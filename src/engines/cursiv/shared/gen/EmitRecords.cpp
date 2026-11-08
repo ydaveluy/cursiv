@@ -9,9 +9,10 @@
 #include "cursiv/shared/gen/CLiteral.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitTable.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 RecordGen record_gen(std::span<const AstRowGen> rows,
                      const std::vector<std::uint16_t>& held,
@@ -92,7 +93,7 @@ std::string emit_records(std::string_view ns,
   };
   // A record names its member's class by its index in the AST tables.
   const auto type_of = [&](const RecordGen& rec) -> std::string {
-    if (rec.typeSlot == detail::kNoIndex) return "::cursiv::detail::kNoIndex";
+    if (rec.typeSlot == kNoIndex) return "::cursiv::detail::kNoIndex";
     return concat(rec.typeSlot, "u");
   };
 
@@ -224,4 +225,4 @@ extern const ::cursiv::GrammarMetaData kGrammarMetaData;
 )");
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

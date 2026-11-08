@@ -9,7 +9,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrBuildCfg;
 
@@ -27,4 +27,4 @@ std::vector<LrAmbiguity> lr_find_ambiguities(const LrBuildCfg& c);
 // One sentence: the rule named, and what to write instead.
 std::string lr_ambiguity_text(const LrBuildCfg& c, const LrAmbiguity& a);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

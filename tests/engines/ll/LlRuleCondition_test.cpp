@@ -70,24 +70,24 @@ unsigned hidden(const cursiv::Parser& p, std::string_view text) {
 template <class Cfg>
 bool reads_ab_dot(const Cfg& g) {
   for (unsigned l = 0; l < g.ngapLeaves; ++l) {
-    if (g.gapLeaves[l].kind != cursiv::GapLeafKind::head) continue;
+    if (g.gapLeaves[l].kind != cursiv::engine::GapLeafKind::head) continue;
     const auto operand = g.lex[g.gapLeaves[l].node];
-    if (operand.kind != cursiv::LexKind::token) continue;
-    std::vector<cursiv::LexNode> steps;
+    if (operand.kind != cursiv::engine::LexKind::token) continue;
+    std::vector<cursiv::engine::LexNode> steps;
     const auto walk = [&](auto&& self, std::uint16_t n) -> bool {
       const auto e = g.lex[n];
-      if (e.kind == cursiv::LexKind::chars ||
-          e.kind == cursiv::LexKind::nguard) {
+      if (e.kind == cursiv::engine::LexKind::chars ||
+          e.kind == cursiv::engine::LexKind::nguard) {
         steps.push_back(e);
         return true;
       }
-      if (e.kind != cursiv::LexKind::seq) return false;
+      if (e.kind != cursiv::engine::LexKind::seq) return false;
       for (unsigned i = 0; i < e.b; ++i)
         if (!self(self, g.lexKid[e.a + i])) return false;
       return true;
     };
-    if (walk(walk, cursiv::lex_token_body(g, operand)) && steps.size() == 4 &&
-        steps[0].kind == cursiv::LexKind::chars &&
+    if (walk(walk, cursiv::engine::lex_token_body(g, operand)) &&
+        steps.size() == 4 && steps[0].kind == cursiv::engine::LexKind::chars &&
         g.sets[steps[0].a].has('a') && g.sets[steps[0].a].has('A'))
       return true;
   }
@@ -208,13 +208,12 @@ void check_terminal_conditions() {
     cursiv::TextOffset seen = 0;
     for (unsigned k = 0; k < 256; ++k)
       seen = std::max(seen, tllterm::generated::Lr::caret_seen(
-                                text, k, 4, cursiv::Token{5, 8, 0}));
+                                text, k, 4, cursiv::engine::Token{5, 8, 0}));
     CHECK(seen > 11);
   }
   // A terminal's body that reads a run to any length is one token, and no
   // run of terminals is endless here.
-  CHECK(cursiv::LrLowering<tllterm::Lr>::table().cfg.unbounded.empty());
-
+  CHECK(cursiv::engine::LrLowering<tllterm::Lr>::table().cfg.unbounded.empty());
 }
 }
 
@@ -375,22 +374,24 @@ void run() {
           std::pair{"n2", "d2"}, std::pair{"n5", "d5"}})
       read(named + std::string(t), reads(ll, inline_ + std::string(t)));
 
-  const auto llb =
-      cursiv::ll_build_program(cursiv::LlLowering<tllrcond::Ll>::lower());
-  const auto lrb =
-      cursiv::lr_build_automaton(cursiv::LrLowering<tllrcond::Lr>::table());
+  const auto llb = cursiv::engine::ll_build_program(
+      cursiv::engine::LlLowering<tllrcond::Ll>::lower());
+  const auto lrb = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<tllrcond::Lr>::table());
   // An inline terminal keeps its complete lexical body.
   CHECK(reads_ab_dot(llb.cfg));
   CHECK(reads_ab_dot(lrb.cfg));
   // An inline terminal in a condition is no token of the grammar.
   using cursiv::detail::tl_has;
-  CHECK((!tl_has<Inline, cursiv::LlLowering<tllrcond::Ll>::terminals>::value));
-  CHECK((!tl_has<Inline, cursiv::LrLowering<tllrcond::Lr>::terminals>::value));
+  CHECK((!tl_has<Inline,
+                 cursiv::engine::LlLowering<tllrcond::Ll>::terminals>::value));
+  CHECK((!tl_has<Inline,
+                 cursiv::engine::LrLowering<tllrcond::Lr>::terminals>::value));
   CHECK((tl_has<tllrcond::Base::ENUM_LEAD,
-                cursiv::LlLowering<tllrcond::Ll>::terminals>::value));
+                cursiv::engine::LlLowering<tllrcond::Ll>::terminals>::value));
   // ...nor is a data rule it reads a rule, nor the trivia its `skip()` names.
-  using LlRules = cursiv::LlLowering<tllrcond::Ll>::rules;
-  using LrRules = cursiv::LrLowering<tllrcond::Lr>::rules;
+  using LlRules = cursiv::engine::LlLowering<tllrcond::Ll>::rules;
+  using LrRules = cursiv::engine::LrLowering<tllrcond::Lr>::rules;
   CHECK((!tl_has<tllrcond::Base::Dotted, LlRules>::value &&
          !tl_has<tllrcond::Base::QName, LlRules>::value &&
          !tl_has<tllrcond::Base::DOTS, LlRules>::value));

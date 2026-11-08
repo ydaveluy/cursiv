@@ -65,7 +65,7 @@ struct G : cursiv::GrammarSpec {
 }  // namespace
 
 void run() {
-  const cursiv::LrLowered low = cursiv::LrLowering<G>::table();
+  const cursiv::engine::LrLowered low = cursiv::engine::LrLowering<G>::table();
   CHECK(!low.cfg.lowerFail());
   CHECK(!low.fault);
   unsigned stepped = 0;
@@ -125,15 +125,15 @@ struct Regioned : cursiv::GrammarSpec {
 // alternative when the directive distributed, one for both when it did not.
 template <class G>
 unsigned sources(const char* name) {
-  const cursiv::LrLowered low = cursiv::LrLowering<G>::table();
+  const cursiv::engine::LrLowered low = cursiv::engine::LrLowering<G>::table();
   CHECK(!low.cfg.lowerFail());
   unsigned seen = 0;
   std::uint16_t rows[8] = {};
   for (std::uint16_t q = 0; q < low.cfg.nprods; ++q) {
-    const cursiv::LrLowProd& p = low.cfg.prods[q];
+    const cursiv::engine::LrLowProd& p = low.cfg.prods[q];
     if (p.lhs != low.cfg.entryNt || p.len == 0) continue;
     const std::uint16_t r = low.cfg.row_at(p, 0);
-    if (r == cursiv::kNoRow) continue;
+    if (r == cursiv::engine::kNoRow) continue;
     bool had = false;
     for (unsigned k = 0; k < seen; ++k) had = had || rows[k] == r;
     if (!had && seen < 8) rows[seen++] = r;
@@ -240,33 +240,33 @@ struct Same : cursiv::GrammarSpec {
 
 template <class H>
 bool refused_at_the_region_edge() {
-  const cursiv::LrBuildTable a =
-      cursiv::lr_build_automaton(cursiv::LrLowering<H>::table());
+  const cursiv::engine::LrBuildTable a = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<H>::table());
   return a.cfg.lowerFail() &&
-         a.cfg.lowerWhy == cursiv::LowerFail::regionBoundaryShared;
+         a.cfg.lowerWhy == cursiv::engine::LowerFail::regionBoundaryShared;
 }
 
 template <class H>
 bool builds_at_the_region_edge() {
-  const auto low = cursiv::LrLowering<H>::table();
+  const auto low = cursiv::engine::LrLowering<H>::table();
   if (low.fault || low.cfg.lowerFail()) return false;
-  const auto built = cursiv::lr_build_automaton(low);
+  const auto built = cursiv::engine::lr_build_automaton(low);
   return !built.cfg.lowerFail() && !built.overflow;
 }
 
 }  // namespace
 
 void run() {
-  const cursiv::LrLowered low = cursiv::LrLowering<G>::table();
+  const cursiv::engine::LrLowered low = cursiv::engine::LrLowering<G>::table();
   CHECK(!low.cfg.lowerFail());
   // The auxiliary the repetition became: the only nonterminal with a
   // production that names itself.
   unsigned aux = 0xffffu;
   for (std::uint16_t q = 0; q < low.cfg.nprods; ++q) {
-    const cursiv::LrLowProd& p = low.cfg.prods[q];
+    const cursiv::engine::LrLowProd& p = low.cfg.prods[q];
     for (unsigned k = 0; k < p.len; ++k)
-      if (!cursiv::is_term(low.cfg.slotSym[p.at + k]) &&
-          cursiv::nt_index(low.cfg.slotSym[p.at + k]) == p.lhs)
+      if (!cursiv::engine::is_term(low.cfg.slotSym[p.at + k]) &&
+          cursiv::engine::nt_index(low.cfg.slotSym[p.at + k]) == p.lhs)
         aux = p.lhs;
   }
   CHECK(aux != 0xffffu);
@@ -315,9 +315,10 @@ struct Inside : cursiv::GrammarSpec {
 }  // namespace
 
 void run() {
-  const cursiv::LrLowered& inside = cursiv::LrLowering<Inside>::table();
+  const cursiv::engine::LrLowered& inside =
+      cursiv::engine::LrLowering<Inside>::table();
   CHECK(!inside.fault);
-  CHECK(!cursiv::lr_build_automaton(inside).cfg.lowerFail());
+  CHECK(!cursiv::engine::lr_build_automaton(inside).cfg.lowerFail());
 }
 
 }  // namespace region_rule
@@ -361,16 +362,17 @@ struct Run : cursiv::GrammarSpec {
 };
 
 template <class G>
-cursiv::LrBuildTable built() {
-  return cursiv::lr_build_automaton(cursiv::LrLowering<G>::table());
+cursiv::engine::LrBuildTable built() {
+  return cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<G>::table());
 }
 
 }  // namespace
 
 void run() {
-  const cursiv::LrBuildTable flat = built<Flat>();
+  const cursiv::engine::LrBuildTable flat = built<Flat>();
   CHECK(flat.nconflicts == 0);
-  const cursiv::LrBuildTable single = built<OptionSome>();
+  const cursiv::engine::LrBuildTable single = built<OptionSome>();
   CHECK(single.nconflicts == 0);
   CHECK(single.nstates == flat.nstates && single.cfg.nprods == flat.cfg.nprods);
   CHECK(built<ManySome>().nconflicts != 0);
@@ -417,15 +419,16 @@ struct Outer : cursiv::GrammarSpec {
 }  // namespace
 
 void run() {
-  const cursiv::LrBuildTable prefix =
-      cursiv::lr_build_automaton(cursiv::LrLowering<Outer<">">>::table());
-  CHECK(prefix.cfg.lowerWhy == cursiv::LowerFail::sectionEndShared);
-  const cursiv::LrBuildTable apart =
-      cursiv::lr_build_automaton(cursiv::LrLowering<Outer<"/">>::table());
-  CHECK(apart.cfg.lowerWhy == cursiv::LowerFail::none);
-  const cursiv::LrBuildTable self =
-      cursiv::lr_build_automaton(cursiv::LrLowering<Self>::table());
-  CHECK(self.cfg.lowerWhy == cursiv::LowerFail::sectionEndShared);
+  const cursiv::engine::LrBuildTable prefix =
+      cursiv::engine::lr_build_automaton(
+          cursiv::engine::LrLowering<Outer<">">>::table());
+  CHECK(prefix.cfg.lowerWhy == cursiv::engine::LowerFail::sectionEndShared);
+  const cursiv::engine::LrBuildTable apart = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<Outer<"/">>::table());
+  CHECK(apart.cfg.lowerWhy == cursiv::engine::LowerFail::none);
+  const cursiv::engine::LrBuildTable self = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<Self>::table());
+  CHECK(self.cfg.lowerWhy == cursiv::engine::LowerFail::sectionEndShared);
 }
 
 }  // namespace section_end
@@ -547,27 +550,27 @@ struct Nested : Base {
 };
 
 template <class G>
-const cursiv::LrBuildCfg& cfg() {
-  return cursiv::LrLowering<G>::table().cfg;
+const cursiv::engine::LrBuildCfg& cfg() {
+  return cursiv::engine::LrLowering<G>::table().cfg;
 }
 
 template <class G>
-std::vector<cursiv::LrAmbiguity> found() {
-  return cursiv::lr_find_ambiguities(cfg<G>());
+std::vector<cursiv::engine::LrAmbiguity> found() {
+  return cursiv::engine::lr_find_ambiguities(cfg<G>());
 }
 
 template <class G>
 std::string unbounded_text(std::size_t i = 0) {
   const auto& c = cfg<G>();
-  return cursiv::unbounded_condition_text(c, c.nt_name(c.unbounded[i].rule),
-                                          c.unbounded[i]);
+  return cursiv::engine::unbounded_condition_text(
+      c, c.nt_name(c.unbounded[i].rule), c.unbounded[i]);
 }
 
 template <class G>
 bool says(const char* part) {
   const auto all = found<G>();
   return !all.empty() &&
-         cursiv::lr_ambiguity_text(cfg<G>(), all[0]).find(part) !=
+         cursiv::engine::lr_ambiguity_text(cfg<G>(), all[0]).find(part) !=
              std::string::npos;
 }
 
@@ -622,8 +625,8 @@ void run() {
 namespace named_conflict {
 
 void run() {
-  const cursiv::LrBuildTable A =
-      cursiv::lr_build_automaton(cursiv::LrLowering<tnamedconf::G>::table());
+  const cursiv::engine::LrBuildTable A = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<tnamedconf::G>::table());
   // The cell is open and nothing was ordered away: what the parser reads is
   // the fast path's alone to get right.
   CHECK(A.nconflicts != 0);
@@ -659,7 +662,7 @@ namespace {
 
 namespace ast = tinfr::ast;
 using G = tinfr::G;
-using Low = cursiv::LrLowering<G>;
+using Low = cursiv::engine::LrLowering<G>;
 
 // The last nonterminal of a name is its clone, and a clone is what the second
 // reading is asked for by.
@@ -672,7 +675,7 @@ std::uint16_t clone_of(std::string_view n) {
 }
 
 void only_what_the_region_reaches_is_read_twice() {
-  CHECK(Low::table().fault.code == cursiv::GrammarFaultCode::none);
+  CHECK(Low::table().fault.code == cursiv::engine::GrammarFaultCode::none);
   CHECK(Low::cfg().cloneNeeded[clone_of("Dotted")]);
   CHECK(!Low::cfg().cloneNeeded[clone_of("Sum")]);
 }
@@ -711,8 +714,8 @@ namespace wri {
 using G = tinfr::wri::G;
 
 void the_island_hands_its_node_up() {
-  CHECK(cursiv::LrLowering<G>::table().fault.code ==
-        cursiv::GrammarFaultCode::none);
+  CHECK(cursiv::engine::LrLowering<G>::table().fault.code ==
+        cursiv::engine::GrammarFaultCode::none);
   cursiv::ParseResult r = engine().parse("wri [a.b] [c]");
   CHECK(r.accepted);
   CHECK(static_cast<bool>(r) && r.diagnostics.empty());
@@ -744,10 +747,10 @@ namespace wide_alternative {
 
 namespace {
 
-using Low = cursiv::LrLowering<twidealt::G>;
+using Low = cursiv::engine::LrLowering<twidealt::G>;
 
 void the_lowering_kept_the_twenty() {
-  CHECK(Low::table().fault.code == cursiv::GrammarFaultCode::none);
+  CHECK(Low::table().fault.code == cursiv::engine::GrammarFaultCode::none);
   const auto& c = Low::cfg();
   unsigned widest = 0;
   for (std::uint16_t k = 0; k < c.nprods; ++k)
@@ -781,6 +784,7 @@ namespace gap {
 
 void run() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   const auto lowered = LrLowering<tasi::cases::G>::table();
   const auto& g = lowered.cfg;
   std::mt19937 rng(123);
@@ -819,12 +823,12 @@ void run() {
         switch (leaf.kind) {
           case GapLeafKind::has:
           case GapLeafKind::is:
-            v = 2u *
-                cursiv::test::gap_reference(
-                    g.lex.data(), g.lexKid.data(),
-                    cursiv::lex_boundary(tasi::cases::generated::G::kTable.cfg),
-                    leaf.node, sample.data(), sample.size(),
-                    leaf.kind == GapLeafKind::is);
+            v = 2u * cursiv::test::gap_reference(
+                         g.lex.data(), g.lexKid.data(),
+                         cursiv::engine::lex_boundary(
+                             tasi::cases::generated::G::kTable.cfg),
+                         leaf.node, sample.data(), sample.size(),
+                         leaf.kind == GapLeafKind::is);
             break;
           case GapLeafKind::end:
             v = 2u * (known && gap_end(text.size(), la));
@@ -835,11 +839,12 @@ void run() {
             const auto rest = static_cast<TextOffset>(text.size()) - la.begin;
             const cursiv::test::GapReference reader{
                 g.lex.data(), g.lexKid.data(),
-                cursiv::lex_boundary(tasi::cases::generated::G::kTable.cfg),
+                cursiv::engine::lex_boundary(
+                    tasi::cases::generated::G::kTable.cfg),
                 text.data() + la.begin, rest};
             cursiv::test::GapReference::Span first;
             first.set(0);
-            const auto body = cursiv::lex_token_body(g, operand);
+            const auto body = cursiv::engine::lex_token_body(g, operand);
             v = known ? 2u * !reader.step(body, first).empty() : 1u;
             break;
           }

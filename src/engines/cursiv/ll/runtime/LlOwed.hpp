@@ -16,7 +16,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/utils/RoundMarks.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& T>
 class LlOwed {
@@ -224,4 +224,4 @@ inline const LlOwed<T>& ll_owed() {
   return owed;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

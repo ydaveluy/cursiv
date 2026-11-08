@@ -17,7 +17,7 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Ad>
 inline constexpr bool kLexBacktrack = [] {
@@ -265,4 +265,4 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_end(const Ad& ad, const char* src,
   return out;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

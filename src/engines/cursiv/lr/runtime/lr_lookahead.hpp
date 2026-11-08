@@ -12,8 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/utils/ImplicitLifetime.hpp"
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/LrShadow.hpp"
 #include "cursiv/lr/runtime/LrStackClimb.hpp"
@@ -23,8 +21,10 @@
 #include "cursiv/lr/runtime/lr_trail.hpp"
 #include "cursiv/lr/table/LrBitSet.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
+#include "cursiv/shared/utils/ImplicitLifetime.hpp"
+#include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The budgets below bound the speculation: a cell one of them runs out on is
 // declared unsettled and goes to the graph, and only readings that already
@@ -451,4 +451,4 @@ unsigned lr_resolve_cands(LrContext& c, std::uint32_t state, const Scan* arm,
       });
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

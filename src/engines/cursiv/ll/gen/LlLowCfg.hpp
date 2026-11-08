@@ -20,7 +20,7 @@
 #include "cursiv/shared/gen/optional_shape.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Every row grows to meet its write: nothing here is counted in advance, and
 // no frozen program holds any of it -- what a reader gets is emitted as plain
@@ -98,4 +98,4 @@ struct LlLowCfg : LowerPools {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

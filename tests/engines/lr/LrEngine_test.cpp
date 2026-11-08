@@ -198,8 +198,8 @@ void a_position_given_up_on_is_not_read_again() {
       t += k % 2 == 0 ? " b" : " c";
     }
     cursiv::Cst cst;
-    cursiv::LrParseStats stats;
-    CHECK(cursiv::lr_parser<tedges::generated::G::kTable>.parse(
+    cursiv::engine::LrParseStats stats;
+    CHECK(cursiv::engine::lr_parser<tedges::generated::G::kTable>.parse(
         t, cst, &stats, &tedges::generated::G::kDrive));
     CHECK(cst.diagnostics().empty());
     CHECK(stats.lookStops <= items);
@@ -218,8 +218,8 @@ void short_items_after_a_long_one_leave_the_graph() {
     t += " b";
     for (unsigned k = 0; k < items; ++k) t += k % 2 == 0 ? " x c" : " x b";
     cursiv::Cst cst;
-    cursiv::LrParseStats stats;
-    CHECK(cursiv::lr_parser<tedges::generated::G::kTable>.parse(
+    cursiv::engine::LrParseStats stats;
+    CHECK(cursiv::engine::lr_parser<tedges::generated::G::kTable>.parse(
         t, cst, &stats, &tedges::generated::G::kDrive));
     CHECK(cst.diagnostics().empty());
     CHECK(stats.splits == 1);
@@ -466,18 +466,21 @@ constexpr const auto& kTable = g::kTable;
 cursiv::TextOffset unmatched_by_walks(const char* src, cursiv::TextOffset len,
                                       std::uint16_t mode, cursiv::TextOffset p,
                                       cursiv::TextOffset& reached) {
-  const cursiv::ByteSet& opens = kTable.derived.lexOpeners[kTable.errMode];
+  const cursiv::engine::ByteSet& opens =
+      kTable.derived.lexOpeners[kTable.errMode];
   cursiv::TextOffset q = p + 1;
-  while (q < len && !cursiv::lex_line_end_at(src, q) &&
-         !cursiv::lr_skips<kTable>(mode, static_cast<unsigned char>(src[q]))) {
+  while (q < len && !cursiv::engine::lex_line_end_at(src, q) &&
+         !cursiv::engine::lr_skips<kTable>(
+             mode, static_cast<unsigned char>(src[q]))) {
     cursiv::TextOffset halt = q;
-    const cursiv::Scan s =
-        cursiv::lr_match_halt<kTable>(src, len, kTable.errMode, q, halt);
+    const cursiv::engine::Scan s = cursiv::engine::lr_match_halt<kTable>(
+        src, len, kTable.errMode, q, halt);
     if (halt > reached) reached = halt;
-    if (s.term != cursiv::kInvalidSymbol && s.end > q) break;
+    if (s.term != cursiv::engine::kInvalidSymbol && s.end > q) break;
     if (opens.has(static_cast<unsigned char>(src[q])) &&
-        cursiv::lr_lex_reading<kTable>(src, len, kTable.errMode, q, reached)
-                .term != cursiv::kInvalidSymbol)
+        cursiv::engine::lr_lex_reading<kTable>(src, len, kTable.errMode, q,
+                                               reached)
+                .term != cursiv::engine::kInvalidSymbol)
       break;
     ++q;
   }
@@ -504,17 +507,17 @@ void a_failed_walk_is_the_walk() {
   for (unsigned trial = 0; trial < 3000; ++trial) {
     const std::string text = random_text(rng);
     const auto len = static_cast<cursiv::TextOffset>(text.size());
-    cursiv::LexFailedWalks<cursiv::LrLexTape<kTable>> failed;
+    cursiv::engine::LexFailedWalks<cursiv::engine::LrLexTape<kTable>> failed;
     for (unsigned q = 0; q < 2 * len + 1 && len != 0; ++q, ++asked) {
       const cursiv::TextOffset from = rng() % len;
       cursiv::TextOffset halt = from, realHalt = from;
-      const cursiv::Scan real = cursiv::lr_match_halt<kTable>(
+      const cursiv::engine::Scan real = cursiv::engine::lr_match_halt<kTable>(
           text.data(), len, kTable.errMode, from, realHalt);
-      if (!failed.fails(cursiv::LrLexTape<kTable>{}, text.data(), len,
+      if (!failed.fails(cursiv::engine::LrLexTape<kTable>{}, text.data(), len,
                         kTable.errMode, from, halt, [] {}))
         continue;
       ++known;
-      CHECK(real.term == cursiv::kInvalidSymbol || real.end <= from);
+      CHECK(real.term == cursiv::engine::kInvalidSymbol || real.end <= from);
       CHECK(halt == realHalt);
     }
   }
@@ -539,17 +542,17 @@ void a_failed_walk_halts_as_the_lexer(
     if (len == 0) continue;
     for (unsigned m = 0; m < A.modeStart.size(); ++m) {
       const auto mode = static_cast<std::uint16_t>(m);
-      cursiv::LexFailedWalks<cursiv::LrLexTape<A>> failed;
+      cursiv::engine::LexFailedWalks<cursiv::engine::LrLexTape<A>> failed;
       for (unsigned q = 0; q < len; ++q, ++asked) {
         const cursiv::TextOffset from = rng() % len;
         cursiv::TextOffset halt = from, realHalt = from;
-        const cursiv::Scan real =
-            cursiv::lr_match_halt<A>(text.data(), len, mode, from, realHalt);
-        if (!failed.fails(cursiv::LrLexTape<A>{}, text.data(), len, mode, from,
-                          halt, [] {}))
+        const cursiv::engine::Scan real = cursiv::engine::lr_match_halt<A>(
+            text.data(), len, mode, from, realHalt);
+        if (!failed.fails(cursiv::engine::LrLexTape<A>{}, text.data(), len,
+                          mode, from, halt, [] {}))
           continue;
         ++known;
-        CHECK(real.term == cursiv::kInvalidSymbol || real.end <= from);
+        CHECK(real.term == cursiv::engine::kInvalidSymbol || real.end <= from);
         CHECK(halt == realHalt);
       }
     }
@@ -570,9 +573,9 @@ void the_unmatched_text_ends_where_it_did() {
       const cursiv::TextOffset p = rng() % len;
       cursiv::TextOffset want = p, got = p;
       const auto wend = unmatched_by_walks(text.data(), len, 0, p, want);
-      cursiv::LexReadBudget budget(len - p);
-      const auto gend = cursiv::lr_unmatched_end<kTable>(text.data(), len, 0, p,
-                                                         got, budget, [] {});
+      cursiv::engine::LexReadBudget budget(len - p);
+      const auto gend = cursiv::engine::lr_unmatched_end<kTable>(
+          text.data(), len, 0, p, got, budget, [] {});
       CHECK(gend == wend);
       CHECK(got == want);
     }
@@ -589,9 +592,9 @@ void unmatched_text_is_read_once() {
     for (unsigned k = 0; k < n; ++k) text += unit;
     const auto len = static_cast<cursiv::TextOffset>(text.size());
     cursiv::TextOffset reached = 0;
-    cursiv::LexReadBudget budget(len);
-    CHECK(cursiv::lr_unmatched_end<kTable>(text.data(), len, 0, 0, reached,
-                                           budget, [] {}) == len);
+    cursiv::engine::LexReadBudget budget(len);
+    CHECK(cursiv::engine::lr_unmatched_end<kTable>(
+              text.data(), len, 0, 0, reached, budget, [] {}) == len);
     CHECK(reached == len);
   }
   static const auto parser = g::create_parser();

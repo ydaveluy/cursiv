@@ -28,37 +28,39 @@ namespace {
 
 constexpr const auto& kLexer = twidepos::generated::Ll::kTable;
 constexpr std::size_t kPositions = twidepos::kLeading + 2;
-constexpr auto kStamp = *cursiv::stamp_split(0, kPositions + 1);
+constexpr auto kStamp = *cursiv::engine::stamp_split(0, kPositions + 1);
 static_assert(kStamp.rowBits == 15);
 
 constexpr auto kA = ll_terms::spelled<kLexer>("a"),
                kB = ll_terms::spelled<kLexer>("b"),
                kC = ll_terms::spelled<kLexer>("c");
-static_assert(kA != cursiv::kInvalidSymbol && kB != cursiv::kInvalidSymbol &&
-              kC != cursiv::kInvalidSymbol);
+static_assert(kA != cursiv::engine::kInvalidSymbol &&
+              kB != cursiv::engine::kInvalidSymbol &&
+              kC != cursiv::engine::kInvalidSymbol);
 
 constexpr std::uint16_t token_at(std::size_t i) {
   return i < twidepos::kLeading ? kA : i == twidepos::kLeading ? kB : kC;
 }
 
 constexpr auto kNodes = [] {
-  std::array<cursiv::LlTable::Node, kPositions> nodes{};
+  std::array<cursiv::engine::LlTable::Node, kPositions> nodes{};
   for (std::size_t i = 0; i < nodes.size(); ++i)
     nodes[i] = {.mode = kLexer.errMode, .term = token_at(i)};
   return nodes;
 }();
 constexpr auto kStates = [] {
-  std::array<cursiv::LlAtnState, kPositions + 1> states{};
+  std::array<cursiv::engine::LlAtnState, kPositions + 1> states{};
   for (std::uint32_t i = 0; i < kPositions; ++i)
     states[i] = {.rule = 0, .edge = i, .nedges = 1};
-  states.back() = {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0};
+  states.back() = {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0};
   return states;
 }();
 constexpr auto kEdges = [] {
-  std::array<cursiv::LlAtnEdge, kPositions> edges{};
+  std::array<cursiv::engine::LlAtnEdge, kPositions> edges{};
   for (std::uint32_t i = 0; i < edges.size(); ++i)
-    edges[i] = {.kind = cursiv::LlEdgeKind::atom,
-                .label = token_at(i), .target = i + 1};
+    edges[i] = {.kind = cursiv::engine::LlEdgeKind::atom,
+                .label = token_at(i),
+                .target = i + 1};
   return edges;
 }();
 constexpr auto kAfter = [] {
@@ -73,7 +75,7 @@ constexpr auto kEdgeNodes = [] {
 }();
 constexpr auto kReturnNodes = [] {
   std::array<std::uint16_t, kPositions + 1> nodes{};
-  nodes.fill(cursiv::kNoRow);
+  nodes.fill(cursiv::engine::kNoRow);
   return nodes;
 }();
 constexpr std::uint32_t kRuleStart[] = {0};
@@ -95,13 +97,14 @@ constexpr auto kTable = [] {
   return table;
 }();
 
-std::vector<std::string> offered(const cursiv::StampedGrammar& grammar,
+std::vector<std::string> offered(const cursiv::engine::StampedGrammar& grammar,
                                  const cursiv::Cst& tree, std::size_t at) {
-  cursiv::LexSuffixSession<cursiv::LlLexTape<kTable>> session(
+  cursiv::engine::LexSuffixSession<cursiv::engine::LlLexTape<kTable>> session(
       tree.text().data(), tree.text().size());
   std::vector<cursiv::NextFeature> next;
   const auto where = static_cast<cursiv::TextOffset>(at);
-  cursiv::ll_next_features_at<kTable>(grammar, tree, where, where, next);
+  cursiv::engine::ll_next_features_at<kTable>(grammar, tree, where, where,
+                                              next);
   std::vector<std::string> spellings;
   for (const cursiv::NextFeature& f : next) {
     const auto spelled = grammar.terminalSpellings(f.feature);
@@ -117,8 +120,8 @@ void the_caret_far_down_a_long_rule_is_offered_what_it_owes() {
   const cursiv::ParseResult parsed = parser->parse(text);
   CHECK(parsed.accepted && parsed.diagnostics.empty() && parsed.value);
 
-  const cursiv::StampedGrammar grammar(twidepos::generated::Ll::kGrammarMetaData,
-                                        kStamp);
+  const cursiv::engine::StampedGrammar grammar(
+      twidepos::generated::Ll::kGrammarMetaData, kStamp);
   cursiv::Cst tree(text);
   cursiv::CstBuilder builder(tree);
   builder.bind_stream();

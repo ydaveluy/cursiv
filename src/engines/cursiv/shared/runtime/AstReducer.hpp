@@ -14,6 +14,14 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/shared/runtime/AstActions.hpp"
+#include "cursiv/shared/runtime/AstBuildCtx.hpp"
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
+#include "cursiv/shared/runtime/Pending.hpp"
+#include "cursiv/shared/runtime/ast_write.hpp"
+#include "cursiv/shared/table/FlatMap.hpp"
+#include "cursiv/shared/table/StampLayout.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstArena.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
 #include "cursiv/syntax-tree/AstMetaData.hpp"
@@ -24,17 +32,8 @@
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/macros.hpp"
-#include "cursiv/shared/runtime/AstActions.hpp"
-#include "cursiv/shared/runtime/AstBuildCtx.hpp"
-#include "cursiv/shared/runtime/CancellationPoll.hpp"
-#include "cursiv/shared/runtime/Pending.hpp"
-#include "cursiv/shared/runtime/ast_write.hpp"
-#include "cursiv/shared/table/FlatMap.hpp"
-#include "cursiv/shared/table/StampLayout.hpp"
 
-namespace cursiv {
-
-namespace detail {
+namespace cursiv::engine {
 
 // Where a directive's value is: its record has one visible child, the
 // payload's own record. A childless record is its own payload, and so is one
@@ -96,8 +95,6 @@ void prune_orphans(std::pmr::vector<AstNode*>& nodes,
       drop(nodes[i]);
   nodes.resize(n);
 }
-
-}  // namespace detail
 
 class AstReducer {
  public:
@@ -167,7 +164,7 @@ class AstReducer {
     // alone, and every node reaches it.
     if (out.value != nullptr &&
         (self._ctx.detached || out._nodes.size() != self._ctx.attached + 1u))
-      detail::prune_orphans(
+      prune_orphans(
           out._nodes, out.references->handles, out.value,
           [&self] { self._stop.poll(); },
           [](AstNode* gone) noexcept { gone->~AstNode(); });
@@ -199,8 +196,8 @@ class AstReducer {
   CURSIV_ALWAYS_INLINE Pending text_write(NodeId id, std::uint16_t field,
                                           std::uint16_t conv, std::uint8_t nar,
                                           ActKind kind) {
-    const auto text = detail::payload_node(*_ctx.cst, id);
-    return Pending{id, text, detail::kNoIndex, field, conv, kind, nar, nullptr};
+    const auto text = payload_node(*_ctx.cst, id);
+    return Pending{id, text, kNoIndex, field, conv, kind, nar, nullptr};
   }
   // A node payload comes off the stack now, before whatever consumes the
   // region gets to it.
@@ -213,7 +210,7 @@ class AstReducer {
   // Returns the outermost node, since a nest region re-wraps it. `Nest` says
   // whether any region of the grammar can wrap. Not forced inline: the
   // compiler may keep one copy per class for every record that creates it.
-  template <detail::MakeFn Mk, AstApplyFn Ap, bool Nest>
+  template <MakeFn Mk, AstApplyFn Ap, bool Nest>
   Made create(std::uint16_t type, NodeId id) {
     const std::size_t first = suffix_begin(id);
     const Made made = consume<Ap, Nest>(Made{Mk(_ctx, id), type}, first, id, id);
@@ -267,8 +264,7 @@ class AstReducer {
   // region above may open a second node and claim it.
   CURSIV_ALWAYS_INLINE void flag(NodeId id, std::uint16_t field,
                                  const Made& m) {
-    const Pending p =
-        effect(id, detail::kNoIndex, field, ActKind::flag, nullptr);
+    const Pending p = effect(id, kNoIndex, field, ActKind::flag, nullptr);
     if (!_f.applies[m.type](*this, p, m) && !under_repair(id)) broken(id);
   }
 
@@ -276,8 +272,8 @@ class AstReducer {
   CURSIV_ALWAYS_INLINE void owe_write(NodeId id, std::uint16_t field,
                                       std::uint16_t conv, std::uint8_t nar,
                                       ActKind kind) {
-    push_raw(conv != detail::kNoIndex ? text_write(id, field, conv, nar, kind)
-                                      : node_write(id, field, nar, kind));
+    push_raw(conv != kNoIndex ? text_write(id, field, conv, nar, kind)
+                              : node_write(id, field, nar, kind));
   }
   // The entry checked its creation or adoption before carrying it here.
   CURSIV_ALWAYS_INLINE void owe_write(NodeId id, std::uint16_t field,
@@ -301,7 +297,7 @@ class AstReducer {
   }
 
   // `Variant` alone asks which alternative the node's own class fills.
-  template <class F, const detail::ConvSlot* Cv, bool Variant>
+  template <class F, const ConvSlot* Cv, bool Variant>
   CURSIV_ALWAYS_INLINE void write(std::uint16_t field, const Pending& p,
                                   const Made& owner) {
     std::uint16_t alt = 0;
@@ -309,9 +305,9 @@ class AstReducer {
       if (p.value != nullptr) alt = _m.field_alt_of(_m.fields[field], p.type);
     // A list's first element: the region says how many it will hold, so a list
     // allocates once.
-    if constexpr (F::storage == detail::FieldStorage::vector) {
+    if constexpr (F::storage == FieldStorage::vector) {
       auto& member =
-          detail::ast_cast_unchecked<typename F::owner>(owner.value)->*F::ptr;
+          ast_cast_unchecked<typename F::owner>(owner.value)->*F::ptr;
       if (p.kind != ActKind::assign && member.capacity() == 0)
         member.reserve(elements_from(p, field));
     }
@@ -320,7 +316,7 @@ class AstReducer {
 
   // The write a record applies to the node it made itself. `Checked` where the
   // node's class is only known at runtime, an adoption.
-  template <class F, const detail::ConvSlot* Cv, bool Variant, bool Checked>
+  template <class F, const ConvSlot* Cv, bool Variant, bool Checked>
   CURSIV_ALWAYS_INLINE void fill(std::uint16_t field, const Pending& p,
                                  const Made& owner) {
     if constexpr (Checked) {
@@ -581,7 +577,7 @@ class AstReducer {
   static Pending effect(NodeId id, std::uint16_t type, std::uint16_t field,
                         ActKind kind, AstNode* value,
                         std::uint8_t nar = kNoNarrow) {
-    return Pending{id, id, type, field, detail::kNoIndex, kind, nar, value};
+    return Pending{id, id, type, field, kNoIndex, kind, nar, value};
   }
   void anchor(AstNode* node, NodeId id) {
     if (node->cstNodeId == id) return;
@@ -784,11 +780,11 @@ class AstReducer {
   // `nest<T, &T::f>`: a T is created, the node built so far moves into T::f,
   // and T is what the rest of the region is. Two nests chain outwards.
   Made wrap(const Pending& p, const Made& current, NodeId begin) {
-    assert(p.type != detail::kNoIndex && _f.makes[p.type] != nullptr &&
+    assert(p.type != kNoIndex && _f.makes[p.type] != nullptr &&
            p.field != kNoField &&
            "a nest row names a buildable type and a node member of it");
-    const detail::FieldDesc& f = _m.fields[p.field];
-    assert(f.target != detail::kNoIndex &&
+    const FieldDesc& f = _m.fields[p.field];
+    assert(f.target != kNoIndex &&
            "a nest's member is of node nature, so it names a family");
     // The one question left is a fact of the tape: what the body built so far
     // must fit the wrapper's member, and after a first nest that node is the
@@ -821,4 +817,4 @@ class AstReducer {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

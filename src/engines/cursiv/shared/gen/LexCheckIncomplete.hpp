@@ -12,7 +12,7 @@
 
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexCheckIncomplete {
   // The refusal the check stands for: `sectionEndShared`, where `first`
@@ -56,4 +56,4 @@ std::string lex_check_incomplete_text(const Cfg& g,
          "the parser is generated as if they never do";
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

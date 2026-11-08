@@ -15,7 +15,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr ByteSet kAllBytes{{~0ull, ~0ull, ~0ull, ~0ull}};
 
@@ -36,9 +36,9 @@ template <class Cfg>
 std::uint16_t lex_intern_set(Cfg& c, const ByteSet& s,
                              std::uint16_t decode = kNoSet,
                              std::uint32_t scalars = 0) {
-  detail::SetIndex& x = c.setIndex;
+  SetIndex& x = c.setIndex;
   x.sync(c);
-  const detail::SetKey key{s, decode, scalars};
+  const SetKey key{s, decode, scalars};
   if (const std::uint16_t* const at = x.find(key)) return *at;
   // Never pass the sentinel on as an NFA edge's set index.
   if (c.nsets == kNoSet) throw LowerRefused(LowerFail::tokenGraphTooLarge);
@@ -98,7 +98,7 @@ template <class Cfg>
 LexCodePoints lex_set_cps(const Cfg& g, std::uint16_t s) {
   if (g.setDecode[s] == kNoSet) return {};
   const std::uint32_t at = lex_set_scalars(g, s);
-  const unicode::Range* const r =
+  const unicode::detail::Range* const r =
       at == 0 ? g.wordRanges.data() : g.scalarRanges.data() + (at >> 16);
   LexCodePoints all;
   all.ranges.assign(r, r + (at == 0 ? g.wordRanges.size() : at & 0xFFFFu));
@@ -125,7 +125,7 @@ std::uint16_t lex_intern_cps_bound(Cfg& g, const ByteSet& bytes,
     const std::size_t base = g.scalarRanges.size();
     if (n > 0xFFFFu || base > 0xFFFFu)
       throw LowerRefused(LowerFail::tokenGraphTooLarge);
-    for (const unicode::Range& r : kept.ranges)
+    for (const unicode::detail::Range& r : kept.ranges)
       g.scalarRanges[g.scalarRanges.size()] = r;
     at = static_cast<std::uint32_t>(base << 16 | n);
   }
@@ -155,4 +155,4 @@ bool lex_bound_covers(const Cfg& g, std::uint16_t a, std::uint16_t b) {
   return lex_set_cps(g, a).covers(lex_set_cps(g, b).led(lex_not(g.sets[a])));
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

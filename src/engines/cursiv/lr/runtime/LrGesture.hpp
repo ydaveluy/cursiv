@@ -9,7 +9,7 @@
 #include "cursiv/shared/runtime/GestureRank.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrGesture {
   // skip: a trivia the lexer refused, read as that trivia up to `end`.
@@ -39,4 +39,4 @@ struct LrGesture {
   std::uint32_t cost = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

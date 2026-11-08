@@ -7,7 +7,7 @@
 #include "cursiv/ll/runtime/ll_repair.hpp"
 #include "cursiv/ll/runtime/ll_section.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& T>
 CURSIV_NOINLINE inline void ll_condition_node(LlContext& c, std::uint16_t mode,
@@ -61,4 +61,4 @@ inline void ll_implied(LlContext& c, std::uint16_t mode, std::uint16_t term,
     ll_expect<T>(c, mode, term, row, pos, condition);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

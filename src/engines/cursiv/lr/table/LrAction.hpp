@@ -5,7 +5,7 @@
 
 #include "cursiv/lr/table/LrActionKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrAction {
   std::uint16_t term = 0;
@@ -29,4 +29,4 @@ constexpr LrAction lr_action_of(std::uint32_t op) {
                   static_cast<std::uint16_t>(op >> 2)};
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

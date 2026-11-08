@@ -6,6 +6,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -23,6 +24,17 @@ namespace cursiv {
 // the walk finishes.
 class LocalSymbols {
  public:
+  // A name and its case policy, shared by every level of a scope walk.
+  struct NameQuery {
+    NameQuery(const std::string_view& text, std::uint64_t hash,
+              bool policy) noexcept
+        : name(text.data(), text.size()), nameHash(hash), exact(policy) {}
+
+    std::string_view name;
+    std::uint64_t nameHash;
+    bool exact;
+  };
+
   // One name's entries at one container, in declaration order, read as a
   // sequence. Two same-named declarations of different types are both kept:
   // the type filter runs at lookup, so hiding the second here would make an
@@ -85,8 +97,16 @@ class LocalSymbols {
   [[nodiscard]] const AstNodeDescription* firstNamed(
       const AstNode* container, std::string_view name, std::uint64_t nameHash,
       bool exact, Take&& take) const {
+    const NameQuery query{name, nameHash, exact};
+    return firstNamed(container, query, std::forward<Take>(take));
+  }
+
+  template <class Take>
+  [[nodiscard]] const AstNodeDescription* firstNamed(
+      const AstNode* container, const NameQuery& query, Take&& take) const {
     if (!may_hold(container)) return nullptr;
-    const std::uint64_t hash = mix(container) ^ nameHash;
+    const std::string_view& name = query.name;
+    const std::uint64_t hash = mix(container) ^ query.nameHash;
     const auto tag = static_cast<std::uint32_t>(hash >> 32u);
     std::uint32_t first = kNone;
     bool spelled = false;
@@ -102,10 +122,11 @@ class LocalSymbols {
         break;
       }
     }
-    if ((spelled || !exact) && take(_entries[first])) return &_entries[first];
+    if ((spelled || !query.exact) && take(_entries[first]))
+      return &_entries[first];
     for (auto at = _nextSameName[first]; at != kNone; at = _nextSameName[at]) {
       const AstNodeDescription& entry = _entries[at];
-      if (exact && entry.name != name) continue;
+      if (query.exact && entry.name != name) continue;
       if (take(entry)) return &entry;
     }
     return nullptr;

@@ -15,7 +15,7 @@
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The mode a fault is lexed with: every terminal, or inside a section every
 // terminal of its grammar and the token that closes it.
@@ -76,4 +76,4 @@ TextOffset ll_text_end(const LlContext& c, TextOffset at, TextOffset upto,
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

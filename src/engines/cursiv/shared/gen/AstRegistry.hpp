@@ -11,10 +11,11 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/syntax-tree/AstMetaData.hpp"
 #include "cursiv/shared/gen/AstRowGen.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/syntax-tree/AstMetaData.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct AstRegistry {
   AstRegistry() = default;
@@ -31,9 +32,9 @@ struct AstRegistry {
   // need to write it.
   struct Field {
     std::string_view name;
-    detail::FieldNature nature = detail::FieldNature::value;
-    detail::FieldStorage storage = detail::FieldStorage::direct;
-    std::uint16_t owner = detail::kNoIndex;
+    FieldNature nature = FieldNature::value;
+    FieldStorage storage = FieldStorage::direct;
+    std::uint16_t owner = kNoIndex;
     // The family types the member accepts, in declaration order: the run of
     // `targets` that starts at `firstTarget`.
     std::uint32_t firstTarget = 0;
@@ -72,8 +73,8 @@ struct AstRegistry {
   }
   // The head of a member's targets, none for a member that names no family.
   std::uint16_t head_of(const Field& f) const {
-    return f.targetCount == 0 ? detail::kNoIndex : targets[f.firstTarget];
+    return f.targetCount == 0 ? kNoIndex : targets[f.firstTarget];
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

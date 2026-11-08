@@ -309,8 +309,8 @@ int main() {
         [&](const std::string& text) { return read(*ll, *llr, text, "loop:"); });
   for (const Case& c : kTwin)
     expect("descent", c, read(*ll, *llr, c.text, "loop:"));
-  const auto refused = cursiv::ll_build_program(
-      cursiv::LlLowering<tindirectloop::Cycle>::lower());
-  CHECK(refused.fault.code == cursiv::GrammarFaultCode::leftRecursion);
+  const auto refused = cursiv::engine::ll_build_program(
+      cursiv::engine::LlLowering<tindirectloop::Cycle>::lower());
+  CHECK(refused.fault.code == cursiv::engine::GrammarFaultCode::leftRecursion);
   return cursiv::test::report("LlIndirectLoop_test");
 }

@@ -13,12 +13,13 @@
 
 #include "cursiv/grammar/Conversion.hpp"
 #include "cursiv/grammar/PayloadOf.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/VariantNodeAlt.hpp"
 #include "cursiv/utils/typelist.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // The AST classes a field points at. A base nothing ever builds is
 // registered exactly this way.
@@ -218,4 +219,4 @@ struct narrow_bases<N, TypeList<Ts...>> {
       first_branch({std::is_base_of_v<Ts, N>...});
 };
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

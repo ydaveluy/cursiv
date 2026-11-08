@@ -12,7 +12,7 @@
 
 #include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class T, unsigned Shift = 12>
 class LrGssPool {
@@ -66,4 +66,4 @@ class LrGssPool {
   std::size_t _size = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

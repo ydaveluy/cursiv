@@ -11,7 +11,7 @@
 #include "cursiv/shared/runtime/LexReading.hpp"
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct RepairEnds {
   enum Regime : std::uint8_t { none, lines, line, last };
@@ -77,4 +77,4 @@ struct RepairEnds {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

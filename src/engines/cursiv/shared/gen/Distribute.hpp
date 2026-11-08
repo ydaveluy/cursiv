@@ -2,9 +2,10 @@
 #pragma once
 
 #include "cursiv/grammar/ExprShape.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/utils/typelist.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 template <class D, class Kids = typename ExprShape<D>::kids>
 struct Distribute {
@@ -41,4 +42,4 @@ struct NormalizeWrites<E, TypeList<Ks...>> {
 template <class E>
 using normalize_writes_t = typename NormalizeWrites<E>::type;
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

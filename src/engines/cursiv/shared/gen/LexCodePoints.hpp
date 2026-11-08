@@ -19,11 +19,13 @@
 
 #include "cursiv/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/grammar/unicode/UnicodeRanges.hpp"
+#include "cursiv/shared/table/ByteSet.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/shared/utils/inside_scalar.hpp"
 #include "cursiv/text/ClassItem.hpp"
 #include "cursiv/text/scalar_at.hpp"
-#include "cursiv/shared/table/ByteSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexCodePoints {
   // One encoding shape: `len` byte ranges, the k-th byte within `lo[k]..hi[k]`.
@@ -33,23 +35,23 @@ struct LexCodePoints {
     unsigned len = 0;
   };
   // Ascending, the markers past the scalars.
-  std::vector<unicode::Range> ranges;
+  std::vector<unicode::detail::Range> ranges;
 
-  static constexpr char32_t kStray = detail::kNoScalar;
-  static constexpr bool marker(const unicode::Range& r) {
+  static constexpr char32_t kStray = kNoScalar;
+  static constexpr bool marker(const unicode::detail::Range& r) {
     return r.lo > 0x10FFFF;
   }
   bool strays() const { return !ranges.empty() && ranges.back().lo == kStray; }
 
-  // The properties named, one bit each over `unicode::Property`; the scalars
-  // a `cr<>` spelling names (`a-z`, `À-ÿ`, `\-`, `\u00e9`, `\s`); the whole
-  // complemented among all characters or not. Surrogates are never code
+  // The properties named, one bit each over `unicode::detail::Property`; the
+  // scalars a `cr<>` spelling names (`a-z`, `À-ÿ`, `\-`, `\u00e9`, `\s`); the
+  // whole complemented among all characters or not. Surrogates are never code
   // points here.
   static LexCodePoints of(std::uint64_t props, bool complement,
                           std::string_view spec) {
     LexCodePoints out;
-    for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::count);
-         ++i)
+    for (unsigned i = 0;
+         i < static_cast<unsigned>(unicode::detail::Property::count); ++i)
       if ((props >> i) & 1)
         out.ranges.insert(out.ranges.end(), unicode::detail::kTables[i].begin(),
                           unicode::detail::kTables[i].end());
@@ -62,20 +64,20 @@ struct LexCodePoints {
   }
 
   // The scalars past ASCII the ranges leave out.
-  static LexCodePoints outside(const unicode::Range* r, std::size_t n) {
+  static LexCodePoints outside(const unicode::detail::Range* r, std::size_t n) {
     LexCodePoints out;
     out.ranges.assign(r, r + n);
     out.ranges.push_back({0, 0x7F});
     out.normalize();
     out.complement();
     std::erase_if(out.ranges,
-                  [](const unicode::Range& x) { return marker(x); });
+                  [](const unicode::detail::Range& x) { return marker(x); });
     return out;
   }
 
   std::vector<Seq> sequences() const {
     std::vector<Seq> out;
-    for (const unicode::Range& r : ranges)
+    for (const unicode::detail::Range& r : ranges)
       if (!marker(r)) split(r.lo, r.hi, out);
     return out;
   }
@@ -111,7 +113,7 @@ struct LexCodePoints {
   // start one -- and the scalars past them, which a reader decodes for.
   ByteSet bytes() const {
     ByteSet out;
-    for (const unicode::Range& r : ranges)
+    for (const unicode::detail::Range& r : ranges)
       for (char32_t cp = r.lo; cp < 0x80 && cp <= r.hi; ++cp)
         out.add(static_cast<unsigned char>(cp));
     if (strays()) {
@@ -120,9 +122,9 @@ struct LexCodePoints {
     }
     return out;
   }
-  std::vector<unicode::Range> wide() const {
-    std::vector<unicode::Range> out;
-    for (const unicode::Range& r : ranges)
+  std::vector<unicode::detail::Range> wide() const {
+    std::vector<unicode::detail::Range> out;
+    for (const unicode::detail::Range& r : ranges)
       if (r.hi >= 0x80) out.push_back({std::max<char32_t>(r.lo, 0x80), r.hi});
     return out;
   }
@@ -133,7 +135,7 @@ struct LexCodePoints {
     ByteSet out;
     for (const Seq& q : sequences())
       if (q.len > 1) out.add(q.lo[0], q.hi[0]);
-    for (const unicode::Range& r : ranges) {
+    for (const unicode::detail::Range& r : ranges) {
       if (r.lo == kStray)
         out.add(0xC2, 0xF4);
       else if (marker(r))
@@ -163,7 +165,7 @@ struct LexCodePoints {
     ByteSet starts, continues;
     starts.add(0xC2, 0xF4);
     continues.add(0x80, 0xBF);
-    for (const unicode::Range& r : ranges) {
+    for (const unicode::detail::Range& r : ranges) {
       if (marker(r)) {
         if (leads.intersects(r.lo == kStray ? starts : continues))
           out.ranges.push_back(r);
@@ -236,9 +238,9 @@ struct LexCodePoints {
 
  private:
   void add_spec(std::string_view spec) {
-    const detail::ClassFault fault = detail::for_class_ranges(
+    const ClassFault fault = for_class_ranges(
         spec, [this](char32_t lo, char32_t hi) { ranges.push_back({lo, hi}); });
-    if (fault != detail::ClassFault::none)
+    if (fault != ClassFault::none)
       throw std::invalid_argument(
           "a character class is malformed: it has a lone or unknown "
           "escape, a class escape at one end of a range, a reversed range, a "
@@ -247,9 +249,9 @@ struct LexCodePoints {
   }
 
   void normalize() {
-    std::ranges::sort(ranges, {}, &unicode::Range::lo);
-    std::vector<unicode::Range> merged;
-    for (const unicode::Range& r : ranges) {
+    std::ranges::sort(ranges, {}, &unicode::detail::Range::lo);
+    std::vector<unicode::detail::Range> merged;
+    for (const unicode::detail::Range& r : ranges) {
       if (marker(r)) {
         if (merged.empty() || merged.back() != r) merged.push_back(r);
         continue;
@@ -265,10 +267,10 @@ struct LexCodePoints {
   }
 
   void complement() {
-    std::vector<unicode::Range> out, kept;
+    std::vector<unicode::detail::Range> out, kept;
     char32_t next = 0;
     bool stray = false;
-    for (const unicode::Range& r : ranges) {
+    for (const unicode::detail::Range& r : ranges) {
       if (marker(r)) {
         if (r.lo == kStray)
           stray = true;
@@ -289,7 +291,7 @@ struct LexCodePoints {
   // encoding lengths, around the surrogates, then at every continuation
   // boundary the two ends disagree on.
   static void split(char32_t lo, char32_t hi, std::vector<Seq>& out) {
-    std::vector<unicode::Range> work{{lo, hi}};
+    std::vector<unicode::detail::Range> work{{lo, hi}};
     while (!work.empty()) {
       auto [a, b] = work.back();
       work.pop_back();
@@ -312,7 +314,7 @@ struct LexCodePoints {
         }
       if (cut) continue;
       std::string la, lb;
-      detail::append_scalar(la, a);
+      append_scalar(la, a);
       const auto n = static_cast<unsigned>(la.size());
       for (unsigned i = 1; i < n && !cut; ++i) {
         const char32_t max = (char32_t{1} << (6 * i)) - 1;
@@ -328,7 +330,7 @@ struct LexCodePoints {
         }
       }
       if (cut) continue;
-      detail::append_scalar(lb, b);
+      append_scalar(lb, b);
       Seq s;
       s.len = n;
       for (unsigned k = 0; k < n; ++k) {
@@ -340,4 +342,4 @@ struct LexCodePoints {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

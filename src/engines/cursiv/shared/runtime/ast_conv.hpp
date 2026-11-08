@@ -12,14 +12,15 @@
 #include "cursiv/grammar/Conversion.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/PayloadOf.hpp"
+#include "cursiv/shared/runtime/ast_fields.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/VariantNodeAlt.hpp"
 #include "cursiv/utils/macros.hpp"
 #include "cursiv/utils/typelist.hpp"
-#include "cursiv/shared/runtime/ast_fields.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // What a conversion writes: the member itself, where `place` puts the value, or
 // the text a reference binds.
@@ -151,4 +152,4 @@ CURSIV_ALWAYS_INLINE inline void let_go(AstNode* held, const AstNode* owner,
   }
 }
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

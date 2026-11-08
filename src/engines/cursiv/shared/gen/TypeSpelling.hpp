@@ -11,9 +11,10 @@
 
 #include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitTable.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/utils/TypeName.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A value of class type prints as `T(...)`, which a template argument list
 // reads back as a type: the parentheses make it the expression it is.
@@ -21,7 +22,7 @@ inline std::string gen_enclose(std::string_view s) {
   std::string out;
   std::size_t i = 0;
   while (i < s.size()) {
-    if (const auto quoted = detail::cpp_literal_end(s, i); quoted != i) {
+    if (const auto quoted = cpp_literal_end(s, i); quoted != i) {
       out += s.substr(i, quoted - i);
       i = quoted;
       continue;
@@ -43,7 +44,7 @@ inline std::string gen_enclose(std::string_view s) {
     for (;;) {
       std::size_t j = i, depth = 0;
       while (j < s.size()) {
-        if (const auto quoted = detail::cpp_literal_end(s, j); quoted != j) {
+        if (const auto quoted = cpp_literal_end(s, j); quoted != j) {
           j = quoted;
           continue;
         }
@@ -91,7 +92,7 @@ inline std::string gen_enclose(std::string_view s) {
 // Wide integer template arguments need literals both compilers can read.
 inline std::string gen_widen(std::string text) {
   for (std::size_t i = 0; i < text.size();) {
-    if (const auto quoted = detail::cpp_literal_end(text, i); quoted != i) {
+    if (const auto quoted = cpp_literal_end(text, i); quoted != i) {
       i = quoted;
       continue;
     }
@@ -142,4 +143,4 @@ inline std::string narrow_list(const auto& narrows) {
   return concat("::cursiv::TypeList<", joined(narrows, ", "), ">");
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

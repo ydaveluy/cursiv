@@ -4,7 +4,7 @@
 
 #include "cursiv/lr/gen/LrBuildTable.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Lays `electAt`, `electWord` and `electPos`: the order a cell forks in reads
 // them too.
@@ -18,4 +18,4 @@ void lr_elect_runs(LrBuildTable& A);
 // after, read before any pass skips a pass-through: `stateSym`, `stateBelow`.
 void lr_state_symbols(LrBuildTable& A);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -7,24 +7,25 @@
 #include <span>
 
 #include "cursiv/grammar/GrammarImage.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct AstRowDesc;
 
 struct LowerDesc {
-  std::span<const detail::ImageRuleDesc* const> terms;
-  std::span<const detail::ImageRuleDesc* const> predicateTerms;
-  std::span<const detail::ImageRuleDesc* const> nts;
+  std::span<const ImageRuleDesc* const> terms;
+  std::span<const ImageRuleDesc* const> predicateTerms;
+  std::span<const ImageRuleDesc* const> nts;
   std::span<const AstRowDesc* const> rows;
-  const detail::ImageRuleDesc* entry = nullptr;
-  detail::ImageClassDesc bound{};
-  const detail::ImageDesc* indentOpen = nullptr;
-  const detail::ImageDesc* indentClose = nullptr;
-  const detail::ImageRuleDesc* indentNewline = nullptr;
+  const ImageRuleDesc* entry = nullptr;
+  ImageClassDesc bound{};
+  const ImageDesc* indentOpen = nullptr;
+  const ImageDesc* indentClose = nullptr;
+  const ImageRuleDesc* indentNewline = nullptr;
   std::uint32_t optionalGate = 0;
   // The creation the entry's own record may owe.
   const void* entryCreate = nullptr;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

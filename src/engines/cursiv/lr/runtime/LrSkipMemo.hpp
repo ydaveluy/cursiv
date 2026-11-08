@@ -8,7 +8,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrSkipMemo {
  public:
@@ -67,4 +67,4 @@ class LrSkipMemo {
   std::vector<Slot> _slots;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

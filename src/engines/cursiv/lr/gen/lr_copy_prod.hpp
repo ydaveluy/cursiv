@@ -7,7 +7,7 @@
 #include "cursiv/lr/gen/LrBuildCfg.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline std::uint16_t lr_copy_prod(LrBuildCfg& c, std::uint16_t k,
                                   std::uint16_t lhs) {
@@ -34,4 +34,4 @@ inline std::uint16_t lr_copy_prod(LrBuildCfg& c, std::uint16_t k,
   return self;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

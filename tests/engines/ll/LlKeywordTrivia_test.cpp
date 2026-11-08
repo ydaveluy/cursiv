@@ -86,14 +86,14 @@ std::set<std::string> offered(const Parser& p, std::string_view text) {
 // that trivia must retain the error alphabet, even if a smaller mode covers it.
 void hinted_trivia_keeps_keyword_cuts() {
   constexpr auto& table = generated::BasicLl::kTable;
-  cursiv::LlMask<table.termWords> wanted;
+  cursiv::engine::LlMask<table.termWords> wanted;
   for (std::uint16_t term = 1; term < table.nterms; ++term)
     if (table.term_name(term) == "REMARK") wanted.set(term);
   constexpr std::string_view text = "REM a note";
   std::vector<std::uint16_t> plain, hinted;
-  const auto end =
-      cursiv::ll_match_in<table>(text.data(), text.size(), 0, wanted, plain);
-  const auto narrowed = cursiv::ll_match_in<table>(
+  const auto end = cursiv::engine::ll_match_in<table>(text.data(), text.size(),
+                                                      0, wanted, plain);
+  const auto narrowed = cursiv::engine::ll_match_in<table>(
       text.data(), text.size(), 0, wanted, hinted, nullptr, nullptr, nullptr,
       table.modeTrivia[table.errMode]);
   CHECK(end == 0 && plain.empty());

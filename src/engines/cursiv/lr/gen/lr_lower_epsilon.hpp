@@ -16,7 +16,7 @@
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A position a turn's receiver may take in: a symbol, and no end assertion or
 // region edge, which mean something else inside the receiver.
@@ -387,4 +387,4 @@ inline void lr_emit_alts(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
     lr_emit_one(o, p, lhs, at, made, row);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -11,7 +11,7 @@
 #include "cursiv/ll/gen/LlBuiltProgram.hpp"
 #include "cursiv/ll/table/LlNode.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlStampPlan {
  public:
@@ -132,4 +132,4 @@ class LlStampPlan {
   std::vector<std::uint8_t> _reaches;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

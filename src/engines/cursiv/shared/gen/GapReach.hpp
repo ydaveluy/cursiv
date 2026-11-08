@@ -6,13 +6,14 @@
 #include <cstdint>
 #include <vector>
 
-#include "cursiv/text/TextOffset.hpp"
-#include "cursiv/text/scalar_at.hpp"
 #include "cursiv/shared/table/CondReach.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
+#include "cursiv/shared/utils/inside_scalar.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Cfg>
 class GapReach {
@@ -199,4 +200,4 @@ class GapReach {
   const Cfg& _g;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

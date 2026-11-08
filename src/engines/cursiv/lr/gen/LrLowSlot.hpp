@@ -5,7 +5,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrLowSlot {
   // The actions the call site adds to the record this position produced.
@@ -14,4 +14,4 @@ struct LrLowSlot {
   constexpr bool operator==(const LrLowSlot&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

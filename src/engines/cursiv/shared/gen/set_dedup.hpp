@@ -7,7 +7,7 @@
 #include "cursiv/shared/gen/ChainIndex.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Set>
 std::uint64_t set_hash(const Set& s) {
@@ -38,4 +38,4 @@ unsigned set_dedup(const Set* v, unsigned n, std::uint16_t* of) {
   return static_cast<unsigned>(rep.size());
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

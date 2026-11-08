@@ -18,8 +18,9 @@
 #include "cursiv/shared/gen/RuleRows.hpp"
 #include "cursiv/shared/gen/optional_shape.hpp"
 #include "cursiv/shared/gen/spec_row.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 struct LoweringTag {};
 
@@ -35,10 +36,19 @@ struct LoweringView : ViewBase, LoweringTag {
 template <class V>
 concept lowering_view = std::is_base_of_v<LoweringTag, V>;
 
+}  // namespace cursiv::engine
+
+namespace cursiv::detail {
+
 template <class V, class D>
-  requires lowering_view<V>
+  requires engine::lowering_view<V>
 inline constexpr const void* kRowOf<V, D> =
-    &kRow<typename V::stage, typename directive_row<typename V::stage, D>::type>;
+    &engine::kRow<typename V::stage,
+                  typename engine::directive_row<typename V::stage, D>::type>;
+
+}  // namespace cursiv::detail
+
+namespace cursiv::engine {
 
 template <class St, class R>
 inline constexpr const void* kRowPtr = &kRow<St, R>;
@@ -114,9 +124,18 @@ consteval const ImageStageDesc* lower_stage() {
   else
     return &kLowerStage<V, D>;
 }
+}  // namespace cursiv::engine
+
+namespace cursiv::detail {
+
 template <class V, class D>
-  requires lowering_view<V>
-inline constexpr const ImageStageDesc* kStageOf<V, D> = lower_stage<V, D>();
+  requires engine::lowering_view<V>
+inline constexpr const ImageStageDesc* kStageOf<V, D> =
+    engine::lower_stage<V, D>();
+
+}  // namespace cursiv::detail
+
+namespace cursiv::engine {
 
 template <class V, class L>
 constexpr std::span<const ImageRuleDesc* const> rule_list() {
@@ -155,5 +174,4 @@ consteval LowerDesc lower_desc() {
   return d;
 }
 
-
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

@@ -2,7 +2,7 @@
 
 #include "cursiv/shared/gen/chain_run.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 AstEntryTable lr_entry_table(const LrBuildTable& a) {
   AstEntryTable t;
@@ -20,4 +20,4 @@ AstEntryTable lr_entry_table(const LrBuildTable& a) {
   return t;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

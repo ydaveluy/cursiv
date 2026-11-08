@@ -8,7 +8,7 @@
 #include <string>
 #include <system_error>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline bool write_source(const std::string& path, const std::string& text) {
   if (std::error_code unread;
@@ -27,4 +27,4 @@ inline bool write_source(const std::string& path, const std::string& text) {
   return static_cast<bool>(out);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

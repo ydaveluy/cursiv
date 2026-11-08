@@ -20,10 +20,10 @@
 
 namespace {
 
-using cursiv::LrGssForkAgg;
-using cursiv::LrGssNoAgg;
-using Spell = cursiv::LrGssRope<LrGssNoAgg>;
-using Forks = cursiv::LrGssRope<LrGssForkAgg>;
+using cursiv::engine::LrGssForkAgg;
+using cursiv::engine::LrGssNoAgg;
+using Spell = cursiv::engine::LrGssRope<LrGssNoAgg>;
+using Forks = cursiv::engine::LrGssRope<LrGssForkAgg>;
 
 Spell::Id chunk(Spell& rope, const std::vector<std::uint32_t>& values) {
   Spell::Id r = Spell::none;
@@ -366,7 +366,7 @@ struct Cell {
 };
 
 void a_reference_survives_the_growth_that_follows() {
-  cursiv::LrGssPool<Cell, 4> pool;
+  cursiv::engine::LrGssPool<Cell, 4> pool;
   const std::size_t first = pool.push_back({1, 2});
   const Cell* held = &pool[first];
   for (std::uint32_t i = 2; i != 1000; ++i)
@@ -378,7 +378,7 @@ void a_reference_survives_the_growth_that_follows() {
 }
 
 void a_cleared_pool_starts_over() {
-  cursiv::LrGssPool<Cell, 4> pool;
+  cursiv::engine::LrGssPool<Cell, 4> pool;
   for (std::uint32_t i = 0; i != 100; ++i) (void)pool.push_back({i, 0});
   pool.clear();
   CHECK(pool.size() == 0);
@@ -397,7 +397,7 @@ void run() {
 namespace gss_runs {
 namespace {
 
-using Runs = cursiv::LrGssRuns<std::uint32_t, 3>;
+using Runs = cursiv::engine::LrGssRuns<std::uint32_t, 3>;
 
 void every_run_stays_in_one_piece_whatever_its_length() {
   Runs runs;
@@ -438,7 +438,7 @@ void a_cleared_run_store_starts_over() {
 // them is refused before anything is made for it.
 void a_run_past_32_bit_offsets_is_refused() {
   if constexpr (sizeof(std::size_t) > 4) {
-    cursiv::LrGssRuns<std::uint8_t, 20> runs;
+    cursiv::engine::LrGssRuns<std::uint8_t, 20> runs;
     bool refused = false;
     try {
       (void)runs.reserve(std::size_t{1} << 32);
@@ -464,7 +464,7 @@ void run() {
 namespace gss_index {
 namespace {
 
-using Id = cursiv::LrGssIndex::Id;
+using Id = cursiv::engine::LrGssIndex::Id;
 using Key = std::array<std::uint32_t, 11>;
 
 Key key(std::uint32_t value) {
@@ -479,7 +479,7 @@ std::uint64_t collision_hash(const Key& k) {
 }
 
 void collisions_and_moving_pools_preserve_the_first_id() {
-  cursiv::LrGssIndex index;
+  cursiv::engine::LrGssIndex index;
   std::vector<Key> pool(11);
   constexpr Id count = 1024;
   unsigned deadCalls = 0;
@@ -524,7 +524,7 @@ void shedding_keeps_live_collisions_and_counts_only_retained_ids() {
   // Retaining three quarters grows the table; retaining one quarter rebuilds
   // it in place. Both paths must discard dead ids and preserve live matches.
   for (const Id discard : {512u, 1536u}) {
-    cursiv::LrGssIndex index;
+    cursiv::engine::LrGssIndex index;
     Id deadBefore = 0;
     unsigned deadCalls = 0;
     const auto dead = [&](Id id) {
@@ -560,11 +560,11 @@ void shedding_keeps_live_collisions_and_counts_only_retained_ids() {
 }
 
 void moved_indexes_preserve_ids_and_their_sources_can_be_reused() {
-  cursiv::LrGssIndex source;
+  cursiv::engine::LrGssIndex source;
   constexpr Id count = 32;
   const auto never = [](Id) { return false; };
   for (Id i = 0; i < count; ++i) CHECK(source.intern(i % 2, i, never) == i);
-  cursiv::LrGssIndex moved(std::move(source));
+  cursiv::engine::LrGssIndex moved(std::move(source));
   CHECK(moved.size() == count);
   for (Id i = 0; i < count; ++i)
     CHECK(moved.intern(i % 2, count, [&](Id id) { return id == i; }) == i);
@@ -572,7 +572,7 @@ void moved_indexes_preserve_ids_and_their_sources_can_be_reused() {
   CHECK(source.intern(0, 101, [](Id id) { return id == 100; }) == 100);
   CHECK(source.size() == 1);
 
-  cursiv::LrGssIndex assigned;
+  cursiv::engine::LrGssIndex assigned;
   CHECK(assigned.intern(0, 200, never) == 200);
   assigned = std::move(moved);
   CHECK(assigned.size() == count);
@@ -583,7 +583,7 @@ void moved_indexes_preserve_ids_and_their_sources_can_be_reused() {
 }
 
 void hash_extremes_and_nonsequential_ids_are_values() {
-  cursiv::LrGssIndex index;
+  cursiv::engine::LrGssIndex index;
   constexpr Id last = std::numeric_limits<Id>::max() - 1;
   const auto never = [](Id) { return false; };
   CHECK(index.intern(0, last, never) == last);

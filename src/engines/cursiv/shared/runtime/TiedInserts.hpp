@@ -15,7 +15,7 @@
 #include "cursiv/shared/runtime/GestureRank.hpp"
 #include "cursiv/utils/RoundMarks.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class TiedInserts {
  public:
@@ -109,4 +109,4 @@ class TiedInserts {
   RoundMarks _seen;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

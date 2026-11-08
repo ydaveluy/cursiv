@@ -9,7 +9,7 @@
 #include "cursiv/shared/runtime/GestureRank.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlGesture {
   // skip: a trivia the lexer refused, read as that trivia up to `end`.
@@ -33,4 +33,4 @@ struct LlGesture {
   TextOffset begin = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

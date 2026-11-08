@@ -13,7 +13,7 @@
 #include "cursiv/ll/runtime/LlPlan.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What an episode stood on and read. The token in hand is not the text alone:
 // the alphabet that read it says which terminal it is and where it ends.
@@ -137,4 +137,4 @@ class LlEpisodeMemo {
   bool _ended = false;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

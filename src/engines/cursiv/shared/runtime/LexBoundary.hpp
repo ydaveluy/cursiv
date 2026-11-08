@@ -6,23 +6,24 @@
 #include <string_view>
 
 #include "cursiv/grammar/unicode/UnicodeRange.hpp"
-#include "cursiv/text/TextOffset.hpp"
-#include "cursiv/utils/Utf8.hpp"
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/shared/runtime/lex_scalar_in.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/Utf8.hpp"
+#include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexBoundary {
   const ByteSet* sets = nullptr;
   const std::uint16_t* decode = nullptr;
   const ByteSet* wordBytes = nullptr;
-  const unicode::Range* wordRanges = nullptr;
+  const unicode::detail::Range* wordRanges = nullptr;
   std::size_t nwordRanges = 0;
   const std::uint32_t* setScalars = nullptr;
-  const unicode::Range* scalarRanges = nullptr;
+  const unicode::detail::Range* scalarRanges = nullptr;
 
   bool word_at(const char* src, TextOffset i, TextOffset len) const {
     const auto b = static_cast<unsigned char>(src[i]);
@@ -45,7 +46,8 @@ struct LexBoundary {
       if (d != kNoSet && sets[d].has(b)) {
         if (setScalars != nullptr)
           if (const auto ranges = setScalars[set]; ranges != 0) {
-            const unicode::Range* const r = scalarRanges + (ranges >> 16);
+            const unicode::detail::Range* const r =
+                scalarRanges + (ranges >> 16);
             const std::size_t n = ranges & 0xFFFFu;
             return (!lex_lists_only_back(r, n) &&
                     lex_scalar_in(r, n, src + i, len - i)) ||
@@ -65,7 +67,7 @@ struct LexBoundary {
       if (d != kNoSet && sets[d].has(b)) {
         // A continuation byte decodes for a bound that looks back.
         const auto width =
-            static_cast<TextOffset>(b < 0xC0 ? 3 : detail::utf8_width(src[i]));
+            static_cast<TextOffset>(b < 0xC0 ? 3 : utf8_width(src[i]));
         return width < len - i ? i + width : len;
       }
     }
@@ -90,4 +92,4 @@ constexpr LexBoundary lex_boundary(const Cfg& c) {
             c.scalarRanges.data()};
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

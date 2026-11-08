@@ -17,7 +17,7 @@
 #include "cursiv/utils/macros.hpp"
 #include "cursiv/ll/runtime/LlContext.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What a step answers once its rule is done; any other answer is the rule it
 // calls.
@@ -111,4 +111,4 @@ CURSIV_ALWAYS_INLINE inline std::uint16_t ll_call(LlContext& c,
   return next;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

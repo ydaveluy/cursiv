@@ -28,7 +28,7 @@
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The trivia before the token in hand, laid as the drive lays it.
 template <const auto& A>
@@ -324,4 +324,4 @@ void lr_write_abandon(LrContext& c, std::uint32_t keep, ElementId row) {
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

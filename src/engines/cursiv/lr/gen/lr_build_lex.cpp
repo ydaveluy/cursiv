@@ -36,7 +36,7 @@
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 // A state reads under the configuration of its unfinished items. An ordinary
 // completed production only reduces: its goto rechecks the token under the
 // destination's mode, from the same committed position. Its boundary is a
@@ -1007,4 +1007,4 @@ void lr_derive_lexical(const LrBuildTable& a, LrDerivedRows& rows) {
   rows.typoSucc = std::move(successors.states);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

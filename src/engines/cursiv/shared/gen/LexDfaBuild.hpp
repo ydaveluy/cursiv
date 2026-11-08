@@ -29,7 +29,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The subsets of a lexer's DFA, as bit rows in one arena. Held as a list, a
 // subset costs an allocation, a sort and an element-wise compare per
@@ -763,4 +763,4 @@ void lex_build_dfa(Built& b, const LexAlphabet& alpha, LexKeywordCut& cut,
     b.relays[k].resume = dfa.final_of(b.relays[k].resume);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

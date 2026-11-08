@@ -10,7 +10,7 @@
 #include <iterator>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct DynSet {
   // The last word is never zero: two sets holding the same bits hold the same
@@ -149,4 +149,4 @@ struct DynSet {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

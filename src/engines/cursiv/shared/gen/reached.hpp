@@ -11,9 +11,10 @@
 #include "cursiv/grammar/PayloadOf.hpp"
 #include "cursiv/grammar/RuleTraits.hpp"
 #include "cursiv/grammar/expr.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/utils/typelist.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // The rules one expression names directly: structure reaches what its children
 // reach, and three nodes name a rule themselves.
@@ -271,4 +272,4 @@ template <class S, class... Rs, bool Term>
 struct sift<S, TypeList<Rs...>, Term>
     : tl_cat<cond_t<sifted<S, Rs, Term>, TypeList<Rs>, TypeList<>>...> {};
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

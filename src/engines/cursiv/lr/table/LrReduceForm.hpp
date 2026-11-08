@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 enum class LrReduceForm : std::uint8_t {
   through,    // retain the frame and change its state
@@ -13,4 +13,4 @@ enum class LrReduceForm : std::uint8_t {
   foldClose,  // fold onto one record if adjacent, otherwise lay a new one
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

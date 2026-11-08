@@ -13,7 +13,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class A>
 inline std::vector<std::uint8_t> lex_backtrack_modes(
@@ -105,4 +105,4 @@ inline std::vector<std::uint8_t> lex_backtrack_modes(
   return modes;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

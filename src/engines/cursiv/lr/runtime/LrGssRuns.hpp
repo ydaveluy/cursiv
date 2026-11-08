@@ -10,7 +10,7 @@
 
 #include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class T, unsigned Shift = 14>
 class LrGssRuns {
@@ -88,4 +88,4 @@ class LrGssRuns {
   std::size_t _appended = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -14,7 +14,7 @@
 #include "cursiv/lr/gen/lr_term_run.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 LrProgramLayout::LrProgramLayout(const LrBuildTable& a) {
   std::size_t maxRun = 1;
@@ -81,4 +81,4 @@ LrProgramLayout::LrProgramLayout(const LrBuildTable& a) {
   gotos.seal();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

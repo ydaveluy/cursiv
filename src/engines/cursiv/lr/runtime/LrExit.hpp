@@ -3,10 +3,10 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // `pause` is no verdict: the state froze on a lookahead it has no action for,
 // which a repair search resolves.
 enum class LrExit : std::uint8_t { accept, error, pause };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

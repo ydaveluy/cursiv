@@ -22,7 +22,7 @@ namespace {
 // How many of one kind the reading reported.
 std::size_t said(std::string_view text, cursiv::DiagnosticKind kind) {
   cursiv::Cst cst;
-  cursiv::lr_parser<g::kTable>.parse(text, cst, nullptr, &g::kDrive);
+  cursiv::engine::lr_parser<g::kTable>.parse(text, cst, nullptr, &g::kDrive);
   std::size_t n = 0;
   for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
     n += d.kind == kind ? 1u : 0u;
@@ -33,19 +33,19 @@ void generic_typo_runs_keep_the_terminal_guard() {
   const auto rescan = [](std::string_view text) {
     cursiv::Cst cst;
     cursiv::CstBuilder builder(cst);
-    cursiv::LrContext c(text, builder);
+    cursiv::engine::LrContext c(text, builder);
     c.drive = &g::kDrive;
     std::uint64_t read = 0;
     bool cut = false;
-    const auto candidates = cursiv::lr_rescan_candidates<g::kTable>(
+    const auto candidates = cursiv::engine::lr_rescan_candidates<g::kTable>(
         c, 0, 0, static_cast<cursiv::TextOffset>(text.size()), read, cut);
-    return candidates.empty() ? cursiv::Typo{} : candidates.front();
+    return candidates.empty() ? cursiv::engine::Typo{} : candidates.front();
   };
   for (const auto text : {"he llo x", "he\tllo x", "he\nllo x", "he\rllo x",
                           "h llo x", "h\tllo x", "h\nllo x", "h\rllo x"}) {
     const auto typo = rescan(text);
-    CHECK(typo.term != cursiv::kInvalidSymbol &&
-          typo.cost == cursiv::kRepairReread);
+    CHECK(typo.term != cursiv::engine::kInvalidSymbol &&
+          typo.cost == cursiv::engine::kRepairReread);
     CHECK(typo.end == std::string_view(text).size() - 2);
   }
   // Whitespace, punctuation and mixed runs pay the same fault. The DFA
@@ -53,8 +53,8 @@ void generic_typo_runs_keep_the_terminal_guard() {
   for (const auto run : {"  ", "\r\n", " @", "@@@@", "/**/", "\n@ \t"}) {
     const auto text = std::string("he") + run + "llo x";
     const auto typo = rescan(text);
-    CHECK(typo.term != cursiv::kInvalidSymbol &&
-          typo.cost == cursiv::kRepairReread);
+    CHECK(typo.term != cursiv::engine::kInvalidSymbol &&
+          typo.cost == cursiv::engine::kRepairReread);
     CHECK(typo.end == text.size() - 2);
   }
   // More than four invalid bytes, two separated faults or a missing real
@@ -62,11 +62,11 @@ void generic_typo_runs_keep_the_terminal_guard() {
   for (const auto text : {"he     llo x", "he@@@@@llo x", "he/*x*/llo x",
                           "he l lo x", "he@l@lo x", "he ", "he@",
                           "he llo; x"})
-    CHECK(rescan(text).term == cursiv::kInvalidSymbol);
+    CHECK(rescan(text).term == cursiv::engine::kInvalidSymbol);
   // This literal's explicit guard refuses ';', but permits 'E'. A typo must
   // follow that same guard, rather than imposing an extra word boundary.
   const auto prefix = rescan("he lloExtra x");
-  CHECK(prefix.term != cursiv::kInvalidSymbol && prefix.end == 6);
+  CHECK(prefix.term != cursiv::engine::kInvalidSymbol && prefix.end == 6);
   // A normal separator between already valid tokens is left alone.
   CHECK(said("hello world", cursiv::DiagnosticKind::replaced) == 0);
 }

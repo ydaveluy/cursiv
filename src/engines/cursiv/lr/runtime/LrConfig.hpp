@@ -14,7 +14,7 @@
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What a slot of the search stands for. A generator is queued directly and
 // never admitted to `LrSearch::seen`: it has no future of its own, only
@@ -202,4 +202,4 @@ struct LrConfig : LrPin {
   std::uint32_t _begin = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

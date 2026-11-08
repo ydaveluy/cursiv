@@ -167,22 +167,23 @@ void an_unstamped_tree_does_not_supply_engine_positions() {
 
 void generated_return_nodes_match_the_call_graph() {
   const auto& table = tllsemantic::generated::Ll::kTable;
-  std::vector<std::uint16_t> expected(table.atn.nstates, cursiv::kNoRow);
+  std::vector<std::uint16_t> expected(table.atn.nstates,
+                                      cursiv::engine::kNoRow);
   for (std::uint32_t state = 0; state < table.atn.nstates; ++state) {
     const auto& q = table.atn.state(state);
     for (std::uint32_t i = 0; i < q.nedges; ++i) {
       const auto& edge = table.atn.edge(q.edge + i);
-      if (edge.kind == cursiv::LlEdgeKind::rule)
+      if (edge.kind == cursiv::engine::LlEdgeKind::rule)
         expected[edge.follow] = table.edgeNode[q.edge + i];
     }
   }
   for (std::uint32_t ret = 0; ret < table.atn.nstates; ++ret)
-    CHECK(cursiv::ll_call_at<tllsemantic::generated::Ll::kTable>(ret) ==
+    CHECK(cursiv::engine::ll_call_at<tllsemantic::generated::Ll::kTable>(ret) ==
           expected[ret]);
-  CHECK(cursiv::ll_call_at<tllsemantic::generated::Ll::kTable>(
-            table.atn.nstates) == cursiv::kNoRow);
-  CHECK(cursiv::ll_call_at<tllsemantic::generated::Ll::kTable>(UINT32_MAX) ==
-        cursiv::kNoRow);
+  CHECK(cursiv::engine::ll_call_at<tllsemantic::generated::Ll::kTable>(
+            table.atn.nstates) == cursiv::engine::kNoRow);
+  CHECK(cursiv::engine::ll_call_at<tllsemantic::generated::Ll::kTable>(
+            UINT32_MAX) == cursiv::engine::kNoRow);
 }
 
 struct GuardCase { std::string text; std::string_view member; bool narrowed; };

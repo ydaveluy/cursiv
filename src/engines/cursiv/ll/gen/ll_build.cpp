@@ -33,7 +33,7 @@
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/utils/RoundMarks.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 namespace {
 
 using Built = LlBuiltProgram;
@@ -2291,7 +2291,7 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   settle_repair(b, opt.work ? &opt.work->repair : nullptr);
   settle_fusion(b, opt.work);
   if (b.writes.capped) b.cap_hit(kTooManyChains);
-  detail::ll_build_lexer(b, alphabet, opt.work ? &opt.work->overtakes : nullptr);
+  ll_build_lexer(b, alphabet, opt.work ? &opt.work->overtakes : nullptr);
   if (b.cfg.lowerFail()) return b;
   settle_after_states(b);
   settle_head_nodes(b, ruleNullable);
@@ -2299,4 +2299,4 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   return b;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

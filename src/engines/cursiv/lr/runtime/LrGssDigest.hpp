@@ -11,7 +11,7 @@
 #include "cursiv/lr/runtime/LrGssForest.hpp"
 #include "cursiv/lr/runtime/LrGssRope.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrGssDigest {
  public:
@@ -79,4 +79,4 @@ class LrGssDigest {
   std::vector<Rope::Id> _parts;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

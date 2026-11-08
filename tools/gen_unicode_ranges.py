@@ -78,20 +78,19 @@ out = [
     '// tools/gen_unicode_ranges.py from Python\'s unicodedata and the Unicode',
     f'// Character Database, Unicode {VERSION}: never edited.',
     '#pragma once', '', '#include <string_view>', '',
-    'namespace cursiv::unicode {', '',
+    'namespace cursiv::unicode::detail {', '',
     '// The general categories, their majors, and the identifier, space and',
     '// alphabetic properties: a class of code points is a set of these.',
     'enum class Property : unsigned {',
 ]
 for name in props:
     out.append(f'  {name},')
-out += ['  count', '};', '', 'namespace detail {', '',
+out += ['  count', '};', '',
         '// For a dump alone: what a property is called.',
         'inline constexpr std::string_view kNames[] = {']
 for name in props:
     out.append(f'    "{name}",')
-out += ['};', '', '}  // namespace detail', '', '}  // namespace cursiv::unicode',
-        '']
+out += ['};', '', '}  // namespace cursiv::unicode::detail', '']
 open(os.path.join(unicode_dir, 'UnicodeProperty.hpp'), 'w').write('\n'.join(out))
 
 out = [
@@ -146,18 +145,17 @@ out = [
     f'// Unicode Character Database, Unicode {VERSION}: never edited.',
     '#pragma once', '', '#include <cstdint>', '',
     '#include "cursiv/grammar/unicode/UnicodeRange.hpp"', '',
-    'namespace cursiv::unicode {', '',
+    'namespace cursiv::unicode::detail {', '',
     '// From `first` to `last`, every `stride`-th scalar lowers by `delta`.',
     'struct LowerRun {', '  char32_t first;', '  char32_t last;',
     '  std::int32_t delta;', '  std::uint8_t stride;', '};', '',
-    'namespace detail {', '',
 ]
 body = ','.join(f'{{{f:#x},{l:#x},{d},{st or 1}}}' for f, l, d, st in runs)
 out.append(f'inline constexpr LowerRun kLower[] = {{{body}}};')
 for name, rs in (('Cased', cased), ('CaseIgnorable', ignorable)):
     body = ','.join(f'{{{lo:#x},{hi:#x}}}' for lo, hi in rs)
     out.append(f'inline constexpr Range k{name}[] = {{{body}}};')
-out += ['', '}  // namespace detail', '', '}  // namespace cursiv::unicode', '']
+out += ['', '}  // namespace cursiv::unicode::detail', '']
 path = os.path.join(unicode_dir, 'UnicodeLower.hpp')
 open(path, 'w').write('\n'.join(out))
 print(path, len(runs), 'runs')

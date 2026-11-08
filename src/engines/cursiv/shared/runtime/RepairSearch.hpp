@@ -18,7 +18,7 @@
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/runtime/TiedInserts.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The reach of a goal that holds, or whose reading no refusal stopped.
 inline constexpr TextOffset kRepairReachAll = 0xFFFFFFFFu;
@@ -213,4 +213,4 @@ std::uint32_t repair_elect(RepairSearch<G>& s, const std::vector<R>& rs,
   return s.goals[w];
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

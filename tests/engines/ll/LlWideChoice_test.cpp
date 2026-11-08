@@ -34,7 +34,7 @@ int main() {
     const auto spellings = ll->getGrammar().terminalSpellings(t);
     const std::string_view text = table.term_text(t);
     // The end of input is named in words; its table name is for dumps.
-    CHECK(t == cursiv::kEofSymbol
+    CHECK(t == cursiv::engine::kEofSymbol
               ? name == "end of input"
               : table.term_name(t) == (name.empty() ? text : name));
     CHECK(text.empty() ? spellings.empty()

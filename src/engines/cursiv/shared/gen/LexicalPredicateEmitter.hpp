@@ -22,7 +22,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Cfg>
 class LexicalPredicateEmitter {
@@ -73,7 +73,7 @@ class LexicalPredicateEmitter {
                "(const char*, ::cursiv::TextOffset,\n"
                "    ::cursiv::TextOffset, ::cursiv::TextOffset&);");
     for (const auto root : _recognizers)
-      out.line("::cursiv::PredicateState lexical_recognizer_", root,
+      out.line("::cursiv::engine::PredicateState lexical_recognizer_", root,
                "(const char*, "
                "::cursiv::TextOffset,\n"
                "    ::cursiv::TextOffset, ::cursiv::TextOffset&);");
@@ -99,14 +99,15 @@ class LexicalPredicateEmitter {
     if (std::ranges::any_of(_order, [&](auto id) { return recursive(id); }))
       out.write(recursive_source());
     const auto started = [&](std::uint16_t root, std::string_view most) {
-      return recursive(root)
-                 ? concat("lexical_recursive(", root,
-                          "u, src, len, "
-                          "::cursiv::LexicalState{::cursiv::LexicalCursor{at}}"
-                          ", seen, captures)")
-                 : call(root,
-                        "::cursiv::LexicalState{::cursiv::LexicalCursor{at}}",
-                        most);
+      return recursive(root) ? concat("lexical_recursive(", root,
+                                      "u, src, len, "
+                                      "::cursiv::engine::LexicalState{"
+                                      "::cursiv::engine::LexicalCursor{at}}"
+                                      ", seen, captures)")
+                             : call(root,
+                                    "::cursiv::engine::LexicalState{"
+                                    "::cursiv::engine::LexicalCursor{at}}",
+                                    most);
     };
     for (const auto root : _roots) {
       out.line("bool lexical_predicate_", root,
@@ -117,19 +118,19 @@ class LexicalPredicateEmitter {
         out.line("  return lexical_fixed_", same(root),
                  "(src, len, at, seen);");
       else {
-        out.line("  ::cursiv::LexicalCaptures captures;");
+        out.line("  ::cursiv::engine::LexicalCaptures captures;");
         out.line("  return !", started(root, "true"), ".empty();");
       }
       out.line("}");
     }
     for (const auto root : _recognizers) {
-      out.line("::cursiv::PredicateState lexical_recognizer_", root,
+      out.line("::cursiv::engine::PredicateState lexical_recognizer_", root,
                "(const char* src, "
                "::cursiv::TextOffset len,\n"
                "    ::cursiv::TextOffset at, ::cursiv::TextOffset& seen) {");
-      out.line("  ::cursiv::LexicalCaptures captures;");
-      out.line("  return ::cursiv::lexical_endpoints(", started(root, "false"),
-               ");");
+      out.line("  ::cursiv::engine::LexicalCaptures captures;");
+      out.line("  return ::cursiv::engine::lexical_endpoints(",
+               started(root, "false"), ");");
       out.line("}");
     }
     return out.take();
@@ -219,7 +220,7 @@ class LexicalPredicateEmitter {
         throw std::invalid_argument(
             "cursiv: this lexical search cannot be used by a byte recognizer");
     }
-    detail::lex_children(_g, id, [&](auto kid) { visit(kid); });
+    lex_children(_g, id, [&](auto kid) { visit(kid); });
     _width[id] = recursive(id) ? kVariableWidth : width(e);
     if (!recursive(id) && !fixed(id) &&
         (e.kind == LexKind::alt ||
@@ -245,7 +246,7 @@ class LexicalPredicateEmitter {
       return;
     const bool searched =
         e.kind == LexKind::through_nested || e.kind == LexKind::through_same;
-    detail::lex_children(_g, id, [&](auto kid) {
+    lex_children(_g, id, [&](auto kid) {
       use(same(kid), !searched && (direct || dispatched(id)));
     });
   }
@@ -357,7 +358,7 @@ class LexicalPredicateEmitter {
     if (n == 0) out.write("0u");
     return out
         .line(
-            "\n};\ninline constexpr ::cursiv::LexicalWords "
+            "\n};\ninline constexpr ::cursiv::engine::LexicalWords "
             "lexical_words_",
             id, "{lexical_list_", id, ", ", words.size(),
             "u, "
@@ -429,7 +430,7 @@ class LexicalPredicateEmitter {
   std::string longest_step(std::string_view name, std::uint16_t kid,
                            std::string_view level) const {
     return concat("        auto ", name, " = ",
-                  call(kid, "::cursiv::LexicalState{p}"),
+                  call(kid, "::cursiv::engine::LexicalState{p}"),
                   ";\n"
                   "        if (!",
                   name,
@@ -527,7 +528,7 @@ class LexicalPredicateEmitter {
              "len,\n"
              "    ::cursiv::TextOffset& at, ::cursiv::TextOffset& seen) {");
     if (worded(id))
-      out.line("  return ::cursiv::lexical_",
+      out.line("  return ::cursiv::engine::lexical_",
                e.kind == LexKind::alt ? "first_word" : "refused", "(",
                _boundary, ", lexical_words_", id,
                ", src, len, at, "
@@ -568,7 +569,7 @@ class LexicalPredicateEmitter {
       out.line(
           "  seen = ::std::max(seen, at < len ? at + 1 : len);\n"
           "  if (at >= len) return false;\n"
-          "  ::cursiv::LexicalCursor c{at};");
+          "  ::cursiv::engine::LexicalCursor c{at};");
       out.write(dispatch(id, "  ", "      at = p.at;\n      return true;\n",
                          "false"));
       out.line("  return false;");
@@ -619,13 +620,13 @@ class LexicalPredicateEmitter {
   std::string recursive_source() const {
     TextBuilder out;
     out.line(
-        "inline ::cursiv::LexicalState lexical_recursive(\n"
+        "inline ::cursiv::engine::LexicalState lexical_recursive(\n"
         "    ::std::uint16_t root, const char* src, ::cursiv::TextOffset len,\n"
-        "    ::cursiv::LexicalState in, ::cursiv::TextOffset& seen,\n"
-        "    ::cursiv::LexicalCaptures& captures) {\n"
-        "  ::cursiv::LexicalMachine run;\n"
+        "    ::cursiv::engine::LexicalState in, ::cursiv::TextOffset& seen,\n"
+        "    ::cursiv::engine::LexicalCaptures& captures) {\n"
+        "  ::cursiv::engine::LexicalMachine run;\n"
         "  return run.run(root, ::std::move(in), "
-        "[&](::cursiv::LexicalMachine& m) {\n"
+        "[&](::cursiv::engine::LexicalMachine& m) {\n"
         "    auto& f = m.frame();\n    switch (f.node) {");
     for (const auto id : _order) {
       if (!recursive(id) || (_used[id] & kNode) == 0) continue;
@@ -696,13 +697,14 @@ class LexicalPredicateEmitter {
               "        ++f.at; f.stage = 0;\n      }\n"
               "      while (f.at < f.in.size()) {\n"
               "        const auto c = f.in[f.at];\n"
-              "        const auto local = ::cursiv::LexicalCursor{c.at};\n"
+              "        const auto local = "
+              "::cursiv::engine::LexicalCursor{c.at};\n"
               "        if (const auto* cached = m.cached(",
               callee,
               "u, c.at)) {\n"
               "          f.out.unite(m.resume(c, *cached)); ++f.at; continue;\n"
               "        }\n        f.stage = 1;\n        ");
-          out.line(request(callee, "::cursiv::LexicalState{local}"),
+          out.line(request(callee, "::cursiv::engine::LexicalState{local}"),
                    "      }\n      m.finish(::std::move(f.out)); return;");
           break;
         }
@@ -719,7 +721,7 @@ class LexicalPredicateEmitter {
               "        m.finish(::std::move(f.out)); return;\n      }\n"
               "      f.stage = 1;");
           out.write("      ",
-                    request(e.a, "::cursiv::LexicalState{f.in[f.at]}"));
+                    request(e.a, "::cursiv::engine::LexicalState{f.in[f.at]}"));
           break;
         case LexKind::through_lit:
         case LexKind::through_same:
@@ -741,13 +743,14 @@ class LexicalPredicateEmitter {
   std::string node(std::uint16_t id, bool opened = false) const {
     const LexNode& e = _g.lex[id];
     TextBuilder out;
-    out.line((_used[id] & kFinal) != 0 ? "template <bool Final>\n" : "",
-             "inline ::cursiv::LexicalState lexical_",
-             opened ? "after" : "node", "_", id,
-             "(\n"
-             "    const char* src, ::cursiv::TextOffset len,\n"
-             "    ::cursiv::LexicalState in, ::cursiv::TextOffset& seen,\n"
-             "    [[maybe_unused]] ::cursiv::LexicalCaptures& captures) {");
+    out.line(
+        (_used[id] & kFinal) != 0 ? "template <bool Final>\n" : "",
+        "inline ::cursiv::engine::LexicalState lexical_",
+        opened ? "after" : "node", "_", id,
+        "(\n"
+        "    const char* src, ::cursiv::TextOffset len,\n"
+        "    ::cursiv::engine::LexicalState in, ::cursiv::TextOffset& seen,\n"
+        "    [[maybe_unused]] ::cursiv::engine::LexicalCaptures& captures) {");
     if (e.kind == LexKind::rep && e.max == 0)
       return out.line("  return in;\n}").take();
     if (e.kind == LexKind::seq && !fixed(id)) {
@@ -761,21 +764,21 @@ class LexicalPredicateEmitter {
     if (e.kind == LexKind::rep && !fixed(id) &&
         _g.lex[e.a].kind != LexKind::chars)
       return out
-          .line("  return ::cursiv::gap_repeat<", e.min, "u, ", e.max,
+          .line("  return ::cursiv::engine::gap_repeat<", e.min, "u, ", e.max,
                 "u>(in,\n"
-                "      [&](const ::cursiv::LexicalState& cur) { "
+                "      [&](const ::cursiv::engine::LexicalState& cur) { "
                 "return ",
                 call(e.a, "cur"), "; });\n}")
           .take();
     if (worded(id) && !fixed(id))
       return out
-          .line("  return ::cursiv::lexical_words<",
+          .line("  return ::cursiv::engine::lexical_words<",
                 (_used[id] & kFinal) != 0 ? "Final" : "false", ">(", _boundary,
                 ", "
                 "lexical_words_",
                 id, ", src, len, in, seen);\n}")
           .take();
-    out.line("  ::cursiv::LexicalState out;");
+    out.line("  ::cursiv::engine::LexicalState out;");
     if (fixed(id))
       return out
           .line(
@@ -824,12 +827,13 @@ class LexicalPredicateEmitter {
     if (!opened && (e.kind == LexKind::through_nested ||
                     e.kind == LexKind::through_same ||
                     e.kind == LexKind::through_lit))
-      out.line("    auto starts = ", call(e.a, "::cursiv::LexicalState{c}"),
-               ";");
+      out.line("    auto starts = ",
+               call(e.a, "::cursiv::engine::LexicalState{c}"), ";");
     switch (e.kind) {
       case LexKind::positive:
       case LexKind::negative:
-        out.line("    if (", call(e.a, "::cursiv::LexicalState{c}", "true"),
+        out.line("    if (",
+                 call(e.a, "::cursiv::engine::LexicalState{c}", "true"),
                  ".empty() == ", e.kind == LexKind::negative ? "true" : "false",
                  ") out.add(c);");
         break;
@@ -851,8 +855,8 @@ class LexicalPredicateEmitter {
         break;
       }
       case LexKind::mark:
-        out.line("    auto ends = ", call(e.a, "::cursiv::LexicalState{c}"),
-                 ";");
+        out.line("    auto ends = ",
+                 call(e.a, "::cursiv::engine::LexicalState{c}"), ";");
         out.line(
             "    for (::std::size_t j = 0; j < ends.size(); ++j) {\n"
             "      auto p = ends[j];\n"
@@ -894,7 +898,7 @@ class LexicalPredicateEmitter {
               "u);\n"
               "      if (capture == nullptr) { seen = ::std::max(seen, len); "
               "continue; }\n"
-              "      const char* hit = ::cursiv::lex_find_closer(\n"
+              "      const char* hit = ::cursiv::engine::lex_find_closer(\n"
               "          {src + p.at, len - p.at},\n"
               "          {",
               c_literal(before), ", ", before.size(),
@@ -903,7 +907,7 @@ class LexicalPredicateEmitter {
               "          {",
               c_literal(after), ", ", after.size(),
               "u}, [&](const char* q) {\n"
-              "            return ::cursiv::lex_character_boundary(\n"
+              "            return ::cursiv::engine::lex_character_boundary(\n"
               "                {src + p.at, len - p.at}, q);\n"
               "          });\n"
               "      if (hit == nullptr) { seen = ::std::max(seen, len); "
@@ -918,7 +922,7 @@ class LexicalPredicateEmitter {
         out.line(
             "    for (::std::size_t j = 0; j < starts.size(); ++j) {\n"
             "      auto p = starts[j];\n      while (p.at < len) {\n"
-            "        auto ends = ::cursiv::LexicalState{p};");
+            "        auto ends = ::cursiv::engine::LexicalState{p};");
         if (_g.lexKid[e.b] != kNoLexNode)
           out.line("        ends = ", call(_g.lexKid[e.b], "::std::move(ends)"),
                    ";");
@@ -928,7 +932,7 @@ class LexicalPredicateEmitter {
                         padded_final(e) ? "true" : "false"),
                    ";");
         out.line(
-            "        ::cursiv::LexicalState echoed;\n"
+            "        ::cursiv::engine::LexicalState echoed;\n"
             "        for (::std::size_t x = 0; x < ends.size(); ++x) {\n"
             "          auto q = ends[x];");
         out.write(
@@ -979,4 +983,4 @@ class LexicalPredicateEmitter {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

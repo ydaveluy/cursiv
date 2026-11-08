@@ -7,7 +7,7 @@
 
 #include "cursiv/text/TextOffset.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LexReadBudget {
  public:
@@ -27,4 +27,4 @@ class LexReadBudget {
   std::uint64_t _left;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

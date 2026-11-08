@@ -17,7 +17,7 @@
 #include "cursiv/ll/table/LlSimulation.hpp"
 #include "cursiv/shared/runtime/CancellationPoll.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlThreadKey {
   std::uint32_t state, stack, tag, root;
@@ -1125,4 +1125,4 @@ class LlEpisodeSim {
   CancellationPoll _stop;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -8,7 +8,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // `empty` takes no position and says nothing; `endMark` asserts end of input
 // at a position, zero width, and takes none either.
@@ -47,4 +47,4 @@ struct LlNode {
   constexpr bool operator==(const LlNode&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

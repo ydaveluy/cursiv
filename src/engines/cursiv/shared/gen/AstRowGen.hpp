@@ -6,11 +6,12 @@
 #include <cstdint>
 #include <string_view>
 
+#include "cursiv/shared/table/WriteKind.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstMetaData.hpp"
-#include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What a text converter is handed: nothing, the record's text or its parts.
 enum class TextInput : std::uint8_t { none, text, parts };
@@ -21,9 +22,9 @@ struct AstRowGen {
   std::string_view rule;
   // The class the row is declared on: the one a creation, a close or a nest
   // names.
-  std::uint16_t declType = detail::kNoIndex;
+  std::uint16_t declType = kNoIndex;
   std::uint16_t fieldSlot = kNoField;
-  std::uint16_t convSlot = detail::kNoIndex;
+  std::uint16_t convSlot = kNoIndex;
   std::uint8_t narrowSlot = kNoNarrow;
   // Converter rules, spelled as aliases into the grammar's bindings: `void`
   // for a source that names no rule; an override only where one fills the
@@ -86,4 +87,4 @@ struct AstRowGen {
   constexpr bool converts() const { return kind == WriteKind::convert; }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

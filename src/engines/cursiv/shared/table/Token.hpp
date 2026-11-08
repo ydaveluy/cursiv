@@ -5,7 +5,7 @@
 
 #include "cursiv/text/TextOffset.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A grammar symbol as the tables number it. The runtime carries the number and
 // never the meaning: terminals below the nonterminal base, which the
@@ -39,4 +39,4 @@ struct Token {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

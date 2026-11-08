@@ -8,12 +8,10 @@
 #include "cursiv/ll/gen/LlLowCfg.hpp"
 #include "cursiv/shared/gen/ChainPool.hpp"
 #include "cursiv/shared/gen/GrammarFault.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
-namespace detail {
-struct GrammarImage;
-}  // namespace detail
 struct LowerDesc;
 
 struct LlLowered {
@@ -25,6 +23,6 @@ struct LlLowered {
   GrammarFault fault{};
 };
 
-LlLowered ll_lower(detail::GrammarImage& image, const LowerDesc& desc);
+LlLowered ll_lower(GrammarImage& image, const LowerDesc& desc);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

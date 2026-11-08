@@ -6,7 +6,7 @@
 
 #include "cursiv/shared/runtime/SmallRun.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 bool predicate_run(PredicateRuns* runs, std::uint32_t run,
                    const PredicateRound& round, PredicateRest rest,
@@ -66,4 +66,4 @@ bool predicate_run(PredicateRuns* runs, std::uint32_t run,
   return tail.holds;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

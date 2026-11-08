@@ -12,7 +12,7 @@
 #include "cursiv/shared/gen/ChainPool.hpp"
 #include "cursiv/shared/gen/EmitRecords.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 std::vector<RecordGen> lr_record_gens(const AstEntryTable& table,
                                       std::span<const AstRowGen> rows,
@@ -21,4 +21,4 @@ std::vector<RecordGen> lr_record_gens(const AstEntryTable& table,
 std::vector<ElementId> lr_completion_sites(
     const std::vector<RecordGen>& records);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

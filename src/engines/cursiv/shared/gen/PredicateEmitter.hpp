@@ -24,11 +24,12 @@
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/utils/CaseFold.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Cfg>
 class PredicateEmitter {
@@ -92,7 +93,7 @@ class PredicateEmitter {
       if (compiled(l))
         out.line("inline bool predicate_", l,
                  "(const char*, ::cursiv::TextOffset,\n"
-                 "    const ::cursiv::Token&, ::cursiv::TextOffset,\n"
+                 "    const ::cursiv::engine::Token&, ::cursiv::TextOffset,\n"
                  "    ::cursiv::TextOffset* = nullptr);");
     return out.take();
   }
@@ -119,17 +120,18 @@ class PredicateEmitter {
     // token is the mode's.
     if (lexed || sectioned)
       out.line(
-          "inline ::cursiv::Scan predicate_lex(const char* src,\n"
+          "inline ::cursiv::engine::Scan predicate_lex(const char* src,\n"
           "    ::cursiv::TextOffset len, ::cursiv::TextOffset at,\n"
           "    unsigned mode, ::cursiv::TextOffset* seen) {\n"
           "  auto tape = ",
           tape,
           ";\n"
-          "  return ::cursiv::LexSuffixSession<decltype(tape)>::match(\n"
+          "  return "
+          "::cursiv::engine::LexSuffixSession<decltype(tape)>::match(\n"
           "      tape, src, len, mode, at, seen, [&] {\n"
           "        if (!seen) return walk_all(src, len, mode, at);\n"
           "        ::cursiv::TextOffset halt = at;\n"
-          "        const auto sc = ::cursiv::lex_match_halt(\n"
+          "        const auto sc = ::cursiv::engine::lex_match_halt(\n"
           "            tape, src, len, mode, at, halt);\n"
           "        *seen = ::std::max(*seen, halt < len ? halt + 1 : len);\n"
           "        return sc;\n"
@@ -145,7 +147,8 @@ class PredicateEmitter {
           "inline bool predicate_reserved(const char* src, "
           "::cursiv::TextOffset len,\n"
           "    ::cursiv::TextOffset at, ::cursiv::TextOffset end,\n"
-          "    unsigned mode, ::cursiv::SymbolId term, ::cursiv::TextOffset* "
+          "    unsigned mode, ::cursiv::engine::SymbolId term, "
+          "::cursiv::TextOffset* "
           "seen) {\n"
           "  const auto tape = ",
           tape,
@@ -153,12 +156,13 @@ class PredicateEmitter {
           "  auto state = tape.start(mode);\n"
           "  for (auto i = at; i < end; ++i) {\n"
           "    state = tape.step(state, static_cast<unsigned char>(src[i]));\n"
-          "    if (state == ::cursiv::kDeadState) return false;\n"
+          "    if (state == ::cursiv::engine::kDeadState) return false;\n"
           "  }\n"
           "  if (!kTable.dfa_res_set(state).test(term)) return false;\n"
           "  auto far = end;\n"
-          "  const bool reserved = ::cursiv::lex_reserves<kTable>(\n"
-          "      state, src, end, len, far, [&](::cursiv::SymbolId t) {\n"
+          "  const bool reserved = ::cursiv::engine::lex_reserves<kTable>(\n"
+          "      state, src, end, len, far, [&](::cursiv::engine::SymbolId t) "
+          "{\n"
           "        return !tape.refuses(t, src + at, len - at);\n"
           "      });\n",
           refusing
@@ -177,10 +181,12 @@ class PredicateEmitter {
           "inline ::cursiv::TextOffset predicate_close(const char* src,\n"
           "    ::cursiv::TextOffset len, ::cursiv::TextOffset at,\n"
           "    ::cursiv::TextOffset upto, unsigned mode,\n"
-          "    ::cursiv::SymbolId close, ::cursiv::TextOffset* seen) {\n"
+          "    ::cursiv::engine::SymbolId close, ::cursiv::TextOffset* seen) "
+          "{\n"
           "  for (auto p = at; p < upto;) {\n"
           "    const auto sc = predicate_lex(src, len, p, mode, seen);\n"
-          "    if (sc.term == ::cursiv::kInvalidSymbol || sc.end <= p) {\n"
+          "    if (sc.term == ::cursiv::engine::kInvalidSymbol || sc.end <= p) "
+          "{\n"
           "      ++p;\n"
           "      continue;\n"
           "    }\n"
@@ -191,9 +197,10 @@ class PredicateEmitter {
           "}");
     if (_nruns != 0)
       out.line(
-          "inline ::cursiv::PredicateRuns* predicate_runs(const char* src,\n"
+          "inline ::cursiv::engine::PredicateRuns* predicate_runs(const char* "
+          "src,\n"
           "    ::cursiv::TextOffset len) {\n"
-          "  return ::cursiv::LexSuffixSession<decltype(",
+          "  return ::cursiv::engine::LexSuffixSession<decltype(",
           tape,
           ")>::runs(src, "
           "len);\n"
@@ -220,37 +227,43 @@ class PredicateEmitter {
         }
         known = std::format(
             "  if (la.end > la.begin && la.sym < {0}u && {1}[la.sym] != 0 &&\n"
-            "      (la.begin >= len || !::cursiv::ByteSet{{{{0x{2:x}ull, 0x{3:x}ull, "
-            "0x{4:x}ull, 0x{5:x}ull}}}}.has(static_cast<unsigned char>(src[la.begin]))))\n"
+            "      (la.begin >= len || "
+            "!::cursiv::engine::ByteSet{{{{0x{2:x}ull, 0x{3:x}ull, "
+            "0x{4:x}ull, 0x{5:x}ull}}}}.has(static_cast<unsigned "
+            "char>(src[la.begin]))))\n"
             "    return {1}[la.sym] == 2u;\n",
             answers.size(), at->second, trivia.w[0], trivia.w[1], trivia.w[2],
             trivia.w[3]);
       }
       const std::string start =
-          "::cursiv::PredicateState{::cursiv::PredicateCursor{at, "
+          "::cursiv::engine::PredicateState{::cursiv::engine::PredicateCursor{"
+          "at, "
           "::std::min(from, at),\n"
-          "      la.end > la.begin ? la.sym : ::cursiv::kUnread, la.mode, "
+          "      la.end > la.begin ? la.sym : ::cursiv::engine::kUnread, "
+          "la.mode, "
           "la.end}}";
       const unsigned h = home(l);
-      out.line("inline bool predicate_", l, h != 0 ? "_in" : "",
-               "(const char* src, ::cursiv::TextOffset "
-               "len,\n"
-               "    const ::cursiv::Token& la, ::cursiv::TextOffset from,\n"
-               "    ::cursiv::TextOffset* seen) {\n",
-               h != 0 ? "" : known,
-               "  const auto at = ::std::min(la.begin, len);\n"
-               "  return ",
-               holds(leaf.node,
-                     leaf.skip == kNoLexNode ? start : call(leaf.skip, start)),
-               ";\n"
-               "}");
+      out.line(
+          "inline bool predicate_", l, h != 0 ? "_in" : "",
+          "(const char* src, ::cursiv::TextOffset "
+          "len,\n"
+          "    const ::cursiv::engine::Token& la, ::cursiv::TextOffset from,\n"
+          "    ::cursiv::TextOffset* seen) {\n",
+          h != 0 ? "" : known,
+          "  const auto at = ::std::min(la.begin, len);\n"
+          "  return ",
+          holds(leaf.node,
+                leaf.skip == kNoLexNode ? start : call(leaf.skip, start)),
+          ";\n"
+          "}");
       // A section's predicate reads its text alone: one that looked as far as
       // the token closing the section is read again up to there.
       if (h != 0)
         out.line("inline bool predicate_", l,
                  "(const char* src, ::cursiv::TextOffset "
                  "len,\n"
-                 "    const ::cursiv::Token& la, ::cursiv::TextOffset from,\n"
+                 "    const ::cursiv::engine::Token& la, ::cursiv::TextOffset "
+                 "from,\n"
                  "    ::cursiv::TextOffset* seen) {\n"
                  "  ::cursiv::TextOffset reach = 0;\n"
                  "  const bool value = predicate_",
@@ -344,11 +357,11 @@ class PredicateEmitter {
         // first letter.
         first.add(static_cast<unsigned char>(text[0]));
         std::size_t len = 0;
-        const char32_t cp = detail::scalar_at(text.data(), text.size(), len);
+        const char32_t cp = scalar_at(text.data(), text.size(), len);
         if (len != 0)
-          detail::for_each_other_case(cp, [&](char32_t other) {
+          for_each_other_case(cp, [&](char32_t other) {
             std::string bytes;
-            detail::append_scalar(bytes, other);
+            append_scalar(bytes, other);
             first.add(static_cast<unsigned char>(bytes.front()));
           });
       } else {
@@ -388,12 +401,12 @@ class PredicateEmitter {
     _holds.try_emplace(root, name);
     std::vector<std::uint16_t> parts;
     phrase_parts(_g, root, parts);
-    rest_of(name, parts, 0, "::cursiv::predicate_some");
+    rest_of(name, parts, 0, "::cursiv::engine::predicate_some");
   }
 
   static std::string run_function(
       std::string_view name, std::string_view kind = "bool",
-      std::string_view input = "::cursiv::PredicateState in") {
+      std::string_view input = "::cursiv::engine::PredicateState in") {
     return concat("inline ", kind, " ", name,
                   "(const char* src, ::cursiv::TextOffset len,\n"
                   "    ",
@@ -401,8 +414,8 @@ class PredicateEmitter {
   }
 
   std::string prelex(std::uint16_t at, std::string_view indent) const {
-    return concat(indent, "if (p.held == ::cursiv::kUnread) {\n", indent,
-                  "  const auto sc = predicate_lex(src, len, p.at, ",
+    return concat(indent, "if (p.held == ::cursiv::engine::kUnread) {\n",
+                  indent, "  const auto sc = predicate_lex(src, len, p.at, ",
                   _g.lexMode[at], "u, seen);\n", indent,
                   "  p.held = sc.term; p.end = sc.end; p.mode = ",
                   _g.lexMode[at], "u;\n", indent, "}\n");
@@ -447,8 +460,9 @@ class PredicateEmitter {
       if (!phrase_keeps_runs(_g, arm)) {
         plain = true;
         _called[arm] = true;
-        arms += concat("    plain.unite(",
-                       call(arm, "::cursiv::PredicateState{p}"), ");\n");
+        arms +=
+            concat("    plain.unite(",
+                   call(arm, "::cursiv::engine::PredicateState{p}"), ");\n");
         continue;
       }
       const std::string name = concat("predicate_part_", _nparts++);
@@ -456,10 +470,11 @@ class PredicateEmitter {
       phrase_parts(_g, arm, parts);
       rest_of(name, parts, 0, rest);
       arms += concat("    holds = ", name,
-                     "(src, len, ::cursiv::PredicateState{p}, seen) || "
+                     "(src, len, ::cursiv::engine::PredicateState{p}, seen) || "
                      "holds;\n");
     }
-    return std::string(plain ? "  ::cursiv::PredicateState plain;\n" : "") +
+    return std::string(plain ? "  ::cursiv::engine::PredicateState plain;\n"
+                             : "") +
            "  bool holds = false;\n"
            "  for (::std::size_t i = 0; i < in.size(); ++i) {\n"
            "    auto p = in[i];\n" +
@@ -479,31 +494,32 @@ class PredicateEmitter {
     if (between) _called[e.b] = true;
     if (std::ranges::find(_rounds, at) == _rounds.end()) {
       _rounds.push_back(at);
-      const std::string start = run_function(concat("predicate_start_", at),
-                                             "::cursiv::PredicateCursor",
-                                             "::cursiv::PredicateCursor p");
+      const std::string start = run_function(
+          concat("predicate_start_", at), "::cursiv::engine::PredicateCursor",
+          "::cursiv::engine::PredicateCursor p");
       const std::string step = run_function(concat("predicate_step_", at),
-                                            "::cursiv::PredicateState");
+                                            "::cursiv::engine::PredicateState");
       _runDecls += start + ";\n" + step + ";\n";
       _runDefs += start + " {\n";
       if (between)
-        _runDefs += concat("  p = ", call(e.b, "::cursiv::PredicateState{p}"),
-                           "[0];\n");
+        _runDefs +=
+            concat("  p = ", call(e.b, "::cursiv::engine::PredicateState{p}"),
+                   "[0];\n");
       _runDefs +=
           prelex(at, "  ") + "  return p;\n}\n" + step +
           concat(" {\n  return ", call(e.a, "::std::move(in)"), ";\n}\n");
     }
-    const std::string free =
-        concat("::cursiv::predicate_run(predicate_runs(src, len), ", _nruns++,
-               "u,\n"
-               "      ::cursiv::PredicateRound{&predicate_start_",
-               at,
-               ", "
-               "&predicate_step_",
-               at, ", ", between,
-               "},\n"
-               "      &",
-               rest, ", src, len, ::std::move(in), seen)");
+    const std::string free = concat(
+        "::cursiv::engine::predicate_run(predicate_runs(src, len), ", _nruns++,
+        "u,\n"
+        "      ::cursiv::engine::PredicateRound{&predicate_start_",
+        at,
+        ", "
+        "&predicate_step_",
+        at, ", ", between,
+        "},\n"
+        "      &",
+        rest, ", src, len, ::std::move(in), seen)");
     // The rounds it must read before the free ones: every round but the
     // first reads the trivia between rounds.
     if (!between)
@@ -515,7 +531,7 @@ class PredicateEmitter {
              must_rounds("in", e.min - 1u, call(e.a, call(e.b, "in"))) +
              "  return " + free + ";\n";
     // No round at all: the cursors are read in the run's mode as they stand.
-    return "  ::cursiv::PredicateState first;\n"
+    return "  ::cursiv::engine::PredicateState first;\n"
            "  for (::std::size_t i = 0; i < in.size(); ++i) {\n"
            "    auto p = in[i];\n" +
            prelex(at, "    ") + "    first.add(p);\n  }\n" +
@@ -599,7 +615,7 @@ class PredicateEmitter {
         done.push_back(mode);
       }
     if (modes.empty()) return {};
-    return "p.held == ::cursiv::kInvalidSymbol && (" + modes + ")";
+    return "p.held == ::cursiv::engine::kInvalidSymbol && (" + modes + ")";
   }
   bool alike(std::uint16_t x, std::uint16_t y) const {
     if (x == y) return true;
@@ -656,17 +672,18 @@ class PredicateEmitter {
     out.line("  auto visited = cur;");
     return out
         .line(
-            "  ::cursiv::PredicateState out;\n"
+            "  ::cursiv::engine::PredicateState out;\n"
             "  for (::std::uint32_t k = ",
             min, "u; k < ", max,
             "u && !cur.empty(); ++k) "
             "{\n"
-            "    ::cursiv::PredicateState active;\n"
+            "    ::cursiv::engine::PredicateState active;\n"
             "    for (::std::size_t i = 0; i < cur.size(); ++i) {\n"
             "      auto p = ",
             skip == kNoLexNode
                 ? std::string("cur[i]")
-                : concat(call(skip, "::cursiv::PredicateState{cur[i]}"), "[0]"),
+                : concat(call(skip, "::cursiv::engine::PredicateState{cur[i]}"),
+                         "[0]"),
             ";\n", prelex(at, "      "), "      out.add(",
             skip == kNoLexNode ? "p" : "cur[i]",
             ");\n"
@@ -687,14 +704,14 @@ class PredicateEmitter {
     const LexNode e = _g.lex[at];
     const bool owns = e.kind == LexKind::seq || e.kind == LexKind::rep;
     TextBuilder out;
-    out.line(
-        "inline ::cursiv::PredicateState predicate_node_", at,
-        "(const char* src,\n"
-        "    ::cursiv::TextOffset len, ",
-        owns ? "::cursiv::PredicateState" : "const ::cursiv::PredicateState&",
-        " in,\n"
-        "    ::cursiv::TextOffset* seen) {\n"
-        "  (void)src; (void)len; (void)seen;");
+    out.line("inline ::cursiv::engine::PredicateState predicate_node_", at,
+             "(const char* src,\n"
+             "    ::cursiv::TextOffset len, ",
+             owns ? "::cursiv::engine::PredicateState"
+                  : "const ::cursiv::engine::PredicateState&",
+             " in,\n"
+             "    ::cursiv::TextOffset* seen) {\n"
+             "  (void)src; (void)len; (void)seen;");
     if (e.kind == LexKind::seq) {
       for (unsigned i = 0; i < e.b; ++i)
         out.line("  in = ", call(_g.lexKid[e.a + i], "::std::move(in)"),
@@ -712,13 +729,13 @@ class PredicateEmitter {
       const auto more = [&](std::string_view input) {
         return concat("predicate_rounds_", at, "(src, len, ", input, ", seen)");
       };
-      std::string helper =
-          concat("inline ::cursiv::PredicateState predicate_rounds_", at,
-                 "(const char* "
-                 "src,\n"
-                 "    ::cursiv::TextOffset len, ::cursiv::PredicateState in,\n"
-                 "    ::cursiv::TextOffset* seen) {\n"
-                 "  (void)src; (void)len; (void)seen;\n");
+      std::string helper = concat(
+          "inline ::cursiv::engine::PredicateState predicate_rounds_", at,
+          "(const char* "
+          "src,\n"
+          "    ::cursiv::TextOffset len, ::cursiv::engine::PredicateState in,\n"
+          "    ::cursiv::TextOffset* seen) {\n"
+          "  (void)src; (void)len; (void)seen;\n");
       helper += rounds(at, e.b, e.min == 0 ? 0 : e.min - 1,
                        e.max == kEndless ? e.max : e.max - 1,
                        call(e.a, "::std::move(active)"));
@@ -732,7 +749,7 @@ class PredicateEmitter {
     }
 
     out.line(
-        "  ::cursiv::PredicateState out;\n"
+        "  ::cursiv::engine::PredicateState out;\n"
         "  for (::std::size_t i = 0; i < in.size(); ++i) {\n"
         "    auto p = in[i];");
     switch (e.kind) {
@@ -747,8 +764,8 @@ class PredicateEmitter {
         // predicate's own, read under the alphabet it was lexed in.
         if (_turn[at])
           out.line(
-              "    if (p.held != ::cursiv::kUnread &&\n"
-              "        p.held != ::cursiv::kInvalidSymbol) {\n"
+              "    if (p.held != ::cursiv::engine::kUnread &&\n"
+              "        p.held != ::cursiv::engine::kInvalidSymbol) {\n"
               "      if ",
               gap_terms_expression(_g, _turns.at(e.a), "p.held"),
               " out.add({p.end, p.end});\n"
@@ -757,21 +774,22 @@ class PredicateEmitter {
         out.line(
             "    const auto sc = p.held == ", e.a,
             "u\n"
-            "        ? ::cursiv::Scan{p.end, p.held}\n"
+            "        ? ::cursiv::engine::Scan{p.end, p.held}\n"
             "        : predicate_lex(src, len, p.at, ",
             _g.lexMode[at],
             "u, seen);\n"
             "    if (sc.term == ",
             e.a,
             "u && sc.end > p.at &&\n"
-            "        (p.held == ::cursiv::kUnread ||\n"
-            "         p.held == ::cursiv::kInvalidSymbol || (sc.end == p.end "
+            "        (p.held == ::cursiv::engine::kUnread ||\n"
+            "         p.held == ::cursiv::engine::kInvalidSymbol || (sc.end == "
+            "p.end "
             "&&\n"
             "         (",
             _head[at] || _g.terms[e.a].spelled
                 ? "true"
                 : concat("p.held == ", e.a,
-                         "u || p.mode == ::cursiv::kNoMode ||\n"
+                         "u || p.mode == ::cursiv::engine::kNoMode ||\n"
                          "          !predicate_reserved(src, len, p.at, p.end, "
                          "p.mode, ",
                          e.a, "u, seen)"),
@@ -797,7 +815,7 @@ class PredicateEmitter {
               "      if (!",
               gap_terms_expression(_g, trivia, "sc.term"),
               " || sc.end <= p.at) {\n",
-              "        if (p.held == ::cursiv::kUnread) {\n"
+              "        if (p.held == ::cursiv::engine::kUnread) {\n"
               "          p.held = sc.term; p.end = sc.end; p.mode = ",
               _g.lexMode[at],
               "u;\n"
@@ -805,7 +823,7 @@ class PredicateEmitter {
               "        break;\n"
               "      }\n"
               "      p.at = sc.end;\n"
-              "      p.held = ::cursiv::kUnread;\n"
+              "      p.held = ::cursiv::engine::kUnread;\n"
               "    }");
         }
         out.line("    out.add(p);");
@@ -821,18 +839,19 @@ class PredicateEmitter {
             out.line("    if (", none, ") continue;");
         for (unsigned i = 0; i < e.b; ++i) {
           const auto kid = _g.lexKid[e.a + i];
-          out.line("      out.unite(", call(kid, "::cursiv::PredicateState{p}"),
-                   ");");
+          out.line("      out.unite(",
+                   call(kid, "::cursiv::engine::PredicateState{p}"), ");");
         }
         break;
       case LexKind::positive:
       case LexKind::negative:
         out.line(
             "    auto probe = p;\n"
-            "    probe.held = ::cursiv::kUnread;\n"
+            "    probe.held = ::cursiv::engine::kUnread;\n"
             "    if (",
             e.kind == LexKind::positive ? "" : "!", "(",
-            holds(e.a, "::cursiv::PredicateState{probe}"), ")) out.add(p);");
+            holds(e.a, "::cursiv::engine::PredicateState{probe}"),
+            ")) out.add(p);");
         break;
       case LexKind::gap_has:
       case LexKind::gap_is:
@@ -855,4 +874,4 @@ class PredicateEmitter {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

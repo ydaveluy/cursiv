@@ -18,8 +18,7 @@
 #include "cursiv/utils/ctstring.hpp"
 #include "cursiv/utils/typelist.hpp"
 
-namespace cursiv {
-namespace detail {
+namespace cursiv::detail {
 
 template <class G, class X>
 using in_force_t = typename ResolveOverride<G>::template rule<X>;
@@ -181,12 +180,10 @@ struct in_grammar_name {
   }();
 };
 
-}  // namespace detail
-
 // No `declared`: a rule of G read in a section is a rule of its own, never
 // the caller's rule of the same name.
 template <class G, class X>
-struct InGrammar : detail::in_grammar_rule<G, X> {
+struct InGrammar : in_grammar_rule<G, X> {
   static_assert(
       std::is_same_v<std::remove_cvref_t<decltype(G::indent_open)>, Epsilon> &&
           std::is_same_v<std::remove_cvref_t<decltype(G::indent_close)>,
@@ -197,7 +194,6 @@ struct InGrammar : detail::in_grammar_rule<G, X> {
       "declares no `indent_open`, `indent_close` or `indent_newline`");
 };
 
-namespace detail {
 template <class G, class X>
 inline constexpr std::string_view anonymous_rule_label<InGrammar<G, X>> =
     anonymous_rule_label<X>;
@@ -213,19 +209,16 @@ struct section_entry {
                 "entry rule that uses the terminal");
   using type = E;
 };
-}  // namespace detail
 
 // The section `section<G>` opens: G's entry, and the trivia G reads.
 template <class G>
-using section_entry_t = typename detail::section_entry<G>::type;
+using section_entry_t = typename section_entry<G>::type;
 template <class G>
 using section_ignored_t =
-    typename detail::scoped_list<G, typename ResolveOverride<G>::ignored>::type;
+    typename scoped_list<G, typename ResolveOverride<G>::ignored>::type;
 template <class G>
 using section_hidden_t =
-    typename detail::scoped_list<G, typename ResolveOverride<G>::hidden>::type;
-
-namespace detail {
+    typename scoped_list<G, typename ResolveOverride<G>::hidden>::type;
 
 // A rule's type is what G's own deduction answers, the rules already on the
 // way kept: a grammar that embeds itself adopts as a rule that calls itself.
@@ -259,5 +252,4 @@ struct home_of<InGrammar<G, X>> {
   using type = G;
 };
 
-}  // namespace detail
-}  // namespace cursiv
+}  // namespace cursiv::detail

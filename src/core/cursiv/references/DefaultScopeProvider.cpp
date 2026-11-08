@@ -43,7 +43,9 @@ void record_import(const Document& document, std::uint64_t nameHash) {
 // against.
 const AstTypeTag* narrowed_to(const AstReflection& reflection,
                               const ReferenceInfo& context) {
-  return reflection.referenceNarrowTarget(context.reference, context.narrow);
+  return context.narrow == kNoNarrow
+             ? nullptr
+             : reflection.referenceNarrowTarget(context.reference, context.narrow);
 }
 
 }  // namespace
@@ -153,13 +155,15 @@ const AstNodeDescription* DefaultScopeProvider::getScopeEntry(
   // Hashed once for the whole climb: the name does not change from one
   // ancestor to the next.
   const std::uint64_t nameHash = LocalSymbols::hash_name(name);
+  const LocalSymbols::NameQuery query{name, nameHash, caseSensitive};
   for (const AstNode* scope = context.container; climbing(scope, document);
        scope = scope->parent) {
     const AstNodeDescription* const found = document->localSymbols.firstNamed(
-        scope, name, nameHash, caseSensitive,
+        scope, query,
         [&](const AstNodeDescription& entry) {
           return reflection.acceptsTag(accepts, entry.type) &&
-                 reflection.isSubtype(entry.type, narrowed);
+                 (narrowed == nullptr ||
+                  reflection.isSubtype(entry.type, narrowed));
         });
     if (found != nullptr) return found;
   }

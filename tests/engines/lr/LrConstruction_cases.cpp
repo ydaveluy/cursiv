@@ -56,19 +56,19 @@ namespace lr_construction_cases {
 namespace {
 
 // A production of `lhs` over `syms`, laid at the end of the build's rows.
-void lay(cursiv::LrBuildCfg& g, std::uint16_t lhs,
+void lay(cursiv::engine::LrBuildCfg& g, std::uint16_t lhs,
          const std::vector<std::uint16_t>& syms) {
   const auto p = g.nprods++;
-  g.prods[p] = cursiv::LrLowProd{};
+  g.prods[p] = cursiv::engine::LrLowProd{};
   g.prods[p].lhs = lhs;
   g.prods[p].at = g.nslots;
   g.prods[p].len = static_cast<std::uint16_t>(syms.size());
-  g.prods[p].node = cursiv::kNoRow;
-  g.prodBuild[p] = cursiv::LrProdBuild{};
-  g.prodBuild[p].owner = cursiv::kNoRow;
+  g.prods[p].node = cursiv::engine::kNoRow;
+  g.prodBuild[p] = cursiv::engine::LrProdBuild{};
+  g.prodBuild[p].owner = cursiv::engine::kNoRow;
   for (const std::uint16_t x : syms) {
-    g.slots[g.nslots] = cursiv::LrLowSlot{};
-    g.slots[g.nslots].row = cursiv::kNoRow;
+    g.slots[g.nslots] = cursiv::engine::LrLowSlot{};
+    g.slots[g.nslots].row = cursiv::engine::kNoRow;
     g.slotCfg[g.nslots] = 0;
     g.slotSym[g.nslots++] = x;
   }
@@ -82,6 +82,7 @@ namespace {
 
 void stable_set_classes() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   const auto check = [](const std::vector<DynSet>& rows) {
     std::map<std::vector<std::uint64_t>, unsigned> classes;
     std::vector<std::uint16_t> expected, actual(rows.size());
@@ -121,6 +122,7 @@ void stable_set_classes() {
 
 void deep_entry_chains() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   LrBuildTable a;
   a.writes.nchains = 3;
   a.writes.chains.v = {{0, 1}, {1, 2}, {3, 1}};
@@ -155,6 +157,7 @@ void run() {
   stable_set_classes();
   deep_entry_chains();
   using namespace cursiv;
+  using namespace cursiv::engine;
   const LrAction shift{.term = 2, .arg = 7, .alts = 9};
   const LrAction reduce{.term = 2, .kind = LrActionKind::reduce, .arg = 5};
   std::vector<std::vector<LrAction>> rows{
@@ -195,6 +198,7 @@ namespace lexical_derived {
 
 void owed_terminals_stop_at_the_first_acceptance() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   LrBuildTable a;
   a.cfg.nnts = 1;
   a.cfg.nterms = 6;
@@ -253,6 +257,7 @@ void owed_terminals_stop_at_the_first_acceptance() {
 
 void relay_chains_share_suffixes_in_both_pool_forms() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   std::vector<LexRelayGen> dynamic(3);
   Vec<LexRelayGen> growing;
   growing.v = dynamic;
@@ -294,21 +299,23 @@ namespace {
 constexpr std::uint16_t kOpen = 1, kClose = 2, kComma = 3, kN = 4;
 
 // Terminal `k + 1` spells `spell[k]`; nonterminal 1 is the entry.
-void spell(cursiv::LrBuildCfg& g, std::string_view spell, unsigned nnts) {
+void spell(cursiv::engine::LrBuildCfg& g, std::string_view spell,
+           unsigned nnts) {
   const auto n = static_cast<std::uint16_t>(spell.size());
   for (std::uint16_t k = 0; k < n; ++k) {
-    cursiv::ByteSet one{};
+    cursiv::engine::ByteSet one{};
     one.add(static_cast<unsigned char>(spell[k]));
     g.sets[k] = one;
-    g.lex[k] = cursiv::LexNode{cursiv::LexKind::chars, k, 0, 0, 0};
+    g.lex[k] =
+        cursiv::engine::LexNode{cursiv::engine::LexKind::chars, k, 0, 0, 0};
   }
   g.nsets = n;
   g.nlex = n;
   g.nterms = n + 1u;
   for (unsigned t = 0; t <= n; ++t) {
-    g.terms[t] = cursiv::TermInfo{};
+    g.terms[t] = cursiv::engine::TermInfo{};
     g.terms[t].element = cursiv::kNoElement;
-    g.termBuild[t] = cursiv::TermBuild{};
+    g.termBuild[t] = cursiv::engine::TermBuild{};
     g.termBuild[t].lex = static_cast<std::uint16_t>(t == 0 ? 0 : t - 1);
   }
   g.nnts = nnts;
@@ -317,10 +324,11 @@ void spell(cursiv::LrBuildCfg& g, std::string_view spell, unsigned nnts) {
 }
 
 // V -> '[' E ']' | '[' ']' | n ;  E -> E ',' V | V
-void brackets(cursiv::LrLowered& low) {
-  cursiv::LrBuildCfg& g = low.cfg;
+void brackets(cursiv::engine::LrLowered& low) {
+  cursiv::engine::LrBuildCfg& g = low.cfg;
   spell(g, "[],n", 3);  // 0 = $accept, 1 = V, 2 = E
-  const std::uint16_t V = cursiv::nt_sym(1), E = cursiv::nt_sym(2);
+  const std::uint16_t V = cursiv::engine::nt_sym(1),
+                      E = cursiv::engine::nt_sym(2);
   lay(g, 0, {V});
   lay(g, 1, {kOpen, E, kClose});
   lay(g, 1, {kOpen, kClose});
@@ -330,10 +338,11 @@ void brackets(cursiv::LrLowered& low) {
 }
 
 // S -> L d a | L e f ;  L -> L d | d
-void list_then_its_token(cursiv::LrLowered& low) {
-  cursiv::LrBuildCfg& g = low.cfg;
+void list_then_its_token(cursiv::engine::LrLowered& low) {
+  cursiv::engine::LrBuildCfg& g = low.cfg;
   spell(g, "daef", 3);
-  const std::uint16_t S = cursiv::nt_sym(1), L = cursiv::nt_sym(2);
+  const std::uint16_t S = cursiv::engine::nt_sym(1),
+                      L = cursiv::engine::nt_sym(2);
   lay(g, 0, {S});
   lay(g, 1, {L, 1, 2});
   lay(g, 1, {L, 3, 4});
@@ -342,10 +351,11 @@ void list_then_its_token(cursiv::LrLowered& low) {
 }
 
 // S -> x a c | x b c | x Y z z ;  Y -> b
-void called_rule_shifts_first(cursiv::LrLowered& low) {
-  cursiv::LrBuildCfg& g = low.cfg;
+void called_rule_shifts_first(cursiv::engine::LrLowered& low) {
+  cursiv::engine::LrBuildCfg& g = low.cfg;
   spell(g, "xabcz", 3);
-  const std::uint16_t S = cursiv::nt_sym(1), Y = cursiv::nt_sym(2);
+  const std::uint16_t S = cursiv::engine::nt_sym(1),
+                      Y = cursiv::engine::nt_sym(2);
   lay(g, 0, {S});
   lay(g, 1, {1, 2, 4});
   lay(g, 1, {1, 3, 4});
@@ -353,7 +363,7 @@ void called_rule_shifts_first(cursiv::LrLowered& low) {
   lay(g, 2, {3});
 }
 
-std::uint32_t goto_of(const cursiv::LrBuildTable& A, std::uint32_t from,
+std::uint32_t goto_of(const cursiv::engine::LrBuildTable& A, std::uint32_t from,
                       std::uint16_t nt) {
   for (const auto e : A.gotoRows[from])
     if (e.nt == nt) return e.to;
@@ -362,7 +372,7 @@ std::uint32_t goto_of(const cursiv::LrBuildTable& A, std::uint32_t from,
 
 // The state the table stands in once it has read `terms` and made every
 // reduction `la` asks for, short of shifting it.
-std::uint32_t before(const cursiv::LrBuildTable& A,
+std::uint32_t before(const cursiv::engine::LrBuildTable& A,
                      std::initializer_list<std::uint16_t> terms,
                      std::uint16_t la) {
   std::vector<std::uint32_t> stack{0};
@@ -371,17 +381,17 @@ std::uint32_t before(const cursiv::LrBuildTable& A,
   for (std::size_t i = 0; i < input.size(); ++i) {
     for (;;) {
       const std::uint32_t s = stack.back();
-      const cursiv::LrAction* act = nullptr;
+      const cursiv::engine::LrAction* act = nullptr;
       for (unsigned k = 0; k < A.actionCount[s]; ++k)
         if (A.actions[A.actionBase[s] + k].term == input[i])
           act = &A.actions[A.actionBase[s] + k];
       if (act == nullptr) return 0xFFFFFFFFu;
-      if (act->kind != cursiv::LrActionKind::reduce) {
+      if (act->kind != cursiv::engine::LrActionKind::reduce) {
         if (i + 1 == input.size()) return s;
         stack.push_back(act->arg);
         break;
       }
-      const cursiv::LrLowProd& p = A.cfg.prods[act->arg];
+      const cursiv::engine::LrLowProd& p = A.cfg.prods[act->arg];
       stack.resize(stack.size() - p.len);
       stack.push_back(goto_of(A, stack.back(), p.lhs));
     }
@@ -389,10 +399,10 @@ std::uint32_t before(const cursiv::LrBuildTable& A,
   return stack.back();
 }
 
-bool owes(const cursiv::LrBuildTable& A, std::uint32_t s,
+bool owes(const cursiv::engine::LrBuildTable& A, std::uint32_t s,
           std::initializer_list<std::uint16_t> terms) {
   if (s >= A.nstates) return false;
-  cursiv::DynSet want;
+  cursiv::engine::DynSet want;
   for (const std::uint16_t t : terms) want.set(t);
   return A.closeRow[s] == want;
 }
@@ -400,9 +410,10 @@ bool owes(const cursiv::LrBuildTable& A, std::uint32_t s,
 }  // namespace
 
 void run() {
-  cursiv::LrLowered low;
+  cursiv::engine::LrLowered low;
   brackets(low);
-  const cursiv::LrBuildTable A = cursiv::lr_build_automaton(low);
+  const cursiv::engine::LrBuildTable A =
+      cursiv::engine::lr_build_automaton(low);
   CHECK(!A.overflow && !A.cfg.lowerFail());
   // The shortest value is a word, not a pair of brackets.
   CHECK(owes(A, before(A, {}, kOpen), {kN}));
@@ -416,14 +427,16 @@ void run() {
   CHECK(A.closeMax == 3);
   // A due shift owes one token less for every item taking it: the list's
   // continuation and the called rule, which close in one, are what is owed.
-  cursiv::LrLowered list;
+  cursiv::engine::LrLowered list;
   list_then_its_token(list);
-  const cursiv::LrBuildTable L = cursiv::lr_build_automaton(list);
+  const cursiv::engine::LrBuildTable L =
+      cursiv::engine::lr_build_automaton(list);
   CHECK(!L.overflow && !L.cfg.lowerFail());
   CHECK(owes(L, before(L, {1}, 3), {1}));
-  cursiv::LrLowered called;
+  cursiv::engine::LrLowered called;
   called_rule_shifts_first(called);
-  const cursiv::LrBuildTable C = cursiv::lr_build_automaton(called);
+  const cursiv::engine::LrBuildTable C =
+      cursiv::engine::lr_build_automaton(called);
   CHECK(!C.overflow && !C.cfg.lowerFail());
   CHECK(owes(C, before(C, {1}, 3), {3}));
 }
@@ -436,6 +449,7 @@ namespace {
 
 void blocks_share_values_without_changing_columns() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   LrProgramMatrix m;
   const std::vector<std::vector<std::uint64_t>> rows{
       {0, 10, 10, 20, 0, 0, 0, 0, 1, 2, 3},
@@ -491,6 +505,7 @@ void blocks_share_values_without_changing_columns() {
 
 void programs_preserve_order_and_shift_effects() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   LrBuildTable a;
   a.cfg.nterms = 4;
   a.cfg.nnts = 3;
@@ -572,26 +587,28 @@ namespace ordered_reduce {
 namespace {
 
 // S -> a | B a a ;  B -> a | S a | C S a ;  C -> a | a a a
-void cyclic(cursiv::LrLowered& low) {
-  cursiv::LrBuildCfg& g = low.cfg;
-  cursiv::ByteSet one{};
+void cyclic(cursiv::engine::LrLowered& low) {
+  cursiv::engine::LrBuildCfg& g = low.cfg;
+  cursiv::engine::ByteSet one{};
   one.add('a');
   g.sets[0] = one;
   g.nsets = 1;
   g.nlex = 1;
-  g.lex[0] = cursiv::LexNode{cursiv::LexKind::chars, 0, 0, 0, 0};
+  g.lex[0] =
+      cursiv::engine::LexNode{cursiv::engine::LexKind::chars, 0, 0, 0, 0};
   g.nterms = 2;
   for (unsigned t = 0; t < 2; ++t) {
-    g.terms[t] = cursiv::TermInfo{};
+    g.terms[t] = cursiv::engine::TermInfo{};
     g.terms[t].element = cursiv::kNoElement;
-    g.termBuild[t] = cursiv::TermBuild{};
+    g.termBuild[t] = cursiv::engine::TermBuild{};
     g.termBuild[t].lex = 0;
   }
   g.nnts = 4;  // 0 = $accept, 1 = S, 2 = B, 3 = C
   g.entryNt = 1;
   g.startProd = 0;
-  const std::uint16_t S = cursiv::nt_sym(1), B = cursiv::nt_sym(2),
-                      C = cursiv::nt_sym(3), a = 1;
+  const std::uint16_t S = cursiv::engine::nt_sym(1),
+                      B = cursiv::engine::nt_sym(2),
+                      C = cursiv::engine::nt_sym(3), a = 1;
   lay(g, 0, {S});
   lay(g, 1, {a});
   lay(g, 1, {B, a, a});
@@ -603,9 +620,10 @@ void cyclic(cursiv::LrLowered& low) {
 }
 
 void unordered_cells_are_counted() {
-  cursiv::LrLowered low;
+  cursiv::engine::LrLowered low;
   cyclic(low);
-  const cursiv::LrBuildTable A = cursiv::lr_build_automaton(low);
+  const cursiv::engine::LrBuildTable A =
+      cursiv::engine::lr_build_automaton(low);
   CHECK(!A.overflow && !A.cfg.lowerFail());
   CHECK(A.nOrdered != 0);
 }
@@ -635,20 +653,21 @@ struct LongBodies : cursiv::GrammarSpec {
 // Past dot 255 a body is ordered as before it: where `D` ends, the shift
 // of `P` precedes its reduction for every text.
 void long_bodies_keep_the_order_written() {
-  const cursiv::LrBuildTable A =
-      cursiv::lr_build_automaton(cursiv::LrLowering<LongBodies>::table());
+  const cursiv::engine::LrBuildTable A = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<LongBodies>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
   unsigned cells = 0;
   for (std::uint32_t s = 0; s < A.nstates; ++s)
     for (unsigned k = 1; k < A.actionCount[s]; ++k) {
-      const cursiv::LrAction& first = A.actions[A.actionBase[s] + k - 1];
-      const cursiv::LrAction& reduce = A.actions[A.actionBase[s] + k];
+      const cursiv::engine::LrAction& first =
+          A.actions[A.actionBase[s] + k - 1];
+      const cursiv::engine::LrAction& reduce = A.actions[A.actionBase[s] + k];
       if (first.term != reduce.term ||
-          reduce.kind != cursiv::LrActionKind::reduce ||
+          reduce.kind != cursiv::engine::LrActionKind::reduce ||
           A.cfg.prods[reduce.arg].len < 256)
         continue;
       ++cells;
-      CHECK(cursiv::lr_takes_token(first.kind));
+      CHECK(cursiv::engine::lr_takes_token(first.kind));
       CHECK(first.exact && reduce.exact);
     }
   CHECK(cells == 1);
@@ -669,8 +688,8 @@ namespace stamp_layout {
 
 namespace {
 
-using cursiv::stamp_split;
-using cursiv::StampLayout;
+using cursiv::engine::stamp_split;
+using cursiv::engine::StampLayout;
 
 constexpr std::optional<StampLayout> kNone;
 
@@ -706,10 +725,10 @@ void a_forced_row_is_honoured_or_refused() {
 }
 
 void the_refusal_names_both_counts() {
-  CHECK(cursiv::stamp_refusal(40000, 20000) ==
+  CHECK(cursiv::engine::stamp_refusal(40000, 20000) ==
         "its 40000 AST write chains need 16 bits and its 20000 parser states "
         "15 bits, more than the 30 bits of a record");
-  CHECK(cursiv::stamp_refusal(150, 60, 7) ==
+  CHECK(cursiv::engine::stamp_refusal(150, 60, 7) ==
         "its 150 AST write chains need 8 bits and its 60 parser states 6 "
         "bits, more than the 30 bits of a record with the chains forced to 7 "
         "bits");
@@ -759,6 +778,7 @@ namespace lower_limits {
 
 namespace {
 using namespace cursiv;
+using namespace cursiv::engine;
 
 // Whether `build` is refused, and for `why`.
 template <class Build>
@@ -1490,9 +1510,9 @@ void lexical_pools_cannot_wrap() {
 // the grammar's own, and the two meet in one pool.
 void sets_are_interned_once() {
   const auto once = [](LrBuildTable& a) {
-    std::vector<detail::SetKey> seen;
+    std::vector<engine::SetKey> seen;
     for (std::uint16_t s = 0; s < a.cfg.nsets; ++s) {
-      const detail::SetKey key{a.cfg.sets[s], a.cfg.setDecode[s],
+      const engine::SetKey key{a.cfg.sets[s], a.cfg.setDecode[s],
                                lex_set_scalars(a.cfg, s)};
       CHECK(std::ranges::find(seen, key) == seen.end());
       CHECK(lex_intern_set(a.cfg, key.bytes, key.decode, key.scalars) == s);
@@ -1545,6 +1565,7 @@ void run() {
 
 namespace fold_contract {
 using namespace cursiv;
+using namespace cursiv::engine;
 
 void precomposition_keeps_bare_records_through_renames() {
   for (bool wrappedLeaf : {false, true}) {
@@ -1681,6 +1702,7 @@ namespace record_propagation {
 
 void returned_records_follow_unit_calls() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   LrLowered low;
   auto& g = low.cfg;
   g.nterms = 2;
@@ -1719,6 +1741,7 @@ void returned_records_follow_unit_calls() {
 
 void a_bare_record_demand_stops_at_an_owned_record() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   LrLowered low;
   auto& g = low.cfg;
   g.nnts = 6;
@@ -1743,6 +1766,7 @@ void a_bare_record_demand_stops_at_an_owned_record() {
 // direction faces its unfavourable order on the same long chain.
 void long_chains_propagate_in_both_directions() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   constexpr std::uint16_t count = 8000;
   LrLowered low;
   auto& g = low.cfg;

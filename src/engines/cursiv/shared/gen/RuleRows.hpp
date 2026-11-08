@@ -8,13 +8,14 @@
 #include <utility>
 
 #include "cursiv/grammar/ExprShape.hpp"
-#include "cursiv/utils/typelist.hpp"
 #include "cursiv/shared/gen/Distribute.hpp"
 #include "cursiv/shared/gen/Row.hpp"
 #include "cursiv/shared/gen/spec_row.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/utils/typelist.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 template <class St, class E, class Kids = typename ExprShape<E>::kids>
 struct RowsOf;
@@ -105,4 +106,4 @@ template <class S, class... Rs, template <class, class, auto> class InfixSrc>
 struct AllRows<S, TypeList<Rs...>, InfixSrc>
     : dedupe<tl_cat_t<typename RuleRows<S, Rs, InfixSrc>::type...>> {};
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

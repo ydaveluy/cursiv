@@ -5,7 +5,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrLowProd {
   std::uint16_t lhs = 0;  // nonterminal index
@@ -23,4 +23,4 @@ struct LrLowProd {
   constexpr bool operator==(const LrLowProd&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

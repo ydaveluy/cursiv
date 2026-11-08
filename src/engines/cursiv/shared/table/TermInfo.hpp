@@ -6,7 +6,7 @@
 
 #include "cursiv/grammar/ElementId.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr std::uint16_t kNoSet = 0xffff;
 // How the parse lays a terminal no lexer reads.
@@ -76,4 +76,4 @@ constexpr bool lex_term_before(const TermInfo& a, unsigned ta, unsigned ia,
                          ib);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

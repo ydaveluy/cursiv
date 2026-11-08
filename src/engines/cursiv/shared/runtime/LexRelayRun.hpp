@@ -22,7 +22,7 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // `Ad` is the walk's own table adapter. Every rest a relay resumes reads its
 // relay's terminal and nothing else, so what a rest answers is how far that
@@ -268,4 +268,4 @@ class LexRelayRun {
   std::unique_ptr<std::vector<Memo>> _memo;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

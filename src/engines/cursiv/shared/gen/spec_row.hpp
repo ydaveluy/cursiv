@@ -5,12 +5,13 @@
 
 #include "cursiv/grammar/PayloadOf.hpp"
 #include "cursiv/grammar/expr.hpp"
-#include "cursiv/syntax-tree/MemberTraits.hpp"
-#include "cursiv/utils/typelist.hpp"
 #include "cursiv/shared/gen/Row.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/syntax-tree/MemberTraits.hpp"
+#include "cursiv/utils/typelist.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // The payload a write converts, already erased: a rule indistinguishable
 // from a bare matcher is the same action, `void` where nothing converts.
@@ -62,4 +63,4 @@ struct directive_row<St, Flag<P, E>> {
                    typename member_traits<decltype(P)>::class_type, Wrote<P>>;
 };
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

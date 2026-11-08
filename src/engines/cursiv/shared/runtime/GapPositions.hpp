@@ -9,11 +9,12 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/shared/table/Token.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/text/scalar_at.hpp"
-#include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct GapPositions {
   struct Word {
@@ -114,9 +115,8 @@ Set gap_repeat(const Set& in, Step&& step) {
 // The bytes of the character at `g`: a well-formed scalar whole, else one.
 inline TextOffset gap_width(const char* g, TextOffset left) {
   std::size_t len = 0;
-  return detail::scalar_at(g, left, len) == detail::kNoScalar
-             ? 1
-             : static_cast<TextOffset>(len);
+  return scalar_at(g, left, len) == kNoScalar ? 1
+                                              : static_cast<TextOffset>(len);
 }
 
 // The runs of a gap start at its characters, judged on the whole gap.
@@ -140,4 +140,4 @@ inline bool gap_end(std::size_t len, const Token& la) {
   return la.sym == kEofSymbol || la.begin >= len;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

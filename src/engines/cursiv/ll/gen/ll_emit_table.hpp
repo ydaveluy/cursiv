@@ -3,7 +3,7 @@
 
 #include <string>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlFinalProgram;
 
@@ -19,4 +19,4 @@ struct LlTableSource {
 
 LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

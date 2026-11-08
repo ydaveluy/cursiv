@@ -25,7 +25,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Per mode and terminal, the sample words the lexer reads whole as the
 // terminal there, set when first asked and held with the top bit up. The cells
@@ -185,4 +185,4 @@ void lr_next_features_at(const LrCaretTable& table,
                          TextOffset at, TextOffset resume,
                          std::vector<NextFeature>& out);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -16,7 +16,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // `Dfa` names one engine's automaton: `modes`, `start(m)`, `classes`,
 // `cls(byte)`, `next(s, cls)`, `accept(s)` (the terminal plus one, zero where
@@ -169,4 +169,4 @@ bool lex_byte_literal(const Dfa& d, unsigned m, unsigned t) {
   return true;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

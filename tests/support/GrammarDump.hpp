@@ -8,8 +8,8 @@
 #include <type_traits>
 
 #include "cursiv/grammar/GrammarImage.hpp"
-#include "cursiv/grammar/GrammarPrinter.hpp"
 #include "cursiv/grammar/ImageOf.hpp"
+#include "cursiv/shared/utils/GrammarPrinter.hpp"
 
 namespace support {
 
@@ -17,7 +17,8 @@ namespace support {
 template <class E>
 std::string dump_expr() {
   cursiv::detail::GrammarImage image;
-  cursiv::GrammarPrinter printer(image, cursiv::ImageView::written);
+  cursiv::engine::GrammarPrinter printer(image,
+                                         cursiv::engine::ImageView::written);
   return printer.spell(
       image.node(cursiv::detail::kNode<void, std::remove_cvref_t<E>>));
 }
@@ -25,7 +26,8 @@ std::string dump_expr() {
 template <class G>
 std::string dump_declared() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  return cursiv::GrammarPrinter(image, cursiv::ImageView::written)
+  return cursiv::engine::GrammarPrinter(image,
+                                        cursiv::engine::ImageView::written)
       .render()
       .text;
 }
@@ -35,7 +37,8 @@ std::string dump_declared() {
 template <class R>
 std::string dump_closure() {
   cursiv::detail::GrammarImage image;
-  cursiv::GrammarPrinter printer(image, cursiv::ImageView::written);
+  cursiv::engine::GrammarPrinter printer(image,
+                                         cursiv::engine::ImageView::written);
   return printer.closure(image.rule(
       cursiv::detail::kRule<void, cursiv::detail::declared_of_t<R>>));
 }
@@ -43,7 +46,8 @@ std::string dump_closure() {
 template <class C>
 std::string dump_compiled() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<C>();
-  return cursiv::GrammarPrinter(image, cursiv::ImageView::resolved)
+  return cursiv::engine::GrammarPrinter(image,
+                                        cursiv::engine::ImageView::resolved)
       .render()
       .text;
 }

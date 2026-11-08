@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrNtInfo {
   std::uint16_t nameOff = 0, nameLen = 0;
@@ -13,4 +13,4 @@ struct LrNtInfo {
   constexpr bool operator==(const LrNtInfo&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

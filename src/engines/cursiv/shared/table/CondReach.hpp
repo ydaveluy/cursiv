@@ -6,7 +6,7 @@
 
 #include "cursiv/text/TextOffset.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct CondReach {
   // From the token's first byte, at most; ~0 where a run is unbounded.
@@ -25,4 +25,4 @@ struct CondReach {
 
 inline constexpr std::uint16_t kUnboundedTokens = 0xffffu;
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

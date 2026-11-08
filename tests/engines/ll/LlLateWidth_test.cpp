@@ -52,24 +52,24 @@ void a_long_shared_prefix_is_read_whole() {
   CHECK(decision < table.ndecisions);
   if (decision >= table.ndecisions) return;
   CHECK(table.decisions[decision].state == entry &&
-        table.decisions[decision].how == cursiv::LlPredict::adaptive);
+        table.decisions[decision].how == cursiv::engine::LlPredict::adaptive);
   std::string text;
   for (unsigned i = 0; i < 128; ++i) text += "word;";
   text += "5px!";
   cursiv::Cst tree(text);
   cursiv::CstBuilder builder(tree);
   builder.bind_stream();
-  cursiv::LlContext context(text, builder);
-  cursiv::ll_peek<table>(context, table.decisions[decision].mode);
-  cursiv::LlPredictionSession<table> session;
-  const auto selected = cursiv::ll_episode<table>(context, decision);
-  CHECK(selected != cursiv::kNoRow);
+  cursiv::engine::LlContext context(text, builder);
+  cursiv::engine::ll_peek<table>(context, table.decisions[decision].mode);
+  cursiv::engine::LlPredictionSession<table> session;
+  const auto selected = cursiv::engine::ll_episode<table>(context, decision);
+  CHECK(selected != cursiv::engine::kNoRow);
   CHECK(session.work().tokens >= 128);
 }
 }  // namespace
 int main() {
   constexpr const auto& table = tlllatewidth::generated::Ll::kTable;
-  static_assert(table.ngapConds == 0 && !cursiv::kIndented<table>);
+  static_assert(table.ngapConds == 0 && !cursiv::engine::kIndented<table>);
   const auto ll = tlllatewidth::generated::Ll::create_parser();
   for (unsigned n : {1u, 2u, 32u, 128u, 512u, 768u}) {
     std::string prefix;

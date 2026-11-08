@@ -7,7 +7,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Isolate validation so its range checks do not reshape the search loops.
 CURSIV_NOINLINE static const char* lex_find_kmp(
@@ -52,4 +52,4 @@ const char* lex_find_long(std::string_view text, std::string_view before,
   return lex_find_kmp(text, before, mark, after, take);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

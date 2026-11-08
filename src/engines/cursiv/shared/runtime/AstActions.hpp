@@ -11,14 +11,15 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 
 namespace cursiv {
-
-struct AstBuildCtx;
 struct AstMetaData;
 struct AstNode;
+}  // namespace cursiv
+
+namespace cursiv::engine {
+
+struct AstBuildCtx;
 struct Made;
 struct Pending;
-
-namespace detail {
 
 // The text an element denotes, its converters applied; null when it converts
 // nothing and the raw spelling stands.
@@ -37,8 +38,6 @@ struct ValueSlot {
   const void* type = nullptr;
 };
 
-}  // namespace detail
-
 class AstReducer;
 using AstEntryFn = void (*)(AstReducer&, NodeId);
 // One class's writer: the pending lands on a node of that class, or the class
@@ -48,13 +47,13 @@ using AstApplyFn = bool (*)(AstReducer&, const Pending&, const Made&);
 struct AstActions {
   const AstMetaData* meta = nullptr;
 
-  const detail::MakeFn* makes = nullptr;
+  const MakeFn* makes = nullptr;
 
   const AstEntryFn* entries = nullptr;
   // Per entry: a payload's text, and the text the same record gives its parent
   // as a part, its site's rule applied -- one table where they agree.
-  const detail::TextFn* texts = nullptr;
-  const detail::TextFn* calls = nullptr;
+  const TextFn* texts = nullptr;
+  const TextFn* calls = nullptr;
   // Per entry, non-zero where the record is a data rule's own, empty or not.
   const std::uint8_t* callRecords = nullptr;
   std::uint32_t entryCount = 0;
@@ -74,16 +73,16 @@ struct AstActions {
   const std::uint8_t* textInputs = nullptr;
   // Per entry, where a data rule passes a value other than text: the value
   // the record holds, or none where it holds only the record below.
-  const detail::ValueSlot* values = nullptr;
+  const ValueSlot* values = nullptr;
 
   // A leaf that owes nothing names no entry, and denotes its own bytes.
-  detail::TextFn text_at(ElementId e) const {
+  TextFn text_at(ElementId e) const {
     return texts != nullptr && e < entryCount ? texts[e] : nullptr;
   }
-  detail::TextFn call_at(ElementId e) const {
+  TextFn call_at(ElementId e) const {
     return calls != nullptr && e < entryCount ? calls[e] : nullptr;
   }
-  const detail::ValueSlot* value_at(ElementId e) const {
+  const ValueSlot* value_at(ElementId e) const {
     return values != nullptr && e < entryCount ? &values[e] : nullptr;
   }
   bool text_children(ElementId e, bool call) const {
@@ -98,4 +97,4 @@ struct AstActions {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -35,7 +35,7 @@
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Stacks a search sets out from, at most, over every frozen reading.
 inline constexpr std::size_t kLrGssStacks = 512;
@@ -577,4 +577,4 @@ class LrGss {
   std::vector<Shift>& _shifts;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

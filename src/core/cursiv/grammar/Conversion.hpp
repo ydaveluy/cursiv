@@ -23,6 +23,8 @@
 
 namespace cursiv {
 
+namespace detail {
+
 // Exactly the AstNode vocabulary's numbers, int8/uint8 .. float64, spelled
 // out rather than derived from `is_arithmetic_v`: int8/uint8 are
 // signed/unsigned char, so this is a closed set, not "every integer minus
@@ -50,6 +52,8 @@ template <class M>
 inline constexpr bool has_default_convert =
     std::is_same_v<M, std::string_view> || std::is_same_v<M, std::string> ||
     std::is_same_v<M, bool> || from_chars_number<M> || std::is_enum_v<M>;
+
+}  // namespace detail
 
 // The customisation point, for a target of your own:
 //   `static ConversionResult<T> convert(std::string_view)`
@@ -245,7 +249,7 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
 }  // namespace detail
 
 template <class T>
-  requires has_default_convert<T>
+  requires detail::has_default_convert<T>
 struct default_converter<T> {
   static constexpr ConversionResult<T> convert(std::string_view text) {
     return detail::default_convert<T>(text);

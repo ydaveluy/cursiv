@@ -21,7 +21,7 @@
 #include "cursiv/ll/table/LlTable.hpp"
 #include "cursiv/shared/runtime/TypoWalk.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // How far a repair may go on inventing without reading anything where no plan
 // owes it. A construct opened by an invented token calls the rules inside it,
@@ -739,4 +739,4 @@ inline void ll_section_close(LlContext& c, LlSection was) {
   c.section = was.section;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

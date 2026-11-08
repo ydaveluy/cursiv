@@ -9,12 +9,12 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexWordClass {
   ByteSet bytes;
-  std::vector<unicode::Range> wide;
+  std::vector<unicode::detail::Range> wide;
   std::uint16_t set = kNoSet;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

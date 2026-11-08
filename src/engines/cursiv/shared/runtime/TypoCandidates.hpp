@@ -13,7 +13,7 @@
 #include "cursiv/shared/runtime/TypoWalk.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class TypoCandidates {
  public:
@@ -57,4 +57,4 @@ class TypoCandidates {
   FlatMap<std::size_t> _at;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

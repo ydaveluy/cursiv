@@ -9,7 +9,7 @@
 #include "cursiv/ll/gen/LlLowered.hpp"
 #include "cursiv/ll/table/LlAtnView.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Optional construction counters: each visit evaluates one position or rule.
 struct LlBuildWork {
@@ -46,4 +46,4 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
                                           std::uint16_t nrules,
                                           std::uint64_t* visits = nullptr);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

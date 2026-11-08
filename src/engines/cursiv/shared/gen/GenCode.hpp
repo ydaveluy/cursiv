@@ -4,7 +4,7 @@
 #define CURSIV_GEN_STRINGIFY_IMPL(...) #__VA_ARGS__
 #define CURSIV_GEN_STRINGIFY(...) CURSIV_GEN_STRINGIFY_IMPL(__VA_ARGS__)
 
-namespace cursiv {
+namespace cursiv::engine {
 
 enum class GenCode : int {
   ok = 0,
@@ -21,4 +21,4 @@ enum class GenCode : int {
 
 constexpr int exit_status(GenCode c) { return static_cast<int>(c); }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

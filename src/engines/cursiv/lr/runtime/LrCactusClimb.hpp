@@ -7,7 +7,7 @@
 
 #include "cursiv/lr/runtime/LrCactus.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrCactusClimb {
  public:
@@ -70,4 +70,4 @@ class LrCactusClimb {
   bool _go = false;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

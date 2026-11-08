@@ -14,7 +14,7 @@
 #include "cursiv/lr/table/LrSetStore.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <LrSizes S, LrDerivedSizes D>
 struct LrDerivedTables {
@@ -49,4 +49,4 @@ struct LrDerivedTables {
   LrSetStore<S, S.modes, D.modeWantSets> modeWant{};
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

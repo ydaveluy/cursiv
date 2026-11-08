@@ -11,7 +11,7 @@
 
 #include "cursiv/shared/table/LexNode.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 template <class Cfg>
 class LexRightLinear {
@@ -176,4 +176,4 @@ class LexRightLinear {
   }
 };
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

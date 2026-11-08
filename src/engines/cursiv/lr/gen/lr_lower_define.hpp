@@ -16,7 +16,7 @@
 #include "cursiv/shared/gen/GrammarFault.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A chain of auxiliaries passes `like` to spell its name once.
 template <class Cfg>
@@ -351,4 +351,4 @@ inline LrLowerSlot lr_slot_for(LrLowered& o, LrLowerPool& p, LrShapeId at,
   return LrLowerSlot{};
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

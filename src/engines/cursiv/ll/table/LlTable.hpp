@@ -22,7 +22,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlContext;
 
@@ -104,12 +104,12 @@ struct LlTable {
   const ByteSet* sets = nullptr;
   const std::uint16_t* setDecode = nullptr;
   ByteSet wordBytes{};
-  const unicode::Range* wordRanges = nullptr;
+  const unicode::detail::Range* wordRanges = nullptr;
   std::uint16_t nwordRanges = 0;
   // Per set decoding another class, its scalars in `scalarRanges`: `at << 16
   // | count`, zero for the word class's; null where no set does.
   const std::uint32_t* setScalars = nullptr;
-  const unicode::Range* scalarRanges = nullptr;
+  const unicode::detail::Range* scalarRanges = nullptr;
   // Whether a word terminal `t` refuses behind its head is spelled by the
   // token at `p`; null where no terminal refuses one.
   bool (*head_refuses)(SymbolId t, const char* p, TextOffset rest) = nullptr;
@@ -334,4 +334,4 @@ inline unsigned ll_condition_named(std::string_view text,
                             condition, token, gapFrom);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

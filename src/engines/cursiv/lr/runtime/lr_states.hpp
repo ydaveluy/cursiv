@@ -17,7 +17,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Whether any production waits on a condition of the gap.
 template <const auto& A>
@@ -290,4 +290,4 @@ CURSIV_ALWAYS_INLINE inline std::uint32_t lr_apply_reduce(Climb& climb,
   return s;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

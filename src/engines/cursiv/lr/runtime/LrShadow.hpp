@@ -11,7 +11,7 @@
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr TextOffset kLrNoKeep = static_cast<TextOffset>(-1);
 
@@ -46,4 +46,4 @@ struct LrShadow {
   bool torn = false;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

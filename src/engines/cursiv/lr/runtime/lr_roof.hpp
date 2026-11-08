@@ -6,7 +6,7 @@
 #include "cursiv/syntax-tree/CstRun.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // An unwind closes its composite unnamed, for the reduction above it to name.
 // An acceptance with no such reduction above leaves that composite standing
@@ -61,4 +61,4 @@ NodeId lr_roof_forest(CstRun& stream, NodeId root, ElementId entryRow) {
   return records;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

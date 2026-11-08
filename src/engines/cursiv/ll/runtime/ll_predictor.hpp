@@ -9,7 +9,7 @@
 #include "cursiv/ll/runtime/LlEpisode.hpp"
 #include "cursiv/ll/table/LlTable.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The tokens the generated automaton of `T` read past the one in hand on this
 // thread.
@@ -108,4 +108,4 @@ inline std::uint16_t ll_predict(LlContext& c, std::uint16_t decision) {
   return ll_episode<T>(c, decision);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

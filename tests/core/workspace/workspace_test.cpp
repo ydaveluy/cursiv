@@ -3938,6 +3938,62 @@ void find_folds_the_case_and_keeps_the_order() {
   CHECK(by_name(symbols, container, "BAR").size() == 1);
 }
 
+// A callback may change the caller's view: the value-taking lookup keeps
+// the spelling it started with for every candidate it visits.
+void a_callback_cannot_change_the_lookup_spelling() {
+  cursiv::LocalSymbols symbols;
+  const auto* const container = reinterpret_cast<const cursiv::AstNode*>(0x10);
+  symbols.add(container, named("Alpha", cursiv::NodeId{1}));
+  symbols.add(container, named("ALPHA", cursiv::NodeId{2}));
+  symbols.seal();
+
+  std::string_view name = "Alpha";
+  unsigned visited = 0;
+  const auto* found = symbols.firstNamed(
+      container, name, cursiv::LocalSymbols::hash_name(name), true,
+      [&](const cursiv::AstNodeDescription&) {
+        name = "ALPHA";
+        return ++visited != 1;
+      });
+  CHECK(found == nullptr);
+  CHECK(visited == 1);
+  CHECK(name == "ALPHA");
+}
+
+// A scope walk reuses one query at several containers. Case policy and a
+// rejected homonym still select the first fitting declaration at each level.
+void a_query_keeps_its_policy_across_containers() {
+  cursiv::LocalSymbols symbols;
+  const auto* const a = reinterpret_cast<const cursiv::AstNode*>(0x10);
+  const auto* const b = reinterpret_cast<const cursiv::AstNode*>(0x20);
+  symbols.add(a, named("Alpha", cursiv::NodeId{1}));
+  symbols.add(a, named("ALPHA", cursiv::NodeId{2}));
+  symbols.add(a, named("Alpha", cursiv::NodeId{3}));
+  symbols.add(b, named("ALPHA", cursiv::NodeId{4}));
+  symbols.add(b, named("Alpha", cursiv::NodeId{5}));
+  symbols.seal();
+
+  const cursiv::LocalSymbols::NameQuery exact{
+      "Alpha", cursiv::LocalSymbols::hash_name("Alpha"), true};
+  const cursiv::LocalSymbols::NameQuery folded{
+      "alpha", cursiv::LocalSymbols::hash_name("alpha"), false};
+  const auto first = [&](const cursiv::AstNode* container,
+                          const cursiv::LocalSymbols::NameQuery& query) {
+    return symbols.firstNamed(
+        container, query, [](const cursiv::AstNodeDescription& entry) {
+          return entry.symbolId != cursiv::NodeId{1};
+        });
+  };
+  const auto* exactA = first(a, exact);
+  const auto* exactB = first(b, exact);
+  const auto* foldedA = first(a, folded);
+  const auto* foldedB = first(b, folded);
+  CHECK(exactA != nullptr && exactA->symbolId == cursiv::NodeId{3});
+  CHECK(exactB != nullptr && exactB->symbolId == cursiv::NodeId{5});
+  CHECK(foldedA != nullptr && foldedA->symbolId == cursiv::NodeId{2});
+  CHECK(foldedB != nullptr && foldedB->symbolId == cursiv::NodeId{4});
+}
+
 // A container whose bit another container set holds nothing: the filter
 // only says maybe, and the tables answer. Every address that can share a bit
 // with the held ones is asked.
@@ -3967,6 +4023,8 @@ void run() {
   the_index_survives_growth();
   each_container_owns_its_own();
   find_folds_the_case_and_keeps_the_order();
+  a_callback_cannot_change_the_lookup_spelling();
+  a_query_keeps_its_policy_across_containers();
   a_container_sharing_a_bit_holds_nothing();
 }
 

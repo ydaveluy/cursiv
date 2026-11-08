@@ -20,6 +20,8 @@ Source directories, relative to `cursiv/`:
 - `shared/gen/`: Shared grammar, lexer and AST generation utilities.
 - `shared/runtime/`: Shared lexing, predicates, indentation and recovery helpers.
 - `shared/table/`: Shared grammar, symbol and lexical data representations.
+- `shared/utils/`: Utilities the generators and the runtimes share: the core
+  names the engines read, the grammar printer and text helpers.
 
 ## Algorithms and memory
 

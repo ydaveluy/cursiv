@@ -9,7 +9,7 @@
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 enum class GapLeafKind : std::uint8_t { has, is, end, head, phrase, cut };
 
@@ -66,4 +66,4 @@ bool gap_cut_alone(const Cfg& c, unsigned k, DynSet* terms = nullptr) {
   return true;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

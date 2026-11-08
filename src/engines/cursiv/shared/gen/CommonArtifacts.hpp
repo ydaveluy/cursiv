@@ -9,14 +9,14 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/grammar/GrammarDump.hpp"
 #include "cursiv/shared/gen/AstEntryTable.hpp"
 #include "cursiv/shared/gen/AstRegistry.hpp"
 #include "cursiv/shared/gen/EmitRecords.hpp"
 #include "cursiv/shared/gen/GenCode.hpp"
 #include "cursiv/shared/gen/LanguageIdentity.hpp"
+#include "cursiv/shared/utils/GrammarDump.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The units a parser's code spreads over, `ParserRules<k>.cpp` or
 // `ParserGroups<k>.cpp`. The build lists them before a generator runs, so
@@ -46,4 +46,4 @@ struct CommonArtifacts {
 GenCode write_common_artifacts(const std::string& dir,
                                const CommonArtifacts& what);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

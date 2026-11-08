@@ -16,7 +16,7 @@
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlTail {
   // A token taken, or where `node` names none a token the repair inserted;
@@ -60,4 +60,4 @@ struct LlTail {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

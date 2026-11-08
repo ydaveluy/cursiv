@@ -14,26 +14,29 @@
 
 namespace checks {
 
-inline constexpr cursiv::RepairBudget kUnbounded{.floor = ~std::uint64_t{0},
-                                                .perByte = 0,
-                                                .perSearch = ~std::uint64_t{0},
-                                                .perParse = ~std::uint64_t{0}};
+inline constexpr cursiv::engine::RepairBudget kUnbounded{
+    .floor = ~std::uint64_t{0},
+    .perByte = 0,
+    .perSearch = ~std::uint64_t{0},
+    .perParse = ~std::uint64_t{0}};
 
 template <const auto& A>
 struct Stand {
   cursiv::Cst cst;
   cursiv::CstBuilder builder;
-  cursiv::LrContext c;
-  std::vector<cursiv::Scan> room;
+  cursiv::engine::LrContext c;
+  std::vector<cursiv::engine::Scan> room;
 
-  Stand(std::string_view text, const cursiv::LrDrive& drive)
-      : cst(text), builder(cst), c(cst.text(), builder),
+  Stand(std::string_view text, const cursiv::engine::LrDrive& drive)
+      : cst(text),
+        builder(cst),
+        c(cst.text(), builder),
         room(A.maxCands != 0 ? A.maxCands : 1) {
     builder.reserve_stream(cst.text().size());
     c.cand = room.data();
     c.drive = &drive;
-    cursiv::LrParser<A>::install_hooks(c);
-    c.stack.push({0, cursiv::kNoElement, 0, 0, cursiv::kLrNoWord});
+    cursiv::engine::LrParser<A>::install_hooks(c);
+    c.stack.push({0, cursiv::kNoElement, 0, 0, cursiv::engine::kLrNoWord});
   }
 };
 

@@ -5,7 +5,7 @@
 #include "cursiv/lr/gen/LrBuildTable.hpp"
 #include "cursiv/lr/gen/LrLowered.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 LrBuildTable lr_build_automaton(const LrLowered& low,
                                 LrBuildWork* work = nullptr);
@@ -18,4 +18,4 @@ LrBuildTable lr_build_wide(const LrLowered& low,
 // Whether the wider graph owes fewer ambiguities, no cap given way.
 bool lr_wider_stands(const LrBuildTable& c, const LrBuildTable& w);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

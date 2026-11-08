@@ -6,7 +6,7 @@
 
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrPin {
   Token pinTok{};
@@ -18,4 +18,4 @@ struct LrPin {
   bool pinRep = false;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

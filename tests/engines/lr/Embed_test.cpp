@@ -131,10 +131,10 @@ void a_long_section_does_not_cost_a_fault_its_share(const Parser& ll) {
   std::string text = "json '''[@ 1";
   for (unsigned i = 0; i < 100000; ++i) text += ", 1";
   text += "]'''\n";
-  cursiv::LlSearchWork::current() = {};
+  cursiv::engine::LlSearchWork::current() = {};
   const ParseResult r = ll.parse(text);
   CHECK(r.accepted && r.diagnostics.size() == 1);
-  CHECK(cursiv::LlSearchWork::current().work < 65536);
+  CHECK(cursiv::engine::LlSearchWork::current().work < 65536);
 }
 
 // A grammar that skips nothing, where the document's region skips nothing

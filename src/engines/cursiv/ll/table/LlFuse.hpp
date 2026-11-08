@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlFuse {
   std::uint16_t from = 0;
@@ -13,4 +13,4 @@ struct LlFuse {
   constexpr bool operator==(const LlFuse&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

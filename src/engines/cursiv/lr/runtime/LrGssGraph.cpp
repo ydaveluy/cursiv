@@ -17,7 +17,7 @@
 
 #include "cursiv/lr/table/LrColdTables.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 namespace {
 
@@ -1045,4 +1045,4 @@ std::vector<Id> LrGssGraph::derivation(std::span<const Id> forests) {
   return _forest.steps(root);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

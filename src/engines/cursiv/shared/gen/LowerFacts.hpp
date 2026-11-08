@@ -4,11 +4,12 @@
 
 
 #include "cursiv/grammar/GrammarUtils.hpp"
-#include "cursiv/utils/typelist.hpp"
 #include "cursiv/shared/gen/RuleRows.hpp"
 #include "cursiv/shared/gen/reached.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/utils/typelist.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // What the walk is given, keyed on the grammar alone: the four lists are
 // reached through this name, never spelled in the mangled name of every
@@ -32,4 +33,4 @@ struct LowerFacts {
       typename AllRows<stage, rules, Rewrite::template infix_src>::type;
 };
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

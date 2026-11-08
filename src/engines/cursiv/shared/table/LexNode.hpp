@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A `seq` whose `min` is one spells a single literal, its guard included. An
 // `alt` whose `min` is one reads one letter of a case-insensitive literal: its
@@ -92,4 +92,4 @@ constexpr std::uint16_t lex_token_body(const Cfg& g, const LexNode& e) {
   return g.termBuild[e.a].lex;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

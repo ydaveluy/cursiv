@@ -30,7 +30,7 @@
 #include "cursiv/shared/runtime/LexSuffixSession.hpp"
 #include "cursiv/shared/runtime/StampedGrammar.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& A>
 class LrLanguageParser final : public Parser {
@@ -141,4 +141,4 @@ constinit const LrCaretTable LrLanguageParser<A>::kCaret{
     .reductions = A.derived.reductions,
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -25,7 +25,7 @@
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct StampedGrammar final : Grammar {
   StampedGrammar(const GrammarMetaData& meta, StampLayout stamp) noexcept
@@ -180,4 +180,4 @@ struct StampedGrammar final : Grammar {
   StampLayout _stamp;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

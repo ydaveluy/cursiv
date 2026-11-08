@@ -19,7 +19,7 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexReading {
   // `kInvalidSymbol`: no body owing a closer was entered here.
@@ -258,4 +258,4 @@ TextOffset lex_unmatched_end(const Tape& tape, const LexOwed& derived,
   return q;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

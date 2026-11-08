@@ -7,7 +7,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Nothing a build concluded lives here: a frozen table would carry it at its
 // default, a value and not an absence.
@@ -23,4 +23,4 @@ struct LrLowFacts {
   ByteSet wordBytes{};
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

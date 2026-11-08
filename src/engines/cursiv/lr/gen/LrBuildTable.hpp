@@ -33,7 +33,7 @@
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What a pass that mints or fuses states does with one per-state column; see
 // `LrBuildTable::each_state_column`.
@@ -438,4 +438,4 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

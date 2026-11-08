@@ -47,13 +47,14 @@ namespace {
 // would otherwise compile and read the other branch.
 namespace announced {
 
-using Plain = cursiv::LrLexTape<tnestedlex::generated::G::kTable>;
-using Skipping = cursiv::LrLexTape<tnestedlex::generated::G::kTable, true>;
+using Plain = cursiv::engine::LrLexTape<tnestedlex::generated::G::kTable>;
+using Skipping =
+    cursiv::engine::LrLexTape<tnestedlex::generated::G::kTable, true>;
 
 struct LostQualified : Skipping {
-  cursiv::SymbolId qualified(std::uint16_t, const char*, cursiv::TextOffset,
-                             cursiv::TextOffset,
-                             cursiv::TextOffset&) const = delete;
+  cursiv::engine::SymbolId qualified(std::uint16_t, const char*,
+                                     cursiv::TextOffset, cursiv::TextOffset,
+                                     cursiv::TextOffset&) const = delete;
 };
 struct LostRun : Plain {
   cursiv::TextOffset run(std::uint16_t, const char*, cursiv::TextOffset,
@@ -64,20 +65,22 @@ struct LostRelay : Plain {
 };
 
 static_assert(Plain::kRelays && !Plain::kQualified && Skipping::kQualified);
-static_assert(cursiv::LexCursor<Plain> && cursiv::LexCursor<Skipping>);
-static_assert(cursiv::LexAcceptanceAnnounced<Plain> &&
-              cursiv::LexAcceptanceAnnounced<Skipping>);
-static_assert(cursiv::LexRelaysAnnounced<Plain> &&
-              cursiv::LexRelaysAnnounced<Skipping>);
+static_assert(cursiv::engine::LexCursor<Plain> &&
+              cursiv::engine::LexCursor<Skipping>);
+static_assert(cursiv::engine::LexAcceptanceAnnounced<Plain> &&
+              cursiv::engine::LexAcceptanceAnnounced<Skipping>);
+static_assert(cursiv::engine::LexRelaysAnnounced<Plain> &&
+              cursiv::engine::LexRelaysAnnounced<Skipping>);
 
 static_assert(LostQualified::kQualified &&
-              cursiv::LexBoundaryFallback<LostQualified> &&
-              !cursiv::LexQualifiedAcceptance<LostQualified>);
-static_assert(!cursiv::LexAcceptanceAnnounced<LostQualified>);
-static_assert(cursiv::LexOffersRelay<LostRun> &&
-              !cursiv::LexRelaysAnnounced<LostRun>);
-static_assert(LostRelay::kRelays && !cursiv::LexOffersRelay<LostRelay> &&
-              !cursiv::LexRelaysAnnounced<LostRelay>);
+              cursiv::engine::LexBoundaryFallback<LostQualified> &&
+              !cursiv::engine::LexQualifiedAcceptance<LostQualified>);
+static_assert(!cursiv::engine::LexAcceptanceAnnounced<LostQualified>);
+static_assert(cursiv::engine::LexOffersRelay<LostRun> &&
+              !cursiv::engine::LexRelaysAnnounced<LostRun>);
+static_assert(LostRelay::kRelays &&
+              !cursiv::engine::LexOffersRelay<LostRelay> &&
+              !cursiv::engine::LexRelaysAnnounced<LostRelay>);
 
 }  // namespace announced
 
@@ -129,14 +132,14 @@ void lua_long_brackets() {
 void lua_lexes_the_same_from_every_form() {
   namespace g = tbackref::lua::generated::G;
   const std::string text = "[=[ a ]] b ]=]c";
-  const auto s = cursiv::lr_match_text<g::kTable>(
+  const auto s = cursiv::engine::lr_match_text<g::kTable>(
       text.data(), static_cast<cursiv::TextOffset>(text.size()), 0, 0);
   CHECK(s.end == 14);
-  CHECK(s.term != cursiv::kInvalidSymbol);
+  CHECK(s.term != cursiv::engine::kInvalidSymbol);
   // Cut before the closer, the walk is still alive: the halt says so.
   cursiv::TextOffset halt = 0;
-  const auto open = cursiv::lr_match_halt<g::kTable>(
-      text.data(), 12, 0, 0, halt);
+  const auto open =
+      cursiv::engine::lr_match_halt<g::kTable>(text.data(), 12, 0, 0, halt);
   CHECK(open.end == 1);
   CHECK(halt == 12);
 }
@@ -229,9 +232,9 @@ void long_closer_search() {
   // An empty search stands at every position, and `take` still decides.
   {
     const std::string_view text = "ab";
-    CHECK(cursiv::lex_find_long(text, "", "", "",
-                                [](const char*) { return false; }) == nullptr);
-    CHECK(cursiv::lex_find_long(text, "", "", "", [&](const char* at) {
+    CHECK(cursiv::engine::lex_find_long(
+              text, "", "", "", [](const char*) { return false; }) == nullptr);
+    CHECK(cursiv::engine::lex_find_long(text, "", "", "", [&](const char* at) {
             return at == text.data() + 1;
           }) == text.data() + 1);
   }
@@ -239,9 +242,9 @@ void long_closer_search() {
     for (const std::string_view pattern : {"", "a", "ab", "aba", "aaaab", "aaaaaa"})
       for (std::size_t first = 0; first <= pattern.size(); ++first)
         for (std::size_t last = first; last <= pattern.size(); ++last) {
-          const auto* hit = cursiv::lex_find_long(
-              text, pattern.substr(0, first), pattern.substr(first, last - first),
-              pattern.substr(last), any);
+          const auto* hit = cursiv::engine::lex_find_long(
+              text, pattern.substr(0, first),
+              pattern.substr(first, last - first), pattern.substr(last), any);
           const auto want = text.find(pattern);
           CHECK(hit == (want == std::string_view::npos ? nullptr : text.data() + want));
         }
@@ -254,17 +257,16 @@ void long_closer_search() {
     const unsigned at = rng() % pattern.size();
     const unsigned after = at + rng() % (pattern.size() - at);
     const std::string_view p = pattern;
-    const auto* hit = cursiv::lex_find_long(text, p.substr(0, at),
-                                           p.substr(at, after - at), p.substr(after),
-                                           any);
+    const auto* hit = cursiv::engine::lex_find_long(
+        text, p.substr(0, at), p.substr(at, after - at), p.substr(after), any);
     const auto want = text.find(pattern);
     CHECK(hit == (want == std::string::npos ? nullptr : text.data() + want));
   }
   const std::string mark(4096, 'a');
   const std::string text = std::string(100000, 'a') + 'b';
-  CHECK(cursiv::lex_find_long(text, "a", mark, "b", any) ==
+  CHECK(cursiv::engine::lex_find_long(text, "a", mark, "b", any) ==
         text.data() + 95903);
-  CHECK(cursiv::lex_find_long(text, "a", mark, "c", any) == nullptr);
+  CHECK(cursiv::engine::lex_find_long(text, "a", mark, "c", any) == nullptr);
 }
 
 struct Other {};
@@ -332,17 +334,18 @@ struct Recursive : cursiv::GrammarSpec {
 };
 
 template <class G>
-cursiv::LowerFail lowers() {
-  return cursiv::lr_build_automaton(cursiv::LrLowering<G>::table())
+cursiv::engine::LowerFail lowers() {
+  return cursiv::engine::lr_build_automaton(
+             cursiv::engine::LrLowering<G>::table())
       .cfg.lowerWhy;
 }
 
 // An echo names its mark by the tag, behind the run's fence and in a closer.
 void an_echo_under_another_tag_is_refused() {
-  CHECK(lowers<Echo<tbackref::Level>>() == cursiv::LowerFail::none);
-  CHECK(lowers<Echo<Other>>() == cursiv::LowerFail::echoUnmarked);
-  CHECK(lowers<Closer<tbackref::Level>>() == cursiv::LowerFail::none);
-  CHECK(lowers<Closer<Other>>() == cursiv::LowerFail::echoUnmarked);
+  CHECK(lowers<Echo<tbackref::Level>>() == cursiv::engine::LowerFail::none);
+  CHECK(lowers<Echo<Other>>() == cursiv::engine::LowerFail::echoUnmarked);
+  CHECK(lowers<Closer<tbackref::Level>>() == cursiv::engine::LowerFail::none);
+  CHECK(lowers<Closer<Other>>() == cursiv::engine::LowerFail::echoUnmarked);
   std::printf("  an echo answers to its own mark alone\n");
 }
 
@@ -354,39 +357,41 @@ using Semi = decltype(cursiv::lit<";">);
 // The compact relay needs a pad that stops before the echo. The general
 // recognizer also admits overlapping classes and an unbounded empty echo.
 void a_closer_run_stops_where_the_echo_starts() {
-  CHECK(lowers<PaddedBare<Upper, Blanks>>() == cursiv::LowerFail::none);
-  CHECK(lowers<Padded<MaybeUpper, Blanks, Semi>>() == cursiv::LowerFail::none);
+  CHECK(lowers<PaddedBare<Upper, Blanks>>() == cursiv::engine::LowerFail::none);
+  CHECK(lowers<Padded<MaybeUpper, Blanks, Semi>>() ==
+        cursiv::engine::LowerFail::none);
   CHECK(lowers<PaddedBare<Upper, decltype(cursiv::many(cursiv::cr<" A">))>>() ==
-        cursiv::LowerFail::none);
-  CHECK(lowers<PaddedBare<MaybeUpper, Blanks>>() == cursiv::LowerFail::none);
+        cursiv::engine::LowerFail::none);
+  CHECK(lowers<PaddedBare<MaybeUpper, Blanks>>() ==
+        cursiv::engine::LowerFail::none);
   CHECK(lowers<Padded<MaybeUpper, decltype(cursiv::many(cursiv::cr<" ;">)),
-                      Semi>>() == cursiv::LowerFail::none);
+                      Semi>>() == cursiv::engine::LowerFail::none);
 }
 
 void a_recursive_terminal_accepts_composed_delimiters() {
   using A = decltype(cursiv::lit<"a">);
   using B = decltype(cursiv::lit<"b">);
   CHECK(lowers<Recursive<decltype(A{} | cursiv::lit<"c">), B>>() ==
-        cursiv::LowerFail::none);
+        cursiv::engine::LowerFail::none);
   CHECK(
       lowers<Recursive<A, decltype(B{} | cursiv::lit<"c"> | cursiv::eof)>>() ==
-      cursiv::LowerFail::none);
+      cursiv::engine::LowerFail::none);
   CHECK(lowers<Recursive<decltype(A{} | cursiv::cr<"cd">), B>>() ==
-        cursiv::LowerFail::none);
+        cursiv::engine::LowerFail::none);
   CHECK(lowers<Recursive<decltype(A{} | cursiv::lit<kLong>), B>>() ==
-        cursiv::LowerFail::none);
+        cursiv::engine::LowerFail::none);
   CHECK(lowers<Recursive<decltype(cursiv::lit<kLong>), B>>() ==
-        cursiv::LowerFail::none);
+        cursiv::engine::LowerFail::none);
   CHECK(lowers<Recursive<A, decltype(B{} | cursiv::lit<kLong>)>>() ==
-        cursiv::LowerFail::none);
+        cursiv::engine::LowerFail::none);
   CHECK(lowers<Recursive<A, decltype(cursiv::lit<kLong>)>>() ==
-        cursiv::LowerFail::none);
+        cursiv::engine::LowerFail::none);
   CHECK(lowers<Recursive<decltype(cursiv::lit<kLong>),
                          decltype(B{} | cursiv::lit<"c">)>>() ==
-        cursiv::LowerFail::none);
+        cursiv::engine::LowerFail::none);
   CHECK(lowers<Recursive<decltype(A{} | cursiv::lit<"c">),
                          decltype(cursiv::lit<kLong>)>>() ==
-        cursiv::LowerFail::none);
+        cursiv::engine::LowerFail::none);
 }
 
 void nested_delimiter_choices_are_flattened_for_the_native_search() {
@@ -396,18 +401,18 @@ void nested_delimiter_choices_are_flattened_for_the_native_search() {
       cursiv::Choice<A, cursiv::Choice<cursiv::Lit<"c">, cursiv::Lit<"d">>>;
   using Close =
       cursiv::Choice<B, cursiv::Choice<cursiv::Lit<"e">, cursiv::Lit<"f">>>;
-  const auto built = cursiv::lr_build_automaton(
-      cursiv::LrLowering<Recursive<Open, Close>>::table());
-  CHECK(built.cfg.lowerWhy == cursiv::LowerFail::none);
+  const auto built = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<Recursive<Open, Close>>::table());
+  CHECK(built.cfg.lowerWhy == cursiv::engine::LowerFail::none);
   CHECK(built.nrelays == 1);
   if (built.nrelays != 1) return;
   const auto& relay = built.relays[0];
   CHECK(relay.nested && relay.several);
   constexpr std::string_view text = "acxebadfb";
-  CHECK(cursiv::LexNestedSearch::once(relay, built.cfg.names.data(),
-                                      text.data(), text.size(), 1) == 5);
-  CHECK(cursiv::LexNestedSearch::once(relay, built.cfg.names.data(),
-                                      text.data(), text.size(), 6) == 9);
+  CHECK(cursiv::engine::LexNestedSearch::once(
+            relay, built.cfg.names.data(), text.data(), text.size(), 1) == 5);
+  CHECK(cursiv::engine::LexNestedSearch::once(
+            relay, built.cfg.names.data(), text.data(), text.size(), 6) == 9);
 }
 
 // `any` tests a delimiter at the start of a character only: one starting with
@@ -421,13 +426,13 @@ void a_continuation_byte_delimiter_is_not_searched_natively() {
       if (built.relays[k].nested) return true;
     return false;
   };
-  const auto closing = cursiv::lr_build_automaton(
-      cursiv::LrLowering<Recursive<Open, Close>>::table());
-  CHECK(closing.cfg.lowerWhy == cursiv::LowerFail::none);
+  const auto closing = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<Recursive<Open, Close>>::table());
+  CHECK(closing.cfg.lowerWhy == cursiv::engine::LowerFail::none);
   CHECK(!natively(closing));
-  const auto opening = cursiv::lr_build_automaton(
-      cursiv::LrLowering<Recursive<Close, Open>>::table());
-  CHECK(opening.cfg.lowerWhy == cursiv::LowerFail::none);
+  const auto opening = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<Recursive<Close, Open>>::table());
+  CHECK(opening.cfg.lowerWhy == cursiv::engine::LowerFail::none);
   CHECK(!natively(opening));
 }
 
@@ -596,8 +601,9 @@ void a_refusal_before_a_relay_leaves_its_first_byte_to_the_search() {
       std::string text = "{-";
       for (unsigned n = rng() % 12; n != 0; --n)
         text += alphabet[rng() % alphabet.size()];
-      const auto s = cursiv::lr_match_text<tnestedlex::generated::G::kTable>(
-          text.data(), static_cast<cursiv::TextOffset>(text.size()), 0, 0);
+      const auto s =
+          cursiv::engine::lr_match_text<tnestedlex::generated::G::kTable>(
+              text.data(), static_cast<cursiv::TextOffset>(text.size()), 0, 0);
       if (s.end != pragma_model(text, dollar))
         std::printf("  %s\n", text.c_str());
       CHECK(s.end == pragma_model(text, dollar));
@@ -657,8 +663,9 @@ void a_relayed_run_reads_every_rest_once() {
 }
 
 // The record of a balanced run: `names` holds the opener, then the closer.
-cursiv::LexRelay balanced_of(std::string_view open, std::string_view close) {
-  cursiv::LexRelay r;
+cursiv::engine::LexRelay balanced_of(std::string_view open,
+                                     std::string_view close) {
+  cursiv::engine::LexRelay r;
   r.nested = true;
   r.beforeLen = static_cast<std::uint16_t>(open.size());
   r.afterOff = r.beforeLen;
@@ -686,11 +693,11 @@ void a_nested_search_remembers_what_it_settled() {
     for (unsigned n = rng() % 40; n != 0; --n)
       text += alphabet[rng() % alphabet.size()];
     const auto len = static_cast<cursiv::TextOffset>(text.size());
-    cursiv::LexNestedSearch memo;
+    cursiv::engine::LexNestedSearch memo;
     for (unsigned q = 1 + rng() % 30; q != 0; --q, ++asked) {
       const cursiv::TextOffset from = rng() % (len + 1);
-      const auto want = cursiv::LexNestedSearch::once(r, names.data(),
-                                                      text.data(), len, from);
+      const auto want = cursiv::engine::LexNestedSearch::once(
+          r, names.data(), text.data(), len, from);
       const auto got = memo.seek(r, names.data(), text.data(), len, from);
       if (got != want)
         std::printf("  %s %s %s %u: %u, not %u\n", std::string(open).c_str(),
@@ -711,7 +718,7 @@ void a_nested_search_remembers_what_it_settled() {
   for (const auto& [open, close] : kLiterals) {
     const std::string names = std::string(open) + std::string(close);
     const auto r = balanced_of(open, close);
-    cursiv::LexNestedSearch none, lone, all;
+    cursiv::engine::LexNestedSearch none, lone, all;
     for (cursiv::TextOffset from = 1; from <= n; ++from) {
       CHECK(none.seek(r, names.data(), opens.data(), n, from) == 0);
       const auto one = lone.seek(r, names.data(), single.data(), n + 1, from);
@@ -731,12 +738,12 @@ void a_nested_search_remembers_what_it_settled() {
 
 // The record of a balanced run listing its literals: `names` holds the
 // openers, then the closers, each behind a byte of its length.
-cursiv::LexRelay listed_of(std::string& names,
-                           const std::vector<std::string_view>& open,
-                           const std::vector<std::string_view>& close,
-                           bool eof) {
+cursiv::engine::LexRelay listed_of(std::string& names,
+                                   const std::vector<std::string_view>& open,
+                                   const std::vector<std::string_view>& close,
+                                   bool eof) {
   names.clear();
-  cursiv::LexRelay r;
+  cursiv::engine::LexRelay r;
   r.nested = true;
   r.several = true;
   r.eof = eof;
@@ -799,12 +806,12 @@ void a_listed_search_reads_as_the_model() {
     for (unsigned n = rng() % 40; n != 0; --n)
       text += alphabet[rng() % alphabet.size()];
     const auto len = static_cast<cursiv::TextOffset>(text.size());
-    cursiv::LexNestedSearch memo;
+    cursiv::engine::LexNestedSearch memo;
     for (unsigned q = 1 + rng() % 20; q != 0; --q) {
       const cursiv::TextOffset from = rng() % (len + 1);
       const auto want = listed_model(text, from, sides.open, sides.close, eof);
-      const auto once = cursiv::LexNestedSearch::once(r, names.data(),
-                                                      text.data(), len, from);
+      const auto once = cursiv::engine::LexNestedSearch::once(
+          r, names.data(), text.data(), len, from);
       const auto got = memo.seek(r, names.data(), text.data(), len, from);
       if (once != want || got != want)
         std::printf("  %s %u: %u %u, not %u\n", text.c_str(), from, once, got,
@@ -819,7 +826,7 @@ void a_listed_search_reads_as_the_model() {
 // The run of a class before a point, read once along the launches of one
 // relay, and again where a launch comes from behind.
 void a_mark_run_is_read_once() {
-  cursiv::ByteSet cls;
+  cursiv::engine::ByteSet cls;
   cls.add('a');
   cls.add('b');
   std::mt19937 rng(947);
@@ -828,17 +835,18 @@ void a_mark_run_is_read_once() {
     for (unsigned n = rng() % 30; n != 0; --n) text += "abc"[rng() % 3];
     const auto len = static_cast<cursiv::TextOffset>(text.size());
     const cursiv::TextOffset start = rng() % (len + 1);
-    cursiv::LexMarkRun run;
+    cursiv::engine::LexMarkRun run;
     for (unsigned q = 1 + rng() % 20; q != 0; --q) {
       const cursiv::TextOffset end = start + rng() % (len - start + 1);
-      const auto want = cursiv::LexMarkRun::back(cls, text.data(), start, end);
+      const auto want =
+          cursiv::engine::LexMarkRun::back(cls, text.data(), start, end);
       CHECK(run.begin(cls, text.data(), start, end) == want);
     }
   }
   constexpr cursiv::TextOffset n = 1000000;
   std::string text(n, 'a');
   text[n / 2] = 'c';
-  cursiv::LexMarkRun run;
+  cursiv::engine::LexMarkRun run;
   for (cursiv::TextOffset end = 0; end <= n; ++end)
     CHECK(run.begin(cls, text.data(), 0, end) ==
           (end <= n / 2 ? 0 : n / 2 + 1));
@@ -867,18 +875,18 @@ void a_closer_room_near_the_bound_does_not_wrap() {
     std::memcpy(end - kText.size(), kText.data(), kText.size());
     // `before` is "x", `after` sixteen bytes the text never holds.
     constexpr char kNames[] = "xyyyyyyyyyyyyyyyy";
-    cursiv::LexRelay relay;
+    cursiv::engine::LexRelay relay;
     relay.closes = true;
     relay.beforeOff = 0;
     relay.beforeLen = 1;
     relay.afterOff = 1;
     relay.afterLen = 16;
-    cursiv::ByteSet pad;
+    cursiv::engine::ByteSet pad;
     pad.add(' ');
     const cursiv::TextOffset run = 0xFFFFFFFFu - 8u;
     const auto len = static_cast<cursiv::TextOffset>(kText.size());
-    CHECK(cursiv::lex_echo_padded(relay, pad, kNames, end - len, len, 0, 0,
-                                  run) == 0);
+    CHECK(cursiv::engine::lex_echo_padded(relay, pad, kNames, end - len, len, 0,
+                                          0, run) == 0);
   }
   CHECK(munmap(region, 2 * page) == 0);
 #endif
@@ -890,16 +898,16 @@ void a_padded_closer_inside_a_repeated_capture_is_read_once() {
   constexpr cursiv::TextOffset n = 1000000;
   const std::string text = "<" + std::string(3 * n, 'a') + "b";
   constexpr char kNames[] = "ab";
-  cursiv::LexRelay relay;
+  cursiv::engine::LexRelay relay;
   relay.closes = true;
   relay.beforeLen = 1;
   relay.afterOff = 1;
   relay.afterLen = 1;
-  cursiv::ByteSet pad;
+  cursiv::engine::ByteSet pad;
   pad.add(' ');
   const auto len = static_cast<cursiv::TextOffset>(text.size());
-  CHECK(cursiv::lex_echo_padded(relay, pad, kNames, text.data(), len, n + 1, 1,
-                                n) == len);
+  CHECK(cursiv::engine::lex_echo_padded(relay, pad, kNames, text.data(), len,
+                                        n + 1, 1, n) == len);
 }
 
 void closer_candidates_stand_on_character_boundaries() {
@@ -924,7 +932,7 @@ void closer_candidates_stand_on_character_boundaries() {
         at += width != 0 ? width : 1;
       }
       for (std::size_t at = 0; at <= text.size(); ++at)
-        CHECK(cursiv::lex_character_boundary(text, text.data() + at) ==
+        CHECK(cursiv::engine::lex_character_boundary(text, text.data() + at) ==
               boundaries[at]);
     }
   }

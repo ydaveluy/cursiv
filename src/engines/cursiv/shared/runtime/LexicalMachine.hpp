@@ -16,7 +16,7 @@
 #include "cursiv/shared/runtime/PredicateState.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Environments are immutable and interned per recognition: a branch copies
 // an integer, and a repetition deduplicates equal captures.
@@ -262,4 +262,4 @@ class LexicalMachine {
   std::map<std::uint64_t, LexicalState> _memo;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

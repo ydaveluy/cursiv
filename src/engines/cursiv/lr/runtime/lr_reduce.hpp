@@ -17,7 +17,7 @@
 #include "cursiv/lr/table/LrReducePlan.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& A>
 inline constexpr bool kLrPrefixFrames = [] {
@@ -163,4 +163,4 @@ CURSIV_ALWAYS_INLINE inline void lr_reduce_finish(LrContext& c,
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -13,7 +13,7 @@
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Only a hidden rule's run becomes a record. Out of line: inlined, the loop's
 // registers are saved on every shift, and half the shifts record no run.
@@ -108,4 +108,4 @@ CURSIV_ALWAYS_INLINE inline void lr_name_row_at(LrContext& c, LrFrame& f,
   f.row = row;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

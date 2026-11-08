@@ -20,9 +20,9 @@
 
 namespace {
 
-using cursiv::PredicateCursor;
-using cursiv::PredicateState;
 using cursiv::TextOffset;
+using cursiv::engine::PredicateCursor;
+using cursiv::engine::PredicateState;
 using Items = std::vector<std::string>;
 
 std::string repeat(std::string_view unit, unsigned n) {
@@ -143,24 +143,25 @@ struct Dashes {
 // The rounds a test kept answer every later test at once, with what a test
 // reading alone answers and reads.
 void a_kept_round_answers_every_later_test() {
-  constexpr cursiv::PredicateRound round{&Dashes::start, &Dashes::step, true};
+  constexpr cursiv::engine::PredicateRound round{&Dashes::start, &Dashes::step,
+                                                 true};
   for (const std::string_view end : {">", ";"}) {
     const std::string text = repeat("-", 1000) + std::string(end);
     const auto len = static_cast<TextOffset>(text.size());
-    cursiv::PredicateRuns runs;
+    cursiv::engine::PredicateRuns runs;
     unsigned kept = 0, alone = 0;
     bool same = true;
     for (TextOffset at = 1; at <= 1000; ++at) {
       TextOffset seenKept = 0, seenAlone = 0;
       Dashes::steps = 0;
-      const bool a =
-          cursiv::predicate_run(&runs, 7, round, &Dashes::rest, text.data(),
-                                len, PredicateState{{at, at}}, &seenKept);
+      const bool a = cursiv::engine::predicate_run(
+          &runs, 7, round, &Dashes::rest, text.data(), len,
+          PredicateState{{at, at}}, &seenKept);
       kept += Dashes::steps;
       Dashes::steps = 0;
-      const bool b =
-          cursiv::predicate_run(nullptr, 7, round, &Dashes::rest, text.data(),
-                                len, PredicateState{{at, at}}, &seenAlone);
+      const bool b = cursiv::engine::predicate_run(
+          nullptr, 7, round, &Dashes::rest, text.data(), len,
+          PredicateState{{at, at}}, &seenAlone);
       alone += Dashes::steps;
       same = same && a == b && a == (end == ">") && seenKept == seenAlone;
     }
@@ -193,14 +194,14 @@ void a_run_of_several_cursors_costs_its_length() {
     not_checked("cost per round", "no hardware counter is readable");
     return;
   }
-  constexpr cursiv::PredicateRound round{&Dashes::start, &DashComma::step,
-                                         false};
+  constexpr cursiv::engine::PredicateRound round{&Dashes::start,
+                                                 &DashComma::step, false};
   const auto per_round = [&](unsigned n) {
     const std::string text = repeat("-,", n) + ">";
     TextOffset seen = 0;
     const cursiv::bench::PerfSample from = counters.read();
     counters.enable();
-    const bool holds = cursiv::predicate_run(
+    const bool holds = cursiv::engine::predicate_run(
         nullptr, 0, round, &Dashes::rest, text.data(),
         static_cast<TextOffset>(text.size()), PredicateState{{0, 0}}, &seen);
     counters.disable();

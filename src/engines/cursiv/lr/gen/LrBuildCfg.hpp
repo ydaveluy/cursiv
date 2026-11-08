@@ -17,7 +17,7 @@
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrBuildCfg : LrLowFacts, LowerPools {
   // What only construction reads: never frozen, so no reader takes a verdict
@@ -102,4 +102,4 @@ struct LrBuildCfg : LrLowFacts, LowerPools {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

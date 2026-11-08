@@ -10,7 +10,7 @@
 
 #include "cursiv/text/TextOffset.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr TextOffset kLrGapKept = 64;
 
@@ -49,4 +49,4 @@ bool lr_gap_ask(LrGapMemo* memo, unsigned leaf, TextOffset from, TextOffset n,
   return memo != nullptr ? memo->ask(leaf, from, n, read) : read();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

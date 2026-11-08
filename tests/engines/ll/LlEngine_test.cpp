@@ -64,9 +64,9 @@ namespace {
 // A call's place on the machine's stack is 32 bits: a stack past them is
 // refused, never wrapped round to a frame the parse does not stand on.
 std::uint16_t g_machine_calls = 0;
-[[maybe_unused]] std::uint16_t machine_step(std::uint16_t, cursiv::LlContext&,
-                                            void*) {
-  return ++g_machine_calls < 3 ? std::uint16_t{0} : cursiv::kLlDone;
+[[maybe_unused]] std::uint16_t machine_step(std::uint16_t,
+                                            cursiv::engine::LlContext&, void*) {
+  return ++g_machine_calls < 3 ? std::uint16_t{0} : cursiv::engine::kLlDone;
 }
 
 void a_stack_past_its_offsets_is_refused() {
@@ -74,8 +74,8 @@ void a_stack_past_its_offsets_is_refused() {
     static constexpr std::uint32_t kBytes[] = {0xFFFFFFF0u};
     cursiv::Cst tree("");
     cursiv::CstBuilder builder(tree);
-    cursiv::LlContext c("", builder);
-    cursiv::LlMachine machine;
+    cursiv::engine::LlContext c("", builder);
+    cursiv::engine::LlMachine machine;
     bool refused = false;
     try {
       machine.run<machine_step>(c, 0, kBytes);
@@ -102,21 +102,21 @@ using Converter = cursiv::detail::text_conv<[](std::string_view text) {
   return text;
 }>;
 
-cursiv::AstNode* make(cursiv::AstBuildCtx& context, cursiv::NodeId id) {
-  auto* node = static_cast<Node*>(cursiv::detail::make_node<Node>(context, id));
-  CHECK(cursiv::detail::invoke_conv<Converter, std::string_view, 0, false>(
+cursiv::AstNode* make(cursiv::engine::AstBuildCtx& context, cursiv::NodeId id) {
+  auto* node = static_cast<Node*>(cursiv::engine::make_node<Node>(context, id));
+  CHECK(cursiv::engine::invoke_conv<Converter, std::string_view, 0, false>(
       context, id, &node->text));
   return node;
 }
 
-void entry(cursiv::AstReducer& builder, cursiv::NodeId id) {
+void entry(cursiv::engine::AstReducer& builder, cursiv::NodeId id) {
   builder.push_made(id, builder.create<make, nullptr, false>(0, id));
 }
 
 const cursiv::AstMetaData metadata{};
-const cursiv::detail::MakeFn makes[] = {make};
-const cursiv::AstEntryFn entries[] = {entry};
-const cursiv::AstActions actions{
+const cursiv::engine::MakeFn makes[] = {make};
+const cursiv::engine::AstEntryFn entries[] = {entry};
+const cursiv::engine::AstActions actions{
     .meta = &metadata, .makes = makes, .entries = entries, .entryCount = 1};
 
 cursiv::Cst tape(std::string_view text) {
@@ -125,17 +125,17 @@ cursiv::Cst tape(std::string_view text) {
   builder.bind_stream();
   const auto opened = builder.enter();
   for (cursiv::TextOffset at = 0; at < text.size(); ++at)
-    builder.leaf(at, at + 1u, cursiv::StampLayout{}.make(0, 0));
-  const auto root =
-      builder.exit(opened, text.size(), cursiv::StampLayout{}.make(0, 0));
+    builder.leaf(at, at + 1u, cursiv::engine::StampLayout{}.make(0, 0));
+  const auto root = builder.exit(opened, text.size(),
+                                 cursiv::engine::StampLayout{}.make(0, 0));
   builder.bind_entry(0, tree.size(), root);
   builder.bind_accepted(true);
   return tree;
 }
 
-void drive(cursiv::LlContext& context) {
-  context.last =
-      context.tape.leaf(0, context.len, cursiv::StampLayout{}.make(0, 0));
+void drive(cursiv::engine::LlContext& context) {
+  context.last = context.tape.leaf(0, context.len,
+                                   cursiv::engine::StampLayout{}.make(0, 0));
   context.at = context.len;
 }
 
@@ -151,7 +151,7 @@ void ast_conversion_observes_cancellation_before_return() {
     conversions = 0;
     bool threw = false;
     try {
-      (void)cursiv::AstReducer::build<cursiv::StampLayout{}>(
+      (void)cursiv::engine::AstReducer::build<cursiv::engine::StampLayout{}>(
           actions, tape(text), source.get_token());
     } catch (const cursiv::OperationCancelled&) {
       threw = true;
@@ -166,22 +166,23 @@ void ast_conversion_observes_cancellation_before_return() {
   conversions = 0;
   bool threw = false;
   try {
-    (void)cursiv::AstReducer::build<cursiv::StampLayout{}>(actions, tape("x"),
-                                                           source.get_token());
+    (void)cursiv::engine::AstReducer::build<cursiv::engine::StampLayout{}>(
+        actions, tape("x"), source.get_token());
   } catch (const cursiv::OperationCancelled&) {
     threw = true;
   }
   CHECK(threw && conversions == 0);
 
   const auto complete =
-      cursiv::AstReducer::build<cursiv::StampLayout{}>(actions, tape("x"));
+      cursiv::engine::AstReducer::build<cursiv::engine::StampLayout{}>(
+          actions, tape("x"));
   CHECK(complete.value != nullptr &&
         complete.error == cursiv::AstBuildError::none);
 }
 
 void the_parser_propagates_cancellation_to_ast_materialisation() {
   using namespace ast_cancellation;
-  const cursiv::LlLanguageParser<tpar::generated::Ll::kTable> parser(
+  const cursiv::engine::LlLanguageParser<tpar::generated::Ll::kTable> parser(
       tpar::generated::Ll::kGrammarMetaData, actions, drive);
   cursiv::CancellationTokenSource source;
   stop = &source;
@@ -203,12 +204,14 @@ void ast_materialisation_rejects_an_invalid_entry_extent() {
     cursiv::Cst tree("x");
     cursiv::CstBuilder builder(tree);
     builder.bind_stream();
-    const auto root = builder.leaf(0, 1, cursiv::StampLayout{}.make(0, 0));
+    const auto root =
+        builder.leaf(0, 1, cursiv::engine::StampLayout{}.make(0, 0));
     builder.stream().at(root).subtreeSize = extent;
     builder.bind_entry(0, tree.size(), root);
     builder.bind_accepted(true);
-    const auto result = cursiv::AstReducer::build<cursiv::StampLayout{}>(
-        ast_cancellation::actions, std::move(tree));
+    const auto result =
+        cursiv::engine::AstReducer::build<cursiv::engine::StampLayout{}>(
+            ast_cancellation::actions, std::move(tree));
     CHECK(result.error == cursiv::AstBuildError::malformed_cst &&
           result.value == nullptr && !result.diagnostics.empty());
   }
@@ -240,20 +243,23 @@ void ast_with_spans(const cursiv::AstReflection& reflection,
 // Unlike an owning node prefix, this choice cannot become an optional Nest;
 // tests of the prediction cache therefore meet the decision before that ID.
 std::uint16_t name_or_call_decision() {
-  const cursiv::LlLowCfg& cfg = cursiv::LlLowering<tpar::Ll>::table().cfg;
+  const cursiv::engine::LlLowCfg& cfg =
+      cursiv::engine::LlLowering<tpar::Ll>::table().cfg;
   for (std::uint16_t i = 0; i < cfg.ndecisions; ++i)
     if (cfg.rule_name(cfg.decisions[i].rule) == "Primary" &&
         !cfg.repeats(cfg.decisions[i]))
       return i;
-  return cursiv::kNoRow;
+  return cursiv::engine::kNoRow;
 }
 
 // The frames a descent stands on where a `show` reads a primary: at each rule
 // on the way up, the call that ends its caller where there is one.
 template <const auto& table>
-void stand_in_a_show(cursiv::LlReturnStack& stack, std::uint16_t decision) {
-  const cursiv::LlLowCfg& cfg = cursiv::LlLowering<tpar::Ll>::table().cfg;
-  const cursiv::LlAtnView& atn = table.atn;
+void stand_in_a_show(cursiv::engine::LlReturnStack& stack,
+                     std::uint16_t decision) {
+  const cursiv::engine::LlLowCfg& cfg =
+      cursiv::engine::LlLowering<tpar::Ll>::table().cfg;
+  const cursiv::engine::LlAtnView& atn = table.atn;
   std::uint16_t rule = atn.state(table.decisions[decision].state).rule;
   std::vector<std::uint32_t> frames;
   for (const std::string_view caller :
@@ -263,7 +269,8 @@ void stand_in_a_show(cursiv::LlReturnStack& stack, std::uint16_t decision) {
     for (auto i = atn.callerBase[rule]; i < atn.callerBase[rule + 1]; ++i) {
       const std::uint32_t at = atn.callerAt[i];
       if (cfg.rule_name(atn.state(at).rule) != caller) continue;
-      if (frame == 0 || (atn.returnClass[at] & cursiv::kLlTailReturn) != 0)
+      if (frame == 0 ||
+          (atn.returnClass[at] & cursiv::engine::kLlTailReturn) != 0)
         frame = at;
     }
     CHECK(frame != 0);
@@ -291,15 +298,15 @@ struct PredictionAt {
     context.at = at;
     context.triviaAt = at;
     context.laValid = false;
-    context.laMode = cursiv::kInvalidSymbol;
-    cursiv::ll_peek<table>(context, table.decisions[decision].mode);
-    return cursiv::ll_episode<table>(context, decision);
+    context.laMode = cursiv::engine::kInvalidSymbol;
+    cursiv::engine::ll_peek<table>(context, table.decisions[decision].mode);
+    return cursiv::engine::ll_episode<table>(context, decision);
   }
 
   std::string_view text;
   cursiv::Cst tree;
   cursiv::CstBuilder builder;
-  cursiv::LlContext context;
+  cursiv::engine::LlContext context;
   std::uint16_t decision;
 };
 
@@ -309,14 +316,15 @@ struct PredictionAt {
 void predictions_keep_the_end_they_depended_on() {
   constexpr const auto& table = tpar::generated::Ll::kTable;
   const auto decision = name_or_call_decision();
-  CHECK(decision != cursiv::kNoRow);
-  if (decision == cursiv::kNoRow) return;
-  cursiv::LlPredictionSession<table> session;
+  CHECK(decision != cursiv::engine::kNoRow);
+  if (decision == cursiv::engine::kNoRow) return;
+  cursiv::engine::LlPredictionSession<table> session;
   PredictionAt<table> at("name;name();name", decision);
   const auto name = at(0);
   const auto call = at(5);
   const auto incomplete = at(12);
-  CHECK(name != cursiv::kNoRow && call != cursiv::kNoRow && name != call);
+  CHECK(name != cursiv::engine::kNoRow && call != cursiv::engine::kNoRow &&
+        name != call);
   CHECK(incomplete != name);
   for (unsigned round = 0; round < 2; ++round) {
     CHECK(at(12) == incomplete);
@@ -348,30 +356,30 @@ void predictions_keep_the_end_they_depended_on() {
 // known continuation there introduces unrelated callers and changes which
 // token the exact simulation accepts.
 void deep_prediction_keeps_its_known_continuation() {
-  const cursiv::LlAtnState states[] = {
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+  const cursiv::engine::LlAtnState states[] = {
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0},
       {.edge = 0, .nedges = 1},
       {.edge = 1, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 1},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 1},
       {.edge = 2, .nedges = 1},
   };
-  const cursiv::LlAtnEdge edges[] = {
-      {.kind = cursiv::LlEdgeKind::epsilon, .target = 0},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 42, .target = 3},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 43, .target = 3},
+  const cursiv::engine::LlAtnEdge edges[] = {
+      {.kind = cursiv::engine::LlEdgeKind::epsilon, .target = 0},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 42, .target = 3},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 43, .target = 3},
   };
   const std::uint32_t callerBase[] = {0, 1, 1};
   const std::uint32_t callerAt[] = {4};
-  const cursiv::LlAtnView atn{
+  const cursiv::engine::LlAtnView atn{
       .states = states,
       .nstates = 5,
       .edges = edges,
       .callerBase = callerBase,
       .callerAt = callerAt,
   };
-  cursiv::LlSimulation simulation(atn);
+  cursiv::engine::LlSimulation simulation(atn);
   auto& contexts = simulation.contexts();
-  auto stack = contexts.push(cursiv::kLlCtxNone, 2);
+  auto stack = contexts.push(cursiv::engine::kLlCtxNone, 2);
   for (unsigned i = 0; i < 1536; ++i) stack = contexts.push(stack, 1);
   simulation.seed(0, stack);
   bool actual = false, unrelated = false;
@@ -387,7 +395,7 @@ void deep_prediction_keeps_its_known_continuation() {
 // The room a larger walk grew is given back for the next, and the table
 // answers as before.
 void a_table_gives_back_the_room_a_larger_walk_left() {
-  cursiv::LlStamped<std::uint64_t, cursiv::LlKeyHash> keys;
+  cursiv::engine::LlStamped<std::uint64_t, cursiv::engine::LlKeyHash> keys;
   bool fresh = false;
   for (std::uint64_t k = 0; k < 100000; ++k)
     keys.at(k, fresh) = static_cast<std::uint32_t>(k);
@@ -405,8 +413,8 @@ void a_table_gives_back_the_room_a_larger_walk_left() {
 // A walk gives the pool back as it found it: what it made is gone, what was
 // there stands, and the same walk made again makes the same nodes.
 void a_pool_gives_back_what_a_walk_made() {
-  cursiv::LlCtxPool pool;
-  const auto base = pool.push(cursiv::kLlCtxNone, 1);
+  cursiv::engine::LlCtxPool pool;
+  const auto base = pool.push(cursiv::engine::kLlCtxNone, 1);
   const auto kept = pool.push(base, 2);
   const auto third = pool.push(kept, 3);
   const auto walk = [&](unsigned round) {
@@ -417,7 +425,7 @@ void a_pool_gives_back_what_a_walk_made() {
       made.push_back(node);
     }
     const auto joined = pool.merge(made[10], made[200]);
-    CHECK(joined == cursiv::kLlCtxApart || joined > third);
+    CHECK(joined == cursiv::engine::kLlCtxApart || joined > third);
     CHECK(pool.push(base, 2) == kept);
     return made;
   };
@@ -425,7 +433,7 @@ void a_pool_gives_back_what_a_walk_made() {
     CHECK(pool.begin_scratch() && !pool.begin_scratch());
     const auto made = walk(round);
     pool.end_scratch();
-    CHECK(pool.push(cursiv::kLlCtxNone, 1) == base);
+    CHECK(pool.push(cursiv::engine::kLlCtxNone, 1) == base);
     CHECK(pool.push(base, 2) == kept);
     CHECK(pool.push(kept, 3) == third);
     CHECK(pool.begin_scratch());
@@ -438,6 +446,7 @@ void a_pool_gives_back_what_a_walk_made() {
 // must not make two different continuation sets indistinguishable.
 void call_cells_are_sealed_after_their_actual_dependencies() {
   using namespace cursiv;
+  using namespace cursiv::engine;
 
   // Root = A | B; A = Z | R b | R c; B = Z | S d | S e;
   // Z = Q a; R = Q; S = Q; Q = x. The shared Z continuation is state 5.
@@ -541,6 +550,7 @@ void call_cells_are_sealed_after_their_actual_dependencies() {
 // its first path or common prefix must not use one native frame per cell.
 void deep_cell_paths_keep_their_order_and_stop_at_the_first_refusal() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   // R_i = R_(i+1) | (R_(i+1) 'c'); R_N = 'x'.
   for (const unsigned n : {12u, 10000u}) {
     std::vector<LlAtnState> states(5 * (n + 1));
@@ -636,13 +646,13 @@ struct CountedContextKey {
 };
 struct CountedContextHash {
   auto operator()(const CountedContextKey& key) const {
-    return cursiv::LlKeyHash{}(key.value);
+    return cursiv::engine::LlKeyHash{}(key.value);
   }
 };
 
 void context_keys_keep_both_halves_on_every_platform() {
   constexpr unsigned count = 8192;
-  cursiv::LlStamped<CountedContextKey, CountedContextHash> keys;
+  cursiv::engine::LlStamped<CountedContextKey, CountedContextHash> keys;
   CountedContextKey::comparisons = 0;
   for (unsigned i = 0; i < count; ++i) {
     bool fresh = false;
@@ -658,16 +668,17 @@ void context_keys_keep_both_halves_on_every_platform() {
 }
 
 void deep_context_joins_keep_their_canonical_stacks() {
-  cursiv::LlCtxPool pool;
-  auto a = pool.push(cursiv::kLlCtxNone, 1);
-  auto b = pool.push(cursiv::kLlCtxNone, 2);
+  cursiv::engine::LlCtxPool pool;
+  auto a = pool.push(cursiv::engine::kLlCtxNone, 1);
+  auto b = pool.push(cursiv::engine::kLlCtxNone, 2);
   constexpr unsigned depth = 20000;
   for (unsigned i = 0; i < depth; ++i) {
     a = pool.push(a, 3);
     b = pool.push(b, 3);
   }
   const auto joined = pool.merge(a, b);
-  CHECK(joined != cursiv::kLlCtxApart && joined != cursiv::kLlCtxNone);
+  CHECK(joined != cursiv::engine::kLlCtxApart &&
+        joined != cursiv::engine::kLlCtxNone);
   CHECK(pool.merge(b, a) == joined && pool.merge(joined, joined) == joined);
   auto at = joined;
   for (unsigned i = 0; i < depth; ++i) {
@@ -676,48 +687,51 @@ void deep_context_joins_keep_their_canonical_stacks() {
   }
   CHECK(pool.count(at) == 2);
   CHECK(pool.ret(at, 0) == 1 && pool.ret(at, 1) == 2);
-  CHECK(pool.parent(at, 0) == cursiv::kLlCtxNone &&
-        pool.parent(at, 1) == cursiv::kLlCtxNone);
+  CHECK(pool.parent(at, 0) == cursiv::engine::kLlCtxNone &&
+        pool.parent(at, 1) == cursiv::engine::kLlCtxNone);
   CHECK(pool.merge(pool.push(a, 4, 1), pool.push(b, 4, 2)) ==
-        cursiv::kLlCtxApart);
+        cursiv::engine::kLlCtxApart);
 }
 
 struct LlAnalysisFixture {
-  cursiv::LlAtnView atn;
+  cursiv::engine::LlAtnView atn;
   unsigned nrules;
-  const cursiv::TermInfo* terms = nullptr;
+  const cursiv::engine::TermInfo* terms = nullptr;
 };
 LlAnalysisFixture longOwedRun;
 
 void shared_head_calls_are_settled_in_dependency_order() {
   constexpr unsigned count = 4096;
-  std::vector<cursiv::LlAtnState> states(2 * count);
-  std::vector<cursiv::LlAtnEdge> edges(count + 1);
+  std::vector<cursiv::engine::LlAtnState> states(2 * count);
+  std::vector<cursiv::engine::LlAtnEdge> edges(count + 1);
   std::vector<std::uint32_t> starts(count);
   for (unsigned r = 0; r < count; ++r) {
     starts[r] = 2 * r;
     states[2 * r] = {
         .rule = static_cast<std::uint16_t>(r), .edge = r + 1, .nedges = 1};
-    states[2 * r + 1] = {.kind = cursiv::LlAtnKind::ruleStop,
+    states[2 * r + 1] = {.kind = cursiv::engine::LlAtnKind::ruleStop,
                          .rule = static_cast<std::uint16_t>(r)};
     edges[r + 1] =
         r + 1 < count
-            ? cursiv::LlAtnEdge{.kind = cursiv::LlEdgeKind::rule,
-                                .label = static_cast<std::uint16_t>(r + 1),
-                                .target = 2 * (r + 1),
-                                .follow = 2 * r + 1}
-            : cursiv::LlAtnEdge{.kind = cursiv::LlEdgeKind::atom,
-                                .label = 1,
-                                .target = 2 * r + 1};
+            ? cursiv::engine::LlAtnEdge{.kind =
+                                            cursiv::engine::LlEdgeKind::rule,
+                                        .label =
+                                            static_cast<std::uint16_t>(r + 1),
+                                        .target = 2 * (r + 1),
+                                        .follow = 2 * r + 1}
+            : cursiv::engine::LlAtnEdge{
+                  .kind = cursiv::engine::LlEdgeKind::atom,
+                  .label = 1,
+                  .target = 2 * r + 1};
   }
   edges[0] = edges[1];
   states[0].edge = 0;
   states[0].nedges = 2;
-  const cursiv::LlAtnView atn{.states = states.data(),
-                              .nstates = 2 * count,
-                              .edges = edges.data(),
-                              .ruleStart = starts.data()};
-  const auto shared = cursiv::ll_shared_rules(atn, count);
+  const cursiv::engine::LlAtnView atn{.states = states.data(),
+                                      .nstates = 2 * count,
+                                      .edges = edges.data(),
+                                      .ruleStart = starts.data()};
+  const auto shared = cursiv::engine::ll_shared_rules(atn, count);
   CHECK(shared[0] == 0);
   for (unsigned r = 1; r < count; ++r) CHECK(shared[r] == 1);
 }
@@ -726,10 +740,10 @@ void shared_head_calls_are_settled_in_dependency_order() {
 constexpr int kReadsToken = -1, kAsksCondition = -2, kPasses = -3;
 using SharedRules = std::vector<std::vector<std::vector<int>>>;
 struct SharedGraph {
-  std::vector<cursiv::LlAtnState> states;
-  std::vector<cursiv::LlAtnEdge> edges;
+  std::vector<cursiv::engine::LlAtnState> states;
+  std::vector<cursiv::engine::LlAtnEdge> edges;
   std::vector<std::uint32_t> starts;
-  [[nodiscard]] cursiv::LlAtnView view() const {
+  [[nodiscard]] cursiv::engine::LlAtnView view() const {
     return {.states = states.data(),
             .nstates = static_cast<std::uint32_t>(states.size()),
             .edges = edges.data(),
@@ -738,19 +752,19 @@ struct SharedGraph {
 };
 
 SharedGraph shared_graph(const SharedRules& rules) {
-  using Kind = cursiv::LlEdgeKind;
+  using Kind = cursiv::engine::LlEdgeKind;
   SharedGraph g;
-  std::vector<std::vector<cursiv::LlAtnEdge>> out;
-  const auto state = [&](std::size_t rule, cursiv::LlAtnKind kind) {
+  std::vector<std::vector<cursiv::engine::LlAtnEdge>> out;
+  const auto state = [&](std::size_t rule, cursiv::engine::LlAtnKind kind) {
     g.states.push_back({.kind = kind, .rule = static_cast<std::uint16_t>(rule)});
     out.emplace_back();
     return static_cast<std::uint32_t>(g.states.size() - 1);
   };
-  const cursiv::LlAtnKind plain = cursiv::LlAtnState{}.kind;
+  const cursiv::engine::LlAtnKind plain = cursiv::engine::LlAtnState{}.kind;
   for (std::size_t r = 0; r < rules.size(); ++r)
     g.starts.push_back(state(r, plain));
   for (std::size_t r = 0; r < rules.size(); ++r) {
-    const std::uint32_t stop = state(r, cursiv::LlAtnKind::ruleStop);
+    const std::uint32_t stop = state(r, cursiv::engine::LlAtnKind::ruleStop);
     for (const auto& alternative : rules[r]) {
       std::uint32_t at = g.starts[r];
       if (rules[r].size() > 1) {
@@ -789,8 +803,8 @@ SharedGraph shared_graph(const SharedRules& rules) {
 
 // The definition itself, each way of each fork walked whole.
 std::vector<std::uint8_t> shared_by_definition(const SharedGraph& g) {
-  using Kind = cursiv::LlEdgeKind;
-  const cursiv::LlAtnView atn = g.view();
+  using Kind = cursiv::engine::LlEdgeKind;
+  const cursiv::engine::LlAtnView atn = g.view();
   const std::size_t nrules = g.starts.size();
   std::vector<std::uint8_t> nullable(nrules, 0);
   // Each state read before a token from `todo`, into the rules called where
@@ -804,7 +818,7 @@ std::vector<std::uint8_t> shared_by_definition(const SharedGraph& g) {
       if (seen[at] != 0) continue;
       seen[at] = 1;
       visit(at);
-      for (const cursiv::LlAtnEdge& e : atn.outgoing(at)) {
+      for (const cursiv::engine::LlAtnEdge& e : atn.outgoing(at)) {
         if (e.kind == Kind::epsilon) todo.push_back(e.target);
         if (e.kind != Kind::rule) continue;
         if (nullable[e.label] != 0) todo.push_back(e.follow);
@@ -816,7 +830,7 @@ std::vector<std::uint8_t> shared_by_definition(const SharedGraph& g) {
     changed = false;
     for (std::size_t r = 0; r < nrules; ++r)
       walk({g.starts[r]}, false, [&](std::uint32_t at) {
-        if (atn.state(at).kind == cursiv::LlAtnKind::ruleStop &&
+        if (atn.state(at).kind == cursiv::engine::LlAtnKind::ruleStop &&
             nullable[atn.state(at).rule] == 0) {
           nullable[atn.state(at).rule] = 1;
           changed = true;
@@ -827,7 +841,7 @@ std::vector<std::uint8_t> shared_by_definition(const SharedGraph& g) {
   for (std::uint32_t fork = 0; fork < atn.nstates; ++fork) {
     if (atn.state(fork).nedges < 2) continue;
     std::vector<unsigned> reached(nrules, 0);
-    for (const cursiv::LlAtnEdge& e : atn.outgoing(fork)) {
+    for (const cursiv::engine::LlAtnEdge& e : atn.outgoing(fork)) {
       std::vector<std::uint32_t> from;
       std::vector<std::uint8_t> mine(nrules, 0);
       if (e.kind == Kind::epsilon) from.push_back(e.target);
@@ -837,7 +851,7 @@ std::vector<std::uint8_t> shared_by_definition(const SharedGraph& g) {
         if (nullable[e.label] != 0) from.push_back(e.follow);
       }
       walk(from, true, [&](std::uint32_t at) {
-        for (const cursiv::LlAtnEdge& o : atn.outgoing(at))
+        for (const cursiv::engine::LlAtnEdge& o : atn.outgoing(at))
           if (o.kind == Kind::rule) mine[o.label] = 1;
       });
       for (std::size_t r = 0; r < nrules; ++r) reached[r] += mine[r];
@@ -869,8 +883,8 @@ void head_sharing_is_what_each_way_walked_whole_finds() {
     }
     const SharedGraph g = shared_graph(rules);
     const auto expected = shared_by_definition(g);
-    CHECK(cursiv::ll_shared_rules(g.view(),
-                                  static_cast<std::uint16_t>(count)) == expected);
+    CHECK(cursiv::engine::ll_shared_rules(
+              g.view(), static_cast<std::uint16_t>(count)) == expected);
     if (std::ranges::find(expected, 1) != expected.end()) ++sharing;
   }
   CHECK(sharing > 500);
@@ -915,7 +929,7 @@ void head_sharing_walks_grow_with_the_rules() {
   const auto visits = [](const SharedRules& rules) {
     const SharedGraph g = shared_graph(rules);
     std::uint64_t walked = 0;
-    (void)cursiv::ll_shared_rules(
+    (void)cursiv::engine::ll_shared_rules(
         g.view(), static_cast<std::uint16_t>(rules.size()), &walked);
     return walked;
   };
@@ -951,19 +965,19 @@ void head_sharing_walks_grow_with_the_rules() {
 }
 
 void head_sharing_stops_at_conditions_and_closes_cycles() {
-  using Kind = cursiv::LlEdgeKind;
-  static constexpr cursiv::LlAtnState states[] = {
+  using Kind = cursiv::engine::LlEdgeKind;
+  static constexpr cursiv::engine::LlAtnState states[] = {
       {.rule = 0, .edge = 0, .nedges = 2},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0},
       {.rule = 0, .edge = 2, .nedges = 1},
       {.rule = 0, .edge = 3, .nedges = 1},
       {.rule = 1, .edge = 4, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 1},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 1},
       {.rule = 2, .edge = 5, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 2},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 2},
       {.rule = 3, .edge = 6, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 3}};
-  static constexpr cursiv::LlAtnEdge edges[] = {
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 3}};
+  static constexpr cursiv::engine::LlAtnEdge edges[] = {
       {.kind = Kind::rule, .label = 2, .target = 6, .follow = 2},
       {.kind = Kind::rule, .label = 2, .target = 6, .follow = 2},
       {.kind = Kind::rule, .label = 1, .target = 4, .follow = 3},
@@ -975,17 +989,17 @@ void head_sharing_stops_at_conditions_and_closes_cycles() {
   static constexpr LlAnalysisFixture guarded{
       {.states = states, .nstates = 10, .edges = edges, .ruleStart = starts},
       4};
-  auto shared = cursiv::ll_shared_rules(guarded.atn, guarded.nrules);
+  auto shared = cursiv::engine::ll_shared_rules(guarded.atn, guarded.nrules);
   CHECK(shared[0] == 0 && shared[1] == 1 && shared[2] == 0 && shared[3] == 0);
 
-  static constexpr cursiv::LlAtnState cycleStates[] = {
+  static constexpr cursiv::engine::LlAtnState cycleStates[] = {
       {.rule = 0, .edge = 0, .nedges = 2},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0},
       {.rule = 1, .edge = 2, .nedges = 2},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 1},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 1},
       {.rule = 2, .edge = 4, .nedges = 2},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 2}};
-  static constexpr cursiv::LlAtnEdge cycleEdges[] = {
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 2}};
+  static constexpr cursiv::engine::LlAtnEdge cycleEdges[] = {
       {.kind = Kind::rule, .label = 1, .target = 2, .follow = 1},
       {.kind = Kind::rule, .label = 2, .target = 4, .follow = 1},
       {.kind = Kind::rule, .label = 2, .target = 4, .follow = 3},
@@ -998,44 +1012,44 @@ void head_sharing_stops_at_conditions_and_closes_cycles() {
                                             .edges = cycleEdges,
                                             .ruleStart = cycleStarts},
                                            3};
-  shared = cursiv::ll_shared_rules(cycle.atn, cycle.nrules);
+  shared = cursiv::engine::ll_shared_rules(cycle.atn, cycle.nrules);
   CHECK(shared[0] == 0 && shared[1] == 1 && shared[2] == 1);
 }
 
 void owed_prefixes_walk_deep_paths_and_keep_the_shortest_readings() {
   constexpr unsigned count = 20000;
-  std::vector<cursiv::LlAtnState> states(count + 2);
-  std::vector<cursiv::LlAtnEdge> edges(count + 1);
+  std::vector<cursiv::engine::LlAtnState> states(count + 2);
+  std::vector<cursiv::engine::LlAtnEdge> edges(count + 1);
   for (unsigned i = 0; i <= count; ++i) {
     states[i] = {.rule = 0, .edge = i, .nedges = 1};
-    edges[i] = {.kind = i < count ? cursiv::LlEdgeKind::epsilon
-                                  : cursiv::LlEdgeKind::atom,
+    edges[i] = {.kind = i < count ? cursiv::engine::LlEdgeKind::epsilon
+                                  : cursiv::engine::LlEdgeKind::atom,
                 .label = 1,
                 .target = i + 1};
   }
-  states.back() = {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0};
+  states.back() = {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0};
   const std::uint32_t start = 0;
-  const cursiv::TermInfo terms[4]{};
+  const cursiv::engine::TermInfo terms[4]{};
   longOwedRun = {{.states = states.data(),
                   .nstates = count + 2,
                   .edges = edges.data(),
                   .ruleStart = &start},
                  1,
                  terms};
-  cursiv::LlOwed<longOwedRun> owed;
-  cursiv::LlSimulation sim(longOwedRun.atn);
-  sim.load(std::vector<cursiv::LlConfig>{{.state = 0}});
+  cursiv::engine::LlOwed<longOwedRun> owed;
+  cursiv::engine::LlSimulation sim(longOwedRun.atn);
+  sim.load(std::vector<cursiv::engine::LlConfig>{{.state = 0}});
   CHECK(owed.first(sim) == 1);
 
-  using Kind = cursiv::LlEdgeKind;
-  const cursiv::LlAtnState choices[] = {
+  using Kind = cursiv::engine::LlEdgeKind;
+  const cursiv::engine::LlAtnState choices[] = {
       {.rule = 0, .edge = 0, .nedges = 3},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0},
       {.rule = 0, .edge = 3, .nedges = 1},
       {.rule = 1, .edge = 4, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 1},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 1},
       {.rule = 0, .edge = 5, .nedges = 1}};
-  const cursiv::LlAtnEdge paths[] = {
+  const cursiv::engine::LlAtnEdge paths[] = {
       {.kind = Kind::atom, .label = 1, .target = 1},
       {.kind = Kind::rule, .label = 1, .target = 3, .follow = 2},
       {.kind = Kind::atom, .label = 2, .target = 5},
@@ -1047,9 +1061,9 @@ void owed_prefixes_walk_deep_paths_and_keep_the_shortest_readings() {
       {.states = choices, .nstates = 6, .edges = paths, .ruleStart = starts},
       2,
       terms};
-  cursiv::LlOwed<longOwedRun> shortest;
-  cursiv::LlSimulation branch(longOwedRun.atn);
-  branch.load(std::vector<cursiv::LlConfig>{{.state = 0}});
+  cursiv::engine::LlOwed<longOwedRun> shortest;
+  cursiv::engine::LlSimulation branch(longOwedRun.atn);
+  branch.load(std::vector<cursiv::engine::LlConfig>{{.state = 0}});
   std::vector<std::uint16_t> due;
   shortest.due(branch, due, [](auto) { return true; });
   CHECK((due == std::vector<std::uint16_t>{1, 3}));
@@ -1060,14 +1074,14 @@ void owed_prefixes_walk_deep_paths_and_keep_the_shortest_readings() {
 // the frames that changed since the last.
 void a_return_stack_pushes_only_the_frames_that_changed() {
   constexpr const auto& table = tpar::generated::Ll::kTable;
-  cursiv::LlSimulation sim(table.atn);
-  cursiv::LlReturnStack stack;
-  CHECK(stack.context(sim) == cursiv::kLlCtxNone);
+  cursiv::engine::LlSimulation sim(table.atn);
+  cursiv::engine::LlReturnStack stack;
+  CHECK(stack.context(sim) == cursiv::engine::kLlCtxNone);
   stack.push_back(3);
   stack.push_back(4);
   const auto two = stack.context(sim);
   const auto nodes = sim.contexts().size();
-  CHECK(two != cursiv::kLlCtxNone && nodes == 2);
+  CHECK(two != cursiv::engine::kLlCtxNone && nodes == 2);
   CHECK(stack.context(sim) == two && sim.contexts().size() == nodes);
   stack.push_back(5);
   const auto three = stack.context(sim);
@@ -1076,7 +1090,7 @@ void a_return_stack_pushes_only_the_frames_that_changed() {
   CHECK(stack.context(sim) == two && sim.contexts().size() == nodes + 1);
   stack.push_back(5);
   CHECK(stack.context(sim) == three && sim.contexts().size() == nodes + 1);
-  cursiv::LlReturnStack other;
+  cursiv::engine::LlReturnStack other;
   other.push_back(3);
   other.push_back(4);
   other.push_back(5);
@@ -1084,23 +1098,24 @@ void a_return_stack_pushes_only_the_frames_that_changed() {
 }
 
 void an_abandon_replays_equivalent_returns_without_collapsing_frames() {
-  const cursiv::LlAtnState states[] = {
+  const cursiv::engine::LlAtnState states[] = {
       {},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0},
       {.rule = 0, .edge = 0, .nedges = 1},
       {.rule = 1, .edge = 1, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 1}};
-  const cursiv::LlAtnEdge edges[] = {
-      {.kind = cursiv::LlEdgeKind::epsilon, .target = 1},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 42, .target = 4}};
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 1}};
+  const cursiv::engine::LlAtnEdge edges[] = {
+      {.kind = cursiv::engine::LlEdgeKind::epsilon, .target = 1},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 42, .target = 4}};
   const std::uint32_t callers[] = {0, 0, 0};
-  const std::uint32_t classes[] = {
-      0, cursiv::kLlTailReturn | 1u, cursiv::kLlTailReturn | 1u, 3, 4};
-  cursiv::LlAtnView atn{states, 5, edges, nullptr, callers, nullptr, classes};
+  const std::uint32_t classes[] = {0, cursiv::engine::kLlTailReturn | 1u,
+                                   cursiv::engine::kLlTailReturn | 1u, 3, 4};
+  cursiv::engine::LlAtnView atn{states,  5,       edges,  nullptr,
+                                callers, nullptr, classes};
   for (const bool classified : {true, false}) {
     if (!classified) atn.returnClass = nullptr;
-    cursiv::LlSimulation sim(atn);
-    const auto ctx = sim.contexts().push(cursiv::kLlCtxNone, 1, 7);
+    cursiv::engine::LlSimulation sim(atn);
+    const auto ctx = sim.contexts().push(cursiv::engine::kLlCtxNone, 1, 7);
     sim.seed(3, ctx);
     CHECK(sim.leave(1, 2) == classified);
     if (classified) {
@@ -1116,24 +1131,26 @@ void a_search_reads_keywords_in_the_shared_alphabet() {
   constexpr const auto& table = tpar::generated::Ll::kTable;
   constexpr auto keyword = ll_terms::named<table>("export"),
                  identifier = ll_terms::named<table>("ID");
-  static_assert(keyword != cursiv::kInvalidSymbol &&
-                identifier != cursiv::kInvalidSymbol);
-  std::array<cursiv::LlConfig, 2> cfg;
+  static_assert(keyword != cursiv::engine::kInvalidSymbol &&
+                identifier != cursiv::engine::kInvalidSymbol);
+  std::array<cursiv::engine::LlConfig, 2> cfg;
   for (std::uint32_t s = 0; s < table.atn.nstates; ++s)
-    for (const auto& atom : cursiv::ll_atoms<table>().at(s)) {
+    for (const auto& atom : cursiv::engine::ll_atoms<table>().at(s)) {
       if (atom.label == keyword) cfg[0].state = s;
       if (atom.label == identifier) cfg[1].state = s;
     }
   cursiv::Cst tree("export");
   cursiv::CstBuilder builder(tree);
-  cursiv::LlContext c("export", builder);
-  cursiv::LlSearch search(table.atn, c.len);
+  cursiv::engine::LlContext c("export", builder);
+  cursiv::engine::LlSearch search(table.atn, c.len);
   search.limit = 10000;
-  cursiv::Token token{0, 6, keyword};
+  cursiv::engine::Token token{0, 6, keyword};
   std::vector<std::uint16_t> terms;
-  cursiv::ll_search_terms<table>(c, search, cfg.data(), 2, token, terms);
+  cursiv::engine::ll_search_terms<table>(c, search, cfg.data(), 2, token,
+                                         terms);
   CHECK(terms == std::vector<std::uint16_t>{keyword});
-  cursiv::ll_search_terms<table>(c, search, cfg.data() + 1, 1, token, terms);
+  cursiv::engine::ll_search_terms<table>(c, search, cfg.data() + 1, 1, token,
+                                         terms);
   CHECK(terms == std::vector<std::uint16_t>{identifier});
 }
 
@@ -1143,23 +1160,29 @@ void an_optional_prefix_keeps_owing_across_a_required_call() {
   static constexpr const auto& base = tpar::generated::Ll::kTable;
   constexpr auto keyword = ll_terms::named<base>("export"),
                  identifier = ll_terms::named<base>("ID");
-  static_assert(keyword != cursiv::kInvalidSymbol &&
-                identifier != cursiv::kInvalidSymbol);
-  static constexpr cursiv::LlAtnState states[] = {
+  static_assert(keyword != cursiv::engine::kInvalidSymbol &&
+                identifier != cursiv::engine::kInvalidSymbol);
+  static constexpr cursiv::engine::LlAtnState states[] = {
       {.rule = 0, .edge = 0, .nedges = 2},
       {.rule = 0, .edge = 2, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0},
       {.rule = 1, .edge = 3, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 1}};
-  static constexpr cursiv::LlAtnEdge edges[] = {
-      {.kind = cursiv::LlEdgeKind::epsilon, .target = 1},
-      {.kind = cursiv::LlEdgeKind::atom, .label = keyword, .target = 1},
-      {.kind = cursiv::LlEdgeKind::rule, .label = 1, .target = 3, .follow = 2},
-      {.kind = cursiv::LlEdgeKind::atom, .label = identifier, .target = 4}};
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 1}};
+  static constexpr cursiv::engine::LlAtnEdge edges[] = {
+      {.kind = cursiv::engine::LlEdgeKind::epsilon, .target = 1},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = keyword, .target = 1},
+      {.kind = cursiv::engine::LlEdgeKind::rule,
+       .label = 1,
+       .target = 3,
+       .follow = 2},
+      {.kind = cursiv::engine::LlEdgeKind::atom,
+       .label = identifier,
+       .target = 4}};
   static constexpr std::uint32_t starts[] = {0, 3}, callers[] = {0, 0, 1},
                                  returns[] = {2};
   static constexpr std::uint16_t edgeNodes[] = {
-      cursiv::kNoRow, cursiv::kNoRow, cursiv::kNoRow, cursiv::kNoRow};
+      cursiv::engine::kNoRow, cursiv::engine::kNoRow, cursiv::engine::kNoRow,
+      cursiv::engine::kNoRow};
   static constexpr auto table = [] {
     auto t = base;
     t.nrules = 2;
@@ -1173,28 +1196,28 @@ void an_optional_prefix_keeps_owing_across_a_required_call() {
     cursiv::Cst tree("export");
     cursiv::CstBuilder builder(tree);
     if (source == 2) builder.leaf(0, 6, 0);
-    cursiv::LlContext c("export", builder);
-    cursiv::LlSearch s(table.atn, c.len);
+    cursiv::engine::LlContext c("export", builder);
+    cursiv::engine::LlSearch s(table.atn, c.len);
     s.limit = 10000;
     s.sim.resume();
     s.sim.share_epsilon_contexts();
     s.sim.track_calls();
     s.sim.keep_steps();
     s.sim.at_token(source == 1 ? 1 : 0);
-    auto ctx = cursiv::kLlCtxNone;
+    auto ctx = cursiv::engine::kLlCtxNone;
     if (source >= 2) {
       c.stack.push_back(2, 0);
-      s.sourceTokens.assign(1, cursiv::kLlNoNode);
+      s.sourceTokens.assign(1, cursiv::engine::kLlNoNode);
       s.sourceScanned = builder.stream().records();
       ctx = s.sim.contexts().push(ctx, 2, -1);
     }
     s.sim.seed(0, ctx);
-    cursiv::LlReading r;
+    cursiv::engine::LlReading r;
     if (source != 0) CHECK(s.sim.step(keyword));
     r.tokens = source == 1 ? 1 : 0;
-    cursiv::ll_search_keep<table>(s, r);
+    cursiv::engine::ll_search_keep<table>(s, r);
     s.nodes.push_back(r);
-    const auto& due = cursiv::ll_search_facts<table>(c, s, 0).due;
+    const auto& due = cursiv::engine::ll_search_facts<table>(c, s, 0).due;
     CHECK((source == 1 || source == 2)
               ? due == std::vector<std::uint16_t>{identifier}
               : due.empty());
@@ -1202,31 +1225,31 @@ void an_optional_prefix_keeps_owing_across_a_required_call() {
 }
 
 void speculative_conditions_leave_the_real_filter_pending() {
-  const cursiv::LlAtnState states[] = {
+  const cursiv::engine::LlAtnState states[] = {
       {.edge = 0, .nedges = 2},
       {.edge = 2, .nedges = 1},
       {.edge = 3, .nedges = 1},
       {.edge = 4, .nedges = 1},
       {.edge = 5, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0},
   };
-  const cursiv::LlAtnEdge edges[] = {
-      {.kind = cursiv::LlEdgeKind::epsilon, .target = 1},
-      {.kind = cursiv::LlEdgeKind::epsilon, .target = 2},
-      {.kind = cursiv::LlEdgeKind::condition, .label = 0, .target = 3},
-      {.kind = cursiv::LlEdgeKind::condition, .label = 1, .target = 4},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 42, .target = 5},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 43, .target = 5},
+  const cursiv::engine::LlAtnEdge edges[] = {
+      {.kind = cursiv::engine::LlEdgeKind::epsilon, .target = 1},
+      {.kind = cursiv::engine::LlEdgeKind::epsilon, .target = 2},
+      {.kind = cursiv::engine::LlEdgeKind::condition, .label = 0, .target = 3},
+      {.kind = cursiv::engine::LlEdgeKind::condition, .label = 1, .target = 4},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 42, .target = 5},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 43, .target = 5},
   };
   const std::uint32_t callerBase[] = {0, 0};
-  const cursiv::LlAtnView atn{
+  const cursiv::engine::LlAtnView atn{
       .states = states,
       .nstates = 6,
       .edges = edges,
       .callerBase = callerBase,
   };
-  cursiv::LlSimulation simulation(atn);
-  simulation.start(0, cursiv::kLlCtxNone);
+  cursiv::engine::LlSimulation simulation(atn);
+  simulation.start(0, cursiv::engine::kLlCtxNone);
   const auto before = simulation.configs();
   std::vector<std::uint16_t> possible;
   simulation.possible_terms(
@@ -1244,30 +1267,30 @@ void speculative_conditions_leave_the_real_filter_pending() {
 void a_plan_is_the_parses_own_and_goes_with_a_repair() {
   constexpr const auto& table = tpar::generated::Ll::kTable;
   const auto decision = name_or_call_decision();
-  CHECK(decision != cursiv::kNoRow);
-  if (decision == cursiv::kNoRow) return;
+  CHECK(decision != cursiv::engine::kNoRow);
+  if (decision == cursiv::engine::kNoRow) return;
   const std::string text = "name;name();name";
   {
-    cursiv::LlPredictionSession<table> session;
+    cursiv::engine::LlPredictionSession<table> session;
     PredictionAt<table> at(text, decision);
     const auto name = at(0);
-    CHECK(name != cursiv::kNoRow);
-    CHECK(cursiv::ll_planned<table>(at.context, decision) == name);
-    CHECK(cursiv::ll_planned<table>(at.context, decision) ==
-          cursiv::kLlUnplanned);
+    CHECK(name != cursiv::engine::kNoRow);
+    CHECK(cursiv::engine::ll_planned<table>(at.context, decision) == name);
+    CHECK(cursiv::engine::ll_planned<table>(at.context, decision) ==
+          cursiv::engine::kLlUnplanned);
     at.context.at = 3;
-    CHECK(cursiv::ll_planned<table>(at.context, decision) ==
-          cursiv::kLlUnplanned);
+    CHECK(cursiv::engine::ll_planned<table>(at.context, decision) ==
+          cursiv::engine::kLlUnplanned);
     at.context.at = 0;
     at.context.repaired.mark();
-    CHECK(cursiv::ll_planned<table>(at.context, decision) ==
-          cursiv::kLlUnplanned);
+    CHECK(cursiv::engine::ll_planned<table>(at.context, decision) ==
+          cursiv::engine::kLlUnplanned);
     CHECK(session.work().tokens != 0);
   }
-  cursiv::LlPredictionSession<table> next;
+  cursiv::engine::LlPredictionSession<table> next;
   PredictionAt<table> at(text, decision);
-  CHECK(cursiv::ll_planned<table>(at.context, decision) ==
-        cursiv::kLlUnplanned);
+  CHECK(cursiv::engine::ll_planned<table>(at.context, decision) ==
+        cursiv::engine::kLlUnplanned);
 }
 
 // A word is reserved only in an alphabet that actually admits its keyword.
@@ -1277,17 +1300,17 @@ void prediction_reserves_only_viable_keywords() {
   constexpr const auto& table = tpar::generated::Ll::kTable;
   constexpr std::uint16_t identifier = ll_terms::named<table>("ID"),
                           keyword = ll_terms::spelled<table>("let");
-  static_assert(identifier != cursiv::kInvalidSymbol &&
-                keyword != cursiv::kInvalidSymbol);
-  cursiv::LlMask<table.termWords> viable;
+  static_assert(identifier != cursiv::engine::kInvalidSymbol &&
+                keyword != cursiv::engine::kInvalidSymbol);
+  cursiv::engine::LlMask<table.termWords> viable;
   std::vector<std::uint16_t> read;
   viable.set(identifier);
-  CHECK(cursiv::ll_match_in<table>("let;", 4, 0, viable, read) == 3);
+  CHECK(cursiv::engine::ll_match_in<table>("let;", 4, 0, viable, read) == 3);
   CHECK(read == std::vector<std::uint16_t>{identifier});
   viable.set(keyword);
-  CHECK(cursiv::ll_match_in<table>("let;", 4, 0, viable, read) == 3);
+  CHECK(cursiv::engine::ll_match_in<table>("let;", 4, 0, viable, read) == 3);
   CHECK(read == std::vector<std::uint16_t>{keyword});
-  CHECK(cursiv::ll_match_in<table>("lets;", 5, 0, viable, read) == 4);
+  CHECK(cursiv::engine::ll_match_in<table>("lets;", 5, 0, viable, read) == 4);
   CHECK(read == std::vector<std::uint16_t>{identifier});
 
   const auto parser = tpar::generated::Ll::create_parser();
@@ -1309,21 +1332,22 @@ void trailing_trivia_is_read_after_the_entry_region() {
     cursiv::Cst tree(text);
     cursiv::CstBuilder builder(tree);
     builder.bind_stream();
-    builder.leaf(0, 10, cursiv::StampLayout{}.make(cursiv::kNoRow, 0));
-    cursiv::LlContext context(text, builder);
+    builder.leaf(0, 10,
+                 cursiv::engine::StampLayout{}.make(cursiv::engine::kNoRow, 0));
+    cursiv::engine::LlContext context(text, builder);
     context.at = context.pendEnd = 10;
-    context.la = cursiv::Token{10, 10, cursiv::kInvalidSymbol};
+    context.la = cursiv::engine::Token{10, 10, cursiv::engine::kInvalidSymbol};
     context.laValid = true;
     if (classified) {
-      const auto scan = cursiv::ll_match_text<table>(text.data(), text.size(),
-                                                     table.errMode, 10);
-      context.la = cursiv::Token{10, scan.end, scan.term};
+      const auto scan = cursiv::engine::ll_match_text<table>(
+          text.data(), text.size(), table.errMode, 10);
+      context.la = cursiv::engine::Token{10, scan.end, scan.term};
       context.laMode = table.errMode;
       CHECK(table.terms[scan.term].trivia);
     }
-    CHECK(cursiv::ll_tail<table>(context));
-    cursiv::ll_flush_trivia<table>(context);
-    CHECK(!context.repaired && context.la.sym == cursiv::kEofSymbol);
+    CHECK(cursiv::engine::ll_tail<table>(context));
+    cursiv::engine::ll_flush_trivia<table>(context);
+    CHECK(!context.repaired && context.la.sym == cursiv::engine::kEofSymbol);
     CHECK(context.triviaAt == text.size());
     CHECK(tree.size() == 2 && tree[1].hidden && !tree[1].recovered);
     CHECK(tree[1].begin == 11 && tree[1].end == 18);
@@ -1766,23 +1790,25 @@ void a_word_that_spells_no_keyword_is_skipped() {
 // operators in the order they were written, two precedences, none
 // right-associative, and one member for all four.
 void the_precedence_table_says_what_the_grammar_said() {
-  const cursiv::LlTable& t = tpar::generated::Ll::kTable;
-  const auto built =
-      cursiv::ll_build_program(cursiv::LlLowering<tpar::Ll>::table(), {});
+  const cursiv::engine::LlTable& t = tpar::generated::Ll::kTable;
+  const auto built = cursiv::engine::ll_build_program(
+      cursiv::engine::LlLowering<tpar::Ll>::table(), {});
   const auto& c = built.cfg.climbs[0];
   CHECK(c.opCount == 4);
-  const cursiv::LlClimbOp* const op = built.cfg.climbOps.data() + c.opBase;
+  const cursiv::engine::LlClimbOp* const op =
+      built.cfg.climbOps.data() + c.opBase;
   CHECK(op[0].prec == op[1].prec && op[2].prec == op[3].prec);
   CHECK(op[0].prec > op[2].prec);
   const auto first = built.cfg.atomic_operator(op[0].body);
-  CHECK(first != cursiv::kNoRow);
+  CHECK(first != cursiv::engine::kNoRow);
   for (unsigned i = 0; i < 4; ++i) {
     CHECK(op[i].assoc == cursiv::Association::left);
     const auto leaf = built.cfg.atomic_operator(op[i].body);
-    CHECK(leaf != cursiv::kNoRow);
-    if (leaf == cursiv::kNoRow || first == cursiv::kNoRow) continue;
+    CHECK(leaf != cursiv::engine::kNoRow);
+    if (leaf == cursiv::engine::kNoRow || first == cursiv::engine::kNoRow)
+      continue;
     CHECK(built.cfg.nodes[leaf].row == built.cfg.nodes[first].row);
-    CHECK(built.cfg.nodes[leaf].row != cursiv::kNoRow);
+    CHECK(built.cfg.nodes[leaf].row != cursiv::engine::kNoRow);
     CHECK(t.nodes[leaf].mode == c.mode && !t.nodes[leaf].head &&
           t.nodes[leaf].covers == 0);
     CHECK(built.nodeAfter[leaf] != 0xFFFFFFFFu);
@@ -1795,8 +1821,8 @@ void the_precedence_table_says_what_the_grammar_said() {
   // From the second turn on, the node the climb just laid is its left operand.
   CHECK(std::ranges::any_of(
       std::span(built.fuse).subspan(c.leftBase, c.leftCount),
-      [&](const cursiv::LlFuse& f) {
-        return f.from == c.node && f.to != cursiv::kNoRow;
+      [&](const cursiv::engine::LlFuse& f) {
+        return f.from == c.node && f.to != cursiv::engine::kNoRow;
       }));
 }
 
@@ -1808,10 +1834,10 @@ using BorrowedConverter =
 // conversion reads the same value, and the same failure.
 void borrowed_conversion_results_are_not_consumed() {
   std::vector<cursiv::ParseDiagnostic> diagnostics;
-  cursiv::AstBuildCtx ctx;
+  cursiv::engine::AstBuildCtx ctx;
   ctx.diags = &diagnostics;
   const auto convert = [&](std::string& value) {
-    return cursiv::detail::invoke_conv<BorrowedConverter, std::string, 0,
+    return cursiv::engine::invoke_conv<BorrowedConverter, std::string, 0,
                                        false>(ctx, cursiv::kNoNode, &value);
   };
   borrowed = decltype(borrowed)::err("kept failure");
@@ -1846,16 +1872,16 @@ void data_conversions_require_every_part_to_have_been_written() {
   builder.hidden(0, 1, 0);
   const auto root = builder.exit(open, 0, 0);
   CHECK(!tree[root].recovered);
-  const cursiv::AstActions actions{};
-  cursiv::AstBuildCtx context;
+  const cursiv::engine::AstActions actions{};
+  cursiv::engine::AstBuildCtx context;
   context.cst = &tree;
   context.actions = &actions;
   context.repaired = true;
   std::string_view value = "default";
-  CHECK(!cursiv::detail::invoke_conv<StripFirstConverter, std::string_view, 0,
+  CHECK(!cursiv::engine::invoke_conv<StripFirstConverter, std::string_view, 0,
                                      true>(context, root, &value));
   CHECK(value == "default");
-  CHECK(!cursiv::detail::invoke_conv<StripFirstConverter, std::string_view, 0,
+  CHECK(!cursiv::engine::invoke_conv<StripFirstConverter, std::string_view, 0,
                                      false>(context, missing, &value));
   CHECK(value == "default");
 
@@ -1864,7 +1890,7 @@ void data_conversions_require_every_part_to_have_been_written() {
   writtenBuilder.bind_stream();
   const auto leaf = writtenBuilder.leaf(0, 5, 0);
   context.cst = &written;
-  CHECK(cursiv::detail::invoke_conv<StripFirstConverter, std::string_view, 0,
+  CHECK(cursiv::engine::invoke_conv<StripFirstConverter, std::string_view, 0,
                                     true>(context, leaf, &value));
   CHECK(value == "name");
 }
@@ -1873,16 +1899,16 @@ void data_conversions_require_every_part_to_have_been_written() {
 // here doubles them, and no return names a member.
 void a_forked_stack_is_read_once_per_context() {
   constexpr auto& T = tpar::generated::Ll::kTable;
-  const cursiv::StampedGrammar grammar(tpar::generated::Ll::kGrammarMetaData,
-                                       cursiv::StampLayout{});
-  cursiv::LlSimulation sim(T.atn);
-  cursiv::LlCtxPool& pool = sim.contexts();
+  const cursiv::engine::StampedGrammar grammar(
+      tpar::generated::Ll::kGrammarMetaData, cursiv::engine::StampLayout{});
+  cursiv::engine::LlSimulation sim(T.atn);
+  cursiv::engine::LlCtxPool& pool = sim.contexts();
   constexpr unsigned kLevels = 18;
-  std::uint32_t ctx = pool.push(cursiv::kLlCtxNone, 0);
+  std::uint32_t ctx = pool.push(cursiv::engine::kLlCtxNone, 0);
   for (unsigned level = 0; level < kLevels; ++level)
     ctx = pool.merge(pool.push(ctx, 0), pool.push(pool.push(ctx, 0), 1));
-  cursiv::LlMembers members;
-  cursiv::ll_members_up<T>(grammar, sim, ctx, members);
+  cursiv::engine::LlMembers members;
+  cursiv::engine::ll_members_up<T>(grammar, sim, ctx, members);
   CHECK(members.frames <= 4 * kLevels);
 }
 
@@ -1997,25 +2023,26 @@ void verify(bool condition) {
 struct Node : cursiv::Extends<cursiv::AstNode> {
   string_view text;
 };
-void drive(cursiv::LlContext& c) {
-  auto* ex = cursiv::ll_episode_session_slot<table>();
+void drive(cursiv::engine::LlContext& c) {
+  auto* ex = cursiv::engine::ll_episode_session_slot<table>();
   verify(ex && !ex->has_value());
-  auto& kept = cursiv::ll_episode_cache<table>();
+  auto& kept = cursiv::engine::ll_episode_cache<table>();
   verify(kept.plan.empty());
   ++calls;
-  std::vector<cursiv::LlPlanEntry> laid{
+  std::vector<cursiv::engine::LlPlanEntry> laid{
       {.at = calls, .decision = 1, .arm = static_cast<std::uint16_t>(calls)}};
   kept.plan.install(laid, nullptr, 0);
   if (explode) throw std::runtime_error("drive exception");
-  c.last = c.tape.leaf(0, c.len, cursiv::StampLayout{}.make(0, 0));
+  c.last = c.tape.leaf(0, c.len, cursiv::engine::StampLayout{}.make(0, 0));
   c.at = c.len;
 }
-cursiv::AstNode* make(cursiv::AstBuildCtx& ctx, cursiv::NodeId id) {
-  auto* node = static_cast<Node*>(cursiv::detail::make_node<Node>(ctx, id));
+cursiv::AstNode* make(cursiv::engine::AstBuildCtx& ctx, cursiv::NodeId id) {
+  auto* node = static_cast<Node*>(cursiv::engine::make_node<Node>(ctx, id));
   node->text = ctx.cst->text();
   if (nested && !child) {
-    auto* b = cursiv::ll_episode_session_slot<table>();
-    const auto tag = cursiv::ll_episode_cache<table>().plan.entries()[0].arm;
+    auto* b = cursiv::engine::ll_episode_session_slot<table>();
+    const auto tag =
+        cursiv::engine::ll_episode_cache<table>().plan.entries()[0].arm;
     child = true;
     if (nestedThrow) {
       explode = true;
@@ -2043,23 +2070,24 @@ cursiv::AstNode* make(cursiv::AstBuildCtx& ctx, cursiv::NodeId id) {
       verify(result.value && result.diagnostics.empty());
     }
     child = false;
-    verify(cursiv::ll_episode_session_slot<table>() == b);
-    verify(cursiv::ll_episode_cache<table>().plan.entries()[0].arm == tag);
+    verify(cursiv::engine::ll_episode_session_slot<table>() == b);
+    verify(cursiv::engine::ll_episode_cache<table>().plan.entries()[0].arm ==
+           tag);
   }
   if (stop) stop->request_stop();
   return node;
 }
-void entry(cursiv::AstReducer& builder, cursiv::NodeId id) {
+void entry(cursiv::engine::AstReducer& builder, cursiv::NodeId id) {
   builder.push_made(id, builder.create<make, nullptr, false>(0, id));
 }
 const cursiv::AstMetaData metadata{};
-const cursiv::detail::MakeFn makes[] = {make};
-const cursiv::AstEntryFn entries[] = {entry};
-const cursiv::AstActions actions{
+const cursiv::engine::MakeFn makes[] = {make};
+const cursiv::engine::AstEntryFn entries[] = {entry};
+const cursiv::engine::AstActions actions{
     .meta = &metadata, .makes = makes, .entries = entries, .entryCount = 1};
 void public_calls_are_fresh_and_restore_on_exit() {
-  cursiv::LlLanguageParser<table> parser(tpar::generated::Ll::kGrammarMetaData,
-                                         actions, drive);
+  cursiv::engine::LlLanguageParser<table> parser(
+      tpar::generated::Ll::kGrammarMetaData, actions, drive);
   custom = &parser;
   for (unsigned n = 0; n < 2; ++n) {
     const auto r = parser.parse("value");
@@ -2067,7 +2095,7 @@ void public_calls_are_fresh_and_restore_on_exit() {
     verify(static_cast<Node*>(r.value)->text == "value");
   }
   verify(calls == 2);
-  verify(cursiv::ll_episode_session_slot<table>() == nullptr);
+  verify(cursiv::engine::ll_episode_session_slot<table>() == nullptr);
   nested = true;
   const auto parent = parser.parse("parent");
   nested = false;
@@ -2102,7 +2130,7 @@ void public_calls_are_fresh_and_restore_on_exit() {
   }
   stop = nullptr;
   verify(threw && cancel.stop_requested());
-  verify(cursiv::ll_episode_session_slot<table>() == nullptr);
+  verify(cursiv::engine::ll_episode_session_slot<table>() == nullptr);
   const auto after = parser.parse("after");
   verify(after.value && static_cast<Node*>(after.value)->text == "after");
   std::array<unsigned, 4> threadErrors{};
@@ -2122,15 +2150,15 @@ void public_calls_are_fresh_and_restore_on_exit() {
   CHECK(errors == 0);
 }
 void memo_indexes_end_dependencies() {
-  cursiv::LlEpisodeMemo memo;
+  cursiv::engine::LlEpisodeMemo memo;
   constexpr std::uint64_t hash = 719;
   const auto arm = [&](cursiv::TextOffset room,
-                       std::uint16_t rejected = cursiv::kNoRow) {
+                       std::uint16_t rejected = cursiv::engine::kNoRow) {
     const auto* row = memo.find(hash, room, [&](const auto& k) {
       return k.context == 4 && k.length <= room &&
              (!k.ended || k.length == room) && k.arm != rejected;
     });
-    return row != nullptr ? row->arm : cursiv::kNoRow;
+    return row != nullptr ? row->arm : cursiv::engine::kNoRow;
   };
   memo.add(hash, {.context = 4, .length = 8, .arm = 1}, {});
   memo.add(hash, {.context = 4, .length = 20, .arm = 2, .ended = true}, {});
@@ -2144,7 +2172,7 @@ void memo_indexes_end_dependencies() {
   memo.add(collision, {.context = 7, .length = 8, .arm = 5}, {});
   CHECK(arm(20) == 4);
   memo.clear();
-  CHECK(arm(20) == cursiv::kNoRow);
+  CHECK(arm(20) == cursiv::engine::kNoRow);
   for (std::uint32_t length = 1; length <= 10000; ++length)
     memo.add(hash, {.context = 4, .length = length, .arm = 1, .ended = true},
              {});
@@ -2191,8 +2219,9 @@ void generated_public_ast_is_unchanged() {
         }
       }
     }
-  CHECK(cursiv::ll_episode_session_slot<tpar::generated::Ll::kTable>() ==
-        nullptr);
+  CHECK(
+      cursiv::engine::ll_episode_session_slot<tpar::generated::Ll::kTable>() ==
+      nullptr);
 }
 }  // namespace
 void check_prediction_sessions() {

@@ -140,22 +140,23 @@ void exercise(const cursiv::Parser& parser) {
 }
 
 void states() {
-  static_assert(sizeof(cursiv::PredicateCursor) == 16);
-  static_assert(sizeof(cursiv::LexicalCursor) == 8);
-  const std::array<cursiv::PredicateCursor, 6> input{{{4, 1, 2, 3, 8},
-                                                      {4, 0, 2, 3, 8},
-                                                      {4, 1, 1, 3, 8},
-                                                      {4, 1, 2, 2, 8},
-                                                      {4, 1, 2, 3, 7},
-                                                      {3, 9, 9, 9, 9}}};
-  cursiv::PredicateState state;
+  static_assert(sizeof(cursiv::engine::PredicateCursor) == 16);
+  static_assert(sizeof(cursiv::engine::LexicalCursor) == 8);
+  const std::array<cursiv::engine::PredicateCursor, 6> input{{{4, 1, 2, 3, 8},
+                                                              {4, 0, 2, 3, 8},
+                                                              {4, 1, 1, 3, 8},
+                                                              {4, 1, 2, 2, 8},
+                                                              {4, 1, 2, 3, 7},
+                                                              {3, 9, 9, 9, 9}}};
+  cursiv::engine::PredicateState state;
   for (auto cursor : input) {
     state.add(cursor);
     state.add(cursor);
   }
   CHECK(state.size() == input.size());
   for (auto cursor : input) CHECK(state.has(cursor));
-  std::vector<cursiv::PredicateCursor> order(input.begin() + 1, input.end());
+  std::vector<cursiv::engine::PredicateCursor> order(input.begin() + 1,
+                                                     input.end());
   std::sort(order.begin(), order.end(), [](auto a, auto b) {
     return std::tie(a.at, a.from, a.held, a.mode, a.end) <
            std::tie(b.at, b.from, b.held, b.mode, b.end);
@@ -164,7 +165,7 @@ void states() {
     CHECK(state[i + 1] == order[i]);
   CHECK(state.without(state).empty());
 
-  cursiv::LexicalCaptures captures;
+  cursiv::engine::LexicalCaptures captures;
   const auto a = captures.bind(0, 9, 1, 3);
   const auto ab = captures.bind(a, 2, 4, 5);
   const auto ba = captures.bind(captures.bind(0, 2, 4, 5), 9, 1, 3);

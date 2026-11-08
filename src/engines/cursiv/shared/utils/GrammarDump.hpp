@@ -7,10 +7,10 @@
 
 // The dump, folded for review: long rules broken at their top-level
 // alternatives and filled to a column. It reads the text and nothing of the
-// model, which is why it sits beside the source that serves it -- the runtime
-// and `GRAMMAR.txt` must fold identically.
+// model. The grammar source the runtime serves and `GRAMMAR.txt` are folded
+// by this one function, so they fold identically.
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Produced while walking the grammar, before emitting runtime source. Ranks
 // identify rules independently of their printed names or body spelling.
@@ -28,4 +28,4 @@ struct GrammarDump {
 [[nodiscard]] std::string dump_wrapped(std::string_view text,
                                        std::size_t width = 92);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

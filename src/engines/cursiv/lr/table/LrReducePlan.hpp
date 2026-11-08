@@ -6,7 +6,7 @@
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/lr/table/LrReduceForm.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The record a reduction hands its landing to close: never one, always one,
 // or one known only at run time.
@@ -47,4 +47,4 @@ struct LrReducePlan {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

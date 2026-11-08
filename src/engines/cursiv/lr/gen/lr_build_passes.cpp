@@ -32,7 +32,7 @@
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/utils/RoundMarks.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 namespace {
 
 // A cell carried within one growing array, by value: the growth moves the
@@ -926,4 +926,4 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
   A.set_gotos(std::move(A.gotoRows));
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

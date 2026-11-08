@@ -13,7 +13,7 @@
 
 namespace {
 
-using Forest = cursiv::LrGssForest;
+using Forest = cursiv::engine::LrGssForest;
 using Id = Forest::Id;
 
 // Two stacks ordered once their nodes are elected, as the graph orders them.
@@ -514,8 +514,8 @@ void random_forests_elect_what_spelled_ranks_elect() {
 namespace gss_digest {
 namespace {
 
-using cursiv::LrGssDigest;
-using cursiv::LrGssForest;
+using cursiv::engine::LrGssDigest;
+using cursiv::engine::LrGssForest;
 using Id = LrGssForest::Id;
 
 // Every step is taken at position 5; those below 5 are the only step of their
@@ -568,7 +568,7 @@ void a_derivation_ending_on_many_forks_keeps_every_one() {
   const auto rope = digest.of(forest, below, facts);
   CHECK(digest.forks().length(rope) == kSteps);
   const auto cut = digest.forks().first_where(
-      rope, [](const cursiv::LrGssForkAgg& a) { return a.at >= 5; });
+      rope, [](const cursiv::engine::LrGssForkAgg& a) { return a.at >= 5; });
   CHECK(cut == 0);
   CHECK(forks(digest, rope).size() == kSteps);
 }

@@ -18,7 +18,7 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The DFA cursor, whatever a match retains.
 template <class Ad>
@@ -117,4 +117,4 @@ concept LexRelaysAnnounced =
     (!LexDeclaresRelays<Ad> || LexAnnouncesRelays<Ad> == LexOffersRelay<Ad>) &&
     (!LexOffersRelay<Ad> || LexRelayProtocol<Ad>);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

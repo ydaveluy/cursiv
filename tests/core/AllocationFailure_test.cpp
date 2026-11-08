@@ -552,17 +552,17 @@ void a_join_writes_its_parts_where_they_stay() {
   const std::string left(2048, 'a');
   const std::string right(2048, 'b');
   cursiv::Cst tree("x");
-  cursiv::AstBuildCtx ctx;
+  cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &tree;
   (void)ctx.keep_text(std::string_view("x"));  // the pool's first block
-  cursiv::detail::PartRun run;
+  cursiv::engine::PartRun run;
   run.push_back(left);
   run.push_back(right);
   std::string_view joined;
   bool allocated = false;
   fail_allocation(0);
   try {
-    joined = cursiv::detail::join_parts(ctx, run);
+    joined = cursiv::engine::join_parts(ctx, run);
   } catch (const std::bad_alloc&) {
     allocated = true;
   }

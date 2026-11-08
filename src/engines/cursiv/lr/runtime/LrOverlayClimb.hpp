@@ -9,7 +9,7 @@
 
 #include "cursiv/lr/runtime/LrWalkTail.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Base>
 class LrOverlayClimb {
@@ -68,4 +68,4 @@ class LrOverlayClimb {
   LrWalkTail _tail;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

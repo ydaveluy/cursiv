@@ -17,6 +17,7 @@
 // token. The discarded child's node slot may also be reused by that deletion.
 void guarded_offers_follow_the_token() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   constexpr const auto& table = tllcompound::generated::Ll::kTable;
   std::uint32_t guard = kLlNoNode;
   for (std::uint32_t q = 0; q < table.atn.nstates && guard == kLlNoNode; ++q) {

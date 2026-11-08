@@ -15,7 +15,7 @@
 #include "cursiv/ll/table/LlAtnView.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // "The caller is not known": a closure that reaches the end of a rule with
 // this carries on into every state a call of it returns to.
@@ -1096,4 +1096,4 @@ class LlSimulation : public LlReturnPool {
   bool _keepSteps = false;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

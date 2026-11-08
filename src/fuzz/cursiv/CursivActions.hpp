@@ -192,7 +192,7 @@ auto convert_leaf([[maybe_unused]] std::string_view raw) {
 template <class R>
 std::optional<std::string> denote_of(std::string_view raw) {
   auto result = convert_leaf<R>(raw);
-  if constexpr (cursiv::detail::is_conversion_result<decltype(result)>) {
+  if constexpr (cursiv::engine::is_conversion_result<decltype(result)>) {
     if (!result) return std::nullopt;
     return std::string(*result.value);
   } else {
@@ -208,7 +208,7 @@ consteval DenoteFn denote_entry() {
   if constexpr (requires { typename T::kind; })
     if constexpr (is_terminal_rule<T> || cursiv::detail::is_data_rule<T>)
       if constexpr (cursiv::detail::HasConverter<cursiv::detail::conv_t<T>>)
-        if constexpr (cursiv::detail::is_text_value<
+        if constexpr (cursiv::engine::is_text_value<
                           cursiv::detail::unwrap_result_t<
                               decltype(convert_leaf<T>(std::string_view{}))>>)
           return &denote_of<T>;
@@ -247,7 +247,7 @@ Write write_node_of(AstNode& owner, AstNode* child) {
 template <class F, class A, class Res>
 Write accept(typename F::owner& o, Res&& r) {
   using R = std::remove_cvref_t<Res>;
-  if constexpr (cursiv::detail::is_conversion_result<R>) {
+  if constexpr (cursiv::engine::is_conversion_result<R>) {
     if (!r) return Write::modelled;
     return store<F, A>(o, std::move(*r.value));
   } else {
@@ -298,7 +298,7 @@ Write one_text([[maybe_unused]] typename F::owner& o,
     // The name picks the source; the resolved rule converts it.
     using RR = typename pay_rule<C, R>::type;
     using A =
-        typename cursiv::detail::conv_alt<typename F::held,
+        typename cursiv::engine::conv_alt<typename F::held,
                                           cursiv::detail::pay_text<RR>>::type;
     using CR = cursiv::detail::converter_rule_t<RR>;
     if constexpr (!std::is_void_v<CR>) {
@@ -309,7 +309,8 @@ Write one_text([[maybe_unused]] typename F::owner& o,
         // not modelled.
         return Write::not_modelled;
       }
-    } else if constexpr (std::is_void_v<A> || !has_default_convert<A>) {
+    } else if constexpr (std::is_void_v<A> ||
+                         !cursiv::detail::has_default_convert<A>) {
       return Write::not_modelled;
     } else {
       return accept<F, A>(o, cursiv::detail::default_convert<A>(text));

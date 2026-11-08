@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlFinalProgram;
 struct LlLowCfg;
@@ -27,4 +27,4 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
     const LlFinalProgram& done, const std::string& ns,
     const LlTableSource& table);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

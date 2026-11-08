@@ -11,7 +11,7 @@
 #include "cursiv/ll/runtime/LlAhead.hpp"
 #include "cursiv/shared/runtime/GestureRank.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr std::uint32_t kLlNoNode = 0xFFFFFFFFu;
 
@@ -91,4 +91,4 @@ struct LlReading {
   std::uint16_t genAlt = 0, genOwed = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

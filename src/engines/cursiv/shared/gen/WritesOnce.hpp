@@ -10,11 +10,12 @@
 #include "cursiv/grammar/ExprShape.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/expr.hpp"
+#include "cursiv/shared/gen/GrammarRefusals.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/utils/typelist.hpp"
-#include "cursiv/shared/gen/GrammarRefusals.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 template <auto P>
 struct wrote {};
@@ -371,4 +372,4 @@ template <class St, class R, class Body>
 inline constexpr bool writes_once_ok =
     written_once<R, typename writes_once<St, Body, TypeList<>>::fault>;
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

@@ -10,7 +10,7 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/ll/runtime/ll_spine.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlSpine {
  public:
@@ -33,4 +33,4 @@ class LlSpine {
   mutable std::vector<NodeId> _records;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

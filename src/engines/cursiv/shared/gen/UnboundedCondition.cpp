@@ -4,15 +4,15 @@
 #include <string_view>
 #include <utility>
 
-#include "cursiv/grammar/GrammarPrinter.hpp"
-#include "cursiv/utils/ctstring.hpp"
 #include "cursiv/shared/gen/GapReach.hpp"
 #include "cursiv/shared/gen/LowerPools.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
+#include "cursiv/shared/utils/GrammarPrinter.hpp"
+#include "cursiv/utils/ctstring.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 namespace {
 
@@ -75,9 +75,9 @@ std::string spell_set(const ByteSet& bytes) {
     }
   std::string out;
   if (set.count() != 1)
-    detail::charset(out, set);
+    charset(out, set);
   else
-    detail::quote(out, std::string(1, last));
+    quote(out, std::string(1, last));
   return out;
 }
 
@@ -119,14 +119,13 @@ std::string spell(const LowerPools& c, std::uint16_t node,
     case LexKind::rep: {
       const std::string body = spell(c, e.a, identity);
       if (e.max != kEndless)
-        return body + "{" + detail::decimal(e.min) + "," +
-               detail::decimal(e.max) + "}";
+        return body + "{" + decimal(e.min) + "," + decimal(e.max) + "}";
       return body + (e.min == 0   ? "*"
                      : e.min == 1 ? "+"
-                                  : "{" + detail::decimal(e.min) + ",}");
+                                  : "{" + decimal(e.min) + ",}");
     }
     default:
-      return identity ? "...#" + detail::decimal(node) : "...";
+      return identity ? "...#" + decimal(node) : "...";
   }
 }
 
@@ -170,4 +169,4 @@ std::string unbounded_condition_text(const LowerPools& c,
          "as one terminal";
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

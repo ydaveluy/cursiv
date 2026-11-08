@@ -17,7 +17,7 @@
 #include "cursiv/shared/runtime/LexReadBudget.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlMachine;
 
@@ -138,4 +138,4 @@ inline void ll_return(LlContext& c) {
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

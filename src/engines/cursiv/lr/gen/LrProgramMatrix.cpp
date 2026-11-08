@@ -6,7 +6,7 @@
 
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 void LrProgramMatrix::append(std::span<const std::uint64_t> row,
                              std::uint64_t absent) {
@@ -106,4 +106,4 @@ unsigned LrProgramMatrix::value_bits() const {
   return values.empty() ? 8 : bits(std::ranges::max(values));
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

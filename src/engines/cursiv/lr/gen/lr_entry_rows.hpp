@@ -6,8 +6,8 @@
 #include "cursiv/lr/gen/LrBuildTable.hpp"
 #include "cursiv/shared/gen/AstEntryTable.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 AstEntryTable lr_entry_table(const LrBuildTable& a);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

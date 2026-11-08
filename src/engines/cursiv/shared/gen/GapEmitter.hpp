@@ -19,7 +19,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A gap program as native position transforms, one function per node.
 template <class Cfg>
@@ -54,7 +54,8 @@ class GapProgramEmitter {
 
   std::string expression(std::uint16_t id, bool whole, std::string_view text,
                          std::string_view size) const {
-    return concat("::cursiv::gap_matches<", whole, ">(", text, ", ", size,
+    return concat("::cursiv::engine::gap_matches<", whole, ">(", text, ", ",
+                  size,
                   ", [&](const auto& in) { return "
                   "gap_pattern_",
                   id, "(", text, ", ", size, ", in); })");
@@ -113,7 +114,8 @@ class GapProgramEmitter {
           if (e.max == 0)
             out.line("  return in;");
           else
-            out.line("  return ::cursiv::gap_repeat<", e.min, "u, ", e.max,
+            out.line("  return ::cursiv::engine::gap_repeat<", e.min, "u, ",
+                     e.max,
                      "u>(in, [&](const Set& "
                      "cur) {\n"
                      "    return gap_pattern_",
@@ -287,7 +289,7 @@ class GapEmitter : private TextBuilder {
     if (!whole)
       line(
           "  for (::cursiv::TextOffset p = 0; p < n;\n"
-          "       p += ::cursiv::gap_width(g + p, n - p)) {");
+          "       p += ::cursiv::engine::gap_width(g + p, n - p)) {");
     else
       line("  constexpr ::cursiv::TextOffset p = 0;");
     for (const auto& bytes : patterns) {
@@ -313,4 +315,4 @@ class GapEmitter : private TextBuilder {
   std::vector<Asked> _asked;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

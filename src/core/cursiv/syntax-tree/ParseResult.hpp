@@ -21,7 +21,9 @@
 namespace cursiv {
 
 struct Grammar;
+namespace engine {
 class AstReducer;
+}
 
 // The tree is held by pointer so the result can move: nothing the result
 // owns stores a `Cst` address, but everything a caller derives from `cst()`
@@ -39,7 +41,7 @@ class ParseResult {
   void destroy_nodes() noexcept;
   // Runs the destructors of `gone`; their memory stays with the pool.
   static void destroy_detached(std::span<AstNode* const> gone) noexcept;
-  friend class AstReducer;
+  friend class engine::AstReducer;
 
  public:
   ParseResult();

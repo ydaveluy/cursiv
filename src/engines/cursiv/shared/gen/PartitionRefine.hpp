@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // `cls` gives each state its opening class. `each_edge(edge)` calls
 // `edge(from, label, to)` for every edge, in the same order each time. A state has
@@ -103,4 +103,4 @@ std::vector<std::uint32_t> partition_refine(const std::vector<std::uint32_t>& cl
   return blk;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

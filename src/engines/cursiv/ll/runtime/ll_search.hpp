@@ -38,7 +38,7 @@
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What a gesture is to the expected set: the terminal it inserts, if any.
 inline std::uint32_t ll_search_kind(const LlGesture& g) {
@@ -1696,4 +1696,4 @@ LlPause ll_pause(LlContext& c, const LlRoot& root) {
           s.arm, false};
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

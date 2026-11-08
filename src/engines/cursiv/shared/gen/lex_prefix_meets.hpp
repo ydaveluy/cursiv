@@ -19,7 +19,7 @@
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The bytes the edges of a subset read.
 inline ByteSet lex_subset_reads(const LexNfaPool& n, const ByteSet* sets,
@@ -339,4 +339,4 @@ inline std::vector<std::vector<int>> lex_scalar_ends(
   return out;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

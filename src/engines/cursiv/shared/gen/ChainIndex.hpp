@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct ChainIndex {
   static constexpr unsigned kNone = 0xffffffffu;
@@ -63,4 +63,4 @@ struct ChainIndex {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

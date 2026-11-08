@@ -44,7 +44,7 @@
 #include "cursiv/utils/StrongComponents.hpp"
 #include "cursiv/utils/RoundMarks.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 namespace {
 
 // One transition of the canonical graph; the leaf a shift writes is the
@@ -4461,4 +4461,4 @@ bool lr_wider_stands(const LrBuildTable& c, const LrBuildTable& w) {
          (w.nOwed < c.nOwed || (c.nImpliedMixed != 0 && w.nOwed == c.nOwed));
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

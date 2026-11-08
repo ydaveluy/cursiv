@@ -59,19 +59,19 @@ std::string unclosed(unsigned depth, const std::string& open) {
 }
 
 std::uint64_t work_of(const cursiv::Parser& parser, const std::string& text) {
-  cursiv::LlSearchWork::current() = {};
+  cursiv::engine::LlSearchWork::current() = {};
   const cursiv::ParseResult result = parser.parse(text);
   CHECK(result.accepted && !result.diagnostics.empty());
-  return cursiv::LlSearchWork::current().work;
+  return cursiv::engine::LlSearchWork::current().work;
 }
 
 // ...and the tokens its predictions read.
 std::uint64_t predictions_of(const cursiv::Parser& parser,
                              const std::string& text) {
-  cursiv::LlPredictionWork::current() = {};
+  cursiv::engine::LlPredictionWork::current() = {};
   const cursiv::ParseResult result = parser.parse(text);
   CHECK(result.accepted && !result.diagnostics.empty());
-  return cursiv::LlPredictionWork::current().tokens;
+  return cursiv::engine::LlPredictionWork::current().tokens;
 }
 
 void doubling_costs_at_most_double(
@@ -172,12 +172,12 @@ void a_dead_end_deep_in_nesting_is_read_once() {
 void a_plan_is_read_once(const char* prefix) {
   const auto parser = tllrepairgrowth::generated::Ll::create_parser();
   const auto visits = [&](unsigned depth) {
-    cursiv::LlPredictionWork::current() = {};
+    cursiv::engine::LlPredictionWork::current() = {};
     const std::string input = prefix + repeat("a", depth) + "b";
     const cursiv::ParseResult result =
         parser->parse(input);
     CHECK(result.accepted && result.diagnostics.empty());
-    return cursiv::LlPredictionWork::current().planVisits;
+    return cursiv::engine::LlPredictionWork::current().planVisits;
   };
   std::uint64_t before = visits(1024);
   CHECK(before != 0);
@@ -207,14 +207,14 @@ void a_dangling_choice_reads_nothing_ahead() {
           "danglingtwo: " + open + repeat("b c ", depth),
           "danglingtwo: " + open + repeat("c ", depth / 2) +
               repeat("b ", depth / 2)}) {
-      cursiv::LlPredictionWork::current() = {};
+      cursiv::engine::LlPredictionWork::current() = {};
       const cursiv::ParseResult result = parser->parse(text);
       CHECK(result.accepted && result.diagnostics.empty());
-      CHECK(cursiv::LlPredictionWork::current().tokens == 0);
-      if (cursiv::LlPredictionWork::current().tokens != 0)
+      CHECK(cursiv::engine::LlPredictionWork::current().tokens == 0);
+      if (cursiv::engine::LlPredictionWork::current().tokens != 0)
         std::printf("dangling read ahead: %llu tokens at depth %u\n",
                     static_cast<unsigned long long>(
-                        cursiv::LlPredictionWork::current().tokens),
+                        cursiv::engine::LlPredictionWork::current().tokens),
                     depth);
     }
   }
@@ -226,7 +226,7 @@ void a_dangling_choice_reads_nothing_ahead() {
 void loops_that_read_alike_do_not_read_to_the_fault() {
   const auto parser = tllrepairgrowth::generated::Ll::create_parser();
   const auto read = [&](const std::string& text) {
-    cursiv::LlPredictionWork::current() = {};
+    cursiv::engine::LlPredictionWork::current() = {};
     return parser->parse(text);
   };
   std::uint64_t before = 0;
@@ -237,7 +237,8 @@ void loops_that_read_alike_do_not_read_to_the_fault() {
     CHECK(broken.accepted && broken.diagnostics.size() == 1);
     if (!broken.diagnostics.empty())
       CHECK(broken.diagnostics.front().begin == turned.size());
-    const std::uint64_t after = cursiv::LlPredictionWork::current().tokens;
+    const std::uint64_t after =
+        cursiv::engine::LlPredictionWork::current().tokens;
     const bool within =
         before == 0 ||
         static_cast<double>(after) <= kLinear * static_cast<double>(before);
@@ -254,34 +255,34 @@ void loops_that_read_alike_do_not_read_to_the_fault() {
 // one-frame stack join a two-frame stack. Neither prevents the two compatible
 // two-frame stacks from sharing their intermediate and consuming positions.
 void compatible_closure_contexts_share_past_incompatible_readings() {
-  const cursiv::LlAtnState states[] = {
+  const cursiv::engine::LlAtnState states[] = {
       {.edge = 0, .nedges = 1},
       {.edge = 1, .nedges = 1},
       {.edge = 2, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0},
       {.edge = 3, .nedges = 1},
       {.edge = 4, .nedges = 1},
       {.edge = 5, .nedges = 1},
   };
-  const cursiv::LlAtnEdge edges[] = {
-      {.kind = cursiv::LlEdgeKind::atom, .label = 7, .target = 1},
-      {.kind = cursiv::LlEdgeKind::epsilon, .target = 2},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 8, .target = 3},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 9, .target = 3},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 10, .target = 3},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 11, .target = 3},
+  const cursiv::engine::LlAtnEdge edges[] = {
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 7, .target = 1},
+      {.kind = cursiv::engine::LlEdgeKind::epsilon, .target = 2},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 8, .target = 3},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 9, .target = 3},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 10, .target = 3},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 11, .target = 3},
   };
   const std::uint32_t callerBase[] = {0, 0};
-  const cursiv::LlAtnView atn{
+  const cursiv::engine::LlAtnView atn{
       .states = states, .nstates = 7, .edges = edges, .callerBase = callerBase};
-  cursiv::LlSimulation plain(atn), shared(atn);
+  cursiv::engine::LlSimulation plain(atn), shared(atn);
   shared.share_epsilon_contexts();
-  const auto start = [](cursiv::LlSimulation& sim) {
+  const auto start = [](cursiv::engine::LlSimulation& sim) {
     auto& pool = sim.contexts();
-    const auto a = pool.push(pool.push(cursiv::kLlCtxNone, 4), 6);
-    const auto shortStack = pool.push(cursiv::kLlCtxNone, 6);
-    const auto b = pool.push(pool.push(cursiv::kLlCtxNone, 5), 6);
-    sim.load({{0, cursiv::kLlCtxNone, 0},
+    const auto a = pool.push(pool.push(cursiv::engine::kLlCtxNone, 4), 6);
+    const auto shortStack = pool.push(cursiv::engine::kLlCtxNone, 6);
+    const auto b = pool.push(pool.push(cursiv::engine::kLlCtxNone, 5), 6);
+    sim.load({{0, cursiv::engine::kLlCtxNone, 0},
               {0, a, 0},
               {0, shortStack, 0},
               {0, b, 0},
@@ -296,14 +297,14 @@ void compatible_closure_contexts_share_past_incompatible_readings() {
     unsigned readings = 0;
     for (const auto& config : shared.configs()) {
       if (config.state != state || config.alt != 0 ||
-          config.ctx == cursiv::kLlCtxNone)
+          config.ctx == cursiv::engine::kLlCtxNone)
         continue;
       ++readings;
       const auto& pool = shared.contexts();
       CHECK(pool.count(config.ctx) == 1);
       CHECK(pool.ret(config.ctx, 0) == 6);
       const auto parent = pool.parent(config.ctx, 0);
-      if (parent != cursiv::kLlCtxNone) {
+      if (parent != cursiv::engine::kLlCtxNone) {
         CHECK(pool.count(parent) == 2);
         CHECK(pool.ret(parent, 0) == 4 && pool.ret(parent, 1) == 5);
       }
@@ -329,47 +330,47 @@ void compatible_closure_contexts_share_past_incompatible_readings() {
 // Widening that caller's published union must also traverse the condition
 // for T's incoming caller; updating the old position alone loses its return.
 void a_condition_reads_every_new_context_of_a_published_union() {
-  const cursiv::LlAtnState states[] = {
+  const cursiv::engine::LlAtnState states[] = {
       {.edge = 0, .nedges = 1},
       {.edge = 1, .nedges = 1},
       {.edge = 2, .nedges = 1},
       {.edge = 3, .nedges = 1},
       {.edge = 4, .nedges = 1},
       {.edge = 5, .nedges = 1},
-      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0},
       {.edge = 6, .nedges = 1},
       {.edge = 7, .nedges = 1},
   };
-  const cursiv::LlAtnEdge edges[] = {
-      {.kind = cursiv::LlEdgeKind::condition, .label = 1, .target = 3},
-      {.kind = cursiv::LlEdgeKind::condition, .label = 1, .target = 3},
-      {.kind = cursiv::LlEdgeKind::condition, .label = 1, .target = 4},
-      {.kind = cursiv::LlEdgeKind::condition, .label = 2, .target = 5},
-      {.kind = cursiv::LlEdgeKind::condition, .label = 1, .target = 3},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 8, .target = 6},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 9, .target = 6},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 10, .target = 6},
+  const cursiv::engine::LlAtnEdge edges[] = {
+      {.kind = cursiv::engine::LlEdgeKind::condition, .label = 1, .target = 3},
+      {.kind = cursiv::engine::LlEdgeKind::condition, .label = 1, .target = 3},
+      {.kind = cursiv::engine::LlEdgeKind::condition, .label = 1, .target = 4},
+      {.kind = cursiv::engine::LlEdgeKind::condition, .label = 2, .target = 5},
+      {.kind = cursiv::engine::LlEdgeKind::condition, .label = 1, .target = 3},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 8, .target = 6},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 9, .target = 6},
+      {.kind = cursiv::engine::LlEdgeKind::atom, .label = 10, .target = 6},
   };
   const std::uint32_t callerBase[] = {0, 0};
-  const cursiv::LlAtnView atn{
+  const cursiv::engine::LlAtnView atn{
       .states = states, .nstates = 9, .edges = edges, .callerBase = callerBase};
-  cursiv::LlSimulation plain(atn), shared(atn);
+  cursiv::engine::LlSimulation plain(atn), shared(atn);
   shared.share_epsilon_contexts();
-  const auto start = [](cursiv::LlSimulation& sim) {
+  const auto start = [](cursiv::engine::LlSimulation& sim) {
     sim.forget();
-    const auto a = sim.contexts().push(cursiv::kLlCtxNone, 7);
-    const auto b = sim.contexts().push(cursiv::kLlCtxNone, 8);
-    sim.load({{0, cursiv::kLlCtxNone, 0}, {1, a, 0}, {2, b, 0}});
+    const auto a = sim.contexts().push(cursiv::engine::kLlCtxNone, 7);
+    const auto b = sim.contexts().push(cursiv::engine::kLlCtxNone, 8);
+    sim.load({{0, cursiv::engine::kLlCtxNone, 0}, {1, a, 0}, {2, b, 0}});
   };
-  const auto readings = [](cursiv::LlSimulation& sim) {
+  const auto readings = [](cursiv::engine::LlSimulation& sim) {
     std::vector<std::vector<std::uint32_t>> out;
     const auto& pool = sim.contexts();
     for (const auto& c : sim.configs()) {
-      if (c.ctx == cursiv::kLlCtxNone) {
-        out.push_back({c.state, c.alt, cursiv::kLlCtxNone});
+      if (c.ctx == cursiv::engine::kLlCtxNone) {
+        out.push_back({c.state, c.alt, cursiv::engine::kLlCtxNone});
       } else {
         for (unsigned i = 0; i < pool.count(c.ctx); ++i) {
-          CHECK(pool.parent(c.ctx, i) == cursiv::kLlCtxNone);
+          CHECK(pool.parent(c.ctx, i) == cursiv::engine::kLlCtxNone);
           out.push_back({c.state, c.alt, pool.ret(c.ctx, i)});
         }
       }
@@ -425,10 +426,10 @@ void a_parse_has_a_share_of_repair_and_says_so() {
 void recursive_inventions_share_their_continuations() {
   const auto parser = tllrepairgrowth::generated::Ll::create_parser();
   for (const std::string text : {"abacbbb", "abacbb", "abacbbbb"}) {
-    cursiv::LlSearchWork::current() = {};
+    cursiv::engine::LlSearchWork::current() = {};
     const auto result = parser->parse(text);
     CHECK(result.accepted && result.value && !result.diagnostics.empty());
-    CHECK(cursiv::LlSearchWork::current().work < 200000);
+    CHECK(cursiv::engine::LlSearchWork::current().work < 200000);
   }
   for (const std::string text :
        {"c", "bc", "ca", "cb", "caa", "ccc", "ccccccc"}) {

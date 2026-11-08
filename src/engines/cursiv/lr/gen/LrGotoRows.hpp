@@ -8,7 +8,7 @@
 #include <span>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrGotoRows {
   // `guard` is the program that picks the landing, plus one.
@@ -75,4 +75,4 @@ class LrGotoColumns {
   std::vector<Link> links;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

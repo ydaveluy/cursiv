@@ -253,7 +253,7 @@ bool native(const Table& table, std::string_view name) {
 }
 template <class Cfg>
 bool normalized(Cfg cfg) {
-  cursiv::validate_lex_recursion(cfg);
+  cursiv::engine::validate_lex_recursion(cfg);
   bool optimized = true;
   for (auto name :
        {"Run", "Sequence", "Ambiguous", "Alternative", "Reversed",
@@ -262,12 +262,13 @@ bool normalized(Cfg cfg) {
     for (unsigned t = 0; t < cfg.nterms; ++t) {
       if (cfg.term_name(t) != name) continue;
       const auto root = cfg.lex[cfg.termBuild[t].lex];
-      const auto body = root.kind == cursiv::LexKind::call ? cfg.lex[root.a]
-                                                           : cursiv::LexNode{};
-      found = root.kind == cursiv::LexKind::call &&
-              root.b == cursiv::kNoLexNode &&
-              body.kind == cursiv::LexKind::rep && body.min == 1 &&
-              body.max == cursiv::kEndless;
+      const auto body = root.kind == cursiv::engine::LexKind::call
+                            ? cfg.lex[root.a]
+                            : cursiv::engine::LexNode{};
+      found = root.kind == cursiv::engine::LexKind::call &&
+              root.b == cursiv::engine::kNoLexNode &&
+              body.kind == cursiv::engine::LexKind::rep && body.min == 1 &&
+              body.max == cursiv::engine::kEndless;
     }
     CHECK(found);
     optimized &= found;
@@ -339,8 +340,10 @@ void run() {
   const auto lr = tlexbackends::generated::Lr::create_parser();
   check_backends(tlexbackends::generated::Ll::kTable);
   check_backends(tlexbackends::generated::Lr::kTable);
-  exercise(*ll, normalized(cursiv::LlLowering<trightlinear::Ll>::table().cfg));
-  exercise(*lr, normalized(cursiv::LrLowering<trightlinear::Lr>::table().cfg));
+  exercise(*ll, normalized(
+                    cursiv::engine::LlLowering<trightlinear::Ll>::table().cfg));
+  exercise(*lr, normalized(
+                    cursiv::engine::LrLowering<trightlinear::Lr>::table().cfg));
 }
 
 }  // namespace lex_right_linear_cases
@@ -350,16 +353,16 @@ namespace lex_right_linear_shape_cases {
 // Compare all endpoints against an independent small-language evaluator.
 // The generated LL/LR suite separately exercises captures and call scopes.
 namespace {
-using cursiv::kEndless;
-using cursiv::kNoLexNode;
-using cursiv::LexKind;
-using cursiv::LexNode;
+using cursiv::engine::kEndless;
+using cursiv::engine::kNoLexNode;
+using cursiv::engine::LexKind;
+using cursiv::engine::LexNode;
 
 struct Graph {
   std::uint16_t nlex = 0, nterms = 2;
   std::vector<LexNode> lex = std::vector<LexNode>(256);
   std::vector<std::uint16_t> lexKid;
-  std::vector<cursiv::ByteSet> sets;
+  std::vector<cursiv::engine::ByteSet> sets;
   struct Term {
     std::uint16_t lex = 0;
   };
@@ -371,7 +374,7 @@ struct Graph {
   }
   std::uint16_t push_lex(LexNode value) { return node(value); }
   std::uint16_t character(char c) {
-    cursiv::ByteSet set;
+    cursiv::engine::ByteSet set;
     set.add(static_cast<unsigned char>(c));
     auto at = std::find(sets.begin(), sets.end(), set);
     if (at == sets.end()) {
@@ -420,7 +423,7 @@ class Oracle {
           out.insert(pos + 1);
         break;
       case LexKind::call:
-        out = read(cursiv::lex_callee(_g, e), pos);
+        out = read(cursiv::engine::lex_callee(_g, e), pos);
         break;
       case LexKind::seq:
         out.insert(pos);
@@ -531,7 +534,7 @@ void endpoint_differential() {
          {Form::optional, Form::base_first, Form::recursive_first}) {
       auto before = grammar(shape, form), after = before;
       const auto root = before.termBuild[1].lex;
-      cursiv::detail::LexRightLinear<Graph>{after}.run();
+      cursiv::engine::LexRightLinear<Graph>{after}.run();
       CHECK(after.lex[root].kind == LexKind::call);
       CHECK(after.lex[root].b == kNoLexNode);
       const auto closure = after.lex[after.lex[root].a];
@@ -540,7 +543,7 @@ void endpoint_differential() {
       CHECK(before.lexKid == after.lexKid);
       const auto once = after.lex;
       const auto count = after.nlex;
-      cursiv::detail::LexRightLinear<Graph>{after}.run();
+      cursiv::engine::LexRightLinear<Graph>{after}.run();
       CHECK(after.nlex == count && after.lex == once);
       for (unsigned n = 0; n <= 8; ++n)
         for (unsigned bits = 0; bits < (1u << n); ++bits) {
@@ -555,7 +558,7 @@ void endpoint_differential() {
       const auto caller =
           before.list(LexKind::seq, {call, before.character('a')});
       auto called = before;
-      cursiv::detail::LexRightLinear<Graph>{called}.run();
+      cursiv::engine::LexRightLinear<Graph>{called}.run();
       CHECK(called.lex[call].kind == LexKind::call);
       for (unsigned n = 0; n < 9; ++n) {
         const std::string text(n, 'a');
@@ -578,7 +581,7 @@ void excluded_shapes() {
     const auto root = g.termBuild[1].lex;
     g.lex[g.lexKid[g.lex[root].a]].kind = kind;
     const auto old = g.lex;
-    cursiv::detail::LexRightLinear<Graph>{g}.run();
+    cursiv::engine::LexRightLinear<Graph>{g}.run();
     CHECK(g.lex == old);
   }
   {
@@ -586,7 +589,7 @@ void excluded_shapes() {
     const auto root = g.termBuild[1].lex;
     g.lex[g.lexKid[g.lex[root].a]] = LexNode{LexKind::seq, 0, 0};
     const auto old = g.lex;
-    cursiv::detail::LexRightLinear<Graph>{g}.run();
+    cursiv::engine::LexRightLinear<Graph>{g}.run();
     CHECK(g.lex == old);  // E itself is nullable
   }
   {
@@ -594,14 +597,14 @@ void excluded_shapes() {
     const auto root = g.termBuild[1].lex;
     g.lexKid[g.lex[root].a] = g.repeat(g.list(LexKind::seq, {}), 0, kEndless);
     const auto old = g.lex;
-    cursiv::detail::LexRightLinear<Graph>{g}.run();
+    cursiv::engine::LexRightLinear<Graph>{g}.run();
     CHECK(g.lex == old);  // nullable repetition must keep its refusal
   }
   {
     auto g = grammar(Prefix::single, Form::optional);
     g.sets[0] = {};
     const auto old = g.lex;
-    cursiv::detail::LexRightLinear<Graph>{g}.run();
+    cursiv::engine::LexRightLinear<Graph>{g}.run();
     CHECK(g.lex == old);  // unproductive E
   }
 }
@@ -613,7 +616,7 @@ void shared_roots_and_limits() {
     g.termBuild[2].lex = root;
     g.nterms = 3;
     const auto count = g.nlex;
-    cursiv::detail::LexRightLinear<Graph>{g}.run();
+    cursiv::engine::LexRightLinear<Graph>{g}.run();
     CHECK(g.termBuild[1].lex == root && g.termBuild[2].lex == root);
     CHECK(g.lex[root].kind == LexKind::call && g.lex[root].b == kNoLexNode);
     CHECK(g.nlex == count + 2);
@@ -627,7 +630,7 @@ void shared_roots_and_limits() {
       const auto count = g.nlex;
       const auto old = g.lex;
       const unsigned needed = shape == Prefix::single ? 1 : 2;
-      cursiv::detail::LexRightLinear<Graph>{g}.run();
+      cursiv::engine::LexRightLinear<Graph>{g}.run();
       if (spare < needed) {
         CHECK(g.nlex == count && g.lex == old);
       } else {

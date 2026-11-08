@@ -7,7 +7,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // `ruleStop` is where a call returns from, so a closure that reaches it pops
 // the caller's context; every other state is a position the closure walks
@@ -40,4 +40,4 @@ struct LlAtnEdge {
   constexpr bool operator==(const LlAtnEdge&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

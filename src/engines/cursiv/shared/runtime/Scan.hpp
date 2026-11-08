@@ -5,10 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "cursiv/utils/ImplicitLifetime.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/shared/utils/ImplicitLifetime.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct Scan {
   TextOffset end = 0;
@@ -33,4 +33,4 @@ class ScanRoom {
   alignas(Scan) std::byte _bytes[sizeof(Scan) * kRoom];
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

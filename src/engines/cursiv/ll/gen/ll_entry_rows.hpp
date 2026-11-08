@@ -9,7 +9,7 @@
 #include "cursiv/shared/gen/AstRowGen.hpp"
 #include "cursiv/shared/gen/EmitRecords.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlFinalProgram;
 
@@ -22,4 +22,4 @@ AstEntryTable ll_entry_table(const LlFinalProgram& done,
                              std::span<const AstRowGen> rows,
                              std::vector<RecordGen>& records);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

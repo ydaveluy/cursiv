@@ -5,8 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrGuard {
   static constexpr std::uint16_t kNoState = 0xffffu;
@@ -37,4 +36,4 @@ void lr_guard_key(const LrGuard& p, F&& name, std::vector<std::uint32_t>& key) {
   key.insert(key.end(), p.alts.begin(), p.alts.end());
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

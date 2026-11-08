@@ -9,7 +9,7 @@
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct StampLayout {
   unsigned rowBits = std::numeric_limits<ElementId>::digits;
@@ -47,4 +47,4 @@ struct StampLayout {
   constexpr bool operator==(const StampLayout&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

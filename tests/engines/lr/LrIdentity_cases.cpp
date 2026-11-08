@@ -75,7 +75,7 @@ namespace {
 
 namespace ast = tident::ast;
 using G = tident::G;
-using Built = cursiv::LrBuildTable;
+using Built = cursiv::engine::LrBuildTable;
 
 const cursiv::Parser& engine() {
   static const auto p = tfused::generated::Lr::create_parser();
@@ -95,7 +95,7 @@ void reads(std::string_view src) {
 // where known ends and truth begins stay apart; a condition known to hold and
 // one nothing is known of fuse.
 void minimization_reads_condition_tags_as_held() {
-  using cursiv::DynSet;
+  using cursiv::engine::DynSet;
   // Two states alike but for their tags, minimised: how many stand, and where
   // the first one's goto lands.
   const auto minimized = [](std::array<DynSet, 2> known,
@@ -108,7 +108,7 @@ void minimization_reads_condition_tags_as_held() {
     for (unsigned s = 0; s < 2; ++s) {
       a.actionBase[s] = s;
       a.actionCount[s] = 1;
-      a.actions[s] = {0, cursiv::LrActionKind::accept, 0, 0};
+      a.actions[s] = {0, cursiv::engine::LrActionKind::accept, 0, 0};
       a.gotoRows.edges.push_back({0, 1, 0});
       a.gotoRows.close_row();
       a.mode[s] = 0;
@@ -118,7 +118,7 @@ void minimization_reads_condition_tags_as_held() {
       a.tagTruth[s] = truth[s];
       CHECK(known[s].covers(truth[s]));
     }
-    cursiv::lr_minimize_states(a);
+    cursiv::engine::lr_minimize_states(a);
     return std::pair{unsigned{a.nstates}, unsigned{a.gotoRows[0][0].to}};
   };
   CHECK(minimized(
@@ -133,20 +133,21 @@ void run() {
   minimization_reads_condition_tags_as_held();
   // The control: the core graph really is the broken one -- its merge made
   // a cell the grammar does not order, and the detector named it.
-  const cursiv::LrLowered& low = cursiv::LrLowering<G>::table();
+  const cursiv::engine::LrLowered& low = cursiv::engine::LrLowering<G>::table();
   std::unique_ptr<Built> picked =
-      std::make_unique<Built>(cursiv::lr_build_automaton(low));
+      std::make_unique<Built>(cursiv::engine::lr_build_automaton(low));
   CHECK(picked->nOrdered != 0);
   CHECK(picked->nMergeInduced != 0);
 
   if (picked->nMergeInduced != 0) {
     std::unique_ptr<Built> wide =
-        std::make_unique<Built>(cursiv::lr_build_wide(low));
-    if (cursiv::lr_wider_stands(*picked, *wide)) picked = std::move(wide);
+        std::make_unique<Built>(cursiv::engine::lr_build_wide(low));
+    if (cursiv::engine::lr_wider_stands(*picked, *wide))
+      picked = std::move(wide);
   }
 
   // The picked table is deterministic and whole: the wider identity stood.
-  CHECK(picked->identity == cursiv::LrIdentity::core_plus_lookaheads);
+  CHECK(picked->identity == cursiv::engine::LrIdentity::core_plus_lookaheads);
   CHECK(picked->nconflicts == 0 && picked->nOwed == 0);
   CHECK(picked->nOrdered == 0);
   CHECK(picked->nMergeInduced == 0);
@@ -154,22 +155,23 @@ void run() {
   // A conflict one context holds whole is no merge's: the wider graph is
   // not asked about it.
   {
-    const std::unique_ptr<Built> lr2 = std::make_unique<Built>(
-        cursiv::lr_build_automaton(
-            cursiv::LrLowering<tidcase::lr2::G>::table()));
+    const std::unique_ptr<Built> lr2 =
+        std::make_unique<Built>(cursiv::engine::lr_build_automaton(
+            cursiv::engine::LrLowering<tidcase::lr2::G>::table()));
     CHECK(lr2->nOrdered != 0);
     CHECK(lr2->nMergeInduced == 0);
   }
 
   // Two canonical states that hold the same conflict cell are one state.
   {
-    const cursiv::LrLowered& sum = cursiv::LrLowering<tidcase::sum::G>::table();
+    const cursiv::engine::LrLowered& sum =
+        cursiv::engine::LrLowering<tidcase::sum::G>::table();
     const std::unique_ptr<Built> core =
-        std::make_unique<Built>(cursiv::lr_build_automaton(sum));
+        std::make_unique<Built>(cursiv::engine::lr_build_automaton(sum));
     const std::unique_ptr<Built> wide =
-        std::make_unique<Built>(cursiv::lr_build_wide(sum));
+        std::make_unique<Built>(cursiv::engine::lr_build_wide(sum));
     CHECK(core->nMergeInduced != 0);
-    CHECK(cursiv::lr_wider_stands(*core, *wide));
+    CHECK(cursiv::engine::lr_wider_stands(*core, *wide));
     CHECK(wide->nconflicts == 1);
   }
 
@@ -181,11 +183,11 @@ void run() {
     core->nOwed = wide->nOwed = 3;
     core->nconflicts = 12;
     wide->nconflicts = 4;
-    CHECK(!cursiv::lr_wider_stands(*core, *wide));
+    CHECK(!cursiv::engine::lr_wider_stands(*core, *wide));
     wide->nOwed = 2;
-    CHECK(cursiv::lr_wider_stands(*core, *wide));
+    CHECK(cursiv::engine::lr_wider_stands(*core, *wide));
     wide->overflow = true;
-    CHECK(!cursiv::lr_wider_stands(*core, *wide));
+    CHECK(!cursiv::engine::lr_wider_stands(*core, *wide));
   }
 
   reads<ast::AKid>("a c d");
@@ -259,28 +261,29 @@ struct Sites : cursiv::GrammarSpec {
 };
 
 template <class R>
-std::uint16_t symbol_named(const cursiv::LrBuildCfg& c) {
+std::uint16_t symbol_named(const cursiv::engine::LrBuildCfg& c) {
   const auto name =
       cursiv::detail::type_name<cursiv::detail::declared_of_t<R>>();
   for (std::uint16_t t = 0; t < c.nterms; ++t)
     if (c.term_name(t) == name) return t;
   for (std::uint16_t n = 0; n < c.nnts; ++n)
-    if (c.nt_name(n) == name) return cursiv::nt_sym(n);
-  return cursiv::kNoRow;
+    if (c.nt_name(n) == name) return cursiv::engine::nt_sym(n);
+  return cursiv::engine::kNoRow;
 }
 
 template <Last LastSite, bool Direct = false>
 void completion_sites_agree() {
   using G = Sites<LastSite, Direct>;
-  const auto& low = cursiv::LrLowering<G>::table();
+  const auto& low = cursiv::engine::LrLowering<G>::table();
   // Prefix's reduction stays: its expectation has no local shift site and
   // must use the proved agreement of AT's own sites or Name's callers.
-  auto a = cursiv::lr_build_automaton(low);
+  auto a = cursiv::engine::lr_build_automaton(low);
   CHECK(!a.overflow);
-  const auto registry = cursiv::ast_registry<G, cursiv::LrLowering<G>>();
-  const auto facts = cursiv::lr_record_gens(cursiv::lr_entry_table(a),
-                                            registry.rows, a.writes);
-  const auto canonical = cursiv::lr_completion_sites(facts);
+  const auto registry =
+      cursiv::engine::ast_registry<G, cursiv::engine::LrLowering<G>>();
+  const auto facts = cursiv::engine::lr_record_gens(
+      cursiv::engine::lr_entry_table(a), registry.rows, a.writes);
+  const auto canonical = cursiv::engine::lr_completion_sites(facts);
   const auto symbol = symbol_named<
       std::conditional_t<Direct, typename G::AT, typename G::Name>>(a.cfg);
   std::set<cursiv::ElementId> raw;
@@ -300,7 +303,7 @@ void completion_sites_agree() {
   CHECK(!raw.empty());
   const auto owner = facts[*raw.begin()].typeSlot;
 
-  cursiv::lr_derive_tables(a, canonical);
+  cursiv::engine::lr_derive_tables(a, canonical);
   const auto terminal = symbol_named<typename G::AT>(a.cfg);
   // The shifts naming the terminal: where every call fills one member the
   // site is that member, and one call filling another is a site of its own.
@@ -337,8 +340,8 @@ namespace case_lrmanyalternatives {
 // the one that reads another terminal.
 
 void run() {
-  const cursiv::LrBuildTable A =
-      cursiv::lr_build_automaton(cursiv::LrLowering<tmany::G>::table());
+  const cursiv::engine::LrBuildTable A = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<tmany::G>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
   // After `a` the first alternatives read `t` and one reads `u`: `t` is
   // written first, though `u` has the lesser id.
@@ -363,7 +366,8 @@ namespace case_lrchaininsert {
 namespace {
 
 // The terminal a state's list inserts first, empty where its ids order them.
-std::string_view first_inserted(const cursiv::LrBuildTable& A, unsigned s) {
+std::string_view first_inserted(const cursiv::engine::LrBuildTable& A,
+                                unsigned s) {
   const std::uint32_t k = A.insertOf[s];
   if (k == 0) return {};
   return A.cfg.term_name(A.insertWord[A.insertAt[k - 1]]);
@@ -372,8 +376,8 @@ std::string_view first_inserted(const cursiv::LrBuildTable& A, unsigned s) {
 }  // namespace
 
 void run() {
-  const cursiv::LrBuildTable A =
-      cursiv::lr_build_automaton(cursiv::LrLowering<tchaininsert::G>::table());
+  const cursiv::engine::LrBuildTable A = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<tchaininsert::G>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
   unsigned lists = 0;
   for (unsigned s = 0; s < A.nstates; ++s)
@@ -391,7 +395,7 @@ namespace case_lrinsertorder {
 namespace {
 
 // The terminals state `s` inserts in, in the order of its list.
-std::string listed(const cursiv::LrBuildTable& A, unsigned s) {
+std::string listed(const cursiv::engine::LrBuildTable& A, unsigned s) {
   const std::uint32_t k = A.insertOf[s];
   std::string out;
   if (k == 0) return out;
@@ -402,9 +406,10 @@ std::string listed(const cursiv::LrBuildTable& A, unsigned s) {
   return out;
 }
 
-bool shifts(const cursiv::LrBuildTable& A, unsigned s) {
+bool shifts(const cursiv::engine::LrBuildTable& A, unsigned s) {
   for (unsigned z = 0; z < A.actionCount[s]; ++z)
-    if (A.actions[A.actionBase[s] + z].kind == cursiv::LrActionKind::shift)
+    if (A.actions[A.actionBase[s] + z].kind ==
+        cursiv::engine::LrActionKind::shift)
       return true;
   return false;
 }
@@ -412,8 +417,8 @@ bool shifts(const cursiv::LrBuildTable& A, unsigned s) {
 }  // namespace
 
 void run() {
-  const cursiv::LrBuildTable A =
-      cursiv::lr_build_automaton(cursiv::LrLowering<tinsertorder::G>::table());
+  const cursiv::engine::LrBuildTable A = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<tinsertorder::G>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
   unsigned picks = 0, goes = 0, returns = 0;
   for (unsigned s = 0; s < A.nstates; ++s) {
@@ -435,20 +440,21 @@ namespace case_lrguards {
 
 namespace {
 
-using Built = cursiv::LrBuildTable;
+using Built = cursiv::engine::LrBuildTable;
 template <class Rule>
 struct ElectionCase : telect::Election { using entry = Rule; };
 
 // The grammar with its conditions gone: the positions they guarded stand
 // bare, and no reduction a rule is called for waits on one.
-std::unique_ptr<cursiv::LrLowered> without_conditions(
-    const cursiv::LrLowered& low) {
-  auto plain = std::make_unique<cursiv::LrLowered>(low);
+std::unique_ptr<cursiv::engine::LrLowered> without_conditions(
+    const cursiv::engine::LrLowered& low) {
+  auto plain = std::make_unique<cursiv::engine::LrLowered>(low);
   auto& g = plain->cfg;
-  cursiv::lr_guard_positions(g, plain->writes);
+  cursiv::engine::lr_guard_positions(g, plain->writes);
   std::vector<char> called(g.nnts, 0);
   for (std::uint32_t i = 0; i < g.nslots; ++i)
-    if (!cursiv::is_term(g.slotSym[i])) called[cursiv::nt_index(g.slotSym[i])] = 1;
+    if (!cursiv::engine::is_term(g.slotSym[i]))
+      called[cursiv::engine::nt_index(g.slotSym[i])] = 1;
   for (unsigned p = 0; p < g.nprods; ++p)
     if (called[g.prods[p].lhs]) g.prods[p].gap = 0;
   return plain;
@@ -456,10 +462,11 @@ std::unique_ptr<cursiv::LrLowered> without_conditions(
 
 template <class G>
 void adds_no_ambiguity(const char* label) {
-  const cursiv::LrLowered& low = cursiv::LrLowering<G>::table();
-  const auto guarded = std::make_unique<Built>(cursiv::lr_build_automaton(low));
-  const auto bare =
-      std::make_unique<Built>(cursiv::lr_build_automaton(*without_conditions(low)));
+  const cursiv::engine::LrLowered& low = cursiv::engine::LrLowering<G>::table();
+  const auto guarded =
+      std::make_unique<Built>(cursiv::engine::lr_build_automaton(low));
+  const auto bare = std::make_unique<Built>(
+      cursiv::engine::lr_build_automaton(*without_conditions(low)));
   CHECK(!guarded->overflow && !bare->overflow);
   CHECK(guarded->nOwed <= bare->nOwed);
   if (guarded->nOwed > bare->nOwed)
@@ -471,8 +478,8 @@ void adds_no_ambiguity(const char* label) {
 // guards that position, and gates nothing a rule is reduced by.
 template <class G>
 unsigned gated_reductions() {
-  const auto built = std::make_unique<Built>(
-      cursiv::lr_build_automaton(cursiv::LrLowering<G>::table()));
+  const auto built = std::make_unique<Built>(cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<G>::table()));
   unsigned n = 0;
   for (unsigned p = 0; p < built->cfg.nprods; ++p)
     n += built->cfg.prods[p].gap != 0;
@@ -492,13 +499,13 @@ struct Folded : cursiv::GrammarSpec {
 // The table keeps the programs its states name, each once.
 template <class G>
 void names_each_program_once() {
-  const auto built = std::make_unique<Built>(
-      cursiv::lr_build_automaton(cursiv::LrLowering<G>::table()));
-  const std::vector<cursiv::LrGuard>& guards = built->guards;
+  const auto built = std::make_unique<Built>(cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<G>::table()));
+  const std::vector<cursiv::engine::LrGuard>& guards = built->guards;
   std::vector<std::uint8_t> named(guards.size(), 0);
   for (unsigned s = 0; s < built->nstates; ++s) {
-    for (const cursiv::LrAction& x : built->action_row(s))
-      if (x.kind == cursiv::LrActionKind::guard) named[x.arg] = 1;
+    for (const cursiv::engine::LrAction& x : built->action_row(s))
+      if (x.kind == cursiv::engine::LrActionKind::guard) named[x.arg] = 1;
     for (const auto& e : built->gotoRows[s])
       if (e.guard != 0) named[e.guard - 1u] = 1;
   }
@@ -541,14 +548,14 @@ namespace {
 
 // The rule whose reduction the table lays first where `Whole_` and `Tail`
 // both reduce on a token.
-std::string_view first_reduction(const cursiv::LrBuildTable& A) {
+std::string_view first_reduction(const cursiv::engine::LrBuildTable& A) {
   for (unsigned s = 0; s < A.nstates; ++s)
     for (std::uint32_t k = A.actionBase[s] + 1;
          k < A.actionBase[s] + A.actionCount[s]; ++k) {
-      const cursiv::LrAction& a = A.actions[k - 1];
-      const cursiv::LrAction& b = A.actions[k];
-      if (a.term != b.term || a.kind != cursiv::LrActionKind::reduce ||
-          b.kind != cursiv::LrActionKind::reduce)
+      const cursiv::engine::LrAction& a = A.actions[k - 1];
+      const cursiv::engine::LrAction& b = A.actions[k];
+      if (a.term != b.term || a.kind != cursiv::engine::LrActionKind::reduce ||
+          b.kind != cursiv::engine::LrActionKind::reduce)
         continue;
       const std::string_view x = A.cfg.nt_name(A.cfg.prods[a.arg].lhs);
       const std::string_view y = A.cfg.nt_name(A.cfg.prods[b.arg].lhs);
@@ -562,8 +569,8 @@ std::string_view first_reduction(const cursiv::LrBuildTable& A) {
 }  // namespace
 
 void run() {
-  const cursiv::LrBuildTable A =
-      cursiv::lr_build_automaton(cursiv::LrLowering<tcornerkey::Lr>::table());
+  const cursiv::engine::LrBuildTable A = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<tcornerkey::Lr>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
   CHECK(first_reduction(A).ends_with("Whole_"));
 }
@@ -580,29 +587,30 @@ struct Cells {
   unsigned conflicts = 0, exact = 0;
 };
 
-Cells cells_of(const cursiv::LrBuildTable& A) {
+Cells cells_of(const cursiv::engine::LrBuildTable& A) {
   Cells n;
   for (unsigned s = 0; s < A.nstates; ++s)
-    cursiv::lr_each_run(A.actions.data() + A.actionBase[s], A.actionCount[s],
-                        [&](std::size_t i, std::size_t j) {
-                          if (j - i < 2) return;
-                          ++n.conflicts;
-                          n.exact += A.actions[A.actionBase[s] + i].exact;
-                        });
+    cursiv::engine::lr_each_run(
+        A.actions.data() + A.actionBase[s], A.actionCount[s],
+        [&](std::size_t i, std::size_t j) {
+          if (j - i < 2) return;
+          ++n.conflicts;
+          n.exact += A.actions[A.actionBase[s] + i].exact;
+        });
   return n;
 }
 
 void a_chain_is_ordered_for_every_text() {
-  const cursiv::LrBuildTable A =
-      cursiv::lr_build_automaton(cursiv::LrLowering<tgchain::Lr>::table());
+  const cursiv::engine::LrBuildTable A = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<tgchain::Lr>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
   const Cells n = cells_of(A);
   CHECK(n.conflicts != 0 && n.exact == n.conflicts);
 }
 
 void a_run_that_grows_by_turns_is_not() {
-  const cursiv::LrBuildTable A =
-      cursiv::lr_build_automaton(cursiv::LrLowering<ttableorder::Lr>::table());
+  const cursiv::engine::LrBuildTable A = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<ttableorder::Lr>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
   const Cells n = cells_of(A);
   CHECK(n.conflicts != 0 && n.exact < n.conflicts);
@@ -622,7 +630,7 @@ namespace case_lrwrittenorder {
 // resolved differently or an inexact order accidentally promoted to exact.
 
 namespace {
-std::uint64_t action_digest(const cursiv::LrBuildTable& a) {
+std::uint64_t action_digest(const cursiv::engine::LrBuildTable& a) {
   std::uint64_t hash = 14695981039346656037ull;
   const auto add = [&](std::uint32_t x) {
     for (unsigned i = 0; i < 4; ++i) {
@@ -649,9 +657,9 @@ std::uint64_t action_digest(const cursiv::LrBuildTable& a) {
 template <class G>
 void keeps_actions(bool wide, std::uint64_t digest, unsigned states,
                    unsigned canonical, unsigned conflicts, unsigned owed) {
-  const auto& low = cursiv::LrLowering<G>::table();
-  const auto a =
-      wide ? cursiv::lr_build_wide(low) : cursiv::lr_build_automaton(low);
+  const auto& low = cursiv::engine::LrLowering<G>::table();
+  const auto a = wide ? cursiv::engine::lr_build_wide(low)
+                      : cursiv::engine::lr_build_automaton(low);
   CHECK(!a.overflow && !a.cfg.lowerFail());
   CHECK(a.nstates == states && a.ncanonical == canonical);
   CHECK(a.nconflicts == conflicts && a.nOwed == owed);
@@ -682,25 +690,26 @@ namespace {
 namespace longrun = tpasses::generated::G;
 
 template <class G>
-std::unique_ptr<cursiv::LrBuildTable> built() {
-  return std::make_unique<cursiv::LrBuildTable>(
-      cursiv::lr_build_automaton(cursiv::LrLowering<G>::table()));
+std::unique_ptr<cursiv::engine::LrBuildTable> built() {
+  return std::make_unique<cursiv::engine::LrBuildTable>(
+      cursiv::engine::lr_build_automaton(
+          cursiv::engine::LrLowering<G>::table()));
 }
 
 template <class G>
-cursiv::LrFinalTable finished() {
+cursiv::engine::LrFinalTable finished() {
   auto a = built<G>();
   CHECK(!a->overflow);
   const std::vector<cursiv::ElementId> sites(a->writes.nchains + a->nfused,
                                              cursiv::kNoElement);
-  return cursiv::LrFinalTable::make(std::move(a), sites);
+  return cursiv::engine::LrFinalTable::make(std::move(a), sites);
 }
 
 template <class G>
 void probe_cuts(unsigned expected) {
   const auto done = finished<G>();
   unsigned cuts = 0;
-  CHECK(!cursiv::lr_emit_parser_files(done, "probes", &cuts).empty());
+  CHECK(!cursiv::engine::lr_emit_parser_files(done, "probes", &cuts).empty());
   CHECK(cuts == expected);
 }
 
@@ -716,24 +725,27 @@ void groups_spread_over_units() {
       ++n;
     return n;
   };
-  const auto lone = cursiv::lr_emit_parser_files(done, "lone");
-  CHECK(lone.size() == 2 + cursiv::kParserUnits);
+  const auto lone = cursiv::engine::lr_emit_parser_files(done, "lone");
+  CHECK(lone.size() == 2 + cursiv::engine::kParserUnits);
   CHECK(lone[0].first == "ParserStates.cpp" &&
         lone[1].first == "ParserGroups.hpp");
-  CHECK(count(lone[0].second, "static ::cursiv::LrExit states_0(") == 1);
+  CHECK(count(lone[0].second, "static ::cursiv::engine::LrExit states_0(") ==
+        1);
   for (std::size_t f = 1; f < lone.size(); ++f)
     CHECK(count(lone[f].second, "states_") == 0);
-  const auto split = cursiv::lr_emit_parser_files(done, "split", nullptr, 8);
+  const auto split =
+      cursiv::engine::lr_emit_parser_files(done, "split", nullptr, 8);
   CHECK(split.size() == lone.size());
   const std::string_view states = split[0].second;
   const std::string_view header = split[1].second;
-  const std::size_t groups = count(header, "::cursiv::LrExit states_");
+  const std::size_t groups = count(header, "::cursiv::engine::LrExit states_");
   CHECK(groups > 1);
-  CHECK(count(states, "::cursiv::LrExit drive_state(::cursiv::LrContext& c) {") ==
-        1);
-  CHECK(count(states, "::cursiv::LrExit states_") == 0);
+  CHECK(count(states,
+              "::cursiv::engine::LrExit "
+              "drive_state(::cursiv::engine::LrContext& c) {") == 1);
+  CHECK(count(states, "::cursiv::engine::LrExit states_") == 0);
   std::size_t defined = 0;
-  for (unsigned u = 0; u < cursiv::kParserUnits; ++u) {
+  for (unsigned u = 0; u < cursiv::engine::kParserUnits; ++u) {
     const auto& [name, text] = split[2 + u];
     CHECK(name == "ParserGroups" + std::to_string(u) + ".cpp");
     const std::size_t mine = count(text, "::std::uint32_t e) {");
@@ -744,7 +756,7 @@ void groups_spread_over_units() {
   // A group holds at least one line.
   bool refused = false;
   try {
-    (void)cursiv::lr_emit_parser_files(done, "empty", nullptr, 0);
+    (void)cursiv::engine::lr_emit_parser_files(done, "empty", nullptr, 0);
   } catch (const std::invalid_argument&) {
     refused = true;
   }
@@ -838,8 +850,10 @@ void run() {
 
 void run() {
   // Naming an empty guarded creation preserves the lowered condition program.
-  const auto& inlineGuards = cursiv::LrLowering<tguardedchoice::Inline>::cfg();
-  const auto& namedGuards = cursiv::LrLowering<tguardedchoice::Named>::cfg();
+  const auto& inlineGuards =
+      cursiv::engine::LrLowering<tguardedchoice::Inline>::cfg();
+  const auto& namedGuards =
+      cursiv::engine::LrLowering<tguardedchoice::Named>::cfg();
   CHECK(!inlineGuards.lowerFail() && !namedGuards.lowerFail());
   CHECK(inlineGuards.ngapConds == namedGuards.ngapConds);
   CHECK(inlineGuards.ngapLeaves == namedGuards.ngapLeaves);

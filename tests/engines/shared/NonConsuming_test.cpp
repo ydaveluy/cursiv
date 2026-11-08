@@ -58,14 +58,15 @@ struct Grammar : EmptyKinds {
 
 // `part`, where given, is the item the refusal names, as the dump spells it.
 template <auto Body>
-void refuses_empty_turns(cursiv::GrammarFaultCode expected,
+void refuses_empty_turns(cursiv::engine::GrammarFaultCode expected,
                          std::string_view part = {}) {
   using G = Grammar<Body>;
-  const auto ll = cursiv::ll_build_program(cursiv::LlLowering<G>::lower());
-  const auto lr = cursiv::LrLowering<G>::lower();
+  const auto ll =
+      cursiv::engine::ll_build_program(cursiv::engine::LlLowering<G>::lower());
+  const auto lr = cursiv::engine::LrLowering<G>::lower();
   CHECK(ll.fault.code == expected);
   CHECK(lr.fault.code == expected);
-  if (expected != cursiv::GrammarFaultCode::none) {
+  if (expected != cursiv::engine::GrammarFaultCode::none) {
     CHECK(ll.cfg.rule_name(ll.fault.rule) == "Root");
     CHECK(lr.cfg.nt_name(lr.fault.rule) == "Root");
   }
@@ -77,7 +78,7 @@ void refuses_empty_turns(cursiv::GrammarFaultCode expected,
 
 void fixed_points_require_a_finite_empty_derivation() {
   std::array<std::uint8_t, 5> values{};
-  cursiv::detail::settle_empty([&](auto mark) {
+  cursiv::engine::settle_empty([&](auto mark) {
     mark(values[0], values[1]);
     mark(values[1], values[0]);
     mark(values[2], values[3]);
@@ -92,7 +93,7 @@ void fixed_points_require_a_finite_empty_derivation() {
 
 void run() {
   using E = EmptyKinds;
-  using F = cursiv::GrammarFaultCode;
+  using F = cursiv::engine::GrammarFaultCode;
   fixed_points_require_a_finite_empty_derivation();
   refuses_empty_turns<E::many(E::ref<E::Alias>)>(F::nullableRepetition);
   refuses_empty_turns<E::some(E::ref<E::Guarded>)>(F::nullableRepetition);
@@ -237,8 +238,8 @@ struct Prose : Base {
 };
 
 template <class G>
-const cursiv::LrBuildCfg& lr() {
-  return cursiv::LrLowering<G>::table().cfg;
+const cursiv::engine::LrBuildCfg& lr() {
+  return cursiv::engine::LrLowering<G>::table().cfg;
 }
 
 // Whether a production of `lhs` (any, where empty) reads the terminal `t`.
@@ -249,7 +250,8 @@ bool lr_reads(std::string_view t, std::string_view lhs = {}) {
     const auto& q = c.prods[k];
     if (!lhs.empty() && c.nt_name(q.lhs) != lhs) continue;
     for (unsigned i = 0; i < q.len; ++i)
-      if (cursiv::is_term(c.sym_at(q, i)) && c.term_name(c.sym_at(q, i)) == t)
+      if (cursiv::engine::is_term(c.sym_at(q, i)) &&
+          c.term_name(c.sym_at(q, i)) == t)
         return true;
   }
   return false;
@@ -267,21 +269,22 @@ unsigned lr_count(std::string_view lhs) {
 // Both engines lower the grammar without a refusal.
 template <class G>
 bool lowers() {
-  const auto& r = cursiv::LrLowering<G>::table();
-  const auto& l = cursiv::LlLowering<G>::table();
+  const auto& r = cursiv::engine::LrLowering<G>::table();
+  const auto& l = cursiv::engine::LlLowering<G>::table();
   return !r.fault && !r.cfg.lowerFail() && !l.fault;
 }
 
 template <class G>
-std::vector<cursiv::DeadBranch> dead() {
+std::vector<cursiv::engine::DeadBranch> dead() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::WarningFound ctx(image);
-  return cursiv::dead_branches(ctx);
+  cursiv::engine::WarningFound ctx(image);
+  return cursiv::engine::dead_branches(ctx);
 }
 
-std::vector<std::string> texts(const std::vector<cursiv::DeadBranch>& all) {
+std::vector<std::string> texts(
+    const std::vector<cursiv::engine::DeadBranch>& all) {
   std::vector<std::string> out;
-  for (const auto& d : all) out.push_back(cursiv::dead_branch_text(d));
+  for (const auto& d : all) out.push_back(cursiv::engine::dead_branch_text(d));
   return out;
 }
 
@@ -291,7 +294,8 @@ void run() {
   const auto para = dead<Paragraph>();
   CHECK(para.size() == 1);
   CHECK(para.size() == 1 &&
-        para[0] == cursiv::DeadBranch{"Para", "ADORN !. EOL", "", 2, 2, "EOL"});
+        para[0] == cursiv::engine::DeadBranch{"Para", "ADORN !. EOL", "", 2, 2,
+                                              "EOL"});
   CHECK(texts(para) ==
         std::vector<std::string>{
             "rule `Para`: branch 2 of 2 `ADORN !. EOL` can never match -- "
@@ -373,13 +377,13 @@ cursiv::detail::ImageId call(cursiv::detail::GrammarImage& image) {
 template <class R>
 bool nothing() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::WrittenReads f(image);
+  cursiv::engine::WrittenReads f(image);
   return f.nothing(call<R>(image));
 }
 template <class R>
 bool run() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::WrittenReads f(image);
+  cursiv::engine::WrittenReads f(image);
   return f.run(call<R>(image));
 }
 
@@ -404,7 +408,7 @@ void run() {
   CHECK(!run<G::Maybe>());
 
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::WrittenReads f(image);
+  cursiv::engine::WrittenReads f(image);
   CHECK(f.run(call<G::Lead>(image)));
   CHECK(f.nothing(call<G::Ring2>(image)));
   CHECK(!f.nothing(call<G::Cycle1>(image)));
@@ -582,16 +586,16 @@ struct Ranked : Base {
 };
 
 template <class G>
-std::vector<cursiv::SelfBoundedArm> found() {
+std::vector<cursiv::engine::SelfBoundedArm> found() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  return cursiv::self_bounded_arms(image);
+  return cursiv::engine::self_bounded_arms(image);
 }
 
 template <class G>
 std::vector<std::string> said() {
   std::vector<std::string> out;
   for (const auto& a : found<G>())
-    out.push_back(cursiv::self_bounded_arm_text(a));
+    out.push_back(cursiv::engine::self_bounded_arm_text(a));
   return out;
 }
 
@@ -752,24 +756,25 @@ struct Recursive : Base {
 };
 
 template <class G>
-std::vector<cursiv::NestedRunWarning> found() {
+std::vector<cursiv::engine::NestedRunWarning> found() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::WarningFound ctx(image);
-  return cursiv::nested_run_warnings(ctx);
+  cursiv::engine::WarningFound ctx(image);
+  return cursiv::engine::nested_run_warnings(ctx);
 }
 
 template <class G>
 std::vector<std::string> said() {
   std::vector<std::string> out;
   for (const auto& w : found<G>())
-    out.push_back(cursiv::nested_run_warning_text(w));
+    out.push_back(cursiv::engine::nested_run_warning_text(w));
   return out;
 }
 
 template <class G>
 bool names(const char* rule, const char* run) {
   const auto all = found<G>();
-  return all.size() == 1 && all[0] == cursiv::NestedRunWarning{rule, run};
+  return all.size() == 1 &&
+         all[0] == cursiv::engine::NestedRunWarning{rule, run};
 }
 
 }  // namespace
@@ -866,20 +871,20 @@ struct Bounded : Base {
 };
 
 template <class G>
-std::vector<cursiv::WordLitWarning> found() {
+std::vector<cursiv::engine::WordLitWarning> found() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::WarningFound ctx(image);
-  return cursiv::word_lit_warnings(ctx);
+  cursiv::engine::WarningFound ctx(image);
+  return cursiv::engine::word_lit_warnings(ctx);
 }
 
 }  // namespace
 
 void run() {
-  using W = cursiv::WordLitWarning;
+  using W = cursiv::engine::WordLitWarning;
   const auto plain = found<Plain>();
   CHECK(plain == std::vector<W>{{"Root", "'begin'", "begin"}});
   if (plain.size() == 1)
-    CHECK(cursiv::word_lit_warning_text(plain[0]) ==
+    CHECK(cursiv::engine::word_lit_warning_text(plain[0]) ==
           "rule `Root`: `'begin'` is a literal with no guard that ends in a "
           "word character, so it also matches the start of a longer word, "
           "such as `beginx` -- write `kw<\"begin\">`, or give the literal a "
@@ -979,10 +984,10 @@ struct Spelled : Base {
 template <class G>
 std::vector<std::string> texts() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::WarningFound found(image);
+  cursiv::engine::WarningFound found(image);
   std::vector<std::string> out;
-  for (const auto& t : cursiv::twin_branches(found))
-    out.push_back(cursiv::twin_branch_text(t));
+  for (const auto& t : cursiv::engine::twin_branches(found))
+    out.push_back(cursiv::engine::twin_branch_text(t));
   return out;
 }
 
@@ -990,8 +995,9 @@ std::vector<std::string> texts() {
 template <class G>
 std::string read(std::string_view rule) {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::WarningFound found(image);
-  cursiv::TwinReader reader = cursiv::TwinReader::resolved(image);
+  cursiv::engine::WarningFound found(image);
+  cursiv::engine::TwinReader reader =
+      cursiv::engine::TwinReader::resolved(image);
   for (const std::uint32_t r : found.rules())
     if (found.name(r) == rule) return found.spell(reader.drop(found.body(r)));
   return {};
@@ -1000,23 +1006,23 @@ std::string read(std::string_view rule) {
 // Both engines lower the grammar without a refusal.
 template <class G>
 bool lowers() {
-  const auto& r = cursiv::LrLowering<G>::table();
-  const auto& l = cursiv::LlLowering<G>::table();
+  const auto& r = cursiv::engine::LrLowering<G>::table();
+  const auto& l = cursiv::engine::LlLowering<G>::table();
   return !r.fault && !r.cfg.lowerFail() && !l.fault &&
-         !cursiv::ll_build_program(l).fault;
+         !cursiv::engine::ll_build_program(l).fault;
 }
 
 // The productions of `lhs` in the table engine, and whether one calls `rule`.
 using dead_branch_cases::lr_count;
 template <class G>
 bool lr_calls(std::string_view lhs, std::string_view rule) {
-  const auto& c = cursiv::LrLowering<G>::table().cfg;
+  const auto& c = cursiv::engine::LrLowering<G>::table().cfg;
   for (std::uint16_t k = 0; k < c.nprods; ++k) {
     const auto& q = c.prods[k];
     if (c.nt_name(q.lhs) != lhs) continue;
     for (unsigned i = 0; i < q.len; ++i)
-      if (!cursiv::is_term(c.sym_at(q, i)) &&
-          c.nt_name(cursiv::nt_index(c.sym_at(q, i))) == rule)
+      if (!cursiv::engine::is_term(c.sym_at(q, i)) &&
+          c.nt_name(cursiv::engine::nt_index(c.sym_at(q, i))) == rule)
         return true;
   }
   return false;
@@ -1030,16 +1036,16 @@ struct LlBody {
 };
 template <class G>
 LlBody ll_body(std::string_view rule) {
-  const auto& c = cursiv::LlLowering<G>::table().cfg;
+  const auto& c = cursiv::engine::LlLowering<G>::table().cfg;
   LlBody out;
   for (std::uint16_t r = 1; r < c.nrules; ++r) {
     if (c.rule_name(r) != rule) continue;
     std::vector<std::uint16_t> todo{c.rules[r].body};
     while (!todo.empty()) {
-      const cursiv::LlNode& n = c.nodes[todo.back()];
+      const cursiv::engine::LlNode& n = c.nodes[todo.back()];
       todo.pop_back();
-      if (n.kind == cursiv::LlShape::alt) ++out.choices;
-      if (n.kind == cursiv::LlShape::call)
+      if (n.kind == cursiv::engine::LlShape::alt) ++out.choices;
+      if (n.kind == cursiv::engine::LlShape::call)
         out.calls.push_back(c.rule_name(n.sym));
       for (const auto k : c.children(n)) todo.push_back(k);
     }

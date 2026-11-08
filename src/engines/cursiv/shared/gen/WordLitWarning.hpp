@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class WarningFound;
 
@@ -25,4 +25,4 @@ std::vector<WordLitWarning> word_lit_warnings(WarningFound& found);
 
 std::string word_lit_warning_text(const WordLitWarning& w);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

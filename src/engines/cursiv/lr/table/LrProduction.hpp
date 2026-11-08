@@ -6,7 +6,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr std::uint16_t kLrNoProd = 0xFFFFu;
 
@@ -20,4 +20,4 @@ struct LrProduction {
   std::uint8_t guarded = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

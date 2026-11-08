@@ -2,7 +2,9 @@
 
 #include <algorithm>
 
-namespace cursiv {
+#include "cursiv/shared/utils/CoreContract.hpp"
+
+namespace cursiv::engine {
 
 WrittenReads::Slot& WrittenReads::slot(std::uint32_t rule) {
   // Readying a rule may add rules to the image.
@@ -26,44 +28,43 @@ WrittenReads::Slot& WrittenReads::slot(std::uint32_t rule) {
 // or another grammar.
 bool WrittenReads::reads_into(std::uint32_t rule) {
   if (_image.rules[rule].grammar) return false;
-  const detail::ImageRuleKind kind = _image.ready(rule).face[1].kind;
-  return kind != detail::ImageRuleKind::terminal &&
-         kind != detail::ImageRuleKind::infix &&
-         kind != detail::ImageRuleKind::grammar;
+  const ImageRuleKind kind = _image.ready(rule).face[1].kind;
+  return kind != ImageRuleKind::terminal && kind != ImageRuleKind::infix &&
+         kind != ImageRuleKind::grammar;
 }
 
-bool WrittenReads::nothing_of(detail::ImageId id) {
-  const detail::ImageNode n = _image.nodes[id];
+bool WrittenReads::nothing_of(ImageId id) {
+  const ImageNode n = _image.nodes[id];
   const auto kid = [&](std::uint32_t i) { return _image.kids[n.first + i]; };
   if (over_operand(n.kind)) return nothing_of(kid(0));
   switch (n.kind) {
-    case detail::ImageKind::epsilon:
-    case detail::ImageKind::eof:
-    case detail::ImageKind::notOf:
-    case detail::ImageKind::andOf:
-    case detail::ImageKind::gapHas:
-    case detail::ImageKind::gapIs:
-    case detail::ImageKind::implied:
+    case ImageKind::epsilon:
+    case ImageKind::eof:
+    case ImageKind::notOf:
+    case ImageKind::andOf:
+    case ImageKind::gapHas:
+    case ImageKind::gapIs:
+    case ImageKind::implied:
       return true;
-    case detail::ImageKind::seq:
-    case detail::ImageKind::unordered:
+    case ImageKind::seq:
+    case ImageKind::unordered:
       for (std::uint32_t i = 0; i < n.count; ++i)
         if (!nothing_of(kid(i))) return false;
       return true;
-    case detail::ImageKind::choice:
+    case ImageKind::choice:
       for (std::uint32_t i = 0; i < n.count; ++i)
         if (nothing_of(kid(i))) return true;
       return false;
-    case detail::ImageKind::repeat:
+    case ImageKind::repeat:
       return n.m == 0 || nothing_of(kid(0));
-    case detail::ImageKind::ref: {
+    case ImageKind::ref: {
       // An operator table reads nothing where its operand does, through every
       // table it stands on. A cycle of tables reads something: others refuse it.
       std::uint32_t rule = n.a;
       for (std::size_t hop = 0;
            hop < _image.rules.size() && !_image.rules[rule].grammar; ++hop) {
-        const detail::ImageFace& face = _image.ready(rule).face[1];
-        if (face.kind != detail::ImageRuleKind::infix) break;
+        const ImageFace& face = _image.ready(rule).face[1];
+        if (face.kind != ImageRuleKind::infix) break;
         rule = face.primary;
       }
       return reads_into(rule) ? slot(rule).nothing : false;
@@ -73,21 +74,20 @@ bool WrittenReads::nothing_of(detail::ImageId id) {
   }
 }
 
-bool WrittenReads::run_of(detail::ImageId id) {
-  const detail::ImageNode n = _image.nodes[id];
+bool WrittenReads::run_of(ImageId id) {
+  const ImageNode n = _image.nodes[id];
   const auto kid = [&](std::uint32_t i) { return _image.kids[n.first + i]; };
-  if (over_operand(n.kind) || n.kind == detail::ImageKind::embed)
-    return run_of(kid(0));
+  if (over_operand(n.kind) || n.kind == ImageKind::embed) return run_of(kid(0));
   switch (n.kind) {
-    case detail::ImageKind::repeat:
+    case ImageKind::repeat:
       return n.m < n.n && n.n > 1;
-    case detail::ImageKind::choice:
+    case ImageKind::choice:
       for (std::uint32_t i = 0; i < n.count; ++i)
         if (run_of(kid(i))) return true;
       return false;
     // A run among parts that read nothing; the first part that is neither
     // ends it.
-    case detail::ImageKind::seq: {
+    case ImageKind::seq: {
       bool run = false;
       for (std::uint32_t i = 0; i < n.count; ++i) {
         if (run_of(kid(i))) {
@@ -98,7 +98,7 @@ bool WrittenReads::run_of(detail::ImageId id) {
       }
       return run;
     }
-    case detail::ImageKind::ref:
+    case ImageKind::ref:
       return reads_into(n.a) ? slot(n.a).run : false;
     default:
       return false;
@@ -107,7 +107,7 @@ bool WrittenReads::run_of(detail::ImageId id) {
 
 bool WrittenReads::solve(std::uint32_t at) {
   const std::uint32_t rule = _slots[at].rule;
-  const detail::ImageId body = _image.ready(rule).face[1].body;
+  const ImageId body = _image.ready(rule).face[1].body;
   _solving = at;
   const bool nothing = nothing_of(body);
   const bool run = run_of(body);
@@ -139,12 +139,12 @@ bool WrittenReads::answer(Ask ask) {
   }
 }
 
-bool WrittenReads::nothing(detail::ImageId node) {
+bool WrittenReads::nothing(ImageId node) {
   return answer([&] { return nothing_of(node); });
 }
 
-bool WrittenReads::run(detail::ImageId node) {
+bool WrittenReads::run(ImageId node) {
   return answer([&] { return run_of(node); });
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

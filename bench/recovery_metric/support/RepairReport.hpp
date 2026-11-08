@@ -32,7 +32,7 @@ struct RepairReport {
   // How the cost column was counted, or why it is empty.
   std::string counter;
   // How much the parser's repair search may spend.
-  RepairBudget budget;
+  engine::RepairBudget budget;
   std::vector<std::string_view> ceilings;
   std::vector<Section> sections;
 

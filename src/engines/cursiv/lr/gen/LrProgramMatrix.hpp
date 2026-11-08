@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrProgramMatrix {
   // Per row appended, where its row starts: equal rows are laid once. None
@@ -41,4 +41,4 @@ struct LrProgramMatrix {
   std::map<std::vector<std::uint32_t>, std::uint32_t> _runs;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

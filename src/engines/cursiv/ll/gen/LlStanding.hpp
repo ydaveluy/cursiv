@@ -13,7 +13,7 @@
 #include "cursiv/ll/gen/LlBuiltProgram.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlStanding {
   // Per position, the condition ids that stand at the token it reads first.
@@ -139,4 +139,4 @@ struct LlStanding {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

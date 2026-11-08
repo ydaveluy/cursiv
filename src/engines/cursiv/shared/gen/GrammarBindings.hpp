@@ -6,13 +6,14 @@
 #include <type_traits>
 
 #include "cursiv/grammar/GrammarUtils.hpp"
-#include "cursiv/utils/typelist.hpp"
 #include "cursiv/shared/gen/RowOf.hpp"
 #include "cursiv/shared/gen/RuleRows.hpp"
 #include "cursiv/shared/gen/reached.hpp"
 #include "cursiv/shared/runtime/ast_fields.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/utils/typelist.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 template <class R>
 struct row_classes;
@@ -62,6 +63,6 @@ using rule_staged_t =
     typename GrammarBindings<G>::stage::template rule<rule_bound_t<G, I>>;
 
 template <class G, std::size_t I>
-using rule_override_t = ov::slot_decl_t<rule_staged_t<G, I>>;
+using rule_override_t = detail::ov::slot_decl_t<rule_staged_t<G, I>>;
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

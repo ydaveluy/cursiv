@@ -22,7 +22,7 @@
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A lexer's DFA states as ladder rungs of the generated walk; each reader
 // supplies its match and run policy, so the normal walk keeps its shortcuts.
@@ -61,7 +61,7 @@ class LexDfaEmitter {
       const unsigned s = out[i];
       for (unsigned c = 0; c < _ncls; ++c) {
         const unsigned t = next(s, c);
-        if (t == cursiv::kDeadState || t >= n || seen[t]) continue;
+        if (t == kDeadState || t >= n || seen[t]) continue;
         seen[t] = 1;
         out.push_back(t);
       }
@@ -513,7 +513,8 @@ struct LexWalkRungs : TextBuilder {
     if (to == kDeadState || (spelled && !spelled[to]) || view.accept(to) == 0 ||
         view.bounded(to) || view.relay(to) != kNoRelay)
       return;
-    line("  if (i < len && ::cursiv::lex_boundary(", cfg, ").at(", bound,
+    line("  if (i < len && ::cursiv::engine::lex_boundary(", cfg, ").at(",
+         bound,
          ", src, i, len)) "
          "{ ++i; goto W",
          to, "; }");
@@ -561,18 +562,19 @@ void lex_emit_relay_runs(TextBuilder& o, const LexDfaEmitter& dfa,
 
 // The byte-run helpers a generated walk reads, from the shared runtime.
 inline void lex_emit_byte_runs(TextBuilder& o) {
-  o.line("using ::cursiv::eq8;");
-  o.line("using ::cursiv::in_set;");
-  o.line("using ::cursiv::kHi;");
-  o.line("using ::cursiv::ld64;");
-  o.line("using ::cursiv::lt8;");
-  o.line("using ::cursiv::rng8;");
+  o.line("using ::cursiv::engine::eq8;");
+  o.line("using ::cursiv::engine::in_set;");
+  o.line("using ::cursiv::engine::kHi;");
+  o.line("using ::cursiv::engine::ld64;");
+  o.line("using ::cursiv::engine::lt8;");
+  o.line("using ::cursiv::engine::rng8;");
   o.line("");
 }
 
 // The signature of the walk of every mode.
 inline constexpr std::string_view kLexWalkSignature =
-    "::cursiv::Scan walk_all(const char* src, ::cursiv::TextOffset len,\n"
+    "::cursiv::engine::Scan walk_all(const char* src, ::cursiv::TextOffset "
+    "len,\n"
     "         ::std::uint16_t mode, ::cursiv::TextOffset i)";
 
 // The walk of every mode as one function, `walk_all(src, len, mode, i)`: a
@@ -601,7 +603,7 @@ void lex_emit_walk(TextBuilder& o, const LexDfaEmitter& dfa, Policy& policy,
   o.line(linkage, kLexWalkSignature, " {");
   o.write(R"(  const ::cursiv::TextOffset start = i;
   ::cursiv::TextOffset far = i;
-  ::cursiv::LexMatch match{i, 0xFFFFu};
+  ::cursiv::engine::LexMatch match{i, 0xFFFFu};
   [[maybe_unused]] auto& end = match.end;
   [[maybe_unused]] auto& term = match.term;
   unsigned char b;
@@ -628,4 +630,4 @@ void lex_emit_walk(TextBuilder& o, const LexDfaEmitter& dfa, Policy& policy,
   policy.walk_foot();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -18,7 +18,7 @@
 #include "cursiv/shared/gen/ChainPool.hpp"
 #include "cursiv/shared/gen/KeepFirst.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlRecordPlan {
  public:
@@ -332,4 +332,4 @@ class LlRecordPlan {
   KeepFirst _keepFirst;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

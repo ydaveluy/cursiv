@@ -10,12 +10,10 @@
 #include "cursiv/shared/gen/GrammarFault.hpp"
 #include "cursiv/shared/gen/InfixOp.hpp"
 #include "cursiv/shared/gen/optional_shape.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
-namespace detail {
-struct GrammarImage;
-}  // namespace detail
 struct LowerDesc;
 
 struct LrLowered {
@@ -36,6 +34,6 @@ struct LrLowered {
 
 // A `desc.optionalGate` past `kOptionalGateMost` throws
 // `std::invalid_argument`.
-LrLowered lr_lower(detail::GrammarImage& image, const LowerDesc& desc);
+LrLowered lr_lower(GrammarImage& image, const LowerDesc& desc);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

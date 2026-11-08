@@ -12,7 +12,7 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Tape>
 class LexFailedWalks {
@@ -80,4 +80,4 @@ class LexFailedWalks {
   std::vector<Stood> _stood;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

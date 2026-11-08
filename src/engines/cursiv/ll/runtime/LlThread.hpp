@@ -7,7 +7,7 @@
 #include "cursiv/ll/runtime/LlHistory.hpp"
 #include "cursiv/ll/table/LlSimulation.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // No rule completed between a token and the reading that reads the next.
 inline constexpr std::uint32_t kLlNoReduce = 0xFFFFFFFFu;
@@ -27,4 +27,4 @@ struct LlThread {
   std::uint32_t kernel = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

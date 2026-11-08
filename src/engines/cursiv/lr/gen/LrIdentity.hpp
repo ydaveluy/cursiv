@@ -4,8 +4,8 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 enum class LrIdentity : std::uint8_t { core_plus_lookaheads, core };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

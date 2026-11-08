@@ -17,21 +17,21 @@
 #include <vector>
 
 #include "cursiv/grammar/ElementId.hpp"
-#include "cursiv/syntax-tree/CstLeaf.hpp"
-#include "cursiv/text/white_space.hpp"
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/lr/runtime/LrGssIndex.hpp"
 #include "cursiv/lr/runtime/LrVirtualAt.hpp"
 #include "cursiv/lr/runtime/lr_lookahead.hpp"
 #include "cursiv/lr/runtime/lr_refusal.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
-#include "cursiv/shared/runtime/LexByteRun.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
+#include "cursiv/shared/runtime/LexByteRun.hpp"
 #include "cursiv/shared/runtime/token_end_from.hpp"
 #include "cursiv/shared/table/CondReach.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
+#include "cursiv/shared/utils/white_space.hpp"
+#include "cursiv/syntax-tree/CstLeaf.hpp"
+#include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 namespace {
 
@@ -2498,4 +2498,4 @@ void lr_next_features_at(const LrCaretTable& table,
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

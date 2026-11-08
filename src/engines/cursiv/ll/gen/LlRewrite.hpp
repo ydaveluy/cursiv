@@ -7,8 +7,9 @@
 #include "cursiv/shared/gen/InfixLevel.hpp"
 #include "cursiv/shared/gen/InfixOp.hpp"
 #include "cursiv/shared/gen/reached.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv::detail::llow {
+namespace cursiv::engine::llow {
 
 struct Rewrite {
   // The fold rule by its three named parameters alone: a stage's rule has no
@@ -27,4 +28,4 @@ struct Rewrite {
   using infix_src = pay_text<infix_op_src<Op, P>>;
 };
 
-}  // namespace cursiv::detail::llow
+}  // namespace cursiv::engine::llow

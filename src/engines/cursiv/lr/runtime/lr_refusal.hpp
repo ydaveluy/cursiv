@@ -14,7 +14,7 @@
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What `lr_graph_takes` works in, kept by its caller from one call to the next:
 // the containers keep their room, and a vertex is marked reached by the step
@@ -156,4 +156,4 @@ inline void lr_refused_ties(Token at, Without&& without, Ties&& ties,
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

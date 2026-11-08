@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrWalkMemo {
  public:
@@ -53,4 +53,4 @@ class LrWalkMemo {
   std::vector<Slot> _slots;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

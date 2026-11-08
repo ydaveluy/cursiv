@@ -25,19 +25,19 @@
 namespace {
 
 constexpr std::uint64_t kAll = std::numeric_limits<std::uint64_t>::max();
-constexpr cursiv::RepairBudget kBudgets[] = {
+constexpr cursiv::engine::RepairBudget kBudgets[] = {
     {.floor = 0, .perByte = 0, .perSearch = 0, .perParse = 0},
     {.floor = 4096, .perByte = 0, .perSearch = 1, .perParse = 4096},
     {.floor = kAll, .perByte = kAll, .perSearch = kAll, .perParse = 128}};
 
-std::unique_ptr<cursiv::Parser> parser(bool predictive,
-                                      const cursiv::RepairBudget& budget) {
+std::unique_ptr<cursiv::Parser> parser(
+    bool predictive, const cursiv::engine::RepairBudget& budget) {
   namespace ll = tpar::generated::Ll;
   namespace lr = tpar::generated::Lr;
   if (predictive)
-    return std::make_unique<cursiv::LlLanguageParser<ll::kTable>>(
+    return std::make_unique<cursiv::engine::LlLanguageParser<ll::kTable>>(
         ll::kGrammarMetaData, ll::kAstActions, ll::kDrive, budget);
-  return std::make_unique<cursiv::LrLanguageParser<lr::kTable>>(
+  return std::make_unique<cursiv::engine::LrLanguageParser<lr::kTable>>(
       lr::kGrammarMetaData, lr::kAstActions, lr::kDrive, budget);
 }
 
@@ -94,10 +94,11 @@ void a_saturated_budget_still_respects_the_parse_ceiling() {
   for (unsigned i = 0; i < 400; ++i) text += "let a = ; show b;\n";
   for (const auto& budget : {kBudgets[0], kBudgets[2]}) {
     const auto engine = parser(true, budget);
-    cursiv::LlSearchWork::current() = {};
+    cursiv::engine::LlSearchWork::current() = {};
     const auto result = engine->parse(text);
     CHECK(result.accepted && result.value && bounded(result));
-    CHECK(cursiv::LlSearchWork::current().work <= budget.perParse + 1024);
+    CHECK(cursiv::engine::LlSearchWork::current().work <=
+          budget.perParse + 1024);
   }
 }
 
@@ -108,12 +109,12 @@ void a_repair_does_not_pay_for_the_text_behind_it() {
   std::string text = "show 1 + , 2;\n";
   for (unsigned i = 0; i < 40000; ++i) text += "show 3;\n";
   for (const bool predictive : {false, true}) {
-    const auto engine = parser(predictive, cursiv::RepairBudget{});
-    cursiv::LlSearchWork::current() = {};
+    const auto engine = parser(predictive, cursiv::engine::RepairBudget{});
+    cursiv::engine::LlSearchWork::current() = {};
     const auto result = engine->parse(text);
     CHECK(result.accepted && result.value && !bounded(result));
     CHECK(result.diagnostics.size() == 1);
-    if (predictive) CHECK(cursiv::LlSearchWork::current().work < 4096);
+    if (predictive) CHECK(cursiv::engine::LlSearchWork::current().work < 4096);
   }
 }
 
@@ -121,12 +122,12 @@ void a_repair_does_not_pay_for_the_text_behind_it() {
 // must come to, however long the stretch it has to read past.
 void one_cheap_repair(const std::string& text, std::uint64_t most) {
   for (const bool predictive : {false, true}) {
-    const auto engine = parser(predictive, cursiv::RepairBudget{});
-    cursiv::LlSearchWork::current() = {};
+    const auto engine = parser(predictive, cursiv::engine::RepairBudget{});
+    cursiv::engine::LlSearchWork::current() = {};
     const auto result = engine->parse(text);
     CHECK(result.accepted && result.value && !bounded(result));
     CHECK(result.diagnostics.size() == 1);
-    if (predictive) CHECK(cursiv::LlSearchWork::current().work < most);
+    if (predictive) CHECK(cursiv::engine::LlSearchWork::current().work < most);
   }
 }
 

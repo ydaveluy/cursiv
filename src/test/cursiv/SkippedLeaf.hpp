@@ -10,7 +10,8 @@ namespace cursiv::test::detail {
 
 inline bool skipped_leaf(const cursiv::Grammar& grammar,
                          const cursiv::CstNode& n) {
-  const auto* stamped = dynamic_cast<const cursiv::StampedGrammar*>(&grammar);
+  const auto* stamped =
+      dynamic_cast<const cursiv::engine::StampedGrammar*>(&grammar);
   return n.recovered && stamped != nullptr && stamped->stamp().state(n) == 0;
 }
 

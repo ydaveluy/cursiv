@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrFinalTable;
 
@@ -28,4 +28,4 @@ std::vector<std::pair<std::string, std::string>> lr_emit_parser_files(
 
 std::string lr_emit_parser_decl(const LrFinalTable& done, std::string_view ns);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

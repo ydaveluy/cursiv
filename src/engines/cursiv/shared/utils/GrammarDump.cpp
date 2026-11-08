@@ -1,11 +1,11 @@
-#include "cursiv/grammar/GrammarDump.hpp"
+#include "cursiv/shared/utils/GrammarDump.hpp"
 
 #include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 namespace {
 
 // Each alternative is a contiguous run of `body`: nothing is rewritten, and
@@ -116,4 +116,4 @@ std::string dump_wrapped(std::string_view text, std::size_t width) {
   return out;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

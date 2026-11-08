@@ -10,7 +10,7 @@
 #include "cursiv/ll/table/LlAtn.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The descent's levels, as a read ahead of it owns them. Only the active ones
 // are copied: the arena's closed blocks would cost a long document its square.
@@ -104,4 +104,4 @@ inline bool ll_indent_read(const char* src, TextOffset len,
                                    p, out, [held] { return held; }, reached);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

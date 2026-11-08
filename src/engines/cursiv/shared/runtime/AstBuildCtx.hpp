@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "cursiv/shared/table/StampLayout.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
@@ -19,17 +20,14 @@
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct AstActions;
-namespace detail {
-class AstArena;
 struct TextValues;
-}  // namespace detail
 
 struct AstBuildCtx {
   const Cst* cst = nullptr;
-  detail::AstArena* arena = nullptr;
+  AstArena* arena = nullptr;
   std::vector<RefHandle>* refs = nullptr;
   // What a reference will ask when it is read, planted at the write.
   const RefHome* home = nullptr;
@@ -47,7 +45,7 @@ struct AstBuildCtx {
   // built and dropped.
   std::size_t attached = 0;
   // Scoped to one text query; independent writes still run their converters.
-  detail::TextValues* textValues = nullptr;
+  TextValues* textValues = nullptr;
   // Nodes made and not yet on `nodes`, which takes them a run at a time: the
   // list's own append is a call where this is a store.
   static constexpr std::size_t kMadeRun = 256;
@@ -97,4 +95,4 @@ struct AstBuildCtx {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

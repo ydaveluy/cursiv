@@ -6,7 +6,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrProdBuild {
   // The source alternative and the greedy subset inside it: a larger subset
@@ -46,4 +46,4 @@ struct LrProdBuild {
   constexpr bool operator==(const LrProdBuild&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

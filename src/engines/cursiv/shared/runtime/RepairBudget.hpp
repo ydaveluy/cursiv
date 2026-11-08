@@ -10,7 +10,7 @@
 
 #include "cursiv/text/TextOffset.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The real tokens a reading takes past its last gesture before the repair
 // holds: a search's goal.
@@ -88,4 +88,4 @@ inline std::uint64_t repair_allot(const RepairBudget& b, TextOffset len) {
   return std::min(sum, b.perParse);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

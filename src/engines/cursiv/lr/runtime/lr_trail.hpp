@@ -27,7 +27,7 @@
 #include "cursiv/shared/runtime/LexTape.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& A>
 inline constexpr bool kLrTrails = A.cold.electWord.size() != 0;
@@ -554,4 +554,4 @@ bool lr_trail_meet(LrContext& c, LrShadow& a, const LrShadow& b,
   return true;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

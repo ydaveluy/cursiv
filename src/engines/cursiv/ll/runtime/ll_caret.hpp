@@ -34,7 +34,7 @@
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Tokens a replay takes when no record narrows it further.
 inline constexpr unsigned kLlReplayLeaves = 32;
@@ -1414,4 +1414,4 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

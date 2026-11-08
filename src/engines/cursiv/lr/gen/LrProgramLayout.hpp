@@ -8,7 +8,7 @@
 #include "cursiv/lr/gen/LrProgramMatrix.hpp"
 #include "cursiv/lr/gen/LrBuildTable.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrProgramLayout {
   explicit LrProgramLayout(const LrBuildTable& a);
@@ -21,4 +21,4 @@ struct LrProgramLayout {
   unsigned countBits = 1;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

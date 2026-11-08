@@ -8,7 +8,7 @@
 
 #include "cursiv/utils/RoundMarks.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // One stamp per id a list can hold, so a list costs its own length however many
 // ids it repeats.
@@ -33,4 +33,4 @@ class KeepFirst {
   std::uint64_t* _reads;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

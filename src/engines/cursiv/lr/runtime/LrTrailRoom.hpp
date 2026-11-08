@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrTrailRoom {
   static constexpr std::uint32_t kNone = ~std::uint32_t{0};
@@ -92,4 +92,4 @@ struct LrTrailRoom {
   std::vector<Walk> walkLeft, walkRight;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

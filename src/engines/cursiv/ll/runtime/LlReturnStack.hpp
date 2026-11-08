@@ -11,7 +11,7 @@
 
 #include "cursiv/ll/table/LlSimulation.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlReturnStack {
  public:
@@ -52,4 +52,4 @@ class LlReturnStack {
   mutable std::size_t _met = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

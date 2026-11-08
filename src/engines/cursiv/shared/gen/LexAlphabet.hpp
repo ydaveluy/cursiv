@@ -26,7 +26,7 @@
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexAlphabet {
   LexNfaPool nfa;
@@ -202,4 +202,4 @@ struct LexAlphabet {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

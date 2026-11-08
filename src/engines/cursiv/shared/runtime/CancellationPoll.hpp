@@ -9,7 +9,7 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class CancellationPoll {
  public:
@@ -63,4 +63,4 @@ class ThreadStop {
   const CancellationToken* _previous;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

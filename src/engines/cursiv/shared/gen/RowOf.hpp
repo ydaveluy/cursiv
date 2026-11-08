@@ -3,10 +3,11 @@
 // every answer is a template argument.
 #pragma once
 
-#include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/shared/gen/Row.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/syntax-tree/AstField.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 template <class R>
 struct row_of;
@@ -32,4 +33,4 @@ template <class R>
 inline constexpr bool row_writes = row_of<R>::kind == WriteKind::assign ||
                                    row_of<R>::kind == WriteKind::append;
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

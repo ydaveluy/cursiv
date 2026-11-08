@@ -12,7 +12,7 @@
 #include "cursiv/shared/runtime/LexReading.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& T>
 inline LexReading ll_lex_reading(const char* src, TextOffset len,
@@ -70,4 +70,4 @@ inline TextOffset ll_drop_end(LlContext& c, const Token& t) {
   return ll_unmatched_end<T>(c, t.begin, c.len, reached);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

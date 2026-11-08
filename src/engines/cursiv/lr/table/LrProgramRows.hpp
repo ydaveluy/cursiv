@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <span>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Row, class Index, class Value>
 struct LrProgramRows {
@@ -26,4 +26,4 @@ struct LrProgramRows {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

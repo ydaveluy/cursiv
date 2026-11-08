@@ -6,7 +6,7 @@
 #include <string_view>
 #include <tuple>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 std::vector<RecordGen> lr_record_gens(const AstEntryTable& table,
                                       std::span<const AstRowGen> rows,
@@ -38,4 +38,4 @@ std::vector<ElementId> lr_completion_sites(
   return result;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

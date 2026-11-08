@@ -11,7 +11,7 @@
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 namespace {
 
 // A new condition: `a` and `b`. Zero when no id is left.
@@ -147,4 +147,4 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
   return ok && !writes.capped;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

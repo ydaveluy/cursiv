@@ -8,7 +8,7 @@
 #include "cursiv/ll/table/LlDfa.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // `single` names an arm one token tells apart, which is a switch; `staged`
 // walks an automaton the construction closed; `adaptive` is the episode's.
@@ -39,4 +39,4 @@ struct LlDecision {
   constexpr bool operator==(const LlDecision&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

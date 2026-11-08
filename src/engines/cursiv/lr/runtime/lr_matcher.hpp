@@ -9,8 +9,6 @@
 #include <span>
 #include <type_traits>
 
-#include "cursiv/utils/Utf8.hpp"
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/lr/table/LrLexElse.hpp"
 #include "cursiv/shared/runtime/LexBoundary.hpp"
 #include "cursiv/shared/runtime/LexByteRun.hpp"
@@ -18,8 +16,11 @@
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/utils/Utf8.hpp"
+#include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& A>
 CURSIV_ALWAYS_INLINE inline bool lr_skips(std::uint16_t mode, unsigned char b) {
@@ -85,7 +86,7 @@ inline TextOffset lr_else_reach(std::uint16_t s, const char* src, TextOffset i,
        ++k)
     if (A.derived.lexElseRows[k].scalar != 0 &&
         A.derived.lexElseRows[k].bytes.has(b)) {
-      const auto n = static_cast<TextOffset>(detail::utf8_width(src[i]));
+      const auto n = static_cast<TextOffset>(utf8_width(src[i]));
       return i + n < len ? i + n : len;
     }
   return i + 1;
@@ -227,4 +228,4 @@ constexpr SymbolId lr_text_close(std::uint32_t st) {
   return lr_mode_close<A>(A.mode[st]);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

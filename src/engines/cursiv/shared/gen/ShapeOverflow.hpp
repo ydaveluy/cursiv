@@ -1,7 +1,7 @@
 // The first shape limit a construction ran into, named for what it bounds.
 #pragma once
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct ShapeOverflow {
   bool overflow = false;
@@ -13,4 +13,4 @@ struct ShapeOverflow {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

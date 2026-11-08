@@ -6,7 +6,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LexMarkRun {
  public:
@@ -42,4 +42,4 @@ class LexMarkRun {
   bool _known = false;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

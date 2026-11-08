@@ -9,7 +9,7 @@
 #include "cursiv/ll/gen/LlBuiltProgram.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Per state of the graph, what its rule reads from there on before it ends,
 // and whether it may end reading nothing. A condition is crossed as if it
@@ -69,4 +69,4 @@ struct LlExitReads {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

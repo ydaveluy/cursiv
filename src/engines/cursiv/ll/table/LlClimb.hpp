@@ -9,7 +9,7 @@
 #include "cursiv/grammar/Association.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlClimbOp {
   // The position reading this operator, including its condition and writes.
@@ -43,4 +43,4 @@ struct LlClimb {
   constexpr bool operator==(const LlClimb&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

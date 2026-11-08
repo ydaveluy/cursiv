@@ -6,7 +6,7 @@
 
 #include "cursiv/grammar/ElementId.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrReduceName {
   std::uint16_t slot = 0;
@@ -16,4 +16,4 @@ struct LrReduceName {
   auto operator<=>(const LrReduceName&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

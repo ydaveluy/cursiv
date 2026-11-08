@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class WarningFound;
 
@@ -28,4 +28,4 @@ std::vector<DeadBranch> dead_branches(WarningFound& found);
 
 std::string dead_branch_text(const DeadBranch& d);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

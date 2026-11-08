@@ -12,9 +12,7 @@
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
-
-namespace detail {
+namespace cursiv::engine {
 
 // A successful empty derivation needs a finite proof; a cycle alone is not one.
 template <class Visit>
@@ -29,8 +27,6 @@ void settle_empty(Visit&& visit) {
     });
   }
 }
-
-}  // namespace detail
 
 enum class LowerFail : std::uint8_t {
   none = 0,
@@ -353,4 +349,4 @@ std::string lower_fail_sentence(const Cfg& c, std::string_view rule = {}) {
   return "the grammar " + text;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

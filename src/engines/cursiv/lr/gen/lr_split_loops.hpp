@@ -16,7 +16,7 @@
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline void lr_split_loops(LrLowered& o) {
   LrBuildCfg& c = o.cfg;
@@ -125,4 +125,4 @@ inline void lr_split_loops(LrLowered& o) {
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

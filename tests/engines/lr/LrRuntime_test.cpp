@@ -45,6 +45,7 @@ namespace runtime_state {
 
 namespace {
 using namespace cursiv;
+using namespace cursiv::engine;
 
 constexpr StampLayout kStamp{};
 
@@ -352,7 +353,7 @@ namespace stack {
 
 void run() {
   for (const unsigned capacity : {1u, 64u, 128u}) {
-    cursiv::LrStack alias;
+    cursiv::engine::LrStack alias;
     alias.reserve(capacity);
     for (unsigned i = 0; i < capacity; ++i) alias.push({1, 2, 3, 4, i});
     alias.push(alias[0]);
@@ -363,7 +364,7 @@ void run() {
     alias.push(alias[capacity - 1]);
     CHECK(alias.top().word == capacity - 1);
   }
-  cursiv::LrStack stack;
+  cursiv::engine::LrStack stack;
   stack.reserve(1);
   stack.push({0, 1, 2, 3, 4});
   for (std::uint32_t i = 1; i != 257; ++i) {
@@ -397,7 +398,7 @@ using cursiv::CstRun;
 using cursiv::kNoElement;
 using cursiv::NodeId;
 
-constexpr cursiv::StampLayout kStamp{};
+constexpr cursiv::engine::StampLayout kStamp{};
 constexpr cursiv::ElementId kEntry = 7, kRow = 3;
 const std::uint32_t kBare = kStamp.make(kNoElement, 0);
 const std::uint32_t kNamed = kStamp.make(kRow, 0);
@@ -405,7 +406,7 @@ const std::uint32_t kNamed = kStamp.make(kRow, 0);
 // Whether the roof laid its close, and that what it laid spans the whole run.
 bool roofed(CstRun& run, NodeId root, const char* what) {
   const cursiv::NodeCount was = run.records();
-  cursiv::lr_roof_forest<kStamp>(run, root, kEntry);
+  cursiv::engine::lr_roof_forest<kStamp>(run, root, kEntry);
   if (run.records() == was) return false;
   const cursiv::CstNode& lid = run.at(run.records() - 1);
   if (!lid.recovered || lid.begin != run.at(0).begin ||
@@ -522,14 +523,14 @@ const cursiv::Parser& service() {
 // Every record names a row of the table or none, and a state of the table;
 // the count is of the records the full row would misread.
 unsigned misread_by_the_full_row(const cursiv::Cst& cst) {
-  constexpr cursiv::StampLayout L = g::kTable.stamp;
+  constexpr cursiv::engine::StampLayout L = g::kTable.stamp;
   unsigned misread = 0;
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
     const cursiv::CstNode& n = cst[i];
     const cursiv::ElementId row = L.row(n);
     CHECK(row == cursiv::kNoElement || row < g::kAstActions.entryCount);
     CHECK(L.state(n) < g::kTable.nstates);
-    if (cursiv::StampLayout{}.row(n) != row) ++misread;
+    if (cursiv::engine::StampLayout{}.row(n) != row) ++misread;
   }
   return misread;
 }
@@ -581,8 +582,8 @@ void run() {
 namespace cactus_rewind {
 
 void run() {
-  cursiv::LrCactus cactus;
-  const std::uint32_t root = cactus.intern(1, cursiv::kLrNoNode);
+  cursiv::engine::LrCactus cactus;
+  const std::uint32_t root = cactus.intern(1, cursiv::engine::kLrNoNode);
   const std::uint32_t a = cactus.intern(2, root);
   const std::uint32_t b = cactus.intern(3, root);
   CHECK(cactus.intern(2, root) == a);
@@ -591,18 +592,18 @@ void run() {
   const std::uint32_t d = cactus.intern(5, c);
   // A hit moves its node to the front of its siblings.
   CHECK(cactus.intern(3, root) == b && cactus.intern(2, root) == a);
-  const std::uint32_t other = cactus.intern(9, cursiv::kLrNoNode);
-  cactus.begin_push(7, cursiv::kLrNoNode);
+  const std::uint32_t other = cactus.intern(9, cursiv::engine::kLrNoNode);
+  cactus.begin_push(7, cursiv::engine::kLrNoNode);
   CHECK(c > b && d > c && other > d);
   cactus.rewind(mark);
   CHECK(cactus.intern(2, root) == a && cactus.intern(3, root) == b);
   // The ids that were given up are laid again, and the roots forget theirs.
   CHECK(cactus.intern(4, root) == c);
-  CHECK(cactus.intern(9, cursiv::kLrNoNode) == d);
+  CHECK(cactus.intern(9, cursiv::engine::kLrNoNode) == d);
   CHECK(cactus.depth(a) == 2 && cactus.parent(b) == root);
   // Each new child steps past every sibling before it, and the search pays.
-  cursiv::LrCactus wide;
-  const std::uint32_t top = wide.intern(0, cursiv::kLrNoNode);
+  cursiv::engine::LrCactus wide;
+  const std::uint32_t top = wide.intern(0, cursiv::engine::kLrNoNode);
   for (std::uint16_t s = 1; s <= 64; ++s) wide.intern(s, top);
   CHECK(wide.pay(32) == 63 && wide.pay(1) == 0);
 }

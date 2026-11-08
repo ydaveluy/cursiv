@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A bound the parse met is named here, never a silent ceiling.
 struct LrParseStats {
@@ -41,4 +41,4 @@ struct LrParseStats {
   std::uint32_t searchRoom = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

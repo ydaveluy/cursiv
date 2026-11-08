@@ -19,15 +19,15 @@
 
 namespace {
 
-using cursiv::kDeadState;
+using cursiv::engine::kDeadState;
 
 // Terminal 0 is the blank trivia, 1 a token, 2 a trivia the tape records.
 struct Automaton {
   unsigned nclasses = 0;
   std::vector<std::uint16_t> rows{};
   std::vector<std::uint16_t> accepts{};
-  std::vector<cursiv::TermInfo> terms = [] {
-    std::vector<cursiv::TermInfo> out(3);
+  std::vector<cursiv::engine::TermInfo> terms = [] {
+    std::vector<cursiv::engine::TermInfo> out(3);
     out[0].trivia = true;
     out[2].trivia = true;
     out[2].recorded = true;
@@ -45,8 +45,12 @@ struct Automaton {
   }
   [[nodiscard]] std::uint16_t accept(std::uint16_t s) const { return accepts[s]; }
   [[nodiscard]] bool bounded(std::uint16_t) const { return false; }
-  [[nodiscard]] std::uint16_t relay(std::uint16_t) const { return cursiv::kNoRelay; }
-  [[nodiscard]] const cursiv::TermInfo& term(unsigned t) const { return terms[t]; }
+  [[nodiscard]] std::uint16_t relay(std::uint16_t) const {
+    return cursiv::engine::kNoRelay;
+  }
+  [[nodiscard]] const cursiv::engine::TermInfo& term(unsigned t) const {
+    return terms[t];
+  }
 };
 
 struct Read {
@@ -126,7 +130,7 @@ void any_text_reads_the_same_with_the_blind_bytes() {
   std::string text;
   for (unsigned round = 0; round < 40000; ++round) {
     const Automaton a = random_automaton(random);
-    const cursiv::LexSkipRuns set = cursiv::lex_skip_runs(a);
+    const cursiv::engine::LexSkipRuns set = cursiv::engine::lex_skip_runs(a);
     const auto holds = [](const std::vector<std::uint64_t>& words,
                           unsigned char b) {
       return ((words[b >> 6] >> (b & 63u)) & 1u) != 0;
@@ -202,10 +206,10 @@ constexpr std::uint16_t kX = kDeadState;
 // Bytes: 0 a blank, 1 and 2 a longer blank character, 3 a word byte.
 void the_rule_says_what_it_should_on_each_shape() {
   const auto blind_blank = [](const Automaton& a) {
-    return (cursiv::lex_skip_runs(a).skip[0] & 1u) != 0;
+    return (cursiv::engine::lex_skip_runs(a).skip[0] & 1u) != 0;
   };
   const auto stop_on = [](const Automaton& a, unsigned b) {
-    return ((cursiv::lex_skip_runs(a).stop[0] >> b) & 1u) != 0;
+    return ((cursiv::engine::lex_skip_runs(a).stop[0] >> b) & 1u) != 0;
   };
   // A run with a longer character: read from the start, it reaches one state.
   const Automaton longer = from_rows({{{1, 2, kX, 3}, 0},

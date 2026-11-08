@@ -11,7 +11,7 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The child of `parent` that holds node `id`.
 inline NodeId ll_child_holding(const Cst& cst, NodeId parent, NodeId id) {
@@ -62,4 +62,4 @@ inline bool ll_stamped_rules(const Cst& cst, StampLayout stamp,
   return true;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

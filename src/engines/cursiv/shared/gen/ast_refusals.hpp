@@ -14,6 +14,9 @@
 #include "cursiv/grammar/GrammarUtils.hpp"
 #include "cursiv/grammar/PayloadOf.hpp"
 #include "cursiv/grammar/expr.hpp"
+#include "cursiv/shared/gen/GrammarRefusals.hpp"
+#include "cursiv/shared/runtime/ast_fields.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/MemberTraits.hpp"
@@ -21,14 +24,12 @@
 #include "cursiv/utils/TypeName.hpp"
 #include "cursiv/utils/ctstring.hpp"
 #include "cursiv/utils/typelist.hpp"
-#include "cursiv/shared/gen/GrammarRefusals.hpp"
-#include "cursiv/shared/runtime/ast_fields.hpp"
 
 // Why a grammar is refused for the shape of its AST: one static_assert per
 // mistake a member and its payload can make, each guarded by the case it
 // diagnoses, so exactly one fires and the message names the actual mistake.
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // How many nodes of a member's family one match of a shape leaves for the
 // directive above it: what that directive's node path takes when the shape
@@ -451,7 +452,7 @@ struct payloads_ok<Append<S, E>, TypeList<E>>
 // directive stands over it.
 template <class E>
 consteval bool holds_one_node() {
-  static_assert(!mat::look<E>::may,
+  static_assert(!detail::mat::look<E>::may,
                 "a create<> or nest<> here starts a second node inside it, and "
                 "the directive over it writes only one of the two: the other "
                 "is lost -- store the inner node in a member of the outer one "
@@ -551,4 +552,4 @@ consteval bool infix_rules_ok(TypeList<Rs...>) {
   return (infix_rule_reached_ok<St, Src, Rs>() && ...);
 }
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

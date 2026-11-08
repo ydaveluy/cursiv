@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class T, std::size_t N>
 class SmallRun {
@@ -51,4 +51,4 @@ class SmallRun {
   std::vector<T> _more;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

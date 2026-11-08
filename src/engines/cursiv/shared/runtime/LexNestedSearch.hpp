@@ -15,7 +15,7 @@
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/LexRelay.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LexNestedSearch {
  public:
@@ -195,4 +195,4 @@ class LexNestedSearch {
   TextOffset _dry = kFree;  // No closerless position yet.
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

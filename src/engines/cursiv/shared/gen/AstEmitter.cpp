@@ -12,8 +12,9 @@
 #include "cursiv/shared/gen/EmitAstMetaData.hpp"
 #include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 AstEmitter::AstEmitter(const AstRegistry& registry, const AstEntryTable& table,
                        std::string n, std::string h)
@@ -23,7 +24,7 @@ AstEmitter::AstEmitter(const AstRegistry& registry, const AstEntryTable& table,
     if (g.fieldSlot != kNoField &&
         (g.writes() || g.kind == WriteKind::flag || g.kind == WriteKind::nest))
       pending[g.fieldSlot] = 1;
-    takesNodes = takesNodes || (g.writes() && g.convSlot == detail::kNoIndex);
+    takesNodes = takesNodes || (g.writes() && g.convSlot == kNoIndex);
   }
   while (built < reg.types.size() && reg.types[built].built) ++built;
   accepted.resize(built);
@@ -101,10 +102,10 @@ void AstEmitter::plan_held() {
     for (const Run* run : {&held, &over})
       for (const std::uint16_t r : *run) {
         const AstRowGen& g = reg.rows[r];
-        if (g.writes() && g.convPasses && g.convSlot != detail::kNoIndex &&
+        if (g.writes() && g.convPasses && g.convSlot != kNoIndex &&
             heldSlots.try_emplace({g.convSlot, value->valueRule}, next)
                 .second) {
-          if (next == detail::kNoIndex)
+          if (next == kNoIndex)
             throw std::runtime_error(
                 "the grammar uses more than 65 535 conversion slots -- split "
                 "the grammar");
@@ -133,10 +134,8 @@ void AstEmitter::emit_owe(Body& b, std::uint16_t r, int m) const {
   else if (g.effects())
     // Only a nest's effect carries the class it builds.
     b.say({"b.owe_effect(id, ",
-           b.param(u(g.kind == WriteKind::nest ? g.declType
-                                                : detail::kNoIndex)),
-           ", ", b.param(u(g.fieldSlot)), ", ", b.param(act_name(g.act())),
-           ");"});
+           b.param(u(g.kind == WriteKind::nest ? g.declType : kNoIndex)), ", ",
+           b.param(u(g.fieldSlot)), ", ", b.param(act_name(g.act())), ");"});
 }
 
 bool AstEmitter::can_close_held(const Run& held, int cr, const Run& over,
@@ -184,8 +183,8 @@ void AstEmitter::check_base_chains() const {
 std::string AstEmitter::write_pending(Body& b, std::uint16_t r) const {
   const AstRowGen& g = reg.rows[r];
   const std::string h = "h" + std::to_string(b.held++);
-  const std::string lead = "const ::cursiv::Pending " + h;
-  if (g.convSlot != detail::kNoIndex)
+  const std::string lead = "const ::cursiv::engine::Pending " + h;
+  if (g.convSlot != kNoIndex)
     b.say({lead + " = b.text_write(id, ", b.param(u(g.fieldSlot)), ", ",
            b.param(u(conv_of(r))), ", ", b.param(u(g.narrowSlot)), ", ",
            b.param(act_name(g.act())), ");"});
@@ -207,7 +206,7 @@ unsigned AstEmitter::fill_run(Body& b, std::uint16_t cr,
     const AstRowGen& g = reg.rows[held[k]];
     if (g.act() != ActKind::nest || g.fieldSlot == kNoField) continue;
     if (const std::uint16_t family = reg.head_of(reg.fields[g.fieldSlot]);
-        family == detail::kNoIndex || !derives(family, reg.rows[cr].declType))
+        family == kNoIndex || !derives(family, reg.rows[cr].declType))
       continue;
     early[k] = 1;
     emit_owe(b, held[k], -1);
@@ -215,7 +214,7 @@ unsigned AstEmitter::fill_run(Body& b, std::uint16_t cr,
   const unsigned m = b.made++;
   const std::string made = "m" + std::to_string(m);
   const AstRowGen& c = reg.rows[cr];
-  const std::string lead = "const ::cursiv::Made " + made + " = b.";
+  const std::string lead = "const ::cursiv::engine::Made " + made + " = b.";
   const auto type = b.param(u(c.declType));
   const std::string nest = reg.anyNest ? "true" : "false";
   if (c.kind == WriteKind::close)
@@ -367,19 +366,20 @@ void AstEmitter::emit_entries() {
   }
   for (std::size_t i = 0; i < programs.size(); ++i)
     if (programs[i].text.empty())
-      line("void r", i, "(::cursiv::AstReducer&, ::cursiv::NodeId) {}");
+      line("void r", i, "(::cursiv::engine::AstReducer&, ::cursiv::NodeId) {}");
     else
-      line("void r", i, "(::cursiv::AstReducer& b, ::cursiv::NodeId id) {\n",
+      line("void r", i,
+           "(::cursiv::engine::AstReducer& b, ::cursiv::NodeId id) {\n",
            programs[i].text, "}");
   for (unsigned i = 0; i < forms; ++i) line("#undef CURSIV_FORM_", i);
 }
 
 void AstEmitter::emit_types() {
   write(emit_table(
-      "constexpr ::cursiv::detail::MakeFn kMakes[]",
+      "constexpr ::cursiv::engine::MakeFn kMakes[]",
       std::span(reg.types).first(built),
       [](const auto& t) {
-        return "&::cursiv::detail::make_node<" + t.source + ">";
+        return "&::cursiv::engine::make_node<" + t.source + ">";
       },
       "nullptr"));
 }
@@ -401,12 +401,10 @@ void AstEmitter::emit_fields() {
 }
 
 std::string AstEmitter::conv_addr(std::uint16_t slot) {
-  return slot == detail::kNoIndex ? std::string("nullptr")
-                                  : "&kConvs[" + u(slot) + "]";
+  return slot == kNoIndex ? std::string("nullptr") : "&kConvs[" + u(slot) + "]";
 }
 const char* AstEmitter::variant_flag(std::uint16_t f) const {
-  return reg.fields[f].nature == detail::FieldNature::variant ? "true"
-                                                               : "false";
+  return reg.fields[f].nature == FieldNature::variant ? "true" : "false";
 }
 
 std::string AstEmitter::applier_name(std::uint16_t t) const {
@@ -425,7 +423,7 @@ void AstEmitter::emit_writers() {
   for (const AstRowGen& g : reg.rows) {
     if (g.fieldSlot == kNoField) continue;
     auto& convs = convsOf[g.fieldSlot];
-    if (!g.writes() || g.convSlot == detail::kNoIndex)
+    if (!g.writes() || g.convSlot == kNoIndex)
       plainOf[g.fieldSlot] = 1;
     else if (std::ranges::find(convs, g.convSlot) == convs.end())
       convs.push_back(g.convSlot);
@@ -446,16 +444,17 @@ void AstEmitter::emit_writers() {
       return "b.write<" + tag + ", " + conv_addr(slot) + ", " +
              variant_flag(f) + ">(" + args;
     };
-    line("CURSIV_ALWAYS_INLINE inline void w", f,
-         "(::cursiv::AstReducer& b, const ::cursiv::Pending& p, "
-         "const ::cursiv::Made& m) {");
+    line(
+        "CURSIV_ALWAYS_INLINE inline void w", f,
+        "(::cursiv::engine::AstReducer& b, const ::cursiv::engine::Pending& p, "
+        "const ::cursiv::engine::Made& m) {");
     if (convs.size() + (plain ? 1 : 0) == 1) {
-      line("  ", write(plain ? detail::kNoIndex : convs[0]));
+      line("  ", write(plain ? kNoIndex : convs[0]));
     } else {
       line("  switch (p.conv) {");
       for (const std::uint16_t c : convs)
         line("    case ", u(c), ": ", write(c), " return;");
-      line("    default: ", write(detail::kNoIndex), " return;");
+      line("    default: ", write(kNoIndex), " return;");
       line("  }");
     }
     line("}");
@@ -469,9 +468,10 @@ void AstEmitter::emit_writers() {
       none = true;
       continue;
     }
-    line("CURSIV_ALWAYS_INLINE inline bool ", appliers[t],
-         "(::cursiv::AstReducer& b, const ::cursiv::Pending& p, "
-         "const ::cursiv::Made& m) {");
+    line(
+        "CURSIV_ALWAYS_INLINE inline bool ", appliers[t],
+        "(::cursiv::engine::AstReducer& b, const ::cursiv::engine::Pending& p, "
+        "const ::cursiv::engine::Made& m) {");
     line("  switch (p.field) {");
     for (const std::uint16_t f : accepted[t])
       line("    case ", u(f), ": w", f, "(b, p, m); return true;");
@@ -481,10 +481,11 @@ void AstEmitter::emit_writers() {
   }
   if (none)
     line(
-        "bool a_none(::cursiv::AstReducer&, const ::cursiv::Pending&, "
-        "const ::cursiv::Made&) { return false; }");
+        "bool a_none(::cursiv::engine::AstReducer&, const "
+        "::cursiv::engine::Pending&, "
+        "const ::cursiv::engine::Made&) { return false; }");
   write(emit_table(
-      "constexpr ::cursiv::AstApplyFn kApplies[]", appliers,
+      "constexpr ::cursiv::engine::AstApplyFn kApplies[]", appliers,
       [](const std::string& n) { return "&" + n; }, "nullptr"));
 }
 
@@ -492,24 +493,24 @@ void AstEmitter::emit_convs() {
   if (reg.convCount == 0) return;
   std::vector<const AstRowGen*> rep(reg.convCount, nullptr);
   for (const AstRowGen& g : reg.rows)
-    if (g.convSlot != detail::kNoIndex && rep[g.convSlot] == nullptr)
+    if (g.convSlot != kNoIndex && rep[g.convSlot] == nullptr)
       rep[g.convSlot] = &g;
   const auto site = [&](const AstRowGen& g) {
-    return concat("::cursiv::detail::site_conv_t<", g.convName, ", ",
+    return concat("::cursiv::engine::site_conv_t<", g.convName, ", ",
                   g.convOver.empty() ? std::string_view("void") : g.convOver,
                   ">, "
-                  "::cursiv::detail::conv_target_t<",
+                  "::cursiv::engine::conv_target_t<",
                   tags[g.fieldSlot], ">, ", g.convRank, ", ", g.convJoins, ", ",
                   g.convTextParts);
   };
   std::vector<std::string> slots;
   for (const AstRowGen* g : rep)
-    slots.push_back("::cursiv::detail::conv_slot<" + site(*g) + ">()");
+    slots.push_back("::cursiv::engine::conv_slot<" + site(*g) + ">()");
   slots.resize(reg.convCount + heldSlots.size());
   for (const auto& [held, slot] : heldSlots)
-    slots[slot] = concat("::cursiv::detail::held_slot<", held.holder, ", ",
+    slots[slot] = concat("::cursiv::engine::held_slot<", held.holder, ", ",
                          site(*rep[held.pass]), ">()");
-  write(emit_table("constexpr ::cursiv::detail::ConvSlot kConvs[]", slots));
+  write(emit_table("constexpr ::cursiv::engine::ConvSlot kConvs[]", slots));
 }
 
 AstEmitter::ConvPlan AstEmitter::plan_conversions(const Run& held,
@@ -554,20 +555,20 @@ AstEmitter::TextPlan AstEmitter::plan_text(
 std::string AstEmitter::text_conv(const AstRowGen& g) {
   return g.textOver.empty()
              ? concat("::cursiv::detail::converter_rule_t<", g.textConv, ">")
-             : concat("::cursiv::detail::site_conv_t<", g.textConv, ", ",
+             : concat("::cursiv::engine::site_conv_t<", g.textConv, ", ",
                       g.textOver, ">");
 }
 
 std::string AstEmitter::text_fn(const ConvPlan& p, const TextPlan& t) {
   if (t.steps.empty()) return "nullptr";
   if (t.steps.size() == 1 && t.lead)
-    return concat("&::cursiv::detail::denoted_text<",
+    return concat("&::cursiv::engine::denoted_text<",
                   text_conv(*t.steps.front()), ", ", p.data, ">");
   std::string list;
   for (std::size_t i = 0; i < t.steps.size(); ++i)
-    list += concat(", ::cursiv::detail::text_step<", text_conv(*t.steps[i]),
+    list += concat(", ::cursiv::engine::text_step<", text_conv(*t.steps[i]),
                    ", ", t.steps[i]->dataRule, ", ", i == 0 && t.lead, ">");
-  return concat("&::cursiv::detail::denoted_chain<", p.data, list, ">");
+  return concat("&::cursiv::engine::denoted_chain<", p.data, list, ">");
 }
 
 void AstEmitter::emit_conversions() {
@@ -584,10 +585,10 @@ void AstEmitter::emit_conversions() {
       inputs.push_back(static_cast<std::uint8_t>(
           (p.text.children ? 1u : 0u) | (p.call.children ? 2u : 0u)));
     }
-    write(emit_table("constexpr ::cursiv::detail::TextFn kTexts[]", texts));
+    write(emit_table("constexpr ::cursiv::engine::TextFn kTexts[]", texts));
     sharedCalls = calls == texts;
     if (!sharedCalls)
-      write(emit_table("constexpr ::cursiv::detail::TextFn kCalls[]", calls));
+      write(emit_table("constexpr ::cursiv::engine::TextFn kCalls[]", calls));
     // A grammar whose records never read their children first names no table.
     anyInputs =
         std::ranges::any_of(inputs, [](std::uint8_t c) { return c != 0; });
@@ -606,10 +607,10 @@ void AstEmitter::emit_conversions() {
   anyValues = std::ranges::any_of(
       reg.rows, [](const AstRowGen& g) { return g.passes; });
   if (anyValues)
-    write(emit_table("constexpr ::cursiv::detail::ValueSlot kValues[]", plans,
+    write(emit_table("constexpr ::cursiv::engine::ValueSlot kValues[]", plans,
                      [](const ConvPlan& p) {
                        return p.value != nullptr
-                                  ? concat("::cursiv::detail::value_slot<",
+                                  ? concat("::cursiv::engine::value_slot<",
                                            p.value->valueRule, ">()")
                                   : std::string("{}");
                      }));
@@ -656,13 +657,13 @@ namespace ast_detail {
   emit_entries();
   line("");
   write(emit_table(
-      "constexpr ::cursiv::AstEntryFn kEntries[]", names,
+      "constexpr ::cursiv::engine::AstEntryFn kEntries[]", names,
       [](const std::string& n) { return "&" + n; }, "nullptr"));
   emit_conversions();
   const bool turns = emit_flags("kTurns", a.turns);
   line("\n}  // namespace ast_detail\n");
   write(emit_ast_metadata_record(reg));
-  write(R"(constexpr ::cursiv::AstActions kAstActions{
+  write(R"(constexpr ::cursiv::engine::AstActions kAstActions{
     .meta = &kAstMetaData,
     .makes = ast_detail::kMakes,
     .entries = ast_detail::kEntries,
@@ -714,9 +715,9 @@ std::string emit_ast_decl(std::string_view ns) {
 namespace )",
                 ns, R"( {
 extern const ::cursiv::AstMetaData kAstMetaData;
-extern const ::cursiv::AstActions kAstActions;
+extern const ::cursiv::engine::AstActions kAstActions;
 }
 )");
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

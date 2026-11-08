@@ -10,7 +10,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // "The plan does not say."
 inline constexpr std::uint16_t kLlUnplanned = 0xFFFDu;
@@ -164,4 +164,4 @@ class LlPlan {
   Laid _laid = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -9,7 +9,7 @@
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrFusedRow {
   // The creation the record holds.
@@ -75,4 +75,4 @@ CURSIV_ALWAYS_INLINE constexpr ElementId lr_fused_probe(
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

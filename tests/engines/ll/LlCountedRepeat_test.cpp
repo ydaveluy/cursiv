@@ -62,18 +62,18 @@ struct NullableCounted : cursiv::GrammarSpec {
   using entry = Root;
 };
 void counted_bounds_are_in_the_predictive_graph() {
-  const auto b = cursiv::ll_build_program(cursiv::LlLowering<Base>::lower(),
-                                          {.staticPredict = false});
+  const auto b = cursiv::engine::ll_build_program(
+      cursiv::engine::LlLowering<Base>::lower(), {.staticPredict = false});
   CHECK(!b.fault && !b.overflow);
   auto states = b.states.v;
   states.push_back({});
   const auto finish = b.nstates;
-  const cursiv::LlAtnView atn{.states = states.data(),
-                              .nstates = b.nstates + 1,
-                              .edges = b.edges.data(),
-                              .ruleStart = b.ruleStart.data(),
-                              .callerBase = b.callerBase.data(),
-                              .callerAt = b.callerAt.data()};
+  const cursiv::engine::LlAtnView atn{.states = states.data(),
+                                      .nstates = b.nstates + 1,
+                                      .edges = b.edges.data(),
+                                      .ruleStart = b.ruleStart.data(),
+                                      .callerBase = b.callerBase.data(),
+                                      .callerAt = b.callerAt.data()};
   std::uint16_t a = 0;
   for (std::uint16_t i = 0; i < b.cfg.nterms; ++i)
     if (b.cfg.term_name(i) == "A") a = i;
@@ -89,74 +89,77 @@ void counted_bounds_are_in_the_predictive_graph() {
       if (b.cfg.rule_name(r) == expected.first) rule = r;
     CHECK(rule != 0);
     for (int n = 0; n <= 7; ++n) {
-      cursiv::LlSimulation sim(atn);
-      const auto stack = sim.contexts().push(cursiv::kLlCtxNone, finish);
+      cursiv::engine::LlSimulation sim(atn);
+      const auto stack =
+          sim.contexts().push(cursiv::engine::kLlCtxNone, finish);
       sim.seed(b.ruleStart[rule], stack);
       for (int i = 0; i < n; ++i) sim.step(a);
       bool complete = false;
       for (const auto& c : sim.configs())
-        complete |= c.state == finish && c.ctx == cursiv::kLlCtxNone;
+        complete |= c.state == finish && c.ctx == cursiv::engine::kLlCtxNone;
       CHECK(complete ==
             (n >= expected.second.first && n <= expected.second.second));
     }
   }
-  const auto two = cursiv::LlLowering<Base>::cfg();
+  const auto two = cursiv::engine::LlLowering<Base>::cfg();
   std::set<std::uint32_t> returns;
   for (std::uint16_t i = 0; i < two.nnodes; ++i)
-    if (two.nodes[i].kind == cursiv::LlShape::call &&
+    if (two.nodes[i].kind == cursiv::engine::LlShape::call &&
         two.rule_name(two.nodes[i].sym) == "ItemRule")
       CHECK(returns.insert(b.nodeFollow[i]).second);
 }
 void an_internal_zero_count_preserves_the_outer_action_rows() {
   // The public DSL excludes max==0; the empty normalized shape is still
   // well-defined and must retain its directives when built internally.
-  cursiv::LlLowered low;
-  cursiv::detail::llow::Pool pool;
-  const auto kid = pool.push({cursiv::detail::llow::Shape::none});
-  const auto rep = pool.push({cursiv::detail::llow::Shape::rep, kid, 0, 0, 0});
-  const cursiv::detail::llow::Acts made{3}, row{7};
-  const auto id = cursiv::detail::llow::emit(low, pool, rep, made, row, 0);
-  CHECK(low.cfg.nodes[id].kind == cursiv::LlShape::empty);
+  cursiv::engine::LlLowered low;
+  cursiv::engine::llow::Pool pool;
+  const auto kid = pool.push({cursiv::engine::llow::Shape::none});
+  const auto rep = pool.push({cursiv::engine::llow::Shape::rep, kid, 0, 0, 0});
+  const cursiv::engine::llow::Acts made{3}, row{7};
+  const auto id = cursiv::engine::llow::emit(low, pool, rep, made, row, 0);
+  CHECK(low.cfg.nodes[id].kind == cursiv::engine::LlShape::empty);
   const auto chain = low.writes.chains[low.cfg.nodes[id].row];
   CHECK(chain.count == 2 && low.writes.acts[chain.off] == 3 &&
         low.writes.acts[chain.off + 1] == 7);
 }
 
 void unreasonable_counts_are_refused_by_name() {
-  const auto huge = cursiv::LlLowering<Huge>::lower();
-  CHECK(huge.cfg.lowerWhy == cursiv::LowerFail::tooManyPositions);
+  const auto huge = cursiv::engine::LlLowering<Huge>::lower();
+  CHECK(huge.cfg.lowerWhy == cursiv::engine::LowerFail::tooManyPositions);
   CHECK(huge.cfg.rule_name(huge.cfg.lowerRule) == "Root");
-  const auto truncated = cursiv::LlLowering<TruncatedBound>::lower();
-  CHECK(truncated.cfg.lowerWhy == cursiv::LowerFail::tooManyPositions);
-  const auto crowded = cursiv::LlLowering<Crowded>::lower();
-  CHECK(crowded.cfg.lowerWhy == cursiv::LowerFail::tooManyPositions);
+  const auto truncated = cursiv::engine::LlLowering<TruncatedBound>::lower();
+  CHECK(truncated.cfg.lowerWhy == cursiv::engine::LowerFail::tooManyPositions);
+  const auto crowded = cursiv::engine::LlLowering<Crowded>::lower();
+  CHECK(crowded.cfg.lowerWhy == cursiv::engine::LowerFail::tooManyPositions);
   CHECK(crowded.cfg.rule_name(crowded.cfg.lowerRule) != "Root");
-  const auto spread = cursiv::LlLowering<DeepOptionalBound>::lower();
-  CHECK(spread.cfg.lowerWhy == cursiv::LowerFail::none);
-  const auto deep = cursiv::ll_build_program(spread);
+  const auto spread = cursiv::engine::LlLowering<DeepOptionalBound>::lower();
+  CHECK(spread.cfg.lowerWhy == cursiv::engine::LowerFail::none);
+  const auto deep = cursiv::engine::ll_build_program(spread);
   CHECK(!deep.fault && !deep.overflow);
-  const auto longest = cursiv::ll_build_program(
-      cursiv::LlLowering<NoCeiling>::lower(), {.staticPredict = false});
+  const auto longest = cursiv::engine::ll_build_program(
+      cursiv::engine::LlLowering<NoCeiling>::lower(), {.staticPredict = false});
   CHECK(!longest.fault && !longest.overflow &&
-        longest.cfg.lowerWhy == cursiv::LowerFail::none);
+        longest.cfg.lowerWhy == cursiv::engine::LowerFail::none);
   CHECK(longest.cfg.nnodes > 2 * 5000);
-  cursiv::LlLowered full;
-  cursiv::LowerFail why = cursiv::LowerFail::none;
+  cursiv::engine::LlLowered full;
+  cursiv::engine::LowerFail why = cursiv::engine::LowerFail::none;
   try {
-    for (;;) (void)cursiv::detail::llow::put_node(full, {});
-  } catch (const cursiv::LowerRefused& refusal) {
+    for (;;) (void)cursiv::engine::llow::put_node(full, {});
+  } catch (const cursiv::engine::LowerRefused& refusal) {
     why = refusal.why;
   }
-  CHECK(why == cursiv::LowerFail::tooManyPositions);
-  auto unbounded =
-      cursiv::ll_build_program(cursiv::LlLowering<NullableUnbounded>::lower());
-  CHECK(unbounded.fault.code == cursiv::GrammarFaultCode::nullableRepetition);
-  const auto two = cursiv::ll_build_program(
-      cursiv::LlLowering<NullableCounted<2, 2>>::lower());
-  CHECK(two.fault.code == cursiv::GrammarFaultCode::nullableRepetition);
-  const auto upTo = cursiv::ll_build_program(
-      cursiv::LlLowering<NullableCounted<0, 3>>::lower());
-  CHECK(upTo.fault.code == cursiv::GrammarFaultCode::nullableRepetition);
+  CHECK(why == cursiv::engine::LowerFail::tooManyPositions);
+  auto unbounded = cursiv::engine::ll_build_program(
+      cursiv::engine::LlLowering<NullableUnbounded>::lower());
+  CHECK(unbounded.fault.code ==
+        cursiv::engine::GrammarFaultCode::nullableRepetition);
+  const auto two = cursiv::engine::ll_build_program(
+      cursiv::engine::LlLowering<NullableCounted<2, 2>>::lower());
+  CHECK(two.fault.code == cursiv::engine::GrammarFaultCode::nullableRepetition);
+  const auto upTo = cursiv::engine::ll_build_program(
+      cursiv::engine::LlLowering<NullableCounted<0, 3>>::lower());
+  CHECK(upTo.fault.code ==
+        cursiv::engine::GrammarFaultCode::nullableRepetition);
 }
 }  // namespace
 namespace repeat_scope {

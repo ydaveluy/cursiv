@@ -12,14 +12,15 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/text/TextOffset.hpp"
-#include "cursiv/utils/Utf8.hpp"
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/Utf8.hpp"
+#include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The most faults a walk makes. `repair_typo_cost` prices a fourth under a
 // different word's only from 15 bytes, longer than the words a grammar spells
@@ -160,8 +161,8 @@ CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
   const TextOffset len = ad.len();
   // A wrong letter is a code point, never half of one.
   const auto past_letter = [&](TextOffset at) {
-    const auto width = static_cast<TextOffset>(
-        detail::utf8_width(static_cast<char>(ad.byte(at))));
+    const auto width =
+        static_cast<TextOffset>(utf8_width(static_cast<char>(ad.byte(at))));
     return width < len - at ? at + width : len;
   };
 
@@ -311,4 +312,4 @@ CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

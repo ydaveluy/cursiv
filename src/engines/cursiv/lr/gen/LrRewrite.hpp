@@ -7,18 +7,17 @@
 #include "cursiv/shared/gen/reached.hpp"
 #include "cursiv/shared/gen/spec_row.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrRewrite {
   template <class Materialized, class Declared>
   struct stages {
-    using stage =
-        detail::LeadGraphStage<detail::level_rule, Materialized, Declared>;
-    using rules = detail::reached_t<stage>;
+    using stage = LeadGraphStage<level_rule, Materialized, Declared>;
+    using rules = reached_t<stage>;
   };
   template <class St, class Op, auto P>
-  using infix_src = typename detail::src_rule<
-      St, infix_op_src<Op, P, St::template rule>>::type;
+  using infix_src =
+      typename src_rule<St, infix_op_src<Op, P, St::template rule>>::type;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

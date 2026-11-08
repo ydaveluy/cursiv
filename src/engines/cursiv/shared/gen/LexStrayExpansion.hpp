@@ -13,15 +13,16 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/text/scalar_at.hpp"
 #include "cursiv/shared/gen/LexCodePoints.hpp"
 #include "cursiv/shared/gen/LexNfaPool.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
+#include "cursiv/shared/utils/inside_scalar.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Cfg>
 struct LexStrayExpansion {
@@ -139,4 +140,4 @@ struct LexStrayExpansion {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -9,7 +9,7 @@
 #include "engines/shared/RegionBoundaryGrammar.hpp"
 
 namespace {
-static_assert(sizeof(cursiv::LrReducePlan) == 12);
+static_assert(sizeof(cursiv::engine::LrReducePlan) == 12);
 
 using tregionboundary::Document;
 
@@ -91,11 +91,13 @@ struct MixedGuardedTail : cursiv::GrammarSpec {
 
 template <class G>
 void refuses_shared_exit(bool byLl = true, bool byLr = true) {
-  const auto ll = cursiv::ll_build_program(cursiv::LlLowering<G>::lower());
-  const auto lr = cursiv::lr_build_automaton(cursiv::LrLowering<G>::lower());
+  const auto ll =
+      cursiv::engine::ll_build_program(cursiv::engine::LlLowering<G>::lower());
+  const auto lr = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<G>::lower());
   const auto why = [](bool refused) {
-    return refused ? cursiv::LowerFail::regionBoundaryShared
-                   : cursiv::LowerFail::none;
+    return refused ? cursiv::engine::LowerFail::regionBoundaryShared
+                   : cursiv::engine::LowerFail::none;
   };
   CHECK(ll.cfg.lowerWhy == why(byLl));
   CHECK(lr.cfg.lowerWhy == why(byLr));
@@ -106,21 +108,21 @@ void refuses_shared_exit(bool byLl = true, bool byLr = true) {
 template <class Entry>
 void each_mode(const char* name) {
   using G = Grammar<Entry>;
-  const auto ll = cursiv::LlLowering<G>::lower();
-  const auto lr = cursiv::LrLowering<G>::lower();
+  const auto ll = cursiv::engine::LlLowering<G>::lower();
+  const auto lr = cursiv::engine::LrLowering<G>::lower();
   std::printf("region analysis %s: LL lower=%u fault=%u; LR lower=%u fault=%u\n",
               name, unsigned(ll.cfg.lowerWhy), unsigned(ll.fault.code),
               unsigned(lr.cfg.lowerWhy), unsigned(lr.fault.code));
   CHECK(!ll.fault && !ll.cfg.lowerFail());
   CHECK(!lr.fault && !lr.cfg.lowerFail());
   if (!ll.fault && !ll.cfg.lowerFail()) {
-    const auto built = cursiv::ll_build_program(ll);
+    const auto built = cursiv::engine::ll_build_program(ll);
     std::printf("region analysis %s: LL build=%u fault=%u\n", name,
                 unsigned(built.cfg.lowerWhy), unsigned(built.fault.code));
     CHECK(!built.cfg.lowerFail() && !built.fault);
   }
   if (!lr.fault && !lr.cfg.lowerFail()) {
-    const auto built = cursiv::lr_build_automaton(lr);
+    const auto built = cursiv::engine::lr_build_automaton(lr);
     std::printf("region analysis %s: LR build=%u\n", name,
                 unsigned(built.cfg.lowerWhy));
     CHECK(!built.cfg.lowerFail());

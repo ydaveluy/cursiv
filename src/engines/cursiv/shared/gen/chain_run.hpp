@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Built>
 std::vector<std::uint16_t> chain_run(const Built& a, std::uint16_t i) {
@@ -15,4 +15,4 @@ std::vector<std::uint16_t> chain_run(const Built& a, std::uint16_t i) {
   return r;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

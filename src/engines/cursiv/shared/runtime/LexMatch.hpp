@@ -10,7 +10,7 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A boundary or an echo may accept inside a run and fail at its end.
 constexpr bool lex_run_blind(bool accepting, bool bounded, bool relay) {
@@ -76,4 +76,4 @@ struct LexMatch {
 };
 static_assert(sizeof(LexMatch) == 8, "the state fills the padding");
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

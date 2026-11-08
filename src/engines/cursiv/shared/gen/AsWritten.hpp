@@ -6,11 +6,12 @@
 #include <string_view>
 
 #include "cursiv/grammar/GrammarSpec.hpp"
-#include "cursiv/grammar/dump.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/shared/utils/dump.hpp"
 #include "cursiv/utils/TypeName.hpp"
 #include "cursiv/utils/typelist.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Rules>
 struct AsWritten;
@@ -18,12 +19,12 @@ template <class... Rs>
 struct AsWritten<TypeList<Rs...>> {
   static std::string of(std::string_view name) {
     std::string out;
-    ((out.empty() && detail::type_name<detail::declared_of_t<Rs>>() == name
-          ? out = "\n    " + dump_rule<detail::declared_of_t<Rs>>()
+    ((out.empty() && type_name<declared_of_t<Rs>>() == name
+          ? out = "\n    " + dump_rule<declared_of_t<Rs>>()
           : out),
      ...);
     return out;
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

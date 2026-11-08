@@ -23,7 +23,7 @@
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrDrive;
 struct LrSearch;
@@ -113,4 +113,4 @@ struct LrContext {
   mutable LexReadBudget reads;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

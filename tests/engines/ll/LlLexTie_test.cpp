@@ -45,7 +45,7 @@ void expect_cases(Ll ll, LlAst llr,
 void a_reserved_spelling_ties_no_mode_that_reserves_it() {
   constexpr auto& T = tlllextie::generated::ReservedLl::kTable;
   constexpr auto keyword = ll_terms::named<T>("x");
-  CHECK(keyword != cursiv::kInvalidSymbol);
+  CHECK(keyword != cursiv::engine::kInvalidSymbol);
   for (std::uint16_t m = 0; m < T.nmodes; ++m)
     if (T.mode_admits(m, keyword)) CHECK(T.modeMulti[m] == 0);
 }
@@ -57,13 +57,13 @@ void a_visible_token_beats_the_blank_in_a_lookahead() {
   cursiv::Cst tree(" a");
   cursiv::CstBuilder builder(tree);
   builder.bind_stream();
-  cursiv::LlContext context(tree.text(), builder);
-  cursiv::LlMask<T.termWords> viable;
+  cursiv::engine::LlContext context(tree.text(), builder);
+  cursiv::engine::LlMask<T.termWords> viable;
   for (std::uint16_t t = 1; t < T.nterms; ++t)
     if (T.term_name(t) == "GAP") viable.set(t);
   std::vector<std::uint16_t> readings;
   cursiv::TextOffset from = 0;
-  CHECK(cursiv::ll_look<T>(context, from, viable, readings, T.errMode));
+  CHECK(cursiv::engine::ll_look<T>(context, from, viable, readings, T.errMode));
   CHECK(from == 1 && readings.size() == 1);
 }
 

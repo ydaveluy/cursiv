@@ -11,7 +11,7 @@
 
 #include "cursiv/shared/table/StampLayout.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // None where the rows and the states do not both fit; `forced`, when not
 // zero, is the row width asked for.
@@ -43,4 +43,4 @@ inline std::string stamp_refusal(std::uint32_t rows, std::uint32_t states,
   return out;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

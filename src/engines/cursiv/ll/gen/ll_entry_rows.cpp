@@ -7,7 +7,7 @@
 #include "cursiv/shared/gen/chain_run.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 namespace {
 
@@ -136,4 +136,4 @@ AstEntryTable ll_entry_table(const LlFinalProgram& done,
   return t;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

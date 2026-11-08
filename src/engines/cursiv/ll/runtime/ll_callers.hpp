@@ -13,7 +13,7 @@
 #include "cursiv/ll/runtime/ll_section.hpp"
 #include "cursiv/ll/table/LlTable.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Each row the rule's end may return through, the nearest frame first, until
 // `read` answers true or a frame must read something. True where `read` did.
@@ -38,4 +38,4 @@ inline bool ll_callers_take(const LlContext& c, std::uint16_t sym) {
          ll_caller_rows<T>(c, [&](LlTermRow row) { return row.test(sym); });
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

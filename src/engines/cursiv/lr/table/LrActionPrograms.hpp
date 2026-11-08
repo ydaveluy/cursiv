@@ -7,7 +7,7 @@
 
 #include "cursiv/lr/table/LrProgramRows.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Row, class Index, class Cell, class Op>
 struct LrActionPrograms {
@@ -26,4 +26,4 @@ struct LrActionPrograms {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

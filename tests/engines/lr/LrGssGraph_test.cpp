@@ -14,8 +14,8 @@
 
 namespace {
 
-using cursiv::LrGssGraph;
 using cursiv::TextOffset;
+using cursiv::engine::LrGssGraph;
 using Id = LrGssGraph::Id;
 using Reading = LrGssGraph::Reading;
 using Step = LrGssGraph::Step;
@@ -28,7 +28,7 @@ Reading at(std::uint32_t state, TextOffset offset) {
   return r;
 }
 
-struct Frames : cursiv::LrStack {
+struct Frames : cursiv::engine::LrStack {
   explicit Frames(std::initializer_list<std::uint16_t> states) {
     for (const std::uint16_t state : states) push({state, 0, 0, 0, 0});
   }
@@ -39,9 +39,10 @@ struct Frames : cursiv::LrStack {
 std::uint32_t tag(const LrGssGraph& g, Id step) { return g.step(step).action; }
 
 // A real token from `v` shifted onto `reading`, its edge naming `words`.
-Id shift_onto(LrGssGraph& g, Id v, cursiv::SymbolId symbol, Reading reading,
-              std::vector<std::uint32_t> words, bool laid = false,
-              std::uint32_t action = ~0u, bool exact = false) {
+Id shift_onto(LrGssGraph& g, Id v, cursiv::engine::SymbolId symbol,
+              Reading reading, std::vector<std::uint32_t> words,
+              bool laid = false, std::uint32_t action = ~0u,
+              bool exact = false) {
   Step s;
   s.vertex = v;
   s.exact = exact;
@@ -56,7 +57,7 @@ Id shift_onto(LrGssGraph& g, Id v, cursiv::SymbolId symbol, Reading reading,
   return next;
 }
 
-Id shift(LrGssGraph& g, Id v, cursiv::SymbolId symbol, TextOffset to,
+Id shift(LrGssGraph& g, Id v, cursiv::engine::SymbolId symbol, TextOffset to,
          std::uint32_t state, std::vector<std::uint32_t> words,
          bool laid = false) {
   return shift_onto(g, v, symbol, at(state, to), std::move(words), laid);
@@ -380,7 +381,7 @@ void repeated_reductions_keep_their_nested_rank() {
     g.settle(to);
     top = open_next(g);
     g.watch({top, LrGssGraph::none, LrGssGraph::none, LrGssGraph::none,
-             cursiv::kLrNoProd, 1});
+             cursiv::engine::kLrNoProd, 1});
     LrGssGraph::Pop pop{};
     Id edge = LrGssGraph::none;
     CHECK(g.next_path(pop, edge));
@@ -402,12 +403,12 @@ void repeated_reductions_keep_their_nested_rank() {
 // before calling every remaining step, without a thread or a timing race.
 // A stop is read within one run of polls, and never without a token.
 void a_stop_is_read_within_one_run_of_polls() {
-  const cursiv::CancellationPoll none;
+  const cursiv::engine::CancellationPoll none;
   for (unsigned i = 0; i < 100000; ++i) none.poll();
   none.check();
   cursiv::CancellationTokenSource source;
   const auto token = source.get_token();
-  const cursiv::CancellationPoll poll(token);
+  const cursiv::engine::CancellationPoll poll(token);
   for (unsigned i = 0; i < 1000; ++i) poll.poll();
   source.request_stop();
   unsigned polled = 0;
@@ -429,8 +430,8 @@ void a_stop_is_read_within_one_run_of_polls() {
 
 // A real token the lexer ranked among rivals: its rank is the only word of
 // its edge.
-Id ranked_shift(LrGssGraph& g, Id v, cursiv::SymbolId symbol, TextOffset to,
-                std::uint32_t state, std::uint32_t rank) {
+Id ranked_shift(LrGssGraph& g, Id v, cursiv::engine::SymbolId symbol,
+                TextOffset to, std::uint32_t state, std::uint32_t rank) {
   Step s;
   s.vertex = v;
   s.reading = g.reading(v);
@@ -447,15 +448,15 @@ Id ranked_shift(LrGssGraph& g, Id v, cursiv::SymbolId symbol, TextOffset to,
 
 // The frame under `top` reduced onto `to`, `word` the arm written in front of
 // it.
-Id reduce_frame(LrGssGraph& g, Id top, cursiv::SymbolId symbol, Reading to,
-                std::uint32_t word) {
+Id reduce_frame(LrGssGraph& g, Id top, cursiv::engine::SymbolId symbol,
+                Reading to, std::uint32_t word) {
   Step s;
   s.vertex = top;
   s.reading = g.reading(top);
   s.action = 100 + word;
   const Id step = g.add(std::move(s));
-  g.watch({top, step, LrGssGraph::none, LrGssGraph::none, cursiv::kLrNoProd,
-           1});
+  g.watch({top, step, LrGssGraph::none, LrGssGraph::none,
+           cursiv::engine::kLrNoProd, 1});
   LrGssGraph::Pop pop{};
   Id last = LrGssGraph::none;
   CHECK(g.next_path(pop, last));
@@ -511,8 +512,8 @@ void frozen_stacks_come_in_the_order_the_lexer_ranks_their_first_tokens() {
 }
 
 // A real token whose step names the vertex that took it.
-Id taken_shift(LrGssGraph& g, Id v, cursiv::SymbolId symbol, TextOffset to,
-               std::uint32_t state) {
+Id taken_shift(LrGssGraph& g, Id v, cursiv::engine::SymbolId symbol,
+               TextOffset to, std::uint32_t state) {
   return shift_onto(g, v, symbol, at(state, to), {}, false, 0);
 }
 

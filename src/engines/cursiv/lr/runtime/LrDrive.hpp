@@ -12,7 +12,7 @@
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/CondReach.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrDrive {
   LrExit (*enter)(LrContext&) = nullptr;  // the stack's top state, lexing first
@@ -41,4 +41,4 @@ inline LrExit lr_resume(LrContext& c) {
   return c.drive->enter(c);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

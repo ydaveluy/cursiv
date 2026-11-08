@@ -7,7 +7,7 @@
 
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The distinct successors of each of `count` DFA states, whose rows of
 // `ncls` cells `next` holds: first-class order determines which edges a
@@ -31,4 +31,4 @@ struct LexSuccessors {
   std::vector<std::uint16_t> states;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

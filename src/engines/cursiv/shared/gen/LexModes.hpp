@@ -14,7 +14,7 @@
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexModes {
   std::vector<DynSet> set;
@@ -152,4 +152,4 @@ struct LexModes {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

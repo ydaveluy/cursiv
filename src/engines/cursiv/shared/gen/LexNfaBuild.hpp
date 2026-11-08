@@ -21,7 +21,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/utils/RoundMarks.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline int lex_push_relay(LexNfaPool& n, LexRelayBuild r, int resumeOut) {
   r.resumeOut = resumeOut;
@@ -337,7 +337,7 @@ struct LexNfaBuild {
         guards.push_back(e.a);
         return;
       }
-      detail::lex_children(g, at, [&](auto kid) { self(self, kid); }, false);
+      lex_children(g, at, [&](auto kid) { self(self, kid); }, false);
     };
     collect(collect, node);
     if (marks.empty() || guards.empty()) return false;
@@ -351,7 +351,7 @@ struct LexNfaBuild {
            std::ranges::find(marks, e.max) != marks.end()))
         return true;
       bool found = false;
-      detail::lex_children(
+      lex_children(
           g, at,
           [&](auto kid) {
             if (!found) found = self(self, kid);
@@ -668,4 +668,4 @@ struct LexNfaBuild {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

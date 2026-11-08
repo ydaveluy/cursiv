@@ -18,7 +18,7 @@
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct AstEmitter : TextBuilder {
   using Run = std::vector<std::uint16_t>;
@@ -204,4 +204,4 @@ std::string emit_ast(const AstRegistry& registry, const AstEntryTable& table,
 
 std::string emit_ast_decl(std::string_view ns);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -21,13 +21,14 @@ namespace {
 // in both reads, and the walk refuses one that lost either.
 namespace announced {
 
-using Plain = cursiv::LlLexTape<tllsemantic::generated::Ll::kTable>;
-using Skipping = cursiv::LlLexTape<tllsemantic::generated::Ll::kTable, true>;
+using Plain = cursiv::engine::LlLexTape<tllsemantic::generated::Ll::kTable>;
+using Skipping =
+    cursiv::engine::LlLexTape<tllsemantic::generated::Ll::kTable, true>;
 
 struct LostQualified : Plain {
-  cursiv::SymbolId qualified(std::uint16_t, const char*, cursiv::TextOffset,
-                             cursiv::TextOffset,
-                             cursiv::TextOffset&) const = delete;
+  cursiv::engine::SymbolId qualified(std::uint16_t, const char*,
+                                     cursiv::TextOffset, cursiv::TextOffset,
+                                     cursiv::TextOffset&) const = delete;
 };
 struct LostRun : Skipping {
   cursiv::TextOffset run(std::uint16_t, const char*, cursiv::TextOffset,
@@ -35,16 +36,17 @@ struct LostRun : Skipping {
 };
 
 static_assert(Plain::kRelays && Plain::kQualified && Skipping::kQualified);
-static_assert(cursiv::LexCursor<Plain> && cursiv::LexCursor<Skipping>);
-static_assert(cursiv::LexAcceptanceAnnounced<Plain> &&
-              cursiv::LexAcceptanceAnnounced<Skipping>);
-static_assert(cursiv::LexRelaysAnnounced<Plain> &&
-              cursiv::LexRelaysAnnounced<Skipping>);
+static_assert(cursiv::engine::LexCursor<Plain> &&
+              cursiv::engine::LexCursor<Skipping>);
+static_assert(cursiv::engine::LexAcceptanceAnnounced<Plain> &&
+              cursiv::engine::LexAcceptanceAnnounced<Skipping>);
+static_assert(cursiv::engine::LexRelaysAnnounced<Plain> &&
+              cursiv::engine::LexRelaysAnnounced<Skipping>);
 
 static_assert(LostQualified::kQualified &&
-              !cursiv::LexAcceptanceAnnounced<LostQualified>);
-static_assert(cursiv::LexOffersRelay<LostRun> &&
-              !cursiv::LexRelaysAnnounced<LostRun>);
+              !cursiv::engine::LexAcceptanceAnnounced<LostQualified>);
+static_assert(cursiv::engine::LexOffersRelay<LostRun> &&
+              !cursiv::engine::LexRelaysAnnounced<LostRun>);
 
 }  // namespace announced
 

@@ -108,9 +108,9 @@ void an_indent_keeps_an_earlier_repair_reading_alive() {
         CHECK(invented == 1);
 
         cursiv::Cst cst;
-        cursiv::LrParseStats stats;
-        CHECK(cursiv::lr_parser<g::kTable>.parse(prefix + tail, cst, &stats,
-                                                 &g::kDrive));
+        cursiv::engine::LrParseStats stats;
+        CHECK(cursiv::engine::lr_parser<g::kTable>.parse(prefix + tail, cst,
+                                                         &stats, &g::kDrive));
         CHECK(stats.splits > 0 && stats.episodeSearches > 0);
         for (const auto& text : {prefix + ";" + tail, prefix + tail + "!@$"}) {
           const auto valid = engine->parse(text);
@@ -131,8 +131,9 @@ void an_indent_settles_a_cell_without_the_graph() {
   const std::string text = "fork a b\n  c\n    d\n  e\nf\n";
   CHECK(parse_with(g::create_parser(), text) == "ab(c(d) e) f");
   cursiv::Cst cst;
-  cursiv::LrParseStats stats;
-  CHECK(cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive));
+  cursiv::engine::LrParseStats stats;
+  CHECK(cursiv::engine::lr_parser<g::kTable>.parse(text, cst, &stats,
+                                                   &g::kDrive));
   CHECK(stats.splits == 0);
 }
 
@@ -153,8 +154,9 @@ void rivals_share_the_levels_a_line_start_dropped() {
     text += "\n  b\n";
     text += end[0] == '%' ? "!" : "?";
     cursiv::Cst cst;
-    cursiv::LrParseStats stats;
-    CHECK(cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive));
+    cursiv::engine::LrParseStats stats;
+    CHECK(cursiv::engine::lr_parser<g::kTable>.parse(text, cst, &stats,
+                                                     &g::kDrive));
     CHECK(stats.splits != 0);
     CHECK(cst.diagnostics().size() == 1);
   }

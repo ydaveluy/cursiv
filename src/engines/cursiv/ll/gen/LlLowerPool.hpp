@@ -13,11 +13,11 @@
 #include "cursiv/shared/gen/LowerPool.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlRecordPlan;
 
-namespace detail::llow {
+namespace llow {
 
 // `end` is end-of-input at a position (zero-width, no slot); `none` takes no
 // slot and says nothing.
@@ -121,5 +121,5 @@ void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
 void ride_chains_down(LlLowered& o, const LlRecordPlan& plan);
 void lay_own_records(LlLowered& o, const LlRecordPlan& plan);
 
-}  // namespace detail::llow
-}  // namespace cursiv
+}  // namespace llow
+}  // namespace cursiv::engine

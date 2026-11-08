@@ -36,7 +36,7 @@
 #include "cursiv/shared/runtime/TypoWalk.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The largest count where a product or a sum would wrap: a bound derived from
 // a grammar or a document is never smaller for being large.
@@ -1415,4 +1415,4 @@ inline void lr_search_finish(LrContext& c, LrSearch& s) {
   c.stats.searchRoom = static_cast<std::uint32_t>(s.configs.capacity());
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

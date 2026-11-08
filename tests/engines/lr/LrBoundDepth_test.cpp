@@ -50,14 +50,17 @@ inline int depth = 0;
 inline int deepest = 0;
 
 template <const auto& A>
-std::uint32_t owes(const cursiv::LrContext& c, cursiv::LrSearch& s,
-                   cursiv::TextOffset p, cursiv::SymbolId prev,
-                   std::uint32_t run);
+std::uint32_t owes(const cursiv::engine::LrContext& c,
+                   cursiv::engine::LrSearch& s, cursiv::TextOffset p,
+                   cursiv::engine::SymbolId prev, std::uint32_t run);
 
 template <const auto& A>
-std::uint32_t dropped(const cursiv::LrContext& c, cursiv::LrSearch& s,
-                      const cursiv::Token& t, cursiv::SymbolId prev) {
+std::uint32_t dropped(const cursiv::engine::LrContext& c,
+                      cursiv::engine::LrSearch& s,
+                      const cursiv::engine::Token& t,
+                      cursiv::engine::SymbolId prev) {
   using namespace cursiv;
+  using namespace cursiv::engine;
   if (t.begin >= c.len) return kLrNoBound;
   const TextOffset end =
       t.sym == kInvalidSymbol ? t.end : (t.end > t.begin ? t.end : t.begin + 1);
@@ -71,10 +74,11 @@ std::uint32_t dropped(const cursiv::LrContext& c, cursiv::LrSearch& s,
 }
 
 template <const auto& A>
-std::uint32_t owes(const cursiv::LrContext& c, cursiv::LrSearch& s,
-                   cursiv::TextOffset p, cursiv::SymbolId prev,
-                   std::uint32_t run) {
+std::uint32_t owes(const cursiv::engine::LrContext& c,
+                   cursiv::engine::LrSearch& s, cursiv::TextOffset p,
+                   cursiv::engine::SymbolId prev, std::uint32_t run) {
   using namespace cursiv;
+  using namespace cursiv::engine;
   if (p >= s.horizon || lr_search_spent(s)) return 0;
   const std::uint64_t key =
       (std::uint64_t{p} << 20) | (std::uint64_t{prev} << 2) | run;
@@ -108,12 +112,12 @@ std::uint32_t owes(const cursiv::LrContext& c, cursiv::LrSearch& s,
 template <const auto& A>
 struct Bound {
   Stand<A> st;
-  cursiv::LrSearch s;
+  cursiv::engine::LrSearch s;
 
   Bound(std::string_view text, std::uint64_t share)
       : st(text, ga::kDrive), s(text.size(), kUnbounded, st.c.indentArena) {
-    CHECK(ga::kDrive.enter(st.c) == cursiv::LrExit::pause);
-    cursiv::lr_search_start(st.c, s);
+    CHECK(ga::kDrive.enter(st.c) == cursiv::engine::LrExit::pause);
+    cursiv::engine::lr_search_start(st.c, s);
     s.bounding = true;
     s.boundShort = false;
     if (share != ~std::uint64_t{0}) s.limit = s.work + share;
@@ -128,6 +132,7 @@ constexpr std::uint64_t kAll = ~std::uint64_t{0};
 template <const auto& A>
 void agree(std::string_view text, std::uint64_t share) {
   using namespace cursiv;
+  using namespace cursiv::engine;
   Bound<A> now(text, share);
   Bound<A> was(text, share);
   const TextOffset at = now.st.c.la.begin;
@@ -183,8 +188,8 @@ struct Cramped {
 void* cramped(void* arg) {
   auto* job = static_cast<Cramped*>(arg);
   Bound<ga::kTable> b(job->text, kAll);
-  job->owed = cursiv::lr_search_owes<ga::kTable>(
-      b.st.c, b.s, b.st.c.la.begin, cursiv::kInvalidSymbol, 0);
+  job->owed = cursiv::engine::lr_search_owes<ga::kTable>(
+      b.st.c, b.s, b.st.c.la.begin, cursiv::engine::kInvalidSymbol, 0);
   return nullptr;
 }
 
@@ -201,9 +206,9 @@ void a_small_stack_holds_the_walk(std::string_view text) {
   pthread_join(th, nullptr);
   pthread_attr_destroy(&attr);
   Bound<ga::kTable> b(text, kAll);
-  CHECK(job.owed == cursiv::lr_search_owes<ga::kTable>(
-                        b.st.c, b.s, b.st.c.la.begin, cursiv::kInvalidSymbol,
-                        0));
+  CHECK(job.owed ==
+        cursiv::engine::lr_search_owes<ga::kTable>(
+            b.st.c, b.s, b.st.c.la.begin, cursiv::engine::kInvalidSymbol, 0));
 }
 #endif
 
@@ -246,18 +251,19 @@ void a_stop_is_read_while_the_walk_runs() {
   const std::string text = repeated("module m ", "1 ", 400);
   Bound<ga::kTable> b(text, kAll);
   const auto& tokens =
-      cursiv::lr_search_ahead<ga::kTable>(b.st.c, b.s, b.st.c.la.begin).tokens;
+      cursiv::engine::lr_search_ahead<ga::kTable>(b.st.c, b.s, b.st.c.la.begin)
+          .tokens;
   CHECK(!tokens.empty());
   for (cursiv::TextOffset p = b.st.c.la.begin; p < text.size(); ++p)
-    (void)cursiv::lr_search_ahead<ga::kTable>(b.st.c, b.s, p);
+    (void)cursiv::engine::lr_search_ahead<ga::kTable>(b.st.c, b.s, p);
   cursiv::CancellationTokenSource source;
   source.request_stop();
   const cursiv::CancellationToken token = source.get_token();
-  b.st.c.stop = cursiv::CancellationPoll(token);
+  b.st.c.stop = cursiv::engine::CancellationPoll(token);
   bool told = false;
   try {
-    (void)cursiv::lr_search_owes<ga::kTable>(b.st.c, b.s, b.st.c.la.begin,
-                                             cursiv::kInvalidSymbol, 0);
+    (void)cursiv::engine::lr_search_owes<ga::kTable>(
+        b.st.c, b.s, b.st.c.la.begin, cursiv::engine::kInvalidSymbol, 0);
   } catch (const cursiv::OperationCancelled&) {
     told = true;
   }

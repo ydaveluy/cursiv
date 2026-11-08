@@ -7,7 +7,7 @@
 
 #include "cursiv/grammar/ElementId.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // One continuation and its canonical record row, `kNoElement` where no member
 // could be determined. Where a guard's landings write different members, the
@@ -31,4 +31,4 @@ struct LrExpectTable {
   std::array<std::uint16_t, NStates> shiftTerm{};
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

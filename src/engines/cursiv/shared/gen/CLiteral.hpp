@@ -8,9 +8,10 @@
 #include <string>
 #include <string_view>
 
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/scalar_at.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The bytes spelled as an escape; `??=` is a trigraph to a compiler that still
 // reads them.
@@ -30,9 +31,8 @@ inline std::string c_literal(std::string_view s) {
     }
     std::size_t len = 0;
     if (const char32_t scalar =
-            c >= 0x80 ? detail::scalar_at(s.data() + i, s.size() - i, len)
-                      : detail::kNoScalar;
-        scalar != detail::kNoScalar) {
+            c >= 0x80 ? scalar_at(s.data() + i, s.size() - i, len) : kNoScalar;
+        scalar != kNoScalar) {
       // A bidirectional control is escaped: a compiler warns of one in a
       // source file, and a reader cannot see what it does to the text around
       // it.
@@ -59,4 +59,4 @@ inline std::string c_literal(std::string_view s) {
   return q + "\"";
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

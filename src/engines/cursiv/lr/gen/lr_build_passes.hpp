@@ -10,7 +10,7 @@
 #include "cursiv/lr/gen/LrBuildTable.hpp"
 #include "cursiv/shared/gen/LexModes.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The terminal shifted into each state: every rewrite keeps it one.
 std::vector<std::uint16_t> lr_shift_terms(const LrBuildTable& a);
@@ -42,4 +42,4 @@ void lr_subsume_modes(LrBuildTable& A, const LexModes& modes);
 // Equal rows of actions are seated once, the states naming the same one.
 void lr_share_action_rows(LrBuildTable& A);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

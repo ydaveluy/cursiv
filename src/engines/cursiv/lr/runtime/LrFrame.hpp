@@ -7,7 +7,7 @@
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A symbol that wrote no record: nothing for a call site to rename.
 inline constexpr std::uint32_t kLrNoWord = 0xffffffffu;
@@ -28,4 +28,4 @@ struct LrFrame {
 static_assert(std::is_trivially_default_constructible_v<LrFrame>,
               "the stack allocates uninitialised and a push fills the frame");
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

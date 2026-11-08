@@ -25,9 +25,9 @@ namespace lex_nfa_cases {
 
 namespace {
 
-using cursiv::ByteSet;
-using cursiv::LexNfaPool;
-using cursiv::LexNfaState;
+using cursiv::engine::ByteSet;
+using cursiv::engine::LexNfaPool;
+using cursiv::engine::LexNfaState;
 
 // Random sets use only a..f. The other bytes share an empty transition;
 // retain low/high representatives as well as every byte in that alphabet.
@@ -80,7 +80,7 @@ std::vector<bool> heads(const LexNfaPool& n, const std::vector<int>& startOf) {
       if (st.set >= 0) continue;
       todo.push_back(st.t1);
       todo.push_back(st.t2);
-      for (const cursiv::LexNfaGuard& gd : n.guards)
+      for (const cursiv::engine::LexNfaGuard& gd : n.guards)
         if (gd.hole == x) todo.push_back(gd.out);
     }
   }
@@ -172,19 +172,19 @@ void the_walks_agree_with_the_plain_ones() {
       std::set<int> unioned;
       for (const unsigned char b : probe_bytes) {
         const std::vector<int> plain = step(n, sets, from, b);
-        CHECK(cursiv::lex_nfa_step(n, sets, from, b) == plain);
+        CHECK(cursiv::engine::lex_nfa_step(n, sets, from, b) == plain);
         if (bytes.has(b)) unioned.insert(plain.begin(), plain.end());
       }
-      CHECK(cursiv::lex_nfa_step_any(n, sets, from, bytes) ==
+      CHECK(cursiv::engine::lex_nfa_step_any(n, sets, from, bytes) ==
             std::vector<int>(unioned.begin(), unioned.end()));
     }
-    CHECK(cursiv::lex_guard_heads(n, startOf) == heads(n, startOf));
+    CHECK(cursiv::engine::lex_guard_heads(n, startOf) == heads(n, startOf));
     for (unsigned k = 0; size <= 14 && k < 4; ++k) {
       const int a = static_cast<int>(r.next(size)),
                 b = static_cast<int>(r.next(size));
-      CHECK(cursiv::lex_prefix_meets(n, sets, a, b) ==
-            (meets(n, sets, a, b) ? cursiv::LexOverlap::found
-                                  : cursiv::LexOverlap::none));
+      CHECK(cursiv::engine::lex_prefix_meets(n, sets, a, b) ==
+            (meets(n, sets, a, b) ? cursiv::engine::LexOverlap::found
+                                  : cursiv::engine::LexOverlap::none));
     }
   }
 }
@@ -200,7 +200,7 @@ void an_assertion_is_entered_or_not() {
   sets[1].add('!');
   LexNfaPool n;
   const auto asserting = [&](int out) {
-    cursiv::LexRelayBuild r;
+    cursiv::engine::LexRelayBuild r;
     r.row.predicate = 0;
     r.resumeOut = out;
     n.relays.push_back(r);
@@ -211,8 +211,8 @@ void an_assertion_is_entered_or_not() {
   // `#` behind an assertion meets the start of `#!` only where it holds.
   const int hash = n.chars(0, asserting(pattern));
   const int bang = n.chars(0, n.chars(1, n.match(2)));
-  CHECK(cursiv::lex_prefix_meets(n, sets, hash, bang) ==
-        cursiv::LexOverlap::incomplete);
+  CHECK(cursiv::engine::lex_prefix_meets(n, sets, hash, bang) ==
+        cursiv::engine::LexOverlap::incomplete);
   // `#!` at a literal's rank behind an assertion, or as a pattern, ties with
   // the pattern `#!` where the assertion fails.
   const int either = n.split(n.chars(0, n.chars(1, asserting(literal))),
@@ -223,12 +223,13 @@ void an_assertion_is_entered_or_not() {
       return st.accept >= 0 && st.lit;
     });
   };
-  CHECK(cursiv::lex_pair_search(
+  CHECK(cursiv::engine::lex_pair_search(
             n, sets, either, bang,
             [&](const std::vector<int>& x, const std::vector<int>& y) {
-              return cursiv::lex_accepts(n, x) && cursiv::lex_accepts(n, y) &&
+              return cursiv::engine::lex_accepts(n, x) &&
+                     cursiv::engine::lex_accepts(n, y) &&
                      ranked(x) == ranked(y);
-            }) == cursiv::LexOverlap::found);
+            }) == cursiv::engine::LexOverlap::found);
   // Sixteen assertions at one position.
   int many = asserting(pattern);
   for (int k = 1; k < 16; ++k)
@@ -236,7 +237,7 @@ void an_assertion_is_entered_or_not() {
   std::vector<int> at = n.eclose(many);
   std::ranges::sort(at);
   bool unsure = false;
-  CHECK(cursiv::lex_assertion_worlds(n, at, unsure) ==
+  CHECK(cursiv::engine::lex_assertion_worlds(n, at, unsure) ==
         std::vector<std::vector<int>>{at});
   CHECK(unsure);
 }
@@ -255,7 +256,7 @@ void a_nested_run_is_followed_at_depth_zero() {
       out = n.chars(text[i] == '/' ? 0 : text[i] == '*' ? 1 : 2, out);
     return out;
   };
-  cursiv::LexRelayBuild r;
+  cursiv::engine::LexRelayBuild r;
   r.row.nested = true;
   r.open = "/*";
   r.close = "*/";
@@ -263,13 +264,14 @@ void a_nested_run_is_followed_at_depth_zero() {
   n.relays.push_back(r);
   const int comment = spell("/*", n.relay(0));
   const auto ties = [&](int text) {
-    return cursiv::lex_pair_search(
+    return cursiv::engine::lex_pair_search(
         n, sets, comment, text,
         [&](const std::vector<int>& x, const std::vector<int>& y) {
-          return cursiv::lex_accepts(n, x) && cursiv::lex_accepts(n, y);
+          return cursiv::engine::lex_accepts(n, x) &&
+                 cursiv::engine::lex_accepts(n, y);
         });
   };
-  using cursiv::LexOverlap;
+  using cursiv::engine::LexOverlap;
   CHECK(ties(spell("/*x*/", n.match(2))) == LexOverlap::found);
   CHECK(ties(spell("/**/", n.match(2))) == LexOverlap::found);
   CHECK(ties(spell("/*/**/", n.match(2))) == LexOverlap::incomplete);
@@ -283,15 +285,15 @@ void an_echo_leaves_the_walk_incomplete() {
   sets[0].add('[');
   sets[1].add('x');
   LexNfaPool n;
-  cursiv::LexRelayBuild r;
+  cursiv::engine::LexRelayBuild r;
   r.row.closes = true;
   r.resumeOut = n.match(1);
   n.relays.push_back(r);
   const int echo = n.chars(0, n.chars(0, n.relay(0)));
   const auto meets = [&](int text) {
-    return cursiv::lex_prefix_meets(n, sets, text, echo);
+    return cursiv::engine::lex_prefix_meets(n, sets, text, echo);
   };
-  using cursiv::LexOverlap;
+  using cursiv::engine::LexOverlap;
   CHECK(meets(n.chars(0, n.chars(0, n.chars(1, n.match(2))))) ==
         LexOverlap::incomplete);
   CHECK(meets(n.chars(0, n.chars(1, n.match(2)))) == LexOverlap::none);
@@ -315,17 +317,17 @@ namespace {
 
 struct Built {
   std::uint16_t ndfa = 0;
-  cursiv::Vec<std::uint16_t> dfaNext;
+  cursiv::engine::Vec<std::uint16_t> dfaNext;
 };
 
 void large_subsets(bool redundant) {
-  cursiv::ByteSet sets[3];
+  cursiv::engine::ByteSet sets[3];
   sets[0].add('a');
   sets[1].add('a');
   sets[1].add('b');
   sets[2].add('x');
 
-  cursiv::LexNfaPool nfa;
+  cursiv::engine::LexNfaPool nfa;
   const int accept = nfa.match(1);
   int tail = accept;
   for (unsigned i = 0; i < 16; ++i) tail = nfa.chars(1, tail);
@@ -337,16 +339,17 @@ void large_subsets(bool redundant) {
   nfa.s[loop].t1 = head;
   const int root = nfa.chars(2, loop);
 
-  const cursiv::LexKeywordCut cut;
-  const cursiv::TermInfo terms[2];
-  cursiv::LexDfaBuild dfa(nfa, sets, 3,
-                          {unsigned('a'), unsigned('b'), unsigned('x')}, 3, cut,
-                          terms);
+  const cursiv::engine::LexKeywordCut cut;
+  const cursiv::engine::TermInfo terms[2];
+  cursiv::engine::LexDfaBuild dfa(nfa, sets, 3,
+                                  {unsigned('a'), unsigned('b'), unsigned('x')},
+                                  3, cut, terms);
   dfa.close(root);
   const auto seed = dfa.intern();
   Built built;
   std::vector<bool> accepting;
-  const auto write = [&](std::uint16_t id, const cursiv::LexDfaReading& r) {
+  const auto write = [&](std::uint16_t id,
+                         const cursiv::engine::LexDfaReading& r) {
     if (accepting.size() <= id) accepting.resize(id + 1);
     accepting[id] = r.acc.test(1);
   };
@@ -354,8 +357,8 @@ void large_subsets(bool redundant) {
   bool refused = false;
   try {
     dfa.fill(built, write);
-  } catch (const cursiv::LowerRefused& e) {
-    refused = e.why == cursiv::LowerFail::tokenGraphTooLarge;
+  } catch (const cursiv::engine::LowerRefused& e) {
+    refused = e.why == cursiv::engine::LowerFail::tokenGraphTooLarge;
   }
   CHECK(refused == !redundant);
   if (refused || !redundant) return;
@@ -364,17 +367,17 @@ void large_subsets(bool redundant) {
   const auto start = dfa.final_of(seed);
   CHECK(!accepting[start]);
   const auto x = built.dfaNext[std::size_t{start} * 3 + 2];
-  CHECK(x != cursiv::kDeadState && accepting[x]);
-  if (x == cursiv::kDeadState) return;
+  CHECK(x != cursiv::engine::kDeadState && accepting[x]);
+  if (x == cursiv::engine::kDeadState) return;
   CHECK(built.dfaNext[std::size_t{x} * 3] == x &&
         built.dfaNext[std::size_t{x} * 3 + 1] == x);
-  CHECK(built.dfaNext[std::size_t{start} * 3] == cursiv::kDeadState &&
-        built.dfaNext[std::size_t{x} * 3 + 2] == cursiv::kDeadState);
+  CHECK(built.dfaNext[std::size_t{start} * 3] == cursiv::engine::kDeadState &&
+        built.dfaNext[std::size_t{x} * 3 + 2] == cursiv::engine::kDeadState);
 }
 
 struct Wide {
-  cursiv::ByteSet sets[4];
-  cursiv::LexNfaPool nfa;
+  cursiv::engine::ByteSet sets[4];
+  cursiv::engine::LexNfaPool nfa;
   int root = -1;
 
   Wide() {
@@ -385,17 +388,18 @@ struct Wide {
   }
 
   std::uint16_t read(Built& built, std::vector<bool>& accepting) {
-    const cursiv::LexKeywordCut cut;
-    const cursiv::TermInfo terms[2];
-    cursiv::LexDfaBuild dfa(nfa, sets, 4,
-                            {unsigned('a'), 0xC3u, 0xA9u, unsigned('x')}, 4,
-                            cut, terms);
+    const cursiv::engine::LexKeywordCut cut;
+    const cursiv::engine::TermInfo terms[2];
+    cursiv::engine::LexDfaBuild dfa(
+        nfa, sets, 4, {unsigned('a'), 0xC3u, 0xA9u, unsigned('x')}, 4, cut,
+        terms);
     dfa.close(root);
     const auto seed = dfa.intern();
-    dfa.fill(built, [&](std::uint16_t id, const cursiv::LexDfaReading& r) {
-      if (accepting.size() <= id) accepting.resize(id + 1);
-      accepting[id] = r.acc.test(1);
-    });
+    dfa.fill(built,
+             [&](std::uint16_t id, const cursiv::engine::LexDfaReading& r) {
+               if (accepting.size() <= id) accepting.resize(id + 1);
+               accepting[id] = r.acc.test(1);
+             });
     return dfa.final_of(seed);
   }
 };
@@ -425,8 +429,8 @@ void a_loop_over_every_character_is_one_state() {
   const auto start = w.read(built, accepting);
   CHECK(built.ndfa == 2);
   const auto in = step(built, start, 3);
-  CHECK(in != cursiv::kDeadState && accepting[in]);
-  if (in == cursiv::kDeadState) return;
+  CHECK(in != cursiv::engine::kDeadState && accepting[in]);
+  if (in == cursiv::engine::kDeadState) return;
   for (unsigned cls = 0; cls < 3; ++cls) CHECK(step(built, in, cls) == in);
 }
 
@@ -444,7 +448,7 @@ void a_character_before_a_byte_keeps_its_length() {
   const auto start = w.read(built, accepting);
   CHECK(built.ndfa == 5);
   const auto in = step(built, start, 3);
-  if (in == cursiv::kDeadState) return;
+  if (in == cursiv::engine::kDeadState) return;
   CHECK(step(built, in, 1) != step(built, in, 2));
 }
 
@@ -477,7 +481,7 @@ struct Quoted {
   }
   std::uint16_t accept(std::uint16_t s) const { return s == 3 ? 1 : 0; }
   std::uint16_t relay(std::uint16_t s) const {
-    return s == 0 && asserts ? 0 : cursiv::kNoRelay;
+    return s == 0 && asserts ? 0 : cursiv::engine::kNoRelay;
   }
   std::vector<std::uint16_t> hops(std::uint16_t s) const {
     return s == 0 && asserts ? std::vector<std::uint16_t>{1}
@@ -489,7 +493,7 @@ struct Quoted {
     if (s == 1 && b == '"') return 2;
     if (s == 2 && b == 'a') return 2;
     if (s == 2 && b == '"') return 3;
-    return cursiv::kDeadState;
+    return cursiv::engine::kDeadState;
   }
   bool before(unsigned a, unsigned b) const { return a < b; }
 };
@@ -497,10 +501,10 @@ struct Quoted {
 }  // namespace
 
 void run() {
-  const auto behind = cursiv::lex_owed_rows(Quoted{true});
+  const auto behind = cursiv::engine::lex_owed_rows(Quoted{true});
   CHECK(behind.openers[0].has('"'));
   CHECK(behind.bodies[2] == 1 && behind.owed[2] == 0);
-  const auto plain = cursiv::lex_owed_rows(Quoted{false});
+  const auto plain = cursiv::engine::lex_owed_rows(Quoted{false});
   CHECK(!plain.openers[0].has('"'));
 }
 
@@ -513,7 +517,7 @@ namespace lex_reserve_cases {
 void run() {
   // 0 -> 1 -> 2 -> 2, 0 -> 3; a relay of terminal 5 launches at 1.
   const std::vector<std::vector<std::uint32_t>> edges = {{1, 3}, {2}, {2}, {}};
-  const auto reach = cursiv::lex_relayed(
+  const auto reach = cursiv::engine::lex_relayed(
       edges.size(),
       [](std::size_t s, auto&& each) {
         if (s == 1) each(5u);

@@ -11,7 +11,7 @@
 
 #include "cursiv/lr/runtime/lr_matcher.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& A, const auto& Base, const auto& Terms,
           const auto& Bounds, unsigned Max>
@@ -238,4 +238,4 @@ class LrLexCandidates {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -7,7 +7,7 @@
 #include "cursiv/lr/gen/LrBuildCfg.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // `beforeToken` leaves out the productions that hold only at end of input.
 inline std::vector<std::uint8_t> lr_nullable(const LrBuildCfg& g,
@@ -44,4 +44,4 @@ inline std::vector<std::uint8_t> lr_nullable(const LrBuildCfg& g,
   return nullable;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

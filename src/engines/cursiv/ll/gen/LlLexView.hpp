@@ -9,7 +9,7 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlLexView : LexTableView<LlBuiltProgram> {
   // A state whose election checks its acceptances reads past the token: one
@@ -33,4 +33,4 @@ inline bool ll_byte_term(const LlBuiltProgram& a, unsigned m, unsigned t) {
   return a.modeLonger[m] == kNoMode && lex_byte_literal(LlLexView{a}, m, t);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

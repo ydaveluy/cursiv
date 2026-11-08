@@ -38,6 +38,7 @@
 namespace {
 
 using namespace cursiv;
+using namespace cursiv::engine;
 using cursiv::test::failures;
 
 struct RuntimeGrammar {

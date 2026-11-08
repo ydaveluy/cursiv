@@ -36,7 +36,8 @@ using cursiv::test::failures;
 
 namespace metric = cursiv::recovery_metric;
 
-static_assert(!std::is_same_v<cursiv::RepairFault, metric::RepairFault>);
+static_assert(
+    !std::is_same_v<cursiv::engine::RepairFault, metric::RepairFault>);
 
 namespace {
 

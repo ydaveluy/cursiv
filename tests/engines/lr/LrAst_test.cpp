@@ -348,6 +348,7 @@ namespace lowering {
 namespace {
 
 using namespace cursiv;
+using namespace cursiv::engine;
 using detail::tl_has;
 using detail::tl_size;
 
@@ -684,7 +685,7 @@ using Ch = LrLowering<Chain>;
 // The action's id is its position in the published list, so a reader decides
 // what it is by asking that list -- exactly as the AST builder does.
 template <WriteKind... Ks, class... Ts, class... Ms, class... Ns, class... Ss>
-constexpr auto kinds_of(TypeList<detail::Row<Ks, Ts, Ms, Ns, Ss>...>) {
+constexpr auto kinds_of(TypeList<engine::Row<Ks, Ts, Ms, Ns, Ss>...>) {
   return std::array<WriteKind, sizeof...(Ks)>{Ks...};
 }
 constexpr auto ch_kinds = kinds_of(Ch::actions{});
@@ -695,7 +696,7 @@ void one_node_a_succession_of_actions() {
   // Each rule opens a record before it fills it: the creation the rule owes,
   // then the write its body states over the record below.
   const auto opens_then_fills = [&](std::uint16_t r) {
-    const cursiv::Chain ch = acts.chains[r];
+    const cursiv::engine::Chain ch = acts.chains[r];
     const ChainBuild cb = acts.chainBuild[r];
     return ch.count == 2 && cb.makes &&
            ch_kinds[acts.acts[ch.off]] == WriteKind::create &&
@@ -871,7 +872,7 @@ bool join_keeps_everything() {
   const std::uint16_t ia = w.intern_chain(a, kWide);
   const std::uint16_t ib = w.intern_chain(b, kWide);
   const std::uint16_t r = w.concat(ia, ib);
-  const cursiv::Chain ch = w.chains[r];
+  const cursiv::engine::Chain ch = w.chains[r];
   if (ch.count != 2 * kWide) return false;
   const std::uint16_t* const ac = w.acts.data();
   for (unsigned i = 0; i < 2 * kWide; ++i)

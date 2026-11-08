@@ -17,7 +17,7 @@ namespace typo_candidates_cases {
 
 namespace {
 
-using cursiv::Typo;
+using cursiv::engine::Typo;
 
 // One insertion at a time into a ranked list: what the collector replaced.
 std::vector<Typo> by_insertion(const std::vector<Typo>& emitted) {
@@ -58,7 +58,7 @@ void ranks_as_an_insertion_does() {
     for (unsigned i = 0; i < n; ++i)
       emitted.push_back(
           typo(rng() % 30, static_cast<std::uint16_t>(rng() % 4), rng() % 4));
-    cursiv::TypoCandidates c;
+    cursiv::engine::TypoCandidates c;
     for (const Typo& t : emitted) c.add(t);
     const std::vector<Typo> got = c.ranked();
     const std::vector<Typo> want = by_insertion(emitted);
@@ -71,7 +71,7 @@ void ranks_as_an_insertion_does() {
 
 void a_long_line_costs_its_candidates() {
   const auto start = std::chrono::steady_clock::now();
-  cursiv::TypoCandidates c;
+  cursiv::engine::TypoCandidates c;
   constexpr std::uint32_t kEnds = 400000;
   for (std::uint32_t end = 1; end <= kEnds; ++end) c.add(typo(end, 15, 1));
   for (std::uint32_t end = 1; end <= kEnds; ++end) c.add(typo(end, 15, 2));
@@ -98,7 +98,7 @@ namespace gesture_rank_cases {
 
 namespace {
 
-using cursiv::kNoGestureLink;
+using cursiv::engine::kNoGestureLink;
 
 struct Link {
   std::uint32_t parent = kNoGestureLink;
@@ -131,7 +131,7 @@ bool ranks_by_depth(const std::vector<Link>& links, std::uint32_t a,
 void small_forests_rank_as_the_depths_say() {
   std::mt19937 rng(929);
   for (unsigned round = 0; round < 300; ++round) {
-    cursiv::GestureRank rank;
+    cursiv::engine::GestureRank rank;
     std::vector<Link> links;
     const std::uint32_t n = 2 + rng() % 40;
     for (std::uint32_t i = 0; i < n; ++i) {
@@ -148,7 +148,7 @@ void small_forests_rank_as_the_depths_say() {
 
 void long_paths_rank_at_their_divergence() {
   constexpr std::uint32_t kLong = 2'000'000;
-  cursiv::GestureRank rank;
+  cursiv::engine::GestureRank rank;
   std::vector<Link> links;
   for (std::uint32_t i = 0; i < kLong; ++i)
     links.push_back(Link{i == 0 ? kNoGestureLink : i - 1, 0});
@@ -176,8 +176,8 @@ namespace tied_inserts_cases {
 
 namespace {
 
-using cursiv::kNoGestureLink;
-using cursiv::TiedInserts;
+using cursiv::engine::kNoGestureLink;
+using cursiv::engine::TiedInserts;
 
 struct Link {
   std::uint32_t parent = kNoGestureLink;
@@ -210,12 +210,12 @@ void a_handed_path_keeps_what_its_own_links_held() {
       {6, 0, TiedInserts::kArm},               // its end
   };
   const auto kind = [](const Link& l) { return l.kind; };
-  cursiv::GestureRank rank;
+  cursiv::engine::GestureRank rank;
   TiedInserts tied;
   tied.tie(links, 3, 7, rank.part(links, 7, 3), false, kind);
   CHECK((named(tied, links, 4) == std::vector<cursiv::ElementId>{10, 20}));
-  const cursiv::GestureRank::Parting p = rank.part(links, 5, 4);
-  const bool handed = cursiv::GestureRank::before(links, p);
+  const cursiv::engine::GestureRank::Parting p = rank.part(links, 5, 4);
+  const bool handed = cursiv::engine::GestureRank::before(links, p);
   CHECK(handed);
   tied.tie(links, 4, 5, p, handed, kind);
   if (handed) links[4] = links[5];

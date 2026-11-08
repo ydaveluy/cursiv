@@ -16,7 +16,7 @@
 
 #include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlHistory {
  public:
@@ -639,4 +639,4 @@ class LlHistory {
   mutable std::vector<Piece> _walkA, _walkB, _walkEach;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -14,7 +14,7 @@
 #include "cursiv/shared/gen/lex_prefix_meets.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Cfg>
 class LexSeparation {
@@ -95,4 +95,4 @@ class LexSeparation {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

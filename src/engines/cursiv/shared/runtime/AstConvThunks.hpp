@@ -15,19 +15,20 @@
 
 #include "cursiv/grammar/Conversion.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/shared/runtime/AstActions.hpp"
+#include "cursiv/shared/runtime/AstBuildCtx.hpp"
+#include "cursiv/shared/runtime/SmallRun.hpp"
+#include "cursiv/shared/runtime/ast_conv.hpp"
+#include "cursiv/shared/table/StampLayout.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstArena.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/utils/macros.hpp"
-#include "cursiv/shared/runtime/AstActions.hpp"
-#include "cursiv/shared/runtime/AstBuildCtx.hpp"
-#include "cursiv/shared/runtime/SmallRun.hpp"
-#include "cursiv/shared/runtime/ast_conv.hpp"
-#include "cursiv/shared/table/StampLayout.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // One node factory per AST type. The node is on the list from here, and the
 // result runs its destructor when it goes.
@@ -485,7 +486,7 @@ CURSIV_ALWAYS_INLINE inline bool convert_payload(AstBuildCtx& ctx, NodeId id,
       } else {
         if constexpr (std::is_same_v<A, double>) {
           double fast = 0.0;
-          if (detail::fast_decimal(text, fast)) {
+          if (fast_decimal(text, fast)) {
             place<A>(slot, fast);
             return true;
           }
@@ -618,8 +619,7 @@ concept DenotesText = [] {
 // the call. `H` is what the member holds.
 template <class CR, class H>
 concept StatesValue =
-    detail::is_value_conv<CR> && !is_variant_v<H> &&
-    std::is_trivially_copyable_v<H> &&
+    is_value_conv<CR> && !is_variant_v<H> && std::is_trivially_copyable_v<H> &&
     std::is_same_v<std::remove_cvref_t<decltype(CR::convert())>, H>;
 
 // One slot of the conversion registry: the thunk, and the value where the
@@ -645,4 +645,4 @@ consteval ConvSlot held_slot() {
     return conv_slot<Pass, M, Alt, Data, Text>();
 }
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

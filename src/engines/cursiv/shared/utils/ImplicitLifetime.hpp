@@ -5,7 +5,7 @@
 #include <memory>
 #include <type_traits>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Begins an array's lifetime without initializing its elements. Storage must
 // be aligned and large enough; existing representations are preserved. The
@@ -26,4 +26,4 @@ template <class T>
 #endif
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

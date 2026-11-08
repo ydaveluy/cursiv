@@ -5,7 +5,7 @@
 #include <bit>
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <unsigned Bits>
 struct LrBitSet {
@@ -64,4 +64,4 @@ struct LrBitSet {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

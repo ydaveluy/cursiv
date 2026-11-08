@@ -21,7 +21,7 @@
 #include "cursiv/ll/table/LlTable.hpp"
 #include "cursiv/shared/runtime/LexByteRun.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The token `mode` reads at `from`, short of the text's end: a one-byte
 // literal off its byte alone, any other token through the walk.
@@ -624,4 +624,4 @@ CURSIV_ALWAYS_INLINE inline void ll_join_one(LlContext& c, NodeId was,
   T.stamp.set_row(r, to);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

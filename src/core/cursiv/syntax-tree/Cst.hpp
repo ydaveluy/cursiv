@@ -37,10 +37,12 @@ namespace cursiv {
 // which a separate header could not promise.
 class ReverseNodeRange;
 class CstBuilder;
-struct AstBuildCtx;
 
 namespace detail {
 struct CstWalk;
+}
+namespace engine {
+struct AstBuildCtx;
 }
 struct Document;
 
@@ -109,7 +111,7 @@ class Cst {
   std::pmr::memory_resource* memory() const { return _pool.get(); }
 
   // The builder keeps what it joins; anyone else goes through the document.
-  friend struct AstBuildCtx;
+  friend struct engine::AstBuildCtx;
   friend struct Document;
   // Text a view of the tree names, its parts written in one piece: it lives as
   // long as the tree. A null view means an unwritten member, even at length

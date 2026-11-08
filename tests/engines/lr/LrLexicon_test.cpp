@@ -93,7 +93,7 @@ void candidates(std::string text, unsigned from, unsigned end,
   const auto& a = gen::kTable;
   const auto mode = a.mode[0];
   CHECK(a.modeMulti[mode] != 0);
-  std::vector<cursiv::Scan> room(a.maxCands);
+  std::vector<cursiv::engine::Scan> room(a.maxCands);
   const auto n =
       gen::kDrive.scanText(text.data(), static_cast<unsigned>(text.size()),
                            mode, from, room.data(), a.maxCands);
@@ -203,11 +203,11 @@ void every_distinct_reading_is_a_ranked_candidate() {
   const std::string text = "ab;";
   cursiv::Cst cst;
   cursiv::CstBuilder builder(cst);
-  cursiv::LrContext c(text, builder);
+  cursiv::engine::LrContext c(text, builder);
   c.drive = &g::kDrive;
   std::uint64_t read = 0;
   bool cut = false;
-  const auto candidates = cursiv::lr_rescan_candidates<g::kTable>(
+  const auto candidates = cursiv::engine::lr_rescan_candidates<g::kTable>(
       c, 0, 0, static_cast<cursiv::TextOffset>(text.size()), read, cut);
   CHECK(candidates.size() > 1);
   for (std::size_t i = 1; i < candidates.size(); ++i) {
@@ -233,8 +233,9 @@ void run() {
   for (const auto text :
        {"relaxed_ok", "reservedx", "reserved_ok", "united_ok", "relaxed;ok"}) {
     const std::string_view src = text;
-    const auto scan = cursiv::lr_match_text<taudit::generated::G::kTable>(
-        src.data(), src.size(), taudit::generated::G::kTable.errMode, 0);
+    const auto scan =
+        cursiv::engine::lr_match_text<taudit::generated::G::kTable>(
+            src.data(), src.size(), taudit::generated::G::kTable.errMode, 0);
     const bool id = parser->getGrammar().terminalName(scan.term) == "ID";
     CHECK(id);
   }
@@ -390,19 +391,19 @@ namespace {
 cursiv::ConversionResult<std::string_view> borrowed;
 using BorrowedConverter =
     cursiv::detail::text_conv<[]() -> auto& { return borrowed; }>;
-static_assert(cursiv::detail::DenotesText<BorrowedConverter>);
+static_assert(cursiv::engine::DenotesText<BorrowedConverter>);
 cursiv::ConversionResult<std::string> borrowedString;
 using BorrowedStringConverter =
     cursiv::detail::text_conv<[]() -> auto& { return borrowedString; }>;
 
 void borrowed_conversion_results_are_not_consumed() {
   std::vector<cursiv::ParseDiagnostic> diagnostics;
-  cursiv::AstBuildCtx ctx;
+  cursiv::engine::AstBuildCtx ctx;
   ctx.diags = &diagnostics;
   borrowed = decltype(borrowed)::err("retained conversion failure");
   for (unsigned i = 0; i < 2; ++i) {
     const auto text =
-        cursiv::detail::denoted_text<BorrowedConverter>(ctx, cursiv::kNoNode);
+        cursiv::engine::denoted_text<BorrowedConverter>(ctx, cursiv::kNoNode);
     CHECK(!text);
   }
   CHECK(diagnostics.size() == 2);
@@ -413,7 +414,7 @@ void borrowed_conversion_results_are_not_consumed() {
   borrowed = decltype(borrowed)::ok("retained value");
   for (unsigned i = 0; i < 2; ++i) {
     const auto text =
-        cursiv::detail::denoted_text<BorrowedConverter>(ctx, cursiv::kNoNode);
+        cursiv::engine::denoted_text<BorrowedConverter>(ctx, cursiv::kNoNode);
     CHECK(text && *text == "retained value");
     CHECK(borrowed && *borrowed.value == "retained value");
   }
@@ -423,7 +424,7 @@ void borrowed_conversion_results_are_not_consumed() {
   for (unsigned i = 0; i < 2; ++i) {
     std::string value;
     const bool converted =
-        cursiv::detail::invoke_conv<BorrowedStringConverter, std::string, 0,
+        cursiv::engine::invoke_conv<BorrowedStringConverter, std::string, 0,
                                     false>(ctx, cursiv::kNoNode, &value);
     CHECK(converted && value == "retained owned value");
     CHECK(borrowedString && *borrowedString.value == "retained owned value");
@@ -455,10 +456,11 @@ void run() {
 template <const auto& A>
 unsigned tier_of(std::uint16_t s, unsigned t) {
   auto out = 0u;
-  A.each_accept(s, [&](cursiv::SymbolId term, std::uint16_t, unsigned tier) {
-    if (term == t && tier > out) out = tier;
-    return false;
-  });
+  A.each_accept(
+      s, [&](cursiv::engine::SymbolId term, std::uint16_t, unsigned tier) {
+        if (term == t && tier > out) out = tier;
+        return false;
+      });
   return out;
 }
 
@@ -472,8 +474,8 @@ namespace case_lexercontract {
 
 namespace {
 
-using cursiv::Scan;
 using cursiv::TextOffset;
+using cursiv::engine::Scan;
 
 // The sweep, where the grammar has one: every terminal this position reads,
 // and it answers ONE extent -- the same one the walk answers.
@@ -511,7 +513,7 @@ std::string mode_alphabet(unsigned m) {
   std::vector<char> seen(A.dfaAccept.size(), 0), whole(A.ncls, 0);
   seen[A.modeStart[m]] = 1;
   const auto enter = [&](std::uint16_t to) {
-    if (to == cursiv::kDeadState || seen[to] != 0) return;
+    if (to == cursiv::engine::kDeadState || seen[to] != 0) return;
     seen[to] = 1;
     reach.push_back(to);
   };
@@ -522,10 +524,11 @@ std::string mode_alphabet(unsigned m) {
   for (std::size_t i = 0; i < reach.size(); ++i) {
     const std::uint16_t s = reach[i];
     for (unsigned t = 0; t < A.cfg.nterms; ++t)
-      if (A.dfa_acc_set(s).test(t) && A.dfa_acc_bound(s, t) != cursiv::kNoSet)
+      if (A.dfa_acc_set(s).test(t) &&
+          A.dfa_acc_bound(s, t) != cursiv::engine::kNoSet)
         tests.push_back(A.dfa_acc_bound(s, t));
     if constexpr (A.relays.size() != 0)
-      for (auto k = A.dfaRelay[s]; k != cursiv::kNoRelay;
+      for (auto k = A.dfaRelay[s]; k != cursiv::engine::kNoRelay;
            k = A.relays[k].next) {
         const auto& r = A.relays[k];
         tests.push_back(r.markSet);
@@ -536,7 +539,7 @@ std::string mode_alphabet(unsigned m) {
     for (const char c : rep) enter(A.next_byte(s, static_cast<unsigned char>(c)));
   }
   for (const std::uint16_t k : tests)
-    if (A.cfg.setDecode[k] != cursiv::kNoSet)
+    if (A.cfg.setDecode[k] != cursiv::engine::kNoSet)
       for (unsigned b = 0x80; b < 256; ++b) whole[A.cls[b]] = 1;
   std::vector<std::vector<std::uint32_t>> kinds;
   std::string out;
@@ -556,11 +559,12 @@ std::string mode_alphabet(unsigned m) {
 
 // One mode, the drive's walk and sweep against `lr_match_text`.
 template <const auto& A>
-void mode_agrees(const char* lang, unsigned m, const cursiv::LrDrive& drive) {
+void mode_agrees(const char* lang, unsigned m,
+                 const cursiv::engine::LrDrive& drive) {
   const Sweep sweep = drive.scanText;
   const auto shared = [&](const char* s, TextOffset len, TextOffset from) {
-    return cursiv::lr_match_text<A>(s, len, static_cast<std::uint16_t>(m),
-                                    from);
+    return cursiv::engine::lr_match_text<A>(
+        s, len, static_cast<std::uint16_t>(m), from);
   };
   // What the mode's states act on, and trivia.
   std::vector<char> reads(A.cfg.nterms, 0);
@@ -571,7 +575,7 @@ void mode_agrees(const char* lang, unsigned m, const cursiv::LrDrive& drive) {
         reads[t] = 1;
   const auto one = [&](const char* s, TextOffset len, TextOffset from) {
     TextOffset halt = 0;
-    const Scan want = cursiv::lr_match_halt<A>(
+    const Scan want = cursiv::engine::lr_match_halt<A>(
         s, len, static_cast<std::uint16_t>(m), from, halt);
     bool ok =
         same(drive.walk(s, len, static_cast<std::uint16_t>(m), from), want);
@@ -584,7 +588,7 @@ void mode_agrees(const char* lang, unsigned m, const cursiv::LrDrive& drive) {
                                       from, room.data(), A.maxCands);
       for (std::uint32_t k = 1; k < got; ++k)
         ok = ok && room[k].end == room[0].end;
-      if (got != 0 && want.term != cursiv::kInvalidSymbol) {
+      if (got != 0 && want.term != cursiv::engine::kInvalidSymbol) {
         ok = ok && room[0].end == want.end;
         // The walk's own answer is one of the readings the sweep holds, or
         // the drive would elect a token its rivals disown.
@@ -594,7 +598,7 @@ void mode_agrees(const char* lang, unsigned m, const cursiv::LrDrive& drive) {
         ok = ok && held;
       }
       // Nothing to read is nothing to read, in both forms.
-      if (want.term == cursiv::kInvalidSymbol || want.end == from)
+      if (want.term == cursiv::engine::kInvalidSymbol || want.end == from)
         ok = ok && got == 0;
       // A rival the mode reads stands only behind a winner its mode flags:
       // the drive sweeps behind those alone.
@@ -725,11 +729,11 @@ void mode_agrees(const char* lang, unsigned m, const cursiv::LrDrive& drive) {
 template <const auto& A>
 void relay_runs_agree() {
   if constexpr (A.relays.size() != 0) {
-    const cursiv::LrLexTape<A> tape{};
+    const cursiv::engine::LrLexTape<A> tape{};
     std::vector<bool> reached(A.dfaAccept.size());
     std::vector<std::uint16_t> states;
     const auto add = [&](std::uint16_t state) {
-      if (state == cursiv::kDeadState || reached[state]) return;
+      if (state == cursiv::engine::kDeadState || reached[state]) return;
       reached[state] = true;
       states.push_back(state);
     };
@@ -738,7 +742,8 @@ void relay_runs_agree() {
       for (unsigned byte = 0; byte < 256; ++byte)
         add(tape.step(states[i], static_cast<unsigned char>(byte)));
     for (const auto s : states) {
-      if (!cursiv::lex_run_blind(tape, static_cast<std::uint16_t>(s))) continue;
+      if (!cursiv::engine::lex_run_blind(tape, static_cast<std::uint16_t>(s)))
+        continue;
       for (unsigned b = 0; b < 256; ++b) {
         const std::string text = "#" + std::string(65, static_cast<char>(b)) +
                                  static_cast<char>(b ^ 255u);
@@ -762,15 +767,17 @@ void owed_terminals_agree() {
     std::vector<bool> seen(A.dfaAccept.size());
     std::vector<std::uint16_t> todo{static_cast<std::uint16_t>(root)};
     seen[root] = true;
-    cursiv::SymbolId best = cursiv::kInvalidSymbol;
+    cursiv::engine::SymbolId best = cursiv::engine::kInvalidSymbol;
     auto bestTier = 0u;
     while (!todo.empty()) {
       const auto s = todo.back();
       todo.pop_back();
       if (A.dfaAccept[s] != 0) {
-        const auto term = static_cast<cursiv::SymbolId>(A.dfaAccept[s] - 1u);
+        const auto term =
+            static_cast<cursiv::engine::SymbolId>(A.dfaAccept[s] - 1u);
         const auto tier = tier_of<A>(s, term);
-        if (cursiv::LrLexTape<A>{}.prefers(term, tier, best, bestTier)) {
+        if (cursiv::engine::LrLexTape<A>{}.prefers(term, tier, best,
+                                                   bestTier)) {
           best = term;
           bestTier = tier;
         }
@@ -788,7 +795,7 @@ void owed_terminals_agree() {
 }
 
 template <const auto& A>
-void grammar_agrees(const char* lang, const cursiv::LrDrive& drive) {
+void grammar_agrees(const char* lang, const cursiv::engine::LrDrive& drive) {
   owed_terminals_agree<A>();
   relay_runs_agree<A>();
   for (unsigned m = 0; m < A.modeStart.size(); ++m)
@@ -796,9 +803,9 @@ void grammar_agrees(const char* lang, const cursiv::LrDrive& drive) {
 }
 
 template <const auto& A>
-std::vector<std::string_view> long_runs_agree(const char* lang,
-                                              const cursiv::LrDrive& drive) {
-  const cursiv::LrLexTape<A> tape{};
+std::vector<std::string_view> long_runs_agree(
+    const char* lang, const cursiv::engine::LrDrive& drive) {
+  const cursiv::engine::LrLexTape<A> tape{};
   std::vector<bool> tested(A.dfaAccept.size());
   std::vector<std::string_view> terminals;
   unsigned runs = 0;
@@ -814,21 +821,22 @@ std::vector<std::string_view> long_runs_agree(const char* lang,
       for (unsigned byte = 0; byte < 256; ++byte) {
         const auto next = tape.step(state, static_cast<unsigned char>(byte));
         if (next == state) members.push_back(static_cast<char>(byte));
-        if (next == cursiv::kDeadState || seen[next]) continue;
+        if (next == cursiv::engine::kDeadState || seen[next]) continue;
         seen[next] = true;
         states.push_back(next);
         prefixes.push_back(prefix + static_cast<char>(byte));
       }
       if (tested[state] || members.empty() || A.dfaAccept[state] == 0 ||
-          !cursiv::lex_run_blind(tape, state))
+          !cursiv::engine::lex_run_blind(tape, state))
         continue;
       std::string word = prefix;
       for (unsigned i = 0; i < 40; ++i)
         word.push_back(members[(37u * i) % members.size()]);
       const auto m = static_cast<std::uint16_t>(mode);
       const auto wordLen = static_cast<TextOffset>(word.size());
-      const Scan whole = cursiv::lr_match_text<A>(word.data(), wordLen, m, 0);
-      if (whole.term == cursiv::kInvalidSymbol || whole.end != wordLen)
+      const Scan whole =
+          cursiv::engine::lr_match_text<A>(word.data(), wordLen, m, 0);
+      if (whole.term == cursiv::engine::kInvalidSymbol || whole.end != wordLen)
         continue;
       tested[state] = true;
       terminals.push_back(A.cfg.term_name(whole.term));
@@ -837,7 +845,7 @@ std::vector<std::string_view> long_runs_agree(const char* lang,
                               TextOffset from) {
         TextOffset halt = from;
         const Scan want =
-            cursiv::lr_match_halt<A>(text.data(), len, m, from, halt);
+            cursiv::engine::lr_match_halt<A>(text.data(), len, m, from, halt);
         const Scan got = drive.walk(text.data(), len, m, from);
         if (same(got, want)) return true;
         std::printf(
@@ -962,7 +970,8 @@ void a_refused_keyword_hands_the_spelling_back_the_same_way() {
     const TextOffset expected = text.front() == '$' ? 3 :
         text == "~~ghi" || text == "~~de" ? 2 : 1;
     const auto len = static_cast<TextOffset>(text.size());
-    CHECK(cursiv::lr_match_text<a>(text.data(), len, mode, 0).end == expected);
+    CHECK(cursiv::engine::lr_match_text<a>(text.data(), len, mode, 0).end ==
+          expected);
     CHECK(rt::kDrive.walk(text.data(), len, mode, 0).end == expected);
     std::vector<Scan> room(a.maxCands);
     const auto n =
@@ -978,10 +987,12 @@ void a_refused_keyword_hands_the_spelling_back_the_same_way() {
   for (const std::string_view text : {"/*x*/", "/*xx*/", "/*x/*y*/z*/", "/*x",
                                       "<*x*>"}) {
     const auto len = static_cast<TextOffset>(text.size());
-    const auto scan = cursiv::lr_match_text<ar>(text.data(), len, rm, 0);
+    const auto scan =
+        cursiv::engine::lr_match_text<ar>(text.data(), len, rm, 0);
     CHECK(scan.end == len);
     if (text == "/*x*/" || text == "<*x*>")
-      CHECK(scan.term != cursiv::kInvalidSymbol && ar.cfg.terms[scan.term].spelled);
+      CHECK(scan.term != cursiv::engine::kInvalidSymbol &&
+            ar.cfg.terms[scan.term].spelled);
     CHECK(same(relay::kDrive.walk(text.data(), len, rm, 0), scan));
     std::vector<Scan> room(ar.maxCands);
     const auto n = relay::kDrive.scanText(text.data(), len, rm, 0, room.data(),
@@ -1013,37 +1024,39 @@ void the_reading_ends_where_the_lexer_does(const char* lang,
     for (TextOffset i = 0; i < len; ++i) {
       TextOffset halt = i;
       const Scan want =
-          cursiv::lr_match_halt<A>(text.data(), len, mode, i, halt);
-      if (want.term == cursiv::kInvalidSymbol) continue;
+          cursiv::engine::lr_match_halt<A>(text.data(), len, mode, i, halt);
+      if (want.term == cursiv::engine::kInvalidSymbol) continue;
       TextOffset reached = i;
-      const cursiv::LexReading read =
-          cursiv::lr_lex_reading<A>(text.data(), len, mode, i, reached);
+      const cursiv::engine::LexReading read =
+          cursiv::engine::lr_lex_reading<A>(text.data(), len, mode, i, reached);
       if (halt > want.end) {
-        if (read.term == cursiv::kInvalidSymbol && reached > halt && bad++ < 3)
+        if (read.term == cursiv::engine::kInvalidSymbol && reached > halt &&
+            bad++ < 3)
           std::printf(
               "FAIL %s mode %u: nothing read at %u, to %u past the "
               "lexer's %u\n",
               lang, m, i, reached, halt);
         continue;
       }
-      if (read.term != cursiv::kInvalidSymbol) ++bad;
+      if (read.term != cursiv::engine::kInvalidSymbol) ++bad;
       std::uint16_t s = A.modeStart[m];
       for (TextOffset k = i; k + 1 < want.end; ++k) {
         const auto b = static_cast<unsigned char>(text[k]);
         const std::uint16_t nx = A.next_byte(s, b);
-        if (nx == cursiv::kDeadState) break;
+        if (nx == cursiv::engine::kDeadState) break;
         if (nx == s && A.derived.lexBodies[s] != 0) {
           unsigned x = 1;
           while (x < 256 && (A.next_byte(s, static_cast<unsigned char>(x)) !=
-                                 cursiv::kDeadState ||
+                                 cursiv::engine::kDeadState ||
                              x == '\n' || x == '\r'))
             ++x;
           if (x < 256) {
             std::string bent = text;
             bent[k] = static_cast<char>(x);
             reached = i;
-            const cursiv::LexReading r =
-                cursiv::lr_lex_reading<A>(bent.data(), len, mode, i, reached);
+            const cursiv::engine::LexReading r =
+                cursiv::engine::lr_lex_reading<A>(bent.data(), len, mode, i,
+                                                  reached);
             ++broken;
             if (r.term != want.term || r.end != want.end || !r.closed) {
               if (bad++ < 3)
@@ -1117,7 +1130,7 @@ std::uint16_t term_named(std::string_view name) {
     if (A.cfg.term_name(static_cast<std::uint16_t>(t)) == name)
       return static_cast<std::uint16_t>(t);
   CHECK(false);
-  return cursiv::kInvalidSymbol;
+  return cursiv::engine::kInvalidSymbol;
 }
 
 const cursiv::Parser& parser() {
@@ -1128,7 +1141,7 @@ const cursiv::Parser& parser() {
 void reads(std::string_view lead, const char* text, bool clean) {
   cursiv::Cst cst;
   const std::string doc = in(lead, text);
-  cursiv::lr_parser<g::kTable>.parse(doc, cst, nullptr, &g::kDrive);
+  cursiv::engine::lr_parser<g::kTable>.parse(doc, cst, nullptr, &g::kDrive);
   const bool got = cst.diagnostics().empty();
   if (got != clean) {
     std::printf("FAIL %s: %s, %zu diagnostic(s)\n", doc.c_str(),
@@ -1179,9 +1192,9 @@ void a_candidate_inherits_no_sibling_boundary() {
 // refuses behind the terminal is never passed for it.
 template <const auto& A>
 void repairs_in(const std::string& doc, bool alone,
-                const cursiv::LrDrive* drive) {
+                const cursiv::engine::LrDrive* drive) {
   cursiv::Cst cst;
-  cursiv::lr_parser<A>.parse(doc, cst, nullptr, drive);
+  cursiv::engine::lr_parser<A>.parse(doc, cst, nullptr, drive);
   bool reread = false;
   for (cursiv::NodeId i = 0; i < cst.size(); ++i)
     reread = reread || (cst[i].recovered && cst[i].begin < cst[i].end &&
@@ -1336,8 +1349,10 @@ void the_boundary_test_answers_four_ways() {
                         std::uint16_t term) {
     const auto len = static_cast<cursiv::TextOffset>(std::strlen(text));
     cursiv::TextOffset halt = 0;
-    const cursiv::Scan a = cursiv::lr_match_text<A>(text, len, mode, 0);
-    const cursiv::Scan b = cursiv::lr_match_halt<A>(text, len, mode, 0, halt);
+    const cursiv::engine::Scan a =
+        cursiv::engine::lr_match_text<A>(text, len, mode, 0);
+    const cursiv::engine::Scan b =
+        cursiv::engine::lr_match_halt<A>(text, len, mode, 0, halt);
     if (a.end == want && a.term == term && b.end == want && b.term == term)
       return;
     std::printf("FAIL boundary '%s': %u/%u and %u/%u, wanted %u/%u\n", text,
@@ -1361,8 +1376,9 @@ void a_refused_winner_weighs_a_bounded_rival() {
   const std::uint16_t mode = mode_of<A>("twin");
   const auto reads = [&](const char* text, cursiv::TextOffset want) {
     const auto len = static_cast<cursiv::TextOffset>(std::strlen(text));
-    const cursiv::Scan s = cursiv::lr_match_text<A>(text, len, mode, 0);
-    if (s.end == want && s.term != cursiv::kInvalidSymbol) return;
+    const cursiv::engine::Scan s =
+        cursiv::engine::lr_match_text<A>(text, len, mode, 0);
+    if (s.end == want && s.term != cursiv::engine::kInvalidSymbol) return;
     std::printf("FAIL twin '%s': %u/%u\n", text, s.end, s.term);
     ++failures;
   };
@@ -1378,8 +1394,9 @@ void a_refused_winner_weighs_a_bounded_rival() {
 void a_refused_election_ranks_a_token_before_a_trivia() {
   namespace tv = tguard::trivia::generated::G;
   static constexpr auto& A = tv::kTable;
-  const cursiv::Scan s = cursiv::lr_match_text<A>("ab!", 3, A.mode[0], 0);
-  CHECK(s.end == 2 && s.term != cursiv::kInvalidSymbol &&
+  const cursiv::engine::Scan s =
+      cursiv::engine::lr_match_text<A>("ab!", 3, A.mode[0], 0);
+  CHECK(s.end == 2 && s.term != cursiv::engine::kInvalidSymbol &&
         !A.cfg.terms[s.term].trivia && !A.cfg.terms[s.term].spelled);
   const std::unique_ptr<cursiv::Parser> p = tv::create_parser();
   for (const char* t : {"ab!", "ba!"}) {
@@ -1399,7 +1416,8 @@ void a_refused_word_takes_the_match_back_where_it_is_spelled_whole() {
   const auto& A = deep::kTable;
   const auto at = [&](const char* text) {
     const auto len = static_cast<cursiv::TextOffset>(std::strlen(text));
-    return cursiv::lr_match_text<A>(text, len, mode_of<A>("deep"), 0).end;
+    return cursiv::engine::lr_match_text<A>(text, len, mode_of<A>("deep"), 0)
+        .end;
   };
   CHECK(at("<!DOCTYPE x> y") == 12);   // DTD
   CHECK(at("<!-x> y") == 5);           // DTD: `--` not spelled whole
@@ -1426,6 +1444,7 @@ struct Coverage {
 template <const auto& A>
 void audit() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   const auto& rows = A.derived;
   const int before = failures;
   CHECK(rows.lexElseBase.size() == A.dfaAccept.size() + 1);
@@ -1635,8 +1654,8 @@ namespace {
 
 namespace g = trefusedshorter::generated;
 constexpr auto& A = g::Lr::kTable;
-using cursiv::Scan;
 using cursiv::TextOffset;
+using cursiv::engine::Scan;
 
 struct Case {
   std::string_view text;
@@ -1657,8 +1676,8 @@ std::string tokens(const cursiv::ParseResult& r) {
 }
 
 std::string_view name_of(const Scan& s) {
-  return s.term == cursiv::kInvalidSymbol ? std::string_view("-")
-                                          : A.cfg.term_name(s.term);
+  return s.term == cursiv::engine::kInvalidSymbol ? std::string_view("-")
+                                                  : A.cfg.term_name(s.term);
 }
 
 bool held(const Scan* room, std::uint32_t n, const Scan& s) {
@@ -1677,7 +1696,8 @@ void reads(std::string_view lead, const std::vector<Case>& cases) {
     CHECK(tokens(b) == c.tokens);
 
     const auto len = static_cast<TextOffset>(c.text.size());
-    const Scan table = cursiv::lr_match_text<A>(c.text.data(), len, mode, 0);
+    const Scan table =
+        cursiv::engine::lr_match_text<A>(c.text.data(), len, mode, 0);
     const Scan gen = g::Lr::kDrive.walk(c.text.data(), len, mode, 0);
     const bool right = table.end == c.end && name_of(table) == c.term &&
                        gen.end == c.end && name_of(gen) == c.term;
@@ -1715,14 +1735,16 @@ void walks_agree(std::string_view lead) {
   std::vector<Scan> room(A.maxCands != 0 ? A.maxCands : 1);
   each_word([&](const std::string& text) {
     const auto l = static_cast<TextOffset>(text.size());
-    const Scan table = cursiv::lr_match_text<A>(text.data(), l, mode, 0);
+    const Scan table =
+        cursiv::engine::lr_match_text<A>(text.data(), l, mode, 0);
     const Scan gen = g::Lr::kDrive.walk(text.data(), l, mode, 0);
     const auto got = g::Lr::kDrive.scanText(text.data(), l, mode, 0,
                                             room.data(), A.maxCands);
-    const bool ok = table.end == gen.end && table.term == gen.term &&
-                    (got == 0 || (table.term != cursiv::kInvalidSymbol &&
-                                  room[0].end == table.end &&
-                                  held(room.data(), got, table)));
+    const bool ok =
+        table.end == gen.end && table.term == gen.term &&
+        (got == 0 ||
+         (table.term != cursiv::engine::kInvalidSymbol &&
+          room[0].end == table.end && held(room.data(), got, table)));
     if (!ok)
       std::printf(
           "`%s` after `%.*s`: table %u/%.*s, walk %u/%.*s, sweep %u (%u)\n",
@@ -1832,7 +1854,7 @@ void reads_as_the_keyword(Parser& parser, const std::string& text,
 
 template <class Lr>
 void reads_the_keyword(Lr& lr, const char* head) {
-  constexpr unsigned kDepth = cursiv::kLrLookBudget;
+  constexpr unsigned kDepth = cursiv::engine::kLrLookBudget;
   for (const unsigned n :
        {1u, kDepth - 1, kDepth, kDepth + 1, 4 * kDepth, 3000u}) {
     const std::string text = words(n, head);
@@ -1857,7 +1879,7 @@ namespace {
 namespace g = trefuse::head::generated::G;
 
 void the_choice_is_one_leaf() {
-  const auto low = cursiv::LrLowering<treserved::G>::table();
+  const auto low = cursiv::engine::LrLowering<treserved::G>::table();
   CHECK(low.cfg.ngapLeaves == 1);
   std::printf("  a choice of words is one leaf\n");
 }
@@ -1891,11 +1913,14 @@ namespace case_cliteral {
 namespace {
 
 void a_bidi_control_is_escaped() {
-  CHECK(cursiv::c_literal("a\xe2\x80\xae" "b") == "\"a\\u202eb\"");
-  CHECK(cursiv::c_literal("\xd8\x9c") == "\"\\u061c\"");
-  CHECK(cursiv::c_literal("\xe2\x81\xa6\xe2\x81\xa9") == "\"\\u2066\\u2069\"");
-  CHECK(cursiv::c_literal("\xc3\xa9") == "\"\xc3\xa9\"");
-  CHECK(cursiv::c_literal("\xf0\x9f\x98\x80") == "\"\xf0\x9f\x98\x80\"");
+  CHECK(cursiv::engine::c_literal("a\xe2\x80\xae"
+                                  "b") == "\"a\\u202eb\"");
+  CHECK(cursiv::engine::c_literal("\xd8\x9c") == "\"\\u061c\"");
+  CHECK(cursiv::engine::c_literal("\xe2\x81\xa6\xe2\x81\xa9") ==
+        "\"\\u2066\\u2069\"");
+  CHECK(cursiv::engine::c_literal("\xc3\xa9") == "\"\xc3\xa9\"");
+  CHECK(cursiv::engine::c_literal("\xf0\x9f\x98\x80") ==
+        "\"\xf0\x9f\x98\x80\"");
   std::printf("  a bidi control is escaped\n");
 }
 
@@ -1979,6 +2004,7 @@ void run() {
 namespace candidate_collection {
 namespace {
 using namespace cursiv;
+using namespace cursiv::engine;
 
 // Borrow the wide grammar's token storage and boundary protocol; the rows
 // below independently vary arrival order, extent and lexical tier.

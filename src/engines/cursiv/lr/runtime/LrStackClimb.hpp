@@ -8,7 +8,7 @@
 
 #include "cursiv/lr/runtime/LrStack.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrStackClimb {
  public:
@@ -62,4 +62,4 @@ inline bool lr_same_run(const LrStackClimb& a, const LrStackClimb& b,
   return true;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

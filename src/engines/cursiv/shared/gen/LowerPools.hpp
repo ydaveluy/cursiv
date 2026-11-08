@@ -12,7 +12,6 @@
 
 #include "cursiv/grammar/Association.hpp"
 #include "cursiv/grammar/unicode/UnicodeRange.hpp"
-#include "cursiv/utils/Tag.hpp"
 #include "cursiv/shared/gen/LexCheckIncomplete.hpp"
 #include "cursiv/shared/gen/LexWordClass.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
@@ -23,8 +22,10 @@
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/utils/Tag.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What a lowering reads of a terminal and the frozen table never does: beside
 // the cell, not in it.
@@ -59,12 +60,12 @@ struct LowerPools : LowerVerdicts {
   Vec<ByteSet> sets{};
   Vec<std::uint16_t> setDecode{};
   // Where each set was interned, for `lex_intern_set` to find it again.
-  detail::SetIndex setIndex{};
+  SetIndex setIndex{};
   // Per decoded set, where `scalarRanges` lists the scalars it tests, as
   // `lex_set_scalars` reads it.
   Vec<std::uint32_t> setScalars{};
-  Vec<unicode::Range> scalarRanges{};
-  Vec<unicode::Range> wordRanges{};
+  Vec<unicode::detail::Range> scalarRanges{};
+  Vec<unicode::detail::Range> wordRanges{};
   // The lead bytes of the scalars `wordRanges` holds.
   ByteSet wordLeads{};
   Vec<LexNode> lex{};
@@ -73,7 +74,7 @@ struct LowerPools : LowerVerdicts {
   Vec<std::uint16_t> lexMode{};
   // A refused word as the grammar's dump spells it, by its node.
   Vec<std::string> lexSpelled{};
-  Vec<const detail::Tag*> lexTags{};
+  Vec<const Tag*> lexTags{};
   Vec<TermInfo> terms{};
   Vec<TermBuild> termBuild{};
   // Condition `k` is the program `gapOps[gapCondAt[k], gapCondAt[k + 1])`.
@@ -147,7 +148,7 @@ struct LowerPools : LowerVerdicts {
   }
 
   // A tag is interned by its address; a mark and an echo carry the index.
-  std::uint16_t intern_tag(const detail::Tag& tag) {
+  std::uint16_t intern_tag(const Tag& tag) {
     for (std::uint16_t i = 0; i < nlexTags; ++i)
       if (lexTags[i] == &tag) return i;
     if (nlexTags == 0xffffu) throw LowerRefused(LowerFail::tokenGraphTooLarge);
@@ -189,4 +190,4 @@ struct LowerPools : LowerVerdicts {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

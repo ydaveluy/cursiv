@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct AstEntryTable {
   static constexpr std::uint32_t kNoEntry = 0xFFFFFFFFu;
@@ -47,4 +47,4 @@ struct AstEntryTable {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

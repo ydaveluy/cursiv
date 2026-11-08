@@ -7,7 +7,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The cost of an arm no token can stand for: it asserts the end of the text.
 inline constexpr std::uint16_t kLlRepairCostless = 0xFFFFu;
@@ -49,4 +49,4 @@ struct LlNodeBuild {
   constexpr bool operator==(const LlNodeBuild&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

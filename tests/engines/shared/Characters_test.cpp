@@ -585,7 +585,7 @@ void the_word_class_obeys_the_declared_boundary() {
                                    {"\xC3", false},
                                    {"!", false}}) {
     const auto len = static_cast<cursiv::TextOffset>(text.size());
-    CHECK(cursiv::lex_boundary(tchars::generated::Lr::kTable.cfg)
+    CHECK(cursiv::engine::lex_boundary(tchars::generated::Lr::kTable.cfg)
               .word_at(text.data(), 0, len) == word);
   }
 }
@@ -715,9 +715,9 @@ int run() {
     }
     CHECK(mode != 0xFFFF);
     const auto at = [&](std::string_view t) {
-      const cursiv::Scan s = cursiv::lr_match_text<A>(
+      const cursiv::engine::Scan s = cursiv::engine::lr_match_text<A>(
           t.data(), static_cast<cursiv::TextOffset>(t.size()), mode, 0);
-      return s.term == cursiv::kInvalidSymbol
+      return s.term == cursiv::engine::kInvalidSymbol
                  ? std::string("<none>")
                  : std::string(A.cfg.term_name(s.term)) + "@" +
                        std::to_string(s.end);

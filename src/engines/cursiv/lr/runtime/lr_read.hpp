@@ -21,7 +21,7 @@
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A pool with no room for another reading.
 inline constexpr std::size_t kLrNoFork = ~std::size_t{0};
@@ -430,4 +430,4 @@ CURSIV_ALWAYS_INLINE inline void lr_read_step(LrContext& c, Pool& x,
   x.stepped();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

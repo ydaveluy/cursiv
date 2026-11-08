@@ -18,7 +18,7 @@
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/GrammarActions.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 struct RepairBudget;
 }
 
@@ -40,10 +40,10 @@ struct MetricLanguage {
   // Null for a parser that counts none; under the budget `searching`'s
   // parser repairs with.
   Ceilings (*ceilings)(std::string_view,
-                       const cursiv::RepairBudget& budget) = nullptr;
+                       const cursiv::engine::RepairBudget& budget) = nullptr;
   // The same language under a budget; null where its engine takes none.
-  std::unique_ptr<cursiv::Parser> (*searching)(const cursiv::RepairBudget&) =
-      nullptr;
+  std::unique_ptr<cursiv::Parser> (*searching)(
+      const cursiv::engine::RepairBudget&) = nullptr;
 };
 
 inline std::vector<MetricLanguage>& languages() {

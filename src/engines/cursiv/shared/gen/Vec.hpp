@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class T>
 struct Vec {
@@ -37,4 +37,4 @@ struct Vec {
   constexpr const T* data() const { return v.data(); }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

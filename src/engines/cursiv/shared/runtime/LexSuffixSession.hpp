@@ -21,7 +21,7 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Tape>
 class LexSuffixSession {
@@ -198,4 +198,4 @@ class LexSuffixSession {
   PredicateRuns _runs;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

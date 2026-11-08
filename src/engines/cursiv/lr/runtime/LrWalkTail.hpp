@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrWalkTail {
  public:
@@ -33,4 +33,4 @@ class LrWalkTail {
   std::vector<std::uint32_t> _spill;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

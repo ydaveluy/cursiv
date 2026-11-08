@@ -10,7 +10,7 @@
 #include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A row as a designated initializer that spells only the fields off their
 // default: the member initializers write the rest.
@@ -41,4 +41,4 @@ std::string emit_table(std::string_view decl, const Items& items,
   return out.take();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -5,9 +5,9 @@
 
 #include "cursiv/lr/gen/LrBuildTable.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // `sites` holds the canonical record rows; `kNoElement` names no member.
 void lr_derive_tables(LrBuildTable& a, std::span<const ElementId> sites);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

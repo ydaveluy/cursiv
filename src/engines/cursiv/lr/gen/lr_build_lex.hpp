@@ -11,7 +11,7 @@
 #include "cursiv/shared/gen/LexModes.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 LexAlphabet lr_lex_alphabet(LrBuildTable& A);
 
@@ -56,4 +56,4 @@ std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
 // a typo can try.
 void lr_derive_lexical(const LrBuildTable& a, LrDerivedRows& rows);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

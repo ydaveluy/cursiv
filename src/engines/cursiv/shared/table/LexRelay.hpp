@@ -8,7 +8,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct PredicateCursor;
 template <class Cursor>
@@ -55,4 +55,4 @@ struct LexRelay {
   constexpr bool operator==(const LexRelay&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

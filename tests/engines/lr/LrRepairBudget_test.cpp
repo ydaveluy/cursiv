@@ -47,10 +47,11 @@ namespace {
 
 // Whether the lexer elects `u` over `t`, the tie read again in their alphabets.
 template <const auto& A>
-bool beats(const cursiv::LrContext& c, const cursiv::Token& u,
-           const cursiv::Token& t) {
-  return cursiv::lr_token_beats(u, t, [&] {
-    return cursiv::lr_token_weight<A>(c, u) > cursiv::lr_token_weight<A>(c, t);
+bool beats(const cursiv::engine::LrContext& c, const cursiv::engine::Token& u,
+           const cursiv::engine::Token& t) {
+  return cursiv::engine::lr_token_beats(u, t, [&] {
+    return cursiv::engine::lr_token_weight<A>(c, u) >
+           cursiv::engine::lr_token_weight<A>(c, t);
   });
 }
 
@@ -63,25 +64,26 @@ void a_rescanned_token_keeps_its_mode_for_the_election() {
     cursiv::Cst tree(text);
     cursiv::CstBuilder builder(tree);
     builder.bind_stream();
-    cursiv::LrContext context(text, builder);
+    cursiv::engine::LrContext context(text, builder);
     context.drive = &garith::kDrive;
     const auto keyword =
-        cursiv::lr_scan_at<table>(context, table.errMode, 0, 0);
+        cursiv::engine::lr_scan_at<table>(context, table.errMode, 0, 0);
     CHECK(keyword.sym < table.cfg.nterms &&
           table.cfg.term_text(keyword.sym) == "module");
     if (keyword.sym >= table.cfg.nterms) return;
-    cursiv::LrSkipped<table> skip;
+    cursiv::engine::LrSkipped<table> skip;
     skip.set(keyword.sym);
-    const auto crossed = [&](cursiv::TextOffset, const cursiv::Token* trivia) {
+    const auto crossed = [&](cursiv::TextOffset,
+                             const cursiv::engine::Token* trivia) {
       if (trivia != nullptr) CHECK(trivia->mode == table.errMode);
     };
-    const auto identifier = cursiv::lr_scan_skipping<table>(
+    const auto identifier = cursiv::engine::lr_scan_skipping<table>(
         context, table.errMode, 0, 0, skip, crossed);
     CHECK(identifier.begin == keyword.begin && identifier.end == keyword.end);
     CHECK(identifier.sym < table.cfg.nterms &&
           table.cfg.term_name(identifier.sym) == "ID");
     CHECK(identifier.mode == table.errMode);
-    const auto repeated = cursiv::lr_scan_skipping<table>(
+    const auto repeated = cursiv::engine::lr_scan_skipping<table>(
         context, table.errMode, 0, 0, skip, crossed);
     CHECK(repeated == identifier && repeated.mode == table.errMode);
     if (text == "module")
@@ -90,32 +92,33 @@ void a_rescanned_token_keeps_its_mode_for_the_election() {
     CHECK(beats<table>(context, keyword, identifier));
     CHECK(!beats<table>(context, identifier, keyword));
 
-    std::vector<cursiv::LrShadow> readings(2);
+    std::vector<cursiv::engine::LrShadow> readings(2);
     readings[0].la = identifier;
     readings[1].la = keyword;
     for (auto& reading : readings) reading.shifted = true;
-    cursiv::lr_elected_shift<table>(context, readings, readings.size());
+    cursiv::engine::lr_elected_shift<table>(context, readings, readings.size());
     CHECK(readings[0].dead && !readings[1].dead);
 
     // The identifier read in its own alphabet has the same priority, while
     // an identifier read against a shorter horizon loses to either full read.
-    auto own = cursiv::Token{};
+    auto own = cursiv::engine::Token{};
     for (std::uint16_t mode = 0; mode < table.modeStart.size(); ++mode) {
       const auto token =
-          cursiv::lr_scan_at<table>(context, mode, keyword.begin, 0);
+          cursiv::engine::lr_scan_at<table>(context, mode, keyword.begin, 0);
       if (token.sym == identifier.sym) {
         own = token;
         break;
       }
     }
-    CHECK(own.mode != cursiv::kNoMode && own.mode != table.errMode);
-    if (own.mode == cursiv::kNoMode) return;
+    CHECK(own.mode != cursiv::engine::kNoMode && own.mode != table.errMode);
+    if (own.mode == cursiv::engine::kNoMode) return;
     CHECK(beats<table>(context, keyword, own));
     cursiv::TextOffset reached = keyword.begin;
-    const auto shortRead = cursiv::lr_scan_at<table, true>(
+    const auto shortRead = cursiv::engine::lr_scan_at<table, true>(
         context, own.mode, keyword.begin, 0, nullptr, keyword.end - 1,
         &reached);
-    const cursiv::Token tokens[] = {keyword, identifier, own, shortRead};
+    const cursiv::engine::Token tokens[] = {keyword, identifier, own,
+                                            shortRead};
     for (const auto& a : tokens)
       for (const auto& b : tokens)
         for (const auto& c : tokens)
@@ -139,21 +142,22 @@ struct Parsed {
   bool accepted = false;
   bool entry = false;
   std::vector<cursiv::ParseDiagnostic> notes;
-  cursiv::LrParseStats stats;
+  cursiv::engine::LrParseStats stats;
 };
 
 template <const auto& A>
-Parsed parse(std::string_view text, const cursiv::LrDrive& drive,
-             const cursiv::RepairBudget& budget = {}) {
+Parsed parse(std::string_view text, const cursiv::engine::LrDrive& drive,
+             const cursiv::engine::RepairBudget& budget = {}) {
   cursiv::Cst cst;
   Parsed p;
-  p.accepted = cursiv::lr_parser<A>.parse(text, cst, &p.stats, &drive, budget);
+  p.accepted =
+      cursiv::engine::lr_parser<A>.parse(text, cst, &p.stats, &drive, budget);
   p.entry = cst.has_entry();
   p.notes.assign(cst.diagnostics().begin(), cst.diagnostics().end());
   return p;
 }
 
-cursiv::RepairBudget floor_only(std::uint64_t floor) {
+cursiv::engine::RepairBudget floor_only(std::uint64_t floor) {
   return {.floor = floor,
           .perByte = 0,
           .perSearch = ~std::uint64_t{0},
@@ -178,8 +182,8 @@ void a_tie_before_a_long_bracket_stops_racing() {
 // to a state owing it again, one frame higher, stops where the stack the run
 // set out on could owe no more.
 void an_owed_run_that_grows_its_stack_ends() {
-  for (const cursiv::RepairBudget& b :
-       {cursiv::RepairBudget{}, floor_only(1), floor_only(64)}) {
+  for (const cursiv::engine::RepairBudget& b :
+       {cursiv::engine::RepairBudget{}, floor_only(1), floor_only(64)}) {
     const Parsed loop = parse<go::kTable>("loop:c a b b", go::kDrive, b);
     CHECK(loop.accepted && loop.entry && !loop.notes.empty());
     const Parsed upe = parse<go::kTable>("upe:c a a", go::kDrive, b);
@@ -200,7 +204,7 @@ void a_deep_nest_past_the_budget_is_closed() {
   for (unsigned i = 0; i < 3000; ++i) deep += "1 : ";
   deep += "1";
   for (const auto& [text, b] :
-       {std::pair{deep, cursiv::RepairBudget{}},
+       {std::pair{deep, cursiv::engine::RepairBudget{}},
         std::pair{"module m " + std::string(50, '('), floor_only(3)}}) {
     const Parsed p = parse<garith::kTable>(text, garith::kDrive, b);
     CHECK(p.accepted && p.stats.degradedPauses != 0);
@@ -249,10 +253,10 @@ void a_forked_closer_costs_one_reading() {
 // says it stopped.
 void a_run_of_closers_stops_at_a_searchs_share() {
   constexpr std::uint64_t kShare = 1000;
-  const cursiv::RepairBudget budget{.floor = 3,
-                                    .perByte = 0,
-                                    .perSearch = kShare,
-                                    .perParse = ~std::uint64_t{0}};
+  const cursiv::engine::RepairBudget budget{.floor = 3,
+                                            .perByte = 0,
+                                            .perSearch = kShare,
+                                            .perParse = ~std::uint64_t{0}};
   const Parsed p =
       parse<gd::kTable>("nest " + std::string(4000, '('), gd::kDrive, budget);
   CHECK(p.accepted && p.entry && p.stats.degradedStops != 0);
@@ -278,7 +282,7 @@ void every_loop_stops_at_its_share() {
   for (unsigned i = 0; i < 1000000; ++i) line += "a ";
   line += "\nreq R2 \"t\"\n";
   const Parsed p = parse<gr::kTable>(line, gr::kDrive);
-  CHECK(p.accepted && p.stats.work <= cursiv::kRepairPerParse + 64);
+  CHECK(p.accepted && p.stats.work <= cursiv::engine::kRepairPerParse + 64);
 }
 
 // A megabyte no token reads is one fault: where it ends is walked once per
@@ -300,18 +304,20 @@ void a_long_gap_is_read_once() {
   const auto start = std::chrono::steady_clock::now();
   const Parsed p = parse<ga::kTable>(text, ga::kDrive);
   CHECK(std::chrono::steady_clock::now() - start < 3s);
-  CHECK(p.accepted && p.stats.work <= cursiv::kRepairPerParse + 64);
+  CHECK(p.accepted && p.stats.work <= cursiv::engine::kRepairPerParse + 64);
 }
 
 // A bound given as the largest count stays the largest, whatever the length:
 // the parse's allotment saturates instead of wrapping to a small one.
 void an_unbounded_budget_stays_unbounded() {
   constexpr std::uint64_t kAll = ~std::uint64_t{0};
-  CHECK(cursiv::repair_allot({kAll, 64, kAll, kAll}, 1000) == kAll);
-  CHECK(cursiv::repair_allot({1u << 16, kAll, kAll, kAll}, 1000) == kAll);
-  CHECK(cursiv::repair_allot({}, 1000) ==
-        cursiv::kRepairFloor + 1000 * cursiv::kRepairPerByte);
-  CHECK(cursiv::repair_allot({}, 1u << 30) == cursiv::kRepairPerParse);
+  CHECK(cursiv::engine::repair_allot({kAll, 64, kAll, kAll}, 1000) == kAll);
+  CHECK(cursiv::engine::repair_allot({1u << 16, kAll, kAll, kAll}, 1000) ==
+        kAll);
+  CHECK(cursiv::engine::repair_allot({}, 1000) ==
+        cursiv::engine::kRepairFloor + 1000 * cursiv::engine::kRepairPerByte);
+  CHECK(cursiv::engine::repair_allot({}, 1u << 30) ==
+        cursiv::engine::kRepairPerParse);
 }
 
 }  // namespace

@@ -35,7 +35,7 @@ void only_retained_owners_keep_active_reference_ranks() {
     handles.push_back({.owner = &node});
   }
   handles.push_back({.owner = nullptr});
-  cursiv::detail::prune_orphans(
+  cursiv::engine::prune_orphans(
       nodes, handles, &tree[0], [] {}, [](cursiv::AstNode*) {});
   CHECK(nodes.size() == 5u);
   CHECK(handles.size() == 12);
@@ -44,7 +44,7 @@ void only_retained_owners_keep_active_reference_ranks() {
   for (unsigned i = 0; i < nodes.size(); ++i) CHECK(nodes[i] == &tree[i]);
 }
 
-constexpr cursiv::StampLayout kStamp{};
+constexpr cursiv::engine::StampLayout kStamp{};
 
 struct Child : cursiv::Extends<cursiv::AstNode> {};
 struct Root : cursiv::Extends<cursiv::AstNode> {
@@ -62,36 +62,37 @@ constexpr cursiv::AstMetaData meta{.derivesBits = derives,
                                    .fields = fields,
                                    .referenceFields = {},
                                    .fieldCount = 1};
-constexpr cursiv::detail::MakeFn makes[] = {&cursiv::detail::make_node<Root>,
-                                            &cursiv::detail::make_node<Child>};
+constexpr cursiv::engine::MakeFn makes[] = {&cursiv::engine::make_node<Root>,
+                                            &cursiv::engine::make_node<Child>};
 // The one member takes the child's family.
 constexpr std::uint64_t takeBits[] = {2};
 
 unsigned writes = 0;
-bool root_writer(cursiv::AstReducer& b, const cursiv::Pending& p,
-                 const cursiv::Made& m) {
+bool root_writer(cursiv::engine::AstReducer& b,
+                 const cursiv::engine::Pending& p,
+                 const cursiv::engine::Made& m) {
   if (p.field != 0) return false;
   ++writes;
   b.write<ChildField, nullptr, false>(0, p, m);
   return true;
 }
-bool child_writer(cursiv::AstReducer&, const cursiv::Pending&,
-                  const cursiv::Made&) {
+bool child_writer(cursiv::engine::AstReducer&, const cursiv::engine::Pending&,
+                  const cursiv::engine::Made&) {
   return false;
 }
-constexpr cursiv::AstApplyFn applies[] = {root_writer, child_writer};
+constexpr cursiv::engine::AstApplyFn applies[] = {root_writer, child_writer};
 
-void root(cursiv::AstReducer& b, cursiv::NodeId id) {
+void root(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   b.push_made(id, b.create<makes[0], root_writer, false>(0, id));
 }
-void adopt(cursiv::AstReducer& b, cursiv::NodeId id) {
+void adopt(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   const auto m = b.adopt<false>(1, id);
   if (!b.failed()) b.owe_write(id, 0, cursiv::ActKind::assign, m);
 }
-void child(cursiv::AstReducer& b, cursiv::NodeId id) {
+void child(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   b.push_made(id, b.create<makes[1], child_writer, false>(1, id));
 }
-void direct(cursiv::AstReducer& b, cursiv::NodeId id) {
+void direct(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   const auto h =
       b.node_write(id, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
   const auto m = b.create<makes[0], root_writer, false>(0, id);
@@ -101,7 +102,7 @@ void direct(cursiv::AstReducer& b, cursiv::NodeId id) {
   if (b.failed()) return;
   b.push_made(id, m);
 }
-void direct_twice(cursiv::AstReducer& b, cursiv::NodeId id) {
+void direct_twice(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   const auto first =
       b.node_write(id, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
   const auto second =
@@ -116,23 +117,23 @@ void direct_twice(cursiv::AstReducer& b, cursiv::NodeId id) {
   if (b.failed()) return;
   b.push_made(id, m);
 }
-constexpr cursiv::AstEntryFn entries[] = {root, adopt, child, direct,
-                                          direct_twice};
-const cursiv::AstActions actions{.meta = &meta,
-                                 .makes = makes,
-                                 .entries = entries,
-                                 .entryCount = 5,
-                                 .applies = applies,
-                                 .takeBits = takeBits};
+constexpr cursiv::engine::AstEntryFn entries[] = {root, adopt, child, direct,
+                                                  direct_twice};
+const cursiv::engine::AstActions actions{.meta = &meta,
+                                         .makes = makes,
+                                         .entries = entries,
+                                         .entryCount = 5,
+                                         .applies = applies,
+                                         .takeBits = takeBits};
 
 // The tree closed on `top` and accepted, reduced with the write count reset.
 cursiv::ParseResult reduce(cursiv::Cst&& c, cursiv::CstBuilder& b,
                            cursiv::NodeId top,
-                           const cursiv::AstActions& with = actions) {
+                           const cursiv::engine::AstActions& with = actions) {
   b.bind_entry(0, c.size(), top);
   b.bind_accepted(true);
   writes = 0;
-  return cursiv::AstReducer::build<kStamp>(with, std::move(c));
+  return cursiv::engine::AstReducer::build<kStamp>(with, std::move(c));
 }
 
 // An adoption takes the node its body built or none: a repair excuses an
@@ -255,64 +256,67 @@ constexpr cursiv::AstMetaData meta{.derivesBits = derives,
                                    .fields = fields,
                                    .referenceFields = {},
                                    .fieldCount = 2};
-constexpr cursiv::detail::MakeFn makes[] = {&cursiv::detail::make_node<Expr>,
-                                            &cursiv::detail::make_node<Num>,
-                                            &cursiv::detail::make_node<Call>};
+constexpr cursiv::engine::MakeFn makes[] = {&cursiv::engine::make_node<Expr>,
+                                            &cursiv::engine::make_node<Num>,
+                                            &cursiv::engine::make_node<Call>};
 constexpr std::uint64_t takeBits[] = {0, 7};
 
-bool expr_writer(cursiv::AstReducer&, const cursiv::Pending&,
-                 const cursiv::Made&) {
+bool expr_writer(cursiv::engine::AstReducer&, const cursiv::engine::Pending&,
+                 const cursiv::engine::Made&) {
   return false;
 }
-bool num_writer(cursiv::AstReducer& b, const cursiv::Pending& p,
-                const cursiv::Made& m) {
+bool num_writer(cursiv::engine::AstReducer& b, const cursiv::engine::Pending& p,
+                const cursiv::engine::Made& m) {
   if (p.field != 0) return false;
   b.write<FlagField, nullptr, false>(0, p, m);
   return true;
 }
-bool call_writer(cursiv::AstReducer& b, const cursiv::Pending& p,
-                 const cursiv::Made& m) {
+bool call_writer(cursiv::engine::AstReducer& b,
+                 const cursiv::engine::Pending& p,
+                 const cursiv::engine::Made& m) {
   if (p.field != 1) return false;
   b.write<CalleeField, nullptr, false>(1, p, m);
   return true;
 }
-constexpr cursiv::AstApplyFn applies[] = {expr_writer, num_writer, call_writer};
+constexpr cursiv::engine::AstApplyFn applies[] = {expr_writer, num_writer,
+                                                  call_writer};
 
 // The receiver, then its flag owed to whatever the region is when it lands.
-void number(cursiv::AstReducer& b, cursiv::NodeId id) {
+void number(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   b.push_made(id, b.create<makes[1], num_writer, true>(1, id));
   b.owe_effect(id, 1, 0, cursiv::ActKind::flag);
 }
-void turn(cursiv::AstReducer& b, cursiv::NodeId id) {
+void turn(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   b.owe_effect(id, 2, 1, cursiv::ActKind::nest);
 }
-void close(cursiv::AstReducer& b, cursiv::NodeId id) {
+void close(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   const auto m = b.adopt<true>(0, id);
   if (!b.failed()) b.push_made(id, m);
 }
-constexpr cursiv::AstEntryFn entries[] = {number, turn, close};
+constexpr cursiv::engine::AstEntryFn entries[] = {number, turn, close};
 constexpr std::uint8_t turns[] = {0, 1, 0};
-constexpr cursiv::AstActions byState{.meta = &meta,
-                                     .makes = makes,
-                                     .entries = entries,
-                                     .entryCount = 3,
-                                     .applies = applies,
-                                     .takeBits = takeBits,
-                                     .anyNest = true,
-                                     .turnsByState = true};
-constexpr cursiv::AstActions byRow{.meta = &meta,
-                                   .makes = makes,
-                                   .entries = entries,
-                                   .entryCount = 3,
-                                   .applies = applies,
-                                   .takeBits = takeBits,
-                                   .anyNest = true,
-                                   .turns = turns};
+constexpr cursiv::engine::AstActions byState{.meta = &meta,
+                                             .makes = makes,
+                                             .entries = entries,
+                                             .entryCount = 3,
+                                             .applies = applies,
+                                             .takeBits = takeBits,
+                                             .anyNest = true,
+                                             .turnsByState = true};
+constexpr cursiv::engine::AstActions byRow{.meta = &meta,
+                                           .makes = makes,
+                                           .entries = entries,
+                                           .entryCount = 3,
+                                           .applies = applies,
+                                           .takeBits = takeBits,
+                                           .anyNest = true,
+                                           .turns = turns};
 
 // `1(` read as a call turn over its receiver, closed as an expression; a
 // repair may have given the turn up, its receiver with it.
-std::string reduce_turn(const cursiv::AstActions& actions, bool stateSays,
-                        bool abandoned, unsigned badExtent = 0) {
+std::string reduce_turn(const cursiv::engine::AstActions& actions,
+                        bool stateSays, bool abandoned,
+                        unsigned badExtent = 0) {
   cursiv::Cst c("1(");
   cursiv::CstBuilder b(c);
   b.bind_stream();
@@ -478,59 +482,61 @@ namespace text_cases {
 std::vector<cursiv::NodeId> converted;
 unsigned constantCalls = 0, failedCalls = 0;
 
-std::optional<std::string_view> echo(cursiv::AstBuildCtx& ctx,
+std::optional<std::string_view> echo(cursiv::engine::AstBuildCtx& ctx,
                                      cursiv::NodeId id) {
-  const auto text = cursiv::detail::joined_parts<true, true>(ctx, id);
+  const auto text = cursiv::engine::joined_parts<true, true>(ctx, id);
   if (text) converted.push_back(id);
   return text;
 }
-std::optional<std::string_view> constant(cursiv::AstBuildCtx&, cursiv::NodeId) {
+std::optional<std::string_view> constant(cursiv::engine::AstBuildCtx&,
+                                         cursiv::NodeId) {
   ++constantCalls;
   return "constant";
 }
-std::optional<std::string_view> refuse(cursiv::AstBuildCtx& ctx,
+std::optional<std::string_view> refuse(cursiv::engine::AstBuildCtx& ctx,
                                        cursiv::NodeId id) {
-  if (!cursiv::detail::joined_parts<true, true>(ctx, id)) return std::nullopt;
+  if (!cursiv::engine::joined_parts<true, true>(ctx, id)) return std::nullopt;
   ++failedCalls;
   return std::nullopt;
 }
-constexpr cursiv::detail::TextFn conversions[] = {nullptr, echo, constant,
+constexpr cursiv::engine::TextFn conversions[] = {nullptr, echo, constant,
                                                   refuse};
 constexpr std::uint8_t inputs[] = {0, 3, 0, 3};
-constexpr cursiv::AstActions textActions{.texts = conversions,
-                                         .calls = conversions,
-                                         .entryCount = 4,
-                                         .textInputs = inputs};
+constexpr cursiv::engine::AstActions textActions{.texts = conversions,
+                                                 .calls = conversions,
+                                                 .entryCount = 4,
+                                                 .textInputs = inputs};
 
 void an_independent_query_keeps_its_own_cache_until_it_returns() {
   static constexpr auto child =
-      +[](cursiv::AstBuildCtx&, cursiv::NodeId)
-          -> std::optional<std::string_view> {
+      +[](cursiv::engine::AstBuildCtx&,
+          cursiv::NodeId) -> std::optional<std::string_view> {
     ++constantCalls;
     return "fresh";
   };
   static constexpr auto root =
-      +[](cursiv::AstBuildCtx& ctx, cursiv::NodeId id) {
-    return cursiv::detail::evaluate_text(ctx, id, child, false);
-  };
-  const auto throwing = +[](cursiv::AstBuildCtx& ctx, cursiv::NodeId id)
-      -> std::optional<std::string_view> {
+      +[](cursiv::engine::AstBuildCtx& ctx, cursiv::NodeId id) {
+        return cursiv::engine::evaluate_text(ctx, id, child, false);
+      };
+  const auto throwing =
+      +[](cursiv::engine::AstBuildCtx& ctx,
+          cursiv::NodeId id) -> std::optional<std::string_view> {
     (void)root(ctx, id);
     throw 17;
   };
   cursiv::Cst tree("a");
   cursiv::CstBuilder builder(tree);
   const auto id = builder.leaf(0, 1, kStamp.make(0, 0));
-  cursiv::detail::TextValues parent;
+  cursiv::engine::TextValues parent;
   parent.calls.try_emplace(id, child, "stale");
-  cursiv::AstBuildCtx ctx;
+  cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &tree;
   ctx.actions = &textActions;
   ctx.textValues = &parent;
   constantCalls = 0;
   for (bool throws : {false, true}) {
     try {
-      const auto value = cursiv::detail::evaluate_text(
+      const auto value = cursiv::engine::evaluate_text(
           ctx, id, throws ? throwing : root, true);
       CHECK(!throws && value && *value == "fresh");
     } catch (int e) {
@@ -553,12 +559,12 @@ void deep_conversions_keep_order_and_stop_at_constants() {
   cursiv::NodeId root = 0;
   for (unsigned i = depth; i-- > 0;)
     root = builder.exit(open[i], 0, kStamp.make(1, 0));
-  cursiv::AstBuildCtx ctx;
+  cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &tree;
   ctx.actions = &textActions;
   for (unsigned query = 0; query < 2; ++query) {
     converted.clear();
-    const auto value = cursiv::detail::joined_parts(ctx, root);
+    const auto value = cursiv::engine::joined_parts(ctx, root);
     CHECK(value && *value == "a");
     CHECK(converted.size() == depth);
     for (unsigned i = 0; i < converted.size(); ++i)
@@ -569,7 +575,7 @@ void deep_conversions_keep_order_and_stop_at_constants() {
   builder.stream().at(root).engine = kStamp.make(2, 0);
   converted.clear();
   constantCalls = 0;
-  const auto value = cursiv::detail::joined_parts(ctx, root);
+  const auto value = cursiv::engine::joined_parts(ctx, root);
   CHECK(value && *value == "constant");
   CHECK(converted.empty() && constantCalls == 1);
 }
@@ -585,12 +591,12 @@ void a_failed_conversion_stops_before_later_siblings() {
   builder.leaf(1, 2, kStamp.make(0, 0));
   builder.exit(child, 1, kStamp.make(1, 0));
   const auto root = builder.exit(all, 0, kStamp.make(1, 0));
-  cursiv::AstBuildCtx ctx;
+  cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &tree;
   ctx.actions = &textActions;
   converted.clear();
   failedCalls = 0;
-  CHECK(!cursiv::detail::joined_parts(ctx, root));
+  CHECK(!cursiv::engine::joined_parts(ctx, root));
   CHECK(failedCalls == 1 && converted.empty());
   CHECK(ctx.textValues == nullptr);
 }
@@ -633,16 +639,16 @@ void raw_nested_text_is_joined_once_and_parts_keep_their_groups() {
   cursiv::NodeId root = 0;
   for (unsigned i = depth + 1; i-- > 0;)
     root = builder.exit(open[i], 2 * i, kStamp.make(0, 0));
-  cursiv::AstBuildCtx ctx;
+  cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &tree;
   ctx.actions = &textActions;
   const std::size_t before = memory.bytes;
-  const auto value = cursiv::detail::joined_parts<false>(ctx, root);
+  const auto value = cursiv::engine::joined_parts<false>(ctx, root);
   CHECK(value && *value == std::string(depth + 1, 'a'));
   // One block of the pool at most; a join per level would ask for about
   // depth * depth / 2 bytes in all.
   CHECK(memory.bytes - before <= 256u * depth);
-  const auto parts = cursiv::detail::parts_of<false>(ctx, root);
+  const auto parts = cursiv::engine::parts_of<false>(ctx, root);
   CHECK(parts && parts->size() == 2);
   if (parts && parts->size() == 2) {
     CHECK((*parts)[0] == "a");
@@ -658,11 +664,11 @@ void invented_text_never_runs_its_converter() {
   builder.stream().at(invented).recovered = true;
   builder.leaf(0, 1, kStamp.make(0, 0));
   const auto root = builder.exit(open, 0, kStamp.make(0, 0));
-  cursiv::AstBuildCtx ctx;
+  cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &tree;
   ctx.actions = &textActions;
   converted.clear();
-  const auto parts = cursiv::detail::parts_of(ctx, root);
+  const auto parts = cursiv::engine::parts_of(ctx, root);
   CHECK(parts && parts->size() == 1 && (*parts)[0] == "a");
   CHECK(converted.empty());
 }

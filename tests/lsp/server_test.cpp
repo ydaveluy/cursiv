@@ -2788,7 +2788,7 @@ void a_tape_is_declined_and_not_answered_from_the_start_state() {
   // ...and the same door answers a tree the engine did write.
   namespace g = fdoc::generated::DocG;
   cursiv::Cst stream;
-  cursiv::lr_parser<g::kTable>.parse(text, stream, nullptr, &g::kDrive);
+  cursiv::engine::lr_parser<g::kTable>.parse(text, stream, nullptr, &g::kDrive);
   CHECK(stream.engine_stamped());
   CHECK(stream.grammar() ==
         nullptr);  // the engine wrote it, no parser finished it

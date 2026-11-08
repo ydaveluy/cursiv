@@ -213,11 +213,11 @@ void lowering_paths(const cursiv::Parser& parser) {
 
 template <class Lowered, class Name>
 void refused_alike(const Lowered& t, std::uint16_t rules, Name&& name) {
-  CHECK(t.cfg.lowerWhy == cursiv::LowerFail::unorderedTooWide);
+  CHECK(t.cfg.lowerWhy == cursiv::engine::LowerFail::unorderedTooWide);
   CHECK(t.cfg.lowerRule < rules);
   if (t.cfg.lowerRule >= rules) return;
   const std::string said =
-      cursiv::lower_fail_sentence(t.cfg, name(t.cfg, t.cfg.lowerRule));
+      cursiv::engine::lower_fail_sentence(t.cfg, name(t.cfg, t.cfg.lowerRule));
   CHECK(said.starts_with("rule `") &&
         said.find("Root` has an unordered group") != std::string::npos);
 }
@@ -225,10 +225,10 @@ void refused_alike(const Lowered& t, std::uint16_t rules, Name&& name) {
 // Both engines refuse a group in the same words.
 template <class G>
 void refused_too_wide() {
-  const auto& lr = cursiv::LrLowering<G>::table();
+  const auto& lr = cursiv::engine::LrLowering<G>::table();
   refused_alike(lr, lr.cfg.nnts,
                 [](const auto& c, std::uint16_t r) { return c.nt_name(r); });
-  const auto& ll = cursiv::LlLowering<G>::table();
+  const auto& ll = cursiv::engine::LlLowering<G>::table();
   refused_alike(ll, ll.cfg.nrules,
                 [](const auto& c, std::uint16_t r) { return c.rule_name(r); });
 }
@@ -236,20 +236,21 @@ void refused_too_wide() {
 // ...and spell the widest one alike.
 template <class G>
 void spelt() {
-  CHECK(!cursiv::LrLowering<G>::table().cfg.lowerFail());
-  CHECK(!cursiv::LlLowering<G>::table().cfg.lowerFail());
+  CHECK(!cursiv::engine::LrLowering<G>::table().cfg.lowerFail());
+  CHECK(!cursiv::engine::LlLowering<G>::table().cfg.lowerFail());
 }
 
 // ...and refuse an item that may read nothing in the same words, naming it.
 template <class G>
 void refused_empty(std::string_view part) {
-  const auto& lr = cursiv::LrLowering<G>::table();
-  const auto& ll = cursiv::LlLowering<G>::table();
-  CHECK(lr.fault.code == cursiv::GrammarFaultCode::nullableUnorderedItem);
+  const auto& lr = cursiv::engine::LrLowering<G>::table();
+  const auto& ll = cursiv::engine::LlLowering<G>::table();
+  CHECK(lr.fault.code ==
+        cursiv::engine::GrammarFaultCode::nullableUnorderedItem);
   CHECK(lr.fault == ll.fault && lr.fault.part == part);
   CHECK(lr.cfg.nt_name(lr.fault.rule) == "Root" &&
         ll.cfg.rule_name(ll.fault.rule) == "Root");
-  CHECK(cursiv::grammar_fault_text(lr.fault).starts_with(
+  CHECK(cursiv::engine::grammar_fault_text(lr.fault).starts_with(
       "has an unordered item that may match nothing, `" + std::string(part) +
       "`: an item that matches nothing"));
 }
@@ -257,11 +258,12 @@ void refused_empty(std::string_view part) {
 // ...and refuse an optional item in a group that holds a nest, naming it.
 template <class G>
 void refused_nest(std::string_view part) {
-  const auto& lr = cursiv::LrLowering<G>::table();
-  const auto& ll = cursiv::LlLowering<G>::table();
-  CHECK(lr.fault.code == cursiv::GrammarFaultCode::nullableUnorderedItem);
+  const auto& lr = cursiv::engine::LrLowering<G>::table();
+  const auto& ll = cursiv::engine::LlLowering<G>::table();
+  CHECK(lr.fault.code ==
+        cursiv::engine::GrammarFaultCode::nullableUnorderedItem);
   CHECK(lr.fault == ll.fault && lr.fault.part == part && lr.fault.gated);
-  CHECK(cursiv::grammar_fault_text(lr.fault).starts_with(
+  CHECK(cursiv::engine::grammar_fault_text(lr.fault).starts_with(
       "has an optional item, `" + std::string(part) +
       "`, in an unordered group whose items hold a `nest`"));
 }

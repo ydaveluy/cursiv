@@ -18,7 +18,7 @@
 #include "cursiv/ll/table/LlSimulation.hpp"
 #include "cursiv/ll/table/LlTable.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What the episodes of one parse keep: the pool that holds the return stacks,
 // a sim each for the two ways of reading, the plan the last episode made for
@@ -158,4 +158,4 @@ struct LlExactWalk {
   bool _holds;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

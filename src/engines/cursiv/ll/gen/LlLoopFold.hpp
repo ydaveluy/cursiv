@@ -17,14 +17,15 @@
 #include "cursiv/grammar/GrammarUtils.hpp"
 #include "cursiv/grammar/InGrammar.hpp"
 #include "cursiv/grammar/expr.hpp"
-#include "cursiv/text/scalar_at.hpp"
-#include "cursiv/utils/CaseFold.hpp"
-#include "cursiv/utils/typelist.hpp"
 #include "cursiv/shared/gen/LeadGraph.hpp"
 #include "cursiv/shared/gen/optional_shape.hpp"
 #include "cursiv/shared/gen/reached.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/text/scalar_at.hpp"
+#include "cursiv/utils/CaseFold.hpp"
+#include "cursiv/utils/typelist.hpp"
 
-namespace cursiv::detail::llow {
+namespace cursiv::engine::llow {
 
 template <class E>
 struct fold_alts {
@@ -68,34 +69,35 @@ struct Closed : GrammarNode {};
 template <class E>
 struct Turns : GrammarNode {};
 
-}  // namespace cursiv::detail::llow
+}  // namespace cursiv::engine::llow
 
 namespace cursiv::detail {
 
 template <class R, class E, bool Step, bool Hands>
-struct ExprShape<llow::Closed<R, E, Step, Hands>> {
+struct ExprShape<engine::llow::Closed<R, E, Step, Hands>> {
   using kids = TypeList<E>;
   template <class... K>
-  using rebind = llow::Closed<R, K..., Step, Hands>;
+  using rebind = engine::llow::Closed<R, K..., Step, Hands>;
 };
 template <class E>
-struct ExprShape<llow::Turns<E>> {
+struct ExprShape<engine::llow::Turns<E>> {
   using kids = TypeList<E>;
   template <class... K>
-  using rebind = llow::Turns<K...>;
+  using rebind = engine::llow::Turns<K...>;
 };
 template <class R, class E, bool Step, bool Hands>
-inline constexpr bool transparent<llow::Closed<R, E, Step, Hands>> = true;
+inline constexpr bool transparent<engine::llow::Closed<R, E, Step, Hands>> =
+    true;
 template <class R, class E, bool Step, bool Hands>
-inline constexpr bool grouping<llow::Closed<R, E, Step, Hands>> = true;
+inline constexpr bool grouping<engine::llow::Closed<R, E, Step, Hands>> = true;
 template <class E>
-inline constexpr bool transparent<llow::Turns<E>> = true;
+inline constexpr bool transparent<engine::llow::Turns<E>> = true;
 template <class E>
-inline constexpr bool grouping<llow::Turns<E>> = true;
+inline constexpr bool grouping<engine::llow::Turns<E>> = true;
 
 }  // namespace cursiv::detail
 
-namespace cursiv::detail::llow {
+namespace cursiv::engine::llow {
 
 template <class Lead, class Recipe>
 struct LeadArm {
@@ -694,7 +696,7 @@ struct CallTable<S, G, TypeList<Rs...>> {
       mask(typename body_refs<S, Rs>::all{})...};
   static constexpr std::array<Mask, n> late = {
       mask(typename body_refs<S, Rs>::late{})...};
-  static constexpr Mask roots = mask(typename cursiv::detail::roots<S>::type{});
+  static constexpr Mask roots = mask(typename cursiv::engine::roots<S>::type{});
 
   static consteval Mask reached(std::uint32_t loop) {
     Mask m = roots;
@@ -749,4 +751,4 @@ struct loop_fold_rule<S, G, R, true> {
   };
 };
 
-}  // namespace cursiv::detail::llow
+}  // namespace cursiv::engine::llow

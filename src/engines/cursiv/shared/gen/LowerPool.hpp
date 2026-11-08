@@ -8,7 +8,7 @@
 
 #include "cursiv/grammar/ElementId.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LowerPool {
   std::unordered_map<std::uint64_t, std::uint16_t> termIndex{};
@@ -20,4 +20,4 @@ struct LowerPool {
   std::uint16_t owner = kNoElement;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

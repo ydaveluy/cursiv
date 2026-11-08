@@ -8,7 +8,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/shared/table/CondReach.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The end of the `n`-th token from node `first` on in the tape, `none` where
 // fewer follow: the leaves of a postorder tape stand in the order of the text.
@@ -38,4 +38,4 @@ inline TextOffset phrase_end(const Cst& cst, TextOffset resume,
       end);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

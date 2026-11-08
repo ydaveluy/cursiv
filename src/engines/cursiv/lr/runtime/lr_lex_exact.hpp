@@ -21,7 +21,7 @@
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Whether an arm of a cell of several takes `term`, `holds` answering the
 // conditions of the gap. Conditions are read through empty rules, as the
@@ -243,4 +243,4 @@ CURSIV_NOINLINE void lr_drive_exact(LrContext& c, std::uint16_t mode) {
   c.ncand = tied > 1 ? tied : 0;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -2,7 +2,7 @@
 // has.
 #pragma once
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrSizes {
   unsigned terms = 0, prods = 0;
@@ -48,4 +48,4 @@ struct LrSizes {
   constexpr bool operator==(const LrSizes&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

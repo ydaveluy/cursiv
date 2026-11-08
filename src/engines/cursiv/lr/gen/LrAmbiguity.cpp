@@ -6,7 +6,7 @@
 #include "cursiv/lr/gen/LrBuildCfg.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 namespace {
 
@@ -109,4 +109,4 @@ std::string lr_ambiguity_text(const LrBuildCfg& c, const LrAmbiguity& a) {
          "ways -- write one repetition";
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

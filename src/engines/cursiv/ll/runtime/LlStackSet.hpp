@@ -15,7 +15,7 @@
 #include "cursiv/ll/runtime/LlHistory.hpp"
 #include "cursiv/ll/table/LlSimulation.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LlStackSet {
  public:
@@ -130,4 +130,4 @@ class LlStackSet {
   std::size_t _used = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

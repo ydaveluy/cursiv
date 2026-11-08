@@ -9,7 +9,7 @@
 #include "cursiv/syntax-tree/MemberTraits.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 template <auto P>
 struct Wrote {};
@@ -30,4 +30,4 @@ using owned_row =
         typename member_traits<std::remove_cv_t<decltype(P)>>::class_type,
         Wrote<P>, void, Src>;
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

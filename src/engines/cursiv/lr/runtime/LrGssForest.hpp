@@ -21,7 +21,7 @@
 #include "cursiv/lr/runtime/LrGssRope.hpp"
 #include "cursiv/lr/runtime/LrGssRuns.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrGssForest {
  public:
@@ -352,8 +352,7 @@ class LrGssForest {
       _joined.clear();
       lay(alternative, 0, _joined);
       Spell::Length total = 0;
-      for (const Piece& p : _joined)
-        total = detail::gss_length_add(total, length(p));
+      for (const Piece& p : _joined) total = gss_length_add(total, length(p));
       Node& n = _nodes[node];
       n.mark = kRanked;
       if (_small && total <= kFlat) {
@@ -461,4 +460,4 @@ class LrGssForest {
   std::vector<Visit> _ranking;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

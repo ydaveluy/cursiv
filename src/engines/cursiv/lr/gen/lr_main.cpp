@@ -13,7 +13,6 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/grammar/dump.hpp"
 #include "cursiv/lr/gen/LrAmbiguity.hpp"
 #include "cursiv/lr/gen/LrFinalTable.hpp"
 #include "cursiv/lr/gen/LrIdentity.hpp"
@@ -38,6 +37,7 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
+#include "cursiv/shared/utils/dump.hpp"
 
 #ifdef CURSIV_GEN_INCLUDE
 #include CURSIV_GEN_INCLUDE
@@ -51,14 +51,14 @@
 namespace CURSIV_GEN_SCOPE {
 
 using G = CURSIV_GEN_GRAMMAR;
-using View = cursiv::LrView<G>;
+using View = cursiv::engine::LrView<G>;
 
 namespace {
 
-using cursiv::exit_status;
-using cursiv::GenCode;
+using cursiv::engine::exit_status;
+using cursiv::engine::GenCode;
 
-using Built = cursiv::LrBuildTable;
+using Built = cursiv::engine::LrBuildTable;
 
 constexpr std::string_view kStampRowBits = "--stamp-row-bits=";
 constexpr std::string_view kGroupLines = "--group-lines=";
@@ -78,62 +78,63 @@ struct Args {
   // The row width of a record's stamp a lane forces, where not zero.
   unsigned stampRowBits = 0;
   // The lines a group of states holds, which a lane may force down.
-  unsigned groupLines = cursiv::kLrGroupLines;
-  unsigned optionalGate = cursiv::kOptionalGate;
+  unsigned groupLines = cursiv::engine::kLrGroupLines;
+  unsigned optionalGate = cursiv::engine::kOptionalGate;
 
   // A lane's option: false where it is none, or its count is out of range.
   bool take(std::string_view arg) {
     if (arg.starts_with(kStampRowBits))
       return count_to(arg.substr(kStampRowBits.size()),
-                      cursiv::StampLayout{}.rowBits, stampRowBits);
+                      cursiv::engine::StampLayout{}.rowBits, stampRowBits);
     if (arg.starts_with(kGroupLines))
       return count_to(arg.substr(kGroupLines.size()),
                       std::numeric_limits<unsigned>::max(), groupLines);
     if (arg.starts_with(kOptionalGate))
       return count_to(arg.substr(kOptionalGate.size()),
-                      cursiv::kOptionalGateMost, optionalGate, 0);
+                      cursiv::engine::kOptionalGateMost, optionalGate, 0);
     return false;
   }
 };
 
 // The wider graph is built where the core's merge arbitrated or mixed implied
 // tokens, and stands on `lr_wider_stands`.
-std::unique_ptr<Built> build(const cursiv::LrLowered& low) {
-  auto core = std::make_unique<Built>(cursiv::lr_build_automaton(low));
+std::unique_ptr<Built> build(const cursiv::engine::LrLowered& low) {
+  auto core = std::make_unique<Built>(cursiv::engine::lr_build_automaton(low));
   if (core->nMergeInduced != 0 || core->nImpliedMixed != 0) {
-    auto wide = std::make_unique<Built>(cursiv::lr_build_wide(low, core.get()));
-    if (cursiv::lr_wider_stands(*core, *wide)) core = std::move(wide);
+    auto wide =
+        std::make_unique<Built>(cursiv::engine::lr_build_wide(low, core.get()));
+    if (cursiv::engine::lr_wider_stands(*core, *wide)) core = std::move(wide);
   }
   return core;
 }
 
 // A shape the core cannot hold is refused before anything is built.
-bool refuse_ungated(const cursiv::LrLowered& low) {
-  using Lowering = cursiv::LrLowering<G>;
+bool refuse_ungated(const cursiv::engine::LrLowered& low) {
+  using Lowering = cursiv::engine::LrLowering<G>;
   // A lowering that refused a shape has its own sentence.
   if (!low.fault || low.cfg.lowerFail()) return false;
-  const std::uint16_t nt = cursiv::lr_fault_rule(low);
+  const std::uint16_t nt = cursiv::engine::lr_fault_rule(low);
   const std::string_view rule =
       nt < low.cfg.nnts ? low.cfg.nt_name(nt) : std::string_view{};
-  cursiv::refuse_fault(
+  cursiv::engine::refuse_fault(
       CURSIV_GEN_NAME, low.fault,
-      cursiv::lr_fault_message(low,
-                               cursiv::AsWritten<Lowering::rules>::of(rule)));
+      cursiv::engine::lr_fault_message(
+          low, cursiv::engine::AsWritten<Lowering::rules>::of(rule)));
   return true;
 }
 
 // Whether the graph is refused before anything is derived from it. The stamp
 // row width a lane forces is applied to it here, while it can still change.
 bool refuse_graph(Built& a, unsigned stampRowBits) {
-  return cursiv::refuse_unbuilt(CURSIV_GEN_NAME, a,
-                                a.cfg.lowerRule < a.cfg.nnts
-                                    ? a.cfg.nt_name(a.cfg.lowerRule)
-                                    : std::string_view{}) ||
-         cursiv::refuse_empty_match(CURSIV_GEN_NAME,
-                                    cursiv::empty_match_terminal(a)) ||
-         cursiv::refuse_unstamped(CURSIV_GEN_NAME, a.stamp,
-                                  a.writes.nchains + a.nfused, a.nstates,
-                                  stampRowBits);
+  return cursiv::engine::refuse_unbuilt(CURSIV_GEN_NAME, a,
+                                        a.cfg.lowerRule < a.cfg.nnts
+                                            ? a.cfg.nt_name(a.cfg.lowerRule)
+                                            : std::string_view{}) ||
+         cursiv::engine::refuse_empty_match(
+             CURSIV_GEN_NAME, cursiv::engine::empty_match_terminal(a)) ||
+         cursiv::engine::refuse_unstamped(CURSIV_GEN_NAME, a.stamp,
+                                          a.writes.nchains + a.nfused,
+                                          a.nstates, stampRowBits);
 }
 
 // What the build found, in one line, and why a grammar is not deterministic
@@ -144,7 +145,7 @@ void report(const Built& a, unsigned probeCuts) {
       "acts=%u identity=%s\n",
       CURSIV_GEN_NAME, a.nstates, a.cfg.nterms, a.cfg.nnts, a.cfg.nprods,
       a.nactions, a.ndfa, a.writes.nchains, a.writes.nacts,
-      a.identity == cursiv::LrIdentity::core ? "core" : "wide");
+      a.identity == cursiv::engine::LrIdentity::core ? "core" : "wide");
   if (probeCuts != 0 || a.nunminted != 0)
     std::printf("%s: gave way: probeCuts=%u unminted=%u\n", CURSIV_GEN_NAME,
                 probeCuts, a.nunminted);
@@ -168,7 +169,8 @@ void report(const Built& a, unsigned probeCuts) {
     }
     if (!a.multiText.empty()) {
       std::string text;
-      for (const unsigned char b : a.multiText) text += cursiv::spell_byte(b);
+      for (const unsigned char b : a.multiText)
+        text += cursiv::engine::spell_byte(b);
       std::printf(" on `%s`", text.c_str());
     }
     std::printf("\n");
@@ -176,12 +178,12 @@ void report(const Built& a, unsigned probeCuts) {
 }
 
 // What the lowered grammar shows ambiguous with no table, a warning each.
-void report_ambiguities(const cursiv::LrBuildCfg& c) {
+void report_ambiguities(const cursiv::engine::LrBuildCfg& c) {
   constexpr std::size_t kShown = 8;
-  const auto found = cursiv::lr_find_ambiguities(c);
+  const auto found = cursiv::engine::lr_find_ambiguities(c);
   for (std::size_t i = 0; i < found.size() && i < kShown; ++i)
     std::fprintf(stderr, "%s: warning: %s\n", CURSIV_GEN_NAME,
-                 cursiv::lr_ambiguity_text(c, found[i]).c_str());
+                 cursiv::engine::lr_ambiguity_text(c, found[i]).c_str());
   if (found.size() > kShown)
     std::fprintf(stderr, "%s: warning: and %zu more\n", CURSIV_GEN_NAME,
                  found.size() - kShown);
@@ -202,11 +204,12 @@ void report_each_conflict(const Built& a) {
   };
   for (std::size_t i = 0; i < queue.size(); ++i) {
     const std::uint32_t s = queue[i];
-    for (const cursiv::LrAction& x : a.action_row(s))
+    for (const cursiv::engine::LrAction& x : a.action_row(s))
       a.each_landing(x, [&](std::uint16_t to) { reach(s, to, x.term); });
     for (const auto& e : a.gotoRows[s])
-      a.each_goto_landing(
-          e, [&](std::uint16_t to) { reach(s, to, cursiv::nt_sym(e.nt)); });
+      a.each_goto_landing(e, [&](std::uint16_t to) {
+        reach(s, to, cursiv::engine::nt_sym(e.nt));
+      });
   }
   const auto prefix = [&](std::uint32_t st) {
     std::vector<std::uint16_t> path;
@@ -215,15 +218,16 @@ void report_each_conflict(const Built& a) {
     std::string out;
     for (auto it = path.rbegin(); it != path.rend(); ++it) {
       if (!out.empty()) out += ' ';
-      out += cursiv::is_term(*it)
+      out += cursiv::engine::is_term(*it)
                  ? "'" + std::string(a.cfg.term_name(*it)) + "'"
-                 : std::string(a.cfg.nt_name(cursiv::nt_index(*it)));
+                 : std::string(a.cfg.nt_name(cursiv::engine::nt_index(*it)));
     }
     return out;
   };
   for (std::uint32_t st = 0; st < a.nstates; ++st) {
-    const cursiv::LrAction* const row = a.actions.data() + a.actionBase[st];
-    cursiv::lr_each_run(
+    const cursiv::engine::LrAction* const row =
+        a.actions.data() + a.actionBase[st];
+    cursiv::engine::lr_each_run(
         row, a.actionCount[st], [&](std::size_t i, std::size_t j) {
           if (j - i < 2) return;
           const std::string_view t = a.cfg.term_name(row[i].term);
@@ -232,7 +236,7 @@ void report_each_conflict(const Built& a) {
           if (const std::string after = prefix(st); !after.empty())
             std::printf("      after   %s\n", after.c_str());
           for (std::size_t k = i; k < j; ++k)
-            if (row[k].kind == cursiv::LrActionKind::reduce)
+            if (row[k].kind == cursiv::engine::LrActionKind::reduce)
               std::printf("      reduce  %s\n",
                           a.cfg.prod_text(a.cfg.prods[row[k].arg]).c_str());
             else
@@ -247,50 +251,51 @@ void report_each_conflict(const Built& a) {
 
 int run(int argc, char** argv) try {
   Args args;
-  const char* const dir = cursiv::gen_out_dir(
+  const char* const dir = cursiv::engine::gen_out_dir(
       argc, argv,
       "[--stamp-row-bits=1..16] [--group-lines=N] [--optional-gate=0..15]",
       [&](std::string_view arg) { return args.take(arg); });
   if (dir == nullptr) return exit_status(GenCode::usage);
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<View>();
-  if (cursiv::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
+  if (cursiv::engine::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
     return exit_status(GenCode::refused);
-  auto desc = cursiv::kLrLower<G>;
+  auto desc = cursiv::engine::kLrLower<G>;
   desc.optionalGate = args.optionalGate;
-  const auto low = cursiv::lr_lower(image, desc);
+  const auto low = cursiv::engine::lr_lower(image, desc);
   if (refuse_ungated(low))
     return exit_status(GenCode::refused);
 
   auto automaton = build(low);
   if (refuse_graph(*automaton, args.stampRowBits))
     return exit_status(GenCode::refused);
-  const auto registry = cursiv::ast_registry<G, cursiv::LrLowering<G>>(
-      CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
-  const auto entries = cursiv::lr_entry_table(*automaton);
+  const auto registry =
+      cursiv::engine::ast_registry<G, cursiv::engine::LrLowering<G>>(
+          CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
+  const auto entries = cursiv::engine::lr_entry_table(*automaton);
   const auto records =
-      cursiv::lr_record_gens(entries, registry.rows, automaton->writes);
+      cursiv::engine::lr_record_gens(entries, registry.rows, automaton->writes);
   // From here the table is read-only.
-  const cursiv::LrFinalTable done = cursiv::LrFinalTable::make(
-      std::move(automaton), cursiv::lr_completion_sites(records));
+  const cursiv::engine::LrFinalTable done = cursiv::engine::LrFinalTable::make(
+      std::move(automaton), cursiv::engine::lr_completion_sites(records));
   const Built& a = done.table();
 
   unsigned probeCuts = 0;
-  const auto states = cursiv::lr_emit_parser_files(done, CURSIV_GEN_NS,
-                                                   &probeCuts, args.groupLines);
-  if (const GenCode wrote = cursiv::write_common_artifacts(
+  const auto states = cursiv::engine::lr_emit_parser_files(
+      done, CURSIV_GEN_NS, &probeCuts, args.groupLines);
+  if (const GenCode wrote = cursiv::engine::write_common_artifacts(
           dir,
-          {.table = cursiv::lr_emit_table(done, CURSIV_GEN_NS),
-           .parser = cursiv::lr_emit_parser_decl(done, CURSIV_GEN_NS),
+          {.table = cursiv::engine::lr_emit_table(done, CURSIV_GEN_NS),
+           .parser = cursiv::engine::lr_emit_parser_decl(done, CURSIV_GEN_NS),
            .parserUnits = states,
            .ns = CURSIV_GEN_NS,
            .header = CURSIV_GEN_HEADER,
-           .dump = cursiv::dump_compiled_indexed<View>(),
+           .dump = cursiv::engine::dump_compiled_indexed<View>(),
            .registry = registry,
            .entries = entries,
            .records = records,
-           .terminals = cursiv::record_terminals(a.cfg),
-           .lang = {CURSIV_GEN_ID, cursiv::split(CURSIV_GEN_EXTENSIONS),
-                    cursiv::split(CURSIV_GEN_FILE_NAMES)},
+           .terminals = cursiv::engine::record_terminals(a.cfg),
+           .lang = {CURSIV_GEN_ID, cursiv::engine::split(CURSIV_GEN_EXTENSIONS),
+                    cursiv::engine::split(CURSIV_GEN_FILE_NAMES)},
            .parserHeader = "cursiv/lr/runtime/LrLanguageParser.hpp",
            .parserClass = "LrLanguageParser"});
       wrote != GenCode::ok)
@@ -299,7 +304,7 @@ int run(int argc, char** argv) try {
   report(a, probeCuts);
   report_ambiguities(low.cfg);
   const auto& cfg = low.cfg;
-  cursiv::report_warnings(
+  cursiv::engine::report_warnings(
       CURSIV_GEN_NAME, image, cfg, a.cfg, [&](std::uint16_t r) {
         return r < cfg.nnts ? cfg.nt_name(r) : std::string_view{};
       });

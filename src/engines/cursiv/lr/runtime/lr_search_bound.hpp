@@ -24,7 +24,7 @@
 #include "cursiv/shared/runtime/TypoWalk.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What a reading still owes, as the search orders it: cost paid above, the
 // author's tokens lost below.
@@ -682,4 +682,4 @@ std::uint32_t lr_search_bound(LrContext& c, LrSearch& s, const LrConfig& b) {
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

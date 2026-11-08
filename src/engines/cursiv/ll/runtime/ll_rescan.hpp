@@ -15,7 +15,7 @@
 #include "cursiv/shared/runtime/TypoTape.hpp"
 #include "cursiv/shared/runtime/TypoWalk.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& T>
 inline constexpr std::array<std::uint64_t, T.termWords> kNoReserve{};
@@ -104,4 +104,4 @@ inline void ll_rescan_within(const LlContext& c, std::uint16_t mode,
             [&](const Typo& candidate) { found.add(candidate); });
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -10,7 +10,7 @@
 #include "cursiv/lr/table/LrSetStore.hpp"
 #include "cursiv/lr/table/LrSizes.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A state fused from states that stood after two symbols.
 inline constexpr std::uint16_t kLrNoStateSym = 0xFFFFu;
@@ -98,4 +98,4 @@ struct LrColdTables {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

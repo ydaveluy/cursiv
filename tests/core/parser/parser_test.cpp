@@ -50,8 +50,8 @@ const cursiv::Parser& service() {
 // The other road to the same tree: the generated table and drive, read as
 // data, with no service in front of them.
 bool direct_parse(std::string_view text, cursiv::Cst& cst) {
-  return cursiv::lr_parser<dmg::kTable>.parse(text, cst, nullptr,
-                                              &dmg::kDrive);
+  return cursiv::engine::lr_parser<dmg::kTable>.parse(text, cst, nullptr,
+                                                      &dmg::kDrive);
 }
 
 // The erased door answers about records and tokens, which is all a service
@@ -80,8 +80,8 @@ void a_parse_through_the_interface_builds_the_same_tree() {
   cursiv::Cst cst;
   direct_parse(src, cst);
   const cursiv::ParseResult direct =
-      cursiv::AstReducer::build<dmg::kTable.stamp>(dmg::kAstActions,
-                                                   std::move(cst));
+      cursiv::engine::AstReducer::build<dmg::kTable.stamp>(dmg::kAstActions,
+                                                           std::move(cst));
   CHECK(through.nodes().size() == direct.nodes().size());
   CHECK(through.cst().size() == direct.cst().size());
   CHECK(through.references != nullptr && direct.references != nullptr);
@@ -193,7 +193,7 @@ void a_long_reading_runs_whole_and_the_door_answers() {
   }));
 }
 
-cursiv::AstEntryFn stoppedEntry = nullptr;
+cursiv::engine::AstEntryFn stoppedEntry = nullptr;
 cursiv::CancellationTokenSource* astStop = nullptr;
 
 void a_cancelled_token_stops_the_ast_before_work() {
@@ -202,12 +202,13 @@ void a_cancelled_token_stops_the_ast_before_work() {
   cursiv::CancellationTokenSource source;
   source.request_stop();
   CHECK(support::throws<cursiv::OperationCancelled>([&] {
-    (void)cursiv::AstReducer::build<dmg::kTable.stamp>(
+    (void)cursiv::engine::AstReducer::build<dmg::kTable.stamp>(
         dmg::kAstActions, std::move(cst), source.get_token());
   }));
 }
 
-void stop_after_an_ast_entry(cursiv::AstReducer& builder, cursiv::NodeId id) {
+void stop_after_an_ast_entry(cursiv::engine::AstReducer& builder,
+                             cursiv::NodeId id) {
   stoppedEntry(builder, id);
   astStop->request_stop();
 }
@@ -216,8 +217,8 @@ void a_stop_during_ast_work_is_observed() {
   cursiv::Cst cst;
   CHECK(direct_parse("datatype String\nentity A { x : String }\n", cst));
   auto actions = dmg::kAstActions;
-  std::vector<cursiv::AstEntryFn> entries(actions.entries,
-                                          actions.entries + actions.entryCount);
+  std::vector<cursiv::engine::AstEntryFn> entries(
+      actions.entries, actions.entries + actions.entryCount);
   cursiv::ElementId first = cursiv::kNoElement;
   for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
     const auto row = dmg::kTable.stamp.row(cst[id]);
@@ -236,8 +237,8 @@ void a_stop_during_ast_work_is_observed() {
   actions.entries = entries.data();
   bool threw = false;
   try {
-    (void)cursiv::AstReducer::build<dmg::kTable.stamp>(actions, std::move(cst),
-                                                       source.get_token());
+    (void)cursiv::engine::AstReducer::build<dmg::kTable.stamp>(
+        actions, std::move(cst), source.get_token());
   } catch (const cursiv::OperationCancelled&) {
     threw = true;
   }
@@ -247,11 +248,12 @@ void a_stop_during_ast_work_is_observed() {
 
 // The materialisation reads the stop between runs of records: a stop
 // requested at the first entry leaves most of a long document unbuilt.
-std::vector<cursiv::AstEntryFn> countedEntries;
+std::vector<cursiv::engine::AstEntryFn> countedEntries;
 std::vector<cursiv::ElementId> rowById;
 std::size_t entryCalls = 0;
 
-void count_an_ast_entry(cursiv::AstReducer& builder, cursiv::NodeId id) {
+void count_an_ast_entry(cursiv::engine::AstReducer& builder,
+                        cursiv::NodeId id) {
   if (++entryCalls == 1 && astStop != nullptr) astStop->request_stop();
   countedEntries[rowById[id]](builder, id);
 }
@@ -265,14 +267,14 @@ std::size_t entries_built(const std::string& src,
     rowById[id] = dmg::kTable.stamp.row(cst[id]);
   auto actions = dmg::kAstActions;
   countedEntries.assign(actions.entries, actions.entries + actions.entryCount);
-  std::vector<cursiv::AstEntryFn> entries(countedEntries);
-  for (cursiv::AstEntryFn& e : entries)
+  std::vector<cursiv::engine::AstEntryFn> entries(countedEntries);
+  for (cursiv::engine::AstEntryFn& e : entries)
     if (e != nullptr) e = &count_an_ast_entry;
   actions.entries = entries.data();
   entryCalls = 0;
   astStop = stop;
   try {
-    (void)cursiv::AstReducer::build<dmg::kTable.stamp>(
+    (void)cursiv::engine::AstReducer::build<dmg::kTable.stamp>(
         actions, std::move(cst),
         stop != nullptr ? stop->get_token() : cursiv::kNoCancel);
   } catch (const cursiv::OperationCancelled&) {

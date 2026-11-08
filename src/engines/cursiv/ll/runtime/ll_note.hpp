@@ -11,7 +11,7 @@
 #include "cursiv/ll/runtime/ll_matcher.hpp"
 #include "cursiv/shared/runtime/RepairFault.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A record the parse laid, not the author: the tree stays navigable and the
 // bit says which parts to trust.
@@ -76,4 +76,4 @@ inline LlRepairRun& ll_run(LlContext& c) {
   return c.run;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

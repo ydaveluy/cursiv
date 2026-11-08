@@ -29,7 +29,7 @@
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 namespace {
 
@@ -138,7 +138,8 @@ struct LrTableEmitter : TextBuilder {
     f("names", p.names, d.names, "", "u");
     f("count", p.count, d.count);
     f("form", static_cast<std::uint8_t>(p.form),
-      static_cast<std::uint8_t>(d.form), "::cursiv::LrReduceForm(", ")");
+      static_cast<std::uint8_t>(d.form), "::cursiv::engine::LrReduceForm(",
+      ")");
     f("flushes", p.flushes, d.flushes);
     f("turnRow", p.turnRow, d.turnRow);
     f("regionExit", p.regionExit, d.regionExit);
@@ -153,7 +154,7 @@ struct LrTableEmitter : TextBuilder {
     cell(f);
   }
   void cell(const LexRelayGen& r) { write(lex_relay_source(r, names)); }
-  void cell(const unicode::Range& r) {
+  void cell(const unicode::detail::Range& r) {
     write("{", static_cast<std::uint32_t>(r.lo), "u,",
           static_cast<std::uint32_t>(r.hi), "u}");
   }
@@ -199,7 +200,7 @@ struct LrTableEmitter : TextBuilder {
 
   void emit_sizes() {
     write(
-        "inline constexpr ::cursiv::LrSizes "
+        "inline constexpr ::cursiv::engine::LrSizes "
         "kSizes{.terms=",
         S.terms, ",.prods=", S.prods, ",.states=", S.states,
         ",.modes=", S.modes, ",.cls=", S.cls, ",.dfa=", S.dfa,
@@ -232,15 +233,15 @@ struct LrTableEmitter : TextBuilder {
     if (!S.gotoClasses) write(",.gotoClasses=false");
     line("};");
     const LrLowSizes L = low_sizes();
-    line("inline constexpr ::cursiv::LrLowSizes kLow{", L.nameChars, ",",
-         L.sets, ",", L.terms, ",", L.prods, ",", L.wordRanges,
+    line("inline constexpr ::cursiv::engine::LrLowSizes kLow{", L.nameChars,
+         ",", L.sets, ",", L.terms, ",", L.prods, ",", L.wordRanges,
          L.scalarRanges != 0 ? concat(",", L.scalarRanges) : std::string(),
          "};");
   }
 
   void emit_cold() {
     aggregate = true;
-    line("inline constexpr ::cursiv::LrColdTables<kSizes> kCold{");
+    line("inline constexpr ::cursiv::engine::LrColdTables<kSizes> kCold{");
     emit_pool_member("follow", a.followPool);
     array("accBoundBase", a.accBoundBase, S.dfa + 1u);
     array("accBound", a.accBound, S.accBounds);
@@ -286,7 +287,9 @@ struct LrTableEmitter : TextBuilder {
   }
 
   void emit_facts() {
-    line("  static_cast<::cursiv::LrTableFacts&>(t) = ::cursiv::LrTableFacts{");
+    line(
+        "  static_cast<::cursiv::engine::LrTableFacts&>(t) = "
+        "::cursiv::engine::LrTableFacts{");
     write("    .nstates=", a.nstates, ",.nconflicts=", a.nconflicts,
           ",.npeeks=", a.npeeks,
           ","
@@ -306,7 +309,9 @@ struct LrTableEmitter : TextBuilder {
 
   void emit_cfg() {
     const auto& c = a.cfg;
-    line("  static_cast<::cursiv::LrLowFacts&>(t.cfg) = ::cursiv::LrLowFacts{");
+    line(
+        "  static_cast<::cursiv::engine::LrLowFacts&>(t.cfg) = "
+        "::cursiv::engine::LrLowFacts{");
     write("    .nterms=", c.nterms, ",.nnts=", c.nnts, ",.nprods=", c.nprods,
           ",.entryRow=", c.entryRow, ",.wordBytes=");
     cell(c.wordBytes);
@@ -370,7 +375,7 @@ struct LrTableEmitter : TextBuilder {
   void emit_derived() {
     const auto D = a.derivedSizes();
     line(
-        "inline constexpr ::cursiv::LrDerivedSizes "
+        "inline constexpr ::cursiv::engine::LrDerivedSizes "
         "kDerivedSizes{.lexElseRows=",
         D.lexElseRows,
         ","
@@ -385,7 +390,8 @@ struct LrTableEmitter : TextBuilder {
         D.typoReachSets, ",.afterSets=", D.afterSets,
         ",.modeWantSets=", D.modeWantSets, "};");
     line(
-        "inline constexpr ::cursiv::LrDerivedTables<kSizes, kDerivedSizes> "
+        "inline constexpr ::cursiv::engine::LrDerivedTables<kSizes, "
+        "kDerivedSizes> "
         "kDerived{");
     aggregate = true;
     array("skipSet", a.skipSet);
@@ -452,8 +458,8 @@ struct LrTableEmitter : TextBuilder {
     const std::string rows = layer(row, "Rows", matrix.rows);
     const std::string blocks = layer(index, "Blocks", matrix.blocks);
     program_array(value, concat(name, "Values"), matrix.values);
-    line("inline constexpr ::cursiv::LrProgramRows<", row, ", ", index, ", ",
-         value, "> ", name,
+    line("inline constexpr ::cursiv::engine::LrProgramRows<", row, ", ", index,
+         ", ", value, "> ", name,
          "{\n"
          "    ",
          rows, ", ", blocks, ", ", name, "Values, ", columns, "u, ", absent,
@@ -470,7 +476,7 @@ struct LrTableEmitter : TextBuilder {
         p.ops.empty() ? 0 : *std::ranges::max_element(p.ops);
     const auto op = concat("::std::uint", LrProgramMatrix::bits(most), "_t");
     program_array(op, "kProgramOps", p.ops);
-    line("inline constexpr ::cursiv::LrActionPrograms<", "::std::uint",
+    line("inline constexpr ::cursiv::engine::LrActionPrograms<", "::std::uint",
          p.actions.row_bits(), "_t", ", ", "::std::uint",
          p.actions.index_bits(), "_t", ", ", value, ", ", op,
          "> "
@@ -539,7 +545,7 @@ struct LrTableEmitter : TextBuilder {
     emit_programs();
     emit_guards();
     line(
-        "struct Table : ::cursiv::LrFrozenTable<kSizes, kLow, kCold, "
+        "struct Table : ::cursiv::engine::LrFrozenTable<kSizes, kLow, kCold, "
         "kDerived> {\n"
         "  static constexpr auto& programs = kPrograms;\n"
         "  static constexpr auto& gotoPrograms = kGotoPrograms;");
@@ -552,7 +558,8 @@ struct LrTableEmitter : TextBuilder {
           "  static constexpr ::std::span<const ::std::uint64_t> held{kHeld};");
     if (refusing())
       line(
-          "  static bool head_refuses(::cursiv::SymbolId t, const char* p,\n"
+          "  static bool head_refuses(::cursiv::engine::SymbolId t, const "
+          "char* p,\n"
           "                           ::cursiv::TextOffset rest);\n"
           "  static ::cursiv::TextOffset head_reach(unsigned m, const char* "
           "p,\n"
@@ -570,7 +577,8 @@ struct LrTableEmitter : TextBuilder {
     }
     if (trailing())
       line(
-          "  static bool tail_refuses(::cursiv::SymbolId t, const char* p,\n"
+          "  static bool tail_refuses(::cursiv::engine::SymbolId t, const "
+          "char* p,\n"
           "                           ::cursiv::TextOffset rest);");
     if (a.nrelays != 0)
       line(
@@ -582,7 +590,7 @@ struct LrTableEmitter : TextBuilder {
     if (refusing())
       write(lex_head_source(
           a.termHeads, a.modeHeads,
-          "inline bool Table::head_refuses(::cursiv::SymbolId t, "
+          "inline bool Table::head_refuses(::cursiv::engine::SymbolId t, "
           "const char* p,\n    ::cursiv::TextOffset rest)",
           "inline ::cursiv::TextOffset Table::head_reach(unsigned m, "
           "const char* p,\n    ::cursiv::TextOffset rest)",
@@ -591,7 +599,7 @@ struct LrTableEmitter : TextBuilder {
     if (trailing())
       write(lex_tail_source(
           a.termTails,
-          "inline bool Table::tail_refuses(::cursiv::SymbolId t, "
+          "inline bool Table::tail_refuses(::cursiv::engine::SymbolId t, "
           "const char* p,\n    ::cursiv::TextOffset rest)",
           {"kTable.cfg.wordRanges.data(), kTable.cfg.wordRanges.size()",
            "kTable.cfg.scalarRanges.data()"}));
@@ -608,4 +616,4 @@ std::string lr_emit_table(const LrFinalTable& done, std::string_view ns) {
   return e.take();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

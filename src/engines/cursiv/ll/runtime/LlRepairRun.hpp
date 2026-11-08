@@ -7,7 +7,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/shared/runtime/RepairFault.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlRepairRun : RepairFault {
   // A misspelt word's span: whatever reads it lays its leaf.
@@ -18,4 +18,4 @@ struct LlRepairRun : RepairFault {
   std::uint16_t dropMode = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

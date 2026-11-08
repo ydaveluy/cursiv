@@ -4,7 +4,9 @@
 #include <stdexcept>
 #include <unordered_set>
 
-namespace cursiv {
+#include "cursiv/shared/utils/CoreContract.hpp"
+
+namespace cursiv::engine {
 
 namespace {
 
@@ -19,7 +21,7 @@ struct Item {
 // it is reached, and not one of the rules read as themselves.
 class Reach {
  public:
-  explicit Reach(detail::GrammarImage& image) : _image(image) {}
+  explicit Reach(GrammarImage& image) : _image(image) {}
 
   std::vector<std::uint32_t> run() {
     push(_image.entry, false);
@@ -52,27 +54,27 @@ class Reach {
   }
 
   void collect(std::uint32_t rule) {
-    const detail::ImageFace f = _image.ready(rule).face[1];
-    if (f.kind == detail::ImageRuleKind::infix) {
+    const ImageFace f = _image.ready(rule).face[1];
+    if (f.kind == ImageRuleKind::infix) {
       _out.push_back({f.primary, false});
       for (std::uint32_t i = 0; i < f.levelCount; ++i)
         plain(_image.levels[f.levelsAt + i].op);
-    } else if (f.kind != detail::ImageRuleKind::grammar) {
+    } else if (f.kind != ImageRuleKind::grammar) {
       plain(f.body);
     }
   }
 
   // The rules an expression names where it is read.
-  void plain(detail::ImageId id) {
-    switch (const detail::ImageNode n = _image.nodes[id]; n.kind) {
-      case detail::ImageKind::ref:
+  void plain(ImageId id) {
+    switch (const ImageNode n = _image.nodes[id]; n.kind) {
+      case ImageKind::ref:
         _out.push_back({n.a, false});
         return;
-      case detail::ImageKind::embed:
-        if (_image.nodes[_image.kids[n.first]].kind == detail::ImageKind::seq &&
+      case ImageKind::embed:
+        if (_image.nodes[_image.kids[n.first]].kind == ImageKind::seq &&
             _image.nodes[_image.kids[n.first]].count == 3) {
-          const detail::ImageFace section = _image.ready(n.a).face[0];
-          const detail::ImageNode seq = _image.nodes[_image.kids[n.first]];
+          const ImageFace section = _image.ready(n.a).face[0];
+          const ImageNode seq = _image.nodes[_image.kids[n.first]];
           _out.push_back({section.entry, false});
           list(section.ignoreAt, section.ignoreCount);
           list(section.hiddenAt, section.hiddenCount);
@@ -81,16 +83,16 @@ class Reach {
           return;
         }
         break;
-      case detail::ImageKind::skip:
+      case ImageKind::skip:
         list(static_cast<std::uint32_t>(n.a),
              static_cast<std::uint32_t>(n.m + n.n));
         plain(_image.kids[n.first]);
         return;
-      case detail::ImageKind::lit:
-        if (n.flags & detail::kLitGuardExpr) plain(_image.kids[n.first]);
+      case ImageKind::lit:
+        if (n.flags & kLitGuardExpr) plain(_image.kids[n.first]);
         return;
-      case detail::ImageKind::notOf:
-      case detail::ImageKind::andOf:
+      case ImageKind::notOf:
+      case ImageKind::andOf:
         conditional(_image.kids[n.first]);
         return;
       default:
@@ -102,9 +104,9 @@ class Reach {
   }
 
   // ...and where a condition reads them: a rule that is text there is no call.
-  void conditional(detail::ImageId id) {
-    const detail::ImageNode n = _image.nodes[id];
-    if (n.kind == detail::ImageKind::embed)
+  void conditional(ImageId id) {
+    const ImageNode n = _image.nodes[id];
+    if (n.kind == ImageKind::embed)
       throw std::runtime_error(
           "`section<G>(open, close)` is allowed in a rule, not in a condition: a "
           "condition tests text and cannot parse a grammar -- test the token "
@@ -113,17 +115,17 @@ class Reach {
     if (count != 0) {
       for (std::size_t i = 0; i < count; ++i)
         conditional(_image.shape_kids(id)[i]);
-    } else if (n.kind == detail::ImageKind::ref) {
-      const detail::ImageRuleKind kind = _image.ready(n.a).face[0].kind;
-      const bool text = _image.rules[n.a].inlineTerminal ||
-                        kind == detail::ImageRuleKind::data;
+    } else if (n.kind == ImageKind::ref) {
+      const ImageRuleKind kind = _image.ready(n.a).face[0].kind;
+      const bool text =
+          _image.rules[n.a].inlineTerminal || kind == ImageRuleKind::data;
       _out.push_back({n.a, text});
     } else {
       plain(id);
     }
   }
 
-  detail::GrammarImage& _image;
+  GrammarImage& _image;
   std::vector<Item> _queue;
   std::vector<Item> _out;
   std::unordered_set<std::uint64_t> _seen;
@@ -131,17 +133,17 @@ class Reach {
 
 }  // namespace
 
-WarningFound::WarningFound(detail::GrammarImage& image)
+WarningFound::WarningFound(GrammarImage& image)
     : _image(image), _printer(image, ImageView::resolved), _reads(image) {
   _printer.prime();
   for (const std::uint32_t rule : Reach(image).run()) {
     if (image.rules[rule].foreign) continue;
-    const detail::ImageRuleKind kind = image.ready(rule).face[1].kind;
-    if (kind == detail::ImageRuleKind::infix)
+    const ImageRuleKind kind = image.ready(rule).face[1].kind;
+    if (kind == ImageRuleKind::infix)
       _tables.push_back(rule);
-    else if (kind != detail::ImageRuleKind::terminal)
+    else if (kind != ImageRuleKind::terminal)
       _rules.push_back(rule);
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

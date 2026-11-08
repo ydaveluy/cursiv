@@ -22,7 +22,7 @@
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A run of joins a site reads from `kFuse` rather than spelling it where it
 // stands: more than one, or any a group rides.
@@ -205,4 +205,4 @@ struct LlBuiltProgram : ShapeOverflow {
   std::vector<std::uint32_t> faultCycle{};
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

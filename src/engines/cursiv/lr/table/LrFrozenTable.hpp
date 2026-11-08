@@ -15,7 +15,7 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <LrSizes S, LrLowSizes C, const auto& Cold, const auto& Derived>
 struct LrFrozenTable : LrTableFacts {
@@ -171,4 +171,4 @@ struct LrFrozenTable : LrTableFacts {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -72,8 +72,8 @@ void run() {
   std::string nest = "commit k";
   for (int i = 0; i < 40; ++i) nest += " l = r t j = r";
   cursiv::Cst cst;
-  cursiv::LrParseStats stats;
-  CHECK(cursiv::lr_parser<tedges::generated::G::kTable>.parse(
+  cursiv::engine::LrParseStats stats;
+  CHECK(cursiv::engine::lr_parser<tedges::generated::G::kTable>.parse(
       nest, cst, &stats, &tedges::generated::G::kDrive));
   CHECK(cst.diagnostics().empty());
   CHECK(stats.splits == 0);
@@ -722,7 +722,8 @@ std::string open_run(unsigned n) { return "<" + std::string(n, 'a') + ">"; }
 template <const auto& A>
 std::uint32_t section_state() {
   for (std::uint32_t s = 0; s < A.mode.size(); ++s)
-    if (cursiv::lr_text_close<A>(s) != cursiv::kEofSymbol) return s;
+    if (cursiv::engine::lr_text_close<A>(s) != cursiv::engine::kEofSymbol)
+      return s;
   return 0;
 }
 
@@ -731,13 +732,13 @@ struct LrRoom {
       : cst(text), builder(cst), context(text, builder) {}
   cursiv::Cst cst;
   cursiv::CstBuilder builder;
-  cursiv::LrContext context;
+  cursiv::engine::LrContext context;
 };
 
 template <const auto& T>
 std::uint8_t ll_section_of_inner() {
   for (std::uint8_t k = 0; k < T.nsections; ++k)
-    if (T.sectionEnd[k] != cursiv::kEofSymbol) return k + 1;
+    if (T.sectionEnd[k] != cursiv::engine::kEofSymbol) return k + 1;
   return 0;
 }
 
@@ -750,7 +751,7 @@ struct LlRoom {
   }
   cursiv::Cst cst;
   cursiv::CstBuilder builder;
-  cursiv::LlContext context;
+  cursiv::engine::LlContext context;
 };
 
 void the_section_end_is_looked_for_in_linear_work() {
@@ -760,7 +761,7 @@ void the_section_end_is_looked_for_in_linear_work() {
       LrRoom room(text);
       std::uint64_t read = 0;
       g_steps = 0;
-      const auto end = cursiv::lr_text_end<kLr>(
+      const auto end = cursiv::engine::lr_text_end<kLr>(
           room.context, kLr.mode[section_state<kLr>()], 1, room.context.len,
           read);
       CHECK(end == n + 1);
@@ -771,8 +772,8 @@ void the_section_end_is_looked_for_in_linear_work() {
       LlRoom room(text);
       g_steps = 0;
       cursiv::TextOffset reached = 1;
-      const auto end =
-          cursiv::ll_text_end<kLl>(room.context, 1, room.context.len, reached);
+      const auto end = cursiv::engine::ll_text_end<kLl>(
+          room.context, 1, room.context.len, reached);
       CHECK(end == n + 1);
       CHECK(g_steps < 40ull * n);
       CHECK(reached > n && reached < 40ull * n);
@@ -791,24 +792,26 @@ void the_section_end_is_looked_for_once_per_drop() {
     LlRoom room(text);
     g_steps = 0;
     for (cursiv::TextOffset p = 1; p < text.size() - 1; p += 3)
-      CHECK(cursiv::ll_drop_end<kLl>(room.context,
-                                     {p, p, cursiv::kInvalidSymbol}) == p + 1);
+      CHECK(cursiv::engine::ll_drop_end<kLl>(
+                room.context, {p, p, cursiv::engine::kInvalidSymbol}) == p + 1);
     CHECK(g_steps < 40ull * text.size());
   }
 }
 
-void a_whole_parse_of_the_run_is_linear(const cursiv::RepairBudget& budget) {
+void a_whole_parse_of_the_run_is_linear(
+    const cursiv::engine::RepairBudget& budget) {
   std::uint64_t steps[std::size(kRuns)] = {};
   for (std::size_t k = 0; k < std::size(kRuns); ++k) {
     const std::string text = open_run(kRuns[k]);
-    cursiv::LrDrive drive = tsection::generated::Lr::kDrive;
-    drive.walk = [](const char* src, cursiv::TextOffset len,
-                    std::uint16_t mode, cursiv::TextOffset at) {
-      return cursiv::lr_match_text<kLr>(src, len, mode, at);
+    cursiv::engine::LrDrive drive = tsection::generated::Lr::kDrive;
+    drive.walk = [](const char* src, cursiv::TextOffset len, std::uint16_t mode,
+                    cursiv::TextOffset at) {
+      return cursiv::engine::lr_match_text<kLr>(src, len, mode, at);
     };
     cursiv::Cst cst;
     g_steps = 0;
-    CHECK(cursiv::lr_parser<kLr>.parse(text, cst, nullptr, &drive, budget));
+    CHECK(cursiv::engine::lr_parser<kLr>.parse(text, cst, nullptr, &drive,
+                                               budget));
     CHECK(!cst.diagnostics().empty());
     steps[k] = g_steps;
     CHECK(g_steps < 60ull * kRuns[k]);
@@ -823,13 +826,13 @@ void the_engines_tell_a_cancelled_scan() {
   const std::string text = open_run(kRuns[2]);
   {
     LrRoom room(text);
-    room.context.stop = cursiv::CancellationPoll(token);
+    room.context.stop = cursiv::engine::CancellationPoll(token);
     std::uint64_t read = 0;
     bool told = false;
     try {
-      (void)cursiv::lr_text_end<kLr>(room.context,
-                                     kLr.mode[section_state<kLr>()], 1,
-                                     room.context.len, read);
+      (void)cursiv::engine::lr_text_end<kLr>(room.context,
+                                             kLr.mode[section_state<kLr>()], 1,
+                                             room.context.len, read);
     } catch (const cursiv::OperationCancelled&) {
       told = true;
     }
@@ -837,12 +840,12 @@ void the_engines_tell_a_cancelled_scan() {
   }
   {
     LlRoom room(text);
-    room.context.stop = cursiv::CancellationPoll(token);
+    room.context.stop = cursiv::engine::CancellationPoll(token);
     bool told = false;
     try {
       cursiv::TextOffset reached = 1;
-      (void)cursiv::ll_text_end<kLl>(room.context, 1, room.context.len,
-                                     reached);
+      (void)cursiv::engine::ll_text_end<kLl>(room.context, 1, room.context.len,
+                                             reached);
     } catch (const cursiv::OperationCancelled&) {
       told = true;
     }
@@ -856,6 +859,7 @@ void the_engines_tell_a_cancelled_scan() {
 // section `<aaaab` reads as `LONG` with its first byte misspelt.
 void the_bound_rereads_what_a_section_state_rereads() {
   using namespace cursiv;
+  using namespace cursiv::engine;
   constexpr const auto& A = tsection::generated::Lr::kTable;
   const std::string text = "<<aaaab>";
   LrRoom room(text);

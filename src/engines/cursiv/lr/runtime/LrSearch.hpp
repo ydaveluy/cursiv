@@ -24,7 +24,7 @@
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The work one cost may spend before a search bounds what its readings
 // still owe: most repairs are found sooner than a bound pays for itself.
@@ -273,4 +273,4 @@ inline void lr_search_open(LrSearch& s, TextOffset from, std::uint64_t least) {
   s.boundedEnd = from;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

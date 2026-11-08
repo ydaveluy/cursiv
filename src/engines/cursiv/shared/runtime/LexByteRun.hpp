@@ -9,7 +9,7 @@
 
 #include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A set's bytes as a table built at compile time: a member is one load.
 // The set is taken by value, so equal sets share one table.
@@ -88,4 +88,4 @@ CURSIV_ALWAYS_INLINE inline std::uint64_t rng8(std::uint64_t w, unsigned lo,
   return ((x + kRep * (0x80u - lo)) ^ (x + kRep * (0x7fu - hi))) & kHi;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

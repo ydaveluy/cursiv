@@ -49,9 +49,11 @@ void a_flag_after_a_nest_writes_the_new_node() {
   // The initial node and every wrapper have their own flag. In particular,
   // the flag surrounding a nest must be checked after its operand.
   const auto ll =
-      cursiv::ast_registry<FlagTurns, cursiv::LlLowering<FlagTurns>>();
+      cursiv::engine::ast_registry<FlagTurns,
+                                   cursiv::engine::LlLowering<FlagTurns>>();
   const auto lr =
-      cursiv::ast_registry<FlagTurns, cursiv::LrLowering<FlagTurns>>();
+      cursiv::engine::ast_registry<FlagTurns,
+                                   cursiv::engine::LrLowering<FlagTurns>>();
   CHECK(ll.fields.size() == 2 && lr.fields.size() == 2);
 }
 
@@ -73,7 +75,7 @@ struct WriteStage {
 };
 
 template <auto E>
-using WriteFault = typename cursiv::detail::writes_once<
+using WriteFault = typename cursiv::engine::writes_once<
     WriteStage, std::remove_cvref_t<decltype(E)>, cursiv::TypeList<>>::fault;
 
 struct ReturnedWrites : cursiv::GrammarSpec {
@@ -95,6 +97,7 @@ struct RecursiveWrites : cursiv::GrammarSpec {
 void writes_follow_the_current_node_across_nests_and_turns() {
   using namespace cursiv;
   using namespace cursiv::detail;
+  using namespace cursiv::engine;
   using Twice = WriteEachTurn<field_tag<&WriteNode::text>>;
   constexpr auto write = assign<&WriteNode::text>(lit<"a">);
   constexpr auto wrap = nest<&WriteNode::inner>(lit<"!">);
@@ -147,7 +150,7 @@ void twin_cycles_read_each_lazy_rule_body_once() {
                      {.kind = cursiv::detail::ImageKind::choice, .count = 2}};
       image.kids = {0, 1};
       std::vector<unsigned> queries(count + 2);
-      cursiv::TwinReader reader(image, [&](unsigned rule) {
+      cursiv::engine::TwinReader reader(image, [&](unsigned rule) {
         ++queries[rule];
         // Reading a body grows the image, as the real lazy pipeline does.
         if (rule == count && !cycle) return cursiv::detail::ImageId{1};
@@ -188,21 +191,21 @@ struct Operator {};
 void nested_template_arguments_remain_qualified() {
   // An already qualified spelling stays so, independently of the compiler's
   // pretty form; GCC's class value also needs expression parentheses.
-  CHECK(cursiv::gen_qualified(
+  CHECK(cursiv::engine::gen_qualified(
             "astgen::Operator<cursiv::Lit<cursiv::str<3>{\"is\"}, false, "
             "cursiv::detail::WordBound>()>") ==
         "::astgen::Operator<(cursiv::Lit<cursiv::str<3>{\"is\"}, false, "
         "cursiv::detail::WordBound>())>");
-  const auto spelling = cursiv::gen_qualified(
+  const auto spelling = cursiv::engine::gen_qualified(
       cursiv::detail::raw_type_name<Operator<cursiv::kw<"is">>>());
   CHECK(spelling.starts_with("::astgen::Operator<"));
   CHECK(spelling.find("detail::WordBound") != std::string::npos);
   CHECK(spelling.find("false, WordBound") == std::string::npos);
   using Repeated = Operator<cursiv::many(cursiv::lit<"x">)>;
   const auto repeated =
-      cursiv::gen_qualified(cursiv::detail::raw_type_name<Repeated>());
+      cursiv::engine::gen_qualified(cursiv::detail::raw_type_name<Repeated>());
   CHECK(repeated.find("kUnbounded") != std::string::npos);
-  const auto nested = cursiv::gen_qualified(
+  const auto nested = cursiv::engine::gen_qualified(
       cursiv::detail::raw_type_name<
           Operator<cursiv::many(cursiv::lit<"x">) + cursiv::lit<"y">>>());
   CHECK(nested.find("kUnbounded") != std::string::npos);
@@ -215,33 +218,36 @@ void nested_template_arguments_remain_qualified() {
                      : "");
   CHECK(repeated.find(maximum) == std::string::npos);
   CHECK(nested.find(maximum) == std::string::npos);
-  CHECK(cursiv::gen_qualified("cursiv::Repeat<0," + maximum +
-                              ",astgen::Token>") ==
+  CHECK(cursiv::engine::gen_qualified("cursiv::Repeat<0," + maximum +
+                                      ",astgen::Token>") ==
         "::cursiv::Repeat<0,::cursiv::kUnbounded,astgen::Token>");
-  CHECK(cursiv::gen_qualified("cursiv::Repeat<" + maximum +
-                              ",7,astgen::Token>") ==
+  CHECK(cursiv::engine::gen_qualified("cursiv::Repeat<" + maximum +
+                                      ",7,astgen::Token>") ==
         "::cursiv::Repeat<" + maximum_literal + ",7,astgen::Token>");
-  CHECK(cursiv::gen_qualified("cursiv::Repeat<2,7,astgen::Token>") ==
+  CHECK(cursiv::engine::gen_qualified("cursiv::Repeat<2,7,astgen::Token>") ==
         "::cursiv::Repeat<2,7,astgen::Token>");
-  CHECK(cursiv::gen_qualified("astgen::Repeat<0," + maximum +
-                              ",astgen::Token>") ==
+  CHECK(cursiv::engine::gen_qualified("astgen::Repeat<0," + maximum +
+                                      ",astgen::Token>") ==
         "::astgen::Repeat<0," + maximum_literal + ",astgen::Token>");
-  CHECK(cursiv::gen_qualified("astgen::cursiv::Repeat<0," + maximum +
-                              ",astgen::Token>") ==
+  CHECK(cursiv::engine::gen_qualified("astgen::cursiv::Repeat<0," + maximum +
+                                      ",astgen::Token>") ==
         "::astgen::cursiv::Repeat<0," + maximum_literal + ",astgen::Token>");
   const std::string quoted =
       "astgen::Literal<\"cursiv::Repeat<0," + maximum + ",Token>\">";
-  CHECK(cursiv::gen_qualified(quoted) == "::" + quoted);
+  CHECK(cursiv::engine::gen_qualified(quoted) == "::" + quoted);
 
-  CHECK(cursiv::gen_qualified(
+  CHECK(cursiv::engine::gen_qualified(
             cursiv::detail::raw_type_name<
                 Operator<std::numeric_limits<long long>::min()>>()) ==
         "::astgen::Operator<(-9223372036854775807ll - 1)>");
-  CHECK(cursiv::gen_qualified("astgen::Operator<-9223372036854775808L>") ==
+  CHECK(cursiv::engine::gen_qualified(
+            "astgen::Operator<-9223372036854775808L>") ==
         "::astgen::Operator<(-9223372036854775807l - 1)>");
-  CHECK(cursiv::gen_qualified("astgen::Operator<18446744073709551615>") ==
-        "::astgen::Operator<18446744073709551615ull>");
-  CHECK(cursiv::gen_widen("\"-9223372036854775808 18446744073709551615\"") ==
+  CHECK(
+      cursiv::engine::gen_qualified("astgen::Operator<18446744073709551615>") ==
+      "::astgen::Operator<18446744073709551615ull>");
+  CHECK(cursiv::engine::gen_widen(
+            "\"-9223372036854775808 18446744073709551615\"") ==
         "\"-9223372036854775808 18446744073709551615\"");
 }
 
@@ -268,19 +274,19 @@ struct G : cursiv::GrammarSpec {
 
 // A registry type is spelled by its index among the grammar's bound types.
 template <class T>
-std::size_t type_of(const cursiv::AstRegistry& registry) {
+std::size_t type_of(const cursiv::engine::AstRegistry& registry) {
   const auto source = std::format(
-      "::cursiv::detail::ast_bound_t<{}, {}>",
-      cursiv::gen_qualified(cursiv::detail::raw_type_name<G>()),
+      "::cursiv::engine::ast_bound_t<{}, {}>",
+      cursiv::engine::gen_qualified(cursiv::detail::raw_type_name<G>()),
       cursiv::detail::index_of<
-          T, cursiv::detail::GrammarBindings<G>::types>::value);
+          T, cursiv::engine::GrammarBindings<G>::types>::value);
   for (std::size_t i = 0; i < registry.types.size(); ++i)
     if (registry.types[i].source == source) return i;
   return registry.types.size();
 }
 
 template <auto P>
-std::size_t field_of(const cursiv::AstRegistry& registry) {
+std::size_t field_of(const cursiv::engine::AstRegistry& registry) {
   using F = cursiv::detail::field_tag<P>;
   const auto owner = type_of<typename F::owner>(registry);
   for (std::size_t i = 0; i < registry.fields.size(); ++i)
@@ -290,10 +296,10 @@ std::size_t field_of(const cursiv::AstRegistry& registry) {
 }
 
 void reflection_only_types_need_no_factory(
-    const cursiv::AstRegistry& registry) {
-  const cursiv::AstEntryTable table;
-  cursiv::AstEmitter emitter(registry, table, "astgen",
-                             "AstGeneration_test.cpp");
+    const cursiv::engine::AstRegistry& registry) {
+  const cursiv::engine::AstEntryTable table;
+  cursiv::engine::AstEmitter emitter(registry, table, "astgen",
+                                     "AstGeneration_test.cpp");
   const auto base = type_of<Base>(registry);
   const auto reference = type_of<RefOnly>(registry);
   const auto derived = type_of<Derived>(registry);
@@ -324,7 +330,7 @@ void reflection_only_types_need_no_factory(
 }
 
 void a_truncated_operator_product_keeps_every_opening() {
-  using cursiv::OperatorWords;
+  using cursiv::engine::OperatorWords;
   auto first = OperatorWords::none(), second = first;
   for (unsigned i = 1; i <= 17; ++i) first.unite(OperatorWords::token(i));
   for (unsigned i = 1000; i < 1017; ++i) second.unite(OperatorWords::token(i));
@@ -341,11 +347,11 @@ void a_truncated_operator_product_keeps_every_opening() {
 }
 
 void long_refused_words_emit_bounded_functions() {
-  cursiv::ByteSet bytes;
+  cursiv::engine::ByteSet bytes;
   bytes.add('a');
-  cursiv::HeadMatcher head;
-  head.words.emplace_back(8192, cursiv::HeadMatcher::Step{bytes});
-  cursiv::ByteSet lead;
+  cursiv::engine::HeadMatcher head;
+  head.words.emplace_back(8192, cursiv::engine::HeadMatcher::Step{bytes});
+  cursiv::engine::ByteSet lead;
   lead.add(0xC3);
   head.words.back().push_back({{}, lead, true});
   // A decoded word boundary needs no separate scalar pool.
@@ -360,38 +366,38 @@ void long_refused_words_emit_bounded_functions() {
   CHECK(depth == 0 && deepest < 16);
 }
 
-struct LexCfg : cursiv::LowerPools {
+struct LexCfg : cursiv::engine::LowerPools {
   std::uint16_t nterms = 0;
-  cursiv::ByteSet wordBytes;
+  cursiv::engine::ByteSet wordBytes;
 };
 
 void named_heads_compare_the_scalars_after_the_same_lead_byte() {
   LexCfg g;
   g.nterms = 2;
   g.terms[1] = {};
-  cursiv::ByteSet a;
+  cursiv::engine::ByteSet a;
   a.add('a');
-  const auto plain = cursiv::lex_intern_set(g, a);
-  cursiv::LexCodePoints e9, ea;
+  const auto plain = cursiv::engine::lex_intern_set(g, a);
+  cursiv::engine::LexCodePoints e9, ea;
   e9.ranges.push_back({0xE9, 0xE9});
   ea.ranges.push_back({0xEA, 0xEA});
-  const auto boundA = cursiv::lex_intern_cps_bound(g, a, e9);
-  const auto boundB = cursiv::lex_intern_cps_bound(g, a, ea);
+  const auto boundA = cursiv::engine::lex_intern_cps_bound(g, a, e9);
+  const auto boundB = cursiv::engine::lex_intern_cps_bound(g, a, ea);
   CHECK(g.sets[boundA] == g.sets[boundB]);
-  CHECK(cursiv::lex_decode_bytes(g, boundA) ==
-        cursiv::lex_decode_bytes(g, boundB));
-  const auto ch = g.push_lex({cursiv::LexKind::chars, plain});
+  CHECK(cursiv::engine::lex_decode_bytes(g, boundA) ==
+        cursiv::engine::lex_decode_bytes(g, boundB));
+  const auto ch = g.push_lex({cursiv::engine::LexKind::chars, plain});
   const auto body = [&](std::uint16_t bound) {
     const auto classes = g.push_lex_kid(bound);
-    const auto guard =
-        g.push_lex({cursiv::LexKind::nguard, cursiv::kNoSet, classes, 1});
+    const auto guard = g.push_lex(
+        {cursiv::engine::LexKind::nguard, cursiv::engine::kNoSet, classes, 1});
     const auto base = g.push_lex_kid(ch);
     g.push_lex_kid(guard);
-    return g.push_lex({cursiv::LexKind::seq, base, 2});
+    return g.push_lex({cursiv::engine::LexKind::seq, base, 2});
   };
   const auto rootA = body(boundA), rootB = body(boundB);
   g.termBuild[1].lex = rootB;
-  const cursiv::NamedHead head(g);
+  const cursiv::engine::NamedHead head(g);
   CHECK(head.read(rootB, 1) == 2);
   CHECK(head.read(rootA, 1) == 1);
   // Equal scalar lists at different offsets still describe the same class.
@@ -402,31 +408,31 @@ void named_heads_compare_the_scalars_after_the_same_lead_byte() {
   g.setDecode[twin] = g.setDecode[boundB];
   g.setScalars[twin] = scalar << 16 | 1u;
   const auto rootTwin = body(twin);
-  CHECK(cursiv::NamedHead(g).read(rootTwin, 1) == 2);
+  CHECK(cursiv::engine::NamedHead(g).read(rootTwin, 1) == 2);
 }
 
 void stray_expansion_keeps_predicate_cycles_and_their_exits() {
   LexCfg g;
-  cursiv::ByteSet lead, rest, edge;
+  cursiv::engine::ByteSet lead, rest, edge;
   lead.add(0xC2, 0xDF);
   rest.add(0x80, 0xBF);
   edge = rest;
   edge.add('b');
-  const auto leadSet = cursiv::lex_intern_set(g, lead);
-  const auto restSet = cursiv::lex_intern_set(g, rest);
-  const auto edgeSet = cursiv::lex_intern_set(g, edge);
+  const auto leadSet = cursiv::engine::lex_intern_set(g, lead);
+  const auto restSet = cursiv::engine::lex_intern_set(g, rest);
+  const auto edgeSet = cursiv::engine::lex_intern_set(g, edge);
   const auto classes = g.push_lex_kid(restSet);
-  const auto word = g.push_lex({.kind = cursiv::LexKind::nguard,
-                                .a = cursiv::kNoSet,
+  const auto word = g.push_lex({.kind = cursiv::engine::LexKind::nguard,
+                                .a = cursiv::engine::kNoSet,
                                 .b = classes,
                                 .min = 1});
-  cursiv::LexNfaPool n;
+  cursiv::engine::LexNfaPool n;
   const int cycle = n.hole(), match = n.match(1);
   int resumed = cycle;
   constexpr unsigned depth = 8000;
   for (unsigned i = 0; i < depth; ++i) {
     const int relay = static_cast<int>(n.relays.size());
-    cursiv::LexRelayBuild assertion;
+    cursiv::engine::LexRelayBuild assertion;
     assertion.row.predicate = 0;
     assertion.resumeOut = resumed;
     n.relays.push_back(assertion);
@@ -436,7 +442,7 @@ void stray_expansion_keeps_predicate_cycles_and_their_exits() {
   const int exits = n.split(match, reads);
   n.s[cycle].t1 = n.split(resumed, exits);
   const int start = n.chars_stray(leadSet, word, cycle);
-  cursiv::LexStrayExpansion(n, g).run();
+  cursiv::engine::LexStrayExpansion(n, g).run();
   CHECK(!g.lowerFail());
   CHECK(n.relays.size() == 2 * depth);
   // Follow successful predicates as zero-width edges, including the loop.
@@ -479,11 +485,11 @@ void backtracking_modes_require_an_accepted_prefix_and_a_failed_cycle() {
   a.nmodes = 7;
   for (unsigned s = 0; s < a.ndfa; ++s) {
     a.dfaAccept[s] = 0;
-    a.dfaBound[s] = cursiv::kNoSet;
-    a.dfaRelay[s] = cursiv::kNoRelay;
+    a.dfaBound[s] = cursiv::engine::kNoSet;
+    a.dfaRelay[s] = cursiv::engine::kNoRelay;
     if constexpr (requires { a.lexChecks; }) a.lexChecks[s] = 0;
     for (unsigned c = 0; c < a.ncls; ++c)
-      a.dfaNext[s * a.ncls + c] = cursiv::kDeadState;
+      a.dfaNext[s * a.ncls + c] = cursiv::engine::kDeadState;
   }
   const auto edge = [&](unsigned from, unsigned c, std::uint16_t to) {
     a.dfaNext[from * a.ncls + c] = to;
@@ -511,7 +517,7 @@ void backtracking_modes_require_an_accepted_prefix_and_a_failed_cycle() {
   for (unsigned m = 0; m < a.nmodes; ++m) a.modeStart[m] = starts[m];
   const std::vector<std::uint8_t> want{0, 0, 1, 1, 0, 0, 0};
   std::vector<std::uint8_t> cycles{42};
-  CHECK(cursiv::lex_backtrack_modes(a, &cycles) == want);
+  CHECK(cursiv::engine::lex_backtrack_modes(a, &cycles) == want);
   std::vector<std::uint8_t> wantCycles(a.ndfa, 0);
   for (unsigned state : {3u, 7u, 11u, 12u}) wantCycles[state] = 1;
   CHECK(cycles == wantCycles);
@@ -524,10 +530,10 @@ void backtracking_modes_require_an_accepted_prefix_and_a_failed_cycle() {
   a.dfaRelay[7] = 0;
   auto relayed = want;
   relayed[2] = 0;
-  CHECK(cursiv::lex_backtrack_modes(a, &cycles) == relayed);
+  CHECK(cursiv::engine::lex_backtrack_modes(a, &cycles) == relayed);
   wantCycles[7] = 0;
   CHECK(cycles == wantCycles);
-  a.dfaRelay[7] = cursiv::kNoRelay;
+  a.dfaRelay[7] = cursiv::engine::kNoRelay;
   if constexpr (requires { a.nrelays; })
     a.nrelays = 0;
   else
@@ -538,11 +544,11 @@ void backtracking_modes_require_an_accepted_prefix_and_a_failed_cycle() {
   a.modeHeads[2].set(1);
   auto refusing = want;
   refusing[2] = 0;
-  CHECK(cursiv::lex_backtrack_modes(a, &cycles) == refusing);
+  CHECK(cursiv::engine::lex_backtrack_modes(a, &cycles) == refusing);
   wantCycles[7] = 1;
   CHECK(cycles == wantCycles);
   a.modeHeads[3].set(1);
-  CHECK(cursiv::lex_backtrack_modes(a, &cycles).empty());
+  CHECK(cursiv::engine::lex_backtrack_modes(a, &cycles).empty());
   CHECK(cycles.empty());
   a.modeHeads.clear();
 
@@ -551,23 +557,23 @@ void backtracking_modes_require_an_accepted_prefix_and_a_failed_cycle() {
   a.dfaBound[1] = 0;
   auto bounded = want;
   bounded[0] = 1;
-  CHECK(cursiv::lex_backtrack_modes(a) == bounded);
-  a.dfaBound[1] = cursiv::kNoSet;
+  CHECK(cursiv::engine::lex_backtrack_modes(a) == bounded);
+  a.dfaBound[1] = cursiv::engine::kNoSet;
   if constexpr (requires { a.lexChecks; }) {
     a.lexChecks[1] = 1;
-    CHECK(cursiv::lex_backtrack_modes(a) == bounded);
+    CHECK(cursiv::engine::lex_backtrack_modes(a) == bounded);
     a.lexChecks[1] = 0;
   }
   a.dfaBound[13] = 0;
   auto periodic = want;
   periodic[6] = 1;
-  CHECK(cursiv::lex_backtrack_modes(a) == periodic);
-  a.dfaBound[13] = cursiv::kNoSet;
+  CHECK(cursiv::engine::lex_backtrack_modes(a) == periodic);
+  a.dfaBound[13] = cursiv::engine::kNoSet;
   a.dfaAccept[6] = a.dfaAccept[10] = 0;
   // No prefix before the two remaining failed cycles can be retained.
   // An unaffected table emits no mode metadata or cache specialization.
   cycles = {42};
-  CHECK(cursiv::lex_backtrack_modes(a, &cycles).empty());
+  CHECK(cursiv::engine::lex_backtrack_modes(a, &cycles).empty());
   CHECK(cycles.empty());
 }
 
@@ -586,33 +592,34 @@ void backtracking_analysis_handles_long_paths_with_linear_work() {
     CountedBacktrackGraph a;
     a.ndfa = count;
     a.dfaAccept.assign(count, 0);
-    a.dfaBound.assign(count, cursiv::kNoSet);
+    a.dfaBound.assign(count, cursiv::engine::kNoSet);
     a.dfaAccept[1] = 1;
     a.modeStart = {0, 2};
-    CHECK((cursiv::lex_backtrack_modes(a) == std::vector<std::uint8_t>{1, 0}));
+    CHECK((cursiv::engine::lex_backtrack_modes(a) ==
+           std::vector<std::uint8_t>{1, 0}));
     CHECK(a.steps <= 4u * std::uint64_t{count} * a.ncls);
   }
 }
 
 void a_longer_mode_cannot_consume_the_last_slot_twice() {
   LexCfg g;
-  cursiv::LexModes modes(g);
+  cursiv::engine::LexModes modes(g);
   constexpr unsigned count = 65534;
   modes.set.resize(count);
   modes.longer.resize(count);
-  modes.longerMode.resize(count, cursiv::kNoMode);
+  modes.longerMode.resize(count, cursiv::engine::kNoMode);
   modes.tag.resize(count);
   for (unsigned i = 0; i < count; ++i) modes.tag[i] = i + 1;
-  cursiv::DynSet want, beyond;
+  cursiv::engine::DynSet want, beyond;
   want.set(1);
   beyond.set(2);
   bool refused = false;
   try {
     modes.intern(want, 0, beyond);
-  } catch (const cursiv::LowerRefused& f) {
-    refused = f.why == cursiv::LowerFail::tokenGraphTooLarge;
+  } catch (const cursiv::engine::LowerRefused& f) {
+    refused = f.why == cursiv::engine::LowerFail::tokenGraphTooLarge;
   }
-  CHECK(refused && modes.set.size() == cursiv::kNoMode);
+  CHECK(refused && modes.set.size() == cursiv::engine::kNoMode);
   CHECK(modes.intern(beyond) == count);
 }
 
@@ -624,18 +631,20 @@ void ast_generation_cases_run() {
   astgen::twin_cycles_read_each_lazy_rule_body_once();
   astgen::nested_template_arguments_remain_qualified();
   astgen::reflection_only_types_need_no_factory(
-      cursiv::ast_registry<astgen::G, cursiv::LrLowering<astgen::G>>());
+      cursiv::engine::ast_registry<astgen::G,
+                                   cursiv::engine::LrLowering<astgen::G>>());
   astgen::reflection_only_types_need_no_factory(
-      cursiv::ast_registry<astgen::G, cursiv::LlLowering<astgen::G>>());
+      cursiv::engine::ast_registry<astgen::G,
+                                   cursiv::engine::LlLowering<astgen::G>>());
   astgen::a_truncated_operator_product_keeps_every_opening();
   astgen::long_refused_words_emit_bounded_functions();
   astgen::named_heads_compare_the_scalars_after_the_same_lead_byte();
   astgen::a_longer_mode_cannot_consume_the_last_slot_twice();
   astgen::stray_expansion_keeps_predicate_cycles_and_their_exits();
   astgen::backtracking_modes_require_an_accepted_prefix_and_a_failed_cycle<
-      cursiv::LlBuiltProgram>();
+      cursiv::engine::LlBuiltProgram>();
   astgen::backtracking_modes_require_an_accepted_prefix_and_a_failed_cycle<
-      cursiv::LrBuildTable>();
+      cursiv::engine::LrBuildTable>();
   astgen::backtracking_analysis_handles_long_paths_with_linear_work();
 }
 
@@ -664,36 +673,37 @@ void run() {
   fs::create_directories(dir);
   const std::string path = (dir / "Table.hpp").string();
 
-  CHECK(cursiv::write_source(path, "one"));
+  CHECK(cursiv::engine::write_source(path, "one"));
   CHECK(seen(path) == "one");
 
   // Unmoved: the file keeps the time it was written at.
   fs::last_write_time(path, fs::last_write_time(path) - std::chrono::hours(1));
   const auto then = fs::last_write_time(path);
-  CHECK(cursiv::write_source(path, "one"));
+  CHECK(cursiv::engine::write_source(path, "one"));
   CHECK(fs::last_write_time(path) == then);
 
   // Moved, at the same size and at another.
-  CHECK(cursiv::write_source(path, "two"));
+  CHECK(cursiv::engine::write_source(path, "two"));
   CHECK(seen(path) == "two" && fs::last_write_time(path) != then);
-  CHECK(cursiv::write_source(path, "three and more"));
+  CHECK(cursiv::engine::write_source(path, "three and more"));
   CHECK(seen(path) == "three and more");
-  CHECK(cursiv::write_source(path, "short"));
+  CHECK(cursiv::engine::write_source(path, "short"));
   CHECK(seen(path) == "short");
 
   // Empty text, over a file and over none; and bytes a text reader would fold.
-  CHECK(cursiv::write_source(path, ""));
+  CHECK(cursiv::engine::write_source(path, ""));
   CHECK(fs::file_size(path) == 0);
-  CHECK(cursiv::write_source(path, ""));
+  CHECK(cursiv::engine::write_source(path, ""));
   const std::string folded("a\r\nb\0c", 6);
-  CHECK(cursiv::write_source(path, folded));
-  CHECK(cursiv::write_source(path, folded));
+  CHECK(cursiv::engine::write_source(path, folded));
+  CHECK(cursiv::engine::write_source(path, folded));
   CHECK(seen(path) == folded);
-  CHECK(cursiv::write_source((dir / "New.hpp").string(), ""));
+  CHECK(cursiv::engine::write_source((dir / "New.hpp").string(), ""));
   CHECK(fs::exists(dir / "New.hpp"));
 
   // A path that cannot be written says so.
-  CHECK(!cursiv::write_source((dir / "missing" / "Table.hpp").string(), "x"));
+  CHECK(!cursiv::engine::write_source((dir / "missing" / "Table.hpp").string(),
+                                      "x"));
 
   fs::remove_all(dir);
 }

@@ -15,7 +15,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexOwedRows {
   std::vector<std::uint8_t> bodies;
@@ -137,4 +137,4 @@ struct LexOwedView {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

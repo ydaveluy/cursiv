@@ -21,7 +21,7 @@
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The positions a simulation visits that one unit of work pays for.
 inline constexpr std::uint64_t kLlVisitsPerWork = 4;
@@ -142,4 +142,4 @@ struct LlSearchLaid {
   std::uint64_t handed;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

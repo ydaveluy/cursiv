@@ -7,7 +7,7 @@
 #include "cursiv/shared/gen/set_dedup.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct SetPool {
   std::vector<DynSet> sets{};
@@ -21,4 +21,4 @@ struct SetPool {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

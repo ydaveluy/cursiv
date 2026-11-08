@@ -5,7 +5,7 @@
 
 #include <string_view>
 
-namespace cursiv::unicode {
+namespace cursiv::unicode::detail {
 
 // The general categories, their majors, and the identifier, space and
 // alphabetic properties: a class of code points is a set of these.
@@ -52,8 +52,6 @@ enum class Property : unsigned {
   count
 };
 
-namespace detail {
-
 // For a dump alone: what a property is called.
 inline constexpr std::string_view kNames[] = {
     "L",
@@ -97,6 +95,4 @@ inline constexpr std::string_view kNames[] = {
     "Alphabetic",
 };
 
-}  // namespace detail
-
-}  // namespace cursiv::unicode
+}  // namespace cursiv::unicode::detail

@@ -10,7 +10,7 @@
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // FIRST over the nullable prefix of a body, and the nullable set.
 struct LrFirstSets {
@@ -179,4 +179,4 @@ inline LrFirstSets lr_first_sets(const LrBuildCfg& g) {
   return fs;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

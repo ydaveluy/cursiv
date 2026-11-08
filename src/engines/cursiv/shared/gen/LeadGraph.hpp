@@ -9,10 +9,11 @@
 #include "cursiv/grammar/ExprShape.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/expr.hpp"
-#include "cursiv/utils/typelist.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/utils/StrongComponents.hpp"
+#include "cursiv/utils/typelist.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // Only a repetition that may take no turn lets the next element start too.
 template <class E>
@@ -97,4 +98,4 @@ struct LeadGraph<S, TypeList<Rs...>> {
   using component = typename keep<strong.component[at<A>], rules>::type;
 };
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

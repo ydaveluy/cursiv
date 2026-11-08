@@ -26,7 +26,7 @@
 #include "cursiv/shared/runtime/LexSuffixSession.hpp"
 #include "cursiv/shared/runtime/StampedGrammar.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The document ends where the entry rule does, and what stands between the
 // last token and the end is trivia the tree keeps.
@@ -108,4 +108,4 @@ class LlLanguageParser final : public Parser {
   RepairBudget _budget;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

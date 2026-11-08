@@ -8,9 +8,6 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "cursiv/text/TextOffset.hpp"
-#include "cursiv/utils/Utf8.hpp"
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/shared/runtime/LexBoundary.hpp"
 #include "cursiv/shared/runtime/LexRelayRun.hpp"
 #include "cursiv/shared/runtime/LexWalk.hpp"
@@ -19,8 +16,12 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/Utf8.hpp"
+#include "cursiv/utils/macros.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& T>
 struct LexTape {
@@ -192,7 +193,7 @@ inline bool lex_reserves(std::uint16_t s, const char* src, TextOffset at,
       if (at >= len) return true;
       const auto& cfg = LexTape<T>::cfg;
       const auto w = cfg.wordRanges.size() != 0
-                         ? static_cast<TextOffset>(detail::utf8_width(src[at]))
+                         ? static_cast<TextOffset>(utf8_width(src[at]))
                          : TextOffset{1};
       inspected = std::max(inspected, w < len - at ? at + w : len);
       return !lex_boundary(cfg).word_at(src, at, len);
@@ -385,4 +386,4 @@ CURSIV_ALWAYS_INLINE inline Scan lex_match(const Tape& tape, const char* src,
       [&](std::uint16_t more) { return lex_walk(tape, src, len, more, from); });
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

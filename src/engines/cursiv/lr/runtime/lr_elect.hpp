@@ -10,7 +10,7 @@
 
 #include "cursiv/lr/table/LrColdTables.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr std::uint32_t kLrNoRun = ~std::uint32_t{0};
 
@@ -135,4 +135,4 @@ LrElectWords lr_elect_words(std::uint16_t prod,
   return w;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

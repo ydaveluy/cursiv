@@ -10,7 +10,7 @@
 #include "cursiv/shared/gen/write_source.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 namespace {
 
@@ -123,7 +123,7 @@ namespace )",
             ns, R"( {
 
 ::std::unique_ptr<::cursiv::Parser> create_parser() {
-  return ::std::make_unique<::cursiv::)",
+  return ::std::make_unique<::cursiv::engine::)",
             parser, R"(<kTable>>(
       kGrammarMetaData, kAstActions, kDrive);
 }
@@ -197,4 +197,4 @@ GenCode write_common_artifacts(const std::string& dir,
   return GenCode::ok;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

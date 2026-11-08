@@ -9,8 +9,8 @@
 
 namespace {
 
-using cursiv::PredicateCursor;
-using cursiv::PredicateState;
+using cursiv::engine::PredicateCursor;
+using cursiv::engine::PredicateState;
 
 PredicateCursor at(cursiv::TextOffset p) { return PredicateCursor{p, p}; }
 
@@ -66,17 +66,17 @@ void a_moved_from_set_stays_within_its_storage() {
 }
 
 void a_machine_hands_back_the_frame_it_opens() {
-  cursiv::LexicalMachine m;
+  cursiv::engine::LexicalMachine m;
   auto& f = m.enter(7u, {});
   CHECK(&f == &m.frame() && f.node == 7u);
 }
 
 void tokens_compare_by_span_and_symbol_not_mode() {
-  cursiv::Token a{1, 2, 3, 0}, b{1, 2, 3, 4};
+  cursiv::engine::Token a{1, 2, 3, 0}, b{1, 2, 3, 4};
   CHECK(a == b);
   b.sym = 4;
   CHECK(!(a == b));
-  static_assert(cursiv::kBacktrackTail == 64);
+  static_assert(cursiv::engine::kBacktrackTail == 64);
 }
 
 }  // namespace

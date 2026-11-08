@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // "Names no chain" / "names no entry", one value for every column below.
 inline constexpr std::uint16_t kNoRow = 0xFFFFu;
@@ -25,4 +25,4 @@ enum class WriteKind : std::uint8_t {
   convert,
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

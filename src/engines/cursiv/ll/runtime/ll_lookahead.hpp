@@ -20,7 +20,7 @@
 #include "cursiv/ll/table/LlTable.hpp"
 #include "cursiv/shared/runtime/LexMatch.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What a lookahead may read next, as a mask over the terminals. The text is
 // read through it rather than under an alphabet of its own: one tokenisation
@@ -612,4 +612,4 @@ inline bool ll_look(const LlContext& c, TextOffset& from,
   return end != p && !out.empty();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -14,11 +14,12 @@
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/GrammarUtils.hpp"
 #include "cursiv/grammar/expr.hpp"
-#include "cursiv/utils/TypeName.hpp"
 #include "cursiv/shared/gen/LeadGraph.hpp"
 #include "cursiv/shared/gen/reached.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/utils/TypeName.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 template <class I, std::size_t K, bool Climb = false>
 struct InfixLevel;
@@ -163,19 +164,24 @@ struct LeadGraphStage : S {
   template <class R>
   using rule = typename Rule<S, graph, R>::type;
   template <class R>
-  using body = typename ov::stage_body<rule<R>>::type;
+  using body = typename detail::ov::stage_body<rule<R>>::type;
   using entry = rule<typename S::entry>;
 };
 
+}  // namespace cursiv::engine
+
+namespace cursiv::detail {
+
 template <class I, std::size_t K, bool Climb>
-struct home_of<InfixLevel<I, K, Climb>> : home_of<I> {};
+struct home_of<engine::InfixLevel<I, K, Climb>> : home_of<I> {};
 template <class I, std::size_t K>
-struct home_of<InfixRun<I, K>> : home_of<I> {};
+struct home_of<engine::InfixRun<I, K>> : home_of<I> {};
 template <class I, std::size_t K, bool Climb>
-inline constexpr std::string_view kTypeNameView<InfixLevel<I, K, Climb>> =
-    type_name<declared_of_t<I>>();
+inline constexpr std::string_view
+    kTypeNameView<engine::InfixLevel<I, K, Climb>> =
+        type_name<declared_of_t<I>>();
 template <class I, std::size_t K>
-inline constexpr std::string_view kTypeNameView<InfixRun<I, K>> =
+inline constexpr std::string_view kTypeNameView<engine::InfixRun<I, K>> =
     type_name<declared_of_t<I>>();
 
 }  // namespace cursiv::detail

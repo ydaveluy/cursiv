@@ -259,7 +259,8 @@ void the_tables_read_back() {
 
   // The converter of NUM into the variant's int64 alternative, and the default
   // path into a reference's name: two different entries.
-  CHECK(cursiv::ast_registry<tab::hier::G, cursiv::LrLowering<tab::hier::G>>()
+  CHECK(cursiv::engine::ast_registry<tab::hier::G,
+                                     cursiv::engine::LrLowering<tab::hier::G>>()
             .convCount >= 2);
 
   // Built types and the pointee of a node member, each once.
@@ -409,7 +410,7 @@ using namespace tab::enm;
 
 // The reflective default: a plain text rule writes the enum with no converter
 // at all.
-static_assert(cursiv::has_default_convert<Vis>);
+static_assert(cursiv::detail::has_default_convert<Vis>);
 
 void an_enum_is_a_plain_value_member() {
   const cursiv::DefaultAstReflection& r = refl();
@@ -419,7 +420,8 @@ void an_enum_is_a_plain_value_member() {
   // It converts through its own entry: (VIS's converter, Vis) is not
   // (default path, string_view), and the converter-less spelling of the same
   // member is one entry more -- (default path, Vis).
-  CHECK(cursiv::ast_registry<tab::enm::G, cursiv::LrLowering<tab::enm::G>>()
+  CHECK(cursiv::engine::ast_registry<tab::enm::G,
+                                     cursiv::engine::LrLowering<tab::enm::G>>()
             .convCount == 3);
 }
 
@@ -434,7 +436,8 @@ void no_directive_no_columns() {
       reflection_of<&tab::bare::generated::G::create_ast_reflection>();
   CHECK(r.metaData().fieldCount == 0);
   CHECK(r.metaData().typeCount == 1);
-  CHECK(cursiv::ast_registry<tab::bare::G, cursiv::LrLowering<tab::bare::G>>()
+  CHECK(cursiv::engine::ast_registry<tab::bare::G,
+                                     cursiv::engine::LrLowering<tab::bare::G>>()
             .convCount == 0);
   CHECK(r.typeIndexOf(kTag<Node>) != cursiv::kNoType);
 }
@@ -481,7 +484,7 @@ void structural_errors() {
   // A tree that never parsed: nothing to materialise.
   cursiv::Cst empty;
   cursiv::ParseResult none =
-      cursiv::AstReducer::build<tab::generated::All::kTable.stamp>(
+      cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
           tab::generated::All::kAstActions, std::move(empty));
   CHECK(!none && none.error == cursiv::AstBuildError::no_entry);
   CHECK(none.value == nullptr);
@@ -503,7 +506,7 @@ void structural_errors() {
 // root that reduces to nothing (the raw, never-written floor of the
 // reduction stack).
 void a_hand_built_entry_is_answered_not_trusted() {
-  const cursiv::AstActions& acts = tab::generated::All::kAstActions;
+  const cursiv::engine::AstActions& acts = tab::generated::All::kAstActions;
   // (1) Out of range. The public wrapper refuses to bind a root that names no
   // record, so the tape comes back with no entry at all rather than with a
   // wild one.
@@ -517,7 +520,7 @@ void a_hand_built_entry_is_answered_not_trusted() {
     }
     CHECK(!cst.has_entry());
     cursiv::ParseResult r =
-        cursiv::AstReducer::build<tab::generated::All::kTable.stamp>(
+        cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
             acts, std::move(cst));
     CHECK(!r && r.error == cursiv::AstBuildError::no_entry);
     CHECK(r.value == nullptr);
@@ -535,7 +538,7 @@ void a_hand_built_entry_is_answered_not_trusted() {
     }
     CHECK(cst.has_entry());
     cursiv::ParseResult r =
-        cursiv::AstReducer::build<tab::generated::All::kTable.stamp>(
+        cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
             acts, std::move(cst));
     CHECK(!r && r.error == cursiv::AstBuildError::malformed_cst);
     CHECK(r.value == nullptr);
@@ -552,7 +555,7 @@ void a_hand_built_entry_is_answered_not_trusted() {
     }
     CHECK(cst.has_entry());
     cursiv::ParseResult r =
-        cursiv::AstReducer::build<tab::generated::All::kTable.stamp>(
+        cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
             acts, std::move(cst));
     CHECK(!r && r.error == cursiv::AstBuildError::malformed_cst);
     CHECK(r.value == nullptr);
@@ -721,40 +724,41 @@ void assigning_again_keeps_one_reference_site() {
   // A grammar writes a scalar once, so a second write is the builder's own to
   // keep whole: the site stays, the text follows it, and a refused conversion
   // leaves the value in place.
-  cursiv::AstBuildCtx ctx;
+  cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &r.cst();
   ctx.refs = &r.references->handles;
   ctx.home = r.references.get();
-  const cursiv::Pending again{
+  const cursiv::engine::Pending again{
       .root = cursiv::detail::RefAccess::node_id(rec->also[0]),
       .text = cursiv::detail::RefAccess::node_id(rec->also[0]),
       .kind = cursiv::ActKind::assign};
-  const cursiv::detail::ConvSlot text{
-      .fn = [](cursiv::AstBuildCtx& c, cursiv::NodeId id, void* out) {
+  const cursiv::engine::ConvSlot text{
+      .fn = [](cursiv::engine::AstBuildCtx& c, cursiv::NodeId id, void* out) {
         *static_cast<cursiv::AstNode::string_view*>(out) = c.cst->text(id);
         return true;
       }};
-  const cursiv::detail::ConvSlot refuses{
-      .fn = [](cursiv::AstBuildCtx&, cursiv::NodeId, void*) { return false; }};
+  const cursiv::engine::ConvSlot refuses{.fn = [](cursiv::engine::AstBuildCtx&,
+                                                  cursiv::NodeId,
+                                                  void*) { return false; }};
   const auto one = field_of(refl(), kTag<Rec>, "one");
-  cursiv::write_into<cursiv::detail::field_tag<&Rec::one>>(
+  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::one>>(
       ctx, again, rec, &text, one, cursiv::ActKind::assign, 0);
   CHECK(rec->one.refText == "ee" &&
         cursiv::detail::RefAccess::handle(rec->one) == 0);
   CHECK(r.references->handles.size() == 4);
-  cursiv::write_into<cursiv::detail::field_tag<&Rec::one>>(
+  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::one>>(
       ctx, again, rec, &refuses, one, cursiv::ActKind::assign, 0);
   CHECK(rec->one.refText == "ee" &&
         cursiv::detail::RefAccess::handle(rec->one) == 0);
   CHECK(r.references->handles.size() == 4);
   // An optional keeps its site the same way.
   const auto held = field_of(refl(), kTag<Rec>, "maybe");
-  cursiv::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
+  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
       ctx, again, rec, &text, held, cursiv::ActKind::assign, 0);
   CHECK(rec->maybe->refText == "ee" &&
         cursiv::detail::RefAccess::handle(*rec->maybe) == 1);
   CHECK(r.references->handles.size() == 4);
-  cursiv::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
+  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
       ctx, again, rec, &refuses, held, cursiv::ActKind::assign, 0);
   CHECK(rec->maybe->refText == "ee" && r.references->handles.size() == 4);
 }
@@ -777,29 +781,33 @@ void a_write_replaces_the_node_of(auto hold) {
   Target after;
   hold(holder, &before);
   before.parent = &holder;
-  const cursiv::detail::ConvSlot refuses{
-      .fn = [](cursiv::AstBuildCtx&, cursiv::NodeId, void*) { return false; }};
-  cursiv::AstBuildCtx ctx;
+  const cursiv::engine::ConvSlot refuses{.fn = [](cursiv::engine::AstBuildCtx&,
+                                                  cursiv::NodeId,
+                                                  void*) { return false; }};
+  cursiv::engine::AstBuildCtx ctx;
   if constexpr (F::nature == cursiv::detail::FieldNature::variant) {
-    const cursiv::Pending value{.kind = cursiv::ActKind::assign};
-    cursiv::write_into<F>(ctx, value, &holder, &refuses, 0, value.kind, 0);
+    const cursiv::engine::Pending value{.kind = cursiv::ActKind::assign};
+    cursiv::engine::write_into<F>(ctx, value, &holder, &refuses, 0, value.kind,
+                                  0);
     CHECK(before.parent == &holder && !ctx.detached);
   }
-  const cursiv::Pending node{.kind = cursiv::ActKind::assign, .value = &after};
-  cursiv::write_into<F>(ctx, node, &holder, nullptr, 0, node.kind, 0);
+  const cursiv::engine::Pending node{.kind = cursiv::ActKind::assign,
+                                     .value = &after};
+  cursiv::engine::write_into<F>(ctx, node, &holder, nullptr, 0, node.kind, 0);
   CHECK(before.parent == nullptr && ctx.detached);
   CHECK(after.parent == &holder && ctx.attached == 1);
   if constexpr (F::nature == cursiv::detail::FieldNature::variant) {
     // A value replaces it too.
     ctx.detached = false;
-    const cursiv::detail::ConvSlot number{
-        .fn = [](cursiv::AstBuildCtx&, cursiv::NodeId, void* out) {
+    const cursiv::engine::ConvSlot number{
+        .fn = [](cursiv::engine::AstBuildCtx&, cursiv::NodeId, void* out) {
           cursiv::detail::place<std::int64_t>(
               *static_cast<typename F::member*>(out), std::int64_t{7});
           return true;
         }};
-    const cursiv::Pending value{.kind = cursiv::ActKind::assign};
-    cursiv::write_into<F>(ctx, value, &holder, &number, 0, value.kind, 0);
+    const cursiv::engine::Pending value{.kind = cursiv::ActKind::assign};
+    cursiv::engine::write_into<F>(ctx, value, &holder, &number, 0, value.kind,
+                                  0);
     CHECK(after.parent == nullptr && ctx.detached);
   }
 }
@@ -826,25 +834,25 @@ void a_copied_reference_cannot_claim_another_slots_handle() {
   copied.maybe = rec->maybe;
   cursiv::detail::RefAccess::state(copied.one) = cursiv::RefState::Resolved;
   cursiv::detail::RefAccess::state(*copied.maybe) = cursiv::RefState::Resolved;
-  cursiv::AstBuildCtx ctx;
+  cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &r.cst();
   ctx.refs = &r.references->handles;
   ctx.home = r.references.get();
-  const cursiv::Pending p{
+  const cursiv::engine::Pending p{
       .root = cursiv::detail::RefAccess::node_id(rec->also[0]),
       .text = cursiv::detail::RefAccess::node_id(rec->also[0]),
       .kind = cursiv::ActKind::assign};
-  const cursiv::detail::ConvSlot conv{
-      .fn = [](cursiv::AstBuildCtx& c, cursiv::NodeId id, void* out) {
+  const cursiv::engine::ConvSlot conv{
+      .fn = [](cursiv::engine::AstBuildCtx& c, cursiv::NodeId id, void* out) {
         *static_cast<cursiv::AstNode::string_view*>(out) = c.cst->text(id);
         return true;
       }};
   const auto one = field_of(refl(), kTag<Rec>, "one");
   const auto maybe = field_of(refl(), kTag<Rec>, "maybe");
   const auto first = r.references->handles.size();
-  cursiv::write_into<cursiv::detail::field_tag<&Rec::one>>(
+  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::one>>(
       ctx, p, &copied, &conv, one, cursiv::ActKind::assign, 0);
-  cursiv::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
+  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
       ctx, p, &copied, &conv, maybe, cursiv::ActKind::assign, 0);
   CHECK(r.references->handles.size() == first + 2);
   CHECK(cursiv::detail::RefAccess::handle(copied.one) == first &&
@@ -897,7 +905,7 @@ using namespace tab::exact;
 // validation counted, so the two cannot disagree.
 template <class R>
 using slot_of =
-    typename cursiv::detail::conv_alt<decltype(Val::v),
+    typename cursiv::engine::conv_alt<decltype(Val::v),
                                       cursiv::detail::pay_text<R>>::type;
 static_assert(std::is_same_v<slot_of<G::BOOL>, bool>);
 static_assert(std::is_same_v<slot_of<G::NUM>, double>);
@@ -908,7 +916,7 @@ static_assert(std::is_same_v<slot_of<G::PCT>, double>);
 
 // A payload no alternative names exactly still goes through the scan: int8
 // is constructible into `float64` and into nothing else here, so it resolves.
-static_assert(std::is_same_v<typename cursiv::detail::conv_alt<
+static_assert(std::is_same_v<typename cursiv::engine::conv_alt<
                                  std::variant<double, std::string_view>,
                                  cursiv::detail::pay_text<G::BOOL>>::type,
                              double>);
@@ -919,8 +927,10 @@ void every_alternative_is_kept() {
   const cursiv::DefaultAstReflection& r = refl();
   CHECK(desc_of(r, kTag<Val>, "v").nature ==
         cursiv::detail::FieldNature::variant);
-  CHECK(cursiv::ast_registry<tab::exact::G, cursiv::LrLowering<tab::exact::G>>()
-            .convCount == 4);
+  CHECK(
+      cursiv::engine::ast_registry<tab::exact::G,
+                                   cursiv::engine::LrLowering<tab::exact::G>>()
+          .convCount == 4);
 }
 
 void each_payload_lands_in_its_own_slot() {
@@ -965,7 +975,7 @@ using namespace tab::annot;
 
 template <class R>
 using slot_of =
-    typename cursiv::detail::conv_alt<decltype(Val::v),
+    typename cursiv::engine::conv_alt<decltype(Val::v),
                                       cursiv::detail::pay_text<R>>::type;
 static_assert(std::is_same_v<slot_of<G::NUM>, std::int64_t>);
 static_assert(std::is_same_v<slot_of<G::WORD>, std::string_view>);
@@ -973,8 +983,10 @@ static_assert(std::is_same_v<slot_of<G::WORD>, std::string_view>);
 // The two rules keep two conversion entries: the annotated one may not share
 // the bare-text one, or the writer emplaces the wrong slot.
 void the_annotated_rule_keeps_its_own_entry() {
-  CHECK(cursiv::ast_registry<tab::annot::G, cursiv::LrLowering<tab::annot::G>>()
-            .convCount == 2);
+  CHECK(
+      cursiv::engine::ast_registry<tab::annot::G,
+                                   cursiv::engine::LrLowering<tab::annot::G>>()
+          .convCount == 2);
 }
 
 void annotated_terminal_lands_in_its_annotated_slot() {
@@ -1001,7 +1013,7 @@ namespace annot2 {
 using namespace tab::annot2;
 
 static_assert(
-    std::is_same_v<typename cursiv::detail::conv_alt<
+    std::is_same_v<typename cursiv::engine::conv_alt<
                        decltype(Num::n),
                        cursiv::detail::pay_text<tab::All::Annot2INT>>::type,
                    std::int32_t>);
@@ -1522,7 +1534,7 @@ using namespace tab::textlaw;
 // The law itself, on every shape at once.
 template <class M, class R>
 inline constexpr bool takes =
-    cursiv::detail::admits<M, cursiv::detail::pay_text<R>>();
+    cursiv::engine::admits<M, cursiv::detail::pay_text<R>>();
 static_assert(takes<std::string_view, tab::All::TextID>);
 static_assert(takes<std::string_view, tab::All::TextQUOTED>);
 static_assert(!takes<std::string_view, tab::All::TextNUM>);
@@ -2587,21 +2599,21 @@ void leading_plus() {
 // rather than the character '7'. Neither is in the vocabulary, which keeps
 // int8/uint8 (signed/unsigned char) as its numbers instead.
 void char_like_excluded() {
-  static_assert(!cursiv::has_default_convert<char>);
-  static_assert(!cursiv::has_default_convert<wchar_t>);
-  static_assert(!cursiv::has_default_convert<char8_t>);
-  static_assert(!cursiv::has_default_convert<char16_t>);
-  static_assert(!cursiv::has_default_convert<char32_t>);
+  static_assert(!cursiv::detail::has_default_convert<char>);
+  static_assert(!cursiv::detail::has_default_convert<wchar_t>);
+  static_assert(!cursiv::detail::has_default_convert<char8_t>);
+  static_assert(!cursiv::detail::has_default_convert<char16_t>);
+  static_assert(!cursiv::detail::has_default_convert<char32_t>);
   // int8/uint8 (signed/unsigned char) are numbers in the vocabulary and
   // keep their default converter -- this is not "every integer type minus
   // the character ones", it is exactly the AstNode vocabulary's set.
-  static_assert(cursiv::has_default_convert<std::int8_t>);
-  static_assert(cursiv::has_default_convert<std::uint8_t>);
-  static_assert(cursiv::from_chars_number<std::int8_t>);
-  static_assert(!cursiv::from_chars_number<char>);
+  static_assert(cursiv::detail::has_default_convert<std::int8_t>);
+  static_assert(cursiv::detail::has_default_convert<std::uint8_t>);
+  static_assert(cursiv::detail::from_chars_number<std::int8_t>);
+  static_assert(!cursiv::detail::from_chars_number<char>);
   // ...and text is a `string_view` of the document, or a `string` with a copy.
-  static_assert(cursiv::has_default_convert<std::string_view>);
-  static_assert(cursiv::has_default_convert<std::string>);
+  static_assert(cursiv::detail::has_default_convert<std::string_view>);
+  static_assert(cursiv::detail::has_default_convert<std::string>);
 }
 
 // An enum's default conversion is its enumerator names, read through
@@ -2615,7 +2627,7 @@ void enum_defaults() {
   CHECK(q && *q.value == Vis::pub);
   auto bad = cursiv::default_converter<Vis>::convert("nope");
   CHECK(!bad && bad.error.message.find("enumerator") != std::string::npos);
-  static_assert(cursiv::has_default_convert<Vis>);
+  static_assert(cursiv::detail::has_default_convert<Vis>);
 }
 
 // The probe is a window of values, not the run [0, 64): a sentinel below zero
@@ -3399,21 +3411,23 @@ bool reads(std::string_view text) {
 template <class T, class... Rs>
 constexpr auto climbs(cursiv::TypeList<Rs...>) {
   return std::array<bool, sizeof...(Rs)>{
-      (cursiv::detail::row_of<Rs>::kind == cursiv::WriteKind::climb &&
-       std::is_same_v<typename cursiv::detail::row_of<Rs>::type, T>)...};
+      (cursiv::engine::row_of<Rs>::kind == cursiv::engine::WriteKind::climb &&
+       std::is_same_v<typename cursiv::engine::row_of<Rs>::type, T>)...};
 }
 template <class G, class T>
 const std::vector<bool>& builds() {
   static const std::vector<bool> out = [] {
     constexpr auto climb =
-        climbs<T>(typename cursiv::LrLowering<G>::actions{});
-    const auto& low = cursiv::LrLowering<G>::table();
-    const cursiv::LrBuildTable a = cursiv::lr_build_automaton(low);
+        climbs<T>(typename cursiv::engine::LrLowering<G>::actions{});
+    const auto& low = cursiv::engine::LrLowering<G>::table();
+    const cursiv::engine::LrBuildTable a =
+        cursiv::engine::lr_build_automaton(low);
     // The core graph stands, and no condition joins two chains: the
     // lowering's are the table's.
     CHECK(a.nMergeInduced == 0 && a.nImpliedMixed == 0);
     CHECK(low.cfg.ngapConds == 0);
-    const std::span<const cursiv::LrFusedRow> fused(a.fused.data(), a.nfused);
+    const std::span<const cursiv::engine::LrFusedRow> fused(a.fused.data(),
+                                                            a.nfused);
     std::vector<bool> b(low.writes.nchains + fused.size(), false);
     for (std::uint32_t i = 0; i < b.size(); ++i)
       for (const std::uint16_t r :
@@ -3504,8 +3518,8 @@ void a_frontier_of_one_byte_refuses_the_digit_behind_it() {
 void two_overlapping_bytes_are_decided_by_the_state() {
   // The pair asks for a candidate walk, and the table says so instead of
   // lowering the grammar to the character.
-  const auto isolated = cursiv::lr_build_automaton(
-      cursiv::LrLowering<OverlapG>::table());
+  const auto isolated = cursiv::engine::lr_build_automaton(
+      cursiv::engine::LrLowering<OverlapG>::table());
   CHECK(isolated.multiCand && isolated.ncls > 0);
   static_assert(tcstn::generated::LexG::kTable.multiCand);
   static_assert(tcstn::generated::LexG::kTable.ncls > 0);

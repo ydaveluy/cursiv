@@ -9,7 +9,7 @@
 #include "cursiv/lr/gen/LrProgramLayout.hpp"
 #include "cursiv/lr/gen/lr_build_derived.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The build table, derived and laid out, held read-only: no pass or write
 // reaches a row that a pool or a program was built from. It is the table that
@@ -35,4 +35,4 @@ class LrFinalTable {
   LrProgramLayout _programs;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

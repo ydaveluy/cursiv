@@ -13,21 +13,21 @@
 #include "cursiv/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/text/ClassItem.hpp"
 
-namespace cursiv {
+namespace cursiv::detail {
 
 struct ClassRanges {
-  std::vector<unicode::Range> r;
+  std::vector<unicode::detail::Range> r;
   bool strays = false;
 
   static constexpr ClassRanges of(std::string_view spec) {
     ClassRanges out;
     out.r.reserve(spec.size() / 4 + 1);
     for (std::size_t i = 0; i < spec.size();) {
-      const detail::ClassItem it = detail::class_item_at(spec, i);
-      if (it.fault != detail::ClassFault::none) break;
+      const ClassItem it = class_item_at(spec, i);
+      if (it.fault != ClassFault::none) break;
       if (it.klass != 0) {
         out.strays = out.strays || (it.klass & 0x20) == 0;
-        detail::class_escape_ranges(it.klass, [&out](char32_t lo, char32_t hi) {
+        class_escape_ranges(it.klass, [&out](char32_t lo, char32_t hi) {
           out.r.push_back({lo, hi});
         });
       } else {
@@ -43,7 +43,7 @@ struct ClassRanges {
   // sort only runs when the joining pass meets one out of order.
   constexpr void merge() {
     if (joined()) return;
-    std::ranges::sort(r, {}, &unicode::Range::lo);
+    std::ranges::sort(r, {}, &unicode::detail::Range::lo);
     joined();
   }
 
@@ -51,9 +51,9 @@ struct ClassRanges {
   // kept. At one that starts before, it stops and returns false: the ranges
   // then still hold the same scalars, some of them twice.
   constexpr bool joined() {
-    unicode::Range* const first = r.data();
-    unicode::Range* w = first;
-    for (const unicode::Range* x = first; x != first + r.size(); ++x) {
+    unicode::detail::Range* const first = r.data();
+    unicode::detail::Range* w = first;
+    for (const unicode::detail::Range* x = first; x != first + r.size(); ++x) {
       if (w != first && x->lo < w[-1].lo) return false;
       w = join(first, w, *x);
     }
@@ -69,12 +69,12 @@ struct ClassRanges {
     ClassRanges out;
     out.strays = strays;
     out.r.resize(r.size() + o.r.size());
-    unicode::Range* const first = out.r.data();
-    unicode::Range* w = first;
-    const unicode::Range* a = r.data();
-    const unicode::Range* const aEnd = a + r.size();
-    const unicode::Range* b = o.r.data();
-    const unicode::Range* const bEnd = b + o.r.size();
+    unicode::detail::Range* const first = out.r.data();
+    unicode::detail::Range* w = first;
+    const unicode::detail::Range* a = r.data();
+    const unicode::detail::Range* const aEnd = a + r.size();
+    const unicode::detail::Range* b = o.r.data();
+    const unicode::detail::Range* const bEnd = b + o.r.size();
     while (a != aEnd && b != bEnd)
       w = join(first, w, a->lo < b->lo ? *a++ : *b++);
     while (a != aEnd) w = join(first, w, *a++);
@@ -85,9 +85,9 @@ struct ClassRanges {
 
   // Writes `x`, which starts at or after the range before `w`, at `w`, or
   // widens that range where the two touch: the slot after the last range.
-  static constexpr unicode::Range* join(const unicode::Range* first,
-                                        unicode::Range* w,
-                                        const unicode::Range& x) {
+  static constexpr unicode::detail::Range* join(
+      const unicode::detail::Range* first, unicode::detail::Range* w,
+      const unicode::detail::Range& x) {
     if (w == first || x.lo > w[-1].hi + 1) {
       *w = x;
       return w + 1;
@@ -100,7 +100,7 @@ struct ClassRanges {
     ClassRanges out;
     out.r.reserve(r.size() + 1);
     char32_t next = 0;
-    for (const unicode::Range& x : r) {
+    for (const unicode::detail::Range& x : r) {
       if (x.lo > next) out.r.push_back({next, x.lo - 1});
       next = x.hi + 1;
     }
@@ -116,11 +116,11 @@ struct ClassRanges {
     ClassRanges out;
     out.r.reserve(r.size());
     std::size_t i = 0;
-    for (const unicode::Range& x : r) {
+    for (const unicode::detail::Range& x : r) {
       char32_t next = x.lo;
       while (i < o.r.size() && o.r[i].hi < next) ++i;
       while (i < o.r.size() && o.r[i].lo <= x.hi) {
-        const unicode::Range& cut = o.r[i];
+        const unicode::detail::Range& cut = o.r[i];
         if (cut.lo > next) out.r.push_back({next, cut.lo - 1});
         if (cut.hi >= x.hi) {
           next = x.hi + 1;
@@ -154,7 +154,7 @@ struct ClassRanges {
         sink("0123456789abcdef"[(c >> (shift - 4)) & 0xF]);
       if (digits > 4) sink('}');
     };
-    for (const unicode::Range& x : r) {
+    for (const unicode::detail::Range& x : r) {
       put(x.lo);
       if (x.hi == x.lo + 1) {
         put(x.hi);
@@ -172,4 +172,4 @@ struct ClassRanges {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

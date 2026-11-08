@@ -456,8 +456,10 @@ namespace case_lrbracketcaret {
 namespace {
 
 namespace g = ttrivia::generated::Lr;
-static_assert(cursiv::kLaid<g::kTable.cfg, cursiv::kLaidIndent> == 0);
-static_assert(cursiv::kLaid<g::kTable.cfg, cursiv::kLaidDedent> == 0);
+static_assert(
+    cursiv::engine::kLaid<g::kTable.cfg, cursiv::engine::kLaidIndent> == 0);
+static_assert(
+    cursiv::engine::kLaid<g::kTable.cfg, cursiv::engine::kLaidDedent> == 0);
 
 std::set<std::string> offered(const std::string& text, std::size_t caret) {
   static const auto parser = g::create_parser();

@@ -7,11 +7,11 @@
 
 #include "cursiv/shared/gen/AstRegistry.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 std::string emit_ast_metadata(const AstRegistry& registry,
                               const std::vector<std::string>& tags);
 
 std::string emit_ast_metadata_record(const AstRegistry& registry);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -11,8 +11,8 @@ namespace cursiv::detail {
 
 [[nodiscard]] inline bool word_scalar(char32_t scalar) noexcept {
   return (scalar >= '0' && scalar <= '9') || scalar == '_' ||
-         unicode::within(unicode::detail::kL, std::size(unicode::detail::kL),
-                         scalar);
+         unicode::detail::within(unicode::detail::kL,
+                                 std::size(unicode::detail::kL), scalar);
 }
 
 }  // namespace cursiv::detail

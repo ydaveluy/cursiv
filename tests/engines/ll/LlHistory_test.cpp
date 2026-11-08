@@ -13,9 +13,10 @@ namespace {
 
 using Words = std::vector<std::uint32_t>;
 
-Words words_of(const cursiv::LlHistory& h, cursiv::LlHistory::Node n) {
+Words words_of(const cursiv::engine::LlHistory& h,
+               cursiv::engine::LlHistory::Node n) {
   Words out;
-  h.each(n, 0, [&](const cursiv::LlHistory::Event& e) {
+  h.each(n, 0, [&](const cursiv::engine::LlHistory::Event& e) {
     out.push_back(e.word);
     return true;
   });
@@ -23,7 +24,7 @@ Words words_of(const cursiv::LlHistory& h, cursiv::LlHistory::Node n) {
 }
 
 void grafts_keep_canonical_prefixes_and_positions() {
-  using History = cursiv::LlHistory;
+  using History = cursiv::engine::LlHistory;
   for (const unsigned length : {31u, 32u, 33u, 63u, 64u, 65u}) {
     History h;
     std::vector<History::Node> original{History::kRoot};
@@ -71,7 +72,7 @@ void grafts_keep_canonical_prefixes_and_positions() {
 }
 
 void long_continuations_share_their_blocks() {
-  using History = cursiv::LlHistory;
+  using History = cursiv::engine::LlHistory;
   History h;
   const auto from = h.append(History::kRoot, 7u, 1u);
   auto tail = from;
@@ -95,7 +96,7 @@ void long_continuations_share_their_blocks() {
 }
 
 void short_continuations_do_not_copy_the_long_prefix() {
-  using History = cursiv::LlHistory;
+  using History = cursiv::engine::LlHistory;
   History h;
   auto trunk = History::kRoot;
   constexpr unsigned length = 16384, alternatives = 64, suffix = 6;
@@ -131,7 +132,7 @@ void short_continuations_do_not_copy_the_long_prefix() {
 // one cell do, hand a long continuation from one to the other by a path. And
 // the readings that go on from one full queue share one tree of it.
 void siblings_trade_a_long_continuation_by_a_path() {
-  using History = cursiv::LlHistory;
+  using History = cursiv::engine::LlHistory;
   History h;
   constexpr unsigned length = 16384, readings = 64;
   std::vector<History::Node> trunk{History::kRoot};
@@ -157,14 +158,14 @@ void siblings_trade_a_long_continuation_by_a_path() {
 }
 
 void shared_continuations_keep_the_length_in_range() {
-  cursiv::LlHistory h;
-  auto node = h.append(cursiv::LlHistory::kRoot, 1u);
+  cursiv::engine::LlHistory h;
+  auto node = h.append(cursiv::engine::LlHistory::kRoot, 1u);
   for (unsigned i = 0; i < 31; ++i)
-    node = h.graft(node, cursiv::LlHistory::kRoot, node);
+    node = h.graft(node, cursiv::engine::LlHistory::kRoot, node);
   CHECK(h.depth(node) == (std::uint32_t{1} << 31));
   bool refused = false;
   try {
-    (void)h.graft(node, cursiv::LlHistory::kRoot, node);
+    (void)h.graft(node, cursiv::engine::LlHistory::kRoot, node);
   } catch (const std::length_error&) {
     refused = true;
   }
@@ -172,7 +173,7 @@ void shared_continuations_keep_the_length_in_range() {
 }
 
 void periodic_choices_keep_balanced_paths() {
-  using History = cursiv::LlHistory;
+  using History = cursiv::engine::LlHistory;
   for (const unsigned period : {2u, 7u}) {
     History h;
     std::vector<History::Node> prefixes{History::kRoot};
@@ -194,7 +195,7 @@ void periodic_choices_keep_balanced_paths() {
 }
 
 void concatenation_keeps_exact_events_across_runs() {
-  using History = cursiv::LlHistory;
+  using History = cursiv::engine::LlHistory;
   using Events = std::vector<History::Event>;
   History h;
   std::mt19937 rng(117);
@@ -244,13 +245,13 @@ void concatenation_keeps_exact_events_across_runs() {
 }  // namespace
 
 void a_repair_invalidates_the_prediction_plan() {
-  using cursiv::kLlUnplanned;
-  cursiv::LlPlan plan;
-  std::vector<cursiv::LlPlanEntry> entries{
+  using cursiv::engine::kLlUnplanned;
+  cursiv::engine::LlPlan plan;
+  std::vector<cursiv::engine::LlPlanEntry> entries{
       {.at = 4, .decision = 7, .arm = 1},
       {.at = 4, .decision = 7, .arm = 0},
       {.at = 4, .lull = 1, .decision = 7, .arm = 2},
-      {.at = 9, .decision = 3, .arm = cursiv::kNoRow},
+      {.at = 9, .decision = 3, .arm = cursiv::engine::kNoRow},
   };
   const auto laid = plan.install(entries, nullptr, 0);
   CHECK(plan.say(7, 4, 0, 0, false) == 1);
@@ -259,8 +260,8 @@ void a_repair_invalidates_the_prediction_plan() {
   CHECK(plan.say(7, 4, 1, 0, false) == 2);
   CHECK(plan.say(7, 5, 0, 0, false) == kLlUnplanned);
   CHECK(plan.say(8, 4, 0, 0, false) == kLlUnplanned);
-  CHECK(plan.say(3, 9, 0, 0, false) == cursiv::kNoRow);
-  CHECK(plan.say(3, 9, 0, 0, false) == cursiv::kNoRow);
+  CHECK(plan.say(3, 9, 0, 0, false) == cursiv::engine::kNoRow);
+  CHECK(plan.say(3, 9, 0, 0, false) == cursiv::engine::kNoRow);
   CHECK(plan.extend(laid, {{.at = 12, .decision = 1, .arm = 1}}));
   CHECK(plan.say(1, 12, 0, 1, false) == kLlUnplanned);
   CHECK(plan.extend(laid, {{.at = 15, .decision = 5, .arm = 3}}));
@@ -273,17 +274,17 @@ void a_repair_invalidates_the_prediction_plan() {
 // What the plan owes, read the plain way: the first entry of the choice there
 // that is still open, whatever was asked or laid before.
 struct PlainPlan {
-  std::vector<cursiv::LlPlanEntry> entries;
+  std::vector<cursiv::engine::LlPlanEntry> entries;
 
   std::uint16_t say(std::uint16_t decision, cursiv::TextOffset at,
                     std::uint32_t lull, bool again) {
     for (auto& e : entries) {
       if (e.at != at || e.decision != decision || e.lull != lull || e.taken)
         continue;
-      e.taken = !again && e.arm != cursiv::kNoRow;
+      e.taken = !again && e.arm != cursiv::engine::kNoRow;
       return e.arm;
     }
-    return cursiv::kLlUnplanned;
+    return cursiv::engine::kLlUnplanned;
   }
 };
 
@@ -297,23 +298,24 @@ void a_plan_answers_as_a_plain_read_does() {
   for (unsigned round = 0; round < 2000; ++round) {
     cursiv::TextOffset last = 0;
     const auto entries_after = [&](unsigned count) {
-      std::vector<cursiv::LlPlanEntry> out;
+      std::vector<cursiv::engine::LlPlanEntry> out;
       for (unsigned i = 0; i < count; ++i) {
         last += below(3);
         out.push_back({.at = last,
                        .lull = below(2),
                        .decision = static_cast<std::uint16_t>(below(3)),
-                       .arm = below(5) == 0 ? cursiv::kNoRow
-                                            : static_cast<std::uint16_t>(below(4)),
+                       .arm = below(5) == 0
+                                  ? cursiv::engine::kNoRow
+                                  : static_cast<std::uint16_t>(below(4)),
                        .below = below(6) == 0});
       }
       return out;
     };
-    cursiv::LlPlan plan;
+    cursiv::engine::LlPlan plan;
     PlainPlan plain;
     auto first = entries_after(below(8));
     plain.entries = first;
-    std::vector<cursiv::LlPlanWay> ways;
+    std::vector<cursiv::engine::LlPlanWay> ways;
     const auto laid = plan.install(first, &ways, 0);
     bool dropped = false;
     for (unsigned step = 0; step < 40; ++step) {
@@ -325,8 +327,9 @@ void a_plan_answers_as_a_plain_read_does() {
         // Only the plan's first drop takes anything: it has no ways left to hold.
         plan.drop_below();
         if (!dropped)
-          std::erase_if(plain.entries,
-                        [](const cursiv::LlPlanEntry& e) { return e.below; });
+          std::erase_if(
+              plain.entries,
+              [](const cursiv::engine::LlPlanEntry& e) { return e.below; });
         dropped = true;
       } else {
         const auto decision = static_cast<std::uint16_t>(below(3));
@@ -344,8 +347,9 @@ int main() {
   a_repair_invalidates_the_prediction_plan();
   a_plan_answers_as_a_plain_read_does();
   std::mt19937 rng(7);
-  cursiv::LlHistory h;
-  std::vector<cursiv::LlHistory::Node> nodes{cursiv::LlHistory::kRoot};
+  cursiv::engine::LlHistory h;
+  std::vector<cursiv::engine::LlHistory::Node> nodes{
+      cursiv::engine::LlHistory::kRoot};
   for (unsigned i = 0; i < 20000; ++i) {
     const auto parent = nodes[rng() % nodes.size()];
     const auto at = h.append(parent, rng() % 4);
@@ -367,15 +371,15 @@ int main() {
   }
   // One word at two places, or after two runs of tokens of no width, is two
   // nodes.
-  const auto here = h.append(cursiv::LlHistory::kRoot, 5, 10, 0);
-  const auto later = h.append(cursiv::LlHistory::kRoot, 5, 10, 1);
-  const auto elsewhere = h.append(cursiv::LlHistory::kRoot, 5, 11, 0);
+  const auto here = h.append(cursiv::engine::LlHistory::kRoot, 5, 10, 0);
+  const auto later = h.append(cursiv::engine::LlHistory::kRoot, 5, 10, 1);
+  const auto elsewhere = h.append(cursiv::engine::LlHistory::kRoot, 5, 11, 0);
   CHECK(here != later && here != elsewhere && later != elsewhere);
-  CHECK(h.append(cursiv::LlHistory::kRoot, 5, 10, 1) == later);
+  CHECK(h.append(cursiv::engine::LlHistory::kRoot, 5, 10, 1) == later);
   CHECK(h.last(later).at == 10 && h.last(later).lull == 1);
   CHECK(!h.before(here, later) && !h.before(later, here));
   // A long chain stays logarithmic to climb.
-  auto tip = cursiv::LlHistory::kRoot;
+  auto tip = cursiv::engine::LlHistory::kRoot;
   for (unsigned i = 0; i < 200000; ++i) tip = h.append(tip, 1);
   CHECK(h.depth(h.ancestor(tip, 777)) == 777);
   grafts_keep_canonical_prefixes_and_positions();

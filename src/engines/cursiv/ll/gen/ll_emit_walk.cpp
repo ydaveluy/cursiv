@@ -13,7 +13,7 @@
 #include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/gen/LexWalkEmitter.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 namespace {
 
 struct LlWalkEmitter : LexWalkRungs<LlLexView> {
@@ -46,18 +46,18 @@ struct LlWalkEmitter : LexWalkRungs<LlLexView> {
   void walk_entry() {
     line("  (void)end;\n  (void)term;");
     if (!a.modeBacktrack.empty())
-      write(R"(  if (::cursiv::LexSuffixSession<
-          ::cursiv::LlLexTape<kTable>>::has_backtracked())
-    return ::cursiv::lex_walk(kTape, src, len, mode, i);
+      write(R"(  if (::cursiv::engine::LexSuffixSession<
+          ::cursiv::engine::LlLexTape<kTable>>::has_backtracked())
+    return ::cursiv::engine::lex_walk(kTape, src, len, mode, i);
 )");
   }
   void emit_rows_loop() {
     line("Wtab:\n  {");
     if (!relays()) line("    bool relays = false;");
     write(
-        R"(    ::cursiv::lex_walk_rows(kTape, src, len, start, st, i, far, match,
+        R"(    ::cursiv::engine::lex_walk_rows(kTape, src, len, start, st, i, far, match,
         relays, [&](::std::uint16_t state, ::cursiv::TextOffset& at) {
-          if (!::cursiv::lex_run_blind(kTape, state)) return;
+          if (!::cursiv::engine::lex_run_blind(kTape, state)) return;
           while (at < len &&
                  kTape.step(state, static_cast<unsigned char>(src[at])) == state)
             ++at;
@@ -69,23 +69,26 @@ struct LlWalkEmitter : LexWalkRungs<LlLexView> {
     line("Wdone:");
     if (relays())
       line(
-          "  return ::cursiv::lex_walk_end(kTape, src, len, mode, start, i, "
+          "  return ::cursiv::engine::lex_walk_end(kTape, src, len, mode, "
+          "start, i, "
           "far, match,\n                              relays);");
     else
       line(
           "  {\n    bool none = false;\n"
-          "    return ::cursiv::lex_walk_end(kTape, src, len, mode, start, i, "
+          "    return ::cursiv::engine::lex_walk_end(kTape, src, len, mode, "
+          "start, i, "
           "far, match,\n                                none);\n  }");
     line("}");
   }
 
   void emit() {
     lex_emit_byte_runs(*this);
-    line("inline constexpr ::cursiv::LlLexTape<kTable> kTape{};");
+    line("inline constexpr ::cursiv::engine::LlLexTape<kTable> kTape{};");
     if (relays())
       line(
           "using Relays = "
-          "::cursiv::LexRelayRun<::cursiv::LlLexTape<kTable>>;");
+          "::cursiv::engine::LexRelayRun<::cursiv::engine::LlLexTape<kTable>>"
+          ";");
     // Every state keeps its labels, reached or not.
     write(R"(
 #ifdef __clang__
@@ -132,4 +135,4 @@ std::string ll_emit_walk(const LlBuiltProgram& a) {
   return e.take();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

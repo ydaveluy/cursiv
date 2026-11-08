@@ -4,7 +4,7 @@
 
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlLexAccept {
   std::uint16_t term = 0;
@@ -15,4 +15,4 @@ struct LlLexAccept {
   constexpr bool operator==(const LlLexAccept&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

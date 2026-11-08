@@ -18,7 +18,7 @@
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexKeywordCut {
   // A keyword: the set each byte of its spelling reads in, the class its
@@ -350,4 +350,4 @@ struct LexKeywordCut {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

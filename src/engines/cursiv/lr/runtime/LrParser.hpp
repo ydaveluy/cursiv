@@ -30,7 +30,7 @@
 #include "cursiv/shared/runtime/LexSuffixSession.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& A>
 struct LrParser {
@@ -183,4 +183,4 @@ struct LrParser {
 template <const auto& A>
 inline constexpr LrParser<A> lr_parser{};
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

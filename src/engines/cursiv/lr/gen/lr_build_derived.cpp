@@ -27,7 +27,7 @@
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 namespace {
 
@@ -257,4 +257,4 @@ void lr_derive_tables(LrBuildTable& a, std::span<const ElementId> sites) {
   a.closePool = SetPool(a.closeRow.row(0, a.nstates), a.nstates);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

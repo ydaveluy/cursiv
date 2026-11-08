@@ -18,7 +18,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Cfg>
 class NamedHead {
@@ -51,12 +51,12 @@ class NamedHead {
     const auto& answers = answers_of(root);
     return std::ranges::any_of(answers, [](std::uint8_t v) { return v != 1; });
   }
-  // `unsigned name(::cursiv::SymbolId t)`, answering for each terminal.
+  // `unsigned name(SymbolId t)`, answering for each terminal.
   std::string source(std::string_view linkage, std::string_view name,
                      std::uint16_t root) const {
     TextBuilder out;
     out.line(linkage, " unsigned ", name,
-             "(::cursiv::SymbolId t) {\n  switch (t) {");
+             "(::cursiv::engine::SymbolId t) {\n  switch (t) {");
     const auto& answers = answers_of(root);
     for (const unsigned v : {0u, 2u}) {
       bool some = false;
@@ -193,4 +193,4 @@ class NamedHead {
   mutable std::unordered_map<std::uint16_t, std::vector<std::uint8_t>> _answers;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

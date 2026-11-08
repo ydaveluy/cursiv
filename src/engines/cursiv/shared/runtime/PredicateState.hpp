@@ -10,7 +10,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A cursor's `held` before any reading at `at`; `kInvalidSymbol` is a reading
 // that found no token there.
@@ -105,4 +105,4 @@ class PredicateStates {
 
 using PredicateState = PredicateStates<PredicateCursor>;
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

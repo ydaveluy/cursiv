@@ -8,7 +8,7 @@
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/table/LexRelay.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrLexView : LexTableView<LrBuildTable> {
   bool bounded(std::uint16_t s) const { return a.dfa_bounded(s); }
@@ -25,4 +25,4 @@ struct LrLexView : LexTableView<LrBuildTable> {
   unsigned tier(std::uint16_t s, unsigned t) const { return a.dfa_tier(s, t); }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

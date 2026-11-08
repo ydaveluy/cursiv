@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr std::uint32_t kNoGestureLink = 0xFFFFFFFFu;
 
@@ -85,4 +85,4 @@ class GestureRank {
   std::uint32_t _stamp = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

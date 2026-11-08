@@ -78,15 +78,16 @@ std::string repeat(const std::string& unit, unsigned n) {
 // One read of `text` by the table itself: the counters are the table's, not
 // the erased door's.
 struct Read {
-  cursiv::LrParseStats stats;
+  cursiv::engine::LrParseStats stats;
   bool clean = false;
 };
 
 template <const auto& T>
-Read read(const std::string& text, const cursiv::LrDrive* drive) {
+Read read(const std::string& text, const cursiv::engine::LrDrive* drive) {
   Read r;
   cursiv::Cst cst;
-  const bool ok = cursiv::lr_parser<T>.parse(text, cst, &r.stats, drive);
+  const bool ok =
+      cursiv::engine::lr_parser<T>.parse(text, cst, &r.stats, drive);
   r.clean = ok && cst.diagnostics().empty();
   return r;
 }
@@ -118,12 +119,13 @@ constexpr double kCubic = 8.0;
 // where it opened none -- 0 where the sample is unreadable or multiplexed.
 template <const auto& T>
 double per_alternative(const cursiv::bench::PerfCounters& counters,
-                       const std::string& text, const cursiv::LrDrive* drive) {
+                       const std::string& text,
+                       const cursiv::engine::LrDrive* drive) {
   cursiv::Cst cst;
-  cursiv::LrParseStats stats;
+  cursiv::engine::LrParseStats stats;
   const cursiv::bench::PerfSample from = counters.read();
   counters.enable();
-  const bool ok = cursiv::lr_parser<T>.parse(text, cst, &stats, drive);
+  const bool ok = cursiv::engine::lr_parser<T>.parse(text, cst, &stats, drive);
   counters.disable();
   const cursiv::bench::PerfSample spent =
       cursiv::bench::perf_delta(from, counters.read());
@@ -137,8 +139,8 @@ double per_alternative(const cursiv::bench::PerfCounters& counters,
 // is read once before to settle what a first read builds.
 template <const auto& T, class Text>
 std::array<double, 3> series(const cursiv::bench::PerfCounters& counters,
-                             const cursiv::LrDrive* drive, const Text& text,
-                             unsigned first) {
+                             const cursiv::engine::LrDrive* drive,
+                             const Text& text, unsigned first) {
   (void)per_alternative<T>(counters, text(first), drive);
   return {per_alternative<T>(counters, text(first), drive),
           per_alternative<T>(counters, text(2 * first), drive),
@@ -265,24 +267,24 @@ void a_chain_written_twice_costs_its_length() {
 void colliding_fingerprints_do_not_elect_a_derivation() {
   cursiv::Cst cst("");
   cursiv::CstBuilder builder(cst);
-  cursiv::LrContext c("", builder);
-  c.stack.push({0, 0, 0, 0, cursiv::kLrNoWord});
-  cursiv::LrShadow a, b;
+  cursiv::engine::LrContext c("", builder);
+  c.stack.push({0, 0, 0, 0, cursiv::engine::kLrNoWord});
+  cursiv::engine::LrShadow a, b;
   a.run.stand_on(c.stack);
   b.run.stand_on(c.stack);
   a.run.push(0);
   b.run.push(0);
   const auto cell = [&](unsigned left, unsigned right) {
     c.trailRoom.restart();
-    c.trail = {{cursiv::kLrNoTrail, 0, left, 1, cursiv::kLrNoProd, 1, 0,
-                cursiv::kNoMode},
-               {cursiv::kLrNoTrail, 0, right, 1, cursiv::kLrNoProd, 1, 0,
-                cursiv::kNoMode}};
+    c.trail = {{cursiv::engine::kLrNoTrail, 0, left, 1,
+                cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode},
+               {cursiv::engine::kLrNoTrail, 0, right, 1,
+                cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode}};
     a.trail = 0;
     b.trail = 1;
     a.path = 123;
     b.path = 456;
-    return cursiv::lr_trail_first<chain::G::kTable>(c, a, b);
+    return cursiv::engine::lr_trail_first<chain::G::kTable>(c, a, b);
   };
   CHECK(cell(1, 2) == -1);
   CHECK(cell(1, 2) == -1);
@@ -290,15 +292,15 @@ void colliding_fingerprints_do_not_elect_a_derivation() {
   for (unsigned i = 0; i < 5000; ++i) {
     CHECK(cell(1, 2) == -1);
     a.path = 1000u + i;
-    CHECK(cursiv::lr_trail_first<chain::G::kTable>(c, a, b) == -1);
-    CHECK(cursiv::lr_trail_first<chain::G::kTable>(c, a, b) == -1);
+    CHECK(cursiv::engine::lr_trail_first<chain::G::kTable>(c, a, b) == -1);
+    CHECK(cursiv::engine::lr_trail_first<chain::G::kTable>(c, a, b) == -1);
   }
   CHECK(cell(2, 1) == 1);
-  c.trail = {{cursiv::kLrNoTrail, 0, ~std::uint32_t{0}, 1, cursiv::kLrNoProd, 1,
-              0, cursiv::kNoMode},
-             {cursiv::kLrNoTrail, 0, ~std::uint32_t{2}, 2, cursiv::kLrNoProd, 1,
-              0, cursiv::kNoMode}};
-  CHECK(cursiv::lr_trail_lexical<chain::G::kTable>(c, a, b) == 1);
+  c.trail = {{cursiv::engine::kLrNoTrail, 0, ~std::uint32_t{0}, 1,
+              cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode},
+             {cursiv::engine::kLrNoTrail, 0, ~std::uint32_t{2}, 2,
+              cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode}};
+  CHECK(cursiv::engine::lr_trail_lexical<chain::G::kTable>(c, a, b) == 1);
 }
 
 void an_alternative_costs_the_same_however_long_the_text() {

@@ -70,8 +70,8 @@ namespace {
 }
 
 [[nodiscard]] bool is_letter(char32_t scalar) noexcept {
-  return unicode::within(unicode::detail::kL, std::size(unicode::detail::kL),
-                         scalar);
+  return unicode::detail::within(unicode::detail::kL,
+                                 std::size(unicode::detail::kL), scalar);
 }
 
 // The names one answer offers at most; its keywords always come. A reference

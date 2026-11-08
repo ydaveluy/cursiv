@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <span>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // An item is a dot position, indexed densely in (prod, dot) order so a packed
 // word set enumerates already sorted. Its lookahead lives beside it.
@@ -28,4 +28,4 @@ struct LrPoolRows {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

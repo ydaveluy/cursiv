@@ -10,7 +10,7 @@
 
 #include "cursiv/lr/runtime/LrStack.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr std::uint32_t kLrNoNode = 0xFFFFFFFFu;
 
@@ -149,4 +149,4 @@ class LrCactus {
   std::uint64_t _stepped = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

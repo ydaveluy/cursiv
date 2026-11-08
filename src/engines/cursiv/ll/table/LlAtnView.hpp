@@ -8,7 +8,7 @@
 
 #include "cursiv/ll/table/LlAtn.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Set on a return class whose future is the end of its rule.
 inline constexpr std::uint32_t kLlTailReturn = 0x80000000u;
@@ -51,4 +51,4 @@ struct LlAtnView {
   constexpr const LlAtnEdge& edge(std::uint32_t e) const { return edges[e]; }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

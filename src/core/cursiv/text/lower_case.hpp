@@ -17,7 +17,7 @@ namespace cursiv::detail {
 
 inline char32_t lower_scalar(char32_t cp) noexcept {
   const auto* run = std::ranges::upper_bound(unicode::detail::kLower, cp, {},
-                                             &unicode::LowerRun::first);
+                                             &unicode::detail::LowerRun::first);
   if (run == std::begin(unicode::detail::kLower)) return cp;
   --run;
   if (cp > run->last || (cp - run->first) % run->stride != 0) return cp;
@@ -25,13 +25,14 @@ inline char32_t lower_scalar(char32_t cp) noexcept {
 }
 
 inline bool cased(char32_t cp) noexcept {
-  return unicode::within(unicode::detail::kCased,
-                         std::size(unicode::detail::kCased), cp);
+  return unicode::detail::within(unicode::detail::kCased,
+                                 std::size(unicode::detail::kCased), cp);
 }
 
 inline bool case_ignorable(char32_t cp) noexcept {
-  return unicode::within(unicode::detail::kCaseIgnorable,
-                         std::size(unicode::detail::kCaseIgnorable), cp);
+  return unicode::detail::within(unicode::detail::kCaseIgnorable,
+                                 std::size(unicode::detail::kCaseIgnorable),
+                                 cp);
 }
 
 // Whether the sigma at `[begin, end)` follows a cased letter and precedes

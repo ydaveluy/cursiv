@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class V>
 class FlatMap {
@@ -73,4 +73,4 @@ class FlatMap {
   std::size_t _size = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -12,7 +12,7 @@
 #include "cursiv/shared/gen/SetPool.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrDerivedRows {
   std::vector<std::uint64_t> skipSet{};
@@ -41,4 +41,4 @@ struct LrDerivedRows {
   SetPool modeWant{};
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

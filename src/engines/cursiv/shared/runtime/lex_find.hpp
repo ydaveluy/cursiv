@@ -8,11 +8,12 @@
 #include <cstring>
 #include <string_view>
 
+#include "cursiv/shared/utils/inside_scalar.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A search over bytes may find a continuation inside a scalar. Delimited
 // text advances by characters, starting at text.data(), while stray bytes
@@ -52,4 +53,4 @@ const char* lex_find_closer(std::string_view text, std::string_view before,
   return nullptr;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

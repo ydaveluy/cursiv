@@ -12,7 +12,7 @@
 #include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Whether the token `sym` is one of `terms`.
 template <class Cfg>
@@ -77,4 +77,4 @@ class GapConditionEmitter {
   const Cfg& _cfg;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

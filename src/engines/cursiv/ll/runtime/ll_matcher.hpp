@@ -13,7 +13,7 @@
 #include "cursiv/shared/runtime/LexTape.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& T>
 inline bool ll_lex_accepts(std::uint16_t state, SymbolId term, const char* src,
@@ -133,4 +133,4 @@ inline Scan ll_match_text(const char* src, TextOffset len, std::uint16_t mode,
       [&](std::uint16_t more) { return T.walk(src, len, more, from); });
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

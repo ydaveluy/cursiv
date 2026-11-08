@@ -28,7 +28,7 @@
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 namespace {
 
 using Built = LlBuiltProgram;
@@ -293,12 +293,12 @@ void Emit::join(std::uint32_t base, std::uint32_t count,
                 std::string_view from) {
   if (!ll_fuse_tabled(count, false)) {
     if (count == 1)
-      line("::cursiv::ll_join_one<kTable>(c, ", from, ", ", a.fuse[base].to,
-           "u);");
+      line("::cursiv::engine::ll_join_one<kTable>(c, ", from, ", ",
+           a.fuse[base].to, "u);");
     return;
   }
-  line("::cursiv::ll_join<kTable>(c, ", from, ", kFuse + ", base, "u, ", count,
-       "u);");
+  line("::cursiv::engine::ll_join<kTable>(c, ", from, ", kFuse + ", base, "u, ",
+       count, "u);");
 }
 
 // A rule that reads one terminal whichever way it goes, each on a token of its
@@ -327,10 +327,11 @@ bool Emit::word_rule(std::uint16_t r) const {
 void Emit::call_site(std::uint16_t id) {
   const FieldScope scope(*this);
   const LlNode& n = at(id);
-  if (n.mode != kNoRow) line("::cursiv::ll_peek<kTable, ", n.mode, "u>(c);");
+  if (n.mode != kNoRow)
+    line("::cursiv::engine::ll_peek<kTable, ", n.mode, "u>(c);");
   // A nullable callee may inspect its exit under another trivia setting.
   // Commit only the actual entry gap before handing that decision over.
-  if (a.callerPeek[id]) line("::cursiv::ll_flush_trivia<kTable>(c);");
+  if (a.callerPeek[id]) line("::cursiv::engine::ll_flush_trivia<kTable>(c);");
   const std::uint32_t base = a.fuseBase[id];
   const std::uint32_t count = a.fuseBase[id + 1] - base;
   // A section reads its grammar alone, and what its entry left is dropped
@@ -358,7 +359,8 @@ void Emit::call_site(std::uint16_t id) {
     line("default: break;");
     close("}");
     close("}");
-    line("if (", pos, " != 0u) [[likely]] ::cursiv::ll_consume<kTable>(c, ",
+    line("if (", pos,
+         " != 0u) [[likely]] ::cursiv::engine::ll_consume<kTable>(c, ",
          count == 1 ? a.fuse[base].to : at(kid(body, 0)).row, "u, ", pos, ");");
     open("else {");
   }
@@ -370,15 +372,16 @@ void Emit::call_site(std::uint16_t id) {
     line(held ? "" : "const ::cursiv::NodeId ", was, " = c.last;");
   std::string outer;
   if (section != 0) {
-    outer = local(held, "::cursiv::LlSection", "sec");
-    line(held ? "" : "const ::cursiv::LlSection ", outer,
-         " = ::cursiv::ll_section_open<kTable>(c, ", section, "u);");
+    outer = local(held, "::cursiv::engine::LlSection", "sec");
+    line(held ? "" : "const ::cursiv::engine::LlSection ", outer,
+         " = ::cursiv::engine::ll_section_open<kTable>(c, ", section, "u);");
   }
   line("c.stack.push_back(", a.nodeFollow[id],
        "u, c.tape.stream().records());");
   invoke(n.sym, "1u");
-  line("::cursiv::ll_return(c);");
-  if (section != 0) line("::cursiv::ll_section_close<kTable>(c, ", outer, ");");
+  line("::cursiv::engine::ll_return(c);");
+  if (section != 0)
+    line("::cursiv::engine::ll_section_close<kTable>(c, ", outer, ");");
   join(base, count, was);
   if (scoped) close("}");
   if (word) close("}");
@@ -452,9 +455,9 @@ void Emit::invoke(std::uint16_t callee, std::string_view arg) {
   if (finishes(callee)) {
     line(
         "if (const ::std::uint16_t next = "
-        "::cursiv::ll_call<F",
+        "::cursiv::engine::ll_call<F",
         callee, ", &s", callee, ">(c, ", callee, "u);");
-    line("    next != ::cursiv::kLlDone)");
+    line("    next != ::cursiv::engine::kLlDone)");
     line("  return next;");
   } else {
     line("return ", callee, "u;");
@@ -499,16 +502,16 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
       !turn ? std::string("0") : local(held, "::std::uint16_t", "l");
   if (!checkpoint) {
     if (hand == kNoRow)
-      line("::cursiv::ll_peek<kTable, ", mode_of(id), "u>(c);");
-    line("::cursiv::ll_flush_trivia<kTable>(c);");
+      line("::cursiv::engine::ll_peek<kTable, ", mode_of(id), "u>(c);");
+    line("::cursiv::engine::ll_flush_trivia<kTable>(c);");
   }
   // Its locals end with it: a label further on in the block may not cross
   // their initialisation.
   if (!held) open("{");
   if (turn) {
     line(held ? "" : "const ::std::uint16_t ", l,
-         " = ::cursiv::ll_nest_receiver<kTable>(c, ", regionAt.open, ", ",
-         regionAt.begin, ", ", regionAt.count, ");");
+         " = ::cursiv::engine::ll_nest_receiver<kTable>(c, ", regionAt.open,
+         ", ", regionAt.begin, ", ", regionAt.count, ");");
     line(held ? "" : "const auto ", o, " = ", l, " != 0 ? ", regionAt.open,
          " : c.tape.enter();");
     if (counted)
@@ -550,9 +553,9 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
     ownAt = {};
   }
   // A record that opens no node states over one its body builds.
-  const std::string closer =
-      a.writes.chainBuild[n.row].creates ? "::cursiv::ll_close<kTable>("
-                                         : "::cursiv::ll_close_over<kTable>(";
+  const std::string closer = a.writes.chainBuild[n.row].creates
+                                 ? "::cursiv::engine::ll_close<kTable>("
+                                 : "::cursiv::engine::ll_close_over<kTable>(";
   if (!ll_fuse_tabled(oc, true)) {
     line("c.last = ", closer, "c, ", o, ", ", b, ", kTable.stamp.make(", n.row,
          "u, ",
@@ -561,11 +564,11 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
   } else {
     // A turn that reached back covers more than one subtree: no ride there.
     if (turn)
-      line("if (", l, " != 0 || !::cursiv::ll_ride<kTable>(c, ", f,
+      line("if (", l, " != 0 || !::cursiv::engine::ll_ride<kTable>(c, ", f,
            ", kFuse + ", ob, "u, ", oc, "u))");
     else
-      line("if (!::cursiv::ll_ride<kTable>(c, ", f, ", kFuse + ", ob, "u, ", oc,
-           "u))");
+      line("if (!::cursiv::engine::ll_ride<kTable>(c, ", f, ", kFuse + ", ob,
+           "u, ", oc, "u))");
     open();
     line("c.last = ", closer, "c, ", o, ", ", b, ", kTable.stamp.make(", n.row,
          "u, ", l, "));");
@@ -595,8 +598,8 @@ void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
   } else if (region || folds) {
     const bool held = may_suspend(id);
     if (hand == kNoRow)
-      line("::cursiv::ll_peek<kTable, ", mode_of(id), "u>(c);");
-    line("::cursiv::ll_flush_trivia<kTable>(c);");
+      line("::cursiv::engine::ll_peek<kTable, ", mode_of(id), "u>(c);");
+    line("::cursiv::engine::ll_flush_trivia<kTable>(c);");
     if (!held) {
       open("{");
       scoped = true;
@@ -628,16 +631,16 @@ void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
 // before it. With no choice, `kNoRow`, the token is read alone.
 void Emit::peek_choice(std::uint16_t d, std::string_view mode, bool constant) {
   if (constant)
-    line("::cursiv::ll_peek<kTable, ", mode, ">(c);");
+    line("::cursiv::engine::ll_peek<kTable, ", mode, ">(c);");
   else
-    line("::cursiv::ll_peek<kTable>(c, ", mode, ");");
+    line("::cursiv::engine::ll_peek<kTable>(c, ", mode, ");");
   if (d == kNoRow) return;
   if (a.decFlag[d].any())
     line("if (kTable.holds(kTable.dec_flag(", d,
          "u), c.la.sym)) [[unlikely]] "
-         "::cursiv::ll_refuse_flagged<kTable>(c, ",
+         "::cursiv::engine::ll_refuse_flagged<kTable>(c, ",
          mode, ", ", d, "u);");
-  if (a.decStands[d] != 0) line("::cursiv::ll_hold<kTable>(c);");
+  if (a.decStands[d] != 0) line("::cursiv::engine::ll_hold<kTable>(c);");
 }
 
 // The arms of a choice, and the token that picks one. What one token settles
@@ -705,7 +708,7 @@ void Emit::decision(std::uint16_t id) {
   std::vector<std::string> entry(db.nalts);
   line("if (!kTable.holds(kTable.dec_first(", n.decision, "u), c.la.sym)) {");
   open();
-  const std::string fix = concat("::cursiv::ll_choice_fix<kTable>(c, ",
+  const std::string fix = concat("::cursiv::engine::ll_choice_fix<kTable>(c, ",
                                  dec.mode, "u, ", n.decision, "u)");
   if (direct) {
     open("switch (", fix, ") {");
@@ -736,12 +739,12 @@ void Emit::decision(std::uint16_t id) {
       line("default: if (", k, " == 0xFFFFu) ", k, " = ", none, " ? ",
            dec.repair,
            "u : "
-           "::cursiv::ll_predict<kTable>(c, ",
+           "::cursiv::engine::ll_predict<kTable>(c, ",
            n.decision, "u); break;");
     else
       line("default: if (", k, " == 0xFFFFu) ", k,
            " = "
-           "::cursiv::ll_predict<kTable>(c, ",
+           "::cursiv::engine::ll_predict<kTable>(c, ",
            n.decision, "u); break;");
     close("}");
     open("switch (", k, ") {");
@@ -773,7 +776,8 @@ void Emit::decision(std::uint16_t id) {
   // refused: that arm is entered, and repaired where the refusal stands.
   const auto reread = [&] {
     if (direct) return;
-    line("switch (::cursiv::ll_reading_fix<kTable>(c, ", n.decision, "u)) {");
+    line("switch (::cursiv::engine::ll_reading_fix<kTable>(c, ", n.decision,
+         "u)) {");
     open();
     for (std::uint16_t i = 0; i < db.nalts; ++i)
       line("case ", i, "u: goto ", entry[i], ";");
@@ -796,14 +800,14 @@ void Emit::decision(std::uint16_t id) {
     open("default:");
     reread();
     if (db.repairCost != kLlRepairCostless) {
-      open("if (::cursiv::ll_ends<kTable>(c, c.la.sym)) {");
+      open("if (::cursiv::engine::ll_ends<kTable>(c, c.la.sym)) {");
       invent();
       close();
       open("} else {");
-      line("::cursiv::ll_drop<kTable>(c);");
+      line("::cursiv::engine::ll_drop<kTable>(c);");
       close("}");
     } else {
-      line("::cursiv::ll_drop<kTable>(c);");
+      line("::cursiv::engine::ll_drop<kTable>(c);");
     }
     line("break;");
     close();
@@ -831,7 +835,7 @@ void Emit::arm(std::uint16_t id, std::uint16_t hand) {
   if (!step) {
     moved.body =
         concat("CURSIV_NOINLINE void s", moved.tag,
-               "(::cursiv::LlContext& c) {\n", cut_from(from), "}\n\n");
+               "(::cursiv::engine::LlContext& c) {\n", cut_from(from), "}\n\n");
     line("s", moved.tag, "(c);");
     arms.push_back(std::move(moved));
     return;
@@ -840,7 +844,7 @@ void Emit::arm(std::uint16_t id, std::uint16_t hand) {
   moved.frame = frame_of(moved.tag, took);
   moved.body = step_head(moved.tag, resumed);
   moved.body += cut_from(from);
-  moved.body += "  return ::cursiv::kLlDone;\n}\n\n";
+  moved.body += "  return ::cursiv::engine::kLlDone;\n}\n\n";
   taken.resize(took);
   labels.resize(resumed);
   const unsigned k = next_label();
@@ -861,7 +865,7 @@ void Emit::term_choice(std::uint16_t id,
   const LlDecisionBuild& db = a.cfg.decisionBuild[n.decision];
   const std::string k = name("k");
   peek_choice(n.decision, concat(dec.mode, "u"), true);
-  line("static constexpr ::cursiv::LlTermArm ", k, "a[] = {");
+  line("static constexpr ::cursiv::engine::LlTermArm ", k, "a[] = {");
   for (std::uint16_t i = 0; i < db.nalts; ++i) {
     const std::uint16_t x = kid(n, i);
     line("    {", at(x).sym, "u, ", at(x).mode, "u, ", at(x).row, "u, ", x + 1,
@@ -874,8 +878,8 @@ void Emit::term_choice(std::uint16_t id,
   // it owes invented, or repairs the text until an arm takes it.
   line("if (!kTable.holds(kTable.dec_first(", n.decision, "u), c.la.sym)) {");
   open();
-  line(k, " = ::cursiv::ll_choice_fix<kTable>(c, ", dec.mode, "u, ", n.decision,
-       "u);");
+  line(k, " = ::cursiv::engine::ll_choice_fix<kTable>(c, ", dec.mode, "u, ",
+       n.decision, "u);");
   line("if (", k, " >= ", db.nalts, "u) ", k, " = 0xFFFFu;");
   close("}");
   open("if (", k, " == 0xFFFFu) {");
@@ -887,8 +891,8 @@ void Emit::term_choice(std::uint16_t id,
   line("default: ", k, " = ", dec.repair, "u; break;");
   close("}");
   close("}");
-  line("if (", k, " != 0xFFFFu) ::cursiv::ll_take_arm<kTable>(c, ", k, "a[", k,
-       "]);");
+  line("if (", k, " != 0xFFFFu) ::cursiv::engine::ll_take_arm<kTable>(c, ", k,
+       "a[", k, "]);");
 }
 
 // One turn of a loop, or with `body` the turn of a flat chain: the choice to
@@ -947,15 +951,15 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   // stops at the first token a turn could start on, or at one the caller can
   // carry on from, so a loop that was really over is over.
   line("::std::uint8_t fix;");
-  line("fix = ::cursiv::kLlLoopNone;");
+  line("fix = ::cursiv::engine::kLlLoopNone;");
   line("if (!kTable.holds(kTable.dec_first(", n.decision, "u), c.la.sym)) {");
   open();
-  line("fix = ::cursiv::ll_loop_fix<kTable>(c, ", mode, ", ", n.decision,
-       "u);");
-  line("if (fix == ::cursiv::kLlLoopLeave) break;");
+  line("fix = ::cursiv::engine::ll_loop_fix<kTable>(c, ", mode, ", ",
+       n.decision, "u);");
+  line("if (fix == ::cursiv::engine::kLlLoopLeave) break;");
   close("}");
   line("bool mend;");
-  line("mend = fix == ::cursiv::kLlLoopTurn;");
+  line("mend = fix == ::cursiv::engine::kLlLoopTurn;");
   // Arm 0 takes a turn, arm 1 leaves: the sets were written in that order.
   const auto byToken = [&] {
     line("bool go;");
@@ -974,21 +978,22 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     memo.predicts = true;
     const std::string k = name("k");
     line("::std::uint16_t ", k, ";");
-    line(k, " = ::cursiv::ll_predict<kTable>(c, ", n.decision, "u);");
+    line(k, " = ::cursiv::engine::ll_predict<kTable>(c, ", n.decision, "u);");
     // A prediction no arm answers is not the loop's end: the text is broken
     // where a turn would have started. LEAVING IS ONLY AN ANSWER WHERE A RULE
     // ABOVE CAN CARRY ON FROM THE TOKEN -- otherwise it costs the author
     // every construct below, so the loop turns and its body repairs.
     open("if (", k, " != 0) {");
-    line("if (", k, " == ::cursiv::kNoRow && !mend &&");
-    line("    !::cursiv::ll_loop_leaves<kTable>(c, ", n.decision, "u)) {");
+    line("if (", k, " == ::cursiv::engine::kNoRow && !mend &&");
+    line("    !::cursiv::engine::ll_loop_leaves<kTable>(c, ", n.decision,
+         "u)) {");
     open();
-    line("fix = ::cursiv::ll_loop_fix<kTable>(c, ", mode, ", ", n.decision,
-         "u);");
-    line("if (fix == ::cursiv::kLlLoopLeave) break;");
-    line("mend = fix == ::cursiv::kLlLoopTurn;");
-    line(k, " = ::cursiv::ll_predict<kTable>(c, ", n.decision, "u);");
-    line("if (", k, " == ::cursiv::kNoRow) mend = true;");
+    line("fix = ::cursiv::engine::ll_loop_fix<kTable>(c, ", mode, ", ",
+         n.decision, "u);");
+    line("if (fix == ::cursiv::engine::kLlLoopLeave) break;");
+    line("mend = fix == ::cursiv::engine::kLlLoopTurn;");
+    line(k, " = ::cursiv::engine::ll_predict<kTable>(c, ", n.decision, "u);");
+    line("if (", k, " == ::cursiv::engine::kNoRow) mend = true;");
     close("}");
     line("if (", k, " != 0 && !mend) break;");
     close("}");
@@ -1011,7 +1016,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
         flat || !readSplit ? concat(readHead, "u")
                            : concat("(", counts ? concat(i, " == 0") : first,
                                     " ? ", readHead, "u : ", readNext, "u)");
-    line("::cursiv::ll_repeat_read<kTable>(c, ", readMode, ");");
+    line("::cursiv::engine::ll_repeat_read<kTable>(c, ", readMode, ");");
   }
   if (flat) {
     if (inStep) over_fold();
@@ -1023,7 +1028,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   const std::string at = local(held, "::cursiv::TextOffset", "at");
   line(held ? "" : "const ::cursiv::TextOffset ", at, " = c.at;");
   const std::string level =
-      !levels ? std::string{} : local(held, "::cursiv::IndentAt", "lv");
+      !levels ? std::string{} : local(held, "::cursiv::engine::IndentAt", "lv");
   if (levels) line(held ? "" : "const auto ", level, " = c.indent;");
   if (inStep) over_fold();
   group(n.sym, guarded ? kNoRow : kAnyToken);
@@ -1093,10 +1098,10 @@ void Emit::leaf(std::uint16_t id, std::uint16_t hand, std::uint16_t row) {
   const LlNode& n = at(id);
   if (hand == n.sym)
     line("if (c.la.sym == ", n.sym,
-         "u) [[likely]] ::cursiv::ll_consume<kTable>(c, ", row, "u, ", id + 1,
-         "u); else");
-  line(hand == n.sym ? "  " : "", "::cursiv::ll_expect<kTable, ", n.mode, "u, ",
-       n.sym, "u>(c, ", row, "u, ", id + 1, "u);");
+         "u) [[likely]] ::cursiv::engine::ll_consume<kTable>(c, ", row, "u, ",
+         id + 1, "u); else");
+  line(hand == n.sym ? "  " : "", "::cursiv::engine::ll_expect<kTable, ",
+       n.mode, "u, ", n.sym, "u>(c, ", row, "u, ", id + 1, "u);");
 }
 
 void Emit::node(std::uint16_t id, std::uint16_t hand) {
@@ -1106,23 +1111,23 @@ void Emit::node(std::uint16_t id, std::uint16_t hand) {
       leaf(id, hand, n.row);
       return;
     case LlShape::endMark:
-      line("::cursiv::ll_end<kTable>(c, ", n.mode, "u);");
-      line("::cursiv::ll_flush_trivia<kTable>(c);");
+      line("::cursiv::engine::ll_end<kTable>(c, ", n.mode, "u);");
+      line("::cursiv::engine::ll_flush_trivia<kTable>(c);");
       return;
     case LlShape::condition:
       if (a.cut[n.sym].none())
-        line("::cursiv::ll_condition_node<kTable>(c, ", n.mode, "u, ", n.sym,
-             "u, ", id, "u);");
+        line("::cursiv::engine::ll_condition_node<kTable>(c, ", n.mode, "u, ",
+             n.sym, "u, ", id, "u);");
       return;
     case LlShape::implied:
-      line("::cursiv::ll_implied<kTable>(c, ", n.mode, "u, ", n.sym, "u, ",
-           n.min, "u, ", n.row, "u, ", id + 1, "u);");
+      line("::cursiv::engine::ll_implied<kTable>(c, ", n.mode, "u, ", n.sym,
+           "u, ", n.min, "u, ", n.row, "u, ", id + 1, "u);");
       return;
     case LlShape::empty:
       // Past the trivia a parent already wrote: the run's ends never decrease.
       if (n.owns)
         line(
-            "c.last = ::cursiv::ll_close<kTable>(c, c.tape.enter(), "
+            "c.last = ::cursiv::engine::ll_close<kTable>(c, c.tape.enter(), "
             "::std::max(c.at, c.triviaAt), kTable.stamp.make(",
             n.row, "u, 0));");
       return;
@@ -1192,14 +1197,15 @@ void Emit::climb(std::uint16_t r) {
   if (anyNon) line("f.limit = 255u;");
   new_search();
   const std::uint16_t m = rule_mode(cl.primary);
-  line("::cursiv::ll_peek<kTable, ", m == kNoRow ? a.errMode : m, "u>(c);");
-  line("::cursiv::ll_flush_trivia<kTable>(c);");
+  line("::cursiv::engine::ll_peek<kTable, ", m == kNoRow ? a.errMode : m,
+       "u>(c);");
+  line("::cursiv::engine::ll_flush_trivia<kTable>(c);");
   line("f.o = c.tape.enter();");
   line("f.b = c.la.begin;");
   line("f.w0 = c.last;");
   line("c.stack.push_back(", cl.atnEntry, "u, c.tape.stream().records());");
   invoke(cl.primary, "1u");
-  line("::cursiv::ll_return(c);");
+  line("::cursiv::engine::ll_return(c);");
   exits = true;
   line("if (c.give) goto done;");
   open("for (;;) {");
@@ -1208,7 +1214,7 @@ void Emit::climb(std::uint16_t r) {
   // Prediction can keep the first unfinished arm at the end of a document.
   // An infix has no operator there: consuming that zero-width EOF would
   // reset the repair budget and recursively invent another operand forever.
-  line("if (c.la.sym == ::cursiv::kEofSymbol) break;");
+  line("if (c.la.sym == ::cursiv::engine::kEofSymbol) break;");
   line("f.prec = 0;");
   if (anyRight) line("f.right = false;");
   if (anyNon) line("f.non = false;");
@@ -1217,9 +1223,9 @@ void Emit::climb(std::uint16_t r) {
   // and the right operand is read on from there; a rule's body invents its
   // own head. What the repair does not name leaves the climb.
   const auto mend = [&](std::string_view into) {
-    line(into, " = ::cursiv::ll_climb_fix<kTable>(c, ", cl.mode, "u, ",
+    line(into, " = ::cursiv::engine::ll_climb_fix<kTable>(c, ", cl.mode, "u, ",
          selectDec, "u);");
-    line("if (", into, " == ::cursiv::kLlClimbAgain) continue;");
+    line("if (", into, " == ::cursiv::engine::kLlClimbAgain) continue;");
     open("switch (", into, ") {");
     for (std::uint16_t k = 0; k < cl.opCount; ++k) {
       const LlClimbOp& op = a.cfg.climbOps[cl.opBase + k];
@@ -1237,7 +1243,7 @@ void Emit::climb(std::uint16_t r) {
       line("if (f.prec < f.least) break;");
       join(cl.leftBase, cl.leftCount, "f.w0");
       const auto& token = at(leaf);
-      line("::cursiv::ll_insert_planned<kTable>(c, ", token.sym, "u, ",
+      line("::cursiv::engine::ll_insert_planned<kTable>(c, ", token.sym, "u, ",
            token.row, "u, ", leaf + 1, "u);");
       line("goto ", invented, ";");
       close();
@@ -1252,7 +1258,7 @@ void Emit::climb(std::uint16_t r) {
     line("pos = 0;");
     if (bodies) {
       line("::std::uint16_t body;");
-      line("body = ::cursiv::kNoRow;");
+      line("body = ::cursiv::engine::kNoRow;");
     }
     open("switch (c.la.sym) {");
   } else {
@@ -1261,10 +1267,11 @@ void Emit::climb(std::uint16_t r) {
     line("bool bad;");
     line("bad = !kTable.holds(kTable.dec_first(", selectDec, "u), c.la.sym);");
     open("if (!bad) {");
-    line("op = ::cursiv::ll_predict<kTable>(c, ", selectDec, "u);");
+    line("op = ::cursiv::engine::ll_predict<kTable>(c, ", selectDec, "u);");
     line("if (op >= ", cl.opCount,
-         "u && !::cursiv::ll_climb_exits<kTable>(c, c.la.sym))");
-    line("  op = ::cursiv::ll_reading_fix<kTable>(c, ", selectDec, "u);");
+         "u && !::cursiv::engine::ll_climb_exits<kTable>(c, c.la.sym))");
+    line("  op = ::cursiv::engine::ll_reading_fix<kTable>(c, ", selectDec,
+         "u);");
     line("bad = false;");
     close("}");
     open("if (bad) {");
@@ -1304,7 +1311,7 @@ void Emit::climb(std::uint16_t r) {
     open("default:");
     line("if (kTable.holds(kTable.dec_first(", selectDec,
          "u), c.la.sym) && "
-         "::cursiv::ll_climb_exits<kTable>(c, c.la.sym)) break;");
+         "::cursiv::engine::ll_climb_exits<kTable>(c, c.la.sym)) break;");
     line("::std::uint16_t fix;");
     mend("fix");
     line("break;");
@@ -1316,7 +1323,7 @@ void Emit::climb(std::uint16_t r) {
            : "if (f.prec == 0 || f.prec < f.least) break;");
   join(cl.leftBase, cl.leftCount, "f.w0");
   if (!select && !bodies) {
-    line("::cursiv::ll_consume<kTable>(c, row, pos);");
+    line("::cursiv::engine::ll_consume<kTable>(c, row, pos);");
   } else {
     open(select ? "switch (op) {" : "switch (body) {");
     for (std::uint16_t k = 0; k < cl.opCount; ++k) {
@@ -1329,8 +1336,8 @@ void Emit::climb(std::uint16_t r) {
         // held by the wider climb alphabet. Its terminal position reads the
         // selected spelling again before consuming the operator's own span.
         const auto& token = at(leaf);
-        line("::cursiv::ll_expect<kTable, ", token.mode, "u, ", token.sym,
-             "u>(c, ", token.row, "u, ", leaf + 1, "u);");
+        line("::cursiv::engine::ll_expect<kTable, ", token.mode, "u, ",
+             token.sym, "u>(c, ", token.row, "u, ", leaf + 1, "u);");
       } else {
         group(op.body, kAnyToken);
       }
@@ -1338,7 +1345,8 @@ void Emit::climb(std::uint16_t r) {
       close("}");
     }
     line(select ? "default: break;"
-                : "default: ::cursiv::ll_consume<kTable>(c, row, pos); break;");
+                : "default: ::cursiv::engine::ll_consume<kTable>(c, row, pos); "
+                  "break;");
     close("}");
   }
   line("if (c.give) break;");
@@ -1347,10 +1355,12 @@ void Emit::climb(std::uint16_t r) {
   invoke(r, anyRight ? "f.right ? f.prec : f.prec + 1" : "f.prec + 1");
   if (anyNon) line("f.limit = f.non ? f.prec - 1u : f.prec;");
   join(cl.rightBase, cl.rightCount, "f.w1");
-  line("c.last = ::cursiv::ll_close<kTable>(c, f.o, f.b, kTable.stamp.make(",
-       cl.node,
-       "u, "
-       "0));");
+  line(
+      "c.last = ::cursiv::engine::ll_close<kTable>(c, f.o, f.b, "
+      "kTable.stamp.make(",
+      cl.node,
+      "u, "
+      "0));");
   line("if (c.give || c.at == f.before) break;");
   close("}");
 }
@@ -1375,7 +1385,7 @@ std::string Emit::resume_switch(std::size_t resumed) const {
 
 std::string Emit::step_head(std::string_view tag, std::size_t resumed) const {
   return concat("::std::uint16_t s", tag,
-                "(::cursiv::LlContext& c, void* frame) {\n"
+                "(::cursiv::engine::LlContext& c, void* frame) {\n"
                 "  auto& f = *::std::launder(static_cast<F",
                 tag, "*>(frame));\n", resume_switch(resumed));
 }
@@ -1398,7 +1408,7 @@ void Emit::rule(std::uint16_t r) {
     if (resumes != 0 || !fields.empty() || exits)
       throw std::logic_error("cursiv: a plain LL rule resumes");
     frame.clear();
-    line("void s", r, "(::cursiv::LlContext& c) {");
+    line("void s", r, "(::cursiv::engine::LlContext& c) {");
     line("  if (c.give) {\n    c.repaired.mark();\n    return;\n  }");
     write(body);
     line("}\n");
@@ -1408,10 +1418,10 @@ void Emit::rule(std::uint16_t r) {
   write(step_head(std::to_string(r), 0));
   line(
       "  if (c.give) {\n    c.repaired.mark();\n"
-      "    return ::cursiv::kLlDone;\n  }");
+      "    return ::cursiv::engine::kLlDone;\n  }");
   write(body);
   if (exits) line("done:");
-  line("  return ::cursiv::kLlDone;\n}\n");
+  line("  return ::cursiv::engine::kLlDone;\n}\n");
 }
 
 }  // namespace
@@ -1454,11 +1464,12 @@ std::string ll_emit_parser_decl(const std::string& ns) {
   std::string s;
   s += "// GENERATED by the predictive engine -- do not edit.\n";
   s += "#pragma once\n\n";
-  s += "namespace cursiv {\nstruct LlContext;\n}  // namespace cursiv\n\n";
+  s += "namespace cursiv::engine {\nstruct LlContext;\n}  // namespace "
+       "cursiv::engine\n\n";
   s += concat("namespace ", ns, " {\n");
-  s += "void parse_entry(::cursiv::LlContext&);\n";
-  s +=
-      "inline constexpr void (*kDrive)(::cursiv::LlContext&) = &parse_entry;\n";
+  s += "void parse_entry(::cursiv::engine::LlContext&);\n";
+  s += "inline constexpr void (*kDrive)(::cursiv::engine::LlContext&) = "
+       "&parse_entry;\n";
   s += concat("}  // namespace ", ns, "\n");
   return s;
 }
@@ -1487,10 +1498,11 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   // Each rule and arm is declared as a function, or as a step with its frame;
   // a step also takes the machine's case for its number and its frame's size.
   const auto declare = [&](std::string_view tag, const std::string& frame) {
-    declarations += frame.empty()
-                        ? concat("void s", tag, "(::cursiv::LlContext&);\n")
-                        : concat(frame, "::std::uint16_t s", tag,
-                                 "(::cursiv::LlContext&, void*);\n");
+    declarations +=
+        frame.empty()
+            ? concat("void s", tag, "(::cursiv::engine::LlContext&);\n")
+            : concat(frame, "::std::uint16_t s", tag,
+                     "(::cursiv::engine::LlContext&, void*);\n");
   };
   const auto step = [](std::string& steps, std::string& sizes,
                        std::uint32_t number, std::string_view tag) {
@@ -1520,8 +1532,8 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
     if (stepped[r]) {
       step(steps, sizes, r, std::to_string(r));
     } else if (r == entry) {
-      steps +=
-          concat("    case ", r, "u: s", r, "(c); return ::cursiv::kLlDone;\n");
+      steps += concat("    case ", r, "u: s", r,
+                      "(c); return ::cursiv::engine::kLlDone;\n");
       sizes += "sizeof(::std::uint16_t), ";
     } else {
       sizes += "0u, ";
@@ -1596,17 +1608,18 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
              "namespace ",
              ns, " {\n\n", table.functions, ll_emit_walk(a),
              "\nnamespace {\n"
-             "::std::uint16_t step(::std::uint16_t r, ::cursiv::LlContext& c, "
+             "::std::uint16_t step(::std::uint16_t r, "
+             "::cursiv::engine::LlContext& c, "
              "[[maybe_unused]] void* f) {\n  switch (r) {\n",
              steps,
-             "    default: return ::cursiv::kLlDone;\n  }\n}\n"
+             "    default: return ::cursiv::engine::kLlDone;\n  }\n}\n"
              "constexpr ::std::uint32_t kFrameBytes[] = {",
              sizes,
              "};\n"
              "}  // namespace\n"
-             "void parse_entry(::cursiv::LlContext& c) {\n"
+             "void parse_entry(::cursiv::engine::LlContext& c) {\n"
              "  c.stack.reserve(64);\n"
-             "  ::cursiv::LlMachine machine;\n"
+             "  ::cursiv::engine::LlMachine machine;\n"
              "  machine.run<&step>(c, ",
              entry,
              "u, kFrameBytes);\n"
@@ -1618,4 +1631,4 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   return files;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

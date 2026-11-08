@@ -8,7 +8,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr std::uint32_t kNoIndent = 0xFFFFFFFFu;
 
@@ -281,4 +281,4 @@ inline void indent_shift_invented(std::vector<IndentLevel>& arena, IndentAt& at,
     indent_shift<C>(arena, at, t);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

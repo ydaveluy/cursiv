@@ -17,7 +17,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A closer that holds a run of `pad` between `before` and the echo: the first
 // echo and `after` behind such a run and a `before`. The echo starts where the
@@ -100,4 +100,4 @@ inline TextOffset lex_relay(std::uint16_t k, const LexRelay& r,
   return s.term == static_cast<SymbolId>(r.term) ? s.end : 0;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

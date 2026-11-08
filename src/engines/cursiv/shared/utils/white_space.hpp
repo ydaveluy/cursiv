@@ -8,18 +8,19 @@
 
 #include "cursiv/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/grammar/unicode/UnicodeRanges.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/scalar_at.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 [[nodiscard]] constexpr bool white_space_only(std::string_view text) noexcept {
   for (std::size_t at = 0, len = 0; at < text.size(); at += len)
-    if (!unicode::within(
+    if (!unicode::detail::within(
             unicode::detail::kWhite_Space,
             std::size(unicode::detail::kWhite_Space),
-            detail::scalar_at(text.data() + at, text.size() - at, len)))
+            scalar_at(text.data() + at, text.size() - at, len)))
       return false;
   return true;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

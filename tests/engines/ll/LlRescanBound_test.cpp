@@ -29,8 +29,9 @@ using ll_terms::named;
 // The first of the terminals a point owes, a set of them, that are read again
 // at the end of `word`, with `text` behind the re-reading.
 template <const auto& T>
-cursiv::SymbolId owed_after(std::string_view word, std::string_view text,
-                            std::initializer_list<std::string_view> owes) {
+cursiv::engine::SymbolId owed_after(
+    std::string_view word, std::string_view text,
+    std::initializer_list<std::string_view> owes) {
   std::array<std::uint64_t, T.termWords> want{};
   for (const std::string_view name : owes) {
     const std::uint16_t t = named<T>(name);
@@ -40,15 +41,15 @@ cursiv::SymbolId owed_after(std::string_view word, std::string_view text,
   for (const char c : word)
     state = T.next_byte(state, static_cast<unsigned char>(c));
   std::uint64_t read = 0;
-  const cursiv::LlTypoTape<T> tape{
+  const cursiv::engine::LlTypoTape<T> tape{
       {{text.data(), static_cast<cursiv::TextOffset>(text.size()),
         static_cast<cursiv::TextOffset>(text.size()), &read},
        0},
       want.data()};
-  cursiv::SymbolId first = cursiv::kInvalidSymbol;
+  cursiv::engine::SymbolId first = cursiv::engine::kInvalidSymbol;
   tape.owed(state, static_cast<cursiv::TextOffset>(word.size()),
-            [&](cursiv::SymbolId t) {
-              if (first == cursiv::kInvalidSymbol) first = t;
+            [&](cursiv::engine::SymbolId t) {
+              if (first == cursiv::engine::kInvalidSymbol) first = t;
             });
   return first;
 }
@@ -60,18 +61,18 @@ void hinted_readings_agree(std::string_view first, std::string_view second) {
   const auto a = named<T>(first), b = named<T>(second);
   for (const std::string_view text : {"abc;", "abc.", "abcd;", "abcd.", "abc"})
     for (unsigned mask = 1; mask < 4; ++mask) {
-      cursiv::LlMask<T.termWords> wanted;
+      cursiv::engine::LlMask<T.termWords> wanted;
       if ((mask & 1u) != 0) wanted.set(a);
       if ((mask & 2u) != 0) wanted.set(b);
       std::vector<std::uint16_t> expected;
       cursiv::TextOffset inspected = 0;
-      const auto end = cursiv::ll_match_in<T>(
+      const auto end = cursiv::engine::ll_match_in<T>(
           text.data(), static_cast<cursiv::TextOffset>(text.size()), 0, wanted,
           expected, &inspected);
       for (std::uint16_t mode = 0; mode < T.nmodes; ++mode) {
         std::vector<std::uint16_t> read;
         cursiv::TextOffset seen = 0;
-        const auto matched = cursiv::ll_match_in<T>(
+        const auto matched = cursiv::engine::ll_match_in<T>(
             text.data(), static_cast<cursiv::TextOffset>(text.size()), 0,
             wanted, read, &seen, nullptr, nullptr, mode);
         CHECK(matched == end && read == expected);

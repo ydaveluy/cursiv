@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A `guard` is a shift the gap before the token lands: its argument names the
 // program that says where.
@@ -13,4 +13,4 @@ constexpr bool lr_takes_token(LrActionKind k) {
   return k == LrActionKind::shift || k == LrActionKind::guard;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

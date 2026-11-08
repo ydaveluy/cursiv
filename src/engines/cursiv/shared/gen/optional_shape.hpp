@@ -1,7 +1,7 @@
 // How many optional positions distribute before auxiliaries bound the body.
 #pragma once
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The most a gate may be: one alternative distributes 2^n productions and a
 // production count is sixteen bits.
@@ -16,4 +16,4 @@ static_assert(kOptionalGate <= kOptionalGateMost,
               "alternative distributes 2^n productions and a production count "
               "is sixteen bits");
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

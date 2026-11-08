@@ -4,12 +4,13 @@
 
 #include <cstdint>
 
-#include "cursiv/text/scalar_at.hpp"
 #include "cursiv/shared/runtime/LexBoundary.hpp"
 #include "cursiv/shared/runtime/LexTape.hpp"
 #include "cursiv/shared/runtime/TypoWalk.hpp"
+#include "cursiv/shared/utils/inside_scalar.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& T>
 struct TypoTape : TypoBounds {
@@ -60,4 +61,4 @@ struct TypoTape : TypoBounds {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

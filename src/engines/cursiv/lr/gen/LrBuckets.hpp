@@ -11,7 +11,7 @@
 #include "cursiv/lr/gen/LrBuildCfg.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Classes numbered at their first live state; `pick` keeps that state's id.
 // The returned map is indexed by class, not state.
@@ -79,4 +79,4 @@ inline std::vector<bool> lr_reachable(const LrBuildCfg& c,
   return live;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

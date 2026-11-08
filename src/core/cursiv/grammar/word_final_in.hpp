@@ -46,10 +46,10 @@ constexpr bool class_holds(std::uint64_t m, bool n, std::string_view spec,
                            char32_t cp) {
   bool in = spec_holds(spec, cp);
   for (unsigned i = 0;
-       !in && i < static_cast<unsigned>(unicode::Property::count); ++i)
+       !in && i < static_cast<unsigned>(unicode::detail::Property::count); ++i)
     if ((m >> i) & 1)
-      in = unicode::within(unicode::detail::kTables[i].data(),
-                           unicode::detail::kTables[i].size(), cp);
+      in = unicode::detail::within(unicode::detail::kTables[i].data(),
+                                   unicode::detail::kTables[i].size(), cp);
   return in != n;
 }
 

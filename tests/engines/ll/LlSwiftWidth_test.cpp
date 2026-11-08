@@ -45,26 +45,30 @@ void a_completed_entry_survives_an_unfinished_shorter_reading() {
 }
 void a_closing_walk_reads_the_closer() {
   constexpr const auto& table = generated::Ll::kTable;
-  std::uint16_t decision = cursiv::kNoRow;
+  std::uint16_t decision = cursiv::engine::kNoRow;
   const std::uint16_t close = ll_terms::named<table>("Close");
   // Value's loop leaves directly for Close; GuardedValue has a condition there.
   for (std::uint16_t i = 0; i < table.ndecisions; ++i)
     for (const auto& exit : table.atn.outgoing(table.decisions[i].state))
-      if (exit.kind == cursiv::LlEdgeKind::epsilon)
+      if (exit.kind == cursiv::engine::LlEdgeKind::epsilon)
         for (const auto& edge : table.atn.outgoing(exit.target))
-          if (edge.kind == cursiv::LlEdgeKind::atom && edge.label == close) {
-            CHECK(decision == cursiv::kNoRow);
+          if (edge.kind == cursiv::engine::LlEdgeKind::atom &&
+              edge.label == close) {
+            CHECK(decision == cursiv::engine::kNoRow);
             decision = i;
           }
-  CHECK(decision != cursiv::kNoRow && close != cursiv::kInvalidSymbol);
-  if (decision == cursiv::kNoRow || close == cursiv::kInvalidSymbol) return;
+  CHECK(decision != cursiv::engine::kNoRow &&
+        close != cursiv::engine::kInvalidSymbol);
+  if (decision == cursiv::engine::kNoRow ||
+      close == cursiv::engine::kInvalidSymbol)
+    return;
   const auto& dec = table.decisions[decision];
   const std::string_view text = "#\"\"\"\nx\n\"\"\"#\n";
   const auto at_the_closer = [&](auto&& ask) {
     cursiv::Cst tree(text);
     cursiv::CstBuilder builder(tree);
     builder.bind_stream();
-    cursiv::LlContext context(text, builder);
+    cursiv::engine::LlContext context(text, builder);
     context.at = 7;
     context.la = {7, 11, close};
     context.laValid = true;
@@ -72,14 +76,14 @@ void a_closing_walk_reads_the_closer() {
     context.stack.push_back(
         table.atn
             .callerAt[table.atn.callerBase[table.atn.state(dec.state).rule]]);
-    cursiv::LlPredictionSession<table> session;
+    cursiv::engine::LlPredictionSession<table> session;
     CHECK(ask(context) == 1);
   };
-  at_the_closer([&](cursiv::LlContext& context) {
-    return cursiv::ll_episode<table>(context, decision);
+  at_the_closer([&](cursiv::engine::LlContext& context) {
+    return cursiv::engine::ll_episode<table>(context, decision);
   });
-  at_the_closer([&](cursiv::LlContext& context) {
-    return cursiv::ll_predict<table>(context, decision);
+  at_the_closer([&](cursiv::engine::LlContext& context) {
+    return cursiv::engine::ll_predict<table>(context, decision);
   });
 }
 }  // namespace

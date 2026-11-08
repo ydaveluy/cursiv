@@ -39,32 +39,34 @@ namespace {
 namespace cache_test {
 constexpr const auto& base = tllconditions::generated::Ll::kTable;
 constexpr auto identifier = ll_terms::named<base>("ID");
-static_assert(identifier != cursiv::kInvalidSymbol);
+static_assert(identifier != cursiv::engine::kInvalidSymbol);
 // One choice in a rule of its own, called by the document.
-constexpr cursiv::LlAtnState states[] = {
-    {cursiv::LlAtnKind::basic, 1, 0, 0, 2},
-    {cursiv::LlAtnKind::basic, 1, cursiv::kNoRow, 2, 1},
-    {cursiv::LlAtnKind::basic, 1, cursiv::kNoRow, 3, 1},
-    {cursiv::LlAtnKind::basic, 1, cursiv::kNoRow, 4, 1},
-    {cursiv::LlAtnKind::basic, 1, cursiv::kNoRow, 5, 1},
-    {cursiv::LlAtnKind::ruleStop, 1},
-    {cursiv::LlAtnKind::basic, 0, cursiv::kNoRow, 6, 1},
-    {cursiv::LlAtnKind::ruleStop, 0}};
-constexpr cursiv::LlAtnEdge edges[] = {
-    {cursiv::LlEdgeKind::epsilon, 0, 1},
-    {cursiv::LlEdgeKind::epsilon, 0, 2},
-    {cursiv::LlEdgeKind::condition, 0, 3},
-    {cursiv::LlEdgeKind::condition, 1, 4},
-    {cursiv::LlEdgeKind::atom, identifier, 5},
-    {cursiv::LlEdgeKind::atom, identifier, 5},
-    {cursiv::LlEdgeKind::rule, 1, 0, 7}};
+constexpr cursiv::engine::LlAtnState states[] = {
+    {cursiv::engine::LlAtnKind::basic, 1, 0, 0, 2},
+    {cursiv::engine::LlAtnKind::basic, 1, cursiv::engine::kNoRow, 2, 1},
+    {cursiv::engine::LlAtnKind::basic, 1, cursiv::engine::kNoRow, 3, 1},
+    {cursiv::engine::LlAtnKind::basic, 1, cursiv::engine::kNoRow, 4, 1},
+    {cursiv::engine::LlAtnKind::basic, 1, cursiv::engine::kNoRow, 5, 1},
+    {cursiv::engine::LlAtnKind::ruleStop, 1},
+    {cursiv::engine::LlAtnKind::basic, 0, cursiv::engine::kNoRow, 6, 1},
+    {cursiv::engine::LlAtnKind::ruleStop, 0}};
+constexpr cursiv::engine::LlAtnEdge edges[] = {
+    {cursiv::engine::LlEdgeKind::epsilon, 0, 1},
+    {cursiv::engine::LlEdgeKind::epsilon, 0, 2},
+    {cursiv::engine::LlEdgeKind::condition, 0, 3},
+    {cursiv::engine::LlEdgeKind::condition, 1, 4},
+    {cursiv::engine::LlEdgeKind::atom, identifier, 5},
+    {cursiv::engine::LlEdgeKind::atom, identifier, 5},
+    {cursiv::engine::LlEdgeKind::rule, 1, 0, 7}};
 constexpr std::uint32_t starts[] = {6, 0}, callers[] = {0, 0, 1},
                         returns[] = {7};
-constexpr cursiv::LlTable::Decision decisions[] = {
-    {.how = cursiv::LlPredict::adaptive, .mode = base.errMode, .state = 0}};
+constexpr cursiv::engine::LlTable::Decision decisions[] = {
+    {.how = cursiv::engine::LlPredict::adaptive,
+     .mode = base.errMode,
+     .state = 0}};
 bool line_condition(const char* text, cursiv::TextOffset len, unsigned k,
-                    const cursiv::Token& token, cursiv::TextOffset from, bool,
-                    cursiv::TextOffset*) {
+                    const cursiv::engine::Token& token, cursiv::TextOffset from,
+                    bool, cursiv::TextOffset*) {
   const auto end = std::min(token.begin, len);
   const bool line =
       std::string_view(text + std::min(from, end), end - std::min(from, end))
@@ -72,9 +74,9 @@ bool line_condition(const char* text, cursiv::TextOffset len, unsigned k,
   return k == 0 ? line : !line;
 }
 bool end_condition(const char*, cursiv::TextOffset len, unsigned k,
-                   const cursiv::Token& token, cursiv::TextOffset, bool atEnd,
-                   cursiv::TextOffset*) {
-  const bool end = atEnd || cursiv::gap_end(len, token);
+                   const cursiv::engine::Token& token, cursiv::TextOffset,
+                   bool atEnd, cursiv::TextOffset*) {
+  const bool end = atEnd || cursiv::engine::gap_end(len, token);
   return k == 0 ? end : !end;
 }
 constexpr auto gapTable = [] {
@@ -89,7 +91,7 @@ constexpr auto gapTable = [] {
   t.ngapConds = 2;
   return t;
 }();
-constexpr std::uint16_t sectionEnds[] = {identifier, cursiv::kNoRow};
+constexpr std::uint16_t sectionEnds[] = {identifier, cursiv::engine::kNoRow};
 constexpr auto sectionTable = [] {
   auto t = gapTable;
   t.condition = end_condition;
@@ -111,25 +113,25 @@ struct Asking {
     context.at = at;
     context.triviaAt = at;
     context.laValid = false;
-    context.laMode = cursiv::kInvalidSymbol;
+    context.laMode = cursiv::engine::kInvalidSymbol;
     context.section = section;
-    cursiv::ll_peek<T>(context, T.decisions[0].mode);
-    cursiv::ll_episode_engine<T>().abandon();
-    cursiv::ll_episode_cache<T>().plan.clear();
-    return cursiv::ll_episode<T>(context, 0);
+    cursiv::engine::ll_peek<T>(context, T.decisions[0].mode);
+    cursiv::engine::ll_episode_engine<T>().abandon();
+    cursiv::engine::ll_episode_cache<T>().plan.clear();
+    return cursiv::engine::ll_episode<T>(context, 0);
   }
 
   std::string_view text;
   cursiv::Cst tree;
   cursiv::CstBuilder builder;
-  cursiv::LlContext context;
+  cursiv::engine::LlContext context;
 };
 }  // namespace cache_test
 
 void predictions_keep_the_gap_and_embedded_section() {
   using namespace cache_test;
   {
-    cursiv::LlPredictionSession<gapTable> session;
+    cursiv::engine::LlPredictionSession<gapTable> session;
     Asking<gapTable> at(" name;\nname;  name; name;\n\nname;");
     CHECK(at(0) == 1);
     CHECK(at(6) == 0);
@@ -137,7 +139,7 @@ void predictions_keep_the_gap_and_embedded_section() {
     CHECK(at(19) == 1);
   }
   {
-    cursiv::LlPredictionSession<sectionTable> session;
+    cursiv::engine::LlPredictionSession<sectionTable> session;
     Asking<sectionTable> at(" name;");
     CHECK(at(0, 1) == 0);
     CHECK(at(0, 2) == 1);
@@ -154,10 +156,11 @@ void a_choice_that_meets_no_condition_reads_a_nest_once() {
   for (const unsigned n : {256u, 512u, 1024u}) {
     std::string text = "nest:";
     for (unsigned i = 0; i < n; ++i) text += "1+(";
-    cursiv::LlPredictionWork::current() = {};
+    cursiv::engine::LlPredictionWork::current() = {};
     const std::string input = text + "1";
     const auto a = ll->parse(input);
-    const std::uint64_t after = cursiv::LlPredictionWork::current().tokens;
+    const std::uint64_t after =
+        cursiv::engine::LlPredictionWork::current().tokens;
     CHECK(a.accepted && !a.diagnostics.empty());
     const bool within = before == 0 || after <= 2.2 * before;
     CHECK(within);
@@ -274,7 +277,7 @@ void a_normal_continuation_blocks_an_implied_token() {
 namespace refused_test {
 constexpr const auto& base = tllconditions::generated::Ll::kTable;
 constexpr std::size_t kWords = std::size_t{base.nmodes} * base.termWords +
-                               (cursiv::kInvalidSymbol >> 6) + 1u;
+                               (cursiv::engine::kInvalidSymbol >> 6) + 1u;
 constexpr auto admitAll = [] {
   std::array<std::uint64_t, kWords> words{};
   words.fill(~std::uint64_t{0});
@@ -292,11 +295,13 @@ void an_implied_position_reads_a_refused_token_again() {
   cursiv::Cst tree("abc");
   cursiv::CstBuilder builder(tree);
   builder.bind_stream();
-  const cursiv::LlContext context(tree.text(), builder);
+  const cursiv::engine::LlContext context(tree.text(), builder);
   for (std::uint16_t mode = 0; mode < base.nmodes; ++mode) {
     if (!base.mode_admits(mode, cache_test::identifier)) continue;
-    const cursiv::Token read = cursiv::ll_normal_token<refused_test::open>(
-        context, cursiv::Token{0, 0, cursiv::kInvalidSymbol}, mode);
+    const cursiv::engine::Token read =
+        cursiv::engine::ll_normal_token<refused_test::open>(
+            context,
+            cursiv::engine::Token{0, 0, cursiv::engine::kInvalidSymbol}, mode);
     CHECK(read.sym == cache_test::identifier && read.begin == 0 &&
           read.end == 3);
   }
@@ -314,18 +319,20 @@ void prediction_crosses_only_the_active_trivia() {
 void document_end_elects_default_trivia_before_other_regions() {
   constexpr const auto& table = tllconditions::generated::TriviaLl::kTable;
   const std::string_view text = "f=a; \n/*tail*/\n";
-  const auto scan =
-      cursiv::ll_match_text<table>(text.data(), text.size(), table.errMode, 4);
-  CHECK(scan.term != cursiv::kInvalidSymbol && !table.terms[scan.term].trivia);
+  const auto scan = cursiv::engine::ll_match_text<table>(
+      text.data(), text.size(), table.errMode, 4);
+  CHECK(scan.term != cursiv::engine::kInvalidSymbol &&
+        !table.terms[scan.term].trivia);
   cursiv::Cst tree(text);
   cursiv::CstBuilder builder(tree);
   builder.bind_stream();
-  builder.leaf(0, 4, cursiv::StampLayout{}.make(cursiv::kNoRow, 0));
-  cursiv::LlContext context(text, builder);
+  builder.leaf(0, 4,
+               cursiv::engine::StampLayout{}.make(cursiv::engine::kNoRow, 0));
+  cursiv::engine::LlContext context(text, builder);
   context.at = 4;
-  CHECK(cursiv::ll_tail<table>(context));
-  cursiv::ll_flush_trivia<table>(context);
-  CHECK(!context.repaired && context.la.sym == cursiv::kEofSymbol);
+  CHECK(cursiv::engine::ll_tail<table>(context));
+  cursiv::engine::ll_flush_trivia<table>(context);
+  CHECK(!context.repaired && context.la.sym == cursiv::engine::kEofSymbol);
   CHECK(context.triviaAt == text.size());
   CHECK(tree.size() == 2 && tree[1].hidden && !tree[1].recovered);
   CHECK(tree[1].begin == 6 && tree[1].end == 14);
@@ -384,13 +391,14 @@ void a_given_up_tag_leaves_no_node() {
 }
 
 void predicates_survive_lowering_and_prevent_static_token_decisions() {
-  const auto low = cursiv::LlLowering<tllconditions::Ll>::lower();
+  const auto low = cursiv::engine::LlLowering<tllconditions::Ll>::lower();
   CHECK(!low.cfg.lowerFail() && !low.fault);
   CHECK(low.cfg.ngapConds >= 4);
   bool hasCondition = false, hasImplied = false;
   for (const auto& node : low.cfg.nodes.v) {
-    hasCondition = hasCondition || node.kind == cursiv::LlShape::condition;
-    hasImplied = hasImplied || node.kind == cursiv::LlShape::implied;
+    hasCondition =
+        hasCondition || node.kind == cursiv::engine::LlShape::condition;
+    hasImplied = hasImplied || node.kind == cursiv::engine::LlShape::implied;
   }
   CHECK(hasCondition && hasImplied);
   // The guarded operator of `Sum`.
@@ -398,27 +406,27 @@ void predicates_survive_lowering_and_prevent_static_token_decisions() {
   for (std::uint16_t i = 0; i < low.cfg.nclimbOps && !guarded; ++i) {
     const auto body = low.cfg.climbOps[i].body;
     const auto& op = low.cfg.nodes[body];
-    if (op.kind != cursiv::LlShape::seq) continue;
+    if (op.kind != cursiv::engine::LlShape::seq) continue;
     guarded = true;
     CHECK(op.count == 2);
     CHECK(low.cfg.nodes[low.cfg.kids[op.sym]].kind ==
-          cursiv::LlShape::condition);
-    CHECK(low.cfg.atomic_operator(body) != cursiv::kNoRow);
+          cursiv::engine::LlShape::condition);
+    CHECK(low.cfg.atomic_operator(body) != cursiv::engine::kNoRow);
   }
   CHECK(guarded);
-  const auto built = cursiv::ll_build_program(low);
+  const auto built = cursiv::engine::ll_build_program(low);
   CHECK(!built.fault && !built.overflow);
   CHECK(built.nadaptive != 0);
 }
 
 // A condition past what a table names is refused by name, not wrapped.
 void conditions_past_the_table_are_refused() {
-  auto low = cursiv::LlLowering<tllconditions::Ll>::lower();
-  low.cfg.ngapConds = cursiv::kGapConds;
+  auto low = cursiv::engine::LlLowering<tllconditions::Ll>::lower();
+  low.cfg.ngapConds = cursiv::engine::kGapConds;
   const std::uint16_t one[] = {0};
-  CHECK(low.cfg.gap_conjoin(one) == cursiv::kNoRow);
-  CHECK(low.cfg.lowerWhy == cursiv::LowerFail::gapTooMany);
-  CHECK(low.cfg.ngapConds == cursiv::kGapConds);
+  CHECK(low.cfg.gap_conjoin(one) == cursiv::engine::kNoRow);
+  CHECK(low.cfg.lowerWhy == cursiv::engine::LowerFail::gapTooMany);
+  CHECK(low.cfg.ngapConds == cursiv::engine::kGapConds);
 }
 
 struct Doc : cursiv::Extends<cursiv::AstNode> {};
@@ -429,10 +437,10 @@ struct Arrow : cursiv::GrammarSpec {
 };
 
 void a_condition_that_reads_a_run_without_end_is_warned_of() {
-  const auto arrow = cursiv::LlLowering<Arrow>::lower();
+  const auto arrow = cursiv::engine::LlLowering<Arrow>::lower();
   const auto& found = arrow.cfg.unbounded;
   CHECK(found.size() == 1);
-  CHECK(cursiv::unbounded_condition_text(
+  CHECK(cursiv::engine::unbounded_condition_text(
             arrow.cfg, arrow.cfg.rule_name(found[0].rule), found[0])
             .find("rule `Root` has a condition that matches `('-')+` with "
                   "no length limit") != std::string::npos);
@@ -449,7 +457,7 @@ struct Comments : cursiv::GrammarSpec {
 };
 
 void runs_spelt_alike_are_told_apart_by_what_they_read() {
-  const auto comments = cursiv::LlLowering<Comments>::lower();
+  const auto comments = cursiv::engine::LlLowering<Comments>::lower();
   CHECK(comments.cfg.unbounded.size() == 2);
 }
 
@@ -460,7 +468,7 @@ namespace gap_conditions {
 namespace {
 
 bool guarded_head(const char* text, cursiv::TextOffset len, unsigned,
-                  const cursiv::Token& token, cursiv::TextOffset, bool,
+                  const cursiv::engine::Token& token, cursiv::TextOffset, bool,
                   cursiv::TextOffset* seen) {
   if (seen != nullptr)
     *seen =
@@ -468,22 +476,24 @@ bool guarded_head(const char* text, cursiv::TextOffset len, unsigned,
   const std::string_view input(text, len);
   return input.starts_with('a') && !input.starts_with("abcdef");
 }
-constexpr cursiv::LlTable headTable{.condition = guarded_head, .ngapConds = 1};
+constexpr cursiv::engine::LlTable headTable{.condition = guarded_head,
+                                            .ngapConds = 1};
 
 void prediction_keeps_head_guard_reads_beyond_the_candidate() {
   for (const std::string_view text : {"abcdef trailer", "abcdeg trailer", "a"}) {
     cursiv::Cst tree(text);
     cursiv::CstBuilder builder(tree);
     builder.bind_stream();
-    cursiv::LlContext context(text, builder);
-    cursiv::LlLookRead dependency;
-    const auto answer = cursiv::ll_predict_condition<headTable>(
+    cursiv::engine::LlContext context(text, builder);
+    cursiv::engine::LlLookRead dependency;
+    const auto answer = cursiv::engine::ll_predict_condition<headTable>(
         context, 0, {0, 1, 1}, 0, dependency);
     CHECK(answer == (text != "abcdef trailer"));
     CHECK(dependency.inspected == std::min<std::size_t>(text.size(), 7));
     CHECK(dependency.ended == (text.size() <= 7));
     dependency = {};
-    cursiv::ll_predict_condition<headTable>(context, 0, {0, 0, 1}, 0, dependency);
+    cursiv::engine::ll_predict_condition<headTable>(context, 0, {0, 0, 1}, 0,
+                                                    dependency);
     CHECK(dependency.inspected == text.size() && dependency.ended);
   }
 }

@@ -10,12 +10,12 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/shared/gen/AstRowGen.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
-namespace cursiv {
-
+namespace cursiv::engine {
 
 // What one entry answers: the members its run writes on either side of the
 // node it makes, the site it is named by, and the rule a conversion names.
@@ -24,7 +24,7 @@ struct RecordGen {
   std::vector<std::string_view> over;
   bool made = false;
   std::string_view feature;
-  std::uint16_t typeSlot = detail::kNoIndex;
+  std::uint16_t typeSlot = kNoIndex;
   std::uint8_t narrow = kNoNarrow;
   std::string_view rule;
   std::string_view doc;
@@ -68,4 +68,4 @@ std::string emit_records(std::string_view ns,
 
 std::string emit_records_decl(std::string_view ns);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

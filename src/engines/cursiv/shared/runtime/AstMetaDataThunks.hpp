@@ -10,12 +10,13 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "cursiv/shared/runtime/ast_fields.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/utils/typelist.hpp"
-#include "cursiv/shared/runtime/ast_fields.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // The tag answers its own family: a tag carries the closure of its bases,
 // so the question is about the class and no grammar is consulted.
@@ -35,7 +36,7 @@ template <class F, class Node>
 auto& ref_of(Node& owner, std::uint32_t index) noexcept {
   using Owner =
       cond_t<std::is_const_v<Node>, const typename F::owner, typename F::owner>;
-  auto& m = detail::ast_cast_unchecked<Owner>(&owner)->*F::ptr;
+  auto& m = ast_cast_unchecked<Owner>(&owner)->*F::ptr;
   if constexpr (F::storage == FieldStorage::vector)
     return m[index];
   else if constexpr (F::storage == FieldStorage::optional)
@@ -115,7 +116,7 @@ consteval RefOps ref_ops_of() {
             },
         .state =
             [](const AstNode& o, std::uint32_t i) noexcept {
-              return cursiv::detail::public_ref_state(ref_state_raw<F>(o, i));
+              return public_ref_state(ref_state_raw<F>(o, i));
             },
         .size = [](const AstNode& o, std::uint32_t i) noexcept -> std::size_t {
           if (ref_state_raw<F>(o, i) != RefState::Resolved) return 0;
@@ -170,4 +171,4 @@ consteval const AstTypeTag* reference_tag_of() {
     return nullptr;
 }
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

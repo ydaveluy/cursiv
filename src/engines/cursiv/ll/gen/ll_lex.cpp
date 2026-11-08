@@ -29,7 +29,7 @@
 #include "cursiv/shared/gen/lex_reserve.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 namespace {
 
 // What each section's grammar reads, by the section's own configuration: the
@@ -519,4 +519,4 @@ void ll_build_lexer(LlBuiltProgram& b, LexAlphabet& alpha,
   ll_flag_choices(b, alpha, modes, walks);
 }
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

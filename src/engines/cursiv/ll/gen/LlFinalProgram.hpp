@@ -12,7 +12,7 @@
 #include "cursiv/ll/gen/LlBuiltProgram.hpp"
 #include "cursiv/ll/gen/LlStampPlan.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The built program, checked and planned, held read-only: no write reaches a
 // row an emitter reads. It is the program that was handed in, not a copy.
@@ -39,4 +39,4 @@ class LlFinalProgram {
   LlStampPlan _plan;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

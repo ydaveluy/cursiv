@@ -9,7 +9,7 @@
 #include "cursiv/lr/gen/LrBuildCfg.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline std::uint16_t lr_intern_name(LrBuildCfg& c, std::string_view text) {
   if (text.empty()) return c.nameLen;
@@ -21,4 +21,4 @@ inline std::uint16_t lr_intern_name(LrBuildCfg& c, std::string_view text) {
   return off;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

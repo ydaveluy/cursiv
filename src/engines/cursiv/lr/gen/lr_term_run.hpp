@@ -7,7 +7,7 @@
 #include <span>
 #include <utility>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The run `t` owns in a row of `n` cells, as an offset and a length.
 template <class Cell>
@@ -30,4 +30,4 @@ void lr_each_run(const Cell* row, std::size_t n, F&& f) {
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

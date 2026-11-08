@@ -5,7 +5,7 @@
 #include "cursiv/shared/gen/GrammarFault.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The rule an author wrote that `nt` stands for: an auxiliary is told on its
 // owner.
@@ -45,4 +45,4 @@ std::string lr_fault_message(const LrLowered& o,
       written, grammar_fault_cycle(cycle));
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlPredictionWork {
   std::uint64_t tokens = 0;
@@ -17,4 +17,4 @@ struct LlPredictionWork {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

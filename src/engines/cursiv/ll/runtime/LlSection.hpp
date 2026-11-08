@@ -3,10 +3,10 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlSection {
   std::uint8_t section = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

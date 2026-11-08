@@ -19,36 +19,38 @@
 // `How` is `extern` where they are only declared, empty where they are
 // defined. The names are spelt without a leading `::`, which would run into
 // the return type. Those every table has...
-#define CURSIV_LL_COLD_PATHS(How, T)                                           \
-  How template void cursiv::ll_peek_read<T>(::cursiv::LlContext&,              \
-                                            ::std::uint16_t, ::cursiv::Scan);  \
-  How template void cursiv::ll_expect_repair<T>(                               \
-      ::cursiv::LlContext&, ::std::uint16_t, ::std::uint16_t, ::std::uint16_t, \
-      ::std::uint16_t, ::std::uint16_t);                                       \
-  How template void cursiv::ll_expect_arm<T>(::cursiv::LlContext&,             \
-                                             const ::cursiv::LlTermArm&);      \
-  How template bool cursiv::ll_drop<T>(::cursiv::LlContext&);                  \
-  How template ::std::uint16_t cursiv::ll_choice_fix<T>(                       \
-      ::cursiv::LlContext&, ::std::uint16_t, ::std::uint16_t);                 \
-  How template ::std::uint8_t cursiv::ll_loop_fix<T>(                          \
-      ::cursiv::LlContext&, ::std::uint16_t, ::std::uint16_t)
+#define CURSIV_LL_COLD_PATHS(How, T)                                          \
+  How template void cursiv::engine::ll_peek_read<T>(                          \
+      ::cursiv::engine::LlContext&, ::std::uint16_t, ::cursiv::engine::Scan); \
+  How template void cursiv::engine::ll_expect_repair<T>(                      \
+      ::cursiv::engine::LlContext&, ::std::uint16_t, ::std::uint16_t,         \
+      ::std::uint16_t, ::std::uint16_t, ::std::uint16_t);                     \
+  How template void cursiv::engine::ll_expect_arm<T>(                         \
+      ::cursiv::engine::LlContext&, const ::cursiv::engine::LlTermArm&);      \
+  How template bool cursiv::engine::ll_drop<T>(::cursiv::engine::LlContext&); \
+  How template ::std::uint16_t cursiv::engine::ll_choice_fix<T>(              \
+      ::cursiv::engine::LlContext&, ::std::uint16_t, ::std::uint16_t);        \
+  How template ::std::uint8_t cursiv::engine::ll_loop_fix<T>(                 \
+      ::cursiv::engine::LlContext&, ::std::uint16_t, ::std::uint16_t)
 
 // ...those of a table whose descent asks the prediction...
-#define CURSIV_LL_PREDICT_COLD_PATHS(How, T)                                   \
-  How template ::std::uint16_t cursiv::ll_episode<T>(::cursiv::LlContext&,     \
-                                                     ::std::uint16_t);         \
-  How template ::std::uint16_t cursiv::ll_reading_fix<T>(::cursiv::LlContext&, \
-                                                         ::std::uint16_t);     \
-  How template bool cursiv::ll_loop_leaves<T>(::cursiv::LlContext&,            \
-                                              ::std::uint16_t)
+#define CURSIV_LL_PREDICT_COLD_PATHS(How, T)                      \
+  How template ::std::uint16_t cursiv::engine::ll_episode<T>(     \
+      ::cursiv::engine::LlContext&, ::std::uint16_t);             \
+  How template ::std::uint16_t cursiv::engine::ll_reading_fix<T>( \
+      ::cursiv::engine::LlContext&, ::std::uint16_t);             \
+  How template bool cursiv::engine::ll_loop_leaves<T>(            \
+      ::cursiv::engine::LlContext&, ::std::uint16_t)
 
 // ...those of a table with conditions...
-#define CURSIV_LL_CONDITION_COLD_PATHS(How, T)    \
-  How template void cursiv::ll_condition_node<T>( \
-      ::cursiv::LlContext&, ::std::uint16_t, ::std::uint16_t, ::std::uint16_t)
+#define CURSIV_LL_CONDITION_COLD_PATHS(How, T)                        \
+  How template void cursiv::engine::ll_condition_node<T>(             \
+      ::cursiv::engine::LlContext&, ::std::uint16_t, ::std::uint16_t, \
+      ::std::uint16_t)
 
 // ...and those of a table with a precedence climb.
-#define CURSIV_LL_CLIMB_COLD_PATHS(How, T)                     \
-  How template ::std::uint16_t cursiv::ll_climb_fix<T>(        \
-      ::cursiv::LlContext&, ::std::uint16_t, ::std::uint16_t); \
-  How template bool cursiv::ll_climb_reads_on<T>(const ::cursiv::LlContext&)
+#define CURSIV_LL_CLIMB_COLD_PATHS(How, T)                             \
+  How template ::std::uint16_t cursiv::engine::ll_climb_fix<T>(        \
+      ::cursiv::engine::LlContext&, ::std::uint16_t, ::std::uint16_t); \
+  How template bool cursiv::engine::ll_climb_reads_on<T>(              \
+      const ::cursiv::engine::LlContext&)

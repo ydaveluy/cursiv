@@ -10,7 +10,7 @@
 #include "cursiv/shared/runtime/PredicateState.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // What a condition answered from one round of a run, and how far it read.
 struct PredicateRunAnswer {
@@ -65,4 +65,4 @@ bool predicate_run(PredicateRuns* runs, std::uint32_t run,
                    const char* src, TextOffset len, PredicateState cur,
                    TextOffset* seen);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

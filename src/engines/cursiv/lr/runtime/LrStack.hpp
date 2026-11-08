@@ -9,7 +9,7 @@
 #include "cursiv/utils/macros.hpp"
 #include "cursiv/lr/runtime/LrFrame.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Not a vector: a reduce drops frames by a subtraction, where
 // `vector::resize` pays a divide and a call.
@@ -99,4 +99,4 @@ class LrStack {
   std::uint32_t _cap = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

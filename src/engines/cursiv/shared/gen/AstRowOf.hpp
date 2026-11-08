@@ -13,13 +13,9 @@
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/GrammarUtils.hpp"
-#include "cursiv/syntax-tree/AstField.hpp"
-#include "cursiv/syntax-tree/AstNode.hpp"
-#include "cursiv/utils/TypeName.hpp"
-#include "cursiv/utils/typelist.hpp"
 #include "cursiv/shared/gen/AstRegistryBuilder.hpp"
-#include "cursiv/shared/gen/GrammarRefusals.hpp"
 #include "cursiv/shared/gen/GrammarBindings.hpp"
+#include "cursiv/shared/gen/GrammarRefusals.hpp"
 #include "cursiv/shared/gen/Row.hpp"
 #include "cursiv/shared/gen/RowOf.hpp"
 #include "cursiv/shared/gen/WritesOnce.hpp"
@@ -28,10 +24,13 @@
 #include "cursiv/shared/runtime/AstConvThunks.hpp"
 #include "cursiv/shared/runtime/ast_conv.hpp"
 #include "cursiv/shared/runtime/ast_fields.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/syntax-tree/AstField.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/utils/TypeName.hpp"
+#include "cursiv/utils/typelist.hpp"
 
-namespace cursiv {
-
-namespace detail {
+namespace cursiv::engine {
 
 // A data member pointer holds the member's offset in its class, which orders
 // the members of one class as it declares them.
@@ -123,7 +122,7 @@ consteval AstRowDesc make_row() {
       g.rule = type_name<typename Row::type>();
     g.dataRule = is_data_rule<typename Row::type>;
     // The text path runs an override's converter, which the row type drops.
-    using O = ov::slot_decl_t<typename Row::source>;
+    using O = detail::ov::slot_decl_t<typename Row::source>;
     using Cv = site_conv_t<typename Row::type, O>;
     if constexpr ((is_terminal_rule<typename Row::type> ||
                    is_data_rule<typename Row::type>) &&
@@ -167,7 +166,7 @@ consteval AstRowDesc make_row() {
     using M = conv_target_t<F>;
     // A converter is named by the rule the author declared.
     using D = declared_of_t<typename Src::rule>;
-    using O = ov::slot_decl_t<typename Src::rule>;
+    using O = detail::ov::slot_decl_t<typename Src::rule>;
     static_assert(
         std::is_same_v<converter_rule_t<typename Src::rule>, site_conv_t<D, O>>,
         "the converter this site runs is not the one the author's "
@@ -200,17 +199,15 @@ inline constexpr AstRowDesc kRow = make_row<Stage, R>();
 template <class Stage, class... Rs>
 inline constexpr const AstRowDesc* kRows[1 + sizeof...(Rs)] = {nullptr, &kRow<Stage, Rs>...};
 
-}  // namespace detail
-
 template <class G, class Low>
-AstRegistry ast_registry(std::string_view grammar = detail::raw_type_name<G>()) {
+AstRegistry ast_registry(std::string_view grammar = raw_type_name<G>()) {
   using Rows = typename Low::actions;
   using Stage = typename Low::stage;
   // Grammar law: the entry rule produces a node, which is what lets the
   // builder's `result()` read the bottom of the stack instead of searching it.
   // A terminal or data-rule entry would push nothing.
-  static_assert(detail::is_node_rule<typename Normalize<G>::entry> ||
-                    detail::is_infix_rule<typename Normalize<G>::entry>,
+  static_assert(is_node_rule<typename Normalize<G>::entry> ||
+                    is_infix_rule<typename Normalize<G>::entry>,
                 "the entry rule of this grammar builds no AST node: it is a "
                 "terminal or a data rule -- make `entry` a rule that builds "
                 "the root node");
@@ -218,35 +215,33 @@ AstRegistry ast_registry(std::string_view grammar = detail::raw_type_name<G>()) 
   // directive to refuse it: the check lives on the rule and is put in force
   // here, where the rules the build reached are named.
   static_assert(
-      detail::infix_rules_ok<Stage, Low::rewrite::template infix_src>(
+      infix_rules_ok<Stage, Low::rewrite::template infix_src>(
           typename Low::rules{}),
       "an infix rule of this grammar is refused: the message above says which");
-  static_assert(
-      detail::bases_stated(typename detail::ast_classes<Rows>::type{}));
+  static_assert(bases_stated(typename ast_classes<Rows>::type{}));
   // Every directive of every rule, asked of the member it names here: the
   // builder would otherwise meet the mistake one position at a time, with no
   // member left to name in the message.
   static_assert(
       []<class... Rs>(TypeList<Rs...>) consteval {
         return (
-            (detail::payloads_ok<typename Stage::template body<Rs>>::value &&
-             detail::writes_once_ok<Stage, Rs,
-                                    typename Stage::template body<Rs>>) &&
+            (payloads_ok<typename Stage::template body<Rs>>::value &&
+             writes_once_ok<Stage, Rs, typename Stage::template body<Rs>>) &&
             ...);
       }(typename Low::rules{}),
       "a directive of this grammar names a member that cannot take its "
       "value: the message above says which");
   const auto rows = [&]<class... Rs>(TypeList<Rs...>) {
-    return std::span<const AstRowDesc* const>(detail::kRows<Stage, Rs...> + 1,
+    return std::span<const AstRowDesc* const>(kRows<Stage, Rs...> + 1,
                                               sizeof...(Rs));
   }(Rows{});
   const auto types = []<class... Ts>(TypeList<Ts...>) {
-    return std::array<const AstTypeDesc*, sizeof...(Ts)>{&detail::kType<Ts>...};
-  }(typename detail::GrammarBindings<G>::types{});
+    return std::array<const AstTypeDesc*, sizeof...(Ts)>{&kType<Ts>...};
+  }(typename GrammarBindings<G>::types{});
   const auto rules = []<class... Rs>(TypeList<Rs...>) {
-    return std::array<const AstTypeDesc*, sizeof...(Rs)>{&detail::kType<Rs>...};
-  }(typename detail::GrammarBindings<G>::rules{});
+    return std::array<const AstTypeDesc*, sizeof...(Rs)>{&kType<Rs>...};
+  }(typename GrammarBindings<G>::rules{});
   return build_ast_registry(rows, types, rules, grammar);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -7,7 +7,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // "The construction closed no automaton here."
 inline constexpr std::uint32_t kLlNoDfa = 0xFFFFFFFFu;
@@ -34,4 +34,4 @@ struct LlDfaEdge {
   constexpr bool operator==(const LlDfaEdge&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

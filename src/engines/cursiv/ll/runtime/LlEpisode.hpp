@@ -30,7 +30,7 @@
 #include "cursiv/ll/table/LlSimulation.hpp"
 #include "cursiv/ll/table/LlTable.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The arm of the first decision every reading stands for, `kNoRow` while more
 // than one does.
@@ -1677,4 +1677,4 @@ inline LlEpisode<T>& ll_episode_engine() {
   return engine;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

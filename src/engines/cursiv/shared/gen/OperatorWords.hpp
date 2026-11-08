@@ -12,7 +12,7 @@
 
 #include "cursiv/utils/StrongComponents.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class OperatorWords {
  public:
@@ -152,4 +152,4 @@ struct OperatorWordsWalk {
   std::vector<std::optional<OperatorWords>> known;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

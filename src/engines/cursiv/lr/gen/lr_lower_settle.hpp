@@ -23,7 +23,7 @@
 #include "cursiv/utils/StrongComponents.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Productions `drop` accepts are removed in place, `startProd` recalled onto
 // its survivor, and the rows past the count truncated.
@@ -763,4 +763,4 @@ inline void lr_settle_infix_ops(LrLowered& o) {
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

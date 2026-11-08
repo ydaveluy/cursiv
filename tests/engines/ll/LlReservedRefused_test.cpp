@@ -108,36 +108,37 @@ void check(const cursiv::Parser& ll, const cursiv::Parser* lr, Spell spell,
 
 // The re-readings of the text as the name its start owes: the state, or the
 // point, that takes a name and the keyword beside it.
-std::vector<cursiv::Typo> lr_names(std::string_view text) {
+std::vector<cursiv::engine::Typo> lr_names(std::string_view text) {
   namespace lr = tllrefused::generated::Lr;
   cursiv::Cst cst(text);
   cursiv::CstBuilder builder(cst);
-  cursiv::LrContext c(text, builder);
+  cursiv::engine::LrContext c(text, builder);
   std::uint64_t read = 0;
   bool cut = false;
-  return cursiv::lr_rescan_candidates<lr::kTable>(
+  return cursiv::engine::lr_rescan_candidates<lr::kTable>(
       c, 0, 0, static_cast<cursiv::TextOffset>(text.size()), read, cut);
 }
 
-std::vector<cursiv::Typo> ll_names(std::string_view text) {
+std::vector<cursiv::engine::Typo> ll_names(std::string_view text) {
   namespace ll = tllrefused::generated::Ll;
   constexpr const auto& table = ll::kTable;
   cursiv::Cst cst(text);
   cursiv::CstBuilder builder(cst);
-  cursiv::LlContext c(text, builder);
+  cursiv::engine::LlContext c(text, builder);
   const auto name =
-      cursiv::ll_match_text<table>("inx", 3, table.errMode, 0).term;
+      cursiv::engine::ll_match_text<table>("inx", 3, table.errMode, 0).term;
   std::array<std::uint64_t, table.termWords> want{};
   want[name >> 6] |= std::uint64_t{1} << (name & 63u);
   // The whole text is within reach of the walk.
   const auto len = static_cast<cursiv::TextOffset>(text.size());
   const cursiv::TextOffset plain =
-      cursiv::ll_match_text<table>(c.src, len, table.errMode, 0).end;
+      cursiv::engine::ll_match_text<table>(c.src, len, table.errMode, 0).end;
   std::uint64_t read = 0;
   bool cut = false;
-  cursiv::TypoCandidates found;
-  cursiv::ll_rescan_within<table>(c, table.errMode, want.data(), 0, plain, len,
-                                  len, read, found, ~std::uint64_t{0}, cut);
+  cursiv::engine::TypoCandidates found;
+  cursiv::engine::ll_rescan_within<table>(c, table.errMode, want.data(), 0,
+                                          plain, len, len, read, found,
+                                          ~std::uint64_t{0}, cut);
   return found.ranked();
 }
 
@@ -146,14 +147,15 @@ std::vector<cursiv::Typo> ll_names(std::string_view text) {
 void a_refused_keyword_reserves_nothing_from_a_misspelling() {
   namespace lr = tllrefused::generated::Lr;
   const auto name =
-      cursiv::lr_match_text<lr::kTable>("inx", 3, lr::kTable.mode[0], 0).term;
+      cursiv::engine::lr_match_text<lr::kTable>("inx", 3, lr::kTable.mode[0], 0)
+          .term;
   const auto len = [](std::string_view text) {
     return static_cast<cursiv::TextOffset>(text.size());
   };
   const auto whole = [&](std::string_view text) {
-    for (const cursiv::Typo& t : lr_names(text))
+    for (const cursiv::engine::Typo& t : lr_names(text))
       if (t.term == name && t.end == len(text) &&
-          t.cost == cursiv::kRepairReread)
+          t.cost == cursiv::engine::kRepairReread)
         return true;
     return false;
   };
@@ -166,21 +168,24 @@ void a_refused_keyword_reserves_nothing_from_a_misspelling() {
     const std::string_view text = "x in-place";
     cursiv::Cst cst(text);
     cursiv::CstBuilder builder(cst);
-    cursiv::LrContext c(text, builder);
-    cursiv::LrSearch s(c.len, cursiv::RepairBudget{}, c.indentArena);
-    cursiv::lr_search_reset(s);
+    cursiv::engine::LrContext c(text, builder);
+    cursiv::engine::LrSearch s(c.len, cursiv::engine::RepairBudget{},
+                               c.indentArena);
+    cursiv::engine::lr_search_reset(s);
     bool found = false;
-    for (const cursiv::Typo& t : cursiv::lr_search_misread<lr::kTable>(c, s, 2))
+    for (const cursiv::engine::Typo& t :
+         cursiv::engine::lr_search_misread<lr::kTable>(c, s, 2))
       found = found || (t.term == name && t.end == len(text));
     CHECK(found);
   }
   namespace ll = tllrefused::generated::Ll;
   const auto llName =
-      cursiv::ll_match_text<ll::kTable>("inx", 3, ll::kTable.errMode, 0).term;
+      cursiv::engine::ll_match_text<ll::kTable>("inx", 3, ll::kTable.errMode, 0)
+          .term;
   const auto ll_whole = [&](std::string_view text) {
-    for (const cursiv::Typo& t : ll_names(text))
+    for (const cursiv::engine::Typo& t : ll_names(text))
       if (t.term == llName && t.end == len(text) &&
-          t.cost == cursiv::kRepairReread)
+          t.cost == cursiv::engine::kRepairReread)
         return true;
     return false;
   };
@@ -196,32 +201,33 @@ void a_word_refused_at_a_cut_runs_into_it() {
   constexpr auto cut = static_cast<cursiv::TextOffset>(text.size() - 1);
   namespace lr = tllrefused::generated::Lr;
   constexpr auto lrMode = lr::kTable.errMode;
-  const auto lrWhole =
-      cursiv::lr_match_text<lr::kTable>(text.data(), cut + 1, lrMode, 0);
+  const auto lrWhole = cursiv::engine::lr_match_text<lr::kTable>(
+      text.data(), cut + 1, lrMode, 0);
   cursiv::TextOffset halt = 0;
-  const auto lrCut =
-      cursiv::lr_match_halt<lr::kTable>(text.data(), cut, lrMode, 0, halt);
+  const auto lrCut = cursiv::engine::lr_match_halt<lr::kTable>(text.data(), cut,
+                                                               lrMode, 0, halt);
   CHECK(halt == cut && lrCut.term != lrWhole.term);
   namespace ll = tllrefused::generated::Ll;
   constexpr const auto& table = ll::kTable;
   constexpr auto mode = table.errMode;
   const auto llWhole =
-      cursiv::ll_match_text<table>(text.data(), cut + 1, mode, 0);
+      cursiv::engine::ll_match_text<table>(text.data(), cut + 1, mode, 0);
   cursiv::TextOffset reached = 0;
   const auto llCut =
-      cursiv::ll_match_text<table>(text.data(), cut, mode, 0, reached);
+      cursiv::engine::ll_match_text<table>(text.data(), cut, mode, 0, reached);
   CHECK(reached == cut && llCut.term != llWhole.term);
   // A search whose share ends inside a token keeps nothing of it.
-  const std::string word(2 * cursiv::kRepairLexBytes, 'x');
+  const std::string word(2 * cursiv::engine::kRepairLexBytes, 'x');
   cursiv::Cst tree(word);
   cursiv::CstBuilder builder(tree);
-  cursiv::LlContext c(word, builder);
-  cursiv::LlSearch s(table.atn, c.len);
+  cursiv::engine::LlContext c(word, builder);
+  cursiv::engine::LlSearch s(table.atn, c.len);
   s.limit = 1;
-  auto& row = cursiv::ll_search_row<table>(s, 0);
-  CHECK(cursiv::ll_search_scan<table>(c, s, row, mode, 0).term ==
-        cursiv::kInvalidSymbol);
-  CHECK(row[mode].end == cursiv::kLlUnscanned && cursiv::ll_search_spent(s));
+  auto& row = cursiv::engine::ll_search_row<table>(s, 0);
+  CHECK(cursiv::engine::ll_search_scan<table>(c, s, row, mode, 0).term ==
+        cursiv::engine::kInvalidSymbol);
+  CHECK(row[mode].end == cursiv::engine::kLlUnscanned &&
+        cursiv::engine::ll_search_spent(s));
 }
 
 // A keyword a condition's name is checked against reserves the name's text
@@ -230,8 +236,8 @@ void a_word_refused_at_a_cut_runs_into_it() {
 void a_reservation_reads_the_word_its_keyword_refuses() {
   namespace cl = tllrefused::generated::CondLl;
   constexpr const auto& table = cl::kTable;
-  constexpr cursiv::SymbolId name = ll_terms::named<table>("NAME");
-  static_assert(name != cursiv::kInvalidSymbol);
+  constexpr cursiv::engine::SymbolId name = ll_terms::named<table>("NAME");
+  static_assert(name != cursiv::engine::kInvalidSymbol);
   constexpr std::pair<std::string_view, bool> cases[] = {
       {"in-place", false}, {"in-pla", true}, {"in-placex", true}};
   for (const auto& [text, reserved] : cases) {
@@ -520,7 +526,7 @@ void a_read_ahead_takes_what_the_callers_take() {
 }
 
 cursiv::CancellationTokenSource* stopOnEntry = nullptr;
-void stopping_drive(cursiv::LlContext& c) {
+void stopping_drive(cursiv::engine::LlContext& c) {
   if (stopOnEntry != nullptr) stopOnEntry->request_stop();
   tllrefused::generated::Ll::kDrive(c);
 }
@@ -529,7 +535,7 @@ void stopping_drive(cursiv::LlContext& c) {
 // to the next parse on the thread.
 void a_stop_in_a_refused_reading_leaves_nothing_behind() {
   namespace ll = tllrefused::generated::Ll;
-  const cursiv::LlLanguageParser<ll::kTable> parser(
+  const cursiv::engine::LlLanguageParser<ll::kTable> parser(
       ll::kGrammarMetaData, ll::kAstActions, stopping_drive);
   std::string far = "rivals: X";
   for (unsigned i = 0; i < 2000; ++i) far += " a";
@@ -545,10 +551,11 @@ void a_stop_in_a_refused_reading_leaves_nothing_behind() {
   stopOnEntry = nullptr;
   CHECK(threw);
   const auto read = [&] {
-    const std::uint64_t before = cursiv::LlPredictionWork::current().tokens;
+    const std::uint64_t before =
+        cursiv::engine::LlPredictionWork::current().tokens;
     const auto after = parser.parse(far);
     CHECK(after.accepted && after.diagnostics.empty());
-    return cursiv::LlPredictionWork::current().tokens - before;
+    return cursiv::engine::LlPredictionWork::current().tokens - before;
   };
   const std::uint64_t first = read();
   CHECK(first == read());

@@ -7,7 +7,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrLexElse {
   ByteSet bytes;
@@ -18,4 +18,4 @@ struct LrLexElse {
   std::uint8_t scalar = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

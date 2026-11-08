@@ -22,7 +22,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct HeadMatcher {
   // A byte the word reads, or, `refused`, one it refuses where it stands
@@ -76,11 +76,10 @@ struct HeadMatcher {
       Items items;
     };
     std::vector<ByteSet> sets;
-    std::unordered_map<detail::SetKey, std::uint32_t, detail::SetKeyHash>
-        setIndex;
+    std::unordered_map<SetKey, std::uint32_t, SetKeyHash> setIndex;
     const auto set_of = [&](const ByteSet& bytes) {
       const auto [at, fresh] = setIndex.try_emplace(
-          detail::SetKey{bytes}, static_cast<std::uint32_t>(sets.size()));
+          SetKey{bytes}, static_cast<std::uint32_t>(sets.size()));
       if (fresh) sets.push_back(bytes);
       return at->second;
     };
@@ -158,7 +157,8 @@ struct HeadMatcher {
       rows.push_back(row);
     }
     out.line(
-        "  [[maybe_unused]] static constexpr ::cursiv::ByteSet sets[] = {");
+        "  [[maybe_unused]] static constexpr ::cursiv::engine::ByteSet sets[] "
+        "= {");
     for (const ByteSet& s : sets)
       out.line("    {{", s.w[0], "ull, ", s.w[1], "ull, ", s.w[2], "ull, ",
                s.w[3], "ull}},");
@@ -199,12 +199,12 @@ struct HeadMatcher {
           }
           std::string test = bytes;
           if (sets[r.count].any())
-            test += concat(" || (", lead, " && ::cursiv::lex_scalar_in(",
-                           r.scalars == 0
-                               ? std::string(ranges.word)
+            test += concat(
+                " || (", lead, " && ::cursiv::engine::lex_scalar_in(",
+                r.scalars == 0 ? std::string(ranges.word)
                                : concat(ranges.pool, " + ", r.scalars >> 16,
                                         "u, ", r.scalars & 0xFFFFu, "u"),
-                           ", p + ", r.at, "u, rest - ", r.at, "u))");
+                ", p + ", r.at, "u, rest - ", r.at, "u))");
           out.write("      if (", test, ") goto s", r.yes, ";\n    }");
           if (reach)
             out.write(" else if (seen < rest) {\n      seen = rest;\n    }");
@@ -273,16 +273,16 @@ struct HeadMatcher {
         if (ownScalars)
           out.write(
               "(r.scalars != 0u\n"
-              "             ? ::cursiv::lex_scalar_in(",
+              "             ? ::cursiv::engine::lex_scalar_in(",
               ranges.pool,
               " + (r.scalars >> 16), "
               "r.scalars & 0xFFFFu, p + r.at, rest - r.at)\n"
-              "             : ::cursiv::lex_scalar_in(",
+              "             : ::cursiv::engine::lex_scalar_in(",
               ranges.word,
               ", p + r.at, rest - "
               "r.at))");
         else
-          out.write("::cursiv::lex_scalar_in(", ranges.word,
+          out.write("::cursiv::engine::lex_scalar_in(", ranges.word,
                     ", p + r.at, rest - r.at)");
         out.write(")");
       }
@@ -491,4 +491,4 @@ std::vector<HeadMatcher> lex_head_words(LexNfaPool& n, const Cfg& g,
   return out;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

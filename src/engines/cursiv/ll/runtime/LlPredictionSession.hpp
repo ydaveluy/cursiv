@@ -8,7 +8,7 @@
 
 #include "cursiv/ll/runtime/ll_predictor.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& T>
 class LlPredictionSession {
@@ -46,4 +46,4 @@ class LlPredictionSession {
   std::uint64_t _stagedFrom;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

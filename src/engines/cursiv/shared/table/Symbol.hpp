@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr std::uint16_t kNtBase = 0x8000;
 
@@ -18,4 +18,4 @@ constexpr std::uint16_t nt_sym(std::uint16_t i) {
   return static_cast<std::uint16_t>(kNtBase + i);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

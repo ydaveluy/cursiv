@@ -6,7 +6,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlRuleInfo {
   std::uint16_t nameOff = 0, nameLen = 0;
@@ -19,4 +19,4 @@ struct LlRuleInfo {
   constexpr bool operator==(const LlRuleInfo&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

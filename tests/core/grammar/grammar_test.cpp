@@ -19,20 +19,20 @@
 #include "core/grammar/DerivedGrammar.hpp"
 #include "core/grammar/SpellingGrammars.hpp"
 #include "core/syntax-tree/DualGrammar.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/grammar/DefaultGrammarSource.hpp"
-#include "cursiv/grammar/GrammarDump.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/GrammarUtils.hpp"
-#include "cursiv/grammar/dump.hpp"
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/grammar/word_final_in.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/shared/gen/LexCodePoints.hpp"
+#include "cursiv/shared/utils/GrammarDump.hpp"
+#include "cursiv/shared/utils/dump.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/utils/ctstring.hpp"
-#include "cursiv/shared/gen/LexCodePoints.hpp"
-#include "cursiv/Check.hpp"
 #include "derivebase/generated/Base/Module.hpp"
 #include "derivedialect/generated/Dialect/Module.hpp"
 #include "deriverule/generated/RuleDialect/Module.hpp"
@@ -337,14 +337,15 @@ static_assert(std::is_same_v<std::remove_cv_t<decltype(lit<"a", cr<"0-9">>)>,
 // Classes join into one class from either side, spelled in order.
 static_assert(std::is_same_v<decltype(cr<"a-z_"> | uc::L),
                              decltype(uc::L | cr<"a-z_">)>);
-static_assert(std::is_same_v<
-              decltype(cr<"$"> | uc::Nd),
-              CpSet<detail::cp_bit(unicode::Property::Nd), false, "$">>);
+static_assert(
+    std::is_same_v<
+        decltype(cr<"$"> | uc::Nd),
+        CpSet<detail::cp_bit(unicode::detail::Property::Nd), false, "$">>);
 // The syntax characters are spelled `\xNN`.
-static_assert(std::is_same_v<
-              decltype(cr<R"(+\\-)"> | uc::Nd),
-              CpSet<detail::cp_bit(unicode::Property::Nd), false,
-                    "+\\x2d\\x5c">>);
+static_assert(
+    std::is_same_v<decltype(cr<R"(+\\-)"> | uc::Nd),
+                   CpSet<detail::cp_bit(unicode::detail::Property::Nd), false,
+                         "+\\x2d\\x5c">>);
 
 // A union is one class, and `~` complements among all characters, ill-formed
 // bytes included: twice gives the class back.
@@ -645,19 +646,19 @@ static_assert(!std::is_same_v<std::remove_cv_t<decltype(w)>,
 // over sets no literal spells -- every singleton, every contiguous range
 // around the edges of the encodings, and 20 000 pseudo-random sets from a
 // fixed seed.
-std::string key_of(const cursiv::ClassRanges& r) {
+std::string key_of(const cursiv::detail::ClassRanges& r) {
   std::string out;
   r.spell([&out](char c) { out.push_back(c); });
   return out;
 }
 
-bool round_trips(const cursiv::ClassRanges& r) {
-  return cursiv::ClassRanges::of(key_of(r)).r == r.r;
+bool round_trips(const cursiv::detail::ClassRanges& r) {
+  return cursiv::detail::ClassRanges::of(key_of(r)).r == r.r;
 }
 
 int sweep_the_round_trip() {
   int bad = 0;
-  const auto check = [&bad](cursiv::ClassRanges r) {
+  const auto check = [&bad](cursiv::detail::ClassRanges r) {
     r.merge();
     if (round_trips(r)) return;
     if (++bad <= 5)
@@ -676,7 +677,7 @@ int sweep_the_round_trip() {
     return seed >> 33;
   };
   for (int k = 0; k < 20000; ++k) {
-    cursiv::ClassRanges r;
+    cursiv::detail::ClassRanges r;
     for (unsigned n = 1 + next() % 6; n-- > 0;) {
       const unsigned span = next() % 4;
       const char32_t top = span == 0   ? 0x80
@@ -705,6 +706,7 @@ void run() {
 
 namespace source_test {
 using namespace cursiv;
+using namespace cursiv::engine;
 namespace left {
 struct ID : cursiv::detail::TerminalRule<lit<"left">> {};
 }  // namespace left
@@ -2126,8 +2128,8 @@ void run() {
          "compiled grammar with override");
 
   // rule() and closure(): one rule, and a rule with everything it reaches.
-  expect(cursiv::dump_rule<Dg::ID>(), "terminal ID: [a-z] [0-9A-Z_a-z]*;",
-         "rule");
+  expect(cursiv::engine::dump_rule<Dg::ID>(),
+         "terminal ID: [a-z] [0-9A-Z_a-z]*;", "rule");
   expect(support::dump_closure<Dg::Item>(),
          "Item returns Node: \"item\" name=ID;\n"
          "terminal ID: [a-z] [0-9A-Z_a-z]*;",
@@ -2176,14 +2178,14 @@ void run() {
     // ...and the one-rule forms reach it too. They render a rule with no
     // grammar in hand, and an infix rule is the one that asks such a view for
     // more than a body.
-    expect(cursiv::dump_rule<Q3::G::Expr>(),
+    expect(cursiv::engine::dump_rule<Q3::G::Expr>(),
            "infix Expr returns Bin(left, op, right) on Num: "
            "levels(left(\"*\" | \"/\"), left(\"+\" | \"-\"), "
            "nonassoc(\"<\"));",
            "infix rule alone");
     // A unary level prints its class and its two members.
     expect(
-        cursiv::dump_rule<Q3u::G::Expr>(),
+        cursiv::engine::dump_rule<Q3u::G::Expr>(),
         "infix Expr returns Bin(left, op, right) on Num: "
         "levels(postfix<Fact(bang, arg)>('!'), prefix<Neg(op, operand)>('-'), "
         "left('*'));",
@@ -2249,10 +2251,10 @@ void run() {
          "overridden skipper");
 
   // Folding: stable, in the library, shared with the golden.
-  expect(cursiv::dump_wrapped("Item: 'a' / 'b';\n", 92), "Item: 'a' / 'b';\n",
-         "wrap short");
+  expect(cursiv::engine::dump_wrapped("Item: 'a' / 'b';\n", 92),
+         "Item: 'a' / 'b';\n", "wrap short");
   // A doc's apostrophe is prose, not a quote.
-  expect(cursiv::dump_wrapped(
+  expect(cursiv::engine::dump_wrapped(
              "Keyword: /** opens the machine's block */ 'state' | /** closes "
              "the block */ 'end' | /** names the start */ 'initialState' | "
              "'events';\n"),
@@ -2570,6 +2572,7 @@ namespace spec_scalar {
 namespace {
 
 using namespace cursiv;
+using namespace cursiv::engine;
 
 bool holds(const LexCodePoints& c, char32_t cp) {
   for (const auto& r : c.ranges)

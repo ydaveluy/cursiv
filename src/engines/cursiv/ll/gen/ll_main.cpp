@@ -10,7 +10,6 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/grammar/dump.hpp"
 #include "cursiv/ll/gen/LlFinalProgram.hpp"
 #include "cursiv/ll/gen/LlLowering.hpp"
 #include "cursiv/ll/gen/ll_build.hpp"
@@ -27,6 +26,7 @@
 #include "cursiv/shared/gen/LexRecursion.hpp"
 #include "cursiv/shared/gen/gen_report.hpp"
 #include "cursiv/shared/table/LexRelay.hpp"
+#include "cursiv/shared/utils/dump.hpp"
 
 #ifdef CURSIV_GEN_INCLUDE
 #include CURSIV_GEN_INCLUDE
@@ -40,21 +40,21 @@
 namespace CURSIV_GEN_SCOPE {
 
 using G = CURSIV_GEN_GRAMMAR;
-using View = cursiv::LlView<G>;
+using View = cursiv::engine::LlView<G>;
 
 namespace {
 
-using cursiv::exit_status;
-using cursiv::GenCode;
+using cursiv::engine::exit_status;
+using cursiv::engine::GenCode;
 
 // What the build found, in one line: how many choices one token settles, how
 // many an automaton the build closed settles, and how many are left to the
 // parse -- the last is the only number that costs anything at run time.
-void report(const cursiv::LlBuiltProgram& a) {
+void report(const cursiv::engine::LlBuiltProgram& a) {
   unsigned single = 0, staged = 0;
   for (std::uint16_t d = 0; d < a.cfg.ndecisions; ++d) {
-    if (a.cfg.decisions[d].how == cursiv::LlPredict::single) ++single;
-    if (a.cfg.decisions[d].how == cursiv::LlPredict::staged) ++staged;
+    if (a.cfg.decisions[d].how == cursiv::engine::LlPredict::single) ++single;
+    if (a.cfg.decisions[d].how == cursiv::engine::LlPredict::staged) ++staged;
   }
   std::printf(
       "%s: terms=%u rules=%u nodes=%u ll1=%u staged=%u adaptive=%u open=%u "
@@ -66,8 +66,8 @@ void report(const cursiv::LlBuiltProgram& a) {
 }  // namespace
 
 int run(int argc, char** argv) try {
-  cursiv::LlBuildOptions buildOpt;
-  const char* const dir = cursiv::gen_out_dir(
+  cursiv::engine::LlBuildOptions buildOpt;
+  const char* const dir = cursiv::engine::gen_out_dir(
       argc, argv, "[--no-staged]", [&](std::string_view arg) {
         buildOpt.staticPredict = false;
         return arg == "--no-staged";
@@ -75,49 +75,53 @@ int run(int argc, char** argv) try {
   if (dir == nullptr) return exit_status(GenCode::usage);
 
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<View>();
-  if (cursiv::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
+  if (cursiv::engine::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
     return exit_status(GenCode::refused);
 
-  const cursiv::LlLowered& low = cursiv::LlLowering<G>::table();
+  const cursiv::engine::LlLowered& low = cursiv::engine::LlLowering<G>::table();
   // What the emitters cannot write is refused before anything is written:
   // the sentence names the rule, and no table exists to name it in. From here
   // the program is read-only.
-  const auto done = cursiv::LlFinalProgram::make(
-      cursiv::ll_build_program(low, buildOpt), CURSIV_GEN_NAME,
-      cursiv::AsWritten<cursiv::LlLowering<G>::rules>::of);
+  const auto done = cursiv::engine::LlFinalProgram::make(
+      cursiv::engine::ll_build_program(low, buildOpt), CURSIV_GEN_NAME,
+      cursiv::engine::AsWritten<cursiv::engine::LlLowering<G>::rules>::of);
   if (!done) return exit_status(GenCode::refused);
-  const cursiv::LlBuiltProgram& a = done->program();
+  const cursiv::engine::LlBuiltProgram& a = done->program();
   // A rule whose calls its frame cannot name is refused before anything is
   // written.
-  const auto table = cursiv::ll_emit_table(*done, CURSIV_GEN_NS);
-  const auto steps = cursiv::ll_emit_parser_files(*done, CURSIV_GEN_NS, table);
+  const auto table = cursiv::engine::ll_emit_table(*done, CURSIV_GEN_NS);
+  const auto steps =
+      cursiv::engine::ll_emit_parser_files(*done, CURSIV_GEN_NS, table);
 
-  const auto registry = cursiv::ast_registry<G, cursiv::LlLowering<G>>(
-      CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
-  std::vector<cursiv::RecordGen> records;
-  const auto entries = cursiv::ll_entry_table(*done, registry.rows, records);
-  if (const auto wrote = cursiv::write_common_artifacts(
+  const auto registry =
+      cursiv::engine::ast_registry<G, cursiv::engine::LlLowering<G>>(
+          CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
+  std::vector<cursiv::engine::RecordGen> records;
+  const auto entries =
+      cursiv::engine::ll_entry_table(*done, registry.rows, records);
+  if (const auto wrote = cursiv::engine::write_common_artifacts(
           dir,
           {.table = table.header,
-           .parser = cursiv::ll_emit_parser_decl(CURSIV_GEN_NS),
+           .parser = cursiv::engine::ll_emit_parser_decl(CURSIV_GEN_NS),
            .parserUnits = steps,
            .ns = CURSIV_GEN_NS,
            .header = CURSIV_GEN_HEADER,
-           .dump = cursiv::dump_compiled_indexed<View>(),
+           .dump = cursiv::engine::dump_compiled_indexed<View>(),
            .registry = registry,
            .entries = entries,
            .records = records,
-           .terminals = cursiv::record_terminals(a.cfg),
-           .lang = {CURSIV_GEN_ID, cursiv::split(CURSIV_GEN_EXTENSIONS),
-                    cursiv::split(CURSIV_GEN_FILE_NAMES)},
+           .terminals = cursiv::engine::record_terminals(a.cfg),
+           .lang = {CURSIV_GEN_ID, cursiv::engine::split(CURSIV_GEN_EXTENSIONS),
+                    cursiv::engine::split(CURSIV_GEN_FILE_NAMES)},
            .parserHeader = "cursiv/ll/runtime/LlLanguageParser.hpp",
            .parserClass = "LlLanguageParser"});
       wrote != GenCode::ok)
     return exit_status(wrote);
 
   report(a);
-  cursiv::report_warnings(CURSIV_GEN_NAME, image, a.cfg, a.cfg,
-                          [&](std::uint16_t r) { return a.cfg.rule_name(r); });
+  cursiv::engine::report_warnings(
+      CURSIV_GEN_NAME, image, a.cfg, a.cfg,
+      [&](std::uint16_t r) { return a.cfg.rule_name(r); });
   return exit_status(GenCode::ok);
 } catch (const std::exception& error) {
   std::fprintf(stderr, "%s: refused: %s\n", CURSIV_GEN_NAME, error.what());

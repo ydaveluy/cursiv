@@ -12,12 +12,13 @@
 
 #include "cursiv/grammar/GrammarImage.hpp"
 #include "cursiv/shared/gen/GrammarFault.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The first refusal the tables of `rules` earn, a rule named by its position
 // in `rules` plus one; none where every table is sound.
-GrammarFault unary_level_fault(detail::GrammarImage& image,
+GrammarFault unary_level_fault(GrammarImage& image,
                                std::span<const std::uint32_t> rules);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

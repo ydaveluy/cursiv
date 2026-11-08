@@ -223,15 +223,17 @@ void a_reading_reads_on_from_a_runs_last_byte() {
   constexpr const auto& table = ttrivia::generated::Lr::kTable;
   unsigned asked = 0;
   for (std::uint16_t mode = 0; mode < table.modeStart.size(); ++mode) {
-    if (!cursiv::mode_row_has(table.derived.skipStop.data(), mode, '_')) continue;
+    if (!cursiv::engine::mode_row_has(table.derived.skipStop.data(), mode, '_'))
+      continue;
     ++asked;
     const std::string_view text = "  _\n b";
     cursiv::Cst tree(text);
     cursiv::CstBuilder builder(tree);
     builder.bind_stream();
-    cursiv::LrContext context(text, builder);
+    cursiv::engine::LrContext context(text, builder);
     context.drive = &ttrivia::generated::Lr::kDrive;
-    const cursiv::Token token = cursiv::lr_scan_at<table>(context, mode, 0, 0);
+    const cursiv::engine::Token token =
+        cursiv::engine::lr_scan_at<table>(context, mode, 0, 0);
     // A mode that reads no word still stands past the continuation.
     CHECK(token.begin == 5);
   }

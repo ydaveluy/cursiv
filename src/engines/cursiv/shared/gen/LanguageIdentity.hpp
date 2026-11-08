@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LanguageIdentity {
   std::string id;
@@ -26,4 +26,4 @@ inline std::vector<std::string> split(std::string_view text) {
   return out;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

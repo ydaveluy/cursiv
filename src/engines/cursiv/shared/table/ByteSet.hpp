@@ -8,7 +8,7 @@
 
 #include "cursiv/utils/ctstring.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct ByteSet {
   std::uint64_t w[4]{};
@@ -64,4 +64,4 @@ constexpr ByteSet bytes_of(const CharSet& cs) {
   return s;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

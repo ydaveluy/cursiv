@@ -8,7 +8,7 @@
 #include "cursiv/lr/table/LrBitSet.hpp"
 #include "cursiv/lr/table/LrSizes.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <LrSizes S, unsigned NIdx, unsigned NPool>
 struct LrSetStore {
@@ -22,4 +22,4 @@ struct LrSetStore {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

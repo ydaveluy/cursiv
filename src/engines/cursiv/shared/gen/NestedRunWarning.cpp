@@ -1,14 +1,15 @@
 #include "cursiv/shared/gen/NestedRunWarning.hpp"
 
 #include "cursiv/shared/gen/WarningFound.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 std::vector<NestedRunWarning> nested_run_warnings(WarningFound& found) {
   return walk_warnings<NestedRunWarning>(
-      found, [](WarningFound& w, detail::ImageId id) {
-        const detail::ImageNode& n = w.image().nodes[id];
-        return n.kind == detail::ImageKind::repeat && n.n > 1 &&
+      found, [](WarningFound& w, ImageId id) {
+        const ImageNode& n = w.image().nodes[id];
+        return n.kind == ImageKind::repeat && n.n > 1 &&
                w.reads().run(w.image().kids[n.first]);
       });
 }
@@ -20,4 +21,4 @@ std::string nested_run_warning_text(const NestedRunWarning& w) {
          "repetition unless the groups matter";
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

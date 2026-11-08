@@ -1,7 +1,7 @@
 // The extent of the tables derived from a built one, beyond `LrSizes`.
 #pragma once
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrDerivedSizes {
   unsigned lexElseRows = 0;
@@ -20,4 +20,4 @@ struct LrDerivedSizes {
   constexpr bool operator==(const LrDerivedSizes&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -15,10 +15,11 @@ find_package(Threads REQUIRED)
 target_link_libraries(cursivCore PUBLIC Threads::Threads)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CursivAllocator.cmake)
 
-# The parser runtimes, what they share first. A generated language links the
-# runtime of its engine.
+# The parser runtimes, what they share first, with the utilities the
+# generators read too. A generated language links the runtime of its engine.
 file(GLOB_RECURSE CURSIV_ENGINE_SHARED_SOURCES CONFIGURE_DEPENDS
-     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/shared/runtime/*.cpp)
+     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/shared/runtime/*.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/shared/utils/*.cpp)
 add_library(cursivEngineShared STATIC ${CURSIV_ENGINE_SHARED_SOURCES})
 add_library(cursiv::engine::shared ALIAS cursivEngineShared)
 target_include_directories(cursivEngineShared PUBLIC

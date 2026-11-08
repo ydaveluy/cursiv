@@ -9,7 +9,7 @@
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/text/TextOffset.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct RepairFault {
   bool open = false;
@@ -55,4 +55,4 @@ inline RepairNote repair_note(RepairFault& f) {
   return n;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

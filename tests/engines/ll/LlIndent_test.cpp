@@ -53,9 +53,9 @@ void explicit_statement_newlines_win_over_their_trivia_twin() {
   constexpr auto mode = [] {
     for (std::uint16_t m = 0; m < table.nmodes; ++m)
       if (table.mode_admits(m, newline)) return m;
-    return cursiv::kInvalidSymbol;
+    return cursiv::engine::kInvalidSymbol;
   }();
-  static_assert(mode != cursiv::kInvalidSymbol);
+  static_assert(mode != cursiv::engine::kInvalidSymbol);
   // The trivia twin is no rival: no mode reads two terminals from one text,
   // so a choice the newline settles is a table, not a prediction.
   static_assert([] {
@@ -67,11 +67,11 @@ void explicit_statement_newlines_win_over_their_trivia_twin() {
     cursiv::Cst tree("\n  b");
     cursiv::CstBuilder builder(tree);
     builder.bind_stream();
-    cursiv::LlContext context(tree.text(), builder);
+    cursiv::engine::LlContext context(tree.text(), builder);
     const auto scan =
-        cursiv::ll_match_text<table>(context.src, context.len, mode, 0);
+        cursiv::engine::ll_match_text<table>(context.src, context.len, mode, 0);
     CHECK(scan.term == newline && scan.end == 1);
-    cursiv::ll_peek<table>(context, mode);
+    cursiv::engine::ll_peek<table>(context, mode);
     CHECK(context.la.sym == newline && context.la.begin == 0 &&
           context.la.end == 1);
   }
@@ -79,33 +79,33 @@ void explicit_statement_newlines_win_over_their_trivia_twin() {
     cursiv::Cst tree("\na");
     cursiv::CstBuilder builder(tree);
     builder.bind_stream();
-    cursiv::LlContext context(tree.text(), builder);
-    cursiv::LlMask<table.termWords> viable;
+    cursiv::engine::LlContext context(tree.text(), builder);
+    cursiv::engine::LlMask<table.termWords> viable;
     viable.set(newline);
     constexpr auto identifier = ll_terms::named<table>("ID");
-    static_assert(identifier != cursiv::kInvalidSymbol);
+    static_assert(identifier != cursiv::engine::kInvalidSymbol);
     viable.set(identifier);
     std::vector<std::uint16_t> readings;
     cursiv::TextOffset from = 0;
-    cursiv::LlLookRead detail;
-    CHECK(cursiv::ll_look<table>(context, from, viable, readings,
-                                table.errMode, &detail));
+    cursiv::engine::LlLookRead detail;
+    CHECK(cursiv::engine::ll_look<table>(context, from, viable, readings,
+                                         table.errMode, &detail));
     CHECK(detail.token.begin == 0 && detail.token.end == 1);
     CHECK(readings.size() == 1 && readings[0] == newline);
     viable.reset();
     viable.set(identifier);
     from = 0;
-    CHECK(cursiv::ll_look<table>(context, from, viable, readings,
-                                table.errMode, &detail));
+    CHECK(cursiv::engine::ll_look<table>(context, from, viable, readings,
+                                         table.errMode, &detail));
     CHECK(detail.token.begin == 1 && detail.token.end == 2);
     CHECK(readings.size() == 1 && readings[0] == identifier);
     // An active newline joins the physical lines inside brackets.
     viable.set(newline);
-    cursiv::LlLookIndent indent;
+    cursiv::engine::LlLookIndent indent;
     indent.at.depth = 1;
     from = 0;
-    CHECK(cursiv::ll_look<table>(context, from, viable, readings,
-                                table.errMode, &detail, &indent));
+    CHECK(cursiv::engine::ll_look<table>(context, from, viable, readings,
+                                         table.errMode, &detail, &indent));
     CHECK(detail.token.begin == 1 && detail.token.end == 2);
     CHECK(readings.size() == 1 && readings[0] == identifier);
   }
@@ -114,10 +114,11 @@ void explicit_statement_newlines_win_over_their_trivia_twin() {
     cursiv::Cst tree("\n");
     cursiv::CstBuilder builder(tree);
     builder.bind_stream();
-    cursiv::LlContext context(tree.text(), builder);
+    cursiv::engine::LlContext context(tree.text(), builder);
     context.indent.depth = 1;
-    cursiv::ll_peek<table>(context, table.errMode);
-    CHECK(context.la.sym == cursiv::kEofSymbol && context.la.begin == 1);
+    cursiv::engine::ll_peek<table>(context, table.errMode);
+    CHECK(context.la.sym == cursiv::engine::kEofSymbol &&
+          context.la.begin == 1);
   }
 }
 
@@ -667,8 +668,8 @@ int main() {
   const auto flatLl = dedent::FlatLl::create_parser();
   for (const auto text : {"a:\n  b:\n    c", "a:\n  b:\n    c\n"})
     closes(flatLl, text, 2);
-  brackets_are_terminals_read(cursiv::LlLowering<tdelim::Ll>::lower());
-  brackets_are_terminals_read(cursiv::LrLowering<tdelim::Lr>::lower());
+  brackets_are_terminals_read(cursiv::engine::LlLowering<tdelim::Ll>::lower());
+  brackets_are_terminals_read(cursiv::engine::LrLowering<tdelim::Lr>::lower());
   auto delim = std::pair{tdelim::generated::Ll::create_parser(),
                          tdelim::generated::Ll::create_ast_reflection()};
   struct Case { std::string_view before, body, after; };

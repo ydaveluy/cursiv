@@ -9,8 +9,9 @@
 
 #include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/TypeSpelling.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 namespace {
 
 // Ids in the order a thing is first met.
@@ -24,8 +25,7 @@ class Interned {
   }
   std::uint16_t index(const T* key) const {
     const auto at = _ids.find(key);
-    return at == _ids.end() ? detail::kNoIndex
-                            : static_cast<std::uint16_t>(at->second);
+    return at == _ids.end() ? kNoIndex : static_cast<std::uint16_t>(at->second);
   }
   const std::vector<const T*>& keys() const { return _keys; }
 
@@ -83,7 +83,7 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
         throw std::logic_error(
             "a conversion rule is absent from its grammar bindings");
       spelling = out.sources.emplace_front(concat(
-          "::cursiv::detail::", alias, "<", qualified, ", ", at->second, ">"));
+          "::cursiv::engine::", alias, "<", qualified, ", ", at->second, ">"));
     }
     return spelling;
   };
@@ -143,7 +143,7 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
     const auto at = bindingAt.find(type);
     if (at == bindingAt.end())
       throw std::logic_error("an AST type is absent from its grammar bindings");
-    return concat("::cursiv::detail::ast_bound_t<", qualified, ", ", at->second,
+    return concat("::cursiv::engine::ast_bound_t<", qualified, ", ", at->second,
                   ">");
   };
   for (std::size_t t = 0; t < typeKeys.size(); ++t)
@@ -176,7 +176,7 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
   // member and a grammar with none keeps no rows.
   std::size_t bound = 0;
   for (std::size_t i = 0; i < count; ++i)
-    if (detail::is_ref_nature(fields.keys()[i]->nature)) bound = i + 1;
+    if (is_ref_nature(fields.keys()[i]->nature)) bound = i + 1;
   out.accepts.assign(bound * out.typeWords, 0);
   for (std::size_t i = 0; i < count; ++i) {
     const AstFieldDesc& f = *fields.keys()[i];
@@ -191,7 +191,7 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
       out.targets.push_back(types.index(f.targets[t]));
     for (const AstTypeDesc* n : narrows[i]) entry.narrows.push_back(source(n));
     entry.offset = f.offset();
-    if (detail::is_ref_nature(f.nature))
+    if (is_ref_nature(f.nature))
       for (const std::uint16_t t : out.targets_of(entry))
         for (std::size_t w = 0; w < out.typeWords; ++w)
           out.accepts[i * out.typeWords + w] |=
@@ -201,4 +201,4 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
   return out;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -16,9 +16,8 @@
 
 #include "cursiv/lr/runtime/LrGssPool.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
-namespace detail {
 // Lengths describe shared sequences, not the number of stored nodes. A tiny
 // DAG can outgrow this range; wrapping or saturating would change its order.
 inline std::uint64_t gss_length_add(std::uint64_t a, std::uint64_t b) {
@@ -26,7 +25,6 @@ inline std::uint64_t gss_length_add(std::uint64_t a, std::uint64_t b) {
     throw std::length_error("cursiv: GSS sequence exceeds its length range");
   return a + b;
 }
-}  // namespace detail
 
 // Nothing aggregated.
 struct LrGssNoAgg {
@@ -299,7 +297,7 @@ class LrGssRope {
     const Node& a = _nodes[l];
     const Node& b = _nodes[r];
     return intern(
-        Node{l, r, detail::gss_length_add(a.len, b.len),
+        Node{l, r, gss_length_add(a.len, b.len),
              static_cast<std::uint8_t>(std::max(a.height, b.height) + 1),
              Agg::join(a.agg, b.agg)});
   }
@@ -364,4 +362,4 @@ class LrGssRope {
   std::vector<Id> _slots;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

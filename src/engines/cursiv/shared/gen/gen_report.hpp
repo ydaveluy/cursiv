@@ -16,18 +16,14 @@
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv {
-
-namespace detail {
-struct GrammarImage;
-}  // namespace detail
+namespace cursiv::engine {
 
 // The dead branches, branches that repeat earlier ones, flags that may read
 // nothing, repetitions of a run and literals that may stop inside a word that a
 // grammar spells: a warning each.
-void report_grammar_warnings(std::string_view grammar,
-                             detail::GrammarImage& image);
+void report_grammar_warnings(std::string_view grammar, GrammarImage& image);
 
 // A warning each, in this order: a condition of `conds` read to the end of an
 // unbounded run, which makes parsing quadratic in the run and a completion
@@ -35,7 +31,7 @@ void report_grammar_warnings(std::string_view grammar,
 // empty where none stands); a lexical check of `lex` that could not conclude,
 // generated as if it found nothing; then the warnings of `image`.
 template <class CondCfg, class LexCfg, class RuleName>
-void report_warnings(std::string_view grammar, detail::GrammarImage& image,
+void report_warnings(std::string_view grammar, GrammarImage& image,
                      const CondCfg& conds, const LexCfg& lex,
                      RuleName rule_name) {
   const auto n = static_cast<int>(grammar.size());
@@ -71,8 +67,7 @@ const char* gen_out_dir(int argc, char** argv, const char* options,
 
 // An arm that begins and ends with its own rule, a refusal each: true where
 // there was one.
-bool refuse_self_bounded_arms(std::string_view grammar,
-                              detail::GrammarImage& image);
+bool refuse_self_bounded_arms(std::string_view grammar, GrammarImage& image);
 
 // A terminal that matches the empty string is a token the lexer never hands
 // back: `terminal` names the first one, empty where there is none.
@@ -145,4 +140,4 @@ bool refuse_unbuilt(std::string_view grammar, const Built& a,
   return true;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

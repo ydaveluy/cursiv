@@ -9,7 +9,7 @@
 #include "cursiv/lr/table/LrActionKind.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The span of an empty reduction opened on no state: its goto asks the gap.
 inline constexpr std::uint32_t kLrNoFirst = 0xFFFFFFFFu;
@@ -64,4 +64,4 @@ constexpr std::uint32_t lr_goto_land(std::uint32_t cell, std::uint32_t first,
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

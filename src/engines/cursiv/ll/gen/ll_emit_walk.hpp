@@ -3,7 +3,7 @@
 
 #include <string>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LlBuiltProgram;
 
@@ -12,4 +12,4 @@ struct LlBuiltProgram;
 std::string ll_emit_walk_includes(const LlBuiltProgram& a);
 std::string ll_emit_walk(const LlBuiltProgram& a);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -15,7 +15,7 @@
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LowerPools;
 
@@ -97,4 +97,4 @@ std::string unbounded_condition_text(const LowerPools& c,
                                      std::string_view rule,
                                      const UnboundedCondition& u);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

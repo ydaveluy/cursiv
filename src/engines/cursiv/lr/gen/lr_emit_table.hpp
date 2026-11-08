@@ -5,10 +5,10 @@
 #include <string>
 #include <string_view>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrFinalTable;
 
 std::string lr_emit_table(const LrFinalTable& done, std::string_view ns);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

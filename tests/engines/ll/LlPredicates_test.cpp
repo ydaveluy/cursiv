@@ -40,7 +40,7 @@ struct CountedCursor {
 
 void interleaved_readings_merge_with_linear_copy_work() {
   constexpr unsigned count = 16384;
-  cursiv::PredicateStates<CountedCursor> even, odd;
+  cursiv::engine::PredicateStates<CountedCursor> even, odd;
   for (unsigned i = 0; i < count; i += 2) {
     even.add(CountedCursor{i});
     odd.add(CountedCursor{i + 1});
@@ -56,7 +56,7 @@ void interleaved_readings_merge_with_linear_copy_work() {
   // The inline first cursor may occur anywhere in the sorted union.
   std::mt19937 random(79);
   for (unsigned trial = 0; trial < 500; ++trial) {
-    cursiv::PredicateStates<CountedCursor> left, right;
+    cursiv::engine::PredicateStates<CountedCursor> left, right;
     std::set<unsigned> expected;
     const unsigned leftCount = random() % 80;
     for (unsigned i = 0; i < leftCount; ++i) {
@@ -229,13 +229,15 @@ void enumerate(const cursiv::Parser& parser, std::string text, unsigned left) {
 void first_position() {
   namespace ll = tlexicalpredicates::generated::Ll;
   const unsigned llTerm = ll_terms::named<ll::kTable>("Prefix");
-  CHECK(llTerm != cursiv::kInvalidSymbol);
+  CHECK(llTerm != cursiv::engine::kInvalidSymbol);
   bool llRead = false;
   for (unsigned m = 0; m < ll::kTable.nmodes; ++m) {
-    const auto read = ::cursiv::ll_match_text<ll::kTable>("ab", 2, m, 0);
+    const auto read =
+        ::cursiv::engine::ll_match_text<ll::kTable>("ab", 2, m, 0);
     if (read.term != llTerm) continue;
     CHECK(read.end == 2);
-    CHECK(::cursiv::ll_match_text<ll::kTable>("cb", 2, m, 0).term != llTerm);
+    CHECK(::cursiv::engine::ll_match_text<ll::kTable>("cb", 2, m, 0).term !=
+          llTerm);
     llRead = true;
     break;
   }

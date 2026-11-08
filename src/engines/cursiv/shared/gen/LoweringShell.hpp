@@ -4,8 +4,9 @@
 #include "cursiv/grammar/ImageOf.hpp"
 #include "cursiv/shared/gen/LowerDesc.hpp"
 #include "cursiv/shared/gen/LowerFacts.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // `Lower` lowers the image `View` reads, as `Desc` describes it. The closure,
 // the symbol split and the action vocabulary are named once: an id is a
@@ -36,4 +37,4 @@ struct LoweringShell {
   static const auto& cfg() { return table().cfg; }
 };
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

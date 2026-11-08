@@ -15,7 +15,7 @@
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Whether each refusal stands at its token's head: its terminal's entry
 // reaches it reading nothing, the refusals in front of it included.
@@ -69,4 +69,4 @@ void lex_boundary_misses(const LexNfaPool& n, const Cfg& g,
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

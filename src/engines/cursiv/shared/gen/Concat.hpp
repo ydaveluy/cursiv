@@ -7,7 +7,7 @@
 
 #include "cursiv/text/TextBuilder.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class... Parts>
 [[nodiscard]] std::string concat(const Parts&... parts) {
@@ -16,4 +16,4 @@ template <class... Parts>
   return out.take();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

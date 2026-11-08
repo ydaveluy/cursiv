@@ -12,7 +12,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv::detail {
+namespace cursiv::engine {
 
 // A set's identity: its bytes, refused outright; the set of lead bytes at
 // which the word class's scalar decides instead -- `kNoSet` for a plain class;
@@ -64,4 +64,4 @@ struct SetIndex {
   }
 };
 
-}  // namespace cursiv::detail
+}  // namespace cursiv::engine

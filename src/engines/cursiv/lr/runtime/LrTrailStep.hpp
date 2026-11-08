@@ -7,7 +7,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 inline constexpr std::uint32_t kLrNoTrail = ~std::uint32_t{0};
 inline constexpr TextOffset kLrNoEnd = ~TextOffset{0};
@@ -26,4 +26,4 @@ struct LrTrailStep {
   std::uint16_t mode;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

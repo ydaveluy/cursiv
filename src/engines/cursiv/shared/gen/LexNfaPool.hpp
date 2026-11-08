@@ -18,7 +18,7 @@
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexNfaState {
   int set = -1;  // charset index consumed, -1 for an epsilon state
@@ -212,4 +212,4 @@ struct LexNfaPool {
   mutable std::uint32_t _pass = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

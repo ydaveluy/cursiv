@@ -17,7 +17,7 @@
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The terminals a relay launched at `s`, or at a state a walk reaches `s` from,
 // defers: their readings end where no state of the automaton accepts them.
@@ -131,4 +131,4 @@ LexReserved lex_reserve(const Cfg& g, const View& v, std::size_t ndfa,
   return out;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -24,7 +24,7 @@
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A word its own turn reaches again; a match ending where the word does,
 // which only a class past it would rescue; a match ending short of the word;
@@ -444,4 +444,4 @@ std::vector<bool> lex_matcher_takes(LexNfaPool& n, Cfg& g,
   return taken;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

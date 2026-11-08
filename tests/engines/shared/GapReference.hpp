@@ -16,9 +16,9 @@ namespace cursiv::test {
 // `n + 1` of them. Classes and guards stay within the gap; a guard decodes
 // a scalar where its set does.
 struct GapReference {
-  const LexNode* nodes;
+  const engine::LexNode* nodes;
   const std::uint16_t* kids;
-  LexBoundary boundary;
+  engine::LexBoundary boundary;
   const char* s;
   TextOffset n;
   bool has(std::uint16_t set, TextOffset i) const {
@@ -28,28 +28,28 @@ struct GapReference {
   // Whether the word a guard refuses is spelled whole at `p`: its classes
   // in a row, then the end of the text or a byte its rescuing class does
   // not admit.
-  bool refused_at(const LexNode& e, TextOffset p) const {
+  bool refused_at(const engine::LexNode& e, TextOffset p) const {
     if (e.min > n - p) return false;
     for (std::uint32_t k = 0; k < e.min; ++k)
       if (!has(kids[e.b + k], p + k)) return false;
     const TextOffset after = p + e.min;
-    return e.a == kNoSet || after >= n || !has(e.a, after);
+    return e.a == engine::kNoSet || after >= n || !has(e.a, after);
   }
 
-  using Word = GapPositions::Word;
-  using Span = GapPositions::Span;
+  using Word = engine::GapPositions::Word;
+  using Span = engine::GapPositions::Span;
 
   template <class Set>
-  Set compose(const LexNode& e, const Set& in) const {
+  Set compose(const engine::LexNode& e, const Set& in) const {
     Set out;
     switch (e.kind) {
-      case LexKind::seq: {
+      case engine::LexKind::seq: {
         Set cur = in;
         for (unsigned i = 0; i < e.b && !cur.empty(); ++i)
           cur = step(kids[e.a + i], cur);
         return cur;
       }
-      case LexKind::alt:
+      case engine::LexKind::alt:
         for (unsigned i = 0; i < e.b; ++i) out.unite(step(kids[e.a + i], in));
         return out;
       default: {
@@ -73,23 +73,23 @@ struct GapReference {
 
   template <class Set>
   Set step(std::uint16_t node, const Set& in) const {
-    const LexNode& e = nodes[node];
+    const engine::LexNode& e = nodes[node];
     Set out;
     switch (e.kind) {
-      case LexKind::chars:
+      case engine::LexKind::chars:
         in.each([&](TextOffset p) {
           if (p < n && boundary.sets[e.a].has(static_cast<unsigned char>(s[p])))
             out.set(p + 1);
         });
         return out;
-      case LexKind::nguard:
+      case engine::LexKind::nguard:
         in.each([&](TextOffset p) {
           if (!refused_at(e, p)) out.set(p);
         });
         return out;
-      case LexKind::seq:
-      case LexKind::alt:
-      case LexKind::rep:
+      case engine::LexKind::seq:
+      case engine::LexKind::alt:
+      case engine::LexKind::rep:
         return compose(e, in);
       default:
         return out;
@@ -99,15 +99,15 @@ struct GapReference {
 
 // Whether some run of the gap (`whole` false), or all of it, is read by
 // `root`.
-inline bool gap_reference(const LexNode* nodes, const std::uint16_t* kids,
-                          LexBoundary boundary, std::uint16_t root,
+inline bool gap_reference(const engine::LexNode* nodes, const std::uint16_t* kids,
+                          engine::LexBoundary boundary, std::uint16_t root,
                           const char* s, TextOffset n, bool whole) {
   const GapReference r{nodes, kids, boundary, s, n};
   const auto run = [&](auto in) {
     if (whole) {
       in.set(0);
     } else {
-      for (TextOffset p = 0; p < n; p += gap_width(s + p, n - p)) in.set(p);
+      for (TextOffset p = 0; p < n; p += engine::gap_width(s + p, n - p)) in.set(p);
       in.set(n);
     }
     const auto out = r.step(root, in);

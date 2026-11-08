@@ -12,7 +12,7 @@
 #include "cursiv/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/ll/table/LlTable.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Whether the token in hand is one another caller takes: read again under
 // every follower the frames admit, it is this caller's closer that a longer
@@ -52,4 +52,4 @@ inline bool ll_climb_exits(const LlContext& c, std::uint16_t sym) {
   return c.laValid && sym == c.la.sym && ll_climb_reads_on<T>(c);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

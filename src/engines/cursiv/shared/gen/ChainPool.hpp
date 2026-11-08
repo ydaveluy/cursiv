@@ -16,7 +16,7 @@
 #include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A run of actions, laid end to end in one pool. A record carries the chain
 // its production and its call sites owe it, never a single action: a rule
@@ -167,4 +167,4 @@ struct ChainPool {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

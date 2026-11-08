@@ -10,7 +10,7 @@
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
-namespace cursiv::detail::llow {
+namespace cursiv::engine::llow {
 
 Acts cat(const Acts& a, const Acts& b) {
   Acts o = a;
@@ -423,4 +423,4 @@ void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
   o.fault.raise(GrammarFaultCode::infixOperatorNotText, p.owner);
 }
 
-}  // namespace cursiv::detail::llow
+}  // namespace cursiv::engine::llow

@@ -56,7 +56,7 @@ struct Options {
   // was said.
   bool trace = false;
   // What a parse's repairs may spend, where the language's engine takes it.
-  cursiv::RepairBudget budget;
+  cursiv::engine::RepairBudget budget;
   std::vector<std::string> only;
   std::string json;
 };
@@ -250,7 +250,7 @@ metric::RepairReport::Section run(const metric::MetricLanguage& lang,
 }
 
 // `FLOOR,PERBYTE,PERSEARCH,PERPARSE`, each a count or `inf`.
-bool read_budget(std::string_view arg, cursiv::RepairBudget& b) {
+bool read_budget(std::string_view arg, cursiv::engine::RepairBudget& b) {
   std::uint64_t v[4];
   std::stringstream ss{std::string(arg)};
   std::string part;

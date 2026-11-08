@@ -6,7 +6,7 @@
 
 #include "cursiv/shared/table/StampLayout.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrTableFacts {
   std::uint16_t nstates = 0;
@@ -30,4 +30,4 @@ struct LrTableFacts {
   StampLayout stamp{};
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

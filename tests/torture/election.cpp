@@ -31,20 +31,20 @@ using Stmt = tdang::ast::Stmt;
 // door does not carry, so the lane drives the generated table the module's own
 // parser drives.
 template <const auto& A>
-bool accepts(std::string_view text, const cursiv::LrDrive* drive,
-             cursiv::Cst& cst, cursiv::LrParseStats* stats = nullptr) {
-  return cursiv::lr_parser<A>.parse(text, cst, stats, drive) &&
+bool accepts(std::string_view text, const cursiv::engine::LrDrive* drive,
+             cursiv::Cst& cst, cursiv::engine::LrParseStats* stats = nullptr) {
+  return cursiv::engine::lr_parser<A>.parse(text, cst, stats, drive) &&
          cst.accepted() && !cst.recovered();
 }
 
 // One case of the election table, read clean, its tree built. The tree reads
 // the document in place: the caller keeps it alive.
 cursiv::ParseResult elect(std::string_view doc,
-                          cursiv::LrParseStats* stats = nullptr) {
+                          cursiv::engine::LrParseStats* stats = nullptr) {
   cursiv::Cst cst;
   CHECK(accepts<e::kTable>(doc, &e::kDrive, cst, stats));
-  return cursiv::AstReducer::build<e::kTable.stamp>(e::kAstActions,
-                                                    std::move(cst));
+  return cursiv::engine::AstReducer::build<e::kTable.stamp>(e::kAstActions,
+                                                            std::move(cst));
 }
 
 const ast::Case* case_of(const cursiv::ParseResult& r) {
@@ -54,7 +54,7 @@ const ast::Case* case_of(const cursiv::ParseResult& r) {
 // One cell, both reductions kept: the look-ahead elects the earlier complete
 // reading without forking on this input.
 void settles_without_fork(std::string_view opener, bool wantX) {
-  cursiv::LrParseStats stats;
+  cursiv::engine::LrParseStats stats;
   const std::string doc = std::string(opener) + " a b x";
   const cursiv::ParseResult r = elect(doc, &stats);
   CHECK(stats.splits == 0);
@@ -150,7 +150,7 @@ void small_ast_checks() {
   // A lone if: no conflict, no ambiguity to elect.
   CHECK(accepts<e::kTable>("if a then x", &e::kDrive, cst));
   {
-    cursiv::ParseResult r = cursiv::AstReducer::build<e::kTable.stamp>(
+    cursiv::ParseResult r = cursiv::engine::AstReducer::build<e::kTable.stamp>(
         e::kAstActions, std::move(cst));
     const Stmt* root = r.value_as<Stmt>();
     CHECK(root != nullptr);
@@ -164,7 +164,7 @@ void small_ast_checks() {
   cursiv::Cst cst2;
   CHECK(accepts<e::kTable>("if a then if b then x else e", &e::kDrive, cst2));
   {
-    cursiv::ParseResult r = cursiv::AstReducer::build<e::kTable.stamp>(
+    cursiv::ParseResult r = cursiv::engine::AstReducer::build<e::kTable.stamp>(
         e::kAstActions, std::move(cst2));
     const Stmt* root = r.value_as<Stmt>();
     CHECK(root != nullptr && root->cond == "a");
@@ -199,13 +199,13 @@ void small_ast_checks() {
 
 // Does a valid document ever get misparsed at depth?
 template <const auto& A>
-void depth_probe(const Dangling& g, const cursiv::LrDrive* drive,
-                 const cursiv::AstActions& actions, unsigned maxDepth) {
+void depth_probe(const Dangling& g, const cursiv::engine::LrDrive* drive,
+                 const cursiv::engine::AstActions& actions, unsigned maxDepth) {
   for (unsigned n = 1; n <= maxDepth; ++n) {
     const std::string text =
         nested(g.opener, n, n);  // N ifs, N elses: forces a bind at every level
     cursiv::Cst cst;
-    cursiv::LrParseStats stats;
+    cursiv::engine::LrParseStats stats;
     const bool clean = accepts<A>(text, drive, cst, &stats);
 
     // A fully-nested N-if/N-else document has exactly one completion (every
@@ -221,7 +221,7 @@ void depth_probe(const Dangling& g, const cursiv::LrDrive* drive,
     // innermost-first, so walking outer to inner (c0, c1, ...) meets them in
     // reverse -- c_k binds e_{n-1-k}.
     const cursiv::ParseResult r =
-        cursiv::AstReducer::build<A.stamp>(actions, std::move(cst));
+        cursiv::engine::AstReducer::build<A.stamp>(actions, std::move(cst));
     const Stmt* cur = g.root(r);
     bool shapeOk = cur != nullptr;
     for (unsigned k = 0; shapeOk && k < n; ++k) {
@@ -242,18 +242,19 @@ void depth_probe(const Dangling& g, const cursiv::LrDrive* drive,
 // Stability: N nested ifs, one trailing else, bound to the same if at every
 // depth: the election does not move with the depth.
 template <const auto& A>
-void election_stable_in_depth(const Dangling& g, const cursiv::LrDrive* drive,
-                              const cursiv::AstActions& actions,
+void election_stable_in_depth(const Dangling& g,
+                              const cursiv::engine::LrDrive* drive,
+                              const cursiv::engine::AstActions& actions,
                               unsigned maxDepth) {
   for (unsigned depth = 2; depth <= maxDepth; ++depth) {
     const std::string text = nested(g.opener, depth, 1);
     cursiv::Cst cst;
-    cursiv::LrParseStats stats;
+    cursiv::engine::LrParseStats stats;
     const bool clean = accepts<A>(text, drive, cst, &stats);
     CHECK(clean);
     if (!clean) continue;
     const cursiv::ParseResult r =
-        cursiv::AstReducer::build<A.stamp>(actions, std::move(cst));
+        cursiv::engine::AstReducer::build<A.stamp>(actions, std::move(cst));
     const Stmt* cur = g.root(r);
     unsigned level = 0;
     while (cur && cur->else_ == nullptr) {

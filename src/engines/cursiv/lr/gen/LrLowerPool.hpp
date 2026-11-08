@@ -15,7 +15,7 @@
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // The walk lays a body out as a tree of these, and a production is decided over
 // the whole body, since its optional positions distribute over one another.
@@ -210,4 +210,4 @@ struct LrLowerPool : LowerPool {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

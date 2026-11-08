@@ -15,18 +15,21 @@ namespace cursiv::recovery_metric {
 
 template <const auto& Table, const auto& Drive,
           const cursiv::GrammarMetaData& Grammar,
-          const cursiv::AstActions& Actions>
-std::unique_ptr<cursiv::Parser> searching(const cursiv::RepairBudget& budget) {
+          const cursiv::engine::AstActions& Actions>
+std::unique_ptr<cursiv::Parser> searching(
+    const cursiv::engine::RepairBudget& budget) {
   using Engine = std::conditional_t<
       std::is_pointer_v<std::remove_cvref_t<decltype(Drive)>>,
-      cursiv::LlLanguageParser<Table>, cursiv::LrLanguageParser<Table>>;
+      cursiv::engine::LlLanguageParser<Table>,
+      cursiv::engine::LrLanguageParser<Table>>;
   return std::make_unique<Engine>(Grammar, Actions, Drive, budget);
 }
 
 template <const auto& Table, const auto& Drive,
           const cursiv::GrammarMetaData& Grammar,
-          const cursiv::AstActions& Actions>
-Ceilings ceilings(std::string_view text, const cursiv::RepairBudget& budget) {
+          const cursiv::engine::AstActions& Actions>
+Ceilings ceilings(std::string_view text,
+                  const cursiv::engine::RepairBudget& budget) {
   Ceilings counts{};
   if constexpr (std::is_pointer_v<std::remove_cvref_t<decltype(Drive)>>) {
     const auto result =
@@ -37,8 +40,9 @@ Ceilings ceilings(std::string_view text, const cursiv::RepairBudget& budget) {
       counts[2] += d.kind == cursiv::DiagnosticKind::bounded;
   } else {
     cursiv::Cst cst;
-    cursiv::LrParseStats stats{};
-    (void)cursiv::lr_parser<Table>.parse(text, cst, &stats, &Drive, budget);
+    cursiv::engine::LrParseStats stats{};
+    (void)cursiv::engine::lr_parser<Table>.parse(text, cst, &stats, &Drive,
+                                                 budget);
     for (const auto& d : cst.diagnostics())
       counts[2] += d.kind == cursiv::DiagnosticKind::bounded;
     counts[0] = stats.searchStops;

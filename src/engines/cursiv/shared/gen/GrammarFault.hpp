@@ -12,7 +12,7 @@
 
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 enum class GrammarFaultCode : std::uint8_t {
   none = 0,
@@ -222,4 +222,4 @@ inline std::string grammar_fault_cycle(
   return out + " `" + std::string(rules.front()) + '`';
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

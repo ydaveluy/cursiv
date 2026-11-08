@@ -14,7 +14,7 @@
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& T>
 class LlAtoms {
@@ -68,4 +68,4 @@ inline const LlAtoms<T>& ll_atoms() {
   return atoms;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

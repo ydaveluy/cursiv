@@ -20,7 +20,7 @@
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 namespace {
 
 constexpr std::uint32_t kNoWord = ~std::uint32_t{0};
@@ -346,4 +346,4 @@ void lr_elect_runs(LrBuildTable& A) {
   if (A.electWord.empty()) A.electAt.clear();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

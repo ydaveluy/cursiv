@@ -3,7 +3,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A read of the text ahead of the descent: where the next token is read from,
 // and the levels it stands in, in an arena its reader keeps. `head` is set
@@ -16,4 +16,4 @@ struct LlAhead {
   bool head = true;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

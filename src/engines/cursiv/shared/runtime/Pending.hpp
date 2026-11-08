@@ -6,19 +6,20 @@
 
 #include <cstdint>
 
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstMetaData.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct Pending {
   NodeId root = kNoNode;
   NodeId text = kNoNode;
-  std::uint16_t type = detail::kNoIndex;
+  std::uint16_t type = kNoIndex;
   std::uint16_t field = kNoField;
-  std::uint16_t conv = detail::kNoIndex;
+  std::uint16_t conv = kNoIndex;
   ActKind kind = ActKind::none;
   std::uint8_t narrow = kNoNarrow;
   AstNode* value = nullptr;
@@ -31,7 +32,7 @@ static_assert(sizeof(void*) != 8 || sizeof(Pending) == 24,
 // another class.
 struct Made {
   AstNode* value = nullptr;
-  std::uint16_t type = detail::kNoIndex;
+  std::uint16_t type = kNoIndex;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

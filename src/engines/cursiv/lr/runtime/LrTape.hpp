@@ -11,7 +11,7 @@
 #include "cursiv/utils/macros.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // No record is waiting for the state it settles in.
 inline constexpr NodeCount kLrNoPending = 0xFFFFFFFFu;
@@ -110,4 +110,4 @@ class LrTape {
   NodeCount _pend = kLrNoPending;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

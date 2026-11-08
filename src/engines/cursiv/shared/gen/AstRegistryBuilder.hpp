@@ -9,12 +9,13 @@
 #include <span>
 #include <string_view>
 
-#include "cursiv/syntax-tree/AstField.hpp"
-#include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/shared/gen/AstRegistry.hpp"
 #include "cursiv/shared/gen/AstRowGen.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/syntax-tree/AstField.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // A type is told by its address alone; its tag, where it is a node class,
 // answers subtyping.
@@ -29,8 +30,8 @@ struct AstConvDesc {};
 struct AstFieldDesc {
   std::string_view name;
   std::ptrdiff_t (*offset)() = nullptr;
-  detail::FieldNature nature = detail::FieldNature::value;
-  detail::FieldStorage storage = detail::FieldStorage::direct;
+  FieldNature nature = FieldNature::value;
+  FieldStorage storage = FieldStorage::direct;
   const AstTypeDesc* owner = nullptr;
   const AstTypeDesc* const* targets = nullptr;
   std::uint32_t targetCount = 0;
@@ -59,4 +60,4 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
     std::span<const AstTypeDesc* const> bindings,
     std::span<const AstTypeDesc* const> rules, std::string_view grammar);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

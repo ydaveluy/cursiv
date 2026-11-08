@@ -18,7 +18,7 @@
 #include "cursiv/lr/table/LrFusedRow.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Which chains a nonterminal hands back, on a record: a directive over a call
 // renames it, so each pair (what the record states, what the site adds) gets
@@ -278,4 +278,4 @@ void lr_derive_reductions(const LrBuildTable& a, LrDerivedRows& rows) {
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

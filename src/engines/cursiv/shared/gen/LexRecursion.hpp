@@ -13,9 +13,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 
-namespace cursiv {
-
-namespace detail {
+namespace cursiv::engine {
 
 template <class Cfg, class Visit>
 void lex_children(const Cfg& g, std::uint16_t at, Visit&& visit,
@@ -93,8 +91,6 @@ bool lex_derives(const Cfg& g, std::uint16_t at, Facts&& facts,
   }
 }
 
-}  // namespace detail
-
 template <class Cfg>
 std::vector<std::uint8_t> lex_call_ancestors(const Cfg& g) {
   std::vector<std::uint16_t> todo;
@@ -105,7 +101,7 @@ std::vector<std::uint8_t> lex_call_ancestors(const Cfg& g) {
   std::vector<std::vector<std::uint16_t>> parents(g.nlex);
   for (const auto at : todo) calls[at] = 1;
   for (std::uint16_t at = 0; at < g.nlex; ++at)
-    detail::lex_children(g, at, [&](auto kid) { parents[kid].push_back(at); });
+    lex_children(g, at, [&](auto kid) { parents[kid].push_back(at); });
   while (!todo.empty()) {
     const auto at = todo.back();
     todo.pop_back();
@@ -122,10 +118,10 @@ std::vector<std::uint8_t> lex_call_ancestors(const Cfg& g) {
 template <class Cfg>
 std::vector<std::uint8_t> lex_empty_nodes(const Cfg& g) {
   std::vector<std::uint8_t> empty(g.nlex);
-  detail::settle_empty([&](auto&& set) {
+  settle_empty([&](auto&& set) {
     for (std::uint16_t at = 0; at < g.nlex; ++at)
-      set(empty[at], detail::lex_derives(
-                         g, at, [&](auto k) { return empty[k] != 0; }, false));
+      set(empty[at],
+          lex_derives(g, at, [&](auto k) { return empty[k] != 0; }, false));
   });
   return empty;
 }
@@ -148,8 +144,7 @@ void validate_lex_recursion(Cfg& g) {
       todo.pop_back();
       if (to[at] != 0) continue;
       to[at] = viaCalls && body[at] != 0 ? body[at] : t;
-      detail::lex_children(
-          g, at, [&](auto kid) { todo.push_back(kid); }, viaCalls);
+      lex_children(g, at, [&](auto kid) { todo.push_back(kid); }, viaCalls);
     }
   };
   for (std::uint16_t t = 1; t < g.nterms; ++t) reach(body, t, false);
@@ -157,11 +152,11 @@ void validate_lex_recursion(Cfg& g) {
     if (calls[g.termBuild[t].lex]) reach(owner, t, true);
   std::vector<std::uint8_t> empty(g.nlex), productive(g.nlex);
   const auto settle = [&](auto& facts, bool any_text) {
-    detail::settle_empty([&](auto&& set) {
+    settle_empty([&](auto&& set) {
       for (std::uint16_t at = 0; at < g.nlex; ++at)
         if (owner[at] != 0)
           set(facts[at],
-              detail::lex_derives(
+              lex_derives(
                   g, at, [&](auto k) { return facts[k] != 0; }, any_text));
     });
   };
@@ -179,7 +174,7 @@ void validate_lex_recursion(Cfg& g) {
           if (!empty[kid]) break;
         }
       } else {
-        detail::lex_children(g, at, [&](auto kid) { edges.push_back(kid); });
+        lex_children(g, at, [&](auto kid) { edges.push_back(kid); });
       }
     }
     starts.push_back(static_cast<std::uint32_t>(edges.size()));
@@ -208,7 +203,7 @@ void validate_lex_recursion(Cfg& g) {
       lower_refuse(g, LowerFail::terminalEmpty, t);
       return;
     }
-  detail::LexRightLinear<Cfg>{g}.run();
+  LexRightLinear<Cfg>{g}.run();
 }
 
 template <class Cfg>
@@ -255,4 +250,4 @@ std::pair<ByteSet, bool> lex_first_bytes(const Cfg& g, std::uint16_t node) {
   }
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

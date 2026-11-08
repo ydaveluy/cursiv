@@ -21,7 +21,7 @@
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/LexRelay.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LexRelayGen : LexRelay {
   std::uint16_t predicate = kNoLexNode;
@@ -204,4 +204,4 @@ std::string lex_relay_source(const LexRelayGen& r, Name&& name) {
   return concat("{", field.list(), "}");
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

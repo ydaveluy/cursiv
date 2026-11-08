@@ -23,7 +23,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Cfg>
 class LexOvertakes {
@@ -427,4 +427,4 @@ class LexOvertakes {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // Ascending, bit by bit: a set holds hundreds of members, so asking it about
 // each in turn is a call per member.
@@ -39,4 +39,4 @@ struct VecHash {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

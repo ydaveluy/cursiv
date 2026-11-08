@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class WarningFound;
 
@@ -22,4 +22,4 @@ std::vector<NestedRunWarning> nested_run_warnings(WarningFound& found);
 
 std::string nested_run_warning_text(const NestedRunWarning& w);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

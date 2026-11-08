@@ -34,8 +34,8 @@
 
 namespace {
 
-using cursiv::Scan;
 using cursiv::TextOffset;
+using cursiv::engine::Scan;
 namespace gen = tllbound::generated;
 
 // Bit `n` set: the body reads `n` bytes from the position.
@@ -228,10 +228,11 @@ Scan expected(const Lexicon& lx, const std::vector<const Spelled*>& of,
   };
   const auto before = [&](unsigned a, unsigned b) {
     const auto rank = [&](unsigned t) {
-      return cursiv::lex_rank(of[t]->keyword ? cursiv::kTierKeyword
-                              : literal(t)   ? cursiv::kTierLiteral
-                                             : 0u,
-                              A.cfg.terms[t].trivia);
+      return cursiv::engine::lex_rank(
+          of[t]->keyword ? cursiv::engine::kTierKeyword
+          : literal(t)   ? cursiv::engine::kTierLiteral
+                         : 0u,
+          A.cfg.terms[t].trivia);
     };
     return rank(a) != rank(b) ? rank(a) > rank(b) : a < b;
   };
@@ -256,9 +257,9 @@ Scan expected(const Lexicon& lx, const std::vector<const Spelled*>& of,
     }
     if (best >= 0)
       return Scan{static_cast<TextOffset>(at),
-                  static_cast<cursiv::SymbolId>(best)};
+                  static_cast<cursiv::engine::SymbolId>(best)};
   }
-  return Scan{static_cast<TextOffset>(from), cursiv::kInvalidSymbol};
+  return Scan{static_cast<TextOffset>(from), cursiv::engine::kInvalidSymbol};
 }
 
 std::string shape(const cursiv::ParseResult& r) {
@@ -302,13 +303,13 @@ template <const auto& A>
 struct Lane {
   const char* lang;
   const Lexicon& lx;
-  const cursiv::LrDrive& drive;
+  const cursiv::engine::LrDrive& drive;
   std::vector<const Spelled*> of;
   std::vector<std::vector<char>> modes;
   std::vector<char> used;
   std::size_t bad = 0, asked = 0;
 
-  Lane(const char* l, const Lexicon& x, const cursiv::LrDrive& d)
+  Lane(const char* l, const Lexicon& x, const cursiv::engine::LrDrive& d)
       : lang(l), lx(x), drive(d), of(A.cfg.nterms, nullptr) {
     for (unsigned t = 1; t < A.cfg.nterms; ++t) {
       for (const Spelled& sp : lx.terms)
@@ -338,7 +339,7 @@ struct Lane {
         const auto len = static_cast<TextOffset>(s.size());
         const auto mode = static_cast<std::uint16_t>(m);
         const Scan want = expected<A>(lx, of, modes[m], s, from);
-        const Scan got = cursiv::lr_match_text<A>(
+        const Scan got = cursiv::engine::lr_match_text<A>(
             s.data(), len, mode, static_cast<TextOffset>(from));
         const Scan walk =
             drive.walk(s.data(), len, mode, static_cast<TextOffset>(from));
@@ -360,8 +361,9 @@ struct Lane {
 };
 
 template <const auto& A, class Ll, class Lr>
-void agree(const char* lang, const Lexicon& lx, const cursiv::LrDrive& drive,
-           const Ll& ll, const Lr& lr, Text alphabet, std::size_t longest,
+void agree(const char* lang, const Lexicon& lx,
+           const cursiv::engine::LrDrive& drive, const Ll& ll, const Lr& lr,
+           Text alphabet, std::size_t longest,
            std::initializer_list<Text> words) {
   Lane<A> lane(lang, lx, drive);
   std::size_t parses = 0, differ = 0;
@@ -415,18 +417,18 @@ int main() {
   {
     constexpr const auto& A = gen::FrontierLr::kTable;
     const auto lex = [&](Text text) {
-      return cursiv::lr_match_text<A>(
+      return cursiv::engine::lr_match_text<A>(
           text.data(), static_cast<TextOffset>(text.size()), A.mode[0], 0);
     };
     const auto term = [&](Text name) {
       for (unsigned t = 1; t < A.cfg.nterms; ++t)
         if (A.cfg.term_name(static_cast<std::uint16_t>(t)) == name)
-          return static_cast<cursiv::SymbolId>(t);
-      return cursiv::kInvalidSymbol;
+          return static_cast<cursiv::engine::SymbolId>(t);
+      return cursiv::engine::kInvalidSymbol;
     };
     CHECK(lex("di;").end == 1 && lex("di;").term == term("ONE"));
     CHECK(lex("do;").end == 2 && lex("do;").term == term("TWO"));
-    CHECK(lex("do!").term == cursiv::kInvalidSymbol);
+    CHECK(lex("do!").term == cursiv::engine::kInvalidSymbol);
     CHECK(lex("di$").end == 2 && lex("di$").term == term("NAME"));
   }
 

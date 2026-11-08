@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrGssIndex {
  public:
@@ -85,4 +85,4 @@ class LrGssIndex {
   std::size_t _used = 0;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

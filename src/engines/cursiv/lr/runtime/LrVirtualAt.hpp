@@ -8,7 +8,7 @@
 
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrVirtualAt {
   TextOffset insertedAt = 0xFFFFFFFFu;
@@ -58,4 +58,4 @@ struct LrVirtualAt {
   constexpr bool operator==(const LrVirtualAt&) const = default;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

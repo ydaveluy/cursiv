@@ -8,7 +8,7 @@
 #include "cursiv/shared/gen/gen_report.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 namespace {
 
@@ -47,4 +47,4 @@ std::optional<LlFinalProgram> LlFinalProgram::make(LlBuiltProgram built,
       std::make_unique<const LlBuiltProgram>(std::move(built)));
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

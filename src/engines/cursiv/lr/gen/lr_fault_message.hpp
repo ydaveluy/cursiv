@@ -8,10 +8,10 @@
 
 #include "cursiv/lr/gen/LrLowered.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 std::uint16_t lr_fault_rule(const LrLowered& o);
 
 std::string lr_fault_message(const LrLowered& o, std::string_view written);
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -18,7 +18,7 @@
 #include "cursiv/shared/runtime/TypoWalk.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // One walk's table, as `typo_each` reads it.
 template <const auto& A>
@@ -170,4 +170,4 @@ std::vector<Typo> lr_rescan_candidates(LrContext& c, std::uint32_t state,
   return found.ranked();
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

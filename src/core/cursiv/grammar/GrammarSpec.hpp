@@ -48,10 +48,11 @@ struct body_not_a_rule {
 }  // namespace detail
 
 struct GrammarSpec;
-template <class G, class X>
-struct InGrammar;
 
 namespace detail {
+
+template <class G, class X>
+struct InGrammar;
 
 // A grammar is named whole: `section<G>` reads G's entry as G alone reads it.
 template <class R>

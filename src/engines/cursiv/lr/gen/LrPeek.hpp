@@ -8,7 +8,7 @@
 
 #include "cursiv/shared/table/DynSet.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 struct LrPeek {
   std::uint16_t state = 0;
@@ -17,4 +17,4 @@ struct LrPeek {
   DynSet set[2]{};
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

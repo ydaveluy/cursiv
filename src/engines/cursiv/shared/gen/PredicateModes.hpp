@@ -9,7 +9,7 @@
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <class Cfg>
 struct PredicateModes {
@@ -173,4 +173,4 @@ void predicate_modes(Cfg& cfg, LexModes& modes) {
       cfg.lexMode[at] = modes.intern(m.want(at));
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

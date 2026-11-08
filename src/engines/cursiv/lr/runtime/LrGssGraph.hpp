@@ -24,7 +24,7 @@
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class LrGssGraph {
  public:
@@ -431,4 +431,4 @@ class LrGssGraph {
   bool _accepted = false;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

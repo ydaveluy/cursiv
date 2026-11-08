@@ -7,7 +7,7 @@
 #include "cursiv/shared/runtime/LexReadBudget.hpp"
 #include "cursiv/shared/runtime/LexReading.hpp"
 
-namespace cursiv {
+namespace cursiv::engine {
 
 template <const auto& A>
 inline constexpr LexOwed kLrLexOwed{A.derived.lexBodies.data(),
@@ -32,4 +32,4 @@ TextOffset lr_unmatched_end(const char* src, TextOffset len, std::uint16_t mode,
       poll);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::engine
