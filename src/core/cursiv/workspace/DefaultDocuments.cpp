@@ -22,6 +22,17 @@
 
 namespace cursiv {
 
+namespace {
+
+// A final slash is no second document: the folder index drops it, so both
+// spellings are one node there.
+std::string_view document_key(std::string_view canonical) noexcept {
+  return canonical.ends_with('/') ? canonical.substr(0, canonical.size() - 1)
+                                  : canonical;
+}
+
+}  // namespace
+
 const DefaultDocuments::Row* DefaultDocuments::row(
     DocumentId id) const noexcept {
   const auto index = static_cast<std::size_t>(id);
@@ -29,17 +40,21 @@ const DefaultDocuments::Row* DefaultDocuments::row(
 }
 
 DocumentId DefaultDocuments::getDocumentId(std::string_view uri) const {
-  const auto it = _byUri.find(normalize_uri(uri));
+  const std::string canonical = normalize_uri(uri);
+  const auto it = _byUri.find(document_key(canonical));
   return it == _byUri.end() ? kNoDocument : it->second;
 }
 
 DocumentId DefaultDocuments::getOrCreateDocumentId(std::string_view uri) {
   std::string canonical = normalize_uri(uri);
-  if (const auto it = _byUri.find(canonical); it != _byUri.end())
+  const std::size_t key = document_key(canonical).size();
+  if (const auto it = _byUri.find(std::string_view(canonical).substr(0, key));
+      it != _byUri.end())
     return it->second;
   const auto id = static_cast<DocumentId>(_rows.size());
   _rows.emplace_back(canonical, nullptr);
   _byFolder.insert(canonical, id);
+  canonical.resize(key);
   _byUri.try_emplace(std::move(canonical), id);
   return id;
 }

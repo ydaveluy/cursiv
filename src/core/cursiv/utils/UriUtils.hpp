@@ -11,9 +11,9 @@
 namespace cursiv {
 
 // Stable for comparisons and map keys. A local file is `file:///path` whether
-// it came as `file:/path` or `file://localhost/path`; a drive letter opening
-// the path is lowered and its colon escaped, on every host; the scheme and an
-// authority are lower case.
+// it came as `file:/path` or `file:///path`; a drive letter opening the path
+// is lowered and its colon escaped, on every host; the scheme and a host are
+// lower case.
 [[nodiscard]] std::string normalize_uri(std::string_view uri);
 
 [[nodiscard]] bool is_file_uri(std::string_view uri);

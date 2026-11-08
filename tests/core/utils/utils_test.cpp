@@ -375,6 +375,11 @@ void a_path_makes_a_uri_and_back() {
           "\\\\wsl.localhost\\Ubuntu\\a");
     CHECK(cursiv::path_to_file_uri("\\\\Server\\share\\a b") ==
           "file://server/share/a%20b");
+    // Before a share, `localhost` is that share's host, not the current drive.
+    CHECK(cursiv::path_to_file_uri("\\\\localhost\\share\\a") ==
+          "file://localhost/share/a");
+    CHECK(cursiv::file_uri_to_path("file://localhost/share/a").value() ==
+          "\\\\localhost\\share\\a");
     CHECK(!cursiv::file_uri_to_path("file://server").has_value());
   } else {
     CHECK(cursiv::path_to_file_uri("/a/b/c.txt") == "file:///a/b/c.txt");
@@ -435,9 +440,9 @@ void a_uri_has_one_spelling() {
       {R"(file://server/a/b)", R"(file://server/a/b)"},
       {R"(file://Host/a/b)", R"(file://host/a/b)"},
       {R"(file://wsl.localhost/a/b)", R"(file://wsl.localhost/a/b)"},
-      {R"(file://localhost/a/b)", R"(file:///a/b)"},
-      {R"(file://LocalHost/C:/x)", R"(file:///c%3A/x)"},
-      {R"(file://local%68ost/a)", R"(file:///a)"},
+      {R"(file://localhost/a/b)", R"(file://localhost/a/b)"},
+      {R"(file://LocalHost/C:/x)", R"(file://localhost/c%3A/x)"},
+      {R"(file://local%68ost/a)", R"(file://localhost/a)"},
       {R"(file://server/C:/Users/me/a.dsl)",
        R"(file://server/c%3A/Users/me/a.dsl)"},
       {R"(http://Host/a/b)", R"(http://host/a/b)"},
@@ -445,7 +450,12 @@ void a_uri_has_one_spelling() {
       {R"(http://User:Pw@Host:80/a/b)", R"(http://User:Pw@host:80/a/b)"},
       {R"(http://User@Host/a/b)", R"(http://User@host/a/b)"},
       {R"(http://[::1]:8080/a/b)", R"(http://[::1]:8080/a/b)"},
-      {R"(http://a%40b@c/a/b)", R"(http://a@b%40c/a/b)"},
+      {R"(http://a%40b@c/a/b)", R"(http://a%40b@c/a/b)"},
+      {R"(https://alice:p%40ss@EXAMPLE.com/a)",
+       R"(https://alice:p%40ss@example.com/a)"},
+      {R"(https://alice:p%3Ass@host/a)", R"(https://alice:p%3Ass@host/a)"},
+      {R"(https://alice:p:ss@host/a)", R"(https://alice:p%3Ass@host/a)"},
+      {R"(https://al%3Aice:pw@host/a)", R"(https://al%3Aice:pw@host/a)"},
       {R"(vscode-remote://wsl%2Bubuntu/a/b)",
        R"(vscode-remote://wsl%2Bubuntu/a/b)"},
       {R"(untitled:Untitled-1)", R"(untitled:Untitled-1)"},
@@ -467,8 +477,9 @@ void a_uri_has_one_spelling() {
 void one_file_normalizes_to_one_string() {
   CHECK(cursiv::equals_uri("file:///a/b c", "file:///a/b%20c"));
   CHECK(!cursiv::equals_uri("file:///a/b", "file:///a/c"));
-  CHECK(cursiv::equals_uri("file://localhost/a/b", "file:///a/b"));
-  CHECK(cursiv::contains_uri("file:///a", "file://localhost/a/b"));
+  // `localhost` is a host like any other: on Windows it may name a share.
+  CHECK(!cursiv::equals_uri("file://localhost/a/b", "file:///a/b"));
+  CHECK(!cursiv::contains_uri("file:///a", "file://localhost/a/b"));
   // Not a file URI: left alone, and still comparable.
   CHECK(cursiv::normalize_uri("http://x/a") == "http://x/a");
   CHECK(cursiv::equals_uri("http://x/a", "http://x/a"));

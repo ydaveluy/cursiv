@@ -181,25 +181,27 @@ void lower_drive_letter(std::string& path) {
     path[0] = to_lower(path[0]);
 }
 
-// `authority` decoded: the userinfo keeps its case, and the host goes to lower
-// case, RFC 3986 making it case-insensitive.
-std::string format_authority(std::string_view authority) {
+// `authority` split at its first '@' and its userinfo at the first ':', then
+// each part read by `read` and written back one way: the userinfo keeps its
+// case, and the host goes to lower case, RFC 3986 making it case-insensitive.
+// A URI's authority splits before its escapes are decoded, so an escaped '@'
+// or ':' stays inside its part (RFC 3986, section 2.4).
+template <class Read>
+std::string format_authority(std::string_view authority, Read read) {
   std::string out;
   if (const std::size_t at = authority.find('@');
       at != std::string_view::npos) {
     const std::string_view userinfo = authority.substr(0, at);
-    if (const std::size_t colon = userinfo.rfind(':');
-        colon == std::string_view::npos) {
-      out += percent_encode(userinfo, kUnreserved);
-    } else {
-      out += percent_encode(userinfo.substr(0, colon), kUnreserved);
+    const std::size_t colon = userinfo.find(':');
+    out += percent_encode(read(userinfo.substr(0, colon)), kUnreserved);
+    if (colon != std::string_view::npos) {
       out += ':';
-      out += percent_encode(userinfo.substr(colon + 1), kAuthorityBare);
+      out += percent_encode(read(userinfo.substr(colon + 1)), kUnreserved);
     }
     out += '@';
     authority.remove_prefix(at + 1);
   }
-  const std::string host = lower_case(authority);
+  const std::string host = lower_case(read(authority));
   if (const std::size_t colon = host.rfind(':');
       colon == std::string::npos) {
     out += percent_encode(host, kAuthorityBare);
@@ -261,7 +263,6 @@ bool is_normal_uri(const UriParts& parts) {
     return false;
   const bool file = parts.scheme == "file";
   if (parts.slashes != (file || !parts.authority.empty())) return false;
-  if (file && parts.authority == "localhost") return false;
   if ((file || parts.scheme == "http" || parts.scheme == "https") &&
       !parts.path.starts_with('/'))
     return false;
@@ -310,9 +311,9 @@ std::string normalize_uri(std::string_view uri) {
   // the text alone, never on the host.
   const std::string scheme = lower_case(parts.scheme);
   std::string out = scheme + ':';
-  std::string authority = format_authority(percent_decode(parts.authority));
-  // A local file has no host: `localhost` names this machine.
-  if (scheme == "file" && authority == "localhost") authority.clear();
+  const std::string authority = format_authority(
+      parts.authority,
+      [](std::string_view part) { return percent_decode(part); });
   if (!authority.empty() || scheme == "file") out += "//";
   out += authority;
   std::string path = percent_decode(parts.path);
@@ -343,18 +344,21 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
   // An escaped NUL would end the path where the system call stops reading and
   // open another file than the URI names.
   if (decoded.find('\0') != std::string::npos) return std::nullopt;
+  // `localhost` names this machine. On Windows, before a share rather than a
+  // drive, it is the share's host.
+  const bool drive =
+      decoded.size() >= 3 && is_ascii_letter(decoded[1]) && decoded[2] == ':';
   const bool local =
       parts.authority.empty() ||
-      std::ranges::equal(parts.authority, std::string_view("localhost"), {},
-                         [](char c) { return to_lower(c); });
+      (std::ranges::equal(parts.authority, std::string_view("localhost"), {},
+                          [](char c) { return to_lower(c); }) &&
+       (!kWindowsPaths || drive));
   if (local) lower_drive_letter(decoded);
   // Elsewhere a drive keeps its root, where a WASI runner preopens it, and any
   // other host names a file this process cannot open.
   if (!kWindowsPaths) return local ? std::optional(std::move(decoded)) : std::nullopt;
   if (local) {
-    if (decoded.size() >= 3 && is_ascii_letter(decoded[1]) &&
-        decoded[2] == ':')
-      decoded.erase(decoded.begin());
+    if (drive) decoded.erase(decoded.begin());
   } else {
     // A share: the host is the path's first component.
     if (decoded == "/") return std::nullopt;
@@ -379,7 +383,8 @@ std::string path_to_file_uri(std::string_view path) {
             : std::filesystem::path(path.substr(end))
                   .lexically_normal()
                   .generic_string();
-    return "file://" + format_authority(host) +
+    const auto plain = [](std::string_view part) { return std::string(part); };
+    return "file://" + format_authority(host, plain) +
            percent_encode(rest, kPathBare);
   }
   return rooted_path_to_uri(

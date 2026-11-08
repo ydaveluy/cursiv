@@ -2916,6 +2916,22 @@ void one_scheme_is_one_id_whatever_its_case() {
   CHECK(store.all().size() == 1);
 }
 
+// A final slash names the same node in the folder index, so the same
+// document: one id, and a second document under it is refused.
+void a_final_slash_is_one_id() {
+  cursiv::DefaultDocuments store{completeShared()};
+  const auto d = document("mem:///w/a.t");
+  store.addDocument(d);
+
+  CHECK(store.getOrCreateDocumentId("mem:///w/a.t/") == d->id);
+  CHECK(store.getDocument("mem:///w/a.t/") == d);
+  CHECK(support::throws<cursiv::DocumentStoreError>([&] {
+    store.addDocument(document("mem:///w/a.t/"));
+  }));
+  CHECK(store.all().size() == 1);
+  CHECK(store.getDocuments("mem:///w").size() == 1);
+}
+
 // An id can exist before a document does, and still after it is gone: a
 // description that outlives its document must stay nameable.
 void an_id_outlives_its_document() {
@@ -3024,6 +3040,7 @@ void run() {
   invalidating_an_unknown_uri_yields_nothing();
   one_file_is_one_id_however_it_is_spelled();
   one_scheme_is_one_id_whatever_its_case();
+  a_final_slash_is_one_id();
   an_id_outlives_its_document();
   a_removed_document_stays_alive_for_its_holder();
   ids_are_never_reused();
