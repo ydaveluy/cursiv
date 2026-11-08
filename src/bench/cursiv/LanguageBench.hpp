@@ -78,9 +78,6 @@ enum Stage : std::size_t {
   kStageCount,
 };
 
-inline constexpr const char* kStageName[kStageCount] = {
-    "parse+index", "scopes", "link", "validate", "build"};
-
 // The language module installs a `DocumentValidator`, so
 // the phase always runs -- but with an empty registry and every reference
 // resolved it walks nothing and publishes nothing. Real as soon as it does
@@ -159,22 +156,6 @@ struct Row {
 // different amount of text.
 enum class Shape : std::size_t { ManySmall, Medium, FewLarge, Mixed, Count };
 
-constexpr const char* shape_name(Shape shape) {
-  switch (shape) {
-    case Shape::ManySmall:
-      return "many-small";
-    case Shape::Medium:
-      return "medium";
-    case Shape::FewLarge:
-      return "few-large";
-    case Shape::Mixed:
-      return "mixed";
-    case Shape::Count:
-      break;
-  }
-  return "";
-}
-
 }  // namespace detail
 
 // How the reference graph of a shape's corpus is wired. Both regimes drive
@@ -183,52 +164,6 @@ constexpr const char* shape_name(Shape shape) {
 enum class Refs : std::uint8_t { Intra, Cross };
 
 namespace detail {
-
-constexpr const char* refs_name(Refs r) {
-  return r == Refs::Cross ? "cross" : "intra";
-}
-
-// The shapes, as file sizes summing to `budget`.
-//   many-small  16 KiB files      -- dispatch-bound: the most documents, the
-//                                    least work in each
-//   medium      1 MiB files       -- the shape a real workspace has
-//   few-large   budget/4, 4 files -- fewer documents than workers, which is
-//                                    where a per-document fan-out stops being
-//                                    able to help
-//   mixed       80 % of the bytes in 16 KiB files, 20 % in 1 MiB ones -- the
-//               realistic tail, and the one an even split would flatter
-inline std::vector<std::size_t> shape_files(Shape shape, std::size_t budget) {
-  constexpr std::size_t kSmall = std::size_t{16} << 10;
-  constexpr std::size_t kMedium = std::size_t{1} << 20;
-  std::vector<std::size_t> files;
-  // At least one file per component, or a small budget silently drops the
-  // tail of the mixed shape. The budget then overshoots by less than one
-  // file, which the row reports as its real byte count.
-  const auto fill = [&](std::size_t each, std::size_t bytes) {
-    if (bytes == 0 || each == 0) return;
-    const std::size_t count = std::max<std::size_t>(bytes / each, 1);
-    for (std::size_t i = 0; i < count; ++i) files.push_back(each);
-  };
-  switch (shape) {
-    case Shape::ManySmall:
-      fill(kSmall, budget);
-      break;
-    case Shape::Medium:
-      fill(kMedium, budget);
-      break;
-    case Shape::FewLarge:
-      fill(budget / 4, budget);
-      break;
-    case Shape::Mixed:
-      fill(kSmall, budget * 4 / 5);
-      fill(kMedium, budget / 5);
-      break;
-    case Shape::Count:
-      break;
-  }
-  if (files.empty()) files.push_back(budget);
-  return files;
-}
 
 // One point of a scaling curve.
 struct MultiPoint {
@@ -253,7 +188,7 @@ struct MultiRow {
 
 struct Options {
   std::vector<std::size_t> sizes;
-  int iterations = 0;  // 0 -> per-size default, see iterations_for
+  int iterations = 0;  // 0 -> a default that shrinks as the size grows
   std::string filter;
   std::string jsonPath;
   std::string csvPath;
@@ -285,37 +220,6 @@ struct Options {
 
 inline constexpr std::size_t kDefaultMultiBytes = std::size_t{16} << 20;
 inline constexpr std::size_t kFullMultiBytes = std::size_t{64} << 20;
-
-// The ladder, five orders of magnitude. A few kB is what an editor
-// reparses on a keystroke and where the fixed costs show; 128 MiB is a
-// build-system input and shows whether anything grows worse than linearly.
-inline constexpr std::size_t kDefaultSizes[] = {
-    std::size_t{16} << 10, std::size_t{256} << 10, std::size_t{4} << 20};
-inline constexpr std::size_t kFullSizes[] = {
-    std::size_t{16} << 10, std::size_t{256} << 10, std::size_t{4} << 20,
-    std::size_t{32} << 20, std::size_t{128} << 20};
-
-// Repetitions shrink as the corpus grows, so the default sweep stays
-// bounded: the whole ladder is minutes, not an afternoon. `--iterations`
-// overrides.
-inline int iterations_for(std::size_t bytes) {
-  if (bytes <= (std::size_t{256} << 10)) return 5;
-  if (bytes <= (std::size_t{4} << 20)) return 3;
-  if (bytes <= (std::size_t{32} << 20)) return 2;
-  return 1;
-}
-
-inline std::string size_label(std::size_t bytes) {
-  char buf[32];
-  if (bytes >= (std::size_t{1} << 20) && bytes % (std::size_t{1} << 20) == 0)
-    std::snprintf(buf, sizeof buf, "%zuMiB", bytes >> 20);
-  else if (bytes >= (std::size_t{1} << 10) &&
-           bytes % (std::size_t{1} << 10) == 0)
-    std::snprintf(buf, sizeof buf, "%zuKiB", bytes >> 10);
-  else
-    std::snprintf(buf, sizeof buf, "%zuB", bytes);
-  return buf;
-}
 
 inline bool selected(const Options& o, std::string_view name) {
   if (o.exact) return name == o.filter;

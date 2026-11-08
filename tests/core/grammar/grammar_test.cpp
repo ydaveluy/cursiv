@@ -552,37 +552,6 @@ static_assert(
         Embed<R1, Seq<Lit<"<">, Append<&ast::Node::child, Ref<R1>>,
                       Lit<">">>>>);
 
-// Charset semantics: membership; reversed-range rejection is a hard error
-// (untestable positively).
-static_assert(cursiv::detail::parse_charset("a-z").test('m'));
-static_assert(!cursiv::detail::parse_charset("a-z").test('M'));
-static_assert(cursiv::detail::parse_charset("a-zA-Z_").test('_'));
-
-// A bare `-` between two atoms is a range operator, even right after a range
-// -- `"a-z--x"` is 'a'..'z' unioned with '-'..'x', not the set `"a-z\-x"`
-// spells.
-inline constexpr auto kDashLiteral = cursiv::detail::parse_charset(R"(a-z\-x)");
-static_assert(kDashLiteral.test('a') && kDashLiteral.test('z') &&
-              kDashLiteral.test('-') && kDashLiteral.test('x'));
-static_assert(!kDashLiteral.test('0') && !kDashLiteral.test('A') &&
-              !kDashLiteral.test('.'));
-static_assert(kDashLiteral.count() == 27);
-// ...and the range spelling admits the whole of 0x2d..0x7a.
-static_assert(cursiv::detail::parse_charset("a-z--x").count() == 78);
-static_assert(cursiv::detail::parse_charset("a-z--x").test('.') &&
-              cursiv::detail::parse_charset("a-z--x").test('A'));
-
-// `\xNN` spells one byte outright, so NUL is expressible even though it
-// cannot be a literal character.
-static_assert(cursiv::detail::parse_charset(R"(\x00)").test(0x00));
-static_assert(cursiv::detail::parse_charset(R"(\x00)").count() == 1);
-// A range with `\xNN` bounds on both ends: the C0 control range.
-inline constexpr auto kC0 = cursiv::detail::parse_charset(R"(\x00-\x1f)");
-static_assert(kC0.test(0x00) && kC0.test(0x1f) && !kC0.test(0x20));
-static_assert(kC0.count() == 32);
-static_assert(cursiv::detail::parse_charset(R"(\\)").test('\\'));
-static_assert(cursiv::detail::parse_charset(R"(\\)").count() == 1);
-
 // A class is keyed on its canonical spelling, not on the text it was written
 // as: get the spelling wrong and a grammar silently parses a class it never
 // declared.

@@ -25,7 +25,6 @@
 #include "cursiv/GrammarDerivation.hpp"
 #include "cursiv/GrammarGenerator.hpp"
 #include "cursiv/SeededSource.hpp"
-#include "cursiv/TapeSeal.hpp"
 #include "cursiv/Check.hpp"
 
 namespace cursiv::fuzzer::detail {
@@ -63,14 +62,6 @@ struct Lane {
   std::map<std::string, unsigned> unwritten;
   std::map<std::string, unsigned> blind;
 };
-
-// Every column of every record of one tree, in one number, so two tapes are
-// weighed on the same scale.
-inline std::uint64_t tape_seal(const cursiv::Cst& c) {
-  TapeSeal s;
-  seal_records(c, s);
-  return s.digest;
-}
 
 template <class G>
 std::uint64_t run(const char* lang, const cursiv::Parser& parser,

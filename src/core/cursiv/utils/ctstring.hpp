@@ -3,8 +3,6 @@
 #include <cstddef>
 #include <string_view>
 
-#include "cursiv/text/ClassItem.hpp"
-
 namespace cursiv {
 
 // A string literal usable as a template argument, so `kw<"class">` names a type
@@ -47,25 +45,5 @@ struct CharSet {
     return n;
   }
 };
-
-namespace detail {
-// Not constexpr on purpose: reached from a constant evaluation, its name is the
-// diagnostic.
-inline void malformed_cr_spec() { /* the call is the diagnostic */ }
-
-// The bytes of a spelling of ASCII characters, on its text rather than on its
-// `str` type: one body for every spelling instead of one instantiation each.
-constexpr CharSet parse_charset(std::string_view Spec) {
-  CharSet cs{};
-  const ClassFault fault =
-      for_class_ranges(Spec, [&cs](char32_t lo, char32_t hi) {
-        if (hi > 0x7F) malformed_cr_spec();
-        for (char32_t v = lo; v <= hi; ++v)
-          cs.set(static_cast<unsigned char>(v));
-      });
-  if (fault != ClassFault::none) malformed_cr_spec();
-  return cs;
-}
-}  // namespace detail
 
 }  // namespace cursiv

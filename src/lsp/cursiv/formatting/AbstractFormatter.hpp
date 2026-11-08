@@ -37,17 +37,13 @@
 
 namespace cursiv {
 
-namespace detail {
-
-// The AST class that declares the member `Ptr` points to: a rule may name a
-// member of its node's class or of one of its bases.
-template <auto Ptr>
-using feature_owner = typename field_tag<Ptr>::owner;
-
-}  // namespace detail
-
 template <class NodeT>
 class NodeFormatter {
+  // The AST class that declares the member `Ptr` points to: a rule may name a
+  // member of its node's class or of one of its bases.
+  template <auto Ptr>
+  using feature_owner = typename detail::field_tag<Ptr>::owner;
+
  public:
   NodeFormatter(const Document& document, const AstNode* node,
                 FormattingCollector* collector) noexcept
@@ -73,7 +69,7 @@ class NodeFormatter {
 
   // The record that writes `Feature`; the first when the member is a list.
   template <auto Feature>
-    requires std::derived_from<NodeT, detail::feature_owner<Feature>>
+    requires std::derived_from<NodeT, feature_owner<Feature>>
   [[nodiscard]] FormattingRegion property() const {
     return property<Feature>(std::size_t{0});
   }
@@ -83,7 +79,7 @@ class NodeFormatter {
   // diagnostic uses, so the two can never disagree about where a member was
   // written.
   template <auto Feature>
-    requires std::derived_from<NodeT, detail::feature_owner<Feature>>
+    requires std::derived_from<NodeT, feature_owner<Feature>>
   [[nodiscard]] FormattingRegion property(std::size_t index) const {
     if (!searchable()) return FormattingRegion(_cst, {}, _collector);
     const std::optional<CstNodeView> at = find_node_for_feature(
@@ -96,7 +92,7 @@ class NodeFormatter {
   // the order given.
   template <auto... Features>
     requires(sizeof...(Features) > 0 &&
-             (std::derived_from<NodeT, detail::feature_owner<Features>> && ...))
+             (std::derived_from<NodeT, feature_owner<Features>> && ...))
   [[nodiscard]] FormattingRegion properties() const {
     std::vector<NodeId> found;
     if (searchable())

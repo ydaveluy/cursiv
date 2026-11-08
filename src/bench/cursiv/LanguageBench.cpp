@@ -68,6 +68,110 @@
 #include "cursiv/LanguageBench.hpp"
 #include "cursiv/execution/TaskScheduler.hpp"
 
+namespace cursiv::bench {
+namespace {
+
+using detail::Shape;
+
+constexpr const char* kStageName[detail::kStageCount] = {
+    "parse+index", "scopes", "link", "validate", "build"};
+
+// The ladder, five orders of magnitude. A few kB is what an editor
+// reparses on a keystroke and where the fixed costs show; 128 MiB is a
+// build-system input and shows whether anything grows worse than linearly.
+constexpr std::size_t kDefaultSizes[] = {
+    std::size_t{16} << 10, std::size_t{256} << 10, std::size_t{4} << 20};
+constexpr std::size_t kFullSizes[] = {
+    std::size_t{16} << 10, std::size_t{256} << 10, std::size_t{4} << 20,
+    std::size_t{32} << 20, std::size_t{128} << 20};
+
+constexpr const char* shape_name(Shape shape) {
+  switch (shape) {
+    case Shape::ManySmall:
+      return "many-small";
+    case Shape::Medium:
+      return "medium";
+    case Shape::FewLarge:
+      return "few-large";
+    case Shape::Mixed:
+      return "mixed";
+    case Shape::Count:
+      break;
+  }
+  return "";
+}
+
+constexpr const char* refs_name(Refs r) {
+  return r == Refs::Cross ? "cross" : "intra";
+}
+
+// The shapes, as file sizes summing to `budget`.
+//   many-small  16 KiB files      -- dispatch-bound: the most documents, the
+//                                    least work in each
+//   medium      1 MiB files       -- the shape a real workspace has
+//   few-large   budget/4, 4 files -- fewer documents than workers, which is
+//                                    where a per-document fan-out stops being
+//                                    able to help
+//   mixed       80 % of the bytes in 16 KiB files, 20 % in 1 MiB ones -- the
+//               realistic tail, and the one an even split would flatter
+std::vector<std::size_t> shape_files(Shape shape, std::size_t budget) {
+  constexpr std::size_t kSmall = std::size_t{16} << 10;
+  constexpr std::size_t kMedium = std::size_t{1} << 20;
+  std::vector<std::size_t> files;
+  // At least one file per component, or a small budget silently drops the
+  // tail of the mixed shape. The budget then overshoots by less than one
+  // file, which the row reports as its real byte count.
+  const auto fill = [&](std::size_t each, std::size_t bytes) {
+    if (bytes == 0 || each == 0) return;
+    const std::size_t count = std::max<std::size_t>(bytes / each, 1);
+    for (std::size_t i = 0; i < count; ++i) files.push_back(each);
+  };
+  switch (shape) {
+    case Shape::ManySmall:
+      fill(kSmall, budget);
+      break;
+    case Shape::Medium:
+      fill(kMedium, budget);
+      break;
+    case Shape::FewLarge:
+      fill(budget / 4, budget);
+      break;
+    case Shape::Mixed:
+      fill(kSmall, budget * 4 / 5);
+      fill(kMedium, budget / 5);
+      break;
+    case Shape::Count:
+      break;
+  }
+  if (files.empty()) files.push_back(budget);
+  return files;
+}
+
+// Repetitions shrink as the corpus grows, so the default sweep stays
+// bounded: the whole ladder is minutes, not an afternoon. `--iterations`
+// overrides.
+int iterations_for(std::size_t bytes) {
+  if (bytes <= (std::size_t{256} << 10)) return 5;
+  if (bytes <= (std::size_t{4} << 20)) return 3;
+  if (bytes <= (std::size_t{32} << 20)) return 2;
+  return 1;
+}
+
+std::string size_label(std::size_t bytes) {
+  char buf[32];
+  if (bytes >= (std::size_t{1} << 20) && bytes % (std::size_t{1} << 20) == 0)
+    std::snprintf(buf, sizeof buf, "%zuMiB", bytes >> 20);
+  else if (bytes >= (std::size_t{1} << 10) &&
+           bytes % (std::size_t{1} << 10) == 0)
+    std::snprintf(buf, sizeof buf, "%zuKiB", bytes >> 10);
+  else
+    std::snprintf(buf, sizeof buf, "%zuB", bytes);
+  return buf;
+}
+
+}  // namespace
+}  // namespace cursiv::bench
+
 namespace cursiv::bench::detail {
 
 void parse_probe(const char* name, const cursiv::Parser& engine,
@@ -922,8 +1026,8 @@ int cursiv::bench::run(int argc, char** argv,
         for (const std::size_t bytes : o.sizes)
           std::printf(
               "  size %-8s (%zu B, %d iterations)\n",
-              detail::size_label(bytes).c_str(), bytes,
-              o.iterations > 0 ? o.iterations : detail::iterations_for(bytes));
+              size_label(bytes).c_str(), bytes,
+              o.iterations > 0 ? o.iterations : iterations_for(bytes));
       else
         std::printf("  input: file [file ...]\n");
     } else {
@@ -932,14 +1036,14 @@ int cursiv::bench::run(int argc, char** argv,
     }
     if (o.multi) {
       std::printf("  multi budget %s, workers",
-                  detail::size_label(o.multiBytes).c_str());
+                  size_label(o.multiBytes).c_str());
       for (const std::size_t w : o.workers) std::printf(" %zu", w);
       std::printf("\n");
       for (std::size_t s = 0;
            s < static_cast<std::size_t>(detail::Shape::Count); ++s) {
         const auto shape = static_cast<detail::Shape>(s);
-        std::printf("    %-12s %zu files\n", detail::shape_name(shape),
-                    detail::shape_files(shape, o.multiBytes).size());
+        std::printf("    %-12s %zu files\n", shape_name(shape),
+                    shape_files(shape, o.multiBytes).size());
       }
     }
     return 0;
@@ -962,7 +1066,7 @@ int cursiv::bench::run(int argc, char** argv,
       row.source = std::move(origin);
       row.bytes = source.size();
       row.iterations =
-          o.iterations > 0 ? o.iterations : detail::iterations_for(row.bytes);
+          o.iterations > 0 ? o.iterations : iterations_for(row.bytes);
 
       if (irMode) {
         language.parse(source);
@@ -987,7 +1091,7 @@ int cursiv::bench::run(int argc, char** argv,
                 detail::read_file(path), "disk:" + path);
     } else {
       for (const std::size_t bytes : o.sizes) {
-        const std::string label = detail::size_label(bytes);
+        const std::string label = size_label(bytes);
         const std::string source =
             o.corpusDir.empty()
                 ? language.corpus(bytes)
@@ -1023,12 +1127,12 @@ int cursiv::bench::run(int argc, char** argv,
             detail::multi_texts(o, language, shape);
         detail::MultiRow row;
         row.language = language.name;
-        row.shape = detail::shape_name(shape);
+        row.shape = shape_name(shape);
         row.refs = language.multiRefs;
         row.files = files.size();
         for (const std::string& text : files) row.bytes += text.size();
         row.iterations =
-            o.iterations > 0 ? o.iterations : detail::iterations_for(row.bytes);
+            o.iterations > 0 ? o.iterations : iterations_for(row.bytes);
         language.multi(row.iterations, files, o.workers, row);
         detail::print_multi(row);
         std::fflush(stdout);

@@ -12,6 +12,7 @@
 #include "cursiv/shared/gen/WrittenReads.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/shared/utils/ClassSpelling.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/shared/utils/GrammarPrinter.hpp"
 #include "cursiv/shared/utils/white_space.hpp"

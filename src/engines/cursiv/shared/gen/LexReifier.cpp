@@ -11,6 +11,7 @@
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/Lowerer.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
+#include "cursiv/shared/utils/ClassSpelling.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/shared/utils/GrammarPrinter.hpp"
 #include "cursiv/text/scalar_at.hpp"

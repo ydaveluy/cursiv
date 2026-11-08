@@ -890,11 +890,6 @@ consteval auto class_spelled() {
   class_ranges<A, B, Op>().spell([&buf, &at](char c) { buf[at++] = c; });
   return str<n + 1>(buf);
 }
-// Whether a spelling names ASCII scalars only.
-constexpr bool cp_ascii_of(std::string_view spec) {
-  const ClassRanges r = ClassRanges::of(spec);
-  return r.r.empty() || r.r.back().hi < 0x80;
-}
 template <str Text>
 consteval bool class_strays() {
   return ClassRanges::of(Text.view()).strays;
@@ -920,34 +915,6 @@ consteval auto cr_of() {
 }
 consteval std::uint64_t cp_bit(unicode::Property p) {
   return std::uint64_t{1} << static_cast<unsigned>(p);
-}
-// What a class is called, for a dump and a terminal's name: `\p{L|Nd}`,
-// `\p{^L}`, the spelled scalars appended. Measured and written by one body, so
-// the reserved length cannot drift from the text.
-template <class Sink>
-constexpr void cp_name_emit(std::uint64_t props, bool complement,
-                            std::string_view scalars, Sink sink) {
-  const auto put = [&sink](std::string_view v) {
-    for (const char ch : v) sink(ch);
-  };
-  // Whitespace goes by its short name.
-  if (props == 0 &&
-      scalars ==
-          R"(\x09-\x0d \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff)") {
-    put(complement ? "\\S" : "\\s");
-    return;
-  }
-  put("\\p{");
-  if (complement) sink('^');
-  bool first = true;
-  for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::count); ++i)
-    if ((props >> i) & 1) {
-      if (!first) sink('|');
-      first = false;
-      put(unicode::detail::kNames[i]);
-    }
-  put(scalars);
-  sink('}');
 }
 // The scalars the properties `M` names.
 template <std::uint64_t M>
