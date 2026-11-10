@@ -263,14 +263,15 @@ struct Derived : cursiv::Extends<Base> {
 struct Wrapper : cursiv::Extends<Derived> {
   Derived* child = nullptr;
 };
+struct Twin : cursiv::Extends<Derived> {};
 
 struct G : cursiv::GrammarSpec {
   struct ID : terminal<some(cr<"a-z">)> {};
   struct Root
       : rule<create<Derived>(assign<&Base::name>(ref<ID>) +
                              assign<&Derived::target>(ref<ID>) +
-                             many(nest<Wrapper, &Wrapper::child>(lit<"!">)))> {
-  };
+                             many(nest<Wrapper, &Wrapper::child>(lit<"!">))) |
+             create<Twin>(lit<"="> + assign<&Base::name>(ref<ID>))> {};
   using entry = Root;
 };
 
@@ -325,7 +326,23 @@ void reflection_only_types_need_no_factory(
         std::string::npos);
   CHECK(emitter.text().find(factory.template operator()<Wrapper>()) !=
         std::string::npos);
+  // A class taking the same members as another shares its writer.
+  const auto twin = type_of<Twin>(registry);
+  CHECK(emitter.applier_name(twin) == emitter.applier_name(derived));
+  CHECK(emitter.applier_name(wrapper) != emitter.applier_name(derived));
+  const auto mark = emitter.text().size();
   emitter.emit_writers();
+  const std::string_view writers =
+      std::string_view(emitter.text()).substr(mark);
+  const auto count = [&](const std::string& what) {
+    std::size_t n = 0;
+    for (auto at = writers.find(what); at != std::string_view::npos;
+         at = writers.find(what, at + 1))
+      ++n;
+    return n;
+  };
+  CHECK(count("bool " + emitter.applier_name(derived) + "(") == 1);
+  CHECK(count("&" + emitter.applier_name(derived) + ",") == 2);
   const auto name = field_of<&Base::name>(registry);
   CHECK(emitter.text().find("case " + std::to_string(name) + "u: w" +
                             std::to_string(name)) != std::string::npos);
@@ -748,6 +765,7 @@ namespace textmate_cases {
 // where the grammar reads them so, and every other byte of the file as it was.
 
 using cursiv::engine::textmate_keyword_match;
+using cursiv::engine::textmate_keywords;
 using cursiv::engine::with_keyword_match;
 
 void run() {
@@ -778,6 +796,29 @@ void run() {
   // With no word, a pattern that matches nothing rather than everywhere.
   CHECK(textmate_keyword_match({{"+", false}}) == "(?!)");
   CHECK(textmate_keyword_match({}) == "(?!)");
+
+  // A class of characters is no word, like trivia and a word only a condition
+  // reads.
+  struct Term {
+    bool spelled, trivia;
+  };
+  struct Build {
+    bool predicateOnly, folded, charset;
+  };
+  struct Cfg {
+    std::uint16_t nterms = 4;
+    Term terms[4] = {{true, false}, {true, false}, {true, true}, {true, false}};
+    Build termBuild[4] = {{false, true, false},
+                          {false, false, true},
+                          {false, false, false},
+                          {true, false, false}};
+    std::string_view term_text(std::uint16_t t) const {
+      constexpr std::string_view kText[] = {"def", "+-", "#", "only"};
+      return kText[t];
+    }
+  };
+  const auto words = textmate_keywords(Cfg{});
+  CHECK(words.size() == 1 && words[0].text == "def" && words[0].folded);
 
   const std::string file = R"({
   "name": "x",

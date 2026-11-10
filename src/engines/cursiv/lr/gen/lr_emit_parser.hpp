@@ -11,8 +11,9 @@ namespace cursiv::engine {
 
 class LrFinalTable;
 
-// The most lines one function of states holds: GCC's compile time grows faster
-// than a function's size, so the states split into small groups.
+// The lines each function of states aims at: GCC's compile time grows faster
+// than a function's size, so the states split into groups of about this weight.
+// A state or a shared dispatch never splits, so one group may hold more.
 inline constexpr unsigned kLrGroupLines = 1u << 12;
 
 // The parser's sources by file name: `ParserStates.cpp`, `ParserGroups.hpp` and

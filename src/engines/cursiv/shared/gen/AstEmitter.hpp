@@ -90,6 +90,9 @@ struct AstEmitter : TextBuilder {
   // member's tag.
   std::vector<std::vector<std::uint16_t>> accepted;
   std::vector<std::string> tags;
+  // The first built class taking the same members as each one: its writer
+  // serves them all.
+  std::vector<std::uint16_t> applierOf;
 
   AstEmitter(const AstRegistry& registry, const AstEntryTable& table,
              std::string n, std::string h);
@@ -147,7 +150,7 @@ struct AstEmitter : TextBuilder {
   // pending can name.
   std::string applier_name(std::uint16_t t) const;
   // One writer per member a pending can name, switching on the conversion,
-  // then one per class switching on the member.
+  // then one per list of members a class takes, switching on the member.
   void emit_writers();
   // A conversion is named by the first row that asked for it.
   void emit_convs();

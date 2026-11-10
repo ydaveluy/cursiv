@@ -16,14 +16,14 @@ struct TextMateKeyword {
   bool folded = false;
 };
 
-// The text of every token a rule reads as one literal or keyword. Trivia and
-// the words only a condition reads are no tokens a reader sees.
+// The text of every token a rule reads as one literal or keyword. Trivia,
+// classes of characters and the words only a condition reads are no keywords.
 template <class Cfg>
 std::vector<TextMateKeyword> textmate_keywords(const Cfg& c) {
   std::vector<TextMateKeyword> out;
   for (std::uint16_t t = 0; t < c.nterms; ++t)
     if (c.terms[t].spelled && !c.terms[t].trivia &&
-        !c.termBuild[t].predicateOnly)
+        !c.termBuild[t].predicateOnly && !c.termBuild[t].charset)
       out.push_back({c.term_text(t), c.termBuild[t].folded});
   return out;
 }

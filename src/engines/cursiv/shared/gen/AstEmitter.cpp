@@ -28,11 +28,17 @@ AstEmitter::AstEmitter(const AstRegistry& registry, const AstEntryTable& table,
   }
   while (built < reg.types.size() && reg.types[built].built) ++built;
   accepted.resize(built);
-  for (std::size_t t = 0; t < built; ++t)
+  applierOf.resize(built);
+  std::map<std::vector<std::uint16_t>, std::uint16_t> firstOf;
+  for (std::size_t t = 0; t < built; ++t) {
     for (std::size_t f = 0; f < reg.fields.size(); ++f)
       if (pending[f] &&
           derives(reg.fields[f].owner, static_cast<std::uint16_t>(t)))
         accepted[t].push_back(static_cast<std::uint16_t>(f));
+    applierOf[t] =
+        firstOf.try_emplace(accepted[t], static_cast<std::uint16_t>(t))
+            .first->second;
+  }
   for (const auto& field : reg.fields) {
     const auto& owner = reg.types[field.owner];
     tags.push_back("::cursiv::detail::field_tag<&" + owner.source +
@@ -408,8 +414,8 @@ const char* AstEmitter::variant_flag(std::uint16_t f) const {
 }
 
 std::string AstEmitter::applier_name(std::uint16_t t) const {
-  return t < built && !accepted[t].empty() ? "a" + std::to_string(t)
-                                            : std::string("a_none");
+  return t < built && !accepted[t].empty() ? "a" + std::to_string(applierOf[t])
+                                           : std::string("a_none");
 }
 
 void AstEmitter::emit_writers() {
@@ -468,6 +474,7 @@ void AstEmitter::emit_writers() {
       none = true;
       continue;
     }
+    if (applierOf[t] != t) continue;
     line(
         "CURSIV_ALWAYS_INLINE inline bool ", appliers[t],
         "(::cursiv::engine::AstReducer& b, const ::cursiv::engine::Pending& p, "

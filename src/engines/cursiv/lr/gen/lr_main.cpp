@@ -80,7 +80,7 @@ bool count_to(std::string_view text, unsigned most, unsigned& out,
 struct Args {
   // The row width of a record's stamp a lane forces, where not zero.
   unsigned stampRowBits = 0;
-  // The lines a group of states holds, which a lane may force down.
+  // The lines a group of states aims at, which a lane may lower.
   unsigned groupLines = cursiv::engine::kLrGroupLines;
   unsigned optionalGate = cursiv::engine::kOptionalGate;
 

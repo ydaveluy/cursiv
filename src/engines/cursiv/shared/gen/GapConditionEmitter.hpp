@@ -48,21 +48,33 @@ class GapConditionEmitter {
         continue;
       }
       const unsigned count = _cfg.gapOps[++i];
-      if (count > stack.size() || (op == kGapNot && count != 1))
+      if (count == 0 || count > stack.size() || (op == kGapNot && count != 1))
         throw std::logic_error("cursiv: invalid condition operands");
       std::string expression;
       if (op == kGapNot) {
         expression = (partial ? "(2u - (" : "!(") + stack.back() +
                      (partial ? "))" : ")");
+      } else if (partial) {
+        // Three-valued: an operand is read until one decides, 2 for an OR and
+        // 0 for an AND.
+        const std::string_view stop = op == kGapOr ? "2u" : "0u";
+        const std::string_view keep =
+            op == kGapOr ? "::std::max(" : "::std::min(";
+        const std::size_t first = stack.size() - count;
+        const std::string v = concat("v", i);
+        expression = concat("[&] { unsigned ", v, " = ", stack[first], ";");
+        for (std::size_t j = first + 1; j < stack.size(); ++j)
+          expression += concat(" if (", v, " != ", stop, ") ", v, " = ", keep,
+                               v, ", ", stack[j], ");");
+        expression += concat(" return ", v, "; }()");
       } else {
-        expression =
-            partial ? (op == kGapOr ? "::std::max({" : "::std::min({") : "(";
+        expression = "(";
         for (std::size_t j = stack.size() - count; j < stack.size(); ++j) {
           if (j != stack.size() - count)
-            expression += partial ? ", " : (op == kGapOr ? " || " : " && ");
+            expression += op == kGapOr ? " || " : " && ";
           expression += stack[j];
         }
-        expression += partial ? "})" : ")";
+        expression += ")";
       }
       stack.resize(stack.size() - count);
       stack.push_back(std::move(expression));
