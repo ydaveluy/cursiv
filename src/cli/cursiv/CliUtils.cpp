@@ -492,20 +492,26 @@ int report(const Document& document, const Grammar& grammar,
 }  // namespace
 
 int run_command(const std::function<int()>& command) {
+  // Says why on stderr and answers `status`, even when stderr throws.
+  const auto failed = [](int status, const char* prefix,
+                         const char* what) noexcept {
+    try {
+      std::cerr << prefix << what << '\n';
+    } catch (...) {
+    }
+    return status;
+  };
   try {
     detail::enter_host_directory();
     const int status = command();
     flush_output(std::cout);
     return status;
   } catch (const UsageError& error) {
-    std::cerr << error.what() << '\n';
-    return kUsage;
+    return failed(kUsage, "", error.what());
   } catch (const std::exception& error) {
-    std::cerr << "fatal: " << error.what() << '\n';
-    return kFatal;
+    return failed(kFatal, "fatal: ", error.what());
   } catch (...) {
-    std::cerr << "fatal: an unknown exception\n";
-    return kFatal;
+    return failed(kFatal, "fatal: ", "an unknown exception");
   }
 }
 

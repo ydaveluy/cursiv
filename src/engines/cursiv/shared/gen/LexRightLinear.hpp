@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "cursiv/shared/table/LexNode.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
 namespace cursiv::engine {
 
@@ -73,10 +74,11 @@ class LexRightLinear {
   std::vector<Facts> _facts;
   std::uint16_t _prefixSeq = 0;
 
-  Facts facts(std::uint16_t at) {
-    if (at >= _facts.size()) return {};
-    if (_facts[at].state == 2) return _facts[at];
-    if (_facts[at].state == 1) return {};
+  Facts facts(std::uint16_t at) { return descend(facts_walk(at)); }
+  Descent<Facts> facts_walk(std::uint16_t at) {
+    if (at >= _facts.size()) co_return Facts{};
+    if (_facts[at].state == 2) co_return _facts[at];
+    if (_facts[at].state == 1) co_return Facts{};
     _facts[at].state = 1;
     const LexNode e = _g.lex[at];
     Facts f;
@@ -89,7 +91,7 @@ class LexRightLinear {
         const bool seq = e.kind == LexKind::seq;
         f = {true, seq, seq};
         for (unsigned i = 0; i < e.b; ++i) {
-          const auto child = facts(_g.lexChild[e.a + i]);
+          const auto child = co_await facts_walk(_g.lexChild[e.a + i]);
           f.regular = f.regular && child.regular;
           f.productive = seq ? f.productive && child.productive
                              : f.productive || child.productive;
@@ -99,7 +101,7 @@ class LexRightLinear {
         break;
       }
       case LexKind::rep: {
-        const auto child = facts(e.a);
+        const auto child = co_await facts_walk(e.a);
         // A phrase's repetition may have trivia between iterations. A
         // nullable repeated body must retain the original recursion refusal.
         f.regular = child.regular && e.b == kNoLexNode &&
@@ -115,7 +117,7 @@ class LexRightLinear {
     }
     f.state = 2;
     _facts[at] = f;
-    return f;
+    co_return f;
   }
 
   bool tail(std::uint16_t at, std::uint16_t root, bool optional,
@@ -140,26 +142,24 @@ class LexRightLinear {
     return true;
   }
 
-  void sequence(std::uint16_t at, std::vector<std::uint16_t>& out) const {
-    const LexNode e = _g.lex[at];
-    if (e.kind == LexKind::seq)
-      for (unsigned i = 0; i < e.b; ++i) sequence(_g.lexChild[e.a + i], out);
-    else
-      out.push_back(at);
+  void sequence(std::uint16_t root, std::vector<std::uint16_t>& out) const {
+    for (std::vector todo{root}; !todo.empty();) {
+      const std::uint16_t at = todo.back();
+      todo.pop_back();
+      if (const LexNode e = _g.lex[at]; e.kind == LexKind::seq)
+        for (unsigned i = e.b; i-- > 0;) todo.push_back(_g.lexChild[e.a + i]);
+      else
+        out.push_back(at);
+    }
   }
 
   bool same(std::uint16_t a, std::uint16_t b) const {
-    if (a == b) return true;
-    const LexNode x = _g.lex[a], y = _g.lex[b];
-    if (x.kind != y.kind) return false;
-    if (x.kind == LexKind::chars) return x.a == y.a;
-    if (x.kind == LexKind::rep)
-      return x.min == y.min && x.max == y.max && same(x.a, y.a);
-    if (x.kind != LexKind::seq && x.kind != LexKind::alt) return false;
-    if (x.b != y.b) return false;
-    for (unsigned i = 0; i < x.b; ++i)
-      if (!same(_g.lexChild[x.a + i], _g.lexChild[y.a + i])) return false;
-    return true;
+    return lex_same_graph(_g, a, b, [](const LexNode& x, const LexNode& y) {
+      if (x.kind != y.kind) return false;
+      if (x.kind == LexKind::chars) return x.a == y.a;
+      if (x.kind == LexKind::rep) return x.min == y.min && x.max == y.max;
+      return (x.kind == LexKind::seq || x.kind == LexKind::alt) && x.b == y.b;
+    });
   }
 
   bool alternative(std::uint16_t root, std::uint16_t base,

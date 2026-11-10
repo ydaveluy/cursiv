@@ -3,13 +3,14 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <span>
 #include <vector>
 
-#include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/ElementKind.hpp"
 #include "cursiv/GrammarActions.hpp"
 #include "cursiv/GrammarModel.hpp"
+#include "cursiv/grammar/ElementId.hpp"
 
 namespace cursiv::fuzzer::detail {
 
@@ -61,7 +62,7 @@ struct GrammarCost {
       case ElementKind::repetition: {
         const unsigned n = g.minOf(e);
         if (n == 0 || children.empty()) return 0;
-        return sat(cost[children[0]] * n);
+        return sat(std::uint64_t{cost[children[0]]} * n);
       }
       default:
         break;
@@ -72,8 +73,9 @@ struct GrammarCost {
     return s;
   }
 
-  [[nodiscard]] static unsigned sat(unsigned v) {
-    return v > kGrammarUnreachable ? kGrammarUnreachable : v;
+  [[nodiscard]] static unsigned sat(std::uint64_t v) {
+    return v > kGrammarUnreachable ? kGrammarUnreachable
+                                   : static_cast<unsigned>(v);
   }
 };
 

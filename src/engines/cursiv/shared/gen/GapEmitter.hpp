@@ -14,6 +14,7 @@
 
 #include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitTable.hpp"
+#include "cursiv/shared/gen/LexRecursion.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
@@ -32,15 +33,21 @@ class GapProgramEmitter {
         _linkage(linkage),
         _used(cfg.nlex) {}
 
-  void add(std::uint16_t id) {
-    if (_used[id]) return;
-    _used[id] = true;
-    if (const auto& e = _cfg.lex[id];
-        e.kind == LexKind::seq || e.kind == LexKind::alt)
-      for (unsigned i = 0; i < e.b; ++i) add(_cfg.lexChild[e.a + i]);
-    else if (e.kind == LexKind::rep && e.max != 0)
-      add(e.a);
-    _order.push_back(id);
+  // Lists `root` and what it reads, each after its children.
+  void add(std::uint16_t root) {
+    lex_post_order(
+        root,
+        [&](std::uint16_t id, auto&& push) {
+          if (_used[id]) return false;
+          _used[id] = true;
+          if (const auto& e = _cfg.lex[id];
+              e.kind == LexKind::seq || e.kind == LexKind::alt)
+            for (unsigned i = 0; i < e.b; ++i) push(_cfg.lexChild[e.a + i]);
+          else if (e.kind == LexKind::rep && e.max != 0)
+            push(e.a);
+          return true;
+        },
+        [&](std::uint16_t id) { _order.push_back(id); });
   }
 
   // Whether the source reads the boundary: a class test and a guard do, no
@@ -208,51 +215,66 @@ class GapEmitter : private TextBuilder {
     _asked.push_back(a);
   }
   // The gaps a phrase asks where it stands.
-  void phrase(std::uint16_t at) {
-    if (_walked[at]) return;
-    _walked[at] = true;
-    const LexNode& e = _cfg.lex[at];
-    switch (e.kind) {
-      case LexKind::gap_has:
-      case LexKind::gap_is:
-        return ask(e.a, e.kind == LexKind::gap_is);
-      case LexKind::seq:
-      case LexKind::alt:
-        for (unsigned i = 0; i < e.b; ++i) phrase(_cfg.lexChild[e.a + i]);
-        return;
-      case LexKind::rep:
-        if (e.max != 0) phrase(e.a);
-        return;
-      case LexKind::positive:
-      case LexKind::negative:
-        return phrase(e.a);
-      default:
-        return;
+  void phrase(std::uint16_t root) {
+    for (std::vector todo{root}; !todo.empty();) {
+      const std::uint16_t at = todo.back();
+      todo.pop_back();
+      if (_walked[at]) continue;
+      _walked[at] = true;
+      const LexNode& e = _cfg.lex[at];
+      switch (e.kind) {
+        case LexKind::gap_has:
+        case LexKind::gap_is:
+          ask(e.a, e.kind == LexKind::gap_is);
+          break;
+        case LexKind::seq:
+        case LexKind::alt:
+          for (unsigned i = e.b; i-- > 0;)
+            todo.push_back(_cfg.lexChild[e.a + i]);
+          break;
+        case LexKind::rep:
+          if (e.max != 0) todo.push_back(e.a);
+          break;
+        case LexKind::positive:
+        case LexKind::negative:
+          todo.push_back(e.a);
+          break;
+        default:
+          break;
+      }
     }
   }
 
   using GapWord = std::vector<std::uint16_t>;
+  // The words of bytes a gap spells, each arm of its choices one; false past
+  // 16 of them or 16 bytes, or where an arm reads otherwise.
   bool gap_patterns(std::uint16_t node, std::vector<GapWord>& patterns) const {
-    if (const auto& e = _cfg.lex[node]; e.kind == LexKind::alt) {
-      for (unsigned i = 0; i < e.b; ++i)
-        if (!gap_patterns(_cfg.lexChild[e.a + i], patterns)) return false;
-      return patterns.size() <= 16;
-    }
-    GapWord bytes;
-    const auto sequence = [&](auto&& self, std::uint16_t n) {
-      const auto& part = _cfg.lex[n];
-      if (part.kind == LexKind::chars) {
-        bytes.push_back(part.a);
-        return bytes.size() <= 16;
+    std::vector<std::uint16_t> arms{node}, parts;
+    while (!arms.empty()) {
+      const std::uint16_t arm = arms.back();
+      arms.pop_back();
+      if (const auto& e = _cfg.lex[arm]; e.kind == LexKind::alt) {
+        for (unsigned i = e.b; i-- > 0;) arms.push_back(_cfg.lexChild[e.a + i]);
+        continue;
       }
-      if (part.kind != LexKind::seq) return false;
-      for (unsigned i = 0; i < part.b; ++i)
-        if (!self(self, _cfg.lexChild[part.a + i])) return false;
-      return true;
-    };
-    if (!sequence(sequence, node)) return false;
-    patterns.push_back(std::move(bytes));
-    return patterns.size() <= 16;
+      GapWord bytes;
+      for (parts.assign(1, arm); !parts.empty();) {
+        const auto& part = _cfg.lex[parts.back()];
+        parts.pop_back();
+        if (part.kind == LexKind::chars) {
+          bytes.push_back(part.a);
+          if (bytes.size() > 16) return false;
+        } else if (part.kind == LexKind::seq) {
+          for (unsigned i = part.b; i-- > 0;)
+            parts.push_back(_cfg.lexChild[part.a + i]);
+        } else {
+          return false;
+        }
+      }
+      patterns.push_back(std::move(bytes));
+      if (patterns.size() > 16) return false;
+    }
+    return true;
   }
 
   How simple_gap(std::uint16_t node, bool whole) {

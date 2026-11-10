@@ -274,7 +274,7 @@ test('a folder lists its entries from a cookie, cut off where the buffer ends', 
 class PageWorker extends EventTarget {
   static all = [];
   // Whether the browser refuses to create (`create`) or to start (`post`) the
-  // worker of this index.
+  // worker of this index, or the worker exits before it is ready (`ready`).
   static refuses = () => false;
   constructor() {
     super();
@@ -282,9 +282,11 @@ class PageWorker extends EventTarget {
     PageWorker.all.push(this);
   }
   postMessage(data) {
-    if (PageWorker.refuses(PageWorker.all.indexOf(this), 'post')) throw new Error('cannot clone');
+    const index = PageWorker.all.indexOf(this);
+    if (PageWorker.refuses(index, 'post')) throw new Error('cannot clone');
     this.data = data;
-    if (data.role === 'thread') this.say({ type: 'ready' });
+    if (data.role === 'thread')
+      this.say(PageWorker.refuses(index, 'ready') ? { type: 'exit', code: 1 } : { type: 'ready' });
   }
   say(data) { this.dispatchEvent(new MessageEvent('message', { data })); }
   terminate() { this.terminated = true; }
@@ -381,6 +383,13 @@ for (const step of ['create', 'post']) {
     assert.equal(PageWorker.all.filter((w) => !w.terminated).length, 0, 'a worker is left running');
   });
 }
+
+test('a worker that exits before it is ready fails the start and stops the others', async () => {
+  const refuses = (index, at) => at === 'ready' && index === 3;
+  const start = await settled(pageSession('exit before ready', { refuses }));
+  assert.match(start.error?.message ?? 'the start never settled', /exited with code 1/);
+  assert.equal(PageWorker.all.filter((w) => !w.terminated).length, 0, 'a worker is left running');
+});
 
 test('a module with two imported memories is refused', async () => {
   const twoMemories = wasm(section(2, [...name('env'), ...name('memory'), 2, 3, 1, 1],

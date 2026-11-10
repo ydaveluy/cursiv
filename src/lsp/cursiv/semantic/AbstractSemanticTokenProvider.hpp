@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -91,15 +92,16 @@ class AbstractSemanticTokenProvider : public SemanticTokenProvider {
       const CancellationToken& token) const;
   [[nodiscard]] bool answersDelta() const;
   // Keeps `data` as an open document's last answer under a new id, and gives
-  // back the previous answer if `previousId` names it. Forgets the answers of
-  // closed documents.
-  std::optional<std::vector<lsp::Uint>> keep(
+  // the edits from the answer `previousId` names, if kept. A cancelled request
+  // keeps nothing. Forgets the answers of closed documents.
+  std::optional<lsp::SemanticTokensDelta> keep(
       const Document& document, const std::vector<lsp::Uint>& data,
-      std::string& id, std::string_view previousId = {}) const;
+      std::string& id, const CancellationToken& token,
+      std::string_view previousId = {}) const;
 
   struct Answer {
     std::string id;
-    std::vector<lsp::Uint> data;
+    std::shared_ptr<const std::vector<lsp::Uint>> data;
   };
   mutable std::mutex _mutex;
   mutable std::unordered_map<std::string, Answer> _answers;

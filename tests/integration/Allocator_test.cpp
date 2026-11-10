@@ -8,7 +8,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <latch>
+#include <limits>
 #include <memory>
+#include <new>
 #include <string>
 #include <thread>
 #include <vector>
@@ -60,6 +62,23 @@ void standard_allocations_use_the_module_allocator() {
     CHECK(reinterpret_cast<std::uintptr_t>(tiny) % alignment == 0);
     mi_free_size_aligned(tiny, 1, alignment);
   }
+}
+
+// A `new` the allocator refuses throws `std::bad_alloc`: the program goes on.
+void a_refused_new_throws() {
+  const bool shown = mi_option_is_enabled(mi_option_show_errors);
+  mi_option_disable(mi_option_show_errors);
+  bool thrown = false;
+  const volatile std::size_t size =
+      std::numeric_limits<std::size_t>::max() / 2 + 1;
+  try {
+    void* volatile block = ::operator new(size);
+    ::operator delete(block);
+  } catch (const std::bad_alloc&) {
+    thrown = true;
+  }
+  mi_option_set_enabled(mi_option_show_errors, shown);
+  CHECK(thrown);
 }
 
 std::int64_t allocator_threads() {
@@ -146,6 +165,7 @@ void cross_thread_frees_and_repeated_thread_exit() {
 }  // namespace
 
 int main() {
+  a_refused_new_throws();
   std::atomic<unsigned> errors{0};
   mi_register_error([](int, void* arg) {
     static_cast<std::atomic<unsigned>*>(arg)->fetch_add(1, std::memory_order_relaxed);

@@ -17,8 +17,6 @@ struct LowerDesc;
 struct LlLowered {
   LlLowCfg cfg{};
   ChainPool writes{};
-  // A nest starts a separate reduction region without returning a node yet.
-  std::vector<std::uint8_t> nestChains{};
   // The first refusal of this grammar, recorded instead of aborting.
   GrammarFault fault{};
 };

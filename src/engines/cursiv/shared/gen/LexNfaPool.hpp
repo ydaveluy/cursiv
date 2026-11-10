@@ -123,22 +123,6 @@ struct LexNfaPool {
     return h;
   }
 
-  // Thompson repetition: `body(out)` builds one occurrence backwards.
-  template <class Body>
-  int repeat(const LexNode& e, int out, Body&& body) {
-    int tail = out;
-    if (e.max == kEndless) {
-      tail = split(-1, out);
-      const int head = body(tail);
-      s[static_cast<std::size_t>(tail)].t1 = head;
-    } else {
-      for (std::uint32_t i = e.max; i > e.min; --i)
-        tail = split(body(tail), out);
-    }
-    for (std::uint32_t i = 0; i < e.min; ++i) tail = body(tail);
-    return tail;
-  }
-
   // What `roots` reach without consuming, in depth-first preorder, once each.
   std::vector<int> eclose(std::span<const int> roots) const {
     if (_seen.size() < s.size()) _seen.resize(s.size(), 0);

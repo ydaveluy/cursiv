@@ -16,6 +16,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
 namespace cursiv::engine {
@@ -27,21 +28,29 @@ class NamedHead {
 
   // A choice answers as the most its words answer, one by one.
   unsigned read(std::uint16_t root, unsigned t) const {
-    const LexNode& e = _g.lex[root];
-    if (e.kind == LexKind::token) return read(lex_token_body(_g, e), t);
-    if (e.kind == LexKind::alt) {
-      unsigned most = 0;
-      for (unsigned i = 0; i < e.b; ++i)
-        most = std::max(most, read(_g.lexChild[e.a + i], t));
-      return most;
-    }
     const std::uint16_t body = _g.termBuild[t].lex;
-    if (same_lex(root, body)) return 2;
-    if (!_calls.empty() && _calls[body]) return 1;
-    const auto [first, empty] = lex_first_bytes(_g, body);
-    if (empty) return 1;
-    const Reach r = head_reach(root, Reach{2, 0}, first);
-    return std::max(r.start, r.past) == 0 ? 0u : 1u;
+    unsigned most = 0;
+    for (std::vector todo{root}; !todo.empty();) {
+      const std::uint16_t at = todo.back();
+      todo.pop_back();
+      const LexNode& e = _g.lex[at];
+      if (e.kind == LexKind::token) {
+        todo.push_back(lex_token_body(_g, e));
+      } else if (e.kind == LexKind::alt) {
+        for (unsigned i = 0; i < e.b; ++i) todo.push_back(_g.lexChild[e.a + i]);
+      } else if (same_lex(at, body)) {
+        most = 2;
+      } else if (!_calls.empty() && _calls[body]) {
+        most = std::max(most, 1u);
+      } else if (const auto [first, empty] = lex_first_bytes(_g, body); empty) {
+        most = std::max(most, 1u);
+      } else {
+        std::unordered_map<std::uint32_t, Reach> memo;
+        const Reach r = descend(head_reach(at, Reach{2, 0}, first, memo));
+        if (std::max(r.start, r.past) != 0) most = std::max(most, 1u);
+      }
+    }
+    return most;
   }
   bool named(unsigned t) const {
     return !_g.terms[t].spelled && !_g.terms[t].trivia &&
@@ -87,39 +96,34 @@ class NamedHead {
   }
 
   bool same_lex(std::uint16_t x, std::uint16_t y) const {
-    if (x == y) return true;
-    const LexNode& e = _g.lex[x];
-    const LexNode& f = _g.lex[y];
-    if (e.kind != f.kind || e.min != f.min || e.max != f.max) return false;
     const auto same_set = [&](std::uint16_t p, std::uint16_t q) {
       return p == q ||
              (_g.sets[p] == _g.sets[q] && decodes(p) == decodes(q) &&
               (lex_set_scalars(_g, p) == lex_set_scalars(_g, q) ||
                lex_set_cps(_g, p).ranges == lex_set_cps(_g, q).ranges));
     };
-    switch (e.kind) {
-      case LexKind::chars:
-        return same_set(e.a, f.a);
-      case LexKind::nguard:
-        if ((e.a == kNoSet) != (f.a == kNoSet) ||
-            (e.a != kNoSet && !same_set(e.a, f.a)))
+    return lex_same_graph(_g, x, y, [&](const LexNode& e, const LexNode& f) {
+      if (e.kind != f.kind || e.min != f.min || e.max != f.max) return false;
+      switch (e.kind) {
+        case LexKind::chars:
+          return same_set(e.a, f.a);
+        case LexKind::nguard:
+          if ((e.a == kNoSet) != (f.a == kNoSet) ||
+              (e.a != kNoSet && !same_set(e.a, f.a)))
+            return false;
+          for (std::uint32_t k = 0; k < e.min; ++k)
+            if (!same_set(_g.lexChild[e.b + k], _g.lexChild[f.b + k]))
+              return false;
+          return true;
+        case LexKind::seq:
+        case LexKind::alt:
+          return e.b == f.b;
+        case LexKind::rep:
+          return true;
+        default:
           return false;
-        for (std::uint32_t k = 0; k < e.min; ++k)
-          if (!same_set(_g.lexChild[e.b + k], _g.lexChild[f.b + k]))
-            return false;
-        return true;
-      case LexKind::seq:
-      case LexKind::alt:
-        if (e.b != f.b) return false;
-        for (unsigned i = 0; i < e.b; ++i)
-          if (!same_lex(_g.lexChild[e.a + i], _g.lexChild[f.a + i]))
-            return false;
-        return true;
-      case LexKind::rep:
-        return same_lex(e.a, f.a);
-      default:
-        return false;
-    }
+      }
+    });
   }
   // Where a head expression stands over a token whose first byte lies in
   // `first`: at the start, or past it, each never, maybe or always.
@@ -130,9 +134,16 @@ class NamedHead {
   static Reach widen(Reach x, Reach y) {
     return {std::max(x.start, y.start), std::max(x.past, y.past)};
   }
-  Reach head_reach(std::uint16_t node, Reach in, const ByteSet& first) const {
+  // `memo` keeps each node's answer from each `in` under one `first`.
+  Descent<Reach> head_reach(
+      std::uint16_t node, Reach in, const ByteSet& first,
+      std::unordered_map<std::uint32_t, Reach>& memo) const {
+    const std::uint32_t key =
+        std::uint32_t{node} << 8 | in.start << 4 | in.past;
+    if (const auto it = memo.find(key); it != memo.end()) co_return it->second;
     const LexNode& e = _g.lex[node];
     const unsigned beyond = std::min(in.past, 1u);
+    Reach out{std::min(in.start, 1u), std::max(std::min(in.start, 1u), beyond)};
     switch (e.kind) {
       case LexKind::chars: {
         const ByteSet& set = _g.sets[e.a];
@@ -140,7 +151,8 @@ class NamedHead {
                               : first.intersects(set | decodes(e.a))
                                   ? std::min(in.start, 1u)
                                   : 0u;
-        return {0, std::max(from, beyond)};
+        out = {0, std::max(from, beyond)};
+        break;
       }
       case LexKind::nguard: {
         // Refused at the start where the word's first class takes every
@@ -153,43 +165,52 @@ class NamedHead {
           else if (e.min == 1 && e.a == kNoSet && _g.sets[c0].covers(first))
             start = 0;
         }
-        return {start, beyond};
+        out = {start, beyond};
+        break;
       }
-      case LexKind::seq: {
-        Reach cur = in;
+      case LexKind::seq:
+        out = in;
         for (unsigned i = 0; i < e.b; ++i)
-          cur = head_reach(_g.lexChild[e.a + i], cur, first);
-        return cur;
-      }
-      case LexKind::alt: {
-        Reach out{};
+          out = co_await head_reach(_g.lexChild[e.a + i], out, first, memo);
+        break;
+      case LexKind::alt:
+        out = {};
         for (unsigned i = 0; i < e.b; ++i)
-          out = widen(out, head_reach(_g.lexChild[e.a + i], in, first));
-        return out;
-      }
+          out = widen(
+              out, co_await head_reach(_g.lexChild[e.a + i], in, first, memo));
+        break;
       case LexKind::rep: {
         // An cycle longer than the nine values repeats one.
         constexpr unsigned kMostValues = 9;
         Reach cur = in;
+        bool cycles = false;
         for (std::uint32_t k = 0; k < e.min; ++k) {
-          const Reach next = head_reach(e.a, cur, first);
+          const Reach next = co_await head_reach(e.a, cur, first, memo);
           if (next == cur) break;
-          if (k == kMostValues) return {1, 1};
+          if (k == kMostValues) {
+            cycles = true;
+            break;
+          }
           cur = next;
         }
-        Reach out = cur;
+        if (cycles) {
+          out = {1, 1};
+          break;
+        }
+        out = cur;
         for (std::uint32_t k = 0;
              k < kMostValues && (e.max == 0xffffffffu || k < e.max - e.min);
              ++k) {
-          cur = head_reach(e.a, cur, first);
+          cur = co_await head_reach(e.a, cur, first, memo);
           out = widen(out, cur);
         }
-        return out;
+        break;
       }
       default:
-        return {std::min(in.start, 1u),
-                std::max(std::min(in.start, 1u), beyond)};
+        break;
     }
+    memo.emplace(key, out);
+    co_return out;
   }
 
   const Cfg& _g;

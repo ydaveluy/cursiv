@@ -198,58 +198,72 @@ class LexicalPredicateEmitter {
     return *slot;
   }
 
-  void visit(std::uint16_t id) {
-    if (_used[id]) return;
-    _used[id] = kVisited;
-    const LexNode& e = _g.lex[id];
-    switch (e.kind) {
-      case LexKind::chars:
-      case LexKind::nguard:
-      case LexKind::same:
-      case LexKind::seq:
-      case LexKind::alt:
-      case LexKind::rep:
-      case LexKind::positive:
-      case LexKind::negative:
-      case LexKind::mark:
-      case LexKind::call:
-      case LexKind::through_lit:
-      case LexKind::through_same:
-      case LexKind::through_nested:
-        break;
-      default:
-        throw std::invalid_argument(
-            "cursiv: this lexical search cannot be used by a byte recognizer");
-    }
-    lex_children(_g, id, [&](auto child) { visit(child); });
-    _width[id] = recursive(id) ? kVariableWidth : width(e);
-    if (!recursive(id) && !fixed(id) &&
-        (e.kind == LexKind::alt ||
-         (e.kind == LexKind::rep && e.max != 0 &&
-          _g.lex[e.a].kind == LexKind::chars) ||
-         (e.kind == LexKind::seq && e.b != 0 &&
-          (_used[_g.lexChild[e.a + e.b - 1]] & kFinal) != 0)))
-      _used[id] |= kFinal;
-    _order.push_back(id);
+  // Lists `root` and the nodes it reads, each after its children, with its
+  // width and whether it reads final.
+  void visit(std::uint16_t root) {
+    lex_post_order(
+        root,
+        [&](std::uint16_t id, auto&& push) {
+          if (_used[id]) return false;
+          _used[id] = kVisited;
+          switch (_g.lex[id].kind) {
+            case LexKind::chars:
+            case LexKind::nguard:
+            case LexKind::same:
+            case LexKind::seq:
+            case LexKind::alt:
+            case LexKind::rep:
+            case LexKind::positive:
+            case LexKind::negative:
+            case LexKind::mark:
+            case LexKind::call:
+            case LexKind::through_lit:
+            case LexKind::through_same:
+            case LexKind::through_nested:
+              break;
+            default:
+              throw std::invalid_argument(
+                  "cursiv: this lexical search cannot be used by a byte "
+                  "recognizer");
+          }
+          lex_children(_g, id, push);
+          return true;
+        },
+        [&](std::uint16_t id) {
+          const LexNode& e = _g.lex[id];
+          _width[id] = recursive(id) ? kVariableWidth : width(e);
+          if (!recursive(id) && !fixed(id) &&
+              (e.kind == LexKind::alt ||
+               (e.kind == LexKind::rep && e.max != 0 &&
+                _g.lex[e.a].kind == LexKind::chars) ||
+               (e.kind == LexKind::seq && e.b != 0 &&
+                (_used[_g.lexChild[e.a + e.b - 1]] & kFinal) != 0)))
+            _used[id] |= kFinal;
+          _order.push_back(id);
+        });
   }
 
-  void use(std::uint16_t id, bool direct) {
-    const auto flag = direct ? kDirect : kNode;
-    if ((_used[id] & flag) != 0) return;
-    _used[id] |= flag;
-    const LexNode& e = _g.lex[id];
-    if (!direct && fixed(id)) {
-      if (e.kind != LexKind::rep || e.max != 0) use(id, true);
-      return;
+  void use(std::uint16_t root, bool direct) {
+    for (std::vector todo{std::pair{root, direct}}; !todo.empty();) {
+      const auto [id, read] = todo.back();
+      todo.pop_back();
+      const auto flag = read ? kDirect : kNode;
+      if ((_used[id] & flag) != 0) continue;
+      _used[id] |= flag;
+      const LexNode& e = _g.lex[id];
+      if (!read && fixed(id)) {
+        if (e.kind != LexKind::rep || e.max != 0) todo.emplace_back(id, true);
+        continue;
+      }
+      if ((e.kind == LexKind::rep && _g.lex[e.a].kind == LexKind::chars) ||
+          worded(id))
+        continue;
+      const bool searched =
+          e.kind == LexKind::through_nested || e.kind == LexKind::through_same;
+      lex_children(_g, id, [&](auto child) {
+        todo.emplace_back(same(child), !searched && (read || dispatched(id)));
+      });
     }
-    if ((e.kind == LexKind::rep && _g.lex[e.a].kind == LexKind::chars) ||
-        worded(id))
-      return;
-    const bool searched =
-        e.kind == LexKind::through_nested || e.kind == LexKind::through_same;
-    lex_children(_g, id, [&](auto child) {
-      use(same(child), !searched && (direct || dispatched(id)));
-    });
   }
 
   std::string call(std::uint16_t id, std::string_view input,

@@ -224,9 +224,11 @@ struct LlTable {
 
   // Per section configuration: the mode a fault is lexed with, its grammar's
   // terminals and its closing token, and that token, which a repair there never
-  // invents or drops. Null where the grammar embeds none.
+  // invents or drops; per position, the section it stands in, as
+  // `LlContext::section` names it. Null where the grammar embeds none.
   const std::uint16_t* sectionErr = nullptr;
   const std::uint16_t* sectionEnd = nullptr;
+  const std::uint8_t* nodeSection = nullptr;
   std::uint8_t nsections = 0;
 
   StampLayout stamp{};

@@ -45,9 +45,10 @@ inline Scan ll_scan(const LlContext& c, std::uint16_t mode, TextOffset from) {
         T.sectionEnd[c.section - 1u] < T.nterms &&
         !T.mode_admits(mode, T.sectionEnd[c.section - 1u])) {
       const Scan end =
-          ll_match_text<T>(c.src, c.len, ll_err_mode<T>(c), from);
+          ll_match_text<T>(c.src, c.len, ll_err_mode<T>(c.section), from);
       if (ll_ends<T>(c, end.term) ||
-          (end.term < T.nterms && T.mode_covers(ll_err_mode<T>(c), mode) &&
+          (end.term < T.nterms &&
+           T.mode_covers(ll_err_mode<T>(c.section), mode) &&
            T.mode_admits(mode, end.term)))
         return end;
     }

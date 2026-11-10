@@ -79,15 +79,17 @@ class TranslatingParser final : public Parser {
   }
 
   void nextFeaturesAt(const Cst& cst, TextOffset at, TextOffset resume,
-                      std::vector<NextFeature>& out) const override {
+                      std::vector<NextFeature>& out,
+                      const CancellationToken& cancelToken) const override {
     const SourceTranslation* const translation = cst.translation();
     if (translation == nullptr)
-      return _parser->nextFeaturesAt(cst, at, resume, out);
+      return _parser->nextFeaturesAt(cst, at, resume, out, cancelToken);
     // A caret strictly inside a replaced piece would split its spelling.
     const auto from = translation->translated(at);
     const auto to = translation->translated(resume);
     if (from.has_value() && to.has_value())
-      _parser->nextFeaturesAt(engine_tree(cst, *translation), *from, *to, out);
+      _parser->nextFeaturesAt(engine_tree(cst, *translation), *from, *to, out,
+                              cancelToken);
   }
 
  private:

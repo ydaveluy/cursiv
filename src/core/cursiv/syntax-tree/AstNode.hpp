@@ -424,8 +424,9 @@ struct reference {
   // Written by a read (`resolve`), hence mutable.
   mutable AstNode* _target = nullptr;
   // Installed once by the document over the build's work list; null on a
-  // hand-built tree, where reading resolves nothing. A copy keeps it: it reads
-  // the source's site, and only the source is reset by a relink.
+  // hand-built tree, where reading resolves nothing. A copy, made while nothing
+  // resolves the source, keeps it: it reads the source's site, and only the
+  // source is reset by a relink.
   const RefResolver* _resolver = nullptr;
   // The CST node the name was read from. Declared after the pointers so it and
   // the three below share one tail word instead of opening a hole.

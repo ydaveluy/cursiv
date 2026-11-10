@@ -850,76 +850,52 @@ void DefaultLanguageServer::deliverThenWrite(
 
 // The store catches up through one build: the last event per URI wins, a
 // delete is checked against the file system, and an open document's buffer
-// is kept. The build runs even with no event, for what a cut build left.
+// is kept. Classified in the write, disk reads included: reading the store
+// outside the lock would race whatever write is in flight.
 void DefaultLanguageServer::didChangeWatchedFiles(
     const lsp::DidChangeWatchedFilesParams& params) {
-  std::vector<std::string> order;
-  std::unordered_map<std::string, bool> deletedByUri;
-  for (const lsp::FileEvent& event : params.changes) {
-    std::string uri = event.uri.toString();
-    if (uri.empty()) continue;
-    const bool deleted = event.type == lsp::FileChangeType::Deleted;
-    if (deletedByUri.insert_or_assign(uri, deleted).second)
-      order.push_back(std::move(uri));
-  }
-
   const FileSystemProvider& files = *_shared.fileSystemProvider;
-  const DocumentBuilder& builder = *_shared.documentBuilder;
   const Documents& documents = *_shared.documents;
+  writeAndPublish(params.changes.size(), [&](TextChanges& changes) {
+    std::vector<std::string> order;
+    std::unordered_map<std::string, bool> deletedByUri;
+    for (const lsp::FileEvent& event : params.changes) {
+      std::string uri = event.uri.toString();
+      if (uri.empty()) continue;
+      const bool deleted = event.type == lsp::FileChangeType::Deleted;
+      if (deletedByUri.insert_or_assign(uri, deleted).second)
+        order.push_back(std::move(uri));
+    }
 
-  // Everything below is one write action, disk reads included: the
-  // store decides what an event means, and reading it outside the lock
-  // would race whatever write is in flight.
-  _shared.workspaceLock->write(
-      [&](const CancellationToken& token) {
-        std::vector<std::string> changed;
-        std::vector<std::string> removed;
-
-        // Classified here, resolved by `DocumentBuilder::update`. An open
-        // buffer outranks the watcher, and a tracked URI whose file is gone is
-        // removed.
-        const auto classify = [&](std::string uri) {
-          if (const std::shared_ptr<Document> existing =
-                  documents.getDocument(uri);
-              existing != nullptr) {
-            if (existing->isOpen) return;
-            if (!files.exists(existing->uri)) {
-              removed.push_back(std::move(uri));
-              return;
-            }
-          }
-          changed.push_back(std::move(uri));
-        };
-
-        for (const std::string& uri : order) {
-          throw_if_cancelled(token);
-          if (deletedByUri.at(uri)) {
-            // A delete may name a directory: the store's folder index says what
-            // was under it.
-            if (documents.getDocument(uri) != nullptr) {
-              classify(uri);
-              continue;
-            }
-            for (const std::shared_ptr<Document>& d :
-                 documents.getDocuments(uri))
-              classify(std::string(d->uri));
-            continue;
-          }
-          classify(uri);
+    // Resolved by `DocumentBuilder::update`. An open buffer outranks the
+    // watcher, and a tracked URI whose file is gone is removed.
+    const auto classify = [&](std::string uri) {
+      if (const std::shared_ptr<Document> existing = documents.getDocument(uri);
+          existing != nullptr) {
+        if (existing->isOpen) return;
+        if (!files.exists(existing->uri)) {
+          changes.deleted.push_back(std::move(uri));
+          return;
         }
+      }
+      changes.changed.push_back(std::move(uri));
+    };
 
-        const std::vector<std::string_view> changedUris(changed.begin(),
-                                                        changed.end());
-        const std::vector<std::string_view> deletedUris(removed.begin(),
-                                                        removed.end());
-
-        // One grouped build updates what a created file resolves and what a
-        // deleted one breaks; its publish, through the phase hook, sends the
-        // documents it validated again.
-        builder.update(changedUris, deletedUris, token);
-
-      },
-      WorkspaceLock::WriteMode::Durable);
+    for (const std::string& uri : order) {
+      if (deletedByUri.at(uri)) {
+        // A delete may name a directory: the store's folder index says what
+        // was under it.
+        if (documents.getDocument(uri) != nullptr) {
+          classify(uri);
+          continue;
+        }
+        for (const std::shared_ptr<Document>& d : documents.getDocuments(uri))
+          classify(std::string(d->uri));
+        continue;
+      }
+      classify(uri);
+    }
+  });
 }
 
 // The provider delivers pushed and pulled values through the same listeners.
@@ -1126,7 +1102,7 @@ std::vector<lsp::DocumentSymbol> DefaultLanguageServer::documentSymbol(
     const lsp::DocumentSymbolParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::DocumentSymbol> symbols;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Parsed,
+  routeDocument(params.textDocument.uri.toString(), _states.documentSymbol,
                 &LspServices::documentSymbolProvider, token,
                 [&](const DocumentSymbolProvider& provider, const Document& d) {
                   symbols = provider.getSymbols(d, token);
@@ -1139,7 +1115,7 @@ std::vector<lsp::DocumentSymbol> DefaultLanguageServer::documentSymbol(
 std::vector<lsp::LocationLink> DefaultLanguageServer::definition(
     const lsp::DefinitionParams& params, const CancellationToken& token) const {
   std::vector<lsp::LocationLink> links;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
+  routeDocument(params.textDocument.uri.toString(), _states.definition,
                 &LspServices::definitionProvider, token,
                 [&](const DefinitionProvider& provider, const Document& d) {
                   if (std::optional<std::vector<lsp::LocationLink>> found =
@@ -1153,7 +1129,7 @@ std::vector<lsp::LocationLink> DefaultLanguageServer::declaration(
     const lsp::DeclarationParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::LocationLink> links;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
+  routeDocument(params.textDocument.uri.toString(), _states.declaration,
                 &LspServices::declarationProvider, token,
                 [&](const DeclarationProvider& provider, const Document& d) {
                   if (std::optional<std::vector<lsp::LocationLink>> found =
@@ -1167,7 +1143,7 @@ std::vector<lsp::LocationLink> DefaultLanguageServer::typeDefinition(
     const lsp::TypeDefinitionParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::LocationLink> links;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
+  routeDocument(params.textDocument.uri.toString(), _states.typeDefinition,
                 &LspServices::typeDefinitionProvider, token,
                 [&](const TypeDefinitionProvider& provider, const Document& d) {
                   if (std::optional<std::vector<lsp::LocationLink>> found =
@@ -1177,14 +1153,11 @@ std::vector<lsp::LocationLink> DefaultLanguageServer::typeDefinition(
   return links;
 }
 
-// One state higher than its neighbours, as find-references: what implements
-// what is read off the inverse index.
 std::vector<lsp::LocationLink> DefaultLanguageServer::implementation(
     const lsp::ImplementationParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::LocationLink> links;
-  routeDocument(params.textDocument.uri.toString(),
-                WorkspaceState::IndexedReferences,
+  routeDocument(params.textDocument.uri.toString(), _states.implementation,
                 &LspServices::implementationProvider, token,
                 [&](const ImplementationProvider& provider, const Document& d) {
                   if (std::optional<std::vector<lsp::LocationLink>> found =
@@ -1197,13 +1170,13 @@ std::vector<lsp::LocationLink> DefaultLanguageServer::implementation(
 std::vector<lsp::Location> DefaultLanguageServer::references(
     const lsp::ReferenceParams& params, const CancellationToken& token) const {
   std::vector<lsp::Location> locations;
-  routeDocument(
-      params.textDocument.uri.toString(), WorkspaceState::IndexedReferences,
-      &LspServices::referencesProvider, token,
-      [&](const ReferencesProvider& provider, const Document& d) {
-        locations = provider.findReferences(
-            d, params.position, params.context.includeDeclaration, token);
-      });
+  routeDocument(params.textDocument.uri.toString(), _states.references,
+                &LspServices::referencesProvider, token,
+                [&](const ReferencesProvider& provider, const Document& d) {
+                  locations = provider.findReferences(
+                      d, params.position, params.context.includeDeclaration,
+                      token);
+                });
   return locations;
 }
 
@@ -1211,9 +1184,9 @@ std::optional<lsp::Range> DefaultLanguageServer::prepareRename(
     const lsp::PrepareRenameParams& params,
     const CancellationToken& token) const {
   std::optional<lsp::Range> span;
-  routeDocument(params.textDocument.uri.toString(),
-                WorkspaceState::IndexedReferences, &LspServices::renameProvider,
-                token, [&](const RenameProvider& provider, const Document& d) {
+  routeDocument(params.textDocument.uri.toString(), _states.rename,
+                &LspServices::renameProvider, token,
+                [&](const RenameProvider& provider, const Document& d) {
                   span = provider.prepareRename(d, params.position, token);
                 });
   return span;
@@ -1224,9 +1197,9 @@ std::optional<lsp::Range> DefaultLanguageServer::prepareRename(
 std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::rename(
     const lsp::RenameParams& params, const CancellationToken& token) const {
   std::optional<lsp::WorkspaceEdit> edit;
-  routeDocument(params.textDocument.uri.toString(),
-                WorkspaceState::IndexedReferences, &LspServices::renameProvider,
-                token, [&](const RenameProvider& provider, const Document& d) {
+  routeDocument(params.textDocument.uri.toString(), _states.rename,
+                &LspServices::renameProvider, token,
+                [&](const RenameProvider& provider, const Document& d) {
                   edit = provider.rename(d, params.position, params.newName,
                                          token);
                 });
@@ -1238,7 +1211,7 @@ std::vector<lsp::DocumentHighlight> DefaultLanguageServer::documentHighlight(
     const CancellationToken& token) const {
   std::vector<lsp::DocumentHighlight> highlights;
   routeDocument(
-      params.textDocument.uri.toString(), WorkspaceState::IndexedReferences,
+      params.textDocument.uri.toString(), _states.documentHighlight,
       &LspServices::documentHighlightProvider, token,
       [&](const DocumentHighlightProvider& provider, const Document& d) {
         highlights = provider.getDocumentHighlight(d, params.position, token);
@@ -1250,7 +1223,7 @@ lsp::SemanticTokens DefaultLanguageServer::semanticTokensFull(
     const lsp::SemanticTokensParams& params,
     const CancellationToken& token) const {
   lsp::SemanticTokens tokens;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
+  routeDocument(params.textDocument.uri.toString(), _states.semanticTokens,
                 &LspServices::semanticTokenProvider, token,
                 [&](const SemanticTokenProvider& provider, const Document& d) {
                   tokens = provider.semanticHighlight(d, params, token);
@@ -1262,7 +1235,7 @@ lsp::SemanticTokens DefaultLanguageServer::semanticTokensRange(
     const lsp::SemanticTokensRangeParams& params,
     const CancellationToken& token) const {
   lsp::SemanticTokens tokens;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
+  routeDocument(params.textDocument.uri.toString(), _states.semanticTokens,
                 &LspServices::semanticTokenProvider, token,
                 [&](const SemanticTokenProvider& provider, const Document& d) {
                   tokens = provider.semanticHighlightRange(d, params, token);
@@ -1276,7 +1249,7 @@ DefaultLanguageServer::semanticTokensFullDelta(
     const lsp::SemanticTokensDeltaParams& params,
     const CancellationToken& token) const {
   lsp::OneOf<lsp::SemanticTokens, lsp::SemanticTokensDelta> tokens;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
+  routeDocument(params.textDocument.uri.toString(), _states.semanticTokens,
                 &LspServices::semanticTokenProvider, token,
                 [&](const SemanticTokenProvider& provider, const Document& d) {
                   tokens = provider.semanticHighlightDelta(d, params, token);
@@ -1287,8 +1260,7 @@ DefaultLanguageServer::semanticTokensFullDelta(
 std::vector<lsp::InlayHint> DefaultLanguageServer::inlayHint(
     const lsp::InlayHintParams& params, const CancellationToken& token) const {
   std::vector<lsp::InlayHint> hints;
-  routeDocument(params.textDocument.uri.toString(),
-                DocumentState::IndexedReferences,
+  routeDocument(params.textDocument.uri.toString(), _states.inlayHint,
                 &LspServices::inlayHintProvider, token,
                 [&](const InlayHintProvider& provider, const Document& d) {
                   hints = provider.getInlayHints(d, params.range, token);
@@ -1300,7 +1272,7 @@ std::vector<lsp::FoldingRange> DefaultLanguageServer::foldingRange(
     const lsp::FoldingRangeParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::FoldingRange> ranges;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Parsed,
+  routeDocument(params.textDocument.uri.toString(), _states.foldingRange,
                 &LspServices::foldingRangeProvider, token,
                 [&](const FoldingRangeProvider& provider, const Document& d) {
                   ranges = provider.getFoldingRanges(d, token);
@@ -1312,7 +1284,7 @@ std::vector<lsp::SelectionRange> DefaultLanguageServer::selectionRange(
     const lsp::SelectionRangeParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::SelectionRange> ranges;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Parsed,
+  routeDocument(params.textDocument.uri.toString(), _states.selectionRange,
                 &LspServices::selectionRangeProvider, token,
                 [&](const SelectionRangeProvider& provider, const Document& d) {
                   ranges =
@@ -1324,7 +1296,7 @@ std::vector<lsp::SelectionRange> DefaultLanguageServer::selectionRange(
 std::optional<lsp::Hover> DefaultLanguageServer::hover(
     const lsp::HoverParams& params, const CancellationToken& token) const {
   std::optional<lsp::Hover> hover;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
+  routeDocument(params.textDocument.uri.toString(), _states.hover,
                 &LspServices::hoverProvider, token,
                 [&](const HoverProvider& provider, const Document& d) {
                   hover = provider.getHoverContent(d, params.position, token);
@@ -1339,7 +1311,7 @@ lsp::CompletionList DefaultLanguageServer::completion(
     const lsp::CompletionParams& params, const CancellationToken& token) const {
   lsp::CompletionList list;
   list.isIncomplete = true;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
+  routeDocument(params.textDocument.uri.toString(), _states.completion,
                 &LspServices::completionProvider, token,
                 [&](const CompletionProvider& provider, const Document& d) {
                   list = provider.getCompletion(d, params, token);
@@ -1357,8 +1329,7 @@ std::optional<lsp::SignatureHelp> DefaultLanguageServer::signatureHelp(
     const lsp::SignatureHelpParams& params,
     const CancellationToken& token) const {
   std::optional<lsp::SignatureHelp> help;
-  routeDocument(params.textDocument.uri.toString(),
-                DocumentState::IndexedReferences,
+  routeDocument(params.textDocument.uri.toString(), _states.signatureHelp,
                 &LspServices::signatureHelpProvider, token,
                 [&](const SignatureHelpProvider& provider, const Document& d) {
                   help = provider.provideSignatureHelp(d, params, token);
@@ -1366,12 +1337,10 @@ std::optional<lsp::SignatureHelp> DefaultLanguageServer::signatureHelp(
   return help;
 }
 
-// The one route that waits for validation: it reads what the validator wrote,
-// and asked earlier it would offer fixes for findings not yet made.
 std::vector<lsp::CodeAction> DefaultLanguageServer::codeAction(
     const lsp::CodeActionParams& params, const CancellationToken& token) const {
   std::vector<lsp::CodeAction> actions;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Validated,
+  routeDocument(params.textDocument.uri.toString(), _states.codeAction,
                 &LspServices::codeActionProvider, token,
                 [&](const CodeActionProvider& provider, const Document& d) {
                   actions = provider.getCodeActions(d, params, token);
@@ -1386,7 +1355,7 @@ std::vector<lsp::DocumentLink> DefaultLanguageServer::documentLink(
     const lsp::DocumentLinkParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::DocumentLink> links;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Parsed,
+  routeDocument(params.textDocument.uri.toString(), _states.documentLink,
                 &LspServices::documentLinkProvider, token,
                 [&](const DocumentLinkProvider& provider, const Document& d) {
                   links = provider.getDocumentLinks(d, token);
@@ -1394,13 +1363,10 @@ std::vector<lsp::DocumentLink> DefaultLanguageServer::documentLink(
   return links;
 }
 
-// Waits for `IndexedReferences`, not the parse: a lens counts what the
-// workspace points at, such as callers, and earlier it would count a part.
 std::vector<lsp::CodeLens> DefaultLanguageServer::codeLens(
     const lsp::CodeLensParams& params, const CancellationToken& token) const {
   std::vector<lsp::CodeLens> lenses;
-  routeDocument(params.textDocument.uri.toString(),
-                DocumentState::IndexedReferences,
+  routeDocument(params.textDocument.uri.toString(), _states.codeLens,
                 &LspServices::codeLensProvider, token,
                 [&](const CodeLensProvider& provider, const Document& d) {
                   lenses = provider.provideCodeLens(d, token);
@@ -1413,7 +1379,7 @@ std::vector<lsp::TextEdit> DefaultLanguageServer::formatting(
     const lsp::DocumentFormattingParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::TextEdit> edits;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Parsed,
+  routeDocument(params.textDocument.uri.toString(), _states.formatting,
                 &LspServices::formatter, token,
                 [&](const Formatter& formatter, const Document& d) {
                   edits = formatter.formatDocument(d, params, token);
@@ -1425,7 +1391,7 @@ std::vector<lsp::TextEdit> DefaultLanguageServer::rangeFormatting(
     const lsp::DocumentRangeFormattingParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::TextEdit> edits;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Parsed,
+  routeDocument(params.textDocument.uri.toString(), _states.formatting,
                 &LspServices::formatter, token,
                 [&](const Formatter& formatter, const Document& d) {
                   edits = formatter.formatDocumentRange(d, params, token);
@@ -1439,7 +1405,7 @@ std::vector<lsp::TextEdit> DefaultLanguageServer::onTypeFormatting(
     const lsp::DocumentOnTypeFormattingParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::TextEdit> edits;
-  routeDocument(params.textDocument.uri.toString(), DocumentState::Parsed,
+  routeDocument(params.textDocument.uri.toString(), _states.formatting,
                 &LspServices::formatter, token,
                 [&](const Formatter& formatter, const Document& d) {
                   if (formats_on(formatter, params.ch))
@@ -1455,12 +1421,12 @@ std::vector<lsp::CallHierarchyItem> DefaultLanguageServer::prepareCallHierarchy(
     const lsp::CallHierarchyPrepareParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::CallHierarchyItem> items;
-  routeDocument(
-      params.textDocument.uri.toString(), WorkspaceState::IndexedReferences,
-      &LspServices::callHierarchyProvider, token,
-      [&](const CallHierarchyProvider& provider, const Document& d) {
-        items = provider.prepareCallHierarchy(d, params.position, token);
-      });
+  routeDocument(params.textDocument.uri.toString(), _states.callHierarchy,
+                &LspServices::callHierarchyProvider, token,
+                [&](const CallHierarchyProvider& provider, const Document& d) {
+                  items =
+                      provider.prepareCallHierarchy(d, params.position, token);
+                });
   return items;
 }
 
@@ -1469,7 +1435,7 @@ DefaultLanguageServer::incomingCalls(
     const lsp::CallHierarchyIncomingCallsParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::CallHierarchyIncomingCall> calls;
-  routeDocument(params.item.uri.toString(), WorkspaceState::IndexedReferences,
+  routeDocument(params.item.uri.toString(), _states.callHierarchy,
                 &LspServices::callHierarchyProvider, token,
                 [&](const CallHierarchyProvider& provider, const Document&) {
                   calls = provider.incomingCalls(params.item, token);
@@ -1482,7 +1448,7 @@ DefaultLanguageServer::outgoingCalls(
     const lsp::CallHierarchyOutgoingCallsParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::CallHierarchyOutgoingCall> calls;
-  routeDocument(params.item.uri.toString(), WorkspaceState::IndexedReferences,
+  routeDocument(params.item.uri.toString(), _states.callHierarchy,
                 &LspServices::callHierarchyProvider, token,
                 [&](const CallHierarchyProvider& provider, const Document&) {
                   calls = provider.outgoingCalls(params.item, token);
@@ -1494,12 +1460,12 @@ std::vector<lsp::TypeHierarchyItem> DefaultLanguageServer::prepareTypeHierarchy(
     const lsp::TypeHierarchyPrepareParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::TypeHierarchyItem> items;
-  routeDocument(
-      params.textDocument.uri.toString(), WorkspaceState::IndexedReferences,
-      &LspServices::typeHierarchyProvider, token,
-      [&](const TypeHierarchyProvider& provider, const Document& d) {
-        items = provider.prepareTypeHierarchy(d, params.position, token);
-      });
+  routeDocument(params.textDocument.uri.toString(), _states.typeHierarchy,
+                &LspServices::typeHierarchyProvider, token,
+                [&](const TypeHierarchyProvider& provider, const Document& d) {
+                  items =
+                      provider.prepareTypeHierarchy(d, params.position, token);
+                });
   return items;
 }
 
@@ -1507,7 +1473,7 @@ std::vector<lsp::TypeHierarchyItem> DefaultLanguageServer::supertypes(
     const lsp::TypeHierarchySupertypesParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::TypeHierarchyItem> items;
-  routeDocument(params.item.uri.toString(), WorkspaceState::IndexedReferences,
+  routeDocument(params.item.uri.toString(), _states.typeHierarchy,
                 &LspServices::typeHierarchyProvider, token,
                 [&](const TypeHierarchyProvider& provider, const Document&) {
                   items = provider.supertypes(params.item, token);
@@ -1519,7 +1485,7 @@ std::vector<lsp::TypeHierarchyItem> DefaultLanguageServer::subtypes(
     const lsp::TypeHierarchySubtypesParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::TypeHierarchyItem> items;
-  routeDocument(params.item.uri.toString(), WorkspaceState::IndexedReferences,
+  routeDocument(params.item.uri.toString(), _states.typeHierarchy,
                 &LspServices::typeHierarchyProvider, token,
                 [&](const TypeHierarchyProvider& provider, const Document&) {
                   items = provider.subtypes(params.item, token);
@@ -1534,7 +1500,7 @@ std::vector<lsp::WorkspaceSymbol> DefaultLanguageServer::workspaceSymbol(
     const CancellationToken& token) const {
   std::vector<lsp::WorkspaceSymbol> symbols;
   if (!awaitScan(token)) return symbols;
-  (void)readAtWorkspaceState(DocumentState::IndexedContent, token, [&] {
+  (void)readAtWorkspaceState(_states.workspaceSymbol, token, [&] {
     symbols = _shared.workspaceSymbolProvider->getSymbols(params.query, token);
   });
   return symbols;
@@ -1544,7 +1510,7 @@ lsp::WorkspaceSymbol DefaultLanguageServer::workspaceSymbolResolve(
     const lsp::WorkspaceSymbol& symbol, const CancellationToken& token) const {
   lsp::WorkspaceSymbol resolved = symbol;
   if (!awaitScan(token)) return resolved;
-  (void)readAtWorkspaceState(DocumentState::IndexedContent, token, [&] {
+  (void)readAtWorkspaceState(_states.workspaceSymbol, token, [&] {
     resolved = _shared.workspaceSymbolProvider->resolveSymbol(symbol, token);
   });
   return resolved;
@@ -1563,9 +1529,9 @@ std::optional<lsp::LSPAny> DefaultLanguageServer::executeCommand(
   return handler->executeCommand(params.command, arguments, token);
 }
 
-// Mutate, then build, in one durable write. The build runs even when nothing
-// moved or the mutation failed part-way, then the failure goes on. Room for
-// `most` records is made first, so an installed text always reaches the build.
+// Mutate, then build, in one durable write. The build always runs, then the
+// first failure goes on. Room for `most` records comes before the mutation, so
+// an installed text always reaches the build.
 void DefaultLanguageServer::writeAndPublish(
     std::size_t most, cursiv::function_ref<void(TextChanges&)> mutate) {
   const DocumentBuilder& builder = *_shared.documentBuilder;
@@ -1574,16 +1540,21 @@ void DefaultLanguageServer::writeAndPublish(
         TextChanges changes;
         std::vector<std::string_view> changed;
         std::vector<std::string_view> deleted;
-        changed.reserve(most);
-        deleted.reserve(most);
         std::exception_ptr failure;
         try {
+          changed.reserve(most);
+          deleted.reserve(most);
           mutate(changes);
         } catch (...) {
           failure = std::current_exception();
         }
-        changed.assign(changes.changed.begin(), changes.changed.end());
-        deleted.assign(changes.deleted.begin(), changes.deleted.end());
+        // Past the room made, a copy that cannot grow leaves its records out.
+        try {
+          changed.assign(changes.changed.begin(), changes.changed.end());
+          deleted.assign(changes.deleted.begin(), changes.deleted.end());
+        } catch (...) {
+          if (failure == nullptr) failure = std::current_exception();
+        }
         builder.update(changed, deleted, token);
         if (failure) std::rethrow_exception(failure);
       },

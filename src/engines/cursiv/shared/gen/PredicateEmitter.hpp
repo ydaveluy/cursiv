@@ -543,43 +543,55 @@ class PredicateEmitter {
                   free, " || none;\n");
   }
 
-  void visit(std::uint16_t at) {
-    if (_used[at]) return;
-    _used[at] = true;
-    if (const LexNode e = _g.lex[at];
-        e.kind == LexKind::seq || e.kind == LexKind::alt) {
-      for (unsigned i = 0; i < e.b; ++i) visit(_g.lexChild[e.a + i]);
-    } else if (e.kind == LexKind::rep) {
-      if (e.max != 0) visit(e.a);
-      if (e.max > 1 && e.b != kNoLexNode) visit(e.b);
-    } else if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
-      visit(e.a);
-    }
-    _order.push_back(at);
+  // Lists `root` and the nodes it reads, each after its children.
+  void visit(std::uint16_t root) {
+    lex_post_order(
+        root,
+        [&](std::uint16_t at, auto&& push) {
+          if (_used[at]) return false;
+          _used[at] = true;
+          if (const LexNode e = _g.lex[at];
+              e.kind == LexKind::seq || e.kind == LexKind::alt) {
+            for (unsigned i = 0; i < e.b; ++i) push(_g.lexChild[e.a + i]);
+          } else if (e.kind == LexKind::rep) {
+            if (e.max != 0) push(e.a);
+            if (e.max > 1 && e.b != kNoLexNode) push(e.b);
+          } else if (e.kind == LexKind::positive ||
+                     e.kind == LexKind::negative) {
+            push(e.a);
+          }
+          return true;
+        },
+        [&](std::uint16_t at) { _order.push_back(at); });
   }
 
-  void head_tokens(std::uint16_t at, bool turn) {
-    const LexNode e = _g.lex[at];
-    switch (e.kind) {
-      case LexKind::token:
-        _head[at] = true;
-        _turn[at] = turn && turns_of(e.a).any();
-        break;
-      case LexKind::seq:
-        for (unsigned i = 0; i < e.b; ++i) {
-          head_tokens(_g.lexChild[e.a + i], turn);
-          if (!_modes.nullable[_g.lexChild[e.a + i]]) break;
+  // Marks the tokens `root` may open with, in reading order.
+  void head_tokens(std::uint16_t root, bool turn) {
+    for (std::vector todo{root}; !todo.empty();) {
+      const std::uint16_t at = todo.back();
+      todo.pop_back();
+      const LexNode e = _g.lex[at];
+      switch (e.kind) {
+        case LexKind::token:
+          _head[at] = true;
+          _turn[at] = turn && turns_of(e.a).any();
+          break;
+        case LexKind::seq: {
+          unsigned n = 0;
+          while (n < e.b && _modes.nullable[_g.lexChild[e.a + n]]) ++n;
+          for (unsigned i = std::min<unsigned>(n + 1, e.b); i-- > 0;)
+            todo.push_back(_g.lexChild[e.a + i]);
+          break;
         }
-        break;
-      case LexKind::alt:
-        for (unsigned i = 0; i < e.b; ++i)
-          head_tokens(_g.lexChild[e.a + i], turn);
-        break;
-      case LexKind::rep:
-        head_tokens(e.a, turn);
-        break;
-      default:
-        break;
+        case LexKind::alt:
+          for (unsigned i = e.b; i-- > 0;) todo.push_back(_g.lexChild[e.a + i]);
+          break;
+        case LexKind::rep:
+          todo.push_back(e.a);
+          break;
+        default:
+          break;
+      }
     }
   }
 
@@ -617,29 +629,24 @@ class PredicateEmitter {
     return "p.held == ::cursiv::engine::kInvalidSymbol && (" + modes + ")";
   }
   bool same_shape(std::uint16_t x, std::uint16_t y) const {
-    if (x == y) return true;
-    const LexNode a = _g.lex[x], b = _g.lex[y];
-    if (a.kind != b.kind || a.min != b.min || a.max != b.max) return false;
-    switch (a.kind) {
-      case LexKind::chars:
-        return a.a == b.a;
-      case LexKind::seq:
-      case LexKind::alt:
-        if (a.b != b.b) return false;
-        for (unsigned i = 0; i < a.b; ++i)
-          if (!same_shape(_g.lexChild[a.a + i], _g.lexChild[b.a + i]))
-            return false;
-        return true;
-      case LexKind::rep:
-        return same_shape(a.a, b.a) && a.b == b.b;
-      case LexKind::nguard:
-        if (a.a != b.a) return false;
-        for (unsigned i = 0; i < a.min; ++i)
-          if (_g.lexChild[a.b + i] != _g.lexChild[b.b + i]) return false;
-        return true;
-      default:
-        return false;
-    }
+    return lex_same_graph(_g, x, y, [&](const LexNode& a, const LexNode& b) {
+      if (a.kind != b.kind || a.min != b.min || a.max != b.max) return false;
+      switch (a.kind) {
+        case LexKind::chars:
+          return a.a == b.a;
+        case LexKind::seq:
+        case LexKind::alt:
+        case LexKind::rep:
+          return a.b == b.b;
+        case LexKind::nguard:
+          if (a.a != b.a) return false;
+          for (unsigned i = 0; i < a.min; ++i)
+            if (_g.lexChild[a.b + i] != _g.lexChild[b.b + i]) return false;
+          return true;
+        default:
+          return false;
+      }
+    });
   }
   // The terminals the rule reads as `t`: itself, or for a spelling only a
   // condition names, the anonymous terminal a rule spells the same.

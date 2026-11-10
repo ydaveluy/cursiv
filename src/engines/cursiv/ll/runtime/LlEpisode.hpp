@@ -1281,11 +1281,8 @@ class LlEpisode {
             return std::get<0>(e) == alphabet && std::get<1>(e) == begin;
           });
       if (again != seen.end()) {
-        const auto first = std::get<2>(*again);
-        for (std::size_t k = first;
-             k < _readingsOf.size() &&
-             _readingsOf[k].group == _readingsOf[first].group;
-             ++k)
+        const auto [first, end] = std::get<2>(*again);
+        for (std::size_t k = first; k < end; ++k)
           _readingsOf.push_back({_readingsOf[k].term, begin, _readingsOf[k].end,
                                  g, _readingsOf[k].priority});
       } else {
@@ -1295,7 +1292,9 @@ class LlEpisode {
                              &inspected, &ended, nullptr, dec().mode, nullptr,
                              &lengths);
         touch({{}, inspected, ended});
-        seen.emplace_back(alphabet, begin, _readingsOf.size());
+        seen.emplace_back(
+            alphabet, begin,
+            std::pair{_readingsOf.size(), _readingsOf.size() + lengths.size()});
         for (const auto& reading : lengths)
           _readingsOf.push_back(
               {reading.term, begin, reading.end, g, reading.priority});
@@ -1615,7 +1614,8 @@ class LlEpisode {
   std::vector<Reading> _readingsOf;
   // The rest of what a reading step of tracked groups makes, kept between
   // steps to reuse its storage and cleared where it is made.
-  std::vector<std::tuple<LlMask<T.termWords>, TextOffset, std::size_t>>
+  std::vector<std::tuple<LlMask<T.termWords>, TextOffset,
+                         std::pair<std::size_t, std::size_t>>>
       _alphabets;
   std::vector<LlLexReading> _lengths;
   std::vector<Place> _places;

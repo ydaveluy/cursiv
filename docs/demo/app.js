@@ -134,6 +134,8 @@ function updateDiagnosticsStatus() {
   $('diagnostics').title = diags.map((d) => `${d.range.start.line + 1}:${d.range.start.character + 1} ${d.message}`).join('\n') || 'No problems';
   const first = diags[0];
   $('diag-first').textContent = first ? `${first.range.start.line + 1}:${first.range.start.character + 1}  ${first.message}` : '';
+  const built = current?.documents.find((d) => d.uri === state.document)?.builtMs;
+  $('build-time').textContent = built == null ? '' : `built in ${built} ms`;
 }
 
 function showDocument(uri) {
@@ -195,7 +197,8 @@ async function startSession(session, wantedDoc) {
   session.documents = lang.documents.map((d, i) => {
     const uri = `file:///demo/${lang.id}/${d.name}`;
     const model = monaco.editor.createModel(texts[i], d.languageId, monaco.Uri.parse(uri));
-    return { ...d, uri, model, version: 1 };
+    // `sent`: when each version still unanswered went to the server.
+    return { ...d, uri, model, version: 1, sent: new Map(), builtMs: null };
   });
   renderTabs();
   const initial = session.documents.find((d) => d.name === wantedDoc) ?? session.documents[0];
@@ -223,6 +226,11 @@ async function startSession(session, wantedDoc) {
     if (session.disposed) return;
     const d = diagnosedDocument(session.documents, p);
     if (!d) return;
+    const sent = d.sent.get(p.version);
+    if (sent !== undefined) {
+      d.builtMs = Math.round(performance.now() - sent);
+      for (const version of d.sent.keys()) if (version <= p.version) d.sent.delete(version);
+    }
     state.diagnostics[p.uri] = p.diagnostics;
     monaco.editor.setModelMarkers(d.model, 'cursiv', p.diagnostics.map((diag) => ({
       severity: [, monaco.MarkerSeverity.Error, monaco.MarkerSeverity.Warning,
@@ -263,11 +271,17 @@ async function startSession(session, wantedDoc) {
   server.notify('initialized', {});
 
   for (const d of session.documents) {
+    d.sent.set(d.version, performance.now());
     server.notify('textDocument/didOpen', { textDocument: { uri: d.uri, languageId: d.languageId, version: d.version, text: d.model.getValue() } });
-    d.model.onDidChangeContent(() => {
+    // Monaco lists the changes from the end of the text back, in UTF-16
+    // columns: applied in that order, as the protocol does.
+    d.model.onDidChangeContent((e) => {
       if (session.disposed) return;
-      server.notify('textDocument/didChange', { textDocument: { uri: d.uri, version: ++d.version },
-                                                 contentChanges: [{ text: d.model.getValue() }] });
+      d.sent.set(++d.version, performance.now());
+      const contentChanges = e.changes.map(({ range: r, text }) => ({ text, range: {
+        start: { line: r.startLineNumber - 1, character: r.startColumn - 1 },
+        end: { line: r.endLineNumber - 1, character: r.endColumn - 1 } } }));
+      server.notify('textDocument/didChange', { textDocument: { uri: d.uri, version: d.version }, contentChanges });
     });
   }
   // Features are registered once the documents are open, then reused.

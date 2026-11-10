@@ -554,6 +554,11 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   if (!a.sectionErr.empty()) {
     o.array("::std::uint16_t", "kSectionErr", a.sectionErr);
     o.array("::std::uint16_t", "kSectionEnd", a.sectionEnd);
+    std::vector<std::uint8_t> nodeSection(g.nnodes, 0);
+    for (std::uint32_t id = 0; id < g.nnodes; ++id)
+      if (const auto h = g.section_cfg_at(g.nodeBuild[id].cfg); h != 0)
+        nodeSection[id] = static_cast<std::uint8_t>(h + 1u);
+    o.array("::std::uint8_t", "kNodeSection", nodeSection);
   }
   o.array("::std::uint16_t", "kWordBounds", a.wordBounds);
   o.array("::cursiv::unicode::Range", "kWordRanges", g.wordRanges.v, range);
@@ -794,6 +799,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   if (!a.sectionErr.empty()) {
     o.ptr("sectionErr", "kSectionErr");
     o.ptr("sectionEnd", "kSectionEnd");
+    o.ptr("nodeSection", "kNodeSection");
     o.line("    .nsections = ", a.sectionErr.size(), "u,");
   }
   if (a.stamp != StampLayout{})

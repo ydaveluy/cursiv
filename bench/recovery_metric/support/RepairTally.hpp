@@ -22,8 +22,8 @@ struct RepairTally {
   std::uint32_t silent = 0, refused = 0, treeless = 0;
   std::uint64_t eligible = 0, kept = 0, deleted = 0, abandoned = 0, other = 0;
   std::uint32_t restored = 0, invented = 0;
-  std::uint64_t astTotal = 0, astKept = 0, astUnaligned = 0;
-  // Documents whose every untouched node survived.
+  std::uint64_t astTotal = 0, astKept = 0, astUnaligned = 0, astUnread = 0;
+  // Documents whose every untouched node was read and survived.
   std::uint32_t astWhole = 0;
   // Documents by diagnostics per fault: none, below one, one, up to two, up
   // to four, beyond.
@@ -58,7 +58,8 @@ struct RepairTally {
     astTotal += v.ast.total;
     astKept += v.ast.kept;
     astUnaligned += v.ast.unaligned;
-    astWhole += v.ast.kept == v.ast.total ? 1 : 0;
+    astUnread += v.ast.unread;
+    astWhole += v.ast.kept == v.ast.total && v.ast.unread == 0 ? 1 : 0;
     const double r = v.faults == 0 ? 0.0 : double(v.diagnostics) / v.faults;
     perFault[v.diagnostics == 0 ? 0
              : r < 1.0          ? 1

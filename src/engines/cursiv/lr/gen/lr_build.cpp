@@ -185,7 +185,6 @@ struct LrBitWords {
     lo = std::min(k, lo);
     hi = std::max(k, hi);
   }
-  bool test(std::size_t i) const { return ((w[i >> 6] >> (i & 63)) & 1) != 0; }
 };
 
 struct SegHash {
@@ -1689,12 +1688,12 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions,
         return false;
     return true;
   };
-  // A class the first fit has filled. Its members agree pairwise wherever
-  // they both answer, so one of them speaks for the actions of each terminal
-  // and for the gotos, and a state fits it when it agrees with those alone.
+  // A class the first fit filled: a member for the gotos, the actions some
+  // member gives each terminal, and the union of their implied tokens. A state
+  // fits it when it agrees with these.
   struct Class {
     unsigned first = 0;
-    std::vector<unsigned> impliedBy;
+    DynSet implied;
     struct Speaks {
       std::uint16_t term;
       std::uint32_t at, len;
@@ -1714,9 +1713,8 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions,
     return true;
   };
   const auto fits = [&](const Class& c, unsigned s) {
-    for (const unsigned m : c.impliedBy)
-      if (implied[s] != implied[m] && (implied[s] | implied[m]).more_than_one())
-        return false;
+    if (implied[s] != c.implied && (implied[s] | c.implied).more_than_one())
+      return false;
     const auto u = row(s);
     std::size_t i = 0;
     auto at = c.speaks.begin();
@@ -1746,9 +1744,7 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions,
   };
   std::vector<Class::Speaks> merged;
   const auto join = [&](Class& c, unsigned s) {
-    if (std::ranges::none_of(
-            c.impliedBy, [&](unsigned m) { return implied[m] == implied[s]; }))
-      c.impliedBy.push_back(s);
+    c.implied |= implied[s];
     const auto u = row(s);
     merged.clear();
     std::size_t i = 0, j = 0;
@@ -1860,10 +1856,15 @@ inline constexpr LrPartitions kLrPartitions{};
 class LrWrittenOrder {
  public:
   LrWrittenOrder(const LrBuildCfg& g, const LrItemDomain& dom,
-                 const LrGraph& gr, const LrClosures& cl,
-                 const LrFirstSets& fs, const LrBuckets<std::uint16_t>& pn,
-                 const LrBuildTable& A)
-      : _g(g), _dom(dom), _gr(gr), _cl(cl), _fs(fs), _pn(pn), _A(A) {}
+                 const LrGraph& gr, const LrClosures& cl, const LrFirstSets& fs,
+                 const LrBuckets<std::uint16_t>& pn, const LrBuildTable& A)
+      : _g(g), _dom(dom), _gr(gr), _cl(cl), _fs(fs), _pn(pn), _A(A) {
+    for (std::uint32_t ix = 0; ix < _dom.n; ++ix) {
+      const LrItem k = _dom.item(ix);
+      _slotOf.push_back(_g.nt_after(k.prod, k.dot) != kNoRow ? _slots++
+                                                             : kNone);
+    }
+  }
 
   // Lets go of the layouts and the forward walks held once they weigh too
   // much; a layout met again is built again, and what its verdicts said
@@ -2079,12 +2080,8 @@ class LrWrittenOrder {
     std::int8_t kind = 0;
     std::uint32_t x = 0, y = 0;
   };
-  // A word, or the subtree of the frame at a depth.
-  struct Elem {
-    std::uint32_t v = 0;
-    bool frame = false;
-    bool operator==(const Elem&) const = default;
-  };
+  // A word `w << 1`, or the subtree of the frame at depth `d`, `d << 1 | 1`.
+  using Elem = std::uint64_t;
   // What a canonical state shifts on each terminal.
   struct Row {
     bool built = false, shifted = false;
@@ -2217,16 +2214,16 @@ class LrWrittenOrder {
     return it != of.end() && it->prod == p ? std::to_address(it) : nullptr;
   }
 
-  // Whether kernel item `k` reads `t` past production `p` it opens: 2 where
-  // `t` is its next token, 1 where only what follows the item's rule may be.
+  // Whether kernel item `k`, before a nonterminal, reads `t` past production
+  // `p` it opens: 2 where `t` is its next token, 1 where only what follows the
+  // item's rule may be.
   int admits(const LrItem& k, unsigned p, unsigned t) {
-    const LrLowProd& pr = _g.prods[k.prod];
-    if (k.dot >= pr.len || is_term(_g.sym_at(pr, k.dot))) return 0;
-    const LrClosEntry* e = entry(nt_index(_g.sym_at(pr, k.dot)), p);
+    const LrClosEntry* e = entry(_g.nt_after(k.prod, k.dot), p);
     if (e == nullptr) return 0;
     if (e->fixed.test(t) || (e->inherit && after(k).test(t))) return 2;
     if (_follow.empty()) _follow = lr_follow(_g, _fs.nullable, _fs.first);
-    return e->inherit && _restEmpty[item_ix(k) + 1u] && _follow[pr.lhs].test(t)
+    return e->inherit && _restEmpty[item_ix(k) + 1u] &&
+                   _follow[_g.prods[k.prod].lhs].test(t)
                ? 1
                : 0;
   }
@@ -2245,16 +2242,19 @@ class LrWrittenOrder {
     return _after[ix];
   }
 
-  // What `admits` says of each item for a production and a token, said once.
+  // What `admits` says for a production and a token, said once, of each item
+  // before a nonterminal: no other item admits anything.
   std::vector<std::int8_t>& scores(unsigned p, std::uint32_t t) {
     const auto [at, fresh] = _scoreRows.try_emplace(std::uint64_t{p} << 32 | t);
-    if (fresh) at->second.assign(_dom.n, -1);
+    if (fresh) at->second.assign(_slots, -1);
     return at->second;
   }
 
   int score(std::vector<std::int8_t>& row, const LrItem& k, unsigned p,
             unsigned t) {
-    std::int8_t& at = row[item_ix(k)];
+    const std::uint32_t slot = _slotOf[item_ix(k)];
+    if (slot == kNone) return 0;
+    std::int8_t& at = row[slot];
     if (at < 0) at = static_cast<std::int8_t>(admits(k, p, t));
     return at;
   }
@@ -2325,16 +2325,16 @@ class LrWrittenOrder {
     if (over != nullptr) {
       const std::uint32_t lead = corner(
           nt_index(_g.sym_at(_g.prods[over->prod], over->dot)), q.lhs);
-      for (const std::uint32_t w : _keys[lead]) out.push_back({w, false});
+      for (const std::uint32_t w : _keys[lead]) out.push_back(Elem{w} << 1);
     }
     // A production's words ascend by the child they stand before.
     std::uint32_t w = _A.electAt[n.prod];
     const std::uint32_t end = _A.electAt[n.prod + 1];
     for (unsigned i = 0; i <= n.dot; ++i) {
       for (; w < end && _A.electPos[w] == i; ++w)
-        out.push_back({_A.electWord[w], false});
+        out.push_back(Elem{_A.electWord[w]} << 1);
       if (i < n.dot && !is_term(_g.sym_at(q, i)))
-        out.push_back({off + i, true});
+        out.push_back(Elem{off + i} << 1 | 1u);
     }
   }
 
@@ -2371,12 +2371,9 @@ class LrWrittenOrder {
   }
 
   std::uint32_t intern(const std::vector<Elem>& seq) {
-    _seqKey.clear();
-    for (const Elem& e : seq)
-      _seqKey.push_back(std::uint64_t{e.v} << 1 | e.frame);
     const auto [it, fresh] =
-        _seqOf.try_emplace(_seqKey, static_cast<std::uint32_t>(_seqs.size()));
-    if (fresh) _seqs.push_back(seq);
+        _seqOf.try_emplace(seq, static_cast<std::uint32_t>(_seqs.size()));
+    if (fresh) _seqs.push_back(&it->first);
     return it->second;
   }
 
@@ -3144,12 +3141,12 @@ class LrWrittenOrder {
   Say sequence_say(std::uint32_t i, std::uint32_t j) {
     auto [say, fresh] = _sayOf.emplace(std::uint64_t{i} << 32 | j);
     if (!fresh) return say;
-    const std::vector<Elem>& fx = _seqs[i];
-    const std::vector<Elem>& fy = _seqs[j];
+    const std::vector<Elem>& fx = *_seqs[i];
+    const std::vector<Elem>& fy = *_seqs[j];
     std::size_t k = 0;
     while (k < fx.size() && k < fy.size() && fx[k] == fy[k]) ++k;
     if (k < fx.size() && k < fy.size())
-      say.kind = fx[k].frame || fy[k].frame ? 0 : fx[k].v < fy[k].v ? -1 : 1;
+      say.kind = ((fx[k] | fy[k]) & 1u) != 0 ? 0 : fx[k] < fy[k] ? -1 : 1;
     else
       say = {2, i, j};
     return say;
@@ -3370,8 +3367,8 @@ class LrWrittenOrder {
   int tailed(const Reading& ra, const Reading& rb, const Tie& m) {
     const std::vector<std::uint32_t>& tl = _keys[_tails[ra.tailAt + m.xRoot]];
     const std::vector<std::uint32_t>& tr = _keys[_tails[rb.tailAt + m.yRoot]];
-    const std::vector<Elem>& left = _seqs[m.x];
-    const std::vector<Elem>& right = _seqs[m.y];
+    const std::vector<Elem>& left = *_seqs[m.x];
+    const std::vector<Elem>& right = *_seqs[m.y];
     const std::size_t ln = left.size(), rn = right.size();
     if (ln == rn) {
       for (std::size_t i = 0; i < tl.size() && i < tr.size(); ++i)
@@ -3380,11 +3377,11 @@ class LrWrittenOrder {
     }
     for (std::size_t i = std::min(ln, rn);; ++i) {
       if (i >= ln + tl.size() || i >= rn + tr.size()) return 0;
-      const Elem a = i < ln ? left[i] : Elem{tl[i - ln], false};
-      const Elem b = i < rn ? right[i] : Elem{tr[i - rn], false};
+      const Elem a = i < ln ? left[i] : Elem{tl[i - ln]} << 1;
+      const Elem b = i < rn ? right[i] : Elem{tr[i - rn]} << 1;
       if (a == b) continue;
-      if (a.frame || b.frame) return 0;
-      return a.v < b.v ? -1 : 1;
+      if (((a | b) & 1u) != 0) return 0;
+      return a < b ? -1 : 1;
     }
   }
 
@@ -3645,6 +3642,9 @@ class LrWrittenOrder {
   std::vector<std::vector<std::uint32_t>> _corner;
   std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> _back;
   std::unordered_map<std::uint64_t, std::vector<std::int8_t>> _scoreRows;
+  // The slot of each item before a nonterminal in a row of scores.
+  std::vector<std::uint32_t> _slotOf;
+  std::uint32_t _slots = 0;
   FlatMap<std::uint32_t> _parentClassOf;
   std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash>
       _parentClasses;
@@ -3673,9 +3673,9 @@ class LrWrittenOrder {
   std::size_t _held = 0;
   FlatMap<std::uint32_t> _shapeVerdictOf;
   std::vector<ShapeVerdict> _shapeVerdicts;
-  std::vector<std::vector<Elem>> _seqs;
-  std::unordered_map<std::vector<std::uint64_t>, std::uint32_t, VecHash> _seqOf;
-  std::vector<std::uint64_t> _seqKey;
+  // Each sequence by id is the key `_seqOf` holds.
+  std::vector<const std::vector<Elem>*> _seqs;
+  std::unordered_map<std::vector<Elem>, std::uint32_t, VecHash> _seqOf;
   std::unordered_set<std::array<std::uint32_t, 3>, SegHash> _tieSeen;
   std::vector<char> _restEmpty;
   std::vector<DynSet> _after;

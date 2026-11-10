@@ -17,8 +17,9 @@ namespace cursiv {
 struct Document;
 
 // A cache for the whole workspace, emptied by every build: at the update, or,
-// with `state`, when the build reaches that state. Pass the state the provider
-// reads, such as `Linked` for a cache read by a validator.
+// with `state`, once its listeners hear that state; a read that waited for it
+// may still see the old value. Pass the state the provider reads, such as
+// `Linked` for a cache read by a validator.
 //
 // WorkspaceCache<V> holds one value, without a key. get(provider) returns a
 // copy; withValue(provider, consumer) passes a reference that must not outlive

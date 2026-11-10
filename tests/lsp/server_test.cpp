@@ -43,6 +43,7 @@
 #include "cursiv/formatting/Formatter.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/hover/HoverProvider.hpp"
 #include "cursiv/lr/runtime/LrParser.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/parser/Parser.hpp"
@@ -1171,9 +1172,10 @@ void a_refused_allocation_leaves_the_notebook_index_whole() {
   }
 }
 
-// An installed text is always built: an allocation failure anywhere in an
-// edit leaves the old text, or the new one sent to a build.
-void an_installed_edit_is_always_built() {
+// A document update always reaches a build: an allocation failure anywhere
+// before it leaves the old text or the new one, and the build answers whoever
+// waited on the build the update cut.
+void an_update_always_reaches_a_build() {
   struct CountingBuilder final : cursiv::LspDocumentBuilder {
     using LspDocumentBuilder::LspDocumentBuilder;
     mutable int updates = 0;
@@ -1194,26 +1196,55 @@ void an_installed_edit_is_always_built() {
   world.shared.documentBuilder = std::move(counting);
   (void)world.handshake();
   world.open("datatype A\n");
-  const std::shared_ptr<cursiv::Document> document =
-      world.shared.documents->getDocument(kUri);
   int version = 2;
-  for (int after = 0;; ++after) {
-    // Each attempt starts from a built document, so the allocations before
-    // its failure are always the same.
-    world.change(version++, "datatype A" + std::to_string(after) + "\n");
-    const std::string edited = "datatype B" + std::to_string(after) + "\n";
-    const int before = builder.updates;
-    refuse_allocation(after);
-    try {
-      world.change(version++, edited);
-    } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+  // The recording lock's list has room for the two writes of each attempt.
+  world.lock->modes.reserve(2);
+  // `make` builds the notification before the refusal, `send` hands it over.
+  const auto sweep = [&](const auto& make, const auto& send) {
+    for (int after = 0;; ++after) {
+      // Each attempt starts from a built document, so the allocations before
+      // its failure are always the same.
+      world.lock->modes.clear();
+      world.change(version++, "datatype A" + std::to_string(after) + "\n");
+      const auto params = make(after);
+      const int before = builder.updates;
+      refuse_allocation(after);
+      try {
+        send(params);
+      } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+      }
+      const bool refused = refusal_made();
+      const bool built = builder.updates > before;
+      CHECK(built);
+      // Past this point, the failure falls inside the build alone.
+      if (!refused || (built && builder.refusalAhead)) break;
     }
-    const bool refused = refusal_made();
-    const bool built = builder.updates > before;
-    CHECK(document->textDocument().getText() != edited || built);
-    // Past this point, the failure falls inside the build alone.
-    if (!refused || (built && builder.refusalAhead)) break;
-  }
+  };
+  sweep(
+      [&](int after) {
+        lsp::DidChangeTextDocumentParams params;
+        params.textDocument.uri = lsp::Uri::parse(std::string(kUri));
+        params.textDocument.version = version++;
+        lsp::TextDocumentContentChangeWholeDocument whole;
+        whole.text = "datatype B" + std::to_string(after) + "\n";
+        params.contentChanges.emplace_back(std::move(whole));
+        return params;
+      },
+      [&](const lsp::DidChangeTextDocumentParams& params) {
+        world.server().didChange(params);
+      });
+  sweep(
+      [](int) {
+        // Longer than a short string holds: the event's URI needs room.
+        lsp::DidChangeWatchedFilesParams params;
+        params.changes.push_back(lsp::FileEvent{
+            .uri = lsp::Uri::parse("file:///w/a-folder-with-a-long-name"),
+            .type = lsp::FileChangeType::Deleted});
+        return params;
+      },
+      [&](const lsp::DidChangeWatchedFilesParams& params) {
+        world.server().didChangeWatchedFiles(params);
+      });
 }
 
 // A failed publication is not dropped: the next build publishes every
@@ -1305,7 +1336,9 @@ void a_refused_record_is_still_published() {
     world.open(kBroken);
   } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
   }
+#ifdef CURSIV_TEST_REFUSES_ALLOCATIONS
   CHECK(seen.refused.load() == 1);
+#endif
   const auto* const shown = lastSnapshotOf(*world.client, kUri);
   CHECK(shown != nullptr && shown->diagnostics.size() == 1);
   world.shared.documentBuilder->removeDocumentPhaseListener(seen);
@@ -1648,6 +1681,63 @@ void references_do_not_wait_for_validation() {
   std::ranges::sort(starts);
   CHECK((starts == std::vector<std::pair<std::uint32_t, std::uint32_t>>{
                        {1, 9}, {2, 15}}));
+}
+
+// A host chooses what a request waits for: a server built to answer hovers at
+// `Parsed` answers while the build is held short of `Linked`; the default
+// server still waits.
+void a_host_chooses_the_state_a_request_waits_for() {
+  struct Hovers final : cursiv::HoverProvider {
+    [[nodiscard]] std::optional<lsp::Hover> getHoverContent(
+        const cursiv::Document&, lsp::Position,
+        const cursiv::CancellationToken&) const override {
+      return lsp::Hover{};
+    }
+  };
+  // Holds the next build once its documents are indexed, short of `Linked`.
+  struct Hold final : cursiv::BuildPhaseListener {
+    std::atomic<bool> armed{false};
+    std::latch reached{1};
+    std::latch release{1};
+    void onBuildPhase(cursiv::DocumentState state,
+                      std::span<cursiv::Document* const>,
+                      const cursiv::CancellationToken&) override {
+      if (state != cursiv::DocumentState::IndexedContent ||
+          !armed.exchange(false))
+        return;
+      reached.count_down();
+      release.wait();
+    }
+  } hold;
+  World world;
+  world.shared.languageServer = std::make_unique<cursiv::DefaultLanguageServer>(
+      world.shared,
+      cursiv::RequestStates{.hover = cursiv::DocumentState::Parsed});
+  const cursiv::DefaultLanguageServer standard(world.shared);
+  world.ws->hoverProvider = std::make_unique<Hovers>();
+  (void)world.handshake();
+  world.open(kRepaired);
+  world.shared.documentBuilder->addBuildPhaseListener(hold);
+  hold.armed = true;
+  auto edit = std::async(std::launch::async, [&] {
+    world.change(2, "\n" + std::string(kRepaired));
+  });
+  hold.reached.wait();
+
+  lsp::HoverParams params;
+  params.textDocument.uri = lsp::Uri::parse(std::string(kUri));
+  auto parsed = std::async(std::launch::async,
+                           [&] { return world.server().hover(params); });
+  CHECK(parsed.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+  auto linked =
+      std::async(std::launch::async, [&] { return standard.hover(params); });
+  CHECK(linked.wait_for(std::chrono::milliseconds(100)) ==
+        std::future_status::timeout);
+  hold.release.count_down();
+  edit.get();
+  CHECK(parsed.get().has_value());
+  CHECK(linked.get().has_value());
+  world.shared.documentBuilder->removeBuildPhaseListener(hold);
 }
 
 // A URI no language claims answers empty instead of waiting for a build that
@@ -2164,6 +2254,7 @@ void run() {
   a_query_finds_the_declarations_of_the_workspace();
   a_reference_request_does_not_wait_on_a_built_document();
   references_do_not_wait_for_validation();
+  a_host_chooses_the_state_a_request_waits_for();
   a_request_on_an_unknown_document_answers_empty();
   a_command_is_promised_and_answered_only_with_its_handler();
   a_scanned_document_publishes_without_a_tab();
@@ -2181,7 +2272,7 @@ void run() {
   a_notebook_syncs_its_cells_as_documents();
   a_failing_notebook_still_moves_its_cells();
   a_refused_allocation_leaves_the_notebook_index_whole();
-  an_installed_edit_is_always_built();
+  an_update_always_reaches_a_build();
   a_failed_publication_is_retried_by_the_next_build();
   a_failed_removal_is_sent_again();
   a_relinked_document_is_not_cleared_before_its_verdict();

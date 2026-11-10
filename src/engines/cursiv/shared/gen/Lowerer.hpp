@@ -444,16 +444,27 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
   }
 
   // A data rule's conversion over what it reads in place. Over a choice of
-  // tokens, it goes on the record of each token, as a directive over a choice
-  // goes on each alternative: none opens over the choice.
+  // tokens no row stands over, it goes on each token, as a directive over a
+  // choice goes on each alternative.
   void convert_over(Id at, std::uint16_t row) {
-    Node& n = _p.e[at];
-    if (n.kind != Shape::alt || !one_token(at)) {
-      n.made.push_back(row);
-      return;
+    std::vector<Id> tokens;
+    bool spread = _p.e[at].kind == Shape::alt;
+    for (std::vector todo{at}; spread && !todo.empty();) {
+      const Id k = todo.back();
+      todo.pop_back();
+      const Node& n = _p.e[k];
+      if (n.kind == Shape::sym) {
+        spread = is_term(static_cast<std::uint16_t>(n.sym));
+        tokens.push_back(k);
+      } else if (n.kind == Shape::alt && n.made.empty() && n.row.empty()) {
+        for (decltype(n.count) i = n.count; i-- > 0;)
+          todo.push_back(_p.child[n.sym + i]);
+      } else {
+        spread = false;
+      }
     }
-    for (decltype(n.count) k = 0; k < n.count; ++k)
-      convert_over(_p.child[n.sym + k], row);
+    if (!spread) tokens.assign(1, at);
+    for (const Id k : tokens) _p.e[k].made.push_back(row);
   }
 
   Lowered& _o;
@@ -462,15 +473,6 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
 
  private:
   Self& self() { return static_cast<Self&>(*this); }
-  // A token, or a choice of tokens no row stands over.
-  bool one_token(Id at) const {
-    const Node& n = _p.e[at];
-    if (n.kind == Shape::sym) return is_term(static_cast<std::uint16_t>(n.sym));
-    if (n.kind != Shape::alt || !n.made.empty() || !n.row.empty()) return false;
-    for (decltype(n.count) k = 0; k < n.count; ++k)
-      if (!one_token(_p.child[n.sym + k])) return false;
-    return true;
-  }
 };
 
 }  // namespace cursiv::engine

@@ -51,6 +51,15 @@ struct SpellCtx {
     veto = CharSet{};
     vetoed = false;
   }
+  [[nodiscard]] bool forbids(unsigned char b) const {
+    return vetoed && veto.test(b);
+  }
+  // Whether the next byte spelled may be `b`: the refusal ends there.
+  bool admits(char b) {
+    const bool ok = !forbids(static_cast<unsigned char>(b));
+    clear();
+    return ok;
+  }
 };
 
 // Which byte of a set to spell; the two boundaries are named styles since
@@ -59,12 +68,9 @@ struct SpellCtx {
                                      SpellCtx& cx, std::string& out) {
   int lo = -1, hi = -1, nice = -1;
   unsigned count = 0;
-  const bool vetoed = cx.vetoed;
-  const CharSet veto = cx.veto;
-  cx.clear();
   const auto in = [&](unsigned b) {
-    return s.test(static_cast<unsigned char>(b)) &&
-           !(vetoed && veto.test(static_cast<unsigned char>(b)));
+    const auto c = static_cast<unsigned char>(b);
+    return s.test(c) && !cx.forbids(c);
   };
   for (unsigned b = 0; b < 256; ++b) {
     if (!in(b)) continue;
@@ -73,24 +79,22 @@ struct SpellCtx {
     ++count;
     if (nice < 0 && b >= 0x21 && b <= 0x7e) nice = static_cast<int>(b);
   }
-  if (lo < 0) return false;
-  if (st == SpellStyle::low) {
-    out.push_back(static_cast<char>(lo));
-    return true;
-  }
-  if (st == SpellStyle::high) {
-    out.push_back(static_cast<char>(hi));
-    return true;
-  }
-  if (st == SpellStyle::random) {
+  int pick = nice >= 0 ? nice : lo;
+  if (lo < 0 || st == SpellStyle::low) {
+    pick = lo;
+  } else if (st == SpellStyle::high) {
+    pick = hi;
+  } else if (st == SpellStyle::random) {
     unsigned k = cx.src.choose(DecisionKind::byte, count);
     for (unsigned b = 0; b < 256; ++b)
       if (in(b) && k-- == 0) {
-        out.push_back(static_cast<char>(b));
-        return true;
+        pick = static_cast<int>(b);
+        break;
       }
   }
-  out.push_back(static_cast<char>(nice >= 0 ? nice : lo));
+  cx.clear();
+  if (pick < 0) return false;
+  out.push_back(static_cast<char>(pick));
   return true;
 }
 
@@ -104,7 +108,7 @@ struct SpellCtx {
   return n;
 }
 
-// The ASCII characters of a class, when the expression is one.
+// The ASCII characters of a class.
 template <std::uint64_t M, bool N, str S>
 inline constexpr CharSet kClassAscii = [] {
   CharSet s;
@@ -113,11 +117,23 @@ inline constexpr CharSet kClassAscii = [] {
       s.set(static_cast<unsigned char>(b));
   return s;
 }();
-template <class E>
-inline constexpr const CharSet* kAsciiOf = nullptr;
+// The first bytes refusing a class forbids: its ASCII characters, and every
+// byte past ASCII when it may hold a scalar there.
 template <std::uint64_t M, bool N, str S>
-inline constexpr const CharSet* kAsciiOf<CpSet<M, N, S>> =
-    &kClassAscii<M, N, S>;
+inline constexpr CharSet kClassVeto = [] {
+  bool beyond = N || M != 0;
+  cursiv::detail::for_class_ranges(S.view(), [&beyond](char32_t, char32_t hi) {
+    beyond = beyond || hi >= 0x80;
+  });
+  CharSet s = kClassAscii<M, N, S>;
+  for (unsigned b = 0x80; beyond && b < 0x100; ++b)
+    s.set(static_cast<unsigned char>(b));
+  return s;
+}();
+template <class E>
+inline constexpr const CharSet* kVetoOf = nullptr;
+template <std::uint64_t M, bool N, str S>
+inline constexpr const CharSet* kVetoOf<CpSet<M, N, S>> = &kClassVeto<M, N, S>;
 
 template <class C, class E, unsigned D>
 struct SpellOf;
@@ -210,7 +226,7 @@ struct SpellOf<C, Lit<S, CI, Gd>, D> {
     return Reach{f, l, false};
   }
   static bool run(std::string& out, SpellStyle, SpellCtx& cx) {
-    cx.clear();
+    if (!cx.admits(S[0])) return false;
     out += S.view();
     return true;
   }
@@ -234,11 +250,11 @@ struct SpellOf<C, CpSet<M, N, S>, D> {
   }
   static bool run(std::string& out, SpellStyle st, SpellCtx& cx) {
     if (ascii) return spell_byte(kClassAscii<M, N, S>, st, cx, out);
-    cx.clear();
     for (char32_t cp = 0x80; cp <= 0x10FFFF; ++cp)
       if (cursiv::detail::word_class<CpSet<M, N, S>>::has(cp)) {
+        const std::size_t at = out.size();
         append_scalar(out, cp);
-        return true;
+        return cx.admits(out[at]);
       }
     return false;
   }
@@ -342,16 +358,17 @@ struct SpellOf<C, Repeat<Mn, Mx, E>, D> {
   }
 };
 
-// What a refusal names, when it names a byte set: everything else the
-// walk cannot honour, so a spelling the lexer then reads short is a
-// refused document, not a silent one.
+// What a refusal names, when it names a class: everything else the walk
+// cannot honour, so a spelling the lexer then reads short is a refused
+// document, not a silent one.
 template <class E>
 [[nodiscard]] constexpr const CharSet* vetoed_by() {
-  return kAsciiOf<E>;
+  return kVetoOf<E>;
 }
 
-// An assertion spells nothing. One that refuses a byte set forbids it to the
-// next byte; any other refuses the spelling.
+// An assertion spells nothing. One that refuses a class forbids its first
+// bytes to the next byte spelled, whatever spells it; any other refuses the
+// spelling.
 template <class C, class E, unsigned D>
 struct SpellOf<C, Not<E>, D> {
   static constexpr std::size_t min = 0;

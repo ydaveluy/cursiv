@@ -160,12 +160,14 @@ ImageId LexReifier::lit_with(const ImageNode& lit, ImageId guard) {
   return _im.derive(shape, std::span(children, guard != kNoImage ? 1 : 0));
 }
 
-ImageId LexReifier::canon(ImageId id) {
-  if (const auto it = _canon.find(id); it != _canon.end()) return it->second;
+ImageId LexReifier::canon(ImageId id) { return descend(canon_walk(id)); }
+
+Descent<ImageId> LexReifier::canon_walk(ImageId id) {
+  if (const auto it = _canon.find(id); it != _canon.end()) co_return it->second;
   const ImageNode n = at(id);
   std::vector<ImageId> ks;
   for (std::uint32_t i = 0; i < n.count; ++i)
-    ks.push_back(canon(child_at(n, i)));
+    ks.push_back(co_await canon_walk(child_at(n, i)));
   std::uint32_t a = n.a;
   std::string lists;
   if (n.kind == ImageKind::skip) {
@@ -182,18 +184,18 @@ ImageId LexReifier::canon(ImageId id) {
                                    id)
                       .first;
   _canon.emplace(id, at->second);
-  return at->second;
+  co_return at->second;
 }
 
 ImageId LexReifier::resolve(unsigned cfg, ImageId id,
                             std::span<const std::uint32_t> path) {
   _resolving.insert(path.begin(), path.end());
-  const ImageId out = resolve_in(cfg, id);
+  const ImageId out = descend(resolve_in(cfg, id));
   for (const std::uint32_t rule : path) _resolving.erase(rule);
   return out;
 }
 
-ImageId LexReifier::resolve_rule(unsigned cfg, std::uint32_t rule) {
+Descent<ImageId> LexReifier::resolve_rule(unsigned cfg, std::uint32_t rule) {
   const auto call = [&] {
     const auto at = _lowerer._termIdx.find(rule);
     const std::uint32_t term =
@@ -202,64 +204,68 @@ ImageId LexReifier::resolve_rule(unsigned cfg, std::uint32_t rule) {
       refuse_lowering("cursiv: a lexical call names an unreached terminal");
     return make(ImageKind::call, {}, 0, kNoImage, 1u + term);
   };
-  if (_resolving.contains(rule)) return call();
+  if (_resolving.contains(rule)) co_return call();
   const ImageId body = terminal_body(rule, _lowerer.body_in(cfg, rule));
   _resolving.insert(rule);
-  const ImageId resolved = resolve_in(cfg, body);
+  const ImageId resolved = co_await resolve_in(cfg, body);
   _resolving.erase(rule);
-  return has_captures(resolved) ? call() : resolved;
+  if (co_await has_captures(resolved)) co_return call();
+  co_return resolved;
 }
 
-ImageId LexReifier::resolve_in(unsigned cfg, ImageId id) {
+Descent<ImageId> LexReifier::resolve_in(unsigned cfg, ImageId id) {
   switch (const ImageNode n = at(id); n.kind) {
     case ImageKind::ref:
       if (n.a != kNoImage && _lowerer.terminal_rule(n.a))
-        return resolve_rule(cfg, n.a);
-      return id;
+        co_return co_await resolve_rule(cfg, n.a);
+      co_return id;
     case ImageKind::lit: {
-      if ((n.flags & kLitGuardExpr) == 0) return id;
+      if ((n.flags & kLitGuardExpr) == 0) co_return id;
       const ImageId g = child_at(n, 0);
-      const ImageId r = resolve_in(cfg, g);
-      return r == g ? id : lit_with(n, r);
+      const ImageId r = co_await resolve_in(cfg, g);
+      co_return r == g ? id : lit_with(n, r);
     }
     case ImageKind::notOf:
       if (at(child_at(n, 0)).kind == ImageKind::byte)
-        return make(ImageKind::eof);
+        co_return make(ImageKind::eof);
       break;
     case ImageKind::seq:
-      return resolve_seq(cfg, id);
+      co_return co_await resolve_seq(cfg, id);
     case ImageKind::sectionClose: {
       const ImageId end = _lowerer._cfgs[cfg].end;
       if (end == kNoImage)
         refuse_lowering("cursiv: a section's close is read outside any section");
-      return resolve_in(cfg, end);
+      co_return co_await resolve_in(cfg, end);
     }
     default:
       break;
   }
   const auto shape = _im.shape_children(id);
   std::vector<ImageId> ks(shape.begin(), shape.end());
-  for (ImageId& k : ks) k = resolve_in(cfg, k);
-  return rebuilt(id, ks);
+  for (ImageId& k : ks) k = co_await resolve_in(cfg, k);
+  co_return rebuilt(id, ks);
 }
 
-bool LexReifier::consumes(ImageId id) const {
+Descent<bool> LexReifier::consumes(ImageId id) const {
   const ImageNode& n = at(id);
   switch (n.kind) {
     case ImageKind::lit:
     case ImageKind::cpset:
     case ImageKind::byte:
-      return true;
+      co_return true;
     case ImageKind::seq:
-      return std::ranges::any_of(_lowerer.children_of(n),
-                                 [&](ImageId k) { return consumes(k); });
+      for (const ImageId k : _lowerer.children_of(n))
+        if (co_await consumes(k)) co_return true;
+      co_return false;
     case ImageKind::choice:
-      return std::ranges::all_of(_lowerer.children_of(n),
-                                 [&](ImageId k) { return consumes(k); });
+      for (const ImageId k : _lowerer.children_of(n))
+        if (!co_await consumes(k)) co_return false;
+      co_return true;
     case ImageKind::repeat:
-      return n.m > 0 && consumes(child_at(n, 0));
+      if (n.m == 0) co_return false;
+      co_return co_await consumes(child_at(n, 0));
     default:
-      return false;
+      co_return false;
   }
 }
 
@@ -296,33 +302,35 @@ ImageId LexReifier::without_eof(ImageId id) {
   return lit_with(n, guard);
 }
 
-ImageId LexReifier::resolve_seq(unsigned cfg, ImageId id) {
+Descent<ImageId> LexReifier::resolve_seq(unsigned cfg, ImageId id) {
   const ImageNode n = at(id);
   std::vector<ImageId> es;
   for (const ImageId k : _lowerer.children_of(n))
-    es.push_back(resolve_in(cfg, k));
+    es.push_back(co_await resolve_in(cfg, k));
   if (std::ranges::any_of(es, [&](ImageId e) { return eof_lit(e); })) {
-    const auto last = std::find_if(es.rbegin(), es.rend(),
-                                   [&](ImageId e) { return consumes(e); });
-    if (last != es.rend())
-      for (auto i = es.begin(); i != last.base() - 1; ++i)
-        if (at(*i).kind == ImageKind::lit) *i = without_eof(*i);
+    // The literals before the last part that consumes drop their eof refusal.
+    std::size_t last = es.size();
+    for (; last > 0; --last)
+      if (co_await consumes(es[last - 1])) break;
+    for (std::size_t i = 0; i + 1 < last; ++i)
+      if (at(es[i]).kind == ImageKind::lit) es[i] = without_eof(es[i]);
   }
-  return rebuilt(id, es);
+  co_return rebuilt(id, es);
 }
 
-bool LexReifier::has_captures(ImageId id) const {
+Descent<bool> LexReifier::has_captures(ImageId id) const {
   const ImageNode& n = at(id);
   switch (n.kind) {
     case ImageKind::mark:
     case ImageKind::same:
-      return true;
+      co_return true;
     case ImageKind::lit:
-      return (n.flags & kLitGuardExpr) != 0 && has_captures(child_at(n, 0));
+      if ((n.flags & kLitGuardExpr) == 0) co_return false;
+      co_return co_await has_captures(child_at(n, 0));
     default:
       for (const ImageId k : _im.shape_children(id))
-        if (has_captures(k)) return true;
-      return false;
+        if (co_await has_captures(k)) co_return true;
+      co_return false;
   }
 }
 
@@ -349,17 +357,19 @@ LexReifier::EndCloser LexReifier::end_closer(ImageId close) {
 // native search could find inside a character.
 bool LexReifier::nested_literals(ImageId id,
                                  std::vector<std::string_view>& out) const {
-  const ImageNode& n = at(id);
-  if (n.kind == ImageKind::lit) {
-    if (n.flags != 0 ||
-        (static_cast<unsigned char>(n.text[0]) & 0xC0u) == 0x80u)
-      return false;
-    out.push_back(n.text);
-    return true;
+  for (std::vector todo{id}; !todo.empty();) {
+    const ImageNode& n = at(todo.back());
+    todo.pop_back();
+    if (n.kind == ImageKind::lit) {
+      if (n.flags != 0 ||
+          (static_cast<unsigned char>(n.text[0]) & 0xC0u) == 0x80u)
+        return false;
+      out.push_back(n.text);
+      continue;
+    }
+    if (n.kind != ImageKind::choice || n.count < 2) return false;
+    for (std::uint32_t i = n.count; i-- > 0;) todo.push_back(child_at(n, i));
   }
-  if (n.kind != ImageKind::choice || n.count < 2) return false;
-  for (std::uint32_t i = 0; i < n.count; ++i)
-    if (!nested_literals(child_at(n, i), out)) return false;
   return true;
 }
 
@@ -616,25 +626,30 @@ void LexReifier::class_refusals(ImageId id, std::vector<std::uint16_t>& out) {
   if (const ByteSet bytes = cps.bytes(); bytes.any()) one(bytes);
 }
 
-void LexReifier::refusals(const Guard& g, std::vector<std::uint16_t>& out) {
+Descent<void> LexReifier::refusals(const Guard& g,
+                                   std::vector<std::uint16_t>& out) {
   for (const ImageId w : g.refused) {
-    if (at(w).kind == ImageKind::cpset)
+    if (at(w).kind == ImageKind::cpset) {
       class_refusals(w, out);
-    else
-      out.push_back(reify_not_lit(w));
+    } else {
+      const std::uint16_t node = co_await reify_not_lit(w);
+      out.push_back(node);
+    }
   }
 }
 
-std::uint16_t LexReifier::reify_lit(ImageId id, bool tail) {
+Descent<std::uint16_t> LexReifier::reify_lit(ImageId id, bool tail) {
   const ImageNode n = at(id);
   const Guard g = guard_of(n);
   const std::uint16_t guard = lit_guard(n, g, tail);
   const bool guarded = guard != kNoSet;
   const std::uint16_t barred = guarded ? class_guard(guard) : 0;
   std::vector<std::uint16_t> words;
-  if (g.words && !guarded) refusals(g, words);
-  if (g.expression)
-    words.push_back(push(LexNode{LexKind::positive, reify(g.node)}));
+  if (g.words && !guarded) co_await refusals(g, words);
+  if (g.expression) {
+    const std::uint16_t node = co_await reify_walk(g.node, true);
+    words.push_back(push(LexNode{LexKind::positive, node}));
+  }
   std::vector<std::uint16_t> children;
   const auto chars = [&](const ByteSet& set) {
     return push(LexNode{LexKind::chars, intern(set), 0, 0, 0});
@@ -656,21 +671,23 @@ std::uint16_t LexReifier::reify_lit(ImageId id, bool tail) {
       });
   if (guarded) children.push_back(barred);
   children.insert(children.end(), words.begin(), words.end());
-  return group(LexKind::seq, children, 1);
+  co_return group(LexKind::seq, children, 1);
 }
 
-std::uint16_t LexReifier::reify_not_lit(ImageId id) {
+Descent<std::uint16_t> LexReifier::reify_not_lit(ImageId id) {
   const ImageNode n = at(id);
   const Guard g = guard_of(n);
   // A refusal reads one set per byte, which a choice of cases is not.
   if (lit_chooses(n) ||
-      ((g.expression || g.words) && lit_guard(n, g, true) == kNoSet))
-    return push(LexNode{LexKind::negative, reify_lit(id, true)});
+      ((g.expression || g.words) && lit_guard(n, g, true) == kNoSet)) {
+    const std::uint16_t node = co_await reify_lit(id, true);
+    co_return push(LexNode{LexKind::negative, node});
+  }
   std::vector<std::uint16_t> classes;
   lit_units(
       n, [&](const ByteSet& set) { classes.push_back(intern(set)); },
       [](const auto&) {});
-  return refused(id, refusal(lit_guard(n, g, true), classes));
+  co_return refused(id, refusal(lit_guard(n, g, true), classes));
 }
 
 std::uint16_t LexReifier::reify_not_class(ImageId id) {
@@ -687,21 +704,23 @@ std::uint16_t LexReifier::reify_not_class(ImageId id) {
   return nodes.size() == 1 ? nodes.front() : group(LexKind::seq, nodes);
 }
 
-std::uint16_t LexReifier::reify_not_of(ImageId id) {
+Descent<std::uint16_t> LexReifier::reify_not_of(ImageId id) {
   const ImageNode n = at(id);
   switch (n.kind) {
     case ImageKind::lit:
-      return reify_not_lit(id);
+      co_return co_await reify_not_lit(id);
     case ImageKind::cpset:
-      return reify_not_class(id);
+      co_return reify_not_class(id);
     case ImageKind::choice: {
       std::vector<std::uint16_t> arms;
       for (const ImageId k : _lowerer.children_of(n))
-        arms.push_back(reify_not_of(k));
-      return group(LexKind::seq, arms);
+        arms.push_back(co_await reify_not_of(k));
+      co_return group(LexKind::seq, arms);
     }
-    default:
-      return push(LexNode{LexKind::negative, reify(id)});
+    default: {
+      const std::uint16_t node = co_await reify_walk(id, true);
+      co_return push(LexNode{LexKind::negative, node});
+    }
   }
 }
 
@@ -750,16 +769,16 @@ bool LexReifier::mark_run(ImageId id) const {
   return k.kind == ImageKind::lit && k.flags == 0 && one_character(k.text);
 }
 
-std::uint16_t LexReifier::reify_mark(ImageId id, bool tail) {
+Descent<std::uint16_t> LexReifier::reify_mark(ImageId id, bool tail) {
   const ImageNode n = at(id);
   if (!mark_run(child_at(n, 0)))
     refuse_lowering(
         "`mark<>` takes one character class or one-character literal, "
         R"(alone or repeated: `many(lit<"=">)`, `some(w)`, )"
         R"(`repeat<0, 16>(cr<"^() ">)`)");
-  const std::uint16_t childNode = reify(child_at(n, 0), tail);
-  return push(LexNode{LexKind::mark, childNode, 0,
-                      _c.intern_tag(*static_cast<const Tag*>(n.tag)), 0});
+  const std::uint16_t childNode = co_await reify_walk(child_at(n, 0), tail);
+  co_return push(LexNode{LexKind::mark, childNode, 0,
+                         _c.intern_tag(*static_cast<const Tag*>(n.tag)), 0});
 }
 
 std::uint16_t LexReifier::reify_ref(ImageId id) {
@@ -809,10 +828,11 @@ LexReifier::Echo LexReifier::echo_closer(ImageId close) const {
   return e;
 }
 
-std::uint16_t LexReifier::reify_through_lit(ImageId open,
-                                            std::string_view close, bool eof) {
+Descent<std::uint16_t> LexReifier::reify_through_lit(ImageId open,
+                                                     std::string_view close,
+                                                     bool eof) {
   const std::size_t n = close.size();
-  const std::uint16_t openNode = reify(open, false);
+  const std::uint16_t openNode = co_await reify_walk(open, false);
   const std::uint16_t end = eof ? class_guard(intern(kAllBytes)) : kNoLexNode;
 
   std::vector<std::size_t> fail(n + 1, 0);
@@ -835,33 +855,38 @@ std::uint16_t LexReifier::reify_through_lit(ImageId open,
     for (const ByteSet& bs : to) push_child(bs.any() ? intern(bs) : kNoSet);
   }
   if (end != kNoLexNode) push_child(end);
-  return push(LexNode{LexKind::through_lit, openNode, base,
-                      static_cast<std::uint32_t>(n), eof ? 1u : 0u});
+  co_return push(LexNode{LexKind::through_lit, openNode, base,
+                         static_cast<std::uint32_t>(n), eof ? 1u : 0u});
 }
 
-std::uint16_t LexReifier::reify_through(ImageId id, bool tail) {
+Descent<std::uint16_t> LexReifier::echo_side(ImageId side) {
+  if (side == kNoImage) co_return kNoLexNode;
+  co_return co_await reify_walk(side, true);
+}
+
+Descent<std::uint16_t> LexReifier::reify_through(ImageId id, bool tail) {
   const ImageNode n = at(id);
   const ImageId open = child_at(n, 0);
   const ImageId close = child_at(n, 1);
   if (const Echo echo = echo_closer(close); echo.echoes) {
-    const std::uint16_t openNode = reify(open, false);
-    const std::uint16_t before = echo_side(echo.before);
-    const std::uint16_t after = echo_side(echo.after);
-    const std::uint16_t pad = echo_side(echo.pad);
+    const std::uint16_t openNode = co_await reify_walk(open, false);
+    const std::uint16_t before = co_await echo_side(echo.before);
+    const std::uint16_t after = co_await echo_side(echo.after);
+    const std::uint16_t pad = co_await echo_side(echo.pad);
     const std::uint16_t base = _c.nlexChild;
     push_child(before);
     push_child(after);
     if (pad != kNoLexNode) push_child(pad);
-    return push(LexNode{LexKind::through_same, openNode, base,
-                        pad != kNoLexNode ? 3u : 2u,
-                        _c.intern_tag(*static_cast<const Tag*>(echo.tag))});
+    co_return push(LexNode{LexKind::through_same, openNode, base,
+                           pad != kNoLexNode ? 3u : 2u,
+                           _c.intern_tag(*static_cast<const Tag*>(echo.tag))});
   }
   const EndCloser end = end_closer(close);
   if (const ImageNode& closer = at(end.type);
       closer.kind == ImageKind::lit && closer.flags == 0 &&
       !closer.text.empty() &&
       (static_cast<unsigned char>(closer.text[0]) & 0xC0) != 0x80)
-    return reify_through_lit(open, closer.text, end.eof);
+    co_return co_await reify_through_lit(open, closer.text, end.eof);
   const ImageId notClose = make_not(close);
   const ImageId anyChar =
       make(ImageKind::cpset, {}, static_cast<std::uint8_t>(kCpNot));
@@ -870,64 +895,71 @@ std::uint16_t LexReifier::reify_through(ImageId id, bool tail) {
   const ImageId rep = make(ImageKind::repeat, std::span(&itemSeq, 1), 0,
                            kNoImage, 0, kUnbounded);
   const ImageId parts[] = {open, rep, close};
-  return reify(make(ImageKind::seq, parts), tail);
+  co_return co_await reify_walk(make(ImageKind::seq, parts), tail);
 }
 
-std::uint16_t LexReifier::reify_nested(ImageId id) {
+Descent<std::uint16_t> LexReifier::reify_nested(ImageId id) {
   const ImageNode n = at(id);
   const EndCloser end = end_closer(child_at(n, 1));
-  const std::uint16_t open = reify(child_at(n, 0), false);
-  const std::uint16_t close = reify(end.type, false);
+  const std::uint16_t open = co_await reify_walk(child_at(n, 0), false);
+  const std::uint16_t close = co_await reify_walk(end.type, false);
   const std::uint16_t base = _c.nlexChild;
   push_child(open);
   push_child(close);
-  return push(LexNode{LexKind::through_nested, open, base, 2,
-                      end.eof ? 1u : 0u});
+  co_return push(
+      LexNode{LexKind::through_nested, open, base, 2, end.eof ? 1u : 0u});
 }
 
 std::uint16_t LexReifier::reify(ImageId id, bool tail) {
+  return descend(reify_walk(id, tail));
+}
+
+Descent<std::uint16_t> LexReifier::reify_walk(ImageId id, bool tail) {
   const ImageNode n = at(id);
   switch (n.kind) {
     case ImageKind::call:
-      return push(LexNode{LexKind::call, kNoLexNode,
-                          static_cast<std::uint16_t>(n.m)});
+      co_return push(
+          LexNode{LexKind::call, kNoLexNode, static_cast<std::uint16_t>(n.m)});
     case ImageKind::ref:
-      return reify_ref(id);
+      co_return reify_ref(id);
     case ImageKind::lit:
-      return reify_lit(id, tail);
+      co_return co_await reify_lit(id, tail);
     case ImageKind::notOf:
-      return reify_not_of(child_at(n, 0));
-    case ImageKind::andOf:
-      return push(LexNode{LexKind::positive, reify(child_at(n, 0))});
+      co_return co_await reify_not_of(child_at(n, 0));
+    case ImageKind::andOf: {
+      const std::uint16_t node = co_await reify_walk(child_at(n, 0), true);
+      co_return push(LexNode{LexKind::positive, node});
+    }
     case ImageKind::eof:
-      return reify_eof();
+      co_return reify_eof();
     case ImageKind::indent:
-      return push(LexNode{LexKind::indent, 0, 0, 0, 0});
+      co_return push(LexNode{LexKind::indent, 0, 0, 0, 0});
     case ImageKind::dedent:
-      return push(LexNode{LexKind::dedent, 0, 0, 0, 0});
+      co_return push(LexNode{LexKind::dedent, 0, 0, 0, 0});
     case ImageKind::byte:
-      return push(LexNode{LexKind::chars, intern(kAllBytes), 0, 0, 0});
+      co_return push(LexNode{LexKind::chars, intern(kAllBytes), 0, 0, 0});
     case ImageKind::cpset:
-      return reify_class(id);
+      co_return reify_class(id);
     case ImageKind::seq:
     case ImageKind::choice: {
       const bool choice = n.kind == ImageKind::choice;
       const auto children = _lowerer.children_of(n);
       std::vector<std::uint16_t> arms;
       for (std::size_t i = 0; i < children.size(); ++i)
-        arms.push_back(
-            reify(children[i], tail && (choice || i + 1 == children.size())));
-      return group(choice ? LexKind::alt : LexKind::seq, arms);
+        arms.push_back(co_await reify_walk(
+            children[i], tail && (choice || i + 1 == children.size())));
+      co_return group(choice ? LexKind::alt : LexKind::seq, arms);
     }
     case ImageKind::mark:
-      return reify_mark(id, tail);
+      co_return co_await reify_mark(id, tail);
     case ImageKind::same:
-      return push(LexNode{LexKind::same, 0, 0,
-                          _c.intern_tag(*static_cast<const Tag*>(n.tag)), 0});
+      co_return push(LexNode{LexKind::same, 0, 0,
+                             _c.intern_tag(*static_cast<const Tag*>(n.tag)),
+                             0});
     case ImageKind::through:
-      return reify_through(id, tail);
+      co_return co_await reify_through(id, tail);
     case ImageKind::throughNested:
-      return reify_nested(id);
+      co_return co_await reify_nested(id);
     case ImageKind::commit:
       refuse_lowering(
           "a commit is allowed in a rule, not in a terminal or a gap condition "
@@ -935,8 +967,9 @@ std::uint16_t LexReifier::reify(ImageId id, bool tail) {
     case ImageKind::repeat: {
       if (n.m >= kEndless || (n.n != kUnbounded && n.n >= kEndless))
         throw LowerRefused(LowerFail::tokenGraphTooLarge);
-      const std::uint16_t childNode = reify(child_at(n, 0), false);
-      return push(LexNode{
+      const std::uint16_t childNode =
+          co_await reify_walk(child_at(n, 0), false);
+      co_return push(LexNode{
           LexKind::rep, childNode, kNoLexNode, static_cast<std::uint32_t>(n.m),
           n.n == kUnbounded ? kEndless : static_cast<std::uint32_t>(n.n)});
     }

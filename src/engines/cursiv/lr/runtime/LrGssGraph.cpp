@@ -1038,9 +1038,10 @@ std::uint32_t LrGssGraph::tokens(Id forest) {
 }
 
 std::vector<Id> LrGssGraph::derivation(std::span<const Id> forests) {
-  const Id root = _forest.node();
-  _forest.add(root, forests, none, {});
-  return _forest.steps(root);
+  std::vector<Id> out;
+  for (const Id f : forests)
+    _forest.each_step(f, [&](Id s) { out.push_back(s); });
+  return out;
 }
 
 }  // namespace cursiv::engine

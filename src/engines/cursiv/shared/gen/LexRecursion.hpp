@@ -2,16 +2,19 @@
 // zero-progress graph must be acyclic, independently of ordinary recursion.
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <utility>
 #include <vector>
 
 #include "cursiv/shared/gen/LexRightLinear.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
-#include "cursiv/utils/StrongComponents.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/utils/StrongComponents.hpp"
 
 namespace cursiv::engine {
 
@@ -51,6 +54,32 @@ void lex_children(const Cfg& g, std::uint16_t at, Visit&& visit,
       break;
     default:
       break;
+  }
+}
+
+// Walks from `root` depth first, each node once: `enter(at, push)` answers
+// false for a node already seen, else pushes its children in reading order;
+// `leave(at)` runs once they are done.
+template <class Enter, class Leave>
+void lex_post_order(std::uint16_t root, Enter&& enter, Leave&& leave) {
+  std::vector<std::pair<std::uint16_t, bool>> todo{{root, false}};
+  const auto push = [&todo](std::uint16_t child) {
+    todo.emplace_back(child, false);
+  };
+  while (!todo.empty()) {
+    const auto [at, done] = todo.back();
+    todo.pop_back();
+    if (done) {
+      leave(at);
+      continue;
+    }
+    todo.emplace_back(at, true);
+    const std::size_t from = todo.size();
+    if (!enter(at, push)) {
+      todo.pop_back();
+      continue;
+    }
+    std::reverse(todo.begin() + static_cast<std::ptrdiff_t>(from), todo.end());
   }
 }
 
@@ -205,48 +234,56 @@ void validate_lex_recursion(Cfg& g) {
   LexRightLinear<Cfg>{g}.run();
 }
 
+// The bytes `node` may open on, and whether it may read nothing.
 template <class Cfg>
-std::pair<ByteSet, bool> lex_first_bytes(const Cfg& g, std::uint16_t node) {
+Descent<std::pair<ByteSet, bool>> lex_first_bytes_walk(const Cfg& g,
+                                                       std::uint16_t node) {
   const LexNode& e = g.lex[node];
   switch (e.kind) {
     case LexKind::chars:
-      return {g.sets[e.a] | lex_decode_bytes(g, e.a), false};
+      co_return std::pair{g.sets[e.a] | lex_decode_bytes(g, e.a), false};
     case LexKind::call:
-      return lex_first_bytes(g, lex_callee(g, e));
+      co_return co_await lex_first_bytes_walk(g, lex_callee(g, e));
     case LexKind::mark:
-      return lex_first_bytes(g, e.a);
+      co_return co_await lex_first_bytes_walk(g, e.a);
     case LexKind::seq:
     case LexKind::alt: {
       const bool sequence = e.kind == LexKind::seq;
       ByteSet bytes;
       bool empty = sequence;
       for (unsigned i = 0; i < e.b; ++i) {
-        const auto [part, nullable] = lex_first_bytes(g, g.lexChild[e.a + i]);
+        const auto [part, nullable] =
+            co_await lex_first_bytes_walk(g, g.lexChild[e.a + i]);
         bytes |= part;
-        if (sequence && !nullable) return {bytes, false};
+        if (sequence && !nullable) co_return std::pair{bytes, false};
         empty = empty || nullable;
       }
-      return {bytes, empty};
+      co_return std::pair{bytes, empty};
     }
     case LexKind::rep: {
-      if (e.max == 0) return {{}, true};
-      const auto [bytes, empty] = lex_first_bytes(g, e.a);
-      return {bytes, empty || e.min == 0};
+      if (e.max == 0) co_return std::pair{ByteSet{}, true};
+      const auto [bytes, empty] = co_await lex_first_bytes_walk(g, e.a);
+      co_return std::pair{bytes, empty || e.min == 0};
     }
     case LexKind::through_lit:
     case LexKind::through_same:
     case LexKind::through_nested: {
-      const auto [bytes, empty] = lex_first_bytes(g, e.a);
-      if (!empty) return {bytes, false};
+      const auto [bytes, empty] = co_await lex_first_bytes_walk(g, e.a);
+      if (!empty) co_return std::pair{bytes, false};
       const bool nullable = e.kind == LexKind::through_nested ||
                             (e.kind == LexKind::through_lit && e.max != 0);
-      return {kAllBytes, nullable};
+      co_return std::pair{kAllBytes, nullable};
     }
     case LexKind::same:
-      return {kAllBytes, true};
+      co_return std::pair{kAllBytes, true};
     default:
-      return {{}, true};
+      co_return std::pair{ByteSet{}, true};
   }
+}
+
+template <class Cfg>
+std::pair<ByteSet, bool> lex_first_bytes(const Cfg& g, std::uint16_t node) {
+  return descend(lex_first_bytes_walk(g, node));
 }
 
 }  // namespace cursiv::engine

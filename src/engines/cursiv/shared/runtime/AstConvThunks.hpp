@@ -118,9 +118,8 @@ bool each_part_below(AstBuildCtx& ctx, NodeId id, Visit&& visit) {
     for (const NodeId c : cst.reverse_children(at)) pending.push_back(c);
   };
   open(id);
-  for (std::uint32_t turns = 1; !pending.empty(); ++turns) {
-    if (turns % CancellationPoll::kTurns == 0) [[unlikely]]
-      ctx.stop.check();
+  while (!pending.empty()) {
+    ctx.stop.poll();
     const auto child = pending.back();
     pending.pop_back();
     const CstNode& n = cst[child];
@@ -214,23 +213,10 @@ int call_part(AstBuildCtx& ctx, NodeId child, ElementId row, PartRun& out) {
   return 0;
 }
 
-// Raw data-rule groups need no intermediate strings when their text is being
-// joined. Converted calls remain atomic and keep their own conversion order.
-// The parts are those below `id`, not `id` itself.
-template <bool Text>
-bool flat_text_parts(AstBuildCtx& ctx, NodeId id, PartRun& out) {
-  return each_part_below(ctx, id, [&](NodeId child, bool leaf, ElementId row) {
-    if (const int step = call_part<Text>(ctx, child, row, out); step <= 0)
-      return step;
-    if (!leaf) return 1;
-    out.push_back(ctx.cst->text(child));
-    return 0;
-  });
-}
-
-// A parts converter sees each data-rule call as one part. Repaired wrapper
-// records are transparent; other raw subtrees are flattened and joined once.
-template <bool Text>
+// The parts below `id`, not `id` itself: each data-rule call is one part,
+// converted atomically, and a repaired wrapper record is transparent. Where
+// `Flat` a raw subtree is read through, else it is flattened and joined once.
+template <bool Text, bool Flat>
 bool each_child_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
   return each_part_below(ctx, id, [&](NodeId child, bool leaf, ElementId row) {
     if (const int step = call_part<Text>(ctx, child, row, out); step <= 0)
@@ -239,10 +225,14 @@ bool each_child_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
       out.push_back(ctx.cst->text(child));
       return 0;
     }
-    PartRun inner;
-    if (!flat_text_parts<Text>(ctx, child, inner)) return -1;
-    out.push_back(join_parts(ctx, inner));
-    return 0;
+    if constexpr (Flat) {
+      return 1;
+    } else {
+      PartRun inner;
+      if (!each_child_part<Text, true>(ctx, child, inner)) return -1;
+      out.push_back(join_parts(ctx, inner));
+      return 0;
+    }
   });
 }
 
@@ -262,12 +252,7 @@ bool each_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
         out.push_back(*part);
         return true;
       }
-  if (n.subtreeSize != 1) {
-    if constexpr (Flat)
-      return flat_text_parts<Text>(ctx, id, out);
-    else
-      return each_child_part<Text>(ctx, id, out);
-  }
+  if (n.subtreeSize != 1) return each_child_part<Text, Flat>(ctx, id, out);
   // A call that read nothing has no part; one that read a token, repaired or
   // not, has that token.
   if ((n.begin != n.end || !ctx.actions->is_call(row)) && part_leaf(ctx, n))

@@ -37,6 +37,41 @@ namespace cursiv {
 
 struct LspServices;
 
+// The state each standard request waits for, in the order of the services
+// reference. A host installs its server with other states.
+struct RequestStates {
+  ServiceRequirement completion = DocumentState::Linked;
+  ServiceRequirement hover = DocumentState::Linked;
+  ServiceRequirement definition = DocumentState::Linked;
+  ServiceRequirement references = WorkspaceState::IndexedReferences;
+  ServiceRequirement documentHighlight = WorkspaceState::IndexedReferences;
+  // Rename and its preparation.
+  ServiceRequirement rename = WorkspaceState::IndexedReferences;
+  ServiceRequirement documentSymbol = DocumentState::Parsed;
+  ServiceRequirement foldingRange = DocumentState::Parsed;
+  ServiceRequirement selectionRange = DocumentState::Parsed;
+  // Full, range and delta.
+  ServiceRequirement semanticTokens = DocumentState::Linked;
+  // Fixes are offered for what validation found.
+  ServiceRequirement codeAction = DocumentState::Validated;
+  // Whole document, range and on type.
+  ServiceRequirement formatting = DocumentState::Parsed;
+  ServiceRequirement declaration = DocumentState::Linked;
+  ServiceRequirement typeDefinition = DocumentState::Linked;
+  // What implements what is read off the inverse index.
+  ServiceRequirement implementation = WorkspaceState::IndexedReferences;
+  // Each hierarchy's preparation and its two expansions.
+  ServiceRequirement callHierarchy = WorkspaceState::IndexedReferences;
+  ServiceRequirement typeHierarchy = WorkspaceState::IndexedReferences;
+  ServiceRequirement signatureHelp = DocumentState::IndexedReferences;
+  ServiceRequirement inlayHint = DocumentState::IndexedReferences;
+  ServiceRequirement documentLink = DocumentState::Parsed;
+  // A lens counts what the workspace points at, such as callers.
+  ServiceRequirement codeLens = DocumentState::IndexedReferences;
+  // Search and resolve, awaited on the whole workspace.
+  DocumentState workspaceSymbol = DocumentState::IndexedContent;
+};
+
 // Publishes diagnostics at each build phase: `Validated` publishes every
 // document validated since the last time, clean or not, and `Linked` clears
 // the documents removed since. A cancelled build loses nothing.
@@ -45,8 +80,9 @@ class DefaultLanguageServer : public LanguageServer,
                               private DocumentPhaseListener,
                               private ConfigurationSectionListener {
  public:
-  explicit DefaultLanguageServer(SharedLspServices& shared) noexcept
-      : _shared(shared) {}
+  explicit DefaultLanguageServer(SharedLspServices& shared,
+                                 RequestStates states = {}) noexcept
+      : _shared(shared), _states(states) {}
   ~DefaultLanguageServer() noexcept override;
 
   [[nodiscard]] lsp::InitializeResult initialize(
@@ -245,8 +281,8 @@ class DefaultLanguageServer : public LanguageServer,
   bool readAtWorkspaceState(DocumentState, const CancellationToken&,
                             cursiv::function_ref<void()> read) const;
 
-  // `mutate` runs in a write and lists at most `most` moved texts; a build of
-  // them follows, even when `mutate` fails.
+  // `mutate` runs in a write and lists what moved, `most` records for texts it
+  // installs; a build of them follows, even when `mutate` fails.
   void writeAndPublish(std::size_t most,
                        cursiv::function_ref<void(TextChanges&)> mutate);
   // The notebook receives a notification, then its cells move through
@@ -283,6 +319,7 @@ class DefaultLanguageServer : public LanguageServer,
                                  const Document& document);
 
   SharedLspServices& _shared;
+  RequestStates _states;
   // The documents the client was shown a verdict for, until they are gone.
   std::unordered_set<DocumentId> _announced;
   // The documents validated since the last `Validated` phase, written by the

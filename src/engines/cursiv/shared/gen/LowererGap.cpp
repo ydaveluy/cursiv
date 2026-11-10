@@ -24,35 +24,45 @@ constexpr std::string_view kUnreadable =
 
 bool gap_readable(const LowerPools& c, std::uint16_t n,
                   bool recognition = false) {
-  const LexNode& e = c.lex[n];
-  switch (e.kind) {
-    case LexKind::token:
-      return recognition && c.terms[e.a].synthetic == 0;
-    case LexKind::positive:
-    case LexKind::negative:
-      return recognition && gap_readable(c, e.a, true);
-    case LexKind::gap_has:
-    case LexKind::gap_is:
-      return recognition && gap_readable(c, e.a);
-    case LexKind::end_mark:
-      return recognition;
-    case LexKind::rep:
-      return gap_readable(c, e.a, recognition) &&
-             (e.b == kNoLexNode || gap_readable(c, e.b, recognition));
-    case LexKind::chars:
-    case LexKind::nguard:
-      return true;
-    case LexKind::skip:
-      if (!recognition) return false;
-      [[fallthrough]];
-    case LexKind::seq:
-    case LexKind::alt:
-      for (unsigned i = 0; i < e.b; ++i)
-        if (!gap_readable(c, c.lexChild[e.a + i], recognition)) return false;
-      return true;
-    default:
-      return false;
+  for (std::vector todo{std::pair{n, recognition}}; !todo.empty();) {
+    const auto [at, recognizes] = todo.back();
+    todo.pop_back();
+    const LexNode& e = c.lex[at];
+    switch (e.kind) {
+      case LexKind::token:
+        if (!recognizes || c.terms[e.a].synthetic != 0) return false;
+        break;
+      case LexKind::positive:
+      case LexKind::negative:
+      case LexKind::gap_has:
+      case LexKind::gap_is:
+        if (!recognizes) return false;
+        todo.emplace_back(
+            e.a, e.kind == LexKind::positive || e.kind == LexKind::negative);
+        break;
+      case LexKind::end_mark:
+        if (!recognizes) return false;
+        break;
+      case LexKind::rep:
+        if (e.b != kNoLexNode) todo.emplace_back(e.b, recognizes);
+        todo.emplace_back(e.a, recognizes);
+        break;
+      case LexKind::chars:
+      case LexKind::nguard:
+        break;
+      case LexKind::skip:
+        if (!recognizes) return false;
+        [[fallthrough]];
+      case LexKind::seq:
+      case LexKind::alt:
+        for (unsigned i = 0; i < e.b; ++i)
+          todo.emplace_back(c.lexChild[e.a + i], recognizes);
+        break;
+      default:
+        return false;
+    }
   }
+  return true;
 }
 
 }  // namespace
@@ -509,10 +519,11 @@ std::uint16_t Lowerer::gap_cond(unsigned cfg, ImageId e) {
 }
 
 void Lowerer::check_implied_token(unsigned cfg, ImageId e) {
+  for (ImageNode n = at(e); n.kind == ImageKind::doc ||
+                            (n.kind == ImageKind::ref && terminal_rule(n.a));
+       n = at(e))
+    e = n.kind == ImageKind::doc ? child_at(n, 0) : body_in(cfg, n.a);
   const ImageNode n = at(e);
-  if (n.kind == ImageKind::doc) return check_implied_token(cfg, child_at(n, 0));
-  if (n.kind == ImageKind::ref && terminal_rule(n.a))
-    return check_implied_token(cfg, body_in(cfg, n.a));
   if (n.kind != ImageKind::lit || (n.flags & (kLitGuardWord | kLitGuardExpr)))
     refuse_lowering(
         "in `implied(tok, cond)`, `tok` must be a literal with no guard, or "

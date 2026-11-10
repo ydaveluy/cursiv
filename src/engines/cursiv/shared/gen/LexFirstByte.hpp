@@ -102,17 +102,13 @@ LexSkipRuns lex_skip_runs(const Dfa& d) {
       if (fresh) known->second = lex_reads_only_dropped(d, s1);
       inRun[c] = known->second ? 1 : 0;
     }
-    for (bool again = true; again;) {
-      again = false;
-      for (unsigned c = 0; c < classes; ++c) {
-        if (inRun[c] == 0) continue;
-        for (unsigned e = 0; e < classes; ++e) {
-          // The byte whose state reads on otherwise is the one that goes.
-          if (inRun[e] != 0 && apart(c, e)) {
-            inRun[c] = 0;
-            again = true;
-            break;
-          }
+    for (unsigned c = 0; c < classes; ++c) {
+      if (inRun[c] == 0) continue;
+      for (unsigned e = 0; e < classes; ++e) {
+        // The byte whose state reads on otherwise is the one that goes.
+        if (inRun[e] != 0 && apart(c, e)) {
+          inRun[c] = 0;
+          break;
         }
       }
     }

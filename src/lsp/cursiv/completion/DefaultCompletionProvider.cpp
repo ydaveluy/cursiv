@@ -164,7 +164,7 @@ void DefaultCompletionProvider::buildContexts(
   const auto ask = [&](TextOffset begin, TextOffset end, TextOffset nodeOffset,
                        std::string_view identifier) {
     std::vector<NextFeature> features;
-    findFeaturesAt(document, begin, end, features);
+    findFeaturesAt(document, begin, end, features, cancelToken);
     const TextOffset from = std::max(begin, lineStart);
     const CompletionContext context(
         document, features, begin, end, nodeOffset, offset, position,
@@ -212,9 +212,10 @@ void DefaultCompletionProvider::buildContexts(
 
 void DefaultCompletionProvider::findFeaturesAt(
     const Document& document, TextOffset offset, TextOffset end,
-    std::vector<NextFeature>& features) const {
+    std::vector<NextFeature>& features,
+    const CancellationToken& cancelToken) const {
   services.parser->nextFeaturesAt(document.parseResult.cst(), offset, end,
-                                  features);
+                                  features, cancelToken);
 }
 
 bool DefaultCompletionProvider::performCurrentTokenCompletion(

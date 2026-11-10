@@ -547,29 +547,21 @@ consteval TextFn text_entry() {
   return nullptr;
 }
 
-// The appended rows count too: a directive spread over a choice keeps no row
-// of its own.
-template <class C, class L, class X>
+// One row per position; an element past them has none.
+template <class C, class L>
 struct act_rows;
-template <class C, class... Es, class... Xs>
-struct act_rows<C, TypeList<Es...>, TypeList<Xs...>> {
-  static constexpr std::size_t kN = sizeof...(Es) + 2 + sizeof...(Xs);
-  static constexpr std::array<MakeFn, kN> kMake = {
-      make_entry<C, Es>()..., nullptr, nullptr, make_entry<C, Xs>()...};
-  static constexpr std::array<NodeFn, kN> kNode = {
-      node_entry<Es>()..., nullptr, nullptr, node_entry<Xs>()...};
-  static constexpr std::array<TextFn, kN> kText = {
-      text_entry<C, Es>()..., nullptr, nullptr, text_entry<C, Xs>()...};
+template <class C, class... Es>
+struct act_rows<C, TypeList<Es...>> {
+  static constexpr std::size_t kN = sizeof...(Es);
+  static constexpr std::array<MakeFn, kN> kMake = {make_entry<C, Es>()...};
+  static constexpr std::array<NodeFn, kN> kNode = {node_entry<Es>()...};
+  static constexpr std::array<TextFn, kN> kText = {text_entry<C, Es>()...};
   static constexpr std::array<ElementId, kN> kPrimary = {
-      primary_entry<C, Es>()..., kNoElement, kNoElement,
-      primary_entry<C, Xs>()...};
+      primary_entry<C, Es>()...};
   static constexpr std::array<std::span<const InfixOp>, kN> kOps = {
-      ops_entry<C, Es>()..., std::span<const InfixOp>{},
-      std::span<const InfixOp>{}, ops_entry<C, Xs>()...};
-  static constexpr std::array<FoldFn, kN> kFold = {
-      fold_entry<C, Es>()..., nullptr, nullptr, fold_entry<C, Xs>()...};
-  static constexpr std::array<DenoteFn, kN> kDenote = {
-      denote_entry<Es>()..., nullptr, nullptr, denote_entry<Xs>()...};
+      ops_entry<C, Es>()...};
+  static constexpr std::array<FoldFn, kN> kFold = {fold_entry<C, Es>()...};
+  static constexpr std::array<DenoteFn, kN> kDenote = {denote_entry<Es>()...};
 };
 
 // The members a grammar writes, read off the engine's rows.
@@ -588,11 +580,6 @@ template <class... Rs>
 struct written_fields<TypeList<Rs...>>
     : cursiv::detail::dedupe<
           cursiv::detail::tl_cat_t<typename written_field<Rs>::type...>> {};
-
-// Always empty: distributing a directive over a choice is the lowering's
-// job, not the declared model's, and the walk below reaches the payload on
-// its own.
-using spread_rows = TypeList<>;
 
 using ValueYield = cursiv::function_ref<void(std::string_view, std::uint32_t,
                                              ValueKind, std::string_view)>;
@@ -650,8 +637,7 @@ struct value_walk<TypeList<Fs...>> {
 template <class C>
 struct CursivActions final : GrammarActions {
   using Rows =
-      detail::act_rows<C, typename detail::model::positions_for<C>::type,
-                       detail::spread_rows>;
+      detail::act_rows<C, typename detail::model::positions_for<C>::type>;
   using Fields = typename detail::written_fields<
       typename engine::GrammarBindings<C>::rows>::type;
 

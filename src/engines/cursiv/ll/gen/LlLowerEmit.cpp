@@ -335,8 +335,7 @@ void move_chains_down(LlLowered& o, const LlRecordPlan& plan) {
     if (plan.opens_chain(child.row) ||
         (child.kind == LlShape::call && plan.rule_opens(child.sym)))
       continue;
-    if (child.kind == LlShape::term && n.row < o.nestChains.size() &&
-        o.nestChains[n.row] != 0)
+    if (child.kind == LlShape::term && o.writes.chainBuild[n.row].nest)
       continue;
     child.row = o.writes.concat(n.row, child.row);
     n.row = kNoRow;
@@ -352,15 +351,16 @@ void add_own_records(LlLowered& o, const LlRecordPlan& plan) {
         n.kind == LlShape::implied)
       continue;
     n.owns = n.kind != LlShape::call || !plan.rule_hands(n.sym) ||
-             (n.row < o.nestChains.size() && o.nestChains[n.row] != 0);
+             o.writes.chainBuild[n.row].nest;
   }
 }
 
-void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
-                         const Acts& made, const Acts& row, std::uint8_t prec,
-                         Association group, std::uint8_t cfg,
-                         std::vector<std::uint16_t> before,
-                         std::vector<std::uint16_t> after) {
+Descent<void> emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
+                                  const Acts& made, const Acts& row,
+                                  std::uint8_t prec, Association group,
+                                  std::uint8_t cfg,
+                                  std::vector<std::uint16_t> before,
+                                  std::vector<std::uint16_t> after) {
   const Node& n = p.e[at];
   if (n.kind == Shape::sym && is_term(n.sym)) {
     const auto token = put_node(o,
@@ -393,15 +393,16 @@ void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
     }
     o.cfg.climbOps[o.cfg.nclimbOps++] =
         LlClimbOp{.body = body, .prec = prec, .assoc = group};
-    return;
+    co_return;
   }
   if (n.kind == Shape::alt) {
     for (unsigned i = 0; i < n.count; ++i) {
       const auto k = p.child[n.sym + i];
-      emit_operator_nodes(o, p, k, cat(p.e[k].made, made), cat(p.e[k].row, row),
-                          prec, group, cfg, before, after);
+      co_await emit_operator_nodes(o, p, k, cat(p.e[k].made, made),
+                                   cat(p.e[k].row, row), prec, group, cfg,
+                                   before, after);
     }
-    return;
+    co_return;
   }
   if (n.kind == Shape::seq) {
     std::uint16_t token = kNoRow;
@@ -413,10 +414,10 @@ void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
         token = k;
     }
     if (token != kNoRow) {
-      emit_operator_nodes(o, p, token, cat(p.e[token].made, made),
-                          cat(p.e[token].row, row), prec, group, cfg,
-                          std::move(before), std::move(after));
-      return;
+      co_await emit_operator_nodes(o, p, token, cat(p.e[token].made, made),
+                                   cat(p.e[token].row, row), prec, group, cfg,
+                                   std::move(before), std::move(after));
+      co_return;
     }
   }
   // Losing an operator silently changes the language and precedence.

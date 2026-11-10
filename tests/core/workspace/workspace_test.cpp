@@ -4779,6 +4779,10 @@ void ranged_changes_keep_the_lines_right() {
   update_answers_like_a_fresh_document("ab\ncd\n", {at(0, 2, 1, 0, "")});
   update_answers_like_a_fresh_document("ab\ncd\n", {at(1, 2, 2, 0, "")});
   update_answers_like_a_fresh_document("ab\ncd\n", {at(2, 0, 2, 0, "e\r")});
+  // Same length, with a line added or removed: the later lines stay.
+  update_answers_like_a_fresh_document("ab\ncd\nef\n", {at(0, 1, 0, 2, "\n")});
+  update_answers_like_a_fresh_document("ab\ncd\nef\n", {at(0, 2, 1, 0, "x")});
+  update_answers_like_a_fresh_document("ab\ncd\nef\n", {at(1, 0, 1, 1, "z")});
   // Valid and ill-formed UTF-8 on the lines a change touches.
   update_answers_like_a_fresh_document(
       "\xc3\xa9t\xc3\xa9\nabc\xff\n\xf0\x9f\x98\x80",

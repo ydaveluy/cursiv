@@ -60,6 +60,20 @@ test('an error response fails its request', async () => {
   assert.equal(await session.end(), 'code 0');
 });
 
+test('a request goes under its fresh id, whatever id its message holds', async () => {
+  const session = server(String.raw`
+    function onMessage(m) {
+      if (m.method === 'exit') process.exit(0);
+      write({ id: m.id, result: m.id });
+    }`);
+  try {
+    assert.equal((await session.request({ id: 42, method: 'ask' }, 'ask', { timeoutMs: 2000 })).result, 1);
+  } finally {
+    session.send({ method: 'exit' });
+  }
+  assert.equal(await session.end(), 'code 0');
+});
+
 test('a request the server sends under the same id answers nothing', async () => {
   const session = server(String.raw`
     function onMessage(m) {

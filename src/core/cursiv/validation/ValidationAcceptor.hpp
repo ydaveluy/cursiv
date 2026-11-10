@@ -340,7 +340,8 @@ class ValidationAcceptor {
   }
 
   // The immediate arms, which every builder emits through: the one place the
-  // source is set. What they throw goes to the caller and is kept.
+  // source is set. Their errors go to the caller; one from the sink also marks
+  // the diagnostic lost.
   void accept(const AstNode& node, DiagnosticSeverity severity,
               std::string_view message, std::string_view code = {}) const;
   void accept(TextRange span, DiagnosticSeverity severity,

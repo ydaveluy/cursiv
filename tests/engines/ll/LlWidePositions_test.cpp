@@ -103,8 +103,8 @@ std::vector<std::string> offered(const cursiv::engine::StampedGrammar& grammar,
       tree.text().data(), tree.text().size());
   std::vector<cursiv::NextFeature> next;
   const auto where = static_cast<cursiv::TextOffset>(at);
-  cursiv::engine::ll_next_features_at<kTable>(grammar, tree, where, where,
-                                              next);
+  cursiv::engine::ll_next_features_at<kTable>(grammar, tree, where, where, next,
+                                              cursiv::kNoCancel);
   std::vector<std::string> spellings;
   for (const cursiv::NextFeature& f : next) {
     const auto spelled = grammar.terminalSpellings(f.feature);

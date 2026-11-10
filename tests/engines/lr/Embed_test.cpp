@@ -279,6 +279,16 @@ void a_section_keeps_its_own_word_class(const Parser& p) {
   CHECK(ast(first_block(r, true)) == "(get-x=0;)");
 }
 
+// A word that misspells a section's keyword stays apart from a number typed
+// behind it, as the section reads it: another grammar's name does not join
+// the two.
+void a_misspelt_keyword_takes_a_number_behind_it(const Parser& p) {
+  const ParseResult r = p.parse("hexes <hx1>\n");
+  CHECK(r.accepted && !r.diagnostics.empty() &&
+        ast(first_block(r, true)) == "(=1;)");
+  CHECK(checks::offers_named(p, "hexes <hx1>\n", 9, 9, "Hexed::NUMBER"));
+}
+
 void each(const char* name, const Parser& p, std::string_view dump) {
   std::printf("%s\n", name);
   a_section_reads_its_own_trivia(p);
@@ -293,7 +303,7 @@ void each(const char* name, const Parser& p, std::string_view dump) {
   a_fault_is_read_with_the_sections_terminals(p);
   the_dump_qualifies_the_section(dump);
   a_section_keeps_its_own_word_class(p);
-
+  a_misspelt_keyword_takes_a_number_behind_it(p);
 }
 
 // The end of a section is the end of its grammar's text: a `;` implied there
@@ -319,6 +329,8 @@ int main() {
   each("LR", *lr, tembed::generated::DocLr::kGrammarText);
   each("LL", *ll, tembed::generated::DocLl::kGrammarText);
   the_end_of_a_section_is_the_end_of_the_text(*lr);
+  // At the end of the text, a number is offered behind the misspelt keyword.
+  CHECK(checks::offers_named(*lr, "hexes <hx", 9, 9, "Hexed::NUMBER"));
   a_long_section_does_not_cost_a_fault_its_share(*ll);
   return cursiv::test::report("Embed_test");
 }

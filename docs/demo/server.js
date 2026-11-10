@@ -122,12 +122,15 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
   };
   const frames = new Map();
   const workers = [];
+  const starting = new Set();   // rejects of the pool workers not yet ready
   let stopped = false;
+  // Fails every pending request and start.
   const stop = (reason) => {
     if (stopped) return;
     stopped = true;
     workers.forEach((w) => w.terminate());
     for (const id of [...waiting.keys()]) settle(id).reject(new Error(reason));
+    for (const reject of starting) reject(new Error(reason));
     onExit(reason);
   };
   const dec = new TextDecoder();
@@ -142,11 +145,13 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
     const worker = new Worker(new URL('./wasi-worker.js', import.meta.url));
     workers.push(worker);
     worker.addEventListener('message', onMessage(worker));
-    worker.addEventListener('message', ({ data }) => {
-      if (data.type === 'ready') resolve(worker);
-      else if (data.type === 'crash') reject(new Error(data.text.split('\n')[0]));
-    });
-    worker.addEventListener('error', (e) => { reject(e); stop(`worker error: ${e.message}`); });
+    worker.addEventListener('error', (e) => stop(`worker error: ${e.message}`));
+    if (msg.role === 'thread') {
+      starting.add(reject);
+      worker.addEventListener('message', ({ data }) => {
+        if (data.type === 'ready') { starting.delete(reject); resolve(worker); }
+      });
+    }
     worker.postMessage({ ...shared, ...msg });
     if (msg.role === 'main') resolve(worker);
   });

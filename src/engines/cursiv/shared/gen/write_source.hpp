@@ -1,12 +1,13 @@
-// The files a generator writes are replaced together: each is written beside
-// its place, then all are renamed over their places, so a failed write changes
-// nothing. A file whose content is unchanged is not touched.
+// The files a generator writes: each is staged beside its place under a name
+// only this call uses, then all are renamed over their places. A failed write
+// changes nothing; a failed rename keeps those renamed before it.
 #pragma once
 
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <ios>
+#include <random>
 #include <span>
 #include <string>
 #include <string_view>
@@ -20,9 +21,13 @@ struct SourceFile {
   std::string_view text;
 };
 
-// The place of the first file that failed to write, or `files.size()`.
+// The place of the first file that failed to write, or `files.size()`. A
+// file whose content is unchanged is not touched.
 inline std::size_t write_sources(std::span<const SourceFile> files) {
-  const auto staged = [&](std::size_t i) { return files[i].path + ".tmp"; };
+  std::random_device entropy;
+  const std::string suffix =
+      "." + std::to_string(entropy()) + std::to_string(entropy()) + ".tmp";
+  const auto staged = [&](std::size_t i) { return files[i].path + suffix; };
   std::vector<std::size_t> moved;
   // Drops the staged copies from the `from`-th moved file on, and returns
   // `failed`.

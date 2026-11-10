@@ -512,14 +512,14 @@ struct table_of<S, TypeList<Es...>> {
       (text_of<Es>::value.size() + ... + std::size_t{0}) +
       (feature_of<Es>::value.size() + ... + std::size_t{0}) +
       (name_of<Es>().size() + ... + std::size_t{0}) + 2;
-  // A row addresses the blob in 16 bits: the bound is checked here rather
-  // than found as a truncated offset.
-  static_assert(kMax <= 0xFFFFu,
-                "cursiv: this grammar's declared strings exceed what a "
-                "PositionRow offset can address");
   static constexpr std::size_t kChildMax =
       (child_ids<S, L, typename children_of<S, Es>::type>::value.first + ... +
        std::size_t{1});
+  // A row addresses the blob and the children in 16 bits: the bound is checked
+  // here rather than found as a truncated offset.
+  static_assert(kMax <= 0xFFFFu && kChildMax <= 0xFFFFu,
+                "cursiv: this grammar's declared strings or children exceed "
+                "what a PositionRow offset can address");
 
   struct Layout {
     std::array<char, kMax + 1> blob{};

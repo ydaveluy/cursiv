@@ -29,7 +29,7 @@ inline LexReading ll_lex_reading(const char* src, TextOffset len,
 template <const auto& T>
 inline LexReading ll_open_reading(LlContext& c, TextOffset p) {
   if (c.reads.spent()) return LexReading{};
-  const auto mode = ll_err_mode<T>(c);
+  const auto mode = ll_err_mode<T>(c.section);
   TextOffset reached = p;
   LexReading r = ll_lex_reading<T>(c.src, c.len, mode, p, reached);
   if (const TextOffset end = ll_text_end<T>(c, p, reached, reached);
@@ -46,7 +46,7 @@ inline LexReading ll_open_reading(LlContext& c, TextOffset p) {
 template <const auto& T>
 inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from,
                                    TextOffset len, TextOffset& reached) {
-  const auto mode = ll_err_mode<T>(c);
+  const auto mode = ll_err_mode<T>(c.section);
   return lex_unmatched_end(
       LlLexTape<T>{}, LexBodies{T.lexBodies, T.lexBodyTerms, T.lexOpeners},
       c.src, len, mode, from,

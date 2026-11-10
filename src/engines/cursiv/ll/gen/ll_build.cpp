@@ -602,7 +602,8 @@ struct Gaps {
     }
   }
 
-  void compute_sets(std::uint64_t* work) {
+  // The gap sets over the shape facts `g` holds: both passes read one shape.
+  void compute_sets(const Gaps& g, std::uint64_t* work) {
     Pending pending(b.cfg.nnodes + b.cfg.nrules);
     const auto rule = [&](std::uint16_t r) { return b.cfg.nnodes + r; };
     const auto add = [&](DynSet& to, const DynSet& x, std::uint32_t target) {
@@ -677,7 +678,8 @@ struct Gaps {
           bool fresh = false, above = true;
           for (unsigned i = 0; i < n.count; ++i) {
             const std::uint16_t k = child(n, i);
-            const bool in = consumeEnd[id] > i + 1, out = passEnd[id] <= i + 1;
+            const bool in = g.consumeEnd[id] > i + 1,
+                       out = g.passEnd[id] <= i + 1;
             if (fresh) {
               add(pre[k], gap(i), k);
               add(span[k],
@@ -690,8 +692,8 @@ struct Gaps {
             }
             add(after[k],
                 (in ? gap(i + 1) : DynSet{}) | (out ? after[id] : DynSet{}), k);
-            if (!silent[k]) {
-              fresh = freshOut[k] != 0;
+            if (!g.silent[k]) {
+              fresh = g.freshOut[k] != 0;
               above = false;
             }
           }
@@ -726,6 +728,7 @@ void compute_gaps(Built& b, const ShapeGraph& shapes,
   g.emptyReads.assign(nn, 0);
   g.ruleEmptyReads.assign(nr, 0);
   g.compute_shape(shapes, work ? &work->gapShape : nullptr);
+  g.note_later();
   // The document opens and ends under the grammar's own configuration.
   const auto compute_gap_sets = [&](Gaps& x) {
     x.pre.assign(nn, DynSet{});
@@ -736,14 +739,12 @@ void compute_gaps(Built& b, const ShapeGraph& shapes,
     x.ruleAfter.assign(nr, DynSet{});
     x.rulePre[b.cfg.entryRule] = x.ruleSpan[b.cfg.entryRule] =
         x.ruleAfter[b.cfg.entryRule] = Gaps::bit(0);
-    x.note_later();
-    x.compute_sets(work ? &work->gapSets : nullptr);
+    x.compute_sets(g, work ? &work->gapSets : nullptr);
   };
   compute_gap_sets(g);
   // A call site peeks its callee's first token: callers that cross the gap
   // in front of it under different configurations share no point inside it.
-  Gaps local{.b = b, .silent = g.silent, .consumes = g.consumes,
-             .freshOut = g.freshOut, .entries = false};
+  Gaps local{.b = b, .entries = false};
   compute_gap_sets(local);
 
   const auto lowest = [](const DynSet& s) {
@@ -1026,6 +1027,7 @@ struct AtnGen {
     out[from].push_back(
         LlAtnEdge{.kind = LlEdgeKind::atom, .label = t, .target = to});
     owner[from].push_back(node);
+    if (node != kNoRow) b.nodeAfter[node] = to;
   }
   // A return state no other call shares, the call position kept beside the
   // edge: a caret under the callee needs the member this call writes. Only a
@@ -1096,9 +1098,10 @@ void AtnGen::build(std::uint16_t id, std::uint32_t from, std::uint32_t to,
                           n.kind == LlShape::condition ? n.sym : n.min),
                       .target = to});
         owner[from].push_back(id);
+        b.nodeAfter[id] = to;
         break;
       case LlShape::call:
-        b.nodeFollow[id] = to;
+        b.nodeFollow[id] = b.nodeAfter[id] = to;
         call(from, n.sym, to, id);
         break;
       case LlShape::seq: {
@@ -1175,6 +1178,12 @@ void build_atn(Built& b) {
   b.returnNode.clear();
   AtnGen g{b};
   b.nodeFollow.assign(b.cfg.nnodes, 0);
+  // The state the graph stands in once each position is read, what a caret
+  // seeds its closure from: a call stands after its own return state, where
+  // a caret walks up to name the member a token inside the rule fills.
+  b.nodeAfter.assign(b.cfg.nnodes, 0xFFFFFFFFu);
+  for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id)
+    if (b.cfg.nodes[id].kind == LlShape::call) b.nodeAfter[id] = 0;
   b.ruleStart.assign(b.cfg.nrules, 0);
   std::vector<std::uint32_t> ruleStop(b.cfg.nrules, 0);
   // A rule the entry never reaches has no states: its start reads as the
@@ -1532,28 +1541,6 @@ void compute_repair(Built& b, std::uint64_t* work) {
   }
 }
 
-// The state the graph stands in once each position is read: what a caret
-// seeds its closure from. The walk itself is the prediction's own, run at the
-// caret rather than at a choice.
-void compute_after_states(Built& b) {
-  const std::size_t n = b.cfg.nnodes;
-  b.nodeAfter.assign(n, 0xFFFFFFFFu);
-  for (std::uint32_t st = 0; st < b.nstates; ++st) {
-    const LlAtnState& q = b.states[st];
-    for (std::uint32_t i = 0; i < q.nedges; ++i) {
-      const std::uint16_t node = b.edgeNode[q.edge + i];
-      if (node == kNoRow) continue;
-      b.nodeAfter[node] = b.edges[q.edge + i].target;
-    }
-  }
-  // A call stands after its own return state: that is where the graph is once
-  // the rule it names has been read, and a caret walks up to it to name
-  // the member a token inside that rule fills.
-  for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id)
-    if (b.cfg.nodes[id].kind == LlShape::call)
-      b.nodeAfter[id] = b.nodeFollow[id];
-}
-
 // The positions an invocation of a rule can read first, before it has read
 // anything: only there does the rule's caller state what the token fills.
 void compute_head_nodes(Built& b, const std::vector<std::uint8_t>& nullable) {
@@ -1755,12 +1742,8 @@ class ChainJoin {
     // nothing.
     b.writes.chainBuild[r] = {.makes = left.makes || right.makes,
                               .creates = left.creates || right.creates,
+                              .nest = left.nest || right.nest,
                               .doc = b.writes.chainBuild[r].doc};
-    if (r >= b.nestChains.size()) b.nestChains.resize(b.writes.nchains, 0);
-    const bool leftNest = held < b.nestChains.size() && b.nestChains[held] != 0;
-    const bool rightNest =
-        over < b.nestChains.size() && b.nestChains[over] != 0;
-    b.nestChains[r] = leftNest || rightNest;
     if (r >= b.origin.size())
       b.origin.resize(b.writes.nchains, LlFuse{kNoRow, kNoRow});
     if (r != held && r != over && b.origin[r].from == kNoRow)
@@ -1810,9 +1793,8 @@ void compute_fusion(Built& b, LlBuildWork* work) {
   ChainJoin join(b, work ? &work->joins : nullptr);
   for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id) {
     const LlNode& n = b.cfg.nodes[id];
-    if (!n.owns || n.kind != LlShape::seq || n.count != 1 ||
-        n.row >= b.nestChains.size() || b.nestChains[n.row] == 0 ||
-        b.cfg.nodeBuild[id].foldStep)
+    if (!n.owns || n.kind != LlShape::seq || n.count != 1 || n.row == kNoRow ||
+        !b.writes.chainBuild[n.row].nest || b.cfg.nodeBuild[id].foldStep)
       continue;
     const LlNode& only = b.cfg.nodes[b.cfg.childIds[n.sym]];
     if (only.kind != LlShape::term) continue;
@@ -1829,7 +1811,7 @@ void compute_fusion(Built& b, LlBuildWork* work) {
     const std::uint16_t own = b.cfg.terms[n.sym].element;
     n.row = n.row == kNoRow ? own : join(own, n.row);
   }
-  LlRecordPlan records(b.cfg, b.writes, b.nestChains);
+  LlRecordPlan records(b.cfg, b.writes);
   records.count_rows(work ? &work->rows : nullptr);
   records.compute_rows(b.nullable, join);
   b.fuseBase.assign(b.cfg.nnodes + 1, 0);
@@ -2084,7 +2066,6 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   Built b;
   b.cfg = low.cfg;
   b.writes = low.writes;
-  b.nestChains = low.nestChains;
   b.fault = low.fault;
   b.liveRules = reached_from(b.cfg, b.cfg.entryRule);
   refuse_skipped_terminal(b);
@@ -2123,7 +2104,6 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   if (b.writes.capped) b.cap_hit(kTooManyChains);
   ll_build_lexer(b, alphabet, opt.work ? &opt.work->overtakes : nullptr);
   if (b.cfg.lowerFail()) return b;
-  compute_after_states(b);
   compute_head_nodes(b, ruleNullable);
   compute_episode_flags(b);
   return b;

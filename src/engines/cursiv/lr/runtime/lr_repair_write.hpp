@@ -141,9 +141,9 @@ bool lr_write_apply(LrContext& c, LrWriteReading& w, std::uint32_t at) {
   return lr_write_reduce<A>(c, x.arg, lr_shadow_holds(c, w));
 }
 
-// A token the author did not write, with the reductions the table makes on
-// it, taking the arms `arms` names where it forks. False where the table
-// refuses it.
+// A token the author did not write, with the table's reductions on it and the
+// arms `arms` names where it forks. False where the table refuses it: what it
+// wrote stays, and the context keeps its token, levels and implied tokens.
 template <const auto& A>
 bool lr_write_token(LrContext& c, SymbolId term, bool reread, TextOffset end,
                     const Token& written, const std::uint32_t* arms,

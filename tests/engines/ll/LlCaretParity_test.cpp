@@ -462,6 +462,28 @@ void a_frame_of_many_predecessors_costs_their_number() {
   CHECK(!next.empty());
 }
 
+// A stop requested before the question throws once the replay reaches a poll.
+void a_stopped_question_throws_in_the_replay() {
+  std::string text = "fork:";
+  for (int i = 0; i < 4000; ++i) text += "pr a; ";
+  const auto at = static_cast<cursiv::TextOffset>(text.size());
+  cursiv::CancellationTokenSource stop;
+  stop.request_stop();
+  const auto lr = tpar::generated::Lr::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
+  for (const cursiv::Parser* parser : {lr.get(), ll.get()}) {
+    const auto parsed = parser->parse(text);
+    std::vector<cursiv::NextFeature> next;
+    bool stopped = false;
+    try {
+      parser->nextFeaturesAt(parsed.cst(), at, at, next, stop.get_token());
+    } catch (const cursiv::OperationCancelled&) {
+      stopped = true;
+    }
+    CHECK(stopped);
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -481,5 +503,6 @@ int main() {
   a_guarded_reduction_refuses_a_token_as_the_drive_does();
   each_member_a_token_fills_is_named_as_the_descent_names_it();
   a_frame_of_many_predecessors_costs_their_number();
+  a_stopped_question_throws_in_the_replay();
   return cursiv::test::report("LlCaretParity_test");
 }

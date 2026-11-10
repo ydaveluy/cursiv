@@ -38,7 +38,7 @@ definition, rename and formatting all come from it.
       <span id="diag-info" class="info"></span>
       <span id="diag-first" class="first"></span>
     </span>
-    <span class="right"><span id="cursor">Ln 1, Col 1</span><span id="language-id"></span></span>
+    <span class="right"><span id="build-time" title="From the last edit to its diagnostics"></span><span id="cursor">Ln 1, Col 1</span><span id="language-id"></span></span>
   </div>
 </div>
 <script type="module" src="app.js"></script>

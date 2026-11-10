@@ -61,11 +61,13 @@ class LrLanguageParser final : public Parser {
     return out;
   }
 
-  void nextFeaturesAt(const Cst& cst, TextOffset at, TextOffset resume,
-                      std::vector<NextFeature>& out) const override {
+  void nextFeaturesAt(
+      const Cst& cst, TextOffset at, TextOffset resume,
+      std::vector<NextFeature>& out,
+      const CancellationToken& cancelToken = kNoCancel) const override {
     LexSuffixSession<LrLexTape<A>> predicateSession(
         cst.text().data(), static_cast<TextOffset>(cst.text().size()));
-    lr_next_features_at(_caret, *_grammar, cst, at, resume, out);
+    lr_next_features_at(_caret, *_grammar, cst, at, resume, out, cancelToken);
   }
 
  private:
@@ -100,9 +102,12 @@ class LrLanguageParser final : public Parser {
 template <const auto& A>
 constinit const LrCaretTable LrLanguageParser<A>::kCaret{
     .lex = &lr_match_halt<A>,
-    .flagged = A.has_flags() ? +[](std::uint16_t mode, SymbolId sym) {
-      return sym < A.cfg.nterms && A.flagged(mode, sym);
-    } : nullptr,
+    .flagged =
+        A.has_flags()
+            ? +[](std::uint16_t mode,
+                  SymbolId
+                      sym) { return sym < A.cfg.nterms && A.flagged(mode, sym); }
+            : nullptr,
     .lexWithout = without_of(),
     .maxCands = A.maxCands,
     .chooses = A.nconflicts != 0 || A.npeeks != 0 || A.multiCand,
@@ -117,6 +122,7 @@ constinit const LrCaretTable LrLanguageParser<A>::kCaret{
     .skipSet = A.derived.skipSet,
     .skipStop = A.derived.skipStop,
     .errMode = A.errMode,
+    .errModeOf = &lr_err_mode<A>,
     .run =
         +[](std::uint16_t state, SymbolId term) {
           LrCaretTable::Run r;

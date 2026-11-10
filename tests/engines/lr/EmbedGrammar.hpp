@@ -183,6 +183,20 @@ struct Tiny : cursiv::GrammarSpec {
   using entry = Root;
 };
 
+// A keyword a number follows with no blank, in a grammar that reads no name:
+// a word misspelling the keyword stays apart from the number typed behind it.
+struct Hexed : cursiv::GrammarSpec {
+  struct WS : terminal<some(cr<" ">)> {};
+  struct NUMBER : terminal<as<std::int64_t>(some(d))> {};
+  struct Item : rule<create<ast::Set>(
+                    kw<"hex"> + assign<&ast::Set::value>(ref<NUMBER>))> {};
+  struct Root : rule<create<ast::Lines>(
+                    many(append<&ast::Lines::sets>(ref<Item>)) + eof)> {};
+  using entry = Root;
+  using ignored = WS;
+  static constexpr auto word_boundary = cr<"a-zA-Z_">;
+};
+
 inline constexpr auto from_hex = [](std::string_view t) {
   std::int64_t v = 0;
   std::from_chars(t.data() + 2, t.data() + t.size(), v, 16);
@@ -246,12 +260,15 @@ struct Doc : cursiv::GrammarSpec {
       : rule<create<ast::Block>(kw<"dotted"> +
                                 assign<&ast::Block::script>(
                                     section<Dotted>(lit<"<">, lit<">">)))> {};
+  struct Hexes : rule<create<ast::Block>(
+                     kw<"hexes"> + assign<&ast::Block::script>(
+                                       section<Hexed>(lit<"<">, lit<">">)))> {};
 };
 
 struct DocLl : Doc {
   struct Line : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> |
                       ref<Small> | ref<Narrowed> | ref<Dashed> | ref<Widened> |
-                      ref<Lettered> | ref<Sequenced>)+ref<NL>> {};
+                      ref<Lettered> | ref<Sequenced> | ref<Hexes>)+ref<NL>> {};
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Line>)))> {};
   using entry = Root;
@@ -263,9 +280,10 @@ struct DocLr : Doc {
   struct Code : rule<create<ast::Block>(
                     kw<"script"> + assign<&ast::Block::script>(section<Script>(
                                        lit<"<%">, lit<"%>">)))> {};
-  struct Line : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> |
-                      ref<Small> | ref<Narrowed> | ref<Dashed> | ref<Widened> |
-                      ref<Lettered> | ref<Sequenced> | ref<Code>)+ref<NL>> {};
+  struct Line
+      : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> | ref<Small> |
+              ref<Narrowed> | ref<Dashed> | ref<Widened> | ref<Lettered> |
+              ref<Sequenced> | ref<Hexes> | ref<Code>)+ref<NL>> {};
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Line>)))> {};
   using entry = Root;

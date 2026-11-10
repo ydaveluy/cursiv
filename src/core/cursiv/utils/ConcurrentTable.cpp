@@ -28,7 +28,7 @@ constexpr std::size_t kSlots = 1024;
 constexpr std::size_t kCollectEvery = 32;
 constexpr std::size_t kCollectBytes = std::size_t{8} << 20;
 // A release also collects once the first one since the last collection
-// is this old, so a value cleared once per build is not kept for long.
+// is this old: a value cleared once per build goes at the next build's release.
 constexpr std::chrono::milliseconds kCollectAfter{100};
 
 // Every running thread of the process passes a full fence: what a reader

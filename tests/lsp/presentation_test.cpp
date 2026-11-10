@@ -14,19 +14,8 @@
 #include <variant>
 #include <vector>
 
-#include "cursiv/references/DefaultNameProvider.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
-#include "cursiv/syntax-tree/AstNode.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstNodeView.hpp"
-#include "cursiv/syntax-tree/DocumentReferences.hpp"
-#include "cursiv/syntax-tree/MultiRefItems.hpp"
-#include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/validation/DefaultCodeActionProtocol.hpp"
-#include "cursiv/workspace/Document.hpp"
-#include "cursiv/workspace/DocumentFactory.hpp"
-#include "cursiv/workspace/TextDocument.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/DecodedSemanticTokens.hpp"
 #include "cursiv/actions/DefaultCodeActionProvider.hpp"
 #include "cursiv/actions/JsonBridge.hpp"
 #include "cursiv/completion/FuzzyMatcher.hpp"
@@ -35,20 +24,32 @@
 #include "cursiv/ranges/DefaultFoldingRangeProvider.hpp"
 #include "cursiv/ranges/FoldingRangeProvider.hpp"
 #include "cursiv/ranges/SelectionRangeProvider.hpp"
+#include "cursiv/references/DefaultNameProvider.hpp"
 #include "cursiv/runtime/LanguageClient.hpp"
 #include "cursiv/runtime/LanguageServer.hpp"
 #include "cursiv/semantic/AbstractSemanticTokenProvider.hpp"
 #include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/semantic/SignatureHelpProvider.hpp"
+#include "cursiv/services/Diagnostic.hpp"
+#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/services/LspServices.hpp"
 #include "cursiv/symbols/DocumentSymbolProvider.hpp"
 #include "cursiv/symbols/WorkspaceSymbolProvider.hpp"
-#include "cursiv/Check.hpp"
-#include "support/Throws.hpp"
-#include "cursiv/DecodedSemanticTokens.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstNodeView.hpp"
+#include "cursiv/syntax-tree/DocumentReferences.hpp"
+#include "cursiv/syntax-tree/MultiRefItems.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/validation/DefaultCodeActionProtocol.hpp"
+#include "cursiv/workspace/DefaultDocuments.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
 #include "lsp/uri.h"
 #include "support/Editor.hpp"
+#include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
 
@@ -932,8 +933,9 @@ void a_delta_sends_only_what_changed() {
       world.server().semanticTokensFullDelta(since)));
 }
 
-// A request cancelled once its colours are computed keeps nothing: the answer
-// the client holds stays the base of its next delta.
+// A request cancelled once its colours are computed keeps nothing, even one
+// cancelled once it has found its base: the answer the client holds stays the
+// base of its next delta.
 void a_cancelled_answer_keeps_the_last_base() {
   // The grammar's colours with `delta` on; once `cancel` is set, it cancels
   // its request and colours nothing.
@@ -963,16 +965,37 @@ void a_cancelled_answer_keeps_the_last_base() {
                                                         accept, token);
     }
   };
+  // Once `cancel` is set, the next lookup cancels: the provider looks up the
+  // other answers' documents just before it compares with the base.
+  struct CancelsOnLookup final : cursiv::DefaultDocuments {
+    using DefaultDocuments::DefaultDocuments;
+    using DefaultDocuments::getDocument;
+    mutable cursiv::CancellationTokenSource* cancel = nullptr;
+    [[nodiscard]] std::shared_ptr<cursiv::Document> getDocument(
+        std::string_view uri) const override {
+      if (cancel != nullptr) std::exchange(cancel, nullptr)->request_stop();
+      return DefaultDocuments::getDocument(uri);
+    }
+  };
   const Cancels* provider = nullptr;
-  const support::LspWorkspace world([&](cursiv::LspServices& language) {
+  support::LspWorkspace world([&](cursiv::LspServices& language) {
     auto held = std::make_unique<const Cancels>(language);
     provider = held.get();
     language.semanticTokenProvider = std::move(held);
   });
+  auto lookups = std::make_unique<CancelsOnLookup>(world.shared);
+  const CancelsOnLookup& store = *lookups;
+  world.shared.documents = std::move(lookups);
   constexpr std::string_view kA = "file:///w/a.ws";
+  constexpr std::string_view kB = "file:///w/b.ws";
   (void)world.shared.languageServer->initialize({});
   support::open(*world.shared.languageServer, kA, "workspace", kModel);
-  const cursiv::Document& document = *world.shared.documents->getDocument(kA);
+  support::open(*world.shared.languageServer, kB, "workspace", kModel);
+  const cursiv::Document& document = *store.getDocument(kA);
+  lsp::SemanticTokensParams other;
+  other.textDocument.uri = lsp::Uri::parse(std::string(kB));
+  (void)provider->semanticHighlight(*store.getDocument(kB), other,
+                                    cursiv::kNoCancel);
   lsp::SemanticTokensParams full;
   full.textDocument.uri = lsp::Uri::parse(std::string(kA));
   const lsp::SemanticTokens first =
@@ -983,20 +1006,29 @@ void a_cancelled_answer_keeps_the_last_base() {
   since.textDocument = full.textDocument;
   since.previousResultId = *first.resultId;
 
-  cursiv::CancellationTokenSource source;
-  provider->cancel = &source;
-  bool cancelled = false;
-  try {
-    (void)provider->semanticHighlightDelta(document, since, source.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    cancelled = true;
+  for (const bool whileComparing : {false, true}) {
+    cursiv::CancellationTokenSource source;
+    if (whileComparing)
+      store.cancel = &source;
+    else
+      provider->cancel = &source;
+    bool cancelled = false;
+    try {
+      (void)provider->semanticHighlightDelta(document, since,
+                                             source.get_token());
+    } catch (const cursiv::OperationCancelled&) {
+      cancelled = true;
+    }
+    provider->cancel = nullptr;
+    store.cancel = nullptr;
+    CHECK(cancelled);
+    const auto next =
+        provider->semanticHighlightDelta(document, since, cursiv::kNoCancel);
+    const auto* const delta = std::get_if<lsp::SemanticTokensDelta>(&next);
+    CHECK(delta != nullptr && delta->edits.empty());
+    if (delta == nullptr || !delta->resultId.has_value()) return;
+    since.previousResultId = *delta->resultId;
   }
-  provider->cancel = nullptr;
-  CHECK(cancelled);
-  const auto next =
-      provider->semanticHighlightDelta(document, since, cursiv::kNoCancel);
-  const auto* const delta = std::get_if<lsp::SemanticTokensDelta>(&next);
-  CHECK(delta != nullptr && delta->edits.empty());
 }
 
 // A document that never parsed is answered with an empty array, which the

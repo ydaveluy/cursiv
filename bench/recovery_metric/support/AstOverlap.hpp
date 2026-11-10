@@ -25,6 +25,9 @@ struct AstOverlap {
 
   struct Result {
     std::uint64_t total = 0, kept = 0;
+    // Untouched nodes with a value no reader reaches: out of `total`, since
+    // whether they were kept cannot be told.
+    std::uint64_t unread = 0;
     // Stretches too long to align, paired in order instead: counted, since
     // the pairing then decides what was kept.
     std::uint64_t unaligned = 0;
@@ -35,6 +38,7 @@ struct AstOverlap {
     Walk w{*this, touched, {}, {}, {}};
     Result r;
     r.total = w.twin(want).spared;
+    r.unread = w.twin(want).unread;
     if (got != nullptr) w.match(want, *got, r);
     return r;
   }
@@ -59,7 +63,7 @@ struct AstOverlap {
     const AstNode* node;
   };
   struct Digest {
-    std::uint64_t whole = 0, own = 0, spared = 0;
+    std::uint64_t whole = 0, own = 0, spared = 0, unread = 0;
     bool touched = false;
     // A value of this subtree was not read.
     bool blind = false;
@@ -137,9 +141,12 @@ struct AstOverlap {
             s.append(p);
             s += '#';
             s += std::to_string(i);
-            // An unset member has no `=`: it never reads as an empty value.
+            // An unset member has no `=` and a value leads with its length:
+            // none reads as an empty value or as the next member.
             if (k == fuzzer::ValueKind::text) {
               s += '=';
+              s += std::to_string(text.size());
+              s += ':';
               s.append(text);
             }
             s += '\x1f';
@@ -168,12 +175,14 @@ struct AstOverlap {
           o.text);
       s.blind = o.blind;
       s.whole = s.own;
-      s.spared = s.touched ? 0 : 1;
+      s.spared = s.touched || o.blind ? 0 : 1;
+      s.unread = !s.touched && o.blind ? 1 : 0;
       for (const Child& k : children(n)) {
         const Digest c = digest(*k.node, twinSide);
         s.whole = mix(mix(mix(s.whole, k.property), std::uint64_t{k.index}),
                       c.whole);
         s.spared += c.spared;
+        s.unread += c.unread;
         s.blind = s.blind || c.blind;
       }
       memo[&n] = s;
@@ -184,7 +193,8 @@ struct AstOverlap {
     void match(const AstNode& a, const AstNode& b, Result& r) {
       if (a.type != b.type) return;
       const Digest sa = twin(a);
-      if (!sa.touched && sa.own == digest(b, false).own) ++r.kept;
+      if (!sa.touched && !own(a).blind && sa.own == digest(b, false).own)
+        ++r.kept;
       const std::vector<Child> ka = children(a), kb = children(b);
       std::size_t i = 0;
       while (i < ka.size()) {

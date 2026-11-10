@@ -26,10 +26,12 @@ struct Chain {
 };
 
 // What construction concludes about a chain and no run ever asks: whether it
-// hands a node back, whether it opens one, and the write a caret reads it by.
+// hands a node back, whether it opens one or a nest, and the write a caret
+// reads it by.
 struct ChainBuild {
   bool makes = false;
   bool creates = false;
+  bool nest = false;
   // The first action that writes a member. An optional creates a chain per
   // branch, so several chains write one member; they start with the same
   // write, which is all a caret asks of any of them.
@@ -88,8 +90,9 @@ struct ChainPool {
     return intern(run.data(), run.size(), true, chainBuild[c].doc);
   }
 
-  // A chain opens a record when it starts with a creation, and hands a node
-  // back when it starts with a creation or a close.
+  // A chain opens a record when it starts with a creation, hands a node back
+  // when it starts with a creation or a close, and nests when it starts with a
+  // nest.
   void note_makes(std::span<const WriteKind> kind) {
     for (std::uint16_t i = 0; i < nchains; ++i) {
       const Chain& ch = chains[i];
@@ -100,6 +103,7 @@ struct ChainPool {
       const WriteKind first = kind[acts[ch.off]];
       cb.creates = first == WriteKind::create || first == WriteKind::climb;
       cb.makes = cb.creates || first == WriteKind::close;
+      cb.nest = first == WriteKind::nest;
     }
   }
 

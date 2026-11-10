@@ -4,6 +4,8 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace cursiv::engine {
 
@@ -78,6 +80,29 @@ constexpr std::uint16_t lex_callee(const Cfg& g, const LexNode& e) {
 template <class Cfg>
 constexpr std::uint16_t lex_token_body(const Cfg& g, const LexNode& e) {
   return g.termBuild[e.a].lex;
+}
+
+// Whether the graphs at `x` and `y` read alike: `same(a, b)` compares two
+// nodes' kinds and own fields, a sequence's or choice's width among them;
+// their children, and a repetition's body, then compare in turn.
+template <class Cfg, class Same>
+bool lex_same_graph(const Cfg& g, std::uint16_t x, std::uint16_t y,
+                    Same&& same) {
+  std::vector<std::pair<std::uint16_t, std::uint16_t>> todo{{x, y}};
+  while (!todo.empty()) {
+    const auto [p, q] = todo.back();
+    todo.pop_back();
+    if (p == q) continue;
+    const LexNode& a = g.lex[p];
+    const LexNode& b = g.lex[q];
+    if (!same(a, b)) return false;
+    if (a.kind == LexKind::seq || a.kind == LexKind::alt)
+      for (unsigned i = 0; i < a.b; ++i)
+        todo.emplace_back(g.lexChild[a.a + i], g.lexChild[b.a + i]);
+    else if (a.kind == LexKind::rep)
+      todo.emplace_back(a.a, b.a);
+  }
+  return true;
 }
 
 }  // namespace cursiv::engine

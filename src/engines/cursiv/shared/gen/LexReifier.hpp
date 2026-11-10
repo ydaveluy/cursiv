@@ -86,11 +86,12 @@ class LexReifier {
   ImageId rebuilt(ImageId id, const std::vector<ImageId>& children);
   ImageId lit_with(const ImageNode& lit, ImageId guard);
 
-  ImageId resolve_in(unsigned cfg, ImageId id);
-  ImageId resolve_rule(unsigned cfg, std::uint32_t rule);
-  ImageId resolve_seq(unsigned cfg, ImageId id);
-  bool has_captures(ImageId id) const;
-  bool consumes(ImageId id) const;
+  Descent<ImageId> canon_walk(ImageId id);
+  Descent<ImageId> resolve_in(unsigned cfg, ImageId id);
+  Descent<ImageId> resolve_rule(unsigned cfg, std::uint32_t rule);
+  Descent<ImageId> resolve_seq(unsigned cfg, ImageId id);
+  Descent<bool> has_captures(ImageId id) const;
+  Descent<bool> consumes(ImageId id) const;
   bool eof_lit(ImageId id) const;
   ImageId without_eof(ImageId lit);
 
@@ -113,24 +114,23 @@ class LexReifier {
   std::uint16_t refusal(std::uint16_t bound,
                         std::span<const std::uint16_t> classes,
                         std::uint32_t scalar = 0);
-  std::uint16_t reify_lit(ImageId id, bool tail);
-  std::uint16_t reify_not_of(ImageId id);
-  std::uint16_t reify_not_lit(ImageId lit);
+  Descent<std::uint16_t> reify_walk(ImageId id, bool tail);
+  Descent<std::uint16_t> reify_lit(ImageId id, bool tail);
+  Descent<std::uint16_t> reify_not_of(ImageId id);
+  Descent<std::uint16_t> reify_not_lit(ImageId lit);
   std::uint16_t reify_not_class(ImageId cls);
   std::uint16_t reify_class(ImageId cls);
   std::uint16_t reify_eof();
-  std::uint16_t reify_through(ImageId id, bool tail);
-  std::uint16_t reify_through_lit(ImageId open, std::string_view close,
-                                  bool eof);
-  std::uint16_t reify_nested(ImageId id);
-  std::uint16_t reify_mark(ImageId id, bool tail);
+  Descent<std::uint16_t> reify_through(ImageId id, bool tail);
+  Descent<std::uint16_t> reify_through_lit(ImageId open, std::string_view close,
+                                           bool eof);
+  Descent<std::uint16_t> reify_nested(ImageId id);
+  Descent<std::uint16_t> reify_mark(ImageId id, bool tail);
   std::uint16_t reify_ref(ImageId id);
-  void refusals(const Guard& g, std::vector<std::uint16_t>& out);
+  Descent<void> refusals(const Guard& g, std::vector<std::uint16_t>& out);
   void class_refusals(ImageId cls, std::vector<std::uint16_t>& out);
   std::uint16_t refused(ImageId word, std::uint16_t node);
-  std::uint16_t echo_side(ImageId side) {
-    return side == kNoImage ? kNoLexNode : reify(side);
-  }
+  Descent<std::uint16_t> echo_side(ImageId side);
   bool mark_run(ImageId id) const;
 
   Lowerer& _lowerer;

@@ -26,11 +26,11 @@
 
 namespace cursiv {
 
-// A cache partitioned by document: a document's rebuild empties only its
-// own entries, at the update or, with `state` (`Linked` or
-// `IndexedReferences`), when the document reaches that state. A value may read
-// its own document and, with `state`, its references' targets; one that reads
-// further belongs in a `WorkspaceCache`.
+// A cache partitioned by document: a rebuild empties only that document's
+// entries, at the update or, with `state` (`Linked` or `IndexedReferences`),
+// once its listeners hear that state; a read that waited for it may still see
+// the old ones. A value may read its own document and, with `state`, its
+// references' targets; one that reads further belongs in a `WorkspaceCache`.
 //
 // DocumentCache<V> holds one value per document. get(document, provider)
 // returns a copy, get(document) only looks it up, and withValue(document,
@@ -169,7 +169,8 @@ class DocumentCache : private DocumentPhaseListener,
       values = found ? *found : &_owned.emplace_back();
     }
     // Stored with no lock held: the insert's growth may free a value that reads
-    // this cache. Of two partitions made at once, the first stored is kept.
+    // this cache. Of partitions made at once, the first stored is kept and the
+    // others stay unused until the cache goes.
     const std::optional<Values*> kept = _documents.insert(0, document, values);
     assert(kept.has_value() && "the document table is never cleared");
     return **kept;

@@ -1,14 +1,21 @@
 // The fuzzer on grammars of its own: `infix<>` as the entry, and the implied
 // tokens and gap conditions of the asi grammar.
 
+#include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 #include <type_traits>
 
 #include "asi/generated/G/Module.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/CstInvariants.hpp"
 #include "cursiv/CursivLexicon.hpp"
+#include "cursiv/FixedSource.hpp"
 #include "cursiv/FuzzLane.hpp"
+#include "cursiv/GrammarCost.hpp"
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstBuilder.hpp"
@@ -91,8 +98,82 @@ void a_subtree_holds_its_children_whole() {
   CHECK(!back.ok && back.at == 1);
 }
 
+// A repetition costs its child's cost times its minimum, held at unreachable
+// rather than wrapped while the child is still unreachable.
+void a_long_repetition_costs_its_rounds() {
+  namespace fd = cursiv::fuzzer::detail;
+  using K = fd::ElementKind;
+  // 0 holds the repetition 1 of the rule 2, which reads the literal 3.
+  struct Model final : fd::GrammarModel {
+    cursiv::ElementId kids[3] = {1, 2, 3};
+    [[nodiscard]] cursiv::ElementId positionCount() const noexcept override {
+      return 4;
+    }
+    [[nodiscard]] cursiv::ElementId entryRule() const noexcept override {
+      return 0;
+    }
+    [[nodiscard]] K kindOf(cursiv::ElementId e) const noexcept override {
+      constexpr K kKinds[] = {K::group, K::repetition, K::parser_rule,
+                              K::literal};
+      return kKinds[e];
+    }
+    [[nodiscard]] std::span<const cursiv::ElementId> childrenOf(
+        cursiv::ElementId e) const noexcept override {
+      return e < 3 ? std::span<const cursiv::ElementId>(kids + e, 1)
+                   : std::span<const cursiv::ElementId>{};
+    }
+    [[nodiscard]] std::string_view textOf(
+        cursiv::ElementId e) const noexcept override {
+      return e == 3 ? "a" : "";
+    }
+    [[nodiscard]] std::string_view nameOf(
+        cursiv::ElementId) const noexcept override {
+      return {};
+    }
+    [[nodiscard]] std::string_view featureOf(
+        cursiv::ElementId) const noexcept override {
+      return {};
+    }
+    [[nodiscard]] std::uint16_t minOf(
+        cursiv::ElementId e) const noexcept override {
+      return e == 1 ? 4096 : 0;
+    }
+    [[nodiscard]] std::uint16_t maxOf(
+        cursiv::ElementId e) const noexcept override {
+      return e == 1 ? fd::kModelUnbounded : 0;
+    }
+  };
+  const fd::GrammarCost cost(Model{}, fd::kActions<finfix::InfixEntryG>);
+  CHECK(cost[1] == 4096 && cost[0] == 4096);
+}
+
+// What an assertion refuses holds for the next character spelled, whatever
+// spells it; a refusal past ASCII refuses every character past ASCII.
+void a_refusal_holds_for_the_next_character() {
+  namespace fd = cursiv::fuzzer::detail;
+  using cursiv::cr;
+  using cursiv::lit;
+  const auto spelled = [](auto e) -> std::optional<std::string> {
+    fd::FixedSource first;
+    fd::SpellCtx cx{first};
+    std::string out;
+    if (!fd::Spell<finfix::InfixEntryG, decltype(e), fd::kSpellDepth>::run(
+            out, fd::SpellStyle::shortest, cx))
+      return std::nullopt;
+    return out;
+  };
+  CHECK(spelled(!cr<"ab"> + (lit<"a"> | lit<"c">)) == std::nullopt);
+  CHECK(spelled(!cr<"ab"> + (lit<"c"> | lit<"a">)) == "c");
+  CHECK(spelled(!cr<"ab"> + cr<"a-c">) == "c");
+  CHECK(spelled(!cr<"é"> + cr<"é">) == std::nullopt);
+  CHECK(spelled(!cr<"é"> + lit<"é">) == std::nullopt);
+  CHECK(spelled(!cr<"é"> + cr<"a">) == "a");
+}
+
 int main() {
   a_subtree_holds_its_children_whole();
+  a_long_repetition_costs_its_rounds();
+  a_refusal_holds_for_the_next_character();
   namespace g = finfix::generated::InfixEntryG;
   const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
   const std::unique_ptr<cursiv::AstReflection> reflection =

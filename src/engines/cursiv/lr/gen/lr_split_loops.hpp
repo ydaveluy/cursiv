@@ -35,11 +35,12 @@ inline void lr_split_loops(LrLowered& o) {
           !is_term(s) && c.loop_of(nt_index(s)) != kNoRow)
         head[nt_index(s)] = 1;
   }
-  std::map<std::uint16_t, std::vector<std::uint16_t>> members, heads;
+  std::map<std::uint16_t, std::size_t> members;
+  std::map<std::uint16_t, std::vector<std::uint16_t>> heads;
   std::uint16_t next = 0;
   for (unsigned n = 0; n < nN; ++n) {
     if (c.loop_of(n) == kNoRow) continue;
-    members[c.loop_of(n)].push_back(static_cast<std::uint16_t>(n));
+    ++members[c.loop_of(n)];
     if (head[n]) heads[c.loop_of(n)].push_back(static_cast<std::uint16_t>(n));
     next = std::max(next, static_cast<std::uint16_t>(c.loop_of(n) + 1u));
   }
@@ -94,7 +95,7 @@ inline void lr_split_loops(LrLowered& o) {
         if (fresh) enter(to);
       }
     }
-    if (places.size() == members[l].size()) continue;
+    if (places.size() == members[l]) continue;
     next = static_cast<std::uint16_t>(next + hs.size());
 
     std::vector<std::uint8_t> kept(nN, 0);

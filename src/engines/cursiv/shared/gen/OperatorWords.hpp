@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -79,41 +80,30 @@ class OperatorWords {
   // Whether the set holds strings it does not list.
   bool open() const { return _open; }
 
-  // A string both sets list, where neither is open.
-  std::optional<std::vector<std::uint16_t>> common(
-      const OperatorWords& o) const {
+  // A string of this set that one of `o` may spell too, where neither is open;
+  // `same(t, u)` says whether two tokens may spell one text.
+  template <class Same = std::equal_to<>>
+  std::optional<std::vector<std::uint16_t>> common(const OperatorWords& o,
+                                                   Same same = {}) const {
     if (_open || o._open) return std::nullopt;
-    auto a = _words.begin();
-    auto b = o._words.begin();
-    while (a != _words.end() && b != o._words.end()) {
-      if (*a < *b)
-        ++a;
-      else if (*b < *a)
-        ++b;
-      else
-        return *a;
-    }
+    for (const auto& a : _words)
+      for (const auto& b : o._words)
+        if (std::ranges::equal(a, b, same)) return a;
     return std::nullopt;
   }
 
-  bool overlaps(const OperatorWords& o) const {
-    if (!_open && !o._open) return common(o).has_value();
-    return std::ranges::any_of(o._opening,
-                               [&](std::uint16_t t) { return opens_on(t); }) ||
-           std::ranges::any_of(o._words, [&](const auto& w) {
-             return !w.empty() && opens_on(w.front());
-           });
+  template <class Same = std::equal_to<>>
+  bool overlaps(const OperatorWords& o, Same same = {}) const {
+    if (!_open && !o._open) return common(o, same).has_value();
+    const std::vector<std::uint16_t> theirs = o.opening();
+    return std::ranges::any_of(opening(), [&](std::uint16_t t) {
+      return std::ranges::any_of(theirs,
+                                 [&](std::uint16_t u) { return same(t, u); });
+    });
   }
 
  private:
-  // `_words` and `_opening` stay sorted: the words by their first token, the
-  // empty one first.
-  bool opens_on(std::uint16_t t) const {
-    return std::ranges::binary_search(_opening, t) ||
-           std::ranges::binary_search(_words, int{t}, {}, [](const auto& w) {
-             return w.empty() ? -1 : int{w.front()};
-           });
-  }
+  // `_words` and `_opening` stay sorted and each entry once.
   std::vector<std::uint16_t> opening() const {
     std::vector<std::uint16_t> out = _opening;
     for (const auto& w : _words)

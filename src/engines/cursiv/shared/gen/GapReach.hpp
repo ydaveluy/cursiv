@@ -9,6 +9,7 @@
 #include "cursiv/shared/table/CondReach.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/shared/utils/inside_scalar.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/text/scalar_at.hpp"
@@ -95,35 +96,36 @@ class GapReach {
 
   // Maximum consumption, inspection and look past the consumed bytes,
   // computed in one walk of the expression.
-  Bounds bounds(std::uint16_t node) const {
+  Bounds bounds(std::uint16_t node) const { return descend(bounds_walk(node)); }
+  Descent<Bounds> bounds_walk(std::uint16_t node) const {
     static constexpr std::uint64_t kAll = kEndless;
     const auto sat = [](std::uint64_t v) { return std::min(v, kAll); };
     const LexNode& e = _g.lex[node];
     switch (e.kind) {
       case LexKind::token:
-        return bounds(lex_token_body(_g, e));
+        co_return co_await bounds_walk(lex_token_body(_g, e));
       case LexKind::positive:
       case LexKind::negative: {
-        const auto child = bounds(e.a);
-        return {0, child.looked, child.looked};
+        const auto child = co_await bounds_walk(e.a);
+        co_return Bounds{0, child.looked, child.looked};
       }
       case LexKind::gap_has:
       case LexKind::gap_is:
       case LexKind::end_mark:
-        return {0, 0, 0};
+        co_return Bounds{0, 0, 0};
       case LexKind::chars:
-        return {1, 1};
+        co_return Bounds{1, 1};
       case LexKind::nguard:
-        return {0, e.min + kScalarBytes, e.min + kScalarBytes};
+        co_return Bounds{0, e.min + kScalarBytes, e.min + kScalarBytes};
       // Trivia read to any length, or none at all.
       case LexKind::skip:
-        return e.b == 0 ? Bounds{0, 0, 0} : Bounds{kAll, kAll};
+        co_return e.b == 0 ? Bounds{0, 0, 0} : Bounds{kAll, kAll};
       case LexKind::seq:
       case LexKind::alt: {
         Bounds out;
         const bool sequence = e.kind == LexKind::seq;
         for (unsigned i = 0; i < e.b; ++i) {
-          const auto child = bounds(_g.lexChild[e.a + i]);
+          const auto child = co_await bounds_walk(_g.lexChild[e.a + i]);
           out.looked =
               std::max(out.looked, sequence ? sat(out.consumed + child.looked)
                                             : child.looked);
@@ -132,25 +134,26 @@ class GapReach {
           out.overhang = std::max(out.overhang, child.overhang);
         }
         if (sequence) out.looked = std::max(out.consumed, out.looked);
-        return out;
+        co_return out;
       }
       case LexKind::rep: {
-        auto child = bounds(e.a);
+        auto child = co_await bounds_walk(e.a);
         if (e.b != kNoLexNode) {
-          const auto skip = bounds(e.b);
+          const auto skip = co_await bounds_walk(e.b);
           child = {sat(skip.consumed + child.consumed),
                    std::max(skip.looked, sat(skip.consumed + child.looked)),
                    std::max(skip.overhang, child.overhang)};
         }
-        if (e.max == 0) return {0, 0, child.overhang};
-        if (child.consumed == 0) return {0, child.looked, child.overhang};
-        if (e.max == kEndless) return {kAll, kAll, child.overhang};
-        return {sat(child.consumed * e.max),
-                sat(child.consumed * (e.max - 1u) + child.looked),
-                child.overhang};
+        if (e.max == 0) co_return Bounds{0, 0, child.overhang};
+        if (child.consumed == 0)
+          co_return Bounds{0, child.looked, child.overhang};
+        if (e.max == kEndless) co_return Bounds{kAll, kAll, child.overhang};
+        co_return Bounds{sat(child.consumed * e.max),
+                         sat(child.consumed * (e.max - 1u) + child.looked),
+                         child.overhang};
       }
       default:
-        return {kAll, kAll};
+        co_return Bounds{kAll, kAll};
     }
   }
 
@@ -158,6 +161,9 @@ class GapReach {
   // them: a run inside a terminal is that terminal's, whatever its length, and
   // trivia between two of them are no token of the tape's.
   std::uint32_t count(std::uint16_t node) const {
+    return descend(count_walk(node));
+  }
+  Descent<std::uint32_t> count_walk(std::uint16_t node) const {
     static constexpr std::uint32_t kAll = kUnboundedTokens;
     const auto sat = [](std::uint64_t v) {
       return static_cast<std::uint32_t>(std::min<std::uint64_t>(v, kAll));
@@ -167,33 +173,33 @@ class GapReach {
       case LexKind::token:
       case LexKind::chars:
       case LexKind::nguard:
-        return 1;
+        co_return 1u;
       case LexKind::positive:
       case LexKind::negative:
-        return count(e.a);
+        co_return co_await count_walk(e.a);
       case LexKind::gap_has:
       case LexKind::gap_is:
       case LexKind::end_mark:
       case LexKind::skip:
-        return 0;
+        co_return 0u;
       case LexKind::seq:
       case LexKind::alt: {
         std::uint64_t out = 0;
         for (unsigned i = 0; i < e.b; ++i) {
-          const std::uint32_t child = count(_g.lexChild[e.a + i]);
+          const std::uint32_t child = co_await count_walk(_g.lexChild[e.a + i]);
           out = e.kind == LexKind::seq ? out + child
                                        : std::max<std::uint64_t>(out, child);
         }
-        return sat(out);
+        co_return sat(out);
       }
       case LexKind::rep: {
-        std::uint64_t child = count(e.a);
-        if (e.b != kNoLexNode) child += count(e.b);
-        if (e.max == 0 || child == 0) return 0;
-        return e.max == kEndless ? kAll : sat(child * e.max);
+        std::uint64_t child = co_await count_walk(e.a);
+        if (e.b != kNoLexNode) child += co_await count_walk(e.b);
+        if (e.max == 0 || child == 0) co_return 0u;
+        co_return e.max == kEndless ? kAll : sat(child * e.max);
       }
       default:
-        return kAll;
+        co_return kAll;
     }
   }
 

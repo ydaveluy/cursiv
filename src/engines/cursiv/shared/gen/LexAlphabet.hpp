@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -84,35 +85,58 @@ struct LexAlphabet {
     classes(A);
   }
 
-  // A keyword with more spellings than are cut cannot beat trivia that reads
-  // on past it, so such trivia is refused. A walk that cannot conclude leaves
-  // the pair standing, with a warning.
+  // Trivia that can read on past an uncut keyword, by a character neither the
+  // keyword's boundary nor the trivia refuses, is refused: the keyword cannot
+  // beat it. A walk that cannot conclude only warns.
   template <class Cfg>
   void uncut_keywords(Cfg& g) const {
-    // Whether `x` reaches its acceptance through assertions alone.
-    const auto spelled = [&](std::vector<int> x) {
-      for (std::size_t i = 0; i < x.size(); ++i) {
-        const LexNfaState& st = nfa.s[static_cast<std::size_t>(x[i])];
-        if (st.accept >= 0) return true;
-        if (st.relay < 0) continue;
-        for (const int y : nfa.eclose(
-                 nfa.relays[static_cast<std::size_t>(st.relay)].resumeOut))
-          if (std::ranges::find(x, y) == x.end()) x.push_back(y);
+    const ByteSet* const sets = g.sets.data();
+    // Whether `sub` reads a byte or scalar none of the sets `refused` refuses.
+    const auto reads_free = [&](const std::vector<int>& sub,
+                                std::initializer_list<int> refused) {
+      ByteSet out, leads;
+      for (const int r : refused) {
+        if (r < 0) continue;
+        out |= sets[r];
+        leads |= lex_decode_bytes(g, static_cast<std::uint16_t>(r));
       }
-      return false;
+      leads.andnot(out);
+      const ByteSet read = lex_subset_reads(nfa, sets, sub);
+      if (read.intersects(lex_not(out | leads))) return true;
+      if (!read.intersects(leads)) return false;
+      LexCodePoints cps;
+      for (const int r : refused)
+        if (r >= 0) cps.unite(lex_set_cps(g, static_cast<std::uint16_t>(r)));
+      return lex_reads_outside(nfa, sets, sub, cps, leads);
+    };
+    // Trivia reads on by its edges, by a relay that reads text, or past a
+    // refusal of one class; other assertions are left to the walk.
+    const auto reads_past = [&](const std::vector<int>& x,
+                                const std::vector<int>& y) {
+      return std::ranges::any_of(x, [&](int s) {
+        const LexNfaState& st = nfa.s[static_cast<std::size_t>(s)];
+        if (st.accept < 0) return false;
+        if (reads_free(y, {st.bound})) return true;
+        return std::ranges::any_of(y, [&](int q) {
+          const int r = nfa.s[static_cast<std::size_t>(q)].relay;
+          if (r < 0) return false;
+          const LexRelayBuild& relay = nfa.relays[static_cast<std::size_t>(r)];
+          if (relay.row.predicate == kNoLexNode)
+            return st.bound < 0 ||
+                   !lex_bound_ends(g, static_cast<std::uint16_t>(st.bound));
+          const LexNode& e = g.lex[relay.row.predicate];
+          return e.kind == LexKind::nguard && e.a == kNoSet && e.min == 1 &&
+                 e.max == 0 &&
+                 reads_free(nfa.eclose(relay.resumeOut),
+                            {st.bound, g.lexChild[e.b]});
+        });
+      });
     };
     for (const std::uint16_t k : cut.uncut) {
       for (std::uint16_t t = 1; t < g.nterms; ++t) {
         if (!g.terms[t].trivia || startOf[t] < 0) continue;
-        const LexOverlap past = lex_pair_search(
-            nfa, g.sets.data(), startOf[k], startOf[t],
-            [&](const std::vector<int>& x, const std::vector<int>& y) {
-              return spelled(x) && std::ranges::any_of(y, [&](int s) {
-                       const LexNfaState& st =
-                           nfa.s[static_cast<std::size_t>(s)];
-                       return st.set >= 0 || st.relay >= 0;
-                     });
-            });
+        const LexOverlap past =
+            lex_pair_search(nfa, sets, startOf[k], startOf[t], reads_past);
         if (past == LexOverlap::found)
           return lower_refuse(g, LowerFail::keywordSpellings, k);
         if (past == LexOverlap::incomplete)

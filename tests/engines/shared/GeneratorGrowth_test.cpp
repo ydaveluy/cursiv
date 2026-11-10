@@ -71,6 +71,8 @@ struct RuntimeGrammar {
   std::vector<const cursiv::detail::ImageRuleDesc*> terms, nts, ignored;
   const cursiv::detail::ImageRuleDesc* entry = nullptr;
   const AstRowDesc* conversion = nullptr;
+  // The word class keywords end on.
+  std::string_view wordClass = "abcdefghijklmnopqrstuvwxyz0123456789_";
 
   RuntimeGrammar() { ignored.push_back(terminal("WS", some(set(" \t\r\n")))); }
 
@@ -223,8 +225,6 @@ struct RuntimeGrammar {
 
   template <class Lowered, class Lower>
   Lowered lowered(Lower&& lower, std::uint32_t gate = kOptionalGate) {
-    static constexpr std::string_view kWord =
-        "abcdefghijklmnopqrstuvwxyz0123456789_";
     const cursiv::detail::ImageDesc* const none =
         put({.kind = cursiv::detail::ImageKind::epsilon});
     cursiv::detail::ImageGrammarDesc grammar;
@@ -232,7 +232,7 @@ struct RuntimeGrammar {
     grammar.entry = entry;
     grammar.ignore = ignored.data();
     grammar.ignoreCount = static_cast<std::uint32_t>(ignored.size());
-    grammar.bound = {0, false, kWord};
+    grammar.bound = {0, false, wordClass};
     grammar.plain = {0, false, " \t\r\n"};
     LowerDesc desc;
     desc.terms = terms;
@@ -1121,7 +1121,37 @@ void many_keywords_spell_on_a_small_stack() {
   }));
 }
 
-// An expression nested thousands deep: no walk of either generator, from the
+// A keyword of twelve Greek letters whose cases start on different bytes has
+// 4 096 spellings, more than are cut. Trivia that starts with its letters is
+// refused where it reads on past the keyword by a byte or a scalar out of the
+// word class, not where it reads on by word bytes or scalars alone.
+void trivia_past_an_uncut_keyword_is_refused() {
+  const auto why = [](std::uint8_t flags, std::string_view rest) {
+    RuntimeGrammar g;
+    g.wordClass = "0-9A-Z_a-zΑ-Ωα-ω";
+    const auto spelled = [&](std::uint8_t guard) {
+      return g.put({.kind = cursiv::detail::ImageKind::lit,
+                    .flags = static_cast<std::uint8_t>(kLitFolded | guard),
+                    .text = "ΥΠΕΡΣΥΝΤΡΙΠΤΙΚΟΤΑΤΟΣ"});
+    };
+    g.ignored.push_back(g.terminal(
+        "REMARK", g.seq({spelled(0),
+                         g.many(g.put({.kind = cursiv::detail::ImageKind::cpset,
+                                       .flags = flags,
+                                       .text = rest}))})));
+    auto* root = g.node("Root");
+    g.body(root, g.member("v", spelled(kLitGuardWord)));
+    g.entry = root;
+    return ll_build_program(g.lowered<LlLowered>(ll_lower)).cfg.lowerWhy;
+  };
+  CHECK(why(0, "abc") == LowerFail::none);
+  CHECK(why(0, "α-ω") == LowerFail::none);
+  CHECK(why(kCpNot, "\n") == LowerFail::keywordSpellings);
+  CHECK(why(0, "α-ωΪ") == LowerFail::keywordSpellings);
+}
+
+// An expression nested thousands deep, in a rule, in a terminal that calls
+// another halfway and in a condition: no walk of either generator, from the
 // image to the emitted parser and the warnings, descends the native stack.
 void deep_nesting_generates_on_a_small_stack() {
   CHECK(on_small_stack([] {
@@ -1138,8 +1168,26 @@ void deep_nesting_generates_on_a_small_stack() {
         e = g.alt({g.word(spelled("k", i)),
                    g.seq({g.token("("), inner, g.token(")")})});
       }
+      const cursiv::detail::ImageDesc* t = g.token("y");
+      for (unsigned i = 0; i < 2000; ++i) {
+        if (i == 1000) t = g.call(g.terminal("INNER", t));
+        if (i == 1500)
+          t = g.seq({g.group(cursiv::detail::ImageKind::andOf, {t}), t});
+        const auto* inner = i % 3 == 0 ? t : i % 3 == 1 ? g.opt(t) : g.many(t);
+        t = g.alt({g.token("y"), g.seq({g.token("["), inner, g.token("]")})});
+      }
+      const cursiv::detail::ImageDesc* c = g.word("q");
+      for (unsigned i = 0; i < 2000; ++i)
+        c = g.alt({g.word("q"), g.seq({g.token("{"), i % 2 == 0 ? c : g.opt(c),
+                                       g.token("}")})});
       auto* root = g.node("Root");
-      g.body(root, g.member("v", e));
+      auto* deep = g.terminal("DEEP", t);
+      g.body(root,
+             g.seq({g.member("v", e),
+                    g.group(cursiv::detail::ImageKind::andOf, {g.call(deep)}),
+                    g.member("w", g.call(deep)),
+                    g.group(cursiv::detail::ImageKind::andOf, {c}),
+                    g.member("x", c)}));
       g.entry = root;
       g.lowered<int>([&](cursiv::detail::GrammarImage& image,
                          const LowerDesc& desc) {
@@ -1171,6 +1219,80 @@ void deep_nesting_generates_on_a_small_stack() {
   }));
 }
 
+// A terminal that calls itself last, behind a prefix nested thousands deep:
+// the check that it reads a regular closure keeps off the native stack.
+void right_linear_terminal_generates_on_a_small_stack() {
+  CHECK(on_small_stack([] {
+    RuntimeGrammar g;
+    const cursiv::detail::ImageDesc* u = g.token("u");
+    for (unsigned i = 0; i < 4000; ++i)
+      u = g.alt({g.token("u"), g.seq({g.token("<"), u, g.token(">")})});
+    auto* tail = g.terminal("TAIL", u);
+    g.body(tail, g.seq({u, g.opt(g.call(tail))}));
+    auto* root = g.node("Root");
+    g.body(root, g.member("t", g.call(tail)));
+    g.entry = root;
+    (void)ll_build_program(g.lowered<LlLowered>(ll_lower));
+  }));
+}
+
+// A chain of rules, each opening with a call to the next: finding the
+// alphabet of a record's first token keeps off the native stack.
+void rule_chain_generates_on_a_small_stack() {
+  CHECK(on_small_stack([] {
+    RuntimeGrammar g;
+    std::vector<cursiv::detail::ImageRuleDesc*> rules;
+    for (unsigned i = 0; i < 4000; ++i)
+      rules.push_back(g.node(spelled("R", i)));
+    for (unsigned i = 0; i + 1 < rules.size(); ++i)
+      g.body(rules[i],
+             g.seq({g.member("a", g.call(rules[i + 1])), g.token("x")}));
+    g.body(rules.back(), g.member("z", g.word("z")));
+    auto* root = g.node("Root");
+    g.body(root, g.member("v", g.call(rules[0])));
+    g.entry = root;
+    g.lowered<int>(
+        [&](cursiv::detail::GrammarImage& image, const LowerDesc& desc) {
+          const auto done = LlFinalProgram::make(
+              ll_build_program(ll_lower(image, desc)), "Chain");
+          CHECK(done.has_value());
+          if (done)
+            (void)ll_emit_parser_files(*done, "chain",
+                                       ll_emit_table(*done, "chain"));
+          return 0;
+        });
+  }));
+}
+
+// Data rules read in place, each a choice of the next and a token: each
+// conversion goes on every token below it, found off the native stack. The
+// first rule's definition reads the whole chain; the next ones run out of
+// positions.
+void alias_chain_lowers_on_a_small_stack() {
+  CHECK(on_small_stack([] {
+    RuntimeGrammar g;
+    std::vector<cursiv::detail::ImageRuleDesc*> alias;
+    for (unsigned i = 0; i < 2000; ++i) {
+      alias.push_back(g.data(spelled("A", i)));
+      const_cast<cursiv::detail::ImageStageDesc*>(alias.back()->stage)
+          ->inPlace = true;
+    }
+    for (unsigned i = 0; i + 1 < alias.size(); ++i)
+      g.body(alias[i], g.alt({g.call(alias[i + 1]), g.token(spelled("o", i))}));
+    g.body(alias.back(), g.token("z"));
+    auto* root = g.node("Root");
+    g.body(root, g.member("v", g.call(alias[0])));
+    g.entry = root;
+    LowerFail why = LowerFail::none;
+    try {
+      (void)g.lowered<LlLowered>(ll_lower);
+    } catch (const LowerRefused& refused) {
+      why = refused.why;
+    }
+    CHECK(why == LowerFail::tooManyPositions);
+  }));
+}
+
 // Two levels of a table may not share an operator; one that repeats with no
 // maximum is compared by its first tokens, a pattern terminal by itself.
 void a_table_compares_its_levels() {
@@ -1199,6 +1321,19 @@ void a_table_compares_its_levels() {
   };
   CHECK(table(std::vector{minus, minus}).code ==
         GrammarFaultCode::precedenceClash);
+  // An operator that ignores case shares the texts of its cases.
+  const Op lower = [](RuntimeGrammar& g) { return g.token("and"); };
+  const Op upper = [](RuntimeGrammar& g) { return g.token("AND"); };
+  const Op folded = [](RuntimeGrammar& g) {
+    return g.put({.kind = cursiv::detail::ImageKind::lit,
+                  .flags = kLitFolded,
+                  .text = "And"});
+  };
+  CHECK(!table(std::vector{lower, upper}));
+  CHECK(table(std::vector{lower, folded}).code ==
+        GrammarFaultCode::precedenceClash);
+  CHECK(table(std::vector{folded, upper}).code ==
+        GrammarFaultCode::precedenceClash);
   CHECK(!table(std::vector{minus, tildes}));
   const GrammarFault opens = table(std::vector{dashes, minus});
   CHECK(opens.code == GrammarFaultCode::precedenceClash && opens.gated);
@@ -1218,7 +1353,11 @@ void a_table_compares_its_levels() {
 int main() {
   a_table_compares_its_levels();
   many_keywords_spell_on_a_small_stack();
+  trivia_past_an_uncut_keyword_is_refused();
   deep_nesting_generates_on_a_small_stack();
+  rule_chain_generates_on_a_small_stack();
+  right_linear_terminal_generates_on_a_small_stack();
+  alias_chain_lowers_on_a_small_stack();
   a_fact_reaches_its_readers_final();
   a_class_goes_on_with_its_largest_part();
   a_rules_first_terminals_reach_its_readers();

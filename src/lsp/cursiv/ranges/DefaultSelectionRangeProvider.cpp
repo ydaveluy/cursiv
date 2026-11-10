@@ -2,6 +2,7 @@
 
 #include <lsp/types.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <ranges>
@@ -10,14 +11,16 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/syntax-tree/CstUtils.hpp"
+#include "cursiv/text/LspPosition.hpp"
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/text/word_scalar.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/Utf8.hpp"
 #include "cursiv/workspace/Document.hpp"
-#include "cursiv/text/LspPosition.hpp"
 
 namespace cursiv {
 
@@ -67,23 +70,40 @@ struct TokenSpan {
 }
 
 // The chain, outermost first, hidden records excluded -- a comment is not
-// a step of any selection. Roots are walked backwards via `subtree_begin`;
-// empty when no visible record covers the offset.
+// a step of any selection. The first leaf ending past the offset names the
+// innermost node covering it: its owners give the outer steps, the tree below
+// it the inner ones. Without one, the roots are walked backwards via
+// `subtree_begin`. Empty when no visible record covers the offset.
 [[nodiscard]] std::vector<NodeId> chain_at(const Cst& cst, TextOffset offset,
                                            const CancellationToken& token) {
   std::vector<NodeId> chain;
-  NodeId cursor = cst.size();
+  const AstNode* owner = nullptr;
+  if (const NodeCount rank = cst.leaves_before(offset);
+      rank < cst.leaf_count()) {
+    owner = owner_of_leaf(cst, cst.leaf(rank).id);
+    while (owner != nullptr && owner->cstNodeId != kNoNode &&
+           !covers(cst[owner->cstNodeId], offset))
+      owner = owner->parent;
+  }
   NodeId found = kNoNode;
-  while (cursor > 0) {
-    throw_if_cancelled(token);
-    const NodeId root = cursor - 1;
-    if (covers(cst[root], offset)) {
-      // Roots are disjoint: a hidden root covering the offset means no
-      // visible one does.
-      if (cst[root].hidden == 0) found = root;
-      break;
+  if (owner != nullptr && owner->cstNodeId != kNoNode) {
+    for (const AstNode* outer = owner->parent;
+         outer != nullptr && outer->cstNodeId != kNoNode; outer = outer->parent)
+      chain.push_back(outer->cstNodeId);
+    std::ranges::reverse(chain);
+    found = owner->cstNodeId;
+  } else {
+    for (NodeId cursor = cst.size(); cursor > 0;) {
+      throw_if_cancelled(token);
+      const NodeId root = cursor - 1;
+      if (covers(cst[root], offset)) {
+        // Roots are disjoint: a hidden root covering the offset means no
+        // visible one does.
+        if (cst[root].hidden == 0) found = root;
+        break;
+      }
+      cursor = cst.subtree_begin(root);
     }
-    cursor = cst.subtree_begin(root);
   }
   while (found != kNoNode) {
     chain.push_back(found);

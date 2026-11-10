@@ -29,7 +29,6 @@ if(_allocator_flags MATCHES "[-/]fsanitize=")
   return()
 endif()
 
-enable_language(C)
 include(FetchContent)
 set(_mimalloc_revision 56dc5eb80145f9a3ba7ca23d47c6a248b9d8586c) # v3.6.1
 set(_mimalloc_dir "cursiv_mimalloc-${_mimalloc_revision}")
@@ -48,6 +47,10 @@ FetchContent_Declare(cursiv_mimalloc
 FetchContent_MakeAvailable(cursiv_mimalloc)
 
 add_library(cursivAllocator OBJECT ${cursiv_mimalloc_SOURCE_DIR}/src/static.c)
+# Built as C++, its `operator new` throws `std::bad_alloc` when memory runs out,
+# where the C build aborts.
+set_source_files_properties(${cursiv_mimalloc_SOURCE_DIR}/src/static.c
+    PROPERTIES LANGUAGE CXX)
 target_include_directories(cursivAllocator SYSTEM PRIVATE
     ${cursiv_mimalloc_SOURCE_DIR}/include)
 # Documents are small: huge pages would hold far more memory than they use, and

@@ -273,10 +273,11 @@ struct LexDfaBuild {
       return ids.try_emplace(std::move(v), id).first->second;
     };
     bool behindLoneLead = false;
-    for (std::size_t i = 0; i < _order.size(); ++i) {
+    for (std::size_t i = 0; i < _sub.count(); ++i) {
       std::vector<LexDfaReading::Gate> gates;
       std::vector<std::uint32_t> gated;
-      const std::size_t mn = detach(members(_order[i]), gates, gated);
+      const std::size_t mn =
+          detach(members(static_cast<std::uint32_t>(i)), gates, gated);
       readings.push_back(read(mn));
       readings.back().gates = std::move(gates);
       readings.back().gated = std::move(gated);
@@ -292,7 +293,7 @@ struct LexDfaBuild {
       rows.resize((i + 1) * _ncls);
       row(mn, rows.data() + i * _ncls);
     }
-    const std::size_t n = _order.size();
+    const std::size_t n = _sub.count();
     std::uint32_t nblocks = 0;
     if (behindLoneLead) {
       std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t> pairs;
@@ -492,8 +493,6 @@ struct LexDfaBuild {
   const std::vector<std::uint64_t> _zeroRow;
   std::vector<std::uint8_t> _wide;    // the byte classes wholly past ASCII
   std::vector<std::uint32_t> _roots;  // the subsets the caller holds a state of
-  std::vector<std::uint32_t> _localOf;  // gid -> index in the DFA
-  std::vector<std::uint32_t> _order;    // the subsets, in discovery order
   std::vector<std::uint16_t> _final;    // subset -> the state it became
   // A transition's subset is the closure of the states its members step to:
   // one kernel is one subset, closed once however many transitions share it.
@@ -503,21 +502,11 @@ struct LexDfaBuild {
   std::vector<std::uint32_t> _kernelSub;
   std::vector<int> _kernel;
 
-  std::uint32_t number(std::uint32_t gid) {
-    if (_localOf.size() < _sub.count()) {
-      // Reserved at a hint: the pool grows one subset a step, and a resize
-      // re-initialises what it adds.
-      if (_localOf.empty()) _localOf.reserve(_nfa.s.size() * 4 + 512);
-      _localOf.resize(_sub.count(), kNoLocal);
-    }
-    auto& id = _localOf[gid];
-    if (id == kNoLocal) {
-      if (_order.size() >= kMaxSubsets)
-        throw LowerRefused(LowerFail::tokenGraphTooLarge);
-      id = static_cast<std::uint32_t>(_order.size());
-      _order.push_back(gid);
-    }
-    return id;
+  // A subset is numbered by the pool as it is first reached: past
+  // `kMaxSubsets` the terminal is refused.
+  static std::uint32_t number(std::uint32_t gid) {
+    if (gid >= kMaxSubsets) throw LowerRefused(LowerFail::tokenGraphTooLarge);
+    return gid;
   }
 
   std::uint32_t close_kernel() {

@@ -13,6 +13,7 @@
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/lr/runtime/LrGapMemo.hpp"
 #include "cursiv/lr/table/LrAction.hpp"
 #include "cursiv/lr/table/LrExpectTable.hpp"
@@ -80,6 +81,9 @@ struct LrCaretTable {
   std::span<const std::uint64_t> skipSet;
   std::span<const std::uint64_t> skipStop;
   std::uint16_t errMode = 0;
+  // The alphabet a fault is lexed with where a mode reads: in a section, its
+  // grammar's.
+  std::uint16_t (*errModeOf)(std::uint16_t) = nullptr;
   // The full transition relation: the running parser keeps no stack journal.
   struct Run {
     std::uint32_t first = 0;
@@ -181,6 +185,7 @@ struct LrCaretTable {
 void lr_next_features_at(const LrCaretTable& table,
                          const StampedGrammar& grammar, const Cst& cst,
                          TextOffset at, TextOffset resume,
-                         std::vector<NextFeature>& out);
+                         std::vector<NextFeature>& out,
+                         const CancellationToken& cancelToken);
 
 }  // namespace cursiv::engine

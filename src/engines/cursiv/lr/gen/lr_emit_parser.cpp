@@ -489,9 +489,10 @@ inline constexpr RowsTape kRowsTape{};
     }
   }
 
-  // A parse probes the fold table on nearly every reduce: the multiplier that
-  // scatters these keys best is searched, a tie keeping the first.
-  std::uint32_t fused_mul(unsigned slots) const {
+  // The multiplier that scatters these keys best, a tie keeping the first, and
+  // whether each key then sits at its first slot. A parse probes this table on
+  // nearly every reduce.
+  std::pair<std::uint32_t, bool> fused_mul(unsigned slots) const {
     static constexpr unsigned kTries = 16384;
     const unsigned shift = lr_fused_shift(slots), mask = slots - 1;
     std::vector<std::uint32_t> keys(a.nfused);
@@ -539,7 +540,7 @@ inline constexpr RowsTape kRowsTape{};
         best = m;
       }
     }
-    return best;
+    return {best, bestExtra == 0};
   }
 
   void emit_folds() {
@@ -553,17 +554,10 @@ inline constexpr RowsTape kRowsTape{};
       return;
     }
     const unsigned slots = lr_fused_slots(a.nfused);
-    const std::uint32_t mul = fused_mul(slots);
+    const auto [mul, collisionFree] = fused_mul(slots);
     std::vector<std::uint32_t> fk(slots, 0);
     std::vector<std::uint16_t> fv(slots, 0);
     lr_fused_hash(a.fused.data(), a.nfused, slots, mul, fk.data(), fv.data());
-    bool collisionFree = true;
-    for (const std::uint32_t key : fk)
-      if (key != kLrNoFusedKey &&
-          fk[(key * mul) >> lr_fused_shift(slots)] != key) {
-        collisionFree = false;
-        break;
-      }
     array("inline constexpr ::std::uint32_t kFusedKey[]", slots,
           [&](std::size_t i) { write(fk[i]); });
     array("inline constexpr ::std::uint16_t kFusedVal[]", slots,

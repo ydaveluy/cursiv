@@ -2,8 +2,6 @@
 // where a reading is decided, never which readings there are.
 #include "cursiv/lr/gen/lr_build_passes.hpp"
 
-#include "cursiv/shared/gen/PartitionRefine.hpp"
-
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -20,12 +18,14 @@
 
 #include "cursiv/lr/gen/LrBuckets.hpp"
 #include "cursiv/lr/gen/LrBuildCfg.hpp"
+#include "cursiv/lr/gen/LrFirstSets.hpp"
 #include "cursiv/lr/gen/LrGotoRows.hpp"
 #include "cursiv/lr/gen/LrLowProd.hpp"
 #include "cursiv/lr/gen/LrPeek.hpp"
 #include "cursiv/lr/gen/lr_term_run.hpp"
 #include "cursiv/lr/table/LrAction.hpp"
 #include "cursiv/lr/table/LrColdTables.hpp"
+#include "cursiv/shared/gen/PartitionRefine.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/gen/set_dedup.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
@@ -337,12 +337,10 @@ void lr_minimize_states(LrBuildTable& A) {
     }
   }
 
-  std::vector<std::uint32_t> cls(n, 0);
   std::vector<std::uint32_t> key, guardKey;
-  // A guard is read by the classes of the states it goes to.
   std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> guardIds;
   const auto guard_class = [&](std::size_t q) {
-    lr_guard_key(A.guards[q], [&](std::uint16_t to) { return cls[to]; }, guardKey);
+    lr_guard_key(A.guards[q], [](std::uint16_t) { return 0u; }, guardKey);
     return guardIds
         .try_emplace(guardKey, static_cast<std::uint32_t>(guardIds.size()))
         .first->second;
@@ -412,9 +410,10 @@ void lr_minimize_states(LrBuildTable& A) {
   each_edge([&](std::uint32_t, std::uint32_t place, std::uint32_t) {
     places = std::max(places, place + 1);
   });
-  cls = partition_refine(opening, places, each_edge,
-                         A.work != nullptr ? &A.work->minimizes : nullptr,
-                         A.work != nullptr ? &A.work->moves : nullptr);
+  const std::vector<std::uint32_t> cls =
+      partition_refine(opening, places, each_edge,
+                       A.work != nullptr ? &A.work->minimizes : nullptr,
+                       A.work != nullptr ? &A.work->moves : nullptr);
   // One representative per class, numbered by first occurrence so the start
   // state keeps its entry.
   std::vector<std::uint32_t> reps;
@@ -584,25 +583,18 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
   };
   // The first terminals of a rule's shortest readings, from the first symbol of
   // each that needs anything: a set only grows, so the walk ends.
-  std::vector<std::uint8_t> reads(nP, 0), queued(nP, 1);
-  std::vector<std::uint32_t> todo(nP);
-  for (unsigned p = 0; p < nP; ++p) {
+  std::vector<std::uint8_t> reads(nP, 0);
+  for (unsigned p = 0; p < nP; ++p)
     reads[p] = yieldN[prods[p].lhs] != kInf &&
                yieldFrom(p, 0) == yieldN[prods[p].lhs];
-    todo[p] = nP - 1u - p;
-  }
-  while (!todo.empty()) {
-    const std::uint32_t p = todo.back();
-    todo.pop_back();
-    queued[p] = 0;
+  for (LrProductionQueue todo(nP); todo.more();) {
+    const unsigned p = todo.next();
     if (reads[p] == 0) continue;
     DynSet grown = firstN[prods[p].lhs];
     firstFrom(prods[p], 0, grown);
     if (grown == firstN[prods[p].lhs]) continue;
     firstN[prods[p].lhs] = std::move(grown);
-    for (const std::uint32_t reader : readers[prods[p].lhs])
-      if (std::exchange(queued[reader], std::uint8_t{1}) == 0)
-        todo.push_back(reader);
+    for (const std::uint32_t reader : readers[prods[p].lhs]) todo.push(reader);
   }
   A.closeMax = 0;
   for (unsigned p = 0; p < nP; ++p)

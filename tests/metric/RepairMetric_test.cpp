@@ -5,32 +5,36 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
+#include "cursiv/Check.hpp"
+#include "cursiv/CursivActions.hpp"
+#include "cursiv/SeededSource.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/shared/runtime/RepairFault.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/CstLeaf.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/shared/runtime/RepairFault.hpp"
-#include "cursiv/CursivActions.hpp"
-#include "cursiv/SeededSource.hpp"
+#include "domainmodel/DomainModelGrammar.hpp"
+#include "domainmodel/generated/DomainModel/Module.hpp"
 #include "recovery_metric/support/AstOverlap.hpp"
 #include "recovery_metric/support/FaultCorpus.hpp"
 #include "recovery_metric/support/FaultPairing.hpp"
 #include "recovery_metric/support/FaultWindow.hpp"
 #include "recovery_metric/support/RepairCase.hpp"
 #include "recovery_metric/support/RepairFault.hpp"
+#include "recovery_metric/support/RepairTally.hpp"
 #include "recovery_metric/support/RepairTwin.hpp"
 #include "recovery_metric/support/TextKept.hpp"
-#include "cursiv/Check.hpp"
-#include "domainmodel/DomainModelGrammar.hpp"
-#include "domainmodel/generated/DomainModel/Module.hpp"
 
 using cursiv::test::failures;
 
@@ -254,6 +258,102 @@ void the_tree_is_aligned_per_member() {
   CHECK(renamed.total == 4 && renamed.kept == 3);
 }
 
+// The domain model's actions, with the values of some nodes said otherwise:
+// text holding any byte, or a value no reader reaches.
+struct SaidValues final : cursiv::fuzzer::GrammarActions {
+  struct Value {
+    std::string property;
+    cursiv::fuzzer::ValueKind kind;
+    std::string text;
+  };
+  std::unordered_map<const cursiv::AstNode*, std::vector<Value>> values;
+
+  cursiv::AstNode* make(cursiv::ElementId e,
+                        cursiv::fuzzer::WalkTree& t) const override {
+    return kDmActions.make(e, t);
+  }
+  cursiv::ElementId primary(cursiv::ElementId e) const override {
+    return kDmActions.primary(e);
+  }
+  std::span<const cursiv::fuzzer::InfixOp> operators(
+      cursiv::ElementId e) const override {
+    return kDmActions.operators(e);
+  }
+  cursiv::fuzzer::Write fold(cursiv::ElementId e, cursiv::ElementId op,
+                             cursiv::AstNode& node, cursiv::AstNode* left,
+                             std::string_view text,
+                             cursiv::AstNode* right) const override {
+    return kDmActions.fold(e, op, node, left, text, right);
+  }
+  cursiv::fuzzer::Write write_node(cursiv::ElementId e, cursiv::AstNode& owner,
+                                   cursiv::AstNode* child) const override {
+    return kDmActions.write_node(e, owner, child);
+  }
+  cursiv::fuzzer::Write write_text(cursiv::ElementId e,
+                                   cursiv::ElementId payload,
+                                   cursiv::AstNode& owner,
+                                   std::string_view text) const override {
+    return kDmActions.write_text(e, payload, owner, text);
+  }
+  std::optional<std::string> denote(cursiv::ElementId e,
+                                    std::string_view text) const override {
+    return kDmActions.denote(e, text);
+  }
+  void visitValues(
+      const cursiv::AstNode& n,
+      cursiv::function_ref<void(std::string_view, std::uint32_t,
+                                cursiv::fuzzer::ValueKind, std::string_view)>
+          yield) const override {
+    const auto it = values.find(&n);
+    if (it == values.end()) return kDmActions.visitValues(n, yield);
+    for (const Value& v : it->second) yield(v.property, 0, v.kind, v.text);
+  }
+};
+
+// A node is kept only when every value of it reads the same: text moved from
+// one member into the next is a change, and a value no reader reaches leaves
+// the node out of the count and the tree not whole.
+void a_node_is_kept_by_values_read_whole() {
+  const auto parser = dm_parser();
+  const auto reflection = dm::generated::DomainModel::create_ast_reflection();
+  const std::string text = "package p { entity A {} }";
+  const auto ra = parser->parse(text);
+  const auto rb = parser->parse(text);
+  CHECK(ra.value != nullptr && rb.value != nullptr);
+  if (ra.value == nullptr || rb.value == nullptr) return;
+  const auto entity =
+      [](const cursiv::AstNode* root) -> const cursiv::AstNode* {
+    const auto* model = cursiv::ast_cast<const dm::ast::DomainModel>(root);
+    const auto* package =
+        cursiv::ast_cast<const dm::ast::PackageDeclaration>(model->elements[0]);
+    return package->elements[0];
+  };
+  const auto none = [](const cursiv::AstNode&) { return false; };
+  using K = cursiv::fuzzer::ValueKind;
+
+  SaidValues moved;
+  moved.values[entity(ra.value)] = {{"name", K::text, "x\037b#0=y"},
+                                    {"b", K::text, ""}};
+  moved.values[entity(rb.value)] = {{"name", K::text, "x"},
+                                    {"b", K::text, "y\037b#0="}};
+  const metric::AstOverlap byMoved{*reflection, moved};
+  CHECK(!byMoved.same(*ra.value, *rb.value));
+  const auto m = byMoved.run(*ra.value, rb.value, none);
+  CHECK(m.total == 3 && m.kept == 2);
+
+  SaidValues unread;
+  unread.values[entity(ra.value)] = {{"name", K::unreadable, ""}};
+  unread.values[entity(rb.value)] = {{"name", K::unreadable, ""}};
+  const metric::AstOverlap byUnread{*reflection, unread};
+  CHECK(!byUnread.same(*ra.value, *rb.value));
+  metric::RepairVerdict v;
+  v.ast = byUnread.run(*ra.value, rb.value, none);
+  CHECK(v.ast.total == 2 && v.ast.kept == 2 && v.ast.unread == 1);
+  metric::RepairTally tally;
+  tally.add(v);
+  CHECK(tally.astWhole == 0);
+}
+
 // The closers still due after each token: the `}` of an entity opened before
 // the cut, those of the packages around it, never a record that no written
 // token opened.
@@ -282,6 +382,7 @@ int main() {
   the_text_is_aligned_not_counted();
   an_insertion_that_restores_is_no_invention();
   the_tree_is_aligned_per_member();
+  a_node_is_kept_by_values_read_whole();
   a_cut_counts_the_closers_still_due();
   return cursiv::test::report("RepairMetric_test");
 }

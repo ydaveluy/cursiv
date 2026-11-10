@@ -38,12 +38,12 @@ class Parser {
     return {};
   }
 
-  // What may be written at `at`, where the document's text resumes at
-  // `resume` (`at == resume` for an insertion). Read from the element ids the
-  // engine wrote on the tree; by default there is no answer.
-  virtual void nextFeaturesAt(const Cst&, TextOffset, TextOffset,
-                              std::vector<NextFeature>&) const {
-  }
+  // What may be written at `at`, where the document's text resumes at `resume`
+  // (`at == resume` for an insertion), read from the element ids the engine
+  // wrote on the tree; none by default. A stop throws `OperationCancelled`.
+  virtual void nextFeaturesAt(
+      const Cst&, TextOffset, TextOffset, std::vector<NextFeature>&,
+      const CancellationToken& /*cancelToken*/ = kNoCancel) const {}
 };
 
 // `parser` reading the text `translate` makes of each document, while

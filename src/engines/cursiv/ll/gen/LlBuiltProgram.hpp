@@ -33,7 +33,6 @@ constexpr bool ll_fuse_tabled(std::uint32_t joins, bool owning) {
 struct LlBuiltProgram : ShapeOverflow {
   LlLowCfg cfg{};
   ChainPool writes{};
-  std::vector<std::uint8_t> nestChains{};
 
   // The graph, one state per position of a body and one edge per way out.
   Vec<LlAtnState> states{};

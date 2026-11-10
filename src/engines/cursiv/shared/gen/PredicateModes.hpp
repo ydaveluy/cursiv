@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "cursiv/shared/gen/GapReach.hpp"
@@ -24,67 +25,86 @@ struct PredicateModes {
   std::vector<DynSet> first, follow;
   std::vector<bool> nullable, done;
 
-  void read(std::uint16_t at) {
-    if (done[at]) return;
-    done[at] = true;
-    const LexNode e = g.lex[at];
-    nullable[at] = true;
-    if (e.kind == LexKind::token) {
-      first[at].set(e.a);
-      nullable[at] = false;
-    } else if (e.kind == LexKind::rep) {
-      read(e.a);
-      first[at] = first[e.a];
-      nullable[at] = e.min == 0 || nullable[e.a];
-    } else if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
-      nullable[at] = e.kind == LexKind::seq;
-      for (unsigned i = 0; i < e.b; ++i) {
-        const auto child = g.lexChild[e.a + i];
-        read(child);
-        if (e.kind == LexKind::alt || nullable[at]) first[at] |= first[child];
-        nullable[at] = e.kind == LexKind::alt ? nullable[at] || nullable[child]
-                                              : nullable[at] && nullable[child];
+  // Folds `root`'s first terminals and nullability, its children first.
+  void read(std::uint16_t root) {
+    for (std::vector todo{std::pair{root, false}}; !todo.empty();) {
+      const auto [at, folds] = todo.back();
+      todo.pop_back();
+      const LexNode e = g.lex[at];
+      if (!folds) {
+        if (done[at]) continue;
+        done[at] = true;
+        todo.emplace_back(at, true);
+        if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
+          for (unsigned i = e.b; i-- > 0;)
+            todo.emplace_back(g.lexChild[e.a + i], false);
+        } else if (e.kind == LexKind::rep || e.kind == LexKind::positive ||
+                   e.kind == LexKind::negative) {
+          todo.emplace_back(e.a, false);
+        }
+        continue;
       }
-    } else if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
-      read(e.a);
+      nullable[at] = true;
+      if (e.kind == LexKind::token) {
+        first[at].set(e.a);
+        nullable[at] = false;
+      } else if (e.kind == LexKind::rep) {
+        first[at] = first[e.a];
+        nullable[at] = e.min == 0 || nullable[e.a];
+      } else if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
+        nullable[at] = e.kind == LexKind::seq;
+        for (unsigned i = 0; i < e.b; ++i) {
+          const auto child = g.lexChild[e.a + i];
+          if (e.kind == LexKind::alt || nullable[at]) first[at] |= first[child];
+          nullable[at] = e.kind == LexKind::alt
+                             ? nullable[at] || nullable[child]
+                             : nullable[at] && nullable[child];
+        }
+      }
     }
   }
 
   std::vector<bool> trace() {
     std::vector<bool> reached(g.nlex);
-    const auto visit = [&](auto&& self, std::uint16_t at, const DynSet& after) {
-      if (reached[at] && follow[at].covers(after)) return;
-      reached[at] = true;
-      follow[at] |= after;
-      read(at);
-      const LexNode e = g.lex[at];
-      if (e.kind == LexKind::seq) {
-        DynSet next = after;
-        for (unsigned i = e.b; i-- > 0;) {
-          const auto child = g.lexChild[e.a + i];
-          self(self, child, next);
-          if (nullable[child])
-            next |= first[child];
-          else
-            next = first[child];
+    std::vector<std::pair<std::uint16_t, DynSet>> todo;
+    const auto visit = [&](std::uint16_t root, const DynSet& from) {
+      todo.emplace_back(root, from);
+      while (!todo.empty()) {
+        const auto [at, after] = std::move(todo.back());
+        todo.pop_back();
+        if (reached[at] && follow[at].covers(after)) continue;
+        reached[at] = true;
+        follow[at] |= after;
+        read(at);
+        const LexNode e = g.lex[at];
+        if (e.kind == LexKind::seq) {
+          DynSet next = after;
+          for (unsigned i = e.b; i-- > 0;) {
+            const auto child = g.lexChild[e.a + i];
+            todo.emplace_back(child, next);
+            if (nullable[child])
+              next |= first[child];
+            else
+              next = first[child];
+          }
+        } else if (e.kind == LexKind::alt) {
+          for (unsigned i = 0; i < e.b; ++i)
+            todo.emplace_back(g.lexChild[e.a + i], after);
+        } else if (e.kind == LexKind::rep) {
+          todo.emplace_back(e.a, first[e.a] | after);
+          // A round's skipper also elects against the reading that stops.
+          if (e.b != kNoLexNode) todo.emplace_back(e.b, first[e.a] | after);
+        } else if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
+          todo.emplace_back(e.a, DynSet{});
+        } else if (e.kind == LexKind::skip) {
+          for (unsigned i = 0; i < e.b; ++i) read(g.lexChild[e.a + i]);
         }
-      } else if (e.kind == LexKind::alt) {
-        for (unsigned i = 0; i < e.b; ++i)
-          self(self, g.lexChild[e.a + i], after);
-      } else if (e.kind == LexKind::rep) {
-        self(self, e.a, first[e.a] | after);
-        // A round's skipper also elects against the reading that stops.
-        if (e.b != kNoLexNode) self(self, e.b, first[e.a] | after);
-      } else if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
-        self(self, e.a, DynSet{});
-      } else if (e.kind == LexKind::skip) {
-        for (unsigned i = 0; i < e.b; ++i) read(g.lexChild[e.a + i]);
       }
     };
     for (const auto& leaf : g.gapLeaves.v)
       if (leaf.reads_tokens()) {
-        visit(visit, leaf.node, DynSet{});
-        if (leaf.skip != kNoLexNode) visit(visit, leaf.skip, first[leaf.node]);
+        visit(leaf.node, DynSet{});
+        if (leaf.skip != kNoLexNode) visit(leaf.skip, first[leaf.node]);
       }
     return reached;
   }

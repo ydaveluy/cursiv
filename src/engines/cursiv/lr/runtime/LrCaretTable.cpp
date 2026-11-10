@@ -22,6 +22,7 @@
 #include "cursiv/lr/runtime/lr_lookahead.hpp"
 #include "cursiv/lr/runtime/lr_refusal.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 #include "cursiv/shared/runtime/LexByteRun.hpp"
 #include "cursiv/shared/runtime/token_end_from.hpp"
@@ -988,7 +989,7 @@ class CaretStacks {
         if constexpr (Repair)
           repairToken = token.begin == token.end
                             ? Token{held.begin, held.begin, token.sym}
-                            : written(held);
+                            : written(held, heldMode);
         const Token& asked = Repair ? repairToken : token;
         const auto cell = _table.run(state, token.sym);
         bool viable = false;
@@ -1156,14 +1157,14 @@ class CaretStacks {
     return -1;
   }
 
-  // The token in hand as the author wrote it: where its mode read nothing,
-  // the reading of the mode that lexes everything, as the repair asks it.
-  Token written(const Token& held) const {
+  // The token in hand as the author wrote it: where `mode` read nothing, the
+  // reading of the alphabet a fault there is lexed with, as the repair asks it.
+  Token written(const Token& held, std::uint16_t mode) const {
     const auto len = static_cast<TextOffset>(_text.size());
     if (held.sym != kInvalidSymbol || held.begin >= len) return held;
     TextOffset halt = 0;
     const Scan s =
-        _table.lex(_text.data(), len, _table.errMode, held.begin, halt);
+        _table.lex(_text.data(), len, _table.errModeOf(mode), held.begin, halt);
     if (s.term != kInvalidSymbol && s.end > held.begin)
       return Token{held.begin, s.end, s.term};
     return held;
@@ -1878,17 +1879,24 @@ class CaretStacks {
 class CaretReplay {
  public:
   CaretReplay(const LrCaretTable& table, const Cst& cst, CaretStacks& stacks,
-              TextOffset horizon)
-      : _table(table), _cst(cst), _stacks(stacks), _horizon(horizon) {}
+              TextOffset horizon, const CancellationToken& cancelToken)
+      : _table(table),
+        _cst(cst),
+        _stacks(stacks),
+        _horizon(horizon),
+        _stop(cancelToken) {}
 
   // The records under `prefix` in order, then the repairs `events` names. Out
   // of line: inlined, the caller's register pressure falls on every job.
   CURSIV_NOINLINE bool run(NodeId prefix, std::span<const NodeId> events) {
     for (std::size_t i = events.size(); i-- > 0;)
       _jobs.push_back(Job{events[i], 0, false});
-    for (NodeId r = prefix; r > 0; r = _cst.subtree_begin(r - 1))
+    for (NodeId r = prefix; r > 0; r = _cst.subtree_begin(r - 1)) {
+      _stop.poll();
       _jobs.push_back(Job{r - 1, 0, false});
+    }
     while (!_jobs.empty()) {
+      _stop.poll();
       const Job job = _jobs.back();
       _jobs.pop_back();
       if (!step(job)) return false;
@@ -2004,6 +2012,7 @@ class CaretReplay {
   const Cst& _cst;
   CaretStacks& _stacks;
   TextOffset _horizon;
+  CancellationPoll _stop;
   // The repairs among the records before `_gathered`, in order.
   std::vector<NodeId> _repairs;
   NodeId _gathered = 0;
@@ -2028,7 +2037,8 @@ TextOffset jump_horizon(const LrCaretTable& table, const Cst& cst,
 // A caret separated from a token the repair invented only by bytes that were
 // blanks before the invention stands in the same gap, so it may precede it.
 void step_before_invented(const LrCaretTable& table, const Cst& cst,
-                          TextOffset at, CstLeaf& leaf, NodeCount& rank) {
+                          TextOffset at, CstLeaf& leaf, NodeCount& rank,
+                          const CancellationToken& cancelToken) {
   const std::string_view text = cst.text();
   for (NodeCount k = rank + 1; leaf && k-- > 0;) {
     const CstLeaf l = cst.leaf(k);
@@ -2038,7 +2048,8 @@ void step_before_invented(const LrCaretTable& table, const Cst& cst,
       const CstLeaf before = read_leaf_before(cst, table.stamp, r, nullptr);
       CaretStacks probe(table, text);
       CaretReplay replay(table, cst, probe,
-                         before ? jump_horizon(table, cst, r) : TextOffset{0});
+                         before ? jump_horizon(table, cst, r) : TextOffset{0},
+                         cancelToken);
       if (replay.run(before ? before.id + 1 : 0, {}) &&
           probe.reads_blanks_to(at)) {
         leaf = before;
@@ -2066,11 +2077,12 @@ std::atomic<std::uint32_t>* LrSampleReads::cells(std::size_t count) const {
 void lr_next_features_at(const LrCaretTable& table,
                          const StampedGrammar& grammar, const Cst& cst,
                          TextOffset at, TextOffset resume,
-                         std::vector<NextFeature>& out) {
+                         std::vector<NextFeature>& out,
+                         const CancellationToken& cancelToken) {
   if (!StampedGrammar::caret_in(cst, at, resume)) return;
   NodeCount rank = cst.leaves_before(at);
   CstLeaf leaf = read_leaf_before(cst, table.stamp, rank, nullptr);
-  step_before_invented(table, cst, at, leaf, rank);
+  step_before_invented(table, cst, at, leaf, rank, cancelToken);
   const NodeCount leafRank = rank;
   const std::string_view text = cst.text();
   bool skipped = false;
@@ -2142,12 +2154,12 @@ void lr_next_features_at(const LrCaretTable& table,
         TextOffset h = 0;
         asked = true;
         // A word the repair read as another is no token of its reading: read
-        // under the alphabet that admits everything, the candidate only must
-        // not make one word with it.
+        // under the alphabet a fault there is lexed with, the candidate only
+        // must not make one word with it.
         if (leaf.recovered) {
-          const Scan s = table.lex(splice.data(),
-                                   static_cast<TextOffset>(splice.size()),
-                                   table.errMode, 0, h);
+          const Scan s =
+              table.lex(splice.data(), static_cast<TextOffset>(splice.size()),
+                        table.errModeOf(m), 0, h);
           ok = ok || s.term == kInvalidSymbol || s.end <= at - leaf.begin;
           halt = std::max(halt, h);
           return;
@@ -2276,7 +2288,8 @@ void lr_next_features_at(const LrCaretTable& table,
   events.resize(dropped);
 
   CaretReplay replay(table, cst, stacks,
-                     leaf ? jump_horizon(table, cst, leafRank) : TextOffset{0});
+                     leaf ? jump_horizon(table, cst, leafRank) : TextOffset{0},
+                     cancelToken);
   if (!replay.run(prefix, events)) return;
   if (attached) stacks.name_readings(leafTerm);
   const NodeCount held = cst.leaves_before(at);
@@ -2392,8 +2405,9 @@ void lr_next_features_at(const LrCaretTable& table,
             return true;
         return false;
       };
-      // A candidate with no spelling has its conditions asked of each word its
-      // terminal is read as, once a closure shows it asks any.
+      // A candidate with no spelling has its conditions asked of each sample
+      // word its terminal reads, once a closure shows it asks any; a terminal
+      // that reads none stays offered unchecked.
       const auto type = [&](std::string_view word) {
         stacks.next(
             term, at, resume, spelling, word,

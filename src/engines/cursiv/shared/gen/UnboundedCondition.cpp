@@ -18,60 +18,67 @@ namespace cursiv::engine {
 
 namespace {
 
-// Whether a round of `node` may read a byte. `calls` holds the callees entered
-// on the way: one entered again reads nothing new.
-bool consumes(const LowerPools& c, std::uint16_t node,
-              std::vector<std::uint16_t>& calls) {
-  const LexNode& e = c.lex[node];
-  switch (e.kind) {
-    case LexKind::token:
-      return consumes(c, lex_token_body(c, e), calls);
-    case LexKind::mark:
-      return consumes(c, e.a, calls);
-    case LexKind::call: {
-      const std::uint16_t callee = lex_callee(c, e);
-      if (std::ranges::find(calls, callee) != calls.end()) return false;
-      calls.push_back(callee);
-      const bool out = consumes(c, callee, calls);
-      calls.pop_back();
-      return out;
+// Whether a round of `node` may read a byte; a callee is entered once.
+bool consumes(const LowerPools& c, std::uint16_t node) {
+  std::vector<std::uint16_t> calls;
+  for (std::vector todo{node}; !todo.empty();) {
+    const LexNode& e = c.lex[todo.back()];
+    todo.pop_back();
+    switch (e.kind) {
+      case LexKind::token:
+        todo.push_back(lex_token_body(c, e));
+        break;
+      case LexKind::mark:
+        todo.push_back(e.a);
+        break;
+      case LexKind::call:
+        if (const std::uint16_t callee = lex_callee(c, e);
+            std::ranges::find(calls, callee) == calls.end()) {
+          calls.push_back(callee);
+          todo.push_back(callee);
+        }
+        break;
+      case LexKind::chars:
+      case LexKind::same:
+      case LexKind::through_lit:
+      case LexKind::through_same:
+      case LexKind::through_nested:
+        return true;
+      case LexKind::seq:
+      case LexKind::alt:
+        for (unsigned i = 0; i < e.b; ++i) todo.push_back(c.lexChild[e.a + i]);
+        break;
+      case LexKind::rep:
+        if (e.max != 0) todo.push_back(e.a);
+        break;
+      default:
+        break;
     }
-    case LexKind::chars:
-    case LexKind::same:
-    case LexKind::through_lit:
-    case LexKind::through_same:
-    case LexKind::through_nested:
-      return true;
-    case LexKind::seq:
-    case LexKind::alt:
-      for (unsigned i = 0; i < e.b; ++i)
-        if (consumes(c, c.lexChild[e.a + i], calls)) return true;
-      return false;
-    case LexKind::rep:
-      return e.max != 0 && consumes(c, e.a, calls);
-    default:
-      return false;
   }
+  return false;
 }
 
 // The repetitions under `node` that read on without end, and whether the
 // parse keeps their rounds: where `free`, no repetition holds `node`.
 void endless_runs(const LowerPools& c, std::uint16_t node, bool free,
                   std::vector<std::pair<std::uint16_t, bool>>& out) {
-  const LexNode& e = c.lex[node];
-  if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
-    endless_runs(c, e.a, true, out);
-  } else if (e.kind == LexKind::rep) {
-    // A kept run's rounds read its item from each token: a run inside it is
-    // read to its end each time.
-    std::vector<std::uint16_t> calls;
-    const bool endless = e.max == kEndless && consumes(c, e.a, calls);
-    const bool kept = free && phrase_kept_run(c, node);
-    if (endless) out.emplace_back(node, kept);
-    if (!endless || kept) endless_runs(c, e.a, false, out);
-  } else if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
-    for (unsigned i = 0; i < e.b; ++i)
-      endless_runs(c, c.lexChild[e.a + i], free, out);
+  for (std::vector todo{std::pair{node, free}}; !todo.empty();) {
+    const auto [at, unheld] = todo.back();
+    todo.pop_back();
+    const LexNode& e = c.lex[at];
+    if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
+      todo.emplace_back(e.a, true);
+    } else if (e.kind == LexKind::rep) {
+      // A kept run's rounds read its item from each token: a run inside it is
+      // read to its end each time.
+      const bool endless = e.max == kEndless && consumes(c, e.a);
+      const bool kept = unheld && phrase_kept_run(c, at);
+      if (endless) out.emplace_back(at, kept);
+      if (!endless || kept) todo.emplace_back(e.a, false);
+    } else if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
+      for (unsigned i = e.b; i-- > 0;)
+        todo.emplace_back(c.lexChild[e.a + i], unheld);
+    }
   }
 }
 
@@ -94,21 +101,21 @@ std::string spell_set(const ByteSet& bytes) {
 
 // A run as the warning spells it, `...` for what it does not spell. With
 // `identity`, it spells all it reads, so two runs spelt the same read the same.
-std::string spell(const LowerPools& c, std::uint16_t node,
-                  bool identity = false) {
+Descent<std::string> spell_walk(const LowerPools& c, std::uint16_t node,
+                                bool identity) {
   const LexNode& e = c.lex[node];
   switch (e.kind) {
     case LexKind::token:
-      return spell(c, lex_token_body(c, e), identity) +
-             (identity ? "#" + decimal(e.a) : "");
+      co_return co_await spell_walk(c, lex_token_body(c, e), identity) +
+          (identity ? "#" + decimal(e.a) : "");
     case LexKind::positive:
-      return "&" + spell(c, e.a, identity);
+      co_return "&" + co_await spell_walk(c, e.a, identity);
     case LexKind::negative:
-      return "!" + spell(c, e.a, identity);
+      co_return "!" + co_await spell_walk(c, e.a, identity);
     case LexKind::end_mark:
-      return "eof";
+      co_return "eof";
     case LexKind::chars:
-      return spell_set(c.sets[e.a]);
+      co_return spell_set(c.sets[e.a]);
     case LexKind::nguard: {
       std::string out = "!";
       for (std::uint32_t k = 0; k < e.min; ++k)
@@ -117,14 +124,16 @@ std::string spell(const LowerPools& c, std::uint16_t node,
         if (e.a != kNoSet) out += "/" + spell_set(c.sets[e.a]);
         if (e.max != 0) out += "/scalar";
       }
-      return out;
+      co_return out;
     }
     case LexKind::skip: {
-      if (!identity) return "...";
+      if (!identity) co_return "...";
       std::string out = "~(";
-      for (unsigned i = 0; i < e.b; ++i)
-        out += (i != 0 ? " " : "") + spell(c, c.lexChild[e.a + i], identity);
-      return out + ")";
+      for (unsigned i = 0; i < e.b; ++i) {
+        if (i != 0) out += " ";
+        out += co_await spell_walk(c, c.lexChild[e.a + i], identity);
+      }
+      co_return out + ")";
     }
     case LexKind::seq:
     case LexKind::alt: {
@@ -134,22 +143,28 @@ std::string spell(const LowerPools& c, std::uint16_t node,
         const std::uint16_t child = c.lexChild[e.a + i];
         if (!identity && c.lex[child].kind == LexKind::skip) continue;
         if (parts++ != 0) out += e.kind == LexKind::seq ? " " : " | ";
-        out += spell(c, child, identity);
+        out += co_await spell_walk(c, child, identity);
       }
-      return "(" + out + ")";
+      co_return "(" + out + ")";
     }
     case LexKind::rep: {
-      std::string body = spell(c, e.a, identity);
-      if (identity && e.b != kNoLexNode) body += spell(c, e.b, identity);
+      std::string body = co_await spell_walk(c, e.a, identity);
+      if (identity && e.b != kNoLexNode)
+        body += co_await spell_walk(c, e.b, identity);
       if (e.max != kEndless)
-        return body + "{" + decimal(e.min) + "," + decimal(e.max) + "}";
-      return body + (e.min == 0   ? "*"
-                     : e.min == 1 ? "+"
-                                  : "{" + decimal(e.min) + ",}");
+        co_return body + "{" + decimal(e.min) + "," + decimal(e.max) + "}";
+      co_return body + (e.min == 0   ? "*"
+                        : e.min == 1 ? "+"
+                                     : "{" + decimal(e.min) + ",}");
     }
     default:
-      return identity ? "...#" + decimal(node) : "...";
+      co_return identity ? "...#" + decimal(node) : "...";
   }
+}
+
+std::string spell(const LowerPools& c, std::uint16_t node,
+                  bool identity = false) {
+  return descend(spell_walk(c, node, identity));
 }
 
 }  // namespace

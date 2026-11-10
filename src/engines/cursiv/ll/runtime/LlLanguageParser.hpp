@@ -93,11 +93,13 @@ class LlLanguageParser final : public Parser {
     return out;
   }
 
-  void nextFeaturesAt(const Cst& cst, TextOffset at, TextOffset resume,
-                      std::vector<NextFeature>& out) const override {
+  void nextFeaturesAt(
+      const Cst& cst, TextOffset at, TextOffset resume,
+      std::vector<NextFeature>& out,
+      const CancellationToken& cancelToken = kNoCancel) const override {
     LexSuffixSession<LlLexTape<T>> predicateSession(
         cst.text().data(), static_cast<TextOffset>(cst.text().size()));
-    ll_next_features_at<T>(*_grammar, cst, at, resume, out);
+    ll_next_features_at<T>(*_grammar, cst, at, resume, out, cancelToken);
   }
 
  private:

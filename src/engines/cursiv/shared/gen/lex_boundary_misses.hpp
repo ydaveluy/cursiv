@@ -37,15 +37,13 @@ inline std::vector<bool> lex_guard_heads(const LexNfaPool& n,
       if (x < 0 || reached[static_cast<std::size_t>(x)]) continue;
       reached[static_cast<std::size_t>(x)] = 1;
       const LexNfaState& st = n.s[static_cast<std::size_t>(x)];
+      const auto k = static_cast<std::size_t>(st.guard);
+      if (st.guard >= 0 && n.guards[k].term == term) head[k] = true;
       if (st.set >= 0) continue;
       todo.push_back(st.t1);
       todo.push_back(st.t2);
-      if (st.guard >= 0)
-        todo.push_back(n.guards[static_cast<std::size_t>(st.guard)].out);
+      if (st.guard >= 0) todo.push_back(n.guards[k].out);
     }
-    for (std::size_t k = 0; k < n.guards.size(); ++k)
-      if (n.guards[k].term == term)
-        head[k] = reached[static_cast<std::size_t>(n.guards[k].hole)] != 0;
   }
   return head;
 }

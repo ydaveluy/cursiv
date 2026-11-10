@@ -26,7 +26,8 @@ enum class WaitOutcome : std::uint8_t {
 
 // Called on the build's thread once per workspace state a build publishes,
 // with the documents the phase carried, possibly none. A cancelled phase is
-// never told. It runs after the mutation: `Immediate` reads may run beside it.
+// never told. It runs after the state is published, beside its waiters and
+// any `Immediate` read.
 class BuildPhaseListener {
  public:
   virtual ~BuildPhaseListener() noexcept = default;
@@ -35,9 +36,10 @@ class BuildPhaseListener {
                             const CancellationToken&) = 0;
 };
 
-// Called on a worker once a document reaches a state; content states may be
-// told after the document moved on. Waiting for the workspace state here
-// deadlocks. A listener that throws fails the build; the others still receive.
+// Called on a worker after a document's state is published, beside its
+// waiters; content states may be told after the document moved on. Waiting for
+// the workspace state here deadlocks. A listener that throws fails the build;
+// the others still receive.
 class DocumentPhaseListener {
  public:
   virtual ~DocumentPhaseListener() noexcept = default;

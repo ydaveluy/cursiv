@@ -1063,7 +1063,6 @@ inline void lr_search_plan(const LrContext& c, LrSearch& s, std::uint32_t ci,
   for (std::size_t k = 0; k < s.plan.size(); ++k) {
     LrSearch::Step& st = s.plan[k];
     st.closes = k + 1 == s.plan.size() || s.plan[k + 1].g.opens;
-    st.before = s.costBase + st.g.cost;
     st.stepCost =
         (k + 1 < s.plan.size() ? s.plan[k + 1].g.cost : s.configs[ci].cost) -
         st.g.cost;
@@ -1082,7 +1081,8 @@ inline void lr_search_plan(const LrContext& c, LrSearch& s, std::uint32_t ci,
 // went, so a run of steps costs what they read.
 inline bool lr_search_holds(const LrContext& c, const LrSearch& s,
                             const LrSearch::Step& st) {
-  if (c.laMode == kNoMode || !(c.la == st.g.la) || c.cost != st.before)
+  if (c.laMode == kNoMode || !(c.la == st.g.la) ||
+      c.cost != s.costBase + st.g.cost)
     return false;
   std::uint32_t n = st.g.node;
   const std::uint32_t depth = s.cactus.depth(n);

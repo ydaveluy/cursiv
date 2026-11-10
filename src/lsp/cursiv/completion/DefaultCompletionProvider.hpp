@@ -45,7 +45,8 @@ class DefaultCompletionProvider : public CompletionProvider {
   // What may stand at `offset`, where the document's text resumes at `end`.
   virtual void findFeaturesAt(const Document& document, TextOffset offset,
                               TextOffset end,
-                              std::vector<NextFeature>& features) const;
+                              std::vector<NextFeature>& features,
+                              const CancellationToken& cancelToken) const;
 
   // Whether to ask what may replace a token ending at the caret: by default not
   // where the token spells no word.

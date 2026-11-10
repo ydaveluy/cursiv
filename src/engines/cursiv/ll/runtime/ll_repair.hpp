@@ -131,7 +131,7 @@ inline std::uint16_t ll_nest_receiver(LlContext& c, CstBuilder::Open region,
 // again it would split into tokens the repair finds nothing wrong with.
 template <const auto& T>
 inline void ll_repair_peek(LlContext& c) {
-  const std::uint16_t mode = ll_err_mode<T>(c);
+  const std::uint16_t mode = ll_err_mode<T>(c.section);
   if (!c.laValid) {
     ll_peek<T>(c, mode);
     return;
@@ -251,7 +251,7 @@ CURSIV_NOINLINE inline bool ll_drop(LlContext& c) {
   f.end = span;
   f.at = end;
   f.resume = kNoElement;
-  f.dropMode = ll_err_mode<T>(c);
+  f.dropMode = ll_err_mode<T>(c.section);
   const NodeId id = c.tape.leaf(c.la.begin, span, T.stamp.make(kNoRow, 0));
   ll_mark(c, id);
   // No byte taken: the inventions before it still count.
@@ -676,7 +676,7 @@ inline bool ll_tail(LlContext& c) {
   if (c.la.sym == kEofSymbol) return true;
   ll_repair_peek<T>(c);
   while (c.la.sym != kEofSymbol && ll_drop<T>(c))
-    ll_peek<T>(c, ll_err_mode<T>(c));
+    ll_peek<T>(c, ll_err_mode<T>(c.section));
   return false;
 }
 

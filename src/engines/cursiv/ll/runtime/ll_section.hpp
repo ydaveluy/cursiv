@@ -17,12 +17,13 @@
 
 namespace cursiv::engine {
 
-// The mode a fault is lexed with: every terminal, or inside a section every
-// terminal of its grammar and the token that closes it.
+// The mode a fault is lexed with: every terminal, or inside `section` (as
+// `LlContext::section` names it) every terminal of its grammar and the token
+// that closes it.
 template <const auto& T>
-constexpr std::uint16_t ll_err_mode(const LlContext& c) {
-  return T.nsections != 0 && T.sectionErr != nullptr && c.section != 0
-             ? T.sectionErr[c.section - 1u]
+constexpr std::uint16_t ll_err_mode(std::uint8_t section) {
+  return T.nsections != 0 && T.sectionErr != nullptr && section != 0
+             ? T.sectionErr[section - 1u]
              : T.errMode;
 }
 
@@ -55,7 +56,7 @@ TextOffset ll_text_end(const LlContext& c, TextOffset at, TextOffset upto,
     if (c.section == 0) return c.len;
     const TextOffset len = std::min(clip, c.len);
     LexFailedWalks<LlLexTape<T>> failed;
-    const auto mode = ll_err_mode<T>(c);
+    const auto mode = ll_err_mode<T>(c.section);
     for (TextOffset p = at; p < len && p <= upto;) {
       c.stop.poll();
       TextOffset halt = p;

@@ -749,7 +749,8 @@ An expected keyword beats trivia that starts with the same word, as
 `ikw<"REM">` does before a `REM` comment. Each word is one spelling, and a word
 that ignores case doubles for each letter whose two cases start with different
 bytes, as many Greek and Cyrillic letters do. Past 1 024 spellings in one
-terminal, such trivia is refused. Read fewer words in the terminal, match them
+terminal, trivia that reads on past such a word, with a character that may
+follow the word, is refused. Read fewer words in the terminal, match them
 case-sensitively, or make the trivia start differently.
 
 ### `terminalEmpty`

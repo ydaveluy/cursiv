@@ -168,21 +168,6 @@ struct LexRefusalProduct {
     return !dies && std::ranges::all_of(ends, whole);
   }
 
-  bool reads_outside(const std::vector<int>& cl, const ByteSet& leads,
-                     std::uint16_t passSet) const {
-    std::vector<LexCodePoints::Seq> seqs;
-    const LexCodePoints word = word_of(passSet);
-    for (const LexCodePoints::Seq& q :
-         LexCodePoints::outside(word.ranges.data(), word.ranges.size())
-             .sequences()) {
-      ByteSet lead;
-      lead.add(q.lo[0], q.hi[0]);
-      if (lead.intersects(leads)) seqs.push_back(q);
-    }
-    bool dies = false;
-    return !lex_scalar_ends(n, g.sets.data(), cl, seqs, dies).empty();
-  }
-
   // Whether word `e` is one scalar, a well-formed sequence of more than one
   // byte, and which.
   bool one_scalar(const LexNode& e, LexCodePoints& out) const {
@@ -348,7 +333,7 @@ struct LexRefusalProduct {
     }
     // A byte past the word that only a decoded scalar lets pass: what the body
     // reads from it must pass too, or the edge reads a refused word on.
-    if (leads && reads_outside(cl, scalars, e.a))
+    if (leads && lex_reads_outside(n, g.sets.data(), cl, word_of(e.a), scalars))
       refuse(LexRefusalFault::readsPast, k, ByteSet{});
     const int self = into >= 0 ? into : (chain < 0 ? -1 : n.hole());
     if (self >= 0) n.s[static_cast<std::size_t>(self)].t1 = chain;

@@ -9,7 +9,6 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
-#include <new>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -262,13 +261,13 @@ void TextDocument::replaceText(std::size_t from, std::size_t to,
   try {
     patchLineIndex(static_cast<TextOffset>(from), static_cast<TextOffset>(to),
                    static_cast<TextOffset>(text.size()));
-  } catch (const std::bad_alloc&) {
+  } catch (...) {
     dropLineIndex();
   }
 }
 
 // Rescans from the line holding `from` (the one before, after a `\r`) to the
-// first old line start past `to`; the later lines only move.
+// first old line start past `to`; the later lines move by the length change.
 void TextDocument::patchLineIndex(TextOffset from, TextOffset to,
                                   TextOffset inserted) {
   std::vector<TextOffset>& starts = _lineStarts;
@@ -299,8 +298,9 @@ void TextDocument::patchLineIndex(TextOffset from, TextOffset to,
   else
     starts.erase(at(first + added), at(next));
   std::ranges::copy(fresh, at(first + 1));
-  for (std::size_t line = first + added; line < starts.size(); ++line)
-    starts[line] = moved(starts[line]);
+  if (inserted != to - from)
+    for (std::size_t line = first + added; line < starts.size(); ++line)
+      starts[line] = moved(starts[line]);
 }
 
 void TextDocument::dropLineIndex() {

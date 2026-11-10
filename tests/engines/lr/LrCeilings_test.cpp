@@ -564,7 +564,8 @@ void a_wide_nullable_closure_keeps_candidate_order() {
   builder.bind_stream();
   std::vector<cursiv::NextFeature> out;
   const auto start = std::chrono::steady_clock::now();
-  cursiv::engine::lr_next_features_at(table, grammar, c, 0, 0, out);
+  cursiv::engine::lr_next_features_at(table, grammar, c, 0, 0, out,
+                                      cursiv::kNoCancel);
   CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(5));
   CHECK(out.size() == 2);
   if (out.size() != 2) return;

@@ -182,4 +182,5 @@ if (comment != cursiv::kNoNode) {
 A copy of a node takes its members but none of these: it has no type tag, so
 `ast_cast` refuses it, and assigning to a node keeps the node's own. Its
 references read the source's sites: the copy is valid only while the source's
-parse stands, and a relink resets only the source.
+parse stands, and a relink resets only the source. Copy a node only while no
+thread resolves its references.

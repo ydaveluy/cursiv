@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -46,6 +47,16 @@ class Reader {
   }
 
   Descent<OperatorWords> words(ImageId id);
+
+  // Whether two tokens may spell one text: a literal that ignores case
+  // spells each of its cases.
+  bool shares(std::uint16_t t, std::uint16_t u) const {
+    const Token& a = _tokens[t];
+    const Token& b = _tokens[u];
+    return a.rule == b.rule &&
+           (a.folded || b.folded ? folded_equal(a.text, b.text)
+                                 : a.text == b.text);
+  }
 
   std::string spelled(const std::vector<std::uint16_t>& word) const {
     std::string out;
@@ -249,9 +260,10 @@ GrammarFault level_fault(GrammarImage& image,
         const bool twice = b > a && (unary(ga) ? gb == ga : !unary(gb));
         const bool binary = ga == ImageGroup::postfix && !unary(gb);
         if (!twice && !binary) continue;
+        const auto shares = std::bind_front(&Reader::shares, &reader);
         for (const OperatorWords& x : words[a])
           for (const OperatorWords& y : words[b]) {
-            if (!x.overlaps(y)) continue;
+            if (!x.overlaps(y, shares)) continue;
             const bool listed = !x.open() && !y.open();
             GrammarFault fault{
                 .code = binary ? GrammarFaultCode::postfixBinaryClash
@@ -262,7 +274,7 @@ GrammarFault level_fault(GrammarImage& image,
             const std::string at = std::to_string(a + 1);
             const std::string to = std::to_string(b + 1);
             if (binary && listed)
-              fault.part = quote(reader.spelled(*x.common(y)), '`') +
+              fault.part = quote(reader.spelled(*x.common(y, shares)), '`') +
                            " as a postfix operator on level " + at +
                            " and as a binary operator on level " + to;
             else if (binary)

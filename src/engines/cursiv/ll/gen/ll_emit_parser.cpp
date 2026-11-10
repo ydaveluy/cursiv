@@ -193,8 +193,8 @@ struct Emit : TextBuilder {
     return a.cfg.childIds[n.sym + i];
   }
 
-  std::uint16_t first_mode(std::uint16_t id) const;
-  std::uint16_t rule_mode(std::uint16_t r) const;
+  Descent<std::uint16_t> first_mode(std::uint16_t id) const;
+  Descent<std::uint16_t> rule_mode(std::uint16_t r) const;
   void new_search() const {
     if (memo.visited.size() != a.cfg.nrules)
       memo.visited.assign(a.cfg.nrules, 0);
@@ -202,7 +202,7 @@ struct Emit : TextBuilder {
   }
   std::uint16_t mode_of(std::uint16_t id) const {
     new_search();
-    const std::uint16_t m = first_mode(id);
+    const std::uint16_t m = descend(first_mode(id));
     return m == kNoRow ? a.errMode : m;
   }
 
@@ -239,45 +239,46 @@ struct Emit : TextBuilder {
   void join(std::uint32_t base, std::uint32_t count, std::string_view from);
 };
 
-std::uint16_t Emit::rule_mode(std::uint16_t r) const {
-  if (r >= a.cfg.nrules || memo.visited[r] == memo.round) return kNoRow;
+Descent<std::uint16_t> Emit::rule_mode(std::uint16_t r) const {
+  if (r >= a.cfg.nrules || memo.visited[r] == memo.round) co_return kNoRow;
   memo.visited[r] = memo.round;
   const LlRuleInfo& u = a.cfg.rules[r];
-  if (u.climb != kNoRow) {
-    return rule_mode(a.cfg.climbs[u.climb].primary);
-  }
-  return u.body == kNoRow ? kNoRow : first_mode(u.body);
+  if (u.climb != kNoRow)
+    co_return co_await rule_mode(a.cfg.climbs[u.climb].primary);
+  if (u.body == kNoRow) co_return kNoRow;
+  co_return co_await first_mode(u.body);
 }
 
 // The alphabet the first token of this position is read with: a record opened
 // over the position begins where that token does, so the peek comes first and
 // the trivia in front of it stays outside.
-std::uint16_t Emit::first_mode(std::uint16_t id) const {
+Descent<std::uint16_t> Emit::first_mode(std::uint16_t id) const {
   const LlNode& n = at(id);
   switch (n.kind) {
     case LlShape::term:
     case LlShape::endMark:
     case LlShape::condition:
     case LlShape::implied:
-      return n.mode;
+      co_return n.mode;
     case LlShape::call:
-      return n.mode != kNoRow ? n.mode : rule_mode(n.sym);
+      if (n.mode != kNoRow) co_return n.mode;
+      co_return co_await rule_mode(n.sym);
     case LlShape::alt:
-      return a.cfg.decisions[n.decision].mode;
+      co_return a.cfg.decisions[n.decision].mode;
     case LlShape::rep:
       // Opening a record must not commit the caller trivia a nullable
       // repetition only inspects while deciding whether to take an item.
-      return a.callerPeek[id] ? a.readHeadMode[n.decision]
-                              : a.headMode[n.decision];
+      co_return a.callerPeek[id] ? a.readHeadMode[n.decision]
+                                 : a.headMode[n.decision];
     case LlShape::seq: {
       for (unsigned i = 0; i < n.count; ++i) {
-        const std::uint16_t m = first_mode(child_at(n, i));
-        if (m != kNoRow) return m;
+        const std::uint16_t m = co_await first_mode(child_at(n, i));
+        if (m != kNoRow) co_return m;
       }
-      return kNoRow;
+      co_return kNoRow;
     }
     default:
-      return kNoRow;
+      co_return kNoRow;
   }
 }
 
@@ -1168,7 +1169,7 @@ void Emit::climb(std::uint16_t r) {
   line("f.least = c.arg;");
   if (anyNon) line("f.limit = 255u;");
   new_search();
-  const std::uint16_t m = rule_mode(cl.primary);
+  const std::uint16_t m = descend(rule_mode(cl.primary));
   line("::cursiv::engine::ll_peek<kTable, ", m == kNoRow ? a.errMode : m,
        "u>(c);");
   line("::cursiv::engine::ll_flush_trivia<kTable>(c);");
@@ -1458,9 +1459,9 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   std::string declarations = concat("\nnamespace ", ns, " {\n");
   std::vector<std::string> bodies;
   std::size_t bytes = 0;
-  // The machine steps the rules that resume, and the entry whatever it is:
-  // a plain rule is only ever called in place. The arms that are steps follow
-  // the rules, in the order of their numbers.
+  // The machine steps the rules that resume: a plain rule, the entry
+  // included, is only ever called in place. The arms that are steps follow the
+  // rules, in the order of their numbers.
   std::vector<bool> stepped(a.cfg.nrules, false);
   std::string armSteps;
   std::string armSizes;
@@ -1496,19 +1497,37 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
     }
   declarations += concat("}  // namespace ", ns, "\n");
   std::string steps, sizes;
-  const std::uint16_t entry = a.cfg.entryRule;
   for (std::uint16_t r = 0; r < a.cfg.nrules; ++r)
-    if (stepped[r]) {
+    if (stepped[r])
       step(steps, sizes, r, std::to_string(r));
-    } else if (r == entry) {
-      steps += concat("    case ", r, "u: s", r,
-                      "(c); return ::cursiv::engine::kLlDone;\n");
-      sizes += "sizeof(::std::uint16_t), ";
-    } else {
+    else
       sizes += "0u, ";
-    }
   steps += armSteps;
   sizes += armSizes;
+  // A plain entry reaches only plain rules, which never resume: no machine.
+  const std::uint16_t entry = a.cfg.entryRule;
+  const std::string drive =
+      stepped[entry]
+          ? concat(
+                "namespace {\n"
+                "::std::uint16_t step(::std::uint16_t r, "
+                "::cursiv::engine::LlContext& c, "
+                "[[maybe_unused]] void* f) {\n  switch (r) {\n",
+                steps,
+                "    default: return ::cursiv::engine::kLlDone;\n  }\n}\n"
+                "constexpr ::std::uint32_t kFrameBytes[] = {",
+                sizes,
+                "};\n"
+                "}  // namespace\n"
+                "void parse_entry(::cursiv::engine::LlContext& c) {\n"
+                "  c.stack.reserve(64);\n"
+                "  ::cursiv::engine::LlMachine machine;\n"
+                "  machine.run<&step>(c, ",
+                entry, "u, kFrameBytes);\n}\n")
+          : concat(
+                "void parse_entry(::cursiv::engine::LlContext& c) {\n"
+                "  c.stack.reserve(64);\n  s",
+                entry, "(c);\n}\n");
   // A bounded set of translation units keeps the optimizer from repeatedly
   // opening an entire language. The frames are declared once, so the
   // machine's unit sizes every one of them.
@@ -1575,26 +1594,8 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
              ll_emit_walk_includes(a), table.includes,
              "\n"
              "namespace ",
-             ns, " {\n\n", table.functions, ll_emit_walk(a),
-             "\nnamespace {\n"
-             "::std::uint16_t step(::std::uint16_t r, "
-             "::cursiv::engine::LlContext& c, "
-             "[[maybe_unused]] void* f) {\n  switch (r) {\n",
-             steps,
-             "    default: return ::cursiv::engine::kLlDone;\n  }\n}\n"
-             "constexpr ::std::uint32_t kFrameBytes[] = {",
-             sizes,
-             "};\n"
-             "}  // namespace\n"
-             "void parse_entry(::cursiv::engine::LlContext& c) {\n"
-             "  c.stack.reserve(64);\n"
-             "  ::cursiv::engine::LlMachine machine;\n"
-             "  machine.run<&step>(c, ",
-             entry,
-             "u, kFrameBytes);\n"
-             "}\n"
-             "}  // namespace ",
-             ns, "\n", shared ? cold("") : std::string{}));
+             ns, " {\n\n", table.functions, ll_emit_walk(a), "\n", drive,
+             "}  // namespace ", ns, "\n", shared ? cold("") : std::string{}));
   for (unsigned u = 0; u < kParserUnits; ++u)
     files.emplace_back(concat("ParserRules", u, ".cpp"), std::move(sources[u]));
   return files;

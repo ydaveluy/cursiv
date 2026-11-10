@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <exception>
 #include <mutex>
+#include <new>
 #include <stop_token>
 #include <thread>
 
@@ -42,7 +43,13 @@ DefaultWorkspaceLock::~DefaultWorkspaceLock() noexcept {
 }
 
 void DefaultWorkspaceLock::write(WriteAction action, WriteMode mode) {
-  std::stop_source mine;
+  // With no memory for a stop source, the write runs uncancellable: its action
+  // always runs.
+  std::stop_source mine{std::nostopstate};
+  try {
+    mine = std::stop_source();
+  } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+  }
   std::stop_source superseded{std::nostopstate};
   std::uint64_t ticket = 0;
   {

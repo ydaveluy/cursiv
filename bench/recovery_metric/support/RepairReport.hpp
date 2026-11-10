@@ -112,6 +112,9 @@ struct RepairReport {
         if (t.astUnaligned != 0)
           std::fprintf(out, " ast-unaligned:%llu",
                        static_cast<unsigned long long>(t.astUnaligned));
+        if (t.astUnread != 0)
+          std::fprintf(out, " ast-unread:%llu",
+                       static_cast<unsigned long long>(t.astUnread));
         std::fprintf(out, "\n");
       }
     }
@@ -155,8 +158,8 @@ struct RepairReport {
             "\"treeless\":%u,\"text\":{\"eligible\":%llu,\"kept\":%llu,"
             "\"deleted\":%llu,\"abandoned\":%llu,\"other\":%llu,"
             "\"restored\":%u,\"invented\":%u},\"ast\":{\"total\":%llu,"
-            "\"kept\":%llu,\"whole\":%u,\"unaligned\":%llu},\"per_fault\":[%u,%"
-            "u,%u,%u,%u,%u],"
+            "\"kept\":%llu,\"whole\":%u,\"unaligned\":%llu,\"unread\":%llu},"
+            "\"per_fault\":[%u,%u,%u,%u,%u,%u],"
             "\"cost\":",
             t.docs, t.faults, t.diagnostics, t.found, t.missed, t.spurious,
             t.silent, t.noop, t.refused, t.treeless,
@@ -167,7 +170,8 @@ struct RepairReport {
             static_cast<unsigned long long>(t.other), t.restored, t.invented,
             static_cast<unsigned long long>(t.astTotal),
             static_cast<unsigned long long>(t.astKept), t.astWhole,
-            static_cast<unsigned long long>(t.astUnaligned), t.perFault[0],
+            static_cast<unsigned long long>(t.astUnaligned),
+            static_cast<unsigned long long>(t.astUnread), t.perFault[0],
             t.perFault[1], t.perFault[2], t.perFault[3], t.perFault[4],
             t.perFault[5]);
         if (t.costs.empty())

@@ -39,24 +39,36 @@ function parsed(text) {
   }
 }
 
-// The LSP base protocol: headers, a blank line, then Content-Length bytes.
-// `finish` names what the stream ended inside, if anything.
+// The LSP base protocol: headers, a blank line, then Content-Length bytes,
+// whose chunks are joined once the last one comes. `finish` names what the
+// stream ended inside, if anything.
 function frameReader(deliver) {
-  let buffer = Buffer.alloc(0);
+  let chunks = [];
+  let size = 0;
+  let start = -1, end = -1;   // the body's place, once its header is read
+  const joined = () => (chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, size));
   return {
     feed(chunk) {
-      buffer = Buffer.concat([buffer, chunk]);
+      chunks.push(chunk);
+      size += chunk.length;
       for (;;) {
-        const headerEnd = buffer.indexOf('\r\n\r\n');
-        if (headerEnd < 0) return;
-        const start = headerEnd + 4;
-        const end = start + contentLength(buffer.subarray(0, headerEnd).toString('ascii'));
-        if (buffer.length < end) return;
+        if (end < 0) {
+          const buffer = joined();
+          chunks = [buffer];
+          const headerEnd = buffer.indexOf('\r\n\r\n');
+          if (headerEnd < 0) return;
+          start = headerEnd + 4;
+          end = start + contentLength(buffer.subarray(0, headerEnd).toString('ascii'));
+        }
+        if (size < end) return;
+        const buffer = joined();
         deliver(parsed(buffer.subarray(start, end).toString('utf8')));
-        buffer = buffer.subarray(end);
+        chunks = [buffer.subarray(end)];
+        size -= end;
+        start = end = -1;
       }
     },
-    finish: () => buffer.length ? `the output ended inside a message (${buffer.length} bytes left)` : null,
+    finish: () => size ? `the output ended inside a message (${size} bytes left)` : null,
   };
 }
 
@@ -153,12 +165,12 @@ export function startSession(serverPath, args = [], { lines = false } = {}) {
       poll();
     });
 
-  // Sends a request under a fresh id and returns its response, failing on an
-  // error response.
+  // Sends a request under a fresh id, which replaces any id in `message`, and
+  // returns its response, failing on an error response.
   let lastId = 0;
   const request = async (message, what, options) => {
     const id = ++lastId;
-    send({ id, ...message });
+    send({ ...message, id });
     const answer = await waitFor((m) => m.id === id && !('method' in m), what, options);
     if (answer.error) throw new Error(`${what}: ${answer.error.code}: ${answer.error.message}`);
     return answer;

@@ -57,9 +57,9 @@ struct LrSearch : RepairSearch<LrEdit> {
   std::uint64_t degradedLimit = 0;
   std::uint32_t degradedShifts = 0xFFFFFFFFu;
 
-  // What a reading's future depends on, its free insertions aside: two readings
-  // with the same one gain the same key increments. Its levels compare by
-  // content and stay out of the hash.
+  // A reading's stack, position, token in hand, implied tokens, levels and
+  // phase; not its free insertions nor the tokens its frames hold. Its levels
+  // compare by content, out of the hash.
   struct Future {
     std::uint32_t node;
     TextOffset at;
@@ -221,8 +221,7 @@ struct LrSearch : RepairSearch<LrEdit> {
     LrEdit g;
     std::uint32_t armBase = 0;
     std::uint32_t armCount = 0;
-    // What the reading has cost when it is written, and what it costs.
-    std::uint64_t before = 0;
+    // What writing the step adds to the reading's cost.
     std::uint32_t stepCost = 0;
     // The last edit of its fault: its note is added once it is written.
     bool closes = false;

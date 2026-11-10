@@ -638,11 +638,9 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
       // A candidate stands only where a state takes it: a state that refuses
       // the winner crosses a trivia as the flags say.
       accX &= modeTakes;
-      const DynSet read = accX;
-      each_bit(read.w.data(), read.w.size(), [&](std::size_t t) {
-        if (indifferent(static_cast<unsigned>(t), win))
-          accX.reset(static_cast<unsigned>(t));
-      });
+      // Dropping the member just read leaves the walk on the next one.
+      for (const unsigned t : accX.members())
+        if (indifferent(t, win)) accX.reset(t);
       if (!accX.any()) continue;
       // The first matching state fixes the diagnostic witness. The mode's
       // union already proves that at least one such state exists.

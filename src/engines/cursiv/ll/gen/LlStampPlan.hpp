@@ -50,8 +50,8 @@ class LlStampPlan {
   // A group whose record is a nest turn.
   bool turns(std::uint16_t id) const {
     const LlNode& n = node(id);
-    return n.owns && !_a.cfg.nodeBuild[id].foldStep &&
-           n.row < _a.nestChains.size() && _a.nestChains[n.row] != 0;
+    return n.owns && !_a.cfg.nodeBuild[id].foldStep && n.row != kNoRow &&
+           _a.writes.chainBuild[n.row].nest;
   }
 
   // A position whose first reading is a nest turn.

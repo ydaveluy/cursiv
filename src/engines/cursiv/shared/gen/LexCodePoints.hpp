@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -130,13 +131,17 @@ struct LexCodePoints {
   // continuation bytes where it refuses a scalar begun earlier.
   ByteSet leads() const {
     ByteSet out;
-    for (const Seq& q : sequences())
-      if (q.len > 1) out.add(q.lo[0], q.hi[0]);
     for (const unicode::Range& r : ranges) {
-      if (r.lo == kInvalid)
+      if (r.lo == kInvalid) {
         out.add(0xC2, 0xF4);
-      else if (marker(r))
+      } else if (marker(r)) {
         out.add(0x80, 0xBF);
+      } else {
+        // Within one encoding length the lead rises with the scalar.
+        each_length(r.lo, r.hi, [&](char32_t a, char32_t b, unsigned n) {
+          if (n > 1) out.add(lead(a, n), lead(b, n));
+        });
+      }
     }
     return out;
   }
@@ -178,7 +183,10 @@ struct LexCodePoints {
   }
 
   void unite(const LexCodePoints& o) {
+    const auto mid = static_cast<std::ptrdiff_t>(ranges.size());
     ranges.insert(ranges.end(), o.ranges.begin(), o.ranges.end());
+    std::ranges::inplace_merge(ranges, ranges.begin() + mid, {},
+                               &unicode::Range::lo);
     normalize();
   }
 
@@ -245,7 +253,8 @@ struct LexCodePoints {
   }
 
   void normalize() {
-    std::ranges::sort(ranges, {}, &unicode::Range::lo);
+    if (!std::ranges::is_sorted(ranges, {}, &unicode::Range::lo))
+      std::ranges::sort(ranges, {}, &unicode::Range::lo);
     std::vector<unicode::Range> merged;
     for (const unicode::Range& r : ranges) {
       if (marker(r)) {
@@ -283,58 +292,67 @@ struct LexCodePoints {
     ranges = std::move(out);
   }
 
-  // A range becomes the shapes whose bytes vary independently: split at the
-  // encoding lengths, around the surrogates, then at every continuation
-  // boundary the two ends disagree on.
-  static void split(char32_t lo, char32_t hi, std::vector<Seq>& out) {
-    std::vector<unicode::Range> work{{lo, hi}};
-    while (!work.empty()) {
-      auto [a, b] = work.back();
-      work.pop_back();
-      if (a > b) continue;
-      if (a < 0xD800 && b >= 0xD800) {
-        work.push_back({0xE000, b});
-        b = 0xD7FF;
-      } else if (a >= 0xD800 && a <= 0xDFFF) {
-        a = 0xE000;
-      }
-      if (a > b) continue;
-      bool cut = false;
-      for (const char32_t edge : {char32_t{0x80}, char32_t{0x800},
-                                  char32_t{0x10000}})
-        if (a < edge && b >= edge) {
-          work.push_back({edge, b});
-          work.push_back({a, edge - 1});
-          cut = true;
-          break;
-        }
-      if (cut) continue;
-      std::string la, lb;
-      append_scalar(la, a);
-      const auto n = static_cast<unsigned>(la.size());
-      for (unsigned i = 1; i < n && !cut; ++i) {
-        const char32_t max = (char32_t{1} << (6 * i)) - 1;
-        if ((a & ~max) == (b & ~max)) continue;
-        if ((a & max) != 0) {
-          work.push_back({(a | max) + 1, b});
-          work.push_back({a, a | max});
-          cut = true;
-        } else if ((b & max) != max) {
-          work.push_back({b & ~max, b});
-          work.push_back({a, (b & ~max) - 1});
-          cut = true;
-        }
-      }
-      if (cut) continue;
-      append_scalar(lb, b);
-      Seq s;
-      s.len = n;
-      for (unsigned k = 0; k < n; ++k) {
-        s.lo[k] = static_cast<unsigned char>(la[k]);
-        s.hi[k] = static_cast<unsigned char>(lb[k]);
-      }
-      out.push_back(s);
+  // The parts of `lo..hi` one encoding length `n` spells, in order, the
+  // surrogates left out: `part(a, b, n)`.
+  template <class Part>
+  static void each_length(char32_t lo, char32_t hi, Part&& part) {
+    struct Length {
+      char32_t lo, hi;
+      unsigned n;
+    };
+    static constexpr Length kLengths[] = {{0, 0x7F, 1},
+                                          {0x80, 0x7FF, 2},
+                                          {0x800, 0xD7FF, 3},
+                                          {0xE000, 0xFFFF, 3},
+                                          {0x10000, 0x10FFFF, 4}};
+    for (const Length& l : kLengths) {
+      const char32_t a = std::max(lo, l.lo);
+      const char32_t b = std::min(hi, l.hi);
+      if (a <= b) part(a, b, l.n);
     }
+  }
+  // The first byte of scalar `cp` spelled in `n` bytes.
+  static unsigned char lead(char32_t cp, unsigned n) {
+    return static_cast<unsigned char>(
+        n == 1 ? cp : (0xFF00u >> n) | cp >> (6 * (n - 1)));
+  }
+
+  // A range becomes the shapes whose bytes vary independently: one per
+  // encoding length, then cut at every continuation boundary the two ends
+  // disagree on.
+  static void split(char32_t lo, char32_t hi, std::vector<Seq>& out) {
+    each_length(lo, hi, [&](char32_t from, char32_t to, unsigned n) {
+      std::vector<unicode::Range> work{{from, to}};
+      while (!work.empty()) {
+        const auto [a, b] = work.back();
+        work.pop_back();
+        std::string la, lb;
+        append_scalar(la, a);
+        bool cut = false;
+        for (unsigned i = 1; i < n && !cut; ++i) {
+          const char32_t max = (char32_t{1} << (6 * i)) - 1;
+          if ((a & ~max) == (b & ~max)) continue;
+          if ((a & max) != 0) {
+            work.push_back({(a | max) + 1, b});
+            work.push_back({a, a | max});
+            cut = true;
+          } else if ((b & max) != max) {
+            work.push_back({b & ~max, b});
+            work.push_back({a, (b & ~max) - 1});
+            cut = true;
+          }
+        }
+        if (cut) continue;
+        append_scalar(lb, b);
+        Seq q;
+        q.len = n;
+        for (unsigned k = 0; k < n; ++k) {
+          q.lo[k] = static_cast<unsigned char>(la[k]);
+          q.hi[k] = static_cast<unsigned char>(lb[k]);
+        }
+        out.push_back(q);
+      }
+    });
   }
 };
 

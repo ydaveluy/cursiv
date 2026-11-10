@@ -108,11 +108,12 @@ Descent<std::uint16_t> emit(LlLowered& o, const Pool& p, std::uint16_t at,
 
 // One climb operator per token of an atomic operator, `made` and `row` as
 // `emit` takes them. A condition stays on its own side of the token.
-void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
-                         const Acts& made, const Acts& row, std::uint8_t prec,
-                         Association group, std::uint8_t cfg,
-                         std::vector<std::uint16_t> before = {},
-                         std::vector<std::uint16_t> after = {});
+Descent<void> emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
+                                  const Acts& made, const Acts& row,
+                                  std::uint8_t prec, Association group,
+                                  std::uint8_t cfg,
+                                  std::vector<std::uint16_t> before = {},
+                                  std::vector<std::uint16_t> after = {});
 
 void move_chains_down(LlLowered& o, const LlRecordPlan& plan);
 void add_own_records(LlLowered& o, const LlRecordPlan& plan);

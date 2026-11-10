@@ -17,21 +17,23 @@
 #include <vector>
 
 #include "cursiv/grammar/NextFeature.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstLeaf.hpp"
 #include "cursiv/ll/runtime/LlSpine.hpp"
 #include "cursiv/ll/runtime/LlTail.hpp"
 #include "cursiv/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/ll/runtime/ll_matcher.hpp"
+#include "cursiv/ll/runtime/ll_section.hpp"
 #include "cursiv/ll/runtime/ll_spine.hpp"
 #include "cursiv/ll/table/LlSimulation.hpp"
 #include "cursiv/ll/table/LlTable.hpp"
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/runtime/StampedGrammar.hpp"
 #include "cursiv/shared/runtime/token_end_from.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstLeaf.hpp"
 
 namespace cursiv::engine {
 
@@ -254,8 +256,8 @@ inline void ll_first_of_each(std::vector<LlConfig>& configs) {
 class LlReplayWidth {
  public:
   LlReplayWidth(const Cst& cst, StampLayout stamp, const LlSpine& spine,
-                NodeCount end)
-      : _cst(cst), _stamp(stamp), _spine(spine), _rank(end) {}
+                NodeCount end, const CancellationPoll& stop)
+      : _cst(cst), _stamp(stamp), _spine(spine), _rank(end), _stop(stop) {}
 
   unsigned next(bool named = false) {
     if (_round++ == 0) return _last = 0;
@@ -282,8 +284,10 @@ class LlReplayWidth {
       if (_level == 0) return 0;
       const NodeCount stop =
           _cst.leaves_before(_cst[_spine.records()[--_level]].begin);
-      while (_rank > stop)
+      while (_rank > stop) {
+        _stop.poll();
         if (ll_replayable(_cst, _stamp, _cst.leaf(--_rank))) ++_seen;
+      }
     }
   }
 
@@ -292,6 +296,7 @@ class LlReplayWidth {
   const LlSpine& _spine;
   std::size_t _level = 0;
   NodeCount _rank;
+  const CancellationPoll& _stop;
   unsigned _seen = 0;
   unsigned _last = 0;
   unsigned _held = 0;
@@ -520,11 +525,13 @@ inline bool ll_names_arm(const LlCtxPool& pool, std::uint32_t state,
 template <const auto& T>
 inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
                           const LlSpine& spine, NodeCount end, unsigned window,
-                          bool bound, bool& exact, LlTail& tail) {
+                          bool bound, bool& exact, LlTail& tail,
+                          const CancellationPoll& stop) {
   std::vector<CstLeaf> taken;
   NodeCount rank = end;
   unsigned read = 0;
   while (rank > 0 && read <= window) {
+    stop.poll();
     const CstLeaf leaf = cst.leaf(--rank);
     if (ll_replayable(cst, stamp, leaf)) {
       taken.push_back(leaf);
@@ -578,6 +585,7 @@ inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
   for (std::size_t i = 0; i < next; ++i)
     ahead += taken[i].begin != taken[i].end ? 1u : 0u;
   while (next-- > 0) {
+    stop.poll();
     const CstLeaf leaf = taken[next];
     [[maybe_unused]] const TextOffset gapFrom =
         T.ngapConds != 0 ? ll_gap_from(cst, leaf.begin) : 0;
@@ -709,7 +717,8 @@ inline bool ll_trivia_to(std::string_view text, std::uint16_t mode,
 template <const auto& T>
 inline std::vector<SymbolId> ll_indents_at(const Cst& cst, StampLayout stamp,
                                            NodeCount count, TextOffset from,
-                                           TextOffset at) {
+                                           TextOffset at,
+                                           const CancellationPoll& stop) {
   std::vector<SymbolId> found;
   constexpr SymbolId indent = kSyntheticTerm<T, kSyntheticIndent>;
   constexpr SymbolId dedent = kSyntheticTerm<T, kSyntheticDedent>;
@@ -723,6 +732,7 @@ inline std::vector<SymbolId> ll_indents_at(const Cst& cst, StampLayout stamp,
     std::vector<IndentLevel> levels;
     IndentAt open;
     for (NodeCount rank = 0; rank < count; ++rank) {
+      stop.poll();
       const CstLeaf leaf = cst.leaf(rank);
       const std::uint16_t pos = stamp.state(cst[leaf.id]);
       if (leaf.hidden || pos == 0 || pos > T.nafter ||
@@ -749,7 +759,8 @@ inline std::vector<SymbolId> ll_indents_at(const Cst& cst, StampLayout stamp,
 template <const auto& T>
 inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
                                 TextOffset at, TextOffset resume,
-                                std::vector<NextFeature>& out) {
+                                std::vector<NextFeature>& out,
+                                const CancellationToken& cancelToken) {
   if (!StampedGrammar::caret_in(cst, at, resume)) return;
   const StampLayout stamp = grammar.stamp();
   NodeCount rank = 0;
@@ -778,6 +789,9 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   };
   const std::uint16_t leafMode =
       alphabet(pos != 0 ? T.nodes[pos - 1].mode : T.errMode);
+  // What a fault at the leaf is lexed with, as the repair that read it.
+  const std::uint16_t leafErr = ll_err_mode<T>(
+      pos != 0 && T.nodeSection != nullptr ? T.nodeSection[pos - 1] : 0);
   // The gap in front of a region's first token is its caller's, so a token is
   // not always reached across the gap its own position crosses.
   std::uint16_t afterGap = kNoRow;
@@ -922,9 +936,11 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   // asked again from further back.
   const NodeCount before = leaf ? cst.leaves_before(leaf.begin) : 0;
   const LlSpine spine(cst, leaf);
-  LlReplayWidth widths(cst, stamp, spine, before);
+  // The stop, read as the replay steps leaves.
+  const CancellationPoll stop(cancelToken);
+  LlReplayWidth widths(cst, stamp, spine, before, stop);
   const std::vector<SymbolId> indentsAhead =
-      ll_indents_at<T>(cst, stamp, leaf ? rank + 1 : 0, gapFrom, at);
+      ll_indents_at<T>(cst, stamp, leaf ? rank + 1 : 0, gapFrom, at, stop);
   bool named = false;
   LlSimulation sim(T.atn);
   for (unsigned window = widths.next();; window = widths.next(named)) {
@@ -934,8 +950,8 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
     tail.edge = at;
     tail.onward = leaf ? 1u : 0u;
     bool exact = true;
-    LlReplay replayed =
-        ll_replay<T>(sim, cst, stamp, spine, before, window, true, exact, tail);
+    LlReplay replayed = ll_replay<T>(sim, cst, stamp, spine, before, window,
+                                     true, exact, tail, stop);
     named = replayed == LlReplay::named;
     if (named || replayed == LlReplay::shallow) continue;
     bool widens = !exact;
@@ -943,8 +959,8 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
     if (replayed == LlReplay::broken) {
       tail.steps.clear();
       tail.deferred = false;
-      replayed =
-          ll_replay<T>(sim, cst, stamp, spine, before, 0, false, exact, tail);
+      replayed = ll_replay<T>(sim, cst, stamp, spine, before, 0, false, exact,
+                              tail, stop);
       widens = false;
     }
     // The last token's position is the reading the descent chose, a guess
@@ -1039,7 +1055,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
     };
     if (replayed == LlReplay::complete && leaf) {
       held.assign(sim.configs().begin(), sim.configs().end());
-      again = ll_match_text<T>(text.data(), leaf.end, T.errMode, leaf.begin);
+      again = ll_match_text<T>(text.data(), leaf.end, leafErr, leaf.begin);
       lexed = again.end == leaf.end && again.term != kInvalidSymbol;
       if (lexed) {
         sim.possible_terms([&](std::uint16_t term) {
@@ -1291,10 +1307,10 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
       const std::uint16_t read_in =
           branch == 0 ? leafMode : readingMode[branch - 1];
       // A word the repair read as another is no token of its reading: read
-      // under the alphabet that admits everything, the candidate only must
-      // not make one word with it.
+      // under the alphabet a fault there is lexed with, the candidate only
+      // must not make one word with it.
       if (leaf.recovered) {
-        const Scan s = spliced(leaf.begin, spelling, T.errMode);
+        const Scan s = spliced(leaf.begin, spelling, leafErr);
         return s.term == kInvalidSymbol || s.end <= at - leaf.begin;
       }
       const Scan s = spliced(leaf.begin, spelling, read_in);

@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <initializer_list>
 #include <iomanip>
 #include <iostream>
@@ -12,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/cli.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/services/CoreServices.hpp"
@@ -20,7 +22,6 @@
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/workspace/LocalFileSystemProvider.hpp"
-#include "cursiv/Check.hpp"
 #include "support/World.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
@@ -410,6 +411,31 @@ void a_command_answers_like_the_verdict() {
     std::cout.rdbuf(capture.out.rdbuf());
     CHECK(status == cursiv::kFatal);
     CHECK(capture.err.str().starts_with("fatal: cannot write CLI output"));
+  }
+  {
+    // A stderr that throws when it cannot write still leaves the code.
+    struct Refusing final : std::streambuf {};
+    Capture capture;
+    Refusing refusing;
+    std::cerr.rdbuf(&refusing);
+    std::cerr.exceptions(std::ios::badbit);
+    const std::function<int()> commands[] = {
+        []() -> int { throw cursiv::UsageError("misuse"); },
+        []() -> int { throw std::runtime_error("broken"); },
+        []() -> int { throw 42; }};
+    std::vector<int> statuses;
+    for (const auto& command : commands) {
+      std::cerr.clear();
+      try {
+        statuses.push_back(cursiv::run_command(command));
+      } catch (...) {
+        statuses.push_back(-1);
+      }
+    }
+    std::cerr.exceptions(std::ios::goodbit);
+    std::cerr.clear();
+    CHECK(statuses ==
+          std::vector<int>({cursiv::kUsage, cursiv::kFatal, cursiv::kFatal}));
   }
 }
 

@@ -60,8 +60,8 @@ class LlMachine {
   static constexpr std::uint32_t kNoCall = ~std::uint32_t{0};
 
   void push(std::uint16_t rule) {
-    const std::size_t at = _used;
-    _used += sizeof(Call) + ((_bytes[rule] + 7u) & ~std::uint32_t{7});
+    const std::uint64_t at = _used;
+    _used += sizeof(Call) + ((std::uint64_t{_bytes[rule]} + 7u) & ~7ull);
     if (_used > _room) grow();
     const Call call{_top, rule};
     std::memcpy(_frames.get() + at, &call, sizeof call);
@@ -71,11 +71,11 @@ class LlMachine {
   }
 
   // Grows the storage to `_used`, doubling but never past what a call's place
-  // can name, so doubling cannot wrap.
+  // can name. Sizes count in 64 bits: no sum or doubling wraps on any target.
   CURSIV_NOINLINE void grow() {
-    constexpr std::size_t kMost = kNoCall;
+    constexpr std::uint64_t kMost = kNoCall;
     if (_used > kMost) throw std::length_error("cursiv: LL stack is too deep");
-    std::size_t room = _room == 0 ? 4096 : _room;
+    std::uint64_t room = _room == 0 ? 4096 : _room;
     while (room < _used) room = room > kMost / 2 ? kMost : room * 2;
     auto frames = std::make_unique_for_overwrite<std::byte[]>(room);
     if (_room != 0) std::memcpy(frames.get(), _frames.get(), _room);
@@ -84,7 +84,7 @@ class LlMachine {
   }
 
   std::unique_ptr<std::byte[]> _frames;
-  std::size_t _used = 0, _room = 0;
+  std::uint64_t _used = 0, _room = 0;
   std::uint32_t _top = kNoCall;
   const std::uint32_t* _bytes = nullptr;
 };

@@ -320,4 +320,21 @@ inline std::vector<std::vector<int>> lex_scalar_ends(
   return out;
 }
 
+// Whether a walk from `from` reads whole some scalar past ASCII that `cps`
+// leaves out and one of `leads` opens.
+inline bool lex_reads_outside(const LexNfaPool& n, const ByteSet* sets,
+                              const std::vector<int>& from,
+                              const LexCodePoints& cps, const ByteSet& leads) {
+  std::vector<LexCodePoints::Seq> seqs;
+  for (const LexCodePoints::Seq& q :
+       LexCodePoints::outside(cps.ranges.data(), cps.ranges.size())
+           .sequences()) {
+    ByteSet lead;
+    lead.add(q.lo[0], q.hi[0]);
+    if (lead.intersects(leads)) seqs.push_back(q);
+  }
+  bool dies = false;
+  return !lex_scalar_ends(n, sets, from, seqs, dies).empty();
+}
+
 }  // namespace cursiv::engine

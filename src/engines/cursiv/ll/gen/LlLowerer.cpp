@@ -101,25 +101,31 @@ void LlLowerer::emit_op(unsigned cfg, ImageId op, const void* opRow,
       opRule != kNoImage && (node_rule(opRule) || infix_rule(opRule));
   std::vector<std::uint32_t> reading;
   const std::uint16_t built = descend(build_operator(cfg, op, reading));
-  const auto atomic = [&](const auto& self, std::uint16_t id) {
-    const Node& n = _p.e[id];
-    if (n.kind == Shape::sym) return is_term(n.sym);
-    if (n.kind == Shape::alt) {
+  // Whether each way through the operator reads one token, conditions aside.
+  bool whole = true;
+  std::vector<std::uint16_t> todo{built};
+  while (whole && !todo.empty()) {
+    const Node& n = _p.e[todo.back()];
+    todo.pop_back();
+    if (n.kind == Shape::sym) {
+      whole = is_term(n.sym);
+    } else if (n.kind == Shape::alt) {
       for (unsigned i = 0; i < n.count; ++i)
-        if (!self(self, _p.child[n.sym + i])) return false;
-      return true;
+        todo.push_back(_p.child[n.sym + i]);
+    } else if (n.kind == Shape::seq) {
+      unsigned tokens = 0;
+      for (unsigned i = 0; i < n.count; ++i) {
+        const auto k = _p.child[n.sym + i];
+        if (_p.e[k].kind == Shape::condition || _p.e[k].kind == Shape::none)
+          continue;
+        ++tokens;
+        todo.push_back(k);
+      }
+      whole = tokens == 1;
+    } else {
+      whole = false;
     }
-    if (n.kind != Shape::seq) return false;
-    unsigned tokens = 0;
-    for (unsigned i = 0; i < n.count; ++i) {
-      const auto k = _p.child[n.sym + i];
-      if (_p.e[k].kind == Shape::condition || _p.e[k].kind == Shape::none)
-        continue;
-      if (++tokens != 1 || !self(self, k)) return false;
-    }
-    return tokens == 1;
-  };
-  const bool whole = atomic(atomic, built);
+  }
   if (buildsNode ||
       (opRule == kNoImage && !whole && _p.e[built].kind != Shape::implied)) {
     _o.fault.raise(GrammarFaultCode::infixOperatorNotText, _p.owner);
@@ -127,8 +133,9 @@ void LlLowerer::emit_op(unsigned cfg, ImageId op, const void* opRow,
   }
   const Acts row = cat(_p.e[built].row, Acts{row_id(opRow)});
   if (whole) {
-    llow::emit_operator_nodes(_o, _p, built, _p.e[built].made, row, prec, group,
-                              static_cast<std::uint8_t>(cfg));
+    descend(llow::emit_operator_nodes(_o, _p, built, _p.e[built].made, row,
+                                      prec, group,
+                                      static_cast<std::uint8_t>(cfg)));
     return;
   }
   const std::uint16_t body =
@@ -187,15 +194,6 @@ void LlLowerer::define_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs,
       descend(emit(_o, _p, at_, _p.e[at_].made, _p.e[at_].row, lhs));
 }
 
-void LlLowerer::note_nests() {
-  _o.nestChains.assign(_o.writes.nchains, 0);
-  for (std::uint16_t i = 0; i < _o.writes.nchains; ++i) {
-    const Chain chain = _o.writes.chains[i];
-    if (chain.count != 0)
-      _o.nestChains[i] = _rowKind[_o.writes.acts[chain.off]] == WriteKind::nest;
-  }
-}
-
 LlLowered LlLowerer::run() {
   index();
   _lex.declare_word(_d.bound);
@@ -204,12 +202,10 @@ LlLowered LlLowerer::run() {
   declare();
   define();
   _o.writes.note_makes(_rowKind);
-  note_nests();
-  LlRecordPlan records(_o.cfg, _o.writes, _o.nestChains);
+  LlRecordPlan records(_o.cfg, _o.writes);
   records.compute_ownership();
   llow::move_chains_down(_o, records);
   _o.writes.note_makes(_rowKind);
-  note_nests();
   llow::add_own_records(_o, records);
   return std::move(_o);
 }

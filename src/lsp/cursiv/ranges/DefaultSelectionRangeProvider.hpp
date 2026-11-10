@@ -1,5 +1,5 @@
-// Descends from the record containing the offset to the innermost child that
-// contains it, and answers inside-out.
+// Finds the records containing the offset, from the outermost to the
+// innermost, and answers inside-out.
 #pragma once
 
 #include <lsp/types.h>

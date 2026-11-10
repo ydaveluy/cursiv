@@ -85,8 +85,8 @@ class TableEpochs {
   };
 
   // `object` is out of every new reader's reach and is freed once the readers
-  // that may hold it have left; `record` lives in it. Collects once enough
-  // releases, or `bytes`, have come since the last collection.
+  // that may hold it have left; `record` lives in it. A release collects once
+  // enough releases, `bytes` or time have gone by since the last collection.
   static void freeLater(PendingFree& record, void* object, void (*free)(void*),
                         std::size_t bytes) noexcept;
 

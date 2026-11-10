@@ -753,6 +753,12 @@ void run() {
   CHECK(seen(path) == "new table" && seen(parser) == "new parser");
   CHECK(listed() == before);
 
+  // A copy another writer stages beside the same file stays its own.
+  const std::string theirs = path + ".tmp";
+  CHECK(write(theirs, "theirs"));
+  CHECK(write(path, "mine"));
+  CHECK(seen(path) == "mine" && fs::exists(theirs) && seen(theirs) == "theirs");
+
   fs::remove_all(dir);
 }
 
@@ -793,6 +799,11 @@ void run() {
         R"(\b(a|b|B)\b)");
   CHECK(textmate_keyword_match({{"x", false}, {"x", true}}) ==
         R"((?i)\b(x)\b)");
+  // A side is a word's where the editor's `\w` reads a letter, mark, number
+  // or connector of any script there; bytes past ASCII order after it.
+  CHECK(textmate_keyword_match(
+            {{"état", false}, {"café", false}, {"x²", false}, {"a→", false}}) ==
+        R"(\b(café|état|x²)\b|\b(a→)\B)");
   // With no word, a pattern that matches nothing rather than everywhere.
   CHECK(textmate_keyword_match({{"+", false}}) == "(?!)");
   CHECK(textmate_keyword_match({}) == "(?!)");
@@ -843,10 +854,14 @@ void run() {
             R"({"repository": {"keywords": {"match": "a", "match": "b"}}})",
             "c") ==
         R"({"repository": {"keywords": {"match": "a", "match": "c"}}})");
-  // No string at that place, or brackets that do not match: nothing.
+  // Nothing where no string is at that place, a later key on the path hiding
+  // the earlier one, or where brackets do not match.
   for (const std::string_view json :
        {R"({"keywords": {"match": "a"}})",
         R"({"repository": {"keywords": {"match": 1}}})",
+        R"({"repository": {"keywords": {"match": "a", "match": 1}}})",
+        R"({"repository": {"keywords": {"match": "a"}, "keywords": {}}})",
+        R"({"repository": {"keywords": {"match": "a"}}, "repository": 1})",
         R"({"repository": {"keywords": [{"match": "a"}]}})",
         R"({"repository": {"keywords": {"match": "a"}})", ""})
     CHECK(!with_keyword_match(json, "b"));

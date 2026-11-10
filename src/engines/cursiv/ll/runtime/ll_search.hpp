@@ -307,7 +307,7 @@ Token ll_search_peek_ahead(
   if (!cross && c.la.sym < T.nterms && c.la.sym != kEofSymbol &&
       !T.mode_admits(T.errMode, c.la.sym))
     return c.la;
-  const auto mode = ll_err_mode<T>(c);
+  const auto mode = ll_err_mode<T>(c.section);
   TextOffset p = ahead.p;
   bool head = ahead.head;
   for (;;) {
@@ -436,7 +436,7 @@ void ll_search_terms(const LlContext& c, LlSearch& s, const LlConfig* cfg,
   // Under the broad alphabet two terminals never tie, and a wider one read this
   // token: where the positions want it, no walk under theirs reads otherwise.
   if (T.nrelays == 0 && !LexTape<T>::kRefuses &&
-      tok.mode == ll_err_mode<T>(c) && T.modeMulti[tok.mode] == 0 &&
+      tok.mode == ll_err_mode<T>(c.section) && T.modeMulti[tok.mode] == 0 &&
       tok.sym < T.nterms && viable.test(tok.sym)) {
     out.push_back(tok.sym);
     ++s.work;
@@ -815,7 +815,7 @@ std::uint16_t ll_search_lex_mode(const LlContext& c, const LlSearch& s,
   const auto look =
       ll_search_look<T>(s.pool.data() + r.cfg, r.ncfg, viable,
                         kIndented<T> && r.ahead.at.depth != 0);
-  return look != kNoRow ? look : ll_err_mode<T>(c);
+  return look != kNoRow ? look : ll_err_mode<T>(c.section);
 }
 
 // The token in hand read as `term` up to `end` at `cost`: `rep` where its
@@ -945,7 +945,7 @@ TextOffset ll_search_drop_end(LlContext& c, LlSearch& s, const Token& tok) {
   if (const auto it = s.drops.find(tok.begin); it != s.drops.end())
     return it->second;
   const LexReading r =
-      ll_search_reading<T>(c, s, tok.begin, ll_err_mode<T>(c));
+      ll_search_reading<T>(c, s, tok.begin, ll_err_mode<T>(c.section));
   if (ll_search_spent(s)) return tok.begin;
   if (r.term != kInvalidSymbol)
     return s.drops.emplace(tok.begin, lex_cut(tok.begin, r)).first->second;

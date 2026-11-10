@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <map>
 #include <numeric>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -279,22 +280,19 @@ void lr_elect_runs(LrBuildTable& A) {
     members[at->second].push_back(p);
   }
   // Two productions an election cannot tell apart need not be found again.
-  const auto read = [&](unsigned p) {
-    std::vector<std::uint32_t> out;
-    for (std::uint32_t k = A.electAt[p]; k < A.electAt[p + 1]; ++k)
-      out.insert(out.end(), {A.electWord[k], A.electPos[k]});
-    out.push_back(kNoWord);
-    if (!A.electWatchAt.empty())
-      out.insert(out.end(), A.electWatch.begin() + A.electWatchAt[p],
-                 A.electWatch.begin() + A.electWatchAt[p + 1]);
-    return out;
+  const auto same = [&](unsigned p, unsigned q) {
+    const auto eq = [&](const auto& v, const std::vector<std::uint32_t>& at) {
+      return std::ranges::equal(std::span(v).subspan(at[p], at[p + 1] - at[p]),
+                                std::span(v).subspan(at[q], at[q + 1] - at[q]));
+    };
+    return eq(A.electWord, A.electAt) && eq(A.electPos, A.electAt) &&
+           (A.electWatchAt.empty() || eq(A.electWatch, A.electWatchAt));
   };
   // The members of a class are one list, in order, which each of them names.
   bool twins = false;
   for (const auto& group : members) {
-    const auto first = read(group.front());
     if (std::ranges::all_of(group,
-                            [&](unsigned q) { return read(q) == first; }))
+                            [&](unsigned q) { return same(group.front(), q); }))
       continue;
     twins = true;
     for (std::size_t i = 0; i < group.size(); ++i) {

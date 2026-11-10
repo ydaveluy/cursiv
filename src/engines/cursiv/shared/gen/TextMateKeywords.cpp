@@ -3,14 +3,19 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/grammar/unicode/UnicodeRanges.hpp"
+#include "cursiv/grammar/word_final_in.hpp"
 #include "cursiv/services/JsonValue.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {
 
@@ -20,17 +25,21 @@ constexpr bool ascii_letter(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
-// What `\w` matches.
-constexpr bool word_char(char c) {
-  return ascii_letter(c) || (c >= '0' && c <= '9') || c == '_';
+// What `\w` matches in the editor's regex engine, Oniguruma: a letter, a
+// mark, a number or a connector, of any script.
+bool word_char(char32_t cp) {
+  using namespace unicode;
+  return within(kL, std::size(kL), cp) || within(kM, std::size(kM), cp) ||
+         within(kN, std::size(kN), cp) || within(kPc, std::size(kPc), cp);
 }
 
-constexpr char ascii_lower(char c) {
-  return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+constexpr unsigned char ascii_lower(char c) {
+  const auto b = static_cast<unsigned char>(c);
+  return b >= 'A' && b <= 'Z' ? static_cast<unsigned char>(b - 'A' + 'a') : b;
 }
 
-// Dictionary order: letter case only decides between words that are
-// otherwise equal, the lowercase one first.
+// Dictionary order of the bytes: letter case only decides between words that
+// are otherwise equal, the lowercase one first.
 bool dictionary_before(std::string_view a, std::string_view b) {
   if (!std::ranges::equal(a, b, {}, ascii_lower, ascii_lower))
     return std::ranges::lexicographical_compare(a, b, {}, ascii_lower,
@@ -73,8 +82,11 @@ std::string textmate_keyword_match(std::vector<TextMateKeyword> keywords) {
   // By the sides that are bounded by `\B`: none, the start, the end, both.
   std::array<std::string, 4> groups;
   for (const TextMateKeyword& w : words) {
-    std::string& group = groups[(word_char(w.text.front()) ? 0 : 1) +
-                                (word_char(w.text.back()) ? 0 : 2)];
+    std::size_t len = 0;
+    const char32_t first = scalar_at(w.text.data(), w.text.size(), len);
+    const char32_t last = cursiv::detail::last_scalar(w.text);
+    std::string& group =
+        groups[(word_char(first) ? 0 : 1) + (word_char(last) ? 0 : 2)];
     if (!group.empty()) group += '|';
     const bool ownCase = w.folded && !allFolded;
     if (ownCase) group += "(?i:";
@@ -116,10 +128,14 @@ std::optional<std::string> with_keyword_match(std::string_view json,
         end += json[end] == '\\' ? 2 : 1;
       if (end >= json.size()) return std::nullopt;
       const std::size_t next = json.find_first_not_of(" \t\n\r", end + 1);
-      if (next < json.size() && json[next] == ':')
+      if (next < json.size() && json[next] == ':') {
         key = json.substr(at + 1, end - at - 1);
-      else if (open.size() == kPath.size() && open.back().second &&
-               key == kPath.back())
+        // A key that repeats on the path hides what the earlier one held.
+        if (!open.empty() && open.size() <= kPath.size() &&
+            open.back().second && key == kPath[open.size() - 1])
+          found.reset();
+      } else if (open.size() == kPath.size() && open.back().second &&
+                 key == kPath.back())
         found = {at, end + 1};
       at = end;
     }

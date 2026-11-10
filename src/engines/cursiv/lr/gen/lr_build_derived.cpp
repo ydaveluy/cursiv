@@ -164,8 +164,8 @@ struct LrDeriving {
     return out;
   }
 
-  // The continuations of each state, read off its shifts, less end of input,
-  // trivia and the tokens no author types.
+  // The continuations of each state by terminal, as its shifts stand, less
+  // end of input, trivia and the tokens no author types.
   void expect(LrDerivedRows& rows) const {
     // Distinct pairs in first appearance; a state lists each once.
     std::map<std::array<std::uint16_t, 4>, std::uint16_t> pooled;
@@ -215,13 +215,6 @@ struct LrDeriving {
       }
       rows.expectItems.resize(
           first + keep(std::span(rows.expectItems).subspan(first)));
-      // By terminal, so a completion finds one candidate's entries by search.
-      std::stable_sort(rows.expectItems.begin() + first,
-                       rows.expectItems.end(),
-                       [&](std::uint16_t x, std::uint16_t y) {
-                         return rows.expectPool[x].feature <
-                                rows.expectPool[y].feature;
-                       });
     }
     rows.expectBase.push_back(
         static_cast<std::uint32_t>(rows.expectItems.size()));

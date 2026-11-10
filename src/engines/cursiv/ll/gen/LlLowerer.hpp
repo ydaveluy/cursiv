@@ -57,7 +57,6 @@ class LlLowerer : public LowerWalk<LlLowerer, LlLowered, llow::Pool> {
   void emit_op(unsigned cfg, ImageId op, const void* opRow, std::uint8_t prec,
                Association group);
   std::uint16_t climb_chain(const void* row);
-  void note_nests();
 
   std::unordered_map<std::uint64_t, ImageId> _endedIn;
 };

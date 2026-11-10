@@ -122,7 +122,15 @@ framework, the module generated from your grammar, or nothing.
 The server advertises an editor feature only when its provider is installed.
 It calls a provider once the document has reached the state in the
 **Called at** column, or once every document has, where it says *workspace*.
-See [Document lifecycle](#document-lifecycle).
+See [Document lifecycle](#document-lifecycle). To choose other states, replace
+the server that `install_default_shared_lsp_services` installed, in
+`register_lsp_services` like any shared service; here for a completion that
+offers only keywords:
+
+```cpp
+shared.languageServer = std::make_unique<cursiv::DefaultLanguageServer>(
+    shared, cursiv::RequestStates{.completion = cursiv::DocumentState::Parsed});
+```
 
 A request sees every edit sent before it. After `didOpen`, `didChange`,
 `didClose`, `didChangeWatchedFiles`, or a notebook's `didOpen`, `didChange` or
@@ -193,7 +201,8 @@ keywords included: what the author types next asks again. A terminal offers noth
 choice of words, write it as a data rule. A terminal with `as<V>` on each
 alternative is one. Where a [condition](grammar.md#conditions) reads the next
 token's text, a terminal such as `ID` is expected when the condition accepts
-one of a few sample words, such as `a`, `name`, `0` or `_`.
+one of a few sample words, such as `a`, `name`, `0` or `_`, and offered
+unchecked when it reads none of them.
 
 ## Customize semantic tokens
 
@@ -387,9 +396,11 @@ not when a document it depends on changes, so read only the document itself and
 do not resolve references: the scopes of other documents may not be ready yet.
 The default `scopeProvider` then looks for a reference's candidates from the
 nearest enclosing container outward, then in the global index. The linker and
-completion both use these candidates. A reference with none is reported with
-the message of the linker's `createLinkingError`: override it to reword the
-message, as in [Reword the framework's errors](../recipes/validation.md#reword-the-frameworks-errors).
+completion both use these candidates. A custom provider returns descriptions
+of the nodes of the current build: one without a `node` resolves nothing.
+A reference with none is reported with the message of the linker's
+`createLinkingError`, which gets the reference and how it failed: override it
+to reword the message, as in [Reword the framework's errors](../recipes/validation.md#reword-the-frameworks-errors).
 
 ## Advanced: add a service
 

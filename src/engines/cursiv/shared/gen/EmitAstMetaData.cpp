@@ -44,10 +44,10 @@ std::vector<std::size_t> member_order(const AstRegistry& registry) {
 // The member-access aliases of each node type: what the generated module
 // names to reach a type's fields and references.
 std::string emit_ast_members(const AstRegistry& registry,
-                             const std::vector<std::string>& types,
                              const std::vector<std::string>& tags,
                              std::span<const std::size_t> order) {
   const auto& fields = registry.fields;
+  const auto& types = registry.types;
   TextBuilder out;
   const auto access = [&](std::string_view name, std::string_view type,
                           std::span<const std::size_t> members) {
@@ -71,7 +71,7 @@ std::string emit_ast_members(const AstRegistry& registry,
       members.push_back(f);
       if (is_ref_content(fields[f].content)) references[t].push_back(f);
     }
-    access(concat("Members", t), types[t], members);
+    access(concat("Members", t), types[t].source, members);
   }
   const auto typeIds = std::views::iota(std::size_t{0}, types.size());
   const auto number = [](std::size_t f) { return concat(f, "u"); };
@@ -82,9 +82,9 @@ std::string emit_ast_members(const AstRegistry& registry,
   out.write(emit_table(
       "constexpr ::cursiv::detail::NewNodeFn kNewNodes[]", typeIds,
       [&](std::size_t t) -> std::string {
-        return registry.types[t].built
-                   ? concat("&::cursiv::detail::new_ast_node<", types[t], ">")
-                   : "nullptr";
+        return types[t].built ? concat("&::cursiv::detail::new_ast_node<",
+                                       types[t].source, ">")
+                              : "nullptr";
       },
       "nullptr"));
   // A grammar with no reference member keeps no reference rows.
@@ -115,17 +115,15 @@ std::string emit_ast_members(const AstRegistry& registry,
 
 std::string emit_ast_metadata(const AstRegistry& registry,
                               const std::vector<std::string>& tags) {
-  std::vector<std::string> types, narrows;
-  for (const auto& type : registry.types) types.push_back(type.source);
-  for (const auto& field : registry.fields)
-    narrows.push_back(narrow_list(field.narrows));
+  const auto& types = registry.types;
   const std::span<const AstRegistry::Field> fields = registry.fields;
   const auto order = member_order(registry);
   const auto word = [](std::uint64_t w) { return concat(w, "ull"); };
   TextBuilder out;
   out.write(emit_table("constexpr const ::cursiv::AstTypeTag* kTypes[]", types,
-                       [](const std::string& type) {
-                         return concat("&::cursiv::ast_type_tag<", type, ">");
+                       [](const AstRegistry::Type& type) {
+                         return concat("&::cursiv::ast_type_tag<", type.source,
+                                       ">");
                        }));
   out.line("constexpr const ::cursiv::AstTypeTag* kSubtypeTags[] = {");
   std::vector<std::size_t> counts(types.size(), 1);
@@ -178,13 +176,13 @@ std::string emit_ast_metadata(const AstRegistry& registry,
   }
   if (const std::size_t bound = registry.reference_bound(); bound != 0) {
     const auto rows = std::views::iota(std::size_t{0}, bound);
-    out.write(emit_table("constexpr ::cursiv::RefOps kRefOps[]", rows,
-                         [&](std::size_t f) {
-                           return is_ref_content(fields[f].content)
-                                      ? concat("::cursiv::engine::ref_ops_of<",
-                                               tags[f], ", ", narrows[f], ">()")
-                                      : std::string("{}");
-                         }));
+    out.write(emit_table(
+        "constexpr ::cursiv::RefOps kRefOps[]", rows, [&](std::size_t f) {
+          return is_ref_content(fields[f].content)
+                     ? concat("::cursiv::engine::ref_ops_of<", tags[f], ", ",
+                              narrow_list(fields[f].narrows), ">()")
+                     : std::string("{}");
+        }));
     out.write(emit_table("constexpr ::std::uint64_t kAccepts[]",
                          registry.accepts, word));
     out.write(
@@ -222,7 +220,7 @@ std::string emit_ast_metadata(const AstRegistry& registry,
                                          : concat("{kProperties + ", starts[t],
                                                   "u, ", counts[t], "u}");
                  }));
-  return out.write(emit_ast_members(registry, types, tags, order)).take();
+  return out.write(emit_ast_members(registry, tags, order)).take();
 }
 
 std::string emit_ast_metadata_record(const AstRegistry& registry) {

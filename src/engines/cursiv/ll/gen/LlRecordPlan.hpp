@@ -22,13 +22,12 @@ namespace cursiv::engine {
 
 class LlRecordPlan {
  public:
-  LlRecordPlan(const LlLowCfg& cfg, const ChainPool& writes,
-               const std::vector<std::uint8_t>& nests)
-      : _cfg(cfg), _writes(writes), _nests(nests) {}
+  LlRecordPlan(const LlLowCfg& cfg, const ChainPool& writes)
+      : _cfg(cfg), _writes(writes) {}
 
   bool opens_chain(std::uint16_t row) const {
-    return row != kNoRow && (_writes.chainBuild[row].creates ||
-                             (row < _nests.size() && _nests[row] != 0));
+    return row != kNoRow &&
+           (_writes.chainBuild[row].creates || _writes.chainBuild[row].nest);
   }
 
   // Only a structural singleton can absorb a group's chain before fusion: a
@@ -152,8 +151,7 @@ class LlRecordPlan {
     } else {
       return;
     }
-    const bool nests =
-        n.row != kNoRow && n.row < _nests.size() && _nests[n.row] != 0;
+    const bool nests = n.row != kNoRow && _writes.chainBuild[n.row].nest;
     for (const auto row : inner) {
       if (nests && row != kNoRow && _writes.chainBuild[row].makes) continue;
       sink(LlFuse{row, join(row, n.row)});
@@ -324,7 +322,6 @@ class LlRecordPlan {
 
   const LlLowCfg& _cfg;
   const ChainPool& _writes;
-  const std::vector<std::uint8_t>& _nests;
   std::vector<bool> _nodeHands, _hands, _opens;
   std::span<const std::uint8_t> _nullable;
   std::vector<std::uint16_t> _last, _required;

@@ -57,8 +57,7 @@ void record_sources_keep_nullable_suffixes_and_only_required_children() {
   cfg.rules[1].body = 2 * count;
   cursiv::engine::ChainPool writes;
   for (unsigned i = 0; i < 4; ++i) writes.chainBuild[i] = {};
-  const std::vector<std::uint8_t> nests(4, 0);
-  cursiv::engine::LlRecordPlan records(cfg, writes, nests);
+  cursiv::engine::LlRecordPlan records(cfg, writes);
   const auto join = [](std::uint16_t held, std::uint16_t) { return held; };
   records.compute_rows(nullable, join);
   CHECK((records.rule_rows(1) == std::vector<std::uint16_t>{0, 2, 1}));
@@ -97,7 +96,7 @@ void record_sources_keep_nullable_suffixes_and_only_required_children() {
   deep.nodes[count - 1].owns = true;
   deep.nodes[count - 1].row = 3;
   deep.rules[1].body = count - 1;
-  cursiv::engine::LlRecordPlan nested(deep, writes, nests);
+  cursiv::engine::LlRecordPlan nested(deep, writes);
   nullable.assign(count, 0);
   nested.compute_rows(nullable, join);
   CHECK((nested.rule_rows(1) == std::vector<std::uint16_t>{3, 2}));
@@ -122,8 +121,8 @@ void record_aliases_propagate_changes_without_rejoining_every_rule() {
   cursiv::engine::ChainPool writes;
   writes.chainBuild[0] = {.makes = true, .creates = true};
   writes.chainBuild[1] = {};
-  const std::vector<std::uint8_t> nests(2), nullable(count);
-  cursiv::engine::LlRecordPlan records(cfg, writes, nests);
+  const std::vector<std::uint8_t> nullable(count);
+  cursiv::engine::LlRecordPlan records(cfg, writes);
   records.compute_ownership();
   std::size_t joins = 0;
   records.compute_rows(nullable, [&](std::uint16_t held, std::uint16_t over) {
@@ -169,8 +168,8 @@ void record_rows_keep_the_order_of_first_arrival_through_aliases() {
   cfg.rules[2].body = 3;
   cfg.rules[3].body = 4;
   cursiv::engine::ChainPool writes;
-  const std::vector<std::uint8_t> nests, nullable(cfg.nnodes);
-  cursiv::engine::LlRecordPlan records(cfg, writes, nests);
+  const std::vector<std::uint8_t> nullable(cfg.nnodes);
+  cursiv::engine::LlRecordPlan records(cfg, writes);
   records.compute_rows(nullable, [](auto held, auto) { return held; });
   CHECK((records.rule_rows(1) == std::vector<std::uint16_t>{1, 0}));
   // Once a cycle acquires an exit, it reaches every member without adding
