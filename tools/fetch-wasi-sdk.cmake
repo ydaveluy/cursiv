@@ -131,10 +131,14 @@ if(NOT _fetched)
   message(FATAL_ERROR "cannot fetch wasi-sdk ${_version}")
 endif()
 file(ARCHIVE_EXTRACT INPUT "${_tarball}" DESTINATION "${_download}")
-file(RENAME "${_download}/${_name}" "${DEST}" NO_REPLACE RESULT _moved)
-if(NOT _moved EQUAL 0)
+# NO_REPLACE cannot move a folder on every host, so the check comes first.
+if(EXISTS "${DEST}")
   message(FATAL_ERROR "${DEST} appeared during the download: remove it, "
                       "or choose another with -DDEST=<dir>")
+endif()
+file(RENAME "${_download}/${_name}" "${DEST}" RESULT _moved)
+if(NOT _moved EQUAL 0)
+  message(FATAL_ERROR "cannot move wasi-sdk to ${DEST}: ${_moved}")
 endif()
 _release_work()
 

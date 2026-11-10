@@ -83,7 +83,7 @@ cursiv_test(presentation_test lsp/presentation_test.cpp cursiv::lsp wsCore)
 cursiv_test(server_test lsp/server_test.cpp cursiv::lsp wsCore docgGenerated)
 target_compile_definitions(server_test PRIVATE
     CURSIV_TEST_SCRATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
-set_tests_properties(server_test PROPERTIES TIMEOUT 30)
+cursiv_timeout(server_test 30)
 # Refuses one allocation by replacing the global allocator, which the thread
 # sanitizer's runtime also defines: there, nothing is refused.
 if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")

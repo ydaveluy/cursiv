@@ -909,9 +909,10 @@ void validate_reuses_one_scratch_identity() {
     (void)call_tool(server, "validate",
                     R"({"text":"datatype D\n","file":"again.ws"})");
   const cursiv::Documents& store = *world().shared.documents;
-  CHECK(!store.hasDocument("file:///.mcp-scratch/0/again.ws"));
-  CHECK(store.getDocumentId("file:///.mcp-scratch/1/again.ws") ==
-        cursiv::kNoDocument);
+  CHECK(!store.hasDocument(
+      cursiv::path_to_file_uri("/.mcp-scratch/0/again.ws")));
+  CHECK(store.getDocumentId(cursiv::path_to_file_uri(
+            "/.mcp-scratch/1/again.ws")) == cursiv::kNoDocument);
 }
 
 void the_grammar_resource_serves_the_golden_text() {
@@ -1177,7 +1178,7 @@ void validate_sets_nothing_back_under_an_admitted_reader() {
                            cursiv::DocumentState reached,
                            const cursiv::CancellationToken&) override {
         if (reached != cursiv::DocumentState::Validated ||
-            !document.uri.starts_with("file:///.mcp-scratch/"))
+            document.uri.find("/.mcp-scratch/") == std::string::npos)
           return;
         const std::scoped_lock hold(mutex);
         scratch = document.id;
@@ -1190,7 +1191,7 @@ void validate_sets_nothing_back_under_an_admitted_reader() {
         toldPastMutationEnd = toldPastMutationEnd || lock->mutationEnded();
         if (verdicts == 0 ||
             std::ranges::none_of(changed, [](std::string_view uri) {
-              return uri.starts_with("file:///.mcp-scratch/");
+              return uri.find("/.mcp-scratch/") != std::string_view::npos;
             }))
           return;
         (void)moved.wait_for(hold, std::chrono::seconds(5),

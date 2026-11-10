@@ -28,7 +28,7 @@ cursiv_test(utils_test core/utils/utils_test.cpp cursiv::lsp wsCore)
 if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
   cursiv_test(AllocationFailure_test core/AllocationFailure_test.cpp wsCore
       convGenerated)
-  set_tests_properties(AllocationFailure_test PROPERTIES TIMEOUT 30)
+  cursiv_timeout(AllocationFailure_test 30)
   cursiv_own_allocator(AllocationFailure_test)
 endif()
 
