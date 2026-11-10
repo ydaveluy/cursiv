@@ -1,5 +1,5 @@
-// A repetition that comes back to its refusal without reading a byte: the
-// token graph cannot spell the turn that follows the refusal.
+// A repetition whose turn may come back to its guard without reading a byte:
+// the lexer cannot express the turn after the guard.
 // expect LR: refused: terminal .STARS. has a guard inside a repetition, and a turn of that repetition may read nothing after the guard
 #pragma once
 

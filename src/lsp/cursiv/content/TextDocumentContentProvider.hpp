@@ -6,10 +6,8 @@
 #include <span>
 #include <string>
 
-// `workspace/textDocumentContent` (3.18): lets the client ask for the text
-// behind a URI it cannot read itself, such as a virtual scheme a reference
-// resolved into. One shared slot: advertised at initialize only when
-// installed, and absence is the protocol's own "unsupported".
+// `workspace/textDocumentContent`: the text behind a URI the client cannot
+// read itself. Announced at initialize only when installed.
 
 namespace cursiv {
 

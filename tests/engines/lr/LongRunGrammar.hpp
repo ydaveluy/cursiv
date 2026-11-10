@@ -7,7 +7,7 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 
 // One production past what a byte counts: both its items' dot and the
-// insertions its first state owes run beyond 255.
+// insertions its first state needs run beyond 255.
 namespace tbounds::longrun {
 namespace ast {
 struct Doc : cursiv::Extends<cursiv::AstNode> {};

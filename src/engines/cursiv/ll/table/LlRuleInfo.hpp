@@ -1,5 +1,5 @@
 // What the program knows about one rule: its name, its body, and the record
-// its own call lays.
+// its own call creates.
 #pragma once
 
 #include <cstdint>

@@ -12,10 +12,9 @@ namespace {
 using Piece = SourceTranslation::Piece;
 using Side = TextRange Piece::*;
 
-// `at` moved from the `From` side of the pieces to the `To` side, where
-// `next` is the first piece whose `From` range ends past `at`. A point
-// strictly inside a piece goes to the piece's start, or to its end for the
-// end of a range.
+// `at` moved from the `From` side of the pieces to the `To` side; `next` is
+// the first piece whose `From` range ends past `at`. A point inside a piece
+// goes to its start, or its end for the end of a range.
 template <Side From, Side To>
 TextOffset across(std::span<const Piece> pieces, const Piece* next,
                   TextOffset at, bool end) noexcept {
@@ -33,18 +32,26 @@ const Piece* after(std::span<const Piece> pieces, TextOffset at) noexcept {
       [](TextOffset a, const Piece& p) { return a < (p.*From).end; });
 }
 
-// Most spans lie in one run between two pieces and move by that run's
-// shift. For the others, ends never decrease along a run of records, so one
-// cursor walks the pieces (and steps back for spans that break the rule, as
-// repairs may); a begin is searched back from its end, rarely more than a few
-// pieces away. `lost(i, span)` hears of a span whose bound lies strictly
-// inside a piece, before it moves: the way back cannot tell where it stood.
+// Moves `spans` from the `From` side to the `To` side; most move by their
+// run's shift. `lost(i, span)` is called for a span with a bound inside a
+// piece, or at the start of an inserted one: the way back cannot place it.
 template <Side From, Side To, class Span, class Lost>
 void move(std::span<const Piece> pieces, std::span<Span> spans, Lost&& lost) {
   const Piece* const first = pieces.data();
   const Piece* const last = first + pieces.size();
-  const auto past = [](const Piece& p, TextOffset at) {
-    return (p.*From).end > at;
+  // The first piece that ends past `at`, sought from `from` in steps that
+  // double, forward or back.
+  const auto seek = [&](const Piece* from, TextOffset at) {
+    const auto before = [at](const Piece& p) { return (p.*From).end <= at; };
+    std::ptrdiff_t step = 1;
+    if (from != last && before(*from)) {
+      while (step < last - from && before(from[step])) step *= 2;
+      return std::partition_point(from + step / 2 + 1,
+                                  from + std::min(step, last - from), before);
+    }
+    while (step <= from - first && !before(from[-step])) step *= 2;
+    return std::partition_point(from - std::min(step, from - first),
+                                from - step / 2, before);
   };
   const Piece* next = first;
   // The run before `next`: a span starts at or after `runBegin` and ends
@@ -52,8 +59,12 @@ void move(std::span<const Piece> pieces, std::span<Span> spans, Lost&& lost) {
   TextOffset runBegin = 0;
   std::uint64_t runEnd = 0;
   TextOffset shift = 0;
-  const auto inside = [&](const Piece* p, TextOffset at) {
-    return p != last && (p->*From).begin < at;
+  // Whether a bound at `at` cannot come back: inside `p`, or at the start of
+  // a `p` whose other side is empty.
+  const auto stranded = [&](const Piece* p, TextOffset at) {
+    return p != last &&
+           ((p->*From).begin < at ||
+            ((p->*To).begin == (p->*To).end && (p->*From).begin == at));
   };
   for (std::size_t i = 0; i < spans.size(); ++i) {
     Span& s = spans[i];
@@ -62,30 +73,20 @@ void move(std::span<const Piece> pieces, std::span<Span> spans, Lost&& lost) {
       s.end += shift;
       continue;
     }
-    while (next != last && !past(*next, s.end)) ++next;
-    while (next != first && past(next[-1], s.end)) --next;
-    const Piece* begin = next;
-    for (std::ptrdiff_t step = 1;
-         begin != first && past(begin[-1], s.begin); step *= 2) {
-      const Piece* const probe = begin - std::min(step, begin - first);
-      if (!past(*probe, s.begin)) {
-        begin = std::partition_point(probe + 1, begin, [&](const Piece& p) {
-          return !past(p, s.begin);
-        });
-        break;
-      }
-      begin = probe;
-    }
-    if (inside(begin, s.begin) || inside(next, s.end))
+    next = seek(next, s.end);
+    const Piece* const begin = seek(next, s.begin);
+    if (stranded(begin, s.begin) || stranded(next, s.end))
       lost(i, TextRange{s.begin, s.end});
     s.begin = across<From, To>(pieces, begin, s.begin, false);
     s.end = across<From, To>(pieces, next, s.end, true);
-    // An end at an empty piece's offset is past it, not in this run.
+    // An end at an empty piece's offset is past it, not in this run; one at
+    // the start of a piece with an empty other side is lost.
     runBegin = next == first ? 0 : (next[-1].*From).end;
     shift = next == first ? 0 : (next[-1].*To).end - (next[-1].*From).end;
     runEnd = next == last ? std::uint64_t{1} << 32
                           : std::uint64_t{(next->*From).begin} +
-                                ((next->*From).begin != (next->*From).end);
+                                ((next->*From).begin != (next->*From).end &&
+                                 (next->*To).begin != (next->*To).end);
   }
 }
 

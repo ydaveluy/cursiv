@@ -1,9 +1,8 @@
 #pragma once
 
-// Two places where the order a repair inserts in is the order the grammar is
-// read in, though the ids say otherwise. The first alternative of `Root`
-// meets `y` and `}` before anything: `Pick` writes `x` before `y`, and
-// `Block` goes on with `m` before it closes with `}`.
+// Two places where a repair inserts in the order the grammar is read, though
+// the ids say otherwise: `Root` reaches `y` and `}` first, `Pick` writes `x`
+// before `y`, and `Block` reads `m` before `}`.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

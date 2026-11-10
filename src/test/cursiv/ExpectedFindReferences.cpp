@@ -33,6 +33,8 @@ Disposable expectFindReferences(
       replaceIndices(detail::baseOf(expectedFindReferences));
   const std::shared_ptr<Document> document = parseDocument(
       services, marked.output, expectedFindReferences.parseOptions);
+  Disposable disposable = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(disposable);
 
   std::vector<lsp::Range> expectedRanges;
   expectedRanges.reserve(marked.ranges.size());
@@ -70,7 +72,6 @@ Disposable expectFindReferences(
     }
   }
 
-  Disposable disposable = detail::documentDisposable(services, document);
   if (expectedFindReferences.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

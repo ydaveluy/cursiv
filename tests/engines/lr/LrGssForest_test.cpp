@@ -23,8 +23,8 @@ int order(Forest& forest, std::span<const Id> left, std::span<const Id> right) {
   return forest.ordered(left, right);
 }
 
-// Whether `node`'s elected rank reads `words`: alike to a leaf that spells them,
-// and no prefix of it either way.
+// Whether `node`'s elected rank reads `words`: the same to a leaf that spells
+// them, and no prefix of it either way.
 bool reads(Forest& forest, Id node, std::span<const std::uint32_t> words) {
   const Id spelled = forest.node();
   forest.add(spelled, {}, Forest::none, words);
@@ -402,7 +402,7 @@ void a_frame_one_stack_reads_whole_leaves_the_stacks_open() {
 
 // The lexer's rank of the first token a frame reads comes before the words
 // written in front of it, for the election of a node and the order of two
-// stacks alike.
+// stacks the same.
 void a_frame_is_ordered_by_the_lexers_rank_of_its_first_token() {
   Forest forest;
   const auto token = [&](std::uint32_t rank) {
@@ -411,19 +411,19 @@ void a_frame_is_ordered_by_the_lexers_rank_of_its_first_token() {
     forest.add(n, {}, Forest::none, word, {}, Forest::Kind::ranked);
     return n;
   };
-  const auto arm = [&](Id kid, std::uint32_t written) {
+  const auto arm = [&](Id child, std::uint32_t written) {
     const Id n = forest.node();
-    const std::array<Id, 1> kids{kid};
+    const std::array<Id, 1> children{child};
     const std::array<std::uint32_t, 1> word{written};
     const std::array<std::uint16_t, 1> before{0};
-    forest.add(n, kids, Forest::none, word, before);
+    forest.add(n, children, Forest::none, word, before);
     return n;
   };
   const Id late = arm(token(5), 0), soon = arm(token(2), 1);
   const std::array<Id, 1> left{late}, right{soon};
   CHECK(order(forest, left, right) > 0 && order(forest, right, left) < 0);
-  const Id alike = arm(token(5), 1);
-  const std::array<Id, 1> same{alike};
+  const Id sameToken = arm(token(5), 1);
+  const std::array<Id, 1> same{sameToken};
   CHECK(order(forest, left, same) < 0 && order(forest, same, left) > 0);
 
   const Id parent = forest.node();
@@ -534,10 +534,10 @@ void the_fork_steps_come_in_the_order_the_reading_took_them() {
   LrGssForest forest;
   LrGssDigest digest;
   const Id parent = forest.node(), left = forest.node(), right = forest.node();
-  const std::array<Id, 2> kids{left, right};
+  const std::array<Id, 2> children{left, right};
   forest.add(left, {}, 7, {});
   forest.add(right, {}, 2, {});
-  forest.add(parent, kids, 9, {});
+  forest.add(parent, children, 9, {});
   const auto rope = digest.of(forest, parent, facts);
   CHECK(forks(digest, rope) == std::vector<Id>({7, 9}));
   CHECK(digest.forks().length(rope) == 2);
@@ -560,8 +560,8 @@ void a_derivation_ending_on_many_forks_keeps_every_one() {
   Id below = LrGssForest::none;
   for (Id step = 6; step != kSteps + 6; ++step) {
     const Id node = forest.node();
-    const std::array<Id, 1> kid{below};
-    forest.add(node, below == LrGssForest::none ? std::span<const Id>{} : kid,
+    const std::array<Id, 1> child{below};
+    forest.add(node, below == LrGssForest::none ? std::span<const Id>{} : child,
                step, {});
     below = node;
   }

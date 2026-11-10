@@ -10,6 +10,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "cursiv/workspace/NotebookDocuments.hpp"
 
@@ -43,14 +44,20 @@ class DefaultNotebookDocuments : public NotebookDocuments {
   void didClose(const lsp::DidCloseNotebookDocumentParams& params) override;
 
  private:
-  // Names the notebook's cells, and nothing else, as its own.
-  void mapCells(const std::string& uri, const lsp::NotebookDocument& notebook);
+  // The notebook of each cell, by the cell's URI.
+  using CellIndex = std::unordered_map<std::string, std::string>;
+
+  // Moves the notebook `uri` from its `previous` cells to `cells` without
+  // allocating: `_cells` already has room. Callers prepare what may fail first,
+  // so a reader never sees half an update.
+  void indexCells(const std::string& uri,
+                  const std::vector<std::string>& previous,
+                  CellIndex cells) noexcept;
 
   lsp::NotebookDocumentSyncOptions _options;
   mutable std::mutex _mutex;
   std::unordered_map<std::string, lsp::NotebookDocument> _notebooks;
-  // The notebook of each cell, by the cell's URI.
-  std::unordered_map<std::string, std::string> _cells;
+  CellIndex _cells;
 };
 
 }  // namespace cursiv

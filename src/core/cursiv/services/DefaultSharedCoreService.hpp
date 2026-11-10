@@ -2,8 +2,8 @@
 
 #include "cursiv/services/SharedCoreServices.hpp"
 
-// Base of convenience for a default service bound to the whole workspace. The
-// same rule as `DefaultCoreService`: reach a sibling on each call.
+// Base for a default service bound to the whole workspace. Same rule as
+// `DefaultCoreService`: reach a sibling on each call.
 
 namespace cursiv {
 

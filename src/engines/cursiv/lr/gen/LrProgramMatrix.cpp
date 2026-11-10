@@ -37,13 +37,13 @@ void LrProgramMatrix::append(std::span<const std::uint64_t> row,
     if (empty) _empty.emplace(absent, found->second);
     run.push_back(found->second);
   }
-  const auto [laid, fresh] =
+  const auto [slot, fresh] =
       _runs.try_emplace(run, static_cast<std::uint32_t>(blocks.size()));
   if (fresh) blocks.insert(blocks.end(), run.begin(), run.end());
-  rows.push_back(laid->second);
+  rows.push_back(slot->second);
 }
 
-void LrProgramMatrix::seal() {
+void LrProgramMatrix::finish() {
   const std::size_t distinct = _runs.size();
   _pool = {};
   _empty.reset();
@@ -51,7 +51,7 @@ void LrProgramMatrix::seal() {
   const std::size_t stride = (std::size_t{_columns} + 7) / 8;
   const std::size_t states = rows.size();
   const unsigned ib = index_bits(), vb = value_bits();
-  // The bits of a form, by whether it shares rows and lays blocks.
+  // The bits of a form, by whether it shares rows and stores blocks.
   const auto size = [&](bool shared, bool blocked) {
     const std::size_t width = blocked ? stride : _columns;
     const std::size_t last = distinct == 0 ? 0 : (distinct - 1) * width;
@@ -63,29 +63,29 @@ void LrProgramMatrix::seal() {
   for (const bool s : {false, true})
     for (const bool b : {false, true})
       if (size(s, b) < size(shared, blocked)) shared = s, blocked = b;
-  // Where the run of each row laid starts in `blocks`.
+  // Where the run of each stored row starts in `blocks`.
   const std::size_t lines = shared ? distinct : states;
   const auto run = [&](std::size_t i) {
     return shared ? i * stride : std::size_t{rows[i]};
   };
   if (!blocked) {
-    std::vector<std::uint64_t> laid;
-    laid.reserve(lines * _columns);
+    std::vector<std::uint64_t> packed;
+    packed.reserve(lines * _columns);
     for (std::size_t i = 0; i < lines; ++i)
       for (unsigned c = 0; c < _columns; ++c)
-        laid.push_back(values[blocks[run(i) + c / 8] * 8 + c % 8]);
-    values = std::move(laid);
+        packed.push_back(values[blocks[run(i) + c / 8] * 8 + c % 8]);
+    values = std::move(packed);
     blocks = {};
     if (shared)
       for (std::uint32_t& r : rows)
         r = static_cast<std::uint32_t>(r / stride * _columns);
   } else if (!shared) {
-    std::vector<std::uint32_t> laid;
-    laid.reserve(lines * stride);
+    std::vector<std::uint32_t> packed;
+    packed.reserve(lines * stride);
     for (std::size_t i = 0; i < lines; ++i)
-      laid.insert(laid.end(), blocks.begin() + run(i),
-                  blocks.begin() + run(i) + stride);
-    blocks = std::move(laid);
+      packed.insert(packed.end(), blocks.begin() + run(i),
+                    blocks.begin() + run(i) + stride);
+    blocks = std::move(packed);
   }
   if (!shared) rows = {};
 }

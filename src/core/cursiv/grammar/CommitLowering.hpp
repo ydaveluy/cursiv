@@ -12,7 +12,7 @@
 
 namespace cursiv::detail {
 
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 inline constexpr bool holds_commit = false;
 template <class E, class... Ks>
 inline constexpr bool holds_commit<E, TypeList<Ks...>> =
@@ -22,19 +22,20 @@ inline constexpr bool holds_commit<Commit<P, B>, TypeList<P, B>> = true;
 template <class T, class C>
 inline constexpr bool holds_commit<Implied<T, C>, TypeList<>> = holds_commit<C>;
 
-template <class E, class Kids = typename ExprShape<E>::kids>
-inline constexpr bool stray_commit = false;
+template <class E, class Children = typename ExprShape<E>::children>
+inline constexpr bool misplaced_commit = false;
 template <class E, class... Ks>
-inline constexpr bool stray_commit<E, TypeList<Ks...>> =
-    (stray_commit<Ks> || ...);
+inline constexpr bool misplaced_commit<E, TypeList<Ks...>> =
+    (misplaced_commit<Ks> || ...);
 template <class P, class B>
-inline constexpr bool stray_commit<Commit<P, B>, TypeList<P, B>> = true;
+inline constexpr bool misplaced_commit<Commit<P, B>, TypeList<P, B>> = true;
 template <std::size_t Mn, std::size_t Mx, class P, class B>
 inline constexpr bool
-    stray_commit<Repeat<Mn, Mx, Commit<P, B>>, TypeList<Commit<P, B>>> =
-        stray_commit<P> || stray_commit<B>;
+    misplaced_commit<Repeat<Mn, Mx, Commit<P, B>>, TypeList<Commit<P, B>>> =
+        misplaced_commit<P> || misplaced_commit<B>;
 template <class T, class C>
-inline constexpr bool stray_commit<Implied<T, C>, TypeList<>> = stray_commit<C>;
+inline constexpr bool misplaced_commit<Implied<T, C>, TypeList<>> =
+    misplaced_commit<C>;
 
 template <class E, bool Holds = holds_commit<E>>
 struct CommitLowering {
@@ -43,7 +44,7 @@ struct CommitLowering {
 template <class E>
 using commit_free_t = typename CommitLowering<E>::type;
 
-template <class E, class Kids>
+template <class E, class Children>
 struct commit_rebuilt;
 template <class E, class... Ks>
 struct commit_rebuilt<E, TypeList<Ks...>> {
@@ -51,7 +52,7 @@ struct commit_rebuilt<E, TypeList<Ks...>> {
 };
 template <class E>
 struct CommitLowering<E, true>
-    : commit_rebuilt<E, typename ExprShape<E>::kids> {};
+    : commit_rebuilt<E, typename ExprShape<E>::children> {};
 template <class... Es>
 struct CommitLowering<Seq<Es...>, true> {
   using type = cat_seq_t<commit_free_t<Es>...>;
@@ -62,13 +63,14 @@ struct CommitLowering<Implied<T, C>, true> {
 };
 
 template <class Item, class Stop, std::size_t Turns>
-struct commit_ladder {
-  using type = Choice<
-      cat_seq_t<Item, typename commit_ladder<Item, Stop, Turns - 1>::type>,
-      Stop>;
+struct commit_counted_tail {
+  using type =
+      Choice<cat_seq_t<Item, typename commit_counted_tail<Item, Stop,
+                                                          Turns - 1>::type>,
+             Stop>;
 };
 template <class Item, class Stop>
-struct commit_ladder<Item, Stop, 1> {
+struct commit_counted_tail<Item, Stop, 1> {
   using type = Choice<Item, Stop>;
 };
 
@@ -92,11 +94,13 @@ struct commit_exits<Mn, Mx, Item, Stop, 1> {
   using type = cat_seq_t<Repeat<Mn, kUnbounded, Item>, Stop>;
 };
 template <std::size_t Mn, std::size_t Mx, class Item, class Stop>
-struct commit_exits<Mn, Mx, Item, Stop, 2> : commit_ladder<Item, Stop, Mx> {};
+struct commit_exits<Mn, Mx, Item, Stop, 2>
+    : commit_counted_tail<Item, Stop, Mx> {};
 template <std::size_t Mn, std::size_t Mx, class Item, class Stop>
 struct commit_exits<Mn, Mx, Item, Stop, 3> {
-  using type = cat_seq_t<typename commit_lead<Mn, Item>::type,
-                         typename commit_ladder<Item, Stop, Mx - Mn>::type>;
+  using type =
+      cat_seq_t<typename commit_lead<Mn, Item>::type,
+                typename commit_counted_tail<Item, Stop, Mx - Mn>::type>;
 };
 
 template <std::size_t Mn, std::size_t Mx, class P, class B>

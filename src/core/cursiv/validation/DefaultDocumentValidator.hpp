@@ -13,12 +13,9 @@
 #include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/workspace/Document.hpp"
 
-// The pass in two halves: the built-in one -- parse diagnostics, then linking
-// errors -- and the language's own checks, dispatched per node by the
-// registry. The order is not cosmetic: a client reads the first diagnostic
-// on a line, and a crashing check cannot cost the built-in half, which has
-// already run. A document with no check still validates, since the linking
-// errors have no other source.
+// The pass in two halves: the built-in one, parse diagnostics then linking
+// errors, and the language's checks per node. A throwing check cannot cost
+// the built-in half, which runs first.
 
 namespace cursiv {
 
@@ -27,12 +24,6 @@ struct ParseDiagnostic;
 class ValidationAcceptor;
 class ValidationRegistry;
 
-// Not `final`, and its halves are protected and virtual: a language that
-// reports a parse error its own way, or that anchors a broken link elsewhere,
-// overrides one of `processParsingErrors`, `processLinkingErrors` or
-// `validateAst` and keeps the rest. The words are not this class's: a parse
-// error reads as the `parserErrorMessageProvider` says, and a broken link as
-// the linker's `createLinkingError` does.
 class DefaultDocumentValidator : public DocumentValidator {
  public:
   explicit DefaultDocumentValidator(const CoreServices& core) noexcept
@@ -47,33 +38,29 @@ class DefaultDocumentValidator : public DocumentValidator {
   ~DefaultDocumentValidator() noexcept override = default;
 
  protected:
-  // The parser's diagnostics in the client's shape, each stamped with its code.
-  // The conversion lives here because this file owns the codes.
+  // The parser's diagnostics in the client's shape, each with its code.
   virtual void processParsingErrors(const Document&, std::vector<Diagnostic>&,
                                     const CancellationToken&) const;
   // The possible repairs of a recovered error, as machine data: the spellings
-  // the tokens it was owed admit, one edit row each.
+  // of the tokens it expected, one edit row each.
   virtual void attachRepairActions(const Document&, TextRange range,
-                                   const ParseDiagnostic& owed,
+                                   const ParseDiagnostic& parseDiagnostic,
                                    Diagnostic&) const;
-  // Every reference whose state is an error, anchored on the CST node of the
-  // name. The only place a broken link becomes something a client can see.
-  // The one diagnostic the parser could not write: what it refused without
-  // repairing.
+  // The diagnostic for a parse the parser refused without repair.
   [[nodiscard]] Diagnostic unrepairedParseError(const Document&) const;
   // Each failed reference, in the linker's words: `Linker::createLinkingError`
   // is where a language rewords it.
   virtual void processLinkingErrors(const Document&, std::vector<Diagnostic>&,
                                     const CancellationToken&) const;
-  // The registry's checks over every node of the tree, in document order.
-  // Builds the acceptor the three halves below write through -- it lives on
-  // this frame, which is what makes its sink legal for the whole walk.
+  // The registry's checks over every node of the tree. Builds the acceptor the
+  // three parts below write through; it lives on this frame, so its sink stays
+  // valid for the whole walk.
   virtual void validateAst(
       const Document&, std::vector<Diagnostic>&,
       std::span<const ValidationCategory* const> categories,
       const CancellationToken&) const;
 
-  // The three halves, separately overridable: what a hook collects is ready
+  // The three parts, separately overridable: what a hook collects is ready
   // before the first node check reads it, and what the walk accumulated is
   // whole before an after hook reports on it.
   virtual void validateAstBefore(const Document&, ValidationAcceptor&,
@@ -86,11 +73,8 @@ class DefaultDocumentValidator : public DocumentValidator {
                                 std::span<const ValidationCategory* const>,
                                 const CancellationToken&) const;
 
-  // Where a language modulates the walk, node by node: a generated region it
-  // never authored is checked nowhere, a node whose contents are another
-  // language's is entered nowhere. Asked once for every node, before the
-  // first check runs -- the walk completes children before their parent, so
-  // a subtree its root refuses has to be known in advance.
+  // Asked once for every node before the first check: a node can skip its own
+  // checks or its whole subtree, as the walk visits children first.
   [[nodiscard]] virtual ValidateSingleNodeOptions validateSingleNodeOptions(
       const AstNode&, std::span<const ValidationCategory* const>) const;
   // Whether the walk asks `validateSingleNodeOptions` at all. The default
@@ -98,8 +82,8 @@ class DefaultDocumentValidator : public DocumentValidator {
   // true here too, or it is never asked.
   [[nodiscard]] virtual bool asksNodeOptions() const noexcept { return false; }
 
-  // What every diagnostic of this pass is stamped with. A language that
-  // publishes under another name changes this one function.
+  // The `source` of every diagnostic of this pass. A language that publishes
+  // under another name overrides this one function.
   [[nodiscard]] virtual std::string_view getSource() const noexcept;
 
   [[nodiscard]] const ValidationRegistry* validationRegistry() const noexcept;

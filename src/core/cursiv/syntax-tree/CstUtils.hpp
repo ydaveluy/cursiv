@@ -8,25 +8,18 @@
 #include "cursiv/syntax-tree/CstLeaf.hpp"
 #include "cursiv/syntax-tree/CstNodeView.hpp"
 
-// Where a member was written, and where a keyword was spelled, asked by name
-// of an AST node. The search runs over the records of its document's tree,
-// which names the grammar that stamped it and the records that opened a node
-// -- which is what lets a formatter and a diagnostic anchor be written once for
-// the tree.
-//
-// `document` is the node's own. Passing it spares the climb to the root, whose
-// parent it is: a caller asking about many nodes passes it. A node no document
-// holds answers nothing.
+// Where a member was written, and where a keyword was spelled, asked by
+// name of an AST node, over the records of its document's tree. Pass the
+// node's `document` to spare the walk up to the root.
 
 namespace cursiv {
 
 struct AstNode;
 struct Document;
 
-// The records of `node`'s own construction that the grammar says write
-// `feature`, in document order. A record that opens a node of its own ends the
-// search down that branch: a nested declaration answers for itself, never for
-// its parent. Empty for a tree that names no grammar.
+// The records of `node`'s own construction that write `feature`, in
+// document order. A record that opens a node of its own ends the search down
+// that branch. Empty for a tree that names no grammar.
 [[nodiscard]] std::vector<CstNodeView> find_nodes_for_feature(
     const AstNode& node, std::string_view feature,
     const Document* document = nullptr);
@@ -38,13 +31,9 @@ struct Document;
     const AstNode& node, std::string_view feature, std::size_t index = 0,
     const Document* document = nullptr);
 
-// Every visible record of `node`'s own construction whose grammar element
-// spells `keyword`, in any case where the grammar reads the literal in any
-// case, or `node`'s own record alone when it is that keyword. Hidden records
-// are skipped: a keyword inside a comment was not spelled, and a record that
-// opens a node of its own ends the search down that branch -- a rule about "my
-// closing brace" must never select a child's, even a child that is nothing but
-// its keyword.
+// Every visible record of `node`'s own construction that spells `keyword`
+// (in any case where the grammar allows), or `node`'s own record when it is
+// that keyword. A record that opens a node of its own ends the search.
 [[nodiscard]] std::vector<CstNodeView> find_nodes_for_keyword(
     const AstNode& node, std::string_view keyword,
     const Document* document = nullptr);
@@ -53,10 +42,8 @@ struct Document;
     const AstNode& node, std::string_view keyword, std::size_t index = 0,
     const Document* document = nullptr);
 
-// Every hidden record of `node`'s own construction whose rule is `ruleName` --
-// a comment class is what this is for. Same rule down a branch: a record that
-// opens a node of its own answers for itself, so a container never selects a
-// nested one's.
+// Every hidden record of `node`'s own construction whose rule is
+// `ruleName`, such as a comment. A nested node's records are its own.
 [[nodiscard]] std::vector<CstNodeView> find_hidden_nodes(
     const AstNode& node, std::string_view ruleName,
     const Document* document = nullptr);
@@ -66,18 +53,12 @@ struct Document;
 [[nodiscard]] std::vector<NodeId> interior_nodes(const Cst& cst, NodeId open,
                                                  NodeId close);
 
-// The last visible leaf ending at or before `offset`, found by bisecting the
-// leaves the tree states outright. Trivia and repaired leaves are stepped
-// over: neither is something the author wrote at a grammar position, and
-// answering from one names no continuation. The record says which is which
-// -- hidden, recovered, zero width -- so no grammar is read.
+// The last visible leaf ending at or before `offset`. Trivia and repaired
+// leaves are stepped over: the author wrote neither at a grammar position.
 [[nodiscard]] CstLeaf find_leaf_before_offset(const Cst& cst,
                                               TextOffset offset);
 
-// The innermost node owning `leaf`. Postorder puts a record's ancestors
-// after it, so the first entry of the tree's map at or past the leaf is
-// either that owner or a descendant of it: from there the AST parents climb
-// to it. Null when nothing owns the leaf.
+// The innermost node owning `leaf`, or null when nothing owns it.
 [[nodiscard]] AstNode* owner_of_leaf(const Cst& cst, NodeId leaf);
 // The node that owns the caret, reached from the leaf before it. Null when no
 // leaf answers or nothing owns it -- the caller's root stands in.

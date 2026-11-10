@@ -6,8 +6,8 @@
 
 namespace cursiv::detail {
 
-// Transparent, so a lookup by `string_view` does not materialise a
-// `std::string` first.
+// Transparent, so a lookup by `string_view` does not build a `std::string`
+// first.
 struct TransparentStringHash {
   using is_transparent = void;
   [[nodiscard]] std::size_t operator()(std::string_view s) const noexcept {

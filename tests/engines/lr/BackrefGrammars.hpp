@@ -1,9 +1,8 @@
 #pragma once
 
-// Terminals whose closer echoes a run their opener chose, and runs relayed
-// inside a repetition. The shapes are cases of one table, behind an opening
-// keyword each, but the long bracket: its comment is hidden, and a hidden
-// terminal is read in every mode of its table.
+// Terminals whose closer echoes a run their opener chose, and runs relayed in a
+// repetition: cases of one table behind a keyword each, but the long bracket,
+// whose comment is hidden and so read in every mode.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

@@ -1,5 +1,5 @@
 // What the matcher hands back: one match, its end and its terminal -- and, of
-// a candidate, the tier of the branch that read it.
+// a candidate, the priority of the branch that read it.
 #pragma once
 
 #include <cstddef>
@@ -13,7 +13,7 @@ namespace cursiv::engine {
 struct Scan {
   TextOffset end = 0;
   SymbolId term = kInvalidSymbol;
-  std::uint8_t tier = 0;
+  std::uint8_t priority = 0;
 };
 
 // Room for `N` matches the matcher fills before they are read: declaring it
@@ -28,7 +28,7 @@ class ScanRoom {
   [[nodiscard]] Scan& operator[](std::size_t i) noexcept { return data()[i]; }
 
  private:
-  // A table with no rivals still names the room: C++ has no empty array.
+  // A table with no competitors still names the room: C++ has no empty array.
   static constexpr std::size_t kRoom = N != 0 ? N : 1;
   alignas(Scan) std::byte _bytes[sizeof(Scan) * kRoom];
 };

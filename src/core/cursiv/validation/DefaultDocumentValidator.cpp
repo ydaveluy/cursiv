@@ -64,7 +64,7 @@ constexpr std::size_t kCheckRun = 512;
   return categories.empty() ||
          std::ranges::find(categories, category) != categories.end();
 }
-// A parse that said only how far its repairs can be trusted has no fault.
+// Whether the parse reported a fault; a `bounded` note alone is none.
 [[nodiscard]] bool said_a_fault(const ParseResult& parsed) noexcept {
   return std::ranges::any_of(parsed.diagnostics, [](const ParseDiagnostic& d) {
     return d.kind != DiagnosticKind::bounded;
@@ -86,8 +86,8 @@ void DefaultDocumentValidator::validateDocument(
   throw_if_cancelled(token);
   const std::span<const ValidationCategory* const> categories =
       options.categories;
-  // Both halves gated: ungated, a client asking for the fast checks alone would
-  // repay the full walk of `document.references()` on every keystroke.
+  // Both halves are filtered, so a client asking only for fast checks does not
+  // pay the walk over `document.references()` on every keystroke.
   const bool builtIn = runs_built_in(categories);
   if (builtIn) processParsingErrors(document, diagnostics, token);
   // The stops belong to built-in validation, so a filtered pass runs only
@@ -104,27 +104,15 @@ void DefaultDocumentValidator::validateDocument(
     if (!stopOnLinking && runs_checks(categories))
       validateAst(document, diagnostics, categories, token);
   }
-  // Document order on the way out, sorting the vector of diagnostics and never
-  // the walk. Stable, so the documented order survives within one position:
-  // parse first, linking second, checks last.
-  //
-  // The permutation is sorted, not the diagnostics. A `Diagnostic` is 272
-  // bytes: a merge sort moves each one a logarithmic number of times, through
-  // a buffer of its own, and every comparison reaches into an array of that
-  // stride. Offset and position pack into a pair that stays in cache, the
-  // position makes the order total -- so plain `sort` is already stable here --
-  // and the answer is applied in one pass of n moves.
-  //
-  // A list that already arrives in order is kept as it is: checks that report
-  // on sibling nodes often emit in document order, and then the permutation,
-  // the second vector and its n moves buy nothing. Equal positions keep their
-  // emission order either way, so the result is the same.
+  // Sorted into document order on the way out, stably: parse, then linking,
+  // then checks at one position. The (offset, index) pairs are sorted rather
+  // than the large diagnostics, and a list already in order is kept as is.
   if (diagnostics.size() > 1 &&
       !std::ranges::is_sorted(
           diagnostics, {}, [](const Diagnostic& d) { return d.range.begin; })) {
-    std::vector<std::pair<TextOffset, std::uint32_t>> order;
+    std::vector<std::pair<TextOffset, std::size_t>> order;
     order.reserve(diagnostics.size());
-    for (std::uint32_t i = 0; i < diagnostics.size(); ++i)
+    for (std::size_t i = 0; i < diagnostics.size(); ++i)
       order.emplace_back(diagnostics[i].range.begin, i);
     std::ranges::sort(order);
     std::vector<Diagnostic> ordered;
@@ -139,18 +127,17 @@ void DefaultDocumentValidator::validateDocument(
 // What the recovery inserted or replaced, as edit rows the code-action provider
 // turns into quick fixes.
 void DefaultDocumentValidator::attachRepairActions(
-    const Document& document, TextRange range, const ParseDiagnostic& owed,
-    Diagnostic& diagnostic) const {
-  // The repair already says which tokens it was owed, and what they spell is
-  // the grammar's own answer -- never a second walk over the document. A
-  // deletion names the token it resumed on, already in the text: writing it
-  // again is no fix.
-  if (owed.element == kNoElement || owed.kind == DiagnosticKind::deleted)
+    const Document& document, TextRange range,
+    const ParseDiagnostic& parseDiagnostic, Diagnostic& diagnostic) const {
+  // The repair names its tokens, and the grammar spells them. A deletion names
+  // the token it resumed on, already in the text, so it gets no fix.
+  if (parseDiagnostic.element == kNoElement ||
+      parseDiagnostic.kind == DiagnosticKind::deleted)
     return;
 
   constexpr std::size_t kMaxActions = 4;
-  const std::vector<std::string_view> spellings =
-      expected_spellings(_core.parser->getGrammar(), owed, kMaxActions);
+  const std::vector<std::string_view> spellings = expected_spellings(
+      _core.parser->getGrammar(), parseDiagnostic, kMaxActions);
   if (spellings.empty()) return;
 
   const std::string_view text = document.textDocument().getText();
@@ -176,24 +163,18 @@ void DefaultDocumentValidator::attachRepairActions(
   diagnostic.data = JsonValue(std::move(payload));
 }
 
-// The code is read off the tree, the parse diagnostic carrying no kind: no leaf
-// is the parser stopping, a leaf marked `recovered` is a repair, any other leaf
-// is a value a converter refused. The range comes from the diagnostic rather
-// than a lookup, so a node-less sentence still says where it stopped.
+// One diagnostic per parse diagnostic, its code from its kind. The range comes
+// from the parse diagnostic, so a sentence with no node still has a place.
 void DefaultDocumentValidator::processParsingErrors(
     const Document& document, std::vector<Diagnostic>& diagnostics,
     const CancellationToken& token) const {
   const ParseResult& parsed = document.parseResult;
-  // A refusal that says nothing reads as a clean document. The list below is
-  // what the parser repaired, and a failure it could not repair leaves it
-  // empty -- so the verdict is the only witness left, and it has to speak.
-  // Both verdicts: the parse's, and the build's, which had no reader at all.
+  // A failed parse with no repair would read as a clean document: the parse or
+  // build verdict is reported instead.
   if (said_a_parse_error(parsed) && !said_a_fault(parsed))
     diagnostics.push_back(unrepairedParseError(document));
-  // Not gated on the tree. What follows is what the parser wrote, and a repair
-  // needs no node to be said: gating it on the AST lost every repair of a
-  // document too damaged to build one -- the case where a reader needs them
-  // most. Only the message and the grammar are read below.
+  // Not gated on the tree: a document too damaged to build one still reports
+  // its repairs.
   if (parsed.diagnostics.empty()) return;
   throw_if_cancelled(token);
   const std::string_view source = getSource();
@@ -210,14 +191,14 @@ void DefaultDocumentValidator::processParsingErrors(
                                       : kParseRepaired;
     Diagnostic diagnostic;
     diagnostic.range = TextRange{d.begin, d.end};
-    // A bound names no fault of the author's: it says how far the repairs
-    // around it can be trusted.
+    // `bounded` is no fault of the author: it says the repairs around it may
+    // not be the best.
     diagnostic.severity = d.kind == DiagnosticKind::bounded
                               ? DiagnosticSeverity::Information
                               : DiagnosticSeverity::Error;
     diagnostic.message = words.buildMessage(grammar, d, text);
     diagnostic.source = source;
-    // The element the repair was owed is what a quick fix is built from.
+    // A quick fix is built from the element the repair expected.
     if (d.kind != DiagnosticKind::conversion_error)
       attachRepairActions(document, diagnostic.range, d, diagnostic);
     set_data_code(diagnostic, code);
@@ -237,7 +218,7 @@ Diagnostic DefaultDocumentValidator::unrepairedParseError(
   d.severity = DiagnosticSeverity::Error;
   d.source = getSource();
   // The syntax code, never the repair one: nothing was repaired here, and no
-  // quick fix rides this diagnostic -- a client filtering on `parse-repaired`
+  // quick fix is attached to it -- a client filtering on `parse-repaired`
   // must not be offered an action that does not exist.
   set_data_code(d, kSyntaxError);
   if (document.parseResult.accepted) {
@@ -302,9 +283,9 @@ void DefaultDocumentValidator::processLinkingErrors(
       });
 }
 
-// A document hook that throws costs itself, not the pass -- the same law as a
-// per-node check, and the same door: the registry's `handleException`, with no
-// node, since a document check has none. Cancellation goes straight through.
+// A document hook that throws fails alone, not the whole pass, as a per-node
+// check does: the registry's `handleException` reports it, with no node.
+// Cancellation passes through.
 namespace {
 void run_document_check(const ValidationRegistry& registry,
                         const ValidationPreparationEntry& entry,
@@ -354,6 +335,9 @@ void DefaultDocumentValidator::validateAst(
   if (document.parseResult.value != nullptr)
     validateAstNodes(document, accept, categories, token);
   validateAstAfter(document, accept, categories, token);
+  // A refused diagnostic fails the pass, so its categories are not recorded as
+  // run.
+  accept.throwIfDiagnosticLost();
 }
 
 std::string_view DefaultDocumentValidator::getSource() const noexcept {
@@ -451,15 +435,9 @@ void DefaultDocumentValidator::validateAstNodes(
 
   if (root != nullptr) check(*root);
 
-  // Then the rest in `nodes` order, which is the order the tree was built:
-  // the parser numbers a CST node when it completes, so children precede their
-  // parent. That is a total, deterministic order, and it is not document order.
-  //
-  // The walk stays that way on purpose. Document order is owed on the published
-  // list, not on the traversal, and the list is a handful of diagnostics rather
-  // than a tree of nodes -- `validateDocument` sorts it on the way out.
-  //
-  // Node options share the ancestry memo. Small trees also use this walk.
+  // Then the rest in `nodes` order, children before parents: deterministic, but
+  // not document order, which `validateDocument` sorts on the way out. Small
+  // trees and node options use this walk too.
   const OwnedNodes nodes = document.parseResult.nodes();
   if (asks || nodes.size() < 2 * kCheckRun) {
     for (const AstNode* const node : nodes)
@@ -495,6 +473,7 @@ void DefaultDocumentValidator::validateAstNodes(
         ValidationAcceptor local(ValidationAcceptor::Sink(keep), document,
                                  getSource());
         checkRun(run, local);
+        local.throwIfDiagnosticLost();
       });
   for (std::vector<Diagnostic>& run : found)
     for (Diagnostic& diagnostic : run) accept.accept(std::move(diagnostic));

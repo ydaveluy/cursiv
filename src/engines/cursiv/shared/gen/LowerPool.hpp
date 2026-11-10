@@ -1,5 +1,5 @@
 // What both lowering walks keep while they run: the terminals, conditions and
-// leaves already laid, told by the structure that spells them.
+// leaves already built, keyed by their structure.
 #pragma once
 
 #include <cstdint>

@@ -1,7 +1,5 @@
-// The public test module, exercised through the one shipped language that has
-// every service: what each helper builds, what it compares, and the two things
-// nothing else pins -- the marker scanner that turns a text into offsets, and
-// the hook that lets a foreign harness receive the verdicts.
+// The public test helpers, on the workspace fixture language: what each helper
+// builds and compares, the marker scanner, and the verdict hook.
 
 #include "cursiv/ValidationHelper.hpp"
 
@@ -12,21 +10,13 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
-#include "cursiv/actions/CodeActionProvider.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/ServiceRegistry.hpp"
-#include "cursiv/workspace/Document.hpp"
-#include "cursiv/workspace/Documents.hpp"
-#include "cursiv/workspace/FileSystemProvider.hpp"
-#include "cursiv/semantic/SemanticTokenProvider.hpp"
-#include "cursiv/services/SharedLspServices.hpp"
 #include "cursiv/Check.hpp"
-#include "support/Throws.hpp"
 #include "cursiv/CodeActionResult.hpp"
 #include "cursiv/DecodedSemanticTokens.hpp"
 #include "cursiv/Disposable.hpp"
@@ -50,6 +40,15 @@
 #include "cursiv/TextDocumentParams.hpp"
 #include "cursiv/TextPredicate.hpp"
 #include "cursiv/VirtualFileSystemProvider.hpp"
+#include "cursiv/actions/CodeActionProvider.hpp"
+#include "cursiv/semantic/SemanticTokenProvider.hpp"
+#include "cursiv/services/Diagnostic.hpp"
+#include "cursiv/services/ServiceRegistry.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/FileSystemProvider.hpp"
+#include "support/Throws.hpp"
 #include "workspace/lsp/LspModule.hpp"
 #include "workspace/lsp/LspServices.hpp"
 
@@ -63,7 +62,7 @@ struct World {
   ws::WorkspaceServices& language = services.language;
 };
 
-// A check runs to the end, or it throws: both are answers, and the lane names
+// A check runs to the end, or it throws: both are answers, and the test says
 // which it wanted.
 [[nodiscard]] bool passes(cursiv::function_ref<void()> check) {
   return !support::throws<ct::ExpectationError>(check);
@@ -100,6 +99,19 @@ void the_markers_become_offsets() {
   CHECK(sorted.ranges.size() == 2);
   CHECK(sorted.ranges[0].first == 0 && sorted.ranges[0].second == 3);
   CHECK(sorted.ranges[1].first == 1 && sorted.ranges[1].second == 2);
+
+  // The text on each side of a marker never joins into a marker of its own:
+  // `a<` and `|b` are text, and the caret stands between them.
+  const ct::ReplacedIndices joined = ct::replaceIndices({.text = "a<<|>|b"});
+  CHECK(joined.output == "a<|b");
+  CHECK(joined.indices.size() == 1 && joined.indices[0] == 2);
+  CHECK(joined.ranges.empty());
+  const ct::ReplacedIndices inside =
+      ct::replaceIndices({.text = "x<|y<<|>|>z"});
+  CHECK(inside.output == "xy<z");
+  CHECK(inside.indices.size() == 1 && inside.indices[0] == 3);
+  CHECK(inside.ranges.size() == 1);
+  CHECK(inside.ranges[0].first == 1 && inside.ranges[0].second == 3);
 
   // The markers are the caller's: a text that spells `<|>` needs other ones.
   const ct::ReplacedIndices custom =
@@ -390,8 +402,8 @@ void the_symbol_is_painted_where_it_stands() {
   CHECK(passes([&] { (void)ct::expectHighlight(world.language, input); }));
 }
 
-// The rename door: the edit box opens, and the edits cover exactly the marked
-// spans with the new name.
+// Rename at the caret: the edits cover exactly the marked spans with the new
+// name.
 void the_name_is_rewritten_where_it_is_used() {
   World world;
   const ct::ExpectedRename input{.text =
@@ -506,7 +518,7 @@ void the_prose_of_a_declaration_reaches_its_use() {
                                            .disposeAfterCheck = true});
   }));
 
-  // No hover is not a hover whatever its text says.
+  // Without a hover, expecting any hover text fails.
   constexpr std::string_view kBare = "datatype String\n<|>\n";
   CHECK(passes([&] {
     (void)ct::expectHover(world.language, {.text = std::string(kBare),
@@ -533,7 +545,7 @@ void a_reference_is_coloured_as_one() {
     ct::expectSemanticToken(highlighted, {.tokenType = "variable"});
   }));
 
-  // ...and it is not a keyword, which is what makes the check a check.
+  // ...and not a keyword: the check can fail.
   CHECK(!passes(
       [&] { ct::expectSemanticToken(highlighted, {.tokenType = "keyword"}); }));
 }
@@ -585,17 +597,81 @@ void the_workspace_query_reads_the_index() {
   CHECK(count == 0);
 }
 
-// The insertion lands after the last token shifted, not in front of the one
-// that could not be, so the trivia between them stays where the author put it.
+// The insertion goes after the last token shifted, so the trivia stays
+// where the author put it. The fix is checked under the input's URI; the
+// input then stays in the workspace until disposed.
 void a_repair_is_offered_and_really_fixes() {
+  constexpr std::string_view kBroken =
+      "datatype String\nentity A { x  String }\n";
+  constexpr std::string_view kFixed =
+      "datatype String\nentity A { x:  String }\n";
+  for (const std::string_view uri : {"", "file:///w/fixed.ws"}) {
+    World world;
+    ct::ParseHelperOptions options;
+    options.documentUri = uri;
+    bool ran = false;
+    try {
+      ct::CodeActionResult result =
+          ct::testCodeAction(world.language, std::string(kBroken),
+                             "parse-repaired", kFixed, options);
+      ran = true;
+      CHECK(result.action.has_value());
+      CHECK(!result.diagnosticsAll.empty());
+      CHECK(cursiv::data_code(result.diagnosticRelevant) == "parse-repaired");
+      CHECK(result.document->hasAst());
+      CHECK(result.document->textDocument().getText() == kBroken);
+      CHECK(uri.empty() || result.document->uri == uri);
+      const auto held = world.shared.documents->all();
+      CHECK(held.size() == 1);
+      if (held.size() == 1) CHECK(held.front() == result.document);
+      result.dispose();
+    } catch (const std::exception&) {
+    }
+    CHECK(ran);
+    CHECK(world.shared.documents->all().empty());
+  }
+}
+
+// A check that throws removes the document it built: its caller never
+// receives the cleanup.
+void a_failed_check_leaves_no_document() {
   World world;
-  ct::CodeActionResult result = ct::testCodeAction(
-      world.language, "datatype String\nentity A { x  String }\n",
-      "parse-repaired", "datatype String\nentity A { x:  String }\n");
-  CHECK(result.action.has_value());
-  CHECK(!result.diagnosticsAll.empty());
-  CHECK(cursiv::data_code(result.diagnosticRelevant) == "parse-repaired");
-  result.dispose();
+  CHECK(!passes([&] {
+    (void)ct::expectHover(world.language,
+                          {.text = "datatype S<|>tring\n", .hover = "nothing"});
+  }));
+  CHECK(world.shared.documents->all().empty());
+
+  ct::ValidationHelperOptions strict;
+  strict.failOnParsingErrors = true;
+  CHECK(!passes([&] {
+    (void)ct::validationHelper(world.language, "entity A { x  String }\n",
+                               strict);
+  }));
+  CHECK(world.shared.documents->all().empty());
+
+  CHECK(!passes([&] {
+    (void)ct::testCodeAction(world.language,
+                             "datatype String\nentity A { x  String }\n",
+                             "parse-repaired", "not the fix");
+  }));
+  CHECK(world.shared.documents->all().empty());
+
+  // A provider that throws, whatever it throws.
+  struct Throwing final : cursiv::CodeActionProvider {
+    [[nodiscard]] std::vector<lsp::CodeAction> getCodeActions(
+        const cursiv::Document&, const lsp::CodeActionParams&,
+        const cursiv::CancellationToken&) const override {
+      throw std::runtime_error("provider");
+    }
+  };
+  world.language.codeActionProvider = std::make_unique<Throwing>();
+  CHECK(support::throws<std::runtime_error>([&] {
+    (void)ct::testCodeAction(world.language,
+                             "datatype String\nentity A { x  String }\n",
+                             "parse-repaired", std::nullopt);
+  }));
+  CHECK(world.shared.documents->all().empty());
 }
 
 // The language's own actions, their edits filed under another document; with
@@ -736,6 +812,7 @@ int main() {
   the_workspace_query_reads_the_index();
   a_repair_is_offered_and_really_fixes();
   a_repair_is_judged_on_its_own_document();
+  a_failed_check_leaves_no_document();
   the_virtual_file_system_answers_like_a_disk();
   an_installed_hook_receives_the_verdict();
   a_disposable_runs_once();

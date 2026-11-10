@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Complete the "Try it online" page of a documentation build. MkDocs builds
-# the page from docs/demo/ and copies its scripts; this adds the editor
-# (tools/bundle-demo-editor.sh), the example documents, and the language
-# servers that tools/wasm-dist.sh collects from a wasi-release build. The page
-# needs http(s): serve the site over https or on localhost.
+# Completes the "Try it online" page of a documentation build with the editor,
+# the example documents and the servers tools/wasm-dist.sh collects. Serve the
+# site over https or on localhost.
 #
 #   tools/build-demo.sh <servers-dir> <site-demo-dir>   # e.g. dist site/demo
 set -euo pipefail

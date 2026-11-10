@@ -32,7 +32,6 @@ std::string read(Parser& p, Reflection& r, std::string_view text) {
   return out;
 }
 
-// LL reads every text as the case says.
 template <class Ll, class LlAst>
 void expect_cases(Ll ll, LlAst llr,
            std::initializer_list<Case> cases) {

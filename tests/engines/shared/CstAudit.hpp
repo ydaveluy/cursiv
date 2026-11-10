@@ -80,7 +80,8 @@ void audit_cst_structure(const cursiv::ParseResult& r, std::string_view text,
     }
   }
 
-  // Leaves tile the text: in run order, non-overlapping and never going back.
+  // Non-empty leaves in run order: each begins at or after the end of the one
+  // before. The gaps between them are not read.
   cursiv::TextOffset cursor = 0;
   for (cursiv::NodeId i = 0; i < n; ++i) {
     const cursiv::CstNode& x = cst[i];
@@ -120,10 +121,8 @@ void audit_cst_structure(const cursiv::ParseResult& r, std::string_view text,
     return;
   }
 
-  // A tree, not a forest: what the entry root does not contain is trivia or a
-  // repair's leftovers, which is what the bind excludes. A record of the
-  // derivation standing outside it is a document half of which the tree does
-  // not describe.
+  // A tree, not a forest: outside the entry root stand only trivia and a
+  // repair's leftovers, never a record of the derivation.
   const cursiv::NodeId lo = root + 1 - cst[root].subtreeSize;
   for (cursiv::NodeId i = 0; i < n; ++i) {
     if (i >= lo && i <= root) continue;

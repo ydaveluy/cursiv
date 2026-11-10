@@ -1,7 +1,6 @@
-// The parse's own moves read off the table instead of the generated states:
-// what a repair writes where the drive paused, on the context the drive
-// resumes from. A reduce writes what the generated one writes, so a reading
-// replayed whole through here lays the drive's own records.
+// The parse's moves read off the table instead of the generated states: what a
+// repair writes where the drive paused. A reduce writes what the generated one
+// writes, so a reading replayed here writes the drive's own records.
 #pragma once
 
 #include <cstdint>
@@ -30,14 +29,14 @@
 
 namespace cursiv::engine {
 
-// The trivia before the token in hand, laid as the drive lays it.
+// The trivia before the token in hand, written as the drive writes it.
 template <const auto& A>
 inline void lr_write_trivia(LrContext& c) {
   lr_record_trivia<kTermsRecorded<A.cfg>, A.stamp>(c, kLrTermElem<A>.data());
 }
 
-// The goto decides first -- a guarded one by the tag of the span's first
-// state, or by `holds` where the span is empty: one that lands nowhere writes
+// The goto decides first (a guarded one by the tag of the span's first state,
+// or by `holds` where the span is empty): one that leads to no state writes
 // nothing.
 template <const auto& A, class Holds>
 bool lr_write_reduce(LrContext& c, std::uint16_t prod, Holds&& holds) {
@@ -81,8 +80,8 @@ inline LrWriteReading lr_write_reading(const LrContext& c) {
   return w;
 }
 
-// One action written for the reading: a shift lays its leaf -- the held token
-// as a repaired one -- and a reduce what the generated one lays.
+// One action written for the reading: a shift writes its leaf (the held token
+// as a repaired one), and a reduce what the generated one writes.
 template <const auto& A>
 bool lr_write_apply(LrContext& c, LrWriteReading& w, std::uint32_t at) {
   const LrAction x = lr_shadow_action<A>(at);
@@ -94,8 +93,8 @@ bool lr_write_apply(LrContext& c, LrWriteReading& w, std::uint32_t at) {
     const auto state = static_cast<std::uint16_t>(to);
     const ElementId row = A.cfg.terms[w.la.sym].element;
     const bool held = w.pin && w.la == w.pinTok;
-    // An implied token is laid where the last token ended, as the drive lays
-    // it, and the trivia past it is read again behind it.
+    // An implied token is inserted where the last token ended, as the drive
+    // inserts it, and the trivia past it is read again behind it.
     const bool implied =
         kLrImplied<A>.size() != 0 && !held && w.virt.implies(w.la);
     if (implied) {
@@ -103,7 +102,7 @@ bool lr_write_apply(LrContext& c, LrWriteReading& w, std::uint32_t at) {
       c.pending.clear();
     } else if (held && !w.pinRep) {
       // Before the first token, the comments in front of the text stand
-      // outside it: what the text owes goes after them.
+      // outside it: what the repair adds goes after them.
       if (c.shifts == 0) {
         lr_write_trivia<A>(c);
         if (c.tape.held() > c.committed) c.committed = c.tape.held();
@@ -157,7 +156,7 @@ bool lr_write_token(LrContext& c, SymbolId term, bool reread, TextOffset end,
         c, [&]() -> LrWriteReading& { return w; },
         [&] {
           // No text is scanned during replay: the pinned token remains in
-          // hand, with an implied token the gap laid ahead of it, if any.
+          // hand, with an implied token the gap inserted ahead of it, if any.
           w.la = w.pinTok;
           if constexpr (kLrImplied<A>.size() != 0)
             if (w.virt.pending != 0) w.la = w.virt.in_hand();
@@ -177,17 +176,16 @@ bool lr_write_token(LrContext& c, SymbolId term, bool reread, TextOffset end,
   return true;
 }
 
-// The extent a deletion takes of the token in hand: its own; where its mode
-// read none, a token refused in its middle, the longest reading of the mode
-// that lexes everything, one refused in that mode, else the unmatched text.
-// A token the parse laid has none. The walks read the text as ending at
-// `end`, and `reached` rises to how far they read.
+// The extent a deletion takes of the token in hand: its own, or, where its mode
+// read none, the longest reading or refusal of the mode that lexes everything,
+// else the unmatched text. The walks stop at `end`; `reached` rises with them.
 template <const auto& A>
 TextOffset lr_error_end(const LrContext& c, std::uint16_t mode, const Token& t,
                         TextOffset end, TextOffset& reached) {
   if (t.begin >= c.len) return t.begin;
   if (t.sym != kInvalidSymbol) {
-    if (t.sym < A.cfg.nterms && A.cfg.terms[t.sym].laid != 0) return t.begin;
+    if (t.sym < A.cfg.nterms && A.cfg.terms[t.sym].synthetic != 0)
+      return t.begin;
     return t.end > t.begin ? t.end : t.begin + 1;
   }
   const auto open = [&](std::uint16_t m) {
@@ -196,7 +194,7 @@ TextOffset lr_error_end(const LrContext& c, std::uint16_t mode, const Token& t,
     std::uint64_t closer = 0;
     const LexReading r =
         lr_open_reading<A>(c, mode, m, t.begin, end, read, closer);
-    c.reads.pay(t.begin, read + static_cast<TextOffset>(closer));
+    c.reads.spend(t.begin, read + static_cast<TextOffset>(closer));
     if (read > reached) reached = read;
     return r;
   };
@@ -233,22 +231,21 @@ CURSIV_ALWAYS_INLINE inline Token lr_written(const LrContext& c, const Token& t,
   return t;
 }
 
-// Token `t` dropped: an implied one is no longer owed, an indent still opens
-// its level, muted, and a dedent closes the level under the muted ones.
+// Token `t` dropped: an implied one leaves `virt.pending`, an indent still
+// opens its level, muted, and a dedent closes the level under the muted ones.
 template <const auto& A>
 void lr_drop_levels(LrContext& c, LrVirtualAt& virt, IndentAt& indent,
                     const Token& t) {
   if (t.sym == virt.pending && virt.pending != 0) virt.pending = 0;
   if constexpr (kIndented<A.cfg>)
-    indent_drop(c.indentArena, indent.head, t, kLaid<A.cfg, kLaidIndent>,
-                kLaid<A.cfg, kLaidDedent>);
+    indent_drop(c.indentArena, indent.head, t,
+                kSyntheticTerm<A.cfg, kSyntheticIndent>,
+                kSyntheticTerm<A.cfg, kSyntheticDedent>);
 }
 
-// A state that reads no token reduces one production on every token it
-// takes: the construct it holds is whole, and the token after a repair's
-// record closes it before it is shifted. Closed first, so the record stands
-// outside it, as the trivia before that token does. Not where the levels may
-// lay a token of no width in front of it.
+// A state that reads no token reduces one production on every token: its
+// construct is whole, so it closes before a repair's record, which stands
+// outside it. Not where the levels may insert a zero-width token first.
 template <const auto& A>
 void lr_close_whole(LrContext& c, TextOffset resume) {
   if constexpr (!kIndented<A.cfg>) {
@@ -275,7 +272,7 @@ void lr_close_whole(LrContext& c, TextOffset resume) {
 }
 
 // Drop the token in hand, up to `end`: an error leaf over the author's bytes,
-// or, for a token the parse laid, the level it moved.
+// or, for a token the parse inserted, the level it moved.
 template <const auto& A>
 void lr_write_delete(LrContext& c, TextOffset end) {
   const Token t = c.la;
@@ -289,8 +286,8 @@ void lr_write_delete(LrContext& c, TextOffset end) {
   c.laMode = kNoMode;
 }
 
-// A trivia the lexer refused, laid up to `end` as the lexer lays that trivia:
-// the gap before the next token still reaches over it.
+// A trivia the lexer refused, written up to `end` as the lexer writes that
+// trivia: the gap before the next token still reaches over it.
 template <const auto& A>
 void lr_write_skip(LrContext& c, SymbolId term, TextOffset end) {
   const TextOffset at = c.la.begin > c.committed ? c.la.begin : c.committed;

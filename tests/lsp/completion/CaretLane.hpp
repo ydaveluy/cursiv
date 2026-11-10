@@ -1,5 +1,5 @@
-// One caret lane, run against whichever engine generated the caret grammar:
-// the module's two doors are all the lane needs.
+// Completion tests on the caret grammar: they need only a generated module's
+// parser and reflection, so any engine's module can run them.
 #pragma once
 
 #include <memory>
@@ -7,9 +7,9 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 
-struct CaretDoor {
+struct CaretEngine {
   std::unique_ptr<cursiv::Parser> (*parser)();
   std::unique_ptr<cursiv::AstReflection> (*reflection)();
 };
 
-void run_caret_lane(const CaretDoor& door);
+void run_caret_lane(const CaretEngine& engine);

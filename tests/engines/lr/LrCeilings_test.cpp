@@ -1,7 +1,7 @@
 #include "cells/generated/G/Module.hpp"
 #include "cells/generated/G/Parser.hpp"
 #include "cells/generated/G/Table.hpp"
-// The ceilings a parse meets, counted: look-ahead and repair budgets.
+// The ceilings a parse reaches, counted: look-ahead and repair budgets.
 
 #include <algorithm>
 #include <array>
@@ -68,12 +68,12 @@ struct ProbeTable {
   } gotoPrograms;
 };
 constexpr ProbeTable kProbeTable{};
-unsigned probeLandings = 0;
+unsigned probeGotoVisits = 0;
 constexpr unsigned kProbeDiamonds = 24;
 constexpr ProbeTable kWideProbeTable = [] {
   ProbeTable table;
   table.cfg.prods[0].len = 2u * kProbeDiamonds;
-  table.gotoPrograms.visits = &probeLandings;
+  table.gotoPrograms.visits = &probeGotoVisits;
   return table;
 }();
 
@@ -122,11 +122,11 @@ void lexical_probes_share_paths_at_each_remaining_depth() {
     top = shift(first, 2u * i + 2u, 3);
     CHECK(shift(second, 2u * i + 2u, 3) == top);
   }
-  probeLandings = 0;
+  probeGotoVisits = 0;
   CHECK(cursiv::engine::lr_gss_takes<kWideProbeTable>(
       graph, top, 1, [](unsigned) { return true; }));
   // The 2^24 paths all end on the seed's one bottom vertex.
-  CHECK(probeLandings == 1);
+  CHECK(probeGotoVisits == 1);
   CHECK(!graph.underflow());
 }
 
@@ -200,7 +200,7 @@ void a_lexical_probe_requests_the_frames_below_a_partial_seed() {
 
 }  // namespace
 
-// A ceiling the parse meets is counted, never silently taken.
+// A ceiling the parse reaches is counted, never silently taken.
 namespace ceilings {
 
 namespace wide = tcells::generated::G;
@@ -208,9 +208,8 @@ namespace deep = telect::generated::Election;
 
 namespace {
 
-// The counters are the table's, not the erased door's: the language module's
-// parser drops them, so this drives the generated table itself, on the
-// sixteen-by-ten nest.
+// The counters belong to the table, not to the type-erased parser, which drops
+// them: this drives the generated table itself, on the sixteen-by-ten nest.
 cursiv::engine::LrParseStats stats_of(const std::string& body) {
   const std::string text = "nests sixteen " + body;
   cursiv::Cst cst;
@@ -247,7 +246,7 @@ void a_noisy_document_leaves_the_search_little_room() {
 }
 
 // The look budget is a depth in tokens: the same document one repetition
-// under it is settled by the text, and over it by the ceiling. Only the
+// under it is decided by the text, and over it by the ceiling. Only the
 // counter tells the two apart -- both answer with an arm.
 void the_look_budget_says_when_it_answered() {
   CHECK(stats_of(nested(20)).lookStops == 0);
@@ -281,10 +280,10 @@ void a_starved_budget_leaves_the_far_corner_clean() {
   CHECK(cst.diagnostics().empty());
 }
 
-// What a chain of unclosed constructs is owed does not change with its
+// What a chain of unclosed constructs needs does not change with its
 // length: one token, named once, over a document every byte of which is
 // still under a record.
-cursiv::engine::LrParseStats a_deep_nest_is_owed_one_token(unsigned depth) {
+cursiv::engine::LrParseStats a_deep_nest_needs_one_token(unsigned depth) {
   std::string text;
   for (unsigned i = 0; i < depth; ++i) text += "if a then ";
   cursiv::Cst cst;
@@ -301,13 +300,13 @@ cursiv::engine::LrParseStats a_deep_nest_is_owed_one_token(unsigned depth) {
 
 void a_nest_says_the_same_thing_at_every_depth() {
   for (unsigned d : {1u, 8u, 12u, 24u, 40u, 64u})
-    a_deep_nest_is_owed_one_token(d);
+    a_deep_nest_needs_one_token(d);
 }
 
-// A nest deeper than any scan is closed whole: the tokens it owes are one
+// A nest deeper than any scan is closed whole: the tokens it needs are one
 // run, which no budget of the search cuts.
 void a_nest_deeper_than_any_scan_is_closed_whole() {
-  CHECK(a_deep_nest_is_owed_one_token(300).budgetStops == 0);
+  CHECK(a_deep_nest_needs_one_token(300).budgetStops == 0);
 }
 
 }  // namespace
@@ -463,8 +462,8 @@ void run() {
 namespace caret_chain {
 
 // A node whose predecessors grow is read again for the one it gained,
-// not for all of them: sixteen hundred levels answer in a moment, where every
-// level read afresh made the cube of them.
+// not for all of them: sixteen hundred levels answer in a moment, where reading
+// every level again would cost the cube of them.
 void a_caret_behind_a_longer_chain_answers_in_a_moment() {
   const auto parser = telect::generated::Election::create_parser();
   std::string text = "if c then x";
@@ -582,9 +581,8 @@ void run() {
 }  // namespace caret_nullable
 
 // One statement past the look-ahead is read by a graph, which gives the text
-// back once a reading past it validates the arm that died there: the two
-// hundred thousand statements after it read as if it were not there, and the
-// graph holds as much however many follow.
+// back once a reading past it validates the arm that died: the statements after
+// it read as if it were absent, and the graph stays small.
 namespace long_episode {
 
 namespace gl = tceilings::generated::G;
@@ -652,8 +650,7 @@ void run() {
 }  // namespace long_episode
 
 // A valid document the graph holds a long while reads clean, and as the
-// derivation the election ranks first: the one a grammar that takes it
-// outright reads.
+// derivation ranked first: the one a grammar that takes it outright reads.
 namespace held_graph {
 
 namespace loose = tceilings::generated::G;
@@ -725,8 +722,9 @@ void a_long_document_repairs_its_end_as_the_taken_block() {
 }
 
 // A fault is repaired, the text after it forks, and the graph cuts readings
-// it cannot hold. The reading has gone on from the fault, so the span the cut
-// says is laid behind the fault's note: notes lie in the order their texts end.
+// it cannot hold. The reading has gone on from the fault, so the span of the
+// cut is reported after the fault's note: notes follow the order their texts
+// end in.
 void a_cut_span_is_said_behind_the_fault_before_it() {
   const cursiv::engine::RepairBudget starved{.floor = 1, .perByte = 0};
   cursiv::Cst cst;
@@ -744,7 +742,7 @@ void a_cut_span_is_said_behind_the_fault_before_it() {
 }
 
 // Two hundred open ifs and a hundred elses: each else closes the nearest if
-// left open, as the election ranks them.
+// left open, as the ranking orders them.
 void a_deep_nest_binds_each_else_to_the_nearest_if() {
   constexpr unsigned kIfs = 200, kElses = 100;
   std::string text;
@@ -775,7 +773,7 @@ void run() {
 
 }  // namespace held_graph
 
-// A long ambiguity shares its growing choice rank, and the election still
+// A long ambiguity shares its growing choice rank, and the ranking still
 // respects an equal or a late winner.
 namespace rank_growth {
 

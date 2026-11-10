@@ -16,8 +16,9 @@ endif()
 
 set(CURSIV_NEW_CLASS "${NAME}")
 string(TOLOWER "${NAME}" CURSIV_NEW_ID)
-# The namespace is global, so leading underscores and double underscores are
-# reserved as well as C++ keywords. Check both spellings before writing files.
+# The lowercase name is a global namespace and prefixes the project's targets:
+# no C++ keyword or reserved spelling, and not a name that `main`, the standard
+# or Cursiv already takes. Check both spellings before writing files.
 set(_cursiv_keywords
     alignas alignof and and_eq asm auto bitand bitor bool break case catch
     char char8_t char16_t char32_t class compl concept const consteval constexpr
@@ -28,9 +29,10 @@ set(_cursiv_keywords
     requires return short signed sizeof static static_assert static_cast struct
     switch template this thread_local throw true try typedef typeid typename
     union unsigned using virtual void volatile wchar_t while xor xor_eq)
-if(CURSIV_NEW_ID IN_LIST _cursiv_keywords OR CURSIV_NEW_ID MATCHES "^_|__")
-  message(FATAL_ERROR
-      "NAME and its lowercase namespace must not be reserved C++ identifiers (got '${NAME}')")
+if(CURSIV_NEW_ID IN_LIST _cursiv_keywords
+   OR CURSIV_NEW_ID MATCHES "^_|__|^(main|std[0-9]*|posix|cursiv)$")
+  message(FATAL_ERROR "NAME and its lowercase namespace must not be reserved "
+      "C++ identifiers, nor main, std, posix or cursiv (got '${NAME}')")
 endif()
 if(NOT DEFINED EXT)
   set(EXT ".${CURSIV_NEW_ID}")

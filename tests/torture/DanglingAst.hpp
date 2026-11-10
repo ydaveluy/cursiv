@@ -1,7 +1,7 @@
 #pragma once
 
-// The one node the dangling-else grammars build, shared so a lane can walk
-// either declaration order with the same hand-written check.
+// The one node the dangling-else grammars build, shared so a test can walk
+// either declaration order with the same check.
 
 #include <string_view>
 

@@ -48,8 +48,9 @@ class DefaultServiceRegistry : public ServiceRegistry,
   [[nodiscard]] static const CoreServices* lookup(
       const ByName& table, std::string_view key) noexcept;
 
-  // Owns active and retired containers: documents may still name a retired
-  // language. `_all` lists only the current routing targets, in registration order.
+  // Owns active and released containers: documents may still name a released
+  // language. `_all` lists only the current routing targets, in registration
+  // order.
   std::vector<std::unique_ptr<CoreServices>> _owned;
   std::vector<const CoreServices*> _all;
   ByName _byLanguageId;

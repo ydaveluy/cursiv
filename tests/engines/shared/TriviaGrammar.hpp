@@ -132,11 +132,8 @@ struct Suite : Spelled {
 
 }  // namespace timpliedtag
 
-
-// Blanks of every kind are trivia, but between the words of a pair only
-// spaces and tabs are: a newline may stand in front of a pair and behind it,
-// where the caller reads the gap, and never inside it. Each pair stands in one
-// place only, so none takes its first gap from another.
+// Blanks of every kind are trivia, but between the words of a pair only spaces
+// and tabs are: a newline may stand around a pair, never inside it.
 
 namespace tregion {
 
@@ -167,7 +164,7 @@ struct Base : cursiv::GrammarSpec {
                                 many(append<&ast::Group::items>(ref<Pair>) |
                                      append<&ast::Group::items>(ref<Block>)) +
                                 lit<"}">)> {};
-  // The whole turn of a loop, and first in a sequence; it opens on a terminal.
+  // The whole body of a loop, and first in a sequence; it opens on a terminal.
   struct Word : rule<skip(ignore<HWS>, hide<>,
                           assign<&ast::Pair::key>(ref<ID>) + lit<"="> +
                               assign<&ast::Pair::value>(ref<ID>))> {};
@@ -186,7 +183,7 @@ struct Base : cursiv::GrammarSpec {
                     assign<&ast::Group::kind>(lit<"?">) +
                     (append<&ast::Group::items>(ref<Duo>) |
                      append<&ast::Group::items>(ref<Block>)))> {};
-  // A region that opens on a loop: the gap in front of its first turn, or of
+  // A region that opens on a loop: the gap in front of its first item, or of
   // its `>` where it has none, is the caller's; the others are its own.
   struct Atom : rule<create<ast::Pair>(assign<&ast::Pair::key>(ref<ID>))> {};
   struct Run : rule<create<ast::Group>(
@@ -308,7 +305,8 @@ struct Doubled : cursiv::GrammarSpec {
 };
 
 // A line break that is a trivia in one place and a token in another, where a
-// terminal that wins over it spells it too: the two are rivals where both stand.
+// terminal that wins over it spells it too: the two are competitors where both
+// stand.
 struct Both : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<" ">)> {};
   struct WON : terminal<cr<"\n">> {};
@@ -323,10 +321,8 @@ struct Both : cursiv::GrammarSpec {
   using ignored = list<WS>;
 };
 
-// A note whose one-byte opener its body never reads again: that byte crosses
-// like a blank, yet the note reads on over a word typed behind it, and a tally
-// over a number alone. A keyword typed behind a space is a trivia of its own, and
-// two quotes are a blank that reads like a word.
+// A note whose one-byte opener crosses like a blank, yet reads on over a word
+// typed behind it; a keyword behind a space is a trivia of its own.
 struct Noted : cursiv::GrammarSpec {
   struct WS : terminal<some(s | lit<"''">)> {};
   struct NOTE : terminal<lit<"#"> + many(cr<"a-z">)> {};

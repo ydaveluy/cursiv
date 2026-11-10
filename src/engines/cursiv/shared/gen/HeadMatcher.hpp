@@ -47,12 +47,8 @@ struct HeadMatcher {
   std::uint32_t offset = 0;
 
   // `bool name(const char* p, TextOffset n, TextOffset rest)`: whether a word
-  // starts at `p`, reading at most `n` bytes; a refusal looks as far as
-  // `rest`, and `ranges` names the scalars of its class. With `reach`, a last
-  // `TextOffset& seen` rises as a walk's halt does: to the byte no word
-  // continues with, or to the end of the text; past a word spelled whole, to
-  // past the byte that would rescue it, or to the end of the text where none
-  // follows.
+  // starts at `p`, reading at most `n` bytes and refusing up to `rest`. With
+  // `reach`, a last `TextOffset& seen` rises as a walk's halt does.
   std::string source(std::string_view linkage, std::string_view name,
                      const Ranges& ranges, bool reach = false) const {
     TextBuilder out;
@@ -320,10 +316,8 @@ inline std::string lex_head_switch(const std::vector<HeadMatcher>& heads,
   return out.line("    default:\n      return false;\n  }\n}").take();
 }
 
-// Each terminal's matcher; `refuses`, the function answering for terminal `t`
-// at `p` with `rest` bytes left whether its token there spells a word; and
-// `reach`, the one answering for mode `m` how far its terminals' words at `p`
-// are read, as `modeHeads` names them per mode.
+// Each terminal's matcher; `refuses(t, p, rest)`, whether terminal `t`'s token
+// at `p` spells a word; and `reach(m, p)`, how far mode `m`'s words are read.
 inline std::string lex_head_source(const std::vector<HeadMatcher>& heads,
                                    const std::vector<DynSet>& modeHeads,
                                    std::string_view refuses,
@@ -362,9 +356,9 @@ inline std::string lex_tail_source(const std::vector<HeadMatcher>& tails,
   TextBuilder out;
   for (std::size_t t = 0; t < tails.size(); ++t)
     if (!tails[t].words.empty())
-      out.write(tails[t].source("CURSIV_NOINLINE inline", concat("trails_", t),
-                                ranges));
-  return out.write(lex_head_switch(tails, tail, "trails")).take();
+      out.write(tails[t].source("CURSIV_NOINLINE inline",
+                                concat("tail_refuses_", t), ranges));
+  return out.write(lex_head_switch(tails, tail, "tail_refuses")).take();
 }
 
 // The refusals a tree of splits opens on when every leaf is one, false
@@ -383,11 +377,9 @@ inline bool lex_split_refusals(const LexNfaPool& n, int x,
          lex_split_refusals(n, st.t2, leaves, depth + 1);
 }
 
-// The spine of a terminal from `start`: the classes of one byte every match
-// reads alike and the refusals in a row among them. `at(k, head)` meets guard
-// `k` behind the classes `head`, `end(head)` the match where they all end. A
-// split whose every branch opens on the refusal of one word ends the spine,
-// that refusal standing in each.
+// The spine of a terminal from `start`: the classes every match reads the same,
+// and the refusals among them. `at(k, head)` is given guard `k` behind `head`,
+// `end(head)` the match where they all end.
 template <class Cfg, class At, class End>
 void lex_spine(const LexNfaPool& n, const Cfg& g, int start, At&& at,
                End&& end) {
@@ -436,11 +428,9 @@ std::vector<int> lex_spine_offsets(const LexNfaPool& n, const Cfg& g,
   return out;
 }
 
-// The words of the spine refusals `taken` marks, taken off each terminal's
-// graph: the refusal leaves its hole open onto the body, and a matcher asks
-// it of the token instead, opening on the head's classes. `tails` holds,
-// without the head, the words standing where every match ends, which a
-// re-reading that misspells the head asks at its own end.
+// Takes the spine refusals `taken` marks off each terminal's graph, for a
+// matcher to ask of the token instead. `tails` holds the words at every match's
+// end, without the head.
 template <class Cfg>
 std::vector<HeadMatcher> lex_head_words(LexNfaPool& n, const Cfg& g,
                                         const std::vector<int>& startOf,
@@ -467,15 +457,15 @@ std::vector<HeadMatcher> lex_head_words(LexNfaPool& n, const Cfg& g,
             out[t].offset = static_cast<std::uint32_t>(head.size());
           std::vector<HeadMatcher::Step> word = head;
           for (unsigned i = 0; i < e.min; ++i)
-            word.push_back({g.sets[g.lexKid[e.b + i]], {}, false});
+            word.push_back({g.sets[g.lexChild[e.b + i]], {}, false});
           if (e.a != kNoSet) {
-            HeadMatcher::Step rescue{g.sets[e.a], {}, true};
+            HeadMatcher::Step passStep{g.sets[e.a], {}, true};
             if (g.setDecode[e.a] != kNoSet &&
                 (scalars || lex_set_scalars(g, e.a) != 0)) {
-              rescue.lead = g.sets[g.setDecode[e.a]];
-              rescue.scalars = lex_set_scalars(g, e.a);
+              passStep.lead = g.sets[g.setDecode[e.a]];
+              passStep.scalars = lex_set_scalars(g, e.a);
             }
-            word.push_back(rescue);
+            word.push_back(passStep);
           }
           out[t].words.push_back(std::move(word));
           at.push_back(head.size());

@@ -1,7 +1,5 @@
-// The lexicon of one compiled grammar, spelled from the expression its
-// author wrote. A character range keeps its byte set in the type alone --
-// the reified model does not carry it -- so the walk is templated and its
-// answers erased.
+// The lexicon of one compiled grammar, spelled from its expressions. A
+// character range keeps its bytes in its type alone, so the walk is a template.
 #pragma once
 
 #include <algorithm>
@@ -36,7 +34,7 @@ inline constexpr std::size_t kSpellRepCap = 6;
 // "This expression spells nothing", as a length no sum reaches.
 inline constexpr std::size_t kNoSpell = ~std::size_t{0};
 
-// The ribbon plus what the assertion in front forbids. `!cr<R"("\\n)"> + any`
+// The source plus what the assertion in front forbids. `!cr<R"("\\n)"> + any`
 // is the vocabulary's way of writing "any byte but these"; a speller that
 // ignored the refusal could close a string literal in its own middle.
 struct SpellCtx {
@@ -124,7 +122,7 @@ inline constexpr const CharSet* kAsciiOf<CpSet<M, N, S>> =
 template <class C, class E, unsigned D>
 struct SpellOf;
 
-// The recursion's one door: an expression reaches the table as the author's
+// The recursion's entry: an expression reaches the table as the author's
 // `static constexpr auto`, so the reference and the const come off here.
 template <class C, class E, unsigned D>
 struct Spell : SpellOf<C, std::remove_cvref_t<E>, D> {};
@@ -169,8 +167,7 @@ constexpr Reach reach_alt(std::initializer_list<Reach> parts) {
 
 constexpr Reach reach_one(const CharSet& s) { return Reach{s, s, false}; }
 
-// Every byte, because that is what `any` accepts -- spelling it printable is
-// the walk's own restraint, not the lexer's.
+// Every byte, as `any` accepts: only the walk keeps to printable bytes.
 inline constexpr CharSet kEveryByte = [] {
   CharSet s;
   for (unsigned b = 0; b < 256; ++b) s.set(static_cast<unsigned char>(b));
@@ -353,29 +350,33 @@ template <class E>
   return kAsciiOf<E>;
 }
 
-// An assertion spells nothing; the set it refuses travels to the byte in front
-// of which it stands.
+// An assertion spells nothing. One that refuses a byte set forbids it to the
+// next byte; any other refuses the spelling.
 template <class C, class E, unsigned D>
 struct SpellOf<C, Not<E>, D> {
   static constexpr std::size_t min = 0;
   static constexpr Reach reach() { return Reach{{}, {}, true}; }
   static bool run(std::string&, SpellStyle, [[maybe_unused]] SpellCtx& cx) {
     constexpr const CharSet* kVeto = vetoed_by<std::remove_cvref_t<E>>();
-    if constexpr (kVeto != nullptr) cx.forbid(*kVeto);
-    return true;
+    if constexpr (kVeto != nullptr) {
+      cx.forbid(*kVeto);
+      return true;
+    } else {
+      return false;
+    }
   }
 };
 template <class C, unsigned D>
 struct SpellOf<C, Eof, D> {
   static constexpr std::size_t min = 0;
   static constexpr Reach reach() { return Reach{{}, {}, true}; }
-  static bool run(std::string&, SpellStyle, SpellCtx&) { return true; }
+  static bool run(std::string&, SpellStyle, SpellCtx&) { return false; }
 };
 template <class C, class E, unsigned D>
 struct SpellOf<C, And<E>, D> {
   static constexpr std::size_t min = 0;
   static constexpr Reach reach() { return Reach{{}, {}, true}; }
-  static bool run(std::string&, SpellStyle, SpellCtx&) { return true; }
+  static bool run(std::string&, SpellStyle, SpellCtx&) { return false; }
 };
 
 // A run the end of the text also closes is spelled closed: the end of the
@@ -455,9 +456,8 @@ consteval SpellFn spell_entry() {
   return nullptr;
 }
 
-// A function and not the set: storing a `Reach` per element would bloat
-// the table, and only the separator -- known at construction -- turns
-// one into the single bit the walk reads.
+// A function: only the separator, known at construction, turns a `Reach` into
+// the one bit the walk reads.
 template <class C, class E>
 consteval ReachFn reach_entry() {
   using T = std::remove_cvref_t<E>;
@@ -467,13 +467,13 @@ consteval ReachFn reach_entry() {
   return nullptr;
 }
 
-// A region that ignores nothing is an adjacency island: its tokens run
-// into one another with no trivia admitted between them. Substitution has
-// already resolved the region's configuration to rule lists.
+// A region that ignores nothing: its tokens follow one another with no trivia
+// between them. Substitution has already resolved the region's configuration
+// to rule lists.
 template <class E>
-inline constexpr bool glues_here = false;
+inline constexpr bool region_ignores_nothing = false;
 template <class H, class E>
-inline constexpr bool glues_here<Skip<TypeList<>, H, E>> = true;
+inline constexpr bool region_ignores_nothing<Skip<TypeList<>, H, E>> = true;
 
 template <class C, class L>
 struct lex_rows;
@@ -481,8 +481,8 @@ template <class C, class... Es>
 struct lex_rows<C, TypeList<Es...>> {
   static constexpr std::array<SpellFn, sizeof...(Es)> kSpell = {
       spell_entry<C, Es>()...};
-  static constexpr std::array<bool, sizeof...(Es)> kGlue = {
-      glues_here<std::remove_cvref_t<Es>>...};
+  static constexpr std::array<bool, sizeof...(Es)> kIgnoresNothing = {
+      region_ignores_nothing<std::remove_cvref_t<Es>>...};
   static constexpr std::array<ReachFn, sizeof...(Es)> kReach = {
       reach_entry<C, Es>()...};
 };
@@ -507,17 +507,18 @@ struct lex_separator<C, TypeList<R0, Rs...>> {
 template <class C>
 struct CursivLexicon final : GrammarLexicon {
   // The literal column comes off the erased model: a spelling the grammar owns
-  // is the same fact whichever door answers it.
+  // is the same whichever path asks for it.
   explicit CursivLexicon(const GrammarModel& g)
       : _sep(lex_separator<C, typename cursiv::Normalize<C>::ignored>::of()) {
     using Rows = lex_rows<C, typename model::positions_for<C>::type>;
-    _devours.assign(Rows::kReach.size(), false);
+    _readsSeparator.assign(Rows::kReach.size(), false);
     for (std::size_t e = 0; e < Rows::kReach.size(); ++e) {
       if (Rows::kReach[e] == nullptr) continue;
       const Reach r = Rows::kReach[e]();
       for (const char c : _sep) {
         const auto b = static_cast<unsigned char>(c);
-        _devours[e] = _devours[e] || r.first.test(b) || r.last.test(b);
+        _readsSeparator[e] =
+            _readsSeparator[e] || r.first.test(b) || r.last.test(b);
       }
     }
     for (ElementId e = 0; e < g.positionCount(); ++e) {
@@ -546,13 +547,13 @@ struct CursivLexicon final : GrammarLexicon {
 
   [[nodiscard]] std::string_view separator() const override { return _sep; }
 
-  [[nodiscard]] bool glues(ElementId e) const override {
+  [[nodiscard]] bool ignores_nothing(ElementId e) const override {
     using Rows = lex_rows<C, typename model::positions_for<C>::type>;
-    return e < Rows::kGlue.size() && Rows::kGlue[e];
+    return e < Rows::kIgnoresNothing.size() && Rows::kIgnoresNothing[e];
   }
 
-  [[nodiscard]] bool devours(ElementId e) const override {
-    return e < _devours.size() && _devours[e];
+  [[nodiscard]] bool reads_separator(ElementId e) const override {
+    return e < _readsSeparator.size() && _readsSeparator[e];
   }
 
  private:
@@ -573,7 +574,7 @@ struct CursivLexicon final : GrammarLexicon {
   }
 
   std::string _sep;
-  std::vector<bool> _devours;
+  std::vector<bool> _readsSeparator;
   std::vector<std::string> _reserved;
 };
 

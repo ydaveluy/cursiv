@@ -1,7 +1,6 @@
 // A section closed by a `]` that another `]` follows, whose grammar reads
-// `]]`: where the assertion holds, the closing token begins a token of the
-// grammar, but the check does not read whether it does, so the grammar is
-// generated with a warning.
+// `]]`: the check does not read the assertion, so the grammar is generated
+// with a warning.
 // expect LR LL: warning: terminal ... closes a .section<>., but the generator could not check that ...., a terminal of the embedded grammar, neither matches it nor starts with it
 #pragma once
 

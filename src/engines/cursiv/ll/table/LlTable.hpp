@@ -1,7 +1,6 @@
-// The whole of what a generated module hands its engine: pointers into arrays
-// the generator wrote, and the counts that dimension them. A view and not an
-// owner -- the arrays are `inline constexpr` in the module, so a matcher
-// templated on one of these folds every bound it reads.
+// Everything a generated module hands its engine: pointers into the generated
+// arrays and their counts. The arrays are `inline constexpr`, so a matcher
+// templated on the table folds every bound it reads.
 #pragma once
 
 #include <cstddef>
@@ -97,10 +96,9 @@ struct LlTable {
   const std::uint16_t* returnNode = nullptr;
   std::uint32_t atnStart = 0;
 
-  // The lexer. `setDecode` names, per set, the set of lead bytes at which
-  // the word class's scalar decides for it, `kNoSet` for a plain class; null
-  // where the table has neither word ranges nor scalar ranges, and no
-  // boundary reads it.
+  // The lexer. `setDecode` names, per set, the lead bytes at which the word
+  // class's scalar decides, `kNoSet` for a plain class; null without word or
+  // scalar ranges.
   const ByteSet* sets = nullptr;
   const std::uint16_t* setDecode = nullptr;
   ByteSet wordBytes{};
@@ -172,7 +170,7 @@ struct LlTable {
   // loop in a body, the terminal each is on the way to, and the bytes a mode
   // opens such a body with.
   const std::uint8_t* lexBodies = nullptr;
-  const std::uint16_t* lexOwed = nullptr;
+  const std::uint16_t* lexBodyTerms = nullptr;
   const ByteSet* lexOpeners = nullptr;
   const std::uint16_t* dfaAccept = nullptr;
   const std::uint16_t* dfaBound = nullptr;
@@ -207,41 +205,35 @@ struct LlTable {
 
   // The graph a prediction walks.
   LlAtnView atn{};
-  // What a caller reads once a call it made is done, per state a call returns
-  // into: the terminals its rule reads from there on, the row at word
-  // `callerReadAt[s] >> 1` of `callerReads`, and in the low bit whether the
-  // rule may end reading none. Null where nothing asks it: the grammar climbs
-  // nowhere and flags no choice.
+  // What a caller reads once its call is done, per return state: the terminals
+  // at word `callerReadAt[s] >> 1` of `callerReads`, the low bit set where the
+  // rule may end reading none. Null where nothing asks.
   const std::uint64_t* callerReads = nullptr;
   const std::uint32_t* callerReadAt = nullptr;
-  // Per choice, the terminals its alphabet admits for a caller alone that read
-  // over another terminal of that alphabet, the row at word `decFlagAt[d]` of
-  // `decFlag`: the descent takes one only where a caller does. Null where no
-  // choice has any.
+  // Per choice, the terminals its alphabet admits for a caller only that read
+  // over another, at word `decFlagAt[d]` of `decFlag`: the descent takes one
+  // only where a caller does. Null where no choice has any.
   const std::uint64_t* decFlag = nullptr;
   const std::uint32_t* decFlagAt = nullptr;
   std::uint16_t (*staged)(const LlContext&, std::uint16_t) = nullptr;
-  // What an episode reads besides the graph: per rule, whether the callers
-  // two ways out of one choice reach it from share its body; per choice,
-  // whether it is a repetition that ranks its arms over the lexical choices.
-  // Null where none is.
+  // What an episode reads besides the graph: per rule, whether callers two ways
+  // out of one choice share its body; per choice, whether it is a repetition
+  // that ranks its arms over lexical choices. Null where none is.
   const std::uint8_t* sharedRules = nullptr;
   const std::uint8_t* repeatScopes = nullptr;
 
-  // Per section configuration where the grammar embeds others: the mode a
-  // fault is lexed with -- its grammar's terminals and the token that closes
-  // it -- and that token, which a repair there never invents or drops. Null
-  // where it embeds none.
+  // Per section configuration: the mode a fault is lexed with, its grammar's
+  // terminals and its closing token, and that token, which a repair there never
+  // invents or drops. Null where the grammar embeds none.
   const std::uint16_t* sectionErr = nullptr;
   const std::uint16_t* sectionEnd = nullptr;
   std::uint8_t nsections = 0;
 
   StampLayout stamp{};
 
-  // The wider alphabet admits everything the narrower one does. The matrix
-  // holds one row per mode, and the bound is what says so where the row is
-  // taken: a caller always hands a mode of this table, and a reader of the
-  // row -- the compiler included -- cannot know that from the pointer.
+  // Whether the wider alphabet admits all the narrower one does. The bound
+  // check states that `wide` names a row, which no reader can tell from the
+  // pointer.
   constexpr bool mode_covers(std::uint16_t wide, std::uint16_t narrow) const {
     if (wide >= nmodes) return false;
     return ((modeSub[std::size_t{wide} * subWords + (narrow >> 6)] >>
@@ -278,7 +270,7 @@ struct LlTable {
     const auto end = first + lexChoiceAt[std::size_t{s} * 2 + 1];
     for (auto r = first; r < end; ++r)
       if (f(lexChoices[r].term, lexChoices[r].bound,
-            unsigned{lexChoices[r].tier}))
+            unsigned{lexChoices[r].priority}))
         return true;
     return false;
   }

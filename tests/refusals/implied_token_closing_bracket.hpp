@@ -1,4 +1,5 @@
-// A closing bracket too, however the two name its spelling.
+// An implied closing bracket: refused even when `implied` names it by a
+// terminal and `indent_close` by a literal.
 // expect LR LL: in .implied.tok, cond.., .tok. cannot be a bracket named by
 #pragma once
 

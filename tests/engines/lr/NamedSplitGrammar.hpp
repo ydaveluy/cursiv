@@ -1,9 +1,8 @@
 #pragma once
 
-// A cell whose arms are told apart in the tree: seventeen alternatives, each
-// naming the same token with an element of its own, a repetition between the
-// token and the literal that decides. What the elected reading named is what
-// the AST holds.
+// A cell whose arms differ in the tree: seventeen alternatives naming the same
+// token with their own element, a repetition before the deciding literal. The
+// AST holds what the elected reading named.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

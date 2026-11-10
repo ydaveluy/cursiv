@@ -23,7 +23,7 @@ namespace tasi::ops::ast {
 struct Node : cursiv::Extends<cursiv::AstNode> {
   string_view name;
   string_view op;
-  vector<Node*> kids;
+  vector<Node*> children;
 };
 struct Pre : cursiv::Extends<Node> {};
 struct Post : cursiv::Extends<Node> {};
@@ -37,7 +37,7 @@ namespace tasi::tail::ast {
 struct Node : cursiv::Extends<cursiv::AstNode> {
   string_view name;
   string_view op;
-  vector<Node*> kids;
+  vector<Node*> children;
 };
 struct Bin : cursiv::Extends<Node> {};
 struct Doc : cursiv::Extends<cursiv::AstNode> {

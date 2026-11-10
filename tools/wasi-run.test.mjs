@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { guestArguments, guestPath, importedMemoryLimits, listDirectoriesByPath,
@@ -22,7 +22,8 @@ test('each Windows drive is a directory of the module\'s one root', () => {
   assert.deepEqual(preopensFor('darwin', exists), { '/': '/' });
 });
 
-test('a directory is listed from the path it was opened by', () => {
+// The module passes its addresses as i32: past 2 GiB, they arrive negative.
+for (const base of [0, 2 ** 31]) test(`a directory is listed from the path it was opened by${base ? ', its buffers past 2 GiB' : ''}`, () => {
   const root = mkdtempSync(join(tmpdir(), 'cursiv-wasi-list-'));
   try {
     const listed = join(root, 'a', 'b');
@@ -33,22 +34,24 @@ test('a directory is listed from the path it was opened by', () => {
     const links = process.platform !== 'win32';
     if (links) symlinkSync('folder', join(listed, 'link'));
 
-    const memory = new WebAssembly.Memory({ initial: 1 });
+    const memory = new WebAssembly.Memory({ initial: base / 65536 + 1 });
     const closed = [];
     let nextFd = 7;
+    // As node:wasi does, reading each address as unsigned.
     const imports = {
-      path_open: (dirFd, dirFlags, path, length, oflags, base, inheriting, flags, opened) => {
-        new DataView(memory.buffer).setUint32(opened, nextFd++, true);
+      path_open: (dirFd, dirFlags, path, length, oflags, rights, inheriting, flags, opened) => {
+        new DataView(memory.buffer).setUint32(opened >>> 0, nextFd++, true);
         return 0;
       },
       fd_close: (fd) => { closed.push(fd); return 0; },
     };
     listDirectoriesByPath(imports, () => memory, { '/first': '/nowhere', '/second': root });
 
-    const [pathAt, usedAt, openedAt, bufferAt] = [16, 32, 40, 1024];
+    const [pathAt, usedAt, openedAt, bufferAt] = [16, 32, 40, 1024].map((at) => base + at);
+    const signed = (address) => address | 0;
     const open = (dirFd, path, oflags = 2) => {
       new Uint8Array(memory.buffer).set(Buffer.from(path), pathAt);
-      assert.equal(imports.path_open(dirFd, 0, pathAt, path.length, oflags, 0n, 0n, 0, openedAt), 0);
+      assert.equal(imports.path_open(dirFd, 0, signed(pathAt), path.length, oflags, 0n, 0n, 0, signed(openedAt)), 0);
       return new DataView(memory.buffer).getUint32(openedAt, true);
     };
     // As the C library reads: what the buffer cut off comes again from the last
@@ -56,7 +59,7 @@ test('a directory is listed from the path it was opened by', () => {
     const read = (fd, size) => {
       const entries = new Map();
       for (let cookie = 0n; ;) {
-        assert.equal(imports.fd_readdir(fd, bufferAt, size, cookie, usedAt), 0);
+        assert.equal(imports.fd_readdir(fd, signed(bufferAt), size, cookie, signed(usedAt)), 0);
         const view = new DataView(memory.buffer);
         const used = view.getUint32(usedAt, true);
         for (let at = 0; at + 24 <= used;) {
@@ -104,11 +107,11 @@ test('a directory is listed from the path it was opened by', () => {
 test('a host path reaches the module in its own spelling', () => {
   assert.equal(guestPath('win32', 'C:\\Users\\me'), '/c:/Users/me');
   assert.equal(guestPath('win32', 'd:\\'), '/d:/');
-  // A share is no drive: the module stands at its root.
+  // A share is not a drive: the module sees its root.
   assert.equal(guestPath('win32', '\\\\server\\share'), '/');
   assert.equal(guestPath('linux', '/home/me'), '/home/me');
   assert.deepEqual(guestArguments('linux', ['m', 'a\\b'], () => true), ['m', 'a\\b']);
-  // The module's own name stands, and so does anything that names no file.
+  // The module's own name is kept, and so is anything that names no file.
   assert.deepEqual(guestArguments('win32', ['m', '--flag', 'C:\\a'],
     (path) => path === 'C:\\a'), ['m', '--flag', '/c:/a']);
   // An absolute drive path is a path whether or not it exists yet.
@@ -199,6 +202,38 @@ test('runner starts nonshared imported memory and permits memory.grow without ma
   }
 });
 
+// Beside its destination, the SDK download works in a folder of its own. A
+// proxy nobody answers keeps every download here from leaving the machine.
+test('the SDK download keeps a folder it did not make, and takes back its own', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'cursiv-wasi-fetch-'));
+  try {
+    const fetcher = fileURLToPath(new URL('./fetch-wasi-sdk.cmake', import.meta.url));
+    const dest = join(directory, 'sdk'), work = `${dest}.fetching`;
+    const env = { ...process.env, https_proxy: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9' };
+    const fetch = () => spawnSync('cmake', [`-DDEST=${dest.replaceAll('\\', '/')}`, '-P', fetcher],
+      { encoding: 'utf8', timeout: 60000, env });
+    mkdirSync(work);
+    writeFileSync(join(work, 'notes.txt'), 'kept');
+    const refused = fetch();
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /was not made by\s+this\s+script/);
+    assert.equal(readFileSync(join(work, 'notes.txt'), 'utf8'), 'kept');
+
+    // What an interrupted run leaves: its lock, and part of a download.
+    rmSync(work, { recursive: true });
+    mkdirSync(join(work, 'download'), { recursive: true });
+    writeFileSync(join(work, 'cmake.lock'), '');
+    writeFileSync(join(work, 'download', 'partial.tar.gz'), '');
+    const resumed = fetch();
+    assert.notEqual(resumed.status, 0);
+    assert.match(resumed.stderr, /cannot\s+fetch\s+wasi-sdk/);
+    assert.ok(!existsSync(join(work, 'download')), 'the failed download is cleared');
+    assert.ok(!existsSync(dest));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('repository toolchain runs its C++ exception/pthread contract with threads ON and OFF',
   { skip: !sdk && 'wasi-sdk is not installed' }, () => {
     const directory = mkdtempSync(join(tmpdir(), 'cursiv-wasi-toolchain-'));
@@ -261,6 +296,52 @@ int main() {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+// A thread whose worker fails before its code runs, here because the runner is
+// gone, ends the process with an error instead of a wait.
+test('a thread that cannot start ends the process', { skip: !sdk && 'wasi-sdk is not installed' }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'cursiv-wasi-lost-'));
+  try {
+    const copy = join(directory, 'wasi-run.mjs');
+    copyFileSync(runner, copy);
+    const input = join(directory, 'late.c'), output = join(directory, 'late.wasm');
+    writeFileSync(input, `#include <pthread.h>
+#include <stdio.h>
+static void* run(void* unused) { return unused; }
+int main(void) {
+  puts("started");
+  fflush(stdout);
+  getchar();
+  pthread_t thread;
+  if (pthread_create(&thread, NULL, run, NULL)) return 3;
+  pthread_join(thread, NULL);
+  return 0;
+}
+`);
+    const compiled = spawnSync(join(sdk, 'bin/clang'), ['--target=wasm32-wasip1-threads', '-O0', '-pthread',
+      '-Wl,--import-memory', '-Wl,--max-memory=67108864', input, '-o', output],
+    { encoding: 'utf8', timeout: 30000 });
+    assert.equal(compiled.status, 0, compiled.stderr || String(compiled.error));
+    const child = spawn(process.execPath, ['--no-warnings', copy, output]);
+    let stdout = '', stderr = '';
+    child.stderr.on('data', (data) => { stderr += data; });
+    // Once the program runs, the runner goes, then the program starts its thread.
+    child.stdout.on('data', (data) => {
+      stdout += data;
+      if (stdout === 'started\n') {
+        rmSync(copy);
+        child.stdin.end('\n');
+      }
+    });
+    const code = await new Promise((resolve) => {
+      const timer = setTimeout(() => { child.kill(); resolve('still running after 20 s'); }, 20000);
+      child.on('exit', (status) => { clearTimeout(timer); resolve(status); });
+    });
+    assert.equal(code, 1, stderr);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('application hosts extend imports and environment for commands and nested threads',
   { skip: !sdk && 'wasi-sdk is not installed' }, () => {

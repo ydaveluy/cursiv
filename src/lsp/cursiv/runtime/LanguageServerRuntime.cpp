@@ -13,11 +13,12 @@
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
-#include <deque>
 #include <exception>
 #include <format>
 #include <functional>
 #include <future>
+#include <limits>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -26,24 +27,24 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
-#include "cursiv/execution/TaskScheduler.hpp"
-#include "cursiv/observability/ObservabilitySink.hpp"
-#include "cursiv/services/SharedCoreServices.hpp"
-#include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/workspace/DocumentBuilder.hpp"
-#include "cursiv/workspace/WorkspaceLock.hpp"
-#include "cursiv/workspace/WorkspaceManager.hpp"
-#include "cursiv/runtime/LanguageServer.hpp"
-#include "cursiv/runtime/ServerEndpointLanguageClient.hpp"
-#include "cursiv/services/SharedLspServices.hpp"
-#include "cursiv/workspace/ConfigurationProvider.hpp"
-#include "cursiv/workspace/FileOperationHandler.hpp"
 #include "cursiv/McpServer.hpp"
 #include "cursiv/McpService.hpp"
-#include "cursiv/utils/Utf8.hpp"
+#include "cursiv/execution/TaskScheduler.hpp"
+#include "cursiv/observability/ObservabilitySink.hpp"
+#include "cursiv/runtime/LanguageServer.hpp"
+#include "cursiv/runtime/ServerEndpointLanguageClient.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/workspace/ConfigurationProvider.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/FileOperationHandler.hpp"
+#include "cursiv/workspace/WorkspaceLock.hpp"
+#include "cursiv/workspace/WorkspaceManager.hpp"
 #include "lsp/types.h"
 
 namespace cursiv {
@@ -55,10 +56,8 @@ namespace {
                           "Request cancelled");
 }
 
-// A dead write must not kill the process: when the editor goes away
-// mid-reply, the loop below wants the io error, not SIGPIPE. WASI has
-// no signals to ignore -- a write to a closed pipe already returns the
-// error this asks for.
+// A write to a closed pipe must fail with an io error, not kill the process by
+// SIGPIPE. WASI has no signals and already returns the error.
 void ignore_sigpipe_process_wide() {
 #if defined(SIGPIPE) && !defined(__wasi__)
   static const bool ignored = []() {
@@ -67,6 +66,28 @@ void ignore_sigpipe_process_wide() {
   }();
   (void)ignored;
 #endif
+}
+
+// A queued task has no reply to carry its failure: the observability sink is
+// told, and the session goes on.
+void say_notification_threw(SharedCoreServices& shared, std::string_view method,
+                            const std::exception_ptr& failure) noexcept {
+  try {
+    std::string what = "unknown exception";
+    try {
+      std::rethrow_exception(failure);
+    } catch (const std::exception& thrown) {
+      what = thrown.what();
+    } catch (...) {  // NOLINT(bugprone-empty-catch): `what` already says it
+    }
+    shared.observabilitySink->publish(
+        {.severity = ObservationSeverity::Warning,
+         .code = ObservationCode::NotificationThrew,
+         .message = std::format("{} threw: {}", method, what),
+         .uri = {},
+         .languageId = {}});
+  } catch (...) {  // NOLINT(bugprone-empty-catch): nothing left to tell it to
+  }
 }
 
 // Declared before the endpoint and installed after it: the pool's threads
@@ -78,8 +99,13 @@ class LanguageClientGuard {
   LanguageClientGuard(const LanguageClientGuard&) = delete;
   LanguageClientGuard& operator=(const LanguageClientGuard&) = delete;
   ~LanguageClientGuard() {
-    if (_shared.configurationProvider != nullptr)
-      _shared.configurationProvider->initialized(nullptr);
+    try {
+      if (_shared.configurationProvider != nullptr)
+        _shared.configurationProvider->initialized(nullptr);
+    } catch (...) {  // NOLINT(bugprone-empty-catch): the session is over
+      // A provider that fails to detach has nobody left to tell; the client
+      // goes all the same.
+    }
     _shared.languageClient = {};
   }
 
@@ -93,57 +119,71 @@ class LanguageClientGuard {
   SharedLspServices& _shared;
 };
 
-// The workspace writer: notifications run here in arrival order, so the read
-// loop stays free for the cancellation, the shutdown and the exit a build may
-// need. Queuing a document update cancels the write in flight past the scan.
-//
-// A document update makes its change in one write, so it is settled -- its
-// change made, its build still running -- at the first build phase that write
-// announces on this queue's thread. Any other task is settled when it ends.
+// The workspace writer: notifications run here in order, off the read loop.
+// Past the scan, a newer document update supersedes an older one's build but
+// not its change. An update counts as applied at its build's first phase.
 class NotificationQueue {
  public:
-  NotificationQueue(WorkspaceLock& lock, const WorkspaceManager* manager)
-      : _lock(lock), _manager(manager) {
+  explicit NotificationQueue(SharedCoreServices& shared)
+      : _shared(shared),
+        _lock(*shared.workspaceLock),
+        _manager(shared.workspaceManager.get()) {
     _worker = std::jthread([this] { run(); });
   }
   NotificationQueue(const NotificationQueue&) = delete;
   NotificationQueue& operator=(const NotificationQueue&) = delete;
   ~NotificationQueue() { stop(); }
 
-  // What has been taken in, and what has been settled: a request records the
-  // first on the read loop, where the client's own order is still known, and
-  // waits for the second before it reads anything. Its own rung is then its
-  // only wait: the build of the edits before it goes on beside it.
+  // What has been posted and applied: a request records the first on the read
+  // loop, in the client's order, and waits for the second before it reads.
   [[nodiscard]] std::uint64_t posted() const {
     const std::scoped_lock lock(_m);
     return _posted;
   }
 
-  void wait_settled(std::uint64_t upTo, const CancellationToken& token) {
+  void wait_applied(std::uint64_t upTo, const CancellationToken& token) {
     std::unique_lock lock(_m);
-    // Requests normally find their predecessors settled. Only a pending wait
+    // Requests normally find their predecessors applied. Only a pending wait
     // needs to register with the cancellation token.
-    if (!_stopped && _settled < upTo)
-      _cv.wait(lock, token, [&]() { return _stopped || _settled >= upTo; });
+    if (!_stopped && _applied < upTo)
+      _cv.wait(lock, token, [&]() { return _stopped || _applied >= upTo; });
     if (_stopped || token.stop_requested()) throw_request_cancelled();
   }
 
-  // A build phase was announced: the running task is settled if it is a
+  // A build phase was announced: the running task counts as applied if it is a
   // document update and the build is its own, on this queue's thread.
-  void settle_running() {
+  void mark_running_applied() {
     {
       const std::scoped_lock lock(_m);
       if (std::this_thread::get_id() != _workerId || !_running ||
-          !_runningUpdate || _settled > _served)
+          !_runningUpdate || _applied > _served)
         return;
-      _settled = _served + 1;
+      _applied = _served + 1;
     }
     _cv.notify_all();
   }
 
-  // `update` is a document update: it cancels the write in flight, and it is
-  // settled as soon as its build announces a phase.
-  void post(std::function<void()> task, bool update) {
+  // The running update's write has announced it: with another update queued
+  // behind, it cancels its own write, past its change.
+  void supersede_running() {
+    {
+      const std::scoped_lock lock(_m);
+      if (std::this_thread::get_id() != _workerId || !_running ||
+          !_runningUpdate ||
+          std::ranges::none_of(_tasks, [](const Task& t) { return t.update; }))
+        return;
+    }
+    if (scanned()) _lock.cancelWrite();
+  }
+
+  // `update` marks a document update: it cancels the write in flight and
+  // counts as applied at its build's first phase. `method` names the task to
+  // the sink and outlives the session.
+  void post(std::string_view method, std::function<void()> task, bool update) {
+    // The task's place is made first and moved in without allocating: an
+    // update refused for want of memory cancels nothing.
+    std::list<Task> place;
+    place.push_back({std::move(task), method, update});
     // Cancel before publishing: once queued, this task may already be the
     // latest writer, even before notify_all. Cancellation runs callbacks, so
     // it must also stay outside the queue mutex.
@@ -151,7 +191,7 @@ class NotificationQueue {
     {
       const std::scoped_lock lock(_m);
       if (_stopped) return;
-      _tasks.push_back({std::move(task), update});
+      _tasks.splice(_tasks.end(), place);
       ++_posted;
     }
     _cv.notify_all();
@@ -190,6 +230,7 @@ class NotificationQueue {
     }
     for (;;) {
       std::function<void()> task;
+      std::string_view method;
       {
         std::unique_lock lock(_m);
         // `_stopped` is published under the mutex: a stop told only by a flag
@@ -198,40 +239,44 @@ class NotificationQueue {
         _cv.wait(lock, [&]() { return _stopped || !_tasks.empty(); });
         if (_tasks.empty()) return;
         task = std::move(_tasks.front().run);
+        method = _tasks.front().method;
         _runningUpdate = _tasks.front().update;
         _tasks.pop_front();
         _running = true;
       }
       try {
         task();
+      } catch (const OperationCancelled&) {  // NOLINT(bugprone-empty-catch)
       } catch (...) {
-        // A notification has no reply to carry it.
+        say_notification_threw(_shared, method, std::current_exception());
       }
       {
         const std::scoped_lock lock(_m);
         _running = false;
         ++_served;
         // A task with no build phase -- one with no write, or one cut short
-        // before its build announced anything -- is settled here.
-        _settled = std::max(_settled, _served);
+        // before its build announced anything -- counts as applied here.
+        _applied = std::max(_applied, _served);
       }
       _cv.notify_all();
     }
   }
 
+  SharedCoreServices& _shared;
   WorkspaceLock& _lock;
   const WorkspaceManager* _manager;
   mutable std::mutex _m;
   struct Task {
     std::function<void()> run;
+    std::string_view method;
     bool update;
   };
-  // `_served <= _settled <= _posted`: the running task may already be settled.
+  // `_served <= _applied <= _posted`: the running task may already be applied.
   std::uint64_t _posted = 0;
   std::uint64_t _served = 0;
-  std::uint64_t _settled = 0;
+  std::uint64_t _applied = 0;
   std::condition_variable_any _cv;
-  std::deque<Task> _tasks;
+  std::list<Task> _tasks;
   bool _running = false;
   bool _runningUpdate = false;
   std::thread::id _workerId;
@@ -239,22 +284,36 @@ class NotificationQueue {
   std::jthread _worker;
 };
 
-// Tells the queue when its running task's build announces a phase: every
-// phase is announced past the write's settle, on the thread that writes.
-// Registered for the session, before any notification runs.
-class SettleOnBuildPhase final : public BuildPhaseListener {
+// Tells the queue what the running task's build announces on the writing
+// thread: its update, which may leave its build to a queued one, and each
+// phase, which marks it applied. Registered before any notification runs.
+class QueueBuildListener final : public DocumentUpdateListener,
+                                 public BuildPhaseListener {
  public:
-  SettleOnBuildPhase(DocumentBuilder& builder, NotificationQueue& queue)
+  QueueBuildListener(DocumentBuilder& builder, NotificationQueue& queue)
       : _builder(builder), _queue(queue) {
     _builder.addBuildPhaseListener(*this);
+    try {
+      _builder.addDocumentUpdateListener(*this);
+    } catch (...) {
+      _builder.removeBuildPhaseListener(*this);
+      throw;
+    }
   }
-  SettleOnBuildPhase(const SettleOnBuildPhase&) = delete;
-  SettleOnBuildPhase& operator=(const SettleOnBuildPhase&) = delete;
-  ~SettleOnBuildPhase() override { _builder.removeBuildPhaseListener(*this); }
+  QueueBuildListener(const QueueBuildListener&) = delete;
+  QueueBuildListener& operator=(const QueueBuildListener&) = delete;
+  ~QueueBuildListener() override {
+    _builder.removeDocumentUpdateListener(*this);
+    _builder.removeBuildPhaseListener(*this);
+  }
 
+  void onUpdate(std::span<const std::string_view>,
+                std::span<const std::string_view>) override {
+    _queue.supersede_running();
+  }
   void onBuildPhase(DocumentState, std::span<Document* const>,
                     const CancellationToken&) override {
-    _queue.settle_running();
+    _queue.mark_running_applied();
   }
 
  private:
@@ -292,23 +351,53 @@ class PendingRequests {
 
 // A request's place among the pending ones, held by the task that answers it:
 // given back however the task ends, run or dropped unrun by the endpoint.
-class PendingSeat {
+class PendingGuard {
  public:
-  explicit PendingSeat(PendingRequests& requests) : _requests(&requests) {
+  explicit PendingGuard(PendingRequests& requests) : _requests(&requests) {
     requests.enter();
   }
-  PendingSeat(PendingSeat&& other) noexcept
+  PendingGuard(PendingGuard&& other) noexcept
       : _requests(std::exchange(other._requests, nullptr)) {}
-  PendingSeat(const PendingSeat&) = delete;
-  PendingSeat& operator=(const PendingSeat&) = delete;
-  PendingSeat& operator=(PendingSeat&&) = delete;
-  ~PendingSeat() {
+  PendingGuard(const PendingGuard&) = delete;
+  PendingGuard& operator=(const PendingGuard&) = delete;
+  PendingGuard& operator=(PendingGuard&&) = delete;
+  ~PendingGuard() {
     if (_requests != nullptr) _requests->leave();
   }
 
  private:
   PendingRequests* _requests;
 };
+
+// The shapes of the answers a client reads, as its `initialize` says.
+struct ClientShapes {
+  bool definitionLinks = false;
+  bool declarationLinks = false;
+  bool typeDefinitionLinks = false;
+  bool implementationLinks = false;
+  bool hierarchicalSymbols = false;
+  bool codeActionLiterals = false;
+};
+
+ClientShapes client_shapes(const lsp::InitializeParams& params) {
+  ClientShapes shapes;
+  if (!params.capabilities.textDocument.has_value()) return shapes;
+  const auto& text = *params.capabilities.textDocument;
+  shapes.definitionLinks =
+      text.definition && text.definition->linkSupport.value_or(false);
+  shapes.declarationLinks =
+      text.declaration && text.declaration->linkSupport.value_or(false);
+  shapes.typeDefinitionLinks =
+      text.typeDefinition && text.typeDefinition->linkSupport.value_or(false);
+  shapes.implementationLinks =
+      text.implementation && text.implementation->linkSupport.value_or(false);
+  shapes.hierarchicalSymbols =
+      text.documentSymbol &&
+      text.documentSymbol->hierarchicalDocumentSymbolSupport.value_or(false);
+  shapes.codeActionLiterals =
+      text.codeAction && text.codeAction->codeActionLiteralSupport.has_value();
+  return shapes;
+}
 
 struct Session {
   lsp::ServerEndpoint& endpoint;
@@ -317,13 +406,8 @@ struct Session {
   PendingRequests& pending;
   // Read at each failure, never kept: a host may install another sink.
   SharedCoreServices& shared;
+  ClientShapes& shapes;
   bool shutdownRequested = false;
-  bool definitionLinks = false;
-  bool declarationLinks = false;
-  bool typeDefinitionLinks = false;
-  bool implementationLinks = false;
-  bool hierarchicalSymbols = false;
-  bool codeActionLiterals = false;
 };
 
 // Stop the producer before destroying the endpoint: its builds publish
@@ -333,28 +417,6 @@ struct StopNotifications {
   ~StopNotifications() { queue.stop(); }
 };
 
-// A notification has no reply to carry its failure: the observability sink
-// is told instead, and the session goes on.
-void say_notification_threw(SharedCoreServices& shared, std::string_view method,
-                            const std::exception_ptr& failure) noexcept {
-  try {
-    std::string what = "unknown exception";
-    try {
-      std::rethrow_exception(failure);
-    } catch (const std::exception& thrown) {
-      what = thrown.what();
-    } catch (...) {  // NOLINT(bugprone-empty-catch): `what` already says it
-    }
-    shared.observabilitySink->publish(
-        {.severity = ObservationSeverity::Warning,
-         .code = ObservationCode::NotificationThrew,
-         .message = std::format("{} threw: {}", method, what),
-         .uri = {},
-         .languageId = {}});
-  } catch (...) {  // NOLINT(bugprone-empty-catch): nothing left to tell it to
-  }
-}
-
 // The prologue runs on the read loop; the body is queued. `update` is a
 // document update, which cancels the write in flight. `method` names it to the
 // sink and outlives the session: a protocol name, or a custom handler's key.
@@ -363,36 +425,45 @@ auto notification(Session& session, std::string_view method, bool update,
                   Call call) {
   return [&queue = session.queue, &shared = session.shared, method, update,
           call = std::move(call)](auto&& params) {
-    // Said here and not in the body: the writer takes the update later, and
-    // a request dispatched behind it would be answered from the rung the
-    // build before it published. A client's messages are served in the order
-    // it sent them, and this is where that order is still known.
-    queue.post(
-        [&shared, method, call,
-         params = std::forward<decltype(params)>(params)]() mutable {
-          try {
+    // Posted here, on the read loop, where the client's order is known: a
+    // request sent behind it must wait for its change.
+    try {
+      queue.post(
+          method,
+          [call, params = std::forward<decltype(params)>(params)]() mutable {
             call(params);
-          } catch (const OperationCancelled&) {
-            throw;
-          } catch (...) {
-            say_notification_threw(shared, method, std::current_exception());
-          }
-        },
-        update);
+          },
+          update);
+    } catch (...) {
+      // Never queued, so never run: the sink is told of it as of a body that
+      // failed.
+      say_notification_threw(shared, method, std::current_exception());
+    }
   };
 }
 
+// The endpoint answers a `std::exception` as an error and lets anything else
+// end the process: a failure of another kind is answered as an internal error.
+[[noreturn]] void throw_unknown_failure() {
+  throw lsp::RequestError(lsp::MessageError::InternalError,
+                          "unknown exception");
+}
+
 // A cancelled request answers `RequestCancelled` however the cancellation
-// surfaced: a half-computed result is never dressed up as an answer.
+// surfaced: a half-computed result is never sent as an answer.
 template <class Result, class Call, class Params>
 Result serve(NotificationQueue& queue, std::uint64_t behind,
              const CancellationToken& token, Call& call, Params&& params) {
-  queue.wait_settled(behind, token);
+  queue.wait_applied(behind, token);
   Result result;
   try {
     result = call(std::forward<Params>(params), token);
   } catch (const OperationCancelled&) {
     throw_request_cancelled();
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    throw_unknown_failure();
   }
   if (token.stop_requested()) throw_request_cancelled();
   return result;
@@ -412,7 +483,7 @@ auto request(Session& session, Call call) {
     // a document update served after it would answer the reading before.
     const std::uint64_t behind = session.queue.posted();
     auto task = lsp::TaskFunction<Result>(
-        [&queue = session.queue, seat = PendingSeat(session.pending), call,
+        [&queue = session.queue, guard = PendingGuard(session.pending), call,
          behind, token = lsp::RequestContext::get().stopToken(),
          params = std::forward<decltype(params)>(params)]() mutable {
           return serve<Result>(queue, behind, token, call, std::move(params));
@@ -424,39 +495,33 @@ auto request(Session& session, Call call) {
 void add_lifecycle_handlers(Session& session, SharedCoreServices& shared) {
   lsp::ServerEndpoint& endpoint = session.endpoint;
   LanguageServer& server = session.server;
-  endpoint.onInitialize([&session,
-                         &server](const lsp::InitializeParams& params) {
-    if (params.capabilities.textDocument.has_value()) {
-      const auto& text = *params.capabilities.textDocument;
-      session.definitionLinks =
-          text.definition && text.definition->linkSupport.value_or(false);
-      session.declarationLinks =
-          text.declaration && text.declaration->linkSupport.value_or(false);
-      session.typeDefinitionLinks =
-          text.typeDefinition && text.typeDefinition->linkSupport.value_or(false);
-      session.implementationLinks =
-          text.implementation && text.implementation->linkSupport.value_or(false);
-      session.hierarchicalSymbols =
-          text.documentSymbol &&
-          text.documentSymbol->hierarchicalDocumentSymbolSupport.value_or(false);
-      session.codeActionLiterals =
-          text.codeAction && text.codeAction->codeActionLiteralSupport.has_value();
-    }
-    return server.initialize(params);
-  });
+  // The shapes are the accepted attempt's: a refused `initialize` may be
+  // tried again, and leaves nothing of its own behind.
+  endpoint.onInitialize(
+      [&session, &server](const lsp::InitializeParams& params) {
+        const ClientShapes shapes = client_shapes(params);
+        lsp::InitializeResult result;
+        try {
+          result = server.initialize(params);
+        } catch (const std::exception&) {
+          throw;
+        } catch (...) {
+          throw_unknown_failure();
+        }
+        session.shapes = shapes;
+        return result;
+      });
 
-  // The workspace scan, the settings pull and the file-watcher
-  // registration all hang off this one notification, which is why it
-  // is a hook and not a step of `initialize`.
   endpoint.onInitialized(notification(
       session, lsp::notifications::Initialized::Method, false,
       [&server](const lsp::InitializedParams&) { server.initialized(); }));
 
-  // Every queued notification runs, then an empty build publishes every
-  // rung a cut build never did, so each waiter learns its answer.
+  // Every queued notification runs, then an empty build publishes every state
+  // a cut build did not, so each waiter learns its answer.
   endpoint.onShutdown([&session, &shared]() {
     session.shutdownRequested = true;
     session.queue.post(
+        lsp::requests::Shutdown::Method,
         [&shared]() {
           shared.workspaceLock->write(
               [&](const CancellationToken& token) {
@@ -469,7 +534,6 @@ void add_lifecycle_handlers(Session& session, SharedCoreServices& shared) {
     return nullptr;
   });
 
-  // Empty, but not optional: the endpoint's hook on it is what ends the loop.
   endpoint.onExit([] { /* the hook alone ends the loop */ });
 }
 
@@ -592,16 +656,16 @@ void add_text_document_handlers(Session& session) {
         server.didCloseNotebookDocument(params);
       }));
 
-  // The hierarchical arm of the answer for a client that reads it: the
-  // outline this storey builds is a tree. Any other client gets the flat
-  // `SymbolInformation` list.
-  endpoint.onTextDocumentDocumentSymbol(request(
-      session, [&session, &server](const lsp::DocumentSymbolParams& params,
-                                   const CancellationToken& token) {
+  // The hierarchical answer for a client that reads it; any other client gets
+  // the flat `SymbolInformation` list.
+  endpoint.onTextDocumentDocumentSymbol(
+      request(session, [&server, &shapes = session.shapes](
+                           const lsp::DocumentSymbolParams& params,
+                           const CancellationToken& token) {
         lsp::TextDocumentDocumentSymbolResult result;
         std::vector<lsp::DocumentSymbol> symbols =
             server.documentSymbol(params, token);
-        if (session.hierarchicalSymbols)
+        if (shapes.hierarchicalSymbols)
           result = std::move(symbols);
         else
           result = flat_symbols(params.textDocument.uri, std::move(symbols));
@@ -609,32 +673,36 @@ void add_text_document_handlers(Session& session) {
       }));
 
   // Keep the richer links only when the client supports them.
-  endpoint.onTextDocumentDefinition(
-      request(session, [&session, &server](const lsp::DefinitionParams& params,
-                                           const CancellationToken& token) {
+  endpoint.onTextDocumentDefinition(request(
+      session,
+      [&server, &shapes = session.shapes](const lsp::DefinitionParams& params,
+                                          const CancellationToken& token) {
         return navigation_result(server.definition(params, token),
-                                 session.definitionLinks);
+                                 shapes.definitionLinks);
       }));
 
-  endpoint.onTextDocumentDeclaration(
-      request(session, [&session, &server](const lsp::DeclarationParams& params,
-                                           const CancellationToken& token) {
+  endpoint.onTextDocumentDeclaration(request(
+      session,
+      [&server, &shapes = session.shapes](const lsp::DeclarationParams& params,
+                                          const CancellationToken& token) {
         return navigation_result(server.declaration(params, token),
-                                 session.declarationLinks);
+                                 shapes.declarationLinks);
       }));
 
-  endpoint.onTextDocumentTypeDefinition(request(
-      session, [&session, &server](const lsp::TypeDefinitionParams& params,
-                                   const CancellationToken& token) {
+  endpoint.onTextDocumentTypeDefinition(
+      request(session, [&server, &shapes = session.shapes](
+                           const lsp::TypeDefinitionParams& params,
+                           const CancellationToken& token) {
         return navigation_result(server.typeDefinition(params, token),
-                                 session.typeDefinitionLinks);
+                                 shapes.typeDefinitionLinks);
       }));
 
-  endpoint.onTextDocumentImplementation(request(
-      session, [&session, &server](const lsp::ImplementationParams& params,
-                                   const CancellationToken& token) {
+  endpoint.onTextDocumentImplementation(
+      request(session, [&server, &shapes = session.shapes](
+                           const lsp::ImplementationParams& params,
+                           const CancellationToken& token) {
         return navigation_result(server.implementation(params, token),
-                                 session.implementationLinks);
+                                 shapes.implementationLinks);
       }));
 
   // The array arm, empty and not null: an empty list is "nothing names
@@ -739,9 +807,8 @@ void add_text_document_handlers(Session& session) {
         return result;
       }));
 
-  // The list form, not the bare array: `isIncomplete` matters here --
-  // the frontier was computed at one anchor, and the next keystroke
-  // must ask again rather than filter what it already has.
+  // The list form: `isIncomplete` makes the next keystroke ask again rather
+  // than filter what it already has.
   endpoint.onTextDocumentCompletion(
       request(session, [&server](const lsp::CompletionParams& params,
                                  const CancellationToken& token) {
@@ -762,19 +829,19 @@ void add_text_document_handlers(Session& session) {
         return result;
       }));
 
-  // Null for "nothing to offer", the protocol's own spelling: an empty array
-  // would still draw a lightbulb on some clients. A client without code action
-  // literals reads commands only: an action that is just a command goes as
-  // that command, and one with an edit or marked disabled is left out.
-  endpoint.onTextDocumentCodeAction(
-      request(session, [&session, &server](const lsp::CodeActionParams& params,
-                                           const CancellationToken& token) {
+  // Null when there is nothing to offer: an empty array still draws a lightbulb
+  // on some clients. A client without code action literals gets the actions
+  // that are a bare command, as commands.
+  endpoint.onTextDocumentCodeAction(request(
+      session,
+      [&server, &shapes = session.shapes](const lsp::CodeActionParams& params,
+                                          const CancellationToken& token) {
         lsp::TextDocumentCodeActionResult result;
         std::vector<lsp::CodeAction> actions = server.codeAction(params, token);
         lsp::Array<lsp::OneOf<lsp::Command, lsp::CodeAction>> encoded;
         encoded.reserve(actions.size());
         for (lsp::CodeAction& action : actions) {
-          if (session.codeActionLiterals)
+          if (shapes.codeActionLiterals)
             encoded.emplace_back(std::move(action));
           else if (action.command && !action.edit && !action.disabled)
             encoded.emplace_back(std::move(*action.command));
@@ -886,10 +953,8 @@ void add_text_document_handlers(Session& session) {
       }));
 }
 
-// The two notifications about the workspace, not a document. Both
-// arrive only because the server asked for them at `initialized` --
-// watcher and settings alike -- so a client that refused either never
-// gets here.
+// The two workspace notifications. The server asks for both at
+// `initialized`, so a client that refused one never sends it.
 void add_workspace_handlers(Session& session) {
   lsp::ServerEndpoint& endpoint = session.endpoint;
   LanguageServer& server = session.server;
@@ -974,9 +1039,8 @@ void add_file_operation_handlers(Session& session,
           server.didDeleteFiles(params);
         }));
 
-  // Null is "nothing to change": the client moves the files with no
-  // edit in front -- the protocol's spelling for a handler with
-  // nothing to say.
+  // Null is "nothing to change": the client moves the files with no edit
+  // first.
   if (options.willCreate.has_value())
     endpoint.onWorkspaceWillCreateFiles(
         request(session, [&server](const lsp::CreateFilesParams& params,
@@ -1011,10 +1075,8 @@ void add_file_operation_handlers(Session& session,
         }));
 }
 
-// MCP rides the LSP wire as one method: the params carry an MCP
-// message whole, the result its response -- null for a notification.
-// The host process bridges this to a standard MCP transport (no socket
-// under WASI). A request like the others, so the read loop stays free.
+// MCP over the LSP wire as one request: the params carry an MCP message, the
+// result its response, null for a notification.
 void add_mcp_tunnel(Session& session, const McpService& service) {
   auto answer = request(
       session,
@@ -1079,79 +1141,34 @@ void add_custom_handlers(Session& session) {
 
 }  // namespace
 
-namespace {
-
-// A message on the wire is UTF-8 and a document need not be, so what a server
-// quotes from one goes out with each ill-formed part as U+FFFD, as an editor shows
-// it. A connection writes a message as its header, then its content: the header
-// waits, for the length it states.
-class WellFormedStream final : public lsp::io::Stream {
- public:
-  explicit WellFormedStream(lsp::io::Stream& inner) : _inner(inner) {}
-
-  void read(char* buffer, std::size_t size) override {
-    _inner.read(buffer, size);
-  }
-  void write(const char* buffer, std::size_t size) override {
-    if (!std::exchange(_inContent, !_inContent)) {
-      _header.assign(buffer, size);
-      return;
-    }
-    const std::string_view content(buffer, size);
-    if (detail::utf8_well_formed(content)) {
-      _inner.write(_header.data(), _header.size());
-      _inner.write(buffer, size);
-      return;
-    }
-    std::string repaired;
-    repaired.reserve(size + 16);
-    for (std::size_t at = 0; at < size;) {
-      const detail::Utf8Step step = detail::utf8_step(buffer + at, size - at);
-      if (step.wellFormed)
-        repaired.append(buffer + at, step.bytes);
-      else
-        repaired += "\xEF\xBF\xBD";
-      at += step.bytes;
-    }
-    const std::string header = "Content-Length: " +
-                               std::to_string(repaired.size()) +
-                               _header.substr(_header.find("\r\n"));
-    _inner.write(header.data(), header.size());
-    _inner.write(repaired.data(), repaired.size());
-  }
-
- private:
-  lsp::io::Stream& _inner;
-  std::string _header;
-  bool _inContent = false;
-};
-
-}  // namespace
-
-int start_language_server(SharedLspServices& shared, lsp::io::Stream& raw) {
+// The endpoint's JSON writer sends each ill-formed UTF-8 part of a string as
+// U+FFFD.
+int start_language_server(SharedLspServices& shared, lsp::io::Stream& stream) {
   ignore_sigpipe_process_wide();
-  WellFormedStream stream(raw);
 
-  // Declared before the endpoint: the pool it joins as it dies still serves
-  // requests that wait on the queue and leave `pending`.
+  // Declared before the endpoint, whose pool still serves requests as it dies:
+  // they wait on the queue, read the client's shapes and leave `pending`.
   LanguageClientGuard clientGuard(shared);
-  NotificationQueue queue(*shared.workspaceLock, shared.workspaceManager.get());
+  NotificationQueue queue(shared);
   // Removed after the pool and the queue are joined: no build is left to
-  // announce a phase to it.
-  const SettleOnBuildPhase settles(*shared.documentBuilder, queue);
+  // announce an update or a phase to it.
+  const QueueBuildListener builds(*shared.documentBuilder, queue);
   PendingRequests pending;
+  ClientShapes shapes;
   lsp::ServerEndpoint endpoint(stream);
-  // Half as many threads as the builds have workers answer requests, which the
-  // endpoint cannot tell on its own: WASI reports a single core. At least one,
-  // even with no worker: the read loop never answers, so it always reads the
-  // next message.
-  const std::size_t workers = TaskScheduler::defaultWorkerCount();
-  endpoint.messageHandler().setMaxResponseThreads(
-      static_cast<unsigned>(std::max<std::size_t>(1, (workers + 1) / 2)));
-  Session session{endpoint, *shared.languageServer, queue, pending, shared};
+  // Requests are answered by half as many threads as the scheduler has
+  // workers, rounded up, and at least one: the endpoint cannot tell, as WASI
+  // reports one core.
+  const std::size_t workers = shared.taskScheduler->workerCount();
+  const std::size_t answering =
+      std::max<std::size_t>(1, workers / 2 + workers % 2);
+  endpoint.messageHandler().setMaxResponseThreads(static_cast<unsigned>(
+      std::min<std::size_t>(answering, std::numeric_limits<unsigned>::max())));
+  Session session{endpoint, *shared.languageServer, queue, pending, shared,
+                  shapes};
   const StopNotifications stopNotifications{queue};
   clientGuard.install(endpoint, [&queue](std::function<void()> reply) {
-    queue.post(std::move(reply), false);
+    queue.post("the client's reply", std::move(reply), false);
   });
 
   add_lifecycle_handlers(session, shared);

@@ -1,5 +1,5 @@
-// The same eight optional clauses, each the whole of a `skip()` region: a
-// region's edge is no reason to read the first as anything else.
+// Eight optional clauses in front of a recursive call, each the whole of a
+// `tight()` region: the region edges do not change the count.
 // expect LR: refused .hiddenLeftRecursion..*rule .Type. reaches itself before matching anything, behind more than 7 optional items
 // expect LL: refused .leftRecursion..*rule .Type. reaches itself before matching anything
 #pragma once

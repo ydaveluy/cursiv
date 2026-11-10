@@ -10,12 +10,12 @@
 namespace cursiv::engine {
 
 // One continuation and its canonical record row, `kNoElement` where no member
-// could be determined. Where a guard's landings write different members, the
-// state the shift lands in names the entry that is theirs.
+// could be determined. Where a guard's targets write different members, the
+// state the shift goes to names the entry that is theirs.
 struct LrExpect {
   ElementId feature = kNoElement;
   ElementId site = kNoElement;
-  ElementId landing = kNoElement;
+  ElementId toState = kNoElement;
   bool entered = false;
 };
 

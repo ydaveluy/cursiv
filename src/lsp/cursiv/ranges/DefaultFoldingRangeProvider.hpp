@@ -28,8 +28,10 @@ class DefaultFoldingRangeProvider : public FoldingRangeProvider {
       const CancellationToken& token = {}) const override;
 
  protected:
+  // A walk polls the request's token at each node and record it visits.
   virtual void collectFolding(const Document& document,
-                              FoldingRangeAcceptor acceptor) const;
+                              FoldingRangeAcceptor acceptor,
+                              const CancellationToken& token) const;
 
   // Whether the node itself folds; its content is `shouldProcessContent`'s.
   [[nodiscard]] virtual bool shouldProcess(const AstNode& node) const;
@@ -41,7 +43,8 @@ class DefaultFoldingRangeProvider : public FoldingRangeProvider {
                                     FoldingRangeAcceptor acceptor) const;
   virtual void collectCommentFolding(const Document& document,
                                      const AstNode& node,
-                                     FoldingRangeAcceptor acceptor) const;
+                                     FoldingRangeAcceptor acceptor,
+                                     const CancellationToken& token) const;
 
   [[nodiscard]] virtual std::optional<lsp::FoldingRange> toFoldingRange(
       const Document& document, const CstNodeView& node,

@@ -1,5 +1,5 @@
-// A refused rule as its author wrote it, found back by the name the pool
-// holds: what a refusal shows under its sentence.
+// A refused rule as its author wrote it, found by the name the pool holds:
+// what a refusal shows under its sentence.
 #pragma once
 
 #include <string>

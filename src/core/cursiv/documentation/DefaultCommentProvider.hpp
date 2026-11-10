@@ -8,15 +8,11 @@
 #include "cursiv/documentation/CommentProvider.hpp"
 #include "cursiv/services/DefaultCoreService.hpp"
 
-// The node's lexical predecessor, when the rule named below wrote it: walk
-// backward past the node's own subtree, and the first disjoint record decides.
-// The image is returned as written -- the reader downstream decides how to
-// render it.
+// The record right before the node's subtree, when one of the comment rules
+// below wrote it. Returned as written.
 
 namespace cursiv {
 
-// Not `final`: a language derives it to change which comment belongs to a
-// node.
 class DefaultCommentProvider : public CommentProvider,
                                protected DefaultCoreService {
  public:

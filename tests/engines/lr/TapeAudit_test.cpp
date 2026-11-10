@@ -24,7 +24,7 @@
 #include "support/AstText.hpp"
 #include "torture/generated/Torture/Module.hpp"
 
-// Domain A audit lane: CST integrity invariants over LR.
+// CST integrity checks over LR.
 
 namespace {
 
@@ -83,7 +83,7 @@ const char* kSeeds[] = {
 }  // namespace
 
 namespace case_tapesplit {
-// Domain A audit lane, split half: what a forked cell writes on the tape.
+// What a forked cell writes on the tape.
 
 namespace {
 
@@ -100,7 +100,7 @@ void say(const std::string& lang, const std::string& text) {
   std::fflush(stderr);
 }
 
-// The structural audit's question as a verdict: is the run a forest?
+// Whether the run is a forest.
 bool forest(const cursiv::ParseResult& r) {
   const cursiv::Cst& cst = r.cst();
   if (!r.accepted || !cst.has_entry() || cst.entry_root() >= cst.size())
@@ -136,7 +136,7 @@ std::string item(unsigned run, unsigned arm) {
 }
 
 // The same item with a comment between every token: the fork stands with
-// trivia in hand, and each branch owes the run to its own segment.
+// trivia in hand, and each branch writes the run in its own segment.
 std::string commented(unsigned run, unsigned arm) {
   std::string s = "/*o*/ x //l\n";
   for (unsigned i = 0; i < run; ++i) s += " /*" + std::to_string(i) + "*/ a";
@@ -180,8 +180,8 @@ void run() {
     std::string s;
     if (v == nullptr) return std::string("<no ast>");
     refl.visitMembers(
-        *v, [&](std::string_view, std::uint32_t, cursiv::AstNode& kid) {
-          s += refl.getTypeMetaData(kid.type).name;
+        *v, [&](std::string_view, std::uint32_t, cursiv::AstNode& child) {
+          s += refl.getTypeMetaData(child.type).name;
           s += ' ';
         });
     return s;
@@ -250,7 +250,7 @@ void run() {
                     want);
         }
 
-  // A fork standing with trivia in hand: each branch owes the run to its own
+  // A fork standing with trivia in hand: each branch writes the run in its own
   // segment, and the elected one must hold it once.
   for (unsigned run : {0u, 1u, 60u})
     for (unsigned k = 0; k < 17; ++k) {
@@ -299,9 +299,9 @@ void run() {
     for (unsigned k : {0u, 15u, 16u, 31u, 32u, 39u}) {
       const std::string t = "wide " + item(run, k);
       const cursiv::ParseResult r = wide->parse(t);
-      audit("wideunsettled", t, r);
+      audit("wideunresolved", t, r);
       if (!r.accepted || r.cst().recovered())
-        bad("wideunsettled", t, "W1 a document the grammar spells is refused");
+        bad("wideunresolved", t, "W1 a document the grammar spells is refused");
     }
 
   for (unsigned k : {0u, 15u, 16u, 31u, 32u, 39u})
@@ -363,13 +363,13 @@ void run() {
         }
         audit("namedsplit-mut", d, ns);
         const std::string wideText = "wide " + d, nestText = "nested " + d;
-        audit("wideunsettled-mut", wideText, wide->parse(wideText));
+        audit("wideunresolved-mut", wideText, wide->parse(wideText));
         audit("nestedcands-mut", nestText, nest->parse(nestText));
-        const std::string unsettledText = "cell:" + d;
-        audit("unsettled-mut", unsettledText, uns->parse(unsettledText));
+        const std::string unresolvedText = "cell:" + d;
+        audit("unresolved-mut", unresolvedText, uns->parse(unresolvedText));
       }
 
-  // What a caret reads off a split tree: the state a record settled in. Asked
+  // What a caret reads off a split tree: the state a record ended in. Asked
   // at every offset of the documents the forks were opened over.
   {
     std::vector<cursiv::NextFeature> out;

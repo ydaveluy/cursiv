@@ -2,15 +2,14 @@
 
 #include <string_view>
 
-// What a language owes, stated once. A container yields its own slots; the
-// completeness question reads what it yields and nothing else, so a service
-// added declares itself in one place.
+// One service slot of a container. A container lists its own slots, and the
+// completeness check reads only that list, so a new service is declared in one
+// place.
 
 namespace cursiv {
 
-// `required` says a language cannot answer without the slot. An absent slot is
-// reported by name, never filled with something that lies: the registry refuses
-// a container that owes one.
+// `required`: the language cannot work without the slot. The registry refuses a
+// container missing one, and names it.
 struct ServiceSlot {
   std::string_view name;
   bool required = false;
@@ -20,7 +19,7 @@ struct ServiceSlot {
 namespace detail {
 
 // The first required slot nothing has filled, empty when the container is
-// complete. A storey above appends its own rows and this stays the one answer.
+// complete. A derived container adds its own slots.
 template <class Services>
 std::string_view first_missing_service(const Services& services) {
   std::string_view missing;

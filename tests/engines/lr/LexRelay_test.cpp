@@ -1,7 +1,6 @@
-// A relay reads a token's rest past the automaton: an echo ends it at the
-// echo of the run its opener chose, whatever the level, and one that never
-// comes leaves the opener to the tokens it spells; a nested run ends at the
-// closer at depth zero; a relayed run repeated reads every rest once.
+// A relay reads a token's rest past the automaton: an echo ends at the echo of
+// its opener's run, and one that never comes leaves the opener to the tokens it
+// spells; a nested run ends at the closer at depth zero.
 
 #include "cursiv/shared/table/LexRelay.hpp"
 
@@ -42,10 +41,10 @@
 
 namespace {
 
-// A table's adapters announce what they offer, and the walk refuses one that
+// A table's adapters declare what they offer, and the check refuses one that
 // lost it: a skipping adapter without `qualified`, or a relay without its run,
 // would otherwise compile and read the other branch.
-namespace announced {
+namespace declared {
 
 using Plain = cursiv::engine::LrLexTape<tnestedlex::generated::G::kTable>;
 using Skipping =
@@ -67,22 +66,22 @@ struct LostRelay : Plain {
 static_assert(Plain::kRelays && !Plain::kQualified && Skipping::kQualified);
 static_assert(cursiv::engine::LexCursor<Plain> &&
               cursiv::engine::LexCursor<Skipping>);
-static_assert(cursiv::engine::LexAcceptanceAnnounced<Plain> &&
-              cursiv::engine::LexAcceptanceAnnounced<Skipping>);
-static_assert(cursiv::engine::LexRelaysAnnounced<Plain> &&
-              cursiv::engine::LexRelaysAnnounced<Skipping>);
+static_assert(cursiv::engine::LexAcceptanceDeclared<Plain> &&
+              cursiv::engine::LexAcceptanceDeclared<Skipping>);
+static_assert(cursiv::engine::LexRelaysDeclared<Plain> &&
+              cursiv::engine::LexRelaysDeclared<Skipping>);
 
 static_assert(LostQualified::kQualified &&
               cursiv::engine::LexBoundaryFallback<LostQualified> &&
               !cursiv::engine::LexQualifiedAcceptance<LostQualified>);
-static_assert(!cursiv::engine::LexAcceptanceAnnounced<LostQualified>);
+static_assert(!cursiv::engine::LexAcceptanceDeclared<LostQualified>);
 static_assert(cursiv::engine::LexOffersRelay<LostRun> &&
-              !cursiv::engine::LexRelaysAnnounced<LostRun>);
+              !cursiv::engine::LexRelaysDeclared<LostRun>);
 static_assert(LostRelay::kRelays &&
               !cursiv::engine::LexOffersRelay<LostRelay> &&
-              !cursiv::engine::LexRelaysAnnounced<LostRelay>);
+              !cursiv::engine::LexRelaysDeclared<LostRelay>);
 
-}  // namespace announced
+}  // namespace declared
 
 using Items = std::vector<std::string>;
 
@@ -186,7 +185,7 @@ void shared_openers() {
 }
 
 // The closer of a heredoc may be indented: the first line break its blanks
-// and the tag follow ends it, whatever stood in the lines before.
+// and the tag follow ends it, whatever was in the lines before.
 cursiv::TextOffset heredoc_model(std::string_view t) {
   for (std::size_t i = t.find('\n') + 1; i < t.size(); ++i) {
     if (t[i] != '\n') continue;
@@ -478,7 +477,7 @@ std::string times(std::string_view unit, unsigned n) {
 }
 
 // A nested run ends at the closer at depth zero, whatever stands inside,
-// and never at a closer an inner opener still owes.
+// and never at a closer an inner opener still waits for.
 void a_nested_run_ends_at_depth_zero() {
   CHECK(nested("a /* x */ b", "a b"));
   CHECK(nested("a /**/ b", "a b"));
@@ -488,7 +487,7 @@ void a_nested_run_ends_at_depth_zero() {
   CHECK(nested("a /* /* /* x */ y */ z */ b", "a b"));
   CHECK(nested("a /* /* */ /* */ */ b", "a b"));
   CHECK(nested("a /*/*/**/*/*/ b", "a b"));
-  // A closer an inner opener still owes ends nothing.
+  // A closer an inner opener still waits for ends nothing.
   CHECK(nested("a /* /* x */ b", "<refused>"));
   CHECK(nested("a /* x", "<refused>"));
   // An opener inside a string outside the comment is text.
@@ -565,7 +564,6 @@ cursiv::TextOffset pragma_model(std::string_view t, bool dollar = false) {
   return 0;
 }
 
-// A balanced run's delimiters are as long as the author writes them.
 void delimiters_are_as_long_as_written() {
   static const auto p = tnestedlex::generated::G::create_parser();
   const std::string open(40, '<'), close(40, '>');
@@ -673,11 +671,10 @@ cursiv::engine::LexRelay balanced_of(std::string_view open,
   return r;
 }
 
-// A search that keeps what it settled answers as the search that keeps
-// nothing does, from any opener in any order -- literals that overlap
-// themselves or each other included -- and reads a text once, where one
-// search per opener reads it once per opener.
-void a_nested_search_remembers_what_it_settled() {
+// A search that keeps what it decided answers as one that keeps nothing, from
+// any opener in any order, overlapping literals included, and reads a text once
+// instead of once per opener.
+void a_nested_search_remembers_what_it_decided() {
   constexpr std::string_view kPairs[][2] = {
       {"(", ")"},   {"((", "))"}, {"/*", "*/"}, {"{-", "-}"},
       {"ab", "ba"}, {"a", "b"},   {"aa", "a"},  {"a", "aa"},
@@ -727,9 +724,9 @@ void a_nested_search_remembers_what_it_settled() {
         CHECK(one == (from == n ? n + 1 : 0));
         CHECK(e == 2 * n - from + 1);
       } else {
-        const cursiv::TextOffset owed = 1 + (n - from) / 2;
+        const cursiv::TextOffset half = 1 + (n - from) / 2;
         CHECK(one == 0);
-        CHECK(e == (owed <= n / 2 ? n + 2 * owed : 0));
+        CHECK(e == (half <= n / 2 ? n + 2 * half : 0));
       }
     }
   }
@@ -784,7 +781,7 @@ cursiv::TextOffset listed_model(std::string_view t, cursiv::TextOffset from,
 }
 
 // Listed literals, overlapping ones among them, and the end of the text as a
-// closer: the search, and the one that keeps what it settled, answer as a
+// closer: the search, and the one that keeps what it decided, answer as a
 // reading position by position does.
 void a_listed_search_reads_as_the_model() {
   struct Sides {
@@ -853,10 +850,9 @@ void a_mark_run_is_read_once() {
   std::printf("  a mark's run is read once\n");
 }
 
-// The room a padded closer needs past its run is counted beyond the 32 bits
-// of an offset: a mark run near the 4 GiB bound and the bytes after its echo
-// do not wrap into a small count that lets the echo compare run past the
-// text. The text ends against an unreadable page, so such a read faults.
+// The room a padded closer needs past its run is counted beyond 32 bits: a mark
+// run near the 4 GiB bound does not wrap into a small count. The text ends
+// against an unreadable page, so an overrun faults.
 void a_closer_room_near_the_bound_does_not_wrap() {
 #if defined(__unix__) || defined(__APPLE__)
   const long pageSize = sysconf(_SC_PAGESIZE);
@@ -957,7 +953,7 @@ int main() {
   delimiters_are_as_long_as_written();
   a_refusal_before_a_relay_leaves_its_first_byte_to_the_search();
   a_relayed_run_reads_every_rest_once();
-  a_nested_search_remembers_what_it_settled();
+  a_nested_search_remembers_what_it_decided();
   a_listed_search_reads_as_the_model();
   a_mark_run_is_read_once();
   a_closer_room_near_the_bound_does_not_wrap();

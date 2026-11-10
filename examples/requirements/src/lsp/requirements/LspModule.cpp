@@ -17,8 +17,8 @@ namespace req {
 namespace {
 
 // The formatter is the one of the language being built, not of the container:
-// one container type serves both grammars, and a `.tst` laid out by the `.req`
-// rules would be laid out wrong.
+// one container type serves both grammars, and a `.tst` formatted by the `.req`
+// rules would be formatted wrong.
 using MakeFormatter =
     std::unique_ptr<const cursiv::Formatter> (*)(const cursiv::CoreServices&);
 

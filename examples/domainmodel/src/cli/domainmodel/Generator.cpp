@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -46,22 +48,19 @@ using cursiv::TextBuilder;
   });
 }
 
-// The text the author wrote, spelled as the declarations it names spell
-// themselves: a qualified name is what the Java source should say, and the
-// language matches names whatever their case while Java does not. The text
-// is the end of the target's qualified name, one segment per dot, so the
-// climb stops once it has them: a target deep in packages costs what the
-// text spells, not its whole nesting.
+// The name the author wrote, in the case its declarations use, since Java is
+// case-sensitive and the language is not. The walk up stops once it has as many
+// segments as the text.
 [[nodiscard]] std::string written_name(std::string_view written,
                                        const AbstractElement& target) {
   const auto segments = std::ranges::count(written, '.') + 1;
   std::string qualified(target.name);
-  auto climbed = std::ranges::count(qualified, '.') + 1;
+  auto walked = std::ranges::count(qualified, '.') + 1;
   for (const cursiv::AstNode* at = target.parent;
-       at != nullptr && climbed < segments; at = at->parent)
+       at != nullptr && walked < segments; at = at->parent)
     if (const auto* package = cursiv::ast_cast<const PackageDeclaration>(at)) {
       qualified = std::string(package->name) + "." + qualified;
-      climbed += std::ranges::count(package->name, '.') + 1;
+      walked += std::ranges::count(package->name, '.') + 1;
     }
   std::size_t start = qualified.size();
   for (auto left = segments; left > 0 && start != std::string::npos; --left)
@@ -152,31 +151,44 @@ void write_accessors(TextBuilder& out, const Feature& feature) {
   return out.take();
 }
 
+// Writes the elements below `destination / filePath`, a folder per package,
+// on a stack of its own however deep the packages nest.
 void generate_abstract_elements(const std::filesystem::path& destination,
                                 std::span<AbstractElement* const> elements,
-                                const std::string& filePath) {
-  const auto fullPath = destination / filePath;
-  std::filesystem::create_directories(fullPath);
-
-  const auto packagePath = package_path_from_file_path(filePath);
-  for (const auto& element : elements) {
+                                std::string filePath) {
+  // An open folder: its elements, the next to write, and its `filePath` size.
+  struct Folder {
+    std::span<AbstractElement* const> elements;
+    std::size_t pathSize;
+    std::size_t next = 0;
+  };
+  std::filesystem::create_directories(destination / filePath);
+  std::vector<Folder> open{{elements, filePath.size()}};
+  while (!open.empty()) {
+    Folder& folder = open.back();
+    if (folder.next == folder.elements.size()) {
+      open.pop_back();
+      continue;
+    }
+    const AbstractElement* const element = folder.elements[folder.next++];
+    filePath.resize(folder.pathSize);
     if (const auto* package =
             cursiv::ast_cast<const PackageDeclaration>(element)) {
-      // A dotted package becomes a directory path, as Java lays one out.
+      // A dotted package becomes a folder path, with `/` on every platform:
+      // the Java package is read back from it.
       std::string packagePath(package->name);
       std::ranges::replace(packagePath, '.', '/');
-      // `/` on every platform: the Java package is read off this path.
-      generate_abstract_elements(
-          destination, package->elements,
-          (std::filesystem::path(filePath) / std::filesystem::path(packagePath))
-              .generic_string());
+      filePath += '/';
+      filePath += packagePath;
+      std::filesystem::create_directories(destination / filePath);
+      open.push_back({package->elements, filePath.size()});
     } else if (const auto* entity = cursiv::ast_cast<const Entity>(element)) {
       const auto filePathValue =
-          fullPath / (std::string(entity->name) + ".java");
+          destination / filePath / (std::string(entity->name) + ".java");
       // The content first: a model the generator refuses leaves an older
       // output whole.
-      const std::string content =
-          generate_entity_file_content(*entity, packagePath);
+      const std::string content = generate_entity_file_content(
+          *entity, package_path_from_file_path(filePath));
       std::ofstream out(filePathValue, std::ios::binary);
       if (!out.is_open()) {
         throw std::runtime_error("Unable to open output file: "

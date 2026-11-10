@@ -4,9 +4,8 @@
 #include <string_view>
 #include <vector>
 
-// The grammar as reviewable text, served at runtime: the whole of it, one
-// rule, or a rule with everything it reaches. The text is the dump's own
-// format, the same one GRAMMAR.txt is written in.
+// The grammar as readable text at runtime: all of it, one rule, or a rule with
+// every rule it reaches, in the format of `GRAMMAR.txt`.
 
 namespace cursiv {
 
@@ -14,7 +13,7 @@ class GrammarSource {
  public:
   virtual ~GrammarSource() noexcept = default;
 
-  // Folded for review, byte for byte what the committed `GRAMMAR.txt` holds.
+  // Byte for byte the committed `GRAMMAR.txt`.
   [[nodiscard]] virtual std::string_view grammarText() const noexcept = 0;
 
   // In order of first appearance, the entry rule first.

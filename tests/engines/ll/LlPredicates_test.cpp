@@ -309,7 +309,7 @@ void normal_recognition_is_preserved(const cursiv::Parser& parser) {
        {"a", "a x a", "a a", "x", " a", "/*c*/a "})
     same(parser, "commit:", "commit-read:", suffix);
   // A committed repetition stops only where its prefix cannot be read, trivia
-  // between the rounds or not.
+  // between the iterations or not.
   for (const std::string_view suffix :
        {"x", "xa", "xab", "xabab", "xaba", "xabx", "xabc", "xc"})
     same(parser, "tail-c:", "tight-tail-c:", suffix);
@@ -376,10 +376,9 @@ void normal_recognition_is_preserved(const cursiv::Parser& parser) {
     else
       same(parser, "mixed-boundary:", "mixed-boundary-read:", suffix);
   }
-  // The keyword branch ranks the terminal as a keyword where `if` ends a word,
-  // and the literal branch as a literal where a word byte follows: the pattern
-  // cannot read `if` in either place, and a condition reads it there all the
-  // same.
+  // The keyword branch ranks the terminal a keyword where `if` ends a word, the
+  // literal branch a literal before a word byte: the pattern cannot read `if`
+  // there, and the condition still reads it.
   CHECK(clean(parser, "mixed-boundary:ifx"));
   CHECK(clean(parser, "mixed-boundary:ify"));
   CHECK(clean(parser, "mixed-boundary:if y"));

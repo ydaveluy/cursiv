@@ -1,5 +1,5 @@
-// The records a repair lays on the tree and the one note a fault makes: the
-// run in hand is told when a gesture is made at another cursor, or the parse
+// The records a repair writes on the tree and the one note a fault makes: the
+// run in hand is told when an edit is made at another cursor, or the parse
 // ends.
 #pragma once
 
@@ -13,7 +13,7 @@
 
 namespace cursiv::engine {
 
-// A record the parse laid, not the author: the tree stays navigable and the
+// A record the parse made, not the author: the tree stays navigable and the
 // bit says which parts to trust.
 inline void ll_mark(LlContext& c, NodeId id) {
   c.tape.stream().at(id).recovered = true;
@@ -61,10 +61,11 @@ inline void ll_note_run(LlContext& c) {
   if (f.del && f.resume == kNoElement)
     f.resume = ll_resume_at<T>(c, f.end, f.dropMode);
   RepairNote n = repair_note(f);
-  c.tape.note_repair(n.kind, n.element, n.begin, n.end, std::move(n.also));
+  c.tape.note_repair(n.kind, n.element, n.begin, n.end, std::move(n.also),
+                     n.mixedIndent);
 }
 
-// A gesture joins the run in hand where nothing was read since its last one.
+// An edit joins the run in hand where nothing was read since its last one.
 template <const auto& T>
 inline LlRepairRun& ll_run(LlContext& c) {
   if (c.run.open && c.run.at == c.at) return c.run;

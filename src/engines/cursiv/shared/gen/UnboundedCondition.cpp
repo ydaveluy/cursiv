@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "cursiv/shared/gen/GapReach.hpp"
 #include "cursiv/shared/gen/LowerPools.hpp"
@@ -10,20 +11,31 @@
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/utils/GrammarPrinter.hpp"
+#include "cursiv/text/scalar_at.hpp"
 #include "cursiv/utils/ctstring.hpp"
 
 namespace cursiv::engine {
 
 namespace {
 
-// Whether a round of `node` may read a byte.
-bool consumes(const LowerPools& c, std::uint16_t node) {
+// Whether a round of `node` may read a byte. `calls` holds the callees entered
+// on the way: one entered again reads nothing new.
+bool consumes(const LowerPools& c, std::uint16_t node,
+              std::vector<std::uint16_t>& calls) {
   const LexNode& e = c.lex[node];
   switch (e.kind) {
     case LexKind::token:
-      return consumes(c, lex_token_body(c, e));
+      return consumes(c, lex_token_body(c, e), calls);
     case LexKind::mark:
-      return consumes(c, e.a);
+      return consumes(c, e.a, calls);
+    case LexKind::call: {
+      const std::uint16_t callee = lex_callee(c, e);
+      if (std::ranges::find(calls, callee) != calls.end()) return false;
+      calls.push_back(callee);
+      const bool out = consumes(c, callee, calls);
+      calls.pop_back();
+      return out;
+    }
     case LexKind::chars:
     case LexKind::same:
     case LexKind::through_lit:
@@ -33,19 +45,17 @@ bool consumes(const LowerPools& c, std::uint16_t node) {
     case LexKind::seq:
     case LexKind::alt:
       for (unsigned i = 0; i < e.b; ++i)
-        if (consumes(c, c.lexKid[e.a + i])) return true;
+        if (consumes(c, c.lexChild[e.a + i], calls)) return true;
       return false;
     case LexKind::rep:
-      return e.max != 0 && consumes(c, e.a);
+      return e.max != 0 && consumes(c, e.a, calls);
     default:
       return false;
   }
 }
 
 // The repetitions under `node` that read on without end, and whether the
-// parse keeps their rounds: where `free`, no repetition of the phrase holds
-// `node`. A whole terminal ends its own run at its own length: a completion
-// counts it as one token.
+// parse keeps their rounds: where `free`, no repetition holds `node`.
 void endless_runs(const LowerPools& c, std::uint16_t node, bool free,
                   std::vector<std::pair<std::uint16_t, bool>>& out) {
   const LexNode& e = c.lex[node];
@@ -54,13 +64,14 @@ void endless_runs(const LowerPools& c, std::uint16_t node, bool free,
   } else if (e.kind == LexKind::rep) {
     // A kept run's rounds read its item from each token: a run inside it is
     // read to its end each time.
-    const bool endless = e.max == kEndless && consumes(c, e.a);
+    std::vector<std::uint16_t> calls;
+    const bool endless = e.max == kEndless && consumes(c, e.a, calls);
     const bool kept = free && phrase_kept_run(c, node);
     if (endless) out.emplace_back(node, kept);
     if (!endless || kept) endless_runs(c, e.a, false, out);
   } else if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
     for (unsigned i = 0; i < e.b; ++i)
-      endless_runs(c, c.lexKid[e.a + i], free, out);
+      endless_runs(c, c.lexChild[e.a + i], free, out);
   }
 }
 
@@ -77,19 +88,19 @@ std::string spell_set(const ByteSet& bytes) {
   if (set.count() != 1)
     charset(out, set);
   else
-    quote(out, std::string(1, last));
+    out = quote(std::string_view(&last, 1));
   return out;
 }
 
-// A run as the warning spells it, `...` for what it does not spell. Asked for
-// the run's identity instead, that part names its node: two runs spelt alike
-// are one run only where they read the same.
+// A run as the warning spells it, `...` for what it does not spell. With
+// `identity`, it spells all it reads, so two runs spelt the same read the same.
 std::string spell(const LowerPools& c, std::uint16_t node,
                   bool identity = false) {
   const LexNode& e = c.lex[node];
   switch (e.kind) {
     case LexKind::token:
-      return spell(c, lex_token_body(c, e), identity);
+      return spell(c, lex_token_body(c, e), identity) +
+             (identity ? "#" + decimal(e.a) : "");
     case LexKind::positive:
       return "&" + spell(c, e.a, identity);
     case LexKind::negative:
@@ -101,23 +112,35 @@ std::string spell(const LowerPools& c, std::uint16_t node,
     case LexKind::nguard: {
       std::string out = "!";
       for (std::uint32_t k = 0; k < e.min; ++k)
-        out += spell_set(c.sets[c.lexKid[e.b + k]]);
+        out += spell_set(c.sets[c.lexChild[e.b + k]]);
+      if (identity) {
+        if (e.a != kNoSet) out += "/" + spell_set(c.sets[e.a]);
+        if (e.max != 0) out += "/scalar";
+      }
       return out;
+    }
+    case LexKind::skip: {
+      if (!identity) return "...";
+      std::string out = "~(";
+      for (unsigned i = 0; i < e.b; ++i)
+        out += (i != 0 ? " " : "") + spell(c, c.lexChild[e.a + i], identity);
+      return out + ")";
     }
     case LexKind::seq:
     case LexKind::alt: {
       std::string out;
       unsigned parts = 0;
       for (unsigned i = 0; i < e.b; ++i) {
-        const std::uint16_t kid = c.lexKid[e.a + i];
-        if (c.lex[kid].kind == LexKind::skip) continue;
+        const std::uint16_t child = c.lexChild[e.a + i];
+        if (!identity && c.lex[child].kind == LexKind::skip) continue;
         if (parts++ != 0) out += e.kind == LexKind::seq ? " " : " | ";
-        out += spell(c, kid, identity);
+        out += spell(c, child, identity);
       }
       return "(" + out + ")";
     }
     case LexKind::rep: {
-      const std::string body = spell(c, e.a, identity);
+      std::string body = spell(c, e.a, identity);
+      if (identity && e.b != kNoLexNode) body += spell(c, e.b, identity);
       if (e.max != kEndless)
         return body + "{" + decimal(e.min) + "," + decimal(e.max) + "}";
       return body + (e.min == 0   ? "*"
@@ -141,11 +164,11 @@ void find_unbounded_runs(const LowerPools& c, std::uint16_t cond,
     endless_runs(c, c.gapLeaves[v].node, true, runs);
     for (const auto [run, kept] : runs) {
       const UnboundedCondition u{rule, run, kept};
-      // Two copies of one spelling are one run to the author, a part the
-      // warning cannot spell named by its node.
+      // Two copies of one run are one run to the author.
+      const std::string identity = spell(c, run, true);
       if (std::ranges::none_of(found, [&](const UnboundedCondition& f) {
             return f.rule == u.rule && f.kept == u.kept &&
-                   spell(c, f.run, true) == spell(c, run, true);
+                   spell(c, f.run, true) == identity;
           }))
         found.push_back(u);
     }

@@ -3,7 +3,6 @@
 // its own.
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
@@ -36,39 +35,22 @@ function addCandidate(candidates: string[], value: string | undefined): void {
     }
 }
 
-// Where the binary is, in the order the answers are trustworthy: what the user
-// configured, what the environment says, then the default build tree. The
-// extension lives at `examples/arithmetics/vscode`, so the repository root is three
-// levels up and `build/examples/arithmetics/` is where CMake put the server.
-// A native binary is its own command; a wasm module is a file Node runs, and
-// the extension host is Node, so the wasm route needs no dependency.
+// Where the server is, most trusted first: the user's setting, the environment,
+// then the build tree, three levels above this extension's folder. A native
+// binary is its own command; a wasm module runs in Node, like this host.
 interface ServerCommand {
     command: string;
     args: string[];
-    env?: Record<string, string>;
 }
 
-// The wasm server, preferred when it is there: one artefact for every platform,
-// and the sandbox comes with it -- the module reads only what the runner
-// preopens. A packaged .vsix carries the optimized module and the runner under
-// `server/`; a development tree serves them from `build-wasi/` and
-// `tools/`. The module MUST be a threaded build: lsp-framework answers requests
-// on its own thread pool, whose floor is one thread, so a threadless module
-// fails every request with "thread constructor failed". Falls back to the
-// native binary, which is what a build without the WASI toolchain produces.
+// The wasm server, preferred when present: one artifact for every platform,
+// sandboxed to what the runner preopens, which also sizes its thread pool. It
+// must be a threaded build; without one, the native binary runs.
 function wasmCommand(module: string, runner: string): ServerCommand | undefined {
     if (!fs.existsSync(module) || !fs.existsSync(runner)) {
         return undefined;
     }
-    return {
-        command: process.execPath,
-        args: ['--no-warnings', runner, module],
-        // Wasi cannot count the host's cores: `hardware_concurrency()`
-        // answers 1 there, so the pool would never be built. The host
-        // knows, and says so. One fewer than the machine, as the
-        // native default does.
-        env: { CURSIV_WORKERS: String(Math.max(0, os.availableParallelism() - 1)) },
-    };
+    return { command: process.execPath, args: ['--no-warnings', runner, module] };
 }
 
 function resolveWasmCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
@@ -116,7 +98,7 @@ function isWasm(file: string): boolean {
 
 // What the active CMake preset just built: `launch.json` hands its binary
 // directory over, so F5 runs the artefact the editor is configured to build
-// rather than whatever a previous cross left under `server/`.
+// rather than what an earlier cross build left under `server/`.
 function presetCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
     const directory = process.env.CURSIV_SERVER_DIR?.trim();
     if (!directory) return undefined;
@@ -194,7 +176,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         command,
         args: found ? found.args : [],
         transport: TransportKind.stdio,
-        ...(found?.env ? { options: { env: { ...process.env, ...found.env } } } : {}),
     };
     const serverOptions: ServerOptions = { run: executable, debug: executable };
     const clientOptions: LanguageClientOptions = {
@@ -204,8 +185,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     client = new LanguageClient(`cursiv-${KEY}`, `cursiv ${LABEL}`, serverOptions, clientOptions);
     await client.start();
-    // The MCP door onto the same session: a model connected here reads what
-    // the editor holds unsaved.
+    // MCP over the same session: a model connected here reads what the editor
+    // holds unsaved.
     context.subscriptions.push(startMcpBridge(KEY, LABEL, client, outputChannel));
 }
 

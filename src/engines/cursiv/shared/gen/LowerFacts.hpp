@@ -11,10 +11,8 @@
 
 namespace cursiv::engine {
 
-// What the walk is given, keyed on the grammar alone: the four lists are
-// reached through this name, never spelled in the mangled name of every
-// `lay<>` instantiated. `Rewrite` is the engine's: the stages it reads the
-// rules through, and where an operator reads from.
+// What the walk is given, keyed on the grammar alone so the lists stay out of
+// every `lay<>` mangled name. `Rewrite` is the engine's.
 template <class G, class Rewrite>
 struct LowerFacts {
   using resolved = ResolveOverride<G>;

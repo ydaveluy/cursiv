@@ -1,7 +1,6 @@
-// The trees a parse hands over: the AST tables and the reducer that reads them,
-// the node and its reflection, the default converters and Parts, the CST and
-// the DSL surface it is read on, the walks over it, and a reference resolved
-// on read.
+// The trees a parse hands over: the AST tables and their reducer, the node
+// and its reflection, the converters, the CST and its DSL surface, the walks
+// over it, and a reference resolved on read.
 
 #include <algorithm>
 #include <array>
@@ -97,18 +96,15 @@
 #include "duallr/generated/Lr/Module.hpp"
 #include "support/World.hpp"
 
-// The AST tables and the reducer that reads them: the tables through the
-// erased reflection -- member classification, address-as-tag identity, the
-// admissible set a reference pre-expands -- then the reducer, one case per
-// member form, its structural errors and its two shapes with semantics of
-// their own.
+// The AST tables through the erased reflection, then the reducer: one case
+// per member form, its structural errors, and its two shapes of its own.
 namespace ast_builder {
 
 namespace {
 
 // The metadata is the language's table, so a white-box test asks it by the key
 // a service holds: an index found by owner and member name, never a member
-// pointer the erased door no longer knows.
+// pointer, which the type-erased reflection does not know.
 
 using support::parser_of;
 
@@ -118,7 +114,7 @@ const cursiv::DefaultAstReflection& reflection_of() {
   return static_cast<const cursiv::DefaultAstReflection&>(*r);
 }
 
-// The grammar most lanes below read, and its tables.
+// The grammar most tests below read, and its tables.
 const cursiv::Parser& engine() {
   return parser_of<&tab::generated::All::create_parser>();
 }
@@ -163,10 +159,8 @@ bool fields_are_coherent(const cursiv::DefaultAstReflection& refl) {
   return true;
 }
 
-// One law, two inputs: the reducer holds indices (every node it made came
-// out of `makes[i]`), so it asks `derives`, one bit of the base matrix;
-// anyone holding only a tag asks the tag, which walks the closure of its own
-// bases. The whole square is pinned to agree, for every pair.
+// The reducer asks `derives` of indices, a tag holder walks the tag's
+// bases: both agree for every pair.
 bool folds_agree(const cursiv::DefaultAstReflection& refl) {
   const cursiv::AstMetaData& m = refl.metaData();
   for (std::uint16_t b = 0; b < m.typeCount; ++b)
@@ -179,7 +173,7 @@ bool folds_agree(const cursiv::DefaultAstReflection& refl) {
 namespace hier {
 
 using namespace tab::hier;
-using cursiv::detail::FieldNature;
+using cursiv::detail::FieldContent;
 using cursiv::detail::FieldStorage;
 
 // Distinct types, distinct addresses -- the identity is the address.
@@ -228,20 +222,20 @@ void the_tables_read_back() {
            owner == kTag<Holder>;
   }) == 6);
 
-  // Decoded natures and storages.
+  // Decoded kinds and storages.
   const cursiv::detail::FieldDesc& name = desc_of(r, kTag<Base>, "name");
   const cursiv::detail::FieldDesc& items = desc_of(r, kTag<Holder>, "items");
   const cursiv::detail::FieldDesc& level = desc_of(r, kTag<Holder>, "level");
   const cursiv::detail::FieldDesc& tag = desc_of(r, kTag<Holder>, "tag");
   const cursiv::detail::FieldDesc& target = desc_of(r, kTag<Holder>, "target");
-  CHECK(name.nature == FieldNature::value);
+  CHECK(name.content == FieldContent::value);
   CHECK(name.storage == FieldStorage::direct);
-  CHECK(items.nature == FieldNature::node);
+  CHECK(items.content == FieldContent::node);
   CHECK(items.storage == FieldStorage::vector);
-  CHECK(level.nature == FieldNature::value);
+  CHECK(level.content == FieldContent::value);
   CHECK(level.storage == FieldStorage::optional);
-  CHECK(tag.nature == FieldNature::variant);
-  CHECK(target.nature == FieldNature::reference);
+  CHECK(tag.content == FieldContent::variant);
+  CHECK(target.content == FieldContent::reference);
   // The identifier is decoration, but it is filled.
   CHECK(name.name == "name");
   CHECK(target.name == "target");
@@ -320,8 +314,8 @@ void the_climb_contributes_its_members() {
   const std::uint16_t right = field_of(r, kTag<Bin>, "right");
   CHECK(left < m.fieldCount && op < m.fieldCount && right < m.fieldCount);
   CHECK(left != right);
-  CHECK(m.fields[left].nature == cursiv::detail::FieldNature::node);
-  CHECK(m.fields[op].nature == cursiv::detail::FieldNature::value);
+  CHECK(m.fields[left].content == cursiv::detail::FieldContent::node);
+  CHECK(m.fields[op].content == cursiv::detail::FieldContent::value);
   CHECK(m.fields[op].name == "op");
   CHECK(r.typeIndexOf(kTag<Bin>) != cursiv::kNoType);
   // The operands' pointee is registered as a type even though no rule builds
@@ -366,15 +360,13 @@ static_assert(!kTag<Node>->derivesFrom(kTag<Wrap>));
 // A nest names both the type it creates and the member it moves into.
 void the_nest_names_a_node_member() {
   const cursiv::DefaultAstReflection& r = refl();
-  CHECK(desc_of(r, kTag<Wrap>, "inner").nature ==
-        cursiv::detail::FieldNature::node);
+  CHECK(desc_of(r, kTag<Wrap>, "inner").content ==
+        cursiv::detail::FieldContent::node);
   CHECK(desc_of(r, kTag<Wrap>, "inner").target == r.typeIndexOf(kTag<Node>));
 }
 
-// The adoption case: `Root` names no type of its own -- its head node is
-// the one `Inner`'s region built, and each `*` wraps what is current so far.
-// The lowering publishes no creation for `Root`, so the run rides the one
-// below, and the wrapper count is the document's, not the grammar's guess.
+// Adoption: `Root` names no type, its head is the node `Inner`'s region
+// built, and each `*` wraps what is current.
 void adopts_and_wraps() {
   {
     cursiv::ParseResult r = engine().parse("$region abc");
@@ -415,8 +407,8 @@ static_assert(cursiv::detail::has_default_convert<Vis>);
 void an_enum_is_a_plain_value_member() {
   const cursiv::DefaultAstReflection& r = refl();
   // No storage, no node, no reference.
-  CHECK(desc_of(r, kTag<Decl>, "vis").nature ==
-        cursiv::detail::FieldNature::value);
+  CHECK(desc_of(r, kTag<Decl>, "vis").content ==
+        cursiv::detail::FieldContent::value);
   // It converts through its own entry: (VIS's converter, Vis) is not
   // (default path, string_view), and the converter-less spelling of the same
   // member is one entry more -- (default path, Vis).
@@ -462,7 +454,7 @@ void builds_doc() {
   CHECK(r.cst().text(doc->items[0]->cstNodeId) == "item a");
   CHECK(r.diagnostics.empty() && r.error == cursiv::AstBuildError::none);
   // The tag is written at construction, so the dynamic question answers
-  // without the grammar being in the room.
+  // without the grammar.
   CHECK(cursiv::ast_cast<Node>(doc->items[0]) != nullptr);
   CHECK(doc->type->name == "Doc");
   // A node keeps an ID, never a tree pointer: the tree it indexes is the
@@ -499,12 +491,9 @@ void structural_errors() {
   CHECK(doc != nullptr && doc->items.size() == 1);
 }
 
-// A tape a caller built is an input, and its entry may be nonsense.
-// `CstBuilder` is public and a recovered tape is legal by design, so the two
-// ways an entry can name nothing are answered, not crashed on: a root past
-// the end of the tape (an unindexed access, a segfault at -O2/NDEBUG), and a
-// root that reduces to nothing (the raw, never-written floor of the
-// reduction stack).
+// A hand-built tape's entry may name nothing, answered without a crash: (1) a
+// root past the end of the tape, (2) a root that reduces to nothing, (3) an
+// extent out of bounds.
 void a_hand_built_entry_is_answered_not_trusted() {
   const cursiv::engine::AstActions& acts = tab::generated::All::kAstActions;
   // (1) Out of range. The public wrapper refuses to bind a root that names no
@@ -608,7 +597,7 @@ void whole_vocabulary() {
         r.references->handles[2].index == 0);
   CHECK(r.references->handles[3].field == also &&
         r.references->handles[3].index == 1);
-  // The three storage forms of a reference, read back through the erased door.
+  // The three storage forms of a reference, read back through the reflection.
   CHECK(desc_of(tables, kTag<Rec>, "one").storage ==
         cursiv::detail::FieldStorage::direct);
   CHECK(desc_of(tables, kTag<Rec>, "maybe").storage ==
@@ -619,8 +608,8 @@ void whole_vocabulary() {
   // The name is a view, the source node's ID kept beside it.
   CHECK(rec->one.refText == "aa" &&
         r.cst().text(cursiv::detail::RefAccess::node_id(rec->one)) == "aa");
-  // Reading is asking: the home is planted at build, the resolver is not, so a
-  // read before a linker exists fails and caches the failure.
+  // Reading resolves: the build sets up the reference but no linker, so a read
+  // before a linker exists fails and caches the failure.
   CHECK(rec->one.resolve() == cursiv::RefState::ErrorNotFound &&
         rec->one.get() == nullptr);
   // The converted one carries its converter's answer, not the spelling --
@@ -683,8 +672,8 @@ void assigning_again_keeps_one_reference_site() {
         cursiv::detail::RefAccess::handle(*rec->maybe) == 1);
   CHECK(cursiv::detail::RefAccess::handle(rec->also[0]) == 2 &&
         cursiv::detail::RefAccess::handle(rec->also[1]) == 3);
-  CHECK(cursiv::detail::RefAccess::home(rec->one) == r.references.get() &&
-        cursiv::detail::RefAccess::home(*rec->maybe) == r.references.get());
+  CHECK(cursiv::detail::RefAccess::resolver(rec->one) == r.references.get() &&
+        cursiv::detail::RefAccess::resolver(*rec->maybe) == r.references.get());
 
   // Both public visitors see the four surviving slots exactly once. Before
   // linking, forcing gives each slot the ordinary ErrorNotFound answer.
@@ -727,7 +716,7 @@ void assigning_again_keeps_one_reference_site() {
   cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &r.cst();
   ctx.refs = &r.references->handles;
-  ctx.home = r.references.get();
+  ctx.resolver = r.references.get();
   const cursiv::engine::Pending again{
       .root = cursiv::detail::RefAccess::node_id(rec->also[0]),
       .text = cursiv::detail::RefAccess::node_id(rec->also[0]),
@@ -785,7 +774,7 @@ void a_write_replaces_the_node_of(auto hold) {
                                                   cursiv::NodeId,
                                                   void*) { return false; }};
   cursiv::engine::AstBuildCtx ctx;
-  if constexpr (F::nature == cursiv::detail::FieldNature::variant) {
+  if constexpr (F::content == cursiv::detail::FieldContent::variant) {
     const cursiv::engine::Pending value{.kind = cursiv::ActKind::assign};
     cursiv::engine::write_into<F>(ctx, value, &holder, &refuses, 0, value.kind,
                                   0);
@@ -796,7 +785,7 @@ void a_write_replaces_the_node_of(auto hold) {
   cursiv::engine::write_into<F>(ctx, node, &holder, nullptr, 0, node.kind, 0);
   CHECK(before.parent == nullptr && ctx.detached);
   CHECK(after.parent == &holder && ctx.attached == 1);
-  if constexpr (F::nature == cursiv::detail::FieldNature::variant) {
+  if constexpr (F::content == cursiv::detail::FieldContent::variant) {
     // A value replaces it too.
     ctx.detached = false;
     const cursiv::engine::ConvSlot number{
@@ -837,7 +826,7 @@ void a_copied_reference_cannot_claim_another_slots_handle() {
   cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &r.cst();
   ctx.refs = &r.references->handles;
-  ctx.home = r.references.get();
+  ctx.resolver = r.references.get();
   const cursiv::engine::Pending p{
       .root = cursiv::detail::RefAccess::node_id(rec->also[0]),
       .text = cursiv::detail::RefAccess::node_id(rec->also[0]),
@@ -879,7 +868,7 @@ using Plus = std::remove_cvref_t<decltype(cursiv::lit<"+">)>;
 template <class E>
 using payload = typename cursiv::detail::payload_of<E>::type;
 template <class E>
-using spelling = typename cursiv::detail::lit_pays<E>::type;
+using spelling = typename cursiv::detail::lit_payloads<E>::type;
 static_assert(std::is_same_v<payload<cursiv::Mark<Fence, Plus>>, payload<Plus>>);
 static_assert(
     std::is_same_v<spelling<cursiv::Mark<Fence, Plus>>, spelling<Plus>>);
@@ -891,12 +880,9 @@ static_assert(!std::is_same_v<spelling<Plus>, cursiv::TypeList<>>);
 
 }  // namespace wrapped
 
-// `variant<boolean, float64, string_view>` is the shape a JSON-like value
-// member wants, and it is the shape cross-constructibility alone cannot take:
-// a bool is constructible from a double and a double from a bool, so counting
-// constructible alternatives calls every payload ambiguous. Exactness decides
-// first -- the alternative whose type is the converter's result -- and the
-// constructibility scan only ever runs when no alternative names the type.
+// `variant<boolean, float64, string_view>`: a bool and a double convert to
+// each other, so the alternative whose type is the converter's result is
+// chosen first.
 namespace exact {
 
 using namespace tab::exact;
@@ -906,34 +892,34 @@ using namespace tab::exact;
 template <class R>
 using slot_of =
     typename cursiv::engine::conv_alt<decltype(Val::v),
-                                      cursiv::detail::pay_text<R>>::type;
+                                      cursiv::detail::text_payload<R>>::type;
 static_assert(std::is_same_v<slot_of<G::BOOL>, bool>);
 static_assert(std::is_same_v<slot_of<G::NUM>, double>);
 static_assert(std::is_same_v<slot_of<G::STR>, std::string_view>);
 // The positioned wrapper never reaches the comparison: PCT's value type is
-// `double`, so it lands in the same exact slot a bare double converter does.
+// `double`, so it takes the same exact slot a bare double converter does.
 static_assert(std::is_same_v<slot_of<G::PCT>, double>);
 
 // A payload no alternative names exactly still goes through the scan: int8
 // is constructible into `float64` and into nothing else here, so it resolves.
 static_assert(std::is_same_v<typename cursiv::engine::conv_alt<
                                  std::variant<double, std::string_view>,
-                                 cursiv::detail::pay_text<G::BOOL>>::type,
+                                 cursiv::detail::text_payload<G::BOOL>>::type,
                              double>);
 
 // Validation accepts all three, where the constructibility scan alone would
 // have refused bool and double.
 void every_alternative_is_kept() {
   const cursiv::DefaultAstReflection& r = refl();
-  CHECK(desc_of(r, kTag<Val>, "v").nature ==
-        cursiv::detail::FieldNature::variant);
+  CHECK(desc_of(r, kTag<Val>, "v").content ==
+        cursiv::detail::FieldContent::variant);
   CHECK(
       cursiv::engine::ast_registry<tab::exact::G,
                                    cursiv::engine::LrLowering<tab::exact::G>>()
           .convCount == 4);
 }
 
-void each_payload_lands_in_its_own_slot() {
+void each_payload_goes_to_its_own_slot() {
   const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult rb = engine.parse("$exact true");
   auto* b = rb.value_as<Val>();
@@ -964,11 +950,8 @@ void each_payload_lands_in_its_own_slot() {
 
 }  // namespace exact
 
-// An annotated terminal with no converter: the annotation is what the
-// exactness round counts, so it must also be what the writer emplaces.
-// Erasing the rule from the conversion entry makes the writer recompute a
-// `string_view` source, landing the raw text in that alternative silently,
-// with error `none`.
+// An annotated terminal with no converter: the writer emplaces the
+// annotated type, as the exactness round counts it.
 namespace annot {
 
 using namespace tab::annot;
@@ -976,7 +959,7 @@ using namespace tab::annot;
 template <class R>
 using slot_of =
     typename cursiv::engine::conv_alt<decltype(Val::v),
-                                      cursiv::detail::pay_text<R>>::type;
+                                      cursiv::detail::text_payload<R>>::type;
 static_assert(std::is_same_v<slot_of<G::NUM>, std::int64_t>);
 static_assert(std::is_same_v<slot_of<G::WORD>, std::string_view>);
 
@@ -989,7 +972,7 @@ void the_annotated_rule_keeps_its_own_entry() {
           .convCount == 2);
 }
 
-void annotated_terminal_lands_in_its_annotated_slot() {
+void annotated_terminal_goes_to_its_annotated_slot() {
   const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult rn = engine.parse("$annot 42");
   auto* const n = rn.value_as<Val>();
@@ -1005,7 +988,7 @@ void annotated_terminal_lands_in_its_annotated_slot() {
 
 }  // namespace annot
 
-// The same law with no string_view alternative to fall into: the exactness
+// The same check with no string_view alternative to fall into: the exactness
 // round counts `int32`, so the writer may not take the candidate list's head
 // (`double`) instead.
 namespace annot2 {
@@ -1015,7 +998,7 @@ using namespace tab::annot2;
 static_assert(
     std::is_same_v<typename cursiv::engine::conv_alt<
                        decltype(Num::n),
-                       cursiv::detail::pay_text<tab::All::Annot2INT>>::type,
+                       cursiv::detail::text_payload<tab::All::Annot2INT>>::type,
                    std::int32_t>);
 
 void the_validated_alternative_is_the_written_one() {
@@ -1028,12 +1011,8 @@ void the_validated_alternative_is_the_written_one() {
 
 }  // namespace annot2
 
-// An override replaces a body and/or a converter. Type deduction falls
-// through to the base's, so the converter lookup must fall through with it:
-// an override replacing only the body would otherwise answer the base's
-// converted type while `HasConverter` says none exists, and
-// the default conversion would run on text only the base's converter can
-// read.
+// An override replacing only a body keeps the base's converter, as type
+// deduction does.
 namespace over {
 
 using N = tdual::N;
@@ -1053,11 +1032,11 @@ static_assert(
 // ...so the conversion entry keeps the rule: erasing it is only free for a
 // converter-less rule answering string_view.
 static_assert(!cursiv::detail::erased_src<
-              cursiv::detail::pay_text<DerivedHex>>::erasable);
+              cursiv::detail::text_payload<DerivedHex>>::erasable);
 static_assert(
     std::is_same_v<
-        cursiv::detail::erased_src_t<cursiv::detail::pay_text<DerivedHex>>,
-        cursiv::detail::pay_text<DerivedHex>>);
+        cursiv::detail::erased_src_t<cursiv::detail::text_payload<DerivedHex>>,
+        cursiv::detail::text_payload<DerivedHex>>);
 
 void an_override_runs_the_converter_it_inherited(const cursiv::Parser& parser,
                                                  const char* engine) {
@@ -1093,7 +1072,7 @@ void an_override_naming_a_target_converts_to_it(const cursiv::Parser& parser,
 }
 
 // An override that restates only the body keeps the converter of the rule it
-// stood over -- the middle grammar's, not the base's.
+// overrode -- the middle grammar's, not the base's.
 using ChainHex =
     typename cursiv::ResolveOverride<tdual::D2>::template rule<Base::TEN>;
 static_assert(
@@ -1101,8 +1080,8 @@ static_assert(
 static_assert(std::is_same_v<cursiv::detail::converter_rule_t<ChainHex>,
                              cursiv::detail::text_conv<tdual::D1::tens_conv>>);
 
-void an_override_keeps_the_converter_it_stood_over(const cursiv::Parser& parser,
-                                                  const char* engine) {
+void an_override_keeps_the_converter_it_replaced(const cursiv::Parser& parser,
+                                                 const char* engine) {
   cursiv::ParseResult r = parser.parse("ten 0Y1f");
   CHECK(r.error == cursiv::AstBuildError::none && r.diagnostics.empty());
   const N* n = r.value_as<N>();
@@ -1133,10 +1112,8 @@ void a_create_keeps_the_writes_before_it(const cursiv::Parser& parser,
 
 }  // namespace precreate
 
-// `admits` counts the alternatives that accept this payload -- one -- where a
-// payload-blind count of AST-pointer alternatives says two and calls
-// `variant<A*, B*>` ambiguous. The field must also keep every target, not just
-// the first, or `take_node_as` hunts for an `A` when the payload built a `B`.
+// `admits` counts the alternatives that accept the payload, so
+// `variant<A*, B*>` is not ambiguous; the field keeps every target.
 namespace nodealt {
 
 using namespace tab::nodealt;
@@ -1192,7 +1169,7 @@ namespace nest {
 using namespace tab::nested;
 
 // A walk reads what a node contains, a parent first, and skips what is pruned;
-// a climb finds the nearest node of a class, the node itself first.
+// a walk up finds the nearest node of a class, the node itself first.
 void a_walk_reads_what_a_node_contains() {
   cursiv::ParseResult r = engine().parse("$nest pub a . b !!");
   N* const outer = r.value_as<N>();
@@ -1253,12 +1230,8 @@ void nest_chain() {
 
 }  // namespace nest
 
-// The node the reducer holds after a wrap is the wrapper, of another class
-// than the one the rule's element declares. Everything downstream -- the
-// directives that follow the nest, and any parent adopting the rule's result
-// -- must therefore ask the node what it is; the element only says what the
-// grammar declared. Believing the element is silent corruption in both
-// shapes below.
+// After a wrap the reducer holds the wrapper, of another class than the
+// rule's element declares: what follows asks the node its class.
 namespace wrapper {
 
 using namespace tab::wrapper;
@@ -1310,7 +1283,7 @@ void adopts_the_wrapper_as_itself() {
   CHECK(r.accepted && static_cast<bool>(r));
   auto* doc = r.value_as<tab::adoptwrap::Doc>();
   CHECK(doc != nullptr && doc->items.size() == 2);
-  // What landed in the vector is the wrapper, and it answers as one.
+  // What went into the vector is the wrapper, and it answers as one.
   CHECK(cursiv::ast_cast<Wrap>(doc->items[0]) != nullptr);
   CHECK(static_cast<Wrap*>(doc->items[0])->child->name == "a");
   CHECK(doc->items[1]->parent == doc);
@@ -1362,7 +1335,6 @@ void move_assignment_takes_the_new_tree() {
   CHECK(a.nodes().size() == 1 && a.nodes()[0] == a.value);
 }
 
-// Self-move-assignment is a no-op.
 void self_assignment_is_a_no_op() {
   cursiv::ParseResult a = parse("x aa");
   cursiv::ParseResult& self = a;
@@ -1372,10 +1344,9 @@ void self_assignment_is_a_no_op() {
 
 }  // namespace move
 
-// An infix record has exactly three visible direct children in source
-// order -- left operand, operator leaf, right operand -- and precedence
-// appears as nesting on either side (`1+2*3` nests on the right, `1*2+3` on
-// the left). A primary with no operator commits no infix record at all.
+// An infix record has three visible children in order: left, operator,
+// right. Precedence shows as nesting; a lone primary commits no infix
+// record.
 namespace climb {
 
 using namespace tab::climb;
@@ -1427,12 +1398,8 @@ void infix_single_primary() {
 
 }  // namespace climb
 
-// The factorer lifts a shared directive out of a body-root choice of
-// create<> regions (`root_alt_head`) because a rule whose body is that
-// choice never makes a node of its own: `finish` takes the branch's node out
-// of the pendings (`take_node_as`), and `consume` then applies every
-// remaining effect of the body to it -- the ones recorded before the
-// adopted node included. That is what makes the hoist a reshape.
+// The factorer lifts a directive shared by a body-root choice of creates:
+// the branch's node then takes every effect of the body.
 namespace hoist {
 
 using namespace tab::hoist;
@@ -1448,7 +1415,7 @@ void a_hoisted_write_reaches_the_branch() {
   // Each U adopted its branch's node -- no Base of its own was made...
   CHECK(bag->items[0]->type->name == "L");
   CHECK(bag->items[1]->type->name == "V");
-  // ...and the write outside the regions landed on the adopted node.
+  // ...and the write outside the regions went to the adopted node.
   CHECK(bag->items[0]->name == "x");
   CHECK(bag->items[1]->name == "y");
 }
@@ -1519,22 +1486,17 @@ void a_spelling_the_member_reads_still_converts() {
 
 }  // namespace spell
 
-// Every text member is a `string_view`, and what decides whether a payload may
-// write one is the effective return type -- the converter's when there is one,
-// the matched text when there is not:
-//
-//   string_view <- the matched text            : a slice of the document
-//   string_view <- a converter answering view  : the converter's own slice
-//   refused: a converter answering a string, which a `string` member takes;
-//   refused: `as<T>` with a type that is not text, which gives a value.
+// A text member is a `string_view`, written from the matched text or from
+// a converter answering a view. Refused: a converter answering a string, and
+// `as<T>` with a type that is not text.
 namespace textlaw {
 
 using namespace tab::textlaw;
 
-// The law itself, on every shape at once.
+// The rule itself, on every shape at once.
 template <class M, class R>
 inline constexpr bool takes =
-    cursiv::engine::admits<M, cursiv::detail::pay_text<R>>();
+    cursiv::engine::admits<M, cursiv::detail::text_payload<R>>();
 static_assert(takes<std::string_view, tab::All::TextID>);
 static_assert(takes<std::string_view, tab::All::TextQUOTED>);
 static_assert(!takes<std::string_view, tab::All::TextNUM>);
@@ -1644,12 +1606,12 @@ void the_inline_slot_converts() {
 }  // namespace inl
 
 // The member accepts the whole family; this site accepts `Kind1` alone, and
-// the stamp plus the composed filter is what makes a resolution honour it.
+// the site's own filter is what makes a resolution honour it.
 namespace narrow {
 
 using namespace tab::narrow;
 
-void a_narrowed_site_stamps_and_filters() {
+void a_narrowed_site_records_and_filters() {
   cursiv::ParseResult r = engine().parse("use abc");
   CHECK(r.accepted);
   auto* const site = static_cast<Site*>(r.value);
@@ -1677,15 +1639,13 @@ void a_narrowed_site_stamps_and_filters() {
 
 }  // namespace narrow
 
-// `a + b + (d | e) + c` where a/b/c write members and d/e each create their
-// own class: the writes land on whichever node the branch creates, before
-// and after the choice alike, and the rule's type is the branches' common
-// base.
+// `a + b + (d | e) + c`, where d and e create their own class: the writes
+// go to the branch's node, and the rule's type is their common base.
 namespace deferred {
 
 using namespace tab::deferred;
 
-void writes_land_on_the_branch_node() {
+void writes_go_to_the_branch_node() {
   cursiv::ParseResult r = engine().parse("pets rex #fast dog ! @big tom cat");
   CHECK(r.accepted && static_cast<bool>(r));
   auto* doc = r.value_as<Doc>();
@@ -1707,7 +1667,7 @@ void writes_land_on_the_branch_node() {
 }  // namespace
 
 void run() {
-  // The tables the generator wrote, read back through the erased door.
+  // The tables the generator wrote, read back through the reflection.
   hier::the_tables_read_back();
   infix::the_climb_contributes_its_members();
   region::the_nest_names_a_node_member();
@@ -1719,7 +1679,7 @@ void run() {
 
   // ...and the reducer that reads them.
   wiring::builds_doc();
-  narrow::a_narrowed_site_stamps_and_filters();
+  narrow::a_narrowed_site_records_and_filters();
   wiring::structural_errors();
   wiring::a_hand_built_entry_is_answered_not_trusted();
   vocab::whole_vocabulary();
@@ -1729,15 +1689,15 @@ void run() {
   vocab::assigning_again_keeps_one_reference_site();
   vocab::a_write_replaces_the_node_a_member_held();
   vocab::a_copied_reference_cannot_claim_another_slots_handle();
-  exact::each_payload_lands_in_its_own_slot();
-  annot::annotated_terminal_lands_in_its_annotated_slot();
+  exact::each_payload_goes_to_its_own_slot();
+  annot::annotated_terminal_goes_to_its_annotated_slot();
   annot2::the_validated_alternative_is_the_written_one();
   for (const auto& [name, parser] : {
            std::pair{"LR", &parser_of<&tdual::generated::Lr::create_parser>()},
            std::pair{"LL", &parser_of<&tdual::generated::Ll::create_parser>()}}) {
     over::an_override_runs_the_converter_it_inherited(*parser, name);
     over::an_override_naming_a_target_converts_to_it(*parser, name);
-    over::an_override_keeps_the_converter_it_stood_over(*parser, name);
+    over::an_override_keeps_the_converter_it_replaced(*parser, name);
     precreate::a_create_keeps_the_writes_before_it(*parser, name);
   }
   nodealt::both_node_alternatives_build();
@@ -1764,7 +1724,7 @@ void run() {
   optnode::the_reflection_walks_the_optional_child();
   optnode::an_absent_one_yields_nothing();
   inl::the_inline_slot_converts();
-  deferred::writes_land_on_the_branch_node();
+  deferred::writes_go_to_the_branch_node();
 }
 
 }  // namespace ast_builder
@@ -1776,23 +1736,19 @@ namespace {
 struct N : cursiv::Extends<cursiv::AstNode> {  // the vocabulary is inherited:
                                                // bare names
   string_view name;
-  vector<N*> kids;
+  vector<N*> children;
   optional<int32> level;
   variant<int64, string_view> tag;
   reference<N> target;
 };
 static_assert(std::is_base_of_v<cursiv::AstNode, N>);
-// Guarded on the width, like the pins in `syntax-tree/`: on wasm32 a pointer
-// is four bytes and the number would differ while saying the same thing. What
-// a pin catches is a field added.
+// Checked on 64-bit targets only, where a pointer is eight bytes: the size
+// catches a field added.
 static_assert(sizeof(void*) != 8 || sizeof(cursiv::RefHandle) == 16);
 static_assert(!cursiv::has_error(cursiv::RefState::Resolved) &&
               cursiv::has_error(cursiv::RefState::ErrorNotFound));
 
-// A diagnostic positions by range, and by nothing else: whoever reads one
-// holds the tree already -- `ParseResult` owns it -- so the type carries no
-// `const Cst*`, and no node id either, since the site that knew the node
-// filled the range from it.
+// A diagnostic positions by range alone: its reader holds the tree.
 static_assert(std::is_same_v<decltype(cursiv::ParseDiagnostic::begin),
                              cursiv::TextOffset>);
 static_assert(cursiv::ParseDiagnostic{}.begin == 0 &&
@@ -1830,8 +1786,8 @@ static_assert(std::is_default_constructible_v<cursiv::reference<N>>);
 static_assert(std::is_default_constructible_v<cursiv::multi_reference<N>>);
 
 // multi_reference reads like a reference. The builder does not fill `items`
-// -- resolution is the linker's -- so what is pinned here is what a consumer
-// sees once the overload set is filled.
+// -- resolution is the linker's -- so this checks what a consumer sees once
+// the overload set is filled.
 void multi_reference_reads() {
   cursiv::multi_reference<N> m;
   CHECK(m.empty() && m.size() == 0);
@@ -1879,13 +1835,8 @@ struct D : cursiv::Extends<cursiv::AstNode> {
   int payload = 0;
 };
 
-// Counts the blocks the arena asks for, which is the only way to see that it
-// carves its nodes rather than requesting one allocation per node.
-//
-// Monotonic underneath, and that is the arena's contract rather than a
-// convenience: a chunk is never handed back -- `release()` drops the bump and
-// keeps the block -- so a resource that does not free on destruction leaks
-// every chunk (LeakSanitizer said so).
+// Counts the blocks the arena asks for, to check that its nodes share chunks.
+// It only grows: the arena never gives a chunk back.
 struct counting_resource : std::pmr::memory_resource {
   int blocks = 0;
   std::pmr::monotonic_buffer_resource owned;
@@ -1901,12 +1852,8 @@ struct counting_resource : std::pmr::memory_resource {
   }
 };
 
-// The arena carves its nodes out of blocks it took from the resource, and a
-// `release()` drops the bump with them: one that kept it would hand the next
-// node an address inside a block the caller is about to let the pool reclaim.
-//
-// Pinned by what the arena asks for, not by an address: a reclaimed pool
-// hands the same bytes straight back, so `after != before` proves nothing.
+// `release()` frees the arena's blocks. Checked by what the arena asks for,
+// since a reclaimed pool gives the same bytes back.
 void arena_lifetimes() {
   counting_resource pool;
   cursiv::detail::AstArena a(&pool);
@@ -1914,9 +1861,9 @@ void arena_lifetimes() {
   d->payload = 7;
   CHECK(d->parent == nullptr);
   const int first = pool.blocks;
-  CHECK(first == 1);  // one chunk carved, not one block per node
+  CHECK(first == 1);  // one chunk allocated, not one block per node
   (void)a.make<D>();
-  CHECK(pool.blocks == first);  // the second node is a bump in that chunk
+  CHECK(pool.blocks == first);  // the second node goes in that chunk
   a.release();
   (void)a.make<D>();
   CHECK(pool.blocks == first + 1);
@@ -1927,7 +1874,7 @@ struct B2 : cursiv::Extends<cursiv::AstNode> {};
 struct C2 : cursiv::Extends<A2> {};
 struct D2 : cursiv::Extends<C2> {};
 
-// The closure is transitive and names every base once: three storeys down,
+// The closure is transitive and names every base once: three levels down,
 // `derivesFrom` still answers in one walk of one array.
 void the_closure_is_transitive() {
   const cursiv::AstTypeTag& d = cursiv::ast_type_tag<D2>;
@@ -1980,10 +1927,8 @@ void a_two_candidate_reference_answers_by_branch() {
   CHECK(r.get<A2>() == nullptr);
 }
 
-// A copy is another object: it takes the members' values and none of the
-// source's identity, so a tag copied into a base never lets a cast reach a
-// class the copy is not, and no link places the copy in the source's tree.
-// An assignment keeps the target's own.
+// A copy takes the members' values and none of the source's identity; an
+// assignment keeps the target's own.
 void a_copy_takes_no_identity() {
   D source;
   source.payload = 7;
@@ -2155,6 +2100,18 @@ void text_helpers_keep_empty_values_present() {
   const auto owned = document.keep_text(text);
   text[0] = 'x';
   CHECK(owned == "value");
+
+  // Parts whose sizes add up past what memory can hold are refused before a
+  // byte of them is read.
+  const std::string_view half(text.data(),
+                              std::numeric_limits<std::size_t>::max() / 2 + 1);
+  bool refused = false;
+  try {
+    (void)document.keep_text(half, half);
+  } catch (const std::bad_alloc&) {
+    refused = true;
+  }
+  CHECK(refused);
 }
 
 void converters_answer_classes_of_their_own() {
@@ -2316,7 +2273,7 @@ void a_direct_member_with_no_empty_state_is_written_in_place() {
   CHECK(doc->guard == 0);
 }
 
-// `as<T>` makes a `T` first: the member it lands in does not widen the range.
+// `as<T>` makes a `T` first: the member that takes it does not widen the range.
 void a_named_type_converts_before_the_member_takes_it() {
   // An integer is a fair value for a floating member.
   const auto ratio = engine().parse(R"(chain "a" "b" ratio 3)");
@@ -2336,13 +2293,13 @@ void a_named_type_converts_before_the_member_takes_it() {
 // A list and an optional build the value in place: it needs no assignment.
 void a_value_never_assigned_fills_a_list() {
   const auto parsed =
-      engine().parse(R"(chain "a" "b" seal =first =second =third)");
+      engine().parse(R"(chain "a" "b" constant =first =second =third)");
   CHECK(parsed && parsed.diagnostics.empty());
   const auto* doc = parsed.value_as<chain::Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) return;
-  CHECK(doc->sealed.has_value() && doc->sealed->text == "first");
-  CHECK(doc->seals.size() == 2 && doc->seals[1].text == "third");
+  CHECK(doc->constText.has_value() && doc->constText->text == "first");
+  CHECK(doc->constTexts.size() == 2 && doc->constTexts[1].text == "third");
 }
 
 // A rule that passes on a value with no empty state.
@@ -2401,12 +2358,9 @@ void a_final_class_still_converts() {
   CHECK(doc != nullptr && doc->trimmed == "word");
 }
 
-// What a tree offers from the depth of a long chain costs its size, not its
-// size times its depth: each walk costs less than building the document, which
-// is linear, where a climb per node costs as much as dozens of builds. Timed
-// against that build in the same run, so neither a slow nor a busy machine
-// decides.
-void a_deep_tree_is_climbed_once() {
+// Walks from deep in a long chain cost the tree's size, not size times
+// depth. Timed against a build in the same run.
+void a_deep_tree_is_walked_once() {
   constexpr std::size_t kDepth = 48000;
   const auto word = [](std::size_t n) {
     std::string out = "n";
@@ -2455,25 +2409,25 @@ void a_deep_tree_is_climbed_once() {
 }
 
 // Diamonds on diamonds: a base reached by several paths is one base.
-namespace ladder {
+namespace diamonds {
 template <int N>
-struct Rung;
+struct Level;
 template <int N, int Side>
-struct Rail : cursiv::VirtualExtends<Rung<N>> {};
+struct Path : cursiv::VirtualExtends<Level<N>> {};
 template <int N>
-struct Rung : cursiv::VirtualExtends<Rail<N - 1, 0>, Rail<N - 1, 1>> {};
+struct Level : cursiv::VirtualExtends<Path<N - 1, 0>, Path<N - 1, 1>> {};
 template <>
-struct Rung<0> : cursiv::VirtualExtends<cursiv::AstNode> {};
-static_assert(cursiv::detail::bases_of<Rung<2>>::kCount == 2 * 3 + 1);
-}  // namespace ladder
+struct Level<0> : cursiv::VirtualExtends<cursiv::AstNode> {};
+static_assert(cursiv::detail::bases_of<Level<2>>::kCount == 2 * 3 + 1);
+}  // namespace diamonds
 
 void a_class_of_many_paths_states_each_base_once() {
-  ladder::Rung<2> node;
-  cursiv::AstNode* const base = cursiv::detail::stamp_node(node);
-  const auto* const rail = cursiv::ast_cast<ladder::Rail<1, 1>>(base);
-  CHECK(rail == static_cast<const ladder::Rail<1, 1>*>(&node));
-  const auto* const low = cursiv::ast_cast<ladder::Rung<0>>(base);
-  CHECK(low == static_cast<const ladder::Rung<0>*>(&node));
+  diamonds::Level<2> node;
+  cursiv::AstNode* const base = cursiv::detail::set_type_tag(node);
+  const auto* const path = cursiv::ast_cast<diamonds::Path<1, 1>>(base);
+  CHECK(path == static_cast<const diamonds::Path<1, 1>*>(&node));
+  const auto* const low = cursiv::ast_cast<diamonds::Level<0>>(base);
+  CHECK(low == static_cast<const diamonds::Level<0>*>(&node));
 }
 
 // The node a reference resolves to, whichever candidate that is.
@@ -2593,11 +2547,8 @@ void leading_plus() {
   CHECK(plusf && *plusf.value == 2.5);
 }
 
-// Exactly the AstNode vocabulary's numbers get a default converter:
-// wchar_t/char8_t/char16_t/char32_t have no std::from_chars overload, and
-// plain `char` has one but would silently read "7" as the number 7 (0x07)
-// rather than the character '7'. Neither is in the vocabulary, which keeps
-// int8/uint8 (signed/unsigned char) as its numbers instead.
+// Only the AstNode vocabulary's numbers get a default converter: not the
+// wide character types, nor plain `char`, which would read "7" as 7.
 void char_like_excluded() {
   static_assert(!cursiv::detail::has_default_convert<char>);
   static_assert(!cursiv::detail::has_default_convert<wchar_t>);
@@ -2650,7 +2601,7 @@ void enumerators_outside_the_first_run() {
 }
 
 void a_repair_invents_no_value() {
-  // `state` stands where a name was owed: the whole word is noise.
+  // `state` stands where a name was expected: the whole word is noise.
   for (const auto text : {"init state Off end", "init state\tOff end",
                           "init state\nOff end"}) {
     const cursiv::ParseResult r = engine().parse(text);
@@ -2747,10 +2698,8 @@ void data_value_at(const char* lvl) {
                 static_cast<int>(d->b.size()), d->b.data(),
                 static_cast<int>(d->c.size()), d->c.data(),
                 static_cast<int>(d->r.refText.size()), d->r.refText.data());
-  // Where the join lives: atoms that do not touch are one concatenation into
-  // the pool the CST and the AST share, and the slice lives as long as the
-  // `ParseResult` -- which is why a reference may hold it. Atoms that do
-  // touch stay a zero-copy slice of the caller's buffer.
+  // Atoms that do not touch are joined into the shared pool, alive as long
+  // as the `ParseResult`; atoms that touch stay a slice of the caller's buffer.
   const std::string_view doc = r.cst().text();
   const auto in_doc = [&](std::string_view v) {
     return v.data() >= doc.data() &&
@@ -2763,10 +2712,8 @@ void data_value_at(const char* lvl) {
 
 void data_value_is_the_language() { data_value_at("tables"); }
 
-// A part is an atom: the leaves of a composed data rule's span are its
-// parts, so the join is associative -- `adjacent()` is asked of those atoms,
-// not of whatever depth the tape happened to render. Read at O0 and at O2,
-// since the two render different records for the same span.
+// A data rule's parts are the leaves of its span, so the join is the same
+// at O0 and O2, which render different records.
 void parts_are_atoms_at(const char* lvl) {
   const cursiv::ParseResult r =
       engine().parse("a.b ; c.d ; e . f / g . h ; i.j");
@@ -2801,15 +2748,8 @@ void parts_are_atoms_at(const char* lvl) {
 
 void parts_are_atoms() { parts_are_atoms_at("tables"); }
 
-// `cursiv::detail::fast_decimal` is hand-written floating-point arithmetic,
-// so the pin is differential and not a table of expected values: for every
-// spelling, either the fast path declines (nothing is claimed) or its
-// answer must be the same 64 bits std::from_chars produces. Two failures are
-// distinguished because they are different bugs:
-//   * a divergence -- both accept, the bits differ;
-//   * an over-acceptance -- the fast path accepts a spelling from_chars
-//     refuses (or refuses to consume whole), which would turn a diagnostic
-//     into a silent wrong value.
+// `fast_decimal` either declines or gives the same 64 bits as
+// `std::from_chars`. A divergence and an over-acceptance are told apart.
 std::uint64_t bits_of(double d) {
   std::uint64_t u = 0;
   std::memcpy(&u, &d, sizeof u);
@@ -2941,7 +2881,7 @@ void clinger_is_from_chars() {
   CHECK(over_accepted == 0);
   CHECK(took_fast > cases / 4);  // the path must actually be taken
 
-  // And the same claim through the public door the grammars use.
+  // And the same through the public converter the grammars use.
   auto a = cursiv::default_converter<double>::convert("42");
   CHECK(a && *a.value == 42.0);
   auto b = cursiv::default_converter<double>::convert("1e999");
@@ -2977,7 +2917,7 @@ void run() {
   a_converter_answers_a_member_whole();
   a_member_takes_what_it_can_be_assigned();
   a_final_class_still_converts();
-  a_deep_tree_is_climbed_once();
+  a_deep_tree_is_walked_once();
   a_class_of_many_paths_states_each_base_once();
   a_reference_names_its_target_without_a_type();
   a_document_keeps_its_text_past_its_nodes();
@@ -3000,7 +2940,7 @@ void run() {
 
 }  // namespace convert
 
-// Pins the CST runtime alone, no grammar involved: postorder commit, subtree
+// The CST runtime alone, no grammar involved: postorder commit, subtree
 // sizes and spans, growth, the parent inserted in front of trailing trivia,
 // reverse navigation, what a move and a reset leave behind.
 namespace cst {
@@ -3009,7 +2949,7 @@ namespace {
 
 // `ab cd` as: Pair( Word[0,2), Space[2,3) hidden, Word[3,5) ). The element
 // ids are 0, 1 and 2 and stay numbers here: what they name is the grammar's
-// answer, and this lane is about the tape.
+// answer, and this test is about the tape.
 void build_pair(cursiv::Cst& cst) {
   cursiv::CstBuilder b(cst);
   const auto open = b.enter();
@@ -3042,10 +2982,10 @@ void basics() {
   CHECK(cst[1].hidden && !cst[0].hidden && !cst[3].hidden);
 
   // Reverse children: last child first, hidden leaf included.
-  std::vector<cursiv::NodeId> kids;
-  for (cursiv::NodeId id : cst.reverse_children(3)) kids.push_back(id);
-  CHECK(kids.size() == 3);
-  CHECK(kids[0] == 2 && kids[1] == 1 && kids[2] == 0);
+  std::vector<cursiv::NodeId> children;
+  for (cursiv::NodeId id : cst.reverse_children(3)) children.push_back(id);
+  CHECK(children.size() == 3);
+  CHECK(children[0] == 2 && children[1] == 1 && children[2] == 0);
 }
 
 // The run doubles as it grows, and every record written survives the moves.
@@ -3119,8 +3059,8 @@ void reservation_follows_record_density() {
   CHECK(memory.allocated - allocated <= 1024 * sizeof(cursiv::CstNode));
 }
 
-// A run on the heap is an episode's branch, one of thousands: whatever it
-// writes, it holds at most twice that.
+// A run on the heap is one parse branch among thousands: whatever it writes,
+// it holds at most twice that.
 void a_branch_run_holds_at_most_twice_its_records() {
   cursiv::CstRun run;
   for (cursiv::NodeCount i = 0; i < 5000; ++i) {
@@ -3129,8 +3069,8 @@ void a_branch_run_holds_at_most_twice_its_records() {
   }
 }
 
-// A watched run reads the stop once per run of records, on the test that
-// guards its room; the watch ends with its scope and never travels with a
+// A watched run reads the stop once per run of records, at the check that
+// guards its capacity; the watch ends with its scope and never travels with a
 // move.
 void a_watched_run_answers_a_stop_within_a_run_of_records() {
   constexpr cursiv::NodeCount kRun = 64 * 1024;
@@ -3152,7 +3092,7 @@ void a_watched_run_answers_a_stop_within_a_run_of_records() {
   }
   CHECK(threw && written <= kRun);
 
-  // Unwatched again: the stop is no longer read, and the room still grows.
+  // Unwatched again: the stop is no longer read, and the capacity still grows.
   for (cursiv::NodeCount i = 0; i < 4 * kRun; ++i) run.leaf(i, i + 1, 0);
   CHECK(run.records() == written + 4 * kRun);
 
@@ -3172,11 +3112,6 @@ void entry_defaults() {
   CHECK(cst.entry_root() == cursiv::kNoNode);
 }
 
-// `AstReducer::build(std::move(cst))` is the documented idiom, so the source
-// object outlives the move and a diagnostic path may still touch it. It must
-// report itself empty rather than describe storage it handed over. (The entry
-// fields are bound by the parser, a friend, so only their reset-to-default is
-// observable from here.)
 void moved_from_is_empty() {
   cursiv::Cst cst{"ab cd"};
   build_pair(cst);
@@ -3211,10 +3146,7 @@ void moved_from_is_empty() {
   CHECK(sink.size() == 1 && sink.text(0) == "zz");
 }
 
-// A repair belongs to the tree, so it travels with it and dies with it:
-// `recovered()` reads this list alone, so a diagnostic left behind on a
-// moved-from tree, or kept across a reset, is a document reported repaired
-// whose nodes are gone.
+// A repair belongs to the tree: it moves with it and goes with a reset.
 void diagnostics_follow_the_tree() {
   cursiv::Cst cst{"ab cd"};
   cursiv::CstBuilder b(cst);
@@ -3226,7 +3158,7 @@ void diagnostics_follow_the_tree() {
   CHECK(taken.recovered() && taken.diagnostics().size() == 1);
   CHECK(!cst.recovered() && cst.diagnostics().empty());
 
-  // The note of a work bound repairs nothing: it is kept, and the tree is
+  // A work-bound note repairs nothing: it is kept, and the tree is
   // not recovered by it alone.
   cursiv::Cst bounded{"ab cd"};
   cursiv::CstBuilder(bounded).note_repair(cursiv::DiagnosticKind::bounded,
@@ -3240,6 +3172,19 @@ void diagnostics_follow_the_tree() {
   taken.reset("zz");
   CHECK(!taken.recovered() && taken.diagnostics().empty());
   CHECK(taken.size() == 0 && taken.text() == "zz");
+
+  // A repair equal to the one before is the same fault; one that names other
+  // alternatives is another.
+  cursiv::Cst closers{"ab"};
+  cursiv::CstBuilder c(closers);
+  const auto insert = [&c](std::vector<cursiv::ElementId> also) {
+    c.note_repair(cursiv::DiagnosticKind::inserted, 1, 1, 1, std::move(also));
+  };
+  insert({2});
+  insert({2});
+  insert({3});
+  CHECK(closers.diagnostics().size() == 2);
+  CHECK(closers.diagnostics().back().also == std::vector<cursiv::ElementId>{3});
 }
 
 // The tape's end order, at the builder: a parent closing behind trailing
@@ -3291,8 +3236,8 @@ void empty_composite_keeps_the_order() {
   CHECK(flat[2].hidden);
 }
 
-// An insert that lands on a full buffer is what grows it: the suffix moves
-// into the new room, and the next append lands behind it.
+// An insert into a full buffer is what grows it: the suffix moves
+// into the new buffer, and the next append goes behind it.
 void insert_across_a_reallocation() {
   std::string big(9000, 'x');
   cursiv::Cst cst{std::string_view(big)};
@@ -3356,17 +3301,16 @@ void run() {
 
 }  // namespace cst
 
-// The DSL surface the table engine reads: the constructions the ten example
-// grammars spell, each on the smallest grammar that spells it, checked on what
-// the language accepts and refuses. A construction that lowered to the wrong
-// shape shows here as a document read or refused wrongly, not as a table count.
+// The DSL surface the table engine reads: each construction of the example
+// grammars on the smallest grammar that spells it, checked by what it accepts
+// and refuses.
 namespace cst_node {
 
 namespace {
 
 using namespace tcstn;
 
-// `table` only where a lane reads the frozen table itself.
+// `table` only where a test reads the frozen table itself.
 template <class G>
 struct Gen;
 template <>
@@ -3404,10 +3348,7 @@ bool reads(std::string_view text) {
 }
 
 // Every span a record of `row` covers, in tape order: a precedence table
-// shows up here as the nesting of the folds, which acceptance alone cannot
-// see. A record names the run it owes, so a probe asks the run and not a
-// row of a tree above it -- a climb is told apart from the plain creation a
-// primary carries, even where the two build one class.
+// shows as the nesting of the folds.
 template <class T, class... Rs>
 constexpr auto climbs(cursiv::TypeList<Rs...>) {
   return std::array<bool, sizeof...(Rs)>{
@@ -3567,11 +3508,9 @@ void run() {
 
 }  // namespace cst_node
 
-// Pins where a member was written and where a keyword was spelled, asked by
-// name -- the contracts a formatter and a diagnostic anchor stand on: the
-// out-of-range index clamps, a hidden keyword is skipped, an owned child is a
-// boundary even when it is nothing but its keyword, and a keyword fused under
-// a directive is still found.
+// Where a member was written and a keyword spelled: an out-of-range index
+// clamps, a hidden keyword is skipped, an owned child is a boundary, and a
+// keyword under a directive is found.
 namespace cst_utils {
 
 namespace {
@@ -3585,7 +3524,7 @@ const cursiv::Parser& engine() {
 
 enum class Engine : std::uint8_t { lr, ll };
 
-// A document of the dual grammar, parsed by one engine: a lookup climbs from
+// A document of the dual grammar, parsed by one engine: a lookup walks up from
 // a node to it for the tree it searches. Both engines build the same classes,
 // so one reflection serves.
 cursiv::Document* dual_document(support::World<>& world, std::string_view text,
@@ -3658,13 +3597,13 @@ void an_out_of_range_index_clamps() {
 // A keyword fused under `?=` is the directive's own record, relabelled; it is
 // still the word the author spelled, and the search finds it.
 void a_fused_keyword_is_still_found() {
-  const Parsed p("doc sealed item aa");
-  CHECK(static_cast<Doc*>(p.r.value)->sealed);
+  const Parsed p("doc locked item aa");
+  CHECK(static_cast<Doc*>(p.r.value)->locked);
   const std::vector<cursiv::CstNodeView> found =
-      cursiv::find_nodes_for_keyword(p.root(), "sealed");
+      cursiv::find_nodes_for_keyword(p.root(), "locked");
   CHECK(found.size() == 1);
-  if (!found.empty()) CHECK(found[0].text() == "sealed");
-  // The unfused neighbour answers as it always has.
+  if (!found.empty()) CHECK(found[0].text() == "locked");
+  // The unfused neighbour is found too.
   CHECK(cursiv::find_nodes_for_keyword(p.root(), "doc").size() == 1);
 }
 
@@ -3729,7 +3668,7 @@ void interior_nodes_exclude_the_endpoint_branches() {
 
 // A hidden record is found by rule name; the leaf a caret resolves to is the
 // last visible one at or before the offset, hidden ones stepped over; and
-// the node that owns it climbs from there.
+// the node that owns it is found from there.
 void find_hidden_nodes_and_leaf_and_owner_answer_a_caret() {
   constexpr std::string_view kText = "doc # note\nitem aa item bb";
   const Parsed p(kText);
@@ -3753,9 +3692,9 @@ void find_hidden_nodes_and_leaf_and_owner_answer_a_caret() {
   CHECK(cursiv::owner_at(p.r.cst(), 0) == nullptr);
 }
 
-// A parsed tree names the grammar that stamped it and the records that
+// A parsed tree names the grammar that built it and the records that
 // opened a node; a tape built by hand names neither and answers nothing.
-void the_tree_names_the_grammar_that_stamped_it() {
+void the_tree_names_the_grammar_that_built_it() {
   const Parsed p("doc item aa");
   CHECK(p.r.cst().grammar() == &p.document->language->parser->getGrammar());
   CHECK(p.r.cst().owned().data() == p.r.nodes().data());
@@ -3791,7 +3730,7 @@ void the_map_follows_the_result_through_a_move() {
   CHECK(moved.cst().owned().data() == moved.nodes().data());
 
   // Held by another document, it answers as it did. Its root's parent is still
-  // the first one, so the holder is named rather than climbed to.
+  // the first one, so the holder is named rather than walked up to.
   Parsed other("doc item cc");
   other.r = std::move(moved);
   const std::vector<cursiv::CstNodeView> after =
@@ -3989,7 +3928,7 @@ void run() {
   interior_nodes_walk_the_extent();
   interior_nodes_exclude_the_endpoint_branches();
   find_hidden_nodes_and_leaf_and_owner_answer_a_caret();
-  the_tree_names_the_grammar_that_stamped_it();
+  the_tree_names_the_grammar_that_built_it();
   the_map_follows_the_result_through_a_move();
   index_zero_answers_what_the_list_answers();
   every_index_clamps_to_the_list();
@@ -4012,7 +3951,7 @@ struct Node : AstNode {};
 using Ref = reference<Node>;
 using Multi = multi_reference<Node>;
 
-struct Home : RefHome {
+struct Resolver : RefResolver {
   std::function<Answer(std::uint32_t)> one;
   std::function<RefState(MultiRefItems&)> many;
   Answer resolve(std::uint32_t id) const override { return one(id); }
@@ -4040,7 +3979,7 @@ void force(const Ref& ref, const CancellationToken& token) {
 // What a stub hands back: the targets it gathered, named once at the end.
 MultiRefItems named(const std::vector<MultiRefItem>& store) { return store; }
 
-RefHome::Answer answer(Node* target) {
+RefResolver::Answer answer(Node* target) {
   return {target, target ? RefState::Resolved : RefState::ErrorNotFound, 0};
 }
 
@@ -4060,21 +3999,21 @@ void observed(const R& r) {
   CHECK(raw(r) == detail::kRefObserved);
 }
 
-// The steps the lane has taken, for the watchdog to read.
+// The steps the test has taken, for the watchdog to read.
 std::atomic<unsigned> g_steps{0};
 void step() { g_steps.fetch_add(1, std::memory_order_relaxed); }
 
 void a_shared_dependency_is_computed_once() {
-  Home home;
+  Resolver resolver;
   Node target;
   std::array<Ref, 3> refs;
   for (unsigned i = 0; i < refs.size(); ++i) {
-    cursiv::detail::RefAccess::home(refs[i]) = &home;
+    cursiv::detail::RefAccess::resolver(refs[i]) = &resolver;
     cursiv::detail::RefAccess::handle(refs[i]) = i;
   }
   std::array<std::atomic<unsigned>, 3> calls{};
   std::latch entered(1), release(1), readers(2);
-  home.one = [&](unsigned id) {
+  resolver.one = [&](unsigned id) {
     ++calls[id];
     if (id == 2) {
       entered.count_down();
@@ -4103,15 +4042,15 @@ void a_shared_dependency_is_computed_once() {
 // Each thread's provider reads the next thread's reference with nothing in
 // hand; `nested` puts a second resolution of the same thread in the loop.
 void cycles_cross_threads(unsigned count, bool nested) {
-  Home home;
+  Resolver resolver;
   const unsigned stride = nested ? 2 : 1;
   std::vector<Ref> refs(count * stride);
   for (unsigned i = 0; i < refs.size(); ++i) {
-    cursiv::detail::RefAccess::home(refs[i]) = &home;
+    cursiv::detail::RefAccess::resolver(refs[i]) = &resolver;
     cursiv::detail::RefAccess::handle(refs[i]) = i;
   }
   std::barrier entered(static_cast<std::ptrdiff_t>(count));
-  home.one = [&](unsigned id) {
+  resolver.one = [&](unsigned id) {
     if (nested && id % stride == 0) return answer(refs[id + 1].get());
     entered.arrive_and_wait();
     return answer(refs[((id / stride + 1) % count) * stride].get());
@@ -4125,29 +4064,29 @@ void cycles_cross_threads(unsigned count, bool nested) {
   for (const RefState result : results) CHECK(result == RefState::ErrorCycle);
 }
 
-// Every link of the loop says cycle, through either door.
+// Every link of the loop says cycle, through either reference kind.
 void a_cycle_on_one_thread_is_detected() {
-  Home home;
+  Resolver resolver;
   std::array<Ref, 3> refs;
   for (unsigned i = 0; i < refs.size(); ++i) {
-    cursiv::detail::RefAccess::home(refs[i]) = &home;
+    cursiv::detail::RefAccess::resolver(refs[i]) = &resolver;
     cursiv::detail::RefAccess::handle(refs[i]) = i;
   }
-  home.one = [&](unsigned id) {
+  resolver.one = [&](unsigned id) {
     return answer(refs[(id + 1) % refs.size()].get());
   };
   force(refs[0], kNoCancel);
   for (auto& r : refs) CHECK(raw(r) == RefState::ErrorCycle);
 
-  // The plural door takes the same guard.
+  // A multi reference takes the same guard.
   Ref one;
   Multi many;
-  cursiv::detail::RefAccess::home(one) = cursiv::detail::RefAccess::home(many) =
-      &home;
-  home.one = [&](unsigned) {
+  cursiv::detail::RefAccess::resolver(one) =
+      cursiv::detail::RefAccess::resolver(many) = &resolver;
+  resolver.one = [&](unsigned) {
     return answer(many.size() != 0 ? many.get(0) : nullptr);
   };
-  home.many = [&](MultiRefItems&) {
+  resolver.many = [&](MultiRefItems&) {
     return one.get() != nullptr ? RefState::Resolved : RefState::ErrorNotFound;
   };
   CHECK(many.resolve() == RefState::ErrorCycle);
@@ -4155,14 +4094,14 @@ void a_cycle_on_one_thread_is_detected() {
 }
 
 void readers_see_a_complete_multi_reference() {
-  Home home;
+  Resolver resolver;
   Node a, b;
   Multi ref;
-  cursiv::detail::RefAccess::home(ref) = &home;
+  cursiv::detail::RefAccess::resolver(ref) = &resolver;
   std::latch entered(1), release(1);
   unsigned calls = 0;
   std::vector<MultiRefItem> store;
-  home.many = [&](MultiRefItems& out) {
+  resolver.many = [&](MultiRefItems& out) {
     ++calls;
     store.push_back({&a, 0});
     entered.count_down();
@@ -4188,16 +4127,16 @@ void readers_see_a_complete_multi_reference() {
 }
 
 void cancelling_a_wait_unwinds_its_dependent_reference() {
-  Home home;
+  Resolver resolver;
   Node target;
   Ref a, b;
-  cursiv::detail::RefAccess::home(a) = cursiv::detail::RefAccess::home(b) =
-      &home;
+  cursiv::detail::RefAccess::resolver(a) =
+      cursiv::detail::RefAccess::resolver(b) = &resolver;
   cursiv::detail::RefAccess::handle(b) = 1;
   CancellationTokenSource stop;
   const auto token = stop.get_token();
   std::latch entered(1), release(1);
-  home.one = [&](unsigned id) {
+  resolver.one = [&](unsigned id) {
     if (id == 0) return answer(b.get());
     entered.count_down();
     release.wait();
@@ -4222,15 +4161,15 @@ void cancelling_a_wait_unwinds_its_dependent_reference() {
 }
 
 void a_cancelled_producer_can_be_replaced_without_duplicate_items() {
-  Home home;
+  Resolver resolver;
   Node a, b;
   Multi ref;
-  cursiv::detail::RefAccess::home(ref) = &home;
+  cursiv::detail::RefAccess::resolver(ref) = &resolver;
   std::latch entered(1), release(1);
   std::latch secondEntered(1), secondRelease(1);
   unsigned calls = 0;
   std::vector<MultiRefItem> store;
-  home.many = [&](MultiRefItems& out) {
+  resolver.many = [&](MultiRefItems& out) {
     store.clear();
     store.push_back({&a, 0});
     if (++calls == 1) {
@@ -4258,7 +4197,7 @@ void a_cancelled_producer_can_be_replaced_without_duplicate_items() {
   release.count_down();
   producer.join();
   secondEntered.wait();
-  // Readers of the cancelled computation must announce themselves again if
+  // Readers of the cancelled computation must register again if
   // they wake after a new producer has already claimed the same reference.
   observed(ref);
   secondRelease.count_down();
@@ -4269,11 +4208,11 @@ void a_cancelled_producer_can_be_replaced_without_duplicate_items() {
 }
 
 void exceptions_wake_the_readers() {
-  Home home;
+  Resolver resolver;
   Ref ref;
-  cursiv::detail::RefAccess::home(ref) = &home;
+  cursiv::detail::RefAccess::resolver(ref) = &resolver;
   std::latch entered(1), release(1);
-  home.one = [&](unsigned) -> RefHome::Answer {
+  resolver.one = [&](unsigned) -> RefResolver::Answer {
     entered.count_down();
     release.wait();
     throw std::runtime_error("provider failed");
@@ -4293,13 +4232,13 @@ void exceptions_wake_the_readers() {
 }
 
 void rebinding_a_multi_reference_discards_its_previous_targets() {
-  Home home;
+  Resolver resolver;
   Node a, b;
   Node* target = &a;
   Multi ref;
-  cursiv::detail::RefAccess::home(ref) = &home;
+  cursiv::detail::RefAccess::resolver(ref) = &resolver;
   std::vector<MultiRefItem> store;
-  home.many = [&](MultiRefItems& out) {
+  resolver.many = [&](MultiRefItems& out) {
     store.assign(1, {target, 0});
     out = named(store);
     return RefState::Resolved;
@@ -4313,20 +4252,22 @@ void rebinding_a_multi_reference_discards_its_previous_targets() {
 
 // The phase is cancelled between the linker's poll and the wait under it.
 void an_already_cancelled_wait_never_registers_a_callback_under_lock() {
-  Home home;
+  Resolver resolver;
   Node target;
   Ref ref, outer;
-  cursiv::detail::RefAccess::home(ref) =
-      cursiv::detail::RefAccess::home(outer) = &home;
+  cursiv::detail::RefAccess::resolver(ref) =
+      cursiv::detail::RefAccess::resolver(outer) = &resolver;
   cursiv::detail::RefAccess::handle(outer) = 1;
   CancellationTokenSource stop;
   std::latch entered(1), release(1);
-  home.one = [&](unsigned id) {
+  resolver.one = [&](unsigned id) {
     if (id == 1) {
       stop.request_stop();
       return answer(ref.get());
     }
-    entered.count_down(); release.wait(); return answer(&target);
+    entered.count_down();
+    release.wait();
+    return answer(&target);
   };
   std::jthread producer([&] { (void)ref.resolve(); });
   entered.wait();
@@ -4337,19 +4278,19 @@ void an_already_cancelled_wait_never_registers_a_callback_under_lock() {
   release.count_down(); producer.join();
 }
 
-// Two threads, one link plural: the loop is found through either door.
+// Two threads, one link plural: the loop is found through either reference.
 void a_cycle_across_threads_through_a_multi_reference() {
-  Home home;
+  Resolver resolver;
   Ref one;
   Multi many;
-  cursiv::detail::RefAccess::home(one) = cursiv::detail::RefAccess::home(many) =
-      &home;
+  cursiv::detail::RefAccess::resolver(one) =
+      cursiv::detail::RefAccess::resolver(many) = &resolver;
   std::barrier entered(2);
-  home.one = [&](unsigned) {
+  resolver.one = [&](unsigned) {
     entered.arrive_and_wait();
     return answer(many.size() != 0 ? many.get(0) : nullptr);
   };
-  home.many = [&](MultiRefItems&) {
+  resolver.many = [&](MultiRefItems&) {
     entered.arrive_and_wait();
     return one.get() != nullptr ? RefState::Resolved : RefState::ErrorNotFound;
   };
@@ -4362,9 +4303,9 @@ void a_cycle_across_threads_through_a_multi_reference() {
   CHECK(first == RefState::ErrorCycle && second == RefState::ErrorCycle);
 }
 
-// References whose home reads each one's out-edges: a DAG resolves, a ring is
-// a cycle.
-struct Graph : RefHome {
+// References whose `RefResolver` reads each one's out-edges: a DAG resolves, a
+// ring is a cycle.
+struct Graph : RefResolver {
   std::vector<Ref> refs;
   std::vector<std::vector<unsigned>> edges;
   Node target;
@@ -4372,7 +4313,7 @@ struct Graph : RefHome {
 
   explicit Graph(unsigned n) : refs(n), edges(n) {
     for (unsigned i = 0; i < n; ++i) {
-      cursiv::detail::RefAccess::home(refs[i]) = this;
+      cursiv::detail::RefAccess::resolver(refs[i]) = this;
       cursiv::detail::RefAccess::handle(refs[i]) = i;
     }
   }
@@ -4418,7 +4359,7 @@ void race_through(const Graph& graph, std::mt19937& rng, unsigned threads,
   }
 }
 
-// However the threads meet in a DAG, no read answers a cycle: a false one
+// However the threads interleave in a DAG, no read answers a cycle: a false one
 // would be kept for good.
 void threads_through_a_dag_never_see_a_cycle() {
   std::mt19937 rng(7);
@@ -4459,8 +4400,8 @@ void threads_around_a_ring_all_see_the_cycle() {
 }  // namespace
 
 void run() {
-  // A lane that takes no step for 15 s is stalled, loaded or not; the
-  // watchdog speaks even when running directly, outside ctest's timeout.
+  // A test that takes no step for 15 s is stalled, loaded or not; the
+  // watchdog reports it even when run directly, outside ctest's timeout.
   std::jthread watchdog([](std::stop_token stop) {
     std::mutex mutex;
     std::condition_variable_any wake;
@@ -4576,10 +4517,8 @@ std::size_t parse(std::pmr::memory_resource& pool, std::size_t step) {
   return 8 * step * kChunk + records;
 }
 
-// A document that grows at every reparse, as one does under a series of
-// pastes, must not need much more memory than its largest parse: a pool whose
-// blocks keep doubling leaves each smaller one behind in memory that never
-// shrinks, and the editor's server runs out of it.
+// A document that grows at every reparse needs little more memory than
+// its largest parse.
 void a_growing_document_reuses_its_blocks() {
   LinearMemory memory;
   cursiv::detail::BlockArena pool(std::size_t{64} << 10, &memory);
@@ -4593,7 +4532,7 @@ void a_growing_document_reuses_its_blocks() {
 
 // A request whose block header and alignment do not fit beside it in a
 // size_t is refused before any block is taken, and a large one is never
-// carved from the current block by a pointer sum that wraps around.
+// taken from the current block by a pointer sum that wraps around.
 void a_request_past_the_address_space_is_refused() {
   LinearMemory memory;
   cursiv::detail::BlockArena pool(std::size_t{64} << 10, &memory);
@@ -4611,7 +4550,7 @@ void a_request_past_the_address_space_is_refused() {
   CHECK(refused(kMax - 16));
   // Past the largest power of two: asked as is, which the memory refuses.
   CHECK(refused(kMax / 2 + 2));
-  // ...and the pool still carves what it can hold.
+  // ...and the pool still allocates what it can hold.
   CHECK(reinterpret_cast<std::uintptr_t>(pool.allocate(64, 16)) % 16 == 0);
 }
 

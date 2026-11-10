@@ -1,8 +1,6 @@
 // The scalars a class spelling names, as ascending maximal ranges: the
-// compile-time algebra behind `cr<>`, `|` and `~`, and the one spelling every
-// class is keyed on. `strays` is set where the spelling holds a complement
-// escape (`\D`, `\W`, `\S`), which also holds the bytes that start no scalar.
-// Transient: it never leaves a constant evaluation.
+// compile-time algebra behind `cr<>`, `|` and `~`. `holdsInvalid` is set by a
+// complement escape (`\D`, `\W`, `\S`), which also holds non-scalar bytes.
 #pragma once
 
 #include <algorithm>
@@ -17,7 +15,7 @@ namespace cursiv::detail {
 
 struct ClassRanges {
   std::vector<unicode::Range> r;
-  bool strays = false;
+  bool holdsInvalid = false;
 
   static constexpr ClassRanges of(std::string_view spec) {
     ClassRanges out;
@@ -26,7 +24,7 @@ struct ClassRanges {
       const ClassItem it = class_item_at(spec, i);
       if (it.fault != ClassFault::none) break;
       if (it.klass != 0) {
-        out.strays = out.strays || (it.klass & 0x20) == 0;
+        out.holdsInvalid = out.holdsInvalid || (it.klass & 0x20) == 0;
         class_escape_ranges(it.klass, [&out](char32_t lo, char32_t hi) {
           out.r.push_back({lo, hi});
         });
@@ -40,7 +38,7 @@ struct ClassRanges {
   }
 
   // The ranges ascending and joined. They are read in order as a rule, so the
-  // sort only runs when the joining pass meets one out of order.
+  // sort only runs when the joining pass finds one out of order.
   constexpr void merge() {
     if (joined()) return;
     std::ranges::sort(r, {}, &unicode::Range::lo);
@@ -61,13 +59,11 @@ struct ClassRanges {
     return true;
   }
 
-  // Both sides are ascending: one pass takes the lower range next, with no
-  // sort. It walks pointers rather than calling the vector, since a constant
-  // evaluation counts every call: a union of large classes stays far below
-  // the compiler's limit.
+  // Both sides are ascending: one pass merges them. It walks pointers, since a
+  // constant evaluation counts every call.
   constexpr ClassRanges united(const ClassRanges& o) const {
     ClassRanges out;
-    out.strays = strays;
+    out.holdsInvalid = holdsInvalid;
     out.r.resize(r.size() + o.r.size());
     unicode::Range* const first = out.r.data();
     unicode::Range* w = first;

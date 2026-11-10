@@ -1,5 +1,5 @@
-# A nested document: the fixture whose table has objects, arrays and four
-# scalars -- the shape a completion and a colouring are asked about.
+# Nested documents with objects, arrays and four scalars, for completion and
+# colouring.
 cursiv_grammar(docg doc/DocGrammar.hpp fdoc::DocG EXTENSIONS .doc OUT languages/doc/generated
     INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/languages ENGINE LR)
 
@@ -7,9 +7,8 @@ cursiv_grammar(docg doc/DocGrammar.hpp fdoc::DocG EXTENSIONS .doc OUT languages/
 cursiv_grammar(multiref multiref/MultiRefGrammar.hpp fmulti::MultiG EXTENSIONS .mref
     OUT languages/multiref/generated INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/languages)
 
-# The workspace fixture: the language cursiv's own lanes are written against.
-# Names, cross-references, containers and a scope -- every service has
-#something to answer for, and no example is in the way.
+# The fixture language most tests use: names, cross-references, containers and
+# a scope, so every service has something to answer.
 cursiv_grammar(ws workspace/core/WorkspaceGrammar.hpp ws::Workspace EXTENSIONS .ws
     OUT languages/workspace/generated INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/languages ENGINE LR)
 
@@ -30,9 +29,8 @@ if(BUILD_SHARED_LIBS)
   set_target_properties(wsCoreObjects wsLspObjects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
-# The same fixture with its stamp's row forced narrow, as a table whose states
-# need the room lays it out: no grammar small enough to build here gets there
-# on its own. Its lanes read every record through that layout.
+# The same fixture with a small `--stamp-row-bits`, the layout of a table with
+# many states, which no grammar small enough to build here reaches on its own.
 set(CURSIV_NARROW_ROW_BITS 7)
 cursiv_grammar(wsnarrow workspace/core/WorkspaceGrammar.hpp ws::Workspace EXTENSIONS .ws
     OUT narrow/workspace/generated INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/languages ENGINE LR
@@ -44,22 +42,23 @@ foreach(_variant IN ITEMS ws wsnarrow)
   target_link_libraries(${_variant}Lsp PUBLIC ${_variant}Core wsLspObjects)
 endforeach()
 
-# The runtime's own state: contexts, stacks, ranks, the roof, a reading handed
-# over, and records read through a narrow stamp.
+# The runtime's state: contexts, stacks, ranks, the root wrapper, a parse handed
+# over, and records read with a small `--stamp-row-bits`.
 cursiv_test(LrRuntime_test engines/lr/LrRuntime_test.cpp wsnarrowCore)
 cursiv_test(LrGssForest_test engines/lr/LrGssForest_test.cpp)
 cursiv_test(LrGssRope_test engines/lr/LrGssRope_test.cpp)
 cursiv_test(LrGssGraph_test engines/lr/LrGssGraph_test.cpp)
 target_compile_definitions(LrRuntime_test PRIVATE
     CURSIV_NARROW_ROW_BITS=${CURSIV_NARROW_ROW_BITS})
-# Both lanes use the same service interfaces; only their linked parsers differ.
+# edits_test and edits_narrow_test share this object; only their parser
+# differs.
 add_library(editsObjects OBJECT lsp/edits_test.cpp)
 target_link_libraries(editsObjects PRIVATE cursiv::test wsLspObjects)
 target_include_directories(editsObjects PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 cursiv_test(edits_narrow_test $<TARGET_OBJECTS:editsObjects> cursiv::lsp wsnarrowLsp)
 
-# The erased door: a service holds a `Parser&`, not a grammar. And a text
-# translated before its tokens are read, on both engines.
+# A service holds a type-erased `Parser&`; a text is translated before it is
+# lexed, on both engines.
 cursiv_grammar_pair(translate core/parser/TranslationGrammar.hpp ttrans::Lr
     ttrans::Ll)
 cursiv_test(parser_test core/parser/parser_test.cpp cursiv::lsp wsCore translatelrGenerated
@@ -67,7 +66,6 @@ cursiv_test(parser_test core/parser/parser_test.cpp cursiv::lsp wsCore translate
 
 cursiv_test(services_test core/services/services_test.cpp wsLsp)
 
-# Its grammar is its own: this lane exercises core and links core.
 cursiv_grammar(comments core/documentation/CommentsGrammar.hpp tcomment::Comments)
 
 cursiv_test(documentation_test core/documentation/documentation_test.cpp cursiv::lsp commentsGenerated wsCore)

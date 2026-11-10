@@ -1,7 +1,6 @@
-// The registries of a grammar's AST, settled from the rows it publishes. A row
-// names its class, member, conversion and narrowing by the address of a
-// constant descriptor; the indices are assigned here, once: built classes,
-// named families, targets, then owners.
+// The registries of a grammar's AST, built from the rows it publishes, each
+// naming its descriptors by address. Indices go to built classes, named
+// families, targets, then owners.
 #pragma once
 
 #include <cstddef>
@@ -17,20 +16,20 @@
 
 namespace cursiv::engine {
 
-// A type is told by its address alone; its tag, where it is a node class,
-// answers subtyping.
+// A type is identified by its address alone; its tag, where it is a node
+// class, answers subtyping.
 struct AstTypeDesc {
   const AstTypeTag* tag = nullptr;
 };
 
-// A conversion is told by its address alone: the payload source and the type
-// it lands in.
+// A conversion is identified by its address alone: the payload source and the
+// type it converts to.
 struct AstConvDesc {};
 
 struct AstFieldDesc {
   std::string_view name;
   std::ptrdiff_t (*offset)() = nullptr;
-  FieldNature nature = FieldNature::value;
+  FieldContent content = FieldContent::value;
   FieldStorage storage = FieldStorage::direct;
   const AstTypeDesc* owner = nullptr;
   const AstTypeDesc* const* targets = nullptr;

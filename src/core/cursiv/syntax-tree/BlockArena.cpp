@@ -47,7 +47,7 @@ void* BlockArena::do_allocate(std::size_t bytes, std::size_t align) {
     throw std::bad_alloc();
   const std::size_t room = sizeof(Block) + align + bytes;
   if (room > kCap / 2) {
-    // Its own block: the current one keeps carving the small requests.
+    // Its own block: the current one keeps serving the small requests.
     Block* const block =
         take(room > kLargestPower ? room : std::bit_ceil(room), align);
     return aligned(reinterpret_cast<char*>(block + 1), align);

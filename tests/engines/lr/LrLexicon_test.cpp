@@ -13,18 +13,14 @@
 #include <utility>
 #include <vector>
 
-#include "alikereduced/generated/Reduced/Module.hpp"
-#include "alikereduced/generated/Reduced/Table.hpp"
+#include "astfusedlr/generated/Lr/Module.hpp"
 #include "backref/generated/G/Parser.hpp"
 #include "backref/generated/G/Table.hpp"
 #include "candidateruns/generated/G/Module.hpp"
 #include "candidateruns/generated/G/Parser.hpp"
 #include "candidateruns/generated/G/Table.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/grammar/Grammar.hpp"
-#include "cursiv/parser/Parser.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/lr/gen/LrLowering.hpp"
 #include "cursiv/lr/runtime/LrDrive.hpp"
 #include "cursiv/lr/runtime/LrLexCandidates.hpp"
@@ -33,14 +29,16 @@
 #include "cursiv/lr/runtime/lr_lookahead.hpp"
 #include "cursiv/lr/runtime/lr_matcher.hpp"
 #include "cursiv/lr/runtime/lr_rescan.hpp"
+#include "cursiv/parser/Parser.hpp"
 #include "cursiv/shared/gen/CLiteral.hpp"
 #include "cursiv/shared/runtime/AstConvThunks.hpp"
 #include "cursiv/shared/runtime/LexBoundary.hpp"
 #include "cursiv/shared/runtime/LexReading.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
-#include "cursiv/Check.hpp"
-#include "engines/lr/AlikeCandidatesGrammar.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
 #include "engines/lr/AuditGrammar.hpp"
 #include "engines/lr/KeywordHandoffGrammar.hpp"
 #include "engines/lr/LexGuardGrammars.hpp"
@@ -49,6 +47,7 @@
 #include "engines/lr/RefusedHeadWordsGrammar.hpp"
 #include "engines/lr/RefusedShorterGrammar.hpp"
 #include "engines/lr/ReservedChoiceGrammar.hpp"
+#include "engines/lr/SameWordCandidatesGrammar.hpp"
 #include "engines/lr/TypoAlternativesGrammar.hpp"
 #include "engines/lr/WideTerminalsAst.hpp"
 #include "guard/generated/G/Module.hpp"
@@ -56,11 +55,8 @@
 #include "guard/generated/G/Table.hpp"
 #include "guardtrivia/generated/G/Module.hpp"
 #include "guardtrivia/generated/G/Table.hpp"
-#include "support/AstText.hpp"
-
 #include "lraudit/generated/G/Module.hpp"
 #include "lraudit/generated/G/Table.hpp"
-#include "astfusedlr/generated/Lr/Module.hpp"
 #include "onemode/generated/G/Module.hpp"
 #include "onemode/generated/G/Parser.hpp"
 #include "onemode/generated/G/Table.hpp"
@@ -68,9 +64,12 @@
 #include "relayoverlap/generated/G/Parser.hpp"
 #include "relayoverlap/generated/G/Table.hpp"
 #include "rulerefusal/generated/G/Module.hpp"
+#include "samewordreduced/generated/Reduced/Module.hpp"
+#include "samewordreduced/generated/Reduced/Table.hpp"
 #include "shorterlr/generated/Lr/Module.hpp"
 #include "shorterlr/generated/Lr/Parser.hpp"
 #include "shorterlr/generated/Lr/Table.hpp"
+#include "support/AstText.hpp"
 #include "wideterms/generated/G/Module.hpp"
 #include "wideterms/generated/G/Table.hpp"
 
@@ -161,7 +160,7 @@ void run() {
 }  // namespace candidate_runs
 
 // A lexical edit has no knowledge of the syntax after its span. Recovery
-// retains its alternatives and elects the one that preserves that syntax.
+// keeps its alternatives and chooses the one that preserves that syntax.
 namespace typo_alternatives {
 
 namespace g = tguard::generated::G;
@@ -452,13 +451,13 @@ void run() {
 
 }  // namespace mem_conv
 
-// The tier `t` reads at `s`: a keyword's reading kept beside it ranks it.
+// The priority `t` reads at `s`: a keyword's reading kept beside it ranks it.
 template <const auto& A>
-unsigned tier_of(std::uint16_t s, unsigned t) {
+unsigned priority_of(std::uint16_t s, unsigned t) {
   auto out = 0u;
   A.each_accept(
-      s, [&](cursiv::engine::SymbolId term, std::uint16_t, unsigned tier) {
-        if (term == t && tier > out) out = tier;
+      s, [&](cursiv::engine::SymbolId term, std::uint16_t, unsigned priority) {
+        if (term == t && priority > out) out = priority;
         return false;
       });
   return out;
@@ -467,10 +466,8 @@ unsigned tier_of(std::uint16_t s, unsigned t) {
 #ifdef CURSIV_LR_LEXER_CONTRACT
 namespace case_lexercontract {
 // Three lexer entry points share one contract: the walk over the frozen table,
-// the walk the generated drive calls, and the sweep that holds a position's
-// rivals. These comparisons also cover the repair's reading of a token
-// refused in its middle, without relying only on whole parses to exercise
-// each path.
+// the walk the generated driver calls, and the sweep that holds a position's
+// competitors, with the repair's reading of a token refused in its middle.
 
 namespace {
 
@@ -496,10 +493,9 @@ struct Draw {
 
 bool same(Scan x, Scan y) { return x.end == y.end && x.term == y.term; }
 
-// One byte per class the mode tells apart: classes that every state it
-// reaches moves on alike and every boundary it tests holds alike are one, so
-// the other cases of a table split no word of this mode. What a relay or a
-// decoding test reads past the moves keeps its classes whole.
+// One byte per class the mode tells apart: classes every reachable state and
+// boundary treat the same are one. What a relay or a decoding test reads past
+// the moves keeps its classes whole.
 template <const auto& A>
 std::string mode_alphabet(unsigned m) {
   std::string rep;
@@ -557,7 +553,7 @@ std::string mode_alphabet(unsigned m) {
   return out;
 }
 
-// One mode, the drive's walk and sweep against `lr_match_text`.
+// One mode, the driver's walk and sweep against `lr_match_text`.
 template <const auto& A>
 void mode_agrees(const char* lang, unsigned m,
                  const cursiv::engine::LrDrive& drive) {
@@ -591,7 +587,7 @@ void mode_agrees(const char* lang, unsigned m,
       if (got != 0 && want.term != cursiv::engine::kInvalidSymbol) {
         ok = ok && room[0].end == want.end;
         // The walk's own answer is one of the readings the sweep holds, or
-        // the drive would elect a token its rivals disown.
+        // the driver would choose a token its competitors disown.
         bool held = false;
         for (std::uint32_t k = 0; k < got; ++k)
           held = held || room[k].term == want.term;
@@ -600,8 +596,8 @@ void mode_agrees(const char* lang, unsigned m,
       // Nothing to read is nothing to read, in both forms.
       if (want.term == cursiv::engine::kInvalidSymbol || want.end == from)
         ok = ok && got == 0;
-      // A rival the mode reads stands only behind a winner its mode flags:
-      // the drive sweeps behind those alone.
+      // A competitor the mode reads stands only behind a winner its mode flags:
+      // the driver sweeps behind those alone.
       if (want.term < A.cfg.nterms && !A.cfg.terms[want.term].trivia)
         for (std::uint32_t k = 0; k < got; ++k)
           if (room[k].term != want.term && reads[room[k].term] != 0)
@@ -672,11 +668,9 @@ void mode_agrees(const char* lang, unsigned m,
     }
   }
 
-  // Every word the budget allows, exhaustively. The mode tells bytes apart
-  // by class and by nothing else, so one byte per class IS every byte, and a
-  // mode that grows a class grows this sweep with it. The depth is what the
-  // class count leaves room for, so a narrow mode is exhausted deeper than a
-  // wide one and neither costs more than the other.
+  // Every word the budget allows: the mode tells bytes apart only by class, so
+  // one byte per class is every byte. The depth is what the class count leaves
+  // room for, so narrow and wide modes cost the same.
   const std::string rep = mode_alphabet<A>(m);
   {
     constexpr double kWords = 32768;
@@ -707,7 +701,7 @@ void mode_agrees(const char* lang, unsigned m,
   for (int t = 0; t < 3000; ++t) {
     const unsigned n = d.bits() % (sizeof buf + 1);
     // Half the draws are runs. A byte drawn on its own almost never repeats,
-    // and a run is what the ladder crosses eight bytes at a time and what a
+    // and a run is what the lexer walk crosses eight bytes at a time and what a
     // region body is made of: the forms part company there or nowhere.
     if ((t & 1) == 0) {
       for (unsigned k = 0; k < n;) {
@@ -762,24 +756,24 @@ void relay_runs_agree() {
 
 // Recovery traverses to the first acceptance; election then stops that branch.
 template <const auto& A>
-void owed_terminals_agree() {
+void body_terms_agree() {
   for (std::size_t root = 0; root < A.dfaAccept.size(); ++root) {
     std::vector<bool> seen(A.dfaAccept.size());
     std::vector<std::uint16_t> todo{static_cast<std::uint16_t>(root)};
     seen[root] = true;
     cursiv::engine::SymbolId best = cursiv::engine::kInvalidSymbol;
-    auto bestTier = 0u;
+    auto bestPriority = 0u;
     while (!todo.empty()) {
       const auto s = todo.back();
       todo.pop_back();
       if (A.dfaAccept[s] != 0) {
         const auto term =
             static_cast<cursiv::engine::SymbolId>(A.dfaAccept[s] - 1u);
-        const auto tier = tier_of<A>(s, term);
-        if (cursiv::engine::LrLexTape<A>{}.prefers(term, tier, best,
-                                                   bestTier)) {
+        const auto priority = priority_of<A>(s, term);
+        if (cursiv::engine::LrLexTape<A>{}.prefers(term, priority, best,
+                                                   bestPriority)) {
           best = term;
-          bestTier = tier;
+          bestPriority = priority;
         }
         continue;
       }
@@ -790,13 +784,13 @@ void owed_terminals_agree() {
           todo.push_back(to);
         }
     }
-    CHECK(A.derived.lexOwed[root] == best);
+    CHECK(A.derived.lexBodyTerms[root] == best);
   }
 }
 
 template <const auto& A>
 void grammar_agrees(const char* lang, const cursiv::engine::LrDrive& drive) {
-  owed_terminals_agree<A>();
+  body_terms_agree<A>();
   relay_runs_agree<A>();
   for (unsigned m = 0; m < A.modeStart.size(); ++m)
     mode_agrees<A>(lang, m, drive);
@@ -917,13 +911,7 @@ void guard_rows_are_packed(const char* lang) {
   CHECK(accepted == Cold.accBound.size());
 }
 
-// Where a keyword's boundary refuses, the spelling goes back to the names it
-// reserved -- and every form must hand back the same one. A name whose
-// alphabet is narrower than the word class, the same past the width a ladder
-// is emitted for, a guard refusing a word byte beside another, and two names
-// of one spelling.
-// Representative shapes exercise the common lexer entry points without
-// repeating the same combinatorial oracle for every product grammar.
+// Every lexer form reads the grammar the same, and its guard rows are packed.
 #define LANE(ns, name)                                 \
   (grammar_agrees<ns::kTable>(name, ns::kDrive),       \
    guard_rows_are_packed<ns::kTable, ns::kCold>(name))
@@ -1005,11 +993,9 @@ void a_refused_keyword_hands_the_spelling_back_the_same_way() {
 }
 #undef LANE
 
-// The repair's reading against the lexer, over a valid document in every mode:
-// silent on every token the lexer reads, reading no further than the lexer
-// where it reads past its match and finds nothing, and on a token whose body a
-// refused byte broke, ending where the lexer ended it -- the fault never moves
-// the closer.
+// The repair's reading against the lexer over a valid document in every mode:
+// silent on every token the lexer reads, no further where the lexer finds
+// nothing, and ending a token a refused byte broke where the lexer did.
 template <const auto& A>
 void the_reading_ends_where_the_lexer_does(const char* lang,
                                            const std::string& text) {
@@ -1145,7 +1131,7 @@ void reads(std::string_view lead, const char* text, bool clean) {
   const bool got = cst.diagnostics().empty();
   if (got != clean) {
     std::printf("FAIL %s: %s, %zu diagnostic(s)\n", doc.c_str(),
-                clean ? "owed a clean read" : "owed a diagnostic",
+                clean ? "wanted a clean read" : "wanted a diagnostic",
                 cst.diagnostics().size());
     ++failures;
   }
@@ -1162,7 +1148,7 @@ void whole(std::string_view lead, const char* text) {
   ++failures;
 }
 
-// `a;` reads B, and B is owed `_`: A's own guard refused the `;`.
+// `a;` reads B, which then expects `_`: A's own guard refused the `;`.
 void a_candidate_keeps_its_own_guard() {
   reads("own", "a;", false);
   reads("own", "a ;", true);
@@ -1202,7 +1188,7 @@ void repairs_in(const std::string& doc, bool alone,
   const bool got = cst.diagnostics().size() == 1 && reread;
   if (got != alone) {
     std::printf("FAIL %s: %s, %zu diagnostic(s)\n", doc.c_str(),
-                alone ? "owed the typo alone" : "owed more than the typo",
+                alone ? "wanted the typo alone" : "wanted more than the typo",
                 cst.diagnostics().size());
     ++failures;
   }
@@ -1229,7 +1215,7 @@ void a_re_reading_keeps_the_guard_of_what_it_names() {
   repairs_in<g::kTable>("typomulti dxef;;", false, &g::kDrive);
 }
 
-// The caret's own reading of the same law: one spelling, two terminals, and
+// The caret's own reading of the same rule: one spelling, two terminals, and
 // the answer is the terminal whose guard admits what stands behind the caret.
 void a_caret_offers_the_terminal_whose_own_guard_admits() {
   const auto offered = [&](const char* text) {
@@ -1254,7 +1240,7 @@ void a_refused_keyword_reserves_nothing() {
     const cursiv::ParseResult r = parser().parse(doc);
     if (r.cst().diagnostics().empty() != want) {
       std::printf("FAIL %s: %s, %zu diagnostic(s)\n", doc.c_str(),
-                  want ? "owed a clean read" : "owed a diagnostic",
+                  want ? "wanted a clean read" : "wanted a diagnostic",
                   r.cst().diagnostics().size());
       ++failures;
     }
@@ -1269,30 +1255,31 @@ void a_refused_keyword_reserves_nothing() {
   clean("bytewise", "ab?", true);
   clean("bytewise", "ab!", true);
   // Two names of one spelling: the sweep is what tells them apart.
-  clean("rival", "ab_", true);
-  clean("rival", "ab_;", true);
-  clean("rival", "ab!", true);
+  clean("homonym", "ab_", true);
+  clean("homonym", "ab_;", true);
+  clean("homonym", "ab!", true);
 }
 
 // One candidate left is still an answer: the walk elected the name, the
 // keyword's reserve took it away, and what the sweep kept is what stands.
 void one_candidate_left_is_still_the_answer() {
-  const auto owed = [&](const char* text, std::size_t want) {
+  const auto expect_diagnostics = [&](const char* text, std::size_t want) {
     const std::string doc = in("sole", text);
     const cursiv::ParseResult r = parser().parse(doc);
     if (r.cst().diagnostics().size() != want) {
-      std::printf("FAIL %s: owed %zu diagnostic(s), got %zu\n", doc.c_str(),
+      std::printf("FAIL %s: wanted %zu diagnostic(s), got %zu\n", doc.c_str(),
                   want, r.cst().diagnostics().size());
       ++failures;
     }
   };
-  owed("and!", 0);  // the keyword, which owes `!`
-  owed("and;", 1);  // `and` is no name here, so `;` stands for the `!`
-  owed("&&!", 0);
-  owed("abc;", 0);
+  expect_diagnostics("and!", 0);  // the keyword, which expects `!`
+  expect_diagnostics("and;",
+                     1);  // `and` is no name here, so `;` stands for the `!`
+  expect_diagnostics("&&!", 0);
+  expect_diagnostics("abc;", 0);
 }
 
-// A caret offers what the position would READ, and a spelling that glues into
+// A caret offers what the position would READ, and a spelling that merges into
 // a longer terminal is not read there: `<` typed before `<a` spells `<<`, and
 // no reading of the parse ever cuts that back into two.
 void a_caret_offers_only_what_the_position_reads() {
@@ -1312,11 +1299,11 @@ void a_caret_offers_only_what_the_position_reads() {
   const auto refuses = [&](const char* text, cursiv::TextOffset from,
                            cursiv::TextOffset to, std::string_view want) {
     if (!asks(text, from, to, want)) return;
-    std::printf("FAIL '%s' [%u,%u): '%.*s' is offered and glues\n", text, from,
+    std::printf("FAIL '%s' [%u,%u): '%.*s' is offered and merges\n", text, from,
                 to, static_cast<int>(want.size()), want.data());
     ++failures;
   };
-  offers("", 0, 0, "<");     // nothing to glue to
+  offers("", 0, 0, "<");     // nothing to attach to
   offers("<<a", 1, 2, "<");  // the token it already is
   refuses("<a", 0, 0, "<");  // would spell `<<a`, which no alternative reads
   refuses("<<a", 0, 1, "<");
@@ -1338,10 +1325,9 @@ void a_state_refused_whole_gives_the_match_back_to_the_path() {
   whole("stump", "ab;");  // it refuses `;`, and nothing at that extent stands
 }
 
-// The boundary test, in its four answers: no boundary at all, a boundary with
-// nothing behind the match, one the byte behind refuses, one it admits. Both
-// entries of the shared walk take them, since each inlines the walk of its
-// own.
+// The boundary test's four answers: no boundary, a boundary with nothing behind
+// the match, one the byte behind refuses, and one it admits. Both entries of
+// the shared walk take them, each inlining its own walk.
 void the_boundary_test_answers_four_ways() {
   static constexpr auto& A = g::kTable;
   const std::uint16_t mode = mode_of<A>("stump");
@@ -1371,7 +1357,7 @@ void the_boundary_test_answers_four_ways() {
 // The winner's guard refuses the byte behind and the one it outranked
 // declares a boundary that admits it: the refusal path weighs a BOUNDED
 // acceptance, not only an unbounded one.
-void a_refused_winner_weighs_a_bounded_rival() {
+void a_refused_winner_weighs_a_bounded_competitor() {
   static constexpr auto& A = g::kTable;
   const std::uint16_t mode = mode_of<A>("twin");
   const auto reads = [&](const char* text, cursiv::TextOffset want) {
@@ -1382,7 +1368,7 @@ void a_refused_winner_weighs_a_bounded_rival() {
     std::printf("FAIL twin '%s': %u/%u\n", text, s.end, s.term);
     ++failures;
   };
-  reads("ab;", 2);  // the winner refused, the rival's own boundary admits
+  reads("ab;", 2);  // the winner refused, the competitor's own boundary admits
   reads("ab!", 2);  // the other way round
   whole("twin", "ab!");
   whole("twin", "ab;");
@@ -1410,7 +1396,7 @@ void a_refused_election_ranks_a_token_before_a_trivia() {
 
 // The match stands while the refused word is not spelled whole, and is
 // taken back where it is -- giving the match before it back -- unless the
-// word's own boundary rescues it.
+// word's own boundary lets it pass.
 void a_refused_word_takes_the_match_back_where_it_is_spelled_whole() {
   namespace deep = tguard::generated::G;
   const auto& A = deep::kTable;
@@ -1426,7 +1412,7 @@ void a_refused_word_takes_the_match_back_where_it_is_spelled_whole() {
   CHECK(at("<!-- open") == 1);         // DTD taken back: `<` stands
   CHECK(at("<![CDATA[ open") == 1);
   CHECK(at("<![CDATX[ x>") == 12);     // DTD: `[CDATA[` not spelled whole
-  CHECK(at("#includes") == 1);         // HASH: rescued by the word byte
+  CHECK(at("#includes") == 1);         // HASH: kept by the word byte
   CHECK(at("#include x") == 0);        // HASH taken back, nothing before it
   CHECK(at("#inc") == 1);
   std::printf("  a refused word behind a match is read on to its end\n");
@@ -1470,15 +1456,16 @@ void audit() {
         for (unsigned t = 0; t < A.cfg.nterms; ++t) {
           if (!A.dfa_acc_set(s).test(t)) continue;
           const auto bound = A.dfa_acc_bound(s, t);
-          const auto tier = tier_of<A>(s, t);
-          reserved = reserved ||
-                     (tier == kTierLiteral &&
-                      (bound == kNoSet || !A.cfg.sets[bound].has(byte))) ||
-                     (tier == kTierKeyword && !A.cfg.wordBytes.has(byte));
+          const auto priority = priority_of<A>(s, t);
+          reserved =
+              reserved ||
+              (priority == kLiteralPriority &&
+               (bound == kNoSet || !A.cfg.sets[bound].has(byte))) ||
+              (priority == kKeywordPriority && !A.cfg.wordBytes.has(byte));
         }
-        // Tier, then a token before a trivia, then the declaration.
+        // Priority, then a token before a trivia, then the declaration.
         const auto rank = [&](unsigned t) {
-          return lex_rank(tier_of<A>(s, t), A.cfg.terms[t].trivia);
+          return lex_rank(priority_of<A>(s, t), A.cfg.terms[t].trivia);
         };
         for (unsigned t = 0; t < A.cfg.nterms; ++t) {
           if (!A.dfa_acc_set(s).test(t)) continue;
@@ -1535,7 +1522,7 @@ void run() {
   a_mode_that_reads_no_long_token_matches_the_short_one();
   a_state_refused_whole_gives_the_match_back_to_the_path();
   the_boundary_test_answers_four_ways();
-  a_refused_winner_weighs_a_bounded_rival();
+  a_refused_winner_weighs_a_bounded_competitor();
   a_refused_election_ranks_a_token_before_a_trivia();
   audit<g::kTable>();
   audit<tguard::trivia::generated::G::kTable>();
@@ -1635,8 +1622,8 @@ void run() {
     }
 
   for (const std::string& w : all) {
-    const std::string glued = "heads =" + w + ";";
-    CHECK(!parser->parse(glued).diagnostics.empty());
+    const std::string attached = "heads =" + w + ";";
+    CHECK(!parser->parse(attached).diagnostics.empty());
     const std::string longer = "heads =" + w + "x;";
     CHECK(parser->parse(longer).diagnostics.empty());
     const std::string spaced = "heads = " + w + "_ ;";
@@ -1647,8 +1634,8 @@ void run() {
 
 namespace case_refusedshorter {
 // A terminal refused at its head leaves the bytes to what stands without it,
-// and what its own state accepted inside a run is still owed to them: the
-// table's walk, the generated walk and the sweep read alike.
+// and what its own state accepted inside a run still belongs to them: the
+// table's walk, the generated walk and the sweep read the same.
 
 namespace {
 
@@ -1775,18 +1762,18 @@ void run() {
 }
 }  // namespace case_refusedshorter
 
-namespace case_alikecandidates {
-// Two names read one word. Where every state of the mode answers both alike,
-// the table elects and carries no candidate; where a state shifts each, the
+namespace case_samewordcandidates {
+// Two names read one word. Where every state of the mode answers both the same,
+// the table chooses and carries no candidate; where a state shifts each, the
 // next token decides.
 
 namespace {
 
 std::string items(const cursiv::ParseResult& r) {
-  const auto* d = r.value_as<talike::Doc>();
+  const auto* d = r.value_as<tsameword::Doc>();
   if (d == nullptr) return "<none>";
   std::string out;
-  for (const talike::Item* i : d->items) {
+  for (const tsameword::Item* i : d->items) {
     if (!i->note.empty()) out += std::string(i->note) + '|';
     out += std::string(i->name) + (i->value ? "=" : "") + ' ';
   }
@@ -1796,13 +1783,13 @@ std::string items(const cursiv::ParseResult& r) {
 }  // namespace
 
 void run() {
-  static_assert(!talike::generated::Reduced::kTable.multiCand);
+  static_assert(!tsameword::generated::Reduced::kTable.multiCand);
   static_assert(tguard::generated::G::kTable.multiCand);
   const auto mode =
       case_lexguard::mode_of<tguard::generated::G::kTable>("shifted");
   CHECK(tguard::generated::G::kTable.modeMulti[mode] != 0);
 
-  const auto reduced = talike::generated::Reduced::create_parser();
+  const auto reduced = tsameword::generated::Reduced::create_parser();
   const auto r = reduced->parse(
       "type \"a\" f: \"b\" yes: g: enum \"c\" one two \"d\" yesx no1 \"e\" a");
   CHECK(r.accepted && r.diagnostics.empty());
@@ -1824,11 +1811,11 @@ void run() {
     CHECK(!shifted->parse(input).diagnostics.empty());
   }
 }
-}  // namespace case_alikecandidates
+}  // namespace case_samewordcandidates
 
 namespace case_keywordhandoff {
 // The lexer's rank of a token, the literal over the name, is applied where
-// the look-ahead settles a choice and where the graph does: a document reads
+// the look-ahead resolves a choice and where the graph does: a document reads
 // as the same tree on either side of the look-ahead's depth, with fixed AST
 // expectations.
 
@@ -2007,10 +1994,10 @@ using namespace cursiv;
 using namespace cursiv::engine;
 
 // Borrow the wide grammar's token storage and boundary protocol; the rows
-// below independently vary arrival order, extent and lexical tier.
+// below independently vary arrival order, extent and lexical priority.
 struct Table : std::remove_cvref_t<decltype(twide::generated::G::kTable)> {
   struct Cold {
-    std::array<std::uint8_t, 576> accTier{};
+    std::array<std::uint8_t, 576> accPriority{};
     std::array<std::uint16_t, 0> accStand{};
   };
 };
@@ -2041,17 +2028,18 @@ struct Rows {
   }();
 };
 
-// The fixture's tiers are attached to acceptance occurrences, as in a real
-// table: a longer, lower-tier occurrence replaces an earlier one; an equal
-// extent keeps the higher tier.
+// The fixture's priorities are attached to acceptance occurrences, as in a real
+// table: a longer, lower-priority occurrence replaces an earlier one; an equal
+// extent keeps the higher priority.
 template <unsigned N>
 struct RankedTable : Table {
   static constexpr auto cold = [] {
     Cold out;
     for (unsigned row = 0; row < 5; ++row)
       for (unsigned k = Rows<N>::base[row]; k < Rows<N>::base[row + 1]; ++k)
-        out.accTier[k] = row == 1 ? kTierLiteral
-                        : row == 2 ? 0u : kTierKeyword;
+        out.accPriority[k] = row == 1   ? kLiteralPriority
+                             : row == 2 ? 0u
+                                        : kKeywordPriority;
     return out;
   }();
 };
@@ -2075,12 +2063,13 @@ std::uint64_t collect() {
   CHECK(firstWork <= 8u * N);
   for (unsigned i = 0; i < N; ++i) {
     CHECK(room[i].term == R::terminal(i));
-    CHECK(room[i].end == 3 && room[i].tier == kTierKeyword);
+    CHECK(room[i].end == 3 && room[i].priority == kKeywordPriority);
   }
   collector.take(0, 1, "abcdefghij", 5, 10, far);
   for (unsigned i = 0; i < N; ++i) {
     CHECK(room[i].end == (i % 2 == 0 ? 5u : 3u));
-    CHECK(room[i].tier == (i % 2 == 0 ? kTierLiteral : kTierKeyword));
+    CHECK(room[i].priority ==
+          (i % 2 == 0 ? kLiteralPriority : kKeywordPriority));
   }
   NoRelays relays;
   collector.finish("abcdefghij", 10, 0, 0, relays);
@@ -2093,12 +2082,12 @@ std::uint64_t collect() {
     const unsigned original = i < N / 2u ? 2u * i : 2u * (i - N / 2u) + 1u;
     CHECK(room[i].term == R::terminal(original));
     CHECK(room[i].end == 5);
-    CHECK(room[i].tier == (i < N / 2u ? kTierLiteral : 0u));
+    CHECK(room[i].priority == (i < N / 2u ? kLiteralPriority : 0u));
   }
   collector.take(0, 3, "abcdefghij", 5, 10, far);
   collector.take(0, 4, "abcdefghij", 4, 10, far);
   for (unsigned i = 0; i < N; ++i)
-    CHECK(room[i].end == 5 && room[i].tier == kTierKeyword);
+    CHECK(room[i].end == 5 && room[i].priority == kKeywordPriority);
   CHECK(work <= 24u * N);
   return firstWork;
 }
@@ -2125,7 +2114,7 @@ int main() {
   case_lexguard::run();
   case_refusedheadwords::run();
   case_refusedshorter::run();
-  case_alikecandidates::run();
+  case_samewordcandidates::run();
   case_keywordhandoff::run();
   case_lrreservedchoice::run();
   case_cliteral::run();

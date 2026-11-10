@@ -1,6 +1,5 @@
-// Command-line surface for a language: parses arguments, builds the
-// document, and reports the verdict. Works on an erased `Document`, so
-// nothing here is templated on a grammar.
+// Command-line support for a language: parses arguments, builds the document,
+// and reports the verdict.
 #pragma once
 
 #include <concepts>
@@ -29,46 +28,34 @@ class UsageError : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
-/**
- * Scans `root` into the workspace, as an editor's `initialized`
- * notification would, so cross-file references resolve the same way.
- * Throws `UsageError` when `root` is not a directory.
- */
+// Scans `root` into the workspace, as an editor's `initialized` does, so
+// cross-file references resolve. Throws `UsageError` if `root` is not a
+// directory.
 void initialize_root(std::string_view root, cursiv::SharedCoreServices& shared);
 
-/**
- * Reads `path`, adds it to the workspace, and builds it fully so its
- * diagnostics are complete. Throws `UsageError` when no language claims
- * the file or the path cannot be read. The returned reference remains valid
- * while the document is held in `shared.documents`.
- */
+// Reads `path`, adds it to the workspace and builds it fully. Throws
+// `UsageError` when no language claims the file or it cannot be read. The
+// reference stays valid while `shared.documents` holds the document.
 [[nodiscard]] cursiv::Document& build_document_from_path(
     std::string_view path, cursiv::SharedCoreServices& shared);
 
 [[nodiscard]] bool has_error_diagnostics(
     const cursiv::Document& document) noexcept;
 
-/**
- * Prints one `path:line:column: severity: message [source:code]` line per
- * diagnostic, sorted by range. Line and column are 1-based byte offsets,
- * not the LSP layer's UTF-16 columns.
- */
+// Prints one `path:line:column: severity: message [source:code]` line per
+// diagnostic, sorted by range; line and column are 1-based bytes.
 void print_diagnostics(const cursiv::Document& document,
                        std::string_view displayPath, std::ostream& out);
 
-/**
- * Runs a command of the language's own, such as `generate`, with the exit
- * codes of `run_cli`: `command`'s answer once stdout is flushed, `kUsage` for
- * a `UsageError`, and `kFatal` for any other exception or a failed write.
- * The error is printed on stderr.
- */
+// Runs a language's own command, such as `generate`, with `run_cli`'s exit
+// codes: `command`'s answer, `kUsage` for a `UsageError`, `kFatal` for any
+// other exception or a failed write. Errors go to stderr.
 [[nodiscard]] int run_command(const std::function<int()>& command);
 
 namespace detail {
 
-// Non-templated so this compiles once; the template below only picks the
-// shared container's type. Registers the languages before parsing the
-// arguments, so the usage line can name what they serve.
+// Registers the languages before parsing the arguments, so the usage line can
+// name what they serve.
 [[nodiscard]] int run_cli_on(
     int argc, char** argv,
     const std::function<bool(SharedCoreServices&)>& registerLanguageServices,
@@ -76,12 +63,9 @@ namespace detail {
 
 }  // namespace detail
 
-/**
- * `TShared` is the workspace container the run is made on; a language
- * with its own workspace-wide services passes its own type. One
- * registrar may install several languages, a project that declares two
- * grammars over one workspace being the case that needs it.
- */
+// `TShared` is the workspace container; a language with its own
+// workspace-wide services passes its type. One registrar may install several
+// languages over one workspace.
 template <class TShared = SharedCoreServices>
   requires std::derived_from<TShared, SharedCoreServices>
 [[nodiscard]] int run_cli(

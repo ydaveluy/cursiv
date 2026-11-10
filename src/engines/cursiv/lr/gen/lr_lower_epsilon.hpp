@@ -21,7 +21,7 @@ namespace cursiv::engine {
 // A position a turn's receiver may take in: a symbol, and no end assertion or
 // region edge, which mean something else inside the receiver.
 inline bool lr_holds_position(const LrLowerSlot& s) {
-  return !s.end && !s.endAlt && !s.none && !s.lead && !s.trail;
+  return !s.end && !s.endAlt && !s.none && !s.leading && !s.trailing;
 }
 
 // A token required after a choice that may end the text: the arm that ends it
@@ -57,7 +57,7 @@ inline std::uint16_t lr_optional_aux(LrLowered& o, const LrLowerPool& p,
   s.doc = {};
   lr_push_prod(o, p, aux, std::span(&inner, 1));
   const auto absent = lr_push_prod(o, p, aux, {}, {}, s.endAlt);
-  lr_close_region(o.cfg, absent, s.trail);
+  lr_close_region(o.cfg, absent, s.trailing);
   if (s.endAlt && absent != kNoRow) o.cfg.prodBuild[absent].tailCfg = s.cfg;
   s.sym = nt_sym(aux);
   s.optional = false;
@@ -104,7 +104,7 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
     arms.clear();
     // A head left out hands its edge to the first position kept, a tail to
     // the last: the outermost edge, the first head and the last tail.
-    std::uint8_t leadOwed = 0, trailOwed = 0;
+    std::uint8_t pendingLeading = 0, pendingTrailing = 0;
     for (unsigned i = 0; i < n; ++i) {
       bool lr_keep = true;
       if (lr_subset_bit(slots[i])) {
@@ -117,8 +117,8 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
           if (!endOnly) endCfg = slots[i].cfg;
           endOnly = true;
         }
-        if (!leadOwed) leadOwed = slots[i].lead;
-        if (slots[i].trail) trailOwed = slots[i].trail;
+        if (!pendingLeading) pendingLeading = slots[i].leading;
+        if (slots[i].trailing) pendingTrailing = slots[i].trailing;
         continue;
       }
       if (slots[i].end) {
@@ -142,13 +142,14 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
         asserted = true;
       }
       keptSlots[len] = slots[i];
-      if (leadOwed) keptSlots[len].lead = leadOwed;
-      leadOwed = 0;
-      trailOwed = 0;
+      if (pendingLeading) keptSlots[len].leading = pendingLeading;
+      pendingLeading = 0;
+      pendingTrailing = 0;
       ++len;
     }
     if (unreachable) continue;
-    if (trailOwed && len != 0) keptSlots[len - 1].trail = trailOwed;
+    if (pendingTrailing && len != 0)
+      keptSlots[len - 1].trailing = pendingTrailing;
     unsigned greedy = 0;
     for (unsigned k = 0; k < nopt; ++k)
       greedy = (greedy << 1) | ((mask >> k) & 1u);
@@ -156,7 +157,7 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
     const std::uint16_t stop =
         len == 1 && !endOnly && keptSlots[0].made.empty() &&
                 keptSlots[0].row.empty() && keptSlots[0].cfg == 0 &&
-                keptSlots[0].lead == 0 && keptSlots[0].trail == 0
+                keptSlots[0].leading == 0 && keptSlots[0].trailing == 0
             ? p.stop_of(keptSlots[0].sym)
             : std::uint16_t{0};
     const std::uint16_t k = lr_push_prod(
@@ -171,8 +172,8 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
         [&](const LrLowerSlot& s) { return p.is_gap(s.sym); });
     lr_close_region(c, k,
                     !bare      ? std::uint8_t{0}
-                    : len == 0 ? trailOwed
-                               : keptSlots[len - 1].trail);
+                    : len == 0 ? pendingTrailing
+                               : keptSlots[len - 1].trailing);
     if (endOnly && !asserted && k != kNoRow) c.prodBuild[k].tailCfg = endCfg;
   }
 }
@@ -190,28 +191,29 @@ inline LrLowerSlot lr_receiver(LrLowered& o, LrLowerPool& p,
   return slot;
 }
 
-inline std::vector<LrLowerSlot> lr_slots_for_sequence(
-    LrLowered& o, LrLowerPool& p, std::span<const LrShapeId> kids,
+inline Descent<std::vector<LrLowerSlot>> lr_slots_for_sequence(
+    LrLowered& o, LrLowerPool& p, std::span<const LrShapeId> children,
     std::uint8_t cfg) {
   const bool turning = p.turning;
   std::vector<LrLowerSlot> slots;
-  std::vector<LrShapeId> pending(kids.rbegin(), kids.rend());
-  slots.reserve(kids.size());
+  std::vector<LrShapeId> pending(children.rbegin(), children.rend());
+  slots.reserve(children.size());
   std::size_t i = 0;
   while (!pending.empty()) {
     const LrShapeId k = pending.back();
     pending.pop_back();
     const auto& node = p.e[k];
     // Keep the pool in tree form. Flatten a plain sequence only when this
-    // RHS is emitted, rather than recopying growing suffixes while laying
+    // RHS is emitted, rather than recopying growing suffixes while lowering
     // deeply nested nest payloads. Directives/region edges keep their group.
-    if (node.kind == LrShape::seq && node.cfg == cfg &&
-        node.made.empty() && node.row.empty() && !node.lead && !node.trail) {
+    if (node.kind == LrShape::seq && node.cfg == cfg && node.made.empty() &&
+        node.row.empty() && !node.leading && !node.trailing) {
       for (std::size_t child = node.count; child-- > 0;)
-        pending.push_back(p.kid[node.sym + child]);
+        pending.push_back(p.child[node.sym + child]);
       continue;
     }
-    bool reaches = i == 0 ? turning : p.head_turns(k);
+    bool reaches = turning;
+    if (i != 0) reaches = co_await p.head_turns(k);
     if (reaches && i != 0)
       for (const LrLowerSlot& s : slots)
         if (!lr_holds_position(s)) {
@@ -224,59 +226,64 @@ inline std::vector<LrLowerSlot> lr_slots_for_sequence(
       slots.push_back(receiver);
     }
     p.turning = reaches;
-    slots.push_back(lr_slot_for(o, p, k, p.e[k].made, p.e[k].row));
+    slots.push_back(co_await lr_slot_for(o, p, k, p.e[k].made, p.e[k].row));
     ++i;
   }
-  return slots;
+  co_return slots;
 }
 
-// The productions of `lhs` over `kids` in order, `made` and `row` over them.
-inline void lr_emit_sequence(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
-                             std::span<const LrShapeId> kids, std::uint8_t cfg,
-                             const LrActs& made, const LrActs& row) {
+// The productions of `lhs` over `children` in order, `made` and `row` over
+// them.
+inline Descent<void> lr_emit_sequence(LrLowered& o, LrLowerPool& p,
+                                      std::uint16_t lhs,
+                                      std::span<const LrShapeId> children,
+                                      std::uint8_t cfg, const LrActs& made,
+                                      const LrActs& row) {
   const auto priority = lr_priority_alt(o.cfg, lhs);
   const bool turning = p.turning;
-  std::vector<LrLowerSlot> slots = lr_slots_for_sequence(o, p, kids, cfg);
+  std::vector<LrLowerSlot> slots =
+      co_await lr_slots_for_sequence(o, p, children, cfg);
   p.turning = turning;
   lr_emit_subsets(o, p, lhs, std::move(slots), lr_cat(made, row), priority);
 }
 
-inline void lr_emit_one(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
-                        LrShapeId at, const LrActs& made, const LrActs& row) {
+inline Descent<void> lr_emit_one(LrLowered& o, LrLowerPool& p,
+                                 std::uint16_t lhs, LrShapeId at,
+                                 const LrActs& made, const LrActs& row) {
   if (const LrLowerNode& e = p.e[at]; e.kind == LrShape::seq) {
-    lr_emit_sequence(o, p, lhs, std::span(p.kid).subspan(e.sym, e.count), e.cfg,
-                     made, row);
-    return;
+    co_await lr_emit_sequence(o, p, lhs,
+                              std::span(p.child).subspan(e.sym, e.count), e.cfg,
+                              made, row);
+    co_return;
   }
   // `made` and `row` are already the production's chain.
   const auto priority = lr_priority_alt(o.cfg, lhs);
-  std::vector slots{lr_slot_for(o, p, at, LrActs{}, LrActs{})};
+  std::vector slots{co_await lr_slot_for(o, p, at, LrActs{}, LrActs{})};
   lr_emit_subsets(o, p, lhs, std::move(slots), lr_cat(made, row), priority);
 }
 
-// Each item of an unordered group once, in any order. Every item reads input,
-// as the front end requires, so each stands as the symbol it lowers to; an
-// optional item stands in its present form, and the group may end where only
-// such items are left.
-inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
-                              LrShapeId at, const LrActs& made,
-                              const LrActs& row) {
+// Each item of an unordered group once, in any order; an optional item stands
+// in its present form, and the group may end where only such items are left.
+inline Descent<void> lr_emit_unordered(LrLowered& o, LrLowerPool& p,
+                                       std::uint16_t lhs, LrShapeId at,
+                                       const LrActs& made, const LrActs& row) {
   const LrLowerNode& e = p.e[at];
   const std::size_t n = e.count;
-  const std::vector<LrShapeId> kids(p.kid.begin() + e.sym,
-                                    p.kid.begin() + e.sym + n);
+  const std::vector<LrShapeId> children(p.child.begin() + e.sym,
+                                        p.child.begin() + e.sym + n);
   const auto hi = p.unorderedHead.find(at), ti = p.unorderedTail.find(at);
-  const auto& heads = hi == p.unorderedHead.end() ? kids : hi->second;
-  const auto& tails = ti == p.unorderedTail.end() ? kids : ti->second;
-  // Every order of the group is spelled; past the pools its rule is refused.
+  const auto& heads = hi == p.unorderedHead.end() ? children : hi->second;
+  const auto& tails = ti == p.unorderedTail.end() ? children : ti->second;
+  // Every order of the group is written; past the pools its rule is refused.
   const auto too_wide = [&] {
     lower_refuse_rule(o.cfg, LowerFail::unorderedTooWide, p.owner);
   };
   bool turns = false;
-  for (const LrShapeId k : kids) turns = turns || p.holds_turn(k);
+  for (const LrShapeId k : children)
+    if (!turns) turns = co_await p.holds_turn(k);
   if (n > unordered_most(turns)) {
     too_wide();
-    return;
+    co_return;
   }
   // A nest depends on the preceding positions, so its orders stay whole.
   if (turns) {
@@ -284,7 +291,7 @@ inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
     for (std::size_t i = 2; i <= n; ++i) {
       if (count > (0xffffu - o.cfg.nprods) / i) {
         too_wide();
-        return;
+        co_return;
       }
       count *= i;
     }
@@ -295,14 +302,14 @@ inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
       for (std::size_t i = 0; i < n; ++i)
         positions[i] = i == 0       ? heads[order[i]]
                        : i + 1 == n ? tails[order[i]]
-                                    : kids[order[i]];
+                                    : children[order[i]];
       const std::uint16_t before = o.cfg.nprods;
-      lr_emit_sequence(o, p, lhs, positions, e.cfg, made, row);
-      if (o.cfg.lowerFail()) return;
+      co_await lr_emit_sequence(o, p, lhs, positions, e.cfg, made, row);
+      if (o.cfg.lowerFail()) co_return;
       for (std::uint16_t k = before; k < o.cfg.nprods; ++k)
         if (o.cfg.prods[k].lhs == lhs) o.cfg.prodBuild[k].permuted = true;
     } while (std::ranges::next_permutation(order).found);
-    return;
+    co_return;
   }
 
   const std::size_t end = std::size_t{1} << n, full = end - 1;
@@ -319,21 +326,23 @@ inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
     return lr_slot_for(o, p, k, p.e[k].made, p.e[k].row);
   };
   for (std::size_t i = 0; i < n; ++i) {
-    body[i] = symbol(kids[i]);
-    head[i] = heads[i] == kids[i] ? body[i] : symbol(heads[i]);
-    tail[i] = tails[i] == kids[i] ? body[i] : symbol(tails[i]);
+    body[i] = co_await symbol(children[i]);
+    head[i] = body[i];
+    if (heads[i] != children[i]) head[i] = co_await symbol(heads[i]);
+    tail[i] = body[i];
+    if (tails[i] != children[i]) tail[i] = co_await symbol(tails[i]);
   }
   p.turning = turning;
-  if (o.cfg.lowerFail()) return;
+  if (o.cfg.lowerFail()) co_return;
   // Operand auxiliaries share the same pools as the subset states.
   if (productions > 0xffffu - o.cfg.nprods ||
       end - n - 2 + lone > std::size_t{kNtBase} - o.cfg.nnts) {
     too_wide();
-    return;
+    co_return;
   }
   // Where only optional items are left, the group may end.
   const auto ends = [&](std::size_t mask) { return (mask & ~optional) == 0; };
-  // Spelt to the right: the election compares readings from the first item.
+  // Right-recursive, so the election compares readings from the first item.
   std::vector states(end, kNoRow);
   for (std::size_t mask = 1; mask <= full; ++mask)
     if (!std::has_single_bit(mask) || ends(mask))
@@ -358,33 +367,34 @@ inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
                                    ? tail[std::countr_zero(rest)]
                                    : LrLowerSlot{.sym = nt_sym(states[rest]),
                                                  .cfg = e.cfg,
-                                                 .trail = e.trail};
+                                                 .trailing = e.trailing};
       const LrLowerSlot slots[] = {mask == full ? head[i] : body[i], next};
       push(slots);
     }
     // The end comes last, as an option's absence does: an item still read is
     // the preferred reading.
-    if (ends(mask)) lr_close_region(o.cfg, push({}), e.trail);
+    if (ends(mask)) lr_close_region(o.cfg, push({}), e.trailing);
   }
 }
 
 // `made` and `row` are the actions standing over `at`, already resolved.
-inline void lr_emit_alts(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
-                         LrShapeId at, const LrActs& made, const LrActs& row) {
+inline Descent<void> lr_emit_alts(LrLowered& o, LrLowerPool& p,
+                                  std::uint16_t lhs, LrShapeId at,
+                                  const LrActs& made, const LrActs& row) {
   const LrLowerNode& e = p.e[at];
   if (e.kind == LrShape::alt)
     for (unsigned i = 0; i < e.count; ++i) {
-      const LrShapeId k = p.kid[e.sym + i];
+      const LrShapeId k = p.child[e.sym + i];
       // A directive over a choice distributes over its alternatives.
-      lr_emit_alts(o, p, lhs, k, lr_cat(p.e[k].made, made),
-                   lr_cat(p.e[k].row, row));
+      co_await lr_emit_alts(o, p, lhs, k, lr_cat(p.e[k].made, made),
+                            lr_cat(p.e[k].row, row));
     }
   else if (p.passClose != kNoRow && e.kind == LrShape::sym &&
            !is_term(static_cast<std::uint16_t>(e.sym)) && made.size() == 1 &&
            made.front() == p.passClose && row.empty())
-    lr_emit_one(o, p, lhs, at, LrActs{}, row);
+    co_await lr_emit_one(o, p, lhs, at, LrActs{}, row);
   else
-    lr_emit_one(o, p, lhs, at, made, row);
+    co_await lr_emit_one(o, p, lhs, at, made, row);
 }
 
 }  // namespace cursiv::engine

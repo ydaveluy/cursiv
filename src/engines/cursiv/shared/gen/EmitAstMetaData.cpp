@@ -60,8 +60,8 @@ std::string emit_ast_members(const AstRegistry& registry,
   std::vector<std::size_t> refFields;
   bool multi = false;
   for (std::size_t f = 0; f < fields.size(); ++f) {
-    if (is_ref_nature(fields[f].nature)) refFields.push_back(f);
-    multi |= is_multi_ref_nature(fields[f].nature);
+    if (is_ref_content(fields[f].content)) refFields.push_back(f);
+    multi |= is_multi_ref_content(fields[f].content);
   }
   access("UnknownMembers", "void", order);
   for (std::size_t t = 0; t < types.size(); ++t) {
@@ -69,7 +69,7 @@ std::string emit_ast_members(const AstRegistry& registry,
     for (const std::size_t f : order) {
       if (!registry.subtype(fields[f].owner, t)) continue;
       members.push_back(f);
-      if (is_ref_nature(fields[f].nature)) references[t].push_back(f);
+      if (is_ref_content(fields[f].content)) references[t].push_back(f);
     }
     access(concat("Members", t), types[t], members);
   }
@@ -158,15 +158,15 @@ std::string emit_ast_metadata(const AstRegistry& registry,
     }
     if (registry.targets.empty()) out.line("    0u,");
     out.line("};");
-    constexpr const char* natures[] = {"value", "node", "reference",
-                                       "multi_reference", "variant"};
+    constexpr const char* contents[] = {"value", "node", "reference",
+                                        "multi_reference", "variant"};
     constexpr const char* storages[] = {"direct", "optional", "vector"};
     out.write(emit_table(
         "constexpr ::cursiv::detail::FieldDesc kFields[]", fields,
         [&](const AstRegistry::Field& field) {
           return concat("{\"", field.name,
-                        "\", ::cursiv::detail::FieldNature::",
-                        natures[static_cast<unsigned>(field.nature)],
+                        "\", ::cursiv::detail::FieldContent::",
+                        contents[static_cast<unsigned>(field.content)],
                         ", "
                         "::cursiv::detail::FieldStorage::",
                         storages[static_cast<unsigned>(field.storage)], ", ",
@@ -180,7 +180,7 @@ std::string emit_ast_metadata(const AstRegistry& registry,
     const auto rows = std::views::iota(std::size_t{0}, bound);
     out.write(emit_table("constexpr ::cursiv::RefOps kRefOps[]", rows,
                          [&](std::size_t f) {
-                           return is_ref_nature(fields[f].nature)
+                           return is_ref_content(fields[f].content)
                                       ? concat("::cursiv::engine::ref_ops_of<",
                                                tags[f], ", ", narrows[f], ">()")
                                       : std::string("{}");
@@ -190,7 +190,7 @@ std::string emit_ast_metadata(const AstRegistry& registry,
     out.write(
         emit_table("constexpr const ::cursiv::AstTypeTag* kReferenceTags[]",
                    rows, [&](std::size_t f) {
-                     return fields[f].nature == FieldNature::reference
+                     return fields[f].content == FieldContent::reference
                                 ? concat("::cursiv::engine::reference_tag_of<",
                                          tags[f], ">()")
                                 : std::string("nullptr");
@@ -209,7 +209,7 @@ std::string emit_ast_metadata(const AstRegistry& registry,
         [&](std::size_t f) {
           const auto& field = fields[f];
           const std::uint16_t target = registry.head_of(field);
-          const bool ref = is_ref_nature(field.nature) && target != kNoIndex;
+          const bool ref = is_ref_content(field.content) && target != kNoIndex;
           return concat("{\"", field.name, "\", ",
                         ref ? std::format("kTypes[{}u]", target) : "nullptr",
                         "}");

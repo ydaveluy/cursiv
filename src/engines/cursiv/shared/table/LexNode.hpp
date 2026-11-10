@@ -7,61 +7,49 @@
 
 namespace cursiv::engine {
 
-// A `seq` whose `min` is one spells a single literal, its guard included. An
-// `alt` whose `min` is one reads one letter of a case-insensitive literal: its
-// kids are the letter's cases, each a `chars` or a `seq` of them.
-// `rep` reads `a` from `min` to `max` times, the skip `b` before each time
-// past the first, `kNoLexNode` where none.
-// `through_lit` runs up to the first literal closer: `a` is the opener's
-// node, the kids from `b` a table of classes, one row per byte of the
-// closer, `min` the closer's length; `max` is one where the end of the text
-// closes it too, and the kid past the table is then that refusal of any byte.
-// `nguard` is a zero-width refusal of a word: the kids from `b` are its
-// classes, `min` their count, and `a` the class that, following the word,
-// means it was not spelled after all -- `kNoSet` when nothing rescues it. A
-// `max` of one makes the word the rest of a scalar whose lead byte the node
-// before it consumed: the lead stands alone only where the word does not
-// follow.
-// `indent` and `dedent` are a terminal's whole body, and `implied` the body
-// of an implied token: answered by the parse and not by the automaton.
-// `mark` names the run under it (`a`) as the token's mark, `same` echoes it
-// where it stands, and `through_same` runs up to a closer that echoes it: `a`
-// the opener, the two kids from `b` the closer's literal before and after
-// the echo, `kNoLexNode` where it has none, and where `min` is three, the run
-// between the first and the echo. `through_nested` runs up to the closer at
-// depth zero: `a` the opener, the two kids from `b` the opener and the
-// closer as literals the search counts, or choices of them; `max` is one
-// where the end of the text closes it too.
-// `call` reads the body of terminal `b`; an internal call, whose `b` is
-// `kNoLexNode`, reads the node `a`.
-// A condition's phrase reads tokens: `token` reads terminal `a` whole, its
-// body the node `termBuild[a].lex`; `skip` reads trivia, its kids from `a`,
-// `b` of them, `token`s, until the token in hand is none of them; `positive`
-// and `negative` assert `a` and consume nothing; `gap_has` and `gap_is` ask
-// the gap before the token whether it holds or is the expression `a`;
-// `end_mark` holds at the end of the text. The lexer mode a token, choice,
-// repetition or skip reads in is the configuration's `lexMode`.
+// The lexer mode a token, choice, repetition or skip reads in is the
+// configuration's `lexMode`.
 enum class LexKind : std::uint8_t {
   chars,
+  // With `min` one: a single literal, its guard included.
   seq,
+  // With `min` one: a letter of a case-insensitive literal, its children the
+  // cases.
   alt,
+  // `a` from `min` to `max` times, the skip `b` before each time but the first.
   rep,
+  // Up to the first literal closer: `a` the opener, the children from `b` a
+  // class per closer byte, `min` its length; `max` one if the text's end closes
+  // it.
   through_lit,
+  // A zero-width refusal of a word, its `min` classes the children from `b`;
+  // `a` is the class that lifts it. With `max` one, it is a scalar's rest.
   nguard,
+  // `mark` names the run `a` as the token's mark, and `same` echoes it.
   mark,
   same,
+  // Up to a closer that echoes the mark: `a` the opener, the two children from
+  // `b` the closer's literal before and after the echo.
   through_same,
+  // Up to the closer at depth zero: `a` the opener, the two children from `b`
+  // the opener and closer it counts; `max` one if the text's end closes it.
   through_nested,
+  // Bodies the parse decides, not the automaton.
   indent,
   dedent,
   implied,
+  // Trivia: the `b` tokens from child `a`, until the token in hand is none.
   skip,
+  // Terminal `a`, read whole.
   token,
+  // Zero-width assertions of `a`.
   positive,
   negative,
+  // Whether the gap before the token holds, or is, the expression `a`.
   gap_has,
   gap_is,
   end_mark,
+  // The body of terminal `b`, or the node `a` where `b` is `kNoLexNode`.
   call
 };
 
@@ -72,8 +60,8 @@ inline constexpr std::uint32_t kEndless = 0xffffffffu;
 
 struct LexNode {
   LexKind kind{};
-  std::uint16_t a = 0;  // charset / kid base / kid
-  std::uint16_t b = 0;  // kid count / closer base
+  std::uint16_t a = 0;  // charset / child base / child
+  std::uint16_t b = 0;  // child count / closer base
   std::uint32_t min = 0;
   std::uint32_t max = 0;
 

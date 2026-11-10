@@ -1,7 +1,5 @@
-// Which icon a declaration wears: the client draws an outline row or a
-// completion entry from a kind, and only the language knows that an
-// `Entity` is a class and a `Feature` a field. Two shapes, since a symbol
-// is asked for both from a node and from another document's index row.
+// Which icon a declaration shows, as only the language knows. Asked for a
+// node, and for another document's index row.
 #pragma once
 
 #include <lsp/types.h>

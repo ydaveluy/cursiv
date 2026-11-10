@@ -15,7 +15,7 @@ LrBuildTable lr_build_wide(const LrLowered& low,
                            const LrBuildTable* against = nullptr,
                            LrBuildWork* work = nullptr);
 
-// Whether the wider graph owes fewer ambiguities, no cap given way.
+// Whether the wider graph has fewer ambiguities, no cap given way.
 bool lr_wider_stands(const LrBuildTable& c, const LrBuildTable& w);
 
 }  // namespace cursiv::engine

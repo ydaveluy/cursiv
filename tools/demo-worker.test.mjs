@@ -1,6 +1,5 @@
-// The online demo's scripts: its worker, run on real language servers, must give
-// a module every import it asks for and say so when one cannot start; its page
-// transport and its Monaco adapter are run here over stand-ins. Usage:
+// The online demo's scripts: the worker on real language servers, the page
+// transport and the Monaco adapter over stand-ins.
 //   node tools/demo-worker.test.mjs <module>...
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -11,7 +10,7 @@ import vm from 'node:vm';
 import { Worker } from 'node:worker_threads';
 import { importedMemoryLimits } from './wasi-run.mjs';
 import { startServer } from '../docs/demo/server.js';
-import { registerLanguageFeatures } from '../docs/demo/lsp.js';
+import { diagnosedDocument, registerLanguageFeatures } from '../docs/demo/lsp.js';
 
 const script = fileURLToPath(new URL('../docs/demo/wasi-worker.js', import.meta.url));
 
@@ -193,6 +192,54 @@ test('a poll reports the clocks that are due, not the others', () => {
   assert.equal(view.getUint16(512 + 8, true), 0);
 });
 
+test('a poll answers an unsupported subscription at once, beside a later clock', () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const scope = workerScope({ memory });
+  const view = new DataView(memory.buffer);
+  // A read on a descriptor (user data 1), a clock with no such id (2), and two
+  // seconds on the monotonic clock (3).
+  for (const [i, type, clock, ns] of [[0, 1, 0, 0], [1, 0, 9, 0], [2, 0, 1, 2e9]]) {
+    const s = 256 + 48 * i;
+    view.setBigUint64(s, BigInt(i + 1), true);
+    view.setUint8(s + 8, type);
+    view.setUint32(s + 16, clock, true);
+    view.setBigUint64(s + 24, BigInt(ns), true);
+    view.setUint16(s + 40, 0, true);
+  }
+  const start = performance.now();
+  assert.equal(scope.pollOneoff(256, 512, 3, 0), 0);
+  assert.ok(performance.now() - start < 1000, 'the clock was not waited for');
+  assert.equal(view.getUint32(0, true), 2);
+  assert.deepEqual([0, 1].map((e) => [view.getBigUint64(512 + 32 * e, true),
+                                      view.getUint16(512 + 32 * e + 8, true)]),
+                   [[1n, 52], [2n, 28]]);   // ENOSYS, then EINVAL
+});
+
+test('the clocks are the wall and monotonic ones, and no other', () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const { clock_time_get: now } = workerScope({ memory, env: {} }).wasiImports();
+  assert.equal(now(0, 0n, 0), 0);
+  assert.equal(now(1, 0n, 0), 0);
+  assert.equal(now(2, 0n, 0), 58, 'no CPU clock: ENOTSUP');
+  assert.equal(now(3, 0n, 0), 58);
+  assert.equal(now(4, 0n, 0), 28, 'no such clock: EINVAL');
+});
+
+test('pointers past 2 GiB are read as unsigned', () => {
+  // The module passes an i32: an address of 2 GiB or more arrives negative.
+  const memory = new WebAssembly.Memory({ initial: 32769 });
+  const imports = workerScope({ memory, env: { A: 'b' } }).wasiImports();
+  const high = 2 ** 31, signed = (address) => address | 0;
+  const view = new DataView(memory.buffer);
+  assert.equal(imports.clock_time_get(1, 0n, signed(high)), 0);
+  assert.notEqual(view.getBigUint64(high, true), 0n);
+  assert.equal(imports.environ_get(signed(high + 8), signed(high + 16)), 0);
+  assert.equal(view.getUint32(high + 8, true), high + 16);
+  assert.equal(Buffer.from(memory.buffer, high + 16, 4).toString(), 'A=b\0');
+  assert.equal(imports.random_get(signed(high + 32), 16), 0);
+  assert.ok(new Uint8Array(memory.buffer, high + 32, 16).some((b) => b !== 0));
+});
+
 test('a folder lists its entries from a cookie, cut off where the buffer ends', () => {
   const memory = new WebAssembly.Memory({ initial: 1 });
   const files = { '/demo/a/x.txt': new Uint8Array(1), '/demo/a/b/y.txt': new Uint8Array(1) };
@@ -223,11 +270,19 @@ test('a folder lists its entries from a cookie, cut off where the buffer ends', 
   }
 });
 
-// The page's side of the transport, over workers the test speaks for.
+// The page's side of the transport, over stand-in workers the test drives.
 class PageWorker extends EventTarget {
   static all = [];
-  constructor() { super(); PageWorker.all.push(this); }
+  // Whether the browser refuses to create (`create`) or to start (`post`) the
+  // worker of this index.
+  static refuses = () => false;
+  constructor() {
+    super();
+    if (PageWorker.refuses(PageWorker.all.length, 'create')) throw new Error('too many workers');
+    PageWorker.all.push(this);
+  }
   postMessage(data) {
+    if (PageWorker.refuses(PageWorker.all.indexOf(this), 'post')) throw new Error('cannot clone');
     this.data = data;
     if (data.role === 'thread') this.say({ type: 'ready' });
   }
@@ -235,10 +290,11 @@ class PageWorker extends EventTarget {
   terminate() { this.terminated = true; }
 }
 
-async function pageSession(url) {
+async function pageSession(url, { bytes = threadModule, refuses = () => false } = {}) {
   Object.assign(globalThis, { crossOriginIsolated: true, Worker: PageWorker,
-    fetch: async () => ({ ok: true, arrayBuffer: async () => threadModule.buffer }) });
+    fetch: async () => ({ ok: true, arrayBuffer: async () => bytes.buffer }) });
   PageWorker.all = [];
+  PageWorker.refuses = refuses;
   const exits = [];
   const server = await startServer(url, { onExit: (reason) => exits.push(reason) });
   const main = PageWorker.all.find((w) => w.data.role === 'main');
@@ -300,8 +356,11 @@ test('a frame with a long header still answers', async () => {
   server.dispose();
 });
 
+// The module's memory is one page: no message it writes can be longer.
 for (const [what, bad] of [['no length', 'Content-Type: x\r\n\r\n{}'],
-                           ['a body that is no JSON', frame('{"id":')]]) {
+                           ['a body that is no JSON', frame('{"id":')],
+                           ['a length past the server\'s memory', 'Content-Length: 65537\r\n\r\n{}'],
+                           ['a length of 300 digits', `Content-Length: 1${'0'.repeat(300)}\r\n\r\n{}`]]) {
   test(`a frame with ${what} ends the session`, async () => {
     const { server, exits, reply } = await pageSession(what);
     const answer = server.request('initialize', {});
@@ -312,6 +371,22 @@ for (const [what, bad] of [['no length', 'Content-Type: x\r\n\r\n{}'],
     assert.match(exits[0] ?? '', /server sent a message the page cannot read/);
   });
 }
+
+for (const step of ['create', 'post']) {
+  test(`a start the browser refuses to ${step} a worker for stops the others`, async () => {
+    let refused = false;
+    const refuses = (index, at) => at === step && index === 2 && !refused && (refused = true);
+    await assert.rejects(pageSession(`refused ${step}`, { refuses }));
+    assert.ok(PageWorker.all.length >= 3);
+    assert.equal(PageWorker.all.filter((w) => !w.terminated).length, 0, 'a worker is left running');
+  });
+}
+
+test('a module with two imported memories is refused', async () => {
+  const twoMemories = wasm(section(2, [...name('env'), ...name('memory'), 2, 3, 1, 1],
+                                      [...name('env'), ...name('other'), 2, 3, 1, 1]));
+  await assert.rejects(pageSession('two memories', { bytes: twoMemories }), /one shared memory/);
+});
 
 // The Monaco adapter, over an editor that records what it is given.
 function editorStandIn() {
@@ -358,6 +433,9 @@ test('an edit made against a document version holds the editor to it', async () 
   assert.deepEqual(await actionsFor([action(3)], 4), [], 'the document changed since');
   assert.deepEqual(await actionsFor([action(3, [{ kind: 'create', uri: 'file:///demo/b.x' }])], 3), [],
                    'this page creates no file');
+  assert.deepEqual(await actionsFor([action(3, [{ textDocument: { uri: 'file:///demo/b.x', version: 1 },
+                                                 edits: [textEdit] }])], 3), [],
+                   'a version of a document the editor does not hold');
 
   const { providers, model } = adapter({ 'textDocument/rename': action(2).edit }, 3);
   const renamed = await providers.Rename.provideRenameEdits(model, position, 'b', {});
@@ -365,16 +443,28 @@ test('an edit made against a document version holds the editor to it', async () 
   assert.ok(renamed.rejectReason);
 });
 
+test('diagnostics apply to the version they were made for', () => {
+  const uri = 'file:///demo/a.x', documents = [{ uri, version: 3 }];
+  assert.equal(diagnosedDocument(documents, { uri, version: 3, diagnostics: [] }), documents[0]);
+  assert.equal(diagnosedDocument(documents, { uri, version: 2, diagnostics: [] }), undefined,
+               'the document changed since');
+  assert.equal(diagnosedDocument(documents, { uri, diagnostics: [] }), documents[0],
+               'a publication without a version, such as a removal');
+  assert.equal(diagnosedDocument(documents, { uri: 'file:///demo/b.x', diagnostics: [] }), undefined);
+});
+
 test('plain text reads as written', async () => {
-  const plain = { kind: 'plaintext', value: 'a*b* [x](y)' };
+  const plain = { kind: 'plaintext', value: 'a*b* [x](y) &copy; <b>' };
   const { providers, model } = adapter({
     'textDocument/hover': { contents: plain },
     'textDocument/completion': [{ label: 'k', documentation: plain }],
   });
   const hover = await providers.Hover.provideHover(model, position, {});
-  assert.deepEqual(hover.contents, [{ value: 'a\\*b\\*&nbsp;\\[x\\]\\(y\\)' }]);
+  // Markdown reads entities and drops HTML tags: both are escaped too.
+  assert.deepEqual(hover.contents,
+                   [{ value: 'a\\*b\\*&nbsp;\\[x\\]\\(y\\)&nbsp;&amp;copy;&nbsp;&lt;b\\>' }]);
   const { suggestions } = await providers.CompletionItem.provideCompletionItems(model, position, {}, {});
-  assert.equal(suggestions[0].documentation, 'a*b* [x](y)');
+  assert.equal(suggestions[0].documentation, plain.value);
 });
 
 test('a completion brings its other edits and its command', async () => {

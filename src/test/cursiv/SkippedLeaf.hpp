@@ -1,5 +1,5 @@
-// Text a repair gave up: a recovered leaf no read reached, stamped in the
-// layout of the table that wrote the tree, which only its grammar knows.
+// Text a repair skipped: a recovered leaf no read reached. Only the engine's
+// `StampedGrammar` can tell it.
 #pragma once
 
 #include "cursiv/grammar/Grammar.hpp"

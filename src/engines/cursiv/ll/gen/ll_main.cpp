@@ -1,13 +1,13 @@
-// The generator. One source, one target per grammar: the macros name the
-// grammar and its header, and the output is everything that grammar derives --
-// its table, its descent, its AST, its grammar answers, its text and its
-// module -- as C++ source.
+// The generator, one target per grammar named by the macros: it writes
+// everything that grammar derives as C++ source, and its keywords into the
+// TextMate file `--textmate` names.
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "cursiv/ll/gen/LlFinalProgram.hpp"
@@ -24,6 +24,7 @@
 #include "cursiv/shared/gen/GenCode.hpp"
 #include "cursiv/shared/gen/LanguageIdentity.hpp"
 #include "cursiv/shared/gen/LexRecursion.hpp"
+#include "cursiv/shared/gen/TextMateKeywords.hpp"
 #include "cursiv/shared/gen/gen_report.hpp"
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/utils/dump.hpp"
@@ -47,9 +48,9 @@ namespace {
 using cursiv::engine::exit_status;
 using cursiv::engine::GenCode;
 
-// What the build found, in one line: how many choices one token settles, how
-// many an automaton the build closed settles, and how many are left to the
-// parse -- the last is the only number that costs anything at run time.
+// What the build found, in one line: how many choices one token decides, how
+// many an automaton the build closed decides, and how many are left to the
+// parse. Only the last has a run-time cost.
 void report(const cursiv::engine::LlBuiltProgram& a) {
   unsigned single = 0, staged = 0;
   for (std::uint16_t d = 0; d < a.cfg.ndecisions; ++d) {
@@ -67,12 +68,12 @@ void report(const cursiv::engine::LlBuiltProgram& a) {
 
 int run(int argc, char** argv) try {
   cursiv::engine::LlBuildOptions buildOpt;
-  const char* const dir = cursiv::engine::gen_out_dir(
+  const cursiv::engine::GenPaths paths = cursiv::engine::gen_paths(
       argc, argv, "[--no-staged]", [&](std::string_view arg) {
         buildOpt.staticPredict = false;
         return arg == "--no-staged";
       });
-  if (dir == nullptr) return exit_status(GenCode::usage);
+  if (paths.dir == nullptr) return exit_status(GenCode::usage);
 
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<View>();
   if (cursiv::engine::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
@@ -89,7 +90,7 @@ int run(int argc, char** argv) try {
   const cursiv::engine::LlBuiltProgram& a = done->program();
   // A rule whose calls its frame cannot name is refused before anything is
   // written.
-  const auto table = cursiv::engine::ll_emit_table(*done, CURSIV_GEN_NS);
+  auto table = cursiv::engine::ll_emit_table(*done, CURSIV_GEN_NS);
   const auto steps =
       cursiv::engine::ll_emit_parser_files(*done, CURSIV_GEN_NS, table);
 
@@ -100,8 +101,8 @@ int run(int argc, char** argv) try {
   const auto entries =
       cursiv::engine::ll_entry_table(*done, registry.rows, records);
   if (const auto wrote = cursiv::engine::write_common_artifacts(
-          dir,
-          {.table = table.header,
+          paths.dir,
+          {.table = std::move(table.header),
            .parser = cursiv::engine::ll_emit_parser_decl(CURSIV_GEN_NS),
            .parserUnits = steps,
            .ns = CURSIV_GEN_NS,
@@ -113,6 +114,8 @@ int run(int argc, char** argv) try {
            .terminals = cursiv::engine::record_terminals(a.cfg),
            .lang = {CURSIV_GEN_ID, cursiv::engine::split(CURSIV_GEN_EXTENSIONS),
                     cursiv::engine::split(CURSIV_GEN_FILE_NAMES)},
+           .textmate = paths.textmate,
+           .keywords = cursiv::engine::textmate_keywords(a.cfg),
            .parserHeader = "cursiv/ll/runtime/LlLanguageParser.hpp",
            .parserClass = "LlLanguageParser"});
       wrote != GenCode::ok)

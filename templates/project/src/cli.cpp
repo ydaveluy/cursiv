@@ -1,7 +1,6 @@
-// The @CURSIV_NEW_ID@ command line: it parses, links and validates a file and
-// prints its diagnostics. Run it with `--help` to list the options. It returns
-// 0 for no errors, 1 for document errors, 2 for invalid arguments or paths, and
-// 3 for an internal or output error.
+// The @CURSIV_NEW_ID@ command line: it checks a file and prints its diagnostics
+// (`--help` lists the options). It returns 0 without errors, 1 for document
+// errors, 2 for invalid arguments or paths, 3 for an internal or output error.
 
 #include "cursiv/cli.hpp"
 #include "cursiv/services/CoreLanguage.hpp"

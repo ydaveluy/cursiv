@@ -1,9 +1,6 @@
-// Computes semantic tokens from the grammar and the name provider. A server
-// announces semantic tokens only for a language that installs a provider, so a
-// language asks for this one in its `install_lsp_module`; an editor then paints
-// its colours over its own syntax rules. Not templated by the grammar:
-// everything read here is already erased except the name provider's typed
-// lookup.
+// Semantic tokens from the grammar and the name provider. A language installs
+// it in its `install_lsp_module`; an editor paints these colours over its
+// syntax rules.
 #pragma once
 
 #include "cursiv/services/CoreServices.hpp"

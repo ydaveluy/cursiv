@@ -75,7 +75,7 @@ void RgramCfg::push(unsigned lhs, std::vector<Sym> rhs) {
 
 void RgramCfg::add(unsigned lhs, const RgramExpr& e, bool tight) {
   if (e.kind == RgramKind::alt) {
-    for (const RgramExpr& x : e.kids) push(lhs, syms(x, tight));
+    for (const RgramExpr& x : e.children) push(lhs, syms(x, tight));
   } else {
     push(lhs, syms(e, tight));
   }
@@ -85,7 +85,7 @@ std::vector<Sym> RgramCfg::syms(const RgramExpr& e, bool tight) {
   switch (e.kind) {
     case RgramKind::seq: {
       std::vector<Sym> out;
-      for (const RgramExpr& x : e.kids) {
+      for (const RgramExpr& x : e.children) {
         std::vector<Sym> part = syms(x, tight);
         out.insert(out.end(), part.begin(), part.end());
       }
@@ -93,7 +93,7 @@ std::vector<Sym> RgramCfg::syms(const RgramExpr& e, bool tight) {
     }
     case RgramKind::skip: {
       const unsigned x = fresh({}, true);
-      push(x, syms(e.kids[0], true));
+      push(x, syms(e.children[0], true));
       return {call(x)};
     }
     case RgramKind::ref:
@@ -125,12 +125,12 @@ std::vector<Sym> RgramCfg::syms(const RgramExpr& e, bool tight) {
   }
   const unsigned x = fresh();
   if (e.kind == RgramKind::alt) {
-    for (const RgramExpr& a : e.kids) push(x, syms(a, tight));
+    for (const RgramExpr& a : e.children) push(x, syms(a, tight));
     return {call(x)};
   }
-  const std::vector<Sym> body = syms(e.kids[0], tight);
+  const std::vector<Sym> body = syms(e.children[0], tight);
   const Sym stop{.kind = Sym::Kind::cond,
-                 .tok = e.committed ? e.kids[0].kids[0].tok : '\0',
+                 .tok = e.committed ? e.children[0].children[0].tok : '\0',
                  .cond = RgramCond::notTok,
                  .tight = tight};
   const auto self_then_body = [&](unsigned self) {
@@ -177,11 +177,11 @@ std::vector<Sym> RgramCfg::syms(const RgramExpr& e, bool tight) {
   return {call(x)};
 }
 
-// `glued` marks a token inside a region past its first: the gap before it
+// `regionGap` marks a token inside a region past its first: the gap before it
 // is the region's, and a drawn document mostly leaves it empty.
 bool RgramCfg::derive(RgramRandom& r, unsigned nt, unsigned depth,
                       bool inRegion, std::vector<char>& toks,
-                      std::vector<char>& glued) const {
+                      std::vector<char>& regionGap) const {
   if (toks.size() > 14 || depth > 256) return false;
   const std::vector<unsigned>& ps = of[nt];
   unsigned k = ps[0];
@@ -196,10 +196,10 @@ bool RgramCfg::derive(RgramRandom& r, unsigned nt, unsigned depth,
   for (const Sym& s : prods[k].rhs) {
     const bool past = inner && (inRegion || toks.size() > first);
     if (s.kind == Sym::Kind::term) {
-      glued.push_back(past ? 1 : 0);
+      regionGap.push_back(past ? 1 : 0);
       toks.push_back(s.tok);
     } else if (s.kind == Sym::Kind::nt &&
-               !derive(r, s.nt, depth + 1, past, toks, glued)) {
+               !derive(r, s.nt, depth + 1, past, toks, regionGap)) {
       return false;
     }
   }
@@ -215,18 +215,18 @@ std::vector<RgramDocument> RgramCfg::documents(std::uint64_t seed,
   std::vector<RgramDocument> out;
   std::set<std::string> seen;
   for (unsigned tries = 0; out.size() < count && tries < count * 20; ++tries) {
-    std::vector<char> toks, glued;
-    if (!derive(r, 0, 0, false, toks, glued)) continue;
+    std::vector<char> toks, regionGap;
+    if (!derive(r, 0, 0, false, toks, regionGap)) continue;
     // Some texts are damaged by one token: inserted, dropped or replaced.
     if (r.unit() < 0.4 && !toks.empty()) {
       const unsigned m = r.below(3);
       const unsigned j = r.below(static_cast<unsigned>(toks.size()) + 1);
       if (m == 0) {
         toks.insert(toks.begin() + j, kAny[r.below(5)]);
-        glued.insert(glued.begin() + j, 0);
+        regionGap.insert(regionGap.begin() + j, 0);
       } else if (m == 1 && j < toks.size()) {
         toks.erase(toks.begin() + j);
-        glued.erase(glued.begin() + j);
+        regionGap.erase(regionGap.begin() + j);
       } else if (j < toks.size()) {
         toks[j] = kAny[r.below(5)];
       }
@@ -234,7 +234,7 @@ std::vector<RgramDocument> RgramCfg::documents(std::uint64_t seed,
     std::vector<std::string> gaps(toks.size() + 1);
     for (std::string& g : gaps) g = kGaps[r.below(5)];
     for (std::size_t q = 0; q < toks.size(); ++q)
-      if (glued[q] != 0 && r.unit() < 0.9) gaps[q].clear();
+      if (regionGap[q] != 0 && r.unit() < 0.9) gaps[q].clear();
     gaps.front() = kEdges[r.below(3)];
     gaps.back() = kEdges[r.below(3)];
     std::string text = gaps[0];
@@ -315,8 +315,8 @@ RgramVerdict RgramCfg::read(const RgramDocument& d, bool tree) const {
   // Every tree over a span, up to a few: more, or a cycle, is no answer.
   constexpr std::size_t kCap = 8;
   using Key = std::tuple<unsigned, unsigned, unsigned>;
-  using Kids = std::vector<std::string>;
-  using Vals = std::set<Kids>;
+  using Children = std::vector<std::string>;
+  using Vals = std::set<Children>;
   std::map<Key, std::vector<unsigned>> done;
   for (unsigned j = 0; j <= n; ++j)
     for (const Item& it : sets[j])
@@ -339,8 +339,8 @@ RgramVerdict RgramCfg::read(const RgramDocument& d, bool tree) const {
     Vals out;
     if (const auto at = done.find(key); at != done.end())
       for (const unsigned k : at->second)
-        for (const Kids& kids : run(k, 0, i, j)) {
-          out.insert(kids);
+        for (const Children& children : run(k, 0, i, j)) {
+          out.insert(children);
           if (out.size() > kCap) {
             over = true;
             break;
@@ -348,11 +348,11 @@ RgramVerdict RgramCfg::read(const RgramDocument& d, bool tree) const {
         }
     if (!node[a].empty()) {
       Vals named;
-      for (const Kids& kids : out) {
+      for (const Children& children : out) {
         std::string s = node[a] + "{";
-        for (std::size_t q = 0; q < kids.size(); ++q)
-          s += "kids" + std::to_string(q) + "=" + kids[q] + " ";
-        named.insert(Kids{s + "}"});
+        for (std::size_t q = 0; q < children.size(); ++q)
+          s += "children" + std::to_string(q) + "=" + children[q] + " ";
+        named.insert(Children{s + "}"});
       }
       out = std::move(named);
     }
@@ -362,7 +362,7 @@ RgramVerdict RgramCfg::read(const RgramDocument& d, bool tree) const {
   };
   run = [&](unsigned k, unsigned dot, unsigned i, unsigned j) -> Vals {
     const Prod& p = prods[k];
-    if (dot == p.rhs.size()) return i == j ? Vals{Kids{}} : Vals{};
+    if (dot == p.rhs.size()) return i == j ? Vals{Children{}} : Vals{};
     const Sym& s = p.rhs[dot];
     if (s.kind == Sym::Kind::term)
       return i < j && d.toks[i] == s.tok ? run(k, dot + 1, i + 1, j) : Vals{};
@@ -374,9 +374,9 @@ RgramVerdict RgramCfg::read(const RgramDocument& d, bool tree) const {
       const Vals heads = span(s.nt, i, m);
       if (heads.empty()) continue;
       const Vals rests = run(k, dot + 1, m, j);
-      for (const Kids& h : heads)
-        for (const Kids& rest : rests) {
-          Kids both = h;
+      for (const Children& h : heads)
+        for (const Children& rest : rests) {
+          Children both = h;
           both.insert(both.end(), rest.begin(), rest.end());
           out.insert(std::move(both));
           if (out.size() > kCap) {

@@ -32,7 +32,7 @@ struct AstRegistry {
   // need to write it.
   struct Field {
     std::string_view name;
-    FieldNature nature = FieldNature::value;
+    FieldContent content = FieldContent::value;
     FieldStorage storage = FieldStorage::direct;
     std::uint16_t owner = kNoIndex;
     // The family types the member accepts, in declaration order: the run of
@@ -40,7 +40,6 @@ struct AstRegistry {
     std::uint32_t firstTarget = 0;
     std::uint32_t targetCount = 0;
     std::vector<std::string> narrows;
-    // The member's offset in its class.
     std::ptrdiff_t offset = 0;
   };
 

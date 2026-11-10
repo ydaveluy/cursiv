@@ -42,12 +42,13 @@ inline constexpr auto kLrImplied = [] {
   constexpr unsigned n = [] {
     unsigned k = 0;
     for (unsigned t = 1; t < A.cfg.nterms; ++t)
-      k += A.cfg.terms[t].laid == kLaidImplied;
+      k += A.cfg.terms[t].synthetic == kSyntheticImplied;
     return k;
   }();
   std::array<SymbolId, n> q{};
   for (unsigned t = 1, k = 0; t < A.cfg.nterms; ++t)
-    if (A.cfg.terms[t].laid == kLaidImplied) q[k++] = static_cast<SymbolId>(t);
+    if (A.cfg.terms[t].synthetic == kSyntheticImplied)
+      q[k++] = static_cast<SymbolId>(t);
   return q;
 }();
 
@@ -72,10 +73,9 @@ CURSIV_ALWAYS_INLINE inline bool lr_is_trivia(unsigned t) {
   return kLrTermMask<A, false>.test(t);
 }
 
-// The token at `from` under one alphabet and bracket depth `depth`, the trivia
-// before it crossed, `walk(p)` reading each position; past `end`, the end of the
-// text. `crossed(to, trivia)` is told each stretch of trivia: the bytes the mode
-// skips (`trivia` null), or one token.
+// The token at `from` under one alphabet and bracket depth `depth`, trivia
+// crossed, `walk(p)` reading each position; past `end`, the end of the text.
+// `crossed(to, trivia)` receives each stretch of trivia.
 template <const auto& A, class Walk, class Crossed>
 CURSIV_ALWAYS_INLINE inline Token lr_cross_trivia(
     const LrContext& c, std::uint16_t mode, TextOffset from, TextOffset end,
@@ -103,13 +103,9 @@ CURSIV_ALWAYS_INLINE inline Token lr_cross_trivia(
   }
 }
 
-// The token at `from` under one alphabet, trivia crossed and not recorded,
-// read by the drive's own walk under bracket depth `depth`: of the levels of
-// the reading that asks, a scan reads that depth alone. `Short` reads the text
-// as ending at `end` with its inspection frontier: `refused`, whether the walk
-// that read it read on past its match and died, `reached` rising to how far
-// the walks read. Out of line, as the lexer's walk is: inlined into a
-// reader's loop, it costs every step of it.
+// The token at `from` under one alphabet, trivia crossed, unrecorded, by the
+// drive's walk at bracket depth `depth`. `Short` ends the text at `end`;
+// `refused` says the walk died past its match.
 template <const auto& A, bool Short = false>
 CURSIV_NOINLINE inline Token lr_scan_at(const LrContext& c, std::uint16_t mode,
                         TextOffset from, std::uint32_t depth,
@@ -136,9 +132,8 @@ CURSIV_NOINLINE inline Token lr_scan_at(const LrContext& c, std::uint16_t mode,
 }
 
 // Whether the lexer, choosing once for every parse at one place, elects `u`
-// over `t`: the longer, then a literal or a keyword over a pattern of the same
-// bytes. `heavier` weighs `u` against `t`; only two terminals of one extent
-// ask it.
+// over `t`: the longer, then a literal or keyword over a pattern of the same
+// bytes. `heavier` weighs two of one extent.
 template <class Heavier>
 inline bool lr_token_beats(const Token& u, const Token& t, Heavier&& heavier) {
   if (u.begin != t.begin || u.end < t.end) return false;
@@ -150,13 +145,13 @@ inline bool lr_token_beats(const Token& u, const Token& t, Heavier&& heavier) {
 // A token's weight, read again in the alphabet it was read in.
 template <const auto& A>
 inline unsigned lr_token_weight(const LrContext& c, const Token& x) {
-  return lex_weight(lex_reading_tier(LrLexTape<A>{}, c.src, c.len, x.mode,
-                                    x.begin, x.end, x.sym));
+  return lex_weight(lex_reading_priority(LrLexTape<A>{}, c.src, c.len, x.mode,
+                                         x.begin, x.end, x.sym));
 }
 
 template <const auto& A>
-CURSIV_ALWAYS_INLINE inline bool lr_has_rivals(std::uint16_t mode,
-                                               SymbolId sym) {
+CURSIV_ALWAYS_INLINE inline bool lr_has_candidates(std::uint16_t mode,
+                                                   SymbolId sym) {
   if constexpr (A.maxCands > 1)
     return sym < A.cfg.nterms && A.modeWin[mode].test(sym);
   else
@@ -166,10 +161,10 @@ CURSIV_ALWAYS_INLINE inline bool lr_has_rivals(std::uint16_t mode,
 // The terminals matching at `begin`, trivia withdrawn, in the order the
 // deterministic matcher would have answered.
 template <const auto& A>
-CURSIV_ALWAYS_INLINE inline std::uint32_t lr_rivals(const LrContext& c,
-                                                    std::uint16_t mode,
-                                                    TextOffset begin,
-                                                    Scan* room) {
+CURSIV_ALWAYS_INLINE inline std::uint32_t lr_candidates(const LrContext& c,
+                                                        std::uint16_t mode,
+                                                        TextOffset begin,
+                                                        Scan* room) {
   const std::uint32_t n =
       c.drive->scanText(c.src, c.len, mode, begin, room, A.maxCands);
   std::uint32_t keep = 0;
@@ -178,12 +173,13 @@ CURSIV_ALWAYS_INLINE inline std::uint32_t lr_rivals(const LrContext& c,
   return keep;
 }
 
-// Whether the rivals do not weigh alike: only then a derivation owes the word
-// its token's rank.
-CURSIV_ALWAYS_INLINE inline bool lr_rivals_ranked(const Scan* room,
-                                                  std::uint32_t n) {
+// Whether the competitors do not weigh the same: only then does a derivation
+// take its token's rank as a word.
+CURSIV_ALWAYS_INLINE inline bool lr_candidates_ranked(const Scan* room,
+                                                      std::uint32_t n) {
   for (std::uint32_t q = 1; q < n; ++q)
-    if (lex_weight(room[q].tier) != lex_weight(room[0].tier)) return true;
+    if (lex_weight(room[q].priority) != lex_weight(room[0].priority))
+      return true;
   return false;
 }
 
@@ -243,7 +239,7 @@ template <const auto& A, class Holds>
 CURSIV_ALWAYS_INLINE constexpr std::uint32_t lr_shift_target(
     LrActionKind kind, std::uint32_t arg, Holds&& holds) {
   if constexpr (kLrGuarded<A>)
-    if (kind == LrActionKind::guard) return lr_guard_land<A>(arg, holds);
+    if (kind == LrActionKind::guard) return lr_guard_target<A>(arg, holds);
   (void)kind, (void)holds;
   return arg;
 }
@@ -253,40 +249,40 @@ template <const auto& A, class Holds>
 CURSIV_ALWAYS_INLINE constexpr std::uint32_t lr_reduce_target(
     std::uint32_t below, std::uint16_t prod, std::uint32_t first,
     Holds&& holds) {
-  return lr_goto_land<A>(lr_goto_of<A>(below, A.cfg.prods[prod].lhs), first,
-                         holds);
+  return lr_goto_target<A>(lr_goto_of<A>(below, A.cfg.prods[prod].lhs), first,
+                           holds);
 }
 
-// A guarded goto lands out of line, so the plain reduce stays as small as a
+// A guarded goto runs out of line, so the plain reduce stays as small as a
 // grammar without conditions makes it.
-template <const auto& A, class Climb, class Holds>
-CURSIV_NOINLINE std::uint32_t lr_apply_guarded_reduce(Climb& climb,
+template <const auto& A, class Stack, class Holds>
+CURSIV_NOINLINE std::uint32_t lr_apply_guarded_reduce(Stack& stack,
                                                       std::uint16_t p,
                                                       Holds&& holds) {
   const auto& prod = A.cfg.prods[p];
   std::uint32_t first = kLrNoFirst;
-  if (prod.len != 0) first = climb.state_at(climb.size() - prod.len);
-  climb.pop(prod.len);
-  const std::uint32_t s = lr_reduce_target<A>(climb.back(), p, first, holds);
-  if (s != kInvalidSymbol) climb.push(s);
+  if (prod.len != 0) first = stack.state_at(stack.size() - prod.len);
+  stack.pop(prod.len);
+  const std::uint32_t s = lr_reduce_target<A>(stack.back(), p, first, holds);
+  if (s != kInvalidSymbol) stack.push(s);
   return s;
 }
 
-// Close production `p` over `climb`: pop its RHS, follow the goto it lands
-// on -- a guarded one by the tag of the span's first state, or by `holds`
-// where the span is empty. `kInvalidSymbol` where the climb cannot continue.
-template <const auto& A, class Climb, class Holds>
-CURSIV_ALWAYS_INLINE inline std::uint32_t lr_apply_reduce(Climb& climb,
+// Close production `p` over `stack`: pop its RHS, follow the goto it takes
+// (a guarded one by the tag of the span's first state, or by `holds`
+// where the span is empty). `kInvalidSymbol` where the stack cannot continue.
+template <const auto& A, class Stack, class Holds>
+CURSIV_ALWAYS_INLINE inline std::uint32_t lr_apply_reduce(Stack& stack,
                                                           std::uint16_t p,
                                                           Holds&& holds) {
   const auto& prod = A.cfg.prods[p];
-  if (prod.len + 1u > climb.size()) return kInvalidSymbol;
+  if (prod.len + 1u > stack.size()) return kInvalidSymbol;
   if constexpr (kLrGuarded<A>)
     if (prod.guarded != 0) [[unlikely]]
-      return lr_apply_guarded_reduce<A>(climb, p, holds);
-  climb.pop(prod.len);
-  const std::uint32_t s = lr_goto_of<A>(climb.back(), prod.lhs);
-  if (s != kInvalidSymbol) climb.push(s);
+      return lr_apply_guarded_reduce<A>(stack, p, holds);
+  stack.pop(prod.len);
+  const std::uint32_t s = lr_goto_of<A>(stack.back(), prod.lhs);
+  if (s != kInvalidSymbol) stack.push(s);
   return s;
 }
 

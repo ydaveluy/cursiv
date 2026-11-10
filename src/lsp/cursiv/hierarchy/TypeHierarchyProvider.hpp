@@ -8,8 +8,7 @@
 #include "cursiv/workspace/Document.hpp"
 
 // What this extends, and what extends it. Same three steps as the call
-// hierarchy, and for the same reason: the client expands one level per
-// request.
+// hierarchy: the client expands one level per request.
 
 namespace cursiv {
 

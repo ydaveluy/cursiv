@@ -1,4 +1,4 @@
-// How a converted payload lands in a member: the type it converts to, the
+// How a converted payload ends up in a member: the type it converts to, the
 // alternative a variant takes, the converter a site runs. The generator's
 // registries and the builder's thunks read one answer.
 #pragma once
@@ -25,8 +25,8 @@ namespace cursiv::engine {
 // What a conversion writes: the member itself, where `place` puts the value, or
 // the text a reference binds.
 template <class F>
-using conv_target_t =
-    cond_t<is_ref_nature(F::nature), AstNode::string_view, typename F::member>;
+using conv_target_t = cond_t<is_ref_content(F::content), AstNode::string_view,
+                             typename F::member>;
 
 // Whether that rule's payload is one the parts must be joined for. A bare
 // matcher names no rule, and `is_data_rule` has none to ask.
@@ -45,9 +45,9 @@ inline constexpr bool is_conversion_result = false;
 template <class T>
 inline constexpr bool is_conversion_result<ConversionResult<T>> = true;
 
-// Where the converted value lands: a variant takes the one alternative this
-// payload writes. The same `variant_cands` the validation counts, so "checked
-// against this alternative" and "emplaces it" are one statement.
+// Where the converted value goes: a variant takes the one alternative this
+// payload writes. It uses the validation's `variant_cands`, so the alternative
+// checked is the one emplaced.
 template <class M, class Src, bool = is_variant_v<M>>
 struct conv_alt {
   using type = M;
@@ -84,9 +84,8 @@ consteval std::size_t conv_alt_rank() {
     return 0;
 }
 
-// The converter one site runs, from the declarations an author wrote: the
-// override whose slot decides it (`slot_decl_t`) or, where no override fills
-// one, the declared rule's. The rule a stage minted over them has no spelling.
+// The converter one site runs: the override's, or the declared rule's where no
+// override fills the slot.
 template <class Declared, class Over>
 struct site_conv {
   using type = conv_t<Over>;

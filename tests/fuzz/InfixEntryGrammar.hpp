@@ -1,8 +1,7 @@
 #pragma once
 
-// `infix<>` as the entry: the model gives a climb no children of its own
-// (`GrammarCost`'s own note), and a walk that reached the entry through the
-// children of a rule wrote nothing at all.
+// `infix<>` as the entry: an infix has no children in the grammar model, and
+// the fuzzer must still write text for it.
 
 #include <algorithm>
 #include <cstddef>
@@ -27,8 +26,8 @@ struct Bin : cursiv::Extends<Node> {
   string_view op;
   Node* right = nullptr;
 };
-// Reads what it views as it goes, so whatever builds a tree keeps the text
-// longer than its nodes.
+// Reads its view when destroyed, so a tree that frees its text before its
+// nodes fails under a sanitizer.
 struct Text : cursiv::Extends<Node> {
   inline static std::size_t read = 0;
   string_view value;
@@ -44,14 +43,14 @@ struct Ident {
   std::string text;
   explicit Ident(std::string value) : text(std::move(value)) {}
 };
-struct Seal {
+struct ConstText {
   const std::string text;
-  explicit Seal(std::string value) : text(std::move(value)) {}
+  explicit ConstText(std::string value) : text(std::move(value)) {}
 };
 struct Held : cursiv::Extends<Node> {
   Ident only{"none"};
   optional<Ident> first;
-  vector<Seal> seals;
+  vector<ConstText> constTexts;
   variant<int64, string> answer;
   int64 wide = -1;
 };
@@ -93,8 +92,8 @@ inline std::vector<std::string> split(std::string_view text) {
 inline ast::Ident ident(std::string_view text) {
   return ast::Ident(std::string(text.substr(1)));
 }
-inline ast::Seal seal(std::string_view text) {
-  return ast::Seal(std::string(text.substr(1)));
+inline ast::ConstText const_text(std::string_view text) {
+  return ast::ConstText(std::string(text.substr(1)));
 }
 inline std::variant<std::int64_t, std::string> answer(std::string_view text) {
   if (text.size() % 2 == 0) return std::int64_t{1};
@@ -120,7 +119,7 @@ struct InfixEntryG : cursiv::GrammarSpec {
   struct CHECKED_WORDS
       : terminal<as<&checked_list>(lit<"~"> + some(cr<"a-z">))> {};
   struct IDENT : terminal<as<&ident>(lit<"$"> + some(cr<"a-z">))> {};
-  struct SEAL : terminal<as<&seal>(lit<"="> + some(cr<"a-z">))> {};
+  struct CONST_TEXT : terminal<as<&const_text>(lit<"="> + some(cr<"a-z">))> {};
   struct ANSWER : terminal<as<&answer>(lit<"?"> + some(cr<"a-z">))> {};
   struct SMALL : terminal<as<std::int8_t>(some(d))> {};
   struct Sum;
@@ -129,7 +128,7 @@ struct InfixEntryG : cursiv::GrammarSpec {
              create<ast::Held>(
                  kw<"held"> + assign<&ast::Held::only>(ref<IDENT>) +
                  option(assign<&ast::Held::first>(ref<IDENT>)) +
-                 many(append<&ast::Held::seals>(ref<SEAL>)) +
+                 many(append<&ast::Held::constTexts>(ref<CONST_TEXT>)) +
                  option(assign<&ast::Held::answer>(ref<ANSWER>)) +
                  option(kw<"wide"> + assign<&ast::Held::wide>(ref<SMALL>))) |
              create<ast::Text>(assign<&ast::Text::value>(ref<Joined>)) |

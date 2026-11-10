@@ -4,10 +4,8 @@
 
 #include "cursiv/services/JsonValue.hpp"
 
-// The one crossing between the core's owned JSON (`cursiv::JsonValue`, what a
-// diagnostic's `data` carries) and the framework's wire value. Written once,
-// at the junction: the core never learns the framework's type, the framework
-// never learns the core's.
+// Converts between the core's JSON (`cursiv::JsonValue`, a diagnostic's
+// `data`) and the framework's wire value.
 
 namespace cursiv::detail {
 

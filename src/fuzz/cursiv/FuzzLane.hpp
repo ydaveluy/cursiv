@@ -1,7 +1,6 @@
 // A language's fuzz lane: documents written from the declared grammar, and
-// the tree the parser built weighed against the tree the grammar states. It
-// names no engine and no table -- whichever one generated the language, the
-// lane asks it the same question through the erased door.
+// the parser's tree compared with the one the grammar states, whatever the
+// engine.
 #pragma once
 
 #include <cstdint>

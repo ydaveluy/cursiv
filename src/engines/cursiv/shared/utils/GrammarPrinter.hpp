@@ -12,10 +12,8 @@
 #include "cursiv/text/ClassItem.hpp"
 #include "cursiv/utils/ctstring.hpp"
 
-// Renders a grammar image as reviewable text: `{T}` marks where a node is
-// allocated, `'kw'` a keyword, `"lit"` a raw literal. The same image reads
-// as written or as the pipeline resolved it, so a rewrite is reviewable side
-// by side rather than merely asserted.
+// Renders a grammar image as reviewable text, as written or as resolved:
+// `{T}` marks where a node is allocated, `'kw'` a keyword, `"lit"` a literal.
 
 namespace cursiv::engine {
 
@@ -25,7 +23,6 @@ enum class ImageView : std::uint8_t { written = 0, resolved = 1 };
 enum class Prec { Choice, Sequence, Prefix, Item };
 
 std::string decimal(std::size_t v);
-void quote(std::string& out, std::string_view text, char q = '\'');
 void charset(std::string& out, const CharSet& set);
 
 // Rules are named in order of first appearance: the second of two rules called
@@ -36,7 +33,7 @@ class GrammarPrinter {
       : _image(image), _view(view) {}
 
   GrammarDump render();
-  // Keeps the names `render` gave, for a reader that spells more of the text.
+  // Renders once, so later calls use the names `render` gives.
   void prime();
 
   std::string spell(ImageId node);
@@ -58,13 +55,14 @@ class GrammarPrinter {
   void line(std::string& out, std::uint32_t rule);
 
   Prec prec(ImageId node) const;
-  void emit(std::string& out, ImageId node);
-  void item(std::string& out, ImageId node, Prec here);
-  void emit_lit(std::string& out, const ImageNode& n);
+  Descent<void> emit(std::string& out, ImageId node);
+  Descent<void> item(std::string& out, ImageId node, Prec here);
+  Descent<void> emit_lit(std::string& out, const ImageNode& n);
   void emit_class(std::string& out, const ImageNode& n) const;
-  void emit_choice(std::string& out, const ImageNode& n);
-  void emit_repeat(std::string& out, const ImageNode& n);
-  void emit_write(std::string& out, const ImageNode& n, std::string_view op);
+  Descent<void> emit_choice(std::string& out, const ImageNode& n);
+  Descent<void> emit_repeat(std::string& out, const ImageNode& n);
+  Descent<void> emit_write(std::string& out, const ImageNode& n,
+                           std::string_view op);
   bool implied_pair(const ImageNode& n) const;
   bool printed_by_next(const ImageNode& choice, std::uint32_t arm) const;
 

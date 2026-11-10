@@ -10,9 +10,8 @@
 //   Copyright (c) 2018-2024 Dr. Tsung-Wei Huang, University of Wisconsin.
 
 // Chase-Lev work-stealing deque: the owner pushes and pops at the bottom
-// lock-free; a thief steals from the top, and a compare-exchange arbitrates
-// the last item. Old arrays are kept, not freed, since a thief may still be
-// reading one after a resize; only the owner's destruction is safe to reclaim.
+// without locks, thieves steal from the top. Old arrays are kept until the
+// owner dies, as a thief may still read one after a resize.
 
 namespace cursiv::detail {
 
@@ -126,8 +125,8 @@ class TaskQueue {
     return published;
   }
 
-  // Doubling the alignment is what measures best: it keeps a thief's read of
-  // `_top` off the owner's `_bottom` line and off its neighbour's.
+  // 128 bytes measures best: a thief's read of `_top` stays off the owner's
+  // `_bottom` line and off the line prefetched next to it.
   alignas(128) std::atomic<std::int64_t> _top{0};
   alignas(128) std::atomic<std::int64_t> _bottom{0};
   std::atomic<Array*> _array;

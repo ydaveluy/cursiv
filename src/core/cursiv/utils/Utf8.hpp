@@ -4,18 +4,14 @@
 #include <cstdint>
 #include <string_view>
 
-// How wide a UTF-8 sequence its lead byte announces. One rule, one place: what
-// advances a cursor and what counts a column must agree.
+// The length of a UTF-8 sequence, from its lead byte. One rule, so what
+// advances a cursor and what counts a column agree.
 
 namespace cursiv {
 
-// The lead's own three bits of length. Anything that leads nothing -- a
-// continuation byte, 0xF8 and above -- is one byte, which is the only answer
-// that always moves.
-//
-// Masks, not a table: the width sits on the advance's dependency chain, where
-// an L1 load costs more latency than three compares on a register already
-// loaded.
+// The length a lead byte gives. A byte that leads nothing (a
+// continuation byte, 0xF8 and above) counts as one, so a walk always moves.
+// Masks, not a table: a load would cost more than three compares.
 [[nodiscard]] constexpr std::size_t utf8_width(char lead) noexcept {
   const auto b = static_cast<unsigned char>(lead);
   return (b & 0xF8u) == 0xF0u   ? 4

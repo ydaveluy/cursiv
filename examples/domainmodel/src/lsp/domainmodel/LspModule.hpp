@@ -9,7 +9,7 @@
 
 namespace dm {
 
-// This storey's overrides, on top of the core module's.
+// The LSP overrides, on top of the core module's.
 void install_lsp_module(DomainModelServices& services);
 
 std::unique_ptr<DomainModelServices> create_lsp_services(
@@ -17,7 +17,7 @@ std::unique_ptr<DomainModelServices> create_lsp_services(
     std::string languageId =
         std::string(dm::generated::DomainModel::kLanguageId));
 
-// The same one call, one storey up.
+// The shared services and the language, created in one call.
 struct DomainModelLanguage {
   std::unique_ptr<DomainModelSharedServices> shared;
   DomainModelServices& language;

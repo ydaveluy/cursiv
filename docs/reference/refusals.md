@@ -40,8 +40,10 @@ with and without that item, `unordered(a, b) | a`.
 > never ends
 
 No alternative of the rule can ever match: for example, it requires a token
-after `eof`, or its recursion never ends. Give the rule at least one
-alternative that can match.
+right after `eof`, or its recursion never ends. Give the rule at least one
+alternative that can match. A token after `eof` that comes through a call, as
+in `eof + ref<Rest>`, or after a group ending with `eof`, is not refused: that
+alternative never matches.
 
 ### `twoEndMarks`
 
@@ -103,12 +105,12 @@ operand. Give the two operators different texts.
 > has two operators whose texts cannot be compared, the postfix operator on
 > level 1 and the binary operator on level 2 …
 
-This check and [`precedenceClash`](#precedenceclash) compare prefix and
-postfix operators by their text. When an operator's text comes from a
-repetition, an `option` or a region, or has too many spellings, the check
-cannot compare it, so the table is refused wherever two operators could
-clash. Write each operator with literals, terminals and data rules of fixed
-text.
+This check and [`precedenceClash`](#precedenceclash) compare operators by
+their text. A terminal that reads a literal, or a choice of literals, compares
+as those literals; one that reads a pattern compares only with itself. When an
+operator repeats with no maximum, reads a rule that reaches itself, or has too
+many spellings, only its first tokens are compared: the table is refused when
+two operators may start with the same token.
 
 ### `infixOperatorNotText`
 
@@ -737,6 +739,19 @@ Two trivia terminals match the same text at the same length and
 [category](grammar.md#tokens), and one is `hidden`. Put both in `ignored`, or
 make them read different texts.
 
+### `keywordSpellings`
+
+> terminal `ΥΠΕΡΣΥΝΤΡΙΠΤΙΚΟΤΑΤΟΣ` has more than 1 024 keyword spellings, each
+> word counted once for each case of its letters, and some trivia reads on
+> past one of them
+
+An expected keyword beats trivia that starts with the same word, as
+`ikw<"REM">` does before a `REM` comment. Each word is one spelling, and a word
+that ignores case doubles for each letter whose two cases start with different
+bytes, as many Greek and Cyrillic letters do. Past 1 024 spellings in one
+terminal, such trivia is refused. Read fewer words in the terminal, match them
+case-sensitively, or make the trivia start differently.
+
 ### `terminalEmpty`
 
 > terminal `T` matches the empty string -- give its body a part it must read
@@ -827,7 +842,7 @@ multi-byte characters.
 Make each turn of the loop read something after the guard:
 `!lit<"/"> + any`.
 
-### `rescuedRefusalPastMatch`
+### `passableRefusalPastMatch`
 
 > terminal `W` may end a match exactly where a word its guard excludes ends,
 > after the start of the terminal, and `_` after that word lets the guard pass
@@ -844,7 +859,7 @@ word.
 In a nested run the end of the text does not close, the guard may test only
 the first character of that text, and not as a keyword.
 
-### `rescueReadsPast`
+### `readsOutsideBoundary`
 
 > terminal `NAME` excludes a word with a keyword guard, then may read after it
 > a character outside `word_boundary`
@@ -949,9 +964,10 @@ Literals in terminals and conditions get no warning.
 > check that they never match the same text with the same length and
 > category …
 
-The [`sectionEndShared`](#sectionendshared) and [`triviaTied`](#triviatied)
-checks cannot always look inside a terminal that uses a capture, a call, a
-nested run or a condition. They then warn instead of refusing.
+The [`sectionEndShared`](#sectionendshared), [`triviaTied`](#triviatied)
+and [`keywordSpellings`](#keywordspellings) checks cannot always look inside a
+terminal that uses a capture, a call, a nested run or a condition. They then
+warn instead of refusing.
 
 ## Where the engines differ
 

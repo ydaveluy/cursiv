@@ -6,14 +6,13 @@
 #include <vector>
 
 // The dump, folded for review: long rules broken at their top-level
-// alternatives and filled to a column. It reads the text and nothing of the
-// model. The grammar source the runtime serves and `GRAMMAR.txt` are folded
-// by this one function, so they fold identically.
+// alternatives and filled to a column. It folds both the served grammar source
+// and `GRAMMAR.txt`.
 
 namespace cursiv::engine {
 
-// Produced while walking the grammar, before emitting runtime source. Ranks
-// identify rules independently of their printed names or body spelling.
+// The printed grammar: each rule's span of `text` and the rules it uses, by
+// index.
 struct GrammarDump {
   struct Rule {
     std::string name;

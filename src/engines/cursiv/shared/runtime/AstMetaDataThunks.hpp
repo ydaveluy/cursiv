@@ -1,7 +1,5 @@
-// The symbols an `AstMetaData` names: what a reflection reads off one
-// member, and the ops a linker runs on a reference whose type it does not
-// know -- each templated on the strict minimum, so only the arrays are
-// per-grammar.
+// The symbols an `AstMetaData` names: what a reflection reads off one member,
+// and the ops a linker runs on a reference of unknown type.
 #pragma once
 
 #include <array>
@@ -55,9 +53,9 @@ struct ref_branch<TypeList<Ts...>> {
   }
 };
 
-// `Which` is the rank of the candidate the narrow type derives from -- exactly
-// one, by the law -- so a tag this filter accepts lands at the rank the
-// member's own row would have given it, and `get<T>()` keeps its meaning.
+// `Which` is the rank of the one candidate the narrow type derives from, so a
+// tag this filter accepts gets the rank the member's own row gives it, and
+// `get<T>()` keeps its meaning.
 template <class N, std::uint8_t Which>
 struct ref_narrow {
   static std::uint8_t run(const AstTypeTag* t) noexcept {
@@ -88,14 +86,14 @@ RefState ref_state_raw(const AstNode& o, std::uint32_t i) noexcept {
 // `single` load the state with acquire before reading the targets.
 template <class F, class Ns>
 consteval RefOps ref_ops_of() {
-  // One row shape for both natures: a linker holds a `RefHandle` and nothing
+  // One row shape for both kinds: a linker holds a `RefHandle` and nothing
   // else, so how many targets a name reaches stays the grammar's business.
-  if constexpr (!is_ref_nature(F::nature))
+  if constexpr (!is_ref_content(F::content))
     return RefOps{};  // a non-reference field: a null entry
   else {
     using L = typename held_targets<typename F::held>::type;
     RefOps ops{
-        .multi = is_multi_ref_nature(F::nature),
+        .multi = is_multi_ref_content(F::content),
         .branch = &ref_branch<L>::run,
         .narrows = narrow_table<L, Ns>::fns.data(),
         .narrow_count = static_cast<std::uint8_t>(tl_size<Ns>::value),
@@ -121,7 +119,7 @@ consteval RefOps ref_ops_of() {
         .size = [](const AstNode& o, std::uint32_t i) noexcept -> std::size_t {
           if (ref_state_raw<F>(o, i) != RefState::Resolved) return 0;
           const auto& r = ref_of<F>(o, i);
-          if constexpr (is_multi_ref_nature(F::nature))
+          if constexpr (is_multi_ref_content(F::content))
             return RefAccess::items(r).size();
           else
             return RefAccess::target(r) != nullptr ? 1u : 0u;
@@ -130,7 +128,7 @@ consteval RefOps ref_ops_of() {
                  std::size_t k) noexcept -> AstNode* {
           if (ref_state_raw<F>(o, i) != RefState::Resolved) return nullptr;
           const auto& r = ref_of<F>(o, i);
-          if constexpr (is_multi_ref_nature(F::nature))
+          if constexpr (is_multi_ref_content(F::content))
             return k < RefAccess::items(r).size()
                        ? RefAccess::items(r)[k].target
                        : nullptr;
@@ -140,7 +138,7 @@ consteval RefOps ref_ops_of() {
         .reset =
             [](AstNode& o, std::uint32_t i) noexcept {
               auto& r = ref_of<F>(o, i);
-              if constexpr (is_multi_ref_nature(F::nature))
+              if constexpr (is_multi_ref_content(F::content))
                 RefAccess::items(r).clear();
               else {
                 RefAccess::target(r) = nullptr;
@@ -150,7 +148,7 @@ consteval RefOps ref_ops_of() {
                   .store(RefState::Unresolved, std::memory_order_release);
             },
     };
-    if constexpr (!is_multi_ref_nature(F::nature))
+    if constexpr (!is_multi_ref_content(F::content))
       ops.single = [](const AstNode& o, std::uint32_t i) noexcept {
         if (ref_state_raw<F>(o, i) != RefState::Resolved)
           return SingleRefRead{};
@@ -165,7 +163,7 @@ consteval RefOps ref_ops_of() {
 // a list of them has none to name.
 template <class F>
 consteval const AstTypeTag* reference_tag_of() {
-  if constexpr (nature_of<typename F::held> == FieldNature::reference)
+  if constexpr (content_of<typename F::held> == FieldContent::reference)
     return &ast_type_tag<typename F::held>;
   else
     return nullptr;

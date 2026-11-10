@@ -29,15 +29,16 @@ std::string_view ast::Opts::* const kFields[] = {
     &ast::Opts::a17, &ast::Opts::a18, &ast::Opts::a19, &ast::Opts::a20};
 constexpr unsigned kClauses = 20;
 
-std::string_view ast::Storey::* const kStoreyFields[] = {
-    &ast::Storey::a01, &ast::Storey::a02, &ast::Storey::a03, &ast::Storey::a04};
-constexpr unsigned kStoreyClauses = 4;
+std::string_view ast::Separated::* const kSeparatedFields[] = {
+    &ast::Separated::a01, &ast::Separated::a02, &ast::Separated::a03,
+    &ast::Separated::a04};
+constexpr unsigned kSeparatedClauses = 4;
 
 bool clean(const cursiv::ParseResult& r) {
   return r.cst().accepted() && !r.cst().recovered();
 }
 
-// A reading no repair finishes still has to leave a tape a reader can walk,
+// A parse no repair finishes still has to leave a tape a reader can walk,
 // and an accepted one a tree.
 void walkable(const cursiv::Parser& parser, std::string_view broken) {
   const cursiv::ParseResult r = parser.parse(broken);
@@ -107,37 +108,38 @@ void optionals(const cursiv::Parser& parser) {
     walkable(parser, broken);
 }
 
-void storey_one(const cursiv::Parser& parser, const std::string& text,
-                const std::string (&want)[kStoreyClauses]) {
+void separated_one(const cursiv::Parser& parser, const std::string& text,
+                   const std::string (&want)[kSeparatedClauses]) {
   const cursiv::ParseResult r = parser.parse(text);
   if (!clean(r)) {
-    std::printf("  FAIL storey: `%s` was not taken cleanly\n", text.c_str());
+    std::printf("  FAIL separated: `%s` was not taken cleanly\n", text.c_str());
     ++failures;
     return;
   }
-  const ast::Storey* o = r.value_as<ast::Storey>();
+  const ast::Separated* o = r.value_as<ast::Separated>();
   CHECK(o != nullptr);
   if (o == nullptr) return;
-  for (unsigned i = 0; i < kStoreyClauses; ++i)
-    if (o->*kStoreyFields[i] != want[i]) {
-      std::printf("  FAIL storey: clause %u holds `%.*s`, wanted `%s`\n", i + 1,
-                  static_cast<int>((o->*kStoreyFields[i]).size()),
-                  (o->*kStoreyFields[i]).data(), want[i].c_str());
+  for (unsigned i = 0; i < kSeparatedClauses; ++i)
+    if (o->*kSeparatedFields[i] != want[i]) {
+      std::printf("  FAIL separated: clause %u holds `%.*s`, wanted `%s`\n",
+                  i + 1, static_cast<int>((o->*kSeparatedFields[i]).size()),
+                  (o->*kSeparatedFields[i]).data(), want[i].c_str());
       ++failures;
     }
 }
 
 // Optional positions separated by choices holding an end assertion.
-void storey(const cursiv::Parser& parser) {
+void separated(const cursiv::Parser& parser) {
   // Empty, full and scattered subsets preserve each clause's value.
-  storey_one(parser, "storey { ; ; ; ; }", {"", "", "", ""});
-  storey_one(parser, "storey { k01 a ; k02 b ; k03 c ; k04 d ; }",
-             {"a", "b", "c", "d"});
-  storey_one(parser, "storey { k01 a ; ; ; ; }", {"a", "", "", ""});
-  storey_one(parser, "storey { ; ; ; k04 d ; }", {"", "", "", "d"});
-  storey_one(parser, "storey { ; k02 b ; k03 c ; ; }", {"", "b", "c", ""});
-  for (const std::string_view broken :
-       {"storey { k01", "storey { k01 a", "storey { ; ; }", "storey {"})
+  separated_one(parser, "separated { ; ; ; ; }", {"", "", "", ""});
+  separated_one(parser, "separated { k01 a ; k02 b ; k03 c ; k04 d ; }",
+                {"a", "b", "c", "d"});
+  separated_one(parser, "separated { k01 a ; ; ; ; }", {"a", "", "", ""});
+  separated_one(parser, "separated { ; ; ; k04 d ; }", {"", "", "", "d"});
+  separated_one(parser, "separated { ; k02 b ; k03 c ; ; }",
+                {"", "b", "c", ""});
+  for (const std::string_view broken : {"separated { k01", "separated { k01 a",
+                                        "separated { ; ; }", "separated {"})
     walkable(parser, broken);
 }
 
@@ -164,13 +166,13 @@ void entangled(const cursiv::Parser& parser) {
 }  // namespace
 
 void torture_optionals() {
-  // The entangled suffix owes every conflict: auxiliaries add none, and the
-  // other shapes stay deterministic.
+  // Every conflict comes from the entangled suffix: auxiliaries add none, and
+  // the other shapes stay deterministic.
   CHECK(g::kTable.nconflicts <= 22);
 
   const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
   optionals(*parser);
-  storey(*parser);
+  separated(*parser);
   entangled(*parser);
 
   // The emitter must escape a literal newline in its generated C++ text.

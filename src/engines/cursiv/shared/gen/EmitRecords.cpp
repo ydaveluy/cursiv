@@ -161,9 +161,9 @@ namespace grammar_detail {
         emit_table("constexpr ::std::uint8_t kNarrows[]", records,
                    [](const RecordGen& rec) { return concat(rec.narrow); }));
 
-  // The words of every terminal in one pool, a list the pool already holds in
-  // a row read there again: a grammar that spells none writes no pool, and
-  // its rows no spellings.
+  // The words of every terminal in one pool, a list the pool already holds
+  // reused. A grammar that spells none writes no pool, and its rows no
+  // spellings.
   std::vector<std::string_view> spellings;
   std::vector<std::size_t> spellingAt;
   for (const TerminalGen& t : terminals) {

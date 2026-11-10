@@ -13,11 +13,9 @@
 #include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
 
-// Which check runs on which node, and in which pass: a check is filed under
-// a tag (the node, read off the method's signature) and a category (the
-// pass, given to `registerChecks`). Three laws guard the split, checked
-// where each is judged: the method's shape at compile time; the watched
-// type and the reserved `built_in` category at registration.
+// Which check runs on which node, and in which pass: a check is filed under a
+// tag, read off its signature, and a category, given at registration. The
+// shape is checked at compile time; the type and category at registration.
 
 namespace cursiv {
 
@@ -29,17 +27,14 @@ struct ValidationCheckRegistration;
 using ValidationCheck = std::function<void(const AstNode&, ValidationAcceptor&,
                                            const CancellationToken&)>;
 
-// A document-level check, run once per pass around the per-node walk. This is
-// where cross-node state lives: the per-node checks are copies fanning out over
-// documents, so a check that has to see the whole document at once -- two
-// declarations wearing one name -- belongs here, its state on its own stack.
+// A document-level check, run once per pass around the per-node walk. A check
+// that must see the whole document at once, such as duplicate names, goes
+// here, with its state on its own stack.
 using ValidationPreparation = std::function<void(
     const Document&, ValidationAcceptor&, const CancellationToken&)>;
 
-// A hook declares its category at registration, as a per-node check declares
-// one in its return type; it is never handed the pass's list to filter itself
-// against. The incremental build has to know which categories a hook belongs
-// to, or a hooks-only language would never be owed a pass.
+// A hook declares its category at registration, as a per-node check does in
+// its return type: the incremental build must know which pass it belongs to.
 struct ValidationPreparationEntry {
   const ValidationCategory* category = &fast;
   ValidationPreparation check;
@@ -67,7 +62,7 @@ struct ValidationCheckRegistration {
 };
 
 // Which categories a pass runs. Empty is every one, which is what the build
-// path passes: a document is not `Validated` until everything it owes has run.
+// path passes: a document is not `Validated` until all its checks have run.
 using ValidationCategories = std::span<const ValidationCategory* const>;
 
 class ValidationRegistry {
@@ -79,20 +74,15 @@ class ValidationRegistry {
   virtual void registerCheck(ValidationCheckRegistration,
                              const ValidationCategory* category = &fast) = 0;
 
-  // ...and a language's whole table in one statement, which is how a module
-  // reads. The category is stated here and nowhere else: it is a property of
-  // when a check should run, which is the registration's business and not the
-  // check's.
+  // A language's whole table in one call, under one category.
   void registerChecks(std::initializer_list<ValidationCheckRegistration> checks,
                       const ValidationCategory* category = &fast) {
     for (const ValidationCheckRegistration& check : checks)
       registerCheck(check, category);
   }
 
-  // The instance is the container's, bound by address and never copied: a
-  // validator is a service, defined once in the language's own services, so it
-  // may hold per-build state and need not be copyable. The rvalue overloads
-  // are deleted, so a temporary cannot bind and dangle.
+  // The instance is the container's, bound by address and never copied. The
+  // rvalue overloads are deleted, so a temporary cannot bind and dangle.
   template <auto Method, class Object>
   [[nodiscard]] static ValidationCheckRegistration makeValidationCheck(
       const Object& validator) {
@@ -111,14 +101,14 @@ class ValidationRegistry {
   static ValidationCheckRegistration makeExactValidationCheck(const Object&&) =
       delete;
 
-  // `built_in` is refused: it names the runtime's own half. Same bootstrap law
-  // as `registerCheck` -- registered once, on one thread, read forever.
+  // `built_in` is refused: it names the runtime's own half. Same rule as
+  // `registerCheck`: registered once, on one thread, then only read.
   virtual void registerBeforeDocument(
       ValidationPreparation, const ValidationCategory* category = &fast) = 0;
   virtual void registerAfterDocument(
       ValidationPreparation, const ValidationCategory* category = &fast) = 0;
-  // ...and what was filed, in registration order, for the validator to run
-  // around the walk.
+  // What was filed, in registration order, for the validator to run around
+  // the walk.
   [[nodiscard]] virtual std::span<const ValidationPreparationEntry>
   checksBefore() const noexcept = 0;
   [[nodiscard]] virtual std::span<const ValidationPreparationEntry>
@@ -131,12 +121,9 @@ class ValidationRegistry {
                          ValidationCategories,
                          const CancellationToken&) const = 0;
 
-  // What a check that threw becomes; a cancellation never comes here.
-  // `context` says what was running: "An error occurred during validation",
-  // or during its set-up or tear-down. `node` is what the check was given,
-  // null for a check of the whole document. By default, an error worded
-  // "`context`: what it threw" over the node, or the whole document, and a
-  // warning to the observability sink. An override may rethrow `failure`.
+  // What a check that threw becomes; a cancellation never comes here. By
+  // default, an error "`context`: what it threw" on `node` (null for a document
+  // check) or the document, and a warning to the sink. May rethrow `failure`.
   virtual void handleException(std::exception_ptr failure,
                                std::string_view context,
                                ValidationAcceptor& accept,
@@ -152,10 +139,8 @@ class ValidationRegistry {
       const noexcept = 0;
 
  private:
-  // What a check is, read off its pointer. Two shapes differing only in the
-  // third parameter: a check that walks a whole subtree wants to be
-  // interruptible, one that looks at a single node has nothing to poll. A
-  // pointer matching neither leaves `node` undeclared, which is law 1.
+  // A check's shape, read off its pointer: the third parameter is a token for a
+  // check that walks a subtree, absent for one that looks at a single node.
   template <class M>
   struct check_traits {};
   template <class V, class Node>
@@ -184,7 +169,6 @@ class ValidationRegistry {
   template <auto M, class V>
   [[nodiscard]] static ValidationCheckRegistration make_check(
       const V& held, bool exactTypeOnly) {
-    // Law 1 -- the shape.
     static_assert(
         is_check<decltype(M)>,
         "this looks like a validation check and is not shaped like one. A "

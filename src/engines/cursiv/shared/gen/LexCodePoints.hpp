@@ -1,9 +1,6 @@
-// The characters a class names and their UTF-8 byte sequences: the token
-// graph holds byte classes only, so a class of scalars is lexed as the
-// alternatives of well-formed encodings that cover it. A byte that starts no
-// scalar is a character of its own, listed as the range `kStray`; a bound
-// refusing the scalar that starts on an earlier byte lists `kBackScalar` plus
-// how many bytes earlier.
+// The characters a class names and their UTF-8 byte sequences, lexed as byte
+// classes. A byte that starts no scalar is the range `kInvalid`; a scalar that
+// starts on an earlier byte is `kBackScalar` plus how many bytes earlier.
 #pragma once
 
 #include <algorithm>
@@ -37,16 +34,16 @@ struct LexCodePoints {
   // Ascending, the markers past the scalars.
   std::vector<unicode::Range> ranges;
 
-  static constexpr char32_t kStray = kNoScalar;
+  static constexpr char32_t kInvalid = kNoScalar;
   static constexpr bool marker(const unicode::Range& r) {
     return r.lo > 0x10FFFF;
   }
-  bool strays() const { return !ranges.empty() && ranges.back().lo == kStray; }
+  bool holds_invalid() const {
+    return !ranges.empty() && ranges.back().lo == kInvalid;
+  }
 
-  // The properties named, one bit each over `unicode::Property`; the
-  // scalars a `cr<>` spelling names (`a-z`, `À-ÿ`, `\-`, `\u00e9`, `\s`); the
-  // whole complemented among all characters or not. Surrogates are never code
-  // points here.
+  // The properties named, one bit each over `unicode::Property`, the scalars
+  // a `cr<>` spelling names, and whether the whole is complemented.
   static LexCodePoints of(std::uint64_t props, bool complement,
                           std::string_view spec) {
     LexCodePoints out;
@@ -84,16 +81,16 @@ struct LexCodePoints {
 
   // The lead bytes that start no scalar unless the rest of one follows, each
   // with the classes of that rest.
-  struct StrayLead {
+  struct LoneLead {
     ByteSet lead;
     unsigned len = 0;
     ByteSet rest[3];
   };
-  static std::array<StrayLead, 7> stray_leads() {
+  static std::array<LoneLead, 7> lone_leads() {
     using Span = std::pair<unsigned, unsigned>;
     const auto make = [](std::initializer_list<Span> leads,
                          std::initializer_list<Span> rest) {
-      StrayLead out;
+      LoneLead out;
       for (const auto& [lo, hi] : leads) out.lead.add(lo, hi);
       for (const auto& [lo, hi] : rest) out.rest[out.len++].add(lo, hi);
       return out;
@@ -116,7 +113,7 @@ struct LexCodePoints {
     for (const unicode::Range& r : ranges)
       for (char32_t cp = r.lo; cp < 0x80 && cp <= r.hi; ++cp)
         out.add(static_cast<unsigned char>(cp));
-    if (strays()) {
+    if (holds_invalid()) {
       out.add(0x80, 0xC1);
       out.add(0xF5, 0xFF);
     }
@@ -136,7 +133,7 @@ struct LexCodePoints {
     for (const Seq& q : sequences())
       if (q.len > 1) out.add(q.lo[0], q.hi[0]);
     for (const unicode::Range& r : ranges) {
-      if (r.lo == kStray)
+      if (r.lo == kInvalid)
         out.add(0xC2, 0xF4);
       else if (marker(r))
         out.add(0x80, 0xBF);
@@ -167,7 +164,7 @@ struct LexCodePoints {
     continues.add(0x80, 0xBF);
     for (const unicode::Range& r : ranges) {
       if (marker(r)) {
-        if (leads.intersects(r.lo == kStray ? starts : continues))
+        if (leads.intersects(r.lo == kInvalid ? starts : continues))
           out.ranges.push_back(r);
         continue;
       }
@@ -185,7 +182,6 @@ struct LexCodePoints {
     normalize();
   }
 
-  // Every scalar of `o` is here.
   bool covers(const LexCodePoints& o) const {
     LexCodePoints both = *this;
     both.unite(o);
@@ -269,11 +265,11 @@ struct LexCodePoints {
   void complement() {
     std::vector<unicode::Range> out, kept;
     char32_t next = 0;
-    bool stray = false;
+    bool invalid = false;
     for (const unicode::Range& r : ranges) {
       if (marker(r)) {
-        if (r.lo == kStray)
-          stray = true;
+        if (r.lo == kInvalid)
+          invalid = true;
         else
           kept.push_back(r);
         continue;
@@ -283,7 +279,7 @@ struct LexCodePoints {
     }
     if (next <= 0x10FFFF) out.push_back({next, 0x10FFFF});
     out.insert(out.end(), kept.begin(), kept.end());
-    if (!stray) out.push_back({kStray, kStray});
+    if (!invalid) out.push_back({kInvalid, kInvalid});
     ranges = std::move(out);
   }
 

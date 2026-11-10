@@ -9,19 +9,19 @@
 namespace cursiv::recovery_metric {
 
 enum class FaultClass : std::uint8_t {
-  byte,        // one byte inserted, deleted or replaced
-  spread1,     // three token faults, one token between each
+  byte,     // one byte inserted, deleted or replaced
+  spread1,  // three token faults, one token between each
   spread3,
   spread10,
   separators,  // a run of separators gone, one fault each
-  eof1,        // the text cut where 1 closer is owed: one fault
+  eof1,        // the text cut where 1 closer is missing: one fault
   eof3,        // 2-3 closers
   eof7,        // 4-7 closers
   eof20,       // 8-20 closers
   quote,       // a string's closing quote gone
   escape,      // a string's closing quote escaped
   comment,     // a block comment's closer gone, none after it
-  hole,        // a run of stray tokens: one fault
+  hole,        // a run of extra tokens: one fault
   typo,        // a keyword misspelt by one to three letter edits
 };
 

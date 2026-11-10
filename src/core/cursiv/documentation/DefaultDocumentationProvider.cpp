@@ -27,14 +27,10 @@
 namespace cursiv {
 
 std::optional<std::string> DefaultDocumentationProvider::getDocumentation(
-    const AstNode& node, const Document* home) const {
-  if (home == nullptr) home = node.getDocument();
-  if (home == nullptr) return std::nullopt;
-  const Document& document = *home;
-  // The author's comment, rendered rather than raw: a doc comment above a
-  // declaration reaches its reader as markdown, its tags rendered and its
-  // {@link} targets resolved through the hooks below. Nothing else answers
-  // this arm.
+    const AstNode& node, const Document* nodeDocument) const {
+  if (nodeDocument == nullptr) nodeDocument = node.getDocument();
+  if (nodeDocument == nullptr) return std::nullopt;
+  const Document& document = *nodeDocument;
   const std::optional<std::string> written =
       services.commentProvider->getComment(node, &document);
   if (!written || !is_doc_comment(*written)) return std::nullopt;
@@ -61,8 +57,8 @@ DefaultDocumentationProvider::documentationLinkRenderer(
   std::optional<AstNodeDescription> description =
       findNameInLocalSymbols(node, document, name);
   if (!description) description = findNameInGlobalScope(node, document, name);
-  // The node shortcut stands only while the target's build does; without it
-  // the link degrades to text rather than dereferencing a stale identity.
+  // `node` is set only while the target document is built; without it the
+  // link stays plain text.
   if (!description || description->node == nullptr) return std::nullopt;
 
   const Document* target = &document;
@@ -73,8 +69,7 @@ DefaultDocumentationProvider::documentationLinkRenderer(
     target = held.get();
   }
 
-  // The name site is the target language's to find: the link may cross into
-  // a document another grammar owns.
+  // The target document may belong to another language: ask its name provider.
   const CoreServices* const language =
       target->language != nullptr
           ? target->language
@@ -108,25 +103,24 @@ DefaultDocumentationProvider::findNameInLocalSymbols(
     const AstNode& node, const Document& document,
     std::string_view name) const {
   const std::uint64_t hash = LocalSymbols::hash_name(name);
-  for (const AstNode* scope = &node; scope != nullptr && scope != &document;
-       scope = scope->parent) {
-    std::optional<AstNodeDescription> found;
-    document.localSymbols.find(scope, name, hash)
+  const LocalSymbols& symbols = document.localSymbols;
+  std::optional<AstNodeDescription> found;
+  symbols.walkScopes(&node, &document, [&](const AstNode* scope) {
+    symbols.find(scope, name, hash)
         .for_each([&](const AstNodeDescription& entry) {
           if (entry.name != name) return true;
           found = entry;
           return false;
         });
-    if (found) return found;
-  }
-  return std::nullopt;
+    return found.has_value();
+  });
+  return found;
 }
 
 std::optional<AstNodeDescription>
 DefaultDocumentationProvider::findNameInGlobalScope(
     const AstNode&, const Document&, std::string_view name) const {
-  // An empty AcceptSet accepts everything: a doc link names prose, not a
-  // reference the reflection could narrow.
+  // An empty AcceptSet accepts every type.
   const AstNodeDescription* const found =
       shared.indexManager->findByName(name, /*caseSensitive=*/true, {},
                                                *services.astReflection);

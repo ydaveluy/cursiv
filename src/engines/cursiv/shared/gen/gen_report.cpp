@@ -11,6 +11,7 @@
 #include "cursiv/shared/gen/WarningFound.hpp"
 #include "cursiv/shared/gen/WordLitWarning.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {
 
@@ -39,7 +40,7 @@ std::vector<FlagWarning> flag_warnings(WarningFound& found) {
   return walk_warnings<FlagWarning>(found, [](WarningFound& w, ImageId id) {
     const ImageNode& n = w.image().nodes[id];
     return n.kind == ImageKind::flag &&
-           w.reads().nothing(w.image().kids[n.first]);
+           w.reads().nothing(w.image().children[n.first]);
   });
 }
 
@@ -73,10 +74,10 @@ bool refuse_self_bounded_arms(std::string_view grammar, GrammarImage& image) {
 bool refuse_empty_match(std::string_view grammar, std::string_view terminal) {
   if (terminal.empty()) return false;
   const std::string_view text = lower_fail_text(LowerFail::terminalEmpty);
-  std::fprintf(stderr, "%.*s: refused: terminal `%.*s` %.*s\n",
+  std::fprintf(stderr, "%.*s: refused: terminal %s %.*s\n",
                static_cast<int>(grammar.size()), grammar.data(),
-               static_cast<int>(terminal.size()), terminal.data(),
-               static_cast<int>(text.size()), text.data());
+               quote(terminal, '`').c_str(), static_cast<int>(text.size()),
+               text.data());
   return true;
 }
 

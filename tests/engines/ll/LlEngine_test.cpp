@@ -2,10 +2,9 @@
 #include <stdexcept>
 #include <thread>
 #include "cursiv/ll/runtime/LlEpisodeMemo.hpp"
-// What the descent owes: the tree the table engine writes for the same
-// language, a tree for a refused document, a cancellation answered where it
-// stands, a nesting deeper than any machine stack read like any other, and a
-// precedence table as its grammar said.
+// What the descent must do: write the tree the table engine writes, a tree for
+// a refused document, answer a cancellation, read any nesting depth, and climb
+// a precedence table as written.
 
 #include <algorithm>
 #include <array>
@@ -241,7 +240,7 @@ void ast_with_spans(const cursiv::AstReflection& reflection,
 
 // Call(ID '(' ... ')') and Name(ID) deliberately share a scalar prefix.
 // Unlike an owning node prefix, this choice cannot become an optional Nest;
-// tests of the prediction cache therefore meet the decision before that ID.
+// tests of the prediction cache therefore reach the decision before that ID.
 std::uint16_t name_or_call_decision() {
   const cursiv::engine::LlLowCfg& cfg =
       cursiv::engine::LlLowering<tpar::Ll>::table().cfg;
@@ -389,13 +388,13 @@ void deep_prediction_keeps_its_known_continuation() {
   }
   CHECK(actual && !unrelated);
   CHECK(simulation.step(42));
-  CHECK(simulation.settled() == 0);
+  CHECK(simulation.decided() == 0);
 }
 
 // The room a larger walk grew is given back for the next, and the table
 // answers as before.
 void a_table_gives_back_the_room_a_larger_walk_left() {
-  cursiv::engine::LlStamped<std::uint64_t, cursiv::engine::LlKeyHash> keys;
+  cursiv::engine::LlRoundTable<std::uint64_t, cursiv::engine::LlKeyHash> keys;
   bool fresh = false;
   for (std::uint64_t k = 0; k < 100000; ++k)
     keys.at(k, fresh) = static_cast<std::uint32_t>(k);
@@ -444,7 +443,7 @@ void a_pool_gives_back_what_a_walk_made() {
 
 // Alias calls may join a cell opened before their own caller. Creation order
 // must not make two different continuation sets indistinguishable.
-void call_cells_are_sealed_after_their_actual_dependencies() {
+void call_cells_are_shaped_after_their_actual_dependencies() {
   using namespace cursiv;
   using namespace cursiv::engine;
 
@@ -627,9 +626,10 @@ void deep_cell_paths_keep_their_order_and_stop_at_the_first_refusal() {
         CHECK(paths == (1u << (n - 1)));
       }
       LlHistory::Node common = LlHistory::kRoot;
-      bool met = false;
-      CHECK(sim.meet_arms(thread.stack, thread.arm, common, met, 0));
-      CHECK(met && sim.arms().depth(common) == 1);
+      bool hasCommon = false;
+      CHECK(
+          sim.fold_common_arm(thread.stack, thread.arm, common, hasCommon, 0));
+      CHECK(hasCommon && sim.arms().depth(common) == 1);
       if (sim.arms().depth(common) == 1)
         CHECK(sim.arms().event(common, 0).word == thread.root);
     }
@@ -652,7 +652,7 @@ struct CountedContextHash {
 
 void context_keys_keep_both_halves_on_every_platform() {
   constexpr unsigned count = 8192;
-  cursiv::engine::LlStamped<CountedContextKey, CountedContextHash> keys;
+  cursiv::engine::LlRoundTable<CountedContextKey, CountedContextHash> keys;
   CountedContextKey::comparisons = 0;
   for (unsigned i = 0; i < count; ++i) {
     bool fresh = false;
@@ -698,9 +698,9 @@ struct LlAnalysisFixture {
   unsigned nrules;
   const cursiv::engine::TermInfo* terms = nullptr;
 };
-LlAnalysisFixture longOwedRun;
+LlAnalysisFixture longRemainingRun;
 
-void shared_head_calls_are_settled_in_dependency_order() {
+void shared_head_calls_are_computed_in_dependency_order() {
   constexpr unsigned count = 4096;
   std::vector<cursiv::engine::LlAtnState> states(2 * count);
   std::vector<cursiv::engine::LlAtnEdge> edges(count + 1);
@@ -1016,7 +1016,7 @@ void head_sharing_stops_at_conditions_and_closes_cycles() {
   CHECK(shared[0] == 0 && shared[1] == 1 && shared[2] == 1);
 }
 
-void owed_prefixes_walk_deep_paths_and_keep_the_shortest_readings() {
+void remaining_prefixes_walk_deep_paths_and_keep_the_shortest_readings() {
   constexpr unsigned count = 20000;
   std::vector<cursiv::engine::LlAtnState> states(count + 2);
   std::vector<cursiv::engine::LlAtnEdge> edges(count + 1);
@@ -1030,16 +1030,16 @@ void owed_prefixes_walk_deep_paths_and_keep_the_shortest_readings() {
   states.back() = {.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0};
   const std::uint32_t start = 0;
   const cursiv::engine::TermInfo terms[4]{};
-  longOwedRun = {{.states = states.data(),
-                  .nstates = count + 2,
-                  .edges = edges.data(),
-                  .ruleStart = &start},
-                 1,
-                 terms};
-  cursiv::engine::LlOwed<longOwedRun> owed;
-  cursiv::engine::LlSimulation sim(longOwedRun.atn);
+  longRemainingRun = {{.states = states.data(),
+                       .nstates = count + 2,
+                       .edges = edges.data(),
+                       .ruleStart = &start},
+                      1,
+                      terms};
+  cursiv::engine::LlRemaining<longRemainingRun> remaining;
+  cursiv::engine::LlSimulation sim(longRemainingRun.atn);
   sim.load(std::vector<cursiv::engine::LlConfig>{{.state = 0}});
-  CHECK(owed.first(sim) == 1);
+  CHECK(remaining.first(sim) == 1);
 
   using Kind = cursiv::engine::LlEdgeKind;
   const cursiv::engine::LlAtnState choices[] = {
@@ -1057,12 +1057,12 @@ void owed_prefixes_walk_deep_paths_and_keep_the_shortest_readings() {
       {.kind = Kind::condition, .target = 4},
       {.kind = Kind::atom, .label = 2, .target = 1}};
   const std::uint32_t starts[] = {0, 3};
-  longOwedRun = {
+  longRemainingRun = {
       {.states = choices, .nstates = 6, .edges = paths, .ruleStart = starts},
       2,
       terms};
-  cursiv::engine::LlOwed<longOwedRun> shortest;
-  cursiv::engine::LlSimulation branch(longOwedRun.atn);
+  cursiv::engine::LlRemaining<longRemainingRun> shortest;
+  cursiv::engine::LlSimulation branch(longRemainingRun.atn);
   branch.load(std::vector<cursiv::engine::LlConfig>{{.state = 0}});
   std::vector<std::uint16_t> due;
   shortest.due(branch, due, [](auto) { return true; });
@@ -1155,8 +1155,8 @@ void a_search_reads_keywords_in_the_shared_alphabet() {
 }
 
 // A state after an optional prefix is also reachable from the rule's entry.
-// Its required child owes a token only when that call really read the prefix.
-void an_optional_prefix_keeps_owing_across_a_required_call() {
+// Its required child must read a token only when that call read the prefix.
+void an_optional_prefix_keeps_its_token_due_across_a_required_call() {
   static constexpr const auto& base = tpar::generated::Ll::kTable;
   constexpr auto keyword = ll_terms::named<base>("export"),
                  identifier = ll_terms::named<base>("ID");
@@ -1258,10 +1258,10 @@ void speculative_conditions_leave_the_real_filter_pending() {
   CHECK(simulation.configs() == before && simulation.needs_filter());
   CHECK(simulation.filter(
       [](std::uint16_t condition) { return condition == 1; }));
-  CHECK(simulation.settled() == 1 && simulation.step(43));
+  CHECK(simulation.decided() == 1 && simulation.step(43));
 }
 
-// A plan names places of one document: it answers the choices it elected where
+// A plan names places of one document: it answers the choices it made where
 // the descent stands, says nothing of the others, goes with a repair, and is
 // not the next parse's.
 void a_plan_is_the_parses_own_and_goes_with_a_repair() {
@@ -1382,10 +1382,9 @@ const std::string_view kCorpus[] = {
     "",
 };
 
-// The two engines read one language into one tree. The records are compared
-// by span, extent and standing -- an element id is each engine's own
-// numbering and says nothing across the two -- and the AST by class and
-// member, which is what a consumer of either module holds.
+// The two engines read one language into one tree: records compare by span,
+// extent and standing, element ids being each engine's own, and the AST by
+// class and member.
 void the_two_engines_write_one_tree() {
   const auto lr = tpar::generated::Lr::create_parser();
   const auto ll = tpar::generated::Ll::create_parser();
@@ -1505,11 +1504,9 @@ void a_string_instance_is_spelled_as_written() {
   }
 }
 
-// A document the grammar refuses is still a tree: the descent repairs where
-// it stands, so every byte is under a record and the parse says what it did.
-// The repairs themselves are each engine's own -- one searches with a cost
-// model, the other mends in place -- so what is pinned here is the contract,
-// not the shape.
+// A document the grammar refuses is still a tree: every byte is under a record,
+// and the parse says what it did. Each engine repairs its own way, so the
+// contract is pinned, not the shape.
 const std::string_view kBroken[] = {
     "let a = ;", "let = 1;",    "let a 1;",       "let a = f(1;",  "let a = 1",
     "garbage",   "let a = (1;", "let a = 1; let", "export a = 1;",
@@ -1520,7 +1517,6 @@ void a_refused_document_is_still_a_tree() {
   for (const std::string_view text : kBroken) {
     const cursiv::ParseResult r = ll->parse(text);
     CHECK(r.cst().size() != 0);
-    // Every byte of the document is under some record.
     cursiv::TextOffset covered = 0;
     for (cursiv::NodeId i = 0; i < r.cst().size(); ++i) {
       CHECK(r.cst()[i].begin <= r.cst()[i].end);
@@ -1548,24 +1544,24 @@ void a_repair_both_engines_make_is_one_repair() {
         "show ;", "show x x;", "x x;"}) {
     const cursiv::ParseResult a = lr->parse(text);
     const cursiv::ParseResult b = ll->parse(text);
-    bool alike = a.diagnostics.size() == b.diagnostics.size();
-    for (std::size_t i = 0; alike && i < a.diagnostics.size(); ++i)
-      alike = a.diagnostics[i].kind == b.diagnostics[i].kind &&
-              a.diagnostics[i].begin == b.diagnostics[i].begin &&
-              a.diagnostics[i].end == b.diagnostics[i].end;
+    bool matching = a.diagnostics.size() == b.diagnostics.size();
+    for (std::size_t i = 0; matching && i < a.diagnostics.size(); ++i)
+      matching = a.diagnostics[i].kind == b.diagnostics[i].kind &&
+                 a.diagnostics[i].begin == b.diagnostics[i].begin &&
+                 a.diagnostics[i].end == b.diagnostics[i].end;
     std::string x, y;
     if (a.value != nullptr) support::ast_of(*lrR, *a.value, x);
     if (b.value != nullptr) support::ast_of(*llR, *b.value, y);
-    if (!alike || x != y)
+    if (!matching || x != y)
       std::fprintf(stderr, "repair parity input=[%.*s] LR=%zu LL=%zu\n",
                    static_cast<int>(text.size()), text.data(),
                    a.diagnostics.size(), b.diagnostics.size());
-    CHECK(alike && x == y);
+    CHECK(matching && x == y);
   }
 }
 
-// A deletion names the token the reading resumes on, an insertion the terminal
-// it owed, as the other engine says them.
+// A deletion names the token the parse resumes on, an insertion the terminal
+// it expected, as the other engine names them.
 void a_repair_names_what_the_other_engine_names() {
   const auto ll = tpar::generated::Ll::create_parser();
   const auto lr = tpar::generated::Lr::create_parser();
@@ -1595,8 +1591,8 @@ void a_repair_names_what_the_other_engine_names() {
 }
 
 // A token the expression cannot go on from, and no caller of it can either,
-// costs the token and what the climb owes it, never the statement around it.
-void a_stray_token_in_an_expression_leaves_the_statement() {
+// costs the token and the operand the infix expects, never the statement.
+void an_extra_token_in_an_expression_leaves_the_statement() {
   const auto ll = tpar::generated::Ll::create_parser();
   const auto lr = tpar::generated::Lr::create_parser();
   const auto rl = tpar::generated::Ll::create_ast_reflection();
@@ -1636,7 +1632,7 @@ void a_skip_to_the_end_of_the_text_reads_nothing() {
           a.diagnostics[i].end == b.diagnostics[i].end);
 }
 
-// Where several tokens repair alike, both engines invent the one the grammar
+// Where several tokens repair the same, both engines invent the one the grammar
 // wrote first: a number before a name, an operator before the list's comma.
 void an_invented_token_is_the_one_written_first() {
   const auto ll = tpar::generated::Ll::create_parser();
@@ -1814,11 +1810,12 @@ void the_precedence_table_says_what_the_grammar_said() {
     CHECK(built.nodeAfter[leaf] != 0xFFFFFFFFu);
   }
   CHECK(t.nafter == built.cfg.nnodes);
-  // The runs a join's two operands owe, and the state a call of the operand
-  // returns into: zero here is a field that was never written.
+  // The runs of both operands and the state the operand call returns to are
+  // set: zero is a field never written.
   CHECK(c.leftCount != 0 && c.rightCount != 0);
   CHECK(c.atnEntry != 0);
-  // From the second turn on, the node the climb just laid is its left operand.
+  // From the second iteration on, the node the infix just built is its left
+  // operand.
   CHECK(std::ranges::any_of(
       std::span(built.fuse).subspan(c.leftBase, c.leftCount),
       [&](const cursiv::engine::LlFuse& f) {
@@ -2004,9 +2001,9 @@ void caret_out_of_range_keeps_the_output_and_next_request_intact() {
 namespace prediction_session {
 
 namespace {
-// The hand-written drive consumes the entire input as one action; its finish
-// scans only EOF. It needs no lexical acceptance predicates. Keep them out of
-// this artificial parser to avoid GCC's dormant dummy-array warning.
+// The hand-written driver consumes the whole input in one action and its finish
+// scans only EOF, so it needs no lexical acceptance predicates; leaving them
+// out also avoids a GCC warning on an unused dummy array.
 constexpr auto table = [] {
   auto copy = tpar::generated::Ll::kTable;
   copy.lexChoices = nullptr;
@@ -2029,9 +2026,9 @@ void drive(cursiv::engine::LlContext& c) {
   auto& kept = cursiv::engine::ll_episode_cache<table>();
   verify(kept.plan.empty());
   ++calls;
-  std::vector<cursiv::engine::LlPlanEntry> laid{
+  std::vector<cursiv::engine::LlPlanEntry> planned{
       {.at = calls, .decision = 1, .arm = static_cast<std::uint16_t>(calls)}};
-  kept.plan.install(laid, nullptr, 0);
+  kept.plan.install(planned, nullptr, 0);
   if (explode) throw std::runtime_error("drive exception");
   c.last = c.tape.leaf(0, c.len, cursiv::engine::StampLayout{}.make(0, 0));
   c.at = c.len;
@@ -2243,19 +2240,19 @@ int main() {
   deep_prediction_keeps_its_known_continuation();
   a_table_gives_back_the_room_a_larger_walk_left();
   a_pool_gives_back_what_a_walk_made();
-  call_cells_are_sealed_after_their_actual_dependencies();
+  call_cells_are_shaped_after_their_actual_dependencies();
   deep_cell_paths_keep_their_order_and_stop_at_the_first_refusal();
   context_keys_keep_both_halves_on_every_platform();
   deep_context_joins_keep_their_canonical_stacks();
-  shared_head_calls_are_settled_in_dependency_order();
+  shared_head_calls_are_computed_in_dependency_order();
   head_sharing_is_what_each_way_walked_whole_finds();
   head_sharing_walks_grow_with_the_rules();
   head_sharing_stops_at_conditions_and_closes_cycles();
-  owed_prefixes_walk_deep_paths_and_keep_the_shortest_readings();
+  remaining_prefixes_walk_deep_paths_and_keep_the_shortest_readings();
   a_return_stack_pushes_only_the_frames_that_changed();
   an_abandon_replays_equivalent_returns_without_collapsing_frames();
   a_search_reads_keywords_in_the_shared_alphabet();
-  an_optional_prefix_keeps_owing_across_a_required_call();
+  an_optional_prefix_keeps_its_token_due_across_a_required_call();
   caret_out_of_range_keeps_the_output_and_next_request_intact();
   a_forked_stack_is_read_once_per_context();
   a_caret_inside_a_token_answers_in_its_place();
@@ -2271,7 +2268,7 @@ int main() {
   a_refused_document_is_still_a_tree();
   a_repair_both_engines_make_is_one_repair();
   a_repair_names_what_the_other_engine_names();
-  a_stray_token_in_an_expression_leaves_the_statement();
+  an_extra_token_in_an_expression_leaves_the_statement();
   a_skip_to_the_end_of_the_text_reads_nothing();
   an_invented_token_is_the_one_written_first();
   the_first_written_of_sixty_is_invented();

@@ -11,13 +11,9 @@
 #include "cursiv/workspace/FileSystemProvider.hpp"
 #include "cursiv/workspace/WorkspaceFolder.hpp"
 
-// What puts documents in the store: the folders the client opened,
-// enumerated, filtered by the registered languages, and built. Without it a
-// cross-document reference would resolve against whatever an editor happens
-// to have open. Folders, not a single root -- a client sending none opens a
-// workspace of zero folders, which still runs -- and one build at the end:
-// added and built one at a time, every file would re-resolve what the
-// previous left broken.
+// What puts documents in the store: the client's folders, enumerated,
+// filtered by the registered languages, and built once at the end, so no file
+// re-resolves what the one before left broken. No folder at all is valid.
 
 namespace cursiv {
 
@@ -26,12 +22,8 @@ class WorkspaceManager {
   virtual ~WorkspaceManager() noexcept = default;
 
   // Scans `folderUris`, adds every claimed document to the store, and builds
-  // them in one grouped build.
-  //
-  // The same contract `DocumentBuilder::build` has, and for the same reason: it
-  // does not take the workspace lock. A caller inside a write action passes
-  // that action's token through; one with no lock passes
-  // neither and gets the defaults.
+  // them together. Like `DocumentBuilder::build`, it does not take the
+  // workspace lock: a caller inside a write passes that write's token.
   virtual void initializeWorkspace(
       std::span<const WorkspaceFolder> folders,
       const CancellationToken& cancelToken = kNoCancel) = 0;
@@ -61,21 +53,14 @@ class WorkspaceManager {
   [[nodiscard]] virtual bool shouldIncludeEntry(
       const FileSystemNode& entry) const = 0;
 
-  // Whether the scan would reach `entry`: `shouldIncludeEntry` holds for it
-  // and for every folder between it and the root it sits under. A file event
-  // is filtered by it, so an event never brings in what the scan leaves out.
-  // A root itself is reached. An entry inside a workspace folder but under
-  // none of its roots is not; one no workspace folder holds is judged alone.
+  // Whether the scan reaches `entry`: `shouldIncludeEntry` holds for it and for
+  // every folder up to its root. A file event is filtered by it. An entry no
+  // workspace folder holds is judged alone.
   [[nodiscard]] virtual bool isIncluded(const FileSystemNode& entry) const = 0;
 
-  // Resolved once the documents are in the store, which is not "the initial
-  // build finished". The two signals are separate on purpose: whoever needs an
-  // analysis phase waits for it with `DocumentBuilder::waitUntil`, and merging
-  // them would block a consumer on a build the workspace may not owe it.
-  //
-  // A future and not a flag: a flag can be asked, never awaited, so a consumer
-  // on another thread would poll it and race the scan it asked about. The
-  // shared future is set exactly once, by the first scan.
+  // Resolved once the documents are in the store, not when the build ends: wait
+  // for analysis with `DocumentBuilder::waitUntil`. Set once, by the first
+  // scan.
   [[nodiscard]] virtual std::shared_future<void> ready() const = 0;
 };
 

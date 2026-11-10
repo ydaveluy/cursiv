@@ -27,15 +27,19 @@ std::vector<lsp::FoldingRange> DefaultFoldingRangeProvider::getFoldingRanges(
     const Document& document, const CancellationToken& token) const {
   throw_if_cancelled(token);
   std::vector<lsp::FoldingRange> foldings;
-  collectFolding(document, [&](lsp::FoldingRange range) {
-    throw_if_cancelled(token);
-    foldings.push_back(std::move(range));
-  });
+  collectFolding(
+      document,
+      [&](lsp::FoldingRange range) {
+        throw_if_cancelled(token);
+        foldings.push_back(std::move(range));
+      },
+      token);
   return foldings;
 }
 
 void DefaultFoldingRangeProvider::collectFolding(
-    const Document& document, FoldingRangeAcceptor acceptor) const {
+    const Document& document, FoldingRangeAcceptor acceptor,
+    const CancellationToken& token) const {
   if (!document.hasAst()) return;
   const AstNode& root = *document.parseResult.value;
   const AstReflection& reflection = *services.astReflection;
@@ -53,13 +57,14 @@ void DefaultFoldingRangeProvider::collectFolding(
     };
     enter(root);
     while (!pending.empty()) {
+      throw_if_cancelled(token);
       const AstNode& node = *pending.back();
       pending.pop_back();
       if (shouldProcess(node)) collectObjectFolding(document, node, acceptor);
       if (shouldProcessContent(node)) enter(node);
     }
   }
-  collectCommentFolding(document, root, acceptor);
+  collectCommentFolding(document, root, acceptor, token);
 }
 
 bool DefaultFoldingRangeProvider::shouldProcess(const AstNode&) const {
@@ -81,7 +86,7 @@ void DefaultFoldingRangeProvider::collectObjectFolding(
 
 void DefaultFoldingRangeProvider::collectCommentFolding(
     const Document& document, const AstNode& node,
-    FoldingRangeAcceptor acceptor) const {
+    FoldingRangeAcceptor acceptor, const CancellationToken& token) const {
   const Cst& cst = document.parseResult.cst();
   // Trivia outside the entry are roots of the forest, so the document's root
   // answers for the whole tape.
@@ -95,6 +100,7 @@ void DefaultFoldingRangeProvider::collectCommentFolding(
   const auto kComment =
       lsp::FoldingRangeKindEnum(lsp::FoldingRangeKind::Comment);
   for (NodeId id = first; id < past; ++id) {
+    throw_if_cancelled(token);
     if (cst[id].hidden == 0) continue;
     if (std::optional<lsp::FoldingRange> range =
             toFoldingRange(document, CstNodeView{&cst, id}, kComment))

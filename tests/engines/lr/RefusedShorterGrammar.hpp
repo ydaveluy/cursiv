@@ -16,10 +16,9 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
 };
 
-// After its lead word, each case reads `P` (refused where `abab!` starts) and
-// `A`. `head`: `A` is a shorter spelling. `wide`: `A` runs over the bytes of
-// `P` and stands before any byte but `!`. `run`: `A` stands only before an
-// `a`, so inside the run and nowhere else.
+// After its lead word each case reads `P`, refused where `abab!` starts, then
+// `A`. `head`: `A` is shorter. `wide`: `A` runs over `P`'s bytes and stands
+// before any byte but `!`. `run`: `A` stands only before an `a`.
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct HeadP : terminal<!lit<"abab!"> + lit<"abab">> {};

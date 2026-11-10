@@ -1,7 +1,7 @@
 #pragma once
 
-// The brackets the indentation is blind inside of, using literals, spelled
-// terminals, named terminals and a multi-byte opener in one language.
+// Brackets inside which indentation is ignored, written as literals, terminals
+// chosen by spelling, terminals chosen by reference and a multi-byte opener.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -14,9 +14,6 @@ struct Node : cursiv::Extends<cursiv::AstNode> {
 };
 }  // namespace ast
 
-// Each delimiter family exercises a different spelling of the same indentation
-// contract: inline punctuation, named tokens selected by their spelling,
-// named tokens selected by reference, and a multi-byte opener.
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t)">)> {};
   struct NEWLINE : terminal<eol + many(many(cr<R"( \t)">) + eol)> {};

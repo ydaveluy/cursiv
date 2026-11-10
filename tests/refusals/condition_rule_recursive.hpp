@@ -1,5 +1,5 @@
-// A condition that reads a data rule reaching itself: what it reads is
-// unrolled once, and the rule never ends.
+// A condition that tests a data rule calling itself: a condition expands what
+// it tests, and this expansion never ends.
 // expect LR: a condition cannot test a data rule that calls itself
 #pragma once
 

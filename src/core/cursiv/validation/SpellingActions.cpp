@@ -30,12 +30,9 @@
 namespace cursiv {
 namespace {
 
-// How far one name is from another, counting a transposition as one fault:
-// what a misspelling costs to become a name in scope. The optimal string
-// alignment distance over bytes, bit-parallel over the bytes of `a` (Hyyrö
-// 2003), which the 64-byte bound fits in one word: one step per byte of `b`.
-// Names past 64 bytes are not compared; a distance past `limit` returns its
-// saturating successor.
+// The optimal string alignment distance over bytes, a transposition counting
+// as one, bit-parallel (Hyyro 2003). Names past 64 bytes are not compared; a
+// distance past `limit` returns `limit + 1`, saturated.
 std::size_t edit_distance(std::string_view a, std::string_view b,
                           std::size_t limit) {
   constexpr std::size_t kWidest = 64;

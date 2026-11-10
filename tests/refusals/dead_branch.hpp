@@ -1,5 +1,5 @@
-// A branch that reads a token past `eof`, beside one that stands: the
-// generation goes on, and names the branch no text reaches.
+// A branch that reads a token past `eof`, beside one that can match: the
+// grammar is generated with a warning that names the dead branch.
 // expect LR: warning: rule .Para.: branch 2 of 2 .BAR !. SEMI. can never match
 #pragma once
 

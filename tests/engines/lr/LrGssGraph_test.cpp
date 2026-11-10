@@ -34,14 +34,14 @@ struct Frames : cursiv::engine::LrStack {
   }
 };
 
-// The first word a step's edge was laid with, carried in its unread action:
-// collection renumbers steps.
+// The first word a step's edge was synthetic with, carried in its unread
+// action: collection renumbers steps.
 std::uint32_t tag(const LrGssGraph& g, Id step) { return g.step(step).action; }
 
 // A real token from `v` shifted onto `reading`, its edge naming `words`.
 Id shift_onto(LrGssGraph& g, Id v, cursiv::engine::SymbolId symbol,
               Reading reading, std::vector<std::uint32_t> words,
-              bool laid = false, std::uint32_t action = ~0u,
+              bool synthetic = false, std::uint32_t action = ~0u,
               bool exact = false) {
   Step s;
   s.vertex = v;
@@ -49,7 +49,7 @@ Id shift_onto(LrGssGraph& g, Id v, cursiv::engine::SymbolId symbol,
   s.reading = g.reading(v);
   s.reading.la = {g.reading(v).at, reading.at, symbol};
   s.shifts = true;
-  s.laid = laid;
+  s.synthetic = synthetic;
   s.action = action != ~0u ? action : words.empty() ? ~0u : words.front();
   const Id step = g.add(std::move(s));
   const Id next = g.vertex(reading);
@@ -59,8 +59,8 @@ Id shift_onto(LrGssGraph& g, Id v, cursiv::engine::SymbolId symbol,
 
 Id shift(LrGssGraph& g, Id v, cursiv::engine::SymbolId symbol, TextOffset to,
          std::uint32_t state, std::vector<std::uint32_t> words,
-         bool laid = false) {
-  return shift_onto(g, v, symbol, at(state, to), std::move(words), laid);
+         bool synthetic = false) {
+  return shift_onto(g, v, symbol, at(state, to), std::move(words), synthetic);
 }
 
 Id open_next(LrGssGraph& g) {
@@ -71,7 +71,7 @@ Id open_next(LrGssGraph& g) {
   return v;
 }
 
-// Two stacks of one future, their states and symbols alike, one shifted on
+// Two stacks of one future, their states and symbols the same, one shifted on
 // each arm and the arms met again on the next: whether the text comes back,
 // and the action of the step the graph elects first.
 struct Arms {
@@ -100,7 +100,7 @@ Elected elect(const Arms& a, const Arms& b, bool exact = false) {
   Id v = LrGssGraph::none;
   TextOffset p = 0;
   CHECK(g.next_vertex(v, p) && v == top && p == 2);
-  g.settle(p);
+  g.finish_before(p);
   Elected out;
   out.handed = g.hand_back(v, 1);
   if (out.handed) {
@@ -118,15 +118,15 @@ void two_stacks_of_one_future_keep_the_one_ranked_first() {
   CHECK(e.handed && e.first == 0 && e.tabled == 0);
 }
 
-// The words of two derivations tell them apart before the order the table lays
-// its arms in is asked: the arm laid first, with the later words, loses.
+// The words of two derivations tell them apart before the order the table puts
+// its arms in is asked: the arm synthetic first, with the later words, loses.
 void words_outweigh_the_order_of_the_table() {
   const Elected e = elect({{1}, 0}, {{0}, 9});
   CHECK(e.handed && e.first == 9 && e.tabled == 0);
 }
 
 // Where their words say nothing and the table proves its order the election's
-// for every text, the arm the table lays first stays, and the graph counts the
+// for every text, the arm the table puts first stays, and the graph counts the
 // election the table decided.
 void the_order_of_the_table_decides_what_words_leave_open() {
   const Elected e = elect({{1}, 4}, {{1}, 2}, true);
@@ -134,7 +134,7 @@ void the_order_of_the_table_decides_what_words_leave_open() {
 }
 
 // Where the table proves nothing of its order, it elects nothing: both stacks
-// stay, whatever arm it lays first.
+// stay, whatever arm it puts first.
 void an_order_the_table_does_not_prove_drops_no_stack() {
   const Elected e = elect({{1}, 4}, {{1}, 2});
   CHECK(!e.handed && e.tabled == 0);
@@ -151,7 +151,7 @@ void two_symbols_onto_one_state_both_stay() {
   Id v = LrGssGraph::none;
   TextOffset p = 0;
   CHECK(g.next_vertex(v, p) && v == x && p == 1);
-  g.settle(p);
+  g.finish_before(p);
   CHECK(!g.hand_back(v, 0));
 }
 
@@ -170,13 +170,13 @@ void two_arms_over_different_states_both_stay() {
   Id v = LrGssGraph::none;
   TextOffset p = 0;
   CHECK(g.next_vertex(v, p) && v == top);
-  g.settle(p);
+  g.finish_before(p);
   CHECK(!g.hand_back(v, 1));
   CHECK(!g.close());
 }
 
-// A dead arm is a frozen reading, kept until a rival reads three real tokens
-// past it: the text comes back on the third.
+// A dead arm is a frozen reading, kept until a competitor reads three real
+// tokens past it: the text comes back on the third.
 void a_dead_arm_holds_the_text_three_tokens() {
   LrGssGraph g;
   g.seed(Frames({0, 3}), at(3, 0));
@@ -187,7 +187,7 @@ void a_dead_arm_holds_the_text_three_tokens() {
     Id n = LrGssGraph::none;
     TextOffset p = 0;
     CHECK(g.next_vertex(n, p) && n == v && p == to);
-    g.settle(p);
+    g.finish_before(p);
     CHECK(g.hand_back(n, p - 1) == (to == 3));
     if (to != 3) g.take_vertex();
   }
@@ -203,13 +203,13 @@ void a_reading_past_a_held_vertex_gives_the_text_back_at_it() {
   const Id s = open_next(g);
   g.die(0);
   const Id held = shift(g, s, 7, 1, 5, {});
-  // As an episode reads: the nearest vertex, settled, offered, then opened.
+  // As an episode reads: the nearest vertex, finished, offered, then opened.
   TextOffset openedAt = 0;
   const auto offer = [&](Id want) {
     Id v = LrGssGraph::none;
     TextOffset p = 0;
     CHECK(g.next_vertex(v, p) && v == want);
-    g.settle(p);
+    g.finish_before(p);
     const bool back = g.hand_back(v, openedAt);
     if (!back) {
       g.take_vertex();
@@ -228,9 +228,9 @@ void a_reading_past_a_held_vertex_gives_the_text_back_at_it() {
   CHECK(g.elected().size() == 1);
 }
 
-// A laid indent spans real bytes but validates no reading. Both hand-back and
-// the frozen sources wait for three real tokens.
-void laid_shifts_do_not_validate_or_expire_frozen_readings() {
+// A synthetic indent spans real bytes but validates no reading. Both hand-back
+// and the frozen sources wait for three real tokens.
+void synthetic_shifts_do_not_validate_or_expire_frozen_readings() {
   LrGssGraph g;
   g.seed(Frames({0}), at(0, 0));
   Id v = open_next(g);
@@ -239,7 +239,7 @@ void laid_shifts_do_not_validate_or_expire_frozen_readings() {
   g.freeze(v, frozen);
   for (TextOffset to = 1; to <= 5; ++to) {
     shift(g, v, 7, to, 5, {}, to == 2 || to == 4);
-    g.settle(to);
+    g.finish_before(to);
     TextOffset p = 0;
     CHECK(g.next_vertex(v, p) && p == to);
     CHECK(g.sources(1).empty() == (to == 5));
@@ -378,7 +378,7 @@ void repeated_reductions_keep_their_nested_rank() {
       const std::array<std::uint32_t, 1> word{choice};
       g.edge(next, 0, 7, children, g.add(s), word);
     }
-    g.settle(to);
+    g.finish_before(to);
     top = open_next(g);
     g.watch({top, LrGssGraph::none, LrGssGraph::none, LrGssGraph::none,
              cursiv::engine::kLrNoProd, 1});
@@ -428,7 +428,7 @@ void a_stop_is_read_within_one_run_of_polls() {
   CHECK(cancelled);
 }
 
-// A real token the lexer ranked among rivals: its rank is the only word of
+// A real token the lexer ranked among competitors: its rank is the only word of
 // its edge.
 Id ranked_shift(LrGssGraph& g, Id v, cursiv::engine::SymbolId symbol,
                 TextOffset to, std::uint32_t state, std::uint32_t rank) {
@@ -460,11 +460,11 @@ Id reduce_frame(LrGssGraph& g, Id top, cursiv::engine::SymbolId symbol,
   LrGssGraph::Pop pop{};
   Id last = LrGssGraph::none;
   CHECK(g.next_path(pop, last));
-  const std::array<Id, 1> kid{g.children(pop, last)[0]};
+  const std::array<Id, 1> child{g.children(pop, last)[0]};
   const std::array<std::uint32_t, 1> words{word};
   const std::array<std::uint16_t, 1> before{0};
   const Id next = g.vertex(to);
-  g.edge(next, g.below(last), symbol, kid, step, words, before);
+  g.edge(next, g.below(last), symbol, child, step, words, before);
   return next;
 }
 
@@ -537,10 +537,10 @@ void the_lexers_rank_far_below_orders_frozen_stacks_of_unequal_depth() {
   const Id top = taken_shift(g, left, 9, kLong + 1, 900);
   CHECK(open_next(g) == right);
   const Id last = taken_shift(g, right, 9, kLong + 1, 901);
-  Step owed;
-  owed.vertex = last;
-  owed.reading = g.reading(last);
-  g.edge(top, last, 30, {}, g.add(std::move(owed)));
+  Step step;
+  step.vertex = last;
+  step.reading = g.reading(last);
+  g.edge(top, last, 30, {}, g.add(std::move(step)));
   Reading frozen = g.reading(top);
   frozen.la = {kLong + 1, kLong + 1, 0};
   g.freeze(top, frozen);
@@ -618,7 +618,7 @@ int main() {
   two_arms_over_different_states_both_stay();
   a_dead_arm_holds_the_text_three_tokens();
   a_reading_past_a_held_vertex_gives_the_text_back_at_it();
-  laid_shifts_do_not_validate_or_expire_frozen_readings();
+  synthetic_shifts_do_not_validate_or_expire_frozen_readings();
   frozen_stacks_are_ranked_before_the_cap();
   the_cap_holds_over_every_frozen_reading();
   frozen_stacks_share_prefixes_and_keep_equal_rank_order();

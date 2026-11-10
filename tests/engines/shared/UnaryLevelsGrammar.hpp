@@ -108,12 +108,9 @@ struct Cyclic : Base {
 
 inline constexpr auto elvis_text = [] { return std::string_view("?:"); };
 
-// A newline read as a token ends a statement; elsewhere it is trivia, and
-// inside brackets a blank. A member or `?:` may open a line and an index may
-// not, so after an operand a newline is a token to one reading and trivia to
-// the reading its operand ended: an index on the next line starts a
-// statement, and a block's last entry, which reads no newline, ends before
-// the one in front of `end`.
+// A newline read as a token ends a statement; elsewhere it is trivia. A
+// member or `?:` may open a line and an index may not, so an index on the next
+// line starts a statement.
 struct Lines : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t)">)> {};
   struct NEWLINE : terminal<eol> {};

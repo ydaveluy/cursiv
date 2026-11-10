@@ -1,9 +1,8 @@
 #pragma once
 
-// One grammar both engines generate, each body entered by its own first token:
-// documented keywords, a derived node read back through reflection, a string
-// body over code points, a root that owns its children, and the terminals an
-// override chain replaces -- the chain's last grammar is the one generated.
+// One grammar both engines generate, each body entered by its own first
+// token: documented keywords, a derived node, a string body, a root owning its
+// children, and terminals an override chain replaces.
 
 #include <concepts>
 #include <cstdint>
@@ -43,7 +42,7 @@ struct Item : cursiv::Extends<cursiv::AstNode> {
 struct Mark : cursiv::Extends<cursiv::AstNode> {};
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
-  boolean sealed = false;
+  boolean locked = false;
   optional<Mark*> mark;
 };
 
@@ -67,7 +66,7 @@ struct G : cursiv::GrammarSpec {
   // A hidden record: kept in the tree, unlike `ignored`'s raw trivia, so a
   // rule name can still find it.
   struct NOTE : terminal<lit<"#"> + many(cr<R"(^\n)">)> {};
-  // One terminal per shape an override takes, all three spelled alike.
+  // One terminal per shape an override takes, all three spelled the same.
   static constexpr auto hex_conv = [](std::string_view t) {
     return t.size() * 1000;
   };
@@ -126,7 +125,7 @@ struct G : cursiv::GrammarSpec {
   // walk stops at an owned boundary, so a keyword inside `ItemR` would be
   // the Item's to find, not the root's.
   struct Owner : rule<create<Doc> + kw<"doc"> +
-                      option(flag<&Doc::sealed>(kw<"sealed">)) +
+                      option(flag<&Doc::locked>(kw<"locked">)) +
                       option(assign<&Doc::mark>(ref<MarkR>)) +
                       many(kw<"item"> + append<&Doc::items>(ref<ItemR>))> {};
 
@@ -146,10 +145,9 @@ struct G : cursiv::GrammarSpec {
   using hidden = list<NOTE>;
 };
 
-// A chain of three over G, one shape per terminal: HEX keeps the base's
-// converter under a new body; DEC names a bare target the base's converter
-// does not read; TEN has its converter restated in the middle and its body at
-// the end, which keeps the middle one's converter and type.
+// A chain of three over G: HEX keeps the base's converter under a new body,
+// DEC names a bare target, and TEN keeps the middle grammar's converter and
+// type under the last one's body.
 struct D1 : cursiv::extends<G> {
   static constexpr auto tens_conv = [](std::string_view t) {
     return static_cast<std::uint32_t>(t.size() * 10);

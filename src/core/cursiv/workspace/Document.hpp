@@ -16,20 +16,17 @@
 #include "cursiv/workspace/LocalSymbols.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 
-// A document holds what was derived from one text: the trees a parse made,
-// the diagnostics a validation published, and how far along that ladder it
-// stands. The fields are public and mutable, each phase of a build writing
-// the one it computes. Its language is resolved once, at creation.
+// What was derived from one text: the parse, the diagnostics, and the state
+// reached. Each build phase writes its own public field. The language is
+// resolved once, at creation.
 
 namespace cursiv {
 
 class DocumentFactory;
 struct CoreServices;
 
-// It is an `AstNode`, and that is what makes a node's document reachable: the
-// root's `parent` is the document, so climbing to the top of a tree lands on
-// it -- no per-node back-pointer, and no root-to-document table for a builder
-// to keep current. Its own `type` tag is what proves the cast.
+// A document is the root's `parent`, so walking up a tree ends on it: no
+// per-node back-pointer is needed. Its `type` tag proves the cast.
 struct Document : AstNode {
   friend class DocumentFactory;
 
@@ -38,10 +35,7 @@ struct Document : AstNode {
   // replaced, the name it is known by may not.
   const std::string uri;
 
-  // Resolved once, by the factory, from the URI and the client's languageId
-  // together -- the two are only both in hand there. A reader that resolved it
-  // again would have to remember the id, and every reader that forgot would
-  // run another language's services over this tree.
+  // Resolved once, by the factory, from the URI and the client's languageId.
   const CoreServices* language = nullptr;
 
   // Read while a build advances it, hence the atomic; the transitions
@@ -55,13 +49,11 @@ struct Document : AstNode {
 
   std::vector<Diagnostic> diagnostics;
 
-  // Bumped whenever a rebuild tears down the previous build's derived state.
-  // Not the text's version, which a re-read from disk stamps back to 0: this
-  // moves on every rebuild, so a key minted against a build that no longer
-  // exists can be told apart.
+  // Bumped on every rebuild, unlike the text's version, so a key made for an
+  // older build can be told apart.
   std::uint64_t buildRevision = 0;
 
-  // Whether a client is looking at it. The open documents climb every rung
+  // Whether a client is looking at it. The open documents reach every state
   // first, so an editor sees its own file before the rest of the store.
   bool isOpen = false;
 
@@ -72,17 +64,14 @@ struct Document : AstNode {
 
   // Whether any reference of this document failed to resolve. What repairs a
   // broken link when the missing symbol turns up elsewhere: a document that
-  // still owes one is rebuilt even when nothing it names has moved.
+  // still has one is rebuilt even when nothing it names has moved.
   [[nodiscard]] bool hasLinkingErrors() const noexcept;
 
   [[nodiscard]] const TextDocument& textDocument() const noexcept;
 
-  // Keeps a name a scope computation built, for a description that views it: it
-  // lives until the next parse. The parts are written in one piece, so
-  // `keep_text(outer, ".", inner)` needs no temporary. Every call adds to the
-  // document's memory, so call it from a scope computation, which the builder
-  // runs once per parse; a reset to `IndexedContent` or `Parsed` runs it again
-  // on the same parse. It is not locked: the caller holds the document's write.
+  // Keeps a name a scope computation built until the next parse, written in one
+  // piece. Each call adds memory, so call it once per parse. Not locked: the
+  // caller holds the document's write.
   template <std::convertible_to<std::string_view>... Parts>
     requires(sizeof...(Parts) != 0)
   std::string_view keep_text(const Parts&... parts) const {
@@ -99,7 +88,7 @@ struct Document : AstNode {
 
  private:
   std::string_view keep_parts(std::span<const std::string_view> parts) const;
-  void resetForRebuild() noexcept;
+  void resetForRebuild();
 
   TextDocument _textDocument;
 };

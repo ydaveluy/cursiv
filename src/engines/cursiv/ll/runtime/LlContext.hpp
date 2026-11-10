@@ -22,10 +22,9 @@ namespace cursiv::engine {
 class LlMachine;
 
 // Whether the descent invented or skipped anything, and how many times it
-// has: what was planned before the last repair no longer says where it goes.
+// has: a plan made before the last repair does not say where the descent goes.
 class LlRepairFlag {
  public:
-  // One repair event: there is no assignment, so a plain bool cannot stand in.
   void mark() {
     _on = true;
     ++_count;
@@ -57,8 +56,8 @@ struct LlContext {
   // Everything before it is on the tape; the lookahead reaches beyond it.
   TextOffset at = 0;
   // The tokens of no width read since the cursor last moved: two choices at
-  // one place are told apart by it where the grammar lays such tokens.
-  std::uint32_t lull = 0;
+  // one place are told apart by it where the grammar inserts such tokens.
+  std::uint32_t zeroWidth = 0;
 
   Token la{};
   // The alphabet `la` was read with, `kInvalidSymbol` while there is none:
@@ -82,7 +81,7 @@ struct LlContext {
   TextOffset heldEnd = 0;
 
   // Every call's exact return and first CST record. Recovery can then leave
-  // an unfinished call and charge the author's tokens it actually gives up.
+  // an unfinished call and count the author's tokens it actually gives up.
   LlReturnStack stack;
   // The calls the descent hands over, and whether the rule in hand runs in
   // its caller's place: such a rule hands its own calls over.
@@ -106,24 +105,23 @@ struct LlContext {
   // node that holds it may have no node left to state over.
   NodeId lost = kNoNode;
 
-  // The parse invented or skipped something: the tree stands, the verdict
-  // does not.
+  // The parse invented or skipped something: the tree is usable, but the text
+  // has errors.
   LlRepairFlag repaired;
   // What the repairs may still read of open tokens.
   LexReadBudget reads;
   // The repair search of this parse, built at its first fault.
   std::unique_ptr<LlSearch> search;
-  // How many tokens no plan owed have been invented since the last one was
-  // read. A repair that opens a construct calls the rules inside it, and those
-  // may repair in turn: without this the descent invents its way down a
-  // recursion that reads nothing and never returns.
+  // How many tokens no plan asked for were invented since the last one read: it
+  // stops the descent from inventing its way down a recursion that reads
+  // nothing.
   std::uint16_t invented = 0;
   LlRepairRun run{};
   // The embedded grammar's configuration plus one, zero for the document.
   std::uint8_t section = 0;
   RepairBudget budget;
   // The end a region read, past the gap it crossed to it, and the first
-  // record laid after: the nodes that close on that end span the gap.
+  // record written after: the nodes that close on that end span the gap.
   TextOffset regionEnd = 0;
   NodeId regionMark = kNoNode;
 };
@@ -133,7 +131,7 @@ inline void ll_return(LlContext& c) {
   if (c.stack.size() == c.abandonDepth) {
     c.give = false;
     c.abandonDepth = ~std::size_t{0};
-    // An abandon that laid no record gave nothing up on the tape.
+    // An abandon that wrote no record gave nothing up on the tape.
     if (c.lost >= c.tape.stream().records()) c.lost = kNoNode;
   }
 }

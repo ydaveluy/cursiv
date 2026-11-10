@@ -16,27 +16,20 @@ namespace cursiv {
 
 struct Document;
 
-// Scoped to the whole workspace: any build empties it. `state` picks the
-// rung to evict on -- a cache read by a validator is emptied when linking
-// finishes, not when validation does, or it would be thrown away between the
-// two halves of the pass that fills it. Without `state` the eviction comes at
-// the announcement, ahead of the rebuild: an answer computed while the
-// workspace is half built stays until the next update, so a provider that
-// reads a document's state names the rung it needs.
+// A cache for the whole workspace, emptied by every build: at the update, or,
+// with `state`, when the build reaches that state. Pass the state the provider
+// reads, such as `Linked` for a cache read by a validator.
 //
-// Use WorkspaceCache<V> for a single workspace-wide answer, without a
-// key. get(provider) returns a copy; withValue(provider, consumer) lends a
-// const reference until the consumer returns, retaining it even if another
-// thread clears the cache. References, pointers or views into the cache's slot
-// must not outlive the consumer.
+// WorkspaceCache<V> holds one value, without a key. get(provider) returns a
+// copy; withValue(provider, consumer) passes a reference that must not outlive
+// the consumer.
 template <class K, class V = void, class Hash = std::hash<K>,
           class KeyEqual = std::equal_to<K>>
 class WorkspaceCache : public SimpleCache<K, V, Hash, KeyEqual>,
                        private BuildPhaseListener,
                        private DocumentUpdateListener {
  public:
-  // Without `state`, any announced update empties the cache; with one, the
-  // eviction waits for that rung -- deletions still empty at once.
+  // Deleting a document always empties the cache at once.
   explicit WorkspaceCache(SharedCoreServices& sharedServices,
                           std::optional<DocumentState> state = std::nullopt);
   ~WorkspaceCache() noexcept override;
@@ -50,8 +43,7 @@ class WorkspaceCache : public SimpleCache<K, V, Hash, KeyEqual>,
     if (_state.has_value() && reached == *_state) this->clear();
   }
 
-  // A deleted document reaches no phase, so the rung above never fires for
-  // it; a cache with no rung at all empties on every announcement.
+  // A deleted document reaches no state, so it empties the cache here.
   void onUpdate(std::span<const std::string_view>,
                 std::span<const std::string_view> deleted) override {
     if (!_state.has_value() || !deleted.empty()) this->clear();
@@ -68,7 +60,8 @@ WorkspaceCache<K, V, Hash, KeyEqual>::WorkspaceCache(
   // `Changed` is never published: a cache waiting for it would never empty.
   if (state == DocumentState::Changed)
     throw std::invalid_argument(
-        "cursiv: a WorkspaceCache evicts on a rung a build publishes");
+        "cursiv: a WorkspaceCache state must be one a build reaches, not "
+        "Changed");
   if (_builder == nullptr) return;
   _builder->addBuildPhaseListener(*this);
   try {

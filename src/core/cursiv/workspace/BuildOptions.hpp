@@ -8,10 +8,8 @@ namespace cursiv {
 
 struct ValidationCategory;
 
-// What a build was asked for, remembered per document: a document built with
-// one set of categories keeps it across the updates that follow, so a client
-// that configures validation per language does not have to say so again on
-// every keystroke.
+// What a build was asked for, remembered per document across the updates that
+// follow.
 struct BuildOptions {
   // Whether the build runs validation. If false, a newly built document stops
   // at IndexedReferences; completing the request does not imply Validated.

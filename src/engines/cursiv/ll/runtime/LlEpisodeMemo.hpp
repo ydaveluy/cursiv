@@ -1,5 +1,5 @@
 // The plans of the episodes of one parse, kept by what each read: the stack it
-// stood under, and the text it looked at. A place that reads the same again is
+// ran under, and the text it looked at. A place that reads the same again is
 // answered by the plan the first one made.
 #pragma once
 
@@ -15,7 +15,7 @@
 
 namespace cursiv::engine {
 
-// What an episode stood on and read. The token in hand is not the text alone:
+// What an episode ran under and read. The token in hand is not the text alone:
 // the alphabet that read it says which terminal it is and where it ends.
 struct LlRemembered {
   std::uint32_t context = 0;
@@ -101,9 +101,9 @@ class LlEpisodeMemo {
     }
   }
 
-  // The entries of a row, laid at `from`.
-  void lay(const LlRemembered& row, TextOffset from,
-           std::vector<LlPlanEntry>& out) const {
+  // The entries of a row, placed at `from`.
+  void place(const LlRemembered& row, TextOffset from,
+             std::vector<LlPlanEntry>& out) const {
     out.clear();
     for (std::uint32_t i = 0; i < row.count; ++i) {
       LlPlanEntry e = _plans[row.plan + i];

@@ -51,24 +51,9 @@ namespace cursiv::bench {
 
 namespace detail {
 
-// The stages, in the order the builder runs them -- each an interval of one
-// cold build, read at a phase drain through `onBuildPhase`:
-//
-//   parse+index  the `IndexedContent` drain: parse plus this document's
-//                exported content (no separate `index`: the builder has no
-//                barrier between parsing and exporting)
-//   scopes       `IndexedContent` -> `ComputedScopes`: local symbols
-//   link         `ComputedScopes` -> `IndexedReferences`: linking and the
-//                references published to the index
-//   validate     `IndexedReferences` -> `Validated`
-//   build        the call to the `Validated` drain -- the total
-//
-// One column per barrier: a column per finer-grained rung would read zero
-// and say nothing, since `runPhase` publishes merged rungs back to back.
-//
-// `build` is not the sum of the rows above it -- it also carries the parse,
-// the root indexing of adoption, and the scheduler's own dispatch, and that
-// difference is meant to be read.
+// The stages of one cold build, each read at a phase drain: `parse+index` up
+// to `IndexedContent`, `scopes`, `link` up to `IndexedReferences`, `validate`.
+// The four tile `build`, and all five come from the fastest build.
 enum Stage : std::size_t {
   kIndex,
   kScopes,
@@ -78,10 +63,8 @@ enum Stage : std::size_t {
   kStageCount,
 };
 
-// The language module installs a `DocumentValidator`, so
-// the phase always runs -- but with an empty registry and every reference
-// resolved it walks nothing and publishes nothing. Real as soon as it does
-// either: turning thousands of broken references into diagnostics is work.
+// Why `validate` has no figure: with no check and no diagnostic, the phase
+// does nothing.
 inline constexpr const char* kValidateAbsentWhy =
     "this language registers no validation check and publishes no "
     "diagnostic -- the phase has nothing to do";
@@ -96,7 +79,7 @@ struct ServiceMeasurement {
   double ms = kAbsent;     // mean of all timed calls, excluding warmups
   double worst = kAbsent;  // maximum of all timed calls
   std::size_t samples = 0;
-  std::size_t results = 0;  // items returned over one sweep
+  std::size_t results = 0;  // items returned over one pass
   std::size_t probes = 0;
 
   void record(double elapsed) {
@@ -148,12 +131,8 @@ struct Row {
   std::vector<ServiceMeasurement> lsp;
 };
 
-// One workspace, N documents, the real builder: `DefaultDocumentBuilder`
-// spreads each phase across the documents on its `TaskScheduler`, so N files
-// handed to one `build` is the only way to ask whether it parallelises.
-// Equal byte budget across shapes: the rows only compare if the total work
-// is the same, so a shape is `budget` bytes cut differently, never a
-// different amount of text.
+// One workspace, N documents, one `build` over them all. Every shape cuts the
+// same byte budget, so the rows compare.
 enum class Shape : std::size_t { ManySmall, Medium, FewLarge, Mixed, Count };
 
 }  // namespace detail
@@ -208,13 +187,11 @@ struct Options {
   // The pool a document built alone runs on: the machine's, as in a server,
   // unless `--single-workers` says otherwise.
   std::size_t singleWorkers = 0;
-  // The resident lane, and it is a mode, not a column: resident bytes
-  // answer only on an allocator that does not already hold what the build
-  // needs, and this binary warms it well before the ladder. `--rss`
-  // therefore runs one language, skips the parse lane, and builds once.
+  // One language, one cold build, read for resident bytes alone: a warm
+  // allocator would hide what the build needs.
   bool rss = false;
-  // The filter is a whole name and not a beginning -- what `--rss` narrows to
-  // once it has decided which language it measures.
+  // The filter matches a whole name, not a prefix: `--rss` sets it once it
+  // has chosen its language.
   bool exact = false;
 };
 
@@ -232,10 +209,8 @@ inline double ms_since(std::chrono::steady_clock::time_point t0) {
       .count();
 }
 
-// A run that cannot go on, carried to its entry point with the status to end
-// on. Leaving from where it fails would skip the destructors of the services
-// built so far, and their worker threads would run on into the process's own
-// teardown, which Windows does not always survive.
+// A run that cannot go on, thrown to its entry point with the status to end
+// on, so the services built so far stop their threads first.
 struct Stop {
   int status;
 };
@@ -265,10 +240,8 @@ inline std::string printable(std::string_view text) {
   return out;
 }
 
-// Every file the bench opens: the path is resolved, symlinks and `..`
-// included, and must name a regular file, a directory or nothing yet -- a
-// device or a pipe is neither an input nor an output. A path that does not
-// resolve is opened as given, and the open says why it fails.
+// Every file the bench opens: the resolved path must name a regular file, a
+// directory or nothing yet. A path that does not resolve is opened as given.
 inline std::filesystem::path checked_path(const std::string& path) {
   std::error_code ec;
   std::filesystem::path resolved = std::filesystem::weakly_canonical(path, ec);
@@ -322,25 +295,22 @@ namespace detail {
 void parse_probe(const char* name, const Parser& parser,
                  const std::string& src);
 
-// Every workspace interval is measured between the real builder's phase drains.
-// The clock on the ladder: one instant per rung, stamped on the build's own
-// thread the moment the phase has drained, after the fan-out has joined and
-// before the next phase starts.
-// A cancelled phase never drains, so it never stamps; the bench refuses
-// such a build outright rather than report a partial ladder.
+// One instant per phase, recorded on the build's thread once the phase has
+// drained. A cancelled phase records nothing, and the bench refuses that
+// build.
 class PhaseClock final : public cursiv::BuildPhaseListener {
  public:
   using Clock = std::chrono::steady_clock;
 
-  // A read made at a rung lands in the next interval, several microseconds
+  // A read made at a phase falls in the next interval, several microseconds
   // of syscalls: a build that reads counters or resident bytes is not timed.
   void onBuildPhase(cursiv::DocumentState reached,
                     std::span<cursiv::Document* const>,
                     const cursiv::CancellationToken&) override {
-    const auto rung = static_cast<std::size_t>(reached);
-    _at[rung] = Clock::now();
-    if (_perf != nullptr) _sample[rung] = _perf->read();
-    if (_resident) _rss[rung] = rss_now();
+    const auto phase = static_cast<std::size_t>(reached);
+    _at[phase] = Clock::now();
+    if (_perf != nullptr) _sample[phase] = _perf->read();
+    if (_resident) _rss[phase] = rss_now();
   }
 
   void start(const PerfCounters* perf = nullptr,
@@ -358,8 +328,8 @@ class PhaseClock final : public cursiv::BuildPhaseListener {
   [[nodiscard]] bool reached(cursiv::DocumentState s) const noexcept {
     return _at[static_cast<std::size_t>(s)] != Clock::time_point{};
   }
-  // The interval between two rungs, in milliseconds. `from` absent means "from
-  // the call that started the build".
+  // The interval between two phases, in milliseconds; without `from`, from the
+  // call that started the build.
   [[nodiscard]] double span(cursiv::DocumentState to) const {
     return ms_between(_start, _at[static_cast<std::size_t>(to)]);
   }
@@ -440,16 +410,17 @@ inline void dump_document(std::FILE* out, const cursiv::Document& d) {
   references->visitResolved(
       d.parseResult.cst(),
       [&](TextOffset begin, TextOffset end, const AstNode& target, bool multi) {
-        const Document* const home = target.getDocument();
+        const Document* const targetDocument = target.getDocument();
         const CstNode* const at =
-            home != nullptr && target.cstNodeId != kNoNode
-                ? &home->parseResult.cst()[target.cstNodeId]
+            targetDocument != nullptr && target.cstNodeId != kNoNode
+                ? &targetDocument->parseResult.cst()[target.cstNodeId]
                 : nullptr;
-        std::fprintf(out, "ref %u %u %d -> %s %.*s %u %u\n", begin, end,
-                     multi ? 1 : 0, home != nullptr ? home->uri.c_str() : "?",
-                     static_cast<int>(target.type->name.size()),
-                     target.type->name.data(), at != nullptr ? at->begin : 0,
-                     at != nullptr ? at->end : 0);
+        std::fprintf(
+            out, "ref %u %u %d -> %s %.*s %u %u\n", begin, end, multi ? 1 : 0,
+            targetDocument != nullptr ? targetDocument->uri.c_str() : "?",
+            static_cast<int>(target.type->name.size()),
+            target.type->name.data(), at != nullptr ? at->begin : 0,
+            at != nullptr ? at->end : 0);
       });
   references->visitUnresolved(
       d.parseResult.cst(), [&](RefState why, TextOffset begin, TextOffset end,
@@ -468,7 +439,9 @@ inline void dump_build(const std::string& name,
   std::FILE* const out = std::fopen(checked_path(path).string().c_str(), "w");
   if (out == nullptr) refused(name.c_str(), "not dumped: the file won't open");
   for (const cursiv::Document* d : documents) dump_document(out, *d);
-  std::fclose(out);
+  const bool written = std::ferror(out) == 0;
+  if (std::fclose(out) != 0 || !written)
+    refused(name.c_str(), "not dumped: the file was not written whole");
 }
 
 // `resident` is `--rss`: one build, read for resident bytes alone. Otherwise
@@ -487,10 +460,8 @@ void ws_stages(int iterations, bool resident, std::size_t workers,
   bool validated = false;
   PerfCounters perf;
   const int builds = resident ? 1 : perf.active() ? 2 * iterations : iterations;
-  // A document built alone spreads over the whole pool, as an edit does in a
-  // server. One pool serves every build of the row: raised and joined around
-  // each, it would leave the next on cold caches. A counted build runs on
-  // this thread alone, the one the counters read.
+  // A document built alone uses the whole pool, as in a server, kept across
+  // the row's builds. A counted build runs on this thread, which they read.
   auto pool = std::make_unique<TaskScheduler>(workers);
   auto alone = std::make_unique<TaskScheduler>(0);
 
@@ -559,30 +530,27 @@ void ws_stages(int iterations, bool resident, std::size_t workers,
         row.rss[kBuild] = clock.held(DocumentState::Validated);
         row.rssPeakReset = peakReset;
         break;
-      case Probe::Clock:
+      case Probe::Clock: {
         timed = true;
-        best[kBuild] =
-            std::min(best[kBuild], clock.span(DocumentState::Validated));
-        best[kIndex] =
-            std::min(best[kIndex], clock.span(DocumentState::IndexedContent));
-        best[kScopes] =
-            std::min(best[kScopes], clock.span(DocumentState::IndexedContent,
-                                               DocumentState::ComputedScopes));
-        best[kLink] =
-            std::min(best[kLink], clock.span(DocumentState::ComputedScopes,
-                                             DocumentState::IndexedReferences));
+        // Every stage of the fastest build, as `record_perf` keeps its counts.
+        const double build = clock.span(DocumentState::Validated);
+        if (build >= best[kBuild]) break;
+        best[kBuild] = build;
+        best[kIndex] = clock.span(DocumentState::IndexedContent);
+        best[kScopes] = clock.span(DocumentState::IndexedContent,
+                                   DocumentState::ComputedScopes);
+        best[kLink] = clock.span(DocumentState::ComputedScopes,
+                                 DocumentState::IndexedReferences);
         // A language with no check and nothing to publish has no validation
         // to time -- see `kValidateAbsentWhy`.
-        if (const ValidationRegistry* registry = core.validationRegistry.get();
-            core.documentValidator != nullptr &&
-            ((registry != nullptr && registry->checkCount() != 0) ||
-             !d.diagnostics.empty())) {
-          best[kValidate] = std::min(
-              best[kValidate], clock.span(DocumentState::IndexedReferences,
-                                          DocumentState::Validated));
-          validated = true;
-        }
+        const ValidationRegistry* registry = core.validationRegistry.get();
+        validated = core.documentValidator != nullptr &&
+                    ((registry != nullptr && registry->checkCount() != 0) ||
+                     !d.diagnostics.empty());
+        best[kValidate] = clock.span(DocumentState::IndexedReferences,
+                                     DocumentState::Validated);
         break;
+      }
     }
 
     if (n + 1 == builds) {
@@ -612,26 +580,8 @@ void ws_stages(int iterations, bool resident, std::size_t workers,
   row.ms[kValidate] = validated ? best[kValidate] : kAbsent;
 }
 
-// N documents, one build, one pool width per point. The two numbers per
-// point are intervals of the same cold build, read at its phase boundaries:
-//
-//   total  the whole build from `Changed` to the `Validated` drain
-//   link   everything after phase 1 -- `IndexedContent` to `Validated`:
-//          scopes, linking, validation
-//
-// The two halves scale differently: phase 1 is per document and reads
-// nothing else, phase 2 reaches the shared index.
-//
-// The pool width is installed, not wished for: it lives on the workspace's
-// shared scheduler, installed at a known width before the defaults fill --
-// affinity would not do, `hardware_concurrency()` ignores it.
-//
-// `register_` is the same hook the single-document lane takes, passed here
-// too on purpose: `linkMs` spans validation as well as linking, so a
-// language whose server runs checks must run them here too.
-// A worker on a wasm host is an isolate that boots after the pool has
-// returned, tens of milliseconds later: the clock starts once every one of
-// them has run a part, or the lane would time workers still starting.
+// Returns once every worker has run a part: on a wasm host, a worker boots
+// tens of milliseconds after the pool returns.
 inline void warm_pool(cursiv::TaskScheduler& scheduler, std::size_t workers) {
   if (workers == 0) return;
   const cursiv::CancellationToken token;
@@ -657,6 +607,9 @@ inline void warm_pool(cursiv::TaskScheduler& scheduler, std::size_t workers) {
   }
 }
 
+// N documents, one cold build per pool width, timed at the fastest of its
+// repetitions: `total` from `Changed` to `Validated`, `link` from
+// `IndexedContent` on. `register_` installs the checks the server runs.
 template <class Shared>
 void multi_stages(int iterations, const char* languageId, const char* extension,
                   const std::vector<std::string>& files,
@@ -699,9 +652,12 @@ void multi_stages(int iterations, const char* languageId, const char* extension,
             refused(languageId, "left below Validated by the builder");
         if (!clock.reached(DocumentState::Validated))
           refused(languageId, "the build drained no Validated phase");
-        bestTotal = std::min(bestTotal, clock.span(DocumentState::Validated));
-        bestLink = std::min(bestLink, clock.span(DocumentState::IndexedContent,
-                                                 DocumentState::Validated));
+        if (const double total = clock.span(DocumentState::Validated);
+            total < bestTotal) {
+          bestTotal = total;
+          bestLink = clock.span(DocumentState::IndexedContent,
+                                DocumentState::Validated);
+        }
       }
       // One file per pool width: the widths must publish the same thing.
       if (i + 1 == iterations)
@@ -712,8 +668,7 @@ void multi_stages(int iterations, const char* languageId, const char* extension,
 
       if (i + 1 == iterations && workers == workerPoints.front()) {
         // Counted once, on the narrowest point: the graph does not depend on
-        // the pool, and a row that reported it per point would invite the idea
-        // that it might.
+        // the pool.
         std::size_t total = 0;
         std::size_t resolved = 0;
         std::size_t diagnostics = 0;
@@ -833,7 +788,7 @@ Language make_language(const char* name, const char* languageId,
 }
 
 // A language executable needs only its shared services and registration hook.
-// Optional generators enable the size ladder and multi-document worker curve.
+// Optional generators enable the sizes and the multi-document worker curve.
 template <class Shared, bool (*register_)(SharedCoreServices&)>
 int run_language(int argc, char** argv,
                  std::string (*corpus)(std::size_t) = nullptr,

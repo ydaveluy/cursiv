@@ -1,6 +1,5 @@
-// Whether a text is white space alone, as Unicode's `White_Space` says:
-// layout, which an editor never offers as a word. Which text is a blank stays
-// the grammar's skipper's to say.
+// Whether a text is only Unicode `White_Space`, which an editor never offers as
+// a word. Which text is a blank is still the skipper's choice.
 #pragma once
 
 #include <iterator>

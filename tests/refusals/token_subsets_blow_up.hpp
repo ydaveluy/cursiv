@@ -1,6 +1,5 @@
-// A terminal whose subset construction yields about 2^21 states: the lexer
-// refuses as soon as the subsets pass eight times the limit, before a row or a
-// splitting array is held for the millions it would otherwise number.
+// A terminal whose lexer construction yields about 2^21 states: refused as
+// soon as the count passes eight times the limit, before any table is built.
 // expect LR LL: has terminals too complex for the generated lexer
 #pragma once
 

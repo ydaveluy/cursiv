@@ -1,4 +1,4 @@
-// The default ribbon: a seed. Reproducible by construction -- a seed and a
+// The default decision source: a seed. Reproducible -- a seed and a
 // document number replay that exact document.
 #pragma once
 

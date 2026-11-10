@@ -5,8 +5,8 @@
 #include "statemachine/ast.hpp"
 
 // The three checks of this language: a naming convention, the one fact no
-// single node can see -- two declarations wearing one name -- and the keyword
-// a name may not be, which the grammar lexes and the reader refuses.
+// single node can see (two declarations with one name), and the keyword a
+// name may not be, which the grammar accepts and the validator refuses.
 
 namespace sm {
 

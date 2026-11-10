@@ -1,4 +1,4 @@
-// The array a lowering and a construction write into: it grows to meet a write
+// The array a lowering and a construction write into: it grows to fit a write
 // at any index. A growth moves it: a pointer from `data()` or `row()` dies at
 // the next write that extends the array, and so does a reference into it.
 #pragma once
@@ -12,7 +12,7 @@ template <class T>
 struct Vec {
   std::vector<T> v{};
 
-  // The room doubles, the size meets the write. `resize` alone allocates
+  // The room doubles, the size matches the write. `resize` alone allocates
   // exactly what is asked, so a row filled one cell at a time would be
   // quadratic -- and every row of a grammar is filled that way.
   T& operator[](std::size_t i) {

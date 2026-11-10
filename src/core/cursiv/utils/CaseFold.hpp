@@ -10,11 +10,9 @@
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/utils/macros.hpp"
 
-// Case folding for case-insensitive keywords and name lookups: Unicode simple
-// case folding between cases as long in UTF-8, so a name and its folding take
-// as many bytes. An ASCII name folds eight bytes at a stroke. The scope walk
-// and the index key fold with the same functions, or a query would hash into
-// a bucket its comparison never accepts.
+// Case folding for case-insensitive keywords and names: Unicode simple
+// folding between cases of the same UTF-8 length. The scope walk and the index
+// key must fold with these same functions.
 
 namespace cursiv {
 
@@ -110,10 +108,8 @@ template <class Word>
   return w;
 }
 
-// The last `n < 8` bytes of a name `whole` bytes long. A name a word long at
-// least reads the word it ends with instead, overlapping bytes already read:
-// one load where the pieces take three. Chosen by the length alone, so two
-// names of one length always read the same way.
+// The last `n < 8` bytes of a name `whole` bytes long. A name a word long
+// or more reads its last word instead, overlapping bytes already read.
 [[nodiscard]] inline std::uint64_t load_last(const char* p, std::size_t n,
                                              std::size_t whole) noexcept {
   return whole >= 8 ? load<std::uint64_t>(p + n - 8) : load_tail(p, n);

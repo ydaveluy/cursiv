@@ -1,7 +1,5 @@
-// A server binary's whole `main`: a shared container of the language's own
-// type, the languages registered into it, and the transport chosen from the
-// command line. It lives in the framework, not beside a grammar, so ten
-// servers can share one object.
+// A server binary's whole `main`: a shared container of the language's type,
+// its languages registered, and the transport chosen from the command line.
 #pragma once
 
 #include <concepts>
@@ -14,8 +12,6 @@ namespace cursiv {
 
 namespace detail {
 
-// Non-templated, so the whole lifecycle is compiled once: the template below
-// only chooses the container's concrete type.
 [[nodiscard]] int run_language_server_main_on(
     int argc, char** argv, std::string_view serverName,
     const std::function<bool(SharedLspServices&)>& registerLanguageServices,

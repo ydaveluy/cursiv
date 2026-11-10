@@ -1,3 +1,5 @@
+// A terminal that calls itself inside a negative lookahead, before reading
+// anything.
 // expect LR: refused:.*calls itself without consuming input
 #pragma once
 

@@ -1,7 +1,6 @@
 // The states a prediction would return into, as the descent pushes and pops
-// them. A prediction asks for the whole stack as one context of its pool: the
-// frames it has already met are not pushed again, so it costs what changed
-// since the last ask and not the depth.
+// them. Frames already in the pool are not pushed again, so an ask costs what
+// changed, not the depth.
 #pragma once
 
 #include <algorithm>
@@ -28,10 +27,9 @@ class LlReturnStack {
   std::uint32_t operator[](std::size_t i) const { return _frames[i].ret; }
   std::uint32_t begin(std::size_t i) const { return _frames[i].begin; }
 
-  // The context of the whole stack in `pool`, the one pool a stack is asked
-  // for. The nodes it makes stay there for as long as the stack does, which is
-  // what lets two asks over one stack answer with one node. `base` is what the
-  // first frame returns into.
+  // The context of the whole stack in `pool`, the only pool it is asked for;
+  // its nodes stay as long as the stack does, so two asks share one node.
+  // `base` is what the first frame returns into.
   std::uint32_t context(LlReturnPool& pool,
                         std::uint32_t base = kLlCtxNone) const {
     if (_nodes.size() <= _frames.size()) _nodes.resize(_frames.size() + 1);

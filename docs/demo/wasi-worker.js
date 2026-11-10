@@ -1,12 +1,9 @@
 // One WASI "thread" of the language server. The page creates every worker up
-// front: one runs `_start` (the LSP read loop), the others wait in a pool for
-// `wasi.thread-spawn`. A worker blocked in wasm cannot start a new worker, so
-// spawning only hands a start argument to an idle pool worker.
-//
-// Minimal wasi_snapshot_preview1: stdio, plus one read-only preopened folder
-// holding the example documents, which the server scans like a workspace.
+// front: one runs `_start`, the others wait in a pool for `wasi.thread-spawn`.
+// Minimal WASI: stdio and one read-only preopened folder of example documents.
 
-const ESUCCESS = 0, EBADF = 8, EINVAL = 28, EISDIR = 31, ENOENT = 44, ENOSYS = 52, ENOTDIR = 54, ESPIPE = 70, EROFS = 69;
+const ESUCCESS = 0, EBADF = 8, EINVAL = 28, EISDIR = 31, ENOENT = 44, ENOSYS = 52, ENOTDIR = 54, ENOTSUP = 58,
+      ESPIPE = 70, EROFS = 69;
 const DIR = 3, FILE = 4;     // WASI file types
 const PREOPEN = 3;           // the one preopened descriptor
 const EXIT = Symbol('proc_exit');
@@ -18,10 +15,11 @@ const NEXT_TID = 0, EXIT_CODE = 1, SLOT0 = 2;
 
 let ctx;  // { module, memory, ctl, spawnArgs, stdinHdr, stdinBuf, env, slot, root, files }
 
-// The workspace: `ctx.files` maps absolute paths under `ctx.root` to bytes.
-// Descriptors are per worker, from a range of their own.
+// The workspace: `ctx.files` maps absolute paths under `ctx.root` to bytes. A
+// descriptor is known only to the worker that opened it, and each worker
+// numbers its own, every `fdStep`.
 const fds = new Map();
-let nextFd = 0;
+let nextFd = 0, fdStep = 1;
 const dec = new TextDecoder();
 function lookup(path) {
   if (ctx.files[path]) return { type: FILE, path, data: ctx.files[path] };
@@ -159,50 +157,65 @@ function writeOut(fd, iovs, n, nwrittenPtr) {
   return ESUCCESS;
 }
 
-// poll_oneoff: clock subscriptions only (sleeps, timed waits). It waits for
-// the earliest clock, then reports the clocks due by then, and every other
-// subscription as unsupported.
+// poll_oneoff: clock subscriptions only (sleeps, timed waits). Any other
+// subscription, or a clock with no such id, is due at once with its error.
+// It waits for the earliest due, then reports what is due by then.
 function pollOneoff(inPtr, outPtr, nsubs, neventsPtr) {
   const view = dv();
-  const left = [];   // per clock subscription, the time left in ns
+  const subs = [];   // per subscription, its error and the time left in ns
   let wait = Infinity;
   for (let i = 0; i < nsubs; i++) {
-    const s = inPtr + 48 * i;
-    if (view.getUint8(s + 8) !== 0) continue;
-    let t = Number(view.getBigUint64(s + 24, true));
-    if (view.getUint16(s + 40, true) & 1) t = Math.max(0, t - nowNs(view.getUint32(s + 16, true)));
-    left[i] = t;
-    wait = Math.min(wait, t);
+    const s = inPtr + 48 * i, id = view.getUint32(s + 16, true);
+    const error = view.getUint8(s + 8) === 0 ? clockError(id) : ENOSYS;
+    let left = 0;
+    if (error === ESUCCESS) {
+      left = Number(view.getBigUint64(s + 24, true));
+      if (view.getUint16(s + 40, true) & 1) left = Math.max(0, left - nowNs(id));
+    }
+    subs.push({ error, left });
+    wait = Math.min(wait, left);
   }
   const start = performance.now();
-  if (wait !== Infinity) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait / 1e6);
+  if (wait > 0 && wait !== Infinity) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait / 1e6);
   const waited = Math.max(wait, (performance.now() - start) * 1e6);
   let events = 0;
-  for (let i = 0; i < nsubs; i++) {
-    if ((left[i] ?? 0) > waited) continue;      // a clock not due yet
+  subs.forEach(({ error, left }, i) => {
+    if (left > waited) return;                  // a clock not due yet
     const s = inPtr + 48 * i, e = outPtr + 32 * events;
     view.setBigUint64(e, view.getBigUint64(s, true), true);
-    view.setUint16(e + 8, view.getUint8(s + 8) === 0 ? ESUCCESS : ENOSYS, true);
+    view.setUint16(e + 8, error, true);
     view.setUint8(e + 10, view.getUint8(s + 8));
     events++;
-  }
+  });
   view.setUint32(neventsPtr, events, true);
   return ESUCCESS;
 }
 
+// The wall clock (0) and the monotonic one (1). No CPU clock (2, 3) is at
+// hand, and other ids name no clock.
+const clockError = (id) => id <= 1 ? ESUCCESS : id <= 3 ? ENOTSUP : EINVAL;
 // One clock for every worker: timeOrigin differs per worker.
 const nowNs = (id) => id === 0 ? Date.now() * 1e6
                                 : Math.round((performance.timeOrigin + performance.now()) * 1e6);
 
+// WASI passes addresses, sizes and descriptors as unsigned 32-bit numbers,
+// which reach JavaScript signed.
+const unsigned = (imports) => Object.fromEntries(Object.entries(imports).map(([name, call]) =>
+  [name, (...args) => call(...args.map((arg) => typeof arg === 'number' ? arg >>> 0 : arg))]));
+
 function wasiImports() {
   const args = ['language-server'];
   const env = Object.entries(ctx.env).map(([k, v]) => `${k}=${v}`);
-  return {
+  return unsigned({
     args_get: (p, b) => writeStrings(args, p, b),
     args_sizes_get: (c, s) => sizes(args, c, s),
     environ_get: (p, b) => writeStrings(env, p, b),
     environ_sizes_get: (c, s) => sizes(env, c, s),
-    clock_time_get: (id, _precision, out) => { dv().setBigUint64(out, BigInt(nowNs(id)), true); return ESUCCESS; },
+    clock_time_get: (id, _precision, out) => {
+      const error = clockError(id);
+      if (error === ESUCCESS) dv().setBigUint64(out, BigInt(nowNs(id)), true);
+      return error;
+    },
     fd_close: (fd) => { fds.delete(fd); return ESUCCESS; },
     fd_fdstat_get: (fd, out) => {
       const node = fd <= 2 ? { type: 2 } : fd === PREOPEN ? { type: DIR } : fds.get(fd);
@@ -254,7 +267,8 @@ function wasiImports() {
       const node = lookup(path);
       if (!node) return ENOENT;
       if ((oflags & 2) && node.type !== DIR) return ENOTDIR;
-      const fd = nextFd++;
+      const fd = nextFd;
+      nextFd += fdStep;
       fds.set(fd, { ...node, pos: 0 });
       dv().setUint32(fdOut, fd, true);
       return ESUCCESS;
@@ -262,7 +276,7 @@ function wasiImports() {
     poll_oneoff: pollOneoff,
     proc_exit: (code) => {
       Atomics.compareExchange(ctx.ctl, EXIT_CODE, -1, code & 0xff);
-      postMessage({ type: 'exit', code });
+      postMessage({ type: 'exit', code: code & 0xff });
       throw EXIT;
     },
     // The allocator's entropy. getRandomValues refuses shared memory and takes
@@ -276,7 +290,7 @@ function wasiImports() {
       return ESUCCESS;
     },
     sched_yield: () => ESUCCESS,
-  };
+  });
 }
 
 // Synchronous: claims an idle pool worker, or fails with -EAGAIN.
@@ -311,7 +325,9 @@ function report(error) {
 
 async function run(data) {
   ctx = data;
-  nextFd = 16 + (data.role === 'main' ? 0 : (data.slot + 1) * 4096);
+  // The main worker and each pool worker: one number in every `fdStep`.
+  fdStep = ctx.ctl.length - SLOT0 + 1;
+  nextFd = 16 + (data.role === 'main' ? 0 : data.slot + 1);
   if (data.role === 'main') {
     const instance = await instantiate();
     try { instance.exports._start(); postMessage({ type: 'exit', code: 0 }); }

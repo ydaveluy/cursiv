@@ -59,8 +59,8 @@ class DefaultDocuments : public Documents {
       std::string_view folderUri) override;
 
  private:
-  // One row per id ever minted. `document` is null for a URI that has an id but
-  // no document -- one that was deleted, or one only ever named.
+  // One row per id ever created. `document` is null for a URI that has an id
+  // but no document: one that was deleted, or one only ever named.
   struct Row {
     std::string uri;
     std::shared_ptr<Document> document;

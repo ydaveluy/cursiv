@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# The editor of the "Try it online" page: Monaco bundled from npm with esbuild,
-# with coi-serviceworker and their licences. tools/build-demo.sh runs it before
-# adding the language servers; the documentation check runs it alone, so a
-# Monaco update that breaks the bundle fails before it reaches main.
+# The editor of the "Try it online" page: Monaco bundled with esbuild, with
+# coi-serviceworker and their licences. The documentation check runs it alone.
 #
 #   tools/bundle-demo-editor.sh <site-demo-dir>   # e.g. site/demo
 set -euo pipefail
@@ -22,10 +20,8 @@ cp "$demo"/package.json "$demo"/package-lock.json "$demo"/monaco.js "$work/"
 (cd "$work" && npm ci --ignore-scripts --no-audit --no-fund --silent)
 npm=$work/node_modules
 
-# A service worker must be a file of its own, and it serves only the URLs
-# under its directory: at the site root, it also serves the theme's search
-# worker, which the cross-origin isolated page can start only with the
-# headers it adds.
+# At the site root, the service worker also serves the theme's search worker,
+# which the cross-origin isolated page can start only with its headers.
 cp "$npm/coi-serviceworker/coi-serviceworker.js" "$out/.."
 mkdir -p "$out/licenses"
 

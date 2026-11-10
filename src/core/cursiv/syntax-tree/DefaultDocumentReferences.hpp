@@ -15,9 +15,8 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 
-// One compiled grammar's answer to a reference read, as one table per
-// document: the site is a `RefHandle`, and what the member holds is the
-// metadata's row for it.
+// The references of one document for one compiled grammar: each site is a
+// `RefHandle`, read through the metadata's `RefOps` row.
 
 namespace cursiv {
 
@@ -27,7 +26,7 @@ struct DefaultDocumentReferences : DocumentReferences {
 
   [[nodiscard]] Answer resolve(std::uint32_t rank) const override;
 
-  // Defined with the resolution frames, since forcing opens a phase on them.
+  // Defined in `ReferenceResolution.cpp`, with the resolution frames.
   void force(std::span<const RefHandle> which,
              const CancellationToken& cancelToken) override;
 

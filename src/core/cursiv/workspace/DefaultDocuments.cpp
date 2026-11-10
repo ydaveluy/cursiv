@@ -51,6 +51,10 @@ DocumentId DefaultDocuments::getOrCreateDocumentId(std::string_view uri) {
   if (const auto it = _byUri.find(std::string_view(canonical).substr(0, key));
       it != _byUri.end())
     return it->second;
+  // The last value is `kNoDocument`: an id is refused before it is made, and
+  // none is ever handed out twice.
+  if (_rows.size() >= static_cast<std::size_t>(kNoDocument))
+    throw DocumentStoreError("cursiv: the store has no document id left");
   const auto id = static_cast<DocumentId>(_rows.size());
   _rows.emplace_back(canonical, nullptr);
   _byFolder.insert(canonical, id);
@@ -92,8 +96,8 @@ std::shared_ptr<Document> DefaultDocuments::deleteDocument(DocumentId id) {
   const auto index = static_cast<std::size_t>(id);
   if (id == kNoDocument || index >= _rows.size()) return nullptr;
 #ifndef NDEBUG
-  // Catches the UAF this contract warns about (Documents.hpp): a dependent's
-  // resolved reference into `id`, left unpurged by a caller that bypassed
+  // Catches the use-after-free `Documents::deleteDocument` warns about: a
+  // dependent's resolved reference into `id`, left by a caller that bypassed
   // `DocumentBuilder::update`, would otherwise dangle silently.
   if (_rows[index].document != nullptr) {
     const DocumentId self[] = {id};
@@ -156,9 +160,9 @@ std::shared_ptr<Document> DefaultDocuments::createDocument(
 
 std::shared_ptr<Document> DefaultDocuments::getOrCreateDocument(
     std::string_view uri, const CancellationToken& token) {
-  assert(!_shared.workspaceLock->settled() &&
+  assert(!_shared.workspaceLock->mutationEnded() &&
          "getOrCreateDocument mutates the store: a write calls it before its "
-         "settle, never a build phase");
+         "mutation ends, never in a build phase");
   if (std::shared_ptr<Document> held = getDocument(uri)) return held;
   std::shared_ptr<Document> document =
       _shared.documentFactory->fromUri(uri, token);
@@ -169,7 +173,7 @@ std::shared_ptr<Document> DefaultDocuments::getOrCreateDocument(
 std::shared_ptr<Document> DefaultDocuments::invalidateDocument(
     std::string_view uri) {
   std::shared_ptr<Document> document = getDocument(uri);
-  // Through the builder: it owns what a rung means, and dropping the derived
+  // Through the builder: it owns what a state means, and dropping the derived
   // halves without telling it would leave its own bookkeeping claiming they
   // ran.
   if (document != nullptr)

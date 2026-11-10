@@ -18,7 +18,7 @@
 
 namespace cursiv::engine {
 
-// A chain of auxiliaries passes `like` to spell its name once.
+// A chain of auxiliaries passes `like` to write its name once.
 template <class Cfg>
 std::uint16_t lr_new_aux(Cfg& c, std::uint16_t like = kNoRow) {
   if (c.nnts >= kNtBase) throw LowerRefused(LowerFail::tooManyRules);
@@ -65,7 +65,7 @@ inline std::uint16_t lr_push_prod(LrLowered& o, const LrLowerPool& p,
   LrProdBuild& b = c.prodBuild[self];
   q.lhs = lhs;
   b.owner = p.owner;
-  b.home = p.home;
+  b.sectionCfg = p.sectionCfg;
   b.priorityAlt = priorityAlt == kNoRow ? lr_priority_alt(c, lhs) : priorityAlt;
   b.prioritySubset = prioritySubset;
   q.node = o.writes.intern_chain(node.data(), node.size());
@@ -83,16 +83,17 @@ inline std::uint16_t lr_push_prod(LrLowered& o, const LrLowerPool& p,
         o.writes.intern_cat(slots[i].made, slots[i].row, slots[i].doc)};
     sym[i] = slots[i].sym;
     // A position where a region opens stands on the caller's boundary.
-    tgt[i] = slots[i].lead ? slots[i].lead - 1u : slots[i].cfg;
+    tgt[i] = slots[i].leading ? slots[i].leading - 1u : slots[i].cfg;
   }
   c.nslots += len;
-  // ...and so does the boundary after the last one where a region closes.
-  b.tailCfg = slots.empty()        ? 0u
-              : slots.back().trail ? slots.back().trail - 1u
-                                   : slots.back().cfg;
-  b.regionExit = !endOnly && !slots.empty() && slots.back().trail &&
-                 slots.back().cfg != b.tailCfg &&
-                 c.home_at(slots.back().cfg) == c.home_at(b.tailCfg);
+  // The boundary after the last one where a region closes stands there too.
+  b.tailCfg = slots.empty()           ? 0u
+              : slots.back().trailing ? slots.back().trailing - 1u
+                                      : slots.back().cfg;
+  b.regionExit =
+      !endOnly && !slots.empty() && slots.back().trailing &&
+      slots.back().cfg != b.tailCfg &&
+      c.section_cfg_at(slots.back().cfg) == c.section_cfg_at(b.tailCfg);
   return self;
 }
 // The options production `k` decided, `position << 16 | arm` each.
@@ -105,83 +106,89 @@ inline void lr_decide(LrBuildCfg& c, std::uint16_t k,
 }
 
 // A production of no position but conditions, pushed where a region closes:
-// it stands past the region, on the boundary `trail` names.
+// it stands past the region, on the boundary `trailing` names.
 inline void lr_close_region(LrBuildCfg& c, std::uint16_t k,
-                            std::uint8_t trail) {
-  if (trail == 0 || k == kNoRow) return;
+                            std::uint8_t trailing) {
+  if (trailing == 0 || k == kNoRow) return;
   c.prodBuild[k].closesRegion = true;
-  c.prodBuild[k].tailCfg = static_cast<std::uint8_t>(trail - 1u);
+  c.prodBuild[k].tailCfg = static_cast<std::uint8_t>(trailing - 1u);
   c.prodBuild[k].regionExit =
-      !c.prodBuild[k].endOnly &&
-      c.home_at(c.prodBuild[k].home) == c.home_at(trail - 1u);
+      !c.prodBuild[k].endOnly && c.section_cfg_at(c.prodBuild[k].sectionCfg) ==
+                                     c.section_cfg_at(trailing - 1u);
 }
 
-inline void lr_emit_alts(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
-                         LrShapeId at, const LrActs& made, const LrActs& row);
-inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
-                              LrShapeId at, const LrActs& made,
-                              const LrActs& row);
+inline Descent<void> lr_emit_alts(LrLowered& o, LrLowerPool& p,
+                                  std::uint16_t lhs, LrShapeId at,
+                                  const LrActs& made, const LrActs& row);
+inline Descent<void> lr_emit_unordered(LrLowered& o, LrLowerPool& p,
+                                       std::uint16_t lhs, LrShapeId at,
+                                       const LrActs& made, const LrActs& row);
 inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
                             std::vector<LrLowerSlot> slots, const LrActs& node,
                             std::uint16_t priority);
 
 // `made` and `row` are handed in by the caller, which may have taken them
 // for itself: read off the node, one directive would apply twice.
-inline LrLowerSlot lr_slot_for(LrLowered& o, LrLowerPool& p, LrShapeId at,
-                               const LrActs& made, const LrActs& row);
+inline Descent<LrLowerSlot> lr_slot_for(LrLowered& o, LrLowerPool& p,
+                                        LrShapeId at, const LrActs& made,
+                                        const LrActs& row);
 
-inline LrLowerSlot lr_slot_for_group(LrLowered& o, LrLowerPool& p, LrShapeId at,
-                                    const LrActs& made, const LrActs& row) {
+inline Descent<LrLowerSlot> lr_slot_for_group(LrLowered& o, LrLowerPool& p,
+                                              LrShapeId at, const LrActs& made,
+                                              const LrActs& row) {
   LrBuildCfg& c = o.cfg;
   const LrLowerNode& e = p.e[at];
   const std::uint16_t aux = lr_new_aux(c);
   if (e.kind == LrShape::unordered)
-    lr_emit_unordered(o, p, aux, at, made, row);
+    co_await lr_emit_unordered(o, p, aux, at, made, row);
   else
-    lr_emit_alts(o, p, aux, at, made, row);
-  return LrLowerSlot{
-      .sym = nt_sym(aux), .cfg = e.cfg, .lead = e.lead, .trail = e.trail};
+    co_await lr_emit_alts(o, p, aux, at, made, row);
+  co_return LrLowerSlot{.sym = nt_sym(aux),
+                        .cfg = e.cfg,
+                        .leading = e.leading,
+                        .trailing = e.trailing};
 }
 
 // A choice becomes an auxiliary, one production per branch; a branch that is
-// the end assertion alone makes the choice optional instead. A branch that is
-// a condition alone, where the choice closes a region, is refused: the point
-// after it would be read inside the region and outside it.
-inline LrLowerSlot lr_slot_for_alt(LrLowered& o, LrLowerPool& p, LrShapeId at,
-                                   const LrActs& made, const LrActs& row) {
+// the end assertion alone makes it optional instead. A lone condition branch
+// where the choice closes a region is refused.
+inline Descent<LrLowerSlot> lr_slot_for_alt(LrLowered& o, LrLowerPool& p,
+                                            LrShapeId at, const LrActs& made,
+                                            const LrActs& row) {
   const LrLowerNode& e = p.e[at];
   unsigned nEnd = 0;
-  for (unsigned i = 0; e.trail != 0 && i < e.count; ++i) {
-    const LrLowerNode& arm = p.e[p.kid[e.sym + i]];
+  for (unsigned i = 0; e.trailing != 0 && i < e.count; ++i) {
+    const LrLowerNode& arm = p.e[p.child[e.sym + i]];
     const auto sym = static_cast<std::uint16_t>(arm.sym);
     if (arm.kind == LrShape::sym && p.is_gap(sym))
       lower_refuse(o.cfg, LowerFail::regionBoundaryShared);
   }
   bool decoratedEnd = !made.empty() || !row.empty();
   for (unsigned i = 0; i < e.count; ++i) {
-    const auto& child = p.e[p.kid[e.sym + i]];
+    const auto& child = p.e[p.child[e.sym + i]];
     if (child.kind == LrShape::end) {
       ++nEnd;
       decoratedEnd = decoratedEnd || !child.made.empty() || !child.row.empty();
     }
   }
   if (nEnd > 1) o.fault.raise(GrammarFaultCode::twoEndMarks, p.owner);
-  if (nEnd != 0 && decoratedEnd) return lr_slot_for_group(o, p, at, made, row);
-  if (nEnd == e.count) return LrLowerSlot{.end = true, .cfg = e.cfg};
-  if (nEnd == 0) return lr_slot_for_group(o, p, at, made, row);
+  if (nEnd != 0 && decoratedEnd)
+    co_return co_await lr_slot_for_group(o, p, at, made, row);
+  if (nEnd == e.count) co_return LrLowerSlot{.end = true, .cfg = e.cfg};
+  if (nEnd == 0) co_return co_await lr_slot_for_group(o, p, at, made, row);
   const std::uint16_t aux = lr_new_aux(o.cfg);
   for (unsigned i = 0; i < e.count; ++i) {
-    const LrShapeId k = p.kid[e.sym + i];
+    const LrShapeId k = p.child[e.sym + i];
     if (p.e[k].kind != LrShape::end)
-      lr_emit_alts(o, p, aux, k, lr_cat(p.e[k].made, made),
-                   lr_cat(p.e[k].row, row));
+      co_await lr_emit_alts(o, p, aux, k, lr_cat(p.e[k].made, made),
+                            lr_cat(p.e[k].row, row));
   }
-  return LrLowerSlot{.sym = nt_sym(aux),
-                     .optional = true,
-                     .cfg = e.cfg,
-                     .lead = e.lead,
-                     .trail = e.trail,
-                     .endAlt = true};
+  co_return LrLowerSlot{.sym = nt_sym(aux),
+                        .optional = true,
+                        .cfg = e.cfg,
+                        .leading = e.leading,
+                        .trailing = e.trailing,
+                        .endAlt = true};
 }
 
 // `n` turns of one item: only the first stands at the head of the run, and
@@ -190,22 +197,22 @@ inline std::vector<LrLowerSlot> lr_turns(const LrLowerSlot& in, std::uint32_t n,
                                          bool last = true) {
   std::vector items(n, in);
   for (std::uint32_t i = 0; i < n; ++i) {
-    if (i != 0) items[i].lead = 0;
-    if (i + 1 != n || !last) items[i].trail = 0;
+    if (i != 0) items[i].leading = 0;
+    if (i + 1 != n || !last) items[i].trailing = 0;
   }
   return items;
 }
 
-// `R -> R X | X`, the actions riding the item.
+// `R -> R X | X`, the actions on the item.
 inline void lr_emit_left_recursion(LrLowered& o, const LrLowerPool& p,
                                    std::uint16_t aux, const LrLowerSlot& in,
                                    std::uint32_t min) {
   // Only the base case stands at the head of the run, and only the item at
   // its tail.
   LrLowerSlot inner = in;
-  inner.lead = 0;
+  inner.leading = 0;
   const LrLowerSlot pair[2] = {
-      {.sym = nt_sym(aux), .cfg = in.cfg, .lead = in.lead}, inner};
+      {.sym = nt_sym(aux), .cfg = in.cfg, .leading = in.leading}, inner};
   lr_push_prod(o, p, aux, pair);
   lr_push_prod(o, p, aux, lr_turns(in, std::max(min, 1u)));
 }
@@ -226,61 +233,65 @@ inline void lr_emit_chained_repeat(LrLowered& o, const LrLowerPool& p,
     const std::uint16_t next = lr_new_aux(o.cfg, aux);
     const bool hasTail = tail != kNoRow;
     LrLowerSlot item = in;
-    item.lead = 0;
-    if (hasTail) item.trail = 0;
+    item.leading = 0;
+    if (hasTail) item.trailing = 0;
     const LrLowerSlot slots[2] = {
-        item, {.sym = nt_sym(tail), .cfg = in.cfg, .trail = in.trail}};
+        item, {.sym = nt_sym(tail), .cfg = in.cfg, .trailing = in.trailing}};
     lr_push_prod(o, p, next, std::span(slots).first(hasTail ? 2 : 1));
-    lr_close_region(o.cfg, lr_push_prod(o, p, next, {}), in.trail);
+    lr_close_region(o.cfg, lr_push_prod(o, p, next, {}), in.trailing);
     if (o.cfg.lowerFail()) return;
     tail = next;
   }
   std::vector<LrLowerSlot> slots = lr_turns(in, floor, tail == kNoRow);
   if (tail != kNoRow)
-    slots.push_back(
-        LrLowerSlot{.sym = nt_sym(tail), .cfg = in.cfg, .trail = in.trail});
+    slots.push_back(LrLowerSlot{
+        .sym = nt_sym(tail), .cfg = in.cfg, .trailing = in.trailing});
   lr_push_prod(o, p, aux, slots);
 }
 
-inline LrLowerSlot lr_slot_for_rep(LrLowered& o, LrLowerPool& p, LrShapeId at,
-                                   const LrActs& made, const LrActs& row) {
+inline Descent<LrLowerSlot> lr_slot_for_rep(LrLowered& o, LrLowerPool& p,
+                                            LrShapeId at, const LrActs& made,
+                                            const LrActs& row) {
   const LrLowerNode& e = p.e[at];
-  const LrShapeId kid = e.sym;
-  LrLowerSlot in = lr_slot_for(o, p, kid, p.e[kid].made, p.e[kid].row);
+  const LrShapeId child = e.sym;
+  LrLowerSlot in =
+      co_await lr_slot_for(o, p, child, p.e[child].made, p.e[child].row);
   if (e.max == 1) {
     // An optional end assertion says nothing its absence does not.
     if (e.min == 0 && in.end)
       o.fault.raise(GrammarFaultCode::optionalEndMark, p.owner);
-    // ...and neither does an optional condition.
+    // Nor does an optional condition.
     if (e.min == 0 && p.is_gap(in.sym))
       o.fault.raise(GrammarFaultCode::optionalCondition, p.owner);
     in.optional |= e.min == 0;
-    if (e.lead) in.lead = e.lead;
-    if (e.trail) in.trail = e.trail;
+    if (e.leading) in.leading = e.leading;
+    if (e.trailing) in.trailing = e.trailing;
     // An optional turn carries no end assertion.
     in.endAlt &= e.min != 0;
     in.made.insert(in.made.end(), made.begin(), made.end());
     in.row.insert(in.row.end(), row.begin(), row.end());
-    return in;
+    co_return in;
   }
   // An item that may match nothing is refused: one holding no position names
   // no symbol to go on with either.
   if (in.optional || in.none || in.end)
-    return LrLowerSlot{.sym = in.sym, .cfg = in.cfg};
+    co_return LrLowerSlot{.sym = in.sym, .cfg = in.cfg};
   const std::uint16_t aux = lr_new_aux(o.cfg);
-  if (e.max == kEndless && e.min != 0 && in.trail != 0) {
+  if (e.max == kEndless && e.min != 0 && in.trailing != 0) {
     // An unbounded run closing a region has a required final item. Keep its
     // earlier items in an internal prefix: no state both shifts another
     // internal item and reduces the region under the caller's trivia.
     const std::uint16_t prefix = lr_new_aux(o.cfg);
     LrLowerSlot repeated = in;
-    repeated.trail = 0;
+    repeated.trailing = 0;
     lr_emit_left_recursion(o, p, prefix, repeated, e.min - 1u);
     LrLowerSlot last = in;
-    last.lead = 0;
-    std::vector<LrLowerSlot> slots{
-        {.sym = nt_sym(prefix), .optional = e.min == 1,
-         .cfg = in.cfg, .lead = in.lead}, last};
+    last.leading = 0;
+    std::vector<LrLowerSlot> slots{{.sym = nt_sym(prefix),
+                                    .optional = e.min == 1,
+                                    .cfg = in.cfg,
+                                    .leading = in.leading},
+                                   last};
     lr_emit_subsets(o, p, aux, std::move(slots), {}, kNoRow);
   } else if (e.max != kEndless)
     lr_emit_chained_repeat(o, p, aux, in, e);
@@ -290,65 +301,72 @@ inline LrLowerSlot lr_slot_for_rep(LrLowered& o, LrLowerPool& p, LrShapeId at,
     return LrLowerSlot{.sym = nt_sym(nt),
                        .optional = e.min == 0,
                        .cfg = in.cfg,
-                       .lead = in.lead,
-                       .trail = in.trail};
+                       .leading = in.leading,
+                       .trailing = in.trailing};
   };
   // A directive over the list names one record over the whole run: a head
   // holds it.
-  if (made.empty() && row.empty()) return run(aux);
+  if (made.empty() && row.empty()) co_return run(aux);
   const std::uint16_t head = lr_new_aux(o.cfg);
   const std::uint16_t one = nt_sym(aux);
   // The head stands where the run stands, edges included, or it and the
   // caller would answer one point two ways.
-  const LrLowerSlot only{
-      .sym = one, .cfg = in.cfg, .lead = in.lead, .trail = in.trail};
+  const LrLowerSlot only{.sym = one,
+                         .cfg = in.cfg,
+                         .leading = in.leading,
+                         .trailing = in.trailing};
   lr_push_prod(o, p, head, std::span(&only, 1), lr_cat(made, row));
-  return run(head);
+  co_return run(head);
 }
 
-inline LrLowerSlot lr_slot_for(LrLowered& o, LrLowerPool& p, LrShapeId at,
-                               const LrActs& made, const LrActs& row) {
+inline Descent<LrLowerSlot> lr_slot_for(LrLowered& o, LrLowerPool& p,
+                                        LrShapeId at, const LrActs& made,
+                                        const LrActs& row) {
   switch (const LrLowerNode& e = p.e[at]; e.kind) {
     case LrShape::sym:
-      return LrLowerSlot{.sym = static_cast<std::uint16_t>(e.sym),
-                         .cfg = e.cfg,
-                         .lead = e.lead,
-                         .trail = e.trail,
-                         .made = made,
-                         .row = row,
-                         .doc = e.doc};
-    // An item that takes no position has no record for a directive to ride.
+      co_return LrLowerSlot{.sym = static_cast<std::uint16_t>(e.sym),
+                            .cfg = e.cfg,
+                            .leading = e.leading,
+                            .trailing = e.trailing,
+                            .made = made,
+                            .row = row,
+                            .doc = e.doc};
+    // An item that takes no position has no record for a directive to attach
+    // to.
     case LrShape::none:
       if (!made.empty() || !row.empty())
         o.fault.raise(GrammarFaultCode::directiveOnNoPosition, p.owner);
-      return LrLowerSlot{.none = true, .lead = e.lead, .trail = e.trail};
+      co_return LrLowerSlot{
+          .none = true, .leading = e.leading, .trailing = e.trailing};
     case LrShape::end:
       if (!made.empty() || !row.empty())
         o.fault.raise(GrammarFaultCode::directiveOnNoPosition, p.owner);
-      return LrLowerSlot{
-          .end = true, .cfg = e.cfg, .lead = e.lead, .trail = e.trail};
+      co_return LrLowerSlot{.end = true,
+                            .cfg = e.cfg,
+                            .leading = e.leading,
+                            .trailing = e.trailing};
     case LrShape::alt:
-      return lr_slot_for_alt(o, p, at, made, row);
+      co_return co_await lr_slot_for_alt(o, p, at, made, row);
     case LrShape::unordered:
     case LrShape::seq:
-      return lr_slot_for_group(o, p, at, made, row);
+      co_return co_await lr_slot_for_group(o, p, at, made, row);
     case LrShape::scope: {
       // Like a named rule returning its node: internal actions belong to the
       // callee, external directives to the call site.
       const std::uint16_t aux = lr_new_aux(o.cfg);
       const LrLowerNode& child = p.e[e.sym];
-      lr_emit_alts(o, p, aux, e.sym, child.made, child.row);
-      return LrLowerSlot{.sym = nt_sym(aux),
-                         .cfg = e.cfg,
-                         .lead = e.lead,
-                         .trail = e.trail,
-                         .made = made,
-                         .row = row};
+      co_await lr_emit_alts(o, p, aux, e.sym, child.made, child.row);
+      co_return LrLowerSlot{.sym = nt_sym(aux),
+                            .cfg = e.cfg,
+                            .leading = e.leading,
+                            .trailing = e.trailing,
+                            .made = made,
+                            .row = row};
     }
     case LrShape::rep:
-      return lr_slot_for_rep(o, p, at, made, row);
+      co_return co_await lr_slot_for_rep(o, p, at, made, row);
   }
-  return LrLowerSlot{};
+  co_return LrLowerSlot{};
 }
 
 }  // namespace cursiv::engine

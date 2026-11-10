@@ -3,18 +3,19 @@
 #include <lsp/json/json.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
+#include "cursiv/McpServer.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/workspace/ServiceRequirement.hpp"
-#include "cursiv/McpServer.hpp"
 
-// The tool-authoring kit: what a service -- this tree's or a language's own
-// -- builds a door with. Schemas, argument access, uri normalization, and
-// the document spine every positional tool shares.
+// The tool-authoring kit for a service, this tree's or a language's own:
+// schemas, argument access, uri normalization, and the document routing every
+// positional tool shares.
 
 namespace cursiv {
 
@@ -51,16 +52,18 @@ struct McpToolPosition {
 void append_tool_position(std::string& out, const Document& document,
                           TextOffset offset);
 
-/**
- * The document-tool spine: the requirement awaited off the lock, the
- * admission re-asked inside, the language the document was opened with.
- * A bare `DocumentState` waits for the document alone; a `WorkspaceState`
- * waits for the whole workspace, as an answer read from every document's
- * index (references, rename) must. `body` runs once, on the document at that
- * rung, and appends to the answer; the caller words what an empty one means.
- * A cancelled request, or a document that is gone or never gets there,
- * answers an error and `body` does not run.
- */
+namespace detail {
+
+// An `integer` argument as JSON Schema reads one: a number with no fractional
+// part, such as `1.0`, within `[minimum, INT32_MAX]`.
+[[nodiscard]] std::optional<std::int32_t> tool_integer(
+    const lsp::json::Value* value, std::int32_t minimum);
+
+}  // namespace detail
+
+// Awaits `requirement` (a `WorkspaceState` waits for the whole workspace),
+// checks it again under the lock, then runs `body` once to append the answer.
+// A cancelled request, or a document gone or never there, answers an error.
 [[nodiscard]] McpToolResult route_document_tool(
     SharedCoreServices& shared, const std::string& uri,
     ServiceRequirement requirement, const CancellationToken& token,

@@ -1,7 +1,5 @@
-// A grammar rendered as reviewable text: `dump_declared<G>()` prints the
-// grammar as written, `dump_compiled<G>()` its resolved form, so a rewrite is
-// compared side by side. Each call reads an image of its own, so dumps may run
-// on several threads at once.
+// A grammar as reviewable text: `dump_declared<G>()` as written,
+// `dump_compiled<G>()` resolved. Safe on several threads at once.
 #pragma once
 
 #include <string>

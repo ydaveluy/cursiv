@@ -13,10 +13,9 @@ struct Plain : cursiv::GrammarSpec {
   // A backslash continues the line: the next physical line starts no
   // logical one.
   struct WS : terminal<some(cr<R"( \t\f)">) | (lit<"\\"> + eol)> {};
-  // A blank line ends no statement: absorbed, so the next line's run is
-  // read at the next token; a line of form feeds is blank too. Declared
-  // before the trivia newline, so where a state reads both the same byte is
-  // the statement's end.
+  // A blank line ends no statement: it is absorbed, and a line of form feeds is
+  // blank too. Declared before the trivia newline, so where a state reads both,
+  // the byte ends the statement.
   struct NEWLINE : terminal<eol + many(many(cr<R"( \t\f)">) + eol)> {};
   struct NL : terminal<eol> {};
   // A backslash ending a comment is the comment's: the next line is a line.
@@ -103,8 +102,8 @@ struct G : cursiv::GrammarSpec {
 
 // Suites of names, and a last line whose newline the end of input stands for.
 // Behind their own opening keyword, suites of keywords: the caret on a suite's
-// first line stands glued to the indent's run, which no lexer reads.
-namespace laid {
+// first line stands attached to the indent's run, which no lexer reads.
+namespace synthetic {
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t)">)> {};
   struct NEWLINE : terminal<eol + many(many(cr<R"( \t)">) + eol)> {};
@@ -132,7 +131,7 @@ struct G : cursiv::GrammarSpec {
   using ignored = WS;
   using hidden = list<COMMENT>;
 };
-}  // namespace laid
+}  // namespace synthetic
 
 namespace joined {
 struct Words : cursiv::GrammarSpec {
@@ -184,10 +183,8 @@ struct G : tindent::joined::Words {
 namespace tindent {
 
 // A list holds expressions a statement also ends with: the state after one
-// reads the statement's newline, which inside the brackets is a blank.
-// Beside them, a bracket and a suite one rule opens and its caller closes:
-// each opener builds its own type, so its record names one rule and the
-// caret steps over it whole.
+// reads the statement's newline, a blank inside brackets. Beside them, a
+// bracket and a suite one rule opens and its caller closes.
 namespace joined {
 struct Bracket : cursiv::Extends<ast::Node> {};
 struct Suite : cursiv::Extends<ast::Node> {};
@@ -296,7 +293,7 @@ struct G : joined::Words {
 };
 }  // namespace dotted
 
-// Arms that open alike, the lowest opening a block, beside a line the end of
+// Arms that open the same, the lowest opening a block, beside a line the end of
 // the input may end; and a terminal whose last bytes are a line's end behind a
 // backslash, which that terminal holds.
 namespace heads {
@@ -322,7 +319,7 @@ struct G : joined::Words {
 }  // namespace heads
 
 // One list rule reads the document and every suite, so the state that ends
-// a list reads a dedent wherever the list stands; the document then owes a
+// a list reads a dedent wherever the list stands; the document then expects a
 // full stop, which a repair at the end of the input inserts.
 namespace body {
 struct G : cursiv::GrammarSpec {
@@ -345,8 +342,8 @@ struct G : cursiv::GrammarSpec {
 };
 }  // namespace body
 
-// Two heads read alike down a whole suite and told apart by the mark after it:
-// past what a look-ahead reads, the graph reads the suite.
+// Two heads read the same down a whole suite and told apart by the mark after
+// it: past what a look-ahead reads, the graph reads the suite.
 namespace marked {
 struct G : joined::Words {
   struct Stmt;
@@ -382,9 +379,9 @@ struct Cases : G {
 };
 }  // namespace folded
 
-// Readings the text settles only far on, over a token that two terminals read:
-// each of the two meets the line starts as the other does.
-namespace rivals {
+// Readings the text decides only far on, over a token that two terminals read:
+// each of the two sees the line starts as the other does.
+namespace tied {
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t)">)> {};
   struct NEWLINE : terminal<eol> {};
@@ -406,17 +403,43 @@ struct G : cursiv::GrammarSpec {
   using ignored = WS;
   using indent_newline = NEWLINE;
 };
-}  // namespace rivals
+}  // namespace tied
 
-namespace laid {
+// A head the first arm reads with its suite, the second as a document name,
+// read the same to the end. The end implies a `;` after the first arm's last
+// line: the dedent the end gives is refused first, as the parser refuses it.
+namespace ending {
+struct G : joined::Words {
+  struct Line : rule<create<ast::Node>(
+                    assign<&ast::Node::name>(ref<ID>) +
+                    (ref<NEWLINE> | !eof | implied(lit<";">, eof)))> {};
+  struct Bare : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>) +
+                                       (ref<NEWLINE> | eof))> {};
+  struct Head : rule<create<ast::Node>(
+                    assign<&ast::Node::name>(ref<ID>) + lit<":"> +
+                    ref<NEWLINE> + ref<INDENT> +
+                    some(append<&ast::Node::body>(ref<Line>)) + ref<DEDENT>)> {
+  };
+  struct Name : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
+  struct Root
+      : rule<create<ast::Node>(append<&ast::Node::body>(ref<Head>) |
+                               (append<&ast::Node::body>(ref<Name>) + lit<":"> +
+                                ref<NEWLINE> + ref<INDENT> +
+                                some(append<&ast::Node::body>(ref<Bare>)) +
+                                ref<DEDENT>))> {};
+};
+}  // namespace ending
+
+namespace synthetic {
 struct Cases : G {
   struct Case : rule<ref<G::Case> | (kw<"fork"> + ref<fork::G::Root>) |
-                     (kw<"rivals"> + ref<rivals::G::Root>) |
+                     (kw<"tied"> + ref<tied::G::Root>) |
                      (kw<"dotted"> + ref<dotted::G::Root>) |
                      (kw<"heads"> + ref<heads::G::Root>) |
-                     (kw<"marked"> + ref<marked::G::Root>)> {};
+                     (kw<"marked"> + ref<marked::G::Root>) |
+                     (kw<"ending"> + ref<ending::G::Root>)> {};
   using entry = Case;
 };
-}  // namespace laid
+}  // namespace synthetic
 
 }  // namespace tindent

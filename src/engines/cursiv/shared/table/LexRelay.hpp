@@ -44,9 +44,9 @@ struct LexRelay {
   bool several = false;
   // Nested, and no closer to balance it: the run ends with the text.
   bool eof = false;
-  // The tier of the branch this relay stands in: what it reads is a literal
+  // The priority of the branch this relay stands in: what it reads is a literal
   // or a keyword, behind conditions.
-  std::uint8_t tier = 0;
+  std::uint8_t priority = 0;
 
   bool (*asserts)(const char*, TextOffset, TextOffset, TextOffset&) = nullptr;
   PredicateState (*recognizes)(const char*, TextOffset, TextOffset,

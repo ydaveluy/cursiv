@@ -7,10 +7,8 @@
 #include "cursiv/text/Position.hpp"
 #include "cursiv/text/Range.hpp"
 
-// `cursiv::Position` and `lsp::Position` are both a line and a column in
-// UTF-16 code units, so the conversion is a field-for-field copy. The core
-// may not include lsp-framework, so the unit crosses the frontier here and
-// the type does not.
+// Both positions are a line and a UTF-16 column: a field copy, made here
+// because the core may not include lsp-framework.
 
 namespace cursiv {
 

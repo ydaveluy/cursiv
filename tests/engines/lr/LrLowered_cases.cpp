@@ -10,35 +10,34 @@
 #include "../shared/GapReference.hpp"
 #include "asicases/generated/G/Parser.hpp"
 #include "asicases/generated/G/Table.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
-#include "cursiv/parser/Parser.hpp"
-#include "cursiv/syntax-tree/AstNode.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstBuilder.hpp"
-#include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/lr/gen/LrAmbiguity.hpp"
 #include "cursiv/lr/gen/LrLowering.hpp"
 #include "cursiv/lr/gen/lr_build.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
+#include "cursiv/parser/Parser.hpp"
 #include "cursiv/shared/gen/GrammarFault.hpp"
 #include "cursiv/shared/gen/UnboundedCondition.hpp"
 #include "cursiv/shared/runtime/LexBoundary.hpp"
-#include "cursiv/Check.hpp"
-#include "door/generated/G/Module.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
 #include "engines/lr/AsiGrammar.hpp"
-#include "engines/lr/DoorGrammar.hpp"
 #include "engines/lr/PassesGrammar.hpp"
+#include "engines/lr/SmallLanguagesGrammar.hpp"
 #include "passes/generated/G/Module.hpp"
+#include "smalllanguages/generated/G/Module.hpp"
 
 namespace lr_lowered_cases {
 
-// Grammars lowered in process: where an infix step rides, how a directive
-// distributes, and the boundary a region hands back.
+// Grammars lowered in process: which token carries an infix level, how a
+// directive distributes, and the boundary a region hands back.
 
-// The token an infix operator opens on carries the level's step. A rule whose
-// leading item can vanish opens on the next one too, so reading position zero
-// alone binds the step to the wrong token -- and the shift side of the cell is
-// then left with nothing to compare.
+// The token an infix operator opens on carries the level's precedence. A rule
+// whose leading item can vanish opens on the next one too, so position zero
+// alone would bind the precedence to the wrong token.
 namespace infix_first {
 
 namespace {
@@ -75,7 +74,7 @@ void run() {
     if (prec != 0) ++stepped;
     std::printf("  %-4.*s prec=%u\n", static_cast<int>(sp.size()),
                 sp.empty() ? "" : sp.data(), prec);
-    // `*` opens the tighter level, `+` the looser one: both carry a step.
+    // `*` opens the tighter level, `+` the looser one: both carry a precedence.
     if (sp == "*" || sp == "+") CHECK(prec != 0);
   }
   CHECK(stepped >= 2);
@@ -156,10 +155,9 @@ void run() {
 
 }  // namespace distribute
 
-// The boundary a region hands back to its caller stands at one point, so it
-// answers once: both productions of `aux -> aux X | X` read it off their last
-// position, and the empty reading of a rule closing the region stands past
-// it, as the inline form's does.
+// The boundary a region hands back to its caller stands at one point and
+// answers once: both productions of `aux -> aux X | X` read it at their last
+// position, and a region-closing rule's empty reading stands past it.
 namespace region_tail {
 
 namespace {
@@ -294,9 +292,8 @@ void run() {
 }  // namespace region_tail
 
 // A rule only a region reaches is read there, where a skipped terminal is a
-// token of its own: the reading outside is never entered, so it refuses
-// nothing. The corresponding refusal outside a region is covered by
-// refusals/skipped_terminal_shared.hpp.
+// token: the outside reading is never entered, so it refuses nothing.
+// refusals/skipped_terminal_shared.hpp covers the refusal outside a region.
 namespace region_rule {
 
 namespace {
@@ -381,10 +378,9 @@ void run() {
 
 }  // namespace nested_repeat
 
-// A section closed on the start of a token its grammar reads: where it ends
-// would be that grammar's reading. One closed on a token none of its own
-// begins with is read. A grammar that embeds itself closes its section on
-// its own token.
+// A section closed on the start of a token its grammar reads is refused, its
+// end being that grammar's reading, and so is a grammar that embeds itself. One
+// closed on a token none of its own begins with is read.
 namespace section_end {
 
 namespace {
@@ -528,10 +524,15 @@ struct EndlessThrough : Base {
   struct Root : rule<create<Doc>(many(ref<Item>) + lit<";">)> {};
   using entry = Root;
 };
+// A terminal that only names another, whose mark keeps it a call of its own:
+// the call is what the run's item reads.
 struct EndlessMark : Base {
   struct Tag {};
   struct Marked : terminal<mark<Tag>(some(cr<"=">)) + same<Tag>> {};
-  struct Item : rule<!(many(ref<Marked>) + lit<".">)+ref<X>> {};
+  struct Dashes : terminal<mark<Tag>(some(cr<"-">)) + same<Tag>> {};
+  struct Named : terminal<ref<Dashes>> {};
+  struct Item : rule<!(many(ref<Marked>) + lit<".">)+!(many(ref<Named>) +
+                                                       lit<",">)+ref<X>> {};
   struct Root : rule<create<Doc>(many(ref<Item>) + lit<";">)> {};
   using entry = Root;
 };
@@ -541,7 +542,7 @@ struct Bounded : Base {
   using entry = Root;
 };
 // A run inside another repetition is read to its end by each test; the run
-// holding it is read round by round.
+// holding it is read iteration by iteration.
 struct Nested : Base {
   struct Item
       : rule<!(some(some(lit<"-">) + lit<";">) + lit<">">)+ref<X>> {};
@@ -611,17 +612,16 @@ void run() {
   CHECK(cfg<Tokens>().unbounded.empty());
   CHECK(cfg<EndlessTokens>().unbounded.size() == 1);
   CHECK(cfg<EndlessThrough>().unbounded.size() == 1);
-  CHECK(cfg<EndlessMark>().unbounded.size() == 1);
+  CHECK(cfg<EndlessMark>().unbounded.size() == 2);
 }
 }  // namespace case_lrambiguity
 
 // Grammars both lowered in process and generated: what the lowering keeps is
 // what the generated parser reads.
 
-// A state's fast path probes the bytes it can shift on without materialising
-// a token. An open cell is not one it may answer alone: the reading the cell
-// keeps beside the shift is a reading the drive still owes, and bypassing it
-// refuses texts the grammar states.
+// A state's fast path probes the bytes it can shift on without making a token.
+// An open cell is not one it may answer alone: the reading kept beside the
+// shift is still needed, and bypassing it refuses valid texts.
 namespace named_conflict {
 
 void run() {
@@ -631,7 +631,7 @@ void run() {
   // the fast path's alone to get right.
   CHECK(A.nconflicts != 0);
   CHECK(A.nOrdered == 0);
-  const auto engine = tdoor::generated::G::create_parser();
+  const auto engine = tsmall::generated::G::create_parser();
   // `S := A ID ID` over `A := ID | ID ID`, so the language is three names or
   // four and nothing else. The three-name reading is the one the open cell
   // keeps beside its shift.
@@ -654,8 +654,9 @@ void run() {
 
 }  // namespace named_conflict
 
-// The second reading a region asks for is dynamic: the island mints its clones
-// and the table, which no region reaches, is lowered once and climbs normally.
+// The second reading a region asks for is dynamic: the island creates its
+// clones, and the table, which no region reaches, is lowered once and parses
+// normally.
 namespace infix_region {
 
 namespace {
@@ -681,7 +682,7 @@ void only_what_the_region_reaches_is_read_twice() {
 }
 
 const cursiv::Parser& engine() {
-  static const auto p = tdoor::generated::G::create_parser();
+  static const auto p = tsmall::generated::G::create_parser();
   return *p;
 }
 
@@ -691,7 +692,7 @@ cursiv::ParseResult parse(std::string_view src) {
   return r;
 }
 
-void the_ladder_still_climbs() {
+void the_precedence_levels_still_apply() {
   cursiv::ParseResult r = parse("region [a.b] 1 + 2 * 3");
   CHECK(static_cast<bool>(r) && r.diagnostics.empty());
   auto* doc = r.value_as<ast::Doc>();
@@ -734,7 +735,7 @@ void the_island_hands_its_node_up() {
 
 void run() {
   only_what_the_region_reaches_is_read_twice();
-  the_ladder_still_climbs();
+  the_precedence_levels_still_apply();
   the_island_stays_tight();
   wri::the_island_hands_its_node_up();
 }
@@ -824,7 +825,7 @@ void run() {
           case GapLeafKind::has:
           case GapLeafKind::is:
             v = 2u * cursiv::test::gap_reference(
-                         g.lex.data(), g.lexKid.data(),
+                         g.lex.data(), g.lexChild.data(),
                          cursiv::engine::lex_boundary(
                              tasi::cases::generated::G::kTable.cfg),
                          leaf.node, sample.data(), sample.size(),
@@ -838,7 +839,7 @@ void run() {
             CHECK(operand.kind == LexKind::token);
             const auto rest = static_cast<TextOffset>(text.size()) - la.begin;
             const cursiv::test::GapReference reader{
-                g.lex.data(), g.lexKid.data(),
+                g.lex.data(), g.lexChild.data(),
                 cursiv::engine::lex_boundary(
                     tasi::cases::generated::G::kTable.cfg),
                 text.data() + la.begin, rest};

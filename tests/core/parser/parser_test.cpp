@@ -35,8 +35,8 @@
 #include "workspace/generated/Workspace/Module.hpp"
 #include "workspace/generated/Workspace/Table.hpp"
 
-// Pins the erased door: the same grammar, reached through a service that never
-// learns it. The AST it hands back is the one the table read directly gives.
+// The type-erased parser: a service reaches the grammar without knowing its
+// type, and gets the AST the generated table gives directly.
 namespace parser_service {
 
 namespace {
@@ -47,15 +47,15 @@ const cursiv::Parser& service() {
   return support::parser_of<&ws::generated::Workspace::create_parser>();
 }
 
-// The other road to the same tree: the generated table and drive, read as
-// data, with no service in front of them.
+// The same tree from the generated table and drive directly, with no service
+// in front of them.
 bool direct_parse(std::string_view text, cursiv::Cst& cst) {
   return cursiv::engine::lr_parser<dmg::kTable>.parse(text, cst, nullptr,
                                                       &dmg::kDrive);
 }
 
-// The erased door answers about records and tokens, which is all a service
-// that never learns its grammar can ask.
+// The type-erased grammar answers about records and tokens, all a service
+// that does not know the grammar's type can ask.
 void the_grammar_is_reachable_without_the_template() {
   const cursiv::Grammar& g = service().getGrammar();
   const cursiv::ParseResult r = service().parse("datatype String\n");
@@ -74,9 +74,9 @@ void a_parse_through_the_interface_builds_the_same_tree() {
   CHECK(through.value != nullptr);
   CHECK(through.diagnostics.empty());
 
-  // The table read directly, byte for byte the same outcome -- the reference
-  // work list included: the document declares one reference, and both roads
-  // owe its handle.
+  // The table read directly gives the same outcome, the reference list
+  // included: the document declares one reference, and both paths give its
+  // handle.
   cursiv::Cst cst;
   direct_parse(src, cst);
   const cursiv::ParseResult direct =
@@ -157,8 +157,8 @@ void a_broken_text_still_answers() {
   CHECK(r.value != nullptr);
   // The result's list is the tree's repairs, not a second bookkeeping.
   CHECK(r.diagnostics.size() == r.cst().diagnostics().size());
-  // A repair carries its whole record through the erased door: a kind and a
-  // place, not just a count.
+  // A repair keeps its whole record through the type-erased interface: a kind
+  // and a place, not just a count.
   const cursiv::ParseDiagnostic& d = r.diagnostics.front();
   CHECK(d.kind != cursiv::DiagnosticKind::conversion_error);
   CHECK(d.end >= d.begin);
@@ -175,7 +175,7 @@ void a_cancelled_token_stops_the_parse() {
 }
 
 // Ordinary reads keep their hot loop free of cancellation polling.
-void a_long_reading_runs_whole_and_the_door_answers() {
+void a_long_reading_runs_whole_and_the_service_still_cancels() {
   std::string src = "datatype String\n";
   for (int i = 0; i < 20000; ++i)
     src += "entity E" + std::to_string(i) + " { x : String }\n";
@@ -283,6 +283,55 @@ std::size_t entries_built(const std::string& src,
   return entryCalls;
 }
 
+// A stop requested as a long data rule is converted is seen inside that
+// record.
+std::vector<cursiv::NodeCount> extentById;
+bool stoppedInside = false;
+
+void stop_before_a_long_entry(cursiv::engine::AstReducer& builder,
+                              cursiv::NodeId id) {
+  if (extentById[id] < 1000) return countedEntries[rowById[id]](builder, id);
+  astStop->request_stop();
+  try {
+    countedEntries[rowById[id]](builder, id);
+  } catch (const cursiv::OperationCancelled&) {
+    stoppedInside = true;
+    throw;
+  }
+}
+
+void a_stop_inside_a_long_data_rule_is_observed_there() {
+  std::string src = "package a";
+  for (int i = 0; i < 4000; ++i) src += ".a";
+  src += " { }\n";
+  cursiv::Cst cst;
+  CHECK(direct_parse(src, cst));
+  rowById.assign(cst.size(), cursiv::kNoElement);
+  extentById.assign(cst.size(), 0);
+  for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
+    rowById[id] = dmg::kTable.stamp.row(cst[id]);
+    extentById[id] = cst[id].subtreeSize;
+  }
+  auto actions = dmg::kAstActions;
+  countedEntries.assign(actions.entries, actions.entries + actions.entryCount);
+  std::vector<cursiv::engine::AstEntryFn> entries(countedEntries);
+  for (cursiv::engine::AstEntryFn& e : entries)
+    if (e != nullptr) e = &stop_before_a_long_entry;
+  actions.entries = entries.data();
+  cursiv::CancellationTokenSource source;
+  astStop = &source;
+  stoppedInside = false;
+  bool threw = false;
+  try {
+    (void)cursiv::engine::AstReducer::build<dmg::kTable.stamp>(
+        actions, std::move(cst), source.get_token());
+  } catch (const cursiv::OperationCancelled&) {
+    threw = true;
+  }
+  astStop = nullptr;
+  CHECK(threw && stoppedInside);
+}
+
 void a_stop_during_a_long_ast_build_is_observed_early() {
   std::string src = "datatype String\n";
   for (int i = 0; i < 40000; ++i)
@@ -302,18 +351,18 @@ void run() {
   a_parse_reads_only_the_borrowed_view();
   a_broken_text_still_answers();
   a_cancelled_token_stops_the_parse();
-  a_long_reading_runs_whole_and_the_door_answers();
+  a_long_reading_runs_whole_and_the_service_still_cancels();
   a_cancelled_token_stops_the_ast_before_work();
   a_stop_during_ast_work_is_observed();
   a_stop_during_a_long_ast_build_is_observed_early();
+  a_stop_inside_a_long_data_rule_is_observed_there();
 }
 
 }  // namespace parser_service
 
-// A translating parser against the same parser reading the decoded text: every
-// record, diagnostic and completion answer is the decoded parse's, at the
-// document's offsets. Java-like Unicode escapes and C-like line splices, on
-// both engines.
+// A translating parser against the same parser reading the decoded text:
+// every record, diagnostic and completion is the decoded parse's, at the
+// document's offsets, on both engines.
 namespace source_translation {
 
 namespace {
@@ -364,6 +413,14 @@ void class_sigils(std::string_view source, cursiv::SourceTranslation& out) {
     out.replace(at, at + 1, source[at] == '$' ? "class " : "class ;");
 }
 
+// A declaration after another may leave out its keyword, which is inserted
+// after the semicolon.
+void implied_keywords(std::string_view source, cursiv::SourceTranslation& out) {
+  for (auto at = source.find("; "); at != std::string_view::npos;
+       at = source.find("; ", at + 1))
+    out.replace(at + 1, at + 1, "class");
+}
+
 std::string decoded(std::string_view text, cursiv::SourceTranslator translate) {
   cursiv::SourceTranslation t(text);
   translate(text, t);
@@ -376,13 +433,15 @@ struct Engine {
   std::unique_ptr<const cursiv::Parser> unicode;
   std::unique_ptr<const cursiv::Parser> splices;
   std::unique_ptr<const cursiv::Parser> sigils;
+  std::unique_ptr<const cursiv::Parser> implied;
 };
 
 template <class Make>
 Engine engine(Make make) {
   return {make(), cursiv::translating_parser(make(), unicode_escapes),
           cursiv::translating_parser(make(), line_splices),
-          cursiv::translating_parser(make(), class_sigils)};
+          cursiv::translating_parser(make(), class_sigils),
+          cursiv::translating_parser(make(), implied_keywords)};
 }
 
 std::vector<std::string> names(const cursiv::ParseResult& r) {
@@ -450,6 +509,7 @@ cursiv::ParseResult check_against_decoded(const Engine& e,
     const cursiv::CstNode& b = pc[id];
     const TextRange moved = t->original({b.begin, b.end});
     CHECK(a.begin == moved.begin && a.end == moved.end);
+    CHECK(rc.spelling(id) == pc.text(id));
     CHECK(a.subtreeSize == b.subtreeSize && a.engine == b.engine &&
           a.hidden == b.hidden && a.recovered == b.recovered);
   }
@@ -601,6 +661,16 @@ void a_piece_spelling_several_tokens_completes_as_decoded(const Engine& e) {
           repaired.diagnostics[0].end == 1);
 }
 
+// An inserted keyword shares a document offset with the token before it:
+// each still spells what the parser read.
+void an_inserted_keyword_keeps_the_spans_around_it(const Engine& e) {
+  const std::string text = "class A; B; C";
+  const auto r = check_against_decoded(e, *e.implied, implied_keywords, text);
+  CHECK(names(r) == std::vector<std::string>{"A", "B", "C"});
+  CHECK(leaf_at(r.cst(), 7).end == 8);
+  CHECK(!features(*e.implied, r.cst(), TextOffset(text.size())).empty());
+}
+
 // Untouched text takes the plain parser's path: no translation, and the very
 // result the plain parser gives.
 void untouched_text_is_parsed_as_it_is(const Engine& e) {
@@ -632,9 +702,8 @@ bool refused(F f) {
   return false;
 }
 
-// One translator does every phase: a translating parser refuses another, when
-// wrapped over it, or at a parse both translate where a parser in between
-// hides it -- a translation behind one is out of sight until a parse.
+// A translating parser refuses another one wrapped inside it, at construction,
+// or at the first parse when a parser in between hides it.
 template <class Make>
 void translations_do_not_nest(Make make) {
   CHECK(refused([&] {
@@ -663,6 +732,7 @@ void run_engine(const Engine& e) {
   a_keyword_anchor_reads_the_parsed_spelling(e);
   line_splices_join_tokens_and_comments(e);
   a_piece_spelling_several_tokens_completes_as_decoded(e);
+  an_inserted_keyword_keeps_the_spans_around_it(e);
   untouched_text_is_parsed_as_it_is(e);
 }
 

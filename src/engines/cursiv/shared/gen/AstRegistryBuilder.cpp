@@ -176,13 +176,13 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
   // member and a grammar with none keeps no rows.
   std::size_t bound = 0;
   for (std::size_t i = 0; i < count; ++i)
-    if (is_ref_nature(fields.keys()[i]->nature)) bound = i + 1;
+    if (is_ref_content(fields.keys()[i]->content)) bound = i + 1;
   out.accepts.assign(bound * out.typeWords, 0);
   for (std::size_t i = 0; i < count; ++i) {
     const AstFieldDesc& f = *fields.keys()[i];
     AstRegistry::Field& entry = out.fields.emplace_back();
     entry.name = f.name;
-    entry.nature = f.nature;
+    entry.content = f.content;
     entry.storage = f.storage;
     entry.owner = types.index(f.owner);
     entry.firstTarget = static_cast<std::uint32_t>(out.targets.size());
@@ -191,7 +191,7 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
       out.targets.push_back(types.index(f.targets[t]));
     for (const AstTypeDesc* n : narrows[i]) entry.narrows.push_back(source(n));
     entry.offset = f.offset();
-    if (is_ref_nature(f.nature))
+    if (is_ref_content(f.content))
       for (const std::uint16_t t : out.targets_of(entry))
         for (std::size_t w = 0; w < out.typeWords; ++w)
           out.accepts[i * out.typeWords + w] |=

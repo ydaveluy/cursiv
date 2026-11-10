@@ -1,9 +1,8 @@
 #pragma once
 
 // A condition in a rule starts on the token in hand, so each probe ends in a
-// run of the tokens its condition reads first: any other token would be the
-// one in hand there. Where the probe wants a longer token to be the one in
-// hand, the absorbing REST stands alone.
+// run of the tokens its condition reads first. Where a probe wants a longer
+// token in hand, the absorbing REST stands alone.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/ll/PredicatesAst.hpp"

@@ -1,4 +1,4 @@
-// The whole output of the lowering: the program, and what the tree owes at
+// The whole output of the lowering: the program, and what the tree writes at
 // each of its positions. One value, built once.
 #pragma once
 
@@ -19,7 +19,7 @@ struct LlLowered {
   ChainPool writes{};
   // A nest starts a separate reduction region without returning a node yet.
   std::vector<std::uint8_t> nestChains{};
-  // The first refusal this grammar earned, recorded instead of aborted.
+  // The first refusal of this grammar, recorded instead of aborting.
   GrammarFault fault{};
 };
 

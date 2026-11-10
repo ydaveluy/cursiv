@@ -1,6 +1,6 @@
-// Arms that begin and end with their own rule, in rules that build no node:
-// an operator between, nothing between, a mixfix. The order of the arms does
-// not matter.
+// Alternatives that begin and end with their own rule, in rules that build no
+// node: an operator between, nothing between, a mixfix. Their order does not
+// matter.
 // expect LR LL: refused .selfBoundedArm..*rule .Sum.: the alternative .* begins and ends with .Sum., so it does not say how its operands group.*rule .Pair.: the alternative .* begins and ends with .Pair.*rule .Cond.: the alternative .* begins and ends with .Cond.
 #pragma once
 

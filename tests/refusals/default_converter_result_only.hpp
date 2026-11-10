@@ -1,5 +1,5 @@
-// A `default_converter` with no `convert` converts nothing: a target of one's
-// own is reached by a `convert` on the specialisation.
+// A `default_converter` with no `convert` converts nothing: a type of one's
+// own needs a `convert` in the specialization.
 // expect LR: no default_converter<T> for this type
 #pragma once
 

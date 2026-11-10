@@ -17,11 +17,6 @@
 #include "cursiv/completion/CompletionProvider.hpp"
 #include "cursiv/services/LspServices.hpp"
 
-// Not templated by the grammar: what may be written at a caret is the state
-// the leaf before it carries, read through the parser, and what each answer is
-// -- a literal's bytes, a token's name, its prose -- is the grammar model's
-// answer through the same container.
-
 namespace cursiv {
 
 class Cst;
@@ -29,9 +24,6 @@ struct NextFeature;
 
 class DefaultCompletionProvider : public CompletionProvider {
  public:
-  // `LspServices` and not `CoreServices`: a reference candidate is filtered by
-  // the fuzzy matcher and iconed by the node-kind provider, both of this
-  // storey.
   explicit DefaultCompletionProvider(const LspServices& services);
   DefaultCompletionProvider(const DefaultCompletionProvider&) = delete;
   DefaultCompletionProvider& operator=(const DefaultCompletionProvider&) =
@@ -55,10 +47,8 @@ class DefaultCompletionProvider : public CompletionProvider {
                               TextOffset end,
                               std::vector<NextFeature>& features) const;
 
-  // Whether what may replace a token ending at the caret is worth asking: by
-  // default not where it spells no word. All that could match it is a keyword
-  // spelling no letter, which `filterKeyword` leaves out, and the question costs
-  // a walk of the document at every punctuation typed.
+  // Whether to ask what may replace a token ending at the caret: by default not
+  // where the token spells no word.
   [[nodiscard]] virtual bool performCurrentTokenCompletion(
       const Document& document, std::string_view text, TextOffset offset,
       TextOffset end) const;
@@ -98,13 +88,9 @@ class DefaultCompletionProvider : public CompletionProvider {
                                            const ReferenceInfo& reference,
                                            CompletionAcceptor accept) const;
 
-  // The cross-reference a feature fills, if its member holds one and the caret
-  // has a node: a caret with none answers no scope -- not the global one, which
-  // would hand out symbols a local scope excludes.
-  // Where the caret opens the rule that writes the member, or the member belongs
-  // to a class the caret's node is not, a node of that class is made for the
-  // occasion, as a child of the caret's node, and `entered` owns it: the answer's
-  // `container` holds as long as `entered` does.
+  // The cross-reference a feature fills, or none when the caret has no node. A
+  // node made for the occasion is owned by `entered`: the answer's `container`
+  // lives as long as `entered` does.
   [[nodiscard]] std::optional<ReferenceInfo> referenceInfoOf(
       const CompletionContext& context, const NextFeature& next,
       AstNodePtr& entered) const;

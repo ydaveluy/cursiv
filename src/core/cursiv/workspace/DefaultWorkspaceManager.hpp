@@ -13,14 +13,9 @@
 #include "cursiv/workspace/FileSystemProvider.hpp"
 #include "cursiv/workspace/WorkspaceManager.hpp"
 
-// The scan in three steps: the additional documents first, the folders next,
-// one build last. Every service is looked up through `shared` at each call, so
-// replacing any of them needs no rebinding here.
-//
-// `loadAdditionalDocuments` is the one hook, virtual for a use that already
-// exists one storey up: a builtin library has no folder to be found in and no
-// file to be read from, so it enters the workspace here, on a scheme of its
-// own, and a content request then serves its text out of the same store.
+// The scan: the additional documents, then the folders, then one build.
+// Services are looked up through `shared` at each call. The hook
+// `loadAdditionalDocuments` adds documents with no folder.
 
 namespace cursiv {
 
@@ -48,18 +43,13 @@ class DefaultWorkspaceManager : public WorkspaceManager,
   [[nodiscard]] bool shouldIncludeEntry(
       const FileSystemNode& entry) const override;
 
-  // Walks up from the entry to each root that holds it, asking
-  // `shouldIncludeEntry` of every folder met, as the scan would on its way
-  // down. A workspace folder is `normalize_uri(folder.uri)`, its root
-  // `getRootFolder(folder)`.
+  // Walks up from the entry to each root holding it, asking
+  // `shouldIncludeEntry` of every folder met, as the scan would going down.
   [[nodiscard]] bool isIncluded(const FileSystemNode& entry) const override;
 
-  // One walk with an explicit stack so nesting depth does not decide stack use,
-  // and a cancellation check per entry. A refused directory is never entered.
-  //
-  // A folder that refuses enumeration is reported and the walk carries on --
-  // a workspace root's refusal as a bootstrap failure, any other folder's as
-  // a warning -- one unreadable folder not hiding every document beside it.
+  // One walk with an explicit stack and a cancellation check per entry. A
+  // folder that refuses listing is reported, as a failure for a root and a
+  // warning otherwise, and the walk goes on.
   [[nodiscard]] std::vector<std::string> searchFolder(
       std::string_view folderUri,
       const CancellationToken& cancelToken = kNoCancel) const override;
@@ -73,12 +63,9 @@ class DefaultWorkspaceManager : public WorkspaceManager,
   }
 
  protected:
-  // Documents that come from nowhere on disk: a builtin library, a generated
-  // prelude. `add` is narrowed to what a hook may legally do at this point.
-  //
-  // It runs before any folder is walked, so the library wins over a workspace
-  // file carrying the same URI, and it runs even for a workspace of no folders
-  // -- which is why a client that opened none still gets a scan.
+  // Documents not on disk, such as a builtin library. Runs
+  // before any folder, so it wins over a file with the same URI, and runs even
+  // with no folder.
   virtual void loadAdditionalDocuments(
       std::span<const WorkspaceFolder> folders,
       cursiv::function_ref<void(std::string_view uri, std::string text)> add);

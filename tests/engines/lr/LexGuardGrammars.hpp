@@ -5,9 +5,9 @@
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
-#include "engines/lr/AlikeCandidatesGrammar.hpp"
 #include "engines/lr/KeywordHandoffGrammar.hpp"
 #include "engines/lr/RefusedHeadWordsGrammar.hpp"
+#include "engines/lr/SameWordCandidatesGrammar.hpp"
 #include "engines/lr/TypoAlternativesGrammar.hpp"
 
 namespace tguard {
@@ -40,8 +40,8 @@ struct G : cursiv::GrammarSpec {
 }  // namespace mixed
 
 // `abc` twice, B guarded and declared first, so a re-reading that walks the
-// acceptances in declaration order meets it first and owes its guard, which
-// A's does not cover.
+// acceptances in declaration order reaches it first and must check its guard,
+// which A's does not cover.
 namespace typo {
 struct G : cursiv::GrammarSpec {
   struct B : terminal<lit<"abc", !cr<";">>> {};
@@ -76,7 +76,7 @@ struct G : cursiv::GrammarSpec {
 
 // Two names of one spelling behind a refused keyword: the position reads
 // several, so the sweep is what tells them apart.
-namespace rival {
+namespace homonym {
 struct G : cursiv::GrammarSpec {
   struct ID : terminal<some(cr<"a-z">)> {};
   struct Other : terminal<cr<"a"> + cr<"b">> {};
@@ -85,7 +85,7 @@ struct G : cursiv::GrammarSpec {
             (kw<"ab"> + lit<"!">) | (assign<&Doc::value>(ref<ID>) + lit<"_">) |
             (assign<&Doc::value>(ref<Other>) + lit<"_"> + lit<";">))> {};
 };
-}  // namespace rival
+}  // namespace homonym
 
 // Each literal of one terminal keeps its own class guard: `+` refuses a
 // second `+`, `-` a second `-`.
@@ -99,7 +99,7 @@ struct G : cursiv::GrammarSpec {
 }  // namespace twoguards
 
 // The sweep leaves exactly one candidate, and it is not the one the walk
-// elected: a keyword's reserve takes the name away and the position reads the
+// chose: a keyword's reserve takes the name away and the position reads the
 // keyword alone.
 namespace sole {
 struct G : cursiv::GrammarSpec {
@@ -122,10 +122,9 @@ struct G : cursiv::GrammarSpec {
 };
 }  // namespace shorter
 
-// Nested generics closing on `>>`, which is also a terminal of its own. The
-// state inside the nest reads `>` and not `>>`, so its own alphabet holds no
-// `>>` and the longest match there IS `>`: the mode is what splits the
-// spelling, and no rule ever rebuilds a terminal out of shorter ones.
+// Nested generics closing on `>>`, also a terminal of its own. The state inside
+// the nest reads `>` and not `>>`, so its longest match is `>`: the mode splits
+// the spelling, and no rule rebuilds a terminal from shorter ones.
 namespace nested {
 struct G : cursiv::GrammarSpec {
   struct ID : terminal<some(cr<"a-z">)> {};
@@ -138,7 +137,7 @@ struct G : cursiv::GrammarSpec {
 };
 }  // namespace nested
 
-// The state's whole election is refused and nothing there stands in its
+// The state's whole choice is refused and nothing there stands in its
 // place: the walk gives the match back to what the path accepted shorter,
 // which is the only reading of these bytes left.
 namespace stump {
@@ -163,29 +162,28 @@ struct G : cursiv::GrammarSpec {
 };
 }  // namespace twin
 
-// Each case lexes in modes of its own: the table only lends it its classes.
+// Each case lexes in modes of its own and shares only the table's classes.
 struct Cases : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct Entry
-      : rule<(kw<"own"> + ref<own::G::Root>) |
-             (kw<"mixed"> + ref<mixed::G::Root>) |
-             (kw<"typo"> + ref<typo::G::Root>) |
-             (kw<"reserved"> + ref<reserved::G::Root>) |
-             (kw<"bytewise"> + ref<bytewise::G::Root>) |
-             (kw<"rival"> + ref<rival::G::Root>) |
-             (kw<"twoguards"> + ref<twoguards::G::Root>) |
-             (kw<"sole"> + ref<sole::G::Root>) |
-             (kw<"shorter"> + ref<shorter::G::Root>) |
-             (kw<"nested"> + ref<nested::G::Root>) |
-             (kw<"stump"> + ref<stump::G::Root>) |
-             (kw<"twin"> + ref<twin::G::Root>)> {};
+  struct Entry : rule<(kw<"own"> + ref<own::G::Root>) |
+                      (kw<"mixed"> + ref<mixed::G::Root>) |
+                      (kw<"typo"> + ref<typo::G::Root>) |
+                      (kw<"reserved"> + ref<reserved::G::Root>) |
+                      (kw<"bytewise"> + ref<bytewise::G::Root>) |
+                      (kw<"homonym"> + ref<homonym::G::Root>) |
+                      (kw<"twoguards"> + ref<twoguards::G::Root>) |
+                      (kw<"sole"> + ref<sole::G::Root>) |
+                      (kw<"shorter"> + ref<shorter::G::Root>) |
+                      (kw<"nested"> + ref<nested::G::Root>) |
+                      (kw<"stump"> + ref<stump::G::Root>) |
+                      (kw<"twin"> + ref<twin::G::Root>)> {};
   using entry = Entry;
   using ignored = WS;
 };
 
 // A guard that is a word, or two: `<!` stands unless `--` or `[CDATA[`
 // follows it whole, and `#` unless the word `include` does -- `#includes`
-// keeps it, the rescue class being the word's own boundary.
+// keeps it, the class that lets the guard pass being the word's own boundary.
 namespace deep {
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -269,13 +267,12 @@ struct G : cursiv::GrammarSpec {
 }  // namespace typomulti
 
 struct G : Cases {
-  struct Entry : rule<ref<Cases::Entry> |
-                      (kw<"deep"> + ref<deep::G::Root>) |
+  struct Entry : rule<ref<Cases::Entry> | (kw<"deep"> + ref<deep::G::Root>) |
                       (kw<"behind"> + ref<behind::G::Root>) |
                       (kw<"typomulti"> + ref<typomulti::G::Root>) |
                       ref<ttyporead::G::Root> |
                       (kw<"heads"> + ref<trefusedheads::G::Root>) |
-                      (kw<"shifted"> + ref<talike::Shifted::Root>) |
+                      (kw<"shifted"> + ref<tsameword::Shifted::Root>) |
                       (kw<"handoff"> + ref<tkeyword::Behind::Root>)> {};
   using entry = Entry;
 };

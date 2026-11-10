@@ -1,7 +1,6 @@
-// Readings that end on one stack are one reading: a text that reads many ways
-// costs a power of its length -- in alternatives the graph holds, never in the
-// ways it reads -- each alternative costs the same whatever the length, and the
-// text reads as the tree the election ranks first.
+// Readings that end on one stack are one reading: a text with many readings
+// costs a power of its length in alternatives, each costing the same at any
+// length; the tree is the one the election ranks first.
 
 #include <array>
 #include <cstdint>
@@ -10,23 +9,23 @@
 #include <string>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/PerfCounters.hpp"
-#include "cursiv/parser/Parser.hpp"
-#include "cursiv/syntax-tree/AstReflection.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstBuilder.hpp"
-#include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
+#include "cursiv/lr/runtime/LrDerivationStep.hpp"
 #include "cursiv/lr/runtime/LrFrame.hpp"
 #include "cursiv/lr/runtime/LrParseStats.hpp"
 #include "cursiv/lr/runtime/LrParser.hpp"
 #include "cursiv/lr/runtime/LrShadow.hpp"
-#include "cursiv/lr/runtime/LrTrailStep.hpp"
-#include "cursiv/lr/runtime/lr_trail.hpp"
+#include "cursiv/lr/runtime/lr_derivation.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
+#include "cursiv/parser/Parser.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
-#include "cursiv/Check.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
 #include "engines/lr/GrowthGrammars.hpp"
 #include "growth/generated/G/Module.hpp"
 #include "growth/generated/G/Parser.hpp"
@@ -75,8 +74,8 @@ std::string repeat(const std::string& unit, unsigned n) {
   return s;
 }
 
-// One read of `text` by the table itself: the counters are the table's, not
-// the erased door's.
+// One read of `text` by the table itself: the counters belong to the table,
+// not to the type-erased parser.
 struct Read {
   cursiv::engine::LrParseStats stats;
   bool clean = false;
@@ -102,7 +101,7 @@ void grows_by_at_most(const Read& small, const Read& large, double ratio) {
         ratio * static_cast<double>(small.stats.alternatives));
 }
 
-// No stack was dropped for the order the table lays its arms in: the words of
+// No stack was dropped for the order the table puts its arms in: the words of
 // the derivations and the lexer's ranks told every pair apart.
 void is_decided_by_the_text(const Read& r) {
   CHECK(r.stats.tableElections == 0);
@@ -115,7 +114,7 @@ constexpr double kQuadratic = 4.6;
 // Cubic: the spans of a run, each cut where its last item starts.
 constexpr double kCubic = 8.0;
 
-// The instructions one read retires per alternative the graph held -- per byte
+// The instructions one read runs per alternative the graph held -- per byte
 // where it opened none -- 0 where the sample is unreadable or multiplexed.
 template <const auto& T>
 double per_alternative(const cursiv::bench::PerfCounters& counters,
@@ -136,7 +135,7 @@ double per_alternative(const cursiv::bench::PerfCounters& counters,
 }
 
 // The cost per alternative of a text, twice it and four times it; the smallest
-// is read once before to settle what a first read builds.
+// is read once before, so what a first read builds is already there.
 template <const auto& T, class Text>
 std::array<double, 3> series(const cursiv::bench::PerfCounters& counters,
                              const cursiv::engine::LrDrive* drive,
@@ -275,16 +274,16 @@ void colliding_fingerprints_do_not_elect_a_derivation() {
   a.run.push(0);
   b.run.push(0);
   const auto cell = [&](unsigned left, unsigned right) {
-    c.trailRoom.restart();
-    c.trail = {{cursiv::engine::kLrNoTrail, 0, left, 1,
-                cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode},
-               {cursiv::engine::kLrNoTrail, 0, right, 1,
-                cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode}};
-    a.trail = 0;
-    b.trail = 1;
+    c.derivationRoom.restart();
+    c.derivation = {{cursiv::engine::kLrNoDerivation, 0, left, 1,
+                     cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode},
+                    {cursiv::engine::kLrNoDerivation, 0, right, 1,
+                     cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode}};
+    a.derivation = 0;
+    b.derivation = 1;
     a.path = 123;
     b.path = 456;
-    return cursiv::engine::lr_trail_first<chain::G::kTable>(c, a, b);
+    return cursiv::engine::lr_derivation_first<chain::G::kTable>(c, a, b);
   };
   CHECK(cell(1, 2) == -1);
   CHECK(cell(1, 2) == -1);
@@ -292,15 +291,15 @@ void colliding_fingerprints_do_not_elect_a_derivation() {
   for (unsigned i = 0; i < 5000; ++i) {
     CHECK(cell(1, 2) == -1);
     a.path = 1000u + i;
-    CHECK(cursiv::engine::lr_trail_first<chain::G::kTable>(c, a, b) == -1);
-    CHECK(cursiv::engine::lr_trail_first<chain::G::kTable>(c, a, b) == -1);
+    CHECK(cursiv::engine::lr_derivation_first<chain::G::kTable>(c, a, b) == -1);
+    CHECK(cursiv::engine::lr_derivation_first<chain::G::kTable>(c, a, b) == -1);
   }
   CHECK(cell(2, 1) == 1);
-  c.trail = {{cursiv::engine::kLrNoTrail, 0, ~std::uint32_t{0}, 1,
-              cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode},
-             {cursiv::engine::kLrNoTrail, 0, ~std::uint32_t{2}, 2,
-              cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode}};
-  CHECK(cursiv::engine::lr_trail_lexical<chain::G::kTable>(c, a, b) == 1);
+  c.derivation = {{cursiv::engine::kLrNoDerivation, 0, ~std::uint32_t{0}, 1,
+                   cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode},
+                  {cursiv::engine::kLrNoDerivation, 0, ~std::uint32_t{2}, 2,
+                   cursiv::engine::kLrNoProd, 1, 0, cursiv::engine::kNoMode}};
+  CHECK(cursiv::engine::lr_derivation_lexical<chain::G::kTable>(c, a, b) == 1);
 }
 
 void an_alternative_costs_the_same_however_long_the_text() {

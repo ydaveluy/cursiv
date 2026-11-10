@@ -2,9 +2,8 @@
 
 #include <string_view>
 
-// Whether a candidate answers what the user has typed so far. Its own service
-// because a language may want another rule -- and because completion asks it
-// once per candidate, which is the only reason it is not a free function.
+// Whether a candidate matches what the user has typed so far. A service, so a
+// language can replace the rule.
 
 namespace cursiv {
 

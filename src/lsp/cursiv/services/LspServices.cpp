@@ -1,7 +1,5 @@
-// Every slot's type must be complete here, even the ones this file never
-// names: a `ServiceSlot` holds a `unique_ptr`, whose destructor needs the
-// whole type. An include-cleaner sweep would flag these as unused;
-// removing one fails the build on an incomplete type.
+// Every slot's type must be complete here: a `ServiceSlot`'s `unique_ptr`
+// needs it to destroy. These includes are used even where no name is.
 #include "cursiv/services/LspServices.hpp"  // NOLINT(misc-include-cleaner)
 
 #include <memory>
@@ -38,17 +36,17 @@ LspServices::LspServices(SharedLspServices& sharedServices) noexcept
 
 LspServices::~LspServices() noexcept = default;
 
-// The core rows first, then this storey's: `firstMissingService` reports the
-// first thing owed, and a language owes its parser before it owes an outline.
+// The core rows first, then the LSP ones: `firstMissingService` reports the
+// first missing slot.
 void LspServices::visitServices(
     cursiv::function_ref<void(const ServiceSlot&)> yield) const {
   CoreServices::visitServices(yield);
   visitOwnServices(yield);
 }
 
-// This storey's rows alone, so a language container combining several
-// storeys can emit each set once whatever its diamond looks like. None is
-// required: a language answers the requests it installs a provider for.
+// The LSP rows alone, so a container combining several layers lists each set
+// once. None is required: a language answers the requests it has a provider
+// for.
 void LspServices::visitOwnServices(
     cursiv::function_ref<void(const ServiceSlot&)> yield) const {
   yield({"documentSymbolProvider", false, documentSymbolProvider != nullptr});
@@ -94,8 +92,6 @@ void install_default_lsp_services(LspServices& services) {
   if (services.foldingRangeProvider == nullptr)
     services.foldingRangeProvider =
         std::make_unique<DefaultFoldingRangeProvider>(services);
-  // A selection chain is read off the CST alone, so its provider holds no
-  // service.
   if (services.selectionRangeProvider == nullptr)
     services.selectionRangeProvider =
         std::make_unique<DefaultSelectionRangeProvider>();
@@ -104,7 +100,7 @@ void install_default_lsp_services(LspServices& services) {
   if (services.completionProvider == nullptr)
     services.completionProvider =
         std::make_unique<DefaultCompletionProvider>(services);
-  // The quick fixes: the validator stamped the possible repairs on the
+  // The quick fixes: the validator attached the possible repairs to the
   // diagnostics; this turns them into client edits.
   if (services.codeActionProvider == nullptr)
     services.codeActionProvider = std::make_unique<DefaultCodeActionProvider>();

@@ -15,7 +15,6 @@
 #include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/references/LinkingError.hpp"
-#include "cursiv/references/LinkingResult.hpp"
 #include "cursiv/references/ScopeProvider.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -31,9 +30,9 @@ namespace cursiv {
 
 namespace {
 
-// The fewest references a worker forces at once: enough that handing them out
-// costs nothing next to the lookups they make, few enough that a document of a
-// few thousand references already spreads over the pool.
+// The fewest references a worker resolves at once: enough that handing them
+// out is cheap next to the lookups, few enough that a document of a few
+// thousand references already uses the pool.
 constexpr std::size_t kLinkRun = 1024;
 
 // What makes two candidates the same answer to a plural lookup.
@@ -65,11 +64,8 @@ void append_target_names(std::string& message, const AstReflection& reflection,
   }
 }
 
-// It names what is expected -- the site's narrowing when it has one, every
-// type the member declares otherwise -- and the name read, so the reader
-// learns what the site wanted. Appended, not formatted: written for every
-// failed reference, twice -- for the linker's own error and for the
-// diagnostic.
+// Names what the site expected, its narrowing or every type the member
+// declares, and the name read.
 std::string not_found_message(const AstReflection& reflection,
                               std::uint16_t reference, std::uint8_t narrow,
                               std::string_view text) {
@@ -91,27 +87,26 @@ std::string not_found_message(const AstReflection& reflection,
   return message;
 }
 
-}  // namespace
-
-LinkingError DefaultLinker::createLinkingError(
-    const ReferenceInfo& reference, RefState why,
-    const AstNodeDescription* description) const {
-  // A lookup that failed below `ComputedScopes` ran on a linker planted
-  // before the scopes, as a direct `link` does: said at the sink, a single
-  // reference being read again and a plural one keeping its failure. The
-  // document is climbed to when the site does not carry it: a hand-filled
-  // site still deserves the warning.
+// A lookup that failed before its document reached `ComputedScopes`, as a
+// direct `link` call can, is a warning to the sink.
+void say_if_early(const ReferenceInfo& reference, ObservabilitySink& sink) {
   const Document* document = reference.document;
   if (document == nullptr && reference.container != nullptr)
     document = reference.container->getDocument();
   if (document != nullptr && document->state.load(std::memory_order_relaxed) <
                                  DocumentState::ComputedScopes)
-    shared.observabilitySink->publish(
-        {.severity = ObservationSeverity::Warning,
-         .code = ObservationCode::ScopeReadBeforeComputed,
-         .message = "reference resolution before scopes were computed",
-         .uri = document->uri,
-         .languageId = {}});
+    sink.publish({.severity = ObservationSeverity::Warning,
+                  .code = ObservationCode::ScopeReadBeforeComputed,
+                  .message = "reference resolution before scopes were computed",
+                  .uri = document->uri,
+                  .languageId = {}});
+}
+
+}  // namespace
+
+LinkingError DefaultLinker::createLinkingError(
+    const ReferenceInfo& reference, RefState why,
+    const AstNodeDescription* description) const {
   if (why == RefState::ErrorCycle)
     return {std::format("Cyclic reference resolution detected for '{}'.",
                         reference.referenceText),
@@ -126,12 +121,12 @@ void DefaultLinker::link(Document& document,
   DocumentReferences* const table = document.parseResult.references.get();
   if (table == nullptr) return;  // no tree, no work list, nothing to link
   DocumentReferences& references = *table;
-  // The builder binds every home before linking starts. Leave those shared
-  // pointers untouched while another document may resolve through this one.
-  // Direct callers can still link a document without using the builder.
+  // The builder sets these before linking starts, and they must not be written
+  // while another document may resolve through this one; a direct call sets
+  // them here.
   if (references.linker != this) references.linker = this;
   if (references.document != &document) references.document = &document;
-  // A long list is forced in runs spread over the pool, so a large document
+  // A long list is resolved in runs spread over the pool, so a large document
   // does not link on one thread while the others wait for it.
   const auto force = [&](std::span<const RefHandle> run) {
     references.force(run, cancelToken);
@@ -140,10 +135,8 @@ void DefaultLinker::link(Document& document,
                                     kLinkRun, force);
 }
 
-// A document with no tree has nothing to drop, and it is reached: a reset to
-// `Changed` drops the parse result, and `resetToState` unlinks below `Linked`
-// whatever the document was carrying -- a text installed in place arrives here
-// already emptied.
+// A document with no tree has nothing to drop, and is reached: a reset to
+// `Changed` drops the parse before the unlink.
 void DefaultLinker::unlink(Document& document) const {
   DocumentReferences* const table = document.parseResult.references.get();
   if (table == nullptr) return;
@@ -154,36 +147,25 @@ void DefaultLinker::unlink(Document& document) const {
   references.document = nullptr;
 }
 
-AstNodeDescriptionOrError DefaultLinker::getCandidate(
+const AstNodeDescription* DefaultLinker::getCandidate(
     const ReferenceInfo& reference) const {
-  // A reference that spells nothing names nothing: an error here, not an empty
-  // scope -- worded like any failed lookup, so one override rewords both.
-  if (reference.referenceText.empty())
-    return createLinkingError(reference);
-
-  if (const AstNodeDescription* const found =
-          services.scopeProvider->getScopeEntry(reference,
-                                                reference.referenceText);
-      found != nullptr)
-    return found;
-
-  return createLinkingError(reference);
+  const AstNodeDescription* const found =
+      reference.referenceText.empty() ? nullptr
+                                      : services.scopeProvider->getScopeEntry(
+                                            reference, reference.referenceText);
+  if (found == nullptr) say_if_early(reference, *shared.observabilitySink);
+  return found;
 }
 
-AstNodeDescriptionsOrError DefaultLinker::getCandidates(
+std::vector<const AstNodeDescription*> DefaultLinker::getCandidates(
     const ReferenceInfo& reference) const {
-  if (reference.referenceText.empty())
-    return createLinkingError(reference);
-
-  // Every visible homonym the member can hold, in declaration order. What
-  // counts as "named that" is the scope provider's answer -- the case policy
-  // lives there, and a comparison here would resurrect the default.
+  // Every visible entry of that name the member can hold, in declaration
+  // order. The scope provider decides what matches the name: it owns the case
+  // policy.
   std::vector<const AstNodeDescription*> candidates;
-  // One answer per declaration: an outer scope re-surfaces what an inner one
-  // already gave, and a multi-reference must not hold a target twice. The key
-  // is (document, symbol) and the node: two nodes built on one CST record
-  // share a symbol and are still two targets. A few are compared in place;
-  // past them, a set keeps a thousand homonyms linear.
+  // One answer per declaration, keyed by (document, symbol) and node: an outer
+  // scope repeats what an inner one gave. A few are compared in place, then a
+  // set keeps many homonyms linear.
   constexpr std::size_t kCompared = 16;
   const auto key = [](const AstNodeDescription& entry) {
     return CandidateKey{
@@ -200,12 +182,14 @@ AstNodeDescriptionsOrError DefaultLinker::getCandidates(
       for (const auto* held : candidates) seen.insert(key(*held));
     return seen.insert(key(entry)).second;
   };
-  (void)services.scopeProvider->visitScopeEntries(
-      reference, reference.referenceText, [&](const AstNodeDescription& entry) {
-        if (fresh(entry)) candidates.push_back(&entry);
-        return true;
-      });
-  if (candidates.empty()) return createLinkingError(reference);
+  if (!reference.referenceText.empty())
+    (void)services.scopeProvider->visitScopeEntries(
+        reference, reference.referenceText,
+        [&](const AstNodeDescription& entry) {
+          if (fresh(entry)) candidates.push_back(&entry);
+          return true;
+        });
+  if (candidates.empty()) say_if_early(reference, *shared.observabilitySink);
   return candidates;
 }
 

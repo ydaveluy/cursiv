@@ -1,5 +1,5 @@
 // A flag over an operand that may read nothing always sets the member: the
-// grammar is read, and the generator says so.
+// grammar is generated with a warning.
 // expect LR: warning: rule .Root.: .*flags an operand that may match nothing
 #pragma once
 

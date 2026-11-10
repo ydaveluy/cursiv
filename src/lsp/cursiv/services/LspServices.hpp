@@ -1,7 +1,5 @@
-// The same shape one storey up: the core container is the base, so a
-// language that is both a core language and an LSP one is one object.
-// `visitServices` appends this storey's rows to the core's, so
-// `firstMissingService` sees both through one scan.
+// The core container is the base: a language that is both core and LSP is one
+// object, and `visitServices` lists both sets of services.
 #pragma once
 
 #include <memory>
@@ -41,31 +39,24 @@ struct LspServices : virtual CoreServices {
   explicit LspServices(SharedLspServices& sharedServices) noexcept;
   ~LspServices() noexcept override;
 
-  // The same object as `shared()`, seen as what it is. Not a
-  // second container: retyping is the whole of what it does.
+  // The same object as `shared()`, with its LSP type.
   SharedLspServices& lspShared;
 
   std::unique_ptr<const DocumentSymbolProvider> documentSymbolProvider;
   std::unique_ptr<const DefinitionProvider> definitionProvider;
-  // The three go-to questions past definition. Optional and null by
-  // default: what each of them is belongs to the language, and the
-  // framework has no answer to install.
+  // Null by default, down to `codeLensProvider`: only the language knows these
+  // answers.
   std::unique_ptr<const DeclarationProvider> declarationProvider;
   std::unique_ptr<const ImplementationProvider> implementationProvider;
   std::unique_ptr<const TypeDefinitionProvider> typeDefinitionProvider;
-  // The two hierarchies, optional for the same reason: what calls what, and
-  // what extends what, are the language's own relations.
   std::unique_ptr<const CallHierarchyProvider> callHierarchyProvider;
   std::unique_ptr<const TypeHierarchyProvider> typeHierarchyProvider;
-  // Also the language's own: which construct takes arguments, and what is
-  // worth drawing that the author did not write.
   std::unique_ptr<const SignatureHelpProvider> signatureHelpProvider;
   std::unique_ptr<const InlayHintProvider> inlayHintProvider;
   std::unique_ptr<const DocumentLinkProvider> documentLinkProvider;
-  // Which line is worth a command, and what the command runs.
   std::unique_ptr<const CodeLensProvider> codeLensProvider;
-  // Three slots, not one: a language may want its own rename policy and
-  // the stock find-references, and a capability is announced per slot.
+  // Separate slots: a language may replace rename and keep the stock
+  // find-references.
   std::unique_ptr<const ReferencesProvider> referencesProvider;
   std::unique_ptr<const RenameProvider> renameProvider;
   std::unique_ptr<const DocumentHighlightProvider> documentHighlightProvider;
@@ -74,26 +65,18 @@ struct LspServices : virtual CoreServices {
   std::unique_ptr<const SelectionRangeProvider> selectionRangeProvider;
   std::unique_ptr<const HoverProvider> hoverProvider;
   std::unique_ptr<const CompletionProvider> completionProvider;
-  // The one slot the defaults do not fill: a formatter is the language's
-  // own opinion, with no default and no capability announced until one
-  // exists.
+  // Null by default: without a formatter, no formatting is announced.
   std::unique_ptr<const Formatter> formatter;
   std::unique_ptr<const CodeActionProvider> codeActionProvider;
 
   void visitServices(
       cursiv::function_ref<void(const ServiceSlot&)> yield) const override;
-  /**
-   * This storey's rows alone, for a container that combines storeys.
-   */
+  // The LSP rows alone, for a container that combines several sets.
   void visitOwnServices(
       cursiv::function_ref<void(const ServiceSlot&)> yield) const;
 };
 
-/**
- * Installs the core defaults, then this storey's. Not templated by the
- * grammar: everything here reads an erased surface -- the name provider,
- * the CST, the reference work list, and the grammar model.
- */
+// Installs the core defaults, then the LSP ones.
 void install_default_lsp_services(LspServices& services);
 
 }  // namespace cursiv

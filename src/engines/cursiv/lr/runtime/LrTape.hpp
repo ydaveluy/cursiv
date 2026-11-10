@@ -13,9 +13,9 @@
 
 namespace cursiv::engine {
 
-// No record is waiting for the state it settles in.
+// No record is waiting for the state it ends in.
 inline constexpr NodeCount kLrNoPending = 0xFFFFFFFFu;
-// A close that names no state yet: the cascade it ends in settles it.
+// A close that names no state yet: the cascade it ends in sets it.
 inline constexpr std::uint16_t kLrNoState = 0xFFFFu;
 
 class LrTape {
@@ -88,7 +88,7 @@ class LrTape {
   // Nothing pending outside one, and nothing at all where the document ran
   // out before a token was read again.
   template <StampLayout L = StampLayout{}>
-  CURSIV_ALWAYS_INLINE void settle(std::uint16_t state) {
+  CURSIV_ALWAYS_INLINE void set_pending_state(std::uint16_t state) {
     if (_pend == kLrNoPending) [[unlikely]]
       return;
     // Only exit_anchored leaves a pending close, always visible and unrepaired.
@@ -106,7 +106,7 @@ class LrTape {
 
  private:
   CstRun& _trunk;
-  // The record a cascade of reductions closed last, still owed its state.
+  // The last record a cascade of reductions closed, still without its state.
   NodeCount _pend = kLrNoPending;
 };
 

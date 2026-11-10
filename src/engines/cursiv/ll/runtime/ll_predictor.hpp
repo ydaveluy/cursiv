@@ -1,4 +1,4 @@
-// Choices one token cannot settle use a generated automaton or an episode over
+// Choices one token cannot decide use a generated automaton or an episode over
 // the descent's real caller context.
 #pragma once
 
@@ -19,11 +19,9 @@ inline std::uint64_t& ll_staged_reads() {
   return reads;
 }
 
-// A choice no reading of which takes the token in hand: its terminal comes off
-// the position and the position is read again, as long as the choice's arms
-// read the token. A token only a condition names is no arm's. Whether a reading
-// took the token then, its arm in `arm`, and the token stays held if it was;
-// otherwise the token first read is the one the choice goes on with.
+// A choice none of whose readings takes the token in hand: its terminal comes
+// off and the position is read again while the arms read the token. Whether a
+// reading took it, its arm in `arm`; otherwise the first token read stays.
 template <const auto& T>
 inline bool ll_read_refused(LlContext& c, std::uint16_t decision,
                             LlEpisode<T>& episode, std::uint16_t& arm) {
@@ -63,6 +61,7 @@ CURSIV_NOINLINE inline std::uint16_t ll_read_stopped(LlContext& c,
     LlEpisode<T>& episode = ll_episode_engine<T>();
     episode.run(c, decision);
     if (episode.refused()) ll_read_refused<T>(c, decision, episode, arm);
+    ll_episode_cache<T>().work.tokens += episode.take_steps();
   }
   return arm;
 }
@@ -82,12 +81,11 @@ CURSIV_NOINLINE inline std::uint16_t ll_episode(LlContext& c,
   } else if constexpr (T.ngapConds != 0) {
     if (arm == kNoRow) arm = ll_read_stopped<T>(c, decision);
   }
-  auto& cache = ll_episode_cache<T>();
-  cache.work.tokens += episode.take_steps();
+  ll_episode_cache<T>().work.tokens += episode.take_steps();
   return arm;
 }
 
-// The one door the generated code knocks on.
+// The entry point the generated code calls.
 template <const auto& T>
 inline std::uint16_t ll_predict(LlContext& c, std::uint16_t decision) {
   if (c.give) return kNoRow;

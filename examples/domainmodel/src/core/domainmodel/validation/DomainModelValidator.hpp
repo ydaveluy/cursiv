@@ -37,7 +37,7 @@ class DomainModelValidator final : public cursiv::DefaultCoreService,
                                       cursiv::ValidationAcceptor& accept) const;
 
  private:
-  // Where the climb from an entity leaves its document: `ends` if it ends
+  // Where the walk from an entity leaves its document: `ends` if it ends
   // there, `next` if it goes on at an entity of another document, neither if
   // it loops there.
   struct Exit {
@@ -45,33 +45,26 @@ class DomainModelValidator final : public cursiv::DefaultCoreService,
     bool ends = false;
   };
 
-  // The climb from `entity` within its document. It stores the answer of
-  // every entity it passes, so a later climb stops at the first one already
-  // answered: a document costs one pass whatever order its chains are
-  // written in, and a climb holds no frame per storey.
+  // The walk from `entity` within its document. It stores the answer of each
+  // entity it passes, so a later walk stops at the first known one.
   [[nodiscard]] Exit exitOf(const ast::Entity& entity) const;
 
-  // `exitOf`, memoised -- unmemoised the check is quadratic over a document.
-  // An answer reads its document and the entities its references resolve to,
-  // nothing further: a change to those relinks the document, and its entries
-  // go when it is linked again. A change further up the chain relinks
-  // nothing here, so the check walks from one document to the next instead
-  // of keeping a whole climb.
+  // `exitOf`'s answers, emptied when the document is linked again. A change
+  // further up the chain, in another document, goes through `onUpdate`.
   cursiv::DocumentCache<const ast::Entity*, Exit> _exits{
       shared, cursiv::DocumentState::Linked};
 
-  // The documents the climbs from each document went through. A change there
-  // can change a verdict here while relinking nothing here -- `A` extends `B`
-  // of another document, and `B`'s own parent is what changed -- so an update
-  // that moves one of them sends this document back to validation.
+  // Sends a document back to validation when an update moves a document its
+  // walks went through, such as the one of `B` when `A` extends `B`.
   void onUpdate(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted) override;
-  void noteClimb(cursiv::DocumentId from, cursiv::DocumentId through) const;
+  void noteDependency(cursiv::DocumentId from,
+                      cursiv::DocumentId through) const;
 
-  mutable std::mutex _climbedMutex;
+  mutable std::mutex _dependenciesMutex;
   mutable std::unordered_map<cursiv::DocumentId,
                              std::unordered_set<cursiv::DocumentId>>
-      _climbed;
+      _dependencies;
 };
 
 }  // namespace dm

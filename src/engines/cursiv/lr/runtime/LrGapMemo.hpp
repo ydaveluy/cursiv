@@ -1,7 +1,6 @@
-// The answers a condition's reading of the gap gave, by where the gap starts
-// and how long it is: the text between two positions never changes, however
-// many readings ask. Only a gap longer than a unit's walk is kept, and the
-// bytes read to answer one are counted, for a search to pay.
+// The answers a condition's reading of a gap gave, by its start and length: the
+// text between two positions never changes. Only gaps longer than a unit's walk
+// are kept, and the bytes read are counted for the search.
 #pragma once
 
 #include <cstddef>

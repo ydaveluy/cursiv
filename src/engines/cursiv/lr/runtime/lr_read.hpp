@@ -1,17 +1,15 @@
-// One action of a reading, taken as the drive takes it: the token in hand
-// under the state's own mode, the default arm's fallbacks, and the table's
-// answer. Every reading that is not the drive steps through it, whatever
-// stack it stands on, in the indentation levels it owns.
+// One action of a reading, taken as the drive takes it: the token under the
+// state's mode, the default arm's fallbacks, and the table's answer. Every
+// reading but the drive's steps through it, in its own indentation levels.
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/LrDrive.hpp"
-#include "cursiv/lr/runtime/LrOverlayClimb.hpp"
+#include "cursiv/lr/runtime/LrStackOverlay.hpp"
 #include "cursiv/lr/runtime/lr_guard.hpp"
 #include "cursiv/lr/runtime/lr_lex_exact.hpp"
 #include "cursiv/lr/runtime/lr_states.hpp"
@@ -20,6 +18,7 @@
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv::engine {
 
@@ -84,8 +83,8 @@ inline auto lr_shadow_holds(const LrContext& c, const R& s) {
   return lr_shadow_holds(c, s, s.la);
 }
 
-// A lone action the gap refuses -- a reduce whose condition fails, a guard
-// that lands nowhere -- leaves the token without an action, as the drive
+// A lone action the gap refuses (a reduce whose condition fails, a guard
+// that leads to no state) leaves the token without an action, as the drive
 // sends it to the state's default arm.
 template <const auto& A, class R>
 inline void lr_shadow_unguard(const LrContext& c, const R& s,
@@ -107,7 +106,7 @@ inline void lr_shadow_unguard(const LrContext& c, const R& s,
     }
     // An empty reduction can be refused by its goto before touching the
     // stack. It then leaves the token to the same fallbacks as a refused
-    // shift guard, including an implied token the state may lay.
+    // shift guard, including an implied token the state may insert.
     if constexpr (kLrGuarded<A>)
       if (A.cfg.prods[x.arg].len == 0 && A.cfg.prods[x.arg].guarded != 0 &&
           lr_reduce_target<A>(s.run.back(), x.arg, kLrNoFirst,
@@ -160,7 +159,7 @@ inline bool lr_shadow_apply(LrContext& c, R& s, std::uint32_t at) {
     if constexpr (kLrPins<R>) {
       if (!implied && (!s.pin || s.pinRep || !(s.la == s.pinTok)))
         s.at = s.la.end;
-      s.template shifted<A>(A.cfg.terms[s.la.sym].laid != 0);
+      s.template shifted<A>(A.cfg.terms[s.la.sym].synthetic != 0);
     } else if (!implied) {
       s.at = s.la.end;
     }
@@ -215,8 +214,8 @@ inline bool lr_read_indent(LrContext& c, R& s, std::uint16_t mode) {
   Token t;
   if (s.indent.depth != 0 ||
       !indent_virtual_at(c.src, c.len, c.indentArena, s.indent.head,
-                         kLaid<A.cfg, kLaidIndent>, kLaid<A.cfg, kLaidDedent>,
-                         at, t, held))
+                         kSyntheticTerm<A.cfg, kSyntheticIndent>,
+                         kSyntheticTerm<A.cfg, kSyntheticDedent>, at, t, held))
     return false;
   s.la = t;
   s.laMode = mode;
@@ -224,7 +223,7 @@ inline bool lr_read_indent(LrContext& c, R& s, std::uint16_t mode) {
 }
 
 // The actions offered after the token's mode and virtual-token fallbacks
-// have settled. A lone guarded reduction can also answer an unmatched byte.
+// are done. A lone guarded reduction can also answer an unmatched byte.
 struct LrReadActions {
   std::uint32_t first = 0;
   unsigned count = 0;
@@ -243,11 +242,11 @@ CURSIV_ALWAYS_INLINE inline LrReadActions lr_read_actions(LrContext& c,
   const std::uint16_t mode = A.mode[state];
   if (reading().laMode != mode) {
     // No token stands across a line start the indentation answers, as
-    // in the drive; one that stands is charged once, not once per round
+    // in the drive; one that stands is counted once, not once per round
     // that only reduces under it.
     if (kIndented<A.cfg> || reading().laMode == kNoMode ||
         !A.mode_sub(reading().laMode, mode) ||
-        lr_has_rivals<A>(mode, reading().la.sym))
+        lr_has_candidates<A>(mode, reading().la.sym))
       relex();
     else
       kept();
@@ -263,17 +262,19 @@ CURSIV_ALWAYS_INLINE inline LrReadActions lr_read_actions(LrContext& c,
   }
   // The end of input while suites are open is a dedent where the state reads
   // one or refuses the end, as the drive hands it over.
-  if constexpr (kLaid<A.cfg, kLaidDedent> != 0) {
+  if constexpr (kSyntheticTerm<A.cfg, kSyntheticDedent> != 0) {
     if (reading().la.sym == kEofSymbol &&
-        indent_owes_dedent(c.indentArena, reading().indent.head)) {
+        indent_needs_dedent(c.indentArena, reading().indent.head)) {
       std::uint32_t closing = 0;
       unsigned reads = 0;
-      lr_action_run<A>(state, kLaid<A.cfg, kLaidDedent>, closing, reads);
+      lr_action_run<A>(state, kSyntheticTerm<A.cfg, kSyntheticDedent>, closing,
+                       reads);
       if (k == 0 || reads != 0) {
         reading().la = Token{reading().la.begin, reading().la.begin,
-                             kLaid<A.cfg, kLaidDedent>};
+                             kSyntheticTerm<A.cfg, kSyntheticDedent>};
         f = closing;
         k = reads;
+        lr_shadow_unguard<A>(c, reading(), f, k);
       }
     }
   }
@@ -284,14 +285,14 @@ CURSIV_ALWAYS_INLINE inline LrReadActions lr_read_actions(LrContext& c,
     if (k == 0 && v.pending == 0) {
       for (unsigned q = 0; q < kLrImplied<A>.size() && k == 0; ++q) {
         const SymbolId term = kLrImplied<A>[q];
-        if (((v.laid_at(reading().la) >> q) & 1u) != 0) continue;
+        if (((v.inserted_ranks(reading().la) >> q) & 1u) != 0) continue;
         std::uint32_t f2 = 0;
         unsigned k2 = 0;
         lr_action_run<A>(state, term, f2, k2);
         if (k2 == 0 || !c.drive->cond(c, A.cfg.terms[term].cond, v.from,
                                       lr_cond_token(reading(), reading().la)))
           continue;
-        v.lay(reading().la, q, term);
+        v.insert(reading().la, q, term);
         f = f2;
         k = k2;
       }
@@ -304,8 +305,8 @@ CURSIV_ALWAYS_INLINE inline LrReadActions lr_read_actions(LrContext& c,
 // Whether the stack of a reading takes `t`.
 template <const auto& A, class R>
 bool lr_read_takes(const LrContext& c, R& s, const Token& t) {
-  return lr_climb_takes<A>(
-      LrOverlayClimb<std::remove_cvref_t<decltype(s.run)>>(s.run), t.sym,
+  return lr_stack_takes<A>(
+      LrStackOverlay<std::remove_cvref_t<decltype(s.run)>>(s.run), t.sym,
       lr_shadow_holds(c, s, t), c.walkMemo);
 }
 
@@ -321,11 +322,9 @@ CURSIV_NOINLINE bool lr_read_refused(const LrContext& c, R& s,
       c.cand, tied);
 }
 
-// One action of reading `i` of pool `x`: `x.fork(i)` is a copy beside it or
-// `kLrNoFork`, `x.drop(j)` a fork its action refused, `x.apply` and `x.reduce`
-// false where the reading dies; the pool counts its work in `lexed`, `kept_at`
-// and `stepped`. A reading the table refuses is marked `dead` and left as it
-// stood.
+// One action of reading `i` of pool `x`: `x.fork(i)` is a copy or `kLrNoFork`,
+// `x.drop(j)` a refused fork, `x.apply` and `x.reduce` false where the reading
+// dies. A reading the table refuses is marked `dead`.
 template <const auto& A, class Pool>
 CURSIV_ALWAYS_INLINE inline void lr_read_step(LrContext& c, Pool& x,
                                               std::size_t i) {
@@ -369,19 +368,19 @@ CURSIV_ALWAYS_INLINE inline void lr_read_step(LrContext& c, Pool& x,
       if (x[i].la.sym < A.cfg.nterms && A.flagged(mode, x[i].la.sym))
         [[unlikely]]
         refused = lr_read_refused<A>(c, x[i], mode, tied);
-    // The drive would have this position's rivals in hand, so a
+    // The drive would have this position's competitors in hand, so a
     // reading takes one fork each, not the longest match alone.
     if constexpr (A.maxCands > 1) {
       if (c.drive->scanText != nullptr &&
-          (refused || lr_has_rivals<A>(mode, x[i].la.sym))) {
+          (refused || lr_has_candidates<A>(mode, x[i].la.sym))) {
         Scan* const room = c.cand;
         const std::uint32_t nc =
-            refused ? tied : lr_rivals<A>(c, mode, x[i].la.begin, room);
-        // Where the lexer ranks rivals apart, a token's rank is a word of the
-        // derivation that reads it.
-        [[maybe_unused]] const bool ranked = lr_rivals_ranked(room, nc);
+            refused ? tied : lr_candidates<A>(c, mode, x[i].la.begin, room);
+        // Where the lexer ranks competitors apart, a token's rank is a word of
+        // the derivation that reads it.
+        [[maybe_unused]] const bool ranked = lr_candidates_ranked(room, nc);
         [[maybe_unused]] const auto rank = [&](const Scan& scan) {
-          return ranked ? ~lex_weight(scan.tier) : 0u;
+          return ranked ? ~lex_weight(scan.priority) : 0u;
         };
         for (std::uint32_t q = 1; q < nc; ++q) {
           if (room[q].term == room[0].term) continue;

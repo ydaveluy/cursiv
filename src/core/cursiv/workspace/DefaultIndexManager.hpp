@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -24,9 +25,6 @@
 
 namespace cursiv {
 
-// Not `final`. Everything below stays private -- the two
-// tables are copy-on-write behind a lock, and a derived class reaching into
-// them would break the discipline that makes a reader lock-free.
 class DefaultIndexManager : public IndexManager,
                             protected DefaultSharedCoreService {
  public:
@@ -69,9 +67,7 @@ class DefaultIndexManager : public IndexManager,
   ~DefaultIndexManager() noexcept override = default;
 
  private:
-  // The inverse edge: "what points at this symbol", asked by rename and by
-  // find-references, where scanning every document per question would be the
-  // whole workspace.
+  // What points at a symbol, for rename and find-references.
   struct Target {
     DocumentId document;
     NodeId symbol;
@@ -93,13 +89,9 @@ class DefaultIndexManager : public IndexManager,
     const AstNodeDescription* element;
   };
 
-  // Published, not locked: `visitElements` hands candidates to a caller's
-  // visitor that reaches back into the index, and a lock held across that
-  // callback is a self-deadlock on the first reentrant reader.
-  //
-  // Split from `Incoming`: collapsed into one snapshot, a reference write
-  // would invalidate the exports the linker is reading, paying a rebuild per
-  // document.
+  // Published, not locked: a visitor may reach back into the index. Apart from
+  // `Incoming`, so a reference write does not drop the exports the linker
+  // reads.
   struct Exported {
     std::string uri;
     std::vector<AstNodeDescription> elements;
@@ -112,11 +104,9 @@ class DefaultIndexManager : public IndexManager,
     // Owning: a write replaces a row's holder, and a reader still walking this
     // snapshot keeps the row it is on.
     std::vector<std::pair<DocumentId, std::shared_ptr<const Exported>>> rows;
-    // Built from the rows, not scanned per lookup: a scan would walk every
-    // exported symbol on each cross-document reference.
-    //
-    // Keyed by the folded name's hash, so a run may also hold another name
-    // that collides: a reader filters it, exactly or folded as it asks.
+    // Built from the rows so a lookup does not scan every export. Keyed by the
+    // folded name's hash: a run may hold a colliding name, which a reader
+    // filters.
     struct Slot {
       std::uint64_t hash = 0;
       std::uint32_t begin = 0;
@@ -148,18 +138,35 @@ class DefaultIndexManager : public IndexManager,
     std::vector<ReferenceDescription> descriptions;
     std::uint64_t targets = 0;
   };
+  // What `visitReferences` walks: the published view, or a reader's own when a
+  // write changed the rows it was built from.
+  class IncomingView {
+   public:
+    explicit IncomingView(Published<Incoming>::Read published) noexcept
+        : _published(std::move(published)) {}
+    explicit IncomingView(std::shared_ptr<const Incoming> own) noexcept
+        : _own(std::move(own)) {}
+    [[nodiscard]] const Incoming* operator->() const noexcept {
+      return _own != nullptr ? _own.get() : _published->get();
+    }
 
-  // The write side. A build spreads each phase across the pool one document at
-  // a time, so two workers insert at once and an unguarded insertion is a
-  // rehash performed twice. It guards the tables and nothing else: what a
-  // document exports and what it points at are computed before it is taken, on
-  // the worker's own stack, because those walks are the phase's whole cost.
+   private:
+    std::optional<Published<Incoming>::Read> _published;
+    std::shared_ptr<const Incoming> _own;
+  };
+
+  // The write side, guarding the tables only: two workers of a phase insert at
+  // once. Exports and references are computed before it is taken.
   mutable std::mutex _mutex;
 
   // The two halves are separate because two phases fill them, and a change may
   // invalidate one without the other.
   std::unordered_map<DocumentId, std::shared_ptr<Exported>> _exported;
-  std::unordered_map<DocumentId, Referenced> _references;
+  // Shared, so a reader groups and sorts them after releasing the lock.
+  std::unordered_map<DocumentId, std::shared_ptr<const Referenced>> _references;
+  // Counts the releases of `_incoming`, under `_mutex`: a view is published
+  // only if no release happened since its rows were read.
+  std::uint64_t _referenceWrites = 0;
   struct Import {
     std::uint64_t name;
     std::uint32_t position;
@@ -174,28 +181,24 @@ class DefaultIndexManager : public IndexManager,
   std::unordered_map<std::uint64_t, std::vector<Importer>> _importers;
   // Documents a changed export may have retargeted. A mark survives
   // `dropReferences`: only a successful `updateReferences` or the document's
-  // own content drop settles it, or a cancelled relink would be forgotten.
+  // own content drop clears it, or a cancelled relink would be forgotten.
   std::unordered_set<DocumentId> _affected;
 
-  // Null when the matching write dropped it; the first reader after that
-  // rebuilds it once under `_mutex` and publishes. A write drops it before
-  // changing its table, so one that throws never leaves a view the table has
-  // moved past.
-  // Published, not locked: the scope path asks for the export view once per
-  // reference, and a `std::atomic<shared_ptr>` would serialise every worker on
-  // its control block -- the same convoy a mutex makes, one line down.
+  // Null once a write drops it, before changing its table; the next reader
+  // rebuilds and publishes it, unless a write came in since. Published rather
+  // than atomic: the scope path reads the export view once per reference.
   mutable Published<Exports> _exports;
   mutable Published<Incoming> _incoming;
 
   // `_mutex` held by the caller.
   bool dropContent(DocumentId document);
   bool dropReferences(DocumentId document);
+  void clearIncoming();
   void affectImporters(const Exported& exports);
-  // Each takes `_mutex` only when there is nothing published.
-  // The handle keeps the snapshot alive for the whole read, which matters:
-  // what these hand back are pointers into it.
+  // Each takes `_mutex` only when nothing is published. The handle keeps the
+  // snapshot alive for the whole read, as the answers point into it.
   [[nodiscard]] Published<Exports>::Read exportsView() const;
-  [[nodiscard]] Published<Incoming>::Read incomingView() const;
+  [[nodiscard]] IncomingView incomingView() const;
 };
 
 }  // namespace cursiv

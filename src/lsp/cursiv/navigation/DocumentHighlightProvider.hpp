@@ -1,6 +1,4 @@
-// Document highlight: the same symbol, painted where it appears in this
-// document and nowhere else -- the restriction is the protocol's own, and
-// the whole difference from find-references.
+// Document highlight: the occurrences of a symbol in this document only.
 #pragma once
 
 #include <lsp/types.h>
@@ -16,11 +14,8 @@ class DocumentHighlightProvider {
  public:
   virtual ~DocumentHighlightProvider() noexcept = default;
 
-  /**
-   * Called under the workspace read lock. A caret on a reference whose
-   * declaration lives elsewhere still answers, with the references here
-   * alone; empty is never an error.
-   */
+  // Called under the workspace read lock. A reference declared elsewhere still
+  // answers, with the references in this document.
   [[nodiscard]] virtual std::vector<lsp::DocumentHighlight>
   getDocumentHighlight(const Document& document, lsp::Position position,
                        const CancellationToken& = {}) const = 0;

@@ -1,10 +1,8 @@
-// caret_bench -- what a completion costs in the middle of a large document:
-// one parse, then `nextFeaturesAt` asked at a few carets, reps times. Run it
-// under `perf stat` with 0 and with N reps: the difference is the questions.
+// caret_bench -- the cost of completion in a large document: one parse, then
+// `nextFeaturesAt` at a few carets, reps times; compare 0 and N reps under
+// `perf stat`. `block` statements make one top-level loop, 0 makes none.
 //
 //   caret_bench <ll|lr> <statements> [reps] [block] [--print]
-//
-// `block` statements make one loop at the top level; 0 leaves them all there.
 
 #include <chrono>
 #include <cstddef>

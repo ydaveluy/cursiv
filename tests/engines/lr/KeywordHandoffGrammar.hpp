@@ -1,9 +1,8 @@
 #pragma once
 
-// A word two terminals read where one state takes both: the literal `a`, which
-// the lexer ranks above the name, and the name. Only the last token `x`
-// leaves them both standing; the name's arm is written first, and the
-// lexer's rank still comes first.
+// A word two terminals read where one state takes both: the literal `a`, ranked
+// above the name, and the name. Only the last token `x` keeps both; the name's
+// arm is written first, and the lexer's rank still comes first.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

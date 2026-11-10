@@ -5,15 +5,14 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/lr/runtime/LrDerivationRoom.hpp"
+#include "cursiv/lr/runtime/LrDerivationStep.hpp"
 #include "cursiv/lr/runtime/LrGapMemo.hpp"
 #include "cursiv/lr/runtime/LrParseStats.hpp"
 #include "cursiv/lr/runtime/LrShadow.hpp"
 #include "cursiv/lr/runtime/LrSkipMemo.hpp"
 #include "cursiv/lr/runtime/LrStack.hpp"
 #include "cursiv/lr/runtime/LrTape.hpp"
-#include "cursiv/lr/runtime/LrTrailRoom.hpp"
-#include "cursiv/lr/runtime/LrTrailStep.hpp"
 #include "cursiv/lr/runtime/LrVirtualAt.hpp"
 #include "cursiv/lr/runtime/LrWalkMemo.hpp"
 #include "cursiv/shared/runtime/CancellationPoll.hpp"
@@ -22,6 +21,7 @@
 #include "cursiv/shared/runtime/RepairFault.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
 
 namespace cursiv::engine {
 
@@ -51,8 +51,8 @@ struct LrContext {
   Token la{};
   // `kNoMode` is no lookahead held: one field says whether and in which mode.
   std::uint16_t laMode = kNoMode;
-  // The fields a shift touches sit on the three lines above: a token costs the
-  // context no fourth line.
+  // The fields a shift touches sit in the three cache lines above: a token
+  // touches no fourth line.
   // How far plain trivia has been read past `committed`.
   TextOffset pendEnd = 0;
   LrStack stack;
@@ -60,26 +60,26 @@ struct LrContext {
   std::vector<Token> pending;
   // Real tokens shifted: what validates a repair.
   std::uint32_t shifts = 0;
-  // The readings a cell is settled with, held across cells.
+  // The readings a cell is resolved with, held across cells.
   std::vector<LrShadow> spec;
   // Per state and kind of decision, the text its look-ahead read before it ran
   // out: short of it a visit goes to the graph directly. An effort bound, not
-  // a verdict on the state.
-  std::vector<TextOffset> unsettled;
+  // a property of the state.
+  std::vector<TextOffset> unresolved;
   // What the last look-ahead that ran out read to.
   TextOffset lookReach = 0;
   // Which arms each reading of a cell descends from, one bit each, at the
   // table's stride.
   std::vector<std::uint64_t> origin;
   // The steps the readings of a cell took, shared where they agree, and the
-  // room an election between two of them works in.
-  std::vector<LrTrailStep> trail;
-  LrTrailRoom trailRoom;
+  // scratch an election between two of them works in.
+  std::vector<LrDerivationStep> derivation;
+  LrDerivationRoom derivationRoom;
   // Every terminal matching at the cursor where a mode admits several.
   Scan* cand = nullptr;
   LrParseStats stats{};
   std::uint32_t ncand = 0;
-  // A cell or a position no look-ahead settled stopped the drive on it: the
+  // A cell or a position no look-ahead resolved stopped the drive on it: the
   // graph reads it from the context as it stands.
   LrSplit split = LrSplit::none;
 
@@ -89,7 +89,7 @@ struct LrContext {
   SymbolId (*peekAt)(const LrContext&, std::uint16_t) = nullptr;
   unsigned (*resolveAt)(LrContext&, std::uint32_t, std::uint32_t,
                         unsigned) = nullptr;
-  // The candidates are handed over: deciding reads ahead and refills the room.
+  // The candidates are handed over: deciding reads ahead and refills them.
   unsigned (*candAt)(LrContext&, std::uint32_t, const Scan*,
                      unsigned) = nullptr;
   const LrDrive* drive = nullptr;
@@ -97,7 +97,7 @@ struct LrContext {
 
   // What the repairs written so far cost.
   std::uint64_t cost = 0;
-  // The repairs' notes, in the order they are laid.
+  // The repairs' notes, in the order they are written.
   std::vector<RepairNote> notes;
   std::vector<IndentLevel> indentArena;
   IndentAt indent;

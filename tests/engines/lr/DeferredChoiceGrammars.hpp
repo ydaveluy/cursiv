@@ -1,5 +1,5 @@
 // Two complete readings of one text that write different members: the first
-// decision the text meets decides, its arm written first winning.
+// decision the text reaches decides, its arm written first winning.
 #pragma once
 
 #include "cursiv/grammar/GrammarSpec.hpp"

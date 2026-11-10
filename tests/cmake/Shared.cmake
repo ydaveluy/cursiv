@@ -2,12 +2,8 @@ cursiv_grammar_pair(lexicalbackends engines/shared/LexicalBackendsGrammar.hpp tl
 
 cursiv_grammar(characterslr engines/shared/CharactersGrammar.hpp tchars::Lr ENGINE LR)
 
-# Trivia: two ignored terminals reading one text are no tie, and a terminal
-# read as trivia is no bracket.
-# The text an implied token's condition reads lexes whole where the token may
-# be implied, in both engines.
-# A newline token is trivia to a block entry that reads none, though the
-# implied tags build the LR table with each caller's lookaheads apart.
+# Trivia: ignored terminals that tie, trivia that is no bracket, the text an
+# implied token's condition reads, and a newline a block entry does not read.
 
 cursiv_grammar_pair(trivia engines/shared/TriviaGrammar.hpp ttrivia::Lr ttrivia::Ll)
 
@@ -28,18 +24,15 @@ cursiv_grammar_pair(infixoperators engines/shared/InfixOperatorsGrammar.hpp tope
 # an operand, in both engines.
 cursiv_grammar_pair(unarylevels engines/shared/UnaryLevelsGrammar.hpp tunary::Lr tunary::Ll)
 
-# A class's members are visited in its declaration order, whichever order the
-# arms of the grammar name them in, in both engines.
-# The reversed first encounter exercises the shared metadata emitter once.
+# A class's members are visited in declaration order, whatever order the
+# grammar names them in.
 cursiv_grammar(backwardlr engines/shared/AstTreeGrammars.hpp tmember::BackwardLr ENGINE LR)
 
-# Every grammar the build ships, and the lane's own: those carry the guards,
-# the reserves and the wide tables no shipped grammar reaches.
 cursiv_grammar(onemode engines/lr/OneModeGrammar.hpp tonemode::G ENGINE LR)
 cursiv_grammar(candidateruns engines/lr/CandidateRunsGrammar.hpp tcandrun::G ENGINE LR)
 # The lexer's tables: candidate runs, typo alternatives, guards and conversions,
 # wide terminal sets and converters that read memory.
-cursiv_test(LrLexicon_test engines/lr/LrLexicon_test.cpp alikereducedGenerated
+cursiv_test(LrLexicon_test engines/lr/LrLexicon_test.cpp samewordreducedGenerated
     backrefGenerated candidaterunsGenerated guardGenerated
     guardtriviaGenerated
     lrauditGenerated astfusedlrGenerated onemodeGenerated relayoverlapGenerated
@@ -81,7 +74,6 @@ cursiv_aux_grammar(asttreeaux engines/shared/AstTreeGrammars.hpp ttree::Aux)
 # The conformance cases of the grammar reference, on both engines.
 cursiv_grammar_pair(conformance engines/shared/ConformanceGrammars.hpp tconformance::Lr tconformance::Ll)
 
-# Shared suites run after their grammar families have been declared.
 cursiv_test(LexNfa_test engines/shared/LexNfa_test.cpp
     cursivLlGen cursivLrGen)
 cursiv_test(TypoCandidates_test engines/shared/TypoCandidates_test.cpp)
@@ -106,7 +98,7 @@ cursiv_test(EofRegion_test engines/shared/EofRegion_test.cpp
     eofpurellGenerated eofpurelrGenerated)
 cursiv_test(GuardedClimb_test engines/shared/GuardedClimb_test.cpp
     guardedclimbllGenerated guardedclimblrGenerated)
-# The conflicts a generator names on demand: a guarded shift lands in the states
+# The conflicts a generator names on demand: a guarded shift goes to the states
 # its outcomes reach, and nothing shifts into the start state.
 if(NOT CMAKE_CROSSCOMPILING)
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/conflict_report)
@@ -138,12 +130,12 @@ cursiv_grammar_pair(condgrowth engines/shared/ConditionGrowthGrammar.hpp tcondgr
 cursiv_test(ConditionGrowth_test engines/shared/ConditionGrowth_test.cpp
     cursiv::bench condgrowthllGenerated condgrowthlrGenerated)
 
-# What the analyses of a generator cost as a grammar laid at run time grows.
+# What a generator's analyses cost as a grammar built at run time grows.
 cursiv_test(GeneratorGrowth_test engines/shared/GeneratorGrowth_test.cpp
     cursivLlGen cursivLrGen)
 
 # Guards that decide where a token ends, in both engines: a keyword under a
-# complemented word boundary, and a refusal rescued past a terminal's head.
+# complemented word boundary, and a passable refusal past a terminal's head.
 cursiv_grammar_pair(lexguards engines/shared/LexGuardsGrammar.hpp tlexguards::Lr tlexguards::Ll)
 # An assertion that decides whether a longer token reads over a shorter one.
 cursiv_grammar_pair(lexovertake engines/shared/LexGuardsGrammar.hpp

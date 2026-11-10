@@ -1,8 +1,6 @@
-// An infix whose table holds a prefix or postfix level, or that stands in a
-// left recursion, counts as its levels, tightest first: each level reads the
-// one below it as its operand, and the primary is the level under all. A call
-// of the infix is a call of its top level. Outside a left recursion, a run of
-// binary levels stays one climb over the level below it.
+// An infix with a prefix or postfix level, or in a left recursion, is built as
+// its levels, tightest first, each reading the one below as its operand.
+// Elsewhere, a run of binary levels stays one climb.
 #pragma once
 
 #include <cstddef>
@@ -94,7 +92,7 @@ struct InfixLevel : I {
   using operator_infix = declared_of_t<I>;
   static constexpr std::size_t operator_level = K;
   static constexpr auto body = typename level_body<I, K, Climb>::type{};
-  static constexpr bool minted_body = true;
+  static constexpr bool produced_body = true;
 };
 
 // The binary levels `K` ends a run of, from the one above the nearest unary
@@ -173,9 +171,10 @@ struct LeadGraphStage : S {
 namespace cursiv::detail {
 
 template <class I, std::size_t K, bool Climb>
-struct home_of<engine::InfixLevel<I, K, Climb>> : home_of<I> {};
+struct owner_grammar_of<engine::InfixLevel<I, K, Climb>> : owner_grammar_of<I> {
+};
 template <class I, std::size_t K>
-struct home_of<engine::InfixRun<I, K>> : home_of<I> {};
+struct owner_grammar_of<engine::InfixRun<I, K>> : owner_grammar_of<I> {};
 template <class I, std::size_t K, bool Climb>
 inline constexpr std::string_view
     kTypeNameView<engine::InfixLevel<I, K, Climb>> =

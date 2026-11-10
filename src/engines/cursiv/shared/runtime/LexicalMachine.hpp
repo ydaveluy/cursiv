@@ -88,11 +88,9 @@ inline PredicateState lexical_endpoints(const LexicalState& state) {
   return out;
 }
 
-// Many words read as data rather than code, as a character class over several
-// bytes lowers to: a choice of words, or a run of refusals of words. Each word
-// in `words` is its length, the class that rescues a refusal of it (none in a
-// choice), then its classes; `order` from `opens[b]` to `opens[b + 1]` lists
-// the words that can open on byte `b`, as their offsets in `words`, in order.
+// Many words read as data: a choice of words, or a run of refusals of words.
+// Each word is its length, its pass class, then its classes; `order` from
+// `opens[b]` to `opens[b + 1]` lists the words that open on byte `b`.
 struct LexicalWords {
   const std::uint16_t* words;
   std::size_t size;
@@ -163,8 +161,8 @@ LexicalState lexical_words(const Bound& bound, const LexicalWords& w,
 }
 
 // Whether no refusal of the run holds `at` back: none of its words is spelled
-// there, short of its rescue. Every word is one byte at least, so one that
-// cannot open on the byte at `at` refuses nothing.
+// there without its pass class after it. Every word is one byte at least, so
+// one that cannot open on the byte at `at` refuses nothing.
 template <class Bound>
 bool lexical_refused(const Bound& bound, const LexicalWords& w,
                      const char* src, TextOffset len, TextOffset at,
@@ -219,10 +217,8 @@ class LexicalMachine {
   Frame& frame() { return _frames.back(); }
   LexicalState& returned() { return _returned; }
 
-  // Opens a call on top of the frames. The caller's frame reference dangles
-  // from here on, so `enter` is the last use of it: the argument is built
-  // before the call and the step returns right after. The new frame is
-  // handed back for a caller that needs it.
+  // Opens a call on top of the frames and returns the new frame. Any frame
+  // reference the caller holds dangles from here on.
   Frame& enter(std::uint16_t node, LexicalState in) {
     return _frames.emplace_back(Frame{node, std::move(in), {}, {}, 0, 0, 0});
   }

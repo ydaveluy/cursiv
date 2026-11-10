@@ -1,7 +1,3 @@
-// The server storey: the containers and the handshake, the wire's lifecycle,
-// the binary's main, the command table, the hot doors, the frontier of the
-// protocol's positions, the configuration pull and a build across languages.
-
 #include <lsp/connection.h>
 #include <lsp/io/stream.h>
 #include <lsp/json/json.h>
@@ -24,6 +20,7 @@
 #include <latch>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -35,46 +32,20 @@
 #include <variant>
 #include <vector>
 
-#include "cursiv/grammar/ElementId.hpp"
-#include "cursiv/observability/ObservabilitySink.hpp"
-#include "cursiv/grammar/NextFeature.hpp"
-#include "cursiv/parser/Parser.hpp"
-#include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/SharedCoreServices.hpp"
-#include "cursiv/syntax-tree/AstReflection.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstBuilder.hpp"
-#include "cursiv/text/Position.hpp"
-#include "cursiv/text/Range.hpp"
-#include "cursiv/text/TextRange.hpp"
-#include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/utils/FunctionRef.hpp"
-#include "cursiv/utils/UriUtils.hpp"
-#include "cursiv/validation/ValidationAcceptor.hpp"
-#include "cursiv/validation/ValidationCategory.hpp"
-#include "cursiv/validation/ValidationRegistry.hpp"
-#include "cursiv/workspace/DefaultDocumentFactory.hpp"
-#include "cursiv/workspace/DefaultWorkspaceLock.hpp"
-#include "cursiv/workspace/DefaultWorkspaceManager.hpp"
-#include "cursiv/workspace/Document.hpp"
-#include "cursiv/workspace/DocumentBuilder.hpp"
-#include "cursiv/workspace/DocumentFactory.hpp"
-#include "cursiv/workspace/DocumentState.hpp"
-#include "cursiv/workspace/Documents.hpp"
-#include "cursiv/workspace/LocalFileSystemProvider.hpp"
-#include "cursiv/workspace/MemoryFileSystemProvider.hpp"
-#include "cursiv/workspace/WorkspaceFolder.hpp"
-#include "cursiv/workspace/WorkspaceLock.hpp"
-#include "cursiv/workspace/WorkspaceManager.hpp"
-#include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
 #include "cursiv/completion/CompletionContext.hpp"
 #include "cursiv/completion/CompletionProvider.hpp"
 #include "cursiv/completion/CompletionProviderOptions.hpp"
 #include "cursiv/completion/DefaultCompletionProvider.hpp"
 #include "cursiv/content/DefaultTextDocumentContentProvider.hpp"
+#include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/formatting/Formatter.hpp"
+#include "cursiv/grammar/ElementId.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/observability/ObservabilitySink.hpp"
+#include "cursiv/parser/Parser.hpp"
 #include "cursiv/runtime/DefaultLanguageServer.hpp"
 #include "cursiv/runtime/LanguageClient.hpp"
 #include "cursiv/runtime/LanguageServer.hpp"
@@ -84,45 +55,115 @@
 #include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/services/AbstractExecuteCommandHandler.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/ExecuteCommandHandler.hpp"
 #include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/services/SharedLspServices.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/text/LspPosition.hpp"
+#include "cursiv/text/Position.hpp"
+#include "cursiv/text/Range.hpp"
+#include "cursiv/text/TextRange.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/utils/UriUtils.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/validation/ValidationCategory.hpp"
+#include "cursiv/validation/ValidationRegistry.hpp"
 #include "cursiv/workspace/ConfigurationProvider.hpp"
 #include "cursiv/workspace/DefaultConfigurationProvider.hpp"
-#include "cursiv/workspace/DocumentSaveHandler.hpp"
-#include "cursiv/workspace/FileOperationHandler.hpp"
-#include "cursiv/workspace/LspDocumentBuilder.hpp"
+#include "cursiv/workspace/DefaultDocumentFactory.hpp"
 #include "cursiv/workspace/DefaultNotebookDocuments.hpp"
-#include "cursiv/Check.hpp"
+#include "cursiv/workspace/DefaultWorkspaceLock.hpp"
+#include "cursiv/workspace/DefaultWorkspaceManager.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/DocumentSaveHandler.hpp"
+#include "cursiv/workspace/DocumentState.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/FileOperationHandler.hpp"
+#include "cursiv/workspace/LocalFileSystemProvider.hpp"
+#include "cursiv/workspace/LspDocumentBuilder.hpp"
+#include "cursiv/workspace/MemoryFileSystemProvider.hpp"
+#include "cursiv/workspace/WorkspaceFolder.hpp"
+#include "cursiv/workspace/WorkspaceLock.hpp"
+#include "cursiv/workspace/WorkspaceManager.hpp"
 #include "doc/generated/DocG/Module.hpp"
 #include "doc/generated/DocG/Parser.hpp"
 #include "doc/generated/DocG/Table.hpp"
 #include "lsp/types.h"
 #include "lsp/uri.h"
+#include "support/Editor.hpp"
 #include "support/OffersEveryKeyword.hpp"
 #include "support/Throws.hpp"
-#include "support/Editor.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
-// The LSP storey with no wire under it: the containers installed, the
-// handshake's promises, the notifications that publish, and the routes that
-// wait for a rung before they read. What the server hands a client goes to a
-// stand-in that keeps it, which is the whole of what replaces the transport.
+// Fails one allocation on the calling thread, after `after` others. Where the
+// global allocator is not this file's, nothing fails.
+namespace {
+thread_local int refuseAfter = -1;
+thread_local bool refusedOne = false;
+void refuse_allocation(int after) {
+  refusedOne = false;
+  refuseAfter = after;
+}
+// Whether the requested failure happened; the request is cleared either way.
+bool refusal_made() {
+  refuseAfter = -1;
+  return refusedOne;
+}
+}  // namespace
+
+#ifdef CURSIV_TEST_REFUSES_ALLOCATIONS
+void* operator new(std::size_t size) {
+  if (refuseAfter >= 0 && refuseAfter-- == 0) {
+    refusedOne = true;
+    throw std::bad_alloc();
+  }
+  if (void* p = std::malloc(size == 0 ? 1 : size)) return p;
+  throw std::bad_alloc();
+}
+void* operator new[](std::size_t size) { return ::operator new(size); }
+// The `nothrow` forms call the throwing one, as the standard library's do, so
+// `delete` frees only memory this file allocated.
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+  try {
+    return ::operator new(size);
+  } catch (const std::bad_alloc&) {
+    return nullptr;
+  }
+}
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
+  return ::operator new(size, std::nothrow);
+}
+void operator delete(void* p) noexcept {
+  if (p != nullptr) std::free(p);
+}
+void operator delete[](void* p) noexcept { ::operator delete(p); }
+void operator delete(void* p, std::size_t) noexcept { ::operator delete(p); }
+void operator delete[](void* p, std::size_t) noexcept { ::operator delete(p); }
+#endif
+
+// The language server without a transport: a recording client keeps what it
+// is sent.
 namespace language_server {
 
 namespace {
 
 constexpr std::string_view kUri = "file:///w/a.ws";
-// A reference to a type nobody declares: the one document that is broken
-// without being unparsable, so the verdict comes from validation and not from
-// the parser's own recovery.
+// A reference to an undeclared type: the document parses, so its diagnostic
+// comes from validation, not from the parser's recovery.
 constexpr std::string_view kBroken = "entity A { x : Missing }\n";
 constexpr std::string_view kRepaired =
     "datatype Missing\nentity A { x : Missing }\n";
 
-// Keeps the mode of every write, and serves it as the default lock does.
+// Records the mode of every write, and locks as the default lock does.
 struct RecordingLock final : cursiv::DefaultWorkspaceLock {
   std::vector<WriteMode> modes;
   void write(WriteAction action, WriteMode mode) override {
@@ -131,14 +172,19 @@ struct RecordingLock final : cursiv::DefaultWorkspaceLock {
   }
 };
 
-// Keeps what it is handed, and nothing else: the transport's whole role here
-// is to be the place a publication can be read back from.
+// Keeps what it is sent, so the tests can read publications back.
 struct RecordingClient final : cursiv::LanguageClient {
   std::vector<lsp::PublishDiagnosticsParams> published;
   std::vector<lsp::RegistrationParams> registered;
   std::function<void(std::vector<lsp::LSPAny>)> configurationAnswer;
+  // The next `failing` publications throw, as a failing transport would.
+  int failing = 0;
 
   void publishDiagnostics(lsp::PublishDiagnosticsParams params) override {
+    if (failing > 0) {
+      --failing;
+      throw std::runtime_error("publication refused");
+    }
     published.push_back(std::move(params));
   }
   void registerCapability(lsp::RegistrationParams params) override {
@@ -194,10 +240,8 @@ struct EchoCommands final : cursiv::AbstractExecuteCommandHandler {
   }
 };
 
-// Two arms announced and four left out, which is the whole point of the
-// options: the rename pair is the one this world answers. `didRenameFiles`
-// keeps what it was handed, `willRenameFiles` answers an edit naming the new
-// URI, so both directions are readable from outside.
+// Declares only the two rename operations: `didRenameFiles` records its files,
+// `willRenameFiles` returns an edit on the new URI.
 struct RecordingFiles final : cursiv::FileOperationHandler {
   std::vector<lsp::FileRename> renamed;
   lsp::FileOperationOptions options;
@@ -262,7 +306,7 @@ struct RecordingSaves final : cursiv::DocumentSaveHandler {
   }
 };
 
-// Records the notebook saves, after the state the base keeps.
+// Records notebook saves after the base updates its state.
 struct RecordingNotebooks final : cursiv::DefaultNotebookDocuments {
   using DefaultNotebookDocuments::DefaultNotebookDocuments;
   std::vector<std::string> saved;
@@ -273,10 +317,8 @@ struct RecordingNotebooks final : cursiv::DefaultNotebookDocuments {
   }
 };
 
-// The four storeys, installed as a host would: shared core, shared LSP, the
-// language's core, the language's LSP. The workspace fixture because its
-// members hold a cross reference -- a linking verdict and a find-references
-// answer both need one.
+// The default services installed as a host would, on the workspace language,
+// whose references give linking diagnostics and find-references answers.
 struct World {
   cursiv::SharedLspServices shared;
   cursiv::LspServices* ws = nullptr;
@@ -346,21 +388,19 @@ const lsp::PublishDiagnosticsParams* lastSnapshotOf(const RecordingClient& of,
   return nullptr;
 }
 
-// The last thing the client was told about the one URI of the world.
+// The last publication, for tests that open a single document.
 const lsp::PublishDiagnosticsParams* lastSnapshot(const RecordingClient& of) {
   return of.published.empty() ? nullptr : &of.published.back();
 }
 
-// A host that installs the four storeys owes nothing more: every required slot
-// of every container answers.
-void the_installed_defaults_leave_no_slot_owed() {
+void the_installed_defaults_leave_no_slot_missing() {
   const World world;
   CHECK(world.shared.firstMissingService().empty());
   CHECK(world.ws->firstMissingService().empty());
 }
 
-// The handshake promises what the containers can keep, and stays silent about
-// the rest -- an absent capability being the protocol's own "unsupported".
+// The handshake announces only what is installed; an absent capability means
+// unsupported.
 void the_handshake_promises_only_what_is_installed() {
   const World world;
   const lsp::InitializeResult result = world.handshake();
@@ -370,20 +410,19 @@ void the_handshake_promises_only_what_is_installed() {
   CHECK(result.capabilities.referencesProvider.has_value());
   CHECK(result.capabilities.workspaceSymbolProvider.has_value());
   CHECK(result.capabilities.renameProvider.has_value());
-  // Announced, and silent about its triggers: the default claims no character,
-  // so only an explicit invocation opens the list.
+  // Completion is announced with no trigger character: only an explicit
+  // request opens the list.
   CHECK(result.capabilities.completionProvider.has_value());
   CHECK(result.capabilities.completionProvider.has_value() &&
         !result.capabilities.completionProvider->triggerCharacters.has_value());
 
-  // The optional slots the defaults leave empty: no language installed one, so
-  // no route is promised.
+  // Optional services the defaults leave empty are not announced.
   CHECK(!result.capabilities.declarationProvider.has_value());
   CHECK(!result.capabilities.implementationProvider.has_value());
   CHECK(!result.capabilities.typeDefinitionProvider.has_value());
   CHECK(!result.capabilities.callHierarchyProvider.has_value());
   CHECK(!result.capabilities.typeHierarchyProvider.has_value());
-  // No colours unless a language asks for them: the editor keeps its own.
+  // No semantic tokens unless a language installs them.
   CHECK(!result.capabilities.semanticTokensProvider.has_value());
   CHECK(!result.capabilities.signatureHelpProvider.has_value());
   CHECK(!result.capabilities.inlayHintProvider.has_value());
@@ -391,10 +430,10 @@ void the_handshake_promises_only_what_is_installed() {
   CHECK(!result.capabilities.codeLensProvider.has_value());
   CHECK(!result.capabilities.executeCommandProvider.has_value());
   CHECK(!result.capabilities.documentFormattingProvider.has_value());
-  // The workspace arm exists for the folders, and says nothing about files.
+  // `workspace` is announced for the folders, without file operations.
   CHECK(result.capabilities.workspace.has_value());
   CHECK(!result.capabilities.workspace->fileOperations.has_value());
-  // Saves and notebooks are heard of only through a handler.
+  // Saves and notebooks are received of only through a handler.
   const auto* const sync = result.capabilities.textDocumentSync.has_value()
                                ? std::get_if<lsp::TextDocumentSyncOptions>(
                                      &*result.capabilities.textDocumentSync)
@@ -404,7 +443,7 @@ void the_handshake_promises_only_what_is_installed() {
   CHECK(!result.capabilities.notebookDocumentSync.has_value());
 }
 
-// The options a semantic token provider announces, whatever their arm.
+// The announced semantic token options, or null.
 [[nodiscard]] const lsp::SemanticTokensOptions* colour_options(
     const lsp::InitializeResult& result) {
   const auto& announced = result.capabilities.semanticTokensProvider;
@@ -485,9 +524,9 @@ void the_handshake_announces_the_colours_a_language_installs() {
   CHECK(options->range.has_value());
 }
 
-// The session announces one legend: the languages' merged index by index, a
-// type one language appends included. `delta` is announced only when every
-// language answers it.
+// The session announces one legend, the languages' legends merged index by
+// index, a type one language adds included. `delta` is announced only when
+// every language supports it.
 void the_colour_legends_merge_over_the_languages() {
   for (const bool delta : {false, true}) {
     World world;
@@ -519,8 +558,8 @@ void the_colour_legends_merge_over_the_languages() {
       [&] { (void)world.server().initialize({}); }));
 }
 
-// What a provider claims reaches the client verbatim: a character absent from
-// the handshake is one the client never reopens the list on.
+// The provider's characters reach the client as they are: the client reopens
+// the list only on an announced character.
 void the_completion_triggers_are_the_providers_own() {
   World world;
   world.ws->completionProvider = std::make_unique<TriggeringCompletion>();
@@ -534,12 +573,12 @@ void the_completion_triggers_are_the_providers_own() {
   CHECK(announced.allCommitCharacters.has_value() &&
         announced.allCommitCharacters->size() == 1 &&
         announced.allCommitCharacters->front() == ";");
-  // Never promised: no provider of this storey answers a resolve request.
+  // Completion resolve is never announced: no provider supports it.
   CHECK(!announced.resolveProvider.has_value());
 }
 
-// The request reaches the provider whole: a list asked on a trigger character
-// is not the list asked by hand, and the hooks tell the two apart.
+// A list asked on a trigger character differs from one asked by hand, and the
+// hooks can tell them apart.
 void the_completion_context_reaches_the_hooks() {
   World world;
   world.ws->completionProvider = std::make_unique<QuietAfterTrigger>(*world.ws);
@@ -561,6 +600,43 @@ void the_completion_context_reaches_the_hooks() {
   typed.triggerCharacter = std::string(".");
   query.context = std::move(typed);
   CHECK(!support::offers(world.server().completion(query), "entity"));
+}
+
+// Names each candidate by the document that declares it.
+struct WhereDeclared final : cursiv::DefaultCompletionProvider {
+  using DefaultCompletionProvider::DefaultCompletionProvider;
+  cursiv::CompletionValueItem createReferenceCompletionItem(
+      const cursiv::AstNodeDescription& candidate,
+      const cursiv::ReferenceInfo& reference,
+      const cursiv::CompletionContext& context) const override {
+    cursiv::CompletionValueItem item =
+        DefaultCompletionProvider::createReferenceCompletionItem(
+            candidate, reference, context);
+    item.detail = std::string(
+        services.lspShared.documents->getDocumentUri(candidate.documentId));
+    return item;
+  }
+};
+
+// Two declarations of one name each reach the item hook, which may tell them
+// apart: the document's own, and another document's beyond it.
+void each_declaration_of_a_name_reaches_the_item_hook() {
+  World world;
+  world.ws->completionProvider = std::make_unique<WhereDeclared>(*world.ws);
+  (void)world.handshake();
+  support::open(world.server(), "file:///w/b.ws", "workspace",
+                "datatype Same\n");
+  world.open("datatype Same\nentity E { x : Sa }\n");
+  lsp::CompletionParams query;
+  query.textDocument.uri = lsp::Uri::parse(std::string(kUri));
+  query.position = {.line = 1, .character = 17};
+  std::vector<std::string> details;
+  for (const lsp::CompletionItem& item : world.server().completion(query).items)
+    if (item.label == "Same" && item.detail.has_value())
+      details.push_back(*item.detail);
+  std::ranges::sort(details);
+  CHECK(details ==
+        (std::vector<std::string>{"file:///w/a.ws", "file:///w/b.ws"}));
 }
 
 // The provider builds the edit the client declared it applies: both ranges
@@ -600,11 +676,10 @@ void completion_edits_follow_insert_replace_support() {
   }
 }
 
-// Hover and completion prose go in the format the client prefers, the first
-// one it lists: markdown only when that is markdown, plain text otherwise,
-// and when it lists nothing. Each feature reads its own list. The fixture
-// grammar documents its keywords.
-void prose_follows_the_clients_preferred_format() {
+// Hover and completion prose go as markdown when the client lists markdown
+// anywhere, as plain text otherwise. Each feature reads its own list; the
+// workspace grammar documents its keywords.
+void prose_is_markdown_when_the_client_lists_it() {
   using Formats = std::optional<lsp::Array<lsp::MarkupKindEnum>>;
   using enum lsp::MarkupKind;
   const lsp::MarkupKindEnum markdown(Markdown);
@@ -622,10 +697,11 @@ void prose_follows_the_clients_preferred_format() {
   };
   const Case cases[] = {{none, none, PlainText, PlainText},
                         {plainOnly, plainOnly, PlainText, PlainText},
-                        {plainFirst, plainFirst, PlainText, PlainText},
+                        {plainFirst, plainFirst, Markdown, Markdown},
                         {markdownFirst, markdownFirst, Markdown, Markdown},
                         {markdownOnly, none, Markdown, PlainText},
-                        {none, markdownOnly, PlainText, Markdown}};
+                        {none, markdownOnly, PlainText, Markdown},
+                        {plainFirst, plainOnly, Markdown, PlainText}};
   for (const Case& each : cases) {
     World world;
     lsp::InitializeParams params;
@@ -741,9 +817,8 @@ void a_closed_virtual_document_stays() {
   CHECK(text.has_value() && text->text == "datatype Library\n");
 }
 
-// The handler's options are the announcement and the routing: the two arms it
-// declares are promised, the four it does not stay unsaid, and the server's own
-// six doors answer through it.
+// The server announces the file operations the handler declares, and sends
+// those requests to it.
 void the_file_operations_are_the_handlers_own() {
   World world;
   auto files = std::make_unique<RecordingFiles>();
@@ -777,15 +852,16 @@ void the_file_operations_are_the_handlers_own() {
   CHECK(!handler->renamed.empty() &&
         handler->renamed.front().newUri.toString() == "file:///w/b.ws");
 
-  // Without a handler the same six doors answer nothing rather than refusing.
+  // Without a handler, file operation requests answer nothing rather than
+  // fail.
   const World bare;
   CHECK(!bare.server().willRenameFiles(params, cursiv::kNoCancel).has_value());
   bare.server().didRenameFiles(params);
 }
 
-// The handler's options are the announcement: each save notification it names
-// is promised and reaches it, and the edits asked before a save are measured
-// on the open document. A document nobody opened is not asked about.
+// The server announces the save notifications the handler names and sends
+// each to it. The edits before a save are measured on the open document; an
+// unopened document gets none.
 void the_save_notifications_reach_the_handler() {
   World world;
   auto saves = std::make_unique<RecordingSaves>();
@@ -851,9 +927,9 @@ void the_save_notifications_reach_the_handler() {
   return item;
 }
 
-// A notebook's cells are documents like any other: opened with it, built and
-// linked to each other, then moved by its changes and closed with it -- each
-// notification in one write. The notebook's own state follows the client's.
+// A notebook's cells are documents: opened with it, built and linked to each
+// other, changed by its changes and closed with it, each notification in one
+// write. The notebook's own state follows the client's.
 void a_notebook_syncs_its_cells_as_documents() {
   constexpr std::string_view kNotebook = "file:///w/book.wsnb";
   constexpr std::string_view kFirst = "vscode-notebook-cell:/w/book.wsnb#a";
@@ -941,8 +1017,8 @@ void a_notebook_syncs_its_cells_as_documents() {
         changed->cells.front().document.toString() == kThird);
   CHECK(!model.getNotebookCell(kFirst).has_value());
 
-  // Metadata alone moves no cell, and still builds: as a document update, it
-  // cut the build in flight.
+  // A metadata change moves no cell, yet still builds: as a document update,
+  // it cancels the build in progress.
   lsp::DidChangeNotebookDocumentParams relabel;
   relabel.notebookDocument.uri = open.notebookDocument.uri;
   relabel.notebookDocument.version = 3;
@@ -972,10 +1048,321 @@ void a_notebook_syncs_its_cells_as_documents() {
         !model.findNotebookDocumentForCell(kSecond).has_value());
 }
 
-// A tab opened on a broken text is diagnosed; the keystroke that repairs it
-// publishes the empty snapshot that clears the squiggle. Every later
-// validation publishes too, clean or not: the client can tell "still clean"
-// from "not validated yet".
+// When the notebook store throws on a change, the cells still get their new
+// text and are built; the error is then rethrown.
+void a_failing_notebook_still_moves_its_cells() {
+  constexpr std::string_view kNotebook = "file:///w/book.wsnb";
+  constexpr std::string_view kCell = "vscode-notebook-cell:/w/book.wsnb#a";
+  struct Deaf final : cursiv::DefaultNotebookDocuments {
+    using DefaultNotebookDocuments::DefaultNotebookDocuments;
+    void didChange(const lsp::DidChangeNotebookDocumentParams&) override {
+      throw std::runtime_error("deaf");
+    }
+  };
+  World world;
+  world.shared.notebookDocuments =
+      std::make_unique<Deaf>(lsp::NotebookDocumentSyncOptions{});
+  (void)world.handshake();
+  lsp::DidOpenNotebookDocumentParams open;
+  open.notebookDocument.uri = lsp::Uri::parse(std::string(kNotebook));
+  open.notebookDocument.notebookType = "workspace-notebook";
+  open.notebookDocument.version = 1;
+  open.notebookDocument.cells = {code_cell(kCell)};
+  open.cellTextDocuments = {cell_text(kCell, kBroken)};
+  world.server().didOpenNotebookDocument(open);
+  const auto* broken = lastSnapshotOf(*world.client, kCell);
+  CHECK(broken != nullptr && !broken->diagnostics.empty());
+
+  lsp::DidChangeNotebookDocumentParams change;
+  change.notebookDocument.uri = open.notebookDocument.uri;
+  change.notebookDocument.version = 2;
+  lsp::NotebookDocumentCellContentChanges edit;
+  edit.document.uri = lsp::Uri::parse(std::string(kCell));
+  edit.document.version = 2;
+  lsp::TextDocumentContentChangeWholeDocument whole;
+  whole.text = std::string(kRepaired);
+  edit.changes.emplace_back(std::move(whole));
+  lsp::NotebookDocumentCellChanges cells;
+  cells.textContent =
+      lsp::Array<lsp::NotebookDocumentCellContentChanges>{std::move(edit)};
+  change.change.cells = std::move(cells);
+  CHECK(support::throws<std::runtime_error>(
+      [&] { world.server().didChangeNotebookDocument(change); }));
+  CHECK(world.shared.documents->getDocument(kCell)->textDocument().getText() ==
+        kRepaired);
+  const auto* repaired = lastSnapshotOf(*world.client, kCell);
+  CHECK(repaired != nullptr && repaired->diagnostics.empty());
+}
+
+// An allocation that fails part-way through a notebook's update leaves the
+// store as it was or as the update made it, never between: each cell names its
+// notebook, and that notebook lists it.
+void a_refused_allocation_leaves_the_notebook_index_whole() {
+  // Longer than a short string holds, so every index entry needs room.
+  const std::string notebookUri =
+      "file:///w/a-notebook-with-a-name-longer-than-a-short-string.wsnb";
+  const std::string cellUri =
+      "vscode-notebook-cell:/w/a-notebook-with-a-long-name.wsnb#";
+  const std::vector<std::string> cellUris = {cellUri + "a", cellUri + "b",
+                                             cellUri + "c", cellUri + "d"};
+  lsp::DidOpenNotebookDocumentParams open;
+  open.notebookDocument.uri = lsp::Uri::parse(notebookUri);
+  open.notebookDocument.notebookType = "workspace-notebook";
+  open.notebookDocument.version = 1;
+  open.notebookDocument.cells = {code_cell(cellUris[0]), code_cell(cellUris[1]),
+                                 code_cell(cellUris[2])};
+  // The second cell replaced by a fourth.
+  lsp::DidChangeNotebookDocumentParams change;
+  change.notebookDocument.uri = open.notebookDocument.uri;
+  change.notebookDocument.version = 2;
+  lsp::NotebookDocumentCellChangeStructure structure;
+  structure.array.start = 1;
+  structure.array.deleteCount = 1;
+  structure.array.cells = lsp::Array<lsp::NotebookCell>{code_cell(cellUris[3])};
+  lsp::NotebookDocumentCellChanges cells;
+  cells.structure = std::move(structure);
+  change.change.cells = std::move(cells);
+
+  // A store that throws on a read, or holds a half-copied URI, is not whole.
+  const auto whole = [&](const cursiv::DefaultNotebookDocuments& store) {
+    try {
+      for (const std::string& cell : cellUris) {
+        const std::optional<lsp::NotebookDocument> owner =
+            store.findNotebookDocumentForCell(cell);
+        if (owner.has_value() &&
+            std::ranges::none_of(owner->cells,
+                                 [&](const lsp::NotebookCell& held) {
+                                   return held.document.toString() == cell;
+                                 }))
+          return false;
+      }
+      const auto notebook = store.getNotebookDocument(notebookUri);
+      if (notebook.has_value())
+        for (const lsp::NotebookCell& held : notebook->cells)
+          if (!store.findNotebookDocumentForCell(held.document.toString()))
+            return false;
+      return true;
+    } catch (const std::out_of_range&) {
+      return false;
+    }
+  };
+  for (int after = 0;; ++after) {
+    cursiv::DefaultNotebookDocuments store({});
+    refuse_allocation(after);
+    try {
+      store.didOpen(open);
+    } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+    }
+    const bool refused = refusal_made();
+    CHECK(whole(store));
+    if (!refused) break;
+  }
+  for (int after = 0;; ++after) {
+    cursiv::DefaultNotebookDocuments store({});
+    store.didOpen(open);
+    refuse_allocation(after);
+    try {
+      store.didChange(change);
+    } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+    }
+    const bool refused = refusal_made();
+    CHECK(whole(store));
+    if (!refused) break;
+  }
+}
+
+// An installed text is always built: an allocation failure anywhere in an
+// edit leaves the old text, or the new one sent to a build.
+void an_installed_edit_is_always_built() {
+  struct CountingBuilder final : cursiv::LspDocumentBuilder {
+    using LspDocumentBuilder::LspDocumentBuilder;
+    mutable int updates = 0;
+    // Whether the allocation failure was still to come when the last build
+    // began.
+    mutable bool refusalAhead = false;
+    void update(std::span<const std::string_view> changed,
+                std::span<const std::string_view> deleted,
+                const cursiv::CancellationToken& token) const override {
+      ++updates;
+      refusalAhead = refuseAfter >= 0;
+      LspDocumentBuilder::update(changed, deleted, token);
+    }
+  };
+  World world;
+  auto counting = std::make_unique<CountingBuilder>(world.shared);
+  const CountingBuilder& builder = *counting;
+  world.shared.documentBuilder = std::move(counting);
+  (void)world.handshake();
+  world.open("datatype A\n");
+  const std::shared_ptr<cursiv::Document> document =
+      world.shared.documents->getDocument(kUri);
+  int version = 2;
+  for (int after = 0;; ++after) {
+    // Each attempt starts from a built document, so the allocations before
+    // its failure are always the same.
+    world.change(version++, "datatype A" + std::to_string(after) + "\n");
+    const std::string edited = "datatype B" + std::to_string(after) + "\n";
+    const int before = builder.updates;
+    refuse_allocation(after);
+    try {
+      world.change(version++, edited);
+    } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+    }
+    const bool refused = refusal_made();
+    const bool built = builder.updates > before;
+    CHECK(document->textDocument().getText() != edited || built);
+    // Past this point, the failure falls inside the build alone.
+    if (!refused || (built && builder.refusalAhead)) break;
+  }
+}
+
+// A failed publication is not dropped: the next build publishes every
+// validated document, though it validates none again.
+void a_failed_publication_is_retried_by_the_next_build() {
+  constexpr std::string_view kA = "file:///w/a.ws";
+  constexpr std::string_view kB = "file:///w/b.ws";
+  const World world(true);
+  // The warning comes from validation alone: with no unresolved name, no
+  // later build relinks these documents.
+  world.ws->validationRegistry->registerAfterDocument(
+      [](const cursiv::Document& document, cursiv::ValidationAcceptor& accept,
+         const cursiv::CancellationToken&) {
+        if (document.textDocument().getText().starts_with("entity lower"))
+          accept.accept(cursiv::TextRange{7, 12},
+                        cursiv::DiagnosticSeverity::Warning, "Capitalize.");
+      },
+      &cursiv::fast);
+  world.disk->addFile(std::string(kA), "entity lower { }\n");
+  world.disk->addFile(std::string(kB), "entity lower { }\n");
+  world.client->failing = 1;
+  try {
+    (void)world.handshake(world.folderParams());
+  } catch (const std::runtime_error&) {  // NOLINT(bugprone-empty-catch)
+  }
+  CHECK(world.client->failing == 0);
+  support::open(world.server(), "untitled:other", "workspace", "datatype X\n");
+  for (const std::string_view uri : {kA, kB}) {
+    const auto* const published = lastSnapshotOf(*world.client, uri);
+    CHECK(published != nullptr && !published->diagnostics.empty());
+  }
+}
+
+// A document whose text does not change keeps its diagnostics on the client
+// while the workspace relinks it: no empty publication comes before the new
+// one.
+void a_relinked_document_is_not_cleared_before_its_verdict() {
+  const World world;
+  (void)world.handshake();
+  world.open(kBroken);
+  const auto* const shown = lastSnapshot(*world.client);
+  CHECK(shown != nullptr && shown->diagnostics.size() == 1);
+  const std::size_t before = world.client->published.size();
+  // A new declaration elsewhere relinks every document with an unresolved
+  // name; this one still names nothing.
+  support::open(world.server(), "file:///w/b.ws", "workspace",
+                "datatype Other\n");
+  std::vector<std::size_t> verdicts;
+  for (std::size_t i = before; i < world.client->published.size(); ++i)
+    if (world.client->published[i].uri.toString() == kUri)
+      verdicts.push_back(world.client->published[i].diagnostics.size());
+  CHECK(std::ranges::none_of(verdicts, [](std::size_t n) { return n == 0; }));
+  const auto* const kept = lastSnapshotOf(*world.client, kUri);
+  CHECK(kept != nullptr && kept->diagnostics.size() == 1);
+}
+
+// A validated document is published by the build that validated it, even
+// when the server fails to allocate its entry.
+void a_refused_record_is_still_published() {
+  // Makes the next allocation fail on the validating thread, just before the
+  // server records the document.
+  struct Arm final : cursiv::DocumentPhaseListener {
+    std::atomic<bool> armed{true};
+    void onDocumentPhase(cursiv::Document& document,
+                         cursiv::DocumentState reached,
+                         const cursiv::CancellationToken&) override {
+      if (reached == cursiv::DocumentState::Validated && document.uri == kUri &&
+          armed.exchange(false))
+        refuse_allocation(0);
+    }
+  } arm;
+  // Runs after the server's listener: records whether the failed allocation
+  // was the server's.
+  struct Seen final : cursiv::DocumentPhaseListener {
+    std::atomic<int> refused{-1};
+    void onDocumentPhase(cursiv::Document& document,
+                         cursiv::DocumentState reached,
+                         const cursiv::CancellationToken&) override {
+      if (reached == cursiv::DocumentState::Validated && document.uri == kUri &&
+          refused.load() < 0)
+        refused = refusal_made() ? 1 : 0;
+    }
+  } seen;
+  const World world;
+  world.shared.documentBuilder->addDocumentPhaseListener(arm);
+  (void)world.handshake();
+  world.shared.documentBuilder->addDocumentPhaseListener(seen);
+  try {
+    world.open(kBroken);
+  } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+  }
+  CHECK(seen.refused.load() == 1);
+  const auto* const shown = lastSnapshotOf(*world.client, kUri);
+  CHECK(shown != nullptr && shown->diagnostics.size() == 1);
+  world.shared.documentBuilder->removeDocumentPhaseListener(seen);
+  world.shared.documentBuilder->removeDocumentPhaseListener(arm);
+}
+
+// A document's removal counts as told only once the publication succeeds: a
+// failed one is sent again by the next build.
+void a_failed_removal_is_sent_again() {
+  constexpr std::string_view kGone = "untitled:gone";
+  const World world;
+  (void)world.handshake();
+  support::open(world.server(), kGone, "workspace", kBroken);
+  const auto* const shown = lastSnapshotOf(*world.client, kGone);
+  CHECK(shown != nullptr && !shown->diagnostics.empty());
+  world.client->failing = 1;
+  try {
+    world.close(kGone);
+  } catch (const std::runtime_error&) {  // NOLINT(bugprone-empty-catch)
+  }
+  CHECK(world.client->failing == 0);
+  support::open(world.server(), "untitled:other", "workspace", "datatype X\n");
+  const auto* const removed = lastSnapshotOf(*world.client, kGone);
+  CHECK(removed != nullptr && removed->diagnostics.empty() &&
+        !removed->version.has_value());
+}
+
+// The server subscribes to the builder fully or not at all: when the second
+// subscription fails, the first is removed.
+void a_refused_hook_leaves_no_listener() {
+  struct RefusingBuilder final : cursiv::LspDocumentBuilder {
+    using LspDocumentBuilder::LspDocumentBuilder;
+    int buildListeners = 0;
+    void addBuildPhaseListener(cursiv::BuildPhaseListener& listener) override {
+      LspDocumentBuilder::addBuildPhaseListener(listener);
+      ++buildListeners;
+    }
+    void removeBuildPhaseListener(
+        cursiv::BuildPhaseListener& listener) override {
+      LspDocumentBuilder::removeBuildPhaseListener(listener);
+      --buildListeners;
+    }
+    void addDocumentPhaseListener(cursiv::DocumentPhaseListener&) override {
+      throw std::bad_alloc();
+    }
+  };
+  World world;
+  auto refusing = std::make_unique<RefusingBuilder>(world.shared);
+  const RefusingBuilder& builder = *refusing;
+  world.shared.documentBuilder = std::move(refusing);
+  CHECK(support::throws<std::bad_alloc>(
+      [&] { (void)world.server().initialize({}); }));
+  CHECK(builder.buildListeners == 0);
+}
+
+// A broken text is diagnosed, and the edit that repairs it publishes an empty
+// list. Every validation publishes, clean or not.
 void an_edit_republishes_what_it_repaired() {
   const World world;
   (void)world.handshake();
@@ -1191,8 +1578,6 @@ void opening_uses_the_document_factorys_construction_hook() {
   CHECK(document != nullptr && document.get() == observer->created);
 }
 
-// The one door that is not a document's: the query crosses the index, so a
-// declaration of the world answers it.
 void a_query_finds_the_declarations_of_the_workspace() {
   const World world;
   (void)world.handshake();
@@ -1206,8 +1591,6 @@ void a_query_finds_the_declarations_of_the_workspace() {
   CHECK(!found.empty() && found.front().name == "Missing");
 }
 
-// The rung this route waits for is already behind the document the build just
-// carried, so the wait costs nothing and the answer arrives.
 void a_reference_request_does_not_wait_on_a_built_document() {
   const World world;
   (void)world.handshake();
@@ -1222,8 +1605,6 @@ void a_reference_request_does_not_wait_on_a_built_document() {
   CHECK(!locations.empty());
 }
 
-// A workspace request reads beside the validation of the edit before it: the
-// references of the edited text are answered while a check still runs.
 void references_do_not_wait_for_validation() {
   std::latch validating{1};
   std::latch release{1};
@@ -1241,7 +1622,8 @@ void references_do_not_wait_for_validation() {
       &cursiv::fast);
   (void)world.handshake();
   world.open(kRepaired);
-  // One line down: a row read from the text before the edit would show it.
+  // The edit moves every line down, so an answer read from the old text would
+  // show it.
   auto edit = std::async(std::launch::async, [&] {
     world.change(2, "\n" + std::string(kRepaired));
   });
@@ -1268,8 +1650,8 @@ void references_do_not_wait_for_validation() {
                        {1, 9}, {2, 15}}));
 }
 
-// A URI no language claims answers empty rather than waiting for a rung no
-// build will ever take it to.
+// A URI no language claims answers empty instead of waiting for a build that
+// will never come.
 void a_request_on_an_unknown_document_answers_empty() {
   const World world;
   (void)world.handshake();
@@ -1279,8 +1661,8 @@ void a_request_on_an_unknown_document_answers_empty() {
   CHECK(world.server().documentSymbol(params, cursiv::kNoCancel).empty());
 }
 
-// The names are read off the handler at the handshake, and the handler is what
-// answers: without one, neither the promise nor the answer exists.
+// The command names are read from the handler at the handshake; without a
+// handler, nothing is announced or answered.
 void a_command_is_promised_and_answered_only_with_its_handler() {
   World world;
   world.shared.executeCommandHandler = std::make_unique<EchoCommands>();
@@ -1310,8 +1692,8 @@ void a_command_is_promised_and_answered_only_with_its_handler() {
   CHECK(!bare.server().executeCommand(asked, cursiv::kNoCancel).has_value());
 }
 
-// A file the scan found and never opened publishes its verdict all the same:
-// the client's problems view has no other door.
+// A scanned file that was never opened still publishes its diagnostics: that
+// is how they reach the client's problems view.
 void a_scanned_document_publishes_without_a_tab() {
   // The last case interrupts indexing before the configuration arrives.
   struct CutScan final : cursiv::BuildPhaseListener {
@@ -1390,9 +1772,9 @@ void a_scanned_document_publishes_without_a_tab() {
   }
 }
 
-// Closing a tab hands the document back to its file: a repaired buffer over a
-// broken file leaves the file's own verdict on the client, and a buffer with
-// no file leaves the workspace with the empty, versionless snapshot.
+// Closing a tab returns the document to its file: a clean buffer over a broken
+// file leaves the file's diagnostics, and a buffer with no file leaves the
+// workspace with an empty, unversioned publication.
 void a_closed_tab_keeps_the_verdict_of_its_file() {
   const World world(true);
   world.disk->addFile(std::string(kUri), std::string(kBroken));
@@ -1419,8 +1801,8 @@ void a_closed_tab_keeps_the_verdict_of_its_file() {
   CHECK(bare.shared.documents->getDocument(kUri) == nullptr);
 }
 
-// A file created outside the editor reaches the workspace through the
-// watcher, and its verdict reaches the client.
+// A file created outside the editor joins the workspace through the watcher,
+// and its diagnostics reach the client.
 void a_watched_file_joins_the_workspace() {
   const World world(true);
   (void)world.handshake(world.folderParams());
@@ -1450,11 +1832,9 @@ std::vector<std::string> symbol_names(const World& world,
   return names;
 }
 
-// A watched event brings in only what the scan would: a file under a folder
-// the scan leaves out -- hidden, `node_modules`, `out`, at any depth below the
-// root -- stays out, and so does what a folder event on one would expand to.
-// The folders above a root are not asked: a workspace opened inside a hidden
-// folder still takes its files.
+// A watched event brings in only what the scan would: not a file under a
+// hidden, `node_modules` or `out` folder below the root. The folders above a
+// root are not asked.
 void a_watched_file_in_an_excluded_folder_stays_out() {
   const World world(true);
   (void)world.handshake(world.folderParams());
@@ -1525,9 +1905,9 @@ void a_closed_file_outside_the_folders_keeps_its_saved_content() {
   CHECK(symbol_names(world, "Buffered").empty());
 }
 
-// A buffer the file system cannot name -- `untitled:` under the local
-// provider -- still closes, and with nothing saved behind it, it leaves: its
-// symbols go, and a reference to it breaks.
+// A buffer the file system cannot name (`untitled:` with the local provider)
+// still closes, and with no saved file it leaves the workspace: its symbols
+// go, and references to it break.
 void a_closed_untitled_buffer_leaves_the_workspace() {
   World world;
   world.shared.fileSystemProvider =
@@ -1560,8 +1940,8 @@ void a_closed_untitled_buffer_leaves_the_workspace() {
   CHECK(broken != nullptr && !broken->diagnostics.empty());
 }
 
-// Answers a keystroke with the character typed, under the one trigger it
-// names: what reaches it is readable from the edit.
+// Answers a keystroke on its one trigger character with an edit holding the
+// typed character.
 struct KeystrokeFormatter final : cursiv::Formatter {
   std::string trigger;
   explicit KeystrokeFormatter(std::string ch) : trigger(std::move(ch)) {}
@@ -1643,10 +2023,8 @@ void every_notification_writes_durably() {
     CHECK(mode == cursiv::WorkspaceLock::WriteMode::Durable);
 }
 
-// An open on bytes the scan already read installs nothing, and still builds:
-// the build is what carries a document a cut build left behind. The client
-// hears the verdict after its open either way, clean or not, and a document
-// validated by a cut build is published by the next one.
+// Opening a file with the text the scan already read installs nothing but
+// still builds, so the client gets diagnostics after the open, clean or not.
 void an_open_on_known_bytes_still_builds() {
   const World world(true);
   world.disk->addFile(std::string(kUri), std::string(kRepaired));
@@ -1668,14 +2046,15 @@ void an_open_on_known_bytes_still_builds() {
   CHECK(opened != nullptr && opened->diagnostics.empty() &&
         opened->version == 1);
 
-  // Same bytes, a new version: nothing is rebuilt, the clean verdict is
-  // published under the version the client now knows.
+  // Same text, new version: nothing is rebuilt, and the clean result is
+  // published with the client's latest version.
   before = world.client->published.size();
   world.change(2, kRepaired);
   CHECK(world.client->published.size() == before + 1);
-  const lsp::PublishDiagnosticsParams* restamped = lastSnapshot(*world.client);
-  CHECK(restamped != nullptr && restamped->diagnostics.empty() &&
-        restamped->version == 2);
+  const lsp::PublishDiagnosticsParams* republished =
+      lastSnapshot(*world.client);
+  CHECK(republished != nullptr && republished->diagnostics.empty() &&
+        republished->version == 2);
 
   struct CutValidation final : cursiv::DocumentPhaseListener {
     cursiv::WorkspaceLock& lock;
@@ -1701,9 +2080,9 @@ void an_open_on_known_bytes_still_builds() {
         cursiv::DocumentState::Validated);
   CHECK(lastSnapshotOf(*cutWorld.client, kScanned) == nullptr);
   cutWorld.open(kRepaired);
-  const lsp::PublishDiagnosticsParams* owed =
+  const lsp::PublishDiagnosticsParams* cleanSnapshot =
       lastSnapshotOf(*cutWorld.client, kScanned);
-  CHECK(owed != nullptr && owed->diagnostics.empty());
+  CHECK(cleanSnapshot != nullptr && cleanSnapshot->diagnostics.empty());
 }
 
 // A command runs with no lock held, so one that writes to the workspace
@@ -1762,14 +2141,15 @@ void the_watcher_follows_the_clients_capability() {
 }  // namespace
 
 void run() {
-  the_installed_defaults_leave_no_slot_owed();
+  the_installed_defaults_leave_no_slot_missing();
   the_handshake_promises_only_what_is_installed();
   the_handshake_announces_the_colours_a_language_installs();
   the_colour_legends_merge_over_the_languages();
   the_completion_triggers_are_the_providers_own();
   the_completion_context_reaches_the_hooks();
+  each_declaration_of_a_name_reaches_the_item_hook();
   completion_edits_follow_insert_replace_support();
-  prose_follows_the_clients_preferred_format();
+  prose_is_markdown_when_the_client_lists_it();
   virtual_content_waits_for_the_workspace_scan(false);
   virtual_content_waits_for_the_workspace_scan(true);
   a_closed_virtual_document_stays();
@@ -1799,6 +2179,14 @@ void run() {
   the_watcher_follows_the_clients_capability();
   the_save_notifications_reach_the_handler();
   a_notebook_syncs_its_cells_as_documents();
+  a_failing_notebook_still_moves_its_cells();
+  a_refused_allocation_leaves_the_notebook_index_whole();
+  an_installed_edit_is_always_built();
+  a_failed_publication_is_retried_by_the_next_build();
+  a_failed_removal_is_sent_again();
+  a_relinked_document_is_not_cleared_before_its_verdict();
+  a_refused_record_is_still_published();
+  a_refused_hook_leaves_no_listener();
 }
 
 }  // namespace language_server
@@ -1879,7 +2267,7 @@ struct Server final : cursiv::DefaultLanguageServer {
     if (writeOnOpen) {
       shared.workspaceLock->write(
           [&](const cursiv::CancellationToken& token) {
-            shared.workspaceLock->settle();
+            shared.workspaceLock->endMutation();
             entered.count_down();
             writeStarted.set_value();
             release.wait();
@@ -1891,9 +2279,16 @@ struct Server final : cursiv::DefaultLanguageServer {
     entered.count_down();
     release.wait();
   }
+  // When set, the outline runs it before answering.
+  std::function<void()> holdSymbols;
+  mutable std::latch symbolHeld{1};
   std::vector<lsp::DocumentSymbol> documentSymbol(
       const lsp::DocumentSymbolParams&,
       const cursiv::CancellationToken&) const override {
+    if (holdSymbols) {
+      symbolHeld.count_down();
+      holdSymbols();
+    }
     ++symbols;
     return outline();
   }
@@ -2016,8 +2411,8 @@ struct Session {
   }
 };
 
-// What a document holds need not be UTF-8, and a message must be: the text a
-// server quotes goes out repaired, and the header counts what goes out.
+// A document's text need not be UTF-8, but a message must be: quoted text is
+// sent with invalid bytes replaced, and the header counts the bytes sent.
 void a_message_on_the_wire_is_well_formed() {
   Session s([](Server& server) {
     server.onRequest("x/echo", [](const lsp::LSPAny& value,
@@ -2038,11 +2433,11 @@ void a_message_on_the_wire_is_well_formed() {
   }
 }
 
-// Methods the protocol does not define reach the language as the standard ones
-// do: refused or dropped outside the session, a session whose `initialize`
-// failed included, and given the one value the client sent.
+// Methods the protocol does not define reach the language like standard ones:
+// refused or dropped outside the session, including after a failed
+// `initialize`, and given the value the client sent.
 void custom_methods_reach_the_language() {
-  // A notification that throws is told to the sink; the session goes on.
+  // A throwing notification is reported to the sink; the session goes on.
   struct FailedNotes final : cursiv::ObservabilitySink {
     std::mutex m;
     std::vector<std::string> said;
@@ -2057,7 +2452,7 @@ void custom_methods_reach_the_language() {
     }
   };
   FailedNotes* failed = nullptr;
-  std::promise<std::string> heard;
+  std::promise<std::string> received;
   Session s([&](Server& server) {
     auto sink = std::make_unique<FailedNotes>();
     failed = sink.get();
@@ -2068,7 +2463,7 @@ void custom_methods_reach_the_language() {
       return value;
     });
     server.onNotification("x/note", [&](const lsp::LSPAny& value) {
-      heard.set_value(lsp::json::stringify(value));
+      received.set_value(lsp::json::stringify(value));
     });
     server.onNotification("x/fail", [](const lsp::LSPAny&) {
       throw std::runtime_error("note failed");
@@ -2111,7 +2506,7 @@ void custom_methods_reach_the_language() {
 
   s.notify("x/fail", "[0]");
   s.notify("x/note", R"(["b"])");
-  CHECK(heard.get_future().get() == R"("b")");
+  CHECK(received.get_future().get() == R"("b")");
   {
     const std::scoped_lock lock(failed->m);
     CHECK(failed->said == std::vector<std::string>{"x/fail threw: note failed"});
@@ -2148,10 +2543,122 @@ void custom_methods_reach_the_language() {
     sender.writeData(std::string("yes"));
     sender.submit();
   }
-  // The reply is read on the session's loop, which the client's next message
-  // keeps turning.
+  // The reply is read on the session's loop, which runs on the client's next
+  // message.
   s.notify("x/idle");
   CHECK(replied.get_future().get() == R"("yes")");
+
+  // A throwing reply handler is reported to the sink, as a notification is.
+  s.shared.languageClient->sendRequest(
+      "x/ask", lsp::json::Object{},
+      [](lsp::LSPAny) { throw std::runtime_error("reply failed"); });
+  const auto failing = next().get();
+  CHECK(failing.id.has_value());
+  if (!failing.id.has_value()) return;
+  {
+    auto sender = s.client.response(*failing.id);
+    sender.writeData(std::string("no"));
+    sender.submit();
+  }
+  // This request is read after the reply, whose handler has run by then.
+  s.request(9, "x/echo", "[1]");
+  CHECK(read() == "1");
+  {
+    const std::scoped_lock lock(failed->m);
+    CHECK(std::ranges::find(failed->said,
+                            "the client's reply threw: reply failed") !=
+          failed->said.end());
+  }
+}
+
+// A message the language sends on its own waits for the session, like the
+// protocol's own: it is dropped before `initialize` is answered and after
+// `shutdown`.
+void custom_messages_wait_for_the_session() {
+  Session s;
+  // How many messages come before the next response.
+  const auto messages_before_a_response = [&] {
+    for (int messages = 0;; ++messages) {
+      auto message = s.client.readMessage();
+      const auto* const one = std::get_if<lsp::jsonrpc::Message>(&message);
+      if (one != nullptr &&
+          std::holds_alternative<lsp::jsonrpc::Response>(*one))
+        return messages;
+    }
+  };
+  // Refused, but read: the client is installed by then.
+  s.request(2, "x/echo");
+  CHECK(messages_before_a_response() == 0);
+  s.shared.languageClient->sendNotification("x/early");
+  s.shared.languageClient->sendRequest("x/early", lsp::json::Object{}, {});
+  s.request(1, "initialize",
+            R"({"processId":null,"rootUri":null,"capabilities":{}})");
+  CHECK(messages_before_a_response() == 0);
+  s.request(3, "shutdown");
+  CHECK(messages_before_a_response() == 0);
+  s.shared.languageClient->sendNotification("x/late");
+  s.request(4, "x/echo");
+  CHECK(messages_before_a_response() == 0);
+  s.notify("exit");
+  CHECK(s.running.get() == 0);
+}
+
+// A handler's failure of any kind is answered as an internal error, and the
+// session goes on.
+void a_failure_of_any_kind_is_answered() {
+  Session s([](Server& server) {
+    server.onRequest("x/odd",
+                     [](const lsp::LSPAny&,
+                        const cursiv::CancellationToken&) -> lsp::LSPAny {
+                       throw 42;  // NOLINT(hicpp-exception-baseclass)
+                     });
+  });
+  s.initialize();
+  s.request(2, "x/odd");
+  const auto reply = s.answer().get();
+  CHECK(reply.error.has_value() && reply.error->code == -32603);
+  s.request(3, "shutdown");
+  CHECK(!s.answer().get().error.has_value());
+  s.notify("exit");
+  CHECK(s.running.get() == 0);
+}
+
+// Answer shapes follow the accepted `initialize`: a failed attempt that asked
+// for a symbol tree does not affect a retry that did not.
+void a_retried_initialize_keeps_only_its_own_shapes() {
+  Session s([](Server& server) { server.refuseFirstInitialize = true; });
+  s.request(
+      1, "initialize",
+      R"({"processId":null,"rootUri":null,"capabilities":{"textDocument":{"documentSymbol":{"hierarchicalDocumentSymbolSupport":true}}}})");
+  CHECK(s.answer().get().error.has_value());
+  s.initialize();
+  s.request(2, "textDocument/documentSymbol",
+            R"({"textDocument":{"uri":"file:///source.ws"}})");
+  const auto outline = s.answer().get();
+  CHECK(outline.result.has_value() && outline.result->isArray() &&
+        outline.result->array().size() == 4);
+  s.request(3, "shutdown");
+  CHECK(!s.answer().get().error.has_value());
+  s.notify("exit");
+  CHECK(s.running.get() == 0);
+}
+
+void an_answer_computing_as_the_stream_dies_reads_a_live_session() {
+  Session s;
+  // Answered once the session is coming down: its writer stopped, the
+  // endpoint's threads not joined yet.
+  s.server->holdSymbols = [lock = s.lock] {
+    lock->stopped.wait();
+    std::this_thread::sleep_for(50ms);
+  };
+  s.initialize(
+      R"({"textDocument":{"documentSymbol":{"hierarchicalDocumentSymbolSupport":true}}})");
+  s.request(2, "textDocument/documentSymbol",
+            R"({"textDocument":{"uri":"file:///source.ws"}})");
+  s.server->symbolHeld.wait();
+  s.requests.close();
+  CHECK(s.running.get() == 1);
+  CHECK(s.server->symbols == 1);
 }
 
 void shutdown_obeys_the_handshake() {
@@ -2197,10 +2704,9 @@ void shutdown_obeys_the_handshake() {
   }
 }
 
-// The outline and the code actions take the shapes the client declares it
-// reads: the tree and the action literals when it says so. Otherwise the flat
-// symbol list, each symbol naming its parent, and bare commands, where an
-// action with an edit or marked disabled has no place.
+// The outline and code actions take the shapes the client reads: the symbol
+// tree and action literals, or the flat list with parent names and bare
+// commands.
 void answers_take_the_shapes_the_client_reads() {
   const std::string_view capabilities[] = {
       "{}",
@@ -2268,7 +2774,8 @@ void answers_take_the_shapes_the_client_reads() {
       }
     }
 
-    // Nothing a bare command can carry: the null of "nothing to offer".
+    // Line 1 offers only the quick fix with an edit, which a bare command
+    // cannot carry: such a client gets null.
     s.request(
         4, "textDocument/codeAction",
         R"({"textDocument":{"uri":"file:///source.ws"},"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":0}},"context":{"diagnostics":[]}})");
@@ -2314,8 +2821,8 @@ class WorkersSetting {
   std::optional<std::string> _host;
 };
 
-// With no worker thread too: the read loop still reads the cancellation of a
-// request that waits for an earlier notification.
+// With no worker thread too, the read loop still reads the cancellation of a
+// request that waits behind an earlier notification.
 void cancellation_does_not_wait_for_an_earlier_notification() {
   for (const char* workers : {"1", "0"}) {
     const WorkersSetting setting(workers);
@@ -2328,8 +2835,8 @@ void cancellation_does_not_wait_for_an_earlier_notification() {
     auto pending = s.answer();
     const bool cancelled = pending.wait_for(2s) == std::future_status::ready;
     CHECK(cancelled);
-    // Always release on failure, so the old implementation reports rather
-    // than hanging the test process.
+    // Release even on failure, so a broken server reports instead of hanging
+    // the test.
     s.server->release.count_down();
     const auto reply = pending.get();
     CHECK(reply.error.has_value() && reply.error->code == -32800);
@@ -2493,7 +3000,8 @@ void a_cut_edit_releases_the_requests_behind_it() {
       "textDocument/didChange",
       R"({"textDocument":{"uri":"untitled:one","version":3},"contentChanges":[{"text":"z"}]})");
   // Each edit cancels the write in flight as it is queued: the second one
-  // cuts the first, which stops at its settle, before any build phase.
+  // cancels the first, which stops at its `endMutation`, before any build
+  // phase.
   s.lock->awaitCancels(2);
   held.releaseFirst.count_down();
   held.second.wait();
@@ -2505,10 +3013,109 @@ void a_cut_edit_releases_the_requests_behind_it() {
   s.notify("exit");
   CHECK(s.running.get() == 1);
 }
+// Requests are answered by half as many threads as the installed scheduler
+// has build workers, rounded up, and by one at least.
+void the_answers_follow_the_installed_scheduler() {
+  for (const auto& [workers, answering] :
+       {std::pair<std::size_t, int>{0, 1}, {3, 2}}) {
+    std::atomic<int> entered{0};
+    std::latch release{1};
+    Session s([&, workers = workers](Server& server) {
+      server.shared.taskScheduler =
+          std::make_unique<cursiv::TaskScheduler>(workers);
+      server.onRequest("x/hold", [&](const lsp::LSPAny& value,
+                                     const cursiv::CancellationToken&) {
+        entered.fetch_add(1);
+        entered.notify_all();
+        release.wait();
+        return value;
+      });
+    });
+    s.initialize();
+    for (int id = 2; id != 3 + answering; ++id) s.request(id, "x/hold", "[0]");
+    for (int seen = entered.load(); seen < answering; seen = entered.load())
+      entered.wait(seen);
+    // Long enough for a thread beyond the limit to take the last one.
+    std::this_thread::sleep_for(100ms);
+    CHECK(entered.load() == answering);
+    release.count_down();
+    for (int i = 0; i != answering + 1; ++i)
+      CHECK(!s.answer().get().error.has_value());
+    s.request(20, "shutdown");
+    CHECK(!s.answer().get().error.has_value());
+    s.notify("exit");
+    CHECK(s.running.get() == 0);
+  }
+}
+
+// Edits queued behind a build leave their builds to the last of them, as a
+// newer write supersedes an older one: each text is installed, and one build
+// follows them all.
+void queued_edits_leave_their_builds_to_the_last() {
+  struct Counted final : cursiv::DocumentUpdateListener,
+                         cursiv::BuildPhaseListener {
+    std::latch held{1};
+    std::latch release{1};
+    std::atomic<int> updates{0};
+    std::atomic<int> validated{0};
+    void onUpdate(std::span<const std::string_view>,
+                  std::span<const std::string_view>) override {
+      if (updates++ != 0) return;
+      held.count_down();
+      release.wait();
+    }
+    void onBuildPhase(cursiv::DocumentState reached,
+                      std::span<cursiv::Document* const>,
+                      const cursiv::CancellationToken&) override {
+      if (reached == cursiv::DocumentState::Validated) ++validated;
+    }
+  } counted;
+  Session s([](Server& server) {
+    (void)support::add_workspace<cursiv::LspServices>(server.shared);
+  });
+  s.initialize();
+  // Scanned: an edit queued from here cancels the write in flight.
+  s.shared.workspaceManager->initializeWorkspace({});
+  s.shared.workspaceLock->write([&](const cursiv::CancellationToken&) {
+    s.shared.documents->addDocument(s.shared.documentFactory->create(
+        cursiv::TextDocument::create("untitled:one", "workspace", 1, "x")));
+  });
+  s.shared.documentBuilder->addDocumentUpdateListener(counted);
+  s.shared.documentBuilder->addBuildPhaseListener(counted);
+  const auto edit = [&](int version) {
+    s.notify("textDocument/didChange",
+             R"({"textDocument":{"uri":"untitled:one","version":)" +
+                 std::to_string(version) + R"(},"contentChanges":[{"text":"e)" +
+                 std::to_string(version) + R"("}]})");
+  };
+  edit(2);
+  counted.held.wait();
+  for (int version = 3; version != 8; ++version) edit(version);
+  // Every edit queued, each cancelling the write in flight as it came.
+  s.lock->awaitCancels(6);
+  counted.release.count_down();
+  // Drained: every edit and the last build are over; the shutdown builds once.
+  s.request(2, "shutdown");
+  CHECK(!s.answer().get().error.has_value());
+  CHECK(counted.validated == 2);
+  const auto document = s.shared.documents->getDocument("untitled:one");
+  CHECK(document != nullptr && document->textDocument().getText() == "e7");
+  s.notify("exit");
+  CHECK(s.running.get() == 0);
+  s.shared.documentBuilder->removeBuildPhaseListener(counted);
+  s.shared.documentBuilder->removeDocumentUpdateListener(counted);
+}
+
 }  // namespace
 
 void run() {
   custom_methods_reach_the_language();
+  custom_messages_wait_for_the_session();
+  queued_edits_leave_their_builds_to_the_last();
+  the_answers_follow_the_installed_scheduler();
+  a_failure_of_any_kind_is_answered();
+  a_retried_initialize_keeps_only_its_own_shapes();
+  an_answer_computing_as_the_stream_dies_reads_a_live_session();
   a_message_on_the_wire_is_well_formed();
   shutdown_obeys_the_handshake();
   answers_take_the_shapes_the_client_reads();
@@ -2592,9 +3199,6 @@ void run() {
 
 }  // namespace language_server_main
 
-// The command table: names announced in registration order, the last
-// registration of a name winning in its first place, an unknown name
-// answering nothing.
 namespace execute_command_handler {
 
 namespace {
@@ -2642,15 +3246,14 @@ void run() {
 
 }  // namespace execute_command_handler
 
-// The two hot doors -- colouring and completion -- asked of two service
-// containers built the same way over the nested-document fixture. What is
-// pinned is that neither answer depends on the container it was asked of.
+// Semantic tokens and completion on the DocG language: two worlds built the
+// same way give the same answers.
 namespace lsp_services {
 
 namespace {
 
-// One world per engine, everything else identical: the providers, the document
-// factory and the builder are the shipped ones, but for the keyword filter.
+// The DocG language with the default services and the grammar's semantic
+// tokens.
 struct World : support::World<cursiv::SharedLspServices> {
   cursiv::LspServices* doc = &support::add_language<cursiv::LspServices>(
       shared, {"doc", {".doc"}, {}}, fdoc::generated::DocG::create_parser(),
@@ -2661,11 +3264,11 @@ struct World : support::World<cursiv::SharedLspServices> {
                 language);
       });
 
-  mutable unsigned minted = 0;
+  mutable unsigned nextUri = 0;
 
   cursiv::Document* built(std::string text) const {
     return support::built(shared,
-                          "file:///w/a" + std::to_string(minted++) + ".doc",
+                          "file:///w/a" + std::to_string(nextUri++) + ".doc",
                           std::move(text));
   }
 };
@@ -2692,7 +3295,6 @@ const std::string kDocs[] = {
   return params;
 }
 
-// The colours are the same colours, byte for byte on the wire.
 void the_colours_are_the_same_colours() {
   const World one, two;
   for (const std::string& text : kDocs) {
@@ -2711,8 +3313,7 @@ void the_colours_are_the_same_colours() {
   }
 }
 
-// What remains pinned is determinism: two worlds built the same way answer
-// every caret identically.
+// Two worlds built the same way answer every caret identically.
 void the_two_answers_never_cross() {
   const World one, two;
   std::size_t asked = 0;
@@ -2753,16 +3354,14 @@ void the_state_names_exactly_what_may_be_written() {
   const std::vector<std::string> closed =
       labels(world.doc->completionProvider->getCompletion(*t, at(*t, 16),
                                                           cursiv::kNoCancel));
-  // The object closed at this caret, so what stands open is the array: the
-  // closer of a construct already closed is not written here.
+  // The object is closed at this caret and the array is open: `}` is not
+  // offered.
   CHECK(std::find(closed.begin(), closed.end(), "}") == closed.end());
   CHECK(std::find(closed.begin(), closed.end(), "]") != closed.end());
 }
 
-// A tree the tables did not write states no state. `CstBuilder` is public, so
-// a tape reaches the table parser's caret door; every leaf on one reads state
-// zero (the start state), and answering from it would offer the entry rule's
-// openers at every caret. The door declines, falling back to the walk instead.
+// A CST built by hand records no parser state, so `nextFeaturesAt` offers
+// nothing rather than guessing from the start state.
 void a_tape_is_declined_and_not_answered_from_the_start_state() {
   const std::string text = R"({"a":1})";
   cursiv::Cst tape(text);
@@ -2781,11 +3380,10 @@ void a_tape_is_declined_and_not_answered_from_the_start_state() {
   std::vector<cursiv::NextFeature> out;
   const std::unique_ptr<cursiv::Parser> engine =
       fdoc::generated::DocG::create_parser();
-  // Answers nothing rather than answering wrong: the offered set stays empty.
   engine->nextFeaturesAt(tape, 5, 5, out);
   CHECK(out.empty());
 
-  // ...and the same door answers a tree the engine did write.
+  // A CST the engine wrote does get an answer.
   namespace g = fdoc::generated::DocG;
   cursiv::Cst stream;
   cursiv::engine::lr_parser<g::kTable>.parse(text, stream, nullptr, &g::kDrive);
@@ -2796,22 +3394,21 @@ void a_tape_is_declined_and_not_answered_from_the_start_state() {
   CHECK(!out.empty());
 }
 
-// The other half of the same hole: a tape that DOES claim to be an engine's,
-// carrying a state no table has a row for. Both stamps the door reads are
-// subscripts, so a wild one on either must stop the answer, not index past
-// the rows.
+// A CST whose leaves record a state past the end of the table:
+// `nextFeaturesAt` must offer nothing, not read past the table.
 void a_stamp_past_the_table_is_declined() {
   const std::string text = R"({"a":1})";
   namespace g = fdoc::generated::DocG;
   // The first state past the DocG table's rows.
   const std::uint32_t wild =
       g::kTable.stamp.make(cursiv::kNoElement, g::kTable.nstates);
-  // State 1 is one the DocG table names; a build that renumbers re-pins it.
+  // State 1 is a valid DocG state.
   const std::uint32_t named = g::kTable.stamp.make(cursiv::kNoElement, 1);
   const std::unique_ptr<cursiv::Parser> engine =
       fdoc::generated::DocG::create_parser();
 
-  // `at` stamps the leaf the caret sits behind, `before` the one before it.
+  // `at` is the state recorded on the caret's leaf and after, `before` the
+  // state of the leaves before it.
   const auto answers = [&](std::uint32_t at, std::uint32_t before) {
     cursiv::Cst tape(text);
     {
@@ -2831,16 +3428,16 @@ void a_stamp_past_the_table_is_declined() {
     return out.size();
   };
 
-  // A state the table names answers; the same tape with either stamp past the
-  // rows answers nothing at all.
+  // A valid state gets an answer; a state past the table in either place gets
+  // none.
   CHECK(answers(named, named) > 0);
   CHECK(answers(wild, wild) == 0);
   CHECK(answers(wild, named) == 0);
   CHECK(answers(named, wild) == 0);
 }
 
-// This storey owes nothing: a language that installs no provider is complete.
-void a_language_with_no_provider_owes_no_slot() {
+// A language with no optional provider still has every required service.
+void a_language_with_no_provider_misses_no_slot() {
   cursiv::SharedLspServices shared;
   cursiv::install_default_shared_lsp_services(shared);
   cursiv::LspServices language(shared);
@@ -2876,7 +3473,7 @@ void a_grammar_without_references_answers_none() {
 }  // namespace
 
 void run() {
-  a_language_with_no_provider_owes_no_slot();
+  a_language_with_no_provider_misses_no_slot();
   a_grammar_without_references_answers_none();
   the_colours_are_the_same_colours();
   the_two_answers_never_cross();
@@ -2887,8 +3484,6 @@ void run() {
 
 }  // namespace lsp_services
 
-// Pins the one type frontier of the tree: cursiv::Position/Range crossing into
-// the protocol's types and back.
 namespace position {
 
 namespace {
@@ -2913,11 +3508,6 @@ void run() {
 
 }  // namespace position
 
-// Pins the configuration pull: subscribe-then-fetch (an edit racing the pull
-// is not lost), the immediate readiness when there is nothing to pull, the
-// clamp against a short answer, the silence of the pull against the
-// announcement of a change, and the typed view `validation_categories` hands
-// the build path.
 namespace configuration_provider {
 
 namespace {
@@ -2926,7 +3516,7 @@ struct World : support::CoreWorkspace {
   cursiv::ValidationRegistry* registry = ws->validationRegistry.get();
 };
 
-// Keeps what it is asked, answers when told to.
+// Records what it is asked; the test calls `answer` to reply.
 struct RecordingClient final : cursiv::LanguageClient {
   std::vector<std::string> calls;
   std::function<void(std::vector<lsp::LSPAny>)> answer;
@@ -2976,7 +3566,7 @@ lsp::InitializeParams supporting(
   return params;
 }
 
-// Subscribe first, fetch second; ready only once the answer lands; the
+// Subscribe first, fetch second; ready only once the answer arrives, and the
 // section is then readable.
 void the_pull_subscribes_before_it_fetches() {
   World world;
@@ -3022,7 +3612,7 @@ void the_registration_follows_its_own_capability() {
   }
 }
 
-// Nothing to pull is ready at once: unsupported client, and absent client.
+// A client that does not support `configuration`, and no client at all.
 void nothing_to_pull_is_ready_at_once() {
   World world;
   cursiv::DefaultConfigurationProvider unsupported(world.shared);
@@ -3038,7 +3628,6 @@ void nothing_to_pull_is_ready_at_once() {
   CHECK(sessionless.isReady());
 }
 
-// A short answer is clamped, never read past.
 void a_short_answer_is_clamped() {
   World world;
   cursiv::DefaultConfigurationProvider provider(world.shared);
@@ -3191,8 +3780,7 @@ void a_change_replaces_the_section_whole() {
   CHECK(!provider.getConfiguration("workspace", "v").has_value());
 }
 
-// Both pulled and pushed values reach the same listeners.
-void pulled_and_pushed_values_are_announced() {
+void pulled_and_pushed_values_reach_the_listeners() {
   World world;
   cursiv::DefaultConfigurationProvider provider(world.shared);
   CountingListener listener;
@@ -3213,11 +3801,82 @@ void pulled_and_pushed_values_are_announced() {
   change.settings = lsp::LSPAny(std::move(settings));
   provider.updateConfiguration(change);
   CHECK(listener.sections == (std::vector<std::string>{"workspace", "workspace"}));
-  // The same value pushed again changes nothing, and says nothing.
+  // Pushing the same value again notifies no one.
   provider.updateConfiguration(change);
   CHECK(listener.sections ==
         (std::vector<std::string>{"workspace", "workspace"}));
   provider.removeConfigurationListener(listener);
+}
+
+// A value a listener failed to receive is sent again, to every listener, when
+// it comes back, pushed or pulled. Once all have it, a repeat changes nothing.
+void a_value_a_listener_missed_is_received_again() {
+  struct Failing final : cursiv::ConfigurationSectionListener {
+    int failing = 1;
+    int received = 0;
+    void onConfigurationSectionUpdate(std::string_view,
+                                      const lsp::LSPAny&) override {
+      ++received;
+      if (failing > 0) {
+        --failing;
+        throw std::runtime_error("listener refused");
+      }
+    }
+  };
+  World world;
+  {
+    cursiv::DefaultConfigurationProvider provider(world.shared);
+    Failing failing;
+    CountingListener after;
+    provider.addConfigurationListener(failing);
+    provider.addConfigurationListener(after);
+    lsp::DidChangeConfigurationParams change;
+    lsp::json::Object settings;
+    settings["workspace"] = section_with("state", "changed");
+    change.settings = lsp::LSPAny(std::move(settings));
+    CHECK(support::throws<std::runtime_error>(
+        [&] { provider.updateConfiguration(change); }));
+    CHECK(failing.received == 1 && after.sections.size() == 1);
+    provider.updateConfiguration(change);
+    CHECK(failing.received == 2 && after.sections.size() == 2);
+    provider.updateConfiguration(change);
+    CHECK(failing.received == 2 && after.sections.size() == 2);
+    provider.removeConfigurationListener(after);
+    provider.removeConfigurationListener(failing);
+  }
+  {
+    cursiv::DefaultConfigurationProvider provider(world.shared);
+    Failing failing;
+    provider.addConfigurationListener(failing);
+    provider.initialize(supporting(true));
+    RecordingClient client;
+    provider.initialized(&client);
+    CHECK(support::throws<std::runtime_error>(
+        [&] { client.answer({section_with("state", "pulled")}); }));
+    lsp::DidChangeConfigurationParams pull;
+    pull.settings = lsp::LSPAny(nullptr);
+    provider.updateConfiguration(pull);
+    client.answer({section_with("state", "pulled")});
+    CHECK(failing.received == 2);
+    provider.updateConfiguration(pull);
+    client.answer({section_with("state", "pulled")});
+    CHECK(failing.received == 2);
+    provider.removeConfigurationListener(failing);
+  }
+}
+
+// A detach runs as a session ends, so it must not allocate.
+void a_detach_asks_for_no_memory() {
+  World world;
+  cursiv::DefaultConfigurationProvider provider(world.shared);
+  provider.initialize(supporting(true));
+  RecordingClient client;
+  provider.initialized(&client);
+  refuse_allocation(0);
+  const bool threw =
+      support::throws<std::bad_alloc>([&] { provider.initialized(nullptr); });
+  CHECK(!refusal_made() && !threw);
+  CHECK(provider.isReady());
 }
 
 // The typed view: both spellings, built-ins and registry names resolved by
@@ -3255,7 +3914,9 @@ void run() {
   readers_can_observe_configuration_updates();
   listeners_can_read_the_updated_configuration();
   a_change_replaces_the_section_whole();
-  pulled_and_pushed_values_are_announced();
+  pulled_and_pushed_values_reach_the_listeners();
+  a_value_a_listener_missed_is_received_again();
+  a_detach_asks_for_no_memory();
   validation_categories_reads_both_spellings();
 }
 

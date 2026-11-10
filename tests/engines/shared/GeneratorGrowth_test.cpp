@@ -1,35 +1,50 @@
-// What a generator's analyses cost as a grammar grows, and what they answer. The
-// grammars are laid at run time, as the descriptors a grammar's types become: a
-// thousand rules compile as fast as none. A cost is a work counter read at N and
-// 2N; each counts the operation that grows, where the analysis cannot go round it.
+// What a generator's analyses cost as a grammar grows, and what they answer.
+// The grammars are built at run time as descriptors; a cost is a work counter
+// read at N and 2N.
 
 #include <algorithm>
 #include <cstdint>
 #include <ctime>
 #include <deque>
+#include <functional>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#if defined(__unix__) || defined(__APPLE__)
+#include <pthread.h>
+#endif
+
 #include "cursiv/Check.hpp"
 #include "cursiv/grammar/GrammarImage.hpp"
 #include "cursiv/grammar/expr.hpp"
+#include "cursiv/ll/gen/LlFinalProgram.hpp"
 #include "cursiv/ll/gen/LlLowered.hpp"
 #include "cursiv/ll/gen/ll_build.hpp"
+#include "cursiv/ll/gen/ll_emit_parser.hpp"
+#include "cursiv/ll/gen/ll_emit_table.hpp"
+#include "cursiv/lr/gen/LrFinalTable.hpp"
 #include "cursiv/lr/gen/LrLowered.hpp"
 #include "cursiv/lr/gen/lr_build.hpp"
 #include "cursiv/lr/gen/lr_build_derived.hpp"
 #include "cursiv/lr/gen/lr_build_passes.hpp"
+#include "cursiv/lr/gen/lr_completion_sites.hpp"
+#include "cursiv/lr/gen/lr_emit_parser.hpp"
+#include "cursiv/lr/gen/lr_emit_table.hpp"
+#include "cursiv/lr/gen/lr_entry_rows.hpp"
 #include "cursiv/lr/gen/lr_term_run.hpp"
 #include "cursiv/shared/gen/AstRegistryBuilder.hpp"
 #include "cursiv/shared/gen/KeepFirst.hpp"
+#include "cursiv/shared/gen/LevelFault.hpp"
 #include "cursiv/shared/gen/LexModes.hpp"
 #include "cursiv/shared/gen/LexNfaPool.hpp"
 #include "cursiv/shared/gen/LexOvertakes.hpp"
 #include "cursiv/shared/gen/LowerDesc.hpp"
+#include "cursiv/shared/gen/gen_report.hpp"
 #include "cursiv/shared/gen/optional_shape.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
@@ -43,11 +58,12 @@ using cursiv::test::failures;
 
 struct RuntimeGrammar {
   std::deque<cursiv::detail::ImageDesc> nodes;
-  std::deque<std::vector<const cursiv::detail::ImageDesc*>> kids;
+  std::deque<std::vector<const cursiv::detail::ImageDesc*>> children;
   std::deque<std::string> texts;
   std::deque<cursiv::detail::ImageRuleDesc> rules;
   std::deque<cursiv::detail::ImageFaceDesc> faces;
   std::deque<cursiv::detail::ImageStageDesc> stages;
+  std::deque<std::vector<cursiv::detail::ImageLevelDesc>> levels;
   std::deque<AstRowDesc> rows;
   std::deque<AstTypeDesc> types;
   std::deque<AstFieldDesc> fields;
@@ -80,10 +96,10 @@ struct RuntimeGrammar {
   const cursiv::detail::ImageDesc* group(
       cursiv::detail::ImageKind k,
       std::vector<const cursiv::detail::ImageDesc*> v) {
-    const auto& at = kids.emplace_back(std::move(v));
+    const auto& at = children.emplace_back(std::move(v));
     return put({.kind = k,
                 .count = static_cast<std::uint32_t>(at.size()),
-                .kids = at.data()});
+                .children = at.data()});
   }
   const cursiv::detail::ImageDesc* seq(
       std::vector<const cursiv::detail::ImageDesc*> v) {
@@ -95,10 +111,10 @@ struct RuntimeGrammar {
   }
   const cursiv::detail::ImageDesc* repeat(std::uint64_t m, std::uint64_t n,
                                           const cursiv::detail::ImageDesc* k) {
-    const auto& at = kids.emplace_back(std::vector{k});
+    const auto& at = children.emplace_back(std::vector{k});
     return put({.kind = cursiv::detail::ImageKind::repeat,
                 .count = 1,
-                .kids = at.data(),
+                .children = at.data(),
                 .m = m,
                 .n = n});
   }
@@ -128,10 +144,10 @@ struct RuntimeGrammar {
     row.gen.feature = f.name;
     row.field = &f;
     rowList.push_back(&row);
-    const auto& at = kids.emplace_back(std::vector{k});
+    const auto& at = children.emplace_back(std::vector{k});
     return put({.kind = cursiv::detail::ImageKind::assign,
                 .count = 1,
-                .kids = at.data(),
+                .children = at.data(),
                 .row = &row});
   }
 
@@ -174,6 +190,18 @@ struct RuntimeGrammar {
   }
   cursiv::detail::ImageRuleDesc* data(std::string name) {
     return declare(std::move(name), cursiv::detail::ImageRuleKind::data);
+  }
+  // A precedence table of one operator per level, binary levels grouped left.
+  cursiv::detail::ImageRuleDesc* infix(
+      std::string name, std::vector<const cursiv::detail::ImageDesc*> ops) {
+    auto& at = levels.emplace_back();
+    for (const auto* op : ops) at.push_back({.op = op});
+    cursiv::detail::ImageRuleDesc* r =
+        declare(std::move(name), cursiv::detail::ImageRuleKind::infix);
+    auto* f = const_cast<cursiv::detail::ImageFaceDesc*>(r->written);
+    f->levels = at.data();
+    f->levelCount = static_cast<std::uint32_t>(at.size());
+    return r;
   }
   const AstRowDesc* closing() {
     AstRowDesc& row = rows.emplace_back();
@@ -344,7 +372,7 @@ RuntimeGrammar callers(unsigned count, bool nullable) {
 // Whether one keyword reads over another is asked of every pair a state offers
 // together, and only the pairs that stand on one text are walked, with those the
 // sweep's reads were paid by: their number follows the keywords, not their pairs.
-void only_terminals_that_meet_are_walked() {
+void only_terminals_that_overlap_are_walked() {
   const auto walks = [](auto&& work, unsigned count, bool nullable) {
     RuntimeGrammar g = callers(count, nullable);
     return work(g).overtakes;
@@ -355,7 +383,7 @@ void only_terminals_that_meet_are_walked() {
   CHECK(walks(lr, 400, false) <= 3 * walks(lr, 200, false));
 }
 
-// Terminals laid by hand, with what may follow each.
+// Terminals built by hand, with what may follow each.
 struct HandLex {
   struct Cfg {
     unsigned nterms = 1;
@@ -382,7 +410,7 @@ struct HandLex {
     nfa.s[static_cast<std::size_t>(head)].t1 = nfa.chars(set, head);
     return head;
   }
-  // A terminal whose graph `body` lays in front of where it ends.
+  // A terminal whose graph `body` builds in front of where it ends.
   template <class Body>
   unsigned terminal(Body&& body) {
     const unsigned t = g.nterms++;
@@ -529,9 +557,9 @@ void a_set_walks_its_members_in_order() {
   CHECK((seen == std::vector<unsigned>{0, 3, 63, 64}));
 }
 
-// A hand-written ladder of precedence levels: each level's FOLLOW reaches the
+// A hand-written chain of precedence levels: each level's FOLLOW reaches the
 // next, and a closing parenthesis comes back to the top.
-RuntimeGrammar ladder(unsigned levels) {
+RuntimeGrammar precedence_levels(unsigned levels) {
   RuntimeGrammar g;
   const cursiv::detail::ImageDesc* const name =
       g.call(g.terminal("Name", g.some(g.set("abcdefghijklmnopqrstuvwxyz"))));
@@ -550,11 +578,11 @@ RuntimeGrammar ladder(unsigned levels) {
   return g;
 }
 
-// Each edge of the lookaheads' relations is read once: the ladder's edges grow
+// Each edge of the lookaheads' relations is read once: the chain's edges grow
 // with its square, and the unions over them no faster.
 void lookaheads_read_each_edge_once() {
   const auto work = [](unsigned levels) {
-    RuntimeGrammar g = ladder(levels);
+    RuntimeGrammar g = precedence_levels(levels);
     return lr_work(g).lookaheads;
   };
   const std::uint64_t small = work(100);
@@ -610,10 +638,8 @@ void a_reduction_reads_what_its_transitions_answer() {
   CHECK(large <= 5 * small);
 }
 
-// Two levels of N operators read by a repair. The states that end the lower level
-// each hold all the operators of the upper one, and the states that end the upper
-// level each return to all of those: a reading walks what a list of states holds
-// and returns to once, not once per state.
+// Two levels of N operators read by a repair: a reading walks what a list of
+// states holds and returns to once, not once per state.
 void a_repair_walks_each_list_of_states_once() {
   const auto work = [](unsigned count) {
     RuntimeGrammar g;
@@ -648,10 +674,8 @@ std::vector<std::string_view> repair_words(const LrBuildTable& built) {
   return words;
 }
 
-// A rule that can end hands a repair's reading to where it was called: each of two
-// rules ends behind its own optional token, and both reach one list of returns,
-// then one rule. The token past them was read first, so each state's list parts
-// from the ids'.
+// A rule that can end hands a repair's reading to where it was called: two
+// rules end behind their own optional token and reach one list of returns.
 void a_repair_reads_on_where_a_rule_returns() {
   RuntimeGrammar g;
   const auto ending = [&](std::string name, std::string lead, std::string token) {
@@ -673,9 +697,9 @@ void a_repair_reads_on_where_a_rule_returns() {
          std::vector<std::string_view>{"z", "q", "y", "q"}));
 }
 
-// A rule called from two others, which two arms call: it returns to a list of two
-// states, each of which returns to a list of its own. All of them are read, in the
-// order the arms are written, whichever list was laid first.
+// A rule called from two others, which two arms call: it returns to a list of
+// two states, each of which returns to a list of its own. All of them are read,
+// in the order the arms are written, whichever list was built first.
 void a_repair_reads_every_state_of_a_list_in_order() {
   RuntimeGrammar g;
   auto* root = g.node("Root");
@@ -733,7 +757,7 @@ void a_gate_past_its_bound_is_refused() {
   }
 }
 
-// Rules that each call the next: what the last hands back climbs the chain.
+// Rules that each call the next: what the last hands back goes up the chain.
 RuntimeGrammar alias_chain(unsigned count) {
   RuntimeGrammar g;
   std::vector<cursiv::detail::ImageRuleDesc*> alias(count);
@@ -775,8 +799,8 @@ void states_with_one_tail_fuse() {
     return unsigned{lr_build_automaton(low).nstates};
   };
   CHECK(states(40) == states(20) + 20);
-  // A run of optional rules of one class: its rows land on one another's states
-  // in both directions, and read alike whichever of them is read first.
+  // A run of optional rules of one class: its rows go to one another's states
+  // in both directions, and read the same whichever of them is read first.
   RuntimeGrammar g;
   const AstRowDesc* const shared = g.closing();
   auto* root = g.node("Root", shared);
@@ -794,7 +818,7 @@ void states_with_one_tail_fuse() {
 
 // A long run of one token: its states tell themselves apart one by one from the
 // end, and each only has its one predecessor to read again.
-void a_state_is_read_again_only_when_it_lands_on_one_that_moved() {
+void a_state_is_read_again_only_when_it_leads_to_one_that_moved() {
   const auto work = [](unsigned count) {
     RuntimeGrammar g;
     auto* root = g.node("Root");
@@ -810,14 +834,10 @@ void a_state_is_read_again_only_when_it_lands_on_one_that_moved() {
   CHECK(large <= 3 * small);
 }
 
-// A table of gotos alone. `same` lands on itself and each step one step nearer
-// the first, so a step tells itself apart after the one before it. Each side lands
-// on the steps up to its own and on `same` past them: each step that moves is read
-// by all the sides of the class but one. That one moves, and not all those it
-// leaves: the class goes on with its largest part. One side laid twice folds with
-// its twin.
+// A table of gotos alone, whose classes split one side at a time: the class
+// goes on with its largest part, and one side built twice merges with its copy.
 void a_class_goes_on_with_its_largest_part() {
-  const auto laid = [](unsigned count) {
+  const auto grown = [](unsigned count) {
     const auto n = static_cast<std::uint16_t>(2 + 2 * count + 1);
     constexpr std::uint16_t kStart = 0, kSame = 1, kOn = 0, kFirst = 1, kAt = 2;
     const auto side = [](std::uint16_t j) {
@@ -861,26 +881,27 @@ void a_class_goes_on_with_its_largest_part() {
     CHECK(A.nstates == n - 1);
     return work.moves;
   };
-  const std::uint64_t small = laid(100);
-  const std::uint64_t large = laid(200);
+  const std::uint64_t small = grown(100);
+  const std::uint64_t large = grown(200);
   CHECK(small != 0);
   CHECK(large <= 3 * small);
 }
 
-// What the first state owes: the terminals that start the shortest readings.
+// What the first state needs: the terminals that start the shortest readings.
 template <class Build>
-std::size_t owed_first(RuntimeGrammar& g, Build&& check) {
+std::size_t closers_of_the_first_state(RuntimeGrammar& g, Build&& check) {
   const auto low = g.lowered<LrLowered>(lr_lower);
   const LrBuildTable built = lr_build_automaton(low);
   check(built);
-  std::size_t owed = 0;
-  for ([[maybe_unused]] const unsigned t : built.closeRow[0].members()) ++owed;
-  return owed;
+  std::size_t closers = 0;
+  for ([[maybe_unused]] const unsigned t : built.closeRow[0].members())
+    ++closers;
+  return closers;
 }
 
 // A rule's first terminals reach the rules that read it, whichever comes first:
 // a chain of rules numbered either way.
-void what_a_rule_owes_climbs_its_readers() {
+void a_rules_first_terminals_reach_its_readers() {
   for (const bool backward : {false, true}) {
     constexpr unsigned kCount = 12;
     RuntimeGrammar g;
@@ -895,16 +916,15 @@ void what_a_rule_owes_climbs_its_readers() {
     auto* root = g.node("Root");
     g.body(root, g.seq({g.call(at[0]), g.word("end")}));
     g.entry = root;
-    const std::size_t owed = owed_first(g, [](const LrBuildTable& built) {
-      CHECK(built.closeMax == 2);
-    });
-    CHECK(owed == 2);
+    const std::size_t closers = closers_of_the_first_state(
+        g, [](const LrBuildTable& built) { CHECK(built.closeMax == 2); });
+    CHECK(closers == 2);
   }
 }
 
-// A rule of two readings of one cost settles once, and what reads it and another
-// rule goes on counting the other.
-void a_rule_settles_at_its_least_cost() {
+// A rule of two readings of one cost is priced once, and what reads it and
+// another rule goes on counting the other.
+void a_rule_is_priced_at_its_least_cost() {
   RuntimeGrammar g;
   auto* two = g.data("Two");
   g.body(two, g.alt({g.word("x"), g.word("y")}));
@@ -915,10 +935,9 @@ void a_rule_settles_at_its_least_cost() {
   auto* root = g.node("Root");
   g.body(root, g.seq({g.call(both), g.word("end")}));
   g.entry = root;
-  const std::size_t owed = owed_first(g, [](const LrBuildTable& built) {
-    CHECK(built.closeMax == 3);
-  });
-  CHECK(owed == 2);
+  const std::size_t closers = closers_of_the_first_state(
+      g, [](const LrBuildTable& built) { CHECK(built.closeMax == 3); });
+  CHECK(closers == 2);
 }
 
 // Each position of a production reads all its rule hands back, however much of
@@ -950,11 +969,9 @@ void each_position_reads_what_its_rule_hands_back() {
   CHECK(full == 2);
 }
 
-// A state reached from two others, whose reductions a longer token parts: `ab`
-// then `c` follows one rule, `abc` the other. One set read twice is one reading,
-// which flags nothing. A rule that answers both sets is read beside the shorter
-// one, and the longer reads over it, whether it reads them next or, `wrapped`, the
-// callers it ends do.
+// A state reached from two others, whose reductions a longer token splits: `ab`
+// then `c` follows one rule, `abc` the other. With `wrapped`, the callers a
+// rule ends read the sets.
 bool flags_a_mode(bool answersBoth, bool wrapped = false) {
   RuntimeGrammar g;
   auto* pre = g.data("Pre");
@@ -1049,9 +1066,9 @@ LlBuildWork ll_growing_firsts(unsigned count, bool backward) {
   return ll_work(g);
 }
 
-// A rule reads what it calls once that has settled, however the rules are
+// A rule reads what it calls once that is final, however the rules are
 // numbered: its visits follow its size, not the depth of the chain below it.
-void a_fact_reaches_its_readers_settled() {
+void a_fact_reaches_its_readers_final() {
   for (const bool backward : {false, true}) {
     const std::uint64_t small = ll_growing_firsts(100, backward).first;
     const std::uint64_t large = ll_growing_firsts(200, backward).first;
@@ -1060,13 +1077,152 @@ void a_fact_reaches_its_readers_settled() {
   }
 }
 
+// Runs `body` on a thread with a 256 KB stack: true where it ran to its end.
+bool on_small_stack(void (*body)()) {
+#if defined(__unix__) || defined(__APPLE__)
+  struct Run {
+    void (*body)();
+    bool ran = false;
+  } run{body};
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setstacksize(&attr, std::size_t{1} << 18);
+  pthread_t thread;
+  CHECK(pthread_create(
+            &thread, &attr,
+            [](void* at) -> void* {
+              auto* r = static_cast<Run*>(at);
+              r->body();
+              r->ran = true;
+              return nullptr;
+            },
+            &run) == 0);
+  pthread_join(thread, nullptr);
+  pthread_attr_destroy(&attr);
+  return run.ran;
+#else
+  body();
+  return true;
+#endif
+}
+
+// A terminal of many keywords: the walk that spells them keeps its pending
+// branches off the native stack.
+void many_keywords_spell_on_a_small_stack() {
+  CHECK(on_small_stack([] {
+    RuntimeGrammar g;
+    std::vector<const cursiv::detail::ImageDesc*> words;
+    for (unsigned i = 0; i < 3000; ++i)
+      words.push_back(g.word(spelled("", i + 26)));
+    auto* root = g.node("Root");
+    g.body(root, g.member("v", g.call(g.terminal("KW", g.alt(words)))));
+    g.entry = root;
+    (void)ll_work(g);
+  }));
+}
+
+// An expression nested thousands deep: no walk of either generator, from the
+// image to the emitted parser and the warnings, descends the native stack.
+void deep_nesting_generates_on_a_small_stack() {
+  CHECK(on_small_stack([] {
+    for (const bool lr : {false, true}) {
+      RuntimeGrammar g;
+      const cursiv::detail::ImageDesc* e =
+          g.alt({g.word("z"), g.put({.kind = cursiv::detail::ImageKind::eof})});
+      for (unsigned i = 0; i < 2000; ++i) {
+        const auto* inner = i % 4 == 0   ? e
+                            : i % 4 == 1 ? g.opt(e)
+                            : i % 4 == 2
+                                ? g.many(e)
+                                : g.group(cursiv::detail::ImageKind::skip, {e});
+        e = g.alt({g.word(spelled("k", i)),
+                   g.seq({g.token("("), inner, g.token(")")})});
+      }
+      auto* root = g.node("Root");
+      g.body(root, g.member("v", e));
+      g.entry = root;
+      g.lowered<int>([&](cursiv::detail::GrammarImage& image,
+                         const LowerDesc& desc) {
+        CHECK(!refuse_self_bounded_arms("Deep", image));
+        if (lr) {
+          auto graph = std::make_unique<LrBuildTable>(
+              lr_build_automaton(lr_lower(image, desc)));
+          std::vector<const AstTypeDesc*> types;
+          for (const AstTypeDesc& t : g.types) types.push_back(&t);
+          const auto rows =
+              build_ast_registry(g.rowList, types, {}, "Deep").rows;
+          const auto sites = lr_completion_sites(
+              lr_record_gens(lr_entry_table(*graph), rows, graph->writes));
+          const LrFinalTable done = LrFinalTable::make(std::move(graph), sites);
+          (void)lr_emit_table(done, "deep");
+          (void)lr_emit_parser_files(done, "deep");
+        } else {
+          const auto done = LlFinalProgram::make(
+              ll_build_program(ll_lower(image, desc)), "Deep");
+          CHECK(done.has_value());
+          if (done)
+            (void)ll_emit_parser_files(*done, "deep",
+                                       ll_emit_table(*done, "deep"));
+        }
+        report_grammar_warnings("Deep", image);
+        return 0;
+      });
+    }
+  }));
+}
+
+// Two levels of a table may not share an operator; one that repeats with no
+// maximum is compared by its first tokens, a pattern terminal by itself.
+void a_table_compares_its_levels() {
+  const auto fault = [](RuntimeGrammar& g) {
+    return g.lowered<GrammarFault>(
+        [&](cursiv::detail::GrammarImage& image, const LowerDesc&) {
+          std::vector<std::uint32_t> rules;
+          for (const auto* r : g.nts) rules.push_back(image.rule(*r));
+          return level_fault(image, rules);
+        });
+  };
+  const auto table = [&](const auto& ops) {
+    RuntimeGrammar g;
+    std::vector<const cursiv::detail::ImageDesc*> levels;
+    for (const auto& op : ops) levels.push_back(op(g));
+    g.entry = g.infix("Sum", levels);
+    return fault(g);
+  };
+  using Op = std::function<const cursiv::detail::ImageDesc*(RuntimeGrammar&)>;
+  const Op minus = [](RuntimeGrammar& g) { return g.token("-"); };
+  const Op dashes = [](RuntimeGrammar& g) {
+    return g.seq({g.token("-"), g.many(g.token("~"))});
+  };
+  const Op tildes = [](RuntimeGrammar& g) {
+    return g.seq({g.token("*"), g.many(g.token("-"))});
+  };
+  CHECK(table(std::vector{minus, minus}).code ==
+        GrammarFaultCode::precedenceClash);
+  CHECK(!table(std::vector{minus, tildes}));
+  const GrammarFault opens = table(std::vector{dashes, minus});
+  CHECK(opens.code == GrammarFaultCode::precedenceClash && opens.gated);
+  RuntimeGrammar g;
+  auto* op = g.terminal("OP", g.some(g.set("+-")));
+  auto* other = g.terminal("OTHER", g.some(g.set("+-")));
+  g.entry = g.infix("Sum", {g.call(op), g.call(other)});
+  CHECK(!fault(g));
+  RuntimeGrammar same;
+  auto* once = same.terminal("OP", same.some(same.set("+-")));
+  same.entry = same.infix("Sum", {same.call(once), same.call(once)});
+  CHECK(fault(same).code == GrammarFaultCode::precedenceClash);
+}
+
 }  // namespace
 
 int main() {
-  a_fact_reaches_its_readers_settled();
+  a_table_compares_its_levels();
+  many_keywords_spell_on_a_small_stack();
+  deep_nesting_generates_on_a_small_stack();
+  a_fact_reaches_its_readers_final();
   a_class_goes_on_with_its_largest_part();
-  what_a_rule_owes_climbs_its_readers();
-  a_rule_settles_at_its_least_cost();
+  a_rules_first_terminals_reach_its_readers();
+  a_rule_is_priced_at_its_least_cost();
   each_position_reads_what_its_rule_hands_back();
   a_set_read_twice_flags_nothing();
   a_cell_forks_in_the_order_of_its_arms();
@@ -1080,7 +1236,7 @@ int main() {
   a_reduction_reads_what_its_transitions_answer();
   a_component_reads_each_of_its_edges_once();
   a_pair_is_joined_once();
-  a_state_is_read_again_only_when_it_lands_on_one_that_moved();
+  a_state_is_read_again_only_when_it_leads_to_one_that_moved();
   states_with_one_tail_fuse();
   a_production_is_read_again_only_for_what_it_reads();
   an_action_is_asked_once_whether_it_may_be_refused();
@@ -1088,7 +1244,7 @@ int main() {
   lookaheads_read_each_edge_once();
   a_set_walks_its_members_in_order();
   a_record_list_costs_its_length();
-  only_terminals_that_meet_are_walked();
+  only_terminals_that_overlap_are_walked();
   a_state_lists_its_continuations_in_their_number();
   return cursiv::test::report("GeneratorGrowth_test");
 }

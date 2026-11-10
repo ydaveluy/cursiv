@@ -1,4 +1,5 @@
-// An echo needs its mark on every path: a loop that may not turn sets none.
+// A `same` needs its `mark` on every path: a loop that may run zero times sets
+// none.
 // expect LR: refused: terminal .TAG. uses .same<>. where a .mark<>. with its tag is not set on every path before it
 #pragma once
 

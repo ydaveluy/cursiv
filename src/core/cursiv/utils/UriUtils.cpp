@@ -57,7 +57,7 @@ inline constexpr CharSet kUnreserved = [] {
   return s;
 }();
 
-// A path keeps its separators, and an authority its brackets and port.
+// A path keeps its separators, and an IP literal its brackets and colons.
 inline constexpr CharSet kPathBare = [] {
   CharSet s = kUnreserved;
   s.set(static_cast<unsigned char>('/'));
@@ -187,7 +187,7 @@ std::string ascii_lower(std::string_view text) {
 }
 
 // A drive letter is a syntactic fact of the URI, not of the host: the same
-// document arrives as `/c:/`, `/C:/` or `/c%3A/` and must land on one spelling
+// document arrives as `/c:/`, `/C:/` or `/c%3A/` and must map to one spelling
 // whatever platform the server runs on.
 void lower_drive_letter(std::string& path) {
   if (path.size() >= 3 && path[0] == '/' && is_ascii_letter(path[1]) &&
@@ -197,11 +197,9 @@ void lower_drive_letter(std::string& path) {
     path[0] = to_lower(path[0]);
 }
 
-// `authority` split at its first '@' and its userinfo at the first ':', then
-// each part read by `read` and written back one way: the userinfo keeps its
-// case, and the host goes to lower case, RFC 3986 making it case-insensitive.
-// A URI's authority splits before its escapes are decoded, so an escaped '@'
-// or ':' stays inside its part (RFC 3986, section 2.4).
+// `authority` split into userinfo, host and port, each read by `read`: the
+// host goes to lower case, the rest stays as written. The split comes before
+// decoding, so an escaped '@' or ':' stays in its part.
 template <class Read>
 std::string format_authority(std::string_view authority, Read read) {
   std::string out;
@@ -217,15 +215,18 @@ std::string format_authority(std::string_view authority, Read read) {
     out += '@';
     authority.remove_prefix(at + 1);
   }
-  const std::string host = ascii_lower(read(authority));
-  if (const std::size_t colon = host.rfind(':');
-      colon == std::string::npos) {
-    out += percent_encode(host, kAuthorityBare);
-  } else {
-    out += percent_encode(std::string_view(host).substr(0, colon),
-                          kAuthorityBare);
-    out += host.substr(colon);
+  std::string_view port;
+  const std::size_t colon = authority.rfind(':');
+  const std::size_t close = authority.rfind(']');
+  if (colon != std::string_view::npos &&
+      (close == std::string_view::npos || close < colon)) {
+    port = authority.substr(colon);
+    authority = authority.substr(0, colon);
   }
+  const bool literal = authority.starts_with('[') && authority.ends_with(']');
+  out += percent_encode(ascii_lower(read(authority)),
+                        literal ? kAuthorityBare : kUnreserved);
+  out += port;
   return out;
 }
 
@@ -426,7 +427,7 @@ std::string uri_extension(std::string_view uri) {
   const std::string name = uri_file_name(uri);
   const std::size_t dot = name.find_last_of('.');
   if (dot == std::string::npos || dot == 0 || name == "..") return {};
-  // Keep the registry's documented case-insensitive extension convention.
+  // Extensions are case-insensitive, as the registry expects.
   std::string ext = name.substr(dot);
   for (char& c : ext) c = to_lower(c);
   return ext;

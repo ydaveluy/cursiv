@@ -33,10 +33,12 @@ bool WrittenReads::reads_into(std::uint32_t rule) {
          kind != ImageRuleKind::grammar;
 }
 
-bool WrittenReads::nothing_of(ImageId id) {
+Descent<bool> WrittenReads::nothing_of(ImageId id) {
   const ImageNode n = _image.nodes[id];
-  const auto kid = [&](std::uint32_t i) { return _image.kids[n.first + i]; };
-  if (over_operand(n.kind)) return nothing_of(kid(0));
+  const auto child = [&](std::uint32_t i) {
+    return _image.children[n.first + i];
+  };
+  if (over_operand(n.kind)) co_return co_await nothing_of(child(0));
   switch (n.kind) {
     case ImageKind::epsilon:
     case ImageKind::eof:
@@ -45,21 +47,23 @@ bool WrittenReads::nothing_of(ImageId id) {
     case ImageKind::gapHas:
     case ImageKind::gapIs:
     case ImageKind::implied:
-      return true;
+      co_return true;
     case ImageKind::seq:
     case ImageKind::unordered:
       for (std::uint32_t i = 0; i < n.count; ++i)
-        if (!nothing_of(kid(i))) return false;
-      return true;
+        if (!co_await nothing_of(child(i))) co_return false;
+      co_return true;
     case ImageKind::choice:
       for (std::uint32_t i = 0; i < n.count; ++i)
-        if (nothing_of(kid(i))) return true;
-      return false;
+        if (co_await nothing_of(child(i))) co_return true;
+      co_return false;
     case ImageKind::repeat:
-      return n.m == 0 || nothing_of(kid(0));
+      if (n.m == 0) co_return true;
+      co_return co_await nothing_of(child(0));
     case ImageKind::ref: {
-      // An operator table reads nothing where its operand does, through every
-      // table it stands on. A cycle of tables reads something: others refuse it.
+      // An operator table reads nothing where its operand does, through each
+      // table it stands on. A cycle of tables reads something: others refuse
+      // it.
       std::uint32_t rule = n.a;
       for (std::size_t hop = 0;
            hop < _image.rules.size() && !_image.rules[rule].grammar; ++hop) {
@@ -67,41 +71,44 @@ bool WrittenReads::nothing_of(ImageId id) {
         if (face.kind != ImageRuleKind::infix) break;
         rule = face.primary;
       }
-      return reads_into(rule) ? slot(rule).nothing : false;
+      co_return reads_into(rule) ? slot(rule).nothing : false;
     }
     default:
-      return false;
+      co_return false;
   }
 }
 
-bool WrittenReads::run_of(ImageId id) {
+Descent<bool> WrittenReads::run_of(ImageId id) {
   const ImageNode n = _image.nodes[id];
-  const auto kid = [&](std::uint32_t i) { return _image.kids[n.first + i]; };
-  if (over_operand(n.kind) || n.kind == ImageKind::embed) return run_of(kid(0));
+  const auto child = [&](std::uint32_t i) {
+    return _image.children[n.first + i];
+  };
+  if (over_operand(n.kind) || n.kind == ImageKind::embed)
+    co_return co_await run_of(child(0));
   switch (n.kind) {
     case ImageKind::repeat:
-      return n.m < n.n && n.n > 1;
+      co_return n.m < n.n&& n.n > 1;
     case ImageKind::choice:
       for (std::uint32_t i = 0; i < n.count; ++i)
-        if (run_of(kid(i))) return true;
-      return false;
+        if (co_await run_of(child(i))) co_return true;
+      co_return false;
     // A run among parts that read nothing; the first part that is neither
     // ends it.
     case ImageKind::seq: {
       bool run = false;
       for (std::uint32_t i = 0; i < n.count; ++i) {
-        if (run_of(kid(i))) {
+        if (co_await run_of(child(i))) {
           run = true;
-        } else if (!nothing_of(kid(i))) {
-          return false;
+        } else if (!co_await nothing_of(child(i))) {
+          co_return false;
         }
       }
-      return run;
+      co_return run;
     }
     case ImageKind::ref:
-      return reads_into(n.a) ? slot(n.a).run : false;
+      co_return reads_into(n.a) ? slot(n.a).run : false;
     default:
-      return false;
+      co_return false;
   }
 }
 
@@ -109,8 +116,8 @@ bool WrittenReads::solve(std::uint32_t at) {
   const std::uint32_t rule = _slots[at].rule;
   const ImageId body = _image.ready(rule).face[1].body;
   _solving = at;
-  const bool nothing = nothing_of(body);
-  const bool run = run_of(body);
+  const bool nothing = descend(nothing_of(body));
+  const bool run = descend(run_of(body));
   _solving = kNoSlot;
   Slot& s = _slots[at];
   if (s.nothing == nothing && s.run == run) return false;
@@ -120,7 +127,7 @@ bool WrittenReads::solve(std::uint32_t at) {
 }
 
 // Only what reads a slot that moved is solved again.
-void WrittenReads::settle() {
+void WrittenReads::solve_pending() {
   while (!_work.empty()) {
     const std::uint32_t at = _work.back();
     _work.pop_back();
@@ -135,16 +142,16 @@ bool WrittenReads::answer(Ask ask) {
   for (;;) {
     const bool r = ask();
     if (_work.empty()) return r;
-    settle();
+    solve_pending();
   }
 }
 
 bool WrittenReads::nothing(ImageId node) {
-  return answer([&] { return nothing_of(node); });
+  return answer([&] { return descend(nothing_of(node)); });
 }
 
 bool WrittenReads::run(ImageId node) {
-  return answer([&] { return run_of(node); });
+  return answer([&] { return descend(run_of(node)); });
 }
 
 }  // namespace cursiv::engine

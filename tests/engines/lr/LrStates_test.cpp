@@ -137,7 +137,7 @@ void run() {
       }
     CHECK(out.size() == 2 && keeps);
   }
-  // A leaf two readings share: a candidate only one of them leads to glues
+  // A leaf two readings share: a candidate only one of them leads to attaches
   // onto that reading, whose guard refuses it here.
   {
     const auto out = checks::features(*splice, splice->parse("splice:<a"),
@@ -146,7 +146,7 @@ void run() {
           checks::spelled(*splice, out, "c") &&
           checks::spelled(*splice, out, "d"));
   }
-  // One terminal two readings read in different modes: a candidate glued to
+  // One terminal two readings read in different modes: a candidate attached to
   // it is judged in the mode of the reading that goes on with it. The `>`
   // follows the `-` only where the mode also reads `->`, which takes it in.
   {
@@ -154,9 +154,9 @@ void run() {
     const auto at = static_cast<cursiv::TextOffset>(text.size());
     CHECK(checks::offers(*splice, text, at, at, "!") &&
           !checks::offers(*splice, text, at, at, ">"));
-    const std::string gluedText = text + ">";
-    const auto glued = splice->parse(gluedText);
-    CHECK(!glued.accepted || !glued.diagnostics.empty());
+    const std::string attachedText = text + ">";
+    const auto attached = splice->parse(attachedText);
+    CHECK(!attached.accepted || !attached.diagnostics.empty());
     for (const std::string_view typed : {"!", " >"}) {
       const std::string typedText = text + std::string(typed);
       const auto parsed = splice->parse(typedText);
@@ -165,7 +165,7 @@ void run() {
   }
   // One reading through a reduction: the state that reduces the `%` reads the
   // `-` before the state that shifts it, and only the first reads `->`. A `>`
-  // glued to the `-` makes it `->`, so it follows only after a blank.
+  // attached to the `-` makes it `->`, so it follows only after a blank.
   for (const std::string_view gap : {"", " "}) {
     const std::string text = "splice:%-" + std::string(gap);
     const auto at = static_cast<cursiv::TextOffset>(text.size());
@@ -174,10 +174,9 @@ void run() {
     const auto typed = splice->parse(input);
     CHECK((typed.accepted && typed.diagnostics.empty()) == !gap.empty());
   }
-  // A condition reads a run of `~` as one token, however many the arms read
-  // it as, and reads on to what follows the run. Past a caret on its first
-  // token it reads the document's text; before a caret in the run it reads
-  // what is typed there, and a `?` makes it refuse the `^` it stands before.
+  // A condition reads a run of `~` as one token and reads on past it. After a
+  // caret on its first token it reads the document; before a caret in the run
+  // it reads what is typed, and `?` makes it refuse the `^` after it.
   {
     const auto offered = [&](const std::string& text, cursiv::TextOffset at,
                              cursiv::TextOffset resume) {
@@ -305,7 +304,7 @@ void run() {
 
 }  // namespace reduce_cells
 
-// A goto the head refuses lands nowhere, even across emitted state groups.
+// A goto the head refuses leads nowhere, even across emitted state groups.
 namespace group_guard {
 
 namespace {
@@ -353,9 +352,9 @@ void run() {
     CHECK(clean.accepted && clean.diagnostics.empty());
   }
   // A state whose one action reduces the empty rule keeps its refusal label.
-  CHECK(parser->parse("groups:landing p y x").accepted);
-  CHECK(parser->parse("groups:landing p y x").diagnostics.empty());
-  CHECK(parser->parse("groups:landing p x").accepted);
+  CHECK(parser->parse("groups:emptygoto p y x").accepted);
+  CHECK(parser->parse("groups:emptygoto p y x").diagnostics.empty());
+  CHECK(parser->parse("groups:emptygoto p x").accepted);
   const auto reflection = tedges::generated::G::create_ast_reflection();
   a_text_no_condition_admits_is_repaired_not_lost(*parser, *reflection);
 }
@@ -448,18 +447,17 @@ void run() {
 }  // namespace case_lrcarettrivia
 
 namespace case_lrbracketcaret {
-// A grammar that declares delimiters without laying an indent or a dedent
-// still counts them: the caret reads a newline between an opener and its
-// closer as the blank the parse reads, whichever pair of the three it is, and
-// offers what the parse would take there.
+// Delimiters with no indent or dedent are still counted: the caret reads a
+// newline between an opener and its closer as the blank the parse reads, for
+// any of the three pairs, and offers what the parse would take.
 
 namespace {
 
 namespace g = ttrivia::generated::Lr;
-static_assert(
-    cursiv::engine::kLaid<g::kTable.cfg, cursiv::engine::kLaidIndent> == 0);
-static_assert(
-    cursiv::engine::kLaid<g::kTable.cfg, cursiv::engine::kLaidDedent> == 0);
+static_assert(cursiv::engine::kSyntheticTerm<
+                  g::kTable.cfg, cursiv::engine::kSyntheticIndent> == 0);
+static_assert(cursiv::engine::kSyntheticTerm<
+                  g::kTable.cfg, cursiv::engine::kSyntheticDedent> == 0);
 
 std::set<std::string> offered(const std::string& text, std::size_t caret) {
   static const auto parser = g::create_parser();

@@ -38,7 +38,7 @@ class WarningFound {
 
   // Each node under `roots` once, in the order a walk of the tree reaches it
   // first: a node several paths share is read on the first. `enter(node)`
-  // answers whether to walk the node's parts.
+  // returns whether to walk the node's parts.
   template <class Enter>
   void each_node(std::span<const ImageId> roots, Enter enter) {
     _seen.next();
@@ -48,8 +48,8 @@ class WarningFound {
       _todo.pop_back();
       if (!_seen.first(id)) continue;
       if (!enter(id)) continue;
-      const std::span<const ImageId> kids = _image.shape_kids(id);
-      _todo.insert(_todo.end(), kids.rbegin(), kids.rend());
+      const std::span<const ImageId> children = _image.shape_children(id);
+      _todo.insert(_todo.end(), children.rbegin(), children.rend());
     }
   }
 
@@ -71,10 +71,10 @@ inline std::vector<std::uint16_t> printed_places(const GrammarImage& image,
   std::vector<std::uint16_t> out(choice.count);
   std::uint16_t place = 0;
   for (std::uint32_t i = 0; i < choice.count; ++i) {
-    const ImageId* const arm = &image.kids[choice.first + i];
+    const ImageId* const arm = &image.children[choice.first + i];
     const bool merged = i + 1 < choice.count &&
                         image.nodes[arm[1]].kind == ImageKind::implied &&
-                        image.kids[image.nodes[arm[1]].first] == arm[0];
+                        image.children[image.nodes[arm[1]].first] == arm[0];
     out[i] = merged ? place + 1 : ++place;
   }
   return out;

@@ -1,8 +1,6 @@
 #pragma once
-// Every compiler builtin, attribute and intrinsic the tree uses is named here
-// and nowhere else, and each but CURSIV_MUSTTAIL has a fallback that compiles.
-// The grep that keeps it true -- no `__builtin_`, no `[[gnu::`, no `_mm_`
-// outside this file.
+// Every compiler builtin, attribute and intrinsic the tree uses is named
+// here and nowhere else, and each but CURSIV_MUSTTAIL has a fallback.
 
 #if defined(__has_builtin)
 #define CURSIV_HAS_BUILTIN(x) __has_builtin(x)
@@ -10,10 +8,9 @@
 #define CURSIV_HAS_BUILTIN(x) 0
 #endif
 
-// A whole pack deduplicated in one expansion, first occurrence winning and the
-// order kept, at zero instantiations. Where the compiler has none, typelist
-// folds the pack itself; `-DCURSIV_HAS_DEDUP_PACK=0` makes that fold a real
-// build.
+// A whole pack deduplicated in one expansion, first occurrence kept, in
+// order. Without the builtin, typelist folds the pack;
+// `-DCURSIV_HAS_DEDUP_PACK=0` forces that fold.
 #ifndef CURSIV_HAS_DEDUP_PACK
 #if CURSIV_HAS_BUILTIN(__builtin_dedup_pack)
 #define CURSIV_HAS_DEDUP_PACK 1

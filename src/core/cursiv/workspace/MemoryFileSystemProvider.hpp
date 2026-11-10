@@ -9,17 +9,9 @@
 
 #include "cursiv/workspace/FileSystemProvider.hpp"
 
-// A folder that is a map: the same questions answered out of memory, a URI to
-// its text and a prefix walk for the enumeration. It is the second real
-// implementation that makes `FileSystemProvider` an interface rather than a
-// spelling of `std::filesystem`, and it goes through one manager, one scan and
-// one build like the disk does.
-//
-// The URIs are of any scheme, kept as `normalize_uri` spells them and looked up
-// the same way, and `readDirectory` treats the folder as a plain prefix -- the
-// whole of what a hierarchy is here. Not synchronized: reads may run on
-// several threads at once, as the scan and the build run them, but `addFile`
-// must not run beside them.
+// A file system in memory: a map from URI to text, enumerated by prefix. URIs
+// of any scheme, kept as `normalize_uri` spells them. Reads may run on several
+// threads at once, but `addFile` must not run beside them.
 
 namespace cursiv {
 

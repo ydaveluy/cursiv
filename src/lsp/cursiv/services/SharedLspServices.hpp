@@ -28,27 +28,20 @@ class WorkspaceSymbolProvider;
 // shared container and an LSP one holds one `SharedCoreServices` through
 // the diamond.
 struct SharedLspServices : virtual SharedCoreServices {
-  // The one navigation door that is not a document's: it reads the index, so a
-  // symbol of a file nobody opened is reachable. Shared, because a query
-  // crosses every language of the workspace.
+  // Shared: a workspace symbol query reads the index across every language.
   std::unique_ptr<const WorkspaceSymbolProvider> workspaceSymbolProvider;
   std::unique_ptr<const NodeKindProvider> nodeKindProvider;
   std::unique_ptr<const FuzzyMatcher> fuzzyMatcher;
-  // Shared, and null by default: a command belongs to the workspace, not to a
-  // language, and a server that runs none is complete.
+  // Null by default: a command belongs to the workspace, not to a language.
   std::unique_ptr<const ExecuteCommandHandler> executeCommandHandler;
-  // Shared and null by default, for the same reason: what a file operation
-  // means crosses the languages, and a server that watches none is complete.
-  // Not const -- the three `did` arms are told about a world that moved.
+  // Null by default: a file operation crosses the languages.
   std::unique_ptr<FileOperationHandler> fileOperationHandler;
-  // Shared and null by default: what a save means crosses the languages, and
-  // a server that hears of none is complete.
+  // Null by default: a save crosses the languages.
   std::unique_ptr<DocumentSaveHandler> documentSaveHandler;
-  // Null by default: a server that syncs no notebook is complete. Installed,
-  // a notebook's cells are documents like any other.
+  // Null by default. Installed, a notebook's cells are documents like any
+  // other.
   std::unique_ptr<NotebookDocuments> notebookDocuments;
-  // Shared and null by default: MCP is a second door onto the same workspace,
-  // and a session that opens none is complete.
+  // Null by default: MCP is a second way into the same workspace.
   std::unique_ptr<const McpService> mcpService;
   SharedLspServices() noexcept;
   ~SharedLspServices() noexcept override;
@@ -58,19 +51,15 @@ struct SharedLspServices : virtual SharedCoreServices {
   std::unique_ptr<LanguageClient> languageClient;
   // Null unless a workspace serves virtual documents; the capability follows.
   std::unique_ptr<TextDocumentContentProvider> textDocumentContentProvider;
-  // Always installed, like the server: a workspace whose client announces
-  // nothing gets a provider that answers nothing, which is a state rather than
-  // an absence. Keyed here and not in the core container because it speaks
-  // `lsp::InitializeParams` and `LSPAny`, which the core may not include.
+  // Always installed: a client that announces nothing gets a provider that
+  // answers nothing.
   std::unique_ptr<ConfigurationProvider> configurationProvider;
 
   void visitServices(
       cursiv::function_ref<void(const ServiceSlot&)> yield) const override;
 };
 
-/**
- * Installs the core-wide defaults, then this storey's.
- */
+// Installs the shared core defaults, then the LSP ones.
 void install_default_shared_lsp_services(SharedLspServices& shared);
 
 }  // namespace cursiv

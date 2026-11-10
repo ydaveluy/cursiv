@@ -22,14 +22,13 @@
 
 namespace cursiv::engine {
 
-// Every row grows to meet its write: nothing here is counted in advance, and
-// no frozen program holds any of it -- what a reader gets is emitted as plain
-// arrays instead.
+// Every row grows to fit its write: nothing here is counted in advance, and
+// no frozen program holds it; readers get plain emitted arrays.
 struct LlLowCfg : LowerPools {
   std::uint16_t nterms = 0;
   std::uint16_t nrules = 0;
   std::uint32_t nnodes = 0;
-  std::uint32_t nkids = 0;
+  std::uint32_t nchildIds = 0;
   std::uint16_t ndecisions = 0;
   std::uint16_t nclimbs = 0;
   std::uint16_t nclimbOps = 0;
@@ -39,7 +38,7 @@ struct LlLowCfg : LowerPools {
 
   Vec<LlRuleInfo> rules{};
   Vec<LlNode> nodes{};
-  Vec<std::uint16_t> kids{};
+  Vec<std::uint16_t> childIds{};
   Vec<LlDecision> decisions{};
   Vec<LlClimb> climbs{};
   Vec<LlClimbOp> climbOps{};
@@ -54,7 +53,7 @@ struct LlLowCfg : LowerPools {
   std::span<const std::uint16_t> children(const LlNode& node) const {
     if (node.kind == LlShape::rep) return {&node.sym, 1};
     if (node.kind == LlShape::seq || node.kind == LlShape::alt)
-      return {kids.data() + node.sym, node.count};
+      return {childIds.data() + node.sym, node.count};
     return {};
   }
 
@@ -68,16 +67,14 @@ struct LlLowCfg : LowerPools {
   std::uint16_t atomic_operator(std::uint16_t body) const {
     if (const auto& n = nodes[body];
         n.kind == LlShape::seq && n.count == 2 &&
-        nodes[kids[n.sym]].kind == LlShape::condition)
-      body = kids[n.sym + 1];
+        nodes[childIds[n.sym]].kind == LlShape::condition)
+      body = childIds[n.sym + 1];
     return nodes[body].kind == LlShape::term ? body : kNoRow;
   }
 
-  // Terminated: a generated table prints these as C strings. A name is
-  // addressed by a sixteen-bit offset, and past that the offset wraps: the
-  // second name would be written over the first, and every name read after it
-  // would be another one. The walk carries on writing a well-formed value; the
-  // refusal stands.
+  // Terminated: a generated table prints these as C strings. Offsets are 16
+  // bits: past them the name is refused, and the walk goes on writing a valid
+  // value.
   std::uint16_t intern_name(std::string_view s) {
     if (std::size_t{nameLen} + s.size() + 1u > 0xffffu) {
       lower_refuse(*this, LowerFail::namePool);

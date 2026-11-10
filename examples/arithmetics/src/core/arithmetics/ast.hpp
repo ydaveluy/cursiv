@@ -12,8 +12,8 @@ struct Statement : cursiv::Extends<cursiv::AstNode> {};
 struct Expression : cursiv::Extends<cursiv::AstNode> {};
 
 // The nameable things a call can point at: `Definition` or
-// `DeclaredParameter` -- a base class, not a union, so a reference needs no
-// downcast. Sits under `Statement`, though no rule creates one there.
+// `DeclaredParameter`. Sits under `Statement`, though no rule creates one
+// there.
 struct AbstractDefinition : cursiv::Extends<Statement> {
   string_view name;
 };

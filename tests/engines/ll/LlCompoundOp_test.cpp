@@ -43,7 +43,7 @@ void guarded_offers_follow_the_token() {
     source.tokens = 1;
     ll_search_keep<table>(search, source);
     search.nodes.push_back(source);
-    const LlSearchLaid before(search);
+    const LlSearchCheckpoint before(search);
     search.nodes.push_back(source);
     const auto& sameLine = ll_search_facts<table>(c, search, 1);
     CHECK(!sameLine.viable.empty() && !sameLine.due.empty());
@@ -144,19 +144,19 @@ int main() {
                        std::string_view prefix, std::string_view text) {
     const std::string source = std::string(prefix) + std::string(text);
     const auto a = ll.parse(source), b = lr.parse(source);
-    bool alike = a.diagnostics.size() == b.diagnostics.size();
-    for (std::size_t i = 0; alike && i < a.diagnostics.size(); ++i)
-      alike = a.diagnostics[i].kind == b.diagnostics[i].kind &&
-              a.diagnostics[i].begin == b.diagnostics[i].begin &&
-              a.diagnostics[i].end == b.diagnostics[i].end;
+    bool matching = a.diagnostics.size() == b.diagnostics.size();
+    for (std::size_t i = 0; matching && i < a.diagnostics.size(); ++i)
+      matching = a.diagnostics[i].kind == b.diagnostics[i].kind &&
+                 a.diagnostics[i].begin == b.diagnostics[i].begin &&
+                 a.diagnostics[i].end == b.diagnostics[i].end;
     std::string x, y;
     if (a.value != nullptr) support::ast_of(reflection, *a.value, x);
     if (b.value != nullptr) support::ast_of(reflection, *b.value, y);
-    if (!alike || x != y)
+    if (!matching || x != y)
       std::printf("repair parity LL=%zu LR=%zu: %.*s\n", a.diagnostics.size(),
                   b.diagnostics.size(), static_cast<int>(text.size()),
                   text.data());
-    CHECK(alike && x == y);
+    CHECK(matching && x == y);
   };
   for (const std::string_view text :
        {"1 not within 2", "1++2 not within 3++4", "1 not within 2 not within 3",

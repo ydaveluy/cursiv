@@ -1,6 +1,6 @@
-// Where the byte classes of the pools were interned: a class is told by its
-// bytes, the lead bytes it decodes at and the scalars it lists, and the pool is
-// filled in interning order, so the index names the pool's own indices.
+// Where the byte classes of the pools were interned: a class is identified by
+// its bytes, the lead bytes it decodes at and the scalars it lists, and the
+// pool is filled in interning order, so the index names the pool's own indices.
 #pragma once
 
 #include <cstddef>
@@ -14,12 +14,9 @@
 
 namespace cursiv::engine {
 
-// A set's identity: its bytes, refused outright; the set of lead bytes at
-// which the word class's scalar decides instead -- `kNoSet` for a plain class;
-// and where the scalars it tests are listed, zero for the word class's own. A
-// set built from the word class keeps its second half through every union and
-// intersection it enters, so a reader decodes exactly where the class does and
-// never under a plain class of the same bytes.
+// A set's identity: its bytes; the lead bytes at which a scalar decides
+// instead, `kNoSet` for a plain class; and where its scalars are listed, zero
+// for the word class's own.
 struct SetKey {
   ByteSet bytes;
   std::uint16_t decode = kNoSet;

@@ -1,16 +1,17 @@
-#include <cstddef>
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <string>
 #include <string_view>
 #include <utility>
 
+#include "attachedll/generated/AttachedLl/Module.hpp"
 #include "conditionsll/generated/Ll/Module.hpp"
 #include "conditionsll/generated/Ll/Table.hpp"
 #include "conditionslr/generated/Lr/Module.hpp"
-#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/ll/gen/LlLowering.hpp"
 #include "cursiv/ll/gen/ll_build.hpp"
 #include "cursiv/ll/runtime/LlPredictionSession.hpp"
@@ -18,17 +19,16 @@
 #include "cursiv/ll/runtime/ll_predictor.hpp"
 #include "cursiv/ll/runtime/ll_read.hpp"
 #include "cursiv/ll/runtime/ll_repair.hpp"
+#include "cursiv/parser/Parser.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/UnboundedCondition.hpp"
 #include "cursiv/shared/runtime/GapPositions.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
-#include "cursiv/Check.hpp"
 #include "engines/ll/ConditionsGrammar.hpp"
 #include "engines/ll/LlTerms.hpp"
-#include "gluedll/generated/GluedLl/Module.hpp"
-#include "impliedrivalll/generated/RivalLl/Module.hpp"
-#include "impliedrivallr/generated/RivalLr/Module.hpp"
+#include "impliedblockedll/generated/BlockedLl/Module.hpp"
+#include "impliedblockedlr/generated/BlockedLr/Module.hpp"
 #include "reachpredictll/generated/ReachLl/Module.hpp"
 #include "support/AstText.hpp"
 #include "triviapredictll/generated/TriviaLl/Module.hpp"
@@ -147,9 +147,9 @@ void predictions_keep_the_gap_and_embedded_section() {
   }
 }
 
-// A grammar's conditions cost a choice that meets none of them nothing: the
+// Conditions cost nothing to a choice that reaches none of them: the
 // levels of an unclosed nest are refused by the first that reads to its end.
-void a_choice_that_meets_no_condition_reads_a_nest_once() {
+void a_choice_with_no_condition_reads_a_nest_once() {
   const auto ll = tllconditions::generated::Ll::create_parser();
   const auto lr = tllconditions::generated::Lr::create_parser();
   std::uint64_t before = 0;
@@ -196,7 +196,7 @@ void predicates_and_implied_tokens_match_the_table_engine() {
     CHECK(a.diagnostics.empty() == b.diagnostics.empty());
   }
   // One tree: a guarded token alone is the node over it, and a comment after
-  // the last token owes the root nothing.
+  // the last token adds nothing to the root.
   for (const std::string_view text : {"4242 + 4242", "1 + \n 42", "42/*c*/"}) {
     const auto a = ll->parse(text);
     const auto b = lr->parse(text);
@@ -204,11 +204,9 @@ void predicates_and_implied_tokens_match_the_table_engine() {
   }
 }
 
-// After a name, `#` continues `a #b?`: the implied `;` is not inserted there,
-// even where that reading fails at `c`. After a number it is.
-// A terminal a condition refuses is taken off the position, and the text is
-// read without it. A token only a condition names stands: no terminal reads
-// it, so it is an error, and it is never read again in pieces.
+// After a name, `#` continues `a #b?`, so no `;` is implied there even if that
+// reading fails at `c`; after a number it is. A refused terminal is taken off;
+// a token only a condition names is an error and is never split.
 void a_refused_token_is_read_again_and_a_named_one_stands() {
   const auto ll = tllconditions::generated::Ll::create_parser();
   const auto lr = tllconditions::generated::Lr::create_parser();
@@ -254,8 +252,8 @@ void a_refused_token_is_read_again_and_a_named_one_stands() {
 }
 
 void a_normal_continuation_blocks_an_implied_token() {
-  const auto ll = tllconditions::generated::RivalLl::create_parser();
-  const auto lr = tllconditions::generated::RivalLr::create_parser();
+  const auto ll = tllconditions::generated::BlockedLl::create_parser();
+  const auto lr = tllconditions::generated::BlockedLr::create_parser();
   const std::pair<std::string_view, bool> cases[] = {
       {"a #b c d!", false},  {"a #b c d! a #b?", false},
       {"1 #b c d!", true},   {"1 #b c d! a #b?", true},
@@ -270,10 +268,9 @@ void a_normal_continuation_blocks_an_implied_token() {
   }
 }
 
-// A token no terminal names stands in no row of the mode matrix. Here every
-// row, and every word past them, admits everything: a read of the matrix for
-// the refusal would keep it, where the position of an implied token reads
-// its text again under its own alphabet.
+// A token no terminal names stands in no row of the mode matrix, where every
+// row admits everything: the implied token's position reads its text again
+// under its own alphabet instead.
 namespace refused_test {
 constexpr const auto& base = tllconditions::generated::Ll::kTable;
 constexpr std::size_t kWords = std::size_t{base.nmodes} * base.termWords +
@@ -365,9 +362,9 @@ void a_remembered_prediction_keeps_what_an_implied_token_read() {
 // A tag the gap refuses after its `#` is given up whole: its number is an
 // item of its own, and no tag stands over the `#`.
 void a_given_up_tag_leaves_no_node() {
-  const auto ll = tllconditions::generated::GluedLl::create_parser();
+  const auto ll = tllconditions::generated::AttachedLl::create_parser();
   const auto reflection =
-      tllconditions::generated::GluedLl::create_ast_reflection();
+      tllconditions::generated::AttachedLl::create_ast_reflection();
   struct Case {
     std::string_view text, tree;
     cursiv::TextOffset at;
@@ -409,7 +406,7 @@ void predicates_survive_lowering_and_prevent_static_token_decisions() {
     if (op.kind != cursiv::engine::LlShape::seq) continue;
     guarded = true;
     CHECK(op.count == 2);
-    CHECK(low.cfg.nodes[low.cfg.kids[op.sym]].kind ==
+    CHECK(low.cfg.nodes[low.cfg.childIds[op.sym]].kind ==
           cursiv::engine::LlShape::condition);
     CHECK(low.cfg.atomic_operator(body) != cursiv::engine::kNoRow);
   }
@@ -446,19 +443,32 @@ void a_condition_that_reads_a_run_without_end_is_warned_of() {
                   "no length limit") != std::string::npos);
 }
 
-// Two runs the warning cannot spell in full are still two runs.
+// Two runs the warning cannot spell in full are still two runs, and so are
+// two runs of terminals the warning spells the same: one refuses a keyword, the
+// other a bare literal.
 struct Comments : cursiv::GrammarSpec {
   struct X : terminal<lit<"x">> {};
   struct Slash : terminal<through(lit<"/*">, lit<"*/">)> {};
   struct Paren : terminal<through(lit<"(*">, lit<"*)">)> {};
-  struct Root : rule<create<Doc>(!(some(ref<Slash>) + lit<";">)+!(
-                    some(ref<Paren>) + lit<";">)+ref<X>)> {};
+  struct Word : terminal<!kw<"in"> + some(cr<"a-z">)> {};
+  struct Name : terminal<!lit<"in"> + some(cr<"a-z">)> {};
+  struct Root
+      : rule<create<Doc>(
+            !(some(ref<Slash>) + lit<";">)+!(some(ref<Paren>) + lit<";">)+!(
+                some(ref<Word>) + lit<";">)+!(some(ref<Name>) +
+                                              lit<";">)+ref<X>)> {};
   using entry = Root;
 };
 
-void runs_spelt_alike_are_told_apart_by_what_they_read() {
+void runs_spelt_the_same_are_told_apart_by_what_they_read() {
   const auto comments = cursiv::engine::LlLowering<Comments>::lower();
-  CHECK(comments.cfg.unbounded.size() == 2);
+  const auto& found = comments.cfg.unbounded;
+  CHECK(found.size() == 4);
+  if (found.size() == 4)
+    CHECK(cursiv::engine::unbounded_condition_text(comments.cfg, "Root",
+                                                   found[2]) ==
+          cursiv::engine::unbounded_condition_text(comments.cfg, "Root",
+                                                   found[3]));
 }
 
 }  // namespace
@@ -509,11 +519,11 @@ void check_gap_conditions() {
 int main() {
   gap_conditions::check_gap_conditions();
   a_condition_that_reads_a_run_without_end_is_warned_of();
-  runs_spelt_alike_are_told_apart_by_what_they_read();
+  runs_spelt_the_same_are_told_apart_by_what_they_read();
   predicates_survive_lowering_and_prevent_static_token_decisions();
   conditions_past_the_table_are_refused();
   predicates_and_implied_tokens_match_the_table_engine();
-  a_choice_that_meets_no_condition_reads_a_nest_once();
+  a_choice_with_no_condition_reads_a_nest_once();
   a_refused_token_is_read_again_and_a_named_one_stands();
   a_normal_continuation_blocks_an_implied_token();
   prediction_crosses_only_the_active_trivia();

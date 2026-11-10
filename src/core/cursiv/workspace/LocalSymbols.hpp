@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -18,10 +19,8 @@
 
 namespace cursiv {
 
-// Flat arrays for the whole document, rather than a per-container map and
-// deque: those bill several allocations before holding anything, plus a
-// hash node per distinct name, taking the working set out of cache before
-// the walk finishes.
+// Flat arrays for the whole document rather than a map per container: fewer
+// allocations, and a working set that stays in cache.
 class LocalSymbols {
  public:
   // A name and its case policy, shared by every level of a scope walk.
@@ -35,28 +34,26 @@ class LocalSymbols {
     bool exact;
   };
 
-  // One name's entries at one container, in declaration order, read as a
-  // sequence. Two same-named declarations of different types are both kept:
-  // the type filter runs at lookup, so hiding the second here would make an
-  // assignable declaration invisible behind an unassignable homonym written
-  // before it.
+  // One name's entries at one container, in declaration order. Homonyms of
+  // different types are all kept: the type filter runs at lookup.
   class NameMatches {
    public:
     NameMatches() = default;
-    NameMatches(const LocalSymbols* home, std::uint32_t first) noexcept
-        : _home(home), _at(first) {}
+    NameMatches(const LocalSymbols* symbols, std::uint32_t first) noexcept
+        : _symbols(symbols), _at(first) {}
 
     // Calls `fn` on each entry until it answers false. Answers what the last
     // call answered, or true over an empty sequence.
     template <class Fn>
     bool for_each(Fn&& fn) const {
-      for (std::uint32_t at = _at; at != kNone; at = _home->_nextSameName[at])
-        if (!fn(_home->_entries[at])) return false;
+      for (std::uint32_t at = _at; at != kNone;
+           at = _symbols->_nextSameName[at])
+        if (!fn(_symbols->_entries[at])) return false;
       return true;
     }
 
    private:
-    const LocalSymbols* _home = nullptr;
+    const LocalSymbols* _symbols = nullptr;
     std::uint32_t _at = kNone;
   };
 
@@ -66,26 +63,21 @@ class LocalSymbols {
   LocalSymbols(LocalSymbols&&) noexcept = default;
   LocalSymbols& operator=(LocalSymbols&&) noexcept = default;
 
-  // Building, in declaration order.
-  //
-  // A hint and not a capacity: over-reserving for a document whose nodes are
-  // mostly nameless is the one waste this shape can still commit.
+  // Building, in declaration order. After an `add` or `build_index` that
+  // throws, only `clear` and destruction are allowed. `reserve` is a hint.
   void reserve(std::size_t entries);
   // `container` is never null: an entry is visible in the scope of a node.
   void add(const AstNode* container, AstNodeDescription description);
   // Precondition for every query below. Groups, indexes, and freezes.
-  void seal();
+  void build_index();
 
-  // Reading, after `seal`.
-  //
-  // Hashed once by the caller and handed to every level of one walk.
-  // 64 bits like `mix`, and for the same reason: the two are xored and the
-  // tag is the high half, which `std::size_t` cannot hold on a 32-bit target.
+  // Reading, after `build_index`. The name is hashed once per walk, on 64 bits
+  // on every target, like `mix`.
   [[nodiscard]] static std::uint64_t hash_name(std::string_view name) noexcept {
     return folded_hash(name);
   }
-  // The chain of `name`'s folded class at `container`, every spelling in
-  // declaration order: an exact reader filters, a folded one takes it whole.
+  // Every entry at `container` whose name folds like `name`, in declaration
+  // order: an exact reader filters them, a folded one takes them all.
   [[nodiscard]] NameMatches find(const AstNode* container,
                                  std::string_view name,
                                  std::uint64_t nameHash) const noexcept {
@@ -137,7 +129,13 @@ class LocalSymbols {
   [[nodiscard]] std::span<const AstNodeDescription> forContainer(
       const AstNode* container) const noexcept;
 
-  // A rebuild drops what the previous one derived, this among it.
+  // Calls `visit` on `from` and its ancestors below `document` until it
+  // returns true, and returns whether it did. Past the first levels, it skips
+  // the ancestors that hold no entry.
+  template <class Visit>
+  bool walkScopes(const AstNode* from, const AstNode* document,
+                  Visit&& visit) const;
+
   void clear() noexcept;
 
   [[nodiscard]] bool empty() const noexcept { return _entries.empty(); }
@@ -146,6 +144,8 @@ class LocalSymbols {
 
  private:
   static constexpr std::uint32_t kNone = ~std::uint32_t{0};
+  // The levels a walk goes up one by one, and the depth spacing of shortcuts.
+  static constexpr std::uint32_t kStride = 32;
 
   // One container's group: where it starts and how long it is.
   struct Group {
@@ -162,27 +162,49 @@ class LocalSymbols {
     std::uint32_t tag = 0;
   };
 
+  // A node at a depth that is a multiple of `kStride`, with at least `kStride`
+  // levels below it, and the nearest node at or above it that holds entries.
+  struct Shortcut {
+    const AstNode* node = nullptr;
+    const AstNode* holder = nullptr;
+  };
+  // Built from the tree by the first walk that passes `kStride` levels, so
+  // a shallow tree pays nothing. Read-only once `state` is `kRead`.
+  struct Shortcuts {
+    // A full word, which a wait can block on on every target.
+    enum State : std::uint32_t { kUnread, kReading, kRead };
+
+    std::atomic<std::uint32_t> state = kUnread;
+    // The document whose tree was read: the only walk end the table serves.
+    const AstNode* top = nullptr;
+    // Open addressing by node, power of two size, linear probing.
+    std::vector<Shortcut> table;
+    std::size_t mask = 0;
+  };
+
   [[nodiscard]] const Group* group(const AstNode* container) const noexcept;
   [[nodiscard]] NameMatches find_held(const AstNode* container,
                                       std::string_view name,
                                       std::uint64_t nameHash) const noexcept;
+  // The nearest holder at or above `node`, when `node` has a shortcut and the
+  // walk ends at `document`. The first call builds the table.
+  [[nodiscard]] const Shortcut* shortcut(
+      const AstNode* node, const AstNode* document) const noexcept;
 
-  // Sixty-four bits by declaration, not by the width `std::size_t` happens to
-  // have: the tag is the hash's high half, so on a 32-bit target `hash >> 32`
-  // would be undefined. The pointer's low bits are the allocator's alignment,
-  // the same for every node: shifted away, then spread.
+  // 64 bits on every target, as the tag is the high half. The pointer's low
+  // bits are alignment, so they are shifted away before spreading.
   [[nodiscard]] static std::uint64_t mix(const void* p) noexcept {
     std::uint64_t h = reinterpret_cast<std::uintptr_t>(p) >> 4u;
     h *= 0x9e3779b97f4a7c15ull;
     return h ^ (h >> 29u);
   }
 
-  // Inline, and one bit: a climb meets several containers holding nothing for
+  // Inline, and one bit: a walk passes several containers holding nothing for
   // each one that holds something, and this is all those levels pay. A clear
   // bit is a definite no; a set one is confirmed by the tables.
   [[nodiscard]] bool may_hold(const AstNode* container) const noexcept {
     assert((_entries.empty() || !_names.empty()) &&
-           "LocalSymbols::seal() has to run before the first lookup");
+           "LocalSymbols::build_index() has to run before the first lookup");
     const std::uint64_t* const held = _held.get();
     if (held == nullptr) return false;
     const std::size_t bit = held_bit(container, held[0]);
@@ -194,10 +216,10 @@ class LocalSymbols {
         (reinterpret_cast<std::uintptr_t>(container) >> 4u) & mask);
   }
 
-  // Grouped by container after `seal`, each group in declaration order.
+  // Grouped by container after `build_index`, each group in declaration order.
   std::vector<AstNodeDescription> _entries;
-  // The container of `_entries[i]`, while building only: `seal` groups the
-  // entries by it and drops it, since each group then names its container.
+  // The container of `_entries[i]`, while building only: `build_index` groups
+  // the entries by it and drops it, since each group then names its container.
   std::vector<const AstNode*> _containerOf;
   // The next entry of the same container carrying the same name, or `kNone`.
   std::vector<std::uint32_t> _nextSameName;
@@ -210,6 +232,30 @@ class LocalSymbols {
   // them: what `may_hold` reads. Null is an empty filter, which a moved-from
   // table is too.
   std::unique_ptr<std::uint64_t[]> _held;
+  // Null before `build_index`, and for a table with no entry.
+  std::unique_ptr<Shortcuts> _shortcuts;
 };
+
+template <class Visit>
+bool LocalSymbols::walkScopes(const AstNode* from, const AstNode* document,
+                              Visit&& visit) const {
+  const AstNode* at = from;
+  for (std::uint32_t left = kStride; left != 0; --left) {
+    if (at == nullptr || at == document) return false;
+    if (visit(at)) return true;
+    at = at->parent;
+  }
+  // Nothing holds an entry anywhere.
+  if (_held == nullptr) return false;
+  while (at != nullptr && at != document) {
+    if (const Shortcut* found = shortcut(at, document)) {
+      at = found->holder;
+      if (at == nullptr) return false;
+    }
+    if (visit(at)) return true;
+    at = at->parent;
+  }
+  return false;
+}
 
 }  // namespace cursiv

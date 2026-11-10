@@ -1,7 +1,6 @@
-// The text a check is written against, with the positions it cares about
-// spelled inside it: `<|>` marks an index, `<|`...`|>` a range. Every input
-// struct repeats these fields rather than deriving: an aggregate with a base
-// loses designated initializers, which is how a check is written.
+// The text a check is written against, with its positions marked inside:
+// `<|>` an index, `<|`...`|>` a range. Input structs repeat these fields, so
+// they keep designated initializers.
 #pragma once
 
 #include <string>

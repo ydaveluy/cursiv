@@ -4,6 +4,7 @@
 
 #include <charconv>
 #include <cstddef>
+#include <cstdio>
 #include <exception>
 #include <filesystem>
 #include <functional>
@@ -16,20 +17,20 @@
 #include <variant>
 #include <vector>
 
+#include "cursiv/McpServer.hpp"
+#include "cursiv/McpService.hpp"
+#include "cursiv/completion/CompletionProvider.hpp"
+#include "cursiv/mcp/LspMcpService.hpp"
+#include "cursiv/runtime/LanguageServerRuntime.hpp"
+#include "cursiv/services/LspServices.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/LocalFileSystemProvider.hpp"
 #include "cursiv/workspace/WorkspaceFolder.hpp"
 #include "cursiv/workspace/WorkspaceManager.hpp"
-#include "cursiv/completion/CompletionProvider.hpp"
-#include "cursiv/mcp/LspMcpService.hpp"
-#include "cursiv/runtime/LanguageServerRuntime.hpp"
-#include "cursiv/services/LspServices.hpp"
-#include "cursiv/services/SharedLspServices.hpp"
-#include "cursiv/McpServer.hpp"
-#include "cursiv/McpService.hpp"
 
 namespace cursiv::detail {
 
@@ -59,10 +60,8 @@ std::optional<CompletionQuery> parse_complete_at(std::string_view spec) {
   return query;
 }
 
-// Drives content assist by hand, through the same container an editor
-// would: the scope provider reaches the workspace index, filled by
-// scanning a folder -- the one given, else the file's own -- with the
-// transport left out.
+// Drives content assist by hand through an editor's container: a folder is
+// scanned for the index, the one given or else the file's own.
 int run_completion(const CompletionQuery& query,
                    std::optional<std::string_view> folderPath,
                    SharedLspServices& shared) {
@@ -128,8 +127,20 @@ int run_mcp(std::string_view folderPath, SharedLspServices& shared) {
   std::string line;
   while (std::getline(std::cin, line)) {
     if (line.empty()) continue;
-    if (const std::optional<std::string> answer = server->handleText(line))
+    if (const std::optional<std::string> answer = server->handleText(line)) {
       std::cout << *answer << '\n' << std::flush;
+      // An answer that did not go out leaves the client waiting for it.
+      if (!std::cout) {
+        std::cerr << "cannot write the MCP answer\n";
+        return 1;
+      }
+    }
+  }
+  // Only the end of the input ends cleanly. `std::cin`, synced with C stdio,
+  // reads a failed read as the end: `ferror` tells them apart.
+  if (std::cin.bad() || !std::cin.eof() || std::ferror(stdin) != 0) {
+    std::cerr << "cannot read the MCP input\n";
+    return 1;
   }
   return 0;
 }

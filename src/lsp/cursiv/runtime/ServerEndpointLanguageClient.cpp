@@ -1,6 +1,7 @@
 #include "cursiv/runtime/ServerEndpointLanguageClient.hpp"
 
 #include <lsp/error.h>
+#include <lsp/message_base.h>
 #include <lsp/server_endpoint.h>
 
 #include <functional>
@@ -76,7 +77,7 @@ void ServerEndpointLanguageClient::registerCapability(
 }
 
 // The callback form, not a future: waiting here would block the thread that
-// must read the answer. The reply lands on the read loop and is deferred to
+// must read the answer. The reply arrives on the read loop and is deferred to
 // the writer.
 void ServerEndpointLanguageClient::configuration(
     lsp::ConfigurationParams params,
@@ -87,26 +88,30 @@ void ServerEndpointLanguageClient::configuration(
   });
 }
 
-// A custom method skips the endpoint's own refusal: outside a session the
-// message is dropped here, as the others are.
+// A custom method skips the endpoint's own check, so it is asked here: outside
+// a session the message is dropped.
 void ServerEndpointLanguageClient::sendNotification(std::string_view method,
                                                     const lsp::LSPAny& params) {
-  if (!_endpoint.isActive()) return;
-  if (params.isNull())
-    _endpoint.customNotification(method);
-  else
-    _endpoint.customNotification(method, as_params(params));
+  send_in_session([&] {
+    _endpoint.preMethodCall<lsp::GenericNotification>();
+    if (params.isNull())
+      _endpoint.customNotification(method);
+    else
+      _endpoint.customNotification(method, as_params(params));
+  });
 }
 
 void ServerEndpointLanguageClient::sendRequest(
     std::string_view method, const lsp::LSPAny& params,
     std::function<void(lsp::LSPAny)> then) {
-  if (!_endpoint.isActive()) return;
-  const auto reply = deliver(std::move(then), _defer);
-  if (params.isNull())
-    (void)_endpoint.customRequest(method, reply);
-  else
-    (void)_endpoint.customRequest(method, as_params(params), reply);
+  send_in_session([&] {
+    _endpoint.preMethodCall<lsp::GenericRequest>();
+    const auto reply = deliver(std::move(then), _defer);
+    if (params.isNull())
+      (void)_endpoint.customRequest(method, reply);
+    else
+      (void)_endpoint.customRequest(method, as_params(params), reply);
+  });
 }
 
 }  // namespace cursiv

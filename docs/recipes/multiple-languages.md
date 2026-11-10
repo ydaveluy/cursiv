@@ -7,21 +7,23 @@ covers.
 
 ## Two generated languages
 
-Generate each language with its own id and extension. They may share one
-grammar header:
+Generate each language with its own id, extension and TextMate file. They may
+share one grammar header:
 
 ```cmake title="src/CMakeLists.txt"
 cursiv_generate_language(ID         requirements-lang
     GRAMMAR    requirements/RequirementsGrammar.hpp
     NAMESPACE  req::Requirements
     EXTENSIONS .req
-    OUT        requirements/generated)
+    OUT        requirements/generated
+    TEXTMATE   ../vscode/syntaxes/requirements.tmLanguage.json)
 
 cursiv_generate_language(ID         tests-lang
     GRAMMAR    requirements/RequirementsGrammar.hpp
     NAMESPACE  req::Tests
     EXTENSIONS .tst
-    OUT        requirements/generated)
+    OUT        requirements/generated
+    TEXTMATE   ../vscode/syntaxes/tests.tmLanguage.json)
 
 file(GLOB_RECURSE _core CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp)

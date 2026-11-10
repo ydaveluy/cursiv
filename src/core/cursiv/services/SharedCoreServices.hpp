@@ -6,10 +6,9 @@
 #include "cursiv/services/ServiceSlot.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
-// The container of the whole workspace, every language. Non-movable, since
-// what it installs binds to it by reference. The service graph is fixed once
-// concurrent processing begins: quiesce the readers before replacing a
-// service or destroying this.
+// The container of the whole workspace, every language. Non-movable, as what
+// it installs binds to it. Stop all readers before replacing or destroying a
+// service.
 
 namespace cursiv {
 
@@ -30,28 +29,22 @@ struct SharedCoreServices {
   SharedCoreServices(const SharedCoreServices&) = delete;
   SharedCoreServices& operator=(const SharedCoreServices&) = delete;
 
-  // Where the runtime says what went wrong when no client is owed an answer.
-  // First, so it dies last: a service reporting from its own teardown still
-  // has a sink.
+  // Where the runtime reports problems no request answers. Declared first, so
+  // it is destroyed last: a service reporting from its own teardown still has
+  // a sink.
   std::unique_ptr<ObservabilitySink> observabilitySink;
-  // The one pool a workspace shares, replaceable by the host, sized by
-  // `CURSIV_WORKERS` or the hardware. Early for the same reason: every
-  // service that fans out on it is gone before it stops. The builder fans
-  // out over documents, and the linker and the validator over one document's
-  // work from inside the builder's tasks: `TaskScheduler::parallelFor` may be
-  // called from a task.
+  // The workspace's one pool, replaceable, sized by `CURSIV_WORKERS` or the
+  // hardware. Declared early so every service using it is gone before it stops.
+  // `TaskScheduler::parallelFor` may be called from a task.
   std::unique_ptr<TaskScheduler> taskScheduler;
   std::unique_ptr<Documents> documents;
   std::unique_ptr<DocumentFactory> documentFactory;
   std::unique_ptr<IndexManager> indexManager;
   std::unique_ptr<DocumentBuilder> documentBuilder;
-  // After the builder, and the order is load-bearing. Members die in reverse
-  // declaration order, and a language's services -- which this registry owns --
-  // may hold a cache subscribed to the builder. Declared before it, the builder
-  // would die first and every such cache would unsubscribe from freed memory.
+  // After the builder, on purpose: members die in reverse order, and a
+  // language's services may hold a cache subscribed to the builder.
   std::unique_ptr<ServiceRegistry> serviceRegistry;
-  // Always installed: a workspace with no disk under it is an installer's
-  // choice of provider, never an absent slot.
+  // Always installed; a workspace without a disk uses the empty provider.
   std::unique_ptr<FileSystemProvider> fileSystemProvider;
   std::unique_ptr<WorkspaceLock> workspaceLock;
   std::unique_ptr<WorkspaceManager> workspaceManager;
@@ -62,8 +55,7 @@ struct SharedCoreServices {
   [[nodiscard]] std::string_view firstMissingService() const;
 };
 
-// Fill-if-empty, like its language-level counterpart. Nothing shared knows a
-// grammar, so nothing here is templated.
+// Fills the empty slots, like `install_default_core_services`.
 void install_default_shared_core_services(SharedCoreServices& shared);
 
 }  // namespace cursiv

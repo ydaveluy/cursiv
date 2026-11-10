@@ -106,7 +106,7 @@ void check(const cursiv::Parser& ll, const cursiv::Parser* lr, Spell spell,
   }
 }
 
-// The re-readings of the text as the name its start owes: the state, or the
+// The re-readings of the text as the name its start expects: the state, or the
 // point, that takes a name and the keyword beside it.
 std::vector<cursiv::engine::Typo> lr_names(std::string_view text) {
   namespace lr = tllrefused::generated::Lr;
@@ -195,7 +195,7 @@ void a_refused_keyword_reserves_nothing_from_a_misspelling() {
 }
 
 // A refused word spelled to the end of what a walk reads ran into that end:
-// the byte that rescues it may stand past a cut there, so the walk is cut.
+// the byte that lets it pass may stand past a cut there, so the walk is cut.
 void a_word_refused_at_a_cut_runs_into_it() {
   constexpr std::string_view text = "in-placex";
   constexpr auto cut = static_cast<cursiv::TextOffset>(text.size() - 1);
@@ -216,7 +216,7 @@ void a_word_refused_at_a_cut_runs_into_it() {
   const auto llCut =
       cursiv::engine::ll_match_text<table>(text.data(), cut, mode, 0, reached);
   CHECK(reached == cut && llCut.term != llWhole.term);
-  // A search whose share ends inside a token keeps nothing of it.
+  // A search whose budget ends inside a token keeps nothing of it.
   const std::string word(2 * cursiv::engine::kRepairLexBytes, 'x');
   cursiv::Cst tree(word);
   cursiv::CstBuilder builder(tree);
@@ -252,16 +252,15 @@ void a_reservation_reads_the_word_its_keyword_refuses() {
 }  // namespace
 
 // A keyword refused at a position is off it and reserves nothing there: the
-// bytes read as a name, in either engine, and in a mode that reads several
-// candidates.
-// A refused keyword takes itself out of the election, and only itself.
+// bytes read as a name, in either engine and in a mode with several candidates.
+// It takes only itself out of the choice.
 void refused_keyword_cases(const char* engine, const cursiv::Parser& parser) {
-  std::string far = "rivals: X";
+  std::string far = "shared: X";
   for (unsigned i = 0; i < 100; ++i) far += " a";
   for (const std::string& text :
-       {std::string{"rivals:X q"}, std::string{"rivals: X b"},
-        std::string{"rivals: X c"}, std::string{"rivals: X a b"},
-        std::string{"rivals: X a c"}, far + " b", far + " c"}) {
+       {std::string{"shared:X q"}, std::string{"shared: X b"},
+        std::string{"shared: X c"}, std::string{"shared: X a b"},
+        std::string{"shared: X a c"}, far + " b", far + " c"}) {
     const auto result = parser.parse(text);
     CHECK(result.accepted && result.diagnostics.empty());
     if (!result.diagnostics.empty())
@@ -304,10 +303,10 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
   const auto ll = tllrefused::generated::Ll::create_parser();
   const auto lr = tllrefused::generated::Lr::create_parser();
   const std::vector<std::string> next{"a", "b", "c"};
-  std::string far = "rivals: X";
+  std::string far = "shared: X";
   for (unsigned i = 0; i < 100; ++i) far += " a";
   for (const std::string& written :
-       {std::string{"rivals: X "}, std::string{"rivals: X a "}, far + " "})
+       {std::string{"shared: X "}, std::string{"shared: X a "}, far + " "})
     for (const char* rest : {"", "b", "c"}) {
       const std::string text = written + rest;
       const auto at = static_cast<cursiv::TextOffset>(written.size());
@@ -317,31 +316,32 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
   // Past the terminal the first reading would not have taken, the replay still
   // stands: the next items, and a caret inside one of them.
   const std::vector<std::string> item{
-      "-",       "IN",    "NAME",     "cell:",  "glued:",  "head:", "inside:",
-      "marked:", "note:", "pending:", "plain:", "rivals:", "sp:",   "spelt:"};
+      "-",      "IN",      "NAME",    "attached:", "cell:",
+      "head:",  "inside:", "marked:", "note:",     "pending:",
+      "plain:", "shared:", "sp:",     "spelt:"};
   for (const std::string& text :
-       {std::string{"rivals: X c"}, std::string{"rivals: X a c"}, far + " c"}) {
+       {std::string{"shared: X c"}, std::string{"shared: X a c"}, far + " c"}) {
     const auto at = static_cast<cursiv::TextOffset>(text.size());
     CHECK(offered(*ll, text, at) == item);
     CHECK(offered(*lr, text, at) == item);
-    CHECK(offered(*ll, text + " rivals: X a b", at + 1) == item);
-    CHECK(offered(*lr, text + " rivals: X a b", at + 1) == item);
+    CHECK(offered(*ll, text + " shared: X a b", at + 1) == item);
+    CHECK(offered(*lr, text + " shared: X a b", at + 1) == item);
   }
   // Where no gap refuses it the keyword stands and reserves its spelling; where
   // one does, the terminal the same gap guards is refused with it.
   const std::vector<std::string> tight{"q"};
   for (const char* rest : {"", "q"}) {
-    const std::string text = std::string{"rivals:X "} + rest;
+    const std::string text = std::string{"shared:X "} + rest;
     CHECK(offered(*ll, text, 9) == tight);
     CHECK(offered(*lr, text, 9) == tight);
   }
-  CHECK(!parse_clean(*ll, "rivals:X z") && !parse_clean(*lr, "rivals:X z"));
-  CHECK(!parse_clean(*ll, "rivals: X z") && !parse_clean(*lr, "rivals: X z"));
-  // A caret glued behind the word: the reading it follows may be either tie.
+  CHECK(!parse_clean(*ll, "shared:X z") && !parse_clean(*lr, "shared:X z"));
+  CHECK(!parse_clean(*ll, "shared: X z") && !parse_clean(*lr, "shared: X z"));
+  // A caret attached behind the word: the reading it follows may be either tie.
   const std::vector<std::string> marks{"!", "?"};
-  for (const char* text : {"glued: W", "glued: W!", "glued: W?"}) {
-    CHECK(offered(*ll, text, 8) == marks);
-    CHECK(offered(*lr, text, 8) == marks);
+  for (const char* text : {"attached: W", "attached: W!", "attached: W?"}) {
+    CHECK(offered(*ll, text, 11) == marks);
+    CHECK(offered(*lr, text, 11) == marks);
   }
   // Two readings refuse the keyword from one cell.
   for (const char* text : {"cell: V !", "cell: V ?"}) {
@@ -374,18 +374,25 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
   CHECK(offered(*lr, "marked: y #x ;", 13) == std::vector<std::string>{";"});
   CHECK(offered(*lr, "marked: y #x ;", 10) == std::vector<std::string>{"#x"});
   // What a run with ties answered is no answer to a run without.
-  for (const char* text : {"rivals: Xa b rivals: X a c",
-                           "rivals: X a c rivals: Xa b"})
+  for (const char* text :
+       {"shared: Xa b shared: X a c", "shared: X a c shared: Xa b"})
     CHECK(parse_clean(*ll, text) && parse_clean(*lr, text));
   CHECK(parse_clean(*ll, "note:N q") && parse_clean(*lr, "note:N q"));
-  // Both engines read every caret alike.
+  // Both engines read every caret the same.
   for (const std::string text :
-       {"rivals: X b", "rivals: X c", "rivals: X a b", "rivals: X a c",
-        "rivals:X q", "rivals:X z", "x rivals: X a c",
-        "rivals: X a c rivals: X a b", "rivals:  X  a  c", "rivals: X",
-        "rivals: X a", "glued: W", "glued: W!", "glued: W?", "glued:W q",
-        "cell: V !", "cell: V ?", "cell:V q", "cell:V r", "cell:e1V q",
-        "cell:e2V r", "note: k m", "note:N q", "note: N k m", "note: N", "head: z: in",
+       {"shared: X b",       "shared: X c",
+        "shared: X a b",     "shared: X a c",
+        "shared:X q",        "shared:X z",
+        "x shared: X a c",   "shared: X a c shared: X a b",
+        "shared:  X  a  c",  "shared: X",
+        "shared: X a",       "attached: W",
+        "attached: W!",      "attached: W?",
+        "attached:W q",      "cell: V !",
+        "cell: V ?",         "cell:V q",
+        "cell:V r",          "cell:e1V q",
+        "cell:e2V r",        "note: k m",
+        "note:N q",          "note: N k m",
+        "note: N",           "head: z: in",
         "head: y: bare- a!", "head: y: bare- b!"})
     for (cursiv::TextOffset at = 0; at <= text.size(); ++at) {
       const auto a = offered(*ll, text, at), b = offered(*lr, text, at);
@@ -398,7 +405,7 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
 
 // A token behind which the caret has read on is the token the parse read: the
 // word that refuses its keyword stands before the caret, and what stands past
-// the caret may still settle it.
+// the caret may still decide it.
 void a_caret_reads_the_word_a_keyword_is_refused_by() {
   const auto ll = tllrefused::generated::Ll::create_parser();
   const auto lr = tllrefused::generated::Lr::create_parser();
@@ -449,7 +456,7 @@ void a_caret_reads_the_word_a_keyword_is_refused_by() {
 
 std::string nest_of(const tllrefused::Item& item) {
   std::string out = "?";
-  for (const tllrefused::Item* kid : item.kids) out += nest_of(*kid);
+  for (const tllrefused::Item* child : item.children) out += nest_of(*child);
   return item.dash ? out + ":" : out;
 }
 
@@ -495,7 +502,7 @@ void a_dangling_mark_goes_to_the_deepest_level() {
 
 // A prediction reads what the stack admits, whatever else its choice admits for
 // another caller: a comment stays one where this caller takes no token it
-// spells, and a spelling stays whole where its arms read on alike.
+// spells, and a spelling stays whole where its arms read on the same.
 void a_read_ahead_takes_what_the_callers_take() {
   const auto ll = tllrefused::generated::Ll::create_parser();
   const auto lr = tllrefused::generated::Lr::create_parser();
@@ -537,7 +544,7 @@ void a_stop_in_a_refused_reading_leaves_nothing_behind() {
   namespace ll = tllrefused::generated::Ll;
   const cursiv::engine::LlLanguageParser<ll::kTable> parser(
       ll::kGrammarMetaData, ll::kAstActions, stopping_drive);
-  std::string far = "rivals: X";
+  std::string far = "shared: X";
   for (unsigned i = 0; i < 2000; ++i) far += " a";
   far += " c";
   cursiv::CancellationTokenSource source;
@@ -564,20 +571,20 @@ void a_stop_in_a_refused_reading_leaves_nothing_behind() {
 // A run's last byte reads on: a continuation stays a blank, its last byte alone a
 // token, in a state that takes a one-byte token off its first byte.
 void a_splice_is_no_token_behind_a_run(const cursiv::Parser& parser) {
-  const auto kids = [&](const std::string& text) {
+  const auto children = [&](const std::string& text) {
     const auto result = parser.parse(text);
     CHECK(result.accepted && result.diagnostics.empty());
     const auto* const doc = result.value_as<tllrefused::Doc>();
     return doc != nullptr && doc->items.size() == 1
-               ? doc->items[0]->kids.size()
+               ? doc->items[0]->children.size()
                : std::size_t{99};
   };
-  CHECK(kids("sp:a .") == 1);
-  CHECK(kids("sp:a _\n b .") == 2);
-  CHECK(kids("sp:a   _\n ; .") == 2);
-  CHECK(kids("sp:a _ b .") == 3);
-  CHECK(kids("sp:a_ .") == 2);
-  CHECK(kids("sp:a ; _\n ; _ .") == 4);
+  CHECK(children("sp:a .") == 1);
+  CHECK(children("sp:a _\n b .") == 2);
+  CHECK(children("sp:a   _\n ; .") == 2);
+  CHECK(children("sp:a _ b .") == 3);
+  CHECK(children("sp:a_ .") == 2);
+  CHECK(children("sp:a ; _\n ; _ .") == 4);
 }
 
 void run() {

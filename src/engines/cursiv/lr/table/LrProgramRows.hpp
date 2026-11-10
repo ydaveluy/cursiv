@@ -1,7 +1,6 @@
-// A frozen matrix indexed by state and symbol, in the smallest of four forms:
-// a state's row is laid for it, or `rows` names where its shared row starts;
-// a row is its values, or a run of shared blocks of eight values where
-// `blocks` is laid. An empty span is a layer the matrix does not lay.
+// A frozen matrix by state and symbol, in the smallest of four forms: a row per
+// state or shared rows `rows` points at, each its values or a run of shared
+// eight-value `blocks`. An empty span is a layer the matrix does not store.
 #pragma once
 
 #include <cstddef>

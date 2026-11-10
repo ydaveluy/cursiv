@@ -177,7 +177,7 @@ void as_names_the_constant_in_place(const cursiv::Parser& p) {
   check(p, "valued:", "a IS b", "<refused>");
 }
 
-// The constant `as<V>` names reaches a member outside a climb too.
+// The constant `as<V>` names reaches a member outside an infix too.
 void as_assigns_its_constant(const cursiv::Parser& p) {
   for (const auto& [text, want] : {std::pair{"stated:SAME", Op::equal},
                                    {"stated:NOT SAME", Op::NOTEQUAL},
@@ -266,7 +266,7 @@ void a_condition_ending_a_region_reads_past_the_callers_trivia(
                       std::string(gap) + "a");
 }
 
-// A keyword a repair invents has no row, as a dropped token has none, but the
+// A keyword a repair inserts has no row, as a dropped token has none, but the
 // state that reads it: the value its alternative names was never written, and
 // the member keeps its default.
 void an_invented_keyword_leaves_the_member_unwritten(const cursiv::Parser& p) {
@@ -278,7 +278,7 @@ void an_invented_keyword_leaves_the_member_unwritten(const cursiv::Parser& p) {
   if (decl != nullptr) CHECK(decl->vis == Vis::Private && decl->name == "a");
 }
 
-// Each level as it is listed, and every node of the climb a `Recoded`.
+// Each level as it is listed, and every node of the infix a `Recoded`.
 void binary_builds_the_class_it_names(const cursiv::Parser& p) {
   check(p, "derived:", "a != b", "(a NOTEQUAL b)");
   check(p, "derived:", "a := b := c", "(a equal (b equal c))");
@@ -529,7 +529,7 @@ void a_caret_offers_no_chain(const cursiv::Parser& parser) {
   offers(parser, "a <~ (b", 7, {"&~", ")", "*~", "+~", "<~", ">~"});
 }
 
-// Text a repair dropped behind a token it invented is stepped over: a caret
+// Text a repair dropped after a token it inserted is stepped over: a caret
 // in it is offered what the caret before it is.
 void a_caret_in_dropped_text_reads_from_before_it(
     const cursiv::Parser& parser) {
@@ -915,7 +915,7 @@ void the_token_behind_rules_that_read_nothing_is_offered(
 }
 
 // A caret reads as many ways through those rules as the closure does, each once
-// however many readings land on it. No counter sees this: the time is its proof,
+// however many readings reach it. No counter sees this: the time is its proof,
 // by two orders of magnitude.
 void a_caret_keeps_each_way_once(const cursiv::Parser& p) {
   const std::string text = "empties:a;";

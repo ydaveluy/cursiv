@@ -1,3 +1,5 @@
+// A `create`, then unordered items with a `nest`: after the nest, `name` would
+// be written on a `Wrap`, which has no such member.
 // expect LR: this directive writes a member that the current node may not have
 #pragma once
 

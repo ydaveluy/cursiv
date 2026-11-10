@@ -15,7 +15,7 @@ namespace cursiv::engine {
 namespace {
 
 // A new condition: `a` and `b`. Zero when no id is left.
-std::uint8_t lr_guard_lay(LrBuildCfg& g, std::uint8_t a, std::uint8_t b) {
+std::uint8_t lr_guard_add(LrBuildCfg& g, std::uint8_t a, std::uint8_t b) {
   const std::uint16_t two[] = {static_cast<std::uint16_t>(a - 1u),
                                static_cast<std::uint16_t>(b - 1u)};
   const std::uint16_t k = g.gap_conjoin(std::span(two));
@@ -29,13 +29,15 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
   const unsigned nP = g.nprods;
   std::vector count(nN, 0u);
   for (unsigned p = 0; p < nP; ++p) ++count[g.prods[p].lhs];
-  // The rules that are a condition: one empty, gated production. A record
-  // that states nothing only gave a directive a span to ride.
+  // The rules that are a condition: one empty, gated production that asserts
+  // no end. A record that states nothing only gave a directive a span to attach
+  // to.
   std::vector cond(nN, std::uint8_t{});
   for (unsigned p = 0; p < nP; ++p) {
     const LrLowProd& q = g.prods[p];
     const bool bare = q.node == kNoRow || writes.chains[q.node].count == 0;
-    if (q.len == 0 && q.gap != 0 && bare && count[q.lhs] == 1)
+    if (q.len == 0 && q.gap != 0 && bare && count[q.lhs] == 1 &&
+        !g.prodBuild[p].endOnly)
       cond[q.lhs] = q.gap;
   }
   const auto cond_of = [&](std::uint16_t s) -> std::uint8_t {
@@ -48,7 +50,7 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
     if (a == 0 || a == b) return b;
     if (joined[a].size() <= b) joined[a].resize(b + 1u, 0);
     if (joined[a][b] == 0) {
-      const std::uint8_t id = lr_guard_lay(g, a, b);
+      const std::uint8_t id = lr_guard_add(g, a, b);
       joined.resize(g.ngapConds + 1u);
       joined[a][b] = id;
     }
@@ -73,7 +75,7 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
     cfgs.push_back(c);
     guard.push_back(k);
   };
-  // Where each old position lands: a condition on the one it guards.
+  // Where each old position goes: a condition on the one it guards.
   std::vector<std::uint32_t> moved;
   for (unsigned p = 0; p < nP; ++p) {
     LrLowProd& q = g.prods[p];
@@ -81,14 +83,14 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
     const auto at = static_cast<std::uint32_t>(sym.size());
     const auto self = static_cast<std::uint16_t>(p);
     moved.assign(q.len + 1u, 0);
-    std::uint32_t settled = 0;
-    const auto land = [&](unsigned upTo) {
-      for (; settled < upTo; ++settled)
-        moved[settled] = static_cast<std::uint32_t>(sym.size()) - at;
+    std::uint32_t mapped = 0;
+    const auto mark_moved = [&](unsigned upTo) {
+      for (; mapped < upTo; ++mapped)
+        moved[mapped] = static_cast<std::uint32_t>(sym.size()) - at;
     };
     for (unsigned i = 0; i < q.len;) {
       if (cond_of(g.sym_at(q, i)) == 0) {
-        land(i + 1u);
+        mark_moved(i + 1u);
         push(g.slots[q.at + i], g.sym_at(q, i), g.cfg_at(self, i), 0);
         ++i;
         continue;
@@ -105,7 +107,7 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
       // a region is the caller's.
       const std::uint8_t before = g.cfg_at(self, first);
       if (i < q.len) {
-        land(i + 1u);
+        mark_moved(i + 1u);
         push(LrLowSlot{writes.concat(row, g.row_at(q, i))}, g.sym_at(q, i),
              edge(before, g.cfg_at(self, i)), k);
         ++i;
@@ -114,15 +116,15 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
         // on the boundary past it.
         const std::uint8_t past = edge(before, b.tailCfg);
         for (unsigned j = first; j < q.len; ++j) {
-          land(j + 1u);
+          mark_moved(j + 1u);
           push(g.slots[q.at + j], g.sym_at(q, j), past, 0);
         }
       } else {
-        q.gap = k;
+        q.gap = join(q.gap, k);
         b.tailCfg = edge(before, b.tailCfg);
       }
     }
-    land(q.len + 1u);
+    mark_moved(q.len + 1u);
     for (std::uint32_t d = b.decideAt; d < b.decideAt + b.decideLen; ++d) {
       std::uint32_t& x = g.decisions[d];
       x = moved[x >> 16] << 16 | (x & 0xffffu);

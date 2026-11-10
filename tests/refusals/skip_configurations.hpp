@@ -1,5 +1,5 @@
-// The grammar's own configuration and a region for each of 255 terminals: a
-// position names the configuration it is read under by one byte.
+// The grammar's own trivia setting plus 255 `skip()` regions: 256 settings,
+// one more than the limit.
 // expect LR LL: refused: the grammar uses more than 255 trivia settings
 #pragma once
 
@@ -43,8 +43,7 @@ constexpr auto regions(std::index_sequence<Is...>) {
 struct G : Parts {
   struct Root : rule<create<Doc>(regions(std::make_index_sequence<255>{}))> {};
   using entry = Root;
-  // Whitespace keeps the grammar's own configuration distinct from every
-  // subset.
+  // Ignoring `WS` keeps the grammar's own setting distinct from every region's.
   using ignored = WS;
 };
 

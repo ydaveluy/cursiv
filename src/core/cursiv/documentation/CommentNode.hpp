@@ -1,5 +1,5 @@
-// The comment written above a node as a place in the document, for what needs
-// its position and not only its text.
+// The comment written above a node as a place in the document, for callers that
+// need its position and not only its text.
 #pragma once
 
 #include <span>
@@ -20,8 +20,8 @@ struct Document;
                                        const AstNode& node,
                                        std::span<const std::string> ruleNames);
 
-// The documentation in comment record `comment`, its ranges those of the
-// document: `offset` is what a diagnostic's range takes.
+// Parses comment record `comment`. Its ranges are document ranges: `offset`
+// can feed a diagnostic's range.
 [[nodiscard]] DocComment parse_doc_comment(
     const Document& document, NodeId comment, const DocCommentParseOptions& options = {});
 

@@ -1,5 +1,6 @@
 // The table builder, one target per grammar named by the macros: it writes
-// everything that grammar derives as C++ source.
+// everything that grammar derives as C++ source, and its keywords into the
+// TextMate file `--textmate` names.
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
@@ -33,11 +34,13 @@
 #include "cursiv/shared/gen/LanguageIdentity.hpp"
 #include "cursiv/shared/gen/LexRecursion.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/shared/gen/TextMateKeywords.hpp"
 #include "cursiv/shared/gen/gen_report.hpp"
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/utils/dump.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
 #ifdef CURSIV_GEN_INCLUDE
 #include CURSIV_GEN_INCLUDE
@@ -146,33 +149,28 @@ void report(const Built& a, unsigned probeCuts) {
       CURSIV_GEN_NAME, a.nstates, a.cfg.nterms, a.cfg.nnts, a.cfg.nprods,
       a.nactions, a.ndfa, a.writes.nchains, a.writes.nacts,
       a.identity == cursiv::engine::LrIdentity::core ? "core" : "wide");
-  if (probeCuts != 0 || a.nunminted != 0)
-    std::printf("%s: gave way: probeCuts=%u unminted=%u\n", CURSIV_GEN_NAME,
-                probeCuts, a.nunminted);
+  if (probeCuts != 0 || a.nDroppedCopies != 0)
+    std::printf("%s: gave way: probeCuts=%u droppedCopies=%u\n",
+                CURSIV_GEN_NAME, probeCuts, a.nDroppedCopies);
   if (!a.modeFlagPool.sets.empty())
     std::printf("%s: flagged modes: %zu sets\n", CURSIV_GEN_NAME,
                 a.modeFlagPool.sets.size());
-  if (a.nconflicts == 0 && a.nOwed == 0 && !a.multiCand) return;
+  if (a.nconflicts == 0 && a.nAmbiguities == 0 && !a.multiCand) return;
   std::printf(
-      "%s: conflicts=%u owed=%u ordered=%u mergeInduced=%u"
+      "%s: conflicts=%u ambiguities=%u ordered=%u mergeInduced=%u"
       " (state=%u term=%u) canonical=%u multiCand=%d\n",
-      CURSIV_GEN_NAME, a.nconflicts, a.nOwed, a.nOrdered, a.nMergeInduced,
-      a.mergeState, a.mergeTerm, a.ncanonical, a.multiCand ? 1 : 0);
+      CURSIV_GEN_NAME, a.nconflicts, a.nAmbiguities, a.nOrdered,
+      a.nMergeInduced, a.mergeState, a.mergeTerm, a.ncanonical,
+      a.multiCand ? 1 : 0);
   // The pair that asks for a candidate walk.
   if (a.multiCand) {
-    const std::string_view from = a.cfg.term_name(a.multiTerm);
-    std::printf("%s: candidates mode=%u '%.*s'", CURSIV_GEN_NAME, a.multiMode,
-                static_cast<int>(from.size()), from.data());
-    if (a.multiInto != 0) {
-      const std::string_view into = a.cfg.term_name(a.multiInto);
-      std::printf(" -> '%.*s'", static_cast<int>(into.size()), into.data());
-    }
-    if (!a.multiText.empty()) {
-      std::string text;
-      for (const unsigned char b : a.multiText)
-        text += cursiv::engine::spell_byte(b);
-      std::printf(" on `%s`", text.c_str());
-    }
+    std::printf("%s: candidates mode=%u %s", CURSIV_GEN_NAME, a.multiMode,
+                cursiv::quote(a.cfg.term_name(a.multiTerm)).c_str());
+    if (a.multiInto != 0)
+      std::printf(" -> %s",
+                  cursiv::quote(a.cfg.term_name(a.multiInto)).c_str());
+    if (!a.multiText.empty())
+      std::printf(" on %s", cursiv::quote(a.multiText, '`').c_str());
     std::printf("\n");
   }
 }
@@ -205,9 +203,9 @@ void report_each_conflict(const Built& a) {
   for (std::size_t i = 0; i < queue.size(); ++i) {
     const std::uint32_t s = queue[i];
     for (const cursiv::engine::LrAction& x : a.action_row(s))
-      a.each_landing(x, [&](std::uint16_t to) { reach(s, to, x.term); });
+      a.each_target(x, [&](std::uint16_t to) { reach(s, to, x.term); });
     for (const auto& e : a.gotoRows[s])
-      a.each_goto_landing(e, [&](std::uint16_t to) {
+      a.each_goto_target(e, [&](std::uint16_t to) {
         reach(s, to, cursiv::engine::nt_sym(e.nt));
       });
   }
@@ -219,7 +217,7 @@ void report_each_conflict(const Built& a) {
     for (auto it = path.rbegin(); it != path.rend(); ++it) {
       if (!out.empty()) out += ' ';
       out += cursiv::engine::is_term(*it)
-                 ? "'" + std::string(a.cfg.term_name(*it)) + "'"
+                 ? cursiv::quote(a.cfg.term_name(*it))
                  : std::string(a.cfg.nt_name(cursiv::engine::nt_index(*it)));
     }
     return out;
@@ -230,9 +228,8 @@ void report_each_conflict(const Built& a) {
     cursiv::engine::lr_each_run(
         row, a.actionCount[st], [&](std::size_t i, std::size_t j) {
           if (j - i < 2) return;
-          const std::string_view t = a.cfg.term_name(row[i].term);
-          std::printf("%s: state %u on '%.*s' --\n", CURSIV_GEN_NAME, st,
-                      static_cast<int>(t.size()), t.data());
+          std::printf("%s: state %u on %s --\n", CURSIV_GEN_NAME, st,
+                      cursiv::quote(a.cfg.term_name(row[i].term)).c_str());
           if (const std::string after = prefix(st); !after.empty())
             std::printf("      after   %s\n", after.c_str());
           for (std::size_t k = i; k < j; ++k)
@@ -240,7 +237,7 @@ void report_each_conflict(const Built& a) {
               std::printf("      reduce  %s\n",
                           a.cfg.prod_text(a.cfg.prods[row[k].arg]).c_str());
             else
-              a.each_landing(row[k], [](std::uint16_t to) {
+              a.each_target(row[k], [](std::uint16_t to) {
                 std::printf("      shift   -> state %u\n", to);
               });
         });
@@ -251,11 +248,11 @@ void report_each_conflict(const Built& a) {
 
 int run(int argc, char** argv) try {
   Args args;
-  const char* const dir = cursiv::engine::gen_out_dir(
+  const cursiv::engine::GenPaths paths = cursiv::engine::gen_paths(
       argc, argv,
       "[--stamp-row-bits=1..16] [--group-lines=N] [--optional-gate=0..15]",
       [&](std::string_view arg) { return args.take(arg); });
-  if (dir == nullptr) return exit_status(GenCode::usage);
+  if (paths.dir == nullptr) return exit_status(GenCode::usage);
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<View>();
   if (cursiv::engine::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
     return exit_status(GenCode::refused);
@@ -283,7 +280,7 @@ int run(int argc, char** argv) try {
   const auto states = cursiv::engine::lr_emit_parser_files(
       done, CURSIV_GEN_NS, &probeCuts, args.groupLines);
   if (const GenCode wrote = cursiv::engine::write_common_artifacts(
-          dir,
+          paths.dir,
           {.table = cursiv::engine::lr_emit_table(done, CURSIV_GEN_NS),
            .parser = cursiv::engine::lr_emit_parser_decl(done, CURSIV_GEN_NS),
            .parserUnits = states,
@@ -296,6 +293,8 @@ int run(int argc, char** argv) try {
            .terminals = cursiv::engine::record_terminals(a.cfg),
            .lang = {CURSIV_GEN_ID, cursiv::engine::split(CURSIV_GEN_EXTENSIONS),
                     cursiv::engine::split(CURSIV_GEN_FILE_NAMES)},
+           .textmate = paths.textmate,
+           .keywords = cursiv::engine::textmate_keywords(a.cfg),
            .parserHeader = "cursiv/lr/runtime/LrLanguageParser.hpp",
            .parserClass = "LrLanguageParser"});
       wrote != GenCode::ok)

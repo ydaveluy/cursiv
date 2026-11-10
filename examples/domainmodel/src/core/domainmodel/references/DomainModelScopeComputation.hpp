@@ -40,7 +40,7 @@ class DomainModelScopeComputation final
 
  private:
   // Each container's declarations, then requalified for the enclosing
-  // package: a name climbs one dot per storey on the way out.
+  // package: a name gains one qualifier per enclosing package.
   void processContainer(const cursiv::AstNode& root,
                         std::span<ast::AbstractElement* const> elements,
                         const cursiv::Document& document,

@@ -1,5 +1,5 @@
-// A counted repetition of a rule that may match nothing is spelt out as a
-// ladder nested as deep as its bound: the refusal is told without walking it.
+// A counted repetition, up to 21 000, of a rule that may match nothing: LL
+// refuses it before expanding the bound into nested levels.
 // expect LL: refused .nullableRepetition..*rule .Root. repeats an item that may match nothing
 #pragma once
 

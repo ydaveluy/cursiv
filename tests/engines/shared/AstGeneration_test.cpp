@@ -4,13 +4,13 @@
 #include <filesystem>
 #include <format>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
-#include "cursiv/syntax-tree/AstNode.hpp"
-#include "cursiv/utils/TypeName.hpp"
 #include "cursiv/ll/gen/LlBuiltProgram.hpp"
 #include "cursiv/ll/gen/LlLowering.hpp"
 #include "cursiv/lr/gen/LrBuildTable.hpp"
@@ -21,15 +21,17 @@
 #include "cursiv/shared/gen/GrammarBindings.hpp"
 #include "cursiv/shared/gen/HeadMatcher.hpp"
 #include "cursiv/shared/gen/LexBacktrack.hpp"
+#include "cursiv/shared/gen/LexLoneLeadExpansion.hpp"
 #include "cursiv/shared/gen/LexModes.hpp"
-#include "cursiv/shared/gen/LexStrayExpansion.hpp"
 #include "cursiv/shared/gen/LowerPools.hpp"
 #include "cursiv/shared/gen/NamedHead.hpp"
 #include "cursiv/shared/gen/OperatorWords.hpp"
-#include "cursiv/shared/gen/TypeSpelling.hpp"
+#include "cursiv/shared/gen/TextMateKeywords.hpp"
 #include "cursiv/shared/gen/TwinBranch.hpp"
+#include "cursiv/shared/gen/TypeSpelling.hpp"
 #include "cursiv/shared/gen/write_source.hpp"
-#include "cursiv/Check.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/utils/TypeName.hpp"
 
 namespace astgen {
 
@@ -148,7 +150,7 @@ void twin_cycles_read_each_lazy_rule_body_once() {
       image.nodes = {{.kind = cursiv::detail::ImageKind::ref, .a = 0},
                      {.kind = cursiv::detail::ImageKind::lit, .text = "x"},
                      {.kind = cursiv::detail::ImageKind::choice, .count = 2}};
-      image.kids = {0, 1};
+      image.children = {0, 1};
       std::vector<unsigned> queries(count + 2);
       cursiv::engine::TwinReader reader(image, [&](unsigned rule) {
         ++queries[rule];
@@ -166,7 +168,7 @@ void twin_cycles_read_each_lazy_rule_body_once() {
       CHECK(std::ranges::all_of(queries.begin(), queries.begin() + count + 1,
                                 [](unsigned n) { return n == 1; }));
 
-      // A later rule enters an already settled closure. It cannot be part
+      // A later rule enters an already computed closure. It cannot be part
       // of that closure's cycles, and no earlier body needs reading again.
       const auto ref = static_cast<cursiv::detail::ImageId>(image.nodes.size());
       image.nodes.push_back(
@@ -174,8 +176,8 @@ void twin_cycles_read_each_lazy_rule_body_once() {
       const auto choice =
           static_cast<cursiv::detail::ImageId>(image.nodes.size());
       const auto first =
-          static_cast<cursiv::detail::ImageId>(image.kids.size());
-      image.kids.insert(image.kids.end(), {ref, 0});
+          static_cast<cursiv::detail::ImageId>(image.children.size());
+      image.children.insert(image.children.end(), {ref, 0});
       image.nodes.push_back({.kind = cursiv::detail::ImageKind::choice,
                              .first = first,
                              .count = 2});
@@ -337,13 +339,13 @@ void a_truncated_operator_product_keeps_every_opening() {
   const auto product = first.then(second);
   for (unsigned i = 1; i <= 17; ++i) {
     const auto word = OperatorWords::token(i).then(OperatorWords::token(1000));
-    CHECK(product.meets(word) && word.meets(product));
+    CHECK(product.overlaps(word) && word.overlaps(product));
   }
-  CHECK(!product.meets(OperatorWords::token(18)));
-  CHECK(!product.then(OperatorWords::none()).meets(product));
-  CHECK(!OperatorWords::none().then(product).meets(product));
-  CHECK(OperatorWords::nothing().then(product).meets(product));
-  CHECK(product.then(OperatorWords::nothing()).meets(product));
+  CHECK(!product.overlaps(OperatorWords::token(18)));
+  CHECK(!product.then(OperatorWords::none()).overlaps(product));
+  CHECK(!OperatorWords::none().then(product).overlaps(product));
+  CHECK(OperatorWords::nothing().then(product).overlaps(product));
+  CHECK(product.then(OperatorWords::nothing()).overlaps(product));
 }
 
 void long_refused_words_emit_bounded_functions() {
@@ -388,11 +390,11 @@ void named_heads_compare_the_scalars_after_the_same_lead_byte() {
         cursiv::engine::lex_decode_bytes(g, boundB));
   const auto ch = g.push_lex({cursiv::engine::LexKind::chars, plain});
   const auto body = [&](std::uint16_t bound) {
-    const auto classes = g.push_lex_kid(bound);
+    const auto classes = g.push_lex_child(bound);
     const auto guard = g.push_lex(
         {cursiv::engine::LexKind::nguard, cursiv::engine::kNoSet, classes, 1});
-    const auto base = g.push_lex_kid(ch);
-    g.push_lex_kid(guard);
+    const auto base = g.push_lex_child(ch);
+    g.push_lex_child(guard);
     return g.push_lex({cursiv::engine::LexKind::seq, base, 2});
   };
   const auto rootA = body(boundA), rootB = body(boundB);
@@ -411,7 +413,7 @@ void named_heads_compare_the_scalars_after_the_same_lead_byte() {
   CHECK(cursiv::engine::NamedHead(g).read(rootTwin, 1) == 2);
 }
 
-void stray_expansion_keeps_predicate_cycles_and_their_exits() {
+void lone_lead_expansion_keeps_predicate_cycles_and_their_exits() {
   LexCfg g;
   cursiv::engine::ByteSet lead, rest, edge;
   lead.add(0xC2, 0xDF);
@@ -421,7 +423,7 @@ void stray_expansion_keeps_predicate_cycles_and_their_exits() {
   const auto leadSet = cursiv::engine::lex_intern_set(g, lead);
   const auto restSet = cursiv::engine::lex_intern_set(g, rest);
   const auto edgeSet = cursiv::engine::lex_intern_set(g, edge);
-  const auto classes = g.push_lex_kid(restSet);
+  const auto classes = g.push_lex_child(restSet);
   const auto word = g.push_lex({.kind = cursiv::engine::LexKind::nguard,
                                 .a = cursiv::engine::kNoSet,
                                 .b = classes,
@@ -441,8 +443,8 @@ void stray_expansion_keeps_predicate_cycles_and_their_exits() {
   const int reads = n.chars(edgeSet, match);
   const int exits = n.split(match, reads);
   n.s[cycle].t1 = n.split(resumed, exits);
-  const int start = n.chars_stray(leadSet, word, cycle);
-  cursiv::engine::LexStrayExpansion(n, g).run();
+  const int start = n.chars_lone_lead(leadSet, word, cycle);
+  cursiv::engine::LexLoneLeadExpansion(n, g).run();
   CHECK(!g.lowerFail());
   CHECK(n.relays.size() == 2 * depth);
   // Follow successful predicates as zero-width edges, including the loop.
@@ -464,7 +466,7 @@ void stray_expansion_keeps_predicate_cycles_and_their_exits() {
       continue;
     }
     if (st.accept >= 0) {
-      CHECK(st.accept == 1 && st.strayBound && st.bound == restSet);
+      CHECK(st.accept == 1 && st.loneLeadBound && st.bound == restSet);
       ++acceptances;
     }
     if (st.relay >= 0) {
@@ -640,7 +642,7 @@ void ast_generation_cases_run() {
   astgen::long_refused_words_emit_bounded_functions();
   astgen::named_heads_compare_the_scalars_after_the_same_lead_byte();
   astgen::a_longer_mode_cannot_consume_the_last_slot_twice();
-  astgen::stray_expansion_keeps_predicate_cycles_and_their_exits();
+  astgen::lone_lead_expansion_keeps_predicate_cycles_and_their_exits();
   astgen::backtracking_modes_require_an_accepted_prefix_and_a_failed_cycle<
       cursiv::engine::LlBuiltProgram>();
   astgen::backtracking_modes_require_an_accepted_prefix_and_a_failed_cycle<
@@ -650,8 +652,9 @@ void ast_generation_cases_run() {
 
 namespace write_source_cases {
 
-// A generated file whose text did not move is left as it is, whatever its
-// size; one that moved is written, in whole.
+// A generated file whose text did not change is left as it is, whatever its
+// size; one that changed is written, in whole. The files change together: one
+// that cannot be written leaves the others as they were.
 
 namespace {
 
@@ -659,6 +662,11 @@ namespace fs = std::filesystem;
 
 std::string seen(const fs::path& path) {
   return cursiv::test::read_file(path.string());
+}
+
+bool write(const std::string& path, std::string_view text) {
+  const cursiv::engine::SourceFile file{path, text};
+  return cursiv::engine::write_sources(std::span(&file, 1)) == 1;
 }
 
 }  // namespace
@@ -673,46 +681,146 @@ void run() {
   fs::create_directories(dir);
   const std::string path = (dir / "Table.hpp").string();
 
-  CHECK(cursiv::engine::write_source(path, "one"));
+  CHECK(write(path, "one"));
   CHECK(seen(path) == "one");
 
-  // Unmoved: the file keeps the time it was written at.
+  // Unchanged: the file keeps the time it was written at.
   fs::last_write_time(path, fs::last_write_time(path) - std::chrono::hours(1));
   const auto then = fs::last_write_time(path);
-  CHECK(cursiv::engine::write_source(path, "one"));
+  CHECK(write(path, "one"));
   CHECK(fs::last_write_time(path) == then);
 
-  // Moved, at the same size and at another.
-  CHECK(cursiv::engine::write_source(path, "two"));
+  // Changed, at the same size and at another.
+  CHECK(write(path, "two"));
   CHECK(seen(path) == "two" && fs::last_write_time(path) != then);
-  CHECK(cursiv::engine::write_source(path, "three and more"));
+  CHECK(write(path, "three and more"));
   CHECK(seen(path) == "three and more");
-  CHECK(cursiv::engine::write_source(path, "short"));
+  CHECK(write(path, "short"));
   CHECK(seen(path) == "short");
 
   // Empty text, over a file and over none; and bytes a text reader would fold.
-  CHECK(cursiv::engine::write_source(path, ""));
+  CHECK(write(path, ""));
   CHECK(fs::file_size(path) == 0);
-  CHECK(cursiv::engine::write_source(path, ""));
+  CHECK(write(path, ""));
   const std::string folded("a\r\nb\0c", 6);
-  CHECK(cursiv::engine::write_source(path, folded));
-  CHECK(cursiv::engine::write_source(path, folded));
+  CHECK(write(path, folded));
+  CHECK(write(path, folded));
   CHECK(seen(path) == folded);
-  CHECK(cursiv::engine::write_source((dir / "New.hpp").string(), ""));
+  CHECK(write((dir / "New.hpp").string(), ""));
   CHECK(fs::exists(dir / "New.hpp"));
 
   // A path that cannot be written says so.
-  CHECK(!cursiv::engine::write_source((dir / "missing" / "Table.hpp").string(),
-                                      "x"));
+  CHECK(!write((dir / "missing" / "Table.hpp").string(), "x"));
+
+  // A later file that cannot be written leaves the earlier ones as they were,
+  // and nothing beside them; once all can be written, all are written.
+  CHECK(write(path, "old table"));
+  const std::string parser = (dir / "Parser.hpp").string();
+  CHECK(write(parser, "old parser"));
+  const auto listed = [&] {
+    std::vector<std::string> names;
+    for (const auto& entry : fs::directory_iterator(dir))
+      names.push_back(entry.path().filename().string());
+    std::ranges::sort(names);
+    return names;
+  };
+  const std::vector<std::string> before = listed();
+  const std::vector<cursiv::engine::SourceFile> files{
+      {path, "new table"},
+      {parser, "new parser"},
+      {(dir / "missing" / "Module.cpp").string(), "module"}};
+  CHECK(cursiv::engine::write_sources(files) == 2);
+  CHECK(seen(path) == "old table" && seen(parser) == "old parser");
+  CHECK(listed() == before);
+  CHECK(cursiv::engine::write_sources(std::span(files).first(2)) == 2);
+  CHECK(seen(path) == "new table" && seen(parser) == "new parser");
+  CHECK(listed() == before);
 
   fs::remove_all(dir);
 }
 
 }  // namespace write_source_cases
 
+namespace textmate_cases {
+
+// The keywords a grammar spells, written into the one string of an editor's
+// TextMate file the build owns: whole words, the longest first, in any case
+// where the grammar reads them so, and every other byte of the file as it was.
+
+using cursiv::engine::textmate_keyword_match;
+using cursiv::engine::with_keyword_match;
+
+void run() {
+  CHECK(textmate_keyword_match({{"def", true}, {"module", true}}) ==
+        R"((?i)\b(module|def)\b)");
+  // Only the words read in any case match in any case.
+  CHECK(textmate_keyword_match({{"If", false}, {"select", true}}) ==
+        R"(\b((?i:select)|If)\b)");
+  // Punctuation stays out; a symbol at an end is bounded by `\B` there, and
+  // what a pattern reads as an operator is escaped.
+  CHECK(textmate_keyword_match({{"+", false},
+                                {"<=", false},
+                                {"a.b", false},
+                                {"@interface", false},
+                                {"end-", false},
+                                {"#if#", false},
+                                {"end", false},
+                                {"end-if", false}}) ==
+        R"(\b(end-if|a\.b|end)\b|\B(@interface)\b|\b(end-)\B|\B(#if#)\B)");
+  CHECK(textmate_keyword_match({{R"(a.*+?^${}()|[]\)", false}}) ==
+        R"x(\b(a\.\*\+\?\^\$\{\}\(\)\|\[\]\\)\B)x");
+  // Words of one length in dictionary order, the lowercase one first; a word
+  // read twice is one, in any case if either reading is.
+  CHECK(textmate_keyword_match({{"b", false}, {"B", false}, {"a", false}}) ==
+        R"(\b(a|b|B)\b)");
+  CHECK(textmate_keyword_match({{"x", false}, {"x", true}}) ==
+        R"((?i)\b(x)\b)");
+  // With no word, a pattern that matches nothing rather than everywhere.
+  CHECK(textmate_keyword_match({{"+", false}}) == "(?!)");
+  CHECK(textmate_keyword_match({}) == "(?!)");
+
+  const std::string file = R"({
+  "name": "x",
+  "patterns": [{"include": "#keywords"}, {"match": "keep"}],
+  "repository": {
+    "comments": {"match": "keep \"match\": \"too\""},
+    "keywords": {
+      "name": "keyword.control.x",
+      "match": "old",
+      "n": [-1.5e+3, 0, true, false, null, {}, []]
+    }
+  }
+}
+)";
+  std::string wanted = file;
+  wanted.replace(wanted.find(R"("old")"), 5, R"("\\b(a|\"b\")\\b")");
+  const auto put = with_keyword_match(file, R"(\b(a|"b")\b)");
+  CHECK(put == wanted);
+  CHECK(put && with_keyword_match(*put, R"(\b(a|"b")\b)") == wanted);
+  // Where a key repeats, the last one.
+  CHECK(with_keyword_match(
+            R"({"repository": {"keywords": {"match": "a", "match": "b"}}})",
+            "c") ==
+        R"({"repository": {"keywords": {"match": "a", "match": "c"}}})");
+  // No string at that place, or brackets that do not match: nothing.
+  for (const std::string_view json :
+       {R"({"keywords": {"match": "a"}})",
+        R"({"repository": {"keywords": {"match": 1}}})",
+        R"({"repository": {"keywords": [{"match": "a"}]}})",
+        R"({"repository": {"keywords": {"match": "a"}})", ""})
+    CHECK(!with_keyword_match(json, "b"));
+  // Depth costs no stack.
+  const std::size_t deep = 1'000'000;
+  CHECK(!with_keyword_match(std::string(deep, '[') + std::string(deep, ']'),
+                            "b"));
+}
+
+}  // namespace textmate_cases
+
 int main() {
   cursiv::test::count_expectations();
   ast_generation_cases_run();
   write_source_cases::run();
+  textmate_cases::run();
   return cursiv::test::report("AstGeneration_test");
 }

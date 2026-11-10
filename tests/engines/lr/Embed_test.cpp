@@ -24,8 +24,8 @@ using cursiv::ParseResult;
 using cursiv::TextOffset;
 using checks::clean, checks::leaves, checks::offered;
 
-// Read with a repair, the first one in [at, upto]: where the text breaks the
-// law the case is about.
+// Accepted with its first repair in [at, upto]: where the text breaks the rule
+// the case checks.
 bool repaired(const Parser& p, std::string_view text, TextOffset at,
               TextOffset upto = 0) {
   const ParseResult r = p.parse(text);
@@ -40,8 +40,9 @@ bool repaired(const Parser& p, std::string_view text, TextOffset at,
   return ok;
 }
 
-// Some repair of `r` owes the token `text` spells.
-bool owes(const Parser& p, const ParseResult& r, std::string_view text) {
+// Some diagnostic of `r` names the terminal spelled `text`.
+bool names_terminal(const Parser& p, const ParseResult& r,
+                    std::string_view text) {
   for (const cursiv::ParseDiagnostic& d : r.diagnostics)
     if (d.element != cursiv::kNoElement)
       for (const std::string_view s :
@@ -108,21 +109,22 @@ void a_section_reads_its_own_trivia(const Parser& p) {
 }
 
 // A section whose closing token never comes runs to the end of the document,
-// where the repair owes that token: the section's tree stands.
-void a_missing_close_is_owed_at_the_end(const Parser& p) {
+// where the repair inserts that token: the section's tree stands.
+void a_missing_close_is_inserted_at_the_end(const Parser& p) {
   const ParseResult r = p.parse("json ''' [1]\n");
   CHECK(r.accepted && ast(first_block(r, false)) == "[1,]" &&
         !r.diagnostics.empty() &&
         r.diagnostics.front().kind == cursiv::DiagnosticKind::inserted &&
-        r.diagnostics.front().begin == 12 && owes(p, r, "'''"));
+        r.diagnostics.front().begin == 12 && names_terminal(p, r, "'''"));
   for (const std::string_view text :
        {"json '''[1]\ncount 0x2\n", "json '''[1]''\ncount 0x2\n"}) {
     const ParseResult x = p.parse(text);
     CHECK(x.accepted && ast(first_block(x, false)) == "[1,]" &&
-          owes(p, x, "'''"));
+          names_terminal(p, x, "'''"));
   }
   const ParseResult y = p.parse("raw (<[1])\ncount 0x2\n");
-  CHECK(y.accepted && ast(first_block(y, false)) == "[1,]" && owes(p, y, ">"));
+  CHECK(y.accepted && ast(first_block(y, false)) == "[1,]" &&
+        names_terminal(p, y, ">"));
 }
 
 // A fault at the head of a long section: looking for the section's closer costs
@@ -287,7 +289,7 @@ void each(const char* name, const Parser& p, std::string_view dump) {
   a_section_writes_a_sequence(p);
   a_directive_stands_over_the_section_or_a_delimiter(p);
   the_caret_and_the_repair_read_the_section(p);
-  a_missing_close_is_owed_at_the_end(p);
+  a_missing_close_is_inserted_at_the_end(p);
   a_fault_is_read_with_the_sections_terminals(p);
   the_dump_qualifies_the_section(dump);
   a_section_keeps_its_own_word_class(p);
@@ -306,7 +308,7 @@ void the_end_of_a_section_is_the_end_of_the_text(const Parser& p) {
   CHECK(repaired(p, "script <% a = 1 b = 2 %>\n", 15));
   const ParseResult r = p.parse("script <% a = 1\n");
   CHECK(r.accepted && ast(first_block(r, true)) == "(a=1;)" &&
-        owes(p, r, "%>"));
+        names_terminal(p, r, "%>"));
 }
 
 }  // namespace

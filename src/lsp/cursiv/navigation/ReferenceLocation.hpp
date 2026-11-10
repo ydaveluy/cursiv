@@ -16,12 +16,8 @@ class Documents;
 
 namespace detail {
 
-/**
- * Converts reference rows to `Location`s, in their order. Shared by
- * find-references and rename, so the "document the store no longer holds"
- * rule -- silently not listed, never an error -- is written once. A run of
- * rows from one document looks it up and reads its URI once.
- */
+// Converts reference rows to `Location`s, in order; a row of a document the
+// store does not hold is left out.
 [[nodiscard]] std::vector<lsp::Location> reference_locations(
     const Documents& store, std::span<const ReferenceDescription> references);
 

@@ -1,7 +1,5 @@
-// The four checks of the two-language example: two of them read across
-// documents. Whether a requirement is covered is a fact about the `.tst`
-// files beside it, and whether a test's environment is legitimate is a fact
-// about the `.req` it names -- so the world here holds both, built together.
+// The four checks of the two-language example, two of which read across
+// documents: the world here holds `.req` and `.tst` files, built together.
 
 #include <algorithm>
 #include <cstddef>
@@ -23,6 +21,10 @@
 #include <thread>
 #endif
 
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectDiagnosticOptions.hpp"
+#include "cursiv/ExpectFormatting.hpp"
+#include "cursiv/ValidationResult.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/text/TextOffset.hpp"
@@ -36,11 +38,9 @@
 #include "cursiv/workspace/DocumentState.hpp"
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/MemoryFileSystemProvider.hpp"
-#include "cursiv/Check.hpp"
-#include "cursiv/ExpectDiagnosticOptions.hpp"
-#include "cursiv/ValidationResult.hpp"
 #include "requirements/CoreModule.hpp"
 #include "requirements/Generator.hpp"
+#include "requirements/LspModule.hpp"
 #include "requirements/ast.hpp"
 #include "requirements/validation/RequirementsValidator.hpp"
 
@@ -81,7 +81,7 @@ struct World {
   }
 };
 
-// The findings that say one sentence, as the filter every check states it in.
+// The findings with one message, as the filter every check states it in.
 ct::ExpectDiagnosticOptions ofMessage(std::string_view message) {
   return {.message = std::string(message)};
 }
@@ -117,7 +117,7 @@ void a_requirement_says_what_it_lacks() {
   ct::expectWarning(said, kUnnumbered, at(kRequirements.find("Alpha"), 5));
   CHECK(count(said, "Requirement Alpha not covered by a test.") == 1);
 
-  // ...and the one the test does name says neither.
+  // ...and the one the test does name reports neither.
   ct::expectNoIssues(
       said, ofMessage("Requirement name Req1 should contain a number."));
   ct::expectNoIssues(said,
@@ -152,13 +152,13 @@ void a_test_says_what_it_lacks() {
   CHECK(count(said, kUnnumbered) == 1);
   ct::expectWarning(said, kUnnumbered, at(kTests.find("Beta"), 4));
 
-  constexpr std::string_view kStrayEnvironment =
+  constexpr std::string_view kUnusedEnvironment =
       "Test Beta references environment Linux which is not used by any "
       "referenced requirement.";
-  CHECK(count(said, kStrayEnvironment) == 1);
-  ct::expectWarning(said, kStrayEnvironment, at(kTests.find("Linux"), 5));
+  CHECK(count(said, kUnusedEnvironment) == 1);
+  ct::expectWarning(said, kUnusedEnvironment, at(kTests.find("Linux"), 5));
 
-  // A long list says the same, at each stray entry.
+  // A long list reports the same, at each unused entry.
   World many;
   many.add("file:///w/a.req", std::string(kRequirements));
   std::string list = "tst T2 tests Req1 applicable for Win";
@@ -167,17 +167,17 @@ void a_test_says_what_it_lacks() {
   many.add("file:///w/a.tst", list + "\n");
   many.build();
   const ct::ValidationResult manySaid = many.said("file:///w/a.tst");
-  constexpr std::string_view kStrayInList =
+  constexpr std::string_view kUnusedInList =
       "Test T2 references environment Linux which is not used by any "
       "referenced requirement.";
-  CHECK(count(manySaid, kStrayInList) == 4);
-  for (std::size_t stray = list.find("Linux"); stray != std::string::npos;
-       stray = list.find("Linux", stray + 1))
-    ct::expectWarning(manySaid, kStrayInList, at(stray, 5));
+  CHECK(count(manySaid, kUnusedInList) == 4);
+  for (std::size_t pos = list.find("Linux"); pos != std::string::npos;
+       pos = list.find("Linux", pos + 1))
+    ct::expectWarning(manySaid, kUnusedInList, at(pos, 5));
 }
 
 // The numbered test naming an environment its requirement declares: nothing to
-// say, on either side.
+// report, on either side.
 void a_covered_and_numbered_pair_says_nothing() {
   World world;
   world.add("file:///w/a.req",
@@ -190,8 +190,8 @@ void a_covered_and_numbered_pair_says_nothing() {
   ct::expectNoIssues(world.said("file:///w/a.tst"));
 }
 
-// A workspace on a disk the test writes: each write is announced as an editor
-// saving those files would announce it.
+// A workspace on a disk the test writes: each write is reported as an editor
+// saving those files would report it.
 struct Disk {
   cursiv::MemoryFileSystemProvider* files = nullptr;
   req::RequirementsCoreLanguage services = make(files);
@@ -262,6 +262,53 @@ void coverage_follows_a_requirements_only_update() {
   CHECK(disk.said(kReq, kR2) == 1);
   disk.write(kReq, "req R1 \"restored\"\n");
   CHECK(disk.said(kReq, kR1) == 0);
+}
+
+// Two `.req` files declare R1, and the test's R1 resolves to the first in URI
+// order. Renaming, restoring or deleting that one moves the coverage to the
+// other file and back, though the test is never edited.
+void coverage_follows_a_test_retargeted_to_a_homonym() {
+  constexpr std::string_view kA = "file:///w/a.req";
+  constexpr std::string_view kB = "file:///w/b.req";
+  constexpr std::string_view kTst = "file:///w/t.tst";
+  constexpr std::string_view kR1 = "Requirement R1 not covered by a test.";
+  constexpr std::string_view kR2 = "Requirement R2 not covered by a test.";
+  Disk disk;
+  disk.write(kA, "req R1 \"first\"\n");
+  disk.write(kB, "req R1 \"second\"\n");
+  disk.write(kTst, "tst T1 tests R1\n");
+  // The document the test's one reference resolves into.
+  const auto target = [&]() -> std::string {
+    const auto test = disk.services.shared->documents->getDocument(kTst);
+    const auto* const model =
+        test == nullptr ? nullptr
+                        : test->parseResult.value_as<req::ast::TestModel>();
+    if (model == nullptr || model->tests.empty()
+        || model->tests.front()->requirements.empty())
+      return {};
+    const cursiv::AstNode* const node =
+        model->tests.front()->requirements.front().get();
+    const cursiv::Document* const nodeDocument =
+        node == nullptr ? nullptr : node->getDocument();
+    return nodeDocument == nullptr ? std::string{} : nodeDocument->uri;
+  };
+  CHECK(target() == kA);
+  CHECK(disk.said(kA, kR1) == 0);
+  CHECK(disk.said(kB, kR1) == 1);
+
+  disk.write(kA, "req R2 \"renamed\"\n");
+  CHECK(target() == kB);
+  CHECK(disk.said(kA, kR2) == 1);
+  CHECK(disk.said(kB, kR1) == 0);
+
+  disk.write(kA, "req R1 \"restored\"\n");
+  CHECK(target() == kA);
+  CHECK(disk.said(kA, kR1) == 0);
+  CHECK(disk.said(kB, kR1) == 1);
+
+  disk.remove(kA);
+  CHECK(target() == kB);
+  CHECK(disk.said(kB, kR1) == 0);
 }
 
 // A failed scan publishes no answer. The next check retries instead of using
@@ -377,6 +424,22 @@ void the_shipped_pair_generates_its_golden_summary() {
         == expected);
 }
 
+// A `testfile` clause is spaced whenever it is written, in either case of
+// its keyword, and also when its string is empty.
+void a_testfile_clause_is_spaced_even_when_empty() {
+  const req::RequirementsLanguage editor = req::create_lsp_services();
+  for (const std::string_view file : {"\"t.tst\"", "\"\""})
+    for (const std::string_view keyword : {"testfile", "TESTFILE"}) {
+      const std::string clause(keyword);
+      (void)ct::expectFormatting(
+          editor.tests, {.before = "tst T1   " + clause + "="
+                                   + std::string(file) + "   tests R1\n",
+                         .after = "tst T1 " + clause + " = " + std::string(file)
+                                  + " tests R1\n",
+                         .disposeAfterCheck = true});
+    }
+}
+
 #if !defined(__wasi__) || defined(_REENTRANT)
 void simultaneous_coverage_checks_scan_the_workspace_once() {
   struct CountingDocuments : cursiv::DefaultDocuments {
@@ -427,8 +490,9 @@ void simultaneous_coverage_checks_scan_the_workspace_once() {
   };
   checkTogether();
 
-  // An empty build still announces a new workspace generation. It keeps the
-  // trees intact but invalidates a workspace answer, just as a changed URI does.
+  // An empty build still starts a new workspace generation. It keeps the
+  // trees intact but invalidates a workspace answer, just as a changed URI
+  // does.
   counted.counting = false;
   world.shared.documentBuilder->build({}, options);
   counted.scans.store(0);
@@ -447,9 +511,11 @@ int main() {
   a_covered_and_numbered_pair_says_nothing();
   coverage_follows_the_tests_that_change();
   coverage_follows_a_requirements_only_update();
+  coverage_follows_a_test_retargeted_to_a_homonym();
   a_failed_coverage_scan_can_be_retried();
   coverage_follows_a_test_built_later();
   the_shipped_pair_generates_its_golden_summary();
+  a_testfile_clause_is_spaced_even_when_empty();
 #if !defined(__wasi__) || defined(_REENTRANT)
   simultaneous_coverage_checks_scan_the_workspace_once();
 #endif

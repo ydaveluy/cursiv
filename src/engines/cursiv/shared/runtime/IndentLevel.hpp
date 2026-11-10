@@ -19,7 +19,7 @@ struct IndentLevel {
   // Invented by a repair: a line at the enclosing level closes it too.
   bool virt = false;
   // Its indent dropped by a repair: the dedent that closes it is the blank
-  // it stood for.
+  // it represented.
   bool mute = false;
 };
 
@@ -31,11 +31,12 @@ struct IndentAt {
   constexpr bool operator==(const IndentAt&) const = default;
 };
 
-// The terminal a table lays as `Kind`, or zero where the grammar has none.
+// The terminal the parse produces as `Kind`, or zero where the grammar has
+// none.
 template <const auto& C, std::uint8_t Kind>
-inline constexpr SymbolId kLaid = [] {
+inline constexpr SymbolId kSyntheticTerm = [] {
   for (unsigned t = 1; t < C.nterms; ++t)
-    if (C.terms[t].laid == Kind) return static_cast<SymbolId>(t);
+    if (C.terms[t].synthetic == Kind) return static_cast<SymbolId>(t);
   return SymbolId{0};
 }();
 
@@ -47,25 +48,27 @@ inline constexpr bool kBracketed = [] {
   return false;
 }();
 
-// A reading owns its levels and its bracket depth where the grammar lays an
+// A reading owns its levels and its bracket depth where the grammar has an
 // indentation token or brackets a line.
 template <const auto& C>
 inline constexpr bool kIndented =
-    kLaid<C, kLaidIndent> != 0 || kLaid<C, kLaidDedent> != 0 || kBracketed<C>;
+    kSyntheticTerm<C, kSyntheticIndent> != 0 ||
+    kSyntheticTerm<C, kSyntheticDedent> != 0 || kBracketed<C>;
 
 // Shifting it moves what the indentation reads: a level or the depth.
 template <const auto& C>
 inline bool indent_moves(SymbolId t) {
-  return (kLaid<C, kLaidIndent> != 0 && t == kLaid<C, kLaidIndent>) ||
-         (kLaid<C, kLaidDedent> != 0 && t == kLaid<C, kLaidDedent>) ||
+  return (kSyntheticTerm<C, kSyntheticIndent> != 0 &&
+          t == kSyntheticTerm<C, kSyntheticIndent>) ||
+         (kSyntheticTerm<C, kSyntheticDedent> != 0 &&
+          t == kSyntheticTerm<C, kSyntheticDedent>) ||
          (t < C.nterms && C.terms[t].delim != 0);
 }
 
 inline bool indent_byte(unsigned char b) { return b == ' ' || b == '\t'; }
 
 // A line continued with a backslash starts no logical line. The backslash
-// must stand in plain trivia, past `held()` -- the end of what tokens hold --
-// since one a comment or a token ends on is that token's own byte.
+// must be in plain trivia, past `held()`, the end of what tokens hold.
 template <class Held>
 inline bool indent_line_start(const char* src, TextOffset p, Held&& held) {
   if (p == 0) return true;
@@ -88,9 +91,7 @@ inline int indent_cmp(const char* src, const IndentLevel* top, TextOffset b,
 }
 
 // A level is written once for every reading that opens it at one position:
-// two arms of a cell push the same line, and the merge compares heads. The
-// readings that open this line push last, so the search stops at a level
-// opened on an earlier one.
+// the search looks among the latest pushes, down to a level of an earlier line.
 inline std::uint32_t indent_push(std::vector<IndentLevel>& arena,
                                  std::uint32_t head, TextOffset begin,
                                  TextOffset len, bool virt, bool mute = false) {
@@ -105,10 +106,8 @@ inline std::uint32_t indent_push(std::vector<IndentLevel>& arena,
   return n;
 }
 
-// Whether two positions stand in the same levels at the same depth. A search
-// can write one level twice, since `indent_push` finds a level again only
-// among the latest pushes: the levels compare by content, down to one both
-// share.
+// Whether two positions stand in the same levels at the same depth, compared by
+// content down to a level both share.
 inline bool indent_same(const std::vector<IndentLevel>& arena, IndentAt a,
                         IndentAt b) {
   if (a.depth != b.depth) return false;
@@ -132,8 +131,8 @@ inline std::uint32_t indent_unmute(const std::vector<IndentLevel>& arena,
 }
 
 // The end of input closes the levels no repair dropped.
-inline bool indent_owes_dedent(const std::vector<IndentLevel>& arena,
-                               std::uint32_t head) {
+inline bool indent_needs_dedent(const std::vector<IndentLevel>& arena,
+                                std::uint32_t head) {
   return indent_unmute(arena, head) != kNoIndent;
 }
 
@@ -159,12 +158,9 @@ inline IndentRun indent_run(const char* src, TextOffset p, TextOffset end) {
   return r;
 }
 
-// The token the run [run, q) of the line at `p` says against the reading's
-// top level: the run is the line's leading blanks, past any form feed. An
-// indent covers the run; a dedent is zero-width at the line start, and the
-// blanks stay for the next token to cross. A run that agrees with no open
-// level is a token no mode reads: the parse says so instead of joining the
-// line.
+// The token the leading blanks [run, q) of the line at `p` say against the top
+// level: an indent covers them, a dedent is zero-width at the line start. A
+// run that matches no open level is a token no mode reads.
 inline bool indent_token(const char* src, const std::vector<IndentLevel>& arena,
                          std::uint32_t head, SymbolId indentTerm,
                          SymbolId dedentTerm, TextOffset p, TextOffset run,
@@ -183,11 +179,7 @@ inline bool indent_token(const char* src, const std::vector<IndentLevel>& arena,
 }
 
 // The token the indentation says at `p`, a line start. A blank line says
-// nothing. A form feed starts the run again, as in Python: the levels measure
-// what follows the last one. A line back past a level whose indent a repair
-// dropped closes it as the blank it stood for, and so does the end of the
-// input. Past a last line with no newline the input's end is read first, and
-// the drive hands the dedents over where that end is refused.
+// nothing, and a form feed starts the run again, as in Python.
 template <class Held>
 inline bool indent_virtual_at(const char* src, TextOffset len,
                               const std::vector<IndentLevel>& arena,
@@ -203,6 +195,19 @@ inline bool indent_virtual_at(const char* src, TextOffset len,
     head = arena[head].prev;
   return q != len &&
          indent_token(src, arena, head, indentTerm, dedentTerm, p, run, q, out);
+}
+
+// Whether `t`, in hand at the line start `p`, spans the run the top level
+// refuses, however a repair read it: blanks that differ from the level's in
+// the same place.
+template <class Held>
+inline bool indent_refused(const char* src, TextOffset len,
+                           const std::vector<IndentLevel>& arena, IndentAt at,
+                           TextOffset p, const Token& t, Held&& held) {
+  Token out;
+  return at.depth == 0 &&
+         indent_virtual_at(src, len, arena, at.head, 0, 0, p, out, held) &&
+         out.begin == t.begin && out.end == t.end;
 }
 
 // What shifting an indent does to a reading's levels: its run opens a level.
@@ -244,7 +249,8 @@ inline void indent_shift(std::vector<IndentLevel>& arena, IndentAt& at,
 template <const auto& C>
 inline void indent_shift(std::vector<IndentLevel>& arena, IndentAt& at,
                          const Token& t) {
-  indent_shift(arena, at, t, kLaid<C, kLaidIndent>, kLaid<C, kLaidDedent>,
+  indent_shift(arena, at, t, kSyntheticTerm<C, kSyntheticIndent>,
+               kSyntheticTerm<C, kSyntheticDedent>,
                t.sym < C.nterms ? C.terms[t.sym].delim : 0);
 }
 
@@ -275,7 +281,8 @@ inline std::uint32_t indent_invent(std::vector<IndentLevel>& arena,
 template <const auto& C>
 inline void indent_shift_invented(std::vector<IndentLevel>& arena, IndentAt& at,
                                   const Token& t) {
-  if (kLaid<C, kLaidIndent> != 0 && t.sym == kLaid<C, kLaidIndent>)
+  if (kSyntheticTerm<C, kSyntheticIndent> != 0 &&
+      t.sym == kSyntheticTerm<C, kSyntheticIndent>)
     at.head = indent_invent(arena, at.head);
   else
     indent_shift<C>(arena, at, t);

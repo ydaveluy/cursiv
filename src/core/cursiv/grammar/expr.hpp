@@ -19,21 +19,17 @@
 #include "cursiv/utils/ctstring.hpp"
 #include "cursiv/utils/typelist.hpp"
 
-// Grammar expressions. Every type is an empty structural tag so that a rule's
-// body can be a template argument (NTTP). `operator+` flattens sequences
-// (one type per sequence, whatever the parenthesisation) and normalizes each
-// into one head creation followed by a chain of nests -- the creation
-// algebra below states the rule precisely.
+// Grammar expressions. Every type is an empty structural tag, so a rule's
+// body can be a template argument. `operator+` flattens sequences and
+// normalizes each into one head creation and a chain of nests (see below).
 
 namespace cursiv {
 
 struct GrammarNode {};
 
-// What the operators and combinators accept. A rule is referred to, not
-// combined, so it is not one of these. This is `std::derived_from` spelled
-// with the class traits: its `is_convertible_v` is a variable, and g++ gives
-// every variable it instantiates a symbol name -- one per operand an operator
-// meets, each spelling the whole expression built so far.
+// What the operators and combinators accept; a rule is referred to, not
+// combined. Class traits rather than `std::derived_from`: they add no symbol
+// per operand.
 template <class T>
 concept Expr = std::is_base_of_v<GrammarNode, std::remove_cvref_t<T>> &&
                std::is_convertible_v<const volatile std::remove_cvref_t<T>*,
@@ -44,39 +40,20 @@ inline constexpr std::size_t kUnbounded =
 
 namespace detail {
 
-// The guard `kw<>` asks for: "whatever this grammar declares". A sentinel
-// and not a class, because a keyword is spelled before any grammar exists:
-// it is resolved where the declared class is in scope.
+// The guard of `kw<>`: the grammar's `word_boundary`, resolved once the
+// grammar is known.
 struct WordBound {};
 
-// "No guard given" -- `lit<S>`'s second argument when it has none. A tag of
-// its own, so no expression has to double as a null.
+// `lit<S>`'s guard when none is given.
 struct NoGuard {};
 inline constexpr NoGuard no_guard{};
 
 
 }  // namespace detail
 
-// Exact text -- the one terminal behind every literal spelling. `CI` folds
-// case; `Guard` is an expression the lexer runs immediately after the match,
-// on a copy of the cursor, and the match only stands if it succeeds.
-//
-// Adjacency is the whole point, and it is why the guard lives in the node
-// and not in the rule. `lit<"toto"> + !lit<"titi">` is not this: between two
-// atoms of a rule the skipper runs, so that spelling also refuses a `toto`
-// that a comment separates from `titi`, where `lit<"toto", !lit<"titi">>`
-// looks only at the byte that follows the text. Inside a terminal no
-// skipper runs and the two agree -- which is exactly the distinction worth
-// a node parameter.
-//
-// Three states, one slot. `void` is no guard. `detail::WordBound` is the
-// boundary discipline the grammar declares (`word_boundary`): a `kw<>` is
-// spelled before any grammar exists, so it cannot resolve its own guard --
-// it is resolved where the declared class is in scope, keeping the guard
-// only where the text can actually run into that class and dropping it
-// where it cannot. Anything else is an expression the author spelled
-// through `lit<S, G>`, applied as written: no judgement is made about
-// whether it can fire, because only its author knows.
+// Exact text, behind every literal spelling. `CI` folds case; `Guard` runs
+// right after the match, with no skipper between: `void` is none,
+// `detail::WordBound` the grammar's `word_boundary`, else applied as written.
 template <class E, str T>
 struct Doc;
 
@@ -91,21 +68,15 @@ struct Lit : GrammarNode {
                 R"(`lit<"toto", !lit<"titi">>`. For a keyword that must not )"
                 "run into the next word, write `kw<S>` instead");
 
-  // The prose a hover shows over this word. Spelled on the element, the only
-  // place that knows what the word means.
+  // The text a hover shows over this word.
   template <str D>
   consteval auto doc() const {
     return Doc<Lit<S, CI, Guard>, D>{};
   }
 };
 
-// Prose as a node, not as a parameter of what it documents: a literal
-// carrying its own doc would make two words that read the same two types,
-// where the core holds one token -- and every reader of the tree would have
-// to put them back together.
-//
-// A doc replaces, it does not append: the wrapper rewrites its own prose, so
-// `Doc<Doc<E, A>, B>` never forms and `.doc<A>().doc<B>()` is B.
+// Hover text as a node wrapping what it documents, so two equal literals stay
+// one type. A later doc replaces: `.doc<A>().doc<B>()` is B.
 template <class E, str T>
 struct Doc : GrammarNode {
   template <str D>
@@ -114,12 +85,9 @@ struct Doc : GrammarNode {
   }
 };
 
-// A class of characters: the Unicode properties it names, one bit each over
-// `unicode::Property`, the scalars spelled beside them in canonical
-// form
-// (`"\\xc0-\\xff"`, `"$_"`), and whether the whole is complemented. A
-// complement holds every scalar outside the rest, and a byte that starts no
-// scalar. Two spellings of one set are one type.
+// A class of characters: the Unicode properties it names, one bit each, the
+// scalars spelled beside them in canonical form, and whether it is
+// complemented. Two spellings of one set are one type.
 template <std::uint64_t Props, bool Not, str Spec>
 struct CpSet : GrammarNode {};
 
@@ -148,18 +116,18 @@ struct Same : GrammarNode {};
 
 // A line deeper than the one that opened the block, and one back at an
 // enclosing level: each is a terminal's whole body, read at a line start
-// against the runs of the lines the parse stands in, never against a width.
+// against the indentation of the enclosing lines, never against a width.
 struct Indent : GrammarNode {};
 struct Dedent : GrammarNode {};
-// A condition on the bytes between the token before and the token in hand,
+// A condition on the bytes between the previous token and the current one,
 // comments included: `GapHas` holds where some run of them is read by E,
 // `GapIs` where all of them are. Zero width; `!` and `|` compose them.
 template <class E>
 struct GapHas : GrammarNode {};
 template <class E>
 struct GapIs : GrammarNode {};
-// The zero-width token standing for `Tok` where `Cond` holds and the token in
-// hand is refused: `implied(tok, cond)` is `tok | Implied<Tok, Cond>`, so a
+// The zero-width token standing for `Tok` where `Cond` holds and the current
+// token is refused: `implied(tok, cond)` is `tok | Implied<Tok, Cond>`, so a
 // walk reaches `tok` as any alternative.
 template <class Tok, class Cond>
 struct Implied : GrammarNode {};
@@ -189,7 +157,7 @@ struct Repeat : GrammarNode {
 };
 
 // The item of a quantifier that may stop only where `Prefix` cannot be read:
-// `Prefix + Body` is the item. It stands nowhere else.
+// `Prefix + Body` is the item. It appears nowhere else.
 template <class Prefix, class Body>
 struct Commit : GrammarNode {};
 
@@ -235,10 +203,8 @@ struct directive_operand;
 template <class G, class E>
 struct Embed : GrammarNode {};
 
-// The overridden body, inside an override's body. `plug` splices the
-// parent's effective body over it, so no walk below ever meets one. Spelled
-// as a template so each walk's refusal stays dependent and fires on use,
-// not on the specialization's own definition.
+// The overridden body, inside an override's body; `plug` splices the
+// parent's body over it. A template, so each walk's refusal fires on use.
 namespace detail {
 template <class = void>
 struct SuperT : GrammarNode {};
@@ -257,9 +223,8 @@ struct Epsilon : GrammarNode {};
 template <class T, class E>
 struct Create : GrammarNode {};
 
-// ...and the empty region is also the factory. `create<T>` is the node with
-// the empty payload, and calling it names a payload; there is no functor
-// type, so no combinator has to fold one away and none can reach the IR.
+// `create<T>` is the region with the empty payload; calling it gives the
+// payload.
 template <class T>
 struct Create<T, Epsilon> : GrammarNode {
   template <Expr E>
@@ -275,21 +240,14 @@ inline constexpr bool is_create = false;
 template <class T, class E>
 inline constexpr bool is_create<Create<T, E>> = true;
 
-// Forward: `is_nest` is spelled beside `is_create` because the combinators
-// below refuse both for the same reason, while `Nest` itself is declared
-// further down.
+// Beside `is_create`, as the combinators below refuse both; `Nest` is declared
+// later.
 template <class E>
 inline constexpr bool is_nest = false;
 
-// What a directive writes: a bare member pointer or an `xref<P, N>` that
-// carries its member and stands in its place.
-//
-// `N` is what this site accepts. A cross-reference member names the classes
-// it may ever bind; one writing site often means less than all of them
-// (`assign<xref<&Class::base, Interface>>(ref<QName>)`), and saying so is
-// what makes a homonym of the wrong class a failure instead of a wrong
-// link. It is a filter, never a cast: the member's type is unchanged and so
-// is every reader.
+// What a directive writes: a bare member pointer, or an `xref<P, N>` that
+// names the member and the classes `N` this site accepts. `N` filters the
+// link; it never changes the member's type.
 template <auto P, class N>
 struct XRef {};
 
@@ -363,22 +321,14 @@ struct HideTag {};
 
 }  // namespace detail
 
-// A skip-configuration region: inside E the skipper runs these rules --
-// between E's elements only, the entry boundary belongs to the caller. The
-// configuration holds through the rules E calls (dynamic scope), until an
-// inner skip() declares its own.
+// A skip-configuration region: between E's elements, and in the rules E
+// calls, the skipper runs these rules until an inner skip() sets its own.
 template <class I, class H, class E>
 struct Skip : GrammarNode {};
 
-// Levels are listed tightest-binding first in `levels(...)`. `left`/
-// `right` say which way a chain of equal precedence groups, and `nonassoc`
-// that it does not group: the chain is an error; the operator is
-// any lexable expression of statically known length, so a level may hold a
-// choice of several -- and, when they share one length, that choice is
-// fixed-length too. The length is what the whole table is sorted on:
-// maximal munch is a compile-time order, not a runtime race between
-// alternatives, so an operator whose width only the input knows has no rank
-// to take and is refused where it is written.
+// Levels are listed tightest-binding first in `levels(...)`. `left` and
+// `right` say how equal operators group, `nonassoc` that a chain is an error.
+// An operator has a length known at compile time: the table is sorted on it.
 template <class Op>
 struct LeftAssoc {
   using op_expr = Op;
@@ -395,9 +345,8 @@ struct NonAssoc {
   static constexpr Association kGroup = Association::non;
 };
 // A unary level: its operator stands before the operand (`prefix`) or after
-// it (`postfix`) and builds a `Node` of its own, writing the operator and the
-// operand into the two members named. Its operand is read at its own level, so
-// a prefix applies to everything that binds tighter than it.
+// it (`postfix`) and builds a `Node` of its own. Its operand is read at its
+// own level.
 template <Association A, class Node, auto OpPtr, auto OperandPtr, class Op>
 struct UnaryLevel {
   static_assert(
@@ -425,13 +374,9 @@ struct Levels {
   using at = detail::pack_at_t<I, Ls...>;
 };
 
-// `left`/`right`/`nonassoc` yield a table of one, not a bare level, and
-// `levels(...)` lists several. One level is then a legal table -- which is
-// what a cascade spelled one `infix<>` rule per precedence level needs, every
-// storey of it carrying exactly one -- and nothing downstream has to
-// normalise a level into a table. `levels(left(a), right(b))` is
-// `Levels<LeftAssoc<a>, RightAssoc<b>>`. A level's operators are matched by
-// maximal munch, longest first.
+// `left`, `right` and `nonassoc` yield a table of one level; `levels(...)`
+// lists several. `levels(left(a), right(b))` is
+// `Levels<LeftAssoc<a>, RightAssoc<b>>`; operators match longest first.
 template <Expr Op>
 constexpr auto left(Op) {
   return Levels<LeftAssoc<std::remove_cvref_t<Op>>>{};
@@ -445,9 +390,8 @@ constexpr auto nonassoc(Op) {
   return Levels<NonAssoc<std::remove_cvref_t<Op>>>{};
 }
 // `prefix<&U::op, &U::operand>(op)` builds the class declaring `op`;
-// `prefix<U>(op)` builds `U` through its members `op` and `operand`, even
-// where a base of `U` declares them. `postfix` names the operand first, as the
-// text reads.
+// `prefix<U>(op)` builds `U` through its members `op` and `operand`.
+// `postfix` names the operand first, as the text reads.
 template <auto OpPtr, auto OperandPtr, Expr Op>
 constexpr auto prefix(Op) {
   return Levels<UnaryLevel<Association::prefix,
@@ -497,8 +441,8 @@ struct LevelsFn {
                   "levels(...) takes only precedence levels, tightest-binding "
                   "first: each one is `left(op)`, `right(op)`, `nonassoc(op)`, "
                   "`prefix<...>(op)` or `postfix<...>(op)`");
-    // Past the refusal, the table of the levels that are levels: the line
-    // that states the mistake stays the only one.
+    // After the refusal, keep only the real levels, so the error stays one
+    // line.
     return typename levels_of<Ls>::type{};
   }
 };
@@ -517,12 +461,8 @@ struct cat_seq;
 template <class... Es>
 struct Pack {};
 
-// The one place a sequence is built: flattening happens here.
-// Flattening concatenation for a variadic form: `F<a,b> + c` is `F<a,b,c>`
-// and never `F<F<a,b>,c>`, so a spelled expression has one shape whatever
-// the order its operators associate in. One mechanism, four cases; each
-// form is an alias of it, since the rule does not depend on which form it
-// is.
+// The one place a sequence is built: `F<a,b> + c` is `F<a,b,c>`, never
+// `F<F<a,b>,c>`, so an expression has one shape however it is grouped.
 template <template <class...> class F, class A, class B>
 struct FlatCat {
   using type = F<A, B>;
@@ -540,10 +480,8 @@ struct FlatCat<F, F<As...>, F<Bs...>> {
   using type = F<As..., Bs...>;
 };
 
-// A sequence is the one form with an exception: a bare creation absorbs what
-// follows it, so `create<N> + e` and `create<N>(e)` are one type. Absorbing
-// a sequence is the same fact, spelled out because the flattening case is
-// neither more nor less specialised than the one above.
+// A bare creation absorbs what follows it, so `create<N> + e` and
+// `create<N>(e)` are one type.
 template <class A, class B>
 struct SeqCat : FlatCat<Seq, A, B> {};
 template <class N, class B>
@@ -557,33 +495,17 @@ struct SeqCat<Create<N, Epsilon>, Seq<Bs...>> {
 template <class A, class B>
 using ChoiceCat = FlatCat<Choice, A, B>;
 
-// The creation algebra. A sequence normalizes to one head creation followed
-// by a chain of nests:
-//
+// The creation algebra: a sequence normalizes to
 //     [bare...] [Create<T, ...>] Nest<W1, ...> Nest<W2, ...> ...
-//
-// A `Create` absorbs what surrounds it -- both sides -- up to the boundary a
-// `Nest` sets; a `Nest` absorbs what follows it, up to the next nest, because
-// it made its wrapper the current node and everything after belongs to that
-// wrapper. So `a + create<T>(b) + c + nest<W, &W::f>(d) + e` is
-// `create<T>(a + b + c) + nest<W, &W::f>(d + e)`, and the current node stays
-// W1 until W2 wraps it.
-//
-// The bare prefix survives only when no create claims it: that is the
-// adoption case (`ref<Sub> + nest<W, &W::f>(x)`), where the head node comes
-// from the reference and the nest wraps what the reference built.
-//
-// Confluence is the criterion, exactly as for flattening: the fold reads the
-// flat element run, so `(a + create<T>(b)) + c` and `a + (create<T>(b) + c)`
-// build the same type. Absorbing into a region re-normalizes that region's
-// body (`cat_seq`), which is what makes appending past a nest agree with
-// writing the same run inside the create in one go.
+// A create absorbs both sides up to a nest; a nest absorbs what follows it.
+// So `a + create<T>(b) + c + nest<W, &W::f>(d)` is
+// `create<T>(a + b + c) + nest<W, &W::f>(d)`, however it is grouped.
 
 // No region open yet -- the run is still collecting its bare prefix.
 struct NoRegion {};
 
 // One element joins the region currently open. The region's body is re-folded,
-// so a nest inside it keeps absorbing what lands after it.
+// so a nest inside it keeps absorbing what comes after it.
 template <class R, class E>
 struct region_add;
 template <class T, class X, class E>
@@ -756,15 +678,13 @@ constexpr auto operator+(A, B) {
       std::remove_cvref_t<A>, std::remove_cvref_t<B>>::type>::type{};
 }
 
-// `|` is the choice, and the only one, ordered: the arm written first wins a
-// tie.
+// The ordered choice: the arm written first wins a tie.
 template <Expr A, Expr B>
 constexpr auto operator|(A, B) {
   return typename detail::ChoiceCat<std::remove_cvref_t<A>,
                                     std::remove_cvref_t<B>>::type{};
 }
 
-// The lookaheads, unary `!` and `&`.
 template <Expr E>
 constexpr auto operator!(E) {
   return Not<std::remove_cvref_t<E>>{};
@@ -777,7 +697,7 @@ constexpr auto operator&(E) {
 namespace detail {
 
 // `lit<S>` has no guard; `lit<S, G>` carries the one it was given. A terminal
-// named there stands for the body the grammar in force spells: a class, a word
+// named there stands for the body the current grammar spells: a class, a word
 // or a choice of those.
 template <str S, bool CI, class G>
 consteval auto make_lit() {
@@ -804,21 +724,9 @@ consteval auto make_ikw() {
 
 }  // namespace detail
 
-// Three spellings of one node, and two ways to guard it.
-//
-// `kw<S>` asks for the boundary discipline and takes no argument for it: the
-// class is the grammar's `word_boundary` (`w` unless it says otherwise), and
-// the lowering is conditional -- `kw<S>` is `lit<S, !boundary>` where S's
-// last character is in that class, and plain `lit<S>` where it is not. So
-// `kw<"[">` carries no guard and accepts `[abc`, while `kw<"if">` refuses
-// `iffy`, under one rule and no special case, applied where the grammar
-// that decides is in scope -- not here.
-//
-// `lit<S, G>` is the custom path: any expression the lexer can run, applied
-// unconditionally as spelled -- no word-final judgement, because a general
-// predicate has no membership question to ask. The author who spells it
-// owns that. A keyword-ish token that needs a non-class guard is spelled
-// this way; a literal that wants boundary discipline is spelled `kw`.
+// `kw<S>` is `lit<S, !boundary>` when S ends in the grammar's
+// `word_boundary` class, else plain `lit<S>`: `kw<"if">` refuses `iffy`,
+// `kw<"[">` accepts `[abc`. `lit<S, G>` applies the guard `G` as written.
 template <str S, auto G = detail::no_guard>
 inline constexpr auto lit =
     detail::make_lit<S, false, std::remove_cvref_t<decltype(G)>>();
@@ -872,15 +780,15 @@ consteval auto cp_tail() {
   for (std::size_t i = 1; i < Spec.size(); ++i) buf[i - 1] = Spec[i];
   return str<Spec.size()>(buf);
 }
-enum class ClassOp : unsigned char { unite, meet, minus, outside };
+enum class ClassOp : unsigned char { unite, intersect, minus, outside };
 template <str A, str B, ClassOp Op>
 consteval ClassRanges class_ranges() {
   const ClassRanges a = ClassRanges::of(A.view());
   const ClassRanges b = ClassRanges::of(B.view());
-  return Op == ClassOp::unite   ? a.united(b)
-         : Op == ClassOp::meet  ? a.intersected(b)
-         : Op == ClassOp::minus ? a.minus(b)
-                                : a.complemented();
+  return Op == ClassOp::unite       ? a.united(b)
+         : Op == ClassOp::intersect ? a.intersected(b)
+         : Op == ClassOp::minus     ? a.minus(b)
+                                    : a.complemented();
 }
 template <str A, str B, ClassOp Op>
 consteval auto class_spelled() {
@@ -891,17 +799,18 @@ consteval auto class_spelled() {
   return str<n + 1>(buf);
 }
 template <str Text>
-consteval bool class_strays() {
-  return ClassRanges::of(Text.view()).strays;
+consteval bool class_holds_invalid() {
+  return ClassRanges::of(Text.view()).holdsInvalid;
 }
 // A spelling's set among all characters: held in its own scalars, or, where it
 // holds a complement escape, as the complement of the scalars it leaves out.
 template <str Text, bool Complement>
 consteval auto class_of() {
-  constexpr bool strays = class_strays<Text>();
+  constexpr bool holdsInvalid = class_holds_invalid<Text>();
   return CpSet<
-      0, strays != Complement,
-      class_spelled<Text, "", strays ? ClassOp::outside : ClassOp::unite>()>{};
+      0, holdsInvalid != Complement,
+      class_spelled<Text, "",
+                    holdsInvalid ? ClassOp::outside : ClassOp::unite>()>{};
 }
 template <str Spec>
 consteval auto cr_of() {
@@ -944,7 +853,7 @@ consteval auto join_left_out_spelled() {
   join_left_out<Sn, Mn, Sp, Mp>().spell([&buf, &at](char c) { buf[at++] = c; });
   return str<n + 1>(buf);
 }
-// Two classes joined: the scalars together, and the strays of either. A
+// Two classes joined: the scalars together, and the invalid bytes of either. A
 // complement joined to anything is the complement of what it leaves out.
 template <std::uint64_t MA, bool NA, str SA, std::uint64_t MB, bool NB, str SB>
 consteval auto cp_join() {
@@ -955,7 +864,7 @@ consteval auto cp_join() {
                   "cursiv: two complemented classes can be joined with `|` "
                   "only when they use the same Unicode properties: complement "
                   "the whole union instead, ~(a | b)");
-    return CpSet<MA, true, class_spelled<SA, SB, ClassOp::meet>()>{};
+    return CpSet<MA, true, class_spelled<SA, SB, ClassOp::intersect>()>{};
   } else if constexpr (NA) {
     return CpSet<0, true, join_left_out_spelled<SA, MA, SB, MB>()>{};
   } else {
@@ -1053,8 +962,7 @@ inline constexpr Byte byte{};
 template <class R>
 inline constexpr Ref<R> ref{};
 
-// The classes every grammar ends up spelling, and their complements -- the six
-// of regex.
+// The six regex classes: space, word, digit, and their complements.
 inline constexpr auto s = cr<R"(\s)">;
 inline constexpr auto S = ~s;
 inline constexpr auto w = cr<"a-zA-Z0-9_">;
@@ -1062,17 +970,14 @@ inline constexpr auto W = ~w;
 inline constexpr auto d = cr<"0-9">;
 inline constexpr auto D = ~d;
 
-// End of line, which consumes its terminator (`\r\n` before `\r`, or a CRLF
-// file ends its lines twice), and end of input, which is zero-width -- `eol`
-// is not: matching it twice in a row never re-matches the same terminator.
-// `\r` is a prefix of `\r\n`: the sort puts the pair longest-first, and the
-// spelled order already satisfies it -- the resolved choice is unchanged.
+// End of line, which consumes its terminator (`\r\n` before `\r`), and end
+// of input, which is zero-width.
 inline constexpr auto eol = lit<"\n"> | lit<"\r\n"> | lit<"\r">;
 // Inside a terminal, `eof` tests the raw buffer end; in a rule it tests
 // the end after the active skipper has consumed trivia.
 inline constexpr Eof eof{};
 
-// The conditions on the gap before the token in hand, by name.
+// The conditions on the gap before the current token, by name.
 struct gap {
   template <Expr E>
   static constexpr GapHas<std::remove_cvref_t<E>> has(E) { return {}; }
@@ -1088,9 +993,9 @@ constexpr auto implied(T, C) {
 }
 
 namespace detail {
-// The region law would hoist a create over the whole list and fold the
-// separator into every tail item's region; a nest as the item would absorb
-// the repetition that follows it, for the same reason.
+// A separated list's item may not be a create or a nest: the creation algebra
+// would hoist a create over the whole list, folding the separator into each
+// item's region, and a nest would absorb the repetition after it.
 template <class... Es>
 inline constexpr bool list_item_stands =
     !(is_create<Es> || ...) && !(is_nest<Es> || ...);
@@ -1100,7 +1005,7 @@ template <class P, class B, class Sep>
 using committed_tail =
     Repeat<0, kUnbounded,
            Commit<std::remove_cvref_t<decltype(Sep{} + P{})>, B>>;
-// ...and the whole list, when it may be absent, commits on the first prefix.
+// The whole list, when it may be absent, commits on the first prefix.
 template <class P, class B, class Sep>
 using committed_list = Commit<
     P, std::remove_cvref_t<decltype(B{} + committed_tail<P, B, Sep>{})>>;
@@ -1174,10 +1079,8 @@ struct OptionFn {
 }  // namespace detail
 inline constexpr detail::OptionFn option{};
 
-// The unordered group: each item once, in any order. An item is whole, so a
-// group given as an item stays one: `unordered(unordered(a, b), c)` reads `c`
-// before or after both of `a` and `b`, never between them. Every item reads
-// input; the generators refuse one that may match nothing.
+// The unordered group: each item once, in any order. A nested group stays
+// one item. Every item must read input.
 namespace detail {
 struct UnorderedFn {
   template <Expr... Es>
@@ -1271,8 +1174,6 @@ inline constexpr detail::AppendFn<S> append{};
 template <auto Ptr>
 inline constexpr detail::FlagFn<Ptr> flag{};
 
-// The tags of `skip()` are verbs, what the region does to each terminal; the
-// grammar's own settings, `ignored` and `hidden`, are participles.
 template <class... Rs>
 inline constexpr detail::IgnoreTag<Rs...> ignore{};
 template <class... Rs>
@@ -1289,12 +1190,8 @@ struct TightFn {
 }  // namespace detail
 inline constexpr detail::TightFn tight{};
 
-// Two spellings, one node. `nest<T, &T::f>` names the wrapper, `nest<&T::f>`
-// lets the member name it -- a pointer to member already says which class it
-// belongs to, and stating it twice is a place for the two to disagree. Two
-// function templates and not one variable template: a type argument cannot
-// bind to `auto` nor a value to `class`, so the two spellings sort
-// themselves.
+// Two spellings, one node: `nest<T, &T::f>` names the wrapper, `nest<&T::f>`
+// lets the member's class name it.
 template <class T, auto Ptr, Expr E>
 constexpr Nest<T, Ptr, std::remove_cvref_t<E>> nest(E) {
   return {};
@@ -1312,10 +1209,8 @@ nest(E) {
 // layers: a list of parts back to a shape, a choice's parts as a list.
 namespace cursiv::detail {
 
-// Flattening without create absorption: absorption is an authoring
-// convention (a create written in a sequence owns the rest of the rule); a
-// create a rewrite introduces is a bounded region, and swallowing its
-// neighbours would widen it.
+// Flattening without create absorption: a create a rewrite introduces is a
+// bounded region.
 template <class... Es>
 struct flat_seq;
 template <class E>

@@ -1,6 +1,6 @@
 #pragma once
 
-// The grammars the spelling lane parses: one `kw<>` under three declared word
+// The grammars the spelling tests parse: one `kw<>` under three declared word
 // boundaries, an infix chain whose operators go through the same resolution,
 // and one keyword in both cases against a class not closed under case.
 
@@ -94,8 +94,8 @@ struct IUpper : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-// ...and the mirror class, which the naive "fold to lower" answer gets wrong:
-// `A-Z` holds `F` and not `f`, so the lowercase spelling needs the guard too.
+// ...and the mirror class: `A-Z` holds `F` and not `f`, so the lowercase
+// spelling needs the guard too.
 struct IUpperClass : cursiv::GrammarSpec {
   static constexpr auto word_boundary = cr<"A-Z">;
   struct WS : terminal<some(s)> {};

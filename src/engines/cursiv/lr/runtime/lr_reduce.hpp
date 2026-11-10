@@ -1,5 +1,5 @@
 // The reduction shared by generated states and repair replay: production and
-// landing are constants on the nominal path, table values in the writer.
+// target are constants on the nominal path, table values in the writer.
 #pragma once
 
 #include <cassert>
@@ -40,10 +40,9 @@ inline bool lr_receiver(LrContext& c, NodeCount from, NodeCount to,
   return seen != 0;
 }
 
-// Prepare the result frame, leaving its first state's tag intact for a
-// guarded goto. The returned row is a record the landing must close. A
-// production passed as an integral constant unrolls its renames, which a loop
-// over the table does not at -O2.
+// Prepares the result frame, keeping its first state's tag for a guarded goto,
+// and returns a record the target must close. An integral-constant production
+// unrolls its renames.
 template <const auto& A, class Prod, class Folds>
 CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
                                                       Folds&& folds) {
@@ -76,7 +75,7 @@ CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
       pendWord != kLrNoWord && (pendWord + 1 == c.tape.len() ||
                                 lr_last_real_word<A.stamp>(c, pendWord));
   const ElementId held = last ? c.stack[base].row : kNoElement;
-  // A turn's record reaches back over what the frame below it laid. Grouping
+  // A turn's record reaches back over what the frame below it created. Grouping
   // that slips a record in, so it waits for the renames above.
   bool reach = false;
   std::uint32_t receiver = base - 1;
@@ -116,10 +115,9 @@ CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
   if (pendNode != kNoElement) pendRow = pendNode;
   std::uint32_t prefix = base;
   if constexpr (kLrPrefixFrames<A>) {
-    // A checkpoint after an epsilon prefix may have reached farther back
-    // than slot zero. Preserve that start through the enclosing reduction.
-    // Only frames popped now are visited: total work is linear in stack
-    // events, and grammars without nest pay none of it.
+    // A checkpoint after an epsilon prefix may reach before slot zero; its
+    // start is kept through the enclosing reduction. Only popped frames are
+    // visited.
     for (std::uint32_t i = base + 1; i < c.stack.size(); ++i)
       if (c.stack[i].open < c.stack[prefix].open) prefix = i;
   }
@@ -147,19 +145,20 @@ CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
   return pendNode;
 }
 
-// `settles`: the landing state ends the reduction cascade.
+// `endsCascade`: the target state ends the reduction cascade.
 template <StampLayout L>
 CURSIV_ALWAYS_INLINE inline void lr_reduce_finish(LrContext& c,
                                                   std::uint32_t to,
-                                                  ElementId row, bool settles) {
+                                                  ElementId row,
+                                                  bool endsCascade) {
   LrFrame& top = c.stack.top();
   top.state = static_cast<std::uint16_t>(to);
   if (row != kNoElement) {
     top.word = c.tape.len();
     c.tape.exit_anchored<L>(top.open, top.begin, c.committed, row,
-                            settles ? top.state : kLrNoState);
-  } else if (settles) {
-    c.tape.settle<L>(top.state);
+                            endsCascade ? top.state : kLrNoState);
+  } else if (endsCascade) {
+    c.tape.set_pending_state<L>(top.state);
   }
 }
 

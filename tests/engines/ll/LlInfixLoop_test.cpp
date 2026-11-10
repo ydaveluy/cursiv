@@ -1,6 +1,6 @@
 // A left recursion through an infix reads as the loop of the rule a call starts
-// with, the infix standing as its levels: both engines read what the walk of
-// the spec elects, whichever rule the call enters at.
+// with, the infix giving its levels: both engines read the loop the grammar
+// picks, whichever rule the call enters at.
 #include <cstdint>
 #include <cstdio>
 #include <span>
@@ -37,7 +37,7 @@ constexpr Case kSum[] = {
     {"p/ a + b ! !", "Doc(Post(Bin(BaPost(Bb))))"},
     {"p/ a ! !", "Doc(Post(Post(Ba)))"},
 };
-constexpr Case kLadder[] = {
+constexpr Case kTwoLevels[] = {
     {"e/ a", "Doc(Ba)"},
     {"e/ - a + b", "Doc(Neg(Bin(BaBb)))"},
     {"e/ - a * b", "Doc(Neg(Bin(BaBb)))"},
@@ -104,12 +104,13 @@ constexpr Case kMixed[] = {
 };
 
 std::string dump(const cursiv::AstReflection& r, const cursiv::AstNode& n) {
-  std::string kids;
-  r.visitMembers(n, [&](std::string_view, std::uint32_t, cursiv::AstNode& kid) {
-    kids += dump(r, kid);
-  });
+  std::string children;
+  r.visitMembers(n,
+                 [&](std::string_view, std::uint32_t, cursiv::AstNode& child) {
+                   children += dump(r, child);
+                 });
   const std::string name(r.getTypeMetaData(n.type).name);
-  return kids.empty() ? name : name + '(' + kids + ')';
+  return children.empty() ? name : name + '(' + children + ')';
 }
 
 std::string read(const cursiv::Parser& parser, const cursiv::AstReflection& r,
@@ -141,7 +142,7 @@ void expect_cases(std::span<const Case> cases, std::string_view prefix) {
 
 void run() {
   expect_cases(kSum, "loop:sum:");
-  expect_cases(kLadder, "loop:ladder:");
+  expect_cases(kTwoLevels, "loop:twolevels:");
   expect_cases(kVia, "loop:via:");
   expect_cases(kMixed, "loop:mixed:");
 }

@@ -1,5 +1,5 @@
-// A word refused behind one literal of a choice: the match of `##` ends before
-// `abc` is read, so whether it stands turns on text past the token.
+// A guard after one literal of a choice: the match of `##` ends before `abc`
+// is read, so whether the guard holds depends on text past the token.
 // expect LR: refused: terminal .HASH. may end a match before the end of .'abc'., which a guard excludes after the start of the terminal
 #pragma once
 

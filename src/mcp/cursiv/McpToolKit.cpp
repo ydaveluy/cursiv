@@ -3,9 +3,12 @@
 #include <lsp/json/json.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -46,9 +49,16 @@ json::Value tool_position_schema() {
   json::Object properties;
   properties["file"] =
       tool_property("string", "path or file:// uri of the document");
-  properties["line"] = tool_property("integer", "1-based line");
-  properties["column"] =
-      tool_property("integer", "1-based column, in utf-16 units");
+  // The domain `tool_position` accepts, said where a client reads it.
+  const auto coordinate = [](std::string_view description) {
+    json::Value property = tool_property("integer", description);
+    property.object()["minimum"] = json::Value(json::Integer{1});
+    property.object()["maximum"] =
+        json::Value(std::numeric_limits<json::Integer>::max());
+    return property;
+  };
+  properties["line"] = coordinate("1-based line");
+  properties["column"] = coordinate("1-based column, in utf-16 units");
   json::Array required;
   required.emplace_back(json::String("file"));
   required.emplace_back(json::String("line"));
@@ -92,13 +102,31 @@ McpToolPosition tool_position(const json::Value& arguments) {
   const json::Value* const column = tool_argument(arguments, "column");
   if (file == nullptr || !file->isString())
     throw std::invalid_argument("'file' names the document");
-  if (line == nullptr || !line->isInteger() || line->integer() < 1)
-    throw std::invalid_argument("'line' is 1-based");
-  if (column == nullptr || !column->isInteger() || column->integer() < 1)
-    throw std::invalid_argument("'column' is 1-based");
+  const std::optional<std::int32_t> lineNumber = detail::tool_integer(line, 1);
+  if (!lineNumber) throw std::invalid_argument("'line' is 1-based");
+  const std::optional<std::int32_t> columnNumber =
+      detail::tool_integer(column, 1);
+  if (!columnNumber) throw std::invalid_argument("'column' is 1-based");
   return {tool_file_uri(file->string()),
-          static_cast<std::uint32_t>(line->integer() - 1),
-          static_cast<std::uint32_t>(column->integer() - 1)};
+          static_cast<std::uint32_t>(*lineNumber - 1),
+          static_cast<std::uint32_t>(*columnNumber - 1)};
+}
+
+std::optional<std::int32_t> detail::tool_integer(const json::Value* value,
+                                                 std::int32_t minimum) {
+  if (value == nullptr) return std::nullopt;
+  if (value->isInteger()) {
+    const json::Integer number = value->integer();
+    return number >= minimum ? std::optional(number) : std::nullopt;
+  }
+  if (!value->isDecimal()) return std::nullopt;
+  const double number = value->decimal();
+  // A NaN or an infinity fails the range test.
+  if (!(number >= minimum &&
+        number <= std::numeric_limits<std::int32_t>::max()) ||
+      std::trunc(number) != number)
+    return std::nullopt;
+  return static_cast<std::int32_t>(number);
 }
 
 void append_tool_position(std::string& out, const Document& document,
@@ -120,17 +148,15 @@ McpToolResult not_held(const std::string& uri) {
 
 }  // namespace
 
-// `body` runs once, on a document standing at the rung -- and for a workspace
-// requirement, in a workspace standing there too. Every other end is an error
-// the model reads, never an empty answer the caller would word as "nothing
-// found".
+// `body` runs once, on a document at the requirement's state. Every other end
+// is an error the model reads, never an empty answer.
 McpToolResult route_document_tool(
     SharedCoreServices& shared, const std::string& uri,
     ServiceRequirement requirement, const CancellationToken& token,
     cursiv::function_ref<void(const Document&, const CoreServices&,
                               std::string&)>
         body) {
-  const DocumentState rung = requirement.state;
+  const DocumentState target = requirement.state;
   const bool workspace =
       requirement.type == ServiceRequirement::Type::Workspace;
   // The store is a write's to rehash: its lookup is a read like any other,
@@ -147,18 +173,18 @@ McpToolResult route_document_tool(
   if (id == kNoDocument) return not_held(uri);
   const DocumentBuilder& builder = *shared.documentBuilder;
   for (;;) {
-    const WaitOutcome reached = workspace ? builder.waitUntil(rung, token)
-                                          : builder.waitUntil(rung, id, token);
+    const WaitOutcome reached = workspace
+                                    ? builder.waitUntil(target, token)
+                                    : builder.waitUntil(target, id, token);
     if (reached == WaitOutcome::Cancelled) return cancelled();
     if (reached != WaitOutcome::Reached)
       return {"the document never reached the state this tool reads at", true};
     enum class Admission : std::uint8_t { Behind, Ran, Gone, Lagging };
     Admission admission = Admission::Behind;
     std::string out;
-    // The wait's verdict is stale by the time of admission: a write may have
-    // reset the document, or removed it, in between. A document set back is
-    // awaited again; a workspace rung is read under a queued read, which no
-    // write runs beside, so the whole index stands for the whole answer.
+    // Admission checks again: a write may have reset or removed the document
+    // since the wait. A workspace state is read under a queued read, which no
+    // write runs beside.
     if (!shared.workspaceLock->read(
             [&] {
               const std::shared_ptr<Document> document =
@@ -171,10 +197,10 @@ McpToolResult route_document_tool(
                 admission = Admission::Lagging;
                 return;
               }
-              if (workspace && builder.currentState() < rung) return;
-              // Under a queued read the build is over: a document still
-              // below the workspace's rung was left out of it.
-              if (document->state.load() < rung) {
+              if (workspace && builder.currentState() < target) return;
+              // Under a queued read the build is over: a document still below
+              // the workspace's state was left out of it.
+              if (document->state.load() < target) {
                 if (workspace) admission = Admission::Lagging;
                 return;
               }

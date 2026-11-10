@@ -4,9 +4,9 @@
 #include "cursiv/services/SharedLspServices.hpp"
 #include "domainmodel/CoreServices.hpp"
 
-// The same language one storey up. Both containers derive `CoreServices`
-// virtually, so this holds one of it and the core module wires the same
-// object the LSP providers read.
+// The same language with its LSP services. Both containers derive
+// `CoreServices` virtually, so this holds one of it and the core module wires
+// the same object the LSP providers read.
 
 namespace dm {
 

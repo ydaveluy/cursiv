@@ -31,7 +31,7 @@ target_link_libraries(caret_bench PRIVATE cursiv::bench benchcaretllGenerated
     benchcaretlrGenerated)
 
 # The repair quality report: faults planted in valid documents, each faulted
-# copy weighed against its twin, per grammar and per class of fault.
+# copy compared with its twin, per grammar and per class of fault.
 set(CURSIV_RECOVERY_METRIC_LANGUAGES
     arithmetics domainmodel requirements statemachine)
 set(_metricSources recovery_metric/main.cpp)
@@ -71,7 +71,7 @@ if(CURSIV_BUILD_TESTS)
           -DOUT=${CMAKE_CURRENT_BINARY_DIR}/recovery_metric_smoke
           -P ${CMAKE_CURRENT_SOURCE_DIR}/recovery_metric/smoke.cmake)
 
-  # Its lane: every class held within a document of what it answers now.
+  # Its lane: each class stays within one document of the recorded figures.
   set_target_properties(recovery_metric PROPERTIES EXCLUDE_FROM_ALL OFF)
   add_test(NAME recovery_metric_lane
       COMMAND ${CMAKE_COMMAND}

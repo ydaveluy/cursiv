@@ -1,6 +1,6 @@
 // What the readings of open tokens may read where a run of bytes opens one
 // from every position: a share of the text, and a floor for the short ones.
-// Spent, a reading is none and the run goes whole.
+// Once spent, a reading gives nothing and the run is taken whole.
 #pragma once
 
 #include <cstdint>
@@ -15,7 +15,7 @@ class LexReadBudget {
 
   bool spent() const { return _left == 0; }
 
-  void pay(TextOffset from, TextOffset reached) {
+  void spend(TextOffset from, TextOffset reached) {
     const std::uint64_t bytes = reached - from;
     _left = bytes < _left ? _left - bytes : 0;
   }

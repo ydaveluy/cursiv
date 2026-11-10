@@ -8,17 +8,12 @@
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
 
-// The default quick fixes: the edit rows the document validator wrote into a
-// diagnostic's `data` (`core/validation/DefaultCodeActionProtocol.hpp`) and
-// those a linking error is owed on demand (`spelling_actions`), turned into
-// client edits. Reads the document's own published block, not the request's
-// echo, and drops any row whose stamped version is stale.
+// The default quick fixes: the edit rows of a diagnostic's `data` and the
+// spelling fixes of a linking error, as client edits. Reads the document's own
+// diagnostics, not the request's echo, and drops a row with a stale version.
 
 namespace cursiv {
 
-// Not `final`: a language with fixes of its own derives this and overrides
-// the hook below, so the runtime's repairs and the language's are offered
-// together.
 class DefaultCodeActionProvider : public CodeActionProvider {
  public:
   ~DefaultCodeActionProvider() noexcept override = default;

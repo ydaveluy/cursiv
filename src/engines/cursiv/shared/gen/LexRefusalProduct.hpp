@@ -1,8 +1,6 @@
 // A refusal no matcher took, spelled by the token graph: the product of its
-// word with the continuation it refuses, one level per byte of the word read.
-// No match stands on more than one class past the token, of bytes or of
-// scalars, so nothing a lexer reads is ever taken back; what the product
-// cannot spell is a fault.
+// word with the continuation it refuses, one level per byte. No match looks
+// more than one class past the token; what the product cannot spell is a fault.
 #pragma once
 
 #include <algorithm>
@@ -19,17 +17,14 @@
 #include "cursiv/shared/gen/LexWordClass.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
-#include "cursiv/shared/gen/lex_prefix_meets.hpp"
+#include "cursiv/shared/gen/lex_prefix_overlap.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
 namespace cursiv::engine {
 
-// A word its own turn reaches again; a match ending where the word does,
-// which only a class past it would rescue; a match ending short of the word;
-// a word running into a relay's content; a rescue read on over a scalar the
-// word class leaves out.
+// What the product cannot spell, one fault per kind of refusal.
 enum class LexRefusalFault : std::uint8_t {
   inLoop,
   endsOnWord,
@@ -47,18 +42,18 @@ struct LexRefusalProduct {
   // The refusals a matcher took: the product leaves them be.
   const std::vector<bool>& taken;
   // Per refusal, the one read in a row right in front of it, the only way
-  // into it, -1 for none; and the frontier those in front lay, once asked.
+  // into it, -1 for none; and the frontier those in front set, once asked.
   std::vector<int> front{};
   std::vector<int> aheadAt{};
   std::vector<ByteSet> aheadBytes{};
   std::vector<LexCodePoints> aheadCps{};
-  // What each refusal lays in front of the ones behind it, asked once.
-  struct Laid {
+  // What each refusal sets in front of the ones behind it, asked once.
+  struct Leading {
     bool known = false, single = false, scalar = false;
     ByteSet byte{};
     LexCodePoints cps{};
   };
-  std::vector<Laid> laid{};
+  std::vector<Leading> leading{};
 
   // Every refusal `taken` leaves, once the graph it points into is complete.
   void run() {
@@ -84,7 +79,7 @@ struct LexRefusalProduct {
     aheadAt.assign(n.guards.size(), -1);
     aheadBytes.assign(n.guards.size(), ByteSet{});
     aheadCps.assign(n.guards.size(), LexCodePoints{});
-    laid.assign(n.guards.size(), Laid{});
+    leading.assign(n.guards.size(), Leading{});
     for (std::size_t k = 0; k < n.guards.size(); ++k) {
       if (taken[k]) continue;
       std::map<std::pair<unsigned, int>, int> memo;
@@ -93,10 +88,8 @@ struct LexRefusalProduct {
   }
 
  private:
-  // What the refusals in a row in front of refusal `k` refuse where a match
-  // ends there: classes of one byte, and words of one scalar. Where one is
-  // such a word, the first refusal read lays the whole frontier, so the
-  // others find it covered; false where none is.
+  // Whether the refusals in a row from `k` refuse, where a match ends there,
+  // one byte or one scalar: the first one read then sets the whole frontier.
   bool ahead(std::size_t k) {
     if (aheadAt[k] >= 0) return aheadAt[k] == 1;
     bool scalars = false;
@@ -105,14 +98,14 @@ struct LexRefusalProduct {
     for (int j = front[k]; j >= 0 && steps < n.guards.size();
          j = front[static_cast<std::size_t>(j)]) {
       ++steps;
-      Laid& word = laid[static_cast<std::size_t>(j)];
+      Leading& word = leading[static_cast<std::size_t>(j)];
       if (!word.known) {
         word.known = true;
         const LexNode e = g.lex[n.guards[static_cast<std::size_t>(j)].node];
         if (e.a == kNoSet && e.min == 1) {
           word.single = true;
-          word.byte = g.sets[g.lexKid[e.b]];
-          word.cps = lex_set_cps(g, g.lexKid[e.b]);
+          word.byte = g.sets[g.lexChild[e.b]];
+          word.cps = lex_set_cps(g, g.lexChild[e.b]);
         } else if (e.a == kNoSet && one_scalar(e, word.cps)) {
           word.scalar = true;
         }
@@ -127,10 +120,8 @@ struct LexRefusalProduct {
     return scalars;
   }
 
-  // Whether every continuation of this prefix admits a match somewhere, over
-  // the NFA subsets, each once: `[^\n]* ![^\n]` is total. A match ends before
-  // a byte its bound neither refuses nor decodes at: where the bound decodes,
-  // the scalar there may be one it refuses, so the walk reads on.
+  // Whether every continuation of this prefix admits a match, as
+  // `[^\n]* ![^\n]` does: a walk over the NFA subsets, each once.
   bool total(std::vector<int> start) const {
     std::ranges::sort(start);
     std::vector<std::vector<int>> work{start};
@@ -158,19 +149,19 @@ struct LexRefusalProduct {
     return true;
   }
 
-  LexCodePoints word_of(std::uint16_t rescue) const {
+  LexCodePoints word_of(std::uint16_t passSet) const {
     LexCodePoints word;
     const auto at = std::ranges::find_if(
         g.sectionWords.v,
-        [rescue](const LexWordClass& w) { return w.set == rescue; });
+        [passSet](const LexWordClass& w) { return w.set == passSet; });
     word.ranges = at != g.sectionWords.v.end() ? at->wide : g.wordRanges.v;
     return word;
   }
 
   template <class Whole>
   bool scalars_total(const std::vector<int>& cl, const Whole& whole,
-                     std::uint16_t rescue) const {
-    const LexCodePoints word = word_of(rescue);
+                     std::uint16_t passSet) const {
+    const LexCodePoints word = word_of(passSet);
     bool dies = false;
     const auto ends =
         lex_scalar_ends(n, g.sets.data(), cl, word.sequences(), dies);
@@ -178,9 +169,9 @@ struct LexRefusalProduct {
   }
 
   bool reads_outside(const std::vector<int>& cl, const ByteSet& leads,
-                     std::uint16_t rescue) const {
+                     std::uint16_t passSet) const {
     std::vector<LexCodePoints::Seq> seqs;
-    const LexCodePoints word = word_of(rescue);
+    const LexCodePoints word = word_of(passSet);
     for (const LexCodePoints::Seq& q :
          LexCodePoints::outside(word.ranges.data(), word.ranges.size())
              .sequences()) {
@@ -198,26 +189,24 @@ struct LexRefusalProduct {
     if (e.min < 2 || e.min > 4) return false;
     const ByteSet* cls[4];
     for (unsigned i = 0; i < e.min; ++i) {
-      const std::uint16_t set = g.lexKid[e.b + i];
+      const std::uint16_t set = g.lexChild[e.b + i];
       if (g.setDecode[set] != kNoSet) return false;
       cls[i] = &g.sets[set];
     }
     return LexCodePoints::spelled(cls, e.min, out);
   }
 
-  // A refusal whose last byte is a nested relay's first content byte: the
-  // walk reads that byte off the refused class, and the search starts a byte
-  // behind. A longer stretch, a rescue class or a decoded class is not one
-  // byte, and where the end of the text closes the run, no byte may follow.
+  // A refusal whose last byte is a nested relay's first content byte: that
+  // byte is read off the refused class, and the search starts a byte behind.
   int relay_refusal(std::size_t k, const LexNode& e, unsigned lvl, int r) {
     const LexRelayGen& row = n.relays[static_cast<std::size_t>(r)].row;
     if (const bool ends =
             row.nested && !row.eof && e.a == kNoSet && lvl + 1 == e.min;
-        !ends || lex_decode_bytes(g, g.lexKid[e.b + lvl]).any()) {
+        !ends || lex_decode_bytes(g, g.lexChild[e.b + lvl]).any()) {
       refuse(LexRefusalFault::intoRelay, k, ByteSet{});
       return -1;
     }
-    const ByteSet off = lex_not(g.sets[g.lexKid[e.b + lvl]]);
+    const ByteSet off = lex_not(g.sets[g.lexChild[e.b + lvl]]);
     if (!off.any()) return -1;
     LexRelayBuild shifted = n.relays[static_cast<std::size_t>(r)];
     shifted.row.back = 1;
@@ -239,14 +228,14 @@ struct LexRefusalProduct {
       return at->second;
     const LexNode e = g.lex[n.guards[k].node];
     const bool done = lvl == e.min;
-    // The word fully spelled and nothing rescuing it: the reading is dead.
+    // The word fully spelled and nothing to lift it: the reading is dead.
     if (done && e.a == kNoSet) return -1;
     const std::vector<int> cl = n.eclose(q);
     const ByteSet scalars = done ? lex_decode_bytes(g, e.a) : ByteSet{};
     // At the word's end, whether the body reads on over every byte and scalar
-    // the rescue class holds: then a longer match takes every rescued text,
+    // the pass class holds: then a longer match takes every text it lets pass,
     // and a match ending here is only the reading the refusal kills.
-    bool rescued = done;
+    bool longerTakes = done;
     ByteSet stranded;
     std::map<std::vector<int>, bool> totals;
     const auto whole = [&](const std::vector<int>& sub) {
@@ -259,17 +248,17 @@ struct LexRefusalProduct {
         const auto c = static_cast<unsigned char>(b);
         if (g.sets[e.a].has(c) &&
             !whole(lex_nfa_step(n, g.sets.data(), cl, c))) {
-          rescued = false;
+          longerTakes = false;
           stranded.add(c);
         }
       }
-    if (rescued && scalars.any() && !scalars_total(cl, whole, e.a)) {
-      rescued = false;
+    if (longerTakes && scalars.any() && !scalars_total(cl, whole, e.a)) {
+      longerTakes = false;
       stranded |= scalars;
     }
-    const std::uint16_t wantIdx = done ? kNoSet : g.lexKid[e.b + lvl];
+    const std::uint16_t wantIdx = done ? kNoSet : g.lexChild[e.b + lvl];
     const std::uint16_t pick = done ? e.a : wantIdx;
-    // Past the word, a byte the rescue class decodes at goes on too.
+    // Past the word, a byte the pass class decodes at goes on too.
     const ByteSet pickSet = g.sets[pick] | scalars;
     int chain = -1;
     bool leads = false;
@@ -288,8 +277,8 @@ struct LexRefusalProduct {
                 on == g.sets[pick] ? pick : lex_intern_set(g, on);
             add(n.push({.set = static_cast<int>(idx),
                         .t1 = to,
-                        .stray = st.stray,
-                        .strayTerm = st.strayTerm}));
+                        .loneLead = st.loneLead,
+                        .loneLeadTerm = st.loneLeadTerm}));
           }
         }
         if (done) continue;
@@ -297,19 +286,19 @@ struct LexRefusalProduct {
           add(n.push({.set = st.set,
                       .t1 = st.t1,
                       .minus = wantIdx,
-                      .stray = st.stray,
-                      .strayTerm = st.strayTerm}));
+                      .loneLead = st.loneLead,
+                      .loneLeadTerm = st.loneLeadTerm}));
         } else {
           ByteSet off = g.sets[st.set];
           off.andnot(g.sets[wantIdx]).andnot(g.sets[st.minus]);
           if (off.any())
             add(n.push({.set = lex_intern_set(g, off),
                         .t1 = st.t1,
-                        .stray = st.stray,
-                        .strayTerm = st.strayTerm}));
+                        .loneLead = st.loneLead,
+                        .loneLeadTerm = st.loneLeadTerm}));
         }
       } else if (st.accept >= 0 && done) {
-        if (!rescued) refuse(LexRefusalFault::endsOnWord, k, stranded);
+        if (!longerTakes) refuse(LexRefusalFault::endsOnWord, k, stranded);
       } else if (st.accept >= 0) {
         // The token ends inside the word: the last byte left is one class at
         // the frontier, and so is a whole word of one scalar, decoded; more
@@ -357,8 +346,8 @@ struct LexRefusalProduct {
           refuse(LexRefusalFault::inLoop, k, ByteSet{});
       }
     }
-    // A byte past the word that only a decoded scalar rescues: what the body
-    // reads from it must be rescued, or the edge reads a refused word on.
+    // A byte past the word that only a decoded scalar lets pass: what the body
+    // reads from it must pass too, or the edge reads a refused word on.
     if (leads && reads_outside(cl, scalars, e.a))
       refuse(LexRefusalFault::readsPast, k, ByteSet{});
     const int self = into >= 0 ? into : (chain < 0 ? -1 : n.hole());
@@ -367,20 +356,16 @@ struct LexRefusalProduct {
   }
 };
 
-// The spine refusals a matcher asks: those at a terminal's head, and behind
-// it those the product cannot spell without text past the token -- tried on a
-// copy until what is taken leaves no other such. `offsets` are the spine's.
-// The last trial is the product: `n` and the set pools keep it, and what it
-// cannot spell is named on the verdicts.
+// The spine refusals a matcher asks: those at a terminal's head, and those the
+// product cannot spell without text past the token. The last trial is kept,
+// and what it cannot spell is named on the verdicts.
 template <class Cfg>
 std::vector<bool> lex_matcher_takes(LexNfaPool& n, Cfg& g,
                                     const std::vector<int>& offsets) {
   std::vector<bool> taken(n.guards.size(), false);
   for (std::size_t k = 0; k < n.guards.size(); ++k) taken[k] = offsets[k] == 0;
-  // A trial only appends to the set pools: `lex_intern_set` and
-  // `lex_intern_cps_bound` write behind `nsets` and the end of
-  // `scalarRanges`, and never change an entry already there. Cutting each pool
-  // back to its size and `nsets` to its count therefore undoes a trial.
+  // A trial only appends to the set pools, so cutting them back to their sizes
+  // undoes it.
   const auto nsets = g.nsets;
   const auto setsSize = g.sets.size();
   const auto decodeSize = g.setDecode.size();
@@ -427,7 +412,7 @@ std::vector<bool> lex_matcher_takes(LexNfaPool& n, Cfg& g,
         lower_refuse(g, LowerFail::wordRefusedInLoop, gd.term);
         break;
       case LexRefusalFault::endsOnWord:
-        lower_refuse(g, LowerFail::rescuedRefusalPastMatch, gd.term, bytes);
+        lower_refuse(g, LowerFail::passableRefusalPastMatch, gd.term, bytes);
         break;
       case LexRefusalFault::endsShort:
         if (!g.lowerFail()) g.lowerWord = gd.node;
@@ -437,7 +422,7 @@ std::vector<bool> lex_matcher_takes(LexNfaPool& n, Cfg& g,
         lower_refuse(g, LowerFail::refusalIntoRelay, gd.term);
         break;
       case LexRefusalFault::readsPast:
-        lower_refuse(g, LowerFail::rescueReadsPast, gd.term);
+        lower_refuse(g, LowerFail::readsOutsideBoundary, gd.term);
         break;
     }
   }

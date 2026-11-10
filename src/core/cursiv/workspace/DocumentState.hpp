@@ -8,11 +8,11 @@
 
 namespace cursiv {
 
-// Two of these rungs cost a barrier a build could do without -- but they are
-// what a `waitUntil` waits on, so dropping them would drop the question.
+// Some states add a barrier the build alone would not need: they stay because
+// `waitUntil` waits on them.
 enum class DocumentState : std::uint8_t {
   // The text changed and needs parsing again; whatever was derived from the
-  // previous text is no longer valid.
+  // previous text is stale.
   Changed = 0,
   // An AST exists. The structure can be walked; references cannot resolve yet.
   Parsed = 1,
@@ -31,8 +31,8 @@ enum class DocumentState : std::uint8_t {
   Validated = 6,
 };
 
-// How many rungs the ladder has, for a table indexed by one. Derived, so a
-// rung added above cannot leave a table one short.
+// The number of states, for a table indexed by state. Derived, so a new state
+// cannot leave a table one short.
 inline constexpr std::size_t kDocumentStateCount =
     static_cast<std::size_t>(DocumentState::Validated) + 1;
 

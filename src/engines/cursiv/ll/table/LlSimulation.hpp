@@ -1,7 +1,6 @@
-// The walk over sets of configurations: the construction runs it with a
-// ceiling to settle a choice once and for all, and a repair search and a caret
-// run it over the stack the descent stands on. A prediction has a closure of
-// its own, `LlEpisodeSim`. Nothing here knows a grammar.
+// The walk over sets of configurations: the construction runs it with a ceiling
+// to decide a choice, and the repair search and the caret run it over the
+// descent's stack. Predictions use `LlEpisodeSim`.
 #pragma once
 
 #include <algorithm>
@@ -11,9 +10,10 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/ll/table/LlAtnView.hpp"
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv::engine {
 
@@ -27,10 +27,10 @@ inline constexpr std::uint32_t kLlCtxApart = 0xFFFFFFFEu;
 
 inline void ll_clear(auto&... x) { (x.clear(), ...); }
 
-// Open-addressed flat arrays retain their storage across tokens.
-// Stamps clear the table without visiting each slot or allocating nodes.
+// Open-addressed flat arrays keep their storage across tokens. A round number
+// clears the table without visiting each slot or allocating nodes.
 template <class K, class H>
-class LlStamped {
+class LlRoundTable {
  public:
   void release() {
     std::vector<K>{}.swap(_key);
@@ -49,7 +49,7 @@ class LlStamped {
     _size = 0;
   }
 
-  // Gives back the room a much larger walk left behind: probing a table that
+  // Gives back the memory a much larger walk left behind: probing a table that
   // is mostly empty touches a cache line for every key.
   void trim() {
     if (_key.size() > kFloor && _key.size() > kSlack * std::max(_peak, _size))
@@ -89,11 +89,8 @@ class LlStamped {
   }
 
  private:
-  // THE INDEX TAKES THE HIGH BITS OF A MULTIPLICATION, NEVER THE LOW ONES: a
-  // multiply carries upward alone, so masking the low bits of a hash that
-  // ends in one leaves the index naming the last field the hash mixed in --
-  // for a reading, its arm, and a walk of a thousand readings then queues on
-  // four slots. 2^64 / phi is the multiplier that spreads them.
+  // The index takes the high bits of a product by 2^64 / phi, never the low
+  // ones, which would name only the last field the hash mixed in.
   std::size_t slot(std::uint64_t h) const {
     return static_cast<std::size_t>((h * 0x9E3779B97F4A7C15ull) >> _shift);
   }
@@ -137,11 +134,9 @@ struct LlKeyHash {
   }
 };
 
-// The stack a closure carries, as a graph and not a list: a node names every
-// state a return may go to, so two readings that reached one position by two
-// routes are ONE reading with a forked stack. Without that, a rule reached
-// through eight callers is eight configurations, and a grammar whose
-// expressions cascade -- C's -- multiplies them at every level.
+// The stack a closure carries, as a graph: a node names every state a return
+// may go to, so two readings that reached one position by two routes are one
+// reading with a forked stack.
 class LlCtxPool {
  public:
   // The nodes made so far: a node is only meaningful against the pool that
@@ -185,13 +180,9 @@ class LlCtxPool {
     return intern(pair, 1, &start);
   }
 
-  // The two stacks as one: a return both name goes to one place with the two
-  // parents joined, a return only one names stays its own. `kLlCtxApart`
-  // where the unknown caller is on one side -- the walk then keeps both,
-  // since no join can say what a known stack and an unknown one agree on.
-  // Answered once per pair: a closure asks the same join at every position
-  // that reaches one rule two ways, and the graph is small enough that the
-  // memo is the whole of what makes merging cheaper than not merging.
+  // The two stacks as one: a return both name goes to one place, parents
+  // joined; a return only one names stays its own. `kLlCtxApart` where one side
+  // has the unknown caller. Answered once per pair.
   std::uint32_t merge(std::uint32_t a, std::uint32_t b) {
     if (a == b) return a;
     if (a == kLlCtxNone || b == kLlCtxNone) return kLlCtxApart;
@@ -369,9 +360,9 @@ class LlCtxPool {
   std::vector<std::uint16_t> _n;
   // Hash collisions link through pool nodes, avoiding per-hash allocations.
   std::vector<std::uint32_t> _link;
-  LlStamped<std::uint64_t, LlKeyHash> _index;
-  LlStamped<std::uint64_t, LlKeyHash> _scratchIndex;
-  LlStamped<std::uint64_t, LlKeyHash> _memo;
+  LlRoundTable<std::uint64_t, LlKeyHash> _index;
+  LlRoundTable<std::uint64_t, LlKeyHash> _scratchIndex;
+  LlRoundTable<std::uint64_t, LlKeyHash> _memo;
   std::vector<Join> _joins;
   std::size_t _mark = 0;
   bool _scratching = false;
@@ -427,7 +418,7 @@ class LlReturnPool {
 };
 
 // One step of the walk over a set of configurations. `alts` is what the set
-// still admits; a set every configuration of which names one arm is settled.
+// still admits; a set every configuration of which names one arm is decided.
 class LlSimulation : public LlReturnPool {
  public:
   explicit LlSimulation(const LlAtnView& atn, std::uint32_t closureLimit = 0)
@@ -435,6 +426,9 @@ class LlSimulation : public LlReturnPool {
   bool capped() const { return _capped; }
   // How many positions its walks have visited: what their work comes to.
   std::uint64_t visits() const { return _total; }
+
+  // The parse's stop, read as a walk visits its positions. Unset, none is read.
+  void watch(const CancellationPoll& stop) { _stop = stop; }
 
   // The stack ends in an unknown caller by choice, not because the descent
   // stands there: `unbound` then says a reading returned out of a rule into it.
@@ -447,8 +441,8 @@ class LlSimulation : public LlReturnPool {
     _shareEpsilon = true;
     if (_rank.empty()) rank_states();
   }
-  // ...and steps one set of readings by the same terminals again and again: a
-  // step is kept, by the set and the terminals, while its contexts last.
+  // Repair weighing also steps one set by the same terminals again and again:
+  // a step is kept, by set and terminals, while its contexts last.
   void keep_steps() { _keepSteps = true; }
   // Recovery keeps even tail calls: leaving one must name the exact call,
   // and its cost depends on how many author tokens it has read.
@@ -475,8 +469,8 @@ class LlSimulation : public LlReturnPool {
     _capped = false;
   }
 
-  // ...and the contexts go too, which is what a walk that keeps no set
-  // between calls owes: the pool would otherwise grow with the document.
+  // `reset`, and the contexts go too, as a walk that keeps no set between
+  // calls needs: the pool would otherwise grow with the document.
   void forget() {
     reset();
     _ctx.clear();
@@ -535,7 +529,7 @@ class LlSimulation : public LlReturnPool {
   }
 
   // The closure at one state, not past it: what a caret asks, where the
-  // question is what may be read HERE and not which arm was taken.
+  // question is what may be read here and not which arm was taken.
   void seed(std::uint32_t state, std::uint32_t stack) {
     reset();
     closure(LlConfig{.state = state, .ctx = stack, .alt = 0}, _next);
@@ -550,15 +544,13 @@ class LlSimulation : public LlReturnPool {
       feed(LlConfig{.state = _atn.edge(s.edge + i).target,
                     .ctx = stack,
                     .alt = static_cast<std::uint16_t>(i)});
-    settle();
+    expand_sources();
     _cur.swap(_next);
   }
 
-  // Advance every configuration that can read this token. A spelling several
-  // terminals match is several terminals: a keyword guarded against running
-  // into a word and the bare literal of the same text are two of them, and an
-  // arm that wants one must not die because another was named first. False
-  // when no reading survives, which is a choice no arm answers.
+  // Advances every configuration that can read this token. A spelling several
+  // terminals match counts as all of them, as a guarded keyword and the bare
+  // literal do. False when no reading survives.
   bool step(const std::uint16_t* terms, std::size_t n) {
     if (!_keepSteps) return advance(Labelled{terms, n, labels(terms, n)});
     return kept_step(terms, n);
@@ -566,7 +558,7 @@ class LlSimulation : public LlReturnPool {
   bool step(std::uint16_t term) { return step(&term, 1); }
 
   // The step a caret replays over a token it did not read itself: the edges
-  // `takes(edge index)` names, whatever they carry -- an implied token is read
+  // `takes(edge index)` names, whatever they carry; an implied token is read
   // across the condition that stands for it.
   template <class Takes>
   bool step_edges(Takes&& takes) {
@@ -598,10 +590,9 @@ class LlSimulation : public LlReturnPool {
     return needs_filter([](std::uint16_t) { return true; });
   }
 
-  // The next token is also needed to evaluate a pending condition. Traverse
-  // those conditions speculatively to find its alphabet, without changing the
-  // configurations that the real filter will retain. A choice's wider lexical
-  // mode could otherwise reserve a keyword that has no transition here.
+  // The terminals the next token may be, for a pending condition too: its
+  // conditions are walked ahead without changing the configurations, so a wider
+  // mode does not reserve a keyword with no edge here.
   template <class F>
   void possible_terms(F&& read) {
     const bool pending = needs_filter();
@@ -629,7 +620,7 @@ class LlSimulation : public LlReturnPool {
 
   // The arm every surviving configuration names, `kNoRow` while more than
   // one does.
-  std::uint16_t settled() const {
+  std::uint16_t decided() const {
     if (_cur.empty()) return kNoRow;
     const std::uint16_t a = _cur.front().alt;
     for (const LlConfig& c : _cur)
@@ -637,9 +628,9 @@ class LlSimulation : public LlReturnPool {
     return a;
   }
 
-  // ...and the lowest arm still standing, which is what a walk that runs out
-  // of input or of patience answers: the arms are ordered, and the first that
-  // admits the text is the reading the grammar states.
+  // The lowest arm still standing, which is what a walk that runs out of input
+  // or of patience answers: the arms are ordered, and the first that admits
+  // the text is the reading the grammar states.
   std::uint16_t lowest() const {
     std::uint16_t a = kNoRow;
     for (const LlConfig& c : _cur)
@@ -761,18 +752,14 @@ class LlSimulation : public LlReturnPool {
           feed(LlConfig{.state = e.target, .ctx = c.ctx, .alt = c.alt});
       }
     }
-    settle();
+    expand_sources();
     _cur.swap(_next);
     return !_cur.empty();
   }
 
-  // A reading already standing at this position with another stack is the
-  // same reading with a forked stack: the two join, and the walk carries on
-  // only where the join widened what was already covered. Where they cannot
-  // join -- one of them has no caller to name -- both are kept.
-  // Depth first, on a stack of its own: a reading that returns through every
-  // caller of a deep document walks as far as the document nests. A call's
-  // context is pushed when it is visited, in the order a recursion would.
+  // A reading already here with another stack joins it, and the walk goes on
+  // only where the join widened the stack; where they cannot join, both are
+  // kept. Depth first, on a stack of its own.
   bool closure(const LlConfig& c, std::vector<LlConfig>& out,
                std::vector<LlConfig>* conditions = nullptr) {
     _pending.clear();
@@ -783,12 +770,9 @@ class LlSimulation : public LlReturnPool {
     return done;
   }
 
-  // A walk that shares epsilon positions takes all its sources before it
-  // expands any, so the contexts that meet at a position leave it once. Where
-  // two stacks cannot join, the seats they split into depend on the order the
-  // readings came in, and a worse split costs the steps after it: the sources
-  // are then walked one at a time too, and that walk's seats win if it ends
-  // within a few times the first one's work.
+  // A walk that shares epsilon positions takes all its sources before expanding
+  // any. Where stacks cannot join, the sources are also walked one at a time,
+  // and that walk wins if it costs at most a few times the first.
   void feed(const LlConfig& c) {
     if (!_shareEpsilon) {
       closure(c, _next);
@@ -797,7 +781,7 @@ class LlSimulation : public LlReturnPool {
       _pending.push_back({c, kNoFollow});
     }
   }
-  void settle() {
+  void expand_sources() {
     if (!_shareEpsilon) return;
     _split = false;
     _visits = 0;
@@ -841,6 +825,7 @@ class LlSimulation : public LlReturnPool {
              std::vector<LlConfig>* conditions = nullptr) {
     for (;;) {
       while (!_pending.empty() && !_capped && !(_stopAtSplit && _split)) {
+        _stop.poll();
         Pending next = _pending.back();
         _pending.pop_back();
         next.config.ctx = push_return(next.config.ctx, next.follow);
@@ -859,7 +844,8 @@ class LlSimulation : public LlReturnPool {
   }
 
   // Where a state stands in a reverse postorder of the graph a closure walks:
-  // a seat expands once everything that reaches it from lower down has arrived.
+  // a entry expands once everything that reaches it from lower down has
+  // arrived.
   void rank_states() {
     const std::uint32_t n = _atn.nstates;
     _rank.assign(n, 0);
@@ -900,7 +886,7 @@ class LlSimulation : public LlReturnPool {
   void forget_visits() {
     _seen.clear();
     _at.clear();
-    _seatNext.clear();
+    _nextAtPosition.clear();
     forget_deltas();
   }
 
@@ -911,8 +897,8 @@ class LlSimulation : public LlReturnPool {
   }
 
   // The contexts that reached a position and have not yet left it.
-  void defer(std::uint32_t at, const LlConfig& cur, std::size_t seats) {
-    if (_delta.size() < seats) _delta.resize(seats, kLlCtxApart);
+  void defer(std::uint32_t at, const LlConfig& cur, std::size_t entries) {
+    if (_delta.size() < entries) _delta.resize(entries, kLlCtxApart);
     std::uint32_t& held = _delta[at];
     if (held == kLlCtxApart) {
       held = cur.ctx;
@@ -944,17 +930,18 @@ class LlSimulation : public LlReturnPool {
             ready || kind == LlEdgeKind::atom || kind == LlEdgeKind::condition;
       }
     bool first = false, joined = false;
-    std::uint32_t* seat = nullptr;
+    std::uint32_t* latest = nullptr;
     std::uint32_t where = 0;
     const bool shared = ready || _shareEpsilon;
     if (shared) {
       const std::uint64_t key =
           (static_cast<std::uint64_t>(cur.state) << 16) | cur.alt;
-      seat = &_at.at(key, first);
+      latest = &_at.at(key, first);
       if (!first) {
         unsigned tried = 0;
-        for (std::uint32_t at = *seat; at != kNoFollow && tried++ < kSeatsTried;
-             at = _shareEpsilon ? _seatNext[at] : kNoFollow) {
+        for (std::uint32_t at = *latest;
+             at != kNoFollow && tried++ < kEntriesTried;
+             at = _shareEpsilon ? _nextAtPosition[at] : kNoFollow) {
           const std::uint32_t m = _ctx.merge(out[at].ctx, cur.ctx);
           if (m == kLlCtxApart) {
             _split =
@@ -990,10 +977,10 @@ class LlSimulation : public LlReturnPool {
       const auto at = static_cast<std::uint32_t>(out.size());
       where = at;
       if (_shareEpsilon) {
-        _seatNext.resize(out.size() + 1, kNoFollow);
-        _seatNext[at] = first ? kNoFollow : *seat;
+        _nextAtPosition.resize(out.size() + 1, kNoFollow);
+        _nextAtPosition[at] = first ? kNoFollow : *latest;
       }
-      if (first || _shareEpsilon) *seat = at;
+      if (first || _shareEpsilon) *latest = at;
       out.push_back(cur);
     }
     if (conditions != nullptr && conditional) conditions->push_back(cur);
@@ -1039,11 +1026,10 @@ class LlSimulation : public LlReturnPool {
   }
 
   static constexpr std::size_t kLinearLabels = 8;
-  // The seats of a position a new stack tries to join, the latest first. Stacks
-  // whose calls began apart join none of them however many stand there, and
-  // trying them all costs a long right-recursive list its square: one that
-  // joins none of these takes a seat of its own.
-  static constexpr unsigned kSeatsTried = 8;
+  // The entries of a position a new stack tries to join, latest first; one that
+  // joins none of them takes a entry of its own, so a long right-recursive list
+  // is not quadratic.
+  static constexpr unsigned kEntriesTried = 8;
   static constexpr std::size_t kPoolCap = std::size_t{1} << 16;
   static constexpr std::size_t kKeptCap = std::size_t{1} << 20;
   // The one-at-a-time walk may spend this many visits per visit of the first,
@@ -1066,23 +1052,23 @@ class LlSimulation : public LlReturnPool {
   std::vector<Kept> _kept;
   std::vector<LlConfig> _keptConfigs;
   std::vector<std::uint16_t> _keptTerms;
-  LlStamped<std::uint64_t, LlKeyHash> _keptIndex;
+  LlRoundTable<std::uint64_t, LlKeyHash> _keptIndex;
   bool _keepCalls = false;
   std::int64_t _callFrom = 0;
 
   const LlAtnView& _atn;
   std::vector<LlConfig> _cur, _next;
-  LlStamped<LlConfig, LlConfigHash> _seen;
+  LlRoundTable<LlConfig, LlConfigHash> _seen;
   // Where a reading of one position and one arm already stands, so a second
   // route to it joins instead of doubling the set.
-  LlStamped<std::uint64_t, LlKeyHash> _at;
+  LlRoundTable<std::uint64_t, LlKeyHash> _at;
   // Every compatible union at a position, for repair weighing: the first
-  // stack seated there cannot keep the others apart.
-  std::vector<std::uint32_t> _seatNext;
-  // Per seat of a walk that shares epsilon positions: the contexts that
-  // arrived since it last expanded, and the seats waiting to expand.
+  // stack stored there cannot keep the others apart.
+  std::vector<std::uint32_t> _nextAtPosition;
+  // Per entry of a walk that shares epsilon positions: the contexts that
+  // arrived since it last expanded, and the entries waiting to expand.
   std::vector<std::uint32_t> _delta;
-  // (rank, seat) as one word: the seats leave in the order of the ranks.
+  // (rank, entry) as one word: the entries leave in the order of the ranks.
   std::vector<std::uint64_t> _ready;
   std::vector<std::uint32_t> _rank;
   std::vector<std::uint64_t> _labels;
@@ -1092,6 +1078,7 @@ class LlSimulation : public LlReturnPool {
   std::vector<LlConfig> _conditions;
   std::uint32_t _limit = 0, _visited = 0;
   bool _capped = false, _truncated = false, _unbound = false;
+  CancellationPoll _stop;
   bool _shareEpsilon = false;
   bool _keepSteps = false;
 };

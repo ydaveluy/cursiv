@@ -19,6 +19,11 @@
 namespace tllsemantic {
 struct Ll : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
+  // Two arms that read the same run of tokens and part at its end: the
+  // generated automaton reads the whole run ahead of the choice.
+  struct Staged : rule<create<tfoldorder::Leaf>(
+                      (many(lit<"x">) + lit<"!">) |
+                      (many(lit<"x"> + option(lit<"y">)) + lit<";">))> {};
   struct Root : rule<(lit<"fold:"> + ref<tfoldorder::Base::Root>) |
                      (lit<"data:"> + ref<tlldatatext::Base::Root>) |
                      (lit<"creation:"> + ref<tllcreation::Combined::Root>) |
@@ -31,7 +36,8 @@ struct Ll : cursiv::GrammarSpec {
                      (lit<"agree:"> + ref<tllcaretagree::Base::Root>) |
                      (lit<"depth:"> + ref<tcaretdepth::Base::Root>) |
                      (lit<"guard:"> + ref<tllcaretguard::Base::Root>) |
-                     (lit<"loop:"> + ref<tindirectloop::Combined::Root>)> {};
+                     (lit<"loop:"> + ref<tindirectloop::Combined::Root>) |
+                     (lit<"staged:"> + ref<Staged>)> {};
   using entry = Root;
   using ignored = WS;
 };

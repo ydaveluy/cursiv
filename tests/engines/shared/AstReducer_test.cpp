@@ -54,7 +54,7 @@ using ChildField = cursiv::detail::field_tag<&Root::child>;
 constexpr std::uint64_t derives[] = {1, 2};
 constexpr std::uint16_t targets[] = {1};
 constexpr cursiv::detail::FieldDesc fields[] = {
-    {"child", cursiv::detail::FieldNature::node,
+    {"child", cursiv::detail::FieldContent::node,
      cursiv::detail::FieldStorage::direct, 1, 0, targets, 1}};
 constexpr cursiv::AstMetaData meta{.derivesBits = derives,
                                    .typeCount = 2,
@@ -87,7 +87,7 @@ void root(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
 }
 void adopt(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   const auto m = b.adopt<false>(1, id);
-  if (!b.failed()) b.owe_write(id, 0, cursiv::ActKind::assign, m);
+  if (!b.failed()) b.defer_write(id, 0, cursiv::ActKind::assign, m);
 }
 void child(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   b.push_made(id, b.create<makes[1], child_writer, false>(1, id));
@@ -137,7 +137,7 @@ cursiv::ParseResult reduce(cursiv::Cst&& c, cursiv::CstBuilder& b,
 }
 
 // An adoption takes the node its body built or none: a repair excuses an
-// effect that does not land, never a node that was not built.
+// effect that does not apply, never a node that was not built.
 void an_adoption_takes_the_node_its_body_built(bool node, bool ownRepair,
                                                bool parentRepair,
                                                bool childRepair,
@@ -177,7 +177,7 @@ void an_adoption_takes_the_node_its_body_built(bool node, bool ownRepair,
   CHECK(writes == (good ? 1u : 0u));
 }
 
-// A node member owed no node is a broken tree, repaired or not.
+// A node member given no node is a broken tree, repaired or not.
 void a_direct_write_without_its_node_is_broken(bool repaired) {
   cursiv::Cst c("");
   cursiv::CstBuilder b(c);
@@ -212,7 +212,6 @@ void repeated_node_writes_keep_source_order_and_skip_other_families() {
   CHECK(writes == 2);
 }
 
-// A node no member takes is not in the node list.
 void a_node_no_member_takes_leaves_the_node_list() {
   cursiv::Cst c("ab");
   cursiv::CstBuilder b(c);
@@ -245,10 +244,10 @@ using CalleeField = cursiv::detail::field_tag<&Call::callee>;
 constexpr std::uint64_t derives[] = {7, 2, 4};
 constexpr std::uint16_t targets[] = {0};
 constexpr cursiv::detail::FieldDesc fields[] = {
-    {"flag", cursiv::detail::FieldNature::value,
+    {"flag", cursiv::detail::FieldContent::value,
      cursiv::detail::FieldStorage::direct, cursiv::detail::kNoIndex, 1, targets,
      0},
-    {"callee", cursiv::detail::FieldNature::node,
+    {"callee", cursiv::detail::FieldContent::node,
      cursiv::detail::FieldStorage::direct, 0, 2, targets, 1}};
 constexpr cursiv::AstMetaData meta{.derivesBits = derives,
                                    .typeCount = 3,
@@ -281,13 +280,13 @@ bool call_writer(cursiv::engine::AstReducer& b,
 constexpr cursiv::engine::AstApplyFn applies[] = {expr_writer, num_writer,
                                                   call_writer};
 
-// The receiver, then its flag owed to whatever the region is when it lands.
+// The receiver, then its flag set on whatever the region is when it applies.
 void number(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   b.push_made(id, b.create<makes[1], num_writer, true>(1, id));
-  b.owe_effect(id, 1, 0, cursiv::ActKind::flag);
+  b.defer_effect(id, 1, 0, cursiv::ActKind::flag);
 }
 void turn(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
-  b.owe_effect(id, 2, 1, cursiv::ActKind::nest);
+  b.defer_effect(id, 2, 1, cursiv::ActKind::nest);
 }
 void close(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
   const auto m = b.adopt<true>(0, id);
@@ -544,7 +543,7 @@ void an_inserted_name_leaves_references_and_handles_untouched() {
   cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &tree;
   ctx.refs = &references.handles;
-  ctx.home = &references;
+  ctx.resolver = &references;
   ctx.repaired = true;
   std::vector<cursiv::ParseDiagnostic> diagnostics;
   ctx.diags = &diagnostics;
@@ -882,12 +881,12 @@ int main() {
   only_retained_owners_keep_active_reference_ranks();
   for (bool own : {false, true})
     for (bool parent : {false, true})
-      for (bool kid : {false, true})
+      for (bool childRepair : {false, true})
         for (bool unrelated : {false, true}) {
-          an_adoption_takes_the_node_its_body_built(false, own, parent, kid,
-                                                    unrelated);
-          an_adoption_takes_the_node_its_body_built(true, own, parent, kid,
-                                                    unrelated);
+          an_adoption_takes_the_node_its_body_built(false, own, parent,
+                                                    childRepair, unrelated);
+          an_adoption_takes_the_node_its_body_built(true, own, parent,
+                                                    childRepair, unrelated);
         }
   an_adoption_takes_the_node_its_body_built(true, true, true, true, true, true);
   for (bool repaired : {false, true})

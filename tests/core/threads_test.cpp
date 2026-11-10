@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -35,15 +36,14 @@
 #include "support/GrammarDump.hpp"
 #include "support/Throws.hpp"
 
-// Pins the contract of the parallel-for, which is what a change of pool has to
-// keep: every index runs exactly once, the call returns after the last body,
-// the first exception is rethrown, cancellation short-circuits the rest, and a
-// body may run another parallel-for without deadlocking.
+// The parallel-for contract: every index runs once, the call returns after
+// the last body, the first exception is rethrown, cancellation stops the rest,
+// and a body may nest another run.
 namespace task_scheduler {
 
 namespace {
 
-// Four workers whatever the machine, so the lanes below are the same run on a
+// Four workers whatever the machine, so the tests below run the same on a
 // laptop and on a build farm.
 constexpr std::size_t kWorkers = 4;
 
@@ -128,12 +128,8 @@ void the_call_returns_after_the_last_body() {
   CHECK(inside.load() == 0);
 }
 
-// The work spreads as a rendezvous, not a high-water mark, so a peak-of-one
-// is the truth on a loaded machine, not a defect. The first item blocks
-// until the second starts, which only another thread can do: a part holds
-// no item beyond the one it runs, so heavy items at the start of a range
-// never wait behind each other. The first item reads the answer itself: once
-// the run is over, the second has always started. The deadline just keeps a
+// The first item blocks until the second starts, which only another thread
+// can do: a part holds no item beyond the one it runs. The deadline keeps a
 // pool that cannot deliver from hanging.
 void the_work_spreads_across_threads() {
   cursiv::TaskScheduler tasks{kWorkers};
@@ -195,6 +191,17 @@ void a_stopped_run_hands_out_no_more_items() {
     return !stopped.load(std::memory_order_relaxed);
   });
   CHECK(calls.load() < 200);
+
+  // At the top of the index range too: claims past the last item never wrap
+  // round to the first.
+  std::atomic<std::size_t> firsts{0};
+  pool.run(std::numeric_limits<std::size_t>::max(),
+           [&](std::size_t index) noexcept {
+             if (index != 0) return true;
+             ++firsts;
+             return false;
+           });
+  CHECK(firsts.load() == 1);
 }
 
 void inline_runs_report_cancellation_from_the_last_body() {
@@ -385,16 +392,14 @@ void run() {
 
 }  // namespace task_scheduler
 
-// Pins the handshake that lets a value be read without a lock: what is read
-// is what was published, a value held by a reader is never freed under it,
-// and one nobody holds does not pile up -- the two failure modes that would
-// otherwise rot silently, on a loaded machine or after a day of editing.
+// Reading without a lock: what is read is what was published, a value a
+// reader holds is never freed under it, and one nobody holds does not pile up.
 namespace published {
 
 namespace {
 
 // Counts itself, and carries a value twice: `mirror` must always be `2 * seed`,
-// so a reader that lands on a freed or half-built object is caught by the
+// so a reader that reaches a freed or half-built object is caught by the
 // mismatch rather than by luck.
 struct Payload {
   explicit Payload(int value) : seed(value), mirror(value * 2) { ++live; }
@@ -436,9 +441,9 @@ void what_is_published_is_what_is_read() {
   CHECK((*read).mirror == 14);
 }
 
-// Retiring is not freeing: a reader that took the pointer before the swap keeps
-// reading the value it took.
-void a_held_read_keeps_the_retired_value_alive() {
+// Replacing is not freeing: a reader that took the pointer before the swap
+// keeps reading the value it took.
+void a_held_read_keeps_the_replaced_value_alive() {
   cursiv::Published<Payload> slot;
   slot.publish(payload(1));
 
@@ -465,6 +470,21 @@ void nothing_is_retained_once_the_readers_leave() {
   CHECK(Payload::live.load() == 1);
 }
 
+// A value is freed with no lock of its slot held: its destructor may use the
+// slot again.
+void a_freed_value_may_use_its_slot() {
+  cursiv::Published<int> slot;
+  std::size_t retained = 1;
+  slot.publish(std::shared_ptr<const int>(new int(1), [&](const int* value) {
+    delete value;
+    retained = slot.retainedCount();
+    slot.publish(std::make_shared<const int>(3));
+  }));
+  slot.publish(std::make_shared<const int>(2));
+  CHECK(retained == 0);
+  CHECK(*slot.read() == 3);
+}
+
 void a_reader_that_outlives_the_slot_is_not_the_contract() {
   {
     cursiv::Published<Payload> slot;
@@ -474,9 +494,8 @@ void a_reader_that_outlives_the_slot_is_not_the_contract() {
   CHECK(Payload::live.load() == 0);
 }
 
-// The one that matters. Readers spin on `read()` while writers replace the
-// value under them; a value freed too early shows as a broken payload here, and
-// as a report under the sanitizers the same lane runs.
+// Readers spin on `read()` while writers replace the value under them; a value
+// freed too early shows as a broken payload here, and as a sanitizer report.
 void readers_and_writers_race() {
   cursiv::Published<Payload> slot;
   slot.publish(payload(0));
@@ -516,16 +535,16 @@ void readers_and_writers_race() {
 
   CHECK(broken.load() == 0);
   CHECK(empty.load() == 0);
-  // The lane proves nothing if nobody actually read.
+  // The test proves nothing if nobody read.
   CHECK(reads.load() > 1'000);
 }
 
-// Retiring to nothing is what an invalidation does, and a reader must see the
+// Clearing is what an invalidation does, and a reader must see the
 // absence rather than a stale value.
-void retiring_leaves_nothing_to_read() {
+void clearing_leaves_nothing_to_read() {
   cursiv::Published<Payload> slot;
   slot.publish(payload(5));
-  slot.retire();
+  slot.clear();
   CHECK(!slot.read());
 }
 
@@ -555,19 +574,20 @@ void a_write_only_slot_does_not_grow() {
 void run() {
   a_fresh_slot_reads_nothing();
   what_is_published_is_what_is_read();
-  a_held_read_keeps_the_retired_value_alive();
+  a_held_read_keeps_the_replaced_value_alive();
   nothing_is_retained_once_the_readers_leave();
+  a_freed_value_may_use_its_slot();
   a_reader_that_outlives_the_slot_is_not_the_contract();
-  retiring_leaves_nothing_to_read();
+  clearing_leaves_nothing_to_read();
   readers_and_writers_race();
   a_write_only_slot_does_not_grow();
 }
 
 }  // namespace published
 
-// Pins the reader/writer lock: entry order, supersession against durability,
-// the inline read inside a write, the gate wait a cancellation abandons --
-// and the settled door an `Immediate` read comes through.
+// The reader/writer lock: entry order, superseded and durable writes, the read
+// inside a write, a cancelled gate wait, and the `Immediate` read that enters
+// once a write's mutation ends.
 namespace workspace_lock {
 
 namespace {
@@ -612,21 +632,21 @@ void a_newer_write_supersedes_the_running_one() {
   CHECK(order == std::vector<std::string>({"first", "second"}));
 }
 
-// `cancelWrite` on a durable write lands at its settle: the mutation is kept,
-// what follows is cancelled.
-void cancel_write_lands_at_a_durable_settle() {
+// `cancelWrite` on a durable write takes effect when its mutation ends: the
+// mutation is kept, what follows is cancelled.
+void cancel_write_takes_effect_at_a_durable_mutation_end() {
   cursiv::DefaultWorkspaceLock lock;
   std::atomic<bool> entered{false};
   std::atomic<bool> cancelled{false};
-  bool cancelledBeforeSettle = false;
+  bool cancelledBeforeMutationEnd = false;
   bool sawCancel = false;
   std::jthread writer([&] {
     lock.write(
         [&](const cursiv::CancellationToken& token) {
           entered = true;
           wait_for(cancelled);
-          cancelledBeforeSettle = token.stop_requested();
-          lock.settle();
+          cancelledBeforeMutationEnd = token.stop_requested();
+          lock.endMutation();
           while (!token.stop_requested()) std::this_thread::yield();
           sawCancel = true;
         },
@@ -636,30 +656,27 @@ void cancel_write_lands_at_a_durable_settle() {
   lock.cancelWrite();
   cancelled = true;
   writer.join();
-  CHECK(!cancelledBeforeSettle);
+  CHECK(!cancelledBeforeMutationEnd);
   CHECK(sawCancel);
 }
 
-// A later write does not cancel a durable one's mutation; it runs after it,
-// in entry order. The pre-settle check can never fail wrongly (durability
-// guarantees it whenever the later write entered in time); the post-settle
-// handover is deterministic -- once the later write enters, the token ends
-// up cancelled whichever side of the settle the entry landed on, so waiting
-// for it always terminates and always proves it.
+// A later write does not cancel a durable one's mutation; it runs after it.
+// Once the later write enters, the token ends up cancelled whichever side of
+// the mutation end it entered on, so the wait below always ends.
 void a_durable_write_keeps_its_mutation() {
   cursiv::DefaultWorkspaceLock lock;
   std::vector<std::string> order;
   std::atomic<bool> entered{false};
   std::atomic<bool> posted{false};
-  bool cancelledBeforeSettle = false;
+  bool cancelledBeforeMutationEnd = false;
 
   std::jthread first([&] {
     lock.write(
         [&](const cursiv::CancellationToken& token) {
           entered = true;
           wait_for(posted);
-          cancelledBeforeSettle = token.stop_requested();
-          lock.settle();
+          cancelledBeforeMutationEnd = token.stop_requested();
+          lock.endMutation();
           while (!token.stop_requested()) std::this_thread::yield();
           order.emplace_back("first");
         },
@@ -674,7 +691,7 @@ void a_durable_write_keeps_its_mutation() {
   });
   first.join();
   second.join();
-  CHECK(!cancelledBeforeSettle);
+  CHECK(!cancelledBeforeMutationEnd);
   CHECK(order == std::vector<std::string>({"first", "second"}));
 }
 
@@ -708,24 +725,23 @@ void a_cancelled_gate_wait_returns_false() {
   release = true;
 }
 
-// An `Immediate` read runs beside a settled write, which is the whole point:
-// it does not wait for the write's tail. A `Normal` one in the same window
-// does wait, and that difference is what is pinned.
-void an_immediate_read_runs_beside_a_settled_write() {
+// An `Immediate` read runs beside a write past its mutation, without waiting
+// for the write's tail. A `Normal` one in the same window waits.
+void an_immediate_read_runs_beside_a_write_past_its_mutation() {
   cursiv::DefaultWorkspaceLock lock;
-  std::atomic<bool> settled{false};
+  std::atomic<bool> mutationEnded{false};
   std::atomic<bool> immediateDone{false};
   std::atomic<bool> release{false};
   std::atomic<bool> normalDone{false};
 
   std::jthread writer([&] {
     lock.write([&](const cursiv::CancellationToken&) {
-      lock.settle();
-      settled = true;
+      lock.endMutation();
+      mutationEnded = true;
       while (!release.load()) std::this_thread::yield();
     });
   });
-  wait_for(settled);
+  wait_for(mutationEnded);
 
   std::jthread normal([&] {
     (void)lock.read([&] {}, {}, WorkspaceLock::ReadPriority::Normal);
@@ -744,23 +760,21 @@ void an_immediate_read_runs_beside_a_settled_write() {
   CHECK(normalDone.load());
 }
 
-// ...and not before the settle. This is the half a single-threaded builder
-// does not need: a
-// mutation phase drops parses, and a reader admitted there would hold
-// pointers into a freed arena.
+// ...and not before the mutation ends: it drops parses, and a reader let in
+// there would hold pointers into freed memory.
 void an_immediate_read_waits_out_the_mutation() {
   cursiv::DefaultWorkspaceLock lock;
   std::atomic<bool> mutating{false};
   std::atomic<bool> readEntered{false};
-  std::atomic<bool> settle{false};
+  std::atomic<bool> endMutation{false};
 
   std::jthread writer([&] {
     lock.write([&](const cursiv::CancellationToken&) {
       mutating = true;
-      while (!settle.load()) std::this_thread::yield();
+      while (!endMutation.load()) std::this_thread::yield();
       // Nothing was let in while the mutation ran.
       CHECK(!readEntered.load());
-      lock.settle();
+      lock.endMutation();
     });
   });
   wait_for(mutating);
@@ -772,7 +786,7 @@ void an_immediate_read_waits_out_the_mutation() {
   // Give the reader every chance to get in early; it must not.
   for (int i = 0; i < 1000; ++i) std::this_thread::yield();
   CHECK(!readEntered.load());
-  settle = true;
+  endMutation = true;
   reader.join();
   writer.join();
   CHECK(readEntered.load());
@@ -807,9 +821,9 @@ void a_write_waits_for_immediate_readers() {
   CHECK(wrote.load());
 }
 
-// `settle` off the writer's own thread opens nothing: a caller with no write
-// in hand cannot admit itself.
-void settle_is_the_writers_alone() {
+// `endMutation` off the writer's own thread opens nothing: a caller with no
+// write in hand cannot admit itself.
+void end_mutation_is_the_writers_alone() {
   cursiv::DefaultWorkspaceLock lock;
   std::atomic<bool> mutating{false};
   std::atomic<bool> readEntered{false};
@@ -822,7 +836,7 @@ void settle_is_the_writers_alone() {
     });
   });
   wait_for(mutating);
-  lock.settle();  // not the writer's thread: a no-op
+  lock.endMutation();  // not the writer's thread: a no-op
 
   std::jthread reader([&] {
     (void)lock.read([&] { readEntered = true; }, {},
@@ -836,42 +850,40 @@ void settle_is_the_writers_alone() {
   CHECK(readEntered.load());
 }
 
-// `settled` is the query a mutation asserts against: false with no write in
-// hand, false through the mutation, true from the settle to the end of the
-// action, and false again after -- so a build outside any lock reads the same
-// answer as one whose write has not settled yet.
-void settled_says_when_a_mutation_may_not_run() {
+// `mutationEnded`: false with no write, false through the mutation, true
+// from its end to the end of the action, and false again after.
+void mutation_ended_says_when_a_mutation_may_not_run() {
   cursiv::DefaultWorkspaceLock lock;
-  CHECK(!lock.settled());
+  CHECK(!lock.mutationEnded());
 
   std::atomic<bool> mutating{false};
   std::atomic<bool> go{false};
   std::atomic<bool> release{false};
   bool duringMutation = true;
-  bool afterSettle = false;
+  bool afterMutationEnd = false;
 
   std::jthread writer([&] {
     lock.write([&](const cursiv::CancellationToken&) {
       mutating = true;
       wait_for(go);
-      duringMutation = lock.settled();
-      lock.settle();
-      afterSettle = lock.settled();
+      duringMutation = lock.mutationEnded();
+      lock.endMutation();
+      afterMutationEnd = lock.mutationEnded();
       wait_for(release);
     });
   });
   wait_for(mutating);
   // Asked from outside the writer too: the answer is the serving write's, not
   // the asker's.
-  CHECK(!lock.settled());
+  CHECK(!lock.mutationEnded());
   go = true;
-  while (!lock.settled()) std::this_thread::yield();
+  while (!lock.mutationEnded()) std::this_thread::yield();
   release = true;
   writer.join();
 
   CHECK(!duringMutation);
-  CHECK(afterSettle);
-  CHECK(!lock.settled());
+  CHECK(afterMutationEnd);
+  CHECK(!lock.mutationEnded());
 }
 
 // The declared contract: an escaping `OperationCancelled` is absorbed, any
@@ -906,15 +918,15 @@ void write_absorbs_a_cancellation_and_propagates_anything_else() {
 void run() {
   a_write_runs_and_a_read_sees_it();
   a_newer_write_supersedes_the_running_one();
-  cancel_write_lands_at_a_durable_settle();
+  cancel_write_takes_effect_at_a_durable_mutation_end();
   a_durable_write_keeps_its_mutation();
   a_read_inside_a_write_runs_inline();
   a_cancelled_gate_wait_returns_false();
-  an_immediate_read_runs_beside_a_settled_write();
+  an_immediate_read_runs_beside_a_write_past_its_mutation();
   an_immediate_read_waits_out_the_mutation();
   a_write_waits_for_immediate_readers();
-  settle_is_the_writers_alone();
-  settled_says_when_a_mutation_may_not_run();
+  end_mutation_is_the_writers_alone();
+  mutation_ended_says_when_a_mutation_may_not_run();
   write_absorbs_a_cancellation_and_propagates_anything_else();
 }
 
@@ -997,7 +1009,7 @@ void run() {
 
 }  // namespace imported_names
 
-// Pins that the grammar dumps may run on several threads at once: each reads
+// The grammar dumps may run on several threads at once: each reads
 // an image of its own, which fills itself as the printer reads it.
 namespace grammar_dump {
 
@@ -1005,7 +1017,7 @@ namespace {
 
 struct Item : cursiv::Extends<cursiv::AstNode> {};
 
-// Each rule calls the next, so a dump lays one rule after another.
+// Each rule calls the next, so a dump writes one rule after another.
 struct Chain : cursiv::GrammarSpec {
   template <int I>
   struct R : rule<ref<R<I - 1>>> {};

@@ -13,24 +13,21 @@ namespace cursiv::engine {
 inline constexpr std::uint16_t kLlRepairCostless = 0xFFFFu;
 
 struct LlDecisionBuild {
-  // The arms it decides between: the emitted program spells each of them, so
+  // The arms it decides between: the emitted program writes each of them, so
   // a descent never counts them.
   std::uint16_t nalts = 0;
-  // What the cheapest arm costs in invented tokens. A choice whose cheapest
-  // arm is a whole construct is skipped instead: a member the author did not
-  // write is not a repair, it is a second document -- unless the text has
-  // ended, where no token is left to skip. The emitter reads it to decide
-  // whether to write the repair at all.
+  // What the cheapest arm costs in invented tokens. A choice whose cheapest arm
+  // is a whole construct is skipped instead, unless the text has ended. The
+  // emitter reads it to decide whether to write the repair.
   std::uint16_t repairCost = 0;
 
   constexpr bool operator==(const LlDecisionBuild&) const = default;
 };
 
 struct LlNodeBuild {
-  // The skip configuration the position is read under: the region it stands
-  // in, zero for the grammar's. The regime rides the position -- a rule whose
-  // body opens a region has an interior of its own and the caller's entry,
-  // which no per-rule flag can say.
+  // The skip configuration the position is read under: its region, zero for the
+  // grammar's. A rule whose body opens a region has its own interior and the
+  // caller's entry, so this belongs to the position.
   std::uint8_t cfg = 0;
   // The section a call opens, its configuration plus one: the descent enters
   // it reading that grammar alone.
@@ -40,11 +37,11 @@ struct LlNodeBuild {
   // A normalized fold closes each turn over the already consumed prefix.
   bool foldStep = false;
   // A nest over one terminal: the row that terminal carries where the nest
-  // has no receiver to wrap and lays no record, its own and the nest's in one.
+  // has no receiver to wrap and makes no record, its own and the nest's in one.
   std::uint16_t leafRow = kNoRow;
   // A turn of a counted repetition's optional tail, and the sequence that
   // joins it to the next: the tail is one chain, written out flat.
-  bool ladder = false;
+  bool countedTail = false;
 
   constexpr bool operator==(const LlNodeBuild&) const = default;
 };

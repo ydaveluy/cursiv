@@ -24,7 +24,6 @@ static std::uint16_t lr_authored(const LrBuildCfg& c, std::uint16_t nt) {
   return nt;
 }
 
-// The rule a refusal names.
 std::uint16_t lr_fault_rule(const LrLowered& o) {
   return lr_authored(o.cfg, o.fault.rule);
 }

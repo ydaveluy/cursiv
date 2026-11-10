@@ -1,8 +1,6 @@
 #!/usr/bin/env node
-// The stack frame each function of a wasm module reserves, read off the
-// disassembly: a frame past the limit fails the run. The wasm stack is a
-// fixed reservation, so a frame too large traps instead of growing it.
-//
+// Fails when a function of a wasm module reserves a stack frame past the limit,
+// read off the disassembly: the wasm stack never grows.
 // Usage: node tools/wasm-frames.mjs <llvm-objdump> <limit-bytes> <module>...
 // Exits 2 on a bad command line, 77 (skipped) when no disassembler was found.
 

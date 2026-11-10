@@ -1,6 +1,5 @@
-// What the editor is handed to write -- completion items and formatting edits --
-// over the workspace fixture, which a second lane builds with its stamp's row
-// forced narrow.
+// Completion items and formatting edits on the workspace language;
+// `edits_narrow_test` runs the same tests on a parser with narrow table rows.
 
 #include <lsp/types.h>
 
@@ -39,18 +38,14 @@
 #include "workspace/lsp/LspServices.hpp"
 #include "workspace/lsp/WorkspaceFormatter.hpp"
 
-// What the editor is handed at a caret. `follow_test` pins the grammar's
-// answer; this pins the storey above it -- where the caret can sit inside a
-// half-typed word, what the item replaces, what is filtered out, and the one
-// answer the grammar alone cannot give: the names a reference may hold.
 namespace completion_provider {
 
 namespace {
 
 namespace ct = cursiv::test;
 
-// The workspace fixture and not a bare grammar: its members hold a cross
-// reference, and the scope's answer is half of what this door owes an editor.
+// The workspace language rather than a bare grammar: its members hold
+// references, which completion offers from the scope.
 struct World : support::LspWorkspace {
   explicit World(bool everyKeyword = false)
       : WorkspaceWorld([everyKeyword](cursiv::LspServices& language) {
@@ -71,8 +66,7 @@ using support::offers;
   return at == list.items.end() ? nullptr : &*at;
 }
 
-// The document without its caret marker: what an editor actually holds, and
-// what an edit is applied to.
+// `marked` without its `<|>` caret marker.
 [[nodiscard]] std::string text_of(std::string_view marked) {
   std::string out(marked);
   const std::size_t at = out.find("<|>");
@@ -80,8 +74,8 @@ using support::offers;
   return out;
 }
 
-// The editor's own gesture, done here: a range is a line/character pair, so it
-// is walked to an offset the same way a client walks it.
+// Converts an LSP position to an offset; the texts here are ASCII, so a
+// character is a byte.
 [[nodiscard]] std::size_t offset_of(std::string_view text,
                                     const lsp::Position& at) {
   std::size_t off = 0;
@@ -100,8 +94,7 @@ using support::offers;
   return text.replace(from, to - from, newText);
 }
 
-// The same, at the end of a broken text: the recovery always leaves a tree
-// now, and the answer is asked of it.
+// Completion at the end of a one-line `text`, broken or not.
 [[nodiscard]] lsp::CompletionList offeredWithoutATree(const World& world,
                                                       std::string text) {
   const auto caret = static_cast<lsp::Uint>(text.size());
@@ -114,7 +107,6 @@ using support::offers;
                                                      cursiv::kNoCancel);
 }
 
-// The empty document offers the entry rule's first words, and nothing else.
 void an_empty_document_offers_what_may_begin_it() {
   const World world;
   const lsp::CompletionList list = offeredWithoutATree(world, "");
@@ -124,22 +116,16 @@ void an_empty_document_offers_what_may_begin_it() {
   CHECK(offers(list, "package"));
 }
 
-// The question is not asked at the caret. A caret inside a half-typed word sits
-// in the middle of a token the author is still writing: asked there, the answer
-// would be what follows that token. It is asked at the word's start, and what
-// has been typed becomes the filter.
 void a_half_typed_word_is_filtered_not_followed() {
   const World world;
   const lsp::CompletionList list = offeredWithoutATree(world, "ent");
 
   CHECK(offers(list, "entity"));
-  // ...and the words that do not begin with what was typed are gone.
   CHECK(!offers(list, "datatype"));
   CHECK(!offers(list, "package"));
 }
 
-// ...and the item replaces the word, rather than appending to it. Without the
-// edit an editor would leave `ententity`.
+// Without the edit, an editor would write `ententity`.
 void the_item_replaces_the_word_being_typed() {
   const World world;
   const lsp::CompletionList list = offeredWithoutATree(world, "ent");
@@ -153,15 +139,13 @@ void the_item_replaces_the_word_being_typed() {
   CHECK(edit.newText == "entity");
   CHECK(edit.insert.start.character == 0);
   CHECK(edit.insert.end.character == 3);
-  // Nothing is typed past the caret here, so both ranges say the same thing.
+  // Nothing follows the caret, so both ranges are the same.
   CHECK(edit.replace.start.character == 0);
   CHECK(edit.replace.end.character == 3);
 }
 
-// A caret in the middle of a word covers the whole word. `Str|ng` accepted as
-// `String` must leave `String`, not `Stringng`: the insert range stops at the
-// caret and keeps the tail, the replace range takes the word's own end -- the
-// editor picks via `editor.suggest.insertMode`.
+// The insert range stops at the caret, the replace range at the end of the
+// word.
 void an_item_covers_the_word_the_caret_sits_in() {
   const World world;
   offered(*world.ws, "datatype String\nentity E { f : Str<|>ng }",
@@ -174,24 +158,20 @@ void an_item_covers_the_word_the_caret_sits_in() {
             const auto& edit =
                 std::get<lsp::InsertReplaceEdit>(*item->textEdit);
             CHECK(edit.newText == "String");
-            // What is typed past the caret is kept...
             CHECK(edit.insert.start.character == 15);
             CHECK(edit.insert.end.character == 18);
-            // ...or taken, and the whole word goes.
             CHECK(edit.replace.start.character == 15);
             CHECK(edit.replace.end.character == 20);
           });
 }
 
-// The edit is applied, and the document that comes out is the assertion. Two
-// ranges mean two possible documents, and only one of them is what an author
-// meant: the caret in the middle of a word is exactly where they part.
+// Applies each range and checks the document it gives: with the caret
+// mid-word, the insert and replace ranges give different documents.
 void an_applied_edit_leaves_the_word_the_author_meant() {
   const auto check = [](std::string source, std::string_view label,
                         std::string_view wantReplace,
                         std::string_view wantInsert) {
     const World world;
-    // Taken before the marked text is handed over: what the editor holds.
     const std::string document = text_of(source);
     offered(*world.ws, std::move(source), [&](const lsp::CompletionList& list) {
       const lsp::CompletionItem* const item = find(list, label);
@@ -202,25 +182,21 @@ void an_applied_edit_leaves_the_word_the_author_meant() {
       CHECK(apply(document, edit.insert, edit.newText) == wantInsert);
     });
   };
-  // A keyword the caret sits inside: replace gives the word, insert doubles
-  // its tail -- which is the `publicblic` an editor in insert mode shows.
+  // A keyword around the caret: replace gives the word, insert repeats its
+  // tail.
   check("ent<|>ity E { }", "entity", "entity E { }", "entityity E { }");
-  // ...and a cross-reference candidate says the same.
+  // A cross-reference candidate.
   check("datatype String\nentity E { f : Str<|>ng }", "String",
         "datatype String\nentity E { f : String }",
         "datatype String\nentity E { f : Stringng }");
 }
 
-// A keyword is offered mid-word too, and the boundary is asked at the word's
-// end rather than at the caret: an accepted item replaces the whole word, so
-// what the lexer must still read the candidate against is the text past the
-// word, not the tail the edit is about to take.
+// The keyword boundary is checked at the end of the word, not at the caret.
 void a_keyword_is_offered_from_inside_a_word() {
   const World world;
   offered(*world.ws, "ent<|>ity E {}", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "entity"));
   });
-  // ...and the edit takes the word whole, so accepting leaves `entity`.
   offered(*world.ws, "ent<|>ity E {}", [](const lsp::CompletionList& list) {
     const lsp::CompletionItem* const item = find(list, "entity");
     CHECK(item != nullptr);
@@ -231,8 +207,6 @@ void a_keyword_is_offered_from_inside_a_word() {
   });
 }
 
-// ...and a word no keyword begins stays silent: widening the boundary must not
-// turn the mid-word caret into noise.
 void a_word_no_keyword_begins_offers_no_keyword() {
   const World world;
   offered(*world.ws, "zq<|>xw E {}", [](const lsp::CompletionList& list) {
@@ -242,8 +216,8 @@ void a_word_no_keyword_begins_offers_no_keyword() {
   });
 }
 
-// A keyword spelling no letter is left out, and a language says otherwise, per
-// keyword.
+// A keyword with no letter, such as `{`, is offered only when a language asks,
+// as `offer_every_keyword` does.
 void a_keyword_with_no_letter_is_left_out() {
   const World world;
   offered(*world.ws, "entity E <|>", [](const lsp::CompletionList& list) {
@@ -257,8 +231,7 @@ void a_keyword_with_no_letter_is_left_out() {
   });
 }
 
-// A keyword answers what has been typed through the same matcher as a name:
-// a subsequence anchored on a word start is enough.
+// `pkg` matches `package` as a subsequence from the start of the word.
 void a_keyword_is_matched_like_a_name() {
   const World world;
   const lsp::CompletionList list = offeredWithoutATree(world, "pkg");
@@ -267,8 +240,6 @@ void a_keyword_is_matched_like_a_name() {
   CHECK(!offers(list, "datatype"));
 }
 
-// What an item says of itself: a keyword is a `Keyword`, and it sorts after
-// every name.
 void a_keyword_says_what_it_is_and_sorts_after_the_names() {
   const World world;
   offered(*world.ws, "entity E <|>", [](const lsp::CompletionList& list) {
@@ -287,9 +258,8 @@ void a_keyword_says_what_it_is_and_sorts_after_the_names() {
           });
 }
 
-// A word that ends in a letter is still being typed, and what may stand there
-// is the name: never offered once something is typed, since the author is
-// writing it, not choosing it. What follows it is not asked.
+// After `entity E`, the name is still being typed: nothing is offered, even
+// with every keyword enabled.
 void a_word_that_answers_nothing_offers_nothing() {
   const World world(true);
   offered(*world.ws, "entity E<|>", [](const lsp::CompletionList& list) {
@@ -297,23 +267,20 @@ void a_word_that_answers_nothing_offers_nothing() {
   });
 }
 
-// The scope answers where a member holds a reference, which is the one thing
-// the grammar alone cannot say: `Feature::type` names a type, and the offer is
-// the visible declarations rather than the word "ID".
+// `Feature::type` is a reference: the scope offers the visible declarations,
+// not the terminal name `ID`.
 void a_reference_offers_the_names_in_scope() {
   const World world;
   offered(*world.ws, "datatype String\ndatatype Int\nentity E { f : <|>",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "String"));
             CHECK(offers(list, "Int"));
-            // ...and the token's own name is not what an editor wants there.
             CHECK(!offers(list, "ID"));
           });
 }
 
-// ...and the same caret with the record still closed after it: what follows the
-// hole is what a real edit looks like, and the state read there must be the
-// one before the hole and not the one the repair walked into.
+// The same caret with `}` after it: completion reads the state before the gap,
+// not the one the repair reached.
 void a_reference_offers_the_names_in_scope_mid_document() {
   const World world;
   offered(*world.ws,
@@ -324,32 +291,27 @@ void a_reference_offers_the_names_in_scope_mid_document() {
           });
 }
 
-// Nothing is offered inside a comment -- a decree, not something the
-// grammar's continuations happen to lack. Every way in is closed: with a
-// word under the caret and without, block comment and line comment alike.
+// Nothing is offered inside a comment, whatever the grammar allows there.
 void a_caret_inside_a_comment_is_offered_nothing() {
   const World world;
-  // ...with a word under the caret, and without one.
+  // With a word under the caret and without one.
   offered(*world.ws, "entity E {}\n/* aa<|>a */\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
   offered(*world.ws, "entity E {}\n/* --<|>- */\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
-  // ...in the opener itself, which is inside the leaf as much as its body is.
+  // Inside the opening `/*`.
   offered(*world.ws, "entity E {}\n/<|>* aaa */\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
   offered(*world.ws, "entity E {}\n/*<|> aaa */\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
-  // ...and a line comment says the same.
+  // A line comment.
   offered(*world.ws, "entity E {}\n// aa<|>a\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
-  // A comment the author has not closed matches no terminal at all, so the
-  // repair keeps its bytes as spans it threw away -- unread text either way.
+  // An unclosed comment matches no terminal, and the repair skips its text.
   offered(*world.ws, "entity E {}\n/* aa<|>a",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
 }
 
-// ...and the two boundaries are not inside it: what stands right after a
-// comment closes, and right before one opens, is the grammar's to answer.
 void the_edges_of_a_comment_still_answer() {
   const World world;
   offered(*world.ws, "entity E {}\n/* aaa */<|>\nentity F {}",
@@ -358,8 +320,6 @@ void the_edges_of_a_comment_still_answer() {
           [](const lsp::CompletionList& list) { CHECK(!list.items.empty()); });
 }
 
-// A candidate carries the documentation of its declaration, rendered; one
-// whose author wrote nothing carries nothing.
 void a_candidate_carries_its_documentation() {
   const World world;
   offered(
@@ -378,10 +338,6 @@ void a_candidate_carries_its_documentation() {
       });
 }
 
-// A terminal is never an offer. Where the grammar wants a fresh name the only
-// honest answer is nothing: an item labelled `ID` inserts the two letters `ID`
-// when the author accepts it, and the bytes a terminal matches are not ours to
-// guess. A keyword is offered because the grammar spells it out.
 void a_terminal_is_never_offered_by_name() {
   const World world;
   offered(*world.ws, "entity <|>",
@@ -390,7 +346,6 @@ void a_terminal_is_never_offered_by_name() {
           [](const lsp::CompletionList& list) { CHECK(!offers(list, "ID")); });
 }
 
-// ...filtered by what has been typed, through the same anchor as a keyword.
 void a_reference_is_filtered_by_what_is_typed() {
   const World world;
   offered(*world.ws, "datatype String\ndatatype Int\nentity E { f : St<|>",
@@ -400,9 +355,8 @@ void a_reference_is_filtered_by_what_is_typed() {
           });
 }
 
-// One answer, once. A grammar reaches the same word by more than one path --
-// `datatype` opens a declaration whether or not a package encloses it -- and an
-// editor showing it twice is a defect the walk cannot prevent on its own.
+// The grammar reaches `datatype` by two paths, inside a package and outside
+// one.
 void the_same_answer_is_offered_once() {
   const World world;
   const lsp::CompletionList list = offeredWithoutATree(world, "");
@@ -416,10 +370,6 @@ void the_same_answer_is_offered_once() {
   }
 }
 
-// Two declarations of the same name are two offers when their types differ,
-// and the detail is what makes them distinguishable: the default kind provider
-// answers one constant, so without the declared type on the row the dedup key
-// would collapse the pair into one entry naming neither.
 void two_homonyms_of_different_types_stay_two_offers() {
   const World world;
   offered(*world.ws, "datatype String\nentity String { }\nentity E { f : <|>",
@@ -434,17 +384,12 @@ void two_homonyms_of_different_types_stay_two_offers() {
           });
 }
 
-// A caret past a repair still answers: the tree a broken document leaves is
-// what the walk reads, and it reaches the caret because an engaged frame closes
-// incomplete rather than unwinding.
 void a_broken_document_still_answers() {
   const World world(true);
   offered(*world.ws, "entity E { f : String\nentity <|>",
           [](const lsp::CompletionList& list) { CHECK(!list.items.empty()); });
 }
 
-// Cancellation is the caller's, and it is honoured rather than ignored: a
-// completion is asked on every keystroke and the one before last is waste.
 void a_cancelled_request_gives_up() {
   const World world;
   const std::shared_ptr<cursiv::Document> document =
@@ -487,8 +432,8 @@ void run() {
 
 }  // namespace completion_provider
 
-// The formatter, exercised through the workspace language: its own rules pin
-// the engine's contract, and a lane that needs another rule writes it.
+// The formatter on the workspace language; a test that needs another rule
+// installs its own formatter.
 namespace formatter {
 
 namespace {
@@ -504,8 +449,8 @@ struct World {
     return *services.language.formatter;
   }
 
-  // A fresh URI per text: the lanes below format the same source twice and the
-  // second document must be a document of its own.
+  // A new URI per text: some tests build the same source twice and need two
+  // documents.
   cursiv::Document* built(std::string text) {
     return support::built(shared,
                           "file:///w/d" + std::to_string(nextUri++) + ".ws",
@@ -513,9 +458,8 @@ struct World {
   }
 };
 
-// The workspace language with its formatter swapped for a test-local one: the
-// lanes that pin a contract the shipped rules never exercise write the rule
-// they need.
+// Replaces the workspace formatter with a test formatter, for rules the
+// language's own formatter does not use.
 template <class FormatterT>
 void install(World& world) {
   world.services.language.formatter =
@@ -532,8 +476,8 @@ struct FitFormatter final : ws::WorkspaceFormatter {
   }
 };
 
-// A blank line and one level: the move the lanes below hang on a selection
-// to see which record it landed on.
+// A blank line and one indent level: tests prepend it to a selection to see
+// which node it reaches.
 [[nodiscard]] cursiv::FormattingAction blankLineIndented() {
   return cursiv::FormattingAction{
       .options = {}, .moves = {cursiv::FormattingMove{.tabs = 1, .lines = 2}}};
@@ -596,9 +540,8 @@ struct AppendLevelFormatter final : ws::WorkspaceFormatter {
   }
 };
 
-// A rule on a record that HAS CHILDREN: the walk reaches the record before it
-// descends, so this gap, which sits past the whole subtree, is emitted before
-// everything inside it. Nothing else claims either gap, so both edits survive.
+// An `append` on a node that has children: its gap, after the whole subtree,
+// is visited before the gaps inside it. No other rule claims either gap.
 struct ContainerAppendFormatter final : ws::WorkspaceFormatter {
   using WorkspaceFormatter::WorkspaceFormatter;
   void formatWorkspace(cursiv::FormattingBuilder&,
@@ -651,6 +594,19 @@ struct SidePriorityFormatter final : ws::WorkspaceFormatter {
   }
 };
 
+// A gap kept from the token after it, at a priority above the space the
+// colon before it asks for.
+struct KeepPriorityFormatter final : ws::WorkspaceFormatter {
+  using WorkspaceFormatter::WorkspaceFormatter;
+  void formatFeature(cursiv::FormattingBuilder& builder,
+                     const ws::ast::Feature* feature) const override {
+    WorkspaceFormatter::formatFeature(builder, feature);
+    builder.getNodeFormatter(feature)
+        .property<&ws::ast::Feature::type>()
+        .prepend(cursiv::KeepActionBuilder{}({.priority = 9}));
+  }
+};
+
 struct LeadingSpaceFormatter final : ws::WorkspaceFormatter {
   using WorkspaceFormatter::WorkspaceFormatter;
   void formatWorkspace(cursiv::FormattingBuilder&,
@@ -661,8 +617,7 @@ struct LeadingSpaceFormatter final : ws::WorkspaceFormatter {
   }
 };
 
-// Two spaces per level, spaces not tabs: the indentation the engine writes is
-// the client's options, so the lanes below can name the columns they expect.
+// Two spaces per level, so tests can name the columns they expect.
 [[nodiscard]] lsp::FormattingOptions options() {
   lsp::FormattingOptions chosen;
   chosen.tabSize = 2;
@@ -689,8 +644,7 @@ template <class W>
                                                cursiv::kNoCancel);
 }
 
-// The client's half: the edits, applied to the text they were measured
-// against.
+// Applies the edits to the document's text, as a client does.
 [[nodiscard]] std::string applied(const cursiv::Document& document,
                                   const std::vector<lsp::TextEdit>& edits) {
   std::vector<cursiv::TextEdit> converted;
@@ -702,8 +656,8 @@ template <class W>
 
 using support::kMessy;
 
-// ...and the shape it reaches: the language's own rule, no space before the
-// colon and one after it.
+// `kMessy` formatted by the language's rules: no space before a colon, one
+// after it.
 constexpr std::string_view kShaped =
     "entity Person {\n"
     "  name: String\n"
@@ -711,9 +665,6 @@ constexpr std::string_view kShaped =
     "}\n"
     "datatype String\n";
 
-// The fixed point, which is what makes the answer a shape and not a diff: the
-// edits move the document somewhere, and formatting that somewhere moves
-// nothing.
 void formatting_twice_is_formatting_once() {
   World world;
   (void)ct::expectFormatting(world.services.language,
@@ -726,8 +677,6 @@ void formatting_twice_is_formatting_once() {
   CHECK(format(world, *formatted).empty());
 }
 
-// The same text, already in shape, answers the empty list -- the contract an
-// editor is written against rather than a coincidence of the rules.
 void a_document_already_in_shape_answers_no_edit() {
   World world;
   const cursiv::Document* const messy = world.built(std::string(kMessy));
@@ -737,8 +686,7 @@ void a_document_already_in_shape_answers_no_edit() {
   CHECK(format(world, *clean).empty());
 }
 
-// The language reads its words in either case, and a rule written for a word
-// shapes it in every case.
+// The workspace language reads its keywords in any case.
 void a_keyword_rule_shapes_every_case_of_the_word() {
   World world;
   const cursiv::Document* const messy =
@@ -786,10 +734,8 @@ void indentation_counts_do_not_wrap() {
   CHECK(rejected);
 }
 
-// A selection format keeps the edits whose lines overlap the selected lines.
-// The gap that closes the last selected line is kept whole, even where it
-// reaches the next line; what no edit may do is begin on a line past the
-// selection.
+// A selection keeps the edits whose lines overlap the selected lines; the gap
+// closing the last line is kept whole. No edit begins past the selection.
 void a_range_format_keeps_the_edits_on_its_lines() {
   World world;
   const cursiv::Document* const messy = world.built(std::string(kMessy));
@@ -836,8 +782,8 @@ void a_range_format_always_applies_the_root_rules() {
         "datatype A\ndatatype B\ndatatype C\n\n\n");
 }
 
-// A repaired parse describes text the author did not write, so reprinting it
-// would discard theirs: the answer is no edits at all.
+// A repaired parse holds text the author did not write, so no edits are
+// given.
 void a_document_with_a_parse_error_is_not_formatted() {
   World world;
   const cursiv::Document* const broken =
@@ -862,8 +808,6 @@ void a_fit_carries_no_options() {
                               .disposeAfterCheck = true});
 }
 
-// A rule on the token before a gap and one on the token after it claim the same
-// gap: the higher priority holds it, whichever side it was written on.
 void a_gap_claimed_from_both_sides_keeps_the_higher_priority() {
   World world;
   install<SidePriorityFormatter>(world);
@@ -873,6 +817,21 @@ void a_gap_claimed_from_both_sides_keeps_the_higher_priority() {
                                         "}\n",
                               .after = "entity Person {\n"
                                        "  name  : String\n"
+                                       "}\n",
+                              .options = options(),
+                              .disposeAfterCheck = true});
+}
+
+// `keep` claims a gap like any other rule, by priority.
+void a_kept_gap_holds_against_the_other_side() {
+  World world;
+  install<KeepPriorityFormatter>(world);
+  (void)ct::expectFormatting(world.services.language,
+                             {.before = "entity Person {\n"
+                                        "  name :   String\n"
+                                        "}\n",
+                              .after = "entity Person {\n"
+                                       "  name:   String\n"
                                        "}\n",
                               .options = options(),
                               .disposeAfterCheck = true});
@@ -899,8 +858,8 @@ void a_multi_name_selection_keeps_the_order_given() {
                               .disposeAfterCheck = true});
 }
 
-// A rule may target nodes it already holds and records it already selected,
-// outside the property and keyword vocabulary.
+// A rule may target AST nodes it holds and CST nodes it already selected,
+// without `property` or `keyword`.
 void a_rule_targets_the_records_it_holds() {
   World world;
   install<HeldRecordsFormatter>(world);
@@ -1061,8 +1020,6 @@ void a_block_comment_keeps_its_alignment_over_a_mixed_margin() {
         "datatype String\n  /* c\n   * d\n   */\nentity Person {}\n");
 }
 
-// The fixed point over margins mixing tabs and spaces, in both units: one pass
-// gives a comment its margin, and a second pass finds nothing to do.
 void mixed_comment_margins_reach_their_shape_in_one_pass() {
   lsp::FormattingOptions tabs;
   tabs.tabSize = 4;
@@ -1082,10 +1039,9 @@ void mixed_comment_margins_reach_their_shape_in_one_pass() {
       }
 }
 
-// An `append` targets the next node, a whole construction when one follows,
-// and a level it carries stays in force until that construction's parent
-// closes: `{`.append(indent) lands the first feature and the closing brace
-// one level in, and leaves the second feature, which no rule names, alone.
+// An `append` targets the next node, and its level holds until that node's
+// parent closes: `{`.append(indent) indents the first feature and the closing
+// brace, and leaves the second feature alone.
 void an_append_level_stays_while_its_target_is_a_construction() {
   World world;
   install<AppendLevelFormatter>(world);
@@ -1102,7 +1058,6 @@ void an_append_level_stays_while_its_target_is_a_construction() {
                               .disposeAfterCheck = true});
 }
 
-// An index past the last occurrence selects the last one, never nothing.
 void a_property_index_clamps_to_the_last_occurrence() {
   World world;
   install<ClampedIndexFormatter>(world);
@@ -1120,11 +1075,8 @@ void a_property_index_clamps_to_the_last_occurrence() {
                               .disposeAfterCheck = true});
 }
 
-// A keystroke formats the caret's line, whole. The range runs from the start
-// of the line to the caret, but edits are kept by line, as for a selection:
-// text past the caret is formatted too, and so is a gap that crosses into the
-// line. The base advertises no trigger character, so no client sends the
-// request until a language names one.
+// A keystroke formats the caret's whole line, as a selection would. The
+// default formatter names no trigger character, so a language must name one.
 void a_format_on_type_stays_on_the_carets_line() {
   World world;
   CHECK(!world.formatter().formatOnTypeOptions().has_value());
@@ -1160,14 +1112,14 @@ void a_format_on_type_stays_on_the_carets_line() {
   CHECK(advertised.has_value() && advertised->firstTriggerCharacter == "}");
 }
 
-// A failed value conversion leaves the tree intact, so the document is still
-// formatted, whole or by range: only a syntax error withholds the edits.
+// A conversion error leaves the tree intact: only a syntax error withholds
+// formatting, whole or by range.
 void a_conversion_error_does_not_withhold_formatting() {
   World world;
   cursiv::Document* const document =
       world.built("entity   Person{ name   :String }\n");
-  // The workspace language converts nothing that can fail: the diagnostic is
-  // the one a failed conversion lays.
+  // The workspace language has no conversion that can fail, so the test adds
+  // the diagnostic itself.
   cursiv::ParseDiagnostic failed;
   failed.kind = cursiv::DiagnosticKind::conversion_error;
   failed.begin = 17;
@@ -1178,12 +1130,10 @@ void a_conversion_error_does_not_withhold_formatting() {
   CHECK(!formatRange(world, *document, {{0, 0}, {0, 33}}).empty());
 }
 
-// A comment is anchored by the newlines around it, and re-indented with the
-// block it sits in -- its text preserved, never reprinted from the tree.
+// A comment is anchored by the newlines around it and re-indented with its
+// block; its text is kept, never reprinted from the tree.
 void a_multiline_comment_is_reindented() {
   World world;
-  // The author's words, kept; the margin, redrawn at the block's level rather
-  // than left at column zero.
   constexpr std::string_view kCommented =
       "entity Person {\n"
       "  /*\n"
@@ -1202,19 +1152,18 @@ void a_multiline_comment_is_reindented() {
                               .options = options(),
                               .disposeAfterCheck = true});
 
-  // ...and it is a fixed point like everything else.
   const cursiv::Document* const formatted =
       world.built(std::string(kCommented));
   CHECK(format(world, *formatted).empty());
 }
 
-// The comment shapes of the base, as a language's formatter calls them.
+// Exposes the base comment formatting to the tests.
 struct Comments : cursiv::AbstractFormatter {
   using AbstractFormatter::formatMultilineComment;
 };
 
-// Blanks right after the opening marker are no line of the comment: the shape
-// one pass gives is the one the next pass keeps, whitespace normalized or not.
+// Blanks right after the opening marker are not a line of the comment; a
+// second pass keeps what the first gives, whitespace normalized or not.
 void a_doc_comment_reaches_its_shape_in_one_pass() {
   World world;
   constexpr std::string_view kShapedDoc =
@@ -1244,9 +1193,29 @@ void a_doc_comment_reaches_its_shape_in_one_pass() {
     }
 }
 
-// The terminator is the document's, not the platform's: a file written with
-// CRLF keeps CRLF in everything the engine inserts, a rewritten comment's own
-// line breaks included.
+void a_one_line_comment_keeps_the_stars_it_starts_with() {
+  World world;
+  (void)ct::expectFormatting(world.services.language,
+                             {.before = "/** **Person** */\n"
+                                        "entity Person {}\n",
+                              .after = "/** **Person** */\n"
+                                       "entity Person {}\n",
+                              .options = options(),
+                              .disposeAfterCheck = true});
+  for (const auto& [text, shaped] :
+       {std::pair<std::string_view, std::string_view>{"/** **bold** */",
+                                                      "/** **bold** */"},
+        {"/** * item */", "/** * item */"},
+        {"/**  *x */", "/** *x */"}}) {
+    const cursiv::MultilineCommentFormatOptions chosen;
+    const std::string once = Comments::formatMultilineComment(text, chosen);
+    CHECK(once == shaped);
+    CHECK(Comments::formatMultilineComment(once, chosen) == once);
+  }
+}
+
+// Line ends follow the document, not the platform: a CRLF file gets CRLF in
+// every inserted line break, those of a rewritten comment included.
 void a_crlf_document_keeps_its_terminators() {
   World world;
   const cursiv::Document* const messy = world.built(
@@ -1266,7 +1235,7 @@ void a_crlf_document_keeps_its_terminators() {
 }  // namespace
 
 // The edits of a container rule do not come out in document order, and the
-// engine owes the client an ordered list all the same.
+// client still gets an ordered list.
 void a_rule_on_a_container_is_ordered_before_it_is_answered() {
   World world;
   install<ContainerAppendFormatter>(world);
@@ -1295,6 +1264,7 @@ void run() {
   a_conversion_error_does_not_withhold_formatting();
   a_fit_carries_no_options();
   a_gap_claimed_from_both_sides_keeps_the_higher_priority();
+  a_kept_gap_holds_against_the_other_side();
   a_multi_name_selection_keeps_the_order_given();
   a_rule_targets_the_records_it_holds();
   a_descendant_rule_wins_over_an_ancestor_rule();
@@ -1308,6 +1278,7 @@ void run() {
   a_property_index_clamps_to_the_last_occurrence();
   a_multiline_comment_is_reindented();
   a_doc_comment_reaches_its_shape_in_one_pass();
+  a_one_line_comment_keeps_the_stars_it_starts_with();
   a_crlf_document_keeps_its_terminators();
 }
 

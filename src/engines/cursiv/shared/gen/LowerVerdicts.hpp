@@ -11,12 +11,13 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {
 
 // A successful empty derivation needs a finite proof; a cycle alone is not one.
 template <class Visit>
-void settle_empty(Visit&& visit) {
+void least_fixpoint(Visit&& visit) {
   for (bool changed = true; changed;) {
     changed = false;
     visit([&](auto& value, bool empty) {
@@ -31,7 +32,7 @@ void settle_empty(Visit&& visit) {
 enum class LowerFail : std::uint8_t {
   none = 0,
   wordRefusedInLoop,
-  rescuedRefusalPastMatch,
+  passableRefusalPastMatch,
   wordPastMatch,
   boundaryDisagrees,
   regionBoundaryShared,
@@ -54,7 +55,7 @@ enum class LowerFail : std::uint8_t {
   gapLeafPool,
   indentTwice,
   refusalIntoRelay,
-  rescueReadsPast,
+  readsOutsideBoundary,
   boundaryMisses,
   unorderedTooWide,
   terminalCycle,
@@ -64,11 +65,12 @@ enum class LowerFail : std::uint8_t {
   terminalReadsRule,
   commitPrefixEmpty,
   triviaTied,
+  keywordSpellings,
 };
 
-// The widest unordered group either engine spells, from what the descent, the
-// dearer of the two, holds in 16 bits: three positions for every item of every
-// subset, or two for every item of every order where an item nests.
+// The widest unordered group either engine builds, from what the descent, the
+// costlier of the two, holds in 16 bits: three positions for every item of
+// every subset, or two for every item of every order where an item nests.
 constexpr unsigned unordered_most(bool nests) {
   const auto cost = [nests](std::uint64_t k) {
     if (!nests)
@@ -91,7 +93,7 @@ constexpr std::string_view lower_fail_text(LowerFail f) {
       return "has a guard inside a repetition, and a turn of that repetition "
              "may read nothing after the guard -- make each turn read "
              "something after it, as in `!lit<\"/\"> + any`";
-    case LowerFail::rescuedRefusalPastMatch:
+    case LowerFail::passableRefusalPastMatch:
       return "may end a match exactly where a word its guard excludes ends, "
              "after the start of the terminal, and {bytes} after that word "
              "lets the guard pass: whether the guard holds would depend on "
@@ -191,7 +193,7 @@ constexpr std::string_view lower_fail_text(LowerFail f) {
              "a nested run the end of the text does not close, a guard may "
              "test only the first character of that text, and not as a "
              "keyword";
-    case LowerFail::rescueReadsPast:
+    case LowerFail::readsOutsideBoundary:
       return "excludes a word with a keyword guard, then may read after it a "
              "character outside `word_boundary`: whether the guard holds "
              "would depend on that character -- add to `word_boundary` every "
@@ -234,6 +236,12 @@ constexpr std::string_view lower_fail_text(LowerFail f) {
              "is `hidden`: which one the tree keeps would depend on the order "
              "of declaration -- put both in `ignored`, or make them match "
              "different texts";
+    case LowerFail::keywordSpellings:
+      return "has more than 1 024 keyword spellings, each word counted once "
+             "for each case of its letters, and some trivia reads on past one "
+             "of them: the generated lexer cannot let the keyword win over "
+             "that trivia -- read fewer words in this terminal, match them "
+             "case-sensitively, or make the trivia start differently";
     case LowerFail::none:
       break;
   }
@@ -323,16 +331,16 @@ std::string lower_fail_sentence(const Cfg& c, std::string_view rule = {}) {
     word = '`' + c.lexSpelled[c.lowerWord] + '`';
   } else if (c.lowerWord != kNoRow) {
     const LexNode e = c.lex[c.lowerWord];
-    word = "`";
+    std::string letters;
     for (unsigned i = 0; i < e.min; ++i) {
-      const ByteSet& s = c.sets[c.lexKid[e.b + i]];
+      const ByteSet& s = c.sets[c.lexChild[e.b + i]];
       for (unsigned b = 0; b < 256; ++b)
         if (s.has(static_cast<unsigned char>(b))) {
-          word += static_cast<char>(b);
+          letters += static_cast<char>(b);
           break;
         }
     }
-    word += '`';
+    word = quote(letters, '`');
   }
   std::string text(lower_fail_text(c.lowerWhy));
   const auto fill = [&](std::string_view mark, std::string_view with) {
@@ -343,7 +351,7 @@ std::string lower_fail_sentence(const Cfg& c, std::string_view rule = {}) {
   fill("{bytes}", bytes);
   fill("{word}", word);
   if (c.lowerTerm != kNoRow)
-    return "terminal `" + std::string(c.term_name(c.lowerTerm)) + "` " + text;
+    return "terminal " + quote(c.term_name(c.lowerTerm), '`') + " " + text;
   if (c.lowerRule != kNoRow && !rule.empty())
     return "rule `" + std::string(rule) + "` " + text;
   return "the grammar " + text;

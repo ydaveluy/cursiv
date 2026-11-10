@@ -1,5 +1,5 @@
 // Trivia queries compile to fixed-pattern checks or native position transforms.
-// Every gap a condition asks, a phrase's own included, is laid once at
+// Every gap a condition asks, a phrase's own included, is emitted once at
 // construction.
 #pragma once
 
@@ -37,7 +37,7 @@ class GapProgramEmitter {
     _used[id] = true;
     if (const auto& e = _cfg.lex[id];
         e.kind == LexKind::seq || e.kind == LexKind::alt)
-      for (unsigned i = 0; i < e.b; ++i) add(_cfg.lexKid[e.a + i]);
+      for (unsigned i = 0; i < e.b; ++i) add(_cfg.lexChild[e.a + i]);
     else if (e.kind == LexKind::rep && e.max != 0)
       add(e.a);
     _order.push_back(id);
@@ -83,7 +83,7 @@ class GapProgramEmitter {
           if (e.min != 0)
             out.line("    if (", e.min, "u > n - p) { out.set(p); return; }");
           for (unsigned k = 0; k < e.min; ++k)
-            out.line("    if (!", _boundary, ".at(", _cfg.lexKid[e.b + k],
+            out.line("    if (!", _boundary, ".at(", _cfg.lexChild[e.b + k],
                      "u, g, p + ", k,
                      "u, n)) { out.set(p); return; "
                      "}");
@@ -100,13 +100,13 @@ class GapProgramEmitter {
             out.line(
                 "  if (cur.empty()) return cur;\n"
                 "  cur = gap_pattern_",
-                _cfg.lexKid[e.a + k], "(g, n, cur);");
+                _cfg.lexChild[e.a + k], "(g, n, cur);");
           out.line("  return cur;");
           break;
         case LexKind::alt:
           out.line("  Set out;");
           for (unsigned k = 0; k < e.b; ++k)
-            out.line("  out.unite(gap_pattern_", _cfg.lexKid[e.a + k],
+            out.line("  out.unite(gap_pattern_", _cfg.lexChild[e.a + k],
                      "(g, n, in));");
           out.line("  return out;");
           break;
@@ -218,7 +218,7 @@ class GapEmitter : private TextBuilder {
         return ask(e.a, e.kind == LexKind::gap_is);
       case LexKind::seq:
       case LexKind::alt:
-        for (unsigned i = 0; i < e.b; ++i) phrase(_cfg.lexKid[e.a + i]);
+        for (unsigned i = 0; i < e.b; ++i) phrase(_cfg.lexChild[e.a + i]);
         return;
       case LexKind::rep:
         if (e.max != 0) phrase(e.a);
@@ -235,7 +235,7 @@ class GapEmitter : private TextBuilder {
   bool gap_patterns(std::uint16_t node, std::vector<GapWord>& patterns) const {
     if (const auto& e = _cfg.lex[node]; e.kind == LexKind::alt) {
       for (unsigned i = 0; i < e.b; ++i)
-        if (!gap_patterns(_cfg.lexKid[e.a + i], patterns)) return false;
+        if (!gap_patterns(_cfg.lexChild[e.a + i], patterns)) return false;
       return patterns.size() <= 16;
     }
     GapWord bytes;
@@ -247,7 +247,7 @@ class GapEmitter : private TextBuilder {
       }
       if (part.kind != LexKind::seq) return false;
       for (unsigned i = 0; i < part.b; ++i)
-        if (!self(self, _cfg.lexKid[part.a + i])) return false;
+        if (!self(self, _cfg.lexChild[part.a + i])) return false;
       return true;
     };
     if (!sequence(sequence, node)) return false;
@@ -266,8 +266,8 @@ class GapEmitter : private TextBuilder {
     }
     if (!whole) {
       // A search for CR already includes CRLF, wherever it occurs in the gap.
-      // The search only tries the start of a character, so a pattern that may
-      // begin on a continuation byte, 0x80 to 0xBF, covers nothing past a start.
+      // The search tries only character starts, so a pattern that may begin on
+      // a continuation byte, 0x80 to 0xBF, covers nothing past a start.
       const auto covers = [&](std::uint16_t pe, std::uint16_t qe) {
         return _cfg.sets[qe].covers(_cfg.sets[pe]);
       };

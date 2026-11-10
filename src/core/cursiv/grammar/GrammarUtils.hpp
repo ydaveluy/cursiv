@@ -1,7 +1,6 @@
 // The stages a declared grammar goes through before an engine reads it, and
 // `Normalize`, which is all of them. Each stage takes the one before and
-// republishes the whole surface, so the chain has no last link. Everything
-// is answered per rule, from `entry` down: a grammar is a graph.
+// answers per rule, from `entry` down.
 #pragma once
 
 #include <cstddef>
@@ -78,8 +77,8 @@ template <class R, class G>
 using winners_t =
     typename choose_parent<R, typename parents_of<G>::type>::winners;
 
-// The one parent whose rule stands where `G` does not restate it; two would
-// leave the choice unmade.
+// The one parent whose rule applies when `G` does not override it; two are
+// refused.
 template <class R, class G>
 struct standing_parent {
   using type = winners_t<R, G>;
@@ -104,11 +103,10 @@ struct flat_of<Sh, A, B, Rest...>
 template <template <class...> class Sh, class... Es>
 using flat_of_t = typename flat_of<Sh, Es...>::type;
 
-// The splice, and the only walk that rebuilds a body: `super` becomes the
-// body the parents made effective, `B::type`, asked for only there; every
-// other node is rebuilt over its children. A `super` spelled outside an
-// override body never reaches this walk, and every other walk refuses it.
-template <class B, class E, class Kids = typename ExprShape<E>::kids>
+// The splice, the only walk that rebuilds a body: `super` becomes the body
+// the parents made effective, and every other node is rebuilt over its
+// children.
+template <class B, class E, class Children = typename ExprShape<E>::children>
 struct plug;
 template <class B, class E>
 using plug_t = typename plug<B, E>::type;
@@ -149,7 +147,7 @@ struct parent_body<R, TypeList<P>> {
   using type = eff_body_t<P, R>;
 };
 
-// Nothing restated here: what the parents made effective stands.
+// Not overridden here: the parents' effective body applies.
 template <class G, class R, bool Has>
 struct eff_body {
   using type = typename parent_body<R, standing_t<R, G>>::type;
@@ -163,7 +161,7 @@ struct super_body {
                 "override here names neither: write the body without it");
   using type = typename parent_body<R, winners_t<R, G>>::type;
 };
-// Restated: the override's body, with `super` spliced to what stood before.
+// Overridden: the override's body, with `super` replaced by the previous body.
 template <class G, class R>
 struct eff_body<G, R, true> {
   using type =
@@ -183,9 +181,8 @@ struct override_decl<G, R, true> {
   using owner = G;
 };
 
-// An override does not replace a rule's name: the mint wears the override's
-// declaration over the base rule's identity. `I` is the rule that stood
-// before it, which a slot it leaves empty falls back to.
+// An override keeps the rule's name: `declared` is the base rule, the rest is
+// the override's. `I` is the rule it replaces, used for a slot it leaves empty.
 template <class R, class O, auto B, class I>
 struct Overridden : O {
   using declared = R;
@@ -210,8 +207,8 @@ template <class R, class P>
 struct parent_rule<R, TypeList<P>> {
   using type = typename eff_rule<P, R>::type;
 };
-// Restated over several parents, it stands over the first one's, which must
-// then agree with the others on a slot the override leaves to them.
+// Overridden over several parents, it replaces the first one's rule, whose
+// converter must match the others' where the override states none.
 template <class R, class P, class Q, class... Ps>
 struct parent_rule<R, TypeList<P, Q, Ps...>> {
   using type = typename eff_rule<P, R>::type;
@@ -259,15 +256,14 @@ struct declared_stage_body<X, true> {
   using type = unnamed_data_operands_t<rule_body_t<X>>;
 };
 
-// A body a stage produced is final: `shed_root_create` reads a declared body,
-// where a root create only states a type. A stage means it, so a mint is read
-// as it stands.
+// A body a stage produced (`produced_body`) is read as it stands; only a
+// declared body has its root create removed.
 template <class X>
 struct stage_body {
   using type = typename declared_stage_body<X>::type;
 };
 template <class X>
-  requires requires { X::minted_body; }
+  requires requires { X::produced_body; }
 struct stage_body<X> {
   using type = std::remove_cv_t<decltype(X::body)>;
 };
@@ -336,11 +332,11 @@ consteval bool case_of() {
 
 }  // namespace detail::ov
 
-// Head of the chain: the rule a reference actually names here -- the declared
-// one where nothing restates it, the mint otherwise.
+// First stage: the rule a reference names in `G`, the declared one unless an
+// override replaces it.
 template <class G>
 struct ResolveOverride {
-  // Does this grammar, or a grammar it extends, restate `R`?
+  // Whether this grammar, or one it extends, overrides `R`.
   template <class R>
   static constexpr bool overrides = detail::ov::overrides_rule<G, R>;
 
@@ -348,12 +344,12 @@ struct ResolveOverride {
   template <class R>
   using rule = typename detail::ov::eff_rule<G, R>::type;
 
-  // ...and that rule's body, `super` spliced away and a root `create` shed.
+  // That rule's body, with `super` replaced and a root `create` removed.
   template <class R>
   using body = typename detail::ov::stage_body<rule<R>>::type;
 
-  // The whole public surface, answered again. A stage that dropped any of it
-  // would end the pipeline: what comes after has no other way to ask.
+  // Every stage republishes the whole surface: the next stage has no other
+  // way to reach it.
   using entry = rule<typename G::entry>;
   using ignored = typename detail::ov::as_rules<G, typename G::ignored>::type;
   using hidden = typename detail::ov::as_rules<G, typename G::hidden>::type;
@@ -379,21 +375,16 @@ consteval bool folds_case() {
 // the rule's own element. Two shapes, one meaning; this leaves only the first.
 namespace detail::mat {
 
-// What one expression is to the head of its alternative -- eight readings of
-// one tree, so one walk:
-//
-//   heads    it gives the head on every path: a creation, or a call the rule
-//            adopts
-//   may      a head appears on some path: one branch of a choice is enough
-//   adopts   a call the rule adopts appears on some path
-//   writes   every path writes a member, so the node a nest buries exists
-//   touches  some path writes, creates or nests: the current node is not empty
+// What one expression is to the head of its alternative, in one walk:
+//   heads    it gives the head on every path: a creation, or an adopted call
+//   may      a head appears on some path
+//   adopts   an adopted call appears on some path
+//   writes   every path writes a member, so the node a nest wraps exists
+//   touches  some path writes, creates or nests
 //   wraps    it makes a new current node, so the head stops in front of it
 //   inside   a second head can appear on one path
-//   late     a call is adopted on a path where the current node is not empty
-//
-// The default is none of them: the answer that never orphans a node, and
-// each node below states only what it is.
+//   late     a call is adopted where the current node is not empty
+// The default is none of them.
 struct blank {
   static constexpr bool heads = false, may = false, adopts = false,
                         writes = false, touches = false, wraps = false,
@@ -402,7 +393,7 @@ struct blank {
 template <class E>
 struct look : blank {};
 
-// A create absorbs what surrounds it, so a second head lands inside it.
+// A create absorbs what surrounds it, so a second head ends up inside it.
 template <class T, class E>
 struct look<Create<T, E>> : blank {
   static constexpr bool heads = true, may = true, touches = true,
@@ -431,7 +422,7 @@ struct look_ref : blank {
 template <class R>
 struct look<Ref<R>> : look_ref<named_rule_t<R>> {};
 
-// A nest buries the current node: it heads nothing, what follows is the
+// A nest wraps the current node: it heads nothing, what follows is the
 // wrapper's, and a head inside it replaces the wrapper.
 template <class T, auto P, class E>
 struct look<Nest<T, P, E>> : blank {
@@ -491,8 +482,8 @@ struct look<Choice<As...>> {
   static constexpr bool late = (look<As>::late || ...);
 };
 
-// One that may match nothing heads nothing, and one that can turn twice on a
-// head has a second. Either way each turn wraps again.
+// One that may match nothing heads nothing, and one that can repeat a head
+// has a second. Either way each iteration wraps again.
 template <std::size_t Mn, std::size_t Mx, class E>
 struct look<Repeat<Mn, Mx, E>> : look<E> {
   static constexpr bool heads = Mn >= 1 && look<E>::heads;
@@ -507,7 +498,7 @@ struct look<Skip<I, H, E>> : look<E> {};
 template <class G, class E>
 struct look<Embed<G, E>> : look<E> {};
 
-// The one reading a reader outside asks for.
+// Whether E gives the head on every path.
 template <class E>
 inline constexpr bool look_heads = look<E>::heads;
 
@@ -556,56 +547,50 @@ template <class E, class RT,
 struct head_type {
   using type = typename branch_type<E, TypeList<>>::type;
 };
-// Writes nothing, adopts nothing: it names no class, so the rule's stands -- a
-// nest behind it still has to bury a node.
+// Writes nothing, adopts nothing: it names no class, so the rule's class
+// applies, as a nest after it still needs a node to wrap.
 template <class E, class RT>
 struct head_type<E, RT, true> {
   using type = RT;
 };
 
-// The root create shedding took away. It is what tells an alternative of
-// nothing but wrappers that a head was written: `create<W> + some(nest<..>)`
-// has a node for the first turn to bury, and `nest<..>` alone has not -- and
-// the two shed to the same body.
+// The root create that was removed: it tells `create<W> + some(nest<..>)`,
+// which has a node to wrap, from `nest<..>` alone.
 template <class B>
-struct shed_head {
+struct root_create_class {
   using type = void;
 };
 template <class T, class E>
-struct shed_head<Create<T, E>> {
+struct root_create_class<Create<T, E>> {
   using type = T;
 };
 
-// One alternative, given the head it owes. Three answers and no fourth:
-//   parts in front of the wrapper  the creation claims them, the rest follows
-//   none, but a head was spelled   it claims the whole alternative
-//   none at all                    left as it is, and `checked` refuses it
-// ...and the parts are left as they are where they may adopt a node: that node
-// is the head. They are left too, and refused, where a wrapper follows parts
-// that do not write on every path: the node it buries would not exist.
-template <class Shed, class Expr, class RT>
+// One alternative, given the head it needs. Parts in front of the wrapper
+// are claimed by the creation; with none, a spelled head claims the whole
+// alternative; otherwise it is left as it is, and `checked` refuses it.
+template <class RootClass, class Expr, class RT>
 struct claimed_head {
   // Reading the candidates refuses a directive that never runs.
   using runs = typename cands<Expr>::type;
-  using type = Shed;
+  using type = RootClass;
 };
 template <class Expr, class RT>
 struct claimed_head<void, Expr, RT> : head_type<Expr, RT> {};
 
-template <class Shed, class RT, class A, class HeadL, class Rest>
+template <class RootClass, class RT, class A, class HeadL, class Rest>
 struct head_of {
   using expr = typename seq_of<HeadL>::type;
-  using T = typename claimed_head<Shed, expr, RT>::type;
+  using T = typename claimed_head<RootClass, expr, RT>::type;
   using claimed =
       typename seq_of<tl_cat_t<TypeList<Create<T, expr>>, Rest>>::type;
   static constexpr bool buries = !std::is_same_v<Rest, TypeList<>>;
-  using type = cond_t<std::is_void_v<Shed> &&
+  using type = cond_t<std::is_void_v<RootClass> &&
                           (look<expr>::may || (buries && !look<expr>::writes)),
                       A, claimed>;
 };
-template <class Shed, class RT, class A, class Rest>
-struct head_of<Shed, RT, A, TypeList<>, Rest> {
-  using type = Create<Shed, A>;
+template <class RootClass, class RT, class A, class Rest>
+struct head_of<RootClass, RT, A, TypeList<>, Rest> {
+  using type = Create<RootClass, A>;
 };
 template <class RT, class A, class Rest>
 struct head_of<void, RT, A, TypeList<>, Rest> {
@@ -614,17 +599,17 @@ struct head_of<void, RT, A, TypeList<>, Rest> {
 
 // A spelled creation claims the whole alternative, so a call in it is a second
 // head even where the alternative would adopt it.
-template <class Shed, class RT, class A,
+template <class RootClass, class RT, class A,
           bool Heads =
-              look<A>::heads && (std::is_void_v<Shed> || !look<A>::adopts)>
-struct headed_of
-    : head_of<Shed, RT, A, typename parts<A>::head, typename parts<A>::rest> {};
-template <class Shed, class RT, class A>
-struct headed_of<Shed, RT, A, true> {
+              look<A>::heads && (std::is_void_v<RootClass> || !look<A>::adopts)>
+struct headed_of : head_of<RootClass, RT, A, typename parts<A>::head,
+                           typename parts<A>::rest> {};
+template <class RootClass, class RT, class A>
+struct headed_of<RootClass, RT, A, true> {
   using type = A;
 };
-template <class Shed, class RT, class A>
-using headed = typename headed_of<Shed, RT, A>::type;
+template <class RootClass, class RT, class A>
+using headed = typename headed_of<RootClass, RT, A>::type;
 
 // An alternative whose head the text may leave out, and which spells no
 // creation to carry the rule over that: it hands a node over on some paths
@@ -659,7 +644,7 @@ template <class L>
 inline constexpr bool late_call = late_in<false, L>;
 
 // An alternative that creates nothing starts on the node it adopts: a write
-// after the call lands there.
+// after the call goes there.
 template <class A, bool Creates = is_self_resolving<A>>
 struct hand_at_start {
   using type = TypeList<>;
@@ -667,9 +652,7 @@ struct hand_at_start {
 template <class A>
 struct hand_at_start<A, false> : adopt_cands<A, TypeList<>> {};
 
-// A failure here is a grammar the stage could not make whole. `twice` is a
-// tripwire: `expr.hpp` already refuses two creates in a sequence, and a create
-// after a nest, where they are spelled. `bare` is nobody else's. `Over`: an
+// A failure here is a grammar this stage cannot complete. `Over` marks an
 // override, whose type is the base rule's.
 template <class RT, class A, bool Over>
 struct checked {
@@ -712,18 +695,18 @@ struct checked {
 };
 
 // The body, alternative by alternative; a choice keeps its arity.
-template <class RT, class Shed, class A, bool Over>
-using checked_alt = checked<RT, headed<Shed, RT, A>, Over>;
-template <class RT, class Shed, class B, bool Over>
+template <class RT, class RootClass, class A, bool Over>
+using checked_alt = checked<RT, headed<RootClass, RT, A>, Over>;
+template <class RT, class RootClass, class B, bool Over>
 struct materialize {
-  using type = typename checked_alt<RT, Shed, B, Over>::type;
+  using type = typename checked_alt<RT, RootClass, B, Over>::type;
 };
-template <class RT, class Shed, bool Over, class... As>
-struct materialize<RT, Shed, Choice<As...>, Over> {
-  using type = Choice<typename checked_alt<RT, Shed, As, Over>::type...>;
+template <class RT, class RootClass, bool Over, class... As>
+struct materialize<RT, RootClass, Choice<As...>, Over> {
+  using type = Choice<typename checked_alt<RT, RootClass, As, Over>::type...>;
 };
 
-// Only a node rule owes one: an infix rule's body is the climb's, and a
+// Only a node rule needs a head: an infix rule's body is the climb's, and a
 // terminal or data rule builds nothing.
 template <class X, bool Node = is_node_rule<X>>
 struct rule_body {
@@ -731,10 +714,10 @@ struct rule_body {
 };
 template <class X>
 struct rule_body<X, true>
-    : materialize<rule_type_t<X>,
-                  typename shed_head<std::remove_cv_t<decltype(X::body)>>::type,
-                  typename detail::ov::stage_body<X>::type, is_overridden<X>> {
-};
+    : materialize<
+          rule_type_t<X>,
+          typename root_create_class<std::remove_cv_t<decltype(X::body)>>::type,
+          typename detail::ov::stage_body<X>::type, is_overridden<X>> {};
 
 // The stage hands back a rule, not a body on the side: asking the rule and
 // asking the stage must not give two answers.
@@ -742,13 +725,13 @@ template <class R, auto B>
 struct Materialized : R {
   using declared = R;
   static constexpr auto body = B;
-  static constexpr bool minted_body = true;
+  static constexpr bool produced_body = true;
 };
 
-// An override keeps its rule's genre: one that stops building a node would
-// still answer the type of the rule it stood over.
+// An override keeps its rule's kind, node or value: one that stops building a
+// node would still answer the type of the rule it replaces.
 template <class Rule>
-consteval bool OverrideGenre() {
+consteval bool OverrideChangesKind() {
   static_assert(
       dependent_false<Rule>,
       "this override changes whether the rule builds a node: the rule it "
@@ -763,12 +746,12 @@ inline constexpr bool node_kept = true;
 template <class X>
 inline constexpr bool node_kept<X, true> = [] {
   if constexpr (!(is_node_rule<X> == is_node_rule<inherited_of_t<X>>))
-    return OverrideGenre<declared_of_t<X>>();
+    return OverrideChangesKind<declared_of_t<X>>();
   return true;
 }();
 
-// Nothing owed, no mint: a wrapper over an unchanged body would double every
-// instantiation keyed on the rule.
+// An unchanged body keeps its rule: a wrapper would double every instantiation
+// keyed on the rule.
 template <class X,
           bool Same = std::is_same_v<typename rule_body<X>::type,
                                      typename detail::ov::stage_body<X>::type>>
@@ -803,15 +786,14 @@ struct MaterializeCreate {
   template <class R>
   using body = typename detail::ov::stage_body<rule<R>>::type;
 
-  // Did the body that came in owe one? A root `create` is shed before this
-  // reads it, so `rule<create<T>(x)>` owes one and gets the same body back --
-  // the two spellings converge.
+  // Whether this stage rewrote the rule. A root `create` is removed before
+  // this reads it, so `rule<create<T>(x)>` is rewritten to the same body.
   template <class R>
-  static constexpr bool owed =
+  static constexpr bool rewritten =
       !std::is_same_v<rule<R>, typename S::template rule<R>>;
 
-  // With this stage's rules: an `entry` whose body still implied its
-  // creation would make the stage a matter of which way you asked.
+  // `entry` and the lists hold this stage's rules, so asking through them or
+  // through `rule` gives one answer.
   using entry = typename detail::mat::mat_rule<typename S::entry>::type;
   using ignored = typename detail::mat::mat_each<typename S::ignored>::type;
   using hidden = typename detail::mat::mat_each<typename S::hidden>::type;

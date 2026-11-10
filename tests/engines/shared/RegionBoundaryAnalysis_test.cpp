@@ -13,11 +13,9 @@ static_assert(sizeof(cursiv::engine::LrReducePlan) == 12);
 
 using tregionboundary::Document;
 
-// Existing refusal contracts. DifferentArms reaches the same X under two
-// trivia settings; the guarded nullable/counted tails document analysis
-// limits, rather than a demonstrated ambiguity of the language. The direct
-// nullable tail is instead covered by the positive Optional runtime cases.
-// GuardedRun and ImpliedTail are the shapes only one engine refuses.
+// Refused shapes: DifferentArms reaches the same X under two trivia settings,
+// the guarded tails are analysis limits, and GuardedRun and ImpliedTail are
+// refused by one engine only.
 struct RefusalBase : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct X : terminal<lit<"x">> {};

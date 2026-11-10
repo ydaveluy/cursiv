@@ -31,7 +31,10 @@ unresolved supertype.
 folders its packages name; `-d DIR` chooses where. The generator only shows
 how to turn a model into code: the validation does not check Java's reserved
 words or name collisions, so a valid model can still give Java that does not
-compile, for example a feature named `class`.
+compile, for example a feature named `class`. Types are also written as the
+model names them, without imports, and a datatype names no Java type, so even
+`example/blog.dmodel` gives Java that does not compile: `Date` is not a Java
+class, and `Snapshot` uses `Post` from another package.
 
 ## Read the implementation
 

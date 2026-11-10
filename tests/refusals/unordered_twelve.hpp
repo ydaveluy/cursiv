@@ -1,4 +1,4 @@
-// Twelve items in any order, one past the most either engine spells.
+// Twelve items in any order, one more than either engine accepts.
 // expect LR LL: refused: rule .Root. has an unordered group with too many items
 #pragma once
 

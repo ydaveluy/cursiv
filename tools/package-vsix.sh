@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# The installable extensions: one .vsix per language, each embedding the
-# optimized wasm server and the Node runner under server/ -- an installed
-# extension has no repository tree to fall back on, so the module travels
-# with it. Needs a wasi-threads build; SDK Clang optimizes Release executables,
-# and this script packages them without another optimization pass.
+# One installable .vsix per language, embedding the wasm server and the Node
+# runner under server/. Needs a wasi-threads Release build, packaged as built.
 #
 #   tools/package-vsix.sh [build-dir] [out-dir]   # default: build-wasi dist-vsix
 set -euo pipefail
@@ -34,10 +31,11 @@ for ext in examples/*/vscode; do
 
   (
     cd "$extension"
-    # npm ci is the reproducible install, and it wants the lock file; an
-    # already-populated node_modules is reused as-is.
-    if [ ! -d node_modules ]; then
-      if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent; fi
+    # Install from the lock file again when npm's record of the install is
+    # older than the manifest or the lock file.
+    installed=node_modules/.package-lock.json
+    if [ ! "$installed" -nt package.json ] || [ ! "$installed" -nt package-lock.json ]; then
+      npm ci --silent
     fi
     npm run bundle
   )

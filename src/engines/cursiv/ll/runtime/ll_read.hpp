@@ -1,4 +1,4 @@
-// Reading, and the two writes a read owes the tree: trivia goes on the tape
+// Reading, and the two writes a read makes on the tree: trivia goes on the tape
 // in front of the token it precedes, and the token's own leaf carries the row
 // its position states.
 #pragma once
@@ -156,28 +156,24 @@ CURSIV_ALWAYS_INLINE inline void ll_read_gap(LlContext& c, std::uint16_t mode,
   c.laMode = mode;
 }
 
-// The lookahead under one alphabet, where the token in hand does not answer
-// it. A token already read under another is read again where it begins: the
-// two alphabets may not agree on where it ends, and the point that asks is
-// the one that decides. The gap in front of it is not read again: the point
-// that crossed it read it under the configuration of the group that holds
-// it, so the trivia in front of a region's first token stays the caller's,
-// whatever the region skips. A token in hand this alphabet reads as a blank,
-// a newline a wider one took for a token, joins that gap, and the read goes
-// on past it. Where the lexer read nothing, the gap is read again with it.
-// The indentation's tokens stand under any alphabet, and so does the end, a
-// dedent where `mode` owes one. `sc`, where it ends past the blanks, is the
-// trivia the lexer read there already.
+// The lookahead under one alphabet where the token in hand does not answer it:
+// the token is read again where it begins, its gap kept; a token read as a
+// blank joins the gap. `sc`: trivia already read.
 template <const auto& T>
 CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
                                          Scan sc = {}) {
   if constexpr (kIndented<T>)
     if (c.laValid) {
+      // At the end of the input, the alphabet says whether a level closes
+      // before the end, as a repair's read says it.
       if (c.la.sym == kEofSymbol &&
           ll_end_dedents<T>(c.indentArena, c.indent, ll_mode_ends<T>(mode)))
-        c.la.sym = kLaid<T, kLaidDedent>;
+        c.la.sym = kSyntheticTerm<T, kSyntheticDedent>;
+      else if (c.la.sym == kSyntheticTerm<T, kSyntheticDedent> &&
+               c.la.begin == c.len && ll_mode_ends<T>(mode))
+        c.la.sym = kEofSymbol;
       if (c.la.sym == kEofSymbol ||
-          (c.la.sym < T.nterms && T.terms[c.la.sym].laid != 0)) {
+          (c.la.sym < T.nterms && T.terms[c.la.sym].synthetic != 0)) {
         c.laMode = mode;
         return;
       }
@@ -193,7 +189,7 @@ CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
       return;
     }
   } else {
-    // THE SCAN THAT ENDED THE TRIVIA IS THE TOKEN'S OWN: reading it twice is
+    // The scan that ended the trivia is the token's own: reading it twice is
     // a second pass of the lexer over every token of the document.
     c.pending.clear();
   }
@@ -231,14 +227,13 @@ CURSIV_ALWAYS_INLINE inline bool ll_probe(LlContext& c, std::uint16_t mode) {
 template <const auto& T>
 inline void ll_hold(LlContext& c) {
   if (c.la.sym != kEofSymbol && c.la.sym != kInvalidSymbol &&
-      !(c.la.sym < T.nterms && T.terms[c.la.sym].laid != 0))
+      !(c.la.sym < T.nterms && T.terms[c.la.sym].synthetic != 0))
     c.laMode = kLaHeld;
 }
 
-// ...and again once a repair at the point is done: the repair reads under the
-// widest alphabet, yet the arm entered reads no terminal the point's lexer
-// takes away. `held` is the token held before, none where none was; a token
-// the repair spelt itself stays its own.
+// The same, once a repair at the point is done: the repair reads under the
+// widest alphabet, but the arm entered reads no terminal the point's lexer
+// removes. `held` is the token held before, if any.
 template <const auto& T>
 inline void ll_rehold(LlContext& c, const Token& held, std::uint16_t mode) {
   if (held.sym == kInvalidSymbol || !c.laValid) return;
@@ -247,7 +242,7 @@ inline void ll_rehold(LlContext& c, const Token& held, std::uint16_t mode) {
   } else if (c.la.mode == kNoMode) {
     return;
   } else if (c.la.mode != mode && c.la.sym != kEofSymbol &&
-             c.la.sym < T.nterms && T.terms[c.la.sym].laid == 0) {
+             c.la.sym < T.nterms && T.terms[c.la.sym].synthetic == 0) {
     const Scan sc = ll_match_text<T>(c.src, c.len, mode, c.la.begin);
     c.la = Token{c.la.begin, sc.end,
                  sc.end == c.la.begin ? kInvalidSymbol : sc.term, mode};
@@ -268,8 +263,8 @@ inline bool ll_held_takes(const LlContext& c, SymbolId term) {
   TextOffset far = c.la.end;
   return tape.reserves(state, term, c.src, c.la.begin, c.la.end, c.len, far) ||
          (T.dfa_acc_set(state).test(term) &&
-          tape.tier(state, c.la.sym, c.src, c.la.end, c.len, far) != 0 &&
-          tape.tier(state, term, c.src, c.la.end, c.len, far) == 0);
+          tape.priority(state, c.la.sym, c.src, c.la.end, c.len, far) != 0 &&
+          tape.priority(state, term, c.src, c.la.end, c.len, far) == 0);
 }
 
 // Whether `mode` lexes `sym` for the length of its token alone: no position
@@ -280,11 +275,9 @@ constexpr bool ll_lengthens(std::uint16_t mode, std::uint16_t sym) {
          T.mode_admits(T.longer_mode(mode), sym);
 }
 
-// A token held answers a point that reads under another alphabet with the
-// terminal the lexer reads there, unless the held one takes it away. The
-// alphabet that does not admit it is the narrower one: where it reads another
-// extent, the held token was a longer match of a terminal that cannot follow,
-// unless it is a condition's own token, which lengthens what it guards.
+// A held token answers a point under another alphabet with the terminal the
+// lexer reads there, unless the held one removes it: another extent means a
+// longer match of a terminal that cannot follow, or a condition's own token.
 template <const auto& T>
 inline void ll_peek_held(LlContext& c, std::uint16_t mode) {
   if (c.la.sym == kInvalidSymbol) return;
@@ -299,10 +292,9 @@ inline void ll_peek_held(LlContext& c, std::uint16_t mode) {
   if (c.la.mode == kNoMode || !ll_held_takes<T>(c, sc.term)) c.la.sym = sc.term;
 }
 
-// The token as the position of an implied token reads it, under that
-// position's own alphabet: what may follow an insertion is no candidate for
-// the text its condition tests. A token no terminal names, where the lexer
-// read nothing, is read again there too.
+// The token as an implied token's position reads it, under that position's
+// alphabet: what may follow an insertion is no candidate for the text its
+// condition tests. A token no terminal names is read again there too.
 template <const auto& T>
 inline Token ll_normal_token(const LlContext& c, const Token& token,
                              std::uint16_t mode) {
@@ -327,7 +319,7 @@ CURSIV_ALWAYS_INLINE inline void ll_peek(LlContext& c, std::uint16_t mode) {
     bool physical = true;
     if constexpr (kIndented<T>)
       physical = c.la.sym != kEofSymbol && c.la.sym < T.nterms &&
-                 T.terms[c.la.sym].laid == 0;
+                 T.terms[c.la.sym].synthetic == 0;
     if (physical &&
         (ll_ends<T>(c, c.la.sym) ||
          (T.mode_covers(c.laMode, mode) && T.mode_admits(mode, c.la.sym)))) {
@@ -347,10 +339,9 @@ CURSIV_ALWAYS_INLINE inline void ll_peek(LlContext& c) {
   ll_peek<T>(c, Mode);
 }
 
-// A repetition may inspect its distinct closing token across its caller's
-// trivia. Once it elects another item, that gap belongs to the item's own
-// configuration. Only an uncommitted gap is read again: tokens in place keep
-// their lexical election, and repairs keep the token they invented.
+// A repetition may peek at its closing token across its caller's trivia; once
+// it elects another item, an uncommitted gap is read again under the item's
+// configuration. Tokens in place and invented tokens stay.
 template <const auto& T>
 inline void ll_repeat_read(LlContext& c, std::uint16_t mode) {
   if (!c.laValid || c.la.mode == kNoMode ||
@@ -391,15 +382,14 @@ inline void ll_give_back(LlContext& c, const LlHeldRead& read) {
   c.pendEnd = read.pendEnd;
 }
 
-// The token in hand read again under `mode`, its terminal added to `skip`. A
-// trivia that reads there instead is crossed, and the position past it is read
-// whole. False, the read left as it stands, where the token is no terminal's or
-// where nothing reads there. The trivia before it stays read.
+// The token in hand read again under `mode`, its terminal added to `skip`;
+// trivia that reads there instead is crossed. False, nothing changed, where the
+// token is no terminal's or nothing reads there.
 template <const auto& T>
 inline bool ll_read_without(LlContext& c, std::uint16_t mode,
                             LlSkipped<T>& skip) {
   if (c.la.sym == kEofSymbol || c.la.sym >= T.nterms ||
-      T.terms[c.la.sym].laid != 0)
+      T.terms[c.la.sym].synthetic != 0)
     return false;
   skip.set(c.la.sym);
   const typename LlLexTape<T>::Skipping tape{.skip = &skip};
@@ -430,7 +420,7 @@ inline void ll_ties_without(const LlContext& c, std::uint16_t mode,
   ties.assign(1, c.la.sym);
   // A read past a trivia may stand on the end, or on a token nothing lexes.
   if (c.la.sym == kEofSymbol || c.la.sym >= T.nterms ||
-      T.terms[c.la.sym].laid != 0)
+      T.terms[c.la.sym].synthetic != 0)
     return;
   const typename LlLexTape<T>::Skipping tape{.skip = &skip};
   const Scan own = lex_match(tape, c.src, c.len, mode, c.la.begin);
@@ -438,18 +428,16 @@ inline void ll_ties_without(const LlContext& c, std::uint16_t mode,
     skip.set(at.term);
     at = lex_match(tape, c.src, c.len, mode, c.la.begin);
     if (at.term == kInvalidSymbol || at.end != own.end ||
-        lex_weight(at.tier) != lex_weight(own.tier) ||
+        lex_weight(at.priority) != lex_weight(own.priority) ||
         ll_blank<T>(at.term, c.indent.depth))
       return;
     ties.push_back(at.term);
   }
 }
 
-// The token in hand at a choice whose alphabet admits, for a caller alone, a
-// terminal that reads over another of its own: where no frame the descent
-// stands in goes on from it, no reading of the choice takes that longer
-// match, and the position is read again without it, as often as the reading
-// it then elects is another such.
+// The token in hand at a choice whose alphabet admits, for a caller only, a
+// terminal that reads over another: where no frame goes on from it, the
+// position is read again without that longer match.
 template <const auto& T>
 CURSIV_NOINLINE inline void ll_refuse_flagged(LlContext& c, std::uint16_t mode,
                                               std::uint16_t decision) {
@@ -459,11 +447,11 @@ CURSIV_NOINLINE inline void ll_refuse_flagged(LlContext& c, std::uint16_t mode,
   }
 }
 
-// A read ahead of the descent, from the token in hand: the trivia before it
-// is crossed, and not read again under another alphabet. Its levels are the
-// descent's, in the descent's arena.
+// A read ahead of the descent, from where the token in hand was read: the
+// trivia before it is crossed, and not read again under another alphabet. Its
+// levels are the descent's, in the descent's arena.
 inline LlAhead ll_ahead(const LlContext& c) {
-  return LlAhead{c.indent, c.heldEnd, c.la.begin, c.la.begin == c.at};
+  return LlAhead{c.indent, c.heldEnd, c.pendEnd, c.pendEnd == c.at};
 }
 
 // The next visible token of a read ahead, as the descent would read it under
@@ -482,15 +470,14 @@ inline Token ll_ahead_peek(const LlContext& c,
              : t;
 }
 
-
-// ...and past `t`, taken or dropped as a repair drops it.
+// Steps a read ahead past `t`, taken or dropped as a repair drops it.
 template <const auto& T>
 inline void ll_ahead_step(std::vector<IndentLevel>& levels, LlAhead& a,
                           const Token& t, bool dropped) {
   if constexpr (kIndented<T>) {
     if (dropped)
-      indent_drop(levels, a.at.head, t, kLaid<T, kLaidIndent>,
-                  kLaid<T, kLaidDedent>);
+      indent_drop(levels, a.at.head, t, kSyntheticTerm<T, kSyntheticIndent>,
+                  kSyntheticTerm<T, kSyntheticDedent>);
     else
       indent_shift<T>(levels, a.at, t);
     if (t.end != t.begin) a.held = t.end;
@@ -500,8 +487,8 @@ inline void ll_ahead_step(std::vector<IndentLevel>& levels, LlAhead& a,
 }
 
 // The trivia in front of the token goes on the tape first: a record's end
-// never decreases, so a hidden run laid after the token it precedes would put
-// the tree out of order.
+// never decreases, so a hidden run written after the token it precedes would
+// put the tree out of order.
 template <const auto& T>
 CURSIV_ALWAYS_INLINE inline void ll_flush_trivia(LlContext& c) {
   for (const Token& t : c.pending)
@@ -510,9 +497,9 @@ CURSIV_ALWAYS_INLINE inline void ll_flush_trivia(LlContext& c) {
   c.triviaAt = std::max(c.triviaAt, c.pendEnd);
 }
 
-// One token onto the tape, and the cursor past it. `row` is the whole of what
-// the leaf owes: the build joined the terminal's own conversion to whatever
-// its position states, so nothing is decided here.
+// One token onto the tape, and the cursor past it. `row` is everything the
+// leaf writes: the build joined the terminal's own conversion to whatever its
+// position states, so nothing is decided here.
 template <const auto& T>
 CURSIV_ALWAYS_INLINE inline void ll_consume(LlContext& c, std::uint16_t row,
                                             std::uint16_t pos = 0) {
@@ -524,9 +511,9 @@ CURSIV_ALWAYS_INLINE inline void ll_consume(LlContext& c, std::uint16_t row,
     indent_shift<T>(c.indentArena, c.indent, c.la);
     if (c.la.end != c.la.begin) {
       c.heldEnd = c.la.end;
-      c.lull = 0;
+      c.zeroWidth = 0;
     } else {
-      ++c.lull;
+      ++c.zeroWidth;
     }
   }
   c.at = c.la.end;
@@ -535,16 +522,9 @@ CURSIV_ALWAYS_INLINE inline void ll_consume(LlContext& c, std::uint16_t row,
   c.laMode = kInvalidSymbol;
 }
 
-// What a call site states over the record its call handed back. The joins
-// were interned by the build, so this is a lookup and never a construction --
-// and a site whose call always hands the same record has one of them, which
-// the generated code writes without a test.
-//
-// `was` is the record in hand before the call: a call that handed none back
-// -- a repair refused it the room to write one, the descent was too deep, or
-// it laid nothing but the trivia in front of it -- leaves that record
-// standing, and the site has nothing of its own to state over -- nor where a
-// call that gave up left its record saying nothing.
+// What a call site states over the record its call returned, a join the build
+// interned. `was` is the record before the call: a call that returned none, or
+// gave up with an empty record, leaves it standing with nothing to state.
 template <const auto& T>
 CURSIV_ALWAYS_INLINE inline void ll_join(LlContext& c, NodeId was,
                                          const LlFuse* f, unsigned n) {
@@ -572,18 +552,12 @@ inline bool ll_states_nothing(const CstRun& run, NodeCount at) {
   return true;
 }
 
-// A group whose content turned out to be one subtree covering all of it: a
-// record over it would span exactly what that one spans, so the chain rides
-// onto it and no second record is laid. False where the text gave the group
-// more than one position, or where riding would put two creations on one
-// record -- the build offers no join there -- or where a join from no row
-// meets the row an elected abandon erased: it would put the group's creation
-// back, where ll_close lays the group's record with none. A local give-up
-// marks the ride as ll_close marks its record. Trivia, and repairs that
-// state nothing, may stand on either side of the subtree: they owe the group
-// nothing.
+// A group whose content is one subtree covering it: the chain goes onto the
+// subtree instead of a second record. False with more than one position, two
+// creations on one record, or a row an elected abandon erased.
 template <const auto& T>
-inline bool ll_ride(LlContext& c, NodeCount from, const LlFuse* f, unsigned n) {
+inline bool ll_reuse_subtree(LlContext& c, NodeCount from, const LlFuse* f,
+                             unsigned n) {
   if (n == 0 || c.last == kNoNode) return false;
   CstRun& run = c.tape.stream();
   NodeCount now = run.records();

@@ -17,9 +17,9 @@ namespace ll_keyword_relay_cases {
 
 namespace {
 
-// The tape of a table with relays announces them and its qualified acceptance
-// in both reads, and the walk refuses one that lost either.
-namespace announced {
+// A tape of a table with relays declares its relays and its qualified
+// acceptance, with and without skipping; a tape missing either fails the check.
+namespace declared {
 
 using Plain = cursiv::engine::LlLexTape<tllsemantic::generated::Ll::kTable>;
 using Skipping =
@@ -38,17 +38,17 @@ struct LostRun : Skipping {
 static_assert(Plain::kRelays && Plain::kQualified && Skipping::kQualified);
 static_assert(cursiv::engine::LexCursor<Plain> &&
               cursiv::engine::LexCursor<Skipping>);
-static_assert(cursiv::engine::LexAcceptanceAnnounced<Plain> &&
-              cursiv::engine::LexAcceptanceAnnounced<Skipping>);
-static_assert(cursiv::engine::LexRelaysAnnounced<Plain> &&
-              cursiv::engine::LexRelaysAnnounced<Skipping>);
+static_assert(cursiv::engine::LexAcceptanceDeclared<Plain> &&
+              cursiv::engine::LexAcceptanceDeclared<Skipping>);
+static_assert(cursiv::engine::LexRelaysDeclared<Plain> &&
+              cursiv::engine::LexRelaysDeclared<Skipping>);
 
 static_assert(LostQualified::kQualified &&
-              !cursiv::engine::LexAcceptanceAnnounced<LostQualified>);
+              !cursiv::engine::LexAcceptanceDeclared<LostQualified>);
 static_assert(cursiv::engine::LexOffersRelay<LostRun> &&
-              !cursiv::engine::LexRelaysAnnounced<LostRun>);
+              !cursiv::engine::LexRelaysDeclared<LostRun>);
 
-}  // namespace announced
+}  // namespace declared
 
 std::string shown(const cursiv::ParseResult& r) {
   std::string out;

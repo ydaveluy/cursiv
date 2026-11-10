@@ -2,9 +2,9 @@
 
 #include "cursiv/workspace/DocumentState.hpp"
 
-// What a request waits for: one document reaching a rung, or the whole
+// What a request waits for: one document reaching a state, or the whole
 // workspace reaching it. An answer read from the inverse index is a workspace
-// answer, and it is wrong until every document has climbed.
+// answer, wrong until every document has reached the state.
 
 namespace cursiv {
 
@@ -12,7 +12,7 @@ struct ServiceRequirement {
   enum class Type { Document, Workspace };
 
   // A bare state is the document scope: the two spellings are one type, so a
-  // route that needs no workspace rung reads as the state alone.
+  // route that needs no workspace state reads as the state alone.
   constexpr ServiceRequirement(DocumentState s) noexcept  // NOLINT
       : state(s) {}
   constexpr ServiceRequirement(Type t, DocumentState s) noexcept
@@ -22,7 +22,7 @@ struct ServiceRequirement {
   DocumentState state = DocumentState::Changed;
 };
 
-// One constant per rung, workspace-scoped.
+// One constant per state, workspace-scoped.
 namespace WorkspaceState {
 
 inline constexpr ServiceRequirement Parsed{ServiceRequirement::Type::Workspace,

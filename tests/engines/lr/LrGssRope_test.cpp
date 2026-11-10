@@ -119,7 +119,7 @@ void two_ropes_share_the_prefix_they_share() {
   }
 }
 
-void parts_join_in_order_whatever_they_meet_first() {
+void parts_join_in_order_whatever_joins_first() {
   std::mt19937 rng(3);
   Spell rope;
   for (unsigned round = 0; round != 200; ++round) {
@@ -177,9 +177,9 @@ void forks_are_found_by_position() {
   }
 }
 
-// A node is made once: what is joined alike is the same node, whichever way
+// A node is made once: what is joined the same is the same node, whichever way
 // it was reached, and a value that differs is a node of its own.
-void what_is_joined_alike_is_one_node() {
+void what_is_joined_the_same_is_one_node() {
   Spell rope;
   const std::vector<std::uint32_t> values{3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5};
   const auto a = chunk(rope, values);
@@ -237,7 +237,7 @@ void a_deep_shared_avl_tree_keeps_its_cursor_and_frontier_in_bounds() {
   CHECK(rope.common(leaf, 0, root, 0, 1) == 1);
 }
 
-// Two ropes of one content, joined in different shapes, are told alike; and
+// Two ropes of one content, joined in different shapes, are told the same; and
 // the roots of one sequence read as their join.
 void ropes_of_one_content_agree_whatever_their_shape() {
   std::mt19937 rng(13);
@@ -268,7 +268,6 @@ void ropes_of_one_content_agree_whatever_their_shape() {
   }
 }
 
-// Any number of roots read as their join.
 void many_roots_read_as_one_sequence() {
   std::mt19937 rng(17);
   Spell rope;
@@ -339,7 +338,6 @@ std::pair<std::int64_t, std::int64_t> cancelling_pair(unsigned gap) {
   return {basis[0][0], basis[0][1]};
 }
 
-// Two sequences that one hash cannot tell apart are two sequences here.
 void sequences_that_collide_under_a_polynomial_hash_are_told_apart() {
   constexpr unsigned kGap = 7, kLength = 24, kFirst = 5;
   const auto [a, b] = cancelling_pair(kGap);
@@ -417,7 +415,7 @@ void every_run_stays_in_one_piece_whatever_its_length() {
   CHECK(runs.size() == total);
 }
 
-void a_run_filled_alike_reads_alike() {
+void a_run_filled_the_same_reads_the_same() {
   Runs runs;
   const std::size_t at = runs.append(11, 42u);
   for (std::size_t i = 0; i != 11; ++i) CHECK(runs[at + i] == 42u);
@@ -449,13 +447,28 @@ void a_run_past_32_bit_offsets_is_refused() {
     CHECK(runs.size() == 0);
     CHECK(runs.append(3, std::uint8_t{9}) == 0 && runs[2] == 9);
   }
+  // A length whose end wraps around the offsets is refused as well, wherever
+  // the runs before it stand.
+  Runs runs;
+  (void)runs.append(1, 5u);
+  for (const std::size_t n : {~std::size_t{0}, ~std::size_t{0} - 6}) {
+    bool refused = false;
+    try {
+      (void)runs.reserve(n);
+    } catch (const std::length_error&) {
+      refused = true;
+    }
+    CHECK(refused);
+  }
+  CHECK(runs.size() == 1 && runs[0] == 5u);
+  CHECK(runs.append(2, 7u) == 1 && runs[2] == 7u);
 }
 
 }  // namespace
 
 void run() {
   every_run_stays_in_one_piece_whatever_its_length();
-  a_run_filled_alike_reads_alike();
+  a_run_filled_the_same_reads_the_same();
   a_cleared_run_store_starts_over();
   a_run_past_32_bit_offsets_is_refused();
 }
@@ -539,11 +552,11 @@ void shedding_keeps_live_collisions_and_counts_only_retained_ids() {
     CHECK(index.intern(hash(count), count,
                        [&](Id id) { return id == count; }, dead) == count);
     CHECK(index.size() == count - discard + 1 && deadCalls != 0);
-    const unsigned afterShed = deadCalls;
+    const unsigned afterDrop = deadCalls;
     for (Id i = discard; i <= count; ++i)
       CHECK(index.intern(hash(i), count + 1,
                          [&](Id id) { return id == i; }, dead) == i);
-    CHECK(index.size() == count - discard + 1 && deadCalls == afterShed);
+    CHECK(index.size() == count - discard + 1 && deadCalls == afterDrop);
 
     // A discarded key receives a fresh id; a second lookup keeps that id.
     CHECK(index.intern(hash(0), count + 1, [](Id id) { return id == 0; }, dead) ==
@@ -555,7 +568,7 @@ void shedding_keeps_live_collisions_and_counts_only_retained_ids() {
     CHECK(index.size() == 0);
     for (Id i = 0; i < 64; ++i)
       CHECK(index.intern(hash(i), i, [](Id) { return false; }, dead) == i);
-    CHECK(index.size() == 64 && deadCalls == afterShed);
+    CHECK(index.size() == 64 && deadCalls == afterDrop);
   }
 }
 
@@ -615,10 +628,10 @@ int main() {
 
   a_rope_reads_what_it_was_joined_from();
   two_ropes_share_the_prefix_they_share();
-  parts_join_in_order_whatever_they_meet_first();
+  parts_join_in_order_whatever_joins_first();
   a_long_run_appended_or_prepended_stays_shallow();
   forks_are_found_by_position();
-  what_is_joined_alike_is_one_node();
+  what_is_joined_the_same_is_one_node();
   virtual_lengths_are_checked_before_they_wrap();
   a_deep_shared_avl_tree_keeps_its_cursor_and_frontier_in_bounds();
   ropes_of_one_content_agree_whatever_their_shape();

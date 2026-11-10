@@ -26,27 +26,23 @@ cursiv_test(utils_test core/utils/utils_test.cpp cursiv::lsp wsCore)
 # Replaces the global allocator, which the thread sanitizer's runtime also
 # defines: the two do not link.
 if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
-  cursiv_test(AllocationFailure_test core/AllocationFailure_test.cpp wsCore)
+  cursiv_test(AllocationFailure_test core/AllocationFailure_test.cpp wsCore
+      convGenerated)
   set_tests_properties(AllocationFailure_test PROPERTIES TIMEOUT 30)
   cursiv_own_allocator(AllocationFailure_test)
 endif()
 
-# The grammars a core lane parses with, one generated language each: a lane
-# that needs a parser links the languages it names and instantiates nothing.
 cursiv_grammar(conv core/syntax-tree/ConvertGrammars.hpp tconv::G)
-# Small languages the lanes read through the parser, one case each.
-cursiv_grammar(door engines/lr/DoorGrammar.hpp tdoor::G ENGINE LR)
-# ONE LANGUAGE, TWO ENGINES: the same grammar generated twice, so a lane can
-# hold both modules and compare what they wrote.
-# These parsers also check shared state across generated translation units.
+cursiv_grammar(smalllanguages engines/lr/SmallLanguagesGrammar.hpp tsmall::G ENGINE LR)
+# Generated in separate units, so its tests also check the state they share.
 cursiv_grammar_pair(parity engines/ll/ParityGrammar.hpp tpar::Lr tpar::Ll
     SEPARATE_UNITS)
 cursiv_grammar_pair(menu engines/ll/MenuGrammar.hpp tmenu::Lr tmenu::Ll)
 cursiv_grammar_pair(tag engines/ll/TagGrammar.hpp ttag::Lr ttag::Ll)
 cursiv_grammar(passes engines/lr/PassesGrammar.hpp tpasses::G ENGINE LR)
 cursiv_grammar(astfusedlr engines/lr/AstFusedGrammar.hpp tfused::Lr ENGINE LR)
-# A namespace holding its own `cursiv` and `std`: each engine's units name
-# both from the global scope. Its region is read by both engines, compared.
+# A namespace holding its own `cursiv` and `std`: generated code must name both
+# from the global scope.
 cursiv_grammar_pair(shadow engines/lr/ShadowedNamespaceGrammars.hpp
     tshadow::cursiv::std::Lr tshadow::cursiv::std::Ll)
 cursiv_grammar(sentblob core/grammar/SentinelGrammars.hpp tsent::Blob)

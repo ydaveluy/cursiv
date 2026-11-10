@@ -2,11 +2,9 @@
 
 #include "cursiv/services/CoreServices.hpp"
 
-// Base of convenience for a default service bound to one language.
-//
-// Reach a sibling service through `services` on each call, never cached at
-// construction: a language module replaces slots a default already filled.
-// `shared` is fixed for the container's life.
+// Base for a default service bound to one language. Reach sibling services
+// through `services` at each call, never cached: a language module may
+// replace them. `shared` is fixed for the container's life.
 
 namespace cursiv {
 

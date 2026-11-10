@@ -1,6 +1,6 @@
 #pragma once
 
-// Operators on different steps that open on one token and part on the text
+// Operators on different levels that open on one token and differ by the text
 // after it: `>>` written as two `>` against `>`, `->` against `-` and `>`,
 // `not in` and `not like` against each other and against a prefix `not`.
 

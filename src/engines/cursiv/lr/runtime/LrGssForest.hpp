@@ -1,12 +1,6 @@
 // Packed derivations of an episode. A node is elected once no alternative can
-// reach it or its descendants; its alternatives share both ends' readings.
-// Competing ranks must differ before either ends, for suffixes to preserve
-// order. A rank is the sequence of words an alternative spells and of the
-// ranks of the nodes below, held as a shared rope so that two ranks are told
-// apart without reading what they share; an alternative's words stand before
-// the child their position names. Where two alternatives read their first
-// token apart, the lexer's rank of that token comes before any word either
-// spells at the same offset.
+// reach it. A rank, the words an alternative holds and the ranks below, is a
+// shared rope, so ranks compare without reading what they share.
 #pragma once
 
 #include <algorithm>
@@ -28,7 +22,7 @@ class LrGssForest {
   using Id = std::uint32_t;
   static constexpr Id none = ~Id{0};
   // What an alternative reads itself: a token, one the lexer ranked among
-  // rivals -- its only word is the rank --, or neither.
+  // competitors (its only word is the rank), or neither.
   enum class Kind : std::uint8_t { inner, token, ranked };
 
   void clear() {
@@ -179,10 +173,9 @@ class LrGssForest {
     return out;
   }
 
-  // Two stacks under one future, their nodes elected, frame by frame, each
-  // frame's rank: negative where `left` orders first, positive where `right`
-  // does, zero where they read alike, `kOpen` where one side ends a part the
-  // other goes on with, as the future's words there are not in either.
+  // Two stacks under one future, compared frame by frame: negative where `left`
+  // orders first, positive where `right` does, zero where the same, `kOpen`
+  // where one ends a part the other goes on with.
   static constexpr int kOpen = 3;
   int ordered(std::span<const Id> left, std::span<const Id> right) {
     if (left.size() != right.size()) return kOpen;
@@ -197,11 +190,12 @@ class LrGssForest {
       return v;
     ranked(left);
     ranked(right);
-    _layLeft.clear();
-    _layRight.clear();
-    if (length(rank_piece(left)) != 0) _layLeft.push_back(rank_piece(left));
-    if (length(rank_piece(right)) != 0) _layRight.push_back(rank_piece(right));
-    const int v = compare(_layLeft, _layRight);
+    _piecesLeft.clear();
+    _piecesRight.clear();
+    if (length(rank_piece(left)) != 0) _piecesLeft.push_back(rank_piece(left));
+    if (length(rank_piece(right)) != 0)
+      _piecesRight.push_back(rank_piece(right));
+    const int v = compare(_piecesLeft, _piecesRight);
     return v == -2 || v == 2 ? kOpen : v;
   }
 
@@ -231,7 +225,7 @@ class LrGssForest {
   // A node's rank is computed once a comparison reads it, never before.
   enum Mark : std::uint8_t { kFresh, kVisiting, kElected, kRanked };
   struct Node {
-    // The rank as a rope, where it is long; short, as those words laid in
+    // The rank as a rope, where it is long; short, as those words stored in
     // `_flats`.
     Spell::Id rank = Spell::none;
     Id first = none;
@@ -266,8 +260,8 @@ class LrGssForest {
     const Alternative& a = _alternatives[alternative];
     if (a.kind != Kind::inner)
       return {a.kind == Kind::ranked ? _choices[a.choices.at] : kNoLead, true};
-    for (const Id kid : _children.span(a.children.at, a.children.size))
-      if (_nodes[kid].text) return {_nodes[kid].lead, true};
+    for (const Id child : _children.span(a.children.at, a.children.size))
+      if (_nodes[child].text) return {_nodes[child].lead, true};
     return {kNoLead, false};
   }
   struct Visit {
@@ -298,21 +292,22 @@ class LrGssForest {
 
   // The pieces `alternative` reads from its child `from` on: its words and its
   // children's ranks. The children from `from` on must be ranked.
-  void lay(Id alternative, std::size_t from, std::vector<Piece>& out) const {
+  void pieces_of(Id alternative, std::size_t from,
+                 std::vector<Piece>& out) const {
     const Alternative& a = _alternatives[alternative];
-    const auto kids = _children.span(a.children.at, a.children.size);
+    const auto childIds = _children.span(a.children.at, a.children.size);
     const std::uint32_t end = a.choices.at + a.choices.size;
     std::uint32_t w = a.choices.at;
     for (std::size_t k = from;; ++k) {
       const std::uint32_t at = w;
-      while (w != end && (k == kids.size() || _choiceAt[w] <= k)) ++w;
+      while (w != end && (k == childIds.size() || _choiceAt[w] <= k)) ++w;
       if (w != at) out.push_back(words_piece(Range{at, w - at}));
-      if (k == kids.size()) break;
-      if (has_rank(kids[k])) out.push_back(rank_piece(kids[k]));
+      if (k == childIds.size()) break;
+      if (has_rank(childIds[k])) out.push_back(rank_piece(childIds[k]));
     }
   }
 
-  // Leading children both alternatives read alike, before any word, are not
+  // Leading children both alternatives read the same, before any word, are not
   // ranked.
   bool precedes(Id candidate, Id elected) {
     if (const int v =
@@ -327,11 +322,11 @@ class LrGssForest {
       ++from;
     for (std::size_t k = from; k < kl.size(); ++k) ranked(kl[k]);
     for (std::size_t k = from; k < kr.size(); ++k) ranked(kr[k]);
-    _layLeft.clear();
-    _layRight.clear();
-    lay(candidate, from, _layLeft);
-    lay(elected, from, _layRight);
-    return compare(_layLeft, _layRight) < 0;
+    _piecesLeft.clear();
+    _piecesRight.clear();
+    pieces_of(candidate, from, _piecesLeft);
+    pieces_of(elected, from, _piecesRight);
+    return compare(_piecesLeft, _piecesRight) < 0;
   }
 
   void ranked(Id root) {
@@ -350,7 +345,7 @@ class LrGssForest {
       const Id alternative = v.alternative;
       _ranking.pop_back();
       _joined.clear();
-      lay(alternative, 0, _joined);
+      pieces_of(alternative, 0, _joined);
       Spell::Length total = 0;
       for (const Piece& p : _joined) total = gss_length_add(total, length(p));
       Node& n = _nodes[node];
@@ -367,10 +362,9 @@ class LrGssForest {
     }
   }
 
-  // Flat ranks are dropped for ropes, which a rank takes when next asked for.
-  // A parent that already has a rope must revisit its children too: opening
-  // its derivation still reads their ranks. No node reads `_flats` past this
-  // point, so its words are freed.
+  // Flat ranks are dropped for ropes, built when next asked. A parent with a
+  // rope revisits its children too, since its derivation reads their ranks.
+  // `_flats` is freed.
   void flatten_no_more() {
     for (std::size_t i = 0; i != _nodes.size(); ++i) {
       Node& n = _nodes[i];
@@ -400,7 +394,7 @@ class LrGssForest {
     return p.words != nullptr ? p.words[at] : _spell.at(p.rank, at);
   }
 
-  // How many values two pieces read alike from their offsets, within `n`.
+  // How many values two pieces read the same from their offsets, within `n`.
   Spell::Length agree(const Piece& a, Spell::Length oa, const Piece& b,
                       Spell::Length ob, Spell::Length n) const {
     if (a.words == nullptr && b.words == nullptr) {
@@ -423,7 +417,7 @@ class LrGssForest {
   }
 
   // Negative where `left` reads first, positive where `right` does, zero
-  // where they read alike; two where one ends while the other goes on.
+  // where they read the same; two where one ends while the other goes on.
   int compare(std::span<const Piece> left, std::span<const Piece> right) const {
     std::size_t i = 0, j = 0;
     Spell::Length oi = 0, oj = 0;
@@ -454,7 +448,7 @@ class LrGssForest {
   LrGssRuns<std::uint32_t> _flats;
   bool _small = true;
   Spell _spell;
-  std::vector<Piece> _joined, _layLeft, _layRight;
+  std::vector<Piece> _joined, _piecesLeft, _piecesRight;
   std::vector<Spell::Id> _parts;
   std::vector<Visit> _visits;
   std::vector<Visit> _ranking;

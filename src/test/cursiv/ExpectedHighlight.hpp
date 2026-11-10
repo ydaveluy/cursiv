@@ -1,5 +1,5 @@
 // `textDocument/documentHighlight`: the caret at one marked index, and the
-// marked ranges the symbol under it must be painted at.
+// marked ranges where the symbol under it must be highlighted.
 #pragma once
 
 #include <cstddef>

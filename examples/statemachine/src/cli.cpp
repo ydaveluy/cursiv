@@ -1,5 +1,5 @@
-// The statemachine command line: the usual verdict, plus `generate FILE` --
-// what this example is for, a model that becomes code.
+// The statemachine command line: the usual check, plus `generate FILE`: a
+// model that becomes code.
 
 #include <iostream>
 #include <optional>
@@ -46,10 +46,8 @@ int generate(const GenerateOptions& options) {
   cursiv::install_default_shared_core_services(shared);
   if (!kRegister(shared)) return cursiv::kFatal;
 
-  // The file alone, not its folder: the generated program declares only the
-  // states and events of this machine, so a name it took from a neighbour
-  // would be one the C++ never declares. Unscanned, such a name is an
-  // unresolved reference, said below.
+  // The file alone, not its folder: the generated program declares only this
+  // machine's states and events, so a name from a neighbour is unresolved.
   const cursiv::Document& document =
       cursiv::build_document_from_path(options.path, shared);
   if (cursiv::has_error_diagnostics(document)) {

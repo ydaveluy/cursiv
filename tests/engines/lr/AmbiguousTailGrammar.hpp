@@ -1,6 +1,6 @@
 #pragma once
 
-// A cell the text never settles, hit once per statement: after `p`, a `(`
+// A cell the text never resolves, hit once per statement: after `p`, a `(`
 // is the call's or the next statement's, and both readings stay valid to the
 // end. Every reading that passes it forks; the arms must fall back together.
 
@@ -13,10 +13,9 @@ namespace ast {
 struct Doc : cursiv::Extends<cursiv::AstNode> {};
 }  // namespace ast
 
-// Beside it, a cell with arms that read a line break apart: past `p a`, one
-// arm stands where a NEWLINE is a token and the other where it is trivia,
-// and both close the statement on `b`. Counting a shift apart, the two still
-// have one future.
+// Beside it, a cell whose arms read a line break apart: past `p a`, NEWLINE is
+// a token for one arm and trivia for the other, and both close the statement on
+// `b`. Counting a shift apart, the two still have one future.
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t)">)> {};
   struct NL : terminal<eol> {};

@@ -1,7 +1,5 @@
-// Faults and diagnostics paired one to one. A diagnostic may answer a fault
-// whose window it reaches; the pairing answers the most faults, and tries the
-// diagnostics nearest a fault first. What is left on either side is a miss or
-// a parasite, so one diagnostic more never lowers the parasites.
+// Faults and diagnostics paired one to one, for the most faults, nearest
+// diagnostic first. What is left is a miss or a spurious diagnostic.
 #pragma once
 
 #include <algorithm>
@@ -22,12 +20,10 @@ struct FaultPairing {
 
   // Per fault, the diagnostic that answers it.
   std::vector<std::uint32_t> answer;
-  std::uint32_t found = 0, missed = 0, parasites = 0;
+  std::uint32_t found = 0, missed = 0, spurious = 0;
 
-  // How far a diagnostic stands from a closed stretch, or `kNone` when it
-  // does not reach it. An abandonment names a construct by its two ends --
-  // where it opened, where the reading stopped -- and reaches a fault only
-  // there: a wide one earns nothing for the text it covers.
+  // How far a diagnostic stands from a closed stretch, or `kNone` when it does
+  // not reach it. An abandonment reaches it only by its two ends.
   [[nodiscard]] static std::uint32_t reach(const ParseDiagnostic& d,
                                            TextOffset lo, TextOffset hi,
                                            TextOffset at, TextOffset end) {
@@ -76,7 +72,7 @@ struct FaultPairing {
       if (grab(grab, f)) ++p.found;
     }
     p.missed = static_cast<std::uint32_t>(windows.size()) - p.found;
-    p.parasites = static_cast<std::uint32_t>(diagnostics.size()) - p.found;
+    p.spurious = static_cast<std::uint32_t>(diagnostics.size()) - p.found;
     return p;
   }
 };

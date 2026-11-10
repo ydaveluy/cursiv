@@ -127,9 +127,8 @@ void an_artificial_end_is_no_dedent_or_section_end() {
 }
 
 // A fingerprint selects the readings that may share a future; their futures
-// decide. A reading whose fingerprint a cheaper one holds, as a collision
-// would have it, still stands where its positions differ, and one whose
-// positions are the same dies to it.
+// decide. A reading whose fingerprint a cheaper one holds still stands where
+// its positions differ, and dies where they are the same.
 void a_shared_fingerprint_drops_only_a_shared_future() {
   cursiv::engine::LlSearch s(kPlain.atn, 0);
   s.pool = {cursiv::engine::LlConfig{0, cursiv::engine::kLlCtxNone, 0},

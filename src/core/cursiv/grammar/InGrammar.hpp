@@ -1,6 +1,6 @@
-// A rule of grammar G read inside the section another grammar opens with
-// `section<G>`: G's rule in force -- G's overrides, never the caller's -- over
-// a body whose names and keywords stay G's.
+// A rule of grammar G read inside a `section<G>` of another grammar: G's
+// effective rule, with G's overrides and not the caller's, and G's names and
+// keywords.
 #pragma once
 
 #include <array>
@@ -23,7 +23,7 @@ namespace cursiv::detail {
 template <class G, class X>
 using in_force_t = typename ResolveOverride<G>::template rule<X>;
 
-template <class G, class E, class Kids = typename ExprShape<E>::kids>
+template <class G, class E, class Children = typename ExprShape<E>::children>
 struct scoped;
 template <class G, class E>
 using scoped_t = typename scoped<G, E>::type;
@@ -72,7 +72,7 @@ struct scoped_guard<G, S, CI, WordBound> {
       std::remove_cvref_t<decltype(ResolveOverride<G>::word_boundary)>;
   using type = cond_t<word_final_in<S, bound, CI>(), Not<bound>, void>;
 };
-// ...and folds case where G is case-insensitive.
+// A literal also folds case when G is case-insensitive.
 template <class G, str S, bool CI, class Gd>
 struct scoped<G, Lit<S, CI, Gd>, TypeList<>> {
   static constexpr bool folded = CI || folds_case<G, S>();
@@ -231,7 +231,7 @@ struct rule_type<InGrammar<G, X>, node_kind, Seen>
 template <class G, class X, class Seen>
 struct rule_type<InGrammar<G, X>, infix_kind, Seen>
     : rule_type<in_force_t<G, X>, infix_kind, Seen> {};
-// ...so a deduction entering it walks the body of the rule in force too.
+// A deduction entering it also walks the body of G's effective rule.
 template <class G, class X>
 struct deduction_calls<InGrammar<G, X>>
     : dedupe<tl_cat_t<typename rule_calls<InGrammar<G, X>>::type,
@@ -244,11 +244,11 @@ inline constexpr std::string_view kTypeNameView<InGrammar<G, X>> = {
 
 // The grammar a rule belongs to: the caller's, `void`, or the one embedded.
 template <class R>
-struct home_of {
+struct owner_grammar_of {
   using type = void;
 };
 template <class G, class X>
-struct home_of<InGrammar<G, X>> {
+struct owner_grammar_of<InGrammar<G, X>> {
   using type = G;
 };
 

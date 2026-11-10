@@ -2,8 +2,7 @@
 
 #include <cstdint>
 
-// How an element is addressed -- the id a tree and a grammar share, and the
-// whole of what a `CstNode` needs to spell its own column.
+// The id of a grammar element, shared by a CST record and its grammar.
 
 namespace cursiv {
 

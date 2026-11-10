@@ -1,5 +1,5 @@
 // What only repair walks: the terminals a state admits and what its open
-// items owe. Its own object, so a step never shares a cache line with it.
+// items need. Its own object, so a step never shares a cache line with it.
 #pragma once
 
 #include <array>
@@ -12,7 +12,7 @@
 
 namespace cursiv::engine {
 
-// A state fused from states that stood after two symbols.
+// A state fused from states that come after two symbols.
 inline constexpr std::uint16_t kLrNoStateSym = 0xFFFFu;
 // The end of a production's twins.
 inline constexpr std::uint16_t kLrNoTwin = 0xFFFFu;
@@ -33,17 +33,17 @@ struct LrColdTables {
   std::array<AccBoundOffset, S.dfa + 1u> accBoundBase{};
   std::array<std::uint16_t, S.accBounds> accBound{};
   std::array<std::uint16_t, S.accStands> accStand{};
-  std::array<std::uint8_t, S.accTiers> accTier{};
+  std::array<std::uint8_t, S.accPriorities> accPriority{};
 
   // The production every reduce of a state names, if one.
   std::array<std::uint16_t, S.states> soleReduce{};
   std::array<std::uint8_t, S.states> readsToken{};
   // States that take the same gotos and hold the same conditions of the gap
-  // are one class: below its top, a frame is read for nothing else. Laid
+  // are one class: below its top, a frame is read for nothing else. Built
   // only where a reading can split.
   std::array<std::uint16_t, S.gotoClasses ? S.states : 0> gotoClass{};
 
-  // The terminals a state owes, one set per distinct row, and the most
+  // The terminals a state needs, one set per distinct row, and the most
   // tokens any production's shortest reading holds.
   std::array<TermSet, S.closeSets> closePool{};
   std::array<std::uint16_t, S.states> closeOf{};
@@ -63,19 +63,18 @@ struct LrColdTables {
   std::array<std::uint32_t, S.electWords != 0 ? S.prods + 1 : 0> electAt{};
   std::array<std::uint32_t, S.electWords> electWord{};
   std::array<std::uint16_t, S.electWords> electPos{};
-  // The symbol each state stood after before the passes skipped
+  // The symbol each state came after before the passes skipped
   // pass-throughs into it: what an edge into it stands for.
   std::array<std::uint16_t, S.electWords != 0 ? S.states : 0> electSym{};
-  // ...and the symbol the state under it stood after, where every way into it
+  // The symbol the state under it comes after, where every way into it
   // agrees: what the frame under it stands for.
   std::array<std::uint16_t, S.electWords != 0 ? S.states : 0> electBelow{};
   // Per action, whether its cell is ordered as the election orders it for
   // every text: a bit of word `action / 64`.
   std::array<std::uint64_t, S.orderWords> orderExact{};
-  // A pass-through the table skips: per production `electWatch[electWatchAt[p],
-  // electWatchAt[p + 1])`, each `position << 16 | rule` whose callee may stand
-  // there; per `rule << 16 | symbol`, ascending, the decisions of the skipped
-  // run, before (0) or after (1) the callee.
+  // A pass-through the table skips: per production, each `position << 16 |
+  // rule` whose callee may stand there; per `rule << 16 | symbol`, ascending,
+  // the skipped run's decisions, before (0) or after (1) the callee.
   std::array<std::uint32_t, S.electWatches != 0 ? S.prods + 1 : 0>
       electWatchAt{};
   std::array<std::uint32_t, S.electWatches> electWatch{};
@@ -84,10 +83,9 @@ struct LrColdTables {
       electChainAt{};
   std::array<std::uint32_t, S.electChainWords> electChainWord{};
   std::array<std::uint16_t, S.electChainWords> electChainPos{};
-  // A production fused states may name in another's stead: those it may stand
-  // for, from `electTwinFirst[p]` on through `electTwinNext` to `kLrNoTwin`,
-  // each found by its symbols, `electRhs[electRhsAt[q], electRhsAt[q + 1])`.
-  // The productions that stand for one another share that list.
+  // The productions fused states may name in another's stead: from
+  // `electTwinFirst[p]` through `electTwinNext` to `kLrNoTwin`, each found by
+  // its symbols in `electRhs`. Twins share one list.
   std::array<std::uint16_t, S.electTwins> electTwinFirst{};
   std::array<std::uint16_t, S.electTwins> electTwinNext{};
   std::array<std::uint32_t, S.electTwins != 0 ? S.prods + 1 : 0> electRhsAt{};

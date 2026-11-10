@@ -13,15 +13,15 @@
 namespace refuse {
 
 namespace frozen_pick {
-struct Seal {
+struct ConstText {
   const std::string text;
-  explicit Seal(std::string value) : text(std::move(value)) {}
+  explicit ConstText(std::string value) : text(std::move(value)) {}
 };
-inline std::variant<Seal, std::int64_t> pick(std::string_view text) {
-  return Seal(std::string(text));
+inline std::variant<ConstText, std::int64_t> pick(std::string_view text) {
+  return ConstText(std::string(text));
 }
 struct Node : cursiv::Extends<cursiv::AstNode> {
-  variant<Seal, int64> value{int64{0}};
+  variant<ConstText, int64> value{int64{0}};
 };
 }  // namespace frozen_pick
 struct G : Base {

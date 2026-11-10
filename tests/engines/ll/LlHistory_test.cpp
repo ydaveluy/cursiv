@@ -23,7 +23,7 @@ Words words_of(const cursiv::engine::LlHistory& h,
   return out;
 }
 
-void grafts_keep_canonical_prefixes_and_positions() {
+void rebases_keep_canonical_prefixes_and_positions() {
   using History = cursiv::engine::LlHistory;
   for (const unsigned length : {31u, 32u, 33u, 63u, 64u, 65u}) {
     History h;
@@ -41,10 +41,10 @@ void grafts_keep_canonical_prefixes_and_positions() {
           expected = h.append(expected, i % 7u, i + 100u, i % 3u);
           prefixes.push_back(expected);
         }
-        const auto made = h.graft(base, original[cut], original.back());
+        const auto made = h.rebase(base, original[cut], original.back());
         CHECK(made == expected);
-        CHECK(h.graft(base, original[cut], original[cut]) == base);
-        CHECK(h.graft(original[cut], original[cut], original.back()) ==
+        CHECK(h.rebase(base, original[cut], original[cut]) == base);
+        CHECK(h.rebase(original[cut], original[cut], original.back()) ==
               original.back());
         for (unsigned i = 0; i < prefixes.size(); ++i)
           CHECK(h.ancestor(made, baseLength + i) == prefixes[i]);
@@ -53,7 +53,7 @@ void grafts_keep_canonical_prefixes_and_positions() {
           const auto last = h.last(n);
           CHECK(last.word == (cut + i - 1u) % 7u);
           CHECK(last.at == cut + i - 1u + 100u);
-          CHECK(last.lull == (cut + i - 1u) % 3u);
+          CHECK(last.zeroWidth == (cut + i - 1u) % 3u);
           n = h.ancestor(n, h.depth(n) - 1u);
           CHECK(n == prefixes[i - 1u]);
           CHECK(h.starts_with(made, n) && !h.starts_with(n, made));
@@ -62,12 +62,12 @@ void grafts_keep_canonical_prefixes_and_positions() {
         CHECK(h.common(made, original.back()) == History::kRoot);
       }
     }
-    // A `from` that is not an ancestor of `to` lays all of `to` after `base`.
+    // A `from` that is not an ancestor of `to` puts all of `to` after `base`.
     const auto other = h.append(History::kRoot, 88u, 1u, 2u);
     auto expected = other;
     for (unsigned i = 0; i < length; ++i)
       expected = h.append(expected, i % 7u, i + 100u, i % 3u);
-    CHECK(h.graft(other, other, original.back()) == expected);
+    CHECK(h.rebase(other, other, original.back()) == expected);
   }
 }
 
@@ -81,11 +81,11 @@ void long_continuations_share_their_blocks() {
     tail = h.append(tail, i % 7u, i + 100u, i % 3u);
   const auto before = h.size();
   for (unsigned i = 0; i < alternatives; ++i) {
-    // Two events against the one of `from`: the continuation lands one
+    // Two events against the one of `from`: the continuation ends one
     // event further on.
     const auto base =
         h.append(h.append(History::kRoot, 9u, i + 100000u), 8u, i + 100000u);
-    const auto made = h.graft(base, from, tail);
+    const auto made = h.rebase(base, from, tail);
     CHECK(h.depth(made) == length + 2u);
     CHECK(h.ancestor(made, 2u) == base);
     CHECK(h.last(made) == h.last(tail));
@@ -111,14 +111,14 @@ void short_continuations_do_not_copy_the_long_prefix() {
     bases.push_back(h.append(trunk, 100u + i, length));
   const auto before = h.size();
   for (const auto base : bases) {
-    const auto made = h.graft(base, from, to);
+    const auto made = h.rebase(base, from, to);
     CHECK(h.depth(made) == length + 1u + suffix);
     CHECK(h.ancestor(made, length + 1u) == base);
     auto expected = base;
     for (unsigned i = 0; i < suffix; ++i) {
       const History::Event event{8u + i, length + 1u + i, i % 3u};
       CHECK(h.event(made, length + 1u + i) == event);
-      expected = h.append(expected, event.word, event.at, event.lull);
+      expected = h.append(expected, event.word, event.at, event.zeroWidth);
     }
     CHECK(made == expected);
   }
@@ -144,7 +144,7 @@ void siblings_trade_a_long_continuation_by_a_path() {
   for (unsigned i = 0; i < length; ++i)
     to = h.append(to, i % 5u, length + 1u + i);
   auto before = h.size();
-  const auto made = h.graft(base, from, to);
+  const auto made = h.rebase(base, from, to);
   CHECK(h.size() - before < 32u);
   before = h.size();
   for (unsigned d = length - 8u; d < length; ++d)
@@ -161,11 +161,11 @@ void shared_continuations_keep_the_length_in_range() {
   cursiv::engine::LlHistory h;
   auto node = h.append(cursiv::engine::LlHistory::kRoot, 1u);
   for (unsigned i = 0; i < 31; ++i)
-    node = h.graft(node, cursiv::engine::LlHistory::kRoot, node);
+    node = h.rebase(node, cursiv::engine::LlHistory::kRoot, node);
   CHECK(h.depth(node) == (std::uint32_t{1} << 31));
   bool refused = false;
   try {
-    (void)h.graft(node, cursiv::engine::LlHistory::kRoot, node);
+    (void)h.rebase(node, cursiv::engine::LlHistory::kRoot, node);
   } catch (const std::length_error&) {
     refused = true;
   }
@@ -186,10 +186,11 @@ void periodic_choices_keep_balanced_paths() {
     for (const unsigned cut : {1u, 7u, 8u, 511u, 4096u, length - 1u}) {
       CHECK(h.ancestor(prefixes.back(), cut) == prefixes[cut]);
       CHECK(h.event(prefixes.back(), cut).word == cut % period);
-      const auto made = h.graft(prefixes[cut], prefixes[cut], prefixes.back());
+      const auto made = h.rebase(prefixes[cut], prefixes[cut], prefixes.back());
       CHECK(made == prefixes.back());
-      const auto suffix = h.graft(History::kRoot, prefixes[cut], prefixes.back());
-      CHECK(h.graft(prefixes[cut], History::kRoot, suffix) == prefixes.back());
+      const auto suffix =
+          h.rebase(History::kRoot, prefixes[cut], prefixes.back());
+      CHECK(h.rebase(prefixes[cut], History::kRoot, suffix) == prefixes.back());
     }
   }
 }
@@ -207,13 +208,13 @@ void concatenation_keeps_exact_events_across_runs() {
     const unsigned cut = rng() % (events[tail].size() + 1u);
     if (events[base].size() + events[tail].size() - cut > 512u) continue;
     const auto from = h.ancestor(nodes[tail], cut);
-    const auto made = h.graft(nodes[base], from, nodes[tail]);
+    const auto made = h.rebase(nodes[base], from, nodes[tail]);
     Events expected = events[base];
     expected.insert(expected.end(), events[tail].begin() + cut,
                     events[tail].end());
     auto canonical = History::kRoot;
     for (const auto& e : expected)
-      canonical = h.append(canonical, e.word, e.at, e.lull);
+      canonical = h.append(canonical, e.word, e.at, e.zeroWidth);
     CHECK(made == canonical);
     Events actual;
     h.each(made, 0, [&](const History::Event& e) {
@@ -224,7 +225,7 @@ void concatenation_keeps_exact_events_across_runs() {
     const History::Event next{static_cast<std::uint32_t>(rng() % 3u),
                               static_cast<std::uint32_t>(rng() % 3u),
                               static_cast<std::uint32_t>(rng() % 2u)};
-    nodes.push_back(h.append(made, next.word, next.at, next.lull));
+    nodes.push_back(h.append(made, next.word, next.at, next.zeroWidth));
     expected.push_back(next);
     events.push_back(std::move(expected));
   }
@@ -234,8 +235,8 @@ void concatenation_keeps_exact_events_across_runs() {
   const History::Event zero{}, collision{0x9E3779B9u, 0x7F4A7C15u, 1u};
   auto a = History::kRoot, b = History::kRoot;
   for (unsigned i = 0; i < 32; ++i) {
-    a = h.append(a, zero.word, zero.at, zero.lull);
-    b = h.append(b, collision.word, collision.at, collision.lull);
+    a = h.append(a, zero.word, zero.at, zero.zeroWidth);
+    b = h.append(b, collision.word, collision.at, collision.zeroWidth);
   }
   CHECK(a != b && h.common(a, b) == History::kRoot);
   CHECK(!h.starts_with(a, b) && !h.starts_with(b, a));
@@ -250,10 +251,10 @@ void a_repair_invalidates_the_prediction_plan() {
   std::vector<cursiv::engine::LlPlanEntry> entries{
       {.at = 4, .decision = 7, .arm = 1},
       {.at = 4, .decision = 7, .arm = 0},
-      {.at = 4, .lull = 1, .decision = 7, .arm = 2},
+      {.at = 4, .zeroWidth = 1, .decision = 7, .arm = 2},
       {.at = 9, .decision = 3, .arm = cursiv::engine::kNoRow},
   };
-  const auto laid = plan.install(entries, nullptr, 0);
+  const auto generation = plan.install(entries, nullptr, 0);
   CHECK(plan.say(7, 4, 0, 0, false) == 1);
   CHECK(plan.say(7, 4, 0, 0, false) == 0);
   CHECK(plan.say(7, 4, 0, 0, false) == kLlUnplanned);
@@ -262,24 +263,25 @@ void a_repair_invalidates_the_prediction_plan() {
   CHECK(plan.say(8, 4, 0, 0, false) == kLlUnplanned);
   CHECK(plan.say(3, 9, 0, 0, false) == cursiv::engine::kNoRow);
   CHECK(plan.say(3, 9, 0, 0, false) == cursiv::engine::kNoRow);
-  CHECK(plan.extend(laid, {{.at = 12, .decision = 1, .arm = 1}}));
+  CHECK(plan.extend(generation, {{.at = 12, .decision = 1, .arm = 1}}));
   CHECK(plan.say(1, 12, 0, 1, false) == kLlUnplanned);
-  CHECK(plan.extend(laid, {{.at = 15, .decision = 5, .arm = 3}}));
+  CHECK(plan.extend(generation, {{.at = 15, .decision = 5, .arm = 3}}));
   CHECK(plan.say(5, 15, 0, 0, true) == 3);
   CHECK(plan.say(5, 15, 0, 0, true) == 3);
   CHECK(plan.say(5, 15, 0, 0, false) == 3);
   CHECK(plan.say(5, 15, 0, 0, false) == kLlUnplanned);
 }
 
-// What the plan owes, read the plain way: the first entry of the choice there
-// that is still open, whatever was asked or laid before.
+// What the plan must answer, computed the plain way: the first entry of the
+// choice there that is still open, whatever was queried or added before.
 struct PlainPlan {
   std::vector<cursiv::engine::LlPlanEntry> entries;
 
   std::uint16_t say(std::uint16_t decision, cursiv::TextOffset at,
-                    std::uint32_t lull, bool again) {
+                    std::uint32_t zeroWidth, bool again) {
     for (auto& e : entries) {
-      if (e.at != at || e.decision != decision || e.lull != lull || e.taken)
+      if (e.at != at || e.decision != decision || e.zeroWidth != zeroWidth ||
+          e.taken)
         continue;
       e.taken = !again && e.arm != cursiv::engine::kNoRow;
       return e.arm;
@@ -288,8 +290,8 @@ struct PlainPlan {
   }
 };
 
-// Asks, entries laid behind them and refusals dropped, in any order, get the
-// plain answers.
+// Queries, entries added after them and dropped refusals, in any order, get
+// the plain answers.
 void a_plan_answers_as_a_plain_read_does() {
   std::mt19937 rng(11);
   const auto below = [&rng](std::uint32_t n) {
@@ -302,7 +304,7 @@ void a_plan_answers_as_a_plain_read_does() {
       for (unsigned i = 0; i < count; ++i) {
         last += below(3);
         out.push_back({.at = last,
-                       .lull = below(2),
+                       .zeroWidth = below(2),
                        .decision = static_cast<std::uint16_t>(below(3)),
                        .arm = below(5) == 0
                                   ? cursiv::engine::kNoRow
@@ -316,12 +318,12 @@ void a_plan_answers_as_a_plain_read_does() {
     auto first = entries_after(below(8));
     plain.entries = first;
     std::vector<cursiv::engine::LlPlanWay> ways;
-    const auto laid = plan.install(first, &ways, 0);
+    const auto generation = plan.install(first, &ways, 0);
     bool dropped = false;
     for (unsigned step = 0; step < 40; ++step) {
       if (const unsigned what = below(10); what == 0) {
         const auto more = entries_after(below(4));
-        CHECK(plan.extend(laid, more));
+        CHECK(plan.extend(generation, more));
         plain.entries.insert(plain.entries.end(), more.begin(), more.end());
       } else if (what == 1 && below(8) == 0) {
         // Only the plan's first drop takes anything: it has no ways left to hold.
@@ -334,10 +336,10 @@ void a_plan_answers_as_a_plain_read_does() {
       } else {
         const auto decision = static_cast<std::uint16_t>(below(3));
         const cursiv::TextOffset at = below(last + 2);
-        const std::uint32_t lull = below(2);
+        const std::uint32_t zeroWidth = below(2);
         const bool again = below(4) == 0;
-        CHECK(plan.say(decision, at, lull, 0, again) ==
-              plain.say(decision, at, lull, again));
+        CHECK(plan.say(decision, at, zeroWidth, 0, again) ==
+              plain.say(decision, at, zeroWidth, again));
       }
     }
   }
@@ -376,13 +378,25 @@ int main() {
   const auto elsewhere = h.append(cursiv::engine::LlHistory::kRoot, 5, 11, 0);
   CHECK(here != later && here != elsewhere && later != elsewhere);
   CHECK(h.append(cursiv::engine::LlHistory::kRoot, 5, 10, 1) == later);
-  CHECK(h.last(later).at == 10 && h.last(later).lull == 1);
+  CHECK(h.last(later).at == 10 && h.last(later).zeroWidth == 1);
   CHECK(!h.before(here, later) && !h.before(later, here));
-  // A long chain stays logarithmic to climb.
+  // Positions never rank: past an event that differs only by its position, the
+  // words after it do, so the order stays one order whatever the places.
+  std::vector<cursiv::engine::LlHistory::Node> placed{
+      cursiv::engine::LlHistory::kRoot};
+  for (unsigned i = 0; i < 4000; ++i)
+    placed.push_back(
+        h.append(placed[rng() % placed.size()], rng() % 3, rng() % 2));
+  for (unsigned i = 0; i < 20000; ++i) {
+    const auto a = placed[rng() % placed.size()];
+    const auto b = placed[rng() % placed.size()];
+    CHECK(h.before(a, b) == (words_of(h, a) < words_of(h, b)));
+  }
+  // Walking up a long chain stays logarithmic.
   auto tip = cursiv::engine::LlHistory::kRoot;
   for (unsigned i = 0; i < 200000; ++i) tip = h.append(tip, 1);
   CHECK(h.depth(h.ancestor(tip, 777)) == 777);
-  grafts_keep_canonical_prefixes_and_positions();
+  rebases_keep_canonical_prefixes_and_positions();
   long_continuations_share_their_blocks();
   short_continuations_do_not_copy_the_long_prefix();
   siblings_trade_a_long_continuation_by_a_path();

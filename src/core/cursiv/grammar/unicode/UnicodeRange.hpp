@@ -1,5 +1,5 @@
-// A range of code points, and the lookup over a sorted, disjoint row of them:
-// the property tables are such rows, and so is a class's own past ASCII.
+// A range of code points, and the lookup over a sorted, disjoint list of them:
+// the property tables are such lists, and so is a class's non-ASCII part.
 #pragma once
 
 #include <cstddef>

@@ -1,9 +1,6 @@
 # One allocator for every cursiv executable: mimalloc, linked as an object so
-# its malloc family stands before libc's -- an archive would not guarantee
-# that. Global sanitizer flags disable it automatically; per-target sanitizer
-# flags require an explicit opt-out. The threadless wasm target is unsupported.
-# On Windows and macOS the system's shared libraries keep their own allocator,
-# so a block could cross heaps: the system allocator stays the default there.
+# its malloc comes before libc's. Off by default on Windows and macOS and under
+# global sanitizer flags; a target with its own sanitizer flags must opt out.
 if(WIN32 OR APPLE)
   set(_allocator_default OFF)
 else()
@@ -57,12 +54,12 @@ target_include_directories(cursivAllocator SYSTEM PRIVATE
 # clearing them costs more than they save. MIMALLOC_ALLOW_THP=1 restores them.
 target_compile_definitions(cursivAllocator PRIVATE
     MI_STATIC_LIB MI_MALLOC_OVERRIDE MI_DEFAULT_ALLOW_THP=0)
-# Not this tree's to keep warning-clean.
+# Third-party code: its warnings are silenced.
 target_compile_options(cursivAllocator PRIVATE -w)
 set_target_properties(cursivAllocator PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
-  # The upstream port lacks locks, thread exit and arena reuse for large
+  # mimalloc's WASI port lacks locks, thread exit and arena reuse for large
   # alignments, and clears new memory that is already zero: the patch fixes
   # them. A tree it already patched is left as it is.
   find_package(Git REQUIRED)

@@ -8,7 +8,7 @@
 
 namespace cursiv::engine {
 
-// The record a reduction hands its landing to close: never one, always one,
+// The record a reduction hands its target to close: never one, always one,
 // or one known only at run time.
 enum class LrReduceRow : std::uint8_t { none, node, any };
 
@@ -17,10 +17,10 @@ struct LrReducePlan {
   std::uint16_t count = 0;
   LrReduceForm form = LrReduceForm::discard;
   // Empty, and its nonterminal stands first in some production: the trivia
-  // before the next token is laid ahead of it.
+  // before the next token is written ahead of it.
   bool flushes = false;
   // A nest turn's row where its record reaches back over the record the frame
-  // below laid; its own node where that frame laid nothing.
+  // below created; its own node where that frame created nothing.
   std::uint16_t turnRow = 0xFFFFu;
   // A completed region hands an untouched gap to its caller, even where its
   // last optional item was absent. No token is needed to take that exit.

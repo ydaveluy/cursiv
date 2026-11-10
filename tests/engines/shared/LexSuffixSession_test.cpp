@@ -6,8 +6,9 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/shared/runtime/LexWalk.hpp"
 #include "cursiv/Check.hpp"
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
+#include "cursiv/shared/runtime/LexWalk.hpp"
 
 namespace {
 
@@ -144,6 +145,40 @@ void many_short_guards_share_a_long_successful_or_failed_suffix() {
       CHECK(seen == len);
     }
     CHECK(steps < 8 * std::uint64_t{len});
+  }
+}
+
+// A long suffix reads the parse's stop as it walks: a stop asked for stops
+// it within a few thousand bytes, and what it had kept still answers as a
+// complete walk does.
+void a_long_suffix_reads_the_stop() {
+  std::string text = "a";
+  while (text.size() < 100000) text += "ab ";
+  text += '!';
+  std::uint64_t steps = 0;
+  const Tape tape{&steps};
+  const auto len = static_cast<TextOffset>(text.size());
+  cursiv::engine::LexSuffixSession<Tape> session(text.data(), len);
+  cursiv::CancellationTokenSource source;
+  source.request_stop();
+  const cursiv::CancellationToken stopped = source.get_token();
+  {
+    const cursiv::engine::ThreadStop stop(stopped);
+    bool threw = false;
+    try {
+      (void)read(tape, text, 0, 1, nullptr);
+    } catch (const cursiv::OperationCancelled&) {
+      threw = true;
+    }
+    CHECK(threw);
+    CHECK(steps <= 16 * cursiv::engine::CancellationPoll::kTurns);
+  }
+  for (const TextOffset at : {TextOffset{1}, len / 2, len - 10}) {
+    TextOffset halt = at;
+    const auto want = cursiv::engine::lex_walk_from(tape, text.data(), len,
+                                                    tape.start(0), at, halt);
+    const auto got = read(tape, text, 0, at, nullptr);
+    CHECK(got.term == want.term && got.end == want.end);
   }
 }
 
@@ -386,6 +421,7 @@ void generated_walks_continue_from_a_state_without_losing_their_prefix() {
 int main() {
   cached_suffixes_agree_with_complete_walks();
   many_short_guards_share_a_long_successful_or_failed_suffix();
+  a_long_suffix_reads_the_stop();
   sessions_restore_their_parent_and_never_reuse_another_parse();
   context_dependent_tokens_keep_the_normal_matcher();
   ordinary_tokens_share_only_the_suffixes_they_backtrack_over();

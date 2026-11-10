@@ -114,7 +114,7 @@ std::vector<std::string> offered(const cursiv::engine::StampedGrammar& grammar,
   return spellings;
 }
 
-void the_caret_far_down_a_long_rule_is_offered_what_it_owes() {
+void the_caret_far_down_a_long_rule_is_offered_what_comes_next() {
   const auto parser = twidepos::generated::Ll::create_parser();
   const std::string text = std::string(twidepos::kLeading, 'a') + "bc";
   const cursiv::ParseResult parsed = parser->parse(text);
@@ -148,6 +148,6 @@ void the_caret_far_down_a_long_rule_is_offered_what_it_owes() {
 }  // namespace
 
 int main() {
-  the_caret_far_down_a_long_rule_is_offered_what_it_owes();
+  the_caret_far_down_a_long_rule_is_offered_what_comes_next();
   return cursiv::test::report("LlWidePositions_test");
 }

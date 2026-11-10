@@ -3,8 +3,8 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <type_traits>
 #include <utility>
@@ -14,14 +14,17 @@
 namespace cursiv::detail {
 
 // A workspace question with no key dimension. Values are immutable once
-// published. Like ConcurrentTable, every borrowed read holds the epoch until
-// its consumer returns, including when a concurrent clear retires the slot.
+// published. Like ConcurrentTable, a read by reference holds the epoch until
+// its consumer returns, even when a concurrent clear releases the slot.
 template <class V>
 class ConcurrentValue {
+  // A slot is empty, then ready once a value is published. A clear with no
+  // memory for a new slot closes the current one: it answers nothing.
+  enum class Fill : std::uint8_t { kEmpty, kReady, kClosed };
   struct ValueSlot {
-    TableEpochs::Retired retired;
+    TableEpochs::PendingFree pendingFree;
     const std::uint64_t generation;
-    std::atomic<bool> ready{false};
+    std::atomic<Fill> fill{Fill::kEmpty};
     std::optional<V> value;
 
     explicit ValueSlot(std::uint64_t g) : generation(g) {}
@@ -33,8 +36,7 @@ class ConcurrentValue {
   ConcurrentValue(const ConcurrentValue&) = delete;
   ConcurrentValue& operator=(const ConcurrentValue&) = delete;
 
-  // Copies out, exactly as the keyed cache does. No reference into the slot
-  // escapes.
+  // Returns a copy; no reference into the slot escapes.
   template <class Provider>
   [[nodiscard]] V get(Provider&& provider) const {
     return useOrCompute(std::forward<Provider>(provider),
@@ -46,12 +48,13 @@ class ConcurrentValue {
   [[nodiscard]] std::optional<V> find() const {
     const TableEpochs::Guard guard;
     const ValueSlot* const slot = _slot.load(std::memory_order_seq_cst);
-    if (slot->ready.load(std::memory_order_acquire)) return *slot->value;
+    if (slot->fill.load(std::memory_order_acquire) == Fill::kReady)
+      return *slot->value;
     return std::nullopt;
   }
 
-  // Borrowed only for this call. The consumer returns void so the API cannot
-  // accidentally return a reference into a slot its guard is about to leave.
+  // The value is valid only during this call. The consumer returns void, so no
+  // reference into the slot can escape the guard.
   template <class Provider, class Consumer>
   void withValue(Provider&& provider, Consumer&& consumer) const {
     static_assert(std::is_void_v<std::invoke_result_t<Consumer, const V&>>,
@@ -60,18 +63,23 @@ class ConcurrentValue {
                  std::forward<Consumer>(consumer));
   }
 
-  void clear() {
+  // Never fails: with no memory for the next slot, the current one closes.
+  void clear() noexcept {
     const TableEpochs::Guard guard;
-    ValueSlot* previous;
+    ValueSlot* previous = nullptr;
     {
       const std::lock_guard lock(_writers);
       previous = _slot.load(std::memory_order_seq_cst);
-      auto next = std::make_unique<ValueSlot>(previous->generation + 1);
-      _slot.store(next.release(), std::memory_order_seq_cst);
+      auto* const next = new (std::nothrow) ValueSlot(previous->generation + 1);
+      if (next == nullptr) {
+        previous->fill.store(Fill::kClosed, std::memory_order_relaxed);
+        return;
+      }
+      _slot.store(next, std::memory_order_seq_cst);
     }
     // A collection may run value destructors; no cache lock is held there.
-    TableEpochs::retire(previous->retired, previous, &destroy,
-                        sizeof(ValueSlot));
+    TableEpochs::freeLater(previous->pendingFree, previous, &destroy,
+                           sizeof(ValueSlot));
   }
 
  private:
@@ -82,7 +90,7 @@ class ConcurrentValue {
     {
       const TableEpochs::Guard guard;
       const ValueSlot* const slot = _slot.load(std::memory_order_seq_cst);
-      if (slot->ready.load(std::memory_order_acquire))
+      if (slot->fill.load(std::memory_order_acquire) == Fill::kReady)
         return std::invoke(std::forward<Consumer>(consumer), *slot->value);
       generation = slot->generation;
     }
@@ -90,25 +98,28 @@ class ConcurrentValue {
     // Outside both the guard and lock: providers may reenter the cache, and
     // another provider or a clear need not wait for this computation.
     V computed = std::invoke(std::forward<Provider>(provider));
-    const TableEpochs::Guard guard;
-    std::unique_lock lock(_writers);
-    ValueSlot* const slot = _slot.load(std::memory_order_seq_cst);
-    if (slot->generation != generation) {
-      lock.unlock();
-      // The caller gets its computed answer, but this generation cannot
-      // publish a result from the workspace a clear has already replaced.
-      return std::invoke(std::forward<Consumer>(consumer),
-                         std::as_const(computed));
+    {
+      const TableEpochs::Guard guard;
+      std::unique_lock lock(_writers);
+      ValueSlot* const slot = _slot.load(std::memory_order_seq_cst);
+      const Fill fill = slot->fill.load(std::memory_order_relaxed);
+      if (slot->generation == generation && fill != Fill::kClosed) {
+        // Moved in under the lock: V's move (or copy) must not use this cache.
+        if (fill == Fill::kEmpty) {
+          slot->value.emplace(std::move(computed));
+          slot->fill.store(Fill::kReady, std::memory_order_release);
+        }
+        lock.unlock();
+        // The guard keeps the value alive through the consumer, even if a clear
+        // releases the slot.
+        return std::invoke(std::forward<Consumer>(consumer),
+                           std::as_const(*slot->value));
+      }
     }
-    if (!slot->ready.load(std::memory_order_relaxed)) {
-      slot->value.emplace(std::move(computed));
-      slot->ready.store(true, std::memory_order_release);
-    }
-    lock.unlock();
-    // A clear after unlocking may retire slot; the guard keeps its value
-    // alive throughout this consumer, without copying an owning V per hit.
+    // A clear came first: the caller gets its own answer, which is not
+    // stored.
     return std::invoke(std::forward<Consumer>(consumer),
-                       std::as_const(*slot->value));
+                       std::as_const(computed));
   }
 
   static void destroy(void* object) noexcept {

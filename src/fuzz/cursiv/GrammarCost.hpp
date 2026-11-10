@@ -1,7 +1,5 @@
-// What the shortest derivation of an element costs, in terminals: a least
-// fixed point over the declarative grammar alone. The LR side has its own
-// answer (what a state owes); reusing it would pierce the independence this
-// lane exists for, the one deliberate exception to the reuse rule.
+// The terminals of an element's shortest derivation: a least fixed point over
+// the declarative grammar alone, kept apart from the engines on purpose.
 #pragma once
 
 #include <algorithm>
@@ -39,7 +37,7 @@ struct GrammarCost {
  private:
   [[nodiscard]] unsigned of(const GrammarModel& g, const GrammarActions& act,
                             ElementId e) const {
-    const std::span<const ElementId> kids = g.childrenOf(e);
+    const std::span<const ElementId> children = g.childrenOf(e);
     switch (g.kindOf(e)) {
       // A climb costs one operand: the model gives it no children, and its
       // shortest derivation is its primary with no operator at all.
@@ -57,20 +55,20 @@ struct GrammarCost {
       case ElementKind::ordered_choice:
       case ElementKind::unordered_choice: {
         unsigned best = kGrammarUnreachable;
-        for (const ElementId c : kids) best = std::min(cost[c], best);
+        for (const ElementId c : children) best = std::min(cost[c], best);
         return best;
       }
       case ElementKind::repetition: {
         const unsigned n = g.minOf(e);
-        if (n == 0 || kids.empty()) return 0;
-        return sat(cost[kids[0]] * n);
+        if (n == 0 || children.empty()) return 0;
+        return sat(cost[children[0]] * n);
       }
       default:
         break;
     }
     // A rule, a group, a directive: the sum of what it holds.
     unsigned s = 0;
-    for (const ElementId c : kids) s = sat(s + cost[c]);
+    for (const ElementId c : children) s = sat(s + cost[c]);
     return s;
   }
 

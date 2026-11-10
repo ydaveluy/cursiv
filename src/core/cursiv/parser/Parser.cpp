@@ -14,7 +14,7 @@
 namespace cursiv {
 namespace {
 
-// A tree holds one translation, and its AST borrows that one's text: binding a
+// A tree holds one translation, and its AST points into that text: binding a
 // second would free it.
 constexpr const char* kNested =
     "cursiv: translating_parser over a parser that already translates; "
@@ -39,7 +39,8 @@ Cst engine_tree(const Cst& cst, const SourceTranslation& translation) {
                                        cst.diagnostics().end());
   translation.to_text(std::span(repairs));
   for (ParseDiagnostic& d : repairs)
-    builder.note_repair(d.kind, d.element, d.begin, d.end, std::move(d.also));
+    builder.note_repair(d.kind, d.element, d.begin, d.end, std::move(d.also),
+                        d.mixedIndent);
   if (cst.grammar() != nullptr) builder.bind_model(*cst.grammar(), cst.owned());
   return tree;
 }
@@ -60,12 +61,13 @@ class TranslatingParser final : public Parser {
                     const CancellationToken& cancelToken) const override {
     // Both sides of the map are 32-bit offsets.
     if (text.size() > kMaxDocument)
-      throw std::overflow_error("cursiv: document exceeds 4 GiB");
+      throw std::overflow_error(
+          "cursiv: document exceeds the size limit, just under 4 GiB");
     SourceTranslation translation(text);
     _translate(text, translation);
     if (!translation.changed()) return _parser->parse(text, cancelToken);
     translation.finish();
-    // On the heap before the parse: the AST borrows the text, and moving a
+    // On the heap before the parse: the AST points into the text, and moving a
     // short string afterwards would move its bytes too.
     auto owned = std::make_unique<SourceTranslation>(std::move(translation));
     ParseResult result = _parser->parse(owned->text(), cancelToken);

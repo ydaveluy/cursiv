@@ -1,6 +1,5 @@
 // The sets of the pools, interned once each: the lowering's classes and those
-// a lexer construction invents when resolving a refusal spells classes the
-// grammar never named.
+// the lexer construction creates when it resolves a refusal.
 #pragma once
 
 #include <algorithm>
@@ -30,8 +29,8 @@ std::uint32_t lex_set_scalars(const Cfg& g, std::uint16_t s) {
   return s < g.setScalars.size() ? g.setScalars[s] : 0;
 }
 
-// The set with these bytes, decoding and scalars, interned once: the pool's
-// index answers, kept in step with the pool, which a trial may have cut back.
+// The set with these bytes, decoding and scalars, interned once. Returns its
+// pool index, kept in step with the pool, which a trial may have cut back.
 template <class Cfg>
 std::uint16_t lex_intern_set(Cfg& c, const ByteSet& s,
                              std::uint16_t decode = kNoSet,

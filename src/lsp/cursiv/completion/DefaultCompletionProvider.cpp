@@ -14,14 +14,18 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/completion/FuzzyMatcher.hpp"
 #include "cursiv/documentation/DocumentationProvider.hpp"
-#include "cursiv/grammar/unicode/UnicodeRanges.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/grammar/unicode/UnicodeRanges.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/references/ScopeProvider.hpp"
+#include "cursiv/runtime/LanguageServer.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
+#include "cursiv/symbols/NodeKindProvider.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
@@ -29,17 +33,14 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/CstUtils.hpp"
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
+#include "cursiv/text/LspPosition.hpp"
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/text/word_scalar.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/AstNodeDescription.hpp"
 #include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/completion/FuzzyMatcher.hpp"
-#include "cursiv/runtime/LanguageServer.hpp"
-#include "cursiv/services/SharedLspServices.hpp"
-#include "cursiv/symbols/NodeKindProvider.hpp"
-#include "cursiv/text/LspPosition.hpp"
 
 namespace cursiv {
 
@@ -73,12 +74,9 @@ namespace {
   return unicode::within(unicode::kL, std::size(unicode::kL), scalar);
 }
 
-// The names one answer offers at most; its keywords always come. A reference
-// caret with nothing typed enumerates the whole global index, and every entry
-// it keeps costs a handful of allocations plus a documentation render, under
-// the workspace read lock.
-// `isIncomplete` is already always true, which is the protocol's licence to
-// stop: what the author types next asks again.
+// A scope stops offering names once the answer holds this many items, keywords
+// included; keywords always come. `isIncomplete` is always true, so what the
+// author types next asks again.
 constexpr std::size_t kMaxItems = 1000;
 
 // Kind, label and detail: two homonyms of different types stay apart. Read
@@ -96,8 +94,8 @@ struct ItemKeyHash {
   }
 };
 
-// A data rule reads tokens and writes nothing: no member, no node of its own.
-// The records of `[from, to)` read so already, which an inner rule's are.
+// Whether `record` only reads tokens outside `[from, to)`, as a data rule does:
+// no member and no node of its own. `[from, to)` is an inner rule's.
 [[nodiscard]] bool writes_nothing(const Cst& cst, const Grammar& grammar,
                                   NodeId record, NodeId from, NodeId to) {
   const auto writes = [&](NodeId k) {
@@ -155,9 +153,8 @@ void DefaultCompletionProvider::buildContexts(
   const TextOffset offset = std::min(lines.offsetAt(from_lsp(position)),
                                      static_cast<TextOffset>(text.size()));
   const Cst& cst = document.parseResult.cst();
-  // Nothing is offered inside a comment: what stands there is prose, not a
-  // continuation the grammar recognizes. Same for text a repair discarded --
-  // the parse read neither as grammar.
+  // Nothing is offered inside a comment or inside text a repair discarded: the
+  // parse read neither as grammar.
   if (caret_in_unread_text(cst, offset)) return;
   const std::uint32_t line = lines.positionAt(offset).line;
   const TextOffset lineStart = lines.offsetAt({line, 0});
@@ -204,7 +201,7 @@ void DefaultCompletionProvider::buildContexts(
       return;
     performNext = performNextTokenCompletion(document, token, start, offset);
     if (performNext && !ask(offset, offset, nodeOffset, {})) return;
-    // The next token is the same place where none holds the caret.
+    // When no token holds the caret, the next token is the place just asked.
     if (tokens.nextTokenStart == offset && tokens.nextTokenEnd == offset)
       return;
   }
@@ -358,7 +355,7 @@ void DefaultCompletionProvider::completionFor(const CompletionContext& context,
 std::optional<ReferenceInfo> DefaultCompletionProvider::referenceInfoOf(
     const CompletionContext& context, const NextFeature& next,
     AstNodePtr& entered) const {
-  // Asked first: the caret's node is looked up once, and only when needed.
+  // Checked first, so the caret's node is looked up only when needed.
   if (next.property.empty()) return std::nullopt;
   return detail::reference_at_caret(*services.astReflection, context.document,
                                     context.node(), next, entered);
@@ -368,21 +365,31 @@ void DefaultCompletionProvider::completionForCrossReference(
     const CompletionContext& context, const NextFeature&,
     const ReferenceInfo& reference, CompletionAcceptor accept) const {
   const FuzzyMatcher& matcher = *services.lspShared.fuzzyMatcher;
-  // Asked before an item is made: making one renders its documentation, and
-  // with nothing typed the whole global index goes by. The scope does not
-  // deduplicate -- a resolution wants candidates in declaration order, so a
-  // root-exported declaration comes twice.
-  using Seen = std::pair<std::string_view, const AstTypeTag*>;
+  // A declaration the scope gives twice, as a root export does, is offered
+  // once; two declarations of one name both reach
+  // `createReferenceCompletionItem`.
+  struct Seen {
+    std::string_view name;
+    const AstTypeTag* type;
+    DocumentId documentId;
+    NodeId symbolId;
+    bool operator==(const Seen&) const = default;
+  };
   const auto hash = [](const Seen& s) {
-    return std::hash<std::string_view>{}(s.first) ^
-           std::hash<const AstTypeTag*>{}(s.second);
+    return std::hash<std::string_view>{}(s.name) ^
+           std::hash<const AstTypeTag*>{}(s.type) ^
+           std::hash<std::uint64_t>{}(
+               (std::uint64_t{static_cast<std::uint32_t>(s.documentId)} << 32) ^
+               s.symbolId);
   };
   std::unordered_set<Seen, decltype(hash)> seen(16, hash);
   visitReferenceCandidates(
       reference, context, [&](const AstNodeDescription& candidate) {
         throw_if_cancelled(context.cancelToken);
         if (!matcher.match(context.identifier, candidate.name)) return true;
-        if (!seen.insert(Seen{candidate.name, candidate.type}).second)
+        if (!seen.insert(Seen{candidate.name, candidate.type,
+                              candidate.documentId, candidate.symbolId})
+                 .second)
           return true;
         CompletionValueItem item =
             createReferenceCompletionItem(candidate, reference, context);
@@ -419,12 +426,14 @@ std::optional<lsp::MarkupContent>
 DefaultCompletionProvider::getReferenceDocumentation(
     const AstNodeDescription& candidate) const {
   if (candidate.node == nullptr) return std::nullopt;
-  const Document* const home = candidate.node->getDocument();
-  if (home == nullptr || home->language == nullptr) return std::nullopt;
+  const Document* const candidateDocument = candidate.node->getDocument();
+  if (candidateDocument == nullptr || candidateDocument->language == nullptr)
+    return std::nullopt;
   const DocumentationProvider* const docs =
-      home->language->documentationProvider.get();
+      candidateDocument->language->documentationProvider.get();
   if (docs == nullptr) return std::nullopt;
-  std::optional<std::string> doc = docs->getDocumentation(*candidate.node, home);
+  std::optional<std::string> doc =
+      docs->getDocumentation(*candidate.node, candidateDocument);
   if (!doc.has_value()) return std::nullopt;
   lsp::MarkupContent content;
   content.kind = lsp::MarkupKindEnum(lsp::MarkupKind::Markdown);

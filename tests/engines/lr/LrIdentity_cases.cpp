@@ -66,7 +66,7 @@ namespace lr_identity_cases {
 // The construction run natively: the identity it picks and the completion
 // sites it agrees on.
 
-// The build must pick the wider identity on its own: a user never hears the
+// The build must pick the wider identity on its own: a user never receives the
 // word. The choice is made here the way the generator makes it, over a
 // construction run natively.
 namespace identity {
@@ -82,13 +82,13 @@ const cursiv::Parser& engine() {
   return *p;
 }
 
-template <class Kid>
+template <class Child>
 void reads(std::string_view src) {
   const cursiv::ParseResult r = engine().parse(src);
   CHECK(r.accepted);
   CHECK(static_cast<bool>(r) && r.diagnostics.empty());
   auto* doc = r.value_as<ast::Doc>();
-  CHECK(doc != nullptr && cursiv::ast_cast<Kid>(doc->kid) != nullptr);
+  CHECK(doc != nullptr && cursiv::ast_cast<Child>(doc->child) != nullptr);
 }
 
 // A tag reads as held unless known false. Two tags whose words differ only in
@@ -96,8 +96,8 @@ void reads(std::string_view src) {
 // one nothing is known of fuse.
 void minimization_reads_condition_tags_as_held() {
   using cursiv::engine::DynSet;
-  // Two states alike but for their tags, minimised: how many stand, and where
-  // the first one's goto lands.
+  // Two states the same but for their tags, minimised: how many stand, and
+  // where the first one's goto leads.
   const auto minimized = [](std::array<DynSet, 2> known,
                             std::array<DynSet, 2> truth) {
     Built a;
@@ -146,9 +146,9 @@ void run() {
       picked = std::move(wide);
   }
 
-  // The picked table is deterministic and whole: the wider identity stood.
+  // The picked table is deterministic and whole: the wider identity was kept.
   CHECK(picked->identity == cursiv::engine::LrIdentity::core_plus_lookaheads);
-  CHECK(picked->nconflicts == 0 && picked->nOwed == 0);
+  CHECK(picked->nconflicts == 0 && picked->nAmbiguities == 0);
   CHECK(picked->nOrdered == 0);
   CHECK(picked->nMergeInduced == 0);
 
@@ -175,25 +175,25 @@ void run() {
     CHECK(wide->nconflicts == 1);
   }
 
-  // The wider graph is judged on the ambiguities it owes, never on cells:
-  // the passes copy a cell into every state they mint.
+  // The wider graph is judged on its unresolved ambiguities (`nAmbiguities`),
+  // never on cells: the passes copy a cell into every state they create.
   {
     const std::unique_ptr<Built> core = std::make_unique<Built>();
     const std::unique_ptr<Built> wide = std::make_unique<Built>();
-    core->nOwed = wide->nOwed = 3;
+    core->nAmbiguities = wide->nAmbiguities = 3;
     core->nconflicts = 12;
     wide->nconflicts = 4;
     CHECK(!cursiv::engine::lr_wider_stands(*core, *wide));
-    wide->nOwed = 2;
+    wide->nAmbiguities = 2;
     CHECK(cursiv::engine::lr_wider_stands(*core, *wide));
     wide->overflow = true;
     CHECK(!cursiv::engine::lr_wider_stands(*core, *wide));
   }
 
-  reads<ast::AKid>("a c d");
-  reads<ast::BKid>("b c d");
-  reads<ast::BKid>("a c e");
-  reads<ast::AKid>("b c e");
+  reads<ast::AChild>("a c d");
+  reads<ast::BChild>("b c d");
+  reads<ast::BChild>("a c e");
+  reads<ast::AChild>("b c e");
 }
 
 }  // namespace identity
@@ -387,10 +387,9 @@ void run() {
 }  // namespace case_lrchaininsert
 
 namespace case_lrinsertorder {
-// A repair tries the terminals of a state in the order a reading of the
-// grammar meets them: alternatives as written, a loop that goes on before the
-// rule that closes it, and, in a state that only reduces, what the rules it
-// returns to read.
+// A repair tries a state's terminals in the order a reading of the grammar
+// reaches them: alternatives as written, a loop's next item before its closer,
+// and in a state that only reduces, what its callers read.
 
 namespace {
 
@@ -434,9 +433,9 @@ void run() {
 }  // namespace case_lrinsertorder
 
 namespace case_lrguards {
-// A condition takes readings away and adds none: a table owes no ambiguity
-// the same grammar without its conditions does not owe. Every grammar of the
-// suite that writes a condition in a rule is held to it.
+// A condition takes readings away and adds none: a table has no more
+// unresolved ambiguities (`nAmbiguities`) than the same grammar without its
+// conditions. Every grammar of the suite with a condition in a rule is checked.
 
 namespace {
 
@@ -468,10 +467,10 @@ void adds_no_ambiguity(const char* label) {
   const auto bare = std::make_unique<Built>(
       cursiv::engine::lr_build_automaton(*without_conditions(low)));
   CHECK(!guarded->overflow && !bare->overflow);
-  CHECK(guarded->nOwed <= bare->nOwed);
-  if (guarded->nOwed > bare->nOwed)
-    std::printf("    %s owes %u, %u without its conditions\n", label,
-                guarded->nOwed, bare->nOwed);
+  CHECK(guarded->nAmbiguities <= bare->nAmbiguities);
+  if (guarded->nAmbiguities > bare->nAmbiguities)
+    std::printf("    %s keeps %u ambiguities, %u without its conditions\n",
+                label, guarded->nAmbiguities, bare->nAmbiguities);
 }
 
 // Reductions that wait on a condition: a condition standing before a position
@@ -486,8 +485,8 @@ unsigned gated_reductions() {
   return n;
 }
 
-// Options before a condition: the graph lays a program per way in, and the
-// states they land on fuse.
+// Options before a condition: the graph builds a program per way in, and the
+// states they lead to fuse.
 struct Folded : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Root : rule<option(lit<"c">) + option(lit<"a">) + lit<"b"> +
@@ -496,7 +495,6 @@ struct Folded : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// The table keeps the programs its states name, each once.
 template <class G>
 void names_each_program_once() {
   const auto built = std::make_unique<Built>(cursiv::engine::lr_build_automaton(
@@ -542,11 +540,11 @@ void run() {
 
 namespace case_lrcornerkey {
 // What orders two readings is read off the words of the whole left corner
-// they climb through, not of its first sixteen.
+// they rise through, not of its first sixteen.
 
 namespace {
 
-// The rule whose reduction the table lays first where `Whole_` and `Tail`
+// The rule whose reduction the table puts first where `Whole_` and `Tail`
 // both reduce on a token.
 std::string_view first_reduction(const cursiv::engine::LrBuildTable& A) {
   for (unsigned s = 0; s < A.nstates; ++s)
@@ -577,9 +575,9 @@ void run() {
 }  // namespace case_lrcornerkey
 
 namespace case_lrtableorder {
-// The order the table lays a cell's arms in drops a stack only where it is the
+// The order the table puts a cell's arms in drops a stack only where it is the
 // election's for every text. A chain's cells are; the cells of a run that
-// grows by turns are not, and its texts read as the LL engine reads them.
+// grows by iterations are not, and its texts read as the LL engine reads them.
 
 namespace {
 
@@ -653,16 +651,17 @@ std::uint64_t action_digest(const cursiv::engine::LrBuildTable& a) {
 }
 
 // Digests of the action tables, both graph constructions: left corners of
-// varying length, growing turns, shared origins, ties that stay inexact.
+// varying length, growing loops, shared origins, ties that stay inexact.
 template <class G>
 void keeps_actions(bool wide, std::uint64_t digest, unsigned states,
-                   unsigned canonical, unsigned conflicts, unsigned owed) {
+                   unsigned canonical, unsigned conflicts,
+                   unsigned ambiguities) {
   const auto& low = cursiv::engine::LrLowering<G>::table();
   const auto a = wide ? cursiv::engine::lr_build_wide(low)
                       : cursiv::engine::lr_build_automaton(low);
   CHECK(!a.overflow && !a.cfg.lowerFail());
   CHECK(a.nstates == states && a.ncanonical == canonical);
-  CHECK(a.nconflicts == conflicts && a.nOwed == owed);
+  CHECK(a.nconflicts == conflicts && a.nAmbiguities == ambiguities);
   CHECK(a.nOrdered == 0);
   CHECK(action_digest(a) == digest);
 }
@@ -787,8 +786,8 @@ void run() {
   probe_cuts<tbounds::byteprobes::G<64>>(0);
   probe_cuts<tbounds::byteprobes::G<70>>(1);
   groups_spread_over_units();
-  // What a state owes runs past a byte's reach, in the frozen table as in the
-  // construction.
+  // The tokens a state still needs run past a byte's reach, in the frozen table
+  // as in the construction.
   // The shared entry adds its tag to the 256-token completion.
   static_assert(longrun::kCold.closeMax == 257);
   {

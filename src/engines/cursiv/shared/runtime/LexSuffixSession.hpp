@@ -1,8 +1,5 @@
-// Lexical searches of one immutable document share their DFA suffixes.
-// A suffix belongs to its state and text position, including the boundaries
-// it inspected. Echoing relays, and a mode that reads a refusing terminal,
-// still use the matcher. The conditions read over the document share the
-// rounds of their runs.
+// Lexical searches of one immutable document share their DFA suffixes, each
+// keyed by its state and position, and the rounds of their conditions' runs.
 #pragma once
 
 #include <algorithm>
@@ -13,13 +10,14 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/text/TextOffset.hpp"
-#include "cursiv/utils/macros.hpp"
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/runtime/LexMatch.hpp"
 #include "cursiv/shared/runtime/PredicateRuns.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv::engine {
 
@@ -129,14 +127,16 @@ class LexSuffixSession {
     prior.halt = std::max(prior.halt, next.halt);
     return prior;
   }
+  // A walk keeps a point every `kStride` bytes, and reads the parse's stop at
+  // one point in every `kTurns`.
   struct Cache {
     static constexpr TextOffset kStride = 16;
-    struct Stood {
+    struct Point {
       std::uint64_t key;
       Answer local;
     };
     std::unordered_map<std::uint64_t, Answer> known;
-    std::vector<Stood> path;
+    std::vector<Point> path;
 
     bool match(const Tape& tape, const char* src, TextOffset len,
                std::uint16_t state, TextOffset from, Scan& out,
@@ -152,6 +152,7 @@ class LexSuffixSession {
             break;
           }
           path.push_back({key, {}});
+          turn(at);
         }
         // A relay may capture text from the token's start. Such a suffix
         // cannot be shared with a token that began elsewhere.
@@ -175,6 +176,7 @@ class LexSuffixSession {
         ++at;
       }
       for (auto it = path.rbegin(); it != path.rend(); ++it) {
+        turn(static_cast<TextOffset>(it->key >> 16));
         tail = followed(it->local, tail);
         known.emplace(it->key, tail);
       }
@@ -183,6 +185,14 @@ class LexSuffixSession {
                                              : tail.best;
       halt = tail.halt;
       return true;
+    }
+
+    static void turn(TextOffset at) {
+      if (at % (kStride * CancellationPoll::kTurns) == 0) [[unlikely]]
+        read_stop();
+    }
+    CURSIV_COLD CURSIV_NOINLINE static void read_stop() {
+      ThreadStop::poll().check();
     }
   };
 

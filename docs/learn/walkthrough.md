@@ -267,8 +267,8 @@ shows as a diagnostic.
 To add hover documentation, write `/** The gram unit. */` before `unit gram`.
 Hover then shows it on `gram` and on each reference to it. Hover reads these
 comments from the `hidden` terminal named `ML_COMMENT`, which stays in the
-syntax tree. To highlight the Recipe keywords, update the extension's TextMate
-grammar, as that guide explains.
+syntax tree. The build writes the Recipe keywords into the extension's
+TextMate grammar, so the editor highlights them, as that guide explains.
 
 ## What to change next
 

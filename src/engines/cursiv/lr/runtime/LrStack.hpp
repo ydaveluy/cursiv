@@ -11,8 +11,8 @@
 
 namespace cursiv::engine {
 
-// Not a vector: a reduce drops frames by a subtraction, where
-// `vector::resize` pays a divide and a call.
+// A reduce drops frames by a subtraction, where `vector::resize` costs a
+// divide and a call.
 class LrStack {
  public:
   LrStack() = default;
@@ -25,8 +25,8 @@ class LrStack {
   }
   [[nodiscard]] std::uint32_t size() const { return _n; }
 
-  // Pinned: one more caller and the inliner outlines it -- every shift and
-  // goto then pays a call.
+  // Always inlined: with one more caller the inliner outlines it, and every
+  // shift and goto then costs a call.
   CURSIV_ALWAYS_INLINE void push(LrFrame frame) {
     if (_n == _cap) [[unlikely]]
       grow();
@@ -80,7 +80,7 @@ class LrStack {
     throw std::length_error("cursiv: LR stack is too deep");
   }
   // Out of line as well: inlined, the doubling is copied into every goto
-  // column, one copy per landing state.
+  // column, one copy per target state.
   CURSIV_NOINLINE void grow() {
     if (_cap == std::numeric_limits<std::uint32_t>::max()) [[unlikely]]
       too_deep();

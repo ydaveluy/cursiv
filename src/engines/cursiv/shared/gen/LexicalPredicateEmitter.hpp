@@ -36,7 +36,7 @@ class LexicalPredicateEmitter {
         _width(g.nlex, kVariableWidth),
         _first(g.nlex),
         _recursive(lex_call_ancestors(g)),
-        _kids(g.nlex, Kids::spelled),
+        _childReading(g.nlex, ChildReading::spelled),
         _same(g.nlex) {
     const auto add = [&](std::vector<std::uint16_t>& list, std::uint16_t node) {
       if (node == kNoLexNode || std::ranges::find(list, node) != list.end())
@@ -50,7 +50,7 @@ class LexicalPredicateEmitter {
     }
     std::map<std::vector<std::uint32_t>, std::uint16_t> shapes;
     for (const auto id : _order) {
-      _kids[id] = kids(id);
+      _childReading[id] = child_reading(id);
       std::vector<std::uint32_t> key;
       _same[id] = shape(id, key) ? shapes.try_emplace(key, id).first->second
                                  : id;
@@ -146,10 +146,10 @@ class LexicalPredicateEmitter {
   std::vector<std::uint32_t> _width;
   mutable std::vector<std::optional<std::pair<ByteSet, bool>>> _first;
   std::vector<std::uint8_t> _recursive;
-  // How a node reads its kids: each in turn, a choice dispatched on the byte
-  // it opens on, or many words read as data (`LexicalWords`).
-  enum class Kids : std::uint8_t { spelled, dispatched, words };
-  std::vector<Kids> _kids;
+  // How a node reads its children: each in turn, a choice dispatched on the
+  // byte it opens on, or many words read as data (`LexicalWords`).
+  enum class ChildReading : std::uint8_t { spelled, dispatched, words };
+  std::vector<ChildReading> _childReading;
   // Each node as the first node of its shape: a grammar that repeats an
   // expression has its code once.
   std::vector<std::uint16_t> _same;
@@ -161,7 +161,7 @@ class LexicalPredicateEmitter {
 
   std::uint16_t same(std::uint16_t id) const { return _same[id]; }
   // What a node's code reads, where that is its kind, its bounds, its classes
-  // and its kids' shapes alone; the others keep a code of their own.
+  // and its children' shapes alone; the others keep a code of their own.
   bool shape(std::uint16_t id, std::vector<std::uint32_t>& key) const {
     const LexNode& e = _g.lex[id];
     if (recursive(id)) return false;
@@ -172,12 +172,13 @@ class LexicalPredicateEmitter {
         return true;
       case LexKind::nguard:
         key.push_back(e.a);
-        for (unsigned i = 0; i < e.min; ++i) key.push_back(_g.lexKid[e.b + i]);
+        for (unsigned i = 0; i < e.min; ++i)
+          key.push_back(_g.lexChild[e.b + i]);
         return true;
       case LexKind::seq:
       case LexKind::alt:
         for (unsigned i = 0; i < e.b; ++i)
-          key.push_back(same(_g.lexKid[e.a + i]));
+          key.push_back(same(_g.lexChild[e.a + i]));
         return true;
       case LexKind::rep:
         key.push_back(e.max != 0 ? same(e.a) : kNoLexNode);
@@ -220,14 +221,14 @@ class LexicalPredicateEmitter {
         throw std::invalid_argument(
             "cursiv: this lexical search cannot be used by a byte recognizer");
     }
-    lex_children(_g, id, [&](auto kid) { visit(kid); });
+    lex_children(_g, id, [&](auto child) { visit(child); });
     _width[id] = recursive(id) ? kVariableWidth : width(e);
     if (!recursive(id) && !fixed(id) &&
         (e.kind == LexKind::alt ||
          (e.kind == LexKind::rep && e.max != 0 &&
           _g.lex[e.a].kind == LexKind::chars) ||
          (e.kind == LexKind::seq && e.b != 0 &&
-          (_used[_g.lexKid[e.a + e.b - 1]] & kFinal) != 0)))
+          (_used[_g.lexChild[e.a + e.b - 1]] & kFinal) != 0)))
       _used[id] |= kFinal;
     _order.push_back(id);
   }
@@ -246,8 +247,8 @@ class LexicalPredicateEmitter {
       return;
     const bool searched =
         e.kind == LexKind::through_nested || e.kind == LexKind::through_same;
-    lex_children(_g, id, [&](auto kid) {
-      use(same(kid), !searched && (direct || dispatched(id)));
+    lex_children(_g, id, [&](auto child) {
+      use(same(child), !searched && (direct || dispatched(id)));
     });
   }
 
@@ -268,32 +269,34 @@ class LexicalPredicateEmitter {
   // says which of them the byte at hand can open, so the others are not asked.
   static constexpr unsigned kDispatchMin = 4, kDispatchMax = 32;
   bool dispatched(std::uint16_t id) const {
-    return _kids[id] == Kids::dispatched;
+    return _childReading[id] == ChildReading::dispatched;
   }
-  bool worded(std::uint16_t id) const { return _kids[id] == Kids::words; }
-  Kids kids(std::uint16_t id) const {
+  bool worded(std::uint16_t id) const {
+    return _childReading[id] == ChildReading::words;
+  }
+  ChildReading child_reading(std::uint16_t id) const {
     const LexNode& e = _g.lex[id];
     if ((e.kind != LexKind::alt && e.kind != LexKind::seq) || recursive(id) ||
         e.b < kDispatchMin)
-      return Kids::spelled;
+      return ChildReading::spelled;
     // Past what a mask holds, a choice of words or a run of refusals of words
     // is read as data: a class of characters over several bytes lowers to
     // hundreds of them.
     if (e.b > kDispatchMax) {
       for (unsigned i = 0; i < e.b; ++i)
-        if (!(e.kind == LexKind::alt ? word(_g.lexKid[e.a + i])
-                                     : refusal(_g.lexKid[e.a + i])))
-          return Kids::spelled;
-      return Kids::words;
+        if (!(e.kind == LexKind::alt ? word(_g.lexChild[e.a + i])
+                                     : refusal(_g.lexChild[e.a + i])))
+          return ChildReading::spelled;
+      return ChildReading::words;
     }
-    if (e.kind != LexKind::alt) return Kids::spelled;
+    if (e.kind != LexKind::alt) return ChildReading::spelled;
     for (unsigned i = 0; i < e.b; ++i) {
-      const auto kid = _g.lexKid[e.a + i];
-      if (recursive(kid) || !fixed(kid) || _width[kid] == 0 ||
-          first_bytes(kid).second)
-        return Kids::spelled;
+      const auto child = _g.lexChild[e.a + i];
+      if (recursive(child) || !fixed(child) || _width[child] == 0 ||
+          first_bytes(child).second)
+        return ChildReading::spelled;
     }
-    return Kids::dispatched;
+    return ChildReading::dispatched;
   }
 
   // A word is a class, or a sequence of classes; a refusal of one, an `nguard`
@@ -303,7 +306,7 @@ class LexicalPredicateEmitter {
     if (e.kind == LexKind::chars) return true;
     if (e.kind != LexKind::seq || e.b == 0) return false;
     for (unsigned i = 0; i < e.b; ++i)
-      if (_g.lex[_g.lexKid[e.a + i]].kind != LexKind::chars) return false;
+      if (_g.lex[_g.lexChild[e.a + i]].kind != LexKind::chars) return false;
     return true;
   }
   bool refusal(std::uint16_t id) const {
@@ -318,21 +321,21 @@ class LexicalPredicateEmitter {
     std::vector<std::uint16_t> words;
     std::vector<std::vector<std::uint32_t>> opens(256);
     for (unsigned i = 0; i < e.b; ++i) {
-      const auto kid = _g.lexKid[e.a + i];
-      const LexNode& k = _g.lex[kid];
+      const auto child = _g.lexChild[e.a + i];
+      const LexNode& k = _g.lex[child];
       const auto at = static_cast<std::uint32_t>(words.size());
       if (k.kind == LexKind::nguard) {
         words.push_back(static_cast<std::uint16_t>(k.min));
         words.push_back(k.a);
         for (unsigned j = 0; j < k.min; ++j)
-          words.push_back(_g.lexKid[k.b + j]);
+          words.push_back(_g.lexChild[k.b + j]);
       } else if (k.kind == LexKind::chars) {
         words.insert(words.end(), {1, kNoSet, k.a});
       } else {
         words.push_back(static_cast<std::uint16_t>(k.b));
         words.push_back(kNoSet);
         for (unsigned j = 0; j < k.b; ++j)
-          words.push_back(_g.lex[_g.lexKid[k.a + j]].a);
+          words.push_back(_g.lex[_g.lexChild[k.a + j]].a);
       }
       const auto first = words[at + 2];
       const ByteSet opening = _g.sets[first] | lex_decode_bytes(_g, first);
@@ -374,7 +377,7 @@ class LexicalPredicateEmitter {
     ByteSet ascii;
     ascii.add(0, 0x7f);
     for (unsigned i = 0; i < e.b; ++i)
-      if (first_bytes(_g.lexKid[e.a + i]).first.intersects(ascii))
+      if (first_bytes(_g.lexChild[e.a + i]).first.intersects(ascii))
         seen |= std::uint32_t{1} << i;
     return std::popcount(seen) == 1 ? std::countr_zero(seen) : -1;
   }
@@ -391,7 +394,7 @@ class LexicalPredicateEmitter {
     for (unsigned b = from; b < 256; ++b) {
       std::uint32_t mask = 0;
       for (unsigned i = 0; i < e.b; ++i)
-        if (first_bytes(_g.lexKid[e.a + i])
+        if (first_bytes(_g.lexChild[e.a + i])
                 .first.has(static_cast<unsigned char>(b)))
           mask |= std::uint32_t{1} << i;
       out.write(b % 16 == 0 ? "\n" : "", mask, "u,");
@@ -400,7 +403,7 @@ class LexicalPredicateEmitter {
   }
 
   // The readings of a dispatched choice the byte at `at` can open, in order;
-  // `take` lays what to do with one that reads.
+  // `take` is the code for one that reads.
   std::string dispatch(std::uint16_t id, std::string_view indent,
                        std::string_view take, std::string_view miss) const {
     const LexNode& e = _g.lex[id];
@@ -410,7 +413,7 @@ class LexicalPredicateEmitter {
     if (ascii >= 0)
       out.line(indent, "if (b < 0x80) {\n", indent, "  auto p = c;\n", indent,
                "  if (lexical_fixed_",
-               same(_g.lexKid[e.a + static_cast<unsigned>(ascii)]),
+               same(_g.lexChild[e.a + static_cast<unsigned>(ascii)]),
                "(src, len, p.at, seen)) {\n", take, indent, "  }\n", indent,
                "  return ", miss, ";\n", indent, "}");
     out.line(indent, "for (auto m = lexical_first_", id, "[b",
@@ -419,7 +422,7 @@ class LexicalPredicateEmitter {
              "  switch (::std::countr_zero(m)) {");
     for (unsigned i = 0; i < e.b; ++i)
       out.line(indent, "    case ", i, "u: read = lexical_fixed_",
-               same(_g.lexKid[e.a + i]),
+               same(_g.lexChild[e.a + i]),
                "(src, len, p.at, seen); "
                "break;");
     out.line(indent, "    default: break;\n", indent, "  }");
@@ -427,10 +430,10 @@ class LexicalPredicateEmitter {
     return out.take();
   }
 
-  std::string longest_step(std::string_view name, std::uint16_t kid,
+  std::string longest_step(std::string_view name, std::uint16_t child,
                            std::string_view level) const {
     return concat("        auto ", name, " = ",
-                  call(kid, "::cursiv::engine::LexicalState{p}"),
+                  call(child, "::cursiv::engine::LexicalState{p}"),
                   ";\n"
                   "        if (!",
                   name,
@@ -475,15 +478,15 @@ class LexicalPredicateEmitter {
   bool padded_final(const LexNode& e) const {
     const auto& opener = _g.lex[e.a];
     if (opener.kind != LexKind::seq || opener.b < 2) return false;
-    const auto& mark = _g.lex[_g.lexKid[opener.a + opener.b - 2]];
+    const auto& mark = _g.lex[_g.lexChild[opener.a + opener.b - 2]];
     if (mark.kind != LexKind::mark || mark.min != e.max) return false;
     std::string after;
-    if (!LexRelayGen::literal_size(_g, _g.lexKid[opener.a + opener.b - 1]) ||
-        (_g.lexKid[e.b + 1] != kNoLexNode &&
-         !LexRelayGen::literal(_g, _g.lexKid[e.b + 1], after)))
+    if (!LexRelayGen::literal_size(_g, _g.lexChild[opener.a + opener.b - 1]) ||
+        (_g.lexChild[e.b + 1] != kNoLexNode &&
+         !LexRelayGen::literal(_g, _g.lexChild[e.b + 1], after)))
       return false;
     const auto& [bytes, empty] = first_bytes(mark.a);
-    const auto& pad = _g.lex[_g.lexKid[e.b + 2]];
+    const auto& pad = _g.lex[_g.lexChild[e.b + 2]];
     return pad.kind == LexKind::rep && _g.lex[pad.a].kind == LexKind::chars &&
            LexRelayGen::pad_final(_g.sets[_g.lex[pad.a].a], bytes, empty,
                                   after);
@@ -505,16 +508,16 @@ class LexicalPredicateEmitter {
     if (e.kind == LexKind::seq) {
       std::uint32_t n = 0;
       for (unsigned i = 0; i < e.b; ++i) {
-        const auto part = _width[_g.lexKid[e.a + i]];
+        const auto part = _width[_g.lexChild[e.a + i]];
         if (part >= kVariableWidth - n) return kVariableWidth;
         n += part;
       }
       return n;
     }
     if (e.kind == LexKind::alt) {
-      const auto n = e.b == 0 ? 0 : _width[_g.lexKid[e.a]];
+      const auto n = e.b == 0 ? 0 : _width[_g.lexChild[e.a]];
       for (unsigned i = 1; i < e.b; ++i)
-        if (_width[_g.lexKid[e.a + i]] != n) return kVariableWidth;
+        if (_width[_g.lexChild[e.a + i]] != n) return kVariableWidth;
       return n;
     }
     return kVariableWidth;
@@ -540,7 +543,7 @@ class LexicalPredicateEmitter {
           test(e.a, "at"), ") return false;\n  ++at;\n  return true;");
     else if (e.kind == LexKind::seq) {
       for (unsigned i = 0; i < e.b; ++i)
-        out.line("  if (!lexical_fixed_", same(_g.lexKid[e.a + i]),
+        out.line("  if (!lexical_fixed_", same(_g.lexChild[e.a + i]),
                  "(src, len, at, seen)) return false;");
       out.line("  return true;");
     } else if (e.kind == LexKind::rep) {
@@ -578,7 +581,7 @@ class LexicalPredicateEmitter {
         out.line(
             "  { auto probe = at;\n"
             "    if (lexical_fixed_",
-            same(_g.lexKid[e.a + i]),
+            same(_g.lexChild[e.a + i]),
             "(src, len, probe, seen)) {\n"
             "      at = probe;\n      return true;\n    }\n  }");
       out.line("  return false;");
@@ -592,11 +595,11 @@ class LexicalPredicateEmitter {
       out.line("  auto probe = at;");
       for (unsigned i = 0; i < e.min; ++i)
         out.line("  seen = ::std::max(seen, probe < len ? ", _boundary,
-                 ".reach(", _g.lexKid[e.b + i],
+                 ".reach(", _g.lexChild[e.b + i],
                  "u, src, probe, "
                  "len) : len);\n"
                  "  if (probe >= len || !",
-                 test(_g.lexKid[e.b + i], "probe"),
+                 test(_g.lexChild[e.b + i], "probe"),
                  ") return true;\n  ++probe;");
       if (e.a == kNoSet)
         out.line("  return false;");
@@ -640,8 +643,8 @@ class LexicalPredicateEmitter {
               "      } else { f.cur = ::std::move(f.in); f.stage = 1; }\n"
               "      switch (f.at++) {");
           for (unsigned i = 0; i < e.b; ++i)
-            out.write("      case ", i,
-                      "u: ", request(_g.lexKid[e.a + i], "::std::move(f.cur)"));
+            out.write("      case ", i, "u: ",
+                      request(_g.lexChild[e.a + i], "::std::move(f.cur)"));
           out.line(
               "      default: m.finish(::std::move(f.cur)); return;\n"
               "      }");
@@ -652,7 +655,7 @@ class LexicalPredicateEmitter {
               "      f.stage = 1;\n      switch (f.at++) {");
           for (unsigned i = 0; i < e.b; ++i)
             out.write("      case ", i,
-                      "u: ", request(_g.lexKid[e.a + i], "f.in"));
+                      "u: ", request(_g.lexChild[e.a + i], "f.in"));
           out.line(
               "      default: m.finish(::std::move(f.out)); return;\n"
               "      }");
@@ -756,7 +759,7 @@ class LexicalPredicateEmitter {
     if (e.kind == LexKind::seq && !fixed(id)) {
       for (unsigned i = 0; i < e.b; ++i)
         out.line("  in = ",
-                 call(_g.lexKid[e.a + i], "::std::move(in)",
+                 call(_g.lexChild[e.a + i], "::std::move(in)",
                       i + 1 == e.b ? "Final" : "false"),
                  ";\n  if (in.empty()) return in;");
       return out.line("  return in;\n}").take();
@@ -806,14 +809,15 @@ class LexicalPredicateEmitter {
               "  for (::std::size_t k = 0; k < in.size(); ++k) {\n"
               "    auto c = in[k];\n"
               "    if (lexical_fixed_",
-              same(_g.lexKid[e.a + i]),
+              same(_g.lexChild[e.a + i]),
               "(src, len, c.at, seen)) out.add(c);\n"
               "  }\n"
               "  if constexpr (Final) if (!out.empty()) return out;");
         return out.line("  return out;\n}").take();
       }
       for (unsigned i = 0; i < e.b; ++i) {
-        out.line("  out.unite(", call(_g.lexKid[e.a + i], "in", "Final"), ");");
+        out.line("  out.unite(", call(_g.lexChild[e.a + i], "in", "Final"),
+                 ");");
         out.line("  if constexpr (Final) if (!out.empty()) return out;");
       }
       return out.line("  return out;\n}").take();
@@ -873,8 +877,8 @@ class LexicalPredicateEmitter {
             "    for (::std::size_t j = 0; j < starts.size(); ++j) {\n"
             "      auto p = starts[j];\n      unsigned depth = 1;\n"
             "      while (p.at < len && depth != 0) {");
-        out.write(longest_step("close", _g.lexKid[e.b + 1], "--"));
-        out.write(longest_step("open", _g.lexKid[e.b], "++"));
+        out.write(longest_step("close", _g.lexChild[e.b + 1], "--"));
+        out.write(longest_step("open", _g.lexChild[e.b], "++"));
         out.line(
             "        seen = ::std::max(seen, p.at + 1);\n        ++p.at;\n"
             "      }");
@@ -884,10 +888,10 @@ class LexicalPredicateEmitter {
       case LexKind::through_same:
         if (e.min == 2) {
           std::string before, after;
-          if ((_g.lexKid[e.b] != kNoLexNode &&
-               !LexRelayGen::literal(_g, _g.lexKid[e.b], before)) ||
-              (_g.lexKid[e.b + 1] != kNoLexNode &&
-               !LexRelayGen::literal(_g, _g.lexKid[e.b + 1], after)))
+          if ((_g.lexChild[e.b] != kNoLexNode &&
+               !LexRelayGen::literal(_g, _g.lexChild[e.b], before)) ||
+              (_g.lexChild[e.b + 1] != kNoLexNode &&
+               !LexRelayGen::literal(_g, _g.lexChild[e.b + 1], after)))
             throw std::logic_error("cursiv: an echo closer is not a literal");
           out.line(
               "    for (::std::size_t j = 0; j < starts.size(); ++j) {\n"
@@ -923,12 +927,12 @@ class LexicalPredicateEmitter {
             "    for (::std::size_t j = 0; j < starts.size(); ++j) {\n"
             "      auto p = starts[j];\n      while (p.at < len) {\n"
             "        auto ends = ::cursiv::engine::LexicalState{p};");
-        if (_g.lexKid[e.b] != kNoLexNode)
-          out.line("        ends = ", call(_g.lexKid[e.b], "::std::move(ends)"),
-                   ";");
+        if (_g.lexChild[e.b] != kNoLexNode)
+          out.line("        ends = ",
+                   call(_g.lexChild[e.b], "::std::move(ends)"), ";");
         if (e.min > 2)
           out.line("        ends = ",
-                   call(_g.lexKid[e.b + 2], "::std::move(ends)",
+                   call(_g.lexChild[e.b + 2], "::std::move(ends)",
                         padded_final(e) ? "true" : "false"),
                    ";");
         out.line(
@@ -938,9 +942,9 @@ class LexicalPredicateEmitter {
         out.write(
             echoed_capture("          ", "q", "t", e.max, "echoed.add(q);"));
         out.line("        }");
-        if (_g.lexKid[e.b + 1] != kNoLexNode)
+        if (_g.lexChild[e.b + 1] != kNoLexNode)
           out.line("        echoed = ",
-                   call(_g.lexKid[e.b + 1], "::std::move(echoed)"), ";");
+                   call(_g.lexChild[e.b + 1], "::std::move(echoed)"), ";");
         out.line(
             "        if (!echoed.empty()) { out.unite(echoed); break; }\n"
             "        ::std::size_t width = 0;\n"
@@ -962,7 +966,7 @@ class LexicalPredicateEmitter {
           out.line("          case ", i, "u:");
           bool first = true;
           for (unsigned d = 0; d <= e.min; ++d) {
-            const auto set = _g.lexKid[e.b + i * (e.min + 1) + d];
+            const auto set = _g.lexChild[e.b + i * (e.min + 1) + d];
             if (set == kNoSet) continue;
             out.line("            ", first ? "" : "else ", "if (",
                      test(set, "p.at"), ") state = ", d, "u;");

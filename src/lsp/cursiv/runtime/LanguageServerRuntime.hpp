@@ -1,7 +1,5 @@
 // The session: a server endpoint on a stream, the server's methods registered
-// on it, and its message loop. The endpoint owns the lifecycle -- initialize,
-// shutdown, exit -- and the trace; the workspace side of every message belongs
-// to `LanguageServer`.
+// on it, and its message loop.
 #pragma once
 
 #include <lsp/io/stream.h>
@@ -10,14 +8,9 @@
 
 namespace cursiv {
 
-/**
- * Runs one session on an already-open stream. Returns 0 if the client
- * asked for `shutdown` before `exit`, 1 otherwise. `shared` must already
- * carry its language server and languages; the session installs a
- * language client on it for the call and removes it before returning.
- * Run one session per `shared`: its services keep what a session told
- * them, such as the client's settings and the diagnostics it was sent.
- */
+// Runs one session on an open stream: 0 if the client asked for `shutdown`
+// before `exit`, else 1. `shared` must hold its server and languages, and
+// serves one session only: its services keep what the session told them.
 [[nodiscard]] int start_language_server(SharedLspServices& shared,
                                         lsp::io::Stream& stream);
 

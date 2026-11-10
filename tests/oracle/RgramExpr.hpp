@@ -40,7 +40,7 @@ struct RgramExpr {
   RgramCond cond = RgramCond::eof;
   unsigned lo = 0, hi = 0;
   bool committed = false;
-  std::vector<RgramExpr> kids{};
+  std::vector<RgramExpr> children{};
 };
 
 }  // namespace cursiv

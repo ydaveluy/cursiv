@@ -10,7 +10,7 @@ std::vector<NestedRunWarning> nested_run_warnings(WarningFound& found) {
       found, [](WarningFound& w, ImageId id) {
         const ImageNode& n = w.image().nodes[id];
         return n.kind == ImageKind::repeat && n.n > 1 &&
-               w.reads().run(w.image().kids[n.first]);
+               w.reads().run(w.image().children[n.first]);
       });
 }
 

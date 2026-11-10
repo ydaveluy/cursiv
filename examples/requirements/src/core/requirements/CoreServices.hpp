@@ -24,8 +24,7 @@ struct RequirementsCoreServices
 
   using CoreServicesFor::CoreServicesFor;
 
-  // Optional both: each of the two languages fills its own and leaves the
-  // other empty.
+  // Both optional, as each language leaves the other's slot empty.
   void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
                          yield) const override {
     cursiv::CoreServices::visitServices(yield);

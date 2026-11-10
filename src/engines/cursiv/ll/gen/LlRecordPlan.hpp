@@ -39,7 +39,7 @@ class LlRecordPlan {
     if (n.kind != LlShape::seq) return kNoRow;
     std::uint16_t only = kNoRow;
     for (unsigned i = 0; i < n.count; ++i) {
-      const auto k = _cfg.kids[n.sym + i];
+      const auto k = _cfg.childIds[n.sym + i];
       if (const auto kind = _cfg.nodes[k].kind; kind == LlShape::empty ||
                                                 kind == LlShape::endMark ||
                                                 kind == LlShape::condition)
@@ -50,7 +50,7 @@ class LlRecordPlan {
     return only;
   }
 
-  void settle_ownership() {
+  void compute_ownership() {
     const auto count = _cfg.nnodes + _cfg.nrules;
     std::vector<std::vector<std::uint32_t>> handsUsers(count),
         opensUsers(count);
@@ -161,7 +161,7 @@ class LlRecordPlan {
   }
 
   template <class Join>
-  void settle_rows(std::span<const std::uint8_t> nullable, Join&& join) {
+  void compute_rows(std::span<const std::uint8_t> nullable, Join&& join) {
     _nullable = nullable;
     _last.assign(_cfg.nnodes, 0);
     _required.assign(_cfg.nnodes, 0);
@@ -169,7 +169,7 @@ class LlRecordPlan {
       const LlNode& n = _cfg.nodes[id];
       if (n.kind != LlShape::seq) continue;
       for (unsigned i = 0; i < n.count; ++i)
-        if (!takes_none(_cfg.kids[n.sym + i])) {
+        if (!takes_none(_cfg.childIds[n.sym + i])) {
           _last[id] = static_cast<std::uint16_t>(i);
           ++_required[id];
         }
@@ -266,7 +266,7 @@ class LlRecordPlan {
            n.kind == LlShape::rep;
   }
 
-  // Whether a reading of the position may lay no record: it matches nothing,
+  // Whether a reading of the position may create no record: it matches nothing,
   // is the end, or is a choice with such an arm.
   bool takes_none(std::uint16_t id) const {
     const auto none = [&](std::uint16_t k) {

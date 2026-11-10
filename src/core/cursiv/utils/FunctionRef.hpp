@@ -70,11 +70,8 @@ class function_ref<R(A...)> {
   }
 
  private:
-  // Not owned: the callable outlives the call, which is the whole contract --
-  // this type exists so a visitor crosses an ABI boundary without an
-  // allocation.
-  // Function pointers are values: binding &function must not retain the
-  // address of a temporary pointer object. Other callables remain borrowed.
+  // Not owned: the callable must outlive the call. A function pointer is kept
+  // by value; other callables by reference.
   Bound _bound;
   R (*_call)(Bound, A...);
 };

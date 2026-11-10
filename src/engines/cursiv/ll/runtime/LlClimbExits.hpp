@@ -14,10 +14,9 @@
 
 namespace cursiv::engine {
 
-// Whether the token in hand is one another caller takes: read again under
-// every follower the frames admit, it is this caller's closer that a longer
-// follower covered, or a blank -- a newline only another caller reads as a
-// token -- that this caller crosses to the follower behind it.
+// Whether another caller takes the token in hand: read again under every
+// follower the frames admit, it is this caller's closer that a longer follower
+// covered, or a newline this caller crosses as trivia.
 template <const auto& T>
 CURSIV_NOINLINE inline bool ll_climb_reads_on(const LlContext& c) {
   LlMask<T.termWords> viable;

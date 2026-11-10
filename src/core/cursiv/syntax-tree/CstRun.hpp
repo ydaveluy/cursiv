@@ -46,12 +46,9 @@ class CstRun {
     if (_mem == nullptr) delete[] _r;
   }
 
-  // The tree's own arena, and never a second allocator: the records and the
-  // AST both come from it, so a parse frees in one release and the AST build
-  // reads records laid next to the nodes it writes. A doubling leaves its
-  // predecessor behind -- the arena has no free -- which is what
-  // makes sizing from the document worth doing. Binding drops the buffer;
-  // unbound, the run owns a heap buffer.
+  // The tree's own arena: the records and the AST share it and are freed in
+  // one release. Binding drops the buffer; unbound, the run owns a heap
+  // buffer.
   void bind(std::pmr::memory_resource* mem) {
     if (_mem == nullptr) delete[] _r;
     _r = nullptr;
@@ -63,11 +60,9 @@ class CstRun {
     _mem = mem;
   }
 
-  // Sized from the document at a record per byte: room reserved past the
-  // need is never touched, so natively it never becomes resident. Wasm linear
-  // memory charges untouched room too: there a quarter is estimated, and a
-  // large one is taken only once records reach it, in one step, so a dense
-  // tree strands no series of smaller buffers in the arena.
+  // Sized from the document, a record per byte; the room past the records is
+  // never written. Wasm memory charges for that room, so there a quarter is
+  // reserved, and the rest taken in one step when records reach it.
   void reserve_for(std::size_t textBytes) {
     const std::size_t words = sizeof(void*) < 8 ? textBytes / 4 : textBytes;
     std::size_t want =
@@ -82,9 +77,9 @@ class CstRun {
   // The records past zero are room again: the buffer stays.
   void clear() { _records = 0; }
 
-  // A parse's stop, read once per run of records by the write that reaches
-  // the watermark: the test that guards the room is the only per-record
-  // cost. Null, or a token that cannot stop, watches nothing.
+  // A parse's cancellation token, checked by the write that reaches `_mark`,
+  // so the room check stays the only per-record cost. Null, or a token that
+  // cannot stop, disables it.
   void watch(const CancellationToken* stop) {
     _stop = stop != nullptr && stop->stop_possible() ? stop : nullptr;
     rearm();
@@ -130,10 +125,8 @@ class CstRun {
     put(begin, end, extent, engine, false, true);
   }
 
-  // The run is raw storage and a word index is arithmetic -- a base
-  // subtracted from a coordinate the caller carried across a fork. Asserted,
-  // so a coordinate that outlived its run says so instead of reading a
-  // record that is not there.
+  // A word index is a base subtracted from a coordinate, so it is asserted to
+  // stand inside the run.
   [[nodiscard]] const CstNode& at(std::size_t i) const {
     assert(i < _records && "a word index stands inside its own run");
     return _r[i];
@@ -143,9 +136,9 @@ class CstRun {
     return _r[i];
   }
 
-  // One record opened in the middle: a parent that must precede the trailing
-  // trivia already on the run. Off the per-record path -- the suffix it
-  // moves is that trivia, never the tree.
+  // One record placed at `at`, the records from there on moving up by one: a
+  // parent that precedes trailing trivia, or a group over records that others
+  // already follow. Off the per-record path.
   CURSIV_NOINLINE void insert(NodeId at, TextOffset begin, TextOffset end,
                               NodeCount extent, std::uint32_t engine) {
     assert(at <= _records && "an insertion stands inside its own run");

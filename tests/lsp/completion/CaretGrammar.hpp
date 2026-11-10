@@ -1,9 +1,8 @@
 #pragma once
 
-// The shape a caret is read against: a keyword the author gave a name of its
-// own, a k=2 cell with two arms, a construct a repair can leave open, one
-// member written from two sites -- one narrowed, one not -- and one written
-// by a rule that lays a record of its own.
+// The constructs completion is tested against: named keywords, two statements
+// that differ only on their third token, a construct a repair leaves open,
+// and members written from several rules.
 
 #include <string_view>
 
@@ -39,8 +38,8 @@ struct Beta : cursiv::Extends<Sym> {};
 struct Link : cursiv::Extends<Stmt> {
   reference<Sym> to;
 };
-// A SECOND CLASS SPELLING `to`: the member name alone no longer says which
-// reference a site writes, so only the class the grammar names can.
+// A second class with a `to` member: the member name alone does not say which
+// reference a rule writes; the class does.
 struct Bond : cursiv::Extends<cursiv::AstNode> {
   reference<Beta> to;
   string_view note;
@@ -52,7 +51,8 @@ struct Nest : cursiv::Extends<Stmt> {
   reference<Alpha> to;
   Stmt* inner = nullptr;
 };
-// Each writes its own member: where a token may open either, both are read.
+// Each writes its own reference: where a token may start either class,
+// completion reads both.
 struct SeesAlpha : cursiv::Extends<Stmt> {
   string_view name;
   reference<Alpha> alpha;
@@ -82,7 +82,7 @@ struct File : cursiv::Extends<cursiv::AstNode> {
 // ID is declared first on purpose: a literal beats a named terminal at equal
 // match length whatever the order, and only that order proves it.
 struct Caret : cursiv::GrammarSpec {
-  // Names reach past ASCII, and the word boundary with them.
+  // Names may hold non-ASCII letters, and so does the word boundary.
   static constexpr auto word_boundary = cr<R"(a-zA-Z0-9_\u{80}-\u{10FFFF})">;
   struct WS : terminal<some(s)> {};
   struct ID
@@ -94,8 +94,8 @@ struct Caret : cursiv::GrammarSpec {
   struct BANG : terminal<lit<"!">> {};
   struct QMARK : terminal<lit<"?">> {};
 
-  // Two unit-rename chains over the same shift: the state after `@` reduces
-  // either, and the readings only part one token past `~`.
+  // Two chains of single-call rules over the same `@`: either may follow `@`,
+  // and they differ only after `~`.
   struct FooB : rule<ref<AT>> {};
   struct FooA : rule<ref<FooB>> {};
   struct Foo : rule<ref<FooA>> {};
@@ -131,9 +131,8 @@ struct Caret : cursiv::GrammarSpec {
                     kw<"see"> +
                     assign<cursiv::xref<&ast::Link::to, ast::Alpha>>(ref<ID>) +
                     lit<";">)> {};
-  // The reference stands last but for an optional, so one branch of the rule
-  // is a single symbol and lays the record's own chain on the reference's own
-  // slot: two chains for one write, which the caret must still read as one.
+  // The reference is last but for an optional, so one branch of the rule is
+  // the reference alone: completion must still see one write of `Bond::to`.
   struct TieBody
       : rule<assign<cursiv::xref<&ast::Bond::to, ast::Beta>>(ref<ID>) +
              option(assign<&ast::Bond::note>(ref<ID>))> {};
@@ -142,15 +141,15 @@ struct Caret : cursiv::GrammarSpec {
             kw<"tie"> + assign<&ast::Tie::bond>(ref<TieBody>) + lit<";">)> {};
   struct AnyR : rule<create<ast::Link>(
                     kw<"any"> + assign<&ast::Link::to>(ref<ID>) + lit<";">)> {};
-  // A member written by a whole rule that lays a record of its own: the two
-  // cannot share a chain, so the write stays on the production and the caret
-  // is the only reader left to find it there.
+  // A member written by a call to rules that each create a node: completion
+  // must still find the write in `HoldR`.
   struct BoxR : rule<create<ast::Box>(kw<"box"> + lit<";">)> {};
   struct BagR : rule<create<ast::Bag>(kw<"bag"> + lit<";">)> {};
   struct HoldR : rule<create<ast::Hold>(
                      assign<&ast::Hold::inner>(ref<BoxR> | ref<BagR>))> {};
-  // One token, two members: read directly, through a data rule, through rules
-  // that open on it, and beside a reading that fills nothing.
+  // One token that may write either of two members: directly, through a data
+  // rule, through rules that start with it, and beside a branch that writes
+  // nothing.
   struct EitherR
       : rule<create<ast::SeesAlpha>(kw<"either"> +
                                     assign<&ast::SeesAlpha::alpha>(ref<ID>) +
@@ -176,8 +175,8 @@ struct Caret : cursiv::GrammarSpec {
                                     assign<&ast::SeesAlpha::alpha>(ref<ID>) +
                                     lit<"+">) |
              create<ast::SeesBeta>(kw<"maybe"> + ref<ID> + lit<"-">)> {};
-  // Two rules sharing a prefix, each going on to a member behind data rules: one
-  // through a list of the other's, and one of them with a string beside it.
+  // Two rules that share a prefix, then write a member through data rules:
+  // `Words` is a list of `Word`, and `ModelR` also takes a string.
   struct Word : rule<ref<ID> | kw<"word">> {};
   struct Words : rule<some(ref<Word>, lit<".">)> {};
   struct STR : terminal<lit<"'"> + many(cr<"a-z">) + lit<"'">> {};
@@ -195,8 +194,7 @@ struct Caret : cursiv::GrammarSpec {
   struct InstanceR : rule<create<ast::Instance>(
                          kw<"child"> + assign<&ast::Instance::instance>(
                                            ref<ModelR> | ref<AssemblyR>))> {};
-  // A terminal that writes a reference where it opens a rule, and stands bare
-  // past a keyword, where no reference is written.
+  // A terminal that writes a reference in `TickR`, and nothing after `bare`.
   struct TICK : terminal<lit<"'"> + many(word_boundary)> {};
   struct TickR : rule<create<ast::Link>(assign<&ast::Link::to>(ref<TICK>) +
                                         lit<";">)> {};

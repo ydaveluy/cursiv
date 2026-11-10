@@ -51,8 +51,8 @@ void a_blank_keeps_its_head_refusal(const cursiv::Parser& parser) {
   }
 }
 
-// A comment left open is laid as the trivia it would be, in a grammar whose
-// other regions read its bytes as a token: the two engines repair it alike.
+// A comment left open is kept as the trivia it would be, in a grammar whose
+// other regions read its bytes as a token: the two engines repair it the same.
 void an_open_comment_is_skipped_where_it_is_trivia(const cursiv::Parser& ll,
                                                    const cursiv::Parser& lr) {
   const std::string_view text = "ranked:a /*open";
@@ -176,10 +176,9 @@ void a_run_of_blanks_reads_on_from_its_last_byte(const cursiv::Parser& p) {
   }
 }
 
-// A caret in a gap answers for what is typed there. A word typed in the blanks of
-// a continuation leaves them plain blanks, so it reads; behind the continuation's
-// `_` it reads as one word with it, behind a splice's `\\` that byte is a token,
-// and behind a note's opener it goes on the note.
+// A caret in a gap answers for what is typed there: in a continuation's blanks
+// a word reads, behind its `_` it joins it, and behind a note's opener it goes
+// on the note.
 void a_caret_answers_for_what_is_typed_in_a_gap(const cursiv::Parser& ll,
                                                 const cursiv::Parser& lr) {
   using Offers = std::vector<std::string>;
@@ -241,8 +240,8 @@ void a_reading_reads_on_from_a_runs_last_byte() {
 }
 
 // A scalar a name and a blank both spell, in each role, and the names around it
-// that no rival reads. A position where only one is taken reads that one, and
-// where both are the text past it decides.
+// that no competitor reads. A position where only one is taken reads that one,
+// and where both are the text past it decides.
 void a_tie_stands_only_behind_its_first_byte(const cursiv::Parser& p) {
   const std::string bom = "\xef\xbb\xbf";
   const struct {
@@ -273,9 +272,9 @@ void a_tie_stands_only_behind_its_first_byte(const cursiv::Parser& p) {
   }
 }
 
-// A terminal the winner beats is a rival where a state takes it, though it is a
-// trivia elsewhere.
-void a_trivia_taken_as_a_token_stays_a_rival(const cursiv::Parser& p) {
+// A terminal the winner beats is a competitor where a state takes it, though it
+// is a trivia elsewhere.
+void a_trivia_taken_as_a_token_stays_a_candidate(const cursiv::Parser& p) {
   for (const std::string_view text :
        {"both:a\n!", "both:a\n?", "both:a \n !", "bothlines:a\nb", "bothlines:a b"}) {
     const cursiv::ParseResult r = p.parse(text);
@@ -300,7 +299,7 @@ void run() {
     a_blank_keeps_its_head_refusal(*make());
     a_run_of_blanks_reads_on_from_its_last_byte(*make());
     a_tie_stands_only_behind_its_first_byte(*make());
-    a_trivia_taken_as_a_token_stays_a_rival(*make());
+    a_trivia_taken_as_a_token_stays_a_candidate(*make());
     a_region_head_is_its_callers(*make());
     an_implied_condition_reads_the_trivia_of_its_place(*make());
   }
@@ -427,11 +426,11 @@ void check(const cursiv::Parser& parser, std::string_view text,
 }
 
 void a_newline_stands_around_a_region(const cursiv::Parser& parser) {
-  // First in an arm of a choice that a loop repeats, on its first turn and on
-  // later ones, behind a region and behind a group.
+  // First in an arm of a choice that a loop repeats, on its first iteration and
+  // on later ones, behind a region and behind a group.
   check(parser, "{\na b\n{\nc 1\n}\n2 d\ne f\n}\n", "({(a=b,{(c=1),2=d,e=f))");
   check(parser, "{ a b }", "({(a=b))");
-  // The whole turn of a loop.
+  // The whole body of a loop.
   check(parser, "[\nx = y\nz=w\n]", "([(x=y,z=w))");
   // First in a sequence, at the head of the document, with a newline behind.
   check(parser, "\na = b\n;\nc=d;", "(;(a=b),;(c=d))");
@@ -439,7 +438,7 @@ void a_newline_stands_around_a_region(const cursiv::Parser& parser) {
   // An arm of a choice no loop repeats, last in the document.
   check(parser, "?\na 1\n", "(?(a=1))");
   check(parser, "?\n{\n1 2\n}", "(?({(1=2)))");
-  // A region that opens on a loop, with turns and without.
+  // A region that opens on a loop, with items and without.
   check(parser, "<\na b>\n", "(<(a,b))");
   check(parser, "<\n>", "(<())");
 }

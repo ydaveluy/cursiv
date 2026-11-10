@@ -7,7 +7,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <mutex>
+#include <new>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -18,9 +20,6 @@
 #include "cursiv/text/Position.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Utf8.hpp"
-
-// Nothing here is on a parse's path: a document is addressed in client units
-// only when a client asks. It compiles once.
 
 namespace cursiv {
 
@@ -50,6 +49,51 @@ constexpr std::uint64_t kHighs = 0x8080808080808080ull;
   const std::uint64_t wide = zero_byte((w ^ (kOnes * 0xF0U)) & (kOnes * 0xF8U));
   return 8U - static_cast<std::uint32_t>(std::popcount(tail)) +
          static_cast<std::uint32_t>(std::popcount(wide));
+}
+
+// The 64 line flags from line `at` on, as one word.
+[[nodiscard]] std::uint64_t flags_at(const std::vector<std::uint64_t>& flags,
+                                     std::size_t at) noexcept {
+  const std::size_t word = at / 64;
+  const std::size_t shift = at % 64;
+  std::uint64_t value = word < flags.size() ? flags[word] >> shift : 0;
+  if (shift != 0 && word + 1 < flags.size())
+    value |= flags[word + 1] << (64 - shift);
+  return value;
+}
+
+// Sets the flags of `value` from line `at` on, over cleared ones.
+void put_flags(std::vector<std::uint64_t>& flags, std::size_t at,
+               std::uint64_t value) noexcept {
+  const std::size_t word = at / 64;
+  const std::size_t shift = at % 64;
+  flags[word] |= value << shift;
+  if (shift != 0 && word + 1 < flags.size())
+    flags[word + 1] |= value >> (64 - shift);
+}
+
+// Replaces the flags of lines `[at, at + removed)` with the first `added` of
+// `fresh`, moving the later ones. Flags past the last line stay clear.
+void splice_flags(std::vector<std::uint64_t>& flags, std::size_t lines,
+                  std::size_t at, std::size_t removed,
+                  const std::vector<std::uint64_t>& fresh, std::size_t added) {
+  if (added != removed) {
+    const std::size_t tail = lines - at - removed;
+    std::vector<std::uint64_t> moved((tail + 63) / 64);
+    for (std::size_t i = 0; i < moved.size(); ++i)
+      moved[i] = flags_at(flags, at + removed + (i * 64));
+    flags.resize((at + added + tail + 63) / 64);
+    flags[at / 64] &= (std::uint64_t{1} << (at % 64)) - 1;
+    std::fill(flags.begin() + static_cast<std::ptrdiff_t>(at / 64) + 1,
+              flags.end(), 0);
+    for (std::size_t i = 0; i < moved.size(); ++i)
+      put_flags(flags, at + added + (i * 64), moved[i]);
+  }
+  for (std::size_t i = 0; i < added; ++i) {
+    const std::uint64_t bit = std::uint64_t{1} << ((at + i) % 64);
+    std::uint64_t& word = flags[(at + i) / 64];
+    word = ((fresh[i / 64] >> (i % 64)) & 1U) != 0 ? word | bit : word & ~bit;
+  }
 }
 
 }  // namespace
@@ -108,7 +152,7 @@ std::string TextDocument::applyEdits(const TextDocument& document,
     order.emplace_back(range.start, document.offsetAt(range.start),
                        document.offsetAt(range.end), e.newText);
   }
-  // Ascending stable sort: two insertions at the same point land in array
+  // Ascending stable sort: two insertions at the same point stay in array
   // order. The result is then laid down front to back, every byte once.
   std::ranges::stable_sort(
       order, [](const Edit& a, const Edit& b) { return a.start < b.start; });
@@ -134,6 +178,10 @@ std::string_view TextDocument::getText(const Range& range) const {
   if (to < from) std::swap(from, to);
   return std::string_view(_text).substr(from, to - from);
 }
+
+// One line per byte and one more: every line number, and the next, fits in
+// 32 bits.
+static_assert(kMaxDocument + 1 <= std::numeric_limits<std::uint32_t>::max());
 
 std::uint32_t TextDocument::lineCount() const {
   ensureLineIndex();
@@ -193,7 +241,8 @@ void TextDocument::setText(std::string text) {
   // Every offset into the text is a `TextOffset`: a longer one is refused
   // before it replaces the current one.
   if (text.size() > kMaxDocument)
-    throw std::overflow_error("cursiv: document exceeds 4 GiB");
+    throw std::overflow_error(
+        "cursiv: document exceeds the size limit, just under 4 GiB");
   // Under the same lock the index is built with: a read action runs on many
   // threads, and dropping the table is a write to it like any other.
   const std::scoped_lock lock(_lineIndexMutex);
@@ -204,10 +253,54 @@ void TextDocument::setText(std::string text) {
 void TextDocument::replaceText(std::size_t from, std::size_t to,
                                std::string_view text) {
   if (text.size() > kMaxDocument - (_text.size() - (to - from)))
-    throw std::overflow_error("cursiv: document exceeds 4 GiB");
+    throw std::overflow_error(
+        "cursiv: document exceeds the size limit, just under 4 GiB");
   const std::scoped_lock lock(_lineIndexMutex);
   _text.replace(from, to - from, text);
-  dropLineIndex();
+  if (!_lineIndexReady.load(std::memory_order_relaxed)) return;
+  // An index that cannot follow is built again on the next question.
+  try {
+    patchLineIndex(static_cast<TextOffset>(from), static_cast<TextOffset>(to),
+                   static_cast<TextOffset>(text.size()));
+  } catch (const std::bad_alloc&) {
+    dropLineIndex();
+  }
+}
+
+// Rescans from the line holding `from` (the one before, after a `\r`) to the
+// first old line start past `to`; the later lines only move.
+void TextDocument::patchLineIndex(TextOffset from, TextOffset to,
+                                  TextOffset inserted) {
+  std::vector<TextOffset>& starts = _lineStarts;
+  const std::size_t lines = starts.size();
+  std::size_t first = lineOf(from);
+  if (first > 0 && starts[first] == from && _text[from - 1] == '\r') --first;
+  const auto next = static_cast<std::size_t>(
+      std::upper_bound(starts.begin() + static_cast<std::ptrdiff_t>(first),
+                       starts.end(), to) -
+      starts.begin());
+  const auto moved = [&](TextOffset start) {
+    return static_cast<TextOffset>(start - to + from + inserted);
+  };
+  const TextOffset end = next < lines ? moved(starts[next]) : size();
+  std::vector<TextOffset> fresh;
+  std::vector<std::uint64_t> ascii;
+  std::vector<std::uint64_t> wellFormed;
+  scanLines(starts[first], end, next == lines, fresh, ascii, wellFormed);
+  const std::size_t added = fresh.size() + 1;
+  const std::size_t removed = next - first;
+  splice_flags(_asciiLines, lines, first, removed, ascii, added);
+  splice_flags(_wellFormedLines, lines, first, removed, wellFormed, added);
+  const auto at = [&](std::size_t line) {
+    return starts.begin() + static_cast<std::ptrdiff_t>(line);
+  };
+  if (added > removed)
+    starts.insert(at(next), added - removed, 0);
+  else
+    starts.erase(at(first + added), at(next));
+  std::ranges::copy(fresh, at(first + 1));
+  for (std::size_t line = first + added; line < starts.size(); ++line)
+    starts[line] = moved(starts[line]);
 }
 
 void TextDocument::dropLineIndex() {
@@ -247,9 +340,16 @@ void TextDocument::ensureLineIndex() const {
   _lineStarts.push_back(0);
   _asciiLines.clear();
   _wellFormedLines.clear();
+  scanLines(0, size(), true, _lineStarts, _asciiLines, _wellFormedLines);
+  _lineIndexReady.store(true, std::memory_order_release);
+}
+
+void TextDocument::scanLines(TextOffset from, TextOffset to, bool last,
+                             std::vector<TextOffset>& starts,
+                             std::vector<std::uint64_t>& ascii,
+                             std::vector<std::uint64_t>& wellFormed) const {
   const char* const p = _text.data();
-  const TextOffset n = size();
-  const TextOffset words = n >= 8 ? n - 7 : 0;
+  const TextOffset words = to >= 8 ? to - 7 : 0;
   // The high bits of what the line being filled has read.
   std::uint64_t high = 0;
   // The next "\n" or "\r" at or after `at`, with what it passed folded in: a
@@ -262,36 +362,37 @@ void TextDocument::ensureLineIndex() const {
         break;
       high |= w & kHighs;
     }
-    for (; at < n && p[at] != '\n' && p[at] != '\r'; ++at)
+    for (; at < to && p[at] != '\n' && p[at] != '\r'; ++at)
       high |= static_cast<unsigned char>(p[at]) & 0x80u;
     return at;
   };
   // Two bits per line, in line order: a line opens the word they go in. A
   // line with a high byte is decoded once, here, to know which walk it takes.
+  std::size_t line = 0;
+  TextOffset start = from;
   const auto markLine = [&](TextOffset end) {
-    const std::size_t line = _lineStarts.size() - 1;
     if (line % 64 == 0) {
-      _asciiLines.push_back(0);
-      _wellFormedLines.push_back(0);
+      ascii.push_back(0);
+      wellFormed.push_back(0);
     }
     const std::uint64_t bit = std::uint64_t{1} << (line % 64);
-    const TextOffset start = _lineStarts.back();
-    if (high == 0) _asciiLines.back() |= bit;
+    if (high == 0) ascii.back() |= bit;
     if (high == 0 || detail::utf8_well_formed({p + start, end - start}))
-      _wellFormedLines.back() |= bit;
+      wellFormed.back() |= bit;
     high = 0;
+    ++line;
   };
   // The LSP terminators, the "\r\n" pair counting once.
-  for (TextOffset at = 0; at < n;) {
+  for (TextOffset at = from;;) {
     const TextOffset brk = nextBreak(at);
-    if (brk == n) break;
+    if (brk == to) break;
     at = brk + 1;
-    if (p[brk] == '\r' && at < n && p[at] == '\n') ++at;
+    if (p[brk] == '\r' && at < to && p[at] == '\n') ++at;
     markLine(brk);
-    _lineStarts.push_back(at);
+    if (!last && at == to) return;
+    starts.push_back(start = at);
   }
-  markLine(n);
-  _lineIndexReady.store(true, std::memory_order_release);
+  markLine(to);
 }
 
 bool TextDocument::asciiLine(std::uint32_t line) const noexcept {
@@ -312,10 +413,9 @@ TextOffset TextDocument::lineEnd(std::uint32_t line) const noexcept {
   return end;
 }
 
-// The index opens at 0, so the answer is the entry before the first start
-// past the offset. Where the offset falls names the line, but a document of
-// one long line and then thousands of short ones makes a walk from there
-// dearer than the bisection: the stride doubles and the frame is bisected.
+// The line is the entry before the first start past the offset. A galloping
+// search from the offset's guess, then bisection, so one long line before many
+// short ones stays cheap.
 std::uint32_t TextDocument::lineOf(TextOffset clamped) const noexcept {
   std::size_t lo = 0;
   std::size_t hi = _lineStarts.size();

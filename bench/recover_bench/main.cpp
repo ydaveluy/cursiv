@@ -1,9 +1,7 @@
-// recover_bench -- the repair path under measurement: one document, altered at
-// many sites, parsed to a tree. Prints a fingerprint of every tree so a change
-// that claims to be behaviour-preserving is checked, not asserted.
+// recover_bench -- the repair path: one document, altered at many sites,
+// repaired to a tree, with a fingerprint of each tree printed.
 //
-//   recover_bench <lang> <bytes> <sites> <reps> [--print]
-//   lang: arithmetics (the default) or domainmodel
+//   recover_bench <arithmetics|domainmodel> <bytes> <sites> <reps> [--print]
 
 #include <cstdint>
 #include <cstdio>

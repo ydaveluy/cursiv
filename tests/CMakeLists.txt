@@ -7,14 +7,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI" AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_link_options(--no-wasm-opt)
 endif()
 
-# include(), not add_subdirectory(): paths stay rooted here.
+# include() keeps relative paths rooted here.
 include(cmake/BatchGenerators.cmake)
 foreach(_suite IN ITEMS Helpers Core LrLowering Shared Ll Lr Workspace
                         Torture Services Integration Refusals Regressions)
   include(cmake/${_suite}.cmake)
 endforeach()
 
-# Target-specific grammar checks above must remain visible to the batcher.
+# After the suites, so the batcher sees the options they set on their targets.
 if(CMAKE_CROSSCOMPILING)
   cursiv_host_manifest("include(\"${CMAKE_CURRENT_SOURCE_DIR}/cmake/BatchGenerators.cmake\")")
   cursiv_host_manifest("cursiv_batch_test_generators()")

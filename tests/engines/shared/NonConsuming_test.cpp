@@ -33,7 +33,7 @@ struct Bin : cursiv::Extends<cursiv::AstNode> {
   cursiv::AstNode* right{};
 };
 struct Holder : cursiv::Extends<cursiv::AstNode> {
-  vector<cursiv::AstNode*> kids;
+  vector<cursiv::AstNode*> children;
 };
 
 struct EmptyKinds : cursiv::GrammarSpec {
@@ -78,7 +78,7 @@ void refuses_empty_turns(cursiv::engine::GrammarFaultCode expected,
 
 void fixed_points_require_a_finite_empty_derivation() {
   std::array<std::uint8_t, 5> values{};
-  cursiv::engine::settle_empty([&](auto mark) {
+  cursiv::engine::least_fixpoint([&](auto mark) {
     mark(values[0], values[1]);
     mark(values[1], values[0]);
     mark(values[2], values[3]);
@@ -109,12 +109,10 @@ void run() {
   refuses_empty_turns<E::repeat<2>(E::ref<E::Consuming>)>(F::none);
   // An operator table reads nothing where its operand does, through every table
   // it stands on, and a commit's parts read as they are written.
-  refuses_empty_turns<E::create<Holder>(
-      E::many(E::append<&Holder::kids>(E::ref<E::Climb>)))>(
-      F::nullableRepetition);
-  refuses_empty_turns<E::create<Holder>(
-      E::many(E::append<&Holder::kids>(E::ref<E::Over>)))>(
-      F::nullableRepetition);
+  refuses_empty_turns<E::create<Holder>(E::many(
+      E::append<&Holder::children>(E::ref<E::Climb>)))>(F::nullableRepetition);
+  refuses_empty_turns<E::create<Holder>(E::many(
+      E::append<&Holder::children>(E::ref<E::Over>)))>(F::nullableRepetition);
   refuses_empty_turns<E::many(
       E::commit(E::option(E::lit<"b">), E::option(E::lit<"c">)))>(
       F::nullableRepetition);
@@ -122,7 +120,7 @@ void run() {
   refuses_empty_turns<!E::many(E::option(E::lit<"b">)) + E::lit<"x">>(F::none);
   refuses_empty_turns<&E::many(E::option(E::lit<"b">)) + E::lit<"x">>(F::none);
   // An unordered item reads input or is an optional item, whatever reads
-  // nothing in it: both engines refuse any other before laying the group, and
+  // nothing in it: both engines refuse any other before building the group, and
   // name it.
   const auto empty = F::nullableUnorderedItem;
   refuses_empty_turns<E::unordered(E::ref<E::Guarded>, E::lit<"x">)>(
@@ -644,15 +642,13 @@ void run() {
 
 namespace nested_run_warning_cases {
 
-// The runs nested in a run, read off the grammar as written: in place, behind
-// a rule, behind a choice, or behind parts that read nothing. A repetition
-// whose item stops at one length, or whose runs the lexer reads whole, stays
-// silent.
+// The runs nested in a run, in place or behind a rule, a choice or parts that
+// read nothing. An item of one length, or read whole by the lexer, is silent.
 
 namespace {
 
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Doc*> kids;
+  vector<Doc*> children;
 };
 
 struct Base : cursiv::GrammarSpec {
@@ -697,7 +693,7 @@ struct Spared : Base {
   struct Root : rule<create<Doc>(some(ref<Item>) + lit<";">)> {};
   using entry = Root;
 };
-struct Trailed : Base {
+struct OptionalComma : Base {
   struct Root
       : rule<create<Doc>(some(some(ref<X>) + option(lit<",">)) + lit<";">)> {};
   using entry = Root;
@@ -708,8 +704,8 @@ struct Counted : Base {
 };
 struct Grouped : Base {
   struct Leaf : rule<create<Doc>(lit<"x">)> {};
-  struct Root : rule<create<Doc>(many(append<&Doc::kids>(create<Doc>(
-                                     some(append<&Doc::kids>(ref<Leaf>))))) +
+  struct Root : rule<create<Doc>(many(append<&Doc::children>(create<Doc>(some(
+                                     append<&Doc::children>(ref<Leaf>))))) +
                                  lit<";">)> {};
   using entry = Root;
 };
@@ -792,7 +788,7 @@ void run() {
   CHECK(names<Chosen>("Root", "Item*"));
   CHECK(found<Inline>().size() == 1);
   CHECK(names<Spared>("Root", "Item+"));
-  CHECK(found<Trailed>().size() == 1);
+  CHECK(found<OptionalComma>().size() == 1);
   CHECK(found<Counted>().size() == 1);
   CHECK(found<Grouped>().size() == 1);
   CHECK(found<Leading>().size() == 1);
@@ -889,6 +885,13 @@ void run() {
           "word character, so it also matches the start of a longer word, "
           "such as `beginx` -- write `kw<\"begin\">`, or give the literal a "
           "guard (`lit<\"begin\", G>`) if that is intended");
+  // A control byte is spelled, so the sentence never holds one.
+  CHECK(cursiv::engine::word_lit_warning_text(
+            {"Root", "'a\\000b'", std::string("a\0b", 3)}) ==
+        "rule `Root`: `'a\\000b'` is a literal with no guard that ends in a "
+        "word character, so it also matches the start of a longer word, "
+        "such as `a\\000bx` -- write `kw<\"a\\000b\">`, or give the literal a "
+        "guard (`lit<\"a\\000b\", G>`) if that is intended");
   CHECK(found<Twice>() == std::vector<W>{{"Root", "'item'", "item"},
                                          {"Item", "'item'", "item"}});
   CHECK(found<Spared>().empty());
@@ -901,7 +904,7 @@ void run() {
 namespace twin_branch_cases {
 
 // A branch that reads what an earlier branch of its choice reads is never
-// chosen: one reader names it, and both engines lay the body without it.
+// chosen: one reader names it, and both engines build the body without it.
 
 namespace {
 
@@ -950,7 +953,7 @@ struct Union : Base {
                                    option(lit<";">)))> {};
   using entry = Root;
 };
-// Two optional items reading alike: the second read in place of the first.
+// Two optional items reading the same: the second read in place of the first.
 struct Items : Base {
   struct Root
       : rule<create<Pair>(lit<"r"> + option(assign<&Pair::a>(ref<ID>)) +
@@ -1080,7 +1083,7 @@ void run() {
   CHECK(texts<Apart>().empty());
   CHECK(texts<Spelled>().empty());
 
-  // What each engine lays: the twin is gone, and what stays is the rule
+  // What each engine builds: the twin is gone, and what stays is the rule
   // written without it.
   CHECK(read<Same>("Root") == "a=ID");
   CHECK(read<Writes>("Root") == "a=ID");

@@ -8,7 +8,7 @@ namespace cursiv {
 
 struct RgramVerdict {
   bool accepted = false;
-  // Spelled as `test::ast_of` spells a tree; empty where the text has
+  // Spelled as `support::ast_of` spells a tree; empty where the text has
   // several, or where no tree was asked for.
   std::string tree{};
 };

@@ -7,9 +7,8 @@
 #include "cursiv/workspace/AstNodeDescription.hpp"
 
 // What one reference site can see, asked three ways: everything visible, the
-// first entry of one name, every entry of one name -- no scope object is
-// built, the walk answers directly. What counts as "named `name`" is the
-// provider's, never the caller's, so a language's case policy lives here.
+// first entry of a name, every entry of a name. The provider decides what
+// matches a name, so a language's case policy lives here.
 
 namespace cursiv {
 
@@ -17,8 +16,9 @@ class ScopeProvider {
  public:
   virtual ~ScopeProvider() noexcept = default;
 
-  // The first entry named `name` in declaration order, skipping the homonyms
-  // that fail the type filter. Null when none, and null for an empty name.
+  // The first entry named `name` that passes the type filter, or null (always
+  // for an empty name). A local entry lives as long as the document's scopes; a
+  // global one as `IndexManager::visitElements` says.
   [[nodiscard]] virtual const AstNodeDescription* getScopeEntry(
       const ReferenceInfo& context, std::string_view name) const = 0;
 

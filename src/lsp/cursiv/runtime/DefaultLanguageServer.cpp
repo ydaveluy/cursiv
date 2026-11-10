@@ -108,11 +108,8 @@ namespace {
   return lsp::DiagnosticTag::Unnecessary;
 }
 
-// Whether a closed document has saved content to fall back to. A URI on a
-// scheme the content provider serves has: its text lives in the store, as for
-// a builtin library `loadAdditionalDocuments` put there. Otherwise a URI the
-// file system provider cannot answer for, such as an `untitled:` buffer under
-// the local provider, has none.
+// Whether a closed document has saved content to fall back to: a URI the
+// content provider serves, or one the file system provider can answer for.
 [[nodiscard]] bool has_saved_content(const FileSystemProvider& files,
                                      const TextDocumentContentProvider* content,
                                      std::string_view uri) {
@@ -133,7 +130,6 @@ namespace {
   }
 }
 
-// Whether `options` names `ch`, first or among the others.
 [[nodiscard]] bool names_trigger(
     const lsp::DocumentOnTypeFormattingOptions& options, std::string_view ch) {
   if (options.firstTriggerCharacter == ch) return true;
@@ -162,8 +158,6 @@ void merge_on_type_options(
     for (std::string& ch : *options.moreTriggerCharacter) add(ch);
 }
 
-// Whether `ch` is one of the characters `formatter` named for on-type
-// formatting.
 [[nodiscard]] bool formats_on(const Formatter& formatter, std::string_view ch) {
   const std::optional<lsp::DocumentOnTypeFormattingOptions> options =
       formatter.formatOnTypeOptions();
@@ -224,29 +218,23 @@ void merge_semantic_tokens_options(
   if (!announced(into->range) || !announced(options.range)) into->range.reset();
 }
 
-// Whether the first known kind a client lists, its preferred one, is
-// markdown. A client that lists none never said it reads markdown.
-[[nodiscard]] bool prefers_markdown(
+[[nodiscard]] bool lists_markdown(
     const std::optional<lsp::Array<lsp::MarkupKindEnum>>& formats) {
-  if (formats.has_value())
-    for (const lsp::MarkupKindEnum& kind : *formats) {
-      if (kind == lsp::MarkupKind::Markdown) return true;
-      if (kind == lsp::MarkupKind::PlainText) return false;
-    }
-  return false;
+  return formats.has_value() &&
+         std::ranges::any_of(*formats, [](const lsp::MarkupKindEnum& kind) {
+           return kind == lsp::MarkupKind::Markdown;
+         });
 }
 
-// The providers write their prose as markdown. For a client that prefers
-// plain text, the same prose goes as plain text, shown as written.
+// Labels the providers' markdown as plain text, for a client that does not
+// read markdown.
 void as_plain_text(lsp::MarkupContent& content) {
   if (content.kind == lsp::MarkupKind::Markdown)
     content.kind = lsp::MarkupKindEnum(lsp::MarkupKind::PlainText);
 }
 
-// The changes of a `didChange`, in the core's units: a ranged-vs-whole-
-// document choice is exactly the core event's optional range, so this
-// decides nothing. Strings are copied, since the params do not outlive the
-// call.
+// A `didChange`'s changes in the core's units, strings copied: the params do
+// not outlive the call.
 std::vector<TextDocumentContentChangeEvent> from_lsp(
     std::span<const lsp::TextDocumentContentChangeEvent> changes) {
   std::vector<TextDocumentContentChangeEvent> converted;
@@ -279,15 +267,19 @@ DefaultLanguageServer::~DefaultLanguageServer() noexcept {
     _hookedConfiguration->removeConfigurationListener(*this);
 }
 
-// At `initialize`, not construction: the constructor only stores the
-// reference, and a host may still replace the builder before the
-// session starts. This is the first moment the installed builder is
-// the session's.
+// At `initialize`, not construction: a host may replace the builder until the
+// session starts.
 void DefaultLanguageServer::hookServices() {
   if (DocumentBuilder* const builder = _shared.documentBuilder.get();
       builder != _hookedBuilder) {
+    // Both or neither: the destructor unhooks only a builder it recorded.
     builder->addBuildPhaseListener(*this);
-    builder->addDocumentPhaseListener(*this);
+    try {
+      builder->addDocumentPhaseListener(*this);
+    } catch (...) {
+      builder->removeBuildPhaseListener(*this);
+      throw;
+    }
     _hookedBuilder = builder;
   }
   ConfigurationProvider* const configuration =
@@ -298,9 +290,8 @@ void DefaultLanguageServer::hookServices() {
   }
 }
 
-// Capabilities are read off the installed languages, not declared: an
-// absent one is the honest "no", since the protocol reads a missing
-// provider as unsupported.
+// Capabilities come from the installed languages' services: a missing
+// provider reads as unsupported.
 lsp::InitializeResult DefaultLanguageServer::initialize(
     const lsp::InitializeParams& params) {
   hookServices();
@@ -317,17 +308,15 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
     const std::string uri = path_to_file_uri(params.rootPath->value());
     _folders.emplace_back(uri, uri_file_name(uri));
   }
-  _scanOwed = !_folders.empty();
-  // Whether the client will accept the file watcher this server registers at
-  // `initialized`. Asked here because this is where the client says it.
+  _scanPending = !_folders.empty();
+  // Whether the client accepts the file watcher registered at `initialized`.
   _dynamicFileWatching =
       params.capabilities.workspace.has_value() &&
       params.capabilities.workspace->didChangeWatchedFiles.has_value() &&
       params.capabilities.workspace->didChangeWatchedFiles->dynamicRegistration
           .value_or(false);
-  // The other half of the quick fixes' version guard: the server already
-  // refuses to build an action measured against a stale version, and
-  // this lets the client refuse to apply one that went stale afterward.
+  // Versioned edits let the client refuse a quick fix that went stale after
+  // it was built.
   _versionedEdits =
       params.capabilities.workspace.has_value() &&
       params.capabilities.workspace->workspaceEdit.has_value() &&
@@ -337,11 +326,11 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
   _markdownCompletion = false;
   if (const auto& text = params.capabilities.textDocument) {
     if (text->hover.has_value())
-      _markdownHover = prefers_markdown(text->hover->contentFormat);
+      _markdownHover = lists_markdown(text->hover->contentFormat);
     if (text->completion.has_value() &&
         text->completion->completionItem.has_value())
-      _markdownCompletion = prefers_markdown(
-          text->completion->completionItem->documentationFormat);
+      _markdownCompletion =
+          lists_markdown(text->completion->completionItem->documentationFormat);
   }
   if (ConfigurationProvider* configuration =
           _shared.configurationProvider.get())
@@ -349,10 +338,8 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
   for (const auto& callback : _onInitialize) callback(params);
 
   lsp::InitializeResult result;
-  // The options arm, not the bare enum: the numeric form omits
-  // `openClose`, and a spec-compliant client would then never send
-  // `didOpen`. `Incremental` is what `Document::applyEdits` needs, and the
-  // save arms are the handler's.
+  // The options form, not the bare enum, whose numeric form omits `openClose`.
+  // `Incremental` is what `Document::applyEdits` needs.
   lsp::TextDocumentSyncOptions sync;
   sync.openClose = true;
   sync.change =
@@ -370,9 +357,8 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
   lsp::ServerInfo info;
   info.name = "cursiv";
   result.serverInfo = std::move(info);
-  // The trigger characters are a union, not the last language's list:
-  // announced once for the whole session, so keeping only one language's
-  // set would leave another's arguments unhelped.
+  // The trigger characters are the union over all languages: they are
+  // announced once per session.
   bool hasSignatureHelp = false;
   std::set<std::string> signatureTriggers;
   std::set<std::string> signatureRetriggers;
@@ -387,8 +373,6 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
       result.capabilities.documentSymbolProvider = true;
     if (services->definitionProvider != nullptr)
       result.capabilities.definitionProvider = true;
-    // The three go-to questions past definition are separate answers, not
-    // synonyms: a language installs the ones it can tell apart.
     if (services->declarationProvider != nullptr)
       result.capabilities.declarationProvider = true;
     if (services->typeDefinitionProvider != nullptr)
@@ -411,8 +395,7 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
         signatureRetriggers.insert(options.retriggerCharacters->begin(),
                                    options.retriggerCharacters->end());
     }
-    // `resolveProvider` false on all three: no interface here has a resolve
-    // step, so announcing one would invite a request nothing answers.
+    // `resolveProvider` stays false: none of the three has a resolve step.
     if (services->inlayHintProvider != nullptr) {
       lsp::InlayHintOptions options;
       options.resolveProvider = false;
@@ -452,8 +435,7 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
       result.capabilities.selectionRangeProvider = true;
     if (services->hoverProvider != nullptr)
       result.capabilities.hoverProvider = true;
-    // A union like the signature help above, and for the same reason: the
-    // characters are announced once for the whole session.
+    // A union, as for signature help.
     if (const CompletionProvider* completion =
             services->completionProvider.get()) {
       hasCompletion = true;
@@ -492,8 +474,7 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
     result.capabilities.signatureHelpProvider = std::move(options);
   }
   if (hasCompletion) {
-    // `resolveProvider` stays unset: no completion provider of this storey has
-    // a resolve step, so announcing one would invite a request nothing answers.
+    // `resolveProvider` stays unset: completion has no resolve step.
     lsp::CompletionOptions options;
     if (!completionTriggers.empty())
       options.triggerCharacters.emplace(completionTriggers.begin(),
@@ -544,9 +525,6 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
   return result;
 }
 
-// Configuration first, then the scan; neither is waited for. The
-// settings answer comes back on the read loop, so waiting here would be
-// this thread waiting for itself.
 void DefaultLanguageServer::onRequest(std::string method,
                                       CustomRequest handler) {
   _custom.requests.emplace_back(std::move(method), std::move(handler));
@@ -562,20 +540,18 @@ void DefaultLanguageServer::onInitialize(
   _onInitialize.push_back(std::move(callback));
 }
 
+// Configuration first, then the scan; neither is waited for. The settings
+// answer comes back on the read loop, so waiting here would be this thread
+// waiting for itself.
 void DefaultLanguageServer::initialized() {
   if (ConfigurationProvider* configuration =
           _shared.configurationProvider.get())
     configuration->initialized(_shared.languageClient.get());
   registerFileWatcher();
 
-  // One write action for the whole scan and its publications: the lock
-  // serves writes in entry order, so a `didOpen` racing the scan is
-  // wholly before or wholly after it, never inside.
-  //
-  // A bootstrap failure is said, not swallowed: `initialized` is a
-  // notification, so an uncaught exception leaves no trace and an empty
-  // workspace presents as a healthy one. A cancelled scan never reaches
-  // here -- the lock absorbs `OperationCancelled` itself.
+  // One write for the whole scan and its publications, so a racing `didOpen`
+  // runs wholly before or after it. A bootstrap failure is reported: a
+  // notification's exception would leave an empty workspace looking healthy.
   try {
     _shared.workspaceLock->write(
         [&](const CancellationToken& token) {
@@ -632,19 +608,19 @@ DefaultLanguageServer::textDocumentContent(
 void DefaultLanguageServer::didOpen(
     const lsp::DidOpenTextDocumentParams& params) {
   writeAndPublish(
-      [&](TextChanges& changes) { openText(params.textDocument, changes); });
+      1, [&](TextChanges& changes) { openText(params.textDocument, changes); });
 }
 
 void DefaultLanguageServer::didChange(
     const lsp::DidChangeTextDocumentParams& params) {
-  writeAndPublish([&](TextChanges& changes) {
+  writeAndPublish(1, [&](TextChanges& changes) {
     changeText(params.textDocument, params.contentChanges, changes);
   });
 }
 
 void DefaultLanguageServer::didClose(
     const lsp::DidCloseTextDocumentParams& params) {
-  writeAndPublish([&](TextChanges& changes) {
+  writeAndPublish(1, [&](TextChanges& changes) {
     closeText(params.textDocument.uri.toString(), changes);
   });
 }
@@ -662,6 +638,11 @@ void DefaultLanguageServer::openText(const lsp::TextDocumentItem& item,
       existing == nullptr || existing->textDocument().getText() != item.text ||
       existing->language != _shared.serviceRegistry->findServices(
                                 normalized, item.languageId.value());
+  // Recorded before the text moves: a text installed is a text built.
+  if (moved) {
+    std::erase(changes.deleted, uri);
+    changes.changed.push_back(uri);
+  }
   if (existing == nullptr) {
     // Installed at `Changed`: the build parses the client's text, in
     // parallel with the rest and under its token, so the next keystroke
@@ -678,12 +659,9 @@ void DefaultLanguageServer::openText(const lsp::TextDocumentItem& item,
   if (const std::shared_ptr<Document> open = documents.getDocument(uri)) {
     open->isOpen = true;
     // The client's number over the scan's zero, whether or not the bytes
-    // moved: it is what a diagnostic and a stamped edit report back.
+    // moved: a diagnostic and a versioned edit report it back.
     if (!moved) updateVersion(*open, static_cast<std::int64_t>(item.version));
   }
-  if (!moved) return;
-  std::erase(changes.deleted, uri);
-  changes.changed.push_back(std::move(uri));
 }
 
 // The tree is dropped before the bytes move, on the same document object, so
@@ -715,39 +693,38 @@ void DefaultLanguageServer::changeText(
     updateVersion(*document, version);
     return;
   }
-  _shared.documentFactory->attachTextDocument(*document, std::move(edited));
   changes.changed.push_back(std::move(uri));
+  _shared.documentFactory->attachTextDocument(*document, std::move(edited));
 }
 
 void DefaultLanguageServer::updateVersion(Document& document,
                                           std::int64_t version) {
   if (document.textDocument().version() == version) return;
   _shared.documentFactory->attachVersion(document, version);
-  // The bytes did not move, so a validated verdict stands; the client hears
+  // The bytes did not move, so a validated verdict stands; the client receives
   // it again under the version it now knows the document by. A document not
   // validated yet is published by the build that follows.
   if (document.state.load() == DocumentState::Validated)
     announceDocument(document);
 }
 
-// Closing a tab is not deleting a file: wherever the file lives, its saved
-// content replaces the buffer and the document stays, its verdict republished
-// by the rebuild. Only a URI with nothing saved behind it leaves -- an
-// `untitled:` buffer or a notebook cell among them -- and the client is told
-// so.
+// Closing a tab is not deleting a file: the saved content replaces the buffer
+// and the document stays. Only a URI with nothing saved behind it, such as an
+// `untitled:` buffer or a notebook cell, leaves.
 void DefaultLanguageServer::closeText(std::string_view uri,
                                       TextChanges& changes) {
   const std::shared_ptr<Document> closing = _shared.documents->getDocument(uri);
   if (closing == nullptr) return;
-  closing->isOpen = false;
-  if (has_saved_content(*_shared.fileSystemProvider,
-                        _shared.textDocumentContentProvider.get(),
-                        closing->uri)) {
+  const bool saved = has_saved_content(
+      *_shared.fileSystemProvider, _shared.textDocumentContentProvider.get(),
+      closing->uri);
+  if (saved) {
     changes.changed.emplace_back(uri);
-    return;
+  } else {
+    std::erase(changes.changed, uri);
+    changes.deleted.emplace_back(uri);
   }
-  std::erase(changes.changed, uri);
-  changes.deleted.emplace_back(uri);
+  closing->isOpen = false;
 }
 
 // The handler is told with no lock held, as for the file operations: one that
@@ -784,43 +761,53 @@ std::vector<lsp::TextEdit> DefaultLanguageServer::willSaveWaitUntil(
   return edits;
 }
 
-// The notebook hears first, so a build of its cells sees it as the client
-// has it; then every cell the notification names moves in one write. The
-// write runs even when no cell moves, or no notebook service is installed:
-// queued as a document update, the notification cut the build in flight, and
-// its build carries what that one left behind.
+// The notebook receives first, so a build of its cells sees it as the client
+// has it; then the cells move in one write. The write runs even when nothing
+// moves: its build carries what the build it cut left behind.
 void DefaultLanguageServer::didOpenNotebookDocument(
     const lsp::DidOpenNotebookDocumentParams& params) {
   NotebookDocuments* notebooks = _shared.notebookDocuments.get();
-  if (notebooks != nullptr) notebooks->didOpen(params);
-  writeAndPublish([&](TextChanges& changes) {
-    if (notebooks == nullptr) return;
-    for (const lsp::TextDocumentItem& cell : params.cellTextDocuments)
-      openText(cell, changes);
-  });
+  deliverThenWrite(
+      notebooks, [&] { notebooks->didOpen(params); },
+      params.cellTextDocuments.size(),
+      [&](TextChanges& changes) {
+        for (const lsp::TextDocumentItem& cell : params.cellTextDocuments)
+          openText(cell, changes);
+      });
 }
 
 void DefaultLanguageServer::didChangeNotebookDocument(
     const lsp::DidChangeNotebookDocumentParams& params) {
   NotebookDocuments* notebooks = _shared.notebookDocuments.get();
-  if (notebooks != nullptr) notebooks->didChange(params);
-  writeAndPublish([&](TextChanges& changes) {
-    if (notebooks == nullptr || !params.change.cells.has_value()) return;
-    const lsp::NotebookDocumentCellChanges& cells = *params.change.cells;
-    if (cells.structure.has_value()) {
-      if (cells.structure->didOpen.has_value())
-        for (const lsp::TextDocumentItem& cell : *cells.structure->didOpen)
-          openText(cell, changes);
-      if (cells.structure->didClose.has_value())
-        for (const lsp::TextDocumentIdentifier& cell :
-             *cells.structure->didClose)
-          closeText(cell.uri.toString(), changes);
+  const std::optional<lsp::NotebookDocumentCellChanges>& cells =
+      params.change.cells;
+  std::size_t records = 0;
+  if (cells.has_value()) {
+    if (cells->structure.has_value()) {
+      const auto& structure = *cells->structure;
+      if (structure.didOpen.has_value()) records += structure.didOpen->size();
+      if (structure.didClose.has_value()) records += structure.didClose->size();
     }
-    if (cells.textContent.has_value())
-      for (const lsp::NotebookDocumentCellContentChanges& cell :
-           *cells.textContent)
-        changeText(cell.document, cell.changes, changes);
-  });
+    if (cells->textContent.has_value()) records += cells->textContent->size();
+  }
+  deliverThenWrite(
+      notebooks, [&] { notebooks->didChange(params); }, records,
+      [&](TextChanges& changes) {
+        if (!cells.has_value()) return;
+        if (cells->structure.has_value()) {
+          if (cells->structure->didOpen.has_value())
+            for (const lsp::TextDocumentItem& cell : *cells->structure->didOpen)
+              openText(cell, changes);
+          if (cells->structure->didClose.has_value())
+            for (const lsp::TextDocumentIdentifier& cell :
+                 *cells->structure->didClose)
+              closeText(cell.uri.toString(), changes);
+        }
+        if (cells->textContent.has_value())
+          for (const lsp::NotebookDocumentCellContentChanges& cell :
+               *cells->textContent)
+            changeText(cell.document, cell.changes, changes);
+      });
 }
 
 void DefaultLanguageServer::didSaveNotebookDocument(
@@ -832,21 +819,38 @@ void DefaultLanguageServer::didSaveNotebookDocument(
 void DefaultLanguageServer::didCloseNotebookDocument(
     const lsp::DidCloseNotebookDocumentParams& params) {
   NotebookDocuments* notebooks = _shared.notebookDocuments.get();
-  if (notebooks != nullptr) notebooks->didClose(params);
-  writeAndPublish([&](TextChanges& changes) {
-    if (notebooks == nullptr) return;
-    for (const lsp::TextDocumentIdentifier& cell : params.cellTextDocuments)
-      closeText(cell.uri.toString(), changes);
-  });
+  deliverThenWrite(
+      notebooks, [&] { notebooks->didClose(params); },
+      params.cellTextDocuments.size(),
+      [&](TextChanges& changes) {
+        for (const lsp::TextDocumentIdentifier& cell : params.cellTextDocuments)
+          closeText(cell.uri.toString(), changes);
+      });
 }
 
-// The store catches up through one build. What this decides is only what
-// a naive loop gets wrong: the last event per URI wins (an atomic save is
-// a delete+create batch), a delete is re-checked against the file system
-// and expanded through the store, and an open document outranks the
-// watcher so its buffer is left untouched. Everything else -- statting a
-// URI, expanding a directory, dropping what no language claims, creating
-// a document the store lacks -- belongs to `DocumentBuilder::update`.
+// Without a notebook service no cell moves. A notebook that fails to receive
+// the notification still lets its cells move and build, then its failure goes
+// on.
+void DefaultLanguageServer::deliverThenWrite(
+    const NotebookDocuments* notebooks, cursiv::function_ref<void()> deliver,
+    std::size_t most, cursiv::function_ref<void(TextChanges&)> mutate) {
+  std::exception_ptr failure;
+  if (notebooks != nullptr) {
+    try {
+      deliver();
+    } catch (...) {
+      failure = std::current_exception();
+    }
+  }
+  writeAndPublish(most, [&](TextChanges& changes) {
+    if (notebooks != nullptr) mutate(changes);
+  });
+  if (failure) std::rethrow_exception(failure);
+}
+
+// The store catches up through one build: the last event per URI wins, a
+// delete is checked against the file system, and an open document's buffer
+// is kept. The build runs even with no event, for what a cut build left.
 void DefaultLanguageServer::didChangeWatchedFiles(
     const lsp::DidChangeWatchedFilesParams& params) {
   std::vector<std::string> order;
@@ -858,7 +862,6 @@ void DefaultLanguageServer::didChangeWatchedFiles(
     if (deletedByUri.insert_or_assign(uri, deleted).second)
       order.push_back(std::move(uri));
   }
-  if (order.empty()) return;
 
   const FileSystemProvider& files = *_shared.fileSystemProvider;
   const DocumentBuilder& builder = *_shared.documentBuilder;
@@ -872,12 +875,10 @@ void DefaultLanguageServer::didChangeWatchedFiles(
         std::vector<std::string> changed;
         std::vector<std::string> removed;
 
-        // Classified here, resolved by the build: `DocumentBuilder::update`
-        // is what stats a URI, expands a directory, drops what no language
-        // claims, and installs a document the store does not hold yet.
-        // An open buffer outranks the watcher, and a tracked URI whose file
-        // is gone is a removal whatever the event said.
-        const auto settle = [&](std::string uri) {
+        // Classified here, resolved by `DocumentBuilder::update`. An open
+        // buffer outranks the watcher, and a tracked URI whose file is gone is
+        // removed.
+        const auto classify = [&](std::string uri) {
           if (const std::shared_ptr<Document> existing =
                   documents.getDocument(uri);
               existing != nullptr) {
@@ -896,15 +897,15 @@ void DefaultLanguageServer::didChangeWatchedFiles(
             // A delete may name a directory: the store's folder index says what
             // was under it.
             if (documents.getDocument(uri) != nullptr) {
-              settle(uri);
+              classify(uri);
               continue;
             }
             for (const std::shared_ptr<Document>& d :
                  documents.getDocuments(uri))
-              settle(std::string(d->uri));
+              classify(std::string(d->uri));
             continue;
           }
-          settle(uri);
+          classify(uri);
         }
 
         const std::vector<std::string_view> changedUris(changed.begin(),
@@ -912,9 +913,9 @@ void DefaultLanguageServer::didChangeWatchedFiles(
         const std::vector<std::string_view> deletedUris(removed.begin(),
                                                         removed.end());
 
-        // One grouped build heals what a created file resolved and
-        // invalidates what a deleted one broke; its publish, through the
-        // phase hook, sends exactly the documents whose verdict moved.
+        // One grouped build updates what a created file resolves and what a
+        // deleted one breaks; its publish, through the phase hook, sends the
+        // documents it validated again.
         builder.update(changedUris, deletedUris, token);
 
       },
@@ -1005,13 +1006,10 @@ std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::willDeleteFiles(
   return edit;
 }
 
-// `changes` carries what to edit; `documentChanges` adds the version it
-// was measured against. This restamps the first as the second for a
-// client that announced it can, so a stale click is refused rather
-// than applied at the wrong offsets. An action that wrote its own
-// `documentChanges` keeps them: the client prefers them to `changes`.
-void DefaultLanguageServer::stampVersion(lsp::CodeAction& action,
-                                         const Document& document) {
+// Rewrites `changes` as versioned `documentChanges` for a client that reads
+// them, so a stale click is refused. An action's own `documentChanges` stay.
+void DefaultLanguageServer::addDocumentVersion(lsp::CodeAction& action,
+                                               const Document& document) {
   if (!action.edit.has_value() || !action.edit->changes.has_value() ||
       action.edit->documentChanges.has_value())
     return;
@@ -1040,7 +1038,7 @@ void DefaultLanguageServer::stampVersion(lsp::CodeAction& action,
 // one moment a request about one of them can be routed.
 bool DefaultLanguageServer::awaitScan(const CancellationToken& token,
                                       bool required) const {
-  if (!required && !_scanOwed.load()) return true;
+  if (!required && !_scanPending.load()) return true;
   const std::shared_future<void> ready = _shared.workspaceManager->ready();
   while (ready.wait_for(std::chrono::milliseconds(10)) !=
          std::future_status::ready)
@@ -1051,36 +1049,37 @@ bool DefaultLanguageServer::awaitScan(const CancellationToken& token,
 // The lookup is a read of the store like any other -- a write rehashes the map
 // it walks -- and it is over before the wait, which may not hold the readers'
 // side.
-bool DefaultLanguageServer::awaitRung(std::string_view uri, DocumentState rung,
-                                      const CancellationToken& token) const {
+bool DefaultLanguageServer::awaitState(std::string_view uri,
+                                       DocumentState state,
+                                       const CancellationToken& token) const {
   DocumentId id = kNoDocument;
   if (!_shared.workspaceLock->read(
           [&] { id = _shared.documents->getDocumentId(uri); }, token,
           WorkspaceLock::ReadPriority::Immediate))
     return false;
-  return _shared.documentBuilder->waitUntil(rung, id, token) ==
+  return _shared.documentBuilder->waitUntil(state, id, token) ==
          WaitOutcome::Reached;
 }
 
-// A rung that is cancelled, unreachable or lost to a failed build answers
-// empty; a cancelled token is turned into the protocol's own refusal by the
-// runtime, which checks it after every request.
+// A state that is cancelled, unreachable or lost to a failed build answers
+// empty; the runtime turns a cancelled token into the protocol's refusal.
 template <class Service, class Call>
 void DefaultLanguageServer::routeDocument(
-    std::string_view uri, ServiceRequirement rung,
+    std::string_view uri, ServiceRequirement requirement,
     std::unique_ptr<const Service> LspServices::* slot,
     const CancellationToken& token, Call call) const {
-  const bool workspace = rung.type == ServiceRequirement::Type::Workspace;
+  const bool workspace =
+      requirement.type == ServiceRequirement::Type::Workspace;
   if (!awaitScan(token)) return;
   // False when a later write reset the document after the wait: it is then
-  // awaited again. Below a workspace rung the workspace has reached, the
-  // document was left out of the build, which answers empty.
+  // awaited again. A document below a workspace state the workspace reached was
+  // left out of the build, which answers empty.
   const auto answer = [&]() {
     const std::shared_ptr<Document> document =
         _shared.documents->getDocument(uri);
     if (document == nullptr) return true;
-    if (document->state.load() < rung.state) return workspace;
-    // The factory fixed the language from both URI and languageId. It may
+    if (document->state.load() < requirement.state) return workspace;
+    // The factory chose the language from both URI and languageId. It may
     // be core-only, in which case this document has no LSP provider.
     const auto* services = dynamic_cast<const LspServices*>(document->language);
     if (services == nullptr) return true;
@@ -1090,27 +1089,22 @@ void DefaultLanguageServer::routeDocument(
     return true;
   };
   if (workspace) {
-    (void)readAtWorkspaceState(rung.state, token, [&] { (void)answer(); });
+    (void)readAtWorkspaceState(requirement.state, token,
+                               [&] { (void)answer(); });
     return;
   }
-  // The wait is the precondition an `Immediate` read owes, so this request
-  // reads beside the rest of the build instead of queuing behind it. The
-  // rung is checked again inside the lock, because the wait's verdict is
-  // stale by the time of admission. Once admitted the answer is stable:
-  // phases only climb, and the next write waits for this reader to leave.
+  // Waits for the state an `Immediate` read needs, so the request reads beside
+  // the rest of the build. The state is checked again inside the lock.
   for (bool answered = false; !answered;) {
-    if (!awaitRung(uri, rung.state, token)) return;
+    if (!awaitState(uri, requirement.state, token)) return;
     if (!_shared.workspaceLock->read([&] { answered = answer(); }, token,
                                      WorkspaceLock::ReadPriority::Immediate))
       return;
   }
 }
 
-// A workspace rung is the whole build's: the builder's state, not a
-// document's, says every index row is back. It is checked again inside the
-// lock, because a write that began a build lowered it before its settle,
-// which is where the `Immediate` read is admitted; the rung is then awaited
-// again.
+// A workspace state is the builder's, not a document's. It is checked again
+// inside the lock, where a write may have lowered it, and then awaited again.
 bool DefaultLanguageServer::readAtWorkspaceState(
     DocumentState state, const CancellationToken& token,
     cursiv::function_ref<void()> read) const {
@@ -1140,9 +1134,8 @@ std::vector<lsp::DocumentSymbol> DefaultLanguageServer::documentSymbol(
   return symbols;
 }
 
-// Nothing is handed over but the document. The target of a definition
-// routinely lives in another document, and it carries its own positions --
-// including when the client never opened it.
+// The provider gets only the asking document: a target in another document,
+// even one the client never opened, carries its own positions.
 std::vector<lsp::LocationLink> DefaultLanguageServer::definition(
     const lsp::DefinitionParams& params, const CancellationToken& token) const {
   std::vector<lsp::LocationLink> links;
@@ -1184,8 +1177,8 @@ std::vector<lsp::LocationLink> DefaultLanguageServer::typeDefinition(
   return links;
 }
 
-// One rung higher than its neighbours, for the reason find-references is: what
-// implements what is read off the inverse index.
+// One state higher than its neighbours, as find-references: what implements
+// what is read off the inverse index.
 std::vector<lsp::LocationLink> DefaultLanguageServer::implementation(
     const lsp::ImplementationParams& params,
     const CancellationToken& token) const {
@@ -1226,9 +1219,8 @@ std::optional<lsp::Range> DefaultLanguageServer::prepareRename(
   return span;
 }
 
-// A rename is a read action, not a slip: it computes edits and hands
-// them to the client, which applies them and sends `didChange` back.
-// The same holds for the code action and formatting routes below.
+// A rename is a read action: the client applies the edits and sends
+// `didChange` back. So are the code action and formatting routes below.
 std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::rename(
     const lsp::RenameParams& params, const CancellationToken& token) const {
   std::optional<lsp::WorkspaceEdit> edit;
@@ -1374,7 +1366,7 @@ std::optional<lsp::SignatureHelp> DefaultLanguageServer::signatureHelp(
   return help;
 }
 
-// The one route that waits for the top rung: it reads what the validator wrote,
+// The one route that waits for validation: it reads what the validator wrote,
 // and asked earlier it would offer fixes for findings not yet made.
 std::vector<lsp::CodeAction> DefaultLanguageServer::codeAction(
     const lsp::CodeActionParams& params, const CancellationToken& token) const {
@@ -1385,7 +1377,7 @@ std::vector<lsp::CodeAction> DefaultLanguageServer::codeAction(
                   actions = provider.getCodeActions(d, params, token);
                   if (_versionedEdits)
                     for (lsp::CodeAction& action : actions)
-                      stampVersion(action, d);
+                      addDocumentVersion(action, d);
                 });
   return actions;
 }
@@ -1402,9 +1394,8 @@ std::vector<lsp::DocumentLink> DefaultLanguageServer::documentLink(
   return links;
 }
 
-// The top of the resolution rungs, not the parse: a lens routinely counts what
-// the workspace points at -- callers, implementers -- and asked earlier it
-// would count what was linked so far.
+// Waits for `IndexedReferences`, not the parse: a lens counts what the
+// workspace points at, such as callers, and earlier it would count a part.
 std::vector<lsp::CodeLens> DefaultLanguageServer::codeLens(
     const lsp::CodeLensParams& params, const CancellationToken& token) const {
   std::vector<lsp::CodeLens> lenses;
@@ -1417,7 +1408,7 @@ std::vector<lsp::CodeLens> DefaultLanguageServer::codeLens(
   return lenses;
 }
 
-// One slot and one rung for the three arms, one call each.
+// One slot and one state for the three arms, one call each.
 std::vector<lsp::TextEdit> DefaultLanguageServer::formatting(
     const lsp::DocumentFormattingParams& params,
     const CancellationToken& token) const {
@@ -1536,8 +1527,8 @@ std::vector<lsp::TypeHierarchyItem> DefaultLanguageServer::subtypes(
   return items;
 }
 
-// A query is about no document, so the rung waited for is the
-// workspace's: half an index would silently answer half a query.
+// A query is about no document, so the state waited for is the workspace's:
+// half an index would silently answer half a query.
 std::vector<lsp::WorkspaceSymbol> DefaultLanguageServer::workspaceSymbol(
     const lsp::WorkspaceSymbolParams& params,
     const CancellationToken& token) const {
@@ -1559,7 +1550,7 @@ lsp::WorkspaceSymbol DefaultLanguageServer::workspaceSymbolResolve(
   return resolved;
 }
 
-// No rung and no lock: a command is the workspace's own code, and takes
+// No wait and no lock: a command is the workspace's own code, and takes
 // what it needs itself.
 std::optional<lsp::LSPAny> DefaultLanguageServer::executeCommand(
     const lsp::ExecuteCommandParams& params,
@@ -1572,21 +1563,29 @@ std::optional<lsp::LSPAny> DefaultLanguageServer::executeCommand(
   return handler->executeCommand(params.command, arguments, token);
 }
 
-// Mutate, then build: one durable write action, publication inside the
-// build's drains. The build runs even when nothing moved: it carries what a
-// cut build left behind.
+// Mutate, then build, in one durable write. The build runs even when nothing
+// moved or the mutation failed part-way, then the failure goes on. Room for
+// `most` records is made first, so an installed text always reaches the build.
 void DefaultLanguageServer::writeAndPublish(
-    cursiv::function_ref<void(TextChanges&)> mutate) {
+    std::size_t most, cursiv::function_ref<void(TextChanges&)> mutate) {
   const DocumentBuilder& builder = *_shared.documentBuilder;
   _shared.workspaceLock->write(
       [&](const CancellationToken& token) {
         TextChanges changes;
-        mutate(changes);
-        const std::vector<std::string_view> changed(changes.changed.begin(),
-                                                    changes.changed.end());
-        const std::vector<std::string_view> deleted(changes.deleted.begin(),
-                                                    changes.deleted.end());
+        std::vector<std::string_view> changed;
+        std::vector<std::string_view> deleted;
+        changed.reserve(most);
+        deleted.reserve(most);
+        std::exception_ptr failure;
+        try {
+          mutate(changes);
+        } catch (...) {
+          failure = std::current_exception();
+        }
+        changed.assign(changes.changed.begin(), changes.changed.end());
+        deleted.assign(changes.deleted.begin(), changes.deleted.end());
         builder.update(changed, deleted, token);
+        if (failure) std::rethrow_exception(failure);
       },
       WorkspaceLock::WriteMode::Durable);
 }
@@ -1594,9 +1593,8 @@ void DefaultLanguageServer::writeAndPublish(
 void DefaultLanguageServer::onBuildPhase(DocumentState reached,
                                          std::span<Document* const>,
                                          const CancellationToken&) {
-  // `Linked` clears, `Validated` publishes; see the declaration.
   if (reached == DocumentState::Linked)
-    clearStaleSnapshots();
+    clearRemoved();
   else if (reached == DocumentState::Validated)
     publishValidated();
 }
@@ -1606,56 +1604,67 @@ void DefaultLanguageServer::onDocumentPhase(Document& document,
                                             const CancellationToken&) {
   if (reached != DocumentState::Validated) return;
   const std::scoped_lock lock(_validatedMutex);
-  _validated.push_back(document.id);
-}
-
-// Clears squiggles measured against a text that may be gone, the
-// moment the workspace is linked, before validation spends its time --
-// and only for documents the client was actually shown something for. A removed
-// document owes an empty snapshot too, whichever caller removed it.
-void DefaultLanguageServer::clearStaleSnapshots() {
-  for (auto it = _announced.begin(); it != _announced.end();) {
-    const auto announced = it++;
-    const std::shared_ptr<Document> d =
-        _shared.documents->getDocument(announced->first);
-    if (d == nullptr) {
-      publishRemoval(_shared.documents->getDocumentUri(announced->first));
-      continue;
-    }
-    if (announced->second == 0) continue;   // nothing to clear
-    if (!d->diagnostics.empty()) continue;  // verdict intact: not stale
-    publish(*d);                            // the empty snapshot
-    announced->second = 0;
+  try {
+    _validated.push_back(document.id);
+  } catch (...) {
+    // Not recorded, and not validated again by the next build: the next
+    // drain announces every validated document instead.
+    _announceAll = true;
   }
 }
 
-// Every document validated since the last drain, once, clean or not. One
-// gone, or set back by a later write, is skipped: its next validation records
-// it again.
+// Clears the documents the client was shown something for and which are gone.
+// One still held keeps what the client shows until its next validation.
+void DefaultLanguageServer::clearRemoved() {
+  for (auto it = _announced.begin(); it != _announced.end();) {
+    const DocumentId id = *it++;
+    if (_shared.documents->getDocument(id) == nullptr)
+      publishRemoval(_shared.documents->getDocumentUri(id));
+  }
+}
+
+// Announces each document validated since the last drain, once, clean or not,
+// unless gone or set back since. After a failure or a lost record, the next
+// drain announces every validated document.
 void DefaultLanguageServer::publishValidated() {
   std::vector<DocumentId> validated;
+  bool all = false;
   {
     const std::scoped_lock lock(_validatedMutex);
     validated.swap(_validated);
+    all = std::exchange(_announceAll, false);
   }
-  std::ranges::sort(validated);
-  const auto repeated = std::ranges::unique(validated);
-  validated.erase(repeated.begin(), repeated.end());
-  for (const DocumentId id : validated) {
-    const std::shared_ptr<Document> d = _shared.documents->getDocument(id);
-    if (d != nullptr && d->state.load() == DocumentState::Validated)
-      announceDocument(*d);
+  try {
+    if (all) {
+      for (const std::shared_ptr<Document>& d : _shared.documents->all())
+        if (d->state.load() == DocumentState::Validated) announceDocument(*d);
+      return;
+    }
+    std::ranges::sort(validated);
+    const auto repeated = std::ranges::unique(validated);
+    validated.erase(repeated.begin(), repeated.end());
+    for (const DocumentId id : validated) {
+      const std::shared_ptr<Document> d = _shared.documents->getDocument(id);
+      if (d != nullptr && d->state.load() == DocumentState::Validated)
+        announceDocument(*d);
+    }
+  } catch (...) {
+    const std::scoped_lock lock(_validatedMutex);
+    _announceAll = true;
+    throw;
   }
 }
 
+// Recorded before publishing: a document the client may show is cleared once
+// gone.
 void DefaultLanguageServer::announceDocument(const Document& document) {
+  _announced.insert(document.id);
   publish(document);
-  _announced[document.id] = document.diagnostics.size();
 }
 
 void DefaultLanguageServer::publish(const Document& document) const {
   LanguageClient* client = _shared.languageClient.get();
-  if (client == nullptr) return;  // no session: nothing to notify
+  if (client == nullptr) return;
 
   lsp::PublishDiagnosticsParams params;
   params.uri = lsp::Uri::parse(document.uri);
@@ -1675,18 +1684,16 @@ void DefaultLanguageServer::publish(const Document& document) const {
       published.severity = to_lsp_severity(d.severity);
       if (!d.source.empty()) published.source = std::string(d.source);
       // `DiagnosticCode` is LSP's `integer | string`; the wire narrows the
-      // integer to `int` here, the one place the two shapes meet.
+      // integer to `int` here, the one place that handles both shapes.
       if (d.code.has_value()) {
         if (d.code->isString())
           published.code = d.code->string();
         else
           published.code = static_cast<int>(d.code->integer());
       }
-      // The machine payload rides along: LSP round-trips `data` untouched
-      // into `codeAction` requests, which is the quick-fix chain's wire.
+      // `data` comes back untouched in `codeAction` requests: it carries the
+      // quick fixes.
       if (d.data.has_value()) published.data = detail::to_lsp_any(*d.data);
-      // The href, wrapped: `codeDescription` carries only the URL on the core
-      // side, and LSP wants it inside a one-field object.
       if (d.codeDescription.has_value()) {
         lsp::CodeDescription description;
         description.href = lsp::Uri::parse(*d.codeDescription);
@@ -1699,10 +1706,8 @@ void DefaultLanguageServer::publish(const Document& document) const {
           tags.emplace_back(to_lsp_tag(tag));
         published.tags = std::move(tags);
       }
-      // Each row names its own document -- an empty `uri` means this
-      // one -- and its position is read through that document's own
-      // index, never this diagnostic's. An unheld document answers
-      // nothing.
+      // Each row names its own document (an empty `uri` means this one), whose
+      // index places it. An unheld document answers nothing.
       if (!d.relatedInformation.empty()) {
         std::vector<lsp::DiagnosticRelatedInformation> related;
         related.reserve(d.relatedInformation.size());
@@ -1728,16 +1733,16 @@ void DefaultLanguageServer::publish(const Document& document) const {
 }
 
 void DefaultLanguageServer::publishRemoval(std::string_view uri) {
-  // The announcement ledger forgets the document too: if the URI is
-  // recreated later, its first block is a first announcement again.
+  if (LanguageClient* client = _shared.languageClient.get()) {
+    lsp::PublishDiagnosticsParams params;
+    params.uri = lsp::Uri::parse(uri);
+    client->publishDiagnostics(std::move(params));
+  }
+  // Forgotten once the empty snapshot is out, so a failed one is sent again. A
+  // URI recreated later is announced anew.
   if (const DocumentId id = _shared.documents->getDocumentId(uri);
       id != kNoDocument)
     _announced.erase(id);
-  LanguageClient* client = _shared.languageClient.get();
-  if (client == nullptr) return;
-  lsp::PublishDiagnosticsParams params;
-  params.uri = lsp::Uri::parse(uri);
-  client->publishDiagnostics(std::move(params));
 }
 
 }  // namespace cursiv

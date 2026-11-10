@@ -1,5 +1,5 @@
-// An infix rule synthesizes its body, so its operands carry no directive to
-// refuse them: `left` and `right` hold a class the primary does not build.
+// An infix rule writes `left` and `right` itself: here they hold `Other`, a
+// class that neither the primary nor the infix rule builds.
 // expect LR: this member holds a node of its own type
 #pragma once
 
@@ -18,7 +18,6 @@ struct Bin : cursiv::Extends<cursiv::AstNode> {
 
 struct G : Base {
   struct NUM : terminal<some(d)> {};
-  // The climb builds `Bin`, never `Other`: no reading fills the two operands.
   struct Primary : rule<create<ast::Bin>(assign<&ast::Bin::op>(ref<NUM>))> {};
   struct Sum : infix<Primary, ast::Bin, (left(lit<"+">))> {};
   using entry = Sum;

@@ -1,19 +1,17 @@
-// What one action does to the tree, and the sentinel that names none. The
-// action itself is a type in the lowering; only its kind reaches a value.
+// What one action does to the tree. The action itself is a type in the
+// lowering; only its kind is a value.
 #pragma once
 
 #include <cstdint>
 
 namespace cursiv::engine {
 
-// "Names no chain" / "names no entry", one value for every column below.
+// A row column that names no chain or no entry.
 inline constexpr std::uint16_t kNoRow = 0xFFFFu;
 
-// A creation opens the record; the three writes (`assign`, `append`,
-// `flag`) fill one; a nest buries the current node under a new one; a
-// conversion turns the span's text into the value its rule returns. A climb
-// creates too, but from the record's own children. A close opens nothing and
-// still hands a node back, adopting what its body built.
+// `create` opens a record (`climb` an infix rule's), the writes fill it, `nest`
+// puts the current node under a new one, `convert` turns the span's text into
+// a value, and `close` returns the node its body built.
 enum class WriteKind : std::uint8_t {
   create,
   close,

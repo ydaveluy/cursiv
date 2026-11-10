@@ -1,5 +1,5 @@
-// The same two heads in the other order: a create absorbs what stands before
-// it, the call included.
+// An unassigned call to an AST rule, then a `create`: the alternative builds
+// two nodes.
 // expect LR: this alternative can create two nodes
 #pragma once
 

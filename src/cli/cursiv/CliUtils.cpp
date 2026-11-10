@@ -17,7 +17,6 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/utils/HostDirectory.hpp"
 #include "cursiv/cli.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/parser/Parser.hpp"
@@ -29,6 +28,8 @@
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/text/scalar_at.hpp"
+#include "cursiv/utils/HostDirectory.hpp"
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/utils/Utf8.hpp"
 #include "cursiv/workspace/Document.hpp"
@@ -76,50 +77,6 @@ constexpr std::string_view kHex = "0123456789abcdef";
 void flush_output(std::ostream& out) {
   out.flush();
   if (!out) throw std::ios_base::failure("cannot write CLI output");
-}
-
-// A leaf's text on one line: control characters are escaped, and a long
-// run is cut rather than wrapped -- before the UTF-8 sequence the limit falls
-// inside, never through it.
-void quote_text(std::ostream& out, std::string_view text) {
-  constexpr std::size_t kMaxQuoted = 60;
-  std::size_t shown = text.size();
-  if (shown > kMaxQuoted) {
-    shown = kMaxQuoted;
-    // A sequence has at most three continuation bytes.
-    while (shown > kMaxQuoted - 3 &&
-           (static_cast<unsigned char>(text[shown]) & 0xC0u) == 0x80u)
-      --shown;
-  }
-  out << '\'';
-  for (const char ch : text.substr(0, shown)) {
-    switch (ch) {
-      case '\n':
-        out << "\\n";
-        break;
-      case '\r':
-        out << "\\r";
-        break;
-      case '\t':
-        out << "\\t";
-        break;
-      case '\'':
-        out << "\\'";
-        break;
-      case '\\':
-        out << R"(\\)";
-        break;
-      default: {
-        const auto byte = static_cast<unsigned char>(ch);
-        if (byte < 0x20u || byte == 0x7fu)
-          out << "\\x" << kHex[byte >> 4] << kHex[byte & 0x0fu];
-        else
-          out << ch;
-      }
-    }
-  }
-  if (shown < text.size()) out << "...";
-  out << '\'';
 }
 
 // `help` wins over every other flag on the line. `root`, when set, is
@@ -366,8 +323,14 @@ void dump_cst(const Document& document, const Grammar& grammar,
     if (node.hidden != 0) out << " hidden";
     if (node.recovered != 0) out << " recovered";
     if (cst.childless(frame.id)) {
-      out << ' ';
-      quote_text(out, cst.text(frame.id));
+      // A long leaf is cut at 60 bytes, never inside a UTF-8 sequence.
+      const std::string_view text = cst.text(frame.id);
+      std::size_t shown = std::min<std::size_t>(text.size(), 60);
+      while (shown < text.size() && shown > 57 &&
+             (static_cast<unsigned char>(text[shown]) & 0xC0u) == 0x80u)
+        --shown;
+      out << ' ' << cursiv::quote(text.substr(0, shown))
+          << (shown < text.size() ? "..." : "");
     }
     out << '\n';
 
@@ -442,10 +405,9 @@ void write_json_offset(std::ostream& out, TextOffset offset) {
   out.write(digits, end - digits);
 }
 
-// The same tree as JSON, on one line: per node `element`, `begin` and `end`,
-// plus `type` (the AST class built there), `hidden` and `recovered` when set,
-// and `text` on a leaf. The text is not cut, since this form is meant to be
-// read back; ill-formed UTF-8 is replaced by U+FFFD in the output only.
+// The same tree as one line of JSON: per node `element`, `begin`, `end`, plus
+// `type`, `hidden` and `recovered` when set, and `text` on a leaf. Ill-formed
+// UTF-8 is written as U+FFFD.
 void dump_cst_json(const Document& document, const Grammar& grammar,
                    std::ostream& out) {
   const cursiv::Cst& cst = document.parseResult.cst();
@@ -454,10 +416,8 @@ void dump_cst_json(const Document& document, const Grammar& grammar,
     return;
   }
 
-  // Not `JsonValue`: its serializer recurses, which would let the
-  // document's nesting decide the native stack depth. A frame either opens
-  // a node (queuing its children) or closes the brackets a parent left
-  // open.
+  // Not `JsonValue`, whose serializer recurses: an explicit stack keeps deep
+  // documents off the native stack.
   struct Frame {
     cursiv::NodeId id;
     bool close;
@@ -488,8 +448,8 @@ void dump_cst_json(const Document& document, const Grammar& grammar,
     if (node.hidden != 0) out << ",\"hidden\":true";
     if (node.recovered != 0) out << ",\"recovered\":true";
     if (cst.childless(frame.id)) {
-      // Untruncated: `quote_text`'s 60-byte cut serves a human's terminal,
-      // this spelling serves a parser.
+      // Untruncated: the text dump's cut serves a human's terminal, this
+      // spelling serves a parser.
       out << ",\"text\":";
       write_json_string(out, cst.text(frame.id));
       out << '}';
@@ -532,8 +492,8 @@ int report(const Document& document, const Grammar& grammar,
 }  // namespace
 
 int run_command(const std::function<int()>& command) {
-  detail::enter_host_directory();
   try {
+    detail::enter_host_directory();
     const int status = command();
     flush_output(std::cout);
     return status;
@@ -542,6 +502,9 @@ int run_command(const std::function<int()>& command) {
     return kUsage;
   } catch (const std::exception& error) {
     std::cerr << "fatal: " << error.what() << '\n';
+    return kFatal;
+  } catch (...) {
+    std::cerr << "fatal: an unknown exception\n";
     return kFatal;
   }
 }
@@ -558,9 +521,8 @@ int run_cli_on(
     if (shared.fileSystemProvider == nullptr)
       shared.fileSystemProvider = std::make_unique<LocalFileSystemProvider>();
     install_default_shared_core_services(shared);
-    // The registry owns the languages; a container it merely pointed at
-    // would leave the routing table dangling once that statement ended. A
-    // language the registry refuses says why, as a fatal run does.
+    // The registry owns the languages. A language it refuses says why, as a
+    // fatal run does.
     if (registerLanguageServices && !registerLanguageServices(shared)) {
       std::cerr << "no language could be registered\n";
       return kFatal;

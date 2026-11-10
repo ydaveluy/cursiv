@@ -1,7 +1,7 @@
 #pragma once
 
-// Two readings of `c a` that part only below a left corner of twenty rungs:
-// one node over both tokens, or `c` and a node over `a`. Each rung lays one
+// Two readings of `c a` that split only below a left corner twenty rules deep:
+// one node over both tokens, or `c` and a node over `a`. Each rule adds one
 // word, so the corner's last word is all that orders the readings.
 
 #include "cursiv/grammar/GrammarSpec.hpp"

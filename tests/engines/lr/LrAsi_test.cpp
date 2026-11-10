@@ -127,18 +127,18 @@ void spell_op(const tasi::ops::ast::Node* n, std::string& out) {
   using namespace tasi::ops::ast;
   if (cursiv::ast_cast<Bin>(n) != nullptr) {
     out += '(';
-    spell_op(n->kids[0], out);
+    spell_op(n->children[0], out);
     out += n->op;
-    spell_op(n->kids[1], out);
+    spell_op(n->children[1], out);
     out += ')';
   } else if (cursiv::ast_cast<Pre>(n) != nullptr) {
     out += "(";
     out += n->op;
-    spell_op(n->kids[0], out);
+    spell_op(n->children[0], out);
     out += ")";
   } else if (cursiv::ast_cast<Post>(n) != nullptr) {
     out += "(";
-    spell_op(n->kids[0], out);
+    spell_op(n->children[0], out);
     out += n->op;
     out += ")";
   } else {
@@ -150,9 +150,9 @@ void spell_op(const tasi::ops::ast::Node* n, std::string& out) {
 bool tail(std::string_view text, std::string_view want) {
   return items<tasi::tail::ast::Doc>(
       "tailops ", text, want, [](const auto* item, std::string& got) {
-        for (const auto* const k : item->kids) {
+        for (const auto* const k : item->children) {
           if (!k->op.empty()) got += k->op;
-          got += k->kids.empty() ? k->name : k->kids[0]->name;
+          got += k->children.empty() ? k->name : k->children[0]->name;
         }
       });
 }
@@ -286,7 +286,7 @@ void statements() {
   CHECK(same("a / b / c++", "a/b/c++"));
   CHECK(same("return /ab/", "return(/ab/)"));
   CHECK(same("x = a / b", "<refused>"));
-  // A keyword that is also a name: the cell is elected by what follows.
+  // A keyword that is also a name: the cell is chosen by what follows.
   CHECK(same("go c", "go<c>"));
   CHECK(same("go\nc", "go c"));
   CHECK(same("go(c)", "<refused>"));  // the keyword, and `(` is no operand
@@ -356,18 +356,18 @@ bool clean(const Case& c, std::string_view body) {
   return r.accepted && r.diagnostics.empty();
 }
 
-// Whether a diagnostic names a token the parse lays, which no author types.
-bool names_laid(const Case& c, std::string_view body) {
+// Whether a diagnostic names a token the parse adds, which no author types.
+bool names_implied(const Case& c, std::string_view body) {
   const cursiv::Parser& p = c.p;
   const std::string text = c.text(body);
   const cursiv::ParseResult r = p.parse(text);
-  const auto laid = [&](cursiv::ElementId e) {
+  const auto is_implied = [&](cursiv::ElementId e) {
     return p.getGrammar().terminalName(e) == "implied";
   };
   for (const auto& d : r.diagnostics) {
-    if (laid(d.element)) return true;
+    if (is_implied(d.element)) return true;
     for (const cursiv::ElementId e : d.also)
-      if (laid(e)) return true;
+      if (is_implied(e)) return true;
   }
   return false;
 }
@@ -414,10 +414,10 @@ int main() {
   CHECK(clean(more, "bang a\nbang b"));
   CHECK(!clean(more, "bang a !\nbang b"));
   // A repair names the token an implied one stands for, never the implied.
-  CHECK(!names_laid(more, "begin a b end"));
-  CHECK(!names_laid(more, "loop x"));
-  CHECK(!names_laid(more, "bang a ! x"));
-  CHECK(!names_laid(spelled, "a b"));
+  CHECK(!names_implied(more, "begin a b end"));
+  CHECK(!names_implied(more, "loop x"));
+  CHECK(!names_implied(more, "bang a ! x"));
+  CHECK(!names_implied(spelled, "a b"));
   // A repair around an implied token finishes, and says something.
   {
     const std::string text = more.text("bang a !\nbang b ) use c\nuse d");
@@ -463,18 +463,18 @@ int main() {
   CHECK(offers_at(spelled, "{ a |", "}"));
   CHECK(!offers_at(spelled, "a |", "return"));
   CHECK(!names_at(spelled, "a |", "ID"));
-  // Two implied tokens owed at one position, and one before a keyword.
+  // Two implied tokens expected at one position, and one before a keyword.
   CHECK(offers_at(more, "loop\n|", "bang"));
   CHECK(offers_at(more, "begin a |", "end"));
-  // Behind the implied tokens `loop` owes, `end` glued to `begin` would lex
-  // as one word.
+  // After the implied tokens `loop` expects, `end` attached to `begin` would
+  // lex as one word.
   CHECK(offers_at(more, "loop\nbegin |", "end") &&
         !offers_at(more, "loop\nbegin|", "end"));
-  // The drive met the missing `)` with the implied `;` in hand, reduced by
-  // it: the replay finds the invented token where the drive did.
+  // The parser met the missing `)` with the implied `;` in hand, reduced by
+  // it: the replay finds the inserted token where the parser did.
   CHECK(offers_at(spelled, "{a(b}|", "return"));
   CHECK(offers_at(spelled, "{a(b} |", "return"));
-  // An implied `;` the tape laid before dropped text closed the statement.
+  // An implied `;` the tape added before dropped text closed the statement.
   CHECK(offers_at(spelled, "a\n@@ |", "return"));
   CHECK(!offers_at(spelled, "a\n@@ |", "("));
   // A statement that ends on no token wide ends where its last token did.
@@ -516,7 +516,7 @@ int main() {
   CHECK(optgap("go x; go !y;") == "x y");
   CHECK(optgap("go\nx;") == "<repaired>");
   CHECK(optgap("go\n!x;") == "<repaired>");
-  // The repair's reading refuses the empty option past the line as the drive
+  // The repair's reading refuses the empty option past the line as the parser
   // does: no name is read after it, and the rest of the line is given up.
   {
     const Case opt{cases(), "optgap "};
@@ -539,7 +539,7 @@ int main() {
     }
     CHECK(offers_at(close, "a |", ";") && !offers_at(close, "a\n|", ";"));
   }
-  // The goto that closes a rule lands by what held where the rule opened.
+  // The goto that closes a rule depends on what held where the rule opened.
   {
     const Case held{cases(), "held "};
     CHECK(offers_at(held, "ab|", "x") && !offers_at(held, "ab|", "y"));

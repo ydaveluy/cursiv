@@ -1,7 +1,5 @@
 // A precedence table, as the descent climbs it: an operand rule, the operators
-// that join two of them, and the three members one join writes. A chain of
-// binary operators is not a body -- spelled as one it would be left-recursive,
-// and spelled as a cascade it would be one near-identical rule per step.
+// that join two operands, and the three members a join writes.
 #pragma once
 
 #include <cstdint>
@@ -24,13 +22,13 @@ struct LlClimbOp {
 struct LlClimb {
   // The operand, a rule: a grammar's static checks refuse any other.
   std::uint16_t primary = kNoRow;
-  // The record one join lays, and what its three positions write into it.
+  // The record one join creates, and what its three positions write into it.
   std::uint16_t node = kNoRow;
   std::uint16_t leftRow = kNoRow, rightRow = kNoRow;
   std::uint16_t opBase = 0, opCount = 0;
   // The alphabet an operator is read with.
   std::uint16_t mode = kNoRow;
-  // The joins the three positions owe, as runs of the join pool: an operand
+  // The joins the three positions need, as runs of the join pool: an operand
   // hands back a record, and the side it stands on states its member over it.
   std::uint32_t leftBase = 0, leftCount = 0;
   std::uint32_t rightBase = 0, rightCount = 0;

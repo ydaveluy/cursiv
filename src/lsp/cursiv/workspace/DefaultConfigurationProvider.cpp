@@ -5,17 +5,19 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "cursiv/runtime/LanguageClient.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
-#include "cursiv/runtime/LanguageClient.hpp"
 #include "cursiv/workspace/ConfigurationProvider.hpp"
 #include "lsp/types.h"
 
@@ -47,9 +49,9 @@ std::vector<const cursiv::ValidationCategory*> detail::validation_categories(
     if (!name.isString()) continue;
     const std::string& spelled = name.string();
     const cursiv::ValidationCategory* found = nullptr;
-    // The shipped palette answers by name whether or not a check declared it
-    // yet -- "fast" always means cursiv's `fast` -- and the language's own
-    // inventions answer through the registry that filed them.
+    // The built-in categories match by name whether or not a check declared
+    // them yet ("fast" always means cursiv's `fast`); the language's own
+    // categories match through its registry.
     if (spelled == cursiv::built_in.description) {
       found = &cursiv::built_in;
     } else if (spelled == cursiv::fast.description) {
@@ -73,14 +75,38 @@ std::vector<const cursiv::ValidationCategory*> detail::validation_categories(
 DefaultConfigurationProvider::~DefaultConfigurationProvider() noexcept =
     default;
 
-bool DefaultConfigurationProvider::updateSectionConfiguration(
+std::optional<std::uint64_t>
+DefaultConfigurationProvider::updateSectionConfiguration(
     const std::string& section, lsp::LSPAny value) {
   const std::scoped_lock lock(_mutex);
   const auto previous = _bySection.find(section);
-  const bool changed =
-      previous == _bySection.end() || previous->second.value != value;
-  _bySection.insert_or_assign(section, Section{std::move(value), ++_revision});
-  return changed;
+  const bool changed = previous == _bySection.end() ||
+                       !previous->second.delivered ||
+                       previous->second.value != value;
+  _bySection.insert_or_assign(section,
+                              Section{std::move(value), ++_revision, !changed});
+  if (!changed) return std::nullopt;
+  return _revision;
+}
+
+void DefaultConfigurationProvider::deliver(std::string_view section,
+                                           const lsp::LSPAny& value,
+                                           std::uint64_t revision,
+                                           std::exception_ptr& failure) {
+  bool delivered = true;
+  for (ConfigurationSectionListener* listener : _listeners) {
+    try {
+      listener->onConfigurationSectionUpdate(section, value);
+    } catch (...) {
+      delivered = false;
+      if (!failure) failure = std::current_exception();
+    }
+  }
+  if (!delivered) return;
+  const std::scoped_lock lock(_mutex);
+  if (const auto at = _bySection.find(section);
+      at != _bySection.end() && at->second.revision == revision)
+    at->second.delivered = true;
 }
 
 std::vector<std::string> DefaultConfigurationProvider::sections() const {
@@ -105,12 +131,12 @@ void DefaultConfigurationProvider::initialize(
 }
 
 void DefaultConfigurationProvider::initialized(LanguageClient* client) {
-  // Nothing to pull is ready, immediately: a client that never answers
-  // `workspace/configuration` leaves every section unknown for the whole
-  // session, and saying so at once keeps a reader from waiting forever.
-  std::vector<std::string> names = sections();
   _client = client;
-  if (!_supported || client == nullptr || names.empty()) {
+  // Nothing to pull is ready at once, so no reader waits for a client that
+  // never answers. A detach, from a dying session, allocates nothing.
+  std::vector<std::string> names;
+  if (_supported && client != nullptr) names = sections();
+  if (names.empty()) {
     const std::scoped_lock lock(_mutex);
     ++_pullGeneration;
     _ready = true;
@@ -153,9 +179,7 @@ void DefaultConfigurationProvider::pullConfiguration(
     _ready = false;
   }
 
-  // No `scopeUri`: this is the workspace-level value of each section. A
-  // per-document scope would be one request per document per section, for a
-  // question nothing in this workspace asks per document.
+  // No `scopeUri`: the workspace-level value of each section.
   lsp::ConfigurationParams request;
   request.items.reserve(names.size());
   for (const std::string& name : names) {
@@ -178,21 +202,25 @@ void DefaultConfigurationProvider::pullConfiguration(
         {
           const std::scoped_lock lock(_mutex);
           if (generation != _pullGeneration) return;
+          changed.reserve(count);
           for (std::size_t i = 0; i < count; ++i) {
             const auto previous = _bySection.find(names[i]);
             if (previous != _bySection.end() &&
                 previous->second.revision > revision)
               continue;
-            if (previous == _bySection.end() ||
-                previous->second.value != values[i])
-              changed.push_back(i);
-            _bySection.insert_or_assign(names[i], Section{values[i], revision});
+            const bool toDeliver = previous == _bySection.end() ||
+                                   !previous->second.delivered ||
+                                   previous->second.value != values[i];
+            if (toDeliver) changed.push_back(i);
+            _bySection.insert_or_assign(
+                names[i], Section{values[i], revision, !toDeliver});
           }
           _ready = true;
         }
+        std::exception_ptr failure;
         for (const std::size_t i : changed)
-          for (ConfigurationSectionListener* listener : _listeners)
-            listener->onConfigurationSectionUpdate(names[i], values[i]);
+          deliver(names[i], values[i], revision, failure);
+        if (failure) std::rethrow_exception(failure);
       });
 }
 
@@ -206,14 +234,17 @@ void DefaultConfigurationProvider::updateConfiguration(
     return;
   }
   if (!params.settings.isObject()) return;
+  std::exception_ptr failure;
   for (const auto& [section, value] : params.settings.object()) {
     // A value sent again is no change, as for a pulled one: the language is
     // not revalidated for it.
-    if (!updateSectionConfiguration(section, value)) continue;
+    const std::optional<std::uint64_t> revision =
+        updateSectionConfiguration(section, value);
+    if (!revision) continue;
     // Notify outside the cache lock: listeners may read the new settings.
-    for (ConfigurationSectionListener* listener : _listeners)
-      listener->onConfigurationSectionUpdate(section, value);
+    deliver(section, value, *revision, failure);
   }
+  if (failure) std::rethrow_exception(failure);
 }
 
 std::optional<lsp::LSPAny> DefaultConfigurationProvider::getConfiguration(

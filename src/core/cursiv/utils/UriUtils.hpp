@@ -10,10 +10,9 @@
 
 namespace cursiv {
 
-// Stable for comparisons and map keys. A local file is `file:///path` whether
-// it came as `file:/path` or `file:///path`; a drive letter opening the path
-// is lowered and its colon escaped, on every host; the scheme and a host are
-// lower case.
+// Stable for comparisons and map keys: a local file is `file:///path`, a
+// leading drive letter is lowered with its colon escaped, and the scheme and
+// host are lower case.
 [[nodiscard]] std::string normalize_uri(std::string_view uri);
 
 [[nodiscard]] bool is_file_uri(std::string_view uri);
@@ -27,7 +26,7 @@ namespace cursiv {
 
 // Leading-dot form, lower-cased: `"Calc"` -> `".calc"`. Empty passes through.
 // The registration side of `uri_extension`'s convention -- a metadata spelling
-// and a URI spelling must land in the same row.
+// and a URI spelling must map to the same row.
 [[nodiscard]] std::string normalize_extension(std::string_view extension);
 
 // The POSIX extension of the decoded path, lower-cased: none for ".env", "."

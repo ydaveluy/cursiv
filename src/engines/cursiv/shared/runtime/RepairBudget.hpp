@@ -1,8 +1,6 @@
-// What a repair search prices and what it may spend: a gesture's cost, a
-// misspelling's, the tokens that validate a repair, and the work a parse's
-// repair is allowed -- in
-// reads, a floor and a share per byte for the whole parse, up to a ceiling
-// whatever its length, and the most one search takes of what is left.
+// What a repair search costs and may spend: an edit's cost, a
+// misspelling's, the tokens that validate a repair, and the reads a parse's
+// repairs are allowed, with the most one search takes of what is left.
 #pragma once
 
 #include <algorithm>
@@ -12,29 +10,28 @@
 
 namespace cursiv::engine {
 
-// The real tokens a reading takes past its last gesture before the repair
+// The real tokens a reading takes past its last edit before the repair
 // holds: a search's goal.
 inline constexpr std::uint32_t kRepairValidateShifts = 3;
 
-// What a gesture costs: a re-reading keeps the author's bytes where any other
-// invents or drops, so it is the least a gesture still owed can cost. The unit
-// is fine enough to price a misspelling by how much of its word it changes.
+// What an edit costs. A re-reading keeps the author's bytes where any other
+// edit inserts or drops, so it costs the least. The unit is fine enough to
+// price a misspelling by how much of its word it changes.
 inline constexpr std::uint32_t kRepairUnit = 4;
-inline constexpr std::uint32_t kRepairGesture = 2 * kRepairUnit;
+inline constexpr std::uint32_t kRepairEdit = 2 * kRepairUnit;
 inline constexpr std::uint32_t kRepairReread = kRepairUnit;
-static_assert(kRepairReread <= kRepairGesture,
-              "a re-reading is the least a gesture can cost");
+static_assert(kRepairReread <= kRepairEdit,
+              "a re-reading is the least an edit can cost");
 // A word read as a terminal it does not resemble: its deletion and the
-// terminal's insertion, made as one gesture.
-inline constexpr std::uint32_t kRepairReplace = 2 * kRepairGesture;
+// terminal's insertion, made as one edit.
+inline constexpr std::uint32_t kRepairReplace = 2 * kRepairEdit;
 // The bytes of a word each fault past its first takes: a word of fewer bytes
 // than that is a different word.
 inline constexpr std::uint32_t kRepairFaultBytes = 5;
 
-// What reading a word of `length` bytes as a terminal costs, with `faults`
-// faults between them: a re-reading for the first fault, and each further
-// fault its share of the word, up to `kRepairReplace` where the word is too
-// short for them -- one fault up to 4 bytes, two from 5, three from 10.
+// What re-reading a word of `length` bytes as a terminal costs with `faults`
+// faults, up to `kRepairReplace`: one fault up to 4 bytes, two from 5, three
+// from 10.
 constexpr std::uint32_t repair_typo_cost(std::uint32_t faults,
                                          std::uint32_t length) {
   const std::uint64_t extra =
@@ -49,7 +46,7 @@ static_assert(repair_typo_cost(2, 4) == kRepairReplace);
 static_assert(repair_typo_cost(2, 5) < kRepairReplace);
 static_assert(repair_typo_cost(3, 9) == kRepairReplace);
 static_assert(repair_typo_cost(3, 10) < kRepairReplace);
-static_assert(repair_typo_cost(2, 12) < 2 * kRepairGesture,
+static_assert(repair_typo_cost(2, 12) < 2 * kRepairEdit,
               "a word of 12 bytes two faults off is read as the terminal "
               "before it is replaced by one");
 
@@ -63,7 +60,7 @@ inline std::uint64_t repair_bytes(std::uint64_t work, std::uint64_t limit) {
                                                     : left * kRepairLexBytes;
 }
 
-// Bounds on work against the document, set on the recovery metric.
+// Work bounds per document, tuned on the recovery metric.
 inline constexpr std::uint64_t kRepairFloor = std::uint64_t{1} << 16;
 inline constexpr std::uint64_t kRepairPerByte = 64;
 // What bounds one search's work and memory within the parse's.

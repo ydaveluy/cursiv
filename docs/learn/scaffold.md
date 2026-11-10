@@ -82,7 +82,7 @@ extension loaded.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-DNAME=` | *required* | Grammar type. It and its lowercase form must be valid, non-reserved C++ identifiers. |
+| `-DNAME=` | *required* | Grammar type. It and its lowercase form must be valid, non-reserved C++ identifiers, and the lowercase form must not be `main`, `std`, `posix` or `cursiv`. |
 | `-DEXT=` | `.<id>` | File extension: a dot, then letters, digits or underscores. |
 | `-DDIR=` | `<id>` | Directory to create. If it exists, it must be empty. |
 | `-DCURSIV_TAG=` | `main` | Cursiv revision to fetch. |

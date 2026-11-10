@@ -12,10 +12,9 @@
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "requirements/ast.hpp"
 
-// The two checks a `.req` document owes. The second is the reason this
-// example exists: whether a requirement is covered is a fact about the other
-// language's documents, so it is computed once per build and memoised
-// workspace-wide.
+// The two checks of a `.req` document. Whether a requirement is covered
+// depends on the other language's documents, so it is computed once per build
+// for the whole workspace.
 
 namespace req {
 
@@ -40,10 +39,9 @@ class RequirementsValidator final : public cursiv::DefaultCoreService,
 
   [[nodiscard]] std::shared_ptr<const Covered> computeCoverage() const;
 
-  // A `.req` names no `.tst`, so an edited test relinks no requirement
-  // document, yet it can cover or uncover any requirement: an update that
-  // touches a document of another language sends every validated
-  // requirement document back to validation.
+  // Any update can cover or uncover a requirement without relinking its
+  // document, so it sends every validated requirement document back to
+  // validation.
   void onUpdate(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted) override;
 

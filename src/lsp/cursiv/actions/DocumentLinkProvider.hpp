@@ -7,9 +7,9 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 
-// The clickable paths a document writes -- an include, an import, a URL in
-// a comment. No default: only the grammar knows which text is a path, and
-// only the language knows what it resolves against.
+// The clickable paths of a document: an include, an import, a URL in a
+// comment. No default: only the language knows which text is a path and what
+// it resolves against.
 
 namespace cursiv {
 

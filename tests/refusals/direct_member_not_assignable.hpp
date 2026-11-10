@@ -10,17 +10,19 @@
 namespace refuse {
 
 namespace frozen {
-struct Seal {
+struct ConstText {
   const std::string text;
-  explicit Seal(std::string value) : text(std::move(value)) {}
+  explicit ConstText(std::string value) : text(std::move(value)) {}
 };
-inline Seal seal(std::string_view text) { return Seal(std::string(text)); }
+inline ConstText const_text(std::string_view text) {
+  return ConstText(std::string(text));
+}
 struct Node : cursiv::Extends<cursiv::AstNode> {
-  Seal value{"none"};
+  ConstText value{"none"};
 };
 }  // namespace frozen
 struct G : Base {
-  struct NAME : terminal<as<&frozen::seal>(some(cr<"a-z">))> {};
+  struct NAME : terminal<as<&frozen::const_text>(some(cr<"a-z">))> {};
   struct Root
       : rule<create<frozen::Node>(assign<&frozen::Node::value>(ref<NAME>))> {};
   using entry = Root;

@@ -1,7 +1,6 @@
 // Persistent sequences of 32-bit values under concatenation, balanced by
-// height. A node exists once: sequences joined alike share it, so identical
-// nodes are told by their ids, and two sequences meet at the first value that
-// differs without a hash concluding anything.
+// height. A node exists once, so equal nodes share one id, and two sequences
+// compare at their first differing value with no hash deciding.
 #pragma once
 
 #include <algorithm>
@@ -26,7 +25,6 @@ inline std::uint64_t gss_length_add(std::uint64_t a, std::uint64_t b) {
   return a + b;
 }
 
-// Nothing aggregated.
 struct LrGssNoAgg {
   static LrGssNoAgg join(const LrGssNoAgg&, const LrGssNoAgg&) { return {}; }
   bool operator==(const LrGssNoAgg&) const = default;
@@ -127,8 +125,8 @@ class LrGssRope {
     return join(a, b);
   }
 
-  // The join of `parts` in order. A few meet small ones first, so that a
-  // large one is copied once; many meet by halves.
+  // The join of `parts` in order. A few join small ones first, so that a
+  // large one is copied once; many join by halves.
   Id concat_all(std::vector<Id>& parts) {
     std::erase(parts, none);
     if (parts.size() > kFew) return halves(parts, 0, parts.size());
@@ -150,7 +148,7 @@ class LrGssRope {
   }
 
   // The first index whose value, with all those before it, satisfies `holds`
-  // -- a predicate prefixes only turn true --, or the length where none does.
+  // (true from some prefix on), or the length where none does.
   template <class Holds>
   [[nodiscard]] Length first_where(Id r, Holds&& holds) const {
     if (r == none) return 0;

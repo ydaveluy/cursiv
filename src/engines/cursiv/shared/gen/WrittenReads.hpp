@@ -1,7 +1,5 @@
 // What the grammar as written may read: whether an expression may match
-// nothing, and whether it may be nothing but a run. A rule's answer is the
-// least fixpoint over the rules a query reaches, solved when the generator
-// runs: one answer per rule, however the rules call each other.
+// nothing, or nothing but a run. A rule's answer is a least fixpoint.
 #pragma once
 
 #include <cstddef>
@@ -51,7 +49,7 @@ inline bool is_condition_node(const GrammarImage& image, ImageId id) {
       case ImageKind::assign:
       case ImageKind::append:
       case ImageKind::flag:
-        id = image.kids[n.first];
+        id = image.children[n.first];
         break;
       default:
         return false;
@@ -79,10 +77,10 @@ class WrittenReads {
 
   Slot& slot(std::uint32_t rule);
   bool reads_into(std::uint32_t rule);
-  bool nothing_of(ImageId node);
-  bool run_of(ImageId node);
+  Descent<bool> nothing_of(ImageId node);
+  Descent<bool> run_of(ImageId node);
   bool solve(std::uint32_t at);
-  void settle();
+  void solve_pending();
   template <class Ask>
   bool answer(Ask ask);
 

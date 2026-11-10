@@ -1,7 +1,5 @@
-// What offering a terminal beside others does to the lexer: it reads over a
-// terminal when its match runs past the one the other ends on, into a token
-// that may follow it -- the longest match takes the text the reading that goes
-// on would have read.
+// What offering a terminal beside others does to the lexer: it reads over one
+// when its match runs past where the other ends, into a token that may follow.
 #pragma once
 
 #include <algorithm>
@@ -19,7 +17,7 @@
 #include "cursiv/shared/gen/LexNfaPool.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
-#include "cursiv/shared/gen/lex_prefix_meets.hpp"
+#include "cursiv/shared/gen/lex_prefix_overlap.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 
@@ -40,9 +38,7 @@ class LexOvertakes {
   }
 
   // The terminals of `added` that, offered beside those of `kept` and the
-  // trivia, read over one of them, or over a trivia whose text they match, as
-  // the lexer elects the token: a caller that does not take the token reads
-  // that text as trivia, and the position past it is another's to answer.
+  // trivia, read over one of them, or over a trivia whose text they match.
   DynSet overtaking(const DynSet& added, const DynSet& kept) {
     DynSet fresh = added;
     fresh.andnot(kept);
@@ -67,7 +63,7 @@ class LexOvertakes {
   bool reads_over(unsigned a, const DynSet& beside) {
     sweep_on();
     if (_swept && !_open.test(a)) {
-      for (const std::uint16_t b : _meets[a])
+      for (const std::uint16_t b : _endsWithin[a])
         if (beside.test(b) &&
             (_asked[a].test(b) ? _past[a].test(b) : runs_past(b, a)))
           return true;
@@ -118,19 +114,19 @@ class LexOvertakes {
   std::vector<DynSet> _asked, _past;
   // The terminals `reads_over` has still to ask, kept to reuse its words.
   DynSet _ask;
-  // Per terminal `a`, the terminals that end on a text `a` stands on, ascending,
+  // Per terminal `a`, the terminals that end on a text `a` stands on, in order,
   // and those whose relays leave what they read to a walk of their own.
-  std::vector<std::vector<std::uint16_t>> _meets;
+  std::vector<std::vector<std::uint16_t>> _endsWithin;
   DynSet _open;
   bool _swept = false, _sweepOver = false;
   // What the sweep has yet to read, and what it has found.
   using Item = std::uint64_t;  // terminal << 32 | state, ascending
-  std::vector<DynSet> _sweepMeets;
+  std::vector<DynSet> _sweepEndsWithin;
   std::vector<std::vector<Item>> _sweepWork;
   std::unordered_set<std::vector<Item>, VecHash> _sweepSeen;
   std::size_t _sweepAt = 0, _sweepItems = 0;
   std::uint64_t _walks = 0;
-  // The graph states stepped; the sweep's opening is charged before it is read.
+  // The graph states stepped; the sweep's opening is counted before it is read.
   std::uint64_t _walkReads = 0, _sweepReads = 0;
   // Per terminal, where a token that may follow it starts, once asked.
   std::vector<std::vector<int>> _next;
@@ -152,24 +148,16 @@ class LexOvertakes {
     return out;
   }
 
-  // Reads every terminal's graph at once, each subset of them once: `a` can
-  // only run past a text `b` ends on where the two stand together. A pair this
-  // rules out is one a walk finds nothing for: it steps the same subsets, and
-  // has as many pairs at most as there are subsets here, short of its budget.
-  //
-  // Whether it pays depends on the walks still to come, which nothing says, and
-  // on how far its subsets multiply. So the walks pay for it: it reads as many
-  // states as they have read, and waits where it stands until they read more. A
-  // grammar pays at most that, however its subsets multiply, and one that goes
-  // on asking has the sweep once the walks have read its size. Past the limits
-  // below, every pair is left to its walk.
+  // Reads every terminal's graph at once, each subset once, to rule out the
+  // pairs that never stand together. It reads only as many states as the pair
+  // walks have read so far; past the limits below, pairs are left to the walks.
   void sweep_on() {
     while (!_sweepOver && _sweepReads < _walkReads) sweep_step();
   }
 
   void sweep_open() {
     const std::size_t nterms = _g.nterms;
-    _sweepMeets.resize(nterms);
+    _sweepEndsWithin.resize(nterms);
     // A terminal that holds a relay reads what no subset says.
     std::vector<unsigned> held(_nfa.s.size(), 0);
     std::vector<int> todo;
@@ -202,7 +190,7 @@ class LexOvertakes {
     _sweepOver = true;
     _sweepWork = {};
     _sweepSeen = {};
-    _sweepMeets = {};
+    _sweepEndsWithin = {};
   }
 
   // Reads one subset, the first of them after the sweep's opening.
@@ -210,12 +198,12 @@ class LexOvertakes {
     constexpr std::size_t kMostSubsets = 20000, kMostItems = std::size_t{1} << 22;
     if (_sweepWork.empty()) sweep_open();
     if (_sweepAt == _sweepWork.size()) {
-      _meets.resize(_g.nterms);
+      _endsWithin.resize(_g.nterms);
       for (std::size_t a = 0; a < _g.nterms; ++a) {
-        _sweepMeets[a] |= _open;
-        each_bit(_sweepMeets[a].w.data(), _sweepMeets[a].w.size(),
+        _sweepEndsWithin[a] |= _open;
+        each_bit(_sweepEndsWithin[a].w.data(), _sweepEndsWithin[a].w.size(),
                  [&](std::size_t b) {
-                   _meets[a].push_back(static_cast<std::uint16_t>(b));
+                   _endsWithin[a].push_back(static_cast<std::uint16_t>(b));
                  });
       }
       _swept = true;
@@ -247,19 +235,19 @@ class LexOvertakes {
     }
     _sweepReads += ending.size() * standing.size();
     for (const unsigned b : ending)
-      for (const unsigned a : standing) _sweepMeets[a].set(b);
-    // Bytes every edge of the subset reads alike step it alike.
+      for (const unsigned a : standing) _sweepEndsWithin[a].set(b);
+    // Bytes every edge of the subset reads the same step it the same.
     for (unsigned c = 0; c < 256; ++c) {
       const auto byte = static_cast<unsigned char>(c);
       if (!left.has(byte)) continue;
       _sweepReads += at.size();
-      ByteSet alike = left;
+      ByteSet together = left;
       for (const ByteSet& on : reads)
         if (on.has(byte))
-          alike &= on;
+          together &= on;
         else
-          alike.andnot(on);
-      left.andnot(alike);
+          together.andnot(on);
+      left.andnot(together);
       std::vector<Item> next;
       for (std::size_t k = 0; k < at.size();) {
         const std::uint64_t t = at[k] >> 32;
@@ -370,9 +358,9 @@ class LexOvertakes {
         const auto byte = static_cast<unsigned char>(c);
         if (!left.has(byte)) continue;
         _walkReads += ra.size() + rx.size();
-        // Every edge of both subsets reads the bytes of `alike` as it reads
+        // Every edge of both subsets reads the bytes of `together` as it reads
         // `byte`: they step where it steps, and are taken with it.
-        ByteSet alike = left;
+        ByteSet together = left;
         for (const std::vector<int>* sub : {&ra, &rx})
           for (const int x : *sub) {
             const LexNfaState& st = _nfa.s[static_cast<std::size_t>(x)];
@@ -380,11 +368,11 @@ class LexOvertakes {
             ByteSet on = sets[st.set];
             if (st.minus >= 0) on.andnot(sets[st.minus]);
             if (on.has(byte))
-              alike &= on;
+              together &= on;
             else
-              alike.andnot(on);
+              together.andnot(on);
           }
-        left.andnot(alike);
+        left.andnot(together);
         auto na = lex_nfa_step(_nfa, sets, ra, byte);
         auto nx = lex_nfa_step(_nfa, sets, rx, byte);
         if (na.empty() || nx.empty()) continue;

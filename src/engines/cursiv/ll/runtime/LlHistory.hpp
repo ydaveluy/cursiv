@@ -1,9 +1,6 @@
-// Histories share both prefixes and continuations. A history is a balanced
-// tree of runs -- one event repeated -- followed by a short queue. Complete
-// histories are interned by their events, even when concatenation gave their
-// trees different shapes: equality is identity, never a digest. Most appends
-// cost a link; a full queue goes into the tree once, for every history that
-// goes on from it. Concatenation copies only paths in the balanced trees.
+// Histories share prefixes and continuations: a balanced tree of runs of one
+// event, then a short queue, interned by their events, so equality is identity.
+// Appends mostly cost a link; concatenation copies only tree paths.
 #pragma once
 
 #include <algorithm>
@@ -11,6 +8,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <stdexcept>
 #include <vector>
 
@@ -24,7 +22,7 @@ class LlHistory {
   static constexpr Node kRoot = 0;
 
   struct Event {
-    std::uint32_t word = 0, at = 0, lull = 0;
+    std::uint32_t word = 0, at = 0, zeroWidth = 0;
     bool operator==(const Event&) const = default;
   };
 
@@ -54,8 +52,8 @@ class LlHistory {
   Event last(Node n) const { return _heads.rows[n].event; }
 
   Node append(Node n, std::uint32_t word, std::uint32_t at = 0,
-              std::uint32_t lull = 0) {
-    const Event e{word, at, lull};
+              std::uint32_t zeroWidth = 0) {
+    const Event e{word, at, zeroWidth};
     const Head h = _heads.rows[n];
     if (h.size == ~std::uint32_t{0}) throw too_long();
     if (h.queued < kTail)
@@ -75,7 +73,7 @@ class LlHistory {
       for (std::uint32_t up = h.size - d; up != 0; --up) n = _heads.rows[n].up;
       if (n != kRoot) return n;
     }
-    return settle(h.tree, d);
+    return node_of(h.tree, d);
   }
 
   bool starts_with(Node n, Node prefix) const {
@@ -95,20 +93,23 @@ class LlHistory {
     return shared == depth(b) ? b : ancestor(a, shared);
   }
 
-  // The words of the first events where two histories differ; false where
-  // one runs into the other. Names no prefix, unlike `common`.
+  // The first words where two histories part, positions aside; false where the
+  // words of one run into the other's. Names no prefix, unlike `common`.
   bool parts(Node a, Node b, std::uint32_t& wordA, std::uint32_t& wordB) const {
     if (a == b) return false;
     std::uint32_t shared = 0;
     Event x, y;
-    if (!diverge(a, b, shared, x, y)) return false;
+    if (!diverge(a, b, shared, x, y, [](const Event& p, const Event& q) {
+          return p.word == q.word;
+        }))
+      return false;
     wordA = x.word;
     wordB = y.word;
     return true;
   }
 
-  // Positions distinguish histories. At their first differing event only
-  // its word ranks them; positions add no tie breaker.
+  // Positions distinguish histories but never rank them: their words do, in
+  // order, the shorter first where one runs into the other.
   bool before(Node a, Node b) const {
     std::uint32_t x = 0, y = 0;
     if (parts(a, b, x, y)) return x < y;
@@ -117,7 +118,7 @@ class LlHistory {
 
   // `base` followed by what `to` took after `from`; all of `to` where `from`
   // does not start it.
-  Node graft(Node base, Node from, Node to) {
+  Node rebase(Node base, Node from, Node to) {
     if (from == to) return base;
     const std::uint32_t skip = starts_with(to, from) ? depth(from) : 0;
     if (base == from && skip == depth(from)) return to;
@@ -145,11 +146,11 @@ class LlHistory {
       } else {
         kept = tree_concat(whole(base), tree_drop(tree, skip));
       }
-      return settle(kept, weight(kept), tail.data(), queued);
+      return node_of(kept, weight(kept), tail.data(), queued);
     }
     Node result = base;
     for (std::uint32_t k = skip - treed; k < queued; ++k)
-      result = append(result, tail[k].word, tail[k].at, tail[k].lull);
+      result = append(result, tail[k].word, tail[k].at, tail[k].zeroWidth);
     return result;
   }
 
@@ -178,7 +179,7 @@ class LlHistory {
     return h * 0x9E3779B97F4A7C15ull;
   }
   static std::uint64_t hash(const Event& e) {
-    auto h = (std::uint64_t{e.word} << 32 | e.at) ^ mix(e.lull);
+    auto h = (std::uint64_t{e.word} << 32 | e.at) ^ mix(e.zeroWidth);
     h = (h ^ (h >> 30)) * 0xBF58476D1CE4E5B9ull;
     h = (h ^ (h >> 27)) * 0x94D049BB133111EBull;
     return h ^ (h >> 31);
@@ -204,10 +205,9 @@ class LlHistory {
                  LlHistory::hash(event) ^ count);
     }
   };
-  // A history: its tree, then one to `kTail` events chained, the last one
-  // here and the others `up`. `up` is the history without its last event --
-  // for the first one queued, where that is known, else the root. `whole`
-  // holds all its events as one tree once asked.
+  // A history: its tree, then one to `kTail` queued events, the last one here
+  // and the others up the `up` chain. `whole` holds all its events as one tree
+  // once asked.
   struct Head {
     Id tree = 0;
     Node up = kRoot;
@@ -275,8 +275,8 @@ class LlHistory {
 
   // The history of the first `d` events of `tree`, then the `k` events of
   // `more` where `d` takes them all: one to `kTail` last ones queued.
-  Node settle(Id tree, std::uint32_t d, const Event* more = nullptr,
-              std::uint32_t k = 0) const {
+  Node node_of(Id tree, std::uint32_t d, const Event* more = nullptr,
+               std::uint32_t k = 0) const {
     if (d > ~std::uint32_t{0} - k) throw too_long();
     const std::uint32_t size = d + k;
     if (size == 0) return kRoot;
@@ -356,8 +356,7 @@ class LlHistory {
     });
   }
 
-  // AVL runs: equal events at different positions cannot skew the tree, as
-  // they would in a treap whose priority depended only on the event's value.
+  // AVL-balanced, so equal events at different positions cannot skew the tree.
   std::uint32_t weight(Id t) const { return _trees.rows[t].size; }
   std::uint32_t height(Id t) const { return _trees.rows[t].height; }
   Id make(Id left, const Event& event, std::uint32_t count, Id right) const {
@@ -552,7 +551,7 @@ class LlHistory {
   }
 
   // The pieces of `n` to walk, its first on top.
-  void lay(std::vector<Piece>& stack, Node n) const {
+  void push_pieces(std::vector<Piece>& stack, Node n) const {
     stack.clear();
     const Id tree = _heads.rows[n].tree;
     for (std::uint32_t k = _heads.rows[n].queued; k-- > 0;
@@ -573,32 +572,35 @@ class LlHistory {
     Event x, y;
     return !part(shared, x, y);
   }
-  // How many events `a` and `b` share first, and where they part the event
-  // each has there: false where one runs into the other. Identical shared
-  // subtrees are passed over whole; other shapes are compared by their runs.
+  // How many events `a` and `b` share first, and the events where they part;
+  // false where one runs into the other. `same` compares two events. Shared
+  // subtrees are passed over whole.
+  template <class Same = std::equal_to<>>
   bool diverge(Node a, Node b, std::uint32_t& shared, Event& eventA,
-               Event& eventB) const {
+               Event& eventB, Same same = {}) const {
     if (_heads.rows[a].tree == _heads.rows[b].tree) {
       // Siblings: one tree, and the few events past it.
       std::array<Event, kTail> ta{}, tb{};
       const std::uint32_t na = tail_events(a, ta), nb = tail_events(b, tb);
       shared = weight(_heads.rows[a].tree);
       for (std::uint32_t k = 0; k < na && k < nb; ++k, ++shared)
-        if (!(ta[k] == tb[k])) {
+        if (!same(ta[k], tb[k])) {
           eventA = ta[k];
           eventB = tb[k];
           return true;
         }
       return false;
     }
-    lay(_walkA, a);
-    lay(_walkB, b);
+    push_pieces(_walkA, a);
+    push_pieces(_walkB, b);
     shared = 0;
-    return part(shared, eventA, eventB);
+    return part(shared, eventA, eventB, same);
   }
-  // The pieces laid in `_walkA` and `_walkB` walked side by side, as `diverge`
-  // walks two histories.
-  bool part(std::uint32_t& shared, Event& eventA, Event& eventB) const {
+  // The pieces placed in `_walkA` and `_walkB`, walked side by side as
+  // `diverge` walks two histories.
+  template <class Same = std::equal_to<>>
+  bool part(std::uint32_t& shared, Event& eventA, Event& eventB,
+            Same same = {}) const {
     std::vector<Piece>& x = _walkA;
     std::vector<Piece>& y = _walkB;
     while (!x.empty() && !y.empty()) {
@@ -617,7 +619,7 @@ class LlHistory {
         const Id t = q.tree;
         y.pop_back();
         open(y, t);
-      } else if (!(p.event == q.event)) {
+      } else if (!same(p.event, q.event)) {
         eventA = p.event;
         eventB = q.event;
         return true;

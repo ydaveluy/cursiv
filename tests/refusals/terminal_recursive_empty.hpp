@@ -1,3 +1,4 @@
+// A recursive terminal whose whole body is optional.
 // expect LR: terminal .EMPTY. matches the empty string
 #pragma once
 

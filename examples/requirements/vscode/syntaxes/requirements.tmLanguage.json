@@ -9,8 +9,7 @@
       "include": "#comments"
     },
     {
-      "name": "keyword.control.requirements-lang",
-      "match": "(?i)\\b(applicable|contact|environment|for|req)\\b"
+      "include": "#keywords"
     },
     {
       "name": "string.quoted.double.requirements-lang",
@@ -36,6 +35,10 @@
     }
   ],
   "repository": {
+    "keywords": {
+      "name": "keyword.control.requirements-lang",
+      "match": "(?i)\\b(environment|applicable|contact|for|req)\\b"
+    },
     "comments": {
       "patterns": [
         {

@@ -44,11 +44,8 @@ struct NameRole {
   bool repaired = false;
 };
 
-// The role of the innermost visible record spanning exactly `[begin, end)`
-// and writing a member. Such a record lies, in postorder, between the first
-// leaf reaching `begin` and the first record running past `end`, children
-// before parents, so the first one found is the innermost. Absent when no
-// such record exists.
+// The role of the innermost visible record that spans exactly `[begin, end)`
+// and writes a member; none if there is no such record.
 [[nodiscard]] std::optional<NameRole> name_role_at(const Cst& cst,
                                                    TextOffset begin,
                                                    TextOffset end) {
@@ -91,15 +88,16 @@ std::optional<lsp::Range> DefaultRenameProvider::prepareRename(
 }
 
 bool DefaultRenameProvider::isNameOfLanguage(
-    const Document& home, std::span<const TextRange> spans,
+    const Document& declaringDocument, std::span<const TextRange> spans,
     std::string_view newName, const CancellationToken& token) const {
   // A zero-width record may span an empty substitution; reject empty names
   // explicitly, independently of what the parser recovers.
   if (newName.empty()) return false;
-  if (home.language == nullptr || !home.hasAst()) return false;
-  const std::string_view text = home.textDocument().getText();
+  if (declaringDocument.language == nullptr || !declaringDocument.hasAst())
+    return false;
+  const std::string_view text = declaringDocument.textDocument().getText();
 
-  // Every substitution at once, as the edits will land: two sites may read
+  // Every substitution at once, as the edits apply: two sites may read
   // differently side by side than alone.
   std::string candidate;
   TextOffset copied = 0;
@@ -112,20 +110,17 @@ bool DefaultRenameProvider::isNameOfLanguage(
   }
   candidate.append(text.substr(copied));
   // The tree slices `candidate`, so both live exactly as long as this frame.
-  const ParseResult reparsed = home.language->parser->parse(candidate, token);
+  const ParseResult reparsed =
+      declaringDocument.language->parser->parse(candidate, token);
 
-  const ParseResult& before = home.parseResult;
+  const ParseResult& before = declaringDocument.parseResult;
   if (before.accepted && !reparsed.accepted) return false;
   // Under recovery a parse accepts anything and pays for it in diagnostics, so
   // the count is the real verdict and `accepted` alone would pass a keyword.
   if (reparsed.diagnostics.size() > before.diagnostics.size()) return false;
 
-  // The count is not enough either: a repaired document can read a number or
-  // a whole expression where the name stood, at no extra cost. Each
-  // replacement must keep its own record, not be consumed with surrounding
-  // text (for example by a comment it opened), and that record must write
-  // what the old name wrote, with no part of it repaired. The old name may
-  // have needed a repair: renaming it is how the author fixes it.
+  // Each replacement must keep a record of its own, with no repaired part, that
+  // writes what the old name wrote. The old name may itself have been repaired.
   const auto length = static_cast<TextOffset>(newName.size());
   TextOffset at = 0;
   copied = 0;
@@ -175,13 +170,14 @@ std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
   // A declaration that writes no name has none to rename: its site would be
   // its whole record.
   const AstNode* target = found.targets.front();
-  const Document* home = target->getDocument();
-  if (home == nullptr) return std::nullopt;
-  const CoreServices* declaring = home->language;
+  const Document* declaringDocument = target->getDocument();
+  if (declaringDocument == nullptr) return std::nullopt;
+  const CoreServices* declaring = declaringDocument->language;
   const NameProvider* names =
       declaring == nullptr ? nullptr : declaring->nameProvider.get();
   if (const std::optional<CstNodeView> declared =
-          names == nullptr ? std::nullopt : names->getNameNode(*target, home);
+          names == nullptr ? std::nullopt
+                           : names->getNameNode(*target, declaringDocument);
       !declared || !*declared)
     return std::nullopt;
 
@@ -193,10 +189,8 @@ std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
           },
           token);
 
-  // Every document the edits touch is read back with all its substitutions
-  // made, by its own language: what lexes as a name in the declaring grammar
-  // may be a keyword in another, and a reference may read differently from
-  // the declaration. A refusal is the whole rename's. Rows come grouped by
+  // Each touched document is read back with all its substitutions, by its own
+  // language; one refusal refuses the whole rename. Rows come grouped by
   // document, in document order.
   std::vector<TextRange> spans;
   for (auto row = rows.begin(); row != rows.end();) {
@@ -212,9 +206,8 @@ std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
 
   lsp::WorkspaceEdit edit;
   lsp::Map<lsp::DocumentUri, lsp::Array<lsp::TextEdit>> changes;
-  // The declaration and every reference, which is what `includeDeclaration`
-  // buys: a rename that rewrote only the references would leave the workspace
-  // pointing at a name nothing declares.
+  // The declaration and every reference: renaming only the references would
+  // leave them pointing at a name nothing declares.
   for (lsp::Location& location : detail::reference_locations(store, rows)) {
     throw_if_cancelled(token);
     lsp::TextEdit rewrite;

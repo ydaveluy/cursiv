@@ -34,7 +34,7 @@ struct LexModes {
   // `intern` compares, and the comparison stays exact.
   ChainIndex index;
 
-  // A program laid by hand names only the grammar's trivia.
+  // A program written by hand names only the grammar's trivia.
   template <class Cfg>
   explicit LexModes(const Cfg& g)
       : skips(std::max<std::size_t>(g.cfgTriviaAt.size(), 2) - 1) {
@@ -100,9 +100,9 @@ struct LexModes {
     std::vector out(own.size(), err);
     for (std::size_t k = 0; k < own.size(); ++k)
       for (std::uint32_t i = g.cfgTriviaAt[k]; i < g.cfgTriviaAt[k + 1]; ++i)
-        own[g.cfgHome[k]].set(g.cfgTrivia[i]);
+        own[g.cfgSection[k]].set(g.cfgTrivia[i]);
     for (std::size_t h = 1; h < own.size(); ++h)
-      if (g.cfgHome[h] == h) {
+      if (g.cfgSection[h] == h) {
         own[h].set(g.cfgEnd[h]);
         out[h] = intern(own[h]);
       }

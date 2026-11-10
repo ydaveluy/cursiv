@@ -36,15 +36,16 @@ struct LexNfaBuild {
   Intern internName;
   std::vector<std::uint8_t> calls = lex_call_ancestors(g);
 
-  // What a branch of a terminal reads, as a mask: the tiers its readings rank
-  // at.
+  // What a branch of a terminal reads, as a mask: the priorities its readings
+  // rank at.
   static constexpr unsigned kPattern = 1, kLiteral = 2, kKeyword = 4;
 
-  unsigned tiers_of(std::uint16_t node) const {
+  unsigned priorities_of(std::uint16_t node) const {
     const LexNode& e = g.lex[node];
     if (e.kind == LexKind::alt) {
       auto out = 0u;
-      for (unsigned i = 0; i < e.b; ++i) out |= tiers_of(g.lexKid[e.a + i]);
+      for (unsigned i = 0; i < e.b; ++i)
+        out |= priorities_of(g.lexChild[e.a + i]);
       return out;
     }
     if (const auto own = LexKeywordCut::shape(g, node); own.any && own.all)
@@ -54,12 +55,12 @@ struct LexNfaBuild {
     auto core = 0u;
     std::uint16_t only = 0;
     for (unsigned i = 0; i < e.b; ++i) {
-      const auto kid = g.lexKid[e.a + i];
-      if (is_condition(g.lex[kid].kind)) continue;
+      const auto child = g.lexChild[e.a + i];
+      if (is_condition(g.lex[child].kind)) continue;
       ++core;
-      only = kid;
+      only = child;
     }
-    return core == 1 ? tiers_of(only) : kPattern;
+    return core == 1 ? priorities_of(only) : kPattern;
   }
 
   // Whether every class a node can end on breaks `run`, for the fence in
@@ -72,14 +73,14 @@ struct LexNfaBuild {
         return !g.sets[e.a].intersects(run);
       case LexKind::seq:
         for (unsigned i = e.b; i-- > 0;) {
-          const std::uint16_t kid = g.lexKid[e.a + i];
-          if (g.lex[kid].kind == LexKind::nguard) continue;
-          return ends_apart(kid, run);
+          const std::uint16_t child = g.lexChild[e.a + i];
+          if (g.lex[child].kind == LexKind::nguard) continue;
+          return ends_apart(child, run);
         }
         return false;
       case LexKind::alt:
         for (unsigned i = 0; i < e.b; ++i)
-          if (!ends_apart(g.lexKid[e.a + i], run)) return false;
+          if (!ends_apart(g.lexChild[e.a + i], run)) return false;
         return true;
       default:
         return false;
@@ -97,15 +98,15 @@ struct LexNfaBuild {
                    std::uint16_t after, std::uint16_t pad, RelayShape& shape) {
     if (q.kind != LexKind::seq || q.b < 3 || at == 0 || at + 1 >= q.b)
       return false;
-    const auto& mark = g.lex[g.lexKid[q.a + at]];
+    const auto& mark = g.lex[g.lexChild[q.a + at]];
     if (mark.kind != LexKind::mark) return false;
     const auto& run = g.lex[mark.a];
     if (run.kind != LexKind::rep || g.lex[run.a].kind != LexKind::chars)
       return false;
     const auto markSet = g.lex[run.a].a;
-    const auto fence = LexRelayGen::literal_size(g, g.lexKid[q.a + at + 1]);
+    const auto fence = LexRelayGen::literal_size(g, g.lexChild[q.a + at + 1]);
     if (!fence) return false;
-    if (!ends_apart(g.lexKid[q.a + at - 1], g.sets[markSet])) return false;
+    if (!ends_apart(g.lexChild[q.a + at - 1], g.sets[markSet])) return false;
     if ((before != kNoLexNode &&
          !LexRelayGen::literal(g, before, shape.before)) ||
         (after != kNoLexNode && !LexRelayGen::literal(g, after, shape.after)))
@@ -127,8 +128,8 @@ struct LexNfaBuild {
     return true;
   }
 
-  // One relay, from the sequence `q` whose kid `at` is the mark and whose next
-  // kid is the fence; the walk resumes at `resumeOut`.
+  // One relay, from the sequence `q` whose child `at` is the mark and whose
+  // next child is the fence; the walk resumes at `resumeOut`.
   int relay(const LexNode& q, unsigned at, int resumeOut, std::uint16_t before,
             std::uint16_t after, std::uint16_t pad, bool closes) {
     RelayShape shape;
@@ -136,7 +137,7 @@ struct LexNfaBuild {
       throw std::logic_error("cursiv: an echo needs recognition");
     auto& row = shape.relay.row;
     row.term = n.term;
-    row.tier = _tier;
+    row.priority = _priority;
     row.closes = closes;
     if (before != kNoLexNode) {
       row.beforeOff = internName(g, shape.before);
@@ -152,7 +153,7 @@ struct LexNfaBuild {
   // The shape checked before reification contains only literal leaves.
   void lit_list(std::uint16_t node, std::vector<std::string>& out) const {
     if (const LexNode& e = g.lex[node]; e.kind == LexKind::alt) {
-      for (unsigned i = 0; i < e.b; ++i) lit_list(g.lexKid[e.a + i], out);
+      for (unsigned i = 0; i < e.b; ++i) lit_list(g.lexChild[e.a + i], out);
       return;
     }
     std::string bytes;
@@ -180,7 +181,7 @@ struct LexNfaBuild {
     const std::string before = side(o), after = side(c);
     LexRelayBuild r;
     r.row.term = n.term;
-    r.row.tier = _tier;
+    r.row.priority = _priority;
     r.row.closes = true;
     r.row.nested = true;
     r.row.beforeOff = internName(g, before);
@@ -205,7 +206,7 @@ struct LexNfaBuild {
     }
     LexRelayBuild r;
     r.row.term = n.term;
-    r.row.tier = _tier;
+    r.row.priority = _priority;
     r.row.recognition = node;
     const int resume = n.relay(lex_push_relay(n, r, out));
     const auto [bytes, empty] = lex_first_bytes(g, node);
@@ -219,7 +220,7 @@ struct LexNfaBuild {
     if (e.kind == LexKind::positive || e.kind == LexKind::negative) return true;
     if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
       for (unsigned i = 0; i < e.b; ++i)
-        if (assertions(g.lexKid[e.a + i])) return true;
+        if (assertions(g.lexChild[e.a + i])) return true;
     } else if (e.kind == LexKind::rep || e.kind == LexKind::mark ||
                e.kind == LexKind::through_lit ||
                e.kind == LexKind::through_same) {
@@ -243,7 +244,7 @@ struct LexNfaBuild {
       case LexKind::seq:
       case LexKind::alt:
         for (unsigned i = 0; i < e.b && !answer; ++i)
-          answer = word_guard(g.lexKid[e.a + i]);
+          answer = word_guard(g.lexChild[e.a + i]);
         break;
       case LexKind::rep:
         answer = e.max != 0 && word_guard(e.a);
@@ -272,14 +273,15 @@ struct LexNfaBuild {
       switch (e.kind) {
         case LexKind::seq:
           for (unsigned i = 0; i < e.b; ++i) {
-            const auto kid = g.lexKid[e.a + i];
-            if (g.lex[kid].kind == LexKind::same) {
+            const auto child = g.lexChild[e.a + i];
+            if (g.lex[child].kind == LexKind::same) {
               RelayShape shape;
-              if (i < 2 || g.lex[g.lexKid[e.a + i - 2]].min != g.lex[kid].min ||
+              if (i < 2 ||
+                  g.lex[g.lexChild[e.a + i - 2]].min != g.lex[child].min ||
                   !relay_shape(e, i - 2, kNoLexNode, kNoLexNode, kNoLexNode,
                                shape))
                 return false;
-            } else if (!native_run(kid)) {
+            } else if (!native_run(child)) {
               return false;
             }
           }
@@ -288,15 +290,15 @@ struct LexNfaBuild {
           const auto& opener = g.lex[e.a];
           RelayShape shape;
           return opener.kind == LexKind::seq && opener.b >= 2 &&
-                 g.lex[g.lexKid[opener.a + opener.b - 2]].min == e.max &&
+                 g.lex[g.lexChild[opener.a + opener.b - 2]].min == e.max &&
                  relay_shape(
-                     opener, opener.b - 2, g.lexKid[e.b], g.lexKid[e.b + 1],
-                     e.min > 2 ? g.lexKid[e.b + 2] : kNoLexNode, shape) &&
+                     opener, opener.b - 2, g.lexChild[e.b], g.lexChild[e.b + 1],
+                     e.min > 2 ? g.lexChild[e.b + 2] : kNoLexNode, shape) &&
                  native_run(e.a);
         }
         case LexKind::alt:
           for (unsigned i = 0; i < e.b; ++i)
-            if (!native_run(g.lexKid[e.a + i])) return false;
+            if (!native_run(g.lexChild[e.a + i])) return false;
           return true;
         case LexKind::rep:
           return (e.max <= 1 || !word_guard(e.a)) && native_run(e.a);
@@ -337,7 +339,7 @@ struct LexNfaBuild {
         guards.push_back(e.a);
         return;
       }
-      lex_children(g, at, [&](auto kid) { self(self, kid); }, false);
+      lex_children(g, at, [&](auto child) { self(self, child); }, false);
     };
     collect(collect, node);
     if (marks.empty() || guards.empty()) return false;
@@ -353,8 +355,8 @@ struct LexNfaBuild {
       bool found = false;
       lex_children(
           g, at,
-          [&](auto kid) {
-            if (!found) found = self(self, kid);
+          [&](auto child) {
+            if (!found) found = self(self, child);
           },
           false);
       return found;
@@ -364,39 +366,40 @@ struct LexNfaBuild {
   }
 
   // The accept of the terminal being built, and the one its literal branches
-  // end on; the tier the branch in hand ranks at.
+  // end on; the priority the branch in hand ranks at.
   int _match = -1;
   int _litMatch = -1;
-  std::uint8_t _tier = 0;
+  std::uint8_t _priority = 0;
 
-  int branch_end(unsigned tiers, int out) {
-    if (tiers != kLiteral || out != _match) return out;
+  int branch_end(unsigned priorities, int out) {
+    if (priorities != kLiteral || out != _match) return out;
     if (_litMatch < 0) _litMatch = n.match(n.s[_match].accept, true);
     return _litMatch;
   }
 
   template <class Build>
-  int in_tier(unsigned tiers, Build&& build) {
-    // A branch that reads several tiers at once ranks as a pattern.
-    const std::uint8_t tier = tiers == kKeyword   ? kTierKeyword
-                              : tiers == kLiteral ? kTierLiteral
-                                                  : 0;
-    const auto outer = std::exchange(_tier, tier);
+  int with_priority(unsigned priorities, Build&& build) {
+    // A branch that reads several priorities at once ranks as a pattern.
+    const std::uint8_t priority = priorities == kKeyword   ? kKeywordPriority
+                                  : priorities == kLiteral ? kLiteralPriority
+                                                           : 0;
+    const auto outer = std::exchange(_priority, priority);
     const int s = build();
-    _tier = outer;
+    _priority = outer;
     return s;
   }
 
-  // One branch of the terminal, to the accept its tier asks for.
+  // One branch of the terminal, to the accept its priority asks for.
   int branch(std::uint16_t node, int out) {
     if (const LexNode& e = g.lex[node]; e.kind == LexKind::alt) {
-      int s = branch(g.lexKid[e.a], out);
+      int s = branch(g.lexChild[e.a], out);
       for (unsigned i = 1; i < e.b; ++i)
-        s = n.split(branch(g.lexKid[e.a + i], out), s);
+        s = n.split(branch(g.lexChild[e.a + i], out), s);
       return s;
     }
-    const auto tiers = tiers_of(node);
-    return in_tier(tiers, [&] { return run(node, branch_end(tiers, out)); });
+    const auto priorities = priorities_of(node);
+    return with_priority(
+        priorities, [&] { return run(node, branch_end(priorities, out)); });
   }
 
   bool recognized(std::uint16_t node) {
@@ -405,17 +408,18 @@ struct LexNfaBuild {
   }
 
   // An arm the graph cannot spell is recognized apart from the others, at its
-  // own tier.
+  // own priority.
   int arms(std::uint16_t node, int out) {
     const bool apart = recognized(node);
     if (const LexNode& e = g.lex[node]; e.kind == LexKind::alt && apart) {
-      int s = arms(g.lexKid[e.a], out);
+      int s = arms(g.lexChild[e.a], out);
       for (unsigned i = 1; i < e.b; ++i)
-        s = n.split(arms(g.lexKid[e.a + i], out), s);
+        s = n.split(arms(g.lexChild[e.a + i], out), s);
       return s;
     }
     if (apart)
-      return in_tier(tiers_of(node), [&] { return recognition(node, out); });
+      return with_priority(priorities_of(node),
+                           [&] { return recognition(node, out); });
     return branch(node, out);
   }
 
@@ -426,10 +430,8 @@ struct LexNfaBuild {
     return arms(node, out);
   }
 
-  // A call owns its captures; a lookahead reads the current ones and exports
-  // none. An echo is bound where a mark<> of its tag was set on every path to
-  // it, so a mark in one arm or in a loop that may not turn binds nothing
-  // after.
+  // Whether every echo is bound: a mark<> of its tag set on every path to it.
+  // A call owns its captures; a lookahead exports none.
   bool echoes_marked(std::uint16_t node) {
     using Tags = std::vector<std::uint32_t>;
     _seen.next();
@@ -453,13 +455,13 @@ struct LexNfaBuild {
             return;
           case LexKind::seq:
             for (unsigned i = 0; i < e.b; ++i)
-              walkSelf(walkSelf, g.lexKid[e.a + i], marks);
+              walkSelf(walkSelf, g.lexChild[e.a + i], marks);
             return;
           case LexKind::alt: {
             Tags common;
             for (unsigned i = 0; i < e.b; ++i) {
               Tags arm = marks;
-              walkSelf(walkSelf, g.lexKid[e.a + i], arm);
+              walkSelf(walkSelf, g.lexChild[e.a + i], arm);
               if (i == 0) {
                 common = std::move(arm);
               } else {
@@ -512,20 +514,20 @@ struct LexNfaBuild {
            kind == LexKind::nguard;
   }
 
-  // The kid of `q` that is a choice of several tiers, when assertions and
-  // refusals alone stand around it, else `q.b`: a condition around a choice
+  // The child of `q` that is a choice of several priorities, when assertions
+  // and refusals alone stand around it, else `q.b`: a condition around a choice
   // stands around each branch.
   unsigned choice_among_conditions(const LexNode& q) const {
     unsigned at = q.b;
     for (unsigned i = 0; i < q.b; ++i) {
-      if (is_condition(g.lex[g.lexKid[q.a + i]].kind)) continue;
+      if (is_condition(g.lex[g.lexChild[q.a + i]].kind)) continue;
       if (at != q.b) return q.b;
       at = i;
     }
     if (at == q.b || q.b == 1) return q.b;
-    const std::uint16_t choice = g.lexKid[q.a + at];
+    const std::uint16_t choice = g.lexChild[q.a + at];
     if (g.lex[choice].kind != LexKind::alt) return q.b;
-    return std::has_single_bit(tiers_of(choice)) ? q.b : at;
+    return std::has_single_bit(priorities_of(choice)) ? q.b : at;
   }
 
   // Whether the walk behind a refusal may read a byte its class decodes at: an
@@ -557,17 +559,17 @@ struct LexNfaBuild {
         int s = out;
         unsigned i = e.b;
         if (const unsigned at = choice_among_conditions(e); at < e.b) {
-          const LexNode& choice = g.lex[g.lexKid[e.a + at]];
+          const LexNode& choice = g.lex[g.lexChild[e.a + at]];
           for (unsigned b = 0; b < choice.b; ++b) {
-            const auto kid = g.lexKid[choice.a + b];
-            const auto tiers = tiers_of(kid);
-            const int arm = in_tier(tiers, [&] {
-              int tail = branch_end(tiers, out);
+            const auto child = g.lexChild[choice.a + b];
+            const auto priorities = priorities_of(child);
+            const int arm = with_priority(priorities, [&] {
+              int tail = branch_end(priorities, out);
               for (unsigned k = e.b; k-- > at + 1;)
-                tail = run(g.lexKid[e.a + k], tail);
-              tail = run(kid, tail);
+                tail = run(g.lexChild[e.a + k], tail);
+              tail = run(child, tail);
               for (unsigned k = at; k-- > 0;)
-                tail = run(g.lexKid[e.a + k], tail);
+                tail = run(g.lexChild[e.a + k], tail);
               return tail;
             });
             s = b == 0 ? arm : n.split(arm, s);
@@ -575,25 +577,25 @@ struct LexNfaBuild {
           i = 0;
         }
         while (i-- > 0) {
-          const auto kid = g.lexKid[e.a + i];
-          if (g.lex[kid].kind == LexKind::nguard && g.lex[kid].max != 0) {
-            s = n.chars_stray(g.lex[g.lexKid[e.a + i - 1]].a, kid, s);
+          const auto child = g.lexChild[e.a + i];
+          if (g.lex[child].kind == LexKind::nguard && g.lex[child].max != 0) {
+            s = n.chars_lone_lead(g.lex[g.lexChild[e.a + i - 1]].a, child, s);
             --i;
             continue;
           }
-          if (g.lex[kid].kind == LexKind::same) {
+          if (g.lex[child].kind == LexKind::same) {
             // The echo: the walk stops here and the search resumes at `s`.
-            const int k = i < 2 || g.lex[g.lexKid[e.a + i - 2]].min !=
-                                       g.lex[kid].min
-                              ? -1
-                              : relay(e, i - 2, s, kNoLexNode, kNoLexNode,
-                                      kNoLexNode, false);
+            const int k =
+                i < 2 || g.lex[g.lexChild[e.a + i - 2]].min != g.lex[child].min
+                    ? -1
+                    : relay(e, i - 2, s, kNoLexNode, kNoLexNode, kNoLexNode,
+                            false);
             if (k < 0)
               throw std::logic_error("cursiv: an echo needs recognition");
             s = n.relay(k);
             continue;
           }
-          s = run(kid, s);
+          s = run(child, s);
         }
         return s;
       }
@@ -614,24 +616,24 @@ struct LexNfaBuild {
       case LexKind::through_same: {
         const auto& opener = g.lex[e.a];
         if (opener.kind != LexKind::seq || opener.b < 2 ||
-            g.lex[g.lexKid[opener.a + opener.b - 2]].min != e.max)
+            g.lex[g.lexChild[opener.a + opener.b - 2]].min != e.max)
           throw std::logic_error("cursiv: an echo needs recognition");
-        const int k = relay(opener, opener.b - 2, out, g.lexKid[e.b],
-                            g.lexKid[e.b + 1],
-                            e.min > 2 ? g.lexKid[e.b + 2] : kNoLexNode, true);
+        const int k = relay(opener, opener.b - 2, out, g.lexChild[e.b],
+                            g.lexChild[e.b + 1],
+                            e.min > 2 ? g.lexChild[e.b + 2] : kNoLexNode, true);
         return run(e.a, n.relay(k));
       }
       case LexKind::alt: {
-        int s = run(g.lexKid[e.a], out);
+        int s = run(g.lexChild[e.a], out);
         for (unsigned i = 1; i < e.b; ++i)
-          s = n.split(run(g.lexKid[e.a + i], out), s);
+          s = n.split(run(g.lexChild[e.a + i], out), s);
         return s;
       }
       case LexKind::through_lit:
         return run(e.a, n.through(g, e, out));
       case LexKind::through_nested: {
-        const int k = nested_relay(g.lexKid[e.b], g.lexKid[e.b + 1],
-                                  e.max != 0, out);
+        const int k =
+            nested_relay(g.lexChild[e.b], g.lexChild[e.b + 1], e.max != 0, out);
         return run(e.a, n.relay(k));
       }
       case LexKind::positive:
@@ -647,14 +649,14 @@ struct LexNfaBuild {
                 crossing = true;
           }
           if (!crossing && oneClass)
-            crossing = reads_decoded(lex_decode_bytes(g, g.lexKid[e.b]), out);
+            crossing = reads_decoded(lex_decode_bytes(g, g.lexChild[e.b]), out);
           if (!crossing) return n.guard(node, out);
         } else if (!echoes_marked(node)) {
           throw std::logic_error("cursiv: an echo needs recognition");
         }
         LexRelayBuild r;
         r.row.term = n.term;
-        r.row.tier = _tier;
+        r.row.priority = _priority;
         r.row.predicate = node;
         return n.relay(lex_push_relay(n, r, out));
       }

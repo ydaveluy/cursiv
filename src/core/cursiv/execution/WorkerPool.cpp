@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -16,7 +17,7 @@
 
 namespace {
 
-// How long a publisher waits on the last parts before handing the core back.
+// Spins a publisher waits on the last parts before it sleeps.
 constexpr std::size_t kCorunSpins = 256;
 
 std::uint64_t next_random(std::uint64_t& state) noexcept {
@@ -43,12 +44,8 @@ WorkerPool::WorkerPool(std::size_t workers) : _idle(workers) {
   for (std::size_t i = 0; i < bucket_count(workers); ++i)
     _buckets.push_back(std::make_unique<Bucket>());
 
-  // Started only once every queue exists: a worker steals from all of them from
-  // its first instruction.
-  //
-  // A thread that fails to start must not leave the others running: a joinable
-  // `std::thread` destroyed with the half-built pool terminates the process,
-  // and the constructor's throw means no destructor will run for it.
+  // Started once every queue exists, as a worker steals from all of them. A
+  // thread that fails to start stops the others: no destructor runs here.
   try {
     for (std::size_t i = 0; i < workers; ++i) {
       _workers[i]->victim = i;
@@ -77,7 +74,7 @@ bool WorkerPool::onWorkerThread() const noexcept {
 }
 
 // `_workers` is written once, by the constructor, so this reads it unlocked.
-// A scan is enough: its cost lands once per run, not once per item.
+// A scan is enough: its cost is paid once per run, not once per item.
 std::size_t WorkerPool::selfIndex() const noexcept {
   const auto self = std::this_thread::get_id();
   for (std::size_t i = 0; i < _workers.size(); ++i)
@@ -85,10 +82,9 @@ std::size_t WorkerPool::selfIndex() const noexcept {
   return _workers.size();
 }
 
-// One item per claim: an item is worth a document or a run of thousands of
-// references, so the claim costs little beside it, and a part never holds back
-// heavy items another part could take. A body that says stop moves the claim
-// counter to the end, so no part claims again.
+// One item per claim: an item is a document or a large run of work, so the
+// claim is cheap beside it. A body that says stop moves the counter to the
+// end, so no part claims again.
 void WorkerPool::drain(Job& job) const noexcept {
   for (;;) {
     const std::size_t index = job.next.fetch_add(1, std::memory_order_relaxed);
@@ -100,15 +96,9 @@ void WorkerPool::drain(Job& job) const noexcept {
   }
 }
 
-// The cell is read before the work, and that ordering is the whole safety: the
-// publisher's stack dies the moment the count reaches zero, so the job must not
-// be touched after the decrement -- while the cell, owned by the pool, may.
-//
-// The last part looks at `asleep` after its decrement, and a sleeping
-// publisher sets it before its last look at the count: both sequentially
-// consistent, so one of the two sees the other. A cell already taken by the
-// next run can show that run's publisher asleep, which then wakes for nothing
-// and sleeps again.
+// The cell is read before the work: the publisher's stack dies when the count
+// reaches zero, while the pool's cell does not. `asleep` and the count are
+// both sequentially consistent: the last part cannot miss a sleeping publisher.
 void WorkerPool::runTask(Task& task) const noexcept {
   Job& job = *task.job;
   Cell& cell = *job.cell;
@@ -132,9 +122,9 @@ bool WorkerPool::queueEmpty(std::size_t victim) const noexcept {
              : _buckets[victim - _workers.size()]->queue.empty();
 }
 
-// Steals from the victim that last paid, then at random. Gives up after enough
-// consecutive misses that the queues are worth calling empty; returns false
-// only when the pool is closing.
+// Steals from the last successful victim, then at random. Gives up after
+// enough misses in a row to call the queues empty; returns false only when the
+// pool is closing.
 bool WorkerPool::explore(Worker& worker, Task*& task) noexcept {
   const std::size_t victims = victimCount();
   const std::size_t maxSteals = (victims + 1) << 1;
@@ -157,9 +147,9 @@ bool WorkerPool::explore(Worker& worker, Task*& task) noexcept {
   }
 }
 
-// The two-phase park: announce, look at every queue once more, and sleep only
-// if all were empty. A task pushed between the last search and the sleep moves
-// the epoch, so the sleep returns instead of missing it.
+// Two-phase wait: register, check every queue once more, and sleep only if all
+// were empty. A task pushed between the last search and the sleep moves the
+// epoch, so the sleep returns instead of missing it.
 bool WorkerPool::waitForTask(Worker& worker, std::size_t index,
                              Task*& task) noexcept {
   for (;;) {
@@ -191,7 +181,6 @@ void WorkerPool::workerLoop(std::size_t index) noexcept {
   Worker& worker = *_workers[index];
   Task* task = nullptr;
   for (;;) {
-    // Drain the local queue, then steal, then park.
     while (task != nullptr) {
       runTask(*task);
       task = worker.queue.pop();
@@ -209,7 +198,7 @@ void WorkerPool::submit(Task& task, std::size_t self, std::size_t parts) {
       return;
     }
     for (std::size_t at = 0; at < _buckets.size() && at < parts; ++at) {
-      // Rank `at`, `at + buckets`, `at + 2*buckets`... all land here.
+      // Rank `at`, `at + buckets`, `at + 2*buckets`... all go to this bucket.
       const std::size_t share =
           (parts - at + _buckets.size() - 1) / _buckets.size();
       Bucket& bucket = *_buckets[at];
@@ -245,10 +234,8 @@ void WorkerPool::corun(const Job& job, std::size_t self) noexcept {
       misses = 0;
       continue;
     }
-    // Nothing left to steal. A short spin first, since what remains is
-    // usually one item; then a non-worker sleeps -- spinning would cost a
-    // core the running parts need -- while a worker keeps yielding, since it
-    // may not hold a thread those parts need.
+    // Nothing left to steal: a short spin, then a non-worker sleeps, while a
+    // worker keeps yielding.
     if (++misses < kCorunSpins) {
       detail::pause_once();
       continue;
@@ -272,16 +259,17 @@ void WorkerPool::run(std::size_t count,
                      cursiv::function_ref<bool(std::size_t)> body) {
   if (count == 0) return;
 
-  // No more parts than items, and never more than the pool can run.
+  // No more parts than items or than the pool runs. Each part claims once past
+  // the last item, so a count too close to the type's top runs alone.
   const std::size_t parts = std::min(count, _workers.size() + 1);
-  if (parts <= 1) {
+  if (parts <= 1 || count > std::numeric_limits<std::size_t>::max() - parts) {
     for (std::size_t index = 0; index < count && body(index); ++index) {
     }
     return;
   }
 
   Cell* cell = claimCell();
-  // Every cell in flight: run it alone rather than wait for one. Never wrong.
+  // Every cell is in use: run alone rather than wait for one.
   if (cell == nullptr) {
     for (std::size_t index = 0; index < count && body(index); ++index) {
     }

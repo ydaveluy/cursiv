@@ -4,7 +4,7 @@ valid.req	valid		the base document
 02_typo2.req	typo2	194	'environment' written 'envirnoment' -- distance 2
 03_closer_block.req	closer_block	314	the closing '"' of a requirement text is missing, mid file (the language has no braces; a string is its only closer)
 04_closer_eof.req	closer_eof	566	the closing '"' of the LAST requirement text is missing
-05_intruder.req	intruder	334	one '%' token too many between a name and its text
+05_extra_token.req	extra_token	334	one '%' token too many between a name and its text
 06_truncated.req	truncated	552	the last requirement is cut after its name
 07_two_faults.req	two_faults	123 575	'environment' typo near the top AND the last quote missing
 08_head_fault.req	head_fault	89	the 'contact' keyword of the first construct is misspelt

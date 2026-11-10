@@ -4,7 +4,7 @@ valid.dmodel	valid		the base document
 02_typo2.dmodel	typo2	366	'package' written 'pacakge' -- one transposition, distance 2
 03_closer_block.dmodel	closer_block	341	the '}' closing entity Comment is missing, mid file
 04_closer_eof.dmodel	closer_eof	499	the '}' closing the last package is missing at EOF
-05_intruder.dmodel	intruder	86	one ':' too many in a feature declaration
+05_extra_token.dmodel	extra_token	86	one ':' too many in a feature declaration
 06_truncated.dmodel	truncated	694	the file stops just after an entity is opened
 07_two_faults.dmodel	two_faults	98 513	'entity' typo on the first construct AND the last '}' gone
 08_head_fault.dmodel	head_fault	88	the 'entity' keyword of the first construct is misspelt

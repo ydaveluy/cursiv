@@ -1,4 +1,4 @@
-// The runtime's own state: contexts, stacks, the roof, and records read
+// The runtime's own state: contexts, stacks, the wrapper, and records read
 // through a narrow stamp.
 
 #include <algorithm>
@@ -12,28 +12,28 @@
 #include <type_traits>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/grammar/Grammar.hpp"
+#include "cursiv/lr/runtime/LrCactus.hpp"
+#include "cursiv/lr/runtime/LrFrame.hpp"
+#include "cursiv/lr/runtime/LrSearch.hpp"
+#include "cursiv/lr/runtime/LrStack.hpp"
+#include "cursiv/lr/runtime/LrStackView.hpp"
+#include "cursiv/lr/runtime/lr_lookahead.hpp"
+#include "cursiv/lr/runtime/lr_moves.hpp"
+#include "cursiv/lr/runtime/lr_repair_write.hpp"
+#include "cursiv/lr/runtime/lr_wrap_root.hpp"
+#include "cursiv/lr/table/LrAction.hpp"
+#include "cursiv/lr/table/LrProduction.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/shared/runtime/GapPositions.hpp"
+#include "cursiv/shared/runtime/RepairBudget.hpp"
+#include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/syntax-tree/CstRun.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/lr/runtime/LrCactus.hpp"
-#include "cursiv/lr/runtime/LrFrame.hpp"
-#include "cursiv/shared/runtime/RepairBudget.hpp"
-#include "cursiv/lr/runtime/LrSearch.hpp"
-#include "cursiv/lr/runtime/LrStack.hpp"
-#include "cursiv/lr/runtime/LrStackClimb.hpp"
-#include "cursiv/lr/runtime/lr_lookahead.hpp"
-#include "cursiv/lr/runtime/lr_moves.hpp"
-#include "cursiv/lr/runtime/lr_repair_write.hpp"
-#include "cursiv/lr/runtime/lr_roof.hpp"
-#include "cursiv/lr/table/LrAction.hpp"
-#include "cursiv/lr/table/LrProduction.hpp"
-#include "cursiv/shared/runtime/GapPositions.hpp"
-#include "cursiv/shared/table/StampLayout.hpp"
-#include "cursiv/Check.hpp"
 #include "engines/lr/ParseChecks.hpp"
 #include "workspace/generated/Workspace/AstReflection.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
@@ -106,7 +106,7 @@ void gap_search_keeps_positions_at_word_boundaries() {
   }
 }
 
-// A union or a difference of spans is the span `set` lays for its positions,
+// A union or a difference of spans is the span `set` builds for its positions,
 // with no zero word at either end: a repetition stops on equal spans.
 void gap_spans_unite_and_part_as_their_positions() {
   using Span = GapPositions::Span;
@@ -204,7 +204,7 @@ struct EmptyGuardTable {
     unsigned nprods = 1;
     std::array<TermInfo, 3> terms = [] {
       std::array<TermInfo, 3> t{};
-      t[2].laid = kLaidImplied;
+      t[2].synthetic = kSyntheticImplied;
       t[2].cond = 1;
       return t;
     }();
@@ -285,7 +285,7 @@ void a_lookahead_keeps_its_lexical_mode() {
 void a_class_stands_for_the_frames_below_the_top() {
   LrStack base;
   base.push(LrFrame{1, kNoElement, 0, 0, kLrNoWord});
-  LrStackClimb a, b, c;
+  LrStackView a, b, c;
   a.stand_on(base);
   b.stand_on(base);
   c.stand_on(base);
@@ -321,7 +321,7 @@ void abandoning_a_suffix_discards_only_its_pending_close() {
   }
 }
 
-// A recovered region naming no row owes the tree nothing: the record before
+// A recovered region naming no row adds nothing to the tree: the record before
 // it still ends the derivation.
 void adjacency_skips_a_recovered_region_without_rows() {
   Cst tree("ab");
@@ -387,10 +387,10 @@ void run() {
 
 }  // namespace stack
 
-// The close an acceptance owes when a record stands beside the root. The run
-// is laid by hand: what decides is the shape of the records, not a grammar,
+// The close an acceptance adds when a record stands beside the root. The run
+// is built by hand: what decides is the shape of the records, not a grammar,
 // so the four shapes are spelled here rather than drawn.
-namespace roof {
+namespace wrapping {
 
 namespace {
 
@@ -403,10 +403,10 @@ constexpr cursiv::ElementId kEntry = 7, kRow = 3;
 const std::uint32_t kBare = kStamp.make(kNoElement, 0);
 const std::uint32_t kNamed = kStamp.make(kRow, 0);
 
-// Whether the roof laid its close, and that what it laid spans the whole run.
-bool roofed(CstRun& run, NodeId root, const char* what) {
+// Whether the wrapper added its close, and that the close spans the whole run.
+bool wrapped(CstRun& run, NodeId root, const char* what) {
   const cursiv::NodeCount was = run.records();
-  cursiv::engine::lr_roof_forest<kStamp>(run, root, kEntry);
+  cursiv::engine::lr_wrap_root<kStamp>(run, root, kEntry);
   if (run.records() == was) return false;
   const cursiv::CstNode& lid = run.at(run.records() - 1);
   if (!lid.recovered || lid.begin != run.at(0).begin ||
@@ -417,15 +417,15 @@ bool roofed(CstRun& run, NodeId root, const char* what) {
   return true;
 }
 
-// A leaf naming a row is a node the tree owes and nothing above will take:
+// A leaf naming a row is a node the tree needs and nothing above will take:
 // the acceptance closes over it. It is the ONLY leaf that is not ordinary.
-void a_leaf_naming_a_row_is_roofed() {
+void a_leaf_naming_a_row_is_wrapped() {
   CstRun run;
   run.reserve_for(64);
   run.leaf(0, 1, kBare);
   run.close(0, 1, 2, kBare);  // the root
   run.leaf(1, 2, kNamed);
-  CHECK(roofed(run, 1, "a leaf naming a row after the root"));
+  CHECK(wrapped(run, 1, "a leaf naming a row after the root"));
 
   // ...and the walk before the root is the same test.
   CstRun before;
@@ -433,11 +433,11 @@ void a_leaf_naming_a_row_is_roofed() {
   before.leaf(0, 1, kNamed);
   before.leaf(1, 2, kBare);
   before.close(1, 2, 2, kBare);  // the root, spanning the second leaf alone
-  CHECK(roofed(before, 2, "a leaf naming a row before the root"));
+  CHECK(wrapped(before, 2, "a leaf naming a row before the root"));
 }
 
 // Trivia, a repair's discards, a token the entry never spanned: a leaf that
-// names no row is described by nothing and owed nothing.
+// names no row is described by nothing and needs nothing.
 void a_bare_leaf_is_left_alone() {
   CstRun run;
   run.reserve_for(64);
@@ -445,33 +445,33 @@ void a_bare_leaf_is_left_alone() {
   run.close(0, 1, 2, kBare);
   run.leaf(1, 2, kBare);
   run.hidden(2, 3, kNamed);  // trivia stays trivia, whatever it stamps
-  CHECK(!roofed(run, 1, "a bare leaf after the root"));
+  CHECK(!wrapped(run, 1, "a bare leaf after the root"));
 }
 
 // A composite beside the root is a subtree the document keeps and the tree
 // does not describe, named or not.
-void a_composite_beside_the_root_is_roofed() {
+void a_composite_beside_the_root_is_wrapped() {
   CstRun run;
   run.reserve_for(64);
   run.leaf(0, 1, kBare);
   run.close(0, 1, 2, kBare);
   run.leaf(1, 2, kBare);
   run.close(1, 2, 2, kBare);
-  CHECK(roofed(run, 1, "a composite after the root"));
+  CHECK(wrapped(run, 1, "a composite after the root"));
 }
 
-// A root that spans the whole run owes nothing.
+// A root that spans the whole run needs nothing.
 void a_whole_document_is_left_alone() {
   CstRun run;
   run.reserve_for(64);
   run.leaf(0, 1, kNamed);
   run.leaf(1, 2, kNamed);
   run.close(0, 2, 3, kBare);
-  CHECK(!roofed(run, 2, "a root over the whole run"));
+  CHECK(!wrapped(run, 2, "a root over the whole run"));
 }
 
 // A root that names the document is the one node over it: its own record
-// takes what stands before it, and one it shares is roofed with no second.
+// takes what stands before it, and one it shares is wrapped with no second.
 void a_root_naming_the_document_stays_its_one_node() {
   CstRun own;
   own.reserve_for(64);
@@ -479,7 +479,7 @@ void a_root_naming_the_document_stays_its_one_node() {
   own.close(0, 1, 2, kBare);
   own.leaf(1, 2, kBare);
   own.close(1, 2, 2, kStamp.make(kEntry, 0));
-  CHECK(!roofed(own, 3, "a root naming the document"));
+  CHECK(!wrapped(own, 3, "a root naming the document"));
   const cursiv::CstNode& root = own.at(3);
   CHECK(root.begin == 0 && root.subtreeSize == 4 && root.recovered);
 
@@ -488,21 +488,21 @@ void a_root_naming_the_document_stays_its_one_node() {
   shared.leaf(0, 1, kBare);
   shared.close(0, 1, 2, kBare);
   shared.leaf(1, 2, kNamed);
-  CHECK(roofed(shared, 2, "a root sharing the document's record"));
+  CHECK(wrapped(shared, 2, "a root sharing the document's record"));
   CHECK(kStamp.row(shared.at(3)) == kNoElement);
 }
 
 }  // namespace
 
 void run() {
-  a_leaf_naming_a_row_is_roofed();
+  a_leaf_naming_a_row_is_wrapped();
   a_bare_leaf_is_left_alone();
-  a_composite_beside_the_root_is_roofed();
+  a_composite_beside_the_root_is_wrapped();
   a_whole_document_is_left_alone();
   a_root_naming_the_document_stays_its_one_node();
 }
 
-}  // namespace roof
+}  // namespace wrapping
 
 // The workspace fixture generated with its stamp's row forced narrow: the
 // parse, the repair, the tree and the caret read every record in the table's
@@ -576,9 +576,9 @@ void run() {
 
 }  // namespace stamp_narrow
 
-// A stack the cactus laid for an attempt is given back whole: the nodes it
-// interned leave their parents, whichever order the children stood in, and
-// what stood before answers as it did.
+// A stack the cactus built for an attempt is given back whole: the nodes it
+// interned leave their parents, whichever order the children were in, and
+// what was there before answers as it did.
 namespace cactus_rewind {
 
 void run() {
@@ -597,7 +597,7 @@ void run() {
   CHECK(c > b && d > c && other > d);
   cactus.rewind(mark);
   CHECK(cactus.intern(2, root) == a && cactus.intern(3, root) == b);
-  // The ids that were given up are laid again, and the roots forget theirs.
+  // The ids that were given up are used again, and the roots forget theirs.
   CHECK(cactus.intern(4, root) == c);
   CHECK(cactus.intern(9, cursiv::engine::kLrNoNode) == d);
   CHECK(cactus.depth(a) == 2 && cactus.parent(b) == root);
@@ -605,7 +605,7 @@ void run() {
   cursiv::engine::LrCactus wide;
   const std::uint32_t top = wide.intern(0, cursiv::engine::kLrNoNode);
   for (std::uint16_t s = 1; s <= 64; ++s) wide.intern(s, top);
-  CHECK(wide.pay(32) == 63 && wide.pay(1) == 0);
+  CHECK(wide.stepped_units(32) == 63 && wide.stepped_units(1) == 0);
 }
 
 }  // namespace cactus_rewind
@@ -614,7 +614,7 @@ int main() {
   cactus_rewind::run();
   runtime_state::run();
   stack::run();
-  roof::run();
+  wrapping::run();
   stamp_narrow::run();
   return cursiv::test::report("LrRuntime_test");
 }

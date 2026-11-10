@@ -75,12 +75,9 @@ struct DiagnosticRelatedInformation {
   TextRange range{};
 };
 
-// `ParseDiagnostic` is message + `NodeId`; this is offsets + severity + source.
-// Parsing converts the first into the second, never the reverse.
-//
-// `data` is the machine's field: it round-trips untouched into `codeAction`
-// requests, which is what lets a quick fix know what to insert without parsing
-// the message's English back out.
+// Offsets, severity and source; parsing turns a `ParseDiagnostic` into it.
+// `data` goes back untouched into `codeAction` requests, so a quick fix never
+// parses the message.
 struct Diagnostic {
   TextRange range{};
   DiagnosticSeverity severity = DiagnosticSeverity::Error;
@@ -93,8 +90,8 @@ struct Diagnostic {
   std::optional<JsonValue> data = {};
 };
 
-// The key of `data` a code action tells a diagnostic by. `code` is what a client
-// shows the author, and the codes the runtime stamps are not for the author.
+// The key in `data` that code actions match a diagnostic by. `code` is shown to
+// the user; these internal codes are not.
 inline constexpr std::string_view kDataCode = "code";
 
 // The code `data` carries, empty where it carries none.

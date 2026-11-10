@@ -54,9 +54,8 @@ struct NoIndentActionBuilder {
   [[nodiscard]] operator FormattingAction() const { return operator()({}); }
 };
 
-// An action with no move leaves the gap alone, and it is a real answer rather
-// than an absent rule: a compound shape whose default would touch a boundary
-// the language wants untouched says so by naming it.
+// An action with no move leaves the gap as written: a language names it to
+// keep a compound shape's default off a boundary.
 struct KeepActionBuilder {
   [[nodiscard]] FormattingAction operator()(
       FormattingActionOptions options = {}) const {

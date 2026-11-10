@@ -24,7 +24,7 @@ struct LowerDesc {
   const ImageDesc* indentClose = nullptr;
   const ImageRuleDesc* indentNewline = nullptr;
   std::uint32_t optionalGate = 0;
-  // The creation the entry's own record may owe.
+  // The creation the entry's own record may carry.
   const void* entryCreate = nullptr;
 };
 

@@ -170,8 +170,8 @@ std::optional<json::Value> McpServer::handle(
     return error_response(nullptr, rpc::Error::InvalidRequest, error.what());
   }
   auto* const request = std::get_if<rpc::Request>(&parsed);
-  // The server sends no requests of its own, so a response has no home; a
-  // notification answers nothing by construction.
+  // The server sends no requests of its own, so a response matches no
+  // request; a notification answers nothing by construction.
   if (request == nullptr || request->isNotification()) return std::nullopt;
   const rpc::MessageId& id = *request->id;
   const std::string& method = request->method;

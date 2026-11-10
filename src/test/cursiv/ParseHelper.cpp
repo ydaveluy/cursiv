@@ -8,6 +8,9 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/Disposable.hpp"
+#include "cursiv/DocumentDisposable.hpp"
+#include "cursiv/ExpectationError.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/workspace/BuildOptions.hpp"
@@ -15,7 +18,6 @@
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
 #include "cursiv/workspace/Documents.hpp"
-#include "cursiv/ExpectationError.hpp"
 
 namespace cursiv::test {
 
@@ -42,6 +44,9 @@ std::shared_ptr<Document> parseHelper(const CoreServices& services,
   std::shared_ptr<Document> document =
       shared.documentFactory->fromString(std::move(text), uri);
   shared.documents->addDocument(document);
+  // A build that throws leaves the workspace as it found it.
+  Disposable added = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(added);
   Document* const set[] = {document.get()};
   shared.documentBuilder->build(set, static_cast<const BuildOptions&>(options));
   return document;
@@ -52,8 +57,10 @@ std::shared_ptr<Document> parseDocument(const CoreServices& services,
                                         const ParseHelperOptions& options) {
   std::shared_ptr<Document> document =
       parseHelper(services, std::move(text), options);
-  if (!document->hasAst())
+  if (!document->hasAst()) {
+    detail::documentDisposable(services, document).dispose();
     throw ExpectationError("cursiv: could not parse document");
+  }
   return document;
 }
 

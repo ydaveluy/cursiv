@@ -54,6 +54,8 @@ Disposable expectFormatting(const LspServices& services,
 
   const std::shared_ptr<Document> document = parseDocument(
       services, expectedFormatting.before, expectedFormatting.parseOptions);
+  Disposable disposable = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(disposable);
   const lsp::FormattingOptions options =
       expectedFormatting.options.value_or(defaultOptions());
 
@@ -82,7 +84,6 @@ Disposable expectFormatting(const LspServices& services,
   expectedFunction(normalizeEOL(edited),
                    normalizeEOL(expectedFormatting.after));
 
-  Disposable disposable = detail::documentDisposable(services, document);
   if (expectedFormatting.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

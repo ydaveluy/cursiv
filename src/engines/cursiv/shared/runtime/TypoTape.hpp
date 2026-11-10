@@ -21,17 +21,15 @@ struct TypoTape : TypoBounds {
 
   // A word the terminal refuses where its token ends, spelled behind the
   // re-reading: its head may be the one misspelt.
-  bool trails(SymbolId t, TextOffset p) const {
+  bool refused_after(SymbolId t, TextOffset p) const {
     if (!cfg.terms[t].refuses) return false;
     if constexpr (requires { T.tailRefuses; })
       return T.tailRefuses != nullptr && T.tailRefuses(t, src + p, docLen - p);
     else
       return T.tail_refuses(t, src + p, docLen - p);
   }
-  // The boundary is the one the ACCEPTANCE declares: a state may accept several
-  // terminals, each with a frontier of its own, and a repair may not read what
-  // the lexer would refuse. An unbounded terminal still ends at a word edge: a
-  // repair cutting a word in two is a cascade, not a reading.
+  // The boundary is the one terminal `t`'s acceptance declares; an unbounded
+  // terminal still ends at a word edge.
   bool closed(std::uint16_t s, SymbolId t, TextOffset p) const {
     if (p >= docLen) return true;
     if (inside_scalar(src, p, docLen)) return false;
@@ -57,7 +55,7 @@ struct TypoTape : TypoBounds {
     if constexpr (LexTape<T>::kRefuses)
       if (cfg.terms[t].refuses && T.head_refuses(t, src + head, docLen - head))
         return false;
-    return closed(s, t, p) && !trails(t, p);
+    return closed(s, t, p) && !refused_after(t, p);
   }
 };
 

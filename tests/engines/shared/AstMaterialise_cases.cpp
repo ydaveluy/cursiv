@@ -93,10 +93,11 @@ void successive_assigned_and_appended_values_keep_their_spans(const Reader& e) {
   const auto result = e.parser->parse(source);
   const auto* holder = result.value_as<tmaterialise::Holder>();
   CHECK(result.accepted && !result.cst().recovered() &&
-        result.diagnostics.empty() && holder && holder->kids.size() == 2);
-  if (!holder || holder->kids.size() != 2) return;
-  const auto* prop = cursiv::ast_cast<tmaterialise::Prop>(holder->kids[0]);
-  const auto* index = cursiv::ast_cast<tmaterialise::Index>(holder->kids[1]);
+        result.diagnostics.empty() && holder && holder->children.size() == 2);
+  if (!holder || holder->children.size() != 2) return;
+  const auto* prop = cursiv::ast_cast<tmaterialise::Prop>(holder->children[0]);
+  const auto* index =
+      cursiv::ast_cast<tmaterialise::Index>(holder->children[1]);
   CHECK(prop && index);
   part_span(result, holder->value, holder, 18, 19);
   part_span(result, prop, holder, 21, 24);
@@ -143,7 +144,7 @@ void stacked_wrappers_and_post_operand_flags_keep_their_meaning(const Reader& e)
     const auto* box = cursiv::ast_cast<tmaterialise::Box>(current);
     CHECK(box && box->parent == parent && seen.insert(box).second);
     if (!box) return;
-    // The flag runs after all twenty wrappers: it lands on the final outer
+    // The flag runs after all twenty wrappers: it applies to the final outer
     // Box, rather than on the node current before its operand.
     CHECK(box->on == (depth == 0));
     if (parent) part_span(result, box, parent, 12, 13);
@@ -255,16 +256,17 @@ void run() {
   expect(payload, "a[1].c",
          "Holder{value=Prop{object=Index{object=Var{} index=Num{} } } }");
   expect(payload, "a; b.c; d[2]",
-         "Holder{value=Var{} kids0=Prop{object=Var{} } "
-         "kids1=Index{object=Var{} index=Num{} } }");
+         "Holder{value=Var{} children0=Prop{object=Var{} } "
+         "children1=Index{object=Var{} index=Num{} } }");
   for (const Reader& r : payload)
     successive_assigned_and_appended_values_keep_their_spans(r);
 
   const Pair group = readers("flaggroup:");
   expect(group, "", "Holder{}");
   expect(group, "!$a", "Holder{value=Var{} }");
-  expect(group, "!$a; $b; $c", "Holder{value=Var{} kids0=Var{} kids1=Var{} }");
-  expect(group, "; $b", "Holder{kids0=Var{} }");
+  expect(group, "!$a; $b; $c",
+         "Holder{value=Var{} children0=Var{} children1=Var{} }");
+  expect(group, "; $b", "Holder{children0=Var{} }");
   for (const Reader& r : group) {
     const auto flagged = r.parser->parse("mat:flaggroup:!$a");
     const auto* holder = flagged.value_as<tmaterialise::Holder>();
@@ -274,20 +276,20 @@ void run() {
     CHECK(holder != nullptr && !holder->flag);
   }
 
-  const Pair ladder = readers("optionalnest:");
-  expect(ladder, "$a", "Var{}");
-  expect(ladder, "7", "Num{}");
-  expect(ladder, "$a cast as t", "Cast{operand=Var{} }");
-  expect(ladder, "$a instance of t", "Inst{operand=Var{} }");
-  expect(ladder, "$a cast as t instance of u",
+  const Pair nest = readers("optionalnest:");
+  expect(nest, "$a", "Var{}");
+  expect(nest, "7", "Num{}");
+  expect(nest, "$a cast as t", "Cast{operand=Var{} }");
+  expect(nest, "$a instance of t", "Inst{operand=Var{} }");
+  expect(nest, "$a cast as t instance of u",
          "Inst{operand=Cast{operand=Var{} } }");
-  expect(ladder, "1 + 2", "Bin{left=Num{} right=Num{} }");
-  expect(ladder, "1 + $a cast as t + 3",
+  expect(nest, "1 + 2", "Bin{left=Num{} right=Num{} }");
+  expect(nest, "1 + $a cast as t + 3",
          "Bin{left=Bin{left=Num{} right=Cast{operand=Var{} } } right=Num{} }");
-  expect(ladder, "($a cast as t) + 1",
+  expect(nest, "($a cast as t) + 1",
          "Bin{left=Cast{operand=Var{} } right=Num{} }");
-  expect(ladder, "((1))", "Num{}");
-  expect(ladder, "-($a + 1)", "Neg{operand=Bin{left=Var{} right=Num{} } }");
+  expect(nest, "((1))", "Num{}");
+  expect(nest, "-($a + 1)", "Neg{operand=Bin{left=Var{} right=Num{} } }");
 
   const Pair pass = readers("passthrough:");
   expect(pass, "i", "Var{}");
@@ -319,9 +321,7 @@ void run() {
   }
 
   // The node of a call a repair gave up is absent, and only the repair says
-  // so: the build adds no diagnostic, whether the document or a member was
-  // owed that node. Where the repair gives up the call alone, the holder
-  // stands without it.
+  // so; where it gives up the call alone, the holder stands without it.
   const Pair givenUp = readers({});
   for (const Reader& r : givenUp)
     for (const char* text : {"mat:givenup:x n a ? ;", "mat:passed:n a ?"}) {

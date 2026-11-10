@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -74,7 +75,7 @@ void DomainModelScopeComputation::addExportedSymbol(
 }
 
 // The other direction: the walk descends, and a nested package requalifies what
-// its children declared -- so a name is spelled at every storey it is visible
+// its children declared -- so a name is spelled at every level it is visible
 // from, and `foo.bar.E2` resolves from the root as `E2` does from inside.
 cursiv::LocalSymbols DomainModelScopeComputation::collectLocalSymbols(
     const cursiv::Document& document,
@@ -87,7 +88,7 @@ cursiv::LocalSymbols DomainModelScopeComputation::collectLocalSymbols(
   symbols.reserve(document.parseResult.nodes().size() / 4);
   processContainer(*root, static_cast<const ast::DomainModel&>(*root).elements,
                    document, symbols, cancelToken);
-  symbols.seal();
+  symbols.build_index();
   return symbols;
 }
 
@@ -96,54 +97,70 @@ void DomainModelScopeComputation::processContainer(
     std::span<ast::AbstractElement* const> elements,
     const cursiv::Document& document, cursiv::LocalSymbols& symbols,
     const cursiv::CancellationToken& cancelToken) const {
-  const QualifiedNameProvider& names = *_dm.qualifiedNameProvider;
   const std::span<const cursiv::AstTypeTag* const> types =
       _dm.astReflection->getAllSubTypes(&cursiv::ast_type_tag<ast::Type>);
 
-  // One storey per open container, so packages nested a thousand deep hold
-  // no native frame each. A storey collects what it declares in element
-  // order, its nested packages' names at their places.
-  struct Storey {
+  // One `Level` per open container, so packages nested a thousand deep hold
+  // no native frame each. Each collects what it declares in element order,
+  // its nested packages' names at their places.
+  struct Level {
     const cursiv::AstNode* container;
     std::span<ast::AbstractElement* const> elements;
     std::size_t next = 0;
     std::vector<cursiv::AstNodeDescription> declared;
+    // How long `qualifier` is while this level is open.
+    std::size_t qualified = 0;
   };
-  std::vector<Storey> open;
-  open.push_back({&root, elements, 0, {}});
+  // The open packages' names, outermost first, each with its dot. A nested
+  // type's qualified name is kept once, and each level names it by a suffix:
+  // `E`, then `q.E`, then `p.q.E`.
+  std::string qualifier;
+  std::vector<Level> open;
+  open.push_back({&root, elements, 0, {}, 0});
   while (!open.empty()) {
-    if (Storey& storey = open.back(); storey.next < storey.elements.size()) {
-      ast::AbstractElement* const element = storey.elements[storey.next++];
+    if (Level& level = open.back(); level.next < level.elements.size()) {
+      ast::AbstractElement* const element = level.elements[level.next++];
       cursiv::throw_if_cancelled(cancelToken);
       if (element == nullptr) continue;
 
       if (in_family(types, element->type)) {
         if (element->name.empty()) continue;
+        const std::string_view name =
+            qualifier.empty() ? element->name
+                              : document.keep_text(qualifier, element->name)
+                                    .substr(qualifier.size());
         if (auto description =
                 _dm.astNodeDescriptionProvider->createDescription(
-                    *element, element->name, &document))
-          storey.declared.push_back(*std::move(description));
+                    *element, name, &document))
+          level.declared.push_back(*std::move(description));
         continue;
       }
       if (element->type == &cursiv::ast_type_tag<ast::PackageDeclaration>) {
         const auto& package =
             static_cast<const ast::PackageDeclaration&>(*element);
-        open.push_back({&package, package.elements, 0, {}});
+        open.push_back({&package, package.elements, 0, {}, qualifier.size()});
+        // A package whose name is missing qualifies nothing.
+        if (!package.name.empty()) {
+          qualifier += package.name;
+          qualifier += '.';
+        }
       }
       continue;
     }
 
-    // A storey closes: its names are known at its level, and its package
-    // requalifies them for the storey below -- one dot per level.
-    Storey done = std::move(open.back());
+    // A level closes: its names are known there, and gain its package's name
+    // and dot for the enclosing level.
+    Level done = std::move(open.back());
     open.pop_back();
     for (const cursiv::AstNodeDescription& description : done.declared)
       symbols.add(done.container, description);
     if (open.empty()) break;
-    const std::string_view package =
-        static_cast<const ast::PackageDeclaration&>(*done.container).name;
+    // The width the package's name and dot added to `qualifier`.
+    const std::size_t package = qualifier.size() - done.qualified;
+    qualifier.resize(done.qualified);
     for (cursiv::AstNodeDescription& nested : done.declared) {
-      nested.name = names.keepQualifiedName(document, package, nested.name);
+      nested.name = std::string_view(nested.name.data() - package,
+                                     nested.name.size() + package);
       open.back().declared.push_back(std::move(nested));
     }
   }

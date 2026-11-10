@@ -56,9 +56,9 @@ namespace cursiv::engine {
 
 namespace {
 
-struct LrParserEmitter : LexWalkRungs<LrLexView> {
+struct LrParserEmitter : LexStateBlocks<LrLexView> {
   explicit LrParserEmitter(const LrFinalTable& done)
-      : LexWalkRungs(LrLexView{done.table()}),
+      : LexStateBlocks(LrLexView{done.table()}),
         a(done.table()),
         gotos(a.gotoRows, a.cfg.nnts),
         dfa(a.cls, {a.dfaNext.data(), a.dfaNext.size()}, a.ncls, a.ndfa),
@@ -127,7 +127,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   }
 
   // The states split into groups, one function each: a jump that leaves its
-  // group is a tail call into the group it lands in, and an exit returns.
+  // group is a tail call into the group it goes to, and an exit returns.
   unsigned groupLines = kLrGroupLines;
   unsigned ngroups = 1;
   // Groups live in units of their own, which read what the states inline
@@ -166,7 +166,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
     return groupOf[kind == 'R' ? a.nstates + n : n];
   }
   // A jump to label `kind n` is written `@J<kind><n>;` and logged before the
-  // groups exist; `enter` then registers its entry, `resolved` spells it.
+  // groups exist; `enter` then registers its entry, `resolved` writes it.
   struct Jump {
     char kind;
     unsigned n;
@@ -186,7 +186,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
     jumpLog.push_back({kind, n});
     return concat("@J", kind, n, ";");
   }
-  // Entries are numbered in the order `enter` meets them.
+  // Entries are numbered in the order `enter` finds them.
   void enter(unsigned g, const Piece& p) {
     for (std::size_t i = p.from; i < p.to; ++i) {
       const auto [kind, n] = jumpLog[i];
@@ -233,8 +233,9 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   bool multiMode(unsigned m) const { return a.modeMulti[m] == 1; }
   bool eofMode(unsigned m) const { return a.modeMulti[m] == 2; }
   bool sweepMode(unsigned m) const { return a.modeMulti[m] != 0; }
-  // Whether a mode's ladder stops short, so its walk ends in the flat DFA rows.
-  bool anyPartialLadder() const {
+  // Whether a mode's inline states stop short, so its walk ends in the flat DFA
+  // rows.
+  bool anyPartialInlineStates() const {
     for (unsigned m = 0; m < a.nmodes; ++m)
       if (walk_partial(m)) return true;
     return false;
@@ -251,11 +252,11 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   // A state entered by shifting the token in hand has that shift written
   // once, at `H`, ahead of every state.
   std::vector<int> hopElem{};
-  std::vector<bool> laidInto{};
+  std::vector<bool> impliedInto{};
   bool shifted(unsigned s) const { return hopElem[s] != -2; }
   void plan_hops() {
     hopElem.assign(a.nstates, -2);
-    laidInto.assign(a.nstates, false);
+    impliedInto.assign(a.nstates, false);
     for (unsigned st = 0; st < a.nstates; ++st)
       for (const LrAction& x : a.action_row(st)) {
         const auto into = [&](unsigned to) {
@@ -265,9 +266,9 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
             throw std::logic_error(
                 "LR: a state is shifted into by two elements");
           h = e;
-          if (implied(x.term)) laidInto[to] = true;
+          if (implied(x.term)) impliedInto[to] = true;
         };
-        a.each_landing(x, into);
+        a.each_target(x, into);
       }
   }
   // A probe's shift is written once per target and element, the token's
@@ -291,8 +292,9 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   void emit_hop(unsigned s, const ProbeSet& probes) {
     if (!shifted(s)) return;
     const auto elem = static_cast<unsigned>(hopElem[s]);
-    if (laidInto[s])
-      line("H", s, ":\n  lay(c, ", s, "u, ", elem, ");\n  goto S", s, ";");
+    if (impliedInto[s])
+      line("H", s, ":\n  push_implied(c, ", s, "u, ", elem, ");\n  goto S", s,
+           ";");
     else if (probes.contains({s, elem}))
       line("H", s, ":\n  hb = c.la.begin; he = c.la.end;\n  goto P", s, "_",
            elem, ";");
@@ -301,7 +303,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
            ", c.la.begin, c.la.end);\n  goto S", s, ";");
   }
 
-  // The two-token oracle of one conflict cell, its sets spelled as literals.
+  // The two-token oracle of one conflict cell, its sets written as literals.
   int peek_of(unsigned s, unsigned t) const {
     for (unsigned k = 0; k < a.npeeks; ++k)
       if (a.peeks[k].state == s && a.peeks[k].term == t)
@@ -347,7 +349,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   }
 
   void emit_lex_tables() {
-    if (anyPartialLadder()) {
+    if (anyPartialInlineStates()) {
       // A state's acceptance and boundary in one word, read together.
       array("[[maybe_unused]] inline constexpr ::std::uint32_t kMeta[]", a.ndfa,
             [&](std::size_t i) {
@@ -413,7 +415,7 @@ inline constexpr RowsTape kRowsTape{};
 )");
   }
 
-  // The rows, read where a mode stops spelling states.
+  // The rows, read where a mode stops writing out its states.
   void emit_rows_loop() {
     write(R"(Wtab:
   {
@@ -472,12 +474,12 @@ inline constexpr RowsTape kRowsTape{};
     // The gap starts where the last token with a width ended.
     if (conds()) line("  if (e != b) c.virt.from = e;");
     line("}\n");
-    // An implied token is laid where the last token ended, and the trivia
+    // An implied token is inserted where the last token ended, and the trivia
     // past it is read again behind it. A dedent is shifted: the trivia of its
     // suite's last line is the suite's.
     if (!impliedTerms.empty()) {
       write(
-          R"(inline void lay(::cursiv::engine::LrContext& c, ::std::uint32_t tgt,
+          R"(inline void push_implied(::cursiv::engine::LrContext& c, ::std::uint32_t tgt,
                 ::std::uint16_t row) {
   ::cursiv::engine::lr_push_leaf<kTable.stamp, false>(c, tgt, ::cursiv::ElementId(row), c.committed,
                        c.committed);
@@ -496,7 +498,7 @@ inline constexpr RowsTape kRowsTape{};
     for (unsigned j = 0; j < a.nfused; ++j)
       keys[j] = lr_fused_key(a.fused[j].node, a.fused[j].site);
     std::vector<std::uint8_t> marks(slots, 0);
-    std::uint8_t* const stamp = marks.data();
+    std::uint8_t* const seen = marks.data();
     const std::uint32_t* const kp = keys.data();
     const std::size_t n = keys.size();
     std::uint8_t gen = 0;
@@ -509,11 +511,11 @@ inline constexpr RowsTape kRowsTape{};
       unsigned extra = 0;
       const auto place = [&](std::uint32_t k) {
         unsigned h = (k * mul) >> shift;
-        while (stamp[h] == gen) {
+        while (seen[h] == gen) {
           h = (h + 1) & mask;
           ++extra;
         }
-        stamp[h] = gen;
+        seen[h] = gen;
       };
       std::size_t j = 0;
       for (; j + 4 <= n; j += 4) {
@@ -679,7 +681,8 @@ inline constexpr RowsTape kRowsTape{};
       const unsigned start = a.modeStart[m];
       if (std::ranges::find(starts, start) != starts.end()) continue;
       starts.push_back(start);
-      partial |= dfa.ladder_from(start).size() != dfa.states_from(start).size();
+      partial |=
+          dfa.inline_states_from(start).size() != dfa.states_from(start).size();
     }
     write(R"(inline void match_all(const char* src, ::cursiv::TextOffset len,
                       ::cursiv::TextOffset i, ::cursiv::engine::Scan* v,
@@ -706,7 +709,7 @@ inline constexpr RowsTape kRowsTape{};
       std::vector<unsigned> order;
       std::vector<std::uint8_t> spelled(a.ndfa, 0);
       for (const unsigned start : starts)
-        for (const unsigned st : dfa.ladder_from(start))
+        for (const unsigned st : dfa.inline_states_from(start))
           if (!spelled[st]) {
             spelled[st] = 1;
             order.push_back(st);
@@ -784,7 +787,7 @@ inline constexpr RowsTape kRowsTape{};
         R"(      for (unsigned k = kCandBase[st]; k < kCandBase[st + 1u]; ++k) {
         assert(n < cap);
         if (n < cap) v[n++] = ::cursiv::engine::Scan{best.end, kCandPool[k])",
-        a.tiered() ? ", kTable.cold.accTier[k]" : "", R"(};
+        a.prioritized() ? ", kTable.cold.accPriority[k]" : "", R"(};
       }
       return;
     default: goto full;
@@ -852,8 +855,8 @@ inline void rank_cands(::cursiv::engine::Scan* v, ::std::uint32_t n) {
   // match has already spoken: the rank the walk elects by decides.
   const auto before = [](const ::cursiv::engine::Scan& x, const ::cursiv::engine::Scan& y) {
     return ::cursiv::engine::lex_term_before(
-        ::cursiv::engine::lex_rank(x.tier, (kTermFlags[x.term] & 1u) != 0), x.term,
-        ::cursiv::engine::lex_rank(y.tier, (kTermFlags[y.term] & 1u) != 0), y.term);
+        ::cursiv::engine::lex_rank(x.priority, (kTermFlags[x.term] & 1u) != 0), x.term,
+        ::cursiv::engine::lex_rank(y.priority, (kTermFlags[y.term] & 1u) != 0), y.term);
   };
   for (::std::uint32_t k = 1; k < n; ++k)
     for (::std::uint32_t j = k; j > 0 && before(v[j], v[j - 1]); --j)
@@ -911,7 +914,7 @@ inline void pick_cand(::cursiv::engine::LrContext& c, ::std::uint32_t s) {
   }
 
   bool walk_partial(unsigned m) const {
-    return dfa.ladder_from(a.modeStart[m]).size() !=
+    return dfa.inline_states_from(a.modeStart[m]).size() !=
            dfa.states_from(a.modeStart[m]).size();
   }
 
@@ -936,7 +939,7 @@ inline void pick_cand(::cursiv::engine::LrContext& c, ::std::uint32_t s) {
     line("Wdone:");
     if (a.nrelays != 0) {
       write(R"(  ::cursiv::TextOffset halt;
-  return ::cursiv::engine::lex_walk_settle(kTape, src, len, kTable.modeStart[mode],
+  return ::cursiv::engine::lex_walk_result(kTape, src, len, kTable.modeStart[mode],
                                     start, i, far, match, relays, halt);
 )");
     } else {
@@ -990,7 +993,7 @@ inline void pick_cand(::cursiv::engine::LrContext& c, ::std::uint32_t s) {
   }
 
   // Ahead of the walk: the table's own walk, cached, where a mode that may
-  // backtrack stops spelling states.
+  // backtrack stops writing out its states.
   void walk_before(bool partial) {
     if (partial && !a.dfaBacktrack.empty())
       write(R"(CURSIV_NOINLINE inline ::cursiv::engine::Scan walk_table_cached(
@@ -1029,7 +1032,7 @@ inline void pick_cand(::cursiv::engine::LrContext& c, ::std::uint32_t s) {
   }
 
   std::vector<unsigned> wsLead{};
-  // Modes alike in blanks, candidate collection and the winners swept behind
+  // Modes the same in blanks, candidate collection and the winners swept behind
   // share one tail, which takes the mode as an argument.
   std::vector<unsigned> tailLead{};
   // The modes some state lexes in, each with its lexer.
@@ -1158,17 +1161,18 @@ inline void lengthen(::cursiv::engine::LrContext& c) {
 )");
   }
 
-  // What keeps a token another mode lexed from standing here: it hides a rival
-  // this mode flags -- for a mode of the second kind, where it ends the text.
-  std::string owes_walk(unsigned m) const {
+  // What keeps a token another mode lexed from standing here: it hides a
+  // competitor this mode flags (for a mode of the second kind, where it ends
+  // the text).
+  std::string other_mode_guard(unsigned m) const {
     const std::string win = win_test(m, "c.la.sym");
     if (win.empty()) return "";
     return eofMode(m) ? " && !(c.la.end == c.len && (" + win + "))"
                       : " && !(" + win + ")";
   }
 
-  // Whether the token in hand is a winner the mode flags as hiding a rival,
-  // spelled per mode; empty where it flags none.
+  // Whether the token in hand is a winner the mode flags as hiding a
+  // competitor, written per mode; empty where it flags none.
   std::string win_test(unsigned m, std::string_view term = "s.term") const {
     std::string test;
     const DynSet& win = a.modeWin[m];
@@ -1245,7 +1249,7 @@ again:
     }
     ::cursiv::engine::Scan s = c.cand[0];
     for (::std::uint32_t k = 1; k < c.ncand; ++k)
-      if (kTape.prefers(c.cand[k].term, c.cand[k].tier, s.term, s.tier))
+      if (kTape.prefers(c.cand[k].term, c.cand[k].priority, s.term, s.priority))
         s = c.cand[k];
 )");
       line("    if (!(", win, ")) c.ncand = 0;");
@@ -1314,8 +1318,8 @@ again:
              knownEnds.empty() ? "" : "s, ", "c.cand, c.ncand, kMaxCands, ",
              start, ");");
     } else if (eofMode(m)) {
-      // The rivals meet where the text ends, and the state reading the token
-      // is the one on top of the stack.
+      // The competitors overlap where the text ends, and the state reading
+      // the token is the one on top of the stack.
       line("    if (s.end == len && (", flagged,
            ")) "
            "[[unlikely]] {\n"
@@ -1340,7 +1344,7 @@ again:
   // implementation specializes on the first production's constant index.
   std::vector<unsigned> reduceOf{};
   void plan_reduces(const std::string& used) {
-    plan_settles();
+    plan_state_needs();
     reduceOf.resize(a.cfg.nprods);
     std::map<std::vector<unsigned>, unsigned> seen;
     for (unsigned prod = 0; prod < a.cfg.nprods; ++prod) {
@@ -1371,10 +1375,9 @@ again:
   }
   std::vector<std::vector<std::uint16_t>> heldModes{};
 
-  // Whether the token a reduction holds stands in the state it lands in, as
-  // that state's entry would decide: under its own mode, or under one that
-  // covers it with no winner to walk again. The landing then goes straight to
-  // its dispatch, which re-lexes a covered token it has no action for.
+  // Whether the token a reduction holds stands in the state it goes to, as
+  // that state's entry would decide: the target then goes straight to its
+  // dispatch, which re-lexes a covered token it has no action for.
   bool stands(unsigned prod, unsigned to) const {
     const unsigned m = a.mode[to];
     if (multiMode(m)) return false;
@@ -1384,29 +1387,29 @@ again:
     });
   }
 
-  // The dispatch a landing in `to` reads: its own, or the one it shares.
+  // The dispatch a target in `to` reads: its own, or the one it shares.
   unsigned dispatch_label(unsigned to) const {
     return dispShared[to] != 0 ? dispLead[to] : to;
   }
 
   std::string guard_target(std::uint32_t guard,
                            std::string_view first = "") const {
-    return first.empty() ? concat("guard_land(c, ", guard - 1u, "u)")
+    return first.empty() ? concat("guard_state(c, ", guard - 1u, "u)")
                          : concat("guard_held(", first, ", ", guard - 1u, "u)");
   }
-  // Where a guard lands, by the gap where the span opened or by the tag of
+  // Where a guard goes, by the gap where the span opened or by the tag of
   // the state it opened in: one helper each, which every site inlines.
-  void emit_guard_lands() {
+  void emit_guard_helpers() {
     if (a.guards.empty()) return;
-    write(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_land(
+    write(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_state(
     const ::cursiv::engine::LrContext& c, ::std::uint32_t k) {
-  return ::cursiv::engine::lr_guard_land<kTable>(
+  return ::cursiv::engine::lr_guard_target<kTable>(
       k, [&](unsigned j) { return drive_cond(c, j, c.virt.from, c.la); });
 }
 )");
     write(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_held(
     ::std::uint32_t first, ::std::uint32_t k) {
-  return ::cursiv::engine::lr_guard_land<kTable>(
+  return ::cursiv::engine::lr_guard_target<kTable>(
       k, [&](unsigned j) { return ::cursiv::engine::lr_held<kTable>(first, j); });
 }
 
@@ -1417,27 +1420,27 @@ again:
     return concat("reduce_allowed(c, ", prod, "u)");
   }
 
-  std::vector<bool> landed{};
-  void emit_guarded_landings(std::uint32_t guard, std::string_view ind,
-                             const auto& landing, std::string_view none,
-                             std::string_view first = "") {
+  std::vector<bool> caseSeen{};
+  void emit_guarded_targets(std::uint32_t guard, std::string_view ind,
+                            const auto& onTarget, std::string_view none,
+                            std::string_view first = "") {
     const auto& targets = a.guards[guard - 1u].to;
-    landed.resize(a.nstates);
+    caseSeen.resize(a.nstates);
     line(ind, "switch (", guard_target(guard, first), ") {");
     for (const std::uint16_t to : targets) {
-      if (to == LrGuard::kNoState || landed[to]) continue;
-      landed[to] = true;
+      if (to == LrGuard::kNoState || caseSeen[to]) continue;
+      caseSeen[to] = true;
       line(ind, "case ", to, "u:");
-      landing(to);
+      onTarget(to);
     }
     for (const std::uint16_t to : targets)
-      if (to != LrGuard::kNoState) landed[to] = false;
+      if (to != LrGuard::kNoState) caseSeen[to] = false;
     line(ind, "default: ", none, "\n", ind, "}");
   }
 
-  // Where a closed node is still owed the state it settles in: a goto column
-  // outside this set never settles anything.
-  void plan_settles() {
+  // Where a closed node still needs the state it ends in: a goto column
+  // outside this set never gives a waiting node its state.
+  void plan_state_needs() {
     std::vector<bool> live(a.nstates, false);
     std::vector<bool> spreadNt(a.cfg.nnts, false);
     std::vector<unsigned> work;
@@ -1449,11 +1452,11 @@ again:
         live[to] = true;
         work.push_back(to);
       };
-      for (const auto e : gotos[lhs]) a.each_goto_landing(e, reach);
+      for (const auto e : gotos[lhs]) a.each_goto_target(e, reach);
     };
     for (unsigned q = 0; q < a.cfg.nprods; ++q)
       if (a.cfg.prods[q].node != kNoRow) spread(a.cfg.prods[q].lhs);
-    settlesPlain.assign(a.cfg.nnts, false);
+    plainNeedsState.assign(a.cfg.nnts, false);
     while (!work.empty()) {
       const unsigned st = work.back();
       work.pop_back();
@@ -1461,13 +1464,13 @@ again:
         if (act.kind != LrActionKind::reduce) continue;
         const auto& q = a.cfg.prods[act.arg];
         spread(q.lhs);
-        if (q.node == kNoRow) settlesPlain[q.lhs] = true;
+        if (q.node == kNoRow) plainNeedsState[q.lhs] = true;
       }
     }
   }
-  std::vector<bool> settlesPlain{};
-  [[nodiscard]] bool settles(unsigned lhs, bool node) const {
-    return node || settlesPlain[lhs];
+  std::vector<bool> plainNeedsState{};
+  [[nodiscard]] bool needs_state(unsigned lhs, bool node) const {
+    return node || plainNeedsState[lhs];
   }
 
   // A close waiting on a cascade is answered by the first state that can
@@ -1483,43 +1486,43 @@ again:
     const char* const row = a.reductions[prod].row(p.len) == LrReduceRow::none
                                 ? "::cursiv::kNoElement"
                                 : "rec";
-    const auto land = [&](unsigned to) {
+    const auto finish_at = [&](unsigned to) {
       line("      ::cursiv::engine::lr_reduce_finish<kTable.stamp>(c, ", to,
            "u, ", row, ", ",
-           settles(p.lhs, p.node != kNoRow) && reads_a_token(to), ");");
+           needs_state(p.lhs, p.node != kNoRow) && reads_a_token(to), ");");
       line("      ",
            stands(prod, to) ? jump('D', dispatch_label(to)) : jump('G', to));
     };
     if (one >= 0) {
-      land(static_cast<unsigned>(one));
+      finish_at(static_cast<unsigned>(one));
       return;
     }
     line("      switch (c.stack[c.stack.size() - 2u].state) {");
-    struct Landing {
+    struct GotoCase {
       std::uint16_t to;
       std::uint32_t guard;
       std::vector<std::uint16_t> from;
     };
-    std::vector<Landing> landings;
+    std::vector<GotoCase> gotoCases;
     std::map<std::pair<std::uint16_t, std::uint32_t>, std::size_t> at;
     for (const auto e : gotos[p.lhs]) {
       const auto [it, fresh] =
-          at.try_emplace(std::pair{e.to, e.guard}, landings.size());
-      if (fresh) landings.push_back({e.to, e.guard, {}});
-      landings[it->second].from.push_back(e.from);
+          at.try_emplace(std::pair{e.to, e.guard}, gotoCases.size());
+      if (fresh) gotoCases.push_back({e.to, e.guard, {}});
+      gotoCases[it->second].from.push_back(e.from);
     }
-    for (const Landing& l : landings) {
+    for (const GotoCase& l : gotoCases) {
       for (const std::uint16_t from : l.from) line("      case ", from, ":");
       if (l.guard == 0)
-        land(l.to);
+        finish_at(l.to);
       else
-        emit_guarded_landings(l.guard, "        ", land, none,
-                              p.len == 0 ? "" : "c.stack.top().state");
+        emit_guarded_targets(l.guard, "        ", finish_at, none,
+                             p.len == 0 ? "" : "c.stack.top().state");
     }
     line("      default: ", none, "\n      }");
   }
 
-  // The landing switches that two reductions of one group spell alike, each
+  // The target switches that two reductions of one group write the same, each
   // written once under a `T` label. Below this many lines a switch costs less
   // repeated than the jump costs on every reduction.
   static constexpr unsigned kLrTailLines = 32;
@@ -1569,7 +1572,7 @@ again:
       line(
           "    if (c.laMode != ::cursiv::engine::kNoMode && "
           "mode_sub(c.laMode, ",
-          m, ")", owes_walk(m),
+          m, ")", other_mode_guard(m),
           ") "
           "goto D",
           s, ";");
@@ -1585,7 +1588,7 @@ again:
       line("  if (c.ncand != 0) [[unlikely]] pick_cand(c, ", s, ");");
   }
 
-  // The arm owed by the labels written since it was set.
+  // The arm the labels written since it was set still need.
   std::string pendBody{};
 
   // Terminals reading the same arm, consecutive ids as a range.
@@ -1636,7 +1639,8 @@ again:
     if (dedentTerm != 0 && a.follow[s].test(dedentTerm))
       line(
           "  if (c.la.sym == 0 && "
-          "::cursiv::engine::indent_owes_dedent(c.indentArena, c.indent.head)) "
+          "::cursiv::engine::indent_needs_dedent(c.indentArena, "
+          "c.indent.head)) "
           "{ "
           "c.la = ::cursiv::engine::Token{c.la.begin, c.la.begin, ",
           dedentTerm, "}; }");
@@ -1646,7 +1650,7 @@ again:
       const std::size_t run = j - i;
       if (cellLead[i] != i) return;
       // Terminals that answer the same way share their labels: gcc and clang
-      // do not merge identical arms alike.
+      // do not merge identical arms the same.
       if (run == 1) {
         if (std::string body = capture([&] { emit_arm(x); });
             body != pendBody) {
@@ -1710,11 +1714,12 @@ again:
                         : "",
            "goto D", s, "; }");
     }
-    // An end of input refused while suites are open owes a dedent first.
+    // An end of input refused while suites are open needs a dedent first.
     if (dedentTerm != 0)
       line(
           "      if (c.la.sym == 0 && "
-          "::cursiv::engine::indent_owes_dedent(c.indentArena, c.indent.head)) "
+          "::cursiv::engine::indent_needs_dedent(c.indentArena, "
+          "c.indent.head)) "
           "{ "
           "c.la = ::cursiv::engine::Token{c.la.begin, c.la.begin, ",
           dedentTerm,
@@ -1727,7 +1732,7 @@ again:
       if (a.follow[s].test(impliedTerms[q]))
         line("      if (imply_", q, "(c)) goto D", s, ";");
     // With no token in hand, the sole guarded reduce or region exit can
-    // still land. The exit hands the untouched gap to its caller; valid
+    // still run. The exit hands the untouched gap to its caller; valid
     // tokens, including an optional item's shift, took priority above.
     if (const auto sole = a.soleReduce[s];
         sole != kLrNoProd &&
@@ -1735,7 +1740,7 @@ again:
         a.modeTight[a.mode[s]] != 0)
       line("      if (c.la.sym == 0xFFFFu && ",
            a.cfg.prods[sole].gap != 0 ? reduce_allowed(sole) : "true",
-           a.may_land_nowhere(s, sole)
+           a.goto_may_fail(s, sole)
                ? concat(" && ",
                         guard_target(a.goto_guard(s, a.cfg.prods[sole].lhs)),
                         " != ::cursiv::engine::kInvalidSymbol")
@@ -1808,7 +1813,7 @@ again:
     // The terminal's one action, where it is a shift or a reduce no gap
     // decides.
     const auto plain = [&](unsigned t) -> const LrAction* {
-      if (const auto& term = a.cfg.terms[t]; term.trivia || term.laid != 0)
+      if (const auto& term = a.cfg.terms[t]; term.trivia || term.synthetic != 0)
         return nullptr;
       const auto [lo, n] =
           lr_term_run(row, a.actionCount[s], static_cast<std::uint16_t>(t));
@@ -1823,13 +1828,13 @@ again:
     // to read again, since no stack may take it past the reduction.
     ByteSet flagBytes{};
     const bool spared = flag_bytes(m, flagBytes);
-    const auto owes = [&](unsigned t, unsigned b) {
+    const auto flagged = [&](unsigned t, unsigned b) {
       return a.flags_mode(m) && a.modeFlag[m].test(t) &&
              plain(t)->kind == LrActionKind::reduce &&
              (!spared || flagBytes.has(static_cast<unsigned char>(b)));
     };
-    // The bytes the walk answers alone. Rivals at one byte stay the lexer's
-    // to rank where the end of the text holds candidates.
+    // The bytes the walk answers alone. Competitors at one byte stay the
+    // lexer's to rank where the end of the text holds candidates.
     ByteSet walked{};
     DynSet named;
     unsigned nnamed = 0;
@@ -1843,7 +1848,7 @@ again:
       unsigned n = nnamed;
       bool ok = true;
       for (const unsigned t : reach.members()) {
-        ok = plain(t) != nullptr && !owes(t, b);
+        ok = plain(t) != nullptr && !flagged(t, b);
         if (!ok) break;
         if (!more.test(t)) {
           more.set(t);
@@ -1863,7 +1868,8 @@ again:
     write("  if (c.laMode != ::cursiv::engine::kNoMode) { if (c.laMode == ", m,
           ") goto D", s);
     if (subs)
-      write("; if (mode_sub(c.laMode, ", m, ")", owes_walk(m), ") goto D", s);
+      write("; if (mode_sub(c.laMode, ", m, ")", other_mode_guard(m),
+            ") goto D", s);
     line("; lex_", m, "(c); goto D", s, "; }");
     emit_entry_labels(s);
     line("  {");
@@ -1886,7 +1892,7 @@ again:
                                 std::string_view term, std::string_view ind) {
       line(ind, "c.la = ::cursiv::engine::Token{p, ", end, ", ", term, ", ", m,
            "};\n", ind, "c.laMode = ", m, ";");
-      emit_empty_landing(s, x.arg, ind);
+      emit_no_target_exit(s, x.arg, ind);
       line(ind, jump('R', reduceOf[x.arg]));
     };
     if (!literals.empty() || walked.any()) {
@@ -1932,7 +1938,7 @@ again:
           line("      }");
         } else {
           line("      switch (sc.term) {");
-          // Terminals reducing alike share their arm.
+          // Terminals reducing the same share their arm.
           std::vector<bool> done(a.cfg.nterms, false);
           for (const unsigned t : named.members()) {
             if (done[t]) continue;
@@ -1973,13 +1979,13 @@ again:
   }
 
   // One action, as a state writes it.
-  void emit_land(unsigned to, std::string_view ind) {
+  void emit_target(unsigned to, std::string_view ind) {
     assert(shifted(to));
     line(ind, jump('H', to));
   }
   // A token that moves the levels or the bracket depth calls the helper
   // `indent_shift` picks for its kind: the drive and the replay move them
-  // alike.
+  // the same.
   void emit_take(const LrAction& x, std::string_view ind) {
     if (implied(x.term)) line(ind, "c.virt.pending = 0;");
     if (indentTerm != 0 && x.term == indentTerm)
@@ -1993,8 +1999,8 @@ again:
       line(ind, "::cursiv::engine::indent_shift_delim(c.indent, ",
            int{a.cfg.terms[x.term].delim}, ");");
   }
-  void emit_empty_landing(unsigned s, unsigned prod, std::string_view ind) {
-    if (!a.may_land_nowhere(s, prod)) return;
+  void emit_no_target_exit(unsigned s, unsigned prod, std::string_view ind) {
+    if (!a.goto_may_fail(s, prod)) return;
     line(ind, "if (", guard_target(a.goto_guard(s, a.cfg.prods[prod].lhs)),
          " == ::cursiv::engine::kInvalidSymbol) goto X", s, ";");
   }
@@ -2002,16 +2008,16 @@ again:
     if (lr_takes_token(x.kind)) {
       if (x.kind == LrActionKind::shift) {
         emit_take(x, "    ");
-        emit_land(x.arg, "    ");
+        emit_target(x.arg, "    ");
         return;
       }
-      // Nothing moves before an outcome lands: one that lands nowhere leaves
-      // the token without an action.
-      emit_guarded_landings(
+      // Nothing moves before an outcome is known: one that leads to no state
+      // leaves the token without an action.
+      emit_guarded_targets(
           x.arg + 1u, "    ",
           [&](unsigned to) {
             emit_take(x, "      ");
-            emit_land(to, "      ");
+            emit_target(to, "      ");
           },
           concat("goto X", curState, ";"));
       return;
@@ -2020,22 +2026,22 @@ again:
       // Where the reduce's condition fails, the token has no action here.
       if (const unsigned g = a.cfg.prods[x.arg].gap; g != 0)
         line("    if (!", reduce_allowed(x.arg), ") goto X", curState, ";");
-      emit_empty_landing(curState, x.arg, "    ");
+      emit_no_target_exit(curState, x.arg, "    ");
       line("    ", jump('R', reduceOf[x.arg]));
     } else {
       line("    goto Acc;");
     }
   }
 
-  // The tokens the parse lays: the indentation's, and the implied ones.
+  // The tokens the parse inserts: the indentation's, and the implied ones.
   unsigned indentTerm = 0, dedentTerm = 0;
   std::vector<unsigned> impliedTerms{};
-  void plan_laid() {
+  void plan_synthetic() {
     for (unsigned t = 1; t < a.cfg.nterms; ++t) {
-      const auto laid = a.cfg.terms[t].laid;
-      if (laid == kLaidIndent) indentTerm = t;
-      if (laid == kLaidDedent) dedentTerm = t;
-      if (laid == kLaidImplied) impliedTerms.push_back(t);
+      const auto kind = a.cfg.terms[t].synthetic;
+      if (kind == kSyntheticIndent) indentTerm = t;
+      if (kind == kSyntheticDedent) dedentTerm = t;
+      if (kind == kSyntheticImplied) impliedTerms.push_back(t);
     }
     indentedGrammar = a.indented();
     subs = !indentedGrammar && any_sub();
@@ -2044,7 +2050,7 @@ again:
   bool indentedGrammar = false;
   unsigned curState = 0;
   bool implied(unsigned term) const {
-    return a.cfg.terms[term].laid == kLaidImplied;
+    return a.cfg.terms[term].synthetic == kSyntheticImplied;
   }
   bool guards(unsigned s) const {
     return std::ranges::any_of(a.action_row(s), [&](const LrAction& x) {
@@ -2187,13 +2193,14 @@ again:
     for (unsigned q = 0; q < impliedTerms.size(); ++q) {
       define(concat("CURSIV_NOINLINE ", linkage("static ")),
              concat("bool imply_", q, "(::cursiv::engine::LrContext& c)"));
-      line("  if (c.virt.pending != 0 || (c.virt.laid_at(c.la) & ", 1u << q,
+      line("  if (c.virt.pending != 0 || (c.virt.inserted_ranks(c.la) & ",
+           1u << q,
            "u) != 0 ||\n"
            "      !drive_cond(c, ",
            a.cfg.terms[impliedTerms[q]].cond,
            "u, c.virt.from, c.la))\n"
            "    return false;\n"
-           "  c.virt.lay(c.la, ",
+           "  c.virt.insert(c.la, ",
            q, "u, ", impliedTerms[q],
            ");\n"
            "  return true;\n"
@@ -2232,7 +2239,7 @@ again:
     dispLead.assign(a.nstates, 0);
     dispShared.assign(a.nstates, 0);
     dispPiece.assign(a.nstates, {});
-    // What it spells and the mode it lexes in tell two apart.
+    // What it writes and the mode it lexes in tell two apart.
     std::vector<std::unordered_map<std::string_view, std::uint32_t>> first(
         a.nmodes);
     for (unsigned s = 0; s < a.nstates; ++s) {
@@ -2255,7 +2262,7 @@ again:
   }
 
   void emit_state(unsigned s) {
-    // A state whose reading another spells enters it.
+    // A state whose reading another writes enters it.
     if (dispShared[s] != 0 && dispLead[s] != s) {
       const unsigned lead = dispLead[s];
       line("G", s, ": {\n  goto G", lead, ";");
@@ -2332,7 +2339,7 @@ again:
     write(
         R"(// Every state keeps its labels, reached or not: the file maps the table.
 // Labels: G/S/L entry, C lexed, D dispatch, X refused, H/P hop, AC arm,
-// R reduce, T shared landing, Acc accept.
+// R reduce, T shared goto target, Acc accept.
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wunused-label"
 #else
@@ -2373,7 +2380,7 @@ again:
     line("#include \"cursiv/shared/runtime/Scan.hpp\"");
     line("#include \"cursiv/shared/runtime/LexBoundary.hpp\"");
     line("#include \"cursiv/shared/runtime/LexByteRun.hpp\"");
-    if (anyPartialLadder())
+    if (anyPartialInlineStates())
       line("#include \"cursiv/shared/runtime/LexMatch.hpp\"");
     if (a.multiCand)
       line("#include \"cursiv/lr/runtime/LrLexCandidates.hpp\"");
@@ -2409,14 +2416,14 @@ again:
     for (unsigned s = 0; s < ns; ++s) {
       for (const LrAction& x : a.action_row(s)) {
         if (x.kind == LrActionKind::reduce) link(s, ns + reduceOf[x.arg]);
-        a.each_landing(x, [&](unsigned to) { link(s, to); });
+        a.each_target(x, [&](unsigned to) { link(s, to); });
       }
     }
     for (unsigned q = 0; q < a.cfg.nprods; ++q) {
       if (weight[ns + q] == 0) continue;
       const unsigned lhs = a.cfg.prods[q].lhs;
       for (const auto e : gotos[lhs])
-        a.each_goto_landing(e, [&](unsigned to) { link(ns + q, to); });
+        a.each_goto_target(e, [&](unsigned to) { link(ns + q, to); });
     }
     // States that read one dispatch go to one group: the jump into the lead's
     // reading stays inside one function, as the weights above assumed.
@@ -2463,7 +2470,7 @@ again:
     }
   }
 
-  // What a group holds: its states, and the reduces that land from it.
+  // What a group holds: its states, and the reduces taken from it.
   void plan_groups(const std::string& used) {
     const unsigned ns = a.nstates, n = ns + a.cfg.nprods;
     // Each node weighs the lines it writes in a single group; a node that
@@ -2538,7 +2545,7 @@ again:
           groupOf[a.nstates + prod] == g)
         leads.push_back(prod);
     std::vector<std::string> tails(leads.size());
-    const auto settle = [&](std::size_t i) {
+    const auto render_tail = [&](std::size_t i) {
       enter(g, tailPiece[leads[i]]);
       tails[i] = resolved(tailPiece[leads[i]].text, g);
     };
@@ -2548,7 +2555,7 @@ again:
     std::map<std::string_view, unsigned> uses;
     for (std::size_t i = 0; i < leads.size(); ++i)
       if (!lone(i)) {
-        settle(i);
+        render_tail(i);
         ++uses[tails[i]];
       }
     std::map<std::string_view, unsigned> sharedTails;
@@ -2558,7 +2565,7 @@ again:
         sharedTails.try_emplace(tail,
                                 static_cast<unsigned>(sharedTails.size()));
     for (std::size_t i = 0; i < leads.size(); ++i)
-      if (lone(i)) settle(i);
+      if (lone(i)) render_tail(i);
     for (std::size_t i = 0; i < leads.size(); ++i) {
       const auto it = sharedTails.find(tails[i]);
       emit_reduce(
@@ -2734,13 +2741,13 @@ again:
   // The files: `ParserStates.cpp`, the groups' header, then their units.
   std::vector<std::pair<std::string, std::string>> emit_all(
       std::string_view ns) {
-    plan_laid();
+    plan_synthetic();
     plan_known_candidates();
     plan_lexers();
     plan_states();
     emit_helpers(ns);
     emit_drive_cond();
-    shared([&] { emit_guard_lands(); });
+    shared([&] { emit_guard_helpers(); });
     emit_imply();
     emit_states(ns);
     std::vector<std::pair<std::string, std::string>> files;

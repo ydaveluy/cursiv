@@ -1,6 +1,6 @@
 // The re-readings of a misspelling as the walk emits them: a (terminal, end)
-// once, at its least cost, laid in rank order when they are asked for -- the
-// cheaper first, then the longer span, then the walk's own order.
+// once, at its least cost, sorted when they are asked for: the cheaper first,
+// then the longer span, then the walk's own order.
 #pragma once
 
 #include <algorithm>

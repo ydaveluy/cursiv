@@ -8,13 +8,13 @@
 #include <format>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/references/Linker.hpp"
-#include "cursiv/references/LinkingResult.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -31,8 +31,8 @@ namespace cursiv {
 
 namespace {
 
-// A throwing provider is the language's bug, not the document's: said to the
-// observability sink of the document's language, if it has one.
+// A throwing provider is the language's bug, not the document's: reported to
+// the observability sink of the document's language, if it has one.
 void say_provider_threw(const Document* document, std::string_view name,
                         const std::exception_ptr& failure) noexcept {
   if (document == nullptr || document->language == nullptr) return;
@@ -79,9 +79,8 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
   if (rank >= handles.size()) return {};
   const RefHandle& h = handles[rank];
   if (h.owner == nullptr) return {};
-  // The rung before the linker, and the rung judges: a document seen at
-  // `ComputedScopes` has published its linker, and one it reaches during the
-  // lookup must not keep a failure that began below it.
+  // Before the document reaches `ComputedScopes`, a failure is not kept: the
+  // reference stays `Unresolved` and is asked again later.
   const Document* at = document.load(std::memory_order_acquire);
   if (at == nullptr) at = h.owner->getDocument();
   const bool early = at != nullptr && at->state.load(std::memory_order_acquire) <
@@ -92,18 +91,17 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
   const Linker* const l = linker.load(std::memory_order_acquire);
   if (l == nullptr) return failed();
   const RefOps& ops = _f.refOps[h.field];
-  // Read once for the site and the filter both -- and only when the member
-  // declares narrowings at all: the common field pays a predictable branch,
-  // never the indirect call.
+  // Read once for the site and the filter, and only when the member declares
+  // narrowings, so the common case skips the indirect call.
   const std::uint8_t narrow =
       ops.narrow_count != 0 ? ops.narrow_of(*h.owner, h.index) : kNoNarrow;
 
   const auto name = ops.text(*h.owner, h.index);
-  const AstNodeDescriptionOrError found = contained(
+  const AstNodeDescription* const found = contained(
       at, name, [&] { return l->getCandidate(info(h, name, narrow)); });
-  if (!found.has_value() || *found == nullptr) return failed();
+  if (found == nullptr) return failed();
 
-  AstNode* const target = (*found)->node;
+  AstNode* const target = found->node;
   if (target == nullptr) return failed();
   // A target the site cannot hold is not an answer: the scope decided it was
   // visible, the site -- its narrowing included -- decides it fits.
@@ -117,10 +115,9 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
 
 void DefaultDocumentReferences::forceAt(const Cst& cst, TextOffset offset,
                                         const CancellationToken& cancelToken) {
-  std::vector<RefHandle> at;
+  // Each rank is a run of one in the work list.
   for (const std::uint32_t rank : ranks_in(cst, offset, offset))
-    at.push_back(handles[rank]);
-  force(at, cancelToken);
+    force(std::span(handles).subspan(rank, 1), cancelToken);
 }
 
 void DefaultDocumentReferences::visitResolved(
@@ -253,20 +250,17 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
   const Document* at = document.load(std::memory_order_acquire);
   if (at == nullptr) at = h.owner->getDocument();
   const auto name = ops.text(*h.owner, h.index);
-  const AstNodeDescriptionsOrError found = contained(
+  const std::vector<const AstNodeDescription*> found = contained(
       at, name, [&] { return l->getCandidates(info(h, name, narrow)); });
-  if (!found.has_value()) return RefState::ErrorNotFound;
 
+  // Filled in place: a relink reuses the storage the reset kept.
   const detail::RefFilter filter{&ops, narrow};
-  std::vector<MultiRefItem> found_targets;
-  for (const AstNodeDescription* const entry : *found) {
+  for (const AstNodeDescription* const entry : found) {
     if (entry == nullptr || entry->node == nullptr) continue;
     const std::uint8_t which = filter.branch(entry->node->type);
-    if (which != kNoBranch) found_targets.push_back({entry->node, which});
+    if (which != kNoBranch) out.push_back({entry->node, which});
   }
-  if (found_targets.empty()) return RefState::ErrorNotFound;
-  out = std::move(found_targets);
-  return RefState::Resolved;
+  return out.empty() ? RefState::ErrorNotFound : RefState::Resolved;
 }
 
 ReferenceInfo DefaultDocumentReferences::info(const RefHandle& h,

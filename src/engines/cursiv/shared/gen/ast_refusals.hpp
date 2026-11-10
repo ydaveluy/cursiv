@@ -33,7 +33,7 @@ namespace cursiv::engine {
 
 // How many nodes of a member's family one match of a shape leaves for the
 // directive above it: what that directive's node path takes when the shape
-// pays no value of its own.
+// gives no value of its own.
 
 // The builder takes the first node of the family and ignores the others, so
 // a node of another class is no node here. One that a rule of a base class
@@ -132,35 +132,34 @@ struct alts_index_targets<std::variant<As...>>
     : std::bool_constant<((alt_names_a_type<As> == ast_pointer_alt<As>) &&
                           ...)> {};
 
-// One check per (member, payload source).
 template <auto P, class Src>
 struct check_write {
   using tag = field_tag<P>;
   using X =
       cond_t<writes_whole<tag, Src>, typename tag::member, typename tag::held>;
   static constexpr bool ok = admits<X, Src>();
-  static constexpr FieldNature nature = tag::nature;
+  static constexpr FieldContent content = tag::content;
   // A pointer to any class is a node member, so "the pointee is off the
   // AstNode family" and "the payload is the wrong family" are two mistakes.
   static constexpr bool pointee_ok =
-      nature != FieldNature::node ||
+      content != FieldContent::node ||
       std::is_base_of_v<AstNode, std::remove_pointer_t<X>>;
   // A `string_view` member refusing its text: the value is not what the source
   // spells, and the generic "no conversion" message below would mislead.
   static constexpr bool view_dangles =
-      nature == FieldNature::value && std::is_same_v<X, AstNode::string_view> &&
-      is_text_pay<Src> && !ok;
-  static constexpr bool cuts_number = narrows<X, typename pay_value<Src>::type>;
-  // A value replacing what the member holds needs an assignment, of the value
-  // or of a member made from it: a whole answer and a plain value held directly
-  // do. A list's or an optional's element, and a variant's alternative, are
-  // built in place.
+      content == FieldContent::value &&
+      std::is_same_v<X, AstNode::string_view> && is_text_payload<Src> && !ok;
+  static constexpr bool cuts_number =
+      narrows<X, typename payload_value<Src>::type>;
+  // A value that replaces what the member holds needs an assignment; a list's
+  // or an optional's element and a variant's alternative are built in place.
   static constexpr bool replaceable =
-      !(std::is_same_v<typename pay_value<Src>::type, typename tag::member> ||
+      !(std::is_same_v<typename payload_value<Src>::type,
+                       typename tag::member> ||
         (tag::storage == FieldStorage::direct &&
-         nature == FieldNature::value)) ||
+         content == FieldContent::value)) ||
       std::is_assignable_v<typename tag::member&,
-                           typename pay_value<Src>::type> ||
+                           typename payload_value<Src>::type> ||
       std::is_move_assignable_v<typename tag::member>;
   static constexpr bool list_grows =
       tag::storage != FieldStorage::vector ||
@@ -168,25 +167,25 @@ struct check_write {
   // Mixing in a reference alternative shifts the interpreter's positions
   // apart from the writer's, surfacing as `malformed_cst` on every document.
   static constexpr bool variant_alts_index_targets =
-      nature != FieldNature::variant || alts_index_targets<X>::value;
+      content != FieldContent::variant || alts_index_targets<X>::value;
 
   static consteval bool check() {
-    static_assert(!(is_ref_nature(nature) && !is_text_pay<Src>),
+    static_assert(!(is_ref_content(content) && !is_text_payload<Src>),
                   "a reference member takes text: a cross-reference stores "
                   "the name as written, from a terminal or a data rule, never "
                   "a node built by a rule");
-    static_assert(!(is_ref_nature(nature) && is_text_pay<Src> && !ok),
+    static_assert(!(is_ref_content(content) && is_text_payload<Src> && !ok),
                   "a reference member holds a name, so its value must be text: "
                   "give the rule a converter that returns a string or a "
                   "string_view");
     if constexpr (!pointee_ok)
       ::MemberNodeOutsideAst<P, std::remove_pointer_t<X>>();
-    static_assert(!(nature == FieldNature::node && pointee_ok && !ok),
+    static_assert(!(content == FieldContent::node && pointee_ok && !ok),
                   "this member holds a node of its own type: the value "
                   "written must be a node whose type derives from the type "
                   "the member points to (from a rule that builds a node, a "
                   "region, or a nest)");
-    static_assert(!(nature == FieldNature::variant && !ok),
+    static_assert(!(content == FieldContent::variant && !ok),
                   "a variant member takes a value that matches exactly one "
                   "of its alternatives -- this one matches none, or "
                   "several");
@@ -198,11 +197,9 @@ struct check_write {
                   "builder would pick the wrong alternative, or none -- give "
                   "the reference a member of its own");
     if constexpr (view_dangles)
-      ::ViewOfOtherText<P, typename pay_value<Src>::type>();
-    // An enum's default conversion matches text against its enumerator names,
-    // so a plain text payload already admits; this fires for a node payload or
-    // an unbuildable converter result. Whether a literal's spelling is an
-    // enumerator is `check_lit_write`'s question.
+      ::ViewOfOtherText<P, typename payload_value<Src>::type>();
+    // Fires for a node payload or an unbuildable converter result: an enum
+    // converts text by its enumerator names.
     static_assert(!cuts_number,
                   "this rule gives a number this member cannot always hold: "
                   "make the member wider, or give the rule the member's own "
@@ -216,7 +213,8 @@ struct check_write {
                   "a list moves its elements as it grows, and this type cannot "
                   "be moved: give it a move constructor, or use `optional<T>`");
     static_assert(
-        !(nature == FieldNature::value && !ok && !view_dangles && !cuts_number),
+        !(content == FieldContent::value && !ok && !view_dangles &&
+          !cuts_number),
         "no conversion from this value to the member type: the built-in "
         "conversions cover string_view, bool, arithmetic types and enums, and "
         "nothing else -- give the rule a converter that returns the member's "
@@ -279,7 +277,7 @@ consteval bool may_spell_number(std::string_view text) {
 template <auto P, class Src>
 consteval bool check_lit_write() {
   using X = typename field_tag<P>::held;
-  if constexpr (field_tag<P>::nature != FieldNature::value) {
+  if constexpr (field_tag<P>::content != FieldContent::value) {
     return true;
   } else if constexpr (std::is_same_v<X, bool> || std::is_enum_v<X>) {
     // Type compatibility does not ensure the literal names a value.
@@ -297,23 +295,22 @@ consteval bool check_lit_writes(TypeList<Srcs...>) {
   return (check_lit_write<P, Srcs>() && ...);
 }
 
-// Each source on its own.
 template <auto P, class... Srcs>
 consteval bool check_writes(TypeList<Srcs...>) {
   return (check_write<P, Srcs>::check() && ...);
 }
 
-// A rule or terminal paying text somewhere inside the shape: under a
+// A rule or terminal giving text somewhere inside the shape: under a
 // sequence, that payload never reaches the member.
-template <class E, class Kids = typename ExprShape<E>::kids>
-inline constexpr bool inner_text_pay = false;
+template <class E, class Children = typename ExprShape<E>::children>
+inline constexpr bool inner_text_payload = false;
 template <class R>
-inline constexpr bool inner_text_pay<Ref<R>> =
+inline constexpr bool inner_text_payload<Ref<R>> =
     !is_node_rule<named_rule_t<R>> && !is_infix_rule<named_rule_t<R>>;
 template <class E, class... Ks>
   requires(grouping<E> || transparent<E>)
-inline constexpr bool inner_text_pay<E, TypeList<Ks...>> =
-    (inner_text_pay<Ks> || ...);
+inline constexpr bool inner_text_payload<E, TypeList<Ks...>> =
+    (inner_text_payload<Ks> || ...);
 // A variant member with an alternative that is a value, not a node.
 template <class H>
 inline constexpr bool takes_values = false;
@@ -323,7 +320,7 @@ inline constexpr bool takes_values<std::variant<As...>> =
 
 // Whether a shape builds a node, which a member that takes a value has no use
 // for.
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 inline constexpr bool builds_a_node = holds_directive<E>;
 template <class E, class... Ks>
 inline constexpr bool builds_a_node<E, TypeList<Ks...>> =
@@ -332,19 +329,15 @@ template <class R>
 inline constexpr bool builds_a_node<Ref<R>, TypeList<>> =
     is_node_rule<named_rule_t<R>> || is_infix_rule<named_rule_t<R>>;
 
-// A shape may pay nothing -- a sequence holding a node, a repetition, a
-// lookahead -- leaving no source for `check_write` to judge. The builder then
-// reads that as "a node travels" and looks for one in the span, which only a
-// family-naming member can receive, and only from a span holding one on every
-// match and no repetition of them -- refused here rather than at the first
-// document.
+// A shape that gives no value gives its member the node in its span: only a
+// member naming a family receives it, from a span holding exactly one node.
 template <auto P, class E>
 struct dir_payload_ok {
   using tag = field_tag<P>;
   static constexpr bool takes_a_node =
-      alt_names_a_type<typename tag::held> && !is_ref_nature(tag::nature);
+      alt_names_a_type<typename tag::held> && !is_ref_content(tag::content);
   static constexpr bool values_lost =
-      takes_values<typename tag::held> && inner_text_pay<E>;
+      takes_values<typename tag::held> && inner_text_payload<E>;
   using held = nodes_held<typename held_targets<typename tag::held>::type,
                           typename once_item<E>::type>;
   static constexpr bool counted = takes_a_node && !values_lost;
@@ -364,8 +357,8 @@ struct dir_payload_ok {
     return true;
   }
 };
-// The directive distributes over a choice, so each alternative pays on its
-// own: the payloads of the others do not stand in for one that has none.
+// The directive distributes over a choice, so each alternative is checked on
+// its own: the payloads of the others do not stand in for one that has none.
 template <auto P, class... As>
 struct dir_payload_ok<P, Choice<As...>> {
   static consteval bool check() {
@@ -376,11 +369,8 @@ template <auto P, class E>
   requires transparent<E>
 struct dir_payload_ok<P, E> : dir_payload_ok<P, through_t<E>> {};
 
-// One directive per storage: `assign` on a vector would silently accumulate and
-// `append` on a scalar would silently overwrite. Not auto-repaired either --
-// that would change what an accumulating grammar means -- so the directive is
-// named.
-// `=` on a list takes one thing, the whole list a rule answers.
+// One directive per storage: `append` to a vector, `assign` to anything else.
+// `=` on a list takes the whole list a rule answers.
 template <auto P, bool IsAppend, class... Srcs>
 consteval bool dir_storage_ok(TypeList<Srcs...>) {
   using F = field_tag<P>;
@@ -402,16 +392,14 @@ consteval bool dir_storage_ok(TypeList<Srcs...>) {
   return true;
 }
 
-// A site may bind less than its member accepts. The narrow type must derive
-// from exactly one of the member's candidates: one, because a filter only
-// restricts and an outside type would accept what the member can't hold;
-// exactly one, because the filter answers which candidate a tag satisfies.
+// A site may bind less than its member accepts: the narrow type must derive
+// from exactly one of the member's candidates.
 template <auto P, class N>
 consteval bool dir_narrow_ok() {
   if constexpr (!std::is_void_v<N>) {
     using tag = field_tag<P>;
     using targets = typename held_targets<typename tag::held>::type;
-    constexpr bool on_a_reference = is_ref_nature(tag::nature);
+    constexpr bool on_a_reference = is_ref_content(tag::content);
     constexpr std::size_t bases =
         on_a_reference ? narrow_bases<N, targets>::count : 0;
     if constexpr (!on_a_reference) ::NarrowNonReference<P, N>();
@@ -425,7 +413,7 @@ consteval bool dir_narrow_ok() {
 
 // The walk: every directive in a rule body, payloads included (a region's
 // body holds directives of its own).
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 struct payloads_ok;
 template <class E, class... Ks>
 struct payloads_ok<E, TypeList<Ks...>>
@@ -436,7 +424,7 @@ inline constexpr bool spec_ok =
     dir_payload_ok<spec_ptr<S>, E>::check() &&
     dir_narrow_ok<spec_ptr<S>, spec_narrow_t<S>>() &&
     check_writes<spec_ptr<S>>(typename payload_of<E>::type{}) &&
-    check_lit_writes<spec_ptr<S>>(typename lit_pays<E>::type{});
+    check_lit_writes<spec_ptr<S>>(typename lit_payloads<E>::type{});
 
 template <auto S, class E>
 struct payloads_ok<Assign<S, E>, TypeList<E>>
@@ -465,7 +453,7 @@ struct payloads_ok<Create<T, E>, TypeList<E>>
 
 template <auto P>
 consteval bool nest_ok() {
-  static_assert(field_tag<P>::nature == FieldNature::node,
+  static_assert(field_tag<P>::content == FieldContent::node,
                 "nest<T, &C::f> moves the node built so far into f, so the "
                 "member must hold a node pointer");
   return true;
@@ -483,9 +471,9 @@ consteval bool infix_operands_ok() {
   if constexpr (NodePrimary) {
     // Both halves: nested levels feed the climb's own node back into the
     // operands, and the primary's node enters them first.
-    using self = pay_node<rule_type_t<R>>;
-    using primary =
-        pay_node<rule_type_t<typename St::template rule<typename R::primary>>>;
+    using self = node_payload<rule_type_t<R>>;
+    using primary = node_payload<
+        rule_type_t<typename St::template rule<typename R::primary>>>;
     return check_write<R::left_pointer, self>::check() &&
            check_write<R::right_pointer, self>::check() &&
            check_write<R::left_pointer, primary>::check() &&
@@ -498,17 +486,15 @@ consteval bool infix_operands_ok() {
 }
 
 // The operator member takes what every operator hands over: a bare literal's
-// text, or the value a terminal's or a data rule's converter makes of it. A
-// bare literal is its own whole payload, so its spelling must convert too.
-// `Src` is the source the engine's lowering writes from, not the rule the
-// author named: the check answers about the write that happens.
+// text, which must convert too, or a converter's value. `Src` is the source
+// the lowering writes from.
 template <class R, class St, template <class, class, auto> class Src,
           std::size_t... Is>
 consteval bool infix_ops_ok(std::index_sequence<Is...>) {
   constexpr auto P = R::op_pointer;
   const auto writes = []<class... Ops>(TypeList<Ops...>) {
     return (check_write<P, Src<St, Ops, P>>::check() && ...) &&
-           (check_lit_writes<P>(typename lit_pays<Ops>::type{}) && ...);
+           (check_lit_writes<P>(typename lit_payloads<Ops>::type{}) && ...);
   };
   return (writes(typename alts_list<
                  typename R::levels::template at<Is>::op_expr>::type{}) &&
@@ -526,7 +512,7 @@ consteval bool infix_member_belongs() {
 }
 
 // An infix rule synthesizes its body, so a mismatched member carries no
-// directive to refuse it: the rule answers for its three members.
+// directive to refuse it: the rule checks its three members.
 template <class R, class St, template <class, class, auto> class Src>
 consteval bool infix_rule_ok() {
   using Primary = typename St::template rule<typename R::primary>;

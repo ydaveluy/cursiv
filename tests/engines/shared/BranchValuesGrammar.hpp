@@ -1,8 +1,6 @@
-// One boolean three ways: a terminal whose alternatives each give a constant,
-// the data rule that gives the same constants, and the same words in place. A
-// value stands where a name can too, so the words compete with names as in a
-// real grammar. Beside them, `as` converts the text or the parts of what it
-// reads.
+// One boolean three ways: a terminal whose alternatives give constants, a data
+// rule that gives the same, and the same words in place, competing with names.
+// Beside them, `as` converts the text or the parts of what it reads.
 #pragma once
 
 #include <cstdint>
@@ -93,7 +91,7 @@ struct Suite : cursiv::GrammarSpec {
                                         as<std::int32_t>(ref<NUM>))) |
              (lit<"%"> + assign<&ast::Item::count>(ref<Measure>))) +
             lit<";">)> {};
-  // A choice of values behind a condition lays a record of its own where a
+  // A choice of values behind a condition adds a record of its own where a
   // repair leaves a token beside the value, and passes on the value it read.
   struct SWITCH : terminal<as<true>(ikw<"ON">) | as<false>(ikw<"OFF">)> {};
   struct Gated : rule<!lit<"%"> + (ref<BOOL> | ref<SWITCH>)> {};

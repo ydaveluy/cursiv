@@ -10,11 +10,9 @@
 // From Taskflow (taskflow/core/atomic_notifier.hpp), MIT licence:
 //   Copyright (c) 2018-2024 Dr. Tsung-Wei Huang, University of Wisconsin.
 
-// Parks a worker without losing a wake-up. One 64-bit word packs an epoch
-// above and a waiter count below; a notify moves the epoch, so a worker
-// already announced never sleeps past a wake-up it missed the timing of. A
-// worker sleeps on that word through `detail::wait_while_equal`, which blocks
-// on every target.
+// Parks a worker without losing a wake-up: one 64-bit word holds an epoch
+// above a waiter count, and a notify moves the epoch. A worker that misses
+// 2^32 notifications before it sleeps waits for the next one.
 
 namespace cursiv::detail {
 
@@ -33,12 +31,8 @@ class AtomicNotifier {
     return _waiters[index];
   }
 
-  // Waking exactly as many as there is work for; past the waiter count it is
-  // cheaper to wake everyone than to walk the list.
-  //
-  // One fence for the whole batch: a run wakes one worker per part, and paying
-  // a sequential-consistency fence per wake put dozens of them on the path that
-  // publishes work -- while one before the batch orders it just as well.
+  // Wakes as many as there is work for, or everyone past the waiter count. One
+  // fence orders the whole batch.
   void notifyN(std::size_t count) noexcept {
     if (count == 0) return;
     if (count >= _waiters.size()) {
@@ -61,9 +55,8 @@ class AtomicNotifier {
       }
   }
 
-  // Announce, then look again, then commit: skipping the second look is the
-  // lost wake-up, since work published between the last search and the sleep
-  // would wake nobody.
+  // Register, check for work again, then commit: without the second check,
+  // work published between the last search and the sleep wakes nobody.
   void prepareWait(Waiter& waiter) noexcept {
     const std::uint64_t prev =
         _state.fetch_add(kWaiterInc, std::memory_order_relaxed);
@@ -81,15 +74,14 @@ class AtomicNotifier {
       detail::wait_while_equal(_state, prev, std::memory_order_acquire);
       prev = _state.load(std::memory_order_acquire);
     }
-    // Seq_cst rather than relaxed: correctness would allow the looser order,
-    // but the sooner the waiter count reaches zero the fewer spurious wake-ups
-    // -- and each of those is a system call.
+    // Relaxed would be correct; seq_cst brings the waiter count to zero sooner,
+    // so fewer spurious wake-ups, each a system call.
     _state.fetch_sub(kWaiterInc, std::memory_order_seq_cst);
   }
 
  private:
-  // Moves the epoch and wakes one sleeper. Returns false when none was
-  // announced, which is the common case on a pool that never went idle.
+  // Moves the epoch and wakes one sleeper. Returns false when no worker waits,
+  // the common case on a busy pool.
   bool wakeOne() noexcept {
     for (std::uint64_t state = _state.load(std::memory_order_acquire);
          (state & kWaiterMask) != 0;)

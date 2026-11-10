@@ -1,7 +1,6 @@
-// A language the recovery metric runs: its erased parser, the readers its
-// tree is weighed with, the valid documents faults are planted in, and --
-// where the table engine generated it -- the ceilings one parse reached.
-// Each language's unit registers itself, so a binary runs what it links.
+// A language the recovery metric runs: its parser, how its tree is read, its
+// valid documents and, for a generated table, its ceilings. Each language
+// registers itself, so a binary runs what it links.
 #pragma once
 
 #include <array>

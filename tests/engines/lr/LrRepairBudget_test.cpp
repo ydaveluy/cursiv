@@ -1,8 +1,6 @@
 // A parse's repair keeps to its budget: past it the parse still ends, its
-// document accepted with a tree, and a run of owed insertions grows no bound.
+// document accepted with a tree, and a run of needed insertions grows no bound.
 // A repair that never ends trips the watchdog, not the lane's timeout.
-
-#include "cursiv/shared/runtime/RepairBudget.hpp"
 
 #include <chrono>
 #include <condition_variable>
@@ -19,33 +17,35 @@
 #include "arithmetics/generated/Arith/Table.hpp"
 #include "asi/generated/G/Parser.hpp"
 #include "asi/generated/G/Table.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstBuilder.hpp"
-#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/lr/runtime/LrDrive.hpp"
 #include "cursiv/lr/runtime/LrParseStats.hpp"
 #include "cursiv/lr/runtime/LrParser.hpp"
 #include "cursiv/lr/runtime/lr_lex_exact.hpp"
 #include "cursiv/lr/runtime/lr_lookahead.hpp"
-#include "cursiv/Check.hpp"
+#include "cursiv/shared/runtime/RepairBudget.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "degraded/generated/G/Parser.hpp"
 #include "degraded/generated/G/Table.hpp"
-#include "owed/generated/G/Parser.hpp"
-#include "owed/generated/G/Table.hpp"
+#include "insertloop/generated/G/Parser.hpp"
+#include "insertloop/generated/G/Table.hpp"
 #include "requirements/generated/Requirements/Parser.hpp"
 #include "requirements/generated/Requirements/Table.hpp"
 
 namespace ga = ::tasi::generated::G;
 namespace garith = ::arith::generated::Arith;
 namespace gd = ::tdegraded::generated::G;
-namespace go = ::towed::generated::G;
+namespace go = ::tinsertloop::generated::G;
 namespace gr = ::req::generated::Requirements;
 
 using namespace std::chrono_literals;
 
 namespace {
 
-// Whether the lexer elects `u` over `t`, the tie read again in their alphabets.
+// Whether the lexer chooses `u` over `t`, the tie read again in their
+// alphabets.
 template <const auto& A>
 bool beats(const cursiv::engine::LrContext& c, const cursiv::engine::Token& u,
            const cursiv::engine::Token& t) {
@@ -165,7 +165,7 @@ cursiv::engine::RepairBudget floor_only(std::uint64_t floor) {
 }
 
 // Two repairs of one fault stand in different stacks and cost the same: they
-// cannot meet before the bracket behind the fault closes, so a race stops long
+// cannot merge before the bracket behind the fault closes, so a race stops long
 // before it, and the bracket's length costs the search nothing.
 void a_tie_before_a_long_bracket_stops_racing() {
   for (const unsigned terms : {4000u, 40000u}) {
@@ -178,10 +178,10 @@ void a_tie_before_a_long_bracket_stops_racing() {
   }
 }
 
-// Past the budget at the end of the text, an owed insertion that leads back
-// to a state owing it again, one frame higher, stops where the stack the run
-// set out on could owe no more.
-void an_owed_run_that_grows_its_stack_ends() {
+// Past the budget at the end of the text, a needed insertion that leads back
+// to a state needing it again, one frame higher, stops where the stack the run
+// set out on could need no more.
+void an_insertion_run_that_grows_its_stack_ends() {
   for (const cursiv::engine::RepairBudget& b :
        {cursiv::engine::RepairBudget{}, floor_only(1), floor_only(64)}) {
     const Parsed loop = parse<go::kTable>("loop:c a b b", go::kDrive, b);
@@ -196,8 +196,8 @@ void an_owed_run_that_grows_its_stack_ends() {
   }
 }
 
-// Past the budget, the closers a deep nest owes at the end are inserted as
-// many as the stack the run set out on owes, however deep: the fault that
+// Past the budget, the closers a deep nest needs at the end are inserted, as
+// many as the stack the run set out on needs, however deep: the fault that
 // reaches the end is closed, not wrapped whole.
 void a_deep_nest_past_the_budget_is_closed() {
   std::string deep = "module m " + std::string(60, '(');
@@ -220,7 +220,7 @@ void a_deep_nest_past_the_budget_is_closed() {
 }
 
 // The closers of a deep nest are found one reading at a time: the words a
-// state offers before the owed closer -- forty here -- are not attempted, and
+// state offers before the needed closer -- forty here -- are not attempted, and
 // the memory a level costs is its step.
 void the_closers_of_a_deep_nest_hold_one_reading() {
   const Parsed p = parse<gd::kTable>("nest " + std::string(20000, '('), gd::kDrive,
@@ -230,14 +230,14 @@ void the_closers_of_a_deep_nest_hold_one_reading() {
   CHECK(p.stats.work <= std::uint64_t{8} * 20000);
 }
 
-// A closer is one reading however often the table forks over it: the ladder
+// A closer is one reading however often the table forks over it: `forked`
 // forks four times, 2^4 readings if every arm were read, and what a closer
-// costs does not move with the number a text owes.
+// costs does not move with the number a text needs.
 void a_forked_closer_costs_one_reading() {
   std::uint64_t before = 0;
   for (const unsigned depth : {1000u, 2000u, 4000u}) {
-    const Parsed p = parse<gd::kTable>("ladder " + std::string(depth, '('),
-                                      gd::kDrive, floor_only(3));
+    const Parsed p = parse<gd::kTable>("forked " + std::string(depth, '('),
+                                       gd::kDrive, floor_only(3));
     CHECK(p.accepted && p.stats.degradedPauses != 0);
     CHECK(p.stats.degradedHeld < 64);
     CHECK(p.stats.work <= std::uint64_t{32} * depth);
@@ -248,8 +248,8 @@ void a_forked_closer_costs_one_reading() {
   }
 }
 
-// The closers pay on the share of one search, like any search: a nest that
-// owes more than that is closed as far as the share reaches, and the parse
+// The closers are paid from one search's share, like any search: a nest that
+// needs more than that is closed as far as the share reaches, and the parse
 // says it stopped.
 void a_run_of_closers_stops_at_a_searchs_share() {
   constexpr std::uint64_t kShare = 1000;
@@ -296,7 +296,7 @@ void unmatched_text_is_one_fault() {
 
 // A condition reads a long gap once, whoever asks, and the search pays for
 // it: twenty faults, each behind two hundred thousand blanks, cost the gaps
-// once. Asked again by every reading, they took seconds.
+// once.
 void a_long_gap_is_read_once() {
   const std::string gap(200000, ' ');
   std::string text;
@@ -332,7 +332,7 @@ int main() {
     if (!stop.stop_requested()) std::abort();
   });
   a_tie_before_a_long_bracket_stops_racing();
-  an_owed_run_that_grows_its_stack_ends();
+  an_insertion_run_that_grows_its_stack_ends();
   a_deep_nest_past_the_budget_is_closed();
   the_closers_of_a_deep_nest_hold_one_reading();
   a_forked_closer_costs_one_reading();

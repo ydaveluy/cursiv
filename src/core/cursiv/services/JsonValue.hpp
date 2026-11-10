@@ -9,11 +9,9 @@
 #include <variant>
 #include <vector>
 
-// An owned JSON value for the one core field that is JSON by contract,
-// `Diagnostic::data` -- a core service attaches a machine payload with no
-// protocol framework in the room. `toJsonString` is deterministic (sorted
-// keys, classic-locale numbers), so a payload can be pinned and diffed, and
-// writes UTF-8: the ill-formed bytes of a string are written as U+FFFD.
+// An owned JSON value, for `Diagnostic::data`. `toJsonString` is deterministic
+// (sorted keys, classic-locale numbers) and writes UTF-8, with ill-formed
+// bytes as U+FFFD.
 
 #include "cursiv/utils/TransparentStringHash.hpp"
 
@@ -27,6 +25,8 @@ class JsonValue {
   };
 
   using Array = std::vector<JsonValue>;
+  // Keys are UTF-8: two keys that differ only in ill-formed bytes come out with
+  // the same name.
   using Object =
       std::unordered_map<std::string, JsonValue, detail::TransparentStringHash,
                          std::equal_to<>>;

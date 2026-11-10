@@ -1,8 +1,6 @@
-// The stacks that fork. Readings reaching one state with different stacks are
-// one reading over a cell: the stacks it may stand on, each with the words of
-// the reading that had it. A cell is split into its stacks only where the
-// reading returns past it, and every word it read since is then laid under
-// each stack's own words.
+// The stacks that fork. Readings at one state with different stacks are one
+// reading over a cell, each stack with its reading's words. A cell splits into
+// its stacks only where the reading returns past it.
 #pragma once
 
 #include <algorithm>
@@ -52,7 +50,7 @@ class LlStackSet {
     Cell& c = _cells[_used];
     c.members.assign(1, only);
     c.byCall = true;
-    c.sealed = false;
+    c.shaped = false;
     return kCellBit | static_cast<std::uint32_t>(_used++);
   }
 
@@ -75,13 +73,13 @@ class LlStackSet {
   // A cell is its shape, whatever order its stacks joined it in: two cells
   // over the same stacks are one.
   std::uint64_t canon(std::uint32_t stack) const {
-    assert(!is_cell(stack) || _cells[index(stack)].sealed);
+    assert(!is_cell(stack) || _cells[index(stack)].shaped);
     return is_cell(stack)
                ? _cells[index(stack)].shape | (std::uint64_t{1} << 63)
                : stack;
   }
-  void seal(std::uint32_t cell) {
-    if (_cells[index(cell)].sealed) return;
+  void compute_shape(std::uint32_t cell) {
+    if (_cells[index(cell)].shaped) return;
     // A caller can gain a member opened later in the closure. Seal those
     // dependencies first: creation order is not a topological order.
     _pending.clear();
@@ -91,7 +89,7 @@ class LlStackSet {
       Cell& c = _cells[index(at.cell)];
       if (at.next < c.members.size()) {
         const auto child = c.members[at.next++].stack;
-        if (is_cell(child) && !_cells[index(child)].sealed)
+        if (is_cell(child) && !_cells[index(child)].shaped)
           _pending.push_back({child});
         continue;
       }
@@ -99,13 +97,13 @@ class LlStackSet {
       for (const Member& m : c.members) _sorted.push_back(canon(m.stack));
       std::sort(_sorted.begin(), _sorted.end());
       c.shape = _shapes.try_emplace(_sorted, _shapes.size()).first->second;
-      c.sealed = true;
+      c.shaped = true;
       _pending.pop_back();
     }
   }
 
   // The leading member first: its words are those the cell's readings go on
-  // extending, and the ones the others are laid under.
+  // extending, and the ones the others are placed under.
   std::vector<Member>& members(std::uint32_t cell) {
     return _cells[index(cell)].members;
   }
@@ -115,7 +113,7 @@ class LlStackSet {
     std::vector<Member> members;
     std::uint64_t shape = 0;
     bool byCall = false;
-    bool sealed = false;
+    bool shaped = false;
   };
 
   struct Pending {

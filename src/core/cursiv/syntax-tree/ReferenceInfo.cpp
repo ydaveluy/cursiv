@@ -65,7 +65,7 @@ std::optional<ReferenceInfo> reference_at_caret(const AstReflection& reflection,
   info.property = feature;
   // The site's own narrowing, which the tree can't say: the reference isn't
   // written yet, so only the grammar knows this site accepts less than the
-  // member. Two sites of one member differ here, and their offers add up.
+  // member. Two sites of one member may differ here; completion offers both.
   info.narrow = next.narrow;
   return info;
 }

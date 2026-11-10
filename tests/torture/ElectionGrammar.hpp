@@ -1,8 +1,8 @@
 #pragma once
 
-// The ambiguous shapes of the torture lane, one opening keyword each: the
+// The ambiguous shapes of the torture test, one opening keyword each: the
 // cases share no state and each owns exactly one conflict. Rules that read
-// alike stay distinct: a rank follows the order rules are first reached in,
+// the same stay distinct: a rank follows the order rules are first reached in,
 // which a shared rule would carry from one case into the next.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
@@ -26,7 +26,7 @@ struct Election : cursiv::GrammarSpec {
   struct ID : terminal<some(cr<"a-z0-9">)> {};
   struct A : terminal<lit<"a">> {};
 
-  // Two distinct rules: the earlier complete reading wins, while the other
+  // Two distinct rules: the earlier complete parse wins, while the other
   // reduction remains available if the earlier one fails.
   struct RankXYX : rule<create<ast::XN>(kw<"a"> + kw<"b">)> {};
   struct RankXYY : rule<create<ast::YN>(kw<"b">)> {};
@@ -42,7 +42,7 @@ struct Election : cursiv::GrammarSpec {
              create<ast::Top>(assign<&ast::Top::x>(ref<RankYXX>) + kw<"x">)> {};
 
   // Two ordered alternatives of one rule: the conflict survives to the table
-  // and the episode forks over it.
+  // and the parse forks over it.
   struct RunXYR
       : rule<create<ast::RX>(kw<"c"> + kw<"a">) | create<ast::RY>(kw<"a">)> {};
   struct RunXY
@@ -56,7 +56,7 @@ struct Election : cursiv::GrammarSpec {
              create<ast::Hold>(kw<"c"> + assign<&ast::Hold::r>(ref<RunYXR>) +
                                kw<"x">)> {};
 
-  // A reading a condition guards against one that shifts the same token:
+  // A parse a condition guards against one that shifts the same token:
   // the condition must not change who wins, and without it the arm written
   // first does.
   struct GuardXYName : rule<!kw<"x"> + ref<ID>> {};

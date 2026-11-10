@@ -20,15 +20,12 @@ class Parser {
  public:
   virtual ~Parser() noexcept = default;
 
-  // The door into the grammar model: an element id a result carries means
-  // something only through this. The entry rule is the grammar's `entry`, fixed
-  // when the parser is generated.
+  // The grammar the element ids of a result refer to. The entry rule is the
+  // grammar's `entry`, fixed when the parser is generated.
   [[nodiscard]] virtual const Grammar& getGrammar() const noexcept = 0;
 
-  // The result borrows `text`: every `string_view` in the AST is a view into
-  // it, so the caller keeps the bytes alive at least as long as the result. A
-  // `Document` owns both, and in that order. Only the view's bytes are read:
-  // no NUL terminator or padding is required, and embedded NULs are content.
+  // The result does not own `text`: the AST's views point into it, so it must
+  // outlive the result. Only the view's bytes are read; NULs are content.
   [[nodiscard]] virtual ParseResult parse(
       std::string_view text,
       const CancellationToken& cancelToken = kNoCancel) const = 0;
@@ -41,23 +38,17 @@ class Parser {
     return {};
   }
 
-  // What may be written at `at`, where the document's own text resumes at
-  // `resume`: what lies between is what the answer replaces, `at == resume`
-  // for a bare insertion. Answered from the stamps the engine left on the tree,
-  // and a literal only where it can be read there: not swallowed by the token
-  // ending at `at`, not run on into the text at `resume`. Answering nothing is
-  // legal, and is what a tree no engine stamped gets.
+  // What may be written at `at`, where the document's text resumes at
+  // `resume` (`at == resume` for an insertion). Read from the element ids the
+  // engine wrote on the tree; by default there is no answer.
   virtual void nextFeaturesAt(const Cst&, TextOffset, TextOffset,
                               std::vector<NextFeature>&) const {
-    // no stamps to read: no answer
   }
 };
 
-// `parser` reading the text `translate` makes of each document, while every
-// offset it answers -- tree, diagnostics, completion -- is the document's.
-// A document the translator leaves untouched is parsed as it is. One
-// translator does all the phases: over a parser that already translates, this
-// throws `std::invalid_argument`, here or at the parse.
+// `parser` reading the text `translate` makes of each document, while
+// every offset it answers is the document's. Over a parser that already
+// translates, this throws `std::invalid_argument`.
 [[nodiscard]] std::unique_ptr<const Parser> translating_parser(
     std::unique_ptr<const Parser> parser, SourceTranslator translate);
 

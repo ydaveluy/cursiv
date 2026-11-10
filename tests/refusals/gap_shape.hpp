@@ -1,4 +1,4 @@
-// A gap condition over a run the gap matcher does not read.
+// A gap condition over a `through`, which gap conditions cannot test.
 // expect LR LL: refused: the grammar uses an expression in .gap::has. or .gap::is. that they cannot test
 #pragma once
 

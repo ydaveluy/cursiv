@@ -1,9 +1,8 @@
 #pragma once
 
 // A line continued by a backslash starts no logical line. Two derivations of
-// one text, the first with an empty reduction before the token past the
-// continuation: read ahead from a cell, the first stands as the election
-// orders it.
+// one text, the first with an empty reduction after the continuation: read
+// ahead from a cell, the first stands.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

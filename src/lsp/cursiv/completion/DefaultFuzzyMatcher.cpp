@@ -49,9 +49,9 @@ class Utf16Cursor {
 
 bool DefaultFuzzyMatcher::isWordTransition(char16_t previous,
                                            char16_t current) const noexcept {
-  const bool hump =
+  const bool lowerToUpper =
       previous >= 'a' && previous <= 'z' && current >= 'A' && current <= 'Z';
-  return hump || (previous == '_' && current != '_');
+  return lowerToUpper || (previous == '_' && current != '_');
 }
 
 bool DefaultFuzzyMatcher::match(std::string_view query,

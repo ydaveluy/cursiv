@@ -1,8 +1,7 @@
-// Where the engine elects among readings: the arm written first, between
-// rules and between the alternatives of one, a condition against a shift, the
-// dangling else at depth, and a run partitioned two ways. A
-// reduce/reduce retains its fallback; lookahead can settle the cell without a
-// branch.
+// How the engine elects among parses: the arm written first, between rules
+// and between the alternatives of one, a condition against a shift, the
+// dangling else at depth, and a run split two ways. A reduce/reduce conflict
+// keeps its fallback; look-ahead can resolve a cell without a fork.
 
 #include <cstdio>
 #include <string>
@@ -27,9 +26,8 @@ namespace ast = telect::ast;
 namespace e = telect::generated::Election;
 using Stmt = tdang::ast::Stmt;
 
-// The table, not the grammar: the counters are the table's, which the erased
-// door does not carry, so the lane drives the generated table the module's own
-// parser drives.
+// Drives the generated table directly: its counters are not available through
+// the type-erased parser.
 template <const auto& A>
 bool accepts(std::string_view text, const cursiv::engine::LrDrive* drive,
              cursiv::Cst& cst, cursiv::engine::LrParseStats* stats = nullptr) {
@@ -52,8 +50,8 @@ const ast::Case* case_of(const cursiv::ParseResult& r) {
 }
 
 // One cell, both reductions kept: the look-ahead elects the earlier complete
-// reading without forking on this input.
-void settles_without_fork(std::string_view opener, bool wantX) {
+// parse without forking on this input.
+void resolves_without_fork(std::string_view opener, bool wantX) {
   cursiv::engine::LrParseStats stats;
   const std::string doc = std::string(opener) + " a b x";
   const cursiv::ParseResult r = elect(doc, &stats);
@@ -70,11 +68,11 @@ void settles_without_fork(std::string_view opener, bool wantX) {
 }
 
 // "c a x" completes as Hold(RX("c a")) or "c" Hold(RY("a")): the reduces are
-// R's own alternatives, so the conflict survives to the table and the episode
+// R's own alternatives, so the conflict survives to the table and the parse
 // forks over it.
 void runtime_elects(std::string_view opener, bool wantX) {
-  // Whether the cell forked or the look-ahead settled it is the engine's
-  // own business; what is pinned is the arm elected.
+  // Whether the cell forked or the look-ahead resolved it is the engine's
+  // own business; what is checked is the arm elected.
   const std::string doc = std::string(opener) + " c a x";
   const cursiv::ParseResult r = elect(doc);
   const ast::Case* c = case_of(r);
@@ -197,7 +195,7 @@ void small_ast_checks() {
   }
 }
 
-// Does a valid document ever get misparsed at depth?
+// A valid document nested deep parses to its one tree.
 template <const auto& A>
 void depth_probe(const Dangling& g, const cursiv::engine::LrDrive* drive,
                  const cursiv::engine::AstActions& actions, unsigned maxDepth) {
@@ -218,7 +216,7 @@ void depth_probe(const Dangling& g, const cursiv::engine::LrDrive* drive,
     }
 
     // The tree must be the one valid nesting: elses were typed
-    // innermost-first, so walking outer to inner (c0, c1, ...) meets them in
+    // innermost-first, so walking outer to inner (c0, c1, ...) reaches them in
     // reverse -- c_k binds e_{n-1-k}.
     const cursiv::ParseResult r =
         cursiv::engine::AstReducer::build<A.stamp>(actions, std::move(cst));
@@ -340,9 +338,9 @@ void torture_election() {
   CHECK(e::kTable.nconflicts == 11);
 
   // X declared first: X wins; Y declared first: Y wins.
-  settles_without_fork("rankxy", true);
-  settles_without_fork("rankyx", false);
-  // The readings part first at Hold's arms, not R's: Hold's first arm, which
+  resolves_without_fork("rankxy", true);
+  resolves_without_fork("rankyx", false);
+  // The parses part first at Hold's arms, not R's: Hold's first arm, which
   // reads "c a" as R, wins whatever the order of R's arms.
   runtime_elects("runxy", true);
   runtime_elects("runyx", true);

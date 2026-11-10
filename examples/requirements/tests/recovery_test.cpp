@@ -30,7 +30,7 @@ void run(Lane& lane) {
   }
   language(lane, *engine, "valid.req",
            {"01_typo1.req", "02_typo2.req", "03_closer_block.req",
-            "04_closer_eof.req", "05_intruder.req", "06_truncated.req",
+            "04_closer_eof.req", "05_extra_token.req", "06_truncated.req",
             "07_two_faults.req", "08_head_fault.req", "09_list_delim.req",
             "10_noise.req", "11_head_typo.req"});
   mutation_oracle(*engine, "requirements", document("valid.req"));

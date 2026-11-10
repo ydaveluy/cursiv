@@ -1,5 +1,5 @@
 // The whole output of the lowering: the context-free core, and what the tree
-// owes at each of its positions.
+// writes at each of its positions.
 #pragma once
 
 #include <cstdint>
@@ -18,7 +18,7 @@ struct LowerDesc;
 
 struct LrLowered {
   LrBuildCfg cfg{};
-  // The optional positions an alternative spells out as subsets.
+  // The optional positions an alternative expands into subsets.
   unsigned optionalGate = kOptionalGate;
   ChainPool writes{};
   // Here and not in the core, which the automaton copies.
@@ -28,7 +28,7 @@ struct LrLowered {
   // The auxiliaries the optional gate made of surplus optional positions.
   std::vector<std::uint16_t> gated{};
   // Every operator of every precedence table, bound to its opening tokens
-  // once the productions are laid.
+  // once the productions are written.
   std::vector<InfixOp> infixOps{};
 };
 

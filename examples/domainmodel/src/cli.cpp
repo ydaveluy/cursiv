@@ -1,4 +1,4 @@
-// The domainmodel command line: the usual verdict, plus `generate FILE` -- one
+// The domainmodel command line: the usual check, plus `generate FILE`: one
 // Java class per entity, in the directory a package spells.
 
 #include <filesystem>
@@ -47,10 +47,8 @@ int generate(const GenerateOptions& options) {
   cursiv::install_default_shared_core_services(shared);
   if (!kRegister(shared)) return cursiv::kFatal;
 
-  // The file's folder first: a model that names a declaration from the file
-  // beside it is not invalid, it is unscanned -- and a generator that refused
-  // it would refuse the example this one ships with. A missing file is said
-  // before its folder is scanned for nothing.
+  // Scan the file's folder too, so a declaration from a file beside it
+  // resolves. A missing file is reported before that scan.
   if (!std::filesystem::is_regular_file(options.path))
     throw cursiv::UsageError(options.path + " is not a regular file");
   cursiv::initialize_root(

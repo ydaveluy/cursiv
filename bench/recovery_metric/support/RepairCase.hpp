@@ -43,7 +43,7 @@ struct RepairCase {
     return true;
   }
 
-  // Where a twin offset lands. Inside a removed range, or at an insertion
+  // Where a twin offset maps to. Inside a removed range, or at an insertion
   // point, `before` answers the fault's first faulted byte and `!before` the
   // byte past what it wrote.
   [[nodiscard]] TextOffset place(TextOffset offset, bool before) const {

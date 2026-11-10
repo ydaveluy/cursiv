@@ -1,7 +1,5 @@
-// The declarative grammar as a tree of positions, computed from the
-// grammar's own types via `cursiv::Normalize<G>` -- the one entry to the
-// pipeline. No engine: none of the lowering's normalisations apply, since
-// a generator reading the engine's own reading would agree by construction.
+// The declarative grammar as a tree of positions, from its own types through
+// `cursiv::Normalize<G>`, independent of any engine.
 #pragma once
 
 #include <array>
@@ -40,7 +38,7 @@ template <class E>
 struct refs_impl;
 template <class E>
 using refs = refs_impl<E>;
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 struct refs_form;
 template <class E>
 struct refs_form<E, TypeList<>> {
@@ -87,8 +85,8 @@ struct rule_edges
           typename refs<typename S::template body<R>>::type,
           typename primary_of<cursiv::detail::is_infix_rule<R>, S, R>::type> {};
 
-// Closed in rounds: every rule's edges are read once, the round scanning
-// the frontier alone.
+// Computed in rounds: each round reads only the rules the previous one found,
+// so every rule's edges are read once.
 template <class Seen, class Cs>
 struct fresh_of;
 template <class Seen, class... Cs>
@@ -143,7 +141,7 @@ struct local_impl<Lit<S, CI, Gd>> {
 };
 template <class E>
 struct local_impl<Trigger<E>> : local<E> {};
-// Prose takes no position: what the reader stands on is the word under it.
+// Prose takes no position: the word under it does.
 template <class E, str T>
 struct local_impl<Doc<E, T>> : local<E> {};
 template <std::uint64_t M, bool N, str S>
@@ -157,6 +155,20 @@ struct local_impl<Byte> {
 template <>
 struct local_impl<Eof> {
   using type = TypeList<Eof>;
+};
+// An implied token and a gap condition: one zero-width position each, whose
+// condition stands on no position.
+template <class T, class C>
+struct local_impl<Implied<T, C>> {
+  using type = TypeList<Implied<T, C>>;
+};
+template <class E>
+struct local_impl<GapHas<E>> {
+  using type = TypeList<GapHas<E>>;
+};
+template <class E>
+struct local_impl<GapIs<E>> {
+  using type = TypeList<GapIs<E>>;
 };
 template <>
 struct local_impl<Epsilon> {
@@ -325,6 +337,14 @@ template <class E>
 struct shape_kind<And<E>> {
   static constexpr ElementKind value = ElementKind::and_predicate;
 };
+// Zero-width where a condition holds, which the walk cannot impose: an
+// assertion.
+template <class T, class C>
+struct shape_kind<Implied<T, C>> : shape_kind<And<C>> {};
+template <class E>
+struct shape_kind<GapHas<E>> : shape_kind<And<E>> {};
+template <class E>
+struct shape_kind<GapIs<E>> : shape_kind<And<E>> {};
 template <auto P, class E>
 struct shape_kind<Assign<P, E>> {
   static constexpr ElementKind value = ElementKind::assignment;
@@ -420,40 +440,38 @@ struct bounds_of<Repeat<Mn, Mx, E>> {
       Mx >= kModelUnbounded ? kModelUnbounded : static_cast<std::uint16_t>(Mx);
 };
 
-// What a position contains: a rule holds its declared body, anything else
-// what its shape declares. The graph has cycles -- a rule reaches itself
-// through its body -- so a reader descends with its own guard; nothing
-// here unrolls.
+// What a position contains: a rule, its body; anything else, what its shape
+// declares. The graph has cycles, so a reader guards its own descent.
 template <class S, class E, bool IsRule = requires { typename E::kind; }>
-struct kids_of {
-  using type = typename ExprShape<E>::kids;
+struct children_of {
+  using type = typename ExprShape<E>::children;
 };
 template <class S, class R>
-struct kids_of<S, R, true> {
+struct children_of<S, R, true> {
   using type = cond_t<atomic_rule<R>, TypeList<>,
                       TypeList<typename S::template body<R>>>;
 };
 
-// A kid resolves to its own row -- or, for a call, to the row of the rule it
+// A child resolves to its own row -- or, for a call, to the row of the rule it
 // names: a `Ref<R>` spells no position of its own. What resolves to nothing at
 // all (an `Epsilon`, a `super<>`) is not a child.
 template <class K>
-struct kid_target {
+struct child_target {
   using type = K;
 };
 template <class R>
-struct kid_target<Ref<R>> {
+struct child_target<Ref<R>> {
   using type = R;
 };
 // Prose spells no position either: the word under it is the child.
 template <class E, str T>
-struct kid_target<Doc<E, T>> : kid_target<E> {};
+struct child_target<Doc<E, T>> : child_target<E> {};
 template <class L, class K>
-inline constexpr ElementId row_of_kid =
-    index_of<typename kid_target<std::remove_cvref_t<K>>::type, L>::value <
+inline constexpr ElementId row_of_child =
+    index_of<typename child_target<std::remove_cvref_t<K>>::type, L>::value <
             tl_size<L>::value
         ? static_cast<ElementId>(
-              index_of<typename kid_target<std::remove_cvref_t<K>>::type,
+              index_of<typename child_target<std::remove_cvref_t<K>>::type,
                        L>::value)
         : kNoElement;
 
@@ -463,19 +481,19 @@ struct PositionRow {
   std::uint16_t featOff = 0, featLen = 0;
   std::uint16_t nameOff = 0, nameLen = 0;
   std::uint16_t min = 0, max = 0;
-  std::uint16_t kidAt = 0, kidCount = 0;
+  std::uint16_t childAt = 0, childCount = 0;
 };
 
 template <class S, class L, class Ks>
-struct kid_ids;
+struct child_ids;
 template <class S, class L, class... Ks>
-struct kid_ids<S, L, TypeList<Ks...>> {
+struct child_ids<S, L, TypeList<Ks...>> {
   static constexpr std::size_t kMax = sizeof...(Ks) + 1;
   static constexpr auto value = [] {
     std::array<ElementId, kMax> a{};
     std::size_t n = 0;
-    ((row_of_kid<L, Ks> != kNoElement ? (void)(a[n++] = row_of_kid<L, Ks>)
-                                      : (void)0),
+    ((row_of_child<L, Ks> != kNoElement ? (void)(a[n++] = row_of_child<L, Ks>)
+                                        : (void)0),
      ...);
     return std::pair<std::size_t, std::array<ElementId, kMax>>{n, a};
   }();
@@ -494,21 +512,21 @@ struct table_of<S, TypeList<Es...>> {
       (text_of<Es>::value.size() + ... + std::size_t{0}) +
       (feature_of<Es>::value.size() + ... + std::size_t{0}) +
       (name_of<Es>().size() + ... + std::size_t{0}) + 2;
-  // A row addresses the blob in 16 bits, and nothing shares a slice any more:
-  // the bound is asked here rather than discovered as a truncated offset.
+  // A row addresses the blob in 16 bits: the bound is checked here rather
+  // than found as a truncated offset.
   static_assert(kMax <= 0xFFFFu,
                 "cursiv: this grammar's declared strings exceed what a "
                 "PositionRow offset can address");
-  static constexpr std::size_t kKidMax =
-      (kid_ids<S, L, typename kids_of<S, Es>::type>::value.first + ... +
+  static constexpr std::size_t kChildMax =
+      (child_ids<S, L, typename children_of<S, Es>::type>::value.first + ... +
        std::size_t{1});
 
   struct Layout {
     std::array<char, kMax + 1> blob{};
     std::size_t used = 0;
     std::array<PositionRow, kN + 1> rows{};
-    std::array<ElementId, kKidMax + 1> kids{};
-    std::size_t nkids = 0;
+    std::array<ElementId, kChildMax + 1> children{};
+    std::size_t nchildren = 0;
   };
 
   static consteval Layout compute() {
@@ -521,10 +539,8 @@ struct table_of<S, TypeList<Es...>> {
         bounds_of<std::remove_cvref_t<Es>>::min..., 0};
     const std::uint16_t maxs[kN + 1] = {
         bounds_of<std::remove_cvref_t<Es>>::max..., 0};
-    // APPENDED, NEVER SEARCHED: `kMax` is the sum of every string's size, so
-    // the blob is already allocated for the case where none is shared --
-    // looking for a slice already present saves no byte and made the pass
-    // quadratic, which is what exceeded a compiler's step budget.
+    // Appended, never searched: `kMax` already holds every string, and a
+    // search would make the pass quadratic.
     const auto place = [&r](std::string_view l) consteval {
       const std::size_t at = r.used;
       for (const char c : l) r.blob[r.used++] = c;
@@ -533,20 +549,22 @@ struct table_of<S, TypeList<Es...>> {
     std::size_t i = 0;
     ((
          r.rows[i] =
-             PositionRow{kinds[i], static_cast<std::uint16_t>(place(texts[i])),
-                         static_cast<std::uint16_t>(texts[i].size()),
-                         static_cast<std::uint16_t>(place(feats[i])),
-                         static_cast<std::uint16_t>(feats[i].size()),
-                         static_cast<std::uint16_t>(place(names[i])),
-                         static_cast<std::uint16_t>(names[i].size()), mins[i],
-                         maxs[i], static_cast<std::uint16_t>(r.nkids),
-                         static_cast<std::uint16_t>(
-                             kid_ids<S, L, typename kids_of<S, Es>::type>::value
-                                 .first)},
+             PositionRow{
+                 kinds[i], static_cast<std::uint16_t>(place(texts[i])),
+                 static_cast<std::uint16_t>(texts[i].size()),
+                 static_cast<std::uint16_t>(place(feats[i])),
+                 static_cast<std::uint16_t>(feats[i].size()),
+                 static_cast<std::uint16_t>(place(names[i])),
+                 static_cast<std::uint16_t>(names[i].size()), mins[i], maxs[i],
+                 static_cast<std::uint16_t>(r.nchildren),
+                 static_cast<std::uint16_t>(
+                     child_ids<S, L, typename children_of<S, Es>::type>::value
+                         .first)},
          [&] {
-           const auto& k = kid_ids<S, L, typename kids_of<S, Es>::type>::value;
+           const auto& k =
+               child_ids<S, L, typename children_of<S, Es>::type>::value;
            for (std::size_t j = 0; j < k.first; ++j)
-             r.kids[r.nkids++] = k.second[j];
+             r.children[r.nchildren++] = k.second[j];
          }(),
          ++i),
      ...);
@@ -577,10 +595,8 @@ inline constexpr ElementId row_of =
               index_of<std::remove_cvref_t<T>,
                        typename positions_for<G>::type>::value)
         : kNoElement;
-// A call is named as the body spells it, and the closure walked those
-// names: an override's derived rule sits under the base's name, so the
-// declared name answers first and the resolved type only where it does
-// not -- an infix primary stands under its resolved type instead.
+// A call's row, by the name the body spells first, then by its resolved type,
+// under which an infix primary stands.
 template <class G, class R>
 inline constexpr ElementId call_row =
     row_of<G, R> != kNoElement
@@ -624,8 +640,8 @@ struct DeclaredModel final : GrammarModel {
   [[nodiscard]] std::span<const ElementId> childrenOf(
       ElementId e) const noexcept override {
     if (!holds(e)) return {};
-    return {kLayout.kids.data() + kLayout.rows[e].kidAt,
-            kLayout.rows[e].kidCount};
+    return {kLayout.children.data() + kLayout.rows[e].childAt,
+            kLayout.rows[e].childCount};
   }
   [[nodiscard]] std::string_view textOf(ElementId e) const noexcept override {
     if (!holds(e)) return {};

@@ -32,8 +32,8 @@ struct Base : cursiv::GrammarSpec {
   // a gap, or past a line's end.
   struct ArrowTail : rule<(lit<"-"> + lit<">"> + ref<ID>) | gap::line> {};
   struct Mark : rule<option(lit<"%">)> {};
-  // A condition on `~>`, a spelling no terminal declares: at the head of an
-  // arm, behind a nullable rule, on a turn of a loop, on a climb's operand.
+  // A condition on `~>`, a spelling no terminal declares: at the start of an
+  // arm, after a nullable rule, in a loop, on an infix operand.
   struct Waved : rule<create<Number>(!lit<"~>"> + option(lit<"~">) +
                                      ref<NUMBER>)> {};
   struct WavedSum : infix<Waved, Binary, left(lit<"*">)> {};
@@ -76,13 +76,14 @@ struct Base : cursiv::GrammarSpec {
   struct Block : rule<create<Document>(
                      lit<"{"> + many(append<&Document::items>(ref<Statement>)) +
                      lit<"}">)> {};
-  // Arms that open alike, one waiting on the gap in front of its second word.
+  // Arms that open the same, one waiting on the gap in front of its second
+  // word.
   struct OnLine : rule<create<StatementNode>(ref<ID> + gap::line + kw<"over"> +
                                              lit<";">)> {};
   struct SameLine : rule<create<StatementNode>(ref<ID> + kw<"under"> +
                                                lit<";">)> {};
-  // `->` reads over the `-` a statement goes on with, and opens the next
-  // statement: a gap decides which of the two a stack takes.
+  // `->` covers the `-` a statement goes on with, and also starts the next
+  // statement: a gap decides which of the two is read.
   struct Tail : rule<(lit<"-"> + lit<">"> + ref<ID> + lit<";">) | gap::line> {};
   struct LineEnded
       : rule<create<StatementNode>(kw<"sv"> + ref<ID> + ref<Tail>)> {};
@@ -91,13 +92,13 @@ struct Base : cursiv::GrammarSpec {
                      ((gap::none + lit<"->"> + ref<ID> + lit<";">) |
                       (lit<"-"> + lit<">"> + ref<ID> + lit<";">)))> {};
   struct Arrow : rule<create<StatementNode>(lit<"->"> + ref<ID> + lit<";">)> {};
-  // Alternatives alike past their first token, which conditions tell apart.
+  // Alternatives the same past their first token, which conditions tell apart.
   struct Fork : rule<create<StatementNode>(
                     (kw<"fk"> + ref<ID> + gap::none + lit<";">) |
                     (kw<"fk"> + ref<ID> + lit<"("> + lit<")">) |
                     (kw<"fk"> + ref<ID> + &lit<"x"> + lit<"x"> + lit<";">))> {};
   // Nesting behind an operand that no condition stands in: the rest of the
-  // grammar has conditions, this choice meets none.
+  // grammar has conditions, this choice reaches none.
   struct NestPrimary;
   struct NestPostfix : rule<(ref<NestPrimary> + lit<"!">) | ref<NestPrimary>> {};
   struct NestSum : rule<ref<NestPostfix> + many(lit<"+"> + ref<NestPostfix>)> {};
@@ -169,7 +170,7 @@ struct ReachLl : ReachBase {};
 // An implied `;` whose condition holds on a token another reading takes
 // normally: after a name, `#` continues `a #b?`, which blocks the insertion
 // even where that reading fails later. After a number, nothing reads `#`.
-struct RivalBase : cursiv::GrammarSpec {
+struct BlockedBase : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
   struct NUMBER : terminal<some(d)> {};
@@ -186,12 +187,12 @@ struct RivalBase : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct RivalLl : RivalBase {};
-struct RivalLr : RivalBase {};
+struct BlockedLl : BlockedBase {};
+struct BlockedLr : BlockedBase {};
 
-// A tag glued to its number: one creating group of `#`, a gap condition and
-// an option, whose node rides onto the `#` where nothing follows it.
-struct GluedBase : cursiv::GrammarSpec {
+// A tag attached to its number: one created node of `#`, a gap condition and an
+// option, which covers only the `#` when nothing follows it.
+struct AttachedBase : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct NUMBER : terminal<some(d)> {};
   struct Atom : rule<create<Number>(ref<NUMBER>)> {};
@@ -204,5 +205,5 @@ struct GluedBase : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct GluedLl : GluedBase {};
+struct AttachedLl : AttachedBase {};
 }  // namespace tllconditions

@@ -9,8 +9,7 @@
       "include": "#comments"
     },
     {
-      "name": "keyword.control.tests-lang",
-      "match": "(?i)\\b(applicable|contact|for|testfile|tests|tst)\\b"
+      "include": "#keywords"
     },
     {
       "name": "string.quoted.double.tests-lang",
@@ -36,6 +35,10 @@
     }
   ],
   "repository": {
+    "keywords": {
+      "name": "keyword.control.tests-lang",
+      "match": "(?i)\\b(applicable|testfile|contact|tests|for|tst)\\b"
+    },
     "comments": {
       "patterns": [
         {

@@ -8,43 +8,14 @@
 #include "cursiv/grammar/word_final_in.hpp"
 #include "cursiv/shared/utils/ClassSpelling.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {
 
 std::string decimal(std::size_t v) { return std::to_string(v); }
 
-void quote(std::string& out, std::string_view text, char q) {
-  out += q;
-  for (const char ch : text) {
-    if (ch == q) {
-      out += '\\';
-      out += ch;
-      continue;
-    }
-    switch (ch) {
-      case '\\':
-        out += R"(\\)";
-        break;
-      case '\n':
-        out += "\\n";
-        break;
-      case '\r':
-        out += "\\r";
-        break;
-      case '\t':
-        out += "\\t";
-        break;
-      default:
-        out += ch;
-    }
-  }
-  out += q;
-}
-
-// A character class, rendered as the ranges it holds rather than as the spec
-// that produced it: a computed set has no spec, and printing the two forms
-// differently would hide the very thing a merging pass does. The rendering
-// reads back as that set under `cr<>`'s syntax.
+// A character class, rendered as the ranges it holds in `cr<>`'s syntax: a
+// computed set has no spec.
 void charset(std::string& out, const CharSet& set) {
   const auto emit = [&out](int c) {
     switch (c) {
@@ -80,9 +51,7 @@ void charset(std::string& out, const CharSet& set) {
           out += static_cast<char>(c);
         } else {
           constexpr char kHex[] = "0123456789abcdef";
-          out += "\\x";
-          out += kHex[(c >> 4) & 0xF];
-          out += kHex[c & 0xF];
+          out += {'\\', 'x', kHex[c >> 4], kHex[c & 0xF]};
         }
     }
   };
@@ -108,8 +77,8 @@ void charset(std::string& out, const CharSet& set) {
 
 namespace {
 
-// Prose, on the one line the dump gives it: a raw terminator would split a
-// rule in two and the source's line index would name a rule that is not there.
+// Prose on one line: a raw newline would split the rule and break the source's
+// line index.
 void one_line(std::string& out, std::string_view text) {
   for (const char ch : text) {
     if (ch == '\n')
@@ -189,41 +158,41 @@ Prec GrammarPrinter::prec(ImageId id) const {
     case ImageKind::doc:
     case ImageKind::trigger:
     case ImageKind::embed:
-      return prec(_image.kids[n.first]);
+      return prec(_image.children[n.first]);
     default:
       return Prec::Item;
   }
 }
 
-void GrammarPrinter::item(std::string& out, ImageId id, Prec here) {
+Descent<void> GrammarPrinter::item(std::string& out, ImageId id, Prec here) {
   const bool need = prec(id) < here;
   if (need) out += '(';
-  emit(out, id);
+  co_await emit(out, id);
   if (need) out += ')';
 }
 
 bool GrammarPrinter::implied_pair(const ImageNode& n) const {
   if (n.kind != ImageKind::choice || n.count != 2) return false;
-  const ImageNode& second = _image.nodes[_image.kids[n.first + 1]];
+  const ImageNode& second = _image.nodes[_image.children[n.first + 1]];
   return second.kind == ImageKind::implied &&
-         _image.kids[second.first] == _image.kids[n.first];
+         _image.children[second.first] == _image.children[n.first];
 }
 
 bool GrammarPrinter::printed_by_next(const ImageNode& n,
                                      std::uint32_t arm) const {
   if (arm + 1 >= n.count) return false;
-  const ImageNode& next = _image.nodes[_image.kids[n.first + arm + 1]];
+  const ImageNode& next = _image.nodes[_image.children[n.first + arm + 1]];
   return next.kind == ImageKind::implied &&
-         _image.kids[next.first] == _image.kids[n.first + arm];
+         _image.children[next.first] == _image.children[n.first + arm];
 }
 
-void GrammarPrinter::emit_lit(std::string& out, const ImageNode& n) {
+Descent<void> GrammarPrinter::emit_lit(std::string& out, const ImageNode& n) {
   enum class Guard { none, word, bound, expr };
   Guard guard = Guard::none;
   ImageId expression = kNoImage;
   if (n.flags & kLitGuardExpr) {
     guard = Guard::expr;
-    expression = _image.kids[n.first];
+    expression = _image.children[n.first];
   } else if (n.flags & kLitGuardWord) {
     guard = Guard::word;
     if (_view == ImageView::resolved && _image.bound.known)
@@ -232,7 +201,7 @@ void GrammarPrinter::emit_lit(std::string& out, const ImageNode& n) {
                   ? Guard::bound
                   : Guard::none;
   }
-  quote(out, n.text, guard == Guard::none ? '\'' : '"');
+  out += quote(n.text, guard == Guard::none ? '\'' : '"');
   if (n.flags & kLitFolded) out += '~';
   if (guard == Guard::bound) {
     if (!(_image.bound.props == _image.plain.props &&
@@ -250,7 +219,7 @@ void GrammarPrinter::emit_lit(std::string& out, const ImageNode& n) {
     const ImageNode& g = _image.nodes[expression];
     const ImageNode* cls = nullptr;
     if (g.kind == ImageKind::notOf) {
-      const ImageNode& inner = _image.nodes[_image.kids[g.first]];
+      const ImageNode& inner = _image.nodes[_image.children[g.first]];
       if (inner.kind == ImageKind::cpset) cls = &inner;
     }
     if (cls != nullptr) {
@@ -260,7 +229,7 @@ void GrammarPrinter::emit_lit(std::string& out, const ImageNode& n) {
       }
     } else {
       out += "\\b(";
-      emit(out, expression);
+      co_await emit(out, expression);
       out += ')';
     }
   }
@@ -278,28 +247,30 @@ void GrammarPrinter::emit_class(std::string& out, const ImageNode& n) const {
   }
 }
 
-void GrammarPrinter::emit_choice(std::string& out, const ImageNode& n) {
+Descent<void> GrammarPrinter::emit_choice(std::string& out,
+                                          const ImageNode& n) {
   if (implied_pair(n)) {
-    emit(out, _image.kids[n.first + 1]);
-    return;
+    co_await emit(out, _image.children[n.first + 1]);
+    co_return;
   }
   bool first = true;
   for (std::uint32_t arm = 0; arm < n.count; ++arm) {
     if (printed_by_next(n, arm)) continue;
     if (!first) out += " | ";
     first = false;
-    item(out, _image.kids[n.first + arm], Prec::Sequence);
+    co_await item(out, _image.children[n.first + arm], Prec::Sequence);
   }
 }
 
-void GrammarPrinter::emit_repeat(std::string& out, const ImageNode& n) {
-  if (const ImageId kid = _image.kids[n.first];
-      _image.nodes[kid].kind == ImageKind::repeat) {
+Descent<void> GrammarPrinter::emit_repeat(std::string& out,
+                                          const ImageNode& n) {
+  if (const ImageId child = _image.children[n.first];
+      _image.nodes[child].kind == ImageKind::repeat) {
     out += '(';
-    emit(out, kid);
+    co_await emit(out, child);
     out += ')';
   } else {
-    item(out, kid, Prec::Item);
+    co_await item(out, child, Prec::Item);
   }
   const auto unbounded = static_cast<std::uint64_t>(kUnbounded);
   if (n.m == 0 && n.n == unbounded)
@@ -319,8 +290,8 @@ void GrammarPrinter::emit_repeat(std::string& out, const ImageNode& n) {
   }
 }
 
-void GrammarPrinter::emit_write(std::string& out, const ImageNode& n,
-                                std::string_view op) {
+Descent<void> GrammarPrinter::emit_write(std::string& out, const ImageNode& n,
+                                         std::string_view op) {
   out += n.text;
   if (!n.text2.empty()) {
     out += '[';
@@ -328,158 +299,161 @@ void GrammarPrinter::emit_write(std::string& out, const ImageNode& n,
     out += ']';
   }
   out += op;
-  const ImageId kid = _image.kids[n.first];
+  const ImageId child = _image.children[n.first];
   // A created payload brackets as a whole -- `m=({T} a b)` -- because the
   // create would otherwise read as absorbing past the assignment.
-  item(out, kid,
-       _image.nodes[kid].kind == ImageKind::create ? Prec::Item : Prec::Prefix);
+  co_await item(out, child,
+                _image.nodes[child].kind == ImageKind::create ? Prec::Item
+                                                              : Prec::Prefix);
 }
 
-void GrammarPrinter::emit(std::string& out, ImageId id) {
+Descent<void> GrammarPrinter::emit(std::string& out, ImageId id) {
   const ImageNode n = _image.nodes[id];
-  const auto kid = [&](std::uint32_t i) { return _image.kids[n.first + i]; };
+  const auto child = [&](std::uint32_t i) {
+    return _image.children[n.first + i];
+  };
   switch (n.kind) {
     case ImageKind::epsilon:
-      return;
+      co_return;
     case ImageKind::lit:
-      emit_lit(out, n);
-      return;
+      co_await emit_lit(out, n);
+      co_return;
     case ImageKind::doc:
       out += "/** ";
       one_line(out, n.text);
       out += " */ ";
-      emit(out, kid(0));
-      return;
+      co_await emit(out, child(0));
+      co_return;
     case ImageKind::cpset:
       emit_class(out, n);
-      return;
+      co_return;
     case ImageKind::byte:
       out += "\\C";
-      return;
+      co_return;
     case ImageKind::eof:
       out += "!.";
-      return;
+      co_return;
     case ImageKind::indent:
       out += "indent";
-      return;
+      co_return;
     case ImageKind::dedent:
       out += "dedent";
-      return;
+      co_return;
     case ImageKind::gapHas:
       if (n.flags & kGapLine) {
         out += "gap::line";
-        return;
+        co_return;
       }
       out += "gap::has(";
-      item(out, kid(0), Prec::Choice);
+      co_await item(out, child(0), Prec::Choice);
       out += ')';
-      return;
+      co_return;
     case ImageKind::gapIs:
-      if (_image.nodes[kid(0)].kind == ImageKind::epsilon) {
+      if (_image.nodes[child(0)].kind == ImageKind::epsilon) {
         out += "gap::none";
-        return;
+        co_return;
       }
       out += "gap::is(";
-      item(out, kid(0), Prec::Choice);
+      co_await item(out, child(0), Prec::Choice);
       out += ')';
-      return;
+      co_return;
     case ImageKind::implied:
       out += "implied(";
-      item(out, kid(0), Prec::Choice);
+      co_await item(out, child(0), Prec::Choice);
       out += ", ";
-      item(out, kid(1), Prec::Choice);
+      co_await item(out, child(1), Prec::Choice);
       out += ')';
-      return;
+      co_return;
     case ImageKind::through:
       out += "through(";
-      item(out, kid(0), Prec::Choice);
+      co_await item(out, child(0), Prec::Choice);
       out += ", ";
-      item(out, kid(1), Prec::Choice);
+      co_await item(out, child(1), Prec::Choice);
       out += ')';
-      return;
+      co_return;
     case ImageKind::mark:
       out += "mark<";
       out += n.text;
       out += ">(";
-      emit(out, kid(0));
+      co_await emit(out, child(0));
       out += ')';
-      return;
+      co_return;
     case ImageKind::same:
       out += "same<";
       out += n.text;
       out += '>';
-      return;
+      co_return;
     case ImageKind::seq:
-      // A create absorbs the rest of its sequence, so `{T} a b` needs no
-      // brackets -- except when it does not: a bounded mid-sequence create is
-      // bracketed whole (`x ({T} a b) c`), not on its payload.
+      // A create takes the rest of its sequence, so `{T} a b` needs no
+      // brackets; one in mid-sequence is bracketed whole: `x ({T} a b) c`.
       for (std::uint32_t i = 0; i < n.count; ++i) {
         if (i != 0) out += ' ';
-        item(out, kid(i),
-             _image.nodes[kid(i)].kind == ImageKind::create && i + 1 != n.count
-                 ? Prec::Item
-                 : Prec::Sequence);
+        co_await item(
+            out, child(i),
+            _image.nodes[child(i)].kind == ImageKind::create && i + 1 != n.count
+                ? Prec::Item
+                : Prec::Sequence);
       }
-      return;
+      co_return;
     case ImageKind::choice:
-      emit_choice(out, n);
-      return;
+      co_await emit_choice(out, n);
+      co_return;
     case ImageKind::unordered:
       out += "unordered(";
       for (std::uint32_t i = 0; i < n.count; ++i) {
         if (i != 0) out += ", ";
-        item(out, kid(i), Prec::Choice);
+        co_await item(out, child(i), Prec::Choice);
       }
       out += ')';
-      return;
+      co_return;
     case ImageKind::repeat:
-      emit_repeat(out, n);
-      return;
+      co_await emit_repeat(out, n);
+      co_return;
     case ImageKind::notOf:
       out += '!';
-      item(out, kid(0), Prec::Prefix);
-      return;
+      co_await item(out, child(0), Prec::Prefix);
+      co_return;
     case ImageKind::andOf:
       out += '&';
-      item(out, kid(0), Prec::Prefix);
-      return;
+      co_await item(out, child(0), Prec::Prefix);
+      co_return;
     case ImageKind::trigger:
     case ImageKind::embed:
-      emit(out, kid(0));
-      return;
+      co_await emit(out, child(0));
+      co_return;
     case ImageKind::ref:
       out += reference_name(n.a);
-      return;
+      co_return;
     case ImageKind::create:
       out += '{';
       out += n.text;
       out += "} ";
-      item(out, kid(0), Prec::Sequence);
-      return;
+      co_await item(out, child(0), Prec::Sequence);
+      co_return;
     case ImageKind::nest:
       out += '{';
       out += n.text;
       out += '.';
       out += n.text2;
       out += "=} ";
-      item(out, kid(0), Prec::Item);
-      return;
+      co_await item(out, child(0), Prec::Item);
+      co_return;
     case ImageKind::assign:
-      emit_write(out, n, "=");
-      return;
+      co_await emit_write(out, n, "=");
+      co_return;
     case ImageKind::append:
-      emit_write(out, n, "+=");
-      return;
+      co_await emit_write(out, n, "+=");
+      co_return;
     case ImageKind::flag:
-      emit_write(out, n, "?=");
-      return;
+      co_await emit_write(out, n, "?=");
+      co_return;
     case ImageKind::commit:
     case ImageKind::closed:
     case ImageKind::turns:
     case ImageKind::call:
     case ImageKind::sectionClose:
     case ImageKind::throughNested:
-      return;
+      co_return;
     case ImageKind::skip:
       if (n.m == 0 && n.n == 0) {
         out += "tight(";
@@ -493,15 +467,15 @@ void GrammarPrinter::emit(std::string& out, ImageId id) {
                   static_cast<std::uint32_t>(n.n));
         out += ">, ";
       }
-      item(out, kid(0), Prec::Choice);
+      co_await item(out, child(0), Prec::Choice);
       out += ')';
-      return;
+      co_return;
   }
 }
 
 std::string GrammarPrinter::spell(ImageId node) {
   std::string out;
-  emit(out, node);
+  descend(emit(out, node));
   return out;
 }
 
@@ -522,9 +496,8 @@ void GrammarPrinter::line(std::string& out, std::uint32_t rule) {
     out += reference_name(f.entry);
     out += ';';
   } else if (f.kind == ImageRuleKind::infix) {
-    // The node it builds and the three members it writes are as much the
-    // rule as its level table -- nothing else in the dump says what an infix
-    // rule produces.
+    // Nothing else in the dump says what an infix rule builds: print its node
+    // and the three members it writes.
     out += "infix ";
     out += name_for(rule);
     out += " returns ";
@@ -538,7 +511,7 @@ void GrammarPrinter::line(std::string& out, std::uint32_t rule) {
     out += ") on ";
     out += reference_name(f.primary);
     out += ": ";
-    // A table of one is its level alone, as it is spelled.
+    // A single level prints without `levels(...)`, as it is written.
     if (f.levelCount > 1) out += "levels(";
     for (std::uint32_t i = 0; i < f.levelCount; ++i) {
       if (i != 0) out += ", ";
@@ -564,7 +537,7 @@ void GrammarPrinter::line(std::string& out, std::uint32_t rule) {
         default:
           out += "left(";
       }
-      emit(out, level.op);
+      descend(emit(out, level.op));
       out += ')';
     }
     if (f.levelCount > 1) out += ')';
@@ -580,7 +553,7 @@ void GrammarPrinter::line(std::string& out, std::uint32_t rule) {
       out += f.returns;
     }
     out += ": ";
-    emit(out, f.body);
+    descend(emit(out, f.body));
     out += ';';
   }
 }

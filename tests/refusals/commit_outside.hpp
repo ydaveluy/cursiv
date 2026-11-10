@@ -1,4 +1,4 @@
-// A commit beside other items: it stands only as the item of a quantifier.
+// A commit beside other items: it is allowed only as the item of a quantifier.
 // expect LR: commit.prefix, body. must be the direct item of option, many, some or repeat
 #pragma once
 

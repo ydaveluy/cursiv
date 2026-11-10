@@ -1,7 +1,6 @@
-// The lexer of a table: the configuration each state reads under and the
-// conditions' flags, one NFA per terminal, the byte classes its edges are
-// written in, and the subsets that make a DFA of each mode -- a state's
-// alphabet.
+// The lexer of a table: each state's configuration, the conditions' flags, one
+// NFA per terminal, their byte classes, and the subsets that make each mode's
+// DFA.
 #include "cursiv/lr/gen/lr_build_lex.hpp"
 
 #include <algorithm>
@@ -37,12 +36,9 @@
 #include "cursiv/shared/table/Token.hpp"
 
 namespace cursiv::engine {
-// A state reads under the configuration of its unfinished items. An ordinary
-// completed production only reduces: its goto rechecks the token under the
-// destination's mode, from the same committed position. Its boundary is a
-// fallback for a state of reductions alone, not a competing token reading.
-// A distinct optional exit can reduce on a refused tight gap before its goto
-// reads the caller's token. Guards and EOF assertions still read here.
+// A state reads under the configuration of its unfinished items; a completed
+// production only reduces, and its goto reads the token again under the
+// target's mode. Guards and EOF assertions still read here.
 std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
                                         const LrPoolRows<LrItem>& clos,
                                         const std::vector<unsigned>& pick,
@@ -85,7 +81,7 @@ std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
       std::uint8_t cfg = 0;
       bool seen = false;
       bool mixed = false;
-      bool differentHomes = false;
+      bool differentSections = false;
     };
     Reading active, exiting, completed;
     const auto note = [&](Reading& reading, std::uint8_t c) {
@@ -94,8 +90,8 @@ std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
         reading.seen = true;
       } else if (reading.cfg != c) {
         reading.mixed = true;
-        reading.differentHomes |=
-            A.cfg.home_at(reading.cfg) != A.cfg.home_at(c);
+        reading.differentSections |=
+            A.cfg.section_cfg_at(reading.cfg) != A.cfg.section_cfg_at(c);
       }
     };
     for (const LrItem& it : clos[pick[f]]) {
@@ -122,23 +118,24 @@ std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
     const Reading& reading = active.seen ? active
                               : exiting.seen ? exiting : completed;
     if (reading.mixed)
-      lower_refuse(A.cfg, reading.differentHomes
+      lower_refuse(A.cfg, reading.differentSections
                               ? LowerFail::sectionPointShared
                               : LowerFail::regionBoundaryShared);
-    // A reduction may hand trivia back to its caller, but may not lend a
+    // A reduction may hand trivia back to its caller, but may not give a
     // section's token reading to a state outside that section.
     if (active.seen && exiting.seen &&
         (exiting.mixed || active.cfg != exiting.cfg)) {
-      if (exiting.differentHomes ||
-          A.cfg.home_at(active.cfg) != A.cfg.home_at(exiting.cfg))
+      if (exiting.differentSections ||
+          A.cfg.section_cfg_at(active.cfg) != A.cfg.section_cfg_at(exiting.cfg))
         lower_refuse(A.cfg, LowerFail::sectionPointShared);
       else if (active.mixed || exiting.mixed ||
                !separate_exit(f, active.cfg, exiting.cfg))
         lower_refuse(A.cfg, LowerFail::regionBoundaryShared);
     }
     if ((active.seen || exiting.seen) && completed.seen &&
-        (completed.differentHomes ||
-         A.cfg.home_at(reading.cfg) != A.cfg.home_at(completed.cfg)))
+        (completed.differentSections ||
+         A.cfg.section_cfg_at(reading.cfg) !=
+             A.cfg.section_cfg_at(completed.cfg)))
       lower_refuse(A.cfg, LowerFail::sectionPointShared);
     cfg[f] = reading.cfg;
   }
@@ -168,26 +165,26 @@ std::vector<DynSet> lr_state_guard_firsts(const LrBuildTable& A,
 // What each section's grammar reads, by the section's own configuration: the
 // terminals of its productions.
 std::vector<DynSet> lr_section_reads(const LrBuildCfg& g) {
-  std::vector<DynSet> own(g.cfgHome.size());
+  std::vector<DynSet> own(g.cfgSection.size());
   for (std::uint16_t k = 0; k < g.nprods; ++k) {
     const LrLowProd& q = g.prods[k];
     for (unsigned i = 0; i < q.len; ++i)
       if (const std::uint16_t y = g.sym_at(q, i); is_term(y))
-        own[g.prodBuild[k].home].set(y);
+        own[g.prodBuild[k].sectionCfg].set(y);
   }
   return own;
 }
 
-// The NFAs first: resolving a refusal spells classes the grammar never
+// The NFAs first: resolving a refusal creates classes the grammar never
 // named, and the partition must see them.
 LexAlphabet lr_lex_alphabet(LrBuildTable& A) {
   auto& g = A.cfg;
-  // One bit per implied token laid at a position.
+  // One bit per implied token inserted at a position.
   constexpr unsigned kImpliedBits =
       std::numeric_limits<decltype(LrVirtualAt::inserted)>::digits;
   unsigned implied = 0;
   for (unsigned t = 1; t < g.nterms; ++t) {
-    if (g.terms[t].laid != kLaidImplied) continue;
+    if (g.terms[t].synthetic != kSyntheticImplied) continue;
     ++implied;
     if (implied > kImpliedBits)
       lower_refuse(g, LowerFail::gapTooMany, static_cast<std::uint16_t>(t));
@@ -210,14 +207,14 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
   // kept.
   std::vector<std::pair<unsigned, DynSet>> implied;
   for (unsigned t = 1; t < nT; ++t)
-    if (g.terms[t].laid == kLaidImplied)
+    if (g.terms[t].synthetic == kSyntheticImplied)
       implied.emplace_back(t, impliedFirsts[g.terms[t].cond]);
   // A mode is also keyed by the section its states read, and the token that
-  // ends their text: a state of a section never lends its mode to a state
-  // outside it, nor one that reads the closing token to one that reduces on it.
+  // ends their text: a section's state never shares its mode with an outside
+  // one, nor a state that reads the closing token with one that reduces on it.
   const bool sections = g.sections();
   const auto tag = [&](unsigned f, std::uint8_t k) -> std::uint32_t {
-    const std::uint8_t h = g.home_at(k);
+    const std::uint8_t h = g.section_cfg_at(k);
     if (h == 0) return 0;
     std::uint16_t end = g.cfgEnd[h];
     for (const LrAction& action : A.action_row(f))
@@ -332,7 +329,7 @@ void lr_lex_dfa(LrBuildTable& A, const LexAlphabet& alpha,
       if (j - i > 1)
         lower_refuse(g, LowerFail::boundaryDisagrees, r.accepts[i].term);
       A.accBound[A.accBoundBase[self] + rank] = r.accepts[i].bound;
-      A.accTier[A.accBoundBase[self] + rank] = r.accepts[i].tier;
+      A.accPriority[A.accBoundBase[self] + rank] = r.accepts[i].priority;
       std::uint16_t stand = kNoSet;
       for (const LexDfaReading::Accept& own : r.stands) {
         if (own.term != r.accepts[i].term) continue;
@@ -366,9 +363,9 @@ std::vector<DynSet> lr_lex_reserve(LrBuildTable& A) {
         each_bit(accS.w.data(), accS.w.size(), [&](std::size_t bit) {
           const auto t = static_cast<unsigned>(bit);
           if (t == 0) return;
-          each(t, A.dfa_acc_bound(state, t), A.dfa_acc_tier(state, t));
+          each(t, A.dfa_acc_bound(state, t), A.dfa_acc_priority(state, t));
           if (const auto stand = A.dfa_acc_stand(state, t); stand != kNoSet)
-            each(t, stand, unsigned{kTierKeyword});
+            each(t, stand, unsigned{kKeywordPriority});
         });
       },
       [&](std::size_t s, unsigned u) { A.dfaRes[s].set(u); },
@@ -558,7 +555,7 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
       const bool hasBound = accept[s] != 0 && bound[s] != kNoSet;
       const unsigned win = hasBound ? accept[s] - 1u : 0u;
       // Bit 1 of the choice is the word class, bit 0 the boundary, bit 2 a
-      // lead byte the scalar decides -- both answers.
+      // lead byte the scalar decides (both answers).
       const auto variant = [&](unsigned k) {
         DynSet got = accSet[s];
         for (auto r = A.dfaRelay[s]; r != kNoRelay; r = A.relays[r].next)
@@ -588,20 +585,19 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
         }
       }
     }
-    // What triggers is a state's actions meeting an acceptance other than
+    // What triggers is a state's actions overlapping an acceptance other than
     // the one the priority answers.
     bool multi = false;
     // What the mode's parser states take, unioned once.
     DynSet modeTakes = modes.joins | relayTerms;
     for (const auto f : parserStates)
       for (const LrAction& action : A.action_row(f)) modeTakes.set(action.term);
-    // Whether every parser state of the mode answers `t` as it answers
-    // `win`, by reduces alone, and one answers it at all: which of the two is
-    // elected changes nothing the mode's states do. Rows are ordered on the
-    // terminal, so each answer is one run.
-    std::map<std::pair<unsigned, unsigned>, bool> alike;
+    // Whether every state of the mode answers `t` as it answers `win`, by
+    // reduces alone, and one answers it at all: the election between them
+    // changes nothing. Rows are sorted by terminal, so each answer is one run.
+    std::map<std::pair<unsigned, unsigned>, bool> memo;
     const auto indifferent = [&](unsigned t, unsigned win) {
-      const auto [at, fresh] = alike.try_emplace({t, win}, false);
+      const auto [at, fresh] = memo.try_emplace({t, win}, false);
       if (!fresh) return at->second;
       bool answered = false;
       for (const auto f : parserStates) {
@@ -654,17 +650,17 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
         for (const auto f : parserStates) {
           const DynSet af = reads(f);
           if (!accX.intersects(af)) continue;
-          DynSet owed = acc;
-          owed &= af;
+          DynSet common = acc;
+          common &= af;
           A.multiMode = static_cast<std::uint16_t>(m);
           for (unsigned t = 1; t < nT; ++t) {
-            if (!owed.test(t)) continue;
+            if (!common.test(t)) continue;
             if (A.multiTerm == 0)
               A.multiTerm = static_cast<std::uint16_t>(t);
             else if (A.multiInto == 0)
               A.multiInto = static_cast<std::uint16_t>(t);
           }
-          // Only a pair held on every way into the state meets on that text.
+          // Only a pair held on every way into the state matches that text.
           if (held[s].test(A.multiTerm) &&
               (A.multiInto == 0 || held[s].test(A.multiInto)))
             A.multiText = lr_dfa_text(A, alpha, A.modeStart[m], s);
@@ -685,7 +681,7 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
     if (multi) {
       A.modeMulti[m] = 1;
       A.multiCand = true;
-      // Every terminal the mode's DFA accepts anywhere: the room a sweep
+      // Every terminal the mode's DFA accepts anywhere: the space a sweep
       // fills on its way.
       DynSet all{};
       for (const unsigned st : states) {
@@ -699,7 +695,7 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
     }
   }
   if (commit) {
-    // One cell per mode, not only up to the last one owed a walk.
+    // One cell per mode, not only up to the last one that needs a walk.
     A.modeMulti.row(0, A.nmodes);
     A.modeWin.row(0, A.nmodes);
   }
@@ -716,8 +712,8 @@ std::vector<DynSet> lr_lex_automaton(LrBuildTable& A, const LexAlphabet& alpha,
   return words;
 }
 
-// A mode whose rivals meet only where the text ends keeps the table's single
-// reading and answers its rivals there alone: it is marked 2, not 1.
+// A mode whose competitors overlap only at the end of the text keeps the
+// table's single reading and answers them there alone: it is marked 2, not 1.
 void lr_lex_candidates(LrBuildTable& A, const LexAlphabet& alpha,
                        const LexModes& modes,
                        const std::vector<DynSet>& wordAt) {
@@ -763,10 +759,9 @@ void lr_lex_candidates(LrBuildTable& A, const LexAlphabet& alpha,
 }
 
 void lr_lex_condition_flags(LrBuildTable& A) {
-  // Whether a condition may refuse action `at` of state `s`, or the one action
-  // a state an empty rule's goto lands in takes on its terminal. An action leads
-  // to one other at most: each is answered once, for all that lead to it, and
-  // a run of them that comes back to itself refuses nothing.
+  // Whether a condition may refuse action `at` of state `s`, or the action the
+  // goto of an empty rule leads to. Each action leads to at most one other, so
+  // each is answered once, and a cycle refuses nothing.
   enum : std::uint8_t { kUnasked, kNo, kYes, kWalking };
   std::vector<std::uint8_t> refusing(A.nactions, kUnasked);
   std::vector<std::uint32_t> walked;
@@ -801,7 +796,7 @@ void lr_lex_condition_flags(LrBuildTable& A) {
     return answer;
   };
   // Per mode, the terminals a condition may refuse in a state reading in it:
-  // every action of their cell. A state a reduce lands in under another mode
+  // every action of their cell. A state a reduce goes to under another mode
   // reads the token again in its own once a guard refuses it there.
   std::vector<DynSet> asked(A.nmodes);
   DynSet all;
@@ -809,7 +804,7 @@ void lr_lex_condition_flags(LrBuildTable& A) {
     const auto row = A.action_row(s);
     lr_each_run(row.data(), row.size(), [&](std::size_t i, std::size_t j) {
       const LrAction& x = row[i];
-      if (A.cfg.terms[x.term].laid != 0) return;
+      if (A.cfg.terms[x.term].synthetic != 0) return;
       for (std::size_t k = i; k < j; ++k)
         if (!refusable(s, A.actionBase[s] + static_cast<std::uint32_t>(k)))
           return;

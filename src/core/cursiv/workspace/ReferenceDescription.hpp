@@ -16,15 +16,13 @@ struct ReferenceDescription {
   TextOffset sourceBegin = 0;
   TextOffset sourceEnd = 0;
 
-  // The target's declaration site, as `AstNodeDescription` names it. Two
-  // nodes built on one CST record share it: "who points here" is asked of the
-  // text they are both declared by, so a reference to either is listed for
-  // both, and a reference holding both draws one row.
+  // The target's declaration site, as `AstNodeDescription` names it. Two nodes
+  // built on one CST record share it, so a reference holding both is one row.
   DocumentId targetDocumentId = kNoDocument;
   NodeId targetSymbolId = kNoNode;
 
-  // A cross-reference inside one document, marked because a local
-  // change need not re-link the world.
+  // A cross-reference inside one document, marked because a change inside the
+  // document need not relink other documents.
   bool local = false;
   // Whether the source names several targets: a consumer walking incoming
   // edges skips the others in O(1) rather than going back to the source

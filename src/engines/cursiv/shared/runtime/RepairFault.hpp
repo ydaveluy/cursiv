@@ -1,5 +1,5 @@
-// The gestures a repair makes with no token read between them: one fault, and
-// one note once it closes. Both engines state a fault the same way.
+// The edits a repair makes with no token read between them: one fault, and
+// one note once it closes. Both engines report a fault the same way.
 #pragma once
 
 #include <utility>
@@ -14,11 +14,13 @@ namespace cursiv::engine {
 struct RepairFault {
   bool open = false;
   bool ins = false, rep = false, del = false, abandon = false;
+  // The deletion starts with a line's run of blanks the open level refuses.
+  bool mixedIndent = false;
   // The first terminal invented, a misspelling's terminal, what an abandoned
-  // construct owed, and the token a deletion resumes on.
+  // construct still needed, and the token a deletion resumes on.
   ElementId first = kNoElement;
   ElementId read = kNoElement;
-  ElementId owed = kNoElement;
+  ElementId missing = kNoElement;
   ElementId resume = kNoElement;
   // Where the text stopped when the fault opened: an insertion's caret.
   TextOffset point = 0;
@@ -31,6 +33,7 @@ struct RepairFault {
 // The columns of a `ParseDiagnostic`, buffered until the parse ends.
 struct RepairNote {
   DiagnosticKind kind = DiagnosticKind::deleted;
+  bool mixedIndent = false;
   ElementId element = kNoElement;
   TextOffset begin = 0;
   TextOffset end = 0;
@@ -38,10 +41,10 @@ struct RepairNote {
 };
 
 inline RepairNote repair_note(RepairFault& f) {
-  RepairNote n{DiagnosticKind::deleted, f.resume, f.begin, f.end, {}};
+  RepairNote n{DiagnosticKind::deleted, false, f.resume, f.begin, f.end, {}};
   if (f.abandon) {
     n.kind = DiagnosticKind::incomplete;
-    n.element = f.owed;
+    n.element = f.missing;
   } else if (f.rep || (f.ins && f.del)) {
     n.kind = DiagnosticKind::replaced;
     n.element = f.rep ? f.read : f.first;
@@ -50,6 +53,8 @@ inline RepairNote repair_note(RepairFault& f) {
     n.element = f.first;
     n.begin = f.point;
     n.end = f.point;
+  } else {
+    n.mixedIndent = f.mixedIndent;
   }
   if (f.ins) n.also = std::move(f.also);
   return n;

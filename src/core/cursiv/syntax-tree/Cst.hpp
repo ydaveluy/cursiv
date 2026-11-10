@@ -5,9 +5,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
+#include <new>
 #include <numeric>
 #include <span>
 #include <stdexcept>
@@ -25,16 +27,13 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/macros.hpp"
 
-// The concrete syntax tree: a postorder run of 16-byte records, out of a
-// std::pmr resource shared with the AST, read at the index that is its node
-// id. The only mutations a `const Cst&` performs are the two indexes the
-// first question of their kind lazily builds; every other read is pure.
+// The concrete syntax tree: a postorder run of 16-byte records, indexed by
+// node id. A `const Cst&` changes only the two indexes built on first use.
 
 namespace cursiv {
 
-// Defined at the foot of this header: `Cst` returns one, and it needs `Cst`
-// complete to walk. A client that has the tree can therefore iterate it --
-// which a separate header could not promise.
+// Defined at the end of this header: `Cst` returns one, and it needs `Cst`
+// complete.
 class ReverseNodeRange;
 class CstBuilder;
 
@@ -60,8 +59,7 @@ class Cst {
   }
   explicit Cst(std::string_view text) : Cst() { set_text(text); }
   // Hand-written so a moved-from tree reports itself empty: `= default` copies
-  // the scalars, leaving the source claiming a size over storage it no longer
-  // owns.
+  // the scalars, leaving the source claiming a size over storage it gave away.
   Cst(Cst&& other) noexcept { *this = std::move(other); }
   Cst& operator=(Cst&& other) noexcept {
     if (this == &other) return *this;
@@ -86,13 +84,12 @@ class Cst {
   }
   ~Cst() = default;
 
-  // Start another parse here, releasing the old tree and any AST built from the
-  // shared resource. Use-after-free hazard: an `AstArena` on `memory()` keeps a
-  // chunk of the buffers this frees and would carve its next node there, so
-  // `AstArena::release()` comes first.
+  // Starts another parse, releasing the old tree and any AST on the shared
+  // resource. Call `AstArena::release()` first: the arena would allocate its
+  // next node from the freed buffers.
   void reset(std::string_view text) {
-    // The records live in the resource, so the run lets go before the release
-    // and takes the new one after.
+    // The records live in the resource: unbind the run before the release and
+    // bind it again after.
     _stream.bind(nullptr);
     // A moved-from tree has no resource left to release.
     if (_pool != nullptr)
@@ -110,15 +107,18 @@ class Cst {
   friend class ParseResult;
   std::pmr::memory_resource* memory() const { return _pool.get(); }
 
-  // The builder keeps what it joins; anyone else goes through the document.
+  // The builder stores joined text here; others go through the document.
   friend struct engine::AstBuildCtx;
   friend struct Document;
-  // Text a view of the tree names, its parts written in one piece: it lives as
-  // long as the tree. A null view means an unwritten member, even at length
-  // zero.
+  // Joins `parts` into text that lives as long as the tree. A null view means
+  // an unwritten member, even at length zero.
   std::string_view keep_text(std::span<const std::string_view> parts) const {
     std::size_t size = 0;
-    for (const std::string_view part : parts) size += part.size();
+    for (const std::string_view part : parts) {
+      if (part.size() > std::numeric_limits<std::size_t>::max() - size)
+        throw std::bad_alloc();
+      size += part.size();
+    }
     auto* const out = static_cast<char*>(
         _pool->allocate(size == 0 ? 1 : size, alignof(char)));
     char* at = out;
@@ -130,8 +130,8 @@ class Cst {
     return std::string_view(out, size);
   }
 
-  // Every field but the resource, back to a fresh tree's. Not `*this =
-  // Cst{}`, which would allocate a pool for a dying object.
+  // Resets every field but the resource. Not `*this = Cst{}`, which would
+  // allocate a pool.
   void clear() noexcept {
     _text = std::string_view(&kEmptyDocumentByte, std::size_t{0});
     _entryBegin = 0;
@@ -154,7 +154,8 @@ class Cst {
     // Checked once: every offset in the tree is 32 bits, so a larger document
     // would report wrong spans rather than an error.
     if (text.size() > kMaxDocument)
-      throw std::overflow_error("cursiv: document exceeds 4 GiB");
+      throw std::overflow_error(
+          "cursiv: document exceeds the size limit, just under 4 GiB");
     // An empty view may carry a null pointer; one stable address keeps offset
     // arithmetic defined.
     _text = text.empty() ? std::string_view(&kEmptyDocumentByte, std::size_t{0})
@@ -170,9 +171,8 @@ class Cst {
   // completed; a parse may still reject text after it and keep the root.
   bool has_entry() const { return _entryRoot != kNoNode; }
   bool accepted() const { return _accepted; }
-  // A repair happened, which is the diagnostics saying so and no second
-  // place to keep it in step: `accepted() && !recovered()` is the clean
-  // parse, `accepted() && recovered()` the repaired one.
+  // Whether a repair happened, read from the diagnostics: `accepted() &&
+  // !recovered()` is a clean parse, `accepted() && recovered()` a repaired one.
   bool recovered() const {
     return std::ranges::any_of(_diagnostics, &ParseDiagnostic::isSyntax);
   }
@@ -201,10 +201,8 @@ class Cst {
     return _translation->text().substr(at.begin, at.end - at.begin);
   }
 
-  // Postorder makes the last child constant-time; a forward sibling cannot be
-  // computed from one subtree size. Source order is the caller's job:
-  // `[subtree_begin(id), id]` over a subtree, `reverse_children` reversed over
-  // one node's children.
+  // Postorder gives the last child in constant time, not the next sibling:
+  // walk `[subtree_begin(id), id]`, or `reverse_children` reversed.
   NodeId subtree_begin(NodeId id) const {
     const NodeId extent = node(id).subtreeSize;
     return id - (extent - 1);
@@ -216,13 +214,11 @@ class Cst {
 
   ReverseNodeRange reverse_children(NodeId parent) const;
 
-  // Whether an engine wrote this tape. A hand-built one carries no stamp --
-  // every record reads zero, which an engine decoding it would take for a
-  // meaning of its own. A reader that turns the stamp into an answer asks
-  // first.
+  // Whether an engine wrote the records. Hand-built records carry no engine
+  // data: check this before reading it.
   [[nodiscard]] bool engine_stamped() const { return _enginesTape; }
-  // The tree binds the grammar and AST ownership for every stamped record.
-  // Null for a tape no language parser finished.
+  // The grammar of the engine's records; null when no language parser
+  // finished the tree.
   [[nodiscard]] const Grammar* grammar() const { return _grammar; }
   [[nodiscard]] OwnedNodes owned() const { return _owned; }
   // Null unless the language's translator rewrote the document: the AST's
@@ -273,11 +269,10 @@ class Cst {
   }
 
  private:
-  // One writer: an engine states what a finished pass knows through the
-  // builder, and nothing else reaches the run's lifecycle.
+  // The only writer: an engine finishes the tree through the builder.
   friend class CstBuilder;
 
-  // The engine hands the run over, and states that the stamps are its own.
+  // Marks the records as written by an engine.
   void bind_stream() {
     _leaves.clear();
     _enginesTape = true;
@@ -292,28 +287,28 @@ class Cst {
     _entryRoot = root;
   }
   void bind_accepted(bool accepted) { _accepted = accepted; }
-  // Stated once a build is over: `owned` must not grow under this.
-  // `addressof`, not `&`: the grammar DSL overloads the operator, and here
-  // the type is only declared, which the overload's concept cannot answer.
+  // Set once a build is over: `owned` must not grow after this. `addressof`,
+  // not `&`: the grammar DSL overloads the operator, and `Grammar` is only
+  // declared here.
   void bind_model(const Grammar& grammar, OwnedNodes owned) {
     _grammar = std::addressof(grammar);
     _owned = owned;
     _nodeRecords.clear();
     _nodeIndex = 0;
   }
-  // A parse of the translated text moves to the document's offsets and
-  // keeps the text its AST borrows, and the spans a replaced piece widens.
+  // Moves a parse of the translated text to the document's offsets, and
+  // keeps the text its AST points into. The text is bound first: a node's
+  // destructor may read it.
   void bind_translation(std::string_view document,
                         std::unique_ptr<SourceTranslation> translation) {
+    SourceTranslation& bound = *translation;
+    _translation = std::move(translation);
     set_text(document);
-    translation->bind(
+    bound.bind(
         size() != 0 ? std::span(&_stream.at(0), size()) : std::span<CstNode>{},
         std::span(_diagnostics));
-    _translation = std::move(translation);
   }
 
-  // One storage, and this is the read of it: the records the parser wrote are
-  // the records every reader reads, at the index that is the node id.
   const CstNode& node(NodeId id) const { return _stream.at(id); }
 
   static CstLeaf leaf_of(NodeId id, const CstNode& n) {
@@ -324,12 +319,11 @@ class Cst {
     if (!published(_leafIndex)) [[unlikely]]
       index_leaves();
   }
-  // The index a second caret question finds ready.
+  // Builds the leaf index once.
   CURSIV_NOINLINE void index_leaves() const {
     build_once(_leafIndex, [this] {
-      // Room for every record, which natively never becomes resident past the
-      // leaves written; Wasm linear memory charges untouched room too, for as
-      // long as the tree lives, so there the leaves are counted first.
+      // Room for every record, the room past the leaves never written; Wasm
+      // memory charges for that room, so there the leaves are counted first.
       std::size_t room = size();
       if constexpr (sizeof(void*) < 8) {
         room = 0;
@@ -358,10 +352,8 @@ class Cst {
   // read it live.
   CURSIV_NOINLINE void index_nodes() const;
 
-  // Builds an index once and publishes it. One lock for every index, held
-  // only while one is built, so a second reader waits instead of building it
-  // beside the first. The list is cleared by `build`, not appended to: a build
-  // cut short leaves the flag unpublished and the list half-written.
+  // Builds an index once and publishes it. One lock for every index, so a
+  // second reader waits instead of building it too. `build` clears the list.
   template <class Build>
   void build_once(std::uint8_t& flag, Build&& build) const {
     const std::lock_guard lock(_indexLock);
@@ -393,10 +385,10 @@ class Cst {
   NodeId _entryRoot = kNoNode;
   bool _accepted = false;
   std::vector<ParseDiagnostic> _diagnostics;
-  // The tree, and the only copy of it: the records the engine appended, or
-  // the ones a caller built by hand through `CstBuilder`.
+  // The records the engine appended, or the ones a caller built by hand
+  // through `CstBuilder`.
   CstRun _stream;
-  // Whether the records carry an engine's stamp, or a hand builder's zeros.
+  // Whether an engine wrote the records, rather than `CstBuilder`.
   bool _enginesTape = false;
   const Grammar* _grammar = nullptr;
   OwnedNodes _owned;
@@ -411,7 +403,7 @@ class Cst {
   mutable std::uint8_t _nodeIndex = 0;
   // Held only while an index is built. Neither moved nor reset.
   mutable std::mutex _indexLock;
-  // The translated text the AST borrows, and its map to the document.
+  // The translated text the AST points into, and its map to the document.
   std::unique_ptr<const SourceTranslation> _translation;
 };
 

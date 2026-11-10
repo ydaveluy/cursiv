@@ -28,6 +28,7 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/shared/gen/LexCodePoints.hpp"
 #include "cursiv/shared/utils/GrammarDump.hpp"
+#include "cursiv/shared/utils/GrammarPrinter.hpp"
 #include "cursiv/shared/utils/dump.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
@@ -50,7 +51,7 @@
 #include "support/GrammarDump.hpp"
 #include "support/World.hpp"
 
-// Pins the expression layer: NTTP usability, operator+ flattening, create
+// The expression layer: NTTP usability, operator+ flattening, create
 // absorption, combinator shapes, directive shapes.
 namespace expr {
 
@@ -108,9 +109,9 @@ static_assert(
     std::is_same_v<decltype(lit<"a"> + create<ast::Node>(lit<"b">) + lit<"c">),
                    Create<ast::Node, Seq<Lit<"a">, Lit<"b">, Lit<"c">>>>);
 
-// A bare `create<T>` is an expression -- the node with the empty payload --
-// and the call form just names a payload; there is no separate factory type
-// for the IR to see. The empty payload is the identity of concatenation.
+// A bare `create<T>` is an expression, the node with the empty payload, and
+// the call form names a payload. The empty payload is the identity of
+// concatenation.
 static_assert(std::is_same_v<decltype(create<ast::Node>),
                              const Create<ast::Node, Epsilon>>);
 static_assert(std::is_same_v<decltype(create<ast::Node> + lit<"b">),
@@ -174,10 +175,8 @@ static_assert(
     std::is_same_v<decltype(create<ast::Node>(lit<"a"> + n1) + lit<"e">),
                    decltype(create<ast::Node>(lit<"a"> + n1 + lit<"e">))>);
 
-// Parenthesization invariance: any bracketing of one element run yields the
-// same canonical type. The trap is a group whose own elements look bare in
-// isolation -- folding per group first would strand `e` and `g` bare; reading
-// the flat run every time lets the splice re-absorb them.
+// Any bracketing of one element run yields the same canonical type, even
+// where a group's own elements look bare alone.
 static_assert(
     std::is_same_v<decltype(lit<"a"> +
                             (create<ast::Node>(lit<"b">) + lit<"c"> + n1) +
@@ -193,7 +192,7 @@ static_assert(
     std::is_same_v<decltype(n1 + (lit<"e"> + lit<"f">)+n2),
                    Seq<Nest<W1, &W1::held, Seq<Lit<"d">, Lit<"e">, Lit<"f">>>,
                        Nest<W2, &W2::held, Lit<"f">>>>);
-// ...and a group ending in a create meeting a group starting bare: the
+// ...and a group ending in a create followed by a group starting bare: the
 // create absorbs across the splice, rightwards, with no nest to bound it.
 static_assert(std::is_same_v<
               decltype((lit<"a"> + create<ast::Node>(lit<"b">)) +
@@ -207,9 +206,8 @@ template <std::size_t... Is>
 constexpr auto long_run(std::index_sequence<Is...>) {
   return (... + (static_cast<void>(Is), lit<"a">));
 }
-static_assert(
-    detail::tl_size<detail::ExprShape<decltype(long_run(
-        std::make_index_sequence<600>{}))>::kids>::value == 600);
+static_assert(detail::tl_size<detail::ExprShape<decltype(long_run(
+                  std::make_index_sequence<600>{}))>::children>::value == 600);
 }  // namespace alg
 
 // Combinators, and the separated forms that spell `a (sep a)*`.
@@ -298,13 +296,13 @@ static_assert(
 
 // ...and stands nowhere else.
 static_assert(detail::holds_commit<decltype(many(commit(A{}, B{})))>);
-static_assert(!detail::stray_commit<decltype(many(commit(A{}, B{})))>);
-static_assert(!detail::stray_commit<
+static_assert(!detail::misplaced_commit<decltype(many(commit(A{}, B{})))>);
+static_assert(!detail::misplaced_commit<
               decltype(lit<"x"> + option(some(commit(A{}, B{}), lit<",">)))>);
-static_assert(detail::stray_commit<decltype(commit(A{}, B{}))>);
-static_assert(detail::stray_commit<decltype(commit(A{}, B{}) + lit<"x">)>);
-static_assert(detail::stray_commit<decltype(commit(A{}, B{}) | lit<"x">)>);
-static_assert(detail::stray_commit<decltype(many(!commit(A{}, B{})))>);
+static_assert(detail::misplaced_commit<decltype(commit(A{}, B{}))>);
+static_assert(detail::misplaced_commit<decltype(commit(A{}, B{}) + lit<"x">)>);
+static_assert(detail::misplaced_commit<decltype(commit(A{}, B{}) | lit<"x">)>);
+static_assert(detail::misplaced_commit<decltype(many(!commit(A{}, B{})))>);
 static_assert(!detail::holds_commit<decltype(lit<"x"> + many(lit<"y">))>);
 }  // namespace commits
 // `kw<".">` carries a sentinel: a factory is spelled before the grammar's
@@ -326,8 +324,8 @@ static_assert(std::is_same_v<std::remove_cv_t<decltype(kw<".">)>,
                              Lit<".", false, detail::WordBound>>);
 
 // `lit<S, G>` is the custom path: the guard is an expression the lexer runs
-// right after the text, held in the type exactly as spelled. Nothing judges
-// whether it can fire -- that is `kw<>`'s discipline, not this one.
+// right after the text, held in the type exactly as spelled. Unlike `kw<>`,
+// nothing checks whether it can fire.
 static_assert(
     std::is_same_v<std::remove_cv_t<decltype(lit<"toto", !lit<"titi">>)>,
                    Lit<"toto", false, Not<Lit<"titi">>>>);
@@ -430,10 +428,9 @@ static_assert(
 static_assert(std::is_same_v<decltype(tight(lit<"a">)),
                              Skip<TypeList<>, TypeList<>, Lit<"a">>>);
 
-// `as<X>(e)` annotates `e` with a converter: a constant converts to itself, a
-// type through its default converter, a callable through the input its
-// signature reads. A rule's body turns it into a data rule over `e`, so `e`'s
-// tokens stay its own, and the rule it calls may still be incomplete.
+// `as<X>(e)` annotates `e` with a converter: a constant, a type's default
+// converter, or a callable. In a rule's body it becomes a data rule over `e`,
+// whose callee may still be incomplete.
 enum class Kind { one, two };
 struct Late;
 using detail::Rule;
@@ -531,14 +528,13 @@ static_assert(
     std::is_same_v<decltype(nest<ast::Node, &ast::Node::child>(lit<"x">)),
                    Nest<ast::Node, &ast::Node::child, Lit<"x">>>);
 
-// `through` is the node -- unrolled to a sequence it would read two ways (a
-// scalar run at O0, a byte search under `reduce`).
+// `through` stays one node.
 static_assert(std::is_same_v<decltype(through(lit<"/*">, lit<"*/">)),
                              Through<Lit<"/*">, Lit<"*/">>>);
 static_assert(std::is_same_v<decltype(through(lit<"/*">, lit<"*/"> + lit<"x">)),
                              Through<Lit<"/*">, Seq<Lit<"*/">, Lit<"x">>>>);
 
-// A section is one node, and a directive over it lands on the grammar's entry.
+// A section is one node; a directive over it applies to the grammar's entry.
 static_assert(std::is_same_v<decltype(section<R1>(lit<"<">, lit<">">)),
                              Embed<R1, Seq<Lit<"<">, Ref<R1>, Lit<">">>>>);
 static_assert(
@@ -599,7 +595,6 @@ static_assert(spelled(cr<"€">) == "\\u20ac");
 static_assert(spelled(cr<"😀">) == "\\u{1f600}");
 static_assert(spelled(cr<R"(\u{80}-\u{10FFFF})">) == "\\x80-\\u{10ffff}");
 
-// ikw is the case-insensitive keyword.
 static_assert(std::is_same_v<std::remove_cv_t<decltype(ikw<"and">)>,
                              Lit<"and", true, detail::WordBound>>);
 
@@ -609,10 +604,8 @@ static_assert(std::is_same_v<std::remove_cv_t<decltype(s)>,
 static_assert(!std::is_same_v<std::remove_cv_t<decltype(w)>,
                               std::remove_cv_t<decltype(d)>>);
 
-// The only law the emitter owes: a set's key reads back as that set. Pinned
-// over sets no literal spells -- every singleton, every contiguous range
-// around the edges of the encodings, and 20 000 pseudo-random sets from a
-// fixed seed.
+// A set's key reads back as that set: every singleton, the ranges around
+// the encodings' edges, and 20 000 random sets from one seed.
 std::string key_of(const cursiv::detail::ClassRanges& r) {
   std::string out;
   r.spell([&out](char c) { out.push_back(c); });
@@ -763,10 +756,8 @@ void run() {
 
 }  // namespace grammar_source
 
-// Which rule a reference names, once a derived grammar has had its say.
-// Everything here is a `static_assert`: the resolution is a type function, so
-// a runtime check would only say that it compiled. The lane exists so a
-// change to `ResolveOverride` says which law it broke.
+// Which rule a reference names once a derived grammar has had its say, all
+// as `static_assert`s: the resolution is a type function.
 namespace grammar_utils {
 
 namespace {
@@ -798,7 +789,7 @@ struct spliced<Seq<Bs...>, Tail...> {
 template <class Body, class... Tail>
 using spliced_t = typename spliced<Body, Tail...>::type;
 
-// Identity, not a wrapper that forwards: a mint here would double every
+// Identity, not a forwarding wrapper: a new type here would double every
 // instantiation keyed on the rule, for a grammar that overrides nothing.
 
 using Plain = ResolveOverride<Doc>;
@@ -820,8 +811,8 @@ struct Wide : extends<Doc> {
 using Wid = ResolveOverride<Wide>;
 
 static_assert(Wid::overrides<Doc::ID>);
-// The rule is minted, and it remembers what it stands for: a diagnostic names
-// the rule the author wrote, not the mint.
+// The override is a new type that remembers the rule it stands for: a
+// diagnostic names the rule the author wrote.
 static_assert(!std::same_as<Wid::rule<Doc::ID>, Doc::ID>);
 static_assert(std::same_as<Wid::rule<Doc::ID>::declared, Doc::ID>);
 // A terminal stays a terminal -- a kind change is refused where it is spelled.
@@ -838,7 +829,7 @@ static_assert(std::same_as<Wid::rule<Doc::Word>, Doc::Word>);
 // say -- is a different grammar to everything downstream.
 
 // The three body shapes an override can stand over, as a terminal and as a
-// rule: the algebra is the same, and saying so is what makes it a law.
+// rule: splicing works the same for both.
 struct Shapes : GrammarSpec {
   struct SeqT : terminal<lit<"a"> + lit<"b">> {};
   struct SeqR : rule<lit<"a"> + lit<"b">> {};
@@ -941,8 +932,8 @@ static_assert(
 static_assert(
     std::same_as<eff<RepOneR, Shapes::OneR>, base_body<Spelled::ManyOne>>);
 
-// A terminal and a rule splice alike: the algebra is the body's, not the
-// kind's, and the kind is what the mint preserves.
+// A terminal and a rule splice the same: splicing depends on the body, not the
+// kind, and the override keeps the kind.
 static_assert(
     std::same_as<eff<CatSeqT, Shapes::SeqT>, eff<CatSeqR, Shapes::SeqR>>);
 static_assert(
@@ -978,7 +969,7 @@ static_assert(
     std::same_as<eff<Quiet, Shapes::SeqT>, eff<Thrice, Shapes::SeqT>>);
 
 // A diamond is legal while only one side restates the rule; the other's
-// silence is not a competing answer. Two would be refused where they meet.
+// silence is not a competing answer. Two would be refused where they join.
 
 struct Untouched : extends<Shapes> {};
 
@@ -1000,7 +991,7 @@ static_assert(ResolveOverride<Joined>::overrides<Shapes::SeqT>);
 static_assert(
     std::same_as<eff<Joined, Shapes::SeqT>, eff<Thrice, Shapes::SeqT>>);
 
-// `Overridden` wears the override's declaration: what the override states of
+// `Overridden` takes the override's declaration: what the override states of
 // itself -- its slot, and the converter the slot carries -- is what the rule
 // answers, the base's only where the override restates neither.
 
@@ -1018,7 +1009,7 @@ static_assert(std::same_as<ResolveOverride<Slotted>::rule<Doc::ID>::slot,
                            TypeList<Tagged>>);
 static_assert(std::same_as<Plain::rule<Doc::ID>::slot, TypeList<>>);
 
-// Two sides that restate a rule apart meet where a grammar restates it once
+// Two sides that restate a rule apart join where a grammar restates it once
 // more, as the refusal advises: a body with no `super` needs neither side's.
 struct Chosen : extends<CatSeqT, PreSeqT> {
   template <class>
@@ -1076,10 +1067,8 @@ struct Built : GrammarSpec {
 static_assert(
     std::same_as<ResolveOverride<Built>::body<Built::Node>, Ref<Built::ID>>);
 
-// `MaterializeCreate`: the creation a rule implies, spelled out. A node rule
-// builds a node, and today that creation lives either in the body -- every
-// alternative heading itself -- or nowhere, carried by the rule's own
-// element. This stage makes it always the first.
+// `MaterializeCreate`: the creation a node rule implies, spelled out first
+// in its body.
 
 namespace mk {
 
@@ -1089,13 +1078,13 @@ struct Node : cursiv::AstNode {
 
 struct G : GrammarSpec {
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
-  // No alternative heads itself: the rule owed the creation.
+  // No alternative heads itself: the rule needs the creation.
   struct Plain : rule<assign<&Node::name>(ref<ID>)> {};
   // Every alternative already heads itself.
   struct Both : rule<create<Node>(lit<"+">) | create<Node>(lit<"1">)> {};
   // One does, one does not.
   struct Mixed : rule<create<Node>(lit<"+">) | assign<&Node::name>(ref<ID>)> {};
-  // A rule that builds no node owes nothing.
+  // A rule that builds no node needs none.
   struct Data : rule<ref<ID>> {};
   using entry = Plain;
 };
@@ -1121,28 +1110,26 @@ inline constexpr bool every_alt_heads<Choice<As...>> =
     (detail::mat::look_heads<As> && ...);
 
 // Nothing headed it: the whole alternative becomes the region of one creation.
-static_assert(M::owed<G::Plain>);
+static_assert(M::rewritten<G::Plain>);
 static_assert(std::same_as<M::body<G::Plain>, Create<Node, R::body<G::Plain>>>);
-// The two spellings converge: whether the author wrote the creation or left
-// the rule to imply it, the body after this is one type. A `create` at the
-// root of a declared body is shed, so the explicit spelling arrives here owing
-// one just as the implicit does.
+// Written or implied, the creation gives one body: a root `create` is
+// dropped, so both arrive here needing one.
 static_assert(
     std::same_as<M::body<G::Plain>, Normalize<Spelled>::body<Spelled::Plain>>);
 
 // Every alternative headed itself: nothing to do, and the body is untouched.
-static_assert(!M::owed<G::Both>);
+static_assert(!M::rewritten<G::Both>);
 static_assert(std::same_as<M::body<G::Both>, R::body<G::Both>>);
 
-// One branch owed it: the other keeps the creation it spelled, and the arity
+// One branch needed it: the other keeps the creation it spelled, and the arity
 // of the choice does not move -- an alternative in is an alternative out.
-static_assert(M::owed<G::Mixed>);
+static_assert(M::rewritten<G::Mixed>);
 static_assert(
     std::same_as<M::body<G::Mixed>, Normalize<Spelled>::body<Spelled::Mixed>>);
 
-// A rule that builds no node, and a terminal, owe nothing.
-static_assert(!M::owed<G::Data>);
-static_assert(!M::owed<G::ID>);
+// A rule that builds no node, and a terminal, need none.
+static_assert(!M::rewritten<G::Data>);
+static_assert(!M::rewritten<G::ID>);
 static_assert(std::same_as<M::body<G::ID>, R::body<G::ID>>);
 
 // "Alternative" is not a shape a rule must have: a body that is one sequence
@@ -1153,7 +1140,7 @@ struct Flat : GrammarSpec {
   // Nothing in the sequence heads it.
   struct SeqPlain : rule<lit<"a"> + assign<&Node::name>(ref<G::ID>)> {};
   // A `create` written inside a sequence absorbs its neighbours, so the
-  // declared body is already headed -- and being at the root, it is shed
+  // declared body is already headed -- and being at the root, it is dropped
   // before this reads it, and put back over the same region.
   struct SeqInner : rule<lit<"a"> + create<Node>(ref<G::ID>) + lit<"b">> {};
   // The head comes from the callee, and the rule adopts it.
@@ -1167,7 +1154,7 @@ struct Flat : GrammarSpec {
 using F = Normalize<Flat>;
 using FR = ResolveOverride<Flat>;
 
-static_assert(F::owed<Flat::SeqPlain>);
+static_assert(F::rewritten<Flat::SeqPlain>);
 static_assert(
     std::same_as<F::body<Flat::SeqPlain>,
                  Create<Node, Seq<Lit<"a">, Assign<&Node::name, Ref<G::ID>>>>>);
@@ -1175,10 +1162,10 @@ static_assert(
 // The absorbed create came back over exactly the region it had claimed.
 static_assert(std::same_as<F::body<Flat::SeqInner>, base_body<Flat::SeqInner>>);
 
-static_assert(!F::owed<Flat::RefAdopt>);
+static_assert(!F::rewritten<Flat::RefAdopt>);
 static_assert(std::same_as<F::body<Flat::RefAdopt>, Ref<Flat::Sub>>);
 
-static_assert(F::owed<Flat::RepMany>);
+static_assert(F::rewritten<Flat::RepMany>);
 // Each further turn of a repetition of a head is a head of its own.
 static_assert(!detail::mat::look<Repeat<1, 1, Ref<Flat::Sub>>>::inside);
 static_assert(detail::mat::look<Repeat<1, kUnbounded, Ref<Flat::Sub>>>::inside);
@@ -1189,10 +1176,8 @@ static_assert(every_alt_heads<F::body<Flat::SeqInner>>);
 static_assert(every_alt_heads<F::body<Flat::RefAdopt>>);
 static_assert(every_alt_heads<F::body<Flat::RepMany>>);
 
-// A nest makes its wrapper the current node. What follows belongs to the
-// wrapper, so the head creation claims only what stands before it -- and its
-// type is what the head writes, never the rule's own answer, which with a
-// nest in the body is the wrapper.
+// A nest makes its wrapper the current node, so the head creation claims
+// only what stands before it, and its type is what the head writes.
 
 namespace nst {
 
@@ -1227,10 +1212,8 @@ static_assert(std::same_as<M::body<G::AN>,
                            Seq<Create<Inner, Assign<&Inner::name, Ref<G::ID>>>,
                                Nest<Wrap, &Wrap::inner, Lit<"!">>>>);
 
-// A repetition holding a nest sets the same boundary. The DSL's algebra does
-// not stop there on its own -- a spelled create absorbs the repetition whole,
-// and being at the root it is then shed -- so this is where the shape would
-// be lost without asking the question.
+// A repetition holding a nest sets the same boundary, which the DSL's
+// algebra alone would lose.
 static_assert(
     std::same_as<cursiv::detail::rule_type_t<R::rule<G::ANR>>, Inner>);
 static_assert(std::same_as<M::body<G::ANR>,
@@ -1238,12 +1221,9 @@ static_assert(std::same_as<M::body<G::ANR>,
                                Repeat<0, static_cast<std::size_t>(-1),
                                       Nest<Wrap, &Wrap::inner, Lit<"!">>>>>);
 
-//     A returns A : name=ID | ref<B>;      where B returns a class deriving
-//     from A
-//
-// The two branches answer differently and both are right: one writes the
-// head, the other has it built for it. So one owes a creation and the other
-// owes nothing -- the alternative, not the rule, is the unit.
+//     A returns A : name=ID | ref<B>;   where B's class derives from A
+// One branch writes the head and needs a creation, the other has it built and
+// needs none: the alternative, not the rule, is the unit.
 
 struct Sub : cursiv::Extends<Inner> {
   string_view extra;
@@ -1269,10 +1249,10 @@ using FM = Normalize<Fam>;
 // one the callee builds -- their common base, which here is the first.
 static_assert(std::same_as<cursiv::detail::rule_type_t<Fam::ARule>, Inner>);
 
-// One branch owes, the other does not. `ref<BRule>` is a head: `Inner` bases
-// `Sub`, so the rule adopts what the callee built -- wrapping it would put a
-// second node over the first.
-static_assert(FM::owed<Fam::ARule>);
+// One branch needs a creation, the other does not. `ref<BRule>` is a head:
+// `Inner` bases `Sub`, so the rule adopts what the callee built; wrapping it
+// would put a second node over the first.
+static_assert(FM::rewritten<Fam::ARule>);
 static_assert(
     std::same_as<FM::body<Fam::ARule>,
                  Choice<Create<Inner, Assign<&Inner::name, Ref<G::ID>>>,
@@ -1283,12 +1263,10 @@ static_assert(detail::mat::look_heads<FM::body<Fam::ARule>>);
 // share, and a reference to a class it bases is a head all the same.
 static_assert(
     std::same_as<cursiv::detail::rule_type_t<Fam::Mixed>, cursiv::AstNode>);
-static_assert(!FM::owed<Fam::Mixed>);
+static_assert(!FM::rewritten<Fam::Mixed>);
 
-// `ref<A> + many(nest<&B::a>(...))` where A builds a node: the left-nested
-// chain of a postfix expression, the one shape here that uses `nest<>` for
-// real. The head comes from the callee, so the rule adopts it and owes
-// nothing.
+// `ref<A> + many(nest<&B::a>(...))` where A builds a node: a postfix
+// chain. The rule adopts the callee's head and needs no creation.
 
 struct Chain : GrammarSpec {
   struct ARule : rule<create<Inner>(assign<&Inner::name>(ref<G::ID>))> {};
@@ -1303,17 +1281,15 @@ using CM = Normalize<Chain>;
 // wrapper the chain leaves -- their common base.
 static_assert(std::same_as<cursiv::detail::rule_type_t<Chain::Post>, Inner>);
 
-// Nothing is owed, and the body is untouched.
-static_assert(!CM::owed<Chain::Post>);
+// No creation is needed, and the body is untouched.
+static_assert(!CM::rewritten<Chain::Post>);
 static_assert(std::same_as<CM::body<Chain::Post>,
                            ResolveOverride<Chain>::body<Chain::Post>>);
 static_assert(detail::mat::look_heads<CM::body<Chain::Post>>);
 
+// One head, then a chain of wrappers:
 //     [bare...] [Create<T, ...>] Nest<W1, ...> Nest<W2, ...> ...
-//
-// One head, then a chain of wrappers. The DSL's own algebra already refuses
-// two creates in a sequence, and a create after a nest -- so only a nest with
-// nothing in front of it is this stage's to catch.
+// Only a nest with nothing in front of it is this stage's to catch.
 template <class A>
 inline constexpr bool one_head =
     !detail::mat::chain<typename detail::mat::alt_parts<A>::type>::twice &&
@@ -1331,12 +1307,9 @@ struct Shape : GrammarSpec {
 
 using ShM = Normalize<Shape>;
 
-// One branch of a nested choice is enough to be a second head, and a create
-// absorbs what surrounds it -- so the second head is buried inside the
-// first's region rather than standing beside it. A branch that merely calls
-// a rule building a node of the family counts the same.
-//
-//   create<N>(a) + (create<N>(b) | 'c')   refused, for the first branch
+// One branch of a nested choice, or a call to a rule of the family, is a
+// second head:
+//   create<N>(a) + (create<N>(b) | 'c')   refused
 //   create<N>(a) + (ref<B>       | 'c')   refused, B building a node
 //   create<N>(a) + ('c'          | 'd')   legal
 static_assert(
@@ -1375,10 +1348,8 @@ static_assert(std::same_as<base_body<Two::Long>, base_body<Two::Short>>);
 static_assert(std::same_as<Normalize<Two>::body<Two::Long>,
                            Normalize<Two>::body<Two::Short>>);
 
-// A member declared in a base names that base, not the class the author
-// spelled it through: `&Wrap::name` is an `Inner` member, so the short form
-// deduces `Inner`. The long form is how a wrapper deeper than its member is
-// named.
+// A member declared in a base names that base: `&Wrap::name` is an
+// `Inner` member, so the short form deduces `Inner`.
 static_assert(std::same_as<decltype(nest<&Wrap::name>(lit<"!">)),
                            Nest<Inner, &Wrap::name, Lit<"!">>>);
 static_assert(std::same_as<decltype(nest<Wrap, &Wrap::name>(lit<"!">)),
@@ -1495,10 +1466,8 @@ static_assert(std::same_as<Normalize<G>::body<G::RootWrapped>,
 
 }  // namespace hand
 
-// The deductions answer a rule outside every cycle once, whatever path leads
-// to it, and a rule inside one once per set of rules on the path: a diamond
-// of adoptions and a clique of data rules answer as a lone path does, and a
-// ring of levels that only adopt answers its primary's class at every level.
+// A rule outside every cycle has one answer whatever the path, and one
+// inside a cycle one answer per set of rules on the path.
 namespace paths {
 
 struct Leaf : cursiv::Extends<cursiv::AstNode> {
@@ -1549,8 +1518,7 @@ static_assert(std::same_as<cursiv::detail::rule_type_t<Ring::L<2>>, Leaf>);
 }  // namespace paths
 
 // After the transformation every node rule adopts: its element is a pure
-// label, in every grammar rather than in some. That is the whole point, and
-// it did not hold before.
+// label, in every grammar.
 
 static_assert(!every_alt_heads<R::body<G::Plain>>);
 static_assert(!every_alt_heads<R::body<G::Mixed>>);
@@ -1559,8 +1527,8 @@ static_assert(every_alt_heads<M::body<G::Plain>>);
 static_assert(every_alt_heads<M::body<G::Both>>);
 static_assert(every_alt_heads<M::body<G::Mixed>>);
 
-// An override restates the body; the creation is owed on what the grammar
-// actually compiles, not on what the base declared.
+// An override restates the body; the creation is needed on what the grammar
+// compiles, not on what the base declared.
 
 struct Restated : extends<G> {
   template <class>
@@ -1570,7 +1538,7 @@ struct Restated : extends<G> {
   struct override<T> : rule<create<Node>(lit<"x">)> {};
 };
 
-// The creation is owed on the body the grammar compiles: the override's, not
+// The creation is needed on the body the grammar compiles: the override's, not
 // the base's -- and the answer heads itself either way.
 static_assert(
     std::same_as<Normalize<Restated>::body<G::Plain>, Create<Node, Lit<"x">>>);
@@ -1581,9 +1549,7 @@ static_assert(every_alt_heads<Normalize<Restated>::body<G::Plain>>);
 }  // namespace mk
 
 // The public surface, answered again by every stage: a transformation of a
-// grammar is a grammar. What it does not republish, the stage after it
-// cannot ask, so each one answers the whole surface -- the pipeline is a
-// chain rather than a set of one-shot readers.
+// grammar is a grammar.
 
 namespace api {
 
@@ -1626,8 +1592,8 @@ static_assert(std::same_as<P0::ignored, TypeList<Base::WS>>);
 static_assert(std::same_as<P0::hidden, TypeList<Base::DOC>>);
 static_assert(std::same_as<P0::entry, Base::Root>);
 
-// An override reaches the skipper: both lists carry the minted rule, not the
-// declared one, and the mint still names what it stands for.
+// An override reaches the skipper: both lists carry the override's type, not
+// the declared rule, and it still names the rule it stands for.
 static_assert(!std::same_as<P1::ignored, P0::ignored>);
 static_assert(!std::same_as<P1::hidden, P0::hidden>);
 static_assert(P1::overrides<Base::WS>);
@@ -1649,21 +1615,19 @@ static_assert(std::same_as<decltype(P0::word_boundary), decltype(P1::word_bounda
 // The two ways to ask agree, and that is the whole contract.
 static_assert(std::same_as<std::remove_cv_t<decltype(M0::entry::body)>,
                            M0::body<Base::Root>>);
-// So the entry is a mint, not the rule that came in -- and it says what it
+// So the entry is a new type, not the rule that came in, and it says what it
 // stands for at the stage before.
 static_assert(!std::same_as<M0::entry, P0::entry>);
 static_assert(std::same_as<M0::entry::declared, P0::entry>);
 // ...while its identity is untouched: a rule stays the kind it was declared.
 static_assert(std::same_as<M0::entry::kind, Base::Root::kind>);
 
-// A root `create` in a stage's body is not an annotation. `rule_body_t`
-// sheds one -- it reads a declared body, where a root create only states a
-// type a deduction cannot reach. A stage means it, so a stage's body is read
-// through the stage.
+// A root `create` in a stage's body is meant: `rule_body_t` drops one from
+// a declared body, so a stage's body is read through the stage.
 static_assert(!std::same_as<cursiv::detail::rule_body_t<M0::entry>,
                             M0::body<Base::Root>>);
 
-// The skipper's rules are terminals: they build no node and owe nothing, so
+// The skipper's rules are terminals: they build no node and need nothing, so
 // they come through as themselves.
 static_assert(std::same_as<M0::ignored, P0::ignored>);
 static_assert(std::same_as<M0::hidden, P0::hidden>);
@@ -1672,8 +1636,8 @@ static_assert(std::same_as<decltype(M0::word_boundary), decltype(P0::word_bounda
 static_assert(std::same_as<M1::ignored, P1::ignored>);
 static_assert(std::same_as<M1::hidden, P1::hidden>);
 
-// ...and it is still the stage that materialises: the entry owed a head.
-static_assert(M0::owed<Base::Root>);
+// ...and it is still the stage that materialises: the entry needed a head.
+static_assert(M0::rewritten<Base::Root>);
 static_assert(std::same_as<M0::body<Base::Root>,
                            Create<Node, Assign<&Node::name, Ref<Base::ID>>>>);
 
@@ -1683,8 +1647,8 @@ using M2 = MaterializeCreate<M0>;
 static_assert(std::same_as<M2::ignored, P0::ignored>);
 static_assert(std::same_as<M2::body<Base::Root>, M0::body<Base::Root>>);
 // Running it again changes nothing -- not even the rule's identity: every
-// alternative already heads itself, so there is nothing to mint.
-static_assert(!M2::owed<Base::Root>);
+// alternative already heads itself, so there is nothing to create.
+static_assert(!M2::rewritten<Base::Root>);
 static_assert(std::same_as<M2::entry, M0::entry>);
 
 }  // namespace api
@@ -1692,15 +1656,13 @@ static_assert(std::same_as<M2::entry, M0::entry>);
 }  // namespace
 
 void run() {
-  // Every law above is a `static_assert`; reaching here is the verdict.
+  // Every check above is a `static_assert`.
 }
 
 }  // namespace grammar_utils
 
-// The two ways a literal is guarded, and the one node behind both: `kw<S>`
-// asks for the grammar's boundary discipline (`word_boundary`, declared like
-// `ignored`/`hidden`) and lowers to `lit<S, !boundary>` conditionally; `lit<S,
-// G>` is the custom path, any predicate applied as spelled.
+// The two ways a literal is guarded: `kw<S>` takes the grammar's
+// `word_boundary`, `lit<S, G>` applies `G` as spelled.
 namespace grammar_spec {
 
 namespace {
@@ -1732,10 +1694,8 @@ bool parses(const cursiv::Parser& engine, std::string_view text) {
   return r.accepted && !r.cst().recovered();
 }
 
-// One rule, no special case: the guard exists exactly where the text can run
-// into the declared class. `[` is in no usual boundary, so `kw<"[">` accepts
-// `[abc`; a grammar that puts `[` in its boundary gets the guard, and the
-// same input is refused there.
+// The guard exists only where the text can run into the boundary class:
+// `kw<"[">` accepts `[abc` unless the grammar puts `[` in its boundary.
 
 void the_word_final_rule() {
   // '[' is in no usual boundary, so the keyword carries no guard...
@@ -1776,13 +1736,13 @@ struct Kept : cursiv::GrammarSpec {
 };
 
 void the_hub_fuses_what_cannot_fire() {
-  // Two spellings of '(' that no reading can tell apart are one matcher, and
+  // Two spellings of '(' that no parse can tell apart are one matcher, and
   // the dump is where the fusion shows.
   CHECK(support::dump_compiled<Fused>().find("'(' '(' \"if\"") !=
         std::string::npos);
   // ...and a boundary that admits '(' tells them apart, so the `kw` keeps its
   // guard and no fusion happens. Same three elements, two answers: the
-  // discipline is what decides, never the spelling.
+  // boundary decides, never the spelling.
   CHECK(support::dump_compiled<Kept>().find("'(' '(' \"if\"") ==
         std::string::npos);
 }
@@ -1796,7 +1756,7 @@ void an_operator_is_resolved_too() {
             "levels(left('*'), left('+'))") != std::string::npos);
 }
 
-// ...and the same law from the other side: an `ikw<>` with no letter that
+// ...and the same from the other side: an `ikw<>` with no letter that
 // has another case is the `kw<>` of its spelling, the same node.
 static_assert(cursiv::detail::holds_a_letter<"if">());
 static_assert(cursiv::detail::holds_a_letter<"IF">());
@@ -1830,7 +1790,7 @@ namespace dumpcol {
 struct ID : cursiv::detail::TerminalRule<cursiv::some(cursiv::cr<"0-9">)> {};
 }  // namespace dumpcol
 
-// Pins the rendering: every shape's spelling, bracketing by precedence, the
+// The rendering: every shape's spelling, bracketing by precedence, the
 // grammar skeleton, and that compiled<> shows the override where declared<>
 // shows the base.
 namespace dump {
@@ -1996,8 +1956,8 @@ static_assert(std::is_same_v<
 static_assert(std::is_same_v<cursiv::detail::rule_type_t<G::Expr>, Expr>);
 }  // namespace Q3u
 
-// Overridden rules the compiled view meets twice: as a mint (the entry, the
-// skipper) and by the name a body spells.
+// Overridden rules the compiled view finds twice: as an override type (the
+// entry, the skipper) and by the name a body spells.
 namespace Q5 {
 struct SelfBase : cursiv::GrammarSpec {
   struct ID : terminal<some(cr<"a-z">)> {};
@@ -2045,8 +2005,8 @@ void run() {
          R"(("a" | "b") "c")", "brackets");
   expect(support::dump_expr<decltype(many(kw<"a">))>(), "\"a\"*", "many");
   // A raw expression view has no grammar, so a `kw<>` that names no class of
-  // its own prints its guard as spelled -- the resolution belongs to the hub,
-  // and `compiled<>` is where it shows.
+  // its own prints its guard as spelled: the grammar resolves it, and
+  // `compiled<>` is where it shows.
   expect(support::dump_expr<decltype(some(kw<"a">, kw<",">))>(),
          R"("a" ("," "a")*)", "separated");
   expect(support::dump_expr<decltype(repeat<2, 5>(kw<"a">))>(), "\"a\"{2,5}",
@@ -2204,7 +2164,7 @@ void run() {
          "data and returns");
 
   // An overridden rule is one rule, under its own name, whether the view
-  // meets it as a mint or by the name a body spells.
+  // finds it as an override type or by the name a body spells.
   expect(support::dump_compiled<Q5::SelfDerived>(),
          "grammar SelfDerived;\n"
          "entry data List: ID (';' List)?;\n"
@@ -2230,6 +2190,27 @@ void run() {
          "    | /** names the start */ 'initialState'\n"
          "    | 'events';\n",
          "wrap past a doc's apostrophe");
+  // A space a quote or a class spells is never a break; a doc's prose is.
+  expect(cursiv::engine::dump_wrapped(
+             "Item: 'one two' [\\t ] \"say \\\"hi there\\\"\" tail;\n", 12),
+         "Item: 'one two'\n"
+         "      [\\t ]\n"
+         "      \"say \\\"hi there\\\"\"\n"
+         "      tail;\n",
+         "wrap keeps quotes and classes whole");
+  // A class of properties spells its scalars bare, a quote and a space too.
+  expect(cursiv::engine::dump_wrapped(
+             "Item: \\p{^\\x0a\"\\x5c} x | \\p{L \\xa0} 'y';\n", 16),
+         "Item: \\p{^\\x0a\"\\x5c}\n"
+         "      x\n"
+         "    | \\p{L \\xa0}\n"
+         "      'y';\n",
+         "wrap keeps property classes whole");
+  expect(cursiv::engine::dump_wrapped("Item: /** a long doc here */ x;\n", 16),
+         "Item: /** a long\n"
+         "      doc here\n"
+         "      */ x;\n",
+         "wrap fills a doc's prose");
 }
 
 }  // namespace dump
@@ -2243,19 +2224,19 @@ void a_derived_node_keeps_the_length_of_each_text() {
   cursiv::detail::GrammarImage image;
   const cursiv::detail::ImageDesc token{.kind = cursiv::detail::ImageKind::lit,
                                         .text = "x"};
-  const cursiv::detail::ImageId kid = image.node(token);
+  const cursiv::detail::ImageId child = image.node(token);
   const cursiv::detail::ImageNode shorter{
       .kind = cursiv::detail::ImageKind::assign,
       .text = "value",
       .text2 = std::string_view(kText, 4)};
   cursiv::detail::ImageNode longer = shorter;
   longer.text2 = std::string_view(kText, 6);
-  const cursiv::detail::ImageId a = image.derive(shorter, std::span(&kid, 1));
-  const cursiv::detail::ImageId b = image.derive(longer, std::span(&kid, 1));
+  const cursiv::detail::ImageId a = image.derive(shorter, std::span(&child, 1));
+  const cursiv::detail::ImageId b = image.derive(longer, std::span(&child, 1));
   CHECK(a != b);
   CHECK(image.nodes[a].text2 == "Long");
   CHECK(image.nodes[b].text2 == "Longer");
-  CHECK(image.derive(longer, std::span(&kid, 1)) == b);
+  CHECK(image.derive(longer, std::span(&child, 1)) == b);
 }
 
 void run() { a_derived_node_keeps_the_length_of_each_text(); }
@@ -2494,11 +2475,10 @@ void any_takes_the_byte_and_stops_at_the_end() {
   CHECK(!parses(sentfree(), doc("a", "b")));
 }
 
-// A core lane owes its own grammar. Naming an example language would compile
-// the longest one of the tree a second time, and what is under test is the
-// engine's answer at the byte, never that language's.
+// The test has its own grammar: an example language would compile the longest
+// grammar of the tree again, and the test is about the engine at the byte.
 
-// A quoted run whose class admits the byte: json's string, its departure 1.
+// A quoted run whose class admits the byte, as a JSON string's does.
 void a_quoted_run_takes_the_byte() {
   // The token is the five bytes of `"x\0y"`, NUL included -- not the two the
   // string would have if the byte ended it.
@@ -2563,11 +2543,11 @@ void a_spelling_reads_as_scalars() {
   const auto wide = LexCodePoints::of(0, true, R"('\\\r\n\u2028)");
   CHECK(!holds(wide, U'\\') && !holds(wide, U'\r') && holds(wide, U'r') &&
         !holds(wide, 0x2028));
-  CHECK(wide.strays());
+  CHECK(wide.holds_invalid());
   const auto wideSign = LexCodePoints::of(0, false, R"(\u00e9+\\-)");
   CHECK(holds(wideSign, U'\\') && holds(wideSign, U'-') &&
         holds(wideSign, 0xE9));
-  CHECK(!wideSign.strays());
+  CHECK(!wideSign.holds_invalid());
 }
 
 // A union reads as the spelling that holds them all.

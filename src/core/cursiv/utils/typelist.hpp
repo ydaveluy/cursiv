@@ -6,10 +6,9 @@
 
 #include "cursiv/utils/macros.hpp"
 
-// The type-list toolkit every layer shares. A conditional branch is lazy only
-// when it is a class template-id whose `::type` is asked afterwards -- an
-// alias, or a branch containing `typename X::type`, is instantiated on both
-// sides regardless; dispatch on a bool parameter instead.
+// The type-list toolkit every layer shares. A conditional branch is lazy
+// only as a class template-id whose `::type` is asked afterwards; dispatch on
+// a bool parameter instead of an alias.
 
 namespace cursiv {
 
@@ -160,10 +159,8 @@ struct dedupe<TypeList<Ts...>> : dedupe_pack<Ts...> {};
 template <class L>
 using dedupe_t = typename dedupe<L>::type;
 
-// O(1) type -> index: one overload resolution answers what a linear fold
-// re-evaluates per query. The ellipsis overload is the miss sentinel,
-// preserving the `value < tl_size` contract. Requires a duplicate-free list --
-// duplicates make the `using ...::at` set ambiguous; every caller passes one.
+// Type to index in one overload resolution. The ellipsis overload is the
+// miss, which keeps `value < tl_size`. The list must hold no duplicates.
 template <std::size_t I, class T>
 struct idx_leaf {
   static constexpr std::integral_constant<std::size_t, I> at(
@@ -179,10 +176,8 @@ struct idx_tree<std::index_sequence<Is...>, TypeList<Ts...>>
 };
 template <class T, class L>
 struct index_of;
-// Inherited, not declared: a static member of its own would put one symbol
-// per instantiation in the table, and this one is asked with lists of
-// hundreds -- the list is spelled in the name. `integral_constant`'s member
-// is named by the answer, so lists sharing a position share one symbol.
+// Inherited, not declared: lists of hundreds of types would each add a
+// symbol of their own, where `integral_constant` is shared by position.
 template <class T, class... Ts>
 struct index_of<T, TypeList<Ts...>>
     : decltype(idx_tree<std::index_sequence_for<Ts...>, TypeList<Ts...>>::at(

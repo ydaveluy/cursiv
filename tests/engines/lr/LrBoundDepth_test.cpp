@@ -28,12 +28,9 @@
 #include "cursiv/Check.hpp"
 #include "engines/lr/LrStand.hpp"
 
-// What a reading still owes is walked over the text ahead of it, as far as the
-// bound reaches: a text of one-byte or unreadable tokens makes the walk as
-// deep as that reach. It runs on a stack of its own, so the depth is not the
-// native stack's. Checked against the recursion it replaced, kept here as the
-// reference: the same values, and the same work spent, whatever the share left
-// the walk, and against a native stack too small for that recursion.
+// What a reading still needs is walked over the text ahead as far as the bound
+// reaches, on a stack of its own. Checked against a reference recursion, same
+// values and work, and against a native stack too small for that recursion.
 
 namespace {
 
@@ -50,9 +47,9 @@ inline int depth = 0;
 inline int deepest = 0;
 
 template <const auto& A>
-std::uint32_t owes(const cursiv::engine::LrContext& c,
-                   cursiv::engine::LrSearch& s, cursiv::TextOffset p,
-                   cursiv::engine::SymbolId prev, std::uint32_t run);
+std::uint32_t cost_ahead(const cursiv::engine::LrContext& c,
+                         cursiv::engine::LrSearch& s, cursiv::TextOffset p,
+                         cursiv::engine::SymbolId prev, std::uint32_t run);
 
 template <const auto& A>
 std::uint32_t dropped(const cursiv::engine::LrContext& c,
@@ -64,51 +61,52 @@ std::uint32_t dropped(const cursiv::engine::LrContext& c,
   if (t.begin >= c.len) return kLrNoBound;
   const TextOffset end =
       t.sym == kInvalidSymbol ? t.end : (t.end > t.begin ? t.end : t.begin + 1);
-  if (lr_search_ahead<A>(c, s, t.begin).refused) return kLrOwedReread;
+  if (lr_search_ahead<A>(c, s, t.begin).refused) return kLrRereadCost;
   std::uint32_t best =
-      kLrOwedGesture + kLrLost + owes<A>(c, s, end, prev, 0);
+      kLrEditCost + kLrLost + cost_ahead<A>(c, s, end, prev, 0);
   for (const Typo& y : lr_search_misread<A>(c, s, t.begin))
-    if (best > kLrOwedReread)
-      best = std::min(best, kLrOwedReread + owes<A>(c, s, y.end, y.term, 0));
+    if (best > kLrRereadCost)
+      best =
+          std::min(best, kLrRereadCost + cost_ahead<A>(c, s, y.end, y.term, 0));
   return best;
 }
 
 template <const auto& A>
-std::uint32_t owes(const cursiv::engine::LrContext& c,
-                   cursiv::engine::LrSearch& s, cursiv::TextOffset p,
-                   cursiv::engine::SymbolId prev, std::uint32_t run) {
+std::uint32_t cost_ahead(const cursiv::engine::LrContext& c,
+                         cursiv::engine::LrSearch& s, cursiv::TextOffset p,
+                         cursiv::engine::SymbolId prev, std::uint32_t run) {
   using namespace cursiv;
   using namespace cursiv::engine;
   if (p >= s.horizon || lr_search_spent(s)) return 0;
   const std::uint64_t key =
       (std::uint64_t{p} << 20) | (std::uint64_t{prev} << 2) | run;
-  if (const std::uint32_t* hit = s.owes.find(key)) return *hit;
+  if (const std::uint32_t* hit = s.costAhead.find(key)) return *hit;
   ++depth;
   deepest = std::max(deepest, depth);
   std::uint32_t best = kLrNoBound;
   const auto next = [&](const Token& t, bool again) {
     const bool follows =
         prev == kInvalidSymbol || (!again && A.derived.after[prev].test(t.sym));
-    const std::uint32_t cost = follows ? 0 : kLrOwedGesture;
+    const std::uint32_t cost = follows ? 0 : kLrEditCost;
     if (cost >= best) return;
     const std::uint32_t held = follows ? run + 1 : 1;
     if (t.sym == kEofSymbol || held >= kRepairValidateShifts) {
       best = cost;
       return;
     }
-    best = std::min(best, cost + owes<A>(c, s, t.end, t.sym, held));
+    best = std::min(best, cost + cost_ahead<A>(c, s, t.end, t.sym, held));
   };
   lr_search_each<A>(c, s, p, next, [&](const Token& t) {
-    if (best > kLrOwedReread) best = std::min(best, dropped<A>(c, s, t, prev));
+    if (best > kLrRereadCost) best = std::min(best, dropped<A>(c, s, t, prev));
   });
-  if (!s.boundShort) s.owes.emplace(key).first = best;
+  if (!s.boundShort) s.costAhead.emplace(key).first = best;
   --depth;
   return best;
 }
 
 }  // namespace ref
 
-// A search set out on the refusal `text` meets, as a bound reads it.
+// A search set out on the refusal `text` reaches, as a bound reads it.
 template <const auto& A>
 struct Bound {
   Stand<A> st;
@@ -126,9 +124,9 @@ struct Bound {
 
 constexpr std::uint64_t kAll = ~std::uint64_t{0};
 
-// The same probes on two searches that began alike: one asks the walk now
-// written, the other the recursion. Values, work spent and what the bound
-// knows must agree after each.
+// The same probes on two searches that began the same: one asks the walk, the
+// other the reference recursion. Values, work spent and what the bound knows
+// must agree after each.
 template <const auto& A>
 void agree(std::string_view text, std::uint64_t share) {
   using namespace cursiv;
@@ -146,8 +144,9 @@ void agree(std::string_view text, std::uint64_t share) {
     for (const SymbolId prev : prevs)
       for (std::uint32_t run = 0; run < 3; ++run) {
         const std::uint32_t a =
-            lr_search_owes<A>(now.st.c, now.s, p, prev, run);
-        const std::uint32_t b = ref::owes<A>(was.st.c, was.s, p, prev, run);
+            lr_search_cost_ahead<A>(now.st.c, now.s, p, prev, run);
+        const std::uint32_t b =
+            ref::cost_ahead<A>(was.st.c, was.s, p, prev, run);
         CHECK(a == b);
         CHECK(now.s.work == was.s.work);
         CHECK(now.s.boundShort == was.s.boundShort);
@@ -169,26 +168,25 @@ void agree(std::string_view text, std::uint64_t share) {
   }
 }
 
-// Native stack: a walk over `text` in a thread whose stack the recursion it
-// replaced overran (it segfaults at this size), at a few hundred frames. An
-// unoptimized build needs room for the parse alone, whose frames are not
-// shrunk.
+// Native stack: a walk over `text` in a thread whose stack the reference
+// recursion overruns, at a few hundred frames. An unoptimized build needs room
+// for the parse alone.
 #if defined(__linux__)
 #ifdef NDEBUG
-constexpr std::size_t kCrampedStack = 32 * 1024;
+constexpr std::size_t kSmallStack = 32 * 1024;
 #else
-constexpr std::size_t kCrampedStack = 128 * 1024;
+constexpr std::size_t kSmallStack = 128 * 1024;
 #endif
 
-struct Cramped {
+struct SmallStackJob {
   std::string_view text;
-  std::uint32_t owed = 0;
+  std::uint32_t costAhead = 0;
 };
 
-void* cramped(void* arg) {
-  auto* job = static_cast<Cramped*>(arg);
+void* run_on_small_stack(void* arg) {
+  auto* job = static_cast<SmallStackJob*>(arg);
   Bound<ga::kTable> b(job->text, kAll);
-  job->owed = cursiv::engine::lr_search_owes<ga::kTable>(
+  job->costAhead = cursiv::engine::lr_search_cost_ahead<ga::kTable>(
       b.st.c, b.s, b.st.c.la.begin, cursiv::engine::kInvalidSymbol, 0);
   return nullptr;
 }
@@ -196,18 +194,18 @@ void* cramped(void* arg) {
 void a_small_stack_holds_the_walk(std::string_view text) {
   pthread_attr_t attr;
   pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, kCrampedStack);
-  Cramped job{text};
+  pthread_attr_setstacksize(&attr, kSmallStack);
+  SmallStackJob job{text};
   pthread_t th;
-  if (pthread_create(&th, &attr, &cramped, &job) != 0) {
+  if (pthread_create(&th, &attr, &run_on_small_stack, &job) != 0) {
     pthread_attr_destroy(&attr);
     return;
   }
   pthread_join(th, nullptr);
   pthread_attr_destroy(&attr);
   Bound<ga::kTable> b(text, kAll);
-  CHECK(job.owed ==
-        cursiv::engine::lr_search_owes<ga::kTable>(
+  CHECK(job.costAhead ==
+        cursiv::engine::lr_search_cost_ahead<ga::kTable>(
             b.st.c, b.s, b.st.c.la.begin, cursiv::engine::kInvalidSymbol, 0));
 }
 #endif
@@ -262,7 +260,7 @@ void a_stop_is_read_while_the_walk_runs() {
   b.st.c.stop = cursiv::engine::CancellationPoll(token);
   bool told = false;
   try {
-    (void)cursiv::engine::lr_search_owes<ga::kTable>(
+    (void)cursiv::engine::lr_search_cost_ahead<ga::kTable>(
         b.st.c, b.s, b.st.c.la.begin, cursiv::engine::kInvalidSymbol, 0);
   } catch (const cursiv::OperationCancelled&) {
     told = true;

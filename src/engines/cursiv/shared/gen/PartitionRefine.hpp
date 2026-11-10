@@ -10,10 +10,9 @@
 
 namespace cursiv::engine {
 
-// `cls` gives each state its opening class. `each_edge(edge)` calls
-// `edge(from, label, to)` for every edge, in the same order each time. A state has
-// at most one edge per label, and the states of a class the same labels. `reads`
-// counts the edges read and `moves` the states moved, where given.
+// `cls` gives each state its opening class; `each_edge(edge)` calls
+// `edge(from, label, to)` for every edge, in a stable order, at most one per
+// state and label. `reads` and `moves` count the work, where given.
 template <class EachEdge>
 std::vector<std::uint32_t> partition_refine(const std::vector<std::uint32_t>& cls,
                                             std::uint32_t nlabels,
@@ -35,8 +34,8 @@ std::vector<std::uint32_t> partition_refine(const std::vector<std::uint32_t>& cl
       in[put[to]++] = In{from, label};
     });
   }
-  // Block `b` is `elem[first[b]]` up to `elem[last[b]]`; a pass moves the states
-  // it marks to the front, up to `mid[b]`.
+  // Block `b` is `elem[first[b]]` up to `elem[last[b]]`; a pass moves the
+  // states it marks to the front, up to `mid[b]`.
   std::uint32_t initial = 0;
   for (const std::uint32_t c : cls) initial = std::max(initial, c + 1);
   std::vector<std::uint32_t> blk(cls), elem(n), pos(n);

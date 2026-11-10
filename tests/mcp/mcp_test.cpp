@@ -1,7 +1,10 @@
-// The MCP endpoint with no wire under it -- handshake, registries, dispatch and
-// the errors JSON-RPC owes -- and the default tools over a real workspace, with
-// and without the lsp storey's formatter.
+// The MCP server without a transport, and its default tools over a real
+// workspace, with and without the formatter's tool.
 
+#include <lsp/json/json.h>
+#include <lsp/types.h>
+
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -12,17 +15,24 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
-#include <lsp/json/json.h>
-#include <lsp/types.h>
-
+#include "caret/generated/Caret/Module.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/DefaultMcpService.hpp"
+#include "cursiv/McpServer.hpp"
+#include "cursiv/McpToolKit.hpp"
+#include "cursiv/formatting/Formatter.hpp"
+#include "cursiv/mcp/LspMcpService.hpp"
 #include "cursiv/references/DefaultLinker.hpp"
 #include "cursiv/references/DefaultScopeComputation.hpp"
+#include "cursiv/runtime/LanguageClient.hpp"
+#include "cursiv/runtime/LanguageServer.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/UriUtils.hpp"
@@ -37,15 +47,6 @@
 #include "cursiv/workspace/ServiceRequirement.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 #include "cursiv/workspace/WorkspaceLock.hpp"
-#include "cursiv/formatting/Formatter.hpp"
-#include "cursiv/mcp/LspMcpService.hpp"
-#include "cursiv/runtime/LanguageClient.hpp"
-#include "cursiv/runtime/LanguageServer.hpp"
-#include "cursiv/DefaultMcpService.hpp"
-#include "cursiv/McpServer.hpp"
-#include "cursiv/McpToolKit.hpp"
-#include "cursiv/Check.hpp"
-#include "caret/generated/Caret/Module.hpp"
 #include "doc/generated/DocG/Module.hpp"
 #include "multiref/generated/MultiG/Module.hpp"
 #include "support/Throws.hpp"
@@ -55,8 +56,8 @@
 #include "workspace/generated/Workspace/Module.hpp"
 #include "workspace/lsp/LspModule.hpp"
 
-// The MCP endpoint with no wire under it: the handshake, the two registries,
-// the dispatch, and the errors JSON-RPC owes.
+// The MCP server without a transport: the handshake, the two registries, the
+// dispatch, and the errors JSON-RPC requires.
 namespace mcp_server {
 
 namespace {
@@ -97,8 +98,8 @@ void initialize_echoes_a_known_protocol() {
   CHECK(capabilities != nullptr && find(*capabilities, "resources") != nullptr);
 }
 
-// The guide rides the handshake, and only when someone wrote one.
-void instructions_ride_the_handshake() {
+// The instructions come with the handshake, only when some were written.
+void instructions_come_with_the_handshake() {
   cursiv::McpServer bare = make();
   const json::Value silent = ask(
       bare, R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})");
@@ -318,7 +319,7 @@ void a_name_is_registered_once() {
 
 void run() {
   initialize_echoes_a_known_protocol();
-  instructions_ride_the_handshake();
+  instructions_come_with_the_handshake();
   a_stranger_protocol_gets_the_latest();
   ping_answers_an_empty_object();
   an_unregistered_server_lists_no_tools();
@@ -335,8 +336,8 @@ void run() {
 
 }  // namespace mcp_server
 
-// The default tool set over a real workspace: two documents, one broken, and
-// the five facades answered through the JSON door.
+// The default tools over a real workspace of two documents, one broken,
+// answered through JSON.
 namespace default_mcp_service {
 
 namespace {
@@ -371,14 +372,15 @@ constexpr GeneratedModule kMultiRef{
     &fmulti::generated::MultiG::create_grammar_source};
 
 // The workspace's lock, with a hook around each read the test thread makes
-// outside a write: what puts a write, or a refusal, between a tool's wait and
-// its read. Reads are ranked from 1.
+// outside a write, ranked from 1, and `asking` called for each write the test
+// thread asks for, before it waits for the readers to leave.
 struct HookedLock final : cursiv::WorkspaceLock {
   explicit HookedLock(std::unique_ptr<cursiv::WorkspaceLock> wrapped)
       : inner(std::move(wrapped)) {}
 
   void write(WriteAction action, WriteMode mode) override {
     const bool mine = std::this_thread::get_id() == owner;
+    if (mine && writing == 0 && asking) asking();
     if (mine) ++writing;
     struct Leave {
       bool mine;
@@ -401,8 +403,10 @@ struct HookedLock final : cursiv::WorkspaceLock {
     if (after) after(rank);
     return admitted;
   }
-  void settle() override { inner->settle(); }
-  [[nodiscard]] bool settled() const override { return inner->settled(); }
+  void endMutation() override { inner->endMutation(); }
+  [[nodiscard]] bool mutationEnded() const override {
+    return inner->mutationEnded();
+  }
   void cancelWrite() override { inner->cancelWrite(); }
 
   std::unique_ptr<cursiv::WorkspaceLock> inner;
@@ -411,6 +415,7 @@ struct HookedLock final : cursiv::WorkspaceLock {
   int reads = 0;
   std::function<bool(int)> before;
   std::function<void(int)> after;
+  std::function<void()> asking;
 };
 
 struct World : support::World<> {
@@ -463,14 +468,15 @@ struct Answer {
 };
 
 Answer call_tool(cursiv::McpServer& server, std::string_view name,
-                 std::string_view argumentsJson) {
+                 std::string_view argumentsJson,
+                 const cursiv::CancellationToken& token = {}) {
   std::string request = R"({"jsonrpc":"2.0","id":1,"method":"tools/call",)";
   request += R"("params":{"name":")";
   request += name;
   request += R"(","arguments":)";
   request += argumentsJson;
   request += "}}";
-  const std::optional<std::string> raw = server.handleText(request);
+  const std::optional<std::string> raw = server.handleText(request, token);
   CHECK(raw.has_value());
   if (!raw.has_value()) return {};
   const json::Value reply = json::parse(*raw);
@@ -492,8 +498,8 @@ bool contains(const std::string& text, std::string_view needle) {
   return text.find(needle) != std::string::npos;
 }
 
-// One world for the whole lane: the build is the slow half, and the tools all
-// read the same one.
+// One workspace for the whole test: building it is slow, and the tools only
+// read it.
 World& world() {
   static World w;
   static const bool built = [] {
@@ -521,7 +527,7 @@ void diagnostics_report_the_broken_documents_only() {
   CHECK(!contains(answer.text, "a.ws"));
 }
 
-// A fix the validator stamped reaches a caller with no editor: the
+// A fix the validator attached reaches a caller with no editor: the
 // diagnostic names it by title.
 void diagnostics_name_the_fixes_they_carry() {
   World own;
@@ -543,6 +549,22 @@ void symbols_list_the_exported_names() {
   const Answer filtered = call_tool(server, "symbols", R"({"query":"d"})");
   CHECK(contains(filtered.text, "D (DataType)"));
   CHECK(!contains(filtered.text, "A (Entity)"));
+
+  // The case is ignored beyond ASCII too.
+  World own;
+  own.build({{kA,
+              "datatype \xC3\x89\x63ole\nentity Z\xC3\xA8\x62re { x : "
+              "\xC3\x89\x63ole }\n"}});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto unicode = service.createServer();
+  for (const std::string_view query :
+       {R"({"query":"\u00e9cole"})", R"({"query":"\u00c9COLE"})"}) {
+    const Answer found = call_tool(*unicode, "symbols", query);
+    CHECK(contains(found.text, "\xC3\x89\x63ole (DataType)"));
+    CHECK(!contains(found.text, "(Entity)"));
+  }
+  const Answer zebra = call_tool(*unicode, "symbols", R"({"query":"Z\u00c8"})");
+  CHECK(contains(zebra.text, "Z\xC3\xA8\x62re (Entity)"));
 }
 
 void references_answer_declaration_and_uses() {
@@ -625,8 +647,8 @@ void documents_list_the_store() {
   CHECK(contains(answer.text, "1 diagnostic(s)"));
 }
 
-// The asymmetry closer: what the workspace holds is readable, disk or not --
-// under a uri with no authority too.
+// What the workspace holds is readable, on disk or not, under a uri with no
+// authority too.
 void text_document_content_serves_the_held_text() {
   World own;
   own.build({{kA, "datatype D\nentity A { x : D }\n"},
@@ -674,6 +696,20 @@ void hover_describes_the_declaration() {
   CHECK(contains(answer.text, "'D' (DataType)"));
   CHECK(contains(answer.text, "declared at"));
   CHECK(contains(answer.text, "a.ws:1:"));
+  // A position is a number with no fractional part, however it is written.
+  const Answer spelled =
+      call_tool(server, "hover",
+                R"({"file":"file:///w/a.ws","line":2.0,"column":1.6e1})");
+  CHECK(!spelled.isError && spelled.text == answer.text);
+  for (const std::string_view position :
+       {R"("line":1.5,"column":1)", R"("line":0.0,"column":1)",
+        R"("line":1,"column":-1)", R"("line":1,"column":3e9)",
+        R"("line":"1","column":1)"}) {
+    const Answer refused =
+        call_tool(server, "hover",
+                  R"({"file":"file:///w/a.ws",)" + std::string(position) + "}");
+    CHECK(refused.isError && contains(refused.text, "is 1-based"));
+  }
 }
 
 void rename_lists_every_edit_and_applies_nothing() {
@@ -691,8 +727,8 @@ void rename_lists_every_edit_and_applies_nothing() {
   CHECK(contains(content.text, "datatype D"));
 }
 
-// The generation loop's tool: a text validated against the workspace's own
-// symbols, then discarded without a trace.
+// A text validated against the workspace's own symbols, then removed without
+// a trace.
 void validate_links_against_the_workspace() {
   cursiv::McpServer server = make_server();
   const Answer valid =
@@ -724,6 +760,14 @@ void validate_uses_the_explicit_language() {
       R"({"text":"datatype D\n","languageId":"missing","file":"valid.ws"})");
   CHECK(unknown.isError);
   CHECK(contains(unknown.text, "no language is registered as 'missing'"));
+  CHECK(own.shared.documents->all().empty());
+  // A dot name would leave the call's own slot once the uri is normalised.
+  for (const std::string_view arguments :
+       {R"({"text":"datatype D\n","languageId":"requested","file":".."})",
+        R"({"text":"datatype D\n","languageId":"requested","file":"a/."})"}) {
+    const Answer dot = call_tool(*server, "validate", arguments);
+    CHECK(dot.isError && contains(dot.text, "'file' names a file"));
+  }
   CHECK(own.shared.documents->all().empty());
 }
 
@@ -831,7 +875,7 @@ void validate_reports_the_broken_text_and_pollutes_nothing() {
   CHECK(unknown.isError);
   CHECK(contains(unknown.text, "no language is registered as 'nope'"));
 
-  // A validation through the editor's MCP door also clears its temporary
+  // A validation through the editor's MCP tunnel also clears its temporary
   // diagnostics when the builder removes the document.
   struct Client final : cursiv::LanguageClient {
     std::vector<lsp::PublishDiagnosticsParams> published;
@@ -857,7 +901,6 @@ void validate_reports_the_broken_text_and_pollutes_nothing() {
   }
 }
 
-// The grammar resource is byte for byte the golden reference.
 // One validation at a time uses one scratch identity, handed back after: the
 // store does not grow by one row per call.
 void validate_reuses_one_scratch_identity() {
@@ -1113,6 +1156,167 @@ void validate_runs_every_category() {
   CHECK(own.shared.documents->all().empty());
 }
 
+// The text is published once, with every category: no later build of the same
+// write sets it back or tells a subscriber under an admitted reader. Run on a
+// built workspace and on one never built, which is built first.
+void validate_sets_nothing_back_under_an_admitted_reader() {
+  for (const bool built : {true, false}) {
+    World own;
+    struct Watch final : cursiv::DocumentPhaseListener,
+                         cursiv::DocumentUpdateListener {
+      cursiv::WorkspaceLock* lock = nullptr;
+      std::mutex mutex;
+      std::condition_variable moved;
+      cursiv::DocumentId scratch = cursiv::kNoDocument;
+      int verdicts = 0;
+      bool inside = false;
+      bool asked = false;
+      bool toldPastMutationEnd = false;
+      bool slowBesideReader = false;
+      void onDocumentPhase(cursiv::Document& document,
+                           cursiv::DocumentState reached,
+                           const cursiv::CancellationToken&) override {
+        if (reached != cursiv::DocumentState::Validated ||
+            !document.uri.starts_with("file:///.mcp-scratch/"))
+          return;
+        const std::scoped_lock hold(mutex);
+        scratch = document.id;
+        ++verdicts;
+        moved.notify_all();
+      }
+      void onUpdate(std::span<const std::string_view> changed,
+                    std::span<const std::string_view>) override {
+        std::unique_lock hold(mutex);
+        toldPastMutationEnd = toldPastMutationEnd || lock->mutationEnded();
+        if (verdicts == 0 ||
+            std::ranges::none_of(changed, [](std::string_view uri) {
+              return uri.starts_with("file:///.mcp-scratch/");
+            }))
+          return;
+        (void)moved.wait_for(hold, std::chrono::seconds(5),
+                             [&] { return inside; });
+      }
+      void slowRuns() {
+        const std::scoped_lock hold(mutex);
+        slowBesideReader = slowBesideReader || inside;
+      }
+      // A write asked once a verdict is out waits for the reader it let in.
+      void ask() {
+        const std::scoped_lock hold(mutex);
+        if (verdicts == 0) return;
+        asked = true;
+        moved.notify_all();
+      }
+    } watch;
+    own.addLanguage(
+        "slowed", {".slowed"}, {}, {}, [&](cursiv::CoreServices& language) {
+          language.validationRegistry->registerAfterDocument(
+              [&](const cursiv::Document&, cursiv::ValidationAcceptor& accept,
+                  const cursiv::CancellationToken&) {
+                watch.slowRuns();
+                accept.accept(cursiv::TextRange{0, 0},
+                              cursiv::DiagnosticSeverity::Warning,
+                              "slow check ran");
+              },
+              &cursiv::slow);
+        });
+    if (built) own.build({{kA, "datatype D\n"}});
+    HookedLock& lock = own.hook();
+    watch.lock = &lock;
+    lock.asking = [&] { watch.ask(); };
+    own.shared.documentBuilder->addDocumentPhaseListener(watch);
+    own.shared.documentBuilder->addDocumentUpdateListener(watch);
+
+    bool changedUnderReader = false;
+    std::thread reader([&] {
+      cursiv::DocumentId id = cursiv::kNoDocument;
+      {
+        std::unique_lock hold(watch.mutex);
+        if (!watch.moved.wait_for(hold, std::chrono::seconds(5),
+                                  [&] { return watch.verdicts > 0; }))
+          return;
+        id = watch.scratch;
+      }
+      // As an editor request does: the state, then a read beside the build.
+      if (own.shared.documentBuilder->waitUntil(
+              cursiv::DocumentState::Validated, id) !=
+          cursiv::WaitOutcome::Reached)
+        return;
+      (void)lock.read(
+          [&] {
+            const std::shared_ptr<cursiv::Document> document =
+                own.shared.documents->getDocument(id);
+            if (document == nullptr ||
+                document->state.load() < cursiv::DocumentState::Validated)
+              return;
+            const std::size_t seen = document->diagnostics.size();
+            std::unique_lock hold(watch.mutex);
+            const int verdicts = watch.verdicts;
+            watch.inside = true;
+            watch.moved.notify_all();
+            (void)watch.moved.wait_for(hold, std::chrono::seconds(5), [&] {
+              return watch.asked || watch.verdicts != verdicts;
+            });
+            watch.inside = false;
+            changedUnderReader = document->diagnostics.size() != seen;
+          },
+          {}, cursiv::WorkspaceLock::ReadPriority::Immediate);
+    });
+    const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+    auto server = service.createServer();
+    const Answer answer =
+        call_tool(*server, "validate",
+                  R"({"text":"datatype D\n","languageId":"slowed"})");
+    reader.join();
+    lock.asking = {};
+    own.shared.documentBuilder->removeDocumentPhaseListener(watch);
+    own.shared.documentBuilder->removeDocumentUpdateListener(watch);
+    CHECK(!answer.isError && contains(answer.text, "slow check ran"));
+    CHECK(watch.verdicts == 1);
+    CHECK(!watch.slowBesideReader);
+    CHECK(!changedUnderReader);
+    CHECK(!watch.toldPastMutationEnd);
+    CHECK(own.shared.documents->all().size() == (built ? 1U : 0U));
+  }
+}
+
+// A cancelled request stops the text's own build where it stands, even when no
+// newer write supersedes it, and still removes the text.
+void validate_stops_when_its_request_is_cancelled() {
+  World own;
+  std::stop_source request;
+  bool stopped = false;
+  own.addLanguage(
+      "slowed", {".slowed"}, {}, {}, [&](cursiv::CoreServices& language) {
+        language.validationRegistry->registerAfterDocument(
+            [&](const cursiv::Document&, cursiv::ValidationAcceptor&,
+                const cursiv::CancellationToken& token) {
+              // The client gives up while a long check runs; the check polls
+              // its token.
+              request.request_stop();
+              const auto deadline =
+                  std::chrono::steady_clock::now() + std::chrono::seconds(5);
+              while (!token.stop_requested() &&
+                     std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+              stopped = token.stop_requested();
+              cursiv::throw_if_cancelled(token);
+            },
+            &cursiv::slow);
+      });
+  own.build({{kA, "datatype D\n"}});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  const Answer answer = call_tool(
+      *server, "validate", R"({"text":"datatype D\n","languageId":"slowed"})",
+      request.get_token());
+  CHECK(stopped);
+  CHECK(answer.isError && contains(answer.text, "cancelled"));
+  CHECK(own.shared.documents->all().size() == 1);
+  CHECK(own.shared.documentBuilder->currentState() ==
+        cursiv::DocumentState::Validated);
+}
+
 // A document keeps the language it was opened with, whatever its uri says:
 // the documentation of a declaration under a uri no extension routes is its
 // language's still.
@@ -1197,7 +1401,7 @@ void a_site_two_targets_share_is_listed_once() {
 // The outline nests each name under its nearest named ancestor, through
 // containers that have none, as the editor's does; past its depth it says
 // how much it leaves out.
-void document_symbols_climb_through_unnamed_containers() {
+void document_symbols_nest_through_unnamed_containers() {
   World own;
   own.addLanguage("doc", {".doc"}, {}, kDoc);
   std::string deep;
@@ -1245,12 +1449,33 @@ void scope_candidates_read_every_site_through_its_own_class() {
   CHECK(!tie.isError);
   CHECK(contains(tie.text, "b (Beta)"));
   CHECK(!contains(tie.text, "a (Alpha)"));
+
+  // A word is answered from its own node wherever the caret stands in it, as
+  // completion answers it.
+  World after;
+  after.addLanguage("caret", {".caret"}, {}, kCaret);
+  constexpr std::string_view kAfter =
+      "fn f() { alpha a; nest a { beta c; } 'xy; }";
+  after.build({{"file:///w/after.caret", kAfter}});
+  const cursiv::DefaultMcpService afterService(after.shared, {"test-mcp", "0"});
+  auto afterServer = afterService.createServer();
+  const Answer atEnd = call_tool(*afterServer, "scope-candidates",
+                                 at("file:///w/after.caret", kAfter, "'xy"));
+  CHECK(!atEnd.isError && contains(atEnd.text, "a (Alpha)"));
+  CHECK(!contains(atEnd.text, "c (Beta)"));
+  for (const std::string_view inside : {"'x", "'", "} "}) {
+    const Answer within =
+        call_tool(*afterServer, "scope-candidates",
+                  at("file:///w/after.caret", kAfter, inside));
+    CHECK(!contains(within.text, "c (Beta)"));
+    CHECK(within.text == atEnd.text);
+  }
 }
 
 // A removal that failed keeps its slot out of use: the next validation of
-// the same name gets an identity of its own, not the one still held. Last in
-// the lane: the slots are the process's.
-void validate_retires_a_slot_it_could_not_empty() {
+// the same name gets an identity of its own, not the one still held. Runs
+// last: the slots belong to the process.
+void validate_abandons_a_slot_it_could_not_empty() {
   World own;
   bool armed = false;
   own.addLanguage(
@@ -1311,18 +1536,20 @@ void run() {
   a_tool_that_read_nothing_says_so();
   references_wait_for_the_whole_workspace();
   validate_runs_every_category();
+  validate_sets_nothing_back_under_an_admitted_reader();
+  validate_stops_when_its_request_is_cancelled();
   hover_reads_the_language_the_document_was_opened_with();
   symbols_name_a_symbol_without_a_record();
   a_site_two_targets_share_is_listed_once();
-  document_symbols_climb_through_unnamed_containers();
+  document_symbols_nest_through_unnamed_containers();
   scope_candidates_read_every_site_through_its_own_class();
-  validate_retires_a_slot_it_could_not_empty();
+  validate_abandons_a_slot_it_could_not_empty();
 }
 
 }  // namespace default_mcp_service
 
-// The lsp-storey MCP service: the default set plus the formatter's door,
-// over the one shipped language whose formatter has opinions.
+// The LSP MCP service: the default tools plus the formatter's, over the
+// workspace fixture.
 namespace lsp_mcp_service {
 
 namespace {
@@ -1410,15 +1637,18 @@ void format_answers_the_shaped_text() {
 }
 
 // The formatter is asked as the editor asks it: the parameters name the
-// document they format.
+// document they format, and carry the indentation the call asked for.
 void format_names_the_document_to_the_formatter() {
   struct Recording final : cursiv::Formatter {
     std::string* seen;
-    explicit Recording(std::string* into) : seen(into) {}
+    lsp::Uint* tabSize;
+    Recording(std::string* into, lsp::Uint* tabInto)
+        : seen(into), tabSize(tabInto) {}
     [[nodiscard]] std::vector<lsp::TextEdit> formatDocument(
         const cursiv::Document&, const lsp::DocumentFormattingParams& params,
         const cursiv::CancellationToken&) const override {
       *seen = params.textDocument.uri.toString();
+      *tabSize = params.options.tabSize;
       return {};
     }
     [[nodiscard]] std::vector<lsp::TextEdit> formatDocumentRange(
@@ -1429,7 +1659,9 @@ void format_names_the_document_to_the_formatter() {
   };
   World own;
   std::string seen;
-  own.services.language.formatter = std::make_unique<Recording>(&seen);
+  lsp::Uint tabSize = 0;
+  own.services.language.formatter =
+      std::make_unique<Recording>(&seen, &tabSize);
   const cursiv::LspMcpService service(*own.services.shared,
                                       {"test-lsp-mcp", "0"});
   cursiv::McpServer server = std::move(*service.createServer());
@@ -1439,6 +1671,12 @@ void format_names_the_document_to_the_formatter() {
           R"({"name":"format","arguments":{"file":"file:///w/messy.ws"}}})");
   CHECK(reply.object().get("result").object().find("isError") == nullptr);
   CHECK(seen == kUri);
+  CHECK(tabSize == 2);
+  (void)ask(server,
+            R"({"jsonrpc":"2.0","id":4,"method":"tools/call","params":)"
+            R"({"name":"format","arguments":{"file":"file:///w/messy.ws",)"
+            R"("tabSize":4.0}}})");
+  CHECK(tabSize == 4);
 }
 
 // The `file` argument, as a uri.
@@ -1449,8 +1687,8 @@ std::string file_argument(const json::Value& arguments) {
   return cursiv::tool_file_uri(file->string());
 }
 
-// What a language project does: subclass, add its own doors with the public
-// kit, and silence a default one by overriding its register method. A door
+// What a language project does: subclass, add its own tools with the public
+// kit, and silence a default one by overriding its register method. A tool
 // that reads every document's index waits for the whole workspace.
 struct BlogMcpService final : cursiv::LspMcpService {
   using cursiv::LspMcpService::LspMcpService;

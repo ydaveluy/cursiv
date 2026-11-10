@@ -1,7 +1,5 @@
-// The lifecycle the editor drives, over the protocol's own generated
-// structs so there is no second copy to keep in step. Diagnostics leave
-// through `LanguageClient`, never a return value here, which keeps
-// publication ordered by the workspace lock.
+// The lifecycle the editor drives, over the protocol's generated structs.
+// Diagnostics leave through `LanguageClient`, ordered by the workspace lock.
 #pragma once
 
 #include <lsp/messages.h>
@@ -25,17 +23,15 @@ class LanguageServer {
   [[nodiscard]] virtual lsp::InitializeResult initialize(
       const lsp::InitializeParams&) = 0;
 
-  // Called with the client's parameters at `initialize`: how a service hears
+  // Called with the client's parameters at `initialize`: how a service receives
   // what the client supports. Nothing unsubscribes: a callback stays safe to
   // call once its subscriber is gone.
   virtual void onInitialize(
       std::function<void(const lsp::InitializeParams&)> callback) = 0;
 
-  // Methods the protocol does not define, registered before the session starts.
-  // A handler takes the one value the client sent: an array of one element is
-  // that element, since a client wraps a value that is no object, and null
-  // where the message has no parameters. A request runs as the standard ones
-  // do, off the read loop, and a notification in arrival order with the others.
+  // Methods the protocol does not define, registered before the session. A
+  // handler takes the value the client sent, unwrapped from an array of one, or
+  // null; requests and notifications run as the standard ones do.
   using CustomRequest =
       std::function<lsp::LSPAny(const lsp::LSPAny&, const CancellationToken&)>;
   using CustomNotification = std::function<void(const lsp::LSPAny&)>;
@@ -48,18 +44,13 @@ class LanguageServer {
                               CustomNotification handler) = 0;
   [[nodiscard]] virtual const CustomHandlers& customHandlers() const = 0;
 
-  /**
-   * The client's acknowledgement, and the first moment the server may
-   * speak. Scans the folders from `initialize`, then asks for settings
-   * and the file watching this server needs.
-   */
+  // The client's acknowledgement, the first moment the server may speak: asks
+  // for settings and file watching, then scans the folders.
   virtual void initialized() = 0;
 
-  // The document notifications -- these three and `didChangeWatchedFiles` --
-  // make their change in one write, on the calling thread. A request sent
-  // after one waits only for that write's change, not for the rest of its
-  // build: it is answered once the first build phase is announced and its
-  // own document has reached the state it reads.
+  // The document notifications, with `didChangeWatchedFiles`, make their change
+  // in one write. A request sent after one waits for that change and for its
+  // own document's state, not for the whole build.
   virtual void didOpen(const lsp::DidOpenTextDocumentParams&) = 0;
   virtual void didChange(const lsp::DidChangeTextDocumentParams&) = 0;
   virtual void didClose(const lsp::DidCloseTextDocumentParams&) = 0;
@@ -73,10 +64,9 @@ class LanguageServer {
       const CancellationToken& = {}) const = 0;
   virtual void didSave(const lsp::DidSaveTextDocumentParams&) = 0;
 
-  // A notebook's cells are text documents: these open, change and close them
-  // as the three above do, all of a notification's cells in one write, and
-  // tell `notebookDocuments` first. Document notifications, but for `didSave`.
-  // Announced only where `notebookDocuments` is installed.
+  // A notebook's cells are text documents, opened, changed and closed as above,
+  // all of a notification's cells in one write, after `notebookDocuments`
+  // receives it. Announced only where `notebookDocuments` is installed.
   virtual void didOpenNotebookDocument(
       const lsp::DidOpenNotebookDocumentParams&) = 0;
   virtual void didChangeNotebookDocument(
@@ -86,25 +76,18 @@ class LanguageServer {
   virtual void didCloseNotebookDocument(
       const lsp::DidCloseNotebookDocumentParams&) = 0;
 
-  /**
-   * The world moved without the editor: a file written by a build, a
-   * branch checked out, a file deleted from a terminal. Re-read through
-   * the file system provider, or dropped. A document notification.
-   */
+  // Files changed outside the editor: re-read through the file system provider,
+  // or dropped. A document notification.
   virtual void didChangeWatchedFiles(
       const lsp::DidChangeWatchedFilesParams&) = 0;
 
-  /**
-   * The client's settings changed. Nothing rebuilds here: what a setting
-   * means is its reader's business.
-   */
+  // The client's settings changed. Nothing rebuilds here: a setting's reader
+  // decides what it means.
   virtual void didChangeConfiguration(
       const lsp::DidChangeConfigurationParams&) = 0;
 
-  /**
-   * Folders joined or left the workspace. Nothing happens by default, and a
-   * client sends this only where `initialize` announces `changeNotifications`.
-   */
+  // Folders joined or left the workspace. Nothing happens by default; a client
+  // sends this only where `initialize` announces `changeNotifications`.
   virtual void didChangeWorkspaceFolders(
       const lsp::DidChangeWorkspaceFoldersParams&) = 0;
 
@@ -133,8 +116,8 @@ class LanguageServer {
   [[nodiscard]] virtual std::vector<lsp::LocationLink> definition(
       const lsp::DefinitionParams&, const CancellationToken& = {}) const = 0;
 
-  // The three go-to questions past definition, each its own slot: a
-  // language answers only the ones it installs a provider for.
+  // Declaration, type definition and implementation: answered only where a
+  // language installs a provider.
   [[nodiscard]] virtual std::vector<lsp::LocationLink> declaration(
       const lsp::DeclarationParams&, const CancellationToken& = {}) const = 0;
   [[nodiscard]] virtual std::vector<lsp::LocationLink> typeDefinition(
@@ -226,9 +209,8 @@ class LanguageServer {
       const lsp::TypeHierarchySubtypesParams&,
       const CancellationToken& = {}) const = 0;
 
-  // Read actions: the edits go to the client, which applies them and
-  // sends the `didChange` back. A document already in shape answers
-  // empty, by contract.
+  // Read actions: the client applies the edits and sends `didChange` back. A
+  // document already in shape answers empty.
   [[nodiscard]] virtual std::vector<lsp::TextEdit> formatting(
       const lsp::DocumentFormattingParams&,
       const CancellationToken& = {}) const = 0;

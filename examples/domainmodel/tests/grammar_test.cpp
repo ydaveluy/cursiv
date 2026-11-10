@@ -1,9 +1,10 @@
-// The domain model's three checks, each said and each silent: the naming rule
-// over the whole `Type` family -- one sentence for a datatype and an entity --
+// The domain model's three checks, each reporting and each silent: the naming
+// rule over the whole `Type` family (one message for a datatype and an entity)
 // and the cycle in `extends`, which is the one check no single node can answer.
 
 #include <algorithm>
 #include <cstddef>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -59,7 +60,7 @@ struct World {
   }
 };
 
-// How many findings say that sentence, whatever else they carry.
+// How many findings carry that message, whatever else they carry.
 std::size_t count(const ct::ValidationResult& said, std::string_view message) {
   return ct::filterByOptions(said, {.message = std::string(message)}).size();
 }
@@ -77,7 +78,7 @@ void a_lowercase_entity_is_a_warning_on_its_name() {
   ct::expectWarning(world.validate(text), kCapital, at(text.find("blog"), 4));
 }
 
-// The second method, and the same sentence: the rule is over `Type`, not over
+// The second method, and the same message: the rule is over `Type`, not over
 // one of its leaves.
 void a_lowercase_datatype_says_the_same_sentence() {
   const World world;
@@ -100,7 +101,7 @@ void an_entity_extending_itself_is_an_error() {
   ct::expectError(world.validate(text), kCycle, at(text.rfind('A'), 1));
 }
 
-void a_cycle_through_a_third_entity_is_an_error_on_each_storey() {
+void a_cycle_through_a_third_entity_is_an_error_on_each_level() {
   const World world;
   const ct::ValidationResult said = world.validate(
       "entity A extends B {\n}\n"
@@ -117,8 +118,8 @@ void a_chain_that_ends_says_nothing() {
                      "entity C extends B {\n}\n"));
 }
 
-// A workspace on a disk the test writes: each write is announced as an editor
-// saving those files would announce it.
+// A workspace on a disk the test writes: each write is reported as an editor
+// saving those files would report it.
 struct Disk {
   cursiv::MemoryFileSystemProvider* files = nullptr;
   cursiv::CoreLanguage<Services, Shared> services = make(files);
@@ -154,8 +155,8 @@ constexpr std::string_view kA = "file:///a.dmodel";
 constexpr std::string_view kB = "file:///b.dmodel";
 constexpr std::string_view kC = "file:///c.dmodel";
 
-// The climb crosses documents, so an edit in one changes the answer in the
-// other: after the edit, both say what a fresh build says.
+// The walk crosses documents, so an edit in one changes the answer in the
+// other: after the edit, both report what a fresh build reports.
 void a_cycle_closed_in_another_document_is_an_error_in_both() {
   Disk disk;
   disk.write({{std::string(kA), "entity A extends B {\n}\n"},
@@ -167,11 +168,9 @@ void a_cycle_closed_in_another_document_is_an_error_in_both() {
   CHECK(disk.cycles(kB) == 1);
 }
 
-// The same through a document the edit does not touch: `a` names nothing
-// that changed, but the climbs from `b` and `c` go through it. `E` is on no
-// loop, but its climb never ends either. `a` names only `b`, which the edit
-// relinks and does not change: its verdict changes all the same, and again
-// when the loop is opened.
+// The same for `a`, which the edit does not touch: its result changes when the
+// loop closes in `c`, and again when it opens. `E` is on no loop, but its walk
+// never ends either.
 void a_cycle_through_an_untouched_document_is_an_error() {
   Disk disk;
   disk.write({{std::string(kA), "entity A extends B {\n}\n"},
@@ -206,13 +205,19 @@ void a_cycle_closed_two_documents_away_is_an_error_at_the_start() {
   CHECK(disk.cycles(kC) == 1);
 }
 
+std::string read_file(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  CHECK(in.is_open());
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
 #if defined(__linux__)
-// A worker's stack can be small -- half a mebibyte on macOS -- so a climb
-// holds no frame per storey.
+// A worker's stack can be small -- half a mebibyte on macOS -- so a walk
+// holds no frame per entity.
 #ifdef NDEBUG
-constexpr std::size_t kCrampedStack = 64 * 1024;
+constexpr std::size_t kSmallStack = 64 * 1024;
 #else
-constexpr std::size_t kCrampedStack = 256 * 1024;
+constexpr std::size_t kSmallStack = 256 * 1024;
 #endif
 
 struct Climb {
@@ -236,26 +241,24 @@ void* climb(void* arg) {
   return nullptr;
 }
 
-// A chain written head first, each entity extending the next: the climb from
-// the head passes every storey before it learns anything. Once it ends, once
-// it goes back to its middle, and then every storey is on a climb that never
-// ends. The validation fills its own validator's answers, so the climb from
-// the small stack runs on a fresh one.
+// A chain written head first, each entity extending the next, once ending and
+// once looping back to its middle. The walk on the small stack runs on a fresh
+// validator.
 void a_long_chain_written_head_first_fits_a_small_stack() {
-  constexpr std::size_t kStoreys = 4000;
+  constexpr std::size_t kLevels = 4000;
   for (const bool loops : {false, true}) {
     std::string text;
-    for (std::size_t i = 0; i < kStoreys; ++i) {
+    for (std::size_t i = 0; i < kLevels; ++i) {
       text += "entity E" + std::to_string(i);
-      if (i + 1 < kStoreys)
+      if (i + 1 < kLevels)
         text += " extends E" + std::to_string(i + 1);
       else if (loops)
-        text += " extends E" + std::to_string(kStoreys / 2);
+        text += " extends E" + std::to_string(kLevels / 2);
       text += " {\n}\n";
     }
     const World world;
     const ct::ValidationResult said = world.validate(text);
-    CHECK(count(said, kCycle) == (loops ? kStoreys : 0));
+    CHECK(count(said, kCycle) == (loops ? kLevels : 0));
 
     const dm::DomainModelValidator fresh(world.services.language);
     Climb job{.validator = &fresh, .document = said.document.get()};
@@ -267,7 +270,7 @@ void a_long_chain_written_head_first_fits_a_small_stack() {
     if (job.head == nullptr) continue;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, kCrampedStack);
+    pthread_attr_setstacksize(&attr, kSmallStack);
     pthread_t th;
     const bool started = pthread_create(&th, &attr, &climb, &job) == 0;
     pthread_attr_destroy(&attr);
@@ -281,8 +284,10 @@ void a_long_chain_written_head_first_fits_a_small_stack() {
 struct Scopes {
   const dm::DomainModelCoreServices* services = nullptr;
   const cursiv::Document* document = nullptr;
+  std::filesystem::path out;
   std::size_t local = 0;
   std::size_t exported = 0;
+  bool generated = false;
 };
 
 void* scope(void* arg) {
@@ -293,44 +298,66 @@ void* scope(void* arg) {
   job->exported =
       job->services->scopeComputation->collectExportedSymbols(*job->document)
           .size();
+  const auto* const model = cursiv::ast_cast<const dm::ast::DomainModel>(
+      job->document->parseResult.value);
+  try {
+    (void)dm::generate_java(*model, "deep.dmodel", job->out.string());
+    job->generated = true;
+  } catch (const std::exception&) {
+  }
   return nullptr;
 }
 
-// Packages nested deep: the scopes walk them and spell every qualifier with
-// no native frame per storey.
+// Packages nested deep, walked by the scopes and the generator with no native
+// frame per package. One-letter names keep the deepest folder a valid path.
 void deep_packages_fit_a_small_stack() {
-  constexpr std::size_t kStoreys = 2000;
+  constexpr std::size_t kLevels = 1500;
+  constexpr std::size_t kHalfway = kLevels / 2;
   std::string text;
-  for (std::size_t i = 0; i < kStoreys; ++i)
-    text += "package p" + std::to_string(i) + " {\n";
+  std::string qualified;
+  for (std::size_t i = 0; i < kLevels; ++i) {
+    text += "package p {\n";
+    qualified += "p.";
+    if (i + 1 == kHalfway) {
+      text += "entity M extends ";
+      for (std::size_t below = kHalfway; below < kLevels; ++below) text += "p.";
+      text += "E {\n}\n";
+    }
+  }
   text += "entity E {\n}\n";
-  for (std::size_t i = 0; i < kStoreys; ++i) text += "}\n";
+  for (std::size_t i = 0; i < kLevels; ++i) text += "}\n";
+  text += "entity R extends " + qualified + "E {\n}\n";
   const World world;
   const ct::ValidationResult said = world.validate(text);
   ct::expectNoIssues(said);
 
+  const std::filesystem::path out =
+      std::filesystem::path(CURSIV_TEST_SCRATCH_DIR) / "generated-deep";
+  std::filesystem::remove_all(out);
   Scopes job{.services = &world.services.language,
-             .document = said.document.get()};
+             .document = said.document.get(),
+             .out = out};
   pthread_attr_t attr;
   pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, kCrampedStack);
+  pthread_attr_setstacksize(&attr, kSmallStack);
   pthread_t th;
   const bool started = pthread_create(&th, &attr, &scope, &job) == 0;
   pthread_attr_destroy(&attr);
   CHECK(started);
   if (!started) return;
   pthread_join(th, nullptr);
-  // `E` at its storey and requalified at each one below, the root included.
-  CHECK(job.local == kStoreys + 1);
-  CHECK(job.exported == 1);
+  // `E` and `M` at their level and each one below it, and `R` at the root.
+  CHECK(job.local == (kLevels + 1) + (kHalfway + 1) + 1);
+  CHECK(job.exported == 3);
+  CHECK(job.generated);
+  std::string folder = "deep";
+  for (std::size_t i = 0; i < kLevels; ++i) folder += "/p";
+  qualified.pop_back();
+  CHECK(read_file(out / folder / "E.java")
+            .starts_with("package deep." + qualified + ";\n"));
+  std::filesystem::remove_all(out);
 }
 #endif
-
-std::string read_file(const std::filesystem::path& path) {
-  std::ifstream in(path, std::ios::binary);
-  CHECK(in.is_open());
-  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-}
 
 // Every file under `root`, by its path below it.
 std::map<std::string, std::string> tree_of(const std::filesystem::path& root) {
@@ -342,10 +369,8 @@ std::map<std::string, std::string> tree_of(const std::filesystem::path& root) {
   return files;
 }
 
-// The Java a model becomes, every file whole and byte for byte: generated
-// code rarely changes, and a change anywhere in it is one to read. The second
-// model names its types in another case than they are declared in, which the
-// language accepts and Java would not.
+// The Java each model becomes, byte for byte. The second model names its
+// types in another case than their declarations, which Java would refuse.
 void models_generate_their_golden_java() {
   const std::filesystem::path root(CURSIV_EXAMPLE_DIR);
   const std::filesystem::path out =
@@ -378,10 +403,8 @@ void models_generate_their_golden_java() {
 
 }  // namespace
 
-// A token that opens a rule reached through a chain: the state has no shift
-// for it -- an element must be reduced first -- so the grammar names the member
-// instead, and only because every call site of that rule spells the same one.
-// `Model.elements` and `Package.elements` are two rows and one name.
+// A token that opens an element names the member it fills, `elements`, since
+// every rule that holds elements uses that one name.
 void a_token_that_opens_an_element_names_the_member_it_fills() {
   const std::unique_ptr<cursiv::Parser> engine =
       dm::generated::DomainModel::create_parser();
@@ -454,7 +477,7 @@ int main() {
   a_lowercase_datatype_says_the_same_sentence();
   capitalised_names_say_nothing();
   an_entity_extending_itself_is_an_error();
-  a_cycle_through_a_third_entity_is_an_error_on_each_storey();
+  a_cycle_through_a_third_entity_is_an_error_on_each_level();
   a_chain_that_ends_says_nothing();
   a_cycle_closed_in_another_document_is_an_error_in_both();
   a_cycle_through_an_untouched_document_is_an_error();

@@ -53,7 +53,7 @@ struct RgramCfg {
   void add(unsigned lhs, const RgramExpr& e, bool tight);
   std::vector<Sym> syms(const RgramExpr& e, bool tight);
   bool derive(RgramRandom& r, unsigned nt, unsigned depth, bool inRegion,
-              std::vector<char>& toks, std::vector<char>& glued) const;
+              std::vector<char>& toks, std::vector<char>& regionGap) const;
 };
 
 }  // namespace cursiv

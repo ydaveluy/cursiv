@@ -1,6 +1,5 @@
-// A grammar of the consumer's own -- no cursiv example is reachable from here.
-// Small on purpose: what this project proves is the build surface, not a
-// language.
+// The consumer's own grammar, small on purpose: this project tests the build,
+// not a language.
 #pragma once
 
 #include "cursiv/grammar/GrammarSpec.hpp"

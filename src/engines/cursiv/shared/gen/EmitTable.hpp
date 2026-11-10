@@ -1,4 +1,4 @@
-// The spelling of a table every emitter shares.
+// How every emitter writes a table.
 #pragma once
 
 #include <functional>

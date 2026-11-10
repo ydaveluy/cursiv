@@ -86,7 +86,7 @@ const char* AstEmitter::act_name(ActKind k) {
     case ActKind::none:
       break;
   }
-  throw std::logic_error("an owed row names neither a write nor an effect");
+  throw std::logic_error("a deferred row names neither a write nor an effect");
 }
 
 void AstEmitter::plan_held() {
@@ -122,18 +122,18 @@ std::uint16_t AstEmitter::conv_of(std::uint16_t r) const {
   return at == heldSlots.end() ? g.convSlot : at->second;
 }
 
-void AstEmitter::emit_owe(Body& b, std::uint16_t r, int m) const {
+void AstEmitter::emit_deferred(Body& b, std::uint16_t r, int m) const {
   const AstRowGen& g = reg.rows[r];
   if (g.writes() && m < 0)
-    b.say({"b.owe_write(id, ", b.param(u(g.fieldSlot)), ", ",
+    b.say({"b.defer_write(id, ", b.param(u(g.fieldSlot)), ", ",
            b.param(u(conv_of(r))), ", ", b.param(u(g.narrowSlot)), ", ",
            b.param(act_name(g.act())), ");"});
   else if (g.writes())
-    b.say({"b.owe_write(id, ", b.param(u(g.fieldSlot)), ", ",
+    b.say({"b.defer_write(id, ", b.param(u(g.fieldSlot)), ", ",
            b.param(act_name(g.act())), ", m" + std::to_string(m) + ");"});
   else if (g.effects())
     // Only a nest's effect carries the class it builds.
-    b.say({"b.owe_effect(id, ",
+    b.say({"b.defer_effect(id, ",
            b.param(u(g.kind == WriteKind::nest ? g.declType : kNoIndex)), ", ",
            b.param(u(g.fieldSlot)), ", ", b.param(act_name(g.act())), ");"});
 }
@@ -200,7 +200,7 @@ unsigned AstEmitter::fill_run(Body& b, std::uint16_t cr,
   for (const std::uint16_t r : held)
     if (fills(cr, r)) slots.push_back(write_pending(b, r));
   // A nest whose member holds the class made here wraps that node, so it is
-  // owed before the creation.
+  // queued before the creation.
   std::vector<char> early(held.size(), 0);
   for (std::size_t k = 0; k < held.size(); ++k) {
     const AstRowGen& g = reg.rows[held[k]];
@@ -209,7 +209,7 @@ unsigned AstEmitter::fill_run(Body& b, std::uint16_t cr,
         family == kNoIndex || !derives(family, reg.rows[cr].declType))
       continue;
     early[k] = 1;
-    emit_owe(b, held[k], -1);
+    emit_deferred(b, held[k], -1);
   }
   const unsigned m = b.made++;
   const std::string made = "m" + std::to_string(m);
@@ -244,7 +244,7 @@ unsigned AstEmitter::fill_run(Body& b, std::uint16_t cr,
       b.say({"b.flag(id, ", b.param(u(reg.rows[r].fieldSlot)),
              ", " + made + ");"});
     else if (reg.rows[r].effects())
-      emit_owe(b, r, -1);
+      emit_deferred(b, r, -1);
   }
   return m;
 }
@@ -252,8 +252,8 @@ unsigned AstEmitter::fill_run(Body& b, std::uint16_t cr,
 void AstEmitter::run_held(Body& b, const Run& held, const Run& over, int cr,
                           int heldMade) const {
   if (cr < 0) {
-    for (const std::uint16_t r : held) emit_owe(b, r, -1);
-    for (const std::uint16_t r : over) emit_owe(b, r, -1);
+    for (const std::uint16_t r : held) emit_deferred(b, r, -1);
+    for (const std::uint16_t r : over) emit_deferred(b, r, -1);
     return;
   }
   unsigned m;
@@ -270,7 +270,7 @@ void AstEmitter::run_held(Body& b, const Run& held, const Run& over, int cr,
   if (std::ranges::none_of(
           all, [&](std::uint16_t r) { return reg.rows[r].writes(); }))
     b.say("b.push_made(id, m" + std::to_string(m) + ");");
-  for (const std::uint16_t r : all) emit_owe(b, r, static_cast<int>(m));
+  for (const std::uint16_t r : all) emit_deferred(b, r, static_cast<int>(m));
 }
 
 AstEmitter::Body AstEmitter::entry_body(std::uint32_t e) const {
@@ -294,7 +294,7 @@ AstEmitter::Body AstEmitter::entry_body(std::uint32_t e) const {
     }
     if (made_row(added) >= 0) {
       // A caller making a node closes the inner scope first, so a child of
-      // the same type cannot claim its writes.
+      // the same type cannot take its writes.
       run_held(b, held, over, heldRow, heldMade);
       held = added;
       heldRow = made_row(held);
@@ -404,7 +404,7 @@ std::string AstEmitter::conv_addr(std::uint16_t slot) {
   return slot == kNoIndex ? std::string("nullptr") : "&kConvs[" + u(slot) + "]";
 }
 const char* AstEmitter::variant_flag(std::uint16_t f) const {
-  return reg.fields[f].nature == FieldNature::variant ? "true" : "false";
+  return reg.fields[f].content == FieldContent::variant ? "true" : "false";
 }
 
 std::string AstEmitter::applier_name(std::uint16_t t) const {
@@ -596,8 +596,8 @@ void AstEmitter::emit_conversions() {
       write(emit_table("constexpr ::std::uint8_t kTextInputs[]", inputs,
                        [](std::uint8_t c) { return u(c); }));
   }
-  // A call that read nothing is told from a token laid with no width only by
-  // its record, and only a converter of parts counts the difference.
+  // A call that read nothing differs from a token with no width only by its
+  // record, and only a converter of parts sees the difference.
   std::vector<std::uint8_t> records;
   for (const ConvPlan& p : plans) records.push_back(p.data);
   anyCalls = std::ranges::any_of(

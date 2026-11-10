@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Collect the LSP modules and their notices in dist/. The WASI Release build
-# lets SDK Clang run wasm-opt after linking; packaging copies modules as built.
+# Collects the LSP modules of a WASI Release build, as built, and their notices.
 #
 #   tools/wasm-dist.sh [build-dir] [dist-dir]   # default: build-wasi dist
 set -euo pipefail

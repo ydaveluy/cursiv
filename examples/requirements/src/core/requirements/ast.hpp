@@ -33,7 +33,7 @@ struct RequirementModel : cursiv::Extends<cursiv::AstNode> {
 // here resolves across documents, not just within this one.
 struct Test : cursiv::Extends<cursiv::AstNode> {
   string_view name;
-  string_view testFile;  // empty when the optional clause is absent
+  string_view testFile;  // empty when the clause is absent or written ""
   vector<reference<Requirement>> requirements;
   vector<reference<Environment>> environments;
 };

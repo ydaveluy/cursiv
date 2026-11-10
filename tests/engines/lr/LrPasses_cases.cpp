@@ -6,17 +6,17 @@
 #include <string_view>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/Check.hpp"
-#include "door/generated/G/Module.hpp"
-#include "engines/lr/DoorGrammar.hpp"
 #include "engines/lr/ParseChecks.hpp"
 #include "engines/lr/PassesGrammar.hpp"
+#include "engines/lr/SmallLanguagesGrammar.hpp"
 #include "passes/generated/G/Module.hpp"
+#include "smalllanguages/generated/G/Module.hpp"
 
 namespace lr_passes_cases {
 
@@ -79,9 +79,9 @@ void an_empty_production_reads_no_neighbour() {
   CHECK(repaired(*p, "m"));
 }
 
-// A cell the second token would decide keeps its fork when a reduce lands
-// in another lex mode. Where that mode reads the keyword's bytes as a name, the
-// keyword beats the name: the lexer elects one token for both readings.
+// A cell the second token would decide keeps its fork when a reduce goes
+// to another lex mode. Where that mode reads the keyword's bytes as a name, the
+// keyword beats the name: the lexer chooses one token for both readings.
 void a_peek_never_crosses_a_lex_mode() {
   CHECK(repaired("peek ", "b x in foo"));
   CHECK(clean("peek ", "b x foo bar"));
@@ -111,7 +111,6 @@ void a_peek_never_crosses_a_lex_mode() {
   }
 }
 
-// An unbounded repetition keeps its floor.
 void an_unbounded_repetition_keeps_its_floor() {
   CHECK(repaired("repeat ", "a"));
   CHECK(clean("repeat ", "a b"));
@@ -131,11 +130,9 @@ void run() {
 
 }  // namespace passes
 
-// A soft keyword: the word is a keyword in one alternative and a name in
-// another, and what follows decides -- once the grammar spells it as one
-// terminal on both sides. Against the plain identifier, the keyword takes
-// the spelling wherever the state reads it, as the reference's single lexer
-// would.
+// A soft keyword: a keyword in one alternative and a name in another, decided
+// by what follows, once the grammar spells it as one terminal. Against the
+// plain identifier, the keyword takes the spelling wherever the state reads it.
 namespace soft_keyword {
 
 namespace {
@@ -190,15 +187,15 @@ namespace rank_context {
 namespace {
 
 // `A`, `B`, or `-` where the parse complained, behind the grammar's keyword.
-char kid(const cursiv::Parser& p, std::string_view head,
-         std::string_view body) {
+char child(const cursiv::Parser& p, std::string_view head,
+           std::string_view body) {
   const std::string text = std::string(head) + std::string(body);
   const cursiv::ParseResult r = p.parse(text);
   if (!r.accepted || !r.diagnostics.empty()) return '-';
   const auto* const d = r.value_as<trank::ast::Doc>();
-  if (d == nullptr || d->kid == nullptr) return '-';
-  if (cursiv::ast_cast<trank::ast::AKid>(d->kid) != nullptr) return 'A';
-  if (cursiv::ast_cast<trank::ast::BKid>(d->kid) != nullptr) return 'B';
+  if (d == nullptr || d->child == nullptr) return '-';
+  if (cursiv::ast_cast<trank::ast::AChild>(d->child) != nullptr) return 'A';
+  if (cursiv::ast_cast<trank::ast::BChild>(d->child) != nullptr) return 'B';
   return '?';
 }
 
@@ -207,11 +204,11 @@ char kid(const cursiv::Parser& p, std::string_view head,
 void run() {
   const auto p = tpasses::generated::G::create_parser();
   for (const std::string_view head : {"plain ", "grown "}) {
-    CHECK(kid(*p, head, "x c") == 'A');
-    CHECK(kid(*p, head, "y c z") == 'B');
+    CHECK(child(*p, head, "x c") == 'A');
+    CHECK(child(*p, head, "y c z") == 'B');
   }
-  CHECK(kid(*p, "context ", "x c w") == 'A');
-  CHECK(kid(*p, "context ", "y c w") == 'B');
+  CHECK(child(*p, "context ", "x c w") == 'A');
+  CHECK(child(*p, "context ", "y c w") == 'B');
 }
 
 }  // namespace rank_context
@@ -219,49 +216,44 @@ void run() {
 // A look-ahead answers on the text, not on how many reductions an arm
 // performs before it reads: two arms the same token refutes tie, and the tie
 // is the grammar's preference.
-namespace settle_phase {
+namespace reduce_phase {
 
 namespace {
 
 namespace ast = tphase::ast;
 
-// The kid of the settle case's reading; the tree lives until the next call.
-const ast::Kid* kid_of(const cursiv::Parser& p, std::string_view body) {
+// The child of the decide case's reading; the tree lives until the next call.
+const ast::Child* child_of(const cursiv::Parser& p, std::string_view body) {
   static std::string text;
   static cursiv::ParseResult r;
-  text = "settle " + std::string(body);
+  text = "decide " + std::string(body);
   r = p.parse(text);
   CHECK(r.accepted);
   const auto* doc = r.value_as<ast::Doc>();
-  return doc != nullptr ? doc->kid : nullptr;
+  return doc != nullptr ? doc->child : nullptr;
 }
 
 }  // namespace
 
 void run() {
   const auto parser = tpasses::generated::G::create_parser();
-  CHECK(cursiv::ast_cast<ast::AKid>(kid_of(*parser, "c x y q")) != nullptr);
-  CHECK(cursiv::ast_cast<ast::Wrap>(kid_of(*parser, "c x y r")) != nullptr);
-  CHECK(cursiv::ast_cast<ast::AKid>(kid_of(*parser, "c x #")) != nullptr);
-  CHECK(cursiv::ast_cast<ast::AKid>(kid_of(*parser, "c x y #")) != nullptr);
+  CHECK(cursiv::ast_cast<ast::AChild>(child_of(*parser, "c x y q")) != nullptr);
+  CHECK(cursiv::ast_cast<ast::Wrap>(child_of(*parser, "c x y r")) != nullptr);
+  CHECK(cursiv::ast_cast<ast::AChild>(child_of(*parser, "c x #")) != nullptr);
+  CHECK(cursiv::ast_cast<ast::AChild>(child_of(*parser, "c x y #")) != nullptr);
 }
 
-}  // namespace settle_phase
+}  // namespace reduce_phase
 
-// The small languages of the door grammar, read through the parser.
+// The small languages of `SmallLanguagesGrammar.hpp`, read through the parser.
 
-// The walk reads to where the automaton dies and hands back the last place it
-// accepted. Where a longer spelling stays alive to the end of an unbounded
-// run and the shorter one wins anyway, every position re-reads that run: the
-// same bytes, once per byte. `a+b` beside `a` over sixteen thousand `a`
-// doubles four times for every doubling of the text.
-//
-// The reading is right, which is what this pins; the cost is not, and no memo
-// of how far the automaton can run from a place is kept.
+// The walk reads to where the automaton dies and returns the last accepting
+// place. Where a longer spelling stays alive over an unbounded run, each
+// position re-reads the run: quadratic. This pins the reading, not the cost.
 namespace maximal_munch {
 
 void run() {
-  const auto engine = tdoor::generated::G::create_parser();
+  const auto engine = tsmall::generated::G::create_parser();
   for (const std::size_t n : {std::size_t{64}, std::size_t{4000}}) {
     const std::string text = "munch " + std::string(n, 'a');
     const cursiv::ParseResult r = engine->parse(text);
@@ -284,14 +276,12 @@ void run() {
 }  // namespace maximal_munch
 
 // A run read eight bytes at a time answers a byte past 0x7F by its high bit
-// alone, the ranges being read off the low seven. A class holding some of
-// that half and not all is therefore not a shape the step can read: it would
-// stop on a byte of its own, and the jump past the byte loop means nothing
-// looks again.
+// alone. A class holding part of that half cannot use the step: it would stop
+// on its own byte, and nothing would look again.
 namespace high_byte {
 
 void run() {
-  const auto engine = tdoor::generated::G::create_parser();
+  const auto engine = tsmall::generated::G::create_parser();
   // Long enough for the eight-byte step to run at all.
   const std::string texts[] = {"abcdefghij",
                                "abcd\x85"
@@ -323,9 +313,9 @@ void run() {
 
 }  // namespace high_byte
 
-// A precedence table reads its operators from data rules: the step rides the
-// token the rule opens on, the trivia between its words is the skipper's, and
-// the rule's converter hands `op` its value.
+// A precedence table reads its operators from data rules: the precedence goes
+// on the token the rule opens on, the trivia between its words is the
+// skipper's, and the rule's converter hands `op` its value.
 namespace infix_op {
 
 namespace {
@@ -359,7 +349,7 @@ void one_operator_of_several_words(const cursiv::Parser& p,
 }
 
 void the_words_and_the_trivia_between_them() {
-  const auto p = tdoor::generated::G::create_parser();
+  const auto p = tsmall::generated::G::create_parser();
   one_operator_of_several_words(*p, "a is b", Cmp::is);
   one_operator_of_several_words(*p, "a is not b", Cmp::is_not);
   one_operator_of_several_words(*p, "a != b", Cmp::is_not);
@@ -370,8 +360,8 @@ void the_words_and_the_trivia_between_them() {
                                 Cmp::leq);
 }
 
-void the_step_rides_the_opening_token() {
-  const auto p = tdoor::generated::G::create_parser();
+void operators_sharing_a_first_word_are_told_apart() {
+  const auto p = tsmall::generated::G::create_parser();
   const cursiv::ParseResult r = p->parse("infix a is not b and c is less d");
   CHECK(r.accepted && r.diagnostics.empty());
   const Bin* root = as_bin(r.value);
@@ -394,7 +384,7 @@ void the_step_rides_the_opening_token() {
 
 void run() {
   the_words_and_the_trivia_between_them();
-  the_step_rides_the_opening_token();
+  operators_sharing_a_first_word_are_told_apart();
 }
 
 }  // namespace infix_op
@@ -437,7 +427,7 @@ void spell(const Expr* e, std::string& out) {
 }
 
 std::string read(std::string_view text) {
-  static const auto p = tdoor::generated::G::create_parser();
+  static const auto p = tsmall::generated::G::create_parser();
   const std::string doc = "after " + std::string(text);
   const cursiv::ParseResult r = p->parse(doc);
   if (!r.accepted || !r.diagnostics.empty()) return "<refused>";
@@ -474,7 +464,7 @@ void spell(const pa::Ty* t, std::string& out) {
 }
 
 std::string read(std::string_view text) {
-  static const auto p = tdoor::generated::G::create_parser();
+  static const auto p = tsmall::generated::G::create_parser();
   const std::string doc = "after " + std::string(text);
   const cursiv::ParseResult r = p->parse(doc);
   if (!r.accepted || !r.diagnostics.empty()) return "<refused>";
@@ -561,7 +551,7 @@ struct Walk {
 };
 
 std::string verdict(std::string_view text) {
-  static const auto p = tdoor::generated::G::create_parser();
+  static const auto p = tsmall::generated::G::create_parser();
   const std::string doc = "nest " + std::string(text);
   const cursiv::ParseResult r = p->parse(doc);
   if (!r.accepted) return "refused";
@@ -596,7 +586,7 @@ void long_postfix_chain_beside_a_fault() {
   std::string text = "x";
   for (unsigned i = 0; i < count; ++i) text += i % 2 == 0 ? ".a()" : ".b()";
   text += "; y = = ;";
-  const auto p = tdoor::generated::G::create_parser();
+  const auto p = tsmall::generated::G::create_parser();
   const std::string input = "nest " + text;
   const auto r = p->parse(input);
   CHECK(r.accepted && r.error == cursiv::AstBuildError::none);
@@ -620,7 +610,7 @@ void long_postfix_chain() {
   std::string text = "x";
   for (unsigned i = 0; i < count; ++i) text += i % 2 == 0 ? ".a()" : ".b()";
   text += ';';
-  const auto p = tdoor::generated::G::create_parser();
+  const auto p = tsmall::generated::G::create_parser();
   const std::string doc = "nest " + text;
   const auto r = p->parse(doc);
   CHECK(r.accepted && r.error == cursiv::AstBuildError::none);
@@ -675,7 +665,7 @@ using namespace tdatains::ast;
 
 // The data case's reading; its tree lives until the next call.
 cursiv::ParseResult parse(std::string_view text) {
-  static const auto p = tdoor::generated::G::create_parser();
+  static const auto p = tsmall::generated::G::create_parser();
   static std::string doc;
   doc = "data " + std::string(text);
   return p->parse(doc);
@@ -746,7 +736,8 @@ void row(const cursiv::Parser& p, const char* who, const std::string& body) {
 }  // namespace
 
 void run() {
-  const std::unique_ptr<cursiv::Parser> p = tdoor::generated::G::create_parser();
+  const std::unique_ptr<cursiv::Parser> p =
+      tsmall::generated::G::create_parser();
   row(*p, "plain", "k a end");
   row(*p, "plain", "k a done");
   for (const char* d : {"k { } end", "k { } done", "k { a } end",
@@ -770,7 +761,7 @@ void run() {
   passes::run();
   soft_keyword::run();
   rank_context::run();
-  settle_phase::run();
+  reduce_phase::run();
 }
 
 }  // namespace lr_passes_cases

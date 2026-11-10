@@ -1,5 +1,5 @@
 // Two parents override a terminal with different converters, and the child's
-// restatement states none: which value the terminal gives is left unmade.
+// restatement names none: the terminal's value type is left undecided.
 // expect LR: two parent grammars give this rule different converters
 #pragma once
 

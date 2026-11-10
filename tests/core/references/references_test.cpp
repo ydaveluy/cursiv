@@ -15,7 +15,6 @@
 #include <string_view>
 #include <tuple>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "core/references/NarrowedSiteGrammar.hpp"
@@ -28,7 +27,6 @@
 #include "cursiv/references/DefaultScopeComputation.hpp"
 #include "cursiv/references/DefaultScopeProvider.hpp"
 #include "cursiv/references/LinkingError.hpp"
-#include "cursiv/references/LinkingResult.hpp"
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
@@ -66,8 +64,7 @@
 #include "workspace/generated/Workspace/AstReflection.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
-// Pins what a name points at. Reading a reference resolves it -- the lazy
-// `ref` -- and the linker is what the read reaches.
+// What a name points at. Reading a reference resolves it, through the linker.
 namespace linker {
 
 namespace {
@@ -105,28 +102,6 @@ struct World : support::CoreWorkspace {
   }
 };
 
-void linking_results_distinguish_null_from_an_error() {
-  const cursiv::AstNodeDescriptionOrError empty = nullptr;
-  CHECK(empty.has_value() && *empty == nullptr);
-  cursiv::ReferenceInfo site{};
-  site.referenceText = "Absent";
-  const cursiv::AstNodeDescriptionOrError refused =
-      cursiv::LinkingError{"missing", site};
-  CHECK(!refused.has_value());
-  CHECK(refused.error().message == "missing");
-  CHECK(refused.error().info.referenceText == "Absent");
-  CHECK(support::throws<std::bad_variant_access>([&] {
-    (void)*refused;
-  }));
-
-  cursiv::AstNodeDescriptionsOrError plural =
-      std::vector<const cursiv::AstNodeDescription*>{nullptr};
-  const auto* const storage = plural->data();
-  const std::vector<const cursiv::AstNodeDescription*> moved = *std::move(plural);
-  CHECK(moved.size() == 1 && moved.front() == nullptr);
-  CHECK(moved.data() == storage);
-}
-
 void a_name_points_at_what_it_declares() {
   const World world;
   const auto document =
@@ -140,13 +115,12 @@ void a_name_points_at_what_it_declares() {
         std::optional<std::string_view>("String"));
 }
 
-// The read is what resolves, which is the whole point of the home: nothing
-// forced this one.
+// Reading the reference resolves it: nothing forced this one.
 void reading_a_reference_resolves_it() {
   const World world;
   const auto document =
       world.scoped("datatype String\nentity Person { age : String }\n");
-  // No `link` call at all -- only the linker planted, as a build would.
+  // No `link` call at all: only the linker set, as a build would.
   document->parseResult.references->linker = world.ws->linker.get();
 
   ws::ast::Feature& age = World::feature(*document);
@@ -161,7 +135,7 @@ void an_early_read_is_read_again() {
       "datatype String\nentity Person { age : String }\n", "file:///w/a.ws");
   world.shared.documents->addDocument(document);
   ws::ast::Feature& age = World::feature(*document);
-  // Before any linker is planted, then with one planted below the rung.
+  // Before any linker is set, then with one set below `ComputedScopes`.
   CHECK(age.type.get() == nullptr);
   CHECK(age.type.resolve() == cursiv::RefState::Unresolved);
   world.ws->linker->link(*document);
@@ -184,7 +158,7 @@ void an_unknown_name_resolves_to_nothing() {
 }
 
 // A scope provider may ask the public linker while resolving another site:
-// that nested lookup still returns the whole error, not only a failure state.
+// the nested lookup finds nothing, and the outer one still resolves.
 void a_nested_public_lookup_keeps_its_message() {
   World world;
   struct Nested final : cursiv::DefaultScopeProvider {
@@ -197,9 +171,8 @@ void a_nested_public_lookup_keeps_its_message() {
       if (name == "String") {
         auto missing = context;
         missing.referenceText = "Absent";
-        const auto answer = services.linker->getCandidate(missing);
-        CHECK(!answer.has_value());
-        if (!answer.has_value()) message = answer.error().message;
+        CHECK(services.linker->getCandidate(missing) == nullptr);
+        message = services.linker->createLinkingError(missing).message;
       }
       return DefaultScopeProvider::getScopeEntry(context, name);
     }
@@ -215,7 +188,7 @@ void a_nested_public_lookup_keeps_its_message() {
         "Could not resolve reference to Type named 'Absent'.");
 }
 
-// `unlink` clears every answer, and it is the one place that loop is written.
+// `unlink` clears every answer.
 void unlink_forgets_every_answer() {
   const World world;
   const auto document =
@@ -229,7 +202,6 @@ void unlink_forgets_every_answer() {
   CHECK(World::feature(*document).type.get() == nullptr);
 }
 
-// The primitive under it all, asked directly.
 void the_candidate_is_the_scope_s_first_fit() {
   const World world;
   const auto document =
@@ -238,18 +210,16 @@ void the_candidate_is_the_scope_s_first_fit() {
       site_of(ws::generated::Workspace::kAstMetaData,
               document->parseResult.references->handles.front(), "String");
 
-  const cursiv::AstNodeDescriptionOrError found =
+  const cursiv::AstNodeDescription* const found =
       world.ws->linker->getCandidate(site);
-  CHECK(found.has_value());
-  CHECK((*found)->name == "String");
+  CHECK(found != nullptr && found->name == "String");
 
-  // A site that spells nothing is an error, not an empty scope -- worded like
-  // any failed lookup, so one override rewords both.
+  // A site that spells nothing resolves to nothing, worded like any failure.
   cursiv::ReferenceInfo nameless = site;
   nameless.referenceText = {};
-  const auto refused = world.ws->linker->getCandidate(nameless);
-  CHECK(!refused.has_value());
-  CHECK(refused.error().message ==
+  CHECK(world.ws->linker->getCandidate(nameless) == nullptr);
+  CHECK(world.ws->linker->getCandidates(nameless).empty());
+  CHECK(world.ws->linker->createLinkingError(nameless).message ==
         "Could not resolve reference to Type named ''.");
 }
 
@@ -280,11 +250,9 @@ void plural_candidates_keep_first_identity_in_scope_order() {
   cursiv::ReferenceInfo site{};
   site.referenceText = "Same";
   const auto candidates = world.ws->linker->getCandidates(site);
-  CHECK(candidates.has_value());
-  if (!candidates) return;
-  CHECK(candidates->size() == 1024);
-  for (std::size_t i = 0; i < candidates->size(); ++i)
-    CHECK((*candidates)[i] == &rows->entries[i]);
+  CHECK(candidates.size() == 1024);
+  for (std::size_t i = 0; i < candidates.size(); ++i)
+    CHECK(candidates[i] == &rows->entries[i]);
 }
 
 // The sentence names the type the member wanted, which is the half that tells
@@ -298,14 +266,12 @@ void the_failure_names_the_expected_type() {
       site_of(ws::generated::Workspace::kAstMetaData,
               document->parseResult.references->handles.front(), "String");
 
-  const cursiv::AstNodeDescriptionOrError refused =
-      world.ws->linker->getCandidate(site);
-  CHECK(!refused.has_value());
-  CHECK(refused.error().message ==
+  CHECK(world.ws->linker->getCandidate(site) == nullptr);
+  const cursiv::LinkingError refused =
+      world.ws->linker->createLinkingError(site);
+  CHECK(refused.message ==
         "Could not resolve reference to Entity named 'String'.");
-  // `targetDescription` is for a name that did reach a description -- never
-  // here, where nothing answered at all.
-  CHECK(refused.error().targetDescription == nullptr);
+  CHECK(refused.targetDescription == nullptr);
 }
 
 // A name nothing declares reads the same way, and that is deliberate: the
@@ -317,10 +283,8 @@ void a_name_nothing_declares_reads_the_same() {
       site_of(ws::generated::Workspace::kAstMetaData,
               document->parseResult.references->handles.front(), "Absent");
 
-  const cursiv::AstNodeDescriptionOrError refused =
-      world.ws->linker->getCandidate(site);
-  CHECK(!refused.has_value());
-  CHECK(refused.error().message ==
+  CHECK(world.ws->linker->getCandidate(site) == nullptr);
+  CHECK(world.ws->linker->createLinkingError(site).message ==
         "Could not resolve reference to Entity named 'Absent'.");
 }
 
@@ -351,13 +315,11 @@ void the_policy_decides_what_a_reference_reaches() {
   const cursiv::ReferenceInfo site =
       site_of(ws::generated::Workspace::kAstMetaData,
               document->parseResult.references->handles.front(), "StrinG");
-  const cursiv::AstNodeDescriptionOrError one =
+  const cursiv::AstNodeDescription* const one =
       world.ws->linker->getCandidate(site);
-  const cursiv::AstNodeDescriptionsOrError all =
-      world.ws->linker->getCandidates(site);
-  CHECK(one.has_value() && all.has_value());
-  CHECK(!all->empty() && all->front() == *one);
-  CHECK((*one)->name == "String");
+  const auto all = world.ws->linker->getCandidates(site);
+  CHECK(one != nullptr && !all.empty() && all.front() == one);
+  CHECK(one != nullptr && one->name == "String");
 }
 
 // An alias-chasing provider: its answer depends on the candidate's own
@@ -505,7 +467,7 @@ void a_throwing_provider_stays_on_its_reference() {
 
 // Moves the site's document past `ComputedScopes` while it looks, as the
 // worker scoping that document does beside a read, and finds nothing.
-struct RungMovingProvider final : cursiv::DefaultScopeProvider {
+struct StateMovingProvider final : cursiv::DefaultScopeProvider {
   using DefaultScopeProvider::DefaultScopeProvider;
   cursiv::Document* moved = nullptr;
 
@@ -516,15 +478,15 @@ struct RungMovingProvider final : cursiv::DefaultScopeProvider {
   }
 };
 
-// Judged on the rung the read began at: a failure that started below the
-// scopes is not kept, whatever rung the document reached meanwhile.
+// Judged on the state the read began at: a failure that started below
+// `ComputedScopes` is not kept, whatever state the document reached meanwhile.
 void an_early_failure_is_judged_where_the_read_began() {
   World world;
   const auto document = world.shared.documentFactory->fromString(
       "datatype String\nentity Person { age : String }\n", "file:///w/a.ws");
   world.shared.documents->addDocument(document);
   document->state = cursiv::DocumentState::IndexedContent;
-  auto provider = std::make_unique<RungMovingProvider>(*world.ws);
+  auto provider = std::make_unique<StateMovingProvider>(*world.ws);
   provider->moved = document.get();
   world.ws->scopeProvider = std::move(provider);
   document->parseResult.references->linker = world.ws->linker.get();
@@ -560,10 +522,7 @@ void a_candidate_is_answered_once() {
   const cursiv::ReferenceInfo site =
       site_of(ws::generated::Workspace::kAstMetaData,
               document->parseResult.references->handles.front(), "String");
-  const cursiv::AstNodeDescriptionsOrError all =
-      world.ws->linker->getCandidates(site);
-  CHECK(all.has_value());
-  CHECK(all->size() == 1);
+  CHECK(world.ws->linker->getCandidates(site).size() == 1);
 }
 
 // A lookup before the local symbols exist fails, and the sink says so.
@@ -702,7 +661,7 @@ void a_name_only_another_class_holds_is_not_found() {
   CHECK(document->parseResult.references->anyUnresolved());
 }
 
-// The same site with a fitting name: the narrowing resolves as it always did.
+// The same site with a fitting name: the narrowed site resolves.
 void a_narrow_that_fits_still_resolves() {
   const NsWorld world;
   const auto document = world.scoped("one a two b use a");
@@ -729,7 +688,7 @@ void a_failed_narrowing_draws_no_edge() {
   CHECK(!seen);
 }
 
-// The plural door looks up its class only too.
+// A multi reference site also looks up its own class only.
 void a_multi_site_looks_up_its_class_only() {
   const NsWorld world;
   const auto fits = world.scoped("two b one b use b all b");
@@ -791,20 +750,20 @@ void the_diagnostic_names_the_site_s_class() {
   CHECK(has(diagnostics, "not that kind: 'b'"));
 }
 
-// Both resolution doors honour a derived linker's methods and its error
-// hook, even though the reference itself keeps only the failure state.
+// Both lookups use a derived linker's methods, and every failed reference's
+// diagnostic is worded by its `createLinkingError`, which linking never calls.
 void a_derived_linker_keeps_its_lookup_and_error_hooks() {
   NsWorld world;
   struct Hooked final : cursiv::DefaultLinker {
     using DefaultLinker::DefaultLinker;
     mutable unsigned single = 0, plural = 0, errors = 0;
 
-    cursiv::AstNodeDescriptionOrError getCandidate(
+    const cursiv::AstNodeDescription* getCandidate(
         const cursiv::ReferenceInfo& site) const override {
       ++single;
       return DefaultLinker::getCandidate(site);
     }
-    cursiv::AstNodeDescriptionsOrError getCandidates(
+    std::vector<const cursiv::AstNodeDescription*> getCandidates(
         const cursiv::ReferenceInfo& site) const override {
       ++plural;
       return DefaultLinker::getCandidates(site);
@@ -826,31 +785,18 @@ void a_derived_linker_keeps_its_lookup_and_error_hooks() {
   Use& use = NsWorld::use(*document);
   CHECK(use.what.resolve() == cursiv::RefState::ErrorNotFound);
   CHECK(use.all.resolve() == cursiv::RefState::ErrorNotFound);
-  CHECK(hooked->single == 1 && hooked->plural == 1 && hooked->errors == 2);
+  CHECK(hooked->single == 1 && hooked->plural == 1 && hooked->errors == 0);
 
-  cursiv::ReferenceInfo site{
-      .container = &use,
-      .document = document.get(),
-      .referenceText = "b",
-      .property = "what",
-      .index = std::nullopt,
-      .reference =
-          world.lang->astReflection->referenceIndexOf(use.type, "what"),
-      .narrow = cursiv::detail::RefAccess::narrow(use.what)};
-  const auto single = world.lang->linker->getCandidate(site);
-  CHECK(!single.has_value());
-  if (!single.has_value())
-    CHECK(single.error().message == "custom: Expecting Kind1 named 'b'.");
-  site.reference = world.lang->astReflection->referenceIndexOf(use.type, "all");
-  site.property = "all";
-  site.narrow = cursiv::detail::RefAccess::narrow(use.all);
-  const auto plural = world.lang->linker->getCandidates(site);
-  CHECK(!plural.has_value());
-  if (!plural.has_value())
-    CHECK(plural.error().message == "custom: Expecting Kind1 named 'b'.");
+  std::vector<cursiv::Diagnostic> diagnostics;
+  world.lang->documentValidator->validateDocument(
+      *document, diagnostics, cursiv::ValidationOptions{}, {});
+  CHECK(hooked->errors == 2);
+  CHECK(std::ranges::count_if(diagnostics, [](const cursiv::Diagnostic& d) {
+          return d.message == "custom: Expecting Kind1 named 'b'.";
+        }) == 2);
 }
 
-// A premature default link still reports both failed doors at the sink.
+// A default link before the scopes reports both failed lookups to the sink.
 void early_single_and_multi_failures_are_said() {
   NsWorld world;
   const auto& sunk = support::capture_observations(world.shared);
@@ -870,7 +816,6 @@ void early_single_and_multi_failures_are_said() {
 }  // namespace
 
 void run() {
-  linking_results_distinguish_null_from_an_error();
   a_name_points_at_what_it_declares();
   reading_a_reference_resolves_it();
   an_unknown_name_resolves_to_nothing();
@@ -904,16 +849,13 @@ void run() {
 
 }  // namespace linker
 
-// Pins the declared name of a node and where it was written. The dispatch is
-// typed because reading a member needs the member's type; the interface it
-// answers through is not.
+// The declared name of a node and where it was written.
 namespace name_provider {
 
 namespace {
 
 // A container, because `getNameNode` asks the grammar which record wrote the
-// name. `getName` still asks it nothing -- that is what keeps this service off
-// a template.
+// name.
 cursiv::CoreServices& language() {
   static cursiv::SharedCoreServices shared;
   static cursiv::CoreServices services(shared);
@@ -980,7 +922,7 @@ void the_name_node_is_the_text_it_was_read_from() {
   const std::string_view src = p.document.textDocument().getText();
   const cursiv::AstNode* const person = find_named(p.result, "Person");
 
-  // The document is found by the climb; passing it explicitly is the same
+  // The document is found by the walk up; passing it explicitly is the same
   // answer, one lookup cheaper.
   const auto nameNode = provider().getNameNode(*person);
   const auto passed = provider().getNameNode(*person, &p.document);
@@ -1032,7 +974,7 @@ void run() {
 
 }  // namespace name_provider
 
-// Pins navigation over a multi reference: a declaration one targets stands
+// Navigation over a multi reference: a declaration one targets stands
 // for its whole overload set -- in the answer under the caret, and in the
 // rows find-references emits.
 namespace references {
@@ -1041,8 +983,7 @@ namespace {
 
 namespace ct = cursiv::test;
 
-// The LSP storey too: what the editor is answered about a group is the same
-// fact, one floor up.
+// With LSP services too: the editor gets the same answer about a group.
 struct World : support::World<cursiv::SharedLspServices> {
   cursiv::LspServices* mref = &support::add_language<cursiv::LspServices>(
       shared, {"multiref", {".mref"}, {}},
@@ -1132,7 +1073,7 @@ struct WiderSiteReferences final : cursiv::DocumentReferences {
 };
 
 // A multi reference is told apart by the whole span of its name: another one
-// that starts at the same offset lends none of its targets to the group.
+// that starts at the same offset adds none of its targets to the group.
 void a_group_is_its_own_sites_targets() {
   World world;
   cursiv::Document* const document = world.built("SELECT t FROM t, t");
@@ -1260,7 +1201,7 @@ void the_group_does_not_leak_into_plain_references() {
 
 // Two documents submitted together take the builder's real pool path
 // (`DefaultDocumentBuilder`'s `parallelFor`), not the single-document case
-// every lane of this group otherwise takes: each keeps its own group.
+// every other test here takes: each keeps its own group.
 void two_documents_built_together_keep_their_own_group() {
   const World world;
   auto docA = world.shared.documentFactory->fromString("SELECT t FROM t, t",
@@ -1280,6 +1221,30 @@ void two_documents_built_together_keep_their_own_group() {
   const cursiv::Declaration foundB =
       world.mref->references->findDeclaration(*b, 14);
   CHECK(foundB.targets.size() == 3);
+}
+
+// A site every target of a multi reference reaches is one row: the first
+// target's, however many share it.
+void a_shared_site_keeps_the_first_target_s_row() {
+  const World world;
+  std::string text = "SELECT t FROM t";
+  for (int i = 0; i < 39; ++i) text += ", t";
+  cursiv::Document* const document = world.built(std::move(text));
+  const cursiv::Declaration found =
+      world.mref->references->findDeclaration(*document, 7);
+  CHECK(found.targets.size() == 40);
+  if (found.targets.size() != 40) return;
+  const std::vector<cursiv::ReferenceDescription> rows =
+      cursiv::detail::collect_references_per_declaration(
+          *world.mref->references, found.targets,
+          [](const cursiv::AstNode&) {
+            return cursiv::FindReferencesOptions{};
+          },
+          cursiv::kNoCancel);
+  CHECK(rows.size() == 1);
+  if (rows.size() != 1) return;
+  CHECK(rows[0].sourceBegin == 7);
+  CHECK(rows[0].targetSymbolId == found.targets.front()->cstNodeId);
 }
 
 void a_multi_reference_tracks_new_global_candidates(bool ignoreCase) {
@@ -1448,10 +1413,6 @@ struct ExportPair final : cursiv::DefaultScopeComputation {
   }
 };
 
-// `same;same`: an `Outer` and its `Inner` are cut from one CST record, so
-// they share a symbol, and are still two nodes. The multi reference holds
-// both; find-references lists their one declaration site and their one
-// reference once each.
 void an_unresolved_reference_names_every_type_it_accepts() {
   support::World<> world;
   (void)support::add_language<cursiv::CoreServices>(
@@ -1467,6 +1428,9 @@ void an_unresolved_reference_names_every_type_it_accepts() {
         "Could not resolve reference to Outer or Inner named 'absent'.");
 }
 
+// `same;same`: an `Outer` and its `Inner` share one CST record and symbol,
+// and are still two nodes. Find-references lists their one declaration site
+// and their one reference once each.
 void two_nodes_on_one_record_are_two_targets() {
   support::World<> world;
   const cursiv::CoreServices* const srm =
@@ -1509,10 +1473,9 @@ void two_nodes_on_one_record_are_two_targets() {
   }
 }
 
-// A window's visit is the whole table's, kept to the names that touch it --
-// that begin at or before its end and end at or after its start -- in the same
-// order: from every offset, the end of the text included, over resolved,
-// failed, multi, qualified and repaired names. A caret is a window of no width.
+// A window's visit is the whole table's, kept to the names that touch it, in
+// the same order: from every offset, over resolved, failed, multi, qualified
+// and repaired names. A caret is a window of no width.
 void a_window_visits_what_touches_it(const cursiv::Document& document) {
   using Seen = std::vector<
       std::tuple<bool, cursiv::TextOffset, cursiv::TextOffset, const void*>>;
@@ -1606,6 +1569,7 @@ void run() {
   a_declaration_stands_for_its_group(false);
   the_group_does_not_leak_into_plain_references();
   two_documents_built_together_keep_their_own_group();
+  a_shared_site_keeps_the_first_target_s_row();
   a_multi_reference_tracks_new_global_candidates(false);
   a_multi_reference_tracks_new_global_candidates(true);
   a_throwing_provider_stays_on_its_multi_reference(false);
@@ -1616,15 +1580,15 @@ void run() {
 
 }  // namespace references
 
-// Pins the two symbol tables one document derives from its own tree: what it
+// The two symbol tables one document derives from its own tree: what it
 // shows the world, and what is visible from inside it.
 namespace scope_computation {
 
 namespace {
 
 struct World : support::CoreWorkspace {
-  // Stored, because a description names its document by id and the store is
-  // what mints one: an unmanaged document describes nothing resolvable.
+  // Stored, because a description names its document by id and the store
+  // gives the id: an unmanaged document describes nothing resolvable.
   std::shared_ptr<cursiv::Document> parse(std::string text) const {
     auto document = shared.documentFactory->fromString(std::move(text),
                                                        "file:///w/a.ws");
@@ -1640,8 +1604,7 @@ bool has(const std::vector<cursiv::AstNodeDescription>& all,
   return false;
 }
 
-// A document shows the world its root's direct children -- not what is nested
-// inside them.
+// A document exports its types, not the features nested inside them.
 void exported_symbols_are_the_top_level_ones() {
   const World world;
   const auto document =
@@ -1651,7 +1614,7 @@ void exported_symbols_are_the_top_level_ones() {
 
   CHECK(has(exported, "String"));
   CHECK(has(exported, "Person"));
-  // `age` is nested inside `Person`: another document cannot see it.
+  // `age` is a feature of `Person`: another document cannot see it.
   CHECK(!has(exported, "age"));
 
   // Every description names its document and carries a live node.
@@ -1674,7 +1637,7 @@ void local_symbols_are_bound_to_their_container() {
 
   CHECK(!symbols.empty());
   const cursiv::AstNode* const root = document->parseResult.value;
-  // One name's entries at one container, through the sealed name table.
+  // One name's entries at one container, through the built name table.
   const auto at = [&](const cursiv::AstNode* container, std::string_view name) {
     std::vector<const cursiv::AstNodeDescription*> found;
     symbols.find(container, name, cursiv::LocalSymbols::hash_name(name))
@@ -1737,7 +1700,7 @@ void run() {
 
 }  // namespace scope_computation
 
-// Pins what one reference site can see. The site and the name looked up in it
+// What one reference site can see. The site and the name looked up in it
 // are separate: a completion asks the same site for many prefixes.
 namespace scope_provider {
 
@@ -1792,7 +1755,7 @@ void a_site_describes_itself_without_a_name() {
   CHECK(found->node != nullptr);
 }
 
-// The same site, many prefixes -- which is what a content assist does, and
+// The same site, many prefixes, which is what completion does, and
 // why the name is not part of the site. A site's index is the key to
 // everything the grammar knows about the member.
 void a_site_index_says_what_the_member_is() {
@@ -1861,7 +1824,7 @@ void a_site_can_be_filled_by_hand() {
   CHECK(!world.visible(typed).empty());
 }
 
-// `Feature::type` is `reference<DataType, Entity>`: both families resolve. A
+// `Feature::type` accepts a DataType and an Entity: both families resolve. A
 // filter naming only the first would silently refuse the second.
 void the_whole_candidate_set_is_honoured() {
   const World world;
@@ -1967,8 +1930,8 @@ void an_insensitive_provider_matches_across_case() {
   CHECK(found->name == "String");  // the spelling stays the author's
 }
 
-// Shadowing follows the policy: the closest fold-equal declaration wins,
-// whatever its case -- exactly what an exact name does today.
+// Shadowing follows the policy: the closest declaration equal once folded
+// wins, whatever its case, as the closest exact name does.
 void shadowing_respects_the_policy() {
   const World world;
   const auto document = world.scoped(
@@ -2036,10 +1999,9 @@ void the_named_visit_leads_with_the_entry() {
       context, "", [](const cursiv::AstNodeDescription&) { return false; }));
 }
 
-// The no-name door enumerates: what the site currently spells is a fact about
-// the text, not a filter on what may stand there -- filtering by it would hide
-// every other completion.
-void the_no_name_door_ignores_what_the_site_spells() {
+// Asked without a name, the provider enumerates: what the site spells is a
+// fact about the text, not a filter, which would hide every other completion.
+void a_lookup_without_a_name_ignores_what_the_site_spells() {
   const World world;
   const auto document = world.scoped(
       "datatype String\ndatatype Number\nentity Person { age : String }\n");
@@ -2048,7 +2010,7 @@ void the_no_name_door_ignores_what_the_site_spells() {
   cursiv::ReferenceInfo context = site(*document);
   context.referenceText = "String";
   const std::vector<std::string> names = world.visible(context);
-  // Once from the local climb, once from the global index: a spelled site
+  // Once from the local walk, once from the global index: a spelled site
   // must not shrink the global arm to its own text.
   CHECK(std::ranges::count(names, std::string("Number")) == 2);
   CHECK(std::ranges::count(names, std::string("String")) == 2);
@@ -2071,7 +2033,7 @@ void run() {
   shadowing_respects_the_policy();
   an_exact_name_passes_a_folded_homonym();
   the_named_visit_leads_with_the_entry();
-  the_no_name_door_ignores_what_the_site_spells();
+  a_lookup_without_a_name_ignores_what_the_site_spells();
 }
 
 }  // namespace scope_provider

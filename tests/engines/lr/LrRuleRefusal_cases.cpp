@@ -91,7 +91,7 @@ void run() {
   CHECK(!offers(*p, "ask |x", 0, "if"));
   CHECK(!offers(*p, "ask |\xc3\xa9", 0, "if"));
   CHECK(!offers(*p, "ask |\xf0\x9d\x92\xb3", 0, "if"));
-  // A named terminal has no bytes yet, but its body settles a condition:
+  // A named terminal has no bytes yet, but its body decides a condition:
   // the terminal the condition names is refused, one that starts as it
   // does may still be a token it reads whole.
   CHECK(names(*p, "put |", "BRACED"));

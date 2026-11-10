@@ -1,10 +1,6 @@
-// A condition that may read the token in hand over a run of terminals with no
-// end. A parse reads such a run round by round and keeps each round's answer,
-// so tests at each token of a long run read it once, unless it stands inside
-// another repetition or a round of it may read no token: each test then reads
-// to the run's end, and parsing grows with the square of the run. Either way a
-// completion cannot step over what the condition decided, and replays every
-// token before the caret.
+// A condition that may read over a run of terminals with no end. Inside
+// another repetition, or where a round may read no token, parsing grows with
+// the square of the run; a completion always replays the run.
 #pragma once
 
 #include <cstdint>
@@ -38,11 +34,11 @@ bool phrase_advances(const Cfg& c, std::uint16_t node) {
       return true;
     case LexKind::seq:
       for (unsigned i = 0; i < e.b; ++i)
-        if (phrase_advances(c, c.lexKid[e.a + i])) return true;
+        if (phrase_advances(c, c.lexChild[e.a + i])) return true;
       return false;
     case LexKind::alt:
       for (unsigned i = 0; i < e.b; ++i)
-        if (!phrase_advances(c, c.lexKid[e.a + i])) return false;
+        if (!phrase_advances(c, c.lexChild[e.a + i])) return false;
       return e.b != 0;
     case LexKind::rep:
       return e.min != 0 && e.max != 0 && phrase_advances(c, e.a);
@@ -66,7 +62,7 @@ bool phrase_keeps_runs(const Cfg& c, std::uint16_t node) {
   if (const LexNode& e = c.lex[node];
       e.kind == LexKind::seq || e.kind == LexKind::alt) {
     for (unsigned i = 0; i < e.b; ++i)
-      if (phrase_keeps_runs(c, c.lexKid[e.a + i])) return true;
+      if (phrase_keeps_runs(c, c.lexChild[e.a + i])) return true;
     return false;
   }
   return phrase_kept_run(c, node);
@@ -82,7 +78,7 @@ void phrase_parts(const Cfg& c, std::uint16_t node,
     out.push_back(node);
     return;
   }
-  for (unsigned i = 0; i < e.b; ++i) phrase_parts(c, c.lexKid[e.a + i], out);
+  for (unsigned i = 0; i < e.b; ++i) phrase_parts(c, c.lexChild[e.a + i], out);
 }
 
 // What condition `cond` reads without end, as `rule` asks it: one finding per

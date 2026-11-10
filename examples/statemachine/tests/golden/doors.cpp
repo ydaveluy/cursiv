@@ -40,6 +40,9 @@ public:
         std::cout << "[" << state->get_name() << "]" << std::endl;
     }
 
+    Doors(const Doors&) = delete;
+    Doors& operator=(const Doors&) = delete;
+
     ~Doors() {
         if (state != nullptr) {
             delete state;

@@ -8,10 +8,9 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 
-// The formatter slot: optional, with no default, so a language with no
-// formatter simply does not format. The contract is edits over the
-// whitespace between tokens, never a rewrite -- an already-shaped document
-// answers an empty list, not an error.
+// Optional, with no default: a language with no formatter does not format.
+// Edits change only the whitespace between tokens; a shaped document answers
+// an empty list.
 
 namespace cursiv {
 
@@ -19,20 +18,15 @@ class Formatter {
  public:
   virtual ~Formatter() noexcept = default;
 
-  // Precondition: called under the workspace read lock. A format computes edits
-  // and hands them to the client, which applies them and sends the `didChange`
-  // back; the workspace is not written here.
+  // Precondition: called under the workspace read lock. Returns edits for the
+  // client; the workspace is not written.
   [[nodiscard]] virtual std::vector<lsp::TextEdit> formatDocument(
       const Document& document, const lsp::DocumentFormattingParams& params,
       const CancellationToken& = {}) const = 0;
 
-  // The same rules restricted to the lines of a range. Every construction with
-  // a line in the range gives its rules, one that starts before the range too,
-  // so every selected line is formatted. An edit is kept when its lines lie
-  // within the range's lines or cover the range's last line; an edit that
-  // starts before the range and ends before its last line is left out. The
-  // range's columns do not narrow it, and a kept gap is rewritten whole, so an
-  // edit may reach past the range.
+  // The same rules for the lines of a range. An edit is kept when its lines lie
+  // within the range's lines or cover its last line; columns do not narrow the
+  // range, so an edit may reach past it.
   [[nodiscard]] virtual std::vector<lsp::TextEdit> formatDocumentRange(
       const Document& document,
       const lsp::DocumentRangeFormattingParams& params,

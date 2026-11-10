@@ -1,10 +1,8 @@
 #pragma once
 
-// One boolean read three ways: a terminal whose alternatives each give a
-// constant, a terminal converted whole, and the data rule reading the same
-// words. A value follows a name directly, so a caret glued to the name is
-// asked about it, and a line comment can end right before one. A size is a
-// terminal of words in nested choices, keywords of either case.
+// One boolean read three ways: a terminal of constant alternatives, a
+// terminal converted whole, and a data rule. A size is a terminal of words in
+// nested choices, keywords of either case.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

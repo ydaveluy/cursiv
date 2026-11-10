@@ -117,7 +117,7 @@ struct LrTableEmitter : TextBuilder {
     f("textLen", t.textLen, d.textLen);
     f("delim", t.delim, d.delim);
     f("joins", t.joins, d.joins);
-    f("laid", t.laid, d.laid);
+    f("synthetic", t.synthetic, d.synthetic);
     f("cond", t.cond, d.cond);
     f("refuses", t.refuses, d.refuses);
     cell(f);
@@ -159,7 +159,7 @@ struct LrTableEmitter : TextBuilder {
           static_cast<std::uint32_t>(r.hi), "u}");
   }
   void cell(const LrExpect& e) {
-    write("{.feature=", e.feature, ",.site=", e.site, ",.landing=", e.landing,
+    write("{.feature=", e.feature, ",.site=", e.site, ",.toState=", e.toState,
           ",.entered=", e.entered, "}");
   }
 
@@ -172,7 +172,7 @@ struct LrTableEmitter : TextBuilder {
       cell(src[i]);
     }
   }
-  // `member = {{cells}};` -- `n` cells of the source, the rest defaulted.
+  // `member = {{cells}};`: `n` cells of the source, the rest defaulted.
   template <class Src>
   void array(std::string_view member, const Src& src, std::size_t n,
              std::size_t have) {
@@ -218,7 +218,7 @@ struct LrTableEmitter : TextBuilder {
           ",.followSets=", S.followSets, ",.closeSets=", S.closeSets);
     field("dfaRelayResSets", S.dfaRelayResSets);
     field("accStands", S.accStands);
-    field("accTiers", S.accTiers);
+    field("accPriorities", S.accPriorities);
     field("errModes", S.errModes);
     if (S.indented) write(",.indented=true");
     field("insertLists", S.insertLists);
@@ -246,7 +246,8 @@ struct LrTableEmitter : TextBuilder {
     array("accBoundBase", a.accBoundBase, S.dfa + 1u);
     array("accBound", a.accBound, S.accBounds);
     if (S.accStands != 0) array("accStand", a.accStand, S.accStands);
-    if (S.accTiers != 0) array("accTier", a.accTier, S.accTiers);
+    if (S.accPriorities != 0)
+      array("accPriority", a.accPriority, S.accPriorities);
     array("soleReduce", a.soleReduce, S.states);
     array("readsToken", a.readsToken, S.states);
     if (S.gotoClasses) array("gotoClass", a.gotoClass, S.states);
@@ -412,7 +413,7 @@ struct LrTableEmitter : TextBuilder {
     array("rowLhs", a.rowLhs);
     emit_pool_member("typoReach", a.typoReach);
     array("lexBodies", a.lexBodies);
-    array("lexOwed", a.lexOwed);
+    array("lexBodyTerms", a.lexBodyTerms);
     array("lexOpeners", a.lexOpeners);
     emit_pool_member("after", a.after);
     emit_pool_member("modeWant", a.modeWant);
@@ -447,7 +448,7 @@ struct LrTableEmitter : TextBuilder {
                       unsigned absent) {
     const auto row = concat("::std::uint", matrix.row_bits(), "_t");
     const auto index = concat("::std::uint", matrix.index_bits(), "_t");
-    // A layer the matrix does not lay is an empty span.
+    // A layer the matrix does not fill is an empty span.
     const auto layer = [&](std::string_view type, std::string_view part,
                            const std::vector<std::uint32_t>& cells) {
       if (cells.empty()) return std::string("{}");
@@ -485,8 +486,8 @@ struct LrTableEmitter : TextBuilder {
          p.countBits, "u};");
   }
 
-  // Guard `k` lays at `kGuardAt[k]` its condition count, the conditions and a
-  // landing per outcome; `kHeld` holds per condition a bit per state, set
+  // Guard `k` stores at `kGuardAt[k]` its condition count, the conditions and a
+  // target per outcome; `kHeld` holds per condition a bit per state, set
   // where its tag says the condition held or says nothing of it.
   void emit_guards() {
     if (a.guards.empty()) return;

@@ -1,16 +1,18 @@
 // The scalar a UTF-8 sequence encodes, read once for every reader of a text:
-// well-formed sequences only, so the lexer, a guard and a spelling agree.
+// well-formed sequences only, so the lexer, a guard and a spelling agree; and
+// `quote`, a text spelled for people to read.
 #pragma once
 
 #include <cstddef>
 #include <string>
+#include <string_view>
 
 namespace cursiv {
 
 inline constexpr char32_t kNoScalar = 0xFFFFFFFFu;
 
 // The scalar at `p` and, in `len`, the bytes it takes; `kNoScalar` and no
-// bytes where they are not one -- a stray continuation, a truncated tail, an
+// bytes where they are not one -- a lone continuation, a truncated tail, an
 // overlong form, a surrogate.
 constexpr char32_t scalar_at(const char* p, std::size_t avail,
                              std::size_t& len) {
@@ -50,6 +52,43 @@ inline void append_scalar(std::string& out, char32_t cp) {
     out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
   }
   out += static_cast<char>(0x80 | (cp & 0x3F));
+}
+
+// `text` between two `q`s, as every message shows a text: C++ escapes, and
+// any other control byte in octal, which no digit after it extends.
+inline std::string quote(std::string_view text, char q = '\'') {
+  std::string out(1, q);
+  for (const char ch : text) {
+    if (ch == q) {
+      out += '\\';
+      out += ch;
+      continue;
+    }
+    switch (ch) {
+      case '\\':
+        out += R"(\\)";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      case '\t':
+        out += "\\t";
+        break;
+      default:
+        if (const auto byte = static_cast<unsigned char>(ch);
+            byte < 32 || byte == 127)
+          out += {'\\', static_cast<char>('0' + (byte >> 6)),
+                  static_cast<char>('0' + ((byte >> 3) & 7)),
+                  static_cast<char>('0' + (byte & 7))};
+        else
+          out += ch;
+    }
+  }
+  out += q;
+  return out;
 }
 
 }  // namespace cursiv

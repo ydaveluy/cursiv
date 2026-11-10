@@ -1,7 +1,6 @@
-// A misspelling is repaired by re-reading, never by rewriting: a cold search
-// over the mode's DFA -- a bounded edit distance -- says how far each terminal
-// the point admits would have reached, at what price, and the author's own
-// span becomes its leaf.
+// A misspelling is repaired by re-reading, never by rewriting: a cold, bounded
+// edit-distance search over the mode's DFA says how far each terminal the point
+// admits would reach, and at what cost.
 #pragma once
 
 #include <array>
@@ -26,13 +25,11 @@ template <const auto& T>
 struct LlTypoTape : TypoTape<T> {
   // The terminals the point admits.
   std::uint64_t* want;
-  const CancellationPoll* stop = nullptr;
 
   std::span<const std::uint16_t> successors(std::uint16_t s) const {
     return typo_successors(T.typoSuccBase, T.typoSucc, s);
   }
   std::uint16_t next_byte(std::uint16_t s, unsigned char b) const {
-    if (stop != nullptr) stop->poll();
     ++*this->read;
     return T.next_byte(s, b);
   }
@@ -48,9 +45,9 @@ struct LlTypoTape : TypoTape<T> {
     }
     return any;
   }
-  // A word a keyword reserved is not a name, whatever the walk paid for it.
+  // A word a keyword reserved is not a name, whatever the walk cost.
   template <class Emit>
-  void owed(std::uint16_t s, TextOffset p, Emit emit) const {
+  void accepted(std::uint16_t s, TextOffset p, Emit emit) const {
     if (T.dfaAccept[s] == 0) return;
     const LlTermRow acc = T.dfa_acc_set(s);
     const LlTermRow res = reserved(s, p);
@@ -59,7 +56,7 @@ struct LlTypoTape : TypoTape<T> {
            bits &= bits - 1u) {
         const auto t =
             static_cast<SymbolId>(k * 64u + std::countr_zero(bits));
-        if (this->closed(s, t, p) && !this->trails(t, p)) emit(t);
+        if (this->closed(s, t, p) && !this->refused_after(t, p)) emit(t);
       }
   }
   LlTermRow reserved(std::uint16_t s, TextOffset p) const {
@@ -79,11 +76,8 @@ struct LlTypoTape : TypoTape<T> {
 };
 
 // The re-readings of a misspelling from `at`, over the terminals `want` names
-// under `mode`, added to `found`; `read` counts the bytes the walks read. The
-// caller already read the ordinary token, which ends at `plain`, and bounded
-// the section. All paths and alphabets share `most`; hitting a horizon
-// reports an incomplete set of candidates through `cut`. `scratch` keeps the
-// walk's points, or null.
+// under `mode`, added to `found`. The ordinary token ends at `plain`. All walks
+// share `most`; `cut` says a horizon left the set incomplete.
 template <const auto& T>
 inline void ll_rescan_within(const LlContext& c, std::uint16_t mode,
                              const std::uint64_t* want, TextOffset at,
@@ -98,10 +92,10 @@ inline void ll_rescan_within(const LlContext& c, std::uint16_t mode,
       if (((allowed[t >> 6] >> (t & 63u)) & 1u) != 0 &&
           T.head_refuses(t, c.src + at, c.len - at))
         allowed[t >> 6] &= ~(std::uint64_t{1} << (t & 63u));
-  const TypoBounds bounds{c.src, horizon, len, &read, &cut, most, scratch};
-  typo_each(LlTypoTape<T>{{bounds, at}, allowed.data(), &c.stop},
-            T.modeStart[mode], at, plain,
-            [&](const Typo& candidate) { found.add(candidate); });
+  const TypoBounds bounds{c.src, horizon, len,     &read,
+                          &cut,  most,    scratch, &c.stop};
+  typo_each(LlTypoTape<T>{{bounds, at}, allowed.data()}, T.modeStart[mode], at,
+            plain, [&](const Typo& candidate) { found.add(candidate); });
 }
 
 }  // namespace cursiv::engine

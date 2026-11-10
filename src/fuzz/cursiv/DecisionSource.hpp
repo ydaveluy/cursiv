@@ -1,7 +1,6 @@
-// The ribbon of decisions. Every choice the generation makes goes through
-// this one door -- which alternative, how many rounds, which byte -- so a
-// seed and a fuzzer's bytes are the same mechanism seen twice. The
-// encoding lives in `DecisionCodec`, never here.
+// Every choice the generation makes: which alternative, how many rounds,
+// which byte. A seed and a fuzzer's bytes drive it the same; `DecisionCodec`
+// encodes them.
 #pragma once
 
 #include <cstdint>
@@ -26,7 +25,7 @@ struct DecisionSource {
   // One decision among `n`; never called with `n == 0`.
   virtual unsigned choose(DecisionKind tag, unsigned n) = 0;
 
-  // A ribbon that has run out. The generation then falls back on the shortest
+  // A source that has run out. The generation then falls back on the shortest
   // derivation instead of inventing entropy of its own.
   [[nodiscard]] virtual bool exhausted() const { return false; }
 };

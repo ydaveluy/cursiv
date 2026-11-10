@@ -19,7 +19,7 @@ class LrGssIndex {
     _used = 0;
   }
 
-  // `dead` names the ids no later key can match: a full index sheds them before
+  // `dead` names the ids no later key can match: a full index drops them before
   // it grows.
   template <class Match, class Dead>
   Id intern(std::uint64_t hash, Id fresh, Match&& match, Dead&& dead) {
@@ -51,28 +51,28 @@ class LrGssIndex {
 
  private:
   static constexpr Id kNone = 0xFFFFFFFFu;
-  static constexpr std::size_t kShedFrom = std::size_t{1} << 12;
+  static constexpr std::size_t kDropFrom = std::size_t{1} << 12;
   struct Slot {
     std::uint32_t hash = 0;
     Id id = kNone;
   };
 
-  // Keeps its size only where the live keys fill a quarter of it: shed to just
-  // under half, it would rebuild again a few keys later. A table the first
-  // cache level holds is cheaper doubled than shed.
+  // Keeps its size only where the live keys fill a quarter of it: dropped to
+  // just under half, it would rebuild again a few keys later. A table the first
+  // cache level holds is cheaper doubled than dropped.
   template <class Dead>
   void grow(Dead&& dead) {
-    const bool shed = _slots.size() >= kShedFrom;
+    const bool dropDead = _slots.size() >= kDropFrom;
     std::size_t live = 0;
     for (const Slot& old : _slots)
-      if (old.id != kNone && !(shed && dead(old.id))) ++live;
+      if (old.id != kNone && !(dropDead && dead(old.id))) ++live;
     const std::size_t size = _slots.empty()           ? 16
                              : 4 * (live + 1) > _slots.size() ? 2 * _slots.size()
                                                               : _slots.size();
     std::vector<Slot> next(size);
     const std::size_t mask = next.size() - 1;
     for (const Slot& old : _slots) {
-      if (old.id == kNone || (shed && dead(old.id))) continue;
+      if (old.id == kNone || (dropDead && dead(old.id))) continue;
       std::size_t at = old.hash & mask;
       while (next[at].id != kNone) at = (at + 1) & mask;
       next[at] = old;

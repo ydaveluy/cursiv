@@ -25,7 +25,7 @@ struct Rewrite {
     using stage = LeadGraphStage<fold_rule, leveled>;
   };
   template <class St, class Op, auto P>
-  using infix_src = pay_text<infix_op_src<Op, P>>;
+  using infix_src = text_payload<infix_op_src<Op, P>>;
 };
 
 }  // namespace cursiv::engine::llow

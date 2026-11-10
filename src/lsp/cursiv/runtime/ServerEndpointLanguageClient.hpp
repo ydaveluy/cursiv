@@ -1,7 +1,5 @@
-// The client on the wire: the implementation of `LanguageClient` that
-// leaves the process, holding no conversion, buffer or state of its own.
-// It borrows the endpoint: the session installs it and removes it once the
-// endpoint's threads are joined (`LanguageServerRuntime.cpp`).
+// The `LanguageClient` on the wire. It borrows the endpoint: the session
+// removes it once the endpoint's threads are joined.
 #pragma once
 
 #include <lsp/server_endpoint.h>

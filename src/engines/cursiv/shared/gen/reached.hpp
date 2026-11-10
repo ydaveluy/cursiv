@@ -18,7 +18,7 @@ namespace cursiv::engine {
 
 // The rules one expression names directly: structure reaches what its children
 // reach, and three nodes name a rule themselves.
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 struct refs;
 template <class E>
 using refs_t = typename refs<E>::type;
@@ -74,7 +74,7 @@ struct as_conditions<TypeList<Rs...>> {
   using type = TypeList<typename as_condition<Rs>::type...>;
 };
 
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 struct cond_refs : refs<E> {};
 template <class E, class K, class... Ks>
 struct cond_refs<E, TypeList<K, Ks...>>
@@ -175,14 +175,14 @@ struct reached_of {
 // a call boundary of its own.
 template <class E>
 struct lex_has_captures;
-template <class Kids>
-struct lex_kids_have_captures;
+template <class Children>
+struct lex_children_have_captures;
 template <class... Es>
-struct lex_kids_have_captures<TypeList<Es...>>
+struct lex_children_have_captures<TypeList<Es...>>
     : std::bool_constant<(lex_has_captures<Es>::value || ...)> {};
 template <class E>
-struct lex_has_captures : lex_kids_have_captures<typename ExprShape<E>::kids> {
-};
+struct lex_has_captures
+    : lex_children_have_captures<typename ExprShape<E>::children> {};
 template <>
 struct lex_has_captures<void> : std::false_type {};
 template <>
@@ -242,12 +242,9 @@ template <class S, auto Body, class C>
 inline constexpr bool reads_token<S, Ref<Rule<Body, C>>> =
     reads_token<S, std::remove_cv_t<decltype(Body)>>;
 
-// A rule never called, its body read where it is named, the conversion riding
-// the record of what that reads: the inline data rule an `as<X>(e)` stands
-// for, and a declared data rule that reads one token and gives it a value --
-// a converter of its own, or an `as` per alternative. A rule that keeps the
-// token's text keeps its call: two of them reading one token, offered side by
-// side, are two readings a call tells apart.
+// A rule read in place where it is named, its conversion on the record of
+// what it reads: an `as<X>(e)`, or a data rule that reads one token and gives
+// it a value. A rule that keeps the token's text keeps its call.
 template <class S, class R,
           class RR = typename S::template rule<declared_of_t<R>>>
 inline constexpr bool read_in_place = false;

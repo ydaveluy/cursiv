@@ -1,5 +1,5 @@
-// A left-recursive call inside a repetition: LR reads it, the descent spells
-// out only an option or a repetition in front of the call.
+// A left-recursive call inside a repetition: LR accepts it; LL accepts
+// optional items in front of the call, not a repetition around it.
 // expect LR: refusal_left_recursion_repeated: states=
 // expect LL: refused .leftRecursion..*rule .Path. reaches itself before matching anything inside a repetition
 #pragma once

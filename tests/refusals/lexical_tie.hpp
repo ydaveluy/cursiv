@@ -1,4 +1,4 @@
-// `**` reads as both terminals where one state shifts either.
+// `**` matches both `STARS` and `BOLD` where the parser accepts either.
 // expect LR: candidates mode=[0-9]+ .(STARS|BOLD). -> .(STARS|BOLD). on .[*][*].
 #pragma once
 

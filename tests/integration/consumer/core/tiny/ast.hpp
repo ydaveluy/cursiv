@@ -1,5 +1,4 @@
-// The consumer's AST: one node, one member. `vector`/`string_view` are the
-// base's aliases, as every shipped grammar spells them.
+// `vector` is the alias `cursiv::AstNode` provides, as shipped grammars use it.
 #pragma once
 
 #include "cursiv/syntax-tree/AstNode.hpp"

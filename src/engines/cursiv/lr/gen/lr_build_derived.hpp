@@ -1,4 +1,4 @@
-// The tables derived from a built automaton, laid on the one that ships.
+// The tables derived from a built automaton, added to the one that ships.
 #pragma once
 
 #include <span>

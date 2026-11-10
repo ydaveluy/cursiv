@@ -27,10 +27,10 @@ ValidationResult validationHelper(const CoreServices& services,
   // object it cannot see allocated.
   ValidationResult result{detail::documentDisposable(services, document),
                           document->diagnostics, document, &services};
+  const detail::DisposeOnThrow cleanup(result);
 
   if (options.failOnParsingErrors) {
-    // The parse half is three codes in this tree; two of them say the tree is
-    // not what the author wrote.
+    // Of the parse codes, these two say the tree is not what the author wrote.
     ExpectDiagnosticOptions syntactic;
     syntactic.severity = DiagnosticSeverity::Error;
     for (const std::string_view code : {kSyntaxError, kParseRepaired}) {

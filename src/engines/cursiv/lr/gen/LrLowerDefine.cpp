@@ -21,16 +21,16 @@ void LrLowerer::emit_op(unsigned cfg, std::uint16_t lhs, ImageId op,
   const std::uint32_t opRule = op_rule_of(op);
   const bool buildsNode =
       opRule != kNoImage && (node_rule(opRule) || infix_rule(opRule));
-  const LrShapeId laid = lay(cfg, op);
-  std::vector kids{laid};
-  if (_p.e[laid].kind == LrShape::seq && _p.e[laid].made.empty())
-    kids.assign(_p.kid.begin() + _p.e[laid].sym,
-                _p.kid.begin() + _p.e[laid].sym + _p.e[laid].count);
+  const LrShapeId built = descend(build(cfg, op));
+  std::vector children{built};
+  if (_p.e[built].kind == LrShape::seq && _p.e[built].made.empty())
+    children.assign(_p.child.begin() + _p.e[built].sym,
+                    _p.child.begin() + _p.e[built].sym + _p.e[built].count);
   std::vector<LrLowerSlot> before, after;
   std::uint16_t sym = kNoRow;
   std::string_view doc;
   bool plain = !buildsNode;
-  for (const LrShapeId k : kids) {
+  for (const LrShapeId k : children) {
     LrLowerNode n = _p.e[k];
     // An operator read in place stands as one symbol: its token, which the
     // operator's own row converts, or a record over its tokens.
@@ -43,7 +43,7 @@ void LrLowerer::emit_op(unsigned cfg, std::uint16_t lhs, ImageId op,
       plain = false;
       continue;
     }
-    const LrLowerSlot s = lr_slot_for(_o, _p, k, n.made, n.row);
+    const LrLowerSlot s = descend(lr_slot_for(_o, _p, k, n.made, n.row));
     if (_p.is_gap(s.sym))
       (sym == kNoRow ? before : after).push_back(s);
     else if (sym == kNoRow && !s.optional && !s.none && !s.end &&
@@ -94,18 +94,18 @@ void LrLowerer::define_infix(unsigned cfg, std::uint32_t rule,
 void LrLowerer::define_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs,
                            std::uint8_t tail) {
   _p.owner = lhs;
-  _p.home = static_cast<std::uint8_t>(_cfgs[cfg].home);
+  _p.sectionCfg = static_cast<std::uint8_t>(_cfgs[cfg].sectionCfg);
   const ImageStageDesc& st = stage(rule);
   if (st.kind == ImageRuleKind::infix) {
     define_infix(cfg, rule, lhs);
     return;
   }
-  const LrShapeId at_ = lay(cfg, body_in(cfg, rule));
-  if (tail != 0) ambient(at_, false, tail);
-  if (close_body(st, at_) && !has_rows(body_in(cfg, rule)) &&
+  const LrShapeId at_ = descend(build(cfg, body_in(cfg, rule)));
+  if (tail != 0) descend(ambient(at_, false, tail));
+  if (close_body(st, at_) && !descend(has_rows(body_in(cfg, rule))) &&
       rule != _im.rule(*_d.entry))
     _p.passClose = _p.e[at_].made.back();
-  lr_emit_alts(_o, _p, lhs, at_, _p.e[at_].made, _p.e[at_].row);
+  descend(lr_emit_alts(_o, _p, lhs, at_, _p.e[at_].made, _p.e[at_].row));
   _p.passClose = kNoRow;
 }
 

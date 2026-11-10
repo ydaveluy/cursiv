@@ -1,5 +1,5 @@
-// A word refused two bytes into a relay's content: the walk reads only the
-// first byte of it, and no edge of the token graph narrows the rest.
+// A guard whose excluded word `{-##` reaches two bytes into the text between a
+// `mark` and its `same`: only the first of those bytes can be checked.
 // expect LR: refused: terminal .CMT. has a guard whose excluded word reaches into the text between a .mark<>. and its .same<>.
 #pragma once
 

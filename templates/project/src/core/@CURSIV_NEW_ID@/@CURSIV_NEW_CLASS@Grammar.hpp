@@ -5,29 +5,9 @@
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "@CURSIV_NEW_ID@/ast.hpp"
 
-// The sample language declares people and greets them:
-//
-//     person Alice
-//     Hello Alice!
-//
-// The members of a grammar:
-//   * `terminal<...>`  a token, such as a name or a number; `as<T>(...)`
-//                      converts its text, for example to a number
-//   * `rule<...>`      a rule; it builds the AST class whose members it fills
-//   * `entry`          the rule that reads a whole document
-//   * `ignored`        tokens allowed anywhere and dropped, such as spaces
-//   * `hidden`         tokens allowed anywhere and kept in the syntax tree,
-//                      such as comments, which hover can then show
-//
-// In a rule, `ref<R>` reads the rule or terminal `R`, and these build the AST:
-//   * `create<T>`         build a T, even if no member is set
-//   * `assign<&T::m>(e)`  read `e` and store it in `m`
-//   * `append<&T::m>(e)`  read `e` and add it to the list `m`
-//   * `flag<&T::m>(e)`    read `e` and set the bool `m` to true
-//   * `nest<&T::m>(e)`    wrap the node built so far in a new T, stored in `m`
-//
-// If the build refuses the grammar, look up the message on the "Grammar
-// errors" page of the Cursiv documentation.
+// The sample language declares people and greets them: `person Alice`, then
+// `Hello Alice!`. The Cursiv documentation describes the grammar's parts, and
+// its "Grammar errors" page each message the build may refuse it with.
 
 namespace @CURSIV_NEW_ID@ {
 

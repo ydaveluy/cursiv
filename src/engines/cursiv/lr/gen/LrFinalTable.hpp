@@ -1,4 +1,4 @@
-// The automaton once its tables are derived and its programs are laid.
+// The automaton once its tables are derived and its programs written out.
 #pragma once
 
 #include <memory>
@@ -11,13 +11,13 @@
 
 namespace cursiv::engine {
 
-// The build table, derived and laid out, held read-only: no pass or write
+// The build table, derived and written out, held read-only: no pass or write
 // reaches a row that a pool or a program was built from. It is the table that
 // was handed in, not a copy of it.
 class LrFinalTable {
  public:
-  // Derives the tables of `graph` from the completion `sites`, then lays its
-  // programs.
+  // Derives the tables of `graph` from the completion `sites`, then writes out
+  // its programs.
   static LrFinalTable make(std::unique_ptr<LrBuildTable> graph,
                            std::span<const ElementId> sites) {
     lr_derive_tables(*graph, sites);

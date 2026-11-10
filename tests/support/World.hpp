@@ -1,7 +1,5 @@
-// The workspace a lane asks its services of, set up as a host sets one up --
-// the shared defaults over an empty disk, then each language with its parser,
-// its reflection, the defaults and the slots the lane writes itself -- the
-// documents held and built in it, and what watches it work.
+// A test workspace set up as a host does: default shared services over an
+// empty file system, then languages, documents and an observation sink.
 #pragma once
 
 #include <atomic>
@@ -29,8 +27,8 @@
 
 namespace support {
 
-// `tweak` replaces the slots the lane writes itself once the defaults are in,
-// before the language is registered.
+// `tweak` replaces services after the defaults are installed, before the
+// language is registered.
 template <class Services, class Shared>
 Services& add_language(Shared& shared, cursiv::LanguageMetaData meta,
                        std::unique_ptr<cursiv::Parser> parser,
@@ -50,7 +48,7 @@ Services& add_language(Shared& shared, cursiv::LanguageMetaData meta,
   return added;
 }
 
-// Held by the store, not built.
+// Adds a document without building it.
 inline cursiv::Document* add(const cursiv::SharedCoreServices& shared,
                              std::string_view uri, std::string text) {
   auto document = shared.documentFactory->fromString(std::move(text), uri);
@@ -59,7 +57,7 @@ inline cursiv::Document* add(const cursiv::SharedCoreServices& shared,
   return raw;
 }
 
-// Held, then built to the end in a set of its own.
+// Adds a document and builds it alone.
 inline cursiv::Document* built(const cursiv::SharedCoreServices& shared,
                                std::string_view uri, std::string text) {
   cursiv::Document* const set[] = {add(shared, uri, std::move(text))};
@@ -67,8 +65,7 @@ inline cursiv::Document* built(const cursiv::SharedCoreServices& shared,
   return set[0];
 }
 
-// Held, then built in one set: a reference resolves against what its
-// neighbours export, so the set reaches the index together.
+// Adds documents and builds them together, so references resolve across them.
 inline std::vector<cursiv::Document*> built(
     const cursiv::SharedCoreServices& shared,
     std::vector<std::pair<std::string, std::string>> sources) {
@@ -106,7 +103,7 @@ class CountingParser final : public cursiv::Parser {
   std::unique_ptr<const cursiv::Parser> _parser;
 };
 
-// The sink a host writes: it keeps what it is told.
+// An observation sink that keeps every observation.
 struct CaptureSink final : cursiv::ObservabilitySink {
   std::vector<cursiv::Observation> seen;
   void publish(const cursiv::Observation& observation) noexcept override {
@@ -117,7 +114,7 @@ struct CaptureSink final : cursiv::ObservabilitySink {
   }
 };
 
-// One installed in `shared` in place of its sink, kept by address.
+// Replaces the sink of `shared` with a CaptureSink and returns it.
 inline CaptureSink& capture_observations(cursiv::SharedCoreServices& shared) {
   auto sink = std::make_unique<CaptureSink>();
   CaptureSink& kept = *sink;

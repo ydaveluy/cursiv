@@ -51,9 +51,10 @@ TwinReader TwinReader::resolved(GrammarImage& image) {
   });
 }
 
-std::vector<ImageId> TwinReader::kids(ImageId id) const {
+std::vector<ImageId> TwinReader::children(ImageId id) const {
   const ImageNode& n = _im.nodes[id];
-  return {_im.kids.begin() + n.first, _im.kids.begin() + n.first + n.count};
+  return {_im.children.begin() + n.first,
+          _im.children.begin() + n.first + n.count};
 }
 
 std::uint32_t TwinReader::intern(std::vector<std::uint64_t> shape) {
@@ -66,36 +67,36 @@ std::uint32_t TwinReader::text(std::string_view s) {
   return _texts.try_emplace(s, next).first->second;
 }
 
-std::uint32_t TwinReader::key(ImageId id) {
-  if (id < _keys.size() && _keys[id] != 0) return _keys[id] - 1;
-  const std::uint32_t k = shape(id);
+Descent<std::uint32_t> TwinReader::key(ImageId id) {
+  if (id < _keys.size() && _keys[id] != 0) co_return _keys[id] - 1;
+  const std::uint32_t k = co_await shape(id);
   if (_keys.size() <= id)
     _keys.resize(std::max<std::size_t>(id + 1u, _im.nodes.size()), 0);
   _keys[id] = k + 1;
-  return k;
+  co_return k;
 }
 
-std::uint32_t TwinReader::shape(ImageId id) {
+Descent<std::uint32_t> TwinReader::shape(ImageId id) {
   const ImageNode n = _im.nodes[id];
-  if (reads_operand(n.kind)) return key(kid(id, 0));
+  if (reads_operand(n.kind)) co_return co_await key(child_at(id, 0));
   switch (n.kind) {
     case ImageKind::epsilon:
-      return intern({kEmpty});
+      co_return intern({kEmpty});
     case ImageKind::seq: {
       std::vector<Item> items;
-      flatten(id, items);
-      if (items.empty()) return intern({kEmpty});
-      if (items.size() == 1) return items[0].key;
+      co_await flatten(id, items);
+      if (items.empty()) co_return intern({kEmpty});
+      if (items.size() == 1) co_return items[0].key;
       std::vector<std::uint64_t> s{kSeq};
       for (const Item& i : items) s.push_back(i.key);
-      return intern(std::move(s));
+      co_return intern(std::move(s));
     }
     case ImageKind::choice: {
-      const std::vector<std::uint32_t> arms = branch_keys(id);
-      if (arms.size() == 1) return arms[0];
+      const std::vector<std::uint32_t> arms = co_await branch_keys(id);
+      if (arms.size() == 1) co_return arms[0];
       std::vector<std::uint64_t> s{kChoice};
       s.insert(s.end(), arms.begin(), arms.end());
-      return intern(std::move(s));
+      co_return intern(std::move(s));
     }
     case ImageKind::skip: {
       // A region is its lists, whichever order they were written in.
@@ -108,12 +109,12 @@ std::uint32_t TwinReader::shape(ImageId id) {
       std::vector<std::uint64_t> s{kRegion, n.m, n.n};
       for (const auto& part : {list(n.a, n.m), list(n.a + n.m, n.n)})
         s.insert(s.end(), part.begin(), part.end());
-      for (const ImageId k : kids(id)) s.push_back(key(k));
-      return intern(std::move(s));
+      for (const ImageId k : children(id)) s.push_back(co_await key(k));
+      co_return intern(std::move(s));
     }
     case ImageKind::ref:
       if (const ImageId body = expanded(n.a); body != kNoImage)
-        return key(body);
+        co_return co_await key(body);
       break;
     default:
       break;
@@ -128,18 +129,18 @@ std::uint32_t TwinReader::shape(ImageId id) {
                                text(n.text2),
                                reinterpret_cast<std::uintptr_t>(n.row),
                                reinterpret_cast<std::uintptr_t>(n.tag)};
-  for (const ImageId k : kids(id)) s.push_back(key(k));
-  return intern(std::move(s));
+  for (const ImageId k : children(id)) s.push_back(co_await key(k));
+  co_return intern(std::move(s));
 }
 
 // Each distinct key once, in the order written.
-std::vector<std::uint32_t> TwinReader::branch_keys(ImageId choice) {
+Descent<std::vector<std::uint32_t>> TwinReader::branch_keys(ImageId choice) {
   std::vector<std::uint32_t> out;
-  for (const ImageId k : kids(choice)) {
-    const std::uint32_t key_ = key(k);
+  for (const ImageId k : children(choice)) {
+    const std::uint32_t key_ = co_await key(k);
     if (std::ranges::find(out, key_) == out.end()) out.push_back(key_);
   }
-  return out;
+  co_return out;
 }
 
 ImageId TwinReader::expanded(std::uint32_t rule) {
@@ -148,10 +149,8 @@ ImageId TwinReader::expanded(std::uint32_t rule) {
   return data.cyclic ? kNoImage : data.body;
 }
 
-// Discover each reachable rule and expression once, then settle their cycles
-// together. Bodies are lazy and may grow the image. A previous batch already
-// explored its whole closure, so an edge into it cannot return to this batch.
-// Expressions have vertices too: shared bodies are never scanned per caller.
+// Discovers each reachable rule and expression once, then resolves their cycles
+// together. A previous batch explored its whole closure already.
 void TwinReader::analyse_calls(std::uint32_t rule) {
   struct Vertex {
     std::uint64_t key;
@@ -183,7 +182,7 @@ void TwinReader::analyse_calls(std::uint32_t rule) {
     } else {
       const ImageNode n = _im.nodes[id];
       for (std::uint32_t k = 0; k < n.count; ++k)
-        enter(_im.kids[n.first + k], false);
+        enter(_im.children[n.first + k], false);
       if (n.kind == ImageKind::ref || n.kind == ImageKind::closed)
         enter(n.a, true);
     }
@@ -201,46 +200,49 @@ void TwinReader::analyse_calls(std::uint32_t rule) {
 }
 
 // The positions `id` reads in a row: writes and prose drop away, sequences
-// and calls read in place open, and a choice whose branches all read alike is
-// that branch.
-void TwinReader::flatten(ImageId id, std::vector<Item>& out) {
+// and calls read in place open, and a choice whose branches all read the same
+// is that branch.
+Descent<void> TwinReader::flatten(ImageId id, std::vector<Item>& out) {
   const ImageNode n = _im.nodes[id];
-  if (reads_operand(n.kind)) return flatten(kid(id, 0), out);
+  if (reads_operand(n.kind)) co_return co_await flatten(child_at(id, 0), out);
   switch (n.kind) {
     case ImageKind::epsilon:
-      return;
+      co_return;
     case ImageKind::seq:
-      for (const ImageId k : kids(id)) flatten(k, out);
-      return;
+      for (const ImageId k : children(id)) co_await flatten(k, out);
+      co_return;
     case ImageKind::ref:
-      if (const std::vector<Item>* body = called(n.a); body != nullptr) {
+      if (const std::vector<Item>* body = co_await called(n.a);
+          body != nullptr) {
         out.insert(out.end(), body->begin(), body->end());
-        return;
+        co_return;
       }
       break;
     case ImageKind::choice:
-      if (branch_keys(id).size() == 1) {
-        flatten(kid(id, 0), out);
-        return;
+      if ((co_await branch_keys(id)).size() == 1) {
+        co_await flatten(child_at(id, 0), out);
+        co_return;
       }
       break;
     default:
       break;
   }
-  out.push_back({key(id), id, optional(id) ? kid(id, 0) : kNoImage});
+  out.push_back(
+      {co_await key(id), id, optional(id) ? child_at(id, 0) : kNoImage});
 }
 
 // The positions a call reads in place, or null where it is compared whole.
-const std::vector<TwinReader::Item>* TwinReader::called(std::uint32_t rule) {
+Descent<const std::vector<TwinReader::Item>*> TwinReader::called(
+    std::uint32_t rule) {
   if (const auto it = _calls.find(rule); it != _calls.end())
-    return it->second.empty() ? nullptr : &it->second;
+    co_return it->second.empty() ? nullptr : &it->second;
   std::vector<Item> items;
   if (const ImageId body = expanded(rule); body != kNoImage) {
-    flatten(body, items);
+    co_await flatten(body, items);
     if (items.size() > kCallItems) items.clear();
   }
   const auto& at = _calls.try_emplace(rule, std::move(items)).first->second;
-  return at.empty() ? nullptr : &at;
+  co_return at.empty() ? nullptr : &at;
 }
 
 // Whether a position reads a token: one that only tests the text, or the end
@@ -252,14 +254,14 @@ bool TwinReader::reads(const std::vector<Item>& items) const {
 
 // What a row of positions reads, an optional one taken and left. Past the
 // gate an optional position is compared as written.
-std::vector<TwinReader::Reading> TwinReader::readings(
+Descent<std::vector<TwinReader::Reading>> TwinReader::readings(
     const std::vector<Item>& items) {
   std::vector<std::size_t> open;
   for (std::size_t i = 0; i < items.size() && open.size() < kOptionalGate; ++i)
     if (items[i].operand != kNoImage) open.push_back(i);
   std::vector<std::vector<Item>> taken(open.size());
   for (std::size_t j = 0; j < open.size(); ++j)
-    flatten(items[open[j]].operand, taken[j]);
+    co_await flatten(items[open[j]].operand, taken[j]);
   std::vector<Reading> out;
   for (unsigned mask = 0; mask < (1u << open.size()); ++mask) {
     Reading r;
@@ -274,7 +276,7 @@ std::vector<TwinReader::Reading> TwinReader::readings(
     }
     out.push_back(std::move(r));
   }
-  return out;
+  co_return out;
 }
 
 bool TwinReader::optional(ImageId id) const {
@@ -283,44 +285,47 @@ bool TwinReader::optional(ImageId id) const {
 }
 
 // Whether a fold of a left recursion stands in the expression: the election
-// ranks its arms by an order of its own, so the reader leaves them as laid.
-bool TwinReader::folds(ImageId id) {
-  if (const auto it = _folds.find(id); it != _folds.end()) return it->second;
+// ranks its arms by an order of its own, so the reader leaves them as built.
+Descent<bool> TwinReader::folds(ImageId id) {
+  if (const auto it = _folds.find(id); it != _folds.end()) co_return it->second;
   const ImageKind kind = _im.nodes[id].kind;
   bool out = kind == ImageKind::closed || kind == ImageKind::turns;
-  for (const ImageId k : kids(id)) out = out || folds(k);
+  for (const ImageId k : children(id))
+    if (!out) out = co_await folds(k);
   _folds.emplace(id, out);
-  return out;
+  co_return out;
 }
 
 // Two optional items whose operands read the same tokens.
-bool TwinReader::alike(ImageId a, ImageId b) {
-  if (key(kid(a, 0)) != key(kid(b, 0)) || folds(kid(a, 0))) return false;
+Descent<bool> TwinReader::read_same(ImageId a, ImageId b) {
+  const std::uint32_t ka = co_await key(child_at(a, 0));
+  if (ka != co_await key(child_at(b, 0))) co_return false;
+  if (co_await folds(child_at(a, 0))) co_return false;
   std::vector<Item> items;
-  flatten(kid(a, 0), items);
-  return reads(items);
+  co_await flatten(child_at(a, 0), items);
+  co_return reads(items);
 }
 
 ImageId TwinReader::drop(ImageId body, std::vector<TwinFound>* found) {
   _found = found;
-  const ImageId out = drop_node(body);
+  const ImageId out = descend(drop_node(body));
   _found = nullptr;
   return out;
 }
 
 // Conditions, calls, regions of another grammar and the folds a lowering
 // makes are read as written.
-ImageId TwinReader::drop_node(ImageId id) {
+Descent<ImageId> TwinReader::drop_node(ImageId id) {
   if (const auto it = _dropped.find(id); it != _dropped.end())
-    return it->second;
+    co_return it->second;
   const ImageNode n = _im.nodes[id];
   ImageId out = id;
   switch (n.kind) {
     case ImageKind::choice:
-      out = drop_choice(id);
+      out = co_await drop_choice(id);
       break;
     case ImageKind::seq:
-      out = drop_sequence(id);
+      out = co_await drop_sequence(id);
       break;
     case ImageKind::repeat:
     case ImageKind::unordered:
@@ -331,9 +336,9 @@ ImageId TwinReader::drop_node(ImageId id) {
     case ImageKind::flag:
     case ImageKind::create:
     case ImageKind::nest: {
-      const std::vector<ImageId> was = kids(id);
+      const std::vector<ImageId> was = children(id);
       std::vector<ImageId> now;
-      for (const ImageId k : was) now.push_back(drop_node(k));
+      for (const ImageId k : was) now.push_back(co_await drop_node(k));
       if (now != was) out = _im.derive(n, now);
       break;
     }
@@ -341,24 +346,28 @@ ImageId TwinReader::drop_node(ImageId id) {
       break;
   }
   _dropped.emplace(id, out);
-  return out;
+  co_return out;
 }
 
 // A branch is dropped where each of its readings is a reading of an earlier
 // branch. A branch that reads no token, as `eof` alone, stays, and so do the
 // branches of a choice that holds a fold.
-ImageId TwinReader::drop_choice(ImageId id) {
+Descent<ImageId> TwinReader::drop_choice(ImageId id) {
   const ImageNode n = _im.nodes[id];
-  const std::vector<ImageId> was = kids(id);
-  const bool folded =
-      std::ranges::any_of(was, [&](ImageId k) { return folds(k); });
+  const std::vector<ImageId> was = children(id);
+  bool folded = false;
+  for (const ImageId k : was)
+    if (co_await folds(k)) {
+      folded = true;
+      break;
+    }
   std::map<Reading, std::uint32_t> first;
   std::vector<ImageId> kept;
   std::vector<TwinFound> twins;
   for (std::uint32_t i = 0; i < was.size(); ++i) {
     std::vector<Item> items;
-    flatten(was[i], items);
-    const std::vector<Reading> rs = readings(items);
+    co_await flatten(was[i], items);
+    const std::vector<Reading> rs = co_await readings(items);
     TwinFound twin{.at = id, .arm = i, .over = {}, .item = false};
     bool repeats = i != 0 && !folded && reads(items);
     for (std::size_t r = 0; r < rs.size() && repeats; ++r) {
@@ -379,21 +388,21 @@ ImageId TwinReader::drop_choice(ImageId id) {
     _found->insert(_found->end(), twins.begin(), twins.end());
   bool changed = !twins.empty();
   for (ImageId& k : kept) {
-    const ImageId d = drop_node(k);
+    const ImageId d = co_await drop_node(k);
     changed = changed || d != k;
     k = d;
   }
-  if (!twins.empty() && kept.size() == 1) return kept[0];
-  return changed ? _im.derive(n, kept) : id;
+  if (!twins.empty() && kept.size() == 1) co_return kept[0];
+  co_return changed ? _im.derive(n, kept) : id;
 }
 
-// A run of optional items, two of which read alike, is read by its first item
-// present from the first of those on.
-ImageId TwinReader::drop_sequence(ImageId id) {
+// A run of optional items, two of which read the same, is read by its first
+// item present from the first of those on.
+Descent<ImageId> TwinReader::drop_sequence(ImageId id) {
   const ImageNode n = _im.nodes[id];
-  const std::vector<ImageId> was = kids(id);
+  const std::vector<ImageId> was = children(id);
   std::vector<ImageId> now;
-  for (const ImageId k : was) now.push_back(drop_node(k));
+  for (const ImageId k : was) now.push_back(co_await drop_node(k));
   std::vector<ImageId> out;
   for (std::size_t s = 0; s < was.size();) {
     std::size_t e = s;
@@ -402,45 +411,42 @@ ImageId TwinReader::drop_sequence(ImageId id) {
       out.push_back(now[s++]);
       continue;
     }
-    const auto twinned = [&](std::size_t a) {
-      for (std::size_t b = a + 1; b < e; ++b)
-        if (alike(was[a], was[b])) return true;
-      return false;
-    };
     std::size_t i = s;
-    while (i < e && !twinned(i)) ++i;
+    for (bool twinned = false; i < e; ++i) {
+      for (std::size_t b = i + 1; b < e && !twinned; ++b)
+        twinned = co_await read_same(was[i], was[b]);
+      if (twinned) break;
+    }
     out.insert(out.end(), now.begin() + static_cast<std::ptrdiff_t>(s),
                now.begin() + static_cast<std::ptrdiff_t>(i));
     if (i < e && _runs < kRunDepth) {
       for (std::size_t j = i + 1; _found != nullptr && j < e; ++j)
         for (std::size_t t = i; t < j; ++t)
-          if (alike(was[t], was[j])) {
+          if (co_await read_same(was[t], was[j])) {
             _found->push_back({.at = id,
                                .arm = static_cast<std::uint32_t>(j),
                                .over = {static_cast<std::uint32_t>(t)},
                                .item = true});
             break;
           }
-      out.push_back(
-          first_present({now.begin() + static_cast<std::ptrdiff_t>(i),
-                         now.begin() + static_cast<std::ptrdiff_t>(e)}));
+      out.push_back(co_await first_present(
+          {now.begin() + static_cast<std::ptrdiff_t>(i),
+           now.begin() + static_cast<std::ptrdiff_t>(e)}));
     } else {
       out.insert(out.end(), now.begin() + static_cast<std::ptrdiff_t>(i),
                  now.begin() + static_cast<std::ptrdiff_t>(e));
     }
     s = e;
   }
-  return out == was ? id : _im.derive(n, out);
+  co_return out == was ? id : _im.derive(n, out);
 }
 
-// `x? y? z?` is `(x y? z? | y z? | z)?`: each branch opens on its own first
-// item present, so one that reads only what an earlier one reads is dropped
-// as any other twin branch, and the readings that kept it go with it. What
-// this spells is read again without a word: the warning names the run.
-ImageId TwinReader::first_present(const std::vector<ImageId>& run) {
+// `x? y? z?` is `(x y? z? | y z? | z)?`: a branch that reads only what an
+// earlier one reads is dropped as any other twin.
+Descent<ImageId> TwinReader::first_present(const std::vector<ImageId>& run) {
   std::vector<ImageId> arms;
   for (std::size_t k = 0; k < run.size(); ++k) {
-    std::vector parts{kid(run[k], 0)};
+    std::vector parts{child_at(run[k], 0)};
     parts.insert(parts.end(), run.begin() + static_cast<std::ptrdiff_t>(k + 1),
                  run.end());
     arms.push_back(parts.size() == 1
@@ -453,10 +459,10 @@ ImageId TwinReader::first_present(const std::vector<ImageId>& run) {
                  std::span(&choice, 1));
   std::vector<TwinFound>* const found = std::exchange(_found, nullptr);
   ++_runs;
-  const ImageId out = drop_node(option);
+  const ImageId out = co_await drop_node(option);
   --_runs;
   _found = found;
-  return out;
+  co_return out;
 }
 
 std::vector<TwinBranch> twin_branches(WarningFound& found) {
@@ -470,7 +476,7 @@ std::vector<TwinBranch> twin_branches(WarningFound& found) {
     for (const TwinFound& hit : hits) {
       const ImageNode at = image.nodes[hit.at];
       const auto part = [&](std::uint32_t i) {
-        return image.kids[at.first + i];
+        return image.children[at.first + i];
       };
       TwinBranch t;
       t.rule = found.name(rule);

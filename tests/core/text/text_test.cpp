@@ -18,6 +18,7 @@
 #include "cursiv/text/ClassItem.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 #include "cursiv/text/lower_case.hpp"
+#include "cursiv/text/scalar_at.hpp"
 #include "cursiv/utils/ctstring.hpp"
 #include "support/Throws.hpp"
 
@@ -144,7 +145,7 @@ static_assert(union_is("a-c", "d-f", {{U'a', U'f'}}));
 static_assert(union_is("m", "a-z", {{U'a', U'z'}}));
 static_assert(union_is("a-cx-z", "b-dm",
                        {{U'a', U'd'}, {U'm', U'm'}, {U'x', U'z'}}));
-// A spelling read out of order, or with ranges that meet, still gives its
+// A spelling read out of order, or with ranges that touch, still gives its
 // ranges ascending and joined.
 static_assert(union_is("ba", "", {{U'a', U'b'}}));
 static_assert(union_is("zab-c", "", {{U'a', U'c'}, {U'z', U'z'}}));
@@ -279,10 +280,20 @@ void a_text_lowers_as_a_client_lowers_it() {
   CHECK(cursiv::detail::lower_case("ΟΔΟΣ ΣΑ") == "οδος σα");
   CHECK(cursiv::detail::lower_case("ΑΣ'") == "ας'");
   CHECK(cursiv::detail::lower_case("Σ") == "σ");
+  // The ordinal indicators are cased letters with no other case.
+  CHECK(cursiv::detail::lower_case("ªΣ") == "ªς");
+  CHECK(cursiv::detail::lower_case("ΑΣº") == "ασº");
   CHECK(cursiv::detail::lower_case("\U00010400") == "\U00010428");
   CHECK(cursiv::detail::lower_case(std::string("A\xFF"
                                                "B")) == std::string("a\xFF"
                                                                     "b"));
+}
+
+// A control byte is spelled in octal, which no digit after it extends.
+void a_text_is_quoted_as_messages_show_it() {
+  CHECK(cursiv::quote(std::string_view("a\0b\1771\n'\\", 8)) ==
+        R"('a\000b\1771\n\'\\')");
+  CHECK(cursiv::quote("x`y", '`') == R"(`x\`y`)");
 }
 
 }  // namespace
@@ -368,6 +379,16 @@ void a_builder_hands_over_its_text() {
   CHECK(w.take() == "    b\n");
 }
 
+// A part may be the builder's own text, which the write moves as it grows.
+void a_builder_writes_its_own_text() {
+  TextBuilder w;
+  const std::string first(100, 'a');
+  w.line(first);
+  w.line("b");
+  w.write(w.text());
+  CHECK(w.text() == first + "\nb\n" + first + "\nb\n");
+}
+
 int main() {
   CHECK(same_ranges(LexCodePoints::of(0, false, R"(\s)"),
                     {{0x09, 0x0D},
@@ -404,9 +425,9 @@ int main() {
                      {0x5B, 0x5E},
                      {0x60, 0x60},
                      {0x7B, 0x10FFFF},
-                     {LexCodePoints::kStray, LexCodePoints::kStray}}));
-  CHECK(!LexCodePoints::of(0, false, R"(\w)").strays());
-  CHECK(LexCodePoints::of(0, true, R"(\w)").strays());
+                     {LexCodePoints::kInvalid, LexCodePoints::kInvalid}}));
+  CHECK(!LexCodePoints::of(0, false, R"(\w)").holds_invalid());
+  CHECK(LexCodePoints::of(0, true, R"(\w)").holds_invalid());
   CHECK(!LexCodePoints::of(0, true, R"(\u{0}-\u{10FFFF})").ranges.empty());
   CHECK(same_ranges(
       LexCodePoints::of(detail::cp_bit(unicode::Property::White_Space), false,
@@ -428,9 +449,11 @@ int main() {
     }));
   }
   a_text_lowers_as_a_client_lowers_it();
+  a_text_is_quoted_as_messages_show_it();
   a_builder_lays_out_its_parts();
   a_builder_joins_a_list();
   a_builder_hands_over_its_text();
+  a_builder_writes_its_own_text();
   a_builder_stays_within_its_indentation();
   a_builder_goes_back_to_a_place();
   return test::report("text_test");

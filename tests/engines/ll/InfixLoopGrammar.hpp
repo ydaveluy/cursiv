@@ -45,7 +45,7 @@ struct Sum : Common {
 };
 
 // Two left levels, a prefix and a postfix.
-struct Ladder : Common {
+struct TwoLevels : Common {
   struct E;
   struct P : rule<create<Ba>(lit<"a">) | create<Bb>(lit<"b">) |
                   (lit<"("> + ref<E> + lit<")">) |
@@ -88,11 +88,11 @@ struct Mixed : Common {
   using entry = Root;
   using ignored = WS;
 };
-// These tables use the same trivia and operator levels. Select their
-// entry rules in one generated language instead of generating each separately.
+// These grammars share trivia and operator levels, so one generated language
+// selects each entry by its prefix.
 struct Combined : Common {
   struct Root : rule<(lit<"sum:"> + ref<Sum::Root>) |
-                     (lit<"ladder:"> + ref<Ladder::Root>) |
+                     (lit<"twolevels:"> + ref<TwoLevels::Root>) |
                      (lit<"via:"> + ref<Via::Root>) |
                      (lit<"mixed:"> + ref<Mixed::Root>)> {};
   using entry = Root;

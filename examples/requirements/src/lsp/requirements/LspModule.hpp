@@ -20,7 +20,7 @@ std::unique_ptr<RequirementsServices> create_tests_lsp_services(
     RequirementsSharedServices& sharedServices,
     std::string languageId = std::string(req::generated::Tests::kLanguageId));
 
-// The same one call, one storey up: both languages of the example.
+// The shared services and both languages of the example, created in one call.
 struct RequirementsLanguage {
   std::unique_ptr<RequirementsSharedServices> shared;
   RequirementsServices& requirements;

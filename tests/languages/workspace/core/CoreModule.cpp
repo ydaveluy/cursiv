@@ -1,5 +1,4 @@
-// What this language installs over the generated module: what its author
-// writes. Everything the grammar derives is in the generated one.
+// The services this language installs over its generated module.
 
 #include <memory>
 

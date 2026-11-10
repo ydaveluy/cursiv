@@ -39,7 +39,7 @@ struct Blank : cursiv::GrammarSpec {
 };
 
 // Visible blanks, counted character units and an identical trivia terminal
-// share one parser. Each entry retains its own whitespace configuration.
+// share one parser; each entry keeps its own whitespace settings.
 struct Ll : cursiv::GrammarSpec {
   struct Root
       : rule<(lit<"required:"> +

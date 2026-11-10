@@ -24,17 +24,15 @@ namespace ws {
 
 namespace {
 
-// The name is read through the tag, not a cast: `ast_cast` is exact, so an
-// `Entity` would not see itself as the `AbstractElement` that names it.
+// Read through the type tag: `ast_cast` is exact, so it would not see an
+// `Entity` as the `AbstractElement` that holds the name.
 std::string_view name_of(const cursiv::AstNode& node) {
   return cursiv::is_named(node) ? node.type->readName(node)
                                 : std::string_view{};
 }
 
-// The qualified name a declaration will answer to, with `renamed` spelled
-// `newName` -- functional rather than mutate-then-read, since an AST is not
-// written to answer a request. A climb, and the qualifier built once, however
-// deep the packages nest.
+// The qualified name of `node` once `renamed` is called `newName`, computed
+// without changing the AST.
 std::string qualified_after_rename(const cursiv::AstNode& node,
                                    const cursiv::AstNode& renamed,
                                    std::string_view newName,
@@ -56,9 +54,8 @@ std::string qualified_after_rename(const cursiv::AstNode& node,
                                 &node == &renamed ? newName : name_of(node));
 }
 
-// The renamed declaration and everything under it, in source order: a package
-// carries its members' qualified names, so each of them has references to
-// rewrite too.
+// The renamed declaration and everything under it, in source order: each
+// member of a renamed package has references to rewrite too.
 void collect_subtree(const cursiv::AstNode& node,
                      std::vector<const cursiv::AstNode*>& out) {
   std::vector<const cursiv::AstNode*> pending{&node};
@@ -93,8 +90,7 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
   const cursiv::References& references = *core().references;
   const cursiv::Documents& store = *core().shared().documents;
 
-  // The declaration edit is the base's: what a new name may be, and where a
-  // declaration writes it, is not this language's business.
+  // The base checks the new name and edits the declaration.
   std::optional<lsp::WorkspaceEdit> edit =
       cursiv::DefaultRenameProvider::rename(document, position, newName, token);
   if (!edit.has_value()) return edit;
@@ -107,20 +103,16 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
   std::vector<const cursiv::AstNode*> renamed;
   collect_subtree(*found.targets.front(), renamed);
 
-  // Once, and never inside the loop: `emplace` on an optional constructs a
-  // new value, so calling it per reference would throw away the declaration
-  // edits the base just made.
+  // Outside the loop: `emplace` on an optional constructs a new value, which
+  // would drop the base's declaration edits.
   if (!edit->changes.has_value()) edit->changes.emplace();
   auto& changes = *edit->changes;
-  // Each document's sites, to the row of the edit there. A document's rows
-  // are indexed when a reference first lands in them, so a site is found
-  // without scanning every edit of its document again.
+  // Per document, the row of each site's edit, indexed when a reference first
+  // is found in that document.
   std::unordered_map<const lsp::Array<lsp::TextEdit>*,
                      std::unordered_map<std::uint64_t, std::size_t>>
       sites;
 
-  // A site written under a qualifier takes the new qualified name; a bare one
-  // takes the bare name. Which of the two a site is, is what it spells.
   for (const cursiv::AstNode* const node : renamed) {
     cursiv::throw_if_cancelled(token);
     const std::string qualified =
@@ -140,21 +132,19 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
       const std::string_view written = text.getText().substr(
           reference.sourceBegin, reference.sourceEnd - reference.sourceBegin);
 
-      // A bare site takes the referenced node's own name, which is `newName`
-      // exactly when that node is the one renamed -- never the qualified
-      // form, even when an ancestor package is what was renamed.
+      // A qualified site takes the new qualified name. A bare site stays bare,
+      // even when an enclosing package is the one renamed.
       const std::string_view replacement =
           written.find('.') == std::string_view::npos ? bare : qualified;
-      if (written == replacement) continue;  // nothing to say
+      if (written == replacement) continue;
 
       lsp::TextEdit rewrite;
       rewrite.range = cursiv::to_lsp(
           text.rangeAt(reference.sourceBegin, reference.sourceEnd));
       rewrite.newText = std::string(replacement);
 
-      // The base already wrote the bare name at this site; ours is the one
-      // that knows whether the site is qualified, so it replaces rather than
-      // adds -- two edits over one span is a rename a client refuses.
+      // The base already edited this site with the bare name: replace its
+      // text, since a client refuses two edits over one span.
       auto& rows = changes[lsp::DocumentUri::parse(std::string(source->uri))];
       auto [index, fresh] = sites.try_emplace(&rows);
       if (fresh)

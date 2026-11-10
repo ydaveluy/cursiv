@@ -1,7 +1,6 @@
-// The lifecycle, wired to the workspace: every notification that
-// changes text is one write action -- mutate, build, publish, in
-// order -- and a request is one read action. The server holds no text
-// of its own; every route goes through `documents`.
+// The lifecycle, wired to the workspace: a notification that changes text is
+// one write (mutate, build, publish) and a request is one read. The server
+// holds no text of its own.
 #pragma once
 
 #include <lsp/messages.h>
@@ -16,12 +15,15 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
+#include "cursiv/runtime/LanguageServer.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
 #include "cursiv/text/Range.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/workspace/ConfigurationProvider.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
@@ -30,20 +32,14 @@
 #include "cursiv/workspace/TextDocument.hpp"
 #include "cursiv/workspace/WorkspaceFolder.hpp"
 #include "cursiv/workspace/WorkspaceLock.hpp"
-#include "cursiv/runtime/LanguageServer.hpp"
-#include "cursiv/services/SharedLspServices.hpp"
-#include "cursiv/workspace/ConfigurationProvider.hpp"
 
 namespace cursiv {
 
 struct LspServices;
 
-/**
- * Publishes diagnostics from the build-phase hook: `Linked` clears
- * squiggles a rebuild invalidated, `Validated` publishes every document
- * validated since the last publication, clean or not. A build cancelled
- * mid-way loses nothing: the next one publishes what it validated.
- */
+// Publishes diagnostics at each build phase: `Validated` publishes every
+// document validated since the last time, clean or not, and `Linked` clears
+// the documents removed since. A cancelled build loses nothing.
 class DefaultLanguageServer : public LanguageServer,
                               private BuildPhaseListener,
                               private DocumentPhaseListener,
@@ -229,34 +225,37 @@ class DefaultLanguageServer : public LanguageServer,
                   TextChanges& changes);
   void closeText(std::string_view uri, TextChanges& changes);
 
-  // The route every request about one document shares: rung, lock,
-  // document, slot, call. The URI is explicit because a hierarchy
-  // expansion names its document through the item it was handed, not a
-  // `textDocument` member.
+  // The route every request about one document takes: state, lock, document,
+  // service, call. The URI is explicit: a hierarchy item names its document.
   template <class Service, class Call>
-  void routeDocument(std::string_view uri, ServiceRequirement rung,
+  void routeDocument(std::string_view uri, ServiceRequirement requirement,
                      std::unique_ptr<const Service> LspServices::* slot,
                      const CancellationToken& token, Call call) const;
 
-  // The waits happen outside the read action: waiting under the read
-  // would hold the readers' side against the very writer that could
-  // satisfy it. False means answer empty -- cancelled, excluded from the
-  // build, or the build failed.
+  // Waits outside the read, which would block the writer it waits for. False
+  // means answer empty: cancelled, excluded from the build, or the build
+  // failed.
   [[nodiscard]] bool awaitScan(const CancellationToken&,
                                bool required = false) const;
-  [[nodiscard]] bool awaitRung(std::string_view uri, DocumentState,
-                               const CancellationToken&) const;
+  [[nodiscard]] bool awaitState(std::string_view uri, DocumentState,
+                                const CancellationToken&) const;
   // Runs `read` once every document has reached the state, beside the rest
   // of the build. False means it did not run -- cancelled, or the build
   // failed.
   bool readAtWorkspaceState(DocumentState, const CancellationToken&,
                             cursiv::function_ref<void()> read) const;
 
-  // `mutate` runs under exclusivity and lists what it moved; a build follows
-  // either way, over those lists through `update`.
-  void writeAndPublish(cursiv::function_ref<void(TextChanges&)> mutate);
-  // `Linked` clears what the rebuild invalidated, `Validated` publishes
-  // what `onDocumentPhase` recorded.
+  // `mutate` runs in a write and lists at most `most` moved texts; a build of
+  // them follows, even when `mutate` fails.
+  void writeAndPublish(std::size_t most,
+                       cursiv::function_ref<void(TextChanges&)> mutate);
+  // The notebook receives a notification, then its cells move through
+  // `writeAndPublish`.
+  void deliverThenWrite(const NotebookDocuments* notebooks,
+                        cursiv::function_ref<void()> deliver, std::size_t most,
+                        cursiv::function_ref<void(TextChanges&)> mutate);
+  // `Linked` clears the documents removed, `Validated` publishes what
+  // `onDocumentPhase` recorded.
   void onBuildPhase(DocumentState, std::span<Document* const>,
                     const CancellationToken&) override;
   // Records each validated document, on the worker that validated it: a
@@ -266,9 +265,9 @@ class DefaultLanguageServer : public LanguageServer,
                        const CancellationToken&) override;
   void onConfigurationSectionUpdate(std::string_view,
                                     const lsp::LSPAny&) override;
-  void clearStaleSnapshots();
+  void clearRemoved();
   void publishValidated();
-  // `publish`, and remember how many diagnostics the client now shows.
+  // `publish`, and remember that the client was shown the document.
   void announceDocument(const Document&);
   // Subscribes to the services installed when the session initializes.
   void hookServices();
@@ -279,22 +278,23 @@ class DefaultLanguageServer : public LanguageServer,
   // The dynamic registration for `workspace/didChangeWatchedFiles`, when
   // the client said it accepts one.
   void registerFileWatcher() const;
-  // Restamps a `changes` edit as a versioned `documentChanges` one.
-  static void stampVersion(lsp::CodeAction& action, const Document& document);
+  // Rewrites a `changes` edit as a versioned `documentChanges` one.
+  static void addDocumentVersion(lsp::CodeAction& action,
+                                 const Document& document);
 
   SharedLspServices& _shared;
-  // How many diagnostics the client was last shown, per document; absent =
-  // never published.
-  std::unordered_map<DocumentId, std::size_t> _announced;
+  // The documents the client was shown a verdict for, until they are gone.
+  std::unordered_set<DocumentId> _announced;
   // The documents validated since the last `Validated` phase, written by the
-  // validating workers.
+  // validating workers. `_announceAll` stands for a record that was lost: the
+  // next drain then announces every validated document.
   std::mutex _validatedMutex;
   std::vector<DocumentId> _validated;
-  // Whether the client reads a versioned edit: `documentChanges` carries
-  // the version each edit was measured against, letting the client
-  // refuse a fix clicked after a later keystroke. Asked at the handshake.
+  bool _announceAll = false;
+  // Whether the client reads versioned `documentChanges`, which let it refuse
+  // a fix clicked after a later keystroke. Set at the handshake.
   bool _versionedEdits = false;
-  // Whether the client prefers markdown for hover contents and for completion
+  // Whether the client reads markdown for hover contents and for completion
   // documentation; otherwise that prose goes as plain text. Asked at the
   // handshake.
   bool _markdownHover = false;
@@ -305,10 +305,9 @@ class DefaultLanguageServer : public LanguageServer,
   ConfigurationProvider* _hookedConfiguration = nullptr;
   // Set by a handshake with folders: a request routed before the scan waits
   // for it.
-  std::atomic<bool> _scanOwed = false;
-  // Arrive at `initialize`, used at `initialized` -- the protocol's own
-  // split: nothing may be scanned until the client has acknowledged the
-  // handshake. The only state this server keeps between the two.
+  std::atomic<bool> _scanPending = false;
+  // Set at `initialize`, used at `initialized`: nothing is scanned before the
+  // client acknowledges the handshake.
   std::vector<WorkspaceFolder> _folders;
   bool _dynamicFileWatching = false;
 };

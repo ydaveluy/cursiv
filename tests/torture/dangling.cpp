@@ -1,6 +1,6 @@
-// The dangling-else grammar through the erased door its generated module
-// hands out: corrupted documents read without a crash or a silent swallow, and
-// completion.
+// The dangling-else grammar through its generated module's type-erased
+// parser: corrupted documents parse without a crash or an unreported error,
+// and completion.
 
 #include <lsp/types.h>
 
@@ -34,10 +34,7 @@ struct World : support::World<cursiv::SharedLspServices> {
 
 using support::offers;
 
-// No offer may spell a raw terminal name -- every label a plain keyword
-// spelling (this grammar's `kw<"if">`/`kw<"then">`/`kw<"else">`) or the
-// grammar's own terminal names for `ID`, never an internal identifier like
-// "KW_IF" or a mangled rule tag.
+// No label is empty or names a terminal or a rule (`ID`, `Stmt`).
 bool labels_are_sane(const lsp::CompletionList& list) {
   for (const lsp::CompletionItem& i : list.items) {
     if (i.label.empty()) return false;
@@ -68,15 +65,14 @@ struct Case {
 const Case kCases[] = {
     {"missing then", "if a x"},
     {"missing else body", "if a then x else"},
-    {"stray else (nothing left to bind)", "if a then x else e else e2"},
+    {"extra else (nothing left to bind)", "if a then x else e else e2"},
     {"truncated keyword", "if a th"},
     {"empty document", ""},
     {"if with no condition", "if then x"},
     {"deep nesting, one corrupted level", "if a then if then x else e"},
 };
 
-// A document that cannot read clean carries at least one diagnostic whose
-// span sits inside the text.
+// A broken document parses with diagnostics whose spans sit inside the text.
 void recovery() {
   const std::unique_ptr<cursiv::Parser> engine =
       telect::generated::Election::create_parser();
@@ -86,14 +82,13 @@ void recovery() {
 
     CHECK(!(cst.accepted() && !cst.recovered()));  // broken by construction
 
-    // The recovery's contract: an accepted reading has a value.
+    // An accepted parse has a value.
     if (cst.accepted()) CHECK(r.value != nullptr);
     for (const cursiv::ParseDiagnostic& d : r.diagnostics) {
       CHECK(d.begin <= d.end);
       CHECK(d.end <= c.text.size());
     }
-    // A repaired reading owes at least one diagnostic -- silence would mean
-    // the corruption was swallowed rather than reported.
+    // A recovered parse reports at least one diagnostic.
     if (cst.recovered()) CHECK(!r.diagnostics.empty());
   }
 }
@@ -101,25 +96,23 @@ void recovery() {
 void completion() {
   const World world;
 
-  // The very start of a document (a trailing " x" keeps it parseable): the
-  // only thing writable there is the entry rule's own opener, "if" or an
-  // identifier -- never both a keyword and its internal name.
+  // At the start of a document (the trailing ` x` keeps it parseable), the
+  // entry's opener `if` is offered.
   offered(world, "<|> x", [](const lsp::CompletionList& list) {
     CHECK(labels_are_sane(list));
     CHECK(offers(list, "if"));
   });
 
-  // Right after "if ": a condition is owed, so "if"/"then"/"else" must not
-  // be offered here -- only what starts an ID-shaped condition would be,
-  // and this grammar spells no keyword for that.
+  // After `if `, a condition is expected: neither `then` nor `else` is
+  // offered.
   offered(world, "if <|>a then x", [](const lsp::CompletionList& list) {
     CHECK(labels_are_sane(list));
     CHECK(!offers(list, "then"));
     CHECK(!offers(list, "else"));
   });
 
-  // Mid-word: the caret sits inside "th" of "then" -- completing "then"
-  // must replace the whole word, not insert past the caret leaving "thenen".
+  // Inside `then`: the replace range covers the whole word, so accepting it
+  // does not leave `thenen`.
   offered(world, "if a th<|>en x", [](const lsp::CompletionList& list) {
     CHECK(labels_are_sane(list));
     const lsp::CompletionItem* item = nullptr;
@@ -132,17 +125,12 @@ void completion() {
     }
   });
 
-  // Right after "then" with nothing following yet, DeepIf's grammar opens a
-  // whole Stmt next, so "if" is offered -- but a raw "e" glued with no
-  // separating space must not merge into one word with any keyword offer.
+  // Right after `then`, with no space before the caret.
   offered(world, "if a then<|> x", [](const lsp::CompletionList& list) {
     CHECK(labels_are_sane(list));
   });
 
-  // Past a genuine parse error (a truncated "th" that can never complete to
-  // a keyword at this position because a full identifier already sits
-  // before it), the caret is in a rejected zone: nothing here spells a
-  // full keyword name to insert blindly.
+  // Past a parse error: an identifier sits where `then` is expected.
   offered(world, "if a x th<|>", [](const lsp::CompletionList& list) {
     CHECK(labels_are_sane(list));
   });

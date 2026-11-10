@@ -11,16 +11,15 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
-#include "cursiv/parser/DefaultParserErrorMessageProvider.hpp"
-#include "cursiv/parser/Parser.hpp"
-#include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/ll/gen/LlLowering.hpp"
 #include "cursiv/ll/runtime/ll_predictor.hpp"
 #include "cursiv/ll/runtime/ll_read.hpp"
 #include "cursiv/lr/gen/LrLowering.hpp"
-#include "cursiv/Check.hpp"
-#include "engines/shared/CaretOffers.hpp"
+#include "cursiv/parser/DefaultParserErrorMessageProvider.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
 #include "dedentrunflatll/generated/FlatLl/Module.hpp"
 #include "dedentrunll/generated/Ll/Module.hpp"
 #include "delimll/generated/Ll/Module.hpp"
@@ -28,15 +27,16 @@
 #include "engines/ll/DelimSpellingGrammar.hpp"
 #include "engines/ll/LlTerms.hpp"
 #include "engines/lr/IndentAst.hpp"
+#include "engines/shared/CaretOffers.hpp"
 #include "indent/generated/G/Module.hpp"
-#include "indentrepaired/generated/G/Module.hpp"
 #include "indentfolded/generated/Cases/Module.hpp"
 #include "indentimplied/generated/Cases/Module.hpp"
+#include "indentrepaired/generated/G/Module.hpp"
 #include "llindent/generated/Ll/Module.hpp"
 #include "llindent/generated/Ll/Table.hpp"
 #include "llindentbare/generated/Bare/Module.hpp"
 #include "llindentfolded/generated/Folded/Module.hpp"
-#include "llindentlaid/generated/Laid/Module.hpp"
+#include "llindentsynthetic/generated/Synthetic/Module.hpp"
 #include "support/AstText.hpp"
 
 namespace {
@@ -56,8 +56,9 @@ void explicit_statement_newlines_win_over_their_trivia_twin() {
     return cursiv::engine::kInvalidSymbol;
   }();
   static_assert(mode != cursiv::engine::kInvalidSymbol);
-  // The trivia twin is no rival: no mode reads two terminals from one text,
-  // so a choice the newline settles is a table, not a prediction.
+  // The trivia form of the newline does not compete with it: no mode reads two
+  // terminals from one text, so a choice the newline decides is a table, not a
+  // prediction.
   static_assert([] {
     for (std::uint16_t m = 0; m < table.nmodes; ++m)
       if (table.modeMulti[m] != 0) return false;
@@ -186,8 +187,8 @@ void a_dropped_indent_leaves_the_name_it_splits(const cursiv::Parser& p) {
 }
 
 // The end of input under a level whose indent a repair dropped closes it as
-// the blank it stood for: no dedent is read there, and none is dropped.
-void muted_levels_lay_no_dedent_at_the_end() {
+// the blank it represents: no dedent is read there, and none is dropped.
+void muted_levels_add_no_dedent_at_the_end() {
   const auto ll = tllindent::generated::Ll::create_parser();
   for (const std::string_view text : {"a\n  b", "a\n  b\n", "a:\n    b\n  c"}) {
     const auto result = ll->parse(text);
@@ -198,7 +199,8 @@ void muted_levels_lay_no_dedent_at_the_end() {
 }
 
 // Each way a line's indentation goes wrong -- too deep, back to no level,
-// another blank -- is one repair that says so, in both engines.
+// another blank than the open block's -- is one repair that says so, in both
+// engines.
 void an_indentation_error_says_so() {
   const auto ll = tllindent::generated::Ll::create_parser();
   const auto lr = tindent::generated::G::create_parser();
@@ -210,7 +212,10 @@ void an_indentation_error_says_so() {
          {std::pair<std::string_view, std::string_view>{
               "a\n  b\nc\n", "Unexpected indentation."},
           {"a:\n    b\n  c\n", "Unexpected indentation."},
-          {"a:\n\tb\n    c\n", mixed}}) {
+          {"a:\n\tb\n    c\n", mixed},
+          {"a:\n    b\n\t\tc\n", mixed},
+          {"a:\n\t\n  b\n   c\n", "Unexpected indentation."},
+          {"a:\n\tb\nc:\n  d\n    e\n", "Unexpected indentation."}}) {
       const auto result = p->parse(text);
       CHECK(result.diagnostics.size() == 1);
       for (const auto& d : result.diagnostics)
@@ -219,7 +224,8 @@ void an_indentation_error_says_so() {
     }
 }
 
-// A line a bracket joins stands in the gap to the caret behind it.
+// A caret on a line that a bracket joins to the previous one reads across the
+// newline.
 void a_caret_crosses_a_line_its_bracket_joins() {
   const auto p = tdelim::generated::Ll::create_parser();
   const std::vector<std::string> word{"ID"};
@@ -250,8 +256,9 @@ void a_form_feed_leaves_a_caret_its_reading() {
 }
 
 // A form feed starts a line's indentation again, as in Python: the blanks
-// after the last one are the line's indentation, in both engines. A line of
-// form feeds is blank, and past content a form feed is plain trivia.
+// after the last one are the line's indentation, read and repaired as without
+// it, in both engines. A line of form feeds is blank, and past content a form
+// feed is plain trivia.
 void a_form_feed_starts_the_indentation_again() {
   const auto ll = tllindent::generated::Ll::create_parser();
   const auto lr = tindent::generated::G::create_parser();
@@ -283,24 +290,29 @@ void a_form_feed_starts_the_indentation_again() {
   // The blanks after the form feed match no open level.
   for (const cursiv::Parser* const p : {ll.get(), lr.get()})
     CHECK(!p->parse("a:\n  b\n \f c\n").diagnostics.empty());
-}
-
-// An indent a repair invents opens a level the line back at the enclosing one
-// closes: one fault, and the tree the other engine builds.
-void an_invented_indent_opens_a_level() {
-  const auto ll = tllindent::generated::Ll::create_parser();
-  const auto lr = tindent::generated::G::create_parser();
-  const auto rl = tllindent::generated::Ll::create_ast_reflection();
-  const auto rr = tindent::generated::G::create_ast_reflection();
-  for (const std::string_view text : {"a:\nb\n", "a:\n  b:\nc\n"}) {
-    const auto a = ll->parse(text);
-    const auto b = lr->parse(text);
-    CHECK(a.diagnostics.size() == b.diagnostics.size());
-    std::string x, y;
-    support::ast_of(*rl, *a.value, x);
-    support::ast_of(*rr, *b.value, y);
-    CHECK(x == y);
-  }
+  const cursiv::DefaultParserErrorMessageProvider words;
+  for (const auto& [fed, plain] :
+       {std::pair<std::string_view, std::string_view>{"a:\n\tb\n\f    c\n",
+                                                      "a:\n\tb\n    c\n"},
+        {"a:\n\tb\n  \f    c\n", "a:\n\tb\n    c\n"},
+        {"a:\n  b\n\f    c\n", "a:\n  b\n    c\n"},
+        {"a:\n\tb\n\f\t c\n", "a:\n\tb\n\t c\n"},
+        {"a:\n\fb\n\f  c\n", "a:\nb\n  c\n"},
+        {"f [g]:\n  b:\n\fc\n", "f [g]:\n  b:\nc\n"}})
+    for (const cursiv::Parser* const p : {ll.get(), lr.get()}) {
+      const auto a = p->parse(fed);
+      const auto b = p->parse(plain);
+      CHECK(a.diagnostics.size() == b.diagnostics.size());
+      for (std::size_t i = 0;
+           i < a.diagnostics.size() && i < b.diagnostics.size(); ++i) {
+        const auto& x = a.diagnostics[i];
+        const auto& y = b.diagnostics[i];
+        CHECK(x.kind == y.kind && x.element == y.element &&
+              x.end - x.begin == y.end - y.begin &&
+              words.buildMessage(p->getGrammar(), x, fed) ==
+                  words.buildMessage(p->getGrammar(), y, plain));
+      }
+    }
 }
 
 // The repairs are the other engine's, down to what they name.
@@ -329,9 +341,24 @@ void repairs_agree_with_the_table_engine(
   }
 }
 
+// An indent a repair invents opens a level the next line back at the enclosing
+// one closes, blanks in front of it or not, or the end of the input: the
+// repairs and the tree the other engine builds.
+void an_invented_indent_opens_a_level() {
+  repairs_agree_with_the_table_engine({"a:\nb\n", "a:\n  b:\nc\n",
+                                       "a:\n  b:\n  c\n  d\n", "f:\n  b:\nf:\n",
+                                       "b:\nf:\n"});
+}
+
+// A statement that may end with the input ends there only: a dedent a repair
+// invents inside the text is no end of it, in either engine.
+void an_end_assertion_holds_at_the_end_only() {
+  repairs_agree_with_the_table_engine({"a:\n  b c\n", "a:\n  b c\nd\n"});
+}
+
 // An indent no block asked for is one fault, and the lines behind it are read,
 // a last line with no newline too.
-void a_stray_indent_costs_one_fault() {
+void an_extra_indent_costs_one_fault() {
   repairs_agree_with_the_table_engine(
       {"a:\n  b\n    c\n  d\ne\n", "  a\nb\n", "a:\n  b\n c\n", "a\n  b\nc\n",
        "    a\n  b\nc\n", "a::\n  a\nb\n", "s0::\n  0\n", "s0:s1\n",
@@ -351,8 +378,8 @@ void an_invented_bracket_moves_the_levels_of_the_lines_behind() {
 // repair names as the search read it: the end of the input is the pending
 // dedent there too, and no block is invented inside another.
 void an_unfinished_block_at_the_end_is_not_filled_with_blocks() {
-  const auto ll = tllindent::generated::Laid::create_parser();
-  const auto lr = tindent::laid::generated::Cases::create_parser();
+  const auto ll = tllindent::generated::Synthetic::create_parser();
+  const auto lr = tindent::synthetic::generated::Cases::create_parser();
   const std::string_view text = "heads z:";
   const auto a = ll->parse(text);
   const auto b = lr->parse(text);
@@ -363,8 +390,8 @@ void an_unfinished_block_at_the_end_is_not_filled_with_blocks() {
 // A dropped token holds its bytes as a read one does, a backslash in front of
 // its own line's end included: the line after it says an indentation.
 void a_dropped_token_holds_the_backslash_it_ends_on() {
-  const auto ll = tllindent::generated::Laid::create_parser();
-  const auto lr = tindent::laid::generated::Cases::create_parser();
+  const auto ll = tllindent::generated::Synthetic::create_parser();
+  const auto lr = tindent::synthetic::generated::Cases::create_parser();
   for (const std::string_view text :
        {"heads a %c\\\n%d\\\ne\n", "heads a %c\\\n%d\\\n  e\n"}) {
     const auto x = ll->parse(text);
@@ -412,19 +439,19 @@ std::vector<std::string> blocks(unsigned count) {
 }
 
 // What a caret over [from, to) is offered, by the name and spelling of each
-// terminal. The tokens the indentation lays are no text to offer, unless
-// `laid` asks for them.
+// terminal. The tokens the indentation adds are no text to offer, unless
+// `synthetic` asks for them.
 std::vector<std::string> offered(const cursiv::Parser& parser,
                                  const std::string& text,
                                  cursiv::TextOffset from, cursiv::TextOffset to,
-                                 bool laid = false) {
+                                 bool synthetic = false) {
   const auto result = parser.parse(text);
   std::vector<cursiv::NextFeature> next;
   parser.nextFeaturesAt(result.cst(), from, to, next);
   std::vector<std::string> out;
   for (const auto& f : next) {
     const auto name = parser.getGrammar().terminalName(f.feature);
-    if (!laid && (name == "INDENT" || name == "DEDENT")) continue;
+    if (!synthetic && (name == "INDENT" || name == "DEDENT")) continue;
     const auto spellings = parser.getGrammar().terminalSpellings(f.feature);
     if (spellings.empty()) out.push_back(std::string(name) + " ");
     for (const std::string_view s : spellings)
@@ -451,10 +478,8 @@ std::string joined(const std::vector<std::string>& names) {
 }
 
 // A caret stands where the other engine's does, at every place of a valid
-// document and where a cut of one stops on a blank: past an indent, a dedent
-// and the closing of a suite alike, on a line's blanks, which say what the
-// line's level is, and offering no token the indentation lays. A cut that stops
-// on a word is left out: the repairs the two engines make for it are their own.
+// document and where a cut stops on a blank, past an indent, a dedent or a
+// suite's close. A cut on a word is left out.
 void a_caret_agrees_with_the_table_engine_past_the_levels(
     const cursiv::Parser& ll, const cursiv::Parser& lr,
     const std::vector<std::string>& corpus) {
@@ -478,9 +503,9 @@ void a_caret_agrees_with_the_table_engine_past_the_levels(
 }
 
 // A suite's first line is offered its words: the indent the caret stands
-// glued to is no text a lexer reads again.
+// attached to is no text a lexer reads again.
 void a_caret_behind_an_indent_is_offered_the_words_of_the_suite() {
-  const auto ll = tllindent::generated::Laid::create_parser();
+  const auto ll = tllindent::generated::Synthetic::create_parser();
   CHECK(offers(*ll, "suites top a:\n  pa", 16, 18, "pass"));
   CHECK(offers(*ll, "suites top a:\n  pass\n", 16, 20, "pass"));
   CHECK(offers(*ll, "suites top a:\n  pass\n  pa", 23, 25, "pass"));
@@ -490,7 +515,7 @@ void a_caret_behind_an_indent_is_offered_the_words_of_the_suite() {
 // words of the level it leaves, whether the caret stands at the end of the
 // text or inside the word.
 void a_caret_past_a_dedent_is_offered_the_words_of_the_outer_level() {
-  const auto ll = tllindent::generated::Laid::create_parser();
+  const auto ll = tllindent::generated::Synthetic::create_parser();
   CHECK(offers(*ll, "suites top a:\n  pass\n", 21, 21, "top"));
   CHECK(!offers(*ll, "suites top a:\n  pass\n", 21, 21, "pass"));
   CHECK(offers(*ll, "suites top a:\n  pass\ntop b:\n  pass\n", 21, 24, "top"));
@@ -596,8 +621,8 @@ int main() {
   a_caret_behind_an_indent_is_offered_the_words_of_the_suite();
   a_caret_past_a_dedent_is_offered_the_words_of_the_outer_level();
   a_caret_agrees_with_the_table_engine_past_the_levels(
-      *tllindent::generated::Laid::create_parser(),
-      *tindent::laid::generated::Cases::create_parser(),
+      *tllindent::generated::Synthetic::create_parser(),
+      *tindent::synthetic::generated::Cases::create_parser(),
       {"suites top a:\n  pass\n", "suites top a:\n  pass\n  pass\n",
        "suites top a:\n  pass\ntop b:\n  pass\n",
        "suites top a:\n  pass\n  pass\ntop b:\n  pass\n  pass\n",
@@ -610,17 +635,18 @@ int main() {
        "a:\n  b [ c\n      d\n  ]\n  e\n"});
   explicit_statement_newlines_win_over_their_trivia_twin();
   dropped_dedents_split_no_token();
-  muted_levels_lay_no_dedent_at_the_end();
+  muted_levels_add_no_dedent_at_the_end();
   a_dropped_indent_leaves_the_name_it_splits(
-      *tllindent::generated::Laid::create_parser());
+      *tllindent::generated::Synthetic::create_parser());
   a_dropped_indent_leaves_the_name_it_splits(
-      *tindent::laid::generated::Cases::create_parser());
+      *tindent::synthetic::generated::Cases::create_parser());
   an_invented_indent_opens_a_level();
+  an_end_assertion_holds_at_the_end_only();
   an_indentation_error_says_so();
   a_form_feed_starts_the_indentation_again();
   a_caret_crosses_a_line_its_bracket_joins();
   a_form_feed_leaves_a_caret_its_reading();
-  a_stray_indent_costs_one_fault();
+  an_extra_indent_costs_one_fault();
   an_invented_bracket_moves_the_levels_of_the_lines_behind();
   an_invented_block_closed_at_once_ends();
   an_unfinished_block_at_the_end_is_not_filled_with_blocks();
@@ -650,9 +676,9 @@ int main() {
          *tindent::repaired::generated::G::create_parser(),
          *tllindent::generated::Bare::create_ast_reflection(),
          {"a:\n  b\nc\n", "a:\n  b:\n    c\n"});
-  parity(*tllindent::generated::Laid::create_parser(),
-         *tindent::laid::generated::Cases::create_parser(),
-         *tllindent::generated::Laid::create_ast_reflection(),
+  parity(*tllindent::generated::Synthetic::create_parser(),
+         *tindent::synthetic::generated::Cases::create_parser(),
+         *tllindent::generated::Synthetic::create_ast_reflection(),
          {"a", "a:\n  b", "a:\n  b\nc"});
   namespace dedent = tlldedentrun::generated;
   auto runs = std::pair{dedent::Ll::create_parser(),

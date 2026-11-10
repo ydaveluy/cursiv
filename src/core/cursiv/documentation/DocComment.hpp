@@ -1,9 +1,7 @@
 #pragma once
 
-// Structured documentation comment model: tokenizer, parser and renderers.
-// A comment parses into a tree of paragraphs, tags and lines, each carrying
-// its source range; the markers (start, line prefix, end) are configurable
-// through `DocCommentParseOptions`.
+// Structured documentation comments: tokenizer, parser and renderers. A
+// comment parses into paragraphs, tags and lines, each with its source range.
 
 #include <cstdint>
 #include <functional>
@@ -14,10 +12,8 @@
 
 namespace cursiv {
 
-/// Zero-based line/character position inside the source document.
-/// `character` counts BYTES of the comment's text, not UTF-16 units. `offset`
-/// is the byte offset in the same document, past the `offset` of the position
-/// the comment was parsed from.
+/// Zero-based position in the source document. `character` counts bytes of
+/// the comment's text, not UTF-16 units; `offset` is a byte offset.
 struct DocCommentPosition {
   std::uint32_t line = 0;
   std::uint32_t character = 0;
@@ -30,24 +26,20 @@ struct DocCommentRange {
   DocCommentPosition end;
 };
 
-/// Options controlling how a comment is delimited.
-///
-/// Markers are matched as literal text: `start`/`line` after leading
-/// whitespace at the beginning of a line, `end` (with surrounding whitespace)
-/// at the end of the last line.
+/// How a comment is delimited. Markers are literal text: `start` and `line`
+/// after leading whitespace, `end` at the end of the last line.
 struct DocCommentParseOptions {
   std::string start = "/**";
   std::string line = "*";
   std::string end = "*/";
 };
 
-/// Options controlling how a parsed comment is rendered to Markdown.
 struct DocCommentRenderOptions {
-  /// Emphasis applied to a `@tag` marker. Defaults to italic.
+  /// Emphasis of a `@tag` marker.
   enum class TagStyle : std::uint8_t { Plain, Italic, Bold, BoldItalic };
   TagStyle tag = TagStyle::Italic;
 
-  /// Default rendering for `{@link}` targets. Defaults to plain.
+  /// Rendering of a `{@link}` target when `renderLink` gives none.
   enum class LinkStyle : std::uint8_t { Plain, Code };
   LinkStyle link = LinkStyle::Plain;
 
@@ -65,15 +57,9 @@ struct DocCommentRenderOptions {
       renderLink;
 };
 
-/// One node of a parsed documentation comment.
-///
-/// A node is one of:
-/// - `Paragraph`: a block of text whose `children` are the inline nodes (lines
-///   and inline tags) it is composed of.
-/// - `Tag`: a `@tag`. A block tag's `children` hold its content, lines and
-///   inline tags; an inline tag (`{@link ...}`, `inlineTag == true`) holds at
-///   most one line.
-/// - `Line`: a single line of plain text in `text`.
+/// One node of a parsed comment: a `Paragraph` of inline nodes, a `Tag` whose
+/// children hold its content (an inline tag holds at most one line), or a
+/// `Line` of plain text.
 struct DocCommentNode {
   enum class Kind : std::uint8_t { Paragraph, Tag, Line };
 
@@ -100,15 +86,12 @@ struct DocCommentNode {
       const DocCommentRenderOptions& options = {}) const;
 };
 
-/// A fully parsed documentation comment.
 struct DocComment {
-  /// Top-level nodes only: paragraphs and block tags. Inline tags live inside
-  /// their paragraph's (or tag's) children -- which is why the tag queries
-  /// below never see them.
+  /// Top-level nodes only: paragraphs and block tags. Inline tags are in their
+  /// paragraph's or tag's children, so `getTag` and `getTags` do not see them.
   std::vector<DocCommentNode> elements;
-  /// From the first element's start to the last one's end -- the delimiters
-  /// are outside, and an empty comment degenerates to its start position.
-  /// `character` counts BYTES of the comment's own text, not UTF-16 units.
+  /// From the first element's start to the last one's end, delimiters
+  /// excluded; an empty comment gives its start position.
   DocCommentRange range;
 
   /// Returns the first top-level block tag named `name` in document order, or
@@ -120,26 +103,18 @@ struct DocComment {
   [[nodiscard]] std::vector<const DocCommentNode*> getTags(
       std::string_view name) const;
 
-  /// Renders the comment to plain text.
   [[nodiscard]] std::string toString() const;
-  /// Renders the comment to Markdown.
   [[nodiscard]] std::string toMarkdown(
       const DocCommentRenderOptions& options = {}) const;
 };
 
-/// Returns whether `comment` is delimited as a documentation comment under
-/// `options`: its first line starts with `start` and its last line ends with
-/// `end`, leading and trailing whitespace tolerated. Middle lines are never
-/// examined and `options.line` is not read. An empty marker disables its half
-/// of the test.
+/// Whether `comment` starts with `options.start` and ends with `options.end`,
+/// whitespace tolerated. An empty marker disables its half of the test.
 [[nodiscard]] bool is_doc_comment(std::string_view comment,
                                   const DocCommentParseOptions& options = {});
 
-/// Parses `comment` into a structured documentation model. An empty marker in
-/// `options` disables its role, as it does for `is_doc_comment`.
-///
-/// `start` is the position the comment occupies in the source document, used to
-/// anchor every node range; it defaults to the document origin.
+/// Parses `comment`; an empty marker in `options` disables its role. `start`
+/// is where the comment sits in the document, and anchors every node range.
 [[nodiscard]] DocComment parse_doc_comment(
     std::string_view comment, DocCommentPosition start = {},
     const DocCommentParseOptions& options = {});

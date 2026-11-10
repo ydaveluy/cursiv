@@ -1,7 +1,5 @@
-# THE SCAFFOLD, RUN: `docs/cursiv-new.cmake` writes a project outside this
-# tree, and that project is then configured, built and tested the way its README
-# says. What only a run can prove: the templates still name an engine surface
-# that exists, and a project with nothing generated in it still builds.
+# Runs `docs/cursiv-new.cmake`, then configures, builds and tests the project
+# as its README says, from a tree with nothing generated in it.
 cmake_minimum_required(VERSION 3.30)
 
 file(REMOVE_RECURSE ${WORK})
@@ -15,8 +13,8 @@ function(_step what)
   endif()
 endfunction()
 
-# The published scaffolder is packed FROM the templates: editing one without
-# repacking the other is the drift this catches before anything is built.
+# The published scaffolder is packed from the templates: this catches a
+# template edited without repacking.
 _step("repacking the scaffolder" ${CMAKE_COMMAND} -DOUT=${WORK}/packed.cmake
       -P ${GENERATE})
 execute_process(COMMAND ${CMAKE_COMMAND} -E compare_files --ignore-eol
@@ -39,6 +37,17 @@ foreach(_name IN ITEMS Class Foo__Bar _Hidden)
   endif()
 endforeach()
 
+# A name whose namespace or targets the project already has beside it.
+foreach(_name IN ITEMS Main MAIN Std Std17 Posix Cursiv)
+  execute_process(COMMAND ${CMAKE_COMMAND} -DNAME=${_name}
+      -DDIR=${WORK}/taken-${_name} -P ${SCAFFOLD}
+      RESULT_VARIABLE _rc OUTPUT_VARIABLE _log ERROR_VARIABLE _log)
+  if(_rc EQUAL 0 OR NOT _log MATCHES "nor[ \n]+main,[ \n]+std,[ \n]+posix[ \n]+or[ \n]+cursiv"
+     OR EXISTS ${WORK}/taken-${_name})
+    message(FATAL_ERROR "the scaffold accepted name ${_name}: ${_log}")
+  endif()
+endforeach()
+
 # An extension ends file names and is written into CMake and JSON as is.
 foreach(_ext IN ITEMS "." ".bad\"" ".x/../../outside" ".a;b" "rcp")
   execute_process(COMMAND ${CMAKE_COMMAND} -DNAME=Ext "-DEXT=${_ext}"
@@ -56,12 +65,24 @@ endif()
 _step("the scaffolder" ${CMAKE_COMMAND} -DNAME=No -P ${SCAFFOLD})
 set(_project ${WORK}/no)
 
-# ONE CONFIGURE AND ONE BUILD, over a tree that holds no generated source: the
-# sequence the scaffolded README prints is the sequence run here.
+# The build writes the grammar's keywords into the editor's TextMate file, so a
+# stale list there comes back as the grammar spells it.
+set(_syntax ${_project}/vscode/syntaxes/no.tmLanguage.json)
+file(READ ${_syntax} _json)
+string(JSON _json SET "${_json}" repository keywords match [["stale"]])
+file(WRITE ${_syntax} "${_json}")
+
+# One configure and one build over a tree without generated sources, as the
+# scaffolded README prints them.
 _step("the configure" ${CMAKE_COMMAND} -S ${_project} -B ${_project}/build
       -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=${CXX}
       -DCURSIV_SOURCE_DIR=${CURSIV})
 _step("the build" ${CMAKE_COMMAND} --build ${_project}/build)
+file(READ ${_syntax} _json)
+string(JSON _match GET "${_json}" repository keywords match)
+if(NOT _match STREQUAL [[\b(person|Hello)\b]])
+  message(FATAL_ERROR "the build did not write the keywords into ${_syntax}: ${_match}")
+endif()
 _step("the tests" ${CMAKE_CTEST_COMMAND} --test-dir ${_project}/build
       --output-on-failure)
 set(_bench ${_project}/build/src/no_bench)

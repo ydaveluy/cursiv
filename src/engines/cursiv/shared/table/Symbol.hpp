@@ -1,7 +1,6 @@
-// One packed id space for the two kinds of symbol: terminals below the
-// base, nonterminals above. Terminal 0 is end of input, nonterminal 0 the
-// augmented start, and a right-hand side holds either without a tag to say
-// which.
+// One packed id space for both kinds of symbol: terminals below the base,
+// nonterminals above. Terminal 0 is the end of input, nonterminal 0 the
+// augmented start.
 #pragma once
 
 #include <cstdint>

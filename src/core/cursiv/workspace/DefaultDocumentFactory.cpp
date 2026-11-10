@@ -74,7 +74,7 @@ std::shared_ptr<Document> DefaultDocumentFactory::fromString(
     const CancellationToken& cancelToken) const {
   const std::string canonical = normalize_uri(uri);
   const CoreServices& services = servicesFor(canonical, {});
-  // Disk content is version 0: it has no client to stamp it.
+  // Disk content is version 0: it has no client to set one.
   return fromTextDocument(
       TextDocument::create(canonical, services.languageMetaData.languageId, 0,
                            std::move(text)),

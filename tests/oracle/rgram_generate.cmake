@@ -1,6 +1,6 @@
-# One random grammar's generator run. A refusal is an answer its lane reads,
-# and it removes the tree an earlier generator wrote, which the lane would
-# otherwise read; anything else that fails is the build's.
+# Runs the generator on one random grammar. A refusal is an answer its test
+# reads, and removes what an earlier run wrote; any other failure fails the
+# build.
 file(MAKE_DIRECTORY ${DIR})
 execute_process(COMMAND ${GEN} ${DIR}
     RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 300)

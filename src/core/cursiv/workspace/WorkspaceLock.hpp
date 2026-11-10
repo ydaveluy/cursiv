@@ -7,15 +7,9 @@
 
 namespace cursiv {
 
-// One writer, shared readers. Every pointer and view taken under a read stays
-// valid while it is held, unless the read is `Immediate` -- the door `settle`
-// opens. A read inside a write runs inline, on the writer's own thread only;
-// a write under a read, or a wait from a read action, both deadlock instead,
-// silently. So does a `Normal` read inside another read once a write is
-// waiting -- the write waits for the reader already in -- and one from a
-// worker of a write's build, which waits for that write. An escaping
-// `OperationCancelled` is absorbed; any other exception propagates after
-// exclusivity is released.
+// One writer, shared readers; a read inside a write runs inline on the
+// writer's thread. A write inside a read, or a wait or `Normal` read from a
+// read or a build worker, can deadlock. `OperationCancelled` is absorbed.
 class WorkspaceLock {
  public:
   virtual ~WorkspaceLock() noexcept = default;
@@ -26,16 +20,13 @@ class WorkspaceLock {
     // The default, and the low-latency model: a newer write cancels this
     // one's token the moment it enters.
     Supersedable,
-    // The mutation is protected: a causally-announced edit -- one the client
-    // has already committed on its side -- must not lose the install of its
-    // text to a keystroke that arrived behind it. Durability ends at `settle`:
-    // once the mutation is read-safe, the rest is superseded normally.
+    // Protects the mutation of an edit the client already committed from a
+    // later keystroke; past `endMutation`, the write is superseded normally.
     Durable,
   };
 
-  // `cursiv::function_ref`, not an owning callable: `write`/`read` run the
-  // action on the calling thread, so it lives on that stack for the whole call.
-  // It has no empty state, which is the point -- a null action is not a case.
+  // `write`/`read` run the action on the calling thread, so it lives on that
+  // stack for the whole call; it cannot be null.
   using WriteAction = cursiv::function_ref<void(const CancellationToken&)>;
   using ReadAction = cursiv::function_ref<void()>;
 
@@ -43,11 +34,11 @@ class WorkspaceLock {
   // where the state it needs has already been awaited by other means -- here,
   // `DocumentBuilder::waitUntil`.
   enum class ReadPriority : std::uint8_t {
-    // Queued behind every write, as a read has always been.
+    // Queued behind every write.
     Normal,
-    // Runs beside a settled write instead of waiting for it. What it buys is
-    // the build's tail: a request needing only `Parsed` no longer waits for
-    // the scopes and the linking of a build already past its mutation.
+    // Runs beside a write whose mutation ended, instead of waiting for it: a
+    // request needing only `Parsed` does not wait for the scopes and the
+    // linking of a build already past its mutation.
     Immediate,
   };
 
@@ -60,20 +51,15 @@ class WorkspaceLock {
   [[nodiscard]] virtual bool read(ReadAction action,
                                   const CancellationToken& = {},
                                   ReadPriority = ReadPriority::Normal) = 0;
-  // The write's mutation is over, said from inside it on its own thread. It is
-  // the one boundary a write has: before it an `Immediate` read would hold
-  // pointers a reset is about to invalidate -- dropping a parse invalidates
-  // every pointer into a document; after it, the documents this write did not
-  // reset only climb, and a `Durable` write stops being protected. A no-op
-  // anywhere else, so a caller with no write in hand cannot open the door.
-  virtual void settle() = 0;
-  // Whether the serving write has said it -- what a mutation asserts against.
-  // Past a settle, an `Immediate` read may be holding a tree, so nothing may
-  // free one. False when no write holds, which is what lets a build outside
-  // any lock assert the same line.
-  [[nodiscard]] virtual bool settled() const = 0;
+  // Says the write's mutation is over, from inside the write: documents it did
+  // not reset only advance from here, and `Immediate` reads may run. A no-op
+  // anywhere else.
+  virtual void endMutation() = 0;
+  // Whether the serving write's mutation has ended: nothing may free a tree
+  // then. False when no write holds.
+  [[nodiscard]] virtual bool mutationEnded() const = 0;
   // Cancels the last submitted write; it still runs, and a durable one keeps
-  // its mutation: the cancellation lands at its settle.
+  // its mutation: the cancellation takes effect when its mutation ends.
   virtual void cancelWrite() = 0;
 };
 

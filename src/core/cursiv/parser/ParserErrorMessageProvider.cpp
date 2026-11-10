@@ -35,18 +35,15 @@ std::string ParserErrorMessageProvider::buildMessage(
   return "Syntax error";
 }
 
-// What the grammar accepts where a repair was owed. A repair is owed
-// terminals, so their spellings are asked of the grammar directly -- no
-// descent through groups and repetitions, and no cycle to guard against.
-// The first names the sentence: where it has no spelling of its own the
-// others say nothing about it, and its name alone is the better word.
+// The spellings of the terminals a repair expected, the first element's
+// first. None when the first has no spelling: its name says more.
 std::vector<std::string_view> expected_spellings(const Grammar& grammar,
                                                  const ParseDiagnostic& d,
                                                  std::size_t limit) {
   std::vector<std::string_view> spellings;
-  const auto add = [&](ElementId owed) {
-    if (owed == kNoElement) return;
-    for (const std::string_view text : grammar.terminalSpellings(owed)) {
+  const auto add = [&](ElementId expected) {
+    if (expected == kNoElement) return;
+    for (const std::string_view text : grammar.terminalSpellings(expected)) {
       if (spellings.size() == limit) return;
       if (std::ranges::find(spellings, text) == spellings.end())
         spellings.push_back(text);
@@ -55,9 +52,9 @@ std::vector<std::string_view> expected_spellings(const Grammar& grammar,
   if (limit == 0) return spellings;
   add(d.element);
   if (spellings.empty()) return spellings;
-  for (const ElementId owed : d.also) {
+  for (const ElementId expected : d.also) {
     if (spellings.size() == limit) break;
-    add(owed);
+    add(expected);
   }
   return spellings;
 }

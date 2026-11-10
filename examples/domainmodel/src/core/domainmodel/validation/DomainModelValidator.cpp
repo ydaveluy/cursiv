@@ -58,16 +58,15 @@ DomainModelValidator::~DomainModelValidator() noexcept {
     shared.documentBuilder->removeDocumentUpdateListener(*this);
 }
 
-void DomainModelValidator::noteClimb(cursiv::DocumentId from,
-                                     cursiv::DocumentId through) const {
-  const std::scoped_lock lock(_climbedMutex);
-  _climbed[from].insert(through);
+void DomainModelValidator::noteDependency(cursiv::DocumentId from,
+                                          cursiv::DocumentId through) const {
+  const std::scoped_lock lock(_dependenciesMutex);
+  _dependencies[from].insert(through);
 }
 
-// Announced once this update's resets are done: a document the climbs went
-// through moved if it is gone or no longer linked. A validated document whose
-// climbs went through one goes back to validation; any other drops its entry,
-// which its next validation writes again.
+// A validated document whose walks went through a document now gone or
+// unlinked goes back to validation. Any other entry is dropped until the
+// document's next validation.
 void DomainModelValidator::onUpdate(std::span<const std::string_view>,
                                     std::span<const std::string_view>) {
   const cursiv::Documents& store = *shared.documents;
@@ -76,8 +75,8 @@ void DomainModelValidator::onUpdate(std::span<const std::string_view>,
     return document == nullptr
            || document->state.load() < cursiv::DocumentState::IndexedReferences;
   };
-  const std::scoped_lock lock(_climbedMutex);
-  for (auto at = _climbed.begin(); at != _climbed.end();) {
+  const std::scoped_lock lock(_dependenciesMutex);
+  for (auto at = _dependencies.begin(); at != _dependencies.end();) {
     const std::shared_ptr<cursiv::Document> document =
         store.getDocument(at->first);
     if (document != nullptr
@@ -89,7 +88,7 @@ void DomainModelValidator::onUpdate(std::span<const std::string_view>,
       shared.documentBuilder->resetToState(
           *document, cursiv::DocumentState::IndexedReferences);
     }
-    at = _climbed.erase(at);
+    at = _dependencies.erase(at);
   }
 }
 
@@ -116,7 +115,7 @@ DomainModelValidator::Exit DomainModelValidator::exitOf(
   const cursiv::DocumentId id =
       document == nullptr ? cursiv::kNoDocument : document->id;
   return _exits.get(id, &entity, [&] {
-    // The entities past `entity`: most climbs pass none.
+    // The entities past `entity`: most walks pass none.
     Passed passed;
     Exit exit;
     for (const ast::Entity* at = &entity;;) {
@@ -143,11 +142,11 @@ DomainModelValidator::Exit DomainModelValidator::exitOf(
   });
 }
 
-// From one document to the next: a climb that enters an entity twice loops.
-// Each document it enters is noted, since the verdict reads it.
+// From one document to the next: a walk that enters an entity twice loops.
+// Each document it enters is noted, since the result depends on it.
 void DomainModelValidator::checkEntityDoesNotExtendItself(
     const ast::Entity& entity, cursiv::ValidationAcceptor& accept) const {
-  const cursiv::Document* const home = entity.getDocument();
+  const cursiv::Document* const entityDocument = entity.getDocument();
   Passed entered;
   for (const ast::Entity* at = &entity;;) {
     const Exit exit = exitOf(*at);
@@ -156,8 +155,8 @@ void DomainModelValidator::checkEntityDoesNotExtendItself(
         || entered.contains(exit.next))
       break;
     if (const cursiv::Document* const next = exit.next->getDocument();
-        home != nullptr && next != nullptr && next != home)
-      noteClimb(home->id, next->id);
+        entityDocument != nullptr && next != nullptr && next != entityDocument)
+      noteDependency(entityDocument->id, next->id);
     entered.add(exit.next);
     at = exit.next;
   }

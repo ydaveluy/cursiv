@@ -15,10 +15,8 @@
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/formatting/FormattingAction.hpp"
 
-// The engine: rules in, minimal edits out. It knows the CST and the
-// document, never a grammar, so it compiles once for the tree. The CST is a
-// postorder tape with no parent link; document order comes from descending
-// the forest's roots through `reverse_children`.
+// The engine: rules in, minimal edits out. It knows the CST and the document,
+// never a grammar.
 
 namespace cursiv::detail {
 
@@ -51,7 +49,7 @@ class FormattingActions final : public FormattingCollector {
 
   std::vector<std::uint32_t> _at;
   std::vector<FormattingAction> _pool;
-  // Sparse, and a comment is rare beside a record: this one stays a map.
+  // Sparse: few records are rewritten comments.
   std::unordered_map<NodeId, std::string> _replacements;
 };
 
@@ -61,9 +59,8 @@ class FormattingActions final : public FormattingCollector {
 [[nodiscard]] std::string indentation_text(
     std::int32_t indentation, const lsp::FormattingOptions& options);
 
-// The lines of a range format, held as the offsets where they start, so a test
-// on lines is a comparison of offsets: no span is converted to a position to
-// find out the range leaves it out.
+// The lines of a range format, held as the offsets where they start: a test on
+// lines compares offsets and converts no span to a position.
 class RangeLines {
  public:
   RangeLines(const TextDocument& text, const lsp::Range& range);
@@ -91,10 +88,9 @@ class RangeLines {
   std::uint64_t _afterLast;
 };
 
-// Runs the walk and materialises the edits. `visitHidden` runs on every hidden
-// record before its edits are computed, with the indentation in force and the
-// newline style, so an `onHidden` callback may register a rule or a
-// replacement.
+// Runs the walk and makes the edits. `visitHidden` sees each hidden record
+// first, with the indentation in force, so an `onHidden` callback may add a
+// rule or a replacement.
 [[nodiscard]] std::vector<lsp::TextEdit> run_formatting(
     const Document& document, const Cst& cst,
     const lsp::FormattingOptions& options,

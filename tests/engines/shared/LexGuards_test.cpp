@@ -38,9 +38,9 @@ void a_keyword_keeps_a_complemented_boundary(const cursiv::Parser& p) {
   CHECK(items(p, "go!go;") == (Items{"go!", "go;"}));
 }
 
-// A letter rescues `if`, and a match ending on it stands where the longer one
+// A letter lets `if` pass, and a match ending on it stands where the longer one
 // is refused by the scalar after it.
-void a_rescued_refusal_keeps_the_shorter_match(const cursiv::Parser& p) {
+void a_passable_refusal_keeps_the_shorter_match(const cursiv::Parser& p) {
   CHECK(items(p, "xifaλ") == (Items{"xif", "aλ"}));
   CHECK(items(p, "xifa") == Items{"xifa"});
   CHECK(items(p, "xabcλ") == (Items{"xab", "cλ"}));
@@ -60,7 +60,7 @@ void an_assertion_reads_a_choice_of_many_words(const cursiv::Parser& p) {
 }
 
 // A run of more refusals than a recognizer tests one by one is read as data:
-// each word refused, short of the letter that rescues it.
+// each word refused, short of the letter that lets it pass.
 void an_assertion_reads_a_run_of_many_refusals(const cursiv::Parser& p) {
   CHECK(items(p, "vqz") == Items{"vqz"});
   CHECK(items(p, "vqλz") == Items{"vqλz"});
@@ -119,7 +119,7 @@ int main() {
   auto lr = tlexguards::generated::Lr::create_parser();
   for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
     a_keyword_keeps_a_complemented_boundary(*parser);
-    a_rescued_refusal_keeps_the_shorter_match(*parser);
+    a_passable_refusal_keeps_the_shorter_match(*parser);
     an_assertion_reads_a_choice_of_many_words(*parser);
     an_assertion_reads_a_run_of_many_refusals(*parser);
   }

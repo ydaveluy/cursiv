@@ -7,10 +7,8 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 
-// The commands an editor draws above a line -- run this test, show these
-// callers. No default: which construct is worth a lens is the language's
-// own. No resolve step either: a lens is answered complete, `resolveProvider`
-// false at the handshake, so nothing ever asks to resolve one.
+// The commands an editor draws above a line. No default and no resolve step:
+// a lens is answered complete.
 
 namespace cursiv {
 

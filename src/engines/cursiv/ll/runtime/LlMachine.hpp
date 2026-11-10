@@ -1,11 +1,6 @@
-// The descent's calls, kept on the heap: a step runs in place a callee that
-// can finish there and hands every other call to this loop, which runs it
-// before resuming the step; a callee run in place that calls in turn waits
-// here too. The native stack never holds more than a step, the callee it runs
-// in place and the plain rules below them, a chain the generator bounds and
-// none of which reaches a rule that calls itself: how deep the text nests is
-// bounded by memory, not by the stack, and by the 4 GiB of frames a call's
-// place can name: past them a parse throws `std::length_error`.
+// The descent's calls: a step runs in place a callee that can finish there and
+// hands any other call to this loop, so nesting is bounded by memory, up to 4
+// GiB of frames; past that a parse throws `std::length_error`.
 #pragma once
 
 #include <cstddef>
@@ -75,11 +70,13 @@ class LlMachine {
     _top = static_cast<std::uint32_t>(at);
   }
 
+  // Grows the storage to `_used`, doubling but never past what a call's place
+  // can name, so doubling cannot wrap.
   CURSIV_NOINLINE void grow() {
-    if (_used > kNoCall)
-      throw std::length_error("cursiv: LL stack is too deep");
+    constexpr std::size_t kMost = kNoCall;
+    if (_used > kMost) throw std::length_error("cursiv: LL stack is too deep");
     std::size_t room = _room == 0 ? 4096 : _room;
-    while (room < _used) room *= 2;
+    while (room < _used) room = room > kMost / 2 ? kMost : room * 2;
     auto frames = std::make_unique_for_overwrite<std::byte[]>(room);
     if (_room != 0) std::memcpy(frames.get(), _frames.get(), _room);
     _frames = std::move(frames);
@@ -92,11 +89,9 @@ class LlMachine {
   const std::uint32_t* _bytes = nullptr;
 };
 
-// The call of `rule`, whose frame is `F` and step `S`, run in place: its frame
-// stands on the native stack while it runs, and moves to the machine only if
-// it calls in turn. A rule already in its caller's place hands the call to the
-// machine instead. `kLlDone` once the callee is done; otherwise the call its
-// caller hands over.
+// The call of `rule`, frame `F` and step `S`, run in place on the native stack;
+// its frame moves to the machine if it calls in turn or holds its caller's
+// place. `kLlDone` once done, else the call to hand over.
 template <class F, std::uint16_t (*S)(LlContext&, void*)>
 CURSIV_ALWAYS_INLINE inline std::uint16_t ll_call(LlContext& c,
                                                   std::uint16_t rule) {

@@ -1,8 +1,6 @@
-// A branch that reads the same tokens as an earlier branch of its choice: the
-// choice takes the first branch written, so the later one is never chosen.
-// An optional item read in place of an earlier one that reads the same tokens
-// is never chosen either. Both lowerings read the bodies without them, and the
-// generator names each one in a warning.
+// A branch, or an optional item, that reads the same tokens as an earlier one
+// of its choice is never chosen: both lowerings drop it, and the generator
+// names it in a warning.
 #pragma once
 
 #include <cstdint>
@@ -30,11 +28,9 @@ struct TwinFound {
   bool item = false;
 };
 
-// Twins are compared by the tokens they read: a write or prose reads as its
-// operand, and a call to a data rule that does not call itself as the rule's
-// body, while a region, a condition and any other call stand for themselves.
-// An optional position is read taken and left, up to the gate. Languages are
-// not compared: two branches that spell one language two ways both stay.
+// Twins are compared by the tokens they read, a call to a data rule read
+// through; a region, a condition and any other call stand for themselves.
+// Languages are not compared.
 class TwinReader {
  public:
   // The body a call to `rule` reads in place, where the rule is a data rule of
@@ -60,29 +56,29 @@ class TwinReader {
   };
   using Reading = std::vector<std::uint32_t>;
 
-  ImageId kid(ImageId id, std::uint32_t i) const {
-    return _im.kids[_im.nodes[id].first + i];
+  ImageId child_at(ImageId id, std::uint32_t i) const {
+    return _im.children[_im.nodes[id].first + i];
   }
-  std::vector<ImageId> kids(ImageId id) const;
+  std::vector<ImageId> children(ImageId id) const;
   std::uint32_t intern(std::vector<std::uint64_t> shape);
   std::uint32_t text(std::string_view s);
-  std::uint32_t key(ImageId id);
-  std::uint32_t shape(ImageId id);
-  std::vector<std::uint32_t> branch_keys(ImageId choice);
+  Descent<std::uint32_t> key(ImageId id);
+  Descent<std::uint32_t> shape(ImageId id);
+  Descent<std::vector<std::uint32_t>> branch_keys(ImageId choice);
   ImageId expanded(std::uint32_t rule);
-  const std::vector<Item>* called(std::uint32_t rule);
+  Descent<const std::vector<Item>*> called(std::uint32_t rule);
   void analyse_calls(std::uint32_t rule);
-  void flatten(ImageId id, std::vector<Item>& out);
+  Descent<void> flatten(ImageId id, std::vector<Item>& out);
   bool reads(const std::vector<Item>& items) const;
-  std::vector<Reading> readings(const std::vector<Item>& items);
+  Descent<std::vector<Reading>> readings(const std::vector<Item>& items);
   bool optional(ImageId id) const;
-  bool folds(ImageId id);
-  bool alike(ImageId a, ImageId b);
+  Descent<bool> folds(ImageId id);
+  Descent<bool> read_same(ImageId a, ImageId b);
 
-  ImageId drop_node(ImageId id);
-  ImageId drop_choice(ImageId id);
-  ImageId drop_sequence(ImageId id);
-  ImageId first_present(const std::vector<ImageId>& run);
+  Descent<ImageId> drop_node(ImageId id);
+  Descent<ImageId> drop_choice(ImageId id);
+  Descent<ImageId> drop_sequence(ImageId id);
+  Descent<ImageId> first_present(const std::vector<ImageId>& run);
 
   GrammarImage& _im;
   DataBody _dataBody;

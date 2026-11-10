@@ -1,5 +1,5 @@
 // An operator of a precedence table: its step and grouping reach the tokens it
-// opens on once every production is laid.
+// opens on once every production is built.
 #pragma once
 
 #include <cstdint>
@@ -43,12 +43,9 @@ struct infix_op_read<TypeList<E>> : infix_op_rule<E> {};
 template <class... Es>
 struct infix_op_rule<Seq<Es...>> : infix_op_read<readers_t<Es...>> {};
 
-// What an operator's site reads from. A rule that states no conversion, joins
-// no parts and lands in a member no alternative is chosen for reads its span
-// exactly as a bare literal does -- naming it must not mint a second row, or
-// the ladder's productions stop sharing a class and the table grows one state
-// per operator instead of one per step. `Resolve` is the rule a stage reads
-// for the one named.
+// What an operator's site reads from. A rule with no conversion, no parts and
+// no chosen alternative reads its span as a bare literal does, on the same
+// row. `Resolve` is the rule a stage reads for the one named.
 template <class Op, auto P,
           template <class> class Resolve = std::type_identity_t>
 consteval auto infix_op_src_of() {

@@ -95,7 +95,7 @@ std::vector<Read> tokens(const Automaton& a, std::string_view text, Skips&& skip
   return out;
 }
 
-// The earlier rule: every live edge of the run's state returns to it.
+// A narrower rule: every live edge of the run's state returns to it.
 bool every_edge_loops(const Automaton& a, std::uint16_t s1) {
   for (unsigned c = 0; c < a.classes(); ++c) {
     const std::uint16_t n = a.next(s1, c);
@@ -145,7 +145,7 @@ void any_text_reads_the_same_with_the_blind_bytes() {
       any = any || blind(static_cast<unsigned char>(c));
       if (every_edge_loops(a, s1)) {
         earlier = true;
-        // The rule is wider than the one before, never narrower.
+        // Where the narrower rule holds, the real one holds too.
         CHECK(blind(static_cast<unsigned char>(c)));
       }
     }

@@ -1,5 +1,5 @@
-// The lexer of an LL table as source: every mode's walk spelled as a ladder of
-// rungs, the shared emitter's, its end the shared runtime's.
+// The lexer of an LL table as source: the shared `LexStateBlocks` writes each
+// mode's walk, and the shared runtime ends it.
 #include "cursiv/ll/gen/ll_emit_walk.hpp"
 
 #include <cstddef>
@@ -16,9 +16,9 @@
 namespace cursiv::engine {
 namespace {
 
-struct LlWalkEmitter : LexWalkRungs<LlLexView> {
+struct LlWalkEmitter : LexStateBlocks<LlLexView> {
   explicit LlWalkEmitter(const LlBuiltProgram& built)
-      : LexWalkRungs(LlLexView{built}),
+      : LexStateBlocks(LlLexView{built}),
         a(built),
         dfa(std::span<const std::uint8_t, 256>(built.cls),
             {built.dfaNext.data(), std::size_t{built.ndfa} * built.ncls},
@@ -29,9 +29,8 @@ struct LlWalkEmitter : LexWalkRungs<LlLexView> {
 
   bool relays() const { return !a.relays.empty(); }
 
-  // What the rungs ask beyond the shared ones: the election a checked state
-  // makes out of line is known where the terminal it accepts reserves nothing
-  // and no other terminal it accepts has a boundary.
+  // A checked state exits on its keyword directly when the terminal it
+  // accepts reserves nothing and no other terminal it accepts has a boundary.
   void emit_bound_exit(unsigned st, const std::uint8_t* spelled) {
     if (a.dfaAccept[st] == 0) return;
     const auto top = static_cast<SymbolId>(a.dfaAccept[st] - 1u);
@@ -40,7 +39,6 @@ struct LlWalkEmitter : LexWalkRungs<LlLexView> {
     if (!a.dfaResSet[st].test(top)) emit_keyword_exit(st, spelled, "kTable");
   }
 
-  // What the walk around them asks.
   void walk_before(bool) const { /* nothing to emit before the walk */ }
   // A session that backtracked reads the table's walk, which checkpoints.
   void walk_entry() {

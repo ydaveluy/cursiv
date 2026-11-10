@@ -24,8 +24,8 @@ class DefaultDocumentHighlightProvider : public DocumentHighlightProvider {
       const CancellationToken& token = {}) const override;
 
  protected:
-  // Override this method to determine the highlight kind of the given
-  // reference; the default stamps none.
+  // The highlight of one site; a site naming several targets comes as its
+  // first target's row. The default sets no kind.
   [[nodiscard]] virtual lsp::DocumentHighlight createDocumentHighlight(
       const Document& document, const ReferenceDescription& reference) const;
 

@@ -1,5 +1,5 @@
-// A directive over a choice distributes: an alternative that produces no
-// value is refused beside one that does, not crashed on at the first document.
+// A directive over a choice applies to each alternative: one that gives no
+// value is refused, even beside one that does.
 // expect LR: applies to an expression that gives no value
 #pragma once
 

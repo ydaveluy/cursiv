@@ -41,7 +41,7 @@ struct G : Parts {
 
 // A cell the second token decides in every context: after `xaa c q`, `z` or
 // `w` says whether `c` was an `A` or a `B`. Each cell opens on a word of its
-// own, or the cells would read alike and only the first would stay.
+// own, or the cells would read the same and only the first would stay.
 namespace peeks {
 template <std::size_t I>
 constexpr cursiv::str<4> opening() {

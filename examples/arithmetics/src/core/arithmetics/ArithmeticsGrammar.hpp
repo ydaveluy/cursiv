@@ -46,10 +46,8 @@ struct Arith : cursiv::GrammarSpec {
   // Statement returns AstNode: Definition | Evaluation;
   struct Statement : rule<ref<Definition> | ref<Evaluation>> {};
 
-  // Definition returns Definition:
-  // 'def'i name=ID ('(' args+=DeclaredParameter (','
-  // args+=DeclaredParameter)* ')')?
-  // ':' expr=Expression ';';
+  // Definition returns Definition: 'def'i name=ID ('(' args+=DeclaredParameter
+  // (',' args+=DeclaredParameter)* ')')? ':' expr=Expression ';';
   struct Definition
       : rule<defKw + assign<&ast::Definition::name>(ref<ID>)
              + option(
@@ -70,20 +68,18 @@ struct Arith : cursiv::GrammarSpec {
       : rule<assign<&ast::Evaluation::expression>(ref<Expression>) + lit<";">> {
   };
 
-  // Expression returns Expression: BinaryExpression;
-  // infix BinaryExpression returns BinaryExpression on PrimaryExpression:
-  // left assoc '%' > left assoc '^' > left assoc ('*' | '/')
-  // > left assoc ('+' | '-');
+  // Expression returns Expression: BinaryExpression; infix BinaryExpression
+  // returns BinaryExpression on PrimaryExpression: left assoc '%' > left assoc
+  // '^' > left assoc ('*' | '/') > left assoc ('+' | '-');
   struct Expression : infix<PrimaryExpression, ast::BinaryExpression,
                             levels(left(ref<MODULO>),                  //
                                    left(ref<EXPONENT>),                //
                                    left(ref<MULTIPLY> | ref<DIVIDE>),  //
                                    left(ref<ADD> | ref<SUBTRACT>))> {};
 
-  // PrimaryExpression returns Expression:
-  // ({GroupedExpression} '(' expression=Expression ')')
-  // | ({NumberLiteral} value=NUMBER)
-  // | ({FunctionCall} func=[AbstractDefinition] ('(' args+=Expression (','
+  // PrimaryExpression returns Expression: ({GroupedExpression} '('
+  // expression=Expression ')') | ({NumberLiteral} value=NUMBER) |
+  // ({FunctionCall} func=[AbstractDefinition] ('(' args+=Expression (','
   // args+=Expression)* ')')?);
   struct PrimaryExpression
       : rule<create<ast::GroupedExpression>(

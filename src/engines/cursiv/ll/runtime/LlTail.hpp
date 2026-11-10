@@ -33,7 +33,7 @@ struct LlTail {
   std::vector<LlConfig> before;
   // The last token, read again where the replay ends: once as each terminal
   // it can be.
-  std::vector<Step> stood;
+  std::vector<Step> lastReads;
   // Where the text a candidate replaces begins, and how many tokens stand
   // between the replay's last and the caret.
   TextOffset edge = 0;

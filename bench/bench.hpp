@@ -16,17 +16,13 @@
 #include <utility>
 #include <vector>
 
-// The little that a throughput bench needs: a deterministic generator and a
-// driver with the CLI the measurement scripts expect. Deliberately small -- a
-// bench that needs something structurally different should duplicate this
-// rather than grow it into a framework.
+// What a throughput bench needs: deterministic generators and a driver with
+// the CLI the measurement scripts expect. Keep it small.
 
 namespace bench {
 
-// The stopwatch and the corpus reader: what a tool needs before the
-// measurement loop. The loops stay in the tools -- the three protocols
-// (best-of-five in-process, alternated rounds, timed reps) differ on
-// purpose and are the instrument.
+// The stopwatch and the corpus reader. The measurement loops stay in the
+// tools, whose protocols differ on purpose.
 inline double seconds_of(auto&& fn) {
   const auto t0 = std::chrono::steady_clock::now();
   fn();
@@ -51,10 +47,8 @@ inline std::uint64_t splitmix64(std::uint64_t& state) {
   return z ^ (z >> 31);
 }
 
-// An identifier whose first letter rotates through the alphabet: a
-// generator that starts every event name with the same letter as the
-// `events` keyword is adversarial rather than realistic, and it
-// specifically defeats first-byte pruning under measurement.
+// An identifier whose first letter rotates through the alphabet, so names do
+// not all start like a keyword.
 inline std::string makeIdent(std::string_view prefix, std::size_t index,
                              std::uint64_t seed) {
   static constexpr char firstLetters[] =
@@ -67,9 +61,8 @@ inline std::string makeIdent(std::string_view prefix, std::size_t index,
   id += prefix;
   // The decimal digits make a collision with a reserved word impossible.
   id += std::to_string(index);
-  // 8..16, and this range is fixed: identifier length is exactly what a
-  // lexical path is paid to handle, so shortening it here would flatter
-  // the engine on the one axis under measurement.
+  // 8..16, and fixed: shorter identifiers would make the lexer look faster
+  // than it is.
   const std::size_t targetLen =
       8 + static_cast<std::size_t>(splitmix64(state) % 9);
   if (id.size() > 16) id.resize(16);
@@ -79,8 +72,8 @@ inline std::string makeIdent(std::string_view prefix, std::size_t index,
 }
 
 // `BIN <bytes|path> <reps>`, so one parse and three parses of the same input
-// can be differenced to remove startup and generation. No arguments prints a
-// small sweep.
+// can be differenced to remove startup and generation. No arguments runs a
+// few sizes.
 template <class Generate, class Parse>
 int run(int argc, char** argv, Generate generate, Parse parse) {
   // A leading digit is a size, not a path: the CLI takes either.
@@ -101,16 +94,11 @@ int run(int argc, char** argv, Generate generate, Parse parse) {
     return acc == static_cast<std::size_t>(reps) ? 0 : 1;
   }
 
-  // A file given here is the corpus, and the generated ladder is only used
-  // when no path is given.
   const std::string fromFile = argc >= 2 ? load(argv[1]) : std::string();
   std::printf("%10s %12s %10s\n", "bytes", "ms", "MiB/s");
-  // Whole, not sampled: a prefix of a real document is generally not a
-  // document -- the statemachine corpus is rejected at 65 kB because a
-  // block was cut in half -- so a corpus given by path is measured entire.
-  // Five orders of magnitude on the ladder: a few kB is what an editor
-  // reparses on every keystroke, a hundred MiB is a build-system input and
-  // shows whether anything grows worse than linearly.
+  // A corpus given by path is measured whole: a prefix of a document is rarely
+  // one. The sizes run from what an editor reparses per keystroke to a hundred
+  // MiB, which shows any growth worse than linear.
   const std::vector<std::size_t> sizes =
       fromFile.empty() ? std::vector<std::size_t>{std::size_t{4} << 10,
                                                   std::size_t{64} << 10,
@@ -152,10 +140,8 @@ struct ArithFuncInfo {
   int arity;  // number of declared parameters, 0..2
 };
 
-// Generates a leaf expression: a number literal, a reference to a param (if
-// any are in scope), or a call into a previously-defined function (using
-// its declared arity, with plain number-literal arguments to keep recursion
-// bounded).
+// A leaf expression: a number, a parameter in scope, or a call to an earlier
+// function with number arguments.
 inline std::string genArithLeaf(std::uint64_t& state,
                                 const std::vector<std::string>& params,
                                 const std::vector<ArithFuncInfo>& funcs) {
@@ -208,11 +194,8 @@ inline std::string genArithExpr(std::uint64_t& state, int budget,
   return expr;
 }
 
-// Generates a valid arithmetics source of approximately `targetBytes`:
-// a fixed pool of `def` statements (0-2 params, 3-5 op deep bodies, calls
-// into earlier defs) followed by a stream of evaluation statements (also
-// 3-5 op deep, calling into the def pool) until the target size is reached.
-// Deterministic: a given targetBytes always yields an identical source.
+// A valid arithmetics source of about `targetBytes`, always the same: a pool of
+// `def` statements, then evaluations that call into them.
 inline std::string generateArithmeticsSource(std::size_t targetBytes) {
   std::string out;
   out.reserve(targetBytes + 4096);
@@ -269,13 +252,9 @@ inline std::string generateArithmeticsSource(std::size_t targetBytes) {
 }
 
 }  // namespace bench
-// Synthetic domain-model source generator: a chain of entities, each
-// extending the previous one and holding a feature that names it, inside
-// one package -- dense in the two things this language costs money on, the
-// `extends` clause and the cross-reference in a feature type.
-//
-// No RNG: the names are sequential by construction (`Entity0`, `Entity1`,
-// ...), so a given targetBytes always yields an identical source.
+// Domain-model source: a chain of entities in one package, each extending the
+// previous one and holding a feature that names it. Names are sequential, so
+// the source is always the same.
 
 namespace bench {
 
@@ -304,22 +283,9 @@ inline std::string generateDomainModelSource(std::size_t targetBytes) {
 }
 
 }  // namespace bench
-// Per-file generators for the multi-document lane: a workspace is N files,
-// and the single-document generators next door cannot make one -- they
-// always emit the same top-level names, so N copies would be N duplicate
-// symbols in one index. Not a second copy of those generators either: the
-// single-document ones are pinned byte-for-byte for the recovery
-// equivalence harness, so these get their own, simpler shapes.
-//
-// Two reference regimes, and the difference is the point of the lane:
-//
-//   intra   every reference resolves inside its own file (statemachine's
-//           transitions, domainmodel's `extends` chain)
-//   cross   file 0 declares the pool, every other file names it
-//           (requirements' environments); the local scope misses and
-//           resolution falls through to the shared workspace index
-//
-// Both exercise the link phase for real, just different halves of it.
+// Per-file generators for the multi-document lane, with names unique across
+// files. `intra`: each file resolves its own references; `cross`: file 0
+// declares a pool the others name through the workspace index.
 
 namespace bench {
 
@@ -421,13 +387,9 @@ inline std::string multidocRequirementsFile(std::size_t fileIndex,
 }
 
 }  // namespace bench
-// Synthetic requirements source generator (the `.req` document): one
-// contact header, a fixed pool of 24 environments, then requirements each
-// naming two of them -- dense in string literals and cross-references. No
-// RNG, sequential by construction.
-//
-// The `.tst` document has no generator: the tests language shares this
-// rule set, so a second corpus would re-measure the same terminals.
+// Requirements source (`.req`): a contact header, 24 environments, then
+// requirements naming two of them each. The `.tst` language shares its rules,
+// so it has no corpus of its own.
 
 namespace bench {
 
@@ -457,21 +419,16 @@ inline std::string generateRequirementsSource(std::size_t targetBytes) {
 }
 
 }  // namespace bench
-// Synthetic statemachine-source generator, shared so the throughput benches and
-// the recovery-interpreter equivalence harness generate byte-identical corpora
-// from one place.
+// Synthetic statemachine-source generator, shared by the throughput benches and
+// the recovery metric.
 
 namespace bench {
 
 constexpr std::size_t kSmNumEvents = 50;
 constexpr std::size_t kSmNumCommands = 20;
 
-// Generates a valid statemachine source of approximately `targetBytes`.
-// Deterministic: a given targetBytes always yields an identical source.
-//
-// Transitions/actions may reference state names ahead of the current one;
-// that is fine because Transition::state / State::actions are unresolved
-// cross-refs at the grammar level, needing only a syntactically valid name.
+// A valid statemachine source of about `targetBytes`, always the same. A
+// transition may name a state ahead of it.
 inline std::string generateStatemachineSource(std::size_t targetBytes) {
   std::string out;
   out.reserve(targetBytes + 4096);

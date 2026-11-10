@@ -1,4 +1,4 @@
-// The targets a name resolving to several has, filled by a read.
+// The targets of a name that resolves to several, filled by a read.
 #pragma once
 
 #include <cstdint>

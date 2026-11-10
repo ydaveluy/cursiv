@@ -19,9 +19,8 @@
 
 namespace cursiv {
 
-// Delegates to `References::findDeclaration`, the same call rename,
-// references and highlight make, so a caret on a declaration's own name
-// resolves here exactly as it does for the other three.
+// Uses `References::findDeclaration`, as rename, references and highlight do,
+// so a caret resolves the same way for all four.
 std::optional<std::vector<lsp::LocationLink>>
 DefaultDefinitionProvider::getDefinition(const Document& document,
                                          lsp::Position position,
@@ -31,9 +30,6 @@ DefaultDefinitionProvider::getDefinition(const Document& document,
 
   const References& references = *_core.references;
 
-  // The retry one byte back, the resolution on read and the "anything but
-  // `Resolved` denotes nothing" rule all belong to the service, stated once
-  // there.
   const Declaration found = references.findDeclaration(
       document, document.textDocument().offsetAt(from_lsp(position)), token);
   if (!found) return std::nullopt;
@@ -44,48 +40,41 @@ DefaultDefinitionProvider::getDefinition(const Document& document,
   const lsp::Range origin =
       to_lsp(document.textDocument().rangeAt(found.span.begin, found.span.end));
 
-  // A multi-reference names several declarations at once and the protocol's
-  // answer is a list either way, so the single-target family is the list of
-  // one.
+  // A multi-reference gives one link per declaration.
   for (const AstNode* target : found.targets) {
     throw_if_cancelled(token);
     if (target == nullptr) continue;
-    // A node carries no back-pointer, so the owning document comes from
-    // the store via `getDocument`; a target reached through the global
-    // index routinely lives in another file, whose own positions still
-    // convert.
-    const Document* home = target->getDocument();
-    if (home == nullptr || !home->hasAst()) continue;
+    // The target's own document, often another file.
+    const Document* targetDocument = target->getDocument();
+    if (targetDocument == nullptr || !targetDocument->hasAst()) continue;
 
-    // Which members are names is a fact about the grammar that built the
-    // target, not the one that pointed at it, so the name provider comes
-    // from the target's own language.
-    const CoreServices* language = home->language;
+    // Names are read by the target's language, not the asking one.
+    const CoreServices* language = targetDocument->language;
     const CstNodeView nameNode =
-        language == nullptr ? CstNodeView{}
-                            : language->nameProvider->getNameNode(*target, home)
-                                  .value_or(CstNodeView{});
+        language == nullptr
+            ? CstNodeView{}
+            : language->nameProvider->getNameNode(*target, targetDocument)
+                  .value_or(CstNodeView{});
 
     lsp::LocationLink link;
-    link.targetUri = lsp::Uri::parse(home->uri);
-    // Target range is the whole declaration a peek shows; selection range
-    // is where it puts the cursor. A node built by hand has no span of
-    // its own, so its name node, if any, is the only thing left to show
-    // or select.
+    link.targetUri = lsp::Uri::parse(targetDocument->uri);
+    // The target range is the whole declaration, the selection range its name.
+    // A node built by hand has no span: its name node is all there is to show.
     if (target->cstNodeId != kNoNode) {
-      const CstNode& node = home->parseResult.cst()[target->cstNodeId];
+      const CstNode& node =
+          targetDocument->parseResult.cst()[target->cstNodeId];
       link.targetRange =
-          to_lsp(home->textDocument().rangeAt(node.begin, node.end));
+          to_lsp(targetDocument->textDocument().rangeAt(node.begin, node.end));
     } else if (nameNode) {
-      link.targetRange = to_lsp(
-          home->textDocument().rangeAt(nameNode.begin(), nameNode.end()));
+      link.targetRange = to_lsp(targetDocument->textDocument().rangeAt(
+          nameNode.begin(), nameNode.end()));
     } else {
       continue;
     }
-    link.targetSelectionRange = nameNode
-                                    ? to_lsp(home->textDocument().rangeAt(
-                                          nameNode.begin(), nameNode.end()))
-                                    : link.targetRange;
+    link.targetSelectionRange =
+        nameNode ? to_lsp(targetDocument->textDocument().rangeAt(
+                       nameNode.begin(), nameNode.end()))
+                 : link.targetRange;
     link.originSelectionRange = origin;
     links.push_back(std::move(link));
   }

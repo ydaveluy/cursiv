@@ -25,48 +25,48 @@ class Dead {
 
   void rule(std::uint32_t rule) {
     const ImageId body = _w.body(rule);
-    if (!eof_in(body)) return;
+    if (!descend(eof_in(body))) return;
     _rule = _w.name(rule);
-    walk(body, Arm{});
+    descend(walk(body, Arm{}));
   }
 
   std::vector<DeadBranch> found;
 
  private:
   const ImageNode& node(ImageId id) const { return _im.nodes[id]; }
-  ImageId kid(const ImageNode& n, std::uint32_t i) const {
-    return _im.kids[n.first + i];
+  ImageId child_at(const ImageNode& n, std::uint32_t i) const {
+    return _im.children[n.first + i];
   }
 
   bool is_eof(ImageId id) const { return node(id).kind == ImageKind::eof; }
 
   // Conditions consume no token in their containing sequence.
-  bool is_cond(ImageId id) const {
+  Descent<bool> is_cond(ImageId id) const {
     const ImageNode& n = node(id);
     switch (n.kind) {
       case ImageKind::andOf:
       case ImageKind::notOf:
       case ImageKind::gapHas:
       case ImageKind::gapIs:
-        return true;
+        co_return true;
       case ImageKind::choice:
       case ImageKind::seq: {
         bool any = false;
         for (std::uint32_t i = 0; i < n.count; ++i) {
-          const ImageId k = kid(n, i);
-          const bool condition = is_cond(k);
-          if (!condition && !is_eof(k)) return false;
+          const ImageId k = child_at(n, i);
+          const bool condition = co_await is_cond(k);
+          if (!condition && !is_eof(k)) co_return false;
           any = any || condition;
         }
-        return any;
+        co_return any;
       }
       default:
-        return false;
+        co_return false;
     }
   }
 
   // One for a branch that is `eof` bare, two for one under a directive.
-  unsigned end_arm(ImageId id) const {
+  Descent<unsigned> end_arm(ImageId id) const {
     const ImageNode& n = node(id);
     switch (n.kind) {
       case ImageKind::assign:
@@ -74,110 +74,114 @@ class Dead {
       case ImageKind::flag:
       case ImageKind::create:
       case ImageKind::nest:
-        return end_arm(kid(n, 0)) ? 2u : 0u;
+        co_return co_await end_arm(child_at(n, 0)) ? 2u : 0u;
       case ImageKind::skip:
       case ImageKind::doc:
-        return end_arm(kid(n, 0));
+        co_return co_await end_arm(child_at(n, 0));
       default:
-        return is_eof(id) ? 1u : 0u;
+        co_return is_eof(id) ? 1u : 0u;
     }
   }
 
   // A write over a creation stands on a rule of its own.
-  bool creates(ImageId id) const {
+  Descent<bool> creates(ImageId id) const {
     const ImageNode& n = node(id);
     switch (n.kind) {
       case ImageKind::create:
-        return true;
+        co_return true;
       case ImageKind::nest:
       case ImageKind::skip:
       case ImageKind::doc:
-        return creates(kid(n, 0));
+        co_return co_await creates(child_at(n, 0));
       case ImageKind::repeat:
-        return n.n == 1 && creates(kid(n, 0));
+        if (n.n != 1) co_return false;
+        co_return co_await creates(child_at(n, 0));
       default:
-        return false;
+        co_return false;
     }
   }
 
   // `Written`: a directive stands over the element, and spreads over a
   // choice.
-  Read read(ImageId id, bool written) {
+  Descent<Read> read(ImageId id, bool written) {
     const ImageNode n = node(id);
     switch (n.kind) {
       case ImageKind::eof:
-        return Read::end;
+        co_return Read::end;
       case ImageKind::ref:
-        return _im.ready(n.a).face[1].kind == ImageRuleKind::terminal
-                   ? Read::token
-                   : Read::other;
+        co_return _im.ready(n.a).face[1].kind == ImageRuleKind::terminal
+            ? Read::token
+            : Read::other;
       case ImageKind::lit:
       case ImageKind::cpset:
       case ImageKind::byte:
       case ImageKind::through:
       case ImageKind::indent:
       case ImageKind::dedent:
-      case ImageKind::implied:
       case ImageKind::embed:
-        return Read::token;
+        co_return Read::token;
+      // An implied token is inserted with no width, past the end as well.
       case ImageKind::epsilon:
-        return Read::none;
+      case ImageKind::implied:
+        co_return Read::none;
       case ImageKind::doc:
       case ImageKind::skip:
-        return read(kid(n, 0), written);
+        co_return co_await read(child_at(n, 0), written);
       case ImageKind::create:
       case ImageKind::nest:
-        return read(kid(n, 0), true);
+        co_return co_await read(child_at(n, 0), true);
       case ImageKind::assign:
       case ImageKind::append:
       case ImageKind::flag:
-        return creates(kid(n, 0)) ? Read::other : read(kid(n, 0), true);
+        if (co_await creates(child_at(n, 0))) co_return Read::other;
+        co_return co_await read(child_at(n, 0), true);
       case ImageKind::repeat: {
-        const Read k = read(kid(n, 0), written);
-        if (n.n != 1) return Read::other;
-        if (n.m != 0) return k;
-        if (k == Read::token) return Read::option;
-        return k == Read::option || k == Read::none ? k : Read::other;
+        const Read k = co_await read(child_at(n, 0), written);
+        if (n.n != 1) co_return Read::other;
+        if (n.m != 0) co_return k;
+        if (k == Read::token) co_return Read::option;
+        co_return k == Read::option || k == Read::none ? k : Read::other;
       }
       case ImageKind::choice: {
         unsigned ends = 0;
         bool wrote = written;
         for (std::uint32_t i = 0; i < n.count; ++i) {
-          const unsigned e = end_arm(kid(n, i));
+          const unsigned e = co_await end_arm(child_at(n, i));
           ends += e != 0 ? 1u : 0u;
           wrote = wrote || e == 2;
         }
-        return is_cond(id) || ends != 1 || wrote ? Read::other : Read::either;
+        co_return co_await is_cond(id) || ends != 1 || wrote ? Read::other
+                                                             : Read::either;
       }
       default:
-        return Read::other;
+        co_return Read::other;
     }
   }
 
   // The choice an `either` element stands for, under what keeps it one.
-  ImageId choice_of(ImageId id) const {
+  Descent<ImageId> choice_of(ImageId id) const {
     if (const ImageNode& n = node(id);
         n.kind == ImageKind::skip || n.kind == ImageKind::doc ||
         (n.kind == ImageKind::repeat && n.m == 1 && n.n == 1))
-      return choice_of(kid(n, 0));
-    return id;
+      co_return co_await choice_of(child_at(n, 0));
+    co_return id;
   }
 
   // Whether `eof` stands as a position anywhere under the expression: a
   // condition holds none, and a rule called is walked on its own.
-  bool eof_in(ImageId id) {
+  Descent<bool> eof_in(ImageId id) {
     if (_eof.size() <= id) _eof.resize(_im.nodes.size(), 0);
-    if (_eof[id] != 0) return _eof[id] == 2;
+    if (_eof[id] != 0) co_return _eof[id] == 2;
     const ImageNode& n = node(id);
     bool holds = n.kind == ImageKind::eof;
     if (!holds && n.kind != ImageKind::notOf && n.kind != ImageKind::andOf)
-      for (const ImageId k : _im.shape_kids(id))
-        if (eof_in(k)) {
+      for (const ImageId k : _im.shape_children(id))
+        if (co_await eof_in(k)) {
           holds = true;
           break;
         }
     _eof[id] = holds ? 2 : 1;
-    return holds;
+    co_return holds;
   }
 
   std::vector<Arm> arms_of(const ImageNode& choice) const {
@@ -194,11 +198,11 @@ class Dead {
       found.push_back(std::move(d));
   }
 
-  void walk_kid(ImageId id, Arm a) {
-    if (eof_in(id)) walk(id, a);
+  Descent<void> walk_child(ImageId id, Arm a) {
+    if (co_await eof_in(id)) co_await walk(id, a);
   }
 
-  void walk(ImageId id, Arm a) {
+  Descent<void> walk(ImageId id, Arm a) {
     const ImageNode n = node(id);
     switch (n.kind) {
       // A directive, prose or region over a branch is still that branch.
@@ -209,32 +213,32 @@ class Dead {
       case ImageKind::nest:
       case ImageKind::doc:
       case ImageKind::skip:
-        walk_kid(kid(n, 0), a);
-        return;
+        co_await walk_child(child_at(n, 0), a);
+        co_return;
       case ImageKind::choice: {
         const std::vector<Arm> arms = arms_of(n);
         for (std::uint32_t i = 0; i < n.count; ++i)
-          walk_kid(kid(n, i), arms[i]);
-        return;
+          co_await walk_child(child_at(n, i), arms[i]);
+        co_return;
       }
       case ImageKind::seq:
-        walk_seq(id, a);
-        return;
+        co_await walk_seq(id, a);
+        co_return;
       default: {
-        const std::vector<ImageId> kids(_im.shape_kids(id).begin(),
-                                        _im.shape_kids(id).end());
-        for (const ImageId k : kids) walk_kid(k, Arm{});
+        const std::vector<ImageId> children(_im.shape_children(id).begin(),
+                                            _im.shape_children(id).end());
+        for (const ImageId k : children) co_await walk_child(k, Arm{});
       }
     }
   }
 
   // A sequence drops each reading that keeps a token past an end assertion:
   // an `eof`, or the `eof` branch of an `either`.
-  void walk_seq(ImageId id, Arm a) {
+  Descent<void> walk_seq(ImageId id, Arm a) {
     const ImageNode n = node(id);
     std::vector<Read> reads;
     for (std::uint32_t i = 0; i < n.count; ++i)
-      reads.push_back(read(kid(n, i), false));
+      reads.push_back(co_await read(child_at(n, i), false));
     const std::uint32_t count = n.count;
     std::vector<std::uint32_t> token_after(count);
     for (std::uint32_t i = count, next = count; i-- > 0;) {
@@ -244,23 +248,27 @@ class Dead {
     std::uint32_t end = 0;
     while (end < count && reads[end] != Read::end) ++end;
     if (end < count && token_after[end] < count) {
-      add(_w.spell(id), {}, a, _w.spell(kid(n, token_after[end])));
+      add(_w.spell(id), {}, a, _w.spell(child_at(n, token_after[end])));
     } else {
       for (std::uint32_t i = 0; i < count; ++i) {
-        const ImageId k = kid(n, i);
+        const ImageId k = child_at(n, i);
         if (reads[i] == Read::option && end < i) {
           add(_w.spell(k), {}, {}, {});
         } else if (reads[i] == Read::either && token_after[i] < count) {
-          const ImageId c = choice_of(k);
+          const ImageId c = co_await choice_of(k);
           const ImageNode choice = node(c);
           std::uint32_t at = 0;
-          while (at < choice.count && end_arm(kid(choice, at)) == 0) ++at;
-          add(_w.spell(kid(choice, at)), _w.spell(c), arms_of(choice)[at],
-              _w.spell(kid(n, token_after[i])));
+          while (at < choice.count) {
+            if (co_await end_arm(child_at(choice, at)) != 0) break;
+            ++at;
+          }
+          add(_w.spell(child_at(choice, at)), _w.spell(c), arms_of(choice)[at],
+              _w.spell(child_at(n, token_after[i])));
         }
       }
     }
-    for (std::uint32_t i = 0; i < count; ++i) walk_kid(kid(n, i), Arm{});
+    for (std::uint32_t i = 0; i < count; ++i)
+      co_await walk_child(child_at(n, i), Arm{});
   }
 
   WarningFound& _w;

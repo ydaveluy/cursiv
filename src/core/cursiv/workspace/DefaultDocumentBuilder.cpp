@@ -43,6 +43,25 @@
 
 namespace cursiv {
 
+namespace {
+
+// Calls `tell` on every listener, even after one throws, then rethrows the
+// first failure.
+template <class Listener, class Tell>
+void tell_every(const std::vector<Listener*>& listeners, Tell&& tell) {
+  std::exception_ptr failure;
+  for (Listener* const listener : listeners) {
+    try {
+      tell(*listener);
+    } catch (...) {
+      if (failure == nullptr) failure = std::current_exception();
+    }
+  }
+  if (failure != nullptr) std::rethrow_exception(failure);
+}
+
+}  // namespace
+
 DefaultDocumentBuilder::DefaultDocumentBuilder(SharedCoreServices& shared)
     : _shared(shared), _updateBuildOptions{true, {&built_in, &fast}} {}
 
@@ -61,7 +80,7 @@ std::vector<Document*> DefaultDocumentBuilder::pending(
          getBuildOptions(*d).validation))
       work.push_back(d);
   // The open ones first, stably: the documents someone is looking at reach
-  // every rung, and so the client, before the rest of the store.
+  // every state, and so the client, before the rest of the store.
   std::ranges::stable_partition(work,
                                 [](const Document* d) { return d->isOpen; });
   return work;
@@ -72,30 +91,30 @@ void DefaultDocumentBuilder::runPhase(std::span<Document* const> all,
                                       const CancellationToken& token,
                                       std::optional<cursiv::function_ref<void()>>
                                           beforePublish) const {
-  const DocumentState phaseEnd = (steps.end() - 1)->rung;
+  const DocumentState phaseEnd = (steps.end() - 1)->state;
   const std::vector<Document*> work = pending(all, phaseEnd);
   // Tested even when there is nothing to do: a workspace whose whole tail is
   // unclaimed would otherwise never look at the token again.
   throw_if_cancelled(token);
-  // Where each document entered: a rung is announced with the documents of
-  // this phase that stand on it once the phase is over.
+  // Where each document entered: a state is reported with the documents of
+  // this phase that are at it once the phase is over.
   std::vector<DocumentState> entries(work.size());
   for (std::size_t i = 0; i < work.size(); ++i)
     entries[i] = work[i]->state.load();
   const auto run = [&](const Step& step, std::size_t i) {
-    if (entries[i] >= step.rung) return;
+    if (entries[i] >= step.state) return;
     throw_if_cancelled(token);
     Document& d = *work[i];
     step.body(d, *languageOf(d), token);
-    d.state = step.rung;
+    d.state = step.state;
     wakeDocumentWaiters(d);
-    if (!beforePublish) notifyDocumentPhase(d, step.rung, token);
+    if (!beforePublish) notifyDocumentPhase(d, step.state, token);
   };
   const auto indices = std::views::iota(std::size_t{0}, work.size());
   std::exception_ptr failure;
   try {
-    // The pool is the workspace's, a required slot: no null check, as the slot
-    // law demands -- a container that owes it is refused at registration.
+    // The pool is a required slot: a container without it is refused at
+    // registration, so no null check.
     _shared.taskScheduler->parallelFor(token, indices, [&](std::size_t i) {
       for (const Step& step : steps) run(step, i);
     });
@@ -105,20 +124,36 @@ void DefaultDocumentBuilder::runPhase(std::span<Document* const> all,
   }
   if (beforePublish) {
     // Published exports can invalidate old links even when this phase failed.
-    (*beforePublish)();
+    bool published = true;
+    try {
+      (*beforePublish)();
+    } catch (...) {
+      published = false;
+      failure = std::current_exception();
+    }
+    // Each document's states in order, up to the first that fails, as `run`
+    // does.
+    std::mutex failures;
+    const auto tell = [&](std::size_t i) {
+      for (const Step& step : steps) {
+        if (entries[i] >= step.state || work[i]->state.load() < step.state)
+          continue;
+        try {
+          notifyDocumentPhase(*work[i], step.state, token);
+        } catch (...) {
+          const std::scoped_lock lock(failures);
+          if (failure == nullptr) failure = std::current_exception();
+          return;
+        }
+      }
+    };
     if (!_documentPhaseListeners.empty()) {
-      std::mutex failures;
-      _shared.taskScheduler->parallelFor(kNoCancel, indices, [&](std::size_t i) {
-        for (const Step& step : steps)
-          if (entries[i] < step.rung && work[i]->state.load() >= step.rung) {
-            try {
-              notifyDocumentPhase(*work[i], step.rung, token);
-            } catch (...) {
-              const std::scoped_lock lock(failures);
-              if (failure == nullptr) failure = std::current_exception();
-            }
-          }
-      });
+      // Unpublished, the write's mutation has not ended: told on this thread,
+      // whose reads run inline.
+      if (published)
+        _shared.taskScheduler->parallelFor(kNoCancel, indices, tell);
+      else
+        for (const std::size_t i : indices) tell(i);
     }
     if (failure != nullptr) std::rethrow_exception(failure);
   }
@@ -128,30 +163,32 @@ void DefaultDocumentBuilder::runPhase(std::span<Document* const> all,
   for (const Step& step : steps) {
     reached.clear();
     for (std::size_t i = 0; i < work.size(); ++i)
-      if (entries[i] <= step.rung) reached.push_back(work[i]);
-    publishWorkspaceState(step.rung);
-    // After the rung is published, on this thread: a listener that waits on the
-    // rung it is being told about must not deadlock, and a cancelled phase --
-    // gone by exception above -- is never announced.
-    notifyBuildPhase(reached, step.rung, token);
+      if (entries[i] <= step.state) reached.push_back(work[i]);
+    publishWorkspaceState(step.state);
+    // After the state is published, on this thread: a listener that waits on
+    // the state it is told about must not deadlock, and a cancelled phase, gone
+    // by exception above, is never reported.
+    notifyBuildPhase(reached, step.state, token);
   }
 }
 
 void DefaultDocumentBuilder::notifyBuildPhase(
     std::span<Document* const> documents, DocumentState state,
     const CancellationToken& token) const {
-  for (BuildPhaseListener* listener : _phaseListeners)
-    listener->onBuildPhase(state, documents, token);
+  tell_every(_phaseListeners, [&](BuildPhaseListener& listener) {
+    listener.onBuildPhase(state, documents, token);
+  });
 }
 
 bool DefaultDocumentBuilder::resultsAreIncomplete(
     const Document& document) const {
   const CoreServices* const language = languageOf(document);
   if (language == nullptr) return false;
-  const BuildOptions owed = getBuildOptions(document);
-  return owed.validation && !findMissingValidationCategories(
-                                 document, *language, owed.validationCategories)
-                                 .empty();
+  const BuildOptions options = getBuildOptions(document);
+  return options.validation &&
+         !findMissingValidationCategories(document, *language,
+                                          options.validationCategories)
+              .empty();
 }
 
 void DefaultDocumentBuilder::cleanUpDeleted(std::string_view uri) const {
@@ -202,20 +239,21 @@ std::vector<std::string> DefaultDocumentBuilder::findChangedUris(
 void DefaultDocumentBuilder::emitUpdate(
     std::span<const std::string_view> changed,
     std::span<const std::string_view> deleted) const {
-  for (DocumentUpdateListener* const listener : _updateListeners)
-    listener->onUpdate(changed, deleted);
+  tell_every(_updateListeners, [&](DocumentUpdateListener& listener) {
+    listener.onUpdate(changed, deleted);
+  });
 }
 
 void DefaultDocumentBuilder::notifyDocumentPhase(
     Document& document, DocumentState state,
     const CancellationToken& token) const {
-  for (DocumentPhaseListener* listener : _documentPhaseListeners) {
+  tell_every(_documentPhaseListeners, [&](DocumentPhaseListener& listener) {
     try {
-      listener->onDocumentPhase(document, state, token);
+      listener.onDocumentPhase(document, state, token);
     } catch (const OperationCancelled&) {
-      // The phase tests the token itself, once every listener has heard.
+      // The phase tests the token itself, once every listener has received.
     }
-  }
+  });
 }
 
 void DefaultDocumentBuilder::addDocumentPhaseListener(
@@ -364,7 +402,7 @@ void DefaultDocumentBuilder::buildDocuments(
       }
   }
 
-  if (!prepareContent) _shared.workspaceLock->settle();
+  if (!prepareContent) _shared.workspaceLock->endMutation();
 
   const auto publishContent = [&] {
     for (const auto& heldDocument : held) {
@@ -375,7 +413,7 @@ void DefaultDocumentBuilder::buildDocuments(
         continue;
       if (index.isAffected(*d, changed)) rebuild(d);
     }
-    _shared.workspaceLock->settle();
+    _shared.workspaceLock->endMutation();
   };
 
   runPhase(work,
@@ -393,10 +431,8 @@ void DefaultDocumentBuilder::buildDocuments(
                : std::nullopt);
 
   try {
-    // A barrier, not a stage of the linking phase: a derived scope provider
-    // may hunt cross-document, and a hunt reading a document another worker
-    // was still scoping would memoise a false "not found", differently on
-    // each run. Every local scope is written before the first link reads one.
+    // A barrier before linking: every local scope is written before the first
+    // link reads one, so a cross-document lookup never memoizes a false miss.
     runPhase(work,
              {{DocumentState::ComputedScopes,
                [](Document& d, const CoreServices& language,
@@ -418,9 +454,9 @@ void DefaultDocumentBuilder::buildDocuments(
                }}},
              token);
   } catch (...) {
-    // Linked but not indexed is a rung the document cannot keep: back to
+    // Linked but not indexed is a state the document cannot keep: back to
     // `ComputedScopes`, so the next build relinks it. Its memo is dropped
-    // there, before that build settles -- nothing is touched past this one's.
+    // there, before that build ends its mutation.
     for (Document* d : work)
       if (d->state.load() == DocumentState::Linked)
         d->state = DocumentState::ComputedScopes;
@@ -432,8 +468,8 @@ void DefaultDocumentBuilder::buildDocuments(
              [this](Document& d, const CoreServices& language,
                     const CancellationToken& phase) {
                // Per document, not per build: each keeps what it was asked.
-               const BuildOptions owed = getBuildOptions(d);
-               validate(d, language, owed.validationCategories, phase);
+               const BuildOptions options = getBuildOptions(d);
+               validate(d, language, options.validationCategories, phase);
              }}},
            token);
 
@@ -497,32 +533,22 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   for (const std::string_view uri : changedUris) note(uri);
   for (const std::string_view uri : deletedUris) note(uri);
 
-  // Cause (a) before any look at the moved set, and it plays on an empty one:
-  // this is the whole repair path for a reference broken by a symbol that has
-  // since appeared somewhere else.
+  // Broken references first, even with an empty moved set: this is the whole
+  // repair path for a reference broken by a symbol that has since appeared
+  // somewhere else.
   letGoOf(moved, true);
 
-  // Then the moved ones, all the way down, and before the text is replaced or
-  // the document destroyed: the index outlives the arena it describes.
-  // An open document standing at `Parsed` holds the parse of its own buffer,
-  // paid for by the opening: reset, it would pay it again.
+  // Then the moved documents, fully, before their text is replaced or they are
+  // destroyed. An open document at `Parsed` keeps the parse its opening made.
   for (const std::string_view uri : changedUris)
     if (const std::shared_ptr<Document> d = store.getDocument(uri))
       if (!(d->isOpen && d->state == DocumentState::Parsed))
         resetDocument(*d, DocumentState::Changed);
   for (const std::string_view uri : deletedUris) cleanUpDeleted(uri);
 
-  // The request lands on what moved. A document cause (a) reset lost its own
-  // with its diagnostics and builds under the update's; one left standing
-  // keeps its own.
-  //
-  // A changed URI the store does not hold is installed here: a file created
-  // outside the editor reaches the workspace by no other door, and
-  // `findChangedUris` has already dropped what no language claims. Deletion
-  // followed by change recreates the same URI.
-  //
-  // Installed empty at `Changed`: the parse phase reads it and parses it, in
-  // parallel and under the token.
+  // Changed documents get the update's request. One the store lacks is
+  // installed empty at `Changed` for the parse phase; `findChangedUris` has
+  // already dropped what no language claims.
   const DocumentFactory& factory = *_shared.documentFactory;
   std::vector<Document*> requested;
   for (const std::string_view uri : changedUris) {
@@ -534,7 +560,7 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   }
   prepareBuild(requested, _updateBuildOptions);
 
-  // Announced once the store says it: a subscriber told of a deletion finds
+  // Reported once the store reflects it: a subscriber told of a deletion finds
   // the document gone unless it was recreated by the same update, and every
   // changed document stands at `Changed`.
   emitUpdate(changedUris, deletedUris);
@@ -543,8 +569,8 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   // superseded write would leave documents reset and others not.
   throw_if_cancelled(token);
 
-  // What is owed: a rung below the top, a request no build finished, a
-  // category the request still owes. A document whose request stops at
+  // What to build: a state below the last, a request no build finished, a
+  // category the request still needs. A document whose request stops at
   // `IndexedReferences` passes through with nothing left to run.
   std::vector<Document*> work;
   for (const std::shared_ptr<Document>& doc : store.all()) {
@@ -596,14 +622,18 @@ void DefaultDocumentBuilder::resetToState(Document& document,
 
 void DefaultDocumentBuilder::resetDocument(Document& document,
                                            DocumentState state) const {
-  // The contract `buildDocuments` owes the lock, checked where it can be
-  // broken: past a settle an `Immediate` read may hold this very tree, and
-  // dropping a parse is what invalidates every pointer into it.
-  assert(!_shared.workspaceLock->settled() &&
-         "a document may not be reset once the write has settled");
+  // The lock's contract for `buildDocuments`, checked where it can be
+  // broken: once the mutation ends, an `Immediate` read may hold this tree,
+  // and dropping a parse is what invalidates every pointer into it.
+  assert(!_shared.workspaceLock->mutationEnded() &&
+         "a document may not be reset once the write's mutation has ended");
   IndexManager& index = *_shared.indexManager;
   const CoreServices* language = languageOf(document);
   using enum DocumentState;
+  // Made before anything is undone: a refused allocation leaves the document
+  // and its index rows as they were.
+  std::optional<ParseResult> empty;
+  if (state == Changed) empty.emplace();
   switch (state) {
     case Changed:
       [[fallthrough]];
@@ -614,12 +644,8 @@ void DefaultDocumentBuilder::resetDocument(Document& document,
       document.localSymbols.clear();  // undoes `ComputedScopes`
       [[fallthrough]];
     case ComputedScopes:
-      // Undoes `Linked`, and the order is forced: the resolutions are dropped
-      // before the descriptions that named them.
-      //
-      // A memoised resolution is not a rung -- an ordinary read creates one at
-      // whatever rung the document happens to be on -- so this runs for every
-      // target below `Linked` rather than only when one was reached.
+      // Undoes `Linked`: resolutions go before the descriptions they name. Runs
+      // for every target below `Linked`, as any read can memoize a resolution.
       if (language != nullptr) language->linker->unlink(document);
       [[fallthrough]];
     case Linked:
@@ -628,10 +654,8 @@ void DefaultDocumentBuilder::resetDocument(Document& document,
     case IndexedReferences:
       document.diagnostics.clear();  // undoes `Validated`...
       {
-        // ...and the memory of which categories produced them: the two travel
-        // together, or a revalidation would skip what it just erased. The
-        // request goes with them: the next build of this document is asked by
-        // whoever builds it, not by an attempt that never finished.
+        // ...with the record of which categories produced them, and the
+        // request: the next build of the document asks again.
         const std::scoped_lock lock(_stateMutex);
         _validated.erase(document.id);
         _buildOptions.erase(document.id);
@@ -640,12 +664,9 @@ void DefaultDocumentBuilder::resetDocument(Document& document,
     case Validated:
       break;
   }
-  // The tree goes last: `dropParse` is what invalidates every pointer above,
-  // and also what makes the text replaceable.
-  // There is no root-to-document table: a node climbs to its document, so
-  // dropping the tree is dropping the result -- and the local symbols with
-  // it, being descriptions into that tree.
-  if (state == Changed) document.parseResult = ParseResult{};
+  // The tree goes last: dropping it invalidates every pointer above, the local
+  // symbols included, and makes the text replaceable.
+  if (empty) document.parseResult = std::move(*empty);
   if (document.state.load() > state) document.state = state;
   if (state == ComputedScopes && document.state.load() == ComputedScopes &&
       language != nullptr)
@@ -662,11 +683,9 @@ void DefaultDocumentBuilder::computeLocalScopes(
 
 void DefaultDocumentBuilder::bindReferences(Document& document,
                                             const CoreServices& language) {
-  // A reference becomes readable at ComputedScopes, including one followed
-  // from another document. Install its home before publishing that state;
-  // the scope barrier makes every document ready before linking starts. The
-  // linker is released last: a reader on another worker that sees it sees
-  // the local symbols above.
+  // Makes the references readable from `ComputedScopes` on. The linker is
+  // stored last, with release order: a reader that sees it sees the local
+  // symbols.
   if (DocumentReferences* const references =
           document.parseResult.references.get()) {
     references->document.store(&document, std::memory_order_relaxed);
@@ -674,10 +693,8 @@ void DefaultDocumentBuilder::bindReferences(Document& document,
   }
 }
 
-// What `requested` still owes `document`. An empty request is everything the
-// language owes -- the `built_in` half plus every category its registry
-// declares -- and that expansion is what lets a later, narrower build be
-// compared against what already ran.
+// What `requested` still asks of `document`. An empty request means the
+// `built_in` half and every category of the language's registry.
 std::vector<const ValidationCategory*>
 DefaultDocumentBuilder::findMissingValidationCategories(
     const Document& document, const CoreServices& language,
@@ -704,13 +721,9 @@ DefaultDocumentBuilder::findMissingValidationCategories(
   return wanted;
 }
 
-// Published as one block: the builder publishes and the validator fills, so
-// there is a single place to look for what a diagnostic is made of.
-//
-// Incrementally: only the categories this request still owes are run, their
-// diagnostics are appended to the block already published -- the validator
-// re-sorts the whole block, so the order law holds across builds -- and what
-// ran is recorded under `_stateMutex`, this being called from parallel bodies.
+// Runs only the categories the request still needs and appends their
+// diagnostics to the published ones; the validator sorts the whole list.
+// Called from parallel bodies, so the record is kept under `_stateMutex`.
 void DefaultDocumentBuilder::validate(
     Document& document, const CoreServices& language,
     std::span<const ValidationCategory* const> categories,
@@ -731,12 +744,9 @@ void DefaultDocumentBuilder::validate(
   document.diagnostics = std::move(all);
 }
 
-// One call to `build` or `update` is one attempt, from its first step. The
-// rung goes down before anything can cut the call short: a wait must not read
-// the rung of the last build as passed by documents this one resets. Whatever
-// fails the call -- a phase, a listener told of the update, the update's own
-// resets -- answers the waiters with `BuildFailed`. A cancellation is not a
-// failure: the write that supersedes it answers them.
+// One `build` or `update` call is one attempt. The workspace state drops
+// first. A failure answers waiters with `BuildFailed`; a cancellation does
+// not, as the write that supersedes it answers them.
 void DefaultDocumentBuilder::runAttempt(
     cursiv::function_ref<void()> body) const {
   const std::uint64_t attempt = beginAttempt();
@@ -779,7 +789,7 @@ void DefaultDocumentBuilder::publishWorkspaceState(DocumentState state) const {
 }
 
 // A build failure is signalled, not carried: the exception is rethrown to
-// `build`'s caller, and a waiter only learns the rung will not come. Attempts
+// `build`'s caller, and a waiter only learns the state will not come. Attempts
 // start at one and `_failedAttempt` at zero, so the rank is the flag.
 void DefaultDocumentBuilder::publishFailure(std::uint64_t attempt) const {
   {
@@ -808,16 +818,13 @@ WaitOutcome DefaultDocumentBuilder::waitUntil(
                               : WaitOutcome::Cancelled;
 }
 
-// A per-document wait ends with the next build that runs to the end or fails:
-// reached, cancelled, the build failed, or the workspace passed the rung while
-// the document lags -- excluded or removed -- which is `Unreachable`. A
-// cancelled build ends none: its successor does, or the waiter's token.
+// A per-document wait ends with the next build that finishes or fails. It is
+// `Unreachable` when the workspace passes the state while the document lags.
+// A cancelled build ends none.
 WaitOutcome DefaultDocumentBuilder::waitUntil(
     DocumentState state, DocumentId id, const CancellationToken& token) const {
-  // The store is a plain map a write mutates, so it is read under the lock --
-  // once, and never from the predicate: a wait is the one place that may not
-  // hold the readers' side. The handle then keeps the document alive for the
-  // whole wait, and its rung is an atomic.
+  // The store is read once under the lock, never from the predicate; the
+  // handle keeps the document alive for the whole wait.
   std::shared_ptr<Document> document;
   if (!_shared.workspaceLock->read(
           [&] { document = _shared.documents->getDocument(id); }, token,
@@ -830,7 +837,7 @@ WaitOutcome DefaultDocumentBuilder::waitUntil(
   // ready or not.
   if (token.stop_requested()) return WaitOutcome::Cancelled;
   // Counted before the first test of the predicate: a worker that reads no
-  // waiter has stored its rung before this count, and the test sees it.
+  // waiter has stored its state before this count, and the test sees it.
   _awaited.push_back(id);
   _documentWaiters.fetch_add(1);
   // Left with the lock held: the wait takes it back before returning.

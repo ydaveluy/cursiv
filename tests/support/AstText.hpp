@@ -1,7 +1,6 @@
-// A parse's two answers, spelled so two of them compare: the records by span,
-// extent and standing, the AST by class and member or by class and span. An
-// element id is each engine's own numbering and says nothing across two runs,
-// so no spelling carries one.
+// A parse written as text to compare: CST records by span, size and flags; the
+// AST by class and member, or by span. No node id: each engine numbers nodes
+// its own way.
 #pragma once
 
 #include <cstdint>
@@ -30,14 +29,14 @@ inline void ast_of(const cursiv::AstReflection& r, const cursiv::AstNode& n,
   const auto meta = r.getTypeMetaData(n.type);
   out += meta.name;
   out += '{';
-  r.visitMembers(
-      n, [&](std::string_view p, std::uint32_t i, const cursiv::AstNode& kid) {
-        out += p;
-        if (i != cursiv::AstReflection::kNoIndex) out += std::to_string(i);
-        out += '=';
-        ast_of(r, kid, out);
-        out += ' ';
-      });
+  r.visitMembers(n, [&](std::string_view p, std::uint32_t i,
+                        const cursiv::AstNode& child) {
+    out += p;
+    if (i != cursiv::AstReflection::kNoIndex) out += std::to_string(i);
+    out += '=';
+    ast_of(r, child, out);
+    out += ' ';
+  });
   out += '}';
 }
 
@@ -47,9 +46,9 @@ inline void spans_of(const cursiv::AstReflection& r, const cursiv::Cst& cst,
   out += r.getTypeMetaData(n.type).name;
   out += '[' + std::to_string(at.begin) + ',' + std::to_string(at.end) + ')';
   r.visitMembers(
-      n, [&](std::string_view, std::uint32_t, const cursiv::AstNode& kid) {
+      n, [&](std::string_view, std::uint32_t, const cursiv::AstNode& child) {
         out += ' ';
-        spans_of(r, cst, kid, out);
+        spans_of(r, cst, child, out);
       });
 }
 

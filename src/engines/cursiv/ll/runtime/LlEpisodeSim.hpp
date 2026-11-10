@@ -34,27 +34,27 @@ struct LlThreadKeyHash {
   }
 };
 
-// Where a frame lent from the descent stands in its stack: how many frames it
-// has under it, and a frame further down it, chosen so that the frame at any
-// depth is reached in a logarithmic number of steps and not one per frame.
-struct LlLentRung {
+// Where a frame copied from the descent stands in its stack: how many frames
+// it has under it, and a frame further down, chosen so that the frame at any
+// depth is reached in a logarithmic number of steps.
+struct LlCopyDepth {
   std::uint32_t depth = 0;
   std::uint32_t jump = kLlCtxNone;
 
-  // The rung of a frame lent over `parent`. Its jump goes as far as the
+  // The entry of a frame copied over `parent`. Its jump goes as far as the
   // parent's jump goes on from the one it reaches, where the two spans are
   // equal, and to the parent otherwise.
-  static LlLentRung over(const std::vector<LlLentRung>& rungs,
-                         std::uint32_t parent) {
+  static LlCopyDepth over(const std::vector<LlCopyDepth>& depths,
+                          std::uint32_t parent) {
     const auto depth = [&](std::uint32_t n) {
-      return n == kLlCtxNone ? 0u : rungs[n].depth;
+      return n == kLlCtxNone ? 0u : depths[n].depth;
     };
     const auto jump = [&](std::uint32_t n) {
-      return n == kLlCtxNone ? kLlCtxNone : rungs[n].jump;
+      return n == kLlCtxNone ? kLlCtxNone : depths[n].jump;
     };
     const std::uint32_t near = jump(parent);
     const std::uint32_t far = jump(near);
-    LlLentRung r{depth(parent) + 1, parent};
+    LlCopyDepth r{depth(parent) + 1, parent};
     if (depth(parent) - depth(near) == depth(near) - depth(far)) r.jump = far;
     return r;
   }
@@ -64,7 +64,7 @@ struct LlLentRung {
 // none where two ways to it took different arms, or where readings also part
 // there with no choice of their own.
 struct LlChoiceArms {
-  std::uint32_t at = 0, lull = 0;
+  std::uint32_t at = 0, zeroWidth = 0;
   std::uint16_t decision = 0;
   std::uint64_t arms = 0;
 };
@@ -84,10 +84,10 @@ class LlEpisodeSim {
   // The rules, flagged by rule, whose callers share its body. Unset, none.
   void share_calls(const std::uint8_t* shared) { _shares = shared; }
 
-  // The depths of the frames lent, which the cache of the parse keeps. Unset,
-  // the walks go down a lent stack as they go down the episode's own.
-  void read_lent_rungs(const std::vector<LlLentRung>* rungs) {
-    _rungs = rungs;
+  // The depths of the copied frames, which the cache of the parse keeps.
+  // Unset, the walks go down a copied stack as they go down the episode's own.
+  void read_copy_depths(const std::vector<LlCopyDepth>* depths) {
+    _copyDepths = depths;
   }
 
   // The stop of the parse: rules that may read nothing, nested, keep one closure
@@ -113,9 +113,9 @@ class LlEpisodeSim {
   // Where the text stands for the readings closed next, which is where the
   // decisions they pass are taken, and how many tokens of no width have been
   // read there.
-  void at(std::uint32_t position, std::uint32_t lull = 0) {
+  void at(std::uint32_t position, std::uint32_t zeroWidth = 0) {
     _pos = position;
-    _lull = lull;
+    _zeroWidth = zeroWidth;
   }
 
   // Between two episodes.
@@ -127,7 +127,7 @@ class LlEpisodeSim {
     _log = nullptr;
   }
 
-  // ...and an episode that grew large gives its room back.
+  // An episode that grew large gives its memory back.
   void trim() {
     const auto each = [](auto&... x) { (x.trim(), ...); };
     each(_arms, _lexes, _reduces, _seen, _at, _held, _crossed, _calls, _flat,
@@ -136,7 +136,7 @@ class LlEpisodeSim {
   }
 
   // Whether one reading precedes another: the lexical choices first, then the
-  // decisions, each by the first word where they part -- except where the
+  // decisions, each by the first word where they part; except where the
   // readings part at a decision that ranks its arms over them.
   bool earlier(const LlThread& a, const LlThread& b) const {
     return earlier(a.arm, a.lex, b.arm, b.lex);
@@ -175,10 +175,8 @@ class LlEpisodeSim {
   }
 
   // The readings the origins grow into, closed over the empty moves, best
-  // first. The origins come best first themselves: each is closed before the
-  // next, and what a reading goes on to read is read in the order of its
-  // edges, so the order of the readings needs no comparing. Only a reading
-  // that returns past a cell leaves it, and those wait their turn.
+  // first. Each origin closes before the next, so the order needs no comparing.
+  // A reading that returns past a cell waits its turn.
   void close(const std::vector<LlThread>& origins, std::vector<LlThread>& out) {
     ll_clear(out, _seen, _at, _calls, _relatedProcessed, _relatedFlags,
              _relatedBaseCount, _relatedBases, _stack, _words, _side);
@@ -204,7 +202,7 @@ class LlEpisodeSim {
           (_side.front().seq != waiting || _stack.size() <= after)) {
         LlThread seen = from != nullptr ? *from : LlThread{};
         if (from != nullptr && word != kNoWord)
-          seen.arm = _arms.append(seen.arm, word, _pos, _lull);
+          seen.arm = _arms.append(seen.arm, word, _pos, _zeroWidth);
         if (from == nullptr || earlier(_side.front().thread, seen)) {
           std::pop_heap(_side.begin(), _side.end(),
                         [this](auto& a, auto& b) { return later(a, b); });
@@ -235,7 +233,8 @@ class LlEpisodeSim {
       for (auto& m : _stacks.members(cell)) m.stack = flat(m.stack);
     }
     for (std::size_t k = _base; k < _stacks.size(); ++k)
-      _stacks.seal(LlStackSet::kCellBit | static_cast<std::uint32_t>(k));
+      _stacks.compute_shape(LlStackSet::kCellBit |
+                            static_cast<std::uint32_t>(k));
   }
 
   // The readings that take `terms`, each at the state its edge leads to, to be
@@ -263,7 +262,7 @@ class LlEpisodeSim {
   unsigned standing(std::uint32_t stack) {
     for (auto cell = below(stack); cell != kLlCtxNone;) {
       const auto& members = _stacks.members(cell);
-      // Every member stands for at least one reading. Two already settle
+      // Every member stands for at least one reading. Two already decide
       // this capped count, without walking either member's descendants.
       if (members.size() > 1) return 2;
       cell = below(members.front().stack);
@@ -271,8 +270,8 @@ class LlEpisodeSim {
     return 1;
   }
 
-  // ...and the arms of those readings: each with the decisions of its own and
-  // then the ones taken since. `visit` stops the walk by answering false.
+  // The arms of those readings: each with the decisions of its own and then
+  // the ones taken since. `visit` stops the walk by answering false.
   template <class Visit>
   bool each_arm(std::uint32_t stack, LlHistory::Node arm, Visit&& visit) {
     const auto cell = below(stack);
@@ -283,11 +282,9 @@ class LlEpisodeSim {
     });
   }
 
-  // The choices the readings of `threads` went by, sorted by place, each with
-  // the arms taken there. A reading over a cell took what each member of the
-  // cell took, whatever came before it, so each cell is read once, not once
-  // per reading over it. False where the words of a member do not extend the
-  // lead of the cell it stands on.
+  // The choices the readings of `threads` went by, sorted by place, with the
+  // arms taken there. Each cell is read once. False where a member's words do
+  // not extend its cell's lead.
   bool choices(const std::vector<LlThread>& threads,
                std::vector<LlChoiceArms>& out) {
     out.clear();
@@ -300,14 +297,14 @@ class LlEpisodeSim {
     std::vector<Taken> taken;
     std::vector<LlHistory::Event> words;
     std::vector<std::uint32_t> cells;
-    std::vector<std::uint8_t> met(_stacks.size(), 0);
+    std::vector<std::uint8_t> hasCommon(_stacks.size(), 0);
     const auto take = [&](std::uint32_t stack, LlHistory::Node arm) {
       const std::uint32_t base = below(stack);
       LlHistory::Node lead = LlHistory::kRoot;
       if (base != kLlCtxNone) {
         lead = _stacks.members(base)[0].arm;
-        if (met[LlStackSet::index(base)] == 0) {
-          met[LlStackSet::index(base)] = 1;
+        if (hasCommon[LlStackSet::index(base)] == 0) {
+          hasCommon[LlStackSet::index(base)] = 1;
           cells.push_back(base);
         }
       }
@@ -329,7 +326,7 @@ class LlEpisodeSim {
         if (!take(m.stack, m.arm)) return false;
     }
     const auto key = [](const LlHistory::Event& e) {
-      return std::tuple{e.word, e.at, e.lull};
+      return std::tuple{e.word, e.at, e.zeroWidth};
     };
     std::sort(taken.begin(), taken.end(), [&](const Taken& a, const Taken& b) {
       if (a.base != b.base) return a.base < b.base;
@@ -371,10 +368,11 @@ class LlEpisodeSim {
         const std::uint32_t arm = e.word & 0xFFFFu;
         const std::uint64_t bit = arm < 64 ? std::uint64_t{1} << arm : 0;
         if (out.size() > first && out.back().at == e.at &&
-            out.back().lull == e.lull && out.back().decision == decision)
+            out.back().zeroWidth == e.zeroWidth &&
+            out.back().decision == decision)
           out.back().arms |= bit;
         else
-          out.push_back({e.at, e.lull, decision, bit});
+          out.push_back({e.at, e.zeroWidth, decision, bit});
         at = next;
       }
       if (ends || out.size() - first > 1)
@@ -382,15 +380,15 @@ class LlEpisodeSim {
     }
     // The ways to one choice: it keeps its arms where they all agree.
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-      return std::tuple{a.at, a.lull, a.decision, a.arms} <
-             std::tuple{b.at, b.lull, b.decision, b.arms};
+      return std::tuple{a.at, a.zeroWidth, a.decision, a.arms} <
+             std::tuple{b.at, b.zeroWidth, b.decision, b.arms};
     });
     std::size_t kept = 0;
     for (std::size_t k = 0; k < out.size();) {
       std::size_t next = k + 1;
       bool agree = true;
       for (; next < out.size() && out[next].at == out[k].at &&
-             out[next].lull == out[k].lull &&
+             out[next].zeroWidth == out[k].zeroWidth &&
              out[next].decision == out[k].decision;
            ++next)
         agree = agree && out[next].arms == out[k].arms;
@@ -403,28 +401,27 @@ class LlEpisodeSim {
     return true;
   }
 
-  // What `common` and every reading of a thread share, folded into `common`
-  // from the first reading `met`: false once it is no deeper than `floor`,
-  // and the walk stops. A reading is grafted only where `common` runs past
-  // the arm it starts with, and a cell is met, unwalked, by the prefix its
-  // readings' arms share where they part right there or `common` parts from
-  // it first.
-  bool meet_arms(std::uint32_t stack, LlHistory::Node arm,
-                 LlHistory::Node& common, bool& met, std::uint32_t floor) {
+  // Folds into `common` what it shares with every reading of a thread, from the
+  // first reading `hasCommon`; false, ending the walk, once it is no deeper
+  // than `floor`. A reading is rebased only where `common` runs past its arm.
+  bool fold_common_arm(std::uint32_t stack, LlHistory::Node arm,
+                       LlHistory::Node& common, bool& hasCommon,
+                       std::uint32_t floor) {
     const auto cell = below(stack);
     if (cell == kLlCtxNone) {
-      common = met ? _arms.common(common, arm) : arm;
-      met = true;
+      common = hasCommon ? _arms.common(common, arm) : arm;
+      hasCommon = true;
       return _arms.depth(common) > floor;
     }
-    return walk_arms(
-        cell, arm, [&](auto& path) { return meet(path, common, met, floor); });
+    return walk_arms(cell, arm, [&](auto& path) {
+      return fold_common(path, common, hasCommon, floor);
+    });
   }
 
  private:
   // A reading's arm, made once some reading below asks for it: its own head
-  // past which what the reading above took after `from` is grafted.
-  struct Graft {
+  // past which what the reading above took after `from` is rebased.
+  struct Rebase {
     LlHistory::Node head, from;
     LlHistory::Node made = kUnmade;
   };
@@ -432,24 +429,24 @@ class LlEpisodeSim {
 
   struct ArmFrame {
     std::uint32_t cell;
-    Graft graft;
+    Rebase rebase;
     std::size_t next = 0;
   };
   enum class ArmVisit { descend, skip, stop };
 
   LlHistory::Node made(std::vector<ArmFrame>& path) {
     auto at = path.size() - 1;
-    while (at != 0 && path[at].graft.made == kUnmade) --at;
-    if (path[at].graft.made == kUnmade)
-      path[at].graft.made = path[at].graft.head;
+    while (at != 0 && path[at].rebase.made == kUnmade) --at;
+    if (path[at].rebase.made == kUnmade)
+      path[at].rebase.made = path[at].rebase.head;
     for (++at; at < path.size(); ++at) {
-      Graft& g = path[at].graft;
-      g.made = _arms.graft(g.head, g.from, path[at - 1].graft.made);
+      Rebase& g = path[at].rebase;
+      g.made = _arms.rebase(g.head, g.from, path[at - 1].rebase.made);
     }
-    return path.back().graft.made;
+    return path.back().rebase.made;
   }
 
-  // The active DFS path also holds each lazy graft. Its parent is the prior
+  // The active DFS path also holds each lazy rebase. Its parent is the prior
   // frame's index, so growing the vector leaves no dangling parent pointer.
   template <class Visit>
   bool walk_arms(std::uint32_t cell, LlHistory::Node arm, Visit&& visit) {
@@ -481,10 +478,10 @@ class LlEpisodeSim {
   struct Heads {
     LlHistory::Node shared = kUnmade;
     std::uint32_t shortest = 0;
-    // `single`: every arm is `shared`. `unsettled`: `shared` is no more than
+    // `single`: every arm is `shared`. `partial`: `shared` is no more than
     // a prefix of them all, since one arm ends there while others go on, and
     // what comes after the cell says whether they still agree.
-    bool single = false, unsettled = false;
+    bool single = false, partial = false;
   };
   // A member's arms are those of the cell its stack stands on, with what the
   // member added to that cell's lead put after each.
@@ -522,11 +519,11 @@ class LlEpisodeSim {
         const std::uint32_t added = _arms.depth(m.arm) - _arms.depth(lead);
         if (!_arms.starts_with(m.arm, lead)) {
           h = {LlHistory::kRoot, 0, false, true};
-        } else if (!lower.unsettled &&
+        } else if (!lower.partial &&
                    lower.shortest > _arms.depth(lower.shared)) {
           h = {lower.shared, lower.shortest + added, false, false};
-        } else if (!lower.unsettled && lower.single) {
-          const LlHistory::Node s = _arms.graft(lower.shared, lead, m.arm);
+        } else if (!lower.partial && lower.single) {
+          const LlHistory::Node s = _arms.rebase(lower.shared, lead, m.arm);
           h = {s, _arms.depth(s), true, false};
         } else {
           h = {lower.shared, lower.shortest + added, false, true};
@@ -536,9 +533,9 @@ class LlEpisodeSim {
       if (all.shared == kUnmade) {
         all = h;
       } else {
-        all.unsettled = all.unsettled || h.unsettled;
+        all.partial = all.partial || h.partial;
         all.single =
-            !all.unsettled && all.single && h.single && all.shared == h.shared;
+            !all.partial && all.single && h.single && all.shared == h.shared;
         all.shared = _arms.common(all.shared, h.shared);
         all.shortest = std::min(all.shortest, h.shortest);
       }
@@ -547,14 +544,14 @@ class LlEpisodeSim {
     return _heads[LlStackSet::index(cell)];
   }
 
-  ArmVisit meet(std::vector<ArmFrame>& path, LlHistory::Node& common, bool& met,
-                std::uint32_t floor) {
+  ArmVisit fold_common(std::vector<ArmFrame>& path, LlHistory::Node& common,
+                       bool& hasCommon, std::uint32_t floor) {
     const auto cell = path.back().cell;
-    const auto& g = path.back().graft;
+    const auto& g = path.back().rebase;
     if (cell == kLlCtxNone) {
-      if (!met) {
+      if (!hasCommon) {
         common = made(path);
-        met = true;
+        hasCommon = true;
       } else if (const LlHistory::Node c = _arms.common(common, g.head);
                  _arms.depth(c) < _arms.depth(g.head)) {
         common = c;
@@ -565,21 +562,21 @@ class LlEpisodeSim {
     }
     if (const Heads h = heads(cell); h.shared != kUnmade) {
       const std::uint32_t depth = _arms.depth(h.shared);
-      LlHistory::Node meets = kUnmade;
-      if (!h.unsettled && h.shortest > depth) {
-        meets = met ? _arms.common(common, h.shared) : h.shared;
-      } else if (!h.unsettled && h.single) {
+      LlHistory::Node folded = kUnmade;
+      if (!h.partial && h.shortest > depth) {
+        folded = hasCommon ? _arms.common(common, h.shared) : h.shared;
+      } else if (!h.partial && h.single) {
         const LlHistory::Node whole =
-            _arms.graft(h.shared, _stacks.members(cell)[0].arm, made(path));
-        meets = met ? _arms.common(common, whole) : whole;
-      } else if (met) {
+            _arms.rebase(h.shared, _stacks.members(cell)[0].arm, made(path));
+        folded = hasCommon ? _arms.common(common, whole) : whole;
+      } else if (hasCommon) {
         if (const LlHistory::Node c = _arms.common(common, h.shared);
             _arms.depth(c) < depth)
-          meets = c;
+          folded = c;
       }
-      if (meets != kUnmade) {
-        common = meets;
-        met = true;
+      if (folded != kUnmade) {
+        common = folded;
+        hasCommon = true;
         return _arms.depth(common) > floor ? ArmVisit::skip : ArmVisit::stop;
       }
     }
@@ -595,7 +592,7 @@ class LlEpisodeSim {
   }
 
   // The conditions `accepts` takes are crossed, and what stands past them is
-  // read with what stood there; the readings still waiting are not kept.
+  // read with what was there; the readings still waiting are not kept.
   template <class F>
   bool filter(std::vector<LlThread>& threads, F&& accepts) {
     _everyone = threads;
@@ -671,7 +668,7 @@ class LlEpisodeSim {
   LlHistory::Node word(LlHistory::Node arm, const LlAtnState& s,
                        std::uint32_t edge) {
     const std::uint32_t w = word_of(s, edge);
-    return w == kNoWord ? arm : _arms.append(arm, w, _pos, _lull);
+    return w == kNoWord ? arm : _arms.append(arm, w, _pos, _zeroWidth);
   }
   static std::uint32_t word_of(const LlAtnState& s, std::uint32_t edge) {
     if (s.decision == kNoRow || s.nedges < 2) return kNoWord;
@@ -732,8 +729,8 @@ class LlEpisodeSim {
     }
   }
 
-  // `p` stands one word short of where it goes: the word is laid down only for
-  // a reading that is not met twice.
+  // `p` stands one word short of where it goes: the word is added only for a
+  // reading that is not met twice.
   void visit(LlThread& p, std::uint32_t pending, std::vector<LlThread>& out) {
     const LlAtnState& s = _atn.state(p.state);
     bool fresh = false;
@@ -743,7 +740,8 @@ class LlEpisodeSim {
       return;
     }
     owner = p.kernel;
-    if (pending != kNoWord) p.arm = _arms.append(p.arm, pending, _pos, _lull);
+    if (pending != kNoWord)
+      p.arm = _arms.append(p.arm, pending, _pos, _zeroWidth);
     if (_log != nullptr) _log->emplace_back(p.state, p.root);
     bool ready = s.kind == LlAtnKind::ruleStop && p.stack == kLlCtxNone;
     for (std::uint32_t i = 0; i < s.nedges; ++i) {
@@ -753,14 +751,14 @@ class LlEpisodeSim {
     }
     if (ready) {
       bool first = false;
-      std::uint32_t& seat =
+      std::uint32_t& slot =
           _at.at(LlThreadKey{p.state, 0, p.tag, p.root}, first);
       if (first) {
-        seat = static_cast<std::uint32_t>(out.size());
+        slot = static_cast<std::uint32_t>(out.size());
         out.push_back(p);
-      } else if (joinable(out[seat], p)) {
-        fork(out[seat], p);
-        join(out[seat].kernel, p.kernel);
+      } else if (joinable(out[slot], p)) {
+        fork(out[slot], p);
+        join(out[slot].kernel, p.kernel);
         return;
       } else {
         out.push_back(p);
@@ -804,48 +802,47 @@ class LlEpisodeSim {
     return false;
   }
 
-  // A frame made before the episode's walk began: the descent's stack, lent
-  // to the episode, with no cell under it. The walks down a stack stop there,
+  // A frame made before the episode's walk began: the descent's stack, copied
+  // for the episode, with no cell under it. The walks down a stack stop there,
   // so they cost the frames the episode made rather than the descent's depth.
-  bool lent(std::uint32_t stack) const {
+  bool copied(std::uint32_t stack) const {
     return _pool.contexts().before_walk(stack);
   }
 
-  // The rung of a lent frame, or null for any other: with it, what a walk
-  // asks of a stack that has reached the descent's frames is answered there.
-  const LlLentRung* rung(std::uint32_t stack) const {
-    if (_rungs == nullptr || stack >= _rungs->size() ||
-        (*_rungs)[stack].depth == 0 || !lent(stack))
+  // A copied frame's `LlCopyDepth`, or null: with it, a walk that reaches the
+  // descent's frames is answered there.
+  const LlCopyDepth* copy_depth(std::uint32_t stack) const {
+    if (_copyDepths == nullptr || stack >= _copyDepths->size() ||
+        (*_copyDepths)[stack].depth == 0 || !copied(stack))
       return nullptr;
-    return &(*_rungs)[stack];
+    return &(*_copyDepths)[stack];
   }
 
-  // Whether the lent frame `a`, which has the rung `r`, is `b` with frames
-  // over it. The unknown caller is under every lent stack; a frame not lent is
-  // under none, since the frames lent stand on frames lent alone.
-  bool lent_stands_on(std::uint32_t a, const LlLentRung& r, std::uint32_t b) {
+  // Whether the copied frame `a`, whose entry is `r`, is `b` with frames
+  // over it. The unknown caller is under every copied stack; a frame not
+  // copied is under none, since copied frames stand only on copied frames.
+  bool copied_stands_on(std::uint32_t a, const LlCopyDepth& r,
+                        std::uint32_t b) {
     if (a == b || b == kLlCtxNone) return true;
-    const LlLentRung* under = rung(b);
+    const LlCopyDepth* under = copy_depth(b);
     if (under == nullptr || under->depth >= r.depth) return false;
-    const auto& rungs = *_rungs;
-    while (rungs[a].depth > under->depth) {
-      const std::uint32_t jump = rungs[a].jump;
-      const bool far = jump != kLlCtxNone && rungs[jump].depth >= under->depth;
+    const auto& depths = *_copyDepths;
+    while (depths[a].depth > under->depth) {
+      const std::uint32_t jump = depths[a].jump;
+      const bool far = jump != kLlCtxNone && depths[jump].depth >= under->depth;
       a = far ? jump : _pool.contexts().parent(a, 0);
     }
     return a == b;
   }
 
-  // A stack without the cells that hold a single stack: the frames over such
-  // a cell stand over that stack, so that a rule entered again and again
-  // leaves no chain of them behind. Each frame is walked once per episode: only
-  // the cells of the closure in hand gain members, and this runs after its walk.
+  // A stack without the cells that hold a single stack, so a rule entered again
+  // and again leaves no chain of them. Each frame is walked once per episode.
   std::uint32_t flat(std::uint32_t stack) {
     _frames.clear();
     std::uint32_t at = stack, base = kLlCtxNone;
     bool changed = false;
     while (at != kLlCtxNone) {
-      if (lent(at)) {
+      if (copied(at)) {
         base = at;
         break;
       }
@@ -886,7 +883,7 @@ class LlEpisodeSim {
   std::uint32_t below(std::uint32_t stack) {
     _chain.clear();
     std::uint32_t at = stack, bottom = kLlCtxNone;
-    while (at != kLlCtxNone && !lent(at)) {
+    while (at != kLlCtxNone && !copied(at)) {
       if (LlStackSet::is_cell(at)) {
         bottom = at;
         break;
@@ -905,13 +902,14 @@ class LlEpisodeSim {
     return bottom;
   }
 
-  // Whether `a` is `b` with frames over it. The walk stops at the first frame
-  // lent, which knows its depth: it costs the frames the episode made.
+  // Whether `a` is `b` with frames over it. The walk stops at the first copied
+  // frame, which knows its depth: it costs the frames the episode made.
   bool stands_on(std::uint32_t a, std::uint32_t b) {
     for (;;) {
       if (a == b) return true;
       if (a == kLlCtxNone || LlStackSet::is_cell(a)) return false;
-      if (const LlLentRung* r = rung(a)) return lent_stands_on(a, *r, b);
+      if (const LlCopyDepth* r = copy_depth(a))
+        return copied_stands_on(a, *r, b);
       a = _pool.contexts().parent(a, 0);
     }
   }
@@ -920,10 +918,9 @@ class LlEpisodeSim {
     return stands_on(a, b) || stands_on(b, a);
   }
 
-  // Whether `stack` stands on a member of the cell, or a member on it. The
-  // chains of the members are indexed once, a flag per frame; a chain stops at
-  // the first frame lent, which is listed as a base of the cell instead, so
-  // that the descent's depth is not walked once per cell.
+  // Whether `stack` stands on a member of the cell, or a member on it. Member
+  // chains are indexed once, a flag per frame, and stop at the first frame
+  // taken from the descent, listed as a base of the cell.
   bool member_related(std::uint32_t cell, std::uint32_t stack) {
     static constexpr std::uint32_t root = 1u, ancestor = 2u;
     const auto key = [cell](std::uint32_t context) {
@@ -946,7 +943,7 @@ class LlEpisodeSim {
         // The rest of a marked chain is already indexed. Its terminal
         // cell or unknown caller belongs to that chain too.
         if (marked || at == kLlCtxNone || LlStackSet::is_cell(at)) break;
-        if (rung(at) != nullptr) {
+        if (copy_depth(at) != nullptr) {
           std::uint32_t& count = _relatedBaseCount.at(cell, fresh);
           _relatedBases.at(key(count++), fresh) = at;
           break;
@@ -964,8 +961,8 @@ class LlEpisodeSim {
     if (const auto* flags = _relatedFlags.find(key(stack));
         flags != nullptr && (*flags & ancestor) != 0)
       return true;
-    // A member on the frames lent: the bases that stand on `stack`.
-    if (stack == kLlCtxNone || rung(stack) != nullptr)
+    // A member on the copied frames: the bases that stand on `stack`.
+    if (stack == kLlCtxNone || copy_depth(stack) != nullptr)
       for (std::uint32_t k = 0; k < nbases; ++k)
         if (stands_on(base(k), stack)) return true;
     for (;;) {
@@ -973,10 +970,10 @@ class LlEpisodeSim {
           flags != nullptr && (*flags & root) != 0)
         return true;
       if (stack == kLlCtxNone || LlStackSet::is_cell(stack)) return false;
-      if (rung(stack) != nullptr) break;
+      if (copy_depth(stack) != nullptr) break;
       stack = _pool.contexts().parent(stack, 0);
     }
-    // Where the stack reaches the frames lent, a member among them is a base
+    // Where the stack reaches the copied frames, a member among them is a base
     // that it stands on; the unknown caller, a member too, ends every chain.
     if (const auto* flags = _relatedFlags.find(key(kLlCtxNone));
         flags != nullptr && (*flags & root) != 0)
@@ -1003,7 +1000,7 @@ class LlEpisodeSim {
     return true;
   }
 
-  // The reading `e`, now over the stacks of `p` as well; it leads. Common
+  // Puts the reading `e` over the stacks of `p` as well; it leads. Common
   // return frames stand above the fork, shared until the first that differs.
   void fork(LlThread& e, const LlThread& p) {
     std::uint32_t first = e.stack, second = p.stack;
@@ -1069,8 +1066,8 @@ class LlEpisodeSim {
       for (std::size_t k = members.size(); k-- > 1;) {
         LlThread m = p;
         m.stack = members[k].stack;
-        m.arm = _arms.graft(members[k].arm, members[0].arm, p.arm);
-        m.lex = _lexes.graft(members[k].lex, members[0].lex, p.lex);
+        m.arm = _arms.rebase(members[k].arm, members[0].arm, p.arm);
+        m.lex = _lexes.rebase(members[k].lex, members[0].lex, p.lex);
         push_later(m);
       }
       LlThread lead = p;
@@ -1089,7 +1086,7 @@ class LlEpisodeSim {
   LlReturnPool& _pool;
   bool _tracked;
   LlHistory _arms, _lexes;
-  LlStamped<std::uint64_t, LlKeyHash> _reduces;
+  LlRoundTable<std::uint64_t, LlKeyHash> _reduces;
   std::vector<std::uint32_t> _reduceUp{0};
   LlStackSet _stacks;
   std::vector<LlThread> _stack;
@@ -1097,20 +1094,20 @@ class LlEpisodeSim {
   std::vector<Pending> _side;
   std::vector<LlThread> _origins;
   // What filter and possible_terms read past the conditions: the readings and
-  // the ones a crossing grows, kept between calls for their room.
+  // the ones a crossing grows, kept between calls to reuse their storage.
   std::vector<LlThread> _everyone;
   std::vector<LlThread> _crossOrigins;
   std::vector<LlThread> _crossGrown;
-  LlStamped<LlThreadKey, LlThreadKeyHash> _seen, _held, _crossed, _calls;
-  LlStamped<LlThreadKey, LlThreadKeyHash> _at;
-  LlStamped<std::uint64_t, LlKeyHash> _below;
-  LlStamped<std::uint64_t, LlKeyHash> _relatedProcessed, _relatedFlags;
-  // The frames lent that the chains of a cell's members end on, listed per
+  LlRoundTable<LlThreadKey, LlThreadKeyHash> _seen, _held, _crossed, _calls;
+  LlRoundTable<LlThreadKey, LlThreadKeyHash> _at;
+  LlRoundTable<std::uint64_t, LlKeyHash> _below;
+  LlRoundTable<std::uint64_t, LlKeyHash> _relatedProcessed, _relatedFlags;
+  // The copied frames that the chains of a cell's members end on, listed per
   // cell: how many, and each by its place in the list.
-  LlStamped<std::uint64_t, LlKeyHash> _relatedBaseCount;
-  LlStamped<std::uint64_t, LlKeyHash> _relatedBases;
+  LlRoundTable<std::uint64_t, LlKeyHash> _relatedBaseCount;
+  LlRoundTable<std::uint64_t, LlKeyHash> _relatedBases;
   std::vector<std::uint32_t> _chain, _frames;
-  LlStamped<std::uint64_t, LlKeyHash> _flat;
+  LlRoundTable<std::uint64_t, LlKeyHash> _flat;
   std::vector<std::uint32_t> _shared;
   std::vector<Heads> _heads;
   std::vector<std::pair<std::uint32_t, std::uint32_t>> _joins;
@@ -1118,10 +1115,10 @@ class LlEpisodeSim {
   std::size_t _base = 0;
   std::uint32_t _seq = 0;
   std::uint32_t _pos = 0;
-  std::uint32_t _lull = 0;
+  std::uint32_t _zeroWidth = 0;
   const std::uint8_t* _scoped = nullptr;
   const std::uint8_t* _shares = nullptr;
-  const std::vector<LlLentRung>* _rungs = nullptr;
+  const std::vector<LlCopyDepth>* _copyDepths = nullptr;
   CancellationPoll _stop;
 };
 

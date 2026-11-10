@@ -1,6 +1,6 @@
-// A `cr<>` spelling read as std::regex (ECMAScript) reads a bracket
-// expression, one item at a time: a character, a range, a class escape. A raw
-// byte past ASCII is read as UTF-8.
+// Reads a `cr<>` spelling as a std::regex (ECMAScript) bracket expression, one
+// item at a time: a character, a range, a class escape. A raw byte past ASCII
+// is read as UTF-8.
 #pragma once
 
 #include <iterator>

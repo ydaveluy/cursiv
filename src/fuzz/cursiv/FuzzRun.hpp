@@ -1,7 +1,5 @@
-// The lane: one grammar, N documents written by the declarative walk, and one
-// verdict on each -- the erased door reads the document clean, and the AST it
-// builds matches the grammar's own directives. Nothing here names an engine;
-// and nothing here reads a table.
+// The lane: one grammar, N documents written by the declarative walk, each
+// read clean by the parser into the AST its directives state. Engine-free.
 #pragma once
 
 #include <bit>
@@ -11,12 +9,9 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/parser/Parser.hpp"
-#include "cursiv/syntax-tree/AstReflection.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/AstCompare.hpp"
-#include "cursiv/AstExcused.hpp"
+#include "cursiv/AstUnwritten.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/CstInvariants.hpp"
 #include "cursiv/CursivActions.hpp"
 #include "cursiv/CursivLexicon.hpp"
@@ -25,7 +20,10 @@
 #include "cursiv/GrammarDerivation.hpp"
 #include "cursiv/GrammarGenerator.hpp"
 #include "cursiv/SeededSource.hpp"
-#include "cursiv/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
 
 namespace cursiv::fuzzer::detail {
 
@@ -54,10 +52,10 @@ struct Lane {
   // A tree the walk did not model is this harness's limit; a tree the engine
   // did not build is a broken contract. Never the same skip.
   std::uint64_t unmodelled = 0, nullTrees = 0;
-  // The tape, weighed on what a postorder tree owes whatever wrote it.
+  // The tape, checked against what any postorder tree must hold.
   std::uint64_t tapes = 0, tapeGaps = 0;
   unsigned styles = 0;
-  // What no instrument reaches, by name: a member the walk could not write and
+  // What no check reaches, by name: a member the walk could not write and
   // a member no reader reads. Neither is ever counted as an agreement.
   std::map<std::string, unsigned> unwritten;
   std::map<std::string, unsigned> blind;
@@ -117,12 +115,8 @@ std::uint64_t run(const char* lang, const cursiv::Parser& parser,
           "for <<%s>>\n",
           lang, inv.why.c_str(), inv.at, d.text.c_str());
 
-
-    // The oracle. The CST is an intermediate form and is not predicted here:
-    // a prediction of what the engine owes would be its reading checked
-    // against a copy of itself.
-    // Accepted and unrepaired: an engine that builds no tree here has broken
-    // the contract, and a skip would count it nowhere.
+    // The oracle checks the AST, not the CST. An accepted, unrepaired document
+    // without a tree breaks the contract.
     if (r.value == nullptr) {
       if (++lane.nullTrees == 1)
         std::printf(
@@ -135,7 +129,7 @@ std::uint64_t run(const char* lang, const cursiv::Parser& parser,
       continue;
     }
     ++lane.judged;
-    for (const AstExcused& x : d.unwritten) ++lane.unwritten[x.member];
+    for (const AstUnwritten& x : d.unwritten) ++lane.unwritten[x.member];
     const AstCompare::Result diff =
         AstCompare{reflection, kActions<G>}.run(*d.tree, *r.value, d.unwritten);
     for (const std::string& n : diff.blind) ++lane.blind[n];
@@ -182,8 +176,8 @@ std::uint64_t run(const char* lang, const cursiv::Parser& parser,
   if (lane.refused != 0 || lane.repaired != 0) ++failures;
   if (lane.treeGaps != 0 || lane.tapeGaps != 0) ++failures;
   if (lane.nullTrees != 0) ++failures;
-  // Every tape weighed is either judged or declared unmodelled: a document that
-  // left by some other door would leave the count silent about it.
+  // Every tape checked is judged, unmodelled or without a tree: a document
+  // counted nowhere fails the run.
   if (lane.judged + lane.unmodelled + lane.nullTrees != lane.tapes) {
     std::printf("FAIL %s: %llu tapes, %llu judged, %llu unmodelled\n", lang,
                 (unsigned long long)lane.tapes, (unsigned long long)lane.judged,

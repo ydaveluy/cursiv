@@ -1,9 +1,8 @@
 #pragma once
 
-// One language, twice: the shapes the two engines have to agree on -- a
-// choice, a loop, an option inside a sequence, a precedence table and a rule
-// whose body is one reference. The two grammars differ by their name alone,
-// which is what lets one tree hold both generated modules.
+// One language twice: the shapes both engines must agree on, a choice, a loop,
+// an option in a sequence, a precedence table and a one-reference rule. The two
+// grammars differ by name only, so one tree holds both modules.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/ll/ParityAst.hpp"
@@ -27,10 +26,9 @@ struct Base : cursiv::GrammarSpec {
       : infix<Unary, ast::Binary,
               levels(left(lit<"*"> | lit<"/">), left(lit<"+"> | lit<"-">))> {};
 
-  // Two rules that write nothing of their own between the table and the arm
-  // that parenthesises: the record the table states its member over is then
-  // three rules below it, and the parenthesised arm hands back no record at
-  // all.
+  // Two rules that write nothing between the table and the parenthesised arm:
+  // the record the table states its member over is three rules down, and the
+  // parenthesised arm returns no record.
   struct Unary : rule<create<ast::Neg>(lit<"~"> +
                                        assign<&ast::Neg::operand>(ref<Unary>))
                       | ref<Postfix>> {};
@@ -61,9 +59,9 @@ struct Base : cursiv::GrammarSpec {
                         lit<"="> + assign<&ast::Let::value>(ref<Expression>) +
                         lit<";">> {};
 
-  // The record this one lays rides onto its member's, since everything after
-  // that member may be absent -- and where the member hands back no record,
-  // the ride is what has to fail rather than land on the last leaf written.
+  // This rule's record extends its member's record, since everything after that
+  // member may be absent; where the member returns no record, that must fail
+  // rather than attach to the last leaf written.
   struct ItemRule
       : rule<assign<&ast::Item::value>(ref<Expression>) +
              option(kw<"as"> + assign<&ast::Item::alias>(ref<ID>))> {};
@@ -81,7 +79,7 @@ struct Base : cursiv::GrammarSpec {
   using hidden = list<COMMENT, BLOCK>;
 };
 
-// Declarations that open alike and part on their second word.
+// Declarations that open the same and part on their second word.
 struct Decls : cursiv::GrammarSpec {
   using WS = Base::WS;
   using ID = Base::ID;
@@ -145,9 +143,9 @@ struct Repairs : cursiv::GrammarSpec {
                             ref<Closed>)))> {};
 };
 
-// Alternatives alike past their first token: in one rule, through a rule of
-// one's own, around a rule both call, as rules a loop chooses between, and over
-// a word two terminals read.
+// Alternatives the same past their first token: in one rule, through a rule of
+// one's own, around a rule both call, as rules a loop chooses between, over a
+// word two terminals read, and one that reads on into the next iteration.
 struct Forks : cursiv::GrammarSpec {
   using WS = Base::WS;
   using ID = Base::ID;
@@ -174,12 +172,19 @@ struct Forks : cursiv::GrammarSpec {
   struct Twins
       : rule<create<ast::Let>((kw<"tw"> + ref<ID> + ref<ID> + lit<";">) |
                               (kw<"tw"> + ref<TAG> + ref<TAG> + lit<":">))> {};
+  struct Lone : rule<create<ast::Let>(
+                    kw<"pr"> + assign<&ast::Let::name>(ref<ID>) + lit<";">)> {};
+  struct Pair : rule<create<ast::Let>(
+                    kw<"pr"> + assign<&ast::Let::name>(ref<ID>) + lit<";"> +
+                    kw<"pr"> + ref<ID> + lit<";"> + lit<"!">)> {};
+  struct Paired : rule<ref<Lone> | ref<Pair>> {};
   struct UnitRule : rule<many(append<&ast::Unit::lets>(ref<Run>) |
                               append<&ast::Unit::lets>(ref<Same>) |
                               append<&ast::Unit::lets>(ref<Around>) |
                               append<&ast::Unit::lets>(ref<Twins>) |
                               append<&ast::Unit::lets>(ref<Field>) |
-                              append<&ast::Unit::lets>(ref<Method>))> {};
+                              append<&ast::Unit::lets>(ref<Method>) |
+                              append<&ast::Unit::lets>(ref<Paired>))> {};
 
   using entry = UnitRule;
   using ignored = WS;

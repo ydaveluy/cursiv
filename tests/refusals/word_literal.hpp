@@ -1,5 +1,5 @@
 // A literal with no guard that ends in a word character reads the start of a
-// longer word: the grammar is read, and the generator says so.
+// longer word: the grammar is generated with a warning.
 // expect LR LL: warning: rule .Root.: .'begin'. is a literal with no guard that ends in a word character, so it also matches the start of a longer word.*write .kw<.begin.>.
 #pragma once
 

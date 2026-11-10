@@ -48,9 +48,10 @@ string(JSON _bytes GET "${_json}" rows 0 bytes)
 string(JSON _iterations GET "${_json}" rows 0 iterations)
 string(JSON _stageCount LENGTH "${_json}" rows 0 stages)
 string(JSON _build GET "${_json}" rows 0 stages build)
+string(JSON _rssType TYPE "${_json}" rows 0 rss)
 if(NOT _count EQUAL 2 OR NOT _source STREQUAL "disk:${_input}" OR
    NOT _bytes EQUAL 10 OR NOT _iterations EQUAL 1 OR
-   NOT _stageCount EQUAL 5 OR _build LESS 0)
+   NOT _stageCount EQUAL 5 OR _build LESS 0 OR NOT _rssType STREQUAL "NULL")
   message(FATAL_ERROR "file benchmark did not measure the supplied inputs: ${_json}")
 endif()
 
@@ -123,12 +124,27 @@ if(_quoted EQUAL -1)
   message(FATAL_ERROR "CSV did not quote the input file name: ${_csv}")
 endif()
 
-run_bench("${BENCH}" "${_input}" --rss --json "${WORK}/rss.json")
+run_bench("${BENCH}" "${_input}" --rss --json "${WORK}/rss.json"
+    --csv "${WORK}/rss.csv")
 file(READ "${WORK}/rss.json" _rss)
 string(JSON _lspCount LENGTH "${_rss}" rows 0 lsp)
 string(JSON _iterations GET "${_rss}" rows 0 iterations)
 if(NOT _lspCount EQUAL 0 OR NOT _iterations EQUAL 1)
   message(FATAL_ERROR "RSS mode ran the warm parse lane or repeated a build")
+endif()
+# The exports carry what the console prints: each resident figure, null where
+# the platform gave none, and whether the peak is the build's own.
+string(JSON _stages LENGTH "${_rss}" rows 0 rss stages)
+string(JSON _peak TYPE "${_rss}" rows 0 rss peak)
+string(JSON _reset TYPE "${_rss}" rows 0 rss peak_reset)
+file(STRINGS "${WORK}/rss.csv" _rssCsv)
+list(GET _rssCsv 0 _header)
+list(GET _rssCsv 1 _line)
+if(NOT _stages EQUAL 5 OR NOT _peak MATCHES "^(NUMBER|NULL)$" OR
+   NOT _reset STREQUAL "BOOLEAN" OR
+   NOT _header MATCHES ",build_rss_bytes,rss_peak_bytes,rss_peak_reset$" OR
+   NOT _line MATCHES ",(true|false)$")
+  message(FATAL_ERROR "RSS figures missing from the exports: ${_rss}\n${_rssCsv}")
 endif()
 run_bench("${BENCH}" "${_input}" --rss --iterations 4
     --json "${WORK}/rss-order.json")
@@ -144,7 +160,7 @@ refuse_bench("${_input}" --multi)
 refuse_bench(--dump-corpus "${WORK}/invalid")
 refuse_bench(--unknown)
 
-# A consumer-supplied generator uses the existing dump/replay and worker lanes.
+# The consumer's generator: a corpus dumped then replayed, and the worker curve.
 run_bench("${GENERATED}" --sizes 64 --no-multi --dump-corpus "${WORK}/corpus")
 run_bench("${GENERATED}" --sizes 64 --no-multi --iterations 1
     --corpus "${WORK}/corpus" --json "${WORK}/replay.json")

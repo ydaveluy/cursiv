@@ -1,5 +1,5 @@
-// A language's own container one storey up: its core services and the editor
-// services, over one `CoreServices`.
+// A language's LSP container: its core services and the editor services, over
+// one `CoreServices`.
 #pragma once
 
 #include <type_traits>
@@ -10,12 +10,8 @@
 
 namespace cursiv {
 
-// A language derives this and takes the constructor:
-//
-//   struct MyServices final
-//       : cursiv::LspServicesFor<MyCoreServices, MySharedServices> {
-//     using LspServicesFor::LspServicesFor;
-//   };
+// A language derives this and inherits its constructor
+// (`using LspServicesFor::LspServicesFor;`).
 template <class TCore, class TShared>
 struct LspServicesFor : TCore, LspServices {
   static_assert(std::is_base_of_v<CoreServices, TCore>,
@@ -26,8 +22,8 @@ struct LspServicesFor : TCore, LspServices {
   explicit LspServicesFor(TShared& sharedServices)
       : TCore(sharedServices), LspServices(sharedServices) {}
 
-  // One emission per storey through the diamond: the language rows through the
-  // core side, the LSP rows alone.
+  // Each set once through the diamond: the language rows through the core
+  // side, then the LSP rows alone.
   void visitServices(
       function_ref<void(const ServiceSlot&)> yield) const override {
     TCore::visitServices(yield);

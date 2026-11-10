@@ -16,12 +16,13 @@
 #include "cursiv/shared/gen/Vec.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {
 
 struct LrBuildCfg : LrLowFacts, LowerPools {
-  // What only construction reads: never frozen, so no reader takes a verdict
-  // at its default for an answer.
+  // What only construction reads: never frozen, so no reader mistakes a
+  // default value for an answer.
   std::uint32_t nslots = 0;
   std::uint16_t entryNt = 0;
   std::uint16_t startProd = 0;  // $accept -> entry ; reducing it is acceptance
@@ -96,7 +97,8 @@ struct LrBuildCfg : LrLowFacts, LowerPools {
     for (unsigned i = 0; i < p.len; ++i) {
       const std::uint16_t y = sym_at(p, i);
       out += ' ';
-      out += is_term(y) ? term_name(y) : nt_name(nt_index(y));
+      out +=
+          is_term(y) ? quote(term_name(y)) : std::string(nt_name(nt_index(y)));
     }
     return out;
   }

@@ -1,6 +1,5 @@
-// recovery_metric -- the quality of error repair, per grammar and per class
-// of fault: valid documents, faults planted in them from a seed, and every
-// faulted copy weighed against its twin by the benchmark's support code.
+// recovery_metric -- the quality of error repair, per grammar and class of
+// fault: each faulted copy of a valid document compared with its twin.
 //
 //   recovery_metric [--docs N] [--seed S] [--reps R] [--only a,b]
 //                   [--json PATH] [--cpu N | --no-cost] [--trace]
@@ -52,8 +51,8 @@ struct Options {
   int reps = 2;
   int cpu = -2;  // -2: the first performance core, -1: unpinned
   bool cost = true;
-  // One line per faulted document on stderr: its faults, windows, and what
-  // was said.
+  // One line per faulted document on stderr: its faults, windows and
+  // diagnostics.
   bool trace = false;
   // What a parse's repairs may spend, where the language's engine takes it.
   cursiv::engine::RepairBudget budget;
@@ -143,7 +142,7 @@ void trace(std::string_view lang, metric::FaultClass cls,
   std::fprintf(stderr,
                " | found %u miss %u para %u%s | text %llu/%llu del %llu aband "
                "%llu other %llu rest %u inv %u | ast %llu/%llu",
-               v.found, v.missed, v.parasites, v.noop ? " noop" : "",
+               v.found, v.missed, v.spurious, v.noop ? " noop" : "",
                static_cast<unsigned long long>(v.text.kept),
                static_cast<unsigned long long>(v.text.eligible),
                static_cast<unsigned long long>(v.text.deleted),
@@ -335,7 +334,12 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "no language selected\n");
     return 2;
   }
+  // A report not written whole fails the run.
   report.text(stdout);
+  if (std::fflush(stdout) != 0 || std::ferror(stdout) != 0) {
+    std::fprintf(stderr, "cannot write the report\n");
+    return 1;
+  }
   if (!o.json.empty()) {
     std::FILE* f = std::fopen(o.json.c_str(), "w");
     if (f == nullptr) {
@@ -343,7 +347,11 @@ int main(int argc, char** argv) {
       return 1;
     }
     report.json(f);
-    std::fclose(f);
+    const bool written = std::ferror(f) == 0;
+    if (std::fclose(f) != 0 || !written) {
+      std::fprintf(stderr, "cannot write %s\n", o.json.c_str());
+      return 1;
+    }
   }
   return 0;
 }

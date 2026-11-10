@@ -1,5 +1,5 @@
 # The report is well formed: the run answers 0, the text names every class,
-# and the JSON parses with every count a class owes. What the counts say is
+# and the JSON parses with every count of each class. The counts' values are
 # not judged here.
 execute_process(
     COMMAND ${EMULATOR} ${METRIC} --docs 3 --reps 1 --json ${OUT}.json
@@ -38,7 +38,7 @@ foreach(g RANGE ${last})
   endif()
   math(EXPR lastClass "${classes} - 1")
   foreach(c RANGE ${lastClass})
-    foreach(key docs faults diagnostics found missed parasites silent noop
+    foreach(key docs faults diagnostics found missed spurious silent noop
                 refused treeless machine)
       string(JSON v ERROR_VARIABLE err GET "${json}" grammars ${g} classes ${c}
              ${key})

@@ -25,7 +25,7 @@ struct Opts : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
 };
 
-struct Storey : cursiv::Extends<cursiv::AstNode> {
+struct Separated : cursiv::Extends<cursiv::AstNode> {
   string_view a01, a02, a03, a04;
 };
 
@@ -98,13 +98,17 @@ struct OptionalsG : cursiv::GrammarSpec {
             lit<"}">)> {};
 
   // Optional positions separated by choices containing an end assertion.
-  struct StoreyBlock : rule<create<ast::Storey>(
-      lit<"{"> +
-      option(kw<"k01"> + assign<&ast::Storey::a01>(ref<ID>)) + (eof | lit<";">) +
-      option(kw<"k02"> + assign<&ast::Storey::a02>(ref<ID>)) + (eof | lit<";">) +
-      option(kw<"k03"> + assign<&ast::Storey::a03>(ref<ID>)) + (eof | lit<";">) +
-      option(kw<"k04"> + assign<&ast::Storey::a04>(ref<ID>)) + (eof | lit<";">) +
-      lit<"}">)> {};
+  struct SeparatedBlock
+      : rule<create<ast::Separated>(
+            lit<"{"> +
+            option(kw<"k01"> + assign<&ast::Separated::a01>(ref<ID>)) +
+            (eof | lit<";">)+option(kw<"k02"> +
+                                    assign<&ast::Separated::a02>(ref<ID>)) +
+            (eof | lit<";">)+option(kw<"k03"> +
+                                    assign<&ast::Separated::a03>(ref<ID>)) +
+            (eof | lit<";">)+option(kw<"k04"> +
+                                    assign<&ast::Separated::a04>(ref<ID>)) +
+            (eof | lit<";">)+lit<"}">)> {};
 
   // An optional run ending its alternative, with a clause opening on the same
   // keyword as the next rule: the ambiguous suffix stays in the body.
@@ -135,14 +139,13 @@ struct OptionalsG : cursiv::GrammarSpec {
   struct VarsRule : rule<create<ast::Vars>(
                         some(append<&ast::Vars::items>(ref<VarRule>)))> {};
 
-  struct Entry : rule<(kw<"optionals"> + ref<Block>) |
-                      (kw<"storey"> + ref<StoreyBlock>) |
-                      (kw<"entangled"> + ref<RecsRule>) |
-                      (kw<"recycle"> + ref<VarsRule>) |
-                      ref<tbnd::BoundaryG::Root> |
-                      (lit<"newline:"> +
-                       skip(ignore<tnl::NlG::WS>, hide<>,
-                            ref<tnl::NlG::Root> + eof))> {};
+  struct Entry
+      : rule<(kw<"optionals"> + ref<Block>) |
+             (kw<"separated"> + ref<SeparatedBlock>) |
+             (kw<"entangled"> + ref<RecsRule>) |
+             (kw<"recycle"> + ref<VarsRule>) | ref<tbnd::BoundaryG::Root> |
+             (lit<"newline:"> + skip(ignore<tnl::NlG::WS>, hide<>,
+                                     ref<tnl::NlG::Root> + eof))> {};
 
   using entry = Entry;
   using ignored = WS;

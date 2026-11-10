@@ -35,11 +35,9 @@ struct StampLayout {
     return static_cast<std::uint16_t>(n.engine >> rowBits);
   }
 
-  // The row of an already written record, its state left alone.
   constexpr void set_row(CstNode& n, ElementId row) const {
     n.engine = (n.engine & ~row_mask()) | (row & row_mask());
   }
-  // The state of an already written record, its row left alone.
   constexpr void set_state(CstNode& n, std::uint16_t state) const {
     n.engine = (n.engine & row_mask()) | (std::uint32_t{state} << rowBits);
   }

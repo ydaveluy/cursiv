@@ -1,8 +1,6 @@
 // What the graph's election reads of a forest node's elected derivation: the
-// fork steps it took -- those at a vertex that took several -- in the order
-// the reading took them, as a rope that carries their positions. Two
-// derivations that took the same forks before a position share that part of
-// their ropes; the ones that differ are told apart from the first fork on.
+// fork steps it took, in order, as a rope of their positions. Derivations with
+// the same forks before a position share that part.
 #pragma once
 
 #include <vector>
@@ -52,15 +50,15 @@ class LrGssDigest {
       }
       const Id alt = forest.elect(f);
       bool ready = true;
-      for (const Id kid : forest.children(alt))
-        if (_of[kid] == kUnset) {
-          _work.push_back(kid);
+      for (const Id child : forest.children(alt))
+        if (_of[child] == kUnset) {
+          _work.push_back(child);
           ready = false;
         }
       if (!ready) continue;
       _work.pop_back();
       _parts.clear();
-      for (const Id kid : forest.children(alt)) _parts.push_back(_of[kid]);
+      for (const Id child : forest.children(alt)) _parts.push_back(_of[child]);
       if (const Id step = forest.step(alt); step != none) {
         const Facts s = facts(step);
         if (s.fork) _parts.push_back(_forks.leaf(step, LrGssForkAgg{s.at}));

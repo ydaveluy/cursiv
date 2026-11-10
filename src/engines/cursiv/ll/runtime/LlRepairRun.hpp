@@ -1,4 +1,4 @@
-// The gestures a repair makes with no token read between them: one fault, and
+// The edits a repair makes with no token read between them: one fault, and
 // one note once the run ends.
 #pragma once
 
@@ -10,9 +10,9 @@
 namespace cursiv::engine {
 
 struct LlRepairRun : RepairFault {
-  // A misspelt word's span: whatever reads it lays its leaf.
+  // A misspelt word's span: whatever reads it writes its leaf.
   TextOffset spelt = 0, speltEnd = 0;
-  // The cursor after the last gesture: one made at the same cursor joins.
+  // The cursor after the last edit: one made at the same cursor joins.
   TextOffset at = 0;
   // The alphabet the last drop was read with: the token it resumes on is.
   std::uint16_t dropMode = 0;

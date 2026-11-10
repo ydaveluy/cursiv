@@ -1,3 +1,4 @@
+// A `same` after a call to a recursive terminal, with no `mark` before it.
 // expect LR: refused: terminal .MARKED. uses .same<>. where a .mark<>. with its tag is not set on every path before it
 #pragma once
 

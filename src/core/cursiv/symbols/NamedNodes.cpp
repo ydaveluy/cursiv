@@ -26,9 +26,9 @@ detail::NamedNodes detail::collect_named_nodes(const Document& document,
                                                const CancellationToken& token) {
   const auto& all = document.parseResult.nodes();
   NamedNodes named;
-  // A record is not a key: `wrap` builds its wrapper at the record its content
-  // already sits on. The id opens a run of nodes, and the node is picked out
-  // of that run by identity.
+  // A record is not a key: a nest builds its wrapper on the record its content
+  // already uses. `opens` gives the first node of each record, and the node is
+  // found in that run by identity.
   std::vector opens(document.parseResult.cst().size(), kNone);
   std::vector rankAt(all.size(), kNone);
   for (std::uint32_t at = 0; at < all.size(); ++at) {
@@ -46,15 +46,15 @@ detail::NamedNodes detail::collect_named_nodes(const Document& document,
   }
 
   // The nearest named ancestor of each node on the way, found once: a long
-  // chain of unnamed containers is climbed by the first symbol under it.
+  // chain of unnamed containers is walked by the first symbol under it.
   constexpr std::size_t kUnknown = NamedNodes::kNoOwner - 1;
   std::vector ownerAt(all.size(), kUnknown);
-  std::vector<std::uint32_t> climbed;
+  std::vector<std::uint32_t> walked;
   named.owners.reserve(named.nodes.size());
   for (const AstNode* const node : named.nodes) {
     throw_if_cancelled(token);
     std::size_t owner = NamedNodes::kNoOwner;
-    climbed.clear();
+    walked.clear();
     for (const AstNode* p = node->parent; p != nullptr; p = p->parent) {
       const NodeId record = p->cstNodeId;
       if (record >= opens.size() || opens[record] == kNone) continue;
@@ -70,9 +70,9 @@ detail::NamedNodes detail::collect_named_nodes(const Document& document,
         owner = ownerAt[at];
         break;
       }
-      climbed.push_back(at);
+      walked.push_back(at);
     }
-    for (const std::uint32_t at : climbed) ownerAt[at] = owner;
+    for (const std::uint32_t at : walked) ownerAt[at] = owner;
     named.owners.push_back(owner);
   }
   return named;

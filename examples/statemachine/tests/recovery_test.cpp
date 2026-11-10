@@ -49,11 +49,9 @@ void run(Lane& lane) {
         }
     }
   }
-  // A word two letters off the keyword it stands for is read as that keyword,
-  // and the name after it stays a name. A word unlike the keyword is the
-  // next item: the keyword is inserted before it. A word unlike the keyword
-  // and followed by a name, where only that keyword may stand, is replaced by
-  // it -- one gesture where the alternatives take two.
+  // A word two letters off a keyword is read as it. A word unlike it gets the
+  // keyword inserted before it, or is replaced by it when a name follows and
+  // only that keyword may stand there.
   for (const auto& [text, want] :
        {std::pair<std::string_view, std::vector<std::string>>{
             "statemacne Lamp\n\nevents toggle",
@@ -76,7 +74,7 @@ void run(Lane& lane) {
   language(lane, *engine, "valid.statemachine",
            {"01_typo1.statemachine", "02_typo2.statemachine",
             "03_closer_block.statemachine", "04_closer_eof.statemachine",
-            "05_intruder.statemachine", "06_truncated.statemachine",
+            "05_extra_token.statemachine", "06_truncated.statemachine",
             "07_two_faults.statemachine", "08_head_fault.statemachine",
             "09_list_delim.statemachine", "10_noise.statemachine",
             "11_head_typo.statemachine"});

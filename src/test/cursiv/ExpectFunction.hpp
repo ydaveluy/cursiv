@@ -1,6 +1,5 @@
-// Where every check in this module is reported: the helpers compare, the
-// hook decides what a mismatch means -- which is what lets them sit under
-// any test framework instead of one.
+// Where every check of this module reports: the helpers compare, the hook
+// decides what a mismatch means, so they work under any test framework.
 #pragma once
 
 #include <functional>
@@ -10,8 +9,7 @@
 
 namespace cursiv::test {
 
-// The two sides already rendered, plus the sentence: a C++ module has no
-// `unknown` to hand over, so it hands over what it would have printed.
+// The two sides as printed text, and the message.
 using ExpectFunction =
     std::function<void(std::string_view actual, std::string_view expected,
                        std::string_view message)>;

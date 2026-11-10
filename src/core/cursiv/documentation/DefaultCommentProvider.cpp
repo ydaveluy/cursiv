@@ -28,16 +28,14 @@ NodeId find_comment_node(const Document& document, const AstNode& node,
   const Grammar& grammar = *cst.grammar();
   const NodeId nodeId = node.cstNodeId;
   const TextOffset nodeStart = cst[nodeId].begin;
-  // The root's neighbourhood is the whole leading trivia; any other node owns
-  // exactly one step past its subtree.
+  // The root takes a comment anywhere in its leading trivia; any other node
+  // only the record right before it.
   const bool root = &node == document.parseResult.value;
-  // A root with no visible content owns nothing: there is no first token for
-  // the comment to precede.
+  // An empty root has no first token for a comment to precede.
   if (root && nodeStart == cst[nodeId].end) return kNoNode;
 
-  // Record ends never decrease. Find the last record before the node's text
-  // without scanning its entire subtree; leading trivia inside the subtree
-  // remains eligible. This needs no auxiliary CST index.
+  // Record ends never decrease: a binary search finds the last record that
+  // ends before the node's text. Leading trivia inside the subtree counts.
   NodeId lo = 0, hi = nodeId;
   while (lo < hi) {
     const NodeId mid = std::midpoint(lo, hi);
@@ -64,8 +62,8 @@ DocComment parse_doc_comment(const Document& document, NodeId comment,
                              const DocCommentParseOptions& options) {
   const Cst& cst = document.parseResult.cst();
   const TextOffset begin = cst[comment].begin;
-  // The document's index says the line; its columns count code units, where a
-  // comment's count bytes, so the column is read back to the line's start.
+  // The text document gives the line, but its columns count code units and a
+  // comment's count bytes: measure the column from the line start.
   const std::size_t lastBreak = cst.text().substr(0, begin).find_last_of("\r\n");
   const std::size_t lineStart =
       lastBreak == std::string_view::npos ? 0 : lastBreak + 1;

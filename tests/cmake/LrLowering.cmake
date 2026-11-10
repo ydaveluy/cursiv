@@ -1,6 +1,6 @@
 cursiv_grammar(edges engines/lr/EdgesGrammar.hpp tedges::G ENGINE LR
     GENERATOR_ARGS --group-lines=64)
-# Where a reading commits and where a token ends: committed repetitions, region
+# Where a parse commits and where a token ends: committed repetitions, region
 # edges and guarded alternatives.
 cursiv_test(LrEdges_test engines/lr/LrEdges_test.cpp
     edgesGenerated
@@ -31,8 +31,7 @@ cursiv_test(LrStates_test engines/lr/LrStates_test.cpp
     trivialrGenerated
     rulerefusalGenerated)
 target_sources(LrStates_test PRIVATE engines/lr/LrRuleRefusal_cases.cpp)
-# Only the master project builds what the shipped languages' own documents ask,
-# and only when they are built with LR: these suites read the LR tables.
+# Top-level LR builds only: these suites read the shipped examples' LR tables.
 if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
   # The shipped examples under repair and at the caret.
   cursiv_test(LrExamples_test engines/lr/LrExamples_test.cpp
@@ -47,12 +46,10 @@ if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
   target_compile_definitions(LrExamples_test PRIVATE
       CURSIV_EXAMPLE_DIR="${PROJECT_SOURCE_DIR}/examples")
 
-  # Which repair a reading makes, what the search opens to find it, and what
-  # it costs over a long document.
+  # Which repair a parse makes, what the search explores to find it, and its
+  # cost over a long document.
   cursiv_grammar(opentoken engines/lr/OpenTokenGrammar.hpp topen::G ENGINE LR)
   cursiv_grammar(indentbody engines/lr/IndentGrammar.hpp tindent::body::G ENGINE LR)
-  # The repair search against an enumeration of its gestures, and its
-  # writer against the drive over whole documents.
   cursiv_test(LrRepairSearch_test engines/lr/LrRepairSearch_test.cpp
     arithmeticsGenerated
     domain-modelGenerated
@@ -69,21 +66,21 @@ if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
     nestedGenerated)
 
   # A parse past its repair budget ends, accepted, whatever it met.
-  cursiv_grammar(owed engines/lr/OwedLoopGrammars.hpp towed::G ENGINE LR)
+  cursiv_grammar(insertloop engines/lr/InsertionLoopGrammars.hpp tinsertloop::G ENGINE LR)
   cursiv_grammar(degraded engines/lr/DegradedGrammars.hpp tdegraded::G ENGINE LR)
   cursiv_test(LrRepairBudget_test engines/lr/LrRepairBudget_test.cpp
     arithmeticsGenerated
     asiGenerated
     requirements-langGenerated
     degradedGenerated
-    owedGenerated)
+    insertloopGenerated)
   # Its CPU work has a 30s watchdog: reserve all four CI test slots.
   cursiv_timeout(LrRepairBudget_test 60)
   set_tests_properties(LrRepairBudget_test PROPERTIES PROCESSORS 4)
 endif()
 
-# The construction piece by piece, grammars lowered in process and generated,
-# the door grammar's small languages and the passes grammar's cases.
+# Table construction step by step, on grammars lowered in process and
+# generated.
 set(_lowering_cases
     engines/lr/LrLowering_test.cpp
     engines/lr/LrConstruction_cases.cpp
@@ -91,6 +88,6 @@ set(_lowering_cases
     engines/lr/LrPasses_cases.cpp
 )
 cursiv_test(LrLowering_test "${_lowering_cases}"
-    asicasesGenerated cursivLrGen doorGenerated passesGenerated)
+    asicasesGenerated cursivLrGen smalllanguagesGenerated passesGenerated)
 set_target_properties(LrStates_test LrLowering_test PROPERTIES
     UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)

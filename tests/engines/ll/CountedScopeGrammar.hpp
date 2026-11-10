@@ -1,18 +1,15 @@
 #pragma once
 
-// Counted repetitions beside, inside and under directives, ahead of and
-// behind positions that call a rule: each rule reads as one function of the
-// descent, whatever labels it holds, and the table engine reads the same text
-// the same way.
+// Counted repetitions beside, inside and under directives, around positions
+// that call a rule: each rule is one function of the descent, and the table
+// engine reads the text the same way.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 
-// Two runs, each of a kind, a token, a floor and a ceiling: the kinds P, S and
-// G read no rule, C and X call one. The paired bounds below cover each
-// interval in both positions, optional/required neighbours, both call orders
-// and every directive shape. A Cartesian product of the same five intervals
-// only repeated the bounded-repeat checks from CountedRepeatGrammar.hpp.
+// Two runs, each a kind, a token, a floor and a ceiling: kinds P, S and G read
+// no rule, C and X call one. The pairs cover each interval in both positions,
+// optional and required neighbours, both call orders and every directive shape.
 #define TSCOPE_PAIRS(ROW)              \
   ROW(k00, P, 'a', 0, 3, C, 'b', 0, 3) \
   ROW(k01, P, 'a', 0, 3, C, 'b', 2, 4) \

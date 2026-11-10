@@ -58,11 +58,10 @@ void TestsFormatter::formatTest(cursiv::FormattingBuilder& builder,
   auto formatter = builder.getNodeFormatter(test);
   formatter.keyword("tst").append(oneSpace);
 
-  // The optional clause is absent when its view is empty.
-  if (!test->testFile.empty()) {
-    formatter.keyword("testfile").prepend(oneSpace);
-    formatter.keyword("=").prepend(oneSpace).append(oneSpace);
-  }
+  // Space the optional clause whenever its keywords are written, even as
+  // `testfile = ""`; an absent keyword selects nothing.
+  formatter.keyword("testfile").prepend(oneSpace);
+  formatter.keyword("=").prepend(oneSpace).append(oneSpace);
 
   formatter.keyword("tests").prepend(oneSpace).append(oneSpace);
   formatSeparatedList(formatter.keywords(","));

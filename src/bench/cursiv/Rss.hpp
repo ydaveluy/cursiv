@@ -1,7 +1,6 @@
-// What the process holds, read at a phase boundary: a level, not a counter,
-// so two of these subtract into what a phase made resident. Comparable
-// across binaries (one language per process); not comparable between
-// languages within one run -- the allocator there is already warm.
+// What the process holds at a phase boundary: two readings subtract into what
+// a phase made resident. Compare one language across binaries, never two
+// languages of one run.
 #pragma once
 
 #include <cstddef>
@@ -15,22 +14,19 @@
 namespace cursiv::bench::detail {
 
 // Resident bytes now, and the highest this process has held. Each figure is
-// zero and invalid where the platform does not answer it -- the ladder keeps
-// its other columns.
+// zero and invalid where the platform does not answer it; the other columns
+// stay.
 struct RssSample {
-  // Signed, so the stages sum to the total: a phase that gives more back
-  // than it took has a figure of its own, and clamping it to zero would
-  // make the ladder add up to something it never was.
+  // Signed, so the stages sum to the total: a phase may give back more than it
+  // took.
   std::ptrdiff_t current = 0;
   std::size_t peak = 0;
   bool valid = false;
   bool peakValid = false;
 };
 
-// Writing `5` to `clear_refs` resets the process high-water mark, the only
-// way a peak means this build's and not a previous language's -- spent once,
-// outside the timed window, never per phase. Where the write is refused, the
-// peak is the whole process's, and the caller says so.
+// Resets the process's high-water mark by writing `5` to `clear_refs`, once
+// per build. When refused, the peak is the whole process's.
 inline bool rss_reset() noexcept {
 #ifdef __linux__
   std::FILE* const f = std::fopen("/proc/self/clear_refs", "w");
@@ -42,9 +38,8 @@ inline bool rss_reset() noexcept {
 #endif
 }
 
-// `statm` for the level -- one line of seven numbers, where `status` would be
-// fifty to parse -- and `getrusage` for the mark, which costs no parsing at
-// all.
+// `statm` for the current level and `getrusage` for the peak: both are cheap
+// to read.
 [[nodiscard]] inline RssSample rss_now() noexcept {
   RssSample s;
 #ifdef __linux__

@@ -1,5 +1,4 @@
 cursiv_grammar(semanticll engines/ll/SemanticGrammar.hpp tllsemantic::Ll ENGINE LL)
-# Representative LL languages are shared by semantic, prediction and repair suites.
 cursiv_grammar(boundasciilr engines/ll/ReservedBoundGrammar.hpp tllbound::AsciiLr ENGINE LR)
 cursiv_grammar(boundasidelr engines/ll/ReservedBoundGrammar.hpp tllbound::AsideLr ENGINE LR)
 cursiv_grammar(boundfrontierlr engines/ll/ReservedBoundGrammar.hpp tllbound::FrontierLr ENGINE LR)
@@ -11,8 +10,8 @@ cursiv_grammar(dedentrunflatll engines/ll/DedentRunGrammar.hpp tlldedentrun::Fla
 cursiv_grammar(dedentrunll engines/ll/DedentRunGrammar.hpp tlldedentrun::Ll ENGINE LL)
 cursiv_grammar(delimll engines/ll/DelimSpellingGrammar.hpp tdelim::Ll ENGINE LL)
 cursiv_grammar(escapell engines/ll/ReservedEscapeGrammar.hpp tllescape::Ll ENGINE LL)
-cursiv_grammar(gluedll engines/ll/ConditionsGrammar.hpp tllconditions::GluedLl ENGINE LL)
-cursiv_grammar_pair(impliedrival engines/ll/ConditionsGrammar.hpp tllconditions::RivalLr tllconditions::RivalLl)
+cursiv_grammar(attachedll engines/ll/ConditionsGrammar.hpp tllconditions::AttachedLl ENGINE LL)
+cursiv_grammar_pair(impliedblocked engines/ll/ConditionsGrammar.hpp tllconditions::BlockedLr tllconditions::BlockedLl)
 cursiv_grammar(indirectfoldll engines/ll/ExpressionContractsGrammar.hpp tllexpressions::Ll ENGINE LL)
 cursiv_grammar(indirectloopcycle engines/ll/IndirectLoopGrammar.hpp tindirectloop::CycleLr ENGINE LR)
 cursiv_grammar(keywordtriviabarell engines/ll/KeywordTriviaGrammar.hpp tllkwtrivia::BareLl ENGINE LL)
@@ -27,7 +26,7 @@ cursiv_grammar(lextiereservedll engines/ll/LexTieGrammar.hpp tlllextie::Reserved
 cursiv_grammar(llindent engines/ll/IndentParityGrammars.hpp tllindent::Ll ENGINE LL)
 cursiv_grammar(llindentbare engines/ll/IndentParityGrammars.hpp tllindent::Bare ENGINE LL)
 cursiv_grammar(llindentfolded engines/ll/IndentParityGrammars.hpp tllindent::Folded ENGINE LL)
-cursiv_grammar(llindentlaid engines/ll/IndentParityGrammars.hpp tllindent::Laid ENGINE LL)
+cursiv_grammar(llindentsynthetic engines/ll/IndentParityGrammars.hpp tllindent::Synthetic ENGINE LL)
 cursiv_grammar(openingll engines/ll/OpeningTokenGrammar.hpp topening::Ll ENGINE LL)
 cursiv_grammar(openingshiftlr engines/ll/OpeningTokenGrammar.hpp topening::ShiftLr ENGINE LR)
 cursiv_grammar(predicatesll engines/ll/PredicatesGrammar.hpp tpredicates::Ll ENGINE LL)
@@ -57,8 +56,8 @@ cursiv_test(LlCaretParity_test engines/ll/LlCaretParity_test.cpp
 cursiv_test(LlCompoundOp_test engines/ll/LlCompoundOp_test.cpp
     compoundllGenerated compoundlrGenerated)
 cursiv_test(LlConditions_test engines/ll/LlConditions_test.cpp
-    conditionsllGenerated conditionslrGenerated impliedrivalllGenerated
-    gluedllGenerated impliedrivallrGenerated reachpredictllGenerated
+    conditionsllGenerated conditionslrGenerated impliedblockedllGenerated
+    attachedllGenerated impliedblockedlrGenerated reachpredictllGenerated
     triviapredictllGenerated cursivLlGen)
 cursiv_test(LlCountedRepeat_test engines/ll/LlCountedRepeat_test.cpp
     countedllGenerated countedlrGenerated semanticllGenerated cursivLlGen)
@@ -68,11 +67,11 @@ cursiv_test(LlGeneration_test engines/ll/LlGeneration_test.cpp
     cursivLlGen cursivLrGen)
 cursiv_test(LlHistory_test engines/ll/LlHistory_test.cpp)
 cursiv_test(LlIndent_test engines/ll/LlIndent_test.cpp
-    indentGenerated indentrepairedGenerated indentfoldedGenerated indentimpliedGenerated llindentGenerated llindentbareGenerated llindentfoldedGenerated llindentlaidGenerated
+    indentGenerated indentrepairedGenerated indentfoldedGenerated indentimpliedGenerated llindentGenerated llindentbareGenerated llindentfoldedGenerated llindentsyntheticGenerated
     dedentrunflatllGenerated dedentrunllGenerated delimllGenerated cursivLlGen cursivLrGen)
 cursiv_test(LlIndirectLoop_test engines/ll/LlIndirectLoop_test.cpp
     indirectloopcycleGenerated semanticllGenerated cursivLlGen)
-cursiv_test(LlKeywordTrivia_test engines/ll/LlKeywordTrivia_test.cpp
+cursiv_test(LlKeywordTrivia_test engines/ll/LlKeywordTrivia_test.cpp cursivLlGen
     keywordtriviabarellGenerated keywordtriviabasicllGenerated keywordtriviacapturedllGenerated keywordtriviawidellGenerated)
 cursiv_test(LlLateWidth_test engines/ll/LlLateWidth_test.cpp
     latewidthllGenerated)
@@ -120,7 +119,7 @@ endif()
 set_tests_properties(LlRepairBudget_test PROPERTIES TIMEOUT 30)
 set_tests_properties(LlSwiftWidth_test PROPERTIES TIMEOUT 20)
 
-# These cases all exercise semanticll; share their heavy grammar/AST headers.
+# These cases all parse with semanticll and share one compilation of its headers.
 set(_semantic_cases
     engines/ll/LlSemantic_test.cpp
     engines/ll/LlCaretAgreement_cases.cpp

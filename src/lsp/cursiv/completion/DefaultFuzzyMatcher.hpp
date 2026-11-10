@@ -4,10 +4,8 @@
 
 #include "cursiv/completion/FuzzyMatcher.hpp"
 
-// Case-insensitive, and the query's first character must land on a word
-// boundary (text start, a camelCase hump, or just after `_`); the rest is a
-// subsequence. A plain subsequence would let `ram` answer `Grammar`; anchoring
-// the first character is what keeps `GK` -> `GrammarKeyword` useful instead.
+// Case-insensitive subsequence whose first character falls on a word boundary
+// (text start, a camelCase capital, or after `_`): `GK` finds `GrammarKeyword`.
 
 namespace cursiv {
 
@@ -17,7 +15,7 @@ class DefaultFuzzyMatcher : public FuzzyMatcher {
                            std::string_view text) const override;
 
  protected:
-  // A hump (`aB`) or the character after an underscore.
+  // A camelCase capital (`aB`) or the character after an underscore.
   [[nodiscard]] virtual bool isWordTransition(char16_t previous,
                                               char16_t current) const noexcept;
 };

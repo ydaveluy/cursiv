@@ -19,7 +19,7 @@ struct LrBitSet {
   constexpr bool test(unsigned i) const {
     return ((w[i >> 6] >> (i & 63)) & 1) != 0;
   }
-  // The index of `i` in a row laid in bit order.
+  // The index of `i` in a row stored in bit order.
   constexpr unsigned rank(unsigned i) const {
     unsigned r = 0;
     for (unsigned k = 0; k < (i >> 6); ++k)

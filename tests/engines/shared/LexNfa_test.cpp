@@ -1,12 +1,3 @@
-#include "cursiv/shared/gen/LexDfaBuild.hpp"
-#include "cursiv/shared/gen/LexNfaPool.hpp"
-#include "cursiv/shared/gen/LexOwedRows.hpp"
-#include "cursiv/shared/gen/Vec.hpp"
-#include "cursiv/shared/gen/lex_boundary_misses.hpp"
-#include "cursiv/shared/gen/lex_prefix_meets.hpp"
-#include "cursiv/shared/gen/lex_reserve.hpp"
-#include "cursiv/shared/table/ByteSet.hpp"
-#include "cursiv/Check.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -16,6 +7,16 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "cursiv/Check.hpp"
+#include "cursiv/shared/gen/LexBodyRows.hpp"
+#include "cursiv/shared/gen/LexDfaBuild.hpp"
+#include "cursiv/shared/gen/LexNfaPool.hpp"
+#include "cursiv/shared/gen/Vec.hpp"
+#include "cursiv/shared/gen/lex_boundary_misses.hpp"
+#include "cursiv/shared/gen/lex_prefix_overlap.hpp"
+#include "cursiv/shared/gen/lex_reserve.hpp"
+#include "cursiv/shared/table/ByteSet.hpp"
 
 namespace lex_nfa_cases {
 
@@ -87,7 +88,7 @@ std::vector<bool> heads(const LexNfaPool& n, const std::vector<int>& startOf) {
   return head;
 }
 
-bool meets(const LexNfaPool& n, const ByteSet* sets, int a, int b) {
+bool overlaps(const LexNfaPool& n, const ByteSet* sets, int a, int b) {
   using Pair = std::pair<std::vector<int>, std::vector<int>>;
   Pair start;
   closure(n, start.first, a);
@@ -182,18 +183,16 @@ void the_walks_agree_with_the_plain_ones() {
     for (unsigned k = 0; size <= 14 && k < 4; ++k) {
       const int a = static_cast<int>(r.next(size)),
                 b = static_cast<int>(r.next(size));
-      CHECK(cursiv::engine::lex_prefix_meets(n, sets, a, b) ==
-            (meets(n, sets, a, b) ? cursiv::engine::LexOverlap::found
-                                  : cursiv::engine::LexOverlap::none));
+      CHECK(cursiv::engine::lex_prefix_overlap(n, sets, a, b) ==
+            (overlaps(n, sets, a, b) ? cursiv::engine::LexOverlap::found
+                                     : cursiv::engine::LexOverlap::none));
     }
   }
 }
 
-// A relay that asserts resumes its continuation only where the assertion
-// holds, so the pair walk enters it or not: a text read past it may meet,
-// which the walk does not prove, and a tie its continuation would outrank
-// still stands where it fails. Each assertion doubles the subsets a position
-// stands for: past a few dozen, the walk keeps the one none holds in, unsure.
+// The pair walk enters an asserting relay or not: an overlap past it is not
+// proved. Past a few dozen subsets, the walk keeps the one with no assertion
+// entered, unsure.
 void an_assertion_is_entered_or_not() {
   ByteSet sets[2];
   sets[0].add('#');
@@ -208,10 +207,10 @@ void an_assertion_is_entered_or_not() {
   };
   const int pattern = n.match(1);
   const int literal = n.match(1, true);
-  // `#` behind an assertion meets the start of `#!` only where it holds.
+  // `#` behind an assertion overlaps the start of `#!` only where it holds.
   const int hash = n.chars(0, asserting(pattern));
   const int bang = n.chars(0, n.chars(1, n.match(2)));
-  CHECK(cursiv::engine::lex_prefix_meets(n, sets, hash, bang) ==
+  CHECK(cursiv::engine::lex_prefix_overlap(n, sets, hash, bang) ==
         cursiv::engine::LexOverlap::incomplete);
   // `#!` at a literal's rank behind an assertion, or as a pattern, ties with
   // the pattern `#!` where the assertion fails.
@@ -290,14 +289,14 @@ void an_echo_leaves_the_walk_incomplete() {
   r.resumeOut = n.match(1);
   n.relays.push_back(r);
   const int echo = n.chars(0, n.chars(0, n.relay(0)));
-  const auto meets = [&](int text) {
-    return cursiv::engine::lex_prefix_meets(n, sets, text, echo);
+  const auto overlaps = [&](int text) {
+    return cursiv::engine::lex_prefix_overlap(n, sets, text, echo);
   };
   using cursiv::engine::LexOverlap;
-  CHECK(meets(n.chars(0, n.chars(0, n.chars(1, n.match(2))))) ==
+  CHECK(overlaps(n.chars(0, n.chars(0, n.chars(1, n.match(2))))) ==
         LexOverlap::incomplete);
-  CHECK(meets(n.chars(0, n.chars(1, n.match(2)))) == LexOverlap::none);
-  CHECK(meets(n.chars(0, n.match(2))) == LexOverlap::found);
+  CHECK(overlaps(n.chars(0, n.chars(1, n.match(2)))) == LexOverlap::none);
+  CHECK(overlaps(n.chars(0, n.match(2))) == LexOverlap::found);
 }
 
 }  // namespace
@@ -417,8 +416,8 @@ void a_loop_over_every_character_is_one_state() {
   const auto lead = nfa.chars(1, pending);
   nfa.s[pending].t1 = nfa.split(
       nfa.chars(2, loop),
-      nfa.split(nfa.chars(0, loop),
-                nfa.split(nfa.chars(1, pending), nfa.match_strayed(1, 2, -1))));
+      nfa.split(nfa.chars(0, loop), nfa.split(nfa.chars(1, pending),
+                                              nfa.match_lone_lead(1, 2, -1))));
   nfa.s[loop].t1 =
       nfa.split(nfa.chars(0, loop), nfa.split(nfa.chars(2, loop), lead));
   nfa.s[loop].t2 = accept;
@@ -463,7 +462,7 @@ void run() {
 
 }  // namespace lex_dfa_cases
 
-namespace lex_owed_rows_cases {
+namespace lex_body_rows_cases {
 
 // The bytes a mode opens a body with: a token that begins behind a zero-width
 // assertion is opened by the bytes that begin the rest of it.
@@ -501,14 +500,14 @@ struct Quoted {
 }  // namespace
 
 void run() {
-  const auto behind = cursiv::engine::lex_owed_rows(Quoted{true});
+  const auto behind = cursiv::engine::lex_body_rows(Quoted{true});
   CHECK(behind.openers[0].has('"'));
-  CHECK(behind.bodies[2] == 1 && behind.owed[2] == 0);
-  const auto plain = cursiv::engine::lex_owed_rows(Quoted{false});
+  CHECK(behind.bodies[2] == 1 && behind.terms[2] == 0);
+  const auto plain = cursiv::engine::lex_body_rows(Quoted{false});
   CHECK(!plain.openers[0].has('"'));
 }
 
-}  // namespace lex_owed_rows_cases
+}  // namespace lex_body_rows_cases
 
 namespace lex_reserve_cases {
 
@@ -536,7 +535,7 @@ int main() {
   cursiv::test::count_expectations();
   lex_nfa_cases::run();
   lex_dfa_cases::run();
-  lex_owed_rows_cases::run();
+  lex_body_rows_cases::run();
   lex_reserve_cases::run();
   return cursiv::test::report("LexNfa_test");
 }

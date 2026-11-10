@@ -22,23 +22,23 @@ namespace cursiv::detail {
 
 // The payload builds a T.
 template <class T>
-struct pay_node {
+struct node_payload {
   using type = T;
 };
 // R is the value rule that matched the text, or void for a bare matcher.
 template <class R>
-struct pay_text {
+struct text_payload {
   using rule = R;
 };
 
 template <class S>
-inline constexpr bool is_text_pay = false;
+inline constexpr bool is_text_payload = false;
 template <class R>
-inline constexpr bool is_text_pay<pay_text<R>> = true;
+inline constexpr bool is_text_payload<text_payload<R>> = true;
 template <class S>
-inline constexpr bool is_node_pay = false;
+inline constexpr bool is_node_payload = false;
 template <class T>
-inline constexpr bool is_node_pay<pay_node<T>> = true;
+inline constexpr bool is_node_payload<node_payload<T>> = true;
 
 template <class E>
 struct payload_of {
@@ -46,38 +46,38 @@ struct payload_of {
 };
 template <str S, bool CI, class Gd>
 struct payload_of<Lit<S, CI, Gd>> {
-  using type = TypeList<pay_text<void>>;
+  using type = TypeList<text_payload<void>>;
 };
 template <std::uint64_t M, bool N, str S>
 struct payload_of<CpSet<M, N, S>> {
-  using type = TypeList<pay_text<void>>;
+  using type = TypeList<text_payload<void>>;
 };
 template <>
 struct payload_of<Byte> {
-  using type = TypeList<pay_text<void>>;
+  using type = TypeList<text_payload<void>>;
 };
 template <>
 struct payload_of<Indent> {
-  using type = TypeList<pay_text<void>>;
+  using type = TypeList<text_payload<void>>;
 };
 template <>
 struct payload_of<Dedent> {
-  using type = TypeList<pay_text<void>>;
+  using type = TypeList<text_payload<void>>;
 };
 template <class T, class C>
 struct payload_of<Implied<T, C>> {
-  using type = TypeList<pay_text<void>>;
+  using type = TypeList<text_payload<void>>;
 };
 template <class D>
 struct payload_of<SuperT<D>> : super_escaped<SuperT<D>> {};
 // A run up to a closer matches text, opener and closer included.
 template <class O, class Cl>
 struct payload_of<Through<O, Cl>> {
-  using type = TypeList<pay_text<void>>;
+  using type = TypeList<text_payload<void>>;
 };
 template <class Tag>
 struct payload_of<Same<Tag>> {
-  using type = TypeList<pay_text<void>>;
+  using type = TypeList<text_payload<void>>;
 };
 // A node rule (an infix rule too: its climb builds nodes) hands over a node;
 // a terminal or data rule hands over the text it matched, converted.
@@ -85,11 +85,11 @@ template <class R0>
 struct payload_of<Ref<R0>> {
   using R = named_rule_t<R0>;
   using type = TypeList<cond_t<is_node_rule<R> || is_infix_rule<R>,
-                               pay_node<rule_type_t<R>>, pay_text<R>>>;
+                               node_payload<rule_type_t<R>>, text_payload<R>>>;
 };
 template <class T, class E>
 struct payload_of<Create<T, E>> {
-  using type = TypeList<pay_node<T>>;
+  using type = TypeList<node_payload<T>>;
 };
 template <class... As>
 struct payload_of<Choice<As...>> : tl_cat<typename payload_of<As>::type...> {};
@@ -97,43 +97,38 @@ struct payload_of<Choice<As...>> : tl_cat<typename payload_of<As>::type...> {};
 template <class... Es>
   requires(tl_size<readers_t<Es...>>::value == 1)
 struct payload_of<Seq<Es...>> : payload_of<tl_at_t<0, readers_t<Es...>>> {};
-// Prose, a mark and a region pay what they wrap.
+// Doc text, a mark and a region give what they wrap.
 template <class E>
   requires transparent<E>
 struct payload_of<E> : payload_of<through_t<E>> {};
 
 // A bare literal's payload is its own spelling, so whether the member's
-// conversion can ever accept it is decidable here rather than on every match.
-//
-// A second walk and not a second source: `payload_of` erases the spelling, and
-// must keep doing so, because the source type is the identity the conversion
-// table and the builder's writer key on. The spelling rides a list only
-// validation reads, shaped exactly like `payload_of`'s -- so a spreading choice
-// is judged one branch at a time, and what produces no payload produces no
-// spelling.
+// conversion can accept it is decided here. A list only validation reads,
+// shaped like `payload_of`'s, which erases the spelling.
 template <str S>
-struct pay_lit {
+struct lit_payload {
   static constexpr auto spelling = S;
 };
 
 template <class E>
-struct lit_pays {
+struct lit_payloads {
   using type = TypeList<>;
 };
 template <str S, bool CI, class Gd>
-struct lit_pays<Lit<S, CI, Gd>> {
+struct lit_payloads<Lit<S, CI, Gd>> {
   // A case-insensitive literal does not match its own spelling alone, so the
   // spelling is not what the member receives and nothing is decidable.
-  using type = cond_t<CI, TypeList<>, TypeList<pay_lit<S>>>;
+  using type = cond_t<CI, TypeList<>, TypeList<lit_payload<S>>>;
 };
 template <class... As>
-struct lit_pays<Choice<As...>> : tl_cat<typename lit_pays<As>::type...> {};
+struct lit_payloads<Choice<As...>>
+    : tl_cat<typename lit_payloads<As>::type...> {};
 template <class... Es>
   requires(tl_size<readers_t<Es...>>::value == 1)
-struct lit_pays<Seq<Es...>> : lit_pays<tl_at_t<0, readers_t<Es...>>> {};
+struct lit_payloads<Seq<Es...>> : lit_payloads<tl_at_t<0, readers_t<Es...>>> {};
 template <class E>
   requires transparent<E>
-struct lit_pays<E> : lit_pays<through_t<E>> {};
+struct lit_payloads<E> : lit_payloads<through_t<E>> {};
 
 template <class... Ps>
 consteval auto joined_spelling(TypeList<Ps...>) {
@@ -144,39 +139,33 @@ consteval auto joined_spelling(TypeList<Ps...>) {
    ...);
   return str<(1 + ... + Ps::spelling.size())>(text);
 }
-// An inline rule of literals alone pays their spelling joined, as a data
+// An inline rule of literals only gives their spellings joined, as a data
 // rule's text.
 template <class E>
 struct lit_joined {
   using type = TypeList<>;
 };
 template <class... Es>
-  requires(
-      (!is_condition<Es> || ...) &&
-      ((is_condition<Es> || tl_size<typename lit_pays<Es>::type>::value == 1) &&
-       ...))
+  requires((!is_condition<Es> || ...) &&
+           ((is_condition<Es> ||
+             tl_size<typename lit_payloads<Es>::type>::value == 1) &&
+            ...))
 struct lit_joined<Seq<Es...>> {
-  using parts = tl_cat_t<typename lit_pays<
+  using parts = tl_cat_t<typename lit_payloads<
       std::conditional_t<is_condition<Es>, Epsilon, Es>>::type...>;
-  using type = TypeList<pay_lit<joined_spelling(parts{})>>;
+  using type = TypeList<lit_payload<joined_spelling(parts{})>>;
 };
 template <class E>
   requires is_wrapper<E>
 struct lit_joined<E> : lit_joined<through_t<E>> {};
 template <class R>
   requires(is_anonymous_rule<R> && !is_terminal_rule<R> && slot_empty<R>)
-struct lit_pays<Ref<R>> : lit_joined<std::remove_cv_t<decltype(R::body)>> {};
+struct lit_payloads<Ref<R>> : lit_joined<std::remove_cv_t<decltype(R::body)>> {
+};
 
-// What a text payload carries: without a converter the value is the matched
-// text and the member's type decides the conversion; with one, the converter's
-// result type reaches the member. No unwrapping here -- `rule_type_t` already
-// peeled `ConversionResult` for every reader at once.
-//
-// The converter is taken from the resolved rule, and read as `rule_type` reads
-// the slot: an override that replaces only a body keeps the converter of the
-// rule it stood over, one that names a bare target replaces it with that
-// target's own conversion. A data rule that states none and passes a value
-// other than text reads the value of what it took.
+// What a text payload carries: the matched text, converted by the member's
+// type, or the converter's result. The converter is the resolved rule's, as
+// `rule_type` reads it.
 template <class R>
 struct converter_rule {
   static consteval auto pick() {
@@ -212,31 +201,24 @@ struct text_value<void> {
   static constexpr bool converted = false;
 };
 
-// When two payload sources are one conversion: stated once, and read by the
-// hub's `one_conv` on the declared body and by the fold's `conv_slot` on the
-// compiled one. Two relations for one law would drift apart.
-//
-// Erasing the rule is sound only where it is invisible: `admits` reads the
-// value a source produces and whether a converter produced it, so a rule
-// answering `string_view` with no converter is indistinguishable from the
-// bare-matcher source. An annotated rule is not -- its annotation is what the
-// exactness round counted -- and neither is a data rule, whose value is
-// composed from its parts.
+// When two payload sources are one conversion, for `one_conv` and `conv_slot`.
+// A rule is erased only where it adds nothing: no converter, no annotation,
+// not a data rule.
 template <class Src>
 struct erased_src {
   using type = Src;
 };
 // Already erased: it names no rule, so none of the questions can be asked.
 template <>
-struct erased_src<pay_text<void>> {
-  using type = pay_text<void>;
+struct erased_src<text_payload<void>> {
+  using type = text_payload<void>;
 };
 template <class R>
-struct erased_src<pay_text<R>> {
+struct erased_src<text_payload<R>> {
   static constexpr bool erasable =
       std::is_void_v<converter_rule_t<R>> && !is_data_rule<R> &&
       std::is_same_v<rule_type_t<R>, std::string_view>;
-  using type = cond_t<erasable, pay_text<void>, pay_text<R>>;
+  using type = cond_t<erasable, text_payload<void>, text_payload<R>>;
 };
 template <class Src>
 using erased_src_t = typename erased_src<Src>::type;

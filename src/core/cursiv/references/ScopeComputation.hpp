@@ -6,11 +6,8 @@
 #include "cursiv/workspace/AstNodeDescription.hpp"
 #include "cursiv/workspace/LocalSymbols.hpp"
 
-// The two symbol tables one document derives from its own tree: neither call
-// reads another document, so this phase itself needs no barrier -- though the
-// builder still bars it, since linking that follows must find every
-// document's local symbols already written. Neither table resolves a
-// reference; scope computation runs before linking exists.
+// The two symbol tables one document derives from its own tree, before
+// linking. Neither call reads another document.
 
 namespace cursiv {
 

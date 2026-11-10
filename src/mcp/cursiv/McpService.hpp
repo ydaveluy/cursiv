@@ -15,10 +15,7 @@ struct McpServiceOptions {
   std::string version;
 };
 
-/**
- * Builds one `McpServer` per session. The service outlives every server it
- * creates.
- */
+// Builds one `McpServer` per session, and outlives every server it creates.
 class McpService {
  public:
   virtual ~McpService() noexcept = default;

@@ -1,7 +1,5 @@
 // One walk over a mode's automaton, for every engine: longest match, ties to
-// the earliest declared terminal, and a state's own boundary tested inside the
-// match rather than in a second scan. An engine names its table through an
-// adapter; the search is written once.
+// the earliest declared terminal, and each state's boundary tested in the walk.
 #pragma once
 
 #include <algorithm>
@@ -28,11 +26,8 @@ inline constexpr bool kLexBacktrack = [] {
   return false;
 }();
 
-// The DFA cursor, independent of what a match retains. Both a single best
-// match and a collection read each state through `take`; `skip` preserves
-// the reader's own fast path over a self-loop. A generated prefix can hand
-// over its match and relays without re-reading the prefix. A boolean `skip`
-// can finish the walk at a checkpoint; a void `skip` only crosses self-loops.
+// The DFA cursor, independent of what a match keeps: each state goes through
+// `take`. A void `skip` crosses self-loops; a boolean one may end the walk.
 template <class Ad, class Match, class Relays, class Skip>
 CURSIV_ALWAYS_INLINE inline bool lex_walk_rows(const Ad& ad, const char* src,
                                                TextOffset len, TextOffset start,
@@ -63,7 +58,7 @@ CURSIV_ALWAYS_INLINE inline bool lex_walk_rows(const Ad& ad, const char* src,
 // its match, the relays it launched ranked against it, and a refused word
 // read again. `halt` is where it stopped reading.
 template <class Ad, class Relays>
-CURSIV_ALWAYS_INLINE inline Scan lex_walk_settle(
+CURSIV_ALWAYS_INLINE inline Scan lex_walk_result(
     const Ad& ad, const char* src, TextOffset len, std::uint16_t st,
     TextOffset from, TextOffset i, TextOffset far, const LexMatch& m,
     [[maybe_unused]] Relays& run, TextOffset& halt) {
@@ -72,10 +67,8 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_settle(
   if constexpr (relays) {
     if (run.any()) {
       Scan relayed{from, kInvalidSymbol};
-      // A literal or keyword that stands where the walk ended reserves from a
-      // relayed reading ending there what it reserves from the walk's own, and
-      // a reading behind conditions that such a branch read takes the walk's
-      // reading.
+      // A literal or keyword where the walk ended reserves from a relayed
+      // reading what it reserves from the walk's own.
       const std::uint16_t ended = m.state;
       const auto reserved = [&](SymbolId t) {
         if constexpr (requires {
@@ -86,18 +79,18 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_settle(
           return false;
         }
       };
-      auto tier = 0u;
+      auto priority = 0u;
       const auto taken = [&] {
         if constexpr (requires { ad.takes(ended, 1u, out.term); }) {
-          return tier != 0 && out.term != kInvalidSymbol &&
-                 ad.takes(ended, ad.taking(relayed.term, tier), out.term);
+          return priority != 0 && out.term != kInvalidSymbol &&
+                 ad.takes(ended, ad.taking(relayed.term, priority), out.term);
         } else {
           return false;
         }
       };
       const auto walked = [&] {
         return out.term != kInvalidSymbol
-                   ? ad.tier(ended, out.term, src, out.end, len, far)
+                   ? ad.priority(ended, out.term, src, out.end, len, far)
                    : 0u;
       };
       run.finish(ad, src, len, far, [&](SymbolId t, TextOffset e, unsigned as) {
@@ -105,18 +98,18 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_settle(
           if (ad.skip->test(t)) return;
         if (e == out.end && out.term != kInvalidSymbol && reserved(t)) return;
         if (e == relayed.end && t == relayed.term) {
-          tier = std::max(tier, as);
+          priority = std::max(priority, as);
         } else if (e > relayed.end ||
                    (e == relayed.end &&
-                    ad.prefers_relayed(t, as, relayed.term, tier))) {
+                    ad.prefers_relayed(t, as, relayed.term, priority))) {
           relayed = Scan{e, t};
-          tier = as;
+          priority = as;
         }
       });
       if (relayed.end > out.end ||
           (relayed.end == out.end && relayed.term != kInvalidSymbol &&
            (taken() ||
-            ad.prefers_relayed(relayed.term, tier, out.term, walked()))))
+            ad.prefers_relayed(relayed.term, priority, out.term, walked()))))
         out = relayed;
     }
   }
@@ -126,14 +119,9 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_settle(
   return out;
 }
 
-// `Ad` names one engine's table, as `LexAdapter.hpp` says, and each thing it
-// offers answers with a lookup. What it announces is checked first.
-//
-// Inlined into the one entry point each engine gives it: a descent asks this
-// once per token, and a frame between the two would be paid on every one.
-// `halt` is where the walk stopped reading: `len` when the input ran out with
-// the automaton still alive, so a caller splicing text knows the answer may
-// still change past what it handed over.
+// `Ad` names one engine's table, as `LexAdapter.hpp` says. `halt` is where the
+// walk stopped reading: `len` where the input ran out with the automaton alive,
+// so the answer may change with more text.
 template <class Ad, bool Checkpoints = false>
 CURSIV_ALWAYS_INLINE inline Scan lex_walk_from(Ad ad, const char* src,
                                                TextOffset len, std::uint16_t st,
@@ -141,17 +129,17 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_from(Ad ad, const char* src,
                                                TextOffset& halt) {
   static_assert(LexCursor<Ad>,
                 "a lexical adapter offers start, step, accept and bounded");
-  static_assert(LexAcceptanceAnnounced<Ad>,
+  static_assert(LexAcceptanceDeclared<Ad>,
                 "an adapter that announces kQualified offers qualified(); one "
                 "that does not offers the boundary fallback");
-  static_assert(LexRelaysAnnounced<Ad>,
+  static_assert(LexRelaysDeclared<Ad>,
                 "an adapter's kRelays matches its relay(), and a relay offers "
                 "the whole relay protocol");
   TextOffset i = from;
   TextOffset far = from;
   LexMatch m{from, kInvalidSymbol};
   // A relay reads ahead of this DFA cursor: its searches run as the walk
-  // meets them, the rests once it is done, apart from what it matched.
+  // reaches them, the rests once it is done, apart from what it matched.
   constexpr bool relays = requires { ad.relay(st); };
   [[maybe_unused]] std::conditional_t<relays, LexRelayRun<Ad>, bool> run{};
   const auto skip = [&](std::uint16_t state, TextOffset& at) {
@@ -199,7 +187,7 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_from(Ad ad, const char* src,
   } else {
     lex_walk_rows(ad, src, len, from, st, i, far, m, run, skip);
   }
-  Scan out = lex_walk_settle(ad, src, len, st, from, i, far, m, run, halt);
+  Scan out = lex_walk_result(ad, src, len, st, from, i, far, m, run, halt);
   if constexpr (checkpoints)
     if (out.term != kInvalidSymbol && halt > out.end &&
         halt - out.end > kBacktrackTail)
@@ -255,7 +243,7 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_end(const Ad& ad, const char* src,
                                               Relays& run) {
   TextOffset halt;
   Scan out =
-      lex_walk_settle(ad, src, len, ad.start(mode), from, i, far, m, run, halt);
+      lex_walk_result(ad, src, len, ad.start(mode), from, i, far, m, run, halt);
   if constexpr (kLexBacktrack<Ad>)
     if (out.term != kInvalidSymbol && halt > out.end &&
         halt - out.end > kBacktrackTail &&

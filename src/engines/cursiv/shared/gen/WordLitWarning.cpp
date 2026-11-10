@@ -6,6 +6,7 @@
 #include "cursiv/grammar/word_final_in.hpp"
 #include "cursiv/shared/gen/WarningFound.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {
 
@@ -50,17 +51,13 @@ std::vector<WordLitWarning> word_lit_warnings(WarningFound& found) {
 }
 
 std::string word_lit_warning_text(const WordLitWarning& w) {
-  std::string text;
-  for (const char c : w.text) {
-    if (c == '"' || c == '\\') text += '\\';
-    text += c;
-  }
+  const std::string text = quote(w.text, '"');
   return "rule `" + w.rule + "`: `" + w.lit +
          "` is a literal with no guard that ends in a word character, so it "
-         "also matches the start of a longer word, such as `" + w.text +
-         "x` -- write `kw<\"" + text +
-         "\">`, or give the literal a guard (`lit<\"" + text +
-         "\", G>`) if that is intended";
+         "also matches the start of a longer word, such as " +
+         quote(w.text + 'x', '`') + " -- write `kw<" + text +
+         ">`, or give the literal a guard (`lit<" + text +
+         ", G>`) if that is intended";
 }
 
 }  // namespace cursiv::engine

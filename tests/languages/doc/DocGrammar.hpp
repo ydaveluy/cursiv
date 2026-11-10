@@ -1,8 +1,7 @@
 #pragma once
 
-// A nested document: objects, arrays and four scalars. The smallest grammar
-// whose table still has the shape the fuzzer is written for -- recursion
-// through two rules, several terminals, and goto edges to chase.
+// A nested document: objects, arrays and four scalars, with recursion through
+// two rules.
 
 #include <string_view>
 

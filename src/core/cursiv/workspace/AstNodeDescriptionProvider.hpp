@@ -6,9 +6,8 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/workspace/AstNodeDescription.hpp"
 
-// One description for one node. Which nodes get described is the scope
-// computation's question -- exported and local are two answers over one tree --
-// so a walk here could only ever serve one of them.
+// One description for one node; the scope computation decides which nodes are
+// described.
 
 namespace cursiv {
 
@@ -18,10 +17,8 @@ class AstNodeDescriptionProvider {
  public:
   virtual ~AstNodeDescriptionProvider() noexcept = default;
 
-  // Nothing for an empty name: a description that names nothing is
-  // unresolvable, so it is refused where it would be made. Both defaults are
-  // asked of the node itself -- its name of the `NameProvider`, its document of
-  // the climb.
+  // Nothing for an empty name, which nothing could resolve. By default the name
+  // comes from the `NameProvider` and the document from the node.
   [[nodiscard]] virtual std::optional<AstNodeDescription> createDescription(
       AstNode& node, std::string_view name = {},
       const Document* document = nullptr) const = 0;

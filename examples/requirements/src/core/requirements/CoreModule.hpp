@@ -24,7 +24,7 @@ std::unique_ptr<RequirementsCoreServices> create_tests_core_services(
     RequirementsSharedCoreServices& sharedServices,
     std::string languageId = std::string(req::generated::Tests::kLanguageId));
 
-// The whole world in one call: the shared container built over `files` -- none
+// Everything in one call: the shared container built over `files` -- none
 // meaning no disk under it -- with both languages registered in it.
 struct RequirementsCoreLanguage {
   std::unique_ptr<RequirementsSharedCoreServices> shared;

@@ -44,8 +44,8 @@ void unite_and_without_keep_the_size_exact() {
   CHECK(e == a);
 }
 
-// A moved-from set owes nothing but a valid state: it must never claim
-// elements its storage no longer holds.
+// A moved-from set promises only a valid state: it must never claim
+// elements outside its storage.
 void a_moved_from_set_stays_within_its_storage() {
   PredicateState a;
   for (const auto p : {3u, 4u, 5u}) a.add(at(p));

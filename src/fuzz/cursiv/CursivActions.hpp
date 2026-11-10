@@ -1,7 +1,6 @@
-// The directives of one compiled grammar, applied: `create` and `nest` name
-// a class, an assignment names a member and the payload's own converter.
-// What it does not model, it refuses: a `Parts` converter, a payload with
-// several sources, a member no `put` expresses.
+// The directives of one compiled grammar, applied. It refuses what it does not
+// model: a `Parts` converter, a payload with several sources, a member no
+// `put` expresses.
 #pragma once
 
 #include <array>
@@ -19,7 +18,10 @@
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/PayloadOf.hpp"
 #include "cursiv/grammar/expr.hpp"
+#include "cursiv/shared/gen/GrammarBindings.hpp"
+#include "cursiv/shared/gen/Row.hpp"
 #include "cursiv/shared/runtime/ast_conv.hpp"
+#include "cursiv/shared/table/WriteKind.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/VariantNodeAlt.hpp"
@@ -35,9 +37,8 @@ template <class T>
          n->type->derivesFrom(&ast_type_tag<T>);
 }
 
-// Rendered as text, not bytes, so the two trees are weighed on one scale
-// and a divergence reads. `%.17g` round-trips a double, so equal doubles
-// print equal.
+// Rendered as text, so both trees compare the same way and a difference is
+// readable. `%.17g` round-trips a double, so equal doubles print equal.
 
 template <class X>
 struct Render {
@@ -79,7 +80,8 @@ struct Render<std::variant<As...>> {
         [&](const auto& alt) {
           using A = std::remove_cvref_t<decltype(alt)>;
           if constexpr (cursiv::detail::ast_pointer_alt<A>) {
-            ok = false;  // a node in a variant: no reader reaches it
+            // A node in a variant: not read here, compared as a child.
+            ok = false;
           } else {
             std::string s;
             ok = Render<A>::run(alt, s);
@@ -222,11 +224,11 @@ Write write_node_of(AstNode& owner, AstNode* child) {
   if (!node_is<typename F::owner>(&owner)) return Write::not_modelled;
   auto& o = *cursiv::detail::ast_cast_unchecked<typename F::owner>(&owner);
   using Held = typename F::held;
-  if constexpr (F::nature == cursiv::detail::FieldNature::node) {
+  if constexpr (F::content == cursiv::detail::FieldContent::node) {
     using T = std::remove_pointer_t<Held>;
     if (!node_is<T>(child)) return Write::not_modelled;
     return store<F, Held>(o, cursiv::detail::ast_cast_unchecked<T>(child));
-  } else if constexpr (F::nature == cursiv::detail::FieldNature::variant) {
+  } else if constexpr (F::content == cursiv::detail::FieldContent::variant) {
     using A = node_alt_t<Held>;
     if constexpr (std::is_void_v<A>) {
       return Write::not_modelled;
@@ -240,10 +242,8 @@ Write write_node_of(AstNode& owner, AstNode* child) {
   }
 }
 
-// The converter's answer. A positioned result that failed is still
-// modelled: the engine leaves the member at its default and says where,
-// so both trees agree -- refusing here would excuse a member the walk did
-// read.
+// The converter's answer. A failed positioned result is still modelled: the
+// engine leaves the member at its default, as here.
 template <class F, class A, class Res>
 Write accept(typename F::owner& o, Res&& r) {
   using R = std::remove_cvref_t<Res>;
@@ -265,18 +265,16 @@ consteval ElementId payload_row() {
     return model::call_row<C, R>;
 }
 
-// The rule a payload resolves to. An override keeps the base's name at the
-// call site but replaces what it matches, so the converter and value type
-// belong to the derived rule. A bare matcher names no rule and stands for
-// itself.
+// The rule a payload resolves to: an override's derived rule, or a bare
+// matcher itself.
 template <class R>
 concept declares_kind = requires { typename R::kind; };
 template <class C, class R, bool = declares_kind<R>>
-struct pay_rule {
+struct payload_rule {
   using type = R;
 };
 template <class C, class R>
-struct pay_rule<C, R, true> {
+struct payload_rule<C, R, true> {
   using resolved = typename cursiv::Normalize<C>::template rule<R>;
   using type = std::conditional_t<std::is_void_v<resolved>, R, resolved>;
 };
@@ -288,7 +286,7 @@ Write one_text([[maybe_unused]] typename F::owner& o,
                [[maybe_unused]] ElementId payload,
                [[maybe_unused]] bool fallback,
                [[maybe_unused]] std::string_view text) {
-  if constexpr (!cursiv::detail::is_text_pay<S>) {
+  if constexpr (!cursiv::detail::is_text_payload<S>) {
     return Write::not_modelled;
   } else {
     using R = typename S::rule;
@@ -296,10 +294,9 @@ Write one_text([[maybe_unused]] typename F::owner& o,
     if (fallback ? kRow != kNoElement : kRow != payload)
       return Write::not_modelled;
     // The name picks the source; the resolved rule converts it.
-    using RR = typename pay_rule<C, R>::type;
-    using A =
-        typename cursiv::engine::conv_alt<typename F::held,
-                                          cursiv::detail::pay_text<RR>>::type;
+    using RR = typename payload_rule<C, R>::type;
+    using A = typename cursiv::engine::conv_alt<
+        typename F::held, cursiv::detail::text_payload<RR>>::type;
     using CR = cursiv::detail::converter_rule_t<RR>;
     if constexpr (!std::is_void_v<CR>) {
       if constexpr (cursiv::detail::ConvertsText<CR>) {
@@ -347,7 +344,7 @@ Write write_text_of(AstNode& owner, [[maybe_unused]] ElementId payload,
 
   if constexpr (D::enable) {
     return store<F, typename F::held>(o, true);
-  } else if constexpr (cursiv::detail::is_ref_nature(F::nature)) {
+  } else if constexpr (cursiv::detail::is_ref_content(F::content)) {
     // A reference is judged on its text: the name is what the document
     // spells, and resolving it is the linker's verdict, not the walk's.
     typename F::held slot{};
@@ -393,7 +390,7 @@ consteval MakeFn make_entry() {
 }
 
 // The operand rule's row. `Ref<R>` resolves to R's own row, which is where an
-// effective rule and the name it was declared under meet.
+// effective rule and the name it was declared under coincide.
 template <class C, class R>
 consteval ElementId primary_row() {
   return model::call_row<C, typename R::primary>;
@@ -550,10 +547,8 @@ consteval TextFn text_entry() {
   return nullptr;
 }
 
-// The appended rows count too: a directive the table spread over a choice
-// kept no row of its own, and the children column names the appended
-// spelling -- a table stopping at `element_list` would refuse every such
-// write.
+// The appended rows count too: a directive spread over a choice keeps no row
+// of its own.
 template <class C, class L, class X>
 struct act_rows;
 template <class C, class... Es, class... Xs>
@@ -577,44 +572,22 @@ struct act_rows<C, TypeList<Es...>, TypeList<Xs...>> {
       denote_entry<Es>()..., nullptr, nullptr, denote_entry<Xs>()...};
 };
 
-template <class E>
-struct field_of {
+// The members a grammar writes, read off the engine's rows.
+template <class R>
+struct written_field {
   using type = TypeList<>;
 };
-template <auto Sp, class E>
-struct field_of<Assign<Sp, E>> {
-  using type =
-      TypeList<cursiv::detail::field_tag<cursiv::detail::spec_ptr<Sp>>>;
-};
-template <auto Sp, class E>
-struct field_of<Append<Sp, E>> {
-  using type =
-      TypeList<cursiv::detail::field_tag<cursiv::detail::spec_ptr<Sp>>>;
-};
-template <auto P, class E>
-struct field_of<Flag<P, E>> {
+template <engine::WriteKind K, class T, auto P, class N, class Src>
+struct written_field<engine::Row<K, T, engine::Wrote<P>, N, Src>> {
   using type = TypeList<cursiv::detail::field_tag<P>>;
-};
-template <class T, auto P, class E>
-struct field_of<Nest<T, P, E>> {
-  using type = TypeList<cursiv::detail::field_tag<P>>;
-};
-
-// A climb's three members are named by the rule, not by a directive.
-template <class E>
-  requires requires { typename E::kind; } && cursiv::detail::is_infix_rule<E>
-struct field_of<E> {
-  using type = TypeList<cursiv::detail::field_tag<E::left_pointer>,
-                        cursiv::detail::field_tag<E::op_pointer>,
-                        cursiv::detail::field_tag<E::right_pointer>>;
 };
 
 template <class L>
-struct fields_of;
-template <class... Es>
-struct fields_of<TypeList<Es...>>
-    : cursiv::detail::dedupe<cursiv::detail::tl_cat_t<
-          typename field_of<std::remove_cvref_t<Es>>::type...>> {};
+struct written_fields;
+template <class... Rs>
+struct written_fields<TypeList<Rs...>>
+    : cursiv::detail::dedupe<
+          cursiv::detail::tl_cat_t<typename written_field<Rs>::type...>> {};
 
 // Always empty: distributing a directive over a choice is the lowering's
 // job, not the declared model's, and the walk below reaches the payload on
@@ -627,8 +600,8 @@ using ValueYield = cursiv::function_ref<void(std::string_view, std::uint32_t,
 template <class F, class X>
 void yield_one(std::string_view name, std::uint32_t index, const X& v,
                ValueYield yield) {
-  if constexpr (cursiv::detail::is_ref_nature(F::nature)) {
-    if constexpr (F::nature == cursiv::detail::FieldNature::reference)
+  if constexpr (cursiv::detail::is_ref_content(F::content)) {
+    if constexpr (F::content == cursiv::detail::FieldContent::reference)
       yield(name, index, ValueKind::text, v.refText);
     else
       yield(name, index, ValueKind::unreadable, {});
@@ -643,7 +616,7 @@ void yield_one(std::string_view name, std::uint32_t index, const X& v,
 
 template <class F>
 void yield_field(const AstNode& n, ValueYield yield) {
-  if constexpr (F::nature == cursiv::detail::FieldNature::node) {
+  if constexpr (F::content == cursiv::detail::FieldContent::node) {
     return;  // `AstReflection` walks the nodes
   } else {
     if (!node_is<typename F::owner>(&n)) return;
@@ -679,8 +652,8 @@ struct CursivActions final : GrammarActions {
   using Rows =
       detail::act_rows<C, typename detail::model::positions_for<C>::type,
                        detail::spread_rows>;
-  using Fields = typename detail::fields_of<
-      typename detail::model::positions_for<C>::type>::type;
+  using Fields = typename detail::written_fields<
+      typename engine::GrammarBindings<C>::rows>::type;
 
   [[nodiscard]] AstNode* make(ElementId e, WalkTree& ar) const override {
     if (e >= Rows::kMake.size() || Rows::kMake[e] == nullptr) return nullptr;

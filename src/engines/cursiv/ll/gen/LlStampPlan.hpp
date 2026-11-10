@@ -1,6 +1,6 @@
-// Which groups lay a record that names the rule it was laid in, and how many
-// such records stand open around each position: the two halves of what a caret
-// reads off the tree to learn the stack the descent stood on.
+// Which groups create a record that names the rule it was created in, and how
+// many such records stand open around each position: the two halves of what a
+// caret reads off the tree to learn the stack the descent held.
 #pragma once
 
 #include <cassert>
@@ -29,7 +29,7 @@ class LlStampPlan {
     // fourteen bits a record keeps for its state.
     if (a.cfg.nrules > kRules || a.cfg.sections()) return;
     for (std::uint32_t id = 0; id < a.cfg.nnodes; ++id)
-      _stamps[id] = lays_named(static_cast<std::uint16_t>(id));
+      _stamps[id] = writes_named(static_cast<std::uint16_t>(id));
     // A group follows its members and has one parent: walked down, a position
     // reads the count its parent left.
     for (std::size_t id = a.cfg.nnodes; id-- > 0;) {
@@ -61,15 +61,16 @@ class LlStampPlan {
   // back over what the sequence read before it.
   bool reaches_back(std::uint16_t id) const { return _reaches[id] != 0; }
 
-  // The record of this group is laid, whole and in place, by the rule whose
-  // body holds it: no turn reaches back over it and no ride replaces it.
+  // The record of this group is created, whole and in place, by the rule whose
+  // body holds it: no turn reaches back over it and no reused subtree replaces
+  // it.
   bool stamps(std::uint16_t id) const { return _stamps[id] != 0; }
 
   // How many groups that stamp enclose a position of the same rule, itself
   // included.
   std::uint8_t covers(std::size_t node) const { return _covers[node]; }
 
-  // The state of a record laid by a group of `rule`.
+  // The state of a record created by a group of `rule`.
   static constexpr std::uint16_t state(std::uint16_t rule) {
     return static_cast<std::uint16_t>(rule << 1);
   }
@@ -78,11 +79,11 @@ class LlStampPlan {
   static constexpr std::uint32_t kRules = 1u << 13;
 
   const LlNode& node(std::uint16_t id) const { return _a.cfg.nodes[id]; }
-  std::uint16_t kid(const LlNode& n, unsigned i) const {
-    return _a.cfg.kids[n.sym + i];
+  std::uint16_t child_at(const LlNode& n, unsigned i) const {
+    return _a.cfg.childIds[n.sym + i];
   }
 
-  // Groups are laid after their members, so a kid's answer is already there.
+  // A group's id is above its members', so a child's answer is already there.
   bool heads_over(std::uint16_t id) const {
     if (turns(id)) return true;
     const LlNode& n = node(id);
@@ -95,7 +96,7 @@ class LlStampPlan {
     }
     if (n.kind == LlShape::seq) {
       for (unsigned i = 0; i < n.count; ++i) {
-        const auto child = kid(n, i);
+        const auto child = child_at(n, i);
         assert(child < id);
         if (_heads[child] != 0) return true;
         if (!_a.nullable[child]) return false;
@@ -104,8 +105,8 @@ class LlStampPlan {
     }
     if (n.kind == LlShape::alt)
       for (unsigned i = 0; i < n.count; ++i) {
-        assert(kid(n, i) < id);
-        if (_heads[kid(n, i)] != 0) return true;
+        assert(child_at(n, i) < id);
+        if (_heads[child_at(n, i)] != 0) return true;
       }
     return false;
   }
@@ -114,11 +115,11 @@ class LlStampPlan {
     const LlNode& n = node(id);
     if (n.kind != LlShape::seq) return false;
     for (unsigned k = 1; k < n.count; ++k)
-      if (head_turns(kid(n, k))) return true;
+      if (head_turns(child_at(n, k))) return true;
     return false;
   }
 
-  bool lays_named(std::uint16_t id) const {
+  bool writes_named(std::uint16_t id) const {
     const LlNode& n = node(id);
     return n.owns && n.kind != LlShape::empty && !turns(id) &&
            !_a.cfg.nodeBuild[id].foldStep &&

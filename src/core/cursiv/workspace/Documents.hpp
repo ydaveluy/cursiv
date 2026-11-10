@@ -9,21 +9,15 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
 
-// The managed documents of a workspace, by URI and by id. A store and nothing
-// more: what builds a document is the factory's, what parses it is the
-// builder's.
-//
-// Every gate normalizes the URI, so two spellings of one file are one id and
-// one document whatever the caller wrote.
+// The managed documents of a workspace, by URI and by id; a store only. Every
+// entry point normalizes the URI, so two spellings of one file are one id.
 
 namespace cursiv {
 
 struct Document;
 
-// What a store refuses. An error and not an assertion, for the reason a refused
-// language registration is one: `-DNDEBUG` would otherwise let the mistake
-// through, and the mistake is a document destroyed while the index still
-// describes it.
+// What a store refuses: an error rather than an assertion, so release builds
+// still catch a document destroyed while the index describes it.
 class DocumentStoreError : public std::invalid_argument {
  public:
   using std::invalid_argument::invalid_argument;
@@ -33,10 +27,8 @@ class Documents {
  public:
   virtual ~Documents() noexcept = default;
 
-  // Throws when the URI is already held. A silent replacement would destroy
-  // the document under the index rows that still describe it -- and
-  // `deleteDocument` below is where that contract is stated, so this is the
-  // door that must not bypass it.
+  // Throws when the URI is already held: replacing it would destroy a document
+  // the index still describes.
   virtual void addDocument(std::shared_ptr<Document> document) = 0;
 
   // Built from text and held, in one call. `addDocument` above states the
@@ -46,8 +38,8 @@ class Documents {
       const CancellationToken& cancelToken = kNoCancel) = 0;
 
   // The document for `uri`, read from disk if it is not held yet. A mutation of
-  // the store like `addDocument`: called from a write, before its settle --
-  // never from a build's phases, which read the store unlocked beside it.
+  // the store like `addDocument`: called from a write before its mutation ends
+  // -- never from a build's phases, which read the store unlocked beside it.
   virtual std::shared_ptr<Document> getOrCreateDocument(
       std::string_view uri,
       const CancellationToken& cancelToken = kNoCancel) = 0;
@@ -71,11 +63,8 @@ class Documents {
       std::string_view uri) = 0;
   [[nodiscard]] virtual std::string getDocumentUri(DocumentId id) const = 0;
 
-  // The caller purges indexes and unlinks dependents before letting the
-  // returned document die: a dependent still holding a resolved reference
-  // into it goes dangling, silently. `DocumentBuilder::update` is the safe
-  // route -- it does both before deleting. A debug build asserts this
-  // (`DefaultDocuments::deleteDocument`), catching what release would not.
+  // The caller purges the index and unlinks dependents before the returned
+  // document dies, as `DocumentBuilder::update` does. Debug builds assert it.
   [[nodiscard]] virtual std::shared_ptr<Document> deleteDocument(
       std::string_view uri) = 0;
   [[nodiscard]] virtual std::shared_ptr<Document> deleteDocument(

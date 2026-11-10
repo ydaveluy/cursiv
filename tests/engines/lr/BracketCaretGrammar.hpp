@@ -1,9 +1,8 @@
 #pragma once
 
-// A grammar that declares delimiters without laying an indent or a dedent: the
-// statement's newline is a token, and between an opener and its closer a
-// blank. The word before a newline and the word before a closer are one state,
-// which reads both.
+// Delimiters with no indent or dedent: the statement's newline is a token, but
+// a blank between an opener and its closer. The word before a newline and the
+// word before a closer share one state.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

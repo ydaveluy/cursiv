@@ -18,10 +18,8 @@ constexpr std::string_view signature() {
 }
 }  // namespace cursiv::type_name_detail
 
-// How a thing is named when it has no identifier of its own: reflection names
-// whatever has an identifier to reflect on, `__PRETTY_FUNCTION__` names what
-// has none -- split to its last component, and the one compiler-specific
-// spelling a committed file carries.
+// How a thing with no identifier of its own is named: from reflection where
+// there is one, else from `__PRETTY_FUNCTION__`, cut to its last component.
 
 namespace cursiv::detail {
 
@@ -167,11 +165,9 @@ constexpr bool is_identifier(std::string_view s) {
   });
 }
 
-// The window of values an enumerator may have, probed one instantiation each:
-// negatives (a sentinel), and enough positives for the single-bit spellings
-// of a flag set. Outside it an enumerator has no spellable name, and where
-// two share a value only the first is reachable -- the probe answers a
-// value, not a declaration.
+// The values probed for an enumerator's name: a few negatives, and enough
+// positives for the single-bit flags. Of two enumerators with one value, only
+// the first is named.
 #ifndef CURSIV_ENUM_PROBE_MIN
 #define CURSIV_ENUM_PROBE_MIN (-64)
 #endif

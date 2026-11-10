@@ -1,7 +1,6 @@
-// The published row: an action is a type here -- what it does, to which class,
-// through which member -- and its id is its position in the list. A reader
-// builds its own table of thunks from that same list, in the same order, with
-// nothing to reconcile.
+// The published row: an action is a type (what it does, to which class,
+// through which member), and its id is its position in the list a reader
+// builds its thunks from.
 #pragma once
 
 #include <type_traits>
@@ -14,10 +13,8 @@ namespace cursiv::engine {
 template <auto P>
 struct Wrote {};
 
-// `N` is the candidates a reference narrows to and `Src` what the write reads.
-// Both belong to the directive and not to the position: two directives writing
-// one member through different narrowings -- or from payloads two different
-// converters read -- do two different things, so they are two actions.
+// `N` is the candidates a reference narrows to and `Src` what the write reads:
+// two directives that differ in either are two actions.
 template <WriteKind K, class T, class M = void, class N = void,
           class Src = void>
 struct Row {};

@@ -1,5 +1,5 @@
 // What the LR lanes ask of a parse: whether it read as expected, clean or
-// repaired, the leaves it laid, and what a caret is offered.
+// repaired, the leaves it made, and what a caret is offered.
 #pragma once
 
 #include <cstdio>

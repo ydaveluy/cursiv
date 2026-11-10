@@ -19,10 +19,8 @@
 
 namespace branch_values_cases {
 
-// One boolean three ways -- a terminal whose alternatives each give a
-// constant, the data rule giving the same constants, and the words in place:
-// the same tree, the same records but for the rule they name, and the same
-// words expected at the same carets.
+// One boolean three ways, as a terminal, a data rule and words in place: the
+// same tree, the same records but for the rule, the same words at the carets.
 
 namespace {
 
@@ -135,7 +133,7 @@ std::string show(const std::vector<std::string>& entries) {
 void same_carets(std::string_view document) {
   for (unsigned e = 0; e < 2; ++e) {
     const cursiv::Parser& parser = *engines()[e];
-    std::size_t asked = 0, alike = 0;
+    std::size_t asked = 0, agreed = 0;
     for (std::size_t cut = 0; cut <= document.size(); ++cut) {
       const std::string_view body = document.substr(0, cut);
       for (std::size_t at = 0; at <= body.size(); ++at) {
@@ -143,7 +141,7 @@ void same_carets(std::string_view document) {
         const auto b = features(parser, "rule:", body, at);
         const auto c = features(parser, "inline:", body, at);
         ++asked;
-        alike += a == b && a == c;
+        agreed += a == b && a == c;
         if (a != b || a != c)
           std::printf("%s [%.*s] at %zu\n  token: %s\n  rule:  %s\n"
                       "  inline:%s\n",
@@ -151,7 +149,7 @@ void same_carets(std::string_view document) {
                       at, show(a).c_str(), show(b).c_str(), show(c).c_str());
       }
     }
-    CHECK(alike == asked);
+    CHECK(agreed == asked);
   }
 }
 

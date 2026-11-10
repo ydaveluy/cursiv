@@ -57,7 +57,7 @@ bool lr_fold_chains(LrBuildTable& A) {
   // One id per run, grown one chain at a time: `fold` names the pair (what
   // the record states so far, what the site states over it).
   bool full = false;
-  // The pairs already minted, by their halves.
+  // The pairs already created, by their halves.
   std::unordered_map<std::uint32_t, std::uint16_t> fx;
   const auto fold = [&](ElementId r, ElementId over) {
     if (over == kNoRow || r == kNoRow) return over;
@@ -155,9 +155,9 @@ bool lr_fold_chains(LrBuildTable& A) {
         readers[nt_index(sym)].push_back(p);
     }
   }
-  // Productions run in rounds, by number, which is the order the ids are minted
-  // in. A set only grows, up to every id, and a production runs again only where
-  // one it reads grew: the walk ends.
+  // Productions run in rounds, by number, which is the order the ids are
+  // created in. A set only grows, up to every id, and a production runs again
+  // only where one it reads grew: the walk ends.
   std::priority_queue<std::uint64_t, std::vector<std::uint64_t>, std::greater<>>
       todo;
   std::vector<std::uint8_t> queued(nP, 1);
@@ -180,7 +180,7 @@ bool lr_fold_chains(LrBuildTable& A) {
     return false;
   }
 
-  // Which reduces ever meet a chain: only a production that lays nothing and
+  // Which reduces ever read a chain: only a production that writes nothing and
   // whose one symbol brings nothing back reads no row.
   for (unsigned p = 0; p < nP; ++p) {
     LrLowProd& pr = wprods[p];
@@ -216,8 +216,8 @@ void lr_derive_reductions(const LrBuildTable& a, LrDerivedRows& rows) {
   for (unsigned i = 0; i < a.cfg.nprods; ++i)
     if (const auto b = a.cfg.nt_after(i, 0); b != kNoRow) opens[b] = true;
   // A section's entry opens its grammar's text, as the document's does.
-  for (std::size_t k = 1; k < a.cfg.cfgHome.size(); ++k)
-    if (a.cfg.cfgHome[k] == k) opens[a.cfg.cfgEntry[k]] = true;
+  for (std::size_t k = 1; k < a.cfg.cfgSection.size(); ++k)
+    if (a.cfg.cfgSection[k] == k) opens[a.cfg.cfgEntry[k]] = true;
   for (unsigned i = 0; i < a.cfg.nprods; ++i) {
     const auto& p = a.cfg.prods[i];
     LrReducePlan plan{.names = static_cast<std::uint32_t>(rows.reduceNames.size())};

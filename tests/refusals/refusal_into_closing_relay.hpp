@@ -1,5 +1,5 @@
-// A word refused one byte into a nested run that the end of the text closes:
-// the run starts behind that byte, and a text ending in front of it has no run.
+// A guard whose excluded word `(*!` reaches one byte into a nested comment,
+// which the end of the text may close.
 // expect LR: refused: terminal .CMT. has a guard whose excluded word reaches into the text between a .mark<>. and its .same<>.
 #pragma once
 

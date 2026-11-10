@@ -1,6 +1,6 @@
 // The graph a prediction walks, borrowed: the construction presents its own
 // rows through this, a generated module the ones it froze. A decision the build
-// could not settle is answered at parse time over the graph that left it open.
+// could not resolve is answered at parse time over the graph that left it open.
 #pragma once
 
 #include <cstdint>
@@ -17,7 +17,6 @@ struct LlAtnView {
   const LlAtnState* states = nullptr;
   std::uint32_t nstates = 0;
   const LlAtnEdge* edges = nullptr;
-  // Where each rule is entered.
   const std::uint32_t* ruleStart = nullptr;
   // Every state a call of one rule returns to, as runs indexed by the rule:
   // what a closure reaching the end of a rule continues into when the caller

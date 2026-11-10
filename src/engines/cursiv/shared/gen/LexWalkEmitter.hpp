@@ -1,7 +1,6 @@
-// The walk of a lexer's automaton as generated source, for every engine: each
-// state a rung of a ladder, a run of bytes crossed eight a step where its set
-// has the shape for it. An engine's emitter is the policy the rungs ask for
-// the match, the relays and the end of the walk.
+// The walk of a lexer's automaton as generated source, for every engine: one
+// labelled block per state, a run of bytes crossed eight at a time where it
+// can. The engine's policy writes the match, the relays and the end.
 #pragma once
 
 #include <algorithm>
@@ -24,13 +23,13 @@
 
 namespace cursiv::engine {
 
-// A lexer's DFA states as ladder rungs of the generated walk; each reader
+// A lexer's DFA states as labelled blocks of the generated walk; each reader
 // supplies its match and run policy, so the normal walk keeps its shortcuts.
 class LexDfaEmitter {
  public:
-  // Past this a mode's ladder costs more instruction cache than the table
+  // Past this a mode's inline states cost more instruction cache than the table
   // walk costs work.
-  static constexpr unsigned kLadder = 320;
+  static constexpr unsigned kMaxInlineStates = 320;
 
   LexDfaEmitter(std::span<const std::uint8_t, 256> cls,
                 std::span<const std::uint16_t> next, unsigned ncls,
@@ -70,14 +69,12 @@ class LexDfaEmitter {
     return out;
   }
 
-  // The states a mode spells in source: the whole of it under the rung, past
-  // it the start, its successors and the runs they reach. Every state kept is
-  // entered by an edge that is itself spelled, or its label would stand on
-  // text nothing can reach.
-  const std::vector<unsigned>& ladder_from(unsigned lo) const {
+  // The states a mode writes in source: all of them up to `kMaxInlineStates`,
+  // past it the start, its successors and the runs they reach.
+  const std::vector<unsigned>& inline_states_from(unsigned lo) const {
     const auto& mine = states_from(lo);
-    if (mine.size() <= kLadder) return mine;
-    const auto [at, fresh] = _ladders.try_emplace(lo);
+    if (mine.size() <= kMaxInlineStates) return mine;
+    const auto [at, fresh] = _inlineStates.try_emplace(lo);
     if (!fresh) return at->second;
     std::vector<std::uint8_t> keep(_ndfa, 0);
     std::vector front{lo};
@@ -100,7 +97,7 @@ class LexDfaEmitter {
     return out;
   }
 
-  // One state as a rung; an edge outside `spelled` continues in the rows.
+  // One state as a block; an edge outside `spelled` continues in the rows.
   template <class Output, class Policy>
   void state(Output& out, Policy& policy, unsigned st,
              const std::uint8_t* spelled = nullptr) const {
@@ -273,13 +270,11 @@ class LexDfaEmitter {
   unsigned _ncls;
   unsigned _ndfa;
   mutable std::unordered_map<unsigned, std::vector<unsigned>> _reachable{};
-  mutable std::unordered_map<unsigned, std::vector<unsigned>> _ladders{};
+  mutable std::unordered_map<unsigned, std::vector<unsigned>> _inlineStates{};
 };
 
-// The two eight-byte shapes of a run: everything from `lo` up but at most
-// four bytes, or a union of a few ASCII ranges. The lowest lane a step flags
-// is the run's end exactly: the emitted code jumps past the byte loop there,
-// which reads only the last bytes, fewer than eight.
+// The two eight-byte shapes of a run: everything from `lo` up but at most four
+// bytes, or a union of a few ASCII ranges. The lowest lane flagged is its end.
 struct LexRunShape {
   // The widest byte `lt8` answers for: past it the subtraction borrows out
   // of the lowest lane, the one `ctzll` reads.
@@ -412,7 +407,7 @@ class LexRunEmitter {
   unsigned _runId = 0;
 };
 
-// What the rungs ask of an automaton `View` names (`LexFirstByte.hpp`),
+// What the state blocks ask of the automaton `View` names (`LexFirstByte.hpp`),
 // besides the runs `lex_run_blind` crosses blind: a state whose every live
 // edge loops on itself, accepting without a bound...
 template <class View>
@@ -459,12 +454,12 @@ int lex_continuation_of(const View& v, std::uint16_t st,
   return -1;
 }
 
-// The rungs both engines spell alike over the automaton `View` names: the runs
-// a state crosses, the match it takes and the relays it launches, to compete
-// with that match. An engine's emitter adds the walk around them.
+// The state blocks both engines write the same over the automaton `View` names:
+// the runs a state crosses, the match it takes and the relays it launches, to
+// compete with that match. An engine's emitter adds the walk around them.
 template <class View>
-struct LexWalkRungs : TextBuilder {
-  explicit LexWalkRungs(View v) : view(v) {}
+struct LexStateBlocks : TextBuilder {
+  explicit LexStateBlocks(View v) : view(v) {}
 
   const View view;
   LexRunEmitter runs;
@@ -487,10 +482,8 @@ struct LexWalkRungs : TextBuilder {
          k = view.relay_of(k).next)
       line(ind, "relays.launch(kTape, ", k, "u, src, len, start, i);");
   }
-  // A keyword whose one way on is the word it starts: its boundary is the edge,
-  // so the rung settles both here and asks no election. The caller knows the
-  // state elects the terminal it accepts. `cfg` spells what the emitted code
-  // reads the boundary from.
+  // A keyword whose one way on is the word it starts: the state decides its
+  // boundary here, with no election.
   void emit_keyword_exit(unsigned st, const std::uint8_t* spelled,
                          std::string_view cfg) {
     const auto s = static_cast<std::uint16_t>(st);
@@ -571,18 +564,14 @@ inline void lex_emit_byte_runs(TextBuilder& o) {
   o.line("");
 }
 
-// The signature of the walk of every mode.
 inline constexpr std::string_view kLexWalkSignature =
     "::cursiv::engine::Scan walk_all(const char* src, ::cursiv::TextOffset "
     "len,\n"
     "         ::std::uint16_t mode, ::cursiv::TextOffset i)";
 
 // The walk of every mode as one function, `walk_all(src, len, mode, i)`: a
-// computed goto enters the mode's ladder, each state it spells is a rung, a
-// state past the ladder is read in the rows from `Wtab`, and the walk ends at
-// `Wdone`. The policy writes the rungs' match and relays
-// (`LexDfaEmitter::state`), `walk_before` ahead of the function, the rows and
-// the end; `linkage` prefixes the definition.
+// computed goto enters the mode's inline states, a state past it reads the rows
+// from `Wtab`, and the walk ends at `Wdone`.
 template <class Policy>
 void lex_emit_walk(TextBuilder& o, const LexDfaEmitter& dfa, Policy& policy,
                    std::span<const std::uint16_t> starts, bool relays,
@@ -591,7 +580,7 @@ void lex_emit_walk(TextBuilder& o, const LexDfaEmitter& dfa, Policy& policy,
   std::vector<std::uint8_t> spelled(dfa.states(), 0);
   bool partial = false;
   for (const auto start : starts) {
-    const auto& mine = dfa.ladder_from(start);
+    const auto& mine = dfa.inline_states_from(start);
     partial = partial || mine.size() != dfa.states_from(start).size();
     for (const unsigned st : mine)
       if (!spelled[st]) {

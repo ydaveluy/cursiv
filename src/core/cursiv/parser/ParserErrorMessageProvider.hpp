@@ -8,10 +8,9 @@
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/text/TextOffset.hpp"
 
-// How a syntax error reads. The parser states facts, not words: a
-// `ParseDiagnostic` says what it did, where, and what it was owed. This
-// service words them when the validator publishes them, one method per shape
-// of error, so a language rewords the shapes it wants and keeps the others.
+// How a syntax error reads. The parser states facts in a `ParseDiagnostic`;
+// this service words them, one method per kind of error, so a language
+// rewords only the kinds it wants.
 
 namespace cursiv {
 
@@ -28,9 +27,9 @@ class ParserErrorMessageProvider {
                                          const ParseDiagnostic& diagnostic,
                                          std::string_view text) const;
 
-  // The repairs. `grammar` is the one the diagnostic's elements belong to.
+  // The repairs; `grammar` is the one the diagnostic's elements belong to.
   //
-  // A construct admitted absent: nothing was read.
+  // A missing construct was assumed: nothing was read.
   [[nodiscard]] virtual std::string buildInsertedMessage(
       const Grammar& grammar, const ParseDiagnostic& diagnostic,
       std::string_view text) const = 0;
@@ -38,33 +37,33 @@ class ParserErrorMessageProvider {
   [[nodiscard]] virtual std::string buildDeletedMessage(
       const Grammar& grammar, const ParseDiagnostic& diagnostic,
       std::string_view text) const = 0;
-  // Text read as the construct it was owed: a misspelling.
+  // Text read as the expected construct: a misspelling.
   [[nodiscard]] virtual std::string buildMismatchTokenMessage(
       const Grammar& grammar, const ParseDiagnostic& diagnostic,
       std::string_view text) const = 0;
-  // The text ran out while a construct was still owed.
+  // The text ended before an expected construct.
   [[nodiscard]] virtual std::string buildIncompleteMessage(
       const Grammar& grammar, const ParseDiagnostic& diagnostic,
       std::string_view text) const = 0;
-  // A span the repair's bound on work settled: how far the repairs around it
-  // can be trusted.
+  // A span where recovery hit its work limit: the repairs around it may not
+  // be the best.
   [[nodiscard]] virtual std::string buildBoundedMessage(
       const Grammar& grammar, const ParseDiagnostic& diagnostic,
       std::string_view text) const = 0;
 
   // What the parser could not repair: the text after what the entry rule
-  // read, from `end` on...
+  // read, from `end` on.
   [[nodiscard]] virtual std::string buildNotAllInputParsedMessage(
       std::string_view text, TextOffset end) const = 0;
-  // ...an entry rule that never completed...
+  // An entry rule that never completed.
   [[nodiscard]] virtual std::string buildUnparsedMessage(
       std::string_view text) const = 0;
-  // ...and a parse that no tree could be built from.
+  // A parse no tree could be built from.
   [[nodiscard]] virtual std::string buildNoTreeMessage(
       std::string_view text) const = 0;
 };
 
-// The spellings of what the repair was owed, the first named first, at most
+// The spellings of what the repair expected, the first named first, at most
 // `limit` of them: what a message quotes and what a quick fix writes.
 [[nodiscard]] std::vector<std::string_view> expected_spellings(
     const Grammar& grammar, const ParseDiagnostic& diagnostic,

@@ -11,8 +11,7 @@
 #include "cursiv/utils/FunctionRef.hpp"
 
 // A parallel-for over a pool of workers. The pool is only forward-declared, so
-// no consumer of the workspace compiles a thread header for it and swapping it
-// changes one file.
+// users do not compile thread headers.
 
 namespace cursiv {
 
@@ -31,24 +30,16 @@ class TaskScheduler {
   // oversubscribed. Zero on a single core, where everything below runs inline.
   [[nodiscard]] static std::size_t defaultWorkerCount() noexcept;
 
-  // Applies `task` to every element and waits. The first exception a task
-  // throws is rethrown here, before any cancellation is reported; cancellation
-  // is cooperative and short-circuits the rest with `OperationCancelled`.
-  // Below `minParallelCount` -- and for any range that is not sized and
-  // random-access -- the run is inline on the calling thread. Safe to call
-  // from inside a task (a worker participates in the nested run) and from two
-  // threads at once on one scheduler. Neither the range nor the task is
-  // owned: both must outlive the call, which always returns after the last
-  // element.
+  // Applies `task` to every element and waits; the first exception is rethrown,
+  // before any cancellation. Inline below `minParallelCount` or for a range not
+  // sized and random-access. May nest; range and task must outlive the call.
   template <class Range, class F>
   void parallelFor(const CancellationToken& token, Range&& range, F&& task,
                    std::size_t minParallelCount = 2);
 
-  // As above, for many small pieces of work, where handing each to a worker
-  // would cost more than doing it: `task` takes a run of `items` instead, of
-  // at least `minRun` of them. Runs start at multiples of `minRun` and the
-  // last one takes the rest, so `items.size() / minRun` runs in all; a span
-  // shorter than two runs goes to `task` whole, on the calling thread.
+  // As above, for many small items: `task` takes runs of at least `minRun`
+  // items, starting at multiples of `minRun`. A span shorter than two runs goes
+  // to `task` whole, on the calling thread.
   template <class T, class F>
   void parallelFor(const CancellationToken& token, std::span<T> items,
                    std::size_t minRun, F&& task);
@@ -58,7 +49,7 @@ class TaskScheduler {
   [[nodiscard]] std::size_t workerCount() const noexcept;
 
  private:
-  // Precondition: `count > 1` and a live pool, both tested above.
+  // Precondition: `count > 1` and a live pool.
   void parallelForIndexed(const CancellationToken& token, std::size_t count,
                           cursiv::function_ref<void(std::size_t)> body);
 

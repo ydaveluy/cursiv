@@ -1,4 +1,4 @@
-// The decisions an episode elected, in the order the descent will meet them:
+// The decisions an episode elected, in the order the descent will reach them:
 // the descent asks for each where it stands, and is answered without reading
 // the text again. A plan holds only while the descent goes where it went.
 #pragma once
@@ -18,7 +18,7 @@ inline constexpr std::uint16_t kLlUnplanned = 0xFFFDu;
 struct LlPlanEntry {
   TextOffset at = 0;
   // The tokens of no width read at `at` before the choice.
-  std::uint32_t lull = 0;
+  std::uint32_t zeroWidth = 0;
   std::uint16_t decision = kNoRow;
   // `kNoRow` where the readings all died at this choice.
   std::uint16_t arm = kNoRow;
@@ -32,15 +32,15 @@ struct LlPlanEntry {
 // answers: the arms the readings took there, one bit each.
 struct LlPlanWay {
   TextOffset at = 0;
-  std::uint32_t lull = 0;
+  std::uint32_t zeroWidth = 0;
   std::uint16_t decision = kNoRow;
   std::uint64_t arms = 0;
 };
 
 class LlPlan {
  public:
-  // Names a plan as one `install` laid it.
-  using Laid = std::uint64_t;
+  // Names one plan that `install` set.
+  using Generation = std::uint64_t;
 
   void clear() {
     _entries.clear();
@@ -48,53 +48,53 @@ class LlPlan {
     _below = false;
     _repairs = 0;
     ++_layout;
-    ++_laid;
+    ++_generation;
   }
   bool empty() const { return _entries.empty(); }
 
-  // The entries are in the order the descent meets them, so `at` never
+  // The entries are in the order the descent reaches them, so `at` never
   // decreases.
   const std::vector<LlPlanEntry>& entries() const { return _entries; }
 
-  // Lays `entries` for the descent after `repairs` repairs, and `ways`, where
-  // given, as the ways its refusals below hold on, in the order of `at` as the
-  // entries; both get what the plan held before.
-  Laid install(std::vector<LlPlanEntry>& entries, std::vector<LlPlanWay>* ways,
-               std::uint32_t repairs) {
+  // Installs `entries` for the descent after `repairs` repairs, and `ways`,
+  // where given, as the ways its refusals below hold on, in the order of `at`
+  // as the entries; both get what the plan held before.
+  Generation install(std::vector<LlPlanEntry>& entries,
+                     std::vector<LlPlanWay>* ways, std::uint32_t repairs) {
     _entries.swap(entries);
     ++_layout;
     _ways.clear();
     _below = ways != nullptr;
     if (_below) _ways.swap(*ways);
     _repairs = repairs;
-    return ++_laid;
+    return ++_generation;
   }
 
-  // Puts `path` after the plan `laid` names; false once it is no longer the
-  // one laid.
-  bool extend(Laid laid, const std::vector<LlPlanEntry>& path) {
-    if (laid != _laid) return false;
+  // Appends `path` to the plan `generation` names; false once another plan has
+  // replaced it.
+  bool extend(Generation generation, const std::vector<LlPlanEntry>& path) {
+    if (generation != _generation) return false;
     _entries.insert(_entries.end(), path.begin(), path.end());
     return true;
   }
 
   // The descent took `arm` at `decision` without asking the plan: the
   // refusals below stand while that is an arm the readings took there.
-  void went(std::uint16_t decision, TextOffset at, std::uint32_t lull,
+  void went(std::uint16_t decision, TextOffset at, std::uint32_t zeroWidth,
             std::uint16_t arm) {
     if (!_below) return;
     auto it = std::lower_bound(
         _ways.begin(), _ways.end(), at,
         [](const LlPlanWay& w, TextOffset p) { return w.at < p; });
     for (; it != _ways.end() && it->at == at; ++it)
-      if (it->decision == decision && it->lull == lull) {
+      if (it->decision == decision && it->zeroWidth == zeroWidth) {
         if (arm < 64 && ((it->arms >> arm) & 1u) != 0) return;
         break;
       }
     drop_below();
   }
 
-  // ...and once it may have gone another way, they are not the plan's.
+  // Once the descent may have gone another way, the refusals below are void.
   void drop_below() {
     if (!_below) return;
     std::erase_if(_entries, [](const LlPlanEntry& e) { return e.below; });
@@ -103,39 +103,37 @@ class LlPlan {
     _below = false;
   }
 
-  // What the plan says of `decision` where the descent stands at `at`, after
-  // `repairs` repairs: nothing once the descent has been mended. A choice
-  // the descent met is answered once -- a rule that may be empty meets one
-  // choice at one place several times -- and a refusal as often as it asks.
-  // An `again` choice is answered as often as it asks: a climb asks its
-  // operator once per level it unwinds over one token.
-  std::uint16_t say(std::uint16_t decision, TextOffset at, std::uint32_t lull,
-                    std::uint32_t repairs, bool again) {
+  // What the plan says of `decision` at `at` after `repairs` repairs; nothing
+  // once the descent was mended. A choice met is answered once, a refusal or an
+  // `again` choice each time it asks.
+  std::uint16_t say(std::uint16_t decision, TextOffset at,
+                    std::uint32_t zeroWidth, std::uint32_t repairs,
+                    bool again) {
     if (_entries.empty() || repairs != _repairs) return kLlUnplanned;
     // Many levels may ask one choice at one place: each picks up where the last
-    // one left it, past what can no longer answer it.
-    if (decision >= _seats.size()) _seats.resize(decision + 1u);
-    Seat& seat = _seats[decision];
-    if (seat.layout != _layout || seat.at != at) seat = {_layout, at, 0};
-    // Past the entries before this place, among them those laid since.
-    if (seat.next < _entries.size() && _entries[seat.next].at < at) {
+    // one left it, past the entries that cannot answer it.
+    if (decision >= _cursors.size()) _cursors.resize(decision + 1u);
+    Cursor& cursor = _cursors[decision];
+    if (cursor.layout != _layout || cursor.at != at) cursor = {_layout, at, 0};
+    // Past the entries before this place, among them those added since.
+    if (cursor.next < _entries.size() && _entries[cursor.next].at < at) {
       const auto first = std::lower_bound(
-          _entries.begin() + static_cast<std::ptrdiff_t>(seat.next),
+          _entries.begin() + static_cast<std::ptrdiff_t>(cursor.next),
           _entries.end(), at,
           [](const LlPlanEntry& e, TextOffset p) { return e.at < p; });
-      seat.next = static_cast<std::size_t>(first - _entries.begin());
+      cursor.next = static_cast<std::size_t>(first - _entries.begin());
     }
     bool moving = true;
-    for (std::size_t i = seat.next;
+    for (std::size_t i = cursor.next;
          i < _entries.size() && _entries[i].at == at; ++i) {
       ++_visits;
       LlPlanEntry& e = _entries[i];
       if (e.decision != decision || e.taken) {
-        if (moving) seat.next = i + 1;
+        if (moving) cursor.next = i + 1;
         continue;
       }
       moving = false;
-      if (e.lull != lull) continue;
+      if (e.zeroWidth != zeroWidth) continue;
       e.taken = !again && e.arm != kNoRow;
       return e.arm;
     }
@@ -147,21 +145,21 @@ class LlPlan {
 
  private:
   // Where a choice stands in the entries of the place it was last asked at.
-  struct Seat {
+  struct Cursor {
     std::uint64_t layout = 0;
     TextOffset at = 0;
     std::size_t next = 0;
   };
 
   std::vector<LlPlanEntry> _entries;
-  std::vector<Seat> _seats;
-  // Names the positions of `_entries`, which the seats count on.
+  std::vector<Cursor> _cursors;
+  // Names the positions of `_entries`, which the entries count on.
   std::uint64_t _layout = 1;
   std::uint64_t _visits = 0;
   std::vector<LlPlanWay> _ways;
   bool _below = false;
   std::uint32_t _repairs = 0;
-  Laid _laid = 0;
+  Generation _generation = 0;
 };
 
 }  // namespace cursiv::engine

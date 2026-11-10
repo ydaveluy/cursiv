@@ -8,7 +8,7 @@
 #include "engines/ll/RescanBoundAst.hpp"
 
 namespace tllrescan {
-// The bounded terminal ranks first, and is the state's own election.
+// The bounded terminal ranks first, and is the state's own choice.
 struct Narrow : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct BOUNDED : terminal<lit<"abc"> + !cr<";">> {};
@@ -23,7 +23,7 @@ struct Narrow : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// The spelled one is elected where both accept, and is declared last.
+// The spelled one is chosen where both accept, and is declared last.
 struct Shadow : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct BOUNDED : terminal<lit<"abc"> + !cr<";">> {};

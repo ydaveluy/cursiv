@@ -6,10 +6,8 @@
 
 namespace cursiv {
 
-// A position plus the tree that explains it, for the one reader with no tree
-// in hand: a data-rule converter is handed text, so its parts carry their
-// own. Nothing else stores a tree pointer this way -- nodes and diagnostics
-// keep a bare `NodeId`, and a tree states structure alone.
+// A position plus its tree, for a data-rule converter, which is handed text
+// and no tree. Everything else keeps a bare `NodeId`.
 struct CstNodeView {
   const Cst* cst = nullptr;
   NodeId id = kNoNode;
@@ -17,8 +15,8 @@ struct CstNodeView {
   std::string_view text() const { return cst->text(id); }
   TextOffset begin() const { return node().begin; }
   TextOffset end() const { return node().end; }
-  // Bounded: a view built with an id from a tape that has since been rewound
-  // must refuse, not dereference a slot that no longer exists.
+  // Bounded: a view built with an id from a tree that has since been reset
+  // must refuse, not read a record that is gone.
   explicit operator bool() const {
     return cst != nullptr && id != kNoNode && id < cst->size();
   }

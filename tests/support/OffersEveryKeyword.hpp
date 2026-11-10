@@ -1,7 +1,7 @@
 #pragma once
 
-// What follows the caret, keywords spelling no letter too, which a default
-// provider leaves out: for the lanes about what the grammar states at a caret.
+// When nothing is typed at the caret, also offers keywords without a letter,
+// which the default provider leaves out.
 
 #include <memory>
 #include <string_view>

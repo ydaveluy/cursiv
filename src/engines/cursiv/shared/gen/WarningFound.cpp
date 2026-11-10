@@ -15,10 +15,8 @@ struct Item {
   bool condition = false;
 };
 
-// The rules a grammar reaches from `entry`, `ignored` and `hidden`, in the
-// order reached, closed over the rules each body names as the pipeline resolved
-// the bodies. A rule a condition names is read there as text, never as a call:
-// it is reached, and not one of the rules read as themselves.
+// The rules a grammar reaches from `entry`, `ignored` and `hidden`, in order.
+// A rule a condition names is reached, but read there as text.
 class Reach {
  public:
   explicit Reach(GrammarImage& image) : _image(image) {}
@@ -58,70 +56,70 @@ class Reach {
     if (f.kind == ImageRuleKind::infix) {
       _out.push_back({f.primary, false});
       for (std::uint32_t i = 0; i < f.levelCount; ++i)
-        plain(_image.levels[f.levelsAt + i].op);
+        descend(plain(_image.levels[f.levelsAt + i].op));
     } else if (f.kind != ImageRuleKind::grammar) {
-      plain(f.body);
+      descend(plain(f.body));
     }
   }
 
   // The rules an expression names where it is read.
-  void plain(ImageId id) {
+  Descent<void> plain(ImageId id) {
     switch (const ImageNode n = _image.nodes[id]; n.kind) {
       case ImageKind::ref:
         _out.push_back({n.a, false});
-        return;
+        co_return;
       case ImageKind::embed:
-        if (_image.nodes[_image.kids[n.first]].kind == ImageKind::seq &&
-            _image.nodes[_image.kids[n.first]].count == 3) {
+        if (_image.nodes[_image.children[n.first]].kind == ImageKind::seq &&
+            _image.nodes[_image.children[n.first]].count == 3) {
           const ImageFace section = _image.ready(n.a).face[0];
-          const ImageNode seq = _image.nodes[_image.kids[n.first]];
+          const ImageNode seq = _image.nodes[_image.children[n.first]];
           _out.push_back({section.entry, false});
           list(section.ignoreAt, section.ignoreCount);
           list(section.hiddenAt, section.hiddenCount);
-          plain(_image.kids[seq.first]);
-          plain(_image.kids[seq.first + 2]);
-          return;
+          co_await plain(_image.children[seq.first]);
+          co_await plain(_image.children[seq.first + 2]);
+          co_return;
         }
         break;
       case ImageKind::skip:
         list(static_cast<std::uint32_t>(n.a),
              static_cast<std::uint32_t>(n.m + n.n));
-        plain(_image.kids[n.first]);
-        return;
+        co_await plain(_image.children[n.first]);
+        co_return;
       case ImageKind::lit:
-        if (n.flags & kLitGuardExpr) plain(_image.kids[n.first]);
-        return;
+        if (n.flags & kLitGuardExpr) co_await plain(_image.children[n.first]);
+        co_return;
       case ImageKind::notOf:
       case ImageKind::andOf:
-        conditional(_image.kids[n.first]);
-        return;
+        co_await conditional(_image.children[n.first]);
+        co_return;
       default:
         break;
     }
-    const auto kids = _image.shape_kids(id);
-    for (std::size_t i = 0; i < kids.size(); ++i)
-      plain(_image.shape_kids(id)[i]);
+    const auto children = _image.shape_children(id);
+    for (std::size_t i = 0; i < children.size(); ++i)
+      co_await plain(_image.shape_children(id)[i]);
   }
 
   // ...and where a condition reads them: a rule that is text there is no call.
-  void conditional(ImageId id) {
+  Descent<void> conditional(ImageId id) {
     const ImageNode n = _image.nodes[id];
     if (n.kind == ImageKind::embed)
       throw std::runtime_error(
           "`section<G>(open, close)` is allowed in a rule, not in a condition: a "
           "condition tests text and cannot parse a grammar -- test the token "
           "that opens the section");
-    const std::size_t count = _image.shape_kids(id).size();
+    const std::size_t count = _image.shape_children(id).size();
     if (count != 0) {
       for (std::size_t i = 0; i < count; ++i)
-        conditional(_image.shape_kids(id)[i]);
+        co_await conditional(_image.shape_children(id)[i]);
     } else if (n.kind == ImageKind::ref) {
       const ImageRuleKind kind = _image.ready(n.a).face[0].kind;
       const bool text =
           _image.rules[n.a].inlineTerminal || kind == ImageRuleKind::data;
       _out.push_back({n.a, text});
     } else {
-      plain(id);
+      co_await plain(id);
     }
   }
 

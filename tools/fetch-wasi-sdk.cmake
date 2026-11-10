@@ -1,6 +1,5 @@
-# The pinned SDK, fetched and verified -- one version, one checksum per host,
-# because an artifact is reproducible only against an exact release.
-# cmake/wasi.cmake finds the result on its own.
+# Fetches and verifies the pinned wasi-sdk, one checksum per host, where
+# cmake/wasi.cmake finds it.
 #   cmake -P tools/fetch-wasi-sdk.cmake                 # to ~/wasi-sdk-34.0
 #   cmake -DDEST=<dir> -P tools/fetch-wasi-sdk.cmake
 cmake_minimum_required(VERSION 3.30)
@@ -83,30 +82,61 @@ if(NOT _sha256)
   message(FATAL_ERROR "wasi-sdk ${_version} has no release for ${_arch} ${_os}")
 endif()
 
-# Unpacked beside its destination, then moved in one step: an interrupted run
-# leaves no half-installed SDK behind.
+# Unpacked in `<DEST>.fetching`, then moved in one step, so an interrupted run
+# leaves no half SDK. Its lock file marks the folder and keeps two runs apart.
 set(_name wasi-sdk-${_version}-${_arch}-${_os})
 set(_work "${DEST}.fetching")
-file(REMOVE_RECURSE "${_work}")
-set(_tarball "${_work}/${_name}.tar.gz")
+if(EXISTS "${_work}" AND NOT EXISTS "${_work}/cmake.lock")
+  message(FATAL_ERROR "${_work} exists and was not made by this script: "
+                      "remove it, or choose another with -DDEST=<dir>")
+endif()
+file(LOCK "${_work}" DIRECTORY GUARD PROCESS RESULT_VARIABLE _locked)
+if(NOT _locked EQUAL 0)
+  message(FATAL_ERROR "cannot lock ${_work}: ${_locked}")
+endif()
+# Another run may have installed it meanwhile. Each run removes the folder as
+# it releases it, and one still waiting removes it in turn.
+function(_release_work)
+  file(LOCK "${_work}" DIRECTORY RELEASE)
+  execute_process(COMMAND ${CMAKE_COMMAND} -E rm -rf "${_work}")
+endfunction()
+_sdk_complete("${DEST}" _done)
+if(_done)
+  _release_work()
+  message(STATUS "already installed: ${DEST} (${_version})")
+  return()
+endif()
+set(_download "${_work}/download")
+file(REMOVE_RECURSE "${_download}")
+set(_tarball "${_download}/${_name}.tar.gz")
+set(_fetched FALSE)
 foreach(_attempt 1 2 3)
   message(STATUS "fetching ${_release}/${_name}.tar.gz")
-  file(DOWNLOAD "${_release}/${_name}.tar.gz" "${_tarball}"
-       EXPECTED_HASH SHA256=${_sha256} TLS_VERIFY ON STATUS _status)
+  # The hash is checked after the download, so a bad attempt is retried.
+  file(DOWNLOAD "${_release}/${_name}.tar.gz" "${_tarball}" TLS_VERIFY ON STATUS _status)
   list(GET _status 0 _code)
-  if(_code EQUAL 0)
-    break()
-  endif()
   list(GET _status 1 _why)
+  if(_code EQUAL 0)
+    file(SHA256 "${_tarball}" _got)
+    if(_got STREQUAL _sha256)
+      set(_fetched TRUE)
+      break()
+    endif()
+    set(_why "SHA-256 ${_got} instead of ${_sha256}")
+  endif()
   message(WARNING "download failed: ${_why}")
 endforeach()
-if(NOT _code EQUAL 0)
-  file(REMOVE_RECURSE "${_work}")
+if(NOT _fetched)
+  file(REMOVE_RECURSE "${_download}")
   message(FATAL_ERROR "cannot fetch wasi-sdk ${_version}")
 endif()
-file(ARCHIVE_EXTRACT INPUT "${_tarball}" DESTINATION "${_work}")
-file(RENAME "${_work}/${_name}" "${DEST}")
-file(REMOVE_RECURSE "${_work}")
+file(ARCHIVE_EXTRACT INPUT "${_tarball}" DESTINATION "${_download}")
+file(RENAME "${_download}/${_name}" "${DEST}" NO_REPLACE RESULT _moved)
+if(NOT _moved EQUAL 0)
+  message(FATAL_ERROR "${DEST} appeared during the download: remove it, "
+                      "or choose another with -DDEST=<dir>")
+endif()
+_release_work()
 
 _sdk_complete("${DEST}" _done)
 if(NOT _done)

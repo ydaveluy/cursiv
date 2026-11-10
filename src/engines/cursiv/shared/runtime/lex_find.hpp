@@ -16,7 +16,7 @@
 namespace cursiv::engine {
 
 // A search over bytes may find a continuation inside a scalar. Delimited
-// text advances by characters, starting at text.data(), while stray bytes
+// text advances by characters, starting at text.data(), while invalid bytes
 // remain characters of their own. ASCII delimiters need no lookbehind.
 inline bool lex_character_boundary(std::string_view text, const char* at) {
   return at == text.data() + text.size() ||

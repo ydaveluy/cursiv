@@ -13,8 +13,6 @@ namespace cursiv {
 
 struct CoreServices;
 
-// Not `final`: a derived factory overrides the two steps below -- which
-// services a URI belongs to, and how the text becomes a tree.
 class DefaultDocumentFactory : public DocumentFactory,
                                protected DefaultSharedCoreService {
  public:

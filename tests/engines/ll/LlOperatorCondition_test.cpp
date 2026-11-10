@@ -97,8 +97,8 @@ void a_guarded_operator_among_plain_ones_reads_its_own_gap() {
   expect_cases("mixed:", cases);
 }
 
-// The operator's token also opens an item of its own: a break behind it parts
-// the operands, and the same text reads as two items.
+// The operator's token also opens an item of its own: a line break after it
+// separates the operands, and the same text reads as two items.
 void a_break_behind_the_operator_parts_what_it_would_join() {
   const Case cases[] = {
       {"1 + 2", kJoined},

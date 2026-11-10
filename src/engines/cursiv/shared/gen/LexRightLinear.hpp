@@ -1,7 +1,6 @@
 // A consuming, observation-free right-linear terminal is a regular positive
-// closure. Keep a noncyclic call to the closure, preserving the recognizer
-// backend: an equivalent NFA may expand counted repeats or need an exponential
-// DFA. Other calls keep their scope and every endpoint remains available.
+// closure: a noncyclic call to it stays a call, so the recognizer backend
+// keeps it and no NFA expands it.
 #pragma once
 
 #include <algorithm>
@@ -28,7 +27,7 @@ class LexRightLinear {
       if (const LexNode e = _g.lex[root]; e.kind == LexKind::seq) {
         if (!tail(root, root, true, prefix)) continue;
       } else if (e.kind == LexKind::alt && e.b == 2) {
-        const auto a = _g.lexKid[e.a], b = _g.lexKid[e.a + 1];
+        const auto a = _g.lexChild[e.a], b = _g.lexChild[e.a + 1];
         if (!alternative(root, a, b, prefix) &&
             !alternative(root, b, a, prefix))
           continue;
@@ -36,12 +35,12 @@ class LexRightLinear {
         continue;
       }
       if (!std::ranges::all_of(prefix,
-                               [&](auto kid) {
-                                 const auto f = facts(kid);
+                               [&](auto child) {
+                                 const auto f = facts(child);
                                  return f.regular && f.productive;
                                }) ||
-          std::ranges::all_of(prefix,
-                              [&](auto kid) { return facts(kid).nullable; }))
+          std::ranges::all_of(
+              prefix, [&](auto child) { return facts(child).nullable; }))
         continue;
       // A full graph keeps its original recognizer; an optimization must not
       // introduce a new size refusal or leave a partly rewritten prefix.
@@ -90,23 +89,23 @@ class LexRightLinear {
         const bool seq = e.kind == LexKind::seq;
         f = {true, seq, seq};
         for (unsigned i = 0; i < e.b; ++i) {
-          const auto kid = facts(_g.lexKid[e.a + i]);
-          f.regular = f.regular && kid.regular;
-          f.productive = seq ? f.productive && kid.productive
-                             : f.productive || kid.productive;
+          const auto child = facts(_g.lexChild[e.a + i]);
+          f.regular = f.regular && child.regular;
+          f.productive = seq ? f.productive && child.productive
+                             : f.productive || child.productive;
           f.nullable =
-              seq ? f.nullable && kid.nullable : f.nullable || kid.nullable;
+              seq ? f.nullable && child.nullable : f.nullable || child.nullable;
         }
         break;
       }
       case LexKind::rep: {
-        const auto kid = facts(e.a);
+        const auto child = facts(e.a);
         // A phrase's repetition may have trivia between iterations. A
         // nullable repeated body must retain the original recursion refusal.
-        f.regular =
-            kid.regular && e.b == kNoLexNode && (e.max <= 1 || !kid.nullable);
-        f.productive = e.min == 0 || kid.productive;
-        f.nullable = e.min == 0 || kid.nullable;
+        f.regular = child.regular && e.b == kNoLexNode &&
+                    (e.max <= 1 || !child.nullable);
+        f.productive = e.min == 0 || child.productive;
+        f.nullable = e.min == 0 || child.nullable;
         break;
       }
       default:
@@ -124,7 +123,7 @@ class LexRightLinear {
     prefix.clear();
     const LexNode e = _g.lex[at];
     if (e.kind != LexKind::seq || e.b < 2) return false;
-    auto last = _g.lexKid[e.a + e.b - 1];
+    auto last = _g.lexChild[e.a + e.b - 1];
     if (optional) {
       const LexNode opt = _g.lex[last];
       if (opt.kind != LexKind::rep || opt.min != 0 || opt.max != 1 ||
@@ -135,7 +134,8 @@ class LexRightLinear {
     if (const LexNode call = _g.lex[last];
         call.kind != LexKind::call || lex_callee(_g, call) != root)
       return false;
-    for (unsigned i = 0; i + 1 < e.b; ++i) prefix.push_back(_g.lexKid[e.a + i]);
+    for (unsigned i = 0; i + 1 < e.b; ++i)
+      prefix.push_back(_g.lexChild[e.a + i]);
     _prefixSeq = at;
     return true;
   }
@@ -143,7 +143,7 @@ class LexRightLinear {
   void sequence(std::uint16_t at, std::vector<std::uint16_t>& out) const {
     const LexNode e = _g.lex[at];
     if (e.kind == LexKind::seq)
-      for (unsigned i = 0; i < e.b; ++i) sequence(_g.lexKid[e.a + i], out);
+      for (unsigned i = 0; i < e.b; ++i) sequence(_g.lexChild[e.a + i], out);
     else
       out.push_back(at);
   }
@@ -158,7 +158,7 @@ class LexRightLinear {
     if (x.kind != LexKind::seq && x.kind != LexKind::alt) return false;
     if (x.b != y.b) return false;
     for (unsigned i = 0; i < x.b; ++i)
-      if (!same(_g.lexKid[x.a + i], _g.lexKid[y.a + i])) return false;
+      if (!same(_g.lexChild[x.a + i], _g.lexChild[y.a + i])) return false;
     return true;
   }
 
@@ -168,7 +168,7 @@ class LexRightLinear {
     if (!tail(recursive, root, false, prefix)) return false;
     std::vector<std::uint16_t> x, y;
     sequence(base, x);
-    for (const auto kid : prefix) sequence(kid, y);
+    for (const auto child : prefix) sequence(child, y);
     return x.size() == y.size() &&
            std::ranges::equal(x, y, [&](std::uint16_t p, std::uint16_t q) {
              return facts(p).regular && facts(q).regular && same(p, q);

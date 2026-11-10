@@ -1,7 +1,6 @@
-// A token the lexer refused in its middle, read on the mode's automaton as a
-// superset: the walk goes back into the body it was reading, so a fault
-// inside the token never moves where it ends. Read off the emitted table; a
-// valid text never reaches it.
+// A token the lexer refused in its middle, read on as a superset: the walk
+// goes back into the body it was reading, so a fault inside the token never
+// moves where it ends. A valid text never reaches it.
 #pragma once
 
 #include <cstddef>
@@ -22,7 +21,7 @@
 namespace cursiv::engine {
 
 struct LexReading {
-  // `kInvalidSymbol`: no body owing a closer was entered here.
+  // `kInvalidSymbol` when no body that needs a closer was entered here.
   SymbolId term = kInvalidSymbol;
   // Where its body began: past its opener.
   TextOffset open = 0;
@@ -32,16 +31,14 @@ struct LexReading {
   bool closed = false;
 };
 
-// The automaton states that loop on a byte without accepting, the terminal a
-// state owes where its body runs on to a closer, and the bytes a mode opens
-// such a body with.
-struct LexOwed {
+// The automaton states that loop on a byte without accepting, the terminal
+// whose closer a state waits for, and the bytes a mode opens such a body with.
+struct LexBodies {
   const std::uint8_t* bodies = nullptr;
-  const std::uint16_t* owed = nullptr;
+  const std::uint16_t* terms = nullptr;
   const ByteSet* openers = nullptr;
 };
 
-// Where a line ends: a `\n` or a `\r`.
 inline bool lex_line_end_at(const char* src, TextOffset i) {
   return src[i] == '\n' || src[i] == '\r';
 }
@@ -96,14 +93,11 @@ std::uint16_t lex_hop(const Tape& tape, std::uint16_t k, const char* src,
   return kDeadState;
 }
 
-// The reading at `p` under `mode`, where the lexer's walk read past its match
-// and was refused. From the body it last entered, a refused byte resumes the
-// body: the byte itself where the body admits it -- an escape given up -- and
-// the byte after it otherwise, save a line end, which the token stops short
-// of. A token open to the end of the text stops there. `reached` rises to how
-// far the walks read.
+// The reading at `p` under `mode`, where the lexer read past its match and was
+// refused: the body it last entered resumes past the refused byte, but stops
+// short of a line end. `reached` rises to how far the walks read.
 template <class Tape>
-LexReading lex_reading(const Tape& tape, const LexOwed& derived,
+LexReading lex_reading(const Tape& tape, const LexBodies& derived,
                        const char* src, TextOffset len, std::uint16_t mode,
                        TextOffset p, TextOffset& reached) {
   LexReading out;
@@ -120,11 +114,8 @@ LexReading lex_reading(const Tape& tape, const LexOwed& derived,
   std::uint16_t s = tape.start(mode);
   std::uint16_t body = kDeadState;
   TextOffset i = p;
-  // What the lexer took before the refusal is its own: only a body entered
-  // past its last acceptance owes a closer. An echo ends the walk, and so
-  // does a recognition that reads to the end of the text unmatched: the
-  // token is open to the end where nothing closes it. Where the automaton
-  // stops, the walk goes on in the rest of an assertion that holds there.
+  // Only a body entered past the last acceptance needs a closer. An echo, or a
+  // recognition unmatched to the end of the text, ends the walk.
   bool relayed = false;
   const auto replay = [&](bool resets) {
     [[maybe_unused]] std::size_t hops = 0;
@@ -182,7 +173,7 @@ LexReading lex_reading(const Tape& tape, const LexOwed& derived,
         i < len &&
         tape.step(body, static_cast<unsigned char>(src[i])) != kDeadState;
     if (i >= len || (!admits && lex_line_end_at(src, i))) {
-      out.term = derived.owed[body];
+      out.term = derived.terms[body];
       out.end = i;
       return out;
     }
@@ -223,13 +214,11 @@ inline TextOffset lex_cut(TextOffset p, const LexReading& r) {
   return r.open > p ? r.open : p + 1;
 }
 
-// The unmatched text at `p`, which `mode` lexes a fault with: the bytes where
-// no token starts, not even one the lexer would leave open, up to a `blank`
-// or a line end -- one token, however long. An open token there is repaired
-// as it would be with nothing in front of it. `reached` rises to how far the
-// walks read; the readings of open tokens are paid from `budget`.
+// The unmatched text at `p`, one fault token up to a `blank` or a line end,
+// where no token starts. `reached` rises to how far the walks read; the
+// readings of open tokens use up `budget`.
 template <class Tape, class Blank, class Poll>
-TextOffset lex_unmatched_end(const Tape& tape, const LexOwed& derived,
+TextOffset lex_unmatched_end(const Tape& tape, const LexBodies& derived,
                              const char* src, TextOffset len,
                              std::uint16_t mode, TextOffset p, Blank&& blank,
                              TextOffset& reached, LexReadBudget& budget,
@@ -248,7 +237,7 @@ TextOffset lex_unmatched_end(const Tape& tape, const LexOwed& derived,
     if (!budget.spent()) {
       TextOffset read = q;
       const LexReading r = lex_reading(tape, derived, src, len, mode, q, read);
-      budget.pay(q, read);
+      budget.spend(q, read);
       if (read > reached) reached = read;
       if (r.term != kInvalidSymbol) break;
     }

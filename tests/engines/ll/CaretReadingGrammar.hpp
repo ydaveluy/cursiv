@@ -1,10 +1,8 @@
 #pragma once
 
-// A word that is a guarded terminal in one arm and a name in the other: `do`
-// read by the guarded terminal, or by the name that the second arm goes on
-// from. Both are patterns, so the lexer leaves the choice to the parse; a
-// literal would outrank the name. A caret after the word offers what either
-// reading goes on with.
+// A word that is a guarded terminal in one arm and a name in the other: `do`.
+// Both are patterns, so the parse decides; a caret after the word offers what
+// either reading goes on with.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

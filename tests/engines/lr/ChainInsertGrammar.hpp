@@ -1,9 +1,8 @@
 #pragma once
 
-// A chain of twenty-six unit reductions that two tokens share: the state
-// after `x` reduces by one production on `a` and on `b`, and so does each
-// state above it, up to `S`, which writes `b` before `a`. `x` is read first,
-// so its state is the first the construction orders and walks the whole chain.
+// A chain of twenty-six unit reductions two tokens share: the states from `x`
+// up to `S`, which writes `b` before `a`, each reduce by one production on
+// both. The state after `x` comes first, so it walks the whole chain.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

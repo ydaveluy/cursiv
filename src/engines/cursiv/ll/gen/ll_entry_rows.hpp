@@ -14,10 +14,8 @@ namespace cursiv::engine {
 class LlFinalProgram;
 
 // The AST emitter's reading: the halves, or one run where the site makes a
-// node. A join lays the closes of every rule a call may return through on the
-// record, and the record's first maker is its node: a close typed for a turn
-// the climb did not take adopts nothing. A creation over a node already made
-// is a scope of its own: the runs follow one another, as the table's do.
+// node. A join writes the closes of every rule a call may return through; a
+// creation over a made node is its own scope.
 AstEntryTable ll_entry_table(const LlFinalProgram& done,
                              std::span<const AstRowGen> rows,
                              std::vector<RecordGen>& records);

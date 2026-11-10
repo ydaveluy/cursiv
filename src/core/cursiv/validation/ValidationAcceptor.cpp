@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <exception>
 #include <functional>
 #include <optional>
 #include <string>
@@ -29,8 +30,9 @@ ValidationAcceptor::ValidationAcceptor(Sink sink, const Document& document,
 
 const Cst* ValidationAcceptor::cstOf(const AstNode& node) const noexcept {
   if (node.cstNodeId == kNoNode) return nullptr;
-  const Document* const home = node.getDocument();
-  const Cst* const cst = home != nullptr ? &home->parseResult.cst() : _cst;
+  const Document* const nodeDocument = node.getDocument();
+  const Cst* const cst =
+      nodeDocument != nullptr ? &nodeDocument->parseResult.cst() : _cst;
   assert(cst == nullptr || node.cstNodeId < cst->size());
   return cst;
 }
@@ -42,12 +44,9 @@ TextRange ValidationAcceptor::spanOf(const AstNode& node) const noexcept {
   return TextRange{at.begin, at.end};
 }
 
-// The view is checked, not trusted: a name that lives in the CST's own pool --
-// or in whatever a converter allocated -- is not a slice of the document, and
-// subtracting the two pointers would be undefined and wrong. The comparison is
-// on `data()`, which is the one question that can be asked of two unrelated
-// buffers without arithmetic between them. A translated document's AST
-// borrows the translated text, whose spans map back to the document.
+// The view is checked, not trusted: a name in the CST pool or a converter's
+// memory is not a slice of the document, so only `data()` is compared. A
+// translated document's AST points into the translated text.
 TextRange ValidationAcceptor::spanOfName(std::string_view borrowed,
                                          const AstNode& node) const noexcept {
   const SourceTranslation* const translation =
@@ -84,10 +83,11 @@ std::optional<TextRange> ValidationAcceptor::anchorSpan(
     bool keyword) const noexcept {
   if (node.cstNodeId == kNoNode) return std::nullopt;
   // The node's own document, or the one validated for a node no document
-  // holds yet; climbed once, and handed to the search.
-  const Document* const home = node.getDocument();
+  // holds yet; found once, and handed to the search.
+  const Document* const nodeDocument = node.getDocument();
   const Document* const document =
-      home != nullptr ? home : (_cst != nullptr ? _document : nullptr);
+      nodeDocument != nullptr ? nodeDocument
+                              : (_cst != nullptr ? _document : nullptr);
   if (document == nullptr) return std::nullopt;
   const Cst* const cst = &document->parseResult.cst();
   if (_anchorCst != cst || _anchorNode != node.cstNodeId) {
@@ -99,22 +99,22 @@ std::optional<TextRange> ValidationAcceptor::anchorSpan(
     return anchor.keyword == keyword && anchor.name == name;
   });
   if (found == _anchors.end()) {
-    if (index == 0) {
-      const auto at = keyword
-                          ? find_node_for_keyword(node, name, index, document)
-                          : find_node_for_feature(node, name, index, document);
-      if (at.has_value()) return TextRange{at->begin(), at->end()};
-    } else {
-      // A list that cannot be kept is no anchor: the check goes on with the
-      // range it has rather than ending the process.
-      try {
+    // A search that cannot finish is no anchor: the check keeps the range it
+    // has. The first walk of a tree may allocate.
+    try {
+      if (index == 0) {
+        const auto at =
+            keyword ? find_node_for_keyword(node, name, index, document)
+                    : find_node_for_feature(node, name, index, document);
+        if (at.has_value()) return TextRange{at->begin(), at->end()};
+      } else {
         auto nodes = keyword ? find_nodes_for_keyword(node, name, document)
                              : find_nodes_for_feature(node, name, document);
         _anchors.emplace_back(std::string(name), keyword, std::move(nodes));
-      } catch (...) {
-        return std::nullopt;
+        found = _anchors.end() - 1;
       }
-      found = _anchors.end() - 1;
+    } catch (...) {
+      return std::nullopt;
     }
   }
   if (found == _anchors.end() || found->nodes.empty()) return std::nullopt;
@@ -137,12 +137,20 @@ void ValidationAcceptor::accept(TextRange span, DiagnosticSeverity severity,
   accept(std::move(diagnostic));
 }
 
-// The funnel: every builder emits here, and the source is stamped in exactly
-// one place -- a diagnostic that already carries one (a hook forwarding
-// another language's finding) keeps it.
+// Every builder emits here, the one place the source is set; a diagnostic that
+// already has one (a hook forwarding another language's finding) keeps it.
 void ValidationAcceptor::accept(Diagnostic&& diagnostic) const {
-  if (diagnostic.source.empty()) diagnostic.source = _source;
-  _sink(std::move(diagnostic));
+  try {
+    if (diagnostic.source.empty()) diagnostic.source = _source;
+    _sink(std::move(diagnostic));
+  } catch (...) {
+    if (_lost == nullptr) _lost = std::current_exception();
+    throw;
+  }
+}
+
+void ValidationAcceptor::throwIfDiagnosticLost() const {
+  if (_lost != nullptr) std::rethrow_exception(_lost);
 }
 
 }  // namespace cursiv

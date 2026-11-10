@@ -11,9 +11,6 @@
 
 namespace cursiv {
 
-// Not `final`: a language whose visibility is not "the root and its children"
-// derives this and overrides the half it disagrees with -- a qualified-name
-// language, say.
 class DefaultScopeComputation : public ScopeComputation,
                                 protected DefaultCoreService {
  public:
@@ -30,23 +27,22 @@ class DefaultScopeComputation : public ScopeComputation,
       const CancellationToken& cancelToken = kNoCancel) const override;
 
  protected:
-  // The exporting walk with the child set as a parameter: describes `parent`,
-  // then every node `children` hands to its callback. What the public default
-  // runs over the root's direct members, reusable by a language that exports
-  // another slice of the tree.
+  // Describes `parent`, then every node `children` hands to its callback. The
+  // default runs it over the root's members; a language may export another
+  // part.
   [[nodiscard]] std::vector<AstNodeDescription> collectExportedSymbolsForNode(
       AstNode& parent, const Document& document,
       function_ref<void(function_ref<void(AstNode&)>)> children,
       const CancellationToken& cancelToken) const;
 
-  // One node into the exports, when it has a name. The override point of a
-  // language that renames what it publishes.
+  // Adds one node to the exports when it has a name. A language overrides it to
+  // change what it exports.
   virtual void addExportedSymbol(AstNode& node,
                                  std::vector<AstNodeDescription>& exported,
                                  const Document& document) const;
 
-  // One node into its container's symbols, when it has a name. The override
-  // point of a language that widens visibility.
+  // Adds one node to its container's symbols when it has a name. A language
+  // overrides it to widen visibility.
   virtual void addLocalSymbol(AstNode& node, const Document& document,
                               LocalSymbols& symbols) const;
 };

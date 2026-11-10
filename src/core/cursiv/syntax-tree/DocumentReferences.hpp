@@ -12,10 +12,9 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
-// The cross-references of one document, and the home that answers them. Held
-// by pointer and never moved: every reference stores this address and a rank
-// into the list below, and `RefHome::resolve(rank)` is given nothing else. It
-// is the `RefHome` itself, so reading a reference resolves lazily through it.
+// The cross-references of one document, and the `RefResolver` that resolves
+// them on first read. Never moved: every reference stores this address and its
+// index.
 
 namespace cursiv {
 
@@ -35,46 +34,35 @@ using UnresolvedReferenceVisitor = cursiv::function_ref<void(
 using ResolvedReferenceVisitor = cursiv::function_ref<void(
     TextOffset begin, TextOffset end, const AstNode& target, bool multi)>;
 
-struct DocumentReferences : RefHome {
+struct DocumentReferences : RefResolver {
   // The work list, in the order the builder wrote it: the rank a reference
   // carries indexes this.
   std::vector<RefHandle> handles;
 
   ImportedNames importedNames;
 
-  // Set when local scopes are computed, before the linking phase, and
-  // published before the document's rung: a reader that sees it sees the
-  // local symbols. A single reference whose read begins while its document is
-  // below `ComputedScopes` -- this unset among those -- is not kept if it
-  // fails: it stays `Unresolved` and the next read asks again. A plural one
-  // keeps its failure, and so does a tree with no document.
+  // Set when local scopes are computed, before linking. A single reference
+  // read before that is not kept if it fails, and is asked again; a plural one
+  // keeps its failure, as does a tree with no document.
   std::atomic<const Linker*> linker{nullptr};
 
-  // ...and the document those references live in, planted with it. Every
-  // site of one table shares it, so carrying it here spares the climb to
-  // the root that a scope provider would otherwise pay per reference.
+  // The document of these references, set with `linker`. Kept here so a scope
+  // provider does not walk up to the root for each reference.
   std::atomic<const Document*> document{nullptr};
 
-  // Every virtual below needs the grammar -- reading, forcing or clearing a
-  // reference goes through its `RefOps` row, which only a compiled grammar
-  // reaches; that is why they live here and the linker stays erased.
-  // Cancellation is polled inside the loop; an exception out of one provider
-  // fails that one reference, never the list -- only cancellation propagates.
-  // `which` are handles of this table: all of them, or a run of them, as the
-  // linker splits a long list so several workers force one document.
+  // Resolves the references `which`, all or a run of them. Cancellation
+  // propagates; any other exception from a provider fails that one reference.
   virtual void force(std::span<const RefHandle> which,
                      const CancellationToken& cancelToken) = 0;
 
-  // The references whose name holds `offset` or ends there, forced the same
-  // way: a caret asks for its own reference, not for the document's.
+  // Resolves the references whose name holds `offset` or ends there: a caret
+  // asks for its own reference, not for the whole document's.
   virtual void forceAt(const Cst& cst, TextOffset offset,
                        const CancellationToken& cancelToken) = 0;
 
   // What each reference holds a target for, with the span of the text that
-  // named it. The index builds its edges from this. Not visited: a reference
-  // with no target, and one whose name node is gone -- an edge needs a place
-  // to be drawn from. Nothing is forced: a document not yet linked yields
-  // zero edges.
+  // named it. A reference with no target or no name node is skipped; nothing
+  // is resolved.
   virtual void visitResolved(const Cst& cst,
                              ResolvedReferenceVisitor visitor) const = 0;
 
@@ -91,11 +79,8 @@ struct DocumentReferences : RefHome {
   virtual void visitUnresolved(const Cst& cst,
                                UnresolvedReferenceVisitor visitor) const = 0;
 
-  // The two visits above, each in rank order, kept to the references whose
-  // name touches `[begin, end]`: it begins at or before `end` and ends at or
-  // after `begin`. A caret is `[offset, offset]`, the references `forceAt`
-  // forces; a range of the editor asks for its own references, not for the
-  // document's.
+  // The two visits above, in rank order, kept to the references whose name
+  // touches `[begin, end]`. A caret is `[offset, offset]`.
   virtual void visitIn(const Cst& cst, TextOffset begin, TextOffset end,
                        ResolvedReferenceVisitor resolved,
                        UnresolvedReferenceVisitor unresolved) const = 0;

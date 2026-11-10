@@ -8,12 +8,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "cursiv/syntax-tree/CstNode.hpp"
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/lr/runtime/LrCactus.hpp"
 #include "cursiv/lr/runtime/LrConfig.hpp"
+#include "cursiv/lr/runtime/LrEdit.hpp"
 #include "cursiv/lr/runtime/LrFrame.hpp"
-#include "cursiv/lr/runtime/LrGesture.hpp"
 #include "cursiv/lr/runtime/LrStack.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 #include "cursiv/shared/runtime/LexReading.hpp"
@@ -23,23 +21,25 @@
 #include "cursiv/shared/runtime/TypoWalk.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv::engine {
 
 // The work one cost may spend before a search bounds what its readings
-// still owe: most repairs are found sooner than a bound pays for itself.
+// still cost: most repairs are found before a bound pays off.
 inline constexpr std::uint64_t kLrBoundAfter = 1024;
 
 inline constexpr std::uint32_t kLrNoConfig = 0xFFFFFFFFu;
 inline constexpr TextOffset kLrNoOpen = 0xFFFFFFFFu;
 
-struct LrSearch : RepairSearch<LrGesture> {
+struct LrSearch : RepairSearch<LrEdit> {
   LrSearch(TextOffset len, const RepairBudget& b,
            const std::vector<IndentLevel>& levels)
       : RepairSearch(len, b), seen(0, FutureHash{}, FutureSame{&levels}) {}
 
-  // What the conditions had read of long gaps when the search last paid.
-  std::uint64_t gapsPaid = 0;
+  // What the conditions had read of long gaps when the search last counted.
+  std::uint64_t gapsCounted = 0;
   // A span a bound decided, open over the faults written since its search
   // set out; a degraded parse's stays open to the end.
   bool bounded = false;
@@ -48,20 +48,18 @@ struct LrSearch : RepairSearch<LrGesture> {
   // The least a reading the bound decided could still have finished at: a
   // reading elected below it outranks all of them, and no bound decided it.
   std::uint64_t boundedLeast = ~std::uint64_t{0};
-  // Past the budget, a run of insertions where the parse stands is bounded by
-  // what the stack it set out on could owe, fixed there: an insertion that
-  // grows the stack grows no bound, and the work it spends is one search's
-  // share. `degradedShifts` tells the run's faults apart.
+  // Past the budget, a run of insertions is bounded by what its starting stack
+  // could need, set there; its work is one search's share. `degradedShifts`
+  // tells the run's faults apart.
   TextOffset degradedAt = kLrNoOpen;
   std::uint64_t degradedRun = 0;
   std::uint64_t degradedCap = 0;
   std::uint64_t degradedLimit = 0;
   std::uint32_t degradedShifts = 0xFFFFFFFFu;
 
-  // What a reading's future depends on, its free insertions aside: two
-  // readings with the same one gain the same increments of key, the one
-  // holding fewer free insertions perhaps more. Its levels compare by
-  // content, in the parse's arena, and stay out of the hash.
+  // What a reading's future depends on, its free insertions aside: two readings
+  // with the same one gain the same key increments. Its levels compare by
+  // content and stay out of the hash.
   struct Future {
     std::uint32_t node;
     TextOffset at;
@@ -124,23 +122,21 @@ struct LrSearch : RepairSearch<LrGesture> {
   // The configurations one read is still carrying forward.
   std::vector<std::uint32_t> reading;
   std::vector<std::uint32_t> out;
-  // Memos, of walks their share did not cut: the token at a position under a
-  // mode, the lexer's refused reading there and what a deletion takes of it,
-  // the ends its re-readings may stop at, a position's re-readings under a
-  // state, and the token in hand as the mode that lexes everything reads it.
+  // Memos of walks their share did not cut: a mode's token at a position, the
+  // refused reading and a deletion's extent, the ends re-readings may stop at,
+  // and a state's re-readings.
   std::unordered_map<std::uint64_t, Token> lexed;
   std::unordered_map<std::uint64_t, LexReading> readings;
   FlatMap<TextOffset> errorEnds;
   std::unordered_map<std::uint64_t, RepairEnds> ends;
   std::unordered_map<std::uint64_t, std::vector<Typo>> typos;
   std::vector<Typo> cutTypos;
-  // The points the misspelling walks keep, lent to each in turn.
+  // Scratch the misspelling walks reuse in turn.
   TypoScratch typoScratch;
   std::unordered_map<TextOffset, Token> written;
-  // What the bound reads of the text, never past `horizon`: every mode's
-  // tokens at a position and the bytes a mode reading none drops there, every
-  // state's re-readings of a position, and the least owed from a position on.
-  // `refused`: some mode's lexer was refused in the middle of a token there.
+  // What the bound reads of the text, never past `horizon`: every mode's tokens
+  // at a position, the bytes a mode reading none drops, the re-readings and the
+  // least due. `refused`: a lexer stopped mid-token.
   struct Ahead {
     std::vector<Token> tokens;
     std::vector<Token> dropped;
@@ -148,11 +144,11 @@ struct LrSearch : RepairSearch<LrGesture> {
   };
   std::unordered_map<TextOffset, Ahead> ahead;
   std::unordered_map<TextOffset, std::vector<Typo>> misread;
-  FlatMap<std::uint32_t> owes;
-  // The calls of the walk over what a reading owes, in flight: it keeps them
+  FlatMap<std::uint32_t> costAhead;
+  // The calls of the walk over what a reading still costs, in flight: kept
   // here, not on the native stack, whose depth the text would set. Each
   // resumes at its `phase`.
-  enum class OwePhase : std::uint8_t {
+  enum class CostPhase : std::uint8_t {
     outer,
     outerRet,
     more,
@@ -164,12 +160,12 @@ struct LrSearch : RepairSearch<LrGesture> {
     droppedTypo,
     droppedTypoRet,
   };
-  struct Owe {
-    OwePhase phase = OwePhase::outer;
+  struct CostFrame {
+    CostPhase phase = CostPhase::outer;
     SymbolId prev = 0;
     std::uint32_t run = 0;
     std::uint32_t best = 0;
-    // The gesture paid on the way to the call in flight.
+    // The edit cost on the way to the call in flight.
     std::uint32_t cost = 0;
     // The token ahead being taken or dropped, the tokens at its start, and
     // the re-readings of the token a drop stands on.
@@ -182,7 +178,7 @@ struct LrSearch : RepairSearch<LrGesture> {
     const Ahead* more = nullptr;
     const std::vector<Typo>* typos = nullptr;
   };
-  std::vector<Owe> oweStack;
+  std::vector<CostFrame> costStack;
   TextOffset horizon = 0;
   std::uint64_t boundAfter = kLrBoundAfter;
   // A bound in flight, and whether one of its walks could not read a token
@@ -191,7 +187,7 @@ struct LrSearch : RepairSearch<LrGesture> {
   bool boundShort = false;
   FlatMap<std::uint8_t> unread;
   // What the table does with an invented token before its reading: the
-  // reductions it makes (their productions and the states they land on, and the
+  // reductions it makes (their productions and the states they go to, and the
   // states the stack stands on above its own) and the shift that takes it.
   struct Chain {
     static constexpr std::uint32_t kRoom = 16;
@@ -212,8 +208,8 @@ struct LrSearch : RepairSearch<LrGesture> {
     std::int64_t count = 0;
   };
   std::vector<Source> sources;
-  // What the sources' least payment stands for.
-  std::uint64_t paidBase = 0;
+  // What the sources' least cost stands for.
+  std::uint64_t costBase = 0;
   // Per frozen frame, the author's tokens its construct holds, counted from
   // the top down as deeper abandons are asked for.
   std::vector<std::int64_t> srcTokens;
@@ -222,15 +218,15 @@ struct LrSearch : RepairSearch<LrGesture> {
   // pauses that match them. `arms` are the choices a step's own token took
   // where it forked.
   struct Step {
-    LrGesture g;
+    LrEdit g;
     std::uint32_t armBase = 0;
     std::uint32_t armCount = 0;
-    // What the reading has paid when it is written, and what it pays.
+    // What the reading has cost when it is written, and what it costs.
     std::uint64_t before = 0;
-    std::uint32_t paid = 0;
-    // The last gesture of its fault: its note is laid once it is written.
+    std::uint32_t stepCost = 0;
+    // The last edit of its fault: its note is added once it is written.
     bool closes = false;
-    // The frozen frame under the lowest the reading stood on up to this step:
+    // The frozen frame under the lowest the reading reached up to this step:
     // below it the stack is the one the search set out from.
     LrFrame kept{};
   };
@@ -240,18 +236,18 @@ struct LrSearch : RepairSearch<LrGesture> {
   // Where a path written to its end stopped inside its last fault: a search
   // set out from there, no token read since, goes on with that fault.
   TextOffset openAt = kLrNoOpen;
-  // The shifts the context had read when the last gesture was written: more
-  // since means the fault it left open takes no gesture now.
+  // The shifts the context had read when the last edit was written: more
+  // since means the fault it left open takes no further edit.
   std::uint32_t wroteShifts = 0;
 
-  // The fault being written: what its gestures did so far.
+  // The fault being written: what its edits did so far.
   RepairFault fault;
 };
 
-// Where a search's pools stand before a gesture is laid: what the gesture adds
+// Where a search's pools stand before an edit is made: what the edit adds
 // past it may be given back.
-struct LrSearchLaid {
-  explicit LrSearchLaid(const LrSearch& s)
+struct LrSearchCheckpoint {
+  explicit LrSearchCheckpoint(const LrSearch& s)
       : configs(static_cast<std::uint32_t>(s.configs.size())),
         links(static_cast<std::uint32_t>(s.links.size())),
         cactus(s.cactus.mark()),

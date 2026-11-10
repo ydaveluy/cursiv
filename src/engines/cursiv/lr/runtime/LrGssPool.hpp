@@ -45,7 +45,7 @@ class LrGssPool {
   }
 
  private:
-  static_assert(Shift < 32);
+  static_assert(Shift > 0 && Shift < 32);
   static constexpr std::size_t kChunk = std::size_t{1} << Shift;
   static constexpr std::size_t kMask = kChunk - 1;
   // The chunks whose indices all stay below 2^32 - 1, the graph's `none`.

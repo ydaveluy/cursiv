@@ -1,9 +1,6 @@
-// The cold paths of the generated descent: the reads that do not take the
-// token in place, the repairs, and the prediction an episode runs. None is
-// inlined, and together they are most of the runtime a table instantiates:
-// where the rules span several units, the parser's own unit instantiates them
-// once per table, and every other unit declares them extern and compiles none
-// of them.
+// The cold paths of the generated descent: reads that do not take the token in
+// place, repairs, and the episode prediction. None is inlined: the parser's
+// unit instantiates them once per table, and other units declare them extern.
 #pragma once
 
 #include <cstdint>
@@ -16,9 +13,8 @@
 #include "cursiv/ll/runtime/ll_repair.hpp"
 
 // The explicit instantiations of the cold paths of table `T`, at global scope:
-// `How` is `extern` where they are only declared, empty where they are
-// defined. The names are spelt without a leading `::`, which would run into
-// the return type. Those every table has...
+// `How` is `extern` where declared, empty where defined. No leading `::`, which
+// would run into the return type. Those every table has...
 #define CURSIV_LL_COLD_PATHS(How, T)                                          \
   How template void cursiv::engine::ll_peek_read<T>(                          \
       ::cursiv::engine::LlContext&, ::std::uint16_t, ::cursiv::engine::Scan); \

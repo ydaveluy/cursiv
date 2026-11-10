@@ -12,10 +12,8 @@
 #include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
 
-// What the whole workspace knows: the symbols every document exports, and the
-// references every document holds. Two halves, updated by two phases, because a
-// document's exports are known before anything is linked and its references
-// only after.
+// What the whole workspace knows: the symbols each document exports, filled
+// before linking, and the references each document holds, filled after.
 
 namespace cursiv {
 
@@ -25,7 +23,7 @@ class IndexManager {
  public:
   virtual ~IndexManager() noexcept = default;
 
-  // Phase `IndexedContent`: what this document shows the world.
+  // Phase `IndexedContent`: what this document exports.
   virtual void updateContent(
       const Document& document,
       const CancellationToken& cancelToken = kNoCancel) = 0;
@@ -46,23 +44,16 @@ class IndexManager {
       const Document& document,
       const std::unordered_set<DocumentId>& changed) const = 0;
 
-  // Every exported symbol, optionally of one type and from one set of
-  // documents. The empty set means all of them. The default index visits
-  // normalized URIs in lexical order, retaining each document's export order.
+  // Every exported symbol, optionally of one type and from some documents (all
+  // when empty), by normalized URI then export order. A description kept past
+  // the call is valid until its document's exports next change.
   [[nodiscard]] virtual bool visitElements(
       const AstTypeTag* type, std::span<const DocumentId> documents,
       cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const = 0;
 
-  // What the workspace declares under one name: the global scope a reference
-  // resolves to when no local scope answers it, without scanning every
-  // exported symbol per lookup. `accepts` is the reference's own bitset
-  // (`AstReflection::referenceAccepts`); the first match wins in the same
-  // order as `visitElements`.
-  //
-  // The reflection is the asking language's, and `caseSensitive` is too: a
-  // description carries a tag, the process's identity for a class, but the
-  // bitset is over the asker's own indices -- without the conversion a
-  // `.tst` could never resolve a symbol a `.req` exported.
+  // The first export named `name` that `accepts` (`referenceAccepts`) takes, in
+  // `visitElements` order and valid as there. `reflection` is the asking
+  // language's, as `accepts` is over its own indices.
   [[nodiscard]] virtual const AstNodeDescription* findByName(
       std::string_view name, bool caseSensitive, AcceptSet accepts,
       const AstReflection& reflection) const = 0;
@@ -74,10 +65,9 @@ class IndexManager {
       const AstReflection& reflection,
       cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const = 0;
 
-  // Every reference pointing at one symbol -- the inverse of the linker's edge.
-  // A visitor, like `visitElements` above and for the same reason: the rows
-  // live in a snapshot the guard holds open, and nothing may leave under it.
-  // False when the visitor stopped the walk.
+  // Every reference to one symbol, the reverse of the linker. A visitor,
+  // as the rows live in a snapshot held open during the walk. False when the
+  // visitor stopped.
   [[nodiscard]] virtual bool visitReferences(
       DocumentId targetDocument, NodeId targetSymbol,
       cursiv::function_ref<bool(const ReferenceDescription&)> visitor)

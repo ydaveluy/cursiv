@@ -1,7 +1,6 @@
-// The grammar as declared, with the engine erased: the generator's sole
-// subject. Not `cursiv::Grammar`, which answers for the engine's own
-// tables -- reading those here would make the generator agree with the
-// engine by construction and prove nothing.
+// The grammar as declared, with the engine erased: what the generator reads.
+// It does not read `cursiv::Grammar`, whose tables come from the engine under
+// test.
 #pragma once
 
 #include <cstdint>

@@ -7,8 +7,7 @@ namespace ws {
 
 namespace x = cursiv;
 
-// Prose on the word that carries it: what a hover shows when the caret is on
-// a keyword rather than on a name.
+// Keyword documentation, which a hover on the keyword shows.
 inline constexpr auto packageKw =
     x::ikw<"package">.doc<"Opens a package, the scope its members answer in.">();
 inline constexpr auto entityKw =
@@ -21,13 +20,12 @@ struct Workspace : cursiv::GrammarSpec {
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ML_COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};
 
-  // terminal ID: [A-Za-z_] [0-9A-Za-z_]*; and, for names that ignore case,
-  // Latin and Greek letters beyond ASCII, `ẞ`, and the Ohm and Kelvin signs.
+  // Beyond ASCII, Latin and Greek letters, `ẞ`, and the Ohm and Kelvin signs,
+  // for names that ignore case.
   struct ID
       : terminal<cr<R"(a-zA-Z_\u00C0-\u024F\u0370-\u03FF\u1E9E\u2126\u212A)"> +
                  many(cr<R"(\w\u00C0-\u024F\u0370-\u03FF\u1E9E\u2126\u212A)">)> {};
 
-  // QualifiedName returns string: ID ('.' ID)*;
   struct QualifiedName : rule<some(ref<ID>, lit<".">)> {};
 
   struct AbstractElementRule;
@@ -37,19 +35,14 @@ struct Workspace : cursiv::GrammarSpec {
   struct FeatureRule;
   struct PackageDeclarationRule;
 
-  // Feature returns Feature: many?='many'i? name=ID ':' type=QualifiedName;
   struct FeatureRule
       : rule<option(flag<&ast::Feature::many>(ikw<"many">)) +
              assign<&ast::Feature::name>(ref<ID>) + lit<":"> +
              assign<&ast::Feature::type>(ref<QualifiedName>)> {};
 
-  // DataType returns DataType: 'datatype'i name=ID;
   struct DataTypeRule : rule<create<ast::DataType> + datatypeKw +
                              assign<&ast::DataType::name>(ref<ID>)> {};
 
-  // Entity returns Entity:
-  // 'entity'i name=ID ('extends'i superType=QualifiedName)?
-  // '{' features+=Feature* '}';
   struct EntityRule
       : rule<entityKw + assign<&ast::Entity::name>(ref<ID>) +
              option(ikw<"extends"> +
@@ -57,11 +50,8 @@ struct Workspace : cursiv::GrammarSpec {
              lit<"{"> + many(append<&ast::Entity::features>(ref<FeatureRule>)) +
              lit<"}">> {};
 
-  // Type returns Type: DataType | Entity;
   struct TypeRule : rule<ref<DataTypeRule> | ref<EntityRule>> {};
 
-  // PackageDeclaration returns PackageDeclaration:
-  // 'package'i name=QualifiedName '{' elements+=AbstractElement* '}';
   struct PackageDeclarationRule
       : rule<packageKw +
              assign<&ast::PackageDeclaration::name>(ref<QualifiedName>) +
@@ -70,11 +60,9 @@ struct Workspace : cursiv::GrammarSpec {
                  ref<AbstractElementRule>)) +
              lit<"}">> {};
 
-  // AbstractElement returns AbstractElement: PackageDeclaration | Type;
   struct AbstractElementRule
       : rule<ref<PackageDeclarationRule> | ref<TypeRule>> {};
 
-  // Domainmodel returns Workspace: elements+=AbstractElement+;
   struct Domainmodel : rule<some(append<&ast::Workspace::elements>(
                            ref<AbstractElementRule>))> {};
 

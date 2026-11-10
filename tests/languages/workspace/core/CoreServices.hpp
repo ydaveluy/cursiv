@@ -8,21 +8,16 @@
 #include "workspace/core/references/QualifiedNameProvider.hpp"
 #include "workspace/core/validation/WorkspaceValidator.hpp"
 
-// What this language owns beyond what every language owns, and the module
-// that fills its container.
-
 namespace ws {
 
-// Nothing workspace-wide yet; it exists so the language's container is built
-// from its own shared type.
+// Empty, so the language's services derive from a shared type of their own.
 struct WorkspaceSharedCoreServices : virtual cursiv::SharedCoreServices {};
 
 struct WorkspaceCoreServices
     : cursiv::CoreServicesFor<WorkspaceSharedCoreServices> {
   // The qualifier a declaration answers to from outside its package.
   std::unique_ptr<const QualifiedNameProvider> qualifiedNameProvider;
-  // The class whose methods are this language's checks. Defined once here;
-  // the registry files pointers into it, never copies.
+  // Owns the checks; the validation registry holds pointers into it.
   std::unique_ptr<const WorkspaceValidator> validator;
 
   using CoreServicesFor::CoreServicesFor;

@@ -6,8 +6,8 @@
 
 namespace cursiv::detail {
 
-// Immutable generated source and direct dependency ranks. All views outlive
-// the service; no rule identity is recovered by parsing its display text.
+// Generated source text and direct dependency ranks; all views outlive the
+// service.
 struct GrammarSourceRule {
   std::string_view name;
   std::string_view text;

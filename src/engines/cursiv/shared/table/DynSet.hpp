@@ -1,6 +1,5 @@
-// The bit set construction works in: same surface as `LrBitSet`, this one
-// builds, that one is stored. It holds as many words as its highest member
-// needs, so a grammar declares as many terminals as it likes.
+// The growable bit set of the construction, with the surface of the stored
+// `LrBitSet`. It holds as many words as its highest member needs.
 #pragma once
 
 #include <algorithm>
@@ -19,8 +18,7 @@ struct DynSet {
 
   std::uint64_t word(std::size_t k) const { return k < w.size() ? w[k] : 0; }
 
-  // The members, ascending: a walk reads each of them and every word up to the
-  // highest one, empty words included.
+  // The members in ascending order; a walk reads every word up to the highest.
   class Members {
    public:
     explicit Members(const DynSet& s) : _s(s) {}
@@ -70,8 +68,8 @@ struct DynSet {
     w[k] &= ~(std::uint64_t{1} << (i & 63));
     trim();
   }
-  // How many members stand below `i`: the index of `i` in a row laid in
-  // bit order.
+  // How many members are below `i`: the index of `i` in a row stored in bit
+  // order.
   std::uint32_t rank(unsigned i) const {
     std::uint32_t r = 0;
     const std::size_t n = std::min<std::size_t>(w.size(), i / 64);

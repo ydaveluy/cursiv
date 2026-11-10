@@ -230,7 +230,7 @@ void properties_follow_the_class(const Engine& e) {
   CHECK(properties(e, &cursiv::ast_type_tag<Derived>) == "third items ");
 }
 
-void a_type_the_grammar_does_not_name_is_visited_alike(const Engine& e) {
+void a_type_the_grammar_does_not_name_is_visited_the_same_way(const Engine& e) {
   tmember::ast::Leaf a, b, c;
   Unnamed node;
   node.type = &cursiv::ast_type_tag<Unnamed>;
@@ -248,7 +248,7 @@ void a_type_the_grammar_does_not_name_is_visited_alike(const Engine& e) {
 void every_engine(const Engine& e) {
   members_are_visited_in_declaration_order(e);
   properties_follow_the_class(e);
-  a_type_the_grammar_does_not_name_is_visited_alike(e);
+  a_type_the_grammar_does_not_name_is_visited_the_same_way(e);
 }
 
 }  // namespace
@@ -280,7 +280,7 @@ static_assert(
     std::is_same_v<cursiv::detail::rule_type_t<Grammar::Primary>, Element>);
 static_assert(
     std::is_same_v<cursiv::detail::rule_type_t<Grammar::Parent>, Element>);
-static_assert(!cursiv::Normalize<Grammar>::owed<Grammar::Expression>);
+static_assert(!cursiv::Normalize<Grammar>::rewritten<Grammar::Expression>);
 
 namespace {
 

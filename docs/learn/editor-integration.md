@@ -47,8 +47,11 @@ Update these files when you change the language:
 | `vscode/syntaxes/<id>.tmLanguage.json` | TextMate rules for initial syntax highlighting |
 | `vscode/language-configuration.json` | Brackets, comment toggling and auto-closing pairs |
 
-Cursiv does not update the TextMate rules: add new grammar keywords to them
-yourself.
+Each time it generates the parser, the build writes the grammar's keywords
+into the TextMate file that `TEXTMATE` names in `src/CMakeLists.txt`, as the
+`match` of `repository.keywords` (see
+[CMake API](../reference/cmake.md#cursiv_generate_language)). Write the other
+rules, such as comments and strings, yourself.
 
 A server sends no semantic tokens unless a language installs a provider. To
 colour from the grammar, install the ready-made one in `install_lsp_module`. The

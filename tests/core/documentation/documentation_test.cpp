@@ -27,11 +27,9 @@
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
 
-// Pins the CommentProvider contract: the image is returned as written, only
-// the rule the provider is bound to answers, the root reads its whole leading
-// trivia, and a node without a document or a CST answers nothing.
-//
-// The grammar is the test's own: this lane exercises core and links core.
+// The CommentProvider contract: the comment is returned as written, only the
+// bound rule answers, the root reads its whole leading trivia, and a node with
+// no document or CST answers nothing. The grammar is the test's own.
 namespace comment_provider {
 
 namespace {
@@ -77,10 +75,9 @@ struct Parsed {
   }
 };
 
-// The comment as a place: found through the node, and its tags read at their
-// place in the document, whatever stands before them on a line.
-// Every comment of a long file read once costs the comments, not the file for
-// each: no counter sees it, so the time is the proof, by two orders of magnitude.
+// The comment found through the node, its tags read at their place in the
+// document. Reading every comment of a long file costs the comments, not the
+// file each time: the time is the proof.
 void comments_read_without_the_file_before_them() {
   std::string text;
   for (unsigned i = 0; i < 20000; ++i)
@@ -189,7 +186,7 @@ void each_declaration_finds_its_own() {
 }
 
 void only_the_immediate_neighbour_answers() {
-  // The stray comment two declarations up never leaks in.
+  // The comment two declarations up never leaks in.
   const Parsed p("/** Doc. */\ndatatype Name\nentity Person { }\n");
   CHECK(!provider().getComment(*p.element(1), &p.document));
 }
@@ -203,13 +200,13 @@ void the_nearest_comment_wins() {
 }
 
 // A comment trailing the previous declaration's line still belongs to what
-// follows it, never to what it trails.
+// follows it, never to what precedes it.
 void a_trailing_comment_belongs_to_the_next() {
-  const Parsed p("entity A { } /** Trail. */\nentity B { }\n");
+  const Parsed p("entity A { } /** Tail. */\nentity B { }\n");
   CHECK(!provider().getComment(*p.element(0), &p.document));
   const std::optional<std::string> comment =
       provider().getComment(*p.element(1), &p.document);
-  CHECK(comment.has_value() && *comment == "/** Trail. */");
+  CHECK(comment.has_value() && *comment == "/** Tail. */");
 }
 
 // The root's neighbourhood is the whole leading trivia: a line comment in
@@ -267,13 +264,13 @@ void a_degenerate_marker_is_still_the_image() {
   CHECK(comment.has_value() && *comment == "/**/");
 }
 
-void a_homeless_node_answers_nothing() {
+void a_node_with_no_document_answers_nothing() {
   const Parsed p("entity Person { }\n");
   ast::Entity made;
   made.type = &cursiv::ast_type_tag<ast::Entity>;
-  // No document to climb to.
+  // No document to walk up to.
   CHECK(!provider().getComment(made));
-  // Homed, but no CST record.
+  // In a document, but no CST record.
   made.parent = p.result.value;
   CHECK(made.cstNodeId == cursiv::kNoNode);
   CHECK(!provider().getComment(made));
@@ -299,13 +296,13 @@ void run() {
   an_empty_root_owns_nothing();
   an_adjacent_comment_answers();
   a_degenerate_marker_is_still_the_image();
-  a_homeless_node_answers_nothing();
+  a_node_with_no_document_answers_nothing();
 }
 
 }  // namespace comment_provider
 
-// Pins the documentation-comment model, function by function as the audit
-// walks it. Pure strings: nothing here needs a service, a document or a CST.
+// The documentation-comment model, on strings alone: nothing here needs a
+// service, a document or a CST.
 namespace doc_comment {
 
 namespace {
@@ -340,8 +337,8 @@ void whitespace_is_bytes() {
   CHECK(is_doc("/** x */  "));
   CHECK(is_doc("/**\r\n * x\r\n */"));
   CHECK(!is_doc("  "));
-  // U+00A0, a blank to a Unicode reader, is not one here -- and the strongest
-  // manifestation is rendered text: a trailing NBSP stays in the line.
+  // U+00A0, a blank to a Unicode reader, is not one here: a trailing NBSP
+  // stays in the rendered line.
   CHECK(!is_doc("\xC2\xA0/** x */"));
   CHECK(cursiv::parse_doc_comment("/** A\xC2\xA0 */").toString() ==
         "A\xC2\xA0");
@@ -796,7 +793,7 @@ void run() {
 
 }  // namespace doc_comment
 
-// Pins the documentation a hover shows: the author's comment rendered to
+// The documentation a hover shows: the author's comment rendered to
 // markdown, {@link} targets resolved to their declaration's name site, and
 // the grammar's own prose on the element arm.
 namespace documentation_provider {
@@ -856,9 +853,8 @@ void a_link_resolves_to_the_declaration() {
   CHECK(text.has_value() && *text == "See [String](file:///w/a.ws#L3%2C10).");
 }
 
-// The display text survives an unresolved target: the author chose it.
-// What a link named and nothing answered for: the target, as jsdoc.ts writes
-// it, so a reader sees which name was meant.
+// An unresolved link shows its target, not its display text, so a reader sees
+// which name was meant.
 void an_unresolved_link_is_its_target() {
   const World w;
   const auto doc =

@@ -1,11 +1,6 @@
-// How much of the author's text a repaired document still reads in place.
-// Every twin token no fault touches is placed in the faulted text by the
-// known edits -- an alignment, never a multiset -- and found there as a live
-// leaf of the same extent, under a skipped span, under an abandoned
-// construct, or as none of these. A window's neighbours count: a separator
-// restored keeps them, a value dropped in its place does not. The repair's
-// own tokens -- an insertion, a re-read -- restore a token the faults took
-// from the twin between the same neighbours, or are invented.
+// How much of the author's text a repaired document still reads in place:
+// each twin token no fault touches is found, by the known edits, as a live
+// leaf, skipped, abandoned or lost. The repair's own tokens restore or invent.
 #pragma once
 
 #include <algorithm>
@@ -31,13 +26,13 @@ struct TextKept {
   // Tokens the repair made: those that stand for a token the faults took.
   std::uint32_t restored = 0, invented = 0;
 
-  // `restores(token, owed)`: whether a token the repair owed the grammar
-  // spells the twin's token.
+  // `restores(token, expected)`: whether the terminal a repair inserted for the
+  // grammar spells the twin's token.
   [[nodiscard]] static TextKept of(
       std::span<const CstLeaf> twin, const RepairCase& c,
       std::span<const FaultWindow> windows, std::span<const CstLeaf> got,
       std::span<const ParseDiagnostic> diagnostics,
-      function_ref<bool(std::size_t token, ElementId owed)> restores) {
+      function_ref<bool(std::size_t token, ElementId expected)> restores) {
     TextKept t;
     const std::size_t n = twin.size();
     std::vector<std::uint8_t> touched(n);
@@ -105,9 +100,9 @@ struct TextKept {
                                   : static_cast<TextOffset>(c.text.size());
         holes.push_back(Hole{i, std::min(lo, w.at), std::max(hi, w.end), false});
       }
-    const auto fill = [&](TextOffset b, TextOffset e, ElementId owed) {
+    const auto fill = [&](TextOffset b, TextOffset e, ElementId expected) {
       for (Hole& h : holes)
-        if (!h.taken && h.lo <= b && e <= h.hi && restores(h.token, owed)) {
+        if (!h.taken && h.lo <= b && e <= h.hi && restores(h.token, expected)) {
           h.taken = true;
           return true;
         }

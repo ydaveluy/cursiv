@@ -5,10 +5,8 @@
 
 #include "cursiv/navigation/DefaultRenameProvider.hpp"
 
-// Renaming a package renames what it contains, as far as a reference site is
-// concerned: `foo.bar.E2` written elsewhere must become `foo.baz.E2`, and
-// that is not a substitution the base can make -- it has to recompute the
-// qualified name of every declaration under the renamed one.
+// Renaming a package also renames the qualified names under it: `foo.bar.E2`
+// written elsewhere becomes `foo.baz.E2`.
 
 namespace dm {
 

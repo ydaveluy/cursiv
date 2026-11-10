@@ -2,9 +2,8 @@
 
 #include <string>
 
-// A root an editor opened, and what it is called there. This storey may not
-// name the LSP protocol -- the same reason `text/Position` exists -- so it
-// carries the two fields itself.
+// A root an editor opened, and what it is called there. Core does not depend
+// on the LSP types, so it carries the two fields itself.
 
 namespace cursiv {
 

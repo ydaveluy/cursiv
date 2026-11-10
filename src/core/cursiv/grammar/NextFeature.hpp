@@ -24,8 +24,8 @@ struct NextFeature {
   // record the member belongs to may not be open yet at the caret, and the
   // same member name on two classes is two different references.
   const AstTypeTag* type = nullptr;
-  // The caret opens the rule that writes the member: no token of it stands
-  // before the caret, so the node it would build is not in the tree.
+  // The caret is at the start of the rule that writes the member: none of its
+  // tokens is before the caret, so its node is not in the tree yet.
   bool entered = false;
 
   bool operator==(const NextFeature&) const = default;

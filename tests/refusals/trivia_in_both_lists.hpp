@@ -1,3 +1,4 @@
+// One terminal listed as both `ignored` and `hidden`.
 // expect LR: belongs to at most one of .ignored. and .hidden.
 #pragma once
 

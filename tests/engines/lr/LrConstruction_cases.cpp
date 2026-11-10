@@ -16,10 +16,8 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/grammar/ElementId.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstBuilder.hpp"
-#include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/lr/gen/LrFinalTable.hpp"
 #include "cursiv/lr/gen/LrFirstSets.hpp"
 #include "cursiv/lr/gen/LrLowered.hpp"
@@ -36,7 +34,7 @@
 #include "cursiv/lr/gen/lr_entry_rows.hpp"
 #include "cursiv/lr/gen/lr_intern_name.hpp"
 #include "cursiv/lr/gen/lr_lower_epsilon.hpp"
-#include "cursiv/lr/gen/lr_lower_settle.hpp"
+#include "cursiv/lr/gen/lr_lower_passes.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/lr_moves.hpp"
 #include "cursiv/lr/table/LrProgramRows.hpp"
@@ -48,16 +46,18 @@
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
-#include "cursiv/Check.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/syntax-tree/CstNode.hpp"
 #include "engines/lr/SectionTailGrammar.hpp"
 
 namespace lr_construction_cases {
 
 namespace {
 
-// A production of `lhs` over `syms`, laid at the end of the build's rows.
-void lay(cursiv::engine::LrBuildCfg& g, std::uint16_t lhs,
-         const std::vector<std::uint16_t>& syms) {
+// A production of `lhs` over `syms`, added at the end of the build's rows.
+void add_production(cursiv::engine::LrBuildCfg& g, std::uint16_t lhs,
+                    const std::vector<std::uint16_t>& syms) {
   const auto p = g.nprods++;
   g.prods[p] = cursiv::engine::LrLowProd{};
   g.prods[p].lhs = lhs;
@@ -196,7 +196,7 @@ void run() {
 
 namespace lexical_derived {
 
-void owed_terminals_stop_at_the_first_acceptance() {
+void body_terms_stop_at_the_first_acceptance() {
   using namespace cursiv;
   using namespace cursiv::engine;
   LrBuildTable a;
@@ -206,7 +206,7 @@ void owed_terminals_stop_at_the_first_acceptance() {
   a.cfg.terms[2].trivia = true;
   a.cfg.terms[4].trivia = true;
   lr_derive_tables(a, {});
-  CHECK(a.lexOwed.empty());
+  CHECK(a.lexBodyTerms.empty());
   a.ndfa = 14;
   a.ncls = 3;
   a.dfaNext.v.assign(std::size_t{a.ndfa} * a.ncls, kDeadState);
@@ -246,13 +246,13 @@ void owed_terminals_stop_at_the_first_acceptance() {
         a.accBoundBase.v[s] + a.dfaAcc[s].rank(a.cfg.nterms);
   a.accBound.v.assign(a.accBoundBase.v[a.ndfa], kNoSet);
   a.accStand.v.assign(a.accBoundBase.v[a.ndfa], kNoSet);
-  a.accTier.v.assign(a.accBoundBase.v[a.ndfa], 0);
-  a.accTier.v[a.accBoundBase.v[5]] = kTierKeyword;
-  a.accTier.v[a.accBoundBase.v[12]] = kTierKeyword;
+  a.accPriority.v.assign(a.accBoundBase.v[a.ndfa], 0);
+  a.accPriority.v[a.accBoundBase.v[5]] = kKeywordPriority;
+  a.accPriority.v[a.accBoundBase.v[12]] = kKeywordPriority;
   lr_derive_tables(a, {});
   const std::vector<std::uint16_t> expected{
       1, 1, 2, 2, kInvalidSymbol, 2, 1, 5, 4, 5, 1, 1, 3, kInvalidSymbol};
-  CHECK(a.lexOwed == expected);
+  CHECK(a.lexBodyTerms == expected);
 }
 
 void relay_chains_share_suffixes_in_both_pool_forms() {
@@ -289,9 +289,9 @@ void relay_chains_share_suffixes_in_both_pool_forms() {
 
 }  // namespace lexical_derived
 
-// A state owes the tokens its open items still need, the fewest first: the
-// bracket that closes a list is owed, the separator that would extend it is
-// not.
+// A state's close row holds the tokens its open items still need, the fewest
+// first: the bracket that closes a list is in it, the separator that would
+// extend it is not.
 namespace close_rows {
 
 namespace {
@@ -329,12 +329,12 @@ void brackets(cursiv::engine::LrLowered& low) {
   spell(g, "[],n", 3);  // 0 = $accept, 1 = V, 2 = E
   const std::uint16_t V = cursiv::engine::nt_sym(1),
                       E = cursiv::engine::nt_sym(2);
-  lay(g, 0, {V});
-  lay(g, 1, {kOpen, E, kClose});
-  lay(g, 1, {kOpen, kClose});
-  lay(g, 1, {kN});
-  lay(g, 2, {E, kComma, V});
-  lay(g, 2, {V});
+  add_production(g, 0, {V});
+  add_production(g, 1, {kOpen, E, kClose});
+  add_production(g, 1, {kOpen, kClose});
+  add_production(g, 1, {kN});
+  add_production(g, 2, {E, kComma, V});
+  add_production(g, 2, {V});
 }
 
 // S -> L d a | L e f ;  L -> L d | d
@@ -343,11 +343,11 @@ void list_then_its_token(cursiv::engine::LrLowered& low) {
   spell(g, "daef", 3);
   const std::uint16_t S = cursiv::engine::nt_sym(1),
                       L = cursiv::engine::nt_sym(2);
-  lay(g, 0, {S});
-  lay(g, 1, {L, 1, 2});
-  lay(g, 1, {L, 3, 4});
-  lay(g, 2, {L, 1});
-  lay(g, 2, {1});
+  add_production(g, 0, {S});
+  add_production(g, 1, {L, 1, 2});
+  add_production(g, 1, {L, 3, 4});
+  add_production(g, 2, {L, 1});
+  add_production(g, 2, {1});
 }
 
 // S -> x a c | x b c | x Y z z ;  Y -> b
@@ -356,11 +356,11 @@ void called_rule_shifts_first(cursiv::engine::LrLowered& low) {
   spell(g, "xabcz", 3);
   const std::uint16_t S = cursiv::engine::nt_sym(1),
                       Y = cursiv::engine::nt_sym(2);
-  lay(g, 0, {S});
-  lay(g, 1, {1, 2, 4});
-  lay(g, 1, {1, 3, 4});
-  lay(g, 1, {1, Y, 5, 5});
-  lay(g, 2, {3});
+  add_production(g, 0, {S});
+  add_production(g, 1, {1, 2, 4});
+  add_production(g, 1, {1, 3, 4});
+  add_production(g, 1, {1, Y, 5, 5});
+  add_production(g, 2, {3});
 }
 
 std::uint32_t goto_of(const cursiv::engine::LrBuildTable& A, std::uint32_t from,
@@ -399,8 +399,8 @@ std::uint32_t before(const cursiv::engine::LrBuildTable& A,
   return stack.back();
 }
 
-bool owes(const cursiv::engine::LrBuildTable& A, std::uint32_t s,
-          std::initializer_list<std::uint16_t> terms) {
+bool needs(const cursiv::engine::LrBuildTable& A, std::uint32_t s,
+           std::initializer_list<std::uint16_t> terms) {
   if (s >= A.nstates) return false;
   cursiv::engine::DynSet want;
   for (const std::uint16_t t : terms) want.set(t);
@@ -416,29 +416,29 @@ void run() {
       cursiv::engine::lr_build_automaton(low);
   CHECK(!A.overflow && !A.cfg.lowerFail());
   // The shortest value is a word, not a pair of brackets.
-  CHECK(owes(A, before(A, {}, kOpen), {kN}));
-  CHECK(owes(A, before(A, {kOpen}, kN), {kClose}));
+  CHECK(needs(A, before(A, {}, kOpen), {kN}));
+  CHECK(needs(A, before(A, {kOpen}, kN), {kClose}));
   // The list stands after one element: the bracket closes it, and a comma
   // would open one more.
-  CHECK(owes(A, before(A, {kOpen, kN}, kClose), {kClose}));
-  CHECK(owes(A, before(A, {kOpen, kN, kComma}, kN), {kN}));
-  // A whole value owes a reduction, and no token at all.
-  CHECK(owes(A, before(A, {kOpen, kClose}, 0), {}));
+  CHECK(needs(A, before(A, {kOpen, kN}, kClose), {kClose}));
+  CHECK(needs(A, before(A, {kOpen, kN, kComma}, kN), {kN}));
+  // A whole value needs a reduction, and no token at all.
+  CHECK(needs(A, before(A, {kOpen, kClose}, 0), {}));
   CHECK(A.closeMax == 3);
-  // A due shift owes one token less for every item taking it: the list's
-  // continuation and the called rule, which close in one, are what is owed.
+  // A pending shift needs one token less for every item taking it: the list's
+  // continuation and the called rule, which close in one, are what is needed.
   cursiv::engine::LrLowered list;
   list_then_its_token(list);
   const cursiv::engine::LrBuildTable L =
       cursiv::engine::lr_build_automaton(list);
   CHECK(!L.overflow && !L.cfg.lowerFail());
-  CHECK(owes(L, before(L, {1}, 3), {1}));
+  CHECK(needs(L, before(L, {1}, 3), {1}));
   cursiv::engine::LrLowered called;
   called_rule_shifts_first(called);
   const cursiv::engine::LrBuildTable C =
       cursiv::engine::lr_build_automaton(called);
   CHECK(!C.overflow && !C.cfg.lowerFail());
-  CHECK(owes(C, before(C, {1}, 3), {3}));
+  CHECK(needs(C, before(C, {1}, 3), {3}));
 }
 
 }  // namespace close_rows
@@ -468,13 +468,13 @@ void blocks_share_values_without_changing_columns() {
   }
   CHECK(m.index_bits() == 8 && m.value_bits() == 8);
   // Two distinct rows of eleven values: shared rows of values are smallest.
-  m.seal();
+  m.finish();
   CHECK(m.blocks.empty() && m.rows == std::vector<std::uint32_t>{0, 11, 0});
-  const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> laid{
+  const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> packed{
       m.rows, m.blocks, m.values, 11, 0};
   for (unsigned state = 0; state < rows.size(); ++state)
     for (unsigned col = 0; col < rows[state].size(); ++col)
-      CHECK(laid.get(state, col) == rows[state][col]);
+      CHECK(packed.get(state, col) == rows[state][col]);
 
   LrProgramMatrix wide;
   for (unsigned i = 0; i < 65537; ++i) {
@@ -484,7 +484,7 @@ void blocks_share_values_without_changing_columns() {
   }
   CHECK(wide.value_bits() == 64);
   // Every row distinct, one value wide: the values alone are smallest.
-  wide.seal();
+  wide.finish();
   CHECK(wide.rows.empty() && wide.blocks.empty());
   const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> wideView{
       wide.rows, wide.blocks, wide.values, 1, 0};
@@ -577,11 +577,9 @@ void run() {
 
 }  // namespace programs
 
-// A grammar built to make reduce/reduce cells the grammar does not order:
-// one terminal, rules that reach back, and two bodies of different lengths
-// over the same text. The table forks such a cell by production index, and
-// `nOrdered` counts it -- the count is what this pins. A body past 255
-// symbols is ordered at its far dots as at its near ones.
+// A grammar built to make reduce/reduce cells the grammar does not order: one
+// terminal, rules that reach back, two bodies of different lengths over one
+// text. `nOrdered` counts the cells forked by production index.
 namespace ordered_reduce {
 
 namespace {
@@ -609,14 +607,14 @@ void cyclic(cursiv::engine::LrLowered& low) {
   const std::uint16_t S = cursiv::engine::nt_sym(1),
                       B = cursiv::engine::nt_sym(2),
                       C = cursiv::engine::nt_sym(3), a = 1;
-  lay(g, 0, {S});
-  lay(g, 1, {a});
-  lay(g, 1, {B, a, a});
-  lay(g, 2, {a});
-  lay(g, 2, {S, a});
-  lay(g, 2, {C, S, a});
-  lay(g, 3, {a});
-  lay(g, 3, {a, a, a});
+  add_production(g, 0, {S});
+  add_production(g, 1, {a});
+  add_production(g, 1, {B, a, a});
+  add_production(g, 2, {a});
+  add_production(g, 2, {S, a});
+  add_production(g, 2, {C, S, a});
+  add_production(g, 3, {a});
+  add_production(g, 3, {a, a, a});
 }
 
 void unordered_cells_are_counted() {
@@ -628,7 +626,7 @@ void unordered_cells_are_counted() {
   CHECK(A.nOrdered != 0);
 }
 
-// A body longer than 255 symbols that meets a reduction at its dots 5 and
+// A body longer than 255 symbols that reaches a reduction at its dots 5 and
 // 261, under two callers whose cells stand over different origins. `P` is
 // written first, so its shift precedes.
 struct LongBodies : cursiv::GrammarSpec {
@@ -820,7 +818,7 @@ struct GapGrammar : GrammarSpec {
   using entry = Root;
 };
 
-// The final table is the one that was built, derived and laid out, never a
+// The final table is the one that was built, derived and packed out, never a
 // copy; the emitters read it alone, and nothing writes to it or runs a pass
 // over it.
 template <class T>
@@ -910,8 +908,8 @@ void edge_options_stay_linear() {
     for (auto& s : slots) {
       s.sym = 1;
       s.optional = true;
-      s.lead = kind == 0;
-      s.trail = kind == 1;
+      s.leading = kind == 0;
+      s.trailing = kind == 1;
       s.endAlt = kind == 2;
     }
     lr_emit_subsets(low, pool, 1, slots, {});
@@ -970,7 +968,7 @@ void factored_options_write_only_on_the_present_arm() {
   slots.back().row = {23, 23};
   // Surplus positions, taken from the right, use a nullable auxiliary.
   lr_emit_subsets(low, pool, 1, slots, {});
-  lr_lay_bare_records(low);
+  lr_add_bare_records(low);
   CHECK(!low.cfg.lowerFail());
   CHECK(low.cfg.nnts == 3);
   bool present = false, absent = false, called = false;
@@ -1123,7 +1121,7 @@ void first_sets_include_the_last_nonterminal() {
   CHECK(fs.first[last].test(1));
 }
 
-// Reads every production until none changes: the sets a worklist must settle on.
+// Reads every production until none changes: the sets a worklist must reach.
 template <bool Last>
 std::vector<DynSet> first_by_passes(const LrBuildCfg& g,
                                     const std::vector<std::uint8_t>& nullable) {
@@ -1207,7 +1205,7 @@ std::vector<std::uint8_t> nullable_by_passes(const LrBuildCfg& g,
   return nullable;
 }
 
-void first_and_follow_settle_where_passes_do() {
+void first_and_follow_agree_with_the_passes() {
   std::uint32_t seed = 1;
   const auto below = [&seed](std::uint32_t n) {
     seed = seed * 1664525u + 1013904223u;
@@ -1268,7 +1266,7 @@ void first_and_follow_stay_linear_on_a_chain() {
 }
 
 // Each rule reads the next, the last reads nothing, and each pass of a fixpoint
-// would settle one more.
+// would find one more.
 void nullable_stays_linear_on_a_chain() {
   LrBuildCfg cfg;
   cfg.nnts = kNtBase;
@@ -1371,7 +1369,8 @@ LrBuildTable election_aliases(unsigned length) {
   auto& cfg = a.cfg;
   cfg.nterms = 3;
   cfg.nnts = cfg.nprods = static_cast<std::uint16_t>(length + 2u);
-  const auto lay = [&](unsigned p, const std::vector<std::uint16_t>& body) {
+  const auto add_production = [&](unsigned p,
+                                  const std::vector<std::uint16_t>& body) {
     cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(p),
                      .at = cfg.nslots,
                      .len = static_cast<std::uint16_t>(body.size())};
@@ -1382,11 +1381,13 @@ LrBuildTable election_aliases(unsigned length) {
       cfg.slotCfg[cfg.nslots++] = 0;
     }
   };
-  lay(0, {nt_sym(1), nt_sym(static_cast<std::uint16_t>(length + 1u))});
+  add_production(0,
+                 {nt_sym(1), nt_sym(static_cast<std::uint16_t>(length + 1u))});
   for (unsigned p = 1; p <= length; ++p)
-    lay(p, {p == length ? std::uint16_t{1}
-                       : nt_sym(static_cast<std::uint16_t>(p + 1u))});
-  lay(length + 1u, {1, 2});
+    add_production(p,
+                   {p == length ? std::uint16_t{1}
+                                : nt_sym(static_cast<std::uint16_t>(p + 1u))});
+  add_production(length + 1u, {1, 2});
   return a;
 }
 
@@ -1440,6 +1441,58 @@ void alias_decisions_keep_their_order_around_the_callee() {
   CHECK(!a.electWatch.empty());
 }
 
+// Two runs of aliases from one rule down to one symbol: the run its first
+// alternative opens in written order stands for the pair. `X: A | D | B`, `A:
+// 1`, `D: 2`, `B: 1`; then `X: A | 1` and `X: 1 | A`.
+void alias_diamonds_keep_the_first_alternative_run() {
+  // Rule 1 is `X`; `words` are the decisions of the productions that spell
+  // some, and `expected` the run that stands for `X` down to terminal 1.
+  const auto run_of = [](const std::vector<std::vector<std::uint16_t>>& bodies,
+                         const std::vector<unsigned>& lhs,
+                         const std::vector<unsigned>& spelling) {
+    LrBuildTable a;
+    auto& cfg = a.cfg;
+    cfg.nterms = 3;
+    cfg.nnts = 5;
+    cfg.nprods = static_cast<std::uint16_t>(bodies.size());
+    a.electAt.push_back(0);
+    for (unsigned p = 0; p < bodies.size(); ++p) {
+      cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(lhs[p]),
+                      .at = cfg.nslots,
+                      .len = static_cast<std::uint16_t>(bodies[p].size())};
+      cfg.prodBuild[p] = {};
+      for (const auto sym : bodies[p]) {
+        cfg.slotSym[cfg.nslots] = sym;
+        cfg.slots[cfg.nslots] = {};
+        cfg.slotCfg[cfg.nslots++] = 0;
+      }
+      if (std::ranges::find(spelling, p) != spelling.end()) {
+        a.electWord.insert(a.electWord.end(), {10u * p + 1u, 10u * p + 2u});
+        a.electPos.insert(a.electPos.end(), {0, 1});
+      }
+      a.electAt.push_back(static_cast<std::uint32_t>(a.electWord.size()));
+    }
+    lr_elect_runs(a);
+    const auto key = 1u << 16 | 1u;
+    const auto at =
+        std::lower_bound(a.electChainKey.begin(), a.electChainKey.end(), key);
+    if (at == a.electChainKey.end() || *at != key)
+      return std::vector<std::uint32_t>{0};
+    const auto i = static_cast<unsigned>(at - a.electChainKey.begin());
+    return std::vector<std::uint32_t>(
+        a.electChainWord.begin() + a.electChainAt[i],
+        a.electChainWord.begin() + a.electChainAt[i + 1u]);
+  };
+  CHECK(run_of(
+            {{nt_sym(1)}, {nt_sym(2)}, {nt_sym(3)}, {nt_sym(4)}, {1}, {2}, {1}},
+            {0, 1, 1, 1, 2, 3, 4},
+            {4, 6}) == std::vector<std::uint32_t>({41, 42}));
+  CHECK(run_of({{nt_sym(1)}, {nt_sym(2)}, {1}, {1}}, {0, 1, 1, 2}, {2, 3}) ==
+        std::vector<std::uint32_t>({31, 32}));
+  CHECK(run_of({{nt_sym(1)}, {1}, {nt_sym(2)}, {1}}, {0, 1, 1, 2}, {1, 3}) ==
+        std::vector<std::uint32_t>({11, 12}));
+}
+
 // Productions a fused state may name in one another's stead share one list of
 // twins: the table grows with the productions, not with their square.
 void twins_share_one_list() {
@@ -1452,7 +1505,7 @@ void twins_share_one_list() {
   cfg.nprods = static_cast<std::uint16_t>(kTwins);
   a.electAt.push_back(0);
   for (unsigned p = 0; p < kTwins; ++p) {
-    // `0: (p + 1) (kTwins + 1)`, alike but for its own decision.
+    // `0: (p + 1) (kTwins + 1)`, the same but for its own decision.
     cfg.prods[p] = {.lhs = 0, .at = cfg.nslots, .len = 2};
     cfg.prodBuild[p] = {};
     for (const unsigned nt : {p + 1u, kTwins + 1u}) {
@@ -1483,8 +1536,8 @@ void lexical_pools_cannot_wrap() {
             cfg.nlex = 65535;
             cfg.push_lex({});
           } else if (which == 1) {
-            cfg.nlexKid = 65535;
-            cfg.push_lex_kid(0);
+            cfg.nlexChild = 65535;
+            cfg.push_lex_child(0);
           } else {
             cfg.sets[65534] = {};
             cfg.setDecode[65534] = 0;
@@ -1507,7 +1560,7 @@ void lexical_pools_cannot_wrap() {
 
 // A class is interned once, whether the lowering or a build's guard product
 // asks for it: a section's word class is declared before the lowering reifies
-// the grammar's own, and the two meet in one pool.
+// the grammar's own, and the two end up in one pool.
 void sets_are_interned_once() {
   const auto once = [](LrBuildTable& a) {
     std::vector<engine::SetKey> seen;
@@ -1547,7 +1600,7 @@ void run() {
   a_word_the_graph_reads_whole_stays_in_it();
   auxiliary_self_markers_are_outside_the_symbol_domain();
   first_sets_include_the_last_nonterminal();
-  first_and_follow_settle_where_passes_do();
+  first_and_follow_agree_with_the_passes();
   first_and_follow_stay_linear_on_a_chain();
   nullable_stays_linear_on_a_chain();
   unit_cycle_checks_use_bounded_stack_space();
@@ -1555,6 +1608,7 @@ void run() {
   left_recursion_splitting_restores_each_siblings_path();
   wordless_aliases_need_no_election_paths();
   alias_decisions_keep_their_order_around_the_callee();
+  alias_diamonds_keep_the_first_alternative_run();
   twins_share_one_list();
   lexical_pools_cannot_wrap();
   sets_are_interned_once();
@@ -1712,21 +1766,21 @@ void returned_records_follow_unit_calls() {
   const auto created = low.writes.intern_chain(&action, 1);
   low.writes.chainBuild[created].creates = true;
 
-  lay(g, 0, {nt_sym(1)});
-  lay(g, 1, {nt_sym(2)});
-  lay(g, 2, {});
-  lay(g, 3, {nt_sym(4)});
+  add_production(g, 0, {nt_sym(1)});
+  add_production(g, 1, {nt_sym(2)});
+  add_production(g, 2, {});
+  add_production(g, 3, {nt_sym(4)});
   g.prods[3].node = bare;  // This production returns its own record.
-  lay(g, 4, {});
-  lay(g, 5, {nt_sym(6)});
-  lay(g, 6, {1});
+  add_production(g, 4, {});
+  add_production(g, 5, {nt_sym(6)});
+  add_production(g, 6, {1});
   g.slots[g.prods[6].at].row = created;
-  lay(g, 7, {});
+  add_production(g, 7, {});
   g.prods[7].node = created;
-  lay(g, 8, {});
+  add_production(g, 8, {});
   g.prods[8].node = bare;
-  lay(g, 8, {nt_sym(2)});  // Every alternative must return a record.
-  lay(g, 9, {1, 1});
+  add_production(g, 8, {nt_sym(2)});  // Every alternative must return a record.
+  add_production(g, 9, {1, 1});
   // A directive over part of a longer body does not open its whole record.
   g.slots[g.prods[10].at].row = created;
 
@@ -1746,16 +1800,16 @@ void a_bare_record_demand_stops_at_an_owned_record() {
   auto& g = low.cfg;
   g.nnts = 6;
   const auto bare = low.writes.bare_chain();
-  lay(g, 0, {nt_sym(1), nt_sym(4)});
+  add_production(g, 0, {nt_sym(1), nt_sym(4)});
   g.slots[0].row = g.slots[1].row = bare;
-  lay(g, 1, {nt_sym(2)});
-  lay(g, 2, {nt_sym(3)});
-  lay(g, 3, {});
-  lay(g, 4, {nt_sym(5)});
+  add_production(g, 1, {nt_sym(2)});
+  add_production(g, 2, {nt_sym(3)});
+  add_production(g, 3, {});
+  add_production(g, 4, {nt_sym(5)});
   g.prods[4].node = bare;
-  lay(g, 5, {});
+  add_production(g, 5, {});
 
-  lr_lay_bare_records(low);
+  lr_add_bare_records(low);
   CHECK(g.prods[3].node == bare);
   CHECK(g.prods[5].node == kNoRow);
   CHECK(g.prods[0].node == kNoRow);
@@ -1773,14 +1827,14 @@ void long_chains_propagate_in_both_directions() {
   g.nnts = count;
   const auto bare = low.writes.bare_chain();
   for (std::uint16_t nt = 0; nt + 1u < count; ++nt)
-    lay(g, nt, {nt_sym(nt + 1u)});
-  lay(g, count - 1, {});
+    add_production(g, nt, {nt_sym(nt + 1u)});
+  add_production(g, count - 1, {});
   auto users = lr_record_users(g);
   CHECK(lr_hands_a_record(g, users) == std::vector<bool>(count, false));
 
   g.slots[0].row = bare;
   std::ranges::reverse(g.prods.v);
-  lr_lay_bare_records(low);
+  lr_add_bare_records(low);
   users = lr_record_users(g);
   CHECK(lr_hands_a_record(g, users) == std::vector<bool>(count, true));
   CHECK(lr_opens_a_record(low, users) == std::vector<bool>(count, false));
@@ -1802,7 +1856,7 @@ void run() {
   record_propagation::long_chains_propagate_in_both_directions();
   fold_contract::precomposition_keeps_bare_records_through_renames();
   fold_contract::substituted_reductions_keep_the_returned_row();
-  lexical_derived::owed_terminals_stop_at_the_first_acceptance();
+  lexical_derived::body_terms_stop_at_the_first_acceptance();
   lexical_derived::relay_chains_share_suffixes_in_both_pool_forms();
   action_rows::run();
   close_rows::run();

@@ -1,7 +1,5 @@
-// The erased parser of one language, read by the predictive engine: a
-// generated table as its only template argument, the rest handed over as data.
-// Nothing here names a grammar type, so a module is the whole door onto a
-// language.
+// The type-erased parser of one language for the predictive engine: a generated
+// table is its only template argument, the rest is data.
 #pragma once
 
 #include <memory>
@@ -33,15 +31,14 @@ namespace cursiv::engine {
 template <const auto& T>
 inline void ll_finish(LlContext& c) {
   ll_span_region_end(c);
-  // Text no rule wanted is still text: it goes on the tape, and the verdict
-  // says the document was not the grammar's.
+  // Text no rule wanted still goes on the tape, as a deletion the diagnostics
+  // report.
   ll_tail<T>(c);
   ll_note_run<T>(c);
   if (c.search) LlSearchWork::current().work += c.search->work;
   ll_flush_trivia<T>(c);
-  // The parse completed: every refusal was repaired where it stood, and what
-  // was repaired is on the diagnostics. A reader that wants the verdict reads
-  // those, not this.
+  // Always accepted: every refusal was repaired where it occurred, and the
+  // diagnostics report the repairs. A reader checks those, not this flag.
   c.tape.bind_accepted(true);
 }
 
@@ -59,6 +56,8 @@ class LlLanguageParser final : public Parser {
     return *_grammar;
   }
 
+  // A temporary that owns its text is refused here as through `Parser`.
+  using Parser::parse;
   // Reentrant, and it must be: a rename reparses synthetic text while its
   // caller still holds a result of this same parser.
   [[nodiscard]] ParseResult parse(

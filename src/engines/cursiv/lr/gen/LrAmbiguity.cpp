@@ -5,6 +5,7 @@
 #include "cursiv/lr/gen/LrBuckets.hpp"
 #include "cursiv/lr/gen/LrBuildCfg.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {
 
@@ -72,7 +73,7 @@ std::string plain_name(const LrBuildCfg& c, std::uint16_t sym, unsigned depth) {
 }
 
 std::string spell(const LrBuildCfg& c, std::uint16_t sym) {
-  return "`" + plain_name(c, sym, 2) + "`";
+  return quote(plain_name(c, sym, 2), '`');
 }
 
 }  // namespace

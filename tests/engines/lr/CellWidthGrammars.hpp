@@ -8,7 +8,7 @@
 #include "engines/lr/NamedSplitGrammar.hpp"
 #include "engines/lr/NestedSplitGrammars.hpp"
 
-// Three arms whose readings immediately meet a forty-arm cell: the pool
+// Three arms whose readings immediately reach a forty-arm cell: the pool
 // passes its own ceiling before the text has said anything.
 namespace tflood {
 struct Doc : cursiv::Extends<cursiv::AstNode> {
@@ -155,7 +155,7 @@ struct G : cursiv::GrammarSpec {
 };
 }  // namespace tflood
 
-// Forty arms no look-ahead can settle: a repetition stands between the
+// Forty arms no look-ahead can resolve: a repetition stands between the
 // terminal that opens an alternative and the literal that closes it.
 namespace twideun {
 
@@ -251,9 +251,6 @@ struct G : cursiv::GrammarSpec {
 };
 
 }  // namespace twideun
-
-// More terminals match one position than a word has bits.
-
 
 // Two readings of the first token, each opening a rule that offers forty
 // of the next: more readings than the oracle carries at once.

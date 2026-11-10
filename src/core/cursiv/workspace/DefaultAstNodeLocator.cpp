@@ -18,9 +18,8 @@ namespace cursiv {
 
 namespace {
 
-// Which member of `container` holds `child`, and where. Not read off the
-// child itself: here the grammar answers it, so the walk is over the
-// container's members and stops at the first that yields this very node.
+// Which member of `container` holds `child`, and where: found by walking the
+// container's members to the first that yields this node.
 struct Slot {
   std::string_view property;
   std::uint32_t index = AstReflection::kNoIndex;

@@ -220,10 +220,9 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
   if (cst.grammar() == nullptr) return {};
   FormattingBuilder builder(document, actions);
 
-  // Root first, each node before its descendants: on a boundary two
-  // constructions both claim, the inner one's rule is registered last and
-  // wins the tie. The root is always formatted, and a subtree whose lines miss
-  // the range's lines is not entered; the engine then keeps the edits by line.
+  // Root first, each node before its descendants, so an inner construction's
+  // rule wins a tie on a shared boundary. The root is always formatted; a
+  // subtree whose lines miss the range is not entered.
   std::optional<detail::RangeLines> lines;
   if (range.has_value()) lines.emplace(document.textDocument(), *range);
   std::vector<const AstNode*> pending{parsed.value};
@@ -294,8 +293,7 @@ void AbstractFormatter::formatBlock(FormattingRegion open,
   const FormattingAction beforeClose = options.beforeClose.value_or(newLine);
   const FormattingAction contentIndent = options.contentIndent.value_or(indent);
 
-  // An empty block stays on its line: `{}` is a shape, not a block that lost
-  // its content, and breaking it would be the formatter inventing structure.
+  // An empty block `{}` stays on one line.
   if (content.empty()) {
     open.prepend(beforeOpen).append(insideEmpty);
     close.prepend(insideEmpty);
@@ -342,8 +340,9 @@ std::string AbstractFormatter::formatMultilineComment(
   if (const bool hasLineBreak =
           body.find_first_of("\n\r") != std::string_view::npos;
       !options.forceMultiline && !hasLineBreak) {
+    // The body follows the opening marker: it has no line prefix to strip.
     const std::string content =
-        normalize_tag_line(strip_line_prefix(body, options), options);
+        normalize_tag_line(trim_horizontal(body), options);
     std::string result = options.start;
     result.push_back(' ');
     result += content;

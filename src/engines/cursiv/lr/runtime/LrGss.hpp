@@ -53,15 +53,17 @@ bool lr_gss_takes(LrGssGraph& graph, LrGssGraph::Id vertex, SymbolId term,
       [&](Id v) { return graph.reading(v).run.state; },
       [&](Id v, auto&& f) { graph.each_below(v, f); },
       [&](std::uint32_t top, std::uint32_t& prod, std::uint32_t& len) {
-        const int act = lr_climb_act<A>(top, term, holds, prod);
+        const int act = lr_state_act<A>(top, term, holds, prod);
         if (act >= 0) return act;
         if (!lr_reduce_allowed<A>(prod, holds)) return 0;
         len = A.cfg.prods[prod].len;
         return -1;
       },
       [](std::uint32_t prod) {
-        if constexpr (kLrGuarded<A>) return A.cfg.prods[prod].guarded != 0;
-        else return false;
+        if constexpr (kLrGuarded<A>)
+          return A.cfg.prods[prod].guarded != 0;
+        else
+          return false;
       },
       [&](std::uint32_t from, std::uint32_t prod, std::uint32_t first) {
         return lr_reduce_target<A>(from, prod, first, holds);
@@ -72,7 +74,7 @@ template <const auto& A>
 class LrGss {
  public:
   // Reads what the look-ahead left open, from the context as it stands, and
-  // writes on it the derivation it elects -- or, where every reading froze, the
+  // writes on it the derivation it elects; or, where every reading froze, the
   // repair a search elects from them.
   CURSIV_NOINLINE static LrExit read(LrContext& c, LrGssGraph& g) {
     c.stop.check();
@@ -137,7 +139,7 @@ class LrGss {
         Id v;
         TextOffset at;
         if (!next_vertex(v, at)) break;
-        _g.settle(at);
+        _g.finish_before(at);
         if (_g.hand_back(v, openedAt)) {
           collapsed = true;
           break;
@@ -174,9 +176,9 @@ class LrGss {
     _c.notes.push_back(std::move(note));
   }
 
-  // Every reading froze: one search sets out from those no rival read past, as
-  // from an episode's frozen readings, and the one it elects is written. A
-  // single one is the flat search's.
+  // Every reading froze: one search sets out from those no competitor read
+  // past, as from an episode's frozen readings, and the one it elects is
+  // written. A single one is the flat search's.
   LrExit repair() {
     _c.stop.check();
     ++_c.stats.episodeSearches;
@@ -192,7 +194,7 @@ class LrGss {
       return lr_search_degraded<A>(_c, s);
     }
     lr_search_reset(s);
-    s.paidBase = _c.cost;
+    s.costBase = _c.cost;
     std::vector<LrStack> frames(sources.size());
     for (std::uint32_t k = 0; k < sources.size(); ++k) {
       _c.stop.poll();
@@ -245,7 +247,7 @@ class LrGss {
       replay(_g.step(step));
     }
     const Reading& r = s.reading;
-    lay_pending(r);
+    collect_pending(r);
     _c.pendEnd = r.pendEnd;
     _c.la = r.la;
     _c.laMode = r.laMode;
@@ -278,7 +280,7 @@ class LrGss {
             r.la.end = room[candidate].end;
             r.la.sym = room[candidate].term;
             step.ranked = collectedRanked;
-            step.lexRank = ~lex_weight(room[candidate].tier);
+            step.lexRank = ~lex_weight(room[candidate].priority);
             return;
           }
         }
@@ -304,17 +306,18 @@ class LrGss {
             refused = refuse(v, r, mode, room, tied);
         r.pendEnd = r.la.begin;
         if constexpr (A.maxCands > 1) {
-          if (refused || lr_has_rivals<A>(r.laMode, r.la.sym)) {
+          if (refused || lr_has_candidates<A>(r.laMode, r.la.sym)) {
             const unsigned keep =
-                refused ? tied
-                        : lr_rivals<A>(_c, r.laMode, r.la.begin, room.data());
+                refused
+                    ? tied
+                    : lr_candidates<A>(_c, r.laMode, r.la.begin, room.data());
             if (keep != 0) {
               candidates = keep;
-              collectedRanked = lr_rivals_ranked(room.data(), keep);
+              collectedRanked = lr_candidates_ranked(room.data(), keep);
               r.la = Token{r.la.begin, room[0].end, room[0].term, r.laMode};
               collected = r;
               step.ranked = collectedRanked;
-              step.lexRank = ~lex_weight(room[0].tier);
+              step.lexRank = ~lex_weight(room[0].priority);
             }
           }
         }
@@ -352,8 +355,9 @@ class LrGss {
         if (to == kInvalidSymbol) continue;
         lives = true;
         take.shifts = true;
-        take.laid = r.la.sym < A.cfg.nterms && A.cfg.terms[r.la.sym].laid != 0;
-        const bool real = !take.laid && r.la.begin < r.la.end;
+        take.synthetic =
+            r.la.sym < A.cfg.nterms && A.cfg.terms[r.la.sym].synthetic != 0;
+        const bool real = !take.synthetic && r.la.begin < r.la.end;
         const Id s = _g.add(std::move(take));
         Reading next = r;
         next.run.state = to;
@@ -367,16 +371,16 @@ class LrGss {
         if constexpr (kIndented<A.cfg>)
           indent_shift<A.cfg>(_c.indentArena, next.indent, r.la);
         if constexpr (kLrConditioned<A>) next.virt.shift(r.la);
-        const Id landed = _g.vertex(next);
-        lay(landed, v, to, r.la.sym, {}, s, {}, {});
-        if (real) _shifts.push_back({landed, r.la});
+        const Id shiftedTo = _g.vertex(next);
+        add_edge(shiftedTo, v, to, r.la.sym, {}, s, {}, {});
+        if (real) _shifts.push_back({shiftedTo, r.la});
       }
       if (!lives) _g.freeze(v, r);
     }
   }
 
   // The token of `r`, a flagged winner of `mode`, read again while no stack
-  // under `v` takes it after the reductions the table lays for it, the
+  // under `v` takes it after the reductions the table has for it, the
   // graph's paths popped as a reduction pops them.
   CURSIV_NOINLINE bool refuse(Id v, Reading& r, std::uint16_t mode,
                               ScanRoom<A.maxCands>& room, std::uint32_t& tied) {
@@ -389,7 +393,7 @@ class LrGss {
   }
 
   // The nearest unopened vertex, once the shifts from every place before it
-  // are settled: of the tokens shifted from one place, only the one the lexer
+  // are decided: of the tokens shifted from one place, only the one the lexer
   // elects stands.
   bool next_vertex(Id& v, TextOffset& at) {
     while (_g.next_vertex(v, at))
@@ -397,22 +401,22 @@ class LrGss {
     return false;
   }
 
-  // Settles the shifts that start before `before`; whether a vertex was
-  // retired. Where none starts before it, nothing is settled and nothing is
+  // Decides the shifts that start before `before`; whether a vertex was
+  // dropped. Where none starts before it, nothing is decided and nothing is
   // weighed: each vertex opened at one place would weigh them all again.
   bool elected_stand(TextOffset before) {
     const Token lead = _shifts.front().token;
-    bool alike = true, settles = false;
+    bool oneToken = true, anyBefore = false;
     for (const Shift& s : _shifts) {
-      alike = alike && s.token == lead;
-      settles = settles || s.token.begin < before;
+      oneToken = oneToken && s.token == lead;
+      anyBefore = anyBefore || s.token.begin < before;
     }
-    if (!settles) return false;
-    if (alike) {
+    if (!anyBefore) return false;
+    if (oneToken) {
       _shifts.clear();
       return false;
     }
-    // A tie reads its tokens again: each once, not once per rival.
+    // A tie reads its tokens again: each once, not once per competitor.
     const auto weight = [&](Shift& s) {
       if (s.weight == Shift::kUnweighed)
         s.weight = static_cast<std::uint8_t>(lr_token_weight<A>(_c, s.token));
@@ -435,13 +439,13 @@ class LrGss {
       if (s.token.begin < before && s.beaten &&
           !std::ranges::binary_search(standing, s.vertex))
         rejected.push_back(s.vertex);
-    _g.retire(rejected);
+    _g.drop_vertices(rejected);
     std::erase_if(_shifts,
                   [&](const Shift& s) { return s.token.begin < before; });
     return !rejected.empty();
   }
 
-  // False where an empty reduction lands nowhere: the reading has no action.
+  // False where an empty reduction goes nowhere: the reading has no action.
   bool reduce(Id v, Step step, std::uint16_t prod) {
     const Pop pop{v, _g.add(std::move(step)), none, none, prod,
                   A.cfg.prods[prod].len};
@@ -473,7 +477,8 @@ class LrGss {
     if constexpr (A.cold.electWord.size() != 0) {
       const auto [words, pos] = lr_elect_words<A>(
           pop.prod, _g.child_symbols(), _g.word_room(), _g.word_at_room());
-      lay(goes, v, to, A.cfg.nterms + p.lhs, children, pop.step, words, pos);
+      add_edge(goes, v, to, A.cfg.nterms + p.lhs, children, pop.step, words,
+               pos);
     } else {
       _g.edge(goes, v, A.cfg.nterms + p.lhs, children, pop.step);
     }
@@ -481,11 +486,11 @@ class LrGss {
   }
 
   // The edge into `goes`, in state `to`: where the table skipped pass-throughs
-  // into it, the node of `symbol` stands under the one `to` stood after.
-  void lay(Id goes, Id from, std::uint32_t to, std::uint32_t symbol,
-           std::span<const Id> children, Id step,
-           std::span<const std::uint32_t> words,
-           std::span<const std::uint16_t> pos) {
+  // into it, the node of `symbol` stands under the one `to` comes after.
+  void add_edge(Id goes, Id from, std::uint32_t to, std::uint32_t symbol,
+                std::span<const Id> children, Id step,
+                std::span<const std::uint32_t> words,
+                std::span<const std::uint16_t> pos) {
     if constexpr (A.cold.electSym.size() != 0) {
       const std::uint32_t run = lr_elect_stands<A>(to, symbol);
       if (run != kLrNoRun) {
@@ -505,7 +510,7 @@ class LrGss {
     const Reading& r = step.reading;
     if (_c.stack.top().state != r.run.state || _c.committed != r.at)
       throw std::logic_error("cursiv: GSS replay left the elected derivation");
-    if (step.scanned) lay_pending(r);
+    if (step.scanned) collect_pending(r);
     _c.pendEnd = r.pendEnd;
     _c.la = r.la;
     _c.laMode = r.laMode;
@@ -524,10 +529,10 @@ class LrGss {
     _c.laMode = w.laMode;
   }
 
-  // The trivia from `from` to `r`'s token laid pending, `walk(p)` reading each
-  // position; the token the crossing stopped at.
+  // The trivia from `from` to `r`'s token placed pending, `walk(p)` reading
+  // each position; the token the crossing stopped at.
   template <class Walk>
-  Token lay_trivia(const Reading& r, TextOffset from, Walk&& walk) {
+  Token collect_trivia(const Reading& r, TextOffset from, Walk&& walk) {
     return lr_cross_trivia<A>(
         _c, A.mode[r.run.state], from, r.la.begin, r.indent.depth, walk,
         [&](TextOffset, const Token* trivia) {
@@ -539,20 +544,20 @@ class LrGss {
   // The trivia from the cursor to `r`'s token, pending as the drive leaves it.
   // An indent stands behind its own run, form feeds included, and no trivia:
   // nothing is pending.
-  void lay_pending(const Reading& r) {
+  void collect_pending(const Reading& r) {
     _c.pending.clear();
-    if constexpr (kLaid<A.cfg, kLaidIndent> != 0)
-      if (r.la.sym == kLaid<A.cfg, kLaidIndent>) return;
+    if constexpr (kSyntheticTerm<A.cfg, kSyntheticIndent> != 0)
+      if (r.la.sym == kSyntheticTerm<A.cfg, kSyntheticIndent>) return;
     const auto mode = A.mode[r.run.state];
-    const Token stop = lay_trivia(r, _c.committed, [&](TextOffset p) {
+    const Token stop = collect_trivia(r, _c.committed, [&](TextOffset p) {
       return _c.drive->walk(_c.src, _c.len, mode, p);
     });
-    if (stop.begin < r.la.begin) lay_pending_apart(r);
+    if (stop.begin < r.la.begin) collect_pending_apart(r);
   }
 
   // The token's stack refused a flagged terminal that beats trivia on the way:
-  // the walk skips it as it meets it.
-  CURSIV_NOINLINE void lay_pending_apart(const Reading& r) {
+  // the walk skips it as it reaches it.
+  CURSIV_NOINLINE void collect_pending_apart(const Reading& r) {
     if constexpr (A.has_flags()) {
       _c.pending.clear();
       const auto mode = A.mode[r.run.state];
@@ -560,7 +565,7 @@ class LrGss {
       const typename LrLexTape<A>::Skipping tape{.skip = &skip};
       TextOffset at = _c.committed;
       for (;;) {
-        const Token stop = lay_trivia(r, at, [&](TextOffset p) {
+        const Token stop = collect_trivia(r, at, [&](TextOffset p) {
           return lex_match(tape, _c.src, _c.len, mode, p);
         });
         if (stop.begin >= r.la.begin) return;

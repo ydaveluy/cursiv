@@ -1,6 +1,6 @@
 // Everything a thunk may touch while a tree is reduced: the tape and the
-// layout its records are stamped in, the arena, the lists the result keeps, and
-// the table the thunks read.
+// layout of its records, the arena, the lists the result keeps, and the table
+// the thunks read.
 #pragma once
 
 #include <cstddef>
@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
@@ -29,8 +30,8 @@ struct AstBuildCtx {
   const Cst* cst = nullptr;
   AstArena* arena = nullptr;
   std::vector<RefHandle>* refs = nullptr;
-  // What a reference will ask when it is read, planted at the write.
-  const RefHome* home = nullptr;
+  // What a reference asks when it is read, set when it is written.
+  const RefResolver* resolver = nullptr;
   std::vector<ParseDiagnostic>* diags = nullptr;
   std::pmr::vector<AstNode*>* nodes = nullptr;
   const AstActions* actions = nullptr;
@@ -41,13 +42,16 @@ struct AstBuildCtx {
   bool detached = false;
   // How the tape's records name their row: a thunk serves every table.
   StampLayout stamp{};
+  // The build's stop, read by the cold walks and the walks over a data rule's
+  // parts.
+  CancellationPoll stop;
   // Nodes a member took. The list holds one more, the root, unless a node was
   // built and dropped.
   std::size_t attached = 0;
   // Scoped to one text query; independent writes still run their converters.
   TextValues* textValues = nullptr;
-  // Nodes made and not yet on `nodes`, which takes them a run at a time: the
-  // list's own append is a call where this is a store.
+  // Nodes created and not yet on `nodes`, which takes them in batches: a store
+  // here is cheaper than the list's append call.
   static constexpr std::size_t kMadeRun = 256;
   std::size_t madeCount = 0;
   AstNode* made[kMadeRun]{};
@@ -60,8 +64,8 @@ struct AstBuildCtx {
   std::string_view keep_text(std::span<const std::string_view> parts) const {
     return cst->keep_text(parts);
   }
-  // In creation order, which is the list's. A node stays here if the list
-  // refuses it: the reducer's teardown answers for it.
+  // In creation order, the list's order. If the list refuses a node, the
+  // reducer's teardown destroys it.
   void list(AstNode* node) {
     made[madeCount] = node;
     if (++madeCount == kMadeRun) [[unlikely]]

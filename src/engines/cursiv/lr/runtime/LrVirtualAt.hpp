@@ -1,7 +1,6 @@
-// Where a reading stands with the gaps and the implied tokens: where the last
-// were inserted, each once per position; where the next gap begins; and the
-// implied token in hand, which a state lexing in its own mode hands back
-// rather than the token.
+// Where a reading stands with the gaps and implied tokens: where the last were
+// inserted, once per position; where the next gap begins; and the implied token
+// in hand, which a state lexing in its own mode hands back.
 #pragma once
 
 #include <cstdint>
@@ -19,12 +18,12 @@ struct LrVirtualAt {
   std::uint32_t inserted = 0;
   SymbolId pending = 0;
 
-  // The ranks already laid where `la` stands.
-  [[nodiscard]] std::uint32_t laid_at(const Token& la) const {
+  // The ranks already inserted where `la` stands.
+  [[nodiscard]] std::uint32_t inserted_ranks(const Token& la) const {
     return insertedAt == la.begin ? inserted : 0;
   }
   // What decides a reading's future from `at`: past where the last ones were
-  // laid, with none in hand, the ranks decide nothing, so two readings that
+  // inserted, with none in hand, the ranks decide nothing, so two readings that
   // differ only there are one.
   [[nodiscard]] LrVirtualAt seen_from(TextOffset at) const {
     LrVirtualAt v = *this;
@@ -34,7 +33,7 @@ struct LrVirtualAt {
     }
     return v;
   }
-  // The implied token in hand, zero wide where it was laid.
+  // The implied token in hand, zero wide where it was inserted.
   [[nodiscard]] Token in_hand() const {
     return Token{insertedAt, insertedAt, pending};
   }
@@ -47,9 +46,9 @@ struct LrVirtualAt {
     if (t.sym == pending) pending = 0;
     if (t.end != t.begin) from = t.end;
   }
-  // Rank `q`, terminal `t`, laid in place of `la` and in hand until shifted.
-  void lay(Token& la, unsigned q, SymbolId t) {
-    inserted = laid_at(la) | std::uint32_t{1} << q;
+  // Rank `q`, terminal `t`, inserted at `la` and in hand until shifted.
+  void insert(Token& la, unsigned q, SymbolId t) {
+    inserted = inserted_ranks(la) | std::uint32_t{1} << q;
     insertedAt = la.begin;
     pending = t;
     la = Token{la.begin, la.begin, t};

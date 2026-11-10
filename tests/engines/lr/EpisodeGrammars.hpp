@@ -1,6 +1,6 @@
 #pragma once
 
-// A cell after `x` on `a` that reduce or shift settle only at the token that
+// A cell after `x` on `a`, reduce or shift, resolved only at the token that
 // ends the statement, however long the run of `a` before it.
 
 #include "cursiv/grammar/GrammarSpec.hpp"

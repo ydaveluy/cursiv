@@ -16,7 +16,7 @@ struct LrProduction {
   std::uint16_t len = 0;
   // Reduced only where condition `gap - 1` holds.
   std::uint8_t gap = 0;
-  // A goto of its left side lands by a guard.
+  // A goto of its left side goes through a guard.
   std::uint8_t guarded = 0;
 };
 

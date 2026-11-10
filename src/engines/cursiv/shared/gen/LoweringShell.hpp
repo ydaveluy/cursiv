@@ -8,10 +8,8 @@
 
 namespace cursiv::engine {
 
-// `Lower` lowers the image `View` reads, as `Desc` describes it. The closure,
-// the symbol split and the action vocabulary are named once: an id is a
-// position in one of these lists, so a reader builds its table of thunks from
-// the same list.
+// `Lower` lowers the image `View` reads, as `Desc` describes it. An id is a
+// position in one of these lists, which a reader builds its thunks from.
 template <class View, class Lowered,
           Lowered (*Lower)(GrammarImage&, const LowerDesc&),
           const LowerDesc& Desc>

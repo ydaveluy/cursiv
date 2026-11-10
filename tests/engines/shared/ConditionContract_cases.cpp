@@ -12,10 +12,8 @@
 
 namespace condition_contract_cases {
 
-// What a condition in a rule tests, in both engines: the text of the token the
-// lexer chooses among the terminals the parser can take where it stands; the
-// first terminals of the conditions there lengthen that token and rank
-// nothing.
+// What a condition in a rule tests, in both engines: the token the lexer
+// chooses among the terminals the parser can take there.
 
 namespace {
 

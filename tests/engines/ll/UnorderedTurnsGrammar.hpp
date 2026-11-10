@@ -17,7 +17,7 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   // `+1` is one LABEL or `+` then a LABEL: a loop over `+ LABEL` and the
-  // LABEL after it rival over the same bytes.
+  // LABEL after it competitor over the same bytes.
   struct LABEL : terminal<some(cr<"a-zA-Z0-9+">)> {};
   struct AddTail
       : rule<lit<"+"> + option(ref<WS>) + assign<&Tail::name>(ref<LABEL>)> {};

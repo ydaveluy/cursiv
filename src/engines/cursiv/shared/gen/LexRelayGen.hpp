@@ -40,15 +40,15 @@ struct LexRelayGen : LexRelay {
              !pad.has(static_cast<unsigned char>(after.front()))));
   }
 
-  // Walks the literal `node` spells, one byte per single-byte class, handing
-  // each byte to `emit`. Answers its length, or nothing where `node` is no
+  // Walks the literal `node` spells, one byte per single-byte class, passing
+  // each byte to `emit`. Returns its length, or nothing where `node` is no
   // literal.
   template <class Cfg, class Emit>
   static std::optional<std::size_t> walk_literal(const Cfg& g,
                                                  std::uint16_t node,
                                                  Emit&& emit) {
-    const auto one = [&](std::uint16_t kid) {
-      const auto& c = g.lex[kid];
+    const auto one = [&](std::uint16_t child) {
+      const auto& c = g.lex[child];
       if (c.kind != LexKind::chars || g.sets[c.a].count() != 1) return false;
       each_bit(g.sets[c.a].w, 4,
                [&](std::size_t b) { emit(static_cast<char>(b)); });
@@ -59,7 +59,7 @@ struct LexRelayGen : LexRelay {
       return one(node) ? std::optional<std::size_t>{1} : std::nullopt;
     if (e.kind != LexKind::seq || e.b == 0) return std::nullopt;
     for (unsigned i = 0; i < e.b; ++i)
-      if (!one(g.lexKid[e.a + i])) return std::nullopt;
+      if (!one(g.lexChild[e.a + i])) return std::nullopt;
     return std::size_t{e.b};
   }
 
@@ -76,7 +76,7 @@ struct LexRelayGen : LexRelay {
   }
 };
 
-// A row appended by `push`, which answers its index: an index is sixteen
+// A row appended by `push`, which returns its index: an index is sixteen
 // bits, `kNoRelay` aside.
 template <class Push>
 std::uint16_t lex_relay_push(Push&& push, const LexRelayGen& row) {
@@ -198,7 +198,7 @@ std::string lex_relay_source(const LexRelayGen& r, Name&& name) {
   field("padSet", r.padSet, d.padSet);
   field("several", r.several, d.several);
   field("eof", r.eof, d.eof);
-  field("tier", r.tier, d.tier);
+  field("priority", r.priority, d.priority);
   field("asserts", r.predicate, kNoLexNode, "&lexical_predicate_");
   field("recognizes", r.recognition, kNoLexNode, "&lexical_recognizer_");
   return concat("{", field.list(), "}");

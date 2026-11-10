@@ -1,5 +1,5 @@
 // The draws a random grammar and its documents are made of: a seed names one
-// grammar on every platform, so the generator and the lane agree on it.
+// grammar on every platform, so the generator and the test agree on it.
 #pragma once
 
 #include <cstdint>

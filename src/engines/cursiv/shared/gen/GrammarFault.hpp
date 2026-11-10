@@ -1,6 +1,6 @@
-// The one refusal a lowering records against a rule, never aborts on: a code,
-// the rule that earned it and, where one part of the rule earned it, that
-// part. The walk carries on writing a well-formed value.
+// The one refusal a lowering records against a rule, without aborting: a code,
+// the rule that caused it and, where one part of the rule caused it, that
+// part. The walk goes on writing a well-formed value.
 #pragma once
 
 #include <cstddef>
@@ -55,7 +55,7 @@ struct GrammarFault {
   constexpr bool operator==(const GrammarFault&) const = default;
 };
 
-// The code, spelled: what a refusal lane pins on.
+// The code's name, which the refusal tests match.
 constexpr std::string_view grammar_fault_name(GrammarFaultCode c) {
   constexpr std::string_view names[] = {"none",
                                         "nullableRepetition",
@@ -79,15 +79,16 @@ constexpr std::string_view grammar_fault_name(GrammarFaultCode c) {
   return names[static_cast<std::size_t>(c)];
 }
 
-// Two operators of a table that may share a text, one of them spelled past
+// Two operators of a table that may start the same, one of them spelled past
 // what the comparison lists.
 inline std::string unlisted_operators(const GrammarFault& f) {
   return "has two operators whose texts cannot be compared, " + f.part +
-         " of its precedence table: one of them is written with a "
-         "repetition, an `option` or a region, or has more than " +
+         " of its precedence table: one of them repeats with no maximum, reads "
+         "a rule that reaches itself, or has more than " +
          std::to_string(f.count) +
-         " spellings, so both may match the same text -- write each operator "
-         "with literals, terminals and data rules of fixed text";
+         " spellings, and both may start with the same token -- start them "
+         "with different tokens, or write each with literals, terminals and "
+         "data rules of fixed text";
 }
 
 // What the author is told: what the engine cannot hold and what to write

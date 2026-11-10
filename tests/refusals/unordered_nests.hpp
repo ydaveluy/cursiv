@@ -1,5 +1,5 @@
-// Seven items in any order, each one a nest: they are spelled in every order,
-// and the orders of seven outgrow the pools of the descent.
+// Seven nests in any order: a group of nests is expanded into every order, and
+// seven items give too many.
 // expect LR LL: refused: rule .Root. has an unordered group with too many items
 #pragma once
 

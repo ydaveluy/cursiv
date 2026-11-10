@@ -9,7 +9,7 @@ namespace cursiv {
 namespace {
 
 // Every control character becomes a space: a line break would split the
-// line, a NUL end it where a C string stops, an escape steer a terminal.
+// line, a NUL end it where a C string stops, an escape control a terminal.
 void append_flat(std::string& out, std::string_view text) {
   const std::size_t at = out.size();
   out.append(text);

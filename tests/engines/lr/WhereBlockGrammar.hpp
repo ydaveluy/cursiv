@@ -1,10 +1,8 @@
 #pragma once
 
-// Equations whose `where` block has no end marker: the next equation is the
-// block's or any enclosing one's, and a pattern's `=` is an operator too, so
-// the text never says where a block ends. `Open` leaves it to the election;
-// `Taken` commits each block to an equation wherever one can be read, which is
-// the reading `Open` elects.
+// Equations whose `where` block has no end marker, and whose `=` is also an
+// operator, so the text never says where a block ends. `Open` leaves it to the
+// election; `Taken` commits each block, the reading `Open` elects.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

@@ -7,11 +7,9 @@
 #include "cursiv/services/ServiceSlot.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
-// The container of one language. Non-movable, since an installed default
-// holds a back-reference to it. Slots are erased interfaces, not templates,
-// since one workspace carries several grammars at once; a service adds
-// itself once, in `visitServices`. Slot types are declared, never included,
-// which is why the destructor is out-of-line.
+// The container of one language; non-movable, as defaults point back to it.
+// Slots are abstract interfaces, so one workspace holds several grammars. Each
+// slot is listed in `visitServices`.
 
 namespace cursiv {
 
@@ -45,7 +43,6 @@ struct CoreServices {
 
   LanguageMetaData languageMetaData;
 
-  // `const` in the pointee, so a const container hands out a const engine.
   std::unique_ptr<const Parser> parser;
 
   // Null by default: a language serves its grammar's text only when its
@@ -61,32 +58,29 @@ struct CoreServices {
   std::unique_ptr<const ScopeComputation> scopeComputation;
   std::unique_ptr<const ScopeProvider> scopeProvider;
   std::unique_ptr<const Linker> linker;
-  // The inverse direction of the linker's edge: the linker answers what a name
-  // points at, this answers what points at a node and what is under a caret.
+  // The reverse of the linker: what points at a node, and what is under a
+  // caret.
   std::unique_ptr<const References> references;
-  // What the grammar declares about its own vocabulary, and -- its own service,
-  // because it answers a different question -- the comment an author wrote
-  // above a declaration.
+  // The documentation shown for a node, and the raw comment written above it.
   std::unique_ptr<const DocumentationProvider> documentationProvider;
   std::unique_ptr<const CommentProvider> commentProvider;
-  // The words of the syntax errors the parser reports as facts.
+  // The messages of the syntax errors the parser reports.
   std::unique_ptr<const ParserErrorMessageProvider> parserErrorMessageProvider;
   std::unique_ptr<ValidationRegistry> validationRegistry;
-  // The pass that runs the checks. A language's own validator -- the class
-  // whose methods are checks -- is a slot of that language's container, not of
-  // this one.
+  // Runs the registered checks. A language's own validator class is a slot of
+  // the language's derived container.
   std::unique_ptr<const DocumentValidator> documentValidator;
 
-  // `firstMissingService` scans exactly what this yields, and a storey above
-  // appends its own rows.
+  // `firstMissingService` checks exactly what this yields; a derived container
+  // adds its own slots.
   virtual void visitServices(
       cursiv::function_ref<void(const ServiceSlot&)> yield) const;
 
   [[nodiscard]] std::string_view firstMissingService() const;
 
  protected:
-  // A virtual base is built by the most derived class. This lets it name no
-  // such base: the base it derives through hands over the shared services.
+  // Lets the most derived class skip this virtual base: the intermediate base
+  // then calls `bindShared`.
   CoreServices() noexcept;
   void bindShared(SharedCoreServices& sharedServices) noexcept {
     _shared = std::addressof(sharedServices);
@@ -96,10 +90,8 @@ struct CoreServices {
   SharedCoreServices* _shared = nullptr;
 };
 
-// Fills the slots no grammar decides, fill-if-empty: a language module that
-// pre-installed one keeps it. `languageMetaData`, `parser` and `astReflection`
-// are deliberately left out -- the first two are the language's own, and the
-// reflection comes from its generated module.
+// Fills the slots no grammar decides, keeping any already set.
+// `languageMetaData`, `parser` and `astReflection` are the language's own.
 void install_default_core_services(CoreServices& services);
 
 }  // namespace cursiv

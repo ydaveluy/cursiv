@@ -67,7 +67,7 @@ struct infix_writes<R, Levels<Ls...>> {
 // What can still be written on the node an expression returns, and the calls
 // that can supply that node. `keeps` means some path leaves the incoming node
 // in hand. A nest kills that prefix; a directive's operand is another context.
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 struct node_effects {
   using writes = TypeList<>;
   using calls = TypeList<>;
@@ -173,10 +173,8 @@ struct writes_calls {
   struct of : dedupe<typename body_effects<St, R>::calls> {};
 };
 
-// The single-valued members a rule's node can end up with written, over every
-// path: what its body writes and what every rule whose node it can adopt
-// writes, a cycle included. The rules come from the closure of those calls,
-// so each rule has one answer whatever path asks for it.
+// The single-valued members a rule's node can end up with written: what its
+// body writes and what every rule whose node it can adopt writes.
 template <class St, class Rs>
 struct writes_of;
 template <class St, class... Rs>

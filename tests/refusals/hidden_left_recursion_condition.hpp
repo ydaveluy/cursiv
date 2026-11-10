@@ -1,4 +1,4 @@
-// The item in front of the recursion is a condition, which reads no text.
+// A recursive call behind a condition, which reads no text.
 // expect LR: refused .hiddenLeftRecursion..*rule .X. reaches itself before matching anything, behind an item that may match nothing
 // expect LL: refused .leftRecursion..*rule .X. reaches itself before matching anything
 #pragma once

@@ -1,7 +1,5 @@
-// The descent, and nothing else: the record containing the offset, then
-// the child containing it, until none does -- read outside-in, published
-// inside-out. Downwards because a `CstNode` carries no parent link, only
-// its own subtree extent.
+// Descends from the record containing the offset to the innermost child that
+// contains it, and answers inside-out.
 #pragma once
 
 #include <lsp/types.h>

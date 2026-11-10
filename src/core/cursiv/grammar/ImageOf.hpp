@@ -15,10 +15,9 @@
 #include "cursiv/utils/TypeName.hpp"
 #include "cursiv/utils/typelist.hpp"
 
-// Each expression type is a constant `ImageDesc`, each rule an `ImageRuleDesc`,
-// and nothing here is code: `GrammarImage` interns them when something reads
-// the grammar. `V` is the grammar whose pipeline resolves the rules, `void`
-// for an expression read as written.
+// Each expression type is a constant `ImageDesc`, each rule an
+// `ImageRuleDesc`, interned by `GrammarImage`. `V` is the grammar whose
+// pipeline resolves the rules, `void` for an expression read as written.
 
 namespace cursiv::detail {
 
@@ -86,7 +85,7 @@ template <class V, class E>
 inline constexpr ImageDesc kNode = no_image<E>();
 
 template <class V, class... Es>
-inline constexpr const ImageDesc* kKids[] = {&kNode<V, Es>...};
+inline constexpr const ImageDesc* kChildren[] = {&kNode<V, Es>...};
 
 // A rule refers to its body and the body to the rule: the rule is made by a
 // class defined after both, and only its address is taken in between.
@@ -120,10 +119,11 @@ struct Draft {
     c.d.flags = f;
     return c;
   }
-  consteval Draft kids(std::uint32_t count, const ImageDesc* const* k) const {
+  consteval Draft children(std::uint32_t count,
+                           const ImageDesc* const* k) const {
     Draft c = *this;
     c.d.count = count;
-    c.d.kids = k;
+    c.d.children = k;
     return c;
   }
   consteval Draft rule(const ImageRuleDesc* r) const {
@@ -180,9 +180,9 @@ template <class Gd>
 inline constexpr bool kExpressionGuard =
     !std::is_void_v<Gd> && !std::is_same_v<Gd, WordBound>;
 template <class V, class Gd>
-consteval const ImageDesc* const* guard_kids() {
+consteval const ImageDesc* const* guard_children() {
   if constexpr (kExpressionGuard<Gd>)
-    return kKids<V, Gd>;
+    return kChildren<V, Gd>;
   else
     return nullptr;
 }
@@ -193,7 +193,7 @@ inline constexpr ImageDesc kNode<V, Lit<S, CI, Gd>> =
             (CI ? kLitFolded : 0) |
             (std::is_same_v<Gd, WordBound> ? kLitGuardWord : 0) |
             (kExpressionGuard<Gd> ? kLitGuardExpr : 0)))
-        .kids(kExpressionGuard<Gd> ? 1u : 0u, guard_kids<V, Gd>())
+        .children(kExpressionGuard<Gd> ? 1u : 0u, guard_children<V, Gd>())
         .text(S.view());
 
 template <class V, std::uint64_t M, bool N, str S>
@@ -205,7 +205,7 @@ inline constexpr ImageDesc kNode<V, CpSet<M, N, S>> =
 
 template <class V, class E, str T>
 inline constexpr ImageDesc kNode<V, Doc<E, T>> =
-    Draft(ImageKind::doc).kids(1, kKids<V, E>).text(T.view());
+    Draft(ImageKind::doc).children(1, kChildren<V, E>).text(T.view());
 
 template <class V, class E>
 inline constexpr ImageDesc kNode<V, GapHas<E>> =
@@ -213,21 +213,21 @@ inline constexpr ImageDesc kNode<V, GapHas<E>> =
         .flags(static_cast<std::uint8_t>(
             std::is_same_v<E, std::remove_cvref_t<decltype(eol)>> ? kGapLine
                                                                   : 0))
-        .kids(1, kKids<V, E>);
+        .children(1, kChildren<V, E>);
 template <class V, class E>
 inline constexpr ImageDesc kNode<V, GapIs<E>> =
-    Draft(ImageKind::gapIs).kids(1, kKids<V, E>);
+    Draft(ImageKind::gapIs).children(1, kChildren<V, E>);
 template <class V, class T, class C>
 inline constexpr ImageDesc kNode<V, Implied<T, C>> =
-    Draft(ImageKind::implied).kids(2, kKids<V, T, C>);
+    Draft(ImageKind::implied).children(2, kChildren<V, T, C>);
 template <class V, class O, class Cl>
 inline constexpr ImageDesc kNode<V, Through<O, Cl>> =
-    Draft(ImageKind::through).kids(2, kKids<V, O, Cl>);
+    Draft(ImageKind::through).children(2, kChildren<V, O, Cl>);
 
 template <class V, class Tag, class E>
 inline constexpr ImageDesc kNode<V, Mark<Tag, E>> =
     Draft(ImageKind::mark)
-        .kids(1, kKids<V, E>)
+        .children(1, kChildren<V, E>)
         .text(type_name<Tag>())
         .tag(&type_tag<Tag>);
 template <class V, class Tag>
@@ -236,33 +236,33 @@ inline constexpr ImageDesc kNode<V, Same<Tag>> =
 
 template <class V, class... Es>
 inline constexpr ImageDesc kNode<V, Seq<Es...>> =
-    Draft(ImageKind::seq).kids(sizeof...(Es), kKids<V, Es...>);
+    Draft(ImageKind::seq).children(sizeof...(Es), kChildren<V, Es...>);
 template <class V, class... Es>
 inline constexpr ImageDesc kNode<V, Choice<Es...>> =
-    Draft(ImageKind::choice).kids(sizeof...(Es), kKids<V, Es...>);
+    Draft(ImageKind::choice).children(sizeof...(Es), kChildren<V, Es...>);
 template <class V, class... Es>
 inline constexpr ImageDesc kNode<V, Unordered<Es...>> =
-    Draft(ImageKind::unordered).kids(sizeof...(Es), kKids<V, Es...>);
+    Draft(ImageKind::unordered).children(sizeof...(Es), kChildren<V, Es...>);
 
 template <class V, std::size_t Mn, std::size_t Mx, class E>
 inline constexpr ImageDesc kNode<V, Repeat<Mn, Mx, E>> =
-    Draft(ImageKind::repeat).kids(1, kKids<V, E>).counts(Mn, Mx);
+    Draft(ImageKind::repeat).children(1, kChildren<V, E>).counts(Mn, Mx);
 
 template <class V, class E>
 inline constexpr ImageDesc kNode<V, Not<E>> =
-    Draft(ImageKind::notOf).kids(1, kKids<V, E>);
+    Draft(ImageKind::notOf).children(1, kChildren<V, E>);
 template <class V, class E>
 inline constexpr ImageDesc kNode<V, And<E>> =
-    Draft(ImageKind::andOf).kids(1, kKids<V, E>);
+    Draft(ImageKind::andOf).children(1, kChildren<V, E>);
 template <class V, class E>
 inline constexpr ImageDesc kNode<V, Trigger<E>> =
-    Draft(ImageKind::trigger).kids(1, kKids<V, E>);
+    Draft(ImageKind::trigger).children(1, kChildren<V, E>);
 template <class V, class P, class B>
 inline constexpr ImageDesc kNode<V, Commit<P, B>> =
-    Draft(ImageKind::commit).kids(2, kKids<V, P, B>);
+    Draft(ImageKind::commit).children(2, kChildren<V, P, B>);
 template <class V, class Gr, class E>
 inline constexpr ImageDesc kNode<V, Embed<Gr, E>> =
-    Draft(ImageKind::embed).kids(1, kKids<V, E>).rule(&kRule<V, Gr>);
+    Draft(ImageKind::embed).children(1, kChildren<V, E>).rule(&kRule<V, Gr>);
 
 template <class V, class R>
 inline constexpr ImageDesc kNode<V, Ref<R>> =
@@ -271,14 +271,14 @@ inline constexpr ImageDesc kNode<V, Ref<R>> =
 template <class V, class T, class E>
 inline constexpr ImageDesc kNode<V, Create<T, E>> =
     Draft(ImageKind::create)
-        .kids(1, kKids<V, E>)
+        .children(1, kChildren<V, E>)
         .text(type_name<T>())
         .row(kRowOf<V, Create<T, E>>);
 
 template <class V, class T, auto P, class E>
 inline constexpr ImageDesc kNode<V, Nest<T, P, E>> =
     Draft(ImageKind::nest)
-        .kids(1, kKids<V, E>)
+        .children(1, kChildren<V, E>)
         .text(type_name<T>(), member_name<P>())
         .row(kRowOf<V, Nest<T, P, E>>);
 
@@ -292,26 +292,26 @@ consteval std::string_view narrow_name() {
 template <class V, auto Sp, class E>
 inline constexpr ImageDesc kNode<V, Assign<Sp, E>> =
     Draft(ImageKind::assign)
-        .kids(1, kKids<V, E>)
+        .children(1, kChildren<V, E>)
         .text(member_name<spec_ptr<Sp>>(), narrow_name<Sp>())
         .row(kRowOf<V, Assign<Sp, E>>);
 template <class V, auto Sp, class E>
 inline constexpr ImageDesc kNode<V, Append<Sp, E>> =
     Draft(ImageKind::append)
-        .kids(1, kKids<V, E>)
+        .children(1, kChildren<V, E>)
         .text(member_name<spec_ptr<Sp>>(), narrow_name<Sp>())
         .row(kRowOf<V, Append<Sp, E>>);
 template <class V, auto P, class E>
 inline constexpr ImageDesc kNode<V, Flag<P, E>> =
     Draft(ImageKind::flag)
-        .kids(1, kKids<V, E>)
+        .children(1, kChildren<V, E>)
         .text(member_name<P>())
         .row(kRowOf<V, Flag<P, E>>);
 
 template <class V, class... Is, class... Hs, class E>
 inline constexpr ImageDesc kNode<V, Skip<TypeList<Is...>, TypeList<Hs...>, E>> =
     Draft(ImageKind::skip)
-        .kids(1, kKids<V, E>)
+        .children(1, kChildren<V, E>)
         .rules(RulesOf<V, TypeList<Is..., Hs...>>::kAll)
         .counts(sizeof...(Is), sizeof...(Hs));
 
@@ -459,11 +459,11 @@ struct RuleMaker {
     r.name = type_name<D>();
     r.qualified = raw_type_name<D>();
     r.anonymous = is_anonymous_rule<D>;
-    r.foreign = !std::is_void_v<typename home_of<D>::type>;
+    r.foreign = !std::is_void_v<typename owner_grammar_of<D>::type>;
     r.inlineTerminal = is_inline_terminal<D>;
     r.grammar = is_grammar<D>;
-    if constexpr (!std::is_void_v<typename home_of<D>::type>)
-      r.home = &kRule<V, typename home_of<D>::type>;
+    if constexpr (!std::is_void_v<typename owner_grammar_of<D>::type>)
+      r.ownerGrammar = &kRule<V, typename owner_grammar_of<D>::type>;
     r.stage = kStageOf<V, D>;
     r.written = &kWritten<V, D>;
     r.resolved = resolved_of<V, D>();

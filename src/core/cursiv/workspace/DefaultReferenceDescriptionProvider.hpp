@@ -5,11 +5,8 @@
 #include "cursiv/workspace/ReferenceDescription.hpp"
 #include "cursiv/workspace/ReferenceDescriptionProvider.hpp"
 
-// Grammar-free, for the reason the export provider is: what a reference is,
-// where its name was written and what it resolved to are read off the
-// document's own `DocumentReferences`, which its language's generated module
-// made. It resolves nothing -- the two walks it calls are reads, so indexing a
-// document never triggers the linking it is supposed to describe.
+// Grammar-free: references are read off the document's `DocumentReferences`.
+// It only reads, so indexing a document never triggers its linking.
 
 namespace cursiv {
 

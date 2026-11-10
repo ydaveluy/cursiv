@@ -8,15 +8,11 @@
 #include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/workspace/AstNodeDescription.hpp"
 
-// The documentation a hover shows: the comment the author wrote, rendered to
-// markdown with its {@link} targets resolved. The element arm reads the
-// grammar's own doc column. No per-document state, no cache to invalidate:
-// every answer is read where it lives.
+// The documentation a hover shows: the author's comment as markdown, with its
+// {@link} targets resolved. It keeps no state.
 
 namespace cursiv {
 
-// Not `final`: the four protected hooks are how a language changes what a
-// link points at or how a tag renders, without rewriting the rendering.
 class DefaultDocumentationProvider : public DocumentationProvider,
                                      protected DefaultCoreService {
  public:
@@ -26,10 +22,8 @@ class DefaultDocumentationProvider : public DocumentationProvider,
       const AstNode& node, const Document* document = nullptr) const override;
 
  protected:
-  // The markdown for one {@link name display}: resolved to the declaration's
-  // name site as `[display](uri#L{line},{column})`, 1-based. Nullopt falls
-  // back to the default rendering -- a URL stays a link, anything else is the
-  // display text.
+  // The markdown for one {@link name display}, at the declaration's name:
+  // `[display](uri#L{line},{column})`, 1-based. Nullopt uses the default.
   [[nodiscard]] virtual std::optional<std::string> documentationLinkRenderer(
       const AstNode& node, const Document& document, std::string_view name,
       std::string_view display) const;
@@ -37,8 +31,8 @@ class DefaultDocumentationProvider : public DocumentationProvider,
   [[nodiscard]] virtual std::optional<std::string> documentationTagRenderer(
       const AstNode& node, const Document& document, std::string_view name,
       std::string_view content, bool inlineTag) const;
-  // `name` as a doc link reads it: the exact spelling, climbing the node's
-  // containers -- no type filter, this is prose and not linking.
+  // The exact spelling, in the local scopes of the node and its containers,
+  // any type.
   [[nodiscard]] virtual std::optional<AstNodeDescription>
   findNameInLocalSymbols(const AstNode& node, const Document& document,
                          std::string_view name) const;

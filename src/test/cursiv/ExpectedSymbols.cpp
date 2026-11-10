@@ -24,6 +24,8 @@ Disposable expectSymbols(const LspServices& services,
   const ExpectedBase base = detail::baseOf(input);
   const std::shared_ptr<Document> document =
       parseDocument(services, base.text, base.parseOptions);
+  Disposable disposable = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(disposable);
   std::vector<lsp::DocumentSymbol> symbols;
   if (services.documentSymbolProvider != nullptr)
     symbols = services.documentSymbolProvider->getSymbols(*document, kNoCancel);
@@ -46,7 +48,6 @@ Disposable expectSymbols(const LspServices& services,
                               " symbols in document");
   }
 
-  Disposable disposable = detail::documentDisposable(services, document);
   if (base.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

@@ -43,7 +43,7 @@ struct LrDerivedTables {
 
   LrSetStore<S, S.dfa, D.typoReachSets> typoReach{};
   std::array<std::uint8_t, S.dfa> lexBodies{};
-  std::array<std::uint16_t, S.dfa> lexOwed{};
+  std::array<std::uint16_t, S.dfa> lexBodyTerms{};
   std::array<ByteSet, S.modes> lexOpeners{};
   LrSetStore<S, S.terms, D.afterSets> after{};
   LrSetStore<S, S.modes, D.modeWantSets> modeWant{};

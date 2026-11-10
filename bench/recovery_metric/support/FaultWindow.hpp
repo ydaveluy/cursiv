@@ -1,8 +1,6 @@
-// Where one fault may be answered, read on the twin and never on a repaired
-// tree: the stretch the fault touches -- its bytes, the tokens and the trivia
-// they reach -- widened by one token each side, then placed in the faulted
-// text. A token flush against the fault is touched when the faulted text puts
-// no blank between them: the lexer may glue the two.
+// Where one fault may be answered, read on the twin: the tokens and trivia it
+// touches, attached neighbours included, widened by one token each side and
+// placed in the faulted text.
 #pragma once
 
 #include <algorithm>

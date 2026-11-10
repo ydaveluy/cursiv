@@ -14,28 +14,27 @@ class LrSkipMemo {
  public:
   static constexpr std::uint32_t kSkips = 4;
 
-  // The token read from `from` in `mode` under bracket depth `depth`, off the
+  // The token read from `from` in `mode`, inside a bracket or not, off the
   // `n` terminals `skip` names; null for none.
   [[nodiscard]] const Token* find(TextOffset from, std::uint16_t mode,
-                                  std::uint32_t depth,
-                                  const std::uint16_t* skip,
+                                  bool inside, const std::uint16_t* skip,
                                   std::uint32_t n) const {
     if (_slots.empty()) return nullptr;
     const Slot& s = _slots[index(from, mode, skip, n)];
-    return s.live && s.from == from && s.mode == mode && s.depth == depth &&
+    return s.live && s.from == from && s.mode == mode && s.inside == inside &&
                    same(s, skip, n)
                ? &s.token
                : nullptr;
   }
 
-  void put(TextOffset from, std::uint16_t mode, std::uint32_t depth,
+  void put(TextOffset from, std::uint16_t mode, bool inside,
            const std::uint16_t* skip, std::uint32_t n, const Token& token) {
     if (_slots.empty()) _slots.resize(kSlots);
     Slot& s = _slots[index(from, mode, skip, n)];
     s.live = true;
     s.from = from;
     s.mode = mode;
-    s.depth = depth;
+    s.inside = inside;
     s.n = static_cast<std::uint8_t>(n);
     for (std::uint32_t i = 0; i < n; ++i) s.skip[i] = skip[i];
     s.token = token;
@@ -45,10 +44,10 @@ class LrSkipMemo {
   static constexpr std::uint32_t kSlots = 128;
   struct Slot {
     bool live = false;
+    bool inside = false;
     std::uint8_t n = 0;
     std::uint16_t mode = 0;
     TextOffset from = 0;
-    std::uint32_t depth = 0;
     std::uint16_t skip[kSkips];
     Token token;
   };

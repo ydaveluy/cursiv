@@ -1,3 +1,5 @@
+// A lookahead `same<Other>` with no `mark<Other>`, in a terminal that also
+// calls a recursive terminal.
 // expect LR: refused: terminal .MARKED. uses .same<>. where a .mark<>. with its tag is not set on every path before it
 #pragma once
 

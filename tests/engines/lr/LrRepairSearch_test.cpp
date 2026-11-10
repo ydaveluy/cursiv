@@ -58,13 +58,9 @@
 #include "repaircost/generated/G/Table.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
 
-// The repair search against what it stands for. Its election is the least key
-// an enumeration of every gesture sequence up to a cost finds from a flat
-// reading's pause, each goal of the least cost read on to where it is
-// refused; the writer it repairs through lays, over a whole valid document and
-// through the graphs its cells open, the drive's own records; and the faults
-// the old engine repaired by the wrong currency are repaired by the cheaper
-// one.
+// The repair search against what it stands for: its choice is the least key
+// an enumeration of every edit sequence up to a cost finds, and the writer
+// it repairs through writes the parser's own records over a valid document.
 
 namespace {
 
@@ -88,7 +84,7 @@ cursiv::engine::LrExit pause_then_cancel(cursiv::engine::LrContext& c) {
   return exit;
 }
 
-// The drive wrote real records before the stop. Recovery must throw rather
+// The parser wrote real records before the stop. Recovery must throw rather
 // than report a syntax refusal, and the direct caller keeps no partial tape.
 void a_stop_at_recovery_discards_the_partial_tree() {
   cursiv::CancellationTokenSource source;
@@ -125,7 +121,7 @@ void phases_and_generators_name_what_they_stand_for() {
     bool abandon, replace, insert, insertBeforeGarbage;
   };
   for (const Allowed& a :
-       {Allowed{LrRepairPhase::beforeGesture, true, true, true, true},
+       {Allowed{LrRepairPhase::beforeEdit, true, true, true, true},
         Allowed{LrRepairPhase::afterAbandon, false, true, true, true},
         Allowed{LrRepairPhase::inserting, false, true, true, false},
         Allowed{LrRepairPhase::discardOnly, false, false, false, false}}) {
@@ -155,7 +151,7 @@ void phases_and_generators_name_what_they_stand_for() {
         abandons.armNext == 6);
 }
 
-// Equal stacks at the same pause can still owe different insertion costs:
+// Equal stacks at the same pause can still have different insertion costs:
 // their allowances were fixed before the reductions that brought them here.
 // Both stand at an equal key; at a worse key, only one holding more.
 void insertion_allowance_is_part_of_the_future() {
@@ -168,11 +164,11 @@ void insertion_allowance_is_part_of_the_future() {
   s.configs[0].phase = cursiv::engine::LrRepairPhase::inserting;
   auto free = s.configs[0];
   free.freeInserts = 2;
-  free.link = s.link(cursiv::engine::LrGesture{.choice = 1});
+  free.link = s.link(cursiv::engine::LrEdit{.choice = 1});
   s.configs.push_back(free);
   for (const std::uint64_t held : {1u, 3u}) {
     auto dear = free;
-    dear.cost += cursiv::engine::kRepairGesture;
+    dear.cost += cursiv::engine::kRepairEdit;
     dear.freeInserts = held;
     s.configs.push_back(dear);
   }
@@ -183,22 +179,22 @@ void insertion_allowance_is_part_of_the_future() {
   cursiv::engine::lr_search_admit(s, 3);
   CHECK(s.configs[2].gone && !s.configs[3].gone);
 
-  auto owed = gdm::kTable.cold.close_row(c.stack.top().state);
-  const auto term = static_cast<cursiv::engine::SymbolId>(owed.take());
+  auto closeRow = gdm::kTable.cold.close_row(c.stack.top().state);
+  const auto term = static_cast<cursiv::engine::SymbolId>(closeRow.take());
   CHECK(term < gdm::kTable.cfg.nterms);
   for (unsigned i = 0; i < 2; ++i) {
     bool due = false;
     cursiv::engine::lr_search_insert<gdm::kTable>(c, s, i, term, 0, due);
     CHECK(due && !s.out.empty());
     for (const auto q : s.out) {
-      CHECK(s.configs[q].cost == (i == 0 ? cursiv::engine::kRepairGesture : 0));
+      CHECK(s.configs[q].cost == (i == 0 ? cursiv::engine::kRepairEdit : 0));
       if (i == 1) CHECK(s.configs[q].freeInserts == 1);
     }
   }
 }
 
 // In front of bytes no mode reads, one insertion is made, never a run: each
-// reading refuses them alike.
+// reading refuses them the same.
 void unread_bytes_take_one_insertion() {
   Stand<gdm::kTable> st("entity E { \xc3\xa9 : T }", gdm::kDrive);
   cursiv::engine::LrContext& c = st.c;
@@ -215,12 +211,12 @@ void unread_bytes_take_one_insertion() {
       one = i;
   CHECK(one != cursiv::engine::kLrNoConfig);
   if (one == cursiv::engine::kLrNoConfig) return;
-  const std::size_t laid = s.links.size();
+  const std::size_t linksBefore = s.links.size();
   cursiv::engine::lr_search_expand<gdm::kTable>(c, s, one);
   bool again = false, dropped = false;
-  for (std::size_t l = laid; l < s.links.size(); ++l) {
-    again = again || s.links[l].kind == cursiv::engine::LrGesture::ins;
-    dropped = dropped || s.links[l].kind == cursiv::engine::LrGesture::del;
+  for (std::size_t l = linksBefore; l < s.links.size(); ++l) {
+    again = again || s.links[l].kind == cursiv::engine::LrEdit::ins;
+    dropped = dropped || s.links[l].kind == cursiv::engine::LrEdit::del;
   }
   CHECK(!again && dropped);
 }
@@ -237,8 +233,8 @@ void merged_path_keeps_its_source_rank() {
   cursiv::engine::lr_search_root(s, c, c.committed, c.stack, c.tape.len(), 1,
                                  true);
   s.heap.clear();
-  auto owed = gdm::kTable.cold.close_row(c.stack.top().state);
-  const auto term = static_cast<cursiv::engine::SymbolId>(owed.take());
+  auto closeRow = gdm::kTable.cold.close_row(c.stack.top().state);
+  const auto term = static_cast<cursiv::engine::SymbolId>(closeRow.take());
   CHECK(term < gdm::kTable.cfg.nterms);
   std::uint32_t first = cursiv::engine::kLrNoConfig,
                 last = cursiv::engine::kLrNoConfig;
@@ -260,8 +256,8 @@ void merged_path_keeps_its_source_rank() {
   CHECK(!exhausted && !raced);
 }
 
-// The order a search elects in: cost, how far the goal reads on -- further
-// first -- then the author's tokens lost, gestures, faults, tokens invented,
+// The order a search chooses by: cost, how far the goal reads on -- further
+// first -- then the author's tokens lost, edits, faults, tokens inserted,
 // and the order of the frozen reading it set out from.
 using Key =
     std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t,
@@ -270,14 +266,14 @@ constexpr Key kNoKey{~0u, ~0u, ~0u, ~0u, ~0u, ~0u, ~std::uint64_t{0}};
 
 Key key_of(const cursiv::engine::LrConfig& x, cursiv::TextOffset reach,
            std::uint64_t order) {
-  return {x.cost, ~reach, x.lost, x.gestures, x.faults, x.invented, order};
+  return {x.cost, ~reach, x.lost, x.edits, x.faults, x.invented, order};
 }
 
 // The order of the frozen reading a path set out from.
 using Rank = std::function<std::uint64_t(const cursiv::engine::LrSearch&,
                                          std::uint32_t)>;
 
-// Goal `g` read on with no gesture, every arm of every cell: where its
+// Goal `g` read on with no edit, every arm of every cell: where its
 // furthest reading is refused, or all of it where one accepts.
 template <const auto& A>
 cursiv::TextOffset reach_of(cursiv::engine::LrContext& c,
@@ -312,7 +308,7 @@ cursiv::TextOffset reach_of(cursiv::engine::LrContext& c,
 }
 
 // Each of `goals` keyed as it reads on: as far as the furthest of those
-// that make its gestures, the arms they took aside.
+// that make its edits, the arms they took aside.
 template <const auto& A>
 std::vector<Key> keys_of(cursiv::engine::LrContext& c,
                          cursiv::engine::LrSearch& s,
@@ -325,8 +321,8 @@ std::vector<Key> keys_of(cursiv::engine::LrContext& c,
   for (std::size_t k = 0; k < goals.size(); ++k) {
     cursiv::TextOffset group = far[k];
     for (std::size_t j = 0; j < goals.size(); ++j)
-      if (cursiv::engine::lr_same_gestures(s.links, s.configs[goals[k]].link,
-                                           s.configs[goals[j]].link))
+      if (cursiv::engine::lr_same_edits(s.links, s.configs[goals[k]].link,
+                                        s.configs[goals[j]].link))
         group = std::max(group, far[j]);
     out.push_back(key_of(s.configs[goals[k]], group,
                          rank(s, s.configs[goals[k]].link)));
@@ -334,16 +330,14 @@ std::vector<Key> keys_of(cursiv::engine::LrContext& c,
   return out;
 }
 
-// Every gesture sequence from the roots `lay` sets out, to cost `most`, each
-// reading kept whatever another with its future holds: the least key a goal
-// reaches. Every refused reading on
-// the way is bounded by what its readings below reach: no goal under it is
-// cheaper than its bound says, paid then lost.
-template <const auto& A, class Lay>
+// Every edit sequence from the roots `setup` sets out, up to cost `most`:
+// the least key a goal reaches. No goal under a refused reading is cheaper than
+// its bound says.
+template <const auto& A, class Setup>
 Key enumerate(cursiv::engine::LrContext& c, std::uint32_t most,
-              std::string_view text, Lay lay, const Rank& rank) {
+              std::string_view text, Setup setup, const Rank& rank) {
   cursiv::engine::LrSearch s(c.len, kUnbounded, c.indentArena);
-  if (!lay(s)) return kNoKey;
+  if (!setup(s)) return kNoKey;
   std::vector<cursiv::engine::RepairEntry> todo(s.heap);
   s.heap.clear();
   std::vector<std::uint32_t> goals;
@@ -378,16 +372,17 @@ Key enumerate(cursiv::engine::LrContext& c, std::uint32_t most,
   for (const cursiv::engine::LrConfig& g : s.configs) {
     if (g.generates() || g.gone || !cursiv::engine::lr_search_goal(g)) continue;
     const std::uint64_t k = (std::uint64_t{g.cost} << 32) | g.lost;
-    for (std::uint32_t l = g.link; l != cursiv::engine::kNoGestureLink;
+    for (std::uint32_t l = g.link; l != cursiv::engine::kNoEditLink;
          l = s.links[l].parent)
       if (owner[l] != cursiv::engine::kLrNoConfig)
         below[owner[l]] = std::min(below[owner[l]], k);
   }
-  for (const auto& [i, owed] : refused) {
+  for (const auto& [i, costAhead] : refused) {
     const cursiv::engine::LrConfig& x = s.configs[i];
     const std::uint64_t floor =
-        (std::uint64_t{x.cost + owed / cursiv::engine::kLrPaid} << 32) |
-        (x.lost + owed % cursiv::engine::kLrPaid);
+        (std::uint64_t{x.cost + costAhead / cursiv::engine::kLrCostScale}
+         << 32) |
+        (x.lost + costAhead % cursiv::engine::kLrCostScale);
     if (below[i] == ~std::uint64_t{0} || floor <= below[i]) continue;
     std::printf("FAIL: `%.*s` bounds a reading at %llx, a goal under it %llx\n",
                 static_cast<int>(text.size()), text.data(),
@@ -406,23 +401,23 @@ Key enumerate(cursiv::engine::LrContext& c, std::uint32_t most,
 }
 
 void print_key(const Key& k) {
-  const auto [cost, far, lost, gestures, faults, invented, order] = k;
+  const auto [cost, far, lost, edits, faults, invented, order] = k;
   std::printf(
-      "(cost %u, reach %u, lost %u, gestures %u, faults %u, invented %u, "
+      "(cost %u, reach %u, lost %u, edits %u, faults %u, invented %u, "
       "order %llu)",
-      cost, ~far, lost, gestures, faults, invented,
+      cost, ~far, lost, edits, faults, invented,
       static_cast<unsigned long long>(order));
 }
 
-// The search's election from the roots `lay` sets out, keyed as the
+// The search's election from the roots `setup` sets out, keyed as the
 // enumeration keys it.
-template <const auto& A, class Lay>
-Key elect(cursiv::engine::LrContext& c, Lay lay, const Rank& rank,
+template <const auto& A, class Setup>
+Key elect(cursiv::engine::LrContext& c, Setup setup, const Rank& rank,
           std::uint32_t& cost) {
   cursiv::engine::LrSearch s(c.len, kUnbounded, c.indentArena);
   s.boundAfter = 0;
   cost = ~0u;
-  if (!lay(s)) return kNoKey;
+  if (!setup(s)) return kNoKey;
   bool exhausted = false;
   bool raced = false;
   const std::uint32_t at =
@@ -437,13 +432,13 @@ Key elect(cursiv::engine::LrContext& c, Lay lay, const Rank& rank,
 
 // The search elects the least key the enumeration finds from the same roots,
 // where it finds one within the cost it enumerates to.
-template <const auto& A, class Lay>
-void agree(cursiv::engine::LrContext& c, std::string_view text, Lay lay,
+template <const auto& A, class Setup>
+void agree(cursiv::engine::LrContext& c, std::string_view text, Setup setup,
            const Rank& rank) {
-  constexpr std::uint32_t kMost = 3 * cursiv::engine::kRepairGesture;
+  constexpr std::uint32_t kMost = 3 * cursiv::engine::kRepairEdit;
   std::uint32_t cost = 0;
-  const Key elected = elect<A>(c, lay, rank, cost);
-  const Key least = enumerate<A>(c, kMost, text, lay, rank);
+  const Key elected = elect<A>(c, setup, rank, cost);
+  const Key least = enumerate<A>(c, kMost, text, setup, rank);
   if (cost <= kMost ? elected == least : least == kNoKey) return;
   std::printf("FAIL: `%.*s` elects ", static_cast<int>(text.size()),
               text.data());
@@ -576,8 +571,8 @@ void same_records(const cursiv::Cst& ran, const cursiv::Cst& read,
   }
 }
 
-// A valid document read whole by the interpreted writer lays the records the
-// drive lays. False where a cell split rather than answered: the drive's
+// A valid document read whole by the interpreted writer writes the records the
+// drive writes. False where a cell split rather than answered: the drive's
 // branches are not the writer's to follow.
 template <const auto& A>
 bool writes_as_drive(const cursiv::engine::LrDrive& drive,
@@ -731,8 +726,6 @@ std::vector<cursiv::ParseDiagnostic> repaired_indent(std::string_view text) {
 
 }  // namespace
 
-// Which repair a reading makes, and what it costs over a long document.
-
 // Which repair a reading makes, and how much the search opens to find it.
 namespace repair_choice {
 
@@ -743,9 +736,9 @@ namespace open_g = topen::generated::G;
 
 namespace {
 
-// A missing `;` is owed where the whole definition closes, many rungs above
-// the operand the parse froze on: every rung of the climb offers its own
-// insertions, and the one the next line takes wins.
+// A missing `;` is needed where the whole definition closes, many levels above
+// the operand the parse froze on: every level offers its own insertions, and
+// the one the next line takes wins.
 void a_missing_terminator_is_inserted_where_the_construct_closes() {
   const auto inserted = [](const std::string& text) {
     cursiv::Cst cst;
@@ -769,7 +762,7 @@ void a_missing_terminator_is_inserted_where_the_construct_closes() {
 // A line indented deeper than a statement allows is one fault: the level
 // its skipped indent opened closes with no second word, whether its dedent
 // comes alone or after a suite's own.
-void a_stray_indent_is_said_once() {
+void an_extra_indent_is_said_once() {
   for (const char* text :
        {"a\n  b\nc\n", "a:\n  b\n    c\nd\n", "a\n  b\n  c\n  d\ne\n"}) {
     cursiv::Cst cst;
@@ -857,7 +850,7 @@ void a_deletion_names_the_token_it_resumes_on() {
 
 void run() {
   a_missing_terminator_is_inserted_where_the_construct_closes();
-  a_stray_indent_is_said_once();
+  an_extra_indent_is_said_once();
   a_refused_word_at_the_end_is_not_an_open_token();
   a_deletion_names_the_token_it_resumes_on();
   a_token_refused_in_its_middle_ends_at_its_closer();
@@ -918,8 +911,8 @@ void a_fault_per_member_is_said_once_each() {
 }
 
 // Calls left open to the end of the file: each is closed one way or the
-// other, and the readings frozen alike merge instead of doubling per call.
-void readings_frozen_alike_do_not_fill_the_room() {
+// other, and the readings frozen the same merge instead of doubling per call.
+void readings_frozen_the_same_do_not_fill_the_room() {
   std::string text;
   for (unsigned i = 0; i < 40; ++i) text += "a(";
   text += "b";
@@ -943,9 +936,7 @@ void a_document_of_close_faults_reads_in_one_pass() {
 }
 
 // Packages left open to the end of the file: one fault closes them all, and
-// each planned step reads only the frames it moved. Read against the whole
-// plan's lowest frame, this document takes seconds; each step alone, a few
-// hundredths.
+// each planned step reads only the frames it moved.
 void a_run_of_closers_replays_in_one_pass() {
   std::string text;
   for (unsigned i = 0; i < 50000; ++i) text += "package p {";
@@ -960,18 +951,15 @@ void a_run_of_closers_replays_in_one_pass() {
 
 void run() {
   a_fault_per_member_is_said_once_each();
-  readings_frozen_alike_do_not_fill_the_room();
+  readings_frozen_the_same_do_not_fill_the_room();
   a_document_of_close_faults_reads_in_one_pass();
   a_run_of_closers_replays_in_one_pass();
 }
 
 }  // namespace repair_scale
 
-// Repairs over long documents: their cost, their ledger, and the arms a
-// repaired reading forks.
-
 // A repair's cost follows the document, not the square of it: 16 KiB of
-// stray bytes between good tokens.
+// invalid bytes between good tokens.
 namespace repair_cost {
 
 namespace g = trepair::generated::G;
@@ -986,13 +974,13 @@ std::string noise(unsigned n) {
   return t + "w } end";
 }
 
-void a_document_of_stray_bytes_is_read_in_one_pass() {
+void a_document_of_invalid_bytes_is_read_in_one_pass() {
   cursiv::Cst cst;
   cursiv::engine::LrParseStats stats;
   const std::string text = noise(4096);
   cursiv::engine::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive);
   // What a quadratic repair breaks first is the clock, and the lane's own
-  // timeout is what catches that. Each stray byte is said once, within the
+  // timeout is what catches that. Each invalid byte is said once, within the
   // budget.
   unsigned bounded = 0;
   for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
@@ -1003,9 +991,7 @@ void a_document_of_stray_bytes_is_read_in_one_pass() {
 
 }  // namespace
 
-void run() {
-  a_document_of_stray_bytes_is_read_in_one_pass();
-}
+void run() { a_document_of_invalid_bytes_is_read_in_one_pass(); }
 
 }  // namespace repair_cost
 
@@ -1063,7 +1049,7 @@ void run() {
 }  // namespace ledger
 
 // A repair followed by a tail of statements each crossing a cell the text
-// never settles: the arms a repaired reading forks must merge back like any
+// never resolves: the arms a repaired reading forks must merge back like any
 // other's, or they double at every statement.
 namespace ambiguous_tail {
 
@@ -1147,7 +1133,7 @@ void matches_the_emitted_automata() {
   for (std::size_t start = 0; start < n; ++start) {
     CHECK(actualBodies[start] == bodies[start]);
     Set reachable;
-    bool owesCloser = false;
+    bool leadsToCloser = false;
     std::vector<std::uint8_t> seen(n, 0);
     std::vector<std::uint16_t> todo{static_cast<std::uint16_t>(start)};
     seen[start] = 1;
@@ -1155,9 +1141,9 @@ void matches_the_emitted_automata() {
       const auto s = todo.back();
       todo.pop_back();
       reachable |= A.dfa_acc_set(s);
-      owesCloser |= bodies[s] != 0;
+      leadsToCloser |= bodies[s] != 0;
       if constexpr (A.relays.size() != 0)
-        owesCloser |= A.dfaRelay[s] != cursiv::engine::kNoRelay;
+        leadsToCloser |= A.dfaRelay[s] != cursiv::engine::kNoRelay;
       for (const auto to : successors[s])
         if (seen[to] == 0) {
           seen[to] = 1;
@@ -1175,7 +1161,7 @@ void matches_the_emitted_automata() {
         if (A.next_byte(A.modeStart[mode], static_cast<unsigned char>(b)) ==
             start)
           CHECK(openers[mode].has(static_cast<unsigned char>(b)) ==
-                owesCloser);
+                leadsToCloser);
   }
   const auto& openers = A.derived.lexOpeners;
   for (std::size_t mode = 0; mode < A.modeStart.size(); ++mode)
@@ -1327,7 +1313,7 @@ int main() {
   }
   // The end of the input under a level whose indent a repair dropped, with no
   // last newline: the drive's dedents close the levels under the dropped
-  // ones, and a dropped level alone owes none.
+  // ones, and a dropped level alone needs none.
   {
     namespace gb = ::tindent::body::generated::G;
     for (const std::string_view text :
@@ -1342,12 +1328,12 @@ int main() {
     const auto d = repaired<ga::kTable>("module m f(1 2);", ga::kDrive);
     CHECK(d.size() == 1 && d[0].kind == cursiv::DiagnosticKind::inserted);
   }
-  // Parentheses owed at the end, however many: one fault, closed.
+  // Parentheses needed at the end, however many: one fault, closed.
   {
     const auto d = repaired<ga::kTable>("module m ((((((((((((1", ga::kDrive);
     CHECK(d.size() == 1 && d[0].kind == cursiv::DiagnosticKind::inserted);
   }
-  // A run of stray openers is one fault; past what the budget pays for
+  // A run of extra openers is one fault; past what the budget pays for
   // searching, still a few, and the bound says so.
   {
     const auto d =
@@ -1360,10 +1346,9 @@ int main() {
     CHECK(d.size() <= 4 && !d.empty() &&
           d.back().kind == cursiv::DiagnosticKind::bounded);
   }
-  // A search stopped by its own share says so over its fault, which the
-  // searches after it finish as one, and the next fault is searched for;
-  // only the parse's budget running out leaves the rest to the first gesture
-  // that holds.
+  // A search stopped by its own share says so over its fault, the searches
+  // after it finish as one, and the next fault is searched for; only the
+  // parse's budget running out leaves the rest to the first edit that holds.
   {
     constexpr std::string_view kDoc = "entity A {{{{{{{{{{{{ a: B c D }";
     const auto own = repaired<gdm::kTable>(
@@ -1400,7 +1385,7 @@ int main() {
     const auto d = repaired_indent("a:\n  b\n    c\n    d\n  e\nf\n");
     CHECK(d.size() == 1 && d[0].kind == cursiv::DiagnosticKind::deleted);
   }
-  // A token invented at a line start leaves the line's run to the token the
+  // A token inserted at a line start leaves the line's run to the token the
   // author wrote: the drive reads it as the search did.
   {
     const auto d = repaired_indent("a:\n  b:\n  *  c\nx\n");

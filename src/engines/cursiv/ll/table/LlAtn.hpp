@@ -34,7 +34,7 @@ struct LlAtnEdge {
   // atom: the terminal | rule: the nonterminal.
   std::uint16_t label = 0;
   std::uint32_t target = 0;
-  // rule: the state the call returns to. Unread for the other two.
+  // rule: the state the call returns to. Unread for the other kinds.
   std::uint32_t follow = 0;
 
   constexpr bool operator==(const LlAtnEdge&) const = default;

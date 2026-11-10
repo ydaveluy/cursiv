@@ -5,39 +5,20 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
+#include "cursiv/Check.hpp"
+#include "cursiv/SkippedLeaf.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/parser/DefaultParserErrorMessageProvider.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/Check.hpp"
-#include "cursiv/SkippedLeaf.hpp"
 
-// The recovery corpus as a lane: fifty broken documents over five shipped
-// languages, each a named break (a typo, a closer gone, an intruder, a
-// truncation -- the corpus manifest names each), plus the valid twin
-// every one of them was cut from.
-//
-// What a row asks, and the last one is the property the whole feature lives
-// or dies by:
-//
-//   1. The valid twin parses clean -- `accepted && !recovered`. A repair
-//      that fires on a correct document is a defect, whatever it recovers.
-//   2. The broken one is accepted, with its error spans situated: the
-//      signature carries every span, so a repair that drifts by a byte is a
-//      line that moved, not a bit that flipped.
-//   3. Completeness: how much of the valid document's token list survives.
-//      One number per document, pinned -- a repair that gives up early
-//      shows as a number that fell.
-//   4. Nothing invented: every token of the repaired tree is a token of the
-//      valid tree, counted as a multiset. A recovery may lose text; it may
-//      never make text up.
-//   5. What each repair says: its kind, the position it names, and the
-//      sentence an author is shown -- rendered here by the very function the
-//      validator calls, so a wording that drifts is a line that moved.
-//   6. The floor, in `language` below: what no regeneration may bless.
+// The recovery corpus as a lane: broken documents, each with the valid twin
+// it was cut from. A row checks that the twin parses clean, then the broken
+// one's spans, kept and invented tokens, repairs and minimum checks.
 
 namespace cursiv::test {
 
@@ -70,11 +51,10 @@ namespace detail {
 inline constexpr std::string_view kKind[] = {"ins", "del", "rep", "eof",
                                              "conv", "bnd"};
 
-// What a repair was owed, named: a terminal is spelled by the grammar or it is
-// named, and nothing else is owed -- a repair inserts bytes the lexer would
-// match, never a position of a tree above.
-inline std::string_view owed_name(const cursiv::Grammar& grammar,
-                                  cursiv::ElementId e) {
+// The name of what a repair expected: a terminal's spelling, or its name. A
+// repair inserts bytes the lexer would match, never a node of a tree above.
+inline std::string_view expected_name(const cursiv::Grammar& grammar,
+                                      cursiv::ElementId e) {
   if (e == cursiv::kNoElement) return "?";
   const auto spellings = grammar.terminalSpellings(e);
   if (spellings.size() == 1) return spellings.front();
@@ -100,10 +80,8 @@ inline Proj project(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
     const cursiv::CstNode& n = cst[i];
     if (n.subtreeSize != 1) continue;  // leaves alone
-    // An error span is text the repair threw away: a skipped leaf names no
-    // state, since no shift ever reached it. A token the repair invented and
-    // one it re-read as the terminal owed both name the state that took
-    // them -- both are still tokens, counted by `inv` against the valid twin.
+    // A skipped leaf is an error span and names no state. A token a repair
+    // invented or re-read names the state that took it.
     if (skipped_leaf(grammar, n)) {
       p.errors.emplace_back(n.begin, n.end);
       continue;
@@ -117,7 +95,7 @@ inline Proj project(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
     // reports -- a literal by its spelling, a rule by its name -- and then
     // the sentence itself, which is the only part an author ever reads.
     p.diags.emplace_back(std::string(kKind[static_cast<int>(d.kind)]) + ":" +
-                         std::string(owed_name(grammar, d.element)) + "@" +
+                         std::string(expected_name(grammar, d.element)) + "@" +
                          std::to_string(d.begin) + "<" +
                          words.buildMessage(grammar, d, text) + ">");
   }
@@ -126,9 +104,8 @@ inline Proj project(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
 
 }  // namespace detail
 
-// Through the erased door, like every other lane: the language's own module is
-// where its engine is compiled, and a lane that named the grammar would build
-// the state chain a second time.
+// Through the type-erased `Parser`, like every other lane: naming the grammar
+// here would compile its engine a second time.
 inline Proj project(const cursiv::Parser& engine, const std::string& text) {
   const cursiv::ParseResult result = engine.parse(text);
   Proj p = detail::project(engine.getGrammar(), result.cst(), text);
@@ -157,8 +134,8 @@ inline int invented(const std::vector<std::string>& got,
 }
 
 // One line per document: the verdict, the spans, the two numbers. The
-// reference file holds these; the properties below hold what no
-// regeneration may bless.
+// reference file holds these; the checks below hold what `--write` cannot
+// accept.
 inline std::string signature(const Proj& p, std::size_t validTokens, int inv) {
   std::string s = "acc=" + std::to_string(int(p.accepted)) +
                   " cov=" + std::to_string(int(p.covered)) +
@@ -186,10 +163,7 @@ struct Lane {
   void close() const {
     std::string text;
     for (const std::string& l : lines) text += l + "\n";
-    // WHAT IS REFRESHED IS WHAT WAS READ. Writing a second file wherever the
-    // answer moved forked the reference under the engine that owns the corpus
-    // and left the shared one to rot; an engine that needs a reference of its
-    // own is one whose file already stands beside it.
+    // Only the reference that was read is refreshed.
     const std::string path = reference_path();
     if (write) {
       // An engine's own file stands only while its repairs differ: once they
@@ -199,14 +173,22 @@ struct Lane {
         std::filesystem::remove(path);
         return;
       }
-      std::FILE* const f = std::fopen(path.c_str(), "w");
-      if (f == nullptr) {
+      // Written beside the reference, then renamed over it: a write that
+      // fails, down to the last flush, leaves the reference as it was.
+      const std::string written = path + ".tmp";
+      std::FILE* const f = std::fopen(written.c_str(), "wb");
+      bool whole = f != nullptr;
+      if (whole) {
+        whole = std::fwrite(text.data(), 1, text.size(), f) == text.size();
+        whole = std::fclose(f) == 0 && whole;
+      }
+      std::error_code error;
+      if (whole) std::filesystem::rename(written, path, error);
+      if (!whole || error) {
+        std::filesystem::remove(written, error);
         std::printf("cannot write %s\n", path.c_str());
         ++failures;
-        return;
       }
-      std::fwrite(text.data(), 1, text.size(), f);
-      std::fclose(f);
       return;
     }
     const std::string want = cursiv::test::read_file(path);
@@ -232,9 +214,9 @@ struct Lane {
     return std::string(CURSIV_RECOVERY_CORPUS) + "/REFERENCE.txt";
   }
 
-  // Where this engine's own reference stands, when it has one. Its absence is
-  // the statement that this engine reads the corpus the way the shared file
-  // says, and `--write` then refreshes that file rather than minting this one.
+  // Where this engine's own reference stands, when it has one. Without it, this
+  // engine reads the corpus as the shared file says, and `--write` refreshes
+  // that file rather than creating this one.
   static std::string own_reference_path() {
     const std::string dir(CURSIV_RECOVERY_CORPUS);
 #if defined(CURSIV_ENGINE_LR)
@@ -260,7 +242,7 @@ inline void language(Lane& lane, const cursiv::Parser& engine,
                      std::string_view validName,
                      const std::vector<std::string>& broken) {
   const Proj valid = project(engine, document(validName));
-  // (1) The valid twin is clean. Everything below is read against it.
+  // The valid twin is clean. Everything below is read against it.
   if (!valid.accepted || valid.recovered) {
     std::printf(
         "FAIL %s: the valid document is not taken cleanly (acc=%d "
@@ -286,7 +268,7 @@ inline void language(Lane& lane, const cursiv::Parser& engine,
                   lane.lang.c_str(), name.c_str());
       ++failures;
     }
-    // (2) A broken document is never taken as a clean one: it is repaired,
+    // A broken document is never taken as a clean one: it is repaired,
     // or it is refused. Silently accepting a break is the one answer an
     // editor cannot work with.
     if (p.accepted && !p.recovered) {
@@ -294,27 +276,21 @@ inline void language(Lane& lane, const cursiv::Parser& engine,
                   lane.lang.c_str(), name.c_str());
       ++failures;
     }
-    // (3) An accepted document has a tree: a repair that leaves the builder
+    // An accepted document has a tree: a repair that leaves the builder
     // nothing to build has not repaired anything.
     if (p.accepted && !p.value) {
       std::printf("FAIL %s/%s: accepted without an AST\n", lane.lang.c_str(),
                   name.c_str());
       ++failures;
     }
-    // (4) Invention is re-reading, not fabrication. No repair inserts text
-    // -- spans are skipped and elements retried -- so a token the valid
-    // document lacks is the same bytes read another way (`de` where `def`
-    // was meant). The number is pinned rather than forbidden: it moves when
-    // a repair starts guessing.
+    // Invention is re-reading: a token the valid document lacks is the same
+    // bytes read another way. Bounded, so a repair that guesses fails.
     if (inv > 4) {
       std::printf("FAIL %s/%s: %d tokens re-read -- a repair is guessing\n",
                   lane.lang.c_str(), name.c_str(), inv);
       ++failures;
     }
-    // (6) The floor, and it is what `--write` may not reach. A signature
-    // records what the recovery did, and regenerating it is how a
-    // deliberate change lands, so nothing above refuses a row saying the
-    // recovery did nothing -- the floor is the three checks below instead.
+    // The three checks below, which `--write` cannot accept.
     if (!p.covered) {
       std::printf("FAIL %s/%s: the tree does not reach the last byte\n",
                   lane.lang.c_str(), name.c_str());

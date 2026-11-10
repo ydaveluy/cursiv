@@ -1,6 +1,6 @@
-// A name an escape may begin, reading one on past a word it refuses, under a
-// word boundary without the escape's backslash: `inA` would be read as
-// `in` and a second name.
+// A name that excludes the keyword `in` and may go on with an escape, whose
+// backslash is outside the word boundary: `in` then an escape would be read
+// as `in` and a second name.
 // expect LR: refused: terminal .NAME. excludes ."in". at its start, and can read .\\. at the start of a word and again after ."in".
 #pragma once
 

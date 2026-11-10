@@ -28,8 +28,6 @@
 namespace cursiv {
 namespace {
 
-// The request's `only` filter: absent or empty accepts everything; otherwise
-// the QuickFix kind must be among what the client asked for.
 [[nodiscard]] bool accepts_quick_fixes(const lsp::CodeActionContext& context) {
   if (!context.only.has_value() || context.only->empty()) return true;
   return std::ranges::any_of(*context.only,
@@ -93,17 +91,16 @@ namespace {
                            *candidate.data);
 }
 
-// One edit row into one code action; null when the row is malformed, stale
-// (another revision's offsets) or out of bounds -- a dropped fix reappears
-// with the next build's fresh block.
+// One edit row as one code action; null when the row is malformed, stale
+// (offsets of another revision) or out of bounds. A dropped fix comes back
+// with the next build.
 [[nodiscard]] std::optional<lsp::CodeAction> make_action(
     const Document& document, const Diagnostic& diagnostic,
     const JsonValue& row, std::span<const lsp::Diagnostic> clientDiagnostics) {
   if (!row.isObject()) return std::nullopt;
   const JsonValue::Object& object = row.object();
-  // The edit is derived from kind/title/newText/begin/end/revision alone: the
-  // `editKind` the writer also carries is not consumed here -- insert against
-  // replace is what `begin == end` already says.
+  // `editKind` is ignored: `begin == end` already tells an insert from a
+  // replace.
   const JsonValue* kind = field(object, detail::kKindField);
   const JsonValue* title = field(object, detail::kTitleField);
   const JsonValue* newText = field(object, detail::kNewTextField);
@@ -165,9 +162,8 @@ std::vector<lsp::CodeAction> DefaultCodeActionProvider::getCodeActions(
   // The `only` filter gates the built-in quick fixes alone: the hook below
   // decides its own kinds.
   if (accepts_quick_fixes(params.context)) {
-    // The request's range, as offsets over this text -- what selects which
-    // findings the client is asking about. Touching counts: a caret sitting
-    // on a zero-width repair point must reach it.
+    // Findings touching the request's range count: a caret on a zero-width
+    // repair point must reach it.
     const TextOffset from =
         document.textDocument().offsetAt(from_lsp(params.range.start));
     const TextOffset to =
@@ -183,8 +179,8 @@ std::vector<lsp::CodeAction> DefaultCodeActionProvider::getCodeActions(
     for (const Diagnostic& diagnostic : document.diagnostics)
       if (diagnostic.range.begin <= to && diagnostic.range.end >= from)
         asked.push_back(&diagnostic);
-    // Asked here, for the findings under the request: the lookup walks the
-    // reference's whole scope, which no validation pays for every site.
+    // Spelling fixes are computed here, only for the findings under the
+    // request: the lookup walks the reference's whole scope.
     throw_if_cancelled(token);
     const std::vector<JsonValue::Array> spelled =
         detail::spelling_actions(document, asked);

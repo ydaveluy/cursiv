@@ -1,3 +1,4 @@
+// A `mark` set inside a lookahead: the `same` after it does not see it.
 // expect LR: refused: terminal .OUTER. uses .same<>. where a .mark<>. with its tag is not set on every path before it
 #pragma once
 #include "refusals/head.hpp"

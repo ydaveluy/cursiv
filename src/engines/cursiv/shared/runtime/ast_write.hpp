@@ -1,5 +1,4 @@
-// One member's write, from a pending to the node that owns it: the storage
-// peeled, the nature dispatched, the conversion run or the node wired.
+// One member's write, from a pending value to the node that owns it.
 #pragma once
 
 #include <cassert>
@@ -53,8 +52,8 @@ CURSIV_ALWAYS_INLINE inline bool run_conv(AstBuildCtx& ctx, NodeId id,
   return c.fn(ctx, id, &member);
 }
 
-// One body per written member. The caller proved the owner, so the cast is a
-// fact.
+// One body per written member. The caller checked the owner's class, so the
+// cast is safe.
 template <class F>
 CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
                                             AstNode* owner,
@@ -64,7 +63,7 @@ CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
   using X = typename F::held;
   (void)field, (void)kind, (void)alt;
   auto& member = ast_cast_unchecked<typename F::owner>(owner)->*F::ptr;
-  if constexpr (F::nature == FieldNature::node) {
+  if constexpr (F::content == FieldContent::node) {
     using T = std::remove_pointer_t<X>;
     static_assert(
         std::is_base_of_v<AstNode, T>,
@@ -79,8 +78,8 @@ CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
     place<X>(member, ast_cast_unchecked<T>(p.value));
     p.value->parent = owner;
     ++ctx.attached;
-  } else if constexpr (is_ref_nature(F::nature)) {
-    // `check_write` refuses a reference source that is not `is_text_pay`.
+  } else if constexpr (is_ref_content(F::content)) {
+    // `check_write` refuses a reference source that is not `is_text_payload`.
     assert(conv != nullptr &&
            "a reference member is written from a text payload, and a text "
            "payload always carries a conversion");
@@ -95,7 +94,8 @@ CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
       else
         return member.emplace_back();
     }();
-    // Stamped with what this site accepts, which may be less than the member.
+    // Bound to the targets this site accepts, which may be fewer than the
+    // member's.
     RefAccess::bind(slot, p.text, text, p.narrow);
     std::uint32_t index = 0;
     if constexpr (F::storage == FieldStorage::vector) {
@@ -103,9 +103,10 @@ CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
     } else {
       // Reassigning a scalar keeps its location, once verified: a copied
       // reference may carry another member's handle.
-      const auto*& home = RefAccess::home(slot);
+      const auto*& resolver = RefAccess::resolver(slot);
       const std::uint32_t handle = RefAccess::handle(slot);
-      if (home == ctx.home && home != nullptr && handle < ctx.refs->size()) {
+      if (resolver == ctx.resolver && resolver != nullptr &&
+          handle < ctx.refs->size()) {
         const RefHandle& previous = (*ctx.refs)[handle];
         if (previous.owner == owner && previous.field == field &&
             previous.index == 0)
@@ -114,10 +115,10 @@ CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
     }
     // A handle, never a pointer: a vector of references relocates as it grows,
     // the owner does not.
-    RefAccess::home(slot) = ctx.home;
+    RefAccess::resolver(slot) = ctx.resolver;
     RefAccess::handle(slot) = static_cast<std::uint32_t>(ctx.refs->size());
     ctx.refs->emplace_back(owner, field, index);
-  } else if constexpr (F::nature == FieldNature::variant) {
+  } else if constexpr (F::content == FieldContent::variant) {
     AstNode* const held = node_held(member);
     if (p.value != nullptr) {
       using L = typename variant_node_alt<X>::type;

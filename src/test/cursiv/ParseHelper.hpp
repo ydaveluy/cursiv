@@ -1,4 +1,4 @@
-// One text into a built document, and the sweep that takes it back out. The
+// Builds a document from one text, and removes it again. The
 // document is added to the workspace store, so what a helper returns is
 // reachable by URI until `clearDocuments` removes it.
 #pragma once

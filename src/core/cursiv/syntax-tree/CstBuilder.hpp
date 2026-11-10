@@ -1,7 +1,6 @@
-// How a tree is produced, and the only writer `Cst` admits: enter/exit,
-// leaf/hidden, and the binds a finished pass states its result through. An
-// engine reaches the run directly through `stream()`; anyone else drives the
-// calls above.
+// How a tree is written, and the only writer of a `Cst`: enter/exit,
+// leaf/hidden, and the `bind_*` calls that finish a pass. Leaf and walk reads
+// index the tree once, so they come after the build.
 #pragma once
 
 #include <cassert>
@@ -40,9 +39,9 @@ class CstBuilder {
   // Opening performs no write and needs no matching cancellation on failure.
   [[nodiscard]] Open enter() const noexcept { return Open(_cst.size()); }
 
-  // The run's law: ends never decrease, hidden records included. A parent
-  // therefore goes right after its last visible descendant -- before any
-  // trailing trivia -- and its end is that descendant's.
+  // Ends never decrease, hidden records included: a parent goes right after
+  // its last visible descendant, before any trailing trivia, and ends where
+  // that descendant ends.
   NodeId exit(Open from, TextOffset begin, std::uint32_t engine) {
     assert(from._count <= _cst.size() &&
            "a CST parent cannot start after its children");
@@ -65,7 +64,7 @@ class CstBuilder {
     return id;
   }
 
-  // Inlined like the run's own writers: an engine lays one per token.
+  // Inlined like the run's own writers: an engine writes one per token.
   CURSIV_ALWAYS_INLINE NodeId leaf(TextOffset begin, TextOffset end,
                                    std::uint32_t engine) {
     _cst._stream.leaf(begin, end, engine);
@@ -77,35 +76,34 @@ class CstBuilder {
     return _cst.size() - 1;
   }
 
-  // A repair, as a value -- appended by the surviving attempt, since what a
-  // rewind dropped never reaches here. This list is what `Cst::recovered()`
-  // reads: a repair and its record cannot drift apart if there is only one
-  // of them.
+  // A repair, appended by the attempt that survived. `Cst::recovered()` reads
+  // this list.
   void note_repair(DiagnosticKind kind, ElementId element, TextOffset begin,
-                   TextOffset end, std::vector<ElementId> also = {}) {
-    // Twice the same sentence is one fault seen twice: nested constructs
-    // closing at one point owe the same closer.
+                   TextOffset end, std::vector<ElementId> also = {},
+                   bool mixedIndent = false) {
+    // Two identical repairs in a row are one fault: nested constructs closing
+    // at one point expect the same closer.
     if (!_cst._diagnostics.empty()) {
       const ParseDiagnostic& last = _cst._diagnostics.back();
       if (last.kind == kind && last.element == element && last.begin == begin &&
-          last.end == end)
+          last.end == end && last.also == also &&
+          last.mixedIndent == mixedIndent)
         return;
     }
     _cst._diagnostics.push_back(
-        {kind, element, std::move(also), begin, end, {}});
+        {kind, mixedIndent, element, std::move(also), begin, end, {}});
   }
 
   // Where an engine writes its records, and where every reader reads them:
   // one run, indexed by node id.
   CstRun& stream() { return _cst._stream; }
   const CstRun& stream() const { return _cst._stream; }
-  // States that the records on the run are an engine's, stamps included.
+  // Marks the records as written by an engine.
   void bind_stream() { _cst.bind_stream(); }
   void reserve_stream(std::size_t words) { _cst._stream.reserve_for(words); }
 
-  // The two facts a completed pass states about its run. Guarded: a caller may
-  // name a root no record answers to; such a root binds none, and an AST build
-  // answers `no_entry` rather than indexing past the end.
+  // Set by a completed pass. A root with no record binds nothing, and the AST
+  // build then answers `no_entry` rather than reading past the end.
   void bind_entry(NodeId begin, NodeId end, NodeId root) noexcept {
     const bool in_range = root == kNoNode || root < _cst.size();
     _cst.bind_entry(begin, end, in_range ? root : kNoNode);
@@ -120,11 +118,8 @@ class CstBuilder {
   }
 
  private:
-  // The empty composite goes at its region's open, not at the run's end:
-  // records before the open end at or before its `begin`, trivia taken
-  // inside the region ends after it -- appending past that trivia would
-  // break the run's end order. It is the last visible record then: the
-  // enclosing exit must land after it, or the subtree would lose a child.
+  // The empty composite goes at its region's open, not at the run's end, so
+  // the run stays in end order and the enclosing exit comes after it.
   NodeId exit_empty(Open from, TextOffset begin, std::uint32_t engine) {
     const NodeId id = from._count;
     if (id == _cst.size())

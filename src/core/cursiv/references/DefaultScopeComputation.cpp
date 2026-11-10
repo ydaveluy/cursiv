@@ -16,10 +16,8 @@ std::vector<AstNodeDescription> DefaultScopeComputation::collectExportedSymbols(
   AstNode* const root = document.parseResult.value;
   if (root == nullptr) return {};
 
-  // The root, then what it directly contains: nothing deeper is another
-  // document's business. Asked of the grammar rather than filtered out of the
-  // whole tree -- a document is exported by its top level, which is a handful
-  // of nodes however deep the rest goes.
+  // The root, then what it directly contains, asked of the grammar: a document
+  // exports its top level only.
   return collectExportedSymbolsForNode(
       *root, document,
       [&](function_ref<void(AstNode&)> visit) {
@@ -63,7 +61,7 @@ LocalSymbols DefaultScopeComputation::collectLocalSymbols(
   // Collected flat in declaration order, grouped and indexed once: nothing is
   // inserted after this, so nothing moves and the addresses handed out below
   // are final.
-  symbols.seal();
+  symbols.build_index();
   return symbols;
 }
 

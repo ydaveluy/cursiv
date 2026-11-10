@@ -9,11 +9,14 @@
       "include": "#comments"
     },
     {
-      "name": "keyword.control.domain-model",
-      "match": "(?i)\\b(datatype|entity|extends|many|package)\\b"
+      "include": "#keywords"
     }
   ],
   "repository": {
+    "keywords": {
+      "name": "keyword.control.domain-model",
+      "match": "(?i)\\b(datatype|extends|package|entity|many)\\b"
+    },
     "comments": {
       "patterns": [
         {

@@ -40,6 +40,9 @@ public:
         std::cout << "[" << state->get_name() << "]" << std::endl;
     }
 
+    TrafficLight(const TrafficLight&) = delete;
+    TrafficLight& operator=(const TrafficLight&) = delete;
+
     ~TrafficLight() {
         if (state != nullptr) {
             delete state;

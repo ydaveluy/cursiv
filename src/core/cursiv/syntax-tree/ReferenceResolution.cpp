@@ -158,7 +158,7 @@ RefState wait_for_reference(RefState& state) {
   } unlink{shared, request};
   // Cancellation can publish Unresolved and another reader can immediately
   // claim the next computation. Running without the observed bit must leave
-  // this wait too, so its next pass announces itself to that new producer.
+  // this wait too, so its next pass registers itself with that new producer.
   request.wake.wait(lock, [&] {
     return request.token.stop_requested() ||
            st.load(std::memory_order_acquire) != kRefObserved;
@@ -173,7 +173,7 @@ void publish(RefState& state, RefState result) noexcept {
       st.compare_exchange_strong(expected, result, std::memory_order_release,
                                  std::memory_order_relaxed))
     return;
-  // A reader announced itself first. Publishing under the same lock makes
+  // A reader registered itself first. Publishing under the same lock makes
   // both the state check before sleep and the cycle search observe one order.
   auto& shared = waits();
   const std::scoped_lock lock(shared.mutex);
@@ -220,33 +220,36 @@ RefState resolve_guarded(RefState& state, Compute compute, Clear clear) {
 
 }  // namespace
 
-RefState resolve_one_slow(RefState& state, const RefHome* home,
+RefState resolve_one_slow(RefState& state, const RefResolver* resolver,
                           std::uint32_t handle, AstNode*& target,
                           std::uint8_t& which) {
-  return resolve_guarded(state, [&] {
-    const auto answer = home->resolve(handle);
-    target = answer.target;
-    which = answer.which;
-    return answer.state;
-  }, [&]() noexcept {
-    target = nullptr;
-    which = 0;
-  });
+  return resolve_guarded(
+      state,
+      [&] {
+        const auto answer = resolver->resolve(handle);
+        target = answer.target;
+        which = answer.which;
+        return answer.state;
+      },
+      [&]() noexcept {
+        target = nullptr;
+        which = 0;
+      });
 }
 
-RefState resolve_all_slow(RefState& state, const RefHome* home,
+RefState resolve_all_slow(RefState& state, const RefResolver* resolver,
                           std::uint32_t handle, MultiRefItems& out) {
-  return resolve_guarded(state, [&] {
-    return home->resolveAll(handle, out);
-  }, [&]() noexcept { out.clear(); });
+  return resolve_guarded(
+      state, [&] { return resolver->resolveAll(handle, out); },
+      [&]() noexcept { out.clear(); });
 }
 
 }  // namespace cursiv::detail
 
 namespace cursiv {
 
-// Here, beside the frames: forcing is a phase, and its root frame is where a
-// wait anywhere under it finds `cancelToken`.
+// Here, beside the frames: resolving a batch is a phase, and its root frame is
+// where a wait under it finds `cancelToken`.
 void DefaultDocumentReferences::force(std::span<const RefHandle> which,
                                       const CancellationToken& cancelToken) {
   if (which.empty()) return;

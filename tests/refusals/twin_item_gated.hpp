@@ -1,7 +1,5 @@
-// Two optional items reading the same tokens and writing different members, in
-// a sequence so wide that the gate spells its first positions as auxiliaries:
-// the second read in place of the first is named and dropped as in a narrow
-// one.
+// Two optional items reading the same tokens, at the start of a long sequence
+// of options: the second is still reported and dropped.
 // expect LR LL: warning: rule .Root.: ..b=ID... matches the same tokens as the earlier ..a=ID..., so it is never chosen in place of that item
 #pragma once
 

@@ -1,11 +1,9 @@
 #pragma once
 
 // Where the closers of a text that ends open are inserted: a nest whose closer
-// stands after forty words its state offers first, so forty attempts come
-// before each closer that is owed; a grammar whose shortest completion is as
-// long as its rules say -- 2^63 tokens after an `x`; and a ladder whose every
-// level reads the one below as itself or through a rule of its own, so the
-// table forks four times over the closer of a group.
+// comes after forty words its state offers first, a grammar whose shortest
+// completion is 2^63 tokens, and a chain of rules the table forks four times
+// over.
 
 #include <cstddef>
 
@@ -47,9 +45,9 @@ struct Deep : cursiv::GrammarSpec {
 template <>
 struct Deep::A<0> : Deep::rule<lit<"x">> {};
 
-namespace ladder {
+namespace forked {
 struct Tree : cursiv::Extends<cursiv::AstNode> {
-  vector<Tree*> kids;
+  vector<Tree*> children;
 };
 struct Group : cursiv::Extends<Tree> {};
 struct Word : cursiv::Extends<Tree> {};
@@ -57,46 +55,50 @@ struct Direct : cursiv::Extends<Tree> {};
 struct Through : cursiv::Extends<Tree> {};
 struct Via : cursiv::Extends<Tree> {};
 struct Doc : cursiv::Extends<Tree> {};
-}  // namespace ladder
+}  // namespace forked
 
-struct Ladder : cursiv::GrammarSpec {
+struct Forked : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Item;
-  struct L0 : rule<create<ladder::Group>(
-                  lit<"("> + many(append<&ladder::Tree::kids>(ref<Item>)) +
+  struct L0 : rule<create<forked::Group>(
+                  lit<"("> + many(append<&forked::Tree::children>(ref<Item>)) +
                   lit<")">)> {};
-  struct V0 : rule<create<ladder::Via>(append<&ladder::Tree::kids>(ref<L0>))> {
-  };
+  struct V0
+      : rule<create<forked::Via>(append<&forked::Tree::children>(ref<L0>))> {};
   struct L1
-      : rule<create<ladder::Direct>(append<&ladder::Tree::kids>(ref<L0>)) |
-             create<ladder::Through>(append<&ladder::Tree::kids>(ref<V0>))> {};
-  struct V1 : rule<create<ladder::Via>(append<&ladder::Tree::kids>(ref<L1>))> {
-  };
+      : rule<create<forked::Direct>(append<&forked::Tree::children>(ref<L0>)) |
+             create<forked::Through>(
+                 append<&forked::Tree::children>(ref<V0>))> {};
+  struct V1
+      : rule<create<forked::Via>(append<&forked::Tree::children>(ref<L1>))> {};
   struct L2
-      : rule<create<ladder::Direct>(append<&ladder::Tree::kids>(ref<L1>)) |
-             create<ladder::Through>(append<&ladder::Tree::kids>(ref<V1>))> {};
-  struct V2 : rule<create<ladder::Via>(append<&ladder::Tree::kids>(ref<L2>))> {
-  };
+      : rule<create<forked::Direct>(append<&forked::Tree::children>(ref<L1>)) |
+             create<forked::Through>(
+                 append<&forked::Tree::children>(ref<V1>))> {};
+  struct V2
+      : rule<create<forked::Via>(append<&forked::Tree::children>(ref<L2>))> {};
   struct L3
-      : rule<create<ladder::Direct>(append<&ladder::Tree::kids>(ref<L2>)) |
-             create<ladder::Through>(append<&ladder::Tree::kids>(ref<V2>))> {};
-  struct V3 : rule<create<ladder::Via>(append<&ladder::Tree::kids>(ref<L3>))> {
-  };
+      : rule<create<forked::Direct>(append<&forked::Tree::children>(ref<L2>)) |
+             create<forked::Through>(
+                 append<&forked::Tree::children>(ref<V2>))> {};
+  struct V3
+      : rule<create<forked::Via>(append<&forked::Tree::children>(ref<L3>))> {};
   struct L4
-      : rule<create<ladder::Direct>(append<&ladder::Tree::kids>(ref<L3>)) |
-             create<ladder::Through>(append<&ladder::Tree::kids>(ref<V3>))> {};
-  struct Item : rule<ref<L4> | create<ladder::Word>(kw<"w">)> {};
-  struct Root : rule<create<ladder::Doc>(
-                    many(append<&ladder::Tree::kids>(ref<Item>)))> {};
+      : rule<create<forked::Direct>(append<&forked::Tree::children>(ref<L3>)) |
+             create<forked::Through>(
+                 append<&forked::Tree::children>(ref<V3>))> {};
+  struct Item : rule<ref<L4> | create<forked::Word>(kw<"w">)> {};
+  struct Root : rule<create<forked::Doc>(
+                    many(append<&forked::Tree::children>(ref<Item>)))> {};
   using entry = Root;
   using ignored = WS;
 };
 
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct Root : rule<(kw<"nest"> + ref<Nest::Root>) |
-                     (kw<"deep"> + ref<Deep::S>) |
-                     (kw<"ladder"> + ref<Ladder::Root>)> {};
+  struct Root
+      : rule<(kw<"nest"> + ref<Nest::Root>) | (kw<"deep"> + ref<Deep::S>) |
+             (kw<"forked"> + ref<Forked::Root>)> {};
   using entry = Root;
   using ignored = WS;
 };

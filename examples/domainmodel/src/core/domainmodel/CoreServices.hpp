@@ -22,7 +22,7 @@ struct DomainModelCoreServices
   // The qualifier a declaration answers to from outside its package.
   std::unique_ptr<const QualifiedNameProvider> qualifiedNameProvider;
   // The class whose methods are this language's checks. Defined once here;
-  // the registry files pointers into it, never copies.
+  // the registry keeps pointers into it, never copies.
   std::unique_ptr<const DomainModelValidator> validator;
 
   using CoreServicesFor::CoreServicesFor;

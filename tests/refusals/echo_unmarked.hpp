@@ -1,4 +1,4 @@
-// A lookahead cannot echo a tag absent from the enclosing token.
+// A `same` in a lookahead, with a tag that no `mark` of the token sets.
 // expect LR: refused: terminal .TAG. uses .same<>. where a .mark<>. with its tag is not set on every path before it
 #pragma once
 

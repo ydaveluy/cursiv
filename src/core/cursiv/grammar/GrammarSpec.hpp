@@ -14,27 +14,20 @@
 #include "cursiv/utils/ctstring.hpp"
 #include "cursiv/utils/typelist.hpp"
 
-// The declarative layer: rule kinds whose body is a template argument
-// (terminal / data / rule / override), type deduction for each, and the
-// cursiv::GrammarSpec base a grammar derives from.
+// The declarative layer: the rule kinds whose body is a template argument
+// (`terminal`, `rule`, `infix`, overrides), the type each rule produces, and
+// the `GrammarSpec` base a grammar derives from.
 
 namespace cursiv {
 
-// A rule is referred to (`ref<R>`), never combined; its body is an NTTP, so a
-// rule can reference itself or a merely-declared sibling from its own
-// base-clause. The kind decides whether the token separator runs inside the
-// body, which decides what language is accepted.
-//
-// A kind spelled directly is an anonymous rule: `ref<terminal<body>>` inside
-// another body is an inline atom, `ref<rule<body>>` an inline region. Nothing
-// new runs -- the base already is a rule, so the reference resolves, the slot
-// travels in the type, and two identical spellings are one type and one rule.
+// A rule is referred to (`ref<R>`), never combined; its body is an NTTP, so
+// a rule can name itself or a sibling declared later. A kind spelled
+// directly, such as `ref<terminal<body>>`, is an anonymous inline rule.
 
 namespace detail {
 
-// A rule value where a body belongs (`rule<ID{}>`) is the one bare use no
-// combinator can refuse: a rule kind is not an expression, so it reaches
-// nothing else. Stated once, asked by both kinds.
+// A rule value used as a body (`rule<ID{}>`) is the one misuse no combinator
+// can refuse, since a rule is not an expression.
 template <auto Body>
 struct body_not_a_rule {
   static_assert(
@@ -76,37 +69,35 @@ template <class E>
 inline constexpr bool is_as = false;
 template <class C, class E>
 inline constexpr bool is_as<As<C, E>> = true;
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 inline constexpr bool holds_as = is_as<E>;
 template <class E, class... Ks>
 inline constexpr bool holds_as<E, TypeList<Ks...>> =
     is_as<E> || (holds_as<Ks> || ...);
 
-// A body's `as<X>(e)` is resolved once the rule is formed: an inline data rule
-// over e with the converter, so every reader below meets a rule and e's tokens
-// stay e's own. That rule is never called: an engine reads e in place, and the
-// conversion rides the record of what e reads.
+// A body's `as<X>(e)` becomes an inline data rule over `e` with the
+// converter. That rule is never called: an engine reads `e` in place.
 template <class E, bool Holds = holds_as<E>>
 struct as_resolved {
   using type = E;
 };
 template <class E>
 using as_resolved_t = typename as_resolved<E>::type;
-template <class E, class Kids>
+template <class E, class Children>
 struct as_rebuilt;
 template <class E, class... Ks>
 struct as_rebuilt<E, TypeList<Ks...>> {
   using type = typename ExprShape<E>::template rebind<as_resolved_t<Ks>...>;
 };
 template <class E>
-struct as_resolved<E, true> : as_rebuilt<E, typename ExprShape<E>::kids> {};
+struct as_resolved<E, true> : as_rebuilt<E, typename ExprShape<E>::children> {};
 template <class C, class E>
 struct as_resolved<As<C, E>, true> {
   using type = Ref<Rule<E{}, C>>;
 };
 
-// One token, lexed: the separator never runs inside. The optional slot names
-// what the token's text becomes.
+// One token, lexed: no trivia is skipped inside. The optional slot names what
+// the token's text becomes.
 template <auto Body, class... Opts>
 struct TerminalRule {
   static_assert(body_not_a_rule<Body>::ok);
@@ -128,9 +119,10 @@ struct TerminalRule {
 template <auto Body, class... Opts>
 struct Rule {
   static_assert(body_not_a_rule<Body>::ok);
-  static_assert(!stray_commit<as_resolved_t<std::remove_cv_t<decltype(Body)>>>,
-                "commit(prefix, body) must be the direct item of option, "
-                "many, some or repeat, as in many(commit(a, b))");
+  static_assert(
+      !misplaced_commit<as_resolved_t<std::remove_cv_t<decltype(Body)>>>,
+      "commit(prefix, body) must be the direct item of option, "
+      "many, some or repeat, as in many(commit(a, b))");
   using kind = node_kind;
   using slot = TypeList<Opts...>;
   static constexpr auto body =
@@ -152,8 +144,8 @@ struct level_ops<Levels<Ls...>, A>
 template <class Lvls, Association A>
 using level_ops_t = typename level_ops<Lvls, A>::type;
 
-// A condition takes no position, bare or under a repetition or a node whose
-// reading is its child's.
+// A condition consumes nothing, bare or under a repetition or a wrapper that
+// reads only its child.
 template <class E>
 inline constexpr bool is_condition = false;
 template <std::size_t Mn, std::size_t Mx, class E>
@@ -172,7 +164,7 @@ inline constexpr bool is_condition<GapIs<E>> = true;
 template <>
 inline constexpr bool is_condition<Eof> = true;
 
-// What a sequence reads: its elements, but for the conditions around them.
+// The elements of a sequence that consume input: all but its conditions.
 template <class... Es>
 using readers_t =
     tl_cat_t<cond_t<is_condition<Es>, TypeList<>, TypeList<Es>>...>;
@@ -181,7 +173,7 @@ using readers_t =
 template <class E>
 struct sequence_builds_node;
 
-// A region, a mark or prose adds to what it holds and takes nothing from it.
+// A region, a mark or doc text adds to what it holds and takes nothing from it.
 template <class E>
 inline constexpr bool is_wrapper = false;
 template <class I, class H, class E>
@@ -191,10 +183,8 @@ inline constexpr bool is_wrapper<Mark<Tag, E>> = true;
 template <class E, str T>
 inline constexpr bool is_wrapper<Doc<E, T>> = true;
 
-// A sequence of several elements that read, wrapped or not, is a data rule
-// written in place: the wrapper stays in the rule. `Complete` is a reader that
-// can ask what the rules build, and leaves a sequence that builds a node as it
-// is.
+// A sequence of several reading elements is a data rule written in place.
+// With `Complete`, a sequence that builds a node stays as it is.
 template <bool Complete, class E>
 inline constexpr bool unnamed_sequence = false;
 template <bool Complete, class... Es>
@@ -230,7 +220,7 @@ struct unnamed_data_operands {
 };
 template <class E>
 using unnamed_data_operands_t = typename unnamed_data_operands<E>::type;
-template <class E, class Kids>
+template <class E, class Children>
 struct operands_rebuilt;
 template <class E, class... Ks>
 struct operands_rebuilt<E, TypeList<Ks...>> {
@@ -239,7 +229,7 @@ struct operands_rebuilt<E, TypeList<Ks...>> {
 };
 template <class E>
 struct unnamed_data_operands<E, true>
-    : operands_rebuilt<E, typename ExprShape<E>::kids> {};
+    : operands_rebuilt<E, typename ExprShape<E>::children> {};
 template <auto Sp, class E>
 struct unnamed_data_operands<Assign<Sp, E>, true> {
   using type = Assign<Sp, unnamed_data_t<true, unnamed_data_operands_t<E>>>;
@@ -299,9 +289,7 @@ template <class... Es>
 struct cat_list<TypeList<Es...>> : cat_seq<Es...> {};
 
 // What the chain matches, as an expression: `operand ((ops operand) |
-// postfix)*`, an operand being `prefix* primary`. Every analysis --
-// nullability, tails (`many` ends past the separator, which is the climb's own
-// discipline), reachability, the element table, validation -- reads this;
+// postfix)*`, an operand being `prefix* primary`. Every analysis reads this;
 // only an engine parses the climb instead.
 template <class Primary, class Lvls>
 struct infix_body {
@@ -314,12 +302,9 @@ struct infix_body {
   using type = typename cat_list<tl_cat_t<TypeList<operand>, turns>>::type;
 };
 
-// A chain of binary operators is a grammar spelled badly either way:
-// left-recursive spelled directly, one near-identical rule per level spelled
-// as a cascade. So it is a rule kind: the primary rule for the operands, the
-// three members (left operand, operator text, right operand), the level table.
-// A binary level builds `Node`; a prefix or postfix level builds the class it
-// names.
+// A chain of operators as a rule kind: the primary rule for the operands,
+// the left, operator and right members, and the level table. A binary level
+// builds `Node`; a prefix or postfix level builds the class it names.
 template <class Primary, auto LeftPtr, auto OpPtr, auto RightPtr, auto Lvls,
           class Node>
 struct InfixRule {
@@ -357,16 +342,15 @@ concept AnyRule = requires {
   R::body;
 };
 
-// An override does not replace a rule's name: the effective rule is minted
-// from the base and the override, and `declared` is the identity every
-// diagnostic and every dump prints.
+// An override keeps the rule's name: the effective rule is built from the base
+// and the override, and `declared` is the rule every diagnostic and dump
+// prints.
 
 template <class R>
 struct declared_of {
   using type = R;
 };
-// Recursive: a stage that mints over a mint must still name the rule an
-// author wrote.
+// Recursive: an override of an override still names the rule the author wrote.
 template <class R>
   requires requires { typename R::declared; }
 struct declared_of<R> : declared_of<typename R::declared> {};
@@ -376,8 +360,8 @@ using declared_of_t = typename declared_of<R>::type;
 template <class R>
 inline constexpr bool is_overridden = requires { typename R::declared; };
 
-// The rule an override stood over: what its grammar's parents made effective,
-// the declared rule where nothing else restated it.
+// The rule an override replaces: the parents' effective rule, or the declared
+// rule when no parent overrides it.
 template <class R>
 struct inherited_of : declared_of<R> {};
 template <class R>
@@ -388,10 +372,8 @@ struct inherited_of<R> {
 template <class R>
 using inherited_of_t = typename inherited_of<R>::type;
 
-// An inline rule has no identifier. The kind spelled directly is the rule; a
-// declared rule derives from one, so the two are told apart by type alone.
-// Every place that names a rule reads the label rather than reflect a
-// template-id nobody can read.
+// The label of an inline rule, which has no identifier: every place that
+// names a rule reads it instead of a template-id.
 template <class R>
 inline constexpr std::string_view anonymous_rule_label{};
 template <auto Body, class... Opts>
@@ -411,16 +393,12 @@ inline constexpr bool is_inline_terminal = false;
 template <auto Body, class... Opts>
 inline constexpr bool is_inline_terminal<TerminalRule<Body, Opts...>> = true;
 
-// The deductions below walk a rule's body and descend into the rules it
-// names, carrying the path of rules they are inside so that a cycle stops.
-// Only the rules of the path that the callee reaches again can change its
-// answer: they reach it along the path, so they lie on a cycle with it. The
-// callee is handed those alone, in an order it fixes, so every path into a
-// rule outside a cycle shares one answer, and so does every order of one set
-// of rules inside one.
+// The deductions below walk a rule's body into the rules it names, with
+// the path of rules they are in, so a cycle stops. A callee gets only the
+// path's rules it reaches again, so each rule outside a cycle has one answer.
 
 // The references a deduction can follow: through the shapes that gather or
-// wrap their kids, never into a directive's payload or a lookahead.
+// wrap their children, never into a directive's payload or a lookahead.
 template <class E>
 inline constexpr bool wraps_calls = false;
 template <class E, str T>
@@ -429,7 +407,7 @@ template <class Tag, class E>
 inline constexpr bool wraps_calls<Mark<Tag, E>> = true;
 template <auto P, class E>
 inline constexpr bool wraps_calls<Flag<P, E>> = true;
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 struct walked_calls {
   using type = TypeList<>;
 };
@@ -446,8 +424,8 @@ using body_calls_t =
     typename walked_calls<std::remove_cv_t<decltype(R::body)>>::type;
 
 // The rules a deduction enters from R: those its body names, and an infix
-// rule's primary. A rule read in a section adds those the rule in force there
-// names (`InGrammar.hpp`).
+// rule's primary. A rule read in a section adds those the rule that applies
+// there names (`InGrammar.hpp`).
 template <class R, bool Infix = std::is_same_v<typename R::kind, infix_kind>>
 struct rule_calls : dedupe<body_calls_t<R>> {};
 template <class R>
@@ -457,7 +435,7 @@ template <class R>
 struct deduction_calls : rule_calls<R> {};
 
 // Every rule reached from R in one step or more, in the order a breadth-first
-// walk meets them; `Calls<X>::type` names the steps from X.
+// walk reaches them; `Calls<X>::type` names the steps from X.
 template <template <class> class Calls, class Seen, class Front>
 struct calls_closure;
 template <template <class> class Calls, class Seen>
@@ -512,8 +490,8 @@ struct in_reach_order<TypeList<Ys...>, Reach>
                             tl_size<Reach>::value)> {};
 
 // The path a deduction entering R carries on: the rules of `Seen` R reaches,
-// in the order R reaches them -- one set is one path, whichever order it was
-// walked in.
+// in the order R reaches them, so one set gives one path whatever the order it
+// was walked in.
 template <template <class> class Calls, class Seen, class R>
 struct path_into;
 template <template <class> class Calls, class R>
@@ -523,24 +501,18 @@ struct path_into<Calls, TypeList<>, R> {
 template <template <class> class Calls, class... Ys, class R>
 struct path_into<Calls, TypeList<Ys...>, R>
     : in_reach_order<TypeList<Ys...>, typename reached_by<Calls, R>::type> {};
-// The path R's own walk carries: the rules of `Seen` it can meet, then R.
+// The path R's own walk carries: the rules of `Seen` it can reach, then R.
 template <class Seen, class R>
 using deduction_path_t =
     tl_cat_t<typename path_into<deduction_calls, Seen, R>::type, TypeList<R>>;
 
-// The genre of a `rule<>`, deduced. `terminal<>` names its own; `rule<>`
-// covers value and node, and what tells them apart is whether the body
-// commits a node: a create, a nest, a directive, or a reference to a rule
-// that builds one. A slot settles it outright -- a rule that names what its
-// text becomes is a value rule whatever its body holds.
-//
-// `Seen` is the reference path: `A : rule<ref<B>>` over `B : rule<ref<A>>`
-// would ask the question of itself for ever, so a rule already on the path
-// commits nothing new and the answer comes from the rest.
+// Whether a `rule<>` builds a node: its body commits a create, a nest, a
+// directive, or a reference to a node rule. A slot makes it a value rule. A
+// rule already on the `Seen` path commits nothing new.
 template <class R, class Seen, bool OnPath>
 struct rule_builds_node_of;
 
-template <class E, class Seen, class Kids = typename ExprShape<E>::kids>
+template <class E, class Seen, class Children = typename ExprShape<E>::children>
 inline constexpr bool builds_node = false;
 template <class E, class Seen, class... Ks>
   requires grouping<E>
@@ -605,58 +577,41 @@ template <class... Es>
 struct sequence_builds_node<Seq<Es...>>
     : std::bool_constant<builds_node<Seq<Es...>, TypeList<>>> {};
 
-// A rule's body, and the only read of one. An infix rule's is the synthesized
-// `primary (ops primary)*`.
+// A rule's body as declared. An infix rule's is its `infix_body`.
 template <class R>
 using declared_body_t = std::remove_cv_t<decltype(R::body)>;
 
 // A create at the root of a body is the rule's own creation, not a region
-// inside it: what everything downstream reads is `rest`, and the stage makes
-// the head again in front of it -- same elements, same shape, same tree.
+// inside it: readers see its operand, and the node is created in front of it.
 template <class B>
-struct shed_root_create {
+struct strip_root_create {
   using type = B;
 };
 template <class T, class E>
-struct shed_root_create<Create<T, E>> {
+struct strip_root_create<Create<T, E>> {
   using type = E;
 };
 template <class R>
-using rule_body_t = typename shed_root_create<declared_body_t<R>>::type;
+using rule_body_t = typename strip_root_create<declared_body_t<R>>::type;
 
 }  // namespace detail
 
-// A value rule answers its slot: the converter's result, the target the slot
-// names, else the text. A node rule answers its body: the type a root create
-// names, else the most derived class the directives write, else the node it
-// adopts; for a choice, the common base of the alternatives.
+// A value rule answers its slot: the converter's result, the target type,
+// else the text. A node rule answers the type it creates, else the most
+// derived class its directives write, else the node it adopts.
 
-// The positioned conversion result, declared here and defined below: the
-// grammar layer sits below conversion and must not include it, yet the
-// deduction has to recognise the wrapper (see unwrap_result below).
+// Declared only: `Conversion.hpp` defines it, and `unwrap_result` must
+// recognise it.
 template <class T>
 struct ConversionResult;
 
-// ...and the leaf list, declared for the same reason: the parts forms of a
-// converter are recognised in the one chain below, beside the text forms --
-// never by exclusion. Only a reference to it is ever formed here; the
-// definition is complete everywhere these concepts are checked. The parts a
-// data rule joins, as values: each leaf through its own converter. A parts
-// converter sees what the join concatenates, never the raw bytes -- the two
-// would answer differently the moment a leaf converts.
+// The parts a data rule joins, each leaf through its own converter: a parts
+// converter never sees the raw bytes.
 using Parts = std::span<const std::string_view>;
 
 // A terminal and a value rule name what their text becomes with `as<X>`
-// around the whole body. X is a target type reached by `default_converter<T>`,
-// a callable that reads the joined text or the parts, or any other constant,
-// which is the value itself.
-//
-// A lambda is named before it is cited. A closure defined outside an
-// initializer is TU-local ([basic.link]/16) and an exported rule may not
-// expose one, so `as<[](...){...}>` spelled in place is refused in every
-// module interface: write `inline constexpr auto f = [](...){...};` and cite
-// `f`. (The closure in an NTTP is a g++ extension, CWG2542; this project is
-// g++-only and says so here.)
+// around the whole body: a target type, a callable reading the text or the
+// parts, or a constant. Name a lambda before using it in an exported rule.
 
 namespace detail {
 
@@ -777,10 +732,9 @@ inline constexpr bool one_value_type<value_conv<V>, value_conv<Vs>...> =
                     std::remove_cv_t<decltype(Vs)>> &&
      ...);
 
-// `terminal<as<X>(e)>` and `rule<as<X>(e)>`: the conversion of the whole body
-// is the rule's own. A terminal may instead give each alternative a constant:
-// it is then the data rule over the same body, read where it is named, so its
-// words are tokens of their own as in place.
+// `terminal<as<X>(e)>` and `rule<as<X>(e)>`: the whole body's conversion.
+// A terminal that gives each alternative a constant is the data rule over the
+// same body.
 template <auto Body, class E = std::remove_cv_t<decltype(Body)>>
 struct terminal_of {
   using type = TerminalRule<Body>;
@@ -831,8 +785,7 @@ constexpr auto as(E) {
 
 namespace detail {
 
-// One converter per rule: the slot holds at most one option, and two would be
-// two answers to one question.
+// One converter per rule: the slot holds at most one option.
 template <class L>
 struct slot_of {
   using type = void;
@@ -869,24 +822,19 @@ struct slot_conv<O> {
 template <class R>
 using conv_t = typename slot_conv<slot_t<R>>::type;
 
-// A converter is found by invocability, never by name: a rule may declare
-// several `convert` overloads -- the text form and the parts form are one such
-// pair -- and `R::convert` is not an id-expression the moment it does.
+// Found by invocability, never by name: with several `convert` overloads (the
+// text and parts forms), `R::convert` alone is not a valid expression.
 template <class R>
 concept ConvertsText = requires(std::string_view t) { R::convert(t); };
-// A data rule's converter reads the parts instead. Asked by invocability like
-// the others: recognising the parts form by exclusion would be an
-// id-expression.
 template <class R>
 concept ConvertsParts = requires(Parts p) { R::convert(p); };
-// ...and the converter that reads nothing at all.
 template <class R>
 concept ConvertsNothing = requires { R::convert(); };
 template <class R>
 concept HasConverter =
     ConvertsText<R> || ConvertsParts<R> || ConvertsNothing<R>;
 
-// The value the retained form answers.
+// The type a text converter, or one that reads nothing, returns.
 template <class R>
 struct convert_result {
   using type = decltype(R::convert(std::string_view{}));
@@ -897,21 +845,14 @@ struct convert_result<R> {
   using type = decltype(R::convert());
 };
 
-// ...and the same question of the parts form. Without this trait the Parts
-// branch would trust the annotation alone, and a `data<NUM, ..., int>` whose
-// `convert` returns `double` would truncate at the write, silently.
+// The type a parts converter returns.
 template <class R>
 struct convert_parts_result {
   using type = decltype(R::convert(std::declval<Parts>()));
 };
 
-// A converter answering `ConversionResult<T>` produces a T -- the wrapper is
-// the error channel, not the value type. Unwrapping here, in the deduction
-// itself, is what makes every reader agree: the dump prints `returns double`,
-// a variant's exact-match round compares against `double`, and the payload
-// <-> member check reads the type that actually reaches the member.
-// Anything unwrapping a second time downstream would be reading a rule type
-// the grammar never had.
+// A converter answering `ConversionResult<T>` produces a T: unwrapped here,
+// once, so every reader sees the same type.
 template <class T>
 struct unwrap_result {
   using type = T;
@@ -923,20 +864,14 @@ struct unwrap_result<ConversionResult<T>> {
 template <class T>
 using unwrap_result_t = typename unwrap_result<std::remove_cvref_t<T>>::type;
 
-// Forward declarations: `cands<Choice<Es...>>` below needs both, but
-// each is only defined further down (branch_type after the ancestor-walk
-// machinery it depends on for its own primary template; common_base_of right
-// after that machinery too) -- the mutual reference is resolved at
-// instantiation time.
+// Defined further down; `cands<Choice<Es...>>` needs both.
 template <class A, class Seen = TypeList<>>
 struct branch_type;
 template <class Branches>
 struct common_base_of;
 
-// True when E is literally `create<T>(...)` or `nest<T, &P>(...)` at its own
-// top level: this alternative builds its own node, as opposed to a bare
-// assign/append/flag that writes into the one implicit node the
-// enclosing rule builds regardless of which alternative matched.
+// Whether E is `create<T>(...)` or `nest<T, &P>(...)` at its top level: an
+// alternative that builds its own node, not one that writes into the rule's.
 template <class E>
 inline constexpr bool is_self_creating = false;
 template <class T, class E>
@@ -944,11 +879,9 @@ inline constexpr bool is_self_creating<Create<T, E>> = true;
 template <class T, auto P, class E>
 inline constexpr bool is_self_creating<Nest<T, P, E>> = true;
 
-// An alternative resolves its own node when a creation it is bound to reach
-// decides the type: a create<>/nest<> at its root, one further along its
-// sequence -- the directives written before it land on the node that creation
-// makes -- or a choice whose every branch resolves. A repetition may run zero
-// times and a directive's payload builds a value, so neither resolves.
+// An alternative resolves its own node when a creation it always reaches
+// decides the type: at its root, further along its sequence, or in every
+// branch of a choice. A repetition or a directive's payload does not.
 template <class E>
 inline constexpr bool is_self_resolving = is_self_creating<E>;
 template <class... Es>
@@ -965,11 +898,9 @@ template <auto P, class E>
 inline constexpr bool is_self_resolving<Flag<P, E>> = is_self_resolving<E>;
 
 // The candidates a body contributes: created types, and the classes the
-// directives write. The payloads of `assign` and `append` build values, not this
-// rule's node, so they are not descended into; a flag's operand is read in the
-// node in hand, and is. A bare `ref<Sub>` contributes nothing (annotate the
-// rule if an alternative is only a reference).
-template <class E, class Kids = typename ExprShape<E>::kids>
+// directives write. `assign` and `append` payloads build values and are not
+// descended into. A bare `ref<Sub>` contributes nothing.
+template <class E, class Children = typename ExprShape<E>::children>
 struct cands {
   using type = TypeList<>;
 };
@@ -977,18 +908,9 @@ template <class E, class... Ks>
   requires grouping<E>
 struct cands<E, TypeList<Ks...>> : tl_cat<typename cands<Ks>::type...> {};
 
-// A choice whose alternatives each resolve their own node -- a creation at
-// the root or further along the branch -- contributes the one common base
-// that satisfies every branch -- the same question a top-level Or answers
-// (deduce_node_type's Or specialization, below), reached one level down
-// (nested in a Seq, or under a skip() region) instead of at the rule's own
-// top level. The plain flatten-and-concat fallback stays for a mix of bare
-// directives (or a mix of directives and creates): those all write into the
-// same implicit node, so most_derived over the flattened list is the right
-// question there -- blending a nested choice of separate nodes the same way
-// would silently pick the most derived alternative's type instead of their
-// common base, storing e.g. a Base node behind a Derived* whenever the
-// match actually takes the Base branch.
+// A nested choice whose alternatives each resolve their own node
+// contributes their common base, as a top-level choice does. A mix of bare
+// directives writes into one node, and keeps the flattened list.
 template <class... Es>
 struct self_created_common {
   using type = typename common_base_of<
@@ -997,11 +919,8 @@ struct self_created_common {
                 "the alternatives of this nested choice build classes with "
                 "no common base: derive these classes from one base class");
 };
-// The laziness rule (typelist.hpp): a branch is lazy only when it is a class
-// template-id whose `::type` is asked afterwards. Spelled as two
-// `conditional_t` arguments instead, both would be instantiated and one
-// thrown away -- and `self_created_common`'s static_assert would fire on the
-// branch that was not chosen.
+// Two class templates, not a `conditional_t`: only the branch taken may be
+// instantiated (see typelist.hpp).
 template <class... Es>
 struct cands_or_common {
   using type = TypeList<typename self_created_common<Es...>::type>;
@@ -1012,9 +931,8 @@ template <class... Es>
 struct cands<Choice<Es...>, TypeList<Es...>>
     : cond_t<(is_self_resolving<Es> && ...), cands_or_common<Es...>,
              cands_or_cat<Es...>> {};
-// Law: a directive only writes where the engine commits. A lookahead matches
-// without consuming and commits nothing, so a directive under one never runs
-// and contributes no type candidate.
+// A directive writes only where the engine commits. A lookahead consumes and
+// commits nothing, so a directive under one never runs and gives no candidate.
 template <class E>
 struct lookahead_writes_nothing {
   static_assert(
@@ -1032,8 +950,7 @@ template <class D>
 struct cands<SuperT<D>> : super_escaped<SuperT<D>> {
   using type = TypeList<>;
 };
-// Same law, other side: `through()` is a token shape, lexed whole, so no
-// directive placed inside it ever runs either.
+// Likewise, `through()` is lexed as one token, so no directive inside it runs.
 template <class O, class Cl>
 struct cands<Through<O, Cl>> {
   static_assert(
@@ -1118,11 +1035,7 @@ template <class T>
 using ancestor_list_t = typename ancestor_list<T>::type;
 
 // The common base of a list of branch types: the most derived ancestor of
-// the first branch that is also a base of every other one. Shared by a
-// top-level Or (deduce_node_type's specialization, below) and a nested Or
-// whose alternatives each create<>/nest<> their own node
-// (cands<Choice<...>>, above) -- both ask the same question about the
-// same shape, wherever it sits in the body, and must answer it the same way.
+// the first that is a base of every other one.
 template <class Branches>
 struct common_base_of {
   using type = void;
@@ -1167,10 +1080,9 @@ struct infix_answer<R, Levels<Ls...>> {
 template <class R>
 using infix_answer_t = typename infix_answer<R>::type;
 
-// The classes the node in hand can be at each point of an alternative: the
-// head, then each nest's wrapper. A nest buries that node in its member and a
-// directive writes into it, so each class must fit the member named -- the
-// builder learns the class only at run time.
+// The classes the current node can be at each point of an alternative: the
+// head, then each nest's wrapper. Each must fit the member a nest or
+// directive names.
 template <class Ts, class C>
 inline constexpr bool all_derive = false;
 template <class... Ts, class C>
@@ -1229,7 +1141,7 @@ struct unordered_hand<In, TypeList<Es...>, Check>
 template <class In, class... Es, bool Check>
 struct in_hand<In, Unordered<Es...>, Check>
     : unordered_hand<In, TypeList<Es...>, Check> {};
-// A second turn meets the classes the first one left, and only those: the
+// A second turn asks the classes the first one left, and only those: the
 // rest were asked already.
 template <class Ts, class Seen>
 struct hand_new;
@@ -1283,24 +1195,19 @@ template <class In, auto Sp, class E, bool Check>
 struct in_hand<In, Assign<Sp, E>, Check> : writes_over<In, Sp, E, Check> {};
 template <class In, auto Sp, class E, bool Check>
 struct in_hand<In, Append<Sp, E>, Check> : writes_over<In, Sp, E, Check> {};
-// The flag writes the node its operand leaves in hand: the wrapper, if the
+// The flag writes the node its operand leaves current: the wrapper, if the
 // operand nests.
 template <class In, auto P, class E, bool Check>
 struct in_hand<In, Flag<P, E>, Check>
     : writes_ok<typename in_hand<In, E, Check>::type, P, Check> {};
 
-// The type one alternative builds, from what it commits -- and, when it
-// commits nothing of its own, from what it adopts (the empty-list
-// specialization below, spelled apart so only one of the two instantiates).
-// `Seen` is the set of rules whose type is already being deduced on this path.
-template <class E, class Seen, class Kids = typename ExprShape<E>::kids>
+// The type one alternative builds from what it commits, else from what it
+// adopts. `Seen` is the rules whose type is being deduced on this path.
+template <class E, class Seen, class Children = typename ExprShape<E>::children>
 struct adopt_cands;
 
-// The classes an alternative can hand back, walked as the stage checks them
-// but without the checks: one that creates nothing starts on the node it
-// adopts. Its type is their common base -- `(create<X>(..) | ..) +
-// many(nest<T>(..))` hands back an X or a T. A walk that names no class leaves
-// the directives' answer, and the stage makes such a head of that type.
+// The common base of the classes an alternative can hand back:
+// `(create<X>(..) | ..) + many(nest<T>(..))` hands back an X or a T.
 template <class H, class L, class Ad>
 struct hand_or_writes {
   using type = typename common_base_of<H>::type;
@@ -1336,7 +1243,7 @@ inline constexpr bool must_adopt<Doc<E, T>> = must_adopt<E>;
 
 // The classes declaring the members written ahead of any wrapper: the head a
 // path that adopts and creates nothing implies.
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 struct head_writes {
   using type = TypeList<>;
 };
@@ -1357,7 +1264,7 @@ struct head_writes<Flag<P, E>>
     : tl_cat<TypeList<typename Flag<P, E>::node_type>,
              typename head_writes<E>::type> {};
 
-// The node in hand at the start of an alternative: the node it adopts, else
+// The current node at the start of an alternative: the node it adopts, else
 // the one its writes imply.
 template <class Ad, bool Implied, class Hw>
 struct start_hand {
@@ -1392,19 +1299,14 @@ struct branch_type<Nest<T, P, E>, Seen> {
   using type = T;
 };
 
-// Adoption. A bare reference names no member of its own, so what it produces
-// is what the rule it names produces -- that is how a rule whose every
-// alternative is a reference gets a type without an annotation.
-//
-// A dispatch on a bool, never a `&&` or a `conditional_t` over two computed
-// answers: the arm not taken would instantiate, and on `A: ref<B>|'a';
-// B: ref<A>|'b'` that is a descent nothing stops.
+// Adoption: a bare reference produces what the rule it names produces, so
+// a rule of references needs no annotation. A dispatch on a bool, so the arm
+// not taken is never instantiated.
 template <class R, class Seen, bool OnPath>
 struct adopted_type;
-// A rule already on the path answers what it commits directly and descends no
-// further: that is the fixed point. `A: name=ID (B | A); B: 'b' A?` settles on
-// A's own directive, while a pair that commits nothing anywhere answers void
-// and the alternative is refused by name.
+// A rule already on the path answers what it commits and descends no
+// further. A cycle that commits nothing answers void, and is refused by
+// name.
 template <class R, bool Node>
 struct path_type {
   using type = void;
@@ -1436,8 +1338,8 @@ template <class G, class E>
 struct path_body<Embed<G, E>> : path_body<E> {};
 template <class R>
 struct path_type<R, true> : path_body<std::remove_cv_t<decltype(R::body)>> {};
-// ...and an infix rule on the path settles on its chain's class: the climb
-// reaches its own operands through it.
+// An infix rule on the path answers its chain's class: the climb reaches its
+// own operands through it.
 template <class R, bool Infix>
 struct on_path_answer
     : path_type<R, std::is_same_v<typename R::kind, detail::node_kind>> {};
@@ -1452,9 +1354,6 @@ template <class A0, class... As, class Seen>
 struct deduce_node_type<Choice<A0, As...>, Seen> {
   using Branches = TypeList<typename branch_type<A0, Seen>::type,
                             typename branch_type<As, Seen>::type...>;
-  // The same computation cands<Choice<...>> (above) uses for a nested
-  // self-creating choice: a top-level Or is just that shape at the rule's own
-  // top level.
   using Named = typename drop_void<Branches>::type;
   using type = typename common_base_of<Named>::type;
   // Under a path, a choice whose every branch comes back onto the path
@@ -1467,13 +1366,10 @@ struct deduce_node_type<Choice<A0, As...>, Seen> {
                 "base: derive these classes from one base class, or add "
                 "create<T> to say which class each alternative builds");
 };
-// Where a node type came from, and only one source can lie: a pointer to an
-// inherited member carries the class that declares it, so the derived class
-// is lost before any deduction runs. A `create<T>` states its type and an
-// adoption reads one already deduced; neither can be wrong this way, and
-// neither is descended into -- a directive under a create writes the
-// created node.
-template <class E, class Kids = typename ExprShape<E>::kids>
+// Whether the node type comes from the members written: a pointer to an
+// inherited member names its declaring class, so this source alone can be
+// wrong. A `create<T>` and an adoption are not descended into.
+template <class E, class Children = typename ExprShape<E>::children>
 inline constexpr bool type_from_members = false;
 template <auto Sp, class E>
 inline constexpr bool type_from_members<Assign<Sp, E>> = true;
@@ -1501,7 +1397,7 @@ template <class R, class Seen>
 struct adopt_answer<R, Seen, true> {
   using P = typename R::primary;
   // The primary answers as any adopted rule does, this rule on the path so a
-  // climb that reaches its own operands settles there: a primary that only
+  // climb that reaches its own operands ends there: a primary that only
   // chooses between rules answers what they build, not nothing.
   using Path = deduction_path_t<Seen, R>;
   using Both = typename common_base_of<typename drop_void<TypeList<
@@ -1519,11 +1415,9 @@ struct branch_type<Ref<R>, Seen>
     : adopted_type<named_rule_t<R>, Seen,
                    tl_has<named_rule_t<R>, Seen>::value> {};
 
-// The nodes an alternative adopts: a reference to a node rule produces that
-// rule's node, and trivia around one leaves it the only node there is. A
-// reference held by `assign` or `append` is not adopted, so those are not
-// descended into; a flag around one changes nothing.
-template <class E, class Seen, class Kids>
+// The nodes an alternative adopts: a reference to a node rule, alone among
+// trivia. A reference held by `assign` or `append` is not adopted.
+template <class E, class Seen, class Children>
 struct adopt_cands {
   using type = TypeList<>;
 };
@@ -1542,20 +1436,16 @@ struct adopt_cands<Ref<R0>, Seen> {
 template <auto P, class E, class Seen>
 struct adopt_cands<Flag<P, E>, Seen, TypeList<E>> : adopt_cands<E, Seen> {};
 
-// Whether an alternative reaches back onto the path through rules that commit
-// nothing of their own -- `'(' Type ')'` where `Type` is `rule<ref<B>>` and `B`
-// is being deduced, or a chain of such rules down to `B`: the alternative
-// answers nothing here, and the other branches carry the answer.
-template <class E, class Seen, class Kids = typename ExprShape<E>::kids>
+// Whether an alternative reaches back onto the path through rules that
+// commit nothing: it answers nothing, and the other branches answer.
+template <class E, class Seen, class Children = typename ExprShape<E>::children>
 struct adopt_cycles : std::false_type {};
 template <class E, class Seen, class... Ks>
   requires grouping<E>
 struct adopt_cycles<E, Seen, TypeList<Ks...>>
     : std::bool_constant<(adopt_cycles<Ks, Seen>::value || ...)> {};
-// A rule on the path answers what it commits, and one off it answers through
-// its own walk, which carries the path on: either answers nothing only when
-// every way out of it comes back onto the path. A rule's own body is walked
-// with no path to come back to, and there an answer of nothing is a fault.
+// A rule answers nothing only when every way out of it comes back onto the
+// path. Walking its own body, an answer of nothing is a fault.
 template <class R, class Seen, bool OnPath = tl_has<R, Seen>::value,
           bool Walked = OnPath || (is_node_rule<R> &&
                                    !std::is_same_v<Seen, TypeList<>>)>
@@ -1587,7 +1477,7 @@ struct branch_type_from<A, Seen, TypeList<>> {
 };
 
 // An override restating neither slot nor converter keeps the type of the
-// rule it stood over.
+// rule it replaces.
 template <class R>
 struct declared_rule_type {
   using type = typename rule_type<inherited_of_t<R>>::type;
@@ -1611,8 +1501,8 @@ struct passes_value<R, true, Data>
     : cond_t<slot_empty<R>, passes_value<inherited_of_t<R>>,
              std::false_type> {};
 
-// An override with no slot keeps the type of the rule it stood over, and
-// where that rule passes a value on, its new body passes the same type.
+// An override with no slot keeps the type of the rule it replaces, and where
+// that rule passes a value on, its new body passes the same type.
 template <class R, class Seen,
           bool Passes = passes_value<inherited_of_t<R>>::value>
 struct overridden_value : declared_rule_type<R> {};
@@ -1625,10 +1515,9 @@ struct overridden_value<R, Seen, true> : declared_rule_type<R> {
                 "as<T>(...)");
 };
 
-// The value a data rule passes when it states no conversion: a lone reference
-// passes the value of the rule it calls, a choice the value of the branch it
-// took, and anything else its joined text. A rule already on the path answers
-// `void`: the other branches answer for it.
+// The value a data rule passes with no conversion: a lone reference passes
+// its rule's value, a choice its branch's, anything else its joined text. A
+// rule on the path answers `void`.
 template <class E, class Seen>
 struct value_flow {
   using type = std::string_view;
@@ -1683,13 +1572,10 @@ struct body_value {
   using type = cond_t<std::is_void_v<V>, std::string_view, V>;
 };
 
-// The value a rule answers: the slot's converter result, else the rule this
-// one was minted over, else, for a data rule, the value its body passes.
+// The value a rule answers: the slot's converter result, else the type of the
+// rule it overrides, else, for a data rule, the value its body passes.
 template <class R, class Kind, class Seen>
 struct rule_type {
-  // The converter the slot names, and the rule stays the rule: the two are
-  // asked different questions below, and one name for both would have the
-  // converter answer "is this rule an override".
   using Cv = conv_t<R>;
   static consteval auto pick() {
     if constexpr (std::is_same_v<typename R::kind, node_kind> &&
@@ -1728,14 +1614,12 @@ struct rule_type {
   using type = typename decltype(pick())::type;
 };
 
-// An infix rule answers what its climb builds; the shape states it, so there
-// is nothing to name.
+// An infix rule answers what its chain builds.
 template <class R, class Seen>
 struct rule_type<R, detail::infix_kind, Seen> : infix_answer<R> {};
 
-// `rule<>` covers both genres, so this one specialization answers both: a body
-// that commits a node deduces its type, a body that composes text answers the
-// slot -- and the value path is the primary above, reached by delegation.
+// `rule<>` covers both: a body that commits a node deduces its type, and a
+// body that composes text answers as a value rule, through the primary above.
 template <class R, class Seen>
 struct rule_type<R, node_kind, Seen> {
   using type = typename cond_t<
@@ -1750,14 +1634,9 @@ using rule_type_t = typename rule_type<R>::type;
 
 }  // namespace detail
 
-// Everything a grammar spells, re-exposed as members so a derived grammar
-// writes `terminal<cr<"a-z"> + many(w)>` unqualified. A generated grammar needs
-// an `entry`, its own or inherited, and a base that only shares rules has none;
-// `ignored` and `hidden` default to nothing.
-
-// Grammar inheritance. The parent's `override` primary is hidden here, so a
-// grammar that restates nothing inherits its parent's effective rules once
-// instead of applying the parent's overrides a second time.
+// Grammar inheritance. It hides the parents' `override` primary, so a grammar
+// that overrides nothing inherits their effective rules once instead of
+// applying their overrides again.
 template <class... Parents>
 struct extends : Parents... {
   using parents = TypeList<Parents...>;
@@ -1765,6 +1644,9 @@ struct extends : Parents... {
   struct override;
 };
 
+// Everything a grammar spells, as members, so a derived grammar writes
+// `terminal<cr<"a-z"> + many(w)>` unqualified. A generated grammar needs an
+// `entry`; `ignored` and `hidden` default to nothing.
 struct GrammarSpec {
   template <class... Ts>
   using list = TypeList<Ts...>;
@@ -1784,10 +1666,8 @@ struct GrammarSpec {
   using ignored = TypeList<>;
   using hidden = TypeList<>;
 
-  // Factories.
-  // Through `expr`'s factories, so the two spellings of one token cannot
-  // drift: `kw<"end">` takes this grammar's `word_boundary` discipline,
-  // `lit<"end", !lit<"if">>` the guard it spells for itself.
+  // Forwarded to `expr.hpp`, so both spellings of a token agree: `kw<"end">`
+  // takes this grammar's `word_boundary`.
   template <str S, auto G = detail::no_guard>
   static constexpr auto lit = cursiv::lit<S, G>;
   template <str S>
@@ -1802,7 +1682,6 @@ struct GrammarSpec {
   static constexpr Ref<R> ref{};
   static constexpr detail::Super super{};
 
-  // Directives.
   template <class T>
   static constexpr Create<T, Epsilon> create{};
   template <class T, Expr E>
@@ -1842,7 +1721,6 @@ struct GrammarSpec {
     return cursiv::section<G>(open, close);
   }
 
-  // Combinators.
   static constexpr auto left = [](Expr auto op) { return cursiv::left(op); };
   static constexpr auto right = [](Expr auto op) { return cursiv::right(op); };
   static constexpr auto nonassoc = [](Expr auto op) {
@@ -1894,25 +1772,20 @@ struct GrammarSpec {
   using uc = cursiv::uc;
   using gap = cursiv::gap;
 
-  // Which characters a keyword may not run into -- so `kw<"if">` does not
-  // match inside `iffy`. A declaration like `ignored` and `hidden`, and
-  // overridden the same way: a CSS-flavoured grammar writes
-  // `static constexpr auto word_boundary = cr<"a-zA-Z0-9_-">;`, one with
-  // identifiers past ASCII `cr<"a-zA-Z0-9_$"> | uc::XID_Continue`, and every
-  // `kw<>` in it is bounded by that instead; a token may still name its own
-  // class.
+  // The characters a keyword may not run into, so `kw<"if">` does not match
+  // inside `iffy`. Override it like `ignored`, such as
+  // `static constexpr auto word_boundary = cr<"a-zA-Z0-9_-">;`.
   static constexpr auto word_boundary = w;
-  // Whether every literal and keyword ignores letter case, as `ikw<>` does: a
-  // case-insensitive language writes
-  // `static constexpr bool case_insensitive = true;`. A spelling with no
-  // letter, such as `{`, is the same either way.
+  // Whether every literal and keyword ignores letter case, as `ikw<>` does:
+  // `static constexpr bool case_insensitive = true;`.
   static constexpr bool case_insensitive = false;
   // Between an opener and its closer the indentation says nothing: a
   // grammar with `indent`/`dedent` names its brackets here, literals or
   // terminals -- `static constexpr auto indent_open = lit<"("> | ref<LBRACK>;`.
   static constexpr Epsilon indent_open{};
   static constexpr Epsilon indent_close{};
-  // ...and the terminal that ends a statement, a blank inside them.
+  // The terminal that ends a statement; between an opener and its closer it
+  // is trivia.
   using indent_newline = void;
   static constexpr auto eol = cursiv::eol;
   static constexpr auto eof = cursiv::eof;

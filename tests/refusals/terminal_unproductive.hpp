@@ -1,3 +1,4 @@
+// A terminal whose only branch calls itself after `a`: no match ever ends.
 // expect LR: refused:.*has a recursive call that can never finish a match
 #pragma once
 

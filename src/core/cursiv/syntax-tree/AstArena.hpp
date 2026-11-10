@@ -12,9 +12,9 @@
 
 #include "cursiv/syntax-tree/AstNode.hpp"
 
-// Where the AST nodes live: a bump over the resource the tree already owns,
-// so one release frees both. What a node's members own, the `ParseResult` frees
-// by running each node's destructor.
+// AST nodes are bump-allocated from the memory resource the CST already owns,
+// so one release frees both. `ParseResult` runs each node's destructor to free
+// what its members own.
 
 namespace cursiv::detail {
 
@@ -22,14 +22,12 @@ class AstArena {
  public:
   AstArena() = default;
   explicit AstArena(std::pmr::memory_resource* mem) : _mem(mem) {}
-  // The chunk moves with the pool it came from and the source keeps none: a
-  // defaulted move would copy `_cur`/`_end`, leaving two arenas bumping the
-  // same block and handing one address to two nodes.
+  // The source gives up its chunk: a defaulted move would leave two arenas
+  // allocating from the same block.
   AstArena(AstArena&& src) noexcept { *this = std::move(src); }
   AstArena& operator=(AstArena&& src) noexcept {
     _mem = src._mem;
-    // The chunk belongs to the incoming `_mem`: taking one without the other
-    // would carve the new pool's nodes out of the old pool's block.
+    // The chunk comes from `src._mem`, so it moves with it.
     _cur = src._cur;
     _end = src._end;
     src._cur = nullptr;
@@ -41,36 +39,29 @@ class AstArena {
   T* make() {
     static_assert(std::is_base_of_v<AstNode, T>,
                   "an AST node type must derive from cursiv::AstNode");
-    // A default-constructed arena borrows nothing: `make` on it would
-    // dereference null rather than say what is missing.
     assert(_mem != nullptr && "AstArena needs a memory resource before make()");
-    void* s = carve_for<T>();
+    void* s = allocate_for<T>();
     T* v = std::construct_at(static_cast<T*>(s));
-    // The type tag is written at construction, here and in `new_ast_node`, so a
-    // node built by hand carries the same identity a parsed one does.
-    stamp_node(*v);
+    // Set the type tag, as `new_ast_node` does, so a node built by hand has the
+    // same identity as a parsed one.
+    set_type_tag(*v);
     return v;
   }
 
-  // Forgets every node: the arena stays usable but every node it built is
-  // gone. The chunk goes too: a `_cur` kept across this would carve the next
-  // node out of memory the pool has taken back.
+  // Forgets every node and the current chunk, which the pool may take back.
+  // The arena stays usable.
   void release() noexcept {
     _cur = nullptr;
     _end = nullptr;
   }
 
  private:
-  // Nodes are carved in chunks and not requested one by one: `_mem->allocate`
-  // is a virtual call wrapped around what is a pointer increment anyway. The
-  // pool stays the owner, so a caller that supplied a resource still frees
-  // everything in one piece, and nothing is imposed on a node's own members.
-  // The arena never releases a single node, so interior pointers are sound.
+  // Nodes are allocated from chunks of the pool, which owns them and frees
+  // them all at once.
   static constexpr std::size_t kChunk = static_cast<std::size_t>(64u * 1024u);
 
-  // Eight rather than `max_align_t`'s sixteen: every node's size is rounded up
-  // to this, and an ordinary AST class is already a multiple of eight, where
-  // sixteen padded half of them for nothing.
+  // Eight, not `max_align_t`'s sixteen: every node size is rounded up to this,
+  // and sixteen would pad about half of the AST classes.
   static constexpr std::size_t kBumpAlign = 8u;
 
   static char* align_up(const char* p, std::size_t align) {
@@ -79,9 +70,9 @@ class AstArena {
     return reinterpret_cast<char*>((u + a - 1u) & ~(a - 1u));
   }
 
-  // The slow half, out of line: one call per chunk, not per node.
-  [[gnu::cold, gnu::noinline]] void* carve_chunk(std::size_t size,
-                                                 std::size_t align) {
+  // The slow path, out of line: one call per chunk, not per node.
+  [[gnu::cold, gnu::noinline]] void* allocate_chunk(std::size_t size,
+                                                    std::size_t align) {
     if (size > std::numeric_limits<std::size_t>::max() - align)
       throw std::bad_alloc();
     // A node wider than a chunk gets its own exact block; the current chunk
@@ -89,8 +80,6 @@ class AstArena {
     const std::size_t want = size + align > kChunk ? size + align : kChunk;
     auto* const block = static_cast<char*>(_mem->allocate(want, kBumpAlign));
     char* const p = align_up(block, align);
-    // An oversized node takes its own block and the current chunk is kept:
-    // dropping it would strand the room left for the nodes that follow.
     if (want == kChunk) {
       _cur = align_up(p + size, kBumpAlign);
       _end = block + want;
@@ -98,39 +87,34 @@ class AstArena {
     return p;
   }
 
-  // The room is a distance and not a pointer: `p + size > _end` would form a
-  // pointer past one-past-the-end whenever the chunk is exhausted, and on the
-  // first node, where both are null. `_cur` stays `kBumpAlign`-aligned on every
-  // path, which is the premise of `carve_for` below.
-  void* carve(std::size_t size, std::size_t align) {
+  // The room left is compared as a distance, so no pointer goes past the
+  // chunk. `_cur` stays `kBumpAlign`-aligned, which `allocate_for` relies on.
+  void* allocate(std::size_t size, std::size_t align) {
     char* const p = align_up(_cur, align);
-    // The align-up can land past the chunk, which would make the distance
+    // The align-up can go past the chunk, which would make the distance
     // negative: that is exhaustion too.
     if (p > _end || std::cmp_greater(size, _end - p)) [[unlikely]]
-      return carve_chunk(size, align);
+      return allocate_chunk(size, align);
     char* const next = align_up(p + size, kBumpAlign);
-    // Rounding up must not walk the pointer past one-past-the-end of the
-    // block; the chunk simply ends here when it would.
+    // Rounding up must not go past the end of the block.
     _cur = next > _end ? _end : next;
     return p;
   }
 
-  // Size and alignment are compile-time here, and `_cur` is held at
-  // `kBumpAlign`, so the align-up disappears for every ordinary AST class and
-  // the hot path is a load, a constant add, a compare and a store. An
-  // over-aligned node fails the test and takes the general path.
+  // Size and alignment are known here and `_cur` is `kBumpAlign`-aligned, so
+  // an ordinary node needs no align-up. An over-aligned one takes `allocate`.
   template <class T>
-  void* carve_for() {
+  void* allocate_for() {
     if constexpr (alignof(T) <= kBumpAlign) {
       constexpr std::size_t n =
           (sizeof(T) + kBumpAlign - 1u) & ~(kBumpAlign - 1u);
       char* const p = _cur;
       if (std::cmp_greater(n, _end - p)) [[unlikely]]
-        return carve_chunk(n, kBumpAlign);
+        return allocate_chunk(n, kBumpAlign);
       _cur = p + n;
       return p;
     } else {
-      return carve(sizeof(T), alignof(T));
+      return allocate(sizeof(T), alignof(T));
     }
   }
 

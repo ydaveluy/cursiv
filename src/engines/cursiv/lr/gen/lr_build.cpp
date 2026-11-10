@@ -89,7 +89,7 @@ void lr_req_conds(const LrReq& r, DynSet& out) {
 }
 
 // Two chains that lead with one write say one thing to a caret: `(name=ID)?`
-// mints a chain per branch. A fused id stands above the pool, unbounded.
+// creates a chain per branch. A fused id stands above the pool, unbounded.
 std::uint32_t lr_site_key(const ChainPool& w, ElementId e) {
   return e < w.nchains && w.chainBuild[e].lead != kNoRow
              ? 0x10000u + w.chainBuild[e].lead
@@ -155,7 +155,6 @@ void lr_append(auto& pool, const auto& row) {
   pool.insert(pool.end(), row.begin(), row.end());
 }
 
-// `v` sorted, each value once.
 void lr_sort_unique(auto& v) {
   std::ranges::sort(v);
   v.erase(std::ranges::unique(v).begin(), v.end());
@@ -280,7 +279,7 @@ struct LrClosures {
 
 // Close the productions reachable through each rule's first symbol once. The
 // entries serve canonical lookaheads and the order a cell forks in, and a graph
-// under `core` with no cell to order reads neither: `lookaheads` lays them.
+// under `core` with no cell to order reads neither: `lookaheads` asks for them.
 LrClosures lr_closures(const LrBuildCfg& g, const LrBuckets<std::uint16_t>& pn,
                        const LrFirstSets& fs, bool lookaheads) {
   LrClosures cl{lookaheads, {}, std::vector<std::uint32_t>(g.nnts + 1)};
@@ -399,12 +398,12 @@ struct LrGraph {
   }
 };
 
-// The states `depth` edges below `root`, each once per layer. Stamps and
+// The states `depth` edges below `root`, each once per layer. Rounds and
 // predecessor order belong to the caller; only its final row may be sorted.
-template <class Stamp>
+template <class Round>
 std::vector<std::uint32_t> lr_back(
     const std::vector<std::vector<std::uint32_t>>& preds,
-    std::vector<Stamp>& seen, Stamp& gen, unsigned root, unsigned depth) {
+    std::vector<Round>& seen, Round& gen, unsigned root, unsigned depth) {
   std::vector<std::uint32_t> here{root}, next;
   for (unsigned i = 0; i < depth; ++i) {
     next.clear();
@@ -438,9 +437,9 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   seen.init(seenWords.data(), dom.words);
   std::vector<DynSet> laS(WithLa ? dom.n : 0);
 
-  std::vector<LrItem> harv(dom.n);
-  std::vector<DynSet> harvLa(WithLa ? dom.n : 0);
-  auto harvest = [&]() {
+  std::vector<LrItem> collected(dom.n);
+  std::vector<DynSet> collectedLa(WithLa ? dom.n : 0);
+  auto collect_items = [&]() {
     std::uint32_t out = 0;
     const std::size_t klo = seen.lo, khi = seen.hi;
     seen.lo = dom.words;
@@ -453,9 +452,9 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
             (k << 6) | static_cast<unsigned>(std::countr_zero(bits));
         bits &= bits - 1;
         const std::uint16_t p = dom.prodOf[i];
-        harv[out] = LrItem{p, static_cast<std::uint16_t>(i - dom.base[p])};
+        collected[out] = LrItem{p, static_cast<std::uint16_t>(i - dom.base[p])};
         if (WithLa) {
-          harvLa[out] = laS[i];
+          collectedLa[out] = laS[i];
           laS[i] = DynSet{};
         }
         ++out;
@@ -503,7 +502,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       }
       ntMark[B] = 0;
     }
-    return harvest();
+    return collect_items();
   };
 
   auto& [kernPool, kernLaPool, kernAt, kernLen, closPool, closLaPool, closAt,
@@ -520,9 +519,9 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   }
   ChainIndex kernIx;
   kernIx.init(nP + 1);
-  // The programs laid so far, by what they decide. A state asks its tokens'
+  // The programs made so far, by what they decide. A state asks its tokens'
   // conditions one program each, and most states ask the same of the same
-  // landings: the cap on programs counts those that differ, not those asked.
+  // targets: the cap on programs counts those that differ, not those asked.
   std::map<std::vector<std::uint32_t>, std::uint32_t> progIds;
   std::vector<std::uint32_t> progKey;
 
@@ -543,8 +542,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   // A state is its kernel and its tag.
   auto find_or_add = [&](std::uint32_t n, bool& fresh, const DynSet& known,
                          const DynSet& held) -> unsigned {
-    std::uint64_t h =
-        lr_kernel_hash(harv.data(), n, WithLa ? harvLa.data() : nullptr);
+    std::uint64_t h = lr_kernel_hash(collected.data(), n,
+                                     WithLa ? collectedLa.data() : nullptr);
     for (const std::uint64_t x : known.w) h = hash_mix(h, x);
     for (const std::uint64_t x : held.w) h = hash_mix(h, x);
     const LrItem* const kp = kernPool.data();
@@ -553,9 +552,10 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
          i = kernIx.after(i)) {
       if (!(tagKnown[i] == known) || !(tagTruth[i] == held)) continue;
       // Under `core` a kernel is its core: lookaheads are propagated later.
-      if (WithLa ? lr_same_full(kp + kernAt[i], kernLen[i], harv.data(), n,
-                                klp + kernAt[i], harvLa.data())
-                 : lr_same_core(kp + kernAt[i], kernLen[i], harv.data(), n)) {
+      if (WithLa
+              ? lr_same_full(kp + kernAt[i], kernLen[i], collected.data(), n,
+                             klp + kernAt[i], collectedLa.data())
+              : lr_same_core(kp + kernAt[i], kernLen[i], collected.data(), n)) {
         fresh = false;
         return i;
       }
@@ -572,8 +572,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
     const std::size_t kb = kernPool.size();
     kernAt.push_back(static_cast<std::uint32_t>(kb));
     kernLen.push_back(n);
-    lr_append(kernPool, std::span(harv).first(n));
-    if (WithLa) lr_append(kernLaPool, std::span(harvLa).first(n));
+    lr_append(kernPool, std::span(collected).first(n));
+    if (WithLa) lr_append(kernLaPool, std::span(collectedLa).first(n));
     tagKnown.push_back(known);
     tagTruth.push_back(held);
     kernIx.add(h, id);
@@ -613,7 +613,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
            (e >= writes.nchains || writes.chainBuild[e].lead != kNoRow);
   };
   // The site of a call: the slot's chain, or a unit production's own where the
-  // call and its caller each lay a record.
+  // call and its caller each create a record.
   const auto call_site = [&](const LrLowProd& p, unsigned at) {
     const ElementId row = g.row_at(p, at);
     return row != kNoElement || p.len != 1 ? row : ElementId{p.node};
@@ -677,10 +677,9 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
     return dot != 0 ? opensRule[p.lhs] != 0
                     : builds_node(p.lhs) || entryPast[p.lhs] != gen;
   };
-  // What the calls of each rule fill, over the grammar, where they agree: a
-  // position past a rule that may read nothing stands first in a rule its state
-  // holds no call of. Past a token of the rule, a call fills nothing. A rule's
-  // answer narrows at most three times, each going down its hands once.
+  // What the calls of each rule fill, over the grammar, where they agree; past
+  // a token of the rule, a call fills nothing. A rule's answer narrows at most
+  // three times.
   std::vector<LrCaretSite> ruleSite(nN);
   std::vector<std::uint8_t> ruleCalled(nN, 0);
   std::vector<std::vector<std::uint32_t>> ruleHands(nN);
@@ -752,15 +751,15 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       const std::size_t cb = closPool.size();
       closAt[s] = static_cast<std::uint32_t>(cb);
       closLen[s] = c0n;
-      lr_append(closPool, std::span(harv).first(c0n));
-      if (WithLa) lr_append(closLaPool, std::span(harvLa).first(c0n));
+      lr_append(closPool, std::span(collected).first(c0n));
+      if (WithLa) lr_append(closLaPool, std::span(collectedLa).first(c0n));
     }
     const LrItem* const cs = closPool.data() + closAt[s];
     const DynSet* const csLa = WithLa ? closLaPool.data() + closAt[s] : nullptr;
     const std::uint32_t csn = closLen[s];
 
     // A rule's requirement gathers its calls', each its own guard joined to
-    // each way into its rule: a fixpoint. A kernel item owes its own alone.
+    // each way into its rule: a fixpoint. A kernel item needs its own alone.
     bool gated = false;
     for (std::uint32_t ci = 0; guarded && ci < csn && !gated; ++ci) {
       const LrLowProd& p = prods[cs[ci].prod];
@@ -816,7 +815,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       }
     }
 
-    // One pass over the closure: the symbols the state meets, and how many
+    // One pass over the closure: the symbols the state reads, and how many
     // items each advances.
     nNtSyms = 0;
     DynSet actMask;
@@ -834,11 +833,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       if (++symCnt[nT + nt_index(x)] == 1) ntSyms[nNtSyms++] = x;
     }
     // The sites each nonterminal is entered to fill, among the calls `kept`
-    // leaves. A call that writes nothing hands on what the call of its own rule
-    // says, where it opens that rule: past a token of the rule, it fills nothing
-    // the rule's caller states. So does a call that writes, inside a cycle of
-    // left recursion: it reads what was already read, and a token at a caret
-    // fills what the call into the cycle names.
+    // leaves. A call that writes nothing, or writes in a left-recursive cycle,
+    // passes on what its rule's call says.
     const auto entered = [&](auto&& kept) {
       ++gen;
       const auto sites_of = [&](unsigned nt) -> std::vector<LrCaretSite>& {
@@ -914,14 +910,14 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
     };
     entered([](std::uint32_t) { return true; });
     std::uint32_t symTop = 0;
-    // The terminals the state meets, ascending, then its nonterminals.
-    const auto lay = [&](std::size_t k) {
+    // The terminals the state reads, ascending, then its nonterminals.
+    const auto place = [&](std::size_t k) {
       symAt[k] = symFill[k] = symTop;
       symTop += symCnt[k];
       symCnt[k] = 0;
     };
-    each_bit(actMask.w.data(), actMask.w.size(), lay);
-    for (std::uint32_t q = 0; q < nNtSyms; ++q) lay(nT + nt_index(ntSyms[q]));
+    each_bit(actMask.w.data(), actMask.w.size(), place);
+    for (std::uint32_t q = 0; q < nNtSyms; ++q) place(nT + nt_index(ntSyms[q]));
     for (std::uint32_t j = 0; j < csn; ++j) {
       const LrItem& it = cs[j];
       const LrLowProd& p = prods[it.prod];
@@ -930,9 +926,9 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       symItem[symFill[is_term(x) ? x : nT + nt_index(x)]++] = j;
     }
 
-    // The edges on one symbol: one landing, or where guards decide, one per
-    // outcome of the conditions the symbol asks -- its items' guards, and
-    // those of the calls whose span it may open.
+    // The edges on one symbol: one target, or where guards decide, one per
+    // outcome of the conditions the symbol asks (its items' guards, and those
+    // of the calls whose span it may open).
     edgeRow.clear();
     const auto edges_on = [&](std::size_t key, std::uint16_t sym) {
       const bool terminal = is_term(sym);
@@ -981,7 +977,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         std::vector<LrCaretSite> readings;
         for (std::uint32_t k = k0; k < k1; ++k) advance(k, readings);
         bool fresh = false;
-        const unsigned t = find_or_add(harvest(), fresh, noTag, noTag);
+        const unsigned t = find_or_add(collect_items(), fresh, noTag, noTag);
         edgeRow.push_back(LrEdge{sym, static_cast<std::uint16_t>(t), 0,
                                  site_set(readings)});
         if (fresh) work.push_back(t);
@@ -1040,7 +1036,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
           }
         }
         bool fresh = false;
-        const unsigned t = find_or_add(harvest(), fresh, known, truth & known);
+        const unsigned t =
+            find_or_add(collect_items(), fresh, known, truth & known);
         prog.to[v] = static_cast<std::uint16_t>(t);
         prog.alts[v] = site_set(readings);
         if (fresh) work.push_back(t);
@@ -1164,7 +1161,7 @@ void lr_close_over(LrSetNames& sets, std::vector<std::uint32_t>& v,
   }
 }
 
-// What each reduction looks back to, kept for the conflicts laid later.
+// What each reduction looks back to, kept for the conflicts found later.
 struct LrLookback {
   std::vector<std::uint32_t> from, origin;
   std::vector<std::uint16_t> prod;
@@ -1277,7 +1274,7 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
   LrLookback lb;
   LrSetNames& sets = lb.sets;
   sets.count_reads(work);
-  // What a transition reads to begin with: what the state it lands in shifts.
+  // What a transition reads to begin with: what the state it goes to shifts.
   std::vector<std::uint32_t> read(ntr);
   {
     constexpr std::uint32_t kUnnamed = 0xffffffffu;
@@ -1318,8 +1315,8 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
     for (std::uint32_t e = e0; e < e1; ++e) read_end(e);
   }
 
-  // The goto that closes a span: the landing its guard picks off the tag of
-  // the state the span's first step landed in.
+  // The goto that closes a span: the target its guard picks off the tag of
+  // the state the span's first step went to.
   const auto closing = [&](std::uint32_t s0, std::uint32_t s1, unsigned first) {
     if (s0 == s1 || gt.pool[s0].prog == 0) return s0 == s1 ? 0xffffffffu : s0;
     const LrGuard& pg = gr.progs[gt.pool[s0].prog - 1u];
@@ -1374,8 +1371,8 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
   std::vector<std::uint32_t> inclDst, inclSrc;
   inclDst.reserve(inclCap);
   inclSrc.reserve(inclCap);
-  // A walk takes every landing a guard may pick; each path is closed by the
-  // goto its first landing picks, an empty rule by every one.
+  // A walk takes every target a guard may pick; each path is closed by the
+  // goto its first target picks, an empty rule by every one.
   std::vector path(maxLen, unsigned{});
   std::vector<std::span<const LrEdge>> step(maxLen);
   const auto close_path = [&](unsigned p, std::uint16_t prod) {
@@ -1450,12 +1447,12 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
   std::vector<std::uint32_t> follow = read;
   lr_close_over(sets, follow, inclDst, inclSrc, work);
 
-  // Written into the room the graph left empty.
+  // Written into the space the graph left empty.
   DynSet* const closLa = gr.closLaPool.data();
   DynSet endOnly;
   endOnly.set(kEofSymbol);
   for (std::uint32_t q = 0; q < nLb && writeLa; ++q) {
-    // The accept owes end of input, nothing else.
+    // The accept reduces on end of input, nothing else.
     const DynSet* in = &endOnly;
     if (lb.prod[q] != g.startProd) {
       if (lb.from[q] == 0xffffffffu) continue;
@@ -1509,10 +1506,10 @@ struct LrActions {
   unsigned dedentTerm = 0;
 
   LrActions(const LrBuildCfg& g, const LrGraph& gr) : g(g), gr(gr) {
-    // An end assertion holds at a dedent too: the last line may end without
-    // a newline.
+    // An end assertion reduces at a dedent too, its condition telling the
+    // input's end: the last line may end without a newline.
     for (unsigned t = 1; t < g.nterms; ++t)
-      if (g.terms[t].laid == kLaidDedent) dedentTerm = t;
+      if (g.terms[t].synthetic == kSyntheticDedent) dedentTerm = t;
   }
 
   template <class F>
@@ -1617,12 +1614,8 @@ std::vector<unsigned> lr_core_classes(const LrGraph& gr) {
 }
 
 // A canonical state's reduction also answers a terminal its row reads where
-// another state of its core reduces on it, and the terminal reads over one
-// the reduction takes, a trivia of the same text included. The lexer hands
-// that terminal over in place of the text the reduction goes on with, and
-// the caller reads that text again in its own mode, as under the core's
-// merged state: a newline that ends a statement elsewhere ends the operand
-// before it, and is trivia to a caller that reads no newline.
+// another state of its core reduces on it and that terminal reads over one the
+// reduction takes. The caller then reads that text again in its own mode.
 void lr_caller_lookaheads(LrGraph& gr, const LrActions& actions,
                           const std::vector<unsigned>& core,
                           LexOvertakes<LrBuildCfg>& overtakes) {
@@ -1659,10 +1652,9 @@ void lr_caller_lookaheads(LrGraph& gr, const LrActions& actions,
   }
 }
 
-// The re-fusion: states of one core form a group, separated only where they
-// conflict or answer different implied tokens, more than one between them;
-// targets agree when they land in the same group, a fixpoint. `grp` holds
-// the classes of each core on entry.
+// The re-fusion: states of one core form a group, split only where they
+// conflict or answer different implied tokens; targets agree when they are in
+// one group, to a fixpoint. `grp` holds each core's classes on entry.
 std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions,
                                 std::vector<unsigned> grp) {
   const unsigned ns = gr.states();
@@ -1675,7 +1667,8 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions,
       acts.push_back(a);
       ++count[a.term];
       mask.set(a.term);
-      if (actions.g.terms[a.term].laid == kLaidImplied) implied[s].set(a.term);
+      if (actions.g.terms[a.term].synthetic == kSyntheticImplied)
+        implied[s].set(a.term);
     });
     base[s + 1] = static_cast<std::uint32_t>(acts.size());
     const auto n = base[s + 1] - base[s];
@@ -1685,7 +1678,7 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions,
   const auto row = [&](unsigned s) -> std::span<const LrAction> {
     return {acts.data() + base[s], base[s + 1] - base[s]};
   };
-  const auto same_landings = [&](std::uint16_t a, std::uint16_t b) {
+  const auto same_targets = [&](std::uint16_t a, std::uint16_t b) {
     const LrGuard& x = gr.progs[a];
     const LrGuard& y = gr.progs[b];
     if (x.conds != y.conds) return false;
@@ -1713,10 +1706,9 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions,
     // A run is ordered, so two agree action for action.
     for (std::size_t a = 0; a < n; ++a) {
       if (u[a].kind != v[a].kind) return false;
-      if (u[a].kind == LrActionKind::shift ? grp[u[a].arg] != grp[v[a].arg]
-          : u[a].kind == LrActionKind::guard
-              ? !same_landings(u[a].arg, v[a].arg)
-              : u[a].arg != v[a].arg)
+      if (u[a].kind == LrActionKind::shift   ? grp[u[a].arg] != grp[v[a].arg]
+          : u[a].kind == LrActionKind::guard ? !same_targets(u[a].arg, v[a].arg)
+                                             : u[a].arg != v[a].arg)
         return false;
     }
     return true;
@@ -1838,12 +1830,12 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions,
   return grp;
 }
 
-// The ways five origins can be alike: for each, the place of the first origin
-// it equals.
-struct LrAlikes {
+// The ways five origins can be the same: for each, the place of the first
+// origin it equals.
+struct LrPartitions {
   std::array<std::array<std::uint8_t, 5>, 52> of{};
   std::array<std::uint8_t, 1 << 15> id{};
-  constexpr LrAlikes() {
+  constexpr LrPartitions() {
     unsigned n = 0;
     for (std::uint8_t d = 0; d < 5; ++d)
       for (std::uint8_t c = 0; c < 4; ++c)
@@ -1860,17 +1852,11 @@ struct LrAlikes {
           }
   }
 };
-inline constexpr LrAlikes kLrAlikes{};
+inline constexpr LrPartitions kLrPartitions{};
 
-// The order the grammar wrote, read off the election words: two readings of a
-// cell compare as the election compares their derivations, top down in text
-// order, from the lowest node their item chains share. A chain is the item and
-// the kernel items two levels over it; the left corner between two levels lays
-// its least words. Chains may meet at several heights: the highest
-// that tells the readings apart decides, as they part there first. The order
-// is exact for every text where nothing climbs past those levels but chains
-// the other holds, that repeat a node or that end, and the readings meet one
-// way at every height.
+// The order the grammar wrote: two readings of a cell compare as the election
+// compares their derivations, from the lowest node their item chains share; of
+// several shared nodes, the highest that parts them decides.
 class LrWrittenOrder {
  public:
   LrWrittenOrder(const LrBuildCfg& g, const LrItemDomain& dom,
@@ -1880,23 +1866,23 @@ class LrWrittenOrder {
       : _g(g), _dom(dom), _gr(gr), _cl(cl), _fs(fs), _pn(pn), _A(A) {}
 
   // Lets go of the layouts and the forward walks held once they weigh too
-  // much; a layout met again is built again, and what its meetings said
+  // much; a layout met again is built again, and what its verdicts said
   // stands. The layouts of shapes `a` and `b` stay.
   void trim(std::uint32_t a = kNone, std::uint32_t b = kNone) {
     if (_links.size() >= kMostLinks) _links.clear();
     if (_held < kMostHeld) return;
     _held = 0;
     for (std::uint32_t i = 0; i < _layouts.size(); ++i) {
-      Layout& lay = _layouts[i];
+      Layout& layout = _layouts[i];
       if ((a != kNone && i == _shapes[a].layout) ||
           (b != kNone && i == _shapes[b].layout)) {
-        _held += lay.weight;
+        _held += layout.weight;
         continue;
       }
       Layout fresh;
-      fresh.data = std::move(lay.data);
-      fresh.gen = lay.gen + 1;
-      lay = std::move(fresh);
+      fresh.data = std::move(layout.data);
+      fresh.gen = layout.gen + 1;
+      layout = std::move(fresh);
     }
     for (Mid& md : _midPool) {
       md.parents = {};
@@ -1918,8 +1904,8 @@ class LrWrittenOrder {
   }
 
  private:
-  // The tables every comparison reads, laid at the first one: a graph with no
-  // cell to order lays none.
+  // The tables every comparison reads, built at the first one: a graph with no
+  // cell to order builds none.
   void open() {
     if (!_keys.empty()) return;
     _keys.emplace_back();
@@ -1950,7 +1936,7 @@ class LrWrittenOrder {
   static constexpr std::uint32_t kNone = ~std::uint32_t{0};
 
   // What a chain is but for where it stands: its items from the top down, and
-  // the words the chain lays, laid when a say first reads them.
+  // the words the chain adds, built when a say first reads them.
   struct Skeleton {
     std::array<LrItem, 3> at{};
     std::uint32_t seq = kNone;
@@ -1967,13 +1953,12 @@ class LrWrittenOrder {
     std::uint64_t key = 0;
     std::uint32_t begin = 0, end = 0;
   };
-  // A chain over a root of a list. `from..to` hold the states its top's dot may
-  // stand in; a chain of two shares in `over` the record of the nodes it may
-  // climb to. A chain of one has no states: the state of the readings is the
-  // meeting's.
+  // A chain over a root of a list. `from..to` are the states its top's dot may
+  // stand in; a chain of two shares in `over` the nodes it may rise to. A
+  // chain of one has no states.
   struct Chain {
     std::uint32_t height = 0, from = 0, to = 0, over = 0;
-    // The chain of two a chain of three climbs over.
+    // The chain of two a chain of three rises over.
     std::uint32_t mid = 0;
     LrItem top;
     // For a chain of three, the production under the top, and how far under the
@@ -1982,30 +1967,28 @@ class LrWrittenOrder {
     std::uint32_t rootOff = 0;
     std::uint8_t len = 1;
   };
-  // What a root climbs through: the nodes it may begin in and, for each, the
+  // What a root rises through: the nodes it may begin in and, for each, the
   // kernel items over it that the token it was read for allows.
   struct Rise {
     std::uint32_t origins = 0, dot = 0;
     bool narrowed = false;
     std::vector<std::uint64_t> flat;
   };
-  // The nodes a chain of two may climb to, by the state its top begins in, then
-  // the state its dot stands in: the same for every list whose chain over the
-  // same states has this top. `parents` holds, by dot, the kernel items over
-  // those nodes and the place in `over` of each; `parentOff` bounds each dot's
-  // run, and is empty until they are laid.
+  // The nodes a chain of two may rise to, by its top's first state, then its
+  // dot's. `parents` holds, by dot, the kernel items over those nodes and their
+  // places in `over`; `parentOff` bounds each dot's run, empty until built.
   struct Mid {
     std::vector<std::uint64_t> key, over, parents;
     std::vector<std::uint32_t> parentOff;
     LrItem up;
   };
-  // What stands at a height of a layout, laid when asked.
+  // What stands at a height of a layout, built when asked.
   struct Stand {
     bool shortMade = false, tallMade = false;
     std::vector<std::uint64_t> shorts, talls;
   };
-  // The chains of the lists that climb alike over the same states. The chains
-  // of three are laid a height at a time, as the meetings ask.
+  // The chains of the lists that rise the same over the same states. The chains
+  // of three are built a height at a time, as the verdicts ask.
   struct Layout {
     bool built = false;
     std::uint32_t high = 0, low = 0, gen = 0;
@@ -2014,7 +1997,7 @@ class LrWrittenOrder {
     std::vector<Chain> chains;
     std::vector<std::uint64_t> states;
     // The chains of two, by height then item; by height, those and all the
-    // chains of three laid, ordered by production, dot and number.
+    // chains of three built, ordered by production, dot and number.
     std::vector<std::uint32_t> mids;
     std::vector<std::vector<std::uint64_t>> shortAt, at;
     std::vector<std::uint8_t> topped;
@@ -2025,9 +2008,9 @@ class LrWrittenOrder {
     // For a height and an item, the states the chains of two begin in.
     std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> begins;
   };
-  // A list: its roots over a layout. Roots that climb alike are of one class
+  // A list: its roots over a layout. Roots that rise the same are of one class
   // of the layout, whose `members` it buckets; `rootSk` holds the skeleton of
-  // each, laid when a meeting first asks.
+  // each, built when a verdict first asks.
   struct Shape {
     std::uint32_t layout = 0;
     bool narrowed = false;
@@ -2036,36 +2019,36 @@ class LrWrittenOrder {
     LrBuckets<std::uint16_t> members;
     std::vector<std::uint32_t> rootSk;
   };
-  struct Meeting;
-  // What a join says each pair of chains for as it meets them: the shapes they
-  // stand over and the meeting that takes it.
+  struct HeightVerdict;
+  // What a join records for each pair of chains it finds: the shapes they
+  // stand over and the height verdict that takes the pair.
   struct Live {
     Shape* a;
     const Layout* la;
     Shape* b;
     const Layout* lb;
-    Meeting* at;
+    HeightVerdict* at;
   };
   // Two chains whose tops are one node, and the ways the five origins that
-  // stand under the pair were met alike, one bit each.
-  struct Meet {
+  // stand under the pair were met the same, one bit each.
+  struct TopPair {
     std::uint32_t x = 0, y = 0;
     std::uint64_t ways = 0;
   };
-  // What two layouts meet in at each height: laid when a meeting first asks.
+  // Two layouts' top pairs at each height: built when a verdict first asks.
   struct Pair {
     std::uint32_t genA = 0, genB = 0;
-    std::vector<std::vector<Meet>> at;
+    std::vector<std::vector<TopPair>> at;
     std::vector<std::uint8_t> done;
   };
-  // The items a shape climbs from, and the terminal the first step over a
+  // The items a shape rises from, and the terminal the first step over a
   // reduced one reads.
   struct List {
     std::vector<LrItem> roots;
     std::uint32_t t = kNone;
   };
-  // What a list lays past a shape: nothing for a shift, the words a reduced
-  // production owes, the least words of what a kernel item opens for a
+  // What a list adds past a shape: nothing for a shift, the words a reduced
+  // production needs, the least words of what a kernel item opens for a
   // reading that begins here; one tail per root.
   struct Reading {
     std::uint32_t list = kNone;
@@ -2078,16 +2061,16 @@ class LrWrittenOrder {
     std::uint32_t x = 0, y = 0;
   };
   // What the derivations ending at one height say: the direction their
-  // bodies settle, and the ties left to the tails.
-  struct Meeting {
+  // bodies decide, and the ties left to the tails.
+  struct HeightVerdict {
     bool lower = false, upper = false;
     std::vector<Tie> ties;
   };
-  // The meetings of two shapes from the highest height down to the one that
-  // settles them; what every height read says (some first, some second, some
-  // left to the tails); whether the shapes hold every meeting.
-  struct Meetings {
-    std::vector<Meeting> list;
+  // How two shapes compare from the highest height down to the one that
+  // decides them; what every height read says (some first, some second, some
+  // left to the tails); whether the shapes hold every height they join at.
+  struct ShapeVerdict {
+    std::vector<HeightVerdict> list;
     bool lower = false, upper = false, complete = false, tied = false;
   };
   // What two derivations say as far as their bodies go: -1 the first, 1 the
@@ -2113,7 +2096,7 @@ class LrWrittenOrder {
     std::vector<List> lists;
     std::vector<std::uint32_t> shape;
   };
-  // What an item opening nonterminal `b` lays to read a terminal first.
+  // What an item opening nonterminal `b` adds to read a terminal first.
   struct Open {
     std::uint16_t term = 0;
     std::uint32_t tail = 0;
@@ -2139,7 +2122,7 @@ class LrWrittenOrder {
     return static_cast<std::uint32_t>(_keys.size() - 1);
   }
 
-  // The least words a left corner lays from nonterminal `b` down to `c`.
+  // The least words a left corner adds from nonterminal `b` down to `c`.
   std::uint32_t corner(unsigned b, unsigned c) {
     std::vector<std::uint32_t>& best = _corner[b];
     if (!best.empty()) return best[c];
@@ -2166,7 +2149,7 @@ class LrWrittenOrder {
   }
 
   // The terminals nonterminal `b` opens on, each with the least words its
-  // productions lay to begin with it.
+  // productions add to begin with it.
   const std::vector<Open>& opens(unsigned b) {
     Opens& o = _opens[b];
     if (o.built) return o.rows;
@@ -2300,10 +2283,9 @@ class LrWrittenOrder {
     });
   }
 
-  // The parents a reading of `t` climbs through from a node, whose `row` of
-  // scores is `scores(p, t)`, null where `t` is kNone and nothing is scored:
-  // for a reduced one, those that read `t` past it as their next token where
-  // one does. True where some parent is dropped.
+  // The parents a reading of `t` rises through from a node, whose `row` of
+  // scores is `scores(p, t)`, null where `t` is kNone; for a reduced one, those
+  // that read `t` next. True where a parent is dropped.
   template <class F>
   bool each_chosen(std::vector<std::int8_t>* row, unsigned o, unsigned p,
                    std::uint32_t t, F&& f) {
@@ -2337,8 +2319,8 @@ class LrWrittenOrder {
   // Appends the words of `n`, `off` frames under its chain's top, after the
   // least words of the left corner from the item `over` it, where there is
   // one.
-  void lay_words(std::vector<Elem>& out, const LrItem& n, std::uint32_t off,
-                 const LrItem* over) {
+  void append_words(std::vector<Elem>& out, const LrItem& n, std::uint32_t off,
+                    const LrItem* over) {
     const LrLowProd& q = _g.prods[n.prod];
     if (over != nullptr) {
       const std::uint32_t lead = corner(
@@ -2375,14 +2357,14 @@ class LrWrittenOrder {
     return id;
   }
 
-  // The words skeleton `id` lays.
+  // The words skeleton `id` adds.
   std::uint32_t seq_of(std::uint32_t id) {
     Skeleton& sk = _skeletons[id];
     if (sk.seq != kNone) return sk.seq;
     _fx.clear();
     std::uint32_t off = 0;
     for (unsigned i = 0; i < sk.len; ++i) {
-      lay_words(_fx, sk.at[i], off, i == 0 ? nullptr : &sk.at[i - 1]);
+      append_words(_fx, sk.at[i], off, i == 0 ? nullptr : &sk.at[i - 1]);
       off += sk.at[i].dot;
     }
     return sk.seq = intern(_fx);
@@ -2425,12 +2407,12 @@ class LrWrittenOrder {
   }
 
   // The skeleton of a chain of `b` over its root `i`.
-  std::uint32_t skeleton_id(Shape& b, const Layout& lay, const Chain& c,
+  std::uint32_t skeleton_id(Shape& b, const Layout& layout, const Chain& c,
                             unsigned i) {
     const std::uint32_t root = root_skeleton(b, i);
     if (c.len == 1) return root;
     if (c.len == 2) return skeleton_of(root, c.top);
-    return skeleton_of(skeleton_of(root, lay.chains[c.mid].top), c.top);
+    return skeleton_of(skeleton_of(root, layout.chains[c.mid].top), c.top);
   }
 
   std::uint32_t root_skeleton(Shape& b, unsigned i) {
@@ -2497,7 +2479,7 @@ class LrWrittenOrder {
   }
 
   // The record of the nodes a chain of two over the origins in `group` (an item
-  // and an origin each, ascending) may climb to.
+  // and an origin each, ascending) may rise to.
   std::uint32_t mid_of(std::span<const std::uint64_t> group) {
     std::uint64_t h = 0x4d1d;
     for (const std::uint64_t e : group) h = hash_mix(h, e);
@@ -2516,8 +2498,8 @@ class LrWrittenOrder {
     return id;
   }
 
-  // Lays the kernel items over the nodes of a chain of two.
-  void lay_parents(Mid& md) {
+  // Records the kernel items over the nodes of a chain of two.
+  void record_parents(Mid& md) {
     _byDot.resize(_maxDot + 1u);
     for (auto& run : _byDot) run.clear();
     for (std::uint32_t i = 0; i < md.over.size(); ++i)
@@ -2534,12 +2516,12 @@ class LrWrittenOrder {
     _held += md.parents.size();
   }
 
-  // Lays the chains of three whose tops stand at `height`.
+  // Builds the chains of three whose tops stand at `height`.
   void ensure_tops(Layout& sh, std::uint32_t height) {
     if (height >= sh.topped.size() || sh.topped[height]) return;
     sh.topped[height] = 1;
-    std::vector<std::uint32_t>& laid = _laid;
-    laid.clear();
+    std::vector<std::uint32_t>& added = _added;
+    added.clear();
     const auto reach = std::ranges::partition_point(
         sh.mids, [&](std::uint32_t m) {
           return sh.chains[m].height + _maxDot < height;
@@ -2549,28 +2531,29 @@ class LrWrittenOrder {
       const Chain mc = sh.chains[m];
       if (mc.height > height) break;
       Mid& md = _midPool[mc.over];
-      if (md.parentOff.empty()) lay_parents(md);
+      if (md.parentOff.empty()) record_parents(md);
       const std::uint32_t* off = md.parentOff.data();
       const unsigned dot = height - mc.height;
       for (std::uint32_t q = off[dot], r; q < off[dot + 1]; q = r) {
         const auto ix = static_cast<std::uint32_t>(md.parents[q] >> 32);
-        _laying.clear();
+        _overNodes.clear();
         for (r = q; r < off[dot + 1] && md.parents[r] >> 32 == ix; ++r)
-          _laying.push_back(md.over[static_cast<std::uint32_t>(md.parents[r])]);
+          _overNodes.push_back(
+              md.over[static_cast<std::uint32_t>(md.parents[r])]);
         const std::uint32_t c =
-            add_chain(sh, m, _dom.item(ix), _laying, mc.root);
-        laid.push_back(c);
+            add_chain(sh, m, _dom.item(ix), _overNodes, mc.root);
+        added.push_back(c);
         sh.weight += 4 + sh.chains[c].to - sh.chains[c].from;
         _held += 4 + sh.chains[c].to - sh.chains[c].from;
       }
     }
-    if (laid.empty()) return;
-    // The laid chains by item, which `at` takes, then by root offset, which
+    if (added.empty()) return;
+    // The built chains by item, which `at` takes, then by root offset, which
     // orders the runs of states; each order is stable on the chain.
     _items.clear();
     std::uint32_t most = 0;
     std::size_t total = 0;
-    for (const std::uint32_t c : laid) {
+    for (const std::uint32_t c : added) {
       total += sh.chains[c].to - sh.chains[c].from;
       const unsigned ix = item_ix(sh.chains[c].top);
       if (_bucketOf[ix] == kNone) {
@@ -2587,8 +2570,8 @@ class LrWrittenOrder {
       _bucketOf[ix] = place;
       place += n;
     }
-    _byItem.resize(laid.size());
-    for (const std::uint32_t c : laid) {
+    _byItem.resize(added.size());
+    for (const std::uint32_t c : added) {
       const unsigned ix = item_ix(sh.chains[c].top);
       _byItem[_bucketOf[ix]++] = std::uint64_t{ix} << 32 | c;
     }
@@ -2749,20 +2732,21 @@ class LrWrittenOrder {
     return out;
   }
 
-  // The class of a token among those that climb through a production alike:
+  // The class of a token among those that rise through a production the same:
   // the parents it admits, item by item. Only the pairs a comparison asks for
   // are held.
-  std::uint32_t climb_class(unsigned p, std::uint32_t t) {
+  std::uint32_t parent_class(unsigned p, std::uint32_t t) {
     if (t == kNone) return kNone;
     const std::uint64_t pair = std::uint64_t{p} << 16 | t;
-    if (const std::uint32_t* const known = _climbOf.find(pair)) return *known;
+    if (const std::uint32_t* const known = _parentClassOf.find(pair))
+      return *known;
     std::vector<std::uint32_t> id{p};
     std::vector<std::int8_t>& row = scores(p, t);
     for (const LrItem& k : parent_items(p))
       id.push_back(static_cast<std::uint32_t>(score(row, k, p, t)));
-    const auto [at, fresh] = _climbs.try_emplace(
-        std::move(id), static_cast<std::uint32_t>(_climbs.size()));
-    _climbOf.emplace(pair).first = at->second;
+    const auto [at, fresh] = _parentClasses.try_emplace(
+        std::move(id), static_cast<std::uint32_t>(_parentClasses.size()));
+    _parentClassOf.emplace(pair).first = at->second;
     return at->second;
   }
 
@@ -2783,8 +2767,8 @@ class LrWrittenOrder {
     return known = id;
   }
 
-  // What root `r` climbs through over the states `origins` when `t` is the
-  // token read; lists that climb alike share it.
+  // What root `r` rises through over the states `origins` when `t` is the
+  // token read; lists that rise the same share it.
   std::uint32_t rise_of(std::uint32_t origins, const LrItem& r,
                         std::uint32_t t) {
     const auto [at, fresh] =
@@ -2818,7 +2802,7 @@ class LrWrittenOrder {
     return made = id;
   }
 
-  // The shape of a list: lists that climb alike over the same states, from
+  // The shape of a list: lists that rise the same over the same states, from
   // the same roots, have one.
   std::uint32_t shape_of(unsigned s, std::uint32_t list) {
     Row& r = row(s);
@@ -2827,7 +2811,7 @@ class LrWrittenOrder {
     std::vector<std::uint32_t> id{s};
     for (const LrItem& k : l.roots)
       id.insert(id.end(), {std::uint32_t{k.prod} << 16 | k.dot,
-                           climb_class(k.prod, l.t)});
+                           parent_class(k.prod, l.t)});
     if (const auto it = _shapeOf.find(id); it != _shapeOf.end())
       return r.shape[list] = it->second;
     std::vector<std::uint32_t> data, key{0};
@@ -2842,15 +2826,15 @@ class LrWrittenOrder {
       key.push_back(std::uint32_t{k.prod} << 16 | k.dot);
       key.push_back(cls.back());
     }
-    const auto [lay, laid] = _layoutIds.try_emplace(
+    const auto [slot, added] = _layoutIds.try_emplace(
         data, static_cast<std::uint32_t>(_layouts.size()));
-    if (laid) _layouts.emplace_back().data = data;
-    key[0] = lay->second;
+    if (added) _layouts.emplace_back().data = data;
+    key[0] = slot->second;
     const auto [at, fresh] =
         _shapeIds.try_emplace(key, static_cast<std::uint32_t>(_shapes.size()));
     if (fresh) {
       Shape& sh = _shapes.emplace_back();
-      sh.layout = lay->second;
+      sh.layout = slot->second;
       sh.narrowed = narrowed;
       sh.roots = l.roots;
       sh.cls = cls;
@@ -2863,22 +2847,23 @@ class LrWrittenOrder {
     return r.shape[list] = at->second;
   }
 
-  // The meetings of two shapes, worked out once: from the highest height down
-  // to the one that settles them; then, while the readings may still be told
+  // How two shapes compare, worked out once: from the highest height down
+  // to the one that decides them; then, while the readings may still be told
   // apart for every text, what the heights below say.
-  const Meetings& meetings(unsigned s, std::uint32_t sa, std::uint32_t sb) {
-    auto [slot, fresh] = _meetOf.emplace(std::uint64_t{sa} << 32 | sb);
-    if (!fresh) return _meetings[slot];
-    const auto place = slot = static_cast<std::uint32_t>(_meetings.size());
-    _meetings.emplace_back();
+  const ShapeVerdict& shape_verdict(unsigned s, std::uint32_t sa,
+                                    std::uint32_t sb) {
+    auto [slot, fresh] = _shapeVerdictOf.emplace(std::uint64_t{sa} << 32 | sb);
+    if (!fresh) return _shapeVerdicts[slot];
+    const auto place = slot = static_cast<std::uint32_t>(_shapeVerdicts.size());
+    _shapeVerdicts.emplace_back();
     trim(sa, sb);
     ensure(_shapes[sa].layout);
     ensure(_shapes[sb].layout);
     const Layout& A = _layouts[_shapes[sa].layout];
     const Layout& B = _layouts[_shapes[sb].layout];
-    Meetings out;
-    Meeting at;
-    bool settled = false;
+    ShapeVerdict out;
+    HeightVerdict at;
+    bool decided = false;
     const auto complete = [&] {
       return !_shapes[sa].narrowed && !_shapes[sb].narrowed &&
              closed(s, sa, sb) && closed(s, sb, sa);
@@ -2889,34 +2874,34 @@ class LrWrittenOrder {
       out.upper = out.upper || at.upper;
       const bool open = !at.ties.empty();
       out.tied = out.tied || open;
-      if (!settled && (at.lower || at.upper || open)) {
-        settled = !open && at.lower != at.upper;
-        if (settled) out.complete = complete();
+      if (!decided && (at.lower || at.upper || open)) {
+        decided = !open && at.lower != at.upper;
+        if (decided) out.complete = complete();
         if (!(at.lower && at.upper)) out.list.push_back(std::move(at));
       }
-      at = Meeting{};
+      at = HeightVerdict{};
       if (!_tieSeen.empty()) _tieSeen.clear();
     };
     const bool any = !A.chains.empty() && !B.chains.empty();
     const std::uint32_t top = std::min(A.high, B.high);
     const std::uint32_t bottom = std::max(A.low, B.low);
     for (std::uint32_t height = top;
-         !(settled && (!out.complete || (out.lower && out.upper))) && any &&
+         !(decided && (!out.complete || (out.lower && out.upper))) && any &&
          height >= bottom && top >= bottom;
          --height) {
-      meet(s, sa, sb, height, at);
+      judge_height(s, sa, sb, height, at);
       close();
       if (height == 0) break;
     }
-    if (!settled) out.complete = complete();
-    _meetings[place] = std::move(out);
-    return _meetings[place];
+    if (!decided) out.complete = complete();
+    _shapeVerdicts[place] = std::move(out);
+    return _shapeVerdicts[place];
   }
 
   // What the chains of shapes `sa` and `sb` whose tops are one node at
   // `height` say.
-  void meet(unsigned s, std::uint32_t sa, std::uint32_t sb,
-            std::uint32_t height, Meeting& at) {
+  void judge_height(unsigned s, std::uint32_t sa, std::uint32_t sb,
+                    std::uint32_t height, HeightVerdict& at) {
     Shape& a = _shapes[sa];
     Shape& b = _shapes[sb];
     Layout& A = _layouts[a.layout];
@@ -2927,8 +2912,8 @@ class LrWrittenOrder {
       p.done.resize(height + 1, 0);
     }
     if (p.done[height]) {
-      for (const Meet& m : p.at[height])
-        if (incident(a, A, b, B, m, at)) return;
+      for (const TopPair& m : p.at[height])
+        if (judge_chains(a, A, b, B, m, at)) return;
     } else {
       ensure_tops(A, height);
       ensure_tops(B, height);
@@ -2936,8 +2921,8 @@ class LrWrittenOrder {
       p.at[height].clear();
       _sink = &p.at[height];
       _live = &live;
-      _meetAt.reset();
-      p.done[height] = join_meets(A, B, height);
+      _topPairAt.reset();
+      p.done[height] = find_top_pairs(A, B, height);
       _sink = nullptr;
       _live = nullptr;
       if (!p.done[height]) {
@@ -2945,10 +2930,10 @@ class LrWrittenOrder {
         return;
       }
     }
-    meet_roots(s, a, b, height, at);
+    judge_roots(s, a, b, height, at);
   }
 
-  // What two layouts meet in, made anew where either was built again.
+  // The top pairs of two layouts, made anew where either was built again.
   Pair& pair_of(std::uint32_t la, std::uint32_t lb) {
     Pair& p = _pairs[std::uint64_t{la} << 32 | lb];
     if (p.genA != _layouts[la].gen || p.genB != _layouts[lb].gen) {
@@ -2961,8 +2946,8 @@ class LrWrittenOrder {
 
   // The pairs of chains of two and three of two layouts whose tops are one
   // node at `height`, and the ways their states stand, in `_sink`; `_live`
-  // says each as it is met, and may stop the join: False where it did.
-  bool join_meets(const Layout& A, const Layout& B, std::uint32_t height) {
+  // says each as it is met, and may stop the join: false where it did.
+  bool find_top_pairs(const Layout& A, const Layout& B, std::uint32_t height) {
     for (const std::uint64_t packed : A.shortAt[height]) {
       const Chain& ca = A.chains[static_cast<std::uint32_t>(packed)];
       const auto [first, last] = with_prod(B.at[height], ca.top.prod);
@@ -3000,14 +2985,14 @@ class LrWrittenOrder {
   // What the roots of the shapes, whose chains of one hold the state of the
   // readings, say where their tops are one node at `height`. True where the
   // height is split both ways.
-  bool meet_roots(unsigned s, Shape& a, Shape& b, std::uint32_t height,
-                  Meeting& at) {
+  bool judge_roots(unsigned s, Shape& a, Shape& b, std::uint32_t height,
+                   HeightVerdict& at) {
     Layout& A = _layouts[a.layout];
     Layout& B = _layouts[b.layout];
-    const std::uint64_t home = std::uint64_t{s} << 32;
-    const std::span<const std::uint64_t> here(&home, 1);
-    const auto states = [](const Layout& lay, const Chain& c) {
-      return std::span<const std::uint64_t>(lay.states)
+    const std::uint64_t packedState = std::uint64_t{s} << 32;
+    const std::span<const std::uint64_t> here(&packedState, 1);
+    const auto states = [](const Layout& layout, const Chain& c) {
+      return std::span<const std::uint64_t>(layout.states)
           .subspan(c.from, c.to - c.from);
     };
     for (unsigned i = 0; i < a.roots.size(); ++i) {
@@ -3020,7 +3005,8 @@ class LrWrittenOrder {
         for (const std::uint16_t j : b.members.of(cb.root))
           if (each_state(p, height, here, cb.top.dot, states(B, cb),
                          [&](std::uint64_t ex, std::uint64_t ey) {
-                           return incident(a, A, ra, i, b, B, cb, j, ex, ey, at);
+                           return judge_chains(a, A, ra, i, b, B, cb, j, ex, ey,
+                                               at);
                          }))
             return true;
       }
@@ -3031,7 +3017,8 @@ class LrWrittenOrder {
         const Chain& rb = B.chains[B.rootChain[b.cls[j]]];
         if (each_state(p, height, here, height, here,
                        [&](std::uint64_t ex, std::uint64_t ey) {
-                         return incident(a, A, ra, i, b, B, rb, j, ex, ey, at);
+                         return judge_chains(a, A, ra, i, b, B, rb, j, ex, ey,
+                                             at);
                        }))
           return true;
       }
@@ -3046,7 +3033,8 @@ class LrWrittenOrder {
         for (const std::uint16_t i : a.members.of(ca.root))
           if (each_state(p, ca.top.dot, states(A, ca), height, here,
                          [&](std::uint64_t ex, std::uint64_t ey) {
-                           return incident(a, A, ca, i, b, B, rb, j, ex, ey, at);
+                           return judge_chains(a, A, ca, i, b, B, rb, j, ex, ey,
+                                               at);
                          }))
             return true;
       }
@@ -3108,10 +3096,9 @@ class LrWrittenOrder {
     return false;
   }
 
-  // Calls `f(group, hi, b, swap)` on each group of equal `key` in the
-  // shallower of `xs` and `ys` (the other is `hi`, `swap` where it is `xs`) and
-  // each state `b` a walk of production `p`'s symbols joins it to. True where
-  // `f` stops it.
+  // Calls `f(group, hi, b, swap)` on each group of equal `key` in the shallower
+  // of `xs` and `ys` (`hi` the other, `swap` where that is `xs`) and each state
+  // `b` a walk of production `p` joins it to. True where `f` stops it.
   template <class T, class Key, class F>
   bool each_linked(unsigned p, unsigned dx, std::span<const T> xs, unsigned dy,
                    std::span<const T> ys, Key&& key, F&& f) {
@@ -3169,9 +3156,8 @@ class LrWrittenOrder {
   }
 
   // What the chains of skeletons `sx` and `sy` say where their tops are one
-  // node, `o` holding that node's origin, then the origins of the nodes under
-  // each top. Two nodes of one depth must share an origin and differ in
-  // production.
+  // node; `o` holds that node's origin, then those of the nodes under each top.
+  // Two nodes of one depth must share an origin and differ in production.
   Say say_of(std::uint32_t sx, std::uint32_t sy,
              const std::array<std::uint32_t, 5>& o) {
     const Skeleton& x = _skeletons[sx];
@@ -3183,22 +3169,25 @@ class LrWrittenOrder {
     const std::uint32_t X = o[0];
     const std::uint32_t x1 = o[1], x2 = o[2], y1 = o[3], y2 = o[4];
     const bool hx1 = lx > 1, hx2 = lx > 2, hy1 = ly > 1, hy2 = ly > 2;
-    const auto alike = [](unsigned pa, std::uint32_t oa, std::uint32_t ofa,
-                          unsigned pb, std::uint32_t ob, std::uint32_t ofb) {
+    const auto matching = [](unsigned pa, std::uint32_t oa, std::uint32_t ofa,
+                             unsigned pb, std::uint32_t ob, std::uint32_t ofb) {
       return pa == pb && oa == ob && ofa == ofb;
     };
-    if (hx1 && (apart(xo1, x1, 0, X) ||
-                (hy1 && alike(x.at[1].prod, x1, xo1, y.at[1].prod, y1, yo1))))
+    if (hx1 &&
+        (apart(xo1, x1, 0, X) ||
+         (hy1 && matching(x.at[1].prod, x1, xo1, y.at[1].prod, y1, yo1))))
       return {};
     if (hy1 && apart(0, X, yo1, y1)) return {};
-    if (hx2 && (apart(xo2, x2, 0, X) ||
-                (hy1 && (alike(x.at[2].prod, x2, xo2, y.at[1].prod, y1, yo1) ||
-                         apart(xo2, x2, yo1, y1))) ||
-                (hy2 && alike(x.at[2].prod, x2, xo2, y.at[2].prod, y2, yo2))))
+    if (hx2 &&
+        (apart(xo2, x2, 0, X) ||
+         (hy1 && (matching(x.at[2].prod, x2, xo2, y.at[1].prod, y1, yo1) ||
+                  apart(xo2, x2, yo1, y1))) ||
+         (hy2 && matching(x.at[2].prod, x2, xo2, y.at[2].prod, y2, yo2))))
       return {};
-    if (hy2 && (apart(0, X, yo2, y2) ||
-                (hx1 && (alike(x.at[1].prod, x1, xo1, y.at[2].prod, y2, yo2) ||
-                         apart(xo1, x1, yo2, y2)))))
+    if (hy2 &&
+        (apart(0, X, yo2, y2) ||
+         (hx1 && (matching(x.at[1].prod, x1, xo1, y.at[2].prod, y2, yo2) ||
+                  apart(xo1, x1, yo2, y2)))))
       return {};
     return sequence_say(seq_of(sx), seq_of(sy));
   }
@@ -3206,9 +3195,9 @@ class LrWrittenOrder {
   // What the chains `ca` over root `i` of `a` and `cb` over root `j` of `b`
   // say where their tops' dots stand in the states `ex` and `ey`. True where
   // the height is split both ways.
-  bool incident(Shape& a, const Layout& la, const Chain& ca, unsigned i,
-                Shape& b, const Layout& lb, const Chain& cb, unsigned j,
-                std::uint64_t ex, std::uint64_t ey, Meeting& at) {
+  bool judge_chains(Shape& a, const Layout& la, const Chain& ca, unsigned i,
+                    Shape& b, const Layout& lb, const Chain& cb, unsigned j,
+                    std::uint64_t ex, std::uint64_t ey, HeightVerdict& at) {
     const unsigned dx = ca.top.dot, dy = cb.top.dot;
     const std::uint32_t top = dx == 0   ? first_of(ex)
                               : dy == 0 ? first_of(ey)
@@ -3219,20 +3208,20 @@ class LrWrittenOrder {
         static_cast<std::uint16_t>(i), static_cast<std::uint16_t>(j), at);
   }
 
-  // The same for a pair `meets` noted, over every pair of roots its chains
-  // stand over: the way the states stood is all of them the say reads.
-  bool incident(Shape& a, const Layout& la, Shape& b, const Layout& lb,
-                const Meet& m, Meeting& at) {
+  // The same for a top pair `note` recorded, over every pair of roots its
+  // chains stand over: of the states, the say reads only which are equal.
+  bool judge_chains(Shape& a, const Layout& la, Shape& b, const Layout& lb,
+                    const TopPair& m, HeightVerdict& at) {
     const Chain& ca = la.chains[m.x];
     const Chain& cb = lb.chains[m.y];
-    const bool alike = ca.top.dot == cb.top.dot;
+    const bool matching = ca.top.dot == cb.top.dot;
     for (const std::uint16_t i : a.members.of(ca.root)) {
       const std::uint32_t sx = skeleton_id(a, la, ca, i);
       for (const std::uint16_t j : b.members.of(cb.root)) {
-        if (alike && next_of(a, ca, i) == next_of(b, cb, j)) continue;
+        if (matching && next_of(a, ca, i) == next_of(b, cb, j)) continue;
         const std::uint32_t sy = skeleton_id(b, lb, cb, j);
         for (std::uint64_t ways = m.ways; ways != 0; ways &= ways - 1) {
-          const auto& like = kLrAlikes.of[std::countr_zero(ways)];
+          const auto& like = kLrPartitions.of[std::countr_zero(ways)];
           if (judge(sx, sy, {like[0], like[1], like[2], like[3], like[4]}, i,
                     j, at))
             return true;
@@ -3246,7 +3235,7 @@ class LrWrittenOrder {
   // stand on; a tie is left to the tails.
   bool judge(std::uint32_t sx, std::uint32_t sy,
              const std::array<std::uint32_t, 5>& o, std::uint16_t xRoot,
-             std::uint16_t yRoot, Meeting& at) {
+             std::uint16_t yRoot, HeightVerdict& at) {
     const Say say = say_of(sx, sy, o);
     if (say.kind == 2) {
       if (const Tie tie{xRoot, yRoot, say.x, say.y};
@@ -3261,9 +3250,9 @@ class LrWrittenOrder {
     return at.lower && at.upper;
   }
 
-  // Which of the five origins of a pair of chains of two or three stand alike,
-  // which is all `say_of` reads of them; the second of a chain of two stands
-  // for nothing.
+  // Which of the five origins of a pair of chains of two or three stand the
+  // same, which is all `say_of` reads of them; the second of a chain of two
+  // stands for nothing.
   std::uint32_t pattern(unsigned lx, unsigned ly,
                         const std::array<std::uint32_t, 5>& o) const {
     const std::uint32_t x2 = lx == 3 ? o[2] : kNone - 2;
@@ -3276,10 +3265,10 @@ class LrWrittenOrder {
                         : y2 == x2   ? 2
                         : y2 == o[3] ? 3
                                      : 4;
-    return kLrAlikes.id[l1 << 3 | l2 << 6 | l3 << 9 | l4 << 12];
+    return kLrPartitions.id[l1 << 3 | l2 << 6 | l3 << 9 | l4 << 12];
   }
 
-  // Notes that the chains `ca` of `A` and `cb` of `B` meet where their tops'
+  // Notes that the chains `ca` of `A` and `cb` of `B` join where their tops'
   // dots stand in the states `ex` and `ey`.
   bool note(const Layout& A, const Chain& ca, const Layout& B, const Chain& cb,
             std::uint64_t ex, std::uint64_t ey) {
@@ -3292,8 +3281,8 @@ class LrWrittenOrder {
     const auto x = static_cast<std::uint32_t>(&ca - A.chains.data());
     const auto y = static_cast<std::uint32_t>(&cb - B.chains.data());
     const std::uint64_t way = std::uint64_t{1} << pattern(ca.len, cb.len, o);
-    std::vector<Meet>& out = *_sink;
-    auto [at, fresh] = _meetAt.emplace(std::uint64_t{x} << 32 | y);
+    std::vector<TopPair>& out = *_sink;
+    auto [at, fresh] = _topPairAt.emplace(std::uint64_t{x} << 32 | y);
     if (fresh) {
       at = static_cast<std::uint32_t>(out.size());
       out.push_back({x, y, way});
@@ -3301,8 +3290,8 @@ class LrWrittenOrder {
       if ((out[at].ways & way) != 0) return false;
       out[at].ways |= way;
     }
-    return incident(*_live->a, *_live->la, *_live->b, *_live->lb, {x, y, way},
-                    *_live->at);
+    return judge_chains(*_live->a, *_live->la, *_live->b, *_live->lb,
+                        {x, y, way}, *_live->at);
   }
 
   // `note` over the states of two chains of two or three.
@@ -3316,7 +3305,7 @@ class LrWrittenOrder {
     const auto f = [&](std::uint64_t ex, std::uint64_t ey) {
       return note(A, ca, B, cb, ex, ey);
     };
-    // Both chains go on under a top of one dot: their states are alike.
+    // Both chains go on under a top of one dot: their states are the same.
     if (dx == dy) return join_keys(xs, ys, first_of, f);
     return each_state(ca.top.prod, dx, xs, dy, ys, f);
   }
@@ -3377,7 +3366,7 @@ class LrWrittenOrder {
     });
   }
 
-  // How the tails of the readings stand laid past the bodies of `m`.
+  // How the tails of the readings compare past the bodies of `m`.
   int tailed(const Reading& ra, const Reading& rb, const Tie& m) {
     const std::vector<std::uint32_t>& tl = _keys[_tails[ra.tailAt + m.xRoot]];
     const std::vector<std::uint32_t>& tr = _keys[_tails[rb.tailAt + m.yRoot]];
@@ -3409,43 +3398,46 @@ class LrWrittenOrder {
         std::ranges::lower_bound(ids, std::uint64_t{_dom.base[p + 1]} << 32)};
   }
 
-  // The places among the chains of two of `lay` of those whose height is `h`.
-  std::pair<std::uint32_t, std::uint32_t> mids_at(const Layout& lay,
+  // The places among the chains of two of `layout` of those whose height is
+  // `h`.
+  std::pair<std::uint32_t, std::uint32_t> mids_at(const Layout& layout,
                                                   std::uint32_t h) const {
-    const auto height = [&](std::uint32_t m) { return lay.chains[m].height; };
-    const auto lo = std::ranges::lower_bound(lay.mids, h, {}, height);
-    const auto hi = std::ranges::upper_bound(lay.mids, h, {}, height);
-    return {static_cast<std::uint32_t>(lo - lay.mids.begin()),
-            static_cast<std::uint32_t>(hi - lay.mids.begin())};
+    const auto height = [&](std::uint32_t m) {
+      return layout.chains[m].height;
+    };
+    const auto lo = std::ranges::lower_bound(layout.mids, h, {}, height);
+    const auto hi = std::ranges::upper_bound(layout.mids, h, {}, height);
+    return {static_cast<std::uint32_t>(lo - layout.mids.begin()),
+            static_cast<std::uint32_t>(hi - layout.mids.begin())};
   }
 
   // What stands over a node at `height`:
-  // each a top of a chain of `lay`, as item and state, ascending.
-  const std::vector<std::uint64_t>& shorts_at(Layout& lay,
+  // each a top of a chain of `layout`, as item and state, ascending.
+  const std::vector<std::uint64_t>& shorts_at(Layout& layout,
                                               std::uint32_t height) const {
-    Stand& st = lay.stand[height];
+    Stand& st = layout.stand[height];
     if (st.shortMade) return st.shorts;
     st.shortMade = true;
-    for (const std::uint64_t packed : lay.shortAt[height]) {
-      const Chain& c = lay.chains[static_cast<std::uint32_t>(packed)];
+    for (const std::uint64_t packed : layout.shortAt[height]) {
+      const Chain& c = layout.chains[static_cast<std::uint32_t>(packed)];
       for (std::uint32_t k = c.from; k < c.to; ++k)
-        st.shorts.push_back(packed >> 32 << 32 | first_of(lay.states[k]));
+        st.shorts.push_back(packed >> 32 << 32 | first_of(layout.states[k]));
     }
     lr_sort_unique(st.shorts);
     return st.shorts;
   }
 
-  // The same for the chains of three, as laying them would show.
-  const std::vector<std::uint64_t>& talls_at(Layout& lay,
+  // The same for the chains of three, as building them would show.
+  const std::vector<std::uint64_t>& talls_at(Layout& layout,
                                              std::uint32_t height) {
-    Stand& st = lay.stand[height];
+    Stand& st = layout.stand[height];
     if (st.tallMade) return st.talls;
     st.tallMade = true;
     for (unsigned d = 0; d <= _maxDot && d <= height; ++d) {
-      const auto [lo, hi] = mids_at(lay, height - d);
+      const auto [lo, hi] = mids_at(layout, height - d);
       for (std::uint32_t mi = lo; mi < hi; ++mi) {
-        Mid& md = _midPool[lay.chains[lay.mids[mi]].over];
-        if (md.parentOff.empty()) lay_parents(md);
+        Mid& md = _midPool[layout.chains[layout.mids[mi]].over];
+        if (md.parentOff.empty()) record_parents(md);
         for (std::uint32_t q = md.parentOff[d]; q < md.parentOff[d + 1]; ++q)
           st.talls.push_back(
               md.parents[q] >> 32 << 32 |
@@ -3463,11 +3455,12 @@ class LrWrittenOrder {
         tops, std::uint64_t{_dom.base[p] + d} << 32 | a);
   }
 
-  // Whether a root of `b` over `lay` is one; `s` is the state of the readings.
-  bool stands_root(const Shape& b, const Layout& lay, std::uint32_t height,
+  // Whether a root of `b` over `layout` is one; `s` is the state of the
+  // readings.
+  bool stands_root(const Shape& b, const Layout& layout, std::uint32_t height,
                    unsigned p, unsigned d, std::uint32_t a, unsigned s) const {
     for (std::size_t i = 0; i < b.roots.size(); ++i)
-      if (lay.rootChain[b.cls[i]] != kNone && b.roots[i].dot == height &&
+      if (layout.rootChain[b.cls[i]] != kNone && b.roots[i].dot == height &&
           b.roots[i].dot == d && b.roots[i].prod == p && s == a)
         return true;
     return false;
@@ -3509,11 +3502,11 @@ class LrWrittenOrder {
     return false;
   }
 
-  // Whether it tops a root of `b` over `lay`, whose state is `s`.
-  bool holds_root(const Shape& b, const Layout& lay, std::uint32_t height,
+  // Whether it tops a root of `b` over `layout`, whose state is `s`.
+  bool holds_root(const Shape& b, const Layout& layout, std::uint32_t height,
                   unsigned p, std::uint32_t x, unsigned s) {
     for (std::size_t i = 0; i < b.roots.size(); ++i) {
-      if (lay.rootChain[b.cls[i]] == kNone || b.roots[i].dot != height ||
+      if (layout.rootChain[b.cls[i]] == kNone || b.roots[i].dot != height ||
           b.roots[i].prod != p)
         continue;
       if (!std::ranges::binary_search(reach(p, x, height), s)) continue;
@@ -3551,7 +3544,7 @@ class LrWrittenOrder {
     return at < v.size() && v[at] == a;
   }
 
-  // Whether no chain of shape `ci` goes on past its top level to meet shape
+  // Whether no chain of shape `ci` goes on past its top level to join shape
   // `oi`: each node there is held by `oi`, repeats one below it, or has nothing
   // over it. Where the layouts alone hold it so, the roots cannot undo that.
   bool closed(unsigned s, std::uint32_t ci, std::uint32_t oi) {
@@ -3617,9 +3610,9 @@ class LrWrittenOrder {
 
   Decision decide(unsigned s, const Reading& ra, const Reading& rb) {
     const std::uint32_t sa = shape_of(s, ra.list), sb = shape_of(s, rb.list);
-    const Meetings& all = meetings(s, sa, sb);
+    const ShapeVerdict& all = shape_verdict(s, sa, sb);
     int verdict = 0;
-    for (const Meeting& m : all.list) {
+    for (const HeightVerdict& m : all.list) {
       bool first = m.lower, second = m.upper;
       for (const Tie& t : m.ties) {
         const int v = tailed(ra, rb, t);
@@ -3638,7 +3631,7 @@ class LrWrittenOrder {
   const LrItemDomain& _dom;
   const LrGraph& _gr;
   const LrClosures& _cl;
-  // The entries with their lookaheads, laid when an order first reads them,
+  // The entries with their lookaheads, built when an order first reads them,
   // where the graph did not.
   LrClosures _read;
   const LrFirstSets& _fs;
@@ -3652,9 +3645,9 @@ class LrWrittenOrder {
   std::vector<std::vector<std::uint32_t>> _corner;
   std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> _back;
   std::unordered_map<std::uint64_t, std::vector<std::int8_t>> _scoreRows;
-  FlatMap<std::uint32_t> _climbOf;
+  FlatMap<std::uint32_t> _parentClassOf;
   std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash>
-      _climbs;
+      _parentClasses;
   std::vector<Row> _rows;
   std::vector<Opens> _opens;
   std::vector<std::uint32_t> _tails;
@@ -3674,12 +3667,12 @@ class LrWrittenOrder {
   std::unordered_map<std::array<std::uint32_t, 3>, std::uint32_t, SegHash>
       _riseOf;
   std::unordered_map<std::uint64_t, Pair> _pairs;
-  std::vector<Meet>* _sink = nullptr;
+  std::vector<TopPair>* _sink = nullptr;
   Live* _live = nullptr;
-  FlatMap<std::uint32_t> _meetAt;
+  FlatMap<std::uint32_t> _topPairAt;
   std::size_t _held = 0;
-  FlatMap<std::uint32_t> _meetOf;
-  std::vector<Meetings> _meetings;
+  FlatMap<std::uint32_t> _shapeVerdictOf;
+  std::vector<ShapeVerdict> _shapeVerdicts;
   std::vector<std::vector<Elem>> _seqs;
   std::unordered_map<std::vector<std::uint64_t>, std::uint32_t, VecHash> _seqOf;
   std::vector<std::uint64_t> _seqKey;
@@ -3690,11 +3683,11 @@ class LrWrittenOrder {
   std::uint32_t _maxDot = 0;
   std::vector<std::vector<Next>> _nexts;
   std::vector<char> _nextsMade;
-  std::vector<std::uint32_t> _items, _offsets, _byKey, _laid;
+  std::vector<std::uint32_t> _items, _offsets, _byKey, _added;
   std::vector<std::vector<std::uint64_t>> _byDot;
   std::vector<std::uint64_t> _byItem;
   std::vector<std::uint32_t> _bucketOf;
-  std::vector<std::uint64_t> _laying;
+  std::vector<std::uint64_t> _overNodes;
   std::vector<std::vector<std::uint32_t>> _reach;
   std::uint32_t _reachP = kNone, _reachX = kNone, _reachMade = 0;
   std::vector<std::vector<LrItem>> _parentItems;
@@ -3710,8 +3703,8 @@ class LrWrittenOrder {
 };
 
 // A shift/reduce both sides of which sit on a precedence step: the tighter
-// step wins, and at equal steps the associativity -- which a non-associative
-// step answers with neither.
+// step wins, and at equal steps the associativity; a non-associative step
+// keeps neither.
 void lr_drop_by_precedence(const LrBuildCfg& g, const LrAction* merged,
                            char* drop, std::size_t i, std::size_t j) {
   std::size_t sh = j;
@@ -3734,7 +3727,7 @@ void lr_drop_by_precedence(const LrBuildCfg& g, const LrAction* merged,
 }
 
 // The `n` readings in the order `verdict` gives, in `kept`: a selection and
-// not a sort, as the order owes no transitivity. The first left that none
+// not a sort, as the order need not be transitive. The first left that none
 // left precedes goes next.
 struct LrSelection {
   std::vector<std::int8_t> verdicts;
@@ -3777,8 +3770,8 @@ struct LrSelection {
 };
 
 // Every fused entry's row: its members' actions deduplicated, decided or put
-// in the order the drive forks them; the owed ambiguities counted and the goto
-// lanes laid. False where a cap gave way.
+// in the order the drive forks them; the ambiguities left to the graph counted
+// and the goto lanes built. False where a cap gave way.
 bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
                       const LrActions& actions,
                       const std::vector<unsigned>& newId,
@@ -3787,7 +3780,7 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
   const unsigned nT = g.nterms;
   const unsigned ns = gr.states();
   // One key per ambiguity, deduplicated at the end.
-  std::vector<std::uint64_t> owedKeys;
+  std::vector<std::uint64_t> ambiguityKeys;
   constexpr std::uint32_t kNoMerged = 0xffffffffu;
   std::vector<std::uint32_t> headTerm(nT);
   std::vector headGen(nT, std::uint32_t{});
@@ -3795,7 +3788,7 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
   const LrBuckets<> mem(A.nstates, ns,
                         [&](std::uint32_t s) { return newId[s]; });
   LrGotoRows lanes;
-  // A guard's program landing on fused entries, interned.
+  // A guard's program target on fused entries, interned.
   std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash>
       guardIx;
   std::vector<std::uint32_t> guardKey;
@@ -3853,7 +3846,7 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
   DynSet implied;
   if (A.identity == LrIdentity::core)
     for (unsigned t = 1; t < nT; ++t)
-      if (g.terms[t].laid == kLaidImplied) implied.set(t);
+      if (g.terms[t].synthetic == kSyntheticImplied) implied.set(t);
 
   std::vector<LrAction> merged, mtmp;
   std::vector<char> drop;
@@ -3987,7 +3980,7 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
               exact = sure[std::min(kept[a], kept[b]) * n +
                            std::max(kept[a], kept[b])] &&
                       select.verdicts[kept[a] * n + kept[b]] < 0;
-          // Reductions nothing written tells apart are owed to the graph.
+          // Reductions nothing written tells apart are left to the graph.
           for (std::size_t a = 0; a < n; ++a)
             for (std::size_t b = a + 1; b < n; ++b) {
               const LrAction& x = merged[i + kept[a]];
@@ -3997,9 +3990,9 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
                   select.verdicts[kept[a] * n + kept[b]] != 0)
                 continue;
               ++A.nOrdered;
-              owedKeys.push_back((std::uint64_t{1} << 62) |
-                                 (static_cast<std::uint64_t>(x.arg) << 16) |
-                                 y.arg);
+              ambiguityKeys.push_back(
+                  (std::uint64_t{1} << 62) |
+                  (static_cast<std::uint64_t>(x.arg) << 16) | y.arg);
               if (std::ranges::any_of(mem.of(f), [&](std::uint32_t s) {
                     return lb.merge_induced(s, x.arg, y.arg, x.term);
                   })) {
@@ -4033,9 +4026,9 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
         // The pair (this terminal, that reduction) is what stays undecided.
         const LrAction& red =
             a.kind == LrActionKind::reduce ? a : merged[z - 1];
-        owedKeys.push_back((std::uint64_t{2} << 62) |
-                           (static_cast<std::uint64_t>(a.term) << 16) |
-                           red.arg);
+        ambiguityKeys.push_back((std::uint64_t{2} << 62) |
+                                (static_cast<std::uint64_t>(a.term) << 16) |
+                                red.arg);
       }
       wrow[z] = a;
       frow.set(a.term);
@@ -4043,18 +4036,16 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
     A.nactions += static_cast<std::uint32_t>(mrn);
     A.actionCount[f] = static_cast<std::uint16_t>(mrn);
   }
-  lr_sort_unique(owedKeys);
-  A.nOwed = static_cast<std::uint32_t>(owedKeys.size());
+  lr_sort_unique(ambiguityKeys);
+  A.nAmbiguities = static_cast<std::uint32_t>(ambiguityKeys.size());
 
   A.set_gotos(std::move(lanes));
   return true;
 }
 
-// The order a repair tries the terminals of a state: the order a top-down,
-// left-to-right reading of the grammar meets them from the items the state
-// holds. The innermost item reads first, a loop that goes on before the rule
-// that takes what it grew; a rule that can end hands over to the states it
-// returns to.
+// The order a repair tries a state's terminals: as a top-down, left-to-right
+// reading of the grammar reaches them from the state's items, innermost first.
+// A rule that can end hands over to the states it returns to.
 class LrInsertOrder {
  public:
   LrInsertOrder(const LrBuildCfg& g, const LrItemDomain& dom,
@@ -4087,11 +4078,11 @@ class LrInsertOrder {
 
   std::uint64_t reads() const { return _reads; }
 
-  // The terminals of `row` (those marked `stamp` there, `want` of them) that
-  // the canonical state made of `members` meets, in the order it meets them;
-  // the walk stops once it has met them all.
+  // The terminals of `row` (those marked with `mark` there, `want` of them)
+  // that the canonical state made of `members` reaches, in the order it
+  // reaches them; the walk stops once it has met them all.
   void of(std::span<const std::uint32_t> members,
-          std::span<const std::uint32_t> row, std::uint32_t stamp,
+          std::span<const std::uint32_t> row, std::uint32_t mark,
           std::size_t want, std::vector<std::uint16_t>& out) {
     out.clear();
     _seen.next();
@@ -4104,7 +4095,7 @@ class LrInsertOrder {
       _picked.clear();
       _next.clear();
       for (const std::uint32_t id : _level) {
-        const Listed& list = laid(id);
+        const Listed& list = filled(id);
         _reads += list.places.size() + list.returns.size();
         for (const std::uint32_t at : list.places)
           if (_placed.first(at)) _picked.push_back(at);
@@ -4112,7 +4103,7 @@ class LrInsertOrder {
           if (_walked.first(to)) _next.push_back(to);
       }
       std::ranges::sort(_picked);
-      read(row, stamp, want, out);
+      read(row, mark, want, out);
       _level.swap(_next);
     }
   }
@@ -4122,14 +4113,13 @@ class LrInsertOrder {
   static constexpr std::uint64_t kStays = std::uint64_t{1} << 32;
   static constexpr std::uint32_t kNoList = ~std::uint32_t{0};
 
-  // A list of states, each kept once: the states that end a rule return to all
-  // its callers, so few lists stand for many states. Once read, the places of
-  // the items they hold and the lists they return to. An item read again in a
-  // later layer meets nothing new.
+  // A list of states, kept once: the states ending a rule return to all its
+  // callers, so few lists stand for many states. Once read, it holds its items'
+  // places and the lists they return to.
   struct Listed {
     const std::vector<std::uint32_t>* states;
     std::vector<std::uint32_t> places{}, returns{};
-    bool isLaid = false;
+    bool isFilled = false;
   };
 
   // Each production's place in a reading of the grammar from its start, a
@@ -4193,9 +4183,9 @@ class LrInsertOrder {
     return at->second;
   }
 
-  const Listed& laid(std::uint32_t id) {
+  const Listed& filled(std::uint32_t id) {
     Listed& list = _lists[id];
-    if (std::exchange(list.isLaid, true)) return list;
+    if (std::exchange(list.isFilled, true)) return list;
     for (const std::uint32_t s : *list.states) {
       for (const LrItem& k : _gr.kernel(s)) {
         ++_reads;
@@ -4210,7 +4200,7 @@ class LrInsertOrder {
 
   // Reads `_picked` in order: a terminal of `row` is met, a nonterminal opens
   // its alternatives depth first, once, and a nullable one lets the item go on.
-  void read(std::span<const std::uint32_t> row, std::uint32_t stamp,
+  void read(std::span<const std::uint32_t> row, std::uint32_t mark,
             std::size_t want, std::vector<std::uint16_t>& out) {
     _todo.clear();
     for (std::size_t i = _picked.size(); i-- > 0;)
@@ -4222,7 +4212,7 @@ class LrInsertOrder {
       for (; j < q.len; ++j) {
         const std::uint16_t y = _g.sym_at(q, j);
         if (is_term(y)) {
-          if (_met.first(y) && row[y] == stamp) out.push_back(y);
+          if (_met.first(y) && row[y] == mark) out.push_back(y);
           break;
         }
         const unsigned b = nt_index(y);
@@ -4250,7 +4240,7 @@ class LrInsertOrder {
       const std::uint32_t ask = std::uint32_t{lhs} << 16 | k.dot;
       if (std::ranges::find(_asked, ask) != _asked.end()) continue;
       _asked.push_back(ask);
-      const auto here = lr_back(_preds, _under, _stamp, s, k.dot);
+      const auto here = lr_back(_preds, _under, _round, s, k.dot);
       for (const std::uint32_t b : here)
         for (const LrEdge& e : _gr.edges(b, nt_sym(lhs))) out.push_back(e.to);
     }
@@ -4266,7 +4256,7 @@ class LrInsertOrder {
   std::vector<std::uint16_t> _nullFrom;
   std::uint64_t _reads = 0;
   RoundMarks _seen, _met, _walked, _placed;
-  std::uint64_t _stamp = 0;
+  std::uint64_t _round = 0;
   std::vector<std::uint64_t> _under;
   std::vector<std::vector<std::uint32_t>> _preds;
   std::vector<std::uint32_t> _returnsOf, _asked;
@@ -4367,7 +4357,7 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
       return std::nullopt;
     if (!WithLa) flagged = lr_lex_flags(gr, lb, overtakes);
   }
-  // What the wider graph is judged on is settled by the merge.
+  // What the wider graph is judged on is decided by the merge.
   if (against != nullptr && !lr_wider_stands(*against, A)) return std::nullopt;
   if (WithLa)
     flagged = lr_group_flags(gr, LrActions{g, gr}, newId, A.nstates, overtakes);
@@ -4455,10 +4445,11 @@ LrBuildTable lr_build_wide(const LrLowered& low, const LrBuildTable* against,
   return lr_build_impl<true>(low, against, work);
 }
 
-// Ambiguities, not cells: the passes copy a cell into every state they mint.
+// Ambiguities, not cells: the passes copy a cell into every state they create.
 bool lr_wider_stands(const LrBuildTable& c, const LrBuildTable& w) {
   return !w.overflow &&
-         (w.nOwed < c.nOwed || (c.nImpliedMixed != 0 && w.nOwed == c.nOwed));
+         (w.nAmbiguities < c.nAmbiguities ||
+          (c.nImpliedMixed != 0 && w.nAmbiguities == c.nAmbiguities));
 }
 
 }  // namespace cursiv::engine

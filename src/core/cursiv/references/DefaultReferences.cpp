@@ -39,16 +39,9 @@ const CoreServices* language_of(const Document& document,
                                      document.textDocument().languageId());
 }
 
-// What a reference under the caret denotes: the span of its name and every
-// target it resolved to. A multi reference is visited once per target with one
-// span, so the targets of the winning span accumulate. A name that denotes
-// nothing still holds the caret when nothing resolved does: span set, targets
-// empty. That is the site a user renames to fix a typo, so it must not lose the
-// word to whatever stands beside it.
-//
-// The narrowest enclosing span wins, not the first found: an answer that
-// depended on the work list's order would depend on the grammar's field
-// numbering.
+// What a reference under the caret denotes: its name's span and every target.
+// The narrowest enclosing span wins, whatever the work list order. A name that
+// resolved to nothing still keeps the caret: span set, targets empty.
 [[nodiscard]] Declaration reference_at(const Document& document,
                                        TextOffset offset) {
   Declaration found;
@@ -146,14 +139,15 @@ std::vector<const AstNode*> DefaultReferences::getSelfNodes(
     const AstNode& node, const CancellationToken& cancelToken) const {
   const Documents& store = *shared.documents;
   const IndexManager& index = *shared.indexManager;
-  const Document* const home = node.getDocument();
-  if (home == nullptr || node.cstNodeId == kNoNode) return {&node};
+  const Document* const declaringDocument = node.getDocument();
+  if (declaringDocument == nullptr || node.cstNodeId == kNoNode) return {&node};
   // Incoming references define the group, including those from another
   // language whose reference kinds the declaring grammar does not describe.
 
   std::vector<const AstNode*> overloads;
   (void)index.visitReferences(
-      home->id, node.cstNodeId, [&](const ReferenceDescription& incoming) {
+      declaringDocument->id, node.cstNodeId,
+      [&](const ReferenceDescription& incoming) {
         throw_if_cancelled(cancelToken);
         if (!incoming.multiReference) return true;
         const std::shared_ptr<Document> source =
@@ -193,20 +187,21 @@ std::vector<ReferenceDescription> DefaultReferences::getSelfReferences(
   const ServiceRegistry& registry = *shared.serviceRegistry;
   for (const AstNode* const member : getSelfNodes(node, cancelToken)) {
     throw_if_cancelled(cancelToken);
-    const Document* const home = member->getDocument();
-    if (home == nullptr || member->cstNodeId == kNoNode) continue;
-    // The name node comes from the member's own language: which members are
-    // names is a fact about the grammar that built this node, not the one
-    // that pointed at it.
-    const CoreServices* const language = language_of(*home, registry);
+    const Document* const declaringDocument = member->getDocument();
+    if (declaringDocument == nullptr || member->cstNodeId == kNoNode) continue;
+    // The name node comes from the language that built the member, not from
+    // the one that referenced it.
+    const CoreServices* const language =
+        language_of(*declaringDocument, registry);
     const NameProvider* const names =
         language == nullptr ? nullptr : language->nameProvider.get();
-    const CstNodeView site = declaration_site(*member, *home, names);
+    const CstNodeView site =
+        declaration_site(*member, *declaringDocument, names);
     if (!site) continue;
-    const ReferenceDescription row{.sourceDocumentId = home->id,
+    const ReferenceDescription row{.sourceDocumentId = declaringDocument->id,
                                    .sourceBegin = site.begin(),
                                    .sourceEnd = site.end(),
-                                   .targetDocumentId = home->id,
+                                   .targetDocumentId = declaringDocument->id,
                                    .targetSymbolId = member->cstNodeId,
                                    .local = true,
                                    .multiReference = false};
@@ -227,10 +222,8 @@ Declaration DefaultReferences::findDeclaration(
     document.parseResult.references->forceAt(document.parseResult.cst(), offset,
                                              cancelToken);
   Declaration found = at(document, offset, cancelToken);
-  // One retry, and only when nothing contained the offset: a CST span is
-  // half-open, so a click at the end of a name lands one past it. An unresolved
-  // reference did contain it -- span set, targets empty -- and must not lose
-  // the word to the neighbour one byte back.
+  // One retry one byte back, only when nothing contained the offset: a click at
+  // the end of a name falls one past it, as a CST span is half-open.
   if (!found && found.span.end <= found.span.begin && offset > 0)
     found = at(document, offset - 1, cancelToken);
   return found;
@@ -243,11 +236,11 @@ std::vector<ReferenceDescription> DefaultReferences::findReferences(
   throw_if_cancelled(cancelToken);
   const IndexManager& index = *shared.indexManager;
 
-  // Which document declares it is the climb's answer: a node carries no
-  // back-pointer, and a target reached through the global index routinely lives
-  // in another file.
-  const Document* const home = target.getDocument();
-  if (home == nullptr || target.cstNodeId == kNoNode) return references;
+  // The declaring document, found through the containers: a target from the
+  // global index often lives in another file.
+  const Document* const declaringDocument = target.getDocument();
+  if (declaringDocument == nullptr || target.cstNodeId == kNoNode)
+    return references;
 
   const auto wanted = [&](DocumentId source) {
     return options.documentId == kNoDocument || options.documentId == source;
@@ -261,7 +254,7 @@ std::vector<ReferenceDescription> DefaultReferences::findReferences(
          getSelfReferences(target, cancelToken))
       if (wanted(row.sourceDocumentId)) references.push_back(row);
 
-  (void)index.visitReferences(home->id, target.cstNodeId,
+  (void)index.visitReferences(declaringDocument->id, target.cstNodeId,
                               [&](const ReferenceDescription& described) {
                                 throw_if_cancelled(cancelToken);
                                 if (wanted(described.sourceDocumentId))
@@ -269,9 +262,8 @@ std::vector<ReferenceDescription> DefaultReferences::findReferences(
                                 return true;
                               });
 
-  // Reading order is owed rather than offered: the inverse table is built by
-  // walking a hash map, so a rename's edits would otherwise arrive in an order
-  // no test can pin.
+  // Sorted: the inverse table comes from a hash map, and a rename's edits need
+  // a stable order.
   std::ranges::sort(references, [](const ReferenceDescription& a,
                                    const ReferenceDescription& b) {
     return a.sourceDocumentId != b.sourceDocumentId

@@ -14,10 +14,9 @@
 #include "cursiv/execution/TaskQueue.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
-// An indexed parallel-for over a shared claim counter, load-balanced by
-// work-stealing. The publisher runs one part itself and then keeps taking
-// tasks until its own run is done, so a nested `run` call never blocks a
-// worker on itself.
+// An indexed parallel-for over a shared claim counter, balanced by work
+// stealing. The publisher runs one part, then takes tasks until its run is
+// done, so a nested `run` never blocks a worker on itself.
 
 namespace cursiv::detail {
 
@@ -34,24 +33,17 @@ class WorkerPool {
   [[nodiscard]] bool onWorkerThread() const noexcept;
 
   // Calls `body(index)` for every index below `count` and returns once every
-  // call has returned. A call that returns false ends the run: no index is
-  // handed out after it. `body` must not throw: a helper has no caller to
-  // unwind into, so the exception is the publisher's to catch inside the body.
+  // call has returned. A call that returns false ends the run. `body` must not
+  // throw.
   void run(std::size_t count, cursiv::function_ref<bool(std::size_t)> body);
 
  private:
-  // The shared claim counter of one run, on the publisher's stack. It outlives
-  // every task of that run because the publisher co-runs until `pending` is 0.
-  // Above any plausible count of runs in flight; a run that finds them all
-  // taken simply runs alone, which is slow and never wrong.
+  // Runs in flight at once; when every cell is taken, a run runs alone.
   static constexpr std::size_t kCells = 64;
 
-  // The count of parts still running, and it belongs to the pool: a publisher
-  // that is not a worker sleeps until it reaches zero, so the part that empties
-  // it has to signal -- and signalling through the publisher's stack would
-  // touch it after that publisher was free to return. A cell outlives every
-  // run. `asleep` says the publisher sleeps on `done`, so the last part takes
-  // the mutex only then.
+  // The parts still running, owned by the pool so the last part never touches
+  // the publisher's stack. `asleep` says the publisher sleeps on `done`, so the
+  // last part takes the mutex only then.
   struct alignas(128) Cell {
     std::atomic<std::size_t> pending{0};
     std::atomic<bool> taken{false};
@@ -60,6 +52,8 @@ class WorkerPool {
     std::condition_variable done;
   };
 
+  // One run's claim counter, on the publisher's stack, which outlives every
+  // task of the run.
   struct Job {
     cursiv::function_ref<bool(std::size_t)> body;
     std::size_t count;
@@ -68,9 +62,8 @@ class WorkerPool {
     alignas(128) std::atomic<std::size_t> next{0};
   };
 
-  // One object, pushed once per part: every part of a run does the same thing,
-  // so they need not be distinct, and the queue holds the same pointer N times.
-  // That saves one allocation per run, which matters on a stream of small runs.
+  // One per run, on the publisher's stack and pushed once per part: the parts
+  // are identical, so the queues hold the same pointer N times.
   struct Task {
     Job* job;
   };
@@ -78,21 +71,15 @@ class WorkerPool {
   struct Worker {
     TaskQueue<Task*> queue;
     std::size_t victim = 0;  // where the last steal succeeded
-    // A xorshift, and the range taken by multiply-shift: the standard engine
-    // and distribution cost a division apiece, on the loop a whole idle pool
-    // runs. Only the spread matters here, never the statistical quality.
+    // A xorshift reduced by multiply-shift: `<random>` costs a division per
+    // draw on the loop every idle worker runs, and only the spread matters.
     std::uint64_t random = 0;
     std::thread thread;
   };
 
-  // Where a non-worker publishes: a deque may only be pushed by its owner.
-  // Fewer buckets than workers on purpose, since every bucket is one more
-  // place a thief has to look.
-  //
-  // Spread by rank, not by address: one run's parts share one pointer pushed
-  // many times, so hashing the pointer would land every part in a single
-  // bucket behind a single mutex -- one lock taken once per part instead of
-  // once for the batch.
+  // Where a non-worker publishes, as a deque is pushed by its owner only. Fewer
+  // buckets than workers, and spread by rank: one run's parts share a pointer,
+  // so hashing it would put them all behind one mutex.
   struct Bucket {
     std::mutex mutex;
     TaskQueue<Task*> queue;
@@ -111,10 +98,8 @@ class WorkerPool {
   void workerLoop(std::size_t index) noexcept;
   void stopAndJoin() noexcept;
   [[nodiscard]] Cell* claimCell() noexcept;
-  // The publisher's own scheduling loop, run until its job is done. A worker
-  // never leaves it: blocking one would hold a thread the parts it is waiting
-  // for may need. A caller that is not a worker gives up after a short while
-  // and sleeps, which is what keeps it off a core the parts are using.
+  // The publisher's scheduling loop, run until its job is done. A worker never
+  // leaves it; another caller sleeps after a short while to free the core.
   void corun(const Job& job, std::size_t self) noexcept;
   [[nodiscard]] std::size_t selfIndex() const noexcept;
   // Publishes `parts` copies of `task`, which is what makes them stealable.

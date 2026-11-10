@@ -7,20 +7,14 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
-// What an AST's types answer, with the grammar erased: a type tag is unique
-// per type in the whole process, but the type table is per compiled grammar,
-// so a service that cannot be templated holds this instead. One
-// implementation, `DefaultAstReflection`, per compiled grammar's metadata.
+// Type-erased questions about a language's AST types, for services.
+// Implemented by `DefaultAstReflection`.
 
 namespace cursiv {
 
-// What a reference site accepts, as one bit per type index of its language --
-// subtypes already folded in, so a candidate is one test and no walk.
-// Resolved once per site and carried down the scope path, which is why it
-// has a name: it travels through the provider, the index and back.
-//
-// A view, not a container: the bits are the grammar's own table, computed at
-// compile time and alive for the process.
+// What a reference site accepts: one bit per type index of its language,
+// subtypes included. A view of the grammar's own table, alive for the
+// process.
 using AcceptSet = std::span<const std::uint64_t>;
 
 // A type this language does not know.
@@ -32,9 +26,8 @@ struct PropertyMetaData {
   const AstTypeTag* referenceType = nullptr;
 };
 
-// What a class declares, without an instance in hand. The identity is a tag
-// rather than a string, and `superTypes` is the closure the tag already
-// carries -- every base, transitively, not the direct ones alone.
+// What a class declares. `superTypes` holds every base, transitively, not only
+// the direct ones.
 struct TypeMetaData {
   std::string_view name;
   std::span<const AstTypeTag* const> superTypes;
@@ -56,14 +49,11 @@ struct AstReflection {
   // node where a reference is about to be written.
   [[nodiscard]] virtual AstNodePtr createNode(const AstTypeTag* type) const = 0;
 
-  // An unknown tag answers its name and nothing else, never a throw: asking
-  // about a class this grammar does not name is a question, not a fault, and
-  // the class knows what it is called.
+  // An unknown tag gives its name and nothing else; it never throws.
   [[nodiscard]] virtual TypeMetaData getTypeMetaData(
       const AstTypeTag* type) const noexcept = 0;
 
-  // Every AST class this grammar names, in the order it indexes them. A tag
-  // and not a string, which is what a type is here.
+  // Every AST class this grammar names, in the order it indexes them.
   [[nodiscard]] virtual std::span<const AstTypeTag* const> getAllTypes()
       const noexcept = 0;
 
@@ -75,10 +65,7 @@ struct AstReflection {
       const AstNode& node, const AstTypeTag* type) const noexcept = 0;
 
   // Every node `node` directly contains, with the member that holds it and,
-  // for a list member, where in it. The pair could be two fields on every
-  // node; the grammar already knows it, so the question is asked of the
-  // grammar and `AstNode` keeps its size. `kNoIndex` for a member that holds
-  // one.
+  // for a list member, its index; `kNoIndex` for a member that holds one.
   static constexpr std::uint32_t kNoIndex = ~std::uint32_t{0};
   virtual void visitMembers(
       const AstNode& node,
@@ -86,9 +73,8 @@ struct AstReflection {
                                 AstNode& child)>
           yield) const = 0;
 
-  // The type index this grammar knows a tag by, and back. Asked once per
-  // description, never per candidate -- a tag is process-wide, an index is the
-  // language's.
+  // The type index of a tag in this grammar, and back. A tag is process-wide;
+  // an index belongs to the language.
   [[nodiscard]] virtual std::uint16_t typeIndexOf(
       const AstTypeTag* type) const noexcept = 0;
   [[nodiscard]] virtual const AstTypeTag* typeTagOf(
@@ -106,11 +92,8 @@ struct AstReflection {
   [[nodiscard]] virtual std::uint16_t referenceIndexOf(
       const AstTypeTag* referenceType) const noexcept = 0;
 
-  // The reference a member is, by the class that declares it and the
-  // member's name. What a completion has at a caret: the grammar names the
-  // member (`Grammar::recordFeature`), the tree names the container.
-  // `kNoReference` when that class has no such member, or when it is not a
-  // reference.
+  // The reference index of the member `feature` of class `container`, as a
+  // completion has it at a caret. `kNoReference` when it is not a reference.
   [[nodiscard]] virtual std::uint16_t referenceIndexOf(
       const AstTypeTag* container, std::string_view feature) const noexcept = 0;
 
@@ -119,8 +102,8 @@ struct AstReflection {
   [[nodiscard]] virtual bool isMultiReference(
       std::uint16_t reference) const noexcept = 0;
 
-  // Whether any member of this grammar does: the early-out that spares a
-  // find-references the walk reconstructing a group no grammar declares.
+  // Whether any member of this grammar does. It says nothing of the groups
+  // its declarations join: another grammar's references can form them.
   [[nodiscard]] virtual bool hasMultiReference() const noexcept = 0;
 
   // The types a reference declares, by index -- a set, because a member may
@@ -129,8 +112,8 @@ struct AstReflection {
   [[nodiscard]] virtual std::span<const std::uint16_t> referenceTargets(
       std::uint16_t reference) const noexcept = 0;
 
-  // The type one site of that member narrows to, by the index the site
-  // stamps -- what a failed lookup names as expected. Null for
+  // The type one site of that member narrows to, by the narrowing index the
+  // site records: what a failed lookup names as expected. Null for
   // `kNoNarrow` or a row this grammar does not have.
   [[nodiscard]] virtual const AstTypeTag* referenceNarrowTarget(
       std::uint16_t reference, std::uint8_t narrow) const noexcept = 0;
@@ -143,18 +126,14 @@ struct AstReflection {
   [[nodiscard]] virtual std::string_view referenceProperty(
       std::uint16_t reference) const noexcept = 0;
 
-  // What a reference accepts, one bit per type index, computed with the
-  // grammar. Read once per query -- what the site accepts does not change
-  // across a walk; then `accepts` below is a single bit test whatever the
-  // grammar's size. Empty, which accepts everything, for `kNoReference` and
-  // any index past the last reference member. A member before it that is not
-  // a reference has an all-clear row.
+  // What a reference accepts, one bit per type index: read once per query,
+  // then `accepts` is a single bit test. Empty, which accepts everything, for
+  // `kNoReference` or an index past the last reference.
   [[nodiscard]] virtual AcceptSet referenceAccepts(
       std::uint16_t reference) const noexcept = 0;
 
-  // A description carries a tag, a reference site a bitset over this
-  // grammar's indices: the conversion is the asking language's, and a tag it
-  // does not know answers `kNoType`, which no set admits.
+  // Whether `bits` accepts `tag`, through this language's type index; a tag it
+  // does not know gets `kNoType`, which no set accepts.
   [[nodiscard]] bool acceptsTag(AcceptSet bits,
                                 const AstTypeTag* tag) const noexcept {
     if (bits.empty()) return true;

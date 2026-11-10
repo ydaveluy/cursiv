@@ -1,43 +1,11 @@
-// Language benchmarks: one document build and its LSP providers per input. Time
-// and throughput for each, on a ladder from 16 KiB to 128 MiB.
+// Language benchmarks: a document build and its LSP providers, timed at
+// several sizes, and N documents built at several pool widths. `--help`
+// lists the options. A row compares only with rows of the same run.
 //
-//   language_bench [options] [filter]
-//   <language>_bench [options] file [file ...]
-//     --full                 the whole ladder (adds 32 MiB and 128 MiB)
-//     --sizes 16K,4M,...     an explicit ladder
-//     --iterations N         override the per-size repetition count
-//     --json PATH            machine-readable results
-//     --csv PATH             the same rows, one line each
-//     --dump-corpus DIR      write the payloads and a manifest, measure nothing
-//     --corpus DIR           read the payloads from DIR instead of generating
-//     --multi / --no-multi   the multi-document lane alone / not at all
-//     --multi-bytes N        total bytes per shape (default 16M, 64M with
-//     --full)
-//     --workers 1,2,4,8      the scaling curve's points
-//     --single-workers N     the pool of a document built alone (default:
-//                            the machine's, as in a server; 0 = one thread)
-//     --rss                  one language, one cold build: what it makes
-//                            resident, phase by phase, and its peak
-//     --list                 what would run
-//     --file PATH            measure an existing file (repeatable)
-//
-// Two lanes: one document through every stage on a size ladder, and N
-// documents through one `DocumentBuilder::build` at several pool widths --
-// N separate builds would measure N serial workspaces, not parallelism.
-//
-// Env: CURSIV_BENCH_FILTER, CURSIV_BENCH_ITERATIONS, CURSIV_BENCH_BYTES (pins
-// the ladder to one size, which is what an instruction count needs),
-// CURSIV_BENCH_FULL, CURSIV_BENCH_JSON, CURSIV_IR_STAGE=api + CURSIV_IR_REPS
-// (the instruction-count harness: the whole parse, N times, no clock),
-// CURSIV_BENCH_DUMP=DIR (each build's diagnostics and resolutions, one file
-// per row -- what an identity check diffs).
-//
-// On Linux, with a reachable PMU, every stage line also carries its window
-// cost in hardware: cycles and instructions per byte, around the build
-// call alone. No PMU, no columns -- see PerfCounters.
-//
-// One process, one framework, best of a few rounds -- a row here is
-// comparable to another row here, and to nothing else.
+// Env: CURSIV_BENCH_FILTER, CURSIV_BENCH_ITERATIONS, CURSIV_BENCH_FULL,
+// CURSIV_BENCH_JSON, CURSIV_BENCH_BYTES (one size), CURSIV_IR_STAGE=api with
+// CURSIV_IR_REPS (the parse alone, no clock, for instruction counts), and
+// CURSIV_BENCH_DUMP=DIR (each row's diagnostics and resolutions).
 
 #include <algorithm>
 #include <cerrno>
@@ -76,9 +44,9 @@ using detail::Shape;
 constexpr const char* kStageName[detail::kStageCount] = {
     "parse+index", "scopes", "link", "validate", "build"};
 
-// The ladder, five orders of magnitude. A few kB is what an editor
-// reparses on a keystroke and where the fixed costs show; 128 MiB is a
-// build-system input and shows whether anything grows worse than linearly.
+// The document sizes. A few KiB is what an editor reparses on a keystroke and
+// shows the fixed costs; 128 MiB (`--full`) shows whether anything grows
+// worse than linearly.
 constexpr std::size_t kDefaultSizes[] = {
     std::size_t{16} << 10, std::size_t{256} << 10, std::size_t{4} << 20};
 constexpr std::size_t kFullSizes[] = {
@@ -105,15 +73,9 @@ constexpr const char* refs_name(Refs r) {
   return r == Refs::Cross ? "cross" : "intra";
 }
 
-// The shapes, as file sizes summing to `budget`.
-//   many-small  16 KiB files      -- dispatch-bound: the most documents, the
-//                                    least work in each
-//   medium      1 MiB files       -- the shape a real workspace has
-//   few-large   budget/4, 4 files -- fewer documents than workers, which is
-//                                    where a per-document fan-out stops being
-//                                    able to help
-//   mixed       80 % of the bytes in 16 KiB files, 20 % in 1 MiB ones -- the
-//               realistic tail, and the one an even split would flatter
+// The shapes, as file sizes summing to `budget`: 16 KiB files, 1 MiB files,
+// four files (fewer than the workers), and 80 % of the bytes in 16 KiB files
+// with the rest in 1 MiB ones.
 std::vector<std::size_t> shape_files(Shape shape, std::size_t budget) {
   constexpr std::size_t kSmall = std::size_t{16} << 10;
   constexpr std::size_t kMedium = std::size_t{1} << 20;
@@ -147,9 +109,8 @@ std::vector<std::size_t> shape_files(Shape shape, std::size_t budget) {
   return files;
 }
 
-// Repetitions shrink as the corpus grows, so the default sweep stays
-// bounded: the whole ladder is minutes, not an afternoon. `--iterations`
-// overrides.
+// Repetitions shrink as the corpus grows, so a run takes minutes.
+// `--iterations` overrides.
 int iterations_for(std::size_t bytes) {
   if (bytes <= (std::size_t{256} << 10)) return 5;
   if (bytes <= (std::size_t{4} << 20)) return 3;
@@ -182,10 +143,8 @@ void parse_probe(const char* name, const cursiv::Parser& engine,
     if (!r || r.value == nullptr) refused(name, "refused by the builder");
   }
 
-  // Instruction-count mode (experiment harness, off unless asked): the whole
-  // parse, `api`, N repetitions, no clock -- `perf stat -e instructions:u`
-  // counts the process. No other stage is isolated here, so no other name
-  // is taken.
+  // Instruction-count mode: the whole parse N times, no clock, for
+  // `perf stat -e instructions:u`. `api` is the only stage.
   if (const char* stage = std::getenv("CURSIV_IR_STAGE")) {
     if (std::string_view(stage) != "api")
       refused(name,
@@ -205,16 +164,14 @@ void parse_probe(const char* name, const cursiv::Parser& engine,
   }
 }
 
-// The binary states its own age: a build that is not refreshed measures
-// yesterday's tree, and the mtime of the running image is the one
-// identity that cannot lie.
+// Prints the binary's age: a binary that was not rebuilt measures an older
+// tree.
 void print_binary_age() {
   std::error_code ec;
   const auto t = std::filesystem::last_write_time("/proc/self/exe", ec);
   if (ec) return;
-  // `clock_cast` is absent from libc++, so the two epochs are bridged by the
-  // difference between one reading of each -- the same answer to the second,
-  // which is all a staleness banner needs.
+  // `clock_cast` is missing from libc++: the two clocks are converted with one
+  // reading of each, exact to the second.
   const auto sys =
       std::chrono::system_clock::now() +
       std::chrono::duration_cast<std::chrono::system_clock::duration>(
@@ -377,8 +334,8 @@ Options options(int argc, char** argv, std::span<const Language> languages) {
     usage_error("--multi requires a multi-document corpus generator");
   if (!anyMulti) o.multi = false;
 
-  // CURSIV_BENCH_BYTES pins the ladder to one size: one corpus, one figure,
-  // the only shape an instruction count can be read from.
+  // CURSIV_BENCH_BYTES keeps one size: one corpus, one figure, the only
+  // shape an instruction count can be read from.
   if (!explicitSizes.empty()) {
     o.sizes = std::move(explicitSizes);
   } else if (const char* v = env("CURSIV_BENCH_BYTES")) {
@@ -397,13 +354,8 @@ Options options(int argc, char** argv, std::span<const Language> languages) {
   if (!singleWorkersGiven)
     o.singleWorkers = cursiv::TaskScheduler::defaultWorkerCount();
   if (o.workers.empty()) {
-    // 0, 1, 2, 4, 8, and the machine -- the last being what
-    // `TaskScheduler::defaultWorkerCount()` would have chosen, so the widest
-    // point is the one a real host runs.
-    //
-    // Zero is the serial baseline: the submitting thread works alongside the
-    // pool, so `w` workers run `w + 1` documents at a time, and efficiency
-    // divides by threads, not by `w`.
+    // 0, 1, 2, 4, 8 and the machine's default width. The submitting thread
+    // works too, so `w` workers run `w + 1` documents at a time.
     const std::size_t machine = cursiv::TaskScheduler::defaultWorkerCount();
     o.workers.push_back(0);
     for (const std::size_t w :
@@ -467,14 +419,18 @@ std::string read_file(const std::string& path) {
   return out.str();
 }
 
+// Written whole, down to the last flush, or the run fails.
 void write_file(const std::string& path, std::string_view content) {
   std::ofstream out(checked_path(path), std::ios::binary);
+  if (out) {
+    out.write(content.data(), static_cast<std::streamsize>(content.size()));
+    out.close();
+  }
   if (!out) {
     std::fprintf(stderr, "language_bench: cannot write '%s': %s\n",
                  printable(path).c_str(), std::strerror(errno));
     throw Stop{1};
   }
-  out.write(content.data(), static_cast<std::streamsize>(content.size()));
 }
 
 double throughput(std::size_t bytes, double ms) {
@@ -609,11 +565,8 @@ double threads_of(std::size_t workers) {
   return static_cast<double>(workers == 0 ? 1 : workers + 1);
 }
 
-// The scaling curve: `speedup` against the serial point, `efficiency` =
-// speedup / threads. Near 1 means the phase really is spread; a curve
-// that flattens says where it stops being.
-// `phase1` is `total - link`, a subtraction of two measured windows, not
-// a third clock: both halves are whole builds through the real builder.
+// The scaling curve: `speedup` against the serial point, `efficiency` that
+// over the threads. `phase1` is `total - link`, both from the fastest build.
 void print_multi(const MultiRow& row) {
   std::printf("[multi] %s/%s refs=%s files=%zu bytes=%zu iterations=%d\n",
               row.language.c_str(), row.shape.c_str(), refs_name(row.refs),
@@ -748,8 +701,29 @@ std::string csv_field(std::string_view text) {
   return out + '"';
 }
 
+// `null` outside `--rss`. In it, a figure the platform did not answer is
+// `null` too, and `peak_reset` says whether the peak is the build's own.
+std::string rss_json(const Row& row, bool resident) {
+  if (!resident) return "null";
+  std::string out = "{\"stages\": {";
+  for (std::size_t stage = 0; stage < kStageCount; ++stage) {
+    if (stage != 0) out += ", ";
+    out += '"';
+    out += kStageName[stage];
+    out += "\": ";
+    out +=
+        row.rss[stage].valid ? std::to_string(row.rss[stage].current) : "null";
+  }
+  const RssSample& build = row.rss[kBuild];
+  out += "}, \"peak\": ";
+  out += build.valid && build.peakValid ? std::to_string(build.peak) : "null";
+  out += ", \"peak_reset\": ";
+  out += row.rssPeakReset ? "true" : "false";
+  return out + "}";
+}
+
 void write_json(const std::string& path, const std::vector<Row>& rows,
-                const std::vector<MultiRow>& multiRows) {
+                const std::vector<MultiRow>& multiRows, bool resident) {
   std::string out = "{\n  \"tool\": \"language_bench\",\n  \"rows\": [\n";
   for (std::size_t i = 0; i < rows.size(); ++i) {
     const Row& row = rows[i];
@@ -774,7 +748,7 @@ void write_json(const std::string& path, const std::vector<Row>& rows,
     out += "}, \"references\": " + std::to_string(row.references) +
            ", \"resolved\": " + std::to_string(row.resolved) +
            ", \"diagnostics\": " + std::to_string(row.diagnostics) +
-           ", \"lsp\": {";
+           ", \"rss\": " + rss_json(row, resident) + ", \"lsp\": {";
     for (std::size_t s = 0; s < row.lsp.size(); ++s) {
       const auto& service = row.lsp[s];
       if (s != 0) out += ", ";
@@ -805,7 +779,8 @@ void write_json(const std::string& path, const std::vector<Row>& rows,
   write_file(path, out);
 }
 
-void write_csv(const std::string& path, const std::vector<Row>& rows) {
+void write_csv(const std::string& path, const std::vector<Row>& rows,
+               bool resident) {
   std::string out = "language,label,bytes,iterations";
   for (const char* name : kStageName) {
     out += ",";
@@ -817,7 +792,13 @@ void write_csv(const std::string& path, const std::vector<Row>& rows) {
     out += name;
     out += "_mibps";
   }
-  out += ",references,resolved,diagnostics\n";
+  out += ",references,resolved,diagnostics";
+  for (const char* name : kStageName) {
+    out += ",";
+    out += name;
+    out += "_rss_bytes";
+  }
+  out += ",rss_peak_bytes,rss_peak_reset\n";
   for (const Row& row : rows) {
     out += csv_field(row.language) + "," + csv_field(row.label) + "," +
            std::to_string(row.bytes) + "," + std::to_string(row.iterations);
@@ -839,8 +820,19 @@ void write_csv(const std::string& path, const std::vector<Row>& rows) {
       out += buf;
     }
     out += "," + std::to_string(row.references) + "," +
-           std::to_string(row.resolved) + "," +
-           std::to_string(row.diagnostics) + "\n";
+           std::to_string(row.resolved) + "," + std::to_string(row.diagnostics);
+    // Empty outside `--rss`, and where the platform did not answer.
+    for (const RssSample& sample : row.rss) {
+      out += ",";
+      if (resident && sample.valid) out += std::to_string(sample.current);
+    }
+    const RssSample& build = row.rss[kBuild];
+    out += ",";
+    if (resident && build.valid && build.peakValid)
+      out += std::to_string(build.peak);
+    out += ",";
+    if (resident) out += row.rssPeakReset ? "true" : "false";
+    out += "\n";
   }
   write_file(path, out);
 }
@@ -1104,9 +1096,9 @@ int cursiv::bench::run(int argc, char** argv,
     }
   }
 
-  // The multi-document lane runs after the stage ladder: it is the
-  // expensive half, and an interrupted run should still publish the
-  // cheap rows. Never in Ir mode: the instruction counter is process-wide.
+  // The multi-document lane runs after the stage rows: it is the expensive
+  // half, and an interrupted run should still publish the cheap rows. Never
+  // in instruction-count mode: the counter is process-wide.
   std::vector<detail::MultiRow> multiRows;
   if (o.multi && !irMode) {
     if (const std::size_t cpus = detail::usable_cpus(); cpus != 0) {
@@ -1141,9 +1133,10 @@ int cursiv::bench::run(int argc, char** argv,
     }
   }
 
-  if (!o.jsonPath.empty()) detail::write_json(o.jsonPath, rows, multiRows);
+  if (!o.jsonPath.empty())
+    detail::write_json(o.jsonPath, rows, multiRows, o.rss);
   if (!o.csvPath.empty()) {
-    detail::write_csv(o.csvPath, rows);
+    detail::write_csv(o.csvPath, rows, o.rss);
     if (std::ranges::any_of(
             rows, [](const detail::Row& row) { return !row.lsp.empty(); })) {
       detail::write_lsp_csv(detail::companion_csv_path(o.csvPath, "-lsp"),

@@ -1,11 +1,12 @@
-# Core: the language itself. Generates the parser from the grammar, again when
-# the grammar changes, then builds the services and checks under core/. Every
-# other package links it.
+# Core: the language itself. Generates the parser and the editor's keywords
+# from the grammar, again when it changes, then builds the services and checks
+# under core/. Every other package links it.
 cursiv_generate_language(ID @CURSIV_NEW_ID@
     GRAMMAR    @CURSIV_NEW_ID@/@CURSIV_NEW_CLASS@Grammar.hpp
     NAMESPACE  @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@
     EXTENSIONS @CURSIV_NEW_EXT@
-    OUT        @CURSIV_NEW_ID@/generated)
+    OUT        @CURSIV_NEW_ID@/generated
+    TEXTMATE   ../vscode/syntaxes/@CURSIV_NEW_ID@.tmLanguage.json)
 
 file(GLOB_RECURSE _core CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp)

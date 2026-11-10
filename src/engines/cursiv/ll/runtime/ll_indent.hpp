@@ -13,7 +13,7 @@
 namespace cursiv::engine {
 
 // The descent's levels, as a read ahead of it owns them. Only the active ones
-// are copied: the arena's closed blocks would cost a long document its square.
+// are copied: copying the arena's closed blocks would be quadratic.
 inline void ll_indent_copy(const LlContext& c, LlLookIndent& state) {
   state.arena.clear();
   for (auto level = c.indent.head; level != kNoIndent;
@@ -35,16 +35,16 @@ inline void ll_indent_copy(const LlContext& c, LlLookIndent& state) {
 template <const auto& T>
 inline bool ll_end_dedents(const std::vector<IndentLevel>& arena,
                            const IndentAt& at, bool endStands) {
-  return !endStands && kLaid<T, kLaidDedent> != 0 &&
-         indent_owes_dedent(arena, at.head);
+  return !endStands && kSyntheticTerm<T, kSyntheticDedent> != 0 &&
+         indent_needs_dedent(arena, at.head);
 }
 
 // Whether a point that asks `admits` of a terminal takes the end of input as
 // the end: it admits it and no dedent to close a level first.
 template <const auto& T, class Admits>
 inline bool ll_end_stands(Admits&& admits) {
-  return admits(kEofSymbol) &&
-         !(kLaid<T, kLaidDedent> != 0 && admits(kLaid<T, kLaidDedent>));
+  return admits(kEofSymbol) && !(kSyntheticTerm<T, kSyntheticDedent> != 0 &&
+                                 admits(kSyntheticTerm<T, kSyntheticDedent>));
 }
 
 // Whether `mode` takes the end of input as the end.
@@ -75,7 +75,7 @@ inline bool ll_readings_read(const Readings& readings, SymbolId term) {
 // Whether the readings take the pending dedent over the end of input.
 template <const auto& T, class Readings>
 inline bool ll_dedent_over_end(const Readings& readings) {
-  return ll_readings_read<T>(readings, kLaid<T, kLaidDedent>);
+  return ll_readings_read<T>(readings, kSyntheticTerm<T, kSyntheticDedent>);
 }
 
 // Whether the readings take the end of input as the end: one reads it and none
@@ -96,12 +96,14 @@ inline bool ll_indent_read(const char* src, TextOffset len,
                            TextOffset* reached = nullptr) {
   if (at.depth != 0) return false;
   if (p == len && ll_end_dedents<T>(arena, at, admitsEof)) {
-    out = Token{p, p, kLaid<T, kLaidDedent>};
+    out = Token{p, p, kSyntheticTerm<T, kSyntheticDedent>};
     return true;
   }
-  return head && indent_virtual_at(src, len, arena, at.head,
-                                   kLaid<T, kLaidIndent>, kLaid<T, kLaidDedent>,
-                                   p, out, [held] { return held; }, reached);
+  return head &&
+         indent_virtual_at(
+             src, len, arena, at.head, kSyntheticTerm<T, kSyntheticIndent>,
+             kSyntheticTerm<T, kSyntheticDedent>, p, out,
+             [held] { return held; }, reached);
 }
 
 }  // namespace cursiv::engine

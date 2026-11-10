@@ -1,3 +1,4 @@
+// A terminal that calls itself behind an optional item.
 // expect LR: refused:.*calls itself without consuming input
 #pragma once
 

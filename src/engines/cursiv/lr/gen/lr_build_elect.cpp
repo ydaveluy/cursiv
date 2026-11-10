@@ -1,7 +1,6 @@
-// A left recursion reads as a descent reads its fold: its base first, then
-// each turn where the turn's left operand ends, the last one closed by an
-// exit. Bases and turns rank as a walk from the loop's head meets them, each
-// rule's arms in the order written.
+// A left recursion reads as a descent reads its fold: its base, then each turn
+// where its left operand ends, the last closed by an exit. Bases and turns rank
+// as a walk from the loop's head reaches them, arms in written order.
 
 #include "cursiv/lr/gen/lr_build_elect.hpp"
 
@@ -40,14 +39,14 @@ std::vector<unsigned> productions_by_rule(const LrBuildCfg& g) {
 void lr_state_symbols(LrBuildTable& A) {
   const LrBuildCfg& g = A.cfg;
   // Each way into a state, `f(from, to, symbol)`: a shift, a goto, or one
-  // landing of a guard's.
+  // target of a guard's.
   const auto each_entry = [&](auto&& f) {
     for (unsigned s = 0; s < A.nstates; ++s) {
       for (const LrAction& action : A.action_row(s))
-        A.each_landing(action, [&](unsigned to) { f(s, to, action.term); });
+        A.each_target(action, [&](unsigned to) { f(s, to, action.term); });
       for (const auto& e : A.gotoRows[s]) {
         const auto x = static_cast<std::uint16_t>(g.nterms + e.nt);
-        A.each_goto_landing(e, [&](unsigned to) { f(s, to, x); });
+        A.each_goto_target(e, [&](unsigned to) { f(s, to, x); });
       }
     }
   };
@@ -98,7 +97,7 @@ void lr_elect_words(LrBuildTable& A) {
     if (rank == 0)
       for (unsigned i = from[n]; i < from[n + 1]; ++i) word[order[i]] = kNoWord;
   }
-  // Inside one, bases and turns are numbered as the walk meets them; the
+  // Inside one, bases and turns are numbered as the walk reaches them; the
   // subsets of one arm share its number.
   std::vector<std::uint8_t> outside(nN, 0), seen(nN, 0);
   for (unsigned p = 0; p < nP; ++p) {
@@ -151,10 +150,10 @@ void lr_elect_words(LrBuildTable& A) {
 
   // At one position: the exit of the loop the child before it closes, the
   // arm, then the options and turns the arm decides there.
-  struct Laid {
+  struct Entry {
     std::uint32_t pos, kind, word;
   };
-  std::vector<Laid> laid;
+  std::vector<Entry> entries;
   A.electAt.assign(nP + 1u, 0);
   A.electWord.clear();
   A.electPos.clear();
@@ -163,19 +162,19 @@ void lr_elect_words(LrBuildTable& A) {
     const LrLowProd& q = g.prods[p];
     const LrProdBuild& b = g.prodBuild[p];
     const std::uint32_t armAt = turn[p] ? 1u : 0u;
-    laid.clear();
-    if (word[p] != kNoWord) laid.push_back({armAt, 1, word[p]});
+    entries.clear();
+    if (word[p] != kNoWord) entries.push_back({armAt, 1, word[p]});
     for (std::uint32_t d = b.decideAt; d < b.decideAt + b.decideLen; ++d)
-      laid.push_back(
+      entries.push_back(
           {std::max(g.decisions[d] >> 16, armAt), 2, g.decisions[d] & 0xffffu});
     for (unsigned i = turn[p] ? 1u : 0u; i < q.len; ++i)
       if (const std::uint16_t s = g.sym_at(q, i);
           !is_term(s) && g.loop_of(nt_index(s)) != kNoRow)
-        laid.push_back({i + 1u, 0, kLrExitWord});
-    std::ranges::stable_sort(laid, [](const Laid& x, const Laid& y) {
+        entries.push_back({i + 1u, 0, kLrExitWord});
+    std::ranges::stable_sort(entries, [](const Entry& x, const Entry& y) {
       return std::pair(x.pos, x.kind) < std::pair(y.pos, y.kind);
     });
-    for (const Laid& x : laid) {
+    for (const Entry& x : entries) {
       A.electWord.push_back(x.word);
       A.electPos.push_back(static_cast<std::uint16_t>(x.pos));
     }
@@ -188,7 +187,7 @@ void lr_elect_runs(LrBuildTable& A) {
   const unsigned nP = g.nprods, nN = g.nnts;
   const std::vector<unsigned> order = productions_by_rule(g);
 
-  // A pass-through the table skips leaves its callee where its caller stood:
+  // A pass-through the table skips leaves its callee where its caller was:
   // the decisions of the skipped run are restored around the callee, those at
   // its head before it, those at its tail after.
   A.electWatchAt.assign(nP + 1u, 0);
@@ -218,29 +217,35 @@ void lr_elect_runs(LrBuildTable& A) {
   std::vector<Path> paths;
   std::vector<Run> runs;
   std::vector<std::uint8_t> carries(nN, 0);
+  // Each symbol a rule reaches through aliases keeps the run its alternatives
+  // reach first in written order, each alternative's whole run before the next,
+  // as the election prefers.
   const auto collect = [&] {
     std::vector<std::uint8_t> reached(std::size_t{g.nterms} + nN);
     std::vector<std::pair<unsigned, std::size_t>> walk;
+    const auto follow = [&](unsigned at, std::size_t path) {
+      for (auto p = below[at].rbegin(); p != below[at].rend(); ++p)
+        walk.emplace_back(*p, path);
+    };
     for (unsigned x = 0; x < nN; ++x) {
       std::ranges::fill(reached, 0);
-      walk.assign(1, {x, noPath});
+      walk.clear();
+      follow(x, noPath);
       while (!walk.empty()) {
-        const auto [at, path] = walk.back();
+        const auto [p, path] = walk.back();
         walk.pop_back();
-        for (const unsigned p : below[at]) {
-          const std::uint16_t s = g.sym_at(g.prods[p], 0);
-          const unsigned y = is_term(s) ? s : g.nterms + nt_index(s);
-          if (reached[y]) continue;
-          reached[y] = 1;
-          std::size_t run = path;
-          if (A.electAt[p] != A.electAt[p + 1u]) {
-            run = paths.size();
-            paths.push_back({p, path});
-          }
-          if (run != noPath) carries[x] = 1;
-          runs.push_back({x << 16 | y, run});
-          if (!is_term(s)) walk.emplace_back(nt_index(s), run);
+        const std::uint16_t s = g.sym_at(g.prods[p], 0);
+        const unsigned y = is_term(s) ? s : g.nterms + nt_index(s);
+        if (reached[y]) continue;
+        reached[y] = 1;
+        std::size_t run = path;
+        if (A.electAt[p] != A.electAt[p + 1u]) {
+          run = paths.size();
+          paths.push_back({p, path});
         }
+        if (run != noPath) carries[x] = 1;
+        runs.push_back({x << 16 | y, run});
+        if (!is_term(s)) follow(nt_index(s), run);
       }
     }
   };
@@ -256,7 +261,7 @@ void lr_elect_runs(LrBuildTable& A) {
     A.electWatchAt[nP] = static_cast<std::uint32_t>(A.electWatch.size());
   }
 
-  // States that read one reduction alike fuse, whatever their productions
+  // States that read one reduction the same fuse, whatever their productions
   // decided: each production names those it may stand for, and their
   // symbols, so the one the children read is found again.
   A.electTwinFirst.assign(nP, kLrNoTwin);

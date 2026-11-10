@@ -19,8 +19,8 @@
 #include "cursiv/lr/table/LrAction.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
 #include "cursiv/shared/gen/KeepFirst.hpp"
+#include "cursiv/shared/gen/LexBodyRows.hpp"
 #include "cursiv/shared/gen/LexFirstByte.hpp"
-#include "cursiv/shared/gen/LexOwedRows.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/SetPool.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
@@ -37,12 +37,12 @@ struct LrDeriving {
 
   void repair_tables(LrDerivedRows& rows) const {
     const std::size_t n = a.ndfa;
-    LexOwedRows owed = lex_owed_rows(
-        LexOwedView{LrLexView{a}, a.ndfa, rows.typoSuccBase, rows.typoSucc});
-    rows.lexBodies = std::move(owed.bodies);
-    rows.lexOwed = std::move(owed.owed);
-    rows.lexOpeners = std::move(owed.openers);
-    const auto& into = owed.into;
+    LexBodyRows bodyRows = lex_body_rows(
+        LexBodyView{LrLexView{a}, a.ndfa, rows.typoSuccBase, rows.typoSucc});
+    rows.lexBodies = std::move(bodyRows.bodies);
+    rows.lexBodyTerms = std::move(bodyRows.terms);
+    rows.lexOpeners = std::move(bodyRows.openers);
+    const auto& into = bodyRows.into;
     std::vector<DynSet> reach(n), after(a.cfg.nterms), want(a.nmodes);
     for (std::size_t s = 0; s < n; ++s)
       reach[s] = a.dfa_acc_set(static_cast<std::uint16_t>(s));
@@ -67,8 +67,8 @@ struct LrDeriving {
     for (std::uint32_t s = 0; s < a.nstates; ++s) {
       want[a.mode[s]] |= a.follow[s];
       for (const LrAction& x : a.action_row(s))
-        a.each_landing(
-            x, [&](std::uint16_t to) { after[x.term] |= a.follow[to]; });
+        a.each_target(x,
+                      [&](std::uint16_t to) { after[x.term] |= a.follow[to]; });
     }
     rows.typoReach = SetPool(reach.data(), static_cast<unsigned>(n));
     rows.after = SetPool(after.data(), a.cfg.nterms);
@@ -79,8 +79,8 @@ struct LrDeriving {
     return row == kNoElement ? kNoElement : sites[row];
   }
 
-  // The nonterminals a laid row's record may reduce to. A production that may
-  // start with a nullable symbol leaves its row unnamed: its record sits on
+  // The nonterminals a written row's record may reduce to. A production that
+  // may start with a nullable symbol leaves its row unnamed: its record sits on
   // an empty frame, and the goto would leave from it.
   void row_lhs(LrDerivedRows& rows, std::size_t nrows) const {
     const auto& c = a.cfg;
@@ -176,17 +176,18 @@ struct LrDeriving {
       for (const LrAction& act : a.action_row(s)) {
         if (!lr_takes_token(act.kind)) continue;
         if (act.term == 0) continue;
-        if (a.cfg.terms[act.term].trivia || a.cfg.terms[act.term].laid != 0)
+        if (a.cfg.terms[act.term].trivia ||
+            a.cfg.terms[act.term].synthetic != 0)
           continue;
-        const auto item = [&](ElementId site, ElementId landing, bool entered) {
-          const auto key = std::array<std::uint16_t, 4>{
-              act.term, site, landing, std::uint16_t{entered}};
+        const auto item = [&](ElementId site, ElementId toState, bool entered) {
+          const auto key = std::array<std::uint16_t, 4>{act.term, site, toState,
+                                                        std::uint16_t{entered}};
           if (rows.expectPool.size() > UINT16_MAX && !pooled.contains(key))
             throw LowerRefused(LowerFail::tableTooLarge);
           const auto [at, fresh] = pooled.try_emplace(
               key, static_cast<std::uint16_t>(rows.expectPool.size()));
           if (fresh)
-            rows.expectPool.push_back({act.term, site, landing, entered});
+            rows.expectPool.push_back({act.term, site, toState, entered});
           rows.expectItems.push_back(at->second);
         };
         if (act.kind != LrActionKind::guard) {
@@ -194,23 +195,23 @@ struct LrDeriving {
             item(read.site, kNoElement, read.entered);
           continue;
         }
-        // Landings that write one member are one entry; otherwise each lands
-        // on its own.
+        // Targets that write one member are one entry; otherwise each names
+        // the state it goes to.
         const LrGuard& guard = a.guards[act.arg];
-        struct Landed {
+        struct Outcome {
           ElementId site, to;
           bool entered;
         };
-        std::vector<Landed> landed;
+        std::vector<Outcome> outcomes;
         for (std::size_t v = 0; v < guard.to.size(); ++v)
           if (guard.to[v] != LrGuard::kNoState)
             for (const LrCaretSite& read : sites_read(guard.alts[v]))
-              landed.push_back({read.site, guard.to[v], read.entered});
-        const bool alike = std::ranges::all_of(landed, [&](const auto& l) {
-          return l.site == landed.front().site;
+              outcomes.push_back({read.site, guard.to[v], read.entered});
+        const bool oneSite = std::ranges::all_of(outcomes, [&](const auto& l) {
+          return l.site == outcomes.front().site;
         });
-        for (const Landed& l : landed)
-          item(l.site, alike ? kNoElement : l.to, l.entered);
+        for (const Outcome& l : outcomes)
+          item(l.site, oneSite ? kNoElement : l.to, l.entered);
       }
       rows.expectItems.resize(
           first + keep(std::span(rows.expectItems).subspan(first)));
@@ -253,7 +254,7 @@ void lr_derive_tables(LrBuildTable& a, std::span<const ElementId> sites) {
   a.dfaResPool = SetPool(a.dfaRes.data(), a.ndfa);
   a.dfaRelayResPool = SetPool(a.dfaRelayRes.row(0, a.ndfa), a.ndfa);
   a.followPool = SetPool(a.follow.row(0, a.nstates), a.nstates);
-  // A state past the last row owes nothing.
+  // A state past the last row needs nothing.
   a.closePool = SetPool(a.closeRow.row(0, a.nstates), a.nstates);
 }
 

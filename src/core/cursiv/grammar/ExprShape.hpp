@@ -1,6 +1,5 @@
 // The grammar vocabulary as a reader sees it: the children a structural walk
-// descends into, and how to rebuild a node around new ones. Spelled once here
-// rather than in `expr.hpp`, which declares the language and reads nothing.
+// descends into, and how to rebuild a node around new ones.
 #pragma once
 
 #include <cstddef>
@@ -11,8 +10,8 @@
 
 namespace cursiv::detail {
 
-// No permissive default: a node missing here would answer "no children", and
-// a rule named only under it would leave the grammar in silence.
+// No default: a missing node would answer "no children" and silently hide the
+// rules under it.
 template <class E>
 struct ExprShape {
   static_assert(dependent_false<E>,
@@ -24,7 +23,7 @@ struct ExprShape {
 // and a rule's name are read by the walks that care, never descended.
 template <class E>
 struct ExprAtom {
-  using kids = TypeList<>;
+  using children = TypeList<>;
   template <class...>
   using rebind = E;
 };
@@ -48,11 +47,11 @@ template <std::uint64_t M, bool N, str S>
 struct ExprShape<CpSet<M, N, S>> : ExprAtom<CpSet<M, N, S>> {};
 template <str S, bool CI, class Gd>
 struct ExprShape<Lit<S, CI, Gd>> : ExprAtom<Lit<S, CI, Gd>> {};
-// One kid and nothing else: the prose is not a shape, so a splice rebuilds
-// the body and carries the prose across unchanged.
+// One child and nothing else: the doc text is not a shape, so a splice rebuilds
+// the body and carries the text across unchanged.
 template <class E, str T>
 struct ExprShape<Doc<E, T>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Doc<K..., T>;
 };
@@ -60,7 +59,7 @@ template <class R>
 struct ExprShape<Ref<R>> : ExprAtom<Ref<R>> {};
 template <class C, class E>
 struct ExprShape<As<C, E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class K>
   using rebind = As<C, K>;
 };
@@ -69,37 +68,37 @@ struct ExprShape<SuperT<D>> : ExprAtom<SuperT<D>> {};
 
 template <class... Es>
 struct ExprShape<Seq<Es...>> {
-  using kids = TypeList<Es...>;
+  using children = TypeList<Es...>;
   template <class... K>
   using rebind = Seq<K...>;
 };
 template <class... Es>
 struct ExprShape<Choice<Es...>> {
-  using kids = TypeList<Es...>;
+  using children = TypeList<Es...>;
   template <class... K>
   using rebind = Choice<K...>;
 };
 template <class... Es>
 struct ExprShape<Unordered<Es...>> {
-  using kids = TypeList<Es...>;
+  using children = TypeList<Es...>;
   template <class... K>
   using rebind = Unordered<K...>;
 };
 template <class O, class Cl>
 struct ExprShape<Through<O, Cl>> {
-  using kids = TypeList<O, Cl>;
+  using children = TypeList<O, Cl>;
   template <class... K>
   using rebind = Through<K...>;
 };
 template <class G, class E>
 struct ExprShape<Embed<G, E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Embed<G, K...>;
 };
 template <class Tag, class E>
 struct ExprShape<Mark<Tag, E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Mark<Tag, K...>;
 };
@@ -107,61 +106,61 @@ template <class Tag>
 struct ExprShape<Same<Tag>> : ExprAtom<Same<Tag>> {};
 template <std::size_t Mn, std::size_t Mx, class E>
 struct ExprShape<Repeat<Mn, Mx, E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class K>
   using rebind = Repeat<Mn, Mx, K>;
 };
 template <class P, class B>
 struct ExprShape<Commit<P, B>> {
-  using kids = TypeList<P, B>;
+  using children = TypeList<P, B>;
   template <class... K>
   using rebind = Commit<K...>;
 };
 template <class E>
 struct ExprShape<Trigger<E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Trigger<K...>;
 };
 template <class E>
 struct ExprShape<Not<E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Not<K...>;
 };
 template <class E>
 struct ExprShape<And<E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = And<K...>;
 };
 template <auto Sp, class E>
 struct ExprShape<Assign<Sp, E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Assign<Sp, K...>;
 };
 template <auto Sp, class E>
 struct ExprShape<Append<Sp, E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Append<Sp, K...>;
 };
 template <auto P, class E>
 struct ExprShape<Flag<P, E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Flag<P, K...>;
 };
 template <class T, class E>
 struct ExprShape<Create<T, E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Create<T, K...>;
 };
 template <class T, auto P, class E>
 struct ExprShape<Nest<T, P, E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Nest<T, P, K...>;
 };
@@ -169,12 +168,12 @@ struct ExprShape<Nest<T, P, E>> {
 // walk that reaches rules says so itself.
 template <class I, class H, class E>
 struct ExprShape<Skip<I, H, E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = Skip<I, H, K...>;
 };
 
-// A node whose reading is its one child's: prose, a mark, a region or a
+// A node whose reading is its one child's: doc text, a mark, a region or a
 // directive adds to what it wraps and takes nothing from it. A reader that
 // reads one of these differently says so in a specialization of its own.
 template <class E>
@@ -194,10 +193,10 @@ inline constexpr bool transparent<Append<Sp, E>> = true;
 template <auto P, class E>
 inline constexpr bool transparent<Flag<P, E>> = true;
 template <class E>
-using through_t = tl_at_t<0, typename ExprShape<E>::kids>;
+using through_t = tl_at_t<0, typename ExprShape<E>::children>;
 
-// A node that only gathers its kids: a reader that folds over one reads each
-// kid the way it reads the node.
+// A node that only gathers its children: a reader that folds over one reads
+// each child the way it reads the node.
 template <class E>
 inline constexpr bool grouping = false;
 template <class... Es>
@@ -215,8 +214,7 @@ inline constexpr bool grouping<Skip<I, H, E>> = true;
 template <class G, class E>
 inline constexpr bool grouping<Embed<G, E>> = true;
 
-// Whether an expression names a directive of its own, one nested operand not
-// counted: it is the rule of its own already.
+// Whether E itself is a directive; `holds_directive` also looks inside.
 template <class E>
 inline constexpr bool is_directive = false;
 template <class T, class E>
@@ -230,7 +228,7 @@ inline constexpr bool is_directive<Append<Sp, E>> = true;
 template <auto P, class E>
 inline constexpr bool is_directive<Flag<P, E>> = true;
 
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 inline constexpr bool holds_directive = is_directive<E>;
 template <class E, class... Ks>
 inline constexpr bool holds_directive<E, TypeList<Ks...>> =
@@ -274,10 +272,8 @@ inline constexpr bool section_operand<Choice<Es...>> =
 template <class I, class H, class E>
 inline constexpr bool section_operand<Skip<I, H, E>> = section_operand<E>;
 
-// Choices and trivia scopes keep their operand's value. A section pays its
-// entry's value, so its directive belongs on that call, inside the delimiters.
-// Stop at every other shape: a sequence or a data rule still denotes its own
-// text, including any section delimiters it reads.
+// Choices and trivia scopes keep their operand's value, and a section its
+// entry's. Every other shape denotes its own text.
 template <template <auto, class> class Directive, auto S, class E>
 struct directive_operand {
   using type = Directive<S, typename operand_of<E>::type>;

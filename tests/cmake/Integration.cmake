@@ -1,5 +1,4 @@
-# The wasm cross runs the same lanes; only the threadless target loses the
-# ones that construct raw std::thread.
+# A wasm build without threads cannot run the test that starts raw std::thread.
 if(CMAKE_CROSSCOMPILING AND NOT CURSIV_WASI_THREADS)
   set_tests_properties(threads_test PROPERTIES DISABLED TRUE)
 endif()
@@ -47,7 +46,7 @@ if(TARGET cursivAllocator)
   cursiv_test(Allocator_test integration/Allocator_test.cpp)
   target_include_directories(Allocator_test SYSTEM PRIVATE
       $<TARGET_PROPERTY:cursivAllocator,INCLUDE_DIRECTORIES>)
-  # A debug allocator reports what it finds wrong in its port, then goes on.
+  # A debug allocator prints what it finds wrong and goes on.
   set_tests_properties(Allocator_test PROPERTIES TIMEOUT 60
       FAIL_REGULAR_EXPRESSION "mimalloc: (warning|error)")
   if(NOT CMAKE_CROSSCOMPILING)
@@ -64,9 +63,8 @@ if(TARGET cursivAllocator)
   endif()
 endif()
 
-# What a consumer actually does: a project outside this tree, fetched, built and
-# run. Not cross compiled -- the lane configures a second CMake project, and the
-# host is the only machine that can build one here.
+# A project outside this tree fetches, builds and runs Cursiv. Host only: the
+# test configures a second CMake project.
 if(NOT CMAKE_CROSSCOMPILING)
   add_test(NAME fetchcontent_test COMMAND ${CMAKE_COMMAND}
       -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/integration/consumer
@@ -79,9 +77,8 @@ if(NOT CMAKE_CROSSCOMPILING)
   set_tests_properties(fetchcontent_test PROPERTIES TIMEOUT 600
       RESOURCE_LOCK cursiv_build RUN_SERIAL TRUE)
 
-  # The scaffold, run: a language nobody wrote, made by `docs/cursiv-new.cmake`
-  # and taken through its own README -- configure, generate, configure, build,
-  # parse. An unrun scaffold rots silently; this is the only thing that says so.
+  # A language made by `docs/cursiv-new.cmake`, taken through its README:
+  # configure, generate, configure, build, parse.
   add_test(NAME scaffold_test COMMAND ${CMAKE_COMMAND}
       -DSCAFFOLD=${CURSIV_SOURCE_ROOT}/docs/cursiv-new.cmake
       -DGENERATE=${CURSIV_SOURCE_ROOT}/cmake/GenerateScaffold.cmake
@@ -92,7 +89,7 @@ if(NOT CMAKE_CROSSCOMPILING)
   set_tests_properties(scaffold_test PROPERTIES TIMEOUT 900
       RESOURCE_LOCK cursiv_build)
 
-  # Refused at configure, before any compile could fail on it.
+  # Bad grammar arguments are refused at configure time, before any compile.
   add_test(NAME refused_grammar_name_test COMMAND ${CMAKE_COMMAND}
       -S ${CMAKE_CURRENT_SOURCE_DIR}/integration/refused_grammar_name
       -B ${CMAKE_CURRENT_BINARY_DIR}/integration/refused_grammar_name
@@ -106,4 +103,10 @@ if(NOT CMAKE_CROSSCOMPILING)
       -DCURSIV_SOURCE_DIR=${CURSIV_SOURCE_ROOT} -DCASE=file-name)
   set_tests_properties(refused_file_name_test PROPERTIES
       PASS_REGULAR_EXPRESSION "FILE_NAMES entry `my,file` holds a comma")
+  add_test(NAME refused_missing_value_test COMMAND ${CMAKE_COMMAND}
+      -S ${CMAKE_CURRENT_SOURCE_DIR}/integration/refused_grammar_name
+      -B ${CMAKE_CURRENT_BINARY_DIR}/integration/refused_missing_value
+      -DCURSIV_SOURCE_DIR=${CURSIV_SOURCE_ROOT} -DCASE=missing-value)
+  set_tests_properties(refused_missing_value_test PROPERTIES
+      PASS_REGULAR_EXPRESSION "no value after ENGINE")
 endif()

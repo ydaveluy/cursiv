@@ -10,7 +10,7 @@
 
 namespace dm {
 
-// The climb is the qualifier: a package nested in a package answers with both,
+// The walk is the qualifier: a package nested in a package answers with both,
 // outermost first. A loop, and one string built once, however deep the
 // packages nest.
 std::string QualifiedNameProvider::qualifierOf(

@@ -17,8 +17,8 @@ void StateMachineValidator::checkStateNameStartsWithCapital(
         .property<&ast::State::name>();
 }
 
-// One table over both families: a state and an event wearing the same name
-// collide as surely as two states do, and each of the two is named. A name's
+// One table over both families: a state and an event with the same name
+// collide as two states do, and each of the two is reported. A name's
 // first holder is reported when its first duplicate turns up.
 void StateMachineValidator::checkUniqueStatesAndEvents(
     const ast::Statemachine& model, cursiv::ValidationAcceptor& accept) const {
@@ -55,7 +55,7 @@ void StateMachineValidator::checkUniqueStatesAndEvents(
 }
 
 // The words a name may not be. The grammar lexes a name as a plain token, so
-// a keyword worn as one parses; it is refused here, once, instead of being
+// a keyword used as one parses; it is refused here, once, instead of being
 // reserved in every state the lexer has. Case-insensitive, as the keywords are.
 void StateMachineValidator::checkNamesAreNotKeywords(
     const ast::Statemachine& model, cursiv::ValidationAcceptor& accept) const {

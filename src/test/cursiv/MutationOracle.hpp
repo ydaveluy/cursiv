@@ -13,8 +13,7 @@
 
 // The mutation oracle: every one-byte mutation of a valid document is
 // accepted, with an AST, a tree that reaches its last byte, and record ends
-// that never decrease. What a repair is worth, where it is said included,
-// is the recovery metric's to judge.
+// that never decrease.
 
 namespace cursiv::test {
 
@@ -35,7 +34,7 @@ inline std::string mutation_name(char op, std::size_t pos, char byte) {
   return s + b;
 }
 
-// One mutated document held to the floor.
+// Checks one mutated document against the rules above.
 inline void mutation_floor(std::string_view lang, const cursiv::Grammar& grammar,
                            const cursiv::ParseResult& r, const std::string& doc,
                            const std::string& what) {

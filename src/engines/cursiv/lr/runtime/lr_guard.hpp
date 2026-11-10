@@ -1,4 +1,4 @@
-// What the gap decides, read where the parse stands: a guard's landing by the
+// What the gap decides, read where the parse stands: a guard's target by the
 // outcome of its conditions, and what a state's tag says of the gap its span
 // opened on.
 #pragma once
@@ -34,10 +34,10 @@ constexpr bool lr_held(std::uint32_t s, unsigned k) {
   return ((A.held[k * kWords + (s >> 6)] >> (s & 63u)) & 1u) != 0;
 }
 
-// Where guard `k` lands, `holds(c)` answering each of its conditions;
-// `kInvalidSymbol` where the outcome lands nowhere.
+// The state guard `k` goes to, `holds(c)` answering each of its conditions;
+// `kInvalidSymbol` where the outcome leads to no state.
 template <const auto& A, class Holds>
-constexpr std::uint32_t lr_guard_land(std::uint32_t k, Holds&& holds) {
+constexpr std::uint32_t lr_guard_target(std::uint32_t k, Holds&& holds) {
   const std::uint32_t at = A.guardAt[k];
   const unsigned n = A.guardOps[at];
   unsigned v = 0;
@@ -47,20 +47,20 @@ constexpr std::uint32_t lr_guard_land(std::uint32_t k, Holds&& holds) {
   return to == 0xffffu ? kInvalidSymbol : to;
 }
 
-// The goto on a column cell: a guard above the states lands by the tag of
+// The goto on a column cell: a guard above the states decides by the tag of
 // `first`, or by the gap where the span opened on none.
 template <const auto& A, class Holds>
-constexpr std::uint32_t lr_goto_land(std::uint32_t cell, std::uint32_t first,
-                                     Holds&& holds) {
+constexpr std::uint32_t lr_goto_target(std::uint32_t cell, std::uint32_t first,
+                                       Holds&& holds) {
   if constexpr (!kLrGuarded<A>) {
     (void)first, (void)holds;
     return cell;
   } else {
     constexpr std::uint32_t kStates = A.mode.size();
     if (cell == kInvalidSymbol || cell < kStates) return cell;
-    if (first == kLrNoFirst) return lr_guard_land<A>(cell - kStates, holds);
-    return lr_guard_land<A>(cell - kStates,
-                            [&](unsigned k) { return lr_held<A>(first, k); });
+    if (first == kLrNoFirst) return lr_guard_target<A>(cell - kStates, holds);
+    return lr_guard_target<A>(cell - kStates,
+                              [&](unsigned k) { return lr_held<A>(first, k); });
   }
 }
 

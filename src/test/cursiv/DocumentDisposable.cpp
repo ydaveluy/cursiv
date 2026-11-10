@@ -1,12 +1,13 @@
 #include "cursiv/DocumentDisposable.hpp"
 
+#include <exception>
 #include <memory>
 #include <utility>
 
-#include "cursiv/services/CoreServices.hpp"
-#include "cursiv/workspace/Document.hpp"
 #include "cursiv/Disposable.hpp"
 #include "cursiv/ParseHelper.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/workspace/Document.hpp"
 
 namespace cursiv::test {
 
@@ -17,6 +18,14 @@ Disposable detail::documentDisposable(const CoreServices& services,
     const std::shared_ptr<Document> one[] = {held};
     clearDocuments(*shared, one);
   });
+}
+
+detail::DisposeOnThrow::~DisposeOnThrow() {
+  if (std::uncaught_exceptions() <= _uncaught) return;
+  try {
+    _cleanup.dispose();
+  } catch (...) {  // NOLINT(bugprone-empty-catch): the first exception wins
+  }
 }
 
 }  // namespace cursiv::test

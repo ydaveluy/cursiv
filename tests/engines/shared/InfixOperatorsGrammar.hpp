@@ -31,7 +31,7 @@ struct Coded : cursiv::Extends<Expr> {
   Op op = Op::equal;
   Expr* right = nullptr;
 };
-// Declares no member of its own: its base declares the three a climb writes.
+// Declares no member of its own: its base declares the three an infix writes.
 struct Recoded : cursiv::Extends<Coded> {};
 struct Listed : cursiv::Extends<Expr> {
   vector<Expr*> items;
@@ -155,8 +155,9 @@ struct Between : Base {
 };
 
 // A sign a gap makes an operator, where the next column may open with the same
-// sign and an operand opens with a guard: past its own condition, the operator's
-// reading meets the column's at that guard, and it is the better of the two.
+// sign and an operand opens with a guard: past its own condition, the
+// operator's reading joins the column's at that guard, and it is the better of
+// the two.
 struct Rowed : Base {
   struct E;
   struct Named : NameOrParen<E> {};
@@ -206,15 +207,9 @@ struct Stated : Base {
                      eof> {};
 };
 
-// A data rule passes the value of the alternative it took: the enumerator,
-// whether the rule is called, called through another, or the alternative is
-// written in place. A region holding the call and a condition, behind a
-// condition of its own, passes it too: its sequence stays a group, which the
-// descent records when a repair drops a token inside it. A condition that
-// ends a region reads past the caller's trivia, as one after the region does,
-// even trivia the region would refuse, whether it writes or a repetition
-// holds it. A condition held by a repetition or a region of its own leaves
-// the value to the call it follows. Two words may spell one value.
+// A data rule passes the value of the alternative it took, called directly,
+// through another rule, in place, or inside a region with conditions. Two
+// words may spell one value.
 struct Visible : Base {
   struct NOTE : terminal<lit<"#">> {};
   struct Visibility : rule<as<Vis::Public>(kw<"public">) |
@@ -298,11 +293,8 @@ struct Lengthened : Base {
 };
 
 // An operator a data rule spells takes the constant of the alternative it
-// read, at every kind of level, as a member written directly does: a terminal
-// giving a constant per alternative, a rule calling rules that give one each,
-// read in place or not, and alternatives of two words. Beside them, the
-// operators that already name their value: a whole body converted, a keyword
-// read as its enumerator and a literal given its constant in place.
+// read, at every kind of level, beside operators that name their value
+// themselves.
 struct Marking : Base {
   struct E;
   struct SLASH

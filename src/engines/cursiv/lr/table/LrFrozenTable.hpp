@@ -29,7 +29,7 @@ struct LrFrozenTable : LrTableFacts {
   // A mode where two different terminals can match from the same position
   // with different extents: the cold path must enumerate the candidates.
   std::array<std::uint8_t, S.modes> modeMulti{};
-  // Per mode, the winners whose bytes may hide a rival there: a reading
+  // Per mode, the winners whose bytes may hide a competitor there: a reading
   // sweeps the position behind them, and only them.
   LrSetStore<S, S.modes, S.modeWinSets> modeWin{};
   // The mode that lexes what a mode takes for the length of its token alone.
@@ -79,16 +79,15 @@ struct LrFrozenTable : LrTableFacts {
       dfaRelayRes{};
   // The class the byte after this match may not be in, or `kNoSet`.
   std::array<std::uint16_t, S.dfa> dfaBound{};
-  // The head of a state's relay list, or `kNoRelay`; laid only where a token
+  // The head of a state's relay list, or `kNoRelay`; present only where a token
   // echoes a mark.
   std::array<std::uint16_t, S.relays != 0 ? S.dfa : 0> dfaRelay{};
   std::array<LexRelay, S.relays> relays{};
   static constexpr std::uint16_t nrelays = S.relays;
 
-  // Where the grammar embeds others, per mode: the mode a fault is lexed
-  // with -- in a section, its grammar's terminals and the token that closes
-  // it -- and that token where the state reads inside the section, which a
-  // repair never invents, drops or reads as another. `kEofSymbol` elsewhere.
+  // Per mode, where the grammar embeds others: the mode a fault is lexed with,
+  // and the section's closing token, which a repair never invents, drops or
+  // reads as another. `kEofSymbol` elsewhere.
   std::array<std::uint16_t, S.errModes> errModeOf{};
   std::array<std::uint16_t, S.errModes> modeEnd{};
 
@@ -112,23 +111,23 @@ struct LrFrozenTable : LrTableFacts {
     else
       return dfaRelayRes[s];
   }
-  constexpr unsigned tier_at(unsigned k) const {
-    if constexpr (S.accTiers == 0)
+  constexpr unsigned priority_at(unsigned k) const {
+    if constexpr (S.accPriorities == 0)
       return 0;
     else
-      return Cold.accTier[k];
+      return Cold.accPriority[k];
   }
   template <class F>
   constexpr bool each_accept(std::uint16_t s, F&& f) const {
     auto open = dfaAcc[s];
     unsigned k = Cold.accBoundBase[s];
     for (unsigned t = open.take(); t < cfg.nterms; t = open.take(), ++k) {
-      if (f(static_cast<SymbolId>(t), Cold.accBound[k], tier_at(k)))
+      if (f(static_cast<SymbolId>(t), Cold.accBound[k], priority_at(k)))
         return true;
       if constexpr (S.accStands != 0)
         if (Cold.accStand[k] != kNoSet &&
             f(static_cast<SymbolId>(t), Cold.accStand[k],
-              unsigned{kTierKeyword}))
+              unsigned{kKeywordPriority}))
           return true;
     }
     return false;

@@ -6,7 +6,7 @@
 #include "engines/shared/GuardedClimbAst.hpp"
 
 // Calls, a guarded word infix or postfix, and the pattern boundaries that
-// return from the climb. Keep the fixture limited to what its test reads.
+// return from the infix. Keep the fixture limited to what its test reads.
 namespace tguardedclimb {
 struct Base : cursiv::GrammarSpec {
   static constexpr auto Symbol = !cr<R"(\x00-\x7f)"> + (uc::Sm | uc::So);

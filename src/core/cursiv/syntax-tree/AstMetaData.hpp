@@ -11,10 +11,9 @@
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
-// What one compiled grammar's AST types are, as data: classes, subtyping,
-// members and their metadata -- the tables `DefaultAstReflection` answers
-// from, written by the generator. Nothing here builds a node: that is
-// `AstActions`.
+// One compiled grammar's AST types as data: classes, subtyping and
+// members, written by the generator for `DefaultAstReflection`. Nothing here
+// builds a node: that is `AstActions`.
 
 namespace cursiv {
 
@@ -24,14 +23,12 @@ namespace detail {
 // (`kNoField` is the same value, spelled for the element table).
 inline constexpr std::uint16_t kNoIndex = 0xFFFF;
 
-// What the builder shows of one field. `targets` is every family the member
-// accepts, in declaration order, and its index is the variant alternative to
-// emplace; `target` is its head. The type tests live here and not in the
-// writers, which is what keeps a writer templated on the member pointer alone
-// while still making every `static_cast` it performs a proven one.
+// What the builder reads of one field. `targets` lists every type the member
+// accepts, in declaration order; its index is the variant alternative to
+// emplace, and `target` is the first. The writers' casts rely on these tests.
 struct FieldDesc {
   std::string_view name;
-  FieldNature nature = FieldNature::value;
+  FieldContent content = FieldContent::value;
   FieldStorage storage = FieldStorage::direct;
   std::uint16_t target = kNoIndex;
   std::uint16_t owner = kNoIndex;
@@ -39,7 +36,7 @@ struct FieldDesc {
   std::uint16_t target_count = 0;
 };
 
-// Every type that is one type, its own first.
+// Every subtype of one type, itself first.
 struct TagSet {
   const AstTypeTag* const* tags = nullptr;
   std::uint16_t count = 0;
@@ -94,10 +91,8 @@ struct AstMetaData {
     return i < typeCount ? types[i] : nullptr;
   }
 
-  // The pair is proved, not tested: `base` comes from these tables and `sub`
-  // from a pending whose `value` was non-null, carrying the index `makes` was
-  // called with. No tape can reach an out-of-range pair, so the range check is
-  // an assert and not two branches on the hottest path.
+  // Both indexes come from this grammar's tables, so the range is asserted,
+  // not tested.
   constexpr bool derives(std::uint16_t base, std::uint16_t sub) const {
     assert(base < typeCount && sub < typeCount &&
            "a pair of classes this grammar names");

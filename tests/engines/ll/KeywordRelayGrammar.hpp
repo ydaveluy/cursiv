@@ -1,9 +1,8 @@
 #pragma once
 
-// A terminal that is one keyword, or a choice of keywords, is a keyword
-// whatever conditions surround it: it takes its words from a name that
-// ranks first, wherever it is declared, and keeps them only where its own
-// condition holds.
+// A terminal that is one keyword, or a choice of them, is a keyword whatever
+// conditions surround it: it takes its words from a name ranked first, and
+// keeps them only where its condition holds.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

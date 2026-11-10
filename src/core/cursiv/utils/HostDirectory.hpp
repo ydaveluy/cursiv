@@ -8,10 +8,9 @@
 
 namespace cursiv::detail {
 
-// Stands where the caller stands. A WASI module starts at its root whatever the
-// host's directory is, so a path its command line names relative to that
-// directory would read another file; its runner says where that is in `PWD`.
-// Elsewhere the process already stands there.
+// Moves to the caller's directory. A WASI module starts at its root, so it
+// reads the host's directory from `PWD`; elsewhere the process is already
+// there.
 inline void enter_host_directory() {
 #ifdef __wasi__
   if (const char* const directory = std::getenv("PWD")) {

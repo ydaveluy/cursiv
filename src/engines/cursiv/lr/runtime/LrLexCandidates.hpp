@@ -38,7 +38,7 @@ class LrLexCandidates {
       if ((!reserved || !res.test(Terms[k])) &&
           (Bounds[k] == kNoSet || at >= len ||
            !lex_boundary(A.cfg).at(Bounds[k], src, at, len)))
-        add(Terms[k], at, tier_of(k, src, at, len));
+        add(Terms[k], at, priority_of(k, src, at, len));
   }
 
   template <class Relays>
@@ -58,24 +58,25 @@ class LrLexCandidates {
         // A reading behind conditions that a literal's or a keyword's branch
         // read takes the spelling of the readings that end with it.
         for (std::uint32_t k = 0; k < n; ++k) {
-          if (held[k].term == kInvalidSymbol || held[k].tier == 0) continue;
+          if (held[k].term == kInvalidSymbol || held[k].priority == 0) continue;
           const TextOffset end = held[k].end;
           const std::uint16_t walked = walk_to(first, src, start, end);
           drop_if([&](const Scan& o) {
             return o.end == end && walked != kDeadState &&
-                   tape.takes(walked, tape.taking(held[k].term, held[k].tier),
+                   tape.takes(walked,
+                              tape.taking(held[k].term, held[k].priority),
                               o.term);
           });
           for (std::uint32_t j = 0; j < n; ++j)
             if (held[j].end == end && held[j].term != kInvalidSymbol &&
-                tape.takes_relayed(tape.taking(held[k].term, held[k].tier),
-                                   held[j].tier))
+                tape.takes_relayed(tape.taking(held[k].term, held[k].priority),
+                                   held[j].priority))
               held[j].term = kInvalidSymbol;
         }
         for (std::uint32_t k = 0; k < n; ++k)
           if (held[k].term != kInvalidSymbol &&
               !reserved_at(first, src, len, start, held[k]))
-            add(held[k].term, held[k].end, held[k].tier);
+            add(held[k].term, held[k].end, held[k].priority);
       }
     }
     // A terminal refusing a word its token spells stands nowhere here.
@@ -85,7 +86,7 @@ class LrLexCandidates {
                A.head_refuses(o.term, src + start, len - start);
       });
     }
-    // A position has one extent: the shorter matches are not its rivals.
+    // A position has one extent: the shorter matches are not its competitors.
     TextOffset far = 0;
     for (std::uint32_t k = 0; k < _count; ++k) far = std::max(far, _out[k].end);
     drop_if([&](const Scan& o) { return o.end != far; });
@@ -153,58 +154,60 @@ class LrLexCandidates {
       if (_count != before) _index.size = 0;
   }
 
-  // The tier of the reading candidate `k` is: its own, or the keyword's kept
-  // beside it where that stands.
-  CURSIV_ALWAYS_INLINE static std::uint8_t tier_of(unsigned k, const char* src,
-                                                   TextOffset at,
-                                                   TextOffset len) {
-    std::uint8_t tier = 0;
-    if constexpr (A.cold.accTier.size() != 0) tier = A.cold.accTier[k];
+  // The priority of the reading candidate `k` is: its own, or the keyword's
+  // kept beside it where that stands.
+  CURSIV_ALWAYS_INLINE static std::uint8_t priority_of(unsigned k,
+                                                       const char* src,
+                                                       TextOffset at,
+                                                       TextOffset len) {
+    std::uint8_t priority = 0;
+    if constexpr (A.cold.accPriority.size() != 0)
+      priority = A.cold.accPriority[k];
     if constexpr (A.cold.accStand.size() != 0)
       if (A.cold.accStand[k] != kNoSet &&
           (at >= len ||
            !lex_boundary(A.cfg).at(A.cold.accStand[k], src, at, len)))
-        tier = kTierKeyword;
-    return tier;
+        priority = kKeywordPriority;
+    return priority;
   }
 
   CURSIV_ALWAYS_INLINE void keep(std::uint32_t at, TextOffset end,
-                                 std::uint8_t tier) {
+                                 std::uint8_t priority) {
     Scan& held = _out[at];
     if (held.end < end) {
       held.end = end;
-      held.tier = tier;
-    } else if (held.end == end && tier > held.tier) {
-      held.tier = tier;
+      held.priority = priority;
+    } else if (held.end == end && priority > held.priority) {
+      held.priority = priority;
     }
   }
 
   CURSIV_ALWAYS_INLINE void add_small(SymbolId term, TextOffset end,
-                                      std::uint8_t tier) {
+                                      std::uint8_t priority) {
     for (std::uint32_t k = 0; k < _count; ++k) {
       if (_work) ++*_work;
       if (_out[k].term == term) {
-        keep(k, end, tier);
+        keep(k, end, priority);
         return;
       }
     }
     assert(_count < _cap && "a position filled the room its table sized");
-    if (_count < _cap) _out[_count++] = Scan{end, term, tier};
+    if (_count < _cap) _out[_count++] = Scan{end, term, priority};
   }
 
   CURSIV_ALWAYS_INLINE void add(SymbolId term, TextOffset end,
-                                std::uint8_t tier) {
+                                std::uint8_t priority) {
     if constexpr (Max <= kSmall) {
-      add_small(term, end, tier);
+      add_small(term, end, priority);
     } else {
       if (_count < kSmall && _index.size == 0) {
-        add_small(term, end, tier);
+        add_small(term, end, priority);
         return;
       }
       if (_index.size == 0) reindex(std::bit_ceil(2u * _count));
       unsigned at = place(term);
       if (index()[at] != kInvalidSymbol) {
-        keep(index()[at], end, tier);
+        keep(index()[at], end, priority);
         return;
       }
       if (2u * (_count + 1u) > _index.size) {
@@ -214,7 +217,7 @@ class LrLexCandidates {
       assert(_count < _cap && "a position filled the room its table sized");
       if (_count < _cap) {
         index()[at] = static_cast<SymbolId>(_count);
-        _out[_count++] = Scan{end, term, tier};
+        _out[_count++] = Scan{end, term, priority};
       }
     }
   }

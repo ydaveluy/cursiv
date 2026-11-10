@@ -21,8 +21,8 @@ namespace cursiv {
 SharedCoreServices::SharedCoreServices() noexcept = default;
 SharedCoreServices::~SharedCoreServices() noexcept = default;
 
-// Declaration order, exactly: `firstMissingService` reports the first hole,
-// so the order here is a surface, and two orders would be two answers.
+// Declaration order: `firstMissingService` reports the first missing slot in
+// this order.
 void SharedCoreServices::visitServices(
     cursiv::function_ref<void(const ServiceSlot&)> yield) const {
   yield({"observabilitySink", true, observabilitySink != nullptr});
@@ -54,8 +54,8 @@ void install_default_shared_core_services(SharedCoreServices& shared) {
     shared.indexManager = std::make_unique<DefaultIndexManager>(shared);
   if (shared.documentBuilder == nullptr)
     shared.documentBuilder = std::make_unique<DefaultDocumentBuilder>(shared);
-  // The default is the empty provider: reading a disk is a decision the host
-  // states by installing the local one -- never a side effect of forgetting.
+  // The default is the empty provider: a host reads the disk only by
+  // installing the local one.
   if (shared.fileSystemProvider == nullptr)
     shared.fileSystemProvider = std::make_unique<EmptyFileSystemProvider>();
   if (shared.workspaceLock == nullptr)

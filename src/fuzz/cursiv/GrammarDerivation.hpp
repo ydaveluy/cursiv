@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "cursiv/AstUnwritten.hpp"
 #include "cursiv/grammar/ElementId.hpp"
-#include "cursiv/AstExcused.hpp"
 
 namespace cursiv::fuzzer::detail {
 
@@ -16,7 +16,8 @@ struct GrammarToken {
   ElementId elem = kNoElement;  // the literal or terminal rule it spells
   std::string text;
   std::string sep;     // the trivia in front of it, empty for none
-  bool glued = false;  // inside an adjacency island: no trivia may precede it
+  bool attached =
+      false;  // in a region that ignores nothing: no trivia before it
   std::uint32_t begin = 0, end = 0;
 };
 
@@ -25,12 +26,12 @@ struct GrammarDerivation {
   std::string text;
   AstNode* tree = nullptr;  // the AST the grammar's directives build
   bool complete = false;    // the walk finished a sentence
-  unsigned capHits = 0;     // ceilings met, never silent
+  unsigned capHits = 0;     // caps reached, always counted
   unsigned unrendered = 0;  // a terminal whose value could not be spelled
   unsigned styles = 0;      // bit per SpellStyle a terminal was spelled with
   // The members the walk could not write: a write it refuses is a limit of
-  // this instrument, never an equality.
-  std::vector<AstExcused> unwritten;
+  // this check, never an equality.
+  std::vector<AstUnwritten> unwritten;
 };
 
 }  // namespace cursiv::fuzzer::detail

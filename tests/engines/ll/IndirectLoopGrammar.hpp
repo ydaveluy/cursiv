@@ -1,8 +1,6 @@
 // Left recursion through other rules, entered by the rule a token names:
-// `family/a` calls A of a copy nothing else calls, `family/ab:a` calls A of a
-// copy that the document also reaches by B, A first. Cycle is what the descent
-// refuses and the table reads; Shared, what both read: each of its cycles has
-// an arm that only calls the next rule.
+// `family/a` calls A of an unshared copy, `family/ab:a` one the document also
+// reaches by B. The descent refuses Cycle; both engines read Shared.
 #pragma once
 
 #include <algorithm>
@@ -138,7 +136,7 @@ struct Cycle : Common {
   };
 
   template <int>
-  struct Rungs {
+  struct Cycles {
     struct B;
     struct C;
     struct D;
@@ -153,7 +151,7 @@ struct Cycle : Common {
                     create<Bd>(lit<"a">)> {};
   };
   template <int>
-  struct RungsB {
+  struct CyclesB {
     struct B;
     struct C;
     struct D;
@@ -266,8 +264,8 @@ struct Cycle : Common {
                 (lit<"ring-b/a"> + assign<&Doc::value>(ref<RingB<1>::A>)) |
                 (lit<"ring-b/b"> + assign<&Doc::value>(ref<RingB<2>::B>)) |
                 (lit<"ring-b/c"> + assign<&Doc::value>(ref<RingB<3>::C>)) |
-                (lit<"rungs/a"> + assign<&Doc::value>(ref<Rungs<1>::A>)) |
-                (lit<"rungs-b/a"> + assign<&Doc::value>(ref<RungsB<1>::A>)) |
+                (lit<"cycles/a"> + assign<&Doc::value>(ref<Cycles<1>::A>)) |
+                (lit<"cycles-b/a"> + assign<&Doc::value>(ref<CyclesB<1>::A>)) |
                 (lit<"share/a"> + assign<&Doc::value>(ref<Share<1>::A>)) |
                 (lit<"diamond/a"> + assign<&Doc::value>(ref<Diamond<1>::A>)) |
                 (lit<"diamond-s/a"> +
@@ -337,14 +335,14 @@ struct Shared : Common {
   };
 
   template <int>
-  struct Rung {
+  struct Unit {
     struct B;
     struct A : rule<create<Tx>(assign<&Tx::inner>(ref<B>) + lit<"x">) |
                     create<Bax>(lit<"a"> + lit<"x">)> {};
     struct B : rule<ref<A> | create<Ba>(lit<"a">)> {};
   };
   template <int>
-  struct RungB {
+  struct UnitB {
     struct B;
     struct A : rule<create<Tx>(assign<&Tx::inner>(ref<B>) + lit<"x">) |
                     create<Bax>(lit<"a"> + lit<"x">)> {};
@@ -362,7 +360,7 @@ struct Shared : Common {
   };
 
   template <int>
-  struct Ladder {
+  struct PrefixPostfix {
     struct N;
     struct E : rule<create<Post>(assign<&Post::inner>(ref<N>) + lit<"!">) |
                     create<Ba>(lit<"a">)> {};
@@ -370,7 +368,7 @@ struct Shared : Common {
         : rule<create<Neg>(lit<"-"> + assign<&Neg::inner>(ref<N>)) | ref<E>> {};
   };
   template <int>
-  struct LadderB {
+  struct PrefixPostfixB {
     struct N;
     struct E : rule<create<Ba>(lit<"a">) |
                     create<Post>(assign<&Post::inner>(ref<N>) + lit<"!">)> {};
@@ -446,25 +444,33 @@ struct Shared : Common {
                   assign<&Doc::value>(ref<TurnLast<1>::A>)) |
                  (lit<"turn-last/w"> +
                   assign<&Doc::value>(ref<TurnLast<2>::W>)) |
-                 (lit<"rung/a"> + assign<&Doc::value>(ref<Rung<1>::A>)) |
-                 (lit<"rung/b"> + assign<&Doc::value>(ref<Rung<2>::B>)) |
-                 (lit<"rung/ab:a"> + assign<&Doc::value>(ref<Rung<3>::A>)) |
-                 (lit<"rung/ab:b"> + assign<&Doc::value>(ref<Rung<3>::B>)) |
-                 (lit<"rung/ba:b"> + assign<&Doc::value>(ref<Rung<4>::B>)) |
-                 (lit<"rung/ba:a"> + assign<&Doc::value>(ref<Rung<4>::A>)) |
-                 (lit<"rung-b/a"> + assign<&Doc::value>(ref<RungB<1>::A>)) |
-                 (lit<"rung-b/b"> + assign<&Doc::value>(ref<RungB<2>::B>)) |
+                 (lit<"unit/a"> + assign<&Doc::value>(ref<Unit<1>::A>)) |
+                 (lit<"unit/b"> + assign<&Doc::value>(ref<Unit<2>::B>)) |
+                 (lit<"unit/ab:a"> + assign<&Doc::value>(ref<Unit<3>::A>)) |
+                 (lit<"unit/ab:b"> + assign<&Doc::value>(ref<Unit<3>::B>)) |
+                 (lit<"unit/ba:b"> + assign<&Doc::value>(ref<Unit<4>::B>)) |
+                 (lit<"unit/ba:a"> + assign<&Doc::value>(ref<Unit<4>::A>)) |
+                 (lit<"unit-b/a"> + assign<&Doc::value>(ref<UnitB<1>::A>)) |
+                 (lit<"unit-b/b"> + assign<&Doc::value>(ref<UnitB<2>::B>)) |
                  (lit<"chain/a"> + assign<&Doc::value>(ref<Chain<1>::A>)) |
                  (lit<"chain/b"> + assign<&Doc::value>(ref<Chain<2>::B>)) |
                  (lit<"chain/c"> + assign<&Doc::value>(ref<Chain<3>::C>)) |
-                 (lit<"ladder/e"> + assign<&Doc::value>(ref<Ladder<1>::E>)) |
-                 (lit<"ladder/n"> + assign<&Doc::value>(ref<Ladder<2>::N>)) |
-                 (lit<"ladder/en:e"> + assign<&Doc::value>(ref<Ladder<3>::E>)) |
-                 (lit<"ladder/en:n"> + assign<&Doc::value>(ref<Ladder<3>::N>)) |
-                 (lit<"ladder/ne:n"> + assign<&Doc::value>(ref<Ladder<4>::N>)) |
-                 (lit<"ladder/ne:e"> + assign<&Doc::value>(ref<Ladder<4>::E>)) |
-                 (lit<"ladder-b/e"> + assign<&Doc::value>(ref<LadderB<1>::E>)) |
-                 (lit<"ladder-b/n"> + assign<&Doc::value>(ref<LadderB<2>::N>)) |
+                 (lit<"prefix-postfix/e"> +
+                  assign<&Doc::value>(ref<PrefixPostfix<1>::E>)) |
+                 (lit<"prefix-postfix/n"> +
+                  assign<&Doc::value>(ref<PrefixPostfix<2>::N>)) |
+                 (lit<"prefix-postfix/en:e"> +
+                  assign<&Doc::value>(ref<PrefixPostfix<3>::E>)) |
+                 (lit<"prefix-postfix/en:n"> +
+                  assign<&Doc::value>(ref<PrefixPostfix<3>::N>)) |
+                 (lit<"prefix-postfix/ne:n"> +
+                  assign<&Doc::value>(ref<PrefixPostfix<4>::N>)) |
+                 (lit<"prefix-postfix/ne:e"> +
+                  assign<&Doc::value>(ref<PrefixPostfix<4>::E>)) |
+                 (lit<"prefix-postfix-b/e"> +
+                  assign<&Doc::value>(ref<PrefixPostfixB<1>::E>)) |
+                 (lit<"prefix-postfix-b/n"> +
+                  assign<&Doc::value>(ref<PrefixPostfixB<2>::N>)) |
                  (lit<"fvalued/a"> +
                   assign<&Doc::value>(ref<FValued<1>::ReadA>)) |
                  (lit<"fvalued/w"> +
@@ -488,8 +494,8 @@ struct Shared : Common {
              eof> {};
   using entry = Root;
 };
-// Every turn of the sub-cycle reads `y`: the election tells the turns apart by
-// the order written.
+// Every iteration of the inner cycle reads `y`: the parse picks between them
+// by their written order.
 struct Twin : Common {
   struct B;
   struct A : rule<ref<B> | create<Ba>(lit<"a">)> {};

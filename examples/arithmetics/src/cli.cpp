@@ -1,5 +1,5 @@
-// The arithmetics command line: the usual verdict, plus `eval FILE` -- which is
-// what this example is for, a language whose documents have a value.
+// The arithmetics command line: the usual check, plus `eval FILE`, since this
+// language's documents have a value.
 
 #include <iostream>
 #include <string_view>

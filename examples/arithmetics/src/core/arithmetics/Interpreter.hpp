@@ -27,12 +27,9 @@ using EvaluationResult =
 // an exponent beyond, `Infinity` and `NaN` by name.
 [[nodiscard]] std::string number_text(double value);
 
-// Answers for the expressions of one module, each standing on its own with no
-// parameter bound. It keeps the value of each definition without parameters
-// it computes, so `d2: d1 + d1` computes `d1` once and later unbounded
-// questions reuse it; a module changed since is asked through a new one. It
-// also keeps its working memory, so asking many questions of one interpreter
-// allocates little.
+// Answers for the expressions of one module, with no parameter bound. It keeps
+// the values of parameterless definitions and its working memory between
+// questions, so ask a changed module through a new interpreter.
 class Interpreter {
  public:
   Interpreter();
@@ -40,10 +37,8 @@ class Interpreter {
   Interpreter(const Interpreter&) = delete;
   Interpreter& operator=(const Interpreter&) = delete;
 
-  // `nullopt` is every failure, never an exception. `stepLimit` bounds the
-  // nodes this question visits (0 is unlimited), so a caller wanting only
-  // cheap answers pays a bounded cost. A bounded question reuses no value an
-  // earlier one computed: its answer depends on its own expression only.
+  // `nullopt` on any failure, never an exception. `stepLimit` bounds the nodes
+  // visited (0 for no limit); a bounded question reuses no earlier value.
   [[nodiscard]] std::optional<double> evaluate(
       const ast::Expression& expression, std::size_t stepLimit = 0);
 

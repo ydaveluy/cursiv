@@ -1,7 +1,6 @@
 // An engine's record table as the AST emitter reads it: an entry runs its own
-// chain after the entry it extends, if any, and only the first `count` are the
-// table's. `turns` holds, per entry, whether its row is a turn that reached
-// back over its receiver; empty where a turn's record says so by its state.
+// chain after the one it extends, and only the first `count` are the table's.
+// `turns` says per entry whether its row reached back over its receiver.
 #pragma once
 
 #include <algorithm>

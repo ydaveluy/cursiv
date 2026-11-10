@@ -38,7 +38,7 @@ struct FaultCorpus {
     FaultCorpus g(twin, seed ^ (0x9e3779b97f4a7c15ull *
                                 (static_cast<std::uint64_t>(k) + 1)));
     std::vector<RepairCase> out;
-    // A draw may land on a site that cannot be faulted as asked; bounded
+    // A draw may pick a site that cannot be faulted as asked; bounded
     // retries keep a poor document from spinning.
     for (unsigned tries = 0; out.size() < count && tries < count * 8; ++tries) {
       std::vector<RepairFault> faults = g.faults(k);
@@ -85,10 +85,11 @@ struct FaultCorpus {
     return nullptr;
   }
 
-  // Per token, how many closers a cut right after it leaves owed: the
+  // Per token, how many closers a cut right after it leaves missing: the
   // spelled tokens that end a record some spelled token opened before the
   // cut -- the `}` of a block, the `end` of a state, the `;` of a `return`.
-  [[nodiscard]] static std::vector<std::uint32_t> owed(const RepairTwin& twin) {
+  [[nodiscard]] static std::vector<std::uint32_t> missing_closers(
+      const RepairTwin& twin) {
     const Cst& cst = twin.result.cst();
     const std::size_t n = twin.tokens.size();
     const std::vector<std::uint32_t> at = token_rank(twin);
@@ -126,7 +127,7 @@ struct FaultCorpus {
 
  private:
   static constexpr std::uint32_t kNoRank = ~std::uint32_t{0};
-  // A record whose last child is no token owes no closer of its own.
+  // A record whose last child is no token has no closer of its own.
   static constexpr std::uint32_t kNoTail = kNoRank - 1;
 
   const RepairTwin& twin;
@@ -174,8 +175,8 @@ struct FaultCorpus {
   // lexer would read them as one.
   [[nodiscard]] RepairFault drop(std::size_t i) const {
     const CstLeaf& t = twin.tokens[i];
-    const bool glue = t.begin > 0 && solid(t.begin - 1) && solid(t.end);
-    return RepairFault{t.begin, t.end - t.begin, glue ? " " : ""};
+    const bool needsBlank = t.begin > 0 && solid(t.begin - 1) && solid(t.end);
+    return RepairFault{t.begin, t.end - t.begin, needsBlank ? " " : ""};
   }
 
   [[nodiscard]] std::vector<RepairFault> faults(FaultClass k) {
@@ -283,7 +284,7 @@ struct FaultCorpus {
                             : k == FaultClass::eof3 ? 3
                             : k == FaultClass::eof7 ? 7
                                                     : 20;
-        const std::vector<std::uint32_t> depth = owed(twin);
+        const std::vector<std::uint32_t> depth = missing_closers(twin);
         std::vector<std::size_t> sites;
         for (std::size_t i = 0; i + 1 < n; ++i)
           if (depth[i] >= lo && depth[i] <= hi) sites.push_back(i);

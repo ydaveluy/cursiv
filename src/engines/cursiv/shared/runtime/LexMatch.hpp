@@ -1,5 +1,5 @@
 // What a walk holds at a position: the match in hand. One rule reads a state
-// into it, for a mode's walk and for the rest of every relayed token alike.
+// into it, for a mode's walk and for the rest of every relayed token the same.
 #pragma once
 
 #include <algorithm>
@@ -17,10 +17,8 @@ constexpr bool lex_run_blind(bool accepting, bool bounded, bool relay) {
   return !relay && (!accepting || !bounded);
 }
 
-// A run crosses its positions blind, so it may only cross positions that
-// cannot outlive its end. An unbounded accept is dominated by the accept at
-// the run's end; a boundary reading the next byte is not -- it can admit
-// inside the run and refuse at its end -- so there the walk stays per byte.
+// A run crosses its positions blind, so only where its end decides: a boundary
+// that reads the next byte keeps the walk per byte.
 template <class Ad>
 CURSIV_ALWAYS_INLINE inline bool lex_run_blind(const Ad& ad,
                                                std::uint16_t state) {

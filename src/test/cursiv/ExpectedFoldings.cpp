@@ -28,6 +28,8 @@ Disposable expectFoldings(const LspServices& services,
   const ReplacedIndices marked = replaceIndices(detail::baseOf(input));
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, input.parseOptions);
+  Disposable disposable = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(disposable);
   std::vector<lsp::FoldingRange> foldings;
   if (services.foldingRangeProvider != nullptr)
     foldings =
@@ -60,7 +62,6 @@ Disposable expectFoldings(const LspServices& services,
     }
   }
 
-  Disposable disposable = detail::documentDisposable(services, document);
   if (input.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

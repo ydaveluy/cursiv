@@ -1,7 +1,6 @@
-// A conflict cell the second token decides: two arms whose acceptance sets
-// are disjoint after consuming the cell's terminal, each read under one lex
-// mode. The drive peeks instead of forking; a peek neither set claims still
-// forks.
+// A conflict cell the second token decides: two arms with disjoint acceptance
+// sets after the cell's terminal, each under one mode. The drive peeks instead
+// of forking; a peek neither set claims still forks.
 #pragma once
 
 #include <cstdint>

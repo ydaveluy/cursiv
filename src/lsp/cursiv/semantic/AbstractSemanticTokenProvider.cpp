@@ -34,31 +34,34 @@ namespace {
 // result id no other answer of its own ever carried.
 std::atomic<std::uint64_t> last_result_id{0};
 
+// The largest integer the protocol carries: its `uinteger` is 0 to 2^31 - 1.
+constexpr lsp::Uint kMaxUinteger = 0x7FFFFFFFu;
+
 // The five wire integers: `deltaLine` from the previous token's line,
 // `deltaStart` from its column but only on the same line. Callers present
 // tokens in source order, never overlapping.
 void encode_token(std::vector<lsp::Uint>& data, lsp::Uint& prevLine,
                   lsp::Uint& prevChar, lsp::Uint line, lsp::Uint start,
                   lsp::Uint stop, const SemanticToken& token) {
-  if (stop <= start) return;  // a zero-width token colours nothing
+  if (stop <= start) return;
   const lsp::Uint deltaLine = line - prevLine;
   data.push_back(deltaLine);
   data.push_back(deltaLine == 0 ? start - prevChar : start);
   data.push_back(stop - start);
   data.push_back(token.type);
-  data.push_back(token.modifiers);
+  data.push_back(token.modifiers & kMaxUinteger);
   prevLine = line;
   prevChar = start;
 }
 
-// The protocol has no token that crosses a line: one line number and one
-// column length per token. A multi-line span -- a block comment -- is cut at
-// each line end and sent as one token per line.
+// A token cannot cross a line: a multi-line span, such as a block comment, is
+// sent as one token per line.
 void emit(std::vector<lsp::Uint>& data, TextDocument::Cursor& cursor,
-          lsp::Uint& prevLine, lsp::Uint& prevChar,
-          const SemanticToken& token) {
+          lsp::Uint& prevLine, lsp::Uint& prevChar, const SemanticToken& token,
+          const CancellationToken& cancel) {
   Position from = cursor.positionAt(token.begin);
   while (cursor.crossesLine(token.end)) {
+    throw_if_cancelled(cancel);
     const Position end = cursor.lineEnd();
     encode_token(data, prevLine, prevChar, from.line, from.character,
                  end.character, token);
@@ -69,22 +72,30 @@ void emit(std::vector<lsp::Uint>& data, TextDocument::Cursor& cursor,
                to.character, token);
 }
 
-// The one edit that turns `before` into `after`: what lies between their
-// common prefix and their common suffix. None where they are equal.
-[[nodiscard]] lsp::SemanticTokensDelta edits_between(
-    const std::vector<lsp::Uint>& before, const std::vector<lsp::Uint>& after) {
+// The integers that encode one token.
+constexpr std::size_t kTokenWidth = 5;
+
+// The one edit that turns `before` into `after`, between their common prefix
+// and suffix; none when equal. Nothing when the protocol cannot express the
+// edit's start or count: the whole answer goes instead.
+[[nodiscard]] std::optional<lsp::SemanticTokensDelta> edits_between(
+    const std::vector<lsp::Uint>& before, const std::vector<lsp::Uint>& after,
+    const CancellationToken& token) {
   lsp::SemanticTokensDelta delta;
   const std::size_t shorter = std::min(before.size(), after.size());
   std::size_t prefix = 0;
-  while (prefix < shorter && before[prefix] == after[prefix]) ++prefix;
+  while (prefix < shorter && before[prefix] == after[prefix])
+    if (++prefix % kTokenWidth == 0) throw_if_cancelled(token);
   std::size_t suffix = 0;
   while (suffix < shorter - prefix &&
          before[before.size() - 1 - suffix] == after[after.size() - 1 - suffix])
-    ++suffix;
+    if (++suffix % kTokenWidth == 0) throw_if_cancelled(token);
   if (prefix == before.size() && prefix == after.size()) return delta;
+  const std::size_t deleted = before.size() - prefix - suffix;
+  if (prefix > kMaxUinteger || deleted > kMaxUinteger) return std::nullopt;
   lsp::SemanticTokensEdit edit;
   edit.start = static_cast<lsp::Uint>(prefix);
-  edit.deleteCount = static_cast<lsp::Uint>(before.size() - prefix - suffix);
+  edit.deleteCount = static_cast<lsp::Uint>(deleted);
   if (after.size() - suffix > prefix)
     edit.data.emplace(after.begin() + static_cast<std::ptrdiff_t>(prefix),
                       after.end() - static_cast<std::ptrdiff_t>(suffix));
@@ -134,9 +145,10 @@ std::uint32_t AbstractSemanticTokenProvider::tokenModifier(
     std::string_view name) const {
   const std::span<const std::string_view> modifiers = tokenModifiers();
   const auto at = std::ranges::find(modifiers, name);
-  // A bitset of 32: a modifier past it has no bit to stand for it.
+  // A bit per modifier, below the protocol's 2^31: a modifier past the 31st
+  // has no bit to stand for it.
   const auto index = at - modifiers.begin();
-  if (at == modifiers.end() || index >= 32) return 0;
+  if (at == modifiers.end() || index >= 31) return 0;
   return std::uint32_t{1} << index;
 }
 
@@ -145,8 +157,10 @@ lsp::SemanticTokens AbstractSemanticTokenProvider::semanticHighlight(
     const CancellationToken& token) const {
   lsp::SemanticTokens answer;
   answer.data = encode(document, 0, text_end(document), token);
-  // Kept only where a delta may be asked from it.
+  // Kept only where a delta may be asked from it, and not for a cancelled
+  // request: the client's answer stays the base of its next delta.
   if (answersDelta()) {
+    throw_if_cancelled(token);
     std::string id;
     (void)keep(document, answer.data, id);
     answer.resultId = std::move(id);
@@ -169,18 +183,22 @@ AbstractSemanticTokenProvider::semanticHighlightDelta(
     const Document& document, const lsp::SemanticTokensDeltaParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::Uint> data = encode(document, 0, text_end(document), token);
+  // Nothing is kept for a cancelled request: the client's answer stays the
+  // base of its next delta.
+  throw_if_cancelled(token);
   std::string id;
   const std::optional<std::vector<lsp::Uint>> previous =
       keep(document, data, id, params.previousResultId);
-  if (!previous.has_value()) {
+  std::optional<lsp::SemanticTokensDelta> delta;
+  if (previous.has_value()) delta = edits_between(*previous, data, token);
+  if (!delta.has_value()) {
     lsp::SemanticTokens whole;
     whole.resultId = std::move(id);
     whole.data = std::move(data);
     return whole;
   }
-  lsp::SemanticTokensDelta delta = edits_between(*previous, data);
-  delta.resultId = std::move(id);
-  return delta;
+  delta->resultId = std::move(id);
+  return std::move(*delta);
 }
 
 std::vector<lsp::Uint> AbstractSemanticTokenProvider::encode(
@@ -198,10 +216,8 @@ std::vector<lsp::Uint> AbstractSemanticTokenProvider::encode(
           tokens.push_back(accepted);
       },
       token);
-  // A stable order keeps tokens of one span in the order they were accepted,
-  // so the answer is reproducible and the first one wins. The tokens often end
-  // with a run already in order, such as the leaves walked last: only what
-  // precedes that run is sorted, then merged into it, for the same order.
+  // A stable sort, so tokens of one span keep their order and the first wins.
+  // Only what precedes the sorted tail is sorted, then merged into it.
   const auto before = [](const SemanticToken& a, const SemanticToken& b) {
     if (a.begin != b.begin) return a.begin < b.begin;
     return a.end > b.end;
@@ -224,7 +240,7 @@ std::vector<lsp::Uint> AbstractSemanticTokenProvider::encode(
   for (const SemanticToken& t : tokens) {
     throw_if_cancelled(token);
     if (t.begin < emitted) continue;
-    emit(data, cursor, prevLine, prevChar, t);
+    emit(data, cursor, prevLine, prevChar, t, token);
     emitted = t.end;
   }
   return data;
@@ -254,9 +270,17 @@ std::optional<std::vector<lsp::Uint>> AbstractSemanticTokenProvider::keep(
       return held == nullptr || !held->isOpen;
     });
   }
-  Answer& answer = _answers[document.uri];
-  if (!previousId.empty() && answer.id == previousId)
-    previous = std::move(answer.data);
+  const auto held = _answers.find(document.uri);
+  if (held != _answers.end() && !previousId.empty() &&
+      held->second.id == previousId)
+    previous = std::move(held->second.data);
+  // Only an open document's answer is kept.
+  if (!document.isOpen) {
+    if (held != _answers.end()) _answers.erase(held);
+    return previous;
+  }
+  Answer& answer =
+      held != _answers.end() ? held->second : _answers[document.uri];
   answer.id = id;
   answer.data = data;
   return previous;

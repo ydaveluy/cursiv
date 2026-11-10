@@ -11,9 +11,10 @@ const fromRange = (r) => ({
 });
 const doc = (model) => ({ textDocument: { uri: model.uri.toString() } });
 
-// Plain text through Markdown, as an editor shows it: every Markdown sign
+// Plain text shown through Markdown: entities, tags and Markdown signs
 // escaped, runs of spaces kept, each line a paragraph.
-const escapeMarkdown = (text) => text.replace(/[\\`*_{}[\]()#+\-!~]/g, '\\$&')
+const escapeMarkdown = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/[\\`*_{}[\]()#+\-!~]/g, '\\$&')
   .replace(/[ \t]+/g, (run) => '&nbsp;'.repeat(run.length)).replace(/>/g, '\\>').replace(/\n/g, '\n\n');
 
 const markdown = (contents) => {
@@ -33,9 +34,8 @@ const LSP_COMPLETION_KINDS = [, 'Text', 'Method', 'Function', 'Constructor', 'Fi
   'Interface', 'Module', 'Property', 'Unit', 'Value', 'Enum', 'Keyword', 'Snippet', 'Color', 'File',
   'Reference', 'Folder', 'EnumMember', 'Constant', 'Struct', 'Event', 'Operator', 'TypeParameter'];
 
-// An edit made against a version of an open document applies only while the
-// editor holds that version. `null` when the document changed since, or when
-// the edit also creates, renames or deletes files, which this page cannot do.
+// An edit made against a document version applies only while the editor holds
+// that version: `null` otherwise, or when it creates, renames or deletes files.
 // `documentChanges`, when present, replace `changes`.
 export function workspaceEdit(monaco, edit, documents = []) {
   const edits = [];
@@ -52,10 +52,17 @@ export function workspaceEdit(monaco, edit, documents = []) {
     if (!change.textDocument) return null;
     const { uri, version } = change.textDocument;
     const open = version == null ? undefined : documents.find((d) => d.uri === uri);
-    if (open && open.version !== version) return null;
+    if (version != null && open?.version !== version) return null;
     push(uri, change.edits, open?.model.getVersionId());
   }
   return { edits };
+}
+
+// The open document a diagnostics publication is about. One made for a
+// version the editor has moved past is stale: the next one replaces it.
+export function diagnosedDocument(documents, params) {
+  const document = documents.find((d) => d.uri === params.uri);
+  return params.version == null || document?.version === params.version ? document : undefined;
 }
 
 const locations = (monaco, result) => {

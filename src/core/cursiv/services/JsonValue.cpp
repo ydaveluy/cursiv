@@ -183,7 +183,7 @@ JsonValue::JsonValue(bool value) noexcept : _value(value) {}
 JsonValue::JsonValue(int value) noexcept
     : _value(static_cast<std::int64_t>(value)) {}
 JsonValue::JsonValue(std::int64_t value) noexcept : _value(value) {}
-// A non-finite double has no JSON spelling; it lands as null rather than as
+// A non-finite double has no JSON spelling; it becomes null rather than
 // bytes no parser accepts.
 JsonValue::JsonValue(double value) noexcept
     : _value(std::isfinite(value) ? Storage(value) : Storage(nullptr)) {}

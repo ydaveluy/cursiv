@@ -1,1 +1,3 @@
 BasedOnStyle: Google
+# `// expect` lines of tests/refusals are matched whole: never wrap them.
+CommentPragmas: '^ (IWYU pragma:|expect )'

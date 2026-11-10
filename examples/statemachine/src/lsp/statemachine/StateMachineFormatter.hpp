@@ -1,7 +1,5 @@
-// The statemachine example's formatter: an LSP provider, and the only part
-// of this example that knows the protocol. Formatting lives here and not in
-// `src/`, for the same reason `validation.hpp` does: what a state machine
-// should look like is the language's question, never the framework's.
+// The statemachine example's formatter, an LSP provider: how a state machine
+// should look is the language's choice, not the framework's.
 #pragma once
 
 #include "cursiv/services/CoreServices.hpp"
@@ -29,9 +27,8 @@ class StatemachineFormatter final : public cursiv::AbstractFormatter {
     auto formatter = builder.getNodeFormatter(model);
     formatter.keyword("statemachine").append(oneSpace);
 
-    // The keyword only moves when the section exists: `events` with no event
-    // is not written at all in this grammar, so a rule about an absent word
-    // would select nothing -- guarding on the AST says so once, not twice.
+    // The keyword moves only when the section exists: `events` with no event
+    // is not written in this grammar.
     if (!model->events.empty()) {
       formatter.keyword("events").prepend(newLine);
       formatter.properties<&ast::Statemachine::events>().prepend(indent);
@@ -56,7 +53,7 @@ class StatemachineFormatter final : public cursiv::AbstractFormatter {
       openBrace.prepend(oneSpace).append(oneSpace);
       closeBrace.prepend(oneSpace);
       // The first action is spaced by the brace, every later one by this: the
-      // slice is what keeps one rule from fighting another over the same gap.
+      // slice keeps two rules off the same gap.
       formatter.properties<&ast::State::actions>().slice(1).prepend(oneSpace);
     }
 

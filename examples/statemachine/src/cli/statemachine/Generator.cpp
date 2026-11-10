@@ -20,6 +20,8 @@ namespace {
 using namespace sm::ast;
 using cursiv::TextBuilder;
 
+// The input's stem without dots and dashes, or `generated` if nothing is
+// left: two inputs can share it.
 [[nodiscard]] std::string sanitize_file_stem(std::string_view inputPath) {
   auto stem = std::filesystem::path(inputPath).stem().string();
   const auto [newEnd, end] = std::ranges::remove_if(
@@ -37,10 +39,8 @@ using cursiv::TextBuilder;
                                  : std::string("generated");
 }
 
-// One transition per distinct event name (first occurrence), so two
-// transitions on the same event still yield exactly one method -- a
-// redeclared override would not compile. Chosen once per state, in the order
-// of `model.states`, and read by both the declarations and the definitions.
+// Each state's first transition per event name, in the order of
+// `model.states`: a second override of one event would not compile.
 using Handlers = std::vector<std::vector<const Transition*>>;
 
 [[nodiscard]] Handlers distinct_event_transitions(const Statemachine& model) {
@@ -106,6 +106,11 @@ void write_machine_class(TextBuilder& out, const Statemachine& model) {
   out.line("state = initial_state;");
   out.line(R"(std::cout << "[" << state->get_name() << "]" << std::endl;)");
   out.close("}");
+  out.line();
+  // The machine owns its state, which points back at it: no copy, and so no
+  // move.
+  out.line(model.name, "(const ", model.name, "&) = delete;");
+  out.line(model.name, "& operator=(const ", model.name, "&) = delete;");
   out.line();
   out.open("~", model.name, "() {");
   out.open("if (state != nullptr) {");

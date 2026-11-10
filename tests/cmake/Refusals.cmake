@@ -40,10 +40,8 @@ if(NOT CMAKE_CROSSCOMPILING)
   file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/refusals/settings.cmake
       CONTENT "${_refusal_settings}" @ONLY)
 
-  # Each fixture names its lanes, one line per expected diagnostic:
-  # `// expect LR LL: <regex>`. Grammar type checks and lexical validation are
-  # shared by both backends, so they run on LR alone; backend lowering
-  # contracts name LR LL.
+  # Each fixture names its engines, one `// expect LR LL: <regex>` line per
+  # diagnostic; checks both engines share run on LR alone.
   file(GLOB _refusal_cases CONFIGURE_DEPENDS
       ${CMAKE_CURRENT_SOURCE_DIR}/refusals/*.hpp)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

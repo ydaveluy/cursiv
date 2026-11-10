@@ -1,4 +1,4 @@
-// The writes of a body made one per alternative before the walk lays it out.
+// The writes of a body made one per alternative before the walk lowers it.
 #pragma once
 
 #include "cursiv/grammar/ExprShape.hpp"
@@ -7,7 +7,7 @@
 
 namespace cursiv::engine {
 
-template <class D, class Kids = typename ExprShape<D>::kids>
+template <class D, class Children = typename ExprShape<D>::children>
 struct Distribute {
   using type = D;
 };
@@ -31,7 +31,7 @@ struct Distribute<D, TypeList<Skip<I, H, Choice<As...>>>> {
 
 // Children first: an inner directive can reveal a choice the outer write
 // distributes over too.
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 struct NormalizeWrites;
 template <class E, class... Ks>
 struct NormalizeWrites<E, TypeList<Ks...>> {

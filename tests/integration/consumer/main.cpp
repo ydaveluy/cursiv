@@ -1,5 +1,5 @@
-// The application. One include, no template, no grammar: the door the generator
-// wrote is the whole surface.
+// One include, no template, no grammar: the generated module is all the
+// application uses.
 #include <cstdio>
 
 #include "tiny/generated/Tiny/Module.hpp"

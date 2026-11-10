@@ -1,4 +1,5 @@
-// A second call on one path returns a node the first one's replaces.
+// Two unassigned calls to an AST rule on one path: the second node would
+// replace the first.
 // expect LR: this alternative can create two nodes
 #pragma once
 

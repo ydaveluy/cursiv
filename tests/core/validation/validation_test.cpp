@@ -1,6 +1,7 @@
 // The validation pass: dispatch, categories and hooks, the acceptor checks
 // report through, and the sentence a repair is said in.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -13,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
@@ -50,17 +52,15 @@
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/MemoryFileSystemProvider.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/Check.hpp"
 #include "repairmsg/generated/MessageG/Module.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/core/CoreServices.hpp"
 #include "workspace/core/ast.hpp"
 
-// Pins the validation pass: who runs (family against exact filing, category
-// selection, `built_in` reserved), what runs around the walk (the document
-// hooks), what a crashing check costs, and the built-in half end to end -- a
-// repair's quick fix really fixes, a broken reference names its member.
+// The validation pass: which checks run (filing, categories, `built_in`
+// reserved), the document hooks, what a crashing check costs, and the
+// built-in half end to end.
 namespace document_validator {
 
 namespace {
@@ -96,7 +96,7 @@ struct TestValidator {
     accept.information(feature, "feature seen");
   }
   // Four findings a check emits backwards, two of them sharing a position:
-  // what the pass owes is document order, and no reordering within a position.
+  // the pass returns document order, and keeps the order within a position.
   void onEntityUnordered(const ws::ast::Entity&,
                          cursiv::ValidationAcceptor& accept) const {
     accept.warning(cursiv::TextRange{30, 31}, "last");
@@ -110,7 +110,7 @@ struct TestValidator {
   }
 };
 
-// A language that modulates the walk: what it refuses on the entity, and what
+// A language that narrows the walk: what it refuses on the entity, and what
 // it refuses under it. Everything else keeps the default.
 struct SelectiveValidator final : cursiv::DefaultDocumentValidator {
   using cursiv::DefaultDocumentValidator::DefaultDocumentValidator;
@@ -361,7 +361,7 @@ void nested_pruning_preserves_checks_on_siblings() {
 }
 
 // `built_in` names the runtime's own half; a language filing under it is
-// refused loudly, for checks and hooks alike.
+// refused loudly, for checks and hooks the same.
 void built_in_is_refused_at_registration() {
   World world;
   CHECK(support::throws<cursiv::ValidationRegistrationError>([&] {
@@ -465,7 +465,7 @@ void a_crashing_check_costs_itself_not_the_pass() {
   CHECK(observed);
 }
 
-// Same law for a document hook, anchored on the whole document.
+// The same for a document hook, anchored on the whole document.
 void a_crashing_hook_costs_itself_not_the_pass() {
   World world;
   world.registry->registerBeforeDocument([](const cursiv::Document&,
@@ -527,7 +527,7 @@ void a_crash_says_what_was_running() {
 }
 
 // One method says what a crash becomes, for a node check and a document hook
-// alike, and it may let the crash through.
+// the same, and it may let the crash through.
 struct Rewording final : cursiv::DefaultValidationRegistry {
   using DefaultValidationRegistry::DefaultValidationRegistry;
 
@@ -720,10 +720,9 @@ std::vector<std::string> spellings_of(const cursiv::Document& document,
   return names_in(fixes_of(document, *error));
 }
 
-// A misspelt reference is offered the names in scope it is near, nearest
-// first, as the edit rows a parse repair writes; a case that differs outranks
-// an edit; nothing is near a name unlike every other, and nothing is asked of
-// a name too short to be unlike anything.
+// A misspelled reference is offered the near names in scope, nearest first;
+// a case difference outranks an edit. Nothing is near a name unlike all
+// others, or a name too short to compare.
 void a_misspelt_reference_offers_its_neighbours() {
   World world;
   const cursiv::Document* const near = world.build(
@@ -778,7 +777,7 @@ void a_misspelt_reference_offers_its_neighbours() {
 }
 
 // The lookup is the quick fix's, never the validation's: a pass over a
-// misspelt reference walks no scope for neighbours and stamps no row; the
+// misspelt reference walks no scope for neighbours and writes no row; the
 // fix, asked for, walks it once.
 void the_validation_looks_up_no_neighbour() {
   struct Counting final : cursiv::DefaultScopeProvider {
@@ -836,8 +835,8 @@ void a_document_broken_everywhere_stops_being_spelt() {
   CHECK(spelt == 64);
 }
 
-// The note of a work bound is no repair: beside a clean tree the checks still
-// run under the stop, and beside a refusal the refusal still speaks.
+// A work-bound note is no repair: with a clean tree the checks still run under
+// the stop, and with a refusal the syntax error is still reported.
 void a_bound_alone_is_no_parse_fault() {
   World world;
   world.registry->registerCheck(
@@ -897,9 +896,9 @@ void a_never_entered_parse_names_the_whole_document() {
   CHECK(before == 1 && after == 1);
 }
 
-// The anchors land where the grammar wrote: `.property` on the record that
-// wrote the member, `.keyword` on the spelling.
-void anchors_land_where_the_grammar_wrote() {
+// The anchors are placed where the grammar wrote: `.property` on the record
+// that wrote the member, `.keyword` on the spelling.
+void anchors_are_placed_where_the_grammar_wrote() {
   World world;
   world.registry->registerCheck(
       Registry::makeValidationCheck<&TestValidator::onEntity>(world.validator));
@@ -925,7 +924,7 @@ void anchors_land_where_the_grammar_wrote() {
   CHECK(onKeyword->range.begin == keyword &&
         onKeyword->range.end == keyword + 6);
 
-  // The language reads `entity` in either case: the anchor lands on the word
+  // The language reads `entity` in either case: the anchor covers the word
   // in any case it was written.
   const cursiv::Document* const cased =
       world.build("file:///b.ws", "datatype Text\nEnTiTy B {}\n");
@@ -987,9 +986,8 @@ void a_repairs_quick_fix_really_fixes() {
   CHECK(static_cast<bool>(reparsed) && reparsed.diagnostics.empty());
 }
 
-// Document order on the way out, and stable within one position. The pass
-// sorts a permutation rather than the diagnostics themselves, so the order it
-// owes is pinned here and not left to the sort it happens to call.
+// Document order on the way out, stable within one position. The pass sorts a
+// permutation, so the order is checked here rather than left to the sort.
 void the_answer_comes_back_in_document_order() {
   World world;
   world.registry->registerCheck(
@@ -1002,8 +1000,8 @@ void the_answer_comes_back_in_document_order() {
   std::vector<std::string> order;
   for (const cursiv::Diagnostic& diagnostic : diagnostics)
     order.push_back(diagnostic.message);
-  const std::vector<std::string> owed{"first", "second", "third", "last"};
-  CHECK(order == owed);
+  const std::vector<std::string> expected{"first", "second", "third", "last"};
+  CHECK(order == expected);
 }
 
 // A large walk crosses task-run boundaries. Equal-position diagnostics keep
@@ -1080,7 +1078,7 @@ void run() {
   an_unrepaired_parse_is_one_syntax_error();
   a_bound_alone_is_no_parse_fault();
   a_never_entered_parse_names_the_whole_document();
-  anchors_land_where_the_grammar_wrote();
+  anchors_are_placed_where_the_grammar_wrote();
   a_repairs_quick_fix_really_fixes();
   a_deletion_offers_no_quick_fix();
   the_answer_comes_back_in_document_order();
@@ -1089,9 +1087,9 @@ void run() {
 
 }  // namespace document_validator
 
-// The workspace language's own cycle check, which climbs `extends` across
+// The workspace language's own cycle check, which walks `extends` across
 // documents: after an edit, every document the update rebuilds says what a
-// fresh build would say, even when the climb goes through one it left alone.
+// fresh build would say, even when the walk goes through one it left alone.
 namespace cross_document {
 
 namespace {
@@ -1099,8 +1097,8 @@ namespace {
 constexpr std::string_view kCycle =
     "Entity extends itself, directly or through a cycle.";
 
-// A workspace on a disk the test writes: each write is announced as an editor
-// saving those files would announce it.
+// A workspace on a disk the test writes: each write is reported as an editor
+// saving those files would report it.
 struct Disk {
   cursiv::MemoryFileSystemProvider* files = nullptr;
   cursiv::CoreLanguage<ws::WorkspaceCoreServices,
@@ -1152,10 +1150,9 @@ void a_cycle_closed_in_another_document_is_an_error_in_both() {
   CHECK(disk.cycles(kB) == 1);
 }
 
-// `a` names nothing that changed, but the climbs from `b` and `c` go through
-// it. `E` is on no loop, but its climb never ends either. `a` names only `b`,
-// which the edit relinks and does not change: its verdict changes all the
-// same, and again when the loop is opened.
+// `a` names nothing that changed, but the walks from `b` and `c` go through
+// it; `E` is on no loop, but its walk never ends. `a`'s verdict changes when
+// the edit relinks `b`, and again when the loop is opened.
 void a_cycle_through_an_untouched_document_is_an_error() {
   Disk disk;
   disk.write({{std::string(kA), "entity A extends B {\n}\n"},
@@ -1190,12 +1187,55 @@ void a_cycle_closed_two_documents_away_is_an_error_at_the_start() {
   CHECK(disk.cycles(kC) == 1);
 }
 
+// A name is visible at every level of nesting: through 1500 packages from the
+// root, and from halfway with the packages below only. A name one level short
+// resolves nowhere.
+void deep_packages_name_their_types_at_every_level() {
+  Disk disk;
+  constexpr int kDepth = 1500;
+  std::string whole;
+  std::string half;
+  for (int i = 0; i < kDepth; ++i) {
+    whole += "p" + std::to_string(i) + ".";
+    if (i > kDepth / 2) half += "p" + std::to_string(i) + ".";
+  }
+  std::string text =
+      "entity Root { r : " + whole + "E\n s : " + whole.substr(3) + "E }\n";
+  for (int i = 0; i < kDepth; ++i) {
+    text += "package p" + std::to_string(i) + " {\n";
+    if (i == kDepth / 2) text += "entity Half { h : " + half + "E }\n";
+  }
+  text += "entity E {\n}\n" + std::string(kDepth, '}') + "\n";
+  disk.write({{std::string(kA), text}});
+  const auto document = disk.services.shared->documents->getDocument(kA);
+  CHECK(document != nullptr);
+  if (document == nullptr) return;
+  const auto* const root = document->parseResult.value_as<ws::ast::Workspace>();
+  const auto* const entity =
+      root == nullptr ? nullptr
+                      : cursiv::ast_cast<ws::ast::Entity>(root->elements[0]);
+  CHECK(entity != nullptr && entity->features.size() == 2);
+  if (entity == nullptr || entity->features.size() != 2) return;
+  const cursiv::AstNode* const e = entity->features[0]->type.get();
+  CHECK(e != nullptr);
+  CHECK(entity->features[1]->type.get() == nullptr);
+  const ws::ast::Entity* halfway = nullptr;
+  for (const cursiv::AstNode* node : document->parseResult.nodes())
+    if (const auto* at = cursiv::ast_cast<ws::ast::Entity>(node);
+        at != nullptr && at->name == "Half")
+      halfway = at;
+  CHECK(halfway != nullptr && halfway->features.size() == 1);
+  if (halfway != nullptr && halfway->features.size() == 1)
+    CHECK(halfway->features[0]->type.get() == e);
+}
+
 }  // namespace
 
 void run() {
   a_cycle_closed_in_another_document_is_an_error_in_both();
   a_cycle_through_an_untouched_document_is_an_error();
   a_cycle_closed_two_documents_away_is_an_error_at_the_start();
+  deep_packages_name_their_types_at_every_level();
 }
 
 }  // namespace cross_document
@@ -1519,15 +1559,15 @@ void run() {
 
 }  // namespace validation_acceptor
 
-// Pins the `deleted`-repair messages: a stray byte that quotes to nothing must
-// still name the expectation, a deleted token that is the expectation is said
-// once, not twice, and a refused indentation is said as one.
+// The `deleted` repair messages: an extra space that quotes to nothing still
+// names the expectation, a deleted token that is the expectation is named once,
+// and a refused indentation is reported as one.
 namespace parser_error_messages {
 
 namespace {
 
 // `kind` selects one repair; `std::nullopt` takes whichever the engine made,
-// which is what a site spelled differently by each of them is pinned on.
+// for a site each engine repairs differently.
 std::string message_for(const cursiv::Parser& engine, std::string_view text,
                         std::optional<cursiv::DiagnosticKind> kind) {
   const cursiv::ParseResult result = engine.parse(text);
@@ -1541,10 +1581,11 @@ std::string message_for(const cursiv::Parser& engine, std::string_view text,
 
 // The sentence of a deletion over [begin, end) of `text`.
 std::string deleted_over(std::string_view text, cursiv::TextOffset begin,
-                         cursiv::TextOffset end) {
+                         cursiv::TextOffset end, bool mixedIndent = false) {
   const auto engine = tmsg::generated::MessageG::create_parser();
   cursiv::ParseDiagnostic d;
   d.kind = cursiv::DiagnosticKind::deleted;
+  d.mixedIndent = mixedIndent;
   d.begin = begin;
   d.end = end;
   return cursiv::DefaultParserErrorMessageProvider{}.buildMessage(
@@ -1561,9 +1602,8 @@ void a_tight_region_deletion_still_names_the_expectation() {
   CHECK(message == "Expecting ']'.");
 }
 
-// One refusal, where the position owed an operand: the pin is that the
-// sentence names the fault ONCE, never echoing the token back as the thing it
-// expects.
+// One refusal where an operand is expected: the sentence names the fault once,
+// never echoing the token back as what it expects.
 void an_unwound_token_matching_the_expectation_is_not_echoed_twice() {
   const std::unique_ptr<cursiv::Parser> engine =
       tmsg::generated::MessageG::create_parser();
@@ -1606,16 +1646,15 @@ void a_refused_indentation_says_so() {
   CHECK(deleted_over("a\n  b\n", 2, 5) != "Unexpected indentation.");
 }
 
-// A line indented with spaces under one indented with a tab, or the reverse,
-// says so, whatever else the deletion took: the one cause a reader cannot see.
+// A deletion the parser marks as a tab against a space says so, whatever else
+// it took: the one cause a reader cannot see. The text alone never says it.
 void a_tab_and_space_mix_says_so() {
   const std::string mixed =
       "Unexpected indentation: this line mixes tabs and spaces differently "
       "from the lines above.";
-  CHECK(deleted_over("a:\n\tb\n    c\n", 6, 10) == mixed);
-  CHECK(deleted_over("a:\n\tb\n    c\n", 6, 11) == mixed);
-  CHECK(deleted_over("a:\n    b\n\t\tc\n", 9, 12) == mixed);
-  CHECK(deleted_over("a:\n\t\n  b\n   c\n", 9, 13) != mixed);
+  CHECK(deleted_over("a:\n\tb\n    c\n", 6, 10, true) == mixed);
+  CHECK(deleted_over("a:\n\tb\n    c\n", 6, 11, true) == mixed);
+  CHECK(deleted_over("a:\n\tb\n    c\n", 6, 10) == "Unexpected indentation.");
 }
 
 // The end of input is named in words, never by its table name.

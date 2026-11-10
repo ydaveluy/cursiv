@@ -1,6 +1,3 @@
-// What an editor does to a language: opens a tab and replaces its text, asks
-// the list at a marked caret and whether a label is in it, and takes both
-// ranges of an edit.
 #pragma once
 
 #include <lsp/types.h>
@@ -19,7 +16,7 @@
 
 namespace support {
 
-// A tab opened on `text`, at version 1.
+// Opens `uri` on `text`, at version 1.
 inline void open(cursiv::LanguageServer& server, std::string_view uri,
                  std::string_view languageId, std::string_view text) {
   lsp::DidOpenTextDocumentParams params;
@@ -30,7 +27,7 @@ inline void open(cursiv::LanguageServer& server, std::string_view uri,
   server.didOpen(params);
 }
 
-// The whole text of the tab replaced, at `version`.
+// Replaces the whole text of `uri`, at `version`.
 inline void change(cursiv::LanguageServer& server, std::string_view uri,
                    int version, std::string_view text) {
   lsp::DidChangeTextDocumentParams params;
@@ -59,8 +56,7 @@ inline void offered(const cursiv::LspServices& language, std::string text,
                                            .disposeAfterCheck = true});
 }
 
-// An editor that chooses between inserting and replacing a word, so the
-// replace range is sent at all.
+// Declares insert-and-replace support, without which no replace range is sent.
 inline void take_both_ranges(const cursiv::SharedLspServices& shared) {
   lsp::InitializeParams params;
   params.capabilities.textDocument.emplace()

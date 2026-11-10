@@ -4,10 +4,8 @@
 
 #include "cursiv/utils/typelist.hpp"
 
-// What kind of rule this is, and nothing that depends on the answer: the
-// three tags a rule declares, the one predicate decidable from a tag alone,
-// and the walk-time refusal of an escaped `super`. Separate from
-// GrammarSpec, which a reader asking only this would otherwise pull in whole.
+// What kind of rule this is: the three tags a rule declares, the predicate
+// read from a tag alone, and the refusal of an escaped `super`.
 
 namespace cursiv {
 namespace detail {
@@ -17,7 +15,7 @@ struct node_kind {};
 struct infix_kind {};
 
 // `plug` splices every `super` away before any walk runs, so one that reaches
-// a walk was spelled outside an override body. Every total walk lands here.
+// a walk was spelled outside an override body. Every total walk ends up here.
 template <class E>
 struct super_escaped {
   static_assert(dependent_false<E>,

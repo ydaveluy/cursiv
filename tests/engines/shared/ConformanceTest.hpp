@@ -42,7 +42,7 @@ inline bool clean(const cursiv::ParseResult& parsed) {
          parsed.error == cursiv::AstBuildError::none;
 }
 
-// Both engines lay one tree: the same records, spans and standing.
+// Both engines build one tree: the same records, spans and standing.
 inline void one_tree(const Pair& pair, std::string_view text) {
   const std::string source = pair.source(text);
   const std::string ll = support::records(pair[0]->parse(source).cst());

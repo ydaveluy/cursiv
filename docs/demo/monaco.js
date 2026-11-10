@@ -1,12 +1,6 @@
-// The editor of the page: Monaco's core API and the editor features the page
-// can use, without Monaco's own languages. tools/build-demo.sh bundles it with
-// Monaco's editor worker into vendor/monaco/.
-//
-// Left out, since nothing on the page can start them: code lens, colour
-// picker, comments (the example languages register no comment syntax), diff
-// editor, inlay hints, inline completions, linked editing, parameter hints,
-// read-only message, placeholder, minimap section headers, middle-click
-// scroll, GPU rendering and the floating menu.
+// The page's editor: Monaco's core API and the features the page can start,
+// without Monaco's languages, bundled into vendor/monaco/ by
+// tools/build-demo.sh.
 export * from 'monaco-editor/editor';
 import 'monaco-editor/features/anchorSelect/register';
 import 'monaco-editor/features/bracketMatching/register';

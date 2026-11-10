@@ -18,43 +18,47 @@ class Arms {
 
   // Whether the first (or last) reader of an expression is a call to the
   // rule; the conditions around it read nothing and are passed over.
-  bool calls_at_edge(Edge edge, ImageId id) const {
+  Descent<bool> calls_at_edge(Edge edge, ImageId id) const {
     const ImageNode& n = _image.nodes[id];
-    if (over_operand(n.kind)) return calls_at_edge(edge, _image.kids[n.first]);
+    if (over_operand(n.kind))
+      co_return co_await calls_at_edge(edge, _image.children[n.first]);
     switch (n.kind) {
       case ImageKind::ref:
-        return n.a == _rule;
+        co_return n.a == _rule;
       case ImageKind::seq:
-        return readers_call_at_edge(edge, readers_of(n));
+        co_return co_await readers_call_at_edge(edge, readers_of(n));
       default:
-        return false;
+        co_return false;
     }
   }
 
-  bool self_bounded(ImageId id) const {
+  Descent<bool> self_bounded(ImageId id) const {
     const ImageNode& n = _image.nodes[id];
-    if (over_operand(n.kind)) return self_bounded(_image.kids[n.first]);
+    if (over_operand(n.kind))
+      co_return co_await self_bounded(_image.children[n.first]);
     switch (n.kind) {
       case ImageKind::choice:
         for (std::uint32_t i = 0; i < n.count; ++i)
-          if (self_bounded(_image.kids[n.first + i])) return true;
-        return false;
+          if (co_await self_bounded(_image.children[n.first + i]))
+            co_return true;
+        co_return false;
       case ImageKind::seq: {
         const auto readers = readers_of(n);
-        return readers.size() >= 2 &&
-               readers_call_at_edge(Edge::front, readers) &&
-               readers_call_at_edge(Edge::back, readers);
+        if (readers.size() < 2) co_return false;
+        if (!co_await readers_call_at_edge(Edge::front, readers))
+          co_return false;
+        co_return co_await readers_call_at_edge(Edge::back, readers);
       }
       default:
-        return false;
+        co_return false;
     }
   }
 
  private:
-  bool readers_call_at_edge(Edge edge,
-                            const std::vector<ImageId>& readers) const {
-    if (readers.empty()) return false;
-    return calls_at_edge(
+  Descent<bool> readers_call_at_edge(
+      Edge edge, const std::vector<ImageId>& readers) const {
+    if (readers.empty()) co_return false;
+    co_return co_await calls_at_edge(
         edge, edge == Edge::front ? readers.front() : readers.back());
   }
 
@@ -62,7 +66,7 @@ class Arms {
   std::vector<ImageId> readers_of(const ImageNode& seq) const {
     std::vector<ImageId> out;
     for (std::uint32_t i = 0; i < seq.count; ++i) {
-      const ImageId k = _image.kids[seq.first + i];
+      const ImageId k = _image.children[seq.first + i];
       if (!is_condition_node(_image, k)) out.push_back(k);
     }
     return out;
@@ -85,8 +89,8 @@ std::vector<SelfBoundedArm> self_bounded_arms(GrammarImage& image) {
     const std::uint32_t count = n.kind == ImageKind::choice ? n.count : 1;
     for (std::uint32_t i = 0; i < count; ++i) {
       const ImageId arm =
-          n.kind == ImageKind::choice ? image.kids[n.first + i] : body;
-      if (!arms.self_bounded(arm)) continue;
+          n.kind == ImageKind::choice ? image.children[n.first + i] : body;
+      if (!descend(arms.self_bounded(arm))) continue;
       SelfBoundedArm a{name, w.spell(arm)};
       if (std::ranges::find(found, a) == found.end())
         found.push_back(std::move(a));

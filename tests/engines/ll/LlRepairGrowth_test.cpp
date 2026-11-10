@@ -1,7 +1,6 @@
-// What repairing a broken document costs the predictive engine, counted in the
-// reads its searches spend -- never in time. Twice the document, or twice the
-// fault, at most twice the work: the faults a document holds, their number and
-// their density, and how deep they stand.
+// What repairing a broken document costs the predictive engine, in search
+// reads, never time: twice the document or twice the faults is at most twice
+// the work, by fault count, density and depth.
 
 #include <algorithm>
 #include <cstddef>
@@ -11,11 +10,13 @@
 #include <string>
 #include <vector>
 
-#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/ll/runtime/LlPredictionWork.hpp"
 #include "cursiv/ll/runtime/LlSearch.hpp"
 #include "cursiv/ll/table/LlSimulation.hpp"
-#include "cursiv/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
+#include "cursiv/utils/Cancellation.hpp"
 #include "parityll/generated/Ll/Module.hpp"
 #include "repairgrowthll/generated/Ll/Module.hpp"
 
@@ -127,13 +128,14 @@ void a_parse_costs_the_same_whatever_was_parsed_before() {
 }
 
 void a_fault_deep_in_nesting_costs_what_it_reads_not_how_deep_it_stands() {
-  doubling_costs_at_most_double("owed parens", 128,
+  doubling_costs_at_most_double("unclosed parens", 128,
                                 [](unsigned n) { return unclosed(n, "("); });
-  doubling_costs_at_most_double("owed calls", 64,
+  doubling_costs_at_most_double("unclosed calls", 64,
                                 [](unsigned n) { return unclosed(n, "f("); });
-  doubling_costs_at_most_double("strays under parens", 100, [](unsigned n) {
-    return "let x = " + repeat("(", n) + "1" + repeat(" ;", n) + ");\n";
-  });
+  doubling_costs_at_most_double(
+      "extra tokens under parens", 100, [](unsigned n) {
+        return "let x = " + repeat("(", n) + "1" + repeat(" ;", n) + ");\n";
+      });
   doubling_costs_at_most_double("noise under parens", 100, [](unsigned n) {
     return "let x = " + repeat("(", n) + "1" + repeat(" @# $%", n) + ");\n";
   });
@@ -144,23 +146,23 @@ void a_fault_deep_in_nesting_costs_what_it_reads_not_how_deep_it_stands() {
 // read once, not once per level.
 void a_dead_end_deep_in_nesting_is_read_once() {
   doubling_costs_at_most_double(
-      "predictions under owed parens", 64,
+      "predictions under unclosed parens", 64,
       [](unsigned n) { return unclosed(n, "("); }, predictions_of);
   doubling_costs_at_most_double(
-      "predictions under owed calls", 64,
+      "predictions under unclosed calls", 64,
       [](unsigned n) { return unclosed(n, "f("); }, predictions_of);
   // ...and the choices between the levels that one arm alone goes on from are
   // answered with them.
   doubling_costs_at_most_double(
-      "predictions under owed sums", 64,
+      "predictions under unclosed sums", 64,
       [](unsigned n) { return "let x = " + repeat("1+(", n) + "1;\n"; },
       predictions_of);
   doubling_costs_at_most_double(
-      "predictions under owed arguments", 64,
+      "predictions under unclosed arguments", 64,
       [](unsigned n) { return "let x = " + repeat("f(1,", n) + "1;\n"; },
       predictions_of);
   doubling_costs_at_most_double(
-      "predictions under strays", 64,
+      "predictions under extra tokens", 64,
       [](unsigned n) {
         return "let x = " + repeat("(", n) + "1" + repeat(" ;", n) + ");\n";
       },
@@ -194,9 +196,9 @@ void a_plan_is_read_once(const char* prefix) {
   }
 }
 
-// A dangling `else` is settled by the token in hand: no reading walks the levels
-// that stand open, which a count of tokens read does not show of itself, and
-// that would be the square of the levels in time and in memory.
+// A dangling `else` is decided by the token in hand: no reading walks the
+// levels that stand open, which a count of tokens read does not show of
+// itself, and that would be the square of the levels in time and in memory.
 void a_dangling_choice_reads_nothing_ahead() {
   const auto parser = tllrepairgrowth::generated::Ll::create_parser();
   for (const unsigned depth : {1024u, 2048u}) {
@@ -220,10 +222,10 @@ void a_dangling_choice_reads_nothing_ahead() {
   }
 }
 
-// Two loops over one token read alike behind the choice of the first: each turn
-// is settled by the next token, and one fault far along is one diagnostic where
-// it stands, however far along.
-void loops_that_read_alike_do_not_read_to_the_fault() {
+// Two loops over one token read the same after the choice of the first:
+// each step is decided by the next token, and one fault far along is one
+// diagnostic where it stands, however far along.
+void loops_that_read_the_same_do_not_read_to_the_fault() {
   const auto parser = tllrepairgrowth::generated::Ll::create_parser();
   const auto read = [&](const std::string& text) {
     cursiv::engine::LlPredictionWork::current() = {};
@@ -407,6 +409,46 @@ void a_condition_reads_every_new_context_of_a_published_union() {
   }
 }
 
+// A closure reads the parse's stop as it visits its positions: a walk down a
+// long run of positions that read nothing stops within a run of turns, and
+// one with no stop to read walks it whole.
+void a_closure_reads_the_stop_as_it_walks() {
+  using cursiv::engine::LlAtnEdge;
+  using cursiv::engine::LlAtnState;
+  using cursiv::engine::LlEdgeKind;
+  constexpr std::uint32_t kRun = 20000;
+  std::vector<LlAtnState> states;
+  std::vector<LlAtnEdge> edges;
+  for (std::uint32_t i = 0; i < kRun; ++i) {
+    states.push_back({.edge = i, .nedges = 1});
+    edges.push_back({.kind = LlEdgeKind::epsilon, .target = i + 1});
+  }
+  states.push_back({.edge = kRun, .nedges = 1});
+  edges.push_back({.kind = LlEdgeKind::atom, .label = 7, .target = kRun + 1});
+  states.push_back({.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0});
+  const std::uint32_t callerBase[] = {0, 0};
+  const cursiv::engine::LlAtnView atn{.states = states.data(),
+                                      .nstates = kRun + 2,
+                                      .edges = edges.data(),
+                                      .callerBase = callerBase};
+  cursiv::engine::LlSimulation whole(atn);
+  whole.seed(0, cursiv::engine::kLlCtxNone);
+  CHECK(whole.step(7) && whole.visits() > kRun);
+  cursiv::CancellationTokenSource source;
+  source.request_stop();
+  const cursiv::CancellationToken token = source.get_token();
+  cursiv::engine::LlSimulation stopped(atn);
+  stopped.watch(cursiv::engine::CancellationPoll(token));
+  bool threw = false;
+  try {
+    stopped.seed(0, cursiv::engine::kLlCtxNone);
+  } catch (const cursiv::OperationCancelled&) {
+    threw = true;
+  }
+  CHECK(threw);
+  CHECK(stopped.visits() <= cursiv::engine::CancellationPoll::kTurns);
+}
+
 // A parse repairs its faults up to a share of work, and says where it stopped:
 // enough lines to pass it hold a fault each.
 void a_parse_has_a_share_of_repair_and_says_so() {
@@ -441,6 +483,7 @@ void recursive_inventions_share_their_continuations() {
 }  // namespace
 
 int main() {
+  a_closure_reads_the_stop_as_it_walks();
   compatible_closure_contexts_share_past_incompatible_readings();
   a_condition_reads_every_new_context_of_a_published_union();
   recursive_inventions_share_their_continuations();
@@ -452,7 +495,7 @@ int main() {
   a_fault_deep_in_nesting_costs_what_it_reads_not_how_deep_it_stands();
   a_dead_end_deep_in_nesting_is_read_once();
   a_dangling_choice_reads_nothing_ahead();
-  loops_that_read_alike_do_not_read_to_the_fault();
+  loops_that_read_the_same_do_not_read_to_the_fault();
   a_plan_is_read_once("nested:");
   a_plan_is_read_once("mixed:");
   return cursiv::test::report("LlRepairGrowth_test");

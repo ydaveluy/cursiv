@@ -47,23 +47,23 @@ struct LargeGroup {
   }
 };
 
-// The document of each target. A short climb remembers nothing; a long one is
-// remembered, and the next one stops where it meets it, so a deep chain is
-// climbed once.
-class Homes {
+// The document of each target. A short walk remembers nothing; a long one is
+// remembered, and the next one stops where it reaches it, so a deep chain is
+// walked once.
+class TargetDocuments {
  public:
   [[nodiscard]] const Document* of(const AstNode& node) {
     const AstNode* at = &node;
     std::size_t steps = 0;
-    const Document* home = nullptr;
+    const Document* targetDocument = nullptr;
     for (;;) {
       if (!_known.empty())
         if (const auto hit = _known.find(at); hit != _known.end()) {
-          home = hit->second;
+          targetDocument = hit->second;
           break;
         }
       if (at->parent == nullptr) {
-        home = ast_cast<Document>(at);
+        targetDocument = ast_cast<Document>(at);
         break;
       }
       at = at->parent;
@@ -71,8 +71,8 @@ class Homes {
     }
     if (steps > kShort)
       for (const AstNode* p = &node; p != at; p = p->parent)
-        _known.emplace(p, home);
-    return home;
+        _known.emplace(p, targetDocument);
+    return targetDocument;
   }
 
  private:
@@ -92,25 +92,24 @@ DefaultReferenceDescriptionProvider::createDescriptions(
   const Cst& cst = document.parseResult.cst();
   rows.reserve(references->handles.size());
 
-  // One row per resolved target and not one per reference: a multi reference
-  // names its whole overload set, and the inverse table groups rows by target
-  // -- so a reference described only through its first target would be
-  // invisible when asked from any other member of the set. Two targets built
-  // on one CST record share their symbol and draw one row.
+  // One row per resolved target, as the inverse table groups rows by target:
+  // every member of a multi reference's set finds it. Two targets built on one
+  // CST record share one row.
   LargeGroup large;
-  Homes homes;
+  TargetDocuments targetDocuments;
   references->visitResolved(cst, [&](TextOffset begin, TextOffset end,
                                      const AstNode& target, bool multi) {
     throw_if_cancelled(cancelToken);
-    const Document* const home = homes.of(target);
-    const ReferenceDescription row{
-        .sourceDocumentId = document.id,
-        .sourceBegin = begin,
-        .sourceEnd = end,
-        .targetDocumentId = home == nullptr ? kNoDocument : home->id,
-        .targetSymbolId = target.cstNodeId,
-        .local = home == &document,
-        .multiReference = multi};
+    const Document* const targetDocument = targetDocuments.of(target);
+    const ReferenceDescription row{.sourceDocumentId = document.id,
+                                   .sourceBegin = begin,
+                                   .sourceEnd = end,
+                                   .targetDocumentId = targetDocument == nullptr
+                                                           ? kNoDocument
+                                                           : targetDocument->id,
+                                   .targetSymbolId = target.cstNodeId,
+                                   .local = targetDocument == &document,
+                                   .multiReference = multi};
     // The usual single target sees only the first span check. Large groups
     // switch to hashing after a bounded scan of their most recent targets.
     unsigned compared = 0;
@@ -127,10 +126,7 @@ DefaultReferenceDescriptionProvider::createDescriptions(
     rows.push_back(row);
   });
 
-  // Only what resolved is described: a reference pointing nowhere puts no
-  // edge in an index that answers "who points here", and the rebuild of a
-  // document whose missing symbol turned up rides the linking-error flag,
-  // never a row here.
+  // Only what resolved is described: a reference pointing nowhere is no edge.
   return rows;
 }
 

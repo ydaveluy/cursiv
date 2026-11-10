@@ -1,4 +1,4 @@
-// The pure infix form: the precedence ladder and its parentheses.
+// The pure infix form: the precedence levels and their parentheses.
 
 #include <memory>
 

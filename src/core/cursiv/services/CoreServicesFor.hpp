@@ -14,14 +14,9 @@
 
 namespace cursiv {
 
-// Derives virtually, so a language that is both a core language and an LSP one
-// holds exactly one `CoreServices` through the diamond. A language derives this,
-// adds its own slots and takes the constructor:
-//
-//   struct MyCoreServices : cursiv::CoreServicesFor<MySharedCoreServices> {
-//     std::unique_ptr<const MyValidator> validator;
-//     using CoreServicesFor::CoreServicesFor;
-//   };
+// Derives virtually, so a language that is both core and LSP holds one
+// `CoreServices`. A language derives it, adds its slots and inherits the
+// constructor (`using CoreServicesFor::CoreServicesFor;`).
 template <class TShared>
 struct CoreServicesFor : virtual CoreServices {
   static_assert(std::is_base_of_v<SharedCoreServices, TShared>,
@@ -35,9 +30,9 @@ struct CoreServicesFor : virtual CoreServices {
   }
 };
 
-// One language container with the defaults filled -- the headless counterpart
-// of what a module then overrides. `TShared` is deduced, so a custom workspace
-// type reaches the container's constructor as itself.
+// One language container with the defaults filled, before a module overrides
+// them. `TShared` is deduced, so a custom workspace type reaches the
+// container's constructor as itself.
 template <class TServices = CoreServices, class TShared>
 [[nodiscard]] std::unique_ptr<TServices> make_default_core_services(
     TShared& sharedServices, std::string languageId) {

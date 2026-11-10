@@ -1,7 +1,6 @@
-// The torture lane: a grammar built to break error recovery. Every row is
-// printed (nothing is pinned -- this lane is exploration, not a gate) plus
-// two automated invariants that are gates: the tree stays structurally sane,
-// and a bounded random-mutation pass never crashes the engine.
+// A grammar built to break error recovery. Each corpus row is printed, not
+// compared; the checks are the tree's structure, the diagnostics' cover of
+// what was skipped, and a mutation pass that never crashes.
 
 #include <algorithm>
 #include <cstdio>
@@ -30,9 +29,8 @@ void check_tree(const cursiv::ParseResult& r, const std::string& text,
   });
 }
 
-// The coverage identity, and it is a gate: every span the elected reading
-// threw away lies inside some diagnostic's span. A skipped token with nothing
-// said about it is the one outcome an editor cannot work with.
+// Every span the elected parse skipped lies inside a diagnostic's span: a
+// skipped token nobody reports is what an editor cannot work with.
 void check_coverage(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
                     const std::string& name) {
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
@@ -54,10 +52,9 @@ void check_coverage(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
   }
 }
 
-// The other half of the coverage identity, and it is a gate: a diagnostic
-// that claims text (deleted, replaced, incomplete) covers only text the
-// elected reading gave up -- an error leaf, or a region wrapped under a
-// repaired reduce. A live leaf inside such a span is a diagnostic that lies.
+// The converse: a diagnostic that claims text (deleted, replaced, incomplete)
+// covers only text the elected parse gave up, an error leaf or a region under
+// a repaired reduce.
 void check_claims(const cursiv::Cst& cst, const std::string& name) {
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
     const cursiv::CstNode& n = cst[i];
@@ -81,7 +78,7 @@ void check_claims(const cursiv::Cst& cst, const std::string& name) {
   }
 }
 
-// The recovery's contract, gated: an accepted document has a value.
+// An accepted document has a value.
 void check_value(const cursiv::ParseResult& result, const std::string& name) {
   if (!result.cst().accepted() || result.value != nullptr) return;
   std::printf("  FAIL %s: accepted but the AST value is null\n", name.c_str());
@@ -161,9 +158,9 @@ void mutate_pass(const cursiv::Parser& engine, const std::string& seed) {
               tried, failures - problems_before);
 }
 
-// The recycling break: `var X = ;` next to a well-formed `var Y = 2;`. The
-// second declaration is not part of the fault, so its tokens survive it --
-// a reading that steals them to patch the first must lose the election.
+// `var X = ;` next to a well-formed `var Y = 2;`: the second declaration's
+// tokens survive, and a parse that takes them to repair the first must lose
+// the election.
 void recycled_neighbour() {
   const std::unique_ptr<cursiv::Parser> parser =
       topt::generated::OptionalsG::create_parser();
@@ -183,11 +180,11 @@ void recycled_neighbour() {
     }
   };
   one("recycle var X = ; var Y = 2;", "recycled_neighbour");
-  // With no anchor after Y, the freeze keeps the reading that saves it too.
+  // With no anchor after Y, the freeze keeps the parse that saves it too.
   one("recycle var X = ; var Y = ;", "recycled_neighbour_twin");
 }
 
-void a_stray_quote_does_not_invent_a_declaration(
+void an_unmatched_quote_does_not_invent_a_declaration(
     const cursiv::Parser& engine, const std::string& seed) {
   auto text = seed;
   const auto at = text.find("4 + 5");
@@ -262,7 +259,7 @@ int main() {
   }
 
   recycled_neighbour();
-  a_stray_quote_does_not_invent_a_declaration(engine, validText);
+  an_unmatched_quote_does_not_invent_a_declaration(engine, validText);
   mutate_pass(engine, validText);
 
   torture_dangling();

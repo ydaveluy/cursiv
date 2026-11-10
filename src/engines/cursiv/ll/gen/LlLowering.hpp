@@ -1,6 +1,6 @@
-// A user grammar, lowered to the program a predictive descent runs. The shape
-// an author wrote survives -- a repetition stays a loop -- and no template of
-// the grammar does; what a reader needs is in the program or nowhere.
+// A user grammar, lowered to the program a predictive descent runs. The
+// author's shape survives (a repetition stays a loop) but no template of the
+// grammar does: what a reader needs is in the program or nowhere.
 #pragma once
 
 #include "cursiv/grammar/ImageOf.hpp"
@@ -24,12 +24,12 @@ template <class V, class R, class E, bool Step, bool Hands>
 inline constexpr ImageDesc kNode<V, engine::llow::Closed<R, E, Step, Hands>> =
     Draft(ImageKind::closed)
         .flags(static_cast<std::uint8_t>((Step ? 1 : 0) | (Hands ? 2 : 0)))
-        .kids(1, kKids<V, E>)
+        .children(1, kChildren<V, E>)
         .rule(&kRule<V, declared_of_t<R>>);
 
 template <class V, class E>
 inline constexpr ImageDesc kNode<V, engine::llow::Turns<E>> =
-    Draft(ImageKind::turns).kids(1, kKids<V, E>);
+    Draft(ImageKind::turns).children(1, kChildren<V, E>);
 
 }  // namespace cursiv::detail
 

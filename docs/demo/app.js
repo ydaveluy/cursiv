@@ -1,7 +1,7 @@
 // The "Try it online" page: a language picker, one Monaco editor on the example
 // documents, and the language's WASI server running in Web Workers.
 import { startServer } from './server.js';
-import { registerLanguageFeatures } from './lsp.js';
+import { diagnosedDocument, registerLanguageFeatures } from './lsp.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -221,7 +221,7 @@ async function startSession(session, wantedDoc) {
 
   server.on('textDocument/publishDiagnostics', (p) => {
     if (session.disposed) return;
-    const d = session.documents.find((x) => x.uri === p.uri);
+    const d = diagnosedDocument(session.documents, p);
     if (!d) return;
     state.diagnostics[p.uri] = p.diagnostics;
     monaco.editor.setModelMarkers(d.model, 'cursiv', p.diagnostics.map((diag) => ({

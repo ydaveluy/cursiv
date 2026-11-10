@@ -17,7 +17,7 @@
 
 namespace cursiv::engine {
 
-template <class St, class E, class Kids = typename ExprShape<E>::kids>
+template <class St, class E, class Children = typename ExprShape<E>::children>
 struct RowsOf;
 template <class St, class E>
 using rows_of_t = typename RowsOf<St, E>::type;
@@ -33,7 +33,7 @@ struct RowsOf<St, D, TypeList<E>>
 // returning one type may declare two converters.
 template <class R>
 struct ConvertOf {
-  // The rule as written rides in the source slot: an override that restates
+  // The rule as written goes in the source slot: an override that restates
   // the converter is what the text path runs, and `declared_of_t` drops it.
   using row = Row<WriteKind::convert, declared_of_t<R>, void, void, R>;
   using type = TypeList<row>;
@@ -58,8 +58,8 @@ struct RuleRows {
       tl_cat_t<typename ConvertOf<typename S::template rule<R>>::type,
                close_rows_t<typename S::template rule<R>>, body_rows_t<S, R>>;
 };
-// One `op` row per operator of a binary level: what it hands over rides its
-// own converter. A unary level writes what its rule writes: its class, its
+// One `op` row per operator of a binary level: what it gives uses its own
+// converter. A unary level writes what its rule writes: its class, its
 // operator and its operand.
 template <class S, class T, template <class, class, auto> class InfixSrc,
           class L, bool Unary = is_unary_level<L>>

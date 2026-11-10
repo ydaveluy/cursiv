@@ -53,10 +53,8 @@ constexpr bool class_holds(std::uint64_t m, bool n, std::string_view spec,
   return in != n;
 }
 
-// The case a keyword was typed in has no say: `ikw<"if">` matches `IF` as
-// readily as `if`, so under a class not closed under case every case of the
-// last letter is asked. The class and the identifiers' own must agree by
-// hand: widening one without the other is a silent language change.
+// With `ci`, every case of the last letter is asked: `ikw<"if">` also
+// matches `IF`.
 constexpr bool word_final_in(std::string_view s, std::uint64_t m, bool n,
                              std::string_view spec, bool ci) {
   if (s.empty()) return false;

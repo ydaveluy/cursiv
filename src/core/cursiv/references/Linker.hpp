@@ -1,12 +1,14 @@
 #pragma once
 
-#include "cursiv/references/LinkingResult.hpp"
+#include <vector>
+
+#include "cursiv/references/LinkingError.hpp"
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/workspace/AstNodeDescription.hpp"
 
-// What a name points at: `link` and `unlink` walk a document's work list,
-// `getCandidate` and `getCandidates` answer one site -- the second for a
-// reference that names several targets at once -- and `createLinkingError`
+// What a name points at: `link` and `unlink` walk a document's references,
+// `getCandidate` and `getCandidates` answer one site, and `createLinkingError`
 // says why a site failed.
 
 namespace cursiv {
@@ -17,30 +19,27 @@ class Linker {
  public:
   virtual ~Linker() noexcept = default;
 
-  // Resolves every reference the document owns. Cancellation is polled inside
-  // the loop: a document long enough to be worth cancelling is long in its
-  // reference count.
+  // Resolves every reference of the document, checking cancellation inside the
+  // loop.
   virtual void link(Document& document,
                     const CancellationToken& cancelToken = kNoCancel) const = 0;
 
-  // Drops every answer, errors included -- the one place that loop is written.
+  // Clears every resolution, errors included.
   virtual void unlink(Document& document) const = 0;
 
-  // The scope-lookup primitive: what is resolved is what the site spells. An
-  // empty `referenceText` is an error here, not an empty scope -- a reference
-  // that spells nothing names nothing.
-  [[nodiscard]] virtual AstNodeDescriptionOrError getCandidate(
+  // What the site spells resolves to, or null; an empty `referenceText`
+  // resolves to nothing.
+  [[nodiscard]] virtual const AstNodeDescription* getCandidate(
       const ReferenceInfo& reference) const = 0;
 
-  // Every visible candidate, for a reference that names several.
-  [[nodiscard]] virtual AstNodeDescriptionsOrError getCandidates(
+  // Every visible candidate, for a reference that names several; empty when
+  // none.
+  [[nodiscard]] virtual std::vector<const AstNodeDescription*> getCandidates(
       const ReferenceInfo& reference) const = 0;
 
-  // What a reference that failed is told to be: `why` says how, a name found
-  // nowhere or a cycle. The one place the sentence is written, so a language
-  // rewords it once: the errors above and the diagnostic a validator
-  // publishes both read it. `description` is what the name did reach, when the
-  // caller has one.
+  // The error for a failed reference, `why` saying how: a name found nowhere or
+  // a cycle. Every message comes from here: override it for a custom one.
+  // `description` is what the name did reach, when the caller has one.
   [[nodiscard]] virtual LinkingError createLinkingError(
       const ReferenceInfo& reference, RefState why = RefState::ErrorNotFound,
       const AstNodeDescription* description = nullptr) const = 0;

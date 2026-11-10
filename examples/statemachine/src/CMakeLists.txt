@@ -1,10 +1,11 @@
-# Core: the language itself. Generates the parser from the grammar, then builds
-# the services and checks under core/. Every other package links it.
+# Core: the language itself. Generates the parser and the editor's keywords
+# from the grammar, then builds the services and checks under core/.
 cursiv_generate_language(ID         statemachine
     GRAMMAR    statemachine/StateMachineGrammar.hpp
     NAMESPACE  sm::SM
     EXTENSIONS .statemachine
-    OUT        statemachine/generated)
+    OUT        statemachine/generated
+    TEXTMATE   ../vscode/syntaxes/statemachine.tmLanguage.json)
 
 file(GLOB_RECURSE _core CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp)

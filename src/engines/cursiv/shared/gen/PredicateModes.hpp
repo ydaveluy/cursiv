@@ -39,11 +39,11 @@ struct PredicateModes {
     } else if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
       nullable[at] = e.kind == LexKind::seq;
       for (unsigned i = 0; i < e.b; ++i) {
-        const auto kid = g.lexKid[e.a + i];
-        read(kid);
-        if (e.kind == LexKind::alt || nullable[at]) first[at] |= first[kid];
-        nullable[at] = e.kind == LexKind::alt ? nullable[at] || nullable[kid]
-                                              : nullable[at] && nullable[kid];
+        const auto child = g.lexChild[e.a + i];
+        read(child);
+        if (e.kind == LexKind::alt || nullable[at]) first[at] |= first[child];
+        nullable[at] = e.kind == LexKind::alt ? nullable[at] || nullable[child]
+                                              : nullable[at] && nullable[child];
       }
     } else if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
       read(e.a);
@@ -61,15 +61,16 @@ struct PredicateModes {
       if (e.kind == LexKind::seq) {
         DynSet next = after;
         for (unsigned i = e.b; i-- > 0;) {
-          const auto kid = g.lexKid[e.a + i];
-          self(self, kid, next);
-          if (nullable[kid])
-            next |= first[kid];
+          const auto child = g.lexChild[e.a + i];
+          self(self, child, next);
+          if (nullable[child])
+            next |= first[child];
           else
-            next = first[kid];
+            next = first[child];
         }
       } else if (e.kind == LexKind::alt) {
-        for (unsigned i = 0; i < e.b; ++i) self(self, g.lexKid[e.a + i], after);
+        for (unsigned i = 0; i < e.b; ++i)
+          self(self, g.lexChild[e.a + i], after);
       } else if (e.kind == LexKind::rep) {
         self(self, e.a, first[e.a] | after);
         // A round's skipper also elects against the reading that stops.
@@ -77,7 +78,7 @@ struct PredicateModes {
       } else if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
         self(self, e.a, DynSet{});
       } else if (e.kind == LexKind::skip) {
-        for (unsigned i = 0; i < e.b; ++i) read(g.lexKid[e.a + i]);
+        for (unsigned i = 0; i < e.b; ++i) read(g.lexChild[e.a + i]);
       }
     };
     for (const auto& leaf : g.gapLeaves.v)
@@ -97,7 +98,7 @@ struct PredicateModes {
     const LexNode& e = g.lex[at];
     if (e.kind == LexKind::skip) {
       DynSet out = follow[at];
-      for (unsigned i = 0; i < e.b; ++i) out |= first[g.lexKid[e.a + i]];
+      for (unsigned i = 0; i < e.b; ++i) out |= first[g.lexChild[e.a + i]];
       return out;
     }
     DynSet out = first[at];
@@ -161,7 +162,7 @@ DynSet longer_firsts(const Cfg& cfg, const DynSet& want, const DynSet& first) {
   return out;
 }
 
-// Lays in `cfg` the mode each predicate node that lexes reads its token in:
+// Sets in `cfg` the mode each predicate node that lexes reads its token in:
 // what it wants, with no terminal lexed for length, so a condition reads the
 // walk's token alone.
 template <class Cfg>

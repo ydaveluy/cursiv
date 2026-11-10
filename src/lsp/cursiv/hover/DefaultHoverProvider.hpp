@@ -9,10 +9,7 @@
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/hover/HoverProvider.hpp"
 
-// Not templated by the grammar: the walk to a position's leaf is CST
-// topology, resolved through the documentation-provider interface. Its own
-// container serves keyword prose; a referenced declaration's prose instead
-// comes from whichever language declares it, not necessarily this one.
+// A declaration's prose comes from the language that declares it.
 
 namespace cursiv {
 

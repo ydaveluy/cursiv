@@ -1,5 +1,5 @@
 // The growing form of one automaton while it is built: every row the frozen
-// table names, plus the rows construction lays for itself and the emitters.
+// table names, plus the rows construction fills for itself and the emitters.
 #pragma once
 
 #include <algorithm>
@@ -35,16 +35,14 @@
 
 namespace cursiv::engine {
 
-// What a pass that mints or fuses states does with one per-state column; see
-// `LrBuildTable::each_state_column`.
-//
-// A minted state takes its root's cell. States that fuse hold equal cells:
-// minimisation tells states apart by them, and the one cell stands.
+// What a pass that creates or fuses states does with a per-state column; see
+// `LrBuildTable::each_state_column`. Copy: a created state takes its root's
+// cell, and fused states hold equal cells.
 struct LrStateCopy {};
-// A minted state takes the cell its pass composed for it, handed to the mint.
-// States that fuse hold equal cells, as for a copy.
+// A created state takes the cell its pass composed for it, given to
+// `lr_add_state`. States that fuse hold equal cells, as for a copy.
 struct LrStateComposed {};
-// A minted state takes its root's cell. States that fuse keep the cell they
+// A created state takes its root's cell. States that fuse keep the cell they
 // all hold, `none` where two part: minimisation does not tell states apart by
 // it.
 struct LrStateMerge {
@@ -94,20 +92,20 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   std::uint32_t nOrdered = 0;
   // Ambiguities, not cells: a merged graph spreads one pair over more cells
   // than a canonical one, and counting cells would penalise the wider graph.
-  std::uint32_t nOwed = 0;
+  std::uint32_t nAmbiguities = 0;
   // Those the merge may have made; the first is named below.
   std::uint32_t nMergeInduced = 0;
   std::uint16_t mergeState = 0xffff, mergeTerm = 0xffff;
-  // Reduces the merge lets lay an implied token that one of their callers
+  // Reduces the merge lets insert an implied token that one of their callers
   // refuses.
   std::uint32_t nImpliedMixed = 0;
 
   // The copies a pass gave up because the state index was full, each counted
   // once however many edges asked for it.
-  std::uint32_t nunminted = 0;
+  std::uint32_t nDroppedCopies = 0;
 
   // The first pair that forced a candidate walk, where, and the shortest text
-  // it meets on.
+  // both match.
   std::uint16_t multiMode = 0, multiTerm = 0, multiInto = 0;
   std::string multiText{};
 
@@ -138,7 +136,7 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   // Mode a covers mode b (bit a*nmodes+b): the token a answered is the one b
   // would answer.
   Vec<std::uint64_t> modeSub{};
-  // Per mode, the winners whose bytes may hide a rival reading there.
+  // Per mode, the winners whose bytes may hide a competitor reading there.
   Vec<DynSet> modeWin{};
   // Per mode, the mode that lexes what it takes for the length of its token
   // alone, `kNoMode` for none.
@@ -173,12 +171,12 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   // The same per terminal the state accepts, in the bit order of `dfaAcc[s]`.
   Vec<std::uint32_t> accBoundBase{};
   Vec<std::uint16_t> accBound{};
-  // ...and the word-bounded reading it keeps beside its unbounded one.
+  // The word-bounded reading it keeps beside its unbounded one.
   Vec<std::uint16_t> accStand{};
-  // ...and the tier of the reading `accBound` bounds.
-  Vec<std::uint8_t> accTier{};
+  // The priority of the reading `accBound` bounds.
+  Vec<std::uint8_t> accPriority{};
 
-  // Rows the table minted, addressed above the grammar's own: a record
+  // Rows the table created, addressed above the grammar's own: a record
   // whose origin is `writes.nchains + k` stands for the pair held here.
   Vec<LrFusedRow> fused{};
 
@@ -200,12 +198,12 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   Vec<DynSet> tagKnown{};
   Vec<DynSet> tagTruth{};
 
-  // The terminals a state owes, and the longest any production's shortest
+  // The terminals a state needs, and the longest any production's shortest
   // reading runs.
   Vec<DynSet> closeRow{};
   std::uint64_t closeMax = 0;
 
-  // The sets above as the frozen table holds them, laid by `lr_derive_tables`
+  // The sets above as the frozen table holds them, filled by `lr_derive_tables`
   // once none moves.
   SetPool modeWinPool{};
   SetPool modeFlagPool{};
@@ -225,16 +223,15 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   Vec<std::uint32_t> insertOf{};
   std::vector<std::uint32_t> insertAt{0};
   std::vector<std::uint16_t> insertWord{};
-  // Per state, the symbol it stood after before any pass skipped a
-  // pass-through, `kLrNoStateSym` where fused states stood after two.
+  // Per state, the symbol it came after before any pass skipped a
+  // pass-through, `kLrNoStateSym` where fused states came after two.
   Vec<std::uint16_t> stateSym{};
-  // ...and the symbol the state under it stood after, where every way into it
+  // The symbol the state under it comes after, where every way into it
   // agrees.
   Vec<std::uint16_t> stateBelow{};
-  // Where a skipped pass-through may stand: per production, the positions
-  // whose callee the table may skip, `position << 16 | rule`; and per
-  // `rule << 16 | symbol` it may stand for, the decisions the skipped run
-  // took, before (0) or after (1) its callee.
+  // Where a skipped pass-through may stand: per production, each `position <<
+  // 16 | rule` whose callee may be skipped; per `rule << 16 | symbol`, the
+  // skipped run's decisions, before (0) or after (1) it.
   std::vector<std::uint32_t> electWatchAt{};
   std::vector<std::uint32_t> electWatch{};
   std::vector<std::uint32_t> electChainKey{};
@@ -251,9 +248,9 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
 
   Vec<LrAction> actions{};
 
-  // Every per-state column beside the action and goto rows, with its policy.
-  // The passes that mint and fuse states carry each column by it: a new
-  // column joins this list, and only a composed one also joins the mint.
+  // Every per-state column beside the action and goto rows, with its policy,
+  // which the passes that create or fuse states follow. A new column joins
+  // this list; a composed one also joins `lr_add_state`.
   template <class F>
   void each_state_column(F&& f) {
     // The terminals of the action row: a copy's row holds its root's.
@@ -277,20 +274,20 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
     f(mergeState, std::uint16_t{0xffff});
   }
 
-  // The states action `x` lands in: its shift's, or each its guard picks.
+  // The states action `x` goes to: its shift's, or each its guard picks.
   template <class F>
-  void each_landing(const LrAction& x, F&& f) const {
+  void each_target(const LrAction& x, F&& f) const {
     if (x.kind == LrActionKind::shift) f(x.arg);
-    if (x.kind == LrActionKind::guard) guards[x.arg].each_landing(f);
+    if (x.kind == LrActionKind::guard) guards[x.arg].each_target(f);
   }
   // The same for a goto edge: its own, and each its guard picks.
   template <class Edge, class F>
-  void each_goto_landing(const Edge& e, F&& f) const {
+  void each_goto_target(const Edge& e, F&& f) const {
     f(e.to);
-    if (e.guard != 0) guards[e.guard - 1u].each_landing(f);
+    if (e.guard != 0) guards[e.guard - 1u].each_target(f);
   }
-  // Whether guard `k` has an outcome that lands nowhere.
-  bool lands_nowhere(std::uint32_t k) const {
+  // Whether guard `k` has an outcome that leads to no state.
+  bool guard_may_fail(std::uint32_t k) const {
     return std::ranges::count(guards[k].to, LrGuard::kNoState) != 0;
   }
   // The first goto of `lhs` from state `from`, null where it has none: a row
@@ -300,25 +297,25 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
     const auto at = std::ranges::lower_bound(row, lhs, {}, &LrGotoRows::Edge::nt);
     return at != row.end() && at->nt == lhs ? std::to_address(at) : nullptr;
   }
-  // The guard the goto of `lhs` from state `from` lands by, plus one; 0 for a
-  // plain goto.
+  // The guard that decides the goto of `lhs` from state `from`, plus one; 0 for
+  // a plain goto.
   std::uint32_t goto_guard(unsigned from, unsigned lhs) const {
     const LrGotoRows::Edge* const e = goto_edge(from, lhs);
     return e != nullptr ? e->guard : 0;
   }
   // An empty rule's reduce whose goto the gap decides and may leave nowhere:
   // there the token has no action in state `s`.
-  bool may_land_nowhere(unsigned s, unsigned prod) const {
+  bool goto_may_fail(unsigned s, unsigned prod) const {
     if (cfg.prods[prod].len != 0) return false;
     const std::uint32_t k = goto_guard(s, cfg.prods[prod].lhs);
-    return k != 0 && lands_nowhere(k - 1u);
+    return k != 0 && guard_may_fail(k - 1u);
   }
   // Whether a condition may refuse the token action `x` of state `s` takes:
-  // a guard that may land nowhere, or a reduce the gap decides.
+  // a guard that may lead to no state, or a reduce the gap decides.
   bool may_refuse(unsigned s, const LrAction& x) const {
-    if (x.kind == LrActionKind::guard) return lands_nowhere(x.arg);
+    if (x.kind == LrActionKind::guard) return guard_may_fail(x.arg);
     return x.kind == LrActionKind::reduce &&
-           (cfg.prods[x.arg].gap != 0 || may_land_nowhere(s, x.arg));
+           (cfg.prods[x.arg].gap != 0 || goto_may_fail(s, x.arg));
   }
 
   std::uint16_t next_dfa(std::uint16_t s, std::uint8_t c) const {
@@ -336,20 +333,20 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
     return std::ranges::any_of(accStand.v,
                                [](std::uint16_t s) { return s != kNoSet; });
   }
-  std::uint8_t dfa_acc_tier(std::uint16_t s, unsigned t) const {
-    return accTier[accBoundBase[s] + dfaAcc[s].rank(t)];
+  std::uint8_t dfa_acc_priority(std::uint16_t s, unsigned t) const {
+    return accPriority[accBoundBase[s] + dfaAcc[s].rank(t)];
   }
-  // The tier `t` reads at `s`: a keyword's reading kept beside it ranks it.
-  unsigned dfa_tier(std::uint16_t s, unsigned t) const {
-    return dfa_acc_stand(s, t) != kNoSet ? kTierKeyword
-                                         : unsigned{dfa_acc_tier(s, t)};
+  // The priority `t` reads at `s`: a keyword's reading kept beside it ranks it.
+  unsigned dfa_priority(std::uint16_t s, unsigned t) const {
+    return dfa_acc_stand(s, t) != kNoSet ? kKeywordPriority
+                                         : unsigned{dfa_acc_priority(s, t)};
   }
   bool dfa_before(std::uint16_t s, unsigned t, unsigned u) const {
-    return lex_term_before(cfg.terms[t], dfa_tier(s, t), t, cfg.terms[u],
-                           dfa_tier(s, u), u);
+    return lex_term_before(cfg.terms[t], dfa_priority(s, t), t, cfg.terms[u],
+                           dfa_priority(s, u), u);
   }
-  bool tiered() const {
-    return std::ranges::any_of(accTier.v,
+  bool prioritized() const {
+    return std::ranges::any_of(accPriority.v,
                                [](std::uint8_t t) { return t != 0; });
   }
   const DynSet& dfa_res_set(std::uint16_t s) const { return dfaRes[s]; }
@@ -366,12 +363,12 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   bool flags_mode(unsigned m) const {
     return modeFlag.size() != 0 && modeFlag[m].any();
   }
-  // The grammar lays an indentation token or brackets a line, as `kIndented`
+  // The grammar inserts an indentation token or brackets a line, as `kIndented`
   // tells at run time: no mode covers another, and `modeSub` is never built.
   bool indented() const {
     for (unsigned t = 1; t < cfg.nterms; ++t)
-      if (cfg.terms[t].laid == kLaidIndent ||
-          cfg.terms[t].laid == kLaidDedent || cfg.terms[t].delim != 0)
+      if (cfg.terms[t].synthetic == kSyntheticIndent ||
+          cfg.terms[t].synthetic == kSyntheticDedent || cfg.terms[t].delim != 0)
         return true;
     return false;
   }
@@ -408,7 +405,8 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
             relayReserves() ? static_cast<unsigned>(dfaRelayResPool.sets.size())
                             : 0u,
         .accStands = standing() ? static_cast<unsigned>(accBound.size()) : 0u,
-        .accTiers = tiered() ? static_cast<unsigned>(accBound.size()) : 0u,
+        .accPriorities =
+            prioritized() ? static_cast<unsigned>(accBound.size()) : 0u,
         .errModes = static_cast<unsigned>(errModeOf.size()),
         .indented = indented(),
         .insertLists = static_cast<unsigned>(insertAt.size() - 1u),

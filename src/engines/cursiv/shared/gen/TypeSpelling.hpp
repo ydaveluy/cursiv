@@ -131,8 +131,8 @@ inline std::string gen_widen(std::string text) {
   return text;
 }
 
-// Template arguments ride along as written: the unit is emitted at global
-// scope, so they resolve there.
+// Template arguments stay as written: the unit is emitted at global scope, so
+// they resolve there.
 inline std::string gen_qualified(std::string_view name) {
   return gen_widen(gen_enclose(name == "void" || name.starts_with("::") ? std::string(name)
                                               : "::" + std::string(name)));

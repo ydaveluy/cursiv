@@ -1,6 +1,6 @@
 // The record facet of a grammar, written as C++ source: what each entry of the
-// table owes the tree and what each terminal is called. The caller states the
-// runs each entry answers with.
+// table writes to the tree and what each terminal is called. The caller gives
+// the runs of each entry.
 #pragma once
 
 #include <cstddef>
@@ -35,10 +35,8 @@ RecordGen record_gen(std::span<const AstRowGen> rows,
                      const std::vector<std::uint16_t>& held,
                      const std::vector<std::uint16_t>& over);
 
-// What each terminal answers, written as a `GrammarTerminal` row: its name
-// where it is not spelled, and the words it is spelled by -- a literal's text,
-// or the words of a choice of them. The words stay `c`'s. The end of input is
-// named in words: its table name is for dumps, not for a reader.
+// What each terminal answers, as a `GrammarTerminal` row: its name where it is
+// not spelled, and the words it is spelled by. The views point into `c`.
 struct TerminalGen {
   std::string_view name;
   std::string_view doc;

@@ -14,9 +14,8 @@
 #include "cursiv/workspace/DocumentState.hpp"
 #include "workspace/core/ast.hpp"
 
-// A method's first parameter is the type it watches, so the list in
-// `CoreModule.cpp` is the whole registration. The cycle check exists because
-// an `extends` cycle hangs every reader of the hierarchy.
+// Each check's first parameter is the node type it runs on, so the list in
+// `CoreModule.cpp` is the whole registration.
 
 namespace ws {
 
@@ -37,41 +36,36 @@ class WorkspaceValidator final : public cursiv::DefaultCoreService,
                                       cursiv::ValidationAcceptor& accept) const;
 
  private:
-  // Where the climb from an entity leaves its document: `ends` if it ends
-  // there, `next` if it goes on at an entity of another document, neither if
-  // it loops there.
+  // Where an entity's `extends` chain leaves its document: `ends` if it ends
+  // there, `next` if it goes on in another document, neither if it loops.
   struct Exit {
     const ast::Entity* next = nullptr;
     bool ends = false;
   };
 
-  // The climb from `entity` within its document. It stores the answer of
-  // every entity it passes, so a later climb stops at the first one already
-  // answered: a document costs one pass whatever order its chains are
-  // written in, and a climb holds no frame per storey.
+  // Follows the chain of `entity` within its document and stores the answer
+  // of every entity it passes, so a later walk stops at the first known one:
+  // a document costs one pass, whatever the order of its chains.
   [[nodiscard]] Exit exitOf(const ast::Entity& entity) const;
 
-  // `exitOf`, memoised -- unmemoised the check is quadratic over a document.
-  // An answer reads its document and the entities its references resolve to,
-  // nothing further: a change to those relinks the document, and its entries
-  // go when it is linked again. A change further up the chain relinks
-  // nothing here, so the check walks from one document to the next instead
-  // of keeping a whole climb.
+  // `exitOf` answers, dropped when their document is linked again. An answer
+  // stops at the document's edge: a change in another document does not
+  // relink this one.
   cursiv::DocumentCache<const ast::Entity*, Exit> _exits{
       shared, cursiv::DocumentState::Linked};
 
-  // The documents the climbs from each document went through. A change there
-  // can change a verdict here while relinking nothing here -- `A` extends `B`
-  // of another document, and `B`'s own parent is what changed -- so an update
-  // that moves one of them sends this document back to validation.
+  // A change in a document a chain went through can change a verdict here
+  // without relinking this document (`A` extends `B` of another document,
+  // whose parent changed), so it sends this document back to validation.
   void onUpdate(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted) override;
-  void noteClimb(cursiv::DocumentId from, cursiv::DocumentId through) const;
+  void noteChainedDocument(cursiv::DocumentId from,
+                           cursiv::DocumentId through) const;
 
-  mutable std::mutex _climbedMutex;
+  mutable std::mutex _chainedMutex;
   mutable std::unordered_map<cursiv::DocumentId,
                              std::unordered_set<cursiv::DocumentId>>
-      _climbed;
+      _chainedDocuments;
 };
 
 }  // namespace ws

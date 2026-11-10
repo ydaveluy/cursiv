@@ -1,9 +1,6 @@
 // What the callers of the rule in hand read once it ends, at their exact call
-// sites: two calls made by the same rule need not have the same followers.
-// Each frame the descent stands in names what its rule reads once the call
-// returns, and whether that may be nothing: the frames are read from the
-// nearest down to the first that must read something, so a deep descent costs
-// only the frames that may be empty.
+// sites. Frames are read from the nearest down to the first that must read
+// something, so a deep descent costs only the frames that may be empty.
 #pragma once
 
 #include <cstddef>

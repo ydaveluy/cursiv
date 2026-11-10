@@ -1,9 +1,8 @@
 #pragma once
 
-// Statements a semicolon or a line break ends, as ECMAScript reads them: a
-// refused token behind a line break, a closing brace, or the end of input
-// implies the semicolon; a token the statement can take does not, and a
-// restricted production refuses a line break before what follows it.
+// Statements a semicolon or a line break ends, as in ECMAScript: a refused
+// token after a line break, a closing brace or the end implies the semicolon; a
+// restricted production refuses a line break before what follows.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/lr/AsiAst.hpp"
@@ -15,7 +14,7 @@ struct G : cursiv::GrammarSpec {
   struct COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
   // Two readings of `/`: an operator after an operand, a regex where an
-  // operand is owed -- after `return`, never after a name.
+  // operand is expected -- after `return`, never after a name.
   struct REGEX : terminal<lit<"/"> + some(cr<"a-z ">) + lit<"/">> {};
   static constexpr auto eos =
       implied(lit<";">, gap::line | &lit<"}"> | eof);
@@ -73,19 +72,21 @@ struct G : Words {
   struct Unary;
   struct Unary
       : rule<create<ast::Pre>(assign<&ast::Node::op>(ref<OP>) + gap::none +
-                              append<&ast::Node::kids>(ref<Unary>)) |
-             create<ast::Post>(append<&ast::Node::kids>(ref<Atom>) +
+                              append<&ast::Node::children>(ref<Unary>)) |
+             create<ast::Post>(append<&ast::Node::children>(ref<Atom>) +
                                gap::none + assign<&ast::Node::op>(ref<OP>) +
                                !gap::none) |
              ref<Atom>> {};
   struct Expr;
   struct Expr
-      : rule<create<ast::Bin>(append<&ast::Node::kids>(ref<Unary>) +
+      : rule<create<ast::Bin>(append<&ast::Node::children>(ref<Unary>) +
                               gap::none + assign<&ast::Node::op>(ref<OP>) +
-                              gap::none + append<&ast::Node::kids>(ref<Expr>)) |
-             create<ast::Bin>(append<&ast::Node::kids>(ref<Unary>) +
+                              gap::none +
+                              append<&ast::Node::children>(ref<Expr>)) |
+             create<ast::Bin>(append<&ast::Node::children>(ref<Unary>) +
                               !gap::none + assign<&ast::Node::op>(ref<OP>) +
-                              !gap::none + append<&ast::Node::kids>(ref<Expr>)) |
+                              !gap::none +
+                              append<&ast::Node::children>(ref<Expr>)) |
              ref<Unary>> {};
   struct Doc
       : rule<create<ast::Doc>(many(append<&ast::Doc::items>(ref<Expr>)))> {};
@@ -106,11 +107,10 @@ struct G : cursiv::GrammarSpec {
       : rule<create<ast::Bin>(
             ((gap::none + assign<&ast::Node::op>(ref<OP>) + gap::none) |
              (!gap::none + assign<&ast::Node::op>(ref<OP>) + !gap::none)) +
-            append<&ast::Node::kids>(ref<Atom>))> {};
-  struct Expr
-      : rule<create<ast::Node>(append<&ast::Node::kids>(ref<Atom>) +
-                               many(append<&ast::Node::kids>(ref<BinaryOp>)))> {
-  };
+            append<&ast::Node::children>(ref<Atom>))> {};
+  struct Expr : rule<create<ast::Node>(
+                    append<&ast::Node::children>(ref<Atom>) +
+                    many(append<&ast::Node::children>(ref<BinaryOp>)))> {};
   struct Doc
       : rule<create<ast::Doc>(
             many(append<&ast::Doc::items>(ref<Expr>) + lit<";">))> {};
@@ -166,7 +166,7 @@ struct G : Words {
   using ignored = WS;
 };
 
-// The empty option before a literal: the gap decides where its goto lands,
+// The empty option before a literal: the gap decides where its goto leads,
 // on the literal as on any token.
 namespace close {
 struct G : Words {
@@ -180,13 +180,13 @@ struct G : Words {
 }  // namespace close
 }  // namespace optgap
 
-// Conditions and implied tokens past the semicolon: a named token, two owed
+// Conditions and implied tokens past the semicolon: a named token, two expected
 // at one position, a keyword read with its boundary and its case, and
 // conditions composed in a rule.
 namespace more {
 struct G : Words {
   struct SEMI : terminal<lit<";">> {};
-  // `loop \n x` owes a `:` then a `;`, both at `x`.
+  // `loop \n x` expects a `:` then a `;`, both at `x`.
   struct Loop : rule<kw<"loop"> + implied(lit<":">, gap::line) +
                      implied(ref<SEMI>, gap::line | eof)> {};
   // `use a in b`: `in` opens the source, `inner` is a second name on the
@@ -274,8 +274,8 @@ struct G : Words {
 };
 }  // namespace prec
 
-// One rule behind a line break or not: the goto that closes it lands by what
-// held where it opened.
+// One rule behind a line break or not: the goto that closes it depends on
+// what held where it opened.
 namespace held {
 struct G : Words {
   struct Prefix : rule<lit<"a"> + lit<"b">> {};

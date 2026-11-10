@@ -1,6 +1,6 @@
-// A byte set as four words: the form the construction interns and compares.
-// `CharSet` is the grammar's spelling and has no equality by design, so the
-// lowering converts once and everything downstream reads this one.
+// A byte set as four words. The grammar's `CharSet` has no equality, so the
+// lowering converts it once to this form, which the construction interns and
+// compares.
 #pragma once
 
 #include <bit>
@@ -49,7 +49,6 @@ struct ByteSet {
     return a &= b;
   }
   constexpr bool intersects(const ByteSet& o) const { return (*this & o).any(); }
-  // Every byte of `o` is here.
   constexpr bool covers(const ByteSet& o) const {
     return !ByteSet{o}.andnot(*this).any();
   }

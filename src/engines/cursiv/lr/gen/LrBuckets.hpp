@@ -54,12 +54,10 @@ struct LrBuckets {
   }
 };
 
-// Every production by its left-hand side.
 inline LrBuckets<std::uint16_t> lr_by_lhs(const LrBuildCfg& c) {
   return {c.nnts, c.nprods, [&](std::uint32_t k) { return c.prods[k].lhs; }};
 }
 
-// The nonterminals the start reaches.
 inline std::vector<bool> lr_reachable(const LrBuildCfg& c,
                                       const LrBuckets<std::uint16_t>& ix) {
   std::vector<bool> live(c.nnts, false);

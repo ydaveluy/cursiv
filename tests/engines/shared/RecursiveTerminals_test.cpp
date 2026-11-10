@@ -361,7 +361,7 @@ using cursiv::engine::LexNode;
 struct Graph {
   std::uint16_t nlex = 0, nterms = 2;
   std::vector<LexNode> lex = std::vector<LexNode>(256);
-  std::vector<std::uint16_t> lexKid;
+  std::vector<std::uint16_t> lexChild;
   std::vector<cursiv::engine::ByteSet> sets;
   struct Term {
     std::uint16_t lex = 0;
@@ -384,22 +384,23 @@ struct Graph {
     return node(
         {LexKind::chars, static_cast<std::uint16_t>(at - sets.begin())});
   }
-  std::uint16_t list(LexKind kind, const std::vector<std::uint16_t>& kids) {
-    const auto at = static_cast<std::uint16_t>(lexKid.size());
-    lexKid.insert(lexKid.end(), kids.begin(), kids.end());
-    return node({kind, at, static_cast<std::uint16_t>(kids.size())});
+  std::uint16_t list(LexKind kind, const std::vector<std::uint16_t>& children) {
+    const auto at = static_cast<std::uint16_t>(lexChild.size());
+    lexChild.insert(lexChild.end(), children.begin(), children.end());
+    return node({kind, at, static_cast<std::uint16_t>(children.size())});
   }
-  std::uint16_t repeat(std::uint16_t kid, unsigned min, unsigned max) {
-    return node({LexKind::rep, kid, kNoLexNode, min, max});
+  std::uint16_t repeat(std::uint16_t child, unsigned min, unsigned max) {
+    return node({LexKind::rep, child, kNoLexNode, min, max});
   }
   // Reification shares byte sets but creates distinct expression nodes.
   std::uint16_t copy(std::uint16_t at) {
     const auto e = lex[at];
     if (e.kind == LexKind::chars) return node(e);
     if (e.kind == LexKind::rep) return repeat(copy(e.a), e.min, e.max);
-    std::vector<std::uint16_t> kids;
-    for (unsigned i = 0; i < e.b; ++i) kids.push_back(copy(lexKid[e.a + i]));
-    return list(e.kind, kids);
+    std::vector<std::uint16_t> children;
+    for (unsigned i = 0; i < e.b; ++i)
+      children.push_back(copy(lexChild[e.a + i]));
+    return list(e.kind, children);
   }
 };
 
@@ -430,7 +431,7 @@ class Oracle {
         for (unsigned i = 0; i < e.b; ++i) {
           Endpoints next;
           for (const auto from : out) {
-            const auto ends = read(_g.lexKid[e.a + i], from);
+            const auto ends = read(_g.lexChild[e.a + i], from);
             next.insert(ends.begin(), ends.end());
           }
           out = std::move(next);
@@ -438,7 +439,7 @@ class Oracle {
         break;
       case LexKind::alt:
         for (unsigned i = 0; i < e.b; ++i) {
-          const auto ends = read(_g.lexKid[e.a + i], pos);
+          const auto ends = read(_g.lexChild[e.a + i], pos);
           out.insert(ends.begin(), ends.end());
         }
         break;
@@ -512,7 +513,7 @@ Graph grammar(Prefix shape, Form form) {
     root = g.list(LexKind::seq, prefix);
   } else {
     std::vector<std::uint16_t> copied;
-    for (const auto kid : prefix) copied.push_back(g.copy(kid));
+    for (const auto child : prefix) copied.push_back(g.copy(child));
     const auto base =
         copied.size() == 1 ? copied[0] : g.list(LexKind::seq, copied);
     prefix.push_back(call);
@@ -540,7 +541,7 @@ void endpoint_differential() {
       const auto closure = after.lex[after.lex[root].a];
       CHECK(closure.kind == LexKind::rep);
       CHECK(closure.min == 1 && closure.max == kEndless);
-      CHECK(before.lexKid == after.lexKid);
+      CHECK(before.lexChild == after.lexChild);
       const auto once = after.lex;
       const auto count = after.nlex;
       cursiv::engine::LexRightLinear<Graph>{after}.run();
@@ -579,7 +580,7 @@ void excluded_shapes() {
         LexKind::implied}) {
     auto g = grammar(Prefix::single, Form::optional);
     const auto root = g.termBuild[1].lex;
-    g.lex[g.lexKid[g.lex[root].a]].kind = kind;
+    g.lex[g.lexChild[g.lex[root].a]].kind = kind;
     const auto old = g.lex;
     cursiv::engine::LexRightLinear<Graph>{g}.run();
     CHECK(g.lex == old);
@@ -587,7 +588,7 @@ void excluded_shapes() {
   {
     auto g = grammar(Prefix::single, Form::optional);
     const auto root = g.termBuild[1].lex;
-    g.lex[g.lexKid[g.lex[root].a]] = LexNode{LexKind::seq, 0, 0};
+    g.lex[g.lexChild[g.lex[root].a]] = LexNode{LexKind::seq, 0, 0};
     const auto old = g.lex;
     cursiv::engine::LexRightLinear<Graph>{g}.run();
     CHECK(g.lex == old);  // E itself is nullable
@@ -595,7 +596,7 @@ void excluded_shapes() {
   {
     auto g = grammar(Prefix::single, Form::optional);
     const auto root = g.termBuild[1].lex;
-    g.lexKid[g.lex[root].a] = g.repeat(g.list(LexKind::seq, {}), 0, kEndless);
+    g.lexChild[g.lex[root].a] = g.repeat(g.list(LexKind::seq, {}), 0, kEndless);
     const auto old = g.lex;
     cursiv::engine::LexRightLinear<Graph>{g}.run();
     CHECK(g.lex == old);  // nullable repetition must keep its refusal

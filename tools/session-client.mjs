@@ -1,58 +1,89 @@
-// The client side of the session drivers: the server as a child process, the
-// messages it sends back, a wait for one of them, and how the server ended.
-// LSP frames each message with a Content-Length header; MCP over stdio sends
-// one JSON message per line. A wasm server runs through wasi-run.mjs, as ctest
-// runs it.
+// The client side of the session drivers: the server as a child process, its
+// messages, LSP-framed or one JSON per line, and how it ended. A wasm server
+// runs through wasi-run.mjs.
 import { spawn } from 'node:child_process';
+import { constants } from 'node:buffer';
 import { closeSync, openSync, readSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const runner = fileURLToPath(new URL('./wasi-run.mjs', import.meta.url));
 const wasmMagic = Buffer.from([0x00, 0x61, 0x73, 0x6d]);
 
-// The LSP base protocol: a header block, a blank line, then exactly
-// Content-Length bytes. Anything else on the stream is a server bug, and ends
-// the session here rather than hanging it.
-function frameReader(received) {
+// How long a server gets to end on its own, then after SIGTERM.
+const graceMs = 2000;
+
+// The body length a header block gives: one decimal Content-Length.
+function contentLength(block) {
+  let length = null;
+  for (const line of block.split('\r\n')) {
+    const header = /^([^:\s]+):[ \t]*(.*?)[ \t]*$/.exec(line);
+    if (!header) throw new Error(`malformed header line ${JSON.stringify(line)}`);
+    if (header[1].toLowerCase() !== 'content-length') continue;
+    if (length !== null) throw new Error('two Content-Length headers');
+    if (!/^\d+$/.test(header[2])) throw new Error(`bad Content-Length ${JSON.stringify(header[2])}`);
+    length = Number(header[2]);
+    if (!Number.isSafeInteger(length) || length > constants.MAX_LENGTH)
+      throw new Error(`Content-Length ${header[2]} is past what a buffer holds`);
+  }
+  if (length === null) throw new Error(`no Content-Length in header block ${JSON.stringify(block)}`);
+  return length;
+}
+
+function parsed(text) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`a message that is not JSON: ${error.message}`);
+  }
+}
+
+// The LSP base protocol: headers, a blank line, then Content-Length bytes.
+// `finish` names what the stream ended inside, if anything.
+function frameReader(deliver) {
   let buffer = Buffer.alloc(0);
-  return (chunk) => {
-    buffer = Buffer.concat([buffer, chunk]);
-    for (;;) {
-      const headerEnd = buffer.indexOf('\r\n\r\n');
-      if (headerEnd < 0) return;
-      const headers = buffer.subarray(0, headerEnd).toString('ascii');
-      const match = /content-length:\s*(\d+)/i.exec(headers);
-      if (!match) {
-        console.error(`no Content-Length in header block: ${JSON.stringify(headers)}`);
-        process.exit(1);
+  return {
+    feed(chunk) {
+      buffer = Buffer.concat([buffer, chunk]);
+      for (;;) {
+        const headerEnd = buffer.indexOf('\r\n\r\n');
+        if (headerEnd < 0) return;
+        const start = headerEnd + 4;
+        const end = start + contentLength(buffer.subarray(0, headerEnd).toString('ascii'));
+        if (buffer.length < end) return;
+        deliver(parsed(buffer.subarray(start, end).toString('utf8')));
+        buffer = buffer.subarray(end);
       }
-      const start = headerEnd + 4, end = start + Number(match[1]);
-      if (buffer.length < end) return;
-      received.push(JSON.parse(buffer.subarray(start, end).toString('utf8')));
-      buffer = buffer.subarray(end);
-    }
+    },
+    finish: () => buffer.length ? `the output ended inside a message (${buffer.length} bytes left)` : null,
   };
 }
 
 // One JSON message per line. A StringDecoder, not chunk.toString: a character
 // straddling a pipe-read boundary would decode to U+FFFD in both halves.
-function lineReader(received) {
+function lineReader(deliver) {
   const decoder = new StringDecoder('utf8');
   let buffer = '';
-  return (chunk) => {
-    buffer += decoder.write(chunk);
-    for (let nl; (nl = buffer.indexOf('\n')) !== -1;) {
-      const line = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      if (line.trim()) received.push(JSON.parse(line));
-    }
+  return {
+    feed(chunk) {
+      buffer += decoder.write(chunk);
+      for (let nl; (nl = buffer.indexOf('\n')) !== -1;) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        if (line.trim()) deliver(parsed(line));
+      }
+    },
+    finish() {
+      buffer += decoder.end();
+      return buffer.trim() ? `the output ended inside a line: ${JSON.stringify(buffer)}` : null;
+    },
   };
 }
 
 // `lines` speaks one message per line instead of LSP frames.
 export function startSession(serverPath, args = [], { lines = false } = {}) {
-  // The magic number only: a debug server weighs a hundred megabytes.
+  // Only the magic number is read: a debug server is a hundred megabytes.
   const head = Buffer.alloc(4);
   const fd = openSync(serverPath, 'r');
   try {
@@ -67,11 +98,34 @@ export function startSession(serverPath, args = [], { lines = false } = {}) {
     : spawn(serverPath, args, { stdio: ['pipe', 'pipe', 'inherit'] });
   // Every message received, in order; never cleared.
   const received = [];
-  child.stdout.on('data', lines ? lineReader(received) : frameReader(received));
-  const ended = () => child.exitCode !== null || child.signalCode !== null;
-  // A server gone is reported by the wait for its answer, not by a write
-  // into its closed pipe.
-  child.stdin.on('error', () => {});
+
+  // The first session failure, such as a server that cannot start, stops
+  // reading or breaks the protocol: every wait fails on it, and so does `end`.
+  let fault = null;
+  const fail = (what) => { fault ??= what; };
+  child.on('error', (error) => fail(`the server failed: ${error.message}`));
+  child.stdin.on('error', (error) => fail(`writing to the server failed: ${error.message}`));
+
+  // Reading stops at the first fault.
+  const reader = (lines ? lineReader : frameReader)((message) => received.push(message));
+  child.stdout.on('data', (chunk) => {
+    if (fault !== null) return;
+    try {
+      reader.feed(chunk);
+    } catch (error) {
+      fail(error.message);
+    }
+  });
+  child.stdout.on('end', () => {
+    if (fault === null) {
+      const left = reader.finish();
+      if (left !== null) fail(left);
+    }
+  });
+
+  // The process is gone and its output read to the end, or it never started.
+  let closed = false;
+  const whenClosed = new Promise((resolve) => child.once('close', () => { closed = true; resolve(); }));
 
   const send = (message) => {
     const body = JSON.stringify({ jsonrpc: '2.0', ...message });
@@ -79,32 +133,55 @@ export function startSession(serverPath, args = [], { lines = false } = {}) {
                             : `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
   };
 
-  // The latest message that matches, among those received from index `since`:
-  // a notification sent before the client's own last move answers nothing. A
-  // server that ends first fails the wait, and so does one past `timeoutMs`.
+  // The latest matching message received from index `since` on. The wait fails
+  // when the server ends, on a session fault, or after `timeoutMs`.
   const waitFor = (predicate, what, { since = 0, timeoutMs = 20000 } = {}) =>
     new Promise((resolve, reject) => {
       const deadline = Date.now() + timeoutMs;
       const poll = () => {
-        for (let i = received.length - 1; i >= since; --i)
-          if (predicate(received[i])) return resolve(received[i]);
-        if (ended()) return reject(new Error(`server exited before answering ${what}`));
+        try {
+          for (let i = received.length - 1; i >= since; --i)
+            if (predicate(received[i])) return resolve(received[i]);
+        } catch (error) {
+          return reject(error);
+        }
+        if (closed) return reject(new Error(`server exited before answering ${what}`));
+        if (fault !== null) return reject(new Error(`${fault}, before answering ${what}`));
         if (Date.now() > deadline) return reject(new Error(`timed out waiting for ${what}`));
         setTimeout(poll, 10);
       };
       poll();
     });
 
-  // How the server ended: `code 0` is the one clean way. One still running two
-  // seconds later is killed.
-  const end = () => {
-    const said = () => child.exitCode !== null ? `code ${child.exitCode}` : `signal ${child.signalCode}`;
-    if (ended()) return Promise.resolve(said());
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => { child.kill(); resolve('still running after 2 s'); }, 2000);
-      child.once('exit', () => { clearTimeout(timer); resolve(said()); });
-    });
+  // Sends a request under a fresh id and returns its response, failing on an
+  // error response.
+  let lastId = 0;
+  const request = async (message, what, options) => {
+    const id = ++lastId;
+    send({ id, ...message });
+    const answer = await waitFor((m) => m.id === id && !('method' in m), what, options);
+    if (answer.error) throw new Error(`${what}: ${answer.error.code}: ${answer.error.message}`);
+    return answer;
   };
 
-  return { child, received, send, waitFor, end };
+  // How the server ended, `code 0` when clean. One still running after
+  // `graceMs` gets SIGTERM, then SIGKILL; `end` resolves once it is gone.
+  const end = async () => {
+    const closes = () =>
+      Promise.race([whenClosed.then(() => true), delay(graceMs, false, { ref: false })]);
+    let how;
+    if (await closes()) {
+      how = child.exitCode !== null ? `code ${child.exitCode}` : `signal ${child.signalCode}`;
+    } else {
+      child.kill('SIGTERM');
+      if (!await closes()) {
+        child.kill('SIGKILL');
+        await whenClosed;
+      }
+      how = `still running after ${graceMs / 1000} s, ended by ${child.signalCode ?? `code ${child.exitCode}`}`;
+    }
+    return fault === null ? how : `${how}; ${fault}`;
+  };
+
+  return { child, received, send, waitFor, request, end };
 }

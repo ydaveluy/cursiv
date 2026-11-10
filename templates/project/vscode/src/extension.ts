@@ -2,7 +2,6 @@
 // `@CURSIV_NEW_ID@_lsp` and talks to it over standard input and output.
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
@@ -26,7 +25,6 @@ function executableName(): string {
 interface ServerCommand {
     command: string;
     args: string[];
-    env?: Record<string, string>;
 }
 
 // Native and WebAssembly builds name the server the same way, so the first
@@ -63,16 +61,13 @@ function wasmCommand(context: vscode.ExtensionContext): ServerCommand | undefine
                    path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
 }
 
+// A WebAssembly server cannot see how many CPU cores there are: unless
+// CURSIV_WORKERS says otherwise, the runner chooses for it.
 function wasmRun(module: string, runner: string): ServerCommand | undefined {
     if (!fs.existsSync(module) || !fs.existsSync(runner)) {
         return undefined;
     }
-    return {
-        command: process.execPath,
-        args: ['--no-warnings', runner, module],
-        // A WebAssembly server cannot see how many CPU cores there are.
-        env: { CURSIV_WORKERS: String(Math.max(0, os.availableParallelism() - 1)) },
-    };
+    return { command: process.execPath, args: ['--no-warnings', runner, module] };
 }
 
 // The native server: the packaged copy under `bin/`, or the one CMake built
@@ -114,8 +109,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const executable: Executable = {
         command: server.command,
         args: server.args,
-        transport: TransportKind.stdio,
-        ...(server.env ? { options: { env: { ...process.env, ...server.env } } } : {})
+        transport: TransportKind.stdio
     };
     const serverOptions: ServerOptions = { run: executable, debug: executable };
     const clientOptions: LanguageClientOptions = {

@@ -18,7 +18,7 @@ namespace {
 std::atomic<std::size_t> live{0};
 }  // namespace
 
-// Each block keeps its size in front of it, as `delete` has none to go on.
+// Each block stores its size in front of it, because `delete` gets no size.
 void* operator new(std::size_t size) {
   constexpr std::size_t room = alignof(std::max_align_t);
   void* const block = std::malloc(size + room);
@@ -41,7 +41,7 @@ void operator delete[](void* p, std::size_t) noexcept { ::operator delete(p); }
 
 int main() {
   const auto parser = tllrepairgrowth::generated::Ll::create_parser();
-  // What a parse leaves on the thread for the next parse is not the caret's.
+  // Memory a parse keeps on the thread for the next parse is not the caret's.
   const auto kept_by_caret = [&](const std::string& text) {
     (void)parser->parse(text);
     const std::size_t before = live.load(std::memory_order_relaxed);
@@ -56,7 +56,7 @@ int main() {
   };
   std::string deep = "nested:";
   for (unsigned i = 0; i < 1024; ++i) deep += " a";
-  // What the first ask sets up once is no ask's.
+  // The one-time setup of the first query is not counted.
   (void)kept_by_caret("nested: a");
   const std::size_t kept = kept_by_caret(deep);
   CHECK(kept == 0);

@@ -59,6 +59,7 @@ cursiv_generate_language(ID         mylang
 | `FILE_NAMES` | no | exact file names it claims, for a language like `Makefile` |
 | `BASE` | no | id of a language declared earlier in CMake; adds its generated library and include roots as dependencies |
 | `ENGINE` | no | `LL` or `LR`; defaults to `CURSIV_DEFAULT_ENGINE`, which is `LR`, the recommended engine |
+| `TEXTMATE` | no | the TextMate file of the editor extension, which the build keeps in step with the grammar's keywords |
 | `GENERATOR_ARGS` | no | additional arguments passed to the generator |
 
 `NAMESPACE ns::Type` generates into `ns::generated::Type`, under
@@ -72,6 +73,17 @@ stay out of reach. `GRAMMAR mylang/MyLangGrammar.hpp` in
 
 `BASE` only adds build dependencies; declare grammar inheritance in C++ with
 `cursiv::extends<BaseGrammar>`.
+
+`TEXTMATE` names a file relative to the calling `CMakeLists.txt`. Each time
+the parser is generated, the `match` of its `repository.keywords` entry is set
+to the grammar's keywords that hold a letter, and the rest of the file is kept.
+A missing file is left alone. See
+[Ship an editor extension](../learn/editor-integration.md#declare-the-language-to-vs-code).
+
+The generator compiles the grammar with the compile definitions and include
+directories of the directory that declares the language. When cross-compiling,
+it runs on the host, so the grammar must not depend on the target's compiler
+flags or predefined macros.
 
 ## `cursiv_package_language`
 

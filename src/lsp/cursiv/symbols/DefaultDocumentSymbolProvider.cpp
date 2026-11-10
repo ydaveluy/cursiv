@@ -81,8 +81,8 @@ std::vector<lsp::DocumentSymbol> DefaultDocumentSymbolProvider::getSymbols(
         _core.nameProvider->getName(node).value_or(std::string_view{})));
   }
 
-  // The owner of a symbol is its nearest named ancestor; everything else
-  // dissolves, exactly as a descent that recursed through unnamed nodes would.
+  // The owner of a symbol is its nearest named ancestor; unnamed nodes
+  // dissolve.
   std::vector<lsp::DocumentSymbol> roots;
   for (std::size_t i = 0; i < symbols.size(); ++i) {
     const std::size_t owner = named.owners[i];
@@ -91,8 +91,8 @@ std::vector<lsp::DocumentSymbol> DefaultDocumentSymbolProvider::getSymbols(
       continue;
     }
     assert(owner > i && "postorder: an owner is built after what it owns");
-    // Absent, not empty, for a symbol that owns none: the protocol's
-    // `children` is optional and a leaf owes the client no empty array.
+    // Absent, not empty, for a symbol that owns none: the protocol's `children`
+    // is optional.
     if (!symbols[owner].children.has_value()) symbols[owner].children.emplace();
     symbols[owner].children->push_back(std::move(symbols[i]));
   }

@@ -1,16 +1,18 @@
-# Core: the two languages. Generates a parser for each from the grammar file,
-# then builds the services and checks under core/. Every other package links it.
+# Core: the two languages. Generates each parser and its editor keywords from
+# the grammar file, then builds the services and checks under core/.
 cursiv_generate_language(ID         requirements-lang
     GRAMMAR    requirements/RequirementsGrammar.hpp
     NAMESPACE  req::Requirements
     EXTENSIONS .req
-    OUT        requirements/generated)
+    OUT        requirements/generated
+    TEXTMATE   ../vscode/syntaxes/requirements.tmLanguage.json)
 
 cursiv_generate_language(ID         tests-lang
     GRAMMAR    requirements/RequirementsGrammar.hpp
     NAMESPACE  req::Tests
     EXTENSIONS .tst
-    OUT        requirements/generated)
+    OUT        requirements/generated
+    TEXTMATE   ../vscode/syntaxes/tests.tmLanguage.json)
 
 file(GLOB_RECURSE _core CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp)

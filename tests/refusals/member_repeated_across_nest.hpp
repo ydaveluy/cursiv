@@ -1,4 +1,5 @@
-// The suffix of one iteration and the prefix of the next share the wrapper.
+// The write after the nest and the next turn's write before it go to the
+// same wrapper.
 // expect LR: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Item::text
 #pragma once
 #include "refusals/head.hpp"

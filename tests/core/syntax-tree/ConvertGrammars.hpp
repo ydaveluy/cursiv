@@ -1,8 +1,8 @@
 #pragma once
 
 // The grammar behind the default converters and Parts, each body entered by
-// its own first token, so a lane reads back the rule's own value. `inv` is a
-// grammar of its own as well, which a guard lane lowers.
+// its own first token, so a test reads back the rule's own value. `inv` is a
+// grammar of its own as well, which a guard test lowers.
 
 #include <array>
 #include <cstddef>
@@ -23,10 +23,8 @@
 
 namespace tconv {
 
-// A repair may lose a value; it may not invent one. A data rule joins the
-// visible leaves of its region, so where a repair resumes decides what the
-// value is -- resuming one byte into `state` left `tate`, a name the
-// document never contained, which the linker then failed to resolve.
+// A repair may lose a value, never invent one: resuming one byte into
+// `state` must not make the name `tate`.
 namespace inv {
 struct N : cursiv::Extends<cursiv::AstNode> {
   string name;
@@ -192,13 +190,13 @@ struct Trimmed final {
   }
 };
 // Built once and never assigned: a list or an optional asks no more.
-struct Seal {
+struct ConstText {
   const std::string text;
-  explicit Seal(std::string value) : text(std::move(value)) {}
+  explicit ConstText(std::string value) : text(std::move(value)) {}
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  // Reads what it views as it goes: whoever holds a tree keeps the text longer
-  // than its nodes.
+  // Reads its view when destroyed, so a tree that frees its text before its
+  // nodes fails under a sanitizer.
   inline static std::size_t read = 0;
   string_view raw;
   string decoded;
@@ -211,8 +209,8 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
   Ident only{"none"};
   unsigned guard = 0;
   int64 wide = -1;
-  optional<Seal> sealed;
-  vector<Seal> seals;
+  optional<ConstText> constText;
+  vector<ConstText> constTexts;
   optional<Ident> passed;
   // No empty state, held directly and in a list.
   variant<Ident, int64> pick{int64{0}};
@@ -238,8 +236,8 @@ inline std::vector<std::variant<std::int64_t, std::string>> mixed(
     std::string_view text) {
   return {std::int64_t{1}, std::string(text.substr(1))};
 }
-inline Seal seal(std::string_view text) {
-  return Seal(std::string(text.substr(1)));
+inline ConstText const_text(std::string_view text) {
+  return ConstText(std::string(text.substr(1)));
 }
 inline std::variant<std::int64_t, std::string> answer(std::string_view text) {
   if (text == "?one") return std::int64_t{1};
@@ -307,21 +305,9 @@ inline std::string upper(std::string_view text) {
 }
 }  // namespace diamond
 
-// The value of a data rule is the language: `a . b` and `a.b` denote the
-// same name, at every -O, however the rule is composed. Both ways to break
-// that come from reading the tape's direct children instead of the span's
-// atoms:
-//
-//   * one value per level -- `data<QN1> = ref<QN>` collapses at O2, so the
-//     join would get QN's record rather than QN1's, and one level's trivia
-//     would move out of the value: `'c /*x*/ . d'` at O0/O1, `'c.d'` at O2,
-//     the same rule over the same document;
-//   * a non-compositionality -- a join stripping trivia exactly one level
-//     deep reads `Path = QN + "/" + QN` as `'e . f/g . h'` at every level:
-//     stable, and wrong everywhere.
-//
-// The pin is therefore the value, not merely its stability -- cross-level
-// identity alone would bless the second shape, which never diverges.
+// The value of a data rule is the same however the rule is composed and at
+// every -O: `a . b` and `a.b` denote one name. The value itself is checked,
+// not only its stability across levels.
 namespace dv {
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   string_view a;     // ref<QN>    -- parts written tight
@@ -445,7 +431,8 @@ struct G : cursiv::GrammarSpec {
   struct MIXED : terminal<as<&chain::mixed>(lit<"#"> + some(cr<"a-z">))> {};
   struct ONLY : terminal<as<&chain::ident>(lit<"!"> + some(cr<"a-z">))> {};
   struct SMALL : terminal<as<std::int8_t>(some(d))> {};
-  struct SEAL : terminal<as<&chain::seal>(lit<"="> + some(cr<"a-z">))> {};
+  struct CONST_TEXT
+      : terminal<as<&chain::const_text>(lit<"="> + some(cr<"a-z">))> {};
   struct PassedIdent : rule<ref<IDENT>> {};
   struct ANSWER : terminal<as<&chain::answer>(lit<"?"> + some(cr<"a-z">))> {};
   struct MAYBE : terminal<as<&chain::maybe>(lit<"*"> + some(cr<"a-z">))> {};
@@ -453,27 +440,28 @@ struct G : cursiv::GrammarSpec {
   };
   struct WHOLE : terminal<as<std::int64_t>(some(d))> {};
   struct ChainRoot
-      : rule<kw<"chain"> + assign<&chain::Doc::raw>(ref<QUOTED_RAW>) +
-             assign<&chain::Doc::decoded>(ref<Decoded>) +
-             option(assign<&chain::Doc::boxed>(ref<PassedTag>)) +
-             option(assign<&chain::Doc::first>(ref<IDENT>) +
-                    many(append<&chain::Doc::rest>(ref<IDENT>))) +
-             option(assign<&chain::Doc::mixed>(ref<MIXED>)) +
-             option(assign<&chain::Doc::only>(ref<ONLY>)) +
-             option(kw<"small"> + assign<&chain::Doc::wide>(ref<SMALL>)) +
-             option(kw<"seal"> + assign<&chain::Doc::sealed>(ref<SEAL>) +
-                    many(append<&chain::Doc::seals>(ref<SEAL>))) +
-             option(kw<"pass"> +
-                    assign<&chain::Doc::passed>(ref<PassedIdent>)) +
-             option(kw<"pick"> + assign<&chain::Doc::pick>(ref<ONLY>) +
-                    append<&chain::Doc::picks>(ref<ONLY>) +
-                    append<&chain::Doc::picks>(ref<SMALL>)) +
-             option(kw<"answer"> + assign<&chain::Doc::answer>(ref<ANSWER>) +
-                    many(append<&chain::Doc::answers>(ref<ANSWER>))) +
-             option(kw<"maybe"> + assign<&chain::Doc::maybe>(ref<MAYBE>)) +
-             option(kw<"latch"> + assign<&chain::Doc::latch>(ref<TAG>)) +
-             option(kw<"trimmed"> + assign<&chain::Doc::trimmed>(ref<TRIMMED>)) +
-             option(kw<"ratio"> + assign<&chain::Doc::ratio>(ref<WHOLE>))> {};
+      : rule<
+            kw<"chain"> + assign<&chain::Doc::raw>(ref<QUOTED_RAW>) +
+            assign<&chain::Doc::decoded>(ref<Decoded>) +
+            option(assign<&chain::Doc::boxed>(ref<PassedTag>)) +
+            option(assign<&chain::Doc::first>(ref<IDENT>) +
+                   many(append<&chain::Doc::rest>(ref<IDENT>))) +
+            option(assign<&chain::Doc::mixed>(ref<MIXED>)) +
+            option(assign<&chain::Doc::only>(ref<ONLY>)) +
+            option(kw<"small"> + assign<&chain::Doc::wide>(ref<SMALL>)) +
+            option(kw<"constant"> +
+                   assign<&chain::Doc::constText>(ref<CONST_TEXT>) +
+                   many(append<&chain::Doc::constTexts>(ref<CONST_TEXT>))) +
+            option(kw<"pass"> + assign<&chain::Doc::passed>(ref<PassedIdent>)) +
+            option(kw<"pick"> + assign<&chain::Doc::pick>(ref<ONLY>) +
+                   append<&chain::Doc::picks>(ref<ONLY>) +
+                   append<&chain::Doc::picks>(ref<SMALL>)) +
+            option(kw<"answer"> + assign<&chain::Doc::answer>(ref<ANSWER>) +
+                   many(append<&chain::Doc::answers>(ref<ANSWER>))) +
+            option(kw<"maybe"> + assign<&chain::Doc::maybe>(ref<MAYBE>)) +
+            option(kw<"latch"> + assign<&chain::Doc::latch>(ref<TAG>)) +
+            option(kw<"trimmed"> + assign<&chain::Doc::trimmed>(ref<TRIMMED>)) +
+            option(kw<"ratio"> + assign<&chain::Doc::ratio>(ref<WHOLE>))> {};
   struct DeepItem : rule<create<deep::Item>(
                         kw<"item"> + assign<&deep::Item::name>(ref<ID>))> {};
   struct DeepUse : rule<create<deep::Use>(

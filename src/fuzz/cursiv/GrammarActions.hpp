@@ -1,7 +1,6 @@
-// What a directive does to the tree, with the grammar erased: the node an
-// element creates, the member an assignment writes, and a built node's
-// value members read back as text. A write it cannot model is refused,
-// never guessed -- the caller weighs `Write::not_modelled` as nothing.
+// What a directive does to the tree, with the grammar erased: the node it
+// creates, the member it writes, a node's values read back as text. A write it
+// cannot model answers `Write::not_modelled`, never a guess.
 #pragma once
 
 #include <cstdint>
@@ -37,7 +36,7 @@ class WalkTree {
   template <class T>
   [[nodiscard]] AstNode* make() {
     auto node = std::make_unique<T>();
-    AstNode* const base = cursiv::detail::stamp_node(*node);
+    AstNode* const base = cursiv::detail::set_type_tag(*node);
     _nodes.push_back(std::move(node));
     return base;
   }

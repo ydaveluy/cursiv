@@ -76,7 +76,7 @@ class PredicateEmitter {
       if (!_called[*it]) continue;
       const LexNode e = _g.lex[*it];
       if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
-        for (unsigned i = 0; i < e.b; ++i) _called[_g.lexKid[e.a + i]] = true;
+        for (unsigned i = 0; i < e.b; ++i) _called[_g.lexChild[e.a + i]] = true;
       } else if (e.kind == LexKind::rep) {
         if (e.max != 0) _called[e.a] = true;
         if (e.max > 1 && e.b != kNoLexNode) _called[e.b] = true;
@@ -107,7 +107,7 @@ class PredicateEmitter {
     bool reserved = false;
     bool sectioned = false;
     for (unsigned l = 0; l < _g.ngapLeaves; ++l)
-      sectioned = sectioned || (compiled(l) && home(l) != 0);
+      sectioned = sectioned || (compiled(l) && leaf_section(l) != 0);
     for (const auto at : _order) {
       const LexNode& e = _g.lex[at];
       lexed = lexed || e.kind == LexKind::token || e.kind == LexKind::alt ||
@@ -242,7 +242,7 @@ class PredicateEmitter {
           "      la.end > la.begin ? la.sym : ::cursiv::engine::kUnread, "
           "la.mode, "
           "la.end}}";
-      const unsigned h = home(l);
+      const unsigned h = leaf_section(l);
       out.line(
           "inline bool predicate_", l, h != 0 ? "_in" : "",
           "(const char* src, ::cursiv::TextOffset "
@@ -309,9 +309,9 @@ class PredicateEmitter {
   std::uint32_t _nruns = 0;
 
   // The section whose text a compiled leaf ends with, zero outside any.
-  unsigned home(unsigned l) const {
+  unsigned leaf_section(unsigned l) const {
     const unsigned cfg = _g.gapLeaves[l].cfg;
-    const unsigned h = cfg < _g.cfgHome.size() ? _g.cfgHome[cfg] : 0u;
+    const unsigned h = cfg < _g.cfgSection.size() ? _g.cfgSection[cfg] : 0u;
     return h < _err.size() ? h : 0u;
   }
 
@@ -321,11 +321,9 @@ class PredicateEmitter {
            _g.terms[t].textLen != 0;
   }
 
-  // What a head leaf of literal tokens answers of a token in hand of each
-  // terminal, known from the terminal alone: 0 unknown, 1 false, 2 true; empty
-  // where none is known. The leaf holds on its own terminals and fails on a
-  // literal of another text, unless its skip reads trivia at the token's first
-  // byte, which `trivia` holds for the reader to ask.
+  // What a head leaf of literal tokens answers for each terminal in hand: 0
+  // unknown, 1 false, 2 true; empty where none is known. `trivia` holds the
+  // first bytes its skip reads, for the reader to ask.
   std::vector<std::uint8_t> decided(const GapLeaf& leaf, ByteSet& trivia) const {
     if (leaf.kind != GapLeafKind::head || leaf.trigger) return {};
     const LexNode& root = _g.lex[leaf.node];
@@ -333,7 +331,7 @@ class PredicateEmitter {
     if (root.kind == LexKind::token) heads.push_back(leaf.node);
     if (root.kind == LexKind::alt)
       for (unsigned i = 0; i < root.b; ++i)
-        heads.push_back(_g.lexKid[root.a + i]);
+        heads.push_back(_g.lexChild[root.a + i]);
     if (heads.empty() || std::ranges::any_of(heads, [&](std::uint16_t k) {
           return _g.lex[k].kind != LexKind::token;
         }))
@@ -342,13 +340,14 @@ class PredicateEmitter {
       const LexNode& skip = _g.lex[leaf.skip];
       for (unsigned i = 0; i < skip.b; ++i)
         trivia |= lex_first_bytes(
-                      _g, _g.termBuild[_g.lex[_g.lexKid[skip.a + i]].a].lex)
+                      _g, _g.termBuild[_g.lex[_g.lexChild[skip.a + i]].a].lex)
                       .first;
     }
     std::vector<std::uint8_t> out(_g.nterms, 0);
     bool any = false;
     for (unsigned t = 1; t < _g.nterms; ++t) {
-      if (const TermInfo& info = _g.terms[t]; info.trivia || info.laid != 0)
+      if (const TermInfo& info = _g.terms[t];
+          info.trivia || info.synthetic != 0)
         continue;
       const std::string_view text = _g.term_text(static_cast<std::uint16_t>(t));
       ByteSet first;
@@ -456,7 +455,7 @@ class PredicateEmitter {
     std::string arms;
     bool plain = false;
     for (unsigned i = 0; i < e.b; ++i) {
-      const std::uint16_t arm = _g.lexKid[e.a + i];
+      const std::uint16_t arm = _g.lexChild[e.a + i];
       if (!phrase_keeps_runs(_g, arm)) {
         plain = true;
         _called[arm] = true;
@@ -549,7 +548,7 @@ class PredicateEmitter {
     _used[at] = true;
     if (const LexNode e = _g.lex[at];
         e.kind == LexKind::seq || e.kind == LexKind::alt) {
-      for (unsigned i = 0; i < e.b; ++i) visit(_g.lexKid[e.a + i]);
+      for (unsigned i = 0; i < e.b; ++i) visit(_g.lexChild[e.a + i]);
     } else if (e.kind == LexKind::rep) {
       if (e.max != 0) visit(e.a);
       if (e.max > 1 && e.b != kNoLexNode) visit(e.b);
@@ -568,13 +567,13 @@ class PredicateEmitter {
         break;
       case LexKind::seq:
         for (unsigned i = 0; i < e.b; ++i) {
-          head_tokens(_g.lexKid[e.a + i], turn);
-          if (!_modes.nullable[_g.lexKid[e.a + i]]) break;
+          head_tokens(_g.lexChild[e.a + i], turn);
+          if (!_modes.nullable[_g.lexChild[e.a + i]]) break;
         }
         break;
       case LexKind::alt:
         for (unsigned i = 0; i < e.b; ++i)
-          head_tokens(_g.lexKid[e.a + i], turn);
+          head_tokens(_g.lexChild[e.a + i], turn);
         break;
       case LexKind::rep:
         head_tokens(e.a, turn);
@@ -617,7 +616,7 @@ class PredicateEmitter {
     if (modes.empty()) return {};
     return "p.held == ::cursiv::engine::kInvalidSymbol && (" + modes + ")";
   }
-  bool alike(std::uint16_t x, std::uint16_t y) const {
+  bool same_shape(std::uint16_t x, std::uint16_t y) const {
     if (x == y) return true;
     const LexNode a = _g.lex[x], b = _g.lex[y];
     if (a.kind != b.kind || a.min != b.min || a.max != b.max) return false;
@@ -628,21 +627,22 @@ class PredicateEmitter {
       case LexKind::alt:
         if (a.b != b.b) return false;
         for (unsigned i = 0; i < a.b; ++i)
-          if (!alike(_g.lexKid[a.a + i], _g.lexKid[b.a + i])) return false;
+          if (!same_shape(_g.lexChild[a.a + i], _g.lexChild[b.a + i]))
+            return false;
         return true;
       case LexKind::rep:
-        return alike(a.a, b.a) && a.b == b.b;
+        return same_shape(a.a, b.a) && a.b == b.b;
       case LexKind::nguard:
         if (a.a != b.a) return false;
         for (unsigned i = 0; i < a.min; ++i)
-          if (_g.lexKid[a.b + i] != _g.lexKid[b.b + i]) return false;
+          if (_g.lexChild[a.b + i] != _g.lexChild[b.b + i]) return false;
         return true;
       default:
         return false;
     }
   }
   // The terminals the rule reads as `t`: itself, or for a spelling only a
-  // condition names, the anonymous terminal a rule spells alike.
+  // condition names, the anonymous terminal a rule spells the same.
   const DynSet& turns_of(unsigned t) {
     const auto [at, fresh] = _turns.try_emplace(t);
     DynSet& out = at->second;
@@ -653,7 +653,7 @@ class PredicateEmitter {
       for (unsigned u = 1; u < _g.nterms; ++u)
         if (!_g.termBuild[u].predicateOnly &&
             _g.terms[u].nameOff == _g.terms[u].textOff &&
-            alike(_g.termBuild[u].lex, _g.termBuild[t].lex))
+            same_shape(_g.termBuild[u].lex, _g.termBuild[t].lex))
           out.set(u);
     return out;
   }
@@ -714,7 +714,7 @@ class PredicateEmitter {
              "  (void)src; (void)len; (void)seen;");
     if (e.kind == LexKind::seq) {
       for (unsigned i = 0; i < e.b; ++i)
-        out.line("  in = ", call(_g.lexKid[e.a + i], "::std::move(in)"),
+        out.line("  in = ", call(_g.lexChild[e.a + i], "::std::move(in)"),
                  ";\n  if (in.empty()) return in;");
       return out.line("  return in;\n}").take();
     }
@@ -758,10 +758,8 @@ class PredicateEmitter {
         self.set(e.a);
         if (const auto none = read_nothing(self); !none.empty())
           out.line("    if (", none, ") continue;");
-        // The token in hand opens a condition: it holds where the terminal
-        // reads its bytes, the lexer's choice aside, and a commit's exit where
-        // the rule reads it as that terminal. Any other token is the
-        // predicate's own, read under the alphabet it was lexed in.
+        // The token in hand opens a condition where the terminal reads its
+        // bytes; any other token is read under the predicate's own alphabet.
         if (_turn[at])
           out.line(
               "    if (p.held != ::cursiv::engine::kUnread &&\n"
@@ -801,7 +799,7 @@ class PredicateEmitter {
         if (e.b != 0) {
           DynSet trivia;
           for (unsigned i = 0; i < e.b; ++i)
-            trivia |= _modes.first[_g.lexKid[e.a + i]];
+            trivia |= _modes.first[_g.lexChild[e.a + i]];
           trivia.andnot(_modes.follow[at]);
           if (const auto none = read_nothing(_modes.want(at)); !none.empty())
             out.line("    if (", none,
@@ -831,16 +829,16 @@ class PredicateEmitter {
       case LexKind::alt:
         out.write(prelex(at, "    "));
         // A mode covering the whole choice covers each token: all would skip.
-        if (std::ranges::all_of(std::span(_g.lexKid.data() + e.a, e.b),
+        if (std::ranges::all_of(std::span(_g.lexChild.data() + e.a, e.b),
                                 [&](std::uint16_t k) {
                                   return _g.lex[k].kind == LexKind::token;
                                 }))
           if (const auto none = read_nothing(_modes.want(at)); !none.empty())
             out.line("    if (", none, ") continue;");
         for (unsigned i = 0; i < e.b; ++i) {
-          const auto kid = _g.lexKid[e.a + i];
+          const auto child = _g.lexChild[e.a + i];
           out.line("      out.unite(",
-                   call(kid, "::cursiv::engine::PredicateState{p}"), ");");
+                   call(child, "::cursiv::engine::PredicateState{p}"), ");");
         }
         break;
       case LexKind::positive:

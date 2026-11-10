@@ -1,7 +1,5 @@
-// What the editor does around a save: it tells the server before, asks it for
-// edits to make first, and tells it after. Which of the three a client ever
-// sends is `saveOptions()` alone: one the options leave out is one nothing
-// will reach.
+// What the editor does around a save: tells the server before, asks it for
+// edits, and tells it after. A client sends only what `saveOptions()` names.
 #pragma once
 
 #include <lsp/types.h>
@@ -38,10 +36,8 @@ class DocumentSaveHandler {
     // nothing to do by default
   }
 
-  /**
-   * The edits the client applies before it saves, and waits for. Asked only
-   * for an open document. Precondition: called under the workspace read lock.
-   */
+  // The edits the client applies, and waits for, before it saves an open
+  // document. Called under the workspace read lock.
   [[nodiscard]] virtual std::vector<lsp::TextEdit> willSaveDocumentWaitUntil(
       const Document&, const lsp::WillSaveTextDocumentParams&,
       const CancellationToken&) const {

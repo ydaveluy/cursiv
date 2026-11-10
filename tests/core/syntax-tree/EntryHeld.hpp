@@ -1,6 +1,6 @@
-// The chains of a built table, back as rows: the rows one entry names, so a
-// reader can ask what a record's run states. The chains are the lowering's,
-// which construction extends only where a condition joins two positions.
+// The action rows a table entry names, so a test can ask what a record's run
+// holds. Construction adds pairs to the lowering's chains only where a
+// condition joins two positions.
 #pragma once
 
 #include <cstdint>
@@ -12,15 +12,14 @@
 
 namespace cursiv::test {
 
-// What the record holds versus what stands over it: a record's own chain
-// fills it, while a minted pair's `site` half is a directive from above
-// that writes into the caller instead. The two halves cannot be one list.
+// `held` fills the record itself; `over` is the `site` half of a pair made by
+// construction, which writes into the caller. The two cannot be one list.
 struct EntryRuns {
   std::vector<std::uint16_t> held, over;
 };
 
-// Below `nchains` an entry is a chain from the lowering, above it the pair
-// construction minted: a cons cell whose first half may itself be minted.
+// Below `nchains` an entry is a chain from the lowering; above, a pair made by
+// construction, whose first half may itself be such a pair.
 inline EntryRuns entry_runs(const engine::ChainPool& w,
                             std::span<const engine::LrFusedRow> fused,
                             std::uint32_t i) {

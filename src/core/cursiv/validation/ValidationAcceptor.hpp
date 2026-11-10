@@ -4,6 +4,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <initializer_list>
 #include <optional>
 #include <span>
@@ -21,8 +22,8 @@
 #include "cursiv/syntax-tree/MemberTraits.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
-// What a check emits and where it lands. The sink and document are borrowed
-// for one validation pass; indexed anchors are cached only for its current node.
+// What a check emits and where it goes. The sink and document must outlive
+// one validation pass; indexed anchors are cached only for the current node.
 
 namespace cursiv {
 
@@ -53,7 +54,7 @@ class ValidationDiagnosticBuilderBase {
                                   std::string_view message, TextRange span);
 
   // An owned message can hand its buffer to the diagnostic. Constraining the
-  // overload to rvalue strings keeps borrowed text and brace calls unchanged.
+  // overload to rvalue strings keeps views and brace calls unchanged.
   template <class Message>
     requires std::same_as<Message, std::string>
   ValidationDiagnosticBuilderBase(const ValidationAcceptor& acceptor,
@@ -94,8 +95,8 @@ class ValidationDiagnosticBuilderBase {
     return *this;
   }
 
-  // The emission point. During unwinding it still emits what the chain had said
-  // so far, and it never throws.
+  // Emits what the chain said so far, during unwinding too, and never throws: a
+  // diagnostic the acceptor cannot hand on fails the pass after its checks.
   ~ValidationDiagnosticBuilderBase() noexcept { emitNoexcept(); }
 
   // Absolute document offsets, the pair every diagnostic is published as.
@@ -219,10 +220,8 @@ class ValidationDiagnosticBuilder final
 
 class ValidationAcceptor {
  public:
-  // The collector must outlive the acceptor. By rvalue, and every arm below
-  // with it: a `Diagnostic` is hundreds of bytes of optionals and vectors, and
-  // building one per hop -- emit, accept, the sink, the collector -- copies
-  // them all four times.
+  // The collector must outlive the acceptor. Diagnostics move by rvalue through
+  // every arm, as one is hundreds of bytes.
   using Sink = cursiv::function_ref<void(Diagnostic&&)>;
 
   // Precondition: `document` keeps its `ParseResult` for the acceptor's life,
@@ -231,8 +230,8 @@ class ValidationAcceptor {
   ValidationAcceptor(Sink sink, const Document& document,
                      std::string_view source) noexcept;
 
-  // The four severity arms, each a builder. The three-argument spelling
-  // stamps the code on the way in.
+  // The four severity arms, each a builder. The three-argument form also sets
+  // the code.
   template <class Node>
     requires std::derived_from<Node, AstNode>
   ValidationDiagnosticBuilder<Node> error(const Node& node,
@@ -262,7 +261,7 @@ class ValidationAcceptor {
     return make(node, DiagnosticSeverity::Hint, message, code);
   }
 
-  // Computed messages transfer ownership; borrowed messages keep the arms above.
+  // An owned message is moved in; a view uses the arms above.
   template <class Node, class Message>
     requires std::derived_from<Node, AstNode> &&
              std::same_as<Message, std::string>
@@ -292,7 +291,7 @@ class ValidationAcceptor {
     return make(node, DiagnosticSeverity::Hint, std::move(message), code);
   }
 
-  // ...and over a span the check computed itself. No node, so no
+  // Over a span the check computed itself. No node, so no
   // `.property`/`.keyword`; everything else chains.
   ValidationDiagnosticBuilder<AstNode> error(TextRange span,
                                              std::string_view message,
@@ -340,13 +339,17 @@ class ValidationAcceptor {
     return make(span, DiagnosticSeverity::Hint, std::move(message), code);
   }
 
-  // The immediate arms: what the runtime itself calls, and the funnel every
-  // builder emits through -- the one place the source is stamped.
+  // The immediate arms, which every builder emits through: the one place the
+  // source is set. What they throw goes to the caller and is kept.
   void accept(const AstNode& node, DiagnosticSeverity severity,
               std::string_view message, std::string_view code = {}) const;
   void accept(TextRange span, DiagnosticSeverity severity,
               std::string_view message, std::string_view code = {}) const;
   void accept(Diagnostic&& diagnostic) const;
+
+  // Rethrows the error that lost a diagnostic, if any. Call it after the
+  // checks: a builder emits from its destructor, which cannot throw.
+  void throwIfDiagnosticLost() const;
 
   // The document the diagnostics are about.
   [[nodiscard]] const Document& document() const noexcept { return *_document; }
@@ -432,6 +435,8 @@ class ValidationAcceptor {
   mutable NodeId _anchorNode = kNoNode;
   mutable const Cst* _anchorCst = nullptr;
   mutable std::vector<Anchor> _anchors;
+  // The first error that lost a diagnostic.
+  mutable std::exception_ptr _lost;
 };
 
 // Builder bodies that need the acceptor's surface.

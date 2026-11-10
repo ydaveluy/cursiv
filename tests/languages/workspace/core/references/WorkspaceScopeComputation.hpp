@@ -6,9 +6,8 @@
 #include "cursiv/references/DefaultScopeComputation.hpp"
 #include "workspace/core/ast.hpp"
 
-// A declaration inside a package is known by its qualifier -- `foo.bar.E2`,
-// not `E2` -- which is what makes it reachable from another document. What a
-// qualifier is belongs to the grammar, so both halves are overridden here.
+// A declaration inside a package is exported under its qualified name,
+// `foo.bar.E2` rather than `E2`, which is how another document reaches it.
 
 namespace ws {
 
@@ -32,15 +31,14 @@ class WorkspaceScopeComputation final
           cursiv::kNoCancel) const override;
 
  protected:
-  // Exported under the name the outside world spells: qualified by the
-  // enclosing package, bare anywhere else.
+  // Qualified by the enclosing package, bare anywhere else.
   void addExportedSymbol(cursiv::AstNode& node,
                          std::vector<cursiv::AstNodeDescription>& exported,
                          const cursiv::Document& document) const override;
 
  private:
-  // Each container's declarations, then requalified for the enclosing
-  // package: a name climbs one dot per storey on the way out.
+  // Each container's declarations, then qualified again for each enclosing
+  // package.
   void processContainer(const cursiv::AstNode& root,
                         std::span<ast::AbstractElement* const> elements,
                         const cursiv::Document& document,

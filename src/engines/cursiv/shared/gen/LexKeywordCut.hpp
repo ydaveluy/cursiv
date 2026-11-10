@@ -38,6 +38,9 @@ struct LexKeywordCut {
   // spelling it stands in having read `depth` bytes of it.
   std::vector<std::vector<std::uint32_t>> reads;
   bool active = false;
+  // The terminals with more keyword spellings than are cut: no trivia is cut
+  // beside them, so the lexer refuses trivia that reads on past one.
+  std::vector<std::uint16_t> uncut;
 
   bool whole(std::uint32_t tag) const {
     return (tag & 0xffffu) == keywords[(tag >> 16) - 1].sets.size();
@@ -84,14 +87,13 @@ struct LexKeywordCut {
       const Branches own = branches(g, g.termBuild[t].lex);
       if (!own.any) continue;
       if (into.empty()) into = entering(nfa);
+      // Each word is a spelling, and each choice of cases multiplies them:
+      // past a bound, the terminal goes uncut.
       std::vector<Spelling> found;
-      cut.spell(g, nfa, static_cast<int>(t), startOf[t], Spelling{}, own,
-                found);
-      // Each choice of cases multiplies the spellings: past a bound, the
-      // keyword goes uncut and trivia beside it reads as if it stood alone.
-      if (found.size() > kSpellings) found.clear();
-      for (Spelling& w : found) w.word.term = static_cast<std::uint16_t>(t);
-      cut.settle(found, into);
+      std::vector<Edge> pool;
+      if (!spell(g, nfa, static_cast<int>(t), startOf[t], own, found, pool))
+        cut.uncut.push_back(static_cast<std::uint16_t>(t));
+      cut.cut_spellings(found, pool, into);
     }
     if (cut.keywords.empty()) return cut;
     cut.trivia.assign(n, 0);
@@ -124,19 +126,22 @@ struct LexKeywordCut {
     const auto of_all = [&](LexKind kind,
                             const std::vector<std::uint16_t>& list) {
       if (list.size() == 1) return list[0];
-      if (list.size() >= static_cast<std::size_t>(kNoLexNode - g.nlexKid))
+      if (list.size() >= static_cast<std::size_t>(kNoLexNode - g.nlexChild))
         throw LowerRefused(LowerFail::tokenGraphTooLarge);
-      const std::uint16_t base = g.nlexKid;
-      for (const std::uint16_t kid : list) g.push_lex_kid(kid);
+      const std::uint16_t base = g.nlexChild;
+      for (const std::uint16_t child : list) g.push_lex_child(child);
       return node(kind, base, static_cast<std::uint16_t>(list.size()));
     };
     std::vector<std::uint16_t> alts;
-    // Two spellings of one keyword that differ only in the case of a letter
-    // already read wait on the same rest, asserted once.
+    // Spellings that differ only in letters already read share one rest,
+    // asserted once: its length, sets, bound and assertions.
     std::set<std::pair<std::uint16_t, std::vector<std::uint16_t>>> rests;
     for (const std::uint32_t tag : stands) {
       const Keyword& word = keywords[(tag >> 16) - 1];
-      std::vector<std::uint16_t> rest(
+      std::vector<std::uint16_t> rest{
+          static_cast<std::uint16_t>(word.sets.size() - (tag & 0xffffu))};
+      rest.insert(
+          rest.end(),
           word.sets.begin() + static_cast<std::ptrdiff_t>(tag & 0xffffu),
           word.sets.end());
       rest.push_back(word.bound);
@@ -167,15 +172,23 @@ struct LexKeywordCut {
 
   std::map<std::vector<std::uint32_t>, std::uint16_t> _gates;
 
+  // A spelling, read or being read from `at`. Its edges live in a pool, each
+  // naming the one before it: walks that part at a choice share the edges
+  // before it.
   struct Spelling {
+    int at = -1;
     Keyword word;
     std::vector<int> read;
-    // Its edges, the last byte's edge and the first assertion's edge.
-    std::vector<std::pair<int, int>> edges;
-    std::size_t tail = 0;
-    std::size_t asserted = SIZE_MAX;
+    std::uint32_t last = kNoEdge;
+    // The state past its last byte.
+    int end = -1;
     std::size_t steps = 0;
   };
+  struct Edge {
+    int from = -1, to = -1;
+    std::uint32_t before = kNoEdge;
+  };
+  static constexpr std::uint32_t kNoEdge = 0xffffffffu;
 
   // How many states lead into each state, by an exit or a relay's resumption.
   static std::vector<std::uint32_t> entering(const LexNfaPool& nfa) {
@@ -192,63 +205,85 @@ struct LexKeywordCut {
     return into;
   }
 
-  // The spellings of terminal `t` from NFA state `x`, one per alternative. A
-  // spelling reads only the sets of `own`, ends where `t` accepts, and counts
-  // only if its boundary is the word class. An assertion before its last byte
-  // is not behind it, and ends the spelling.
+  // The spellings of terminal `t` from NFA state `start` into `found`; false,
+  // with none, past `kSpellings`. A spelling reads only the sets of `own`, has
+  // the word class as its boundary, and asserts nothing before its last byte.
   template <class Cfg>
-  void spell(const Cfg& g, const LexNfaPool& nfa, int t, int x, Spelling walk,
-             const Branches& own, std::vector<Spelling>& found) {
-    for (; x >= 0 && walk.steps <= nfa.s.size() && found.size() <= kSpellings;
-         ++walk.steps) {
-      const LexNfaState& st = nfa.s[static_cast<std::size_t>(x)];
-      if (st.accept >= 0) {
-        if (st.accept == t && !walk.read.empty() && walk.asserted > walk.tail &&
-            bounded(g, st, walk))
-          found.push_back(std::move(walk));
-        return;
-      }
-      if (st.minus >= 0) return;
-      int next = -1;
-      if (st.relay >= 0) {
-        const LexRelayBuild& r = nfa.relays[static_cast<std::size_t>(st.relay)];
-        if (walk.read.empty() || r.row.predicate == kNoLexNode ||
-            r.row.recognition != kNoLexNode)
-          return;
-        walk.word.after.push_back(r.row.predicate);
-        walk.asserted = std::min(walk.asserted, walk.edges.size());
-        next = r.resumeOut;
-      } else if (st.set >= 0) {
-        if (walk.read.size() >= own.longest ||
-            !std::ranges::binary_search(own.sets,
-                                        static_cast<std::uint16_t>(st.set)))
-          return;
-        walk.word.sets.push_back(static_cast<std::uint16_t>(st.set));
-        walk.read.push_back(x);
-        next = st.t1;
-        walk.tail = walk.edges.size();
-      } else {
-        if (st.t2 >= 0) {
-          Spelling other = walk;
-          other.edges.emplace_back(x, st.t2);
-          spell(g, nfa, t, st.t2, std::move(other), own, found);
+  static bool spell(const Cfg& g, const LexNfaPool& nfa, int t, int start,
+                    const Branches& own, std::vector<Spelling>& found,
+                    std::vector<Edge>& pool) {
+    const auto step = [&pool](Spelling& w, int from, int to) {
+      pool.push_back({from, to, w.last});
+      w.last = static_cast<std::uint32_t>(pool.size() - 1);
+    };
+    std::vector<Spelling> todo(1);
+    todo.back().at = start;
+    while (!todo.empty() && found.size() <= kSpellings) {
+      Spelling walk = std::move(todo.back());
+      todo.pop_back();
+      for (int x = walk.at;
+           x >= 0 && walk.steps <= nfa.s.size() && found.size() <= kSpellings;
+           ++walk.steps) {
+        const LexNfaState& st = nfa.s[static_cast<std::size_t>(x)];
+        if (st.accept >= 0) {
+          if (st.accept == t && !walk.read.empty() &&
+              bounded(g, st, walk.word)) {
+            walk.word.term = static_cast<std::uint16_t>(t);
+            found.push_back(std::move(walk));
+          }
+          break;
         }
-        next = st.t1;
+        if (st.minus >= 0) break;
+        int next = -1;
+        if (st.relay >= 0) {
+          const LexRelayBuild& r =
+              nfa.relays[static_cast<std::size_t>(st.relay)];
+          if (walk.read.empty() || r.row.predicate == kNoLexNode ||
+              r.row.recognition != kNoLexNode)
+            break;
+          walk.word.after.push_back(r.row.predicate);
+          next = r.resumeOut;
+        } else if (st.set >= 0) {
+          if (!walk.word.after.empty() || walk.read.size() >= own.longest ||
+              !std::ranges::binary_search(own.sets,
+                                          static_cast<std::uint16_t>(st.set)))
+            break;
+          walk.word.sets.push_back(static_cast<std::uint16_t>(st.set));
+          walk.read.push_back(x);
+          next = st.t1;
+          walk.end = st.t1;
+        } else if (st.t2 >= 0) {
+          // This walk goes on past `t1` once the walk past `t2` is done.
+          Spelling other = walk;
+          step(other, x, st.t2);
+          other.at = st.t2;
+          if (st.t1 >= 0) step(walk, x, st.t1);
+          walk.at = st.t1;
+          ++walk.steps;
+          todo.push_back(std::move(walk));
+          todo.push_back(std::move(other));
+          break;
+        } else {
+          next = st.t1;
+        }
+        if (next >= 0) step(walk, x, next);
+        x = next;
       }
-      if (next >= 0) walk.edges.emplace_back(x, next);
-      x = next;
     }
+    if (found.size() <= kSpellings) return true;
+    found.clear();
+    return false;
   }
 
-  // Whether `walk` ends on the word class: the bound of `accept`, or a
+  // Whether `word` ends on the word class: the bound of `accept`, or a
   // refusal behind the spelling.
   template <class Cfg>
-  static bool bounded(const Cfg& g, const LexNfaState& accept, Spelling& walk) {
+  static bool bounded(const Cfg& g, const LexNfaState& accept, Keyword& word) {
     if (accept.bound >= 0 &&
         lex_word_set(g, static_cast<std::uint16_t>(accept.bound)))
-      walk.word.bound = static_cast<std::uint16_t>(accept.bound);
-    return walk.word.bound != kNoSet ||
-           std::ranges::any_of(walk.word.after, [&](std::uint16_t node) {
+      word.bound = static_cast<std::uint16_t>(accept.bound);
+    return word.bound != kNoSet ||
+           std::ranges::any_of(word.after, [&](std::uint16_t node) {
              return word_refusal(g, node);
            });
   }
@@ -256,23 +291,25 @@ struct LexKeywordCut {
   // A state another branch of the terminal leads to as well is not the
   // keyword's, nor is anything past it: only what the spellings alone reach
   // is cut.
-  void settle(const std::vector<Spelling>& found,
-              const std::vector<std::uint32_t>& into) {
+  void cut_spellings(const std::vector<Spelling>& found,
+                     const std::vector<Edge>& pool,
+                     const std::vector<std::uint32_t>& into) {
     std::map<int, std::set<int>> from;
     for (const Spelling& w : found)
-      for (const auto& [a, b] : w.edges) from[b].insert(a);
+      for (std::uint32_t e = w.last; e != kNoEdge; e = pool[e].before)
+        from[pool[e].to].insert(pool[e].from);
     const auto alone = [&](int x) {
       return from[x].size() == into[static_cast<std::size_t>(x)];
     };
     for (const Spelling& w : found) {
-      if (w.tail >= w.edges.size() || !alone(w.edges[w.tail].second)) continue;
+      if (!alone(w.end)) continue;
       if (keywords.size() + 1 >= 0x10000u)
         throw LowerRefused(LowerFail::tokenGraphTooLarge);
       const auto tag = static_cast<std::uint32_t>(keywords.size() + 1) << 16;
       for (std::size_t d = 0; d < w.read.size(); ++d)
         reads[static_cast<std::size_t>(w.read[d])].push_back(
             tag | static_cast<std::uint32_t>(d));
-      reads[static_cast<std::size_t>(w.edges[w.tail].second)].push_back(
+      reads[static_cast<std::size_t>(w.end)].push_back(
           tag | static_cast<std::uint32_t>(w.read.size()));
       keywords.push_back(w.word);
     }
@@ -282,7 +319,7 @@ struct LexKeywordCut {
   static bool word_refusal(const Cfg& g, std::uint16_t node) {
     const LexNode& e = g.lex[node];
     return e.kind == LexKind::nguard && e.a == kNoSet && e.min == 1 &&
-           lex_word_set(g, g.lexKid[e.b]);
+           lex_word_set(g, g.lexChild[e.b]);
   }
 
   template <class Cfg>
@@ -290,13 +327,13 @@ struct LexKeywordCut {
                      std::vector<std::uint16_t>& out) {
     const LexNode& e = g.lex[node];
     if (e.kind == LexKind::seq) {
-      for (unsigned i = 0; i < e.b; ++i) leaves(g, g.lexKid[e.a + i], out);
+      for (unsigned i = 0; i < e.b; ++i) leaves(g, g.lexChild[e.a + i], out);
     } else if (e.kind != LexKind::positive && e.kind != LexKind::negative) {
       out.push_back(node);
     }
   }
 
-  // Whether `node` consumes keywords alone; `out` hears those branches, and
+  // Whether `node` consumes keywords alone; `out` gets those branches, and
   // `spelled`, when given, the sets they read in.
   template <class Cfg>
   static bool collect(const Cfg& g, std::uint16_t node, Shape& out,
@@ -312,7 +349,7 @@ struct LexKeywordCut {
       const LexNode& e = g.lex[read[0]];
       bool all = e.b != 0;
       for (unsigned i = 0; i < e.b; ++i)
-        all = collect(g, g.lexKid[e.a + i], out, spelled) && all;
+        all = collect(g, g.lexChild[e.a + i], out, spelled) && all;
       return all;
     }
     if (core == 0 || !word) return false;
@@ -332,7 +369,7 @@ struct LexKeywordCut {
       // The cases of a letter take as many bytes.
       for (unsigned k = 0; k < e.b; ++k) {
         std::vector<std::uint16_t> bytes;
-        leaves(g, g.lexKid[e.a + k], bytes);
+        leaves(g, g.lexChild[e.a + k], bytes);
         for (const std::uint16_t b : bytes) spelled->sets.push_back(g.lex[b].a);
         if (k == 0) longest += bytes.size();
       }

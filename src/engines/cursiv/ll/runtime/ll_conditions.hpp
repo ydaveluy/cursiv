@@ -37,8 +37,7 @@ CURSIV_NOINLINE inline void ll_condition_node(LlContext& c, std::uint16_t mode,
     // caller's abandon belong to the same election, with the same costs.
     ll_repair_peek<T>(c);
     const LlPause pause = ll_pause<T>(c, LlRoot{kNoRow, node});
-    if (const LlGesture* g = pause.gesture;
-        g != nullptr && g->kind != LlGesture::ins) {
+    if (const LlEdit* g = pause.edit; g != nullptr && g->kind != LlEdit::ins) {
       ll_write<T>(c, mode, *g);
       if (c.give) return;
       continue;

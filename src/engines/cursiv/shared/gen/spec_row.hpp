@@ -17,28 +17,27 @@ namespace cursiv::engine {
 // from a bare matcher is the same action, `void` where nothing converts.
 template <class St, class R>
 struct src_rule {
-  using type = erased_src_t<pay_text<typename St::template rule<R>>>;
+  using type = erased_src_t<text_payload<typename St::template rule<R>>>;
 };
 template <class St>
 struct src_rule<St, void> {
-  using type = pay_text<void>;
+  using type = text_payload<void>;
 };
 template <class St, class L>
 struct text_src {
   using type = void;
 };
 template <class St, class R, class... Rest>
-struct text_src<St, TypeList<pay_text<R>, Rest...>> : src_rule<St, R> {};
+struct text_src<St, TypeList<text_payload<R>, Rest...>> : src_rule<St, R> {};
 template <class St, class S0, class... Rest>
 struct text_src<St, TypeList<S0, Rest...>> : text_src<St, TypeList<Rest...>> {};
 template <class St, class E>
-using pay_src_t = typename text_src<St, typename payload_of<E>::type>::type;
+using payload_src_t = typename text_src<St, typename payload_of<E>::type>::type;
 
 template <class St, auto S, WriteKind K, class E>
 using spec_row_t = Row<K, spec_class_t<S>, Wrote<spec_ptr<S>>, spec_narrow_t<S>,
-                       pay_src_t<St, E>>;
+                       payload_src_t<St, E>>;
 
-// The row a write directive names.
 template <class St, class D>
 struct directive_row;
 template <class St, class T, class E>

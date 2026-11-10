@@ -1,8 +1,5 @@
-// One faulted document weighed against its twin: which faults a diagnostic
-// answers one to one, how much of the author's text is still read in place,
-// how much of the twin's tree survives where no fault touched it, and how
-// many diagnostics were said. It reads only what any engine's parse leaves
-// behind -- records, spans, the two flags, the diagnostics and the AST.
+// One faulted document compared with its twin: faults answered, text and tree
+// kept, diagnostics reported. It reads only what any engine's parse leaves.
 #pragma once
 
 #include <algorithm>
@@ -32,7 +29,7 @@
 namespace cursiv::recovery_metric {
 
 struct RepairJudge {
-  // Null: the tree is not weighed.
+  // Null: the tree is not compared.
   const AstReflection* reflection = nullptr;
   const fuzzer::GrammarActions* actions = nullptr;
 
@@ -50,7 +47,7 @@ struct RepairJudge {
     v.diagnostics = static_cast<std::uint32_t>(said.size());
     v.found = p.found;
     v.missed = p.missed;
-    v.parasites = p.parasites;
+    v.spurious = p.spurious;
     v.accepted = cst.accepted();
     v.silent = v.accepted && said.empty();
     v.tree = got.value != nullptr;
@@ -59,13 +56,13 @@ struct RepairJudge {
     cst.visit_leaves([&](const CstLeaf& l) { leaves.push_back(l); });
     const Cst& twinCst = twin.result.cst();
     const Grammar* grammar = twinCst.grammar();
-    const auto restores = [&](std::size_t token, ElementId owed) {
-      if (grammar == nullptr || owed == kNoElement) return false;
-      const auto spellings = grammar->terminalSpellings(owed);
+    const auto restores = [&](std::size_t token, ElementId expected) {
+      if (grammar == nullptr || expected == kNoElement) return false;
+      const auto spellings = grammar->terminalSpellings(expected);
       if (spellings.size() == 1)
         return spellings.front() == twin.spelling(token);
       return !twin.literal[token] &&
-             grammar->terminalName(owed) ==
+             grammar->terminalName(expected) ==
                  grammar->recordRule(twinCst[twin.tokens[token].id]);
     };
     v.text = TextKept::of(twin.tokens, c, windows, leaves, said, restores);
@@ -80,7 +77,7 @@ struct RepairJudge {
             return true;
         return false;
       };
-      const AstOverlap overlap{*reflection, actions};
+      const AstOverlap overlap{*reflection, *actions};
       v.ast = overlap.run(*twin.result.value, got.value, touched);
       // Silent, nothing repaired, and the twin's own tree: the fault did not
       // reach the language, so it is no fault to answer.

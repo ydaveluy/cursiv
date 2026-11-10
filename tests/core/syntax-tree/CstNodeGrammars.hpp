@@ -2,7 +2,7 @@
 
 // The constructions of the DSL on the smallest grammars that spell them. Three
 // lexical cases share a grammar, each body entered by its own first token; a
-// table whose cells a lane pins keeps a grammar of its own.
+// table whose cells a test checks has a grammar of its own.
 
 #include <string_view>
 
@@ -15,10 +15,9 @@ namespace ast {
 struct Node : cursiv::Extends<cursiv::AstNode> {};
 }  // namespace ast
 
-// `ikw` reads one word in either case, and the boundary still refuses a longer
-// one; a block comment runs to its literal closer; `repeat<4>` counts the
-// escape json and json5 spell; and `@` refuses the digit behind it, which an
-// identifier may begin with, so only that frontier can say no.
+// `ikw` reads a word in either case, and the boundary still refuses a
+// longer one; a block comment runs to its closer; `repeat<4>` counts an
+// escape; `@` refuses a digit behind it.
 struct LexBase : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t\r\n)">)> {};
   struct ML : terminal<through(lit<"/*">, lit<"*/">)> {};
@@ -61,11 +60,8 @@ struct InfixG : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// Two single-byte terminals that overlap without being equal: `*` is both a
-// class of its own and a member of the class `UN` reads. Only the state
-// can choose -- where it admits one, the reserve takes it; where it admits
-// both, the reading forks and the branch that cannot continue dies. STAR is a
-// class: a literal would outrank UN at `*` and leave nothing to fork.
+// Two single-byte terminals that overlap: `*` is STAR and also in the class
+// `UN` reads. Where the state admits both, the parse forks.
 struct OverlapG : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t\n)">)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
@@ -80,9 +76,7 @@ struct OverlapG : cursiv::GrammarSpec {
 };
 
 // A refused word inside a token: C's `#` line that is not `#include`. The
-// blanks are spelled twice -- run, then refused -- because a token graph keeps
-// every length of a run open, and the run must be maximal for the refusal to
-// stand where the author put it.
+// blanks are spelled twice, so the run is maximal before the refusal.
 struct WordGuardG : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t\r\n)">)> {};
   struct ID : terminal<some(cr<"a-z">)> {};

@@ -1,4 +1,5 @@
-// A non-nesting branch leaves the current node for the following iteration.
+// A choice whose other branch does not nest: the next turn writes `text` on
+// the same node.
 // expect LR: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Item::text
 #pragma once
 #include "refusals/head.hpp"

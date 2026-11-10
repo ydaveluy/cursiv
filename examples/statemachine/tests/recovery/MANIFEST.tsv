@@ -4,7 +4,7 @@ valid.statemachine	valid		the base document
 02_typo2.statemachine	typo2	358	'state' written 'staet' -- one transposition, distance 2
 03_closer_block.statemachine	closer_block	282	the '}' closing an actions block is missing, mid file
 04_closer_eof.statemachine	closer_eof	501	the final 'end' of the last state is missing
-05_intruder.statemachine	intruder	217	'==>' instead of '=>' -- one token too many
+05_extra_token.statemachine	extra_token	217	'==>' instead of '=>' -- one token too many
 06_truncated.statemachine	truncated	497	the last state is cut in the middle of a transition
 07_two_faults.statemachine	two_faults	217 516	'state' typo near the top AND the final 'end' missing
 08_head_fault.statemachine	head_fault	81	the 'statemachine' keyword at byte 0 is misspelt

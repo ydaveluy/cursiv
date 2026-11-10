@@ -1,7 +1,6 @@
-// What both lowerings do with a grammar image before they lay a single
-// production: number the symbols, declare the terminals with their token
-// graphs, read the conditions as postfix programs. An engine adds the walk of
-// its own bodies.
+// What both lowerings do with a grammar image before building any production:
+// number the symbols, declare the terminals with their token graphs, and read
+// the conditions as postfix programs.
 #pragma once
 
 #include <cstdint>
@@ -48,7 +47,7 @@ class Lowerer {
     std::vector<std::uint32_t> hide;
     std::uint32_t section = kNoImage;
     ImageId end = kNoImage;
-    std::uint32_t home = 0;
+    std::uint32_t sectionCfg = 0;
     ImageClassDesc bound{};
   };
 
@@ -78,7 +77,7 @@ class Lowerer {
           GrammarFault& fault, LowerPool& pool);
 
   virtual std::uint16_t intern_name(std::string_view text) = 0;
-  virtual ImageId ended(ImageId id) = 0;
+  virtual Descent<ImageId> ended(ImageId id) = 0;
   virtual void declare_start() = 0;
   virtual void declare_rules() = 0;
   virtual void define_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs,
@@ -86,21 +85,21 @@ class Lowerer {
   virtual bool define_open() { return false; }
 
   const ImageNode& at(ImageId id) const { return _im.nodes[id]; }
-  ImageId kid(const ImageNode& n, std::uint32_t i) const {
-    return _im.kids[n.first + i];
+  ImageId child_at(const ImageNode& n, std::uint32_t i) const {
+    return _im.children[n.first + i];
   }
-  std::vector<ImageId> kids_of(const ImageNode& n) const;
-  // The node over the kids `rewrite` answers for, itself where none moved.
+  std::vector<ImageId> children_of(const ImageNode& n) const;
+  // The node over the children `rewrite` returns, itself where none changed.
   template <class Rewrite>
-  ImageId map_kids(ImageId id, Rewrite&& rewrite) {
+  Descent<ImageId> map_children(ImageId id, Rewrite rewrite) {
     const ImageNode n = at(id);
     std::vector<ImageId> next;
     bool changed = false;
-    for (const ImageId k : kids_of(n)) {
-      next.push_back(rewrite(k));
+    for (const ImageId k : children_of(n)) {
+      next.push_back(co_await rewrite(k));
       changed |= next.back() != k;
     }
-    return changed ? _im.derive(n, next) : id;
+    co_return changed ? _im.derive(n, next) : id;
   }
   // `&close | eof`: where a section's text ends, or the document's.
   ImageId section_end();
@@ -167,17 +166,17 @@ class Lowerer {
   }
   void note_docs();
   bool docs_differ(const ImageNode& doc) const {
-    return _docsDiffer.contains(at(kid(doc, 0)).text);
+    return _docsDiffer.contains(at(child_at(doc, 0)).text);
   }
   ImageId body_in(unsigned cfg, std::uint32_t rule);
-  bool has_rows(ImageId id) const;
-  bool creates(ImageId id, const void* row) const;
+  Descent<bool> has_rows(ImageId id) const;
+  Descent<bool> creates(ImageId id, const void* row) const;
   bool reads_under(unsigned cfg, std::uint32_t rule) const;
   unsigned region_of(unsigned cfg, const ImageNode& skip) const;
   unsigned section_of(std::uint32_t grammar, ImageId end) const;
   ImageId token_core(ImageId id) const;
   std::uint32_t op_rule_of(ImageId op) const;
-  bool buries(ImageId id) const;
+  Descent<bool> buries(ImageId id) const;
   ImageId optional_item(ImageId item) const;
   void index();
   void declare();
@@ -204,41 +203,44 @@ class Lowerer {
                                bool charset, bool folded,
                                const std::function<std::uint16_t()>& lex);
   void spell_literal(std::uint16_t t, const ImageNode& lit);
-  bool list_words(ImageId id, std::vector<std::string_view>& words) const;
-  std::uint16_t lay_laid(ImageId e, std::uint8_t laid, std::string_view name);
-  void unspell(std::uint16_t t, std::uint8_t laid);
+  Descent<bool> list_words(ImageId id,
+                           std::vector<std::string_view>& words) const;
+  std::uint16_t add_synthetic(ImageId e, std::uint8_t synthetic,
+                              std::string_view name);
+  void unspell(std::uint16_t t, std::uint8_t synthetic);
   void check_implied_token(unsigned cfg, ImageId e);
   std::uint16_t implied_term(ImageId e, std::uint16_t k);
 
-  bool lexical(ImageId id);
-  bool gap(ImageId id);
-  bool phrase_gap(ImageId id);
-  bool lex_phrase(ImageId id);
-  Cut cut_prefix(ImageId p);
+  Descent<bool> lexical(ImageId id);
+  Descent<bool> gap(ImageId id);
+  Descent<bool> phrase_gap(ImageId id);
+  Descent<bool> lex_phrase(ImageId id);
+  Descent<Cut> cut_prefix(ImageId p);
   bool cut_tokens(ImageId id) const;
   bool cut_one(ImageId id) const;
-  std::vector<ImageId> gap_runs(const std::vector<ImageId>& kids);
+  std::vector<ImageId> gap_runs(const std::vector<ImageId>& children);
 
   std::uint16_t gap_cond(unsigned cfg, ImageId e);
-  void gap_ops(unsigned cfg, ImageId e);
+  Descent<void> gap_ops(unsigned cfg, ImageId e);
   void gap_op(std::uint16_t v) { _c.gapOps[_c.ngapOps++] = v; }
-  void gap_join(unsigned cfg, std::uint16_t op, const std::vector<ImageId>& es);
+  Descent<void> gap_join(unsigned cfg, std::uint16_t op,
+                         const std::vector<ImageId>& es);
   std::uint16_t gap_leaf(std::uint64_t key,
                          const std::function<GapLeaf()>& make);
   std::uint16_t skip_node(unsigned cfg);
   std::uint16_t phrase_lexical(unsigned cfg, ImageId e);
-  std::uint16_t phrase(unsigned cfg, ImageId e, std::uint16_t skip,
-                       std::vector<std::uint32_t>& path);
+  Descent<std::uint16_t> phrase(unsigned cfg, ImageId e, std::uint16_t skip,
+                                std::vector<std::uint32_t>& path);
   std::uint16_t phrase_skip(std::uint16_t skip) {
     return _lex.push(_c.lex[skip]);
   }
   std::uint16_t phrase_token(unsigned cfg, ImageId e);
   std::uint16_t phrase_private_token(unsigned cfg, ImageId e, ImageId body);
   std::uint16_t cut_node(unsigned cfg, ImageId token);
-  void cut_terms(unsigned cfg, ImageId token, DynSet& out);
+  Descent<void> cut_terms(unsigned cfg, ImageId token, DynSet& out);
 
   GrammarImage& _im;
-  // A rule's body is laid without the branches that repeat earlier ones.
+  // A rule's body is built without the branches that repeat earlier ones.
   TwinReader _twins;
   const LowerDesc& _d;
   LowerPools& _c;
@@ -272,7 +274,7 @@ class Lowerer {
   void declare_role_term(std::size_t at);
   void inherit_role_term(std::size_t at);
   void declare_config(unsigned cfg);
-  void delimit(ImageId spelled, std::int8_t d);
+  Descent<void> delimit(ImageId spelled, std::int8_t d);
   void delimit_spelled(ImageId spelled, std::int8_t d);
   std::unordered_set<ImageId> _impliedToks;
 
@@ -288,10 +290,8 @@ struct LowerState {
   Pool pool{};
 };
 
-// The walk both lowerings lay a body with, into the tree of laid nodes `Pool`
-// holds. `Self::lay` lays the nodes its engine lays apart and hands every other
-// to `lay_shared`; it also lays an embed's close and the call of a grammar's
-// entry.
+// The walk both lowerings build a body with, into `Pool`. `Self::build` builds
+// the nodes its engine handles itself and passes the others to `build_shared`.
 template <class Self, class Lowered, class Pool>
 class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
  public:
@@ -306,7 +306,7 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
  protected:
   using Node = typename decltype(Pool::e)::value_type;
   using Shape = decltype(Node::kind);
-  using Id = typename decltype(Pool::kid)::value_type;
+  using Id = typename decltype(Pool::child)::value_type;
 
   Id mark(unsigned cfg, Id at) {
     _p.e[at].cfg = static_cast<std::uint8_t>(cfg);
@@ -315,117 +315,120 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
   Id push_sym(std::uint16_t sym, unsigned cfg) {
     return mark(cfg, _p.push(Node{Shape::sym, sym}));
   }
-  Id gather(unsigned cfg, Shape kind, const std::vector<Id>& kids) {
-    // Kids numbered in 16 bits are refused past them.
+  Id gather(unsigned cfg, Shape kind, const std::vector<Id>& children) {
+    // Children numbered in 16 bits are refused past them.
     if constexpr (sizeof(Id) == sizeof(std::uint16_t))
-      if (_p.kid.size() + kids.size() > kNoRow)
+      if (_p.child.size() + children.size() > kNoRow)
         throw LowerRefused(LowerFail::tooManyPositions);
-    const auto base = static_cast<Id>(_p.kid.size());
-    _p.kid.insert(_p.kid.end(), kids.begin(), kids.end());
-    return mark(cfg, _p.push(Node{kind, base, static_cast<Id>(kids.size())}));
+    const auto base = static_cast<Id>(_p.child.size());
+    _p.child.insert(_p.child.end(), children.begin(), children.end());
+    return mark(cfg,
+                _p.push(Node{kind, base, static_cast<Id>(children.size())}));
   }
   Id wrap(unsigned cfg, Id at) { return gather(cfg, Shape::seq, {at}); }
-  Id lay_kids(unsigned cfg, Shape kind, const std::vector<ImageId>& es) {
-    std::vector<Id> kids;
-    for (const ImageId e : es) kids.push_back(self().lay(cfg, e));
-    return gather(cfg, kind, kids);
+  Descent<Id> build_children(unsigned cfg, Shape kind,
+                             const std::vector<ImageId>& es) {
+    std::vector<Id> children;
+    for (const ImageId e : es)
+      children.push_back(co_await self().build(cfg, e));
+    co_return gather(cfg, kind, children);
   }
-  Id lay_seq(unsigned cfg, ImageId e) {
-    const std::vector<ImageId> runs = gap_runs(kids_of(at(e)));
-    if (runs.size() == 1) return self().lay(cfg, runs.front());
-    return lay_kids(cfg, Shape::seq, runs);
+  Descent<Id> build_seq(unsigned cfg, ImageId e) {
+    const std::vector<ImageId> runs = gap_runs(children_of(at(e)));
+    if (runs.size() == 1) co_return co_await self().build(cfg, runs.front());
+    co_return co_await build_children(cfg, Shape::seq, runs);
   }
-  Id lay_ref(unsigned cfg, std::uint32_t rule) {
+  Descent<Id> build_ref(unsigned cfg, std::uint32_t rule) {
     if (_im.rules[rule].grammar) {
-      const Id at = lay_ref(cfg, _im.ready(rule).face[0].entry);
+      const Id at = co_await build_ref(cfg, _im.ready(rule).face[0].entry);
       self().enter(cfg, at);
-      return at;
+      co_return at;
     }
-    // A rule read in place lays its body here, its conversion over what that
+    // A rule read in place builds its body here, its conversion over what that
     // reads, as the rule's own definition would.
     if (stage(rule).inPlace) {
-      const Id at = self().lay(cfg, body_in(cfg, rule));
+      const Id at = co_await self().build(cfg, body_in(cfg, rule));
       convert_over(at, row_id(stage(rule).convertRow));
-      return at;
+      co_return at;
     }
     const std::uint16_t sym = sym_of(cfg, rule);
     if (cfg != 0 && !is_term(sym)) _c.cloneNeeded[nt_index(sym)] = true;
-    return push_sym(sym, cfg);
+    co_return push_sym(sym, cfg);
   }
-  Id lay_embed(unsigned cfg, ImageId e) {
+  Descent<Id> build_embed(unsigned cfg, ImageId e) {
     const ImageNode n = at(e);
-    const ImageNode inner = at(kid(n, 0));
+    const ImageNode inner = at(child_at(n, 0));
     if (inner.kind != ImageKind::seq || inner.count != 3)
       refuse_lowering(kNotInRule);
-    const unsigned in = section_of(n.a, token_core(kid(inner, 2)));
-    const Id open = self().lay(cfg, kid(inner, 0));
-    const Id entry = self().lay(in, kid(inner, 1));
-    const Id close = self().lay_close(cfg, in, kid(inner, 2));
+    const unsigned in = section_of(n.a, token_core(child_at(inner, 2)));
+    const Id open = co_await self().build(cfg, child_at(inner, 0));
+    const Id entry = co_await self().build(in, child_at(inner, 1));
+    const Id close = co_await self().build_close(cfg, in, child_at(inner, 2));
     _c.cfgEnd[in] = static_cast<std::uint16_t>(_p.e[close].sym);
-    return gather(cfg, Shape::seq, {open, entry, close});
+    co_return gather(cfg, Shape::seq, {open, entry, close});
   }
   // An unordered group: each optional item is read in its present form, `x`
   // for `option(x)` and one turn at least for any other repetition, and
   // marked, one bit each, as one the text may leave out.
-  Id lay_unordered(unsigned cfg, ImageId e) {
-    const std::vector<ImageId> items = kids_of(at(e));
-    const Id group = lay_kids(cfg, Shape::unordered, items);
+  Descent<Id> build_unordered(unsigned cfg, ImageId e) {
+    const std::vector<ImageId> items = children_of(at(e));
+    const Id group = co_await build_children(cfg, Shape::unordered, items);
     std::uint32_t optional = 0;
     for (std::size_t i = 0; i < items.size() && i < 32; ++i) {
-      Id& laid = _p.kid[_p.e[group].sym + i];
-      Node& item = _p.e[laid];
+      Id& slot = _p.child[_p.e[group].sym + i];
+      Node& item = _p.e[slot];
       if (optional_item(items[i]) == kNoImage || item.kind != Shape::rep)
         continue;
       optional |= std::uint32_t{1} << i;
       if (item.max == 1)
-        laid = item.sym;
+        slot = item.sym;
       else
         item.min = 1;
     }
     _p.e[group].unorderedOptional = optional;
-    return group;
+    co_return group;
   }
-  // A node both engines lay alike, through `Self`'s own layings of a
+  // A node both engines build the same, through `Self`'s own handling of a
   // repetition, a write, a flag, a condition and an implied token.
-  CURSIV_ALWAYS_INLINE Id lay_shared(unsigned cfg, ImageId e,
-                                     const ImageNode& n) {
+  Descent<Id> build_shared(unsigned cfg, ImageId e, const ImageNode n) {
     switch (n.kind) {
       case ImageKind::ref:
-        return lay_ref(cfg, n.a);
+        co_return co_await build_ref(cfg, n.a);
       case ImageKind::epsilon:
-        return _p.push(Node{Shape::none});
+        co_return _p.push(Node{Shape::none});
       case ImageKind::embed:
-        return lay_embed(cfg, e);
+        co_return co_await build_embed(cfg, e);
       case ImageKind::seq:
-        return gap(e) ? self().lay_condition(cfg, e) : lay_seq(cfg, e);
+        if (descend(gap(e))) co_return self().build_condition(cfg, e);
+        co_return co_await build_seq(cfg, e);
       case ImageKind::choice:
-        return gap(e) ? self().lay_condition(cfg, e)
-                      : lay_kids(cfg, Shape::alt, kids_of(n));
+        if (descend(gap(e))) co_return self().build_condition(cfg, e);
+        co_return co_await build_children(cfg, Shape::alt, children_of(n));
       case ImageKind::repeat:
-        return self().lay_repeat(cfg, e);
+        co_return co_await self().build_repeat(cfg, e);
       case ImageKind::assign:
       case ImageKind::append:
-        return self().lay_write(cfg, e);
+        co_return co_await self().build_write(cfg, e);
       case ImageKind::flag:
-        return self().lay_flag(cfg, e);
+        co_return co_await self().build_flag(cfg, e);
       case ImageKind::gapHas:
       case ImageKind::gapIs:
       case ImageKind::andOf:
-        return self().lay_condition(cfg, e);
+        co_return self().build_condition(cfg, e);
       case ImageKind::implied:
-        return self().lay_implied(cfg, e);
+        co_return co_await self().build_implied(cfg, e);
       case ImageKind::doc: {
         const Id at = push_sym(terminal_sym(cfg, e), cfg);
         if (docs_differ(n)) _p.e[at].doc = n.text;
-        return at;
+        co_return at;
       }
       default:  // a token, or a combinator `terminal_sym` refuses
-        return push_sym(terminal_sym(cfg, e), cfg);
+        co_return push_sym(terminal_sym(cfg, e), cfg);
     }
   }
-  // What a rule's body owes its rule: a data rule's conversion, unless a fold
-  // reads it, and a node rule's close, where the body opens no record -- true
-  // where that close was laid.
+  // What a rule's body adds for its rule: a data rule's conversion, unless a
+  // fold reads it, and a node rule's close, where the body opens no record;
+  // true where that close was built.
   bool close_body(const ImageStageDesc& st, Id at) {
     if (st.kind == ImageRuleKind::data && !st.folded)
       _p.e[at].made.push_back(row_id(st.convertRow));
@@ -441,8 +444,8 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
   }
 
   // A data rule's conversion over what it reads in place. Over a choice of
-  // tokens, it rides the record of each token, as a directive over a choice
-  // rides each alternative: none opens over the choice.
+  // tokens, it goes on the record of each token, as a directive over a choice
+  // goes on each alternative: none opens over the choice.
   void convert_over(Id at, std::uint16_t row) {
     Node& n = _p.e[at];
     if (n.kind != Shape::alt || !one_token(at)) {
@@ -450,7 +453,7 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
       return;
     }
     for (decltype(n.count) k = 0; k < n.count; ++k)
-      convert_over(_p.kid[n.sym + k], row);
+      convert_over(_p.child[n.sym + k], row);
   }
 
   Lowered& _o;
@@ -465,7 +468,7 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
     if (n.kind == Shape::sym) return is_term(static_cast<std::uint16_t>(n.sym));
     if (n.kind != Shape::alt || !n.made.empty() || !n.row.empty()) return false;
     for (decltype(n.count) k = 0; k < n.count; ++k)
-      if (!one_token(_p.kid[n.sym + k])) return false;
+      if (!one_token(_p.child[n.sym + k])) return false;
     return true;
   }
 };

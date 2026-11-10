@@ -1,5 +1,5 @@
-// The same eight optional clauses in front of the call, and three behind it:
-// the clauses behind the call do not take the place of those in front.
+// Eight optional clauses in front of a recursive call, and three behind it
+// that do not change the count in front.
 // expect LR: refused .hiddenLeftRecursion..*rule .Type. reaches itself before matching anything, behind more than 7 optional items
 // expect LL: refused .leftRecursion..*rule .Type. reaches itself before matching anything inside a repetition or behind optional items.*at most 7 optional items
 #pragma once

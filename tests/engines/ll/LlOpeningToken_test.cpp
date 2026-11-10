@@ -99,7 +99,7 @@ void same_spellings(Pair p, std::initializer_list<std::string_view> texts) {
 }
 
 // Expressions drawn at random from a language's operators, a few of them
-// damaged: the engines read each alike, accepted or not.
+// damaged: the engines read each the same, accepted or not.
 void swarm(Pair p, std::initializer_list<std::string_view> ops) {
   const std::vector<std::string_view> spelled(ops);
   std::uint64_t seed = 777;

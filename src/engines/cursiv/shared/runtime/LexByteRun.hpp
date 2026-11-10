@@ -60,10 +60,8 @@ CURSIV_ALWAYS_INLINE inline std::uint64_t ld64(const char* p) {
   return w;
 }
 
-// `eq8` marks a byte equal to `b`, `lt8` a byte below it. ONLY THE LOWEST SET
-// LANE IS EXACT: the borrow out of it can flag higher lanes that answer
-// nothing, so a mask is read by `ctzll` alone -- a union of them keeps that,
-// a negation or an intersection does not.
+// `eq8` marks a byte equal to `b`, `lt8` a byte below it. Only the lowest set
+// lane is exact, so read a mask with `ctzll`; a union keeps that, nothing else.
 CURSIV_ALWAYS_INLINE inline std::uint64_t eq8(std::uint64_t w,
                                               unsigned char b) {
   const std::uint64_t x = w ^ (kRep * b);

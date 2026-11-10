@@ -7,10 +7,8 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 
-// Hover: a position in a document, and the prose the language attaches to
-// what stands there, measured entirely inside that document -- no lookup
-// needed. Nothing is a valid answer, never an error: a position on nothing,
-// on undocumented text, or in a document that never parsed.
+// The prose the language attaches to what stands at a position. Nothing is an
+// answer, never an error.
 
 namespace cursiv {
 

@@ -1,12 +1,7 @@
-// The descent as source: one step per rule, the program's shape spelled
-// straight out. A choice one token separates is a switch on that token; every
-// other one asks the prediction. A choice of single terminals is a table, and
-// a large arm a function of its own -- or a step of its own where it may
-// suspend. A callee that can finish without a call of its own runs in place,
-// its frame on the native stack; any other call goes to the machine, which
-// runs it and resumes the step at a label. A rule that reaches no climb and no
-// rule that calls itself never resumes: it is a plain function with no frame,
-// unless too many of them would stand on one another.
+// The descent as source, one step per rule. A choice one token decides is a
+// switch, a choice of single terminals is a table, any other asks the
+// prediction. A callee that finishes without a call runs in place; other calls
+// go to the machine. A rule with no climb and no recursion is a plain function.
 #include "cursiv/ll/gen/ll_emit_parser.hpp"
 
 #include <algorithm>
@@ -57,10 +52,9 @@ class Anchored {
   Anchor _outer;
 };
 
-// Shared by every rule's emitter: which rules are plain, whether a position
-// may suspend and the first mode it reads do not depend on the rule. A search
-// stamps the rules it visits by round, so the next one starts clean without
-// clearing.
+// Shared by every rule's emitter: which rules are plain, whether a position may
+// suspend, and the first mode it reads. A search marks the rules it visits with
+// a round number, so it needs no clearing.
 struct Memos {
   std::vector<std::uint8_t> plain{};
   std::vector<std::int8_t> suspends{};
@@ -89,7 +83,7 @@ struct Emit : TextBuilder {
   Anchor foldAt{};
   // The record a nest turn reaches back to: the sequence it stands in, with
   // the tape length where that sequence opened. A group whose position is
-  // such a sequence hands its own opening over.
+  // such a sequence passes its own opening on.
   Anchor regionAt{};
   std::uint16_t ownRegion = kNoRow;
   Anchor ownAt{};
@@ -106,17 +100,17 @@ struct Emit : TextBuilder {
   unsigned resumes = 0;
   // Each field as it is taken and each label the step resumes at, in the
   // order the code names them: an arm that becomes a step of its own takes
-  // the ones named while it was spelt into its own frame.
+  // the ones named while it was written into its own frame.
   std::vector<std::size_t> taken{};
   std::vector<unsigned> labels{};
-  // A counted tail of nest turns is spelt one turn inside the other, a block
-  // deeper each: past this many the source outgrows the nesting a compiler
-  // must take, and the walk that writes it its stack.
+  // A counted tail of nest turns is written one turn inside the other, a block
+  // deeper each: past this many the source exceeds the nesting a compiler
+  // must accept, and the emitter's walk exceeds its stack.
   static constexpr unsigned kMaxNestedTurns = 64;
   unsigned nestedTurns = 0;
   bool exits = false;
   std::string frame{};
-  // An arm spelt on its own, `s<tag>`: a function, or where it may suspend a
+  // An arm emitted on its own, `s<tag>`: a function, or where it may suspend a
   // step with its frame `F<tag>` and its number on the machine.
   struct Arm {
     std::string tag{};
@@ -126,8 +120,8 @@ struct Emit : TextBuilder {
   };
   std::vector<Arm> arms{};
   // Past this many bytes of source an arm that can stand alone is a function
-  // or a step: a rule's step stays a size the compiler takes in stride, and
-  // the units share the arms of one large rule.
+  // or a step: a rule's step stays a size the compiler handles well, and the
+  // units share the arms of one large rule.
   static constexpr std::size_t kArmBytes = 16384;
   // The machine numbers its steps below its `kLlDone`.
   static constexpr std::uint32_t kLastStep = 0xFFFFu;
@@ -148,7 +142,7 @@ struct Emit : TextBuilder {
     inUse.push_back(fields.size());
     return "f." + frame_field(type, name(stem));
   }
-  // A field of its own, for good.
+  // A field that is never given back.
   const std::string& frame_field(std::string_view type, std::string name) {
     taken.push_back(fields.size());
     return fields.emplace_back(std::string(type), std::move(name)).second;
@@ -195,8 +189,8 @@ struct Emit : TextBuilder {
   std::string name(std::string_view stem) { return concat(stem, uniq++); }
 
   const LlNode& at(std::uint16_t id) const { return a.cfg.nodes[id]; }
-  std::uint16_t kid(const LlNode& n, unsigned i) const {
-    return a.cfg.kids[n.sym + i];
+  std::uint16_t child_at(const LlNode& n, unsigned i) const {
+    return a.cfg.childIds[n.sym + i];
   }
 
   std::uint16_t first_mode(std::uint16_t id) const;
@@ -212,34 +206,32 @@ struct Emit : TextBuilder {
     return m == kNoRow ? a.errMode : m;
   }
 
-  // A token already read, and what the point that read it proved about it:
-  // `kNoRow` for neither, `kAnyToken` for one in hand the switch did not
-  // pin down. The descent reads once per point, as the table engine does --
-  // an arm that re-lexed the token its own choice had just read would answer
-  // a second question nobody asked.
+  // A token already read, and what its point proved about it: `kNoRow` for
+  // none, `kAnyToken` for one the switch did not pin down. The descent reads
+  // once per point.
   static constexpr std::uint16_t kAnyToken = 0xFFFEu;
-  void node(std::uint16_t id, std::uint16_t hand = kNoRow);
+  Descent<void> node(std::uint16_t id, std::uint16_t hand = kNoRow);
   void leaf(std::uint16_t id, std::uint16_t hand, std::uint16_t row);
-  void group(std::uint16_t id, std::uint16_t hand = kNoRow);
-  void decision(std::uint16_t id);
+  Descent<void> group(std::uint16_t id, std::uint16_t hand = kNoRow);
+  Descent<void> decision(std::uint16_t id);
   void peek_choice(std::uint16_t d, std::string_view mode, bool constant);
-  void arm(std::uint16_t id, std::uint16_t hand);
+  Descent<void> arm(std::uint16_t id, std::uint16_t hand);
   bool word_rule(std::uint16_t r) const;
   void term_choice(std::uint16_t id,
                    const std::vector<std::vector<std::uint16_t>>& byArm);
-  void sequence(std::uint16_t id, std::uint16_t hand);
-  void repetition(std::uint16_t id, std::uint16_t body = kNoRow);
-  bool ladder_flat(std::uint16_t id) const;
-  void ladder(std::uint16_t id);
+  Descent<void> sequence(std::uint16_t id, std::uint16_t hand);
+  Descent<void> repetition(std::uint16_t id, std::uint16_t body = kNoRow);
+  bool counted_tail_flat(std::uint16_t id) const;
+  Descent<void> counted_tail(std::uint16_t id);
   void call_site(std::uint16_t id);
-  bool may_suspend(std::uint16_t id);
+  Descent<bool> may_suspend(std::uint16_t id);
   bool turns(std::uint16_t id) const { return plan.turns(id); }
   bool reaches_back(std::uint16_t id) const {
     return plan.reaches_back(id);
   }
   // A rule that opens no frame and never resumes.
   bool plain(std::uint16_t r) const { return memo.plain[r] != 0; }
-  bool clean(std::uint16_t id);
+  Descent<bool> clean(std::uint16_t id);
   bool finishes(std::uint16_t r);
   void invoke(std::uint16_t callee, std::string_view arg);
   void climb(std::uint16_t r);
@@ -279,7 +271,7 @@ std::uint16_t Emit::first_mode(std::uint16_t id) const {
                               : a.headMode[n.decision];
     case LlShape::seq: {
       for (unsigned i = 0; i < n.count; ++i) {
-        const std::uint16_t m = first_mode(kid(n, i));
+        const std::uint16_t m = first_mode(child_at(n, i));
         if (m != kNoRow) return m;
       }
       return kNoRow;
@@ -315,8 +307,8 @@ bool Emit::word_rule(std::uint16_t r) const {
       a.decFlag[n.decision].any() || a.decStands[n.decision] != 0)
     return false;
   for (std::uint16_t i = 0; i < db.nalts; ++i) {
-    const LlNode& x = at(kid(n, i));
-    if (x.kind != LlShape::term || x.owns || x.row != at(kid(n, 0)).row)
+    const LlNode& x = at(child_at(n, i));
+    if (x.kind != LlShape::term || x.owns || x.row != at(child_at(n, 0)).row)
       return false;
     const DynSet& reads = a.laSet[dec.set + i];
     if (!reads.test(x.sym) || reads.more_than_one()) return false;
@@ -339,7 +331,7 @@ void Emit::call_site(std::uint16_t id) {
   const std::uint8_t section = a.cfg.nodeBuild[id].section;
   // What the site keeps across a plain callee ends with it, as a group's
   // locals do.
-  const bool held = may_suspend(id);
+  const bool held = descend(may_suspend(id));
   // The token in place, as a terminal is read: the rule is called only for a
   // repair, where the token is none of its own.
   const bool word = !held && section == 0 && count <= 1 && !a.callerPeek[id] &&
@@ -354,14 +346,15 @@ void Emit::call_site(std::uint16_t id) {
                 true);
     open("switch (c.la.sym) {");
     for (std::uint16_t i = 0; i < a.cfg.decisionBuild[body.decision].nalts; ++i)
-      line("case ", at(kid(body, i)).sym, "u: ", pos, " = ", kid(body, i) + 1,
-           "u; break;");
+      line("case ", at(child_at(body, i)).sym, "u: ", pos, " = ",
+           child_at(body, i) + 1, "u; break;");
     line("default: break;");
     close("}");
     close("}");
     line("if (", pos,
          " != 0u) [[likely]] ::cursiv::engine::ll_consume<kTable>(c, ",
-         count == 1 ? a.fuse[base].to : at(kid(body, 0)).row, "u, ", pos, ");");
+         count == 1 ? a.fuse[base].to : at(child_at(body, 0)).row, "u, ", pos,
+         ");");
     open("else {");
   }
   const bool scoped = !held && (count != 0 || section != 0);
@@ -390,44 +383,47 @@ void Emit::call_site(std::uint16_t id) {
 // Whether a position calls, anywhere inside, a rule that is not plain: the
 // call may leave the step to resume at a label, so a record open across it
 // keeps its handles in the frame.
-bool Emit::may_suspend(std::uint16_t id) {
+Descent<bool> Emit::may_suspend(std::uint16_t id) {
   if (memo.suspends.empty()) memo.suspends.assign(a.cfg.nnodes, -1);
-  if (memo.suspends[id] >= 0) return memo.suspends[id] != 0;
+  if (memo.suspends[id] >= 0) co_return memo.suspends[id] != 0;
   const LlNode& n = at(id);
   bool any = n.kind == LlShape::call && !plain(n.sym);
   if (n.kind == LlShape::seq || n.kind == LlShape::alt)
-    for (unsigned i = 0; i < n.count; ++i) any = may_suspend(kid(n, i)) || any;
+    for (unsigned i = 0; i < n.count; ++i)
+      any = co_await may_suspend(child_at(n, i)) || any;
   if (n.kind == LlShape::rep) {
     // A tail of counted options is walked, never descended: it may be as
     // deep as the count.
     std::uint16_t turn = id;
-    while (a.cfg.nodeBuild[turn].ladder &&
-           a.cfg.nodeBuild[at(turn).sym].ladder) {
-      any = may_suspend(kid(at(at(turn).sym), 0)) || any;
-      turn = kid(at(at(turn).sym), 1);
+    while (a.cfg.nodeBuild[turn].countedTail &&
+           a.cfg.nodeBuild[at(turn).sym].countedTail) {
+      any = co_await may_suspend(child_at(at(at(turn).sym), 0)) || any;
+      turn = child_at(at(at(turn).sym), 1);
     }
-    any = may_suspend(at(turn).sym) || any;
+    any = co_await may_suspend(at(turn).sym) || any;
   }
   memo.suspends[id] = any ? 1 : 0;
-  return any;
+  co_return any;
 }
 
 // Whether a position has a reading that calls no rule with a frame.
-bool Emit::clean(std::uint16_t id) {
+Descent<bool> Emit::clean(std::uint16_t id) {
   if (memo.clean.empty()) memo.clean.assign(a.cfg.nnodes, -1);
-  if (memo.clean[id] >= 0) return memo.clean[id] != 0;
+  if (memo.clean[id] >= 0) co_return memo.clean[id] != 0;
   const LlNode& n = at(id);
   bool any = true;
   if (n.kind == LlShape::call) any = plain(n.sym);
   if (n.kind == LlShape::seq)
-    for (unsigned i = 0; i < n.count && any; ++i) any = clean(kid(n, i));
+    for (unsigned i = 0; i < n.count && any; ++i)
+      any = co_await clean(child_at(n, i));
   if (n.kind == LlShape::alt) {
     any = false;
-    for (unsigned i = 0; i < n.count && !any; ++i) any = clean(kid(n, i));
+    for (unsigned i = 0; i < n.count && !any; ++i)
+      any = co_await clean(child_at(n, i));
   }
-  if (n.kind == LlShape::rep && n.min != 0) any = clean(n.sym);
+  if (n.kind == LlShape::rep && n.min != 0) any = co_await clean(n.sym);
   memo.clean[id] = any ? 1 : 0;
-  return any;
+  co_return any;
 }
 
 // Whether a rule can finish where its caller runs it: a reading of it calls no
@@ -435,15 +431,12 @@ bool Emit::clean(std::uint16_t id) {
 bool Emit::finishes(std::uint16_t r) {
   const LlRuleInfo& u = a.cfg.rules[r];
   if (u.climb != kNoRow) return plain(a.cfg.climbs[u.climb].primary);
-  return u.body == kNoRow || clean(u.body);
+  return u.body == kNoRow || descend(clean(u.body));
 }
 
-// A callee that can finish in place runs there; one that calls in turn, or
-// one that cannot finish there, leaves the step to return the call to the
-// machine, its frame saying where it resumes: the machine runs the call, then
-// comes back to the label. A local declared before the label and read after it
-// is a field of the frame: a jump to the label skips every initialisation in
-// front of it. A plain callee is a plain call.
+// A callee that can finish in place runs there; any other returns the call to
+// the machine, which runs it and comes back to the label. A local read across
+// the label is a frame field. A plain callee is a plain call.
 void Emit::invoke(std::uint16_t callee, std::string_view arg) {
   if (plain(callee)) {
     line("s", callee, "(c);");
@@ -466,17 +459,17 @@ void Emit::invoke(std::uint16_t callee, std::string_view arg) {
 }
 
 // A group that owns a record: the token in front of it is read first, so the
-// trivia that precedes it lands outside and the record begins where the text
+// trivia that precedes it stays outside and the record begins where the text
 // does.
-void Emit::group(std::uint16_t id, std::uint16_t hand) {
+Descent<void> Emit::group(std::uint16_t id, std::uint16_t hand) {
   const FieldScope scope(*this);
   const LlNode& n = at(id);
-  // An empty position has no token to wait for: it lays its own record.
+  // An empty position has no token to wait for: it creates its own record.
   if (!n.owns || n.kind == LlShape::empty) {
-    node(id, hand);
-    return;
+    co_await node(id, hand);
+    co_return;
   }
-  const bool held = may_suspend(id);
+  const bool held = co_await may_suspend(id);
   const bool checkpoint = n.kind == LlShape::seq && n.count == 0 && turns(id);
   const std::uint32_t ob = a.ownBase[id];
   const std::uint32_t oc = a.ownBase[id + 1] - ob;
@@ -486,14 +479,14 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
   // A nest turn's record begins at its receiver, its first child; its
   // position says it has one.
   const bool turn = turns(id) && regionAt.live();
-  // With no receiver to wrap, the nest rides its lone terminal.
+  // With no receiver to wrap, the nest goes onto its lone terminal.
   if (turns(id) && !turn && a.cfg.nodeBuild[id].leafRow != kNoRow) {
-    leaf(kid(n, 0), hand, a.cfg.nodeBuild[id].leafRow);
-    return;
+    leaf(child_at(n, 0), hand, a.cfg.nodeBuild[id].leafRow);
+    co_return;
   }
   const bool region = !turns(id) && reaches_back(id);
   const bool folds = n.kind == LlShape::seq && n.count == 2 &&
-                     a.cfg.nodeBuild[kid(n, 1)].leftFold;
+                     a.cfg.nodeBuild[child_at(n, 1)].leftFold;
   const bool counted = oc != 0 || region || folds;
   const std::string o = local(held, "::cursiv::CstBuilder::Open", "o");
   const std::string b = local(held, "::cursiv::TextOffset", "b");
@@ -523,7 +516,8 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
   } else {
     line(held ? "" : "const auto ", o, " = ",
          step ? foldAt.open : "c.tape.enter()", ";");
-    // The tape's length is kept only where a ride or a turn may read it back.
+    // The tape's length is kept only where a reused subtree or a turn may read
+    // it back.
     if (counted)
       line(held ? "" : "[[maybe_unused]] const ::cursiv::NodeCount ", f,
            " = c.tape.stream().records();");
@@ -545,7 +539,7 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
       regionAt, a.writes.chainBuild[n.row].creates ? Anchor{} : regionAt);
   const bool outerStep = inStep;
   inStep = step;
-  node(id, hand);
+  co_await node(id, hand);
   inStep = outerStep;
   // The hand-over ends with the group, whose fields go back to the pool.
   if (region) {
@@ -562,13 +556,15 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
          plan.stamps(id) ? std::to_string(LlStampPlan::state(inRule)) : l,
          "));");
   } else {
-    // A turn that reached back covers more than one subtree: no ride there.
+    // A turn that reached back covers more than one subtree: no reused subtree
+    // there.
     if (turn)
-      line("if (", l, " != 0 || !::cursiv::engine::ll_ride<kTable>(c, ", f,
+      line("if (", l,
+           " != 0 || !::cursiv::engine::ll_reuse_subtree<kTable>(c, ", f,
            ", kFuse + ", ob, "u, ", oc, "u))");
     else
-      line("if (!::cursiv::engine::ll_ride<kTable>(c, ", f, ", kFuse + ", ob,
-           "u, ", oc, "u))");
+      line("if (!::cursiv::engine::ll_reuse_subtree<kTable>(c, ", f,
+           ", kFuse + ", ob, "u, ", oc, "u))");
     open();
     line("c.last = ", closer, "c, ", o, ", ", b, ", kTable.stamp.make(", n.row,
          "u, ", l, "));");
@@ -579,13 +575,13 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
 
 // Every transparent position shares its construction prefix. A creation
 // opens a new one; a nest checkpoints it without hiding it from later nests.
-void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
+Descent<void> Emit::sequence(std::uint16_t id, std::uint16_t hand) {
   const FieldScope scope(*this);
   const LlNode& n = at(id);
   const bool region = reaches_back(id);
   // A fold that owns no record anchors its steps where its base begins.
   const bool folds =
-      !n.owns && n.count == 2 && a.cfg.nodeBuild[kid(n, 1)].leftFold;
+      !n.owns && n.count == 2 && a.cfg.nodeBuild[child_at(n, 1)].leftFold;
   const Anchor outer = regionAt;
   const bool over = inStep && !outer.live() && foldAt.live();
   const Anchor& reach = over ? foldAt : outer;
@@ -596,7 +592,7 @@ void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
   } else if (region && ownRegion == id) {
     start = ownAt;
   } else if (region || folds) {
-    const bool held = may_suspend(id);
+    const bool held = co_await may_suspend(id);
     if (hand == kNoRow)
       line("::cursiv::engine::ll_peek<kTable, ", mode_of(id), "u>(c);");
     line("::cursiv::engine::ll_flush_trivia<kTable>(c);");
@@ -618,17 +614,16 @@ void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
   const Anchored foldHere = folds ? Anchored(foldAt, start) : Anchored(foldAt);
   const Anchored regionHere(regionAt);
   for (unsigned k = 0; k < n.count; ++k) {
-    const std::uint16_t x = kid(n, k);
+    const std::uint16_t x = child_at(n, k);
     regionAt = start.live() ? start : reach;
-    group(x, k == 0 ? hand : kNoRow);
+    co_await group(x, k == 0 ? hand : kNoRow);
   }
   if (scoped) close("}");
 }
 
-// The token choice `d` reads under `mode`, a constant or an expression: one
-// its alphabet admits for a caller alone and reads over another of its own is
-// asked of the frames first, then the token is held where conditions stand
-// before it. With no choice, `kNoRow`, the token is read alone.
+// The token choice `d` reads under `mode`, a constant or an expression. A
+// terminal only a caller admits that reads over another is asked of the frames
+// first. With `d` as `kNoRow`, the token is read alone.
 void Emit::peek_choice(std::uint16_t d, std::string_view mode, bool constant) {
   if (constant)
     line("::cursiv::engine::ll_peek<kTable, ", mode, ">(c);");
@@ -643,10 +638,10 @@ void Emit::peek_choice(std::uint16_t d, std::string_view mode, bool constant) {
   if (a.decStands[d] != 0) line("::cursiv::engine::ll_hold<kTable>(c);");
 }
 
-// The arms of a choice, and the token that picks one. What one token settles
-// is a case; what it does not is asked of the prediction -- and only for the
-// tokens that leave more than one arm standing.
-void Emit::decision(std::uint16_t id) {
+// The arms of a choice, and the token that picks one. What one token decides
+// is a case; the rest asks the prediction, only for the tokens that leave more
+// than one arm.
+Descent<void> Emit::decision(std::uint16_t id) {
   const LlNode& n = at(id);
   const LlDecision& dec = a.cfg.decisions[n.decision];
   const LlDecisionBuild& db = a.cfg.decisionBuild[n.decision];
@@ -670,13 +665,12 @@ void Emit::decision(std::uint16_t id) {
     for (auto& arm : byArm) arm.clear();
   }
   // Where the text ends on the token, the prediction reads what else it may
-  // be: the token settles the arm everywhere else.
+  // be: the token decides the arm everywhere else.
   const bool ended = a.decEnded[n.decision] != 0;
   if (ended) shared = true;
-  // A token no arm admits, still there once the skip has had its say. The
-  // prediction is not asked then: it chooses BETWEEN readings, and where none
-  // reads the token it answers with the arm the grammar wrote first -- which
-  // for a rule that reaches itself is the one that invents its way down.
+  // A token no arm admits after the skip. The prediction is not asked: with no
+  // reading it answers the first arm, which in a recursive rule invents its way
+  // down.
   const bool asks =
       (dec.how != LlPredict::single || ended) && shared && db.repairCost <= 1;
   const bool direct = !ended && (dec.how == LlPredict::single || !shared);
@@ -684,13 +678,13 @@ void Emit::decision(std::uint16_t id) {
   // its own.
   bool terms = direct;
   for (std::uint16_t i = 0; i < db.nalts && terms; ++i) {
-    const LlNode& x = at(kid(n, i));
+    const LlNode& x = at(child_at(n, i));
     terms = x.kind == LlShape::term && !x.owns && byArm[i].size() == 1 &&
             byArm[i][0] == x.sym;
   }
   if (terms) {
     term_choice(id, byArm);
-    return;
+    co_return;
   }
   const std::string none = name("none");
   const std::string k = name("k");
@@ -703,8 +697,8 @@ void Emit::decision(std::uint16_t id) {
     line("::std::uint16_t ", k, ";");
     line(k, " = 0xFFFFu;");
   }
-  // A token no arm takes: the repair names the arm it enters with the token
-  // it owes invented. Every arm is spelt once, and entered there.
+  // A token no arm takes: the repair names the arm it enters, inventing the
+  // token it needs. Every arm is written once, and entered there.
   std::vector<std::string> entry(db.nalts);
   line("if (!kTable.holds(kTable.dec_first(", n.decision, "u), c.la.sym)) {");
   open();
@@ -764,16 +758,13 @@ void Emit::decision(std::uint16_t id) {
     // and it knows only that it holds one.
     const std::uint16_t hand =
         direct ? (byArm[i].size() == 1 ? byArm[i][0] : kAnyToken) : kAnyToken;
-    arm(kid(n, i), hand);
+    co_await arm(child_at(n, i), hand);
     line("break;");
     close("}");
   }
   // A choice no arm answers, even after the skip. One invented token is a
-  // repair -- the member the choice stood for gets its value; a whole
-  // construct invented is a second document, and the choice matches nothing
-  // instead.
-  // ...unless an arm reads the token in hand and only what follows it is
-  // refused: that arm is entered, and repaired where the refusal stands.
+  // repair, a whole invented construct is not. An arm that reads the token in
+  // hand, refused only after it, is entered and repaired there.
   const auto reread = [&] {
     if (direct) return;
     line("switch (::cursiv::engine::ll_reading_fix<kTable>(c, ", n.decision,
@@ -784,7 +775,7 @@ void Emit::decision(std::uint16_t id) {
     line("default: break;");
     close("}");
   };
-  // The arm invented is entered where the switch spells it, if it does.
+  // The invented arm is entered where the switch writes it, if it does.
   const auto invent = [&] { line("goto ", entry[dec.repair], ";"); };
   if (db.repairCost <= 1) {
     open("default: {");
@@ -792,11 +783,8 @@ void Emit::decision(std::uint16_t id) {
     invent();
     close("}");
   } else {
-    // ...and a choice too dear to invent still owes the caller a step.
-    // Reading nothing leaves the loop it stands in with nothing to turn on,
-    // so one member no arm could name would cost every member after it. The
-    // token goes instead, and what stands behind it is read. Where the text
-    // has ended no token is left to go: the arm is invented whole.
+    // A choice too costly to invent still skips one token, so the loop it
+    // stands in goes on. At the end of the text the arm is invented whole.
     open("default:");
     reread();
     if (db.repairCost != kLlRepairCostless) {
@@ -815,22 +803,18 @@ void Emit::decision(std::uint16_t id) {
   close("}");
 }
 
-// An arm that reads no record of the code around it -- none a turn or a fold
-// reaches back to -- moves out of the rule's step once its code outgrows
-// `kArmBytes`. With no call that may suspend it is a function the choice
-// calls. Otherwise it is a step of its own, which the machine runs as it runs
-// a rule's: its frame holds the fields its code took and its switch the
-// labels its calls resume at, and the rule's step resumes once it is done.
-// Its inner arms have moved first, so only what they leave counts.
-void Emit::arm(std::uint16_t id, std::uint16_t hand) {
+// An arm whose code outgrows `kArmBytes` and reads no record around it moves
+// out of the rule's step: a function the choice calls, or, if a call in it may
+// suspend, a step of its own the machine runs. Inner arms move first.
+Descent<void> Emit::arm(std::uint16_t id, std::uint16_t hand) {
   const std::size_t from = size();
   const std::size_t took = taken.size();
   const std::size_t resumed = labels.size();
-  group(id, hand);
-  const bool step = may_suspend(id);
+  co_await group(id, hand);
+  const bool step = co_await may_suspend(id);
   if (size() - from < kArmBytes || regionAt.live() || foldAt.live() ||
       (step && memo.steps >= kLastStep))
-    return;
+    co_return;
   Arm moved{.tag = concat(inRule, "_", arms.size())};
   if (!step) {
     moved.body =
@@ -838,7 +822,7 @@ void Emit::arm(std::uint16_t id, std::uint16_t hand) {
                "(::cursiv::engine::LlContext& c) {\n", cut_from(from), "}\n\n");
     line("s", moved.tag, "(c);");
     arms.push_back(std::move(moved));
-    return;
+    co_return;
   }
   moved.step = memo.steps++;
   moved.frame = frame_of(moved.tag, took);
@@ -854,10 +838,8 @@ void Emit::arm(std::uint16_t id, std::uint16_t hand) {
   arms.push_back(std::move(moved));
 }
 
-// A choice whose arms each read one terminal on a token of their own, as
-// data: the token, or the repair where no arm takes it, names an entry of the
-// arms' table, and one reading takes it as the arm spelt in place would. The
-// arms of a large choice of keywords cost the descent a line each.
+// A choice whose arms each read one terminal on a token of their own, as data:
+// the token, or the repair, indexes the arms' table.
 void Emit::term_choice(std::uint16_t id,
                        const std::vector<std::vector<std::uint16_t>>& byArm) {
   const LlNode& n = at(id);
@@ -867,15 +849,15 @@ void Emit::term_choice(std::uint16_t id,
   peek_choice(n.decision, concat(dec.mode, "u"), true);
   line("static constexpr ::cursiv::engine::LlTermArm ", k, "a[] = {");
   for (std::uint16_t i = 0; i < db.nalts; ++i) {
-    const std::uint16_t x = kid(n, i);
+    const std::uint16_t x = child_at(n, i);
     line("    {", at(x).sym, "u, ", at(x).mode, "u, ", at(x).row, "u, ", x + 1,
          "u},");
   }
   line("};");
   line("::std::uint16_t ", k, ";");
   line(k, " = 0xFFFFu;");
-  // A token no arm takes: the repair names the arm it enters with the token
-  // it owes invented, or repairs the text until an arm takes it.
+  // A token no arm takes: the repair names the arm it enters, inventing the
+  // token it needs, or repairs the text until an arm takes it.
   line("if (!kTable.holds(kTable.dec_first(", n.decision, "u), c.la.sym)) {");
   open();
   line(k, " = ::cursiv::engine::ll_choice_fix<kTable>(c, ", dec.mode, "u, ",
@@ -897,16 +879,16 @@ void Emit::term_choice(std::uint16_t id,
 
 // One turn of a loop, or with `body` the turn of a flat chain: the choice to
 // take it, then what it reads, under the loop the chain stands in.
-void Emit::repetition(std::uint16_t id, std::uint16_t body) {
+Descent<void> Emit::repetition(std::uint16_t id, std::uint16_t body) {
   const FieldScope scope(*this);
   const LlNode& n = at(id);
   const LlDecision& dec = a.cfg.decisions[n.decision];
   const bool flat = body != kNoRow;
-  if (!flat && a.cfg.nodeBuild[id].ladder && ladder_flat(id)) {
-    ladder(id);
-    return;
+  if (!flat && a.cfg.nodeBuild[id].countedTail && counted_tail_flat(id)) {
+    co_await counted_tail(id);
+    co_return;
   }
-  const bool nested = !flat && a.cfg.nodeBuild[id].ladder;
+  const bool nested = !flat && a.cfg.nodeBuild[id].countedTail;
   if (nested) {
     ++nestedTurns;
     if (nestedTurns > kMaxNestedTurns)
@@ -916,7 +898,8 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
           "check the count in validation",
           a.cfg.rule_name(inRule), kMaxNestedTurns));
   }
-  const bool held = !flat && may_suspend(n.sym);
+  bool held = !flat;
+  if (held) held = co_await may_suspend(n.sym);
   // The turns are counted wherever a bound reads them: a floor guards the
   // choice, a ceiling ends the loop.
   const bool counts = !flat && (n.min != 0 || n.max != kEndless);
@@ -945,11 +928,8 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   if (guarded) line("if (", i, " >= ", n.min, "u) {");
   if (guarded) open();
   peek_choice(n.decision, mode, !split);
-  // A token neither turn nor exit admits ends the loop where it stands, and
-  // everything after it is text nobody reads again -- one misspelt keyword
-  // at the head of a document would cost every construct below it. The skip
-  // stops at the first token a turn could start on, or at one the caller can
-  // carry on from, so a loop that was really over is over.
+  // A token no turn or exit admits does not end the loop: the skip stops at the
+  // first token a turn starts on or the caller can go on from.
   line("::std::uint8_t fix;");
   line("fix = ::cursiv::engine::kLlLoopNone;");
   line("if (!kTable.holds(kTable.dec_first(", n.decision, "u), c.la.sym)) {");
@@ -958,8 +938,8 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
        n.decision, "u);");
   line("if (fix == ::cursiv::engine::kLlLoopLeave) break;");
   close("}");
-  line("bool mend;");
-  line("mend = fix == ::cursiv::engine::kLlLoopTurn;");
+  line("bool repair;");
+  line("repair = fix == ::cursiv::engine::kLlLoopTurn;");
   // Arm 0 takes a turn, arm 1 leaves: the sets were written in that order.
   const auto byToken = [&] {
     line("bool go;");
@@ -971,7 +951,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     if (!cases.empty()) line(cases, "go = true; break;");
     line("default: break;");
     close("}");
-    line("if (!go && mend) go = true;");
+    line("if (!go && repair) go = true;");
     line("if (!go) break;");
   };
   const auto byPrediction = [&] {
@@ -979,23 +959,21 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     const std::string k = name("k");
     line("::std::uint16_t ", k, ";");
     line(k, " = ::cursiv::engine::ll_predict<kTable>(c, ", n.decision, "u);");
-    // A prediction no arm answers is not the loop's end: the text is broken
-    // where a turn would have started. LEAVING IS ONLY AN ANSWER WHERE A RULE
-    // ABOVE CAN CARRY ON FROM THE TOKEN -- otherwise it costs the author
-    // every construct below, so the loop turns and its body repairs.
+    // A prediction no arm answers ends the loop only where a rule above can go
+    // on from the token; otherwise the loop turns and its body repairs.
     open("if (", k, " != 0) {");
-    line("if (", k, " == ::cursiv::engine::kNoRow && !mend &&");
+    line("if (", k, " == ::cursiv::engine::kNoRow && !repair &&");
     line("    !::cursiv::engine::ll_loop_leaves<kTable>(c, ", n.decision,
          "u)) {");
     open();
     line("fix = ::cursiv::engine::ll_loop_fix<kTable>(c, ", mode, ", ",
          n.decision, "u);");
     line("if (fix == ::cursiv::engine::kLlLoopLeave) break;");
-    line("mend = fix == ::cursiv::engine::kLlLoopTurn;");
+    line("repair = fix == ::cursiv::engine::kLlLoopTurn;");
     line(k, " = ::cursiv::engine::ll_predict<kTable>(c, ", n.decision, "u);");
-    line("if (", k, " == ::cursiv::engine::kNoRow) mend = true;");
+    line("if (", k, " == ::cursiv::engine::kNoRow) repair = true;");
     close("}");
-    line("if (", k, " != 0 && !mend) break;");
+    line("if (", k, " != 0 && !repair) break;");
     close("}");
   };
   if (dec.how != LlPredict::single) {
@@ -1020,9 +998,9 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   }
   if (flat) {
     if (inStep) over_fold();
-    group(body, kAnyToken);
+    co_await group(body, kAnyToken);
     close("}");
-    return;
+    co_return;
   }
   if (trackFirst) line(first, " = false;");
   const std::string at = local(held, "::cursiv::TextOffset", "at");
@@ -1031,7 +1009,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
       !levels ? std::string{} : local(held, "::cursiv::engine::IndentAt", "lv");
   if (levels) line(held ? "" : "const auto ", level, " = c.indent;");
   if (inStep) over_fold();
-  group(n.sym, guarded ? kNoRow : kAnyToken);
+  co_await group(n.sym, guarded ? kNoRow : kAnyToken);
   if (nested) --nestedTurns;
   // A turn that gave up hands the text back to the loop, which takes another
   // on it. A turn that read nothing would turn for ever: a repair inside it
@@ -1045,35 +1023,33 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   if (!held) close("}");
 }
 
-// The optional tail of a counted repetition is nested options, each turn one
-// block deeper than the last. Written flat, one loop holds the turns in a row
-// and the first that is not taken leaves it: the same reading, at a size that
-// grows with the count alone.
-bool Emit::ladder_flat(std::uint16_t id) const {
+// The optional tail of a counted repetition is nested options. Written flat,
+// one loop reads the turns in a row and leaves at the first not taken.
+bool Emit::counted_tail_flat(std::uint16_t id) const {
   for (;;) {
     const LlNode& n = at(id);
-    if (!a.cfg.nodeBuild[id].ladder || a.cfg.nodeBuild[id].leftFold || n.owns ||
-        n.row != kNoRow || n.min != 0 || n.max != 1)
+    if (!a.cfg.nodeBuild[id].countedTail || a.cfg.nodeBuild[id].leftFold ||
+        n.owns || n.row != kNoRow || n.min != 0 || n.max != 1)
       return false;
     const LlNode& in = at(n.sym);
-    if (!a.cfg.nodeBuild[n.sym].ladder) return true;
+    if (!a.cfg.nodeBuild[n.sym].countedTail) return true;
     if (in.owns || in.row != kNoRow || plan.reaches_back(n.sym)) return false;
-    id = kid(in, 1);
+    id = child_at(in, 1);
   }
 }
 
-void Emit::ladder(std::uint16_t id) {
+Descent<void> Emit::counted_tail(std::uint16_t id) {
   const FieldScope scope(*this);
   std::vector<std::pair<std::uint16_t, std::uint16_t>> turns;
   bool held = false;
   for (;;) {
     const std::uint16_t next = at(id).sym;
-    const bool more = a.cfg.nodeBuild[next].ladder;
-    const std::uint16_t body = more ? kid(at(next), 0) : next;
+    const bool more = a.cfg.nodeBuild[next].countedTail;
+    const std::uint16_t body = more ? child_at(at(next), 0) : next;
     turns.emplace_back(id, body);
-    held = may_suspend(body) || held;
+    held = co_await may_suspend(body) || held;
     if (!more) break;
-    id = kid(at(next), 1);
+    id = child_at(at(next), 1);
   }
   const std::string armed = local(held, "bool", "t");
   const Anchored regionHere(regionAt);
@@ -1081,7 +1057,7 @@ void Emit::ladder(std::uint16_t id) {
   line(held ? "" : "bool ", armed, " = false;");
   open("for (;;) {");
   for (std::size_t k = 0; k < turns.size(); ++k) {
-    repetition(turns[k].first, turns[k].second);
+    co_await repetition(turns[k].first, turns[k].second);
     line("if (c.abandonDepth != ~::std::size_t{0}) break;");
     if (k == 0) line(armed, " = true;");
   }
@@ -1104,25 +1080,25 @@ void Emit::leaf(std::uint16_t id, std::uint16_t hand, std::uint16_t row) {
        n.mode, "u, ", n.sym, "u>(c, ", row, "u, ", id + 1, "u);");
 }
 
-void Emit::node(std::uint16_t id, std::uint16_t hand) {
+Descent<void> Emit::node(std::uint16_t id, std::uint16_t hand) {
   const LlNode& n = at(id);
   switch (n.kind) {
     case LlShape::term:
       leaf(id, hand, n.row);
-      return;
+      co_return;
     case LlShape::endMark:
       line("::cursiv::engine::ll_end<kTable>(c, ", n.mode, "u);");
       line("::cursiv::engine::ll_flush_trivia<kTable>(c);");
-      return;
+      co_return;
     case LlShape::condition:
       if (a.cut[n.sym].none())
         line("::cursiv::engine::ll_condition_node<kTable>(c, ", n.mode, "u, ",
              n.sym, "u, ", id, "u);");
-      return;
+      co_return;
     case LlShape::implied:
       line("::cursiv::engine::ll_implied<kTable>(c, ", n.mode, "u, ", n.sym,
            "u, ", n.min, "u, ", n.row, "u, ", id + 1, "u);");
-      return;
+      co_return;
     case LlShape::empty:
       // Past the trivia a parent already wrote: the run's ends never decrease.
       if (n.owns)
@@ -1130,45 +1106,41 @@ void Emit::node(std::uint16_t id, std::uint16_t hand) {
             "c.last = ::cursiv::engine::ll_close<kTable>(c, c.tape.enter(), "
             "::std::max(c.at, c.triviaAt), kTable.stamp.make(",
             n.row, "u, 0));");
-      return;
+      co_return;
     case LlShape::call:
       call_site(id);
-      return;
+      co_return;
     case LlShape::seq:
-      sequence(id, hand);
-      return;
+      co_await sequence(id, hand);
+      co_return;
     case LlShape::alt:
-      decision(id);
-      return;
+      co_await decision(id);
+      co_return;
     case LlShape::rep:
-      repetition(id);
-      return;
+      co_await repetition(id);
+      co_return;
   }
 }
 
-// A precedence table, climbed: the operand, then a turn per operator that
-// binds at least as tight as the one the caller stands under. The record of a
-// join spans from the left operand's first byte, so the open is taken before
-// it and re-closed at every turn. The right operand is the climb again, one
-// step tighter, called through the machine like any rule.
+// A precedence table, climbed: the operand, then one turn per operator binding
+// at least as tight as the caller's. A join's record starts at the left
+// operand. The right operand climbs one step tighter.
 void Emit::climb(std::uint16_t r) {
   const LlClimb& cl = a.cfg.climbs[a.cfg.rules[r].climb];
   const std::uint16_t selectDec = a.cfg.nodes[cl.selectNode].decision;
   const bool select = a.cfg.decisions[selectDec].how != LlPredict::single ||
                       a.decEnded[selectDec] != 0;
-  // A step that groups nothing leaves the next operator of the chain to the
-  // caller, and the caller does not take what the step refused either: after a
-  // turn only an operator on a looser step goes on. Without a right-grouping
-  // operator the operand is always one step tighter, and the frame keeps no
-  // flag for it.
-  bool anyNon = false, anyRight = false, bodies = false, lays = false;
+  // After a turn on a non-grouping step only a looser operator goes on, in the
+  // caller too. Without right-grouping operators the operand is always one step
+  // tighter, and the frame keeps no flag.
+  bool anyNon = false, anyRight = false, bodies = false, atomics = false;
   for (std::uint16_t k = 0; k < cl.opCount; ++k) {
     const LlClimbOp& op = a.cfg.climbOps[cl.opBase + k];
     anyNon = anyNon || op.assoc == Association::non;
     anyRight = anyRight || op.assoc == Association::right;
     const bool atomic = a.cfg.atomic_operator(op.body) != kNoRow;
     bodies = bodies || !atomic;
-    lays = lays || atomic;
+    atomics = atomics || atomic;
   }
   for (const auto& [type, n] : {std::pair{"unsigned", "least"},
                                 {"::cursiv::CstBuilder::Open", "o"},
@@ -1219,10 +1191,10 @@ void Emit::climb(std::uint16_t r) {
   if (anyRight) line("f.right = false;");
   if (anyNon) line("f.non = false;");
   const std::string invented = name("M");
-  // The operator a repair invents: a terminal is laid where the text stops
+  // The operator a repair invents: a terminal is inserted where the text stops
   // and the right operand is read on from there; a rule's body invents its
   // own head. What the repair does not name leaves the climb.
-  const auto mend = [&](std::string_view into) {
+  const auto repair = [&](std::string_view into) {
     line(into, " = ::cursiv::engine::ll_climb_fix<kTable>(c, ", cl.mode, "u, ",
          selectDec, "u);");
     line("if (", into, " == ::cursiv::engine::kLlClimbAgain) continue;");
@@ -1275,7 +1247,7 @@ void Emit::climb(std::uint16_t r) {
     line("bad = false;");
     close("}");
     open("if (bad) {");
-    mend("op");
+    repair("op");
     close("}");
     open("switch (op) {");
   }
@@ -1313,7 +1285,7 @@ void Emit::climb(std::uint16_t r) {
          "u), c.la.sym) && "
          "::cursiv::engine::ll_climb_exits<kTable>(c, c.la.sym)) break;");
     line("::std::uint16_t fix;");
-    mend("fix");
+    repair("fix");
     line("break;");
     close();
   }
@@ -1339,7 +1311,7 @@ void Emit::climb(std::uint16_t r) {
         line("::cursiv::engine::ll_expect<kTable, ", token.mode, "u, ",
              token.sym, "u>(c, ", token.row, "u, ", leaf + 1, "u);");
       } else {
-        group(op.body, kAnyToken);
+        descend(group(op.body, kAnyToken));
       }
       line("break;");
       close("}");
@@ -1350,7 +1322,7 @@ void Emit::climb(std::uint16_t r) {
     close("}");
   }
   line("if (c.give) break;");
-  if (lays) line(invented, ":;");
+  if (atomics) line(invented, ":;");
   line("f.w1 = c.last;");
   invoke(r, anyRight ? "f.right ? f.prec : f.prec + 1" : "f.prec + 1");
   if (anyNon) line("f.limit = f.non ? f.prec - 1u : f.prec;");
@@ -1390,10 +1362,9 @@ std::string Emit::step_head(std::string_view tag, std::size_t resumed) const {
                 tag, "*>(frame));\n", resume_switch(resumed));
 }
 
-// One rule, as a step: its frame holds what outlives a call, and the step
-// jumps back to the label a call resumes at. A plain rule is a function with
-// no frame. A rule entered after the rule in hand gave up opens
-// nothing.
+// One rule as a step: its frame holds what outlives a call, and the step jumps
+// back to the label a call resumes at. A plain rule is a function with no
+// frame. A rule entered after its caller gave up opens nothing.
 void Emit::rule(std::uint16_t r) {
   const LlRuleInfo& u = a.cfg.rules[r];
   open();
@@ -1401,7 +1372,7 @@ void Emit::rule(std::uint16_t r) {
   if (u.climb != kNoRow)
     climb(r);
   else if (u.body != kNoRow)
-    group(u.body);
+    descend(group(u.body));
   std::string body = take();
   close();
   if (plain(r)) {
@@ -1426,11 +1397,9 @@ void Emit::rule(std::uint16_t r) {
 
 }  // namespace
 
-// How many plain rules stand on the native stack from each rule down, zero for
-// a rule that is not plain: one with a climb, one that calls a rule that is
-// not plain -- so none reaches a rule that calls itself -- or one that would
-// stack more than `kLlPlainDepth`. Callees settle first, with no recursion: a
-// chain of rules may be as long as the grammar.
+// How many plain rules stand on the native stack from each rule down; zero for
+// a rule that is not plain: one with a climb, one that calls a rule that is not
+// plain, or one deeper than `kLlPlainDepth`. Computed without recursion.
 std::vector<std::uint8_t> ll_plain_depths(const LlLowCfg& c) {
   std::vector<std::vector<std::uint16_t>> callers(c.nrules);
   std::vector<std::uint16_t> waits(c.nrules, 0), ready, nodes;
@@ -1483,8 +1452,8 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
       "// GENERATED by the predictive engine -- do not edit.\n";
   bool levels = false;
   for (std::uint16_t t = 1; t < a.cfg.nterms; ++t)
-    levels = levels || a.cfg.terms[t].laid == kLaidIndent ||
-             a.cfg.terms[t].laid == kLaidDedent;
+    levels = levels || a.cfg.terms[t].synthetic == kSyntheticIndent ||
+             a.cfg.terms[t].synthetic == kSyntheticDedent;
   Memos memo{.plain = ll_plain_depths(a.cfg), .steps = a.cfg.nrules};
   std::string declarations = concat("\nnamespace ", ns, " {\n");
   std::vector<std::string> bodies;

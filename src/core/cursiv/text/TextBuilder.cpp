@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <functional>
+#include <string>
 
 namespace cursiv {
 
@@ -26,6 +28,10 @@ std::string TextBuilder::take() {
 }
 
 void TextBuilder::add_text(std::string_view text) {
+  // A part may view this builder's own text, which the writes below move.
+  if (std::less_equal<>()(_text.data(), text.data()) &&
+      std::less<>()(text.data(), _text.data() + _text.size()))
+    return add_text(std::string(text));
   for (auto end = text.find('\n'); end != std::string_view::npos;
        end = text.find('\n')) {
     start_line();

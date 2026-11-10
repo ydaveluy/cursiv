@@ -1,9 +1,8 @@
 #pragma once
 
-// Shapes a pass of the construction once lost a sentence of, cells whose arms
-// a rank or a phase elects, and words a state reserves or not: each behind its
-// own opening keyword in one grammar. No rule is shared, so each case keeps
-// the shape it pins.
+// Shapes a pass of the construction could lose a sentence of, cells whose arms
+// a rank or a phase chooses, and words a state reserves or not, each behind its
+// own opening keyword, so each case keeps the shape it pins.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -22,15 +21,15 @@ struct Words : cursiv::GrammarSpec {
 namespace tmin {
 
 namespace ast {
-struct Kid : cursiv::Extends<cursiv::AstNode> {};
-struct XK : cursiv::Extends<Kid> {
+struct Child : cursiv::Extends<cursiv::AstNode> {};
+struct XK : cursiv::Extends<Child> {
   string_view t;
 };
-struct YK : cursiv::Extends<Kid> {
+struct YK : cursiv::Extends<Child> {
   string_view t;
 };
 struct Node : cursiv::Extends<cursiv::AstNode> {
-  Kid* kid = nullptr;
+  Child* child = nullptr;
 };
 }  // namespace ast
 
@@ -41,12 +40,12 @@ struct G : tpasses::Words {
   struct Y : rule<create<ast::YK>(assign<&ast::YK::t>(ref<YT>))> {};
   struct R
       : rule<create<ast::Node>(
-            (lit<"b"> + lit<"k"> + assign<&ast::Node::kid>(ref<Y> | ref<X>)) |
-            (lit<"b"> + assign<&ast::Node::kid>(ref<Y> | ref<X>)) |
-            (lit<"a"> + assign<&ast::Node::kid>(ref<X> | ref<Y>)) |
-            (lit<"c"> + assign<&ast::Node::kid>(ref<Y> | ref<X>)) |
-            (lit<"d"> + lit<"k"> + assign<&ast::Node::kid>(ref<X> | ref<Y>)) |
-            (lit<"d"> + assign<&ast::Node::kid>(ref<X> | ref<Y>)))> {};
+            (lit<"b"> + lit<"k"> + assign<&ast::Node::child>(ref<Y> | ref<X>)) |
+            (lit<"b"> + assign<&ast::Node::child>(ref<Y> | ref<X>)) |
+            (lit<"a"> + assign<&ast::Node::child>(ref<X> | ref<Y>)) |
+            (lit<"c"> + assign<&ast::Node::child>(ref<Y> | ref<X>)) |
+            (lit<"d"> + lit<"k"> + assign<&ast::Node::child>(ref<X> | ref<Y>)) |
+            (lit<"d"> + assign<&ast::Node::child>(ref<X> | ref<Y>)))> {};
 };
 
 }  // namespace tmin
@@ -73,7 +72,7 @@ struct G : tpasses::Words {
 
 }  // namespace tend
 
-// A conflict cell the second token decides, where one arm's reduce lands in a
+// A conflict cell the second token decides, where one arm's reduce goes to a
 // state of another lex mode: the drive re-reads there, so no peek decides it.
 namespace tpeek {
 
@@ -139,15 +138,15 @@ struct G : tpasses::Words {
 namespace trank {
 
 namespace ast {
-struct Kid : cursiv::Extends<cursiv::AstNode> {};
-struct AKid : cursiv::Extends<Kid> {
+struct Child : cursiv::Extends<cursiv::AstNode> {};
+struct AChild : cursiv::Extends<Child> {
   string_view t;
 };
-struct BKid : cursiv::Extends<Kid> {
+struct BChild : cursiv::Extends<Child> {
   string_view t;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  Kid* kid = nullptr;
+  Child* child = nullptr;
 };
 }  // namespace ast
 
@@ -159,17 +158,18 @@ struct Words : tpasses::Words {
 // their cells.
 template <int>
 struct Base : Words {
-  struct A : rule<create<ast::AKid>(assign<&ast::AKid::t>(ref<C>))> {};
-  struct B : rule<create<ast::BKid>(assign<&ast::BKid::t>(ref<C>))> {};
-  struct T2 : rule<create<ast::Doc>(
-                  (assign<&ast::Doc::kid>(ref<B>) + lit<"z">) |
-                  (assign<&ast::Doc::kid>(ref<A>) + lit<"z">))> {};
+  struct A : rule<create<ast::AChild>(assign<&ast::AChild::t>(ref<C>))> {};
+  struct B : rule<create<ast::BChild>(assign<&ast::BChild::t>(ref<C>))> {};
+  struct T2
+      : rule<create<ast::Doc>((assign<&ast::Doc::child>(ref<B>) + lit<"z">) |
+                              (assign<&ast::Doc::child>(ref<A>) + lit<"z">))> {
+  };
 };
 
 namespace plain {
 struct G : Base<0> {
-  struct T1 : rule<create<ast::Doc>(assign<&ast::Doc::kid>(ref<A>) |
-                                    assign<&ast::Doc::kid>(ref<B>))> {};
+  struct T1 : rule<create<ast::Doc>(assign<&ast::Doc::child>(ref<A>) |
+                                    assign<&ast::Doc::child>(ref<B>))> {};
   struct S : rule<(lit<"x"> + ref<T1>) | (lit<"y"> + ref<T2>)> {};
 };
 }  // namespace plain
@@ -178,8 +178,8 @@ struct G : Base<0> {
 namespace grown {
 struct G : Base<1> {
   struct D : rule<lit<"d">> {};
-  struct T1 : rule<create<ast::Doc>(assign<&ast::Doc::kid>(ref<A>) |
-                                    assign<&ast::Doc::kid>(ref<B>) |
+  struct T1 : rule<create<ast::Doc>(assign<&ast::Doc::child>(ref<A>) |
+                                    assign<&ast::Doc::child>(ref<B>) |
                                     (ref<D> + lit<"e">))> {};
   struct S : rule<(lit<"x"> + ref<T1>) | (lit<"y"> + ref<T2>)> {};
 };
@@ -188,22 +188,24 @@ struct G : Base<1> {
 }  // namespace trank
 
 // The state a cell stands in says which choice orders it: after `y c` only T2
-// is open -- a further reading of `c` keeps `q` after it -- so `y c w` is T2's,
-// which writes B first, although T1 alone ends on the same `w` and closes
-// narrower.
+// is open, so `y c w` is T2's, which writes B first, though T1 alone also ends
+// on `w`.
 namespace tcontext {
 
 struct G : trank::Words {
-  struct A
-      : rule<create<trank::ast::AKid>(assign<&trank::ast::AKid::t>(ref<C>))> {};
-  struct B
-      : rule<create<trank::ast::BKid>(assign<&trank::ast::BKid::t>(ref<C>))> {};
+  struct A : rule<create<trank::ast::AChild>(
+                 assign<&trank::ast::AChild::t>(ref<C>))> {};
+  struct B : rule<create<trank::ast::BChild>(
+                 assign<&trank::ast::BChild::t>(ref<C>))> {};
   struct T1
-      : rule<create<trank::ast::Doc>(assign<&trank::ast::Doc::kid>(ref<A>) |
-                                     assign<&trank::ast::Doc::kid>(ref<B>))> {};
-  struct T2 : rule<create<trank::ast::Doc>(
-                  (ref<C> + lit<"q">) | assign<&trank::ast::Doc::kid>(ref<B>) |
-                  assign<&trank::ast::Doc::kid>(ref<A>))> {};
+      : rule<create<trank::ast::Doc>(assign<&trank::ast::Doc::child>(ref<A>) |
+                                     assign<&trank::ast::Doc::child>(ref<B>))> {
+  };
+  struct T2
+      : rule<create<trank::ast::Doc>((ref<C> + lit<"q">) |
+                                     assign<&trank::ast::Doc::child>(ref<B>) |
+                                     assign<&trank::ast::Doc::child>(ref<A>))> {
+  };
   struct S : rule<(lit<"x"> + ref<T1> + lit<"w">) |
                   (lit<"y"> + ref<T2> + lit<"w">)> {};
 };
@@ -211,35 +213,34 @@ struct G : trank::Words {
 }  // namespace tcontext
 
 // A cell whose two readings die on the same token, one after more
-// reductions than the other: `c x #` refutes `A` and `W` alike, so the
+// reductions than the other: `c x #` refutes `A` and `W` the same, so the
 // look-ahead answers the arm the grammar prefers, as a valid text would.
 namespace tphase {
 
 namespace ast {
-struct Kid : cursiv::Extends<cursiv::AstNode> {};
-struct AKid : cursiv::Extends<Kid> {
+struct Child : cursiv::Extends<cursiv::AstNode> {};
+struct AChild : cursiv::Extends<Child> {
   string_view t;
 };
-struct BKid : cursiv::Extends<Kid> {
+struct BChild : cursiv::Extends<Child> {
   string_view t;
 };
-struct Wrap : cursiv::Extends<Kid> {
-  Kid* kid = nullptr;
+struct Wrap : cursiv::Extends<Child> {
+  Child* child = nullptr;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  Kid* kid = nullptr;
+  Child* child = nullptr;
 };
 }  // namespace ast
 
 struct G : trank::Words {
-  struct A : rule<create<ast::AKid>(assign<&ast::AKid::t>(ref<C>))> {};
-  struct B : rule<create<ast::BKid>(assign<&ast::BKid::t>(ref<C>))> {};
-  struct W : rule<create<ast::Wrap>(assign<&ast::Wrap::kid>(ref<B>))> {};
-  struct S : rule<create<ast::Doc>(
-                 (assign<&ast::Doc::kid>(ref<A>) + lit<"x"> + lit<"y"> +
-                  lit<"q">) |
-                 (assign<&ast::Doc::kid>(ref<W>) + lit<"x"> + lit<"y"> +
-                  lit<"r">))> {};
+  struct A : rule<create<ast::AChild>(assign<&ast::AChild::t>(ref<C>))> {};
+  struct B : rule<create<ast::BChild>(assign<&ast::BChild::t>(ref<C>))> {};
+  struct W : rule<create<ast::Wrap>(assign<&ast::Wrap::child>(ref<B>))> {};
+  struct S : rule<create<ast::Doc>((assign<&ast::Doc::child>(ref<A>) +
+                                    lit<"x"> + lit<"y"> + lit<"q">) |
+                                   (assign<&ast::Doc::child>(ref<W>) +
+                                    lit<"x"> + lit<"y"> + lit<"r">))> {};
 };
 
 }  // namespace tphase
@@ -300,7 +301,7 @@ struct G : Words {
              (kw<"plain"> + ref<trank::plain::G::S>) |
              (kw<"grown"> + ref<trank::grown::G::S>) |
              (kw<"context"> + ref<tcontext::G::S>) |
-             (kw<"settle"> + ref<tphase::G::S>) |
+             (kw<"decide"> + ref<tphase::G::S>) |
              (kw<"soft"> + ref<tsoft::spelled::G::Root>) |
              (kw<"named"> + ref<tsoft::named::G::Root>) |
              (kw<"longrun"> + ref<tbounds::longrun::G::S>) |

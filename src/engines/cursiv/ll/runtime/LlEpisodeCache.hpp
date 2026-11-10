@@ -1,6 +1,5 @@
-// What the episodes of a parse keep between them: the pool that holds the
-// descent's stacks, the pool the episodes read in, the plan, and the plans
-// remembered by the text they read; and the walk that lends an episode the
+// What the episodes of a parse keep between them: the stack pools, the plan,
+// the plans keyed by the text they read, and the walk that gives an episode the
 // descent's stack.
 #pragma once
 
@@ -27,11 +26,11 @@ struct LlEpisodeCache {
   // The descent's stacks, as nodes that stay: the plans kept are named by them.
   std::optional<LlReturnPool> exact;
   // The stacks an episode makes, which go when it ends or is let go.
-  std::optional<LlReturnPool> lent;
-  // Where each node of `exact` stands in `lent`.
-  std::vector<std::uint32_t> lentOf;
-  // How deep each lent frame stands, by its node in `lent`.
-  std::vector<LlLentRung> lentRung;
+  std::optional<LlReturnPool> temporary;
+  // Where each node of `exact` stands in `temporary`.
+  std::vector<std::uint32_t> copyOf;
+  // How deep each copied frame stands, by its node in `temporary`.
+  std::vector<LlCopyDepth> copyDepth;
   std::optional<LlEpisodeSim> plain, tracked;
   LlPlan plan;
   LlPredictionWork work;
@@ -54,11 +53,11 @@ inline LlEpisodeCache& ll_episode_cache() {
   return active.has_value() ? *active : active.emplace();
 }
 
-// A pool of the parse's cache, made at its first ask: `exact`, or `lent`.
+// A pool of the parse's cache, made at its first ask: `exact`, or `temporary`.
 template <const auto& T>
 inline LlReturnPool& ll_pool(bool exact) {
   LlEpisodeCache& cache = ll_episode_cache<T>();
-  auto& pool = exact ? cache.exact : cache.lent;
+  auto& pool = exact ? cache.exact : cache.temporary;
   if (!pool) {
     pool.emplace();
     pool->read_returns_by_class(T.atn.returnClass);
@@ -75,7 +74,7 @@ inline LlEpisodeSim& ll_episode_sim(bool tracked) {
     slot.emplace(T.atn, ll_pool<T>(false), tracked);
     slot->rank_arms_over_lexes(T.repeatScopes);
     slot->share_calls(T.sharedRules);
-    slot->read_lent_rungs(&cache.lentRung);
+    slot->read_copy_depths(&cache.copyDepth);
   }
   slot->reset();
   return *slot;
@@ -94,21 +93,21 @@ inline std::uint32_t ll_document_context(LlReturnPool& pool) {
   return cache.document;
 }
 
-// The stack of the descent, in the pool the episodes read in. Each frame lent
-// keeps how deep it stands, so that a walk which meets one over the episode's
-// frames answers what it stands on without climbing the descent's depth.
-inline std::uint32_t ll_lend_stack(LlEpisodeCache& cache, std::uint32_t stack) {
+// The descent's stack, copied into the episodes' pool. Each copied frame
+// keeps its depth, so a walk that reaches one over the episode's frames answers
+// without walking up the descent's depth.
+inline std::uint32_t ll_copy_stack(LlEpisodeCache& cache, std::uint32_t stack) {
   LlCtxPool& from = cache.exact->contexts();
-  LlCtxPool& to = cache.lent->contexts();
-  // `lentOf` and `lentRung` are never cleared: they hold only because the
-  // frames lent are made outside a walk, which would take them back with its
+  LlCtxPool& to = cache.temporary->contexts();
+  // `copyOf` and `copyDepth` are never cleared: they hold only because the
+  // copied frames are made outside a walk, which would take them back with its
   // own.
   assert(!to.scratching());
   std::vector<std::uint32_t> chain;
   std::uint32_t at = stack, base = kLlCtxNone;
   for (; at != kLlCtxNone; at = from.parent(at, 0)) {
-    if (at < cache.lentOf.size() && cache.lentOf[at] != kLlCtxNone) {
-      base = cache.lentOf[at];
+    if (at < cache.copyOf.size() && cache.copyOf[at] != kLlCtxNone) {
+      base = cache.copyOf[at];
       break;
     }
     chain.push_back(at);
@@ -116,12 +115,12 @@ inline std::uint32_t ll_lend_stack(LlEpisodeCache& cache, std::uint32_t stack) {
   for (std::size_t i = chain.size(); i-- > 0;) {
     const std::uint32_t parent = base;
     base = to.push(parent, from.ret(chain[i], 0));
-    if (cache.lentOf.size() <= chain[i])
-      cache.lentOf.resize(chain[i] + 1, kLlCtxNone);
-    cache.lentOf[chain[i]] = base;
-    if (cache.lentRung.size() <= base) cache.lentRung.resize(base + 1);
-    if (cache.lentRung[base].depth == 0)
-      cache.lentRung[base] = LlLentRung::over(cache.lentRung, parent);
+    if (cache.copyOf.size() <= chain[i])
+      cache.copyOf.resize(chain[i] + 1, kLlCtxNone);
+    cache.copyOf[chain[i]] = base;
+    if (cache.copyDepth.size() <= base) cache.copyDepth.resize(base + 1);
+    if (cache.copyDepth[base].depth == 0)
+      cache.copyDepth[base] = LlCopyDepth::over(cache.copyDepth, parent);
   }
   return base;
 }
@@ -136,7 +135,7 @@ struct LlExactWalk {
         _pool(ll_pool<T>(false)),
         key(c.stack.context(ll_pool<T>(true),
                             ll_document_context<T>(ll_pool<T>(true)))),
-        context(ll_lend_stack(*_cache, key)),
+        context(ll_copy_stack(*_cache, key)),
         _holds(_pool.contexts().begin_scratch()) {}
   ~LlExactWalk() {
     if (!_holds) return;

@@ -1,4 +1,5 @@
-// The absent nest leaves two iterations writing the same node.
+// An optional nest: when it is absent, two turns write `text` on the same
+// node.
 // expect LR: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Item::text
 #pragma once
 #include "refusals/head.hpp"

@@ -1,8 +1,6 @@
 // A keyword's or a literal's spelling, reserved where a DFA state accepts it:
-// behind a boundary of word bytes a terminal is a keyword, and the terminals
-// the state also accepts as patterns, or a relay on the way to it defers, lose
-// that spelling. A longer run re-admits them one state further, so `kwx` stays
-// a word.
+// the pattern terminals the state also accepts lose that spelling. A longer
+// run re-admits them one state further, so `kwx` stays a word.
 #pragma once
 
 #include <cstddef>
@@ -19,9 +17,8 @@
 
 namespace cursiv::engine {
 
-// The terminals a relay launched at `s`, or at a state a walk reaches `s` from,
-// defers: their readings end where no state of the automaton accepts them.
-// `launched(s, each)` hands `each` the terminal of every relay launched at `s`,
+// The terminals a relay launched at `s`, or at a state that reaches `s`,
+// defers. `launched(s, each)` names each relay's terminal, and
 // `successors(s, each)` the states its rows lead to.
 template <class Launched, class Successors>
 std::vector<DynSet> lex_relayed(std::size_t ndfa, Launched&& launched,
@@ -50,28 +47,16 @@ struct LexReserved {
   std::vector<bool> standing;
 };
 
-// `v` names the automaton (`classes`, `next`, `relay`) and `relays` its relay
-// rows; `accepts(s)` is what state `s` accepts; `bounds(s, each)` hands
-// `each(term, bound, tier)` every acceptance of `s` with its boundary and
-// tier; `reserve(s, term)` takes the spelling from a terminal. A keyword's
-// spelling and a literal's are reserved from the terminals that read it as a
-// pattern, or that a relay on the way to the state defers; a terminal whose
-// own body is a keyword or a literal keeps it, or its language would empty
-// where it is accepted. Trivia reserves nothing: at one length a token beats
-// it. Answers the keywords each state accepts, and whether a terminal also
-// reads one there with no boundary -- a word byte after the keyword does not
-// take that reading away.
-//
-// What a literal or a keyword read behind conditions takes, where one may
-// end, `held(s, term)` takes apart: the terminals read as patterns lose their
-// spelling only if the reading stands.
+// Reserves each state's keywords and literals with `reserve(s, term)`, from
+// the terminals that read them as patterns or that a relay defers; trivia
+// reserves nothing. Returns the keywords each state accepts.
 template <class Cfg, class View, class Relays, class Accepts, class Bounds,
           class Reserve, class Held>
 LexReserved lex_reserve(const Cfg& g, const View& v, std::size_t ndfa,
                         const Relays& relays, Accepts&& accepts,
                         Bounds&& bounds, Reserve&& reserve, Held&& held) {
-  // The terminals relays defer, untiered ones with what the state accepts,
-  // and the tiered ones pending.
+  // The terminals relays defer, unprioritized ones with what the state accepts,
+  // and the prioritized ones pending.
   std::vector<DynSet> deferred, pending;
   if (!relays.empty()) {
     const auto successors = [&](std::size_t s, auto&& each) {
@@ -80,11 +65,11 @@ LexReserved lex_reserve(const Cfg& g, const View& v, std::size_t ndfa,
             to != kDeadState)
           each(to);
     };
-    const auto launched = [&](bool tiered) {
-      return [&, tiered](std::size_t s, auto&& each) {
+    const auto launched = [&](bool prioritized) {
+      return [&, prioritized](std::size_t s, auto&& each) {
         for (auto k = v.relay(static_cast<std::uint16_t>(s)); k != kNoRelay;
              k = relays[k].next)
-          if (!relays[k].gate && (relays[k].tier != 0) == tiered)
+          if (!relays[k].gate && (relays[k].priority != 0) == prioritized)
             each(relays[k].term);
       };
     };
@@ -101,15 +86,15 @@ LexReserved lex_reserve(const Cfg& g, const View& v, std::size_t ndfa,
   for (std::size_t s = 0; s < ndfa; ++s) {
     DynSet words, open, literals;
     bool reserving = false;
-    bounds(s, [&](unsigned t, std::uint16_t bound, unsigned tier) {
+    bounds(s, [&](unsigned t, std::uint16_t bound, unsigned priority) {
       const bool word = bound != kNoSet && lex_word_set(g, bound);
       if (bound == kNoSet) open.set(t);
       if (word)
         words.set(t);
-      else if (tier == kTierLiteral && !g.terms[t].trivia)
+      else if (priority == kLiteralPriority && !g.terms[t].trivia)
         literals.set(t);
-      reserving =
-          reserving || ((word || tier == kTierLiteral) && !g.terms[t].trivia);
+      reserving = reserving || ((word || priority == kLiteralPriority) &&
+                                !g.terms[t].trivia);
     });
     out.keywords[s] = words;
     out.keywords[s].andnot(open);

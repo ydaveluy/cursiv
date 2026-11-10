@@ -1,7 +1,6 @@
-// The rest of a token past its echo, read by a search: the run the mark
-// chose is read back off the opener, the echo is looked for -- as a closer,
-// or right where the walk stopped -- and the walk resumes past it. A nested
-// run counts its openers instead, and ends at the closer at depth zero.
+// The rest of a token past its echo, read by a search: the echo of the mark is
+// looked for and the walk resumes past it. A nested run counts its openers
+// and ends at the closer at depth zero.
 #pragma once
 
 #include <cstdint>
@@ -20,9 +19,7 @@
 namespace cursiv::engine {
 
 // A closer that holds a run of `pad` between `before` and the echo: the first
-// echo and `after` behind such a run and a `before`. The echo starts where the
-// run ends, which the generator checked: the runs behind two echoes stand
-// apart, and each is read once.
+// echo and `after` behind such a run and a `before`.
 inline TextOffset lex_echo_padded(const LexRelay& r, const ByteSet& pad,
                                   const char* names, const char* src,
                                   TextOffset len, TextOffset at,

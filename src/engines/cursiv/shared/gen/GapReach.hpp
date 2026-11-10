@@ -27,7 +27,6 @@ class GapReach {
            (l.skip != kNoLexNode || bounds(l.node).looked >= kEndless);
   }
 
-  // The leaves condition `k` reads.
   std::vector<std::uint16_t> leaves(unsigned k) const {
     std::vector<std::uint16_t> out;
     for (std::uint32_t i = _g.gapCondAt[k]; i < _g.gapCondAt[k + 1]; ++i) {
@@ -105,8 +104,8 @@ class GapReach {
         return bounds(lex_token_body(_g, e));
       case LexKind::positive:
       case LexKind::negative: {
-        const auto kid = bounds(e.a);
-        return {0, kid.looked, kid.looked};
+        const auto child = bounds(e.a);
+        return {0, child.looked, child.looked};
       }
       case LexKind::gap_has:
       case LexKind::gap_is:
@@ -124,30 +123,31 @@ class GapReach {
         Bounds out;
         const bool sequence = e.kind == LexKind::seq;
         for (unsigned i = 0; i < e.b; ++i) {
-          const auto kid = bounds(_g.lexKid[e.a + i]);
+          const auto child = bounds(_g.lexChild[e.a + i]);
           out.looked =
-              std::max(out.looked,
-                       sequence ? sat(out.consumed + kid.looked) : kid.looked);
-          out.consumed = sequence ? sat(out.consumed + kid.consumed)
-                                  : std::max(out.consumed, kid.consumed);
-          out.overhang = std::max(out.overhang, kid.overhang);
+              std::max(out.looked, sequence ? sat(out.consumed + child.looked)
+                                            : child.looked);
+          out.consumed = sequence ? sat(out.consumed + child.consumed)
+                                  : std::max(out.consumed, child.consumed);
+          out.overhang = std::max(out.overhang, child.overhang);
         }
         if (sequence) out.looked = std::max(out.consumed, out.looked);
         return out;
       }
       case LexKind::rep: {
-        auto kid = bounds(e.a);
+        auto child = bounds(e.a);
         if (e.b != kNoLexNode) {
           const auto skip = bounds(e.b);
-          kid = {sat(skip.consumed + kid.consumed),
-                 std::max(skip.looked, sat(skip.consumed + kid.looked)),
-                 std::max(skip.overhang, kid.overhang)};
+          child = {sat(skip.consumed + child.consumed),
+                   std::max(skip.looked, sat(skip.consumed + child.looked)),
+                   std::max(skip.overhang, child.overhang)};
         }
-        if (e.max == 0) return {0, 0, kid.overhang};
-        if (kid.consumed == 0) return {0, kid.looked, kid.overhang};
-        if (e.max == kEndless) return {kAll, kAll, kid.overhang};
-        return {sat(kid.consumed * e.max),
-                sat(kid.consumed * (e.max - 1u) + kid.looked), kid.overhang};
+        if (e.max == 0) return {0, 0, child.overhang};
+        if (child.consumed == 0) return {0, child.looked, child.overhang};
+        if (e.max == kEndless) return {kAll, kAll, child.overhang};
+        return {sat(child.consumed * e.max),
+                sat(child.consumed * (e.max - 1u) + child.looked),
+                child.overhang};
       }
       default:
         return {kAll, kAll};
@@ -180,17 +180,17 @@ class GapReach {
       case LexKind::alt: {
         std::uint64_t out = 0;
         for (unsigned i = 0; i < e.b; ++i) {
-          const std::uint32_t kid = count(_g.lexKid[e.a + i]);
-          out = e.kind == LexKind::seq ? out + kid
-                                       : std::max<std::uint64_t>(out, kid);
+          const std::uint32_t child = count(_g.lexChild[e.a + i]);
+          out = e.kind == LexKind::seq ? out + child
+                                       : std::max<std::uint64_t>(out, child);
         }
         return sat(out);
       }
       case LexKind::rep: {
-        std::uint64_t kid = count(e.a);
-        if (e.b != kNoLexNode) kid += count(e.b);
-        if (e.max == 0 || kid == 0) return 0;
-        return e.max == kEndless ? kAll : sat(kid * e.max);
+        std::uint64_t child = count(e.a);
+        if (e.b != kNoLexNode) child += count(e.b);
+        if (e.max == 0 || child == 0) return 0;
+        return e.max == kEndless ? kAll : sat(child * e.max);
       }
       default:
         return kAll;

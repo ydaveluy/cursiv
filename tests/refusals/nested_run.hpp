@@ -1,5 +1,5 @@
-// A run written inside a run: the generation goes on, and names the
-// repetition.
+// A repetition directly inside another: the grammar is generated with a
+// warning that names it.
 // expect LR: warning: rule .Root.: .*repeats a repetition, so a run of items can be split into groups in several ways
 #pragma once
 

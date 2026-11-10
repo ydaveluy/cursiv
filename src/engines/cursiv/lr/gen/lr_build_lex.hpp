@@ -35,15 +35,14 @@ LexModes lr_lex_mode_sets(LrBuildTable& A, const std::vector<std::uint8_t>& cfg,
 // state; what each DFA state's words reserve is the candidates' to read.
 std::vector<DynSet> lr_lex_automaton(LrBuildTable& A, const LexAlphabet& alpha,
                                      const LexModes& modes);
-// The modes whose states read a rival of an acceptance, over the states as
+// The modes whose states read a competitor of an acceptance, over the states as
 // the passes left them.
 void lr_lex_candidates(LrBuildTable& A, const LexAlphabet& alpha,
                        const LexModes& modes,
                        const std::vector<DynSet>& wordAt);
 // A terminal a condition may refuse is read only where the condition lets the
-// stack take it. Where the lexer would read it over another acceptance of its
-// mode -- the same text elected or reserved for it, or a longer one -- the mode
-// flags it, so the position is read again without it once no stack takes it.
+// stack take it. Where the lexer would read it over another acceptance, the
+// mode flags it, and the position is read again without it.
 void lr_lex_condition_flags(LrBuildTable& A);
 
 std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,

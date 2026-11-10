@@ -15,7 +15,7 @@ std::unique_ptr<StateMachineServices> create_lsp_services(
     StateMachineSharedServices& sharedServices,
     std::string languageId = std::string(sm::generated::SM::kLanguageId));
 
-// The same one call, one storey up.
+// The shared services and the language, created in one call.
 struct StateMachineLanguage {
   std::unique_ptr<StateMachineSharedServices> shared;
   StateMachineServices& language;

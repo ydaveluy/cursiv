@@ -15,8 +15,8 @@ namespace cursiv {
 
 namespace {
 
-// Byte classes, spelled rather than asked of <cctype>: those read the process
-// locale, and a host's `setlocale` must not change what parses.
+// Not <cctype>: it reads the process locale, and `setlocale` must not change
+// what parses.
 bool is_space(char c) noexcept {
   return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' ||
          c == '\v';
@@ -103,8 +103,6 @@ std::optional<std::size_t> match_suffix_marker(std::string_view line,
   }
   return begin;
 }
-
-// Tokenization
 
 struct Token {
   enum class Type : std::uint8_t { Text, Tag, InlineTag, Break };
@@ -296,9 +294,8 @@ std::vector<Token> tokenize(const std::vector<std::string_view>& lines,
       }
     } else {
       if (const auto tag = match_block_tag(line, index)) {
-        // fullLength is measured from `index` (which may sit on the whitespace
-        // before the '@'), so the begin position must skip that whitespace to
-        // anchor on the '@'; the end and the advancement below stay unchanged.
+        // `fullLength` counts from `index`, which may sit on blanks before the
+        // '@': the range starts at the '@'.
         const auto begin =
             position(currentLine, currentCharacter + whitespaceEnd);
         const auto end =
@@ -322,8 +319,6 @@ std::vector<Token> tokenize(const std::vector<std::string_view>& lines,
   }
   return tokens;
 }
-
-// Parsing
 
 struct ParseContext {
   const std::vector<Token>& tokens;
@@ -364,8 +359,7 @@ DocCommentNode parse_text(ParseContext& context) {
     }
     paragraph.children.push_back(parse_inline(context));
   }
-  // The range covers the children: a parent that closed on its last inline's
-  // head token ended before its own content.
+  // The range ends with the last child, not with the last token read.
   paragraph.range = {firstToken.range.start,
                      paragraph.children.empty()
                          ? firstToken.range.end
@@ -444,8 +438,6 @@ DocComment parse_comment(ParseContext& context) {
   const auto end = elements.empty() ? context.start : elements.back().range.end;
   return DocComment{std::move(elements), {start, end}};
 }
-
-// Rendering
 
 std::string fill_newlines(std::string_view text) {
   return text.ends_with('\n') ? "\n" : "\n\n";

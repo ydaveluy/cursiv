@@ -1,7 +1,3 @@
-// What a caret is offered: the word boundary a literal may not be inserted
-// against, the filter's one rule, the answer behind a repair, and the caret
-// against every position of the table.
-
 #include <lsp/types.h>
 
 #include <algorithm>
@@ -34,10 +30,6 @@
 #include "wordsll/generated/Ll/Module.hpp"
 #include "wordslr/generated/Lr/Module.hpp"
 
-// What a word boundary forbids at a caret: a literal made of word characters
-// cannot be inserted against a name, since the two would read as one word. The
-// lexer is what judges the splice, so the two cases are told apart at the
-// caret itself.
 namespace default_completion_provider {
 
 namespace {
@@ -46,9 +38,9 @@ using support::offered;
 using support::offers;
 using World = support::LspWorkspace;
 
-// A name ending in a letter is still being typed: nothing that follows it is
-// offered, not even a literal that would not join it.
-void a_caret_glued_to_a_name_is_offered_nothing() {
+// A name attached to the caret is still being typed: not even `{`, which would
+// not join it, is offered.
+void a_caret_attached_to_a_name_is_offered_nothing() {
   const World world(support::offer_every_keyword);
   offered(*world.ws, "entity E<|>", [](const lsp::CompletionList& list) {
     CHECK(!offers(list, "{"));
@@ -56,7 +48,6 @@ void a_caret_glued_to_a_name_is_offered_nothing() {
   });
 }
 
-// One space later the boundary is back, and both offers stand.
 void a_caret_past_the_space_is_offered_the_word() {
   const World world(support::offer_every_keyword);
   offered(*world.ws, "entity E <|>", [](const lsp::CompletionList& list) {
@@ -93,15 +84,13 @@ void a_reference_context_names_the_member_being_completed() {
 }  // namespace
 
 void run() {
-  a_caret_glued_to_a_name_is_offered_nothing();
+  a_caret_attached_to_a_name_is_offered_nothing();
   a_caret_past_the_space_is_offered_the_word();
   a_reference_context_names_the_member_being_completed();
 }
 
 }  // namespace default_completion_provider
 
-// Pins the rule, with the case that makes it a rule rather than a
-// subsequence: `ram` must not answer `Grammar`.
 namespace fuzzy_matcher {
 
 namespace {
@@ -112,18 +101,16 @@ void a_query_anchors_on_a_word_boundary() {
   CHECK(matcher.match("grammar", "Grammar"));    // whole, case folded
   CHECK(matcher.match("gr", "Grammar"));         // prefix
   CHECK(matcher.match("gmr", "Grammar"));        // subsequence from the start
-  CHECK(matcher.match("GK", "GrammarKeyword"));  // the humps
+  CHECK(matcher.match("GK", "GrammarKeyword"));  // camel case
   CHECK(matcher.match("dsp", "documentSymbolProvider"));
   CHECK(matcher.match("", "Grammar"));  // nothing typed answers all
 
-  // The one that makes it a rule: `r`, `a`, `m` do sit in order inside
-  // `Grammar`, but none of them starts a word -- a plain subsequence would let
-  // almost every candidate answer almost every query.
+  // `r`, `a`, `m` appear in order in `Grammar`, but none starts a word: a plain
+  // subsequence match would let almost any query match almost any candidate.
   CHECK(!matcher.match("ram", "Grammar"));
   CHECK(!matcher.match("xyz", "Grammar"));
 }
 
-// A snake_case name breaks into words too, and the anchor may be any of them.
 void an_underscore_opens_a_word() {
   const cursiv::DefaultFuzzyMatcher matcher;
   CHECK(matcher.match("sp", "symbol_provider"));
@@ -139,7 +126,8 @@ void unicode_characters_are_not_matched_in_separate_byte_fragments() {
   CHECK(!matcher.match("é", "nom_Ã©"));
   CHECK(!matcher.match("😀", "😁À"));
   CHECK(matcher.match("😀", "😀"));
-  // Matching proceeds by surrogate units for characters outside the BMP.
+  // Matching works on UTF-16 units, so a character outside the BMP may match
+  // across two characters.
   CHECK(matcher.match("😀", "\U0001F601\U0001FA00"));
   CHECK(!matcher.match("aA", "aŁ"));
 }
@@ -154,8 +142,7 @@ void run() {
 
 }  // namespace fuzzy_matcher
 
-// A repair between the caret and the token before it must not silence the
-// answer: what the editor's own provider hands back at a marked caret.
+// A repair near the caret must not empty or widen what completion offers.
 namespace caret_repaired {
 
 namespace g = tcaret::generated::Caret;
@@ -173,9 +160,8 @@ struct World : support::World<cursiv::SharedLspServices> {
 
 namespace {
 
-// The token before `}` was given up on by the repair, so the mode it was read
-// in is not the one the leaf before it names. Judging the splice in that mode
-// refuses every candidate there is, and the editor is handed nothing.
+// The repair skips `emd`, so the leaf before the caret names the wrong lexer
+// mode; reading the caret in that mode would reject every candidate.
 void a_repair_behind_the_caret_does_not_silence_it(const World& world) {
   for (const char* marked : {"fn f() { emd; }<|>", "fn f() { end; }<|>",
                              "fn f() { emd; } <|>", "fn f() { emd; }<|> "}) {
@@ -193,11 +179,9 @@ void a_repair_behind_the_caret_does_not_silence_it(const World& world) {
   }
 }
 
-// `@ ~` is a k=2 cell: the engine elects an arm on the token after `~`, so a
-// caret there has both open. The peek is keyed on the terminal the leaf's
-// BYTES lex to, and a repair beside the cell puts bytes there that are not
-// the cell's -- what it may cost is an arm, never an arm that is not one.
-void a_repair_beside_a_k2_cell_offers_nothing_new() {
+// After `@~`, `DeclR` and `UseR` are both still possible. A repair nearby may
+// drop one of them, never add another feature.
+void a_repair_beside_a_two_token_cell_offers_nothing_new() {
   const std::unique_ptr<cursiv::Parser> engine = g::create_parser();
   const auto after_tilde = [&engine](const std::string& text) {
     const cursiv::ParseResult r = engine->parse(text);
@@ -209,25 +193,25 @@ void a_repair_beside_a_k2_cell_offers_nothing_new() {
     std::ranges::sort(ids);
     return ids;
   };
-  const std::vector<cursiv::ElementId> settled =
+  const std::vector<cursiv::ElementId> clean =
       after_tilde("fn f() { end; @~!; }");
-  CHECK(settled.size() == 2);
+  CHECK(clean.size() == 2);
   for (const char* broken :
        {"fn f() { emd; @~!; }", "fn f() { emd; @~?; }", "fn f() { end; @~!, }",
         "fn f() { end; @~; }", "fn f() { @~!; "}) {
     const std::vector<cursiv::ElementId> got = after_tilde(broken);
-    if (!std::ranges::includes(settled, got)) {
-      std::printf("FAIL %s: the caret offers a feature the settled reading"
-                  " does not\n",
-                  broken);
+    if (!std::ranges::includes(clean, got)) {
+      std::printf(
+          "FAIL %s: the caret offers a feature the clean reading"
+          " does not\n",
+          broken);
       ++failures;
     }
   }
 }
 
-// Replaying an unwind copies an ancestor into the next
-// stage. At these sizes the copy grows the frame arena; walking that
-// ancestor's parents afterwards must still offer the next function.
+// Replaying an unwind copies an ancestor frame; at these sizes the copy grows
+// the frame arena, and walking that ancestor's parents must still offer `fn`.
 void an_unwind_keeps_its_parents_when_the_arena_grows(const World& world) {
   for (unsigned count = 0; count < 8; ++count) {
     std::string text = "fn f() { ";
@@ -251,23 +235,23 @@ void an_unwind_keeps_its_parents_when_the_arena_grows(const World& world) {
 void run() {
   const World world;
   a_repair_behind_the_caret_does_not_silence_it(world);
-  a_repair_beside_a_k2_cell_offers_nothing_new();
+  a_repair_beside_a_two_token_cell_offers_nothing_new();
   an_unwind_keeps_its_parents_when_the_arena_grows(world);
 }
 
 }  // namespace caret_repaired
 
-// What the caret offers at every position of one grammar, and where it stops.
+// The caret tests of `CaretLane.cpp` on the LR engine.
 namespace lr_completion_caret {
 
 namespace g = tcaret::generated::Caret;
 
-// The shape this lane stands on. Lose the k=2 cell and the arm test would
-// pass on a grammar that never had two arms to lose.
+// The table must look two tokens ahead after `@~`, or
+// `a_two_token_cell_offers_both_arms` would pass without testing anything.
 static_assert(g::kTable.npeeks != 0);
 
 void run() {
-  run_caret_lane(CaretDoor{&g::create_parser, &g::create_ast_reflection});
+  run_caret_lane(CaretEngine{&g::create_parser, &g::create_ast_reflection});
 }
 
 }  // namespace lr_completion_caret
@@ -316,9 +300,8 @@ struct World : support::World<cursiv::SharedLspServices> {
   return found;
 }
 
-// `begin` to `end` is one token over two lines: the ranges take the caret's
-// line of it only, and what is typed there is the filter. A caret at its start
-// stands before it, where a keyword would run on into it.
+// `begin\nend` is one token: the ranges cover only the caret's line of it. At
+// its start, `entity` would run into it, so nothing is offered.
 void a_word_spanning_lines_is_replaced_on_the_carets_line() {
   const World world;
   CHECK(ranges_of_entity(world, "<|>begin\nend").empty());
@@ -326,7 +309,6 @@ void a_word_spanning_lines_is_replaced_on_the_carets_line() {
         std::vector<lsp::Uint>{1, 0, 1, 2, 1, 0, 1, 3});
 }
 
-// ...and a word on one line keeps the ranges it always had.
 void a_word_on_one_line_keeps_its_ranges() {
   const World world;
   CHECK(ranges_of_entity(world, "en<|>tity") ==
@@ -342,17 +324,13 @@ void run() {
 
 }  // namespace multiline_word
 
-// A terminal that reads a choice of words offers each of them, as the data
-// rule reading the same words offers its keywords: the same items at the same
-// carets, in both engines, whether the terminal gives each word a constant or
-// converts them whole. A terminal matched by a pattern offers none.
 namespace word_terminals {
 
 namespace {
 
-// Each hook as a language uses it: a value the grammar cannot name, candidates
-// the scope sees and the language does not want, items of its own form, and
-// every way of reading the caret tried.
+// Overrides each hook as a language would: a value the grammar cannot name, a
+// candidate filtered out, an item detail, and every way of reading the caret
+// tried.
 struct Hooked final : cursiv::DefaultCompletionProvider {
   using DefaultCompletionProvider::DefaultCompletionProvider;
   void completionFor(const cursiv::CompletionContext& context,
@@ -391,7 +369,8 @@ struct Hooked final : cursiv::DefaultCompletionProvider {
   }
 };
 
-// What a hook reads as the node of each keyword it is asked about.
+// Records what the hooks see: the node of each keyword, the first token's
+// span, and the reference's container.
 struct SeesNode final : cursiv::DefaultCompletionProvider {
   using DefaultCompletionProvider::DefaultCompletionProvider;
   mutable std::vector<std::string> nodes;
@@ -511,9 +490,9 @@ std::vector<std::string> labels_at(const cursiv::LspServices& language,
   return out;
 }
 
-// Opening the rule that writes a reference, a scope sees a new node of its class
-// under the node at the caret, even one of that class. Past a token of the rule,
-// it sees the node read.
+// Opening the rule that writes a reference, a scope sees a new node of its
+// class under the node at the caret, even one of that class. Past a token of
+// the rule, it sees the node read.
 void a_scope_sees_the_node_of_the_rule_entered() {
   const World world;
   const std::pair<const cursiv::LspServices*, const SeesNode*> engines[] = {
@@ -531,10 +510,9 @@ void a_scope_sees_the_node_of_the_rule_entered() {
   }
 }
 
-// A data rule offers its words as written, filtered on what is typed. Glued to a
-// name, or at the end of a comment, a word would join it, and none is offered. A
-// terminal whose alternatives each convert is a data rule too. Any other terminal
-// says nothing of its contents, whatever it reads.
+// A data rule, or a terminal whose alternatives each convert, offers its words
+// filtered on what is typed, but none attached to a name or ending a comment.
+// Any other terminal offers nothing.
 void a_data_rule_offers_its_words_and_a_terminal_none() {
   const World world;
   using Labels = std::vector<std::string>;
@@ -553,7 +531,7 @@ void a_data_rule_offers_its_words_and_a_terminal_none() {
   }
 }
 
-// Names stop at the cap, and a keyword beside them still comes.
+// Reference names stop at 1 000, and the keyword `none` is still offered.
 void the_cap_on_names_leaves_the_keywords() {
   const World world;
   std::string text = "cap:\n";
@@ -567,10 +545,8 @@ void the_cap_on_names_leaves_the_keywords() {
   }
 }
 
-
-// The tokens of a data rule say nothing of what may stand there: a caret in one
-// is answered from its start. Past a comment inside it no name matches, and its
-// own tokens offer nothing.
+// A caret inside a data rule is completed from the rule's start; past a
+// comment inside it, nothing matches.
 void a_data_rule_is_completed_from_its_start() {
   const World world;
   using Labels = std::vector<std::string>;
@@ -593,9 +569,9 @@ void a_data_rule_is_completed_from_its_start() {
   }
 }
 
-// A data rule of one token has no record of its own and is still read whole, so
-// a caret at its start replaces it and is offered its words. A plain terminal
-// holds no such place: a caret at its start asks there and replaces nothing.
+// A data rule of one token is still read whole: a caret anywhere in it
+// replaces it all. At the start of a plain terminal, the caret replaces
+// nothing.
 void a_data_rule_of_one_token_is_read_whole() {
   const World world;
   using Span = std::pair<unsigned, unsigned>;
@@ -620,7 +596,8 @@ void a_data_rule_of_one_token_is_read_whole() {
 }
 
 // The node of a context is that of the last token begun before the caret, and
-// none where no token stands: nothing else tells a hook it is at the very start.
+// none where no token stands: nothing else tells a hook it is at the very
+// start.
 void a_context_names_the_node_of_its_token() {
   const World world;
   const auto nodes_at = [&](std::string text) {

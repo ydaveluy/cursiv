@@ -44,9 +44,8 @@ struct G : cursiv::GrammarSpec {
     return v;
   };
   struct NUM : terminal<as<num_conv>(some(d))> {};
-  // `create<Mid>` where the deduction would answer `Mid` anyway: `Mid` is a
-  // strict base of what `LeafR` builds, and a type that is the base of another
-  // rule's is one the inherited-member trap could have produced.
+  // `create<Mid>` where deduction gives `Mid` anyway, though `Mid` is a strict
+  // base of what `LeafR` builds.
   struct MidR : rule<create<Mid> + kw<"mid"> + assign<&Base::name>(ref<ID>) +
                      option(flag<&Mid::flagged>(kw<"!">))> {};
   struct LeafR
@@ -160,10 +159,8 @@ struct Rec : cursiv::Extends<cursiv::AstNode> {
   int32 small = 0;
   variant<int64, string_view> tag;
   vector<Target*> targets;
-  // The three storage forms of a reference, and the two ways a name is
-  // produced: `ID` (a plain terminal) hands over a slice of the document,
-  // `QNAME` a view of what its converter built in the tree's resource. The
-  // writer is the same for both, and so are the handles it records.
+  // The three storage forms of a reference, and two ways to make a name: `ID`
+  // slices the document, `QNAME` views what its converter built.
   reference<Target> one;
   optional<reference<Target>> maybe;
   vector<reference<Target>> also;
@@ -187,10 +184,8 @@ struct G : cursiv::GrammarSpec {
     return v;
   };
   struct NUM : terminal<as<num_conv>(some(d))> {};
-  // The positioned result of the same value type: the deduction peels the
-  // wrapper, so this rule's value type is `double` and the exactness round
-  // sees `double` -- not `ConversionResult<double>`, which would match no
-  // alternative at all.
+  // A positioned result: the rule's value type is `double`, not
+  // `ConversionResult<double>`.
   static constexpr auto pct_conv = [](std::string_view t) {
     double v = 0;
     for (char c : t)
@@ -199,7 +194,7 @@ struct G : cursiv::GrammarSpec {
   };
   struct PCT : terminal<as<pct_conv>(some(d) + lit<"%">)> {};
   struct STR : terminal<some(cr<"a-z">)> {};
-  // PCT before NUM: `42%` must not be read as `42` with a stray tail.
+  // PCT before NUM: `42%` must not be read as `42` with a leftover tail.
   struct Root : rule<assign<&Val::v>(ref<BOOL>) | assign<&Val::v>(ref<PCT>) |
                      assign<&Val::v>(ref<NUM>) | assign<&Val::v>(ref<STR>)> {};
   using entry = Root;
@@ -212,7 +207,7 @@ struct G : cursiv::GrammarSpec {
 namespace tab::annot {
 
 struct Val : cursiv::Extends<cursiv::AstNode> {
-  variant<string_view, int64> v;  // slot 0 is the wrong landing for NUM
+  variant<string_view, int64> v;  // slot 0 is the wrong target for NUM
 };
 
 struct G : cursiv::GrammarSpec {
@@ -227,7 +222,7 @@ struct G : cursiv::GrammarSpec {
 
 }  // namespace tab::annot
 
-// The same law with no string_view alternative to fall into.
+// The same check with no string_view alternative to fall into.
 namespace tab::annot2 {
 
 struct Num : cursiv::Extends<cursiv::AstNode> {
@@ -479,10 +474,8 @@ struct All : cursiv::GrammarSpec {
   // inside it: the rule's element carries it, at every level.
   struct RegionInner : rule<create<region::Node> +
                             assign<&region::Node::name>(ref<RegionID>)> {};
-  // Declared `Node`, not `Wrap`: the head node comes from `RegionInner` and
-  // the loop may not run at all, so what this rule hands back is a `Node` on
-  // `"abc"` and a `Wrap` on `"abc *"`. Declaring `Wrap` is refused at compile
-  // time by the creation validator, which names the reference at fault.
+  // Declared `Node`, not `Wrap`: the loop may not run, so this rule hands
+  // back a `Node` on `"abc"` and a `Wrap` on `"abc *"`.
   struct RegionRoot
       : rule<ref<RegionInner> +
              many(nest<region::Wrap, &region::Wrap::inner>(kw<"*">))> {};
@@ -634,8 +627,8 @@ struct All : cursiv::GrammarSpec {
     return out;
   };
   struct TextLOWER : terminal<as<text_lower_conv>(some(cr<"A-Z">))> {};
-  // Not in the body: the shape the law refuses, declared here so the refusal
-  // is asserted beside the shapes it admits.
+  // Not in the body: the shape a text member refuses, declared here so the
+  // refusal is checked beside the shapes it accepts.
   static constexpr auto text_owns_conv = [](std::string_view t) {
     return std::string(t);
   };

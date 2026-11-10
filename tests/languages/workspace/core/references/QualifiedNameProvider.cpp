@@ -10,9 +10,7 @@
 
 namespace ws {
 
-// The climb is the qualifier: a package nested in a package answers with both,
-// outermost first. A loop, and one string built once, however deep the
-// packages nest.
+// The names of `package` and the packages enclosing it, outermost first.
 std::string QualifiedNameProvider::qualifierOf(
     const cursiv::Document&, const ast::PackageDeclaration& package) const {
   std::vector<std::string_view> names;

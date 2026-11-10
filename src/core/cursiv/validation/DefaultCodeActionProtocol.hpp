@@ -8,13 +8,8 @@
 #include "cursiv/text/TextRange.hpp"
 
 // The wire schema of the default quick fixes: edit objects under
-// `kDefaultCodeActionsKey`, written into a diagnostic's `data` by the
-// validator or computed on demand for it (`spelling_actions`), and read back
-// by the code-action provider. Both sides spell the names from here, so the
-// schema has one source of truth.
-//
-// It travels in `data` and not the message: a quick fix that re-parsed the
-// prose would break on the first reworded sentence.
+// `kDefaultCodeActionsKey` in a diagnostic's `data`, written by the validator
+// or `spelling_actions` and read by the code-action provider.
 
 namespace cursiv::detail {
 
@@ -26,10 +21,9 @@ inline constexpr std::string_view kTitleField = "title";
 inline constexpr std::string_view kBeginField = "begin";
 inline constexpr std::string_view kEndField = "end";
 inline constexpr std::string_view kNewTextField = "newText";
-// The text revision begin/end were computed against: a client may hold a
-// diagnostic across further edits, and the consumer would otherwise apply
-// stale offsets to different text. The revision and not the client's version,
-// so a version stamped on unchanged bytes keeps the rows.
+// The text revision the offsets were computed against, so stale offsets are
+// never applied to changed text. Not the client's version, which can change
+// on the same bytes.
 inline constexpr std::string_view kRevisionField = "revision";
 inline constexpr std::string_view kQuickFixKind = "quickfix";
 // The two edit kinds.

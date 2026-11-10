@@ -5,11 +5,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <numeric>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -47,7 +49,7 @@ const CoreServices* language_of(const SharedCoreServices& shared,
       document.uri, document.textDocument().languageId());
 }
 
-// At most half full, so a probe stays short and always meets a free slot.
+// At most half full, so a probe stays short and always finds a free slot.
 std::size_t table_size(std::size_t entries) noexcept {
   return std::bit_ceil(std::max<std::size_t>(entries * 2, 1));
 }
@@ -87,6 +89,10 @@ void DefaultIndexManager::Exports::fill(Shard& shard, std::size_t at) const {
   };
   std::size_t count = 0;
   for (const auto& [id, exported] : rows) count += group(*exported).size();
+  // A run's bounds are 32 bits: a shard too large is refused before it is
+  // built.
+  if (count > std::numeric_limits<std::uint32_t>::max())
+    throw std::length_error("cursiv: too many exported names in one shard");
   shard.slots.assign(table_size(count), {});
   for (const auto& [id, exported] : rows)
     for (const auto& entry : group(*exported)) {
@@ -116,12 +122,14 @@ void DefaultIndexManager::updateContent(const Document& document,
                                         const CancellationToken& cancelToken) {
   const CoreServices* const language = language_of(shared, document);
   if (language == nullptr) return;
-  // The index computes its descriptions rather than receiving them: handed a
-  // ready-made vector it would move the work up into the phase and lose the
-  // token. Computed off the lock -- this walk is the phase's whole cost.
+  // Computed here, off the lock and with the token: this walk is the phase's
+  // whole cost.
   std::vector<AstNodeDescription> exported =
       language->scopeComputation->collectExportedSymbols(document, cancelToken);
 
+  // The shard bounds of one document are 32 bits.
+  if (exported.size() > std::numeric_limits<std::uint32_t>::max())
+    throw std::length_error("cursiv: too many exported names in one document");
   auto fresh = std::make_shared<Exported>();
   fresh->uri = document.uri;
   fresh->elements = std::move(exported);
@@ -138,11 +146,9 @@ void DefaultIndexManager::updateContent(const Document& document,
   for (const auto& entry : hashed)
     fresh->byShard[next[shardOf(entry.hash)]++] = entry;
   const std::scoped_lock lock(_mutex);
-  // What a reader already holds stays valid; the next one rebuilds, under this
-  // lock, so after the change. Retired first: a retirement that throws leaves
-  // the table as the view shows it. Only the export view: nothing here changes
-  // what points at what.
-  _exports.retire();
+  // Released first, so a throw leaves the table as the view shows it; readers
+  // keep what they hold, and the next one rebuilds. Only the export view.
+  _exports.clear();
   if (const auto old = _exported.find(document.id); old != _exported.end())
     affectImporters(*old->second);
   affectImporters(*fresh);
@@ -152,9 +158,7 @@ void DefaultIndexManager::updateContent(const Document& document,
 void DefaultIndexManager::updateReferences(
     const Document& document, const CancellationToken& cancelToken) {
   throw_if_cancelled(cancelToken);
-  // What the document points at is the language's answer, not the index's: a
-  // grammar whose references are not readable off the work list installs its
-  // own provider and this loop does not change.
+  // The language's own provider says what the document points at.
   const CoreServices* const language = language_of(shared, document);
   if (language == nullptr) return;
 
@@ -171,11 +175,12 @@ void DefaultIndexManager::updateReferences(
   const auto* references = document.parseResult.references.get();
   auto names = references == nullptr ? std::vector<std::uint64_t>{}
                                       : references->importedNames.snapshot();
+  auto row = std::make_shared<const Referenced>(std::move(referenced));
 
   const std::scoped_lock lock(_mutex);
-  // Before the tables change, as in `updateContent`: dropping a row retires
-  // the view, and a document that had none retires it here.
-  if (!dropReferences(document.id)) _incoming.retire();
+  // Before the tables change, as in `updateContent`: dropping a row releases
+  // the view, and a document that had none releases it here.
+  if (!dropReferences(document.id)) clearIncoming();
   if (!names.empty()) {
     auto& imports = _importedNames[document.id];
     imports.reserve(names.size());
@@ -187,7 +192,7 @@ void DefaultIndexManager::updateReferences(
           {name, static_cast<std::uint32_t>(importers.size() - 1)});
     }
   }
-  _references.insert_or_assign(document.id, std::move(referenced));
+  _references.insert_or_assign(document.id, std::move(row));
   _affected.erase(document.id);
   // The export view stays: the linker is reading it while this phase runs, and
   // dropping it here would rebuild it once per document.
@@ -203,9 +208,8 @@ bool DefaultIndexManager::removeReferences(DocumentId document) {
   return dropReferences(document);
 }
 
-// One lock for the pair, which is why the two halves are dropped through the
-// unlocked forms: `std::mutex` is not recursive, and taking it twice on one
-// thread is the deadlock this shape exists to prevent.
+// One lock for both halves, dropped through the unlocked forms: `std::mutex`
+// is not recursive.
 bool DefaultIndexManager::remove(DocumentId document) {
   const std::scoped_lock lock(_mutex);
   const bool content = dropContent(document);
@@ -213,12 +217,12 @@ bool DefaultIndexManager::remove(DocumentId document) {
   return content || references;
 }
 
-// Each view is retired before its table loses the row: a retirement that
+// Each view is released before its table loses the row: a release that
 // throws leaves the row there, and the next removal tries again.
 bool DefaultIndexManager::dropContent(DocumentId document) {
   const auto old = _exported.find(document);
   if (old != _exported.end()) {
-    _exports.retire();
+    _exports.clear();
     affectImporters(*old->second);
   }
   _affected.erase(document);
@@ -229,7 +233,7 @@ bool DefaultIndexManager::dropContent(DocumentId document) {
 
 bool DefaultIndexManager::dropReferences(DocumentId document) {
   const auto old = _references.find(document);
-  if (old != _references.end()) _incoming.retire();
+  if (old != _references.end()) clearIncoming();
   if (const auto imported = _importedNames.find(document);
       imported != _importedNames.end()) {
     for (const auto& entry : imported->second) {
@@ -250,6 +254,12 @@ bool DefaultIndexManager::dropReferences(DocumentId document) {
   return true;
 }
 
+// Released first, counted after: a release that throws changes nothing.
+void DefaultIndexManager::clearIncoming() {
+  _incoming.clear();
+  ++_referenceWrites;
+}
+
 void DefaultIndexManager::affectImporters(const Exported& exports) {
   if (_importers.empty()) return;
   for (const auto& entry : exports.byShard)
@@ -265,13 +275,13 @@ bool DefaultIndexManager::isAffected(
   if (_affected.contains(document.id)) return true;
   if (changed.empty()) return false;
   const auto it = _references.find(document.id);
-  if (it == _references.end() || it->second.targets == 0) return false;
+  if (it == _references.end() || it->second->targets == 0) return false;
   // A disjoint mask rules out every target; collisions still need exact IDs.
-  // A changed set larger than the edges is cheaper to meet edge by edge.
-  const auto& edges = it->second.descriptions;
+  // A changed set larger than the edges is cheaper to check edge by edge.
+  const auto& edges = it->second->descriptions;
   if (changed.size() < edges.size() &&
       std::ranges::none_of(changed, [&](DocumentId id) {
-        return (it->second.targets &
+        return (it->second->targets &
                 (std::uint64_t{1} << (static_cast<std::uint32_t>(id) & 63))) !=
                0;
       }))
@@ -362,28 +372,44 @@ DefaultIndexManager::exportsView() const {
 }
 
 // Only what resolved is stored, so nothing is filtered again here.
-cursiv::Published<DefaultIndexManager::Incoming>::Read
-DefaultIndexManager::incomingView() const {
-  if (auto live = _incoming.read(); live) return live;
+DefaultIndexManager::IncomingView DefaultIndexManager::incomingView() const {
+  if (auto live = _incoming.read(); live) return IncomingView(std::move(live));
 
-  const std::scoped_lock lock(_mutex);
-  if (auto live = _incoming.read(); live) return live;
+  // The rows are taken under the lock and grouped after it, so writers do not
+  // wait for the whole workspace's references to be sorted.
+  std::vector<std::shared_ptr<const Referenced>> rows;
+  std::uint64_t writes = 0;
+  {
+    const std::scoped_lock lock(_mutex);
+    if (auto live = _incoming.read(); live)
+      return IncomingView(std::move(live));
+    rows.reserve(_references.size());
+    for (const auto& [id, referenced] : _references) rows.push_back(referenced);
+    writes = _referenceWrites;
+  }
 
   auto built = std::make_shared<Incoming>();
-  for (const auto& [id, references] : _references)
-    for (const ReferenceDescription& reference : references.descriptions)
+  for (const auto& referenced : rows)
+    for (const ReferenceDescription& reference : referenced->descriptions)
       built
           ->byTarget[Target{reference.targetDocumentId,
                             reference.targetSymbolId}]
           .push_back(reference);
   // In source order, whatever order the table hashed the documents into: a
   // reader that takes the first row that fits must find the same one twice.
-  for (auto& [target, rows] : built->byTarget)
-    std::ranges::sort(rows, {}, [](const ReferenceDescription& r) {
+  for (auto& [target, references] : built->byTarget)
+    std::ranges::sort(references, {}, [](const ReferenceDescription& r) {
       return std::tuple{r.sourceDocumentId, r.sourceBegin, r.sourceEnd};
     });
+
+  const std::scoped_lock lock(_mutex);
+  // A write since the rows were taken: this view is still right for this
+  // reader, but is not published.
+  if (writes != _referenceWrites) return IncomingView(std::move(built));
+  // Another reader built the same rows first.
+  if (auto live = _incoming.read(); live) return IncomingView(std::move(live));
   _incoming.publish(std::move(built));
-  return _incoming.read();
+  return IncomingView(_incoming.read());
 }
 
 }  // namespace cursiv

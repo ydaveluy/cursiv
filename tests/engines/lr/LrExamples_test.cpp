@@ -28,11 +28,9 @@
 #include "statemachine/generated/SM/Module.hpp"
 #include "statemachine/generated/SM/Table.hpp"
 
-// What a repair did, applied. A reading that repaired a document laid its
-// edits on the tape -- a note names a fault, not each token of it; making
-// them for real must yield a document the parser reads clean. Only what an
-// editor could apply is made here: text dropped, and a terminal whose bytes
-// the grammar spells, invented or read in place of the author's.
+// What a repair did, applied: making a reading's repairs for real must give a
+// document the parser reads clean. Only what an editor could apply is made:
+// dropped text, and a terminal the grammar spells.
 namespace repair_closure {
 
 namespace {
@@ -43,10 +41,10 @@ struct Tally {
 };
 
 // A reading names the innermost repair first, and the one above it only once
-// that is made -- so the rounds are the walk out, and this is what bounds it.
+// that is made -- so each round moves one repair outward, and this bounds them.
 constexpr unsigned kRounds = 8;
 
-// The files a corpus names, the valid twin apart: the manifest is the list.
+// The files the corpus manifest names, except the valid ones.
 std::vector<std::string> manifest(const std::string& dir) {
   std::vector<std::string> names;
   const std::string all = cursiv::test::read_file(dir + "/MANIFEST.tsv");
@@ -62,11 +60,9 @@ std::vector<std::string> manifest(const std::string& dir) {
   return names;
 }
 
-// An edit per repaired leaf, made from the last so no offset moves under
-// another. A repair whose bytes the grammar cannot spell is one no editor
-// could make either, and so is a construct given up: the document is set
-// aside rather than judged. A trivia re-read in place of one the lexer
-// refused lays no repaired leaf, and its closer has no spelling either.
+// An edit per repaired leaf, from the last so no offset moves. A repair whose
+// bytes the grammar cannot spell, or a construct given up, sets the document
+// aside. A trivia re-read in place of a refused one adds no repaired leaf.
 template <const auto& A>
 bool apply(const cursiv::ParseResult& r, std::string& text, bool& spelled) {
   struct Edit {
@@ -75,10 +71,11 @@ bool apply(const cursiv::ParseResult& r, std::string& text, bool& spelled) {
   };
   const cursiv::Cst& cst = r.cst();
   for (const cursiv::ParseDiagnostic& d : r.diagnostics) {
-    bool laid = d.kind != cursiv::DiagnosticKind::replaced;
-    for (cursiv::NodeId i = 0; i < cst.size() && !laid; ++i)
-      laid = cst[i].recovered && d.begin <= cst[i].begin && cst[i].end <= d.end;
-    if (!laid) {
+    bool covered = d.kind != cursiv::DiagnosticKind::replaced;
+    for (cursiv::NodeId i = 0; i < cst.size() && !covered; ++i)
+      covered =
+          cst[i].recovered && d.begin <= cst[i].begin && cst[i].end <= d.end;
+    if (!covered) {
       spelled = false;
       return false;
     }
@@ -133,7 +130,7 @@ void language(const cursiv::Parser& engine, const char* name,
     ++tally.applicable;
     ++applicable;
     // Round after round: each one makes what the reading last named, and the
-    // next names what stood above it. A document that stops shrinking is one
+    // next names what was above it. A document that stops shrinking is one
     // whose repairs do not describe what the reading did.
     unsigned round = 1;
     cursiv::ParseResult again = engine.parse(fixed);
@@ -151,7 +148,7 @@ void language(const cursiv::Parser& engine, const char* name,
       ++closed;
       continue;
     }
-    std::printf("FAIL %s/%s: %u rounds of repair, %zu still owed\n", name,
+    std::printf("FAIL %s/%s: %u rounds of repair, %zu still missing\n", name,
                 file.c_str(), round, again.diagnostics.size());
     ++failures;
   }
@@ -181,10 +178,9 @@ void run() {
 
 }  // namespace repair_closure
 
-// A caret past the last token of a document. What stands closed there names
-// what may be opened next; the token just read names what may still carry
-// ON, and both are owed -- answering from the close alone drops every
-// continuation of the statement being written.
+// A caret past the last token: what stands closed names what may open next, and
+// the token just read what may still go on; both answer, or every continuation
+// of the statement is lost.
 namespace caret_end {
 
 namespace {
@@ -259,9 +255,9 @@ void a_closed_block_offers_only_its_enclosing_scope() {
   CHECK(offers(*engine, inside, "}"));
 }
 
-// A word the parser read after a token it invented still swallows what is
-// typed against it: `many` glued to `A` is the one word `Amany`.
-void a_word_after_a_repair_swallows_what_is_glued_to_it() {
+// A word the parser read after a token it inserted still swallows what is
+// typed against it: `many` attached to `A` is the one word `Amany`.
+void a_word_after_a_repair_swallows_what_is_attached_to_it() {
   const auto engine = dm::generated::DomainModel::create_parser();
   for (const std::string text : {"entity E { x : A", "entity E { x A"}) {
     CHECK(!offers(*engine, text, "many"));
@@ -282,7 +278,7 @@ void a_comment_takes_the_name_typed_against_its_end() {
 void run() {
   a_statement_may_still_be_carried_on();
   a_closed_block_offers_only_its_enclosing_scope();
-  a_word_after_a_repair_swallows_what_is_glued_to_it();
+  a_word_after_a_repair_swallows_what_is_attached_to_it();
   a_comment_takes_the_name_typed_against_its_end();
 }
 
@@ -321,7 +317,7 @@ void answers_as_spelled(const cursiv::Parser& parser, const std::string& broken,
   }
 }
 
-// Invented tokens -- an operand, and the `:` before it -- shifted after the
+// Inserted tokens -- an operand, and the `:` before it -- shifted after the
 // reductions the table makes on them, which no row of the state names.
 void an_insertion_replays_through_the_reductions_it_needs() {
   const auto parser = arith::generated::Arith::create_parser();
@@ -348,7 +344,7 @@ void an_abandon_to_the_start_state_replays() {
   CHECK(!at_end.empty());
 }
 
-// A record whose rule the drive read off text past the caret is walked: the
+// A record whose rule the parser read off text past the caret is walked: the
 // other rule's continuation stands too.
 void a_record_the_text_has_not_decided_is_walked() {
   const auto parser = tedges::generated::G::create_parser();

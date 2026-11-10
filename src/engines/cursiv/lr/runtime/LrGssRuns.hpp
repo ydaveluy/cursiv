@@ -15,7 +15,6 @@ namespace cursiv::engine {
 template <class T, unsigned Shift = 14>
 class LrGssRuns {
  public:
-  // The values appended so far.
   [[nodiscard]] std::size_t size() const { return _appended; }
 
   // The offset of the run just appended.
@@ -46,23 +45,22 @@ class LrGssRuns {
     _appended = 0;
   }
 
-  // The offset of `n` values left for the caller to write, in one piece: the
-  // rest of the chunk, or the chunks that follow, made where they are
-  // missing. A run past one chunk takes several, side by side. The graph
-  // keeps an offset in 32 bits: a run that would end past them throws
-  // `std::length_error`, and nothing is made for it.
+  // The offset of `n` values for the caller to write in one piece: the rest of
+  // the chunk, or new chunks side by side, published together. A run that would
+  // end past 32-bit offsets throws `std::length_error` and makes nothing.
   std::size_t reserve(std::size_t n) {
     std::size_t at = _end;
     if (n > kChunk || (at & kMask) + n > kChunk) at = (at + kMask) & ~kMask;
+    if (n > kMostValues || at > kMostValues - n) too_many();
     if (n != 0) {
       const std::size_t need = ((at + n - 1) >> Shift) + 1;
-      if (_slots.size() < need) {
-        if (need > kMostSlots) too_many();
-        const std::size_t fresh = need - _slots.size();
-        _owned.push_back(std::make_unique_for_overwrite<T[]>(fresh << Shift));
+      if (const std::size_t had = _slots.size(); had < need) {
+        _owned.push_back(
+            std::make_unique_for_overwrite<T[]>((need - had) << Shift));
+        _slots.resize(need);
         T* base = _owned.back().get();
-        for (std::size_t i = 0; i != fresh; ++i)
-          _slots.push_back(base + (i << Shift));
+        for (std::size_t i = had; i != need; ++i)
+          _slots[i] = base + ((i - had) << Shift);
       }
     }
     _end = at + n;
@@ -71,12 +69,13 @@ class LrGssRuns {
   }
 
  private:
-  static_assert(Shift < 32);
+  static_assert(Shift > 0 && Shift < 32);
   static constexpr std::size_t kChunk = std::size_t{1} << Shift;
   static constexpr std::size_t kMask = kChunk - 1;
-  // The chunks whose offsets all stay below 2^32 - 1.
+  // The chunks whose offsets stay below 2^32 - 1, and the values they hold.
   static constexpr std::size_t kMostSlots =
       (std::size_t{1} << (32 - Shift)) - 1;
+  static constexpr std::size_t kMostValues = kMostSlots << Shift;
 
   [[noreturn]] CURSIV_COLD CURSIV_NOINLINE static void too_many() {
     throw std::length_error("cursiv: GSS runs exceed their 32-bit offsets");

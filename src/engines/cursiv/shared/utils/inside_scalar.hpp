@@ -11,7 +11,6 @@ namespace cursiv::engine {
 // A class's list of scalars names, past them, `kBackScalar + k` for the scalar
 // that starts `k` bytes before the byte a bound reads.
 inline constexpr char32_t kBackScalar = 0xFFFFFFF0u;
-// The bytes the longest well-formed sequence takes.
 inline constexpr std::size_t kScalarBytes = 4;
 
 // Whether a well-formed scalar begun before `at` runs past it.

@@ -1,5 +1,5 @@
-// A creation and a call on one path are two heads: the node the call returns
-// would be held by nothing.
+// A `create` and an unassigned call to an AST rule on one path: the node the
+// call returns would be held by nothing.
 // expect LR: this alternative can create two nodes
 #pragma once
 

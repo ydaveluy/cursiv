@@ -1,7 +1,5 @@
-// A translation and nothing else: converts the UTF-16 position to an
-// offset, asks the core `References` service what is under the caret,
-// and converts the rows into `Location`s. Three providers share this
-// path, so the declaration-versus-reference rule is written once.
+// Translates a UTF-16 position to an offset, asks the core `References`
+// service, and turns the rows into `Location`s.
 #pragma once
 
 #include <lsp/types.h>

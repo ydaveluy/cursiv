@@ -157,10 +157,9 @@ struct FirstArm : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// One grammar for the cases the election leaves to the grammar's order, each
-// behind a digit: the keyword whose continuation fails, a keyword against a
-// name with and without a lookahead, a repetition's turn before an option,
-// and a conversion that refuses the elected reading.
+// The cases the election leaves to the grammar's order, each behind a digit:
+// keywords against names, a repetition before an option, and a conversion
+// that refuses the elected reading.
 inline constexpr auto refuseText = [](std::string_view) {
   return cursiv::ConversionResult<std::string_view>::err("refused");
 };
@@ -477,10 +476,10 @@ struct Adjacent : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// A call is glued to its name, and `ARGS` spells `()` too; both names read
+// A call is attached to its name, and `ARGS` spells `()` too; both names read
 // one word. Where a blank parts the name from `()`, the gap refuses the call,
 // and its `()` takes no part in the reading of the arguments.
-struct GluedCall : cursiv::GrammarSpec {
+struct AttachedCall : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
   struct NAME : terminal<some(cr<"a-z0-9">)> {};
@@ -496,7 +495,7 @@ struct GluedCall : cursiv::GrammarSpec {
 
 // The call and the arguments read the same name: one state holds both after
 // it, and the refused `()` still reserves nothing from `ARGS`.
-struct GluedCallShared : GluedCall {
+struct AttachedCallShared : AttachedCall {
   struct Root
       : rule<create<ast::Won>(
             ((ref<ID> + gap::none + assign<&ast::Won::token>(lit<"()">)) |
@@ -507,7 +506,7 @@ struct GluedCallShared : GluedCall {
 
 // The same name read by a rule: the token after it is read before the rule
 // closes, and read again where the gap refuses the call.
-struct GluedCallCalled : GluedCall {
+struct AttachedCallCalled : AttachedCall {
   struct Callee : rule<some(ref<ID>)> {};
   struct Root
       : rule<create<ast::Won>(
@@ -579,7 +578,7 @@ struct CallerMany : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-struct Ladder : cursiv::GrammarSpec {
+struct UpToTwo : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Root
       : rule<create<ast::Doc>(repeat<0, 2>(lit<"x"> + lit<"a">) +
@@ -689,10 +688,8 @@ struct Calls : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// A branch, or an optional item, that reads what an earlier one reads is never
-// chosen, so the generator drops it. Case `n` holds the twin, and case `n.`
-// the rule written without it. Case 6 holds branches that only look alike,
-// and case 7 a branch that reads one text of an earlier one and more.
+// A twin branch or optional item is dropped: case `n` holds the twin, and case
+// `n.` the rule written without it. Cases 6 and 7 hold branches that stay.
 struct Twins : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
@@ -726,9 +723,9 @@ struct Twins : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// A state shifts `module` or closes the head; behind `b` the closed head goes on
-// to a name, whose alphabet has no `module`. The lexer elects one token for both
-// readings, the keyword, wherever the statement stands in the text.
+// A state shifts `module` or closes the head; behind `b` the closed head goes
+// on to a name, whose alphabet has no `module`. The lexer chooses one token for
+// both readings, the keyword, wherever the statement stands in the text.
 struct ClosedHead : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
@@ -781,15 +778,15 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"repeated:"> + ref<Repeated::Root>) |
              (lit<"tight:"> + ref<Tight::Root>) |
              (lit<"adjacent:"> + ref<Adjacent::Root>) |
-             (lit<"gluedcall:"> + ref<GluedCall::Root>) |
-             (lit<"gluedcallshared:"> + ref<GluedCallShared::Root>) |
-             (lit<"gluedcallcalled:"> + ref<GluedCallCalled::Root>) |
+             (lit<"attachedcall:"> + ref<AttachedCall::Root>) |
+             (lit<"attachedcallshared:"> + ref<AttachedCallShared::Root>) |
+             (lit<"attachedcallcalled:"> + ref<AttachedCallCalled::Root>) |
              (lit<"closers:"> + ref<Closers::Root>) |
              (lit<"longstring:"> + ref<LongString::Root>) |
              (lit<"split:"> + ref<Split::Root>) |
              (lit<"callerlonger:"> + ref<CallerLonger::Root>) |
              (lit<"callermany:"> + ref<CallerMany::Root>) |
-             (lit<"ladder:"> + ref<Ladder::Root>) |
+             (lit<"uptotwo:"> + ref<UpToTwo::Root>) |
              (lit<"atendhost:"> + ref<Hosted<AtEnd>::Root>) |
              (lit<"wordhost:"> + ref<Adopting<Word>::Root>) |
              (lit<"calls:"> + ref<Calls::Root>) |
@@ -808,8 +805,7 @@ struct Suite : cursiv::GrammarSpec {
                                            hide<LiteralTrivia::NOTE>,
                                            ref<LiteralTrivia::Root> + eof)) |
              (lit<"conditionedtrivia:"> +
-              skip(ignore<ConditionedTrivia::WS>,
-                   hide<ConditionedTrivia::NOTE>,
+              skip(ignore<ConditionedTrivia::WS>, hide<ConditionedTrivia::NOTE>,
                    ref<ConditionedTrivia::Root> + eof)) |
              (lit<"guardedliteral:"> + skip(ignore<GuardedLiteral::WS>,
                                             hide<GuardedLiteral::NOTE>,
@@ -817,9 +813,9 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"expectedkeyword:"> +
               skip(ignore<ExpectedKeyword::WS>, hide<ExpectedKeyword::REMARK>,
                    ref<ExpectedKeyword::Root> + eof)) |
-             (lit<"foldedkeyword:"> +
-              skip(ignore<FoldedKeyword::WS>, hide<FoldedKeyword::REMARK>,
-                   ref<FoldedKeyword::Root> + eof)) |
+             (lit<"foldedkeyword:"> + skip(ignore<FoldedKeyword::WS>,
+                                           hide<FoldedKeyword::REMARK>,
+                                           ref<FoldedKeyword::Root> + eof)) |
              ref<tcondcontract::Suite::Root>> {};
   using entry = Root;
   using ignored = WS;

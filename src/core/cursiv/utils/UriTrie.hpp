@@ -11,16 +11,16 @@
 
 #include "cursiv/utils/UriUtils.hpp"
 
-// A URI-keyed store that answers by prefix: a flat map answers only "this
-// exact URI", where a folder-shaped question -- every document under this
-// root -- costs a walk of the tree. The key is segments, split on `/` after
-// normalisation, so two spellings of one URI land on one node.
+// A URI-keyed store that also answers by prefix, such as every document
+// under a folder. The key is the normalised URI's segments.
 
 namespace cursiv {
 
 template <class T>
 class UriTrie {
-  static_assert(std::is_nothrow_move_assignable_v<T>,
+  // The root's value moves with the trie, constructed or assigned.
+  static_assert(std::is_nothrow_move_constructible_v<T> &&
+                    std::is_nothrow_move_assignable_v<T>,
                 "a UriTrie value must move without throwing: a move that "
                 "throws halfway leaves children under a moved-from root");
 
@@ -56,8 +56,8 @@ class UriTrie {
       node->parent->children.erase(node->segment);
   }
 
-  // ...where this drops the value alone, then the spine that held only it: a
-  // path kept for a document that is gone would answer `findAll` for ever.
+  // Drops the value alone, then the path nodes that held only it: a path kept
+  // for a removed document would answer `findAll` forever.
   void eraseValue(std::string_view uri) {
     Node* node = getNode(normalize_uri(uri), false);
     if (node == nullptr) return;
@@ -100,7 +100,7 @@ class UriTrie {
  private:
   struct Node;
   // A subtree is freed one node at a time, through a list threaded on the
-  // parent links it no longer needs: a deep path costs no native stack.
+  // parent links, unused by then: a deep path costs no native stack.
   struct FreeNode {
     void operator()(Node* node) const noexcept;
   };

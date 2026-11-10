@@ -1,6 +1,6 @@
-// A region ends on a call whose rule may read nothing but a condition: the
-// condition reads past the region, so the point after the region's first
-// token reads the rule's token inside the region and the caller's outside it.
+// A region ending on a call to a rule that may read only a condition: the
+// condition looks past the region, so after `a` the same token is read inside
+// the region and outside it.
 // expect LR LL: refused: the grammar reaches the same token both inside a .* region and outside it
 #pragma once
 

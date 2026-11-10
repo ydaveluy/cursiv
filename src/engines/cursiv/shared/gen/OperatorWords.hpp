@@ -1,16 +1,13 @@
-// The token strings an operator can spell, one terminal id per token. Two
-// operators on different steps may open on one token only where no string is
-// both of theirs: the text after the first token then tells them apart.
+// The token strings an operator can spell, one id per token. Two operators on
+// different levels may open on one token only where no string is both of
+// theirs: the text after the first token then tells them apart.
 #pragma once
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <span>
 #include <vector>
-
-#include "cursiv/utils/StrongComponents.hpp"
 
 namespace cursiv::engine {
 
@@ -31,12 +28,12 @@ class OperatorWords {
     w._words.push_back({t});
     return w;
   }
-  // Spells something this set does not list, opening on `opening`.
-  static OperatorWords unlisted(std::span<const std::uint16_t> opening) {
+  // Spells strings no set lists, opening where `from` opens.
+  static OperatorWords unlisted(const OperatorWords& from) {
     OperatorWords w;
     w._open = true;
-    w._opening.assign(opening.begin(), opening.end());
-    w.settle();
+    w._opening = from.opening();
+    w.normalize();
     return w;
   }
 
@@ -44,7 +41,7 @@ class OperatorWords {
     _open = _open || o._open;
     _opening.insert(_opening.end(), o._opening.begin(), o._opening.end());
     _words.insert(_words.end(), o._words.begin(), o._words.end());
-    settle();
+    normalize();
   }
 
   OperatorWords then(const OperatorWords& o) const {
@@ -75,24 +72,32 @@ class OperatorWords {
         out._words.push_back(std::move(w));
       }
     }
-    out.settle();
+    out.normalize();
     return out;
   }
 
-  bool meets(const OperatorWords& o) const {
-    if (!_open && !o._open) {
-      auto a = _words.begin();
-      auto b = o._words.begin();
-      while (a != _words.end() && b != o._words.end()) {
-        if (*a < *b)
-          ++a;
-        else if (*b < *a)
-          ++b;
-        else
-          return true;
-      }
-      return false;
+  // Whether the set holds strings it does not list.
+  bool open() const { return _open; }
+
+  // A string both sets list, where neither is open.
+  std::optional<std::vector<std::uint16_t>> common(
+      const OperatorWords& o) const {
+    if (_open || o._open) return std::nullopt;
+    auto a = _words.begin();
+    auto b = o._words.begin();
+    while (a != _words.end() && b != o._words.end()) {
+      if (*a < *b)
+        ++a;
+      else if (*b < *a)
+        ++b;
+      else
+        return *a;
     }
+    return std::nullopt;
+  }
+
+  bool overlaps(const OperatorWords& o) const {
+    if (!_open && !o._open) return common(o).has_value();
     return std::ranges::any_of(o._opening,
                                [&](std::uint16_t t) { return opens_on(t); }) ||
            std::ranges::any_of(o._words, [&](const auto& w) {
@@ -115,7 +120,7 @@ class OperatorWords {
       if (!w.empty()) out.push_back(w.front());
     return out;
   }
-  void settle() {
+  void normalize() {
     std::ranges::sort(_words);
     _words.erase(std::ranges::unique(_words).begin(), _words.end());
     if (_words.size() > kLimit) {
@@ -130,26 +135,6 @@ class OperatorWords {
   std::vector<std::vector<std::uint16_t>> _words{};
   std::vector<std::uint16_t> _opening{};
   bool _open = false;
-};
-
-// The walk over the rules an operator spells: the rules on its path, how many
-// of each component of the call graph stand there, and what a rule spells.
-// Entered where no rule of its component stands on the path, a rule reaches
-// none of the rules there, so it spells the same wherever the walk meets it
-// and is read once.
-struct OperatorWordsWalk {
-  // `calls` holds the rules each rule calls.
-  explicit OperatorWordsWalk(
-      const std::vector<std::vector<std::uint16_t>>& calls)
-      : scc(StrongComponents<>::of(calls)),
-        walking(calls.size(), false),
-        onPath(calls.size(), 0),
-        known(calls.size()) {}
-
-  StrongComponents<> scc;
-  std::vector<bool> walking;
-  std::vector<std::uint16_t> onPath;
-  std::vector<std::optional<OperatorWords>> known;
 };
 
 }  // namespace cursiv::engine

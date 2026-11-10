@@ -10,15 +10,12 @@
 #include "cursiv/workspace/DocumentState.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 
-// A document answers about a build that has already run: nothing here is on a
-// parse's path. It compiles once.
-
 namespace cursiv {
 
 Document::Document(TextDocument textDocument, std::string uri)
     : uri(uri.empty() ? std::string(textDocument.uri()) : std::move(uri)),
       _textDocument(std::move(textDocument)) {
-  // Its own tag, so the climb below proves the cast rather than assuming it.
+  // Its own tag, so the walk up proves the cast rather than assuming it.
   type = &ast_type_tag<Document>;
 }
 
@@ -57,9 +54,12 @@ const TextDocument& Document::textDocument() const noexcept {
   return _textDocument;
 }
 
-void Document::resetForRebuild() noexcept {
+// The empty result is made before anything changes: a refused allocation
+// leaves the document as it was.
+void Document::resetForRebuild() {
+  ParseResult empty;
   state = DocumentState::Changed;
-  parseResult = ParseResult{};
+  parseResult = std::move(empty);
   localSymbols.clear();
   diagnostics.clear();
   ++buildRevision;

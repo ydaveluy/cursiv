@@ -1,4 +1,5 @@
-// Two indent terminals: the indentation answers one of each.
+// Two terminals that read `indent`: a grammar has one indent and one dedent
+// terminal.
 // expect LR: refused: terminal .OPEN. is a second .indent. or .dedent. terminal
 #pragma once
 

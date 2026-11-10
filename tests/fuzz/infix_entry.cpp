@@ -1,17 +1,18 @@
-// `infix<>` as the entry: the model gives a climb no children of its own
-// (`GrammarCost`'s own note); reaching the entry through `rule_node`, which
-// walks a rule's children, would write nothing at all, every time.
+// The fuzzer on grammars of its own: `infix<>` as the entry, and the implied
+// tokens and gap conditions of the asi grammar.
 
 #include <memory>
 #include <type_traits>
 
-#include "cursiv/grammar/expr.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "asi/generated/G/Module.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/CstInvariants.hpp"
 #include "cursiv/CursivLexicon.hpp"
 #include "cursiv/FuzzLane.hpp"
-#include "cursiv/Check.hpp"
+#include "cursiv/grammar/expr.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "engines/lr/AsiGrammar.hpp"
 #include "fuzz/InfixEntryGrammar.hpp"
 #include "infixentry/generated/InfixEntryG/Module.hpp"
 
@@ -80,6 +81,14 @@ void a_subtree_holds_its_children_whole() {
   CHECK(judged(4).ok);
   const auto cut = judged(3);
   CHECK(!cut.ok && cut.at == 1);
+
+  // Ends never go back along the run, from one root to the next too.
+  cursiv::Cst roots("ab");
+  cursiv::CstBuilder b(roots);
+  b.stream().leaf(1, 2, 0);
+  b.stream().leaf(0, 1, 0);
+  const auto back = cursiv::fuzzer::detail::CstInvariants{}.run(roots, "ab");
+  CHECK(!back.ok && back.at == 1);
 }
 
 int main() {
@@ -94,5 +103,11 @@ int main() {
             "infix_entry", *parser, *reflection, 300, 0x1f1f1f) == 0);
   cursiv::fuzzer::lane<finfix::InfixSequenceG>(
       "infix_sequence", *parser, *reflection, 300, 0x2f2f2f);
+  // An implied token is always written out: the walk cannot tell where the
+  // parser would imply it.
+  const std::unique_ptr<cursiv::Parser> asi =
+      tasi::generated::G::create_parser();
+  cursiv::fuzzer::lane<tasi::G>(
+      "asi", *asi, *tasi::generated::G::create_ast_reflection(), 300, 0x3f3f3f);
   return cursiv::test::report("gen_fuzz_test");
 }

@@ -7,6 +7,8 @@
 
 namespace req {
 
+// The text between the quotes. Escapes stay as written: `"a \"b\""` gives
+// `a \"b\"`, not `a "b"`.
 inline constexpr auto unquote = [](std::string_view t) {
   return t.substr(1, t.size() - 2);
 };
@@ -74,10 +76,9 @@ struct Rules : cursiv::GrammarSpec {
              + some(append<&ast::RequirementModel::requirements>(
                  ref<Requirement>))> {};
 
-  // Test returns Test:
-  // 'tst'i name=ID ('testfile'i '=' testFile=STRING)?
-  // 'tests'i requirements+=ID (',' requirements+=ID)*
-  // ('applicable'i 'for'i environments+=ID (',' environments+=ID)*)?;
+  // Test returns Test: 'tst'i name=ID ('testfile'i '=' testFile=STRING)?
+  // 'tests'i requirements+=ID (',' requirements+=ID)* ('applicable'i 'for'i
+  // environments+=ID (',' environments+=ID)*)?;
   struct Test : rule<tstKw + assign<&ast::Test::name>(ref<ID>)
                      + option(testfileKw + lit<"=">
                               + assign<&ast::Test::testFile>(ref<STRING>))

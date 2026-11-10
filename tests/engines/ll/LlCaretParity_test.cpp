@@ -1,7 +1,6 @@
 // The table engine's completion is the reference: at every caret of a valid
 // document, and at the end of every cut of one, the descent offers the same
-// tokens, and names the operators and the postfix mark as the table engine
-// does.
+// tokens and names operators and the postfix mark the same.
 
 #include <algorithm>
 #include <chrono>
@@ -79,8 +78,8 @@ std::vector<std::string> spellings(const std::vector<Entry>& entries) {
   return out;
 }
 
-// What a mark's name is the table engine's to state: the operators of the
-// precedence table and the postfix mark.
+// The operators of the precedence table and the postfix mark: the table
+// engine's names for them are the reference.
 std::vector<Entry> marks(const std::vector<Entry>& entries) {
   std::vector<Entry> out;
   for (const Entry& e : entries)
@@ -91,7 +90,7 @@ std::vector<Entry> marks(const std::vector<Entry>& entries) {
 }
 
 struct Sweep {
-  std::size_t asked = 0, alike = 0, named = 0;
+  std::size_t asked = 0, sameTokens = 0, named = 0;
 };
 
 void compare(const cursiv::Parser& lr, const cursiv::Parser& ll,
@@ -101,7 +100,7 @@ void compare(const cursiv::Parser& lr, const cursiv::Parser& ll,
   ++sweep.asked;
   const bool tokens = spellings(a) == spellings(b);
   const bool names = marks(a) == marks(b);
-  sweep.alike += tokens;
+  sweep.sameTokens += tokens;
   sweep.named += names;
   if (!tokens || !names)
     std::fprintf(stderr, "caret parity [%s] at %u\n  LR:%s\n  LL:%s\n",
@@ -128,9 +127,10 @@ void sweep_language(std::string_view name, const cursiv::Parser& lr,
                "%.*s: carets %zu, same tokens %zu, same marks %zu; cuts %zu, "
                "same tokens %zu, same marks %zu\n",
                static_cast<int>(name.size()), name.data(), carets.asked,
-               carets.alike, carets.named, cuts.asked, cuts.alike, cuts.named);
-  CHECK(carets.alike == carets.asked && carets.named == carets.asked);
-  CHECK(cuts.alike == cuts.asked && cuts.named == cuts.asked);
+               carets.sameTokens, carets.named, cuts.asked, cuts.sameTokens,
+               cuts.named);
+  CHECK(carets.sameTokens == carets.asked && carets.named == carets.asked);
+  CHECK(cuts.sameTokens == cuts.asked && cuts.named == cuts.asked);
 }
 
 void an_expression_with_parentheses_calls_and_a_postfix_mark() {
@@ -167,7 +167,6 @@ void a_closer_needs_its_opener_and_a_mark_its_member() {
   CHECK(!offers(args, ";"));
 }
 
-// An operator left out of the text still has its right operand read.
 void an_implied_operator_reads_its_right_operand() {
   const auto lr = tllconditions::generated::Lr::create_parser();
   const auto ll = tllconditions::generated::Ll::create_parser();
@@ -207,9 +206,9 @@ void a_literal_takes_its_spelling_from_the_name() {
          std::vector<std::string>{"?"}));
 }
 
-// Behind an operator guarded against a second `<` the lexer elects the bare
-// twin, yet the operand goes on from the operator: the `<` that opens an
-// operand, typed there, would make the operator the twin and is not offered.
+// After `LT`, which refuses a second `<`, the lexer picks `BARE`, yet the
+// operand follows `LT`: a `<` typed there would turn `LT` into `BARE`, so it
+// is not offered.
 void the_twin_of_the_operator_is_not_offered_behind_it() {
   const auto ll = tllexpressions::generated::Ll::create_parser();
   for (const auto& [at, resume] : {std::pair{2u, 2u}, std::pair{2u, 3u}})
@@ -217,13 +216,13 @@ void the_twin_of_the_operator_is_not_offered_behind_it() {
            std::vector<std::string>{"!", "ID"}));
 }
 
-// The choice between two rules that read `%` is made on the token behind it,
+// The choice between two rules that read `%` is made on the token after it,
 // and the choice reads `->` where the position of the `-` does not: a `>`
-// glued to the `-` makes it `->`, so it follows only after a blank.
-void a_token_the_choice_read_glues_as_the_choice_reads_it() {
+// attached to the `-` makes it `->`, so it follows only after a blank.
+void a_token_the_choice_read_joins_as_the_choice_reads_it() {
   const auto ll = tllexpressions::generated::Ll::create_parser();
   for (const std::string gap : {"", " "}) {
-    const std::string text = "glue:%-" + gap;
+    const std::string text = "join:%-" + gap;
     const auto at = static_cast<cursiv::TextOffset>(text.size());
     const auto offered = spellings(features_between(*ll, text, at, at));
     CHECK(offered == (gap.empty() ? std::vector<std::string>{}
@@ -234,10 +233,9 @@ void a_token_the_choice_read_glues_as_the_choice_reads_it() {
   }
 }
 
-// A condition reads a run of `~` as one token, however many the arms read it
-// as, and reads on to what follows the run. Past a caret on its first token it
-// reads the document's text; before a caret in the run it reads what is typed
-// there, and a `?` makes it refuse the `|` it stands before.
+// A condition reads a run of `~` as one token and reads on past it. After a
+// caret on its first token it reads the document; before a caret in the run it
+// reads what is typed, and `?` makes it refuse the `|` after it.
 void a_condition_reads_the_tokens_behind_the_caret_its_own_way() {
   const auto ll = tllexpressions::generated::Ll::create_parser();
   const auto clean = [&](const std::string& text) {
@@ -264,9 +262,9 @@ void a_condition_reads_the_tokens_behind_the_caret_its_own_way() {
   CHECK(clean(cut + "!") && !clean(cut + "?"));
 }
 
-// Behind a repair the replay is still the descent's: a run of invented tokens,
-// a misspelt word and dropped text each leave the stack the table engine
-// names. Inside a comment no end closes, what is typed is the comment's.
+// After a repair the replay still follows the descent: a run of inserted
+// tokens, a misspelt word and deleted text each leave the stack the table
+// engine names. Inside an unclosed comment, typed text belongs to the comment.
 void carets_behind_a_repair_are_the_table_engines() {
   sweep_language("tpar repaired", *tpar::generated::Lr::create_parser(),
                  *tpar::generated::Ll::create_parser(),
@@ -278,15 +276,16 @@ void carets_behind_a_repair_are_the_table_engines() {
       false);
 }
 
-// Alternatives alike past their first token are all open behind the tokens
-// they share, whichever the descent settled on for the text past the caret.
-void alternatives_alike_past_their_first_token_all_go_on() {
+// Alternatives the same past their first token are all open behind the tokens
+// they share, whichever the descent picked for the text past the caret.
+void alternatives_equal_past_their_first_token_all_go_on() {
   sweep_language(
       "tpar forks", *tpar::generated::Lr::create_parser(),
       *tpar::generated::Ll::create_parser(),
       {"fork:fi a;", "fork:fi a()", "fork:x a a b", "fork:x a a c",
        "fork:up in a;", "fork:up in a()", "fork:ty a;", "fork:ty a()",
-       "fork:tw tg tg;", "fork:tw tg tg:", "fork:fi a; ty b; x a b up in c()"});
+       "fork:tw tg tg;", "fork:tw tg tg:", "fork:fi a; ty b; x a b up in c()",
+       "fork:pr a; pr b; pr c;", "fork:pr a; pr b; !"});
   sweep_language("conditions forks",
                  *tllconditions::generated::Lr::create_parser(),
                  *tllconditions::generated::Ll::create_parser(),
@@ -295,8 +294,8 @@ void alternatives_alike_past_their_first_token_all_go_on() {
                  false);
 }
 
-// `->` reads over the `-` a statement goes on with where the gap leaves it to
-// that `-`: the stacks before the `-` are asked as the drive asked them, on the
+// `->` covers the `-` a statement goes on with when the gap allows it: the
+// stacks before the `-` are queried as the parser queried them, on the
 // document's text, and a gap that refuses `->` leaves `-` and `>` to be read.
 void a_gap_takes_a_token_off_the_position_as_the_drive_does() {
   const auto lr = tllconditions::generated::Lr::create_parser();
@@ -321,7 +320,7 @@ void a_gap_takes_a_token_off_the_position_as_the_drive_does() {
 // A word a repair read as the keyword it misspells is the author's: a word
 // typed right behind it makes one word with it and is not offered there, a
 // `(` is.
-void a_misspelt_word_glues_what_is_typed_behind_it() {
+void a_misspelt_word_joins_what_is_typed_behind_it() {
   const auto lr = tpar::generated::Lr::create_parser();
   const auto ll = tpar::generated::Ll::create_parser();
   const std::string text = "shw all x, y;";
@@ -334,8 +333,8 @@ void a_misspelt_word_glues_what_is_typed_behind_it() {
   }
 }
 
-// The drive refuses `aa` behind the first `a` through the guarded reductions of
-// the loop's turn, and reads `a`: the replay reads it as the drive does, or
+// The parser refuses `aa` after the first `a` through the guarded reductions of
+// the loop body, and reads `a`: the replay must read it the same way, or it
 // loses the text from there on.
 void a_guarded_reduction_refuses_a_token_as_the_drive_does() {
   const auto lr = tllconditions::generated::Lr::create_parser();
@@ -354,8 +353,8 @@ void a_guarded_reduction_refuses_a_token_as_the_drive_does() {
   const std::string behind = text + "\nreturn ";
   CHECK(at(*lr, behind, behind.size()) == at(*ll, behind, behind.size()));
   CHECK(!at(*lr, behind, behind.size()).empty());
-  // The same refusal, by a condition that reads on past the caret: the drive
-  // read `a`, so the `b` behind it is what goes on.
+  // The same refusal, by a condition that reads past the caret: the parser read
+  // `a`, so the `b` after it comes next.
   const std::string pairs = "andpair:ababab;";
   const auto twice = lr->parse(pairs);
   CHECK(twice.accepted && twice.diagnostics.empty());
@@ -422,10 +421,9 @@ void each_member_a_token_fills_is_named_as_the_descent_names_it() {
        {"member:bare ", "member:plain ", "member:named ", "member:marked ",
         "member:marked mk ", "member:", "member:bare $a; "})
     CHECK(end(*lr, text) == end(*ll, text));
-  // A member past a repetition opens its rule while no turn of it was read, and
-  // so does one under a choice of what spells it, a state at a time. Past a rule
-  // that may read nothing, the state holds no call of the choice, and every call
-  // of it answers.
+  // A member past a repetition opens its rule while no turn was read, and so
+  // does one under a choice of what spells it. Past a rule that may read
+  // nothing, every call of the choice answers.
   const Names unread{"ID:text/Hold/entered", "bx:marks/Hold/entered",
                      "in:text/Hold/entered", "mk:turns/Hold",
                      "nk:text/Hold",         "zz:turns/Hold",
@@ -449,8 +447,8 @@ void each_member_a_token_fills_is_named_as_the_descent_names_it() {
   CHECK(end(*lr, "let a ") == end(*ll, "let a "));
 }
 
-// The stacks of a caret's closure land on one frame from each of a long chain of
-// prefixes: its predecessors cost their number.
+// The closure stacks of a caret reach one frame from each of a long chain of
+// prefixes: the cost is linear in the number of predecessors.
 void a_frame_of_many_predecessors_costs_their_number() {
   const auto lr = tpar::generated::Lr::create_parser();
   const std::string text = "let a = " + std::string(512000, '~') + "1;";
@@ -474,12 +472,12 @@ int main() {
   a_word_read_as_two_terminals_goes_on_as_either();
   a_literal_takes_its_spelling_from_the_name();
   the_twin_of_the_operator_is_not_offered_behind_it();
-  a_token_the_choice_read_glues_as_the_choice_reads_it();
+  a_token_the_choice_read_joins_as_the_choice_reads_it();
   a_condition_reads_the_tokens_behind_the_caret_its_own_way();
   carets_behind_a_repair_are_the_table_engines();
-  alternatives_alike_past_their_first_token_all_go_on();
+  alternatives_equal_past_their_first_token_all_go_on();
   a_gap_takes_a_token_off_the_position_as_the_drive_does();
-  a_misspelt_word_glues_what_is_typed_behind_it();
+  a_misspelt_word_joins_what_is_typed_behind_it();
   a_guarded_reduction_refuses_a_token_as_the_drive_does();
   each_member_a_token_fills_is_named_as_the_descent_names_it();
   a_frame_of_many_predecessors_costs_their_number();

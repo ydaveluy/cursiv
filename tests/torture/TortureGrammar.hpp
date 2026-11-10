@@ -1,9 +1,8 @@
 #pragma once
 
-// A throwaway NTTP grammar built to break error recovery, not to ship: three
-// bracket kinds for imbrication, a tight (no-skip) header, a through()
-// body that can run to EOF, and keywords of three lengths (2/4/9) for the typo
-// repair to misjudge differently.
+// A grammar built to break error recovery: three bracket kinds for nesting, a
+// tight (no-skip) header, a through() body that can run to the end, and
+// keywords of three lengths (2/4/9) for the typo repair.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -63,15 +62,11 @@ struct Torture : cursiv::GrammarSpec {
   struct NUM : terminal<some(d)> {};
   struct STR : terminal<lit<"\""> + many((lit<"\\"> + any) | cr<R"(^"\\)">) +
                         lit<"\"">> {};
-  // A token-shape mode: `<<<` opens, `>>>` closes, everything between is
-  // opaque to the grammar -- the same `through()` shape `BLOCK` uses for
-  // comments, but here the region is a value, not trivia.
+  // `<<<` opens, `>>>` closes, and everything between is one token: the
+  // `through()` shape `BLOCK` uses for comments, but as a value.
   struct RAW : terminal<through(lit<"<<<">, lit<">>>">)> {};
 
-  // Not `infix<>`: the engine refuses to compile any grammar combining an
-  // infix precedence table with a tight skip() region, even where the table
-  // is unreachable from the region. A hand-rolled right-recursive rule
-  // sidesteps that gate and still gives the corpus an operator to corrupt.
+  // A right-recursive rule gives the corpus an operator to corrupt.
   struct ExprRule;
   struct PrimaryRule
       : rule<create<ast::NumLit>(assign<&ast::NumLit::text>(ref<NUM>))  //
@@ -92,9 +87,7 @@ struct Torture : cursiv::GrammarSpec {
                  many(append<&ast::ListItem::items>(ref<ItemRule>), lit<",">) +
                  lit<")">)> {};
 
-  // Short keyword (2 bytes): the entry, so a typo here has no bare-word
-  // escape hatch -- unlike arithmetics' `def`, nothing else in the grammar
-  // accepts a document that does not open with this literal.
+  // Medium keyword (4 bytes).
   struct TypeDeclRule
       : rule<create<ast::TypeDecl>(
             ikw<"kind"> + assign<&ast::TypeDecl::name>(ref<ID>) + lit<"="> +
@@ -120,7 +113,8 @@ struct Torture : cursiv::GrammarSpec {
   struct MemberRule
       : rule<ref<TypeDeclRule> | ref<RawDeclRule> | ref<SectionRule>> {};
 
-  // Short keyword (2 bytes).
+  // Short keyword (2 bytes), the entry: nothing else accepts a document that
+  // does not open with it, so a typo here has no fallback.
   struct ProgramRule
       : rule<ikw<"go"> + assign<&ast::Program::name>(ref<ID>) + lit<"{"> +
              many(append<&ast::Program::members>(ref<MemberRule>)) + lit<"}">> {

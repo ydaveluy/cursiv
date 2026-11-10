@@ -1,10 +1,8 @@
 #pragma once
 
-// Grammars a document embeds whole with `section<>`, both engines reading it.
-// Each keeps its trivia, its word boundary, its keywords and its end of input
-// in its section, whatever token closes it; the document skips blanks, keeps
-// `#` comments and reads a newline as a token, and restates one of Json's
-// terminals for itself.
+// Grammars a document embeds whole with `section<>`, read by both engines, each
+// keeping its trivia, word boundary, keywords and end of input. The document
+// skips blanks, keeps `#` comments and reads a newline as a token.
 
 #include <charconv>
 #include <concepts>

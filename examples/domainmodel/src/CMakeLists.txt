@@ -1,10 +1,11 @@
-# Core: the language itself. Generates the parser from the grammar, then builds
-# the services and checks under core/. Every other package links it.
+# Core: the language itself. Generates the parser and the editor's keywords
+# from the grammar, then builds the services and checks under core/.
 cursiv_generate_language(ID         domain-model
     GRAMMAR    domainmodel/DomainModelGrammar.hpp
     NAMESPACE  dm::DomainModel
     EXTENSIONS .dmodel
-    OUT        domainmodel/generated)
+    OUT        domainmodel/generated
+    TEXTMATE   ../vscode/syntaxes/domain-model.tmLanguage.json)
 
 file(GLOB_RECURSE _core CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp)

@@ -34,7 +34,7 @@ void record_sources_keep_nullable_suffixes_and_only_required_children() {
   cursiv::engine::LlLowCfg cfg;
   cfg.nrules = 2;
   cfg.nnodes = 2 * count + 1;
-  cfg.nkids = count;
+  cfg.nchildIds = count;
   std::vector<std::uint8_t> nullable(cfg.nnodes, 1);
   for (unsigned i = 0; i < count; ++i) {
     cfg.nodes[2 * i] = {.kind = cursiv::engine::LlShape::term,
@@ -49,7 +49,7 @@ void record_sources_keep_nullable_suffixes_and_only_required_children() {
                             .max = 1};
     cfg.nodeBuild[2 * i] = {};
     cfg.nodeBuild[2 * i + 1] = {};
-    cfg.kids[i] = static_cast<std::uint16_t>(2 * i + 1);
+    cfg.childIds[i] = static_cast<std::uint16_t>(2 * i + 1);
   }
   cfg.nodes[2 * count] = {
       .kind = cursiv::engine::LlShape::seq, .sym = 0, .count = count};
@@ -60,20 +60,20 @@ void record_sources_keep_nullable_suffixes_and_only_required_children() {
   const std::vector<std::uint8_t> nests(4, 0);
   cursiv::engine::LlRecordPlan records(cfg, writes, nests);
   const auto join = [](std::uint16_t held, std::uint16_t) { return held; };
-  records.settle_rows(nullable, join);
+  records.compute_rows(nullable, join);
   CHECK((records.rule_rows(1) == std::vector<std::uint16_t>{0, 2, 1}));
   // A required position, as the lowering spells a count of one: a sequence of
   // one copy of the body.
-  cfg.kids[count] = static_cast<std::uint16_t>(2 * middle);
-  cfg.nkids = count + 1;
+  cfg.childIds[count] = static_cast<std::uint16_t>(2 * middle);
+  cfg.nchildIds = count + 1;
   cfg.nodes[2 * middle + 1] = {
       .kind = cursiv::engine::LlShape::seq, .sym = count, .count = 1};
   nullable[2 * middle + 1] = nullable.back() = 0;
-  records.settle_rows(nullable, join);
+  records.compute_rows(nullable, join);
   CHECK((records.rule_rows(1) == std::vector<std::uint16_t>{2, 1}));
   cfg.nodes[2 * count].owns = true;
   cfg.nodes[2 * count].row = 3;
-  records.settle_rows(nullable, join);
+  records.compute_rows(nullable, join);
   std::vector<std::uint16_t> offered;
   records.own_joins(2 * count, join, [&](const cursiv::engine::LlFuse& x) {
     offered.push_back(x.from);
@@ -84,7 +84,7 @@ void record_sources_keep_nullable_suffixes_and_only_required_children() {
   cursiv::engine::LlLowCfg deep;
   deep.nrules = 2;
   deep.nnodes = count;
-  deep.nkids = count - 1;
+  deep.nchildIds = count - 1;
   deep.nodes[0] = {.kind = cursiv::engine::LlShape::term, .sym = 1, .row = 2};
   deep.nodeBuild[0] = {};
   for (unsigned i = 1; i < count; ++i) {
@@ -92,14 +92,14 @@ void record_sources_keep_nullable_suffixes_and_only_required_children() {
                      .sym = static_cast<std::uint16_t>(i - 1),
                      .count = 1};
     deep.nodeBuild[i] = {};
-    deep.kids[i - 1] = static_cast<std::uint16_t>(i - 1);
+    deep.childIds[i - 1] = static_cast<std::uint16_t>(i - 1);
   }
   deep.nodes[count - 1].owns = true;
   deep.nodes[count - 1].row = 3;
   deep.rules[1].body = count - 1;
   cursiv::engine::LlRecordPlan nested(deep, writes, nests);
   nullable.assign(count, 0);
-  nested.settle_rows(nullable, join);
+  nested.compute_rows(nullable, join);
   CHECK((nested.rule_rows(1) == std::vector<std::uint16_t>{3, 2}));
 }
 
@@ -124,9 +124,9 @@ void record_aliases_propagate_changes_without_rejoining_every_rule() {
   writes.chainBuild[1] = {};
   const std::vector<std::uint8_t> nests(2), nullable(count);
   cursiv::engine::LlRecordPlan records(cfg, writes, nests);
-  records.settle_ownership();
+  records.compute_ownership();
   std::size_t joins = 0;
-  records.settle_rows(nullable, [&](std::uint16_t held, std::uint16_t over) {
+  records.compute_rows(nullable, [&](std::uint16_t held, std::uint16_t over) {
     CHECK(over == 1);
     ++joins;
     return held;
@@ -139,13 +139,13 @@ void record_aliases_propagate_changes_without_rejoining_every_rule() {
   }
   // The same dependency chain also propagates the loss of a guarantee.
   cfg.nodes[count - 1] = {.kind = cursiv::engine::LlShape::empty};
-  records.settle_ownership();
+  records.compute_ownership();
   for (std::uint16_t r = 1; r <= count; ++r)
     CHECK(!records.rule_hands(r) && !records.rule_opens(r));
   // A cycle alone supplies no finite opening or action chain.
   cfg.nodes[count - 1] = {.kind = cursiv::engine::LlShape::call, .sym = 1};
-  records.settle_ownership();
-  records.settle_rows(nullable, [](auto held, auto) { return held; });
+  records.compute_ownership();
+  records.compute_rows(nullable, [](auto held, auto) { return held; });
   for (std::uint16_t r = 1; r <= count; ++r) {
     CHECK(records.rule_hands(r) && !records.rule_opens(r));
     CHECK(records.rule_rows(r).empty());
@@ -156,27 +156,27 @@ void record_rows_keep_the_order_of_first_arrival_through_aliases() {
   cursiv::engine::LlLowCfg cfg;
   cfg.nrules = 4;
   cfg.nnodes = 5;
-  cfg.nkids = 2;
+  cfg.nchildIds = 2;
   cfg.nodes[0] = {.kind = cursiv::engine::LlShape::call, .sym = 2};
   cfg.nodes[1] = {.kind = cursiv::engine::LlShape::term, .sym = 1, .row = 1};
   cfg.nodes[2] = {.kind = cursiv::engine::LlShape::alt, .sym = 0, .count = 2};
   cfg.nodes[3] = {.kind = cursiv::engine::LlShape::call, .sym = 3};
   cfg.nodes[4] = {.kind = cursiv::engine::LlShape::term, .sym = 1, .row = 0};
   for (unsigned id = 0; id < cfg.nnodes; ++id) cfg.nodeBuild[id] = {};
-  cfg.kids[0] = 0;
-  cfg.kids[1] = 1;
+  cfg.childIds[0] = 0;
+  cfg.childIds[1] = 1;
   cfg.rules[1].body = 2;
   cfg.rules[2].body = 3;
   cfg.rules[3].body = 4;
   cursiv::engine::ChainPool writes;
   const std::vector<std::uint8_t> nests, nullable(cfg.nnodes);
   cursiv::engine::LlRecordPlan records(cfg, writes, nests);
-  records.settle_rows(nullable, [](auto held, auto) { return held; });
+  records.compute_rows(nullable, [](auto held, auto) { return held; });
   CHECK((records.rule_rows(1) == std::vector<std::uint16_t>{1, 0}));
   // Once a cycle acquires an exit, it reaches every member without adding
   // duplicates or changing the order of rows that have already arrived.
   cfg.nodes[4] = {.kind = cursiv::engine::LlShape::call, .sym = 1};
-  records.settle_rows(nullable, [](auto held, auto) { return held; });
+  records.compute_rows(nullable, [](auto held, auto) { return held; });
   for (std::uint16_t r = 1; r < cfg.nrules; ++r)
     CHECK((records.rule_rows(r) == std::vector<std::uint16_t>{1}));
 }
@@ -471,9 +471,10 @@ void externally_called_expressions_stay_complete() {
   static_assert(cursiv::detail::tl_has<Aliased::Alias2, Reached>::value);
   static_assert(
       std::is_same_v<
-          typename cursiv::detail::home_of<
+          typename cursiv::detail::owner_grammar_of<
               cursiv::engine::InfixLevel<tllindirect::Base::Expr, 1>>::type,
-          typename cursiv::detail::home_of<tllindirect::Base::Expr>::type>);
+          typename cursiv::detail::owner_grammar_of<
+              tllindirect::Base::Expr>::type>);
   // These entries can need the whole expression inside the wrapper, such
   // as '1+2*'.
   const auto primary = cursiv::engine::ll_build_program(
@@ -564,8 +565,7 @@ void parser_files_have_a_stable_partition_contract() {
 }
 
 // Choices whose first arm opens on a keyword and holds the next choice: each
-// arm is spelt once, so the source grows with the nesting and not with its
-// power.
+// arm is written once, so the source grows linearly with the nesting.
 template <unsigned N>
 constexpr auto keyword_choice() {
   if constexpr (N == 0)
@@ -581,7 +581,6 @@ struct KeywordChoices : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// The parser files of a grammar, by name.
 template <class G>
 std::vector<std::pair<std::string, std::string>> emitted_files() {
   const auto done = cursiv::engine::LlFinalProgram::make(
@@ -593,7 +592,6 @@ std::vector<std::pair<std::string, std::string>> emitted_files() {
       *done, "emit_test", cursiv::engine::ll_emit_table(*done, "emit_test"));
 }
 
-// The bytes of a grammar's parser files, or of its rule units alone.
 template <class G>
 std::size_t emitted_size(bool rulesOnly = false) {
   std::size_t size = 0;
@@ -715,12 +713,13 @@ void plain_calls_stack_no_deeper_than_the_limit() {
     return static_cast<std::uint16_t>(cfg.nnodes++);
   };
   const auto call_then_token = [&](unsigned callee) {
-    cfg.kids[cfg.nkids++] = add({.kind = cursiv::engine::LlShape::call,
-                                 .sym = static_cast<std::uint16_t>(callee)});
-    cfg.kids[cfg.nkids++] =
+    cfg.childIds[cfg.nchildIds++] =
+        add({.kind = cursiv::engine::LlShape::call,
+             .sym = static_cast<std::uint16_t>(callee)});
+    cfg.childIds[cfg.nchildIds++] =
         add({.kind = cursiv::engine::LlShape::term, .sym = 1});
     return add({.kind = cursiv::engine::LlShape::seq,
-                .sym = static_cast<std::uint16_t>(cfg.nkids - 2),
+                .sym = static_cast<std::uint16_t>(cfg.nchildIds - 2),
                 .count = 2});
   };
   cfg.nrules = links + 2;

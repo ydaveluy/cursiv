@@ -11,8 +11,6 @@ function(cursiv_test name src)
   endif()
 endfunction()
 
-# A timeout in an optimised build's seconds: unoptimised code runs the same
-# work several times slower, and unoptimised wasm slower again.
 # A test that replaces the global allocator to count what it sees. On Windows a
 # C++ runtime in a DLL keeps its own `operator new`, so the test links it in.
 function(cursiv_own_allocator name)
@@ -22,6 +20,7 @@ function(cursiv_own_allocator name)
   endif()
 endfunction()
 
+# A timeout in an optimised build's seconds, scaled for slower builds.
 function(cursiv_timeout name seconds)
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     math(EXPR seconds "${seconds} * 4")

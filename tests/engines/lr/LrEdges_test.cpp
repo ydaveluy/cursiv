@@ -52,7 +52,7 @@ void run() {
     const auto r = p->parse(text);
     return r.accepted && r.diagnostics.empty();
   };
-  // Where the prefix can be read the item is owed, whether its body follows
+  // Where the prefix can be read the item is required, whether its body follows
   // or not.
   CHECK(!clean("sa"));
   CHECK(clean("saba"));
@@ -67,7 +67,7 @@ void run() {
   CHECK(clean("[aba]"));
   CHECK(!clean("[a]"));
   CHECK(!clean("[a ba]"));
-  // An item that opens on several tokens is owed on any of them: nested
+  // An item that opens on several tokens is required on any of them: nested
   // blocks fork nowhere.
   std::string nest = "commit k";
   for (int i = 0; i < 40; ++i) nest += " l = r t j = r";
@@ -241,8 +241,8 @@ namespace {
 
 using checks::clean, checks::leaves, checks::offered;
 
-// Read with a repair, the first one at `at`: where the text breaks the law
-// the case is about.
+// Accepted with its first repair at `at`: where the text breaks the rule the
+// case checks.
 bool repaired(const cursiv::Parser& p, std::string_view text,
               cursiv::TextOffset at) {
   const cursiv::ParseResult r = p.parse(text);
@@ -618,7 +618,6 @@ void offers(const Engine& e, const std::string& text,
   CHECK(actual == expected);
 }
 
-// The positions still open are the literals the parser offers at the caret.
 void the_caret_is_offered_the_positions_still_open(const Engine& e) {
   std::vector<std::string> edges, letters, pairs;
   for (const char c : {'p', 'q'})
@@ -693,10 +692,9 @@ void run() {
 }  // namespace case_wideoptional
 
 namespace case_sectiontail {
-// A run that no token of an embedded grammar closes is looked through once:
-// the bytes the recovery walks grow with the run, not with its square, in both
-// engines and with the repair budget spent, and a cancelled parse is told
-// within a run of polls.
+// A run no token of an embedded grammar closes is looked through once: the
+// bytes the recovery walks grow with the run, not its square, in both engines,
+// and a cancelled parse is told within a run of polls.
 
 namespace {
 
@@ -853,15 +851,13 @@ void the_engines_tell_a_cancelled_scan() {
   }
 }
 
-// The bound re-reads a byte as every state may: what the search re-reads in a
-// state of the section, which lexes its faults with the section's alphabet,
-// the bound re-reads too. `<` is the host's token, not the section's: in the
-// section `<aaaab` reads as `LONG` with its first byte misspelt.
-void the_bound_rereads_what_a_section_state_rereads() {
+// The bound re-reads a byte as every state may: what the search re-reads in
+// any state, the bound re-reads at `at` too.
+template <const auto& A>
+void the_bound_rereads_what_every_state_rereads(const std::string& text,
+                                                cursiv::TextOffset at) {
   using namespace cursiv;
   using namespace cursiv::engine;
-  constexpr const auto& A = tsection::generated::Lr::kTable;
-  const std::string text = "<<aaaab>";
   LrRoom room(text);
   LrSearch s(static_cast<TextOffset>(text.size()),
              {.floor = ~std::uint64_t{0},
@@ -871,7 +867,6 @@ void the_bound_rereads_what_a_section_state_rereads() {
              room.context.indentArena);
   s.limit = ~std::uint64_t{0};
   s.bounding = true;
-  const TextOffset at = 1;
   const std::vector<Typo> bound = lr_search_misread<A>(room.context, s, at);
   unsigned asked = 0;
   for (std::uint32_t state = 0; state < A.mode.size(); ++state) {
@@ -887,6 +882,21 @@ void the_bound_rereads_what_a_section_state_rereads() {
     }
   }
   CHECK(asked != 0);
+}
+
+// A state of the section lexes its faults with the section's alphabet. `<` is
+// the host's token, not the section's: in the section `<aaaab` reads as
+// `LONG` with its first byte misspelt.
+void the_bound_rereads_what_a_section_state_rereads() {
+  the_bound_rereads_what_every_state_rereads<tsection::generated::Lr::kTable>(
+      "<<aaaab>", 1);
+}
+
+// A section's text ends at its closer: `abx` read as `abc` ends there, though
+// the closer's first byte goes on with a word.
+void the_bound_rereads_up_to_a_section_closer() {
+  the_bound_rereads_what_every_state_rereads<tedges::generated::G::kTable>(
+      "closed:<abxend", 8);
 }
 
 void both_engines_read_the_run_as_one_fault() {
@@ -910,6 +920,7 @@ void run() {
   a_whole_parse_of_the_run_is_linear({64, 0, 64, 64});
   the_engines_tell_a_cancelled_scan();
   the_bound_rereads_what_a_section_state_rereads();
+  the_bound_rereads_up_to_a_section_closer();
   both_engines_read_the_run_as_one_fault();
 }
 }  // namespace case_sectiontail

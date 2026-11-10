@@ -2,13 +2,14 @@
 
 #include <cmath>
 #include <format>
+#include <limits>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -38,21 +39,11 @@ const ast::Expression* unwrap(const ast::Expression* expression) {
   return expression;
 }
 
-// A call, and the definition whose body writes it.
-struct NestedCall {
-  const ast::FunctionCall* call;
-  const ast::Definition* host;
-};
-
-// The call each call was reached from. Walking back through it is what turns a
-// cycle into a path a reader can follow.
-using CallTree = std::unordered_map<const ast::FunctionCall*, NestedCall>;
-
-// The resolved calls a body writes, source order, the arguments of a call
-// after it: an argument is evaluated before the body it is passed to, so a
-// call it makes is one its host makes. A walk on its own stack, so a body a
-// million terms long holds no native frame per term.
-void select_calls(const ast::Definition& host, std::vector<NestedCall>& out) {
+// The resolved calls a body makes, the calls in their arguments included, in
+// source order. Walks on its own stack.
+std::vector<const ast::FunctionCall*> select_calls(
+    const ast::Definition& host) {
+  std::vector<const ast::FunctionCall*> calls;
   std::vector<const ast::Expression*> pending{host.expr};
   while (!pending.empty()) {
     const ast::Expression* const expression = unwrap(pending.back());
@@ -60,7 +51,7 @@ void select_calls(const ast::Definition& host, std::vector<NestedCall>& out) {
     if (expression == nullptr) continue;
     if (expression->type == &cursiv::ast_type_tag<ast::FunctionCall>) {
       const auto& call = static_cast<const ast::FunctionCall&>(*expression);
-      if (definition_of(call) != nullptr) out.push_back({&call, &host});
+      if (definition_of(call) != nullptr) calls.push_back(&call);
       pending.insert(pending.end(), call.args.rbegin(), call.args.rend());
     } else if (expression->type
                == &cursiv::ast_type_tag<ast::BinaryExpression>) {
@@ -70,41 +61,15 @@ void select_calls(const ast::Definition& host, std::vector<NestedCall>& out) {
       pending.push_back(binary.left);
     }
   }
+  return calls;
 }
 
-// The pair (entry, closing call) when climbing back from `to` re-enters the
-// definition `to` calls, nothing when it enters none.
-std::vector<NestedCall> select_cycle(const NestedCall& to,
-                                     const CallTree& tree) {
-  const ast::Definition* const target = definition_of(*to.call);
-  auto found = tree.find(to.call);
-  while (found != tree.end()) {
-    if (found->second.host == target) return {found->second, to};
-    found = tree.find(found->second.call);
-  }
-  return {};
-}
-
-// The cycle's calls, its closing one first and its entry last.
-std::vector<NestedCall> iterate_back(const std::vector<NestedCall>& cycle,
-                                     const CallTree& tree) {
-  std::vector<NestedCall> back{cycle.back()};
-  if (cycle.front().call == cycle.back().call) return back;
-  auto found = tree.find(cycle.back().call);
-  while (found != tree.end()) {
-    back.push_back(found->second);
-    if (found->second.call == cycle.front().call) break;
-    found = tree.find(found->second.call);
-  }
-  return back;
-}
-
-// `f()->g()->f()`: the cycle read in call order, which is `back` reversed.
-std::string print_cycle(const std::vector<NestedCall>& back) {
+// `f()->g()->f()`: the definitions a cycle's calls enter, in call order.
+std::string print_cycle(std::span<const ast::FunctionCall* const> cycle) {
   std::string path;
-  for (auto at : std::views::reverse(back)) {
+  for (const ast::FunctionCall* const call : cycle) {
     if (!path.empty()) path += "->";
-    path += definition_of(*at.call)->name;
+    path += definition_of(*call)->name;
     path += "()";
   }
   return path;
@@ -124,11 +89,9 @@ std::optional<double> known(
                                : std::optional<double>(found->second);
 }
 
-// A sub-expression that is already a number, bottom up: an operation is
-// reached once on the way down, and again once its operands are known. A
-// parent that folds takes its children's places: reporting both would offer
-// the author two rewrites for one span. A constant is kept short, eight
-// characters at most, so the rewrite stays a simplification.
+// The binary expressions that fold to a number, bottom up. A parent that folds
+// replaces its children, so a span gets one rewrite, and a constant longer
+// than eight characters is not kept.
 void fold(const ast::Expression& root,
           std::unordered_map<const ast::Expression*, double>& folded,
           std::vector<const ast::Expression*>& order) {
@@ -173,10 +136,8 @@ void fold(const ast::Expression& root,
 
 namespace {
 
-// The divisor is evaluated, not folded: a name standing for a number is a
-// number, so a call reaching a zero body is a division by zero too. Bounded,
-// so the check costs one walk of the document plus a few steps per divisor,
-// never the whole call graph.
+// The divisor is evaluated, so a call worth zero is a division by zero too,
+// within a few steps per divisor.
 constexpr std::size_t kDivisorStepLimit = 64;
 
 void say_if_zero(const ast::BinaryExpression& binary, Interpreter& interpreter,
@@ -184,7 +145,7 @@ void say_if_zero(const ast::BinaryExpression& binary, Interpreter& interpreter,
   if ((binary.op != ast::Operator::divide && binary.op != ast::Operator::modulo)
       || binary.right == nullptr)
     return;
-  // An unbound name, a cycle, a spent budget: nullopt, not this check's
+  // An unbound name, a cycle, a step limit reached: nullopt, not this check's
   // answer.
   const std::optional<double> divisor =
       interpreter.evaluate(*binary.right, kDivisorStepLimit);
@@ -255,7 +216,7 @@ void ArithmeticsValidator::checkDivisionsByZero(
 
 namespace {
 
-// Every holder of a shared name is an error. A name's first holder is said
+// Every holder of a shared name is an error. A name's first holder is reported
 // when its first duplicate turns up, so a name held once costs one entry.
 class Duplicates {
  public:
@@ -279,7 +240,7 @@ class Duplicates {
         .property<&ast::AbstractDefinition::name>();
   }
 
-  // The first holder of each name, null once said.
+  // The first holder of each name, null once reported.
   std::unordered_map<std::string_view, const ast::AbstractDefinition*> _first;
 };
 
@@ -324,67 +285,58 @@ void ArithmeticsValidator::checkMatchingParameters(
                   definition->name, definition->args.size(), call.args.size()));
 }
 
-// A cycle of calls, said at every call site with its full path: the
-// definition's name alone would not say which call closes the loop. Each
-// definition's calls are expanded once, so a shared cycle is reported once.
+// A cycle of calls, reported at each of its call sites with its path. A
+// depth-first walk: a call into a definition still on the stack closes a cycle,
+// and each definition is followed once, so a shared cycle is reported once.
 void ArithmeticsValidator::checkFunctionRecursion(
     const ast::Module& module, cursiv::ValidationAcceptor& accept) const {
-  std::unordered_set<const ast::Definition*> expanded;
-  CallTree tree;
-  std::vector<std::vector<NestedCall>> cycles;
-
-  const auto callsOf = [&expanded](const ast::Definition* host) {
-    std::vector<NestedCall> calls;
-    if (host != nullptr && expanded.insert(host).second)
-      select_calls(*host, calls);
-    return calls;
+  // A definition on the stack, the call that entered it (null at the start)
+  // and its own calls.
+  struct Visit {
+    const ast::Definition* definition;
+    const ast::FunctionCall* entry;
+    std::vector<const ast::FunctionCall*> calls;
+    std::size_t next = 0;
   };
-
-  // One breadth-first step: what the called body opens, minus what closes.
-  const auto step = [&](const NestedCall& parent) {
-    std::vector<NestedCall> open;
-    const ast::Definition* const target = definition_of(*parent.call);
-    if (parent.host == target) cycles.push_back({parent});
-    for (const NestedCall& child : callsOf(target)) {
-      tree.insert_or_assign(child.call, parent);
-      // A body not expanded yet hosts no call above, so the climb would find
-      // nothing: a chain written callers first stays one pass.
-      std::vector<NestedCall> cycle =
-          expanded.contains(definition_of(*child.call))
-              ? select_cycle(child, tree)
-              : std::vector<NestedCall>{};
-      if (cycle.empty())
-        open.push_back(child);
-      else
-        cycles.push_back(std::move(cycle));
-    }
-    return open;
-  };
+  // A definition's depth in `open` while walked, `kDone` once left.
+  constexpr std::size_t kDone = std::numeric_limits<std::size_t>::max();
+  std::unordered_map<const ast::Definition*, std::size_t> levelOf;
+  std::vector<Visit> open;
 
   for (const ast::Statement* const statement : module.statements) {
     if (statement == nullptr
         || statement->type != &cursiv::ast_type_tag<ast::Definition>)
       continue;
-    for (const NestedCall& root :
-         callsOf(static_cast<const ast::Definition*>(statement))) {
-      std::vector<NestedCall> open{root};
-      while (!open.empty()) {
-        std::vector<NestedCall> next;
-        for (const NestedCall& parent : open) {
-          const std::vector<NestedCall> children = step(parent);
-          next.insert(next.end(), children.begin(), children.end());
-        }
-        open = std::move(next);
+    const auto& start = static_cast<const ast::Definition&>(*statement);
+    if (!levelOf.try_emplace(&start, 0).second) continue;
+    open.push_back({&start, nullptr, select_calls(start)});
+    while (!open.empty()) {
+      Visit& top = open.back();
+      if (top.next == top.calls.size()) {
+        levelOf[top.definition] = kDone;
+        open.pop_back();
+        continue;
       }
-    }
-  }
+      const ast::FunctionCall* const call = top.calls[top.next++];
+      const ast::Definition* const target = definition_of(*call);
+      const auto [level, fresh] = levelOf.try_emplace(target, open.size());
+      if (fresh) {
+        open.push_back({target, call, select_calls(*target)});
+        continue;
+      }
+      if (level->second == kDone) continue;
 
-  for (const std::vector<NestedCall>& cycle : cycles) {
-    const std::vector<NestedCall> back = iterate_back(cycle, tree);
-    const std::string message =
-        std::format("Recursion is not allowed [{}]", print_cycle(back));
-    for (const NestedCall& nested : back)
-      accept.error(*nested.call, message).property<&ast::FunctionCall::func>();
+      std::vector<const ast::FunctionCall*> cycle;
+      for (auto above = open.begin() + level->second + 1; above != open.end();
+           ++above)
+        cycle.push_back(above->entry);
+      cycle.push_back(call);
+      const std::string message =
+          std::format("Recursion is not allowed [{}]", print_cycle(cycle));
+      // The closing call first, back to the one that entered the cycle.
+      for (const ast::FunctionCall* const site : std::views::reverse(cycle))
+        accept.error(*site, message).property<&ast::FunctionCall::func>();
+    }
   }
 }
 

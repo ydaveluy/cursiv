@@ -211,9 +211,9 @@ void a_parser_without_references_counts_none() {
   }
 }
 
-// A run that cannot go on answers with its status, as `main` would return it:
-// leaving the process from inside left the workers of its services running into
-// the process's own teardown, which Windows does not always survive.
+// A run that cannot go on returns its status for `main` to return: exiting
+// from inside would leave its services' workers running into the process
+// teardown, which Windows does not always survive.
 void a_failed_run_returns_its_status() {
   char program[] = "bench_test";
   char missing[] = "bench_test-missing.ws";

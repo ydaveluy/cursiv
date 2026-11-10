@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <string>
 #include <string_view>
@@ -85,13 +86,14 @@ std::vector<FileSystemNode> MemoryFileSystemProvider::readDirectory(
       nodes.push_back({.isFile = true, .isDirectory = false, .uri = at->first});
       continue;
     }
-    // A deeper key implies the folder between: synthesized once -- every key
-    // under one child is contiguous too, so the previous node is the only
-    // duplicate to test against.
-    std::string child(name.substr(0, prefix.size() + slash));
-    if (nodes.empty() || nodes.back().uri != child)
-      nodes.push_back(
-          {.isFile = false, .isDirectory = true, .uri = std::move(child)});
+    // A deeper key implies the folder between, added once: the walk skips past
+    // its last key, as `0` sorts right after `/`.
+    std::string child(name.substr(0, prefix.size() + slash + 1));
+    child.back() = '0';
+    at = std::prev(_files.lower_bound(child));
+    child.pop_back();
+    nodes.push_back(
+        {.isFile = false, .isDirectory = true, .uri = std::move(child)});
   }
   return nodes;
 }

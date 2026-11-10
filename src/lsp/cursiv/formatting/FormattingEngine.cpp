@@ -29,8 +29,8 @@ namespace cursiv::detail {
 
 namespace {
 
-// A stretch of the document in bytes, and in lines and columns once asked:
-// most gaps are compared as bytes and never published, so most never are.
+// A stretch of the document in bytes. Lines and columns are computed on
+// demand: most gaps are never published.
 struct TextSpan {
   TextOffset begin = 0;
   TextOffset end = 0;
@@ -105,16 +105,15 @@ constexpr std::uint32_t kMaxTabSize = 64;
                        range.start.line);
 }
 
-
-// The order a client's edit list is owed. One definition, because the sink
-// watches for it and `finalize_edits` restores it.
+// The order of a client's edit list. One definition: the sink watches for it
+// and `finalize_edits` restores it.
 [[nodiscard]] bool edit_before(const PendingEdit& left,
                                const PendingEdit& right) noexcept {
   return left.begin != right.begin ? left.begin < right.begin
                                    : left.end < right.end;
 }
 
-// Where a format's edits land: the window is applied at the push, and the
+// Where a format's edits go: the window is applied at the push, and the
 // order watched there. A rule on a record that has children emits the gap
 // past its whole subtree before the subtree, so the order is not a given.
 class EditSink {
@@ -150,10 +149,9 @@ struct MarginPiece {
               std::min(text.find_first_not_of(' '), text.size()))};
 }
 
-// The indentation units a piece counts for. Units are columns when spaces are
-// inserted, so a tab counts `tabSize`. They are levels when tabs are, so a tab
-// counts one, as does each group of `tabSize` spaces in a run, and each space
-// the groups leave over counts one.
+// The indentation units of a piece: columns when inserting spaces (a tab
+// counts `tabSize`), levels when inserting tabs (a tab or `tabSize` spaces
+// count one, and each space left over counts one).
 [[nodiscard]] std::int64_t piece_units(
     const MarginPiece& piece, const lsp::FormattingOptions& options) noexcept {
   const auto tabSize = effective_tab_size(options);
@@ -439,17 +437,26 @@ void emit_gap_edits(NodeId previous, NodeId node,
     return;
 
   const TextSpan gap = gap_before(context, previous, node);
+  const auto push = [&](PendingEdit&& edit) {
+    edit.priority = action.options.priority;
+    sink.push(std::move(edit));
+  };
   const FormattingMove* move = find_fitting_move(gap, action);
-  if (move == nullptr) return;
+  if (move == nullptr) {
+    // A rule with no move keeps the gap, at its priority, against a rule on the
+    // gap's other side.
+    push(PendingEdit{
+        .begin = gap.begin,
+        .end = gap.end,
+        .newText = std::string(context.document.textDocument().getText().substr(
+            gap.begin, gap.end - gap.begin))});
+    return;
+  }
 
   if (move->tabs.has_value())
     context.indentation = checked_count(
         static_cast<std::int64_t>(context.indentation) + *move->tabs);
 
-  const auto push = [&](PendingEdit&& edit) {
-    edit.priority = action.options.priority;
-    sink.push(std::move(edit));
-  };
   if (move->characters.has_value()) {
     // The break ending a line comment must not be replaced by spaces.
     if (previous == kNoNode || context.cst[previous].hidden == 0)
@@ -461,12 +468,9 @@ void emit_gap_edits(NodeId previous, NodeId node,
   }
 }
 
-// The minimality, in one place. Two edits over the same range are two rules
-// over one gap -- the append of the token before it and the prepend of the
-// token after it: the higher priority keeps it, the later one on a tie.
-// Otherwise overlapping edits collapse to the later one. The edits kept so far
-// are the front of the list, so it is filtered in place. Then the pin: an edit
-// whose new text is the text it replaces is not an edit.
+// Two edits over one range are two rules over one gap: the higher priority
+// wins, the later one on a tie. Other overlaps keep the later edit, and an
+// edit that changes nothing is dropped.
 [[nodiscard]] std::vector<lsp::TextEdit> finalize_edits(
     const Document& document, std::vector<PendingEdit> edits, bool sorted) {
   if (!sorted) std::ranges::stable_sort(edits, edit_before);
@@ -658,7 +662,7 @@ std::vector<lsp::TextEdit> run_formatting(
                         actions.replacement(id), context, sink);
     }
 
-    // A level lands on the record and travels down its subtree; a childless
+    // A level is set on the record and travels down its subtree; a childless
     // record has no inside to carry it.
     if (prepend != nullptr && !hidden) {
       const std::int32_t before = context.indentation;

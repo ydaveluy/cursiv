@@ -101,7 +101,7 @@ constexpr auto lr_refused_from(const char* src, TextOffset from,
   };
 }
 
-// The tape of the table: a state's election was spelled as fallback rows;
+// The tape of the table: a state's election is written as fallback rows;
 // `Skips`, with the terminals a refused word took off the position.
 template <const auto& A, bool Skips = false>
 struct LrLexTape : LexTape<A> {

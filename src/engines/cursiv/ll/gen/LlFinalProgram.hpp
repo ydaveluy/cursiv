@@ -18,12 +18,9 @@ namespace cursiv::engine {
 // row an emitter reads. It is the program that was handed in, not a copy.
 class LlFinalProgram {
  public:
-  // Refuses, in this order: a fault the build recorded, what the lowering
-  // refused or a limit it ran into, a record stamp that fits no split, and a
-  // terminal that matches the empty string. A refusal goes to stderr under
-  // `grammar`, and nothing is returned. Otherwise the stamp split is kept,
-  // the program is frozen and its stamps are planned. `asWritten` answers a
-  // rule as its author wrote it, shown under a fault; none where null.
+  // Refuses, in order: a build fault, a lowering refusal or limit, a stamp that
+  // fits no split, and a terminal matching the empty string, printed to stderr
+  // under `grammar`. `asWritten`, if not null, shows a faulty rule as written.
   static std::optional<LlFinalProgram> make(
       LlBuiltProgram built, std::string_view grammar,
       std::string (*asWritten)(std::string_view) = nullptr);

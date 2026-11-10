@@ -19,7 +19,7 @@ void visit_member(
     const AstNode& node,
     cursiv::function_ref<void(std::string_view, std::uint32_t, AstNode&)>
         yield) {
-  if constexpr (F::nature == FieldNature::variant) {
+  if constexpr (F::content == FieldContent::variant) {
     const auto& owner =
         *detail::ast_cast_unchecked<const typename F::owner>(&node);
     const auto one = [&](const auto& v, std::uint32_t at) {
@@ -39,7 +39,7 @@ void visit_member(
     } else {
       one(owner.*F::ptr, AstReflection::kNoIndex);
     }
-  } else if constexpr (F::nature != FieldNature::node) {
+  } else if constexpr (F::content != FieldContent::node) {
     (void)node;
     (void)yield;
   } else {
@@ -86,8 +86,8 @@ struct AstMemberAccess<T, TypeList<Fs...>> {
       const AstNode& node,
       function_ref<void(std::string_view, std::uint32_t, AstNode&)> yield) {
     const auto one = [&]<class F>() {
-      if constexpr (F::nature == FieldNature::node ||
-                    F::nature == FieldNature::variant)
+      if constexpr (F::content == FieldContent::node ||
+                    F::content == FieldContent::variant)
         if (node.type != nullptr &&
             node.type->derivesFrom(&ast_type_tag<typename F::owner>))
           visit_member<F>(node, yield);

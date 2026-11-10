@@ -1,4 +1,5 @@
-// A nest in the child payload cannot reset the parent's written members.
+// A nest inside the node written into `item` starts no new `Holder`: each turn
+// writes `item` again.
 // expect LR: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Holder::item
 #pragma once
 #include "refusals/head.hpp"

@@ -1,7 +1,6 @@
-// Compares two ASTs node by node: type, value members, then child members,
-// in order. Reports the path to the first divergence. A member neither side
-// can read is named as blind, never treated as equal; `visitMembers` skips a
-// node held in a variant member, so those are never compared at all.
+// Compares two ASTs node by node: type, value members, then children, in
+// order, and reports the path to the first difference. A member neither side
+// can read, such as a variant holding a node, goes to `blind`, never equal.
 #pragma once
 
 #include <cstdint>
@@ -10,10 +9,10 @@
 #include <string_view>
 #include <vector>
 
+#include "cursiv/AstUnwritten.hpp"
+#include "cursiv/GrammarActions.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
-#include "cursiv/AstExcused.hpp"
-#include "cursiv/GrammarActions.hpp"
 
 namespace cursiv::fuzzer {
 
@@ -25,17 +24,17 @@ struct AstCompare {
     bool equal = true;
     std::string where;  // the path to the first divergence
     std::string want, got;
-    // Members no reader reaches, by name: a blind spot of the instruments.
+    // Members no reader reaches, by name.
     std::vector<std::string> blind;
   };
 
-  // `excused` names members the walk could not write; they are dropped from
-  // both sides so a blind spot never counts as agreement.
+  // `unwritten` names members the walk could not write; they are dropped from
+  // both sides so they never count as agreement.
   [[nodiscard]] Result run(const AstNode& want, const AstNode& got,
-                           std::span<const AstExcused> excused = {}) const {
+                           std::span<const AstUnwritten> unwritten = {}) const {
     Result r;
     std::vector<Frame> walk;
-    enter(want, got, walk, excused, r);
+    enter(want, got, walk, unwritten, r);
     while (r.equal && !walk.empty()) {
       Frame& top = walk.back();
       if (top.next == top.a.size()) {
@@ -51,7 +50,7 @@ struct AstCompare {
         break;
       }
       ++top.next;
-      enter(*ca.node, *cb.node, walk, excused, r);
+      enter(*ca.node, *cb.node, walk, unwritten, r);
     }
     return r;
   }
@@ -75,10 +74,10 @@ struct AstCompare {
     std::size_t next = 0;
   };
 
-  [[nodiscard]] static bool skipped(std::span<const AstExcused> excused,
+  [[nodiscard]] static bool skipped(std::span<const AstUnwritten> unwritten,
                                     const AstNode& mine,
                                     std::string_view name) {
-    for (const AstExcused& x : excused)
+    for (const AstUnwritten& x : unwritten)
       if (x.node == &mine && x.member == name) return true;
     return false;
   }
@@ -144,14 +143,14 @@ struct AstCompare {
     return out;
   }
 
-  // An excused member is dropped from both lists: the walk never wrote it,
+  // An unwritten member is dropped from both lists: the walk never wrote it,
   // so neither side's value should count.
   template <class T>
-  static void drop(std::span<const AstExcused> excused, const AstNode& mine,
+  static void drop(std::span<const AstUnwritten> unwritten, const AstNode& mine,
                    std::vector<T>& xs) {
     std::size_t at = 0;
     for (std::size_t i = 0; i < xs.size(); ++i) {
-      if (skipped(excused, mine, xs[i].name)) continue;
+      if (skipped(unwritten, mine, xs[i].name)) continue;
       if (at != i) xs[at] = std::move(xs[i]);
       ++at;
     }
@@ -168,7 +167,7 @@ struct AstCompare {
 
   // Compares two nodes, and leaves their children on the walk.
   void enter(const AstNode& a, const AstNode& b, std::vector<Frame>& walk,
-             std::span<const AstExcused> excused, Result& r) const {
+             std::span<const AstUnwritten> unwritten, Result& r) const {
     if (a.type != b.type) {
       const std::string at = path(walk);
       fail(r, at.empty() ? "/" : at, name_of(a), name_of(b));
@@ -176,8 +175,8 @@ struct AstCompare {
     }
     std::vector<Value> va = values(a);
     std::vector<Value> vb = values(b);
-    drop(excused, a, va);
-    drop(excused, a, vb);
+    drop(unwritten, a, va);
+    drop(unwritten, a, vb);
     // The two walks read one table in one order: a length that differs is the
     // table disagreeing with itself, not a tree.
     if (va.size() != vb.size()) {
@@ -208,8 +207,8 @@ struct AstCompare {
 
     std::vector<Child> ca = children(a);
     std::vector<Child> cb = children(b);
-    drop(excused, a, ca);
-    drop(excused, a, cb);
+    drop(unwritten, a, ca);
+    drop(unwritten, a, cb);
     if (ca.size() != cb.size()) {
       const std::string at = path(walk);
       fail(r, at.empty() ? "/" : at, list(name_of(a), ca),

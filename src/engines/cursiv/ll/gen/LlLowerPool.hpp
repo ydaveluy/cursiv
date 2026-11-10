@@ -1,4 +1,4 @@
-// The shapes the LL lowering lays a body out as, and the emission that turns
+// The shapes the LL lowering arranges a body into, and the emission that turns
 // them into the program's nodes: a production is decided over the whole body,
 // since its optional positions distribute over one another.
 #pragma once
@@ -34,10 +34,10 @@ enum class Shape : std::uint8_t {
 };
 
 // A shape limit is a refusal, never a truncation. The refusal is recorded in
-// `cfg.fault` and the walk carries on writing a well-formed value: the gate
-// over the lowering states it once, naming the rule (`GrammarFault.hpp`).
+// `cfg.fault` and the walk carries on writing a well-formed value: the check
+// after the lowering reports it once, naming the rule (`GrammarFault.hpp`).
 
-// The actions one column of one element owes, innermost first.
+// The actions one column of one element needs, innermost first.
 using Acts = std::vector<std::uint16_t>;
 
 [[noreturn]] inline void too_many_positions() {
@@ -46,20 +46,19 @@ using Acts = std::vector<std::uint16_t>;
 
 struct Node {
   Shape kind{};
-  std::uint16_t sym = 0;    // sym: the symbol | seq,alt: kid base | rep: kid
-  std::uint16_t count = 0;  // seq,alt: kid count
+  std::uint16_t sym = 0;  // sym: the symbol | seq,alt: child base | rep: child
+  std::uint16_t count = 0;  // seq,alt: child count
   std::uint32_t min = 0, max = 0;
-  // The two runs a directive standing over this element owes: what it writes,
-  // and the record it opens. A directive takes no position of its own -- it
-  // says what the position under it does.
+  // The two runs of a directive over this element: what it writes, and the
+  // record it opens. A directive takes no position of its own; it says what
+  // the position under it does.
   Acts row{};
   Acts made{};
   // The hover text of this use of a token.
   std::string_view doc{};
-  // The skip configuration the element is read under: the region it stands
-  // in, zero for the grammar's. The regime rides the element -- a rule whose
-  // own body opens a region has an interior of its own and the caller's
-  // entry, which no per-rule flag can say.
+  // The skip configuration the element is read under: its region, zero for the
+  // grammar's. A rule whose body opens a region has its own interior and the
+  // caller's entry, so this belongs to the element.
   std::uint8_t cfg = 0;
   // The section a call opens, its configuration plus one.
   std::uint8_t section = 0;
@@ -76,7 +75,7 @@ struct Node {
 // was read into, and the two pools a reification interns through.
 struct Pool : LowerPool {
   std::vector<Node> e{};
-  std::vector<std::uint16_t> kid{};
+  std::vector<std::uint16_t> child{};
 
   std::uint16_t push(Node x) {
     if (e.size() >= kNoRow) too_many_positions();
@@ -87,9 +86,9 @@ struct Pool : LowerPool {
 
 Acts cat(const Acts& a, const Acts& b);
 
-// Position `node`, as the choice the parse makes there, minted where the
-// shape holds one. What separates its arms is the construction's to settle;
-// the lowering only says where a decision stands.
+// Position `node`, as the choice the parse makes there, created where the
+// shape holds one. The construction decides what separates its arms; the
+// lowering only says where a decision stands.
 std::uint16_t with_decision(LlLowered& o, std::uint16_t node,
                             std::uint16_t nalts, std::uint16_t owner);
 
@@ -100,26 +99,23 @@ std::uint16_t put_group(LlLowered& o, LlShape kind,
                         std::span<const std::uint16_t> ids, std::uint16_t row,
                         const LlNodeBuild& b);
 
-// `made` and `row` are the whole chain standing over this position, the
-// position's own included: a caller reading a kid takes the kid's before it
-// descends. A choice never carries one -- a directive over it distributes,
-// since a write on a step every arm shares could not say which arm the value
-// came from.
-std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
-                   const Acts& made, const Acts& row, std::uint16_t owner);
+// `made` and `row` are the whole chain over this position, its own included. A
+// choice never carries one: a directive over it goes to each arm, so a write
+// can tell which arm gave the value.
+Descent<std::uint16_t> emit(LlLowered& o, const Pool& p, std::uint16_t at,
+                            const Acts& made, const Acts& row,
+                            std::uint16_t owner);
 
-// One climb operator per token of an atomic operator, `made` and `row` the
-// chain over `at` as `emit` takes them. A condition reads the gap on its own
-// side of the token: those in front of it stay in front, those behind it stay
-// behind.
+// One climb operator per token of an atomic operator, `made` and `row` as
+// `emit` takes them. A condition stays on its own side of the token.
 void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
                          const Acts& made, const Acts& row, std::uint8_t prec,
                          Association group, std::uint8_t cfg,
                          std::vector<std::uint16_t> before = {},
                          std::vector<std::uint16_t> after = {});
 
-void ride_chains_down(LlLowered& o, const LlRecordPlan& plan);
-void lay_own_records(LlLowered& o, const LlRecordPlan& plan);
+void move_chains_down(LlLowered& o, const LlRecordPlan& plan);
+void add_own_records(LlLowered& o, const LlRecordPlan& plan);
 
 }  // namespace llow
 }  // namespace cursiv::engine

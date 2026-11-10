@@ -22,7 +22,9 @@ struct LrLexView : LexTableView<LrBuildTable> {
   std::uint16_t relay(std::uint16_t s) const {
     return a.nrelays != 0 ? a.dfaRelay[s] : kNoRelay;
   }
-  unsigned tier(std::uint16_t s, unsigned t) const { return a.dfa_tier(s, t); }
+  unsigned priority(std::uint16_t s, unsigned t) const {
+    return a.dfa_priority(s, t);
+  }
 };
 
 }  // namespace cursiv::engine

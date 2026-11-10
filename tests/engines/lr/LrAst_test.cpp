@@ -466,7 +466,7 @@ void the_token_graph() {
   const auto guarded = [&](unsigned t) {
     const LexNode& e = c.lex[c.termBuild[t].lex];
     return e.kind == LexKind::seq && e.b != 0 &&
-           c.lex[c.lexKid[e.a + e.b - 1u]].kind == LexKind::nguard;
+           c.lex[c.lexChild[e.a + e.b - 1u]].kind == LexKind::nguard;
   };
   CHECK(c.term_name(2) == "KW" && guarded(2));
   // ...and a spelling that could not run into one refuses nothing.
@@ -532,10 +532,9 @@ void the_productions() {
   for (unsigned k = 0; k < c.nprods; ++k) CHECK(c.prods[k].len != 0);
 }
 
-// `E -> E op E` per operator, and the ambiguity is deliberate: what
-// separates the readings is the step, which the construction resolves. The
-// synthesized body `P (ops P)*` would say the same language and group it
-// wrong.
+// `E -> E op E` per operator, ambiguous on purpose: the level separates the
+// readings, and the construction resolves it. The body `P (ops P)*` would say
+// the same language and group it wrong.
 namespace ast {
 struct Node : AstNode {};
 struct Num : Node {
@@ -604,24 +603,24 @@ void a_precedence_table() {
   const auto xsym = [&](unsigned k, unsigned i) {
     return c.sym_at(c.prods[k], i);
   };
-  // Three operators over two steps, then the operand; the primary's own
+  // Three operators over two levels, then the operand; the primary's own
   // production and the augmented start close the count.
   CHECK(c.nprods == 6);
   // Tightest binds hardest: the table declares them tightest first, and a
-  // step's number is what the resolution compares.
+  // level's number is what the resolution compares.
   CHECK(prod(0).len == 3 && c.prodBuild[0].prec == 2);
   CHECK(c.prodBuild[1].prec == 1 && c.prodBuild[2].prec == 1);
-  // The operand ends the chain and sits on no step.
+  // The operand ends the chain and sits on no level.
   CHECK(prod(3).len == 1 && c.prodBuild[3].prec == 0);
   // A production of the table is `E op E`: both operands are the rule itself.
   CHECK(xsym(0, 0) == xsym(0, 2) && xsym(0, 0) == nt_sym(c.entryNt));
-  // The step and the way it groups ride the operator: a shift/reduce covered by
-  // one is decided at construction, not by a fork.
+  // The level and the associativity are the operator's: a shift/reduce covered
+  // by one is decided at construction, not by a fork.
   CHECK(c.termBuild[xsym(0, 1)].prec == 2);
   CHECK(c.termBuild[xsym(0, 1)].assoc == cursiv::Association::left);
   CHECK(!X::table().fault);
 
-  // An operator stays the one on its step wherever it stands in its production.
+  // An operator keeps its level wherever it stands in its production.
   const auto& far = XF::cfg();
   CHECK(!XF::table().fault);
   CHECK(far.prods[1].len == 258 && far.prodBuild[1].prec == 2);
@@ -635,7 +634,7 @@ void a_precedence_table() {
   CHECK(c.row_at(prod(0), 0) == c.row_at(prod(1), 0));
 
   // Naming the operators changes nothing the graph is made of: the same
-  // symbols, the same productions, the same steps. Row numbers are per
+  // symbols, the same productions, the same levels. Row numbers are per
   // grammar, so what is compared is their agreement, not their value.
   const auto& n = XN::cfg();
   CHECK(n.nprods == c.nprods && n.nnts == c.nnts && n.nterms == c.nterms);
@@ -643,19 +642,18 @@ void a_precedence_table() {
     CHECK(n.prods[k].len == c.prods[k].len);
     CHECK(n.prodBuild[k].prec == c.prodBuild[k].prec);
   }
-  // The three named operators write the member through ONE row, exactly as
-  // three literals do. A row apiece would stop the table's productions from
-  // sharing a class, and the automaton would carry one state per operator
-  // instead of one per step.
+  // The three named operators write the member through one row, as three
+  // literals do, so the productions share a class and the automaton holds one
+  // state per level.
   CHECK(n.row_at(n.prods[0], 1) == n.row_at(n.prods[1], 1));
   CHECK(n.row_at(n.prods[1], 1) == n.row_at(n.prods[2], 1));
   CHECK(n.prods[0].node == n.prods[1].node &&
         n.prods[1].node == n.prods[2].node);
 }
 
-// A rule whose match is one element lays no record: its actions ride the record
-// below, which spans the same text. A run of such rules puts a succession of
-// actions on one node instead of a comb of nested ones.
+// A rule whose match is one element adds no record: its actions go on the
+// record below, which spans the same text. A run of such rules puts all its
+// actions on one node instead of nesting one node per rule.
 namespace ast {
 struct Name : Node {
   using ast_bases = TypeList<Node>;
@@ -694,7 +692,7 @@ constexpr auto ch_kinds = kinds_of(Ch::actions{});
 void one_node_a_succession_of_actions() {
   const auto& c = Ch::cfg();
   const auto& acts = Ch::table().writes;
-  // Each rule opens a record before it fills it: the creation the rule owes,
+  // Each rule opens a record before it fills it: the creation the rule needs,
   // then the write its body states over the record below.
   const auto opens_then_fills = [&](std::uint16_t r) {
     const cursiv::engine::Chain ch = acts.chains[r];
@@ -705,15 +703,13 @@ void one_node_a_succession_of_actions() {
   };
   // Three rules, three productions, and the augmented start.
   CHECK(c.nprods == 4);
-  // `Top -> Wrap` and `Wrap -> Name` lay one: the symbol below opens a node of
+  // `Top -> Wrap` and `Wrap -> Name` add one: the symbol below opens a node of
   // its own, and two creations cannot share a record -- they are two nodes over
-  // one span. So a chain that opens one never rides down onto another.
+  // one span. So a chain that opens one never moves down onto another.
   CHECK(opens_then_fills(c.prods[0].node));
   CHECK(opens_then_fills(c.prods[1].node));
-  // `Name -> ID` hands its chain down, and that is the whole point of a chain:
-  // the terminal's record only says what its span denotes, so the rule's
-  // creation and write ride onto it instead of laying a second record over the
-  // same text.
+  // `Name -> ID` hands its chain down: the rule's creation and write go onto
+  // the terminal's record instead of a second record over the same text.
   CHECK(c.prods[2].node == kNoRow);
   CHECK(opens_then_fills(c.row_at(c.prods[2], 0)));
 
@@ -729,8 +725,8 @@ void one_node_a_succession_of_actions() {
   CHECK(convert_makes_nothing);
 }
 
-// The same rule spanning several symbols has no record below to ride, so it
-// lays one -- and the call site's write renames that instead of a leaf.
+// The same rule spanning several symbols has no record below to use, so it
+// adds one -- and the call site's write renames that instead of a leaf.
 struct Dotted : GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
@@ -745,7 +741,8 @@ using Dot = LrLowering<Dotted>;
 void the_record_that_is_needed() {
   const auto& c = Dot::cfg();
   // `QName -> ID` and `QName -> ID _1`: the two spellings are two productions,
-  // which is what makes the answer static. The first rides, the second lays.
+  // which is what makes the answer static. The first uses the record below, the
+  // second adds one.
   const auto qname_prod = [&](unsigned n) {
     for (unsigned k = 0; k < c.nprods; ++k)
       if (c.prods[k].lhs == 2 && c.prods[k].len == n) return k;
@@ -753,12 +750,12 @@ void the_record_that_is_needed() {
   };
   CHECK(c.prods[qname_prod(1)].node == kNoRow);
   CHECK(c.prods[qname_prod(2)].node != kNoRow);
-  // The conversion is owed either way: eliding the record must never elide it.
+  // The conversion is needed either way: eliding the record never elides it.
   CHECK(c.row_at(c.prods[qname_prod(1)], 0) != kNoRow);
 }
 
-// ...and the demand travels down a pass-through, which lays none of its own:
-// the site names `Line`, the record is owed by whoever spans the text.
+// ...and the need goes down a pass-through, which adds none of its own: the
+// site names `Line`, and the record comes from whatever spans the text.
 struct Relay : GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
@@ -789,7 +786,7 @@ void the_demand_travels_down() {
   CHECK(c.prods[prod_of(nt_named("Isle"))].node != kNoRow);
 }
 
-// A grammar spells the same list at two places and each spelling minted its
+// A grammar spells the same list at two places and each spelling created its
 // own auxiliary. They derive the same language with the same actions, so they
 // are one -- and the second's productions are dead.
 struct Twin : GrammarSpec {
@@ -805,12 +802,12 @@ using Tw = LrLowering<Twin>;
 
 void two_auxiliaries_that_say_the_same_thing() {
   const auto& c = Tw::cfg();
-  // Two auxiliaries were minted...
+  // Two auxiliaries were created...
   CHECK(c.auxCount == 2);
   // ...and one loop survives: `R -> R ID | ID`, then four productions of `Root`
   // for the two optional lists, then the augmented start.
   CHECK(c.nprods == 2 + 4 + 1);
-  // Nothing derives the merged one any more.
+  // Nothing derives the merged one.
   const std::uint16_t merged = static_cast<std::uint16_t>(c.nnts - 1);
   for (unsigned k = 0; k < c.nprods; ++k) {
     CHECK(c.prods[k].lhs != merged);
@@ -819,10 +816,9 @@ void two_auxiliaries_that_say_the_same_thing() {
   }
 }
 
-// The regime rides the element, not the rule: a rule whose own body opens a
-// region has a tight interior and an ambient entry. What runs between the
-// body's elements is the region's business; what runs in front of it is the
-// caller's.
+// The skip configuration belongs to the element, not the rule: a rule whose
+// body opens a region has a tight interior and an ambient entry. Between the
+// body's elements is the region's; in front of it is the caller's.
 struct Region : GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
@@ -841,19 +837,17 @@ void a_regions_boundaries() {
   for (unsigned k = 0; k < c.nprods; ++k)
     if (c.prods[k].len == 3) at = k;
   const std::uint16_t pi = static_cast<std::uint16_t>(at);
-  // Bit k is the boundary before `rhs[k]`, and bit `len` the one after the
-  // last symbol. Both edges are the caller's, and only what runs between the
-  // body's elements is the region's business: a boundary the region owned on
-  // the way out would refuse the trivia after it.
+  // Bit k is the boundary before `rhs[k]`, bit `len` the one after the last
+  // symbol. Both edges are the caller's; only the boundaries between elements
+  // are the region's.
   CHECK(c.cfg_at(pi, 0) == 0 && c.cfg_at(pi, 1) != 0 && c.cfg_at(pi, 2) != 0 &&
         c.cfg_at(pi, 3) == 0);
-  // A region asks for a second reading of the rules it reaches, so the clone
-  // half mirrors the rules and is reserved before any auxiliary: a clone's
-  // index is its rule's plus a fixed count, and an auxiliary minted in between
-  // would move it.
+  // A region reads the rules it reaches a second time, so the clone half
+  // mirrors the rules and is reserved before any auxiliary: a clone's index is
+  // its rule's plus a fixed count.
   CHECK(c.nt_name(3) == c.nt_name(1));
   CHECK(c.nt_name(4) == c.nt_name(2));
-  // ...and only the rule the region actually reaches owes one.
+  // ...and only the rule the region actually reaches needs one.
   CHECK(c.cloneNeeded[4] && !c.cloneNeeded[3]);
 }
 
@@ -881,7 +875,7 @@ bool join_keeps_everything() {
   return w.concat(0, 1) == r && w.nchains == 3;
 }
 
-// ...and the run a position owes is as long as the directives standing there.
+// ...and the run a position needs is as long as the directives standing there.
 namespace ast {
 struct Flags : Node {
   using ast_bases = TypeList<Node>;

@@ -1,7 +1,6 @@
-// The terminals a state reads, with the alphabet its position reads them under,
-// and the states that read a position, taken once per table off the graph: a
-// repair asks it of every reading at every token, and two readings on one
-// state ask the same.
+// The terminals a state reads, with the alphabet of its position, and the
+// states that read a position, computed once per table: a repair asks them of
+// every reading at every token.
 #pragma once
 
 #include <algorithm>

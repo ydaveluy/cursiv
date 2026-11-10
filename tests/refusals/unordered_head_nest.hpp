@@ -1,3 +1,4 @@
+// An unordered group of a `create` and a `nest`: the items build two nodes.
 // expect LR: this alternative can create two nodes
 #pragma once
 

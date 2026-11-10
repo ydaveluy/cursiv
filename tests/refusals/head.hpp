@@ -1,7 +1,5 @@
-// The grammar every refusal lane starts from: one skipper, one name, and
-// whatever the lane spells over them. A refusal is a refused generation, so a
-// lane has nothing to run -- what ctest reads is the sentence the refusal
-// carries.
+// The base of every refusal fixture: one skipper and one name. Nothing runs:
+// ctest matches what the generation prints against the `// expect` lines.
 #pragma once
 
 #include "cursiv/grammar/GrammarSpec.hpp"

@@ -189,7 +189,7 @@ category, and any other terminal, such as `some(d)`, is a pattern.
 | Rule | Example |
 |---|---|
 | Only the terminals that a viable parse can accept at this point are tried, plus trivia and what the [conditions](#conditions) there name. | Where only `ID` is expected, `if` reads as an `ID`, even if the grammar uses `kw<"if">` elsewhere. |
-| The longest match wins. At equal length, other tokens beat trivia, and keywords and literals beat patterns. An expected keyword also beats trivia that starts with the same word. | Where `kw<"if">` and `ID` are both expected, `if` reads as the keyword and `iffy` as an `ID`. |
+| The longest match wins. At equal length, other tokens beat trivia, and keywords and literals beat patterns. An expected keyword also beats trivia that starts with the same word, up to a [limit on case spellings](refusals.md#keywordspellings). | Where `kw<"if">` and `ID` are both expected, `if` reads as the keyword and `iffy` as an `ID`. |
 | Other ties keep every match: each parse continues with the token it can accept. | With `LOW : terminal<some(cr<"a-z">)>` and `NAME : terminal<some(cr<"a-zA-Z">)>`, `(ref<LOW> + lit<";">) | (ref<NAME> + lit<":">)` accepts `abc:`. |
 | Once read, a token is never split again, even if the parse then fails. | `(lit<"a"> + lit<"b">) | (lit<"ab"> + lit<"c">)` rejects `ab`. |
 
@@ -459,8 +459,8 @@ needs no `levels`, but each argument of `levels` must be a level; a bare
 operator does not [compile](refusals.md#a-level-table-that-lists-an-operator).
 An operator may be both prefix and binary, like `-` here, but not both postfix
 and binary ([refused](refusals.md#postfixbinaryclash)), nor on two levels of
-one table ([refused](refusals.md#precedenceclash)). Two tables may each give
-it a level.
+one table, even with other levels between them
+([refused](refusals.md#precedenceclash)). Two tables may each give it a level.
 
 `Primary` must [build a node](#building-the-tree); a lone primary returns it.
 A binary operator builds a `T` and writes its members `left`, `op` and
@@ -546,7 +546,7 @@ condition; bound it, as in `repeat<1, 8>(lit<"-">)`, when the language
 allows. See [Where expressions are allowed](#where-expressions-are-allowed) for what a
 condition may contain.
 
-A condition in a rule also settles which token stands where it stands, by one
+A condition in a rule also decides which token stands where it stands, by one
 rule on both engines. The token is the longest match among the terminals a
 viable parse can read there and the spellings the conditions there name. A
 terminal that only a refused condition would let the parse read is not viable,

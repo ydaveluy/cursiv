@@ -1,7 +1,6 @@
-// The AST registries of one grammar, from the actions its lowering publishes:
-// each action is a constant descriptor of the class, member and conversion it
-// names, and `build_ast_registry` settles the indices. What the grammar must
-// satisfy to be built at all is refused here, where the types are.
+// The AST registries of one grammar, from the actions its lowering publishes,
+// each a constant descriptor. What a grammar must satisfy to be built at all is
+// refused here, where the types are.
 #pragma once
 
 #include <array>
@@ -73,7 +72,7 @@ consteval AstFieldDesc make_field() {
   AstFieldDesc d;
   d.name = F::name;
   d.offset = &field_offset<P>;
-  d.nature = F::nature;
+  d.content = F::content;
   d.storage = F::storage;
   d.owner = &kType<typename F::owner>;
   d.targets = TargetsOf<Held>::kAll;
@@ -170,7 +169,7 @@ consteval AstRowDesc make_row() {
     static_assert(
         std::is_same_v<converter_rule_t<typename Src::rule>, site_conv_t<D, O>>,
         "the converter this site runs is not the one the author's "
-        "declarations name: a stage minted it from something else");
+        "declarations name: a stage made it from something else");
     d.conv = &kConv<Src, M>;
     if constexpr (std::is_void_v<D>)
       g.convName = "void";
@@ -203,24 +202,24 @@ template <class G, class Low>
 AstRegistry ast_registry(std::string_view grammar = raw_type_name<G>()) {
   using Rows = typename Low::actions;
   using Stage = typename Low::stage;
-  // Grammar law: the entry rule produces a node, which is what lets the
-  // builder's `result()` read the bottom of the stack instead of searching it.
-  // A terminal or data-rule entry would push nothing.
+  // The entry rule must produce a node: the builder's `result()` then reads the
+  // bottom of the stack instead of searching it. A terminal or data-rule entry
+  // would push nothing.
   static_assert(is_node_rule<typename Normalize<G>::entry> ||
                     is_infix_rule<typename Normalize<G>::entry>,
                 "the entry rule of this grammar builds no AST node: it is a "
                 "terminal or a data rule -- make `entry` a rule that builds "
                 "the root node");
   // An infix rule synthesizes its body, so a mismatched operand carries no
-  // directive to refuse it: the check lives on the rule and is put in force
-  // here, where the rules the build reached are named.
+  // directive to refuse it: the check is on the rule and runs here, where the
+  // rules the build reached are named.
   static_assert(
       infix_rules_ok<Stage, Low::rewrite::template infix_src>(
           typename Low::rules{}),
       "an infix rule of this grammar is refused: the message above says which");
   static_assert(bases_stated(typename ast_classes<Rows>::type{}));
   // Every directive of every rule, asked of the member it names here: the
-  // builder would otherwise meet the mistake one position at a time, with no
+  // builder would otherwise find the mistake one position at a time, with no
   // member left to name in the message.
   static_assert(
       []<class... Rs>(TypeList<Rs...>) consteval {

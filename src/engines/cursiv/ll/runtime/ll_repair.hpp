@@ -1,6 +1,6 @@
 // What a parse does with text its grammar refuses. Every repair is local and
 // every one of them leaves a record: a document too broken to read is still a
-// tree, and an editor needs the tree more than it needs the verdict.
+// tree, which an editor needs more than a pass or fail answer.
 #pragma once
 
 #include <algorithm>
@@ -23,14 +23,12 @@
 
 namespace cursiv::engine {
 
-// How far a repair may go on inventing without reading anything where no plan
-// owes it. A construct opened by an invented token calls the rules inside it,
-// which may invent in turn; past this the descent stops filling positions and
-// unwinds, and the text it never read is skipped instead. A plan is finite
-// and costed: its insertions never count.
+// How many tokens a repair may invent without reading where no plan asks: past
+// this the descent unwinds and skips the text it never read. Plan insertions
+// never count.
 inline constexpr std::uint16_t kLlInventRun = 16;
 
-// Whether the rule in hand was called before its caller laid anything.
+// Whether the rule in hand was called before its caller wrote anything.
 inline bool ll_called_first(const LlContext& c) {
   const std::size_t n = c.stack.size();
   return n == 0 || c.stack.begin(n - 1) == (n > 1 ? c.stack.begin(n - 2) : 0);
@@ -62,7 +60,7 @@ CURSIV_ALWAYS_INLINE inline NodeId ll_exit(LlContext& c, CstBuilder::Open open,
 }
 
 // The nodes that closed on the end a region read span the gap it crossed to
-// that end, which is the region's -- unless trivia was laid behind them.
+// that end, which is the region's, unless trivia was written behind them.
 inline void ll_span_region_end(LlContext& c) {
   if (c.regionMark == kNoNode) return;
   CstRun& run = c.tape.stream();
@@ -89,11 +87,9 @@ inline NodeId ll_close(LlContext& c, CstBuilder::Open open, TextOffset begin,
   return id;
 }
 
-// ...and a record stating over a node its body builds, rather than opening
-// one: given up before any record inside said anything, it says nothing,
-// since no repair excuses a node that was not built. So does a record holding
-// what an elected abandon gave up, where nothing else inside it says anything:
-// that call built no node to state over.
+// A record stating over a node its body builds: given up before any inner
+// record said anything, or holding only what an elected abandon gave up, it
+// says nothing, since no node was built.
 template <const auto& T>
 inline NodeId ll_close_over(LlContext& c, CstBuilder::Open open,
                             TextOffset begin, std::uint32_t engine) {
@@ -114,9 +110,9 @@ inline NodeId ll_close_over(LlContext& c, CstBuilder::Open open,
   return id;
 }
 
-// Whether a nest turn has a receiver: what its region laid before it, which
-// the turn's record reaches back over as its first child -- under a record of
-// its own where it spans more than one, as the reference's composite does.
+// Whether a nest turn has a receiver: what its region wrote before it, which
+// the turn's record reaches back over as its first child, under a record of
+// its own where it spans more than one.
 template <const auto& T>
 inline std::uint16_t ll_nest_receiver(LlContext& c, CstBuilder::Open region,
                                       TextOffset begin, NodeCount from) {
@@ -130,12 +126,9 @@ inline std::uint16_t ll_nest_receiver(LlContext& c, CstBuilder::Open region,
   return 1;
 }
 
-// A fault is reclassified at the token the point refused. Changing to the
-// broad alphabet must not redo the preceding gap under another trivia
-// configuration, which could hide the refused token or expose an earlier
-// blank that the point had already skipped. A token only a condition names
-// stands too: no terminal reads it, and read again it would come apart into
-// tokens the repair then finds nothing wrong with.
+// A fault is reclassified at the token the point refused, without reading its
+// gap again under other trivia. A token only a condition names stays: read
+// again it would split into tokens the repair finds nothing wrong with.
 template <const auto& T>
 inline void ll_repair_peek(LlContext& c) {
   const std::uint16_t mode = ll_err_mode<T>(c);
@@ -145,8 +138,8 @@ inline void ll_repair_peek(LlContext& c) {
   }
   if (c.laMode == mode) return;
   if (c.la.sym == kEofSymbol ||
-      (c.la.sym < T.nterms &&
-       (T.terms[c.la.sym].laid != 0 || !T.mode_admits(T.errMode, c.la.sym)))) {
+      (c.la.sym < T.nterms && (T.terms[c.la.sym].synthetic != 0 ||
+                               !T.mode_admits(T.errMode, c.la.sym)))) {
     c.laMode = mode;
     return;
   }
@@ -156,20 +149,15 @@ inline void ll_repair_peek(LlContext& c) {
   c.laMode = mode;
 }
 
-// A token owed and absent: the record spans nothing, and where it stands is
-// where an editor puts the caret. The element names the TERMINAL, since what
-// a repair inserts is bytes a token would match.
-// The caret goes where the text stops, not where the next token starts: the
-// trivia between them is the author's, and an insertion belongs in front of
-// it. Nothing is flushed here for that reason -- the pending runs land after
-// the record this writes.
+// A missing token: a record spanning nothing where the text stops, where an
+// editor puts the caret; the element names the terminal. The trivia after it is
+// the author's, so nothing is flushed here.
 template <const auto& T>
 inline void ll_write_insert(LlContext& c, std::uint16_t term, std::uint16_t row,
                             std::uint16_t pos) {
-  // A RECORD NEVER GOES BEHIND THE TAPE. The trivia in front of the token may
-  // already stand -- a group flushes it before it opens -- and a record laid
-  // where the text stops would then sit behind it. The sentence still names
-  // where the text stops, which is where an editor puts the caret.
+  // A record never goes behind the tape: where the trivia before the token
+  // already stands, the record goes after it, still naming where the text
+  // stops.
   const CstRun& run = c.tape.stream();
   const TextOffset floor =
       run.records() != 0 ? run.at(run.records() - 1).end : 0;
@@ -178,7 +166,7 @@ inline void ll_write_insert(LlContext& c, std::uint16_t term, std::uint16_t row,
   if (!f.ins) {
     f.first = term;
     if (c.search && c.search->planned && c.search->next == 1 &&
-        c.search->plan.front().kind == LlGesture::ins &&
+        c.search->plan.front().kind == LlEdit::ins &&
         c.search->plan.front().term == term)
       f.also = c.search->also;
   }
@@ -192,7 +180,7 @@ inline void ll_write_insert(LlContext& c, std::uint16_t term, std::uint16_t row,
     }
 }
 
-// ...where no plan owes it, within the run of inventions.
+// An insertion no plan asks for, within the run of inventions.
 template <const auto& T>
 inline void ll_insert(LlContext& c, std::uint16_t term, std::uint16_t row,
                       std::uint16_t pos) {
@@ -213,8 +201,8 @@ inline void ll_insert_planned(LlContext& c, std::uint16_t term,
   ll_write_insert<T>(c, term, row, pos);
 }
 
-// The token in hand, refused in its middle, read as the trivia its body owes:
-// laid over the author's bytes up to `end` as the lexer lays that trivia.
+// The token in hand, refused in its middle, read as the trivia its body needs:
+// written over the author's bytes up to `end` as the lexer writes that trivia.
 template <const auto& T>
 inline void ll_skip(LlContext& c, std::uint16_t term, TextOffset end) {
   const TextOffset p = c.la.begin;
@@ -235,10 +223,9 @@ inline void ll_skip(LlContext& c, std::uint16_t term, TextOffset end) {
   c.laMode = kInvalidSymbol;
 }
 
-// A token nothing wants: it goes on the tape as its own record, so the text is
-// in the tree even where the grammar is not. A byte no terminal matches at all
-// is dropped as one byte -- a skip that advanced by nothing would never end.
-// Whether it moved anything: a byte, or a level a zero-width dedent closes.
+// A token nothing wants goes on the tape as its own record, so all the text is
+// in the tree; a byte no terminal matches is dropped alone. Whether it moved: a
+// byte, or a level a zero-width dedent closes.
 template <const auto& T>
 CURSIV_NOINLINE inline bool ll_drop(LlContext& c) {
   c.stop.poll();
@@ -248,11 +235,17 @@ CURSIV_NOINLINE inline bool ll_drop(LlContext& c) {
   bool level = false;
   if constexpr (kIndented<T>)
     level = indent_drop(c.indentArena, c.indent.head, c.la,
-                        kLaid<T, kLaidIndent>, kLaid<T, kLaidDedent>);
+                        kSyntheticTerm<T, kSyntheticIndent>,
+                        kSyntheticTerm<T, kSyntheticDedent>);
   if (!level && end == c.la.begin) end = ll_drop_end<T>(c, c.la);
   if (!level && end == c.la.begin) return false;
   LlRepairRun& f = ll_run<T>(c);
-  if (!f.del && !f.rep) f.begin = c.la.begin;
+  if (!f.del && !f.rep) {
+    f.begin = c.la.begin;
+    if constexpr (kIndented<T>)
+      f.mixedIndent = indent_refused(c.src, c.len, c.indentArena, c.indent,
+                                     c.at, c.la, [&c] { return c.heldEnd; });
+  }
   const TextOffset span = level ? c.la.begin : end;
   f.del = true;
   f.end = span;
@@ -274,25 +267,25 @@ CURSIV_NOINLINE inline bool ll_drop(LlContext& c) {
 
 // A construct given up where it stands: the caller reads on from there.
 template <const auto& T>
-inline void ll_unfinished(LlContext& c, ElementId owed = kNoElement) {
+inline void ll_unfinished(LlContext& c, ElementId missing = kNoElement) {
   LlRepairRun& f = ll_run<T>(c);
   if (!f.abandon && !f.del && !f.rep) f.begin = f.end = f.point;
   f.abandon = true;
-  f.owed = owed;
+  f.missing = missing;
   c.repaired.mark();
 }
 
 // The word the author spelled wrong, read as the terminal it spells wrong. The
-// span stays his -- what a repair names is the terminal his bytes stand for.
+// span stays the author's; the repair names the terminal those bytes stand for.
 template <const auto& T>
 inline void ll_take_typo(LlContext& c, std::uint16_t mode, const Typo& t,
-                         bool owed) {
+                         bool required) {
   LlRepairRun& f = ll_run<T>(c);
   if (!f.del) f.begin = c.la.begin;
   f.rep = true;
   f.read = t.term;
   f.end = t.end;
-  if (!owed) {
+  if (!required) {
     f.spelt = c.la.begin;
     f.speltEnd = t.end;
   }
@@ -302,23 +295,23 @@ inline void ll_take_typo(LlContext& c, std::uint16_t mode, const Typo& t,
   c.repaired.mark();
 }
 
-// A gesture of the plan that reads or drops text, written wherever the descent
-// stands. An insertion is left to the position that owes it.
+// An edit of the plan that reads or drops text, written wherever the descent
+// stands. An insertion is left to the position that needs it.
 template <const auto& T>
-inline void ll_write(LlContext& c, std::uint16_t mode, const LlGesture& g) {
+inline void ll_write(LlContext& c, std::uint16_t mode, const LlEdit& g) {
   switch (g.kind) {
-    case LlGesture::ins:
+    case LlEdit::ins:
       return;
-    case LlGesture::del:
+    case LlEdit::del:
       ll_drop<T>(c);
       break;
-    case LlGesture::rep:
+    case LlEdit::rep:
       ll_take_typo<T>(c, mode, Typo{g.end, g.term}, false);
       break;
-    case LlGesture::skip:
+    case LlEdit::skip:
       ll_skip<T>(c, g.term, g.end);
       break;
-    case LlGesture::abandon: {
+    case LlEdit::abandon: {
       if (g.end == 0 || g.end > c.stack.size()) {
         c.search->planned = false;
         return;
@@ -334,10 +327,10 @@ inline void ll_write(LlContext& c, std::uint16_t mode, const LlGesture& g) {
       f.abandon = true;
       f.begin = from < run.records() ? run.at(from).begin : c.at;
       f.end = c.at;
-      f.owed = g.term;
+      f.missing = g.term;
       // The CST keeps the author's bytes as they stand; abandoned actions
-      // must no longer create or attach a partial node while its generated
-      // frames close, and no call site states over what was given up.
+      // must not create or attach a partial node while its generated frames
+      // close, and no call site states over what was given up.
       for (NodeCount k = from; k < run.records(); ++k)
         T.stamp.set_row(run.at(k), kNoElement);
       c.last = kNoNode;
@@ -368,11 +361,9 @@ inline bool ll_implied_holds(LlContext& c, std::uint16_t mode,
   return true;
 }
 
-// One terminal, matched or repaired. A position that reads on after a
-// gesture is filled, and the descent carries on -- a rule that gave up here
-// would cost the tree everything after it. An implied token's `condition` is
-// asked again past the last gesture: what was deleted may be all that stood in
-// its way.
+// One terminal, matched or repaired. A position that reads on after an edit
+// is filled and the descent goes on. An implied token's `condition` is asked
+// again past the last edit.
 template <const auto& T>
 CURSIV_NOINLINE inline void ll_expect_repair(LlContext& c, std::uint16_t mode,
                                              std::uint16_t term,
@@ -389,20 +380,20 @@ CURSIV_NOINLINE inline void ll_expect_repair(LlContext& c, std::uint16_t mode,
     const LlPause pause = pos != 0 ? ll_pause<T>(c, root)
                                    : LlPause{nullptr, kNoRow, true};
     if constexpr (T.ngapConds != 0)
-      if (condition != kNoRow && pause.gesture == nullptr) {
+      if (condition != kNoRow && pause.edit == nullptr) {
         ll_peek<T>(c, mode);
         if (c.la.sym != term &&
             ll_implied_holds<T>(c, mode, condition, row, pos))
           return;
       }
-    if (const LlGesture* g = pause.gesture; g != nullptr) {
-      if (g->kind == LlGesture::ins) {
+    if (const LlEdit* g = pause.edit; g != nullptr) {
+      if (g->kind == LlEdit::ins) {
         if (g->term == term) {
           ll_insert_planned<T>(c, term, row, pos);
           return;
         }
-      } else if (g->kind != LlGesture::rep || g->term == term) {
-        const bool typo = g->kind == LlGesture::rep;
+      } else if (g->kind != LlEdit::rep || g->term == term) {
+        const bool typo = g->kind == LlEdit::rep;
         ll_write<T>(c, mode, *g);
         if (c.give) return;
         ll_peek<T>(c, mode);
@@ -413,7 +404,7 @@ CURSIV_NOINLINE inline void ll_expect_repair(LlContext& c, std::uint16_t mode,
         }
         continue;
       }
-      // A step another position owes: the search is asked again from here.
+      // A step another position needs: the search is asked again from here.
       if (again && pos != 0) {
         again = false;
         c.search->planned = false;
@@ -435,7 +426,7 @@ CURSIV_NOINLINE inline void ll_expect_repair(LlContext& c, std::uint16_t mode,
         return;
       }
     }
-    // The first gesture that holds: the token dropped, or at the end of the
+    // The first edit that holds: the token dropped, or at the end of the
     // text the terminal invented.
     if (!ll_ends<T>(c, c.la.sym) && c.la.sym != kEofSymbol && ll_drop<T>(c)) {
       ll_peek<T>(c, mode);
@@ -479,10 +470,9 @@ constexpr bool ll_byte_reads(std::uint16_t mode, std::uint16_t term) {
   }
 }
 
-// The terminal a position of the generated descent expects, read in place
-// where nothing is in hand: a one-byte literal taken where its byte stands
-// past the blanks, as the read and the consume after it would take it, any
-// other token read as `ll_peek` reads it. Then matched as `ll_expect` matches.
+// The terminal a position expects, read in place when nothing is in hand: a
+// one-byte literal taken at its byte past the blanks, any other token read as
+// `ll_peek` does. Then matched as `ll_expect` matches.
 template <const auto& T, std::uint16_t Mode, std::uint16_t Term>
 CURSIV_ALWAYS_INLINE inline void ll_expect(LlContext& c, std::uint16_t row,
                                            std::uint16_t pos = 0) {
@@ -510,7 +500,7 @@ CURSIV_ALWAYS_INLINE inline void ll_expect(LlContext& c, std::uint16_t row,
 
 // An arm of a choice that reads one terminal and nothing else, as data: a
 // choice of such arms selects one, and `ll_take_arm` reads it as the arm
-// spelt in place would.
+// written in place would.
 struct LlTermArm {
   std::uint16_t term, mode, row, pos;
 };
@@ -551,19 +541,17 @@ inline int ll_climb_reads(LlContext& c, std::uint16_t decision,
 // Whether the repairs of a choice are over: its alphabet reads the token in
 // hand, or nothing more can be taken from the text.
 template <const auto& T>
-inline bool ll_settled(const LlContext& c, std::uint16_t decision) {
+inline bool ll_repairs_done(const LlContext& c, std::uint16_t decision) {
   return ll_ends<T>(c, c.la.sym) || T.holds(T.dec_first(decision), c.la.sym);
 }
 
-// The repairs of a choice no arm of which takes the token in hand, written
-// until a pause answers: `answer` reads a pause that elected an insertion or
-// a reading, `give` is the answer where the repair gives up or nothing more
-// can be taken from the text, and `settled` says whether the token a repair
-// left in hand ends them, and with what answer where it is not `give`.
-template <const auto& T, class R, class Answer, class Settled>
+// The repairs of a choice no arm takes the token for, until a pause answers:
+// `answer` reads a pause that elected an insertion or a reading, `give` answers
+// a repair that gives up, `finished` whether the token in hand ends them.
+template <const auto& T, class R, class Answer, class Finished>
 CURSIV_ALWAYS_INLINE inline R ll_fix(LlContext& c, std::uint16_t mode,
                                      std::uint16_t decision, R give,
-                                     Answer&& answer, Settled&& settled) {
+                                     Answer&& answer, Finished&& finished) {
   const Token held = c.laMode == kLaHeld ? c.la : Token{};
   const auto done = [&](R r) {
     ll_rehold<T>(c, held, mode);
@@ -573,8 +561,7 @@ CURSIV_ALWAYS_INLINE inline R ll_fix(LlContext& c, std::uint16_t mode,
   for (;;) {
     ll_repair_peek<T>(c);
     const LlPause pause = ll_pause<T>(c, root);
-    if (const LlGesture* g = pause.gesture;
-        g != nullptr && g->kind != LlGesture::ins) {
+    if (const LlEdit* g = pause.edit; g != nullptr && g->kind != LlEdit::ins) {
       ll_write<T>(c, mode, *g);
       if (c.give) return done(give);
     } else if (g != nullptr || !pause.degraded) {
@@ -583,12 +570,12 @@ CURSIV_ALWAYS_INLINE inline R ll_fix(LlContext& c, std::uint16_t mode,
       return done(give);
     }
     ll_peek<T>(c, mode);
-    if (R r = give; settled(r)) return done(r);
+    if (R r = give; finished(r)) return done(r);
   }
 }
 
-// A choice no arm of which takes the token in hand: the arm a repair enters
-// with the token it owes invented in front, `kNoRow` where the text was
+// A choice no arm of which takes the token in hand: the arm a repair enters,
+// with the token it needs invented in front, `kNoRow` where the text was
 // repaired until an arm reads it or none of its arms reads on.
 template <const auto& T>
 CURSIV_NOINLINE inline std::uint16_t ll_choice_fix(LlContext& c,
@@ -600,7 +587,7 @@ CURSIV_NOINLINE inline std::uint16_t ll_choice_fix(LlContext& c,
         ll_peek<T>(c, mode);
         return pause.arm;
       },
-      [&](std::uint16_t&) { return ll_settled<T>(c, decision); });
+      [&](std::uint16_t&) { return ll_repairs_done<T>(c, decision); });
 }
 
 // A choice an arm of which reads the token in hand, though the prediction
@@ -629,8 +616,8 @@ CURSIV_NOINLINE inline bool ll_loop_leaves(LlContext& c,
 inline constexpr std::uint8_t kLlLoopNone = 0, kLlLoopTurn = 1,
                               kLlLoopLeave = 2;
 
-// ...and a loop that cannot go on from it: whether the repair takes another
-// turn, or leaves the token to what follows the loop.
+// A loop that cannot go on from the token in hand: whether the repair takes
+// another turn, or leaves the token to what follows the loop.
 template <const auto& T>
 CURSIV_NOINLINE inline std::uint8_t ll_loop_fix(LlContext& c,
                                                 std::uint16_t mode,
@@ -638,7 +625,7 @@ CURSIV_NOINLINE inline std::uint8_t ll_loop_fix(LlContext& c,
   return ll_fix<T>(
       c, mode, decision, kLlLoopLeave,
       [&](const LlPause& pause) {
-        if (pause.gesture != nullptr)
+        if (pause.edit != nullptr)
           return pause.arm == 1 ? kLlLoopLeave : kLlLoopTurn;
         ll_peek<T>(c, mode);
         return pause.arm == 1   ? kLlLoopLeave
@@ -647,16 +634,13 @@ CURSIV_NOINLINE inline std::uint8_t ll_loop_fix(LlContext& c,
       },
       [&](std::uint8_t& fix) {
         fix = kLlLoopNone;
-        return ll_settled<T>(c, decision);
+        return ll_repairs_done<T>(c, decision);
       });
 }
 
-// A climb whose operand stands complete before a token it cannot go on from,
-// and no caller can either: the operator a repair invents in front of that
-// token, `kLlClimbAgain` where a skip left one the climb reads after all,
-// anything else where it leaves. The level that takes the operator writes it,
-// and the plan's step with it: a level too tight for it leaves both to the
-// level it returns to.
+// A climb whose operand is complete before a token no caller goes on from: the
+// operator a repair invents there, `kLlClimbAgain` where a skip left one the
+// climb reads, else none. A level too tight leaves it to the one it returns to.
 inline constexpr std::uint16_t kLlClimbAgain = 0xFFFEu;
 
 template <const auto& T>
@@ -668,8 +652,8 @@ CURSIV_NOINLINE inline std::uint16_t ll_climb_fix(LlContext& c,
   return ll_fix<T>(
       c, mode, decision, kNoRow,
       [&](const LlPause& pause) {
-        return pause.gesture != nullptr && pause.arm != exitArm ? pause.arm
-                                                                : kNoRow;
+        return pause.edit != nullptr && pause.arm != exitArm ? pause.arm
+                                                             : kNoRow;
       },
       [&](std::uint16_t& fix) {
         ll_repair_peek<T>(c);
@@ -726,15 +710,13 @@ inline void ll_end(LlContext& c, std::uint16_t mode) {
     }
 }
 
-// ...and left: what its entry did not read is dropped.
+// A section left: what its entry did not read is dropped.
 template <const auto& T>
 inline void ll_section_close(LlContext& c, LlSection was) {
   ll_span_region_end(c);
   ll_drop_to_end<T>(c);
-  // The gap before the closing token belongs to the embedded grammar.
-  // Commit it before returning to the caller's skip configuration: that
-  // caller may re-read the delimiter under another alphabet, and must not
-  // reclassify this gap or discard its recorded comments.
+  // The gap before the closing token belongs to the embedded grammar: it is
+  // flushed before the caller's configuration reads the delimiter again.
   ll_flush_trivia<T>(c);
   c.section = was.section;
 }

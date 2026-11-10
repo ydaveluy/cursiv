@@ -1,6 +1,6 @@
 // The NFA one terminal's spelling is built into, before the subsets make a
 // DFA of it. A refusal is recorded as a hole and narrowed later, so a state's
-// exits are not all known when it is minted.
+// exits are not all known when it is created.
 #pragma once
 
 #include <algorithm>
@@ -33,9 +33,9 @@ struct LexNfaState {
   // stands only if the byte after it is outside this class.
   int bound = -1;
   // ...and where that refusal is a scalar's rest, `plainBound` is the bound the
-  // accept stood behind without it.
+  // accept would have without it.
   int plainBound = -1;
-  bool strayBound = false;
+  bool loneLeadBound = false;
   // The token is handed to this relay here, or -1.
   int relay = -1;
   // An accept that a literal's branch reads.
@@ -43,12 +43,12 @@ struct LexNfaState {
   // The edge consumes a lead byte that starts no scalar where the rest of one
   // follows: the refusal node naming that rest, else -1. The automaton keeps
   // what follows it in a state of its own until the rest is ruled out.
-  int stray = -1;
-  std::uint16_t strayTerm = 0;
+  int loneLead = -1;
+  std::uint16_t loneLeadTerm = 0;
   // The guard this hole stands for, or -1.
   int guard = -1;
 
-  int plain() const { return strayBound ? plainBound : bound; }
+  int plain() const { return loneLeadBound ? plainBound : bound; }
 };
 
 // A relay while the graph is built: its row, and the NFA state the walk
@@ -88,8 +88,9 @@ struct LexNfaPool {
     return static_cast<int>(s.size()) - 1;
   }
   int chars(int set, int next) { return push({.set = set, .t1 = next}); }
-  int chars_stray(int set, int word, int next) {
-    return push({.set = set, .t1 = next, .stray = word, .strayTerm = term});
+  int chars_lone_lead(int set, int word, int next) {
+    return push(
+        {.set = set, .t1 = next, .loneLead = word, .loneLeadTerm = term});
   }
   int split(int a, int b) { return push({.t1 = a, .t2 = b}); }
   int match(int accepts, bool lit = false) {
@@ -97,15 +98,15 @@ struct LexNfaPool {
   }
   int relay(int k) { return push({.relay = k}); }
   // One sink per terminal and class: two literals of one terminal ending on
-  // the same boundary land in one DFA state, as they do on a plain match.
+  // the same boundary end up in one DFA state, as they do on a plain match.
   int match_bounded(int accepts, int bound, bool lit = false) {
     return sink({.accept = accepts, .bound = bound, .lit = lit});
   }
-  int match_strayed(int accepts, int bound, int plain, bool lit = false) {
+  int match_lone_lead(int accepts, int bound, int plain, bool lit = false) {
     return sink({.accept = accepts,
                  .bound = bound,
                  .plainBound = plain,
-                 .strayBound = true,
+                 .loneLeadBound = true,
                  .lit = lit});
   }
   // An epsilon state whose target is filled in later: a run's walk states are
@@ -167,11 +168,8 @@ struct LexNfaPool {
     return eclose(std::span<const int>(&at, 1));
   }
 
-  // The walk of a run, read off the table the lowering computed: one state per
-  // length of closer already spelled. The content is exactly what has not
-  // completed the closer, so the run stops at the first one -- longest and
-  // shortest match then answer the same. Where the end of the text closes it
-  // too, every state short of the closer ends it there as well.
+  // The walk of a run up to its first closer, off the lowering's table: one
+  // state per length of closer already spelled.
   template <class Cfg>
   int through(const Cfg& g, const LexNode& e, int out) {
     const auto len = static_cast<unsigned>(e.min);
@@ -179,11 +177,11 @@ struct LexNfaPool {
     q[len] = out;
     for (unsigned i = 0; i < len; ++i) q[i] = hole();
     const int end =
-        e.max != 0 ? guard(g.lexKid[e.b + len * (len + 1)], out) : -1;
+        e.max != 0 ? guard(g.lexChild[e.b + len * (len + 1)], out) : -1;
     for (unsigned i = 0; i < len; ++i) {
       int chain = end;
       for (unsigned d = 0; d <= len; ++d) {
-        const std::uint16_t set = g.lexKid[e.b + i * (len + 1) + d];
+        const std::uint16_t set = g.lexChild[e.b + i * (len + 1) + d];
         if (set == kNoSet) continue;
         const int step = chars(static_cast<int>(set), q[d]);
         chain = chain < 0 ? step : split(step, chain);
@@ -195,18 +193,19 @@ struct LexNfaPool {
 
  private:
   int sink(const LexNfaState& want) {
-    const auto [at, fresh] = _sinks.try_emplace(
-        {want.accept, want.bound, want.plainBound, want.strayBound, want.lit},
-        static_cast<int>(s.size()));
+    const auto [at, fresh] =
+        _sinks.try_emplace({want.accept, want.bound, want.plainBound,
+                            want.loneLeadBound, want.lit},
+                           static_cast<int>(s.size()));
     return fresh ? push(want) : at->second;
   }
 
-  // The sinks minted so far, by what they accept.
+  // The sinks created so far, by what they accept.
   std::map<std::tuple<int, int, int, bool, bool>, int> _sinks;
-  // The holes of the guards minted so far, by the word refused and the
+  // The holes of the guards created so far, by the word refused and the
   // continuation it narrows.
   std::map<std::pair<std::uint16_t, int>, int> _guardOf;
-  // One mark per state, stamped by the pass that reached it.
+  // One mark per state, set by the pass that reached it.
   mutable std::vector<std::uint32_t> _seen;
   mutable std::vector<int> _todo;
   mutable std::uint32_t _pass = 0;

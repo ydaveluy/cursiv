@@ -1,7 +1,7 @@
 #pragma once
 
 // A repair-search probe: a keyword to misspell, three bracket kinds to leave
-// open, a separated list to lengthen, and a late-settling alternative.
+// open, a separated list to lengthen, and a late-deciding alternative.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -53,7 +53,7 @@ struct Base : cursiv::GrammarSpec {
   struct ItemRule : rule<ref<WordRule> | ref<GroupRule> | ref<IndexRule>> {};
 
   // Two arms that part only on their closing keyword: the repetition between
-  // them is what the reading must carry before it can settle.
+  // them is what the reading must carry before it can decide.
   struct ElementRule
       : rule<create<ast::Element>(
             kw<"element"> + assign<&ast::Element::name>(ref<ID>) + lit<"{"> +

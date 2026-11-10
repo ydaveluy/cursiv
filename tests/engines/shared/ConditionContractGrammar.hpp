@@ -7,11 +7,9 @@
 #include "cursiv/grammar/Conversion.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
-// What a condition in a rule tests, on both engines: the text of the token the
-// lexer chooses among the terminals the parser can take where it stands; the
-// first terminals of the conditions there lengthen that token and rank
-// nothing. Each shape stands behind its own opening word; blanks are skipped
-// and the whole input is read.
+// What a condition in a rule tests, on both engines: the token the lexer
+// chooses among the terminals the parser can take there. Each shape stands
+// behind its own opening word.
 
 namespace tcondcontract {
 
@@ -41,7 +39,7 @@ struct Main : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<as<id_text>(some(cr<"a-zA-Z">))> {};
   struct NAME : terminal<as<name_text>(some(cr<"a-zA-Z">))> {};
-  // An operand that opens on a condition, called alone and through a climb.
+  // An operand that opens on a condition, called alone and through an infix.
   struct Operand : rule<create<Sum>(!lit<"->"> + option(lit<"-">) +
                                     assign<&Sum::name>(ref<ID>))> {};
   struct Climb : infix<Operand, Sum, left(lit<"+">)> {};

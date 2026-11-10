@@ -1,5 +1,5 @@
-// A condition inside a region, in front of a rule that builds a node named as
-// an operator: the region leaves the operator the rule it names.
+// An operator made of a region holding a condition, then a rule that builds a
+// node: the operator still names that rule, which gives no text.
 // expect LR LL: refused .infixOperatorNotText..*rule .Sum. names as an operator something other than one token or a rule that gives a value
 #pragma once
 

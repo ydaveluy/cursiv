@@ -5,8 +5,7 @@
 #include "cursiv/utils/TypeName.hpp"
 
 // What a pointer to member says about itself: the class it writes into, the
-// type it holds, and the identifier it renders as. Spelled here so a reader of
-// one member pointer does not pull in the grammar algebra or the field table.
+// type it holds, and the identifier it renders as.
 
 namespace cursiv {
 

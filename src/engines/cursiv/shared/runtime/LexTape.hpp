@@ -1,6 +1,5 @@
-// What `lex_walk` reads of a frozen table, for both engines: the lookups they
-// spell alike. An engine's tape derives from it for the election its states
-// answer with.
+// What `lex_walk` reads of a frozen table: the lookups both engines share. An
+// engine's tape derives from it to add how its states pick a terminal.
 #pragma once
 
 #include <algorithm>
@@ -97,12 +96,12 @@ struct LexTape {
     else
       return cfg.names;
   }
-  // Whether the reading of `t` at `tier` is elected over that of `other`.
-  bool prefers(SymbolId t, unsigned tier, SymbolId other,
-               unsigned otherTier) const {
+  // Whether the reading of `t` at `priority` is elected over that of `other`.
+  bool prefers(SymbolId t, unsigned priority, SymbolId other,
+               unsigned otherPriority) const {
     return other == kInvalidSymbol ||
-           lex_term_before(cfg.terms[t], tier, t, cfg.terms[other], otherTier,
-                           other);
+           lex_term_before(cfg.terms[t], priority, t, cfg.terms[other],
+                           otherPriority, other);
   }
   bool refuses(SymbolId t, const char* p, TextOffset rest) const {
     return cfg.terms[t].refuses && T.head_refuses(t, p, rest);
@@ -111,31 +110,32 @@ struct LexTape {
   // at `from`, and `s` reserves `t` from it.
   bool reserves(std::uint16_t s, SymbolId t, const char* src, TextOffset from,
                 TextOffset at, TextOffset len, TextOffset& far) const;
-  // The tier the reading of `t` that state `s` accepts ranks at `at`: a
+  // The priority the reading of `t` that state `s` accepts ranks at `at`: a
   // reading whose boundary refuses the byte there is none.
-  unsigned tier(std::uint16_t s, SymbolId t, const char* src, TextOffset at,
-                TextOffset len, TextOffset& far) const;
-  // The tier at which the reading of `reader` takes a spelling: trivia takes
-  // none.
-  unsigned taking(SymbolId reader, unsigned tier) const {
-    return cfg.terms[reader].trivia ? 0u : tier;
+  unsigned priority(std::uint16_t s, SymbolId t, const char* src, TextOffset at,
+                    TextOffset len, TextOffset& far) const;
+  // The priority at which the reading of `reader` takes a spelling: trivia
+  // takes none.
+  unsigned taking(SymbolId reader, unsigned priority) const {
+    return cfg.terms[reader].trivia ? 0u : priority;
   }
   // Whether a reading behind conditions that a literal's or a keyword's branch
-  // read (`tier`, as `taking` answers it) takes the spelling of the walk's
+  // read (`priority`, as `taking` answers it) takes the spelling of the walk's
   // reading `w`, which stopped in state `s`...
-  bool takes(std::uint16_t s, unsigned tier, SymbolId w) const {
-    return tier != 0 && T.dfa_relay_res_set(s).test(w);
+  bool takes(std::uint16_t s, unsigned priority, SymbolId w) const {
+    return priority != 0 && T.dfa_relay_res_set(s).test(w);
   }
   // ...and that of a word read behind conditions that no such branch read.
-  static bool takes_relayed(unsigned tier, unsigned other) {
-    return tier != 0 && other == 0;
+  static bool takes_relayed(unsigned priority, unsigned other) {
+    return priority != 0 && other == 0;
   }
-  bool prefers_relayed(SymbolId t, unsigned tier, SymbolId other,
-                       unsigned otherTier) const {
-    if (other == kInvalidSymbol || takes_relayed(taking(t, tier), otherTier))
+  bool prefers_relayed(SymbolId t, unsigned priority, SymbolId other,
+                       unsigned otherPriority) const {
+    if (other == kInvalidSymbol ||
+        takes_relayed(taking(t, priority), otherPriority))
       return true;
-    return !takes_relayed(taking(other, otherTier), tier) &&
-           prefers(t, tier, other, otherTier);
+    return !takes_relayed(taking(other, otherPriority), priority) &&
+           prefers(t, priority, other, otherPriority);
   }
   TextOffset head_reach(std::uint16_t mode, const char* p,
                         TextOffset rest) const {
@@ -160,11 +160,9 @@ bool lex_bound_blocks(std::uint16_t bound, const char* src, TextOffset at,
   return lex_boundary(LexTape<T>::cfg).at(bound, src, at, len);
 }
 
-// Whether a reading that reserves stands at `at`: a token's acceptance of `s`
-// that `allowed` lets stand, a literal's wherever its boundary lets it, a
-// keyword's bounded by a word class with no word byte of that class there. A
-// table that names no word class has a keyword stand wherever no word byte is,
-// or never.
+// Whether a reading that reserves stands at `at`: an acceptance of `s` that
+// `allowed` lets stand, a literal's where its boundary lets it, a keyword's
+// where no byte of its word class follows.
 template <const auto& T, class Allowed>
 inline bool lex_reserves(std::uint16_t s, const char* src, TextOffset at,
                          TextOffset len, TextOffset& inspected,
@@ -178,17 +176,18 @@ inline bool lex_reserves(std::uint16_t s, const char* src, TextOffset at,
     return reads(term) && !lex_bound_blocks<T>(bound, src, at, len, inspected);
   };
   if constexpr (T.wordBounds.empty()) {
-    if (T.each_accept(s,
-                      [&](SymbolId term, std::uint16_t bound, unsigned tier) {
-                        return tier == kTierLiteral && stands(term, bound);
-                      }))
+    if (T.each_accept(
+            s, [&](SymbolId term, std::uint16_t bound, unsigned priority) {
+              return priority == kLiteralPriority && stands(term, bound);
+            }))
       return true;
     if constexpr (!T.standsWithoutWordClass) {
       return false;
     } else {
-      if (!T.each_accept(s, [&](SymbolId term, std::uint16_t, unsigned tier) {
-            return tier == kTierKeyword && reads(term);
-          }))
+      if (!T.each_accept(s,
+                         [&](SymbolId term, std::uint16_t, unsigned priority) {
+                           return priority == kKeywordPriority && reads(term);
+                         }))
         return false;
       if (at >= len) return true;
       const auto& cfg = LexTape<T>::cfg;
@@ -200,8 +199,8 @@ inline bool lex_reserves(std::uint16_t s, const char* src, TextOffset at,
     }
   } else {
     return T.each_accept(
-        s, [&](SymbolId term, std::uint16_t bound, unsigned tier) {
-          return (tier == kTierLiteral || lex_word_bound<T>(bound)) &&
+        s, [&](SymbolId term, std::uint16_t bound, unsigned priority) {
+          return (priority == kLiteralPriority || lex_word_bound<T>(bound)) &&
                  stands(term, bound);
         });
   }
@@ -218,25 +217,25 @@ bool LexTape<T>::reserves(std::uint16_t s, SymbolId t, const char* src,
 }
 
 template <const auto& T>
-unsigned LexTape<T>::tier(std::uint16_t s, SymbolId t, const char* src,
-                          TextOffset at, TextOffset len,
-                          TextOffset& far) const {
+unsigned LexTape<T>::priority(std::uint16_t s, SymbolId t, const char* src,
+                              TextOffset at, TextOffset len,
+                              TextOffset& far) const {
   auto out = 0u;
-  T.each_accept(s, [&](SymbolId term, std::uint16_t bound, unsigned tier) {
-    if (term == t && tier > out &&
+  T.each_accept(s, [&](SymbolId term, std::uint16_t bound, unsigned priority) {
+    if (term == t && priority > out &&
         !lex_bound_blocks<T>(bound, src, at, len, far))
-      out = tier;
+      out = priority;
     return false;
   });
   return out;
 }
 
-// The tier at which `term` reads `[from, end)` in the walk of `mode`: the
-// state the walk stood in at `end`, and the relays it launched that end there.
+// The priority at which `term` reads `[from, end)` in the walk of `mode`: the
+// state the walk was in at `end`, and the relays it launched that end there.
 template <class Tape>
-unsigned lex_reading_tier(const Tape& tape, const char* src, TextOffset len,
-                          std::uint16_t mode, TextOffset from, TextOffset end,
-                          SymbolId term) {
+unsigned lex_reading_priority(const Tape& tape, const char* src, TextOffset len,
+                              std::uint16_t mode, TextOffset from,
+                              TextOffset end, SymbolId term) {
   auto st = tape.start(mode);
   TextOffset far = from, i = from;
   auto ended = kDeadState;
@@ -255,15 +254,15 @@ unsigned lex_reading_tier(const Tape& tape, const char* src, TextOffset len,
     if (st == kDeadState) break;
     ++i;
   }
-  auto tier =
-      ended == kDeadState ? 0u : tape.tier(ended, term, src, end, len, far);
+  auto priority =
+      ended == kDeadState ? 0u : tape.priority(ended, term, src, end, len, far);
   if constexpr (relays)
     if (run.any())
       run.finish(tape, src, len, far,
                  [&](SymbolId t, TextOffset e, unsigned as) {
-                   if (t == term && e == end && as > tier) tier = as;
+                   if (t == term && e == end && as > priority) priority = as;
                  });
-  return tier;
+  return priority;
 }
 
 // What state `s` elects at `at` with the terminals `skipped` names taken off
@@ -276,26 +275,23 @@ CURSIV_NOINLINE SymbolId lex_elect(std::uint16_t s, const char* src,
   const bool reserved = lex_reserves<T>(
       s, src, at, len, far, [&](SymbolId t) { return !skipped(t); });
   SymbolId best = kInvalidSymbol;
-  auto bestTier = 0u;
-  T.each_accept(s, [&](SymbolId term, std::uint16_t bound, unsigned tier) {
+  auto bestPriority = 0u;
+  T.each_accept(s, [&](SymbolId term, std::uint16_t bound, unsigned priority) {
     if ((reserved && T.dfa_res_set(s).test(term)) || skipped(term) ||
         lex_bound_blocks<T>(bound, src, at, len, far))
       return false;
-    if (LexTape<T>{}.prefers(term, tier, best, bestTier)) {
+    if (LexTape<T>{}.prefers(term, priority, best, bestPriority)) {
       best = term;
-      bestTier = tier;
+      bestPriority = priority;
     }
     return false;
   });
   return best;
 }
 
-// A terminal refusing a word its token spells from `from` stands nowhere there:
-// the position is read again without it, as often as the reading it then
-// elects refuses one in turn. `Hot`, a caller reading no horizon first asks
-// `ended`, the state the refused match was read in, which elects the reading
-// of the same extent where one stands. `ended` is read only for a table
-// without relays, and only `Hot`; a caller that is not passes `kDeadState`.
+// A terminal refusing a word its token spells from `from` stands nowhere: the
+// position is read again without it, until a reading stands. With `Hot`, the
+// state `ended` of the refused match is asked first; others pass `kDeadState`.
 template <bool Hot, class Tape>
 CURSIV_NOINLINE Scan lex_unrefused_walk(const Tape& tape, const char* src,
                                         TextOffset len, std::uint16_t st,
@@ -338,7 +334,7 @@ CURSIV_ALWAYS_INLINE inline Scan lex_unrefused(const Tape& tape,
 }
 
 // A mode's token is the longer of its own and the one its `longer` mode reads,
-// its own at equal length; trivia is never given way to.
+// its own at equal length; it never gives way to trivia.
 template <class Tape, class Match>
 CURSIV_ALWAYS_INLINE inline Scan lex_longest(const Tape& tape,
                                              std::uint16_t mode, Scan own,
@@ -364,7 +360,7 @@ CURSIV_ALWAYS_INLINE inline Scan lex_match_halt(const Tape& tape,
                                                 TextOffset& halt) {
   const Scan out = lex_walk(tape, src, len, mode, from, halt);
   // A refused word the token from `from` spells counts as read, the byte
-  // that would rescue it included, whichever terminal the walk elected.
+  // that would lift the refusal included, whichever terminal the walk elected.
   if constexpr (Tape::kRefuses)
     if (from < len)
       halt =

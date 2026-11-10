@@ -1,7 +1,6 @@
-// The statemachine language's two checks, each said and each silent. The one
-// worth a lane of its own is the second: states and events share one namespace,
-// so a state and an event wearing the same name collide -- a table per family
-// would let that pair through.
+// The statemachine language's two checks, each reporting and each silent.
+// States and events share one namespace, so a state and an event of the same
+// name collide.
 
 #include <cstddef>
 #include <filesystem>
@@ -39,7 +38,7 @@ struct World {
   }
 };
 
-// How many findings say that sentence, whatever else they carry.
+// How many findings carry that message, whatever else they carry.
 std::size_t count(const ct::ValidationResult& said, std::string_view message) {
   return ct::filterByOptions(said, {.message = std::string(message)}).size();
 }
@@ -118,7 +117,7 @@ void a_capitalised_state_says_nothing() {
                      "state Idle end\n"));
 }
 
-// The keyword worn as a name. The grammar lexes a name as a plain token, so
+// A keyword used as a name. The grammar lexes a name as a plain token, so
 // `end` parses; the refusal is the validator's, and it names the site.
 void a_keyword_is_not_a_name() {
   const World world;
@@ -134,7 +133,7 @@ void a_keyword_is_not_a_name() {
   ct::expectError(said, kMessage, at(text.rfind("state end end") + 6, 3));
 }
 
-// ...and the name that is not one says nothing on that count.
+// ...and a name that is not a keyword reports nothing about keywords.
 void a_plain_name_says_nothing_about_keywords() {
   const World world;
   ct::expectNoIssues(

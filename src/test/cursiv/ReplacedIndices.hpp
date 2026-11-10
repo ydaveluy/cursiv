@@ -1,4 +1,4 @@
-// The markers taken back out of an expectation's text, and where they stood --
+// The markers taken back out of an expectation's text, and where they were --
 // the offsets are into the text the parser is then handed, markers gone. A
 // range end with no open range, or a range left open, fails the expectation.
 #pragma once
@@ -17,7 +17,8 @@ struct ExpectedBase;
 struct ReplacedIndices {
   std::string output;
   std::vector<TextOffset> indices;
-  // Sorted by start, so a nested pair is reported outermost first.
+  // Sorted by start, so a pair opened inside another comes after it; pairs
+  // that open at one offset keep the order they close in, innermost first.
   std::vector<std::pair<TextOffset, TextOffset>> ranges;
 };
 

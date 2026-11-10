@@ -6,10 +6,8 @@
 
 #include "cursiv/syntax-tree/AstNode.hpp"
 
-// One reference site, as plain data: everything here can be filled by hand,
-// since a content assist has no reference object, only a caret in a
-// container asking what may be written there. `reference` names that
-// member's row in the grammar -- what a caret can state and an object is not.
+// One reference site, as plain data a content assist can fill by hand: a
+// caret in a container, asking what may be written there.
 
 namespace cursiv {
 
@@ -22,7 +20,7 @@ struct NextFeature;
 
 struct ReferenceInfo {
   const AstNode* container = nullptr;
-  // The document the site is in, carried rather than climbed to. Null only
+  // The document the site is in, carried rather than walked up to. Null only
   // for a site read outside a linked document.
   const Document* document = nullptr;
   // What the site spells -- what the linker resolves. Distinct from the name
@@ -31,32 +29,21 @@ struct ReferenceInfo {
   std::string_view property;
   std::optional<std::uint32_t> index;
 
-  // What may stand here, as the grammar indexes it: the row of the reference
-  // member, which is what its accept table is keyed by. `kNoReference`
-  // accepts everything, which is what an unfiltered enumeration wants.
-  //
-  // An index and not a tag, for the same reason a description carries one: a
-  // tag is process-wide and would have to be looked up, an index is the
-  // language's own and indexes directly. A caller holding only a type asks
+  // The row of the reference member, which keys its accept table.
+  // `kNoReference` accepts everything. From a type, ask
   // `AstReflection::referenceIndexOf`.
   std::uint16_t reference = kNoReference;
 
-  // The site's narrowing, stamped by the writer: what this site accepts may
-  // be less than the member does, and only the site knows. An index into
-  // the member's `RefOps::narrows`; `kNoNarrow` for a site that does not
-  // narrow.
+  // The site's narrowing: an index into the member's `RefOps::narrows`, or
+  // `kNoNarrow`.
   std::uint8_t narrow = kNoNarrow;
 };
 
 namespace detail {
 
-// The cross-reference `next` fills with `container` at the caret, if its
-// member holds one: what a completion and the MCP candidates both ask the
-// scope with, so the two answer alike. Where the caret opens the rule that
-// writes the member, or the member belongs to a class `container` is not, a
-// node of that class is made for the occasion, as a child of `container`,
-// and `entered` owns it: the answer's `container` holds as long as `entered`
-// does. No caret node answers no scope.
+// The cross-reference `next` fills with `container` at the caret, as a
+// completion asks the scope. A node made for the occasion is owned by
+// `entered`, and the answer holds as long as it does.
 [[nodiscard]] std::optional<ReferenceInfo> reference_at_caret(
     const AstReflection& reflection, const Document& document,
     AstNode* container, const NextFeature& next, AstNodePtr& entered);

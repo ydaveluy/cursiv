@@ -14,9 +14,9 @@
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 
-// The caret a completion is asked at, as the hooks see it: the token being
-// written -- `tokenOffset`..`tokenEndOffset`, both `offset` when none is --
-// what may stand there, the caret itself, and how the client asked.
+// A completion request as the hooks see it: the token being written
+// (`tokenOffset` to `tokenEndOffset`, both `offset` when there is none), what
+// may stand there, the caret, and how the client asked.
 
 namespace cursiv {
 
@@ -56,8 +56,8 @@ struct CompletionContext {
   // the caret, or the whole token.
   lsp::Range insertRange;
   lsp::Range replaceRange;
-  // How the client asked, as its request says: `triggerKind`, and the
-  // `triggerCharacter` typed. Absent when the client does not say.
+  // The request's `triggerKind` and `triggerCharacter`; absent when the client
+  // does not send them.
   const std::optional<lsp::CompletionContext>& trigger;
   const CancellationToken& cancelToken;
 

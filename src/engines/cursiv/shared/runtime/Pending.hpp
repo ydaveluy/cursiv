@@ -1,7 +1,6 @@
 // The unit of the reduction stack: a CST root and the node built for it, null
-// for an effect to apply later. `text` is where the value is, not the root when
-// a directive wraps its payload; `type` is the value's exact type, so every
-// family question is an index test.
+// for an effect to apply later. `text` is where the value is, `type` its exact
+// type.
 #pragma once
 
 #include <cstdint>

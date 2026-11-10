@@ -1,6 +1,7 @@
-// A valid document read once, as every faulted copy of it is weighed: its
-// text, its parse, and its tokens -- the visible leaves that carry bytes, in
-// document order. Neither copyable nor movable: the parse borrows the text.
+// A valid document read once, the reference each faulted copy is compared
+// with: its text, its parse, and its tokens -- the visible leaves that carry
+// bytes, in document order. Neither copyable nor movable: the parse borrows
+// the text.
 #pragma once
 
 #include <cstddef>

@@ -6,11 +6,11 @@
 #include <cassert>
 #include <cstdint>
 
-#include "cursiv/lr/runtime/LrCactusClimb.hpp"
+#include "cursiv/lr/runtime/LrCactusView.hpp"
 #include "cursiv/lr/runtime/LrPin.hpp"
 #include "cursiv/lr/runtime/LrVirtualAt.hpp"
-#include "cursiv/shared/runtime/GestureRank.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
+#include "cursiv/shared/runtime/PathRank.hpp"
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
@@ -18,34 +18,34 @@ namespace cursiv::engine {
 
 // What a slot of the search stands for. A generator is queued directly and
 // never admitted to `LrSearch::seen`: it has no future of its own, only
-// gestures of the reading it was made from not yet laid.
+// edits of the reading it was made from not yet made.
 enum class LrWorkKind : std::uint8_t {
   // A reading, read forward by the cells' own step.
   read,
-  // The abandons of a refused reading, laid one depth at a time.
+  // The abandons of a refused reading, made one depth at a time.
   enumerateAbandons,
-  // The insertions of a refused reading that no owed run reaches.
+  // The insertions of a refused reading that no required run reaches.
   enumerateInsertions,
   // The replacement of the word in hand by the keyword its state is forced
-  // to, at the price of its deletion and the keyword's insertion.
+  // to, at the cost of its deletion and the keyword's insertion.
   forcedReplacement,
 };
 
 // Where a point stands in the fault it is repairing, `[abandon] (ins)* (rep |
 // del+)?`; the phases are in the order the fault goes through them.
 enum class LrRepairPhase : std::uint8_t {
-  // No gesture yet at this point.
-  beforeGesture,
-  // The abandon is laid: insertions, a replacement or deletions go on from it.
+  // No edit yet at this point.
+  beforeEdit,
+  // The abandon is made: insertions, a replacement or deletions go on from it.
   afterAbandon,
-  // An insertion is laid, and where it stands more may be.
+  // An insertion is made, and more may follow where it stands.
   inserting,
   // Bytes were dropped or a trivia skipped: only more of them.
   discardOnly,
 };
 
 struct LrConfig : LrPin {
-  LrCactusClimb run;
+  LrCactusView run;
   TextOffset at = 0;
   Token la{};
   std::uint16_t laMode = kNoMode;
@@ -53,32 +53,32 @@ struct LrConfig : LrPin {
   bool dead = false;
   LrVirtualAt virt;
   IndentAt indent;
-  // Shifted by a state that owed it.
+  // Shifted by a state that needed it.
   bool pinDue = false;
 
   // The key; the rank is read through `link`.
   std::uint32_t cost = 0;
   std::uint32_t lost = 0;
-  std::uint32_t gestures = 0;
+  std::uint32_t edits = 0;
   std::uint32_t faults = 0;
   std::uint32_t invented = 0;
-  std::uint32_t link = kNoGestureLink;
-  // Owed insertions still free at this point. A paid insertion opens a new
-  // allowance bounded by the stack it set out on; real text ends it.
+  std::uint32_t link = kNoEditLink;
+  // Required insertions still free at this point. A costed insertion opens a
+  // new allowance bounded by the stack it set out on; real text ends it.
   std::uint64_t freeInserts = 0;
-  // Real tokens since the last gesture, up to `kRepairValidateShifts`.
+  // Real tokens since the last edit, up to `kRepairValidateShifts`.
   std::uint8_t shifts = 0;
-  LrRepairPhase phase = LrRepairPhase::beforeGesture;
-  // No gesture yet at this point: the next one opens a fault. A generator has
-  // paid the fault it opens when it was made, and is never counted again.
+  LrRepairPhase phase = LrRepairPhase::beforeEdit;
+  // No edit yet at this point: the next one opens a fault. A generator has
+  // counted the fault it opens when it was made, and is never counted again.
   bool fresh = true;
-  // A generator stands for gestures of `source()` not yet made.
+  // A generator stands for edits of `source()` not yet made.
   LrWorkKind work = LrWorkKind::read;
   // Dominated, or an arm its own action refused: never read again.
   bool gone = false;
   // Its bound read from the text ahead: queued again at it once.
   bool weighed = false;
-  // Named by a queue entry: its slot outlives the gesture that laid it.
+  // Named by a queue entry: its slot outlives the edit that created it.
   bool queued = false;
   // The arm the next fork of this step hands out; zero, none yet: the reading
   // itself becomes arm 0 at its first fork. A generator of abandons keeps its
@@ -87,10 +87,10 @@ struct LrConfig : LrPin {
 
   bool generates() const { return work != LrWorkKind::read; }
 
-  // Which gestures may come next at the point: an abandon before any gesture;
+  // Which edits may come next at the point: an abandon before any edit;
   // a replacement until bytes are dropped; an insertion until then too, but in
   // front of bytes no mode reads (`garbage`), one at most.
-  bool mayAbandon() const { return phase == LrRepairPhase::beforeGesture; }
+  bool mayAbandon() const { return phase == LrRepairPhase::beforeEdit; }
   bool mayReplace() const { return phase <= LrRepairPhase::inserting; }
   bool mayInsert(bool garbage) const {
     return phase < LrRepairPhase::inserting ||
@@ -98,7 +98,7 @@ struct LrConfig : LrPin {
   }
 
   // The generator for the insertions of the reading `base`, which stands at
-  // `source`; `rank` is the rank base of the non-owed terminals left to try.
+  // `source`; `rank` is the rank base of the other terminals left to try.
   static LrConfig insertGenerator(const LrConfig& base, std::uint32_t source,
                                   std::uint32_t rank) {
     LrConfig g = base;
@@ -109,7 +109,7 @@ struct LrConfig : LrPin {
   }
 
   // The generator for the replacement of the word in hand of the reading
-  // `base`, which stands at `source`; `rank` is the rank it is laid at.
+  // `base`, which stands at `source`; `rank` is the rank it is made at.
   static LrConfig replaceGenerator(const LrConfig& base, std::uint32_t source,
                                    std::uint32_t rank) {
     LrConfig g = insertGenerator(base, source, rank);
@@ -135,7 +135,7 @@ struct LrConfig : LrPin {
     assert(generates());
     return _source;
   }
-  // Of insertions: the rank base of the non-owed terminals left to try; of a
+  // Of insertions: the rank base of the other terminals left to try; of a
   // replacement, its rank.
   std::uint32_t insertRank() const {
     assert(work == LrWorkKind::enumerateInsertions ||
@@ -167,9 +167,9 @@ struct LrConfig : LrPin {
   }
 
   // The author's bytes read again are a token of theirs, but no shift past
-  // the gesture that read them.
+  // the edit that read them.
   template <const auto& A>
-  void shifted(bool laid) {
+  void shifted(bool synthetic) {
     if (pin && la == pinTok) {
       pin = false;
       if (!pinRep) {
@@ -181,14 +181,14 @@ struct LrConfig : LrPin {
         laMode = heldMode;
         return;
       }
-    } else if (laid) {
+    } else if (synthetic) {
       return;
     } else if (shifts < kRepairValidateShifts) {
       ++shifts;
     }
     run.add_token();
     fresh = true;
-    phase = LrRepairPhase::beforeGesture;
+    phase = LrRepairPhase::beforeEdit;
     freeInserts = 0;
   }
 

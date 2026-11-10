@@ -1,4 +1,4 @@
-// One join a call site owes: the chain its call handed back, and that chain
+// One join a call site needs: the chain its call handed back, and that chain
 // followed by what the site states over it.
 #pragma once
 

@@ -1,7 +1,6 @@
-// A literal whose boundary is its own: `hello` may not be followed by `;`.
-// A repair reads what the lexer reads, so a misspelling before a byte the
-// boundary refuses is not one -- two documents that lex alike are repaired
-// alike.
+// A literal with its own boundary: `hello` may not be followed by `;`. A
+// repair reads what the lexer reads, so two documents that lex the same are
+// repaired the same.
 
 #include <cstdint>
 #include <string>
@@ -19,7 +18,7 @@ namespace g = topt::generated::OptionalsG;
 
 namespace {
 
-// How many of one kind the reading reported.
+// How many diagnostics of `kind` the parse reported.
 std::size_t said(std::string_view text, cursiv::DiagnosticKind kind) {
   cursiv::Cst cst;
   cursiv::engine::lr_parser<g::kTable>.parse(text, cst, nullptr, &g::kDrive);
@@ -75,13 +74,13 @@ void generic_typo_runs_keep_the_terminal_guard() {
 
 void torture_boundary() {
   generic_typo_runs_keep_the_terminal_guard();
-  // Spelled right and closed right: nothing to say.
+  // Spelled right: no diagnostic.
   CHECK(said("hello x", cursiv::DiagnosticKind::replaced) == 0);
   CHECK(said("hello x", cursiv::DiagnosticKind::deleted) == 0);
   // Misspelled, and the boundary is clear: one repair, and it is the word.
   CHECK(said("helxo x", cursiv::DiagnosticKind::replaced) == 1);
   // ...and before a byte the boundary refuses, there is no misspelling to
-  // find: `hello;` is not a reading, so `helxo;` is not a repair of one.
+  // find: `hello;` is not a valid parse, so `helxo;` is not a repair of one.
   CHECK(said("helxo; x", cursiv::DiagnosticKind::replaced) == 0);
   CHECK(said("hello; x", cursiv::DiagnosticKind::replaced) == 0);
 }

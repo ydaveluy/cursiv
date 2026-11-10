@@ -16,19 +16,13 @@ class SignatureHelpProvider {
  public:
   virtual ~SignatureHelpProvider() noexcept = default;
 
-  /**
-   * The characters that reopen the popup as the caret moves between
-   * arguments. A language that forgets one gets help once and never again.
-   */
+  // The characters that reopen the popup as the caret moves between arguments.
   [[nodiscard]] virtual lsp::SignatureHelpOptions signatureHelpOptions() const {
     return {};
   }
 
-  /**
-   * Computes the signature help at `params.position`; `params.context` tells
-   * a retrigger from a first request. Precondition: called under the
-   * workspace read lock.
-   */
+  // The signature help at `params.position`; `params.context` tells a retrigger
+  // from a first request. Called under the workspace read lock.
   [[nodiscard]] virtual std::optional<lsp::SignatureHelp> provideSignatureHelp(
       const Document& document, const lsp::SignatureHelpParams& params,
       const CancellationToken& = {}) const = 0;

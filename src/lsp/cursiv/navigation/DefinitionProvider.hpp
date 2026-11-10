@@ -1,6 +1,5 @@
-// Go to definition: a position in a document, and the declarations the
-// name under it links to. A default is installed by
-// `install_lsp_language<C>`, one row in `LspServices::visitServices`.
+// Go to definition: the declarations the name at a position links to.
+// `install_default_lsp_services` installs the default.
 #pragma once
 
 #include <lsp/types.h>
@@ -17,12 +16,9 @@ class DefinitionProvider {
  public:
   virtual ~DefinitionProvider() noexcept = default;
 
-  /**
-   * Called under the workspace read lock. `nullopt` and an empty list both
-   * say nothing is here; the client receives an empty list. A
-   * `LocationLink` carries the origin span plus a split target: the
-   * declaration to preview and the name inside it to select.
-   */
+  // Called under the workspace read lock. `nullopt` and an empty list both
+  // answer an empty list. A link gives the declaration to preview and the name
+  // to select.
   [[nodiscard]] virtual std::optional<std::vector<lsp::LocationLink>>
   getDefinition(const Document& document, lsp::Position position,
                 const CancellationToken& = {}) const = 0;

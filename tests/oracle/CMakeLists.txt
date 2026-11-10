@@ -1,5 +1,5 @@
-# Random grammars against an Earley reading of the same grammar: a seed is a
-# grammar `rgram_write` draws, the build generates and a lane of its own reads
+# Random grammars checked against an Earley parse: `rgram_write` draws one
+# grammar per seed, the build generates its parser and its own test reads it
 # document by document. The oracle reads the grammar alone, never a table.
 
 add_library(rgramOracle STATIC RgramGrammar.cpp RgramCfg.cpp rgram_lane.cpp)
@@ -15,7 +15,7 @@ set(CURSIV_RGRAM_COUNT 0 CACHE STRING
     "How many grammars the long random-grammar run draws; zero, none")
 
 # One seed: its header, its generator, the run that tolerates a refusal, and
-# the lane compiled against what that run left.
+# the test compiled against what that run left.
 function(cursiv_rgram seed)
   set(id rgram${seed})
   set(root ${CMAKE_CURRENT_BINARY_DIR}/grammars)
@@ -62,7 +62,7 @@ function(cursiv_rgram seed)
 endfunction()
 
 # One accepted seed per family. 107 and 242 close a region on a rule;
-# in 107, 169 and 189 a list's continuation shifts a token the state owes.
+# in 107, 169 and 189 a list's continuation shifts a token the state expects.
 set(_rgram_fixed 107 169 189 242 296 164 126 223)
 foreach(seed IN LISTS _rgram_fixed)
   cursiv_rgram(${seed})
@@ -70,8 +70,8 @@ foreach(seed IN LISTS _rgram_fixed)
   set_tests_properties(rgram_${seed} PROPERTIES LABELS rgram TIMEOUT 120)
 endforeach()
 
-# Headers drawn during the build need the same shared generator compilation.
-# Keep optional long-run grammars outside these fixed batches.
+# The fixed seeds' generators share one compilation, as the other test
+# generators do; the long run stays out of these batches.
 foreach(index RANGE 0 1)
   math(EXPR first "${index} * 4")
   list(SUBLIST _rgram_fixed ${first} 4 batch)
@@ -83,7 +83,7 @@ endforeach()
 # The long run, asked for at configure (`-DCURSIV_RGRAM_COUNT=<n>
 # -DCURSIV_RGRAM_SEED=<first>`), built by `rgram-long` and run by
 # `ctest -L rgram-long`: there a grammar the generator refuses passes, and one
-# whose lane judges nothing is skipped.
+# whose test checks nothing is skipped.
 if(CURSIV_RGRAM_COUNT GREATER 0)
   add_custom_target(rgram-long)
   math(EXPR _last "${CURSIV_RGRAM_SEED} + ${CURSIV_RGRAM_COUNT} - 1")

@@ -25,7 +25,7 @@ class LexFailedWalks {
     TextOffset at = from;
     TextOffset head = 0;
     TextOffset stop = 0;
-    _stood.clear();
+    _points.clear();
     for (;;) {
       if (tape.accept(state) != 0) return false;
       if (at % kStride == 0) {
@@ -35,7 +35,7 @@ class LexFailedWalks {
           stop = it->second;
           break;
         }
-        _stood.push_back(Stood{key, 0});
+        _points.push_back(Point{key, 0});
       }
       if constexpr (requires { tape.relay(state); })
         for (auto k = tape.relay(state); k != kNoRelay;
@@ -44,7 +44,7 @@ class LexFailedWalks {
           TextOffset seen = at;
           if (relay.asserts == nullptr || relay.asserts(src, len, at, seen))
             return false;
-          TextOffset& reach = _stood.empty() ? head : _stood.back().reach;
+          TextOffset& reach = _points.empty() ? head : _points.back().reach;
           reach = std::max(reach, seen);
         }
       if (at >= len) {
@@ -60,7 +60,7 @@ class LexFailedWalks {
       ++at;
     }
     // A key answers for the walk from itself on, not for what was read before.
-    for (auto it = _stood.rbegin(); it != _stood.rend(); ++it) {
+    for (auto it = _points.rbegin(); it != _points.rend(); ++it) {
       stop = std::max(stop, it->reach);
       _known.emplace(it->key, stop);
     }
@@ -70,14 +70,14 @@ class LexFailedWalks {
 
  private:
   static constexpr TextOffset kStride = 16;
-  // A key stood on, and how far the assertions read from there up to the next
+  // A key reached, and how far the assertions read from there up to the next
   // key.
-  struct Stood {
+  struct Point {
     std::uint64_t key;
     TextOffset reach;
   };
   std::unordered_map<std::uint64_t, TextOffset> _known;
-  std::vector<Stood> _stood;
+  std::vector<Point> _points;
 };
 
 }  // namespace cursiv::engine

@@ -1,5 +1,5 @@
-// A refused word in a loop is read by recognition, past the automaton's start:
-// the body still matches the empty string.
+// A loop whose item starts with a guard: the guard does not stop the body from
+// matching the empty string.
 // expect LR: terminal .NOISE. matches the empty string
 #pragma once
 

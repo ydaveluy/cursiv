@@ -1,5 +1,5 @@
-// A terminal whose body may match nothing: the lexer reads no token of no
-// width, so the parser owes one it can never be given.
+// A terminal whose body may match nothing: the lexer never produces an empty
+// token, so a rule could wait for one forever.
 // expect LR LL: terminal .MaybeNum. matches the empty string
 #pragma once
 

@@ -30,8 +30,7 @@ void WorkspaceFormatter::formatEntity(cursiv::FormattingBuilder& builder,
                                         const ast::Entity* entity) const {
   auto formatter = builder.getNodeFormatter(entity);
   formatter.keyword("entity").append(oneSpace);
-  // A reference written nowhere carries no text: that is how an entity with
-  // no `extends` is spelled.
+  // An entity without `extends` holds a reference with no text.
   if (!entity->superType.refText.empty()) {
     formatter.keyword("extends").prepend(oneSpace).append(oneSpace);
   }

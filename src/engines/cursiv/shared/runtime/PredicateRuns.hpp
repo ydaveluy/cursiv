@@ -1,7 +1,6 @@
-// The rounds of a condition's repetition with no maximum. A condition tested
-// at each token of a long run reads the run again from each token; the parse
-// keeps, by round, whether the rest of the condition held and how far that
-// read, so each round of a run is read once per document.
+// The rounds of a condition's repetition with no maximum: the parse keeps, by
+// round, whether the rest of the condition held and how far it read, so each
+// round is read once per document.
 #pragma once
 
 #include <cstdint>
@@ -56,10 +55,8 @@ inline bool predicate_some(const char*, TextOffset, PredicateState in,
 }
 
 // Whether `rest` holds after some rounds of a repetition with no maximum,
-// whose free rounds start from `cur`. `runs` keeps the answers of rounds a
-// lone cursor reaches, under `run`, the repetition's place in its condition;
-// without it every round is read. What is read and answered is the same
-// either way.
+// whose free rounds start from `cur`. `runs`, when given, keeps the answers
+// under `run`, the repetition's place in its condition.
 bool predicate_run(PredicateRuns* runs, std::uint32_t run,
                    const PredicateRound& round, PredicateRest rest,
                    const char* src, TextOffset len, PredicateState cur,

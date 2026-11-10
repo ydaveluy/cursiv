@@ -1,8 +1,6 @@
-# The default toolchain of the wasi-debug and wasi-release presets: the Clang of
-# wasi-sdk 34, the pinned release. Another compiler has a file like this one, and
-# shares the rest through wasi-platform.cmake.
-# Cursiv throws: `-fwasm-exceptions` at both compile and link selects the `eh`
-# half of the SDK's dual `eh`/`noeh` sysroot.
+# The default toolchain of the wasi presets: the Clang of the pinned wasi-sdk
+# 34. Another compiler shares the rest through wasi-platform.cmake. Cursiv
+# throws, so `-fwasm-exceptions` selects the SDK's `eh` sysroot.
 if(NOT WASI_SDK)
   set(WASI_SDK $ENV{WASI_SDK})
 endif()

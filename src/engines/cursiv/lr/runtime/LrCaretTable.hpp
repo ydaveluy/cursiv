@@ -27,11 +27,9 @@
 
 namespace cursiv::engine {
 
-// Per mode and terminal, the sample words the lexer reads whole as the
-// terminal there, set when first asked and held with the top bit up. The cells
-// come with the first completion that asks, so a parser that never completes
-// holds none; of two completions racing for them, the second takes the
-// first's.
+// Per mode and terminal, the sample words the lexer reads whole as that
+// terminal, set when first asked, top bit up. The first completion makes the
+// cells; of two racing for them, the second takes the first's.
 class LrSampleReads {
  public:
   ~LrSampleReads() { delete[] _cells.load(std::memory_order_relaxed); }
@@ -96,9 +94,9 @@ struct LrCaretTable {
   // per row, closed by a sentinel.
   std::span<const std::uint32_t> rowLhsBase;
   std::span<const std::uint16_t> rowLhs;
-  // Where a reduce lands, asked of the state under the caret's own.
+  // Where a reduce goes, asked of the state under the caret's own.
   std::uint32_t (*go)(std::uint32_t, SymbolId) = nullptr;
-  // What the gap decides, laid as `lr_guard.hpp` reads it: a goto cell above
+  // What the gap decides, stored as `lr_guard.hpp` reads it: a goto cell above
   // the states names its guard, and a state's tag what held where its span
   // opened.
   std::span<const std::uint32_t> guardAt;
@@ -114,10 +112,10 @@ struct LrCaretTable {
   // asks no condition.
   const LrSampleReads* sampleReads = nullptr;
 
-  // A token the indentation or the parse lays: no lexer reads it, and no
+  // A token the indentation or the parse inserts: no lexer reads it, and no
   // author types it.
-  [[nodiscard]] bool laid(SymbolId sym) const {
-    return sym < terms.size() && terms[sym].laid != 0;
+  [[nodiscard]] bool synthetic(SymbolId sym) const {
+    return sym < terms.size() && terms[sym].synthetic != 0;
   }
 
   [[nodiscard]] std::span<const std::uint16_t> row_lhs(ElementId row) const {
@@ -133,18 +131,19 @@ struct LrCaretTable {
     return guardOps.subspan(at + 1u, guardOps[at]);
   }
 
-  // A direct state or every landing of an encoded guard. `may(c)` answers
+  // A direct state or every target of an encoded guard. `may(c)` answers
   // condition `c` 0 false, 1 unknown, 2 true: a gap is not always known here.
   template <class May, class F>
-  void land_each(std::uint32_t target, May&& may, F&& f) const {
-    land_vectors(target, may,
-                 [&](std::uint32_t to, auto, unsigned, unsigned) { f(to); });
+  void each_target(std::uint32_t target, May&& may, F&& f) const {
+    each_target_with_truth(
+        target, may,
+        [&](std::uint32_t to, auto, unsigned, unsigned) { f(to); });
   }
 
   // The same walk retaining the conditions and their chosen truth vector:
-  // a deferred landing records the unknown bits as issues of its reading.
+  // a deferred target records the unknown bits as issues of its reading.
   template <class May, class F>
-  void land_vectors(std::uint32_t target, May&& may, F&& f) const {
+  void each_target_with_truth(std::uint32_t target, May&& may, F&& f) const {
     if (target == kInvalidSymbol) return;
     if (target < mode.size()) {
       f(target, std::span<const std::uint16_t>{}, 0u, 0u);
@@ -176,10 +175,9 @@ struct LrCaretTable {
   }
 };
 
-// The prefix's stacks are reconstructed from the tape and the final
-// action/goto tables, a complete record as one goto; a continuation must
-// reach a shift on one of them. A tape no engine stamped -- `CstBuilder` is
-// public -- gets no answer rather than a wrong one.
+// The prefix's stacks rebuilt from the tape and the final tables, a complete
+// record as one goto; a continuation must reach a shift on one of them. A tape
+// no engine stamped gets no answer rather than a wrong one.
 void lr_next_features_at(const LrCaretTable& table,
                          const StampedGrammar& grammar, const Cst& cst,
                          TextOffset at, TextOffset resume,

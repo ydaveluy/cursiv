@@ -1,7 +1,6 @@
-// What the client's explorer does to the files -- created, renamed,
-// deleted -- asked before it happens and told after. Which of the six arms
-// a client ever sends is `fileOperationOptions()` alone: an arm the
-// options leave out is one nothing will reach.
+// What the client's explorer does to files (create, rename, delete), asked
+// before and told after. A client sends only what `fileOperationOptions()`
+// names.
 #pragma once
 
 #include <lsp/types.h>
@@ -14,11 +13,8 @@ class FileOperationHandler {
  public:
   virtual ~FileOperationHandler() noexcept = default;
 
-  /**
-   * The options reported to the client at the handshake. Asked once, and
-   * the answer must be stable: a route is registered off it for the whole
-   * session.
-   */
+  // The options reported at the handshake. Asked once: routes are registered
+  // from them for the whole session.
   [[nodiscard]] virtual const lsp::FileOperationOptions& fileOperationOptions()
       const noexcept = 0;
 
@@ -34,12 +30,9 @@ class FileOperationHandler {
     // nothing to do by default
   }
 
-  /**
-   * The edit the client applies before it moves the files, and waits for:
-   * this is where a rename rewrites what names it. `nullopt` means
-   * nothing to change, sent as null. Precondition: called under the
-   * workspace read lock.
-   */
+  // The edit the client applies, and waits for, before it moves the files, such
+  // as a rename's references. `nullopt` sends null. Called under the workspace
+  // read lock.
   [[nodiscard]] virtual std::optional<lsp::WorkspaceEdit> willCreateFiles(
       const lsp::CreateFilesParams&) const {
     return std::nullopt;

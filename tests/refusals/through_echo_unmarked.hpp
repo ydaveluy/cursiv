@@ -1,3 +1,4 @@
+// A `same` inside a `through`, with no `mark` before it.
 // expect LR: uses .same<>. where a .mark<>. with its tag is not set on every path before it
 #pragma once
 

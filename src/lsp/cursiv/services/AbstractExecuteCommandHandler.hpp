@@ -1,7 +1,5 @@
-// The bookkeeping every handler would otherwise repeat: a language says what
-// it registers, this says how a name is found and answered. The table is
-// built once, lazily, since registration may run arbitrary code and re-doing
-// it per request would pay it per keystroke on a code lens.
+// The bookkeeping every handler shares: a language says what it registers,
+// this finds and runs a command by name. The table is built once, lazily.
 #pragma once
 
 #include <lsp/types.h>

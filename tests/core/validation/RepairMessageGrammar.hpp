@@ -1,9 +1,8 @@
 #pragma once
 
-// Each body entered by its first token: a tight region, where a stray space is
-// the one byte a repair can only delete, and a right-recursive sum, where after
-// a primary the state may shift another `+` or reduce -- the ambiguity an
-// unwind resolves by deleting exactly the operator the resumed state owes.
+// Each body entered by its first token: a tight region, where an extra space
+// can only be deleted, and a right-recursive sum, where an unwind deletes
+// exactly the operator the resumed state expects.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

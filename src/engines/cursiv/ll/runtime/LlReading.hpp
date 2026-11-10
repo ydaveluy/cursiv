@@ -7,15 +7,15 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/text/TextOffset.hpp"
 #include "cursiv/ll/runtime/LlAhead.hpp"
-#include "cursiv/shared/runtime/GestureRank.hpp"
+#include "cursiv/shared/runtime/PathRank.hpp"
+#include "cursiv/text/TextOffset.hpp"
 
 namespace cursiv::engine {
 
 inline constexpr std::uint32_t kLlNoNode = 0xFFFFFFFFu;
 
-// The real tokens a plan replay may read to settle the arm it enters.
+// The real tokens a plan replay may read to decide the arm it enters.
 inline constexpr std::uint32_t kLlArmReach = 64;
 
 // What the positions of a pool run offer: the terminals they read next, the
@@ -45,12 +45,12 @@ struct LlReading {
   bool done = false;
   // Its surviving readings name one root arm, the one a plan replay enters.
   // Terminal roots have that property from their first position.
-  bool settled = true;
+  bool decided = true;
   // Dominated: never read again.
   bool gone = false;
-  // Named by a queue entry: its slot outlives the gesture that laid it.
+  // Named by a queue entry: its slot outlives the edit that created it.
   bool queued = false;
-  // No gesture yet at this point: the next one opens a fault.
+  // No edit yet at this point: the next one opens a fault.
   bool fresh = true;
   // Its next token is the descent's token in hand, whose gap the descent
   // crossed under the point's own trivia: it is read where it begins.
@@ -59,27 +59,26 @@ struct LlReading {
   // The key; the rank is read through `link`.
   std::uint32_t cost = 0;
   std::uint32_t lost = 0;
-  std::uint32_t gestures = 0;
+  std::uint32_t edits = 0;
   std::uint32_t faults = 0;
   std::uint32_t invented = 0;
-  std::uint32_t link = kNoGestureLink;
+  std::uint32_t link = kNoEditLink;
   // Author tokens read on this path, including re-readings. Unlike shifts,
-  // this never resets: call starts use it to price an abandon exactly. A race
-  // prices nothing and holds the place in the text here (`ll_search_race`).
+  // this never resets: call starts use it to cost an abandon exactly. A race
+  // costs nothing and holds the place in the text here (`ll_search_race`).
   std::uint32_t tokens = 0;
 
-  // Real tokens since the last gesture, up to `kLlArmReach`.
+  // Real tokens since the last edit, up to `kLlArmReach`.
   std::uint8_t shifts = 0;
   // Where the point stands in `(ins)* (rep | del+)?`; in front of bytes no
   // alphabet reads, one insertion at most.
   std::uint8_t phase = 0;
-  // The last gesture was an owed insertion: the next one costs nothing.
-  bool owing = false;
+  // The last edit was a required insertion: the next one costs nothing.
+  bool afterRequired = false;
 
-  // Stands for the insertions of `genFrom` that are not owed, not yet laid;
-  // `genKeep` is the rank base of the terminals left to try. With
-  // `genReplace`, for the replacement of its word in hand by the keyword its
-  // positions are forced to, laid at rank `genKeep`.
+  // Stands for the insertions of `genFrom` not yet made that no plan asks for;
+  // `genKeep` is the rank base of the terminals left. With `genReplace`, for
+  // replacing its word in hand by the keyword its positions are forced to.
   bool gen = false;
   bool genReplace = false;
   std::uint32_t genFrom = 0;
@@ -88,7 +87,7 @@ struct LlReading {
   bool genAbandon = false;
   std::uint32_t genRet = 0, genParent = 0, genChoice = 0;
   std::int64_t genStart = 0;
-  std::uint16_t genAlt = 0, genOwed = 0;
+  std::uint16_t genAlt = 0, genMissing = 0;
 };
 
 }  // namespace cursiv::engine

@@ -19,14 +19,9 @@
 
 namespace arith {
 
-// No exception on this path: a validator asks thousands of times and most
-// questions have no answer -- an unwind per miss would dwarf the arithmetic.
-// `nullopt` is every failure: an unbound name, a cycle, a spent budget, a zero
-// divisor.
-//
-// The walk runs on explicit stacks, not on native frames: an expression a
-// million terms long, or a chain of a million definitions, costs heap and
-// never the thread's stack. The stacks are kept between questions, emptied.
+// Every failure is `nullopt`, never an exception: most questions a validator
+// asks have no answer. The walk runs on explicit stacks, kept between
+// questions, so a long expression or chain of calls never uses the thread's.
 class Interpreter::Machine {
  public:
   // `remaining` is the steps left before the evaluation gives up, null for
@@ -39,10 +34,12 @@ class Interpreter::Machine {
       return static_cast<const ast::NumberLiteral&>(expression).value;
     _remaining = remaining;
     if (remaining != nullptr) _constants.clear();
+    // Only the calls a failed run left open: clearing the whole set would
+    // cost every bucket it ever grew, on each question.
+    for (const Frame& frame : _frames) _active.erase(frame.definition);
     _tasks.clear();
     _values.clear();
     _frames.clear();
-    _active.clear();
     Task task{Kind::evaluate, &expression};
     for (;;) {
       switch (task.kind) {
@@ -128,16 +125,15 @@ class Interpreter::Machine {
 
     // A parameter used as a value: the name stands for what the enclosing
     // call bound, and it takes no argument.
-    if (!_frames.empty()) {
+    if (target->type == &cursiv::ast_type_tag<ast::DeclaredParameter>) {
+      if (_frames.empty() || !call.args.empty()) return {Kind::failed, nullptr};
       const Frame& frame = _frames.back();
-      const auto& parameters = frame.definition->args;
-      for (std::size_t at = 0; at < parameters.size(); ++at)
-        if (parameters[at] == target) {
-          if (!call.args.empty()) return {Kind::failed, nullptr};
-          const double value = _values[frame.first + at];
-          _values.push_back(value);
-          return {Kind::done, nullptr};
-        }
+      if (target->parent != frame.definition) return {Kind::failed, nullptr};
+      const auto place = _places.find(target);
+      if (place == _places.end()) return {Kind::failed, nullptr};
+      const double value = _values[frame.first + place->second];
+      _values.push_back(value);
+      return {Kind::done, nullptr};
     }
 
     if (target->type != &cursiv::ast_type_tag<ast::Definition>)
@@ -157,6 +153,9 @@ class Interpreter::Machine {
     // The arguments are evaluated in the caller's frame, the body in the
     // callee's: a parameter of the same name does not leak between the two.
     if (call.args.empty()) return enter(definition);
+    // Each argument costs a step: stop before queuing more than the budget.
+    if (_remaining != nullptr && *_remaining < call.args.size())
+      return {Kind::failed, nullptr};
     _tasks.emplace_back(Kind::call, &definition);
     for (std::size_t at = call.args.size(); at-- > 1;) {
       if (definition.args[at] == nullptr || call.args[at] == nullptr)
@@ -172,6 +171,11 @@ class Interpreter::Machine {
   Task enter(const ast::Definition& definition) {
     const std::size_t count = definition.args.size();
     const std::size_t first = _values.size() - count;
+    // Learn the parameters' places on the first call, so the body reads them
+    // without a search.
+    if (count != 0 && !_places.contains(definition.args.front()))
+      for (std::size_t at = 0; at < count; ++at)
+        _places.emplace(definition.args[at], at);
     _frames.push_back({&definition, first});
     _active.insert(&definition);
     _tasks.emplace_back(Kind::leave, &definition);
@@ -214,6 +218,8 @@ class Interpreter::Machine {
   // nothing instead of running for ever.
   std::unordered_set<const ast::Definition*> _active;
   std::unordered_map<const ast::Definition*, double> _constants;
+  // Each parameter's index among its definition's.
+  std::unordered_map<const ast::AbstractDefinition*, std::size_t> _places;
 };
 
 Interpreter::Interpreter() : _machine(std::make_unique<Machine>()) {}

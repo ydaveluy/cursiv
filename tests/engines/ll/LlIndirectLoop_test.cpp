@@ -1,6 +1,6 @@
-// How the election reads a left recursion that runs through other rules: as
-// the loop of the rule a call starts with, whatever else calls them. The table
-// reads every cycle; the descent reads the ones with an arm that only calls on.
+// A left recursion that runs through other rules reads as the loop of the rule
+// a call starts with, whatever else calls them. The table reads every cycle;
+// the descent reads the ones with an arm that only calls on.
 #include <cstdint>
 #include <cstdio>
 #include <span>
@@ -55,8 +55,8 @@ constexpr Case kCycle[] = {
     {"ring-b/b a y", "Doc(Bay)"},
     {"ring-b/c a y x z", "Doc(Tz(Tx(Bay)))"},
 
-    {"rungs/a a w x", "Doc(Tx(Tw(Bc)))"},
-    {"rungs-b/a a w x", "Doc(Tx(Tv(Bd)))"},
+    {"cycles/a a w x", "Doc(Tx(Tw(Bc)))"},
+    {"cycles-b/a a w x", "Doc(Tx(Tv(Bd)))"},
     {"share/a a e x", "Doc(Tp(Be))"},
     {"diamond/a a x y x", "Doc(Tx(Ty(Bax)))"},
     {"diamond-s/a a x y x", "Doc(Tz(Tr(Bax)))"},
@@ -139,17 +139,17 @@ constexpr Case kShared[] = {
     {"turn-last/w a x", "Doc(Tx(Ba))"},
     {"turn-last/w a x x", "Doc(Tx(Bax))"},
 
-    {"rung/a a x", "Doc(Tx(Ba))"},
-    {"rung/b a x", "Doc(Bax)"},
-    {"rung/b a x x", "Doc(Tx(Bax))"},
-    {"rung/ab:a a x", "Doc(Tx(Ba))"},
-    {"rung/ba:b a x", "Doc(Bax)"},
-    {"rung/ba:b a x x", "Doc(Tx(Bax))"},
-    {"rung/ba:a a x x", "Doc(Tx(Tx(Ba)))"},
-    {"rung-b/a a x", "Doc(Tx(Ba))"},
-    {"rung-b/a a x x", "Doc(Tx(Tx(Ba)))"},
-    {"rung-b/b a x", "Doc(Tx(Ba))"},
-    {"rung-b/b a x x", "Doc(Tx(Tx(Ba)))"},
+    {"unit/a a x", "Doc(Tx(Ba))"},
+    {"unit/b a x", "Doc(Bax)"},
+    {"unit/b a x x", "Doc(Tx(Bax))"},
+    {"unit/ab:a a x", "Doc(Tx(Ba))"},
+    {"unit/ba:b a x", "Doc(Bax)"},
+    {"unit/ba:b a x x", "Doc(Tx(Bax))"},
+    {"unit/ba:a a x x", "Doc(Tx(Tx(Ba)))"},
+    {"unit-b/a a x", "Doc(Tx(Ba))"},
+    {"unit-b/a a x x", "Doc(Tx(Tx(Ba)))"},
+    {"unit-b/b a x", "Doc(Tx(Ba))"},
+    {"unit-b/b a x x", "Doc(Tx(Tx(Ba)))"},
 
     {"chain/a a x", "Doc(Tx(Ba))"},
     {"chain/a a x x", "Doc(Tx(Tx(Ba)))"},
@@ -159,23 +159,23 @@ constexpr Case kShared[] = {
     {"chain/c a x", "Doc(Tx(Ba))"},
     {"chain/c b x", "Doc(Tx(Bb))"},
 
-    {"ladder/e - a !", "Doc(Post(Neg(Ba)))"},
-    {"ladder/n - a !", "Doc(Neg(Post(Ba)))"},
-    {"ladder/en:n - a !", "Doc(Neg(Post(Ba)))"},
-    {"ladder/ne:e - a !", "Doc(Post(Neg(Ba)))"},
-    {"ladder-b/e - a ! !", "Doc(Post(Neg(Post(Ba))))"},
-    {"ladder-b/n - a ! !", "Doc(Neg(Post(Post(Ba))))"},
+    {"prefix-postfix/e - a !", "Doc(Post(Neg(Ba)))"},
+    {"prefix-postfix/n - a !", "Doc(Neg(Post(Ba)))"},
+    {"prefix-postfix/en:n - a !", "Doc(Neg(Post(Ba)))"},
+    {"prefix-postfix/ne:e - a !", "Doc(Post(Neg(Ba)))"},
+    {"prefix-postfix-b/e - a ! !", "Doc(Post(Neg(Post(Ba))))"},
+    {"prefix-postfix-b/n - a ! !", "Doc(Neg(Post(Post(Ba))))"},
 
     {"via/w a x x", "Doc(Tx(Bax))"},
     {"via/wa:w a x x", "Doc(Tx(Bax))"},
     {"via/wa:a a x", "Doc(Tx(Ba))"},
     {"via/wa:a a x x", "Doc(Tx(Tx(Ba)))"},
     {"via-aw/w a x x", "Doc(Tx(Tx(Ba)))"},
-    {"rung/a a x x", "Doc(Tx(Tx(Ba)))"},
-    {"rung/ab:a a x x", "Doc(Tx(Tx(Ba)))"},
-    {"rung/ab:b a x", "Doc(Bax)"},
-    {"rung/ab:b a x x", "Doc(Tx(Bax))"},
-    {"rung/ba:a a x", "Doc(Tx(Ba))"},
+    {"unit/a a x x", "Doc(Tx(Tx(Ba)))"},
+    {"unit/ab:a a x x", "Doc(Tx(Tx(Ba)))"},
+    {"unit/ab:b a x", "Doc(Bax)"},
+    {"unit/ab:b a x x", "Doc(Tx(Bax))"},
+    {"unit/ba:a a x", "Doc(Tx(Ba))"},
     {"chain/b a x x", "Doc(Tx(Bax))"},
     {"chain/c a x x", "Doc(Tx(Bax))"},
 
@@ -217,7 +217,7 @@ constexpr Case kShared[] = {
     {"fvalued/aw:w a x x", "Doc(Val[B(A(ax)x)])"},
 };
 
-struct Alike {
+struct HeadGroup {
   std::span<const std::string_view> heads, texts;
 };
 constexpr std::string_view kMutualA[] = {"mutual/a", "mutual/ab:a",
@@ -226,31 +226,32 @@ constexpr std::string_view kMutualB[] = {"mutual/b", "mutual/ab:b",
                                          "mutual/ba:b", "hop:b"};
 constexpr std::string_view kMutualATexts[] = {"a x", "a x y x"};
 constexpr std::string_view kMutualBTexts[] = {"a x y", "a x y x y"};
-constexpr Alike kAlikeCycle[] = {{kMutualA, kMutualATexts},
-                                 {kMutualB, kMutualBTexts}};
+constexpr HeadGroup kCycleGroups[] = {{kMutualA, kMutualATexts},
+                                      {kMutualB, kMutualBTexts}};
 constexpr std::string_view kViaW[] = {"via/w", "via/aw:w", "via/wa:w"};
 constexpr std::string_view kViaA[] = {"via/a", "via/aw:a", "via/wa:a"};
 constexpr std::string_view kViaTexts[] = {"a x", "a x x", "a x x x"};
-constexpr std::string_view kRungA[] = {"rung/a", "rung/ab:a", "rung/ba:a"};
-constexpr std::string_view kRungB[] = {"rung/b", "rung/ab:b", "rung/ba:b"};
-constexpr std::string_view kRungTexts[] = {"a x", "a x x", "a x x x"};
+constexpr std::string_view kUnitA[] = {"unit/a", "unit/ab:a", "unit/ba:a"};
+constexpr std::string_view kUnitB[] = {"unit/b", "unit/ab:b", "unit/ba:b"};
+constexpr std::string_view kUnitTexts[] = {"a x", "a x x", "a x x x"};
 constexpr std::string_view kFSubA[] = {"fsub/a", "fsub/ab:a"};
 constexpr std::string_view kFSubB[] = {"fsub/b", "fsub/ab:b"};
 constexpr std::string_view kFSubTexts[] = {"b y", "a z y", "a z y y"};
-constexpr Alike kAlikeShared[] = {{kViaW, kViaTexts},   {kViaA, kViaTexts},
-                                  {kRungA, kRungTexts}, {kRungB, kRungTexts},
-                                  {kFSubA, kFSubTexts}, {kFSubB, kFSubTexts}};
+constexpr HeadGroup kSharedGroups[] = {
+    {kViaW, kViaTexts},   {kViaA, kViaTexts},   {kUnitA, kUnitTexts},
+    {kUnitB, kUnitTexts}, {kFSubA, kFSubTexts}, {kFSubB, kFSubTexts}};
 
 std::string dump(const cursiv::AstReflection& r, const cursiv::AstNode& n) {
-  std::string kids;
-  r.visitMembers(n, [&](std::string_view, std::uint32_t, cursiv::AstNode& kid) {
-    kids += dump(r, kid);
-  });
+  std::string children;
+  r.visitMembers(n,
+                 [&](std::string_view, std::uint32_t, cursiv::AstNode& child) {
+                   children += dump(r, child);
+                 });
   const std::string name(r.getTypeMetaData(n.type).name);
   if (name == "Val")
     return name + '[' +
            std::string(static_cast<const tindirectloop::Val&>(n).text) + ']';
-  return kids.empty() ? name : name + '(' + kids + ')';
+  return children.empty() ? name : name + '(' + children + ')';
 }
 
 std::string read(const cursiv::Parser& parser, const cursiv::AstReflection& r,
@@ -271,8 +272,9 @@ void expect(const char* engine, const Case& c, const std::string& got) {
 }
 
 template <class Read>
-void alike(const char* engine, std::span<const Alike> groups, Read&& read_one) {
-  for (const Alike& g : groups)
+void read_the_same(const char* engine, std::span<const HeadGroup> groups,
+                   Read&& read_one) {
+  for (const HeadGroup& g : groups)
     for (const std::string_view text : g.texts) {
       const std::string first =
           read_one(std::string(g.heads.front()) + ' ' + std::string(text));
@@ -303,10 +305,12 @@ int main() {
     expect("table", c, read(*table, *tabler, c.text));
   for (const Case& c : kShared)
     expect("descent", c, read(*ll, *llr, c.text, "loop:"));
-  alike("table", kAlikeCycle,
-        [&](const std::string& text) { return read(*table, *tabler, text); });
-  alike("descent", kAlikeShared,
-        [&](const std::string& text) { return read(*ll, *llr, text, "loop:"); });
+  read_the_same("table", kCycleGroups, [&](const std::string& text) {
+    return read(*table, *tabler, text);
+  });
+  read_the_same("descent", kSharedGroups, [&](const std::string& text) {
+    return read(*ll, *llr, text, "loop:");
+  });
   for (const Case& c : kTwin)
     expect("descent", c, read(*ll, *llr, c.text, "loop:"));
   const auto refused = cursiv::engine::ll_build_program(

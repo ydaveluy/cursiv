@@ -17,11 +17,8 @@ class FoldingRangeProvider {
  public:
   virtual ~FoldingRangeProvider() noexcept = default;
 
-  /**
-   * Called under the workspace read lock. Both units are published: the
-   * columns are the record's own bounds, read by a client that folds
-   * mid-line and ignored by one that folds by line.
-   */
+  // Called under the workspace read lock. Both line and column bounds are sent;
+  // a client that folds by line ignores the columns.
   [[nodiscard]] virtual std::vector<lsp::FoldingRange> getFoldingRanges(
       const Document& document, const CancellationToken& = {}) const = 0;
 };

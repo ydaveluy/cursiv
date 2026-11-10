@@ -68,7 +68,7 @@ struct AstEmitter : TextBuilder {
   std::string header;
 
   std::vector<std::string> names;
-  // Whether any entry states something other than its bytes.
+  // Whether any entry denotes something other than its bytes.
   bool anyText = false;
   // Whether every entry gives its parent the text its payload denotes: one
   // table then answers both.
@@ -121,7 +121,7 @@ struct AstEmitter : TextBuilder {
   std::map<Held, std::uint16_t> heldSlots;
   void plan_held();
   std::uint16_t conv_of(std::uint16_t r) const;
-  void emit_owe(Body& b, std::uint16_t r, int m) const;
+  void emit_deferred(Body& b, std::uint16_t r, int m) const;
   bool can_close_held(const Run& held, int cr, const Run& over,
                       const Run& added) const;
   // Every write before a base run's one creation belongs to its maker: fill_run
@@ -134,10 +134,8 @@ struct AstEmitter : TextBuilder {
   void run_held(Body& b, const Run& held, const Run& over, int cr,
                 int heldMade) const;
   Body entry_body(std::uint32_t e) const;
-  // One function per distinct program. Programs that differ only in their
-  // constants expand one form where it spells less: a macro, since GCC
-  // compiles even a forced inline call differently; a type argument with a
-  // comma goes through an alias.
+  // One function per distinct program; programs that differ only in their
+  // constants share one macro where it spells less.
   void emit_entries();
 
   void emit_types();
@@ -167,7 +165,7 @@ struct AstEmitter : TextBuilder {
   };
   // One record's conversions, planned once: every cell the record has in the
   // conversion tables, its text thunks as much as what the scheduler converts
-  // before them, is spelled from this plan alone.
+  // before them, is written from this plan alone.
   struct ConvPlan {
     // The record is a data rule's own: it reads by joining its parts, and it
     // is a call, which gives its parent a part even when it read nothing.
@@ -188,7 +186,6 @@ struct AstEmitter : TextBuilder {
   static TextPlan plan_text(std::span<const AstRowGen* const> chain,
                             bool data);
   static std::string text_conv(const AstRowGen& g);
-  // The thunk that converts a record's text.
   static std::string text_fn(const ConvPlan& p, const TextPlan& t);
   void emit_conversions();
   // A table of flags, named only where one is set: a grammar without a turn's

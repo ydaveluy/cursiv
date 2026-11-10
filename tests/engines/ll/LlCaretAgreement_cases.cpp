@@ -65,7 +65,7 @@ std::vector<Feature> identifiers_of(const cursiv::Parser& parser,
 }
 
 // Readings of one token each name their own member: the class, the member and
-// what the site accepts tell two apart, and sites alike are one entry.
+// what the site accepts tell two apart, and sites the same are one entry.
 void each_reading_names_its_own_member() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
   struct Case {
@@ -95,7 +95,6 @@ void each_reading_names_its_own_member() {
   }
 }
 
-// One site narrows the member and the other does not: neither stands for both.
 void a_narrowed_site_keeps_its_own_entry() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
   const std::string source = "agree:mixed target+";
@@ -108,7 +107,6 @@ void a_narrowed_site_keeps_its_own_entry() {
           (found[1].narrow != cursiv::kNoNarrow));
 }
 
-// Rules sharing a prefix part into a member each, behind data rules.
 void rules_sharing_a_prefix_each_name_their_member() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
   const std::string source = "agree:shared x : ";
@@ -122,7 +120,6 @@ void rules_sharing_a_prefix_each_name_their_member() {
   CHECK(names == (std::vector<std::string_view>{"other", "to"}));
 }
 
-// A reading that fills nothing takes nothing from one that does.
 void a_reading_naming_nothing_leaves_the_member() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
   for (const std::string_view text : {"bare target+", "bare target-"}) {

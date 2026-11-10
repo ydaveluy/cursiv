@@ -7,10 +7,8 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 
-// What an editor may do about a finding. `textDocument/codeAction` asks over a
-// range and a set of diagnostics; each action carries the edit that performs
-// it, and the client applies it and sends the `didChange` back like any other
-// keystroke.
+// What an editor may do about a finding: each action carries its edit, which
+// the client applies and sends back as a `didChange`.
 
 namespace cursiv {
 

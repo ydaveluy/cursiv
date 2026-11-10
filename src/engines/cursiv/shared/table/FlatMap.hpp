@@ -1,6 +1,5 @@
-// An insert-only map from 64-bit keys, open-addressed, for the generator, the
-// repair search, the runs of conditions and the nested searches. A reference
-// it hands out holds until the next insertion. The key `~0` is not for use.
+// An insert-only, open-addressed map from 64-bit keys. A reference it returns
+// stays valid until the next insertion. The key `~0` is reserved.
 #pragma once
 
 #include <cstddef>
@@ -13,11 +12,15 @@ namespace cursiv::engine {
 template <class V>
 class FlatMap {
  public:
-  // The value at `key` and whether it was just made, as `V{}`.
+  // The value at `key`, and whether it was just created as `V{}`.
   std::pair<V&, bool> emplace(std::uint64_t key) {
-    if (_size * 2 >= _keys.size()) grow();
-    const std::size_t i = slot(key);
+    if (_keys.empty()) grow();
+    std::size_t i = slot(key);
     if (_keys[i] == key) return {_vals[i], false};
+    if (_size * 2 >= _keys.size()) {
+      grow();
+      i = slot(key);
+    }
     _keys[i] = key;
     ++_size;
     return {_vals[i], true};
@@ -30,7 +33,6 @@ class FlatMap {
     _size = 0;
   }
 
-  // The value at `key`, or null.
   V* find(std::uint64_t key) {
     if (_size == 0) return nullptr;
     const std::size_t i = slot(key);

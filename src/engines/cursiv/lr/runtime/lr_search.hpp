@@ -1,7 +1,6 @@
-// The repair search: best-first over the gestures a refused reading can make,
-// each reading read ahead by the cells' own step until three tokens hold it.
-// Among the cheapest, the one read furthest on is elected, and its path is
-// written one gesture per pause.
+// The repair search: best first over the edits a refused reading can make,
+// each read ahead by the cells' own step until three tokens hold it. The
+// cheapest that reads furthest wins, written one edit per pause.
 #pragma once
 
 #include <algorithm>
@@ -14,17 +13,13 @@
 #include <vector>
 
 #include "cursiv/grammar/ElementId.hpp"
-#include "cursiv/syntax-tree/CstNode.hpp"
-#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/lr/runtime/LrCactus.hpp"
-#include "cursiv/lr/runtime/LrCactusClimb.hpp"
+#include "cursiv/lr/runtime/LrCactusView.hpp"
 #include "cursiv/lr/runtime/LrConfig.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/LrDrive.hpp"
+#include "cursiv/lr/runtime/LrEdit.hpp"
 #include "cursiv/lr/runtime/LrExit.hpp"
-#include "cursiv/lr/runtime/LrGesture.hpp"
-#include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/lr/runtime/LrSearch.hpp"
 #include "cursiv/lr/runtime/lr_read.hpp"
 #include "cursiv/lr/runtime/lr_repair_write.hpp"
@@ -32,9 +27,13 @@
 #include "cursiv/lr/runtime/lr_states.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 #include "cursiv/shared/runtime/LexReading.hpp"
+#include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/runtime/RepairFault.hpp"
 #include "cursiv/shared/runtime/TypoWalk.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv::engine {
 
@@ -47,12 +46,12 @@ constexpr std::uint64_t saturating_mul(std::uint64_t a, std::uint64_t b) {
   return a != 0 && b > ~std::uint64_t{0} / a ? ~std::uint64_t{0} : a * b;
 }
 
-// What a link is to the expected set: an arm the drive took is no gesture; a
-// gesture inserts its terminal, or nothing.
-inline std::uint32_t lr_search_kind(const LrGesture& g) {
-  if (g.kind == LrGesture::arm) return TiedInserts::kArm;
-  return g.kind == LrGesture::ins ? std::uint32_t{g.term}
-                                  : std::uint32_t{kNoElement};
+// What a link is to the expected set: an arm the drive took is no edit; a
+// edit inserts its terminal, or nothing.
+inline std::uint32_t lr_search_kind(const LrEdit& g) {
+  if (g.kind == LrEdit::arm) return TiedInserts::kArm;
+  return g.kind == LrEdit::ins ? std::uint32_t{g.term}
+                               : std::uint32_t{kNoElement};
 }
 
 inline bool lr_search_goal(const LrConfig& r) {
@@ -65,10 +64,10 @@ inline void lr_search_queue(LrSearch& s, std::uint32_t f, const LrConfig& r,
           !r.generates() && !lr_search_goal(r) && r.fresh);
 }
 
-// Once a gesture's readings are admitted, the tail no queue entry names is
-// given back; where none is left and none handed its link on, so are the
-// links and cactus nodes they laid, which only they named.
-inline void lr_search_trim(LrSearch& s, const LrSearchLaid& m) {
+// Once an edit's readings are admitted, the tail no queue entry names is
+// given back; where none is left and none passed its link on, so are the
+// links and cactus nodes they added, which only they named.
+inline void lr_search_trim(LrSearch& s, const LrSearchCheckpoint& m) {
   while (s.configs.size() > m.configs && !s.configs.back().queued)
     s.configs.pop_back();
   if (s.configs.size() != m.configs || s.handed != m.handed) return;
@@ -83,15 +82,15 @@ inline void lr_search_admit(LrSearch& s, std::uint32_t i) {
   const std::uint32_t h =
       !lr_search_goal(r) && r.freeInserts == 0 ? kRepairReread : 0;
   const auto [it, fresh] = s.seen.try_emplace(LrSearch::Future::of(r), i);
-  if (!fresh && repair_meet<&LrConfig::freeInserts>(s, s.configs, i, it->second,
-                                                    lr_search_kind))
+  if (!fresh && repair_merge<&LrConfig::freeInserts>(
+                    s, s.configs, i, it->second, lr_search_kind))
     return;
   lr_search_queue(s, r.cost + h, r, i);
 }
 
-// The readings in `s.out` admitted, and what the gesture laid trimmed.
-CURSIV_ALWAYS_INLINE inline void lr_search_admit_out(LrSearch& s,
-                                                     const LrSearchLaid& m) {
+// The readings in `s.out` admitted, and what the edit added trimmed.
+CURSIV_ALWAYS_INLINE inline void lr_search_admit_out(
+    LrSearch& s, const LrSearchCheckpoint& m) {
   for (const std::uint32_t q : s.out) lr_search_admit(s, q);
   lr_search_trim(s, m);
 }
@@ -109,14 +108,14 @@ struct LrSearchPool {
     if (single) return kLrNoFork;
     LrConfig& r = s.configs[i];
     if (r.armNext == 0) {
-      r.link = s.link(LrGesture{.parent = r.link, .held = r.pin});
+      r.link = s.link(LrEdit{.parent = r.link, .held = r.pin});
       r.armNext = 1;
     }
     LrConfig copy = r;
     copy.queued = false;
-    copy.link = s.link(LrGesture{.parent = s.links[copy.link].parent,
-                                 .choice = copy.armNext,
-                                 .held = copy.pin});
+    copy.link = s.link(LrEdit{.parent = s.links[copy.link].parent,
+                              .choice = copy.armNext,
+                              .held = copy.pin});
     ++r.armNext;
     ++s.work;
     const auto j = static_cast<std::uint32_t>(s.configs.size());
@@ -125,12 +124,12 @@ struct LrSearchPool {
     return j;
   }
   void drop(std::size_t j) { s.configs[j].gone = true; }
-  // An action refused leaves the reading as it stood.
+  // An action refused leaves the reading as it was.
   template <class Act>
   bool attempt(std::size_t i, Act act) {
     ++s.work;
     LrConfig& r = s.configs[i];
-    const LrCactusClimb run = r.run;
+    const LrCactusView run = r.run;
     const TextOffset was = r.at;
     if (act(r)) return true;
     r.run = run;
@@ -163,15 +162,15 @@ struct LrSearchPool {
   void stepped() {}
 };
 
-// What the search walked between its units of work since it last paid, at a
+// What the search walked between its units of work since it last counted, at a
 // lexed byte's rate: the bytes the conditions read of long gaps, and the
 // siblings the cactus stepped past.
-inline void lr_search_pay(const LrContext& c, LrSearch& s) {
-  s.work += s.cactus.pay(kRepairLexBytes);
-  const std::uint64_t read = c.gaps.read() - s.gapsPaid;
+inline void lr_search_count_work(const LrContext& c, LrSearch& s) {
+  s.work += s.cactus.stepped_units(kRepairLexBytes);
+  const std::uint64_t read = c.gaps.read() - s.gapsCounted;
   if (read < kRepairLexBytes) return;
   s.work += read / kRepairLexBytes;
-  s.gapsPaid += read - read % kRepairLexBytes;
+  s.gapsCounted += read - read % kRepairLexBytes;
 }
 
 // Its forks go to `s.reading`.
@@ -214,7 +213,7 @@ void lr_search_read(LrContext& c, LrSearch& s, std::uint32_t start,
       }
     }
   }
-  lr_search_pay(c, s);
+  lr_search_count_work(c, s);
 }
 
 // The author's tokens under frozen frame `f`, counted from the top frame down
@@ -247,24 +246,23 @@ inline std::int64_t lr_search_src_tokens(const LrContext& c, LrSearch& s,
 }
 
 inline std::uint32_t lr_search_child(LrSearch& s, std::uint32_t from,
-                                     LrGesture::Kind kind, SymbolId term,
-                                     std::uint32_t end,
-                                     std::uint32_t choice) {
+                                     LrEdit::Kind kind, SymbolId term,
+                                     std::uint32_t end, std::uint32_t choice) {
   s.configs.push_back(s.configs[from]);
   LrConfig& e = s.configs.back();
-  e.link = s.link(LrGesture{.parent = e.link,
-                            .choice = choice,
-                            .kind = kind,
-                            .opens = e.fresh,
-                            .term = term,
-                            .end = end,
-                            .at = e.at,
-                            .la = e.la,
-                            .node = e.run.top(),
-                            .low = e.run.low(),
-                            .cost = e.cost});
+  e.link = s.link(LrEdit{.parent = e.link,
+                         .choice = choice,
+                         .kind = kind,
+                         .opens = e.fresh,
+                         .term = term,
+                         .end = end,
+                         .at = e.at,
+                         .la = e.la,
+                         .node = e.run.top(),
+                         .low = e.run.low(),
+                         .cost = e.cost});
   e.faults += e.fresh ? 1u : 0u;
-  e.gestures += 1;
+  e.edits += 1;
   e.fresh = false;
   e.shifts = 0;
   e.dead = e.gone = e.weighed = e.queued = e.pinDue = false;
@@ -273,16 +271,16 @@ inline std::uint32_t lr_search_child(LrSearch& s, std::uint32_t from,
 }
 
 template <const auto& A>
-inline constexpr auto kLrOwedAnywhere = [] {
+inline constexpr auto kLrAnyClose = [] {
   std::remove_cvref_t<decltype(A.cold.follow[0])> all{};
   for (const auto& row : A.cold.closePool) all |= row;
   return all;
 }();
 
-// A terminal the state shifts outright is owed by the state's own row alone.
+// A terminal the state shifts outright is needed by the state's own row alone.
 template <const auto& A>
-inline bool lr_search_owed_maybe(std::uint32_t state, SymbolId t) {
-  if (!kLrOwedAnywhere<A>.test(t)) return false;
+inline bool lr_search_maybe_required(std::uint32_t state, SymbolId t) {
+  if (!kLrAnyClose<A>.test(t)) return false;
   if (A.cold.close_row(static_cast<std::uint16_t>(state)).test(t)) return true;
   std::uint32_t first = 0;
   unsigned count = 0;
@@ -290,11 +288,11 @@ inline bool lr_search_owed_maybe(std::uint32_t state, SymbolId t) {
   return count != 1 || !lr_takes_token_in<A>(lr_shadow_action<A>(first).kind);
 }
 
-// In a section the token that closes it is owed only where the document ends
+// In a section the token that closes it is needed only where the document ends
 // inside it.
 template <const auto& A>
 inline bool lr_search_insertable(std::uint32_t state, SymbolId t, bool atEnd) {
-  return t != kEofSymbol && A.cfg.terms[t].laid != kLaidImplied &&
+  return t != kEofSymbol && A.cfg.terms[t].synthetic != kSyntheticImplied &&
          (atEnd || t != lr_text_close<A>(state));
 }
 
@@ -347,14 +345,14 @@ LrChain lr_search_chain(const LrCactus& cactus, std::uint32_t top,
 }
 
 // The reductions an invented token makes and the shift that takes it, made on
-// its reading as its steps would make them, at the work they would be charged.
+// its reading as its steps would make them, at the work they would count.
 template <const auto& A>
 void lr_search_forward(LrSearch& s, LrConfig& r, const LrSearch::Chain& ch) {
   const auto stand = [&] {
     const std::uint16_t mode = A.mode[r.run.back()];
     if (r.laMode != mode &&
         (r.laMode == kNoMode || !A.mode_sub(r.laMode, mode) ||
-         lr_has_rivals<A>(mode, r.la.sym))) {
+         lr_has_candidates<A>(mode, r.la.sym))) {
       r.la = r.pinTok;
       r.laMode = mode;
     }
@@ -372,12 +370,12 @@ void lr_search_forward(LrSearch& s, LrConfig& r, const LrSearch::Chain& ch) {
   r.run.push(ch.shift);
   r.laMode = kNoMode;
   if (!r.pin || r.pinRep || !(r.la == r.pinTok)) r.at = r.la.end;
-  r.template shifted<A>(A.cfg.terms[r.la.sym].laid != 0);
+  r.template shifted<A>(A.cfg.terms[r.la.sym].synthetic != 0);
 }
 
-// Its readings go to `s.out`; an owed insertion that goes on a run of them
-// costs nothing. A token the table refuses outright is paid for as reading it
-// would have been, and lays nothing: `kNoGestureLink`.
+// Its readings go to `s.out`; a required insertion that goes on a run of them
+// costs nothing. A token the table refuses outright costs what reading it
+// would have, and adds no link: `kNoEditLink`.
 template <const auto& A>
 std::uint32_t lr_search_insert(LrContext& c, LrSearch& s, std::uint32_t bi,
                                SymbolId term, std::uint32_t choice, bool& due) {
@@ -389,12 +387,11 @@ std::uint32_t lr_search_insert(LrContext& c, LrSearch& s, std::uint32_t bi,
       s.work += 1 + s.chain.attempts;
       s.out.clear();
       due = false;
-      return kNoGestureLink;
+      return kNoEditLink;
     }
     chained = told == LrChain::shifts && s.work + s.chain.n + 1 <= s.limit;
   }
-  const std::uint32_t e =
-      lr_search_child(s, bi, LrGesture::ins, term, 0, choice);
+  const std::uint32_t e = lr_search_child(s, bi, LrEdit::ins, term, 0, choice);
   LrConfig& r = s.configs[e];
   const std::uint64_t free = r.freeInserts;
   const std::uint64_t most = saturating_mul(r.run.size(), A.cold.closeMax);
@@ -409,8 +406,8 @@ std::uint32_t lr_search_insert(LrContext& c, LrSearch& s, std::uint32_t bi,
   for (const std::uint32_t q : s.out) {
     LrConfig& x = s.configs[q];
     const bool cont = x.pinDue && free != 0;
-    x.cost += cont ? 0 : kRepairGesture;
-    x.gestures -= cont ? 1u : 0u;
+    x.cost += cont ? 0 : kRepairEdit;
+    x.edits -= cont ? 1u : 0u;
     if (!x.fresh) {
       x.freeInserts =
           x.pinDue ? (cont ? free - 1 : (most > 0 ? most - 1 : 0)) : 0;
@@ -421,7 +418,7 @@ std::uint32_t lr_search_insert(LrContext& c, LrSearch& s, std::uint32_t bi,
 }
 
 // The terminals a state offers a repair to insert, in the order the grammar
-// wrote them -- those its list names first, then the rest by id -- each with
+// wrote them (those its list names first, then the rest by id), each with
 // its place in that order. `visit` answers whether to go on.
 template <const auto& A, class Visit>
 void lr_each_insert(std::uint32_t state, Visit&& visit) {
@@ -450,23 +447,19 @@ void lr_search_inserts(LrContext& c, LrSearch& s, std::uint32_t gi) {
     const auto term = static_cast<SymbolId>(t);
     if (!lr_search_insertable<A>(state, term,
                                  s.configs[from].la.begin >= c.len) ||
-        lr_search_owed_maybe<A>(state, term))
+        lr_search_maybe_required<A>(state, term))
       return true;
     bool due = false;
-    const LrSearchLaid pools(s);
+    const LrSearchCheckpoint pools(s);
     lr_search_insert<A>(c, s, from, term, rank + k, due);
     lr_search_admit_out(s, pools);
     return true;
   });
 }
 
-// The token in hand as the lexer's refused reading of it. Closed, one
-// re-reading; stopped by its own line's end, every end that cuts no word, the
-// shortest first; open further, its line ends in order up to the first a goal
-// holds after, then the end of the text -- past a line the text resumes at, a
-// token that never closed is not read. A trivia so read is skipped, the
-// author's bytes kept. The ends are found once per search, and only as far as
-// the share lets the readings they open be read.
+// The token in hand as the lexer's refused reading of it, ending where it
+// closes, at each line end that cuts no word, or at the text's end; trivia so
+// read is skipped. The ends are found once per search.
 template <const auto& A>
 void lr_search_lexical(LrContext& c, LrSearch& s, std::uint32_t bi,
                        const Token& written, std::uint32_t& choice) {
@@ -480,10 +473,9 @@ void lr_search_lexical(LrContext& c, LrSearch& s, std::uint32_t bi,
   if (!trivia && (!b.mayReplace() || !A.cold.follow[state].test(r.term)))
     return;
   const auto one = [&](TextOffset end) {
-    const LrSearchLaid pools(s);
-    const std::uint32_t e =
-        lr_search_child(s, bi, trivia ? LrGesture::skip : LrGesture::rep,
-                        r.term, end, choice++);
+    const LrSearchCheckpoint pools(s);
+    const std::uint32_t e = lr_search_child(
+        s, bi, trivia ? LrEdit::skip : LrEdit::rep, r.term, end, choice++);
     LrConfig& x = s.configs[e];
     x.cost += kRepairReread;
     x.freeInserts = 0;
@@ -527,8 +519,9 @@ void lr_search_lexical(LrContext& c, LrSearch& s, std::uint32_t bi,
 // a walk its share cut may have found one.
 template <const auto& A>
 bool lr_search_rereads(LrContext& c, LrSearch& s, const LrConfig& b) {
-  const bool laid = b.la.sym < A.cfg.nterms && A.cfg.terms[b.la.sym].laid != 0;
-  if (b.la.begin >= c.len || laid) return false;
+  const bool synthetic =
+      b.la.sym < A.cfg.nterms && A.cfg.terms[b.la.sym].synthetic != 0;
+  if (b.la.begin >= c.len || synthetic) return false;
   const std::uint32_t state = b.run.back();
   if (lr_search_reading<A>(c, s, A.mode[state], b.la.begin).term !=
       kInvalidSymbol)
@@ -553,11 +546,9 @@ SymbolId lr_search_forced(std::uint32_t state) {
   return static_cast<SymbolId>(t);
 }
 
-// The word in hand read as the keyword its state is forced to, over the span
-// its deletion takes, laid as the entry that stood for it is asked for: one
-// gesture at the price of the deletion and the insertion. Where the
-// misspelling walk reads the keyword over that span, it is read there at a
-// lower price.
+// The word in hand read as the keyword its state is forced to, over its
+// deletion's span: one edit costed as a deletion and an insertion, or lower
+// where the misspelling walk reads it there.
 template <const auto& A>
 void lr_search_replace(LrContext& c, LrSearch& s, std::uint32_t gi) {
   const std::uint32_t from = s.configs[gi].source();
@@ -569,16 +560,14 @@ void lr_search_replace(LrContext& c, LrSearch& s, std::uint32_t gi) {
   const TextOffset end = lr_search_error_end<A>(c, s, mode, la);
   for (const Typo& t : lr_search_typos<A>(c, s, state, la.begin))
     if (t.end == end && t.term == term) return;
-  std::uint64_t read = 0;
-  const LrTypoTape<A> tape{
-      {{.src = c.src, .extent = c.len, .docLen = c.len, .read = &read},
-       la.begin},
-      nullptr,
-      nullptr};
+  // One spelling held against the table: no walk, so nothing to count.
+  const TypoTape<A> tape{
+      {.src = c.src, .extent = c.len, .docLen = c.len, .read = nullptr},
+      la.begin};
   if (lr_search_spent(s) || !tape.replaces(A.modeStart[mode], term, end))
     return;
-  const LrSearchLaid pools(s);
-  const std::uint32_t e = lr_search_child(s, from, LrGesture::rep, term, end,
+  const LrSearchCheckpoint pools(s);
+  const std::uint32_t e = lr_search_child(s, from, LrEdit::rep, term, end,
                                           s.configs[gi].insertRank());
   LrConfig& r = s.configs[e];
   lr_pin(r, term, true, end, written, mode);
@@ -588,7 +577,7 @@ void lr_search_replace(LrContext& c, LrSearch& s, std::uint32_t gi) {
   lr_search_admit_out(s, pools);
 }
 
-// The gestures the canonical form admits, in rank order: re-readings, owed
+// The edits the canonical form admits, in rank order: re-readings, required
 // insertions, the others, the drop, and the abandons one depth at a time.
 template <const auto& A>
 void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
@@ -596,28 +585,29 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
   const std::uint32_t state = b.run.back();
   const std::uint16_t mode = A.mode[state];
   const bool atEnd = b.la.begin >= c.len;
-  const bool laid = b.la.sym < A.cfg.nterms && A.cfg.terms[b.la.sym].laid != 0;
+  const bool synthetic =
+      b.la.sym < A.cfg.nterms && A.cfg.terms[b.la.sym].synthetic != 0;
   std::uint32_t choice = 0;
-  // The generator pays the fault it opens here, and the least its gestures
+  // The generator counts the fault it opens here, and the least its edits
   // cost: queued, it is not counted again.
-  const auto defer = [&](LrConfig g, std::uint32_t price) {
-    g.cost += price;
-    g.gestures += 1;
+  const auto defer = [&](LrConfig g, std::uint32_t extra) {
+    g.cost += extra;
+    g.edits += 1;
     g.faults += b.fresh ? 1u : 0u;
     s.configs.push_back(g);
     lr_search_queue(s, g.cost, g,
                     static_cast<std::uint32_t>(s.configs.size()) - 1);
   };
   const Token written = lr_search_written<A>(c, s, b.la, mode);
-  if (!atEnd && !laid) lr_search_lexical<A>(c, s, bi, written, choice);
-  if (b.mayReplace() && !atEnd && !laid) {
+  if (!atEnd && !synthetic) lr_search_lexical<A>(c, s, bi, written, choice);
+  if (b.mayReplace() && !atEnd && !synthetic) {
     for (const Typo& t : lr_search_typos<A>(c, s, state, b.la.begin)) {
       if (lr_search_spent(s)) break;
       if (t.term == lr_text_close<A>(state)) continue;
       ++s.work;
-      const LrSearchLaid pools(s);
+      const LrSearchCheckpoint pools(s);
       const std::uint32_t e =
-          lr_search_child(s, bi, LrGesture::rep, t.term, t.end, choice++);
+          lr_search_child(s, bi, LrEdit::rep, t.term, t.end, choice++);
       LrConfig& r = s.configs[e];
       lr_pin(r, t.term, true, t.end, written, mode);
       r.cost += t.cost;
@@ -627,79 +617,79 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
     }
   }
   // A word in place of the keyword its state is forced to, unlike it, waits
-  // behind one entry, at the price of its deletion and the keyword's
+  // behind one entry, at the cost of its deletion and the keyword's
   // insertion.
-  if (b.mayReplace() && !atEnd && !laid && written.sym != kInvalidSymbol &&
+  if (b.mayReplace() && !atEnd && !synthetic && written.sym != kInvalidSymbol &&
       written.sym != lr_text_close<A>(state) &&
       lex_boundary(A.cfg).word_at(c.src, b.la.begin, c.len) &&
       lr_search_forced<A>(state) != kInvalidSymbol)
     defer(LrConfig::replaceGenerator(b, bi, choice), kRepairReplace);
   ++choice;
-  // Bytes no mode reads refuse every reading alike: insertions in front of
+  // Bytes no mode reads refuse every reading the same: insertions in front of
   // them are told apart only past them, so one is made there, never a run.
   const bool garbage =
-      !atEnd && !laid && written.sym == kInvalidSymbol &&
+      !atEnd && !synthetic && written.sym == kInvalidSymbol &&
       lr_search_reading<A>(c, s, mode, b.la.begin).term == kInvalidSymbol;
   if (b.mayInsert(garbage)) {
-    // Only an owed run costs nothing past its first, so the terminals that
-    // cannot be owed wait behind one entry until a reading that dear is asked
-    // for.
+    // Only a required run costs nothing past its first, so the terminals that
+    // cannot be required wait behind one entry until a reading that costly is
+    // asked for.
     const std::uint32_t insertRank = choice;
     bool deferred = false;
     lr_each_insert<A>(state, [&](unsigned t, unsigned k) {
       const auto term = static_cast<SymbolId>(t);
       if (!lr_search_insertable<A>(state, term, atEnd)) return true;
       if (lr_search_spent(s)) return false;
-      if (!lr_search_owed_maybe<A>(state, term)) {
+      if (!lr_search_maybe_required<A>(state, term)) {
         deferred = true;
         return true;
       }
       bool due = false;
-      const LrSearchLaid pools(s);
+      const LrSearchCheckpoint pools(s);
       const std::uint32_t link =
           lr_search_insert<A>(c, s, bi, term, insertRank + k, due);
-      if (!due && link != kNoGestureLink) s.links[link].choice += A.cfg.nterms;
+      if (!due && link != kNoEditLink) s.links[link].choice += A.cfg.nterms;
       lr_search_admit_out(s, pools);
       return true;
     });
     // Ranks need order, not consecutive values: two terminal-sized ranges
-    // put owed insertions first, then all others in declaration order.
+    // put required insertions first, then all others in declaration order.
     choice += 2u * A.cfg.nterms;
     if (deferred) {
       LrConfig g = LrConfig::insertGenerator(b, bi, insertRank + A.cfg.nterms);
       g.invented += 1;
-      defer(g, kRepairGesture);
+      defer(g, kRepairEdit);
     }
   }
   if (!atEnd && written.sym != lr_text_close<A>(state)) {
     const TextOffset end = lr_search_error_end<A>(c, s, mode, b.la);
-    const LrSearchLaid pools(s);
+    const LrSearchCheckpoint pools(s);
     const std::uint32_t e =
-        lr_search_child(s, bi, LrGesture::del, 0, end, choice++);
+        lr_search_child(s, bi, LrEdit::del, 0, end, choice++);
     LrConfig& r = s.configs[e];
     lr_drop_levels<A>(c, r.virt, r.indent, b.la);
     if (end > r.at) r.at = end;
     if constexpr (kLrConditioned<A>)
       if (end != b.la.begin) r.virt.from = end;
     r.laMode = kNoMode;
-    r.cost += kRepairGesture;
-    r.lost += laid ? 0u : 1u;
+    r.cost += kRepairEdit;
+    r.lost += synthetic ? 0u : 1u;
     r.phase = LrRepairPhase::discardOnly;
     r.freeInserts = 0;
     lr_search_read<A>(c, s, e);
     lr_search_admit_out(s, pools);
   }
-  // Bytes no terminal reads no state takes: giving up frames lays nothing.
+  // Bytes no terminal reads no state takes: giving up frames makes nothing.
   if (b.mayAbandon() && b.run.size() > 1 && b.la.sym < A.cfg.nterms) {
     LrConfig g = LrConfig::abandonGenerator(
         b, bi, b.run.size() - 1, b.run.top(), b.run.begin_node(), choice);
     g.lost += 1;
-    defer(g, kRepairGesture);
+    defer(g, kRepairEdit);
   }
 }
 
 // The shallowest abandon left that gives up text and whose state takes the
-// token in hand: laid at the cost it was queued at, else queued at its own.
+// token in hand: made at the cost it was queued at, else queued at its own.
 template <const auto& A>
 void lr_search_abandon(LrContext& c, LrSearch& s, std::uint32_t gi,
                        std::uint32_t f) {
@@ -727,25 +717,26 @@ void lr_search_abandon(LrContext& c, LrSearch& s, std::uint32_t gi,
     const std::uint32_t below = s.cactus.parent(node);
     if (!A.cold.follow[s.cactus.state(below)].test(la)) continue;
     const std::int64_t at = s.cactus.begin_of(begin);
-    // Counted only as far as this cost could pay: past it, a floor.
+    // Counted only as far as this cost reaches: past it, a floor.
     const std::int64_t lost =
-        at >= 0 ? tokens - at
-                : tokens + lr_search_src_tokens(
-                               c, s, static_cast<std::uint32_t>(-1 - at),
-                               std::max<std::int64_t>(
-                                   (std::int64_t{f} - baseCost) / kRepairGesture -
-                                       tokens,
-                                   0));
+        at >= 0
+            ? tokens - at
+            : tokens +
+                  lr_search_src_tokens(
+                      c, s, static_cast<std::uint32_t>(-1 - at),
+                      std::max<std::int64_t>(
+                          (std::int64_t{f} - baseCost) / kRepairEdit - tokens,
+                          0));
     if (lost < 1) continue;
-    const auto cost = static_cast<std::uint32_t>(baseCost + lost * kRepairGesture);
+    const auto cost = static_cast<std::uint32_t>(baseCost + lost * kRepairEdit);
     const auto lostAll = static_cast<std::uint32_t>(baseLost + lost);
     if (cost > f) {
       requeue(keep, node, begin, cost, lostAll);
       return;
     }
-    const LrSearchLaid pools(s);
-    const std::uint32_t e = lr_search_child(s, g.source(), LrGesture::abandon,
-                                            0, keep, g.armNext++);
+    const LrSearchCheckpoint pools(s);
+    const std::uint32_t e =
+        lr_search_child(s, g.source(), LrEdit::abandon, 0, keep, g.armNext++);
     LrConfig& r = s.configs[e];
     r.run.truncate(r.run.size() - keep);
     r.cost = cost;
@@ -761,12 +752,10 @@ void lr_search_abandon(LrContext& c, LrSearch& s, std::uint32_t gi,
   }
 }
 
-// The goals read on with no gesture: `reach[k]` is where candidate `k`'s
-// furthest reading was refused, or `kRepairReachAll`. The reading furthest back
-// steps, so two bound for one future meet and go on as one; settled once
-// every reading still going stands for the same candidates past every other's
-// refusal, or after `kRepairRaceSteps` steps that read a token. True where the
-// search's share ran out first.
+// The goals read on with no edit: `reach[k]` is where candidate `k`'s
+// furthest reading was refused, past the blanks the indentation reads there, or
+// `kRepairReachAll`. The reading furthest back steps, until all agree or
+// `kRepairRaceSteps` pass. True if the share ran out.
 template <const auto& A>
 bool lr_search_race(LrContext& c, LrSearch& s,
                     const std::vector<std::uint32_t>& of,
@@ -795,7 +784,7 @@ bool lr_search_race(LrContext& c, LrSearch& s,
     queue.push_back(static_cast<std::uint32_t>(runners.size()) - 1);
     std::ranges::push_heap(queue, behind);
   }
-  const auto settle = [&](const std::vector<std::uint32_t>& ks) {
+  const auto reach_all = [&](const std::vector<std::uint32_t>& ks) {
     for (const std::uint32_t k : ks) reach[k] = kRepairReachAll;
   };
   const auto level = [&] {
@@ -810,21 +799,24 @@ bool lr_search_race(LrContext& c, LrSearch& s,
         return false;
     return true;
   };
-  LrSearch::Futures met(0, s.seen.hash_function(), s.seen.key_eq());
+  LrSearch::Futures waiting(0, s.seen.hash_function(), s.seen.key_eq());
   // Only at a token boundary can a reading join the one waiting on its future.
   const auto place = [&](std::uint32_t w, std::int64_t at) {
     const LrConfig& q = s.configs[runners[w].cfg];
     if (q.gone || q.dead) {
+      TextOffset refused = q.la.begin;
+      if constexpr (kIndented<A.cfg>)
+        refused = indent_run(c.src, refused, c.len).stop;
       for (const std::uint32_t k : runners[w].of)
-        reach[k] = std::max(reach[k], q.la.begin);
+        reach[k] = std::max(reach[k], refused);
       return;
     }
     if (q.done) {
-      settle(runners[w].of);
+      reach_all(runners[w].of);
       return;
     }
     if (q.run.tokens() != at) {
-      const auto [it, fresh] = met.try_emplace(LrSearch::Future::of(q), w);
+      const auto [it, fresh] = waiting.try_emplace(LrSearch::Future::of(q), w);
       if (!fresh) {
         std::vector<std::uint32_t> both;
         std::ranges::set_union(runners[it->second].of, runners[w].of,
@@ -840,22 +832,22 @@ bool lr_search_race(LrContext& c, LrSearch& s,
   std::uint32_t steps = 0;
   while (!queue.empty()) {
     c.stop.poll();
-    const bool settled = steps > kRepairRaceSteps || level();
-    if (settled || s.work > s.limit) {
-      for (const std::uint32_t q : queue) settle(runners[q].of);
-      return !settled;
+    const bool decided = steps > kRepairRaceSteps || level();
+    if (decided || s.work > s.limit) {
+      for (const std::uint32_t q : queue) reach_all(runners[q].of);
+      return !decided;
     }
     std::ranges::pop_heap(queue, behind);
     const std::uint32_t w = queue.back();
     queue.pop_back();
     const std::uint32_t i = runners[w].cfg;
-    if (const auto it = met.find(LrSearch::Future::of(s.configs[i]));
-        it != met.end() && it->second == w)
-      met.erase(it);
+    if (const auto it = waiting.find(LrSearch::Future::of(s.configs[i]));
+        it != waiting.end() && it->second == w)
+      waiting.erase(it);
     const std::int64_t at = s.configs[i].run.tokens();
     s.reading.clear();
     lr_search_step<A>(c, x, i);
-    lr_search_pay(c, s);
+    lr_search_count_work(c, s);
     if (s.configs[i].run.tokens() != at) ++steps;
     for (const std::uint32_t j : s.reading) {
       runners.push_back(Runner{j, runners[w].of});
@@ -866,47 +858,48 @@ bool lr_search_race(LrContext& c, LrSearch& s,
   return false;
 }
 
-// An arm the drive takes on its own is no gesture; one taken while an invented
+// An arm the drive takes on its own is no edit; one taken while an invented
 // token is in hand is the writer's, and so the path's.
-inline bool lr_same_gestures(const std::vector<LrGesture>& links,
-                             std::uint32_t a, std::uint32_t b) {
+inline bool lr_same_edits(const std::vector<LrEdit>& links, std::uint32_t a,
+                          std::uint32_t b) {
   const auto drives = [&](std::uint32_t l) {
-    return l != kNoGestureLink && links[l].kind == LrGesture::arm &&
-           !links[l].held && links[l].parent != kNoGestureLink;
+    return l != kNoEditLink && links[l].kind == LrEdit::arm && !links[l].held &&
+           links[l].parent != kNoEditLink;
   };
   for (;;) {
     while (drives(a)) a = links[a].parent;
     while (drives(b)) b = links[b].parent;
     if (a == b) return true;
-    if (a == kNoGestureLink || b == kNoGestureLink) return false;
-    const LrGesture& x = links[a];
-    const LrGesture& y = links[b];
-    if (x.parent == kNoGestureLink || y.parent == kNoGestureLink || x.kind != y.kind ||
-        x.term != y.term || x.end != y.end || x.at != y.at || !(x.la == y.la) ||
-        (x.kind == LrGesture::arm && x.choice != y.choice))
+    if (a == kNoEditLink || b == kNoEditLink) return false;
+    const LrEdit& x = links[a];
+    const LrEdit& y = links[b];
+    if (x.parent == kNoEditLink || y.parent == kNoEditLink ||
+        x.kind != y.kind || x.term != y.term || x.end != y.end ||
+        x.at != y.at || !(x.la == y.la) ||
+        (x.kind == LrEdit::arm && x.choice != y.choice))
       return false;
     a = x.parent;
     b = y.parent;
   }
 }
 
-// Two paths that make the same gestures fold alike.
-inline std::uint64_t lr_gestures_fold(const std::vector<LrGesture>& links,
-                                      std::uint32_t l) {
+// Two paths that make the same edits fold the same.
+inline std::uint64_t lr_edits_fold(const std::vector<LrEdit>& links,
+                                   std::uint32_t l) {
   std::uint64_t h = 0;
-  for (; links[l].parent != kNoGestureLink; l = links[l].parent) {
-    const LrGesture& g = links[l];
-    if (g.kind == LrGesture::arm && !g.held) continue;
+  for (; links[l].parent != kNoEditLink; l = links[l].parent) {
+    const LrEdit& g = links[l];
+    if (g.kind == LrEdit::arm && !g.held) continue;
     const std::uint64_t v =
         (std::uint64_t{g.kind} << 56) ^ (std::uint64_t{g.term} << 40) ^
-        (std::uint64_t{g.la.sym} << 24) ^ (std::uint64_t{g.end} << 20) ^
-        g.at ^ (g.kind == LrGesture::arm ? std::uint64_t{g.choice} << 48 : 0);
+        (std::uint64_t{g.la.sym} << 24) ^ (std::uint64_t{g.end} << 20) ^ g.at ^
+        (g.kind == LrEdit::arm ? std::uint64_t{g.choice} << 48 : 0);
     h = (h ^ v) * 0x100000001b3ull;
   }
   return (h ^ l) * 0x100000001b3ull;
 }
 
-// A plan names nodes of the cactus it was elected on: a search that lays
+// A plan names nodes of the cactus it was elected on: a search that makes
 // another drops it.
 inline void lr_search_reset(LrSearch& s) {
   const auto clear = [](auto&... x) { (x.clear(), ...); };
@@ -915,14 +908,14 @@ inline void lr_search_reset(LrSearch& s) {
   clear(s.sources, s.configs, s.seen, s.srcTokens, s.lexed, s.readings, s.ends,
         s.typos, s.written, s.ahead, s.misread, s.plan, s.planArms);
   s.errorEnds.reset();
-  s.owes.reset();
+  s.costAhead.reset();
   s.unread.reset();
   s.next = 0;
   s.horizon = 0;
 }
 
-// A root is refused, so it owes at least one gesture. Laying its frames is paid
-// as reading that many bytes is.
+// A root is refused, so it costs at least one edit. Adding its frames costs
+// as much as reading that many bytes.
 template <class Reading>
 void lr_search_root(LrSearch& s, const Reading& v, TextOffset at,
                     const LrStack& frames, NodeCount len, std::uint32_t choice,
@@ -931,13 +924,13 @@ void lr_search_root(LrSearch& s, const Reading& v, TextOffset at,
   const LrCactus::Top top = s.cactus.add(frames, src);
   s.work += frames.size() / kRepairLexBytes;
   LrConfig root;
-  root.run = LrCactusClimb(s.cactus, top);
+  root.run = LrCactusView(s.cactus, top);
   root.at = at;
   root.la = v.la;
   root.laMode = v.laMode;
   root.virt = v.virt;
   root.indent = v.indent;
-  root.link = s.link(LrGesture{.choice = choice});
+  root.link = s.link(LrEdit{.choice = choice});
   root.fresh = fresh;
   s.sources.push_back(LrSearch::Source{.frames = &frames, .scanned = len});
   s.horizon = std::max(s.horizon, v.la.begin + kLrBoundReach);
@@ -948,7 +941,7 @@ void lr_search_root(LrSearch& s, const Reading& v, TextOffset at,
 
 inline void lr_search_start(const LrContext& c, LrSearch& s) {
   lr_search_reset(s);
-  s.paidBase = c.cost;
+  s.costBase = c.cost;
   // A fault a stopped search left open goes on.
   lr_search_root(s, c, c.committed, c.stack, c.tape.len(), 0, !s.fault.open);
 }
@@ -957,7 +950,7 @@ inline void lr_search_start(const LrContext& c, LrSearch& s) {
 template <const auto& A>
 std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
                             bool& raced) {
-  s.gapsPaid = c.gaps.read();
+  s.gapsCounted = c.gaps.read();
   std::uint32_t level = 0;
   std::uint64_t levelWork = s.work;
   bool bounds = false;
@@ -976,8 +969,8 @@ std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
     // stay in the search so their ranks and alternative insertions survive.
     if (finished != kNone) {
       const auto& g = s.configs[finished];
-      if (std::array{e.f, e.lost, e.gestures, e.faults, e.invented} >
-          std::array{g.cost, g.lost, g.gestures, g.faults, g.invented})
+      if (std::array{e.f, e.lost, e.edits, e.faults, e.invented} >
+          std::array{g.cost, g.lost, g.edits, g.faults, g.invented})
         break;
     }
     if (s.work > s.limit) {
@@ -1006,15 +999,15 @@ std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
       continue;
     }
     if (furthest == kNone || x.at > s.configs[furthest].at) furthest = e.at;
-    // Queued as if a re-reading went on from it: where none does, it owes a
-    // whole gesture.
-    if (x.freeInserts == 0 && e.f < x.cost + kRepairGesture &&
+    // Queued as if a re-reading went on from it: where none does, it costs a
+    // whole edit.
+    if (x.freeInserts == 0 && e.f < x.cost + kRepairEdit &&
         !lr_search_rereads<A>(c, s, x)) {
-      lr_search_queue(s, x.cost + kRepairGesture, x, e.at, e.lost - x.lost);
+      lr_search_queue(s, x.cost + kRepairEdit, x, e.at, e.lost - x.lost);
       continue;
     }
     // Past `boundAfter` of work at one cost, each reading is bounded once and
-    // waits if it owes more than it was queued at.
+    // waits if it costs more than it was queued at.
     if (e.f != level) {
       level = e.f;
       levelWork = s.work;
@@ -1022,9 +1015,9 @@ std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
     bounds = bounds || s.work - levelWork >= s.boundAfter;
     if (bounds && !x.weighed) {
       s.configs[e.at].weighed = true;
-      const std::uint32_t owed = lr_search_bound<A>(c, s, x);
-      const std::uint32_t f = x.cost + owed / kLrPaid;
-      const std::uint32_t lost = owed % kLrPaid;
+      const std::uint32_t bound = lr_search_bound<A>(c, s, x);
+      const std::uint32_t f = x.cost + bound / kLrCostScale;
+      const std::uint32_t lost = bound % kLrCostScale;
       if (f > e.f || (f == e.f && x.lost + lost > e.lost)) {
         lr_search_queue(s, f, s.configs[e.at], e.at, lost);
         continue;
@@ -1036,8 +1029,8 @@ std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
   // decided, even where the bucket emptied.
   exhausted = exhausted || s.work > s.limit;
   if (s.goals.empty()) return furthest;
-  return repair_elect<lr_gestures_fold, lr_same_gestures, lr_search_kind>(
-      s, s.configs, true, [&](const auto& of, auto& reach) {
+  return repair_elect<lr_edits_fold, lr_same_edits, lr_search_kind>(
+      s, s.configs, true, c.stop, [&](const auto& of, auto& reach) {
         raced = lr_search_race<A>(c, s, of, reach);
       });
 }
@@ -1048,15 +1041,16 @@ inline void lr_search_plan(const LrContext& c, LrSearch& s, std::uint32_t ci,
                            bool open) {
   std::vector<std::uint32_t> path;
   for (std::uint32_t l = s.configs[ci].link;
-       l != kNoGestureLink && s.links[l].parent != kNoGestureLink; l = s.links[l].parent) {
+       l != kNoEditLink && s.links[l].parent != kNoEditLink;
+       l = s.links[l].parent) {
     path.push_back(l);
   }
   s.plan.clear();
   s.planArms.clear();
   s.next = 0;
   for (std::size_t k = path.size(); k-- > 0;) {
-    const LrGesture& g = s.links[path[k]];
-    if (g.kind != LrGesture::arm) {
+    const LrEdit& g = s.links[path[k]];
+    if (g.kind != LrEdit::arm) {
       LrSearch::Step st;
       st.g = g;
       st.armBase = static_cast<std::uint32_t>(s.planArms.size());
@@ -1069,22 +1063,22 @@ inline void lr_search_plan(const LrContext& c, LrSearch& s, std::uint32_t ci,
   for (std::size_t k = 0; k < s.plan.size(); ++k) {
     LrSearch::Step& st = s.plan[k];
     st.closes = k + 1 == s.plan.size() || s.plan[k + 1].g.opens;
-    st.before = s.paidBase + st.g.cost;
-    st.paid = (k + 1 < s.plan.size() ? s.plan[k + 1].g.cost
-                                     : s.configs[ci].cost) -
-              st.g.cost;
+    st.before = s.costBase + st.g.cost;
+    st.stepCost =
+        (k + 1 < s.plan.size() ? s.plan[k + 1].g.cost : s.configs[ci].cost) -
+        st.g.cost;
     st.kept = c.stack[std::max(st.g.low, 1u) - 1];
   }
   if (open && !s.plan.empty() && !lr_search_goal(s.configs[ci]))
     s.plan.back().closes = false;
-  if (!s.plan.empty() && s.plan[0].g.kind == LrGesture::ins)
+  if (!s.plan.empty() && s.plan[0].g.kind == LrEdit::ins)
     std::erase(s.also, static_cast<ElementId>(s.plan[0].g.term));
   else
     s.also.clear();
 }
 
-// The pause a step was made at: the token in hand, what was paid, and the
-// stack above the frames its reading never moved -- read only as deep as it
+// The pause a step was made at: the token in hand, what it cost, and the
+// stack above the frames its reading never moved, read only as deep as it
 // went, so a run of steps costs what they read.
 inline bool lr_search_holds(const LrContext& c, const LrSearch& s,
                             const LrSearch::Step& st) {
@@ -1108,16 +1102,16 @@ inline void lr_search_note(LrContext& c, LrSearch& s) {
   if (!f.open) return;
   RepairNote n = repair_note(f);
   assert((c.notes.empty() || c.notes.back().end <= n.end) &&
-         "a reading never lays a note behind the last one");
+         "a reading never adds a note behind the last one");
   if (s.bounded && n.begin < s.boundedBegin) s.boundedBegin = n.begin;
   c.notes.push_back(std::move(n));
   f = RepairFault{};
 }
 
-// What a construct abandoned in `state` owed: nothing named where its row is
-// empty.
+// What a construct abandoned in `state` still needed: nothing named where its
+// row is empty.
 template <const auto& A>
-ElementId lr_search_owed(std::uint32_t state) {
+ElementId lr_search_missing(std::uint32_t state) {
   const auto& row = A.cold.close_row(static_cast<std::uint16_t>(state));
   const unsigned t = row.first();
   return t < A.cfg.nterms ? static_cast<ElementId>(t) : kNoElement;
@@ -1137,7 +1131,7 @@ bool lr_search_write(LrContext& c, LrSearch& s, const LrSearch::Step& st,
   }
   const std::uint32_t state = c.stack.top().state;
   switch (st.g.kind) {
-    case LrGesture::ins:
+    case LrEdit::ins:
       if (!lr_write_token<A>(c, st.g.term, false, 0, Token{},
                              s.planArms.data() + st.armBase, st.armCount))
         return false;
@@ -1147,7 +1141,7 @@ bool lr_search_write(LrContext& c, LrSearch& s, const LrSearch::Step& st,
         if (first) f.also = s.also;
       }
       break;
-    case LrGesture::rep: {
+    case LrEdit::rep: {
       Token written = c.la;
       // Only conditions can inspect the original token during replay.
       if constexpr (kLrConditioned<A>)
@@ -1162,16 +1156,22 @@ bool lr_search_write(LrContext& c, LrSearch& s, const LrSearch::Step& st,
       f.end = st.g.end;
       break;
     }
-    case LrGesture::skip:
+    case LrEdit::skip:
       if (!f.del && !f.abandon) f.begin = c.la.begin;
       f.rep = true;
       f.read = static_cast<ElementId>(st.g.term);
       lr_write_skip<A>(c, st.g.term, st.g.end);
       f.end = st.g.end;
       break;
-    case LrGesture::del: {
+    case LrEdit::del: {
       const TextOffset end = lr_error_end<A>(c, A.mode[state], c.la);
-      if (!f.del && !f.abandon) f.begin = c.la.begin;
+      if (!f.del && !f.abandon) {
+        f.begin = c.la.begin;
+        if constexpr (kIndented<A.cfg>)
+          f.mixedIndent =
+              indent_refused(c.src, c.len, c.indentArena, c.indent, c.committed,
+                             c.la, [&c] { return c.tape.held(); });
+      }
       f.del = true;
       lr_write_delete<A>(c, end);
       f.end = c.committed;
@@ -1182,8 +1182,8 @@ bool lr_search_write(LrContext& c, LrSearch& s, const LrSearch::Step& st,
               .sym);
       break;
     }
-    case LrGesture::abandon: {
-      f.owed = lr_search_owed<A>(state);
+    case LrEdit::abandon: {
+      f.missing = lr_search_missing<A>(state);
       f.abandon = true;
       f.begin = st.g.end < c.stack.size() ? c.stack[st.g.end].begin
                                           : c.committed;
@@ -1191,10 +1191,10 @@ bool lr_search_write(LrContext& c, LrSearch& s, const LrSearch::Step& st,
       f.end = c.committed;
       break;
     }
-    case LrGesture::arm:
+    case LrEdit::arm:
       break;
   }
-  c.cost += st.paid;
+  c.cost += st.stepCost;
   s.wroteShifts = c.shifts;
   if (st.closes) lr_search_note(c, s);
   return true;
@@ -1227,18 +1227,14 @@ inline LrExit lr_search_wrote(LrContext& c, LrSearch& s) {
   return lr_resume(c);
 }
 
-// At the end of the text, the owed insertions one reading makes in a row,
-// each the first the state's row offers that its own shift owes -- decided on
-// the arm the writer takes, the first wherever the table forks -- until the
-// reading accepts, owes nothing, or the run reaches its bound. The reading is
-// `configs[0]`, moved on from step to step: an attempt that is not its next
-// step leaves nothing behind, and what stands behind it is the plan's links.
-// Whether it made any.
+// At the end of the text, the insertions `configs[0]` still needs, in a row:
+// each the first its row offers that its shift needs, until it accepts, needs
+// nothing or reaches the bound. Whether it made any.
 template <const auto& A>
 bool lr_search_closers(LrContext& c, LrSearch& s) {
   lr_search_start(c, s);
   s.limit = s.degradedLimit;
-  s.gapsPaid = c.gaps.read();
+  s.gapsCounted = c.gaps.read();
   bool closed = false;
   while (!s.configs[0].done) {
     c.stop.poll();
@@ -1252,13 +1248,13 @@ bool lr_search_closers(LrContext& c, LrSearch& s) {
       const auto term = static_cast<SymbolId>(t);
       if (!lr_search_insertable<A>(s.configs[0].run.back(), term,
                                    s.configs[0].la.begin >= c.len) ||
-          !lr_search_owed_maybe<A>(s.configs[0].run.back(), term))
+          !lr_search_maybe_required<A>(s.configs[0].run.back(), term))
         return true;
-      const LrSearchLaid pools(s);
-      const std::uint32_t e = lr_search_child(s, 0, LrGesture::ins, term, 0, 0);
+      const LrSearchCheckpoint pools(s);
+      const std::uint32_t e = lr_search_child(s, 0, LrEdit::ins, term, 0, 0);
       LrConfig& r = s.configs[e];
       lr_pin(r, term, false, 0, Token{}, A.mode[r.run.back()]);
-      r.cost += kRepairGesture;
+      r.cost += kRepairEdit;
       r.invented += 1;
       r.phase = LrRepairPhase::inserting;
       // The reading itself goes on as the first arm at every fork: the
@@ -1281,7 +1277,7 @@ bool lr_search_closers(LrContext& c, LrSearch& s) {
   return closed;
 }
 
-// The first gesture that holds: the token dropped, or at the end the owed
+// The first edit that holds: the token dropped, or at the end the required
 // insertions, else a wrap. Each widens the span a bound decided.
 template <const auto& A>
 LrExit lr_search_degraded(LrContext& c, LrSearch& s) {
@@ -1293,8 +1289,8 @@ LrExit lr_search_degraded(LrContext& c, LrSearch& s) {
   const std::uint32_t state = c.stack.top().state;
   if (c.la.begin < c.len) {
     LrSearch::Step st;
-    st.paid = kRepairGesture;
-    st.g.kind = LrGesture::del;
+    st.stepCost = kRepairEdit;
+    st.g.kind = LrEdit::del;
     lr_search_write<A>(c, s, st, false);
     s.degradedShifts = c.shifts;
     s.boundedEnd = c.committed;
@@ -1303,7 +1299,7 @@ LrExit lr_search_degraded(LrContext& c, LrSearch& s) {
   if (s.degradedAt != c.committed) {
     s.degradedAt = c.committed;
     s.degradedRun = 0;
-    // What one search may hold: the completion a grammar owes can be as long
+    // What one search may hold: the completion a grammar needs can be as long
     // as its rules say, and the plan holds a step for each insertion.
     s.degradedCap = std::min(
         saturating_mul(c.stack.size(), saturating_add(A.cold.closeMax, 1)),
@@ -1321,10 +1317,10 @@ LrExit lr_search_degraded(LrContext& c, LrSearch& s) {
   RepairFault& f = s.fault;
   f.open = true;
   f.abandon = true;
-  f.owed = lr_search_owed<A>(state);
+  f.missing = lr_search_missing<A>(state);
   f.begin = c.stack.size() > 1 ? c.stack[1].begin : c.committed;
   lr_write_abandon<A>(c, 1, A.cfg.entryRow);
-  c.cost += kRepairGesture;
+  c.cost += kRepairEdit;
   f.end = c.committed;
   lr_search_note(c, s);
   s.boundedEnd = c.committed;
@@ -1332,15 +1328,14 @@ LrExit lr_search_degraded(LrContext& c, LrSearch& s) {
   return LrExit::accept;
 }
 
-// A pause the reading goes on from without a search, `e` where it stops
-// next: a dedent the end hands over for a level whose indent a repair dropped
-// is a blank, and the plan's next step is taken where it was made. A pause
-// it was not made at drops the plan.
+// A pause the reading goes on from without a search, `e` where it stops next: a
+// dedent the end hands over for a level a repair dropped is a blank. The plan's
+// next step is taken where it was made; elsewhere the plan is dropped.
 template <const auto& A>
 bool lr_search_goes_on(LrContext& c, LrSearch& s, LrExit& e) {
-  if constexpr (kLaid<A.cfg, kLaidDedent> != 0) {
-    if (c.la.sym == kLaid<A.cfg, kLaidDedent> && c.indent.head != kNoIndent &&
-        c.indentArena[c.indent.head].mute) {
+  if constexpr (kSyntheticTerm<A.cfg, kSyntheticDedent> != 0) {
+    if (c.la.sym == kSyntheticTerm<A.cfg, kSyntheticDedent> &&
+        c.indent.head != kNoIndent && c.indentArena[c.indent.head].mute) {
       c.indent.head = indent_unmute(c.indentArena, c.indent.head);
       c.laMode = kNoMode;
       e = lr_resume(c);
@@ -1363,7 +1358,7 @@ bool lr_search_goes_on(LrContext& c, LrSearch& s, LrExit& e) {
 }
 
 // The first step written, the rest planned; where there is none, or the table
-// refuses it, the first gesture that holds.
+// refuses it, the first edit that holds.
 template <const auto& A>
 LrExit lr_search_take(LrContext& c, LrSearch& s, std::uint32_t elected,
                       bool exhausted, bool raced, bool open) {
@@ -1372,7 +1367,7 @@ LrExit lr_search_take(LrContext& c, LrSearch& s, std::uint32_t elected,
     ++c.stats.budgetStops;
   else if (raced)
     ++c.stats.reachStops;
-  if (exhausted || raced) lr_search_open(s, from, s.paidBase + kRepairReread);
+  if (exhausted || raced) lr_search_open(s, from, s.costBase + kRepairReread);
   // Only the parse's budget leaves the pauses after it unsearched, whatever
   // stopped the search that spent it.
   s.degraded = s.work > s.budget;
@@ -1387,7 +1382,7 @@ LrExit lr_search_take(LrContext& c, LrSearch& s, std::uint32_t elected,
     s.next = 0;
     s.degraded = true;
   }
-  lr_search_open(s, from, s.paidBase + kRepairReread);
+  lr_search_open(s, from, s.costBase + kRepairReread);
   return lr_search_degraded<A>(c, s);
 }
 

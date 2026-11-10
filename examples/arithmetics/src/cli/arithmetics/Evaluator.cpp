@@ -43,7 +43,7 @@ int eval_file(std::string_view path, cursiv::SharedCoreServices& shared,
     const std::string_view source =
         text.getText().substr(span.begin, span.end - span.begin);
     // A valid module can still divide by a zero that a parameter brings: the
-    // evaluation is said, not dropped.
+    // evaluation is reported, not dropped.
     if (!found->second.has_value()) {
       failed = true;
       err << "line " << line << ": " << source << " cannot be evaluated\n";

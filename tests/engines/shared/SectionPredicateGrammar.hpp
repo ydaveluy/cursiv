@@ -112,7 +112,7 @@ struct Name : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// Section operands pay their entry's value through choices and scopes. Data
+// Section operands pass their entry's value through choices and scopes. Data
 // rules still read their whole text, including the section's delimiters.
 struct SectionValues : Last {
   static constexpr auto number = section<Number>(lit<"[">, lit<"]">);

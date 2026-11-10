@@ -31,9 +31,7 @@
 #include "cursiv/formatting/FormattingRules.hpp"
 
 // What a language's author writes, and the base that turns it into edits.
-// Nothing here names a grammar: which element writes a member is asked of
-// the reified model, so one archive serves every language. Dispatch is keyed
-// on `node->type` (`ast_type_tag<T>`'s address): exact runtime type, no RTTI.
+// Dispatch uses `node->type`, the exact runtime type.
 
 namespace cursiv {
 
@@ -74,10 +72,8 @@ class NodeFormatter {
     return property<Feature>(std::size_t{0});
   }
 
-  // The `index`-th record writing `Feature`, clamped to the last one written.
-  // By name, through the reified grammar: the same door a member-anchored
-  // diagnostic uses, so the two can never disagree about where a member was
-  // written.
+  // The `index`-th record writing `Feature`, clamped to the last one; found as
+  // a member-anchored diagnostic finds it.
   template <auto Feature>
     requires std::derived_from<NodeT, feature_owner<Feature>>
   [[nodiscard]] FormattingRegion property(std::size_t index) const {
@@ -104,11 +100,8 @@ class NodeFormatter {
     return FormattingRegion(_cst, std::move(found), _collector);
   }
 
-  // The `index`-th occurrence of `keyword` among this construction's own
-  // literals: every visible descendant, not just a direct child -- a `{`
-  // written inside a group is not a child of the construction that owns it.
-  // An index past the end selects nothing -- a rule about a word that is not
-  // there must not silently land on another one.
+  // The `index`-th `keyword` among this construction's visible descendants, not
+  // only its children. An index past the end selects nothing.
   [[nodiscard]] FormattingRegion keyword(std::string_view keyword,
                                          std::size_t index = 0) const {
     if (!searchable()) return FormattingRegion(_cst, {}, _collector);
@@ -139,10 +132,9 @@ class NodeFormatter {
     return FormattingRegion(_cst, std::move(found), _collector);
   }
 
-  // The hidden records this construction encloses, by the terminal rule that
-  // produced them -- `hidden("SL_COMMENT")` is the grammar's own name -- in
-  // document order. A record that opens a node of its own answers for itself,
-  // as it does for a keyword.
+  // The hidden records this construction encloses, by terminal rule name
+  // (`hidden("SL_COMMENT")`), in document order; a record that opens a node of
+  // its own is that node's. A rule on one sets its margin only.
   [[nodiscard]] FormattingRegion hidden(std::string_view ruleName,
                                         std::size_t index = 0) const {
     if (!searchable()) return FormattingRegion(_cst, {}, _collector);
@@ -180,14 +172,13 @@ class NodeFormatter {
   // A node to search from: a builder may be handed none.
   [[nodiscard]] bool searchable() const noexcept { return _node != nullptr; }
 
-  // A search's records, as the ids a region holds, after what `out` has.
   static void appendIds(std::vector<NodeId>& out,
                         const std::vector<CstNodeView>& found) {
     for (const CstNodeView& at : found) out.push_back(at.id);
   }
 
   const Cst* _cst;
-  // The node's own, handed to every search so none climbs to it.
+  // The node's document, given to every search so none walks up to the root.
   const Document* _document;
   const AstNode* _node;
   FormattingCollector* _collector;
@@ -300,8 +291,7 @@ class AbstractFormatter : public Formatter {
       std::string_view text) {
     return formatMultilineComment(text, MultilineCommentFormatOptions{});
   }
-  // The overloads that hold a record fill the style from the document, which
-  // is the one thing the comment's own bytes cannot say.
+  // With a record, an empty line ending is taken from the document.
   [[nodiscard]] static std::string formatMultilineComment(
       const HiddenNodeFormatter& comment) {
     return formatMultilineComment(comment, MultilineCommentFormatOptions{});
@@ -346,9 +336,8 @@ class AbstractFormatter : public Formatter {
         });
   }
 
-  // A range is formattable while the errors are behind it: an error after the
-  // selection cannot have moved what is inside it, so a broken tail does not
-  // cost the author the shape of the head they just wrote.
+  // A range is formattable when every error lies after it: an error after the
+  // selection cannot have moved what is inside it.
   [[nodiscard]] bool isFormatRangeErrorFree(const Document& document,
                                             const lsp::Range& range) const;
 

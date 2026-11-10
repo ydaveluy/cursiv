@@ -25,7 +25,7 @@ struct lead_empty<Repeat<N, M, E>> : std::bool_constant<N == 0> {};
 template <class I, class H, class E>
 struct lead_empty<Skip<I, H, E>> : lead_empty<E> {};
 
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 struct lead_refs;
 template <class E, class... Ks>
 struct lead_refs<E, TypeList<Ks...>> : tl_cat<typename lead_refs<Ks>::type...> {

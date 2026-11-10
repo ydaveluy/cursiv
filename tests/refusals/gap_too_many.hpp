@@ -1,4 +1,4 @@
-// Thirty-three implied tokens: a reading holds a bit for thirty-two.
+// Thirty-three implied tokens at one position, one more than the limit.
 // expect LR: has more than 255 gap conditions, or more than 32 implied tokens that can be inserted at one position
 #pragma once
 

@@ -1,7 +1,3 @@
-// What a caret on a symbol is answered with: the link to its declaration, the
-// sites that name it, a rename, the prose a mouse rest shows, and the
-// workspace's symbols.
-
 #include <lsp/types.h>
 
 #include <algorithm>
@@ -47,7 +43,7 @@
 
 namespace {
 
-// The workspace fixture as its own module installs it, qualified names and all.
+// The workspace language as its module installs it, with qualified names.
 struct ModuleWorld {
   ws::WorkspaceLanguage services = ws::create_lsp_services();
   ws::WorkspaceSharedServices& shared = *services.shared;
@@ -60,9 +56,6 @@ struct ModuleWorld {
 
 }  // namespace
 
-// Go to definition: the link a caret produces, with its three ranges -- the
-// origin underlined here, the declaration previewed there, the name selected
-// inside it -- across documents and across a multi reference's group.
 namespace definition_provider {
 
 namespace {
@@ -102,7 +95,7 @@ constexpr std::string_view kUse = "entity E { f : String }\n";
 }
 
 // The three ranges of a link: the declaration a peek previews, the name the
-// caret lands on inside it, and the origin underlined under the mouse.
+// caret goes to inside it, and the origin underlined under the mouse.
 void a_link_previews_the_declaration_and_selects_its_name() {
   const Workspace world("workspace", ".ws");
   const std::vector<cursiv::Document*> documents =
@@ -119,8 +112,6 @@ void a_link_previews_the_declaration_and_selects_its_name() {
         spans(*link.originSelectionRange, 1, 15, 21));
 }
 
-// The declaration may live in another document: the link names that file,
-// and its target ranges are that file's.
 void a_link_reaches_into_another_document() {
   const Workspace world("workspace", ".ws");
   const std::vector<cursiv::Document*> documents =
@@ -140,8 +131,7 @@ void a_link_reaches_into_another_document() {
         spans(*link.originSelectionRange, 0, 15, 21));
 }
 
-// A multi reference names every member of its group at once: one link per
-// member, all underlining the one origin.
+// One link per member of the group, all from the same origin.
 void a_multi_reference_links_every_member() {
   const MultiRef world("multiref", ".mref");
   const std::vector<cursiv::Document*> documents =
@@ -206,9 +196,6 @@ void run() {
 
 }  // namespace definition_provider
 
-// Document highlight: the symbol under the caret, painted in this document
-// and nowhere else. Two things are pinned: a row is a range and nothing
-// more, and a declaration that lives elsewhere is not painted here.
 namespace document_highlight_provider {
 
 namespace {
@@ -237,8 +224,8 @@ constexpr std::string_view kUse =
          highlight.range.end.character == to;
 }
 
-// A highlight is a range and nothing more: no kind is stamped, so a client
-// draws its plain highlight on the declaration and the reference alike.
+// No kind is set, so a client draws the same highlight on the declaration and
+// the reference.
 void a_highlight_is_a_range_and_nothing_more() {
   const World world;
   const std::vector<cursiv::Document*> documents =
@@ -254,8 +241,7 @@ void a_highlight_is_a_range_and_nothing_more() {
     CHECK(!highlight.kind.has_value());
 }
 
-// A declaration in another file is not painted here: the caret on a
-// reference answers this document's occurrences, in reading order.
+// Only this document's occurrences, in reading order.
 void a_declaration_elsewhere_is_not_painted_here() {
   const World world;
   const std::vector<cursiv::Document*> documents =
@@ -280,9 +266,6 @@ void run() {
 
 }  // namespace document_highlight_provider
 
-// Find references: every site in the workspace that names the symbol under
-// the caret, pinned across documents and in the order the answer is owed --
-// by document, then by offset -- whichever document asked.
 namespace references_provider {
 
 namespace {
@@ -312,9 +295,8 @@ constexpr std::string_view kUse =
          location.range.end.line == line && location.range.end.character == to;
 }
 
-// The answer crosses documents and comes in reading order -- the declaring
-// document first, then each referencing one, each by offset -- whichever
-// document asked.
+// The declaring document first, then each referencing one, each by offset,
+// whichever document asked.
 void the_answer_crosses_documents_in_reading_order() {
   const World world;
   const std::vector<cursiv::Document*> documents =
@@ -337,8 +319,8 @@ void the_answer_crosses_documents_in_reading_order() {
   }
 }
 
-// `includeDeclaration` is honoured as asked: without it, the referencing
-// sites alone, even from the declaration's own name.
+// Without `includeDeclaration`, only the referencing sites, even when asked
+// from the declaration's own name.
 void the_declaration_joins_only_when_asked() {
   const World world;
   const std::vector<cursiv::Document*> documents =
@@ -401,17 +383,14 @@ void run() {
 
 }  // namespace references_provider
 
-// The one refactoring the framework ships. Three questions are pinned here:
-// what may be renamed at all, how far the edit reaches, and which new names a
-// language refuses -- the last being the only check that reparses.
 namespace rename_provider {
 
 namespace {
 
 namespace ct = cursiv::test;
 
-// The fixture for the reach of an edit: its members hold a cross reference
-// that crosses documents, and its identifiers exclude the reserved words.
+// The workspace language: references cross documents, and identifiers exclude
+// the keywords.
 struct World : support::LspWorkspace {
   [[nodiscard]] std::optional<lsp::WorkspaceEdit> rename(
       const cursiv::Document& document, lsp::Uint line, lsp::Uint character,
@@ -421,8 +400,8 @@ struct World : support::LspWorkspace {
   }
 };
 
-// The fixture's own arm on top of the default: a package's members answer to
-// qualified names, so renaming the package rewrites their sites too.
+// The workspace module's rename, where a package's members have qualified
+// names: renaming the package rewrites their sites too.
 struct Module : ModuleWorld {
   [[nodiscard]] std::optional<lsp::WorkspaceEdit> rename(
       const cursiv::Document& document, lsp::Uint line, lsp::Uint character,
@@ -446,23 +425,20 @@ struct Module : ModuleWorld {
 constexpr std::string_view kLib = "datatype String\n";
 constexpr std::string_view kUse = "entity E { f : String }\n";
 
-// A keyword denotes nothing, so there is no span to put the edit box over --
-// and `nullopt` is what tells the client not to open one.
+// A keyword names nothing: `nullopt` tells the client not to open a rename
+// box.
 void a_keyword_is_not_renamable() {
   const World world;
   (void)ct::expectRename(*world.ws, {.text = "dat<|>atype String\n",
                                            .newName = "Text",
                                            .nothingUnderCaret = true,
                                            .disposeAfterCheck = true});
-  // ...where the name beside it is.
+  // The name beside it is renamable.
   (void)ct::expectRename(*world.ws, {.text = "datatype <|S<|>tring|>\n",
                                            .newName = "Text",
                                            .disposeAfterCheck = true});
 }
 
-// The edit reaches the declaration and every site that names it, wherever they
-// live: a rename that stopped at the asking document would leave the workspace
-// pointing at a name nothing declares.
 void a_rename_crosses_the_documents_that_name_it() {
   const World world;
   const std::vector<cursiv::Document*> documents =
@@ -496,9 +472,7 @@ void a_rename_crosses_the_documents_that_name_it() {
   }
 }
 
-// A name that denotes nothing is still a name, and the typo it is is exactly
-// what the edit box was opened to fix: the one site is rewritten, in the
-// document that asked, and nowhere else.
+// An unresolved name is often a typo: only that site is rewritten.
 void an_unresolved_reference_renames_its_own_site() {
   const World world;
   (void)ct::expectRename(*world.ws,
@@ -507,9 +481,9 @@ void an_unresolved_reference_renames_its_own_site() {
                           .disposeAfterCheck = true});
 }
 
-// The new name is judged by the language that declares the symbol: substituting
-// it and reading the document back refuses a name that lexes as two words, or
-// the empty string.
+// The new name is checked by the language that declares the symbol: the
+// document is read back with it, and a name that lexes as two words, or an
+// empty name, is refused.
 void a_new_name_the_language_would_not_read_back_is_refused() {
   const World world;
   for (const std::string_view refused : {"Two Words", ""})
@@ -521,10 +495,8 @@ void a_new_name_the_language_would_not_read_back_is_refused() {
                             .disposeAfterCheck = true});
 }
 
-// ...and so in a repaired document, where the count of diagnostics proves
-// nothing: the stray `:` already costs one, and the repair reads a number, a
-// brace or a comment there at no extra cost. None is read as the name it
-// replaces, so all are refused; a name still goes through.
+// In a repaired document, a new name that is not read back as the name is
+// refused; a valid one is accepted.
 void a_repaired_document_refuses_what_is_not_read_as_the_name() {
   const World world;
   for (const std::string_view refused : {"1", "{", ":", "/* c */"})
@@ -539,8 +511,8 @@ void a_repaired_document_refuses_what_is_not_read_as_the_name() {
                                   "entity E { f : <|String|> }\n",
                           .newName = "Text",
                           .disposeAfterCheck = true});
-  // The same at a reference, judged where it stands. `a.` reads as a
-  // qualified name only once the repair inserts its last segment.
+  // At a reference: `a.` reads as a qualified name only once the repair
+  // inserts its last segment.
   for (const std::string_view refused : {"1", "{", "a."})
     (void)ct::expectRename(*world.ws,
                            {.text = "entity E { f : <|>Missing :\n",
@@ -551,14 +523,14 @@ void a_repaired_document_refuses_what_is_not_read_as_the_name() {
                          {.text = "entity E { f : <|<|>Missing|> :\n",
                           .newName = "a.b",
                           .disposeAfterCheck = true});
-  // The old name may be the one the repair completed: renaming it to a whole
-  // name is how the author fixes it.
+  // The old name may be one the repair completed; renaming it to a whole name
+  // is how the author fixes it.
   (void)ct::expectRename(*world.ws, {.text = "package <|<|>a.|> { }\n",
                                            .newName = "a.b",
                                            .disposeAfterCheck = true});
 }
 
-// Every document the edits touch is read back with its own substitutions, a
+// Every document the edits touch is read back with its own changes, a
 // repaired one too: its reference still reads as the name it renames.
 void a_rename_reads_back_every_document_it_edits() {
   const World world;
@@ -612,7 +584,6 @@ void name_validation_observes_the_requests_cancellation() {
   CHECK(cancelled);
 }
 
-// ...and the accepted one reaches both the reference and the declaration.
 void an_accepted_rename_rewrites_every_site() {
   const World world;
   (void)ct::expectRename(*world.ws,
@@ -660,8 +631,8 @@ void a_package_rename_requalifies_its_members_sites() {
   }
 }
 
-// ...and a member renamed under a qualifier keeps the qualifier: the site
-// spells `p.G`, not the bare name the default wrote over it.
+// A member renamed through a qualified site keeps the qualifier: `p.G`, not
+// `G`.
 void a_qualified_site_keeps_its_qualifier() {
   const Module world;
   const std::vector<cursiv::Document*> documents =
@@ -710,18 +681,14 @@ void run() {
 
 }  // namespace rename_provider
 
-// What a mouse rest is answered with. The default provider has two arms and
-// this pins both: the grammar's own prose on a keyword, and the declaration's
-// documentation on the name that denotes it -- plus the range each is about,
-// which is what an editor underlines.
 namespace hover_provider {
 
 namespace {
 
 namespace ct = cursiv::test;
 
-// The fixture answers for both: its keywords carry `.doc<>()` and its members
-// hold a cross reference.
+// The workspace language: its keywords carry `.doc<>()` and its members hold
+// references.
 struct World : support::LspWorkspace {
   [[nodiscard]] std::optional<lsp::Hover> at(const cursiv::Document& document,
                                              lsp::Uint line,
@@ -735,8 +702,7 @@ constexpr std::string_view kKeywordModel =
     "datatype String\n"
     "entity E { f : String }\n";
 
-// The grammar's own prose, on the word that carries it -- and the range is
-// that word alone, not the declaration it opens.
+// The range is the keyword alone, not the declaration it starts.
 void a_documented_keyword_answers_the_grammars_prose() {
   const World world;
   (void)ct::expectHover(*world.ws,
@@ -745,7 +711,7 @@ void a_documented_keyword_answers_the_grammars_prose() {
                          .hover = "Declares an entity, closed by `}`.",
                          .disposeAfterCheck = true});
 
-  // The underlined span is what the prose is about, and no helper compares it.
+  // `expectHover` does not check the range, so it is checked here.
   const cursiv::Document* const document =
       world.built("file:///w/a.ws", std::string(kKeywordModel));
   const std::optional<lsp::Hover> hover = world.at(*document, 1, 1);
@@ -756,7 +722,8 @@ void a_documented_keyword_answers_the_grammars_prose() {
 }
 
 // A word with a text per use answers with the text of the use under the caret,
-// even where two rules start alike. A word with one text answers it anywhere.
+// even where two rules start the same. A word with one text answers it
+// anywhere.
 void a_word_answers_the_text_of_its_use(
     std::unique_ptr<cursiv::Parser> parser,
     std::unique_ptr<cursiv::AstReflection> reflection) {
@@ -777,8 +744,8 @@ void a_word_answers_the_text_of_its_use(
   expect("st<|>ate a", "Names a state.");
 }
 
-// A CST span is half-open, so a caret at the very end of a word is one past
-// it: the one retry is what makes a double-click land on the word it selected.
+// A CST span is half-open, so a caret right after a word is outside it: hover
+// retries one byte back, so a double-click is on the selected word.
 void a_caret_one_byte_past_the_word_is_still_on_it() {
   const World world;
   (void)ct::expectHover(*world.ws,
@@ -795,8 +762,7 @@ constexpr std::string_view kModel =
     "datatype String\n"
     "entity E { f : String }\n";
 
-// A name that denotes a declaration shows that declaration's documentation,
-// and the range is the name as written here rather than the target's.
+// The range is the name as written here, not the target's.
 void a_resolved_reference_answers_its_declarations_documentation() {
   const World world;
   (void)ct::expectHover(*world.ws,
@@ -815,14 +781,14 @@ void a_resolved_reference_answers_its_declarations_documentation() {
   CHECK(hover->range->end.line == 2 && hover->range->end.character == 21);
 }
 
-// Nothing under the caret is `nullopt` and not an empty popup: an editor draws
-// a frame around whatever it is handed.
+// `nullopt`, not an empty popup: an editor draws a frame around whatever it
+// gets.
 void a_caret_on_nothing_answers_nothing() {
   const World world;
   (void)ct::expectHover(*world.ws, {.text = "<|>\n\ndatatype String\n",
                                           .disposeAfterCheck = true});
 
-  // ...and so does a name nobody documented.
+  // A name with no documentation.
   (void)ct::expectHover(*world.ws, {.text = "datatype St<|>ring\n",
                                           .disposeAfterCheck = true});
 }
@@ -844,9 +810,7 @@ void run() {
 
 }  // namespace hover_provider
 
-// The two symbol services: the outline of one document, and the one query
-// that crosses the workspace. They read the same tree, so they are pinned
-// against one text.
+// Document symbols and workspace symbols, tested on one text.
 namespace workspace_symbol_provider {
 
 namespace {
@@ -869,15 +833,15 @@ constexpr std::string_view kModel = support::kPackage;
   return nullptr;
 }
 
-// The outline nests by ownership, and the selection range is the name: an
-// editor jumping to a symbol puts the caret on the word, not on the block.
+// The outline nests by ownership, and the selection range is the name, so a
+// jump to a symbol puts the caret on the word.
 void the_outline_nests_and_points_at_the_name() {
   const World world;
   const ct::ExpectedSymbolsCallback outline{
       .text = std::string(kModel),
       .assertion =
           [](std::span<const lsp::DocumentSymbol> symbols) {
-            // One root -- the package -- and everything else beneath it.
+            // One root, the package, with everything beneath it.
             CHECK(symbols.size() == 1);
             const lsp::DocumentSymbol* const package = find(symbols, "p");
             CHECK(package != nullptr && package->children.has_value());
@@ -887,16 +851,13 @@ void the_outline_nests_and_points_at_the_name() {
             const lsp::DocumentSymbol* const person = find(symbols, "Person");
             CHECK(person != nullptr);
             if (person == nullptr) return;
-            // The entity owns its feature, and the feature owns nothing.
             CHECK(person->children.has_value() &&
                   person->children->size() == 1);
             const lsp::DocumentSymbol* const feature = find(symbols, "name");
             CHECK(feature != nullptr);
             if (feature == nullptr) return;
 
-            // A kind is posted on every row: the default provider answers one
-            // constant, which is the language saying it has not chosen -- not
-            // the row saying nothing.
+            // The default provider gives every symbol the same kind.
             CHECK(person->kind == lsp::SymbolKind::Field);
             CHECK(feature->kind == lsp::SymbolKind::Field);
             // The selection range is the name alone: `entity Person {` starts
@@ -904,7 +865,7 @@ void the_outline_nests_and_points_at_the_name() {
             CHECK(person->selectionRange.start.line == 5);
             CHECK(person->selectionRange.start.character == 9);
             CHECK(person->selectionRange.end.character == 15);
-            // ...and the full range covers the block it opens.
+            // The full range covers the block.
             CHECK(person->range.start.character == 2);
             CHECK(person->range.end.line == 7);
           },
@@ -912,7 +873,6 @@ void the_outline_nests_and_points_at_the_name() {
   (void)ct::expectSymbols(*world.ws, outline);
 }
 
-// An unnamed root exposes each named child directly in source order.
 void an_unnamed_root_lists_its_named_children() {
   const World world;
   const cursiv::Document* const document =
@@ -924,13 +884,12 @@ void an_unnamed_root_lists_its_named_children() {
         symbols[1].name == "b");
 }
 
-// The workspace query answers off the index, and a query nothing answers is an
-// empty list rather than everything.
+// A query that matches nothing gives an empty list, not every symbol.
 void a_query_that_matches_nothing_answers_nothing() {
   const World world;
   (void)world.built("file:///w/a.ws", std::string(kModel));
-  // What a document exports is what the index holds: the package, not what it
-  // encloses -- so the declaration this query is meant to find stands alone.
+  // `kModel` exports only its package, so `Person` is declared at the top of a
+  // second document.
   (void)world.built("file:///w/b.ws", "entity Person {\n}\n");
 
   CHECK(!world.shared.workspaceSymbolProvider
@@ -941,7 +900,7 @@ void a_query_that_matches_nothing_answers_nothing() {
             .empty());
 }
 
-// Keeps the walk, reshapes the row: every symbol gets a container name.
+// Sets a container name on every symbol.
 struct ContainerNaming final : cursiv::DefaultWorkspaceSymbolProvider {
   using DefaultWorkspaceSymbolProvider::DefaultWorkspaceSymbolProvider;
 
@@ -955,10 +914,9 @@ struct ContainerNaming final : cursiv::DefaultWorkspaceSymbolProvider {
   }
 };
 
-// One symbol is shaped through a seam of its own, so a language changes the
-// shape without rewriting the index walk; what the seam keeps is the row's
-// own document.
-void one_symbol_is_shaped_through_the_seam() {
+// A language overrides `getWorkspaceSymbol` to change one symbol without
+// rewriting the index walk; the symbol keeps its own document's location.
+void one_symbol_is_changed_through_get_workspace_symbol() {
   World world;
   world.shared.workspaceSymbolProvider =
       std::make_unique<ContainerNaming>(world.shared);
@@ -996,8 +954,8 @@ struct ResolvingProvider final : cursiv::WorkspaceSymbolProvider {
   return options != nullptr && options->resolveProvider == true;
 }
 
-// A provider that resolves is announced and reached through the resolve door;
-// the default is announced as not resolving and hands a symbol back as it came.
+// A resolving provider is announced and reached through the resolve request;
+// the default does not resolve and returns the symbol unchanged.
 void a_resolving_provider_is_announced_and_reached() {
   const lsp::InitializeParams handshake;
   lsp::WorkspaceSymbol symbol;
@@ -1066,9 +1024,8 @@ void a_workspace_symbol_ranges_over_its_name() {
   }
 }
 
-// The gate is the name node, not the text it matched: a declared name that
-// matched nothing still opens a row, so its feature stays under it instead
-// of climbing to the grandparent.
+// A declared name that matched no text still gets a symbol, so its feature
+// stays under it, not under the grandparent.
 void a_declared_name_that_matched_nothing_keeps_its_row() {
   const World world;
   const cursiv::Document* const document =
@@ -1096,7 +1053,7 @@ void run() {
   an_unnamed_root_lists_its_named_children();
   a_declared_name_that_matched_nothing_keeps_its_row();
   a_query_that_matches_nothing_answers_nothing();
-  one_symbol_is_shaped_through_the_seam();
+  one_symbol_is_changed_through_get_workspace_symbol();
   a_resolving_provider_is_announced_and_reached();
   a_workspace_symbol_ranges_over_its_name();
 }

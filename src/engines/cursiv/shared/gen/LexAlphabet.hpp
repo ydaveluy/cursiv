@@ -1,6 +1,6 @@
 // What the lex modes are built over: one NFA per terminal, and the byte
-// classes its edges are written in -- cut once every set is known, since
-// resolving a refusal spells sets the grammar never named.
+// classes its edges are written in, computed once every set is known, since
+// resolving a refusal creates sets the grammar never named.
 #pragma once
 
 #include <algorithm>
@@ -13,15 +13,15 @@
 #include "cursiv/shared/gen/HeadMatcher.hpp"
 #include "cursiv/shared/gen/LexCheckIncomplete.hpp"
 #include "cursiv/shared/gen/LexKeywordCut.hpp"
+#include "cursiv/shared/gen/LexLoneLeadExpansion.hpp"
 #include "cursiv/shared/gen/LexNfaBuild.hpp"
 #include "cursiv/shared/gen/LexNfaPool.hpp"
 #include "cursiv/shared/gen/LexRecursion.hpp"
 #include "cursiv/shared/gen/LexRefusalProduct.hpp"
-#include "cursiv/shared/gen/LexStrayExpansion.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/gen/lex_boundary_misses.hpp"
-#include "cursiv/shared/gen/lex_prefix_meets.hpp"
+#include "cursiv/shared/gen/lex_prefix_overlap.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
@@ -43,14 +43,14 @@ struct LexAlphabet {
     startOf.assign(g.nterms, -1);
     bool levels[2] = {};
     for (std::uint16_t t = 1; t < g.nterms; ++t)
-      if (const auto v = g.terms[t].laid;
-          (v == kLaidIndent || v == kLaidDedent) &&
-          std::exchange(levels[v - kLaidIndent], true))
+      if (const auto v = g.terms[t].synthetic;
+          (v == kSyntheticIndent || v == kSyntheticDedent) &&
+          std::exchange(levels[v - kSyntheticIndent], true))
         lower_refuse(g, LowerFail::indentTwice, t);
     LexNfaBuild builder{nfa, g, internName};
     std::vector<LexKeywordCut::Shape> keyword(g.nterms);
     for (std::uint16_t t = 1; t < g.nterms; ++t) {
-      if (g.terms[t].laid != 0) continue;
+      if (g.terms[t].synthetic != 0) continue;
       nfa.term = t;
       const int match = nfa.match(t);
       startOf[t] = builder.terminal(g.termBuild[t].lex, match);
@@ -62,12 +62,12 @@ struct LexAlphabet {
     A.termHeads = lex_head_words(nfa, g, startOf, taken, A.termTails);
     for (std::uint16_t t = 1; t < g.nterms; ++t)
       g.terms[t].refuses = !A.termHeads[t].words.empty();
-    // A head refusal whose rescue leaves out bytes the terminal reads.
+    // A head refusal whose pass class leaves out bytes the terminal reads.
     lex_boundary_misses(nfa, g, heads, [&](std::size_t k, const ByteSet& b) {
       if (!g.lowerFail()) g.lowerWord = nfa.guards[k].node;
       lower_refuse(g, LowerFail::boundaryMisses, nfa.guards[k].term, b);
     });
-    LexStrayExpansion(nfa, g).run();
+    LexLoneLeadExpansion(nfa, g).run();
     for (const LexNfaState& x : nfa.s) {
       if (x.accept < 0 || x.bound < 0) continue;
       const auto& own = keyword[static_cast<std::size_t>(x.accept)];
@@ -80,7 +80,46 @@ struct LexAlphabet {
     }
     tied_trivia(g);
     cut = LexKeywordCut::of(g, nfa, startOf);
+    uncut_keywords(g);
     classes(A);
+  }
+
+  // A keyword with more spellings than are cut cannot beat trivia that reads
+  // on past it, so such trivia is refused. A walk that cannot conclude leaves
+  // the pair standing, with a warning.
+  template <class Cfg>
+  void uncut_keywords(Cfg& g) const {
+    // Whether `x` reaches its acceptance through assertions alone.
+    const auto spelled = [&](std::vector<int> x) {
+      for (std::size_t i = 0; i < x.size(); ++i) {
+        const LexNfaState& st = nfa.s[static_cast<std::size_t>(x[i])];
+        if (st.accept >= 0) return true;
+        if (st.relay < 0) continue;
+        for (const int y : nfa.eclose(
+                 nfa.relays[static_cast<std::size_t>(st.relay)].resumeOut))
+          if (std::ranges::find(x, y) == x.end()) x.push_back(y);
+      }
+      return false;
+    };
+    for (const std::uint16_t k : cut.uncut) {
+      for (std::uint16_t t = 1; t < g.nterms; ++t) {
+        if (!g.terms[t].trivia || startOf[t] < 0) continue;
+        const LexOverlap past = lex_pair_search(
+            nfa, g.sets.data(), startOf[k], startOf[t],
+            [&](const std::vector<int>& x, const std::vector<int>& y) {
+              return spelled(x) && std::ranges::any_of(y, [&](int s) {
+                       const LexNfaState& st =
+                           nfa.s[static_cast<std::size_t>(s)];
+                       return st.set >= 0 || st.relay >= 0;
+                     });
+            });
+        if (past == LexOverlap::found)
+          return lower_refuse(g, LowerFail::keywordSpellings, k);
+        if (past == LexOverlap::incomplete)
+          lex_check_incomplete(g.lexIncomplete,
+                               {LowerFail::keywordSpellings, k, t});
+      }
+    }
   }
 
   // Whether one text is matched whole by both graphs and read at one rank: a
@@ -140,28 +179,27 @@ struct LexAlphabet {
         }
   }
 
-  // A section ends where its closing token stands, which no token of its
-  // grammar may read or begin with; and the document's indentation is no
-  // section's. `reads(g)` is what each section's grammar reads. A walk that
-  // cannot conclude leaves the token standing, with a warning.
+  // No token of a section's grammar, `reads(g)`, may read or begin with its
+  // closing token. A walk that cannot conclude leaves it, with a warning.
   template <class Cfg, class Reads>
   void section_ends(Cfg& g, Reads&& reads) const {
     if (!g.sections()) return;
     for (unsigned t = 1; t < g.nterms; ++t)
-      if (g.terms[t].laid == kLaidIndent || g.terms[t].laid == kLaidDedent) {
+      if (g.terms[t].synthetic == kSyntheticIndent ||
+          g.terms[t].synthetic == kSyntheticDedent) {
         lower_refuse(g, LowerFail::sectionIndented);
         return;
       }
     const std::vector<DynSet> own = reads(g);
     for (std::size_t h = 1; h < own.size(); ++h) {
-      if (g.cfgHome[h] != h) continue;
+      if (g.cfgSection[h] != h) continue;
       const int end = startOf[g.cfgEnd[h]];
       each_bit(own[h].w.data(), own[h].w.size(), [&](std::size_t t) {
-        const LexOverlap meets =
-            lex_prefix_meets(nfa, g.sets.data(), end, startOf[t]);
-        if (meets == LexOverlap::found)
+        const LexOverlap overlap =
+            lex_prefix_overlap(nfa, g.sets.data(), end, startOf[t]);
+        if (overlap == LexOverlap::found)
           lower_refuse(g, LowerFail::sectionEndShared);
-        else if (meets == LexOverlap::incomplete)
+        else if (overlap == LexOverlap::incomplete)
           lex_check_incomplete(g.lexIncomplete,
                                {LowerFail::sectionEndShared, g.cfgEnd[h],
                                 static_cast<std::uint16_t>(t)});
@@ -173,8 +211,8 @@ struct LexAlphabet {
   template <class Built>
   void classes(Built& A) {
     const auto& g = A.cfg;
-    // A byte's signature names every set it belongs to, one bit each, as
-    // wide as the sets are many: a class of code points cuts hundreds.
+    // A byte's signature names every set it belongs to, one bit each: a class
+    // of code points makes hundreds of sets.
     const std::size_t words = (g.nsets + 63u) / 64u;
     std::vector sig(256, std::vector<std::uint64_t>(words));
     const ByteSet* const bs = g.sets.data();

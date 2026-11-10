@@ -1,5 +1,5 @@
-// A class of scalars refused where a match may end one byte into one of
-// its scalars: the rest of that scalar is text past the token.
+// A guard that excludes a class of characters, where a match may end one byte
+// into such a character: the rest of it is text past the token.
 // expect LR: refused: terminal .NUM. may end a match before the end of .\\p{Lo}., which a guard excludes after the start of the terminal
 #pragma once
 

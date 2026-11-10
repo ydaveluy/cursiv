@@ -1,9 +1,8 @@
 #pragma once
 
-// Classes of code points in a token: identifier properties, a general
-// category, a complement, and the word boundary of a keyword beside them.
-// Character decoding and category tests live in CharactersGrammar.hpp. These
-// remaining cases exercise rival scalar guards and intersected reservations.
+// Classes of code points in a token: identifier properties, a general category,
+// a complement and a keyword's word boundary, with competitor scalar guards and
+// intersected reservations.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

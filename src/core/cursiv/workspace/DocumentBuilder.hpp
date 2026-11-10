@@ -11,7 +11,7 @@
 #include "cursiv/workspace/DocumentState.hpp"
 
 namespace cursiv {
-struct ValidationCategory;  // identity by address; the storey above owns it
+struct ValidationCategory;  // identity by address
 }  // namespace cursiv
 
 namespace cursiv {
@@ -24,15 +24,9 @@ enum class WaitOutcome : std::uint8_t {
   BuildFailed,
 };
 
-// Fired on the build's calling thread, once per rung a build publishes, with
-// the documents that phase carried. A cancelled phase never drained, so it is
-// never announced; a phase with nothing to do still fires with an empty list,
-// which is what lets a subscriber settle work an earlier cancelled build
-// finished per document.
-//
-// A subscriber holds the write's exclusivity, so no other write runs beside
-// it. An `Immediate` read does: every rung fires past the write's settle,
-// which is the door those reads come through.
+// Called on the build's thread once per workspace state a build publishes,
+// with the documents the phase carried, possibly none. A cancelled phase is
+// never told. It runs after the mutation: `Immediate` reads may run beside it.
 class BuildPhaseListener {
  public:
   virtual ~BuildPhaseListener() noexcept = default;
@@ -41,10 +35,9 @@ class BuildPhaseListener {
                             const CancellationToken&) = 0;
 };
 
-// Per-document milestones run on workers before the workspace milestone;
-// waiting for that workspace milestone from a callback would deadlock.
-// Content notifications may be deferred until old links have been invalidated,
-// so the document can already have advanced. Later phases notify immediately.
+// Called on a worker once a document reaches a state; content states may be
+// told after the document moved on. Waiting for the workspace state here
+// deadlocks. A listener that throws fails the build; the others still receive.
 class DocumentPhaseListener {
  public:
   virtual ~DocumentPhaseListener() noexcept = default;
@@ -52,12 +45,9 @@ class DocumentPhaseListener {
                                const CancellationToken&) = 0;
 };
 
-// What the workspace just lost or gained, announced before the rebuild that
-// answers it. A subscriber holding anything derived from a document -- a
-// memo, an inverse table -- learns of a deletion here and nowhere else, a
-// deleted document reaching no phase to be announced at. A subscriber may
-// send another document back down with `resetToState`, when its results read
-// what changed: the rebuild builds that document too.
+// What the workspace lost or gained, told before the rebuild: the only news of
+// a deletion. A listener may send another document back down with
+// `resetToState`, and the rebuild builds it too.
 class DocumentUpdateListener {
  public:
   virtual ~DocumentUpdateListener() noexcept = default;
@@ -70,7 +60,7 @@ class DocumentBuilder {
   virtual ~DocumentBuilder() noexcept = default;
 
   // Listeners are configuration: registered and removed outside any build. The
-  // list is read inside builds without a lock, which that law makes correct.
+  // list is read inside builds without a lock, which this rule makes safe.
   virtual void addBuildPhaseListener(BuildPhaseListener&) = 0;
   virtual void removeBuildPhaseListener(BuildPhaseListener&) = 0;
   virtual void addDocumentPhaseListener(DocumentPhaseListener&) = 0;
@@ -78,22 +68,9 @@ class DocumentBuilder {
   virtual void addDocumentUpdateListener(DocumentUpdateListener&) = 0;
   virtual void removeDocumentUpdateListener(DocumentUpdateListener&) = 0;
 
-  // The options are remembered per document: a document keeps what it was
-  // built with, so one build can carry a different request per document and
-  // a later `update` reuses each document's own. `categories` filters the
-  // validating phase by identity; empty runs every one. A request a cancelled
-  // build left unfinished is kept until a build finishes it: that build runs
-  // the kept request, not its own options, which a later call asks again.
-  //
-  // The split is incremental: the builder remembers per document which
-  // categories have run on the current revision, so a fast build followed by a
-  // slow one runs the slow checks and appends their diagnostics. A `Validated`
-  // rung means "validated for what was asked so far", never "nothing left to
-  // owe". A category already run is not re-run and its diagnostics are not
-  // doubled; an edit resets the memory with the rest of the document.
-  // With validation disabled, the document stops at `IndexedReferences` and
-  // no document-level `Validated` notification is emitted. The workspace
-  // still publishes the end of each phase, including an empty validation phase.
+  // Options are remembered per document; a request a cancelled build left
+  // unfinished is kept until a build ends it. `Validated` means validated for
+  // the categories asked so far: a wider request runs only the missing ones.
   virtual void build(std::span<Document* const>, const BuildOptions& = {},
                      const CancellationToken& = {}) const = 0;
 
@@ -104,21 +81,20 @@ class DocumentBuilder {
                       std::span<const std::string_view> deleted,
                       const CancellationToken& = {}) const = 0;
 
-  // What a changed document is rebuilt with: `built_in` and `fast` unless the
-  // storey above says otherwise. Every other document keeps its own request.
+  // What a changed document is rebuilt with: `built_in` and `fast` unless set
+  // otherwise here. Every other document keeps its own request.
   [[nodiscard]] virtual BuildOptions& updateBuildOptions() noexcept = 0;
   [[nodiscard]] virtual const BuildOptions& updateBuildOptions()
       const noexcept = 0;
 
-  // The prefix rule read backwards: going back to rung k undoes k+1, k+2, ...
-  // up to the top. Back to `Changed`, the tree goes, and every document with a
+  // Going back to state k undoes k+1, k+2, ... up to the last. Back to
+  // `Changed`, the tree goes, and every document with a
   // reference into it goes back to `ComputedScopes` first.
   virtual void resetToState(Document&, DocumentState) const = 0;
 
-  // A wait is for a rung, not for a build. Without the liveness answer
-  // (`Unreachable`), a request on an excluded document blocks forever. A
-  // cancelled build answers nothing: the build after it does, so a caller
-  // that may see no further build passes a token of its own.
+  // Waits for a state, not a build; `Unreachable` when the document cannot get
+  // there. A cancelled build answers nothing, so pass a token when no further
+  // build may come.
   [[nodiscard]] virtual WaitOutcome waitUntil(
       DocumentState, const CancellationToken& = {}) const = 0;
   [[nodiscard]] virtual WaitOutcome waitUntil(

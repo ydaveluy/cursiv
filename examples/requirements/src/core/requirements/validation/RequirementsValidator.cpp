@@ -7,7 +7,6 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/Documents.hpp"
@@ -48,14 +47,7 @@ RequirementsValidator::~RequirementsValidator() noexcept {
 void RequirementsValidator::onUpdate(
     std::span<const std::string_view> changed,
     std::span<const std::string_view> deleted) {
-  const auto ofTests = [this](std::string_view uri) {
-    const cursiv::CoreServices* const language =
-        shared.serviceRegistry->findServices(uri);
-    return language != nullptr && language != &services;
-  };
-  if (std::ranges::none_of(changed, ofTests)
-      && std::ranges::none_of(deleted, ofTests))
-    return;
+  if (changed.empty() && deleted.empty()) return;
   for (const std::shared_ptr<cursiv::Document>& document :
        shared.documents->all())
     if (document->language == &services

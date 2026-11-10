@@ -27,7 +27,7 @@ bool gap_readable(const LowerPools& c, std::uint16_t n,
   const LexNode& e = c.lex[n];
   switch (e.kind) {
     case LexKind::token:
-      return recognition && c.terms[e.a].laid == 0;
+      return recognition && c.terms[e.a].synthetic == 0;
     case LexKind::positive:
     case LexKind::negative:
       return recognition && gap_readable(c, e.a, true);
@@ -48,7 +48,7 @@ bool gap_readable(const LowerPools& c, std::uint16_t n,
     case LexKind::seq:
     case LexKind::alt:
       for (unsigned i = 0; i < e.b; ++i)
-        if (!gap_readable(c, c.lexKid[e.a + i], recognition)) return false;
+        if (!gap_readable(c, c.lexChild[e.a + i], recognition)) return false;
       return true;
     default:
       return false;
@@ -75,9 +75,9 @@ std::uint16_t Lowerer::gap_leaf(std::uint64_t id,
   return _c.ngapLeaves++;
 }
 
-bool Lowerer::lexical(ImageId id) {
+Descent<bool> Lowerer::lexical(ImageId id) {
   if (const auto it = _lexicalMemo.find(id); it != _lexicalMemo.end())
-    return it->second != 0;
+    co_return it->second != 0;
   const ImageNode n = at(id);
   bool out = false;
   switch (n.kind) {
@@ -97,12 +97,16 @@ bool Lowerer::lexical(ImageId id) {
     case ImageKind::trigger:
     case ImageKind::notOf:
     case ImageKind::repeat:
-      out = lexical(kid(n, 0));
+      out = co_await lexical(child_at(n, 0));
       break;
     case ImageKind::seq:
     case ImageKind::choice:
-      out = std::ranges::all_of(kids_of(n),
-                                [&](ImageId k) { return lexical(k); });
+      out = true;
+      for (const ImageId k : children_of(n))
+        if (!co_await lexical(k)) {
+          out = false;
+          break;
+        }
       break;
     case ImageKind::ref:
       out = terminal_rule(n.a) || data_rule(n.a);
@@ -111,12 +115,12 @@ bool Lowerer::lexical(ImageId id) {
       break;
   }
   _lexicalMemo.emplace(id, out ? 1 : 0);
-  return out;
+  co_return out;
 }
 
-bool Lowerer::gap(ImageId id) {
+Descent<bool> Lowerer::gap(ImageId id) {
   if (const auto it = _gapMemo.find(id); it != _gapMemo.end())
-    return it->second != 0;
+    co_return it->second != 0;
   const ImageNode n = at(id);
   bool out = false;
   switch (n.kind) {
@@ -125,15 +129,17 @@ bool Lowerer::gap(ImageId id) {
       out = true;
       break;
     case ImageKind::andOf:
-      out = lexical(kid(n, 0));
+      out = co_await lexical(child_at(n, 0));
       break;
     case ImageKind::notOf: {
-      const ImageId k = kid(n, 0);
+      const ImageId k = child_at(n, 0);
       if (const ImageNode kn = at(k); kn.kind == ImageKind::trigger) {
-        const ImageId p = kid(kn, 0);
-        out = lexical(p) && !cut_prefix(p).ok;
+        const ImageId p = child_at(kn, 0);
+        out = co_await lexical(p);
+        if (out) out = !(co_await cut_prefix(p)).ok;
       } else {
-        out = gap(k) || lexical(k);
+        out = co_await gap(k);
+        if (!out) out = co_await lexical(k);
       }
       break;
     }
@@ -141,9 +147,10 @@ bool Lowerer::gap(ImageId id) {
     case ImageKind::choice: {
       bool parts = true;
       bool any = false;
-      for (const ImageId k : kids_of(n)) {
-        parts = parts && (gap(k) || at(k).kind == ImageKind::eof);
-        any = any || gap(k);
+      for (const ImageId k : children_of(n)) {
+        const bool g = co_await gap(k);
+        parts = parts && (g || at(k).kind == ImageKind::eof);
+        any = any || g;
       }
       out = parts && any;
       break;
@@ -152,26 +159,28 @@ bool Lowerer::gap(ImageId id) {
       break;
   }
   _gapMemo.emplace(id, out ? 1 : 0);
-  return out;
+  co_return out;
 }
 
-bool Lowerer::phrase_gap(ImageId id) {
+Descent<bool> Lowerer::phrase_gap(ImageId id) {
   const ImageNode n = at(id);
   switch (n.kind) {
     case ImageKind::andOf:
-      return lexical(kid(n, 0));
+      co_return co_await lexical(child_at(n, 0));
     case ImageKind::notOf:
-      return phrase_gap(kid(n, 0)) || lexical(kid(n, 0));
+      if (co_await phrase_gap(child_at(n, 0))) co_return true;
+      co_return co_await lexical(child_at(n, 0));
     case ImageKind::choice:
     case ImageKind::seq:
-      return std::ranges::any_of(kids_of(n),
-                                 [&](ImageId k) { return phrase_gap(k); });
+      for (const ImageId k : children_of(n))
+        if (co_await phrase_gap(k)) co_return true;
+      co_return false;
     default:
-      return false;
+      co_return false;
   }
 }
 
-bool Lowerer::lex_phrase(ImageId id) {
+Descent<bool> Lowerer::lex_phrase(ImageId id) {
   const ImageNode n = at(id);
   switch (n.kind) {
     case ImageKind::seq:
@@ -179,19 +188,21 @@ bool Lowerer::lex_phrase(ImageId id) {
     case ImageKind::notOf:
     case ImageKind::eof:
     case ImageKind::skip:
-      return true;
+      co_return true;
     case ImageKind::choice:
-      return std::ranges::any_of(kids_of(n),
-                                 [&](ImageId k) { return lex_phrase(k); });
+      for (const ImageId k : children_of(n))
+        if (co_await lex_phrase(k)) co_return true;
+      co_return false;
     case ImageKind::repeat:
-      return n.n > 1 || lex_phrase(kid(n, 0));
+      if (n.n > 1) co_return true;
+      co_return co_await lex_phrase(child_at(n, 0));
     case ImageKind::ref:
-      return data_rule(n.a);
+      co_return data_rule(n.a);
     case ImageKind::doc:
     case ImageKind::trigger:
-      return lex_phrase(kid(n, 0));
+      co_return co_await lex_phrase(child_at(n, 0));
     default:
-      return false;
+      co_return false;
   }
 }
 
@@ -204,7 +215,7 @@ bool Lowerer::cut_one(ImageId id) const {
     case ImageKind::ref:
       return terminal_rule(n.a);
     case ImageKind::doc:
-      return cut_one(kid(n, 0));
+      return cut_one(child_at(n, 0));
     default:
       return false;
   }
@@ -214,23 +225,23 @@ bool Lowerer::cut_tokens(ImageId id) const {
   const ImageNode& n = at(id);
   return n.kind != ImageKind::choice
              ? cut_one(id)
-             : std::ranges::all_of(kids_of(n),
+             : std::ranges::all_of(children_of(n),
                                    [&](ImageId k) { return cut_one(k); });
 }
 
-Lowerer::Cut Lowerer::cut_prefix(ImageId p) {
+Descent<Lowerer::Cut> Lowerer::cut_prefix(ImageId p) {
   const ImageNode n = at(p);
   const std::vector<ImageId> es =
-      n.kind == ImageKind::seq ? kids_of(n) : std::vector<ImageId>{p};
+      n.kind == ImageKind::seq ? children_of(n) : std::vector<ImageId>{p};
   Cut out;
-  if (es.empty()) return out;
+  if (es.empty()) co_return out;
   for (std::size_t i = 0; i + 1 < es.size(); ++i) {
-    if (!gap(es[i])) return {};
+    if (!co_await gap(es[i])) co_return {};
     out.guards.push_back(es[i]);
   }
   out.token = es.back();
   out.ok = cut_tokens(out.token);
-  return out;
+  co_return out;
 }
 
 std::uint16_t Lowerer::skip_node(unsigned cfg) {
@@ -245,7 +256,7 @@ std::uint16_t Lowerer::skip_node(unsigned cfg) {
 
 std::uint16_t Lowerer::phrase_lexical(unsigned cfg, ImageId e) {
   if (at(e).kind == ImageKind::epsilon)
-    return _lex.push(LexNode{LexKind::seq, _c.nlexKid, 0});
+    return _lex.push(LexNode{LexKind::seq, _c.nlexChild, 0});
   return _lex.reify(_lex.resolve(cfg, e));
 }
 
@@ -253,7 +264,7 @@ std::uint16_t Lowerer::phrase_private_token(unsigned cfg, ImageId e,
                                             ImageId body) {
   const ImageNode n = at(e);
   const auto [at_, fresh] = _pool.termIndex.try_emplace(
-      key(Key::privateToken, _cfgs[cfg].home, e), _nterms);
+      key(Key::privateToken, _cfgs[cfg].sectionCfg, e), _nterms);
   const std::uint16_t t = at_->second;
   if (fresh) {
     if (_nterms >= kNtBase) {
@@ -280,79 +291,79 @@ std::uint16_t Lowerer::phrase_token(unsigned cfg, ImageId e) {
   return phrase_private_token(cfg, e, body_in(cfg, n.a));
 }
 
-std::uint16_t Lowerer::phrase(unsigned cfg, ImageId e, std::uint16_t skip,
-                              std::vector<std::uint32_t>& path) {
+Descent<std::uint16_t> Lowerer::phrase(unsigned cfg, ImageId e,
+                                       std::uint16_t skip,
+                                       std::vector<std::uint32_t>& path) {
   const ImageNode n = at(e);
   switch (n.kind) {
     case ImageKind::seq: {
       std::vector<std::uint16_t> parts, row;
-      for (const ImageId k : kids_of(n))
-        parts.push_back(phrase(cfg, k, skip, path));
+      for (const ImageId k : children_of(n))
+        parts.push_back(co_await phrase(cfg, k, skip, path));
       const bool spaced = _c.lex[skip].b != 0;
       for (std::size_t i = 0; i < parts.size(); ++i) {
         if (spaced && i != 0) row.push_back(phrase_skip(skip));
         row.push_back(parts[i]);
       }
-      return _lex.group(LexKind::seq, row);
+      co_return _lex.group(LexKind::seq, row);
     }
     case ImageKind::choice: {
-      std::vector<std::uint16_t> kids;
-      for (const ImageId k : kids_of(n))
-        kids.push_back(phrase(cfg, k, skip, path));
-      return _lex.group(LexKind::alt, kids);
+      std::vector<std::uint16_t> children;
+      for (const ImageId k : children_of(n))
+        children.push_back(co_await phrase(cfg, k, skip, path));
+      co_return _lex.group(LexKind::alt, children);
     }
     case ImageKind::repeat: {
       if (n.m >= kEndless || (n.n != kUnbounded && n.n >= kEndless))
         throw LowerRefused(LowerFail::tokenGraphTooLarge);
-      const auto one = phrase(cfg, kid(n, 0), skip, path);
-      if (n.m == 1 && n.n == 1) return one;
+      const auto one = co_await phrase(cfg, child_at(n, 0), skip, path);
+      if (n.m == 1 && n.n == 1) co_return one;
       const auto between = _c.lex[skip].b == 0 || n.n <= 1
                                ? kNoLexNode
                                : phrase_skip(skip);
-      return _lex.push(LexNode{LexKind::rep, one, between,
-                               static_cast<std::uint32_t>(n.m),
-                               n.n == kUnbounded
-                                   ? kEndless
-                                   : static_cast<std::uint32_t>(n.n)});
+      co_return _lex.push(LexNode{
+          LexKind::rep, one, between, static_cast<std::uint32_t>(n.m),
+          n.n == kUnbounded ? kEndless : static_cast<std::uint32_t>(n.n)});
     }
     case ImageKind::trigger: {
-      const auto body = phrase(cfg, kid(n, 0), skip, path);
+      const auto body = co_await phrase(cfg, child_at(n, 0), skip, path);
       if (lex_empty_nodes(_c)[body] != 0)
         lower_refuse_rule(_c, LowerFail::commitPrefixEmpty, _pool.owner);
-      return body;
+      co_return body;
     }
     case ImageKind::sectionClose: {
       if (_cfgs[cfg].end == kNoImage)
         refuse_lowering("cursiv: a section's close is read outside any section");
-      return phrase(cfg, _cfgs[cfg].end, skip, path);
+      co_return co_await phrase(cfg, _cfgs[cfg].end, skip, path);
     }
     case ImageKind::andOf:
     case ImageKind::notOf: {
-      const auto body = phrase(cfg, kid(n, 0), skip, path);
-      return _lex.push(LexNode{
+      const auto body = co_await phrase(cfg, child_at(n, 0), skip, path);
+      co_return _lex.push(LexNode{
           n.kind == ImageKind::andOf ? LexKind::positive : LexKind::negative,
           body});
     }
     case ImageKind::eof:
-      return _lex.push(LexNode{LexKind::end_mark});
+      co_return _lex.push(LexNode{LexKind::end_mark});
     case ImageKind::epsilon:
-      return _lex.push(LexNode{LexKind::seq, _c.nlexKid, 0});
+      co_return _lex.push(LexNode{LexKind::seq, _c.nlexChild, 0});
     case ImageKind::gapHas:
     case ImageKind::gapIs:
-      return _lex.push(LexNode{
+      co_return _lex.push(LexNode{
           n.kind == ImageKind::gapHas ? LexKind::gap_has : LexKind::gap_is,
-          phrase_lexical(cfg, kid(n, 0))});
+          phrase_lexical(cfg, child_at(n, 0))});
     case ImageKind::doc:
-      return phrase(cfg, kid(n, 0), skip, path);
+      co_return co_await phrase(cfg, child_at(n, 0), skip, path);
     case ImageKind::skip: {
       std::vector<std::uint16_t> trivia;
       for (std::uint64_t i = 0; i < n.m + n.n; ++i)
         trivia.push_back(phrase_token(
             cfg, _lex.make(ImageKind::ref, {}, 0, _im.ruleLists[n.a + i])));
-      return phrase(cfg, kid(n, 0), _lex.group(LexKind::skip, trivia), path);
+      co_return co_await phrase(cfg, child_at(n, 0),
+                                _lex.group(LexKind::skip, trivia), path);
     }
     case ImageKind::ref: {
-      if (terminal_rule(n.a)) return phrase_token(cfg, e);
+      if (terminal_rule(n.a)) co_return phrase_token(cfg, e);
       if (!data_rule(n.a))
         refuse_lowering(
             "a condition cannot test a rule that builds a node -- test the "
@@ -363,41 +374,42 @@ std::uint16_t Lowerer::phrase(unsigned cfg, ImageId e, std::uint16_t skip,
             "or through other rules -- test the terminals it starts with");
       path.push_back(n.a);
       const std::uint16_t out =
-          phrase(cfg, body_in(cfg, n.a), skip, path);
+          co_await phrase(cfg, body_in(cfg, n.a), skip, path);
       path.pop_back();
-      return out;
+      co_return out;
     }
     default:
-      return phrase_token(cfg, e);
+      co_return phrase_token(cfg, e);
   }
 }
 
-void Lowerer::cut_terms(unsigned cfg, ImageId token, DynSet& out) {
+Descent<void> Lowerer::cut_terms(unsigned cfg, ImageId token, DynSet& out) {
   if (const ImageNode n = at(token); n.kind == ImageKind::choice) {
-    for (const ImageId k : kids_of(n)) cut_terms(cfg, k, out);
-    return;
+    for (const ImageId k : children_of(n)) co_await cut_terms(cfg, k, out);
+    co_return;
   }
   out.set(term_of(cfg, token));
 }
 
 std::uint16_t Lowerer::cut_node(unsigned cfg, ImageId token) {
   DynSet terms;
-  cut_terms(cfg, token, terms);
-  std::vector<std::uint16_t> kids;
+  descend(cut_terms(cfg, token, terms));
+  std::vector<std::uint16_t> children;
   for (std::uint16_t t = 0; t < _nterms; ++t)
     if (terms.test(t))
-      kids.push_back(_lex.push(LexNode{LexKind::token, t}));
-  return kids.size() == 1 ? kids.front() : _lex.group(LexKind::alt, kids);
+      children.push_back(_lex.push(LexNode{LexKind::token, t}));
+  return children.size() == 1 ? children.front()
+                              : _lex.group(LexKind::alt, children);
 }
 
-void Lowerer::gap_join(unsigned cfg, std::uint16_t op,
-                       const std::vector<ImageId>& es) {
-  for (const ImageId e : es) gap_ops(cfg, e);
+Descent<void> Lowerer::gap_join(unsigned cfg, std::uint16_t op,
+                                const std::vector<ImageId>& es) {
+  for (const ImageId e : es) co_await gap_ops(cfg, e);
   gap_op(op);
   gap_op(static_cast<std::uint16_t>(es.size()));
 }
 
-void Lowerer::gap_ops(unsigned cfg, ImageId e) {
+Descent<void> Lowerer::gap_ops(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
   switch (n.kind) {
     case ImageKind::gapHas:
@@ -405,19 +417,19 @@ void Lowerer::gap_ops(unsigned cfg, ImageId e) {
       const bool has = n.kind == ImageKind::gapHas;
       gap_op(gap_leaf(key(has ? Key::hasLeaf : Key::isLeaf, 0, e), [&] {
         return GapLeaf{.kind = has ? GapLeafKind::has : GapLeafKind::is,
-                       .node = phrase_lexical(cfg, kid(n, 0))};
+                       .node = phrase_lexical(cfg, child_at(n, 0))};
       }));
-      return;
+      co_return;
     }
     case ImageKind::andOf: {
-      const ImageId k = kid(n, 0);
+      const ImageId k = child_at(n, 0);
       const ImageNode kn = at(k);
       if (kn.kind == ImageKind::eof || kn.kind == ImageKind::notOf) {
-        gap_ops(cfg, k);
-        return;
+        co_await gap_ops(cfg, k);
+        co_return;
       }
       if (kn.kind == ImageKind::trigger) {
-        const Cut cut = cut_prefix(kid(kn, 0));
+        const Cut cut = co_await cut_prefix(child_at(kn, 0));
         if (cut.ok) {
           const ImageId trigger =
               _lex.make(ImageKind::trigger, std::span(&cut.token, 1));
@@ -425,21 +437,22 @@ void Lowerer::gap_ops(unsigned cfg, ImageId e) {
             return GapLeaf{.kind = GapLeafKind::cut,
                            .node = cut_node(cfg, cut.token)};
           }));
-          for (const ImageId g : cut.guards) gap_ops(cfg, g);
+          for (const ImageId g : cut.guards) co_await gap_ops(cfg, g);
           if (!cut.guards.empty()) {
             gap_op(kGapAnd);
             gap_op(static_cast<std::uint16_t>(cut.guards.size() + 1u));
           }
-          return;
+          co_return;
         }
       }
-      if (!lexical(k)) refuse_lowering(kUnreadable);
+      if (!co_await lexical(k)) refuse_lowering(kUnreadable);
       gap_op(gap_leaf(key(Key::andLeaf, cfg, e), [&] {
         const std::uint16_t skip = skip_node(cfg);
         std::vector<std::uint32_t> path;
-        const std::uint16_t body = phrase(cfg, k, skip, path);
+        const std::uint16_t body = descend(phrase(cfg, k, skip, path));
         return GapLeaf{
-            .kind = lex_phrase(k) ? GapLeafKind::phrase : GapLeafKind::head,
+            .kind = descend(lex_phrase(k)) ? GapLeafKind::phrase
+                                           : GapLeafKind::head,
             .node = body,
             .skip = _c.lex[skip].b == 0 ? kNoLexNode : phrase_skip(skip),
             .cfg = kn.kind == ImageKind::sectionClose
@@ -447,37 +460,38 @@ void Lowerer::gap_ops(unsigned cfg, ImageId e) {
                        : static_cast<std::uint8_t>(cfg),
             .trigger = kn.kind == ImageKind::trigger};
       }));
-      return;
+      co_return;
     }
     case ImageKind::eof:
       gap_op(gap_leaf(key(Key::endLeaf, 0, e),
                       [] { return GapLeaf{.kind = GapLeafKind::end}; }));
-      return;
+      co_return;
     case ImageKind::notOf: {
-      ImageId inner = kid(n, 0);
-      if (at(inner).kind == ImageKind::andOf) inner = kid(at(inner), 0);
-      if (gap(inner) || at(inner).kind == ImageKind::eof)
-        gap_ops(cfg, inner);
+      ImageId inner = child_at(n, 0);
+      if (at(inner).kind == ImageKind::andOf) inner = child_at(at(inner), 0);
+      if (co_await gap(inner) || at(inner).kind == ImageKind::eof)
+        co_await gap_ops(cfg, inner);
       else
-        gap_ops(cfg, _lex.make(ImageKind::andOf, std::span(&inner, 1)));
+        co_await gap_ops(cfg,
+                         _lex.make(ImageKind::andOf, std::span(&inner, 1)));
       gap_op(kGapNot);
       gap_op(1);
-      return;
+      co_return;
     }
     case ImageKind::choice:
-      gap_join(cfg, kGapOr, kids_of(n));
-      return;
+      co_await gap_join(cfg, kGapOr, children_of(n));
+      co_return;
     case ImageKind::seq:
-      gap_join(cfg, kGapAnd, kids_of(n));
-      return;
+      co_await gap_join(cfg, kGapAnd, children_of(n));
+      co_return;
     default:
       refuse_lowering(kUnreadable);
   }
 }
 
 std::uint16_t Lowerer::gap_cond(unsigned cfg, ImageId e) {
-  const std::uint64_t k = phrase_gap(e) ? key(Key::phrase, cfg, e)
-                                        : key(Key::cond, 0, e);
+  const std::uint64_t k =
+      descend(phrase_gap(e)) ? key(Key::phrase, cfg, e) : key(Key::cond, 0, e);
   const auto [at_, fresh] = _pool.gapCond.try_emplace(k, _c.ngapConds);
   const std::uint16_t out = at_->second;
   if (!fresh) return out;
@@ -487,7 +501,7 @@ std::uint16_t Lowerer::gap_cond(unsigned cfg, ImageId e) {
     return 0;
   }
   _c.gapCondAt[_c.ngapConds] = _c.ngapOps;
-  gap_ops(cfg, e);
+  descend(gap_ops(cfg, e));
   ++_c.ngapConds;
   _c.gapCondAt[_c.ngapConds] = _c.ngapOps;
   find_unbounded_runs(_c, out, _pool.owner, _c.unbounded);
@@ -496,7 +510,7 @@ std::uint16_t Lowerer::gap_cond(unsigned cfg, ImageId e) {
 
 void Lowerer::check_implied_token(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
-  if (n.kind == ImageKind::doc) return check_implied_token(cfg, kid(n, 0));
+  if (n.kind == ImageKind::doc) return check_implied_token(cfg, child_at(n, 0));
   if (n.kind == ImageKind::ref && terminal_rule(n.a))
     return check_implied_token(cfg, body_in(cfg, n.a));
   if (n.kind != ImageKind::lit || (n.flags & (kLitGuardWord | kLitGuardExpr)))
@@ -516,7 +530,7 @@ std::uint16_t Lowerer::implied_term(ImageId e, std::uint16_t k) {
         return _lex.push(LexNode{LexKind::implied, 0, 0, 0, 0});
       });
   if (t == before) {
-    unspell(t, kLaidImplied);
+    unspell(t, kSyntheticImplied);
     _c.terms[t].cond = k;
   }
   return t;

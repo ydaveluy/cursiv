@@ -5,8 +5,7 @@
 #include <cstdint>
 #include <string_view>
 #include <variant>
-// Shapes a grammar author reported as building no tree at run time: each one
-// is accepted by the generator, so each must build the tree its directives
+// Shapes the generator accepts: each must build the tree its directives
 // describe, in both engines.
 
 namespace tmaterialise {
@@ -62,7 +61,7 @@ struct Block : cursiv::Extends<cursiv::AstNode> {
 };
 struct Holder : cursiv::Extends<cursiv::AstNode> {
   Expr* value = nullptr;
-  vector<Expr*> kids;
+  vector<Expr*> children;
   boolean flag;
 };
 struct Flags : cursiv::Extends<cursiv::AstNode> {
@@ -134,7 +133,7 @@ struct PayloadCreate : Base {
       : rule<create<Holder>(
             assign<&Holder::value>(create<Var>(assign<&Var::name>(ref<ID>)) +
                                    many(step)) +
-            many(lit<";"> + append<&Holder::kids>(
+            many(lit<";"> + append<&Holder::children>(
                                 create<Var>(assign<&Var::name>(ref<ID>)) +
                                 option(step))))> {};
   using ignored = WS;
@@ -144,7 +143,8 @@ struct FlagGroup : Base {
   struct Root : rule<create<Holder>(
                     option(flag<&Holder::flag>(lit<"!">) +
                            assign<&Holder::value>(ref<VarBase>)) +
-                    many(lit<";"> + append<&Holder::kids>(ref<VarBase>)))> {};
+                    many(lit<";"> + append<&Holder::children>(ref<VarBase>)))> {
+  };
   using ignored = WS;
 };
 
@@ -243,9 +243,9 @@ struct Suite : Base {
   using entry = Root;
   using ignored = WS;
 };
-// The derivation model cannot yet keep an outer node around a create inside
-// a directive's payload. Its seven original fuzz lanes exclude PayloadCreate;
-// that shape is checked explicitly against Holder and its children instead.
+// The derivation model cannot keep an outer node around a create inside a
+// directive's payload, so its fuzz lanes leave PayloadCreate out; that shape is
+// checked against Holder and its children instead.
 struct FuzzSuite : Suite {
   struct Root : rule<(lit<"atomchain:"> + ref<AtomChain::Root>) |
                      (lit<"sharedprefix:"> + ref<SharedPrefix::Unary>) |

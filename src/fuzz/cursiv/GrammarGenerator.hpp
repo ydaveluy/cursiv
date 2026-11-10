@@ -1,7 +1,6 @@
-// The only generator: walks the declarative grammar and writes the
-// tokens a document is made of and the typed AST its directives build,
-// together. Reads no table -- bytes come from `GrammarLexicon`, nodes
-// from `GrammarActions` -- recursion closes on a cost-guided budget.
+// Walks the declarative grammar and writes a document's tokens and the AST its
+// directives build, together: bytes from `GrammarLexicon`, nodes from
+// `GrammarActions`, recursion closed by a cost-guided budget.
 #pragma once
 
 #include <algorithm>
@@ -46,15 +45,13 @@ struct GrammarGenerator {
     Walk w{&src, &ar, {}, 0};
     bool built = false;
     const ElementId entry = g.entryRule();
-    // A climb holds no children in the model (`GrammarCost`'s own note),
-    // so `rule_node` would walk none and write nothing. Every other climb
-    // is reached through `walk`'s `infix_rule` case; the entry is the one
-    // `walk` never sees.
+    // An entry that is a climb, which `walk` never sees: the model gives it no
+    // children for `rule_node` to walk.
     w.d.tree = g.kindOf(entry) == ElementKind::infix_rule
                    ? infix_chain(entry, w, built)
                    : rule_node(entry, w, built);
     w.d.complete = w.ok;
-    if (w.d.complete) lay_out(w.d);
+    if (w.d.complete) build_text(w.d);
     return std::move(w.d);
   }
 
@@ -65,20 +62,20 @@ struct GrammarGenerator {
     GrammarDerivation d;
     unsigned depth = 0;
     bool ok = true;
-    // The adjacency island being written, and where it started: every token of
-    // it but the first admits no separator in front.
-    unsigned glue = 0;
-    std::size_t glueFrom = 0;
-    // The last token ate the trivia beside it, so the next one takes none.
+    // The region that ignores nothing being written, and where it started:
+    // every token of it but the first admits no separator in front.
+    unsigned bare = 0;
+    std::size_t bareFrom = 0;
+    // The last token included the trivia beside it, so the next one takes none.
     bool fed = false;
+    // The end of input was asserted: no token may follow.
+    bool ended = false;
     // The value rule the assignment being walked descended into: its converter
     // is the payload's, and a token of its own names another element.
     ElementId valueRule = kNoElement;
-    // Whether the assignment being walked reached its member. Saved and
-    // restored per assignment: a write inside the payload is another
-    // assignment's, and a shared counter let the outer one pass for
-    // written.
-    bool landed = false;
+    // Whether the assignment being walked reached its member, saved and
+    // restored per assignment.
+    bool written = false;
   };
 
   // What one rule's body collected: the node it built, and the node a bare
@@ -94,7 +91,7 @@ struct GrammarGenerator {
   }
 
   void refuse(ElementId e, const AstNode* on, Walk& w) const {
-    w.d.unwritten.push_back(AstExcused{on, std::string(g.featureOf(e))});
+    w.d.unwritten.push_back(AstUnwritten{on, std::string(g.featureOf(e))});
   }
 
   // What one rule builds: the node its directives created, the node its single
@@ -119,7 +116,7 @@ struct GrammarGenerator {
 
   void walk(ElementId e, ElementId assign, Frame& f, Walk& w) const {
     if (!w.ok) return;
-    const std::span<const ElementId> kids = g.childrenOf(e);
+    const std::span<const ElementId> children = g.childrenOf(e);
     switch (g.kindOf(e)) {
       case ElementKind::literal:
         emit(e, std::string(g.textOf(e)), w);
@@ -131,7 +128,7 @@ struct GrammarGenerator {
       case ElementKind::parser_rule:
       case ElementKind::data_type_rule: {
         const bool climb = g.kindOf(e) == ElementKind::infix_rule;
-        if (climb ? act.primary(e) == kNoElement : kids.empty()) break;
+        if (climb ? act.primary(e) == kNoElement : children.empty()) break;
         bool built = false;
         AstNode* const sub =
             climb ? infix_chain(e, w, built) : rule_node(e, w, built);
@@ -147,7 +144,7 @@ struct GrammarGenerator {
               act.write_node(assign, *to, sub) == Write::not_modelled)
             refuse(assign, to, w);
           else
-            w.landed = true;
+            w.written = true;
         } else if (f.adopted == nullptr) {
           f.adopted = sub;
         }
@@ -158,24 +155,24 @@ struct GrammarGenerator {
         return;
       case ElementKind::create:
         f.node = act.make(e, *w.ar);
-        for (const ElementId c : kids) walk(c, assign, f, w);
+        for (const ElementId c : children) walk(c, assign, f, w);
         return;
       case ElementKind::nest: {
-        // The node built so far is the one this wraps -- a bare call left it
-        // in `adopted`, and taking only `node` dropped the wrap in silence.
+        // The node built so far is the one this wraps; a bare call left it in
+        // `adopted`.
         AstNode* const inner = f.node != nullptr ? f.node : f.adopted;
         f.adopted = nullptr;
         f.node = act.make(e, *w.ar);
         if (f.node == nullptr || inner == nullptr ||
             act.write_node(e, *f.node, inner) == Write::not_modelled)
           refuse(e, f.node, w);
-        for (const ElementId c : kids) walk(c, assign, f, w);
+        for (const ElementId c : children) walk(c, assign, f, w);
         return;
       }
       case ElementKind::ordered_choice:
       case ElementKind::unordered_choice: {
-        if (kids.empty()) return;
-        walk(kids[pick(kids, w)], assign, f, w);
+        if (children.empty()) return;
+        walk(children[pick(children, w)], assign, f, w);
         return;
       }
       case ElementKind::repetition:
@@ -183,37 +180,42 @@ struct GrammarGenerator {
         return;
       case ElementKind::and_predicate:
       case ElementKind::not_predicate:
-        return;  // an assertion spells nothing
-      case ElementKind::skip_region: {
-        const unsigned wasGlue = w.glue;
-        const std::size_t wasFrom = w.glueFrom;
-        if (lex.glues(e)) {
-          ++w.glue;
-          w.glueFrom = w.d.tokens.size();
+        // An assertion spells nothing. The walk imposes only the end of
+        // input; any other is left unwritten below.
+        if (g.kindOf(e) == ElementKind::not_predicate && children.empty()) {
+          w.ended = true;
+          return;
         }
-        for (const ElementId c : kids) walk(c, assign, f, w);
-        w.glue = wasGlue;
-        w.glueFrom = wasFrom;
+        break;
+      case ElementKind::skip_region: {
+        const unsigned wasBare = w.bare;
+        const std::size_t wasFrom = w.bareFrom;
+        if (lex.ignores_nothing(e)) {
+          ++w.bare;
+          w.bareFrom = w.d.tokens.size();
+        }
+        for (const ElementId c : children) walk(c, assign, f, w);
+        w.bare = wasBare;
+        w.bareFrom = wasFrom;
         return;
       }
       case ElementKind::group:
       case ElementKind::unordered_group:
       case ElementKind::through:
-        for (const ElementId c : kids) walk(c, assign, f, w);
+        for (const ElementId c : children) walk(c, assign, f, w);
         return;
       default:
         break;
     }
-    // What the walk cannot write: a character range standing in the
-    // syntax, where spelling one byte would leave it unable to say where
-    // a separator goes.
+    // What the walk cannot write: a character range in the syntax, whose
+    // separators it cannot place, and an assertion it cannot impose.
     ++w.d.unrendered;
     w.ok = false;
   }
 
   // A precedence table, written flat and folded after. The chain is
-  // `primary (op primary)*`; the tree it owes is what climbing the steps
-  // builds, the same resolution the table settled at construction.
+  // `primary (op primary)*`; the tree it must build is what climbing the steps
+  // builds, the same resolution the table decided at construction.
   [[nodiscard]] AstNode* infix_chain(ElementId e, Walk& w, bool& built) const {
     built = false;
     if (++w.depth > kGrammarDepthCap) {
@@ -304,23 +306,21 @@ struct GrammarGenerator {
     return lhs;
   }
 
-  // A member is written from one node or from one token. A value spelled
-  // by several tokens is what a data rule joins through each part's own
-  // converter; the walk holds no such reading, so it names the member
-  // instead.
+  // A member is written from one node or one token. A value of several tokens,
+  // which a data rule joins, is only named.
   void assign_member(ElementId e, Frame& f, Walk& w) const {
     AstNode* const to = f.node;
     const std::size_t first = w.d.tokens.size();
-    const bool outer = w.landed;
+    const bool outer = w.written;
     const ElementId outerRule = w.valueRule;
-    w.landed = false;
+    w.written = false;
     w.valueRule = kNoElement;
     for (const ElementId c : g.childrenOf(e)) walk(c, e, f, w);
-    const bool landed = w.landed;
+    const bool written = w.written;
     const ElementId rule = w.valueRule;
-    w.landed = outer;
+    w.written = outer;
     w.valueRule = outerRule;
-    if (!w.ok || landed) return;
+    if (!w.ok || written) return;
     const std::size_t last = w.d.tokens.size();
     if (to == nullptr || last == first ||
         (last > first + 1 && rule == kNoElement)) {
@@ -345,71 +345,71 @@ struct GrammarGenerator {
       refuse(e, to, w);
   }
 
-  // The alternative: the cheapest once the budget is spent, so a
-  // recursive grammar always closes. One that spells nothing is the last
-  // resort: the walk cannot certify such a branch's assertion about the
-  // input, so taking it could contradict the very next token written.
-  [[nodiscard]] unsigned pick(std::span<const ElementId> kids, Walk& w) const {
+  // The alternative: the cheapest once the budget is spent, so recursion
+  // closes. One that spells nothing comes last: its assertion is unchecked.
+  [[nodiscard]] unsigned pick(std::span<const ElementId> children,
+                              Walk& w) const {
     if (guide != nullptr) {
-      const int k = guide->prefer(kids, w.d.tokens.size());
+      const int k = guide->prefer(children, w.d.tokens.size());
       if (k >= 0) return static_cast<unsigned>(k);
     }
     unsigned spelling = 0;
-    for (const ElementId c : kids) spelling += cost[c] != 0 ? 1u : 0u;
-    if (spelling == 0) spelling = static_cast<unsigned>(kids.size());
-    const bool all = spelling == kids.size();
+    for (const ElementId c : children) spelling += cost[c] != 0 ? 1u : 0u;
+    if (spelling == 0) spelling = static_cast<unsigned>(children.size());
+    const bool all = spelling == children.size();
     if (!cheap(w)) {
       unsigned k = w.src->choose(DecisionKind::entry, spelling);
-      for (unsigned i = 0; i < kids.size(); ++i)
-        if (all || cost[kids[i]] != 0) {
+      for (unsigned i = 0; i < children.size(); ++i)
+        if (all || cost[children[i]] != 0) {
           if (k-- == 0) return i;
         }
       return 0;
     }
-    unsigned best = static_cast<unsigned>(kids.size());
-    for (unsigned i = 0; i < kids.size(); ++i) {
-      if (!all && cost[kids[i]] == 0) continue;
-      if (best == kids.size() || cost[kids[i]] < cost[kids[best]]) best = i;
+    unsigned best = static_cast<unsigned>(children.size());
+    for (unsigned i = 0; i < children.size(); ++i) {
+      if (!all && cost[children[i]] == 0) continue;
+      if (best == children.size() || cost[children[i]] < cost[children[best]])
+        best = i;
     }
-    return best == kids.size() ? 0u : best;
+    return best == children.size() ? 0u : best;
   }
 
   void repeat(ElementId e, ElementId assign, Frame& f, Walk& w) const {
-    const std::span<const ElementId> kids = g.childrenOf(e);
-    if (kids.empty()) return;
+    const std::span<const ElementId> children = g.childrenOf(e);
+    if (children.empty()) return;
     const unsigned lo = g.minOf(e);
     const unsigned hi = g.maxOf(e);
     const unsigned extra = hi > lo ? std::min(hi - lo, kGrammarRepCap) : 0u;
     // A later round begins on the separator a bracketed repetition carries.
-    const ElementId head = kids.size() > 1 ? kids[1] : kids[0];
+    const ElementId head = children.size() > 1 ? children[1] : children[0];
     const bool steered =
         guide != nullptr && guide->another(head, w.d.tokens.size()) >= 0;
     unsigned n = lo;
     if (!steered && !cheap(w) && extra != 0)
       n = lo + w.src->choose(DecisionKind::byte, extra + 1);
-    for (unsigned i = 0; i < n && w.ok; ++i) round(kids, i, assign, f, w);
+    for (unsigned i = 0; i < n && w.ok; ++i) round(children, i, assign, f, w);
     while (steered && w.ok && n < lo + extra &&
            guide->another(head, w.d.tokens.size()) > 0)
-      round(kids, n++, assign, f, w);
+      round(children, n++, assign, f, w);
   }
 
-  void round(std::span<const ElementId> kids, unsigned i, ElementId assign,
+  void round(std::span<const ElementId> children, unsigned i, ElementId assign,
              Frame& f, Walk& w) const {
-    if (i != 0 && kids.size() > 1) walk(kids[1], assign, f, w);
-    walk(kids[0], assign, f, w);
+    if (i != 0 && children.size() > 1) walk(children[1], assign, f, w);
+    walk(children[0], assign, f, w);
   }
 
   void emit(ElementId e, std::string text, Walk& w) const {
-    if (text.empty()) {
+    if (text.empty() || w.ended) {
       ++w.d.unrendered;
       w.ok = false;
       return;
     }
-    const bool hungry = lex.devours(e);
-    const bool glued =
-        (w.glue != 0 && w.d.tokens.size() > w.glueFrom) || hungry || w.fed;
-    w.fed = hungry;
-    w.d.tokens.push_back(GrammarToken{e, std::move(text), {}, glued, 0, 0});
+    const bool readsSeparator = lex.reads_separator(e);
+    const bool attached = (w.bare != 0 && w.d.tokens.size() > w.bareFrom) ||
+                          readsSeparator || w.fed;
+    w.fed = readsSeparator;
+    w.d.tokens.push_back(GrammarToken{e, std::move(text), {}, attached, 0, 0});
   }
 
   // The value of a named terminal, from its own expression. A spelling the
@@ -429,14 +429,14 @@ struct GrammarGenerator {
   }
 
   // The separators: one ignored word in front of every token but the first,
-  // and none at all inside an adjacency island. The document is assembled once
-  // -- no fixpoint, because nothing here reads the text back.
-  void lay_out(GrammarDerivation& d) const {
+  // and none inside a region that ignores nothing. The document is built once:
+  // nothing here reads the text back.
+  void build_text(GrammarDerivation& d) const {
     const std::string_view sep = lex.separator();
     d.text.clear();
     for (std::size_t i = 0; i < d.tokens.size(); ++i) {
       GrammarToken& t = d.tokens[i];
-      t.sep = i != 0 && !t.glued ? std::string(sep) : std::string();
+      t.sep = i != 0 && !t.attached ? std::string(sep) : std::string();
       d.text += t.sep;
       t.begin = static_cast<std::uint32_t>(d.text.size());
       d.text += t.text;

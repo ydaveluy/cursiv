@@ -30,8 +30,7 @@ DefaultAstReflection::DefaultAstReflection(const AstMetaData& meta) : _f(meta) {
 TypeMetaData DefaultAstReflection::getTypeMetaData(
     const AstTypeTag* type) const noexcept {
   const std::uint16_t i = typeIndexOf(type);
-  // The unknown keeps its name: the caller asked about a class, and the class
-  // knows what it is called even when this grammar does not.
+  // An unknown class still gives its name.
   if (i == kNoType)
     return TypeMetaData{
         type != nullptr ? type->name : std::string_view{}, {}, {}};

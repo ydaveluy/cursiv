@@ -20,8 +20,7 @@
 
 namespace characters_cases {
 
-// Charset semantics: membership; reversed-range rejection is a hard error
-// (untestable positively).
+// Membership. A reversed range is a compile error, so it has no test here.
 static_assert(cursiv::engine::parse_charset("a-z").test('m'));
 static_assert(!cursiv::engine::parse_charset("a-z").test('M'));
 static_assert(cursiv::engine::parse_charset("a-zA-Z_").test('_'));
@@ -111,14 +110,14 @@ void quotes(const cursiv::Parser& p) {
   check(p, with("qn:", "'''"), "<refused>");
 }
 
-void a_stray_byte_stands_alone(const cursiv::Parser& p) {
+void an_invalid_byte_stands_alone(const cursiv::Parser& p) {
   for (const char* tag : {"sn:", "sa:"}) {
-    for (const std::string_view stray :
+    for (const std::string_view invalid :
          {std::string_view("\xFF"), std::string_view("\xC3"),
           std::string_view("\xE2\x82"), std::string_view("\xE2"),
           std::string_view("\xF0\x9F\x98"), std::string_view("\x80"),
           std::string_view("\xED\xA0\x80"), std::string_view("\xC0\x80")}) {
-      const std::string text = "\"a" + std::string(stray) + "\"";
+      const std::string text = "\"a" + std::string(invalid) + "\"";
       check(p, with(tag, text), text);
     }
     const std::string closed = "\"" + std::string(kAcute) + "\"";
@@ -315,14 +314,14 @@ void any_text(const cursiv::Parser& p) {
     a_run_ends_at_a_character(p, text);
     check(p, with("chars:", text), joined(chars));
     check(p, with("two:", text), chars.size() == 2 ? text : "<refused>");
-    bool hasA = false, stray = false;
+    bool hasA = false, invalid = false;
     for (const std::string& c : chars) {
       hasA = hasA || c == "a";
-      stray =
-          stray || (c.size() == 1 && static_cast<unsigned char>(c[0]) >= 0x80);
+      invalid = invalid ||
+                (c.size() == 1 && static_cast<unsigned char>(c[0]) >= 0x80);
     }
     check(p, with("ncs:", text), hasA ? "<refused>" : joined(chars));
-    check(p, with("strict:", text), stray ? "<refused>" : text);
+    check(p, with("strict:", text), invalid ? "<refused>" : text);
     std::string quoted = "\"";
     for (const char c : text)
       if (c != '"') quoted += c;
@@ -469,7 +468,7 @@ void a_run_and_a_mark_read_characters(const cursiv::Parser& p) {
 void exercise(const cursiv::Parser& p) {
   whole_scalars(p);
   quotes(p);
-  a_stray_byte_stands_alone(p);
+  an_invalid_byte_stands_alone(p);
   a_byte_is_one_byte(p);
   classes(p);
   the_scalar_and_the_byte(p);
@@ -736,9 +735,8 @@ int run() {
   CHECK(names(wide(), in("intersect", "ifé abé"), {"if", "ab"}));
   CHECK(names(wide(), in("intersect", "if é"), {"<refused>"}));
   // A guard refusing every scalar past ASCII beside a keyword of the same
-  // word: the keyword stands before `€`, and the name before `·`, a word.
-  // Where the guard passes, the literal and the keyword tie, and the rule's
-  // first arm, the literal's, is elected.
+  // word: the keyword stands before `€`, the name before `·`; where both
+  // stand, the first arm wins.
   {
     static constexpr auto& A = tchars::generated::Lr::kTable;
     std::uint16_t mode = 0xFFFF;

@@ -9,8 +9,7 @@
       "include": "#comments"
     },
     {
-      "name": "keyword.control.arithmetics",
-      "match": "(?i)\\b(def|module)\\b"
+      "include": "#keywords"
     },
     {
       "name": "constant.numeric.arithmetics",
@@ -18,6 +17,10 @@
     }
   ],
   "repository": {
+    "keywords": {
+      "name": "keyword.control.arithmetics",
+      "match": "(?i)\\b(module|def)\\b"
+    },
     "comments": {
       "patterns": [
         {

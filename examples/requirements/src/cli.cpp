@@ -1,4 +1,4 @@
-// The requirements command line: the usual verdict, plus `generate FILE` -- an
+// The requirements command line: the usual check, plus `generate FILE`: an
 // HTML coverage summary, which needs both languages of the workspace.
 
 #include <filesystem>
@@ -46,7 +46,7 @@ int generate(const GenerateOptions& options) {
 
   // The whole folder: a coverage summary is about the `.tst` files beside the
   // `.req`, so a build of the one file alone would report nothing covered. A
-  // missing file is said before its folder is scanned for nothing.
+  // missing file is reported before its folder is scanned.
   const std::string path = std::filesystem::absolute(options.path).string();
   if (!std::filesystem::is_regular_file(path))
     throw cursiv::UsageError(path + " is not a regular file");
@@ -88,7 +88,7 @@ int generate(const GenerateOptions& options) {
       options.destination.has_value()
           ? std::optional<std::string_view>(*options.destination)
           : std::nullopt;
-  // Written first: a summary that cannot be written is not announced.
+  // Written first: a summary that cannot be written is not reported.
   const std::string summary =
       req::generate_summary(*model, tests, path, destination);
   std::cout << "Requirement coverage generated successfully: " << summary

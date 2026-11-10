@@ -1,7 +1,6 @@
-// The calculator's six checks, each said and each silent. Two are more than a
-// table lookup: the divisor is evaluated, so a name standing for zero is a
-// division by zero; and a call cycle is said at every call site it runs
-// through, carrying the path that names which call closes it.
+// The calculator's six checks, each reporting and each silent. A name standing
+// for zero is a division by zero, and a call cycle is reported at each of its
+// call sites with its path.
 
 #include <algorithm>
 #include <cstddef>
@@ -56,7 +55,7 @@ struct World {
   }
 };
 
-// How many findings say that sentence, whatever else they carry.
+// How many findings carry that message, whatever else they carry.
 std::size_t count(const ct::ValidationResult& said, std::string_view message) {
   return ct::filterByOptions(said, {.message = std::string(message)}).size();
 }
@@ -137,6 +136,20 @@ void a_three_step_cycle_spells_every_step() {
   const ct::ValidationResult said =
       world.validate("module m\ndef f: g;\ndef g: h;\ndef h: f;\n");
   CHECK(count(said, "Recursion is not allowed [g()->h()->f()]") == 3);
+}
+
+// A cycle that two sibling calls reach, `b` and `c` from `a`, is reported
+// whatever the order of the definitions.
+void a_cycle_reached_through_two_siblings_is_said() {
+  for (const std::string_view order :
+       {"def s: a;\ndef a: b + c;\ndef b: c;\ndef c: b;\n",
+        "def b: c;\ndef c: b;\ndef s: a;\ndef a: b + c;\n"}) {
+    const World world;
+    const ct::ValidationResult said =
+        world.validate("module m\n" + std::string(order));
+    CHECK(count(said, "Recursion is not allowed [c()->b()]") == 2);
+    CHECK(said.diagnostics.size() == 2);
+  }
 }
 
 void a_call_that_returns_says_nothing() {
@@ -277,22 +290,27 @@ void a_short_constant_is_offered_as_written() {
              .length = 10});
 }
 
-// The rewrite writes only a text the grammar reads back: a NUMBER has neither
-// a sign nor an exponent, so `1 - 2` is told it is -1 and offered no edit.
+// The rewrite writes only a number that reads back as the same value: none for
+// `1 - 2`, which has a sign, or for `0 * (1 - 2)`, a negative zero; a plain
+// zero is offered.
 void the_quick_fix_writes_only_a_number_the_grammar_reads() {
   const arith::ArithmeticsLanguage editor = arith::create_lsp_services();
-  const ct::ValidationResult said = ct::validationHelper(
-      editor.language, "module m\ndef a: 50000 * 2;\ndef b: 1 - 2;\n");
-  CHECK(said.diagnostics.size() == 2);
+  const ct::ValidationResult said =
+      ct::validationHelper(editor.language,
+                           "module m\ndef a: 50000 * 2;\ndef b: 1 - 2;\n"
+                           "def c: (0 * (1 - 2)) ^ (0 - 1);\ndef d: 1 - 1;\n");
+  CHECK(said.diagnostics.size() == 5);
   lsp::CodeActionParams params;
-  params.range.end.line = 3;
+  params.range.end.line = 5;
   const std::vector<lsp::CodeAction> actions =
       editor.language.codeActionProvider->getCodeActions(*said.document,
                                                          params);
-  CHECK(actions.size() == 1);
-  if (!actions.empty())
-    CHECK(actions[0].title == "Replace with constant 100000");
-  if (actions.size() != 1 || !actions[0].edit.has_value()
+  std::vector<std::string> titles;
+  for (const lsp::CodeAction& action : actions) titles.push_back(action.title);
+  CHECK((titles
+         == std::vector<std::string>{"Replace with constant 100000",
+                                     "Replace with constant 0"}));
+  if (actions.empty() || !actions[0].edit.has_value()
       || !actions[0].edit->changes.has_value())
     return;
   const auto& edits = actions[0].edit->changes->begin()->second;
@@ -316,15 +334,15 @@ void a_value_is_written_as_javascript_writes_it() {
 }
 
 // The definitions without parameters are values: each is computed once, so a
-// chain that doubles at every storey costs one step per storey.
+// chain that doubles at every level costs one step per level.
 void a_shared_constant_is_computed_once() {
   const World world;
   std::string text = "module m\ndef d0: 1;\n";
-  constexpr int kStoreys = 64;
-  for (int i = 1; i <= kStoreys; ++i)
+  constexpr int kLevels = 64;
+  for (int i = 1; i <= kLevels; ++i)
     text += "def d" + std::to_string(i) + ": d" + std::to_string(i - 1) + " + d"
             + std::to_string(i - 1) + ";\n";
-  text += "d" + std::to_string(kStoreys) + ";\n";
+  text += "d" + std::to_string(kLevels) + ";\n";
   const ct::ValidationResult said = world.validate(text);
   ct::expectNoIssues(said);
   const auto& module =
@@ -338,9 +356,9 @@ void a_shared_constant_is_computed_once() {
 // A worker's stack can be small -- half a mebibyte on macOS, one on WASI -- so
 // no walk holds a native frame per term or per call.
 #ifdef NDEBUG
-constexpr std::size_t kCrampedStack = 64 * 1024;
+constexpr std::size_t kSmallStack = 64 * 1024;
 #else
-constexpr std::size_t kCrampedStack = 256 * 1024;
+constexpr std::size_t kSmallStack = 256 * 1024;
 #endif
 
 struct Walk {
@@ -372,17 +390,17 @@ void* walk(void* arg) {
 }
 
 // A sum of many terms is as deep a tree as it has terms, and a chain of
-// definitions is as deep a call stack as it has storeys.
+// definitions is as deep a call stack as it has definitions.
 void a_deep_module_fits_a_small_stack() {
   constexpr std::size_t kTerms = 20000;
-  constexpr std::size_t kStoreys = 5000;
+  constexpr std::size_t kLevels = 5000;
   std::string text = "module m\ndef sum: x";
   for (std::size_t i = 0; i < kTerms; ++i) text += " + 1";
   text += ";\ndef x: 0;\ndef d0: 0;\n";
-  for (std::size_t i = 1; i <= kStoreys; ++i)
+  for (std::size_t i = 1; i <= kLevels; ++i)
     text +=
         "def d" + std::to_string(i) + ": d" + std::to_string(i - 1) + " + 1;\n";
-  text += "sum;\nd" + std::to_string(kStoreys) + ";\n";
+  text += "sum;\nd" + std::to_string(kLevels) + ";\n";
 
   const World world;
   const ct::ValidationResult said = world.validate(text);
@@ -394,7 +412,7 @@ void a_deep_module_fits_a_small_stack() {
   job.document = said.document.get();
   pthread_attr_t attr;
   pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, kCrampedStack);
+  pthread_attr_setstacksize(&attr, kSmallStack);
   pthread_t th;
   const bool started = pthread_create(&th, &attr, &walk, &job) == 0;
   pthread_attr_destroy(&attr);
@@ -407,7 +425,7 @@ void a_deep_module_fits_a_small_stack() {
     values.push_back(value.value_or(-1.0));
   std::ranges::sort(values);
   CHECK(values
-        == std::vector<double>{static_cast<double>(kStoreys),
+        == std::vector<double>{static_cast<double>(kLevels),
                                static_cast<double>(kTerms)});
 }
 #endif
@@ -456,11 +474,18 @@ void calls_keep_parameters_and_pending_operands() {
   if (first != nullptr) {
     CHECK(!interpreter.evaluate(*first, 1).has_value());
     CHECK(interpreter.evaluate(*first, 512) == 66.0);
+    // A question stopped at any step leaves no state behind for the next.
+    for (std::size_t budget = 1; budget < 64; ++budget) {
+      const std::optional<double> bounded =
+          interpreter.evaluate(*first, budget);
+      CHECK(!bounded.has_value() || *bounded == 66.0);
+      CHECK(interpreter.evaluate(*first) == 66.0);
+    }
   }
 }
 
-// The evaluations a valid module asks for, each one said: a zero that a
-// parameter brings has no value, and that is an answer too, not a silence.
+// The evaluations a valid module asks for, each one reported: a zero that a
+// parameter brings has no value, and that is an answer too.
 void every_evaluation_is_said() {
   const std::filesystem::path file =
       std::filesystem::path(CURSIV_TEST_SCRATCH_DIR) / "evaluations.calc";
@@ -488,8 +513,8 @@ void every_evaluation_is_said() {
   std::filesystem::remove(file);
 }
 
-// A statement whose end is written as a colon: every operator could as
-// cheaply stand there, whatever level it binds at, and either engine names
+// A statement whose end is written as a colon: every operator could stand
+// there at the same cost, whatever level it binds at, and either engine names
 // the same ones, in the order the grammar declares them.
 void a_misplaced_colon_names_every_operator() {
   const World world;
@@ -510,6 +535,7 @@ int main() {
   a_definition_calling_itself_names_its_own_call();
   a_mutual_cycle_is_said_at_each_of_its_call_sites();
   a_three_step_cycle_spells_every_step();
+  a_cycle_reached_through_two_siblings_is_said();
   a_call_that_returns_says_nothing();
   every_definition_of_a_shared_name_is_an_error();
   two_definitions_of_two_names_say_nothing();

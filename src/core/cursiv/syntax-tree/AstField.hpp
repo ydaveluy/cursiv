@@ -11,10 +11,9 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/MemberTraits.hpp"
 
-// What an AST member is, and what an element does to it: the columns
-// `AstMetaData` describes a field with, the effect a record owes the tree,
-// and the decode of a member pointer into them. A closed vocabulary read
-// back by services; nothing here reaches a grammar.
+// What an AST member is, and what an element does to it: the field columns of
+// `AstMetaData`, and the action a record applies to the tree. Read by
+// services; nothing here needs a grammar.
 
 namespace cursiv {
 
@@ -36,7 +35,7 @@ namespace detail {
 enum class FieldStorage : std::uint8_t { direct, optional, vector };
 
 // What the storage holds.
-enum class FieldNature : std::uint8_t {
+enum class FieldContent : std::uint8_t {
   value,
   node,
   reference,
@@ -44,14 +43,14 @@ enum class FieldNature : std::uint8_t {
   variant
 };
 
-// Asked, never spelled out at a call site: a third reference nature would
-// otherwise leave half the tests behind.
-constexpr bool is_ref_nature(FieldNature n) {
-  return n == FieldNature::reference || n == FieldNature::multi_reference;
+// Call this rather than comparing kinds, so a new reference kind is not
+// missed.
+constexpr bool is_ref_content(FieldContent n) {
+  return n == FieldContent::reference || n == FieldContent::multi_reference;
 }
 // Holds several targets (an overload set).
-constexpr bool is_multi_ref_nature(FieldNature n) {
-  return n == FieldNature::multi_reference;
+constexpr bool is_multi_ref_content(FieldContent n) {
+  return n == FieldContent::multi_reference;
 }
 
 template <class M>
@@ -91,13 +90,13 @@ struct strip_storage<std::vector<X, A>> {
 };
 
 template <class X>
-inline constexpr FieldNature nature_of =
-    is_reference_v<X>         ? FieldNature::reference
-    : is_multi_reference_v<X> ? FieldNature::multi_reference
-    : is_variant_v<X>         ? FieldNature::variant
+inline constexpr FieldContent content_of =
+    is_reference_v<X>         ? FieldContent::reference
+    : is_multi_reference_v<X> ? FieldContent::multi_reference
+    : is_variant_v<X>         ? FieldContent::variant
     : (std::is_pointer_v<X> && std::is_class_v<std::remove_pointer_t<X>>)
-        ? FieldNature::node
-        : FieldNature::value;
+        ? FieldContent::node
+        : FieldContent::value;
 
 // One distinct field of the grammar, identified by the member pointer, so two
 // rules naming one member share an entry and nothing templated on this tag
@@ -110,7 +109,7 @@ struct field_tag {
   // `vector<X>` and `optional<X>` both hold an `X`.
   using held = typename strip_storage<member>::type;
   static constexpr FieldStorage storage = strip_storage<member>::storage;
-  static constexpr FieldNature nature = nature_of<held>;
+  static constexpr FieldContent content = content_of<held>;
   static constexpr std::string_view name = member_identifier<P>();
 };
 

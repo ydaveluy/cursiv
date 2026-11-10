@@ -1,4 +1,4 @@
-// One code for a refusal, and one per unit that failed to land.
+// One code for a refusal, and one per unit that failed to write.
 #pragma once
 
 #define CURSIV_GEN_STRINGIFY_IMPL(...) #__VA_ARGS__
@@ -17,6 +17,7 @@ enum class GenCode : int {
   ast = 9,
   records = 10,
   module = 11,
+  textmate = 12,
 };
 
 constexpr int exit_status(GenCode c) { return static_cast<int>(c); }

@@ -9,11 +9,14 @@
       "include": "#comments"
     },
     {
-      "name": "keyword.control.statemachine",
-      "match": "(?i)\\b(actions|commands|end|events|initialState|state|statemachine)\\b"
+      "include": "#keywords"
     }
   ],
   "repository": {
+    "keywords": {
+      "name": "keyword.control.statemachine",
+      "match": "(?i)\\b(initialState|statemachine|commands|actions|events|state|end)\\b"
+    },
     "comments": {
       "patterns": [
         {

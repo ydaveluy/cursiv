@@ -29,6 +29,18 @@ Source directories:
 - `cmake/`: Build integration and language generation.
 - `tools/`: Build, packaging, and development scripts.
 
+## Changing code
+
+- Fix the existing code and fit into it. Do not add a helper, member, flag,
+  code path, check, wrapper, friend or thread-local next to one that already
+  does nearly the same: change that one, and delete what becomes unused.
+- Fix the cause with one general rule, not a special case per input.
+- Keep comments short: one to three lines saying what the code does, or the
+  one rule a caller must know. No reasoning, history, proofs, measurements or
+  lists of edge cases.
+- A fix never adds a sentence to an existing comment or doc section: rewrite
+  it so it reads as written once.
+
 ## VS Code extensions
 
 `examples/*/vscode/` contains TypeScript extension projects, built with npm.

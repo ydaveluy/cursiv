@@ -1,7 +1,6 @@
-// A left recursion is read as the loop of the rule a call starts with, its
-// arms ranked as a walk from that rule meets them. The walk is unfolded into
-// rules of its own for each head, and for each way it meets a rule, so every
-// arm has one rank. A climb's loop is numbered by rule, from one head.
+// A left recursion is read as the loop of the rule a call starts with, its arms
+// ranked as a walk from that rule reaches them. The walk is unfolded into
+// rules per head and per way it reaches a rule, so each arm has one rank.
 #pragma once
 
 #include <algorithm>

@@ -1,7 +1,5 @@
-// Every slot's type must be complete here, even the ones this file never
-// names: a `ServiceSlot` holds a `unique_ptr`, whose destructor needs the
-// whole type. An include-cleaner sweep would flag these as unused;
-// removing one fails the build on an incomplete type.
+// Every slot's type must be complete here: a `ServiceSlot`'s `unique_ptr`
+// needs it to destroy. These includes are used even where no name is.
 
 #include "cursiv/services/SharedLspServices.hpp"  // NOLINT(misc-include-cleaner)
 
@@ -46,7 +44,7 @@ void SharedLspServices::visitServices(
   yield({"notebookDocuments", false, notebookDocuments != nullptr});
   yield({"mcpService", false, mcpService != nullptr});
   yield({"languageServer", true, languageServer != nullptr});
-  // Owed only inside a session, so never a hole a completeness check reports.
+  // Set only inside a session, so never reported missing.
   yield({"languageClient", false, languageClient != nullptr});
   yield({"textDocumentContentProvider", false,
          textDocumentContentProvider != nullptr});

@@ -1,4 +1,4 @@
-// The bytes a terminal reads as its own words' that the class rescuing a word
+// The bytes a terminal reads as its own words' that the pass class of a word
 // it refuses at its head leaves out: read where its body begins and again past
 // the word, they split the word off as a token of its own.
 #pragma once
@@ -10,7 +10,7 @@
 
 #include "cursiv/shared/gen/LexNfaPool.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
-#include "cursiv/shared/gen/lex_prefix_meets.hpp"
+#include "cursiv/shared/gen/lex_prefix_overlap.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
@@ -62,7 +62,7 @@ void lex_boundary_misses(const LexNfaPool& n, const Cfg& g,
     std::vector<int> cur = n.eclose(gd.out);
     const ByteSet begins = lex_subset_reads(n, sets, cur);
     for (unsigned i = 0; i < e.min && !cur.empty(); ++i)
-      cur = lex_nfa_step_any(n, sets, cur, sets[g.lexKid[e.b + i]]);
+      cur = lex_nfa_step_any(n, sets, cur, sets[g.lexChild[e.b + i]]);
     ByteSet out = lex_subset_reads(n, sets, cur) & begins;
     out.andnot(sets[e.a]).andnot(lex_decode_bytes(g, e.a));
     if (out.any()) miss(k, out);

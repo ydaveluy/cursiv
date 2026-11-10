@@ -25,12 +25,12 @@ void LlLowerer::declare_start() {
 
 void LlLowerer::declare_rules() { name_rules(_cfg.rules, _cfg.nrules); }
 
-ImageId LlLowerer::ended(ImageId id) { return ended_in(id, false); }
+Descent<ImageId> LlLowerer::ended(ImageId id) { return ended_in(id, false); }
 
-ImageId LlLowerer::ended_in(ImageId id, bool inPredicate) {
+Descent<ImageId> LlLowerer::ended_in(ImageId id, bool inPredicate) {
   const std::uint64_t memo = std::uint64_t{id} << 1 | (inPredicate ? 1u : 0u);
   if (const auto it = _endedIn.find(memo); it != _endedIn.end())
-    return it->second;
+    co_return it->second;
   const ImageNode n = at(id);
   const bool predicate =
       n.kind == ImageKind::andOf || n.kind == ImageKind::notOf;
@@ -38,7 +38,7 @@ ImageId LlLowerer::ended_in(ImageId id, bool inPredicate) {
   if (n.kind == ImageKind::eof && inPredicate) {
     out = section_end();
   } else if (predicate && !inPredicate &&
-             at(kid(n, 0)).kind == ImageKind::eof) {
+             at(child_at(n, 0)).kind == ImageKind::eof) {
     out = id;
   } else {
     switch (n.kind) {
@@ -48,44 +48,45 @@ ImageId LlLowerer::ended_in(ImageId id, bool inPredicate) {
       case ImageKind::implied:
         break;
       default:
-        out = map_kids(id, [&](ImageId k) {
+        out = co_await map_children(id, [&](ImageId k) {
           return ended_in(k, inPredicate || predicate);
         });
     }
   }
   _endedIn.emplace(memo, out);
-  return out;
+  co_return out;
 }
 
 // An operator reads in place the rules it reaches through choices and
-// sequences, except a rule it reaches again inside its own body: that one
-// stays a call. Each data rule read in place keeps its conversion over what
-// it reads, as a call to it would, except the rule the operator names, whose
-// conversion the operator's row runs. So the value an alternative gives
-// reaches that row.
-std::uint16_t LlLowerer::lay_operator(unsigned cfg, ImageId op,
-                                      std::vector<std::uint32_t>& reading) {
+// sequences, except one it reaches again in its own body. Each keeps its
+// conversion except the rule the operator names, whose row runs it.
+Descent<std::uint16_t> LlLowerer::build_operator(
+    unsigned cfg, ImageId op, std::vector<std::uint32_t>& reading) {
   const ImageNode n = at(op);
   if (n.kind == ImageKind::ref) {
     if (terminal_rule(n.a) || std::ranges::count(reading, n.a) != 0)
-      return lay(cfg, op);
+      co_return co_await build(cfg, op);
     reading.push_back(n.a);
-    const std::uint16_t body = lay_operator(cfg, body_in(cfg, n.a), reading);
+    const std::uint16_t body =
+        co_await build_operator(cfg, body_in(cfg, n.a), reading);
     reading.pop_back();
     if (const ImageStageDesc& st = stage(n.a);
         !reading.empty() && st.kind == ImageRuleKind::data && !st.folded)
       convert_over(body, row_id(st.convertRow));
-    return body;
+    co_return body;
   }
-  if ((n.kind != ImageKind::seq && n.kind != ImageKind::choice) || gap(op))
-    return lay(cfg, op);
+  if ((n.kind != ImageKind::seq && n.kind != ImageKind::choice) ||
+      descend(gap(op)))
+    co_return co_await build(cfg, op);
   const bool seq = n.kind == ImageKind::seq;
-  const std::vector<ImageId> parts = seq ? gap_runs(kids_of(n)) : kids_of(n);
+  const std::vector<ImageId> parts =
+      seq ? gap_runs(children_of(n)) : children_of(n);
   if (seq && parts.size() == 1)
-    return lay_operator(cfg, parts.front(), reading);
-  std::vector<std::uint16_t> kids;
-  for (const ImageId k : parts) kids.push_back(lay_operator(cfg, k, reading));
-  return gather(cfg, seq ? Shape::seq : Shape::alt, kids);
+    co_return co_await build_operator(cfg, parts.front(), reading);
+  std::vector<std::uint16_t> children;
+  for (const ImageId k : parts)
+    children.push_back(co_await build_operator(cfg, k, reading));
+  co_return gather(cfg, seq ? Shape::seq : Shape::alt, children);
 }
 
 std::uint16_t LlLowerer::climb_chain(const void* row) {
@@ -99,38 +100,39 @@ void LlLowerer::emit_op(unsigned cfg, ImageId op, const void* opRow,
   const bool buildsNode =
       opRule != kNoImage && (node_rule(opRule) || infix_rule(opRule));
   std::vector<std::uint32_t> reading;
-  const std::uint16_t laid = lay_operator(cfg, op, reading);
+  const std::uint16_t built = descend(build_operator(cfg, op, reading));
   const auto atomic = [&](const auto& self, std::uint16_t id) {
     const Node& n = _p.e[id];
     if (n.kind == Shape::sym) return is_term(n.sym);
     if (n.kind == Shape::alt) {
       for (unsigned i = 0; i < n.count; ++i)
-        if (!self(self, _p.kid[n.sym + i])) return false;
+        if (!self(self, _p.child[n.sym + i])) return false;
       return true;
     }
     if (n.kind != Shape::seq) return false;
     unsigned tokens = 0;
     for (unsigned i = 0; i < n.count; ++i) {
-      const auto k = _p.kid[n.sym + i];
+      const auto k = _p.child[n.sym + i];
       if (_p.e[k].kind == Shape::condition || _p.e[k].kind == Shape::none)
         continue;
       if (++tokens != 1 || !self(self, k)) return false;
     }
     return tokens == 1;
   };
-  const bool whole = atomic(atomic, laid);
+  const bool whole = atomic(atomic, built);
   if (buildsNode ||
-      (opRule == kNoImage && !whole && _p.e[laid].kind != Shape::implied)) {
+      (opRule == kNoImage && !whole && _p.e[built].kind != Shape::implied)) {
     _o.fault.raise(GrammarFaultCode::infixOperatorNotText, _p.owner);
     return;
   }
-  const Acts row = cat(_p.e[laid].row, Acts{row_id(opRow)});
+  const Acts row = cat(_p.e[built].row, Acts{row_id(opRow)});
   if (whole) {
-    llow::emit_operator_nodes(_o, _p, laid, _p.e[laid].made, row, prec, group,
+    llow::emit_operator_nodes(_o, _p, built, _p.e[built].made, row, prec, group,
                               static_cast<std::uint8_t>(cfg));
     return;
   }
-  const std::uint16_t body = emit(_o, _p, laid, _p.e[laid].made, row, _p.owner);
+  const std::uint16_t body =
+      descend(emit(_o, _p, built, _p.e[built].made, row, _p.owner));
   _cfg.climbOps[_cfg.nclimbOps++] =
       LlClimbOp{.body = body, .prec = prec, .assoc = group};
 }
@@ -143,7 +145,8 @@ void LlLowerer::emit_climb(unsigned cfg, std::uint32_t rule,
     return;
   }
   LlClimb cl;
-  cl.primary = nt_index(_p.e[lay_ref(cfg, _im.rule(*st.primary))].sym);
+  cl.primary =
+      nt_index(_p.e[descend(build_ref(cfg, _im.rule(*st.primary)))].sym);
   cl.node = climb_chain(st.climbRow);
   cl.leftRow = climb_chain(st.leftRow);
   cl.rightRow = climb_chain(st.rightRow);
@@ -170,7 +173,7 @@ void LlLowerer::emit_climb(unsigned cfg, std::uint32_t rule,
 void LlLowerer::define_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs,
                            std::uint8_t) {
   _p.e.clear();
-  _p.kid.clear();
+  _p.child.clear();
   _p.owner = lhs;
   _cfg.ruleCfg[lhs] = static_cast<std::uint8_t>(cfg);
   const ImageStageDesc& st = stage(rule);
@@ -178,9 +181,10 @@ void LlLowerer::define_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs,
     emit_climb(cfg, rule, lhs);
     return;
   }
-  const std::uint16_t at_ = lay(cfg, body_in(cfg, rule));
+  const std::uint16_t at_ = descend(build(cfg, body_in(cfg, rule)));
   close_body(st, at_);
-  _cfg.rules[lhs].body = emit(_o, _p, at_, _p.e[at_].made, _p.e[at_].row, lhs);
+  _cfg.rules[lhs].body =
+      descend(emit(_o, _p, at_, _p.e[at_].made, _p.e[at_].row, lhs));
 }
 
 void LlLowerer::note_nests() {
@@ -202,11 +206,11 @@ LlLowered LlLowerer::run() {
   _o.writes.note_makes(_rowKind);
   note_nests();
   LlRecordPlan records(_o.cfg, _o.writes, _o.nestChains);
-  records.settle_ownership();
-  llow::ride_chains_down(_o, records);
+  records.compute_ownership();
+  llow::move_chains_down(_o, records);
   _o.writes.note_makes(_rowKind);
   note_nests();
-  llow::lay_own_records(_o, records);
+  llow::add_own_records(_o, records);
   return std::move(_o);
 }
 

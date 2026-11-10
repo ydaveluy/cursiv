@@ -7,9 +7,13 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/parser/Parser.hpp"
-#include "cursiv/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/Check.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/ll/gen/LlLowering.hpp"
+#include "cursiv/ll/gen/ll_build.hpp"
+#include "cursiv/ll/runtime/ll_lookahead.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "engines/ll/KeywordTriviaAst.hpp"
 #include "keywordtriviabarell/generated/BareLl/Module.hpp"
 #include "keywordtriviabasicll/generated/BasicLl/Module.hpp"
@@ -138,9 +142,9 @@ std::string random_document(std::mt19937& rng, bool slashes) {
 }
 
 // The grammars that spell one comment in different ways read every valid
-// document alike, in both engines.
-void comments_spelled_alike_read_alike(const cursiv::Parser& basic,
-                                      const cursiv::Parser& variants) {
+// document the same, in both engines.
+void comments_spelled_the_same_read_the_same(const cursiv::Parser& basic,
+                                             const cursiv::Parser& variants) {
   std::mt19937 rng(20261020);
   for (unsigned n = 0; n < 64; ++n) {
     const std::string text = random_document(rng, true);
@@ -169,11 +173,44 @@ void no_break_spaces_are_blanks(const cursiv::Parser& ll) {
   }
 }
 
+// A keyword past ASCII whose letters' cases part on their first byte:
+// twelve such letters make 4 096 spellings, more than the lexer cuts trivia
+// for. Trivia that reads on past the keyword is refused; other trivia stands.
+template <class Remark>
+struct Uncut : cursiv::GrammarSpec {
+  static constexpr auto word_boundary = uc::XID_Continue;
+  struct WS : terminal<some(s)> {};
+  struct REMARK : terminal<Remark{}> {};
+  struct Root
+      : rule<create<Part>(assign<&Part::text>(ikw<"ΥΠΕΡΣΥΝΤΡΙΠΤΙΚΟΤΑΤΟΣ">))> {};
+  using entry = Root;
+  using ignored = WS;
+  using hidden = REMARK;
+};
+using LongRemark = decltype(cursiv::ikw<"ΥΠΕΡΣΥΝΤΡΙΠΤΙΚΟΤΑΤΟΣ"> +
+                            cursiv::many(cursiv::cr<R"(^\r\n)">));
+using HashRemark =
+    decltype(cursiv::lit<"#"> + cursiv::many(cursiv::cr<R"(^\r\n)">));
+
+template <class G>
+cursiv::engine::LowerFail lexer_refusal() {
+  return cursiv::engine::ll_build_program(
+             cursiv::engine::LlLowering<G>::lower())
+      .cfg.lowerWhy;
+}
+
+void trivia_past_an_uncut_keyword_is_refused() {
+  CHECK(lexer_refusal<Uncut<LongRemark>>() ==
+        cursiv::engine::LowerFail::keywordSpellings);
+  CHECK(lexer_refusal<Uncut<HashRemark>>() == cursiv::engine::LowerFail::none);
+}
+
 }  // namespace
 
 int main() {
   cursiv::test::count_expectations();
   hinted_trivia_keeps_keyword_cuts();
+  trivia_past_an_uncut_keyword_is_refused();
   namespace g = tllkwtrivia::generated;
   const auto ll = g::BasicLl::create_parser();
   const auto variants = g::VariantsLl::create_parser();
@@ -188,7 +225,7 @@ int main() {
   expect_cases(variants,
         {{"x.y = a; rem (a (b)) again\nz = b;",
           "x.y=a;z=b;#rem (a (b)) again|"}}, "recognized:");
-  comments_spelled_alike_read_alike(*ll, *variants);
+  comments_spelled_the_same_read_the_same(*ll, *variants);
   const auto wideLl = g::WideLl::create_parser();
   expect_cases(wideLl,
         {{"x.REM\u00a0= a;", "x.REM=a;#"},

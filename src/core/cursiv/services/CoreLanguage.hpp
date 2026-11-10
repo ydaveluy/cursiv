@@ -9,8 +9,8 @@
 #include "cursiv/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/workspace/FileSystemProvider.hpp"
 
-// How a language is built and filed, written once: the two containers and the
-// module that fills them are all that separates one language from another.
+// How a language is built and registered: only the two containers and the
+// module that fills them differ between languages.
 
 namespace cursiv {
 
@@ -32,8 +32,8 @@ template <class TServices, class TShared, void (*install)(TServices&)>
   return services;
 }
 
-// A workspace of its own with this one language in it; no `files` is no disk
-// under it, never an absent provider.
+// A new workspace with this one language; without `files` it gets the empty
+// file system provider.
 template <class TServices, class TShared, void (*install)(TServices&)>
 [[nodiscard]] CoreLanguage<TServices, TShared> create_language(
     std::unique_ptr<FileSystemProvider> files = nullptr) {
@@ -48,9 +48,8 @@ template <class TServices, class TShared, void (*install)(TServices&)>
   return {std::move(shared), language};
 }
 
-// The same language in a workspace someone else owns, which is this language's
-// own shared type: recovered by reference so the container is built with the
-// shared services it expects.
+// Registers the language in an existing workspace, whose shared services must
+// be a `TShared`.
 template <class TServices, class TShared, void (*install)(TServices&)>
 bool register_language(SharedCoreServices& sharedServices) {
   sharedServices.serviceRegistry->registerServices(

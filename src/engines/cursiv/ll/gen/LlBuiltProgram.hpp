@@ -1,6 +1,6 @@
 // What the construction adds to a lowered program: the graph a prediction
-// walks, what every position may begin and be followed by, and the verdict of
-// every choice. The program itself travels through unchanged.
+// walks, what every position may begin and be followed by, and how each choice
+// is decided.
 #pragma once
 
 #include <cstddef>
@@ -24,10 +24,10 @@
 
 namespace cursiv::engine {
 
-// A run of joins a site reads from `kFuse` rather than spelling it where it
-// stands: more than one, or any a group rides.
-constexpr bool ll_fuse_tabled(std::uint32_t joins, bool rides) {
-  return joins > (rides ? 0u : 1u);
+// Whether a site reads its run of joins from `kFuse` instead of emitting it
+// inline: more than one join, or any join of an owning group (`owning`).
+constexpr bool ll_fuse_tabled(std::uint32_t joins, bool owning) {
+  return joins > (owning ? 0u : 1u);
 }
 
 struct LlBuiltProgram : ShapeOverflow {
@@ -46,14 +46,14 @@ struct LlBuiltProgram : ShapeOverflow {
   std::vector<std::uint32_t> returnClass{};
 
   // Per position, then per rule: what may begin here and what may follow; and
-  // per position, whether nothing at all is a reading of it.
+  // per position, whether it can read nothing.
   std::vector<DynSet> first{};
   std::vector<DynSet> after{};
   std::vector<std::uint8_t> nullable{};
   std::vector<DynSet> ruleFirst{};
   std::vector<DynSet> ruleFollow{};
-  // What a position may begin with, and -- where nothing at all is a reading
-  // of it -- whatever follows it.
+  // What a position may begin with, plus what follows it when it can read
+  // nothing.
   DynSet lookahead(std::uint16_t id, const DynSet& follow) const {
     DynSet s = first[id];
     if (nullable[id]) s |= follow;
@@ -62,12 +62,12 @@ struct LlBuiltProgram : ShapeOverflow {
   // The rules the entry reaches, a climb's operators and operand included.
   std::vector<bool> liveRules{};
 
-  // Per condition, the tokens it refuses where the token in hand alone decides
-  // it -- a commit's exit -- and none for any other.
+  // Per condition, the tokens it refuses where the current token alone decides
+  // it (a commit's exit); empty for any other.
   std::vector<DynSet> cut{};
   // One row per arm of every decision, which is what a switch reads.
   std::vector<DynSet> laSet{};
-  // ...and the automata the exploration closed, all of them in one pool.
+  // The automata the exploration closed, in one pool.
   std::vector<LlDfaState> dfa{};
   std::vector<LlDfaEdge> dfaEdge{};
   // Where the document is entered: the entry rule has a caller like every
@@ -85,10 +85,8 @@ struct LlBuiltProgram : ShapeOverflow {
   // The document's end: the grammar's own trivia, then the input's end.
   std::uint16_t tailMode = 0;
   Vec<std::uint16_t> modeStart{};
-  // What each alphabet admits, and which alphabets another one covers: a
-  // token read under a wider alphabet answers a narrower one whenever the
-  // narrower admits the terminal it matched, so no point re-reads what the
-  // point above it already read.
+  // What each alphabet admits, and which alphabets cover another: a token read
+  // under a wider alphabet answers a narrower one that admits its terminal.
   std::vector<std::uint64_t> modeTerms{};
   std::vector<std::uint64_t> modeSub{};
   std::uint32_t subWords = 0;
@@ -98,7 +96,7 @@ struct LlBuiltProgram : ShapeOverflow {
   // Empty unless a mode can read arbitrarily far beyond its last match.
   std::vector<std::uint8_t> modeBacktrack{};
   // The choices of a mode of the second kind that the end of the text can
-  // settle otherwise than their token does.
+  // decide otherwise than their token does.
   std::vector<std::uint8_t> decEnded{};
   std::vector<std::uint16_t> modeTrivia{}, modeJoinedTrivia{};
   std::vector<std::uint16_t> modeLonger{};
@@ -108,7 +106,7 @@ struct LlBuiltProgram : ShapeOverflow {
   std::vector<std::uint16_t> typoSucc{};
   // What a reader of a refused token needs off the automaton.
   std::vector<std::uint8_t> lexBodies{};
-  std::vector<std::uint16_t> lexOwed{};
+  std::vector<std::uint16_t> lexBodyTerms{};
   std::vector<ByteSet> lexOpeners{};
   Vec<std::uint16_t> dfaAccept{};
   Vec<DynSet> dfaAccSet{};
@@ -130,8 +128,8 @@ struct LlBuiltProgram : ShapeOverflow {
   Vec<std::uint16_t> dfaRelay{};
   std::vector<LexRelayGen> relays{};
 
-  // What the static separation left to the simulation, the only numbers that
-  // cost at run time: choices no table covers, and tables that end where their
+  // What the static separation left to the simulation, the only ones with a
+  // run-time cost: choices no table covers, and tables that end where their
   // arms still share a reading. The parse keeps its stack for either.
   std::uint32_t nadaptive = 0, nopen = 0;
   // Per call site, the run of joins it may need: the chain its call handed
@@ -140,10 +138,9 @@ struct LlBuiltProgram : ShapeOverflow {
   std::vector<std::uint32_t> fuseBase{};
   std::vector<std::uint32_t> ownBase{};
   std::vector<LlFuse> fuse{};
-  // Where a joined chain came from, per chain: the run the record was handed
-  // and the run the site stated over it. A reader of the tree needs the two
-  // apart -- what fills the node the record built is not what writes that node
-  // into the region above. `kNoRow` for a chain nobody joined.
+  // Per joined chain, the run the record was given and the run the site stated
+  // over it: what fills the node is not what writes it into the region above.
+  // `kNoRow` for a chain nobody joined.
   std::vector<LlFuse> origin{};
   // The state a call returns into, per call position of the program.
   std::vector<std::uint32_t> nodeFollow{};

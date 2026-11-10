@@ -23,22 +23,21 @@
 #include "cursiv/utils/TypeName.hpp"
 #include "cursiv/utils/typelist.hpp"
 
-// The typed tree the builder materialises from a CST. Every AST node derives
-// from AstNode by design: the base carries the parent link, the ID of the CST
-// node it was built from, and the field vocabulary.
+// The typed tree the builder makes from a CST. Every AST node derives from
+// AstNode, which holds the parent link, the id of the CST node it was built
+// from, and the member type aliases.
 
 namespace cursiv {
 
-// Forward declarations: reference and multi_reference are defined after AstNode
-// (they use its vocabulary), which needs to alias them in that same vocabulary.
+// Defined after AstNode, which aliases them.
 template <class... Ts>
 struct reference;
 template <class... Ts>
 struct multi_reference;
 
-// "This site narrowed nothing": what it accepts is what the member accepts. A
-// site may say less than the member's candidate pack, and the writer then
-// stamps which of the field's narrowings the reference carries.
+// The site accepts what the member accepts. A site may accept fewer types than
+// the member; the builder then records which of the field's narrowings the
+// reference uses.
 inline constexpr std::uint8_t kNoNarrow = 0xFF;
 
 struct AstNode;
@@ -50,34 +49,17 @@ inline constexpr std::ptrdiff_t kNoOffset =
     std::numeric_limits<std::ptrdiff_t>::max();
 }  // namespace detail
 
-// The runtime identity of one AST class, and the identity is the address:
-// `&ast_type_tag<T>` is one inline variable per T, unique in the process. Never
-// copy a tag or compare tags by value -- the name is decoration, and two
-// classes may print the same last component.
-//
-// Whether a node is a T is answered here, not by the grammar: a tag carries
-// the transitive closure of its own bases, which `cursiv::Extends` states and
-// a consteval walk closes. A grammar's type list answers the downward
-// question -- every subtype of T -- and keeps it.
+// The runtime identity of one AST class, which is its address: one inline
+// variable per class. Never copy a tag or compare tags by value. A tag lists
+// the transitive closure of its bases, so a subtype test needs no grammar.
 struct AstTypeTag {
-  // The hot half first: a subtype test reads these two words and nothing
-  // else, so the name and the reader sit after them.
-  //
-  // Every class this one derives from, transitively, itself excluded so the
-  // array names only tags complete before this one. Not inline and not a
-  // bitmask, for the same reason: nothing bounds a hierarchy. A fixed
-  // capacity would refuse a grammar (xsmp already declares eight), and a bit
-  // needs an index -- numbering classes is not evaluable in constant
-  // evaluation, a static counter is fragile across translation units, and a
-  // hash collision would mean a `static_cast` that should not have happened.
-  // An address needs no numbering.
+  // First, as a subtype test reads only these two words: every class this one
+  // derives from, transitively, itself excluded.
   std::uint32_t baseCount = 0;
   const AstTypeTag* const* bases = nullptr;
-  // For a class reaching `AstNode` through a virtual base, where a
-  // `static_cast` cannot come back down: where each of `bases` sits from a
-  // node's `AstNode`, then the class's own start. An offset to a virtual base
-  // is known only from an object, so the first node made states them. Null for
-  // any other class.
+  // For a class reaching `AstNode` through a virtual base: the offset of each
+  // of `bases` from a node's `AstNode`, then the class's own, set by the first
+  // node created. Null for any other class.
   std::ptrdiff_t* offsets = nullptr;
 
   // `this` first: a tag is one of its own family, and the exact test is what
@@ -91,20 +73,14 @@ struct AstTypeTag {
   }
 
   std::string_view name;
-  // The declared name of a node, read without the grammar: whether a class
-  // has a text member called `name` is a fact about the class, not about who
-  // parses it. Null for a class that declares none.
-  //
-  // A reader and not an offset: `offsetof` on a class with a base is only
-  // conditionally supported, while a static cast proved by this very tag is
-  // not.
+  // The declared `name` text member of a node, read without the grammar.
+  // Null for a class that declares none.
   std::string_view (*readName)(const AstNode&) noexcept = nullptr;
 };
 
 namespace detail {
-// A node from its `AstNode`, once the caller has proved its class: `ast_cast`
-// asks, and this one is for the paths that build and read a tree, where asking
-// at every member shows. A `static_cast` will not do: it cannot leave a virtual
+// A node from its `AstNode`, once the caller has proved its class, for the
+// paths that build and read a tree. A `static_cast` cannot leave a virtual
 // base.
 template <class T>
 [[nodiscard]] constexpr T* ast_cast_unchecked(
@@ -137,9 +113,8 @@ concept plain_node = requires(AstNode* node) { static_cast<T*>(node); };
 template <class T>
 consteval std::ptrdiff_t* offsets_of() noexcept;
 
-// Declared here, defined below: the tag's initialiser names it, and its own
-// definition names tags. A class template breaks the knot -- both are only
-// instantiated at a point where each is complete.
+// Defined below: the tag's initializer names it and its definition names tags.
+// As templates, both are instantiated only once each is complete.
 template <class T>
 struct bases_of;
 }  // namespace detail
@@ -153,10 +128,8 @@ inline constexpr AstTypeTag ast_type_tag{
 
 namespace detail {
 
-// `Extends<Bs...>` states the direct bases; the closure is each of them and its
-// own closure, deduplicated -- inheritance is a DAG, so one base may be reached
-// by many paths. Each class asks only its direct bases, so paths are never
-// walked.
+// `Extends<Bs...>` states the direct bases; the closure is each of them and
+// its own closure, deduplicated.
 template <class T>
 struct base_closure {
   using type = TypeList<>;
@@ -195,10 +168,9 @@ struct Document;
 
 struct AstNode {
   AstNode() = default;
-  // A copy is another object: it takes the members' values but none of the
-  // source's identity -- no tag, parent or CST node, as a node built by hand
-  // -- since a tag copied into a base would name a class the copy is not. An
-  // assignment likewise leaves the target its own.
+  // A copy takes the members' values but none of the source's identity: no
+  // tag, parent or CST node. An assignment likewise leaves the target its
+  // own.
   AstNode(const AstNode&) noexcept {}
   AstNode& operator=(const AstNode&) noexcept { return *this; }
   virtual ~AstNode() = default;
@@ -207,17 +179,13 @@ struct AstNode {
   // Written at construction, so identity survives a detached tree and a node
   // built by hand.
   const AstTypeTag* type = nullptr;
-  // An id and not a view: a `const Cst*` per node would be a replicated word,
-  // and an id is the only form a snapshot can carry. `kNoNode` for a node built
-  // by hand. Declared last so its 4 trailing bytes are tail padding a derived
-  // class's first <=4-byte member may occupy. Final once the tree is built:
-  // the node list is sorted by it and searched by it.
+  // An id, `kNoNode` for a node built by hand. Last, so a derived class's
+  // first small member may fill its tail padding. Unchanged once the tree is
+  // built: the node list is sorted and searched by it.
   NodeId cstNodeId = kNoNode;
 
   // The document this node belongs to, null when it is detached or built by
-  // hand. The climb is the lookup: a document is an `AstNode` and the root's
-  // parent, so no back-pointer is replicated and no table is kept in step.
-  // Defined in `workspace/Document.cpp`, where `Document` is complete.
+  // hand: the root's parent. Defined in `workspace/Document.cpp`.
   [[nodiscard]] const Document* getDocument() const noexcept;
 
   // Plain C++: a member owns what it holds. `string_view` is the first choice
@@ -241,14 +209,14 @@ struct AstNode {
   using uint64 = std::uint64_t;
   using float32 = float;
   using float64 = double;
-  // references are vocabulary too: derived nodes use bare names
+  // So derived nodes write `reference<...>` unqualified.
   template <class... Ts>
   using reference = cursiv::reference<Ts...>;
   template <class... Ts>
   using multi_reference = cursiv::multi_reference<Ts...>;
 };
 
-// The base is paid by every node, so its width is pinned rather than observed.
+// Every node pays for the base, so its size is checked.
 static_assert(sizeof(void*) != 8 || sizeof(AstNode) == 32);
 
 // A node declares its base, because C++ cannot be asked for one: the deduced
@@ -279,7 +247,8 @@ inline const char* node_address(const AstNode* node) noexcept {
   return reinterpret_cast<const char*>(node);
 }
 
-// Every base of `T`, from a real one, in the order of its tags.
+// The offset of every base of `T`, measured on a real node, in the order of
+// its tag's bases.
 template <class T>
 void state_offsets(const T& node, std::ptrdiff_t* out) noexcept {
   [&]<class... Bs>(TypeList<Bs...>) {
@@ -292,17 +261,17 @@ void state_offsets(const T& node, std::ptrdiff_t* out) noexcept {
   }(typename bases_of<T>::types{});
 }
 
-// A new node of class `T` says what it is. Written here rather than by a
-// constructor, which could not name the class being built.
+// Sets the type tag of a new node of class `T`: a base constructor cannot name
+// the class being built.
 template <class T>
-AstNode* stamp_node(T& node) noexcept {
+AstNode* set_type_tag(T& node) noexcept {
   AstNode* const base = &node;
   base->type = &ast_type_tag<T>;
   if constexpr (!plain_node<T>) {
     auto* const offsets = bases_of<T>::offsets.data();
     std::atomic_ref<std::ptrdiff_t> own(offsets[bases_of<T>::kCount]);
     // Released last, acquired here: a thread that sees the class's own offset
-    // sees its bases' too, whichever thread stated them.
+    // sees its bases' too, whichever thread set them.
     if (own.load(std::memory_order_acquire) == kNoOffset) {
       state_offsets(node, offsets);
       own.store(reinterpret_cast<const char*>(&node) - node_address(base),
@@ -321,11 +290,12 @@ constexpr T* ast_cast_unchecked(
            node->type->derivesFrom(&ast_type_tag<std::remove_cv_t<T>>));
     return static_cast<T*>(node);
   } else {
-    // The tag says where, in what it costs to ask whether.
+    // Through a virtual base: the tag's offsets give the address, as cheaply
+    // as a subtype test.
     using Bare = std::remove_cv_t<T>;
     if (node == nullptr) return nullptr;
     const AstTypeTag* const tag = node->type;
-    // Not stamped: no tag says where, and C++ still can.
+    // No tag: fall back to `dynamic_cast`.
     if (tag == nullptr) return dynamic_cast<T*>(node);
     std::uint32_t at = tag->baseCount;
     if (tag != &ast_type_tag<Bare>) {
@@ -337,7 +307,7 @@ constexpr T* ast_cast_unchecked(
     const std::ptrdiff_t offset =
         std::atomic_ref<std::ptrdiff_t>(tag->offsets[at])
             .load(std::memory_order_relaxed);
-    // A tag written by hand, on a class no stamped node has stated yet.
+    // A tag set by hand, on a class whose offsets no node has set yet.
     if (offset == kNoOffset) [[unlikely]]
       return dynamic_cast<T*>(node);
     using Byte = std::conditional_t<std::is_const_v<T>, const char, char>;
@@ -346,8 +316,8 @@ constexpr T* ast_cast_unchecked(
 }
 }  // namespace detail
 
-// Errors contiguous and last: has_error is one comparison. The textual detail
-// lives in the central diagnostics, keyed by handle.
+// Errors are contiguous and last, so `has_error` is one comparison. The message
+// is built on demand by `Linker::createLinkingError`.
 enum class RefState : std::uint8_t {
   Unresolved,
   Resolving,
@@ -358,12 +328,10 @@ enum class RefState : std::uint8_t {
 
 constexpr bool has_error(RefState s) { return s >= RefState::ErrorNotFound; }
 
-// A scope provider may read references, so resolution re-enters this protocol.
-// Each resolution in flight is filed under its thread: a read that would wait
-// on its own thread's computation, or on a thread that waits back on it,
-// answers `ErrorCycle`. Work a provider hands to another thread and waits for
-// is not tied to its resolution, so a cycle through it blocks instead.
-struct RefHome {
+// Resolution re-enters this protocol when a scope provider reads
+// references. A read that would wait on its own thread, or on a thread that
+// waits on it, answers `ErrorCycle`.
+struct RefResolver {
   // Untyped, so one non-template hook serves every reference type.
   struct Answer {
     AstNode* target = nullptr;
@@ -371,11 +339,11 @@ struct RefHome {
     std::uint8_t which = 0;
   };
 
-  virtual ~RefHome() noexcept = default;
-  // Computes; the caller stores. `Unresolved` is a failure not to keep: the
-  // next read calls the home again. Any other failure is `ErrorNotFound`.
+  virtual ~RefResolver() noexcept = default;
+  // Computes the answer; the caller stores it. `Unresolved` is not stored: the
+  // next read asks again. Any other failure is `ErrorNotFound`.
   [[nodiscard]] virtual Answer resolve(std::uint32_t handle) const = 0;
-  // Overload-set form: the targets land in `out`.
+  // Overload-set form: the targets go into `out`.
   virtual RefState resolveAll(std::uint32_t handle,
                               MultiRefItems& out) const = 0;
 };
@@ -394,16 +362,14 @@ constexpr RefState public_ref_state(RefState state) noexcept {
 
 // Both slow paths are compiled once. The common read remains a load and a
 // branch in the caller; synchronization headers stay out of generated code.
-RefState resolve_one_slow(RefState& state, const RefHome* home,
+RefState resolve_one_slow(RefState& state, const RefResolver* resolver,
                           std::uint32_t handle, AstNode*& target,
                           std::uint8_t& which);
-RefState resolve_all_slow(RefState& state, const RefHome* home,
+RefState resolve_all_slow(RefState& state, const RefResolver* resolver,
                           std::uint32_t handle, MultiRefItems& out);
 
-// Which candidate T is, as the linker counts them: the first occurrence in
-// the pack. `RefOps::branch` answers the first branch that accepts a tag, so
-// a reader asking `get<T>()` must compare `which` against the same rank --
-// with `reference<T, T>` the last one is an index the linker never writes.
+// Which candidate T is, as the linker counts them: its first occurrence in
+// the pack, as `RefOps::branch` answers.
 template <class T, class... Ts>
 inline constexpr std::uint8_t branch_index = [] {
   std::uint8_t i = 0, found = 0;
@@ -419,11 +385,9 @@ inline constexpr std::uint8_t branch_index = [] {
   return found;
 }();
 
-// An rvalue that owns the bytes a view would alias: `r.bind(id, std::string())`
-// would store a view of memory dying at the end of the full expression, the one
-// dangle the type system can see. Asked as a shape and not at `std::string` by
-// name, since every owning string type dangles alike. An lvalue is the caller's
-// to keep alive; a view, pointer or array aliases something else.
+// An rvalue that owns the bytes a view would alias: `r.bind(id,
+// std::string())` would keep a view of memory gone at the end of the
+// statement.
 template <class S>
 concept owning_text_rvalue =
     !std::is_reference_v<S> && std::is_convertible_v<S, std::string_view> &&
@@ -446,17 +410,8 @@ void refuse_owning_bind() {
 }  // namespace detail
 
 // A cross-reference as an AST field: the name now, one target of Ts... once
-// read. `which` is the index in Ts... written by the linker, and reading
-// resolves, so a reader needs nothing but the field.
-//
-// The name is always borrowed -- a slice of the document, or text the tree
-// keeps for a converter that built it -- so `refText` is a
-// `string_view` and the payload's value type must be one. It is valid
-// exactly as long as both the source buffer and the `ParseResult` are alive:
-// an AST outliving either keeps good targets and dangling spellings.
-//
-// It is not NUL-terminated: the byte after the name is whatever the source
-// wrote next, so print it as `%.*s` with `refText.size()`.
+// read; reading resolves. `refText` points into the source text and does not
+// outlive the `ParseResult`; it is not NUL-terminated.
 template <class... Ts>
 struct reference {
   static_assert(sizeof...(Ts) >= 1);
@@ -469,13 +424,14 @@ struct reference {
   // Written by a read (`resolve`), hence mutable.
   mutable AstNode* _target = nullptr;
   // Installed once by the document over the build's work list; null on a
-  // hand-built or detached tree, where reading resolves nothing. The one
-  // embedded context pointer, since a read must work with nothing in hand.
-  const RefHome* _home = nullptr;
+  // hand-built tree, where reading resolves nothing. A copy keeps it: it reads
+  // the source's site, and only the source is reset by a relink.
+  const RefResolver* _resolver = nullptr;
   // The CST node the name was read from. Declared after the pointers so it and
   // the three below share one tail word instead of opening a hole.
   NodeId _nodeId = kNoNode;
-  std::uint32_t _handle = 0;  // rank in the document's work list; keys `home`
+  std::uint32_t _handle =
+      0;  // index in the document's work list, for `_resolver`
   mutable RefState _state = RefState::Unresolved;
   mutable std::uint8_t _which = 0;
   // The writing site's narrowing, as an index into this field's
@@ -488,9 +444,10 @@ struct reference {
     const RefState current =
         std::atomic_ref<RefState>(_state).load(std::memory_order_acquire);
     if (current == RefState::Resolved) return current;
-    if (_home != nullptr &&
+    if (_resolver != nullptr &&
         (current == RefState::Unresolved || detail::ref_running(current)))
-      return detail::resolve_one_slow(_state, _home, _handle, _target, _which);
+      return detail::resolve_one_slow(_state, _resolver, _handle, _target,
+                                      _which);
     return detail::public_ref_state(current);
   }
 
@@ -532,8 +489,8 @@ struct reference {
   explicit operator bool() const { return resolve() == RefState::Resolved; }
 
  private:
-  // The writer hands over the slice it already had and promises it outlives the
-  // tree. `nar` is defaulted for a caller binding a name by hand.
+  // `t` must outlive the tree. `nar` defaults for a caller binding a name by
+  // hand.
   void bind(NodeId at, AstNode::string_view t, std::uint8_t nar = kNoNarrow) {
     _nodeId = at;
     refText = t;
@@ -549,18 +506,17 @@ struct multi_reference {
   static_assert(sizeof...(Ts) >= 1);
   static_assert(sizeof...(Ts) <= 255,
                 "a reference has at most 255 candidate types");
-  AstNode::string_view refText;  // borrowed, see `reference`
+  AstNode::string_view refText;  // not owned, see `reference`
 
  private:
   friend struct detail::RefAccess;
   mutable MultiRefItems _items;  // written by a read, see `reference`
-  const RefHome* _home = nullptr;
+  const RefResolver* _resolver = nullptr;
   // The CST node of the name, and the tail word it shares -- see `reference`.
   NodeId _nodeId = kNoNode;
   std::uint32_t _handle = 0;
   mutable RefState _state = RefState::Unresolved;
-  // The site's narrowing -- see `reference`. Same tail padding, same
-  // rules: one family, one law.
+  // The site's narrowing; see `reference`.
   std::uint8_t _narrow = kNoNarrow;
 
  public:
@@ -575,14 +531,14 @@ struct multi_reference {
     const RefState current =
         std::atomic_ref<RefState>(_state).load(std::memory_order_acquire);
     if (current == RefState::Resolved) return current;
-    if (_home == nullptr ||
+    if (_resolver == nullptr ||
         (current != RefState::Unresolved && !detail::ref_running(current)))
       return detail::public_ref_state(current);
-    return detail::resolve_all_slow(_state, _home, _handle, _items);
+    return detail::resolve_all_slow(_state, _resolver, _handle, _items);
   }
 
-  // Read items only after acquiring a published result. A cycle or a detached
-  // unresolved reference has no readable overload set.
+  // Read items only after acquiring a published result. A cycle or a
+  // hand-built unresolved reference has no readable overload set.
   std::size_t size() const {
     return resolve() == RefState::Resolved ? _items.size() : 0u;
   }
@@ -617,24 +573,24 @@ struct multi_reference {
   }
 };
 
-// Pinned: the shared tail word is what makes `refNodeId`/`handle`/`_state`/
-// `which`/`narrow` free, and the pin is what proves a new byte lands in it.
+// `_nodeId`, `_handle`, `_state`, `_which` and `_narrow` share one tail word;
+// these checks catch a new member that does not fit in it.
 namespace detail {
 struct ref_size_probe : AstNode {};
 static_assert(sizeof(void*) != 8 || sizeof(reference<ref_size_probe>) == 48);
 static_assert(sizeof(void*) != 8 ||
               sizeof(multi_reference<ref_size_probe>) == 64);
 
-// What the builder and the linker's tables read and write of a reference: the
-// protocol a resolution relies on, which is theirs alone.
+// The private parts of a reference that the builder and the linker read and
+// write.
 struct RefAccess {
   template <class R>
   static auto& target(R& ref) noexcept {
     return ref._target;
   }
   template <class R>
-  static auto& home(R& ref) noexcept {
-    return ref._home;
+  static auto& resolver(R& ref) noexcept {
+    return ref._resolver;
   }
   template <class R>
   static auto& node_id(R& ref) noexcept {
@@ -679,8 +635,6 @@ struct RefHandle {
 };
 static_assert(sizeof(void*) != 8 || sizeof(RefHandle) == 16);
 
-// What a linker can do to a reference it only knows by `RefHandle`. One entry
-// per field, indexed by `RefHandle::field`; a non-reference field is null.
 inline constexpr std::uint8_t kNoBranch = 0xFF;
 
 namespace detail {
@@ -698,6 +652,8 @@ struct SingleRefRead {
 
 }  // namespace detail
 
+// What a linker can do to a reference it only knows by `RefHandle`. One entry
+// per field, indexed by `RefHandle::field`; a non-reference field is null.
 struct RefOps {
   bool multi = false;
   // The index in `Ts...` a candidate satisfies, or `kNoBranch`. A subtype
@@ -705,22 +661,19 @@ struct RefOps {
   detail::RefBranchFn branch = nullptr;
 
   // One entry per narrow type declared on this member, in first-occurrence
-  // order; the reference carries the index. An entry answers what `branch`
-  // answers, since a narrow type derives from exactly one candidate, so there
-  // is no second notion of "which candidate".
+  // order; the reference carries the index.
   const detail::RefBranchFn* narrows = nullptr;
   std::uint8_t narrow_count = 0;
   // The narrow types themselves, same order: what a failed lookup names as
   // "expected".
   const AstTypeTag* const* narrow_tags = nullptr;
-  // The index the writer stamped on one reference, read the way every other
-  // column of this row is read -- through the handle, without the type.
+  // The narrowing index the builder wrote on one reference, read through the
+  // handle without the type.
   std::uint8_t (*narrow_of)(const AstNode& owner,
                             std::uint32_t index) noexcept = nullptr;
 
-  // The eager linker walks the work list calling this, so forcing takes the
-  // same CAS, guard and publication as an ordinary read. Not `noexcept`: the
-  // provider it reaches may throw, and the guard makes that safe.
+  // Resolves the reference as an ordinary read does; the linker calls it over
+  // its work list. Not `noexcept`: the scope provider may throw.
   RefState (*force)(const AstNode& owner, std::uint32_t index) = nullptr;
 
   // Reading. `index` selects the element when the member is a vector of
@@ -763,15 +716,8 @@ struct RefFilter {
 
 }  // namespace detail
 
-// This class or a subtype: the tag carries the closure of its bases, and the
-// test walks it -- an `Entity` is the `Type` it extends. The downward family
-// question -- every subtype of T -- needs the grammar's type list, which this
-// header deliberately does not know: `AstReflection::getAllSubTypes` is that
-// door.
-// `T` is stripped of its cv-qualifiers before the tag is taken:
-// `ast_type_tag<const X>` is a different inline variable from
-// `ast_type_tag<X>`, so `ast_cast<const X>` would otherwise get a silent null
-// forever.
+// The node as a `T` when its class is T or a subtype, else null.
+// `AstReflection::getAllSubTypes` lists the subtypes.
 template <class T>
 [[nodiscard]] constexpr const T* ast_cast(const AstNode* node) noexcept {
   return node != nullptr && node->type != nullptr &&
@@ -784,11 +730,11 @@ using AstNodePtr = std::unique_ptr<AstNode>;
 
 namespace detail {
 // A new `T`, outside any tree's arena: its members at their defaults, its
-// parent null. `AstReflection::createNode` is the door.
+// parent null. Public code calls `AstReflection::createNode`.
 template <class T>
 [[nodiscard]] AstNodePtr new_ast_node() {
   auto node = std::make_unique<T>();
-  stamp_node(*node);
+  set_type_tag(*node);
   return node;
 }
 }  // namespace detail

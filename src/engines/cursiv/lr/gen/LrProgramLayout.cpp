@@ -65,7 +65,7 @@ LrProgramLayout::LrProgramLayout(const LrBuildTable& a) {
       actions.append(row, 0);
     }
   }
-  actions.seal();
+  actions.finish();
 
   // A guarded goto names its program above the states.
   if (a.nstates + a.guards.size() >= 0xffffu)
@@ -78,7 +78,7 @@ LrProgramLayout::LrProgramLayout(const LrBuildTable& a) {
       row[e.nt] = e.guard == 0 ? e.to : a.nstates + e.guard - 1u;
     gotos.append(row, 0xffffu);
   }
-  gotos.seal();
+  gotos.finish();
 }
 
 }  // namespace cursiv::engine

@@ -90,7 +90,7 @@ void run() {
   const auto reflection = tllsemantic::generated::Ll::create_ast_reflection();
 
   // One `*` both an operator and a glob's suffix: an operand is a call of its
-  // own, whose turns win over stopping.
+  // own, whose iterations win over stopping.
   namespace fold = tllexpressions::generated;
   auto foldParser = fold::Ll::create_parser();
   auto foldReflection = fold::Ll::create_ast_reflection();
@@ -131,9 +131,9 @@ void run() {
           "right=Name{} } }"},
          {"! a implies b",
           "Doc{items0=Box{value=Both{left=Name{} right=Name{} } } }"}});
-  // A ladder closed by a left recursion: the arms of a rung, written either
-  // way round, are chosen where the rung starts, and the suffix goes on in the
-  // operand it ends before it climbs out.
+  // Precedence levels closed by a left recursion: the arms of a level, in
+  // either written order, are chosen where the level starts, and the suffix
+  // goes on in the operand it ends before it leaves the level.
   constexpr std::string_view compared =
       "Doc{items0=Compare{left=Mark{value=Name{} } right=Name{} } }";
 
@@ -142,7 +142,7 @@ void run() {
       "right=Name{} } } }";
   constexpr std::string_view matched =
       "Doc{items0=Match{left=Name{} right=Match{left=Name{} right=Name{} } } }";
-  // The suffix again behind a rung that closed: the box is its left.
+  // The suffix again after a level that closed: the box is its left operand.
   constexpr std::string_view again =
       "Doc{items0=Match{left=Box{value=Match{left=Name{} right=Name{} } } "
       "right=Name{} } }";
@@ -190,7 +190,7 @@ void run() {
           "right=Name{} } } }"},
          {"a ago matches b ago ago", boxed}});
 
-  // The wrapping arm written after the bare one in the rungs the name gives.
+  // The wrapping arm written after the bare one in the levels the name gives.
 
   expect_tree("order:last:", parser, reflection,
       {{"min a from a from a matches a",

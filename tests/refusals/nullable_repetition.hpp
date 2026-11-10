@@ -1,4 +1,4 @@
-// A repetition whose item may match nothing: the loop has no fixpoint.
+// A repetition whose item may match nothing: the loop could never stop.
 // expect LR: refused .nullableRepetition..*rule .Root. repeats an item that may match nothing
 #pragma once
 

@@ -10,10 +10,8 @@
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/content/TextDocumentContentProvider.hpp"
 
-// The default answers from the documents store: a virtual document someone
-// already registered (a builtin library added at workspace setup) is served
-// back by URI, gated on the declared schemes. No file system involved -- what
-// the store does not hold does not exist.
+// Serves a virtual document the store holds, by URI and for the declared
+// schemes; what the store does not hold does not exist.
 
 namespace cursiv {
 

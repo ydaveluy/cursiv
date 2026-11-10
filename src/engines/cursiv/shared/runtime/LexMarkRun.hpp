@@ -1,5 +1,5 @@
 // Where the run of a mark's class begins, read back from the point its echo
-// is looked for. Launches of one relay come in order along a run, so what an
+// is looked for. Calls for one relay come in order along a run, so what an
 // earlier one read is not read again.
 #pragma once
 

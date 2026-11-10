@@ -33,8 +33,8 @@ inline void ll_ancestors(const Cst& cst, NodeId id, std::vector<NodeId>& out) {
     out.push_back(at);
 }
 
-// ...for a node that stands near one whose records are known: only the
-// records below the last they share are looked for.
+// The same, for a node near one whose records are known: only the records
+// below the last they share are looked for.
 inline void ll_ancestors_near(const Cst& cst, std::span<const NodeId> known,
                               NodeId id, std::vector<NodeId>& out) {
   std::size_t shared = 0;
@@ -47,7 +47,7 @@ inline void ll_ancestors_near(const Cst& cst, std::span<const NodeId> known,
 }
 
 // The rules the stamped records among them name, the innermost first. False
-// where a repair touched one: its content is no longer the grammar's.
+// where a repair touched one: its content is not the grammar's.
 inline bool ll_stamped_rules(const Cst& cst, StampLayout stamp,
                              std::span<const NodeId> records,
                              std::vector<std::uint16_t>& rules) {

@@ -11,12 +11,15 @@
 #include <set>
 #include <span>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "cursiv/McpServer.hpp"
+#include "cursiv/McpToolKit.hpp"
 #include "cursiv/documentation/DocumentationProvider.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/grammar/GrammarSource.hpp"
@@ -42,6 +45,7 @@
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
 #include "cursiv/text/Position.hpp"
 #include "cursiv/text/TextOffset.hpp"
+#include "cursiv/text/lower_case.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/validation/DefaultCodeActionProtocol.hpp"
@@ -58,8 +62,6 @@
 #include "cursiv/workspace/ServiceRequirement.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 #include "cursiv/workspace/WorkspaceLock.hpp"
-#include "cursiv/McpServer.hpp"
-#include "cursiv/McpToolKit.hpp"
 
 namespace cursiv {
 
@@ -105,9 +107,9 @@ void append_diagnostics(std::string& out, const Document& document) {
       out += diagnostic.source;
       out += ')';
     }
-    // The fixes the runtime would have offered, by title: those the
-    // validator stamped and those a linking error is owed on demand -- a
-    // caller with no editor still learns them.
+    // The fixes the runtime would have offered, by title: those the validator
+    // attached and those a linking error gets on demand, for a caller with no
+    // editor.
     const char* sep = " -- fix: ";
     const auto name = [&](const JsonValue& row) {
       if (!row.isObject()) return;
@@ -143,17 +145,15 @@ std::vector<ReferenceDescription> references_to(
 
 constexpr std::string_view kCancelled = "the request was cancelled";
 
-// `body` once, under a queued read that sees the whole workspace at `rung`:
-// no write runs beside it, and a build that failed or was cut short since the
-// wait is awaited again. Otherwise an error, `never` when the rung is not
-// coming, and `body` does not run.
+// Runs `body` once, under a queued read of the workspace at the given state.
+// Otherwise answers an error, `never` when that state is not coming.
 std::optional<McpToolResult> read_workspace_at(
-    const SharedCoreServices& shared, DocumentState rung,
+    const SharedCoreServices& shared, DocumentState target,
     std::string_view never, const CancellationToken& token,
     cursiv::function_ref<void()> body) {
   for (;;) {
     if (const WaitOutcome reached =
-            shared.documentBuilder->waitUntil(rung, token);
+            shared.documentBuilder->waitUntil(target, token);
         reached != WaitOutcome::Reached)
       return McpToolResult{
           std::string(reached == WaitOutcome::Cancelled ? kCancelled : never),
@@ -161,7 +161,7 @@ std::optional<McpToolResult> read_workspace_at(
     bool current = false;
     if (!shared.workspaceLock->read(
             [&] {
-              if (shared.documentBuilder->currentState() < rung) return;
+              if (shared.documentBuilder->currentState() < target) return;
               current = true;
               body();
             },
@@ -171,9 +171,8 @@ std::optional<McpToolResult> read_workspace_at(
   }
 }
 
-// The grammar of the language the call NAMES -- the id is required, so the
-// contract reads the same whatever the workspace holds. A miss answers with
-// the served ids inline, sparing the round-trip through 'languages'.
+// The grammar of the language the call names; the id is required. A miss
+// answers with the served ids.
 const GrammarSource* pick_grammar(const SharedCoreServices& shared,
                                   const json::Value& arguments,
                                   std::string& error) {
@@ -194,10 +193,8 @@ const GrammarSource* pick_grammar(const SharedCoreServices& shared,
   return nullptr;
 }
 
-// A scratch name is the store's for the length of one call, and an id is for
-// ever: the slots are numbered once and handed back, so the store holds one
-// identity per slot and file name, the slots being as many as validations
-// ever ran at once.
+// A scratch name is held for one call, an id forever: slots are numbered once
+// and reused, so the store keeps one identity per slot and file name.
 class ScratchSlots {
  public:
   [[nodiscard]] std::uint32_t acquire() {
@@ -233,22 +230,29 @@ class ScratchLease {
   ScratchLease(const ScratchLease&) = delete;
   ScratchLease& operator=(const ScratchLease&) = delete;
   ~ScratchLease() {
-    if (!_retired) scratch_slots().release(_slot);
+    if (!_abandoned) scratch_slots().release(_slot);
   }
 
   [[nodiscard]] std::uint32_t slot() const noexcept { return _slot; }
   // The slot is never handed out again: its document could not be removed.
-  void retire() noexcept { _retired = true; }
+  void abandon() noexcept { _abandoned = true; }
 
  private:
   std::uint32_t _slot = scratch_slots().acquire();
-  bool _retired = false;
+  bool _abandoned = false;
 };
 
 struct ScratchInput {
   std::string name;
   std::string languageId;
 };
+
+// Whether `name` stays one file in its slot once the uri is normalised: a dot
+// segment would leave the slot.
+bool one_file(std::string_view name) {
+  return !name.empty() && name != "." && name != ".." &&
+         name.find_first_of("/\\") == std::string_view::npos;
+}
 
 ScratchInput scratch_input(const json::Value& arguments,
                            const SharedCoreServices& shared) {
@@ -274,18 +278,17 @@ ScratchInput scratch_input(const json::Value& arguments,
     if (const auto slash = name.find_last_of("/\\");
         slash != std::string_view::npos)
       name.remove_prefix(slash + 1);
-    if (name.empty()) throw std::invalid_argument("'file' names a file");
+    if (!one_file(name)) throw std::invalid_argument("'file' names a file");
     input.name = name;
     return input;
   }
   if (language != nullptr) {
-    if (const LanguageMetaData& meta = language->languageMetaData;
-        !meta.fileExtensions.empty())
+    const LanguageMetaData& meta = language->languageMetaData;
+    if (!meta.fileExtensions.empty())
       input.name = "text" + normalize_extension(meta.fileExtensions.front());
     else if (!meta.fileNames.empty())
       input.name = meta.fileNames.front();
-    else
-      input.name = "text";
+    if (!one_file(input.name)) input.name = "text";
     return input;
   }
   throw std::invalid_argument("'languageId' or 'file' picks the language");
@@ -529,19 +532,16 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
                 },
                 WorkspaceLock::WriteMode::Durable);
           } catch (...) {
-            lease.retire();
+            lease.abandon();
             throw;
           }
           installed = false;
         };
         McpToolResult result;
         try {
-          // Every category is asked, not only those an edit runs, and the
-          // diagnostics are read inside the write that built them: no other
-          // write can set the document back between the two. Durable: the
-          // install must not lose to a keystroke that arrived behind it; past
-          // settle the build is superseded normally, and the next round asks
-          // again for what it did not finish.
+          // One build per write: what a superseded build left is built first,
+          // alone, then the text is installed, built with every category and
+          // read in that write, so no second build sets it back under a reader.
           for (bool answered = false; !answered;) {
             if (token.stop_requested()) {
               result = {std::string(kCancelled), true};
@@ -549,13 +549,29 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
             }
             shared.workspaceLock->write(
                 [&](const CancellationToken& writeToken) {
+                  const DocumentBuilder& builder = *shared.documentBuilder;
+                  if (builder.currentState() < DocumentState::Validated) {
+                    // Under the write's token alone: work the request gave up
+                    // on would wait for a write that may never come.
+                    builder.update({}, {}, writeToken);
+                    return;
+                  }
+                  // The text's own work stops on a newer write or on the
+                  // request; what it leaves unbuilt, the removal's build
+                  // finishes.
+                  std::stop_source stop;
+                  const std::stop_callback byRequest(
+                      token, [&] { stop.request_stop(); });
+                  const std::stop_callback byWrite(
+                      writeToken, [&] { stop.request_stop(); });
+                  const CancellationToken either = stop.get_token();
                   if (!installed) {
                     shared.documents->addDocument(
                         shared.documentFactory->fromTextDocument(
                             TextDocument::create(
                                 uri, language->languageMetaData.languageId, 0,
                                 text->string()),
-                            writeToken));
+                            either));
                     installed = true;
                   }
                   const std::shared_ptr<Document> document =
@@ -565,13 +581,8 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
                     result = {"the text to validate was removed", true};
                     return;
                   }
-                  // What a build this write superseded still owes is finished
-                  // first: the workspace rung it publishes covers every
-                  // document, not only this one. Then the categories an edit
-                  // does not run.
-                  shared.documentBuilder->update({}, {}, writeToken);
                   Document* const built = document.get();
-                  shared.documentBuilder->build({&built, 1}, {}, writeToken);
+                  builder.build({&built, 1}, {}, either);
                   answered = true;
                   if (document->state.load() < DocumentState::Validated) {
                     result = {"the validation build did not finish", true};
@@ -612,8 +623,10 @@ void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
       [&shared = _shared](const json::Value& arguments,
                           const CancellationToken& token) {
         const json::Value* const query = tool_argument(arguments, "query");
-        const std::string needle =
-            query != nullptr && query->isString() ? query->string() : "";
+        // Both sides lowered by the Unicode mapping, as a client's
+        // `toLowerCase` lowers them: `école` finds `École`.
+        const std::string needle = detail::lower_case(
+            query != nullptr && query->isString() ? query->string() : "");
         std::string out;
         std::size_t matches = 0;
         if (std::optional<McpToolResult> unread = read_workspace_at(
@@ -622,16 +635,10 @@ void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
                   (void)shared.indexManager->visitElements(
                       nullptr, {}, [&](const AstNodeDescription& description) {
                         throw_if_cancelled(token);
-                        const auto lower = [](char c) {
-                          return c >= 'A' && c <= 'Z'
-                                     ? static_cast<char>(c + 32)
-                                     : c;
-                        };
-                        const auto matched = std::ranges::search(
-                            description.name, needle, [&](char a, char b) {
-                              return lower(a) == lower(b);
-                            });
-                        if (matched.empty() && !needle.empty()) return true;
+                        if (!needle.empty() &&
+                            detail::lower_case(description.name).find(needle) ==
+                                std::string::npos)
+                          return true;
                         if (++matches > kMaxLines) return false;
                         out += description.name;
                         if (description.type != nullptr) {
@@ -639,27 +646,31 @@ void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
                           out += description.type->name;
                           out += ')';
                         }
-                        if (const std::shared_ptr<Document> home =
+                        if (const std::shared_ptr<Document> owningDocument =
                                 shared.documents->getDocument(
                                     description.documentId);
-                            home != nullptr) {
+                            owningDocument != nullptr) {
                           out += "  ";
-                          out += home->uri;
-                          const CoreServices* const language = home->language;
+                          out += owningDocument->uri;
+                          const CoreServices* const language =
+                              owningDocument->language;
                           const std::optional<CstNodeView> nameNode =
                               language == nullptr || description.node == nullptr
                                   ? std::nullopt
                                   : language->nameProvider->getNameNode(
-                                        *description.node, home.get());
+                                        *description.node,
+                                        owningDocument.get());
                           // A node built by hand has no record to point at: its
                           // uri alone says where it lives.
                           const NodeId at = nameNode.has_value()
                                                 ? nameNode->id
                                                 : description.symbolId;
-                          if (const Cst& cst = home->parseResult.cst();
+                          if (const Cst& cst =
+                                  owningDocument->parseResult.cst();
                               at != kNoNode && at < cst.size()) {
                             out += ':';
-                            append_tool_position(out, *home, cst[at].begin);
+                            append_tool_position(out, *owningDocument,
+                                                 cst[at].begin);
                           }
                         }
                         out += '\n';
@@ -712,12 +723,13 @@ void DefaultMcpService::registerReferencesTool(McpServer& server) const {
               for (const ReferenceDescription& reference : references_to(
                        *language.references, declaration.targets, token)) {
                 throw_if_cancelled(token);
-                const std::shared_ptr<Document> home =
+                const std::shared_ptr<Document> owningDocument =
                     shared.documents->getDocument(reference.sourceDocumentId);
-                if (home == nullptr) continue;
-                out += home->uri;
+                if (owningDocument == nullptr) continue;
+                out += owningDocument->uri;
                 out += ':';
-                append_tool_position(out, *home, reference.sourceBegin);
+                append_tool_position(out, *owningDocument,
+                                     reference.sourceBegin);
                 out += '\n';
               }
             });
@@ -761,22 +773,22 @@ void DefaultMcpService::registerHoverTool(McpServer& server) const {
                   out += target->type->name;
                   out += ')';
                 }
-                const Document* const home = target->getDocument();
-                if (home != nullptr) {
+                const Document* const owningDocument = target->getDocument();
+                if (owningDocument != nullptr) {
                   out += "  declared at ";
-                  append_location(out, *home, target);
+                  append_location(out, *owningDocument, target);
                 }
                 out += '\n';
                 // The prose is the declaration's language's: a global
                 // candidate may come from another grammar.
-                if (home == nullptr) continue;
-                const CoreServices* const owner = home->language;
+                if (owningDocument == nullptr) continue;
+                const CoreServices* const owner = owningDocument->language;
                 const DocumentationProvider* const docs =
                     owner == nullptr ? nullptr
                                      : owner->documentationProvider.get();
                 if (docs == nullptr) continue;
                 if (const std::optional<std::string> prose =
-                        docs->getDocumentation(*target, home)) {
+                        docs->getDocumentation(*target, owningDocument)) {
                   out += *prose;
                   out += '\n';
                 }
@@ -835,13 +847,13 @@ void DefaultMcpService::registerRenameTool(McpServer& server) const {
               out += "' with '";
               out += newName->string();
               out += "' at (1-based, end-exclusive):\n";
-              const auto edit = [&](const Document& home, TextOffset begin,
-                                    TextOffset end) {
-                out += home.uri;
+              const auto edit = [&](const Document& owningDocument,
+                                    TextOffset begin, TextOffset end) {
+                out += owningDocument.uri;
                 out += ':';
-                append_tool_position(out, home, begin);
+                append_tool_position(out, owningDocument, begin);
                 out += '-';
-                append_tool_position(out, home, end);
+                append_tool_position(out, owningDocument, end);
                 out += '\n';
               };
               // A typo that resolved to nothing still renames itself.
@@ -852,10 +864,11 @@ void DefaultMcpService::registerRenameTool(McpServer& server) const {
               for (const ReferenceDescription& reference : references_to(
                        *language.references, declaration.targets, token)) {
                 throw_if_cancelled(token);
-                const std::shared_ptr<Document> home =
+                const std::shared_ptr<Document> owningDocument =
                     shared.documents->getDocument(reference.sourceDocumentId);
-                if (home != nullptr)
-                  edit(*home, reference.sourceBegin, reference.sourceEnd);
+                if (owningDocument != nullptr)
+                  edit(*owningDocument, reference.sourceBegin,
+                       reference.sourceEnd);
               }
             });
         if (!result.isError && result.text.empty())
@@ -1022,9 +1035,8 @@ void DefaultMcpService::registerDocumentSymbolsTool(McpServer& server) const {
 
 namespace {
 
-// The features the engine answers at `offset`, asked as a completion asks
-// them: in place of the word the caret ends or stands in, and at the caret
-// alone where a whole word answers nothing. `word` is left on what they
+// The features the engine answers at `offset`, asked as completion asks: in
+// place of the word at the caret, else at the caret alone. `word` is what they
 // replace, empty for a bare insertion.
 std::vector<NextFeature> features_at(const Document& document,
                                      const Parser& parser, TextOffset offset,
@@ -1136,7 +1148,14 @@ void DefaultMcpService::registerScopeCandidatesTool(McpServer& server) const {
               const TextOffset offset = document.textDocument().offsetAt(
                   Position{at.line, at.column});
               const Cst& cst = document.parseResult.cst();
-              AstNode* container = owner_at(cst, offset);
+              CstLeaf word;
+              const std::vector<NextFeature> features =
+                  features_at(document, *language.parser, offset, word);
+              // From the word's own node when the caret is in a word, as
+              // completion reads; else from the node before the caret, or the
+              // root when none precedes it.
+              AstNode* container =
+                  word ? owner_of_leaf(cst, word.id) : owner_at(cst, offset);
               if (container == nullptr) container = document.parseResult.value;
               if (container == nullptr) return;
               // One list per reference member, in the order the grammar names
@@ -1153,9 +1172,7 @@ void DefaultMcpService::registerScopeCandidatesTool(McpServer& server) const {
               std::set<Seen> seen;
               std::vector<NextFeature> asked;
               std::size_t matches = 0;
-              CstLeaf word;
-              for (const NextFeature& next :
-                   features_at(document, *language.parser, offset, word)) {
+              for (const NextFeature& next : features) {
                 throw_if_cancelled(token);
                 if (matches > kMaxLines) break;
                 // Two terminals filling one site ask the same scope.

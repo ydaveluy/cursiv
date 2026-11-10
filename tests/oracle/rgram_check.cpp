@@ -1,4 +1,4 @@
-// One random grammar's lane, compiled against the parser the build generated
+// One random grammar's test, compiled against the parser the build generated
 // for it, or against the generator's refusal. `--may-refuse` passes the
 // latter: a long run draws grammars the generator rightly refuses.
 #include <cstdio>

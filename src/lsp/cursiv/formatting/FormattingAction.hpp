@@ -15,10 +15,8 @@
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 
-// The vocabulary a rule is written in: where (a selection of CST records)
-// and what (a whitespace instruction), never what the text becomes. Nothing
-// here knows the grammar, so this header compiles once for every language;
-// the grammar-dependent half lives in `AbstractFormatter.hpp`.
+// The vocabulary of a rule: where (CST records) and what whitespace, never
+// what the text becomes. The grammar half is in `AbstractFormatter.hpp`.
 
 namespace cursiv {
 
@@ -33,10 +31,9 @@ struct FormattingActionOptions {
   bool allowLess = false;
 };
 
-// One low-level whitespace instruction: `characters` is inline spacing in
-// spaces, `lines` is a line-break count followed by the current
-// indentation, `tabs` is an indentation delta in indentation units. Authors
-// write `oneSpace`/`newLine`/`indent`, never this directly.
+// One whitespace instruction: `characters` spaces inline, `lines` line breaks
+// then the indentation, `tabs` an indentation delta. Authors write
+// `oneSpace`, `newLine` and `indent`.
 struct FormattingMove {
   std::optional<std::int32_t> characters = std::nullopt;
   std::optional<std::int32_t> tabs = std::nullopt;
@@ -63,8 +60,7 @@ class FormattingCollector {
 };
 
 // A selection of CST records whitespace rules attach to, obtained from
-// `NodeFormatter`. A plain value: two named regions -- an opening and a closing
-// brace -- are two variables, not two types.
+// `NodeFormatter`.
 class FormattingRegion {
  public:
   FormattingRegion() = default;
@@ -111,10 +107,8 @@ class FormattingRegion {
   FormattingCollector* _collector = nullptr;
 };
 
-// The formatter of one hidden record -- a comment. Hidden records are
-// CST-only: no AST node is built for them, so they are reached by the
-// terminal rule that produced them, not a node callback. `ruleName()` is
-// the name the author wrote in the grammar -- no second registry.
+// The formatter of one hidden record, such as a comment, reached by the
+// terminal rule that produced it: `ruleName()` is its name in the grammar.
 class HiddenNodeFormatter {
  public:
   HiddenNodeFormatter(const Cst& cst, NodeId node, std::int32_t baseIndentation,
@@ -154,6 +148,8 @@ class HiddenNodeFormatter {
   // margin.
   void replace(std::string text) const;
 
+  // A rule on a hidden record sets its margin only, from its move's `tabs`: the
+  // whitespace before a comment stays as written.
   HiddenNodeFormatter& prepend(const FormattingAction& action);
   HiddenNodeFormatter& append(const FormattingAction& action);
   HiddenNodeFormatter& surround(const FormattingAction& action);

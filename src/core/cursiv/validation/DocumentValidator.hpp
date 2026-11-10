@@ -11,27 +11,22 @@
 
 namespace cursiv {
 
-// The codes the runtime itself stamps in a diagnostic's `data`, as opposed to a
+// The codes the runtime itself writes in a diagnostic's `data`, as opposed to a
 // language's own checks. A code action comparing `data_code` against these acts
 // on the failing construct without reading the English back out of the message.
 
 // A reference nothing in scope answers, or one whose resolution cycles.
 inline constexpr std::string_view kLinkingError = "linking-error";
 
-// What a linking diagnostic carries besides its sentence: a quick fix
-// offering "did you mean X" needs the name that failed, the class that
-// declares the member and the member's name -- reading any of them back out
-// of the message would make the prose an API.
+// What a linking diagnostic carries besides its sentence, for a "did you mean"
+// fix: the failed name, the declaring class and the member's name.
 inline constexpr std::string_view kLinkingRefText = "refText";
 inline constexpr std::string_view kLinkingContainerType = "containerType";
 inline constexpr std::string_view kLinkingProperty = "property";
 // A check that threw; the diagnostic replaces whatever it would have said.
 inline constexpr std::string_view kValidationError = "validation-error";
-// The parse half: the three codes name what the tree can attest, so a client
-// filtering everything syntactic matches all three.
-//
-// The parser stopped, or recovery gave up: no leaf to point at, only the byte
-// it reached.
+// The parse half: three codes, so a client can filter all syntax errors. The
+// parser stopped, or recovery gave up: only the byte it reached is known.
 inline constexpr std::string_view kSyntaxError = "syntax-error";
 // Recovery repaired here: the document parses, and the text under this range is
 // not what the author wrote.
@@ -40,16 +35,9 @@ inline constexpr std::string_view kParseRepaired = "parse-repaired";
 // stands.
 inline constexpr std::string_view kConversionError = "conversion-error";
 
-// `categories` is a list of identities and empty is every one. The build path
-// names what a document still owes; an editor wanting the fast checks alone
-// names them.
-//
-// The two stops apply only when built-in validation runs. A repaired AST is partly
-// synthesized, and a check walking it as if the grammar had matched reads
-// defaults where the language promised values. Both default off and the build
-// path keeps them off -- the incremental registry records a category as run
-// when it runs, so a stop that skipped categories while recording them would
-// suppress them for ever. They are for direct callers.
+// `categories` lists identities; empty is every one. The two stops apply to
+// built-in validation only, and are for direct callers: the build keeps them
+// off, as it records the categories it runs.
 struct ValidationOptions {
   std::span<const ValidationCategory* const> categories{};
   bool stopAfterParsingErrors = false;
@@ -64,7 +52,7 @@ class DocumentValidator {
                                 const ValidationOptions&,
                                 const CancellationToken&) const = 0;
 
-  // The two spellings above it, so a caller says only what it means.
+  // Shortcuts: some categories only, or every check.
   void validateDocument(const Document& document,
                         std::vector<Diagnostic>& diagnostics,
                         std::span<const ValidationCategory* const> categories,

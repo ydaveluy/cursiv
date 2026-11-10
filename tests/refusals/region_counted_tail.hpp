@@ -1,6 +1,6 @@
-// A counted repetition ends a region and `eof` follows it: past the floor the
-// point that reads on cannot tell a turn of the region from the end of the
-// text, which the caller reads under another skipper.
+// A region ending on a counted repetition, followed by `eof`: past the minimum
+// count, the parser cannot tell another turn inside the region from the end
+// of the text, read outside it with another skipper.
 // expect LR LL: refused: the grammar reaches the same token both inside a .* region and outside it
 #pragma once
 

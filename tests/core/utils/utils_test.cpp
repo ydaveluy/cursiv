@@ -1,6 +1,6 @@
 // The utilities the tree leans on: folded comparison and hashing, the folder
-// tree, the one form a URI is keyed in, and the caches that must die with the
-// build they answer for.
+// tree, the one form a URI is keyed in, and the caches emptied with the build
+// they belong to.
 
 #include <array>
 #include <chrono>
@@ -36,7 +36,7 @@
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
 #include "cursiv/workspace/Documents.hpp"
-#include "support/RetiredTables.hpp"
+#include "support/PendingTables.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 
@@ -50,7 +50,7 @@ inline constexpr bool kWindowsPaths =
 #include <vector>
 #endif
 
-// Pins the folded comparison and hash across every split a word boundary
+// The folded comparison and hash across every split a word boundary
 // makes: the hash reads the last word of a name a word long overlapping the
 // one before it.
 namespace case_fold {
@@ -171,8 +171,8 @@ void run() {
 
 }  // namespace function_ref
 
-// Pins the folder tree: the exact query, the prefix at two depths, and the
-// erasure that takes a subtree with it -- the claims the registry makes.
+// The folder tree: the exact query, the prefix at two depths, and the erasure
+// that takes a subtree with it, as the registry uses them.
 namespace uri_trie {
 
 namespace {
@@ -190,7 +190,7 @@ void moving_reparents_the_root_children() {
     moved = std::move(temporary);
   }
   CHECK(moved.has("mem:///leaf"));
-  // Pruning the last value climbs all the way back to the moved root.
+  // Pruning the last value goes all the way back up to the moved root.
   moved.eraseValue("mem:///leaf");
   CHECK(moved.all().empty());
   moved.insert("mem:///another", 2);
@@ -231,9 +231,9 @@ void exact_prefix_and_subtree_erasure() {
 }
 
 #if defined(__linux__)
-// A path far deeper than a cramped thread's stack could recurse through:
+// A path far deeper than a small thread's stack could recurse through:
 // listing the values and freeing the nodes walk it on the heap.
-void* deep_path_on_a_cramped_stack(void* arg) {
+void* deep_path_on_a_small_stack(void* arg) {
   auto* const listed = static_cast<std::size_t*>(arg);
   std::string uri = "mem:///";
   for (int i = 0; i < 100000; ++i) uri += "a/";
@@ -253,7 +253,7 @@ void a_deep_path_needs_no_deep_stack() {
   pthread_attr_setstacksize(&attr, std::size_t{128} << 10);
   std::size_t listed = 0;
   pthread_t thread;
-  if (pthread_create(&thread, &attr, &deep_path_on_a_cramped_stack, &listed) ==
+  if (pthread_create(&thread, &attr, &deep_path_on_a_small_stack, &listed) ==
       0) {
     pthread_join(thread, nullptr);
     CHECK(listed == 5);
@@ -274,7 +274,7 @@ void run() {
 
 }  // namespace uri_trie
 
-// Pins the one form every URI is compared and keyed in. Two spellings of one
+// The one form every URI is compared and keyed in. Two spellings of one
 // file must normalize to the same string: they name the same document.
 namespace uri_utils {
 
@@ -435,6 +435,11 @@ void a_uri_has_one_spelling() {
       {R"(http://User:Pw@Host:80/a/b)", R"(http://User:Pw@host:80/a/b)"},
       {R"(http://User@Host/a/b)", R"(http://User@host/a/b)"},
       {R"(http://[::1]:8080/a/b)", R"(http://[::1]:8080/a/b)"},
+      {R"(http://[::1]/a/b)", R"(http://[::1]/a/b)"},
+      {R"(http://[FE80::1%2541]/a)", R"(http://[fe80::1%2541]/a)"},
+      {R"(http://[fe80::1%25en1]:8080/a)", R"(http://[fe80::1%25en1]:8080/a)"},
+      {R"(http://a%3Ab/a)", R"(http://a%3Ab/a)"},
+      {R"(http://a%5Bb%5D:80/a)", R"(http://a%5Bb%5D:80/a)"},
       {R"(http://a%40b@c/a/b)", R"(http://a%40b@c/a/b)"},
       {R"(https://alice:p%40ss@EXAMPLE.com/a)",
        R"(https://alice:p%40ss@example.com/a)"},
@@ -458,7 +463,7 @@ void a_uri_has_one_spelling() {
   CHECK(cursiv::normalize_uri("file:///a/./b/../c") == "file:///a/./b/../c");
 }
 
-// The whole point: one file, one key.
+// One file, one key.
 void one_file_normalizes_to_one_string() {
   CHECK(cursiv::equals_uri("file:///a/b c", "file:///a/b%20c"));
   CHECK(!cursiv::equals_uri("file:///a/b", "file:///a/c"));
@@ -496,8 +501,8 @@ void a_relative_path_walks_back_up() {
   CHECK(cursiv::relative_uri("mem:///w/a", "mem:///w/b/c") == "../b/c");
   CHECK(cursiv::relative_uri("file:///a/b", "file:///a/b").empty());
   CHECK(cursiv::relative_uri("dir/a:one.ws", "dir/b:two.ws") == "../b:two.ws");
-  // Two places: the absolute normalized target.
-  // A path, not a part of a URI; and no way leads from one drive to another.
+  // The answer is a decoded path; another drive, scheme or host gives the
+  // absolute target.
   CHECK(cursiv::relative_uri("file:///a/b%20c", "file:///a/d%20e") == "../d e");
   CHECK(cursiv::relative_uri("file:///c%3A/a", "file:///C:/a/b") == "b");
   CHECK(cursiv::relative_uri("file:///c%3A/a", "file:///d%3A/b%20c") == "d:/b c");
@@ -554,7 +559,7 @@ void names_and_extensions_follow_the_uri_path() {
   }
 }
 
-void an_extension_wears_its_dot() {
+void an_extension_gets_its_leading_dot() {
   CHECK(cursiv::normalize_extension("calc") == ".calc");
   CHECK(cursiv::normalize_extension(".calc") == ".calc");
   CHECK(cursiv::normalize_extension("").empty());
@@ -563,7 +568,7 @@ void an_extension_wears_its_dot() {
 }  // namespace
 
 // A Windows drive letter is a syntactic fact of the URI: the three spellings
-// a client may send land on one, whatever platform the server runs on.
+// a client may send map to one, whatever platform the server runs on.
 void a_drive_letter_normalizes_on_any_host() {
   const std::string canonical = cursiv::normalize_uri("file:///c:/w/a.ws");
   CHECK(cursiv::normalize_uri("file:///C:/w/a.ws") == canonical);
@@ -587,7 +592,7 @@ void run() {
   one_file_normalizes_to_one_string();
   containment_counts_segments();
   a_relative_path_walks_back_up();
-  an_extension_wears_its_dot();
+  an_extension_gets_its_leading_dot();
   a_name_is_what_follows_the_last_separator();
   names_and_extensions_follow_the_uri_path();
   a_drive_letter_normalizes_on_any_host();
@@ -595,11 +600,8 @@ void run() {
 
 }  // namespace uri_utils
 
-// Pins the three caches: a hit never recomputes, and above all when an entry
-// dies -- per update, per rung, per document -- because a cache that outlives
-// its build answers from a world that no longer exists.
-// Every member compiled, in both storages: a member that only some keys use
-// would otherwise wait for a caller to break.
+// The three caches: a hit never recomputes, and an entry is dropped at its
+// update, state or document. Every member is compiled, in both storages.
 template class cursiv::detail::ConcurrentTable<int, int>;
 template class cursiv::detail::ConcurrentTable<std::string, int>;
 template class cursiv::detail::ConcurrentTable<int, std::string>;
@@ -626,8 +628,8 @@ void a_hit_never_recomputes() {
   CHECK(computed == 2);
 }
 
-// A value that counts its copies: what a fill pays is told by how often the
-// cache copies its table.
+// A value that counts its copies, to tell how often a fill copies the cache's
+// table.
 struct Counted {
   int value = 0;
   static inline std::size_t copies = 0;
@@ -740,7 +742,7 @@ void value_providers_and_consumers_can_reenter() {
     CHECK(value == 5);
     cache.clear();
     CHECK(cache.get([] { return 7; }) == 7);
-    CHECK(value == 5);  // retired while this consumer still holds its guard
+    CHECK(value == 5);  // released while this consumer still holds its guard
   });
   CHECK(cache.get([] { return 0; }) == 7);
   CHECK(support::throws<std::runtime_error>([&] {
@@ -813,20 +815,20 @@ void a_value_consumer_keeps_its_answer_alive_during_clear() {
   });
   reading.arrive_and_wait();
   cache.clear();
-  support::collect_retired_tables();
+  support::collect_pending_tables();
   CHECK(!previous.expired());
   CHECK(*cache.get([] { return std::make_shared<int>(42); }) == 42);
   resume.arrive_and_wait();
   consumer.join();
   CHECK(read == 41);
-  support::collect_retired_tables();
+  support::collect_pending_tables();
   CHECK(previous.expired());
 }
 #endif
 
-// Retirement may collect an older owning value. Its destructor runs with no
-// cache lock held, so it may ask the cache another question of its own.
-void a_retired_value_can_reenter_the_cache_when_destroyed() {
+// A collected value's destructor runs with no cache lock held, so it may
+// read or empty the cache, keyed or not.
+void a_cleared_value_can_reenter_the_cache_when_destroyed() {
   cursiv::SimpleCache<std::shared_ptr<int>> cache;
   int released = 0, observed = 0;
   (void)cache.get([&] {
@@ -838,9 +840,82 @@ void a_retired_value_can_reenter_the_cache_when_destroyed() {
   });
   cache.clear();
   for (int i = 0; i < 64; ++i) cache.clear();
-  support::collect_retired_tables();
+  support::collect_pending_tables();
   CHECK(released == 1);
   CHECK(observed == 7);
+
+  cursiv::SimpleCache<int, std::shared_ptr<int>> keyed;
+  (void)keyed.get(1, [&] {
+    return std::shared_ptr<int>(new int(41), [&](int* value) {
+      delete value;
+      ++released;
+      keyed.clear();
+      observed = *keyed.get(2, [] { return std::make_shared<int>(8); });
+    });
+  });
+  for (int i = 0; i < 64; ++i) keyed.clear();
+  support::collect_pending_tables();
+  CHECK(released == 2);
+  CHECK(observed == 8);
+}
+
+// A clear during a provider leaves the caller its own answer, read with no
+// guard: what is released meanwhile can be collected.
+void a_stale_answer_holds_back_no_collection() {
+  cursiv::SimpleCache<int> cache;
+  cursiv::SimpleCache<std::shared_ptr<int>> other;
+  std::weak_ptr<int> dropped;
+  (void)other.get([&] {
+    auto value = std::make_shared<int>(5);
+    dropped = value;
+    return value;
+  });
+  bool consumed = false;
+  cache.withValue(
+      [&] {
+        cache.clear();
+        return 1;
+      },
+      [&](const int& value) {
+        consumed = value == 1;
+        other.clear();
+        support::collect_pending_tables();
+        CHECK(dropped.expired());
+      });
+  CHECK(consumed);
+}
+
+// Waits past the collection delay. A loop on the clock, not a sleep, so a
+// build without threads runs it too.
+void wait_past_the_collection_delay() {
+  const auto until =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(150);
+  while (std::chrono::steady_clock::now() < until) {
+  }
+}
+
+// A first read of a document may grow the cache's table and collect; a
+// value freed then may read the same cache.
+void a_cleared_value_can_read_a_growing_document_cache() {
+  World world;
+  cursiv::DocumentCache<int, int> cache(world.shared);
+  int observed = 0;
+  cursiv::SimpleCache<std::shared_ptr<int>> holder;
+  (void)holder.get([&] {
+    return std::shared_ptr<int>(new int(0), [&](int* value) {
+      delete value;
+      observed = cache.get(cursiv::DocumentId{100000}, 0, [] { return 9; });
+    });
+  });
+  // The only release since a collection, then a wait: the next release
+  // collects.
+  support::collect_pending_tables();
+  holder.clear();
+  wait_past_the_collection_delay();
+  CHECK(observed == 0);
+  for (std::uint32_t d = 1; d <= 64 && observed == 0; ++d)
+    (void)cache.get(cursiv::DocumentId{d}, 0, [] { return 1; });
+  CHECK(observed == 9);
 }
 
 void a_workspace_value_uses_the_same_invalidation_lifecycle() {
@@ -848,23 +923,23 @@ void a_workspace_value_uses_the_same_invalidation_lifecycle() {
   cursiv::Document* const document = world.add("file:///a.ws", "datatype A\n");
   cursiv::Document* const set[] = {document};
   world.shared.documentBuilder->build(set);
-  cursiv::WorkspaceCache<int> announced(world.shared);
+  cursiv::WorkspaceCache<int> unstaged(world.shared);
   cursiv::WorkspaceCache<int> linked(world.shared,
                                           cursiv::DocumentState::Linked);
   int first = 0, second = 0;
   const auto a = [&] { return ++first; };
   const auto b = [&] { return ++second; };
-  CHECK(announced.get(a) == 1);
+  CHECK(unstaged.get(a) == 1);
   CHECK(linked.get(b) == 1);
   world.shared.documentBuilder->build({});
-  CHECK(announced.get(a) == 2);
+  CHECK(unstaged.get(a) == 2);
   CHECK(linked.get(b) == 2);
   const std::string_view changed[] = {"file:///a.ws"};
   world.shared.documentBuilder->update(changed, {});
-  CHECK(announced.get(a) == 3);
+  CHECK(unstaged.get(a) == 3);
   CHECK(linked.get(b) == 3);
   world.shared.documentBuilder->update({}, changed);
-  CHECK(announced.get(a) == 4);
+  CHECK(unstaged.get(a) == 4);
   CHECK(linked.get(b) == 4);
 }
 
@@ -941,11 +1016,11 @@ void a_document_value_is_partitioned_and_can_be_read_without_computing() {
                   });
 }
 
-// Changes clear an unstaged answer at the announcement, but a staged one
-// remains available until its chosen rung. Deletions clear either immediately;
-// the other document keeps its answer throughout.
-void document_values_follow_updates_rungs_and_deletions() {
-  for (const cursiv::DocumentState rung :
+// A change clears an unstaged answer when the update is reported, and a staged
+// one when its document reaches the cache's state. A deletion clears either at
+// once; the other document keeps its answer throughout.
+void document_values_follow_updates_states_and_deletions() {
+  for (const cursiv::DocumentState eviction :
        {cursiv::DocumentState::Linked,
         cursiv::DocumentState::IndexedReferences}) {
     World world;
@@ -955,7 +1030,7 @@ void document_values_follow_updates_rungs_and_deletions() {
     world.shared.documentBuilder->build(documents);
     const cursiv::DocumentId own = a->id, other = b->id;
     cursiv::DocumentCache<int> plain(world.shared);
-    cursiv::DocumentCache<int> staged(world.shared, rung);
+    cursiv::DocumentCache<int> staged(world.shared, eviction);
     CHECK(plain.get(own, [] { return 11; }) == 11);
     CHECK(plain.get(other, [] { return 12; }) == 12);
     CHECK(staged.get(own, [] { return 21; }) == 21);
@@ -965,27 +1040,27 @@ void document_values_follow_updates_rungs_and_deletions() {
       cursiv::DocumentCache<int>& plain;
       cursiv::DocumentCache<int>& staged;
       const cursiv::DocumentId own;
-      const cursiv::DocumentState rung;
+      const cursiv::DocumentState eviction;
       int before = 0, reached = 0;
       Observer(cursiv::DocumentCache<int>& p, cursiv::DocumentCache<int>& s,
                cursiv::DocumentId d, cursiv::DocumentState r)
-          : plain(p), staged(s), own(d), rung(r) {}
+          : plain(p), staged(s), own(d), eviction(r) {}
       void onDocumentPhase(cursiv::Document& document,
                            cursiv::DocumentState state,
                            const cursiv::CancellationToken&) override {
         if (document.id != own) return;
         if (state == static_cast<cursiv::DocumentState>(
-                         static_cast<unsigned>(rung) - 1)) {
+                         static_cast<unsigned>(eviction) - 1)) {
           CHECK(!plain.get(own).has_value());
           CHECK(staged.get(own) == 21);
           ++before;
         }
-        if (state == rung) {
+        if (state == eviction) {
           CHECK(!staged.get(own).has_value());
           ++reached;
         }
       }
-    } observer(plain, staged, own, rung);
+    } observer(plain, staged, own, eviction);
     world.shared.documentBuilder->addDocumentPhaseListener(observer);
     const std::string_view changed[] = {"file:///a.ws"};
     world.shared.documentBuilder->update(changed, {});
@@ -1003,7 +1078,7 @@ void document_values_follow_updates_rungs_and_deletions() {
     CHECK(!staged.get(own).has_value());
     CHECK(plain.get(other) == 12);
     CHECK(staged.get(other) == 22);
-    CHECK(observer.reached == 1);  // a deleted document crosses no rung
+    CHECK(observer.reached == 1);  // a deleted document reaches no state
   }
 }
 
@@ -1090,7 +1165,7 @@ void a_failed_subscription_leaves_no_listener() {
   CHECK(tracked->documentListeners == 0);
 }
 
-// Without a rung, any announced update empties the workspace cache.
+// Without an eviction state, any reported update empties the workspace cache.
 void a_stateless_workspace_cache_empties_on_any_update() {
   World world;
   cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
@@ -1106,10 +1181,11 @@ void a_stateless_workspace_cache_empties_on_any_update() {
   CHECK(cache.get(1, provider) == 2);  // the update emptied it
 }
 
-// With a rung, a change empties at the rung the rebuild climbs through, and
-// a deletion empties at the announcement (a deleted document reaches no
-// rung). The two variants below tell the staged mode from the stateless one.
-void a_staged_workspace_cache_empties_at_its_rung() {
+// With an eviction state, a change empties the cache when the rebuild reaches
+// that state, and a deletion when it is reported (a deleted document reaches
+// no state). The two variants below tell the staged mode from the stateless
+// one.
+void a_staged_workspace_cache_empties_at_its_state() {
   World world;
   cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
   cursiv::Document* const set[] = {a};
@@ -1130,7 +1206,7 @@ void a_staged_workspace_cache_empties_at_its_rung() {
 }
 
 // Partitioned by document: one document's rebuild empties its own entries and
-// nobody else's; `Validated` is refused as an eviction rung.
+// nobody else's; `Validated` is refused as an eviction state.
 void a_document_cache_evicts_per_document() {
   World world;
   cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
@@ -1237,8 +1313,8 @@ void a_document_cache_keeps_out_what_a_clear_overtakes() {
   CHECK(cache.get(b, 4, [] { return 0; }) == 40);
 }
 
-// The same for a deletion, with and without a rung, and with the document
-// cached again before the value is done.
+// The same for a deletion, with and without an eviction state, and with the
+// document cached again before the value is done.
 void a_document_cache_keeps_out_what_a_deletion_overtakes() {
   World world;
   cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
@@ -1281,10 +1357,8 @@ void a_document_cache_keeps_what_a_neighbours_clear_does_not_touch() {
 }
 
 #if !defined(__wasi__) || defined(_REENTRANT)
-// Readers and clearers at once, on documents whose ids are far apart and on
-// neighbours: a read never answers from before a clear that ended before the
-// read began. Each document counts its clears; a value is the count its
-// provider read.
+// Readers and clearers at once, on far and neighbouring documents: a read
+// never answers from before a clear that ended before it began.
 void a_document_cache_never_answers_from_before_a_finished_clear() {
   World world;
   cursiv::DocumentCache<int, std::uint64_t> cache(world.shared);
@@ -1321,15 +1395,15 @@ void a_document_cache_never_answers_from_before_a_finished_clear() {
       for (std::uint64_t round = 1; !stop.load(); ++round) {
         d = (d + 1) % kDocuments;
         if (round % 16 == 0) {
-          std::array<std::uint64_t, kDocuments> owed{};
-          for (std::uint32_t i = 0; i < kDocuments; ++i) owed[i] = ++clears[i];
+          std::array<std::uint64_t, kDocuments> due{};
+          for (std::uint32_t i = 0; i < kDocuments; ++i) due[i] = ++clears[i];
           cache.clear();
           for (std::uint32_t i = 0; i < kDocuments; ++i)
-            raise(finished[i], owed[i]);
+            raise(finished[i], due[i]);
         } else {
-          const std::uint64_t owed = ++clears[d];
+          const std::uint64_t due = ++clears[d];
           cache.clear(id(d));
-          raise(finished[d], owed);
+          raise(finished[d], due);
         }
       }
     });
@@ -1343,10 +1417,8 @@ void a_document_cache_never_answers_from_before_a_finished_clear() {
 }  // namespace
 
 #if !defined(__wasi__) || defined(_REENTRANT)
-// The table under the caches: several threads insert the same keys in
-// different orders while it grows, so every key is raced for and copied
-// mid-insert. None is lost, none is stored twice, and each keeps the first
-// value -- a small pair in the slot itself or an entry apart.
+// Several threads insert the same keys in different orders while the table
+// grows: no key is lost or stored twice, and each keeps its first value.
 template <class V, class Make>
 void a_table_keeps_every_key_through_growth(Make make) {
   constexpr int kThreads = 8;
@@ -1484,11 +1556,11 @@ void a_lookup_compares_about_one_key() {
   CHECK(CountingEqual::compared < kKeys / 10);
 }
 
-// A reader that stays holds back only what was retired after it came: what
-// was retired before is freed meanwhile, and the rest once it leaves. A
+// A reader that stays holds back only what was released after it came: what
+// was released before is freed meanwhile, and the rest once it leaves. A
 // `forEach` still running is such a reader.
 void a_guard_holds_back_only_what_follows_it() {
-  support::collect_retired_tables();
+  support::collect_pending_tables();
   cursiv::detail::ConcurrentTable<int, Live> before;
   cursiv::detail::ConcurrentTable<int, Live> after;
   const auto fill = [](cursiv::detail::ConcurrentTable<int, Live>& table) {
@@ -1504,20 +1576,17 @@ void a_guard_holds_back_only_what_follows_it() {
   before.clear();
   reader.forEach([&](int) {
     after.clear();
-    support::collect_retired_tables();
+    support::collect_pending_tables();
     CHECK(Live::count == 1);
   });
-  support::collect_retired_tables();
+  support::collect_pending_tables();
   CHECK(Live::count == 0);
 }
 
-// What a clear retired waits for a collection, and what holds a lot is
-// collected soon, not after many retirements: a few large tables would
-// otherwise wait for dozens of small ones. The large table the helper fills
-// and clears is a dozen retirements, megabytes in all, and the collection
-// they bring frees the small table retired before them.
-void a_large_retirement_is_collected_soon() {
-  support::collect_retired_tables();
+// A release that holds a lot is collected soon: a dozen large tables
+// bring a collection that frees the small one released before them.
+void a_large_pending_free_is_collected_soon() {
+  support::collect_pending_tables();
   cursiv::detail::ConcurrentTable<int, Live> small;
   {
     Live value;
@@ -1525,8 +1594,27 @@ void a_large_retirement_is_collected_soon() {
   }
   small.clear();
   CHECK(Live::count == 1);
-  support::collect_retired_tables();
+  support::collect_pending_tables();
   CHECK(Live::count == 0);
+}
+
+// A rare release does not wait for dozens more: the first release
+// after a short pause collects.
+void a_rare_pending_free_is_collected_after_a_pause() {
+  support::collect_pending_tables();
+  cursiv::SimpleCache<std::shared_ptr<int>> cache;
+  std::weak_ptr<int> dropped;
+  (void)cache.get([&] {
+    auto value = std::make_shared<int>(1);
+    dropped = value;
+    return value;
+  });
+  cache.clear();
+  CHECK(!dropped.expired());
+  wait_past_the_collection_delay();
+  cursiv::SimpleCache<int> other;
+  other.clear();
+  CHECK(dropped.expired());
 }
 
 #if !defined(__wasi__) || defined(_REENTRANT)
@@ -1546,7 +1634,7 @@ void a_clear_during_a_growth_frees_its_successor() {
     }
   done = true;
   clearer.join();
-  support::collect_retired_tables();
+  support::collect_pending_tables();
 }
 #endif
 
@@ -1581,7 +1669,7 @@ void a_thread_gives_its_slot_back_even_from_a_late_guard() {
 void more_threads_than_slots_read_at_once() {
   constexpr int kHolders = 1024;  // one per slot: none is left after them
   constexpr int kLate = 4;
-  support::collect_retired_tables();
+  support::collect_pending_tables();
   cursiv::detail::ConcurrentTable<int, int> table;
   int one = 1;
   (void)table.insert(table.generation(), 1, one);
@@ -1626,14 +1714,14 @@ void more_threads_than_slots_read_at_once() {
   CHECK(allInside);
   if (allInside) {
     held.clear();
-    support::collect_retired_tables();
+    support::collect_pending_tables();
     CHECK(Live::count == 1);
   }
   cleared = true;
   released = true;
   for (auto& thread : threads) thread.join();
   CHECK(wrong.load() == 0);
-  support::collect_retired_tables();
+  support::collect_pending_tables();
   CHECK(Live::count == 0);
 }
 #endif
@@ -1649,11 +1737,13 @@ void run() {
   a_failed_provider_can_be_retried();
   a_value_cache_keeps_null_and_borrows_without_copying();
   value_providers_and_consumers_can_reenter();
-  a_retired_value_can_reenter_the_cache_when_destroyed();
+  a_cleared_value_can_reenter_the_cache_when_destroyed();
+  a_cleared_value_can_read_a_growing_document_cache();
+  a_stale_answer_holds_back_no_collection();
   a_workspace_value_uses_the_same_invalidation_lifecycle();
   single_value_caches_do_not_require_hashable_values();
   a_document_value_is_partitioned_and_can_be_read_without_computing();
-  document_values_follow_updates_rungs_and_deletions();
+  document_values_follow_updates_states_and_deletions();
 #if !defined(__wasi__) || defined(_REENTRANT)
   document_value_providers_are_invalidated_only_by_their_partition();
   value_providers_do_not_wait_and_clear_rejects_stale_publication();
@@ -1661,7 +1751,7 @@ void run() {
 #endif
   a_failed_subscription_leaves_no_listener();
   a_stateless_workspace_cache_empties_on_any_update();
-  a_staged_workspace_cache_empties_at_its_rung();
+  a_staged_workspace_cache_empties_at_its_state();
   a_document_cache_evicts_per_document();
   a_document_cache_hits_per_document();
   a_document_cache_clears_with_any_hash();
@@ -1684,7 +1774,8 @@ void run() {
   keys_of_one_hash_still_fit();
   a_lookup_compares_about_one_key();
   a_guard_holds_back_only_what_follows_it();
-  a_large_retirement_is_collected_soon();
+  a_large_pending_free_is_collected_soon();
+  a_rare_pending_free_is_collected_after_a_pause();
 }
 
 }  // namespace caching

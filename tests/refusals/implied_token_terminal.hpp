@@ -1,5 +1,5 @@
-// An implied token is a literal: a terminal that reads more than one has no
-// spelling to lay.
+// An implied terminal that reads one or more line ends: an implied token needs
+// one fixed spelling to insert.
 // expect LR LL: in .implied.tok, cond.., .tok. must be a literal with no guard, or a terminal whose body is one
 #pragma once
 

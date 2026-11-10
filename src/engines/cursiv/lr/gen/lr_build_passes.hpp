@@ -39,7 +39,7 @@ void lr_peek_oracle(LrBuildTable& A);
 
 void lr_subsume_modes(LrBuildTable& A, const LexModes& modes);
 
-// Equal rows of actions are seated once, the states naming the same one.
+// Equal rows of actions are stored once, the states naming the same one.
 void lr_share_action_rows(LrBuildTable& A);
 
 }  // namespace cursiv::engine

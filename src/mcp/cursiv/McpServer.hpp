@@ -11,14 +11,14 @@
 #include "cursiv/utils/Cancellation.hpp"
 
 // The MCP endpoint: tools and resources registered by a service, one JSON-RPC
-// message in, at most one response out. Transport-agnostic -- a stdio loop, an
-// LSP tunnel and a test feed the same door.
+// message in, at most one response out. A stdio loop, an LSP tunnel and a
+// test all use the same entry.
 
 namespace cursiv {
 
 // `inputSchema` is the JSON Schema of the call's arguments; null means "any
-// object". `readOnlyHint` defaults to the truth about every default tool --
-// even `validate` leaves the workspace as it found it.
+// object". `readOnlyHint` defaults to true: every default tool, `validate`
+// included, leaves the workspace as it found it.
 struct McpTool {
   std::string name;
   std::string title = {};
@@ -49,34 +49,23 @@ class McpServer {
  public:
   McpServer(std::string name, std::string version);
 
-  /**
-   * One entry per tool name and per resource uri: a second registration of
-   * either throws `std::invalid_argument`. A service replaces a default tool
-   * by overriding the method that registers it.
-   */
+  // One entry per tool name and resource uri: a second registration throws
+  // `std::invalid_argument`. A service replaces a default tool by overriding
+  // its register method.
   void registerTool(McpTool tool, McpToolFunction execute);
   void registerResource(McpResource resource, McpResourceFunction read);
 
-  /**
-   * Adds one paragraph to the guide the handshake hands the model; each
-   * call appends. Documents the workflow, not the tool list -- the tools
-   * describe themselves.
-   */
+  // Appends a paragraph to the guide the handshake gives the model: the
+  // workflow, not the tools, which describe themselves.
   void addInstructions(std::string_view paragraph);
 
-  /**
-   * Handles one JSON-RPC message and returns the response, or nothing for
-   * a notification. Const: registrations all precede the first message, so
-   * concurrent requests read a registry nobody writes. A request id is a
-   * string or an integer that fits in 32 bits.
-   */
+  // Handles one JSON-RPC message: its response, or nothing for a notification.
+  // Registrations all precede the first message. A request id is a string or a
+  // 32-bit integer.
   [[nodiscard]] std::optional<lsp::json::Value> handle(
       lsp::json::Value message, const CancellationToken& = {}) const;
-  /**
-   * The same door as `handle`, over serialized text; a parse failure
-   * answers as JSON-RPC requires, so a transport never inspects what it
-   * forwards.
-   */
+  // `handle` over serialized text; a parse failure answers as JSON-RPC
+  // requires.
   [[nodiscard]] std::optional<std::string> handleText(
       std::string_view text, const CancellationToken& = {}) const;
 

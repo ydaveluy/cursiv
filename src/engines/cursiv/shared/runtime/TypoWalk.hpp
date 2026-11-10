@@ -1,8 +1,6 @@
 // A misspelling is repaired by re-reading, never by rewriting: a cold search
-// over the mode's DFA -- a bounded edit distance between the author's bytes
-// and what the DFA spells -- says how far a terminal the point admits would
-// have reached, at what price, and the author's own span becomes its leaf.
-// An engine names its table through an adapter; the search is written once.
+// over the mode's DFA, a bounded edit distance, says how far a terminal would
+// have reached and at what price. Each engine plugs its table in as an adapter.
 #pragma once
 
 #include <cassert>
@@ -12,35 +10,32 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/shared/utils/inside_scalar.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Utf8.hpp"
 #include "cursiv/utils/macros.hpp"
 
 namespace cursiv::engine {
 
-// The most faults a walk makes. `repair_typo_cost` prices a fourth under a
-// different word's only from 15 bytes, longer than the words a grammar spells
-// as a rule: the work it would take is not paid for.
+// The most faults a walk makes. `repair_typo_cost` rates a fourth fault below
+// a replacement only from 15 bytes, longer than most words a grammar spells,
+// so the search does not try it.
 inline constexpr unsigned kTypoFaults = 3;
 inline constexpr unsigned kTypoRun = 4;    // bytes one fault may swallow
-inline constexpr unsigned kTypoValid = 2;  // valid bytes each fault owes
+inline constexpr unsigned kTypoValid = 2;  // valid bytes each fault needs
 
-// Edges explored at one disagreement, in the order the byte classes are
-// numbered: a state with more is read through the first and the rest are
-// declared given up. Which survive is the numbering's, not the grammar's, so
-// this bounds the search and describes no property of it. Every walk gives up
-// the same edges, the search's and its bound's alike, whatever is left to
-// spend: what a walk finds is all any walk from there finds, and a memo may
-// keep it.
+// Edges explored at one disagreement, in byte-class order; the rest are given
+// up. Every walk gives up the same ones, so a memo may keep what a walk finds.
 inline constexpr unsigned kTypoEdges = 4;
 
 // One point of the re-reading search: where it stands, and what it has spent
-// to get there. `tail` says a fault still owes an unchanged byte after it, as
-// a skipped run does; `head` that a head fault set it out.
+// to get there. `tail` says a fault still needs an unchanged byte after it, as
+// a skipped run does; `head` that a head fault started it.
 struct TypoPoint {
   TextOffset pos = 0;
   std::uint16_t state = 0;
@@ -53,10 +48,8 @@ struct TypoPoint {
   bool head = false;
 };
 
-// A span and the terminal it stands for -- never text: a typo is repaired by
-// re-reading, so no corrected spelling exists anywhere. `cost` is what the
-// re-reading pays, `repair_typo_cost` of its faults over the longer of its
-// span and the terminal's bytes.
+// A span and the terminal it is re-read as, never text. `cost` is the
+// `repair_typo_cost` of its faults over the longer of span and terminal.
 struct Typo {
   TextOffset end = 0;
   SymbolId term = kInvalidSymbol;
@@ -71,25 +64,24 @@ inline TextOffset typo_horizon(TextOffset at, TextOffset plain, TextOffset len,
   return len - far > reach ? far + reach : len;
 }
 
-// What a walk keeps of its points while it reads: lent by a search that asks
+// What a walk keeps of its points while it reads: given by a search that asks
 // for many walks, so that one allocates nothing once an earlier one grew it.
 struct TypoScratch {
   std::vector<TypoPoint> now;
   std::vector<TypoPoint> next;
-  FlatMap<std::uint8_t> seen;
+  // Per place, the valid and spelt bytes of a point read there.
+  FlatMap<std::uint64_t> seen;
   // `seen` holds a point of an earlier walk.
   bool dirty = false;
 };
 
-// What the paths of one walk share, said once for both engines: the text, the
-// horizon and the document's end, and what the paths together have read
-// against what they are paid for. An adapter derives from it and adds its
-// table; `typo_each` reads `len`, `byte`, `cut` and `spent` from here.
+// What the paths of one walk share, for both engines: the text, the horizon,
+// the document's end, the bytes read and the parse's stop. An adapter derives
+// from it and adds its table.
 struct TypoBounds {
   const char* src;
-  // Where the search stops, and where the DOCUMENT stops. They are two facts:
-  // a token may end at the second, and at the first the walk has only run out
-  // of horizon.
+  // Where the search stops, and where the document stops: a token may end at
+  // the second only.
   TextOffset extent;
   TextOffset docLen;
   // The bytes the walk stepped over, every path counted: an adapter's
@@ -99,8 +91,10 @@ struct TypoBounds {
   // them together read `most`: the candidates found are then incomplete.
   bool* shortOf = nullptr;
   std::uint64_t most = ~std::uint64_t{0};
-  // Where the points are kept; null, the walk keeps its own.
+  // Where the points are kept; when null, the walk keeps its own.
   TypoScratch* scratch = nullptr;
+  // Read once per point and per byte a path steps over; never when null.
+  const CancellationPoll* stop = nullptr;
 
   TextOffset len() const { return extent; }
   // Asked where a path reaches `extent`.
@@ -116,44 +110,21 @@ struct TypoBounds {
   unsigned char byte(TextOffset p) const {
     return static_cast<unsigned char>(src[p]);
   }
+  void poll() const {
+    if (stop != nullptr) stop->poll();
+  }
 };
 
-// Where the walk could have gone, one entry per distinct state: a ghost
-// advance stands for a byte never typed, and which byte is the search's
-// question. Distinct states, not classes, or classes leading nowhere else would
-// each cost a walk.
+// The distinct states a ghost advance, a byte never typed, can lead to.
 inline std::span<const std::uint16_t> typo_successors(const std::uint32_t* base,
                                                       const std::uint16_t* succ,
                                                       std::uint16_t s) {
   return {succ + base[s], succ + base[s + 1u]};
 }
 
-// Replays, from `from`, the DFA of the mode the adapter opens with, as a
-// best-first search over (position, state) with up to `kTypoFaults` faults of
-// one each: a run of invalid bytes skipped where it stands, a ghost advance
-// over a byte never typed, their combination on one byte (a substitution), and
-// a transposition. Points are read by fault count, a point at its fewest, so
-// the search costs the points it reaches, not the paths to them. A byte the
-// DFA reads is read: faults are made where the author's byte disagrees, as an
-// edit distance along one spelling only ever needs, and there all of them are
-// explored, never the first that fits. A reading is offered at
-// `repair_typo_cost` of its faults, and not at all where that is a different
-// word's price.
-// What a bound gives up goes through `refused()`, an adapter's count of the
-// walk's stops. The stops a larger share would not make -- the horizon short
-// of the document, the bytes paid for spent -- also set `shortOf`: the
-// candidates found are then incomplete. The terminal and the frontier it must
-// close on are ONE answer: asked apart, the walk names a terminal that another
-// one's guard let through.
-//
-// `Ad` names one walk's table: `len` -- the horizon, the adapter's to set --
-// `byte`, `successors`, `next_byte`, `original`, `owed` (hands each terminal
-// owed at a point to a callback), `refused`, `spent` (stops the walk once its
-// paths have read all it pays for) and `cut` (a horizon stop counts as a
-// refusal); optionally `alive` (drops a path where nothing it could offer is
-// reachable). `TypoBounds` gives `len`, `byte`, `spent` and `cut`.
-// Inlined into each engine's one entry point: a frame between them costs the
-// marshalling of a walk that most often refuses at once.
+// A best-first search from `from` over (position, state) with up to
+// `kTypoFaults` faults: a skipped run, a ghost byte, a substitution or a
+// transposition, made only where the author's byte disagrees with the DFA.
 template <class Ad, class Emit>
 CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
                                           TextOffset from, TextOffset plain,
@@ -166,13 +137,9 @@ CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
     return width < len - at ? at + width : len;
   };
 
-  // A WORD MISSING ITS FIRST BYTE DISAGREES WITH NOTHING: it reads whole as
-  // another terminal, so the head is the one place a fault is paid without a
-  // disagreement, once per state the mode could have entered. It is anchored on
-  // `plain`, where the widest alphabet's token there ends: A HEAD FAULT
-  // RE-READS THAT SPAN AND NEVER RE-CUTS IT, or the walk swallows the token
-  // behind it. Where no token reads (`plain == from`), a head fault reads on to
-  // its terminal's end.
+  // A word missing its first byte reads whole as another terminal, so a head
+  // fault is allowed with no disagreement. It re-reads the span up to `plain`
+  // and never re-cuts it; where no token reads, it reads to its terminal's end.
   const bool unread = plain == from;
   TypoScratch own;
   TypoScratch& x = ad.scratch != nullptr ? *ad.scratch : own;
@@ -180,29 +147,35 @@ CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
   x.next.clear();
   if (x.dirty) x.seen.reset();
   x.dirty = false;
-  // A point two faults or more make in the word is dominated by one made
-  // before it -- with no more faults -- at the same place, which owes no
-  // more: plain over head, free over tail. From a point the DFA reads one
-  // path, so the points faults make are the ones to tell apart. Those of one
-  // fault are apart already, each a different gesture at the plain walk's one
-  // disagreement or at the head; past the word a path has one fault and
-  // makes no other.
+  // A point of two faults or more is dropped where one read before it at the
+  // same place, plain over head and free over tail, has read no fewer valid
+  // and spelt bytes.
   const auto key = [](const TypoPoint& p, bool head, bool tail) {
     return std::uint64_t{p.pos} << 32 | std::uint64_t{p.state} << 2 |
            (head ? 2u : 0u) | (tail ? 1u : 0u);
   };
+  const auto covers = [](std::uint64_t held, const TypoPoint& p) {
+    return (held & 0xFFu) >= p.valid && held >> 8 >= p.spelt;
+  };
   const auto first = [&](const TypoPoint& p) {
     if (p.faults < 2 || unread || p.pos > plain) return true;
     x.dirty = true;
-    if (!x.seen.emplace(key(p, p.head, p.tail)).second) return false;
-    return !(p.head && x.seen.find(key(p, false, p.tail)) != nullptr) &&
-           !(p.tail && x.seen.find(key(p, p.head, false)) != nullptr) &&
-           !(p.head && p.tail && x.seen.find(key(p, false, false)) != nullptr);
+    const auto beaten = [&](bool head, bool tail) {
+      const std::uint64_t* held = x.seen.find(key(p, head, tail));
+      return held != nullptr && covers(*held, p);
+    };
+    if (beaten(p.head, p.tail) || (p.head && beaten(false, p.tail)) ||
+        (p.tail && beaten(p.head, false)) ||
+        (p.head && p.tail && beaten(false, false)))
+      return false;
+    // The place keeps the point that covers the other, or the first.
+    const auto [held, made] = x.seen.emplace(key(p, p.head, p.tail));
+    if (made || (p.valid >= (held & 0xFFu) && p.spelt >= held >> 8))
+      held = std::uint64_t{p.spelt} << 8 | p.valid;
+    return true;
   };
-  // One fault count after another, each stack read last pushed first: the
-  // plain walk alone, then the points its faults make, then the head faults
-  // -- (b) the first byte never written, and (c) written wrong -- the first
-  // head first. A point at `kTypoFaults` pushes nothing.
+  // One fault count after another: the plain walk, then the points its faults
+  // make, then the head faults. A point at `kTypoFaults` pushes nothing.
   x.now.push_back(TypoPoint{from, start, 0, 0, 0, false, false});
   for (bool headed = false;;) {
     while (!x.now.empty()) {
@@ -210,15 +183,14 @@ CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
       x.now.pop_back();
       if (!first(w)) continue;
       for (;;) {
+        ad.poll();
         const bool word = !unread && w.pos <= plain;
         // A leading refusal applies to the source as written. Joining a later
         // fragment must not turn an originally reserved word into a name. Only
         // the unedited path can constrain the candidates this way.
         if (w.faults == 0 && !ad.original(w.state, w.pos)) return;
-        // PAST ITS FIRST FAULT, A READING IS THE WORD IN HAND MISSPELT: it
-        // reads no further than `plain`, and where no token reads there is no
-        // word. More faults joining fragments would read a long token out of
-        // the text behind it at a word's price.
+        // Past its first fault, a reading is the word in hand misspelt: it
+        // reads no further than `plain`.
         if (w.faults > 1 && !word) break;
         if (w.faults != 0 && !w.tail && w.valid >= kTypoValid * w.faults &&
             (!w.head || w.pos == plain || unread)) {
@@ -229,7 +201,7 @@ CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
             const auto offer = [&](SymbolId t) {
               emit(Typo{w.pos, t, cost});
             };
-            ad.owed(w.state, w.pos, offer);
+            ad.accepted(w.state, w.pos, offer);
           }
         }
         // A head fault offers only at `plain`: past it the path is spent.
@@ -259,15 +231,14 @@ CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
           break;
         const auto f = static_cast<std::uint8_t>(w.faults + 1);
         const TextOffset spelt = w.spelt + 1;
-        // (a) The invalid bytes, skipped where they stand. Trivia has no
-        // special status here: the DFA and the same faults govern every byte.
-        // A repaired token can span fragments separated in the source. The
-        // byte at `w.pos` is the first: the step above refused it.
+        // (a) The invalid bytes from `w.pos`, skipped where they stand, up to
+        // the end of the letter they cut into.
         TextOffset k = 1;
         while (w.pos + k < len && k < kTypoRun &&
                ad.next_byte(w.state, ad.byte(w.pos + k)) == kDeadState)
           ++k;
-        while (w.pos + k < len && (ad.byte(w.pos + k) & 0xC0u) == 0x80u) ++k;
+        while (w.pos + k < len && inside_scalar(ad.src, w.pos + k, ad.docLen))
+          ++k;
         x.next.push_back(
             TypoPoint{w.pos + k, w.state, f, w.valid, w.spelt, true, w.head});
         if (w.pos + 1 < len) {
@@ -279,10 +250,9 @@ CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
             x.next.push_back(TypoPoint{w.pos + 2, two, f, w.valid, spelt + 1,
                                        false, w.head});
         }
-        // (b) The ghost advance, over a byte that was never written, and (c)
-        // the substitution: the same advance, one wrong byte given up. Every
-        // edge the DFA still has, since which one the author meant is exactly
-        // what the arbitration above decides.
+        // (b) A ghost advance over a byte never written, and (c) a
+        // substitution: the same advance over one wrong byte. Every edge is
+        // tried.
         const auto succ = ad.successors(w.state);
         if (succ.size() > kTypoEdges) ad.refused();
         for (std::size_t e = 0; e < succ.size() && e < kTypoEdges; ++e) {

@@ -1,5 +1,5 @@
-// The chain pool while it is being interned: a record names a run of actions,
-// and one run, wherever it is owed, is one entry.
+// The chain pool while it is being built: a record names a run of actions,
+// and one run, wherever it is used, is one entry.
 #pragma once
 
 #include <algorithm>
@@ -18,9 +18,9 @@
 
 namespace cursiv::engine {
 
-// A run of actions, laid end to end in one pool. A record carries the chain
-// its production and its call sites owe it, never a single action: a rule
-// that lays no record of its own hands its actions to the record below.
+// A run of actions, end to end in one pool. A record carries the chain of its
+// production and its call sites, never a single action: a rule that writes no
+// record of its own gives its actions to the record below.
 struct Chain {
   std::uint16_t off = 0, count = 0;
 };
@@ -30,9 +30,9 @@ struct Chain {
 struct ChainBuild {
   bool makes = false;
   bool creates = false;
-  // The first action that writes a member. An optional mints a chain per
-  // branch, so one member is spelled by several chains; they lead with the
-  // same write, which is all a caret asks of any of them.
+  // The first action that writes a member. An optional creates a chain per
+  // branch, so several chains write one member; they start with the same
+  // write, which is all a caret asks of any of them.
   std::uint16_t lead = kNoRow;
   // A nest turn's twin of the same run: its record reaches back over its
   // receiver, which the tree builder must tell from one that does not.
@@ -52,21 +52,21 @@ struct ChainPool {
   Vec<Chain> chains{};
   Vec<ChainBuild> chainBuild{};
   std::uint16_t nchains = 0;
-  // The pools grow to meet the write, so what is bounded here is the id, not
-  // the room. A flag, not a refusal of its own: the build reads it once and
-  // names the cap, since a count that wrapped hands two chains one id.
+  // The pools grow as needed, so only the id is bounded. The build reads this
+  // flag once and reports the cap: a count that wrapped would give two chains
+  // one id.
   bool capped = false;
 
   // A chain is what it says, not where it stands: the same run of actions,
-  // wherever it is owed, is one entry.
+  // wherever it is used, is one entry.
   std::uint16_t intern_chain(const std::uint16_t* a, std::size_t n,
                              std::string_view doc = {}) {
     return n == 0 && doc.empty() ? kNoRow : intern(a, n, false, doc);
   }
 
   // A record that says nothing, and is still a record: a call site's
-  // directive needs a span to ride, and a production whose body opens none
-  // gives it one.
+  // directive needs a span, and a production whose body opens none gives it
+  // one.
   std::uint16_t bare_chain() { return intern(nullptr, 0); }
 
   // The two runs standing over one position, interned as one. A joined run is
@@ -149,10 +149,8 @@ struct ChainPool {
       if (ch[i].count == n && chainBuild[i].turn == turn &&
           chainBuild[i].doc == doc && std::equal(a, a + n, ac + ch[i].off))
         return static_cast<std::uint16_t>(i);
-    // A chain becomes an element id, which is sixteen bits: a count that
-    // wrapped would hand two chains one id, and an AST written with the
-    // wrong actions. The new chain's id is the count, and the sentinel is
-    // no id.
+    // A chain's id is its count, on sixteen bits: a count that wraps would
+    // hand two chains one id.
     if (nchains == kNoElement || nacts + n > 0xFFFFu) {
       capped = true;
       return kNoRow;

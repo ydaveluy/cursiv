@@ -52,6 +52,8 @@ Disposable expectRename(const LspServices& services,
   const ReplacedIndices marked = replaceIndices(detail::baseOf(input));
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, input.parseOptions);
+  Disposable disposable = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(disposable);
   const auto* const marker = detail::markerAt(marked.indices, input.index);
 
   std::optional<lsp::Range> box;
@@ -93,7 +95,6 @@ Disposable expectRename(const LspServices& services,
     }
   }
 
-  Disposable disposable = detail::documentDisposable(services, document);
   if (input.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

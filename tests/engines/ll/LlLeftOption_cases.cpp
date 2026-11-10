@@ -150,7 +150,7 @@ void run() {
     const Reading a = read(*ll, *reflection, text);
     const Reading b = read(*lr, *reflection, text);
     // The AST compares across engines, and so do a data rule's records,
-    // which carry its nesting: the descent lays a turn's own record where LR
+    // which carry its nesting: the descent adds a record per iteration where LR
     // does not.
     const bool same = a.tree == b.tree && (!a.text || a.records == b.records);
     if (a.value != want || b.value != want || !same)

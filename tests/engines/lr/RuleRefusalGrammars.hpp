@@ -105,10 +105,9 @@ struct G : trefuse::Words {
 
 namespace trefuse {
 
-// `!e` and `&e` are the two lookaheads on the token in hand: it is not, it is,
-// all that `e` reads. A word carries its boundary (`iffy` is not `if`), a
-// literal its guard, a terminal its body, and a bound decides on the scalar
-// behind the spelling, however many bytes it takes.
+// `!e` and `&e` look ahead on the token in hand. A word carries its boundary
+// (`iffy` is not `if`), a literal its guard, a terminal its body, and a bound
+// decides on the whole scalar.
 namespace head {
 struct G : Words {
   struct BRACED : terminal<lit<"{"> + many(!cr<"}"> + any) + lit<"}">> {};

@@ -1,4 +1,4 @@
-// The growing form of `LrDerivedTables`, laid once the automaton stops
+// The growing form of `LrDerivedTables`, filled once the automaton stops
 // moving.
 #pragma once
 
@@ -35,7 +35,7 @@ struct LrDerivedRows {
 
   SetPool typoReach{};
   std::vector<std::uint8_t> lexBodies{};
-  std::vector<std::uint16_t> lexOwed{};
+  std::vector<std::uint16_t> lexBodyTerms{};
   std::vector<ByteSet> lexOpeners{};
   SetPool after{};
   SetPool modeWant{};

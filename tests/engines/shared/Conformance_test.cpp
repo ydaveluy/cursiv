@@ -173,7 +173,7 @@ int main() {
   won(literalBesideGuard, "if", "if", "");
   won(literalBesideGuard, "iff", "", "iff");
   // The lexer tries what the readings take, not what the state merged from
-  // its callers would: `TEXT` is no rival of `.` where a path is a key.
+  // its callers would: `TEXT` is no competitor of `.` where a path is a key.
   const Pair mergedLookahead{"mergedlookahead:"};
   expect(mergedLookahead, "a.b", true);
   expect(mergedLookahead, "a.b: [@c.d e.f]", true);
@@ -305,18 +305,18 @@ int main() {
   const Pair adjacent{"adjacent:"};
   expect(adjacent, ">>", true);
   expect(adjacent, "> >", false);
-  const Pair gluedCall{"gluedcall:"};
-  won(gluedCall, "f();", "()", "");
-  won(gluedCall, "f ();", "", "()");
-  won(gluedCall, " f ();", "", "()");
-  const Pair gluedCallShared{"gluedcallshared:"};
-  won(gluedCallShared, "f();", "()", "");
-  won(gluedCallShared, "f ();", "", "()");
-  won(gluedCallShared, " f ();", "", "()");
-  const Pair gluedCallCalled{"gluedcallcalled:"};
-  won(gluedCallCalled, "f();", "()", "");
-  won(gluedCallCalled, "f ();", "", "()");
-  won(gluedCallCalled, " f ();", "", "()");
+  const Pair attachedCall{"attachedcall:"};
+  won(attachedCall, "f();", "()", "");
+  won(attachedCall, "f ();", "", "()");
+  won(attachedCall, " f ();", "", "()");
+  const Pair attachedCallShared{"attachedcallshared:"};
+  won(attachedCallShared, "f();", "()", "");
+  won(attachedCallShared, "f ();", "", "()");
+  won(attachedCallShared, " f ();", "", "()");
+  const Pair attachedCallCalled{"attachedcallcalled:"};
+  won(attachedCallCalled, "f();", "()", "");
+  won(attachedCallCalled, "f ();", "", "()");
+  won(attachedCallCalled, " f ();", "", "()");
 
   const Pair closers{"closers:"};
   expect(closers, "<a>x", true);
@@ -359,8 +359,8 @@ int main() {
   });
 
   const Pair many{"callermany:"};
-  const Pair ladder{"ladder:"};
-  for (const Pair* shared : {&many, &ladder}) {
+  const Pair upToTwo{"uptotwo:"};
+  for (const Pair* shared : {&many, &upToTwo}) {
     for (const std::string_view text :
          {"xab", "xaxab", "xa xab", "xaxa xab", "xaxaxab"})
       expect(*shared, text, false);
@@ -406,11 +406,9 @@ int main() {
            n.statements[0]->type == &cursiv::ast_type_tag<ast::Name>;
   });
 
-  // A token alone stands for the node over it, a node that read nothing
-  // stands where the text before it stops, the trivia a region crosses to its
-  // own end is that region's, a token dropped after a whole construct stands
-  // outside it, and the root holds what a repair dropped before its first
-  // token.
+  // Where each node's span stands: an empty node where the text before it
+  // stops, a region with the trivia it crosses, a dropped token outside the
+  // construct before it.
   const Pair all{""};
   for (const std::string_view text :
        {"tie: if", "atendhost: [  a ]", "trailing: \n", "turn: ", "calls: ",
@@ -419,7 +417,7 @@ int main() {
         "conditionedtrivia: a) ", "conditionedtrivia: ) a"})
     one_tree(all, text);
 
-  // The lexer elects the keyword at each occurrence of a statement, whatever
+  // The lexer chooses the keyword at each occurrence of a statement, whatever
   // the statements before it read.
   const Pair closedHead{"closedhead:"};
   const std::string once = closedHead.source("b t module;");

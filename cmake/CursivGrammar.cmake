@@ -11,6 +11,16 @@ else()
   set(CURSIV_HOST_EXE "")
 endif()
 set(CURSIV_HOST_TOOLS "" CACHE PATH "An existing native build containing the generators")
+# The units a generated parser spreads over, as many as the generators'
+# `kParserUnits`: the build names them before a generator runs.
+set(_cursiv_units_header "${_cursiv_root}/src/engines/cursiv/shared/gen/CommonArtifacts.hpp")
+file(STRINGS "${_cursiv_units_header}" _cursiv_units
+     REGEX "^inline constexpr unsigned kParserUnits = [0-9]+;$")
+if(NOT _cursiv_units MATCHES "kParserUnits = ([0-9]+)")
+  message(FATAL_ERROR "cursiv: no `kParserUnits` in ${_cursiv_units_header}")
+endif()
+set(CURSIV_PARSER_UNITS "${CMAKE_MATCH_1}" CACHE INTERNAL "")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_cursiv_units_header}")
 if(CURSIV_HOST_TOOLS)
   set(CURSIV_HOST_DIR "${CURSIV_HOST_TOOLS}" CACHE INTERNAL "")
 else()
@@ -63,6 +73,22 @@ endfunction()
 # after FetchContent_MakeAvailable. A single build command avoids concurrent Ninja runs.
 function(cursiv_host_tools)
   get_property(_targets GLOBAL PROPERTY CURSIV_HOST_GENERATORS)
+  # A generator reads its grammar with the final compile definitions and
+  # include directories of the directory that declares the language.
+  foreach(_target IN LISTS _targets)
+    get_property(_directory GLOBAL PROPERTY CURSIV_HOST_DIRECTORY_${_target})
+    if(NOT _directory)
+      continue()
+    endif()
+    get_directory_property(_definitions DIRECTORY "${_directory}" COMPILE_DEFINITIONS)
+    get_directory_property(_includes DIRECTORY "${_directory}" INCLUDE_DIRECTORIES)
+    if(_definitions)
+      cursiv_host_manifest("target_compile_definitions(${_target} PRIVATE [==[${_definitions}]==])")
+    endif()
+    if(_includes)
+      cursiv_host_manifest("target_include_directories(${_target} BEFORE PRIVATE [==[${_includes}]==])")
+    endif()
+  endforeach()
   list(TRANSFORM _targets REPLACE "(.+)" "${CURSIV_HOST_DIR}/gen/\\1${CURSIV_HOST_EXE}" OUTPUT_VARIABLE _files)
   if(NOT CURSIV_HOST_TOOLS)
     FetchContent_GetProperties(lsp_framework SOURCE_DIR _lsp)
@@ -110,10 +136,8 @@ function(cursiv_package_language name)
     configure_file("${CURSIV_SOURCE_ROOT}/cmake/patches/mimalloc.LICENSE"
         "${_licenses}/mimalloc.LICENSE" COPYONLY)
 
-    # Refresh the module, runner and notices packaged by the VS Code extension.
-    # The copies are outputs of the server's link, which runs again when one
-    # is missing or when the runner or a notice changed. The runner and
-    # notices are outputs of the first server packaged into a directory only.
+    # Copy the module, runner and notices into the extension at each link of
+    # the server; the runner and notices go with a folder's first server.
     set(_server "${PROJECT_SOURCE_DIR}/vscode/server")
     set(_runtime "${CURSIV_SOURCE_ROOT}/tools/wasi-run.mjs"
         "${_licenses}/cursiv.LICENSE"
@@ -142,10 +166,18 @@ endfunction()
 
 # Shared implementation: test languages get a default output path and cheaper compilation.
 function(_cursiv_generate_language test_only)
-  cmake_parse_arguments(PARSE_ARGV 1 ARG "SEPARATE_UNITS" "GRAMMAR;NAMESPACE;ID;OUT;BASE;ENGINE"
+  cmake_parse_arguments(PARSE_ARGV 1 ARG "SEPARATE_UNITS"
+      "GRAMMAR;NAMESPACE;ID;OUT;BASE;ENGINE;TEXTMATE"
       "EXTENSIONS;FILE_NAMES;INCLUDE_DIRS;GENERATOR_ARGS")
   if(NOT "${ARG_UNPARSED_ARGUMENTS}" STREQUAL "")
     message(FATAL_ERROR "cursiv_generate_language: unknown arguments ${ARG_UNPARSED_ARGUMENTS}")
+  endif()
+  # A one-value keyword given nothing is a mistake, never its default. A list
+  # keyword may be empty.
+  set(_missing ${ARG_KEYWORDS_MISSING_VALUES})
+  list(REMOVE_ITEM _missing EXTENSIONS FILE_NAMES INCLUDE_DIRS GENERATOR_ARGS)
+  if(_missing)
+    message(FATAL_ERROR "cursiv_generate_language: no value after ${_missing}")
   endif()
   if(NOT test_only AND DEFINED ARG_INCLUDE_DIRS)
     message(FATAL_ERROR "cursiv_generate_language: unknown arguments INCLUDE_DIRS: "
@@ -235,9 +267,9 @@ function(_cursiv_generate_language test_only)
   else()
     set(_part ParserGroups)
   endif()
-  # One file per unit the generators write: as many as their `kParserUnits`,
-  # which changes together with this range.
-  foreach(_unit RANGE 0 7)
+  # One file per unit the generators write.
+  math(EXPR _lastUnit "${CURSIV_PARSER_UNITS} - 1")
+  foreach(_unit RANGE 0 ${_lastUnit})
     list(APPEND _parserUnits ${_part}${_unit}.cpp)
   endforeach()
   list(APPEND _headers ${_part}.hpp)
@@ -259,6 +291,7 @@ function(_cursiv_generate_language test_only)
     endforeach()
     set(_gen ${CURSIV_HOST_DIR}/gen/${_name}_gen${CURSIV_HOST_EXE})
     set_property(GLOBAL APPEND PROPERTY CURSIV_HOST_GENERATORS ${_name}_gen)
+    set_property(GLOBAL PROPERTY CURSIV_HOST_DIRECTORY_${_name}_gen "${CMAKE_CURRENT_SOURCE_DIR}")
     set(_dep ${_gen})
   else()
     cursiv_grammar_generator(${_name} "${ARG_GRAMMAR}" ${ARG_NAMESPACE} ${_gns}
@@ -267,10 +300,19 @@ function(_cursiv_generate_language test_only)
     set(_dep ${_name}_gen)
   endif()
 
+  # The generator rewrites the keywords of this hand-written file, which is
+  # no build output, so a clean never deletes it.
+  set(_textmate "")
+  if(DEFINED ARG_TEXTMATE)
+    cmake_path(ABSOLUTE_PATH ARG_TEXTMATE BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        NORMALIZE)
+    set(_textmate "--textmate=${ARG_TEXTMATE}")
+  endif()
+
   # Compiler dependency files track grammar headers through the generator executable.
   add_custom_command(OUTPUT ${_written}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${_dir}
-      COMMAND ${_gen} ${ARG_GENERATOR_ARGS} ${_dir}
+      COMMAND ${_gen} ${ARG_GENERATOR_ARGS} ${_textmate} ${_dir}
       DEPENDS ${_dep}
       COMMENT "${_name}: writing ${_dir}"
       VERBATIM)
@@ -316,10 +358,9 @@ function(_cursiv_generate_language test_only)
         $<$<CONFIG:Release>:${_parserOptimization}>
         $<$<PLATFORM_ID:WASI>:-O1>)
   endif()
-  # Keep generated WASI Debug functions within engine limits on local counts.
-  # Debug symbols remain enabled; handwritten application code keeps its flags.
-  # WASI needs tail calls between parser groups, but not for by-value C++ calls.
-  # Clang spells that as below; another compiler adds its own spelling here.
+  # Keep generated WASI Debug functions within the engines' local limits. WASI
+  # needs tail calls between parser groups only: Clang's spelling is below,
+  # another compiler adds its own.
   set_property(SOURCE ${_parserSources} PROPERTY COMPILE_OPTIONS
       $<$<CONFIG:Release>:${_parserOptimization}>
       $<$<AND:$<PLATFORM_ID:WASI>,$<CONFIG:Debug>>:-O1>

@@ -5,13 +5,12 @@
 
 #include "cursiv/parser/ParserErrorMessageProvider.hpp"
 
-// The sentences an editor shows by default. No second parse, and no state:
-// the recovery corpus renders the same sentences an editor gets, so a wording
-// that drifts is a line that moved in a reference.
+// The default sentences an editor shows. No second parse and no state. The
+// recovery reports print the same sentences, so a wording change shows in
+// their reference files.
 
 namespace cursiv {
 
-// Not `final`: a language derives it to reword some shapes and keep the rest.
 class DefaultParserErrorMessageProvider : public ParserErrorMessageProvider {
  public:
   [[nodiscard]] std::string buildInsertedMessage(

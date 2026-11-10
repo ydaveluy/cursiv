@@ -102,10 +102,10 @@ void a_saturated_budget_still_respects_the_parse_ceiling() {
   }
 }
 
-// Two repairs of one fault meet at the next token, one having read a token more
-// than the other: from there they read as one, so the text behind the fault
-// costs the search nothing, however long it is.
-void a_repair_does_not_pay_for_the_text_behind_it() {
+// Two repairs of one fault merge at the next token, one having read a token
+// more than the other: from there they read as one, so the text behind the
+// fault costs the search nothing, however long it is.
+void the_text_behind_a_repair_costs_nothing() {
   std::string text = "show 1 + , 2;\n";
   for (unsigned i = 0; i < 40000; ++i) text += "show 3;\n";
   for (const bool predictive : {false, true}) {
@@ -143,7 +143,7 @@ void arms_that_part_late_do_not_cost_the_stretch() {
   one_cheap_repair("rep:either , " + long_sum() + ";\n", 4096);
 }
 
-// Two repairs that stand in different stacks cannot meet before the bracket
+// Two repairs that stand in different stacks cannot merge before the bracket
 // closes: the race between them stops well short of its end.
 void a_race_does_not_cost_the_bracket() {
   one_cheap_repair("rep:sums 1 + , " + long_sum() + ";\n", 32768);
@@ -179,7 +179,7 @@ int main() {
   a_starved_budget_keeps_clean_text_clean();
   a_bounded_search_still_reads_the_document();
   a_saturated_budget_still_respects_the_parse_ceiling();
-  a_repair_does_not_pay_for_the_text_behind_it();
+  the_text_behind_a_repair_costs_nothing();
   arms_that_part_late_do_not_cost_the_stretch();
   a_race_does_not_cost_the_bracket();
   a_fault_behind_a_long_list_does_not_cost_its_square();

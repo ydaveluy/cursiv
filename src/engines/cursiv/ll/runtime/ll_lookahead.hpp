@@ -22,13 +22,9 @@
 
 namespace cursiv::engine {
 
-// What a lookahead may read next, as a mask over the terminals. The text is
-// read through it rather than under an alphabet of its own: one tokenisation
-// serves every depth, and a spelling two terminals match is read as every
-// terminal the readings still admit.
-//
-// As wide as the grammar's terminals, which the table states: a prediction
-// runs once per choice of the text and allocates nothing.
+// What a lookahead may read next, as a mask over the grammar's terminals: one
+// tokenisation serves every depth, a spelling two terminals match reads as each
+// one still admitted, and a prediction allocates nothing.
 template <std::size_t Words>
 class LlMask {
  public:
@@ -87,7 +83,7 @@ inline bool ll_reserves_in(std::uint16_t state,
 struct LlLexReading {
   std::uint16_t term;
   TextOffset end;
-  std::uint8_t tier;
+  std::uint8_t priority;
 };
 
 // The terminals a position admits, without those refusing a word the text
@@ -122,11 +118,9 @@ inline bool ll_wants_ahead(std::uint16_t st,
   return false;
 }
 
-// Longest match, restricted, and ALL of it: at the longest accepting state
-// every terminal the readings still admit is a reading of this spelling.
-// Naming one of them would kill the arms that wanted another -- a guarded `=`
-// and a bare one are two terminals over one byte. `lengths`, where `Collect`
-// asks for them, takes the readings at that longest extent.
+// Longest match, restricted, and all of it: at the longest accepting state
+// every terminal the readings still admit reads this spelling, as a guarded `=`
+// and a bare one do. `lengths`, when `Collect` asks, takes the readings there.
 template <const auto& T, bool Collect = false>
 inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
                               const LlMask<T.termWords>& wanted,
@@ -151,10 +145,10 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
       terminalEnd;
   std::conditional_t<Collect, std::array<std::uint8_t, T.nterms>,
                      std::array<std::uint8_t, 0>>
-      terminalTier;
+      terminalPriority;
   if constexpr (Collect) {
     terminalEnd.fill(from);
-    terminalTier.fill(0);
+    terminalPriority.fill(0);
   }
   if (different != nullptr) {
     *different = false;
@@ -198,7 +192,7 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
                   static_cast<SymbolId>(k * 64u + std::countr_zero(bits));
               if (ll_lex_accepts<T>(st, term, src, i, len, far)) {
                 terminalEnd[term] = from;
-                terminalTier[term] = 0;
+                terminalPriority[term] = 0;
               }
             }
           }
@@ -221,8 +215,8 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
             const auto term =
                 static_cast<SymbolId>(k * 64u + std::countr_zero(accepted));
             terminalEnd[term] = i;
-            terminalTier[term] = static_cast<std::uint8_t>(
-                tape.tier(st, term, src, i, len, far));
+            terminalPriority[term] = static_cast<std::uint8_t>(
+                tape.priority(st, term, src, i, len, far));
           }
         if (different != nullptr) {
           if ((previous[k] & ~bits) != 0) shorter = true;
@@ -304,10 +298,10 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
             if constexpr (Collect) {
               if (reach > terminalEnd[term]) {
                 terminalEnd[term] = reach;
-                terminalTier[term] = static_cast<std::uint8_t>(as);
+                terminalPriority[term] = static_cast<std::uint8_t>(as);
               } else if (reach == terminalEnd[term] &&
-                         as > terminalTier[term]) {
-                terminalTier[term] = static_cast<std::uint8_t>(as);
+                         as > terminalPriority[term]) {
+                terminalPriority[term] = static_cast<std::uint8_t>(as);
               }
             }
             if (reach < end) return;
@@ -336,7 +330,7 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
           if constexpr (Collect)
             if (takes) {
               terminalEnd[word] = from;
-              terminalTier[word] = 0;
+              terminalPriority[word] = 0;
             }
           return takes;
         });
@@ -349,17 +343,17 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
   if (top != nullptr) {
     *top = 0;
     if (out.size() > 1) {
-      const auto tierOf = [&](std::uint16_t term) {
+      const auto priorityOf = [&](std::uint16_t term) {
         const auto walked = best != kDeadState && end == walkEnd
-                                ? tape.tier(best, term, src, end, len, far)
+                                ? tape.priority(best, term, src, end, len, far)
                                 : 0u;
         return std::max(lex_weight(walked), relayWeight(term));
       };
       auto strongest = 0u;
       for (const std::uint16_t term : out)
-        strongest = std::max(strongest, tierOf(term));
+        strongest = std::max(strongest, priorityOf(term));
       const auto strong = [&](std::uint16_t term) {
-        return tierOf(term) == strongest;
+        return priorityOf(term) == strongest;
       };
       const auto cut = std::stable_partition(out.begin(), out.end(), strong);
       if (cut != out.end()) *top = static_cast<std::size_t>(cut - out.begin());
@@ -381,7 +375,7 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
     lengths->clear();
     for (std::uint16_t term = 1; term < T.nterms; ++term)
       if (terminalEnd[term] != from && terminalEnd[term] == end)
-        lengths->push_back({term, terminalEnd[term], terminalTier[term]});
+        lengths->push_back({term, terminalEnd[term], terminalPriority[term]});
   }
   return end;
 }
@@ -391,8 +385,8 @@ struct LlLookRead {
   TextOffset inspected = 0;
   bool ended = false;
   bool different = false;
-  // The readings of the highest tier lead the read, and this many are they;
-  // zero where the read holds one tier.
+  // The readings of the highest priority lead the read, and this many are they;
+  // zero where the read holds one priority.
   std::size_t top = 0;
   // The token took the text from another reading of it: a blank it spells, or a
   // terminal it reserves. Under fewer terminals that reading stands.
@@ -417,7 +411,7 @@ inline bool ll_predict_condition(const LlContext& c, std::uint16_t condition,
 // Whether the token in hand may be several terminals: anywhere in a mode
 // marked 1, and only where the text ends on it in one marked 2.
 template <const auto& T>
-inline bool ll_reads_rivals(const LlContext& c, std::uint16_t mode) {
+inline bool ll_has_candidates(const LlContext& c, std::uint16_t mode) {
   const std::uint8_t multi = T.modeMulti[mode];
   return multi != 0 && (multi == 1 || c.la.end == c.len);
 }
@@ -435,8 +429,8 @@ inline void ll_first_read(const LlContext& c, const LlTable::Decision& dec,
     read = *ties;
     return;
   }
-  if (!ll_reads_rivals<T>(c, dec.mode) || c.la.sym == kEofSymbol ||
-      c.la.sym == kInvalidSymbol || T.terms[c.la.sym].laid != 0)
+  if (!ll_has_candidates<T>(c, dec.mode) || c.la.sym == kEofSymbol ||
+      c.la.sym == kInvalidSymbol || T.terms[c.la.sym].synthetic != 0)
     return;
   // The mode is already a bit row. Filter its trivia in words, rather than
   // testing every terminal again on every adaptive decision.
@@ -480,7 +474,7 @@ constexpr std::uint16_t ll_skips_of(std::uint16_t mode, bool joined) {
 template <const auto& T>
 inline LlLookIndent& ll_look_indent(const LlContext& c) {
   // Predictions have no user callbacks and finish before the descent can
-  // ask another one: the room is retained between calls.
+  // ask another one: the storage is kept between calls.
   thread_local LlLookIndent state;
   if constexpr (kIndented<T>) {
     ll_indent_copy(c, state);

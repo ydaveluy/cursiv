@@ -8,7 +8,7 @@ struct Item : cursiv::Extends<cursiv::AstNode> {
   boolean keyword = false;
   boolean dash = false;
   string_view name;
-  vector<Item*> kids;
+  vector<Item*> children;
 };
 struct OtherItem : cursiv::Extends<Item> {};
 struct Doc : cursiv::Extends<cursiv::AstNode> {
@@ -30,20 +30,19 @@ struct Base : cursiv::GrammarSpec {
   struct One : terminal<cr<"X">> {};
   struct Two : terminal<cr<"X">> {};
   struct Three : terminal<cr<"X">> {};
-  struct Rivals : rule<create<Item>(
-                      lit<"rivals:"> +
-                      ((gap::none + kw<"X"> + lit<"q">) |
-                       (gap::none + ref<Three> + lit<"z">) |
-                       (ref<One> + many(lit<"a">) + lit<"b">) |
-                       (ref<Two> + many(lit<"a">) + lit<"c">)))> {};
-  // The same, glued to what follows: the reading of a word a caret stands
+  struct Tied : rule<create<Item>(lit<"shared:"> +
+                                  ((gap::none + kw<"X"> + lit<"q">) |
+                                   (gap::none + ref<Three> + lit<"z">) |
+                                   (ref<One> + many(lit<"a">) + lit<"b">) |
+                                   (ref<Two> + many(lit<"a">) + lit<"c">)))> {};
+  // The same, attached to what follows: the reading of a word a caret stands
   // behind is one of those that tie.
   struct Four : terminal<cr<"W">> {};
   struct Five : terminal<cr<"W">> {};
-  struct Glued : rule<create<Item>(lit<"glued:"> +
-                                   ((gap::none + kw<"W"> + lit<"q">) |
-                                    (ref<Four> + lit<"!">) |
-                                    (ref<Five> + lit<"?">)))> {};
+  struct Attached
+      : rule<create<Item>(lit<"attached:"> + ((gap::none + kw<"W"> + lit<"q">) |
+                                              (ref<Four> + lit<"!">) |
+                                              (ref<Five> + lit<"?">)))> {};
   // A keyword two readings refuse from one cell, each past a rule that can be
   // empty: what they leave still reads.
   struct Six : terminal<cr<"V">> {};
@@ -78,9 +77,10 @@ struct Base : cursiv::GrammarSpec {
                      (lit<"y:"> + ref<Bare> + lit<"-"> + lit<"a!">) |
                      (lit<"y:"> + ref<NAME> + lit<"-"> + lit<"b!">)))> {};
   // A dangling `else`: the mark goes to the deepest level that stands open.
-  struct Dangling : rule<create<Item>(lit<"?"> +
-                                      option(append<&Item::kids>(ref<Dangling>)) +
-                                      option(flag<&Item::dash>(lit<":">)))> {};
+  struct Dangling
+      : rule<create<Item>(lit<"?"> +
+                          option(append<&Item::children>(ref<Dangling>)) +
+                          option(flag<&Item::dash>(lit<":">)))> {};
   struct Pending : rule<lit<"pending:"> + ref<Dangling>> {};
   // A continuation that begins as a run of blanks and ends behind a byte that is
   // a token of its own, read where a state takes a one-byte token straight off
@@ -91,10 +91,11 @@ struct Base : cursiv::GrammarSpec {
   struct SpItem : rule<create<Item>(assign<&Item::name>(ref<SpWord>) |
                                     flag<&Item::dash>(lit<"_">) |
                                     flag<&Item::keyword>(lit<";">))> {};
-  struct Spliced : rule<create<Item>(
-                       lit<"sp:"> + skip(ignore<SpBlank, SpMore>, hide<>,
-                                         many(append<&Item::kids>(ref<SpItem>)) +
-                                             lit<".">))> {};
+  struct Spliced
+      : rule<create<Item>(
+            lit<"sp:"> +
+            skip(ignore<SpBlank, SpMore>, hide<>,
+                 many(append<&Item::children>(ref<SpItem>)) + lit<".">))> {};
   // A token only one caller takes, which a comment spells: past a choice that
   // reads ahead, an option and a loop, the other caller reads the comment.
   struct Sharp : terminal<lit<"//"> + many(cr<"^\r\n">)> {};
@@ -116,8 +117,8 @@ struct Base : cursiv::GrammarSpec {
                                          ref<Same1> | ref<Same2>)> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(
                     ref<Spliced> | ref<Spelt> | ref<Inside> | ref<Part> |
-                    ref<Rivals> | ref<Glued> | ref<Cell> | ref<Note> | ref<Marked> |
-                    ref<Plain> | ref<Head> | ref<Pending>)))> {};
+                    ref<Tied> | ref<Attached> | ref<Cell> | ref<Note> |
+                    ref<Marked> | ref<Plain> | ref<Head> | ref<Pending>)))> {};
   using entry = Root;
   using ignored = list<WS, Sharp>;
   using hidden = list<Hushed, Hash>;

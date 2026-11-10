@@ -1,6 +1,7 @@
 #include "arithmetics/ArithmeticsCodeActionProvider.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <string>
 #include <utility>
@@ -10,10 +11,10 @@
 #include "arithmetics/validation/ArithmeticsValidator.hpp"
 #include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/JsonValue.hpp"
+#include "cursiv/text/LspPosition.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/text/LspPosition.hpp"
 
 namespace arith {
 
@@ -41,9 +42,11 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
     const cursiv::JsonValue::Object& payload = diagnostic.data->object();
     const auto constant = payload.find("constant");
     if (constant == payload.end() || !constant->second.isNumber()) continue;
-    // Only a text the grammar reads back: a NUMBER has neither a sign nor
-    // an exponent, so `1 - 2` is told it is -1 but offered no rewrite.
-    const std::string written = number_text(constant->second.number());
+    // Only a text that reads back as the same value: a NUMBER has no sign or
+    // exponent, and a negative zero, though printed 0, is not 0.
+    const double value = constant->second.number();
+    if (std::signbit(value)) continue;
+    const std::string written = number_text(value);
     if (written.empty() || !std::ranges::all_of(written, [](char c) {
           return (c >= '0' && c <= '9') || c == '.';
         }))

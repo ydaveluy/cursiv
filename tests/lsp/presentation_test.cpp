@@ -1,7 +1,3 @@
-// What an editor draws over a document and offers beside it: the folds, the
-// selections and the colours, the signature popup, the quick fixes, and the
-// virtual documents a scheme serves.
-
 #include <lsp/messages.h>
 #include <lsp/types.h>
 
@@ -58,18 +54,18 @@
 
 namespace {
 
-// A URI of its own for each document, so one lane's documents never meet.
-struct MintingWorld : support::LspWorkspace {
-  mutable unsigned minted = 0;
+// A new URI for each document, so tests never share one.
+struct UniqueUriWorld : support::LspWorkspace {
+  mutable unsigned nextUri = 0;
 
   cursiv::Document* built(std::string text) const {
     return WorkspaceWorld::built(
-        "file:///w/a" + std::to_string(minted++) + ".ws", std::move(text));
+        "file:///w/a" + std::to_string(nextUri++) + ".ws", std::move(text));
   }
 };
 
-// Counts the walks over a document's whole table of references, resolved or
-// failed; forwards the rest.
+// Counts the walks over all of a document's references, resolved or failed;
+// forwards the rest.
 struct CountingReferences final : cursiv::DocumentReferences {
   explicit CountingReferences(std::unique_ptr<cursiv::DocumentReferences> in)
       : inner(std::move(in)) {}
@@ -116,14 +112,14 @@ struct CountingReferences final : cursiv::DocumentReferences {
 
 }  // namespace
 
-// What `textDocument/foldingRange` answers: one fold per AST node under the
-// root spanning three lines, the closer left visible, one per comment record
-// of the same size -- and the hooks a language folds otherwise through.
+// One fold per AST node below the root that spans three lines or more, its
+// closing line left visible, and one per comment of that size; a language
+// changes this through hooks.
 namespace folding_range_provider {
 
 namespace {
 
-struct World : MintingWorld {
+struct World : UniqueUriWorld {
   [[nodiscard]] std::vector<lsp::FoldingRange> folds(
       std::string text,
       const cursiv::FoldingRangeProvider* provider = nullptr) const {
@@ -185,8 +181,6 @@ void a_fold_carries_its_lines_and_its_columns() {
   }
 }
 
-// Under three lines nothing folds, whatever the record ends in; and the
-// document's own root, which spans everything, is never a fold.
 void a_record_under_three_lines_and_the_root_do_not_fold() {
   const World world;
   // The root covers lines 0-3; the entity is the only fold.
@@ -214,14 +208,14 @@ void a_document_with_lone_cr_line_breaks_folds() {
         ranges.front().endLine == 2);
 }
 
-// A comment folds per record: a stack of line comments is three records of
-// one line each, and none of them folds.
+// Each line comment is a node of its own: three stacked line comments are
+// three one-line nodes, and none folds.
 void a_stack_of_line_comments_is_not_a_fold() {
   const World world;
   const std::vector<lsp::FoldingRange> ranges =
       world.folds("// one\n// two\n// three\nentity E {}\n");
   CHECK(std::ranges::none_of(ranges, is_comment));
-  // ...where one block comment of three lines is, before the entry as well.
+  // A three-line block comment folds, even before the first declaration.
   const std::vector<lsp::FoldingRange> block =
       world.folds("/* one\n   two\n   three */\nentity E {}\n");
   CHECK(block.size() == 1 && is_comment(block.front()));
@@ -249,8 +243,8 @@ void a_language_chooses_which_nodes_fold() {
   CHECK(starting(without, 5) == nullptr);
   CHECK(starting(without, 0) != nullptr);
 
-  // Refusing the package's content skips the entity inside it, and the
-  // package itself still folds; the comment is not content.
+  // Skipping the package's content skips the entity inside it; the package
+  // still folds, and the comment is not content.
   const ClosedPackages closed(*world.ws);
   const std::vector<lsp::FoldingRange> shallow =
       world.folds(std::string(kModel), &closed);
@@ -259,8 +253,8 @@ void a_language_chooses_which_nodes_fold() {
   CHECK(std::ranges::any_of(shallow, is_comment));
 }
 
-// The last-line hook sees the record and the kind: a language may keep a
-// closer inside its fold.
+// The last-line hook sees the node and the fold kind, so a language may keep
+// the closing line inside its fold.
 struct KeepsTheCloser final : cursiv::DefaultFoldingRangeProvider {
   using DefaultFoldingRangeProvider::DefaultFoldingRangeProvider;
   bool includeLastFoldingLine(
@@ -281,6 +275,33 @@ void a_language_may_keep_the_closer_in_its_fold() {
   CHECK(comment != ranges.end() && comment->endLine == 2);
 }
 
+// The cancellation token is checked at every node, not only at folds.
+struct CancelsAsItWalks final : cursiv::DefaultFoldingRangeProvider {
+  CancelsAsItWalks(const cursiv::LspServices& services,
+                   cursiv::CancellationTokenSource& source)
+      : DefaultFoldingRangeProvider(services), source(&source) {}
+  cursiv::CancellationTokenSource* source;
+  bool shouldProcess(const cursiv::AstNode&) const override {
+    source->request_stop();
+    return false;
+  }
+};
+
+void a_cancelled_walk_stops_without_a_fold() {
+  const World world;
+  cursiv::CancellationTokenSource source;
+  const CancelsAsItWalks cancels(*world.ws, source);
+  const cursiv::Document* const document =
+      world.built("datatype A\ndatatype B\n");
+  bool cancelled = false;
+  try {
+    (void)cancels.getFoldingRanges(*document, source.get_token());
+  } catch (const cursiv::OperationCancelled&) {
+    cancelled = true;
+  }
+  CHECK(cancelled);
+}
+
 }  // namespace
 
 void run() {
@@ -290,6 +311,7 @@ void run() {
   a_stack_of_line_comments_is_not_a_fold();
   a_language_chooses_which_nodes_fold();
   a_language_may_keep_the_closer_in_its_fold();
+  a_cancelled_walk_stops_without_a_fold();
 }
 
 }  // namespace folding_range_provider
@@ -347,14 +369,11 @@ void run() {
 
 }  // namespace symbol_edge_cases
 
-// What `textDocument/selectionRange` answers: the word under the caret, then
-// each containing record up to the document -- and what a caret nothing
-// covers, or a word past ASCII, gets.
 namespace selection_range_provider {
 
 namespace {
 
-struct World : MintingWorld {
+struct World : UniqueUriWorld {
   [[nodiscard]] std::vector<lsp::SelectionRange> at(std::string text,
                                                     lsp::Position caret) const {
     const cursiv::Document* const document = built(std::move(text));
@@ -369,8 +388,6 @@ struct World : MintingWorld {
          range.end.line == line && range.end.character == to;
 }
 
-// Expand-selection is a chain and not a range: the word, then the records
-// around it, up to the document.
 void a_selection_grows_from_the_word_to_the_document() {
   const World world;
   const std::vector<lsp::SelectionRange> answer = world.at(
@@ -387,8 +404,7 @@ void a_selection_grows_from_the_word_to_the_document() {
   // The innermost step is the word itself.
   CHECK(spans(answer.front().range, 3, 4, 8));
 
-  // ...and the chain widens strictly, ending on something that covers the
-  // whole text.
+  // Each parent is strictly wider, and the last covers the whole text.
   std::size_t steps = 1;
   const lsp::SelectionRange* at = &answer.front();
   const lsp::Range* previous = &at->range;
@@ -405,8 +421,8 @@ void a_selection_grows_from_the_word_to_the_document() {
   CHECK(at->range.start.line == 0 && at->range.start.character == 0);
 }
 
-// A caret nothing covers still gets its entry, and that entry is inside the
-// document: the position is clamped the way every other range is.
+// A caret on nothing still gets an entry, clamped inside the document like
+// every other range.
 void a_caret_nothing_covers_answers_a_clamped_empty_range() {
   const World world;
   // Past the last line of a two-line document.
@@ -436,11 +452,10 @@ void a_document_without_a_tree_answers_every_cursor() {
   }
 }
 
-// A word past ASCII is one word, and a dash past ASCII ends one: the
-// innermost step is what an ASCII boundary would have cut.
+// A non-ASCII word is one word, and a non-ASCII dash ends one.
 void a_word_past_ascii_is_read_by_scalar() {
   const World world;
-  // `Über` inside a comment: four scalars, four UTF-16 units.
+  // `Über` inside a comment: four characters, four UTF-16 units.
   const std::vector<lsp::SelectionRange> umlaut = world.at(
       "entity E {}\n/* \xC3\x9C"
       "ber x */\n",
@@ -468,18 +483,13 @@ void run() {
 
 }  // namespace selection_range_provider
 
-// The colours, read back off the wire: one flat array of integers, five per
-// token, each a delta from the one before it. What is checked here is the
-// decoding -- the absolute spans it yields, their order and disjointness, and
-// that every type index names a row of the legend -- a language's own legend
-// and modifiers, and the edits a delta sends.
 namespace semantic_token_provider {
 
 namespace {
 
 namespace ct = cursiv::test;
 
-// A language asks for colours: none come by default.
+// Semantic tokens are off by default: this language turns them on.
 struct World : support::LspWorkspace {
   World()
       : WorkspaceWorld([](cursiv::LspServices& language) {
@@ -547,18 +557,15 @@ struct Decoded {
   return params;
 }
 
-// The row of `name` in the protocol's legend, the grammar provider's own.
+// The index of `name` in the protocol's legend, which the grammar provider
+// uses.
 [[nodiscard]] lsp::Uint row(std::string_view name) {
   return static_cast<lsp::Uint>(
       std::ranges::find(cursiv::kSemanticTokenTypes, name) -
       cursiv::kSemanticTokenTypes.begin());
 }
 
-// 0: /* a comment */
-// 1: datatype String
-// 2: entity Person {
-// 3:   name : String
-// 4: }
+// The checks below number its lines from 0.
 constexpr std::string_view kModel =
     "/* a comment */\n"
     "datatype String\n"
@@ -566,14 +573,10 @@ constexpr std::string_view kModel =
     "  name : String\n"
     "}\n";
 
-// The three questions the walk answers, on one text: which declarations own
-// others and which do not, which names stand for a declaration elsewhere, and
-// which records are the author's prose.
 void every_expected_category_is_coloured() {
   const World world;
   // Each marked span is one category: the comment, a declaration owning
-  // nothing, one owning a feature, its feature, and the name standing for a
-  // declaration elsewhere.
+  // nothing, one owning a feature, its feature, and a reference.
   const ct::DecodedSemanticTokensWithRanges coloured =
       ct::highlightHelper(*world.ws,
                           "<|/* a comment */|>\n"
@@ -595,9 +598,8 @@ void every_expected_category_is_coloured() {
   CHECK(carries(coloured.tokens, "operator"));
 }
 
-// The encoding has no way to state a token before the one it follows, so the
-// walk owes the client source order -- and disjointness, since a byte coloured
-// twice is a colour the client picks at random.
+// The encoding cannot place a token before the previous one, so tokens come
+// in source order and never overlap: a byte coloured twice gets either colour.
 void the_tokens_are_ordered_and_never_overlap() {
   const World world;
   const cursiv::Document* const document =
@@ -621,9 +623,8 @@ void the_tokens_are_ordered_and_never_overlap() {
   for (const Decoded& token : tokens) CHECK(token.modifiers == 0);
 }
 
-// A type index is an index into the announced legend: one that ran past it
-// would colour with a row the client never received. The legend is the
-// protocol's own by default, with `full` and `range` but no `delta`.
+// Every type index must be inside the legend sent to the client. By default
+// the legend is the protocol's, with `full` and `range` but no `delta`.
 void every_index_names_a_row_of_the_legend() {
   const World world;
   const cursiv::Document* const document =
@@ -645,15 +646,13 @@ void every_index_names_a_row_of_the_legend() {
           : nullptr;
   CHECK(full != nullptr && !full->delta.value_or(false));
   CHECK(options.range.has_value());
-  // Nothing kept without `delta`: no answer names itself.
+  // Without `delta`, no answer has a result id.
   CHECK(!provider.semanticHighlight(*document, whole(*document))
              .resultId.has_value());
 }
 
-// A range answers the tokens that touch it and nothing beyond, on the same
-// encoding: decoded, it is the full answer cut to the range, whether the range
-// takes whole lines, cuts through a word, holds a declaration but not what it
-// owns, or covers everything.
+// A range answers the tokens that touch it, nothing beyond: the full answer
+// cut to the range, for whole lines, a cut word, or everything.
 void a_range_is_the_full_answer_cut_to_it() {
   const World world;
   cursiv::Document* const document =
@@ -729,10 +728,8 @@ void unicode_and_multiline_tokens_keep_their_positions() {
   }
 }
 
-// A language's own legend: two of the protocol's types and one of its own,
-// and two modifiers. The grammar's colours keep the types the legend names, at
-// their index there, and drop the rest; a derived provider marks every
-// declaration through the acceptor.
+// A language's own legend: the grammar's colours keep the types it names, at
+// its indices, and drop the rest; a derived provider marks each declaration.
 struct OwnLegend final : cursiv::GrammarSemanticTokenProvider {
   using GrammarSemanticTokenProvider::GrammarSemanticTokenProvider;
 
@@ -777,6 +774,25 @@ void a_language_declares_its_own_types_and_modifiers() {
   CHECK(!provider.tokenType("comment").has_value());
   CHECK(provider.tokenModifier("declaration") == 2u);
   CHECK(provider.tokenModifier("static") == 0u);
+
+  // The protocol's integers stop below 2^31: the 31st modifier has the last
+  // bit, and one more has none.
+  struct LongLegend final : cursiv::GrammarSemanticTokenProvider {
+    using GrammarSemanticTokenProvider::GrammarSemanticTokenProvider;
+    std::array<std::string, 32> names;
+    std::array<std::string_view, 32> views;
+    [[nodiscard]] std::span<const std::string_view> tokenModifiers()
+        const override {
+      return views;
+    }
+  };
+  LongLegend longer(*world.ws);
+  for (std::size_t i = 0; i != longer.names.size(); ++i) {
+    longer.names[i] = "m" + std::to_string(i);
+    longer.views[i] = longer.names[i];
+  }
+  CHECK(longer.tokenModifier("m30") == std::uint32_t{1} << 30);
+  CHECK(longer.tokenModifier("m31") == 0u);
 
   const cursiv::Document* const document =
       world.built("file:///w/a.ws", std::string(kModel));
@@ -828,10 +844,9 @@ struct DeltaWorld : support::LspWorkspace {
   return data;
 }
 
-// With `delta` on, a full answer is named, and a delta from it sends the edit
-// that turns it into the tokens now: none for an unchanged document. An answer
-// the provider no longer holds -- another came since, or its document was
-// closed -- is replaced whole. A range answer is never named.
+// With `delta` on, a full answer has a result id, and a delta from it sends
+// only the edits. A delta from an id not kept gets a full answer; a range
+// answer has no id.
 void a_delta_sends_only_what_changed() {
   constexpr std::string_view kA = "file:///w/a.ws";
   constexpr std::string_view kB = "file:///w/b.ws";
@@ -874,7 +889,7 @@ void a_delta_sends_only_what_changed() {
   CHECK(edited->edits.front().data.has_value() &&
         edited->edits.front().data->size() < now.size());
 
-  // An older answer than the last one is not held.
+  // An answer older than the last one is not kept.
   const auto stale = world.server().semanticTokensFullDelta(since);
   const auto* const replaced = std::get_if<lsp::SemanticTokens>(&stale);
   CHECK(replaced != nullptr && replaced->data == now &&
@@ -899,6 +914,89 @@ void a_delta_sends_only_what_changed() {
   since.previousResultId = *replaced->resultId;
   const auto reopened = world.server().semanticTokensFullDelta(since);
   CHECK(std::holds_alternative<lsp::SemanticTokens>(reopened));
+
+  // A document no tab holds keeps no answer: once opened, it is coloured
+  // whole again.
+  constexpr std::string_view kC = "file:///w/c.ws";
+  const cursiv::Document* const closed = world.built(kC, std::string(kModel));
+  lsp::SemanticTokensParams unopened;
+  unopened.textDocument.uri = lsp::Uri::parse(std::string(kC));
+  const lsp::SemanticTokens kept =
+      world.ws->semanticTokenProvider->semanticHighlight(*closed, unopened);
+  CHECK(!closed->isOpen && kept.resultId.has_value());
+  if (!kept.resultId.has_value()) return;
+  support::open(world.server(), kC, "workspace", kModel);
+  since.textDocument = unopened.textDocument;
+  since.previousResultId = *kept.resultId;
+  CHECK(std::holds_alternative<lsp::SemanticTokens>(
+      world.server().semanticTokensFullDelta(since)));
+}
+
+// A request cancelled once its colours are computed keeps nothing: the answer
+// the client holds stays the base of its next delta.
+void a_cancelled_answer_keeps_the_last_base() {
+  // The grammar's colours with `delta` on; once `cancel` is set, it cancels
+  // its request and colours nothing.
+  struct Cancels final : cursiv::GrammarSemanticTokenProvider {
+    using GrammarSemanticTokenProvider::GrammarSemanticTokenProvider;
+    mutable cursiv::CancellationTokenSource* cancel = nullptr;
+    [[nodiscard]] lsp::SemanticTokensOptions semanticTokensOptions()
+        const override {
+      lsp::SemanticTokensOptions options =
+          GrammarSemanticTokenProvider::semanticTokensOptions();
+      lsp::SemanticTokensFullDelta full;
+      full.delta = true;
+      options.full = std::move(full);
+      return options;
+    }
+
+   protected:
+    void computeHighlighting(
+        const cursiv::Document& document, cursiv::TextOffset begin,
+        cursiv::TextOffset end, cursiv::SemanticTokenAcceptor accept,
+        const cursiv::CancellationToken& token) const override {
+      if (cancel != nullptr) {
+        cancel->request_stop();
+        return;
+      }
+      GrammarSemanticTokenProvider::computeHighlighting(document, begin, end,
+                                                        accept, token);
+    }
+  };
+  const Cancels* provider = nullptr;
+  const support::LspWorkspace world([&](cursiv::LspServices& language) {
+    auto held = std::make_unique<const Cancels>(language);
+    provider = held.get();
+    language.semanticTokenProvider = std::move(held);
+  });
+  constexpr std::string_view kA = "file:///w/a.ws";
+  (void)world.shared.languageServer->initialize({});
+  support::open(*world.shared.languageServer, kA, "workspace", kModel);
+  const cursiv::Document& document = *world.shared.documents->getDocument(kA);
+  lsp::SemanticTokensParams full;
+  full.textDocument.uri = lsp::Uri::parse(std::string(kA));
+  const lsp::SemanticTokens first =
+      provider->semanticHighlight(document, full, cursiv::kNoCancel);
+  CHECK(first.resultId.has_value() && !first.data.empty());
+  if (!first.resultId.has_value()) return;
+  lsp::SemanticTokensDeltaParams since;
+  since.textDocument = full.textDocument;
+  since.previousResultId = *first.resultId;
+
+  cursiv::CancellationTokenSource source;
+  provider->cancel = &source;
+  bool cancelled = false;
+  try {
+    (void)provider->semanticHighlightDelta(document, since, source.get_token());
+  } catch (const cursiv::OperationCancelled&) {
+    cancelled = true;
+  }
+  provider->cancel = nullptr;
+  CHECK(cancelled);
+  const auto next =
+      provider->semanticHighlightDelta(document, since, cursiv::kNoCancel);
+  const auto* const delta = std::get_if<lsp::SemanticTokensDelta>(&next);
+  CHECK(delta != nullptr && delta->edits.empty());
 }
 
 // A document that never parsed is answered with an empty array, which the
@@ -922,14 +1020,15 @@ void run() {
   unicode_and_multiline_tokens_keep_their_positions();
   a_language_declares_its_own_types_and_modifiers();
   a_delta_sends_only_what_changed();
+  a_cancelled_answer_keeps_the_last_base();
   a_document_with_no_tree_is_coloured_with_nothing();
 }
 
 }  // namespace semantic_token_provider
 
-// The signature popup is asked with the request whole: a provider reads the
-// context that tells a retrigger from a first request, and its trigger
-// characters reach the handshake.
+// The signature help provider gets the whole request: its context tells a
+// retrigger from a first request, and its trigger characters reach the
+// handshake.
 namespace signature_help_provider {
 
 namespace {
@@ -1029,16 +1128,14 @@ void run() {
 
 }  // namespace signature_help_provider
 
-// What `textDocument/codeAction` answers over the validator's stamped rows:
-// which requests the built-in quick fix answers, which rows it refuses, and
-// that a language's own hook runs whatever kind the client asked for.
 namespace code_action_provider {
 
 namespace {
 
 using World = support::LspWorkspace;
 
-// A missing `:` the parser repairs, which stamps one quick-fix row.
+// A missing `:` that the parser repairs, giving one diagnostic with a quick
+// fix.
 constexpr const char* kBroken = "datatype String\nentity A { x  String }\n";
 
 [[nodiscard]] lsp::CodeActionParams over(const cursiv::Document& document) {
@@ -1067,7 +1164,7 @@ struct WithSourceAction final : cursiv::DefaultCodeActionProvider {
   }
 };
 
-// No `only`, or one naming quick fixes: the stamped row is offered.
+// No `only`, or one naming quick fixes: the fix is offered.
 void the_built_in_fix_answers_a_request_that_accepts_quick_fixes() {
   const World world;
   const cursiv::Document* const document =
@@ -1091,8 +1188,6 @@ void the_built_in_fix_answers_a_request_that_accepts_quick_fixes() {
                  lsp::CodeActionKind::QuickFix));
 }
 
-// An `only` naming another kind withholds the built-in fix -- and still asks
-// the language, which decides its own kinds.
 void an_only_of_another_kind_withholds_the_fix_and_still_asks_the_hook() {
   const World world;
   const cursiv::Document* const document =
@@ -1108,7 +1203,7 @@ void an_only_of_another_kind_withholds_the_fix_and_still_asks_the_hook() {
   CHECK(has_kind(actions, lsp::CodeActionKind::Source));
   CHECK(!has_kind(actions, lsp::CodeActionKind::QuickFix));
 
-  // ...and with nothing asked, both stand, the runtime's first.
+  // With no `only`, both are offered, the built-in fix first.
   params.context.only = std::nullopt;
   const std::vector<lsp::CodeAction> both =
       provider.getCodeActions(*document, params, cursiv::kNoCancel);
@@ -1117,9 +1212,8 @@ void an_only_of_another_kind_withholds_the_fix_and_still_asks_the_hook() {
   CHECK(both.back().kind == lsp::CodeActionKind::Source);
 }
 
-// A row stamped against another revision of the text names offsets that may
-// no longer hold: it is dropped rather than applied. A version stamped on the
-// same bytes is not another revision.
+// A fix is dropped once a new text document replaces the one it was computed
+// on, since its offsets may be stale. A new version number alone keeps it.
 void a_row_of_another_revision_is_dropped() {
   const World world;
   cursiv::Document* const document = world.built("file:///w/a.ws", kBroken);
@@ -1138,8 +1232,6 @@ void a_row_of_another_revision_is_dropped() {
   CHECK(provider.getCodeActions(*document, params, cursiv::kNoCancel).empty());
 }
 
-// A misspelt reference's neighbour reaches the client as a quick fix that
-// replaces the name.
 void a_misspelt_reference_is_offered_its_neighbour() {
   const World world;
   const cursiv::Document* const document = world.built(
@@ -1181,8 +1273,6 @@ void a_request_walks_the_references_once() {
   CHECK(walked.walks == 1);
 }
 
-// The request's range selects the findings: one that touches nothing stamped
-// is answered nothing.
 void a_range_touching_no_finding_answers_nothing() {
   const World world;
   const cursiv::Document* const document =
@@ -1344,8 +1434,8 @@ void run() {
 
 }  // namespace code_action_provider
 
-// The virtual-document door: an announced scheme is matched exactly against
-// the parsed URI, and a document the store holds is served back by URI.
+// Virtual documents: a registered scheme must match the URI exactly, and a
+// document in the store is served by URI.
 namespace text_document_content_provider {
 
 namespace {

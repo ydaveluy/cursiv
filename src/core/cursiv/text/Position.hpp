@@ -4,7 +4,7 @@
 #include <cstdint>
 
 // A position is where an editor points: a line and a column, not the byte
-// offset a document stores. The unit travels, the type does not.
+// offset a document stores.
 
 namespace cursiv {
 
@@ -16,8 +16,7 @@ struct Position {
 
   [[nodiscard]] constexpr bool operator==(const Position&) const noexcept =
       default;
-  // Document order, which the defaulted comparison already is: `line` is
-  // declared first, so it wins and the column breaks the tie.
+  // Document order: `line` is declared first, so it is compared first.
   [[nodiscard]] constexpr std::strong_ordering operator<=>(
       const Position&) const noexcept = default;
 };

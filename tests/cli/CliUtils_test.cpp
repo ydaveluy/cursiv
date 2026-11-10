@@ -231,19 +231,18 @@ void text_dump_escapes_control_bytes() {
   const Run dump = run(
       {"cli", "--dump",
        files.file(std::string("datatype /* ") + '\0' + '\x1b' + " */ String")});
-  CHECK(dump.out.find("\\x00\\x1b") != std::string::npos);
+  CHECK(dump.out.find("\\000\\033") != std::string::npos);
   CHECK(dump.out.find('\0') == std::string::npos);
   CHECK(dump.out.find('\x1b') == std::string::npos);
 }
 
-// A long leaf is cut between two characters, never inside one.
 void text_dump_cuts_between_characters() {
   const Scratch files;
   // The comment's sixtieth byte is the first of `é`.
   const std::string comment = "/*" + std::string(57, 'a') + "\xc3\xa9*/";
   const Run dump =
       run({"cli", "--dump", files.file("datatype " + comment + " String")});
-  CHECK(dump.out.find("'/*" + std::string(57, 'a') + "...'") !=
+  CHECK(dump.out.find("'/*" + std::string(57, 'a') + "'...") !=
         std::string::npos);
   CHECK(dump.out.find('\xc3') == std::string::npos);
 }
@@ -390,6 +389,12 @@ void a_command_answers_like_the_verdict() {
             throw std::runtime_error("cannot create the directory");
           }) == cursiv::kFatal);
     CHECK(capture.err.str() == "fatal: cannot create the directory\n");
+  }
+  {
+    // A command may throw what no standard type names.
+    Capture capture;
+    CHECK(cursiv::run_command([]() -> int { throw 42; }) == cursiv::kFatal);
+    CHECK(capture.err.str() == "fatal: an unknown exception\n");
   }
   {
     struct FailedFlush final : std::stringbuf {

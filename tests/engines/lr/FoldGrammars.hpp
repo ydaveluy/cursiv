@@ -1,9 +1,8 @@
 #pragma once
 
-// An operand two rules derive, each on a state of its own until the rule
-// above reduces: `a ?? b` reads only through `Coalesce`, `a || b` only through
-// `Or`, and a bare operand through both. The two readings of one operand never
-// take a different token, so the look-ahead must find them one.
+// An operand two rules derive, each on its own state until the rule above
+// reduces: `a ?? b` through `Coalesce`, `a || b` through `Or`, a bare operand
+// through both. The look-ahead must find the two readings one.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

@@ -1,6 +1,5 @@
-# Test parsers repeatedly instantiate the same runtime/STL templates. Share
-# those instantiations across four languages, retaining every generated module
-# and its public target. Products keep their independent compilation units.
+# Test parsers instantiate the same runtime and standard templates: four
+# languages of one engine share one compilation, each keeping its target.
 function(cursiv_batch_test_languages)
   get_property(_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
   set(_namespaces "")

@@ -37,12 +37,16 @@ namespace {
          std::ranges::find(categories, category) != categories.end();
 }
 
-// A check that throws does not abort the pass: the failure becomes a diagnostic
-// on the node it was looking at and the walk carries on, so one broken check
-// costs one node and stays visible to its author.
-//
-// A cancellation is not a failure and goes straight through: turning it into a
-// diagnostic would publish a crash on every document of a cancelled build.
+// Room for one more element, grown as `push_back` grows, so the push that
+// follows cannot fail half-way through a registration.
+template <class T>
+void room_for_one(std::vector<T>& elements) {
+  if (elements.size() == elements.capacity())
+    elements.reserve(std::max<std::size_t>(4, elements.capacity() * 2));
+}
+
+// A check that throws becomes a diagnostic on its node, and the walk goes on.
+// A cancellation goes straight through.
 void run_one(const ValidationRegistry& registry, const ValidationCheck& check,
              const AstNode& node, ValidationAcceptor& accept,
              const CancellationToken& token) {
@@ -98,7 +102,7 @@ void DefaultValidationRegistry::handleException(std::exception_ptr failure,
 }
 
 // Multiplicative hashing: the product's upper half is the well-mixed one.
-std::size_t DefaultValidationRegistry::homeOf(
+std::size_t DefaultValidationRegistry::hashSlotOf(
     const AstTypeTag* type) const noexcept {
   return static_cast<std::size_t>(
              (std::uint64_t{reinterpret_cast<std::uintptr_t>(type)} * _mul) >>
@@ -108,7 +112,7 @@ std::size_t DefaultValidationRegistry::homeOf(
 
 std::size_t DefaultValidationRegistry::slotOf(
     const AstTypeTag* type) const noexcept {
-  std::size_t at = homeOf(type);
+  std::size_t at = hashSlotOf(type);
   while (_byType[at].type != nullptr && _byType[at].type != type)
     at = (at + 1) & _typeMask;
   return at;
@@ -134,21 +138,21 @@ DefaultValidationRegistry::entriesOf(const AstTypeTag* type) {
   ++_typeCount;
   // Off until the search below has run: a refused one leaves this tag where
   // only the full probe finds it.
-  _homeDecides = false;
-  const auto homed = [&] {
+  _hashSlotDecides = false;
+  const auto allAtHashSlot = [&] {
     for (std::size_t at = 0; at < _byType.size(); ++at)
-      if (_byType[at].type != nullptr && homeOf(_byType[at].type) != at)
+      if (_byType[at].type != nullptr && hashSlotOf(_byType[at].type) != at)
         return false;
     return true;
   };
   // A collision tries other multipliers before a wider table: which tags
   // collide is the addresses', not the grammar's.
-  for (unsigned tries = 1; !homed() && tries <= 64; ++tries)
+  for (unsigned tries = 1; !allAtHashSlot() && tries <= 64; ++tries)
     rehash(tries % 8 == 0 && _byType.size() < 16 * _typeCount
                ? _byType.size() * 2
                : _byType.size(),
            _mul + (0x2545f4914f6cdd1dull << 1u));
-  _homeDecides = homed() && _everyNode.empty();
+  _hashSlotDecides = allAtHashSlot() && _everyNode.empty();
   return _byType[slotOf(type)].entries;
 }
 
@@ -162,9 +166,12 @@ void DefaultValidationRegistry::fileDocumentCheck(
     throw ValidationRegistrationError(
         "a document check needs a category of its own -- `built_in` is the "
         "runtime's and null is nobody's");
-  if (std::ranges::find(_categories, category) == _categories.end())
-    _categories.push_back(category);
+  // The hook first, so a refused one publishes no category.
+  const bool newCategory =
+      std::ranges::find(_categories, category) == _categories.end();
+  if (newCategory) room_for_one(_categories);
   into.emplace_back(category, std::move(check));
+  if (newCategory) _categories.push_back(category);
 }
 
 // -Warray-bounds fires here on a `std::mutex` this function never names: at -O3
@@ -182,23 +189,14 @@ void DefaultValidationRegistry::registerCheck(
     throw ValidationRegistrationError(
         "a check needs a category of its own -- `built_in` is the runtime's "
         "and null is nobody's");
-  // The catch-all needs no reflection: `cursiv::AstNode` is every node.
-  // Otherwise, an exact check is filed under its own tag alone; the ordinary
-  // one under every tag of the family, which is what "a check written over a
-  // base" means.
+  // A catch-all check needs no reflection. Otherwise an exact check is filed
+  // under its own tag, and an ordinary one under every tag of its family.
   const bool catchAll = registration.target == nullptr;
   std::span<const AstTypeTag* const> family;
   if (!catchAll) {
     family = _core.astReflection->getAllSubTypes(registration.target);
-    // The refusal comes first: a registration that throws must leave no trace,
-    // neither a count nor a published category.
-    //
-    // A target no reflection names is refused loudly: its family is empty, so a
-    // check filed under the bare tag could never fire -- no produced node
-    // carries a base's tag -- and it would be counted and its category
-    // published while it never ran. Discovery refuses this at compile time for
-    // a language's own checks; here, at the erased door, the usual cause is
-    // bootstrap order, the grammar's reflection added after the checks.
+    // Refused before anything changes: a target no reflection names could never
+    // fire. The usual cause is a grammar's reflection added after its checks.
     if (family.empty())
       throw ValidationRegistrationError(
           std::format("the check's target type '{}' is not in the workspace "
@@ -210,14 +208,22 @@ void DefaultValidationRegistry::registerCheck(
     if (registration.exactTypeOnly)
       family = std::span<const AstTypeTag* const>(&registration.target, 1);
   }
-  ++_count;
-  if (std::ranges::find(_categories, category) == _categories.end())
-    _categories.push_back(category);
+  // Every allocation before the first change: a refusal files the check under
+  // no tag of its family, and a retry files it once everywhere.
   const Entry entry{category, std::make_shared<const ValidationCheck>(
                                   std::move(registration.check))};
+  const bool newCategory =
+      std::ranges::find(_categories, category) == _categories.end();
+  if (newCategory) room_for_one(_categories);
+  if (catchAll)
+    room_for_one(_everyNode);
+  else
+    for (const AstTypeTag* tag : family) room_for_one(entriesOf(tag));
+  ++_count;
+  if (newCategory) _categories.push_back(category);
   if (catchAll) {
     _everyNode.push_back(entry);
-    _homeDecides = false;
+    _hashSlotDecides = false;
     return;
   }
   for (const AstTypeTag* tag : family) entriesOf(tag).push_back(entry);
@@ -227,8 +233,7 @@ void DefaultValidationRegistry::registerCheck(
 void DefaultValidationRegistry::runChecks(
     const AstNode& node, ValidationAcceptor& accept,
     ValidationCategories categories, const CancellationToken& token) const {
-  if (_homeDecides &&
-      _byType[homeOf(node.type)].type != node.type)
+  if (_hashSlotDecides && _byType[hashSlotOf(node.type)].type != node.type)
     return;
   runMatched(node, accept, categories, token);
 }
@@ -242,8 +247,8 @@ CURSIV_NOINLINE void DefaultValidationRegistry::runMatched(
       for (const Entry& entry : typed.entries)
         if (runs(categories, entry.category))
           run_one(*this, *entry.check, node, accept, token);
-  // ...then the ones no type filters, after the typed ones: a published
-  // diagnostic list is read by humans, so its order is part of the answer.
+  // Then the checks no type filters, after the typed ones: people read the
+  // diagnostic list, so its order matters.
   for (const Entry& entry : _everyNode)
     if (runs(categories, entry.category))
       run_one(*this, *entry.check, node, accept, token);

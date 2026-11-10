@@ -5,8 +5,8 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
 
-// Every reference the document writes, resolved or not: the inverse index's
-// only source.
+// Every resolved reference the document writes, one row per target: the
+// inverse index's only source.
 
 namespace cursiv {
 
@@ -17,8 +17,7 @@ class ReferenceDescriptionProvider {
   virtual ~ReferenceDescriptionProvider() noexcept = default;
 
   // The whole list, in document order. Cancellable like every per-document
-  // pass. Not a visit: the only caller keeps the rows anyway, so a callback
-  // bought a `function_ref` hop per reference and saved no allocation.
+  // pass.
   [[nodiscard]] virtual std::vector<ReferenceDescription> createDescriptions(
       const Document& document,
       const CancellationToken& cancelToken = kNoCancel) const = 0;

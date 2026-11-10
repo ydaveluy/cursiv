@@ -24,10 +24,8 @@ struct Pending;
 // The text an element denotes, its converters applied; null when it converts
 // nothing and the raw spelling stands.
 using TextFn = std::optional<std::string_view> (*)(AstBuildCtx&, NodeId);
-// One conversion, as the table holds it. `value` stands where the grammar
-// stated the value, and the write is then a store. With neither pointer, the
-// slot passes the raw record text straight to a string-view member. Every
-// other conversion keeps its thunk.
+// One conversion, as the table holds it: `value` where the grammar states the
+// value, a thunk otherwise, and with neither the record's text as a view.
 struct ConvSlot {
   bool (*fn)(AstBuildCtx&, NodeId, void*) = nullptr;
   const void* value = nullptr;
@@ -42,8 +40,8 @@ struct ValueSlot {
 
 class AstReducer;
 using AstEntryFn = void (*)(AstReducer&, NodeId);
-// One class's writer: the pending lands on a node of that class, or the class
-// declares no such member and the answer is false.
+// One class's writer: it writes the pending value into a node of that class,
+// or returns false when the class has no such member.
 using AstApplyFn = bool (*)(AstReducer&, const Pending&, const Made&);
 
 struct AstActions {
@@ -77,7 +75,7 @@ struct AstActions {
   // the record holds, or none where it holds only the record below.
   const ValueSlot* values = nullptr;
 
-  // A leaf that owes nothing names no entry, and denotes its own bytes.
+  // A leaf with no conversion names no entry and denotes its own bytes.
   TextFn text_at(ElementId e) const {
     return texts != nullptr && e < entryCount ? texts[e] : nullptr;
   }

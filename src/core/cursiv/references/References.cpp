@@ -27,7 +27,8 @@ std::vector<ReferenceDescription> collect_references_per_declaration(
   const auto key = [](const ReferenceDescription& row) {
     return std::tuple{row.sourceDocumentId, row.sourceBegin, row.sourceEnd};
   };
-  std::ranges::sort(rows, {}, key);
+  // Stable, so the row a site keeps is the first target's that reaches it.
+  std::ranges::stable_sort(rows, {}, key);
   const auto repeats = std::ranges::unique(rows, {}, key);
   rows.erase(repeats.begin(), repeats.end());
   return rows;

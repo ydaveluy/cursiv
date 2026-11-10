@@ -16,23 +16,16 @@
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/utils/TypeName.hpp"
 
-// What a matched text becomes. Declaring a converter is part of writing a
-// grammar, so `GrammarSpec.hpp` includes this and an author needs one header
-// -- but a reader that only converts takes this one, which knows nothing of
-// rules, combinators or the DSL.
+// What a matched text becomes. A reader that only converts includes this
+// file, which knows nothing of rules or the DSL.
 
 namespace cursiv {
 
 namespace detail {
 
-// Exactly the AstNode vocabulary's numbers, int8/uint8 .. float64, spelled
-// out rather than derived from `is_arithmetic_v`: int8/uint8 are
-// signed/unsigned char, so this is a closed set, not "every integer minus
-// the character types". Plain `char` is off it because routing "7" through
-// its from_chars overload yields 0x07, not '7'; wchar_t/char8_t/char16_t/
-// char32_t are off it because they have no overload at all, which would be
-// a raw compiler error rather than a diagnostic. A grammar wanting one of
-// those gets the named "no conversion" refusal and writes a converter.
+// The AstNode vocabulary's numbers, int8 to float64, as a closed set. Plain
+// `char` and the wide character types are left out: a grammar that wants one
+// writes a converter.
 template <class M>
 inline constexpr bool from_chars_number =
     std::same_as<M, std::int8_t> || std::same_as<M, std::uint8_t> ||
@@ -41,13 +34,9 @@ inline constexpr bool from_chars_number =
     std::same_as<M, std::int64_t> || std::same_as<M, std::uint64_t> ||
     std::same_as<M, float> || std::same_as<M, double>;
 
-// Which target types the tree's own conversion reaches: the identity, the
-// boolean, the arithmetic set, and an enum matched against its enumerator
-// names. A predicate, because the validation must ask without instantiating
-// the conversion: `requires { default_convert<M>(t); }` answers yes for
-// every M -- the call expression is always well formed and the refusal is a
-// static_assert inside the body -- so a trait is the only honest test. Text
-// is a `string_view` of the document, or a `std::string` owning a copy.
+// The target types the tree's own conversion reaches: the text, bool, the
+// numbers above, and an enum by its enumerator names. A trait, since a
+// `requires` on the call always answers yes.
 template <class M>
 inline constexpr bool has_default_convert =
     std::is_same_v<M, std::string_view> || std::is_same_v<M, std::string> ||
@@ -57,9 +46,7 @@ inline constexpr bool has_default_convert =
 
 // The customisation point, for a target of your own:
 //   `static ConversionResult<T> convert(std::string_view)`
-// The closed set above has one already. Unspecialised it is the named refusal
-// in `rule_type`.
-//
+// Unspecialised, it is the named refusal in `rule_type`.
 template <class T>
 struct default_converter;
 
@@ -69,10 +56,8 @@ struct ConversionResult {
   ParseDiagnostic error;
   constexpr explicit operator bool() const { return value.has_value(); }
   static constexpr ConversionResult ok(T v) { return {std::move(v), {}}; }
-  // The words only: the builder ranges the diagnostic over the record it was
-  // reading, which for a parts converter is the whole rule and never the part
-  // that failed. A converter that has to say which part says it in the
-  // message.
+  // The words only: the diagnostic spans the whole record, so a parts
+  // converter names the part that failed in its message.
   static constexpr ConversionResult err(std::string msg) {
     return {
         std::nullopt,
@@ -82,34 +67,14 @@ struct ConversionResult {
 
 namespace detail {
 
-// Namespace scope, not function scope. As a local `constexpr double[23]` the
-// compiler materialises the 184-byte table on the stack of every call, which
-// costs more than the conversion it serves. At namespace scope it is one
-// .rodata object indexed in place.
+// At namespace scope, so it is not rebuilt on the stack at every call.
 inline constexpr double kPow10[23] = {
     1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11,
     1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
 
-// Clinger's exact fast path (Clinger 1990), in front of the library call.
-// `std::from_chars(..., double&)` is an out-of-line call into libstdc++ --
-// an undefined symbol in every binary that links cursiv -- and on a short
-// number this path saves more than half of its instructions.
-//
-// Why the answer is bit-identical, in one sentence: when the decimal
-// significand is at most 2^53 it is an exact double, when |exp10| <= 22 the
-// power of ten is an exact double, so `sig * 10^e` (or `sig / 10^-e`) is one
-// IEEE operation on two exact operands -- and a single IEEE operation is
-// correctly rounded by definition, which is exactly what from_chars promises.
-//
-// Everything else answers false and the library call runs unchanged: more
-// than 19 significant digits (where the uint64 accumulator would wrap), a
-// wider exponent, inf/nan, a hex literal, or any residue after the number.
-// The 19 bound is what makes the accumulator sound: 9'999'999'999'999'999'999
-// < 2^64-1, so `sig` is exact when the `> 2^53` test is applied to it.
-//
-// Double only, deliberately: for `float` the same table would round decimal
-// -> double -> float and double rounding can differ from the single
-// correctly rounded result. `float` keeps the library call.
+// Clinger's exact fast path: a significand up to 2^53 times or over a power
+// of ten up to 1e22 is one correctly rounded operation. Anything else, and
+// every `float`, takes the library call.
 [[gnu::always_inline]] constexpr bool fast_decimal(std::string_view t,
                                                    double& out) {
   const char* p = t.data();
@@ -210,11 +175,8 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
                : ConversionResult<M>::err("expected 'true' or 'false'");
   } else if constexpr (detail::from_chars_number<M>) {
     M v{};
-    // std::from_chars refuses a leading '+' for every arithmetic type (only
-    // '-' is a sign it reads), so an optional-sign grammar like
-    // `opt(cr<"+-">) + some(d)` would turn the legal "+5" into "not a
-    // number". Strip at most one leading '+': "+5" parses as 5, "++5" still
-    // fails (the surviving '+' is not a digit either), "-5" is untouched.
+    // `std::from_chars` refuses a leading '+', so one is dropped: "+5" reads 5,
+    // "++5" still fails.
     std::string_view digits = text;
     if (!digits.empty() && digits.front() == '+') {
       digits.remove_prefix(1);
@@ -234,10 +196,8 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
                                         ? "value out of range"
                                         : "not a number");
   }
-  // The enumerator names are the language: `visibility=priv` writes
-  // `Vis::priv` with no converter and no table to keep in sync. The
-  // enumerator list is a static array, so the loop is unrolled and each
-  // comparison is against a literal.
+  // An enum reads its enumerator names: `visibility=priv` writes `Vis::priv`
+  // with no converter.
   else if constexpr (std::is_enum_v<M>) {
     if (M found{};
         detail::find_enumerator<M>(text, found, detail::enum_probes{}))

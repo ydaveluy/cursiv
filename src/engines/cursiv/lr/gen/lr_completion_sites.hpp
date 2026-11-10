@@ -1,6 +1,6 @@
 // What each entry of an LR record table answers, and the completion site it
-// stands for: entries naming one member of one owner, narrowed alike, share a
-// site.
+// stands for: entries naming one member of one owner, narrowed the same, share
+// a site.
 #pragma once
 
 #include <span>

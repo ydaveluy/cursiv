@@ -25,10 +25,10 @@ struct LrSizes {
   // one.
   unsigned accStands = 0;
   // Zero where no terminal is read as a literal or a keyword.
-  unsigned accTiers = 0;
+  unsigned accPriorities = 0;
   // A mode per mode where the grammar embeds others, none where it does not.
   unsigned errModes = 0;
-  // The grammar lays an indentation token or brackets a line: its reader
+  // The grammar inserts an indentation token or brackets a line: its reader
   // lexes every token afresh, so the table keeps no mode matrix.
   bool indented = false;
   // The lists of the written order of insertions, and their terminals.

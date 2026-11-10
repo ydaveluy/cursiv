@@ -26,10 +26,7 @@ struct PredicateCursor {
 };
 
 // Deterministic recognition stays in the inline cursor; only competing
-// readings allocate, and duplicate cursors never multiply the next step.
-// The size is told by the tail and whether the inline cursor is taken, so a
-// moved-from set (its tail emptied, its inline cursor copied) still holds
-// what it says: never an index past its storage.
+// readings allocate, and duplicates are dropped. A moved-from set stays valid.
 template <class Cursor>
 class PredicateStates {
  public:
@@ -70,10 +67,8 @@ class PredicateStates {
     }
     add(other._one);
     if (other._more.empty()) return;
-    // Both tails are sorted. Inserting one interleaved endpoint at a time
-    // shifts a growing tail quadratically; merge them in a single pass, from
-    // where the other's first cursor falls: the cursors before it stay in
-    // place, so a set that grows at its end is never copied whole.
+    // Both tails are sorted: merge them in one pass from where the other's
+    // first cursor falls, so a set that grows at its end is never copied.
     const auto from =
         std::lower_bound(_more.begin(), _more.end(), other._more.front()) -
         _more.begin();

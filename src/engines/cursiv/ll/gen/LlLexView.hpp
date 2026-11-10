@@ -18,10 +18,10 @@ struct LlLexView : LexTableView<LlBuiltProgram> {
     return a.dfaBound[s] != kNoSet || a.lexChecks[s] != 0;
   }
   std::uint16_t relay(std::uint16_t s) const { return a.dfaRelay[s]; }
-  unsigned tier(std::uint16_t s, unsigned t) const {
+  unsigned priority(std::uint16_t s, unsigned t) const {
     unsigned out = 0;
     for (const LlLexAccept& x : a.choices(s))
-      if (x.term == t) out = std::max<unsigned>(out, x.tier);
+      if (x.term == t) out = std::max<unsigned>(out, x.priority);
     return out;
   }
 };

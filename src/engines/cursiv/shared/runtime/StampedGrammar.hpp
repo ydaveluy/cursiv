@@ -1,7 +1,6 @@
-// An engine's `Grammar`: one grammar's answers about its records and its
-// tokens, from the metadata a generator writes, a record's row read in the
-// stamp layout of the table that wrote the tree. The same class for every
-// grammar and every engine.
+// An engine's `Grammar`: one grammar's answers about its records and tokens,
+// from the metadata a generator writes. The same class for every grammar and
+// every engine.
 #pragma once
 
 #include <algorithm>
@@ -77,7 +76,7 @@ struct StampedGrammar final : Grammar {
   std::string_view terminalDoc(std::uint16_t t) const noexcept override {
     return t < _f->terminalCount ? _f->terminals[t].doc : std::string_view{};
   }
-  // A linear scan: a hover is a keystroke.
+  // A linear scan is enough: a hover runs once per keystroke.
   std::string_view spellingDoc(std::string_view text) const noexcept override {
     if (text.empty()) return {};
     for (std::uint16_t t = 0; t < _f->terminalCount; ++t) {
@@ -128,9 +127,7 @@ struct StampedGrammar final : Grammar {
   static constexpr std::size_t kSampleWords = samples.size() - 2;
 
   // The text from `from` to the caret `at`, the spelling, then the real text
-  // past `resume` in growing slices, until `walk` halts inside one or the
-  // document ends: an end right after the spelling accepts an unfinished
-  // prefix.
+  // past `resume` in growing slices, until `walk` halts or the document ends.
   static auto spliced(std::string& splice, std::string_view text,
                       TextOffset from, TextOffset at, TextOffset resume,
                       std::string_view spelling, auto&& walk) {
@@ -145,10 +142,8 @@ struct StampedGrammar final : Grammar {
     }
   }
 
-  // Whether `run`, the text of the token `term` up to a caret, is still all
-  // trivia with a word typed behind it: a blank run is, a line comment reads on,
-  // and the blanks of a continuation are, though the word takes them out of it.
-  // The words are the sample words, but for those `lex` reads as trivia themselves.
+  // Whether `run`, the text of token `term` up to a caret, is still all trivia
+  // with a sample word typed behind it.
   static bool ends_before_word(std::string_view run, std::uint16_t term,
                                std::span<const TermInfo> terms, auto&& lex) {
     const auto trivia = [&](std::uint16_t t) {

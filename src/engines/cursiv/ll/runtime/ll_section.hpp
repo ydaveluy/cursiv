@@ -43,9 +43,8 @@ inline bool ll_condition(const LlContext& c, std::uint16_t condition,
 }
 
 // Where the text the descent reads ends: the document's end, or in a section
-// the first token that closes it, looked for from `at` up to a token starting
-// at `upto`, in the bytes before `clip`. `reached` rises to how far the search
-// read, which is `clip` where a walk ran into it.
+// the first closing token, from `at` up to a token starting at `upto`, before
+// `clip`. `reached` rises to how far the search read.
 template <const auto& T>
 TextOffset ll_text_end(const LlContext& c, TextOffset at, TextOffset upto,
                        TextOffset& reached, TextOffset clip = ~TextOffset{0}) {

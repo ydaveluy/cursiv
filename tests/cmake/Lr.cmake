@@ -11,18 +11,17 @@ cursiv_test(LexRelay_test engines/lr/LexRelay_test.cpp
     backrefluaGenerated
     nestedGenerated
     relayoverlapGenerated)
-# Bounds the runs a closer search or a relay read per opener would never
-# finish.
+# Stops a closer search or a relay read per opener, which would never finish.
 set_tests_properties(LexRelay_test PROPERTIES TIMEOUT 120)
 cursiv_grammar(cycle engines/lr/CycleGrammar.hpp tcycle::G ENGINE LR)
 cursiv_grammar(indent engines/lr/IndentGrammar.hpp tindent::G ENGINE LR)
 cursiv_grammar(indentfolded engines/lr/IndentGrammar.hpp tindent::folded::Cases ENGINE LR)
 cursiv_grammar(indentrepaired engines/lr/IndentGrammar.hpp tindent::repaired::G ENGINE LR)
-cursiv_grammar(indentimplied engines/lr/IndentGrammar.hpp tindent::laid::Cases ENGINE LR)
+cursiv_grammar(indentimplied engines/lr/IndentGrammar.hpp tindent::synthetic::Cases ENGINE LR)
 cursiv_grammar(adopt engines/lr/AdoptEntryGrammar.hpp tadopt::G ENGINE LR)
 cursiv_grammar(rulerefusal engines/lr/RuleRefusalGrammars.hpp trefuse::head::G ENGINE LR)
 cursiv_grammar(wideterms engines/lr/WideTerminalsGrammar.hpp twide::G ENGINE LR)
-# Its states in groups, each unit compiled alone as a language's would be.
+# Its states split in groups, each unit compiled alone as a language's would be.
 cursiv_grammar(asi engines/lr/AsiGrammar.hpp tasi::G ENGINE LR
     GENERATOR_ARGS --group-lines=64 SEPARATE_UNITS)
 cursiv_grammar(asicases engines/lr/AsiGrammar.hpp tasi::cases::G ENGINE LR)
@@ -35,7 +34,7 @@ cursiv_test(LrIndent_test engines/lr/LrIndent_test.cpp
     indentrepairedGenerated
     indentimpliedGenerated)
 cursiv_grammar(cells engines/lr/CellWidthGrammars.hpp tcells::G ENGINE LR)
-# Cells and positions no look-ahead settles, split rather than guessed.
+# Cells and positions no look-ahead resolves, split rather than guessed.
 cursiv_test(LrEngine_test engines/lr/LrEngine_test.cpp
     shadowllGenerated
     shadowlrGenerated
@@ -46,10 +45,9 @@ cursiv_test(LrEngine_test engines/lr/LrEngine_test.cpp
     guardGenerated
     nestedGenerated
     lexicalpredicateslrGenerated)
-# The construction itself, which is a host tool: its storage reserves address
-# space wasm32 does not offer, so a cross declares no lane that runs it.
+# Host only: the table construction reserves more address space than wasm32
+# offers.
 if(NOT CMAKE_CROSSCOMPILING)
-  # The construction and its generated fixture run only on the host.
   cursiv_grammar(deferrednested engines/lr/DeferredChoiceGrammars.hpp
       tdeferred::NestedFirst ENGINE LR)
   target_sources(LrLowering_test PRIVATE engines/lr/LrIdentity_cases.cpp)
@@ -59,12 +57,12 @@ endif()
 
 cursiv_grammar(shorterlr engines/lr/RefusedShorterGrammar.hpp trefusedshorter::Lr ENGINE LR)
 
-# The LR failed-walk oracle uses the shared lexical-predicate fixture.
+# The LL suite's lexical-predicate grammar, generated for LR.
 cursiv_grammar(lexicalpredicateslr engines/ll/LexicalPredicatesGrammar.hpp tlexicalpredicates::Lr ENGINE LR)
 
 if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
-  # The bound's walk over what a reading owes keeps its depth off the native
-  # stack, and spends what the recursion did.
+  # The bound's walk keeps its depth off the native stack, at the recursion's
+  # cost.
   cursiv_test(LrBoundDepth_test engines/lr/LrBoundDepth_test.cpp
       arithmeticsGenerated)
 endif()

@@ -1,5 +1,5 @@
-// A directive over a sequence: only a node travels through one, so a member
-// that also takes values would never receive the value a rule inside pays.
+// A directive over a sequence: only a node passes through one, so a member
+// that also takes values would never get the value of a rule inside.
 // expect LR: only a node passes through a sequence
 #pragma once
 

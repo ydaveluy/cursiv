@@ -24,8 +24,7 @@ namespace cursiv {
 
 namespace {
 
-// The existing leaf index locates the token without scanning its siblings.
-// A gap between leaves reaches no record, as does text outside the entry.
+// A gap between leaves, or text outside the entry, has no record.
 [[nodiscard]] NodeId leaf_at(const Cst& cst, TextOffset offset) {
   if (!cst.has_entry()) return kNoNode;
   if (const CstNode& entry = cst[cst.entry_root()];
@@ -51,8 +50,8 @@ std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
   // produced it, and a keyword is a legal name.
   const auto keywordHover = [&]() -> std::optional<lsp::Hover> {
     const Cst& cst = document.parseResult.cst();
-    // A CST span is half-open, so a click at a keyword's very end lands one
-    // past it -- the same retry the definition provider makes.
+    // A CST span is half-open: a click at a keyword's very end falls one past
+    // it.
     NodeId leaf = leaf_at(cst, offset);
     if (leaf == kNoNode && offset > 0) leaf = leaf_at(cst, offset - 1);
     if (leaf == kNoNode) return std::nullopt;
@@ -70,10 +69,8 @@ std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
     return hover;
   };
 
-  // What a name under the caret means is the declaration it denotes -- both
-  // arms of `References::findDeclaration`, the same call every navigation
-  // service makes here -- and its prose comes from the `DocumentationProvider`
-  // of the language that declares it.
+  // A name under the caret means the declaration it denotes; its prose comes
+  // from the declaring language's `DocumentationProvider`.
   const Declaration found =
       _core.references->findDeclaration(document, offset, token);
   if (!found) return keywordHover();
@@ -82,14 +79,14 @@ std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
   std::string joined;
   for (const AstNode* target : found.targets) {
     throw_if_cancelled(token);
-    const Document* home = target->getDocument();
-    if (home == nullptr) continue;
-    const CoreServices* language = home->language;
+    const Document* targetDocument = target->getDocument();
+    if (targetDocument == nullptr) continue;
+    const CoreServices* language = targetDocument->language;
     const DocumentationProvider* const docs =
         language == nullptr ? nullptr : language->documentationProvider.get();
     if (docs == nullptr) continue;
     if (std::optional<std::string> prose =
-            docs->getDocumentation(*target, home)) {
+            docs->getDocumentation(*target, targetDocument)) {
       if (!joined.empty()) joined += ' ';
       joined += *prose;
     }

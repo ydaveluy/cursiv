@@ -1,6 +1,5 @@
-// `Type -> K1 ... K8 Type "[]"`: eight optional clauses that each consume, in
-// front of the recursive call -- the gate reads the last as an item that may
-// match nothing.
+// `Type -> K1 ... K8 Type "[]"`: eight optional clauses in front of the
+// recursive call, one more than the engines accept.
 // expect LR: refused .hiddenLeftRecursion..*rule .Type. reaches itself before matching anything, behind more than 7 optional items
 // expect LL: refused .leftRecursion..*rule .Type. reaches itself before matching anything inside a repetition or behind optional items.*at most 7 optional items
 #pragma once

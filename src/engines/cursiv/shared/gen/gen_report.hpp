@@ -25,11 +25,9 @@ namespace cursiv::engine {
 // grammar spells: a warning each.
 void report_grammar_warnings(std::string_view grammar, GrammarImage& image);
 
-// A warning each, in this order: a condition of `conds` read to the end of an
-// unbounded run, which makes parsing quadratic in the run and a completion
-// replay the tokens before the caret (`rule_name` answers a rule index's name,
-// empty where none stands); a lexical check of `lex` that could not conclude,
-// generated as if it found nothing; then the warnings of `image`.
+// Warns, in this order, of each condition of `conds` read to the end of an
+// unbounded run, each lexical check of `lex` that could not conclude, then the
+// warnings of `image`. `rule_name` names a rule by its index.
 template <class CondCfg, class LexCfg, class RuleName>
 void report_warnings(std::string_view grammar, GrammarImage& image,
                      const CondCfg& conds, const LexCfg& lex,
@@ -44,25 +42,35 @@ void report_warnings(std::string_view grammar, GrammarImage& image,
   report_grammar_warnings(grammar, image);
 }
 
-// The output directory a generator's arguments name. Each argument that
-// starts with a dash goes to `option`, false where it is wrong; a wrong
-// argument or no directory prints the usage, `options` its flags, and answers
-// null.
-template <class Option>
-const char* gen_out_dir(int argc, char** argv, const char* options,
-                        Option&& option) {
+// What a generator's arguments name: the directory it writes to, and the
+// TextMate file `--textmate=<file>` names, empty where none does.
+struct GenPaths {
   const char* dir = nullptr;
+  std::string_view textmate;
+};
+
+// The paths a generator's arguments name. Other flags go to `option`, false
+// where wrong; a wrong argument or no directory prints the usage, with the
+// engine's `options`, and returns no directory.
+template <class Option>
+GenPaths gen_paths(int argc, char** argv, const char* options,
+                   Option&& option) {
+  constexpr std::string_view kTextMate = "--textmate=";
+  GenPaths paths;
   bool bad = false;
   for (int i = 1; i < argc && !bad; ++i) {
     const std::string_view arg = argv[i];
-    if (arg.starts_with("-"))
+    if (arg.starts_with(kTextMate))
+      paths.textmate = arg.substr(kTextMate.size());
+    else if (arg.starts_with("-"))
       bad = !option(arg);
     else
-      dir = argv[i];
+      paths.dir = argv[i];
   }
-  if (!bad && dir != nullptr) return dir;
-  std::fprintf(stderr, "usage: %s %s <out-dir>\n", argv[0], options);
-  return nullptr;
+  if (!bad && paths.dir != nullptr) return paths;
+  std::fprintf(stderr, "usage: %s %s [--textmate=<file>] <out-dir>\n", argv[0],
+               options);
+  return {};
 }
 
 // An arm that begins and ends with its own rule, a refusal each: true where
@@ -92,8 +100,8 @@ inline void refuse_too_large(std::string_view grammar, std::string_view cap) {
                static_cast<int>(cap.size()), cap.data());
 }
 
-// The split of a record's stamp over a table of `rows` and `states`, `forced`
-// being the row width a lane asks for: true where none holds.
+// Splits a record's bits between `rows` and `states` into `stamp`, `forced`
+// being the row width a lane asks for; true, with a refusal, where none fits.
 inline bool refuse_unstamped(std::string_view grammar, StampLayout& stamp,
                              std::uint32_t rows, std::uint32_t states,
                              unsigned forced = 0) {

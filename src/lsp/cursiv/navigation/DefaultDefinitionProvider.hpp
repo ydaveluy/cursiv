@@ -1,7 +1,5 @@
-// A thin translation: what a reference resolves to is the core
-// `References` service's answer already. The one twist is the name
-// provider used per target -- the target's own document's language, not
-// the asking one, since a cross-language reference otherwise has none.
+// Translates the core `References` answer. Names come from the target
+// document's language, not the asking one.
 #pragma once
 
 #include <lsp/types.h>

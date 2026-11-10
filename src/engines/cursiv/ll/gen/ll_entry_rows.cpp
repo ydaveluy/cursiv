@@ -90,39 +90,38 @@ AstEntryTable ll_entry_table(const LlFinalProgram& done,
         makesBefore[k] =
             runMakes[k + 1] || (!runOpens[k + 1] && makesBefore[k + 1]);
       }
-      bool lays = false, owed = false;
+      bool making = false, joining = false;
       for (std::size_t k = 0; k < raw.size(); ++k) {
         auto& run = raw[k];
         const bool opening = opensAfter[k], closing = makesBefore[k];
         if (scopes.empty()) {
-          lays = runMakes[k];
+          making = runMakes[k];
           scopes.push_back(std::move(run));
-        } else if (runOpens[k] && lays) {
-          owed = false;
+        } else if (runOpens[k] && making) {
+          joining = false;
           scopes.push_back(std::move(run));
-        } else if (lays && !runMakes[k] && (owed || opening)) {
-          if (owed)
+        } else if (making && !runMakes[k] && (joining || opening)) {
+          if (joining)
             scopes.back().insert(scopes.back().end(), run.begin(), run.end());
           else
             scopes.push_back(std::move(run));
-          owed = true;
-        } else if (owed) {
-          owed = false;
-          lays = runMakes[k];
+          joining = true;
+        } else if (joining) {
+          joining = false;
+          making = runMakes[k];
           scopes.push_back(std::move(run));
-        } else if (lays && !runMakes[k] && !closing) {
-          // What follows the last creation is the caller's, owed outward.
+        } else if (making && !runMakes[k] && !closing) {
+          // What follows the last creation belongs to the caller.
           scopes.push_back(std::move(run));
         } else {
-          lays = lays || runMakes[k];
+          making = making || runMakes[k];
           scopes.back().insert(scopes.back().end(), run.begin(), run.end());
         }
       }
     } else {
-      // Each join is a scope boundary even when it opens no node. A close
-      // followed by a caller's write and flag must finish the child before
-      // owing those effects outward: combining all but the final run would
-      // let an adopting child of the same family claim the caller's write.
+      // Each join is a scope boundary even when it opens no node: a close
+      // followed by a caller's write and flag finishes the child first, so an
+      // adopting child cannot take the caller's write.
       scopes = std::move(raw);
     }
     const auto own = static_cast<std::uint32_t>(t.runs.size());

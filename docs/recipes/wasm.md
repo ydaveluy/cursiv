@@ -104,7 +104,7 @@ export function createHost({ memory }) {
     imports: {
       app: {
         read_byte(offset) {
-          return new Uint8Array(memory().buffer)[offset];
+          return new Uint8Array(memory().buffer)[offset >>> 0];
         },
       },
     },
@@ -114,12 +114,14 @@ export function createHost({ memory }) {
 ```
 
 Call `memory()` inside imported functions to obtain the current memory after
-any growth. The context also contains the WebAssembly `args` and the resolved
+any growth. Read an address as `offset >>> 0`: it arrives signed, negative past
+2 GiB. The context also contains the WebAssembly `args` and the resolved
 `runner` and `hostModule` paths. Application environment entries supplement the
 host environment; `PWD` always reflects the actual working directory.
 
-`instantiated(instance)` runs on each thread, once the module is instantiated and
-before any of its code runs. A host can use it to load more code into that instance.
+`instantiated(instance)` runs on each thread after the module's start function
+and before `_start` or the thread's entry point. A host can use it to load more
+code into that instance.
 
 `CURSIV_WASI_HOST_MODULE` selects the same module without a command-line flag.
 An explicit flag takes precedence. The selection reaches the command and its

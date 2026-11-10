@@ -41,7 +41,8 @@ misspelled keyword and an incomplete state declaration.
 `-d DIR` chooses where. The generator only shows how to turn a model into
 code: the validation does not check C++'s reserved words or name collisions,
 so a valid model can still give C++ that does not compile, for example an
-event named `delete`.
+event named `delete`. The program only follows transitions: it ignores the
+`commands` and the `actions` of each state, so it never runs a command.
 
 ## Read the implementation
 

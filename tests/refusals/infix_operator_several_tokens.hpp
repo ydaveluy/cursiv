@@ -1,4 +1,5 @@
-// An operator that is no token and no rule: the text it reads has no one value.
+// An operator that is an unordered group, neither one token nor a rule: the
+// text it reads has no single value.
 // expect LR LL: refused .infixOperatorNotText..*rule .Sum. names as an operator something other than one token or a rule that gives a value
 #pragma once
 

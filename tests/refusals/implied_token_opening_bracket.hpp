@@ -1,4 +1,5 @@
-// A bracket changes how the lines after it read: the text must spell it.
+// An implied opening bracket: a bracket changes how the lines after it read,
+// so the text must spell it.
 // expect LR LL: in .implied.tok, cond.., .tok. cannot be a bracket named by
 #pragma once
 

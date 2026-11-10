@@ -13,12 +13,10 @@
 
 namespace cursiv::engine {
 
-// Not constexpr on purpose: reached from a constant evaluation, its name is the
-// diagnostic.
 inline void malformed_cr_spec() { /* the call is the diagnostic */ }
 
-// The bytes of a spelling of ASCII characters, on its text rather than on its
-// `str` type: one body for every spelling instead of one instantiation each.
+// The bytes a spelling of ASCII characters names. It takes the text, not the
+// `str` type, so every spelling shares one instantiation.
 constexpr CharSet parse_charset(std::string_view Spec) {
   CharSet cs{};
   const ClassFault fault =
@@ -38,8 +36,8 @@ constexpr bool cp_ascii_of(std::string_view spec) {
 }
 
 // What a class is called, for a dump and a terminal's name: `\p{L|Nd}`,
-// `\p{^L}`, the spelled scalars appended. Measured and written by one body, so
-// the reserved length cannot drift from the text.
+// `\p{^L}`, the spelled scalars appended. One body both measures and writes,
+// so the reserved length matches the text.
 template <class Sink>
 constexpr void cp_name_emit(std::uint64_t props, bool complement,
                             std::string_view scalars, Sink sink) {

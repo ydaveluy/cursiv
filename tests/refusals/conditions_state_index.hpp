@@ -1,5 +1,5 @@
-// 16 distinct conditions of the gap guard 16 alternatives that all shift one
-// token: a state stands for each subset of them.
+// 16 distinct gap conditions guard 16 alternatives that all read `x`: the
+// parser needs a state for each subset of them.
 // expect LR: refused: the grammar is too large for the generated parser: it needs more than 65 535 parser states
 #pragma once
 

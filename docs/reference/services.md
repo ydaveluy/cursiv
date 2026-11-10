@@ -188,10 +188,12 @@ sees a new node of that class as `container`, with the node at the caret as its
 parent and its own members empty. It lasts only for the request, so do not keep
 it.
 
-Keywords are always offered, and at most 1000 names per answer: what the author
-types next asks again. A terminal offers nothing, whatever it reads. To offer a
+Keywords are always offered. Names stop once an answer holds 1000 items,
+keywords included: what the author types next asks again. A terminal offers nothing, whatever it reads. To offer a
 choice of words, write it as a data rule. A terminal with `as<V>` on each
-alternative is one.
+alternative is one. Where a [condition](grammar.md#conditions) reads the next
+token's text, a terminal such as `ID` is expected when the condition accepts
+one of a few sample words, such as `a`, `name`, `0` or `_`.
 
 ## Customize semantic tokens
 
@@ -250,7 +252,7 @@ from it. The server announces a delta only if every language does.
 
 ## Saves and notebooks
 
-To hear of saves, install a `documentSaveHandler` among the shared services.
+To learn of saves, install a `documentSaveHandler` among the shared services.
 Its `saveOptions()` says which notifications the client sends, and only those
 are announced:
 
@@ -355,6 +357,10 @@ shared services. Keep the returned object alive while you use them. See
 [Read the AST from a program](../learn/consume-the-ast.md) and
 [Several languages](../recipes/multiple-languages.md).
 
+A loaded language does not expose the structure of its rules: `grammarSource`
+gives the grammar's text, its rule names and each rule's text, and the syntax
+tree tells which rule, member and terminal each node reads.
+
 ## Document lifecycle
 
 A new or edited document is `Changed`. The `documentBuilder` moves it
@@ -381,7 +387,9 @@ not when a document it depends on changes, so read only the document itself and
 do not resolve references: the scopes of other documents may not be ready yet.
 The default `scopeProvider` then looks for a reference's candidates from the
 nearest enclosing container outward, then in the global index. The linker and
-completion both use these candidates.
+completion both use these candidates. A reference with none is reported with
+the message of the linker's `createLinkingError`: override it to reword the
+message, as in [Reword the framework's errors](../recipes/validation.md#reword-the-frameworks-errors).
 
 ## Advanced: add a service
 

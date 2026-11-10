@@ -1,8 +1,3 @@
-// What the caret reads off the engine: a keyword the author gave a name of its
-// own, the arm a cell decided past the caret did not keep, the state a repair
-// left standing behind an unclosed construct, and what the site lets a
-// reference hold. One grammar, because every answer comes from the same read.
-
 #include "lsp/completion/CaretLane.hpp"
 
 #include <lsp/types.h>
@@ -35,18 +30,17 @@ using support::offers;
 struct World : support::World<cursiv::SharedLspServices> {
   cursiv::LspServices* lang;
 
-  explicit World(const CaretDoor& door)
+  explicit World(const CaretEngine& engine)
       : lang(&support::add_language<cursiv::LspServices>(
-            shared, {"caret", {".caret"}, {}}, door.parser(),
-            door.reflection(), support::offer_every_keyword)) {
+            shared, {"caret", {".caret"}, {}}, engine.parser(),
+            engine.reflection(), support::offer_every_keyword)) {
     support::take_both_ranges(shared);
   }
 };
 
-// `KW_END` is `kw<"end">` behind a `terminal<>` of its own, which is what the
-// grammar carries: naming it does not stop it spelling its bytes.
-void a_named_keyword_is_offered_by_its_bytes(const CaretDoor& door) {
-  const World world(door);
+// `KW_END` is a terminal that holds `kw<"end">`.
+void a_named_keyword_is_offered_by_its_bytes(const CaretEngine& engine) {
+  const World world(engine);
   offered(*world.lang, "fn f() { e<|> }", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "end"));
     CHECK(!offers(list, "KW_END"));
@@ -54,11 +48,8 @@ void a_named_keyword_is_offered_by_its_bytes(const CaretDoor& door) {
   });
 }
 
-// A terminal answers to what it SPELLS, never to what its author called it:
-// the scan's probe compares the text, and `KW_END` is a name that means
-// nothing to a document.
-void a_terminal_does_not_answer_to_its_own_name(const CaretDoor& door) {
-  const std::unique_ptr<cursiv::Parser> parser = door.parser();
+void a_terminal_does_not_answer_to_its_own_name(const CaretEngine& engine) {
+  const std::unique_ptr<cursiv::Parser> parser = engine.parser();
   const auto takes = [&](std::string_view text) {
     const cursiv::ParseResult r = parser->parse(text);
     return r.cst().accepted() && !r.cst().recovered();
@@ -68,11 +59,11 @@ void a_terminal_does_not_answer_to_its_own_name(const CaretDoor& door) {
   CHECK(!takes("fn f() { end; IKW_LET; }"));
 }
 
-// ...and it wins its ties the same way, whichever side declared first: `end`
-// and `let` both stand against an `ID` declared before them.
+// `ID` is declared before `KW_END` and `IKW_LET`: the order does not decide
+// the tie.
 void a_named_literal_beats_a_named_terminal_at_equal_length(
-    const CaretDoor& door) {
-  const std::unique_ptr<cursiv::Parser> parser = door.parser();
+    const CaretEngine& engine) {
+  const std::unique_ptr<cursiv::Parser> parser = engine.parser();
   const cursiv::ParseResult r = parser->parse("fn f() { end; let; }");
   CHECK(r.cst().accepted() && !r.cst().recovered());
   auto* const file = r.value_as<ast::File>();
@@ -85,10 +76,10 @@ void a_named_literal_beats_a_named_terminal_at_equal_length(
   CHECK(cursiv::ast_cast<ast::IKwWord>(block->stmts[1]) != nullptr);
 }
 
-// After `@ ~` the engine has reduced one of two readings, elected on the token
-// that follows; a caret sits before that token, so both arms are still open.
-void a_k2_cell_offers_both_arms(const CaretDoor& door) {
-  const World world(door);
+// After `@~`, `DeclR` and `UseR` differ only on the next token, where the caret
+// is: both are offered.
+void a_two_token_cell_offers_both_arms(const CaretEngine& engine) {
+  const World world(engine);
   offered(*world.lang, "fn f() { @~<|>!; }",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "!"));
@@ -96,11 +87,10 @@ void a_k2_cell_offers_both_arms(const CaretDoor& door) {
           });
 }
 
-// `see` binds an `Alpha` and nothing else, though `Link::to` accepts every
-// `Sym`: at the caret the reference is not written yet, so the narrowing can
-// only come from the grammar's site.
-void a_narrowed_site_offers_its_subtype_alone(const CaretDoor& door) {
-  const World world(door);
+// `see` takes only an `Alpha`, though `Link::to` accepts any `Sym`: the
+// reference is not written yet, so only the grammar can narrow it.
+void a_narrowed_site_offers_its_subtype_alone(const CaretEngine& engine) {
+  const World world(engine);
   offered(*world.lang, "fn f() { alpha a; beta b; see <|> }",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "a"));
@@ -108,11 +98,11 @@ void a_narrowed_site_offers_its_subtype_alone(const CaretDoor& door) {
           });
 }
 
-// Two classes spell `to`, so the member name settles nothing: the class the
-// site writes in is what picks the reference, and the record is not open yet
-// at a caret standing in front of it.
-void a_member_two_classes_spell_answers_for_its_own_site(const CaretDoor& door) {
-  const World world(door);
+// `Link` and `Bond` both have a `to` member: the class the rule writes decides
+// the reference, here `Bond::to`, which takes a `Beta`.
+void a_member_two_classes_spell_answers_for_its_own_site(
+    const CaretEngine& engine) {
+  const World world(engine);
   offered(*world.lang, "fn f() { alpha a; beta b; tie <|> }",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "b"));
@@ -121,8 +111,8 @@ void a_member_two_classes_spell_answers_for_its_own_site(const CaretDoor& door) 
 }
 
 void a_new_reference_uses_its_own_type_before_an_ancestors(
-    const CaretDoor& door) {
-  const World world(door);
+    const CaretEngine& engine) {
+  const World world(engine);
   offered(*world.lang, "fn f() { alpha a; beta b; nest a { tie <|> } }",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "b"));
@@ -130,11 +120,9 @@ void a_new_reference_uses_its_own_type_before_an_ancestors(
           });
 }
 
-// The same member at a site that narrows nothing: what the member accepts is
-// what stands there, and nothing is thinned.
 void a_site_that_narrows_nothing_offers_the_whole_member(
-    const CaretDoor& door) {
-  const World world(door);
+    const CaretEngine& engine) {
+  const World world(engine);
   offered(*world.lang, "fn f() { alpha a; beta b; any <|> }",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "a"));
@@ -142,10 +130,9 @@ void a_site_that_narrows_nothing_offers_the_whole_member(
           });
 }
 
-// A site that writes nothing offers no name, though the terminal writes a
-// reference where it opens another rule.
-void a_bare_terminal_offers_no_reference(const CaretDoor& door) {
-  const World world(door);
+// `TICK` writes a reference in `TickR`, but after `bare` it writes nothing.
+void a_bare_terminal_offers_no_reference(const CaretEngine& engine) {
+  const World world(engine);
   offered(*world.lang, "fn f() { alpha a; beta b; bare <|> }",
           [](const lsp::CompletionList& list) {
             CHECK(!offers(list, "a"));
@@ -153,10 +140,10 @@ void a_bare_terminal_offers_no_reference(const CaretDoor& door) {
           });
 }
 
-// The levels of a data rule around the caret each read what the one inside read
-// already: their depth costs what the depth does.
-void a_deep_data_rule_costs_its_depth(const CaretDoor& door) {
-  const World world(door);
+// 40 000 nested levels of a data rule around the caret: completion time must
+// stay linear in the depth.
+void a_deep_data_rule_costs_its_depth(const CaretEngine& engine) {
+  const World world(engine);
   const std::size_t depth = 40000;
   const std::string text = "fn f() { alpha a; deep " +
                            std::string(depth, '[') + "<|>x" +
@@ -168,8 +155,8 @@ void a_deep_data_rule_costs_its_depth(const CaretDoor& door) {
   CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(8));
 }
 
-// The member a completion would fill, which no `CompletionList` carries: it
-// is read off the engine beside the terminal, at the end of what is written.
+// The member the token `spelling` would fill at the end of `text`; a
+// `CompletionList` does not carry it.
 [[nodiscard]] std::string_view member(const World& world, std::string_view text,
                                       std::string_view spelling) {
   const cursiv::Parser& parser = *world.lang->parser;
@@ -186,7 +173,7 @@ void a_deep_data_rule_costs_its_depth(const CaretDoor& door) {
   return "<absent>";
 }
 
-// The members an identifier fills at the end of what is written, sorted.
+// The members an `ID` would fill at the end of `text`, sorted.
 [[nodiscard]] std::vector<std::string_view> identifier_members(
     const World& world, std::string_view text) {
   const cursiv::Parser& parser = *world.lang->parser;
@@ -203,10 +190,10 @@ void a_deep_data_rule_costs_its_depth(const CaretDoor& door) {
   return members;
 }
 
-// A token two readings take, each filling its own member: both are named, and
-// each member's own targets are offered, however the token reaches the member.
-void readings_of_one_token_each_name_their_member(const CaretDoor& door) {
-  const World world(door);
+// After `either`, `dotted` or `opens`, the next `ID` may fill `alpha` or
+// `beta`: completion offers the targets of both.
+void readings_of_one_token_each_name_their_member(const CaretEngine& engine) {
+  const World world(engine);
   const std::vector<std::string_view> both{"alpha", "beta"};
   for (const std::string_view head : {"either", "dotted", "opens"}) {
     const std::string text =
@@ -219,10 +206,10 @@ void readings_of_one_token_each_name_their_member(const CaretDoor& door) {
   }
 }
 
-// The rules of a choice share a prefix, and only then part into a member each,
-// behind data rules: both members are read at the caret past the prefix.
-void rules_sharing_a_prefix_each_name_their_member(const CaretDoor& door) {
-  const World world(door);
+// `ModelR` and `AssemblyR` share the prefix `x :`, then each fill their own
+// member through data rules.
+void rules_sharing_a_prefix_each_name_their_member(const CaretEngine& engine) {
+  const World world(engine);
   const std::string text = "fn f() { alpha a; beta b; child x : ";
   CHECK(identifier_members(world, text) ==
         (std::vector<std::string_view>{"alpha", "beta"}));
@@ -232,9 +219,9 @@ void rules_sharing_a_prefix_each_name_their_member(const CaretDoor& door) {
   });
 }
 
-// A reading that fills nothing takes nothing from one that fills a member.
-void a_reading_naming_nothing_leaves_the_member(const CaretDoor& door) {
-  const World world(door);
+// After `maybe`, one branch writes `alpha` and the other writes nothing.
+void a_reading_naming_nothing_leaves_the_member(const CaretEngine& engine) {
+  const World world(engine);
   const std::string text = "fn f() { alpha a; beta b; maybe ";
   CHECK(identifier_members(world, text) ==
         std::vector<std::string_view>{"alpha"});
@@ -244,40 +231,37 @@ void a_reading_naming_nothing_leaves_the_member(const CaretDoor& door) {
   });
 }
 
-// A member filled by a whole rule that lays a record of its own: the write
-// cannot ride onto the callee, and reading the call site instead names the
-// member of whatever encloses it -- `stmts`, which `box` does not fill.
-void a_member_written_by_a_record_of_its_own_is_named(const CaretDoor& door) {
-  const World world(door);
+// `box` starts `BoxR`, which `HoldR` assigns whole to `inner`: the member is
+// `inner`, not the enclosing `stmts`.
+void a_member_written_by_a_record_of_its_own_is_named(
+    const CaretEngine& engine) {
+  const World world(engine);
   CHECK(member(world, "fn f() { ", "box") == "inner");
   CHECK(member(world, "fn f() { ", "end") == "stmts");
 }
 
-// A rule reached through a chain of renames is entered at the call that names
-// it, not at one that only reaches it: `fn` is appended to `fns`, whatever the
-// repetition above it was entered through.
+// `FnR` is appended to `fns` by the call that names it, whatever rules lead to
+// that call.
 void the_call_that_names_a_rule_wins_over_one_that_reaches_it(
-    const CaretDoor& door) {
-  const World world(door);
+    const CaretEngine& engine) {
+  const World world(engine);
   CHECK(member(world, "", "fn") == "fns");
 }
 
-// Past the token that opens a rule the record is already laid, and what
-// follows fills nothing more: `)` closes a call, it does not append an
-// argument to it.
-void a_token_inside_a_rule_names_no_member(const CaretDoor& door) {
-  const World world(door);
+// Inside a rule already started, a token that is not a member fills nothing:
+// `)` closes a call, it does not append an argument.
+void a_token_inside_a_rule_names_no_member(const CaretEngine& engine) {
+  const World world(engine);
   CHECK(member(world, "fn f() { f(", "end") == "args");
   CHECK(member(world, "fn f() { f(", ")").empty());
   CHECK(member(world, "fn f() { ", "}").empty());
 }
 
-// Two constructs open at once is where the entry root collapses onto a record
-// the repair invented: the caret must still answer from the last token read,
-// not from the state that opens the file.
+// With two constructs left open, completion answers from the last token read,
+// not from the start of the file.
 void a_caret_under_nested_open_constructs_keeps_its_state(
-    const CaretDoor& door) {
-  const World world(door);
+    const CaretEngine& engine) {
+  const World world(engine);
   offered(*world.lang, "fn add(<|>", [](const lsp::CompletionList& list) {
     CHECK(offers(list, ")"));
     CHECK(!offers(list, "fn"));
@@ -288,10 +272,10 @@ void a_caret_under_nested_open_constructs_keeps_its_state(
   });
 }
 
-// A name reaching past ASCII is one token to the lexer, and an item replaces
-// it whole: the anchor is the leaf, not a byte class stopping at `Ü`.
-void a_name_outside_ascii_is_replaced_whole(const CaretDoor& door) {
-  const World world(door);
+// A non-ASCII name is one token: the completion edit replaces it whole, not
+// only up to `Ü`.
+void a_name_outside_ascii_is_replaced_whole(const CaretEngine& engine) {
+  const World world(engine);
   offered(*world.lang,
           "fn f() { alpha \xC3\x9C"
           "ber; see \xC3\x9C"
@@ -316,23 +300,23 @@ void a_name_outside_ascii_is_replaced_whole(const CaretDoor& door) {
 
 }  // namespace
 
-void run_caret_lane(const CaretDoor& door) {
-  a_new_reference_uses_its_own_type_before_an_ancestors(door);
-  a_name_outside_ascii_is_replaced_whole(door);
-  a_named_keyword_is_offered_by_its_bytes(door);
-  a_terminal_does_not_answer_to_its_own_name(door);
-  a_named_literal_beats_a_named_terminal_at_equal_length(door);
-  a_k2_cell_offers_both_arms(door);
-  a_narrowed_site_offers_its_subtype_alone(door);
-  a_member_two_classes_spell_answers_for_its_own_site(door);
-  a_site_that_narrows_nothing_offers_the_whole_member(door);
-  a_bare_terminal_offers_no_reference(door);
-  a_deep_data_rule_costs_its_depth(door);
-  a_caret_under_nested_open_constructs_keeps_its_state(door);
-  a_member_written_by_a_record_of_its_own_is_named(door);
-  the_call_that_names_a_rule_wins_over_one_that_reaches_it(door);
-  a_token_inside_a_rule_names_no_member(door);
-  readings_of_one_token_each_name_their_member(door);
-  rules_sharing_a_prefix_each_name_their_member(door);
-  a_reading_naming_nothing_leaves_the_member(door);
+void run_caret_lane(const CaretEngine& engine) {
+  a_new_reference_uses_its_own_type_before_an_ancestors(engine);
+  a_name_outside_ascii_is_replaced_whole(engine);
+  a_named_keyword_is_offered_by_its_bytes(engine);
+  a_terminal_does_not_answer_to_its_own_name(engine);
+  a_named_literal_beats_a_named_terminal_at_equal_length(engine);
+  a_two_token_cell_offers_both_arms(engine);
+  a_narrowed_site_offers_its_subtype_alone(engine);
+  a_member_two_classes_spell_answers_for_its_own_site(engine);
+  a_site_that_narrows_nothing_offers_the_whole_member(engine);
+  a_bare_terminal_offers_no_reference(engine);
+  a_deep_data_rule_costs_its_depth(engine);
+  a_caret_under_nested_open_constructs_keeps_its_state(engine);
+  a_member_written_by_a_record_of_its_own_is_named(engine);
+  the_call_that_names_a_rule_wins_over_one_that_reaches_it(engine);
+  a_token_inside_a_rule_names_no_member(engine);
+  readings_of_one_token_each_name_their_member(engine);
+  rules_sharing_a_prefix_each_name_their_member(engine);
+  a_reading_naming_nothing_leaves_the_member(engine);
 }

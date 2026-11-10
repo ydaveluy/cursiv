@@ -14,7 +14,7 @@ namespace cursiv::engine {
 struct LrFusedRow {
   // The creation the record holds.
   ElementId node = kNoElement;
-  // The row that closes over it -- a directive, or a rule's own row.
+  // The row that closes over it: a directive, or a rule's own row.
   ElementId site = kNoElement;
 };
 

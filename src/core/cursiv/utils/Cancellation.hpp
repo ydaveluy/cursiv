@@ -3,8 +3,8 @@
 #include <stdexcept>
 #include <stop_token>
 
-// Cooperative cancellation, as the standard already spells it: a long build
-// polls the token it was handed and gives up where it stands.
+// Cooperative cancellation with `std::stop_token`: a long build polls its token
+// and stops where it is.
 
 namespace cursiv {
 

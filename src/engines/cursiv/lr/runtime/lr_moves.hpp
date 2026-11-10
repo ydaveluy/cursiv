@@ -1,6 +1,6 @@
 // The tape and stack moves the emitted parser calls, shared by every grammar
 // in the program: nothing here names a table but the stamp layout, which the
-// emitted parser spells only where its table narrowed the row.
+// emitted parser names only where its table narrowed the row.
 #pragma once
 
 #include <cstdint>
@@ -61,7 +61,7 @@ CURSIV_ALWAYS_INLINE inline void lr_push_leaf(LrContext& c,
 }
 
 // Whether `word`'s record still ends the derivation: past it stands only what
-// owes the tree nothing -- trivia, and recovered regions holding no chain.
+// writes nothing to the tree: trivia, and recovered regions holding no chain.
 template <StampLayout L = StampLayout{}>
 CURSIV_NOINLINE inline bool lr_last_real_word(const LrContext& c,
                                               std::uint32_t word) {
@@ -83,13 +83,13 @@ CURSIV_NOINLINE inline bool lr_last_real_word(const LrContext& c,
 }
 
 // Where the record is a creation, the directive does not replace it: `folds`
-// names the row the table minted for both, or `kNoElement`.
+// names the row the table created for both, or `kNoElement`.
 template <StampLayout L = StampLayout{}, class Folds>
 CURSIV_ALWAYS_INLINE inline void lr_name_row(LrContext& c, LrFrame& f,
                                              ElementId site, Folds folds) {
   if (f.word == kLrNoWord) return;  // the symbol wrote no record of its own
   ElementId row = site;
-  // What the record now states stays on the frame: the next site folds onto
+  // What the record states stays on the frame: the next site folds onto
   // it rather than renaming it away.
   if (f.row != kNoElement) {
     const ElementId one = folds(f.row, site);

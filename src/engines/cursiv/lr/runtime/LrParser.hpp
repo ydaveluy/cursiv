@@ -8,11 +8,6 @@
 #include <type_traits>
 
 #include "cursiv/grammar/ElementId.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstBuilder.hpp"
-#include "cursiv/syntax-tree/CstNode.hpp"
-#include "cursiv/syntax-tree/CstRun.hpp"
-#include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/LrDrive.hpp"
 #include "cursiv/lr/runtime/LrExit.hpp"
@@ -20,23 +15,28 @@
 #include "cursiv/lr/runtime/LrGss.hpp"
 #include "cursiv/lr/runtime/LrGssGraph.hpp"
 #include "cursiv/lr/runtime/LrParseStats.hpp"
-#include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/lr/runtime/LrSearch.hpp"
 #include "cursiv/lr/runtime/LrStack.hpp"
 #include "cursiv/lr/runtime/lr_lookahead.hpp"
-#include "cursiv/lr/runtime/lr_roof.hpp"
 #include "cursiv/lr/runtime/lr_search.hpp"
 #include "cursiv/lr/runtime/lr_states.hpp"
+#include "cursiv/lr/runtime/lr_wrap_root.hpp"
 #include "cursiv/shared/runtime/LexSuffixSession.hpp"
+#include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/syntax-tree/CstRun.hpp"
+#include "cursiv/utils/Cancellation.hpp"
 
 namespace cursiv::engine {
 
 template <const auto& A>
 struct LrParser {
   // A leaf carries the state that shifted it in the record's own stamp, laid
-  // out as the table says. The bound is asked here, at the door every caller
-  // comes through: past it a state would truncate in silence.
+  // out as the table says. The bound is checked here, at the entry every
+  // caller goes through: past it a state would truncate in silence.
   static_assert(std::bit_width(A.nstates - 1u) <= A.stamp.state_bits(),
                 "cursiv: this table's stamp layout cannot name its states");
 
@@ -46,7 +46,7 @@ struct LrParser {
                 "cursiv: this grammar reads more candidates at one position "
                 "than a parse holds room for");
 
-  // A bound row is laid in one bit order and read back in the pooled set's:
+  // A bound row is stored in one bit order and read back in the pooled set's:
   // the winner's entry is where the two are proved equal, and a repair asking
   // after one terminal's guard is otherwise handed another's.
   static_assert(
@@ -61,7 +61,7 @@ struct LrParser {
       "cursiv: this table's per-acceptance bounds are not in the order their "
       "reader indexes them by");
 
-  // The verdict, and the tree: `accepted` means the start production reduced
+  // The result, and the tree: `accepted` means the start production reduced
   // over the whole document. `budget` is what its repairs may spend. A stop
   // is observed at cold boundaries and leaves the caller's tree empty.
   bool parse(std::string_view text, Cst& cst, LrParseStats* stats,
@@ -96,16 +96,16 @@ struct LrParser {
     // builder.
     for (RepairNote& note : c.notes)
       builder.note_repair(note.kind, note.element, note.begin, note.end,
-                          std::move(note.also));
+                          std::move(note.also), note.mixedIndent);
     // The stream states its own count, which is what every reader indexes by.
     builder.bind_stream();
     // A reading no repair could finish names no entry. The root is the
-    // last visible record -- a comment after the last token sits on the
+    // last visible record: a comment after the last token sits on the
     // stream behind it.
     CstRun& stream = builder.stream();
     NodeId root = accepted ? last_visible(stream) : kNoNode;
     if (root != kNoNode)
-      root = lr_roof_forest<A.stamp>(stream, root, A.cfg.entryRow);
+      root = lr_wrap_root<A.stamp>(stream, root, A.cfg.entryRow);
     if (root == kNoNode)
       builder.bind_entry(0, 0, kNoNode);
     else
@@ -135,10 +135,9 @@ struct LrParser {
   }
 
  private:
-  // The last record of the derivation: a comment after the last token sits
-  // behind the root, and so does a skip region a repair filed there --
-  // skipped text names no chain, so neither can be the entry. Asked once,
-  // at the bind.
+  // The last record of the derivation: a comment after the last token, or a
+  // skip region a repair filed there, sits behind the root and cannot be the
+  // entry. Asked once, at the bind.
   static NodeId last_visible(const CstRun& stream) {
     for (NodeCount i = stream.records(); i-- > 0;) {
       const CstNode& r = stream.at(i);
@@ -154,13 +153,13 @@ struct LrParser {
   // Only the `resolveAt` and `candAt` hooks that `install_hooks` sets can
   // split a parse, so a table without either never needs the graph.
   static constexpr bool kSplits = A.nconflicts != 0 || A.multiCand;
-  // The same condition lays the goto classes that those hooks read.
+  // The same condition builds the goto classes that those hooks read.
   static_assert(A.cold.gotoClass.size() == (kSplits ? A.nstates : 0u),
                 "cursiv: this table's goto classes do not follow its splits");
   struct NoGraph {};
 
-  // The drive reads until it accepts, fails, freezes on a token -- which a
-  // search repairs -- or stops on what the look-ahead left open, which the
+  // The drive reads until it accepts, fails, freezes on a token (which a
+  // search repairs), or stops on what the look-ahead left open, which the
   // graph reads; both go back to the drive.
   static LrExit run(LrContext& c) {
     // One graph for the whole parse: its buffers outlive each read.

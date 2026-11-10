@@ -1,9 +1,8 @@
 #pragma once
 
 // Where a reading commits and where a token ends, each shape behind its own
-// opening keyword in one grammar: no rule is shared, so each case reads as its
-// grammar alone does. The regions open on a mark their text follows with no
-// gap, as a document's first token has none.
+// opening keyword in one grammar, so each case reads as its grammar alone does.
+// The regions open on a mark their text follows with no gap.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -46,7 +45,7 @@ struct G : cursiv::GrammarSpec {
 };
 }  // namespace small
 
-namespace landing {
+namespace emptygoto {
 struct E : cursiv::Extends<cursiv::AstNode> {};
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   E* e = nullptr;
@@ -61,12 +60,12 @@ struct G : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-}  // namespace landing
+}  // namespace emptygoto
 
 // Both empty reductions share one generated table, split into small groups.
 struct G : small::G {
   struct Case
-      : rule<ref<small::G::Root> | (kw<"landing"> + ref<landing::G::Root>) |
+      : rule<ref<small::G::Root> | (kw<"emptygoto"> + ref<emptygoto::G::Root>) |
              ref<tguardedchoice::Named::Root>> {};
   using entry = Case;
 };
@@ -104,8 +103,8 @@ struct G : cursiv::GrammarSpec {
 
 }  // namespace tfallback
 
-// A cell no bounded look-ahead settles keeps both readings.
-namespace tunsettled {
+// A cell no bounded look-ahead resolves keeps both readings.
+namespace tunresolved {
 
 namespace ast {
 struct P0 : cursiv::Extends<cursiv::AstNode> {};
@@ -133,7 +132,7 @@ struct G : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-}  // namespace tunsettled
+}  // namespace tunresolved
 
 // Completion returns through an unrecorded caller and a repaired token.
 namespace tpeekcaret {
@@ -152,12 +151,12 @@ struct Splice : cursiv::GrammarSpec {
   // One `&` reduced by a rule in one arm and shifted in the other: past the
   // `=`, each arm reads `-` in its own mode, and only one of them reads `->`.
   struct Lead : rule<lit<"&">> {};
-  // One `%` two rules reduce, told apart by the token behind it: the state
+  // Two rules reduce the same `%` and differ by the token after it: the state
   // that reduces it reads `->`, the one that shifts the `-` after it does not.
   struct ByDash : rule<lit<"%">> {};
   struct ByArrow : rule<lit<"%">> {};
-  // A condition reads the tokens after its own on its own: a run of `~` the
-  // arms read one at a time is one token to the conditions.
+  // A condition lexes the text after it by itself: a run of `~` that the arms
+  // read one at a time is one `Tildes` token to the condition.
   struct Tildes : terminal<some(lit<"~">)> {};
   struct Root
       : rule<create<Doc>(
@@ -277,10 +276,9 @@ struct G : tedges::Words {
 
 }  // namespace tregion
 
-// A literal's guard is the literal's own: one alternative of a terminal ends
-// on the word class while its sibling ends on nothing, a guard spelled inside
-// a body holds right after its bytes, and a guard on a repetition is read at
-// every position of the run it closes.
+// A literal's guard is its own: one alternative of a terminal ends on the word
+// class while its sibling ends on nothing, a guard inside a body holds right
+// after its bytes, and a guard on a repetition is read at every position.
 namespace tguardalt {
 
 namespace ast {
@@ -311,7 +309,7 @@ struct G : tedges::Words {
 
 // Two terminals match the same byte, and what tells them apart lies past a
 // repetition nothing bounds: no budget reaches it. A position no look-ahead
-// settles is split, never guessed.
+// resolves is split, never guessed.
 namespace tlexsplit {
 
 namespace ast {
@@ -328,14 +326,33 @@ struct G : tedges::Words {
 
 }  // namespace tlexsplit
 
+// A section a word closes: the closer's first byte is one a keyword ending
+// right before it may not be followed by, in the host's text.
+namespace tclosedword {
+struct Node : cursiv::Extends<cursiv::AstNode> {};
+struct Host : cursiv::Extends<cursiv::AstNode> {
+  Node* inner = nullptr;
+};
+struct Inner : tedges::Words {
+  struct Root : rule<create<Node>(kw<"abc"> + eof)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+struct G : tedges::Words {
+  struct Root : rule<create<Host>(assign<&Host::inner>(
+                    section<Inner>(lit<"<">, kw<"end">)))> {};
+};
+}  // namespace tclosedword
+
 namespace tedges {
 struct G : Words {
   struct Case
       : rule<(kw<"commit"> + ref<tcommit::G::Root>) |
+             (lit<"closed:"> + ref<tclosedword::G::Root>) |
              (lit<"region:"> + ref<tregion::G::Root>) |
              (kw<"guard"> + ref<tguardalt::G::Root>) |
              (kw<"split"> + ref<tlexsplit::G::Root>) |
-             (lit<"cell:"> + ref<tunsettled::G::Root>) |
+             (lit<"cell:"> + ref<tunresolved::G::Root>) |
              (lit<"fallback:"> + ref<tfallback::G::Root>) |
              (lit<"groups:"> + ref<tgroupguard::G::Case>) |
              (lit<"splice:"> + ref<tpeekcaret::Splice::Root>) |

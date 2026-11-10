@@ -1,6 +1,6 @@
 // A name refusing words another terminal reads with a frontier of its own,
 // ranked below the name: what stands where the word refuses the name turns on
-// the byte behind the word, which the rival's own frontier answers.
+// the byte behind the word, which the competitor's own frontier answers.
 #pragma once
 
 #include "cursiv/grammar/GrammarSpec.hpp"
@@ -44,9 +44,9 @@ struct Wide : cursiv::GrammarSpec {
   static constexpr auto word_boundary = cr<R"(a-zA-Z0-9_\u{80}-\u{10FFFF})">;
 };
 
-// Rivals whose frontiers refuse the very bytes behind a refused word: inside
-// the words, the letter one of them goes on with; past a word, a byte its
-// boundary leaves out.
+// Competitors whose frontiers refuse the very bytes behind a refused word:
+// inside the words, the letter one of them goes on with; past a word, a byte
+// its boundary leaves out.
 struct Frontier : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct NAME : terminal<!(kw<"do"> | kw<"di">) + cr<"a-z"> + many(w)> {};
@@ -64,7 +64,7 @@ struct Frontier : cursiv::GrammarSpec {
   static constexpr auto word_boundary = cr<"a-zA-Z0-9_$">;
 };
 
-// Two rivals inside the word, apart only before a byte that does not go on
+// Two competitors inside the word, apart only before a byte that does not go on
 // with it: there the word is never spelled.
 struct Aside : Frontier {
   struct NAME : terminal<!kw<"do"> + cr<"a-z"> + many(w)> {};

@@ -1,12 +1,24 @@
 #include "cursiv/shared/gen/CommonArtifacts.hpp"
 
 #include <cstddef>
+#include <cstdio>
+#include <deque>
+#include <filesystem>
+#include <fstream>
+#include <ios>
+#include <iterator>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
 
 #include "cursiv/shared/gen/AstEmitter.hpp"
 #include "cursiv/shared/gen/CLiteral.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitRecords.hpp"
 #include "cursiv/shared/gen/EmitTable.hpp"
+#include "cursiv/shared/gen/TextMateKeywords.hpp"
 #include "cursiv/shared/gen/write_source.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 
@@ -170,31 +182,58 @@ void install_generated_module(::cursiv::CoreServices& services) {
 
 GenCode write_common_artifacts(const std::string& dir,
                                const CommonArtifacts& what) {
-  const auto put = [&](const char* file, const std::string& text) {
-    return write_source(dir + "/" + file, text);
+  // Every text is built before any file is written.
+  std::deque<std::string> made;
+  std::vector<SourceFile> files;
+  std::vector<GenCode> codes;
+  const auto put = [&](std::string path, std::string_view text, GenCode code) {
+    files.push_back({std::move(path), text});
+    codes.push_back(code);
   };
-  if (!put("Table.hpp", what.table)) return GenCode::table;
-  if (!put("Parser.hpp", what.parser)) return GenCode::parser;
+  const auto at = [&](std::string_view file) { return concat(dir, "/", file); };
+  const auto make = [&](std::string_view file, std::string text, GenCode code) {
+    put(at(file), made.emplace_back(std::move(text)), code);
+  };
+  put(at("Table.hpp"), what.table, GenCode::table);
+  put(at("Parser.hpp"), what.parser, GenCode::parser);
   for (const auto& [file, text] : what.parserUnits)
-    if (!put(file.c_str(), text)) return GenCode::parserFiles;
-  const std::string wrapped = dump_wrapped(what.dump.text);
-  if (!put("GrammarSource.hpp",
-           emit_grammar_source(what.ns, what.dump, wrapped)) ||
-      !put("GRAMMAR.txt", wrapped))
-    return GenCode::grammarText;
-  if (!put("AstReflection.hpp", emit_ast_decl(what.ns)) ||
-      !put("AstReflection.cpp",
-           emit_ast(what.registry, what.entries, what.ns, what.header)))
-    return GenCode::ast;
-  if (!put("Grammar.hpp", emit_records_decl(what.ns)) ||
-      !put("Grammar.cpp",
-           emit_records(what.ns, what.terminals, what.records)))
-    return GenCode::records;
-  if (!put("Module.hpp", emit_module_decl(what.ns, what.lang)) ||
-      !put("Module.cpp", emit_module(what.ns, what.lang, what.parserHeader,
-                                     what.parserClass)))
-    return GenCode::module;
-  return GenCode::ok;
+    put(at(file), text, GenCode::parserFiles);
+  const std::string& wrapped = made.emplace_back(dump_wrapped(what.dump.text));
+  make("GrammarSource.hpp", emit_grammar_source(what.ns, what.dump, wrapped),
+       GenCode::grammarText);
+  put(at("GRAMMAR.txt"), wrapped, GenCode::grammarText);
+  make("AstReflection.hpp", emit_ast_decl(what.ns), GenCode::ast);
+  make("AstReflection.cpp",
+       emit_ast(what.registry, what.entries, what.ns, what.header),
+       GenCode::ast);
+  make("Grammar.hpp", emit_records_decl(what.ns), GenCode::records);
+  make("Grammar.cpp", emit_records(what.ns, what.terminals, what.records),
+       GenCode::records);
+  make("Module.hpp", emit_module_decl(what.ns, what.lang), GenCode::module);
+  make("Module.cpp",
+       emit_module(what.ns, what.lang, what.parserHeader, what.parserClass),
+       GenCode::module);
+  const std::filesystem::path textmate(what.textmate);
+  if (std::error_code missing;
+      !what.textmate.empty() && std::filesystem::exists(textmate, missing)) {
+    std::ifstream in(textmate, std::ios::binary);
+    const std::string json{std::istreambuf_iterator<char>(in), {}};
+    std::optional<std::string> edited;
+    if (in.is_open() && !in.bad())
+      edited = with_keyword_match(json, textmate_keyword_match(what.keywords));
+    if (!edited) {
+      std::fprintf(stderr,
+                   "%s: cannot write the keywords into %.*s, which must "
+                   "be JSON with a string at repository.keywords.match\n",
+                   what.lang.id.c_str(), static_cast<int>(what.textmate.size()),
+                   what.textmate.data());
+      return GenCode::textmate;
+    }
+    put(std::string(what.textmate), made.emplace_back(std::move(*edited)),
+        GenCode::textmate);
+  }
+  const std::size_t failed = write_sources(files);
+  return failed == files.size() ? GenCode::ok : codes[failed];
 }
 
 }  // namespace cursiv::engine

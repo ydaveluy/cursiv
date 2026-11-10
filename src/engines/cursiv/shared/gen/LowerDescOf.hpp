@@ -1,7 +1,5 @@
-// What a lowering reads of a grammar, as constant descriptors: the stage each
-// rule is read through, the actions it publishes, the symbols in the order they
-// are numbered. A view names the grammar and the rewrite its engine reads the
-// rules through.
+// What a lowering reads of a grammar, as constant descriptors: each rule's
+// stage, the actions it publishes, and the symbols in numbering order.
 #pragma once
 
 #include <cstdint>

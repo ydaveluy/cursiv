@@ -1,9 +1,8 @@
 #pragma once
 
-// Two cells no look-ahead can settle, one inside the other: a document needs
-// the product of their arms as readings at once. Two shapes, because the
-// contract is that a nest of undecidable cells still yields the one tree --
-// the narrow one and the widest the lane drives.
+// Two cells no look-ahead can resolve, one inside the other: a document needs
+// the product of their arms as readings at once. The nest still yields one
+// tree, in a narrow shape and in the widest the lane drives.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

@@ -36,9 +36,8 @@ inline constexpr std::array<std::string_view, 10> kSemanticTokenModifiers = {
     "definition", "deprecated", "documentation", "modification",
     "readonly",   "static"};
 
-// One coloured span of the document's text: `type` indexes the provider's
-// `tokenTypes()`, and `modifiers` holds one bit per index of its
-// `tokenModifiers()`.
+// One coloured span: `type` indexes `tokenTypes()`, and `modifiers` holds one
+// bit per index of `tokenModifiers()`, for the first 31 only.
 struct SemanticToken {
   TextOffset begin = 0;
   TextOffset end = 0;
@@ -50,21 +49,14 @@ using SemanticTokenAcceptor = function_ref<void(SemanticToken)>;
 
 class AbstractSemanticTokenProvider : public SemanticTokenProvider {
  public:
-  /**
-   * The names the type indices and modifier bits stand for: the protocol's
-   * own by default. A language that adds its own names appends them, so that
-   * the languages of one server still agree on the indices they share.
-   */
+  // The names of the type indices and modifier bits, the protocol's by default.
+  // A language appends its own, so languages of one server share the indices.
   [[nodiscard]] virtual std::span<const std::string_view> tokenTypes() const;
   [[nodiscard]] virtual std::span<const std::string_view> tokenModifiers()
       const;
 
-  /**
-   * The legend of the two lists, with `full` and `range`. No `delta`: every
-   * answer is computed whole, so its edits save only the transfer. A language
-   * that wants them sets `full.delta`; each open document then keeps its last
-   * answer.
-   */
+  // The legend, with `full` and `range` but no `delta`. A language that sets
+  // `full.delta` gets edits, and each open document keeps its last answer.
   [[nodiscard]] lsp::SemanticTokensOptions semanticTokensOptions()
       const override;
 
@@ -80,19 +72,15 @@ class AbstractSemanticTokenProvider : public SemanticTokenProvider {
                          const CancellationToken& token = {}) const override;
 
   // The index of a type and the bit of a modifier, by name. Nothing, and no
-  // bit, for a name the legend does not hold.
+  // bit, for a name the legend does not hold, or a modifier past the 31st.
   [[nodiscard]] std::optional<std::uint32_t> tokenType(
       std::string_view name) const;
   [[nodiscard]] std::uint32_t tokenModifier(std::string_view name) const;
 
  protected:
-  /**
-   * Accepts every token of `document` touching `[begin, end)`, in any order.
-   * A token outside the window, or empty, is dropped. Where tokens overlap,
-   * the one starting first wins, then the longer, then the first accepted. A
-   * token over several lines is sent as one per line. Precondition: called
-   * under the workspace read lock.
-   */
+  // Accepts every non-empty token touching `[begin, end)`, in any order. Of
+  // overlapping tokens, the one starting first wins, then the longer, then the
+  // first accepted. Called under the workspace read lock.
   virtual void computeHighlighting(const Document& document, TextOffset begin,
                                    TextOffset end, SemanticTokenAcceptor accept,
                                    const CancellationToken& token) const = 0;
@@ -102,9 +90,9 @@ class AbstractSemanticTokenProvider : public SemanticTokenProvider {
       const Document& document, TextOffset begin, TextOffset end,
       const CancellationToken& token) const;
   [[nodiscard]] bool answersDelta() const;
-  // Keeps `data` as the document's last answer under a new id, and gives
+  // Keeps `data` as an open document's last answer under a new id, and gives
   // back the previous answer if `previousId` names it. Forgets the answers of
-  // documents no longer open.
+  // closed documents.
   std::optional<std::vector<lsp::Uint>> keep(
       const Document& document, const std::vector<lsp::Uint>& data,
       std::string& id, std::string_view previousId = {}) const;

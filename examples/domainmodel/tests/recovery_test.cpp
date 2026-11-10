@@ -107,11 +107,12 @@ void run(Lane& lane) {
       }
     }
   }
-  language(lane, *engine, "valid.dmodel",
-           {"01_typo1.dmodel", "02_typo2.dmodel", "03_closer_block.dmodel",
-            "04_closer_eof.dmodel", "05_intruder.dmodel", "06_truncated.dmodel",
-            "07_two_faults.dmodel", "08_head_fault.dmodel",
-            "09_list_delim.dmodel", "10_noise.dmodel", "11_head_typo.dmodel"});
+  language(
+      lane, *engine, "valid.dmodel",
+      {"01_typo1.dmodel", "02_typo2.dmodel", "03_closer_block.dmodel",
+       "04_closer_eof.dmodel", "05_extra_token.dmodel", "06_truncated.dmodel",
+       "07_two_faults.dmodel", "08_head_fault.dmodel", "09_list_delim.dmodel",
+       "10_noise.dmodel", "11_head_typo.dmodel"});
   mutation_oracle(*engine, "domainmodel", document("valid.dmodel"));
 }
 }  // namespace

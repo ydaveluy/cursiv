@@ -32,11 +32,8 @@ std::size_t TaskScheduler::workerCount() const noexcept {
   return _pool != nullptr ? _pool->workerCount() : 0;
 }
 
-// The environment speaks first: under WASI `hardware_concurrency()` answers 1
-// -- wasi-libc cannot see the host's cores -- so a pool that trusts it is
-// never built, threads or no threads. `CURSIV_WORKERS` is how the host says
-// what it knows; zero means "run inline", which is a legitimate answer and
-// not a refusal to parse one.
+// `CURSIV_WORKERS` first, as WASI's `hardware_concurrency()` answers 1. Zero
+// means run inline.
 std::size_t TaskScheduler::defaultWorkerCount() noexcept {
   if (const char* const asked = std::getenv("CURSIV_WORKERS");
       asked != nullptr) {
@@ -59,8 +56,7 @@ void TaskScheduler::parallelForIndexed(
   std::atomic<bool> failed{false};
   std::exception_ptr first;
 
-  // Nothing escapes into the pool: a helper has no caller to unwind into, so
-  // the catch is here and the pool never sees an exception.
+  // No exception reaches the pool: a worker has no caller to unwind into.
   _pool->run(count, [&](std::size_t index) noexcept {
     // Once cancelled or once a sibling failed, the run stops: each part
     // returns at its next item, and the rest is never handed out.
@@ -69,9 +65,8 @@ void TaskScheduler::parallelForIndexed(
     try {
       body(index);
     } catch (...) {
-      // The exchange elects the one thread that records the first exception,
-      // read only after the join below -- which is the happens-before, so no
-      // lock.
+      // One thread records the first exception; it is read only after the
+      // join, which orders it, so no lock is needed.
       if (!failed.exchange(true)) first = std::current_exception();
       return false;
     }

@@ -93,15 +93,15 @@ struct RepairReport {
             "%4u %4u | %6s %7s %7s | %u",
             static_cast<int>(name.size()), name.data(), t.docs, t.faults,
             pct(t.found, t.faults), pct(t.missed, t.faults),
-            ratio(t.parasites, t.faults), t.silent, t.noop,
-            pct(t.kept, t.eligible),
-            pct(t.deleted, t.eligible), pct(t.abandoned, t.eligible),
-            pct(t.other, t.eligible), ratio(t.restored, t.faults),
-            ratio(t.invented, t.faults), pct(t.astKept, t.astTotal),
-            t.astWhole, ratio(t.diagnostics, t.faults), t.perFault[0],
-            t.perFault[1], t.perFault[2], t.perFault[3], t.perFault[4],
-            t.perFault[5], cost(t.cost(0.5)).c_str(),
-            cost(t.cost(0.99)).c_str(), cost(t.cost(1.0)).c_str(), t.machine);
+            ratio(t.spurious, t.faults), t.silent, t.noop,
+            pct(t.kept, t.eligible), pct(t.deleted, t.eligible),
+            pct(t.abandoned, t.eligible), pct(t.other, t.eligible),
+            ratio(t.restored, t.faults), ratio(t.invented, t.faults),
+            pct(t.astKept, t.astTotal), t.astWhole,
+            ratio(t.diagnostics, t.faults), t.perFault[0], t.perFault[1],
+            t.perFault[2], t.perFault[3], t.perFault[4], t.perFault[5],
+            cost(t.cost(0.5)).c_str(), cost(t.cost(0.99)).c_str(),
+            cost(t.cost(1.0)).c_str(), t.machine);
         for (std::size_t i = 0; i < t.ceilings.size() && i < ceilings.size();
              ++i)
           if (t.ceilings[i] != 0)
@@ -150,14 +150,15 @@ struct RepairReport {
         std::fprintf(
             out,
             ",\"docs\":%u,\"faults\":%u,\"diagnostics\":%u,\"found\":%u,"
-            "\"missed\":%u,\"parasites\":%u,\"silent\":%u,\"noop\":%u,"
+            "\"missed\":%u,\"spurious\":%u,\"silent\":%u,\"noop\":%u,"
             "\"refused\":%u,"
             "\"treeless\":%u,\"text\":{\"eligible\":%llu,\"kept\":%llu,"
             "\"deleted\":%llu,\"abandoned\":%llu,\"other\":%llu,"
             "\"restored\":%u,\"invented\":%u},\"ast\":{\"total\":%llu,"
-            "\"kept\":%llu,\"whole\":%u,\"unaligned\":%llu},\"per_fault\":[%u,%u,%u,%u,%u,%u],"
+            "\"kept\":%llu,\"whole\":%u,\"unaligned\":%llu},\"per_fault\":[%u,%"
+            "u,%u,%u,%u,%u],"
             "\"cost\":",
-            t.docs, t.faults, t.diagnostics, t.found, t.missed, t.parasites,
+            t.docs, t.faults, t.diagnostics, t.found, t.missed, t.spurious,
             t.silent, t.noop, t.refused, t.treeless,
             static_cast<unsigned long long>(t.eligible),
             static_cast<unsigned long long>(t.kept),
@@ -166,9 +167,9 @@ struct RepairReport {
             static_cast<unsigned long long>(t.other), t.restored, t.invented,
             static_cast<unsigned long long>(t.astTotal),
             static_cast<unsigned long long>(t.astKept), t.astWhole,
-            static_cast<unsigned long long>(t.astUnaligned),
-            t.perFault[0], t.perFault[1], t.perFault[2], t.perFault[3],
-            t.perFault[4], t.perFault[5]);
+            static_cast<unsigned long long>(t.astUnaligned), t.perFault[0],
+            t.perFault[1], t.perFault[2], t.perFault[3], t.perFault[4],
+            t.perFault[5]);
         if (t.costs.empty())
           std::fprintf(out, "null");
         else

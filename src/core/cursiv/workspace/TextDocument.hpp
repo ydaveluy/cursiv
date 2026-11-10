@@ -14,12 +14,9 @@
 #include "cursiv/text/Range.hpp"
 #include "cursiv/text/TextOffset.hpp"
 
-// The text, and the two units it is addressed in: a parse works in byte
-// offsets, a client in lines and UTF-16 columns. This owns the bytes and the
-// table that converts between them, and nothing else -- what is derived from
-// the text (a tree, its symbols, its diagnostics) is the `Document`'s. The
-// contract is the LSP one: `uri`, `languageId`, `version`, `getText`,
-// `positionAt`, `offsetAt`, `lineCount`, `create`, `update`, `applyEdits`.
+// The text and the two units it is addressed in: byte offsets for a parse,
+// lines and UTF-16 columns for a client. It owns the bytes and the table
+// between them, with the LSP text document contract.
 
 namespace cursiv {
 
@@ -52,9 +49,8 @@ class TextDocument {
   }
   TextDocument& operator=(TextDocument&& o) noexcept;
 
-  // Readonly identity, and the version the client stamped. Disk content is
-  // version 0, as it has no client to stamp it. A text longer than
-  // `kMaxDocument` bytes, here or from `update`, throws
+  // Read-only identity, and the client's version; disk content is
+  // version 0. A text longer than `kMaxDocument` bytes throws
   // `std::overflow_error`.
   [[nodiscard]] static TextDocument create(std::string uri,
                                            std::string languageId,
@@ -67,9 +63,8 @@ class TextDocument {
       std::span<const TextDocumentContentChangeEvent> changes,
       std::int64_t version);
 
-  // What the edits leave behind, and nothing else: `document` is not changed.
-  // Every range names the document's text; edits may touch but never overlap
-  // (`std::invalid_argument`), and insertions at one point land in array
+  // The text the edits leave; `document` is not changed. Edits may touch but
+  // not overlap (`std::invalid_argument`); insertions at one point keep array
   // order.
   [[nodiscard]] static std::string applyEdits(const TextDocument& document,
                                               std::span<const TextEdit> edits);
@@ -85,7 +80,7 @@ class TextDocument {
   [[nodiscard]] std::uint32_t lineCount() const;
 
   // Clamped at both ends: an offset past the text answers the last position,
-  // and one that would land between the `\r` and the `\n` of a pair answers
+  // and one that would fall between the `\r` and the `\n` of a pair answers
   // the end of the line before it -- there is no position inside a terminator.
   [[nodiscard]] Position positionAt(TextOffset offset) const;
 
@@ -124,11 +119,14 @@ class TextDocument {
  private:
 
   void setText(std::string text);
-  // `[from, to)` replaced in the text itself, without a copy of the whole; a
-  // failure leaves the text as it was.
+  // Replaces `[from, to)` in place; a failure leaves the text as it was. A
+  // built index is patched.
   void replaceText(std::size_t from, std::size_t to, std::string_view text);
   // Under the index's lock, after the text changed.
   void dropLineIndex();
+  // Under the index's lock, after `[from, to)` of the text became `inserted`
+  // bytes.
+  void patchLineIndex(TextOffset from, TextOffset to, TextOffset inserted);
 
   [[nodiscard]] TextOffset size() const noexcept {
     return static_cast<TextOffset>(_text.size());
@@ -140,10 +138,16 @@ class TextDocument {
   [[nodiscard]] std::uint32_t advanceUtf16(TextOffset& from, TextOffset to,
                                          bool wellFormed) const noexcept;
 
-  // Built once per text and published by the flag: only the documents a client
-  // points at are ever asked, so the table is built on the first question. A
-  // read action runs on many threads at once, hence the mutex.
+  // Built on the first question, then patched by ranged changes. Read actions
+  // run on many threads, hence the mutex.
   void ensureLineIndex() const;
+  // Scans the lines of `[from, to)`: `from` opens a line, `to` opens one or,
+  // when `last`, ends the text. Appends the later starts to `starts`, and each
+  // line's flags to `ascii` and `wellFormed` from bit 0.
+  void scanLines(TextOffset from, TextOffset to, bool last,
+                 std::vector<TextOffset>& starts,
+                 std::vector<std::uint64_t>& ascii,
+                 std::vector<std::uint64_t>& wellFormed) const;
 
   // The offset the line's content ends at, its terminator excluded -- both
   // bytes of it when the line ends `\r\n`.

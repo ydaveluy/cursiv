@@ -30,10 +30,11 @@ std::uint16_t put_node(LlLowered& o, const LlNode& n,
 std::uint16_t put_group(LlLowered& o, LlShape kind,
                         std::span<const std::uint16_t> ids, std::uint16_t row,
                         const LlNodeBuild& b) {
-  if (std::uint64_t{o.cfg.nkids} + ids.size() > kNoRow) too_many_positions();
-  const auto base = static_cast<std::uint16_t>(o.cfg.nkids);
-  std::ranges::copy(ids, o.cfg.kids.row(o.cfg.nkids, ids.size()));
-  o.cfg.nkids += ids.size();
+  if (std::uint64_t{o.cfg.nchildIds} + ids.size() > kNoRow)
+    too_many_positions();
+  const auto base = static_cast<std::uint16_t>(o.cfg.nchildIds);
+  std::ranges::copy(ids, o.cfg.childIds.row(o.cfg.nchildIds, ids.size()));
+  o.cfg.nchildIds += ids.size();
   return put_node(o,
                   LlNode{.kind = kind,
                          .sym = base,
@@ -68,7 +69,7 @@ inline void refuse_item(LlLowered& o, const Pool& p, const Node& e,
   unsigned ends = 0;
   if (in.kind == Shape::alt)
     for (unsigned i = 0; i < in.count; ++i)
-      ends += p.e[p.kid[in.sym + i]].kind == Shape::end ? 1u : 0u;
+      ends += p.e[p.child[in.sym + i]].kind == Shape::end ? 1u : 0u;
   const bool end =
       in.kind == Shape::end || (in.kind == Shape::alt && ends == in.count);
   if (e.max != 1 || e.min != 0) return;
@@ -83,45 +84,47 @@ inline std::uint16_t refuse_node(LlLowered& o, LowerFail why,
   return put_node(o, LlNode{.kind = LlShape::empty});
 }
 
-inline std::uint16_t emit_item(LlLowered& o, const Pool& p, std::uint16_t k,
-                               std::uint16_t owner) {
+inline Descent<std::uint16_t> emit_item(LlLowered& o, const Pool& p,
+                                        std::uint16_t k, std::uint16_t owner) {
   no_write_off_position(o, p.e[k], owner);
-  return emit(o, p, k, p.e[k].made, p.e[k].row, owner);
+  co_return co_await emit(o, p, k, p.e[k].made, p.e[k].row, owner);
 }
 
-inline std::uint16_t emit_seq(LlLowered& o, const Pool& p, const Node& e,
-                              const Acts& made, const Acts& row,
-                              std::uint16_t owner) {
+inline Descent<std::uint16_t> emit_seq(LlLowered& o, const Pool& p,
+                                       const Node& e, const Acts& made,
+                                       const Acts& row, std::uint16_t owner) {
   std::vector<std::uint16_t> ids(e.count);
   for (unsigned i = 0; i < e.count; ++i)
-    ids[i] = emit_item(o, p, p.kid[e.sym + i], owner);
-  return put_group(
+    ids[i] = co_await emit_item(o, p, p.child[e.sym + i], owner);
+  co_return put_group(
       o, LlShape::seq, ids, o.writes.intern_cat(made, row),
       LlNodeBuild{.cfg = e.cfg, .section = e.section, .foldStep = e.foldStep});
 }
 
-inline std::uint16_t emit_alt(LlLowered& o, const Pool& p, std::uint16_t at,
-                              const Acts& made, const Acts& row,
-                              std::uint16_t owner) {
+inline Descent<std::uint16_t> emit_alt(LlLowered& o, const Pool& p,
+                                       std::uint16_t at, const Acts& made,
+                                       const Acts& row, std::uint16_t owner) {
   const Node& e = p.e[at];
   unsigned nEnd = 0;
   for (unsigned i = 0; i < e.count; ++i)
-    if (p.e[p.kid[e.sym + i]].kind == Shape::end) ++nEnd;
+    if (p.e[p.child[e.sym + i]].kind == Shape::end) ++nEnd;
   if (nEnd > 1) o.fault.raise(GrammarFaultCode::twoEndMarks, owner);
   std::vector<std::uint16_t> ids(e.count);
   for (unsigned i = 0; i < e.count; ++i) {
-    const std::uint16_t k = p.kid[e.sym + i];
-    ids[i] = emit(o, p, k, cat(p.e[k].made, made), cat(p.e[k].row, row), owner);
+    const std::uint16_t k = p.child[e.sym + i];
+    ids[i] = co_await emit(o, p, k, cat(p.e[k].made, made),
+                           cat(p.e[k].row, row), owner);
   }
   const std::uint16_t id = put_group(
       o, LlShape::alt, ids, kNoRow,
       LlNodeBuild{.cfg = e.cfg, .section = e.section});
-  return with_decision(o, id, e.count, owner);
+  co_return with_decision(o, id, e.count, owner);
 }
 
-inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
-                                    const Acts& made, const Acts& row,
-                                    std::uint16_t owner) {
+inline Descent<std::uint16_t> emit_unordered(LlLowered& o, const Pool& p,
+                                             const Node& e, const Acts& made,
+                                             const Acts& row,
+                                             std::uint16_t owner) {
   const auto group = [&](LlShape kind, const std::vector<std::uint16_t>& ids,
                          std::uint16_t rule, std::uint16_t chain = kNoRow,
                          bool foldStep = false) {
@@ -135,7 +138,7 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
   const auto tooWide = [&] {
     return refuse_node(o, LowerFail::unorderedTooWide, owner);
   };
-  if (e.count > unordered_most(e.unorderedTurns)) return tooWide();
+  if (e.count > unordered_most(e.unorderedTurns)) co_return tooWide();
   if (e.unorderedTurns) {
     std::vector<std::uint16_t> order(e.count), arms;
     std::iota(order.begin(), order.end(), 0);
@@ -144,13 +147,13 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
     do {
       std::vector<std::uint16_t> ids;
       for (const auto i : order)
-        ids.push_back(emit_item(o, p, p.kid[e.sym + i], owner));
+        ids.push_back(co_await emit_item(o, p, p.child[e.sym + i], owner));
       arms.push_back(group(LlShape::seq, ids, owner, chain, e.foldStep));
     } while (std::ranges::next_permutation(order).found);
-    return group(LlShape::alt, arms, owner);
+    co_return group(LlShape::alt, arms, owner);
   }
   if (std::uint32_t{o.cfg.nrules} + (1u << e.count) - 1u > kNtBase)
-    return tooWide();
+    co_return tooWide();
   // Where only optional items are left, the group may end there.
   const auto ends = [&](std::uint32_t mask) {
     return (mask & ~e.unorderedOptional) == 0;
@@ -161,7 +164,7 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
     spelt += bits > 1 ? 3 * bits + 1 : 1;
     if (ends(mask)) ++spelt;
   }
-  if (spelt > kNoRow) return tooWide();
+  if (spelt > kNoRow) co_return tooWide();
   const std::uint32_t subsets = 1u << e.count;
   const std::uint16_t baseRule = o.cfg.nrules;
   const LlRuleInfo named = o.cfg.rules[owner];
@@ -178,7 +181,7 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
     for (unsigned i = 0; i < e.count; ++i) {
       const std::uint32_t bit = 1u << i;
       if ((mask & bit) == 0) continue;
-      const auto item = emit_item(o, p, p.kid[e.sym + i], aux);
+      const auto item = co_await emit_item(o, p, p.child[e.sym + i], aux);
       const std::uint32_t remaining = mask ^ bit;
       if (remaining == 0) {
         arms.push_back(item);
@@ -205,7 +208,7 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
           2, aux);
     o.cfg.rules[aux].body = body;
   }
-  return put_node(
+  co_return put_node(
       o,
       LlNode{.kind = LlShape::call,
              .sym = static_cast<std::uint16_t>(baseRule + subsets - 2u),
@@ -213,8 +216,9 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
       LlNodeBuild{.cfg = e.cfg, .section = e.section, .foldStep = e.foldStep});
 }
 
-std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
-                   const Acts& made, const Acts& row, std::uint16_t owner) {
+Descent<std::uint16_t> emit(LlLowered& o, const Pool& p, std::uint16_t at,
+                            const Acts& made, const Acts& row,
+                            std::uint16_t owner) {
   const Node& e = p.e[at];
   const auto place = [&](LlShape kind, std::uint16_t sym,
                          std::uint32_t min = 0) {
@@ -227,38 +231,37 @@ std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
   };
   switch (e.kind) {
     case Shape::sym:
-      return is_term(e.sym) ? place(LlShape::term, e.sym)
-                            : place(LlShape::call, nt_index(e.sym));
+      co_return is_term(e.sym) ? place(LlShape::term, e.sym)
+                               : place(LlShape::call, nt_index(e.sym));
     case Shape::none:
-      return put_node(o, LlNode{.kind = LlShape::empty,
-                                .row = o.writes.intern_cat(made, row)});
+      co_return put_node(o, LlNode{.kind = LlShape::empty,
+                                   .row = o.writes.intern_cat(made, row)});
     case Shape::condition:
-      return place(LlShape::condition, e.sym);
+      co_return place(LlShape::condition, e.sym);
     case Shape::implied:
-      return place(LlShape::implied, e.sym, e.min);
+      co_return place(LlShape::implied, e.sym, e.min);
     case Shape::end:
-      return place(LlShape::endMark, e.sym);
+      co_return place(LlShape::endMark, e.sym);
     case Shape::seq:
-      return emit_seq(o, p, e, made, row, owner);
+      co_return co_await emit_seq(o, p, e, made, row, owner);
     case Shape::alt:
-      return emit_alt(o, p, at, made, row, owner);
+      co_return co_await emit_alt(o, p, at, made, row, owner);
     case Shape::unordered:
-      return emit_unordered(o, p, e, made, row, owner);
+      co_return co_await emit_unordered(o, p, e, made, row, owner);
     case Shape::rep: {
       refuse_item(o, p, e, owner);
       const auto body = [&] { return emit_item(o, p, e.sym, owner); };
       if ((e.max != kEndless && (e.max > 1 || e.min == e.max)) ||
           e.min > 1) {
-        // Each counted occurrence is a different call site. Expanding only
-        // the ATN would overwrite the one nodeFollow/nodeAfter used by the
-        // emitted body and caret; lower both execution and prediction alike.
-        // Nested options keep a single ordered prefix of the body.
+        // Each counted occurrence is its own call site: the body and the ATN
+        // are both expanded, as the body and the caret read one
+        // nodeFollow/nodeAfter. Nested options keep one ordered prefix.
         const std::uint64_t turns = e.max == kEndless ? e.min : e.max;
         const std::uint64_t optional = e.max == kEndless ? 0 : e.max - e.min;
         if (const std::uint64_t spelt =
                 turns + (optional == 0 ? 1 : 2 * optional);
             o.cfg.nnodes + spelt > kNoRow)
-          return refuse_node(o, LowerFail::tooManyPositions, owner);
+          co_return refuse_node(o, LowerFail::tooManyPositions, owner);
         const auto sequence = [&](const std::vector<std::uint16_t>& ids,
                                   std::uint16_t chain, bool outer = false) {
           return put_group(o, ids.empty() ? LlShape::empty : LlShape::seq, ids,
@@ -267,85 +270,82 @@ std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
                                        .section = e.section,
                                        .foldStep = outer && e.foldStep});
         };
-        const auto repetition = [&](std::uint16_t kid, std::uint32_t maximum) {
+        const auto repetition = [&](std::uint16_t child,
+                                    std::uint32_t maximum) {
           const auto id = put_node(
               o,
               LlNode{
-                  .kind = LlShape::rep, .sym = kid, .min = 0, .max = maximum},
+                  .kind = LlShape::rep, .sym = child, .min = 0, .max = maximum},
               LlNodeBuild{.cfg = e.cfg, .section = e.section});
           return with_decision(o, id, 2, owner);
         };
         std::vector<std::uint16_t> ids;
         ids.reserve(e.min + (e.min != e.max));
         for (std::uint32_t count = 0; count < e.min; ++count)
-          ids.push_back(body());
+          ids.push_back(co_await body());
         if (e.max == kEndless) {
-          ids.push_back(repetition(body(), kEndless));
+          ids.push_back(repetition(co_await body(), kEndless));
         } else if (e.max > e.min) {
           // D? nested as (D (D (... D?)?)?)? keeps the greedy arm first.
           std::uint16_t tail = kNoRow;
           for (std::uint32_t count = e.min; count < e.max; ++count) {
-            auto kid = body();
+            auto child = co_await body();
             if (tail != kNoRow) {
-              kid = sequence({kid, tail}, kNoRow);
-              o.cfg.nodeBuild[kid].ladder = true;
+              child = sequence({child, tail}, kNoRow);
+              o.cfg.nodeBuild[child].countedTail = true;
             }
-            tail = repetition(kid, 1);
-            o.cfg.nodeBuild[tail].ladder = true;
+            tail = repetition(child, 1);
+            o.cfg.nodeBuild[tail].countedTail = true;
           }
           ids.push_back(tail);
         }
-        return sequence(ids, o.writes.intern_cat(made, row), true);
+        co_return sequence(ids, o.writes.intern_cat(made, row), true);
       }
-      const std::uint16_t kid = body();
+      const std::uint16_t child = co_await body();
       const std::uint16_t id = put_node(
           o,
           LlNode{.kind = LlShape::rep,
-                 .sym = kid,
+                 .sym = child,
                  .min = e.min,
                  .max = e.max,
                  .row = o.writes.intern_cat(made, row)},
           LlNodeBuild{
               .cfg = e.cfg, .section = e.section, .leftFold = e.leftFold});
       // The turn is the choice: one arm enters the body, the other leaves.
-      return with_decision(o, id, 2, owner);
+      co_return with_decision(o, id, 2, owner);
     }
   }
-  return put_node(o, LlNode{.kind = LlShape::empty});
+  co_return put_node(o, LlNode{.kind = LlShape::empty});
 }
 
-// The chain of a group that stands for one position goes to that position: a
-// record over the group and a record over what it holds cover the same span,
-// and two of them where the shape holds one is a node nobody wrote. A child's
-// creation stays separate until record fusion keeps the caller's writes apart
-// from the writes filling that child.
-void ride_chains_down(LlLowered& o, const LlRecordPlan& plan) {
+// The chain of a group that stands for one position goes to that position: two
+// records over one span would make a node nobody wrote. A child's creation
+// stays apart, so the caller's writes stay apart from the child's.
+void move_chains_down(LlLowered& o, const LlRecordPlan& plan) {
   for (std::uint32_t i = 0; i < o.cfg.nnodes; ++i) {
     const auto id = static_cast<std::uint16_t>(i);
     LlNode& n = o.cfg.nodes[id];
     if (n.row == kNoRow || o.cfg.nodeBuild[id].foldStep) continue;
     const std::uint16_t only = plan.single_position(id);
     if (only == kNoRow || !plan.hands(only)) continue;
-    LlNode& kid = o.cfg.nodes[only];
+    LlNode& child = o.cfg.nodes[only];
     // An outer write belongs to the caller even when the child is the same
     // AST class. Fusion below keeps the two action runs' provenance; plain
     // concatenation here would mistake that write for a child member fill.
-    if (plan.opens_chain(kid.row) ||
-        (kid.kind == LlShape::call && plan.rule_opens(kid.sym)))
+    if (plan.opens_chain(child.row) ||
+        (child.kind == LlShape::call && plan.rule_opens(child.sym)))
       continue;
-    if (kid.kind == LlShape::term && n.row < o.nestChains.size() &&
+    if (child.kind == LlShape::term && n.row < o.nestChains.size() &&
         o.nestChains[n.row] != 0)
       continue;
-    kid.row = o.writes.concat(n.row, kid.row);
+    child.row = o.writes.concat(n.row, child.row);
     n.row = kNoRow;
   }
 }
 
-// ...and what is left: a position whose chain no record of its own carries
-// opens one. A group always does -- nothing else spans it -- and a call does
-// where the rule it names lays none, or where it turns: riding the callee's
-// record, a nest could not reach back over its receiver.
-void lay_own_records(LlLowered& o, const LlRecordPlan& plan) {
+// A position whose chain no record of its own carries opens one: a group
+// always, and a call whose rule creates none or that turns.
+void add_own_records(LlLowered& o, const LlRecordPlan& plan) {
   for (std::uint32_t id = 0; id < o.cfg.nnodes; ++id) {
     LlNode& n = o.cfg.nodes[id];
     if (n.row == kNoRow || n.kind == LlShape::term ||
@@ -397,7 +397,7 @@ void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
   }
   if (n.kind == Shape::alt) {
     for (unsigned i = 0; i < n.count; ++i) {
-      const auto k = p.kid[n.sym + i];
+      const auto k = p.child[n.sym + i];
       emit_operator_nodes(o, p, k, cat(p.e[k].made, made), cat(p.e[k].row, row),
                           prec, group, cfg, before, after);
     }
@@ -406,7 +406,7 @@ void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
   if (n.kind == Shape::seq) {
     std::uint16_t token = kNoRow;
     for (unsigned i = 0; i < n.count; ++i) {
-      const auto k = p.kid[n.sym + i];
+      const auto k = p.child[n.sym + i];
       if (p.e[k].kind == Shape::condition)
         (token == kNoRow ? before : after).push_back(p.e[k].sym);
       else if (p.e[k].kind != Shape::none)

@@ -15,7 +15,7 @@ std::unique_ptr<ArithmeticsServices> create_lsp_services(
     ArithmeticsSharedServices& sharedServices,
     std::string languageId = std::string(arith::generated::Arith::kLanguageId));
 
-// The same one call, one storey up.
+// The shared services and the language, created in one call.
 struct ArithmeticsLanguage {
   std::unique_ptr<ArithmeticsSharedServices> shared;
   ArithmeticsServices& language;

@@ -11,7 +11,7 @@
 namespace cursiv::engine {
 
 struct LrGotoRows {
-  // `guard` is the program that picks the landing, plus one.
+  // `guard` is the program that picks the target, plus one.
   struct Edge {
     std::uint16_t nt = 0, to = 0;
     std::uint32_t guard = 0;

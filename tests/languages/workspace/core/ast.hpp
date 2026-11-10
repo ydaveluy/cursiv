@@ -1,6 +1,5 @@
-// The workspace fixture language: its AST. A bracket filter
-// (`type=[Type]`) is spelled as the base it names: `reference<Type>` accepts
-// a DataType or an Entity through the tag's family test, so one field serves both.
+// The workspace fixture's AST. `reference<Type>` accepts a DataType or an
+// Entity, so one field serves both.
 #pragma once
 
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -15,8 +14,7 @@ struct Type : cursiv::Extends<AbstractElement> {};
 
 struct DataType : cursiv::Extends<Type> {};
 
-// `many` is the fact of a match, not matched text -- the grammar's `?=`
-// (`flag`) sets the flag and stores nothing.
+// `many` records whether the keyword matched, not its text.
 struct Feature : cursiv::Extends<cursiv::AstNode> {
   boolean many;
   string_view name;

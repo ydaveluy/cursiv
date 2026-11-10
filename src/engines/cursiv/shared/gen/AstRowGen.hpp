@@ -1,5 +1,5 @@
 // What one published action states, read once from its row type: the indices
-// the AST runs are settled by, and the names the record facet answers with.
+// the AST runs use, and the names the record facet answers with.
 #pragma once
 
 #include <cstddef>

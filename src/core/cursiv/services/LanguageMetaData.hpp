@@ -11,7 +11,7 @@ namespace cursiv {
 struct LanguageMetaData {
   std::string languageId;
   std::vector<std::string> fileExtensions;
-  // For the files an extension cannot route. An exact name outranks one.
+  // For files an extension cannot route; an exact name wins over an extension.
   std::vector<std::string> fileNames = {};
 };
 

@@ -30,7 +30,7 @@ struct Base : cursiv::GrammarSpec {
       lit<"two:"> + tight(lit<"["> + repeat<2, cursiv::kUnbounded>(item)) +
       lit<"]"> + lit<".">)> {};
   // The empty arm ends the region immediately after '['. The decision may
-  // inspect ']' through caller trivia, but an elected X still reads tightly.
+  // inspect ']' through caller trivia, but a chosen X still reads tightly.
   struct Optional : rule<create<Document>(
       lit<"optional:"> + tight(lit<"["> + option(item)) +
       lit<"]"> + lit<".">)> {};
@@ -79,7 +79,7 @@ struct Base : cursiv::GrammarSpec {
   struct NestHead : rule<
       lit<"nest-head:"> + create<Document>(item) +
       tight(nest<&Document::in>(lit<"."> + item)) + lit<";">> {};
-  // A commit's loop that ends a region: the gap after its last turn is the
+  // A commit's loop that ends a region: the gap after its last iteration is the
   // caller's, as after a plain loop.
   struct CommitTail : rule<create<Document>(
       lit<"commit-tail:"> + tight(many(commit(lit<",">, item))) + lit<";">)> {};
@@ -102,13 +102,27 @@ struct Base : cursiv::GrammarSpec {
   struct SkipNot : rule<create<Document>(
       lit<"skip-not:"> + !lit<"x"> + many(lit<"~">) + option(item) +
       lit<".">)> {};
-  struct Root : rule<ref<Required> | ref<Nonempty> | ref<AtLeastTwo> |
-                     ref<Optional> | ref<Fixed> | ref<ClosingInside> |
-                     ref<Called> | ref<CalledOptional> | ref<CalledEntry> |
-                     ref<Same> | ref<SameHead> | ref<PatternHead> |
-                     ref<ShortItem> | ref<LongItem> | ref<NestHead> |
-                     ref<CommitTail> | ref<CommitNote> | ref<SkipHas> |
-                     ref<SkipNot> | ref<SkipRecord>> {};
+  // Only the second arm skips blanks alone: line ends typed behind `<` run on
+  // to the `?` there, and stop at the blank in the first arm.
+  struct LINES : terminal<some(lit<"\n">)> {};
+  struct BLANKS : terminal<some(lit<" ">)> {};
+  struct ByLines : rule<ref<X>> {};
+  struct ByBlanks : rule<ref<X>> {};
+  struct Lines : rule<create<Document>(
+                     lit<"lines:"> +
+                     ((ref<ByLines> + lit<"<"> +
+                       &(ref<LINES> + lit<"!">)+ref<LINES> + lit<"!">) |
+                      (ref<ByBlanks> +
+                       skip(ignore<BLANKS>, hide<>,
+                            lit<"<"> + &(ref<LINES> + lit<"?">)+ref<LINES> +
+                                lit<"?">))))> {};
+  struct Root
+      : rule<ref<Required> | ref<Nonempty> | ref<AtLeastTwo> | ref<Optional> |
+             ref<Fixed> | ref<ClosingInside> | ref<Called> |
+             ref<CalledOptional> | ref<CalledEntry> | ref<Same> |
+             ref<SameHead> | ref<PatternHead> | ref<ShortItem> | ref<LongItem> |
+             ref<NestHead> | ref<CommitTail> | ref<CommitNote> | ref<SkipHas> |
+             ref<SkipNot> | ref<SkipRecord> | ref<Lines>> {};
   using entry = Root;
   using ignored = WS;
   using hidden = NOTE;

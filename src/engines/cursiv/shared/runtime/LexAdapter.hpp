@@ -1,13 +1,6 @@
-// What `lex_walk` asks of the adapter an engine names its table through. Two
-// capabilities choose the algorithm, so an adapter announces them and the
-// walk holds it to the announcement when it starts:
-//   `kQualified`  a state's election is answered by `qualified`; where it is
-//                 not announced the walk reads the boundary fallback;
-//   `kRelays`     the table echoes marks, and the adapter offers `relay` with
-//                 the rest of the relay protocol.
-// The walk picks its branch by what the adapter has. Without the announcement
-// a method lost by accident would compile and select the other branch.
-// A small adapter that announces nothing is read as it offers.
+// What `lex_walk` asks of an engine's table adapter. An adapter declares
+// `kQualified` (`qualified` answers a state's election) and `kRelays` (it
+// offers `relay`), and the walk checks what it declares as it starts.
 #pragma once
 
 #include <concepts>
@@ -48,31 +41,34 @@ concept LexBoundaryFallback =
     };
 
 // Whether a reading behind conditions takes the spelling of the walk's
-// reading, and the tier it asks that with: one without the other is half a
-// question.
+// reading, and the priority it asks it at: an adapter offers both or neither.
 template <class Ad>
 concept LexTaking =
-    requires(const Ad& ad, std::uint16_t s, SymbolId t, unsigned tier) {
-      { ad.takes(s, tier, t) } -> std::convertible_to<bool>;
-      { ad.taking(t, tier) } -> std::convertible_to<unsigned>;
+    requires(const Ad& ad, std::uint16_t s, SymbolId t, unsigned priority) {
+      { ad.takes(s, priority, t) } -> std::convertible_to<bool>;
+      { ad.taking(t, priority) } -> std::convertible_to<unsigned>;
     };
 
 template <class Ad>
-concept LexOffersTakes = requires(const Ad& ad, std::uint16_t s, SymbolId t,
-                                  unsigned tier) { ad.takes(s, tier, t); };
+concept LexOffersTakes =
+    requires(const Ad& ad, std::uint16_t s, SymbolId t, unsigned priority) {
+      ad.takes(s, priority, t);
+    };
 
 // Everything the walk and its rests ask of an adapter that echoes marks.
 template <class Ad>
 concept LexRelayProtocol =
     requires(const Ad& ad, std::uint16_t s, const char* src, TextOffset i,
-             TextOffset len, TextOffset& far, SymbolId t, unsigned tier) {
+             TextOffset len, TextOffset& far, SymbolId t, unsigned priority) {
       { ad.relay(s) } -> std::convertible_to<std::uint16_t>;
       { ad.relay_of(s) } -> std::convertible_to<const LexRelay&>;
       { ad.sets() } -> std::convertible_to<const ByteSet*>;
       { ad.names() } -> std::convertible_to<const char*>;
       { ad.run(s, src, len, i) } -> std::convertible_to<TextOffset>;
-      { ad.prefers_relayed(t, tier, t, tier) } -> std::convertible_to<bool>;
-      { ad.tier(s, t, src, i, len, far) } -> std::convertible_to<unsigned>;
+      {
+        ad.prefers_relayed(t, priority, t, priority)
+      } -> std::convertible_to<bool>;
+      { ad.priority(s, t, src, i, len, far) } -> std::convertible_to<unsigned>;
     } &&
     (!LexOffersTakes<Ad> || LexTaking<Ad>);
 
@@ -89,10 +85,8 @@ concept LexDeclaresRelays = requires { Ad::kRelays; };
 template <class Ad>
 concept LexAnnouncesRelays = requires { requires Ad::kRelays; };
 
-// A tape that reads a position again without the terminals a refused word took
-// off it names that tape `Skipping`, which holds them in `skip`: a skipping
-// tape names itself, and any other reads a refused word again through it
-// (`lex_unrefused`).
+// The tape `Ad` names `Skipping`, which re-reads a position without the
+// terminals a refused word took off it, held in `skip` (`lex_unrefused`).
 template <class Ad>
 concept LexSkipping = std::same_as<Ad, typename Ad::Skipping>;
 template <class Ad>
@@ -101,19 +95,19 @@ concept LexRereads = requires {
   requires Ad::kRefuses && !LexSkipping<Ad>;
 };
 
-// The acceptance the adapter announces is the one it offers: `qualified` where
+// The acceptance the adapter declares is the one it offers: `qualified` where
 // `kQualified` is true, the fallback where it is false, either where it
-// announces nothing.
+// declares nothing.
 template <class Ad>
-concept LexAcceptanceAnnounced =
+concept LexAcceptanceDeclared =
     (LexAnnouncesQualified<Ad> ? LexQualifiedAcceptance<Ad>
      : LexDeclaresQualified<Ad>
          ? LexBoundaryFallback<Ad>
          : (LexQualifiedAcceptance<Ad> || LexBoundaryFallback<Ad>));
 
-// The relays the adapter announces are the ones it offers, and whole.
+// The relays the adapter declares are the ones it offers, in full.
 template <class Ad>
-concept LexRelaysAnnounced =
+concept LexRelaysDeclared =
     (!LexDeclaresRelays<Ad> || LexAnnouncesRelays<Ad> == LexOffersRelay<Ad>) &&
     (!LexOffersRelay<Ad> || LexRelayProtocol<Ad>);
 

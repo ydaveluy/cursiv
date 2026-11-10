@@ -24,8 +24,9 @@ endif()
 
 set(CURSIV_NEW_CLASS "${NAME}")
 string(TOLOWER "${NAME}" CURSIV_NEW_ID)
-# The namespace is global, so leading underscores and double underscores are
-# reserved as well as C++ keywords. Check both spellings before writing files.
+# The lowercase name is a global namespace and prefixes the project's targets:
+# no C++ keyword or reserved spelling, and not a name that `main`, the standard
+# or Cursiv already takes. Check both spellings before writing files.
 set(_cursiv_keywords
     alignas alignof and and_eq asm auto bitand bitor bool break case catch
     char char8_t char16_t char32_t class compl concept const consteval constexpr
@@ -36,9 +37,10 @@ set(_cursiv_keywords
     requires return short signed sizeof static static_assert static_cast struct
     switch template this thread_local throw true try typedef typeid typename
     union unsigned using virtual void volatile wchar_t while xor xor_eq)
-if(CURSIV_NEW_ID IN_LIST _cursiv_keywords OR CURSIV_NEW_ID MATCHES "^_|__")
-  message(FATAL_ERROR
-      "NAME and its lowercase namespace must not be reserved C++ identifiers (got '${NAME}')")
+if(CURSIV_NEW_ID IN_LIST _cursiv_keywords
+   OR CURSIV_NEW_ID MATCHES "^_|__|^(main|std[0-9]*|posix|cursiv)$")
+  message(FATAL_ERROR "NAME and its lowercase namespace must not be reserved "
+      "C++ identifiers, nor main, std, posix or cursiv (got '${NAME}')")
 endif()
 if(NOT DEFINED EXT)
   set(EXT ".${CURSIV_NEW_ID}")
@@ -346,14 +348,15 @@ person Bob
 Hello Alice!
 Hello Bob!
 ]==])
-_cursiv_new_emit([==[src/CMakeLists.txt]==] [==[# Core: the language itself. Generates the parser from the grammar, again when
-# the grammar changes, then builds the services and checks under core/. Every
-# other package links it.
+_cursiv_new_emit([==[src/CMakeLists.txt]==] [==[# Core: the language itself. Generates the parser and the editor's keywords
+# from the grammar, again when it changes, then builds the services and checks
+# under core/. Every other package links it.
 cursiv_generate_language(ID @CURSIV_NEW_ID@
     GRAMMAR    @CURSIV_NEW_ID@/@CURSIV_NEW_CLASS@Grammar.hpp
     NAMESPACE  @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@
     EXTENSIONS @CURSIV_NEW_EXT@
-    OUT        @CURSIV_NEW_ID@/generated)
+    OUT        @CURSIV_NEW_ID@/generated
+    TEXTMATE   ../vscode/syntaxes/@CURSIV_NEW_ID@.tmLanguage.json)
 
 file(GLOB_RECURSE _core CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp)
@@ -412,10 +415,9 @@ int main(int argc, char** argv) {
       @CURSIV_NEW_ID@::register_lsp_services>(argc, argv);
 }
 ]==])
-_cursiv_new_emit([==[src/cli.cpp]==] [==[// The @CURSIV_NEW_ID@ command line: it parses, links and validates a file and
-// prints its diagnostics. Run it with `--help` to list the options. It returns
-// 0 for no errors, 1 for document errors, 2 for invalid arguments or paths, and
-// 3 for an internal or output error.
+_cursiv_new_emit([==[src/cli.cpp]==] [==[// The @CURSIV_NEW_ID@ command line: it checks a file and prints its diagnostics
+// (`--help` lists the options). It returns 0 without errors, 1 for document
+// errors, 2 for invalid arguments or paths, 3 for an internal or output error.
 
 #include "cursiv/cli.hpp"
 #include "cursiv/services/CoreLanguage.hpp"
@@ -439,29 +441,9 @@ _cursiv_new_emit([==[src/core/@CURSIV_NEW_ID@/@CURSIV_NEW_CLASS@Grammar.hpp]==] 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "@CURSIV_NEW_ID@/ast.hpp"
 
-// The sample language declares people and greets them:
-//
-//     person Alice
-//     Hello Alice!
-//
-// The members of a grammar:
-//   * `terminal<...>`  a token, such as a name or a number; `as<T>(...)`
-//                      converts its text, for example to a number
-//   * `rule<...>`      a rule; it builds the AST class whose members it fills
-//   * `entry`          the rule that reads a whole document
-//   * `ignored`        tokens allowed anywhere and dropped, such as spaces
-//   * `hidden`         tokens allowed anywhere and kept in the syntax tree,
-//                      such as comments, which hover can then show
-//
-// In a rule, `ref<R>` reads the rule or terminal `R`, and these build the AST:
-//   * `create<T>`         build a T, even if no member is set
-//   * `assign<&T::m>(e)`  read `e` and store it in `m`
-//   * `append<&T::m>(e)`  read `e` and add it to the list `m`
-//   * `flag<&T::m>(e)`    read `e` and set the bool `m` to true
-//   * `nest<&T::m>(e)`    wrap the node built so far in a new T, stored in `m`
-//
-// If the build refuses the grammar, look up the message on the "Grammar
-// errors" page of the Cursiv documentation.
+// The sample language declares people and greets them: `person Alice`, then
+// `Hello Alice!`. The Cursiv documentation describes the grammar's parts, and
+// its "Grammar errors" page each message the build may refuse it with.
 
 namespace @CURSIV_NEW_ID@ {
 
@@ -557,10 +539,9 @@ _cursiv_new_emit([==[src/core/@CURSIV_NEW_ID@/ast.hpp]==] [==[// The AST classes
 
 #include "cursiv/syntax-tree/AstNode.hpp"
 
-// `cursiv::Extends<cursiv::AstNode>` provides the member types used below:
-// `string_view` holds matched text, `string` any other text, `T*` and `vector<T*>`
-// hold child nodes, and `reference<T>` holds a name that resolves to a `T` after
-// parsing.
+// `cursiv::Extends<cursiv::AstNode>` provides the member types below: text in
+// `string_view` or `string`, children in `T*` and `vector<T*>`, and a name that
+// resolves to a `T` after parsing in `reference<T>`.
 
 namespace @CURSIV_NEW_ID@::ast {
 
@@ -947,7 +928,6 @@ _cursiv_new_emit([==[vscode/src/extension.ts]==] [==[// The @CURSIV_NEW_ID@ exte
 // `@CURSIV_NEW_ID@_lsp` and talks to it over standard input and output.
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
@@ -971,7 +951,6 @@ function executableName(): string {
 interface ServerCommand {
     command: string;
     args: string[];
-    env?: Record<string, string>;
 }
 
 // Native and WebAssembly builds name the server the same way, so the first
@@ -1008,16 +987,13 @@ function wasmCommand(context: vscode.ExtensionContext): ServerCommand | undefine
                    path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
 }
 
+// A WebAssembly server cannot see how many CPU cores there are: unless
+// CURSIV_WORKERS says otherwise, the runner chooses for it.
 function wasmRun(module: string, runner: string): ServerCommand | undefined {
     if (!fs.existsSync(module) || !fs.existsSync(runner)) {
         return undefined;
     }
-    return {
-        command: process.execPath,
-        args: ['--no-warnings', runner, module],
-        // A WebAssembly server cannot see how many CPU cores there are.
-        env: { CURSIV_WORKERS: String(Math.max(0, os.availableParallelism() - 1)) },
-    };
+    return { command: process.execPath, args: ['--no-warnings', runner, module] };
 }
 
 // The native server: the packaged copy under `bin/`, or the one CMake built
@@ -1059,8 +1035,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const executable: Executable = {
         command: server.command,
         args: server.args,
-        transport: TransportKind.stdio,
-        ...(server.env ? { options: { env: { ...process.env, ...server.env } } } : {})
+        transport: TransportKind.stdio
     };
     const serverOptions: ServerOptions = { run: executable, debug: executable };
     const clientOptions: LanguageClientOptions = {
@@ -1127,6 +1102,9 @@ export function startMcpBridge(
     outputChannel: vscode.OutputChannel,
 ): vscode.Disposable {
     const token = crypto.randomUUID();
+    // The requests the language server has yet to answer, all answered at
+    // once when the bridge closes, as are any later ones.
+    let waiting: Set<() => void> | undefined = new Set();
 
     const server = http.createServer((request, response) => {
         const answer = (status: number, body?: unknown): void => {
@@ -1166,14 +1144,30 @@ export function startMcpBridge(
                 return refusal(400, -32700, 'parse error');
             }
             const id = (message as { id?: unknown })?.id ?? null;
+            const stopped = (): void => answer(503, {
+                jsonrpc: '2.0',
+                id,
+                error: { code: -32603, message: 'the language server stopped' },
+            });
+            const pending = waiting;
+            if (pending === undefined) {
+                return stopped();
+            }
+            pending.add(stopped);
+            // Answered once: by the language server, or when the bridge closes.
+            const settle = (reply: () => void): void => {
+                if (pending.delete(stopped)) {
+                    reply();
+                }
+            };
             client.sendRequest(MCP_METHOD, message).then(
                 // A notification has no result: reply 202 Accepted.
-                (result) => (result === null ? answer(202) : answer(200, result)),
-                (error) => answer(500, {
+                (result) => settle(() => (result === null ? answer(202) : answer(200, result))),
+                (error) => settle(() => answer(500, {
                     jsonrpc: '2.0',
                     id,
                     error: { code: -32603, message: String((error as Error)?.message ?? error) },
-                }),
+                })),
             );
         });
     });
@@ -1220,6 +1214,10 @@ export function startMcpBridge(
     return new vscode.Disposable(() => {
         void registration.then((r) => r?.dispose());
         server.close();
+        const pending = waiting;
+        waiting = undefined;
+        pending?.forEach((stopped) => stopped());
+        pending?.clear();
     });
 }
 ]==])
@@ -1353,11 +1351,9 @@ _cursiv_new_emit([==[CMakePresets.json]==] [==[{
   ]
 }
 ]==])
-_cursiv_new_emit([==[cmake/wasi.cmake]==] [==[# The default toolchain of the wasi-debug and wasi-release presets: the Clang of
-# wasi-sdk 34, the pinned release. Another compiler has a file like this one, and
-# shares the rest through wasi-platform.cmake.
-# Cursiv throws: `-fwasm-exceptions` at both compile and link selects the `eh`
-# half of the SDK's dual `eh`/`noeh` sysroot.
+_cursiv_new_emit([==[cmake/wasi.cmake]==] [==[# The default toolchain of the wasi presets: the Clang of the pinned wasi-sdk
+# 34. Another compiler shares the rest through wasi-platform.cmake. Cursiv
+# throws, so `-fwasm-exceptions` selects the SDK's `eh` sysroot.
 if(NOT WASI_SDK)
   set(WASI_SDK $ENV{WASI_SDK})
 endif()
@@ -1463,10 +1459,9 @@ if(CURSIV_WASI_THREADS)
   # selects libpthread and shared memory; the memory must also be imported so
   # the runner can hand it to each worker.
   add_compile_options(-pthread)
-  # A shared memory must declare its maximum at link time (wasm format). It is
-  # an addressing cap, not a reservation: pages are committed as the heap
-  # grows. Must be a multiple of 65536; 4 GiB is the wasm32 ceiling.
-  # The 100,000-level LL stress test needs about 1 GiB with mimalloc.
+  # A shared memory declares its maximum at link time: a cap, not a
+  # reservation, a multiple of 65536 up to 4 GiB. The 100,000-level LL stress
+  # test needs about 1 GiB.
   set(CURSIV_WASI_MAX_MEMORY 2147483648 CACHE STRING
       "Shared-memory maximum handed to the linker (bytes)")
   add_link_options("LINKER:--import-memory,--max-memory=${CURSIV_WASI_MAX_MEMORY}")
@@ -1490,9 +1485,8 @@ add_link_options("$<$<CONFIG:Release>:LINKER:--strip-debug>")
 # The project resolves the runner after locating the Cursiv source tree.
 find_program(CURSIV_NODE node)
 ]==])
-_cursiv_new_emit([==[tools/fetch-wasi-sdk.cmake]==] [==[# The pinned SDK, fetched and verified -- one version, one checksum per host,
-# because an artifact is reproducible only against an exact release.
-# cmake/wasi.cmake finds the result on its own.
+_cursiv_new_emit([==[tools/fetch-wasi-sdk.cmake]==] [==[# Fetches and verifies the pinned wasi-sdk, one checksum per host, where
+# cmake/wasi.cmake finds it.
 #   cmake -P tools/fetch-wasi-sdk.cmake                 # to ~/wasi-sdk-34.0
 #   cmake -DDEST=<dir> -P tools/fetch-wasi-sdk.cmake
 cmake_minimum_required(VERSION 3.30)
@@ -1575,30 +1569,61 @@ if(NOT _sha256)
   message(FATAL_ERROR "wasi-sdk ${_version} has no release for ${_arch} ${_os}")
 endif()
 
-# Unpacked beside its destination, then moved in one step: an interrupted run
-# leaves no half-installed SDK behind.
+# Unpacked in `<DEST>.fetching`, then moved in one step, so an interrupted run
+# leaves no half SDK. Its lock file marks the folder and keeps two runs apart.
 set(_name wasi-sdk-${_version}-${_arch}-${_os})
 set(_work "${DEST}.fetching")
-file(REMOVE_RECURSE "${_work}")
-set(_tarball "${_work}/${_name}.tar.gz")
+if(EXISTS "${_work}" AND NOT EXISTS "${_work}/cmake.lock")
+  message(FATAL_ERROR "${_work} exists and was not made by this script: "
+                      "remove it, or choose another with -DDEST=<dir>")
+endif()
+file(LOCK "${_work}" DIRECTORY GUARD PROCESS RESULT_VARIABLE _locked)
+if(NOT _locked EQUAL 0)
+  message(FATAL_ERROR "cannot lock ${_work}: ${_locked}")
+endif()
+# Another run may have installed it meanwhile. Each run removes the folder as
+# it releases it, and one still waiting removes it in turn.
+function(_release_work)
+  file(LOCK "${_work}" DIRECTORY RELEASE)
+  execute_process(COMMAND ${CMAKE_COMMAND} -E rm -rf "${_work}")
+endfunction()
+_sdk_complete("${DEST}" _done)
+if(_done)
+  _release_work()
+  message(STATUS "already installed: ${DEST} (${_version})")
+  return()
+endif()
+set(_download "${_work}/download")
+file(REMOVE_RECURSE "${_download}")
+set(_tarball "${_download}/${_name}.tar.gz")
+set(_fetched FALSE)
 foreach(_attempt 1 2 3)
   message(STATUS "fetching ${_release}/${_name}.tar.gz")
-  file(DOWNLOAD "${_release}/${_name}.tar.gz" "${_tarball}"
-       EXPECTED_HASH SHA256=${_sha256} TLS_VERIFY ON STATUS _status)
+  # The hash is checked after the download, so a bad attempt is retried.
+  file(DOWNLOAD "${_release}/${_name}.tar.gz" "${_tarball}" TLS_VERIFY ON STATUS _status)
   list(GET _status 0 _code)
-  if(_code EQUAL 0)
-    break()
-  endif()
   list(GET _status 1 _why)
+  if(_code EQUAL 0)
+    file(SHA256 "${_tarball}" _got)
+    if(_got STREQUAL _sha256)
+      set(_fetched TRUE)
+      break()
+    endif()
+    set(_why "SHA-256 ${_got} instead of ${_sha256}")
+  endif()
   message(WARNING "download failed: ${_why}")
 endforeach()
-if(NOT _code EQUAL 0)
-  file(REMOVE_RECURSE "${_work}")
+if(NOT _fetched)
+  file(REMOVE_RECURSE "${_download}")
   message(FATAL_ERROR "cannot fetch wasi-sdk ${_version}")
 endif()
-file(ARCHIVE_EXTRACT INPUT "${_tarball}" DESTINATION "${_work}")
-file(RENAME "${_work}/${_name}" "${DEST}")
-file(REMOVE_RECURSE "${_work}")
+file(ARCHIVE_EXTRACT INPUT "${_tarball}" DESTINATION "${_download}")
+file(RENAME "${_download}/${_name}" "${DEST}" NO_REPLACE RESULT _moved)
+if(NOT _moved EQUAL 0)
+  message(FATAL_ERROR "${DEST} appeared during the download: remove it, "
+                      "or choose another with -DDEST=<dir>")
+endif()
+_release_work()
 
 _sdk_complete("${DEST}" _done)
 if(NOT _done)

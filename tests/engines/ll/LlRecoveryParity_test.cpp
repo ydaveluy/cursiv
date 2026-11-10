@@ -1,7 +1,6 @@
-// A broken document is repaired as the table engine repairs it: the
-// diagnostics and the tree agree, down to what they name. Each text is the
-// smallest of a kind where the descent used to destroy more of the document
-// than the table engine does, or to name another repair for it.
+// A broken document is repaired as the table engine repairs it: the diagnostics
+// and the tree agree, down to what they name. Each text is the smallest of its
+// kind.
 
 #include <cstddef>
 #include <cstdio>
@@ -44,14 +43,14 @@ void agree(const Engines& e, std::string_view text, bool repaired = true) {
   CHECK(a.diagnostics.empty() == !repaired &&
         b.diagnostics.empty() == !repaired);
   CHECK(a.value != nullptr && b.value != nullptr);
-  bool alike = a.diagnostics.size() == b.diagnostics.size();
-  for (std::size_t i = 0; alike && i < a.diagnostics.size(); ++i) {
+  bool matching = a.diagnostics.size() == b.diagnostics.size();
+  for (std::size_t i = 0; matching && i < a.diagnostics.size(); ++i) {
     const auto& x = a.diagnostics[i];
     const auto& y = b.diagnostics[i];
-    alike = x.kind == y.kind && x.begin == y.begin && x.end == y.end &&
-            x.element == y.element && x.also == y.also;
+    matching = x.kind == y.kind && x.begin == y.begin && x.end == y.end &&
+               x.element == y.element && x.also == y.also;
   }
-  if (!alike) {
+  if (!matching) {
     std::fprintf(stderr, "repair parity [%.*s]\n",
                  static_cast<int>(text.size()), text.data());
     const auto notes = [](const char* engine, const auto& result) {
@@ -63,7 +62,7 @@ void agree(const Engines& e, std::string_view text, bool repaired = true) {
     notes("LL", a);
     notes("LR", b);
   }
-  CHECK(alike);
+  CHECK(matching);
   if (a.value == nullptr || b.value == nullptr) return;
   std::string x, y;
   support::ast_of(*e.llr, *a.value, x);
@@ -97,7 +96,7 @@ void a_repair_keeps_the_following_statement() {
 }
 
 // A prediction can discover a fault far beyond a choice's common prefix.
-// Reading a few clean tokens there must not settle the choice before recovery
+// Reading a few clean tokens there must not commit the choice before recovery
 // reaches the missing semicolon, inventing a postfix operator along the way.
 void a_late_fault_does_not_commit_an_optional_postfix() {
   const auto e = parity();
@@ -110,8 +109,8 @@ void a_late_fault_does_not_commit_an_optional_postfix() {
   agree(e, text);
 }
 
-// A plan owing more closers than a repair may invent unplanned writes them
-// all: the statement after the run stays in the tree.
+// A plan that needs more closers than an unplanned repair may insert writes
+// them all: the statement after the run stays in the tree.
 void a_planned_run_of_closers_is_written_whole() {
   const auto e = parity();
   const std::string text = "let a = " + std::string(20, '(') + "1;\nlet b = 2;";
@@ -125,14 +124,14 @@ void a_planned_run_of_closers_is_written_whole() {
   }
 }
 
-// The first token of a required callee is owed once the descent has read
+// The first token of a required callee is expected once the descent has read
 // anything: it is inserted, and the keyword of the next statement stays one.
 void a_missing_operand_does_not_take_the_next_keyword() {
   const auto e = parity();
   agree(e, "rep:sums 1 + sums 2;");
 }
 
-// A search that had to read deeper than its first frames elected over those
+// A search that had to read deeper than its first frames chose over those
 // frames: the arm its path enters is named over them too.
 void a_choice_past_the_first_frames_enters_the_elected_arm() {
   const auto e = parity();
@@ -158,7 +157,7 @@ bool marks(const cursiv::ParseResult& r, cursiv::TextOffset begin,
 
 // Bytes no terminal reads stop where a token the lexer left open starts: that
 // token is repaired as it would be with nothing in front of it. A trivia the
-// lexer refused is laid as the author's text, unmarked.
+// lexer refused is kept as the author's text, unmarked.
 void unmatched_bytes_stop_at_an_open_token() {
   namespace c = tllconditions::generated;
   const Engines e{c::Ll::create_parser(), c::Lr::create_parser(),
@@ -174,7 +173,7 @@ void unmatched_bytes_stop_at_an_open_token() {
   }
 }
 
-// A token the elected path deletes is asked no condition of a gap: the arm that
+// A token the chosen path deletes is asked no condition of a gap: the arm that
 // path enters is named by what follows the deletion.
 void a_deleted_token_answers_no_condition() {
   namespace c = tllconditions::generated;
@@ -198,7 +197,7 @@ void a_deleted_token_answers_no_condition() {
 // A token no construct takes at the head of a statement, or in front of what
 // closes one: the repair is one insertion or one replacement, and the text
 // behind it is read.
-void a_stray_token_costs_one_repair() {
+void an_extra_token_costs_one_repair() {
   const auto e = parity();
   for (const std::string_view text :
        {",2;", "as;", "+2;", "y,", ")2;", "w,", "a,", "a 2", "@2;", "/2;",
@@ -206,8 +205,8 @@ void a_stray_token_costs_one_repair() {
     agree(e, text);
 }
 
-// Declarations that open alike and part on their second word: a misspelling of
-// it is read again, not made up for by a construct invented in front of it.
+// Declarations that open the same and part on their second word: a misspelling
+// of it is read again, not made up for by a construct invented in front of it.
 void a_misspelt_second_word_is_read_again() {
   const auto e = parity();
   for (const auto& [text, count] :
@@ -229,10 +228,9 @@ void a_misspelt_second_word_is_read_again() {
     CHECK(!parser->parse("decl:/* gap */pub struct a {}").diagnostics.empty());
 }
 
-// Between two operands, every operator is as cheap a repair as the one
-// elected, whatever level it binds at: both engines name the same ones, though
-// the readings each search merges are its own. An operator a tighter level
-// refuses is the next looser level's, and that level writes the planned one.
+// Between two operands every operator is as cheap a repair as the one chosen,
+// whatever its level, and both engines name the same ones. An operator a
+// tighter level refuses goes to the next looser level, which writes it.
 void a_missing_operator_names_every_level() {
   const auto e = parity();
   for (const std::string_view text :
@@ -263,7 +261,7 @@ void a_missing_operator_names_every_level() {
 
 int main() {
   a_missing_operator_names_every_level();
-  a_stray_token_costs_one_repair();
+  an_extra_token_costs_one_repair();
   a_misspelt_second_word_is_read_again();
   a_repair_keeps_the_following_statement();
   a_late_fault_does_not_commit_an_optional_postfix();

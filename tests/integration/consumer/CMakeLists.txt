@@ -1,7 +1,6 @@
-# A CONSUMER, AS SMALL AS ONE GETS: fetch cursiv, declare a language, link the
-# generated module -- the build writes that module itself, from nothing.
-# Configured and built by `fetchcontent_test`; nothing in it may name a cursiv
-# header but the one the generator wrote.
+# A minimal consumer: fetch cursiv, declare a language, link the module the
+# build generates. Built by `fetchcontent_test`; it includes no cursiv header
+# but the generated one.
 cmake_minimum_required(VERSION 3.30)
 project(cursiv_consumer LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
@@ -14,6 +13,9 @@ add_compile_options(
 include(FetchContent)
 FetchContent_Declare(cursiv SOURCE_DIR ${CURSIV_SOURCE_DIR})
 FetchContent_MakeAvailable(cursiv)
+
+# Read by the grammar's directory, the generator included, cross builds too.
+add_compile_definitions(TINY_CONSUMER=1)
 
 cursiv_generate_language(ID         tiny
     GRAMMAR    tiny/TinyParser.hpp

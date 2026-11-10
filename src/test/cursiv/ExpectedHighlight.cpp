@@ -29,6 +29,8 @@ Disposable expectHighlight(const LspServices& services,
   const ReplacedIndices marked = replaceIndices(detail::baseOf(input));
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, input.parseOptions);
+  Disposable disposable = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(disposable);
   std::vector<lsp::DocumentHighlight> highlights;
   const auto* const caret = detail::markerAt(marked.indices, input.index);
   if (caret != nullptr && services.documentHighlightProvider != nullptr)
@@ -68,7 +70,6 @@ Disposable expectHighlight(const LspServices& services,
           detail::markedRange(*document, marked.ranges[at]));
   }
 
-  Disposable disposable = detail::documentDisposable(services, document);
   if (input.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

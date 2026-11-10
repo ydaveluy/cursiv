@@ -37,13 +37,12 @@ void DefaultWorkspaceManager::loadAdditionalDocuments(
 bool DefaultWorkspaceManager::shouldIncludeEntry(
     const FileSystemNode& entry) const {
   const std::string name = uri_file_name(entry.uri);
-  // The platform's own hidden entries stay out...
+  // Hidden entries are out.
   if (name.empty() || name.front() == '.') return false;
-  // ...so do the directories a source tree carries that hold no source of its
-  // own: scanning them is the difference between a workspace opening and a
-  // workspace hanging...
+  // So are directories that hold no source of their own: scanning them can
+  // make opening a workspace hang.
   if (entry.isDirectory) return name != "node_modules" && name != "out";
-  // ...and a file is in exactly when the build could route it.
+  // A file is in exactly when the build could route it.
   if (!entry.isFile) return false;
   return shared.serviceRegistry->hasServices(entry.uri);
 }
@@ -95,11 +94,9 @@ std::vector<std::string> DefaultWorkspaceManager::searchFolder(
     try {
       entries = files.readDirectory(folder);
     } catch (const FileSystemError&) {
-      // Said and stepped over, the root's refusal included: one folder the
-      // server cannot list must not hide the others. Mute continuation is how
-      // a workspace half-opens with no trace. A root is one the workspace
-      // was opened on, whoever walks it: a folder an update saw change is
-      // not one.
+      // Reported and skipped, a root's refusal included: one folder that cannot
+      // be listed must not hide the others. A folder an update saw change is no
+      // root.
       const bool root = std::ranges::any_of(
           _folders, [&](const WorkspaceFolder& open) {
             return getRootFolder(open) == normalize_uri(folder);
@@ -133,8 +130,6 @@ void DefaultWorkspaceManager::initializeWorkspace(
   Documents& store = *shared.documents;
   const DocumentFactory& factory = *shared.documentFactory;
 
-  _folders.assign(folders.begin(), folders.end());
-
   // A document already in the store is not replaced: what is there is newer
   // than the disk it came from.
   const auto add = [&](std::string_view uri, std::string text) {
@@ -142,10 +137,8 @@ void DefaultWorkspaceManager::initializeWorkspace(
       store.addDocument(factory.fromString(std::move(text), uri));
   };
 
-  // Ready resolves before the build, and that is the contract: it says the
-  // documents are findable, not that they are analysed. Once, whatever later
-  // scans do -- a promise keeps no second value to give -- and whatever this
-  // one met: a consumer awaiting it would otherwise wait for the session.
+  // Ready resolves before the build: the documents are findable, not analysed.
+  // Once, from the first scan, whatever it met, so no consumer waits forever.
   const auto resolveReady = [this] {
     if (_resolved) return;
     _resolved = true;
@@ -153,22 +146,14 @@ void DefaultWorkspaceManager::initializeWorkspace(
   };
 
   try {
-    // (1) What comes from nowhere, first and unconditionally.
+    _folders.assign(folders.begin(), folders.end());
+
+    // (1) The additional documents, first and always.
     loadAdditionalDocuments(folders, add);
 
-    // (2) The folders. Every kept URI then goes through the one door a URI
-    // becomes a document by: the factory normalizes it, and reads the file
-    // once. An unreadable file is said and skipped, an unclaimed one skipped
-    // -- a scan that died on one permission bit would leave the workspace
-    // unanalysed.
-    //
-    // A folder's files are read and parsed on the pool, then added in the
-    // order of the walk: ids, warnings and the first failure come out as
-    // they would from reading the files one by one.
-    //
-    // Uninterruptable, the token deliberately not passed down: this runs once,
-    // so a scan cut short leaves documents nothing can name for the session.
-    // What the token governs is the build below, which the next one resumes.
+    // (2) The folders. Each file is read and parsed on the pool, then added in
+    // walk order; an unreadable or unclaimed file is skipped. Not cancellable:
+    // the token governs the build below, which the next build resumes.
     for (const WorkspaceFolder& folder : folders) {
       const std::vector<std::string> uris = searchFolder(getRootFolder(folder));
       std::vector<std::size_t> unheld;

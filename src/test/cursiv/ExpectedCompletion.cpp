@@ -46,6 +46,8 @@ Disposable expectCompletion(const LspServices& services,
   const ReplacedIndices marked = replaceIndices(base);
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, base.parseOptions);
+  Disposable disposable = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(disposable);
 
   lsp::CompletionList completions;
   const auto* const caret =
@@ -79,7 +81,6 @@ Disposable expectCompletion(const LspServices& services,
                               " completion items");
   }
 
-  Disposable disposable = detail::documentDisposable(services, document);
   if (base.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

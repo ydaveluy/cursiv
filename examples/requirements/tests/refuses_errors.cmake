@@ -1,5 +1,5 @@
 # Runs `requirements_cli generate` on a model with errors: the command must
-# answer 1 and say the error, and write no summary.
+# exit with 1, report the error and write no summary.
 execute_process(
   COMMAND ${CLI} generate ${MODEL} -d ${OUT}
   RESULT_VARIABLE status

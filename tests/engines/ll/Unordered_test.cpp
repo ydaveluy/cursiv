@@ -115,9 +115,9 @@ void exercise(const cursiv::Parser& parser) {
     valid(parser, text);
   } while (std::next_permutation(fields.begin(), fields.end()));
 
-  // Exhaust every order once. An eight-item copy only repeats these runtime
-  // paths while expanding the generated LR automaton exponentially; the
-  // Eleven/SixNests lowering checks below cover the supported width limits.
+  // Every order of four items: a wider group only repeats these paths and grows
+  // the LR automaton exponentially; the Eleven/SixNests checks below cover the
+  // width limits.
   std::string order = "abcd";
   do {
     std::string text = "four ";
@@ -162,9 +162,9 @@ const tunordered::Wrap* wrap_of(const cursiv::ParseResult& result) {
   return node ? cursiv::ast_cast<tunordered::Wrap>(node->expression) : nullptr;
 }
 
-// The LR lowering's own paths, which both engines read alike: three positions
-// read from a region's edges, every order of three nests, and a nest writing
-// over its group as over a run.
+// The LR lowering's own paths, which both engines read the same: three
+// positions read from a region's edges, every order of three nests, and a nest
+// writing over its group as over a run.
 void lowering_paths(const cursiv::Parser& parser) {
   std::string order = "abc";
   do {
@@ -212,7 +212,7 @@ void lowering_paths(const cursiv::Parser& parser) {
 }
 
 template <class Lowered, class Name>
-void refused_alike(const Lowered& t, std::uint16_t rules, Name&& name) {
+void refused_in_same_words(const Lowered& t, std::uint16_t rules, Name&& name) {
   CHECK(t.cfg.lowerWhy == cursiv::engine::LowerFail::unorderedTooWide);
   CHECK(t.cfg.lowerRule < rules);
   if (t.cfg.lowerRule >= rules) return;
@@ -226,14 +226,16 @@ void refused_alike(const Lowered& t, std::uint16_t rules, Name&& name) {
 template <class G>
 void refused_too_wide() {
   const auto& lr = cursiv::engine::LrLowering<G>::table();
-  refused_alike(lr, lr.cfg.nnts,
-                [](const auto& c, std::uint16_t r) { return c.nt_name(r); });
+  refused_in_same_words(lr, lr.cfg.nnts, [](const auto& c, std::uint16_t r) {
+    return c.nt_name(r);
+  });
   const auto& ll = cursiv::engine::LlLowering<G>::table();
-  refused_alike(ll, ll.cfg.nrules,
-                [](const auto& c, std::uint16_t r) { return c.rule_name(r); });
+  refused_in_same_words(ll, ll.cfg.nrules, [](const auto& c, std::uint16_t r) {
+    return c.rule_name(r);
+  });
 }
 
-// ...and spell the widest one alike.
+// ...and spell the widest one the same.
 template <class G>
 void spelt() {
   CHECK(!cursiv::engine::LrLowering<G>::table().cfg.lowerFail());
@@ -268,11 +270,11 @@ void refused_nest(std::string_view part) {
       "`, in an unordered group whose items hold a `nest`"));
 }
 
-// Both engines read one text alike: the verdict, the tree and the records
+// Both engines read one text the same: the verdict, the tree and the records
 // under it.
-void alike(const cursiv::Parser& ll, const cursiv::Parser& lr,
-           const cursiv::AstReflection& llAst,
-           const cursiv::AstReflection& lrAst, std::string_view text) {
+void engines_agree(const cursiv::Parser& ll, const cursiv::Parser& lr,
+                   const cursiv::AstReflection& llAst,
+                   const cursiv::AstReflection& lrAst, std::string_view text) {
   const auto a = ll.parse(text), b = lr.parse(text);
   CHECK(a.accepted == b.accepted);
   CHECK(a.diagnostics.size() == b.diagnostics.size());
@@ -287,7 +289,7 @@ void alike(const cursiv::Parser& ll, const cursiv::Parser& lr,
   CHECK(support::records(a.cst()) == support::records(b.cst()));
 }
 
-void records_alike() {
+void engines_agree_on_records() {
   namespace g = tunordered::generated;
   const auto ll = g::Ll::create_parser();
   const auto lr = g::Lr::create_parser();
@@ -300,7 +302,7 @@ void records_alike() {
         "wrapwords 12(?)(!);", "edges ba ;", "fields value 34 flag name 12;",
         "four d b c a ;", "blocks b a a;", "bounded b a a;",
         "pair a a;", "nested a c b;", "gather b b a a;", "gather a b a;"})
-    alike(*ll, *lr, *llAst, *lrAst, text);
+    engines_agree(*ll, *lr, *llAst, *lrAst, text);
 }
 
 // A loop inside an operand is decided in the operand's own rule: `+1` after
@@ -314,7 +316,7 @@ void loop_in_operand() {
   for (const auto text :
        {"!name +1 x;", "?name +1 x;", "?;name +1 x", "!name +1 +2 x y;",
         "?name +1 +2 x y;", "?;name +1 +2 x y", "?name x;", "?name + 1 x;"})
-    alike(*ll, *lr, *llAst, *lrAst, text);
+    engines_agree(*ll, *lr, *llAst, *lrAst, text);
   for (const auto text : {"?name +1 x;", "?;name +1 x"}) {
     const auto result = ll->parse(text);
     const auto* doc = result.value_as<tunorderedturns::Doc>();
@@ -325,7 +327,6 @@ void loop_in_operand() {
   }
 }
 
-// The tree a text builds, spelled.
 std::string tree_of(const cursiv::Parser& parser,
                     const cursiv::AstReflection& ast, std::string_view text) {
   const auto result = parser.parse(text);
@@ -468,7 +469,7 @@ void optional_items(const cursiv::Parser& parser,
   }
 }
 
-void optional_alike() {
+void engines_agree_on_optional_items() {
   namespace g = toptional::generated;
   const auto ll = g::Ll::create_parser();
   const auto lr = g::Lr::create_parser();
@@ -480,13 +481,13 @@ void optional_alike() {
        {"mix d c a 1 b 2;", "mix a 1;", "mix c a 1;", "ordered a 1 d;",
         "opt;", "opt b a;", "count b a a;", "region b;", "region b <>;",
         "child;", "child x 12;", "mix b 2;", "opt a a;"})
-    alike(*ll, *lr, *llAst, *lrAst, text);
+    engines_agree(*ll, *lr, *llAst, *lrAst, text);
 }
 
 }  // namespace
 
 int main() {
-  records_alike();
+  engines_agree_on_records();
   loop_in_operand();
   const auto ll = tunordered::generated::Ll::create_parser();
   const auto lr = tunordered::generated::Lr::create_parser();
@@ -497,7 +498,7 @@ int main() {
   spelt<tunordered::Eleven>();
   spelt<tunordered::SixNests>();
   spelt<tunordered::ElevenOptional>();
-  optional_alike();
+  engines_agree_on_optional_items();
   refused_empty<toptional::NullableItem>("\"a\"? \"b\"?");
   refused_empty<toptional::OptionalOption>("(\"a\"?)?");
   refused_nest<toptional::OptionalNest>("({Wrap.inner=} (op='?'))?");

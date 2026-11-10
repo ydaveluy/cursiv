@@ -1,5 +1,5 @@
 #include <algorithm>
-#include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -28,6 +28,8 @@
 #include "cursiv/semantic/SignatureHelpProvider.hpp"
 #include "cursiv/symbols/DocumentSymbolProvider.hpp"
 #include "cursiv/symbols/WorkspaceSymbolProvider.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstLeaf.hpp"
 #include "cursiv/text/LspPosition.hpp"
 
 namespace cursiv::bench::detail {
@@ -75,25 +77,28 @@ void measure(Row& row, const char* name, bool installed, int iterations,
   row.lsp.push_back(std::move(result));
 }
 
-// Spread probes over word starts, where navigation and hover can answer,
-// rather than arbitrary bytes inside UTF-8 sequences or whitespace. The last
-// position is EOF for completion. Conversion to UTF-16 is outside the clock.
+// Up to nine evenly spaced token starts, then the end of the document for
+// completion. Conversion to UTF-16 is outside the clock.
 std::vector<lsp::Position> positions(const Document& document) {
-  const auto text = document.textDocument().getText();
-  std::vector<TextOffset> starts;
-  bool previous = false;
-  for (std::size_t i = 0; i < text.size(); ++i) {
-    const auto c = static_cast<unsigned char>(text[i]);
-    const bool word = std::isalnum(c) != 0 || c == '_' || c >= 0x80;
-    if (word && !previous) starts.push_back(static_cast<TextOffset>(i));
-    previous = word;
-  }
+  const Cst& cst = document.parseResult.cst();
+  const auto token = [](const CstLeaf& leaf) {
+    return !leaf.hidden && leaf.begin != leaf.end;
+  };
+  std::size_t tokens = 0;
+  cst.visit_leaves([&](const CstLeaf& leaf) { tokens += token(leaf) ? 1 : 0; });
+  const auto count = std::min<std::size_t>(tokens, 9);
+  const auto rank_of = [&](std::size_t i) {
+    return count == 1 ? 0 : i * (tokens - 1) / (count - 1);
+  };
   std::vector<lsp::Position> result;
-  const auto count = std::min<std::size_t>(starts.size(), 9);
-  for (std::size_t i = 0; i < count; ++i) {
-    const auto index = count == 1 ? 0 : i * (starts.size() - 1) / (count - 1);
-    result.push_back(to_lsp(document.textDocument().positionAt(starts[index])));
-  }
+  std::size_t rank = 0;
+  cst.visit_leaves([&](const CstLeaf& leaf) {
+    if (!token(leaf)) return;
+    if (result.size() < count && rank_of(result.size()) == rank)
+      result.push_back(to_lsp(document.textDocument().positionAt(leaf.begin)));
+    ++rank;
+  });
+  const auto text = document.textDocument().getText();
   result.push_back(to_lsp(document.textDocument().positionAt(
       static_cast<TextOffset>(text.size()))));
   return result;

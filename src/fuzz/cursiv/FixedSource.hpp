@@ -1,4 +1,4 @@
-// The ribbon that decides nothing: every choice is the first. The lexicon
+// The source that decides nothing: every choice is the first. The lexicon
 // spells its separator with it: one canonical spelling, worked out without
 // taking any entropy from the caller's source.
 #pragma once

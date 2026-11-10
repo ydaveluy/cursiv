@@ -1,5 +1,5 @@
-// The workspace fixture's grammar as a language whose every other slot is a
-// default: what most lanes register before they ask a service.
+// The workspace fixture language with default services, as most tests
+// register it.
 #pragma once
 
 #include <functional>
@@ -32,17 +32,8 @@ using CoreWorkspace =
 using LspWorkspace =
     WorkspaceWorld<cursiv::SharedLspServices, cursiv::LspServices>;
 
-// A package holding a comment over three lines and an entity: the document an
-// outline and its folds are read off.
-// 0: package p {
-// 1:   /* a block comment
-// 2:      over three lines
-// 3:   */
-// 4:   datatype String
-// 5:   entity Person {
-// 6:     name : String
-// 7:   }
-// 8: }
+// A package holding a three-line comment and an entity, for outline and
+// folding tests.
 inline constexpr std::string_view kPackage =
     "package p {\n"
     "  /* a block comment\n"

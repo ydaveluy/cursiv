@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/services/CoreServices.hpp"
@@ -21,8 +22,8 @@ void DefaultServiceRegistry::registerServices(
   if (services == nullptr)
     throw ServiceRegistrationError("cursiv: no services to register");
 
-  // The gate of the slot law: a container that owes a required slot is
-  // refused here, the shared container's included.
+  // A container missing a required slot is refused here, the shared container
+  // included.
   if (const std::string_view missing = shared.firstMissingService();
       !missing.empty())
     throw ServiceRegistrationError(
@@ -37,46 +38,39 @@ void DefaultServiceRegistry::registerServices(
     throw ServiceRegistrationError(
         std::format("cursiv: language '{}' is missing service '{}'",
                     meta.languageId, missing));
-  // Its services already read the workspace they were built over: routed
-  // here, they would index and resolve in another one.
+  // Its services were built over another workspace, and would index and
+  // resolve there.
   if (&services->shared() != &shared)
     throw ServiceRegistrationError(
         std::format("cursiv: language '{}' was built for another workspace",
                     meta.languageId));
 
-  // Owned before any table names it: a throw below -- a table growing, a
-  // collision's message -- leaves rows on a live container, never a freed one.
+  // Every table is rewritten on the side and swapped in at the end, when the
+  // container is taken over: a throw before that leaves the registry as it was.
   const CoreServices* const language = services.get();
-  _owned.push_back(std::move(services));
+  ByName byLanguageId = _byLanguageId;
+  ByName byExtension = _byExtension;
+  ByName byFileName = _byFileName;
 
-  // A re-registration retires the previous container before claiming: its
-  // rows would otherwise read as a collision of one language with itself. The
-  // language keeps its rank in `_all` -- registration order is the order a
-  // consumer walks, and re-registering must not reshuffle it.
-  const auto known = _byLanguageId.find(meta.languageId);
-  const bool reRegistered = known != _byLanguageId.end();
-  // A new language's room in `_all` before any table names it: listed in the
-  // same step it becomes routable by its id, so the two never disagree.
-  if (!reRegistered) _all.reserve(_all.size() + 1);
-  if (reRegistered) {
-    const CoreServices* const old = known->second;
-    std::erase_if(_byExtension,
+  // A re-registration drops the previous container's rows first, so they are
+  // not a collision with itself; it keeps its rank in `_all`.
+  const auto known = byLanguageId.find(meta.languageId);
+  const CoreServices* const old =
+      known != byLanguageId.end() ? known->second : nullptr;
+  if (old != nullptr) {
+    std::erase_if(byExtension,
                   [old](const auto& row) { return row.second == old; });
-    std::erase_if(_byFileName,
+    std::erase_if(byFileName,
                   [old](const auto& row) { return row.second == old; });
-    std::ranges::replace(_all, old, language);
-    // Existing documents retain this container through their language pointer.
-    // Keep its ownership until registry destruction; only routing is replaced.
   }
-  _byLanguageId[meta.languageId] = language;
-  if (!reRegistered) _all.push_back(language);
-  // The later registration owns a colliding key -- said, never silent: the
-  // first language's documents would quietly resolve to the second's. The
-  // message names the normalised key, which is what routes.
-  const auto claim = [&](auto& table, std::string key, const char* kind) {
+  byLanguageId[meta.languageId] = language;
+  // A colliding key goes to the later language, with a warning naming the
+  // normalized key, published once the registration stands.
+  std::vector<Observation> collisions;
+  const auto claim = [&](ByName& table, std::string key, const char* kind) {
     const CoreServices*& slot = table[key];
     if (slot != nullptr && slot != language)
-      shared.observabilitySink->publish(
+      collisions.push_back(
           {.severity = ObservationSeverity::Warning,
            .code = ObservationCode::LanguageMappingCollision,
            .message = std::format("two languages claim {} '{}'", kind, key),
@@ -88,9 +82,25 @@ void DefaultServiceRegistry::registerServices(
   // ending in a separator: not a claim.
   for (const std::string& extension : meta.fileExtensions)
     if (std::string key = normalize_extension(extension); !key.empty())
-      claim(_byExtension, std::move(key), "extension");
+      claim(byExtension, std::move(key), "extension");
   for (const std::string& fileName : meta.fileNames)
-    if (!fileName.empty()) claim(_byFileName, fileName, "file name");
+    if (!fileName.empty()) claim(byFileName, fileName, "file name");
+
+  // Room for the two pushes below, so nothing past this point throws. A
+  // released container stays owned until the registry dies: documents may still
+  // use it.
+  _owned.reserve(_owned.size() + 1);
+  if (old == nullptr) _all.reserve(_all.size() + 1);
+  _owned.push_back(std::move(services));
+  if (old == nullptr)
+    _all.push_back(language);
+  else
+    std::ranges::replace(_all, old, language);
+  _byLanguageId.swap(byLanguageId);
+  _byExtension.swap(byExtension);
+  _byFileName.swap(byFileName);
+  for (const Observation& collision : collisions)
+    shared.observabilitySink->publish(collision);
 }
 
 const CoreServices* DefaultServiceRegistry::lookup(

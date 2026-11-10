@@ -1,5 +1,5 @@
-// A rule read outside every region and inside one: the reading outside names
-// the skipped terminal where the lexer never hands it over.
+// A rule that reads a skipped terminal, called outside any region and inside a
+// `tight()` one: the call outside is refused.
 // expect LR: refused .skippedTerminal..*rule .Pair. names a terminal that is skipped as trivia at that point
 #pragma once
 

@@ -1,5 +1,5 @@
-// Two trivia whose pair walk grows past its budget: the check stops unsure and
-// the token table, too large to build, is refused with no memory left behind.
+// Two trivia whose comparison grows past its budget: the check stops unsure,
+// and the lexer table, too large to build, is refused without leaking memory.
 // expect LR: refused: the grammar has terminals too complex for the generated lexer
 #pragma once
 

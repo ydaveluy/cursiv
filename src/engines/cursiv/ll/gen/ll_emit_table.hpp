@@ -7,10 +7,8 @@ namespace cursiv::engine {
 
 class LlFinalProgram;
 
-// The header every unit of the parser reads -- the data, and the functions it
-// points at declared -- and those functions themselves, with what they
-// include, for the parser's own unit: each unit that reads the table would
-// otherwise compile its own copy of every one of them.
+// The header every parser unit reads, with the view's functions declared, and
+// their definitions for the parser's own unit only.
 struct LlTableSource {
   std::string header;
   std::string includes;

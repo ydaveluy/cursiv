@@ -31,10 +31,8 @@ std::string_view name_of(const cursiv::AstNode& node) {
                                 : std::string_view{};
 }
 
-// The qualified name a declaration will answer to, with `renamed` spelled
-// `newName` -- functional rather than mutate-then-read, since an AST is not
-// written to answer a request. A climb, and the qualifier built once, however
-// deep the packages nest.
+// The qualified name `node` will have once `renamed` is named `newName`,
+// without changing the AST.
 std::string qualified_after_rename(const cursiv::AstNode& node,
                                    const cursiv::AstNode& renamed,
                                    std::string_view newName,
@@ -113,7 +111,7 @@ std::optional<lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
   if (!edit->changes.has_value()) edit->changes.emplace();
   auto& changes = *edit->changes;
   // Each document's sites, to the row of the edit there. A document's rows
-  // are indexed when a reference first lands in them, so a site is found
+  // are indexed at the first reference in that document, so a site is found
   // without scanning every edit of its document again.
   std::unordered_map<const lsp::Array<lsp::TextEdit>*,
                      std::unordered_map<std::uint64_t, std::size_t>>
@@ -145,7 +143,7 @@ std::optional<lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
       // form, even when an ancestor package is what was renamed.
       const std::string_view replacement =
           written.find('.') == std::string_view::npos ? bare : qualified;
-      if (written == replacement) continue;  // nothing to say
+      if (written == replacement) continue;  // nothing to change
 
       lsp::TextEdit rewrite;
       rewrite.range = cursiv::to_lsp(

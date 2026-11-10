@@ -200,7 +200,7 @@ struct Base : cursiv::GrammarSpec {
       : terminal<through(lit<"<"> + mark<Label>(some(lit<"\xA9">)) + lit<">">,
                          same<Label> + lit<"!">)> {};
   // The scan begins after the opener, even when an exact byte literal ends
-  // with a UTF-8 lead byte. Its following stray byte starts a character.
+  // with a UTF-8 lead byte. Its following continuation byte starts a character.
   struct ScalarSplit
       : terminal<through(lit<"<"> + mark<Equals>(some(lit<"=">)) + lit<"\xC3">,
                          ScalarClose)> {};

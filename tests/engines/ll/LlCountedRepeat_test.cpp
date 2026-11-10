@@ -82,7 +82,7 @@ void counted_bounds_are_in_the_predictive_graph() {
                                {"ThreeRule", {3, 3}},
                                {"Bounded", {2, 4}},
                                {"OptionalCount", {0, 3}},
-                               {"Owed", {3, 7}},
+                               {"AtLeastThree", {3, 7}},
                                {"Once", {1, 1}}}) {
     std::uint16_t rule = 0;
     for (std::uint16_t r = 1; r < b.cfg.nrules; ++r)
@@ -113,10 +113,12 @@ void an_internal_zero_count_preserves_the_outer_action_rows() {
   // well-defined and must retain its directives when built internally.
   cursiv::engine::LlLowered low;
   cursiv::engine::llow::Pool pool;
-  const auto kid = pool.push({cursiv::engine::llow::Shape::none});
-  const auto rep = pool.push({cursiv::engine::llow::Shape::rep, kid, 0, 0, 0});
+  const auto child = pool.push({cursiv::engine::llow::Shape::none});
+  const auto rep =
+      pool.push({cursiv::engine::llow::Shape::rep, child, 0, 0, 0});
   const cursiv::engine::llow::Acts made{3}, row{7};
-  const auto id = cursiv::engine::llow::emit(low, pool, rep, made, row, 0);
+  const auto id = cursiv::detail::descend(
+      cursiv::engine::llow::emit(low, pool, rep, made, row, 0));
   CHECK(low.cfg.nodes[id].kind == cursiv::engine::LlShape::empty);
   const auto chain = low.writes.chains[low.cfg.nodes[id].row];
   CHECK(chain.count == 2 && low.writes.acts[chain.off] == 3 &&

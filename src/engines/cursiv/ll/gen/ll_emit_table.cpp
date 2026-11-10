@@ -1,8 +1,6 @@
-// The table as source: every array the runtime reads, and the one view that
-// names them. Nothing here is computed twice -- what the construction settled
-// is printed, and what a reader derives is printed too, so no module folds a
-// question out of the table at load time. The functions the view points at are
-// declared beside it and defined once, in the parser's own unit.
+// The table as source: every array the runtime reads, and the view that names
+// them. What a reader derives is printed too, so nothing is computed at load
+// time. The view's functions are defined once, in the parser's unit.
 #include "cursiv/ll/gen/ll_emit_table.hpp"
 
 #include <algorithm>
@@ -87,10 +85,8 @@ struct Out : TextBuilder {
   }
 };
 
-// A terminal set per state, pooled: the distinct sets at the width this
-// grammar needs (the construction's sets grow, a frozen row is a fixed run of
-// words), and per state the word its row starts at -- an offset, not a row
-// number, so a reader adds where it would have multiplied.
+// Per-state terminal sets, pooled at the width this grammar needs, and per
+// state the word offset its row starts at.
 struct TermRows {
   std::vector<std::uint64_t> pool;
   std::vector<std::uint32_t> at;
@@ -120,11 +116,17 @@ std::vector<DynSet> lex_live(const Built& a) {
   }
   std::vector<std::uint32_t> todo(a.ndfa);
   for (std::uint32_t s = 0; s < a.ndfa; ++s) todo[s] = s;
+  // A state is queued at most once; taken off, it passes on its current set.
+  std::vector<std::uint8_t> queued(a.ndfa, 1);
   while (!todo.empty()) {
     const std::uint32_t s = todo.back();
     todo.pop_back();
+    queued[s] = 0;
     for (const std::uint32_t from : into[s])
-      if (live[from].add(live[s])) todo.push_back(from);
+      if (live[from].add(live[s]) && queued[from] == 0) {
+        queued[from] = 1;
+        todo.push_back(from);
+      }
   }
   return live;
 }
@@ -215,7 +217,7 @@ std::string staged_source(const Built& a) {
   o.line("  ", unused, "auto from = c.la.end;\n  auto sym = c.la.sym;");
   o.line("  ", unused, "::cursiv::engine::LlLookRead nextRead;");
   o.line(
-      "  if (::cursiv::engine::ll_reads_rivals<kTable>(c, dec.mode)) {\n"
+      "  if (::cursiv::engine::ll_has_candidates<kTable>(c, dec.mode)) {\n"
       "    ::cursiv::engine::LlLookRead first;\n"
       "    ::cursiv::engine::ll_first_read<kTable>(c, dec, viable, read, "
       "&first);\n"
@@ -231,9 +233,11 @@ std::string staged_source(const Built& a) {
     const auto& state = a.dfa[at];
     if (reads[at]) o.line("R", at, ":");
     if (reads[at] && state.alt == kNoRow) {
+      // The automaton may loop over a long shared run: the stop is read between
+      // its tokens.
       o.line(
           "  ++::cursiv::engine::ll_staged_reads<kTable>();\n  "
-          "viable.reset();");
+          "c.stop.poll();\n  viable.reset();");
       for (std::uint32_t e = 0; e < state.nedges; ++e)
         o.line("  viable.set(", a.dfaEdge[state.edge + e].term, "u);");
       // The next token is crossed under the configuration of the position the
@@ -303,9 +307,9 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   // set has scalars of its own.
   const bool decoding = g.wordRanges.size() != 0 || classes;
   const LexNamePool pool(g, a.relays);
-  const auto tabled = [](const auto& bases, bool rides) {
+  const auto tabled = [](const auto& bases, bool owning) {
     for (std::size_t i = 1; i < bases.size(); ++i)
-      if (ll_fuse_tabled(bases[i] - bases[i - 1], rides)) return true;
+      if (ll_fuse_tabled(bases[i] - bases[i - 1], owning)) return true;
     return false;
   };
   bool fuseTable = tabled(a.ownBase, true) || tabled(a.fuseBase, false);
@@ -374,7 +378,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
             return concat("{", pool(x.nameOff), "u,", x.nameLen, "u,",
                           x.element, "u,", x.trivia, ",", x.recorded, ",",
                           x.spelled, ",", pool(x.textOff), "u,", x.textLen,
-                          "u,", x.delim, ",", x.joins, ",", x.laid, "u,",
+                          "u,", x.delim, ",", x.joins, ",", x.synthetic, "u,",
                           x.cond, "u,", x.refuses, "}");
           });
   // A climb reads its operator's token, and the gap behind it, under its own
@@ -443,7 +447,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.array("::std::uint32_t", "kTypoSuccBase", a.typoSuccBase);
   o.array("::std::uint16_t", "kTypoSucc", a.typoSucc);
   o.array("::std::uint8_t", "kLexBodies", a.lexBodies);
-  o.array("::std::uint16_t", "kLexOwed", a.lexOwed);
+  o.array("::std::uint16_t", "kLexBodyTerms", a.lexBodyTerms);
   o.array("::cursiv::engine::ByteSet", "kLexOpeners", a.lexOpeners, byte_set);
   o.array("::std::uint16_t", "kLexAccept",
           std::span(a.dfaAccept.data(), a.ndfa));
@@ -451,7 +455,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.array("::std::uint32_t", "kLexChoiceAt", a.lexChoiceAt.v);
   o.array("::cursiv::engine::LlLexAccept", "kLexChoices", a.lexChoices,
           [](const LlLexAccept& x) {
-            return concat("{", x.term, "u,", x.bound, "u,", x.tier, "u}");
+            return concat("{", x.term, "u,", x.bound, "u,", x.priority, "u}");
           });
   if (lexChecks) o.array("::std::uint8_t", "kLexChecks", a.lexChecks.v);
   if (!a.relays.empty()) {
@@ -561,11 +565,9 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.array("::cursiv::unicode::Range", "kScalarRanges", g.scalarRanges.v,
             range);
   }
-  // The functions the view points at, as the header declares them: their
-  // definitions, and the large bodies only they call, go to the parser's own
-  // unit. A unit that reads the view compiles every function it points at;
-  // an inline function no one in the unit calls costs it nothing but its
-  // text, so the predicates the conditions read stay in the header.
+  // The view's functions as the header declares them. Their definitions go to
+  // the parser's unit; the condition predicates stay inline in the header,
+  // which costs a unit that does not call them nothing.
   const std::string_view conditionFn =
       "bool condition(const char* src, ::cursiv::TextOffset len, unsigned k,\n"
       "    const ::cursiv::engine::Token& token, ::cursiv::TextOffset gapFrom, "
@@ -743,7 +745,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.ptr("typoSuccBase", "kTypoSuccBase");
   o.ptr("typoSucc", "kTypoSucc");
   o.ptr("lexBodies", "kLexBodies");
-  o.ptr("lexOwed", "kLexOwed");
+  o.ptr("lexBodyTerms", "kLexBodyTerms");
   o.ptr("lexOpeners", "kLexOpeners");
   o.ptr("dfaAccept", "kLexAccept");
   o.ptr("dfaBound", "kLexBound");

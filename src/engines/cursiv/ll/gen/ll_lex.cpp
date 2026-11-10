@@ -1,7 +1,5 @@
-// The lexer of one program: a token graph per terminal, the byte classes its
-// edges are written in, and one automaton with a start per mode. What a point
-// the parse reads at may read is the whole of a mode -- a position expecting
-// one terminal lexes that one, a choice lexes what its arms admit.
+// The lexer of one program: a token graph per terminal, their byte classes, and
+// one automaton with a start per mode.
 #include "cursiv/ll/gen/ll_lex.hpp"
 
 #include <algorithm>
@@ -17,10 +15,10 @@
 #include "cursiv/ll/gen/LlStanding.hpp"
 #include "cursiv/shared/gen/LexAlphabet.hpp"
 #include "cursiv/shared/gen/LexBacktrack.hpp"
+#include "cursiv/shared/gen/LexBodyRows.hpp"
 #include "cursiv/shared/gen/LexDfaBuild.hpp"
 #include "cursiv/shared/gen/LexModes.hpp"
 #include "cursiv/shared/gen/LexOvertakes.hpp"
-#include "cursiv/shared/gen/LexOwedRows.hpp"
 #include "cursiv/shared/gen/LexRelayGen.hpp"
 #include "cursiv/shared/gen/LexSuccessors.hpp"
 #include "cursiv/shared/gen/PredicateModes.hpp"
@@ -35,18 +33,17 @@ namespace {
 // What each section's grammar reads, by the section's own configuration: the
 // terminals of its positions and operators.
 std::vector<DynSet> ll_section_reads(const LlLowCfg& g) {
-  const auto& home = g.cfgHome;
-  std::vector<DynSet> own(home.size());
+  const auto& sectionOf = g.cfgSection;
+  std::vector<DynSet> own(sectionOf.size());
   for (std::uint32_t id = 0; id < g.nnodes; ++id)
     if (g.nodes[id].kind == LlShape::term)
-      own[home[g.nodeBuild[id].cfg]].set(g.nodes[id].sym);
+      own[sectionOf[g.nodeBuild[id].cfg]].set(g.nodes[id].sym);
   return own;
 }
 
-// Where a token is read, and what may stand there. A position expecting one
-// terminal lexes that one; a choice lexes what its arms admit. Trivia rides
-// with both: what the configuration the point reads under skips, so a blank a
-// region does not skip stops the walk instead of being eaten.
+// Where a token is read, and what may stand there: a position lexes the
+// terminals it expects, a choice what its arms admit, both with the trivia the
+// point skips. A blank a region does not skip stops the walk.
 LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   auto& g = b.cfg;
   LexModes modes(g);
@@ -56,10 +53,9 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
     return skips[i < at.size() && at[i] < skips.size() ? at[i] : 0] |
            modes.joins;
   };
-  // An implied token answers a refused token in hand: where it may stand, the
-  // text its condition reads must lex, or a shorter token is taken and kept.
-  // The token in hand is the one its normal continuation elects; what follows
-  // an insertion reads the same text again, under its own mode.
+  // Where an implied token may stand, the text its condition reads must lex, or
+  // a shorter token is taken. After an insertion the same text is read again
+  // under its own mode.
   const std::vector<DynSet> firsts = condition_firsts(g);
   std::map<unsigned, DynSet> implied;
   for (std::uint32_t id = 0; id < g.nnodes; ++id)
@@ -132,28 +128,28 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   DynSet tail = skips[0];
   tail.set(kEofSymbol);
   b.tailMode = intern(tail);
-  const auto& home = g.cfgHome;
+  const auto& sectionOf = g.cfgSection;
   b.sectionErr.clear();
   b.sectionEnd.clear();
   if (g.sections()) {
     b.sectionErr = modes.section_modes(g, ll_section_reads(g), b.errMode);
-    b.sectionEnd.assign(home.size(), 0);
-    for (std::size_t h = 1; h < home.size(); ++h)
-      if (home[h] == h) b.sectionEnd[h] = g.cfgEnd[h];
+    b.sectionEnd.assign(sectionOf.size(), 0);
+    for (std::size_t h = 1; h < sectionOf.size(); ++h)
+      if (sectionOf[h] == h) b.sectionEnd[h] = g.cfgEnd[h];
   }
   // For a choice in a region, what its configuration skips and every token it
-  // does not read in another role: a lookahead crosses no other trivia -- in a
-  // section, no token its grammar does not read.
+  // does not read in another role: a lookahead crosses no other trivia, and in
+  // a section no token its grammar does not read.
   b.lookMode.clear();
   if (skips.size() > 1) {
     std::vector byCfg(skips.size(), kNoRow);
     b.lookMode.assign(g.ndecisions, b.errMode);
     for (std::uint16_t d = 0; d < g.ndecisions; ++d) {
       const std::uint8_t k = b.gapCfg[g.decisions[d].node];
-      if (byCfg[k] == kNoRow && !b.sectionErr.empty() && home[k] != 0) {
+      if (byCfg[k] == kNoRow && !b.sectionErr.empty() && sectionOf[k] != 0) {
         DynSet all = skips[k];
         for (std::uint16_t t = 1; t < g.nterms; ++t)
-          if (!trivia.test(t) && modes.set[b.sectionErr[home[k]]].test(t))
+          if (!trivia.test(t) && modes.set[b.sectionErr[sectionOf[k]]].test(t))
             all.set(t);
         byCfg[k] = intern(all);
       }
@@ -230,18 +226,19 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
     built.dfaAccept[self] =
         r.best < 0 ? 0 : static_cast<std::uint16_t>(r.best + 1);
     // The boundary is the match state's own, put there by a literal's guard
-    // or a refusal inside the body -- never the terminal's, which would close
+    // or a refusal inside the body; never the terminal's, which would close
     // every alternative on the class of one.
     built.dfaBound[self] = r.best_bound();
     std::vector<LlLexAccept> own;
-    for (const auto& a : r.accepts) own.push_back({a.term, a.bound, a.tier});
+    for (const auto& a : r.accepts)
+      own.push_back({a.term, a.bound, a.priority});
     for (const auto& a : r.stands)
-      own.push_back({a.term, a.bound, kTierKeyword});
+      own.push_back({a.term, a.bound, kKeywordPriority});
     // A list the pool holds already is read where it stands.
     std::vector<std::uint64_t> key;
     for (const LlLexAccept& a : own)
       key.push_back(std::uint64_t{a.term} << 24 | std::uint64_t{a.bound} << 8 |
-                    a.tier);
+                    a.priority);
     auto& pool = built.lexChoices;
     const auto [at, fresh] = listAt.try_emplace(
         std::move(key), static_cast<std::uint32_t>(pool.size()));
@@ -260,11 +257,11 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
   built.typoSuccBase = std::move(successors.base);
   built.typoSucc = std::move(successors.states);
   {
-    LexOwedRows owed = lex_owed_rows(LexOwedView{
+    LexBodyRows bodyRows = lex_body_rows(LexBodyView{
         LlLexView{built}, built.ndfa, built.typoSuccBase, built.typoSucc});
-    built.lexBodies = std::move(owed.bodies);
-    built.lexOwed = std::move(owed.owed);
-    built.lexOpeners = std::move(owed.openers);
+    built.lexBodies = std::move(bodyRows.bodies);
+    built.lexBodyTerms = std::move(bodyRows.terms);
+    built.lexOpeners = std::move(bodyRows.openers);
   }
   // A state that reserves nothing still has its two sets: only the reserving
   // ones are written, and every reader below walks all `ndfa`.
@@ -277,7 +274,7 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
       [&](std::size_t s) -> const DynSet& { return built.dfaAccSet.data()[s]; },
       [&](std::size_t s, auto&& each) {
         for (const LlLexAccept& a : built.choices(s))
-          each(a.term, a.bound, unsigned{a.tier});
+          each(a.term, a.bound, unsigned{a.priority});
       },
       [&](std::size_t s, unsigned u) {
         built.dfaResSet[s].set(u);
@@ -321,13 +318,9 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
       if (stands) unreserved[s].set(built.relays[r].term);
     }
   }
-  // A mode two terminals can match from one position: the parse then has a
-  // lexical choice as well as a syntactic one, and the prediction is what
-  // settles it. Where only a token that ends the text can, the choice is the
-  // prediction's there alone. Trivia is never a rival: the lexer elects a
-  // visible terminal over it, and a prediction reads the visible ones alone
-  // again. A statement's newline and a blank of the same spelling are one
-  // token.
+  // Modes where two terminals can match at one position: the prediction
+  // decides that lexical choice too. Trivia is never a competitor, and a
+  // newline and a blank of one spelling are one token.
   modeTie.assign(built.nmodes, DynSet{});
   // The terminals read at one length, `endOnly` those of them that stand only
   // where the text ends: true once the mode has a choice everywhere.
@@ -367,15 +360,16 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
   // two of its terminals at a spelling this mode's own reads otherwise.
   std::vector<std::uint16_t> reach;
   std::vector<std::uint8_t> seen;
-  // A relay that asserts where the walk stands reads the rest of its token
-  // in step with the walk it leaves, from one position: what the two accept
-  // after the same bytes ties as a state's own terminals do. The pairs are
-  // the walk with each rest it launches, and two rests of one walk.
+  // A relay that asserts where the walk stands reads the rest of its token in
+  // step with the walk: what both accept after the same bytes ties. The pairs
+  // are the walk with each rest it launches, and two rests of one walk.
   std::vector<std::pair<std::uint16_t, std::uint16_t>> pairs;
   std::unordered_set<std::uint32_t> paired;
+  seen.assign(built.ndfa, 0);
   for (std::uint16_t m = 0; m < built.nmodes; ++m) {
     built.modeMulti[m] = 0;
-    seen.assign(built.ndfa, 0);
+    // Every state the last mode marked is in `reach`, even one left unwalked.
+    for (const std::uint16_t s : reach) seen[s] = 0;
     reach.assign(1, built.modeStart[m]);
     seen[built.modeStart[m]] = 1;
     pairs.clear();
@@ -428,7 +422,7 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
 
 // One alphabet covers another when it admits everything the other does. A
 // token the wider one matched then answers the narrower, provided the
-// narrower admits the terminal it matched -- no subset can match longer.
+// narrower admits the terminal it matched: no subset can match longer.
 void ll_mode_cover(LlBuiltProgram& b, const LexModes& modes) {
   const std::uint32_t words = (b.cfg.nterms + 63u) / 64u;
   b.modeTerms.assign(std::size_t{b.nmodes} * words, 0);
@@ -443,13 +437,9 @@ void ll_mode_cover(LlBuiltProgram& b, const LexModes& modes) {
   });
 }
 
-// A choice reads its token under the alphabet of all its arms, and an arm that
-// may end the rule admits whatever any caller reads after it. Such a terminal,
-// which the rule itself does not read from the choice on, may read over
-// another of the alphabet -- `#(` over `#` -- where the caller in hand takes
-// none of it: per choice, those terminals, which the descent asks of the
-// frames it stands in before it takes one. What those frames answer, what each
-// caller reads past the call, is kept with them.
+// Per choice, the terminals only a caller reads after it that may read over
+// another, `#(` over `#`: the descent asks its frames before taking one, and
+// their answers are kept.
 void ll_flag_choices(LlBuiltProgram& b, const LexAlphabet& alpha,
                      const LexModes& modes, std::uint64_t* walks) {
   const auto& g = b.cfg;
@@ -491,24 +481,24 @@ void ll_build_lexer(LlBuiltProgram& b, LexAlphabet& alpha,
                     std::uint64_t* walks) {
   alpha.section_ends(b.cfg, ll_section_reads);
   const LexModes modes = ll_lex_modes_of(b);
-  // For a mode `modeMulti` marks 2, the terminals that meet at the text's end.
+  // For a mode `modeMulti` marks 2, the terminals that tie at the text's end.
   std::vector<DynSet> modeTie;
   ll_lex_dfa(b, alpha, modes, modeTie);
   b.modeBacktrack = lex_backtrack_modes(b);
   ll_mode_cover(b, modes);
   // Different terminals may spell the same bytes. Their token ids alone
-  // cannot settle a choice; prediction must retain all those readings.
+  // cannot decide a choice; prediction must retain all those readings.
   b.decEnded.assign(b.cfg.ndecisions, 0);
   for (std::uint16_t d = 0; d < b.cfg.ndecisions; ++d) {
     auto& decision = b.cfg.decisions[d];
     const std::uint8_t multi = b.modeMulti[decision.mode];
     if (multi == 0) continue;
     if (multi == 2) {
-      bool meets = false;
+      bool readsTie = false;
       for (unsigned i = 0; i < b.cfg.decisionBuild[d].nalts; ++i)
-        meets = meets ||
-                b.laSet[decision.set + i].intersects(modeTie[decision.mode]);
-      if (!meets) continue;
+        readsTie = readsTie ||
+                   b.laSet[decision.set + i].intersects(modeTie[decision.mode]);
+      if (!readsTie) continue;
       b.decEnded[d] = 1;
       if (decision.how == LlPredict::single) continue;
     }

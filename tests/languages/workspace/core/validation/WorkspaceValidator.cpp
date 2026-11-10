@@ -58,16 +58,15 @@ WorkspaceValidator::~WorkspaceValidator() noexcept {
     shared.documentBuilder->removeDocumentUpdateListener(*this);
 }
 
-void WorkspaceValidator::noteClimb(cursiv::DocumentId from,
-                                   cursiv::DocumentId through) const {
-  const std::scoped_lock lock(_climbedMutex);
-  _climbed[from].insert(through);
+void WorkspaceValidator::noteChainedDocument(cursiv::DocumentId from,
+                                             cursiv::DocumentId through) const {
+  const std::scoped_lock lock(_chainedMutex);
+  _chainedDocuments[from].insert(through);
 }
 
-// Announced once this update's resets are done: a document the climbs went
-// through moved if it is gone or no longer linked. A validated document whose
-// climbs went through one goes back to validation; any other drops its entry,
-// which its next validation writes again.
+// Called after the update's resets. A validated document whose chains went
+// through a removed or unlinked document goes back to validation; any other
+// drops its entry, which its next validation writes again.
 void WorkspaceValidator::onUpdate(std::span<const std::string_view>,
                                   std::span<const std::string_view>) {
   const cursiv::Documents& store = *shared.documents;
@@ -76,8 +75,8 @@ void WorkspaceValidator::onUpdate(std::span<const std::string_view>,
     return document == nullptr ||
            document->state.load() < cursiv::DocumentState::IndexedReferences;
   };
-  const std::scoped_lock lock(_climbedMutex);
-  for (auto at = _climbed.begin(); at != _climbed.end();) {
+  const std::scoped_lock lock(_chainedMutex);
+  for (auto at = _chainedDocuments.begin(); at != _chainedDocuments.end();) {
     const std::shared_ptr<cursiv::Document> document =
         store.getDocument(at->first);
     if (document != nullptr &&
@@ -89,7 +88,7 @@ void WorkspaceValidator::onUpdate(std::span<const std::string_view>,
       shared.documentBuilder->resetToState(
           *document, cursiv::DocumentState::IndexedReferences);
     }
-    at = _climbed.erase(at);
+    at = _chainedDocuments.erase(at);
   }
 }
 
@@ -107,16 +106,16 @@ void WorkspaceValidator::checkDataTypeNameStartsWithCapital(
         .property<&ast::AbstractElement::name>();
 }
 
-// Up the chain to its end, to another document, to an entity already
-// answered, or back to an entity it passed: a loop, which `A -> B -> C -> B`
-// is without coming back to `A`. Every entity passed shares the answer.
+// Up the chain to its end, to another document, to a known entity, or back to
+// an entity passed: a loop, as `A -> B -> C -> B` is without reaching `A`
+// again. Every entity passed shares the answer.
 WorkspaceValidator::Exit WorkspaceValidator::exitOf(
     const ast::Entity& entity) const {
   const cursiv::Document* const document = entity.getDocument();
   const cursiv::DocumentId id =
       document == nullptr ? cursiv::kNoDocument : document->id;
   return _exits.get(id, &entity, [&] {
-    // The entities past `entity`: most climbs pass none.
+    // The entities past `entity`: most walks pass none.
     Passed passed;
     Exit exit;
     for (const ast::Entity* at = &entity;;) {
@@ -143,11 +142,11 @@ WorkspaceValidator::Exit WorkspaceValidator::exitOf(
   });
 }
 
-// From one document to the next: a climb that enters an entity twice loops.
-// Each document it enters is noted, since the verdict reads it.
+// Follows the chain document by document: entering an entity twice is a loop.
+// Each document entered is noted, since the verdict depends on it.
 void WorkspaceValidator::checkEntityDoesNotExtendItself(
     const ast::Entity& entity, cursiv::ValidationAcceptor& accept) const {
-  const cursiv::Document* const home = entity.getDocument();
+  const cursiv::Document* const entityDocument = entity.getDocument();
   Passed entered;
   for (const ast::Entity* at = &entity;;) {
     const Exit exit = exitOf(*at);
@@ -156,8 +155,8 @@ void WorkspaceValidator::checkEntityDoesNotExtendItself(
         entered.contains(exit.next))
       break;
     if (const cursiv::Document* const next = exit.next->getDocument();
-        home != nullptr && next != nullptr && next != home)
-      noteClimb(home->id, next->id);
+        entityDocument != nullptr && next != nullptr && next != entityDocument)
+      noteChainedDocument(entityDocument->id, next->id);
     entered.add(exit.next);
     at = exit.next;
   }

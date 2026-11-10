@@ -11,8 +11,6 @@
 
 namespace cursiv {
 
-// Not `final`: a language whose paths must read differently overrides
-// `getPathSegment` and keeps the walk.
 class DefaultAstNodeLocator : public AstNodeLocator,
                               protected DefaultCoreService {
  public:

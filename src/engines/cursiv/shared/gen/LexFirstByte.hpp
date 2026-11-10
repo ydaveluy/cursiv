@@ -1,6 +1,6 @@
-// What a lexer reads off a token's first byte without its walk, for every
-// engine: the runs of dropped trivia it crosses blind, and the one-byte literals
-// it takes whole. Also the part of the automaton's view both engines share.
+// What a lexer reads off a token's first byte without its walk: the runs of
+// dropped trivia it crosses blind and the one-byte literals it takes whole.
+// Also the part of the automaton's view both engines share.
 #pragma once
 
 #include <algorithm>
@@ -18,15 +18,12 @@
 
 namespace cursiv::engine {
 
-// `Dfa` names one engine's automaton: `modes`, `start(m)`, `classes`,
-// `cls(byte)`, `next(s, cls)`, `accept(s)` (the terminal plus one, zero where
-// it accepts nothing), `bounded(s)` (whether its election reads past the
-// token), `ends(s)` where `bounded` leaves it out (whether an acceptance
-// stands only where no byte follows), `relay(s)` (`kNoRelay` where it holds
-// none), and per terminal `term(t)`, `text(t)` and `folded(t)`.
+// `Dfa` names one engine's automaton. `accept(s)` is the terminal plus one,
+// zero for none; `bounded(s)` says the election reads past the token, and
+// `ends(s)` that an acceptance stands only where no byte follows.
 
 // The part of `Dfa` both engines' tables hold under the same names, with
-// `relay_of(k)`: an engine's view adds `bounded`, `relay` and `tier`.
+// `relay_of(k)`: an engine's view adds `bounded`, `relay` and `priority`.
 template <class Table>
 struct LexTableView {
   const Table& a;
@@ -47,11 +44,9 @@ struct LexTableView {
   bool folded(unsigned t) const { return a.cfg.termBuild[t].folded; }
 };
 
-// What a mode crosses blind, four words per mode, whatever its grammar calls
-// trivia: nothing here knows a character. `skip`: the bytes a run of dropped
-// trivia is made of. `stop`: a byte that, right behind such a run, the run's last
-// byte may read on with: the reader steps back onto that last byte and reads on
-// from it with the walk.
+// What a mode crosses blind, four words per mode. `skip`: the bytes a run of
+// dropped trivia is made of. `stop`: a byte past such a run that its last byte
+// may read on with, so the reader steps back onto that byte.
 struct LexSkipRuns {
   std::vector<std::uint64_t> skip{};
   std::vector<std::uint64_t> stop{};
@@ -80,16 +75,9 @@ bool lex_reads_only_dropped(const Dfa& d, std::uint16_t from) {
   return true;
 }
 
-// A byte belongs to a run where the start takes it to a state that accepts, and
-// from which only dropped trivia reads. Two such bytes in a row leave the walk in
-// the state the second reaches from the start, or end its token there, which
-// leaves it in that same state: so the state behind a run is the one its last
-// byte reaches alone, and what the run reads on with is read from that byte as
-// well as from the run's first. A byte that breaks this is out. A byte stops a run
-// where the run reads on with it into a state a read from the start would not
-// stand in: the reader steps back onto the run's last byte, which is always
-// exact. A mode whose start launches a relay crosses nothing: the token it reads
-// may begin with the run.
+// A byte belongs to a run where the start takes it to an accepting state from
+// which only dropped trivia reads, so the state behind a run is the one its
+// last byte reaches alone. A mode whose start launches a relay crosses nothing.
 template <class Dfa>
 LexSkipRuns lex_skip_runs(const Dfa& d) {
   LexSkipRuns out;

@@ -1,18 +1,15 @@
 // A flagged terminal wins a match only because a merged state offers it for
-// another caller, or because a condition the gap may refuse offers it. Asked
-// of the stack and its conditions before the lexer commits, it is taken off
-// the position when no reduction path of the stack ends in shifting it, and
-// the position is read again without it.
+// another caller, or a condition may refuse the gap: it is taken off where no
+// reduction path of the stack shifts it.
 #pragma once
 
 #include <cstdint>
 
-#include "cursiv/utils/macros.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/LrDrive.hpp"
-#include "cursiv/lr/runtime/LrOverlayClimb.hpp"
 #include "cursiv/lr/runtime/LrSkipMemo.hpp"
 #include "cursiv/lr/runtime/LrStack.hpp"
+#include "cursiv/lr/runtime/LrStackOverlay.hpp"
 #include "cursiv/lr/runtime/LrWalkMemo.hpp"
 #include "cursiv/lr/runtime/lr_matcher.hpp"
 #include "cursiv/lr/runtime/lr_refusal.hpp"
@@ -20,6 +17,7 @@
 #include "cursiv/lr/table/LrAction.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv::engine {
 
@@ -52,7 +50,7 @@ bool lr_cell_takes(std::uint32_t state, SymbolId term, Holds&& holds) {
 // What `state` alone answers on `term`, `holds` answering the conditions of
 // the gap: 0 or 1, or -1 where it reduces by `prod`.
 template <const auto& A, class Holds>
-int lr_climb_act(std::uint32_t state, SymbolId term, Holds&& holds,
+int lr_state_act(std::uint32_t state, SymbolId term, Holds&& holds,
                  std::uint32_t& prod) {
   std::uint32_t first = 0;
   unsigned count = 0;
@@ -70,45 +68,45 @@ int lr_climb_act(std::uint32_t state, SymbolId term, Holds&& holds,
 // The reductions a stack makes on `term` end in a shift or an accept. The walk
 // ends: reductions on one lookahead cannot cycle, the generator refuses unit
 // cycles. `whole` falls where the stack ran short.
-template <const auto& A, class Climb, class Holds>
-bool lr_climb_walk(Climb& climb, SymbolId term, Holds&& holds, bool& whole) {
+template <const auto& A, class Stack, class Holds>
+bool lr_reduce_walk(Stack& stack, SymbolId term, Holds&& holds, bool& whole) {
   for (;;) {
     std::uint32_t prod = 0;
-    const int act = lr_climb_act<A>(climb.back(), term, holds, prod);
+    const int act = lr_state_act<A>(stack.back(), term, holds, prod);
     if (act >= 0) return act != 0;
     if (!lr_reduce_allowed<A>(prod, holds)) return false;
-    if (A.cfg.prods[prod].len + 1u > climb.size()) {
+    if (A.cfg.prods[prod].len + 1u > stack.size()) {
       whole = false;
       return false;
     }
-    if (lr_apply_reduce<A>(climb, prod, holds) == kInvalidSymbol) return false;
+    if (lr_apply_reduce<A>(stack, prod, holds) == kInvalidSymbol) return false;
   }
 }
 
 // The same, answered from `memo` where a walk read the frames this stack
 // repeats, and told to it where the walk asked no condition.
-template <const auto& A, class Climb, class Holds>
-bool lr_climb_takes(Climb climb, SymbolId term, Holds&& holds,
+template <const auto& A, class Stack, class Holds>
+bool lr_stack_takes(Stack stack, SymbolId term, Holds&& holds,
                     LrWalkMemo& memo) {
-  const std::uint32_t size = climb.size();
+  const std::uint32_t size = stack.size();
   std::uint32_t prod = 0;
-  if (const int act = lr_climb_act<A>(climb.peek(size - 1), term, holds, prod);
+  if (const int act = lr_state_act<A>(stack.peek(size - 1), term, holds, prod);
       act >= 0)
     return act != 0;
   const auto top = [&](std::uint32_t i) -> std::uint32_t {
-    return i < size ? climb.peek(size - 1 - i) : LrWalkMemo::kNone;
+    return i < size ? stack.peek(size - 1 - i) : LrWalkMemo::kNone;
   };
   if (const int known = memo.find(term, top); known >= 0) return known != 0;
   bool held = false, whole = true;
-  const bool verdict = lr_climb_walk<A>(
-      climb, term,
+  const bool verdict = lr_reduce_walk<A>(
+      stack, term,
       [&](unsigned k) {
         held = true;
         return holds(k);
       },
       whole);
-  if (!held && whole && !climb.bottom())
-    memo.put(term, climb.reach(), verdict, top);
+  if (!held && whole && !stack.bottom())
+    memo.put(term, stack.reach(), verdict, top);
   return verdict;
 }
 
@@ -117,10 +115,8 @@ template <const auto& A>
 using LrSkipped = typename LrLexTape<A>::Skip;
 
 // The token at `from` in `mode` under bracket depth `depth`, trivia crossed,
-// the terminals of `skip` off the position. `crossed(end, trivia)` is told
-// each stretch of trivia read: the bytes the mode skips (`trivia` null), or
-// one token. A read that crossed none is the same for every reading that asks
-// it at that depth.
+// `skip` off the position. `crossed(end, trivia)` receives each stretch of
+// trivia. A read that crossed none is the same on one side of a bracket.
 template <const auto& A, class Crossed>
 Token lr_scan_skipping(const LrContext& c, std::uint16_t mode, TextOffset from,
                        std::uint32_t depth, const LrSkipped<A>& skip,
@@ -139,7 +135,7 @@ Token lr_scan_skipping(const LrContext& c, std::uint16_t mode, TextOffset from,
     }
   }
   if (named)
-    if (const Token* seen = c.skipMemo.find(from, mode, depth, names, n))
+    if (const Token* seen = c.skipMemo.find(from, mode, depth != 0, names, n))
       return *seen;
   const typename LrLexTape<A>::Skipping tape{.skip = &skip};
   bool crossing = false;
@@ -152,25 +148,23 @@ Token lr_scan_skipping(const LrContext& c, std::uint16_t mode, TextOffset from,
       });
   if (named && !crossing && token.sym < A.cfg.nterms &&
       token.sym != kEofSymbol)
-    c.skipMemo.put(from, mode, depth, names, n, token);
+    c.skipMemo.put(from, mode, depth != 0, names, n, token);
   return token;
 }
 
-// What ties with `la`, a token a refusal elected. `skip` holds what was refused.
-// The count is `room`'s, with `la` first; none where the mode holds no rivals.
+// What ties with `la`, a token a refusal elected. `skip` holds what was
+// refused. The count is `room`'s, with `la` first; none where the mode holds no
+// competitors.
 template <const auto& A, class Takes>
-CURSIV_NOINLINE std::uint32_t lr_refused_rivals(const LrContext& c,
-                                                std::uint16_t mode,
-                                                std::uint32_t depth,
-                                                const Token& la,
-                                                LrSkipped<A> skip, Scan* room,
-                                                Takes&& takes) {
+CURSIV_NOINLINE std::uint32_t lr_refused_candidates(
+    const LrContext& c, std::uint16_t mode, std::uint32_t depth,
+    const Token& la, LrSkipped<A> skip, Scan* room, Takes&& takes) {
   if (A.modeMulti[mode] != 1 || la.sym >= A.cfg.nterms) return 0;
-  const auto tier = [&](const Token& t) {
-    return static_cast<std::uint8_t>(lex_reading_tier(
+  const auto priority = [&](const Token& t) {
+    return static_cast<std::uint8_t>(lex_reading_priority(
         LrLexTape<A>{}, c.src, c.len, mode, t.begin, t.end, t.sym));
   };
-  room[0] = Scan{la.end, la.sym, tier(la)};
+  room[0] = Scan{la.end, la.sym, priority(la)};
   std::uint32_t n = 1;
   lr_refused_ties(
       la,
@@ -184,20 +178,19 @@ CURSIV_NOINLINE std::uint32_t lr_refused_rivals(const LrContext& c,
       [&](const Token& at) {
         return at.sym < A.cfg.nterms && at.begin == la.begin &&
                at.end == la.end &&
-               lex_weight(tier(at)) == lex_weight(room[0].tier);
+               lex_weight(priority(at)) == lex_weight(room[0].priority);
       },
       [&](SymbolId sym) { return A.flagged(mode, sym); }, takes,
       [&](const Token& at) {
-        room[n++] = Scan{at.end, at.sym, tier(at)};
+        room[n++] = Scan{at.end, at.sym, priority(at)};
         return n < A.maxCands;
       });
   return n;
 }
 
-// `la`, a winner of `mode` that the mode flags, read again from where it began
-// while `takes(la)` refuses it. `crossed` hears the trivia a refusal leaves to, and
-// what ties with the new winner lands in `room`, `tied` its count. Whether any was
-// refused.
+// `la`, a winner `mode` flags, read again from where it began while `takes(la)`
+// refuses it. `crossed` receives the trivia left; ties with the new winner go
+// to `room`, `tied` its count. Whether any was refused.
 template <const auto& A, class Takes, class Crossed>
 CURSIV_NOINLINE bool lr_lex_refused(const LrContext& c, std::uint16_t mode,
                                     std::uint32_t depth, Token& la, Takes&& takes,
@@ -211,20 +204,20 @@ CURSIV_NOINLINE bool lr_lex_refused(const LrContext& c, std::uint16_t mode,
         return lr_scan_skipping<A>(c, mode, t.begin, depth, skip, crossed);
       });
   if constexpr (A.maxCands > 1)
-    if (refused) tied = lr_refused_rivals<A>(c, mode, depth, la, skip, room, takes);
+    if (refused)
+      tied = lr_refused_candidates<A>(c, mode, depth, la, skip, room, takes);
   return refused;
 }
 
-// The drive's token, a winner of `mode` that the mode flags: read again from
-// where it began while the stack refuses it, and what tied with the new winner
-// stays a candidate. A trivia left where the terminal is refused is crossed, and
-// recorded: a line break may be a token in one state and a trivia in another.
+// The drive's token, a flagged winner, read again while the stack refuses it;
+// ties with the new winner stay candidates. Trivia left where the terminal is
+// refused is crossed and recorded.
 template <const auto& A>
 CURSIV_NOINLINE void lr_drive_exact(LrContext& c, std::uint16_t mode) {
   Token la = c.la;
   const auto takes = [&](const Token& t) {
-    return lr_climb_takes<A>(
-        LrOverlayClimb<LrStack>(c.stack), t.sym,
+    return lr_stack_takes<A>(
+        LrStackOverlay<LrStack>(c.stack), t.sym,
         [&](unsigned k) { return c.drive->cond(c, k, c.virt.from, t); },
         c.walkMemo);
   };

@@ -7,11 +7,11 @@
 #include <unordered_map>
 #include <vector>
 
-// A grammar as flat data. The types of a grammar become constant descriptors,
-// one per distinct expression type and per rule (`ImageOf.hpp`), and the image
-// interns them into vectors that ordinary code, compiled once, reads. A node
-// is told by the address of its descriptor, so two spellings of one type are
-// one node.
+#include "cursiv/utils/Descent.hpp"
+
+// A grammar as flat data: its types become constant descriptors
+// (`ImageOf.hpp`) interned into vectors that ordinary code reads. Two
+// spellings of one type are one node.
 
 namespace cursiv::detail {
 
@@ -87,7 +87,7 @@ struct ImageDesc {
   ImageKind kind{};
   std::uint8_t flags = 0;
   std::uint32_t count = 0;
-  const ImageDesc* const* kids = nullptr;
+  const ImageDesc* const* children = nullptr;
   // A call's rule, an embed's grammar; a skip's lists, ignored then hidden.
   const ImageRuleDesc* rule = nullptr;
   const ImageRuleDesc* const* rules = nullptr;
@@ -95,8 +95,7 @@ struct ImageDesc {
   std::uint64_t n = 0;
   std::string_view text{};
   std::string_view text2{};
-  // The action a directive publishes, as the engine that lowers it describes
-  // one: opaque here.
+  // The directive's action, as the engine describes it; opaque here.
   const void* row = nullptr;
   // The identity of a mark or its echo.
   const void* tag = nullptr;
@@ -128,8 +127,8 @@ struct ImageFaceDesc {
   bool caseInsensitive = false;
 };
 
-// What a lowering reads of a rule besides the faces: the rule the stage hands
-// it, its body ready to lay, and the actions it owes.
+// What a lowering reads of a rule besides its faces: the rule from the stage,
+// its body and its actions.
 struct ImageOpDesc {
   const ImageDesc* op = nullptr;
   const void* row = nullptr;
@@ -166,7 +165,7 @@ struct ImageRuleDesc {
   bool inlineTerminal = false;
   bool grammar = false;
   // The grammar a rule of a section belongs to.
-  const ImageRuleDesc* home = nullptr;
+  const ImageRuleDesc* ownerGrammar = nullptr;
   const ImageStageDesc* stage = nullptr;
   // The rule as written, then as the pipeline resolved it: one face when the
   // two agree.
@@ -243,12 +242,12 @@ struct ImageClass {
   bool known = false;
 };
 
-// An image fills itself as it is read: `ready` lays a rule's faces on first
+// An image fills itself as it is read: `ready` builds a rule's faces on first
 // use, and a reader may intern or derive more. It belongs to one reader at a
 // time and is never shared between threads.
 struct GrammarImage {
   std::vector<ImageNode> nodes;
-  std::vector<ImageId> kids;
+  std::vector<ImageId> children;
   std::vector<ImageRule> rules;
   std::vector<std::uint32_t> ruleLists;
   std::vector<ImageLevel> levels;
@@ -269,11 +268,11 @@ struct GrammarImage {
 
   // A literal's guard and the operands of a gap condition or of `implied` are
   // read by their own readers, not walked.
-  std::span<const ImageId> shape_kids(ImageId node) const;
+  std::span<const ImageId> shape_children(ImageId node) const;
 
   void open(const ImageGrammarDesc& grammar);
-  // A node a rewrite makes, once for the same fields and kids.
-  ImageId derive(const ImageNode& shape, std::span<const ImageId> kids);
+  // A node a rewrite makes, once for the same fields and children.
+  ImageId derive(const ImageNode& shape, std::span<const ImageId> children);
   // `folded` folds the case of every literal under the node that has a
   // letter: the reading of a case-insensitive grammar.
   ImageId node(const ImageDesc& desc, bool folded = false);
@@ -286,10 +285,11 @@ struct GrammarImage {
  private:
   std::uint32_t list(const ImageRuleDesc* const* rules, std::size_t count);
   ImageFace face(const ImageFaceDesc& desc, bool folded);
+  Descent<ImageId> make_node(const ImageDesc& desc, bool folded);
 
   struct DerivedKey {
     ImageNode shape;
-    std::vector<ImageId> kids;
+    std::vector<ImageId> children;
     bool operator==(const DerivedKey& o) const;
   };
   struct DerivedHash {

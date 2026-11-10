@@ -1,5 +1,5 @@
-// A helper rule that repeats a node: each turn is a head of its own, and the
-// rule hands over only the first.
+// A helper rule that repeats a call to an AST rule: each turn adopts a node of
+// its own, and the rule returns only the first.
 // expect LR: this alternative can create two nodes.*each turn of a repetition
 #pragma once
 

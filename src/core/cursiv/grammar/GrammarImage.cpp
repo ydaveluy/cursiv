@@ -6,7 +6,7 @@
 
 namespace cursiv::detail {
 
-std::span<const ImageId> GrammarImage::shape_kids(ImageId id) const {
+std::span<const ImageId> GrammarImage::shape_children(ImageId id) const {
   const ImageNode& n = nodes[id];
   switch (n.kind) {
     case ImageKind::lit:
@@ -15,7 +15,7 @@ std::span<const ImageId> GrammarImage::shape_kids(ImageId id) const {
     case ImageKind::implied:
       return {};
     default:
-      return {kids.data() + n.first, n.count};
+      return {children.data() + n.first, n.count};
   }
 }
 
@@ -42,12 +42,16 @@ void GrammarImage::open(const ImageGrammarDesc& g) {
 }
 
 ImageId GrammarImage::node(const ImageDesc& d, bool folded) {
+  return descend(make_node(d, folded));
+}
+
+Descent<ImageId> GrammarImage::make_node(const ImageDesc& d, bool folded) {
   auto& known = folded ? _foldedNodes : _nodes;
-  if (const auto it = known.find(&d); it != known.end()) return it->second;
-  std::vector<ImageId> kid;
-  kid.reserve(d.count);
+  if (const auto it = known.find(&d); it != known.end()) co_return it->second;
+  std::vector<ImageId> childIds;
+  childIds.reserve(d.count);
   for (std::uint32_t i = 0; i < d.count; ++i)
-    kid.push_back(node(*d.kids[i], folded));
+    childIds.push_back(co_await make_node(*d.children[i], folded));
   const bool folds = folded && d.kind == ImageKind::lit &&
                      detail::has_cased_letter(d.text);
   ImageNode n{.kind = d.kind,
@@ -63,13 +67,13 @@ ImageId GrammarImage::node(const ImageDesc& d, bool folded) {
     n.a = list(d.rules, static_cast<std::size_t>(d.m + d.n));
   else if (d.rule != nullptr)
     n.a = rule(*d.rule);
-  n.first = static_cast<ImageId>(kids.size());
+  n.first = static_cast<ImageId>(children.size());
   n.count = d.count;
-  kids.insert(kids.end(), kid.begin(), kid.end());
+  children.insert(children.end(), childIds.begin(), childIds.end());
   nodes.push_back(n);
   const auto id = static_cast<ImageId>(nodes.size() - 1);
   known.emplace(&d, id);
-  return id;
+  co_return id;
 }
 
 bool GrammarImage::DerivedKey::operator==(const DerivedKey& o) const {
@@ -79,7 +83,8 @@ bool GrammarImage::DerivedKey::operator==(const DerivedKey& o) const {
          shape.text.size() == o.shape.text.size() &&
          shape.text2.data() == o.shape.text2.data() &&
          shape.text2.size() == o.shape.text2.size() &&
-         shape.row == o.shape.row && shape.tag == o.shape.tag && kids == o.kids;
+         shape.row == o.shape.row && shape.tag == o.shape.tag &&
+         children == o.children;
 }
 
 std::size_t GrammarImage::DerivedHash::operator()(const DerivedKey& k) const {
@@ -89,21 +94,21 @@ std::size_t GrammarImage::DerivedHash::operator()(const DerivedKey& k) const {
   h ^= reinterpret_cast<std::size_t>(k.shape.text.data()) >> 3;
   h ^= reinterpret_cast<std::size_t>(k.shape.row) >> 3;
   h ^= reinterpret_cast<std::size_t>(k.shape.tag) >> 3;
-  for (const ImageId id : k.kids) h = h * 1000003u + id;
+  for (const ImageId id : k.children) h = h * 1000003u + id;
   return h;
 }
 
 ImageId GrammarImage::derive(const ImageNode& shape,
-                             std::span<const ImageId> kidList) {
-  DerivedKey key{shape, {kidList.begin(), kidList.end()}};
+                             std::span<const ImageId> childIds) {
+  DerivedKey key{shape, {childIds.begin(), childIds.end()}};
   key.shape.first = 0;
   key.shape.count = 0;
   if (const auto it = _derived.find(key); it != _derived.end())
     return it->second;
   ImageNode n = shape;
-  n.first = static_cast<ImageId>(kids.size());
-  n.count = static_cast<std::uint32_t>(kidList.size());
-  kids.insert(kids.end(), kidList.begin(), kidList.end());
+  n.first = static_cast<ImageId>(children.size());
+  n.count = static_cast<std::uint32_t>(childIds.size());
+  children.insert(children.end(), childIds.begin(), childIds.end());
   nodes.push_back(n);
   const auto id = static_cast<ImageId>(nodes.size() - 1);
   _derived.try_emplace(std::move(key), id);
@@ -165,8 +170,9 @@ const ImageRule& GrammarImage::ready(std::uint32_t id) {
 }
 
 bool GrammarImage::folds(std::uint32_t rule) const {
-  const ImageRuleDesc* home = rules[rule].desc->home;
-  return home != nullptr ? home->written->caseInsensitive : caseInsensitive;
+  const ImageRuleDesc* ownerGrammar = rules[rule].desc->ownerGrammar;
+  return ownerGrammar != nullptr ? ownerGrammar->written->caseInsensitive
+                                 : caseInsensitive;
 }
 
 }  // namespace cursiv::detail

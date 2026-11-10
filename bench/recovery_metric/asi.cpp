@@ -1,7 +1,6 @@
 // asi: statements a semicolon, a line break, a closing brace or the end of
-// input ends. The documents are generated here; the metric keeps only those
-// the parser takes clean. The fuzz lane's directive reader models none of
-// its conditions, so its tree is weighed on classes alone.
+// input ends. The documents are generated here, and only those the parser
+// takes clean are kept.
 
 #include <cstddef>
 #include <cstdint>
@@ -14,14 +13,18 @@
 #include "asi/generated/G/Parser.hpp"
 #include "asi/generated/G/Table.hpp"
 #include "bench.hpp"
-#include "recovery_metric/Searching.hpp"
+#include "cursiv/CursivActions.hpp"
+#include "engines/lr/AsiGrammar.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
+#include "recovery_metric/Searching.hpp"
 
 namespace metric = cursiv::recovery_metric;
 
 namespace {
 
 namespace g = tasi::generated::G;
+const cursiv::fuzzer::CursivActions<tasi::G> kActions{};
+
 std::string word(std::uint64_t& s) {
   static constexpr char kLetters[] = "abcdefhijklmnopqstuvwxyz";
   std::string w;
@@ -76,18 +79,17 @@ const metric::Registered kLanguage{{
     .name = "asi",
     .parser = &g::create_parser,
     .reflection = &g::create_ast_reflection,
-    .actions = nullptr,
+    .actions = &kActions,
     .documents =
         [] {
           return std::vector<std::string>{document(0xa51, 2),
                                           document(0xa52, 3),
                                           document(0xa53, 4)};
         },
-    .ceilings = &metric::ceilings<g::kTable, g::kDrive,
-                                          g::kGrammarMetaData, g::kAstActions>,
-    .searching = &metric::searching<g::kTable, g::kDrive,
-                                                g::kGrammarMetaData,
-                                                g::kAstActions>,
+    .ceilings = &metric::ceilings<g::kTable, g::kDrive, g::kGrammarMetaData,
+                                  g::kAstActions>,
+    .searching = &metric::searching<g::kTable, g::kDrive, g::kGrammarMetaData,
+                                    g::kAstActions>,
 }};
 
 }  // namespace

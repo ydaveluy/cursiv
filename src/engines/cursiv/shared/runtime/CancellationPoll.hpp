@@ -13,6 +13,9 @@ namespace cursiv::engine {
 
 class CancellationPoll {
  public:
+  // The turns between two reads of the token.
+  static constexpr std::uint32_t kTurns = 256;
+
   CancellationPoll() = default;
   explicit CancellationPoll(const CancellationToken& token)
       : _token(token.stop_possible() ? &token : nullptr) {
@@ -29,8 +32,6 @@ class CancellationPoll {
   }
 
  private:
-  static constexpr std::uint32_t kTurns = 256;
-
   void refill() const {
     _left = _token != nullptr ? kTurns : std::numeric_limits<std::uint32_t>::max();
   }

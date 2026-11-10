@@ -34,13 +34,13 @@ struct LrProdBuild {
   // its cut plus one, zero for any other.
   std::uint16_t stop = 0;
   // The section the rule is read in, its configuration; zero outside any.
-  std::uint8_t home = 0;
+  std::uint8_t sectionCfg = 0;
   // A nest turn whose record reaches back over its receiver, the record the
-  // frame below it laid.
+  // frame below it created.
   bool turn = false;
   std::uint16_t turnNode = kNoRow;
   // One order of an unordered group, whose rule is the group's alone: of two
-  // orders spelling the same symbols, the earlier one is elected.
+  // orders with the same symbols, the earlier one is elected.
   bool permuted = false;
 
   constexpr bool operator==(const LrProdBuild&) const = default;

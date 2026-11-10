@@ -215,10 +215,12 @@ std::vector<std::string> offered(const Reading& reading, std::string text) {
   const auto at = static_cast<cursiv::TextOffset>(caret);
   reading.parser.nextFeaturesAt(result.cst(), at, at, next);
   std::vector<std::string> out;
-  for (const cursiv::NextFeature& f : next)
-    for (const std::string_view s :
-         reading.parser.getGrammar().terminalSpellings(f.feature))
-      out.emplace_back(s);
+  for (const cursiv::NextFeature& f : next) {
+    const auto& grammar = reading.parser.getGrammar();
+    const auto spellings = grammar.terminalSpellings(f.feature);
+    if (spellings.empty()) out.emplace_back(grammar.terminalName(f.feature));
+    for (const std::string_view s : spellings) out.emplace_back(s);
+  }
   std::sort(out.begin(), out.end());
   out.erase(std::unique(out.begin(), out.end()), out.end());
   return out;
@@ -262,6 +264,9 @@ void a_caret_crosses_the_gap_under_each_candidates_alphabet(
   check("skip-rec:a~<|>", {".", "~"});
   check("skip-rec:a~~~~~~~~<|>", {".", "~"});
   check("skip-rec:a~~~~~~~~<|>.", {".", "~"});
+  // Each reading asks its conditions of the token its own trivia make.
+  accepts(reading, "lines:x<\n ?", 0);
+  check("lines:x<<|>\n ?", {"LINES"});
 }
 
 }  // namespace

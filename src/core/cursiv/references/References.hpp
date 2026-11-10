@@ -11,34 +11,25 @@
 #include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
 
-// The inverse index as a service: what a position denotes, and who names that
-// thing. It speaks byte offsets, not the protocol's UTF-16, so a provider, a
-// validator and a refactoring share it with no protocol type in sight.
+// What a position refers to, and which references name a node. Offsets are
+// bytes, not the protocol's UTF-16 units.
 
 namespace cursiv {
 
 struct Document;
 
-// One shape for the two ways a name can appear: on a reference, where the
-// declarations are what it resolved to, and on a declaration's own name, where
-// the declaration is the node itself. A client asking to rename what is under
-// the caret must not have to know which it hit.
+// One shape for both places a name appears: a reference, with the declarations
+// it resolved to, and a declaration's own name, with the declaration itself.
 struct Declaration {
   // The name as written, not the owner's span: a construct may span several
   // words, and only one of them is under the caret.
   TextRange span;
   // A single reference yields one, a multi reference its whole set, and a
-  // declaration's own name yields itself. `const`: navigation reads a tree,
-  // it never edits one.
+  // declaration's own name yields itself.
   std::vector<const AstNode*> targets;
 
-  // Empty is "nothing is denoted here" -- a keyword, whitespace, or a reference
-  // that resolved to nothing.
-  //
-  // An unresolved reference still keeps its span: empty `targets` with a
-  // non-empty `span` says a name is written here and denotes nothing, which is
-  // the caret a user renames to fix a typo. Navigation reads the bool and stays
-  // empty; rename reads the span.
+  // Empty when nothing is denoted here. An unresolved reference keeps its span,
+  // so rename can fix a typo while navigation finds nothing.
   [[nodiscard]] explicit operator bool() const noexcept {
     return !targets.empty();
   }
@@ -47,8 +38,8 @@ struct Declaration {
 struct FindReferencesOptions {
   // Whether the declaration itself joins the references to it.
   bool includeDeclaration = false;
-  // `kNoDocument` is the whole workspace. Restricting to one is what makes a
-  // document-highlight a find-references.
+  // `kNoDocument` searches the whole workspace; document highlight restricts it
+  // to one document.
   DocumentId documentId = kNoDocument;
 };
 
@@ -56,18 +47,13 @@ class References {
  public:
   virtual ~References() noexcept = default;
 
-  // Precondition: called under the workspace read lock.
-  //
-  // A caret one past the last character is still on the word, and the retry is
-  // owned here rather than by each caller: a CST span is half-open, so a
-  // double-click or a word-wise motion lands one past the name it selected.
+  // Precondition: called under the workspace read lock. A caret one past the
+  // last character is still on the word, as a CST span is half-open.
   [[nodiscard]] virtual Declaration findDeclaration(
       const Document& document, TextOffset offset,
       const CancellationToken& cancelToken = kNoCancel) const = 0;
 
-  // Ordered by (document, offset), the workspace's reading order: the inverse
-  // table is a hash map whose enumeration order is unspecified, and a rename's
-  // edits have to be pinnable.
+  // Ordered by (document, offset), so a rename's edits come in a stable order.
   [[nodiscard]] virtual std::vector<ReferenceDescription> findReferences(
       const AstNode& target, const FindReferencesOptions& options = {},
       const CancellationToken& cancelToken = kNoCancel) const = 0;
@@ -76,9 +62,8 @@ class References {
 namespace detail {
 
 /**
- * Every target's rows, once each and in (document, offset) order: a multi
- * reference's targets overlap on the reference that reaches them all, and a
- * rename must not edit one site twice.
+ * Every target's rows, once each, in (document, offset) order. A site shared
+ * by several targets keeps the row of the first target that reaches it.
  */
 [[nodiscard]] std::vector<ReferenceDescription>
 collect_references_per_declaration(

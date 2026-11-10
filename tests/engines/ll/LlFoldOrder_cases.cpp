@@ -1,5 +1,5 @@
 // An ambiguous left recursion reads as the loop it describes: a base, then
-// one turn at a time, whatever order its arms are written in.
+// one step at a time, whatever order its arms are written in.
 #include <string>
 #include <string_view>
 

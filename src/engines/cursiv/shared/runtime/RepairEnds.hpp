@@ -21,17 +21,16 @@ struct RepairEnds {
   Regime regime = none;
   bool done = false;
 
-  // The next end the token's reading `r` from `p` may stop at, past the ones
-  // found, the bytes scanned for it added to `work` up to `maxWork`; false where
-  // none is left. `cuts(x)` says an end at `x` cuts a word; `shortOf` falls where
-  // the scan stopped at `upto` or at what `work` pays for.
+  // The next end the reading `r` from `p` may stop at, or false; the bytes
+  // scanned go to `work`, up to `maxWork`. `cuts(x)` says an end at `x` cuts a
+  // word; `shortOf` is set where the scan stopped early.
   template <class Cuts>
   bool more(const char* src, TextOffset len, TextOffset p, const LexReading& r,
             std::uint64_t& work, Cuts&& cuts, TextOffset upto, bool& shortOf,
             const CancellationPoll& stop, std::uint64_t maxWork) {
     if (done) return false;
     const auto eol = [&](TextOffset i) { return lex_line_end_at(src, i); };
-    const auto pay = [&](TextOffset from, TextOffset to) {
+    const auto add_work = [&](TextOffset from, TextOffset to) {
       work += (to - p) / kRepairLexBytes - (from - p) / kRepairLexBytes;
     };
     const auto advance = [&](TextOffset& i, const auto& keep) {
@@ -52,7 +51,7 @@ struct RepairEnds {
     if (nextRegime == none) {
       TextOffset i = p;
       const bool complete = advance(i, [&](TextOffset at) { return !eol(at); });
-      pay(p, i);
+      add_work(p, i);
       if (!complete) return false;
       nextRegime = i < r.end ? lines : r.end < len && eol(r.end) ? line : last;
       nextScanned = nextRegime == lines ? i : p + 1;
@@ -67,7 +66,7 @@ struct RepairEnds {
       x = r.end;
     }
     // `last` jumps to an end the initial scan already inspected.
-    if (nextRegime != last) pay(nextScanned, x);
+    if (nextRegime != last) add_work(nextScanned, x);
     if (!complete) return false;
     found.push_back(x);
     regime = nextRegime;

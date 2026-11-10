@@ -1,5 +1,5 @@
-// An operator spelling a terminal the grammar skips: the descent lays the
-// operator's rule in place, so the refusal names the table it stands in.
+// An operator rule that reads a terminal the grammar skips: LL inlines the
+// operator's rule, so its error names the infix rule `Sum`.
 // expect LR: refused .skippedTerminal..*rule .Plus. names a terminal that is skipped as trivia at that point
 // expect LL: refused .skippedTerminal..*rule .Sum. names a terminal that is skipped as trivia at that point
 #pragma once

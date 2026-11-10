@@ -7,10 +7,9 @@ const STDIN_CAPACITY = 1 << 20; // a power of two: see readStdin in wasi-worker.
 const HEADER_LIMIT = 4096;      // the most a frame's header may take
 const modules = new Map();      // compiled modules, kept across restarts
 
-// The import section's memory entry: `flags` then `min` then, when the flags
-// say so, `max`, all LEB128. Bit 0 is "has maximum", bit 1 "shared". JS does
-// not reflect the maximum, and a shared memory must match it exactly. A copy
-// of the reader in tools/wasi-run.mjs, whose tests hold the two the same.
+// The limits of the module's imported memory, read off the import section
+// since JS does not reflect the maximum. A copy of the reader in
+// tools/wasi-run.mjs, whose tests keep the two the same.
 export function importedMemoryLimits(bytes) {
   let at = 8;  // past the magic and the version
   let limit = bytes.length;
@@ -85,9 +84,11 @@ async function loadModule(url) {
       if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
       const bytes = new Uint8Array(await response.arrayBuffer());
       const module = await WebAssembly.compile(bytes);
-      // Its threads run in workers, which only a shared memory reaches.
+      // Its threads run in workers, which share its one imported memory.
+      const memories = WebAssembly.Module.imports(module).filter((i) => i.kind === 'memory');
       const limits = importedMemoryLimits(bytes);
-      if (!limits?.shared) throw new Error(`${url} imports no shared memory: the page runs threaded modules only`);
+      if (memories.length !== 1 || !limits.shared)
+        throw new Error(`${url} must import one shared memory: the page runs threaded modules only`);
       return { module, limits, size: bytes.length };
     })());
     modules.get(url).catch(() => modules.delete(url));
@@ -149,11 +150,18 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
     worker.postMessage({ ...shared, ...msg });
     if (msg.role === 'main') resolve(worker);
   });
-  await Promise.all(Array.from({ length: POOL }, (_, slot) => spawn({ role: 'thread', slot })));
-  await spawn({ role: 'main' });
+  // A worker the browser refuses to create or start stops the others.
+  try {
+    await Promise.all(Array.from({ length: POOL }, (_, slot) => spawn({ role: 'thread', slot })));
+    await spawn({ role: 'main' });
+  } catch (error) {
+    stop(`the server could not start: ${error?.message ?? error}`);
+    throw error;
+  }
 
-  // The LSP base protocol, framed per worker: a message never spans threads.
-  // A frame the page cannot read ends the session.
+  // The LSP base protocol, framed per worker. A frame the page cannot read, or
+  // longer than the server's memory, ends the session.
+  const longest = limits.maximum * 65536;
   function feed(worker, chunk) {
     const before = frames.get(worker);
     let buf = chunk;
@@ -168,6 +176,7 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
         if (sep < 0) break;
         const length = /^Content-Length: *(\d+)\s*$/im.exec(dec.decode(buf.subarray(0, sep)));
         if (!length) throw new Error('no Content-Length');
+        if (Number(length[1]) > longest) throw new Error('a Content-Length past the server\'s memory');
         const start = sep + 4, end = start + Number(length[1]);
         if (buf.length < end) break;
         messages.push(JSON.parse(dec.decode(buf.subarray(start, end))));

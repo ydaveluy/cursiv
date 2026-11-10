@@ -1,5 +1,5 @@
 // The decisions a reduction writes into a derivation, read off the table: the
-// graph and the look-ahead lay them alike, so both elect one derivation.
+// graph and the look-ahead write them the same, so both elect one derivation.
 #pragma once
 
 #include <algorithm>
@@ -25,7 +25,7 @@ std::uint32_t lr_elect_run(std::uint32_t rule, std::uint32_t sym) {
              : kLrNoRun;
 }
 
-// The run a node of `symbol` laid into state `to` stands under, where the
+// The run a node of `symbol` pushed into state `to` stands under, where the
 // table skipped pass-throughs into it.
 template <const auto& A>
 std::uint32_t lr_elect_stands(std::uint32_t to, std::uint32_t symbol) {
@@ -67,7 +67,7 @@ void lr_elect_chain(std::uint32_t run, std::uint16_t side, Each&& each) {
 }
 
 // `words` with the decisions of the runs skipped under children standing on
-// `syms` around them, laid in `out` and `at`; false where none was skipped.
+// `syms` around them, written to `out` and `at`; false where none was skipped.
 template <const auto& A>
 bool lr_elect_restore(std::uint16_t prod, std::span<const std::uint32_t> words,
                       std::span<const std::uint16_t> pos,
@@ -115,7 +115,7 @@ struct LrElectWords {
   std::span<const std::uint16_t> pos;
 };
 
-// The words `prod` lays over children standing on `syms`, the twin's and the
+// The words `prod` adds over children standing on `syms`, the twin's and the
 // skipped runs' decisions in; `room` and `at` hold them where a run was
 // restored.
 template <const auto& A>

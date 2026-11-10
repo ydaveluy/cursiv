@@ -1,7 +1,6 @@
 // The subset construction over every mode of a lexer, into one numbering: a
-// subset reached from two modes is one state, so a mode is a start and not a
-// range; subsets that read alike under every byte class are one state too. The
-// rows are this; what a state lays of what it accepts is the engine's.
+// subset reached from two modes is one state, and so are subsets that read
+// the same under every byte class. The engine writes what a state accepts.
 #pragma once
 
 #include <algorithm>
@@ -31,10 +30,8 @@
 
 namespace cursiv::engine {
 
-// The subsets of a lexer's DFA, as bit rows in one arena. Held as a list, a
-// subset costs an allocation, a sort and an element-wise compare per
-// transition; held as bits it costs the words it spans, its canonical order
-// the bit order, so nothing is sorted.
+// The subsets of a lexer's DFA, as bit rows in one arena: a subset costs the
+// words it spans, and its bit order is its canonical order.
 struct LexNfaSubsets {
   std::size_t words = 0;
   // The rows, packed to the span each one occupies: a subset of an NFA of
@@ -59,10 +56,8 @@ struct LexNfaSubsets {
     lo.clear();
     hi.clear();
     cur.assign(words, 0);
-    // Room for the deepest walk and the widest mark list. THE PUSH IS NOT
-    // GUARDED -- the mark is tested at the pop -- so a state is pushed once per
-    // edge that reaches it; what bounds the stack is that it EXPANDS at most
-    // once, and an expansion pushes at most two.
+    // Room for the deepest walk: the mark is tested at the pop, and a state
+    // expands at most once, pushing at most two.
     stack.assign(nstates * 2 + 4, 0);
     touched.assign(words, 0);
     tn = 0;
@@ -145,7 +140,7 @@ struct LexDfaReading {
     std::uint16_t bound;  // `kNoSet` for a reading with none
     // A keyword where the bound is a word class, else a literal where a
     // literal's branch reads it.
-    std::uint8_t tier = 0;
+    std::uint8_t priority = 0;
     auto operator<=>(const Accept&) const = default;
   };
   // A trivia the subset gave up because a keyword's spelling stands beside it:
@@ -169,7 +164,7 @@ struct LexDfaReading {
   DynSet acc;                         // the terminals of `accepts`
   int best = -1;                      // the terminal the lexer elects
   // An acceptance stands behind the refusal of a scalar's rest.
-  bool strayed = false;
+  bool behindLoneLead = false;
 
   // The boundary of the elected terminal's first reading.
   std::uint16_t best_bound() const {
@@ -180,7 +175,7 @@ struct LexDfaReading {
 
   void key(std::vector<std::uint64_t>& out) const {
     for (const Accept& a : accepts)
-      out.push_back((std::uint64_t{a.tier} << 32) |
+      out.push_back((std::uint64_t{a.priority} << 32) |
                     (std::uint64_t{a.term} << 16) | a.bound);
     out.push_back(~std::uint64_t{0});
     for (const Accept& a : stands)
@@ -258,9 +253,9 @@ struct LexDfaBuild {
   // done.
   std::uint16_t final_of(std::uint16_t subset) const { return _final[subset]; }
 
-  // Every state, those its rows reach included, the subsets that read alike
-  // under every byte class merged into the first of them: `write(state,
-  // reading)` lays what the state accepts.
+  // Every state, those its rows reach included, the subsets that read the same
+  // under every byte class merged into the first of them.
+  // `write(state, reading)` writes what the state accepts.
   template <class Built, class Write>
   void fill(Built& A, Write&& write) {
     std::vector<LexDfaReading> readings;
@@ -277,7 +272,7 @@ struct LexDfaBuild {
       const auto id = static_cast<std::uint32_t>(ids.size());
       return ids.try_emplace(std::move(v), id).first->second;
     };
-    bool strayed = false;
+    bool behindLoneLead = false;
     for (std::size_t i = 0; i < _order.size(); ++i) {
       std::vector<LexDfaReading::Gate> gates;
       std::vector<std::uint32_t> gated;
@@ -287,8 +282,8 @@ struct LexDfaBuild {
       readings.back().gated = std::move(gated);
       cls.push_back(intern_key(readings.back()));
       plain.push_back(cls.back());
-      if (readings.back().strayed) {
-        strayed = true;
+      if (readings.back().behindLoneLead) {
+        behindLoneLead = true;
         auto bare = read(mn, true);
         bare.gates = readings.back().gates;
         bare.gated = readings.back().gated;
@@ -299,7 +294,7 @@ struct LexDfaBuild {
     }
     const std::size_t n = _order.size();
     std::uint32_t nblocks = 0;
-    if (strayed) {
+    if (behindLoneLead) {
       std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t> pairs;
       std::vector<std::uint32_t> halves(n);
       for (std::size_t s = 0; s < n; ++s)
@@ -356,14 +351,9 @@ struct LexDfaBuild {
 
  private:
   static constexpr std::uint32_t kNoLocal = 0xffffffffu;
-  // The subsets one build may number before it refuses. The reduction in
-  // `fill` merges subsets that read alike under every class, and the DFA it
-  // leaves must fit `kDeadState` states; the subsets a regular language needs
-  // are seldom more than a small multiple of its minimal DFA, which the
-  // NFA's own redundancy (duplicated branches, shared tails) accounts for.
-  // Refusing at eight times the limit keeps that slack, and bounds `rows` and
-  // the splitting arrays by it, where a terminal such as `(a|b)* a (a|b){24}`
-  // would have them hold millions of subsets before the first refusal.
+  // The subsets one build may number before it refuses: eight times the states
+  // the reduced DFA may have, so a terminal such as `(a|b)* a (a|b){24}` is
+  // refused before it holds millions of subsets.
   static constexpr std::size_t kMaxSubsets = std::size_t{8} * kDeadState;
 
   // The coarsest refinement of `cls` every byte class respects. Blocks are
@@ -397,14 +387,10 @@ struct LexDfaBuild {
     return out;
   }
 
-  // A state whose every wide byte leads into a region of states that read
-  // alike -- the same row on every other byte, the same acceptance bar the
-  // refusal of a scalar's rest, none dead on a wide byte -- reads them in one
-  // stride into the least state of the region that has no such refusal. No
-  // end falls inside a scalar there: the walk never dies on a continuation
-  // byte, and the refusal only held an end back from the byte that continues
-  // it. A region is what the wide bytes reach, so what it says is said once
-  // per strong component of the wide bytes, from the components it reaches.
+  // A state whose wide bytes all lead into a region of states that read the
+  // same on every other byte reads them in one stride, into the least state of
+  // the region that does not refuse a scalar's rest. Decided per strong
+  // component.
   void collapse(const std::vector<std::uint32_t>& blk, std::uint32_t nblocks,
                 std::vector<std::uint32_t>& rows,
                 const std::vector<std::uint32_t>& strict,
@@ -433,13 +419,13 @@ struct LexDfaBuild {
     }
     const auto scc = StrongComponents<>::build(starts, edges);
     // What a component and all it reaches say: whether each state is clean
-    // and lives on every wide byte, a state they all read alike with
+    // and lives on every wide byte, a state they all read the same with
     // (`kNoLocal` where they do not), and their least state with no refusal.
     struct Region {
       bool total = true;
       std::uint32_t like = kNoLocal, least = kNoLocal;
     };
-    const auto alike = [&](std::uint32_t y, std::uint32_t b) {
+    const auto equivalent = [&](std::uint32_t y, std::uint32_t b) {
       return y == b ||
              (plain[head[y]] == plain[head[b]] &&
               std::ranges::all_of(
@@ -449,11 +435,11 @@ struct LexDfaBuild {
       into.total = into.total && r.total;
       into.least = std::min(into.least, r.least);
       if (into.like != kNoLocal &&
-          (r.like == kNoLocal || !alike(into.like, r.like)))
+          (r.like == kNoLocal || !equivalent(into.like, r.like)))
         into.like = kNoLocal;
     };
     // A component closes after all it reaches: in that order, each region is
-    // joined from those already laid.
+    // joined from those already built.
     std::vector<std::uint32_t> order(nblocks);
     for (std::uint32_t b = 0; b < nblocks; ++b) order[b] = b;
     std::ranges::sort(order, {},
@@ -559,10 +545,9 @@ struct LexDfaBuild {
     return bound != kNoSet && bound < _words.size() && _words[bound] != 0;
   }
 
-  // What the first `mn` members accept and launch. A `plain` read answers the
-  // key of the subset as its strays leave it: the acceptance is settled as in
-  // any read, but `acc`, `best` and `strayed` stay unset, which the key never
-  // reads.
+  // What the first `mn` members accept and launch. A `plain` read only decides
+  // the acceptance, for the subset's key: `acc`, `best` and `behindLoneLead`
+  // stay unset.
   LexDfaReading read(std::size_t mn, bool plain = false) const {
     LexDfaReading r;
     const LexNfaState* const nst = _nfa.s.data();
@@ -570,13 +555,13 @@ struct LexDfaBuild {
       const LexNfaState& st = nst[static_cast<std::size_t>(_mem[q])];
       if (st.relay >= 0) r.relays.push_back(static_cast<std::uint16_t>(st.relay));
       if (st.accept >= 0) {
-        if (!plain) r.strayed = r.strayed || st.strayBound;
+        if (!plain) r.behindLoneLead = r.behindLoneLead || st.loneLeadBound;
         const auto own = plain ? st.plain() : st.bound;
         const auto bound = own < 0 ? kNoSet : static_cast<std::uint16_t>(own);
         r.accepts.push_back(
             {static_cast<std::uint16_t>(st.accept), bound,
-             static_cast<std::uint8_t>(word_bound(bound) ? kTierKeyword
-                                       : st.lit          ? kTierLiteral
+             static_cast<std::uint8_t>(word_bound(bound) ? kKeywordPriority
+                                       : st.lit          ? kLiteralPriority
                                                          : 0)});
       }
     }
@@ -591,10 +576,10 @@ struct LexDfaBuild {
       if (!plain) {
         const auto term = rows[i].term;
         r.acc.set(term);
-        auto tier = 0u;
+        auto priority = 0u;
         for (std::size_t k = i; k < j; ++k)
-          tier = std::max<unsigned>(tier, rows[k].tier);
-        const auto rank = lex_rank(tier, _terms[term].trivia);
+          priority = std::max<unsigned>(priority, rows[k].priority);
+        const auto rank = lex_rank(priority, _terms[term].trivia);
         if (r.best < 0 || lex_term_before(rank, term, bestRank,
                                           static_cast<unsigned>(r.best))) {
           r.best = term;
@@ -628,11 +613,9 @@ struct LexDfaBuild {
     return mn;
   }
 
-  // A trivia holding a relay goes on only behind `gates` wherever a keyword
-  // stands beside it; any other trivia, once a keyword is spelled whole. One
-  // subset per terminal, and what the trivia accepts stays. `gated` takes the
-  // keywords the gates wait on, once for all of them. Answers the members
-  // left.
+  // Trivia beside a keyword goes on only behind `gates` if it holds a relay,
+  // and stops once the keyword is spelled whole otherwise. Returns the number
+  // of members left.
   std::size_t detach(std::size_t mn, std::vector<LexDfaReading::Gate>& gates,
                      std::vector<std::uint32_t>& gated) {
     if (!_cut.active) return mn;
@@ -695,13 +678,8 @@ struct LexDfaBuild {
       each_bit(cr, _clsWords,
                [&](std::size_t c) { mm[c * mWordsM + qw] |= qb; });
     }
-    // Two classes with the same members go to the same place: a repeat of
-    // the previous class's mask is answered by the previous class's target,
-    // since byte classes are cut for the whole alphabet and often coincide
-    // inside one subset. A subset of sixty-four members or fewer answers
-    // every class with one word, so the two questions become two
-    // comparisons, not two loops; a zero row stands for "no class answered
-    // yet", which a non-empty row never equals.
+    // A class whose mask repeats the previous class's goes to the same target.
+    // A zero row stands for no class answered yet.
     const std::uint64_t* prevRow = _zeroRow.data();
     std::uint32_t prevAt = kNoLocal;
     for (unsigned c = 0; c < _ncls; ++c) {
@@ -736,11 +714,9 @@ struct LexDfaBuild {
   }
 };
 
-// The DFA of every mode of `modeSet` over the alphabet's classes, into `b`: a
-// state's relay chain stands in `b.dfaRelay` before `write(state, reading)`
-// lays what it accepts; `push` appends a row to `b.relays` and answers its
-// index. Each mode's start and each relay's resume end as the state their
-// subset became.
+// The DFA of every mode of `modeSet` into `b`. `write(state, reading)` writes
+// what a state accepts, its relay chain already in `b.dfaRelay`; `push`
+// appends a row to `b.relays` and returns its index.
 template <class Built, class Push, class Write>
 void lex_build_dfa(Built& b, const LexAlphabet& alpha, LexKeywordCut& cut,
                    const std::vector<DynSet>& modeSet, const Push& push,

@@ -1,3 +1,4 @@
+// A rule, not a terminal, listed as `ignored`.
 // expect LR: .ignored., .hidden. and .skip... list terminals only
 #pragma once
 

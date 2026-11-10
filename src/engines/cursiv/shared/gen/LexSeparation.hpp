@@ -1,6 +1,6 @@
 // Tokens on either side of a trivia boundary must not match the same text.
 // Caller-only trivia must not swallow a token's prefix either. First bytes
-// settle most pairs; the existing token NFAs settle the rest, once per pair.
+// decide most pairs; the existing token NFAs decide the rest, once per pair.
 #pragma once
 
 #include <cstdint>
@@ -11,7 +11,7 @@
 
 #include "cursiv/shared/gen/LexAlphabet.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
-#include "cursiv/shared/gen/lex_prefix_meets.hpp"
+#include "cursiv/shared/gen/lex_prefix_overlap.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 
 namespace cursiv::engine {

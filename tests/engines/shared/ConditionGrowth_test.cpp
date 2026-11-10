@@ -67,7 +67,7 @@ void a_caret_asks_the_run_of_what_is_typed(const cursiv::Parser& p) {
   CHECK(caret_offers::offered(p, "m - - >", 5) == items);
 }
 
-// The instructions a parse retires per token; 0 where the counters are
+// The instructions a parse releases per token; 0 where the counters are
 // denied.
 double per_token(const cursiv::bench::PerfCounters& counters,
                  const cursiv::Parser& parser, const std::string& text) {

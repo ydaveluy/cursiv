@@ -3,22 +3,24 @@
 #include <lsp/json/json.h>
 #include <lsp/types.h>
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/workspace/Document.hpp"
-#include "cursiv/workspace/DocumentState.hpp"
-#include "cursiv/workspace/TextDocument.hpp"
+#include "cursiv/McpServer.hpp"
+#include "cursiv/McpToolKit.hpp"
 #include "cursiv/formatting/Formatter.hpp"
 #include "cursiv/services/LspServices.hpp"
 #include "cursiv/services/SharedLspServices.hpp"
 #include "cursiv/text/LspPosition.hpp"
-#include "cursiv/McpServer.hpp"
-#include "cursiv/McpToolKit.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentState.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
 
 namespace cursiv {
 
@@ -76,12 +78,10 @@ void LspMcpService::registerFormatTool(McpServer& server) const {
               params.textDocument.uri = lsp::DocumentUri::parse(document.uri);
               params.options.tabSize = 2;
               params.options.insertSpaces = true;
-              if (const json::Value* const tabSize =
-                      tool_argument(arguments, "tabSize");
-                  tabSize != nullptr && tabSize->isInteger() &&
-                  tabSize->integer() > 0)
-                params.options.tabSize =
-                    static_cast<lsp::Uint>(tabSize->integer());
+              if (const std::optional<std::int32_t> tabSize =
+                      detail::tool_integer(tool_argument(arguments, "tabSize"),
+                                           1))
+                params.options.tabSize = static_cast<lsp::Uint>(*tabSize);
               if (const json::Value* const insertSpaces =
                       tool_argument(arguments, "insertSpaces");
                   insertSpaces != nullptr && insertSpaces->isBoolean())

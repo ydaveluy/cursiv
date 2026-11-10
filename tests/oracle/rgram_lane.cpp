@@ -24,7 +24,7 @@
 namespace cursiv {
 namespace {
 
-// A parse gets this long before the lane calls it a hang.
+// A parse gets this long before the test calls it a hang.
 constexpr unsigned kWatchSeconds = 10;
 
 // Written before the parse: the handler may only call `write`.

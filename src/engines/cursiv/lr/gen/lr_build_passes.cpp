@@ -47,18 +47,18 @@ void lr_carry(Arr& a, std::size_t to, std::size_t from) {
 template <class Keep>
 constexpr bool lr_merges = std::is_same_v<Keep, LrStateMerge>;
 
-// What a pass composes for a state it mints: its rows, and its cell of each
+// What a pass composes for a state it creates: its rows, and its cell of each
 // column whose policy is `LrStateComposed`.
 struct LrComposedState {
   std::span<const LrAction> row;
   std::span<const LrGotoRows::Edge> gotos;
-  DynSet owed;
+  DynSet close;
 };
 
 // A state appended from what its pass composed; every other column takes
 // `root`'s cell.
-std::uint32_t lr_mint_state(LrBuildTable& A, LrComposedState made,
-                            std::uint32_t root) {
+std::uint32_t lr_add_state(LrBuildTable& A, LrComposedState made,
+                           std::uint32_t root) {
   const std::uint32_t id = A.nstates;
   A.actionBase[id] = A.nactions;
   std::ranges::copy(made.row, A.actions.row(A.nactions, made.row.size()));
@@ -69,7 +69,7 @@ std::uint32_t lr_mint_state(LrBuildTable& A, LrComposedState made,
     if constexpr (!std::is_same_v<decltype(keep), LrStateComposed>)
       lr_carry(column, id, root);
   });
-  A.closeRow[id] = std::move(made.owed);
+  A.closeRow[id] = std::move(made.close);
   A.nstates = static_cast<std::uint16_t>(id + 1);
   return id;
 }
@@ -87,7 +87,7 @@ std::vector<std::uint32_t> lr_kept_cells(LrBuildTable& A, std::uint32_t n,
   unsigned c = 0;
   A.each_state_column([&]<class T>(Vec<T>& column, auto keep) {
     if constexpr (!lr_merges<decltype(keep)>) {
-      // A column no pass laid reads empty cells.
+      // A column no pass filled reads empty cells.
       const T* const cell = column.row(0, n);
       if constexpr (std::is_same_v<T, DynSet>) set_dedup(cell, n, rank.data());
       for (std::uint32_t s = 0; s < n; ++s) {
@@ -117,8 +117,8 @@ std::vector<std::uint8_t> lr_live_states(const LrBuildTable& A,
   while (!work.empty()) {
     const std::uint32_t s = work.back();
     work.pop_back();
-    for (const LrAction& x : A.action_row(s)) A.each_landing(x, reach);
-    for (const LrGotoRows::Edge& e : go[s]) A.each_goto_landing(e, reach);
+    for (const LrAction& x : A.action_row(s)) A.each_target(x, reach);
+    for (const LrGotoRows::Edge& e : go[s]) A.each_goto_target(e, reach);
   }
   return lv;
 }
@@ -155,7 +155,7 @@ void lr_share_action_rows(LrBuildTable& A) {
 }
 
 // `a` covers `b` when b's set is inside a's and their trivia agree. A token
-// b flags as hiding a rival is still owed b's walk: its reader re-lexes it.
+// b flags as hiding a competitor still needs b's walk: its reader re-lexes it.
 void lr_subsume_modes(LrBuildTable& A, const LexModes& modes) {
   const std::uint32_t nm = A.nmodes;
   const std::size_t subWords = (std::size_t{nm} * nm + 63u) / 64u;
@@ -167,13 +167,12 @@ void lr_subsume_modes(LrBuildTable& A, const LexModes& modes) {
   });
 }
 
-// A conflict cell the second token decides needs no fork: each arm consumes
-// the cell's terminal -- a reduce through its lhs's whole goto row, the safe
-// over-approximation -- and collects what the states after the shift accept.
-// Two arms with disjoint sets, each under one mode, are decided by a peek.
+// A conflict cell the second token decides needs no fork: each arm consumes the
+// cell's terminal and collects what the states after it accept. Two arms with
+// disjoint sets, each under one mode, are decided by a peek.
 namespace {
 
-// The actions a walk has pushed, stamped rather than cleared.
+// The actions a walk has pushed, marked by round rather than cleared.
 struct LrPeekWalk {
   RoundMarks seen;
   std::vector<std::uint32_t> wl;
@@ -210,7 +209,8 @@ bool lr_peek_arm(const LrBuildTable& A, const LrGotoColumns& go,
         return false;
       // An implied token is an insertion the peek cannot see.
       for (const unsigned u : A.follow[w].members())
-        if (u != 0 && A.cfg.terms[u].laid == kLaidImplied) return false;
+        if (u != 0 && A.cfg.terms[u].synthetic == kSyntheticImplied)
+          return false;
       tok2 |= A.follow[w];
     } else if (x.kind == LrActionKind::reduce) {
       // A reduce the gap decides is not one the next token decides.
@@ -270,14 +270,14 @@ std::vector<std::uint16_t> lr_shift_terms(const LrBuildTable& a) {
   std::vector terms(a.nstates, kInvalidSymbol);
   for (unsigned s = 0; s < a.nstates; ++s)
     for (const LrAction& x : a.action_row(s)) {
-      const auto stamp = [&](std::uint16_t to) {
+      const auto mark = [&](std::uint16_t to) {
         auto& term = terms[to];
         if (term != kInvalidSymbol && term != x.term)
           throw std::logic_error(
               "LR: a shifted state lost its terminal identity");
         term = x.term;
       };
-      a.each_landing(x, stamp);
+      a.each_target(x, mark);
     }
   return terms;
 }
@@ -304,11 +304,9 @@ void lr_reduce_key(const LrBuildCfg& g, unsigned p,
   }
 }
 
-// Two states with the same rows -- actions, gotos, and every column the
-// states that fuse keep -- towards the same classes are one: partition
-// refinement to the fixpoint, then one representative per class, the
-// unreachable ones swept. A tag is kept as the runtime reads it, held unless
-// known false: no reader past this pass tells a known truth from no knowledge.
+// States with the same rows towards the same classes are one: partition
+// refinement to the fixpoint, one representative per class, unreachable states
+// swept. A tag stays held unless known false.
 void lr_minimize_states(LrBuildTable& A) {
   for (std::size_t s = 0; s < A.tagKnown.size(); ++s) {
     A.tagKnown[s].andnot(A.tagTruth[s]);
@@ -341,7 +339,7 @@ void lr_minimize_states(LrBuildTable& A) {
 
   std::vector<std::uint32_t> cls(n, 0);
   std::vector<std::uint32_t> key, guardKey;
-  // A guard is read by the classes it lands in.
+  // A guard is read by the classes of the states it goes to.
   std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> guardIds;
   const auto guard_class = [&](std::size_t q) {
     lr_guard_key(A.guards[q], [&](std::uint16_t to) { return cls[to]; }, guardKey);
@@ -349,8 +347,8 @@ void lr_minimize_states(LrBuildTable& A) {
         .try_emplace(guardKey, static_cast<std::uint32_t>(guardIds.size()))
         .first->second;
   };
-  // A row's fixed data, every landing read as one class: what the classes then
-  // tell apart is where each place of a row lands.
+  // A row's fixed data, every target read as one class: what the classes then
+  // tell apart is where each place of a row goes.
   const auto read_key = [&](std::uint32_t s) {
     key.clear();
     key.push_back(shiftTerm[s]);
@@ -386,7 +384,7 @@ void lr_minimize_states(LrBuildTable& A) {
     for (std::uint32_t s = 0; s < n; ++s)
       if (!lv[s]) opening[s] = static_cast<std::uint32_t>(first.size());
   }
-  // Each place of a row a landing may stand at, in the row's order: the rows of
+  // Each place of a row a target may stand at, in the row's order: the rows of
   // one class have one shape.
   const auto each_edge = [&](auto&& edge) {
     for (std::uint32_t s = 0; s < n; ++s) {
@@ -418,7 +416,7 @@ void lr_minimize_states(LrBuildTable& A) {
                          A.work != nullptr ? &A.work->minimizes : nullptr,
                          A.work != nullptr ? &A.work->moves : nullptr);
   // One representative per class, numbered by first occurrence so the start
-  // state keeps its seat.
+  // state keeps its entry.
   std::vector<std::uint32_t> reps;
   const auto newIdx = lr_representatives(cls, reps, live);
   const auto remap = [&](std::uint32_t s) {
@@ -452,7 +450,7 @@ void lr_minimize_states(LrBuildTable& A) {
 
     A.each_state_column([&]<class T>(Vec<T>& column, auto keep) {
       if constexpr (lr_merges<decltype(keep)>) {
-        // A column no pass laid stays unlaid.
+        // A column no pass filled stays empty.
         if (column.size() < n) return;
         std::vector<T> cell(k, keep.none);
         std::vector<std::uint8_t> seen(k, 0);
@@ -516,10 +514,9 @@ void lr_minimize_states(LrBuildTable& A) {
   }
 }
 
-// What a state owes: the fewest terminals a kernel item still needs, a list's
-// continuation aside, and the first terminals of those shortest completions.
-// An item set aside counts where it shifts one of them: every item taking a
-// due shift then owes one token less.
+// What a state still needs: the fewest terminals a kernel item needs, a list's
+// continuation aside, and the first terminals of those shortest completions. An
+// item set aside counts where it shifts one of them.
 void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
                    const std::vector<unsigned>& pick) {
   const auto& g = A.cfg;
@@ -530,16 +527,16 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
   const auto add = [](std::uint64_t a, std::uint64_t b) {
     return a > kInf - b ? kInf : a + b;
   };
-  // What each rule costs at least. The cheapest rule not settled yet can get no
-  // cheaper, a sum being no less than what it adds up: a production is read once,
-  // when the last rule it names settles.
+  // What each rule costs at least. The cheapest rule not priced yet can get no
+  // cheaper, a sum being no less than what it adds up: a production is read
+  // once, when the last rule it names is priced.
   std::vector yieldN(nN, kInf);
   std::vector<std::vector<std::uint32_t>> readers(nN);
-  std::vector<std::uint32_t> unsettled(nP, 0);
+  std::vector<std::uint32_t> unpriced(nP, 0);
   for (unsigned p = 0; p < nP; ++p)
     g.each_nt(prods[p], [&](unsigned, std::uint16_t nt) {
       readers[nt].push_back(p);
-      ++unsettled[p];
+      ++unpriced[p];
     });
   const auto yieldSym = [&](std::uint16_t x) {
     return is_term(x) ? std::uint64_t{1} : yieldN[nt_index(x)];
@@ -553,16 +550,16 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
     if (cost != kInf) cheapest.emplace(cost, prods[p].lhs);
   };
   for (unsigned p = 0; p < nP; ++p)
-    if (unsettled[p] == 0) read_cost(p);
+    if (unpriced[p] == 0) read_cost(p);
   while (!cheapest.empty()) {
     const auto [cost, nt] = cheapest.top();
     cheapest.pop();
     if (yieldN[nt] != kInf) continue;
     yieldN[nt] = cost;
     for (const std::uint32_t reader : readers[nt])
-      if (--unsettled[reader] == 0) read_cost(reader);
+      if (--unpriced[reader] == 0) read_cost(reader);
   }
-  // What each item still owes, read once off the costs settled above.
+  // What each item still needs, read once off the costs computed above.
   std::vector<std::uint32_t> itemAt(nP + 1u, 0);
   for (unsigned p = 0; p < nP; ++p) itemAt[p + 1u] = itemAt[p] + prods[p].len + 1u;
   std::vector<std::uint64_t> rest(itemAt[nP], 0);
@@ -586,7 +583,7 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
     }
   };
   // The first terminals of a rule's shortest readings, from the first symbol of
-  // each that owes anything: a set only grows, so the walk ends.
+  // each that needs anything: a set only grows, so the walk ends.
   std::vector<std::uint8_t> reads(nP, 0), queued(nP, 1);
   std::vector<std::uint32_t> todo(nP);
   for (unsigned p = 0; p < nP; ++p) {
@@ -612,7 +609,7 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
     if (const std::uint64_t y = yieldFrom(p, 0); y != kInf)
       A.closeMax = std::max(A.closeMax, y);
 
-  const auto owed = [&](const LrItem& it) {
+  const auto needed = [&](const LrItem& it) {
     const LrLowProd& p = prods[it.prod];
     if (it.dot == 0 && it.prod != g.startProd) return kInf;
     if (const std::uint16_t head = p.len != 0 ? g.sym_at(p, 0) : kNtBase;
@@ -622,37 +619,37 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
   };
   DynSet implied;
   for (unsigned t = 0; t < g.nterms; ++t)
-    if (g.terms[t].laid == kLaidImplied) implied.set(t);
+    if (g.terms[t].synthetic == kSyntheticImplied) implied.set(t);
   for (unsigned f = 0; f < A.nstates; ++f) {
     const std::span<const LrItem> items = clos[pick[f]];
-    std::uint64_t owe = kInf;
-    for (const LrItem& it : items) owe = std::min(owe, owed(it));
+    std::uint64_t need = kInf;
+    for (const LrItem& it : items) need = std::min(need, needed(it));
     DynSet row;
-    if (owe != 0 && owe != kInf)
+    if (need != 0 && need != kInf)
       for (const LrItem& it : items)
-        if (owed(it) == owe) firstFrom(prods[it.prod], it.dot, row);
+        if (needed(it) == need) firstFrom(prods[it.prod], it.dot, row);
     row.andnot(implied);
     const DynSet due = row;
     const auto counted = [&](const LrItem& it) {
-      const std::uint64_t o = owed(it);
+      const std::uint64_t o = needed(it);
       const LrLowProd& p = prods[it.prod];
       if (o != kInf || it.dot >= p.len) return o;
       const std::uint16_t t = g.sym_at(p, it.dot);
       return is_term(t) && due.test(t) ? yieldFrom(it.prod, it.dot) : kInf;
     };
-    std::uint64_t least = owe;
+    std::uint64_t least = need;
     for (const LrItem& it : items) least = std::min(least, counted(it));
-    if (least < owe) {
-      owe = least;
+    if (least < need) {
+      need = least;
       row = DynSet{};
       for (const LrItem& it : items)
-        if (counted(it) == owe) row.set(g.sym_at(prods[it.prod], it.dot));
+        if (counted(it) == need) row.set(g.sym_at(prods[it.prod], it.dot));
     }
 #ifndef NDEBUG
-    // A due terminal lands where one token less is owed.
+    // A due terminal shifts to where one token less is needed.
     for (const LrItem& it : items) {
       const LrLowProd& p = prods[it.prod];
-      if (counted(it) != owe || owe == 0 || owe == kInf || it.dot >= p.len)
+      if (counted(it) != need || need == 0 || need == kInf || it.dot >= p.len)
         continue;
       const std::uint16_t t = g.sym_at(p, it.dot);
       if (!is_term(t) || !row.test(t)) continue;
@@ -660,7 +657,7 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
       for (const LrItem& o : items)
         if (o.dot < prods[o.prod].len && g.sym_at(prods[o.prod], o.dot) == t)
           next = std::min(next, yieldFrom(o.prod, o.dot + 1u));
-      assert(next + 1 == owe && "a due shift owes one token less");
+      assert(next + 1 == need && "a due shift needs one token less");
     }
 #endif
     A.closeRow[f] = std::move(row);
@@ -724,11 +721,11 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
   };
 
   // Index only the original edges, before any copy is appended. Columns
-  // ascend by nonterminal/source: targetOf's mint order numbers states.
+  // ascend by nonterminal/source; `targetOf` numbers the states it creates.
   const LrGotoColumns columns(out, nN);
   using UpeEdge = LrGotoRows::Edge;
   std::vector<std::uint32_t> work;
-  std::vector<std::uint32_t> gStamp(nN, 0), gPos(nN, 0);
+  std::vector<std::uint32_t> gMark(nN, 0), gPos(nN, 0);
   std::uint32_t gGen = 0;
 
   // A guarded goto has no one successor to chase.
@@ -762,21 +759,21 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
     const std::span<const UpeEdge> xOut = out[X];
     std::vector<UpeEdge> gadd(xOut.begin(), xOut.end());
     ++gGen;
-    const auto gSeat = [&](std::size_t i) {
+    const auto gIndex = [&](std::size_t i) {
       const unsigned nt = gadd[i].nt;
-      if (gStamp[nt] == gGen) return;
-      gStamp[nt] = gGen;
+      if (gMark[nt] == gGen) return;
+      gMark[nt] = gGen;
       gPos[nt] = static_cast<std::uint32_t>(i);
     };
     const auto gAt = [&](unsigned nt) {
-      return gStamp[nt] == gGen ? static_cast<int>(gPos[nt]) : -1;
+      return gMark[nt] == gGen ? static_cast<int>(gPos[nt]) : -1;
     };
-    for (std::size_t i = 0; i < gadd.size(); ++i) gSeat(i);
+    for (std::size_t i = 0; i < gadd.size(); ++i) gIndex(i);
     std::uint32_t subs = 0;
     const LrAction* const xrow = sa + ab[X];
     const unsigned xc = ac[X];
-    // A substituted cell owes what its successor owes.
-    DynSet owed;
+    // A substituted cell needs what its successor needs.
+    DynSet close;
     lr_each_run(xrow, xc, [&](std::size_t i, std::size_t j) {
       bool done = false;
       if (j - i == 1 && xrow[i].kind == LrActionKind::reduce &&
@@ -813,7 +810,7 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
         }
         if (fin != 0xFFFFFFFFu) {
           // The successor's goto rows join, unless one disagrees with a
-          // seated row: then the cell stays a reduce.
+          // stored row: then the cell stays a reduce.
           bool clash = false;
           for (const UpeEdge& e : out[fin]) {
             const int at = gAt(e.nt);
@@ -824,11 +821,11 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
           }
           if (!clash) {
             for (unsigned k = fb; k < fe; ++k) row.push_back(sa[k]);
-            if (A.closeRow[fin].test(a)) owed.set(a);
+            if (A.closeRow[fin].test(a)) close.set(a);
             for (const UpeEdge& e : out[fin])
               if (gAt(e.nt) < 0) {
                 gadd.push_back(e);
-                gSeat(gadd.size() - 1);
+                gIndex(gadd.size() - 1);
               }
             ++subs;
             done = true;
@@ -837,18 +834,18 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
       }
       if (!done) {
         for (std::size_t k = i; k < j; ++k) row.push_back(xrow[k]);
-        if (A.closeRow[X].test(xrow[i].term)) owed.set(xrow[i].term);
+        if (A.closeRow[X].test(xrow[i].term)) close.set(xrow[i].term);
       }
     });
     if (subs == 0) return X;
 
-    // A copy the state index cannot name is not minted; the memo answers
+    // A copy the state index cannot name is not created; the memo answers
     // later edges that ask for it, without counting it again.
     if (A.nstates >= 0xFFFFu || row.size() >= 0xffffu) {
-      ++A.nunminted;
+      ++A.nDroppedCopies;
       return X;
     }
-    const std::uint32_t id = lr_mint_state(A, {row, gadd, std::move(owed)}, X);
+    const std::uint32_t id = lr_add_state(A, {row, gadd, std::move(close)}, X);
     out.push_row(gadd);
     work.push_back(id);
     return id;
@@ -894,8 +891,8 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
     return id;
   };
 
-  // Every edge, the minted states' as they come. `targetOf` mints and moves
-  // the arrays: each cell is named through the store.
+  // Every edge, the created states' as they come. `targetOf` creates states
+  // and moves the arrays: each cell is named through the store.
   const auto retarget_shifts = [&](std::uint32_t s) {
     for (unsigned i = 0, c = A.actionCount[s]; i < c; ++i) {
       const std::uint32_t k = A.actionBase[s] + i;

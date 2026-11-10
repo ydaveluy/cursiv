@@ -1,7 +1,6 @@
-// The service containers: what a language's container owes and when it is
-// complete, the registry that routes a document to its language, the slots,
-// the two values a diagnostic and a JSON answer are made of, and the side
-// channel observations are said on.
+// The service containers: what a language's container needs, the registry
+// that routes a document to its language, the slots, diagnostics and JSON
+// values, and the observability channel.
 
 #include <chrono>
 #include <cstddef>
@@ -50,7 +49,7 @@
 #include <unistd.h>
 #endif
 
-// Pins the container every generated language is built through: the
+// The container every generated language is built through: the
 // defaults, the module, and the registration that either owns them or fails.
 namespace core_language {
 
@@ -74,8 +73,8 @@ void create_language_builds_a_workspace_of_its_own() {
 
 void install_nothing(cursiv::CoreServices&) {}
 
-// `register_language`'s `bool` promises `false` on failure; what a caller
-// gets is an uncaught exception instead.
+// `register_language` throws on an incomplete container rather than return
+// `false`.
 void register_language_throws_instead_of_answering_false() {
   cursiv::SharedCoreServices shared;
   cursiv::install_default_shared_core_services(shared);
@@ -86,7 +85,6 @@ void register_language_throws_instead_of_answering_false() {
         cursiv::CoreServices, cursiv::SharedCoreServices, install_nothing>(
         shared);
   } catch (const cursiv::ServiceRegistrationError&) {
-    // Pinned as is: see G6-06
     threw = true;
   }
   CHECK(threw);
@@ -101,7 +99,7 @@ void run() {
 
 }  // namespace core_language
 
-// Pins what one language's container owes and when it is complete. The answer
+// What one language's container must hold, and when it is complete. The answer
 // reads the container's own rows, so a service added in one place cannot be
 // forgotten in another.
 namespace core_services {
@@ -112,14 +110,14 @@ cursiv::LanguageMetaData meta() { return {"workspace", {".ws"}, {}}; }
 
 cursiv::SharedCoreServices shared;
 
-void a_fresh_container_owes_its_metadata_first() {
+void a_fresh_container_misses_its_metadata_first() {
   const cursiv::CoreServices s(shared);
   CHECK(s.firstMissingService() == "languageMetaData");
   CHECK(s.parser == nullptr);
   CHECK(s.languageMetaData.languageId.empty());
 }
 
-void what_is_written_stops_being_owed() {
+void what_is_written_is_no_longer_missing() {
   cursiv::CoreServices s(shared);
   s.languageMetaData = meta();
   CHECK(s.languageMetaData.languageId == "workspace");
@@ -146,7 +144,7 @@ void what_is_written_stops_being_owed() {
   CHECK(s.scopeComputation.get() == mine);
 }
 
-// The container's one door to the engine answers like the engine.
+// The container's parser answers like the engine.
 void the_container_s_parser_is_the_engine() {
   cursiv::CoreServices s(shared);
   s.languageMetaData = meta();
@@ -171,7 +169,7 @@ struct Derived final : cursiv::CoreServicesFor<cursiv::SharedCoreServices> {
   }
 };
 
-void an_added_slot_is_declared_and_owed() {
+void an_added_slot_is_declared_and_required() {
   Derived s(shared);
   s.languageMetaData = meta();
   s.parser = ws::generated::Workspace::create_parser();
@@ -193,8 +191,8 @@ void make_default_builds_a_complete_container() {
   CHECK(s->astNodeDescriptionProvider != nullptr);
 }
 
-// The diamond: a container that is two facades of one language still holds
-// exactly one `CoreServices`.
+// A container deriving two views of one language still holds exactly one
+// `CoreServices`.
 struct FacadeA : virtual cursiv::CoreServices {
   explicit FacadeA(cursiv::SharedCoreServices& sharedServices)
       : cursiv::CoreServices(sharedServices) {}
@@ -219,7 +217,8 @@ void the_diamond_holds_one_container() {
   CHECK(b.parser != nullptr);
 }
 
-// The first hole reported is the first slot declared: the order is a surface.
+// The first hole reported is the first slot declared: the order is part of the
+// API.
 void the_shared_container_reports_in_declaration_order() {
   cursiv::SharedCoreServices bare;
   CHECK(bare.firstMissingService() == "observabilitySink");
@@ -238,10 +237,10 @@ void a_preinstalled_shared_service_is_kept() {
 }  // namespace
 
 void run() {
-  a_fresh_container_owes_its_metadata_first();
-  what_is_written_stops_being_owed();
+  a_fresh_container_misses_its_metadata_first();
+  what_is_written_is_no_longer_missing();
   the_container_s_parser_is_the_engine();
-  an_added_slot_is_declared_and_owed();
+  an_added_slot_is_declared_and_required();
   make_default_builds_a_complete_container();
   the_diamond_holds_one_container();
   the_shared_container_reports_in_declaration_order();
@@ -250,8 +249,8 @@ void run() {
 
 }  // namespace core_services
 
-// Pins the integer half of `DiagnosticCode`, LSP's `integer | string`: the
-// alternative nothing in the tree constructs yet.
+// The integer half of `DiagnosticCode`, LSP's `integer | string`, which
+// nothing in the tree constructs.
 namespace diagnostic {
 
 namespace {
@@ -284,7 +283,7 @@ void run() {
 
 }  // namespace diagnostic
 
-// Pins the determinism `toJsonString` promises: sorted keys, escaped
+// The determinism `toJsonString` promises: sorted keys, escaped
 // control characters, the classic locale, and the null fallback.
 namespace json_value {
 
@@ -326,7 +325,7 @@ void strings_escape_quotes_backslashes_and_control_characters() {
 }
 
 // JSON text is UTF-8: a scalar is written as it stands, each maximal
-// ill-formed subpart as one U+FFFD, here a stray continuation byte, a lead
+// ill-formed subpart as one U+FFFD, here a lone continuation byte, a lead
 // cut short and a lone surrogate.
 void strings_stay_utf8() {
   const cursiv::JsonValue v(std::string("\xC3\xA9\x80|\xE2\x82|\xED\xA0\x80"));
@@ -340,7 +339,7 @@ void doubles_serialize_with_the_classic_locale() {
   CHECK(v.toJsonString({.pretty = false}) == "3.5");
 }
 
-// A non-finite double has no JSON spelling: it lands as `null`.
+// A non-finite double has no JSON spelling: it is written as `null`.
 void non_finite_numbers_fall_back_to_null() {
   const cursiv::JsonValue nan(std::numeric_limits<double>::quiet_NaN());
   const cursiv::JsonValue inf(std::numeric_limits<double>::infinity());
@@ -389,7 +388,7 @@ void run() {
 
 }  // namespace json_value
 
-// Pins which language a document belongs to. One routing table and one answer:
+// Which language a document belongs to. One routing table and one answer:
 // a URI that routed one way for the parse and another for the services would
 // be two languages for one document.
 namespace service_registry {
@@ -413,7 +412,7 @@ std::unique_ptr<cursiv::CoreServices> language(
   return s;
 }
 
-// The registry owns what it routes to, so a lane that wants to name a language
+// The registry owns what it routes to, so a test that wants to name a language
 // keeps the address the registration handed over.
 const cursiv::CoreServices* enroll(
     cursiv::DefaultServiceRegistry& registry,
@@ -423,8 +422,8 @@ const cursiv::CoreServices* enroll(
   return address;
 }
 
-// A shared container that owes a required slot is refused before any language
-// claims -- the antecedent that lets a required slot go unguarded at its use.
+// A shared container missing a required slot is refused before any language
+// registers, so a required slot needs no check where it is used.
 void an_incomplete_shared_container_is_refused() {
   cursiv::SharedCoreServices bare;
   cursiv::DefaultServiceRegistry registry(bare);
@@ -432,7 +431,7 @@ void an_incomplete_shared_container_is_refused() {
   try {
     registry.registerServices(std::make_unique<cursiv::CoreServices>(bare));
   } catch (const cursiv::ServiceRegistrationError& refusal) {
-    // The shared gate speaks, not the language one: that is what pins it.
+    // The shared check refuses, not the language one.
     threw = std::string_view(refusal.what()).find("shared services") !=
             std::string_view::npos;
   }
@@ -450,8 +449,7 @@ void an_incomplete_language_is_refused() {
   }
   CHECK(threw);
 
-  // Named, but owing a parser: still refused. This is what keeps a half-built
-  // language out of the build.
+  // Named, but without a parser: still refused.
   auto parserless = std::make_unique<cursiv::CoreServices>(shared);
   parserless->languageMetaData = {"ws", {".ws"}, {}};
   threw = false;
@@ -502,8 +500,8 @@ void a_uri_routes_by_extension() {
   }));
 }
 
-// The registration spelling and the URI spelling must land in the same row.
-void extensions_meet_however_they_are_spelled() {
+// The registration spelling and the URI spelling must map to the same row.
+void extensions_match_however_they_are_spelled() {
   cursiv::DefaultServiceRegistry registry(shared);
   const cursiv::CoreServices* const one =
       enroll(registry, language("one", {"Model"}));  // no dot, upper case
@@ -573,7 +571,7 @@ void a_later_registration_replaces_the_mapping() {
   CHECK(registry.all()[0] == first);
 }
 
-// Re-registering the same id retires the old container and keeps the rank:
+// Re-registering the same id replaces the old container and keeps the rank:
 // registration order is the order a consumer walks.
 void re_registering_an_id_keeps_its_rank() {
   cursiv::DefaultServiceRegistry registry(shared);
@@ -590,12 +588,12 @@ void re_registering_an_id_keeps_its_rank() {
   CHECK(registry.all()[1] == b);
   CHECK(a != a2);
   CHECK(registry.findServices("file:///x.aa") == a2);
-  // The narrowed-away extension routes to nothing, not to a corpse.
+  // The extension it dropped routes to nothing, not to the old container.
   CHECK(registry.findServices("file:///x.ab") == nullptr);
   CHECK(registry.findServices("file:///x.bb") == b);
 }
 
-void a_retired_container_outlives_its_documents() {
+void a_replaced_container_outlives_its_documents() {
   bool destroyed = false;
   struct TrackedServices final : cursiv::CoreServices {
     bool& destroyed;
@@ -654,21 +652,21 @@ void run() {
   an_incomplete_language_is_refused();
   a_language_of_another_workspace_is_refused();
   a_uri_routes_by_extension();
-  extensions_meet_however_they_are_spelled();
+  extensions_match_however_they_are_spelled();
   precedence_is_id_then_name_then_extension();
   routing_reads_the_file_name_only();
   routing_uses_the_decoded_uri_path();
   a_later_registration_replaces_the_mapping();
   re_registering_an_id_keeps_its_rank();
-  a_retired_container_outlives_its_documents();
+  a_replaced_container_outlives_its_documents();
   an_empty_registry_says_so();
   a_null_registration_is_refused();
 }
 
 }  // namespace service_registry
 
-// Pins the completeness invariant: the answer reads the container's own rows,
-// so a service added in one place cannot be forgotten in another.
+// The completeness check reads the container's own rows, so a service added
+// in one place cannot be forgotten in another.
 namespace service_slot {
 
 namespace {
@@ -699,12 +697,12 @@ void the_first_required_hole_is_the_answer() {
 }
 
 // An optional slot left empty is not a hole.
-void what_is_not_required_is_not_owed() {
+void what_is_not_required_is_not_missing() {
   const Container c({{"documentation", false, false}, {"parser", true, true}});
   CHECK(c.firstMissingService().empty());
 }
 
-void an_empty_container_owes_nothing() {
+void an_empty_container_misses_nothing() {
   CHECK(Container({}).firstMissingService().empty());
 }
 
@@ -713,16 +711,15 @@ void an_empty_container_owes_nothing() {
 void run() {
   a_complete_container_names_nothing();
   the_first_required_hole_is_the_answer();
-  what_is_not_required_is_not_owed();
-  an_empty_container_owes_nothing();
+  what_is_not_required_is_not_missing();
+  an_empty_container_misses_nothing();
 }
 
 }  // namespace service_slot
 
-// Pins that a combined container -- a language that is both a core language
-// and an LSP one -- emits each service row exactly once through the diamond.
-// The split (`visitOwnServices`) is what this guards: an override calling the
-// wrong side would double the core rows, and nothing else would notice.
+// A language that is both core and LSP emits each service row once through
+// the diamond: an override calling the wrong side of `visitOwnServices` would
+// double the core rows.
 namespace shared_core_services {
 
 namespace {
@@ -741,7 +738,7 @@ void a_combined_container_emits_each_row_once() {
     CHECK(seen == 1);
     if (seen != 1) CHECK(name.empty());  // name the duplicate in the log
   }
-  // All three storeys answered: a core row, the language's own, an LSP one.
+  // All three levels answered: a core row, the language's own, an LSP one.
   CHECK(counts.contains("parser"));
   CHECK(counts.contains("qualifiedNameProvider"));
   CHECK(counts.contains("hoverProvider"));
@@ -755,9 +752,9 @@ void run() {
 
 }  // namespace shared_core_services
 
-// Pins the runtime's side channel: an observation renders on one line, and
-// the two workspace-level failures that owe no client an answer are said --
-// a colliding extension, a root the scan was refused.
+// The observability channel: an observation renders on one line, and the two
+// workspace failures no client is told about are reported: a colliding
+// extension, and a root the scan could not read.
 namespace observability_sink {
 
 namespace {
@@ -867,7 +864,7 @@ void concurrent_publishes_never_splice_two_lines() {
   return services;
 }
 
-// The later registration owns the extension, and the collision is said.
+// The later registration owns the extension, and the collision is reported.
 void a_colliding_extension_is_said() {
   Observed world;
   auto& [shared, capture] = world;
@@ -886,7 +883,7 @@ void a_colliding_extension_is_said() {
   CHECK(capture->seen.size() == 1);
 }
 
-// A colliding file name is said too.
+// A colliding file name is reported too.
 void a_colliding_file_name_is_said() {
   Observed world;
   auto& [shared, capture] = world;
@@ -937,9 +934,9 @@ class SubfolderRefusingFileSystemProvider final
   std::string _refused;
 };
 
-// A root's refusal is said as the bootstrap failure it is, and stepped over:
-// the other folders are read and `ready` resolves -- or every request awaiting
-// the scan would wait for the session.
+// A refused root is reported as a startup failure and skipped: the other
+// folders are read and `ready` resolves, or every request waiting for the scan
+// would wait forever.
 void a_refused_root_is_said_and_the_others_are_read() {
   auto provider =
       std::make_unique<SubfolderRefusingFileSystemProvider>("file:///gone");

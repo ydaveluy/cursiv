@@ -43,6 +43,12 @@ A message is exact text or a predicate on `std::string_view`. Options can
 restrict the match to an offset, length, range, diagnostic code, node or
 property; every option you set must match.
 
+`testCodeAction(services, text, code, fixed)`, from
+`cursiv/CodeActionResult.hpp`, checks a quick fix: the text has one diagnostic
+with this code, one action fixes it, and the result is `fixed`, without that
+diagnostic. Pass `std::nullopt` as `fixed` when no action may be offered. Call
+`dispose()` on the result to remove its document.
+
 ## Check editor features
 
 Editor helpers take text with markers: `<|>` for the caret and `<|text|>` for
@@ -92,8 +98,9 @@ For example, with `cursiv/ExpectedHover.hpp` and the Recipe LSP
 ## Clean up documents
 
 Test documents stay in the workspace until you remove them; destroying a
-result does not remove them. When tests share a workspace, remove them so
-that the declarations of one case do not leak into the next:
+result does not remove them, but a helper that throws removes the document it
+added. When tests share a workspace, remove them so that the declarations of
+one case do not leak into the next:
 
 - call `dispose()` on a `ValidationResult`, or on the `Disposable` that an
   editor helper returns (or set `disposeAfterCheck = true`);

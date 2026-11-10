@@ -6,9 +6,8 @@
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/completion/CompletionProviderOptions.hpp"
 
-// Content assist: a position in a document, and everything the language
-// allows to be written there, computed entirely inside that document -- even
-// names offered from other files reach it through the scope provider.
+// Content assist: everything the language allows at a position of a document.
+// Names from other files come through the scope provider.
 
 namespace cursiv {
 
@@ -16,20 +15,14 @@ class CompletionProvider {
  public:
   virtual ~CompletionProvider() noexcept = default;
 
-  // What makes the client ask without a keystroke, announced once per
-  // session. Empty by default: which bytes those are is a fact about one
-  // language.
+  // The trigger and commit characters, sent once at initialize. Empty by
+  // default.
   [[nodiscard]] virtual CompletionProviderOptions completionOptions() const {
     return {};
   }
 
-  /**
-   * The request whole: its position, and its `context` when the client says
-   * how it asked -- invoked, typed a trigger character, or asked again for an
-   * incomplete list. Precondition: called under the workspace read lock. An
-   * empty list is an answer, not an error; `isIncomplete` is always true,
-   * since the next keystroke may shift which grammar position the caret is in.
-   */
+  // Called under the workspace read lock. An empty list is an answer, and
+  // `isIncomplete` is always true: the next keystroke may move the caret.
   [[nodiscard]] virtual lsp::CompletionList getCompletion(
       const Document& document, const lsp::CompletionParams& params,
       const CancellationToken& = {}) const = 0;

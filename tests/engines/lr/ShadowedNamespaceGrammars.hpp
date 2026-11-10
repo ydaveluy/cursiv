@@ -1,9 +1,8 @@
 #pragma once
 
-// A grammar declared where a bare `cursiv::` and a bare `std::` both name the
-// author's own namespaces: what is generated for it spells both from the
-// global scope. Beside its names, a precedence table inside a region, whose
-// two readings, the descent's and the table's, must be the one AST.
+// A grammar declared where bare `cursiv::` and `std::` name the author's own
+// namespaces: its generated code spells both from the global scope. Beside it,
+// a precedence table in a region whose two engines' readings give one AST.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

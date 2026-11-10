@@ -1,9 +1,8 @@
 #pragma once
 
-// Equations `a = b` whose pattern may run on through the next equation's `=`:
-// each `=` is the pattern's operator or the equation's own, and only the end
-// of the text refuses a reading, so every one stays alive to the last token.
-// `inner` writes the longer pattern first, `outer` the shorter.
+// Equations `a = b` whose pattern may run on through the next `=`: only the end
+// of the text refuses a reading, so all stay alive to the last token. `inner`
+// writes the longer pattern first, `outer` the shorter.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

@@ -27,16 +27,15 @@ namespace {
   return offset >= node.begin && offset < node.end;
 }
 
-// The word under the caret is the innermost chain step, answering inside a
-// region the tree records as one block -- a comment above all. A word is a
-// run of letters, digits and `_`, read by scalar: a dash or a quote past
-// ASCII ends it as its ASCII kin would.
+// The word under the caret is the innermost step, inside a region the tree
+// keeps as one block, such as a comment. A word is a run of letters, digits
+// and `_`.
 struct TokenSpan {
   TextOffset begin = 0;
   TextOffset end = 0;
 };
 
-// The lead of the scalar holding `at`.
+// The first byte of the code point holding `at`.
 [[nodiscard]] TextOffset scalar_start(std::string_view text,
                                       TextOffset at) noexcept {
   while (at > 0 && (static_cast<unsigned char>(text[at]) & 0xC0u) == 0x80u)
@@ -55,8 +54,7 @@ struct TokenSpan {
     return static_cast<TextOffset>(utf8_width(text[lead]));
   };
   TextOffset cursor = offset < size ? scalar_start(text, offset) : size;
-  // The caret just past a word is still on it -- the same half-open-span rule
-  // the whole storey follows.
+  // A caret just past a word is still on it.
   if (!is(cursor) && cursor > 0 && is(scalar_start(text, cursor - 1)))
     cursor = scalar_start(text, cursor - 1);
   if (!is(cursor)) return {};
@@ -119,7 +117,7 @@ DefaultSelectionRangeProvider::getSelectionRanges(
         document.textDocument().offsetAt(from_lsp(position));
     std::vector<NodeId> chain = chain_at(cst, offset, token);
     // A caret one past the last character is still on the word: a CST span
-    // is half-open, so a double-click or word-wise motion often lands one
+    // is half-open, so a double-click or word-wise motion often falls one
     // past the name. One retry, only when nothing covered the offset.
     if (chain.empty() && offset > 0) chain = chain_at(cst, offset - 1, token);
 
@@ -150,10 +148,8 @@ DefaultSelectionRangeProvider::getSelectionRanges(
       answer.push_back(std::move(bare));
       continue;
     }
-    // Capped: `parent` is a `unique_ptr`, so the chain tears down by recursing
-    // once per step, and a client expands a handful. An outermost step short of
-    // the root is what the protocol allows for.
-    // Innermost first in `spans`, so the cap drops the outer steps.
+    // Capped: `parent` is a `unique_ptr`, so the chain is torn down by
+    // recursion. `spans` is innermost first, so the cap drops the outer steps.
     if (constexpr std::size_t kMaxDepth = 64; spans.size() > kMaxDepth)
       spans.resize(kMaxDepth);
     // Outermost first into the protocol's nesting: the value is the innermost

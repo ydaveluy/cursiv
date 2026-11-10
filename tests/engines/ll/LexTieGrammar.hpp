@@ -52,10 +52,9 @@ struct Class : cursiv::Extends<cursiv::AstNode> {
   vector<Member*> members;
 };
 
-// A type name and a name over one spelling, the type refusing words at its
-// head, the name reached first; behind annotations and an optional keyword
-// the member's arms part. `Chest();` is a constructor where its arm is
-// written first, a method where the method's is.
+// A type name and a name of one spelling, the type refusing words at its head,
+// the name reached first; the member's arms part behind annotations and an
+// optional keyword. `Chest();` is a constructor where its arm comes first.
 struct Members : cursiv::GrammarSpec {
   static constexpr auto word_boundary = cr<"a-zA-Z0-9_">;
   struct WS : terminal<some(s)> {};

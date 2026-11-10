@@ -75,8 +75,8 @@ struct Plain : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// Preserve each mode's lexer policy while sharing generated parsers and AST
-// metadata: comments are hidden only in the compound-operator mode.
+// Each mode keeps its lexer settings in the shared parser: comments are hidden
+// only in the compound-operator mode.
 struct Suite : cursiv::GrammarSpec {
   struct Root
       : rule<(lit<"compound:"> +

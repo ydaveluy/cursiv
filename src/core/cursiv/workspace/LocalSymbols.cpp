@@ -7,12 +7,15 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/utils/AtomicWait.hpp"
 #include "cursiv/workspace/AstNodeDescription.hpp"
+#include "cursiv/workspace/Document.hpp"
 
 namespace cursiv {
 
@@ -25,6 +28,7 @@ void LocalSymbols::clear() noexcept {
   _groupMask = 0;
   _nameMask = 0;
   _held.reset();
+  _shortcuts.reset();
 }
 namespace {
 
@@ -45,15 +49,19 @@ void LocalSymbols::reserve(std::size_t entries) {
 
 void LocalSymbols::add(const AstNode* container,
                        AstNodeDescription description) {
-  // Null is the empty slot of every table `seal` builds.
+  // Null is the empty slot of every table `build_index` builds.
   assert(container != nullptr && "a local symbol needs a container");
   _entries.push_back(std::move(description));
   _containerOf.push_back(container);
 }
 
-void LocalSymbols::seal() {
+void LocalSymbols::build_index() {
   const std::size_t count = _entries.size();
   if (count == 0) return;
+  // Positions, counts and slots are 32 bits, and a table is at least twice its
+  // entries: more than 2^31 entries is refused before anything changes.
+  if (count > std::size_t{1} << 31u)
+    throw std::length_error("cursiv: too many local symbols in one document");
 
   // One container already defines the only group: no counting or source
   // permutation is needed, whatever names or declarations it contains.
@@ -76,17 +84,10 @@ void LocalSymbols::seal() {
     _containerOf.clear();
     _containerOf.shrink_to_fit();
   } else {
-    // 1. The containers, and how many entries each holds.
-    //
-    // Sized by the entries instead, a document with one container would carry
-    // a group table the width of the whole document, and every ancestor level
-    // of every reference would miss the cache reaching into it.
-    //
-    // The containers are met in a probe table as wide as the entries, and filed
-    // below in its slot order. It keeps a bit per slot, so an empty one costs a
-    // bit to clear and to skip, and a run of entries under one container asks
-    // it once.
-    struct Met {
+    // 1. The containers, and how many entries each holds. They are met in a
+    // probe table as wide as the entries, with one bit per slot, then filed in
+    // slot order.
+    struct Holder {
       const AstNode* container;
       std::uint32_t count;
       std::uint32_t slot;
@@ -98,33 +99,35 @@ void LocalSymbols::seal() {
     const auto isTaken = [&](std::size_t at) {
       return ((taken[at >> 6u] >> (at & 63u)) & 1u) != 0;
     };
-    const auto metAt = std::make_unique_for_overwrite<std::uint32_t[]>(wideSize);
-    const auto met = std::make_unique_for_overwrite<Met[]>(count);
-    const auto metOf = std::make_unique_for_overwrite<std::uint32_t[]>(count);
+    const auto holderAt =
+        std::make_unique_for_overwrite<std::uint32_t[]>(wideSize);
+    const auto holders = std::make_unique_for_overwrite<Holder[]>(count);
+    const auto holderOf =
+        std::make_unique_for_overwrite<std::uint32_t[]>(count);
     std::uint32_t containers = 0;
     const AstNode* last = nullptr;
-    std::uint32_t lastMet = 0;
+    std::uint32_t lastHolder = 0;
     bool alreadyGrouped = true;
     for (std::size_t i = 0; i < count; ++i) {
       if (const AstNode* container = _containerOf[i]; container != last) {
         std::size_t at = static_cast<std::size_t>(mix(container)) & wideMask;
-        while (isTaken(at) && met[metAt[at]].container != container)
+        while (isTaken(at) && holders[holderAt[at]].container != container)
           at = (at + 1) & wideMask;
         if (!isTaken(at)) {
           taken[at >> 6u] |= std::uint64_t{1} << (at & 63u);
-          metAt[at] = containers;
+          holderAt[at] = containers;
           // The first source position is also the group's beginning when
           // no container returns in a later run. The scatter reuses it below.
-          met[containers++] =
-              Met{container, 0, 0, static_cast<std::uint32_t>(i)};
+          holders[containers++] =
+              Holder{container, 0, 0, static_cast<std::uint32_t>(i)};
         } else {
           alreadyGrouped = false;
         }
         last = container;
-        lastMet = metAt[at];
+        lastHolder = holderAt[at];
       }
-      ++met[lastMet].count;
-      metOf[i] = lastMet;
+      ++holders[lastHolder].count;
+      holderOf[i] = lastHolder;
     }
     _groups.assign(table_size(containers), Group{});
     _groupMask = _groups.size() - 1;
@@ -134,7 +137,7 @@ void LocalSymbols::seal() {
     _held[0] = words * 64 - 1;
     for (std::size_t word = 0; word < taken.size(); ++word)
       for (std::uint64_t bits = taken[word]; bits != 0; bits &= bits - 1) {
-        Met& m = met[metAt[word * 64 + std::countr_zero(bits)]];
+        Holder& m = holders[holderAt[word * 64 + std::countr_zero(bits)]];
         std::size_t at = static_cast<std::size_t>(mix(m.container)) & _groupMask;
         while (_groups[at].container != nullptr) at = (at + 1) & _groupMask;
         _groups[at] = Group{m.container, m.next, m.count};
@@ -146,15 +149,12 @@ void LocalSymbols::seal() {
     // A group already in one source run needs no permutation. Group order
     // is private; declaration order inside every group stays exactly as read.
     if (alreadyGrouped) {
-      // Keep the sealed descriptions compact without rebuilding their order.
+      // Keep the grouped descriptions compact without rebuilding their order.
       if (_entries.capacity() != count)
         std::vector<AstNodeDescription>(_entries).swap(_entries);
     } else {
-      // 2. Where each group starts.
-      //
-      // Order of the table, not of the document: a group's position among the
-      // others is nobody's business. What must survive is the order inside a group,
-      // which the scatter below preserves by walking in declaration order.
+      // 2. Where each group starts, in table order. The scatter below keeps the
+      // declaration order inside each group.
       std::uint32_t next = 0;
       for (Group& g : _groups) {
         if (g.container == nullptr) continue;
@@ -166,10 +166,10 @@ void LocalSymbols::seal() {
       // it takes, then the entries are copied in position order, so the new array
       // is written once and never cleared first.
       for (std::uint32_t k = 0; k < containers; ++k)
-        met[k].next = _groups[met[k].slot].begin;
+        holders[k].next = _groups[holders[k].slot].begin;
       const auto from = std::make_unique_for_overwrite<std::uint32_t[]>(count);
       for (std::size_t i = 0; i < count; ++i)
-        from[met[metOf[i]].next++] = static_cast<std::uint32_t>(i);
+        from[holders[holderOf[i]].next++] = static_cast<std::uint32_t>(i);
       std::vector<AstNodeDescription> grouped;
       grouped.reserve(count);
       for (std::size_t at = 0; at < count; ++at)
@@ -183,15 +183,9 @@ void LocalSymbols::seal() {
     _containerOf.shrink_to_fit();
   }
 
-  // 4. The name table.
-  //
-  // After the last move and not before: the keys are views of the entries' own
-  // names, so indexing an array still to be permuted would leave every key
-  // pointing at a description that has since moved away.
-  //
-  // Read group by group: a group knows its container and its run of entries.
-  // Each run is walked backwards, so homonyms can be prepended while keeping
-  // their declaration order. The order between groups does not matter.
+  // 4. The name table, after the last move: its keys are views of the entries'
+  // names. Each group's run is walked backwards so homonyms are prepended in
+  // declaration order.
   _names.assign(table_size(count), NameSlot{});
   _nameMask = _names.size() - 1;
   _nextSameName.assign(count, kNone);
@@ -223,13 +217,117 @@ void LocalSymbols::seal() {
       }
     }
   }
+
+  _shortcuts = std::make_unique<Shortcuts>();
+}
+
+namespace {
+
+// Hands `keep` every node at a depth that is a multiple of `stride` with at
+// least `stride` levels below it, with the nearest node at or above it that
+// `holds`. False when the nodes are not in postorder below `top`.
+template <class Holds, class Keep>
+bool each_shortcut(std::span<AstNode* const> nodes, const AstNode* top,
+                   std::uint32_t stride, Holds&& holds, Keep&& keep) {
+  // The path from the top to the node being read, with each node's nearest
+  // holder, depth, and deepest level below.
+  struct Step {
+    const AstNode* node;
+    const AstNode* holder;
+    std::uint32_t depth;
+    std::uint32_t deepest;
+  };
+  std::vector<Step> path;
+  const auto leave = [&] {
+    const Step step = path.back();
+    path.pop_back();
+    if (step.depth % stride == 0 && step.deepest - step.depth >= stride)
+      keep(step.node, step.holder);
+    if (!path.empty())
+      path.back().deepest = std::max(path.back().deepest, step.deepest);
+  };
+  // Postorder read backwards: each node comes after its parent, and a subtree
+  // is read whole before the next one.
+  for (auto at = nodes.rbegin(); at != nodes.rend(); ++at) {
+    const AstNode* const node = *at;
+    while (!path.empty() && path.back().node != node->parent) leave();
+    if (path.empty() && node->parent != top && node->parent != nullptr)
+      return false;
+    const Step* const above = path.empty() ? nullptr : &path.back();
+    const AstNode* const holder = holds(node)        ? node
+                                  : above != nullptr ? above->holder
+                                                     : nullptr;
+    const std::uint32_t depth = above != nullptr ? above->depth + 1 : 0;
+    path.push_back(Step{node, holder, depth, depth});
+  }
+  while (!path.empty()) leave();
+  return true;
+}
+
+}  // namespace
+
+const LocalSymbols::Shortcut* LocalSymbols::shortcut(
+    const AstNode* node, const AstNode* document) const noexcept {
+  Shortcuts* const shortcuts = _shortcuts.get();
+  if (shortcuts == nullptr) return nullptr;
+  std::uint32_t state = shortcuts->state.load(std::memory_order_acquire);
+  // Only the document the walk ends at is read; a walk ending elsewhere uses no
+  // shortcut.
+  const Document* const tree =
+      state == Shortcuts::kUnread ? ast_cast<Document>(document) : nullptr;
+  if (state == Shortcuts::kUnread && tree == nullptr) return nullptr;
+  // One walk builds the table in one pass; the others wait for it.
+  if (state == Shortcuts::kUnread &&
+      shortcuts->state.compare_exchange_strong(state, Shortcuts::kReading,
+                                               std::memory_order_acquire)) {
+    try {
+      std::vector<Shortcut> found;
+      if (!each_shortcut(
+              tree->parseResult.nodes(), document, kStride,
+              [&](const AstNode* at) {
+                return may_hold(at) && group(at) != nullptr;
+              },
+              [&](const AstNode* at, const AstNode* holder) {
+                found.push_back(Shortcut{at, holder});
+              }))
+        found.clear();
+      shortcuts->top = document;
+      if (!found.empty()) {
+        shortcuts->table.assign(table_size(found.size()), Shortcut{});
+        shortcuts->mask = shortcuts->table.size() - 1;
+        for (const Shortcut& entry : found) {
+          std::size_t at =
+              static_cast<std::size_t>(mix(entry.node)) & shortcuts->mask;
+          while (shortcuts->table[at].node != nullptr)
+            at = (at + 1) & shortcuts->mask;
+          shortcuts->table[at] = entry;
+        }
+      }
+    } catch (...) {
+      // Memory refused: the table stays empty, and walks go up level by level.
+    }
+    shortcuts->state.store(Shortcuts::kRead, std::memory_order_release);
+    detail::wake_all(shortcuts->state);
+  } else if (state == Shortcuts::kReading) {
+    detail::wait_while_equal(shortcuts->state,
+                             std::uint32_t{Shortcuts::kReading},
+                             std::memory_order_acquire);
+  }
+  if (document != shortcuts->top || shortcuts->table.empty()) return nullptr;
+  std::size_t at = static_cast<std::size_t>(mix(node)) & shortcuts->mask;
+  for (;;) {
+    const Shortcut& entry = shortcuts->table[at];
+    if (entry.node == nullptr) return nullptr;
+    if (entry.node == node) return &entry;
+    at = (at + 1) & shortcuts->mask;
+  }
 }
 
 LocalSymbols::NameMatches LocalSymbols::find_held(
     const AstNode* container, std::string_view name,
     std::uint64_t nameHash) const noexcept {
   assert((_entries.empty() || !_names.empty()) &&
-         "LocalSymbols::seal() has to run before the first lookup");
+         "LocalSymbols::build_index() has to run before the first lookup");
   const std::uint64_t hash = mix(container) ^ nameHash;
   const auto tag = static_cast<std::uint32_t>(hash >> 32u);
   std::size_t at = static_cast<std::size_t>(hash) & _nameMask;
@@ -250,7 +348,7 @@ LocalSymbols::NameMatches LocalSymbols::find_held(
 const LocalSymbols::Group* LocalSymbols::group(
     const AstNode* container) const noexcept {
   assert((_entries.empty() || !_groups.empty()) &&
-         "LocalSymbols::seal() has to run before the first lookup");
+         "LocalSymbols::build_index() has to run before the first lookup");
   if (_groups.empty()) return nullptr;
   std::size_t at = static_cast<std::size_t>(mix(container)) & _groupMask;
   for (;;) {

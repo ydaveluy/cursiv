@@ -21,8 +21,8 @@ struct GapLeaf {
   // The skip a head or a phrase reads before its first token, `kNoLexNode`
   // where its configuration skips nothing.
   std::uint16_t skip = kNoLexNode;
-  // The configuration it is read under, whose section its text ends with; the
-  // document's for the leaf that looks for that end.
+  // The configuration it is read under, whose section end is the end it looks
+  // for; the document's for an `end` leaf.
   std::uint8_t cfg = 0;
   // The exit of a commit: its first token must be one the rule reads there.
   bool trigger = false;
@@ -48,13 +48,13 @@ DynSet gap_cut_terms(const Cfg& c, const GapLeaf& leaf) {
   if (const LexNode& e = c.lex[leaf.node]; e.kind == LexKind::token) {
     out.set(e.a);
   } else {
-    for (unsigned i = 0; i < e.b; ++i) out.set(c.lex[c.lexKid[e.a + i]].a);
+    for (unsigned i = 0; i < e.b; ++i) out.set(c.lex[c.lexChild[e.a + i]].a);
   }
   return out;
 }
 
-// Whether condition `k` asks only that the token in hand be none of a set, and
-// which.
+// Whether condition `k` only asks that the token in hand be none of a set,
+// which it writes to `terms`.
 template <class Cfg>
 bool gap_cut_alone(const Cfg& c, unsigned k, DynSet* terms = nullptr) {
   const std::uint32_t at = c.gapCondAt[k];

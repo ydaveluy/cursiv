@@ -17,7 +17,7 @@ namespace cursiv::test {
 // a scalar where its set does.
 struct GapReference {
   const engine::LexNode* nodes;
-  const std::uint16_t* kids;
+  const std::uint16_t* children;
   engine::LexBoundary boundary;
   const char* s;
   TextOffset n;
@@ -26,12 +26,12 @@ struct GapReference {
   }
 
   // Whether the word a guard refuses is spelled whole at `p`: its classes
-  // in a row, then the end of the text or a byte its rescuing class does
-  // not admit.
+  // in a row, then the end of the text or a byte outside the class that
+  // lets the guard pass.
   bool refused_at(const engine::LexNode& e, TextOffset p) const {
     if (e.min > n - p) return false;
     for (std::uint32_t k = 0; k < e.min; ++k)
-      if (!has(kids[e.b + k], p + k)) return false;
+      if (!has(children[e.b + k], p + k)) return false;
     const TextOffset after = p + e.min;
     return e.a == engine::kNoSet || after >= n || !has(e.a, after);
   }
@@ -46,11 +46,12 @@ struct GapReference {
       case engine::LexKind::seq: {
         Set cur = in;
         for (unsigned i = 0; i < e.b && !cur.empty(); ++i)
-          cur = step(kids[e.a + i], cur);
+          cur = step(children[e.a + i], cur);
         return cur;
       }
       case engine::LexKind::alt:
-        for (unsigned i = 0; i < e.b; ++i) out.unite(step(kids[e.a + i], in));
+        for (unsigned i = 0; i < e.b; ++i)
+          out.unite(step(children[e.a + i], in));
         return out;
       default: {
         Set cur = in;
@@ -99,10 +100,11 @@ struct GapReference {
 
 // Whether some run of the gap (`whole` false), or all of it, is read by
 // `root`.
-inline bool gap_reference(const engine::LexNode* nodes, const std::uint16_t* kids,
+inline bool gap_reference(const engine::LexNode* nodes,
+                          const std::uint16_t* children,
                           engine::LexBoundary boundary, std::uint16_t root,
                           const char* s, TextOffset n, bool whole) {
-  const GapReference r{nodes, kids, boundary, s, n};
+  const GapReference r{nodes, children, boundary, s, n};
   const auto run = [&](auto in) {
     if (whole) {
       in.set(0);

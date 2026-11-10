@@ -12,19 +12,15 @@
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
-// The reflection of one compiled grammar: what asks questions about an AST
-// rather than building one, from the metadata's tables, so this is the same
-// class for every grammar. Only what a per-node walk calls stays inline --
-// the type probe, the member visit and the two subtype tests.
+// The reflection of one compiled grammar, read from its metadata tables.
+// Only what a per-node walk calls stays inline.
 
 namespace cursiv {
 
 struct DefaultAstReflection : AstReflection {
   explicit DefaultAstReflection(const AstMetaData& meta);
 
-  // Asked of the tag, not of this grammar's table: a class's bases are a
-  // fact about the class, and the closure is on the tag. A null supertype
-  // accepts everything, as the interface states.
+  // Read from the tag, which holds the closure of its bases.
   [[nodiscard]] bool isSubtype(
       const AstTypeTag* subtype,
       const AstTypeTag* supertype) const noexcept override {
@@ -64,11 +60,8 @@ struct DefaultAstReflection : AstReflection {
     return isSubtype(node.type, type);
   }
 
-  // One probe, not a scan: a scope computation asks this once per named
-  // node, so a walk over every class of the grammar would be paid per
-  // symbol and per document. The table is built once, when the language is
-  // installed, and keyed by the tag's address -- one inline variable per
-  // class, unique for the process.
+  // A hash probe keyed by the tag's address: a scope computation asks this
+  // once per named node.
   [[nodiscard]] std::uint16_t typeIndexOf(
       const AstTypeTag* type) const noexcept override {
     if (type == nullptr) return kNoType;
@@ -111,10 +104,8 @@ struct DefaultAstReflection : AstReflection {
   [[nodiscard]] AcceptSet referenceAccepts(
       std::uint16_t reference) const noexcept override;
 
-  // One work-list entry, described. `text` is what the site spells; a caller
-  // describing a site it has not read leaves it out. `document` stays null
-  // -- a handle alone does not name one, and the provider climbs when it
-  // needs it.
+  // One work-list entry, described. `text` is what the site spells, if read;
+  // `document` stays null.
   [[nodiscard]] ReferenceInfo referenceInfo(const RefHandle& handle,
                                             std::string_view text = {}) const;
 

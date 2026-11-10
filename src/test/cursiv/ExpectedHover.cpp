@@ -27,6 +27,8 @@ Disposable expectHover(const LspServices& services,
   const ReplacedIndices marked = replaceIndices(detail::baseOf(expectedHover));
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, expectedHover.parseOptions);
+  Disposable disposable = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(disposable);
 
   std::optional<lsp::Hover> hover;
   const auto* const caret =
@@ -57,7 +59,6 @@ Disposable expectHover(const LspServices& services,
     expectedFunction(*content, *expectedHover.hover);
   }
 
-  Disposable disposable = detail::documentDisposable(services, document);
   if (expectedHover.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

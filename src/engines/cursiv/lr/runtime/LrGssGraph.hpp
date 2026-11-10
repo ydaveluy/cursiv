@@ -11,7 +11,6 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/text/TextOffset.hpp"
 #include "cursiv/lr/runtime/LrGssDigest.hpp"
 #include "cursiv/lr/runtime/LrGssForest.hpp"
 #include "cursiv/lr/runtime/LrGssIndex.hpp"
@@ -23,6 +22,8 @@
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv::engine {
 
@@ -51,10 +52,11 @@ class LrGssGraph {
     std::uint16_t lone = kLrNoProd;
     bool scanned : 1 = false;
     bool shifts : 1 = false;
-    // Laid by the parser: even a nonempty indent validates no frozen rival.
-    bool laid : 1 = false;
-    // Where the lexer ranked rival tokens apart, the word its token adds to a
-    // derivation's rank.
+    // Inserted by the parser: even a nonempty indent validates no frozen
+    // competitor.
+    bool synthetic : 1 = false;
+    // Where the lexer ranked competitor tokens apart, the word its token adds
+    // to a derivation's rank.
     bool ranked : 1 = false;
     // Its cell's order is the election's, whatever the text goes on to read.
     bool exact : 1 = false;
@@ -75,10 +77,10 @@ class LrGssGraph {
   };
 
   // The top `window` frames of the seed's stack as a private chain under
-  // `start`, the one vertex to open; each frame stands for the symbol `stood`,
-  // per state, names, if any.
+  // `start`, the one vertex to open; each frame stands for the symbol
+  // `seed_symbol`, per state, names, if any.
   void seed(const LrStack& stack, const Reading& start,
-            std::span<const std::uint16_t> stood = {},
+            std::span<const std::uint16_t> seed_symbol = {},
             std::uint32_t window = ~std::uint32_t{0});
   // The stack frames under the seed's lowest vertex, which the graph does not
   // hold; and whether a reduction reached below it, so the episode must be
@@ -103,19 +105,20 @@ class LrGssGraph {
   std::size_t alternatives() const { return _forest.alternatives(); }
 
   Id add(Step step) {
-    const auto id = static_cast<Id>(_steps.size());
-    if (_vertices[step.vertex].steps == none) _vertices[step.vertex].steps = id;
+    const Id id = next_id(_steps);
+    const Id v = step.vertex;
     _steps.push_back(std::move(step));
+    if (_vertices[v].steps == none) _vertices[v].steps = id;
     return id;
   }
   void accept_at(Id v, Id step) { _accepts.emplace_back(v, step); }
 
   // Frozen readings with more stacks than a search takes, and the span of
-  // vertices they stood on.
+  // vertices they were on.
   [[nodiscard]] std::uint32_t cut() const { return _cut; }
   [[nodiscard]] TextOffset cut_begin() const { return _cutBegin; }
   [[nodiscard]] TextOffset cut_end() const { return _cutEnd; }
-  // Stacks dropped for the order the table lays its arms in, the derivations'
+  // Stacks dropped for the order the table puts its arms in, the derivations'
   // words leaving them open and the order proved the election's.
   [[nodiscard]] std::uint32_t tabled() const { return _tabled; }
   void die(TextOffset at) {
@@ -131,9 +134,8 @@ class LrGssGraph {
 
   Id vertex(Reading r);
   // `words` stand before the children `at` names: a reduction's written
-  // decisions. Where `to` stands after `stands`, the pass-throughs the table
-  // skipped down to `symbol` read `wrap` around the node of `symbol`, which
-  // the edge of `stands` holds.
+  // decisions. Where `to` stands after `stands`, the skipped pass-throughs down
+  // to `symbol` read `wrap` around its node, held by the edge of `stands`.
   void edge(Id to, Id from, std::uint32_t symbol, std::span<const Id> children,
             Id step, std::span<const std::uint32_t> words = {},
             std::span<const std::uint16_t> at = {}) {
@@ -167,7 +169,7 @@ class LrGssGraph {
     const auto take = [&](Id e) {
       const Edge& x = _edges[e];
       _children.push_back(x.forest);
-      _childSymbols.push_back(x.symbol == kSeedSymbol ? stood(x.to)
+      _childSymbols.push_back(x.symbol == kSeedSymbol ? seed_symbol(x.to)
                                                       : x.symbol);
     };
     if (last != none) take(last);
@@ -175,7 +177,7 @@ class LrGssGraph {
     return _children;
   }
   std::span<const std::uint32_t> child_symbols() const { return _childSymbols; }
-  // Room for the words of one edge, valid until the next call of `edge`.
+  // Scratch for the words of one edge, valid until the next call of `edge`.
   std::vector<std::uint32_t>& word_room() { return _wordRoom; }
   std::vector<std::uint16_t>& word_at_room() { return _wordAtRoom; }
 
@@ -201,9 +203,9 @@ class LrGssGraph {
   void take_vertex();
   // None of `vertices` is ever opened: the lexer chose another token for
   // their places.
-  void retire(std::span<const Id> vertices);
-  // The real tokens shifted that no rival token has been compared to yet: the
-  // vertex each landed on and the token, whether the lexer elects a rival
+  void drop_vertices(std::span<const Id> vertices);
+  // The real tokens shifted that no competitor has been compared to yet: the
+  // vertex each reached and the token, whether the lexer elects a competitor
   // from the same place over it, and the token's weight once a tie read it.
   struct Shift {
     static constexpr std::uint8_t kUnweighed = 0xFF;
@@ -213,28 +215,25 @@ class LrGssGraph {
     std::uint8_t weight = kUnweighed;
   };
   std::vector<Shift>& shifts() { return _shifts; }
-  // Room the episode's readers borrow, kept from one episode to the next: what
-  // `lr_graph_takes` works in, and the vertices that `elected_stand` weighs.
+  // Scratch kept from one episode to the next: what `lr_graph_takes` works
+  // in, and the vertices that `elected_stand` weighs.
   LrTakesScratch<Id>& takes_scratch() { return _takes; }
   std::vector<Id>& standing() { return _standing; }
   std::vector<Id>& rejected() { return _rejected; }
 
   // Vertices before `before` gain no edge any more; neither do their forests.
-  void settle(TextOffset before);
-  // Whether the text goes back to the drive before `v` opens: at `v`, alone
-  // and past every opened vertex, when its stack has one path once pruned and
-  // that path validated the arms that died; else at the last vertex alone
-  // short of that, once a reading through it validated them. That stack is
-  // then the graph's one derivation.
+  void finish_before(TextOffset before);
+  // Whether the text goes back to the drive before `v` opens: at `v` when its
+  // pruned stack has one path that validated the dead arms, else at the last
+  // lone vertex before it. That stack is then the graph's one derivation.
   bool hand_back(Id v, TextOffset openedAt);
   // The derivations every accept closes; false for none.
   bool close();
   std::vector<Id> elected();
 
-  // A frozen reading no rival read kRepairValidateShifts real tokens past, once
-  // per stack under it: `forests[i]` is what stands between `vertices[i]` and
-  // `vertices[i + 1]`, bottom up. In the order written first; at most `cap` in
-  // all.
+  // A frozen reading no competitor read kRepairValidateShifts real tokens past,
+  // once per stack under it: `forests[i]` stands between `vertices[i]` and
+  // `vertices[i + 1]`, bottom up. Written order first; at most `cap`.
   struct Source {
     Reading reading;
     std::vector<Id> vertices;
@@ -277,11 +276,11 @@ class LrGssGraph {
   // widening ends once this many children in a row fall outside the stacks
   // kept.
   static constexpr std::size_t kMisses = 64;
-  // What a seed's edge stands on: no symbol an action lays.
+  // What a seed's edge stands on: no symbol an action pushes.
   static constexpr std::uint32_t kSeedSymbol = 0;
   // The symbol seed vertex `v`'s frame stands for, `kSeedSymbol` where its
   // state names none.
-  std::uint32_t stood(Id v) const;
+  std::uint32_t seed_symbol(Id v) const;
   struct Edge {
     Id previous;
     Id forest;
@@ -321,7 +320,7 @@ class LrGssGraph {
   Id shared(Id x, Id y) const;
   // One stack of a comparison: the frames above the vertex both stand on,
   // bottom up, the last being the edge compared.
-  struct Climb {
+  struct ComparedStack {
     Id from;
     Id edge;
     std::uint32_t base;
@@ -333,7 +332,7 @@ class LrGssGraph {
                        .forest;
     }
   };
-  Id meet(Id a, Id b) const;
+  Id common_vertex(Id a, Id b) const;
   // The ordering and whether it came from the table's arms.
   struct Order {
     int value = 0;
@@ -341,8 +340,8 @@ class LrGssGraph {
   };
   Order written(Id a, Id b);
   Order written_lone(Id a, Id b, Id floor);
-  Order forked(Id top, Id shared, const std::array<Climb, 2>& stacks);
-  void load(std::size_t side, const Climb& stack, Id shared);
+  Order forked(Id top, Id shared, const std::array<ComparedStack, 2>& stacks);
+  void load(std::size_t side, const ComparedStack& stack, Id shared);
   Order fork_scan(TextOffset at);
   void note_cut(Id v);
   void set_best(Id v, Id edge);
@@ -358,6 +357,14 @@ class LrGssGraph {
   void accept(Id v, Id step);
   TextOffset read_past();
   std::uint64_t edge_hash(Id to, Id from, std::uint32_t symbol) const;
+  // The id the next element of `v` takes; past 32 bits, `none` aside, it throws
+  // `std::length_error` and adds nothing.
+  template <class T>
+  static Id next_id(const std::vector<T>& v) {
+    if (v.size() >= none) too_many();
+    return static_cast<Id>(v.size());
+  }
+  [[noreturn]] CURSIV_COLD CURSIV_NOINLINE static void too_many();
 
   LrGssForest _forest;
   LrGssDigest _digest;
@@ -381,11 +388,11 @@ class LrGssGraph {
   std::vector<std::pair<Id, Reading>> _frozen;
   std::vector<std::uint32_t> _tokens;
   // The step each stack took at a vertex, as of the comparison its round names.
-  struct Stamp {
+  struct Visit {
     std::uint32_t round = 0;
     Id step = none;
   };
-  std::array<std::vector<Stamp>, 2> _stamps;
+  std::array<std::vector<Visit>, 2> _visits;
   // The fork ropes of the frames one scan reads, and where it reads them.
   struct Stream {
     std::span<const LrGssDigest::Rope::Id> frames;
@@ -405,16 +412,16 @@ class LrGssGraph {
   bool _strict = false;
   TextOffset _cutBegin = 0;
   TextOffset _cutEnd = 0;
-  std::span<const std::uint16_t> _stood;
+  std::span<const std::uint16_t> _seedSymbol;
   std::vector<Id> _branching;
-  TextOffset _settled = 0;
+  TextOffset _finishedBefore = 0;
   TextOffset _lastDeath = 0;
   bool _died = false;
   // The last vertex alone whose path had not validated the arms that died,
   // and the real tokens a reading must still shift from it; `none` while no
   // vertex is held.
   Id _held = none;
-  std::uint32_t _owed = 0;
+  std::uint32_t _shiftsLeft = 0;
   std::vector<Candidate> _group;
   std::vector<Id> _batch;
   std::vector<Id> _walk;

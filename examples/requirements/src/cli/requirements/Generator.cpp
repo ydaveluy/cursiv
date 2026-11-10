@@ -62,10 +62,8 @@ std::string generate_summary_file_html_content(
   out.line(R"(<table border="1">)");
   out.line("<TR><TH>Requirement ID</TH><TH>Testcase ID</TH></TR>");
 
-  // Who covers what, in one pass over the tests and in their order: each
-  // row then reads its own list instead of every test again. A test that
-  // names a requirement twice covers it once. Each test model's source is
-  // written once, not once per row it fills.
+  // Who covers what, in one pass over the tests and in their order. A test
+  // that names a requirement twice covers it once.
   struct Covering {
     const Test* test;
     std::size_t source;  // in `sources`

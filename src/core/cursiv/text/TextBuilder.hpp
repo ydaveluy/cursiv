@@ -35,7 +35,7 @@ class TextBuilder {
   struct Options {
     // What `open` and `indented` add.
     std::size_t step = 4;
-    // Past this, a block deepens the code and no longer its indentation.
+    // The indentation stops growing past this width.
     std::size_t maxIndent = std::numeric_limits<std::size_t>::max();
   };
 
@@ -95,7 +95,6 @@ class TextBuilder {
   [[nodiscard]] Indented indented() { return {*this, _options.step}; }
   [[nodiscard]] Indented indented(std::size_t by) { return {*this, by}; }
 
-  // Where the text stands now.
   [[nodiscard]] std::size_t size() const noexcept { return _text.size(); }
   // The text written since `at`, taken out.
   [[nodiscard]] std::string cut_from(std::size_t at);

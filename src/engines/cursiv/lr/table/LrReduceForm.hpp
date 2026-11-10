@@ -7,10 +7,10 @@ namespace cursiv::engine {
 
 enum class LrReduceForm : std::uint8_t {
   through,    // retain the frame and change its state
-  discard,    // no row is handed back or laid
+  discard,    // no row is handed back or written
   carry,      // hand back one record and its row
-  close,      // lay this production's own record
-  foldClose,  // fold onto one record if adjacent, otherwise lay a new one
+  close,      // create this production's own record
+  foldClose,  // fold onto one record if adjacent, otherwise create a new one
 };
 
 }  // namespace cursiv::engine

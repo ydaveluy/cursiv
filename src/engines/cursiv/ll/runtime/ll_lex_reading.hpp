@@ -19,14 +19,13 @@ inline LexReading ll_lex_reading(const char* src, TextOffset len,
                                  std::uint16_t mode, TextOffset p,
                                  TextOffset& reached) {
   return lex_reading(LlLexTape<T>{},
-                     LexOwed{T.lexBodies, T.lexOwed, T.lexOpeners}, src, len,
-                     mode, p, reached);
+                     LexBodies{T.lexBodies, T.lexBodyTerms, T.lexOpeners}, src,
+                     len, mode, p, reached);
 }
 
 // The lexer's refused reading of the token at `p`: the open token its body
-// owes, where there is one. In a section the text ends at the token that
-// closes it, which changes the reading only where it starts within what the
-// reading read: the search for it stops there, and is paid with the reading.
+// needs, if any. In a section the text ends at the closing token; the search
+// for it stops at the reading's end and counts with it.
 template <const auto& T>
 inline LexReading ll_open_reading(LlContext& c, TextOffset p) {
   if (c.reads.spent()) return LexReading{};
@@ -38,7 +37,7 @@ inline LexReading ll_open_reading(LlContext& c, TextOffset p) {
     TextOffset again = p;
     r = ll_lex_reading<T>(c.src, end, mode, p, again);
   }
-  c.reads.pay(p, reached);
+  c.reads.spend(p, reached);
   return r;
 }
 
@@ -49,8 +48,8 @@ inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from,
                                    TextOffset len, TextOffset& reached) {
   const auto mode = ll_err_mode<T>(c);
   return lex_unmatched_end(
-      LlLexTape<T>{}, LexOwed{T.lexBodies, T.lexOwed, T.lexOpeners}, c.src, len,
-      mode, from,
+      LlLexTape<T>{}, LexBodies{T.lexBodies, T.lexBodyTerms, T.lexOpeners},
+      c.src, len, mode, from,
       [&]([[maybe_unused]] unsigned char b) {
         if constexpr (T.skipSet != nullptr)
           return kLlBytes<T, &LlTable::skipSet>[mode][b];
@@ -59,8 +58,8 @@ inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from,
       reached, c.reads, [&c] { c.stop.poll(); });
 }
 
-// What a deletion of the token `t` takes: the token, or of bytes no terminal
-// matches the run of them as one -- and of a token left open, only its opener.
+// What a deletion of the token `t` takes: the token; for bytes no terminal
+// matches, the whole run of them; for a token left open, only its opener.
 template <const auto& T>
 inline TextOffset ll_drop_end(LlContext& c, const Token& t) {
   if (t.end != t.begin) return t.end;

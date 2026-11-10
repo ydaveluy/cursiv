@@ -18,7 +18,7 @@ struct RepairTally {
   std::uint32_t docs = 0, faults = 0, diagnostics = 0;
   // Documents set apart: their faults left the twin's tree as it was.
   std::uint32_t noop = 0;
-  std::uint32_t found = 0, missed = 0, parasites = 0;
+  std::uint32_t found = 0, missed = 0, spurious = 0;
   std::uint32_t silent = 0, refused = 0, treeless = 0;
   std::uint64_t eligible = 0, kept = 0, deleted = 0, abandoned = 0, other = 0;
   std::uint32_t restored = 0, invented = 0;
@@ -44,7 +44,7 @@ struct RepairTally {
     diagnostics += v.diagnostics;
     found += v.found;
     missed += v.missed;
-    parasites += v.parasites;
+    spurious += v.spurious;
     silent += v.silent ? 1 : 0;
     refused += v.accepted ? 0 : 1;
     treeless += v.tree ? 0 : 1;

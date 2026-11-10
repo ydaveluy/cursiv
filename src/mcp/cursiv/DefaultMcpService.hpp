@@ -4,9 +4,9 @@
 
 #include "cursiv/McpService.hpp"
 
-// The default tool set over one workspace. Every tool is a facade on the core
-// services; a language subclasses, overrides `createServer` and registers its
-// own on top of what `super` returns.
+// The default tool set over one workspace, on top of the core services. A
+// language derives it, overrides `createServer` and registers its own tools on
+// the base's server.
 
 namespace cursiv {
 

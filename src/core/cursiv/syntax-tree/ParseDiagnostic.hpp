@@ -9,50 +9,46 @@
 
 namespace cursiv {
 
-// What went wrong, as a value. The parser states the fact: what it did,
-// where, and which grammar element it was owed. The words belong to whoever
-// shows them, composed from those three, so a second locale composes another
-// sentence from the same row. Only a conversion carries text of its own,
-// because what it has to say is about a value and no table holds it.
+// What went wrong, as a value: what the parser did, where, and which grammar
+// element it expected. Whoever shows it writes the message; only a conversion
+// error carries its own text.
 enum class DiagnosticKind : std::uint8_t {
-  // The construct was admitted absent: no source text was consumed, and
+  // A missing construct was assumed: no source text was consumed, and
   // `begin == end` is where an editor puts an insertion caret.
   inserted,
   // Source text was skipped to reach a point the parse could go on from.
   deleted,
   // Source text was consumed as the expected construct -- a misspelling.
   replaced,
-  // The input ended while the construct was still owed.
+  // The input ended before the expected construct.
   incomplete,
   // The tree parsed; turning a matched text into a value did not.
   conversion_error,
-  // The span was settled by the repair's bound on work -- the cheapest
-  // reading it reached -- not by the reading itself: told, never silent.
+  // Recovery hit its work limit on this span and kept the cheapest reading
+  // found; reported, never silent.
   bounded,
 };
 
-// A range and nothing else to situate it: the site that knows a node fills
-// the range from it, and a document too broken to repair leaves no node to
-// point at anyway.
+// Only a range locates it: a caller that knows a node fills the range from it.
 struct ParseDiagnostic {
   DiagnosticKind kind = DiagnosticKind::conversion_error;
-  // A position of the grammar (not a name, not a spelling) for most kinds --
-  // the grammar navigates from it to whatever a reader shows -- but for an
-  // insertion it is instead the terminal the reading was owed, since a
-  // repair inserts bytes a token would match, not a grammar site.
+  // A deletion that starts with a line's indentation whose blanks differ from
+  // the open block's in the same place: a tab against a space.
+  bool mixedIndent = false;
+  // A position of the grammar for most kinds, or, for an insertion, the
+  // terminal the reading expected.
   ElementId element = kNoElement;
-  // The other tokens the reading could as cheaply have been given, in the
-  // order the grammar declares them: a state expects a set, and naming one of
-  // it alone reads as the only way out of it.
+  // The other tokens that were just as cheap here, in grammar order: naming
+  // only one would suggest it is the only fix.
   std::vector<ElementId> also{};
   TextOffset begin = 0;
   TextOffset end = 0;
-  // A conversion's own sentence; empty for every syntax diagnostic, whose
-  // words are the reader's to choose.
+  // A conversion error's own message; empty for a syntax diagnostic, which the
+  // caller words.
   std::string message;
 
-  // From the parse or from a repair, as opposed to from a conversion; a bound
-  // is the note of how far the repairs can be trusted, and repairs nothing.
+  // From the parse or a repair, not from a conversion; `bounded` is only a
+  // note and repairs nothing.
   [[nodiscard]] constexpr bool isSyntax() const noexcept {
     return kind != DiagnosticKind::conversion_error &&
            kind != DiagnosticKind::bounded;

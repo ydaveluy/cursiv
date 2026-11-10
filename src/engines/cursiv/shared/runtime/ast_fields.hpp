@@ -1,6 +1,6 @@
-// What an AST member is, and what a payload may write into it. It answers,
-// it never refuses: the generator states its refusals against this, and
-// the builder's thunks decode the same answers.
+// What an AST member is, and what a payload may write into it. It never
+// refuses: the generator reports refusals from these answers, and the
+// builder's thunks read the same ones.
 #pragma once
 
 #include <cstddef>
@@ -59,20 +59,17 @@ consteval bool admits();
 // The converter's result type, or the type of the matched text when there is
 // none. A node payload produces no value, so nothing matches it exactly.
 template <class Src>
-struct pay_value {
+struct payload_value {
   using type = void;
 };
 template <class R>
-struct pay_value<pay_text<R>> {
+struct payload_value<text_payload<R>> {
   using type = std::remove_cvref_t<typename text_value<R>::type>;
 };
 
-// The alternatives one payload may write, in declaration order, in two rounds
-// where the first that answers wins: (1) an alternative whose type is the
-// value the payload produces, or `variant<boolean, float64, ...>` would be
-// ambiguous, each constructible from the other; (2) constructibility, for
-// payloads no alternative names exactly, which must leave exactly one. The
-// validation counts this list and the writer emplaces its head.
+// The alternatives one payload may write, in declaration order: those whose
+// type is the payload's value, or else those constructible from it, which
+// must be exactly one. The writer emplaces the head.
 template <class Src, class L>
 struct variant_cands;
 template <class Src, class... As>
@@ -80,7 +77,8 @@ struct variant_cands<Src, TypeList<As...>> {
  private:
   template <class A>
   static constexpr bool exact_alt =
-      std::is_same_v<std::remove_cvref_t<A>, typename pay_value<Src>::type> &&
+      std::is_same_v<std::remove_cvref_t<A>,
+                     typename payload_value<Src>::type> &&
       admits<A, Src>();
   static constexpr int exact_n = (0 + ... + (exact_alt<As> ? 1 : 0));
 
@@ -98,12 +96,8 @@ inline constexpr bool is_text_value =
     std::is_same_v<V, std::string_view> || std::is_same_v<V, std::string>;
 
 // A `string_view` member takes any text the tree can name: the matched text,
-// what a converter answers as a view of it, and a data rule's parts, a slice of
-// the source where they are adjacent and kept by the tree where they are not. A
-// `std::string` a converter built takes a `string`, and `as<T>` with a type
-// that is not text gives a value, whatever member reads it. A view of the
-// converter's own local is not caught, and cannot be. A bare matcher names no
-// rule.
+// a converter's view of it, or a data rule's parts. A converter's `std::string`
+// needs a `string` member.
 template <class R>
 inline constexpr bool source_spells = [] {
   if constexpr (std::is_void_v<R>)
@@ -119,9 +113,9 @@ template <class F>
 consteval bool takes_whole() {
   if constexpr (F::storage == FieldStorage::direct)
     return false;
-  else if constexpr (F::nature == FieldNature::value)
+  else if constexpr (F::content == FieldContent::value)
     return true;
-  else if constexpr (F::nature == FieldNature::variant)
+  else if constexpr (F::content == FieldContent::variant)
     return tl_size<typename variant_node_alt<typename F::held>::type>::value ==
            0;
   else
@@ -131,7 +125,7 @@ consteval bool takes_whole() {
 template <class F, class Src>
 inline constexpr bool writes_whole =
     takes_whole<F>() &&
-    std::is_same_v<typename pay_value<Src>::type, typename F::member>;
+    std::is_same_v<typename payload_value<Src>::type, typename F::member>;
 
 // A number the member would cut short. An integer keeps its size in a floating
 // member, which is what a number literal of either form asks of one.
@@ -150,32 +144,31 @@ inline constexpr bool narrows = [] {
   }
 }();
 
-// X is the member's held type (storage already stripped), Src one payload
-// source: references take text; a node slot takes a node deriving from its
-// class; a variant takes it when exactly one alternative accepts it, an exact
-// match winning outright, or when it is that variant, of values only;
-// everything else takes text convertible to the member's type.
+// Whether member type `X` takes source `Src`: a reference takes text, a node
+// slot a node of its class, a variant one that exactly one alternative takes,
+// and anything else text convertible to it.
 template <class X, class Src>
 consteval bool admits() {
   if constexpr (is_reference_v<X> || is_multi_reference_v<X>) {
     // Text and nothing else. A view of the converter's own local is not caught,
     // and cannot be.
-    return is_text_pay<Src> && is_text_value<typename pay_value<Src>::type>;
+    return is_text_payload<Src> &&
+           is_text_value<typename payload_value<Src>::type>;
   } else if constexpr (is_variant_v<X>) {
     return variant_cands<Src, typename variant_alts<X>::type>::count == 1 ||
-           (std::is_same_v<typename pay_value<Src>::type, X> &&
+           (std::is_same_v<typename payload_value<Src>::type, X> &&
             std::is_move_constructible_v<X> &&
             tl_size<typename variant_node_alt<X>::type>::value == 0);
-  } else if constexpr (nature_of<X> == FieldNature::node) {
-    // The pointee owes the base too: the writer narrows an `AstNode*` to it and
-    // wires `parent` through it.
-    if constexpr (is_node_pay<Src>)
+  } else if constexpr (content_of<X> == FieldContent::node) {
+    // The pointee must derive from `AstNode`: the writer narrows an `AstNode*`
+    // to it and sets `parent` through it.
+    if constexpr (is_node_payload<Src>)
       return std::is_base_of_v<AstNode, std::remove_pointer_t<X>> &&
              std::is_base_of_v<std::remove_pointer_t<X>, typename Src::type>;
     else
       return false;
   } else {
-    if constexpr (is_text_pay<Src>) {
+    if constexpr (is_text_payload<Src>) {
       using V = typename text_value<typename Src::rule>::type;
       if constexpr (std::is_same_v<X, AstNode::string_view>)
         return source_spells<typename Src::rule>;

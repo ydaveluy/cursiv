@@ -50,12 +50,11 @@ std::string items(const cursiv::Parser& p, std::string_view text,
   return out;
 }
 
-// Whether the LL parser reads this text cleanly.
 bool reads(const cursiv::Parser& ll, const std::string& text) {
   return items(ll, text) != "<refused>";
 }
 
-// The hidden leaves of the tree a parse of `text` keeps.
+// The number of hidden records in the tree of `text`.
 unsigned hidden(const cursiv::Parser& p, std::string_view text) {
   const std::string source = "rules:" + std::string(text);
   const auto r = p.parse(source);
@@ -83,7 +82,7 @@ bool reads_ab_dot(const Cfg& g) {
       }
       if (e.kind != cursiv::engine::LexKind::seq) return false;
       for (unsigned i = 0; i < e.b; ++i)
-        if (!self(self, g.lexKid[e.a + i])) return false;
+        if (!self(self, g.lexChild[e.a + i])) return false;
       return true;
     };
     if (walk(walk, cursiv::engine::lex_token_body(g, operand)) &&
@@ -189,7 +188,7 @@ void check_terminal_conditions() {
     CHECK(offers(*p, "bare ", "NAME", prefix) && !offers(*p, "bare ", "NOTE", prefix));
     CHECK(offers(*p, "no ", "NAME", prefix) && !offers(*p, "no ", "NUM", prefix));
     CHECK(offers(*p, "is ", "DOTTED", prefix));
-    // A name glued to a keyword reads as one word with it; after `{` it
+    // A name attached to a keyword reads as one word with it; after `{` it
     // stands alone.
     CHECK(!offers(*p, "no", "NAME", prefix));
     CHECK(offers(*p, "group {", "NAME", prefix));
@@ -299,7 +298,7 @@ void run() {
   // A hidden comment between the two stays in the tree.
   CHECK(hidden(ll, "r2 a /*k*/ c;") == 1);
 
-  // Each alternative owes the refusals in front of it and its own.
+  // Each alternative carries the refusals in front of it and its own.
   for (const char* w : words) {
     const std::string name = std::string(" ") + w;
     const bool ab = in(w, {"a", "b"});

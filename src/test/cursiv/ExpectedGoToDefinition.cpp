@@ -32,6 +32,8 @@ Disposable expectGoToDefinition(
       replaceIndices(detail::baseOf(expectedGoToDefinition));
   const std::shared_ptr<Document> document = parseDocument(
       services, marked.output, expectedGoToDefinition.parseOptions);
+  Disposable disposable = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(disposable);
 
   std::vector<lsp::LocationLink> links;
   const auto* const caret =
@@ -66,7 +68,6 @@ Disposable expectGoToDefinition(
                                 detail::markedRange(*document, *range));
   }
 
-  Disposable disposable = detail::documentDisposable(services, document);
   if (expectedGoToDefinition.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

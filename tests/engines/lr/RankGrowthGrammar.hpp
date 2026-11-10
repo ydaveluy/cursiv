@@ -1,9 +1,8 @@
 #pragma once
 
-// Two readings stay alive through a repetition, whose own two arms read the
-// same text, spelled two ways so that neither is dropped as a twin, and add
-// choices at every element. The elected rank grows with the text, while the
-// graph remains under its pruning budget.
+// Two readings stay alive through a repetition whose two arms read the same
+// text, spelled apart so neither is dropped as a twin. The elected rank grows
+// with the text; the graph stays under its pruning budget.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

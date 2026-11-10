@@ -1,7 +1,6 @@
-// A mode needs shared suffixes only when a token can accept a prefix, then
-// keep reading around a cycle without another guaranteed acceptance. A mode
-// that reads a refusing terminal answers for its token's head, and never
-// shares them.
+// A mode needs shared suffixes only where a token can accept a prefix, then
+// read on around a cycle with no acceptance. A mode that reads a refusing
+// terminal never shares them.
 #pragma once
 
 #include <cstddef>

@@ -121,8 +121,7 @@ struct RuleDialect : cursiv::extends<Base> {
                  lit<"*"> + assign<&ast::Item::name>(ref<Base::ID>) + lit<"="> +
                  assign<&ast::Item::value>(ref<Base::NUM>)) |
              super> {};
-  // This variant tests a node-rule override; the terminal guard variants
-  // are already exercised by Base and Dialect.
+  // The node-rule override; Base and Dialect cover the terminal guards.
   using entry = Base::DocRule;
 };
 

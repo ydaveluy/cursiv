@@ -13,9 +13,8 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/text/TextRange.hpp"
 
-// Text a language rewrites before its tokens are read -- Java's Unicode
-// escapes, C's line splices -- and the map back to the document. A
-// translator fills one; the parser reads its text, and the tree, the
+// Text a language rewrites before its tokens are read, such as Unicode
+// escapes or line splices, and the map back to the document. The tree,
 // diagnostics and completion keep the document's offsets.
 
 namespace cursiv {
@@ -66,8 +65,8 @@ class SourceTranslation {
  private:
   friend class Cst;
 
-  // A span of the bound tree with a bound strictly inside a piece, at the
-  // text's offsets.
+  // A span of the bound tree with a bound strictly inside a piece, or at the
+  // start of an inserted one, at the text's offsets.
   struct Kept {
     std::uint32_t index;
     TextRange text;
@@ -87,8 +86,8 @@ class SourceTranslation {
   std::string _text;
   std::vector<Piece> _pieces;
   std::vector<ParseDiagnostic> _errors;
-  // What `bind` kept: few, since only a piece that spells several tokens, or
-  // a token and trivia, holds a bound inside it.
+  // What `bind` kept: few, since only a piece that spells several tokens
+  // holds a bound inside it, and only an inserted piece loses its start.
   std::vector<Kept> _records;
   std::vector<Kept> _repairs;
 };

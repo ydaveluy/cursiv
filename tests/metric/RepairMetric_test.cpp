@@ -70,17 +70,17 @@ cursiv::CstLeaf leaf(cursiv::TextOffset begin, cursiv::TextOffset end,
 
 using Kind = cursiv::DiagnosticKind;
 
-void one_diagnostic_more_is_a_parasite() {
+void one_diagnostic_more_is_spurious() {
   const std::vector<metric::FaultWindow> w{window(10, 20, 15)};
   std::vector<cursiv::ParseDiagnostic> d{said(Kind::inserted, 15, 15)};
   auto p = metric::FaultPairing::pair(w, d);
-  CHECK(p.found == 1 && p.missed == 0 && p.parasites == 0);
+  CHECK(p.found == 1 && p.missed == 0 && p.spurious == 0);
   d.push_back(said(Kind::deleted, 12, 13));
   p = metric::FaultPairing::pair(w, d);
-  CHECK(p.found == 1 && p.parasites == 1);
+  CHECK(p.found == 1 && p.spurious == 1);
   d.push_back(said(Kind::deleted, 100, 101));
   p = metric::FaultPairing::pair(w, d);
-  CHECK(p.found == 1 && p.parasites == 2);
+  CHECK(p.found == 1 && p.spurious == 2);
 }
 
 // The nearest diagnostic goes first, and gives way when another fault has
@@ -91,7 +91,7 @@ void the_pairing_answers_the_most_faults() {
   const std::vector<cursiv::ParseDiagnostic> d{said(Kind::inserted, 14, 14),
                                                said(Kind::inserted, 19, 19)};
   const auto p = metric::FaultPairing::pair(w, d);
-  CHECK(p.found == 2 && p.parasites == 0);
+  CHECK(p.found == 2 && p.spurious == 0);
   CHECK(p.answer[0] == 0 && p.answer[1] == 1);
   const std::vector<metric::FaultWindow> tight{window(10, 20, 14),
                                                window(14, 14, 14)};
@@ -101,7 +101,7 @@ void the_pairing_answers_the_most_faults() {
 
 // Over drawn windows and diagnostics: adding one never lowers what was found
 // nor what was left over.
-void a_diagnostic_never_buys_back_a_parasite() {
+void a_diagnostic_never_buys_back_a_spurious_one() {
   cursiv::fuzzer::SeededSource rng(0x9a17);
   for (int round = 0; round < 400; ++round) {
     std::vector<metric::FaultWindow> w;
@@ -119,8 +119,8 @@ void a_diagnostic_never_buys_back_a_parasite() {
       d.push_back(said(kind, b, b + static_cast<cursiv::TextOffset>(rng.next() % 30)));
       const auto after = metric::FaultPairing::pair(w, d);
       CHECK(after.found >= before.found);
-      CHECK(after.parasites >= before.parasites);
-      CHECK(after.found + after.parasites == d.size());
+      CHECK(after.spurious >= before.spurious);
+      CHECK(after.found + after.spurious == d.size());
       before = after;
     }
   }
@@ -155,7 +155,7 @@ void a_case_maps_the_twin() {
   CHECK(!metric::RepairCase::make("abcdef", {{5, 3, ""}}, c));
 }
 
-// `p a q` with a stray `a ` written in front: the repair reads the stray one
+// `p a q` with an extra `a ` written in front: the repair reads the extra one
 // and skips the author's. A multiset would call the author's `a` kept.
 void the_text_is_aligned_not_counted() {
   const std::string valid = "p a q";
@@ -187,8 +187,8 @@ void an_insertion_that_restores_is_no_invention() {
                                          leaf(6, 6, true), leaf(7, 8),
                                          leaf(9, 10)};
   constexpr cursiv::ElementId kComma = 7, kPlus = 8;
-  const auto comma = [&](std::size_t token, cursiv::ElementId owed) {
-    return owed == kComma && token == 3;
+  const auto comma = [&](std::size_t token, cursiv::ElementId expected) {
+    return expected == kComma && token == 3;
   };
   auto t = metric::TextKept::of(twin, c, windows, got,
                                 {{said(Kind::inserted, 6, 6, kComma)}}, comma);
@@ -197,7 +197,7 @@ void an_insertion_that_restores_is_no_invention() {
   t = metric::TextKept::of(twin, c, windows, got,
                            {{said(Kind::inserted, 6, 6, kPlus)}}, comma);
   CHECK(t.restored == 0 && t.invented == 1);
-  // The `x` dropped where the comma was owed: a value lost, not kept.
+  // The `x` dropped where the comma was missing: a value lost, not kept.
   const std::vector<cursiv::CstLeaf> lost{leaf(0, 1), leaf(2, 3),
                                           leaf(4, 5, true), leaf(7, 8),
                                           leaf(9, 10)};
@@ -228,7 +228,7 @@ void the_tree_is_aligned_per_member() {
   const auto rb = parser->parse(b);
   CHECK(ra.value != nullptr && rb.value != nullptr);
   if (ra.value == nullptr || rb.value == nullptr) return;
-  const metric::AstOverlap overlap{*reflection, &kDmActions};
+  const metric::AstOverlap overlap{*reflection, kDmActions};
   const auto none = [](const cursiv::AstNode&) { return false; };
   const auto whole = overlap.run(*ra.value, ra.value, none);
   CHECK(whole.total == 7 && whole.kept == 7);
@@ -254,33 +254,34 @@ void the_tree_is_aligned_per_member() {
   CHECK(renamed.total == 4 && renamed.kept == 3);
 }
 
-// Closers owed after each token: the `}` of an entity opened before the cut,
-// those of the packages around it -- never a record that no spelled token
-// opened.
-void a_cut_owes_its_open_closers() {
+// The closers still due after each token: the `}` of an entity opened before
+// the cut, those of the packages around it, never a record that no written
+// token opened.
+void a_cut_counts_the_closers_still_due() {
   const auto parser = dm_parser();
   const auto twin = metric::RepairTwin::read(
       *parser, "package p { package q { entity A { x: T } } datatype D }");
   CHECK(twin != nullptr);
   if (twin == nullptr) return;
   CHECK(twin->tokens.size() == 17);
-  const std::vector<std::uint32_t> owed = metric::FaultCorpus::owed(*twin);
+  const std::vector<std::uint32_t> missing =
+      metric::FaultCorpus::missing_closers(*twin);
   const std::vector<std::uint32_t> want{1, 1, 1, 2, 2, 2, 3, 3, 3,
                                         3, 3, 3, 2, 1, 1, 1, 0};
-  CHECK(owed == want);
+  CHECK(missing == want);
 }
 
 }  // namespace
 
 int main() {
-  one_diagnostic_more_is_a_parasite();
+  one_diagnostic_more_is_spurious();
   the_pairing_answers_the_most_faults();
-  a_diagnostic_never_buys_back_a_parasite();
+  a_diagnostic_never_buys_back_a_spurious_one();
   a_wide_abandonment_answers_by_its_ends();
   a_case_maps_the_twin();
   the_text_is_aligned_not_counted();
   an_insertion_that_restores_is_no_invention();
   the_tree_is_aligned_per_member();
-  a_cut_owes_its_open_closers();
+  a_cut_counts_the_closers_still_due();
   return cursiv::test::report("RepairMetric_test");
 }

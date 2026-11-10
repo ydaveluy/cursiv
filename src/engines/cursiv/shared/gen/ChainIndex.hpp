@@ -1,7 +1,5 @@
-// Intrusive hash index over caller-owned IDs.
-// Each chain step follows one stored link. The buckets grow with the IDs
-// added, so a chain stays short whatever the hint given to `init`; a chain's
-// order is not part of the contract, and callers compare exactly.
+// Intrusive hash index over caller-owned IDs. The buckets grow with the IDs
+// added; a chain's order is not part of the contract.
 #pragma once
 
 #include <cstddef>

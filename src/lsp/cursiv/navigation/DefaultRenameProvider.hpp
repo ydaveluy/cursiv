@@ -16,12 +16,6 @@
 
 namespace cursiv {
 
-/**
- * Not `final`: a reference site may be written under a qualifier, and
- * rewriting one is not generic -- renaming a package changes the
- * qualified name of everything it contains, which only that language's
- * naming rule can compute. `DomainModelRenameProvider` is the example.
- */
 class DefaultRenameProvider : public RenameProvider {
  public:
   explicit DefaultRenameProvider(const CoreServices& core) noexcept
@@ -41,14 +35,11 @@ class DefaultRenameProvider : public RenameProvider {
   [[nodiscard]] const CoreServices& core() const noexcept { return _core; }
 
  private:
-  /**
-   * Substitutes `newName` at every span of `home`, given in document order
-   * and disjoint, and reads the document back. The parse verdict must hold,
-   * and each replacement must be read as the name it replaces: a record of
-   * its own, with no repaired part, writing the same member of a node of the
-   * same class.
-   */
-  [[nodiscard]] bool isNameOfLanguage(const Document& home,
+  // Substitutes `newName` at the spans of `declaringDocument` and reads the
+  // document back: the parse verdict holds, and each replacement is an
+  // unrepaired record of its own writing the same member of a node of the same
+  // class.
+  [[nodiscard]] bool isNameOfLanguage(const Document& declaringDocument,
                                       std::span<const TextRange> spans,
                                       std::string_view newName,
                                       const CancellationToken& token) const;

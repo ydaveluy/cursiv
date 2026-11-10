@@ -15,12 +15,9 @@
 #include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
 
-// The index is built at registration, not walked at dispatch: a check on a
-// base is filed under every concrete type of its family (read from the
-// shared reflection, the same table the scope provider and the index filter
-// references with), so running a node's checks is one lookup on its tag. A
-// check is shared, not copied: copying the `std::function` would copy
-// whatever it captured.
+// Built at registration: a check on a base is filed under every concrete type
+// of its family, so a node's checks are one lookup on its tag. Checks are
+// shared, not copied.
 
 namespace cursiv {
 
@@ -31,7 +28,7 @@ class DefaultValidationRegistry : public ValidationRegistry {
   explicit DefaultValidationRegistry(const CoreServices& core) noexcept
       : _core(core) {}
 
-  // Precondition: the grammar's reflection is already on the workspace union.
+  // Precondition: the language's `astReflection` is installed.
   void registerCheck(ValidationCheckRegistration,
                      const ValidationCategory* category) override;
 
@@ -81,7 +78,7 @@ class DefaultValidationRegistry : public ValidationRegistry {
   void fileDocumentCheck(std::vector<ValidationPreparationEntry>& into,
                          ValidationPreparation check,
                          const ValidationCategory* category);
-  [[nodiscard]] std::size_t homeOf(const AstTypeTag* type) const noexcept;
+  [[nodiscard]] std::size_t hashSlotOf(const AstTypeTag* type) const noexcept;
   // The slot holding `type`, or the empty one where it would go.
   [[nodiscard]] std::size_t slotOf(const AstTypeTag* type) const noexcept;
   [[nodiscard]] std::vector<Entry>& entriesOf(const AstTypeTag* type);
@@ -96,10 +93,10 @@ class DefaultValidationRegistry : public ValidationRegistry {
   std::size_t _typeCount = 0;
   // Odd, so the product stays a bijection: a new multiplier can part tags.
   std::uint64_t _mul = 0x9e3779b97f4a7c15ull;
-  // Every filed tag on its home slot, and no check on every node: a node's
-  // home slot then decides alone, and the many nodes no check watches are
+  // Every filed tag on its hash slot, and no check on every node: a node's
+  // hash slot then decides alone, and the many nodes no check watches are
   // turned away by one compare.
-  bool _homeDecides = false;
+  bool _hashSlotDecides = false;
   // The checks no type filters -- those whose target is `cursiv::AstNode`.
   std::vector<Entry> _everyNode;
   // The document-level hooks, in registration order.

@@ -7,11 +7,10 @@ target_compile_definitions(TapeAudit_test PRIVATE
 # Guards, refused word heads and shifting candidates use the same lexical policy.
 cursiv_grammar(guard engines/lr/LexGuardGrammars.hpp tguard::G ENGINE LR)
 cursiv_grammar(guardtrivia engines/lr/LexGuardGrammars.hpp tguard::trivia::G ENGINE LR)
-# Unlike the shared guard table, every mode of Reduced elects one candidate.
-# Keep its candidate-free generated parser as an independent contract.
-cursiv_grammar(alikereduced engines/lr/AlikeCandidatesGrammar.hpp
-    talike::Reduced ENGINE LR)
-# The ceilings a parse meets, counted: look-ahead, graph and repair budgets.
+# Every mode of `Reduced` elects one candidate: a table without candidates.
+cursiv_grammar(samewordreduced engines/lr/SameWordCandidatesGrammar.hpp
+    tsameword::Reduced ENGINE LR)
+# The ceilings a parse reaches, counted: look-ahead, graph and repair budgets.
 cursiv_grammar(ceilings engines/lr/CeilingsGrammar.hpp tceilings::G ENGINE LR)
 cursiv_test(LrCeilings_test engines/lr/LrCeilings_test.cpp
     cellsGenerated
@@ -26,19 +25,19 @@ cursiv_test(RunOnEquations_test engines/lr/RunOnEquations_test.cpp
 set_tests_properties(RunOnEquations_test PROPERTIES TIMEOUT 120)
 cursiv_grammar(room221 engines/lr/FrozenRoomGrammars.hpp troom::seed221::G ENGINE LR)
 cursiv_grammar(repaircost engines/lr/RepairCostGrammar.hpp trepair::G ENGINE LR)
-# Random grammars against an Earley reading of each: every seed is a grammar
-# the build generates, so the lane runs where the generator does.
+# Random grammars checked against an Earley parse. Host only: the build
+# generates a parser for each seed.
 if(NOT CMAKE_CROSSCOMPILING)
   add_subdirectory(oracle)
 endif()
 
-# One representative for each graph-growth class: no fork, linear,
-# quadratic and cubic, with fixed AST oracles for the elected tree.
+# One grammar for each graph-growth class: no fork, linear, quadratic and
+# cubic, with the expected AST of the elected tree.
 cursiv_grammar(growthfastalr engines/lr/GrowthGrammars.hpp tgfasta::Lr ENGINE LR)
 cursiv_grammar(growth engines/lr/GrowthGrammars.hpp tgrowth::G ENGINE LR)
 cursiv_test(LrGrowth_test engines/lr/LrGrowth_test.cpp
     cursiv::bench growthfastalrGenerated growthGenerated)
-# A project may build strict C++: this table has no rivals, which once sized an
-# array at zero in the headers a parser instantiates.
+# A project may build strict C++: a table with no competitors must not size an
+# array at zero.
 target_compile_options(LrGrowth_test PRIVATE -pedantic-errors)
 set_tests_properties(LrGrowth_test PROPERTIES TIMEOUT 120)

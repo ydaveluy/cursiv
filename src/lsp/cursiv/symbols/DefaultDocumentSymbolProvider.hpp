@@ -1,7 +1,5 @@
-// Not templated by the grammar: once a node's name node is in hand, the
-// outline is the same code for every language. A node with a name node
-// becomes a symbol; one without dissolves into its children, found by
-// climbing to the nearest named ancestor since this AST has no child list.
+// The outline, the same for every language: a node with a name node is a
+// symbol, one without dissolves into its children.
 #pragma once
 
 #include <lsp/types.h>
@@ -19,8 +17,6 @@
 
 namespace cursiv {
 
-// Not `final`: a language derives it to change what a symbol is -- its
-// kind, its detail, its name -- in `createSymbol` below.
 class DefaultDocumentSymbolProvider : public DocumentSymbolProvider {
  public:
   explicit DefaultDocumentSymbolProvider(const LspServices& core) noexcept

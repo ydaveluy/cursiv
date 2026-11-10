@@ -1,7 +1,6 @@
-// A terminal's body, resolved against the reading it stands in and reified as
-// a graph of `LexNode`: the one place the token graph is made from a grammar
-// image. A node a resolution makes is told by its structure (`canon`), so two
-// spellings of one token are one key.
+// A terminal's body, resolved against its reading and reified as a graph of
+// `LexNode`. Nodes are keyed by structure (`canon`), so two spellings of one
+// token are one key.
 #pragma once
 
 #include <cstdint>
@@ -10,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 #include "cursiv/grammar/GrammarImage.hpp"
@@ -37,7 +37,7 @@ class LexReifier {
   void declare_word(const ImageClassDesc& bound);
   void declare_section_word(const ImageClassDesc& bound);
 
-  ImageId make(ImageKind kind, std::span<const ImageId> kids = {},
+  ImageId make(ImageKind kind, std::span<const ImageId> children = {},
                std::uint8_t flags = 0, std::uint32_t a = kNoImage,
                std::uint64_t m = 0, std::uint64_t n = 0,
                std::string_view text = {});
@@ -47,8 +47,10 @@ class LexReifier {
   ImageId make_class(const ImageClassDesc& cls);
 
   std::uint16_t push(LexNode node) { return _c.push_lex(node); }
-  std::uint16_t push_kid(std::uint16_t kid) { return _c.push_lex_kid(kid); }
-  std::uint16_t group(LexKind kind, std::span<const std::uint16_t> kids,
+  std::uint16_t push_child(std::uint16_t child) {
+    return _c.push_lex_child(child);
+  }
+  std::uint16_t group(LexKind kind, std::span<const std::uint16_t> children,
                       std::uint32_t min = 0);
   std::uint16_t intern(const ByteSet& set, std::uint16_t decode = kNoSet);
 
@@ -77,18 +79,16 @@ class LexReifier {
     ImageId after = kNoImage;
   };
 
-  using Path = std::vector<std::uint32_t>;
-
   const ImageNode& at(ImageId id) const { return _im.nodes[id]; }
-  ImageId kid(const ImageNode& n, std::uint32_t i) const {
-    return _im.kids[n.first + i];
+  ImageId child_at(const ImageNode& n, std::uint32_t i) const {
+    return _im.children[n.first + i];
   }
-  ImageId rebuilt(ImageId id, const std::vector<ImageId>& kids);
+  ImageId rebuilt(ImageId id, const std::vector<ImageId>& children);
   ImageId lit_with(const ImageNode& lit, ImageId guard);
 
-  ImageId resolve_in(unsigned cfg, ImageId id, Path& path);
-  ImageId resolve_rule(unsigned cfg, std::uint32_t rule, Path& path);
-  ImageId resolve_seq(unsigned cfg, ImageId id, Path& path);
+  ImageId resolve_in(unsigned cfg, ImageId id);
+  ImageId resolve_rule(unsigned cfg, std::uint32_t rule);
+  ImageId resolve_seq(unsigned cfg, ImageId id);
   bool has_captures(ImageId id) const;
   bool consumes(ImageId id) const;
   bool eof_lit(ImageId id) const;
@@ -143,6 +143,8 @@ class LexReifier {
            ImageId>
       _classes;
   std::map<ImageId, ImageId> _canon;
+  // The rules being resolved: a call back into one stays a call.
+  std::unordered_set<std::uint32_t> _resolving;
   std::map<ImageId, std::uint16_t> _codePoints;
 };
 

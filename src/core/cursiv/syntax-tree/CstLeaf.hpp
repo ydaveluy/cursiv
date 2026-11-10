@@ -3,10 +3,8 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/text/TextOffset.hpp"
 
-// One record that holds no other -- what a linear reader of the tree sees
-// without decoding a record it does not read. A childless composite is one
-// too, which is what makes this the same set the tape's `childless(id)`
-// names.
+// A record with no children, an empty composite included: what
+// `Cst::childless(id)` tests.
 
 namespace cursiv {
 

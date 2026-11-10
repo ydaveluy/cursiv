@@ -1,5 +1,5 @@
-// An optional item in a group that holds a nest: such a group spells every
-// order in full, so both engines refuse the item, naming it.
+// An optional item in a group that holds a nest: such a group is expanded into
+// every order, so both engines refuse the item, naming it.
 // expect LR LL: refused .nullableUnorderedItem..*rule .Root. has an optional item, .*Wrap.inner=.*, in an unordered group whose items hold a .nest.
 #pragma once
 

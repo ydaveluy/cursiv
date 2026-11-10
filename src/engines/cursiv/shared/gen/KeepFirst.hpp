@@ -10,14 +10,15 @@
 
 namespace cursiv::engine {
 
-// One stamp per id a list can hold, so a list costs its own length however many
+// One mark per id a list can hold, so a list costs its own length however many
 // ids it repeats.
 class KeepFirst {
  public:
   // `reads`, if any, counts the ids read.
   explicit KeepFirst(std::uint64_t* reads = nullptr) : _reads(reads) {}
 
-  // Moves the ids to keep to the front of `ids`, and says how many there are.
+  // Moves the ids to keep to the front of `ids`, and returns how many there
+  // are.
   std::size_t operator()(std::span<std::uint16_t> ids) {
     _seen.next();
     if (_reads != nullptr) *_reads += ids.size();

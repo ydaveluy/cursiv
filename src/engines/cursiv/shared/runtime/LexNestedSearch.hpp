@@ -1,7 +1,6 @@
 // The search that ends a balanced run: from right after its opener, the closer
-// that brings the depth back to zero. A group closes where it closes whoever
-// reads it, so an instance keeps every group it settled and a walk that meets
-// an opener at each byte reads the text once, not once per opener.
+// that brings the depth back to zero. An instance keeps every group it closed,
+// so the text is read once, not once per opener.
 #pragma once
 
 #include <cstddef>
@@ -31,7 +30,7 @@ class LexNestedSearch {
     return end == 0 && r.eof ? len : end;
   }
 
-  // The same, and every group settled on the way answers the searches after.
+  // The same, keeping every group it closes for later searches.
   CURSIV_NOINLINE TextOffset seek(const LexRelay& r, const char* names,
                                   const char* src, TextOffset len,
                                   TextOffset from) {
@@ -56,12 +55,9 @@ class LexNestedSearch {
     const char* at;
   };
 
-  // One pass: where each literal's first byte next stands is found once and
-  // kept until the cursor passes it. The earlier start wins, and an opener
-  // starting before a closer deepens even where the two overlap -- with `(*`
-  // and `*)`, `(*)` deepens before it closes; a closer wins a tie. `Many`:
-  // several literals a side, the nearest of a side standing for it, and of two
-  // a side spells at one byte, the longer read.
+  // One pass: the earlier start wins, so `(*)` deepens before it closes with
+  // `(*` and `*)`; a closer wins a tie. With `Many`, of two literals a side
+  // spells at one byte, the longer is read.
   template <bool Remember, bool Many>
   CURSIV_ALWAYS_INLINE static TextOffset scan(LexNestedSearch* self,
                                               const LexRelay& r,
@@ -80,7 +76,6 @@ class LexNestedSearch {
       return static_cast<TextOffset>(stop - q) >= n &&
              std::memcmp(q, lit, n) == 0;
     };
-    // A relay names a few literals a side; more spill to the heap.
     [[maybe_unused]] std::conditional_t<Many, SmallRun<Lit, 8>, char> lits;
     if constexpr (Many) {
       const auto list = [&](TextOffset off, TextOffset size, bool isAfter) {

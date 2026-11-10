@@ -1,6 +1,6 @@
-// Two alternatives that part only past their first token, one a section:
-// the point behind that token reads the embedded grammar's first token and
-// the caller's at once.
+// Two alternatives that differ only after their first token, one of them a
+// section: after `<`, the next token belongs to the embedded grammar and to
+// the caller at once.
 // expect LR LL: refused: the grammar reaches the same token both inside a .section<>. and outside it
 #pragma once
 

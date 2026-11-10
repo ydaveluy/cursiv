@@ -1,8 +1,6 @@
-// Readings that part at more than one decision: the first the text meets
-// decides, its first written arm winning -- an inner suffix loop before the
-// closer of the rule around it, an alternative before the option a later
-// position decides, an outer choice before the inner one nearer the conflict;
-// a keyword the lexer ranks first decides before any arm.
+// Readings that part at more than one decision: the first the text reaches
+// decides, its first written arm winning, as an inner loop against its rule's
+// closer. A keyword the lexer ranks first decides before any arm.
 #pragma once
 
 #include "cursiv/grammar/GrammarSpec.hpp"
@@ -68,8 +66,8 @@ constexpr auto in_order(auto written, auto other) {
     return other | written;
 }
 
-// The rungs of a ladder that a left recursion closes into one component: in
-// each rung the wrapping arm is written before the bare one or after it.
+// The precedence levels that a left recursion closes into one component: in
+// each level the wrapping arm is written before or after the bare one.
 template <bool CompareFirst, bool TrimFirst = true, bool BoxFirst = true,
           bool MatchFirst = true, bool AliasedAgo = false>
 struct Cycle : Common {
@@ -145,7 +143,7 @@ struct Refusal : Common {
 };
 
 // A keyword the word terminal also spells, where the condition above the name
-// parted before it -- the `!` operand closing a whole condition keeps the
+// split before it -- the `!` operand closing a whole condition keeps the
 // table's cell there: the lexer ranks the keyword first, before any arm.
 struct Keyword : Common {
   struct Implies;

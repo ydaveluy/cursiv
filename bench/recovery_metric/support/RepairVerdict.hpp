@@ -1,5 +1,5 @@
 // What one faulted document scored, as counts: a class sums them before it
-// divides, so a document weighs what it holds.
+// divides, so a document counts as much as it holds.
 #pragma once
 
 #include <cstdint>
@@ -12,7 +12,7 @@ namespace cursiv::recovery_metric {
 
 struct RepairVerdict {
   std::uint32_t faults = 0, diagnostics = 0;
-  std::uint32_t found = 0, missed = 0, parasites = 0;
+  std::uint32_t found = 0, missed = 0, spurious = 0;
   bool accepted = false;
   // Accepted with no syntax diagnostic: every fault it holds is a miss.
   bool silent = false;
@@ -22,7 +22,7 @@ struct RepairVerdict {
   bool tree = false;
   TextKept text;
   AstOverlap::Result ast;
-  // parse(faulted) over parse(valid), in retired instructions; negative when
+  // parse(faulted) over parse(valid), in released instructions; negative when
   // no counter was read.
   double cost = -1;
   // How often the parse reached each ceiling its caller names.

@@ -5,8 +5,7 @@
 #include <string_view>
 
 // Where a generated file goes and what it is called. The rest of what a
-// command line needs -- scanning a folder, building one document, printing
-// the verdict -- is `cursiv/cli.hpp`'s, and is not restated here.
+// command line needs is in `cursiv/cli.hpp`.
 
 namespace dm {
 
@@ -15,8 +14,8 @@ struct FilePathData {
   std::string name;
 };
 
-// `destination` defaults to `generated`; the name is the input's stem with the
-// characters a file name may not carry removed.
+// `destination` defaults to `generated`. The name is the input's stem without
+// dots and dashes, or `generated` if nothing is left: two inputs can share it.
 [[nodiscard]] FilePathData extract_destination_and_name(
     std::string_view filePath, std::optional<std::string_view> destination);
 

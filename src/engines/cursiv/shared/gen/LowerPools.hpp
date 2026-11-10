@@ -1,6 +1,6 @@
 // The pools both lowerings write into: text, byte classes, the token graph,
 // terminals, gap programs and the configurations a region reads under, each
-// growing to meet its write, and the counters that mark where each one ends.
+// growing to fit its write, and the counters that mark where each one ends.
 #pragma once
 
 #include <algorithm>
@@ -50,7 +50,7 @@ struct LowerPools : LowerVerdicts {
   std::uint16_t nameLen = 0;
   std::uint16_t nsets = 0;
   std::uint16_t nlex = 0;
-  std::uint16_t nlexKid = 0;
+  std::uint16_t nlexChild = 0;
   std::uint16_t nlexTags = 0;
   std::uint16_t ngapConds = 0;
   std::uint16_t ngapLeaves = 0;
@@ -69,7 +69,7 @@ struct LowerPools : LowerVerdicts {
   // The lead bytes of the scalars `wordRanges` holds.
   ByteSet wordLeads{};
   Vec<LexNode> lex{};
-  Vec<std::uint16_t> lexKid{};
+  Vec<std::uint16_t> lexChild{};
   // The mode a condition's node lexes its token in, by its node.
   Vec<std::uint16_t> lexMode{};
   // A refused word as the grammar's dump spells it, by its node.
@@ -92,7 +92,7 @@ struct LowerPools : LowerVerdicts {
   Vec<std::uint32_t> cfgTriviaAt{};
   // The section configuration `k` stands in, zero outside any; and for a
   // section's own, the token that closes it.
-  Vec<std::uint8_t> cfgHome{};
+  Vec<std::uint8_t> cfgSection{};
   Vec<std::uint16_t> cfgEnd{};
   // Configuration `k` names no trivia at all (bare), and reads as a token
   // some terminal the grammar skips (short).
@@ -141,10 +141,10 @@ struct LowerPools : LowerVerdicts {
     return nlex++;
   }
 
-  std::uint16_t push_lex_kid(std::uint16_t k) {
-    if (nlexKid == 0xffffu) throw LowerRefused(LowerFail::tokenGraphTooLarge);
-    lexKid[nlexKid] = k;
-    return nlexKid++;
+  std::uint16_t push_lex_child(std::uint16_t k) {
+    if (nlexChild == 0xffffu) throw LowerRefused(LowerFail::tokenGraphTooLarge);
+    lexChild[nlexChild] = k;
+    return nlexChild++;
   }
 
   // A tag is interned by its address; a mark and an echo carry the index.
@@ -164,13 +164,12 @@ struct LowerPools : LowerVerdicts {
       sectionWords[sectionWords.size()] = std::move(w);
   }
 
-  // The section configuration `k` stands in, zero outside any.
-  std::uint8_t home_at(unsigned k) const {
-    return k < cfgHome.size() ? cfgHome[k] : std::uint8_t{0};
+  std::uint8_t section_cfg_at(unsigned k) const {
+    return k < cfgSection.size() ? cfgSection[k] : std::uint8_t{0};
   }
 
   bool sections() const {
-    return std::ranges::any_of(cfgHome.v,
+    return std::ranges::any_of(cfgSection.v,
                                [](std::uint8_t h) { return h != 0; });
   }
 

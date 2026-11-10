@@ -1,5 +1,5 @@
-// An override that stops a node rule building its node: callers of the base
-// would still read the rule as the node's type.
+// An override that stops a node rule from building its node: callers of the
+// base would still read the rule as the node's type.
 // expect LR: this override changes whether the rule builds a node
 #pragma once
 

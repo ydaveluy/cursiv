@@ -8,18 +8,20 @@
 #include <string>
 #include <utility>
 
-#include "cursiv/text/Position.hpp"
-#include "cursiv/text/TextOffset.hpp"
-#include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/workspace/Document.hpp"
-#include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/semantic/SemanticTokenProvider.hpp"
-#include "cursiv/services/LspServices.hpp"
+#include "cursiv/Disposable.hpp"
+#include "cursiv/DocumentDisposable.hpp"
 #include "cursiv/ExpectFunction.hpp"
 #include "cursiv/ExpectationError.hpp"
 #include "cursiv/ExpectedBase.hpp"
 #include "cursiv/ParseHelper.hpp"
 #include "cursiv/ReplacedIndices.hpp"
+#include "cursiv/semantic/SemanticTokenProvider.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/text/Position.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
 
 namespace cursiv::test {
 
@@ -32,6 +34,10 @@ DecodedSemanticTokensWithRanges highlightHelper(
   const ReplacedIndices replaced = replaceIndices({.text = std::move(text)});
   const std::shared_ptr<Document> document =
       parseHelper(services, replaced.output, options);
+  // The document stays in the workspace, as a `parseHelper` one does, unless
+  // the provider throws.
+  Disposable added = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(added);
   lsp::SemanticTokensParams params;
   params.textDocument.uri = lsp::Uri::parse(document->uri);
   const SemanticTokenProvider& provider = *services.semanticTokenProvider;
@@ -39,6 +45,10 @@ DecodedSemanticTokensWithRanges highlightHelper(
       provider.semanticHighlight(*document, params, kNoCancel);
   const lsp::Array<lsp::String> types =
       provider.semanticTokensOptions().legend.tokenTypes;
+
+  // Five integers per token: a group cut short is a fault of the provider.
+  expectedFunction(std::to_string(encoded.data.size() % 5), "0",
+                   "the semantic tokens are not whole groups of five integers");
 
   DecodedSemanticTokensWithRanges out;
   out.ranges = replaced.ranges;

@@ -11,6 +11,7 @@
 #include <functional>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -52,7 +53,7 @@ std::uint64_t hash(const Reading& r) {
   return mix(h);
 }
 
-// Stable, and safe for an order that owes no transitivity: a neighbour moves
+// Stable, and safe for an order that need not be transitive: a neighbour moves
 // ahead of another only where it is earlier than it.
 template <class T, class Earlier>
 void merge_sort(std::vector<T>& v, Earlier&& earlier) {
@@ -72,6 +73,10 @@ void merge_sort(std::vector<T>& v, Earlier&& earlier) {
 }
 
 }  // namespace
+
+void LrGssGraph::too_many() {
+  throw std::length_error("cursiv: GSS graph exceeds its 32-bit ids");
+}
 
 void LrGssGraph::clear() {
   _forest.clear();
@@ -95,12 +100,12 @@ void LrGssGraph::clear() {
   _cutBegin = 0;
   _cutEnd = 0;
   _branching.clear();
-  _settled = 0;
+  _finishedBefore = 0;
   _shifts.clear();
   _lastDeath = 0;
   _died = false;
   _held = none;
-  _owed = 0;
+  _shiftsLeft = 0;
   _root = none;
   _seedDepth = 0;
   _seedBase = 0;
@@ -109,10 +114,10 @@ void LrGssGraph::clear() {
 }
 
 void LrGssGraph::seed(const LrStack& stack, const Reading& start,
-                      std::span<const std::uint16_t> stood,
+                      std::span<const std::uint16_t> seed_symbol,
                       std::uint32_t window) {
   clear();
-  _stood = stood;
+  _seedSymbol = seed_symbol;
   _seedBase = stack.size() > window ? stack.size() - window : 0;
   _seedDepth = stack.size() - _seedBase;
   Id previous = none;
@@ -120,7 +125,7 @@ void LrGssGraph::seed(const LrStack& stack, const Reading& start,
     Reading r;
     r.run.state = stack[i].state;
     r.at = stack[i].begin;
-    const auto v = static_cast<Id>(_vertices.size());
+    const Id v = next_id(_vertices);
     _vertices.push_back(Vertex{r});
     if (previous != none) {
       const Id f = _forest.node();
@@ -140,19 +145,19 @@ void LrGssGraph::seed(const LrStack& stack, const Reading& start,
   _root = _forest.node();
 }
 
-std::uint32_t LrGssGraph::stood(Id v) const {
-  if (_stood.empty()) return kSeedSymbol;
-  const std::uint16_t s = _stood[_vertices[v].reading.run.state];
+std::uint32_t LrGssGraph::seed_symbol(Id v) const {
+  if (_seedSymbol.empty()) return kSeedSymbol;
+  const std::uint16_t s = _seedSymbol[_vertices[v].reading.run.state];
   return s == kLrNoStateSym ? kSeedSymbol : s;
 }
 
 Id LrGssGraph::vertex(Reading r) {
   r.virt = r.virt.seen_from(r.at);
   const auto k = key(r);
-  const auto fresh = static_cast<Id>(_vertices.size());
+  const Id fresh = next_id(_vertices);
   const Id id = _index.intern(
       hash(r), fresh, [&](Id at) { return key(_vertices[at].reading) == k; },
-      [&](Id at) { return _vertices[at].reading.at < _settled; });
+      [&](Id at) { return _vertices[at].reading.at < _finishedBefore; });
   if (id != fresh) return id;
   _vertices.push_back(Vertex{r});
   queue(id);
@@ -171,7 +176,7 @@ bool LrGssGraph::next_vertex(Id& v, TextOffset& at) const {
   return true;
 }
 
-void LrGssGraph::retire(std::span<const Id> vertices) {
+void LrGssGraph::drop_vertices(std::span<const Id> vertices) {
   _batch.assign(vertices.begin(), vertices.end());
   std::ranges::sort(_batch);
   const auto gone = std::ranges::remove_if(
@@ -195,7 +200,7 @@ std::uint64_t LrGssGraph::edge_hash(Id to, Id from,
 }
 
 // The edge `to` stands on over `from` by `symbol`, made where none is: one
-// `held` back under another is laid in no vertex's list.
+// `held` back under another is put in no vertex's list.
 Id LrGssGraph::intern(Id to, Id from, std::uint32_t symbol, bool held,
                       bool& made) {
   const auto h = edge_hash(to, from, symbol);
@@ -206,7 +211,9 @@ Id LrGssGraph::intern(Id to, Id from, std::uint32_t symbol, bool held,
         const Edge& x = _edges[at];
         return x.to == to && x.previous == from && x.symbol == symbol;
       },
-      [&](Id at) { return _vertices[_edges[at].to].reading.at < _settled; });
+      [&](Id at) {
+        return _vertices[_edges[at].to].reading.at < _finishedBefore;
+      });
   made = e == fresh;
   if (!made) return e;
   const Id f = _forest.node();
@@ -246,8 +253,8 @@ void LrGssGraph::edge(Id to, Id from, std::uint32_t symbol,
     }
   }
   const Step& s = _steps[step];
-  const bool token = s.shifts && !s.laid &&
-                     s.reading.la.begin < s.reading.la.end;
+  const bool token =
+      s.shifts && !s.synthetic && s.reading.la.begin < s.reading.la.end;
   if (words.empty() && s.shifts && s.ranked)
     _forest.add(f, children, step, std::span(&s.lexRank, 1), {},
                 token ? LrGssForest::Kind::ranked : LrGssForest::Kind::inner);
@@ -263,9 +270,9 @@ void LrGssGraph::edge(Id to, Id from, std::uint32_t symbol,
   }
 }
 
-void LrGssGraph::settle(TextOffset before) {
-  if (before <= _settled) return;
-  _settled = before;
+void LrGssGraph::finish_before(TextOffset before) {
+  if (before <= _finishedBefore) return;
+  _finishedBefore = before;
   std::size_t kept = 0;
   _batch.clear();
   for (const Id u : _branching) {
@@ -284,8 +291,7 @@ void LrGssGraph::settle(TextOffset before) {
 
 // Two out-edges whose chains down share states and end hold stacks with one
 // future: all but the one whose words order first are dropped. Only edges of
-// one symbol compare, as a pass-through the table skipped is not in their
-// words. `u` must be closed, and so all it reaches.
+// one symbol compare. `u` must be closed.
 void LrGssGraph::prune(Id u) {
   if (_vertices[u].edges == _vertices[u].lastEdge) return;
   _group.clear();
@@ -311,7 +317,7 @@ void LrGssGraph::prune(Id u) {
     std::size_t j = i + 1;
     while (j < _group.size() && key(_group[j]) == key(_group[i])) ++j;
     for (std::size_t best = i, k = i + 1; k < j; ++k) {
-      const Id floor = meet(_group[best].edge, _group[k].edge);
+      const Id floor = common_vertex(_group[best].edge, _group[k].edge);
       if (floor == none) continue;
       _strict = true;
       const auto [first, byTable] =
@@ -341,10 +347,10 @@ void LrGssGraph::prune(Id u) {
   _vertices[u].lastEdge = tail;
 }
 
-// The vertex two edges' lone chains meet on, where the chains end at one vertex,
-// are as deep and lay the same symbols over the same states up to it; `none`
-// where they do not: the hash tells where to look, never that they do.
-LrGssGraph::Id LrGssGraph::meet(Id a, Id b) const {
+// The vertex two edges' lone chains join at, where the chains end at one
+// vertex, are as deep and push the same symbols over the same states up to it;
+// `none` where they do not: the hash tells where to look, never that they do.
+LrGssGraph::Id LrGssGraph::common_vertex(Id a, Id b) const {
   if (_edges[a].symbol != _edges[b].symbol) return none;
   Id x = _edges[a].previous, y = _edges[b].previous;
   while (x != y) {
@@ -360,7 +366,7 @@ LrGssGraph::Id LrGssGraph::meet(Id a, Id b) const {
 }
 
 // `written` for two edges whose stacks are lone chains down to `floor`, the
-// vertex they meet on. The chains are ranked for this comparison alone, so that
+// vertex they join at. The chains are ranked for this comparison alone, so that
 // nothing under it is compared.
 LrGssGraph::Order LrGssGraph::written_lone(Id a, Id b, Id floor) {
   const Id x = _edges[a].previous, y = _edges[b].previous;
@@ -391,8 +397,8 @@ void LrGssGraph::chain(Id v) {
   for (Id at = v; _vertices[at].chainEnd == none;) {
     Vertex& x = _vertices[at];
     // `hand_back` prunes the vertex it is asked about at the position just
-    // settled, and an empty reduction stacks it on one at that same position.
-    assert(x.reading.at <= _settled);
+    // finished, and an empty reduction stacks it on one at that same position.
+    assert(x.reading.at <= _finishedBefore);
     if (x.edges == none || x.edges != x.lastEdge) {
       x.chainEnd = at;
       break;
@@ -495,18 +501,16 @@ LrGssGraph::Id LrGssGraph::shared(Id x, Id y) const {
   return x;
 }
 
-// Two out-edges of one vertex, each over the best stack under it, down to the
-// vertex both stacks stand on. -1 where the first stands first in the order
-// written, 1 where the second does, 0 where neither. What was read compares
-// in text order; where that leaves them open, the cell the two parted at
-// first forks them in the order the table lays, the grammar's written order.
+// Two out-edges of one vertex, each over its best stack, down to the vertex
+// both stand on: -1 where the first comes first in written order, 1 where the
+// second does, 0 where neither.
 LrGssGraph::Order LrGssGraph::written(Id a, Id b) {
   const Id x = _edges[a].previous, y = _edges[b].previous;
   const Id c = shared(x, y);
   const std::uint32_t base = frames_under(c);
-  const std::array<Climb, 2> stacks{
-      Climb{x, a, base, frames_under(x) - base + 1},
-      Climb{y, b, base, frames_under(y) - base + 1}};
+  const std::array<ComparedStack, 2> stacks{
+      ComparedStack{x, a, base, frames_under(x) - base + 1},
+      ComparedStack{y, b, base, frames_under(y) - base + 1}};
   if (stacks[0].frames == stacks[1].frames) {
     for (std::uint32_t k = 0; k != stacks[0].frames; ++k) {
       const Id left = stacks[0].frame(*this, k);
@@ -525,7 +529,7 @@ LrGssGraph::Order LrGssGraph::written(Id a, Id b) {
 // them open. Before `top`'s position they are the same or are read earliest
 // first; the steps they end on are left to `parted_order`.
 LrGssGraph::Order LrGssGraph::forked(
-    Id top, Id c, const std::array<Climb, 2>& stacks) {
+    Id top, Id c, const std::array<ComparedStack, 2>& stacks) {
   const TextOffset at = _vertices[top].reading.at;
   const auto of = [this](Id step) { return facts(step); };
   for (int side = 0; side != 2; ++side) {
@@ -559,7 +563,7 @@ LrGssGraph::Order LrGssGraph::forked(
 // The fork steps of a stack above those it shares with the other, as
 // `fork_scan` reads them: its best stack's, past the vertex both stand on,
 // then its top frame's.
-void LrGssGraph::load(std::size_t side, const Climb& stack, Id shared) {
+void LrGssGraph::load(std::size_t side, const ComparedStack& stack, Id shared) {
   Stream& s = _streams[side];
   std::size_t count = 0;
   s.total = 0;
@@ -575,10 +579,9 @@ void LrGssGraph::load(std::size_t side, const Climb& stack, Id shared) {
   s.skip = _digest.forks().length(_vertices[shared].forks);
 }
 
-// The two streams' fork steps before `at`, read in the order of their
-// positions: the first vertex both took a step at, and took a different one,
-// parts them. What both took alike is not read: the scan starts at the first
-// step the streams do not share.
+// The two streams' fork steps before `at`, in position order: the first vertex
+// where both stepped differently parts them. The scan starts at the first step
+// the streams do not share.
 LrGssGraph::Order LrGssGraph::fork_scan(TextOffset at) {
   const Rope& forks = _digest.forks();
   const std::array<Rope::Length, 2> left{_streams[0].total - _streams[0].skip,
@@ -602,11 +605,11 @@ LrGssGraph::Order LrGssGraph::fork_scan(TextOffset at) {
   std::array<TextOffset, 2> heldAt{};
   std::array<bool, 2> over{};
   if (++_round == 0) {
-    for (auto& stamps : _stamps) std::ranges::fill(stamps, Stamp{});
+    for (auto& visits : _visits) std::ranges::fill(visits, Visit{});
     _round = 1;
   }
-  for (auto& stamps : _stamps)
-    if (stamps.size() < _vertices.size()) stamps.resize(_vertices.size());
+  for (auto& visits : _visits)
+    if (visits.size() < _vertices.size()) visits.resize(_vertices.size());
   const auto read = [&](int side) {
     Stream& s = _streams[side];
     while (held[side] == none && !over[side]) {
@@ -643,8 +646,8 @@ LrGssGraph::Order LrGssGraph::fork_scan(TextOffset at) {
     held[side] = none;
     if (part != none && when > partAt) break;
     const Id vertex = _steps[step].vertex;
-    _stamps[side][vertex] = {_round, step};
-    const Stamp& other = _stamps[1 - side][vertex];
+    _visits[side][vertex] = {_round, step};
+    const Visit& other = _visits[1 - side][vertex];
     if (other.round != _round || other.step == step) continue;
     const auto [first, table] =
         fork_order(_steps[side == 0 ? step : other.step],
@@ -703,7 +706,7 @@ LrGssGraph::Order LrGssGraph::parted_order(Id top) {
 }
 
 // Two steps taken at one vertex: the candidate the lexer ranks first, then
-// the arm the table lays first. Candidates of one rank are the grammar's to
+// the arm the table puts first. Candidates of one rank are the grammar's to
 // order, which only their derivations' words do.
 LrGssGraph::Order LrGssGraph::fork_order(const Step& x, const Step& y) const {
   if (x.reading.la.sym != y.reading.la.sym)
@@ -725,7 +728,7 @@ bool LrGssGraph::linear(Id v) const {
   }
 }
 
-// A dead arm is a frozen reading, a repair's source until a rival reads
+// A dead arm is a frozen reading, a repair's source until a competitor reads
 // `kRepairValidateShifts` real tokens past it: the real tokens `v`'s path
 // shifted past the last one, up to that many. `v`'s stack must be linear.
 std::uint32_t LrGssGraph::validated(Id v) {
@@ -737,20 +740,17 @@ std::uint32_t LrGssGraph::validated(Id v) {
        x = _edges[_vertices[x].edges].previous)
     _forest.each_step_back(_edges[_vertices[x].edges].forest, [&](Id s) {
       const Token& t = _steps[s].reading.la;
-      if (!_steps[s].shifts || _steps[s].laid || t.begin == t.end) return true;
+      if (!_steps[s].shifts || _steps[s].synthetic || t.begin == t.end)
+        return true;
       if (t.end <= _lastDeath) return false;
       return ++read < kRepairValidateShifts;
     });
   return read;
 }
 
-// A dead arm is a repair's source until a rival validates it, so the text
-// comes back only past that. A vertex alone whose own path did not validate
-// the arms is held: the vertices past it count the real tokens their
-// derivations shifted from it, and the first opened with as many as it owed
-// gives the text back at it, its stack still one path. What the graph read
-// past it is dropped: the drive reads that text again and decides its cells
-// itself.
+// A dead arm is a repair's source until a competitor validates it, so the text
+// goes back only past that: at the first vertex opened with enough real tokens
+// past a lone held one, its stack one path. The drive reads the rest again.
 bool LrGssGraph::hand_back(Id v, TextOffset openedAt) {
   bool alone = _fresh.size() == 1 && _accepts.empty() &&
                _vertices[v].reading.at > openedAt;
@@ -763,7 +763,7 @@ bool LrGssGraph::hand_back(Id v, TextOffset openedAt) {
   if (read >= kRepairValidateShifts)
     back = v;
   else if (_held != none && v > _held && _accepts.empty() &&
-           _vertices[v].ahead >= _owed &&
+           _vertices[v].ahead >= _shiftsLeft &&
            _vertices[_held].edges == _vertices[_held].lastEdge)
     back = _held;
   if (back != none) {
@@ -772,7 +772,7 @@ bool LrGssGraph::hand_back(Id v, TextOffset openedAt) {
   }
   if (alone) {
     _held = v;
-    _owed = kRepairValidateShifts - read;
+    _shiftsLeft = kRepairValidateShifts - read;
     _vertices[v].ahead = 0;
   }
   return false;
@@ -834,10 +834,8 @@ void LrGssGraph::accept(Id v, Id step) {
   });
 }
 
-// The furthest position a derivation read kRepairValidateShifts real tokens past:
-// the ends of each vertex's last tokens, the most over its derivations, held
-// until no step moves them. Those ends only grow until `clear()`, so the
-// answer never falls between calls.
+// The furthest position a derivation read kRepairValidateShifts real tokens
+// past, held until no step moves it. It only grows until `clear()`.
 TextOffset LrGssGraph::read_past() {
   using Ends = std::array<TextOffset, kRepairValidateShifts>;
   auto& ends = _readEnds;
@@ -906,8 +904,8 @@ std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
                   std::move(ropes)};
   };
   // Two stacks compare above the frames they share: by their frames, then by
-  // the first fork they took apart, the whole of both read. Alike, the edges'
-  // insertion order, top down, parts them: two stacks never tie.
+  // the first fork they took apart, the whole of both read. The same, the
+  // edges' insertion order, top down, parts them: two stacks never tie.
   const auto earlier = [&](const Ranked& x, const Ranked& y) {
     const Source& a = x.source;
     const Source& b = y.source;
@@ -1014,7 +1012,7 @@ std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
   }
   merge_sort(found, earlier);
   // The cap holds over every frozen reading together: the stacks ranked first
-  // stand, and the readings the others stood on are cut.
+  // stand, and the readings the others were on are cut.
   if (found.size() > cap) {
     for (std::size_t k = cap; k < found.size(); ++k)
       cut.push_back(found[k].source.vertices.back());

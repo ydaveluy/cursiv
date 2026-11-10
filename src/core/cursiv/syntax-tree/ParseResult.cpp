@@ -11,9 +11,6 @@
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstBuilder.hpp"
 
-// A result is installed once per parse and read afterwards: none of this is on
-// a parse's path. It compiles once.
-
 namespace cursiv {
 
 ParseResult::ParseResult()
@@ -27,7 +24,7 @@ ParseResult::ParseResult(Cst&& tree)
       _nodes(_cst->memory()) {}
 
 // Hand-written so the source reports itself empty, as an assignment leaves it:
-// `= default` would keep `value` over a tree it no longer owns.
+// `= default` would keep `value` over a tree it gave away.
 ParseResult::ParseResult(ParseResult&& src) noexcept { *this = std::move(src); }
 
 ParseResult::~ParseResult() { destroy_nodes(); }
@@ -36,14 +33,13 @@ void ParseResult::destroy_detached(std::span<AstNode* const> gone) noexcept {
   for (AstNode* const node : gone) node->~AstNode();
 }
 
-// No order is owed: a node's destructor frees what its members own, and a child
-// is a plain pointer. So no depth of tree recurses here.
+// No order is needed: a node's destructor frees what its members own, and a
+// child is a plain pointer, so this never recurses.
 void ParseResult::destroy_nodes() noexcept {
   destroy_detached(_nodes);
   _nodes.clear();
 }
 
-// Self-move must be a no-op, hence the guard.
 ParseResult& ParseResult::operator=(ParseResult&& src) noexcept {
   if (this == &src) return *this;
   destroy_nodes();
@@ -79,12 +75,15 @@ void ParseResult::bind_grammar(std::shared_ptr<const Grammar> grammar) noexcept 
   bind_grammar(*_grammarOwner);
 }
 
+// The tree takes the text first: its nodes point into it.
 void ParseResult::bind_translation(
     std::string_view document, std::unique_ptr<SourceTranslation> translation) {
-  translation->to_document(std::span(diagnostics));
-  const auto errors = translation->errors();
-  diagnostics.insert(diagnostics.end(), errors.begin(), errors.end());
+  assert(_cst->translation() == nullptr && "a result binds one translation");
+  const SourceTranslation& bound = *translation;
   CstBuilder(*_cst).bind_translation(document, std::move(translation));
+  bound.to_document(std::span(diagnostics));
+  const auto errors = bound.errors();
+  diagnostics.insert(diagnostics.end(), errors.begin(), errors.end());
 }
 
 ParseResult::operator bool() const noexcept {

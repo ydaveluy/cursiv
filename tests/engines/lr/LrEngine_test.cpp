@@ -35,7 +35,7 @@
 #include "shadowlr/generated/Lr/Module.hpp"
 #include "support/AstText.hpp"
 
-// Cells and positions no look-ahead settles, split rather than guessed.
+// Cells and positions no look-ahead resolves, split rather than guessed.
 
 namespace {
 
@@ -50,7 +50,7 @@ std::string item(unsigned run, unsigned arm) {
 
 // A precedence table in a region, whose two ASTs, the descent's and this
 // engine's, must be the one AST. Then the cells and positions no look-ahead
-// settles, which only this engine has to split.
+// resolves, which only this engine has to split.
 namespace engine {
 
 namespace {
@@ -78,7 +78,6 @@ void one_tree(const char* what, const Twin& t, std::string_view text) {
 
 using checks::clean, checks::repaired;
 
-// A precedence table a region reaches.
 void a_table_may_stand_inside_a_region() {
   namespace ll = tshadow::cursiv::std::generated::Ll;
   namespace lr = tshadow::cursiv::std::generated::Lr;
@@ -86,10 +85,9 @@ void a_table_may_stand_inside_a_region() {
                ll::create_ast_reflection(), lr::create_ast_reflection()};
   for (const std::string_view text : {"[1]", "[1+2]", "[1+2+3]"})
     one_tree("region", t, text);
-  // The boundary before the region is the caller's, and the one a call opens
-  // is the region's: the leading blank is skipped, and every one inside is
-  // refused -- the climb's own boundaries included, which it mints rather
-  // than reads off a body.
+  // The boundary before the region is the caller's and the one a call opens is
+  // the region's: the leading blank is skipped, and every one inside is
+  // refused, the precedence table's own boundaries included.
   CHECK(clean(*t.lr, " [1+2] "));
   CHECK(repaired(*t.lr, "[ 1+2]"));
   CHECK(repaired(*t.lr, "[1 + 2]"));
@@ -97,10 +95,9 @@ void a_table_may_stand_inside_a_region() {
   CHECK(repaired(*t.lr, "[1+2 ]"));
 }
 
-// Where the guard of the acceptance a state elects refuses at the cursor, the
-// terminals it outranked still match: that tells a refusal from a lexical
-// failure. The reader a look-ahead uses owes the same answer, so the `x q` entry
-// asks it there too.
+// Where the guard of the acceptance a state chooses refuses at the cursor, the
+// terminals it outranked still match, which tells a refusal from a lexical
+// failure. A look-ahead's reader answers the same, so `x q` asks it too.
 void a_refused_guard_leaves_the_reading_it_outranked() {
   const auto p = tedges::generated::G::create_parser();
   CHECK(clean(*p, "fallback:a_"));
@@ -120,10 +117,9 @@ void a_refused_guard_leaves_the_reading_it_outranked() {
   CHECK(repaired(*p, "fallback:[ay]"));
 }
 
-// What the drive read past a refused guard, the caret reads too: the leaf
-// `a` of `a_` is the identifier the guard left, and the `_` behind it is
-// owed. After `a;` the leaf is the guarded terminal, which outranks the
-// identifier where it stands: `;` is offered and `_` is not.
+// What the parser read past a refused guard, the caret reads too: the leaf `a`
+// of `a_` is the identifier the guard left, and `_` is expected after it. After
+// `a;` the leaf is the guarded terminal: `;` is offered and `_` is not.
 void a_refused_guard_leaves_the_caret_its_reading() {
   const auto p = tedges::generated::G::create_parser();
   const auto offers = [&](std::string_view text, cursiv::TextOffset from,
@@ -141,7 +137,7 @@ void a_refused_guard_leaves_the_caret_its_reading() {
 // The two readings run side by side through a repetition nothing bounds, so
 // no budget separates them before the last token. Out of look-ahead, the cell
 // is split rather than guessed: the text refutes the loser.
-void a_cell_no_look_ahead_settles_is_split() {
+void a_cell_no_look_ahead_resolves_is_split() {
   const auto p = tedges::generated::G::create_parser();
   std::string b = "cell:x", c = "cell:x";
   for (unsigned i = 0; i < 40; ++i) {
@@ -152,10 +148,10 @@ void a_cell_no_look_ahead_settles_is_split() {
   }
 }
 
-// What the arms a split left standing owe a caret. The leaf names one of
-// them; the others are as much the parse as it is, and the table carries the
-// states they stand in.
-void a_caret_over_a_split_cell_owes_every_arm() {
+// A caret offers what every arm a split left standing reads. The leaf names
+// one of them; the others are as much the parse as it is, and the table carries
+// the states they stand in.
+void a_caret_over_a_split_cell_offers_every_arm() {
   const auto p = tedges::generated::G::create_parser();
   for (const std::string_view text : {"x", "x a", "x a a", "x a b", "x a c"}) {
     const std::string doc = "cell:" + std::string(text);
@@ -176,7 +172,7 @@ void a_caret_over_a_split_cell_owes_every_arm() {
 // Two terminals match the first byte and what tells them apart lies past a
 // repetition nothing bounds. Out of look-ahead, the position is split like a
 // cell: one branch per candidate, on the token it stands for.
-void a_position_no_look_ahead_settles_is_split() {
+void a_position_no_look_ahead_resolves_is_split() {
   const auto p = tedges::generated::G::create_parser();
   std::string t = "split x";
   for (unsigned i = 0; i < 40; ++i) {
@@ -228,10 +224,9 @@ void short_items_after_a_long_one_leave_the_graph() {
   CHECK(read(8) == read(64));
 }
 
-// Forty alternatives, with a repetition between the arm's terminal and its
-// closing literal. Within the look-ahead's depth the oracle still reaches
-// the literal and every arm is settled: a cell is not decided by how many
-// arms it has, so forty of them read as far as two.
+// Forty alternatives, a repetition between each arm's terminal and its closing
+// literal. Within the look-ahead's depth every arm is resolved: forty arms read
+// as far as two.
 std::string wide_arm(unsigned k, unsigned run) {
   return "wide " + item(run, k);
 }
@@ -242,19 +237,17 @@ void a_wide_cell_reads_as_far_as_a_narrow_one() {
     for (unsigned k = 0; k < 40; ++k) CHECK(clean(*p, wide_arm(k, run)));
 }
 
-// Past that depth the text is out of reach and the cell splits. A split is
-// not a guess -- the text refutes all but one arm -- so the turn must hold
-// every arm the cell has, whatever the floor of sixteen says. Forty arms and
-// a hundred and twenty repetitions: every one of them reads clean.
+// Past that depth the cell splits. A split is not a guess, the text refutes all
+// but one arm, so the turn holds every arm whatever the floor of sixteen. Forty
+// arms and a hundred and twenty repetitions all read clean.
 void a_cell_splits_as_wide_as_it_is() {
   const auto p = tcells::generated::G::create_parser();
   for (unsigned k = 0; k < 40; ++k) CHECK(clean(*p, wide_arm(k, 120)));
 }
 
 // More shadow readings than the oracle carries: two readings of the first
-// token, each opening a rule that offers forty of the next. A candidate the
-// pool had no room for is unread, not refuted, and a cell decided from what
-// was read would delete text the author wrote.
+// token, each opening a rule that offers forty of the next. A candidate with no
+// room is unread, not refuted; deciding from what was read would delete text.
 void a_reading_the_pool_had_no_room_for_refutes_nothing() {
   const auto p = tcells::generated::G::create_parser();
   for (unsigned k = 0; k < 40; ++k)
@@ -279,11 +272,11 @@ void run() {
   a_table_may_stand_inside_a_region();
   a_refused_guard_leaves_the_reading_it_outranked();
   a_refused_guard_leaves_the_caret_its_reading();
-  a_cell_no_look_ahead_settles_is_split();
-  a_position_no_look_ahead_settles_is_split();
+  a_cell_no_look_ahead_resolves_is_split();
+  a_position_no_look_ahead_resolves_is_split();
   a_position_given_up_on_is_not_read_again();
   short_items_after_a_long_one_leave_the_graph();
-  a_caret_over_a_split_cell_owes_every_arm();
+  a_caret_over_a_split_cell_offers_every_arm();
   a_wide_cell_reads_as_far_as_a_narrow_one();
   a_cell_splits_as_wide_as_it_is();
   a_reading_the_pool_had_no_room_for_refutes_nothing();
@@ -292,8 +285,8 @@ void run() {
 
 }  // namespace engine
 
-// A cell whose arms outnumber the look-ahead's budget: the reading it settles
-// on may not depend on what the same parser read before. Two parsers over one
+// A cell whose arms outnumber the look-ahead's budget: the reading it picks
+// may not depend on what the same parser read before. Two parsers over one
 // corpus, one forward and one backward, must answer it the same.
 namespace audit {
 
@@ -408,16 +401,14 @@ void run() {
   const auto lr = tcells::generated::G::create_parser();
   const auto lrR = tcells::generated::G::create_ast_reflection();
   // The lengths that move the verdict: none, one, and long enough to put the
-  // deciding token out of the oracle's reach. Between them the answer never
-  // changed over the audit's wider sweep.
+  // deciding token out of the oracle's reach.
   for (unsigned run : {0u, 1u, 40u}) {
     std::printf("run=%u\n", run);
     sweep("nested5x5", *lr, "nests five ", 5, 5, run, lrR.get());
     sweep("nested16x10", *lr, "nests sixteen ", 16, 10, run, nullptr, 4);
   }
-  // Forks and repairs in the same document: what a stale segment table or a
-  // dead branch's record would show up in, under a sanitizer. One shape is
-  // enough -- what this hunts is the interaction, not the width, and the
+  // Forks and repairs in one document, where a stale segment table or a dead
+  // branch's record would show under a sanitizer. One shape is enough; the
   // sweep above drives the wide one.
   {
     std::mt19937 rng(7);

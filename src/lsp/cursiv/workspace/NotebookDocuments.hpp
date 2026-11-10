@@ -1,7 +1,5 @@
-// The notebooks the client opened: their cells, and the notebook a cell
-// belongs to. Installed, it makes the server announce notebook synchronization
-// for the notebooks its options select. Each cell is then an open text
-// document of its own, built and validated like any other.
+// The notebooks the client opened and the notebook of each cell. Installed, it
+// makes the server announce notebook sync; each cell is an open text document.
 #pragma once
 
 #include <lsp/types.h>
@@ -15,10 +13,8 @@ class NotebookDocuments {
  public:
   virtual ~NotebookDocuments() noexcept = default;
 
-  /**
-   * The notebooks and cell languages the client sends, announced at the
-   * handshake. `save` asks for `didSave`.
-   */
+  // The notebooks and cell languages the client sends, announced at the
+  // handshake. `save` asks for `didSave`.
   [[nodiscard]] virtual const lsp::NotebookDocumentSyncOptions&
   notebookDocumentSyncOptions() const noexcept = 0;
 
@@ -31,9 +27,9 @@ class NotebookDocuments {
   [[nodiscard]] virtual std::optional<lsp::NotebookDocument>
   findNotebookDocumentForCell(std::string_view cellUri) const = 0;
 
-  // The four notifications, each told before the server opens, changes or
-  // closes the cells' text, so a build of the cells sees the notebook as the
-  // client has it.
+  // Told before the cells' text changes, so a build of the cells sees the
+  // notebook as the client has it; a request already reading can meanwhile
+  // see the notebook ahead of the cells' text.
   virtual void didOpen(const lsp::DidOpenNotebookDocumentParams& params) = 0;
   virtual void didChange(
       const lsp::DidChangeNotebookDocumentParams& params) = 0;

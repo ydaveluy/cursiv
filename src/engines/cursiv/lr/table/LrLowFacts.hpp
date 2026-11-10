@@ -15,7 +15,7 @@ struct LrLowFacts {
   std::uint16_t nterms = 0;
   std::uint16_t nnts = 0;
   std::uint16_t nprods = 0;
-  // The entry's own creation, which a wrap still owes: it ends the document
+  // The entry's own creation, which a wrap still needs: it ends the document
   // without reducing the entry. `kNoRow` where the entry creates nothing.
   std::uint16_t entryRow = kNoRow;
   // The class a keyword may not run into, as bytes; its scalars past ASCII

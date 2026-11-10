@@ -1,24 +1,7 @@
 #!/usr/bin/env node
-// One scripted session against a server binary, over the editor's own stdio
-// transport: initialize, a didOpen per document, diagnostics, documentSymbol,
-// the optional requests below, shutdown. No editor and no extension host, so
-// an F5 failure becomes attributable to the client rather than to the server.
-//
-// Usage: node tools/lsp-session.mjs <server-binary> <document>...
-//   [--folder <directory>]...            workspace folder in the handshake:
-//                                        the server scans it on `initialized`
-//   [--at <line>:<char>]                 definition, then selectionRange
-//   [--refs-at <line>:<char>]            references, declaration included
-//   [--rename-at <line>:<char>=<name>]   prepareRename, then the WorkspaceEdit
-//                                        printed file by file
-//   [--hover-at <line>:<char>]           hover, with the text under its range
-//   [--semantic-tokens]                  the delta array decoded back to words,
-//                                        then the `full/delta` answer
-//   [--folding]                          the fold ranges, with their first line
-//
-// Cursor coordinates are the protocol's own zero-based UTF-16, on the last
-// document passed. Exits 0 when the handshake completed, every document got a
-// diagnostics snapshot after its didOpen, and the server exited cleanly.
+// One scripted LSP session over stdio, with no editor: a didOpen per document,
+// its diagnostics, documentSymbol, then the requests the usage lists. Cursors
+// are zero-based UTF-16 positions in the last document.
 
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
@@ -93,20 +76,7 @@ if (renameCursor !== null && !/^\d+:\d+=.+$/.test(renameCursor)) {
     process.exit(2);
 }
 
-const { child: server, received, send, waitFor, end: serverEnd } = startSession(serverPath);
-
-// One monotonic id per request, allocated where the request is sent: `waitFor`
-// answers by id over a list it never clears, so a shared id answers twice.
-let lastRequestId = 0;
-async function request(message, what) {
-    const id = ++lastRequestId;
-    send({ id, ...message });
-    const answer = await waitFor((m) => m.id === id, what);
-    if (answer.error) {
-        throw new Error(`${what}: ${answer.error.code}: ${answer.error.message}`);
-    }
-    return answer;
-}
+const { received, send, waitFor, request, end: serverEnd } = startSession(serverPath);
 
 function report(name, published) {
     const diagnostics = published.params.diagnostics ?? [];
@@ -121,10 +91,11 @@ function report(name, published) {
 // when they share a line, from line start otherwise), length, legend index,
 // modifier bitset. The legend comes from the handshake.
 function decodeSemanticTokens(data, legend, lines) {
+    if (data.length % 5 !== 0) throw new Error(`semantic tokens: ${data.length} integers, not a multiple of five`);
     const tokens = [];
     let line = 0;
     let character = 0;
-    for (let i = 0; i + 4 < data.length; i += 5) {
+    for (let i = 0; i < data.length; i += 5) {
         const deltaLine = data[i];
         line += deltaLine;
         character = deltaLine === 0 ? character + data[i + 1] : data[i + 1];
@@ -140,6 +111,7 @@ function decodeSemanticTokens(data, legend, lines) {
     return tokens;
 }
 
+let failed = false;
 try {
     // The folders go in the handshake, and the capability goes with them: a
     // server that has not been told the client supports workspace folders is
@@ -196,22 +168,26 @@ try {
             [...scanned].map((uri) => path.basename(uri)).sort().join(', '));
     }
 
+    // A snapshot of the opened text, told from one of the scan by its version
+    // when the server gives one.
+    const openedVersion = 1;
+    const isSnapshotOf = (uri) => (m) => m.method === 'textDocument/publishDiagnostics' &&
+        m.params?.uri === uri && (m.params.version ?? openedVersion) === openedVersion;
+
     const documents = [];
     for (const documentPath of documentPaths) {
         const uri = fileUri(documentPath);
         const text = await readFile(documentPath, 'utf8');
         documents.push({ uri, name: path.basename(documentPath) });
-        // A snapshot sent after the didOpen.
-        const isSnapshot = (m) => m.method === 'textDocument/publishDiagnostics' && m.params?.uri === uri;
         const since = received.length;
         send({
             method: 'textDocument/didOpen',
             params: {
-                textDocument: { uri, languageId: path.extname(documentPath).slice(1), version: 1, text }
+                textDocument: { uri, languageId: path.extname(documentPath).slice(1), version: openedVersion, text }
             }
         });
         report(documents.at(-1).name, await waitFor(
-            isSnapshot, `a diagnostics snapshot for ${documents.at(-1).name} after its didOpen`, { since }));
+            isSnapshotOf(uri), `a diagnostics snapshot for ${documents.at(-1).name} after its didOpen`, { since }));
     }
 
     // The last snapshot per document so far, which is what the client is
@@ -221,8 +197,7 @@ try {
         console.log('after the whole workspace is open:');
         for (const document of documents) {
             report(document.name, await waitFor(
-                (m) => m.method === 'textDocument/publishDiagnostics' && m.params?.uri === document.uri,
-                `the final snapshot for ${document.name}`));
+                isSnapshotOf(document.uri), `the final snapshot for ${document.name}`));
         }
     }
 
@@ -339,16 +314,24 @@ try {
             console.log(`  ${String(t.line + 1).padStart(3)}:${String(t.character + 1).padStart(3)} ` +
                 `${t.type.padEnd(9)} ${JSON.stringify(t.text)}`);
 
-        // A server that keeps no answer, as one without `delta` does, sends the
-        // tokens whole: the same integers as the full request.
+        // The document has not changed: the answer is the tokens whole, or
+        // edits that give them back.
         const delta = await request({
             method: 'textDocument/semanticTokens/full/delta',
             params: { textDocument: { uri: last.uri }, previousResultId: answer.result?.resultId ?? '' }
         }, 'the semanticTokens delta result');
+        const edits = delta.result?.edits;
         const whole = JSON.stringify(delta.result?.data) === JSON.stringify(data);
         console.log(`semanticTokens/full/delta on ${last.name}: ` +
             (whole ? 'the tokens whole' : JSON.stringify(delta.result)));
-        if (!whole && !delta.result?.edits) throw new Error('the delta result is neither tokens nor edits');
+        if (!whole) {
+            if (!Array.isArray(edits)) throw new Error('the delta result is neither tokens nor edits');
+            const edited = [...data];
+            for (const edit of [...edits].sort((a, b) => b.start - a.start))
+                edited.splice(edit.start, edit.deleteCount, ...(edit.data ?? []));
+            if (JSON.stringify(edited) !== JSON.stringify(data))
+                throw new Error('the delta edits change the tokens of an unchanged document');
+        }
     }
 
     // Each pair is a block the editor can collapse; `kind` is present only
@@ -393,12 +376,11 @@ try {
 
     await request({ method: 'shutdown' }, 'the shutdown result');
     send({ method: 'exit' });
-
-    const end = await serverEnd();
-    console.log(`server exit: ${end}`);
-    process.exit(end === 'code 0' ? 0 : 1);
 } catch (error) {
+    failed = true;
     console.error(String(error.message ?? error));
-    server.kill();
-    process.exit(1);
 }
+
+const end = await serverEnd();
+console.log(`server exit: ${end}`);
+process.exit(!failed && end === 'code 0' ? 0 : 1);

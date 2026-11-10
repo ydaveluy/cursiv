@@ -6,5 +6,5 @@ namespace tllindent {
 struct Ll : tindent::G {};
 struct Folded : tindent::folded::Cases {};
 struct Bare : tindent::repaired::G {};
-struct Laid : tindent::laid::Cases {};
+struct Synthetic : tindent::synthetic::Cases {};
 }  // namespace tllindent

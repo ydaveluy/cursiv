@@ -10,11 +10,8 @@
 #endif
 
 // `std::atomic::wait` and its notifications, made to block on every target.
-// On WASI, libc++ has no futex to call: its wait polls the value and sleeps
-// between polls, for up to 8 ms at a time, and its notify wakes nobody. A
-// parked thread then starts the work it was woken for that much later. A
-// shared wasm memory has its own futex, `memory.atomic.wait` and `notify`, and
-// these use it. Elsewhere they are the standard calls.
+// On WASI, libc++ polls and sleeps instead, so these use the wasm memory's own
+// `memory.atomic.wait` and `notify`. Elsewhere they are the standard calls.
 
 namespace cursiv::detail {
 
@@ -23,7 +20,7 @@ namespace cursiv::detail {
 inline constexpr std::chrono::microseconds kPollBeforeSleep{64};
 #endif
 
-// Returns once `word`, read with `order`, no longer holds `old`.
+// Returns once `word`, read with `order`, does not hold `old`.
 template <class T>
 void wait_while_equal(const std::atomic<T>& word, T old,
                       std::memory_order order) noexcept {
@@ -32,8 +29,8 @@ void wait_while_equal(const std::atomic<T>& word, T old,
                     (sizeof(T) == 4 || sizeof(T) == 8),
                 "a wasm futex waits on a 32- or 64-bit word");
   // A futex wake takes tens of microseconds under a wasm engine, longer than
-  // many waits last. So the first microseconds are polled, giving the core
-  // away between reads, as libc++ polls before it sleeps.
+  // many waits last. So the first microseconds are polled, yielding between
+  // reads, as libc++ polls before it sleeps.
   const auto pollUntil = std::chrono::steady_clock::now() + kPollBeforeSleep;
   // The futex reads the word itself, so it needs a mutable address; it never
   // writes through it.
@@ -54,7 +51,8 @@ void wait_while_equal(const std::atomic<T>& word, T old,
           std::bit_cast<std::int64_t>(old), -1);
   }
 #else
-  word.wait(old, order);
+  // The word is read again here, where a thread sanitizer sees the order.
+  while (word.load(order) == old) word.wait(old, std::memory_order_relaxed);
 #endif
 }
 

@@ -1,7 +1,5 @@
-// The builder of a language server: a document an update rebuilds -- edited or
-// relinked by someone else's edit -- is validated with its own language's
-// configured categories, resolved when the build asks. A build handed explicit
-// options keeps them.
+// The language server's builder: a rebuilt document is validated with its
+// language's configured categories. A build given explicit options keeps them.
 #pragma once
 
 #include <span>

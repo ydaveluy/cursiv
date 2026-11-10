@@ -1,5 +1,5 @@
-// Backed by the index, filtered by the fuzzy matcher, iconed by the node-kind
-// provider -- the three services this one composes rather than reimplements.
+// Reads the index, filters with the fuzzy matcher and takes icons from the
+// node-kind provider.
 #pragma once
 
 #include <lsp/types.h>

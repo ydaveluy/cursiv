@@ -1,3 +1,5 @@
+// Unordered items where the `nest` also writes `name`: in one order, the other
+// item writes `name` again on the same node.
 // expect LR: [ '‘]WrittenAgain<.*refuse::G::Root.*refuse::ast::Node::name
 #pragma once
 

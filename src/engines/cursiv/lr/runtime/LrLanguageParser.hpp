@@ -1,7 +1,5 @@
-// The erased parser of one language, read by the table engine: a generated
-// table as its only template argument, the rest handed over as data.
-// Nothing here names a grammar type, so a module is the whole door onto a
-// language.
+// The type-erased parser of one language for the table engine: a generated
+// table is its only template argument, the rest is data.
 #pragma once
 
 #include <cstdint>
@@ -48,6 +46,8 @@ class LrLanguageParser final : public Parser {
     return *_grammar;
   }
 
+  // A temporary that owns its text is refused here as through `Parser`.
+  using Parser::parse;
   // Reentrant, and it must be: a rename reparses synthetic text while its
   // caller still holds a result of this same parser.
   [[nodiscard]] ParseResult parse(

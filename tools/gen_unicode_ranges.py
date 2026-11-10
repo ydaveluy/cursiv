@@ -63,10 +63,9 @@ props['XID_Continue'] = ranges(cp for cp in range(MAX + 1)
 # str.isspace also holds the separators U+001C-U+001F, which White_Space does not.
 props['White_Space'] = ranges(cp for cp in range(MAX + 1)
                               if chr(cp).isspace() and not 0x1C <= cp <= 0x1F)
-# Alphabetic, which unicodedata lacks: the letters, letter numbers and the
-# signs that spell a letter's sound.
-props['Alphabetic'] = ranges(listed(ucd('DerivedCoreProperties.txt'),
-                                    {'Alphabetic'}))
+# Alphabetic, Cased and Case_Ignorable, which unicodedata lacks.
+derived = ucd('DerivedCoreProperties.txt')
+props['Alphabetic'] = ranges(listed(derived, {'Alphabetic'}))
 
 here = os.path.dirname(__file__)
 unicode_dir = os.path.join(here, '..', 'src', 'core', 'cursiv', 'grammar',
@@ -131,15 +130,8 @@ for cp in range(MAX + 1):
             runs[-1] = [first, cp, delta, cp - last]
             continue
     runs.append([cp, cp, lo - cp, 0])
-cased = ranges(cp for cp in range(MAX + 1)
-               if unicodedata.category(chr(cp)) in ('Lu', 'Ll', 'Lt')
-               or chr(cp).lower() != chr(cp) or chr(cp).upper() != chr(cp))
-# Word_Break MidLetter, MidNumLet and Single_Quote, which unicodedata lacks.
-mid = set(listed(ucd('auxiliary/WordBreakProperty.txt'),
-                 {'MidLetter', 'MidNumLet', 'Single_Quote'}))
-ignorable = ranges(cp for cp in range(MAX + 1)
-                   if cp in mid or unicodedata.category(chr(cp))
-                   in ('Mn', 'Me', 'Cf', 'Lm', 'Sk'))
+cased = ranges(listed(derived, {'Cased'}))
+ignorable = ranges(listed(derived, {'Case_Ignorable'}))
 out = [
     '// What each scalar lowers to, and the casing properties final sigma reads,',
     '// written by tools/gen_unicode_ranges.py from Python\'s unicodedata and the',
@@ -161,11 +153,9 @@ path = os.path.join(unicode_dir, 'UnicodeLower.hpp')
 open(path, 'w').write('\n'.join(out))
 print(path, len(runs), 'runs')
 
-# Simple case folding, the statuses C and S of CaseFolding.txt: what each
-# scalar folds to. A scalar folds only to a case as long in UTF-8 as itself,
-# so a name and its folding take as many bytes: `ẞ`, the Kelvin and Ohm
-# signs and a few more keep themselves, and an ASCII letter matches its two
-# cases and nothing else.
+# Simple case folding (statuses C and S of CaseFolding.txt), kept only where
+# it is as long in UTF-8 as the scalar: `ẞ`, the Kelvin and Ohm signs and a
+# few more keep themselves.
 utf8_len = lambda cp: len(chr(cp).encode())
 fold = {}
 kept = []

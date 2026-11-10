@@ -24,7 +24,7 @@ columns count bytes.
 |---|---|
 | `0` | No error diagnostic (warnings allowed), or help was requested |
 | `1` | At least one error diagnostic |
-| `2` | Invalid arguments, unreadable path, unsupported file, or a file of 4 GiB or more |
+| `2` | Invalid arguments, unreadable path, unsupported file, or a file past the document size limit (just under 4 GiB) |
 | `3` | An internal error or output failure |
 
 ## Load a workspace

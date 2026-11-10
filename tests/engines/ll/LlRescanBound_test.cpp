@@ -1,19 +1,19 @@
-// A state of the lexer may accept several terminals, each with a frontier of
-// its own. A misspelling read again as one of them is judged on the frontier of
-// that terminal: the frontier of the one the state elects is no answer for
-// the others. Fixed recovery oracles pin the cases independently of a backend.
+// A lexer state may accept several terminals, each with its own frontier: a
+// misspelling read again as one of them is judged on that terminal's frontier.
+// Fixed recovery oracles pin the cases for both backends.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "cursiv/parser/Parser.hpp"
-#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/ll/runtime/ll_rescan.hpp"
-#include "cursiv/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "engines/ll/LlTerms.hpp"
 #include "engines/ll/RescanBoundAst.hpp"
 #include "rescannarrowll/generated/NarrowLl/Module.hpp"
@@ -26,14 +26,14 @@ namespace {
 namespace gen = tllrescan::generated;
 using ll_terms::named;
 
-// The first of the terminals a point owes, a set of them, that are read again
-// at the end of `word`, with `text` behind the re-reading.
+// The first of the terminals `names` that is read again at the end of `word`,
+// with `text` after the re-reading.
 template <const auto& T>
-cursiv::engine::SymbolId owed_after(
+cursiv::engine::SymbolId accepted_after(
     std::string_view word, std::string_view text,
-    std::initializer_list<std::string_view> owes) {
+    std::initializer_list<std::string_view> names) {
   std::array<std::uint64_t, T.termWords> want{};
-  for (const std::string_view name : owes) {
+  for (const std::string_view name : names) {
     const std::uint16_t t = named<T>(name);
     want[t >> 6] |= std::uint64_t{1} << (t & 63u);
   }
@@ -47,11 +47,84 @@ cursiv::engine::SymbolId owed_after(
        0},
       want.data()};
   cursiv::engine::SymbolId first = cursiv::engine::kInvalidSymbol;
-  tape.owed(state, static_cast<cursiv::TextOffset>(word.size()),
-            [&](cursiv::engine::SymbolId t) {
-              if (first == cursiv::engine::kInvalidSymbol) first = t;
-            });
+  tape.accepted(state, static_cast<cursiv::TextOffset>(word.size()),
+                [&](cursiv::engine::SymbolId t) {
+                  if (first == cursiv::engine::kInvalidSymbol) first = t;
+                });
   return first;
+}
+
+// The ends of the re-readings of `text` from its start, as any terminal.
+template <const auto& T>
+std::vector<cursiv::TextOffset> typo_ends(std::string_view text) {
+  std::array<std::uint64_t, T.termWords> want{};
+  want.fill(~std::uint64_t{0});
+  std::uint64_t read = 0;
+  const auto len = static_cast<cursiv::TextOffset>(text.size());
+  const cursiv::engine::LlTypoTape<T> tape{{{text.data(), len, len, &read}, 0},
+                                           want.data()};
+  std::vector<cursiv::TextOffset> ends;
+  cursiv::engine::typo_each(
+      tape, T.modeStart[T.errMode], 0, 0,
+      [&](const cursiv::engine::Typo& typo) { ends.push_back(typo.end); });
+  return ends;
+}
+
+// A skipped run of bytes ends where a letter ends: it finishes a well-formed
+// scalar it cut into, and a byte that continues no scalar is one more fault.
+template <const auto& T>
+void a_skipped_run_ends_with_its_letter() {
+  // "ab", two three-byte letters, "c": the run of four bytes ends inside the
+  // second letter and takes the rest of it.
+  const std::vector<cursiv::TextOffset> letters = typo_ends<T>(
+      "ab\xE2\x82\xAC\xE2\x82\xAC"
+      "c");
+  CHECK(std::ranges::find(letters, 9u) != letters.end());
+  // A long run of bytes that make no letter is never one fault: bytes that
+  // continue none, letters cut short, bytes that start none, overlong forms.
+  for (const std::string_view bad :
+       {std::string_view("\x80"), std::string_view("\xE2\x82"),
+        std::string_view("\xF8"), std::string_view("\xC0\x80")}) {
+    std::string illFormed = "ab";
+    while (illFormed.size() < 4096) illFormed += bad;
+    illFormed += 'c';
+    for (const cursiv::TextOffset end : typo_ends<T>(illFormed))
+      CHECK(end < 16u);
+  }
+}
+
+// A walk reads the parse's stop as its paths step over bytes: once a stop is
+// asked for, a long token is not read to its end.
+template <const auto& T>
+void a_walk_reads_the_stop_as_it_steps() {
+  std::string word = "abc";
+  word.append(100000, 'd');
+  const auto len = static_cast<cursiv::TextOffset>(word.size());
+  std::array<std::uint64_t, T.termWords> want{};
+  want.fill(~std::uint64_t{0});
+  for (const bool stopped : {false, true}) {
+    cursiv::CancellationTokenSource source;
+    if (stopped) source.request_stop();
+    const cursiv::CancellationToken token = source.get_token();
+    const cursiv::engine::CancellationPoll stop(token);
+    std::uint64_t read = 0;
+    const cursiv::engine::TypoBounds bounds{.src = word.data(),
+                                            .extent = len,
+                                            .docLen = len,
+                                            .read = &read,
+                                            .stop = &stop};
+    const cursiv::engine::LlTypoTape<T> tape{{bounds, 0}, want.data()};
+    bool threw = false;
+    try {
+      cursiv::engine::typo_each(tape, T.modeStart[T.errMode], 0, 0,
+                                [](const cursiv::engine::Typo&) {});
+    } catch (const cursiv::OperationCancelled&) {
+      threw = true;
+    }
+    CHECK(threw == stopped);
+    CHECK(stopped ? read <= cursiv::engine::CancellationPoll::kTurns
+                  : read >= len);
+  }
 }
 
 // A narrower scan keeps each terminal's own bound; a hint omitting one of
@@ -101,21 +174,23 @@ int main() {
   // The frontier of the terminal ranked first refuses `;`; the other ends at a
   // word, and is the one that stands there.
   constexpr const auto& narrow = gen::NarrowLl::kTable;
-  CHECK(owed_after<narrow>("abc", "abc;", {"BOUNDED", "LONGER"}) ==
+  CHECK(accepted_after<narrow>("abc", "abc;", {"BOUNDED", "LONGER"}) ==
         named<narrow>("LONGER"));
-  CHECK(owed_after<narrow>("abc", "abc.", {"BOUNDED", "LONGER"}) ==
+  CHECK(accepted_after<narrow>("abc", "abc.", {"BOUNDED", "LONGER"}) ==
         named<narrow>("BOUNDED"));
-  CHECK(owed_after<narrow>("abc", "abcd", {"BOUNDED", "LONGER"}) ==
+  CHECK(accepted_after<narrow>("abc", "abcd", {"BOUNDED", "LONGER"}) ==
         named<narrow>("BOUNDED"));
 
-  // The one declared first has the frontier that refuses; the one elected
+  // The one declared first has the frontier that refuses; the one chosen
   // where both accept has none, and ends at a word.
   constexpr const auto& shadow = gen::ShadowLl::kTable;
+  a_skipped_run_ends_with_its_letter<narrow>();
+  a_walk_reads_the_stop_as_it_steps<narrow>();
   hinted_readings_agree<narrow>("BOUNDED", "LONGER");
   hinted_readings_agree<shadow>("BOUNDED", "SPELLED");
-  CHECK(owed_after<shadow>("abc", "abc;", {"BOUNDED", "SPELLED"}) ==
+  CHECK(accepted_after<shadow>("abc", "abc;", {"BOUNDED", "SPELLED"}) ==
         named<shadow>("SPELLED"));
-  CHECK(owed_after<shadow>("abc", "abc.", {"BOUNDED", "SPELLED"}) ==
+  CHECK(accepted_after<shadow>("abc", "abc.", {"BOUNDED", "SPELLED"}) ==
         named<shadow>("BOUNDED"));
 
   struct Case {

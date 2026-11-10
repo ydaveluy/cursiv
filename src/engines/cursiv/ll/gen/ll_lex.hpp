@@ -1,5 +1,5 @@
-// The lexer construction, declared apart: it reads the program's terminals and
-// what every position admits, and writes one automaton for all the modes.
+// The lexer construction: it reads the program's terminals and what every
+// position admits, and writes one automaton for all the modes.
 #pragma once
 
 #include <cstdint>

@@ -45,9 +45,8 @@ constexpr std::array<std::string_view, 8> kCategoryTypes = {
     "keyword", "type",   "variable", "property",
     "number",  "string", "comment",  "operator"};
 
-// The CST names a terminal but not what it lexes, so only the one thing every
-// grammar spells the same way -- the match's first character -- decides
-// string vs number here.
+// The CST does not say what a terminal lexes: the first character tells a
+// string from a number.
 [[nodiscard]] bool is_digit(char c) noexcept { return c >= '0' && c <= '9'; }
 
 [[nodiscard]] bool literal_token(std::string_view text, Category& category) {
@@ -66,10 +65,8 @@ constexpr std::array<std::string_view, 8> kCategoryTypes = {
   return false;
 }
 
-// Whether `node` owns a declaration, as `collect_named_nodes` nests them: any
-// declaration below it does, since the outermost one has `node` for nearest
-// named ancestor. The nodes below it are among those of its record's subtree,
-// where a wrapper sharing its record is told apart by its ancestors.
+// Whether a declaration lies below `node`, as `collect_named_nodes` nests
+// them; found among the nodes of its record's subtree.
 [[nodiscard]] bool owns_a_name(const Document& document,
                                const NameProvider& names, const AstNode& node,
                                const CancellationToken& token) {
@@ -109,7 +106,6 @@ void GrammarSemanticTokenProvider::computeHighlighting(
 
   const ParseResult& parsed = document.parseResult;
   const Cst& cst = parsed.cst();
-  // An element id means something only through the grammar model.
   const Grammar& grammar = _core.parser->getGrammar();
   // A token touches the window when it neither ends before it nor starts
   // after it; one cut by the edge is coloured whole.
@@ -142,10 +138,8 @@ void GrammarSemanticTokenProvider::computeHighlighting(
     for (std::size_t i = 0; i < named.nodes.size(); ++i)
       declare(named.nameNodes[i], owns[i]);
   } else if (first < cst.leaf_count() && past > 0) {
-    // A name lies in its node's record, so only the nodes whose record holds
-    // a leaf of the window, or the gap it falls in, are asked: the records
-    // numbered from its first leaf to its last, and the ancestors of the
-    // first node past them that start by the last.
+    // A name lies in its node's record, so only the nodes whose record holds a
+    // leaf of the window, or the gap it falls in, are asked.
     const NodeId lo = cst.leaf(first).id;
     const NodeId hi = cst.leaf(past - 1).id;
     const OwnedNodes all = parsed.nodes();

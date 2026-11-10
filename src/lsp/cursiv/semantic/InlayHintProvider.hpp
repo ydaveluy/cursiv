@@ -16,11 +16,6 @@ class InlayHintProvider {
  public:
   virtual ~InlayHintProvider() noexcept = default;
 
-  /**
-   * Computes the inlay hints in `range`. Bounded because a document long
-   * enough to need hints is long enough that computing them all would waste
-   * work.
-   */
   [[nodiscard]] virtual std::vector<lsp::InlayHint> getInlayHints(
       const Document& document, lsp::Range range,
       const CancellationToken& = {}) const = 0;

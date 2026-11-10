@@ -1,8 +1,6 @@
-# The recovery metric held to its classes: per grammar and class, faults
-# found, parasites, diagnostics and AST nodes kept may not move past one
-# document's worth from `lane.tsv`. `-DWRITE=1` writes the file from this run.
-# An engine whose repairs differ reads its own `lane-<engine>.tsv` beside it,
-# as the recovery lane reads `REFERENCE-<engine>.txt`.
+# Holds the recovery metric to `lane.tsv`: per grammar and class, no figure may
+# move past one document's worth. `-DWRITE=1` rewrites the file, and an engine
+# whose repairs differ reads `lane-<engine>.tsv` beside it.
 set(shared ${TSV})
 string(TOLOWER "${ENGINE}" engine)
 string(REGEX REPLACE "\\.tsv$" "-${engine}.tsv" own ${TSV})
@@ -26,7 +24,7 @@ foreach(g RANGE ${lastG})
   math(EXPR lastC "${nc} - 1")
   foreach(c RANGE ${lastC})
     set(row "${name}")
-    foreach(path "class" "docs" "faults" "found" "parasites" "diagnostics"
+    foreach(path "class" "docs" "faults" "found" "spurious" "diagnostics"
             "ast;kept" "ast;total")
       string(JSON v GET "${json}" grammars ${g} classes ${c} ${path})
       string(APPEND row "\t${v}")
@@ -82,14 +80,14 @@ foreach(i RANGE 1 ${nr})
   math(EXPR slack "(${r3} + ${r2} - 1) / ${r2}")
   math(EXPR nodes "(${r8} + ${r2} - 1) / ${r2}")
   math(EXPR found "${r4} - ${slack}")
-  math(EXPR parasites "${r5} + ${slack}")
+  math(EXPR spurious "${r5} + ${slack}")
   math(EXPR diagnostics "${r6} + ${slack}")
   math(EXPR kept "${r7} - ${nodes}")
   if(g4 LESS found)
     list(APPEND failed "${grammar} ${cls}: found ${g4}, held at ${r4}")
   endif()
-  if(g5 GREATER parasites)
-    list(APPEND failed "${grammar} ${cls}: parasites ${g5}, held at ${r5}")
+  if(g5 GREATER spurious)
+    list(APPEND failed "${grammar} ${cls}: spurious ${g5}, held at ${r5}")
   endif()
   if(g6 GREATER diagnostics)
     list(APPEND failed "${grammar} ${cls}: diagnostics ${g6}, held at ${r6}")

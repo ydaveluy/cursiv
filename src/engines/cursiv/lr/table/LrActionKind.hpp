@@ -5,8 +5,8 @@
 
 namespace cursiv::engine {
 
-// A `guard` is a shift the gap before the token lands: its argument names the
-// program that says where.
+// A `guard` is a shift whose target the gap before the token picks: its
+// argument names the program that says which.
 enum class LrActionKind : std::uint8_t { shift, reduce, accept, guard };
 
 constexpr bool lr_takes_token(LrActionKind k) {

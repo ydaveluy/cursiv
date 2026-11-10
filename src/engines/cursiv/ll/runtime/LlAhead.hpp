@@ -6,9 +6,8 @@
 namespace cursiv::engine {
 
 // A read of the text ahead of the descent: where the next token is read from,
-// and the levels it stands in, in an arena its reader keeps. `head` is set
-// where nothing but the last token stands in front, the only place a line's
-// indentation is read.
+// and the levels it stands in. `head` is set where only the last token stands
+// in front, the only place a line's indentation is read.
 struct LlAhead {
   IndentAt at;
   TextOffset held = 0;

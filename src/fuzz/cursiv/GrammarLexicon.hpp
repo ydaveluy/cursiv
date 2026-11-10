@@ -12,8 +12,8 @@
 
 namespace cursiv::fuzzer::detail {
 
-// How a character set is spent. `low` and `high` are the set's own
-// boundaries, which is where a lexer's off-by-one lives.
+// How a byte of a character set is chosen. `low` and `high` are the set's own
+// boundaries, where a lexer's off-by-one errors are.
 enum class SpellStyle : std::uint8_t { shortest, low, high, random };
 
 inline constexpr unsigned kSpellStyles = 4;
@@ -30,13 +30,13 @@ struct GrammarLexicon {
   // The shortest ignored word, which leaves no node; empty when the grammar
   // ignores nothing.
   [[nodiscard]] virtual std::string_view separator() const = 0;
-  // An adjacency island -- a region whose skipper runs nothing -- so two of
-  // its tokens admit no separator between them.
-  [[nodiscard]] virtual bool glues(ElementId) const = 0;
+  // A region whose skipper runs nothing: two of its tokens admit no separator
+  // between them.
+  [[nodiscard]] virtual bool ignores_nothing(ElementId) const = 0;
   // A terminal whose own expression begins or ends on a separator byte
-  // eats the trivia beside it: what would separate two tokens becomes
+  // includes the trivia beside it: what would separate two tokens becomes
   // part of one.
-  [[nodiscard]] virtual bool devours(ElementId) const = 0;
+  [[nodiscard]] virtual bool reads_separator(ElementId) const = 0;
 };
 
 }  // namespace cursiv::fuzzer::detail

@@ -1,5 +1,6 @@
 #include "cursiv/shared/utils/GrammarDump.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -8,40 +9,65 @@
 namespace cursiv::engine {
 namespace {
 
+// Where a byte of a printed line is: plain, in a doc's prose, or in a quote, a
+// class or an escape.
+enum class Place : unsigned char { plain, doc, quoted };
+
+// Past the escape at `i`: `\u{...}` reads to its brace, any other is two bytes.
+std::size_t escape_end(std::string_view line, std::size_t i) {
+  if (!line.substr(i).starts_with("\\u{")) return i + 2;
+  const std::size_t close = line.find('}', i + 3);
+  return close == std::string_view::npos ? line.size() : close + 1;
+}
+
+std::vector<Place> places(std::string_view line) {
+  std::vector<Place> out(line.size(), Place::plain);
+  for (std::size_t i = 0; i < line.size();) {
+    const char c = line[i];
+    std::size_t end = i + 1;
+    Place at = Place::plain;
+    if (const bool props = line.substr(i).starts_with("\\p{");
+        props || c == '"' || c == '\'' || c == '[') {
+      // A quote or a class reads to its close: a class of properties holds
+      // bare scalars, quotes and spaces included.
+      const char close = props ? '}' : c == '[' ? ']' : c;
+      end = props ? i + 3 : i + 1;
+      while (end < line.size() && line[end] != close)
+        end = line[end] == '\\' ? escape_end(line, end) : end + 1;
+      ++end;
+      at = Place::quoted;
+    } else if (c == '\\') {
+      end = escape_end(line, i);
+      at = Place::quoted;
+    } else if (line.substr(i).starts_with("/**")) {
+      // An apostrophe in a doc's prose is no quote.
+      const std::size_t close = line.find("*/", i + 3);
+      end = close == std::string_view::npos ? line.size() : close + 2;
+      at = Place::doc;
+    }
+    end = std::min(end, line.size());
+    std::fill(out.begin() + static_cast<std::ptrdiff_t>(i),
+              out.begin() + static_cast<std::ptrdiff_t>(end), at);
+    i = end;
+  }
+  return out;
+}
+
 // Each alternative is a contiguous run of `body`: nothing is rewritten, and
 // the only byte dropped is the separator itself.
 std::vector<std::string_view> top_alternatives(std::string_view body) {
   std::vector<std::string_view> out;
+  const std::vector<Place> at = places(body);
   std::size_t begin = 0;
   int depth = 0;
-  char quote = 0;
-  bool esc = false;
-  bool in_class = false;
   for (std::size_t i = 0; i < body.size(); ++i) {
+    if (at[i] != Place::plain) continue;
     const char c = body[i];
-    if (esc) {
-      esc = false;
-    } else if (c == '\\') {
-      esc = true;
-    } else if (quote != 0) {
-      if (c == quote) quote = 0;
-    } else if (in_class) {
-      if (c == ']') in_class = false;
-    } else if (body.substr(i).starts_with("/**")) {
-      // A doc's prose is printed as written: an apostrophe in it is no quote.
-      const std::size_t close = body.find("*/", i + 3);
-      if (close == std::string_view::npos) break;
-      i = close + 1;
-    } else if (c == '"' || c == '\'') {
-      quote = c;
-    } else if (c == '[') {
-      in_class = true;
-    } else if (c == '(' || c == '{') {
+    if (c == '(' || c == '{') {
       ++depth;
     } else if (c == ')' || c == '}') {
       --depth;
-      // The separator is exactly ` | `, which is what `Printer<Choice>` emits;
-      // a doc's own pipes never wear both spaces, so prose passes through whole.
+      // The separator is exactly ` | `, as `GrammarPrinter` prints a choice.
     } else if (c == '|' && depth == 0 && i > 0 && body[i - 1] == ' ' &&
                i + 1 < body.size() && body[i + 1] == ' ') {
       out.push_back(body.substr(begin, i - begin));
@@ -52,16 +78,17 @@ std::vector<std::string_view> top_alternatives(std::string_view body) {
   return out;
 }
 
-// Broken on spaces only, so nothing a reader needs to see is ever split.
+// Breaks on spaces only, never inside a quote or a class. A word longer than
+// the width stays whole.
 void fill_line(std::string& out, std::string_view text, std::string_view first,
                std::string_view rest, std::size_t width) {
+  const std::vector<Place> at = places(text);
   std::string line(first);
   bool empty = true;
-  std::size_t i = 0;
-  while (i < text.size()) {
-    const std::size_t e = text.find(' ', i);
-    const std::string_view word =
-        text.substr(i, e == std::string_view::npos ? e : e - i);
+  std::size_t begin = 0;
+  for (std::size_t i = 0; i <= text.size(); ++i) {
+    if (i < text.size() && (text[i] != ' ' || at[i] == Place::quoted)) continue;
+    const std::string_view word = text.substr(begin, i - begin);
     if (!empty && line.size() + 1 + word.size() > width) {
       out += line;
       out += '\n';
@@ -71,8 +98,7 @@ void fill_line(std::string& out, std::string_view text, std::string_view first,
     if (!empty) line += ' ';
     line += word;
     empty = false;
-    if (e == std::string_view::npos) break;
-    i = e + 1;
+    begin = i + 1;
   }
   out += line;
   out += '\n';

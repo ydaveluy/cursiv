@@ -1,7 +1,6 @@
-// The statemachine example language: its AST. Deriving `cursiv::AstNode`
-// brings the field vocabulary into scope: `vector`, `string_view`, and
-// `reference` below are the base's aliases. Every `string_view` field
-// borrows a slice of the source buffer, valid only as long as it is.
+// The statemachine example language: its AST. `vector`, `string_view` and
+// `reference` are `cursiv::AstNode`'s aliases, and a `string_view` field lives
+// as long as the source text.
 #pragma once
 
 #include "cursiv/syntax-tree/AstNode.hpp"

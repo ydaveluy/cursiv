@@ -1,9 +1,6 @@
-// A left recursion is read as the loop of the rule a call starts with. The
-// walk from that rule meets its bases and its turns in the order they rank;
-// the loop is laid as folds, a base followed by the turns that apply to it,
-// nested as the recursion nests, so a descent chooses among them as the
-// election does. An alternative whose call stands inside or behind optional
-// items is first read as the alternatives they spell.
+// A left recursion is read as a loop of the rule a call starts with: folds, a
+// base and the turns that apply to it, nested as the recursion nests, in
+// election order. Optional items around the call are expanded first.
 #pragma once
 
 #include <algorithm>
@@ -75,13 +72,13 @@ namespace cursiv::detail {
 
 template <class R, class E, bool Step, bool Hands>
 struct ExprShape<engine::llow::Closed<R, E, Step, Hands>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = engine::llow::Closed<R, K..., Step, Hands>;
 };
 template <class E>
 struct ExprShape<engine::llow::Turns<E>> {
-  using kids = TypeList<E>;
+  using children = TypeList<E>;
   template <class... K>
   using rebind = engine::llow::Turns<K...>;
 };
@@ -165,8 +162,8 @@ template <class G, class O, class T, auto P, class W, class... Es>
            operand_leads<G, O, typename fold_alts<W>::type>::value)
 struct arm_of<G, O, Create<T, Seq<Assign<P, W>, Es...>>>
     : operand_arms<G, O, T, P, TypeList<Es...>, typename fold_alts<W>::type> {};
-// An alternative that opens on an optional item: the item taken -- once at
-// least, for a repetition -- and the item left out.
+// An alternative that opens on an optional item: the item taken (at least
+// once, for a repetition) and the item left out.
 template <class E>
 struct optional_head : std::false_type {};
 template <std::size_t M, class X>
@@ -200,9 +197,8 @@ struct any_member<G, O, TypeList<Xs...>>
     : std::bool_constant<(G::template same<O, Xs> || ...)> {};
 
 // A call of the loop inside or behind optional items is read as the
-// alternatives they spell, the item taken before the item left out, as the
-// election prefers: `X? A y` is `X A y | A y`. Past the optional gate the
-// alternative stays as written, and the descent refuses it.
+// alternatives they expand to, the item first: `X? A y` is `X A y | A y`. Past
+// `kOptionalGate` the alternative stays as written, and the descent refuses it.
 template <class G, class O, class E, unsigned Left = kOptionalGate,
           bool Spell = Left != 0 && optional_head<E>::value &&
                        any_member<G, O, typename lead_refs<E>::type>::value>
@@ -235,13 +231,14 @@ using member_arms_t = typename arms_of<
 
 // The first literal an arm reads after the call that starts it, as far as the
 // type says: two turns that start on literals neither of which begins the other
-// never meet the same token.
+// never read the same token.
 inline constexpr std::size_t kKeyChars = 15;
 struct LoopKey {
   bool known = false, ci = false;
   std::uint8_t len = 0;
   std::array<char, kKeyChars> text{};
-  // The operators of one infix never share a token: each level has its own.
+  // The operators of one infix never share a token: a table whose levels
+  // share an operator text is refused.
   const void* infix = nullptr;
   std::uint8_t level = 0;
 };
@@ -383,7 +380,7 @@ constexpr bool loop_below(const LoopPlan& pl, std::size_t deep,
   return false;
 }
 
-// A turn that reads nothing, however far it climbs, reads no text at all.
+// A turn that reads nothing, however far up it goes, reads no text at all.
 template <std::size_t N>
 constexpr bool loop_reads(const LoopPlan& pl, const LoopTable<N>& t,
                           std::size_t at, std::size_t arm) {
@@ -473,7 +470,7 @@ struct LoopTables<S, G, TypeList<Ms...>> {
       // In a case-insensitive grammar every literal folds; a section's own
       // literals already say whether theirs does.
       if constexpr (std::is_void_v<
-                        typename home_of<tl_at_t<M, members>>::type>)
+                        typename owner_grammar_of<tl_at_t<M, members>>::type>)
         t.key[M][J].ci = t.key[M][J].ci || S::case_insensitive;
       if constexpr (J == 0)
         operator_key<typename S::template rule<tl_at_t<M, members>>>(
@@ -644,7 +641,7 @@ struct reading {
 };
 
 // The rules a body calls once it has consumed a token.
-template <class E, class Kids = typename ExprShape<E>::kids>
+template <class E, class Children = typename ExprShape<E>::children>
 struct late_refs;
 template <class E, class... Ks>
 struct late_refs<E, TypeList<Ks...>> : tl_cat<typename late_refs<Ks>::type...> {
@@ -745,7 +742,7 @@ struct loop_fold_rule<S, G, R, true> {
     using declared = RR;
     static constexpr auto body =
         typename reading<LoopFold<S, G, declared_of_t<R>>, 0>::type{};
-    static constexpr bool minted_body = true;
+    static constexpr bool produced_body = true;
     static constexpr bool ll_folded = true;
     using fold_members = typename LoopFold<S, G, declared_of_t<R>>::members;
   };

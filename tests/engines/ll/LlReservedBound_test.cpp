@@ -1,7 +1,6 @@
-// A name refusing words a terminal ranked below it reads before some bytes
-// only: the LR lexer against one reading the grammar's rules by hand, in
-// every mode and at every position of every text a small alphabet spells,
-// and both engines' parses against each other on the same texts.
+// A name that refuses words a lower-ranked terminal reads before some bytes
+// only: the LR lexer against a hand-written reading of the rules on every text
+// a small alphabet spells, and both engines' parses against each other.
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -229,8 +228,8 @@ Scan expected(const Lexicon& lx, const std::vector<const Spelled*>& of,
   const auto before = [&](unsigned a, unsigned b) {
     const auto rank = [&](unsigned t) {
       return cursiv::engine::lex_rank(
-          of[t]->keyword ? cursiv::engine::kTierKeyword
-          : literal(t)   ? cursiv::engine::kTierLiteral
+          of[t]->keyword ? cursiv::engine::kKeywordPriority
+          : literal(t)   ? cursiv::engine::kLiteralPriority
                          : 0u,
           A.cfg.terms[t].trivia);
     };
@@ -412,7 +411,7 @@ int main() {
       {{"d; do; dog; d1;", "n:d n:dog n:d1 m:/do "},
        {"do$;", "<refused>"},
        {"do!;", "<refused>"}});
-  // Inside the words the rival stands before `i` and not before `o`; past
+  // Inside the words the competitor stands before `i` and not before `o`; past
   // `do` the other one stands before every byte but `!`.
   {
     constexpr const auto& A = gen::FrontierLr::kTable;

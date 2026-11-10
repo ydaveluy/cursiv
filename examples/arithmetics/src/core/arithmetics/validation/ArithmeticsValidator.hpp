@@ -22,8 +22,7 @@ class ArithmeticsValidator final : public cursiv::DefaultCoreService {
  public:
   using cursiv::DefaultCoreService::DefaultCoreService;
 
-  // Document-level, not per node: one walk prices every divisor with a
-  // bounded evaluation, never the call graph.
+  // Document-level: one walk evaluates every divisor within a step limit.
   void checkDivisionsByZero(const cursiv::Document& document,
                             cursiv::ValidationAcceptor& accept,
                             const cursiv::CancellationToken& token) const;

@@ -1,7 +1,6 @@
 // The conditions that stand at one token: those at the head of a position,
-// through the rules it calls and past what reads nothing, and the conditions
-// right in front of it. Conditions that stand at one token share its lexical
-// choice.
+// through its calls and past what reads nothing, and those right in front of
+// it. They share the token's lexical choice.
 #pragma once
 
 #include <algorithm>
@@ -67,19 +66,19 @@ struct LlStanding {
         } else if (n.kind == LlShape::condition) {
           if (b.cut[n.sym].none()) walks[top].out.set(n.sym);
         } else {
-          const std::span<const std::uint16_t> kids = read_by(n);
+          const std::span<const std::uint16_t> childIds = read_by(n);
           bool descended = false;
-          while (walks[top].next < kids.size()) {
-            const std::uint16_t kid = kids[walks[top].next];
-            if (done[kid] == 0) {
-              enter(kid);
+          while (walks[top].next < childIds.size()) {
+            const std::uint16_t child = childIds[walks[top].next];
+            if (done[child] == 0) {
+              enter(child);
               descended = true;
               break;
             }
-            walks[top].out |= lead[kid];
+            walks[top].out |= lead[child];
             ++walks[top].next;
-            if (n.kind == LlShape::seq && !b.nullable[kid])
-              walks[top].next = static_cast<std::uint32_t>(kids.size());
+            if (n.kind == LlShape::seq && !b.nullable[child])
+              walks[top].next = static_cast<std::uint32_t>(childIds.size());
           }
           if (descended) continue;
         }
@@ -101,19 +100,21 @@ struct LlStanding {
         const LlNode& n = g.nodes[visit.id];
         switch (n.kind) {
           case LlShape::seq: {
-            // Behind a kid that may read something a new token begins: where
+            // Behind a child that may read something a new token begins: where
             // it read nothing, it read the token, under what stands there.
             std::vector<DynSet> from(n.count + 1u);
             for (unsigned i = n.count; i-- > 0;) {
-              const auto kid = g.kids[n.sym + i];
-              from[i] = b.nullable[kid] ? lead[kid] | from[i + 1] : lead[kid];
+              const auto child = g.childIds[n.sym + i];
+              from[i] =
+                  b.nullable[child] ? lead[child] | from[i + 1] : lead[child];
             }
             const auto begin = pending.size();
             unsigned run = 0;
             for (unsigned i = 0; i < n.count; ++i) {
-              const auto kid = g.kids[n.sym + i];
-              pending.emplace_back(kid, run == 0 ? point[visit.id] : from[run]);
-              if (!b.nullable[kid] || b.first[kid].any()) run = i + 1;
+              const auto child = g.childIds[n.sym + i];
+              pending.emplace_back(child,
+                                   run == 0 ? point[visit.id] : from[run]);
+              if (!b.nullable[child] || b.first[child].any()) run = i + 1;
             }
             std::reverse(pending.begin() + begin, pending.end());
             break;
@@ -121,8 +122,9 @@ struct LlStanding {
           case LlShape::alt:
           case LlShape::rep: {
             const auto children = g.children(n);
-            for (auto kid = children.rbegin(); kid != children.rend(); ++kid)
-              pending.emplace_back(*kid, point[visit.id]);
+            for (auto child = children.rbegin(); child != children.rend();
+                 ++child)
+              pending.emplace_back(*child, point[visit.id]);
             break;
           }
           default:

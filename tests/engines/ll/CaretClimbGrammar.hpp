@@ -1,8 +1,8 @@
 #pragma once
 
-// An operator guarded against a second `<` and its bare twin, both read after
-// an operand: the `!` goes on from the twin, the operand from the operator,
-// and a `<` typed right behind the operator makes it the twin.
+// After an operand, `<` is either `LT`, which refuses a second `<`, or `BARE`:
+// `BARE` goes on with `!`, `LT` with an operand, and a `<` typed right after
+// `LT` turns it into `BARE`.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

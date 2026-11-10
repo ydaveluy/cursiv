@@ -23,7 +23,7 @@ void lex_children(const Cfg& g, std::uint16_t at, Visit&& visit,
     case LexKind::seq:
     case LexKind::alt:
     case LexKind::skip:
-      for (unsigned i = 0; i < e.b; ++i) visit(g.lexKid[e.a + i]);
+      for (unsigned i = 0; i < e.b; ++i) visit(g.lexChild[e.a + i]);
       break;
     case LexKind::call:
       if (calls) visit(lex_callee(g, e));
@@ -44,7 +44,7 @@ void lex_children(const Cfg& g, std::uint16_t at, Visit&& visit,
       visit(e.a);
       for (unsigned i = 0; i < (e.kind == LexKind::through_nested ? 2u : e.min);
            ++i)
-        if (g.lexKid[e.b + i] != kNoLexNode) visit(g.lexKid[e.b + i]);
+        if (g.lexChild[e.b + i] != kNoLexNode) visit(g.lexChild[e.b + i]);
       break;
     case LexKind::token:
       visit(lex_token_body(g, e));
@@ -63,11 +63,11 @@ bool lex_derives(const Cfg& g, std::uint16_t at, Facts&& facts,
       return productive && g.sets[e.a].any();
     case LexKind::seq:
       for (unsigned i = 0; i < e.b; ++i)
-        if (!facts(g.lexKid[e.a + i])) return false;
+        if (!facts(g.lexChild[e.a + i])) return false;
       return true;
     case LexKind::alt:
       for (unsigned i = 0; i < e.b; ++i)
-        if (facts(g.lexKid[e.a + i])) return true;
+        if (facts(g.lexChild[e.a + i])) return true;
       return false;
     case LexKind::call:
       return facts(lex_callee(g, e));
@@ -101,7 +101,7 @@ std::vector<std::uint8_t> lex_call_ancestors(const Cfg& g) {
   std::vector<std::vector<std::uint16_t>> parents(g.nlex);
   for (const auto at : todo) calls[at] = 1;
   for (std::uint16_t at = 0; at < g.nlex; ++at)
-    lex_children(g, at, [&](auto kid) { parents[kid].push_back(at); });
+    lex_children(g, at, [&](auto child) { parents[child].push_back(at); });
   while (!todo.empty()) {
     const auto at = todo.back();
     todo.pop_back();
@@ -114,11 +114,10 @@ std::vector<std::uint8_t> lex_call_ancestors(const Cfg& g) {
   return calls;
 }
 
-// The lexical nodes that may match nothing.
 template <class Cfg>
 std::vector<std::uint8_t> lex_empty_nodes(const Cfg& g) {
   std::vector<std::uint8_t> empty(g.nlex);
-  settle_empty([&](auto&& set) {
+  least_fixpoint([&](auto&& set) {
     for (std::uint16_t at = 0; at < g.nlex; ++at)
       set(empty[at],
           lex_derives(g, at, [&](auto k) { return empty[k] != 0; }, false));
@@ -144,15 +143,15 @@ void validate_lex_recursion(Cfg& g) {
       todo.pop_back();
       if (to[at] != 0) continue;
       to[at] = viaCalls && body[at] != 0 ? body[at] : t;
-      lex_children(g, at, [&](auto kid) { todo.push_back(kid); }, viaCalls);
+      lex_children(g, at, [&](auto child) { todo.push_back(child); }, viaCalls);
     }
   };
   for (std::uint16_t t = 1; t < g.nterms; ++t) reach(body, t, false);
   for (std::uint16_t t = 1; t < g.nterms; ++t)
     if (calls[g.termBuild[t].lex]) reach(owner, t, true);
   std::vector<std::uint8_t> empty(g.nlex), productive(g.nlex);
-  const auto settle = [&](auto& facts, bool any_text) {
-    settle_empty([&](auto&& set) {
+  const auto fill_facts = [&](auto& facts, bool any_text) {
+    least_fixpoint([&](auto&& set) {
       for (std::uint16_t at = 0; at < g.nlex; ++at)
         if (owner[at] != 0)
           set(facts[at],
@@ -160,8 +159,8 @@ void validate_lex_recursion(Cfg& g) {
                   g, at, [&](auto k) { return facts[k] != 0; }, any_text));
     });
   };
-  settle(empty, false);
-  settle(productive, true);
+  fill_facts(empty, false);
+  fill_facts(productive, true);
 
   std::vector<std::uint32_t> starts{0}, edges;
   for (std::uint16_t at = 0; at < g.nlex; ++at) {
@@ -169,12 +168,12 @@ void validate_lex_recursion(Cfg& g) {
       const LexNode e = g.lex[at];
       if (e.kind == LexKind::seq) {
         for (unsigned i = 0; i < e.b; ++i) {
-          const auto kid = g.lexKid[e.a + i];
-          edges.push_back(kid);
-          if (!empty[kid]) break;
+          const auto child = g.lexChild[e.a + i];
+          edges.push_back(child);
+          if (!empty[child]) break;
         }
       } else {
-        lex_children(g, at, [&](auto kid) { edges.push_back(kid); });
+        lex_children(g, at, [&](auto child) { edges.push_back(child); });
       }
     }
     starts.push_back(static_cast<std::uint32_t>(edges.size()));
@@ -222,7 +221,7 @@ std::pair<ByteSet, bool> lex_first_bytes(const Cfg& g, std::uint16_t node) {
       ByteSet bytes;
       bool empty = sequence;
       for (unsigned i = 0; i < e.b; ++i) {
-        const auto [part, nullable] = lex_first_bytes(g, g.lexKid[e.a + i]);
+        const auto [part, nullable] = lex_first_bytes(g, g.lexChild[e.a + i]);
         bytes |= part;
         if (sequence && !nullable) return {bytes, false};
         empty = empty || nullable;

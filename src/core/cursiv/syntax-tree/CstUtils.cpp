@@ -43,13 +43,9 @@ void Cst::index_nodes() const {
 
 namespace {
 
-// Backwards, which is how the run reads: postorder gives a parent's children
-// in reverse, so the walk follows them there and a list is reversed once.
-// A member's writer is asked before the boundary -- the span that wrote a
-// member may open the node it holds -- and anything else after it: a keyword
-// that is a nested node's only record is that node's. A childless record is
-// passed the same way whether it opens a node or not, so that is asked of it
-// only where it matches.
+// Backwards, as postorder lists a parent's children. A member's writer is
+// asked before the node boundary, since the span that wrote a member may open
+// the node it holds; anything else after it.
 template <bool kWriterFirst, class Match, class Take>
 void walk(const Cst& cst, NodeId root, const Match& matches, const Take& take) {
   if (root == kNoNode || root >= cst.size()) return;
@@ -74,7 +70,7 @@ void walk(const Cst& cst, NodeId root, const Match& matches, const Take& take) {
       cursor = past;
     } else {
       // The preceding record is the last child, or the previous sibling
-      // when this record is childless. No recursive stack is needed.
+      // when this record is childless.
       --cursor;
     }
   }
@@ -113,10 +109,9 @@ std::optional<CstNodeView> clamped(const std::vector<CstNodeView>& found,
   return found[std::min(index, found.size() - 1)];
 }
 
-// A visible leaf that spells the keyword and names no rule: a literal the
-// grammar spelled. A leaf that differs from it in case alone spells it
-// where the grammar reads the literal in any case, which is asked once, at the
-// first such leaf. The rule is asked last, of those leaves only.
+// A visible leaf that spells the keyword and names no rule. A leaf that
+// differs in case alone counts where the grammar reads the literal in any
+// case.
 class SpellsKeyword {
  public:
   SpellsKeyword(const Cst& cst, const Grammar& grammar,
@@ -163,7 +158,7 @@ std::vector<CstNodeView> writers_of(const CstNodeView& node,
   std::vector<CstNodeView> found = collect<true>(
       node, [&](NodeId id) { return grammar->recordWrites(cst[id], feature); });
   // The node's own record answers first: a rule whose match is one element
-  // lays no record of its own, so the span that wrote the member opened it.
+  // writes no record of its own, so the span that wrote the member opened it.
   if (grammar->recordFills(cst[node.id], feature))
     found.insert(found.begin(), node);
   return found;
