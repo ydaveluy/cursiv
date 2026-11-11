@@ -644,9 +644,11 @@ void DefaultDocumentBuilder::resetDocument(Document& document,
       document.localSymbols.clear();  // undoes `ComputedScopes`
       [[fallthrough]];
     case ComputedScopes:
-      // Undoes `Linked`: resolutions go before the descriptions they name. Runs
-      // for every target below `Linked`, as any read can memoize a resolution.
-      if (language != nullptr) language->linker->unlink(document);
+      // Undoes `Linked` in a tree that stays, for any target below `Linked`:
+      // any read can memoize a resolution, and resolutions go before the
+      // descriptions they name.
+      if (language != nullptr && state != Changed)
+        language->linker->unlink(document);
       [[fallthrough]];
     case Linked:
       index.removeReferences(document.id);

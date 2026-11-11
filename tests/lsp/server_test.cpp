@@ -177,6 +177,7 @@ struct RecordingLock final : cursiv::DefaultWorkspaceLock {
 struct RecordingClient final : cursiv::LanguageClient {
   std::vector<lsp::PublishDiagnosticsParams> published;
   std::vector<lsp::RegistrationParams> registered;
+  std::vector<lsp::ShowMessageParams> shown;
   std::function<void(std::vector<lsp::LSPAny>)> configurationAnswer;
   // The next `failing` publications throw, as a failing transport would.
   int failing = 0;
@@ -190,6 +191,9 @@ struct RecordingClient final : cursiv::LanguageClient {
   }
   void registerCapability(lsp::RegistrationParams params) override {
     registered.push_back(std::move(params));
+  }
+  void showMessage(lsp::ShowMessageParams params) override {
+    shown.push_back(std::move(params));
   }
   void configuration(lsp::ConfigurationParams,
                      std::function<void(std::vector<lsp::LSPAny>)> then) override {
@@ -1247,6 +1251,57 @@ void an_update_always_reaches_a_build() {
       });
 }
 
+// A failed build is shown to the user once, until a build validates again;
+// a cancelled one is not shown.
+void a_failed_build_is_shown_once_until_one_succeeds() {
+  struct Failing final : cursiv::LspDocumentBuilder {
+    using LspDocumentBuilder::LspDocumentBuilder;
+    mutable bool fails = false;
+    mutable bool cancels = false;
+    void update(std::span<const std::string_view> changed,
+                std::span<const std::string_view> deleted,
+                const cursiv::CancellationToken& token) const override {
+      if (fails) throw std::runtime_error("out of room");
+      if (cancels) cursiv::OperationCancelled::raise();
+      LspDocumentBuilder::update(changed, deleted, token);
+    }
+  };
+  World world;
+  auto failing = std::make_unique<Failing>(world.shared);
+  Failing& builder = *failing;
+  world.shared.documentBuilder = std::move(failing);
+  (void)world.handshake();
+  world.open("datatype A\n");
+  int version = 2;
+  const auto change = [&] {
+    try {
+      const int next = version++;
+      world.change(next, "datatype A" + std::to_string(next) + "\n");
+    } catch (const std::runtime_error&) {  // NOLINT(bugprone-empty-catch)
+    }
+  };
+  builder.fails = true;
+  change();
+  CHECK(world.client->shown.size() == 1);
+  if (world.client->shown.size() != 1) return;
+  const lsp::ShowMessageParams& shown = world.client->shown.front();
+  CHECK(shown.type.index() == lsp::MessageType::Error);
+  CHECK(shown.message.find("a.ws") != std::string::npos &&
+        shown.message.find("out of room") != std::string::npos);
+  change();
+  CHECK(world.client->shown.size() == 1);
+  builder.fails = false;
+  change();
+  builder.fails = true;
+  change();
+  CHECK(world.client->shown.size() == 2);
+  builder.fails = false;
+  change();
+  builder.cancels = true;
+  change();
+  CHECK(world.client->shown.size() == 2);
+}
+
 // A failed publication is not dropped: the next build publishes every
 // validated document, though it validates none again.
 void a_failed_publication_is_retried_by_the_next_build() {
@@ -2273,6 +2328,7 @@ void run() {
   a_failing_notebook_still_moves_its_cells();
   a_refused_allocation_leaves_the_notebook_index_whole();
   an_update_always_reaches_a_build();
+  a_failed_build_is_shown_once_until_one_succeeds();
   a_failed_publication_is_retried_by_the_next_build();
   a_failed_removal_is_sent_again();
   a_relinked_document_is_not_cleared_before_its_verdict();

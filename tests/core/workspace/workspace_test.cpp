@@ -35,6 +35,7 @@
 #include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/references/DefaultLinker.hpp"
 #include "cursiv/references/DefaultScopeComputation.hpp"
 #include "cursiv/references/DefaultScopeProvider.hpp"
 #include "cursiv/references/Linker.hpp"
@@ -1969,6 +1970,41 @@ void a_reset_to_computed_scopes_keeps_lazy_resolution() {
   (void)lock.read([&] { CHECK(referenced_type(*consumer) == original); });
 }
 
+// A tree that stays is unlinked; one that goes is not: its resolutions go with
+// it.
+void only_a_kept_tree_is_unlinked() {
+  struct Counting final : cursiv::DefaultLinker {
+    using DefaultLinker::DefaultLinker;
+    mutable int unlinked = 0;
+    void unlink(cursiv::Document& document) const override {
+      ++unlinked;
+      DefaultLinker::unlink(document);
+    }
+  };
+  const Counting* linker = nullptr;
+  World world([&](cursiv::CoreServices& language) {
+    auto counting = std::make_unique<Counting>(language);
+    linker = counting.get();
+    language.linker = std::move(counting);
+  });
+  auto& builder = *world.shared.documentBuilder;
+  auto& lock = *world.shared.workspaceLock;
+  auto* document = world.add("file:///a.ws", "entity E { f : E }");
+  cursiv::Document* documents[] = {document};
+  lock.write([&](const cursiv::CancellationToken& token) {
+    builder.build(documents, {}, token);
+  });
+  const int built = linker->unlinked;
+  lock.write([&](const cursiv::CancellationToken&) {
+    builder.resetToState(*document, cursiv::DocumentState::ComputedScopes);
+  });
+  CHECK(linker->unlinked == built + 1);
+  lock.write([&](const cursiv::CancellationToken&) {
+    builder.resetToState(*document, cursiv::DocumentState::Changed);
+  });
+  CHECK(linker->unlinked == built + 1);
+}
+
 // A tree that goes takes with it what points into it, by every path: a document
 // that read it holds no pointer past it, and reads again.
 template <class Drop>
@@ -2708,6 +2744,7 @@ void run() {
   cancelling_after_an_export_does_not_leave_stale_links(false);
   cancelling_after_an_export_does_not_leave_stale_links(true);
   a_reset_to_computed_scopes_keeps_lazy_resolution();
+  only_a_kept_tree_is_unlinked();
   every_way_to_drop_a_tree_lets_go_of_it();
   a_build_from_linked_reindexes_its_resolutions(false);
   a_build_from_linked_reindexes_its_resolutions(true);
@@ -3014,6 +3051,31 @@ void an_attached_text_takes_the_document_back_down() {
   CHECK(d->textDocument().version() == 2);
 }
 
+// An edit moves the document's own text, same object, back to `Changed`; one
+// that rewrites its range with the same bytes leaves the document as it was.
+void an_edit_moves_the_text_in_place() {
+  using Change = cursiv::TextDocumentContentChangeEvent;
+  World world(false);
+  const auto d = world.factory.fromString(kSource, "file:///w/a.ws");
+  d->state = cursiv::DocumentState::Validated;
+  const cursiv::DocumentId id = d->id;
+  const std::string before(d->textDocument().getText());
+
+  const Change same[] = {{cursiv::Range{{0, 0}, {0, 8}}, before.substr(0, 8)}};
+  CHECK(!world.factory.updateTextDocument(*d, same, 2));
+  CHECK(d->state.load() == cursiv::DocumentState::Validated);
+  CHECK(d->textDocument().getText() == before);
+  CHECK(d->textDocument().version() == 0);
+
+  const Change edit[] = {{cursiv::Range{{0, 0}, {0, 0}}, "datatype Fresh\n"}};
+  CHECK(world.factory.updateTextDocument(*d, edit, 3));
+  CHECK(d->id == id);
+  CHECK(d->state.load() == cursiv::DocumentState::Changed);
+  CHECK(d->textDocument().getText() == "datatype Fresh\n" + before);
+  CHECK(d->textDocument().version() == 3);
+  CHECK(d->textDocument().offsetAt({1, 0}) == 15);
+}
+
 }  // namespace
 
 void run() {
@@ -3029,6 +3091,7 @@ void run() {
   a_text_document_becomes_a_parsed_document();
   from_text_document_keeps_the_callers_uri_spelling();
   an_attached_text_takes_the_document_back_down();
+  an_edit_moves_the_text_in_place();
 }
 
 }  // namespace document_factory
@@ -4756,6 +4819,20 @@ void update_answers_like_a_fresh_document(
   answers_like_a_fresh_document(d);
 }
 
+// A moved document keeps the lines its source has read and still answers for
+// its text, constructed or assigned.
+void a_moved_document_keeps_its_lines() {
+  const std::string text = "ab\ncd\r\nef\n\xc3\xa9g\nh";
+  cursiv::TextDocument source = doc(text);
+  CHECK(source.lineCount() == 5);
+  cursiv::TextDocument moved = std::move(source);
+  CHECK(moved.getText() == text);
+  answers_like_a_fresh_document(moved);
+  cursiv::TextDocument assigned = doc("z");
+  assigned = std::move(moved);
+  answers_like_a_fresh_document(assigned);
+}
+
 // Ranged changes keep the lines right: `\r\n` formed or broken at either edge,
 // terminators added or removed, the empty last line, valid and ill-formed
 // UTF-8, many changes per update, more than 64 lines.
@@ -5171,6 +5248,7 @@ void run() {
   a_range_is_a_pair();
   changes_apply_in_order();
   ranged_changes_keep_the_lines_right();
+  a_moved_document_keeps_its_lines();
   edits_leave_the_document_alone();
   equal_starts_keep_the_array_order();
   an_inverted_range_is_straightened();

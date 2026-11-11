@@ -24,7 +24,8 @@ class Linker {
   virtual void link(Document& document,
                     const CancellationToken& cancelToken = kNoCancel) const = 0;
 
-  // Clears every resolution, errors included.
+  // Clears every resolution, errors included, of a tree that stays: a tree
+  // that is dropped takes its resolutions with it.
   virtual void unlink(Document& document) const = 0;
 
   // What the site spells resolves to, or null; an empty `referenceText`

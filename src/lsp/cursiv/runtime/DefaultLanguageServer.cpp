@@ -10,6 +10,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <new>
 #include <optional>
 #include <set>
 #include <span>
@@ -559,13 +560,16 @@ void DefaultLanguageServer::initialized() {
         },
         WorkspaceLock::WriteMode::Durable);
   } catch (const std::exception& failure) {
-    if (LanguageClient* client = _shared.languageClient.get()) {
-      lsp::ShowMessageParams message;
-      message.type = lsp::MessageTypeEnum(lsp::MessageType::Error);
-      message.message =
-          std::string("cursiv: workspace scan failed: ") + failure.what();
-      client->showMessage(std::move(message));
-    }
+    showError(std::string("cursiv: workspace scan failed: ") + failure.what());
+  }
+}
+
+void DefaultLanguageServer::showError(std::string message) const {
+  if (LanguageClient* client = _shared.languageClient.get()) {
+    lsp::ShowMessageParams params;
+    params.type = lsp::MessageTypeEnum(lsp::MessageType::Error);
+    params.message = std::move(message);
+    client->showMessage(std::move(params));
   }
 }
 
@@ -664,9 +668,9 @@ void DefaultLanguageServer::openText(const lsp::TextDocumentItem& item,
   }
 }
 
-// The tree is dropped before the bytes move, on the same document object, so
-// index rows are refreshed by the build rather than left dangling. A stale
-// version, an empty list, or a byte-identical result moves nothing.
+// The text is edited in place on the same document object, its tree dropped
+// first, so index rows are refreshed by the build. A stale version moves
+// nothing; no change, or a lone one rewriting its range alike, only versions.
 void DefaultLanguageServer::changeText(
     const lsp::VersionedTextDocumentIdentifier& identifier,
     std::span<const lsp::TextDocumentContentChangeEvent> edits,
@@ -678,23 +682,14 @@ void DefaultLanguageServer::changeText(
   // A change on a URI nothing opened is not this server's to guess at.
   if (document == nullptr) return;
   if (version < document->textDocument().version()) return;
-  if (edits.empty()) {
-    updateVersion(*document, version);
-    return;
-  }
   // A range outside the text is clamped, not rejected -- the core's
-  // `offsetAt` is total. Edits apply to a copy of the text; replacing the
-  // document would destroy what the index still describes.
-  TextDocument edited = TextDocument::create(
-      uri, std::string(document->textDocument().languageId()), version,
-      std::string(document->textDocument().getText()));
-  TextDocument::update(edited, from_lsp(edits), version);
-  if (edited.getText() == document->textDocument().getText()) {
+  // `offsetAt` is total.
+  if (!_shared.documentFactory->updateTextDocument(*document, from_lsp(edits),
+                                                   version)) {
     updateVersion(*document, version);
     return;
   }
   changes.changed.push_back(std::move(uri));
-  _shared.documentFactory->attachTextDocument(*document, std::move(edited));
 }
 
 void DefaultLanguageServer::updateVersion(Document& document,
@@ -922,7 +917,7 @@ void DefaultLanguageServer::onConfigurationSectionUpdate(
               *document,
               std::min(document->state.load(), DocumentState::IndexedReferences));
         }
-        if (affected) builder.update({}, {}, token);
+        if (affected) buildUpdate({}, {}, token);
       },
       WorkspaceLock::WriteMode::Durable);
 }
@@ -1534,7 +1529,6 @@ std::optional<lsp::LSPAny> DefaultLanguageServer::executeCommand(
 // an installed text always reaches the build.
 void DefaultLanguageServer::writeAndPublish(
     std::size_t most, cursiv::function_ref<void(TextChanges&)> mutate) {
-  const DocumentBuilder& builder = *_shared.documentBuilder;
   _shared.workspaceLock->write(
       [&](const CancellationToken& token) {
         TextChanges changes;
@@ -1555,19 +1549,48 @@ void DefaultLanguageServer::writeAndPublish(
         } catch (...) {
           if (failure == nullptr) failure = std::current_exception();
         }
-        builder.update(changed, deleted, token);
+        buildUpdate(changed, deleted, token);
         if (failure) std::rethrow_exception(failure);
       },
       WorkspaceLock::WriteMode::Durable);
 }
 
+void DefaultLanguageServer::buildUpdate(
+    std::span<const std::string_view> changed,
+    std::span<const std::string_view> deleted, const CancellationToken& token) {
+  try {
+    _shared.documentBuilder->update(changed, deleted, token);
+  } catch (const OperationCancelled&) {
+    throw;
+  } catch (const std::exception& failure) {
+    if (!_buildFailureShown.exchange(true)) {
+      // Named by its one document, else as the workspace. Showing it never
+      // takes the failure's place.
+      try {
+        const std::string name =
+            changed.size() + deleted.size() != 1 ? "the workspace"
+            : changed.empty() ? uri_file_name(deleted.front())
+                              : uri_file_name(changed.front());
+        const char* const why = dynamic_cast<const std::bad_alloc*>(&failure)
+                                    ? "out of memory"
+                                    : failure.what();
+        showError("cursiv: building " + name + " failed: " + why);
+      } catch (...) {  // NOLINT(bugprone-empty-catch)
+      }
+    }
+    throw;
+  }
+}
+
 void DefaultLanguageServer::onBuildPhase(DocumentState reached,
                                          std::span<Document* const>,
                                          const CancellationToken&) {
-  if (reached == DocumentState::Linked)
+  if (reached == DocumentState::Linked) {
     clearRemoved();
-  else if (reached == DocumentState::Validated)
+  } else if (reached == DocumentState::Validated) {
+    _buildFailureShown = false;
     publishValidated();
+  }
 }
 
 void DefaultLanguageServer::onDocumentPhase(Document& document,

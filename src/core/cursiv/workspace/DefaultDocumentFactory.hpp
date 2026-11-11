@@ -39,6 +39,11 @@ class DefaultDocumentFactory : public DocumentFactory,
   Document& attachTextDocument(Document& document,
                                TextDocument textDocument) const override;
 
+  bool updateTextDocument(
+      Document& document,
+      std::span<const TextDocumentContentChangeEvent> changes,
+      std::int64_t version) const override;
+
   Document& attachVersion(Document& document,
                           std::int64_t version) const override;
   ~DefaultDocumentFactory() noexcept override = default;

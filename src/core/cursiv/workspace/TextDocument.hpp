@@ -36,15 +36,19 @@ struct TextEdit {
 class TextDocument {
  public:
   TextDocument() = default;
-  // The line index guards itself, which is what makes this non-copyable; a
-  // document is created once and moved into place.
+  // A move takes the line index the source has built. The index guards
+  // itself, which is what makes a document non-copyable.
   TextDocument(const TextDocument&) = delete;
   TextDocument& operator=(const TextDocument&) = delete;
   TextDocument(TextDocument&& o) noexcept
       : _uri(std::move(o._uri)),
         _languageId(std::move(o._languageId)),
         _version(o._version),
-        _text(std::move(o._text)) {
+        _text(std::move(o._text)),
+        _lineStarts(std::move(o._lineStarts)),
+        _asciiLines(std::move(o._asciiLines)),
+        _wellFormedLines(std::move(o._wellFormedLines)),
+        _lineIndexReady(o._lineIndexReady.load(std::memory_order_relaxed)) {
     o.setText({});
   }
   TextDocument& operator=(TextDocument&& o) noexcept;

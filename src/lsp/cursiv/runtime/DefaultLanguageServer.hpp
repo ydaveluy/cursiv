@@ -285,6 +285,12 @@ class DefaultLanguageServer : public LanguageServer,
   // installs; a build of them follows, even when `mutate` fails.
   void writeAndPublish(std::size_t most,
                        cursiv::function_ref<void(TextChanges&)> mutate);
+  // Every update a write builds. A failure other than a cancellation is shown
+  // to the user once until a build validates again, then goes on.
+  void buildUpdate(std::span<const std::string_view> changed,
+                   std::span<const std::string_view> deleted,
+                   const CancellationToken& token);
+  void showError(std::string message) const;
   // The notebook receives a notification, then its cells move through
   // `writeAndPublish`.
   void deliverThenWrite(const NotebookDocuments* notebooks,
@@ -343,6 +349,8 @@ class DefaultLanguageServer : public LanguageServer,
   // Set by a handshake with folders: a request routed before the scan waits
   // for it.
   std::atomic<bool> _scanPending = false;
+  // A failed build was shown; a build that validates clears it.
+  std::atomic<bool> _buildFailureShown = false;
   // Set at `initialize`, used at `initialized`: nothing is scanned before the
   // client acknowledges the handshake.
   std::vector<WorkspaceFolder> _folders;

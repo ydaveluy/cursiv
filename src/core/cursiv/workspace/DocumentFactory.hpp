@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -51,6 +52,14 @@ class DocumentFactory {
   // the layer that holds the new text.
   virtual Document& attachTextDocument(Document& document,
                                        TextDocument textDocument) const = 0;
+
+  // Applies the changes to the document's own text, in place, and takes it back
+  // to `Changed`. False, with nothing touched, when a lone change rewrites its
+  // range with the same bytes or there is no change.
+  virtual bool updateTextDocument(
+      Document& document,
+      std::span<const TextDocumentContentChangeEvent> changes,
+      std::int64_t version) const = 0;
 
   // The client's version over bytes that did not move. An open of a document
   // the scan already read leaves the disk's version 0 on it otherwise, and

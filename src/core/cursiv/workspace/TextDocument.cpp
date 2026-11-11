@@ -98,10 +98,19 @@ void splice_flags(std::vector<std::uint64_t>& flags, std::size_t lines,
 }  // namespace
 
 TextDocument& TextDocument::operator=(TextDocument&& o) noexcept {
+  if (this == &o) return *this;
   _uri = std::move(o._uri);
   _languageId = std::move(o._languageId);
   _version = o._version;
-  setText(std::move(o._text));
+  {
+    const std::scoped_lock lock(_lineIndexMutex);
+    _text = std::move(o._text);
+    _lineStarts = std::move(o._lineStarts);
+    _asciiLines = std::move(o._asciiLines);
+    _wellFormedLines = std::move(o._wellFormedLines);
+    _lineIndexReady.store(o._lineIndexReady.load(std::memory_order_relaxed),
+                          std::memory_order_release);
+  }
   o.setText({});
   return *this;
 }

@@ -142,4 +142,20 @@ Document& DefaultDocumentFactory::attachTextDocument(
   return document;
 }
 
+bool DefaultDocumentFactory::updateTextDocument(
+    Document& document, std::span<const TextDocumentContentChangeEvent> changes,
+    std::int64_t version) const {
+  if (changes.empty()) return false;
+  const TextDocument& text = document.textDocument();
+  // Only a lone change is compared, over its own range.
+  if (const TextDocumentContentChangeEvent& c = changes.front();
+      changes.size() == 1 &&
+      (c.range ? text.getText(*c.range) : text.getText()) == c.text)
+    return false;
+  // The tree goes before the bytes it slices move.
+  dropTree(document);
+  TextDocument::update(textDocumentOf(document), changes, version);
+  return true;
+}
+
 }  // namespace cursiv
