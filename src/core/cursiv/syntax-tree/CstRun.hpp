@@ -208,7 +208,10 @@ class CstRun {
                                  cap * sizeof(CstNode), alignof(CstNode)))
                            : new CstNode[cap];
     for (std::size_t i = 0; i < _records; ++i) q[i] = _r[i];
-    if (_mem == nullptr) delete[] _r;
+    if (_mem == nullptr)
+      delete[] _r;
+    else if (_r != nullptr)
+      _mem->deallocate(_r, _cap * sizeof(CstNode), alignof(CstNode));
     _r = q;
     _cap = cap;
     rearm();

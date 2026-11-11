@@ -57,8 +57,9 @@ class AstArena {
 
  private:
   // Nodes are allocated from chunks of the pool, which owns them and frees
-  // them all at once.
-  static constexpr std::size_t kChunk = static_cast<std::size_t>(64u * 1024u);
+  // them all at once. A small chunk lets a small document's nodes share the
+  // block its records came from.
+  static constexpr std::size_t kChunk = static_cast<std::size_t>(16u * 1024u);
 
   // Eight, not `max_align_t`'s sixteen: every node size is rounded up to this,
   // and sixteen would pad about half of the AST classes.

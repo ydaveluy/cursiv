@@ -61,6 +61,18 @@ void* BlockArena::do_allocate(std::size_t bytes, std::size_t align) {
   return at;
 }
 
+void BlockArena::do_deallocate(void* p, std::size_t bytes,
+                               std::size_t align) noexcept {
+  if (sizeof(Block) + align + bytes <= kCap / 2) return;
+  for (Block** at = &_blocks; *at != nullptr; at = &(*at)->prev)
+    if (aligned(reinterpret_cast<char*>(*at + 1), align) == p) {
+      Block* const gone = *at;
+      *at = gone->prev;
+      _upstream->deallocate(gone, gone->size, gone->align);
+      return;
+    }
+}
+
 void BlockArena::release() noexcept {
   while (_blocks != nullptr) {
     Block* const prev = _blocks->prev;

@@ -4562,9 +4562,23 @@ void a_request_past_the_address_space_is_refused() {
   CHECK(reinterpret_cast<std::uintptr_t>(pool.allocate(64, 16)) % 16 == 0);
 }
 
+// A run that outgrows a block of its own gives it back: the nodes that follow
+// the records fit in what it left.
+void an_outgrown_run_gives_its_buffer_back() {
+  LinearMemory memory;
+  cursiv::detail::BlockArena pool(std::size_t{64} << 10, &memory);
+  cursiv::CstRun run;
+  run.bind(&pool);
+  for (cursiv::TextOffset i = 0; i < (1u << 21); ++i) run.leaf(i, i + 1, 0);
+  const std::size_t peak = memory.peak;
+  for (int i = 0; i < 256; ++i) (void)pool.allocate(std::size_t{64} << 10, 8);
+  CHECK(memory.peak == peak);
+}
+
 void run() {
   a_growing_document_reuses_its_blocks();
   a_request_past_the_address_space_is_refused();
+  an_outgrown_run_gives_its_buffer_back();
 }
 
 }  // namespace block_arena

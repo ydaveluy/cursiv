@@ -7,8 +7,9 @@
 namespace cursiv::detail {
 
 // Blocks grow from `first` bytes to a cap and then keep that size; a request
-// larger than half the cap gets a block of its own. A reparse then finds
-// freed blocks of the sizes it asks for again, which Wasm memory needs.
+// larger than half the cap gets a block of its own, which goes back when it is
+// deallocated. A reparse then finds freed blocks of the sizes it asks for
+// again, which Wasm memory needs.
 class BlockArena final : public std::pmr::memory_resource {
  public:
   explicit BlockArena(std::size_t first, std::pmr::memory_resource* upstream =
@@ -31,7 +32,8 @@ class BlockArena final : public std::pmr::memory_resource {
   };
 
   void* do_allocate(std::size_t bytes, std::size_t align) override;
-  void do_deallocate(void*, std::size_t, std::size_t) noexcept override {}
+  void do_deallocate(void* p, std::size_t bytes,
+                     std::size_t align) noexcept override;
   [[nodiscard]] bool do_is_equal(
       const std::pmr::memory_resource& other) const noexcept override {
     return this == &other;
