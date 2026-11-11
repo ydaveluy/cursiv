@@ -1124,30 +1124,51 @@ void many_keywords_spell_on_a_small_stack() {
 // A keyword of twelve Greek letters whose cases start on different bytes has
 // 4 096 spellings, more than are cut. Trivia that starts with its letters is
 // refused where it reads on past the keyword by a byte or a scalar out of the
-// word class, not where it reads on by word bytes or scalars alone.
+// word class, or from within a nested run, not where it reads on by word
+// bytes or scalars alone.
 void trivia_past_an_uncut_keyword_is_refused() {
-  const auto why = [](std::uint8_t flags, std::string_view rest) {
+  using cursiv::detail::ImageDesc;
+  using cursiv::detail::ImageKind;
+  const auto spelled = [](RuntimeGrammar& g, std::uint8_t guard) {
+    return g.put({.kind = ImageKind::lit,
+                  .flags = static_cast<std::uint8_t>(kLitFolded | guard),
+                  .text = "ΥΠΕΡΣΥΝΤΡΙΠΤΙΚΟΤΑΤΟΣ"});
+  };
+  // `remark(g, r)` writes the body of trivia terminal `r`.
+  const auto why = [&](const auto& remark) {
     RuntimeGrammar g;
     g.wordClass = "0-9A-Z_a-zΑ-Ωα-ω";
-    const auto spelled = [&](std::uint8_t guard) {
-      return g.put({.kind = cursiv::detail::ImageKind::lit,
-                    .flags = static_cast<std::uint8_t>(kLitFolded | guard),
-                    .text = "ΥΠΕΡΣΥΝΤΡΙΠΤΙΚΟΤΑΤΟΣ"});
-    };
-    g.ignored.push_back(g.terminal(
-        "REMARK", g.seq({spelled(0),
-                         g.many(g.put({.kind = cursiv::detail::ImageKind::cpset,
-                                       .flags = flags,
-                                       .text = rest}))})));
+    auto* trivia = g.terminal("REMARK", g.token("x"));
+    remark(g, trivia);
+    g.ignored.push_back(trivia);
     auto* root = g.node("Root");
-    g.body(root, g.member("v", spelled(kLitGuardWord)));
+    g.body(root, g.member("v", spelled(g, kLitGuardWord)));
     g.entry = root;
     return ll_build_program(g.lowered<LlLowered>(ll_lower)).cfg.lowerWhy;
   };
-  CHECK(why(0, "abc") == LowerFail::none);
-  CHECK(why(0, "α-ω") == LowerFail::none);
-  CHECK(why(kCpNot, "\n") == LowerFail::keywordSpellings);
-  CHECK(why(0, "α-ωΪ") == LowerFail::keywordSpellings);
+  const auto reads_on = [&](std::uint8_t flags, std::string_view rest) {
+    return why([&](RuntimeGrammar& g, auto* trivia) {
+      g.body(trivia,
+             g.seq({spelled(g, 0), g.many(g.put({.kind = ImageKind::cpset,
+                                                 .flags = flags,
+                                                 .text = rest}))}));
+    });
+  };
+  CHECK(reads_on(0, "abc") == LowerFail::none);
+  CHECK(reads_on(0, "α-ω") == LowerFail::none);
+  CHECK(reads_on(kCpNot, "\n") == LowerFail::keywordSpellings);
+  CHECK(reads_on(0, "α-ωΪ") == LowerFail::keywordSpellings);
+  // A nested run opened by the keyword's first letters, closed by `}`.
+  CHECK(why([](RuntimeGrammar& g, auto* trivia) {
+          const ImageDesc* open = g.token("ΥΠΕΡ");
+          const ImageDesc* close = g.token("}");
+          const ImageDesc* other = g.seq(
+              {g.group(ImageKind::notOf, {open}),
+               g.group(ImageKind::notOf, {close}),
+               g.put({.kind = ImageKind::cpset, .flags = kCpNot, .text = ""})});
+          g.body(trivia,
+                 g.seq({open, g.many(g.alt({g.call(trivia), other})), close}));
+        }) == LowerFail::keywordSpellings);
 }
 
 // An expression nested thousands deep, in a rule, in a terminal that calls

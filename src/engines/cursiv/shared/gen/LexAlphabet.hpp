@@ -91,8 +91,8 @@ struct LexAlphabet {
   template <class Cfg>
   void uncut_keywords(Cfg& g) const {
     const ByteSet* const sets = g.sets.data();
-    // Whether `sub` reads a byte or scalar none of the sets `refused` refuses.
-    const auto reads_free = [&](const std::vector<int>& sub,
+    // Whether `side` reads a byte or scalar none of the sets `refused` refuses.
+    const auto reads_free = [&](const LexWalkSide& side,
                                 std::initializer_list<int> refused) {
       ByteSet out, leads;
       for (const int r : refused) {
@@ -101,23 +101,22 @@ struct LexAlphabet {
         leads |= lex_decode_bytes(g, static_cast<std::uint16_t>(r));
       }
       leads.andnot(out);
-      const ByteSet read = lex_subset_reads(nfa, sets, sub);
+      const ByteSet read = lex_side_reads(nfa, sets, side);
       if (read.intersects(lex_not(out | leads))) return true;
       if (!read.intersects(leads)) return false;
       LexCodePoints cps;
       for (const int r : refused)
         if (r >= 0) cps.unite(lex_set_cps(g, static_cast<std::uint16_t>(r)));
-      return lex_reads_outside(nfa, sets, sub, cps, leads);
+      return lex_reads_outside(nfa, sets, side.first, cps, leads);
     };
-    // Trivia reads on by its edges, by a relay that reads text, or past a
-    // refusal of one class; other assertions are left to the walk.
-    const auto reads_past = [&](const std::vector<int>& x,
-                                const std::vector<int>& y) {
-      return std::ranges::any_of(x, [&](int s) {
+    // Trivia reads on by its edges or its runs, by a relay that reads text, or
+    // past a refusal of one class; other assertions are left to the walk.
+    const auto reads_past = [&](const LexWalkSide& x, const LexWalkSide& y) {
+      return std::ranges::any_of(x.first, [&](int s) {
         const LexNfaState& st = nfa.s[static_cast<std::size_t>(s)];
         if (st.accept < 0) return false;
         if (reads_free(y, {st.bound})) return true;
-        return std::ranges::any_of(y, [&](int q) {
+        return std::ranges::any_of(y.first, [&](int q) {
           const int r = nfa.s[static_cast<std::size_t>(q)].relay;
           if (r < 0) return false;
           const LexRelayBuild& relay = nfa.relays[static_cast<std::size_t>(r)];
@@ -127,7 +126,7 @@ struct LexAlphabet {
           const LexNode& e = g.lex[relay.row.predicate];
           return e.kind == LexKind::nguard && e.a == kNoSet && e.min == 1 &&
                  e.max == 0 &&
-                 reads_free(nfa.eclose(relay.resumeOut),
+                 reads_free({nfa.eclose(relay.resumeOut), {}},
                             {st.bound, g.lexChild[e.b]});
         });
       });
@@ -159,12 +158,12 @@ struct LexAlphabet {
                  lex_word_set(g, static_cast<std::uint16_t>(st.bound))));
       });
     };
-    return lex_pair_search(
-        nfa, g.sets.data(), a, b,
-        [&](const std::vector<int>& x, const std::vector<int>& y) {
-          return lex_accepts(nfa, x) && lex_accepts(nfa, y) &&
-                 outranks(x) == outranks(y);
-        });
+    return lex_pair_search(nfa, g.sets.data(), a, b,
+                           [&](const LexWalkSide& x, const LexWalkSide& y) {
+                             return lex_accepts(nfa, x.first) &&
+                                    lex_accepts(nfa, y.first) &&
+                                    outranks(x.first) == outranks(y.first);
+                           });
   }
 
   // Two trivia that read one text at one rank leave the tree to the order

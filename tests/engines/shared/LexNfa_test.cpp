@@ -224,10 +224,11 @@ void an_assertion_is_entered_or_not() {
   };
   CHECK(cursiv::engine::lex_pair_search(
             n, sets, either, bang,
-            [&](const std::vector<int>& x, const std::vector<int>& y) {
-              return cursiv::engine::lex_accepts(n, x) &&
-                     cursiv::engine::lex_accepts(n, y) &&
-                     ranked(x) == ranked(y);
+            [&](const cursiv::engine::LexWalkSide& x,
+                const cursiv::engine::LexWalkSide& y) {
+              return cursiv::engine::lex_accepts(n, x.first) &&
+                     cursiv::engine::lex_accepts(n, y.first) &&
+                     ranked(x.first) == ranked(y.first);
             }) == cursiv::engine::LexOverlap::found);
   // Sixteen assertions at one position.
   int many = asserting(pattern);
@@ -265,9 +266,10 @@ void a_nested_run_is_followed_at_depth_zero() {
   const auto ties = [&](int text) {
     return cursiv::engine::lex_pair_search(
         n, sets, comment, text,
-        [&](const std::vector<int>& x, const std::vector<int>& y) {
-          return cursiv::engine::lex_accepts(n, x) &&
-                 cursiv::engine::lex_accepts(n, y);
+        [&](const cursiv::engine::LexWalkSide& x,
+            const cursiv::engine::LexWalkSide& y) {
+          return cursiv::engine::lex_accepts(n, x.first) &&
+                 cursiv::engine::lex_accepts(n, y.first);
         });
   };
   using cursiv::engine::LexOverlap;

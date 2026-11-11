@@ -82,15 +82,15 @@ class LexSeparation {
         std::uint64_t{prefixes} << 32 | std::uint64_t{a} << 16 | b;
     const auto [at, fresh] = _apart.try_emplace(key, false);
     if (fresh)
-      at->second =
-          lex_pair_search(
-              _alphabet.nfa, _g.sets.data(), _alphabet.startOf[a],
-              _alphabet.startOf[b],
-              [&](const std::vector<int>& x, const std::vector<int>& y) {
-                const bool first = lex_accepts(_alphabet.nfa, x);
-                const bool second = lex_accepts(_alphabet.nfa, y);
-                return prefixes ? first || second : first && second;
-              }) == LexOverlap::none;
+      at->second = lex_pair_search(
+                       _alphabet.nfa, _g.sets.data(), _alphabet.startOf[a],
+                       _alphabet.startOf[b],
+                       [&](const LexWalkSide& x, const LexWalkSide& y) {
+                         const bool first = lex_accepts(_alphabet.nfa, x.first);
+                         const bool second =
+                             lex_accepts(_alphabet.nfa, y.first);
+                         return prefixes ? first || second : first && second;
+                       }) == LexOverlap::none;
     return at->second;
   }
 };

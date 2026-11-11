@@ -190,7 +190,7 @@ inline LexWalkSide lex_side_step(const LexNfaPool& n, const ByteSet* sets,
 // `incomplete` where it had to assume an assertion or stopped short.
 enum class LexOverlap : std::uint8_t { none, found, incomplete };
 
-// Whether some text leads `a` and `b` to subsets `done` takes together. A pair
+// Whether some text leads `a` and `b` to sides `done` takes together. A pair
 // reached past an assertion proves nothing, and a walk past the budget stops
 // unsure.
 template <class Done>
@@ -226,7 +226,7 @@ LexOverlap lex_pair_search(const LexNfaPool& n, const ByteSet* sets, int a,
     const auto [p, q, assumed] = work[i];
     // An assumed pair can only leave the walk unsure.
     if (assumed && unsure) continue;
-    if (done(p.first, q.first)) {
+    if (done(p, q)) {
       if (!assumed) return LexOverlap::found;
       unsure = true;
       continue;
@@ -269,10 +269,10 @@ inline bool lex_recognizes(const LexNfaPool& n, const std::vector<int>& sub) {
 // the walk unsure.
 inline LexOverlap lex_prefix_overlap(const LexNfaPool& n, const ByteSet* sets,
                                      int a, int b) {
-  return lex_pair_search(
-      n, sets, a, b, [&](const std::vector<int>& x, const std::vector<int>&) {
-        return lex_accepts(n, x);
-      });
+  return lex_pair_search(n, sets, a, b,
+                         [&](const LexWalkSide& x, const LexWalkSide&) {
+                           return lex_accepts(n, x.first);
+                         });
 }
 
 // The subsets a walk from `from` stands in once it has read one of the
