@@ -991,10 +991,6 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         A.cap_hit("more than 16 conditions apply to one token");
         return;
       }
-      if (progs.size() >= 0xffffu) {
-        A.cap_hit("it needs more than 65 535 sets of conditions");
-        return;
-      }
       const std::size_t nOut = std::size_t{1} << prog.conds.size();
       prog.to.assign(nOut, LrGuard::kNoState);
       prog.alts.assign(nOut, 0);
@@ -1050,6 +1046,10 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
                    progKey);
       if (const auto [at, fresh] = progIds.try_emplace(progKey, progId);
           fresh) {
+        if (progs.size() >= 0xffffu) {
+          A.cap_hit("it needs more than 65 535 sets of conditions");
+          return;
+        }
         progs.push_back(std::move(prog));
       } else {
         // An earlier program decides the same: this symbol's edges share it.

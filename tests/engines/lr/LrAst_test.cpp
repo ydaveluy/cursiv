@@ -9,17 +9,18 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "adopt/generated/G/Module.hpp"
 #include "astfusedlr/generated/Lr/Module.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/lr/gen/LrLowering.hpp"
+#include "cursiv/lr/table/LrFusedRow.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/lr/gen/LrLowering.hpp"
-#include "cursiv/lr/table/LrFusedRow.hpp"
-#include "cursiv/Check.hpp"
 #include "engines/lr/AdoptEntryGrammar.hpp"
 #include "engines/lr/AstFusedGrammar.hpp"
 #include "engines/lr/ParseChecks.hpp"
@@ -913,34 +914,29 @@ void a_run_of_actions_has_no_cap() {
   // both engines; the independent join above still checks forty actions.
 }
 
-// A collision-free table needs one slot, but a matching hash still needs the
-// whole key. The fallback must find entries displaced by real collisions.
+// A cell is shared by the rows packed over it: its entry names the `held` it
+// holds, so another row's pair, a row with no pair, or an `over` past every
+// pair's is a miss.
 void fused_lookup_checks_the_whole_key() {
-  const auto check = []<bool CollisionFree>(
-                         const std::array<LrFusedRow, 3>& rows) {
-    constexpr unsigned slots = 8;
-    constexpr std::uint32_t mul = 0x20000000u;  // slot is the low three bits
-    constexpr ElementId first = 100;
-    std::array<std::uint32_t, slots> keys{};
-    std::array<std::uint16_t, slots> values{};
-    lr_fused_hash(rows.data(), rows.size(), slots, mul, keys.data(),
-                   values.data());
-    constexpr std::array<ElementId, 5> held{0, 1, 4, 9, kNoElement};
-    constexpr std::array<ElementId, 5> over{0, 2, 5, 6, kNoElement};
-    for (const ElementId h : held)
-      for (const ElementId o : over) {
-        ElementId expected = kNoElement;
-        for (unsigned i = 0; i < rows.size(); ++i)
-          if (rows[i].node == h && rows[i].site == o)
-            expected = static_cast<ElementId>(first + i);
-        CHECK(lr_fused_probe<CollisionFree>(
-                  keys.data(), values.data(), mul, lr_fused_shift(slots),
-                  slots - 1, first, h, o) == expected);
-      }
-  };
-  // Zero is a valid key. Only the pair of sentinels denotes an empty slot.
-  check.operator()<true>({{{0, 0}, {4, 5}, {9, 6}}});
-  check.operator()<false>({{{1, 2}, {4, 2}, {9, 2}}});
+  // Zero is a valid pair; three rows share `over` 2.
+  constexpr std::array<LrFusedRow, 6> rows{
+      {{0, 0}, {4, 5}, {9, 6}, {1, 2}, {4, 2}, {9, 2}}};
+  std::vector<std::uint32_t> base;
+  unsigned width = 0;
+  const std::vector<std::uint32_t> entry =
+      lr_fused_pack(rows.data(), rows.size(), base, width);
+  constexpr ElementId first = 100;
+  constexpr std::array<ElementId, 6> held{0, 1, 2, 4, 9, kNoElement};
+  constexpr std::array<ElementId, 5> over{0, 2, 5, 6, kNoElement};
+  for (const ElementId h : held)
+    for (const ElementId o : over) {
+      ElementId expected = kNoElement;
+      for (unsigned i = 0; i < rows.size(); ++i)
+        if (rows[i].node == h && rows[i].site == o)
+          expected = static_cast<ElementId>(first + i);
+      CHECK(lr_fused_probe(base.data(), static_cast<unsigned>(base.size()),
+                           entry.data(), width, first, h, o) == expected);
+    }
 }
 
 }  // namespace

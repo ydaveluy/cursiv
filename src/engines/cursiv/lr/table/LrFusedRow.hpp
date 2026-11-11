@@ -3,8 +3,8 @@
 #pragma once
 
 #include <algorithm>
-#include <bit>
 #include <cstdint>
+#include <vector>
 
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/utils/macros.hpp"
@@ -18,68 +18,63 @@ struct LrFusedRow {
   ElementId site = kNoElement;
 };
 
-// The index over the pairs is one open-addressed table keyed by both halves:
-// a probe is one load on the latency-bound path. Its multiplier is searched
-// per grammar, since which one scatters a table's keys is a fact about them.
-inline constexpr std::uint32_t kLrNoFusedKey = 0xFFFFFFFFu;
+// The index over the pairs is a row displacement: the pair of `held` and
+// `over` is the entry at `base[held] + over`, which names `held` beside the
+// pair's index. A lookup is two loads and one check, with no probing.
+inline constexpr std::uint32_t kLrNoFusedEntry = 0xFFFFFFFFu;
 
 constexpr std::uint32_t lr_fused_key(ElementId held, ElementId over) {
   return (static_cast<std::uint32_t>(held) << 16) | over;
 }
 
-// Only `kNoElement` on both halves packs to the empty marker, and a real
-// pair's halves are grammar rows below it.
-static_assert(kLrNoFusedKey == lr_fused_key(kNoElement, kNoElement),
-              "the empty marker of a fused table is the pair of no elements");
-
-// Twice the pairs, rounded up: at half load a probe reads one slot.
-constexpr unsigned lr_fused_slots(unsigned nfused) {
-  return std::max(8u, std::bit_ceil(2 * nfused));
-}
-constexpr unsigned lr_fused_shift(unsigned slots) {
-  return 32u - static_cast<unsigned>(std::countr_zero(slots));
-}
-
-// Linear probing; the value is the row's own index, since a row's position
-// is its element id.
-constexpr void lr_fused_hash(const LrFusedRow* fused, unsigned nfused,
-                             unsigned slots, std::uint32_t mul,
-                             std::uint32_t* key, std::uint16_t* val) {
-  const unsigned shift = lr_fused_shift(slots);
-  const unsigned mask = slots - 1;
-  for (unsigned i = 0; i < slots; ++i) {
-    key[i] = kLrNoFusedKey;
-    val[i] = 0;
-  }
+// The entries, and `base` for every `held` below the largest pair's, rows
+// placed fullest first at the lowest offset where their cells are free.
+inline std::vector<std::uint32_t> lr_fused_pack(
+    const LrFusedRow* fused, unsigned nfused, std::vector<std::uint32_t>& base,
+    unsigned& width) {
+  std::vector<std::vector<unsigned>> rows;
+  width = 0;
   for (unsigned j = 0; j < nfused; ++j) {
-    const std::uint32_t k = lr_fused_key(fused[j].node, fused[j].site);
-    unsigned h = (k * mul) >> shift;
-    while (key[h] != kLrNoFusedKey) h = (h + 1) & mask;
-    key[h] = k;
-    val[h] = static_cast<std::uint16_t>(j);
+    if (fused[j].node >= rows.size()) rows.resize(fused[j].node + 1u);
+    rows[fused[j].node].push_back(j);
+    width = std::max(width, fused[j].site + 1u);
   }
+  std::vector<unsigned> order;
+  for (unsigned h = 0; h < rows.size(); ++h)
+    if (!rows[h].empty()) order.push_back(h);
+  std::ranges::stable_sort(order, [&](unsigned x, unsigned y) {
+    return rows[x].size() > rows[y].size();
+  });
+  base.assign(rows.size(), 0);
+  std::vector<std::uint32_t> entry;
+  const auto free = [&](std::size_t at) {
+    return at >= entry.size() || entry[at] == kLrNoFusedEntry;
+  };
+  for (const unsigned h : order) {
+    std::uint32_t b = 0;
+    while (!std::ranges::all_of(
+        rows[h], [&](unsigned j) { return free(b + fused[j].site); }))
+      ++b;
+    for (const unsigned j : rows[h]) {
+      if (b + fused[j].site >= entry.size())
+        entry.resize(b + fused[j].site + 1u, kLrNoFusedEntry);
+      entry[b + fused[j].site] = h << 16 | j;
+    }
+    base[h] = b;
+  }
+  entry.resize(*std::ranges::max_element(base) + width, kLrNoFusedEntry);
+  return entry;
 }
 
-// Emptiness is tested first: `kNoElement` on both halves is the empty marker.
-template <bool CollisionFree = false>
+// A `held` or an `over` past the pairs' is a miss before any load.
+template <class Offset>
 CURSIV_ALWAYS_INLINE constexpr ElementId lr_fused_probe(
-    const std::uint32_t* key, const std::uint16_t* val, std::uint32_t mul,
-    unsigned shift, unsigned mask, ElementId first, ElementId held,
-    ElementId over) {
-  const std::uint32_t k = lr_fused_key(held, over);
-  unsigned h = (k * mul) >> shift;
-  // When the generator placed every key at its first slot, a different key
-  // cannot be displaced farther down the run: one comparison proves a miss.
-  if constexpr (CollisionFree) {
-    if (k == kLrNoFusedKey || key[h] != k) return kNoElement;
-    return static_cast<ElementId>(first + val[h]);
-  }
-  for (;;) {
-    const std::uint32_t at = key[h];
-    if (at == kLrNoFusedKey) return kNoElement;
-    if (at == k) return static_cast<ElementId>(first + val[h]);
-    h = (h + 1) & mask;
-  }
+    const Offset* base, unsigned rows, const std::uint32_t* entry,
+    unsigned width, ElementId first, ElementId held, ElementId over) {
+  if (held >= rows || over >= width) return kNoElement;
+  const std::uint32_t at = entry[base[held] + over];
+  return at >> 16 == held ? static_cast<ElementId>(first + (at & 0xFFFFu))
+                          : kNoElement;
 }
 
 }  // namespace cursiv::engine

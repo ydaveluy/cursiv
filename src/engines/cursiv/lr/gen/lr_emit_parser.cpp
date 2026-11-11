@@ -489,60 +489,6 @@ inline constexpr RowsTape kRowsTape{};
     }
   }
 
-  // The multiplier that scatters these keys best, a tie keeping the first, and
-  // whether each key then sits at its first slot. A parse probes this table on
-  // nearly every reduce.
-  std::pair<std::uint32_t, bool> fused_mul(unsigned slots) const {
-    static constexpr unsigned kTries = 16384;
-    const unsigned shift = lr_fused_shift(slots), mask = slots - 1;
-    std::vector<std::uint32_t> keys(a.nfused);
-    for (unsigned j = 0; j < a.nfused; ++j)
-      keys[j] = lr_fused_key(a.fused[j].node, a.fused[j].site);
-    std::vector<std::uint8_t> marks(slots, 0);
-    std::uint8_t* const seen = marks.data();
-    const std::uint32_t* const kp = keys.data();
-    const std::size_t n = keys.size();
-    std::uint8_t gen = 0;
-    // The probes past each key's first; a try that reaches `cap` has lost.
-    const auto spill = [&](std::uint32_t mul, unsigned cap) {
-      if (++gen == 0) {
-        std::ranges::fill(marks, std::uint8_t{0});
-        gen = 1;
-      }
-      unsigned extra = 0;
-      const auto place = [&](std::uint32_t k) {
-        unsigned h = (k * mul) >> shift;
-        while (seen[h] == gen) {
-          h = (h + 1) & mask;
-          ++extra;
-        }
-        seen[h] = gen;
-      };
-      std::size_t j = 0;
-      for (; j + 4 <= n; j += 4) {
-        place(kp[j]);
-        place(kp[j + 1]);
-        place(kp[j + 2]);
-        place(kp[j + 3]);
-        if (extra >= cap) return cap;
-      }
-      for (; j < n; ++j) place(kp[j]);
-      return std::min(extra, cap);
-    };
-    std::uint32_t best = 0x9E3779B1u;
-    unsigned bestExtra = spill(best, ~0u);
-    std::uint32_t x = best;
-    for (unsigned i = 0; i < kTries && bestExtra != 0; ++i) {
-      x = x * 1664525u + 1013904223u;
-      const std::uint32_t m = x | 1u;
-      if (const unsigned v = spill(m, bestExtra); v < bestExtra) {
-        bestExtra = v;
-        best = m;
-      }
-    }
-    return {best, bestExtra == 0};
-  }
-
   void emit_folds() {
     if (a.nfused == 0) {
       write(R"(inline ::cursiv::ElementId folds(::cursiv::ElementId,
@@ -553,31 +499,24 @@ inline constexpr RowsTape kRowsTape{};
 )");
       return;
     }
-    const unsigned slots = lr_fused_slots(a.nfused);
-    const auto [mul, collisionFree] = fused_mul(slots);
-    std::vector<std::uint32_t> fk(slots, 0);
-    std::vector<std::uint16_t> fv(slots, 0);
-    lr_fused_hash(a.fused.data(), a.nfused, slots, mul, fk.data(), fv.data());
-    array("inline constexpr ::std::uint32_t kFusedKey[]", slots,
-          [&](std::size_t i) { write(fk[i]); });
-    array("inline constexpr ::std::uint16_t kFusedVal[]", slots,
-          [&](std::size_t i) { write(fv[i]); });
+    std::vector<std::uint32_t> base;
+    unsigned width = 0;
+    const std::vector<std::uint32_t> entry =
+        lr_fused_pack(a.fused.data(), a.nfused, base, width);
+    const bool narrow = std::ranges::max(base) <= 0xFFFFu;
+    array(narrow ? "inline constexpr ::std::uint16_t kFusedBase[]"
+                 : "inline constexpr ::std::uint32_t kFusedBase[]",
+          base.size(), [&](std::size_t i) { write(base[i]); });
+    array("inline constexpr ::std::uint32_t kFusedEntry[]", entry.size(),
+          [&](std::size_t i) { write(entry[i]); });
     line(
         "inline constexpr ::cursiv::ElementId kFusedFirst = ", a.writes.nchains,
         ";\n"
-        "inline constexpr ::std::uint32_t kFusedMul = ",
-        mul,
-        "u;\n"
         "inline ::cursiv::ElementId folds(::cursiv::ElementId held, "
-        "::cursiv::ElementId over)"
-        " {\n"
-        "  return ::cursiv::engine::lr_fused_probe", collisionFree ? "<true>" : "",
-        "(kFusedKey, kFusedVal, "
-        "kFusedMul,"
-        " ",
-        lr_fused_shift(slots), "u, ", slots - 1u,
-        "u,"
-        " kFusedFirst, held, over);\n}\n");
+        "::cursiv::ElementId over) {\n"
+        "  return ::cursiv::engine::lr_fused_probe(kFusedBase, ",
+        base.size(), "u, kFusedEntry, ", width,
+        "u, kFusedFirst, held, over);\n}\n");
   }
 
   void emit_data() {
