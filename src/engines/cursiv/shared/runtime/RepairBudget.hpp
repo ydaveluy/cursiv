@@ -53,11 +53,18 @@ static_assert(repair_typo_cost(2, 12) < 2 * kRepairEdit,
 // The bytes of a lexical walk one unit of work pays for.
 inline constexpr TextOffset kRepairLexBytes = 32;
 
+// The largest count where a product or a sum would wrap: a bound derived from
+// a grammar or a document is never smaller for being large.
+constexpr std::uint64_t saturating_add(std::uint64_t a, std::uint64_t b) {
+  return a > ~std::uint64_t{0} - b ? ~std::uint64_t{0} : a + b;
+}
+constexpr std::uint64_t saturating_mul(std::uint64_t a, std::uint64_t b) {
+  return a != 0 && b > ~std::uint64_t{0} / a ? ~std::uint64_t{0} : a * b;
+}
+
 // The bytes of lexical walks the work left from `work` to `limit` pays for.
 inline std::uint64_t repair_bytes(std::uint64_t work, std::uint64_t limit) {
-  const std::uint64_t left = limit > work ? limit - work : 0;
-  return left > ~std::uint64_t{0} / kRepairLexBytes ? ~std::uint64_t{0}
-                                                    : left * kRepairLexBytes;
+  return saturating_mul(limit > work ? limit - work : 0, kRepairLexBytes);
 }
 
 // Work bounds per document, tuned on the recovery metric.
@@ -76,13 +83,10 @@ struct RepairBudget {
 };
 
 // What a parse of `len` bytes may spend: a bound given as the largest count
-// stays the largest, the sum saturating rather than wrapping.
+// stays the largest.
 inline std::uint64_t repair_allot(const RepairBudget& b, TextOffset len) {
-  constexpr std::uint64_t kAll = ~std::uint64_t{0};
-  const std::uint64_t perLen =
-      len != 0 && b.perByte > kAll / len ? kAll : b.perByte * len;
-  const std::uint64_t sum = perLen > kAll - b.floor ? kAll : b.floor + perLen;
-  return std::min(sum, b.perParse);
+  return std::min(saturating_add(saturating_mul(len, b.perByte), b.floor),
+                  b.perParse);
 }
 
 }  // namespace cursiv::engine

@@ -71,6 +71,13 @@ struct LexTape {
   std::uint16_t step(std::uint16_t s, unsigned char b) const {
     return T.next_byte(s, b);
   }
+  // The state a walk from `s` over `[from, end)` stands in.
+  std::uint16_t state_at(std::uint16_t s, const char* src, TextOffset from,
+                         TextOffset end) const {
+    for (; from < end && s != kDeadState; ++from)
+      s = step(s, static_cast<unsigned char>(src[from]));
+    return s;
+  }
   std::uint16_t accept(std::uint16_t s) const { return T.dfaAccept[s]; }
   CURSIV_ALWAYS_INLINE bool bound_has(std::uint16_t s, const char* src,
                                       TextOffset i, TextOffset len) const {
@@ -239,10 +246,10 @@ unsigned lex_reading_priority(const Tape& tape, const char* src, TextOffset len,
   auto st = tape.start(mode);
   TextOffset far = from, i = from;
   auto ended = kDeadState;
-  constexpr bool relays = requires { tape.relay(st); };
-  [[maybe_unused]] std::conditional_t<relays, LexRelayRun<Tape>, bool> run{};
+  [[maybe_unused]] std::conditional_t<Tape::kRelays, LexRelayRun<Tape>, bool>
+      run{};
   for (;;) {
-    if constexpr (relays)
+    if constexpr (Tape::kRelays)
       for (auto k = tape.relay(st); k != kNoRelay; k = tape.relay_of(k).next)
         run.launch(tape, k, src, len, from, i);
     if (i == end) {
@@ -256,7 +263,7 @@ unsigned lex_reading_priority(const Tape& tape, const char* src, TextOffset len,
   }
   auto priority =
       ended == kDeadState ? 0u : tape.priority(ended, term, src, end, len, far);
-  if constexpr (relays)
+  if constexpr (Tape::kRelays)
     if (run.any())
       run.finish(tape, src, len, far,
                  [&](SymbolId t, TextOffset e, unsigned as) {
@@ -303,7 +310,7 @@ CURSIV_NOINLINE Scan lex_unrefused_walk(const Tape& tape, const char* src,
   const auto refuses = [&](SymbolId t) {
     return t != kInvalidSymbol && tape.refuses(t, src + from, len - from);
   };
-  if constexpr (Hot && !requires { tape.relay(st); }) {
+  if constexpr (Hot && !Tape::kRelays) {
     for (TextOffset seen = far;;) {
       const SymbolId t = skipping.qualified(ended, src, out.end, len, seen);
       if (t == kInvalidSymbol) break;

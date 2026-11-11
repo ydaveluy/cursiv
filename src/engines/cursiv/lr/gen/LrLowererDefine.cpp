@@ -1,8 +1,9 @@
 #include <span>
 
 #include "cursiv/lr/gen/LrLowerer.hpp"
-#include "cursiv/lr/gen/lr_lower_define.hpp"
+#include "cursiv/lr/gen/lr_productions.hpp"
 #include "cursiv/lr/gen/lr_lower_epsilon.hpp"
+#include "cursiv/shared/gen/WrittenReads.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 
@@ -16,11 +17,9 @@ LrLowerSlot LrLowerer::infix_side(unsigned cfg, const void* row,
 
 void LrLowerer::emit_op(unsigned cfg, std::uint16_t lhs, ImageId op,
                         const void* opRow, const LrLowerSlot& left,
-                        const LrLowerSlot& right, const LrActs& node,
+                        const LrLowerSlot& right, const Acts& node,
                         std::uint8_t prec, Association group) {
-  const std::uint32_t opRule = op_rule_of(op);
-  const bool buildsNode =
-      opRule != kNoImage && (node_rule(opRule) || infix_rule(opRule));
+  const bool buildsNode = op_builds_node(op);
   const LrShapeId built = descend(build(cfg, op));
   std::vector children{built};
   if (_p.e[built].kind == LrShape::seq && _p.e[built].made.empty())
@@ -77,7 +76,7 @@ void LrLowerer::define_infix(unsigned cfg, std::uint32_t rule,
     _o.fault.raise(GrammarFaultCode::tooManyPrecedences, lhs);
     return;
   }
-  const LrActs node{row_id(st.climbRow)};
+  const Acts node{row_id(st.climbRow)};
   const LrLowerSlot left = infix_side(cfg, st.leftRow, nt_sym(lhs));
   const LrLowerSlot right = infix_side(cfg, st.rightRow, nt_sym(lhs));
   each_op(rule, [&](ImageId op, const void* row, std::uint8_t prec,
@@ -102,7 +101,10 @@ void LrLowerer::define_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs,
   }
   const LrShapeId at_ = descend(build(cfg, body_in(cfg, rule)));
   if (tail != 0) descend(ambient(at_, false, tail));
-  if (close_body(st, at_) && !descend(has_rows(body_in(cfg, rule))) &&
+  if (close_body(st, at_) &&
+      !descend(holds(
+          body_in(cfg, rule),
+          [](const ImageNode& n) { return is_directive_kind(n.kind); })) &&
       rule != _im.rule(*_d.entry))
     _p.passClose = _p.e[at_].made.back();
   descend(lr_emit_alts(_o, _p, lhs, at_, _p.e[at_].made, _p.e[at_].row));

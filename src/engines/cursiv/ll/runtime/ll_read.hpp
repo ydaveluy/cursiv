@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
@@ -153,7 +154,6 @@ CURSIV_ALWAYS_INLINE inline void ll_read_gap(LlContext& c, std::uint16_t mode,
   c.la = ll_cross_gap<T>(c, c.indentArena, c.indent, c.heldEnd, mode, p, head, sc,
                          [&](const Token& t) { c.pending.push_back(t); });
   c.pendEnd = p;
-  c.laValid = true;
   c.laMode = mode;
 }
 
@@ -164,7 +164,7 @@ template <const auto& T>
 CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
                                          Scan sc = {}) {
   if constexpr (kIndented<T>)
-    if (c.laValid) {
+    if (c.laMode != kNoMode) {
       // At the end of the input, the alphabet says whether a level closes
       // before the end, as a repair's read says it.
       if (c.la.sym == kEofSymbol &&
@@ -179,8 +179,10 @@ CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
         return;
       }
     }
-  TextOffset p = std::max(c.at, c.triviaAt);
-  if (c.laValid && c.la.sym != kInvalidSymbol && c.la.sym != kEofSymbol) {
+  assert(c.triviaAt >= c.at);
+  TextOffset p = c.triviaAt;
+  if (c.laMode != kNoMode && c.la.sym != kInvalidSymbol &&
+      c.la.sym != kEofSymbol) {
     p = c.la.begin;
     sc = ll_scan<T>(c, mode, p);
     if (sc.term == kInvalidSymbol || sc.end == p ||
@@ -203,12 +205,14 @@ CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
 template <const auto& T>
 CURSIV_ALWAYS_INLINE inline bool ll_probe(LlContext& c, std::uint16_t mode) {
   if (!ll_in_place<T>(c)) return false;
-  const TextOffset p = ll_past_skip_run<T>(c, mode, std::max(c.at, c.triviaAt));
+  assert(c.triviaAt >= c.at);
+  const TextOffset p = ll_past_skip_run<T>(c, mode, c.triviaAt);
   Token la{p, p, kEofSymbol, mode};
   if (p < c.len) {
     const Scan sc = ll_scan_text<T>(c.src, c.len, mode, p);
     if (sc.term == kInvalidSymbol || sc.end == p) return false;
-    if (T.terms[sc.term].trivia) {
+    const std::uint64_t visible = kLlVisibleTerms<T>[sc.term >> 6];
+    if (((visible >> (sc.term & 63)) & 1) == 0) {
       ll_peek_read<T>(c, mode, sc);
       return true;
     }
@@ -218,7 +222,6 @@ CURSIV_ALWAYS_INLINE inline bool ll_probe(LlContext& c, std::uint16_t mode) {
   c.pending.clear();
   c.pendEnd = p;
   c.la = la;
-  c.laValid = true;
   c.laMode = mode;
   return true;
 }
@@ -237,7 +240,7 @@ inline void ll_hold(LlContext& c) {
 // removes. `held` is the token held before, if any.
 template <const auto& T>
 inline void ll_rehold(LlContext& c, const Token& held, std::uint16_t mode) {
-  if (held.sym == kInvalidSymbol || !c.laValid) return;
+  if (held.sym == kInvalidSymbol || c.laMode == kNoMode) return;
   if (c.la == held) {
     c.la = held;
   } else if (c.la.mode == kNoMode) {
@@ -257,9 +260,8 @@ inline void ll_rehold(LlContext& c, const Token& held, std::uint16_t mode) {
 template <const auto& T>
 inline bool ll_held_takes(const LlContext& c, SymbolId term) {
   const LlLexTape<T> tape;
-  auto state = tape.start(c.la.mode);
-  for (auto i = c.la.begin; i < c.la.end && state != kDeadState; ++i)
-    state = tape.step(state, static_cast<unsigned char>(c.src[i]));
+  const auto state =
+      tape.state_at(tape.start(c.la.mode), c.src, c.la.begin, c.la.end);
   if (state == kDeadState) return false;
   TextOffset far = c.la.end;
   return tape.reserves(state, term, c.src, c.la.begin, c.la.end, c.len, far) ||
@@ -276,13 +278,11 @@ constexpr bool ll_lengthens(std::uint16_t mode, std::uint16_t sym) {
          T.mode_admits(T.longer_mode(mode), sym);
 }
 
-// A held token answers a point under another alphabet with the terminal the
+// A held token `mode` does not admit answers the point with the terminal the
 // lexer reads there, unless the held one removes it: another extent means a
 // longer match of a terminal that cannot follow, or a condition's own token.
 template <const auto& T>
-inline void ll_peek_held(LlContext& c, std::uint16_t mode) {
-  if (c.la.sym == kInvalidSymbol) return;
-  if (T.mode_admits(mode, c.la.sym)) return;
+CURSIV_NOINLINE inline void ll_peek_held(LlContext& c, std::uint16_t mode) {
   const Scan sc = ll_match_text<T>(c.src, c.len, mode, c.la.begin);
   if (sc.term == kInvalidSymbol || sc.end == c.la.begin) return;
   if (sc.end != c.la.end) {
@@ -307,26 +307,26 @@ inline Token ll_normal_token(const LlContext& c, const Token& token,
 
 template <const auto& T>
 CURSIV_ALWAYS_INLINE inline void ll_peek(LlContext& c, std::uint16_t mode) {
-  if (c.laValid && c.laMode == mode) [[likely]]
+  if (c.laMode == mode) [[likely]]
     return;
-  if (c.laValid && c.laMode == kLaHeld) {
-    ll_peek_held<T>(c, mode);
-    return;
-  }
   // A token matched under a wider alphabet is the token a narrower one
   // reads, as long as the narrower admits the terminal it matched: no
   // subset of the candidates can match further.
-  if (c.laValid && c.la.sym != kInvalidSymbol) {
-    bool physical = true;
+  if (c.laMode < T.nmodes) {
+    bool physical = c.la.sym != kInvalidSymbol;
     if constexpr (kIndented<T>)
       physical = c.la.sym != kEofSymbol && c.la.sym < T.nterms &&
                  T.terms[c.la.sym].synthetic == 0;
     if (physical &&
-        (ll_ends<T>(c, c.la.sym) ||
-         (T.mode_covers(c.laMode, mode) && T.mode_admits(mode, c.la.sym)))) {
+        ((T.mode_covers(c.laMode, mode) && T.mode_admits(mode, c.la.sym)) ||
+         ll_ends<T>(c, c.la.sym))) {
       c.laMode = mode;
       return;
     }
+  } else if (c.laMode == kLaHeld) {
+    if (c.la.sym != kInvalidSymbol && !T.mode_admits(mode, c.la.sym))
+      ll_peek_held<T>(c, mode);
+    return;
   }
   ll_peek_read<T>(c, mode);
 }
@@ -335,7 +335,7 @@ CURSIV_ALWAYS_INLINE inline void ll_peek(LlContext& c, std::uint16_t mode) {
 // where nothing is in hand, read in place.
 template <const auto& T, std::uint16_t Mode>
 CURSIV_ALWAYS_INLINE inline void ll_peek(LlContext& c) {
-  if (!c.laValid && ll_probe<T>(c, Mode)) [[likely]]
+  if (c.laMode == kNoMode && ll_probe<T>(c, Mode)) [[likely]]
     return;
   ll_peek<T>(c, Mode);
 }
@@ -345,12 +345,10 @@ CURSIV_ALWAYS_INLINE inline void ll_peek(LlContext& c) {
 // configuration. Tokens in place and invented tokens stay.
 template <const auto& T>
 inline void ll_repeat_read(LlContext& c, std::uint16_t mode) {
-  if (!c.laValid || c.la.mode == kNoMode ||
-      c.la.begin <= std::max(c.at, c.triviaAt))
+  if (c.laMode == kNoMode || c.la.mode == kNoMode || c.la.begin <= c.triviaAt)
     return;
   const bool held = c.laMode == kLaHeld;
-  c.laValid = false;
-  c.laMode = kInvalidSymbol;
+  c.laMode = kNoMode;
   c.pending.clear();
   ll_peek<T>(c, mode);
   // A forbidden gap must reach the body's repair, even if that body's first
@@ -424,13 +422,17 @@ inline void ll_ties_without(const LlContext& c, std::uint16_t mode,
       T.terms[c.la.sym].synthetic != 0)
     return;
   const typename LlLexTape<T>::Skipping tape{.skip = &skip};
-  const Scan own = lex_match(tape, c.src, c.len, mode, c.la.begin);
-  for (Scan at = own;;) {
+  // The weight of the reading of `term` over the token's bytes.
+  const auto weight = [&](SymbolId term) {
+    return lex_weight(lex_reading_priority(LlLexTape<T>{}, c.src, c.len, mode,
+                                           c.la.begin, c.la.end, term));
+  };
+  const unsigned own = weight(c.la.sym);
+  for (Scan at{c.la.end, c.la.sym};;) {
     skip.set(at.term);
     at = lex_match(tape, c.src, c.len, mode, c.la.begin);
-    if (at.term == kInvalidSymbol || at.end != own.end ||
-        lex_weight(at.priority) != lex_weight(own.priority) ||
-        ll_blank<T>(at.term, c.indent.depth))
+    if (at.term == kInvalidSymbol || at.end != c.la.end ||
+        weight(at.term) != own || ll_blank<T>(at.term, c.indent.depth))
       return;
     ties.push_back(at.term);
   }
@@ -487,14 +489,23 @@ inline void ll_ahead_step(std::vector<IndentLevel>& levels, LlAhead& a,
   a.head = true;
 }
 
+// Only a hidden rule's run becomes a record. Out of line: inlined, the loop's
+// registers are saved at every token.
+template <const auto& T>
+CURSIV_COLD CURSIV_NOINLINE inline void ll_record_pending(LlContext& c) {
+  for (const Token& t : c.pending)
+    c.tape.hidden(t.begin, t.end, T.stamp.make(T.terms[t.sym].element, 0));
+  c.pending.clear();
+}
+
 // The trivia in front of the token goes on the tape first: a record's end
 // never decreases, so a hidden run written after the token it precedes would
 // put the tree out of order.
 template <const auto& T>
 CURSIV_ALWAYS_INLINE inline void ll_flush_trivia(LlContext& c) {
-  for (const Token& t : c.pending)
-    c.tape.hidden(t.begin, t.end, T.stamp.make(T.terms[t.sym].element, 0));
-  c.pending.clear();
+  if constexpr (kTermsRecorded<T>)
+    if (!c.pending.empty()) [[unlikely]]
+      ll_record_pending<T>(c);
   c.triviaAt = std::max(c.triviaAt, c.pendEnd);
 }
 
@@ -507,7 +518,10 @@ CURSIV_ALWAYS_INLINE inline void ll_consume(LlContext& c, std::uint16_t row,
   if (c.run.open && c.run.del && c.run.at == c.at)
     c.run.resume = c.la.sym;
   ll_flush_trivia<T>(c);
-  c.last = c.tape.leaf(c.la.begin, c.la.end, T.stamp.make(row, pos));
+  // A token starts where the gap before it ends; only an indentation token
+  // may start further.
+  const TextOffset begin = kIndented<T> ? c.la.begin : c.pendEnd;
+  c.last = c.tape.leaf(begin, c.la.end, T.stamp.make(row, pos));
   if constexpr (kIndented<T>) {
     indent_shift<T>(c.indentArena, c.indent, c.la);
     if (c.la.end != c.la.begin) {
@@ -517,10 +531,9 @@ CURSIV_ALWAYS_INLINE inline void ll_consume(LlContext& c, std::uint16_t row,
       ++c.zeroWidth;
     }
   }
-  c.at = c.la.end;
+  c.at = c.triviaAt = c.la.end;
   c.invented = 0;
-  c.laValid = false;
-  c.laMode = kInvalidSymbol;
+  c.laMode = kNoMode;
 }
 
 // What a call site states over the record its call returned, a join the build

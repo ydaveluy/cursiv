@@ -13,7 +13,8 @@
 #include <stdexcept>
 #include <vector>
 
-#include "cursiv/lr/runtime/LrGssPool.hpp"
+#include "cursiv/utils/macros.hpp"
+#include "cursiv/lr/runtime/LrGssRuns.hpp"
 
 namespace cursiv::engine {
 
@@ -25,23 +26,6 @@ inline std::uint64_t gss_length_add(std::uint64_t a, std::uint64_t b) {
   return a + b;
 }
 
-struct LrGssNoAgg {
-  static LrGssNoAgg join(const LrGssNoAgg&, const LrGssNoAgg&) { return {}; }
-  bool operator==(const LrGssNoAgg&) const = default;
-};
-
-// The furthest position any value of a sequence names.
-struct LrGssForkAgg {
-  std::uint32_t at = 0;
-
-  static LrGssForkAgg join(const LrGssForkAgg& left,
-                           const LrGssForkAgg& right) {
-    return {std::max(left.at, right.at)};
-  }
-  bool operator==(const LrGssForkAgg&) const = default;
-};
-
-template <class Agg>
 class LrGssRope {
  public:
   using Id = std::uint32_t;
@@ -69,7 +53,6 @@ class LrGssRope {
     [[nodiscard]] std::uint32_t value() const {
       return _rope->_nodes[_leaf].left;
     }
-    [[nodiscard]] const Agg& agg() const { return _rope->_nodes[_leaf].agg; }
     void next() {
       if (_depth == 0) {
         _leaf = none;
@@ -106,9 +89,7 @@ class LrGssRope {
     return r == none ? 0 : _nodes[r].height;
   }
 
-  Id leaf(std::uint32_t value, const Agg& agg = {}) {
-    return intern(Node{value, none, 1, 0, agg});
-  }
+  Id leaf(std::uint32_t value) { return intern(Node{value, none, 1, 0}); }
 
   Id concat(Id a, Id b) {
     if (a == none) return b;
@@ -145,29 +126,6 @@ class LrGssRope {
   [[nodiscard]] std::uint32_t at(Id r, Length index) const {
     return _nodes[down(r, index, [](Id) { /* only the leaf is wanted */ })]
         .left;
-  }
-
-  // The first index whose value, with all those before it, satisfies `holds`
-  // (true from some prefix on), or the length where none does.
-  template <class Holds>
-  [[nodiscard]] Length first_where(Id r, Holds&& holds) const {
-    if (r == none) return 0;
-    if (!holds(_nodes[r].agg)) return _nodes[r].len;
-    Agg acc{};
-    Length index = 0;
-    while (_nodes[r].right != none) {
-      const Node& x = _nodes[r];
-      const Length before = _nodes[x.left].len;
-      const Agg upTo = Agg::join(acc, _nodes[x.left].agg);
-      if (holds(upTo)) {
-        r = x.left;
-      } else {
-        acc = upTo;
-        index += before;
-        r = x.right;
-      }
-    }
-    return index;
   }
 
   // How many values the sequences `a` from `oa` and `b` from `ob` share, within
@@ -219,7 +177,6 @@ class LrGssRope {
     Id right;
     Length len;
     std::uint8_t height;
-    Agg agg;
   };
 
   // The subtrees of the root being read still to read, the next on top, and
@@ -296,8 +253,7 @@ class LrGssRope {
     const Node& b = _nodes[r];
     return intern(
         Node{l, r, gss_length_add(a.len, b.len),
-             static_cast<std::uint8_t>(std::max(a.height, b.height) + 1),
-             Agg::join(a.agg, b.agg)});
+             static_cast<std::uint8_t>(std::max(a.height, b.height) + 1)});
   }
 
   // The join of two balanced trees whose heights differ by two at most.
@@ -327,17 +283,17 @@ class LrGssRope {
     return static_cast<std::size_t>(h) & mask;
   }
 
-  // The node equal to `n`, made where none is.
-  Id intern(const Node& n) {
+  // The node equal to `n`, made where none is. Always inlined: a join then
+  // builds its node in registers.
+  CURSIV_ALWAYS_INLINE Id intern(const Node& n) {
     if (2 * (_nodes.size() + 1) > _slots.size()) grow();
     const std::size_t mask = _slots.size() - 1;
     std::size_t at = slot_of(n.left, n.right, mask);
     for (; _slots[at] != none; at = (at + 1) & mask) {
       const Node& m = _nodes[_slots[at]];
-      if (m.left == n.left && m.right == n.right && m.agg == n.agg)
-        return _slots[at];
+      if (m.left == n.left && m.right == n.right) return _slots[at];
     }
-    const auto id = static_cast<Id>(_nodes.push_back(n));
+    const auto id = static_cast<Id>(_nodes.append(1, n));
     _slots[at] = id;
     return id;
   }
@@ -356,7 +312,7 @@ class LrGssRope {
     _slots.swap(next);
   }
 
-  LrGssPool<Node> _nodes;
+  LrGssRuns<Node, 12> _nodes;
   std::vector<Id> _slots;
 };
 

@@ -37,7 +37,6 @@ struct LexKeywordCut {
   // NFA state -> `(keyword + 1) << 16 | depth` for each keyword whose
   // spelling it stands in having read `depth` bytes of it.
   std::vector<std::vector<std::uint32_t>> reads;
-  bool active = false;
   // The terminals with more keyword spellings than are cut: no trivia is cut
   // beside them, so the lexer refuses trivia that reads on past one.
   std::vector<std::uint16_t> uncut;
@@ -47,21 +46,11 @@ struct LexKeywordCut {
   }
 
   // The branches of a token graph that consume one keyword, conditions
-  // aside: whether there are any, and whether the graph has no other.
-  struct Shape {
+  // aside: whether there are any, whether the graph has no other, the sets
+  // their bytes read in, and the longest.
+  struct Branches {
     bool any = false;
     bool all = true;
-  };
-
-  template <class Cfg>
-  static Shape shape(const Cfg& g, std::uint16_t node) {
-    Shape out;
-    out.all = collect(g, node, out, nullptr);
-    return out;
-  }
-
-  // The same, with the sets their bytes read in, and the longest.
-  struct Branches : Shape {
     std::vector<std::uint16_t> sets;
     std::size_t longest = 0;
   };
@@ -69,7 +58,7 @@ struct LexKeywordCut {
   template <class Cfg>
   static Branches branches(const Cfg& g, std::uint16_t node) {
     Branches out;
-    out.all = collect(g, node, out, &out);
+    out.all = collect(g, node, out);
     std::ranges::sort(out.sets);
     out.sets.erase(std::ranges::unique(out.sets).begin(), out.sets.end());
     return out;
@@ -105,7 +94,6 @@ struct LexKeywordCut {
         todo.pop_back();
         if (x < 0 || cut.trivia[static_cast<std::size_t>(x)] != 0) continue;
         cut.trivia[static_cast<std::size_t>(x)] = static_cast<std::uint16_t>(t);
-        cut.active = true;
         todo.push_back(nfa.s[static_cast<std::size_t>(x)].t1);
         todo.push_back(nfa.s[static_cast<std::size_t>(x)].t2);
       }
@@ -117,7 +105,7 @@ struct LexKeywordCut {
   // tags a state of each, stands at the position: the rest of its spelling,
   // and no scalar of its word class behind it.
   template <class Cfg>
-  std::uint16_t gate(Cfg& g, const std::vector<std::uint32_t>& stands) {
+  std::uint16_t gate(Cfg& g, const std::vector<std::uint32_t>& stands) const {
     if (const auto at = _gates.find(stands); at != _gates.end())
       return at->second;
     const auto node = [&](LexKind kind, std::uint16_t a, std::uint16_t b = 0) {
@@ -170,7 +158,8 @@ struct LexKeywordCut {
   // The most spellings a keyword is cut for.
   static constexpr std::size_t kSpellings = 1024;
 
-  std::map<std::vector<std::uint32_t>, std::uint16_t> _gates;
+  // The gates built so far, by the keywords they wait on.
+  mutable std::map<std::vector<std::uint32_t>, std::uint16_t> _gates;
 
   // A spelling, read or being read from `at`. Its edges live in a stack, each
   // naming the one before it: walks that part at a choice share the edges
@@ -325,32 +314,27 @@ struct LexKeywordCut {
            lex_word_set(g, g.lexChild[e.b]);
   }
 
+  // What `node` reads in turn, its assertions aside.
   template <class Cfg>
-  static void leaves(const Cfg& g, std::uint16_t node,
-                     std::vector<std::uint16_t>& out) {
-    for (std::vector todo{node}; !todo.empty();) {
-      const std::uint16_t at = todo.back();
-      todo.pop_back();
-      const LexNode& e = g.lex[at];
-      if (e.kind == LexKind::seq) {
-        for (unsigned i = e.b; i-- > 0;) todo.push_back(g.lexChild[e.a + i]);
-      } else if (e.kind != LexKind::positive && e.kind != LexKind::negative) {
-        out.push_back(at);
-      }
-    }
+  static std::vector<std::uint16_t> leaves(const Cfg& g, std::uint16_t node) {
+    std::vector<std::uint16_t> out;
+    lex_parts(g, node, out);
+    std::erase_if(out, [&](std::uint16_t at) {
+      return g.lex[at].kind == LexKind::positive ||
+             g.lex[at].kind == LexKind::negative;
+    });
+    return out;
   }
 
-  // Whether `node` consumes keywords alone; `out` gets those branches, and
-  // `spelled`, when given, the sets they read in.
+  // Whether `node` consumes keywords alone; `out` gets those branches and the
+  // sets they read in.
   template <class Cfg>
-  static bool collect(const Cfg& g, std::uint16_t node, Shape& out,
-                      Branches* spelled) {
+  static bool collect(const Cfg& g, std::uint16_t node, Branches& out) {
     bool all = true;
     for (std::vector todo{node}; !todo.empty();) {
       const std::uint16_t at = todo.back();
       todo.pop_back();
-      std::vector<std::uint16_t> read;
-      leaves(g, at, read);
+      const auto read = leaves(g, at);
       std::size_t core = read.size();
       bool word = false;
       while (core != 0 && g.lex[read[core - 1]].kind == LexKind::nguard)
@@ -370,25 +354,22 @@ struct LexKeywordCut {
         continue;
       }
       out.any = true;
-      if (spelled == nullptr) continue;
       std::size_t longest = 0;
       for (std::size_t i = 0; i < core; ++i) {
         const LexNode& e = g.lex[read[i]];
         if (e.kind == LexKind::chars) {
-          spelled->sets.push_back(e.a);
+          out.sets.push_back(e.a);
           ++longest;
           continue;
         }
         // The cases of a letter take as many bytes.
         for (unsigned k = 0; k < e.b; ++k) {
-          std::vector<std::uint16_t> bytes;
-          leaves(g, g.lexChild[e.a + k], bytes);
-          for (const std::uint16_t b : bytes)
-            spelled->sets.push_back(g.lex[b].a);
+          const auto bytes = leaves(g, g.lexChild[e.a + k]);
+          for (const std::uint16_t b : bytes) out.sets.push_back(g.lex[b].a);
           if (k == 0) longest += bytes.size();
         }
       }
-      spelled->longest = std::max(spelled->longest, longest);
+      out.longest = std::max(out.longest, longest);
     }
     return all;
   }

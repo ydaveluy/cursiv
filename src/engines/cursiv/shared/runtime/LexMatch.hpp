@@ -56,7 +56,7 @@ struct LexMatch {
     auto t = static_cast<SymbolId>(accepted - 1u);
     // The state's own election refused: the terminals it outranked answer
     // for themselves, and the one that stands takes the match.
-    if constexpr (requires { ad.qualified(st, src, i, len, far); }) {
+    if constexpr (Ad::kQualified) {
       t = ad.qualified(st, src, i, len, far);
       if (t == kInvalidSymbol) return;
     } else {

@@ -449,6 +449,48 @@ void a_closure_reads_the_stop_as_it_walks() {
   CHECK(stopped.visits() <= cursiv::engine::CancellationPoll::kTurns);
 }
 
+// A replay keeps a step by its set and terminals: the same step from the same
+// set is answered without a second walk.
+void a_step_replayed_from_one_set_is_walked_once() {
+  using cursiv::engine::LlAtnEdge;
+  using cursiv::engine::LlAtnState;
+  using cursiv::engine::LlEdgeKind;
+  constexpr std::uint32_t kRun = 100;
+  std::vector<LlAtnState> states;
+  std::vector<LlAtnEdge> edges;
+  states.push_back({.edge = 0, .nedges = 1});
+  edges.push_back({.kind = LlEdgeKind::atom, .label = 7, .target = 1});
+  for (std::uint32_t i = 1; i <= kRun; ++i) {
+    states.push_back({.edge = i, .nedges = 1});
+    edges.push_back({.kind = LlEdgeKind::epsilon, .target = i + 1});
+  }
+  states.push_back({.kind = cursiv::engine::LlAtnKind::ruleStop, .rule = 0});
+  const std::uint32_t callerBase[] = {0, 0};
+  const cursiv::engine::LlAtnView atn{.states = states.data(),
+                                      .nstates = kRun + 2,
+                                      .edges = edges.data(),
+                                      .callerBase = callerBase};
+  const std::uint16_t term = 7;
+  const auto takes = [&](std::uint32_t edge) {
+    return edges[edge].label == term;
+  };
+  cursiv::engine::LlSimulation sim(atn);
+  sim.keep_steps();
+  sim.seed(0, cursiv::engine::kLlCtxNone);
+  const auto start = sim.configs();
+  CHECK(sim.step_edges(takes, {&term, 1}));
+  const auto reached = sim.configs();
+  const auto walked = sim.visits();
+  CHECK(walked > kRun);
+  sim.load(start);
+  CHECK(sim.step_edges(takes, {&term, 1}));
+  CHECK(sim.configs() == reached && sim.visits() == walked);
+  // Without its terminals the step is walked again.
+  sim.load(start);
+  CHECK(sim.step_edges(takes));
+  CHECK(sim.configs() == reached && sim.visits() > walked);
+}
+
 // A parse repairs its faults up to a share of work, and says where it stopped:
 // enough lines to pass it hold a fault each.
 void a_parse_has_a_share_of_repair_and_says_so() {
@@ -484,6 +526,7 @@ void recursive_inventions_share_their_continuations() {
 
 int main() {
   a_closure_reads_the_stop_as_it_walks();
+  a_step_replayed_from_one_set_is_walked_once();
   compatible_closure_contexts_share_past_incompatible_readings();
   a_condition_reads_every_new_context_of_a_published_union();
   recursive_inventions_share_their_continuations();

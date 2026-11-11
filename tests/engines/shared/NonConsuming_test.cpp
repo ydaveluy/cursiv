@@ -20,6 +20,17 @@
 #include <string_view>
 #include <vector>
 
+namespace {
+
+// The rules `G` reaches, as a generator hands them to the warnings.
+template <class G>
+constexpr auto reached() {
+  using namespace cursiv::engine;
+  return rule_list<G, reached_t<cursiv::ResolveOverride<G>>>();
+}
+
+}  // namespace
+
 namespace non_consuming_cases {
 
 namespace {
@@ -275,7 +286,7 @@ bool lowers() {
 template <class G>
 std::vector<cursiv::engine::DeadBranch> dead() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::engine::WarningFound ctx(image);
+  cursiv::engine::WarningFound ctx(image, reached<G>());
   return cursiv::engine::dead_branches(ctx);
 }
 
@@ -586,7 +597,7 @@ struct Ranked : Base {
 template <class G>
 std::vector<cursiv::engine::SelfBoundedArm> found() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  return cursiv::engine::self_bounded_arms(image);
+  return cursiv::engine::self_bounded_arms(image, reached<G>());
 }
 
 template <class G>
@@ -754,7 +765,7 @@ struct Recursive : Base {
 template <class G>
 std::vector<cursiv::engine::NestedRunWarning> found() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::engine::WarningFound ctx(image);
+  cursiv::engine::WarningFound ctx(image, reached<G>());
   return cursiv::engine::nested_run_warnings(ctx);
 }
 
@@ -869,7 +880,7 @@ struct Bounded : Base {
 template <class G>
 std::vector<cursiv::engine::WordLitWarning> found() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::engine::WarningFound ctx(image);
+  cursiv::engine::WarningFound ctx(image, reached<G>());
   return cursiv::engine::word_lit_warnings(ctx);
 }
 
@@ -987,7 +998,7 @@ struct Spelled : Base {
 template <class G>
 std::vector<std::string> texts() {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::engine::WarningFound found(image);
+  cursiv::engine::WarningFound found(image, reached<G>());
   std::vector<std::string> out;
   for (const auto& t : cursiv::engine::twin_branches(found))
     out.push_back(cursiv::engine::twin_branch_text(t));
@@ -998,7 +1009,7 @@ std::vector<std::string> texts() {
 template <class G>
 std::string read(std::string_view rule) {
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  cursiv::engine::WarningFound found(image);
+  cursiv::engine::WarningFound found(image, reached<G>());
   cursiv::engine::TwinReader reader =
       cursiv::engine::TwinReader::resolved(image);
   for (const std::uint32_t r : found.rules())

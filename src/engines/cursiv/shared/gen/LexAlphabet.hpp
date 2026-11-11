@@ -49,13 +49,13 @@ struct LexAlphabet {
           std::exchange(levels[v - kSyntheticIndent], true))
         lower_refuse(g, LowerFail::indentTwice, t);
     LexNfaBuild builder{nfa, g, internName};
-    std::vector<LexKeywordCut::Shape> keyword(g.nterms);
+    std::vector<LexKeywordCut::Branches> keyword(g.nterms);
     for (std::uint16_t t = 1; t < g.nterms; ++t) {
       if (g.terms[t].synthetic != 0) continue;
       nfa.term = t;
       const int match = nfa.match(t);
       startOf[t] = builder.terminal(g.termBuild[t].lex, match);
-      keyword[t] = LexKeywordCut::shape(g, g.termBuild[t].lex);
+      keyword[t] = LexKeywordCut::branches(g, g.termBuild[t].lex);
     }
     const auto heads = lex_guard_heads(nfa, startOf);
     const auto taken =
@@ -217,7 +217,7 @@ struct LexAlphabet {
     for (std::size_t h = 1; h < own.size(); ++h) {
       if (g.cfgSection[h] != h) continue;
       const int end = startOf[g.cfgEnd[h]];
-      each_bit(own[h].w.data(), own[h].w.size(), [&](std::size_t t) {
+      for (const unsigned t : own[h].members()) {
         const LexOverlap overlap =
             lex_prefix_overlap(nfa, g.sets.data(), end, startOf[t]);
         if (overlap == LexOverlap::found)
@@ -226,7 +226,7 @@ struct LexAlphabet {
           lex_check_incomplete(g.lexIncomplete,
                                {LowerFail::sectionEndShared, g.cfgEnd[h],
                                 static_cast<std::uint16_t>(t)});
-      });
+      }
     }
   }
 

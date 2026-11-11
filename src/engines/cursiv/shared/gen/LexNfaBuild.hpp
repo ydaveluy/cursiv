@@ -51,7 +51,7 @@ struct LexNfaBuild {
         for (unsigned i = 0; i < e.b; ++i) todo.push_back(g.lexChild[e.a + i]);
         continue;
       }
-      if (const auto own = LexKeywordCut::shape(g, at); own.any && own.all) {
+      if (const auto own = LexKeywordCut::branches(g, at); own.any && own.all) {
         out |= kKeyword;
         continue;
       }
@@ -412,16 +412,22 @@ struct LexNfaBuild {
                                     : 0;
   }
 
+  // The arms of the choice `node`, each built by the member `build` up to
+  // `out`.
+  Descent<int> each_arm(std::uint16_t node, int out, auto build) {
+    const LexNode& e = g.lex[node];
+    int s = co_await (this->*build)(g.lexChild[e.a], out);
+    for (unsigned i = 1; i < e.b; ++i) {
+      const int arm = co_await (this->*build)(g.lexChild[e.a + i], out);
+      s = n.split(arm, s);
+    }
+    co_return s;
+  }
+
   // One branch of the terminal, to the accept its priority asks for.
   Descent<int> branch(std::uint16_t node, int out) {
-    if (const LexNode& e = g.lex[node]; e.kind == LexKind::alt) {
-      int s = co_await branch(g.lexChild[e.a], out);
-      for (unsigned i = 1; i < e.b; ++i) {
-        const int arm = co_await branch(g.lexChild[e.a + i], out);
-        s = n.split(arm, s);
-      }
-      co_return s;
-    }
+    if (g.lex[node].kind == LexKind::alt)
+      co_return co_await each_arm(node, out, &LexNfaBuild::branch);
     const auto priorities = priorities_of(node);
     const auto outer = std::exchange(_priority, rank(priorities));
     const int s = co_await run(node, branch_end(priorities, out));
@@ -439,14 +445,8 @@ struct LexNfaBuild {
   // own priority.
   Descent<int> arms(std::uint16_t node, int out) {
     const bool apart = co_await recognized(node);
-    if (const LexNode& e = g.lex[node]; e.kind == LexKind::alt && apart) {
-      int s = co_await arms(g.lexChild[e.a], out);
-      for (unsigned i = 1; i < e.b; ++i) {
-        const int arm = co_await arms(g.lexChild[e.a + i], out);
-        s = n.split(arm, s);
-      }
-      co_return s;
-    }
+    if (g.lex[node].kind == LexKind::alt && apart)
+      co_return co_await each_arm(node, out, &LexNfaBuild::arms);
     if (!apart) co_return co_await branch(node, out);
     const auto outer = std::exchange(_priority, rank(priorities_of(node)));
     const int s = co_await recognition(node, out);
@@ -659,14 +659,8 @@ struct LexNfaBuild {
                             e.min > 2 ? g.lexChild[e.b + 2] : kNoLexNode, true);
         co_return co_await run(e.a, n.relay(k));
       }
-      case LexKind::alt: {
-        int s = co_await run(g.lexChild[e.a], out);
-        for (unsigned i = 1; i < e.b; ++i) {
-          const int arm = co_await run(g.lexChild[e.a + i], out);
-          s = n.split(arm, s);
-        }
-        co_return s;
-      }
+      case LexKind::alt:
+        co_return co_await each_arm(node, out, &LexNfaBuild::run);
       case LexKind::through_lit:
         co_return co_await run(e.a, n.through(g, e, out));
       case LexKind::through_nested: {

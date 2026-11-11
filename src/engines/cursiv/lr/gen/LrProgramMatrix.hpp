@@ -1,5 +1,5 @@
 // A fixed-width matrix whose rows share equal blocks of eight values, and
-// equal rows, stored in the smallest form `LrProgramRows` reads.
+// equal rows, as `LrProgramRows` reads it.
 #pragma once
 
 #include <array>
@@ -13,18 +13,16 @@
 namespace cursiv::engine {
 
 struct LrProgramMatrix {
-  // Per row appended, where its row starts: equal rows are stored once. None
-  // once finished where each row is stored for itself.
+  // Per row appended, where its run of blocks starts: equal rows are stored
+  // once.
   std::vector<std::uint32_t> rows;
-  // Per row stored, its run of blocks; none once finished where a row is stored
-  // as its values.
+  // Per row stored, its run of blocks.
   std::vector<std::uint32_t> blocks;
-  // The distinct blocks, or the rows' values where no block is stored.
+  // The distinct blocks.
   std::vector<std::uint64_t> values;
 
   void append(std::span<const std::uint64_t> row, std::uint64_t absent);
-  // Picks the smallest form once the last row is in, and frees what only
-  // `append` reads; no row is appended after.
+  // Frees what only `append` reads; no row is appended after.
   void finish();
   unsigned row_bits() const;
   unsigned index_bits() const;
@@ -33,7 +31,6 @@ struct LrProgramMatrix {
   static unsigned bits(std::uint64_t max);
 
  private:
-  unsigned _columns = 0;
   std::map<std::array<std::uint64_t, 8>, std::uint32_t> _pool;
   // The block of nothing but its absent value, once stored: that value and its
   // index in `_pool`.

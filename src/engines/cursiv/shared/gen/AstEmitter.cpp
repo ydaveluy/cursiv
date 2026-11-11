@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <map>
-#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -24,7 +23,6 @@ AstEmitter::AstEmitter(const AstRegistry& registry, const AstEntryTable& table,
     if (g.fieldSlot != kNoField &&
         (g.writes() || g.kind == WriteKind::flag || g.kind == WriteKind::nest))
       pending[g.fieldSlot] = 1;
-    takesNodes = takesNodes || (g.writes() && g.convSlot == kNoIndex);
   }
   while (built < reg.types.size() && reg.types[built].built) ++built;
   accepted.resize(built);
@@ -89,6 +87,7 @@ const char* AstEmitter::act_name(ActKind k) {
     case ActKind::nest:
       return "::cursiv::ActKind::nest";
     case ActKind::create:
+      return "::cursiv::ActKind::create";
     case ActKind::none:
       break;
   }
@@ -131,17 +130,16 @@ std::uint16_t AstEmitter::conv_of(std::uint16_t r) const {
 void AstEmitter::emit_deferred(Body& b, std::uint16_t r, int m) const {
   const AstRowGen& g = reg.rows[r];
   if (g.writes() && m < 0)
-    b.say({"b.defer_write(id, ", b.param(u(g.fieldSlot)), ", ",
-           b.param(u(conv_of(r))), ", ", b.param(u(g.narrowSlot)), ", ",
-           b.param(act_name(g.act())), ");"});
+    b.say({"b.defer_write(id, n, ", u(g.fieldSlot), ", ", u(conv_of(r)), ", ",
+           u(g.narrowSlot), ", ", act_name(g.act()), ");"});
   else if (g.writes())
-    b.say({"b.defer_write(id, ", b.param(u(g.fieldSlot)), ", ",
-           b.param(act_name(g.act())), ", m" + std::to_string(m) + ");"});
+    b.say({"b.defer_write(id, ", u(g.fieldSlot), ", ", act_name(g.act()),
+           ", m" + std::to_string(m) + ");"});
   else if (g.effects())
     // Only a nest's effect carries the class it builds.
     b.say({"b.defer_effect(id, ",
-           b.param(u(g.kind == WriteKind::nest ? g.declType : kNoIndex)), ", ",
-           b.param(u(g.fieldSlot)), ", ", b.param(act_name(g.act())), ");"});
+           u(g.kind == WriteKind::nest ? g.declType : kNoIndex), ", ",
+           u(g.fieldSlot), ", ", act_name(g.act()), ");"});
 }
 
 bool AstEmitter::can_close_held(const Run& held, int cr, const Run& over,
@@ -191,17 +189,17 @@ std::string AstEmitter::write_pending(Body& b, std::uint16_t r) const {
   const std::string h = "h" + std::to_string(b.held++);
   const std::string lead = "const ::cursiv::engine::Pending " + h;
   if (g.convSlot != kNoIndex)
-    b.say({lead + " = b.text_write(id, ", b.param(u(g.fieldSlot)), ", ",
-           b.param(u(conv_of(r))), ", ", b.param(u(g.narrowSlot)), ", ",
-           b.param(act_name(g.act())), ");"});
+    b.say({lead + " = b.text_write(id, n, ", u(g.fieldSlot), ", ",
+           u(conv_of(r)), ", ", u(g.narrowSlot), ", ", act_name(g.act()),
+           ");"});
   else
-    b.say({lead + " = b.node_write(id, ", b.param(u(g.fieldSlot)), ", ",
-           b.param(u(g.narrowSlot)), ", ", b.param(act_name(g.act())), ");"});
+    b.say({lead + " = b.node_write(id, n, ", u(g.fieldSlot), ", ",
+           u(g.narrowSlot), ", ", act_name(g.act()), ");"});
   return h;
 }
 
-unsigned AstEmitter::fill_run(Body& b, std::uint16_t cr,
-                              const Run& held) const {
+unsigned AstEmitter::fill_run(Body& b, std::uint16_t cr, const Run& held,
+                              int result, bool read) const {
   std::vector<std::string> slots;
   for (const std::uint16_t r : held)
     if (fills(cr, r)) slots.push_back(write_pending(b, r));
@@ -220,164 +218,131 @@ unsigned AstEmitter::fill_run(Body& b, std::uint16_t cr,
   const unsigned m = b.made++;
   const std::string made = "m" + std::to_string(m);
   const AstRowGen& c = reg.rows[cr];
-  const std::string lead = "const ::cursiv::engine::Made " + made + " = b.";
-  const auto type = b.param(u(c.declType));
+  const auto own_flag = [&](std::uint16_t r) {
+    return reg.rows[r].kind == WriteKind::flag &&
+           derives(reg.rows[r].declType, c.declType);
+  };
+  // The node is named only where a statement after its creation reads it.
+  const std::string lead =
+      read || !slots.empty() || std::ranges::any_of(held, own_flag)
+          ? "const ::cursiv::engine::Made " + made + " = b."
+          : "b.";
+  const std::string type = u(c.declType);
   const std::string nest = reg.anyNest ? "true" : "false";
+  // The node goes to the region above as the write `result` states, or as a
+  // plain creation.
+  const std::string field =
+      u(result < 0 ? kNoField : reg.rows[result].fieldSlot);
+  const char* const kind =
+      act_name(result < 0 ? ActKind::create : reg.rows[result].act());
   if (c.kind == WriteKind::close)
-    b.say({lead + "adopt<" + nest + ">(", type, ", id);"});
+    b.say({lead + "adopt<" + nest + ">(id, n, ", type, ", ", field, ", ", kind,
+           ");"});
   else
-    b.say({lead + "create<kMakes[", type, "], ",
-           b.param("&" + applier_name(c.declType)), ", " + nest + ">(", type,
-           ", id);"});
-  b.guard();
+    b.say({lead + "create<kMakes[", type, "], ", "&" + applier_name(c.declType),
+           ", " + nest + ">(id, n, ", type, ", ", field, ", ", kind, ");"});
   std::size_t k = 0;
   for (const std::uint16_t r : held)
     if (fills(cr, r)) {
       // An adoption learns its node's class at runtime.
       const std::uint16_t f = reg.rows[r].fieldSlot;
       const bool checked = c.kind == WriteKind::close;
-      b.say({"b.fill<", b.param(tags[f]), ", ",
-             b.param(conv_addr(conv_of(r))), ", ",
-             b.param(variant_flag(f)), ", ",
-             b.param(checked ? "true" : "false"), ">(", b.param(u(f)),
+      b.say({"b.fill<", tags[f], ", ", conv_addr(conv_of(r)), ", ",
+             checked ? "true" : "false", ">(", u(f),
              ", " + slots[k++] + ", " + made + ");"});
     }
   for (std::size_t j = 0; j < held.size(); ++j) {
     const std::uint16_t r = held[j];
     if (early[j]) continue;
-    if (reg.rows[r].kind == WriteKind::flag &&
-        derives(reg.rows[r].declType, reg.rows[cr].declType))
-      b.say({"b.flag(id, ", b.param(u(reg.rows[r].fieldSlot)),
-             ", " + made + ");"});
+    if (own_flag(r))
+      b.say({"b.flag(id, ", u(reg.rows[r].fieldSlot), ", " + made + ");"});
     else if (reg.rows[r].effects())
       emit_deferred(b, r, -1);
   }
   return m;
 }
 
-void AstEmitter::run_held(Body& b, const Run& held, const Run& over, int cr,
-                          int heldMade) const {
+void AstEmitter::run_held(Body& b, const Run& maker, int makerRow,
+                          const Run& held, const Run& over, int cr) const {
   if (cr < 0) {
     for (const std::uint16_t r : held) emit_deferred(b, r, -1);
     for (const std::uint16_t r : over) emit_deferred(b, r, -1);
     return;
   }
-  unsigned m;
-  if (heldMade >= 0) {
-    m = static_cast<unsigned>(heldMade);
-    b.say({"b.close_made(", b.param(u(reg.rows[cr].declType)),
-           ", id, m" + std::to_string(m) + ");"});
-  } else {
-    m = fill_run(b, static_cast<std::uint16_t>(cr), held);
-  }
-  b.guard();
   Run all = spare(static_cast<std::uint16_t>(cr), held);
   all.insert(all.end(), over.begin(), over.end());
-  if (std::ranges::none_of(
-          all, [&](std::uint16_t r) { return reg.rows[r].writes(); }))
-    b.say("b.push_made(id, m" + std::to_string(m) + ");");
-  for (const std::uint16_t r : all) emit_deferred(b, r, static_cast<int>(m));
+  // The node's first write goes with its creation; the rest follow it.
+  const auto writes = [&](std::uint16_t r) { return reg.rows[r].writes(); };
+  const auto first = std::ranges::find_if(all, writes);
+  const int result = first == all.end() ? -1 : *first;
+  const bool closes = makerRow >= 0;
+  const bool read = closes || std::ranges::count_if(all, writes) > 1;
+  const unsigned m =
+      closes ? fill_run(b, static_cast<std::uint16_t>(makerRow), maker, result,
+                        read)
+             : fill_run(b, static_cast<std::uint16_t>(cr), held, result, read);
+  if (closes)
+    b.say({"b.close_made(", u(reg.rows[cr].declType),
+           ", id, m" + std::to_string(m) + ");"});
+  for (auto at = all.begin(); at != all.end(); ++at)
+    if (at != first) emit_deferred(b, *at, static_cast<int>(m));
 }
 
 AstEmitter::Body AstEmitter::entry_body(std::uint32_t e) const {
   Body b;
   const auto chains = a.chains(e);
   Run held = a.runs[chains.front()], over;
-  int heldMade = -1;
+  // The maker a fused close waits on, with the run it fills.
+  Run maker;
+  int makerRow = -1;
   int heldRow = made_row(held);
   for (std::size_t k = 1; k < chains.size(); ++k) {
     const Run& added = a.runs[chains[k]];
     if (can_close_held(held, heldRow, over, added)) {
-      if (heldMade >= 0 || !reg.anyNest) continue;
-      // The maker's Made stays unpublished until the next scope; with a
-      // nest the close still checks the wrapper it may have returned.
-      heldMade = static_cast<int>(
-          fill_run(b, static_cast<std::uint16_t>(heldRow), held));
-      b.guard();
-      held = added;
-      heldRow = made_row(held);
+      if (makerRow >= 0 || !reg.anyNest) continue;
+      // With a nest the close still checks the wrapper the maker may have
+      // returned: the maker is written with the scope that closes it.
+      maker = std::exchange(held, added);
+      makerRow = std::exchange(heldRow, made_row(added));
       continue;
     }
     if (made_row(added) >= 0) {
       // A caller making a node closes the inner scope first, so a child of
       // the same type cannot take its writes.
-      run_held(b, held, over, heldRow, heldMade);
+      run_held(b, maker, makerRow, held, over, heldRow);
       held = added;
       heldRow = made_row(held);
       over.clear();
-      heldMade = -1;
+      makerRow = -1;
     } else {
       // Directives over one payload share its Made value.
       over.insert(over.end(), added.begin(), added.end());
     }
   }
-  run_held(b, held, over, heldRow, heldMade);
+  run_held(b, maker, makerRow, held, over, heldRow);
   return b;
 }
 
 void AstEmitter::emit_entries() {
   check_base_chains();
-  std::vector<Body> programs;
-  {
-    // `seen` copies each distinct program, and is freed before the forms
-    // are grouped.
-    std::map<std::string, std::string> seen;
-    for (std::uint32_t e = 0; e < a.count; ++e) {
-      holder = plans[e].value;
-      Body b = entry_body(e);
-      const auto [found, fresh] =
-          seen.try_emplace(b.text, "r" + std::to_string(programs.size()));
-      if (fresh) programs.push_back(std::move(b));
-      names.push_back(found->second);
-    }
-  }
-  std::map<std::string_view, std::vector<std::size_t>> shapes;
-  for (std::size_t i = 0; i < programs.size(); ++i)
-    shapes[programs[i].form].push_back(i);
-  std::map<std::string, std::string> aliases;
-  const auto arg = [&](const std::string& v) {
-    if (v.find(',') == std::string::npos) return v;
-    const auto [at, fresh] =
-        aliases.try_emplace(v, "FormArg" + std::to_string(aliases.size()));
-    if (fresh) line("using ", at->second, " = ", v, ";");
-    return at->second;
-  };
-  unsigned forms = 0;
-  for (std::size_t i = 0; i < programs.size(); ++i) {
-    const auto& users = shapes[programs[i].form];
-    if (users.front() != i || users.size() < 2) continue;
-    const Body& f = programs[i];
-    const std::string fn = "CURSIV_FORM_" + std::to_string(forms);
-    std::string decl = "#define " + fn + "(";
-    decl += concat(joined(std::views::iota(std::size_t{0}, f.args.size()), ", ",
-                          [](std::size_t k) { return concat("C", k); }),
-                   ")");
-    for (std::size_t at = 0, nl;
-         (nl = f.form.find('\n', at)) != std::string::npos; at = nl + 1)
-      decl += " \\\n" + f.form.substr(at, nl - at);
-    decl += "\n";
-    const auto call = [&](std::size_t p, const auto& spell) {
-      return concat("  ", fn, "(", joined(programs[p].args, ", ", spell),
-                    ")\n");
-    };
-    std::size_t before = 0, after = decl.size();
-    for (const std::size_t p : users) {
-      before += programs[p].text.size();
-      after += call(p, [](const std::string& v) { return v; }).size();
-    }
-    if (after >= before) continue;
-    for (const std::size_t p : users) programs[p].text = call(p, arg);
-    write(decl);
-    ++forms;
-  }
-  for (std::size_t i = 0; i < programs.size(); ++i)
-    if (programs[i].text.empty())
-      line("void r", i, "(::cursiv::engine::AstReducer&, ::cursiv::NodeId) {}");
+  std::map<std::string, std::string> seen;
+  for (std::uint32_t e = 0; e < a.count; ++e) {
+    holder = plans[e].value;
+    const Body b = entry_body(e);
+    const auto [found, fresh] =
+        seen.try_emplace(b.text, "r" + std::to_string(seen.size()));
+    names.push_back(found->second);
+    if (!fresh) continue;
+    if (b.text.empty())
+      line("void ", found->second,
+           "(::cursiv::engine::AstReducer&, ::cursiv::NodeId, const "
+           "::cursiv::CstNode&) {}");
     else
-      line("void r", i,
-           "(::cursiv::engine::AstReducer& b, ::cursiv::NodeId id) {\n",
-           programs[i].text, "}");
-  for (unsigned i = 0; i < forms; ++i) line("#undef CURSIV_FORM_", i);
+      line("void ", found->second,
+           "(::cursiv::engine::AstReducer& b, ::cursiv::NodeId id, "
+           "[[maybe_unused]] const ::cursiv::CstNode& n) {\n",
+           b.text, "}");
+  }
 }
 
 void AstEmitter::emit_types() {
@@ -390,8 +355,11 @@ void AstEmitter::emit_types() {
       "nullptr"));
 }
 
-void AstEmitter::emit_fields() {
-  if (!takesNodes) return;
+std::string_view AstEmitter::emit_fields() {
+  if (std::ranges::none_of(reg.rows, [](const AstRowGen& g) {
+        return g.writes() && g.convSlot == kNoIndex;
+      }))
+    return {};
   line("constexpr ::std::uint64_t kTakeBits[] = {");
   for (const auto& field : reg.fields) {
     std::string row = "    ";
@@ -404,13 +372,11 @@ void AstEmitter::emit_fields() {
     line(row);
   }
   line("};");
+  return "kTakeBits";
 }
 
 std::string AstEmitter::conv_addr(std::uint16_t slot) {
   return slot == kNoIndex ? std::string("nullptr") : "&kConvs[" + u(slot) + "]";
-}
-const char* AstEmitter::variant_flag(std::uint16_t f) const {
-  return reg.fields[f].content == FieldContent::variant ? "true" : "false";
 }
 
 std::string AstEmitter::applier_name(std::uint16_t t) const {
@@ -447,8 +413,7 @@ void AstEmitter::emit_writers() {
     const std::string& tag = tags[f];
     const std::string args = u(f) + ", p, m);";
     const auto write = [&](std::uint16_t slot) {
-      return "b.write<" + tag + ", " + conv_addr(slot) + ", " +
-             variant_flag(f) + ">(" + args;
+      return "b.write<" + tag + ", " + conv_addr(slot) + ">(" + args;
     };
     line(
         "CURSIV_ALWAYS_INLINE inline void w", f,
@@ -578,12 +543,12 @@ std::string AstEmitter::text_fn(const ConvPlan& p, const TextPlan& t) {
   return concat("&::cursiv::engine::denoted_chain<", p.data, list, ">");
 }
 
-void AstEmitter::emit_conversions() {
-  anyText = std::ranges::any_of(plans, [](const ConvPlan& p) {
-    return !p.text.steps.empty() || !p.call.steps.empty();
-  });
+AstEmitter::ConvTables AstEmitter::emit_conversions() {
+  ConvTables named;
   // A grammar that converts no text names no table.
-  if (anyText) {
+  if (std::ranges::any_of(plans, [](const ConvPlan& p) {
+        return !p.text.steps.empty() || !p.call.steps.empty();
+      })) {
     std::vector<std::string> texts, calls;
     std::vector<std::uint8_t> inputs;
     for (const ConvPlan& p : plans) {
@@ -593,27 +558,30 @@ void AstEmitter::emit_conversions() {
           (p.text.children ? 1u : 0u) | (p.call.children ? 2u : 0u)));
     }
     write(emit_table("constexpr ::cursiv::engine::TextFn kTexts[]", texts));
-    sharedCalls = calls == texts;
-    if (!sharedCalls)
+    // One table answers both where every entry gives its parent the text its
+    // payload denotes.
+    named.texts = named.calls = "kTexts";
+    if (calls != texts) {
       write(emit_table("constexpr ::cursiv::engine::TextFn kCalls[]", calls));
+      named.calls = "kCalls";
+    }
     // A grammar whose records never read their children first names no table.
-    anyInputs =
-        std::ranges::any_of(inputs, [](std::uint8_t c) { return c != 0; });
-    if (anyInputs)
+    if (std::ranges::any_of(inputs, [](std::uint8_t c) { return c != 0; })) {
       write(emit_table("constexpr ::std::uint8_t kTextInputs[]", inputs,
                        [](std::uint8_t c) { return u(c); }));
+      named.textInputs = "kTextInputs";
+    }
   }
   // A call that read nothing differs from a token with no width only by its
   // record, and only a converter of parts sees the difference.
   std::vector<std::uint8_t> records;
   for (const ConvPlan& p : plans) records.push_back(p.data);
-  anyCalls = std::ranges::any_of(
-                 reg.rows, [](const AstRowGen& g) { return g.convParts; }) &&
-             emit_flags("kCallRecords", records);
+  if (std::ranges::any_of(reg.rows,
+                          [](const AstRowGen& g) { return g.convParts; }))
+    named.callRecords = emit_flags("kCallRecords", records);
   // A grammar whose data rules pass no value on names no table either.
-  anyValues = std::ranges::any_of(
-      reg.rows, [](const AstRowGen& g) { return g.passes; });
-  if (anyValues)
+  if (std::ranges::any_of(reg.rows,
+                          [](const AstRowGen& g) { return g.passes; })) {
     write(emit_table("constexpr ::cursiv::engine::ValueSlot kValues[]", plans,
                      [](const ConvPlan& p) {
                        return p.value != nullptr
@@ -621,16 +589,19 @@ void AstEmitter::emit_conversions() {
                                            p.value->valueRule, ">()")
                                   : std::string("{}");
                      }));
+    named.values = "kValues";
+  }
+  return named;
 }
 
-bool AstEmitter::emit_flags(std::string_view name,
-                            const std::vector<std::uint8_t>& cells) {
+std::string_view AstEmitter::emit_flags(
+    std::string_view name, const std::vector<std::uint8_t>& cells) {
   if (std::ranges::none_of(cells, [](std::uint8_t c) { return c != 0; }))
-    return false;
+    return {};
   std::string row;
   for (const std::uint8_t c : cells) row += c != 0 ? "1," : "0,";
   line("constexpr ::std::uint8_t ", std::string(name), "[] = {", row, "};");
-  return true;
+  return name;
 }
 
 std::string AstEmitter::run() {
@@ -655,7 +626,7 @@ namespace ast_detail {
 )");
   write(emit_ast_metadata(reg, tags));
   emit_types();
-  emit_fields();
+  const std::string_view takeBits = emit_fields();
   plan_held();
   emit_convs();
   line("");
@@ -666,43 +637,30 @@ namespace ast_detail {
   write(emit_table(
       "constexpr ::cursiv::engine::AstEntryFn kEntries[]", names,
       [](const std::string& n) { return "&" + n; }, "nullptr"));
-  emit_conversions();
-  const bool turns = emit_flags("kTurns", a.turns);
+  const ConvTables conv = emit_conversions();
+  const std::string_view turns = emit_flags("kTurns", a.turns);
   line("\n}  // namespace ast_detail\n");
   write(emit_ast_metadata_record(reg));
-  write(R"(constexpr ::cursiv::engine::AstActions kAstActions{
-    .meta = &kAstMetaData,
-    .makes = ast_detail::kMakes,
-    .entries = ast_detail::kEntries,
-    .texts = )",
-        anyText ? "ast_detail::kTexts" : "nullptr", R"(,
-    .calls = )",
-        !anyText      ? "nullptr"
-        : sharedCalls ? "ast_detail::kTexts"
-                      : "ast_detail::kCalls",
-        R"(,
-    .callRecords = )",
-        anyCalls ? "ast_detail::kCallRecords" : "nullptr", R"(,
-    .entryCount = )",
-        names.size(), R"(u,
-    .applies = ast_detail::kApplies,
-    .takeBits = )",
-        takesNodes ? "ast_detail::kTakeBits" : "nullptr", R"(,
-    .anyNest = )",
-        reg.anyNest, R"(,
-    .turnsByState = )",
-        a.turnsByState, R"(,
-    .turns = )",
-        turns ? "ast_detail::kTurns" : "nullptr", R"(,
-    .textInputs = )",
-        anyInputs ? "ast_detail::kTextInputs" : "nullptr", R"(,
-    .values = )",
-        anyValues ? "ast_detail::kValues" : "nullptr", R"(,
-};
-
-}  // namespace )",
-        ns, R"(
-)");
+  EmitFields f;
+  const auto table = [&f](std::string_view field, std::string_view name) {
+    f(field, name, std::string_view(), "ast_detail::");
+  };
+  f("meta", std::string_view("&kAstMetaData"), std::string_view());
+  table("makes", "kMakes");
+  table("entries", "kEntries");
+  table("texts", conv.texts);
+  table("calls", conv.calls);
+  table("callRecords", conv.callRecords);
+  f("entryCount", names.size(), std::size_t{0}, "", "u");
+  table("applies", "kApplies");
+  table("takeBits", takeBits);
+  f("anyNest", reg.anyNest, false);
+  f("turnsByState", a.turnsByState, false);
+  table("turns", turns);
+  table("textInputs", conv.textInputs);
+  table("values", conv.values);
+  line("constexpr ::cursiv::engine::AstActions kAstActions{", f.list(),
+       "};\n\n}  // namespace ", ns);
   return take();
 }
 

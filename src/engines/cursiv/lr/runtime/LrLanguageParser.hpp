@@ -142,7 +142,6 @@ constinit const LrCaretTable LrLanguageParser<A>::kCaret{
     .guardOps = A.guardOps,
     .held = A.held,
     .terms = A.cfg.terms,
-    .names = A.cfg.names.data(),
     .prods = A.cfg.prods,
     .reductions = A.derived.reductions,
     .preds = A.derived.preds,

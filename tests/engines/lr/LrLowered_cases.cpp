@@ -263,8 +263,8 @@ void run() {
   for (std::uint16_t q = 0; q < low.cfg.nprods; ++q) {
     const cursiv::engine::LrLowProd& p = low.cfg.prods[q];
     for (unsigned k = 0; k < p.len; ++k)
-      if (!cursiv::engine::is_term(low.cfg.slotSym[p.at + k]) &&
-          cursiv::engine::nt_index(low.cfg.slotSym[p.at + k]) == p.lhs)
+      if (!cursiv::engine::is_term(low.cfg.slots[p.at + k].sym) &&
+          cursiv::engine::nt_index(low.cfg.slots[p.at + k].sym) == p.lhs)
         aux = p.lhs;
   }
   CHECK(aux != 0xffffu);
@@ -273,7 +273,7 @@ void run() {
   for (std::uint16_t q = 0; q < low.cfg.nprods; ++q) {
     if (low.cfg.prods[q].lhs != aux) continue;
     ++seen;
-    tight += low.cfg.prodBuild[q].tailCfg != 0 ? 1u : 0u;
+    tight += low.cfg.prods[q].tailCfg != 0 ? 1u : 0u;
   }
   std::printf("  %u productions for the run, %u of them tight at the tail\n",
               seen, tight);

@@ -26,18 +26,6 @@ Descent<std::uint16_t> LlLowerer::build_create(unsigned cfg, ImageId e) {
   co_return wrapper;
 }
 
-Descent<std::uint16_t> LlLowerer::build_nest(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
-  const std::uint16_t body = co_await build(cfg, child_at(n, 0));
-  if (_p.e[body].kind == Shape::none || _p.e[body].kind == Shape::end)
-    _o.fault.raise(GrammarFaultCode::directiveOnNoPosition, _p.owner);
-  // A nest changes the current node before its payload. Keep that boundary
-  // on the tape even when the payload holds another, conditional nest.
-  const std::uint16_t checkpoint = gather(cfg, Shape::seq, {});
-  _p.e[checkpoint].made.push_back(row_id(n.row));
-  co_return gather(cfg, Shape::seq, {checkpoint, body});
-}
-
 Descent<std::uint16_t> LlLowerer::build_closed(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
   const bool step = (n.flags & 1) != 0;
@@ -117,17 +105,8 @@ Descent<std::uint16_t> LlLowerer::build(unsigned cfg, ImageId e) {
       const std::uint16_t close = co_await build(cfg, _cfgs[cfg].end);
       co_return mark(cfg, _p.push(Node{Shape::end, _p.e[close].sym}));
     }
-    case ImageKind::unordered: {
-      const std::uint16_t node = co_await build_unordered(cfg, e);
-      _p.e[node].unorderedTurns = descend(buries(e));
-      co_return node;
-    }
     case ImageKind::skip:
       co_return co_await build(region_of(cfg, n), child_at(n, 0));
-    case ImageKind::create:
-      co_return co_await build_create(cfg, e);
-    case ImageKind::nest:
-      co_return co_await build_nest(cfg, e);
     case ImageKind::closed:
       co_return co_await build_closed(cfg, e);
     case ImageKind::turns: {

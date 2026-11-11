@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <unordered_set>
 #include <vector>
 
 #include "cursiv/lr/runtime/LrWalkTail.hpp"
@@ -107,9 +106,8 @@ bool lr_graph_takes(LrTakesScratch<Id>& w, Id vertex, State&& state,
 template <class Arms>
 bool lr_cell_walk(std::uint32_t state, Arms&& arms) {
   std::vector<std::uint32_t> states;
-  std::unordered_set<std::uint32_t> seen;
   const auto leads = [&](std::uint32_t to) {
-    if (seen.insert(to).second) states.push_back(to);
+    if (std::ranges::find(states, to) == states.end()) states.push_back(to);
   };
   for (std::size_t at = 0;; ++at) {
     if (arms(state, leads)) return true;
@@ -131,15 +129,19 @@ inline bool lr_refused(Flagged&& flagged, Takes&& takes, Token& la,
   return refused;
 }
 
-// What ties with `at`, a token a refusal elected: each is read in turn by
-// `without(at)`, until `ties` says it ends; a flagged token stays only if
-// `takes` it. `keep` receives each that stays and says whether there is room.
-template <class Without, class Ties, class Flagged, class Takes, class Keep>
-inline void lr_refused_ties(Token at, Without&& without, Ties&& ties,
+// What ties with `winner`, which a refusal elected: each terminal `without(at)`
+// reads in turn over the same bytes at the same `weight`, a flagged one only if
+// `takes` it. `keep` receives each and says whether there is room.
+template <class Without, class Weight, class Flagged, class Takes, class Keep>
+inline void lr_refused_ties(const Token& winner, std::size_t terms,
+                            Without&& without, Weight&& weight,
                             Flagged&& flagged, Takes&& takes, Keep&& keep) {
-  for (;;) {
+  const unsigned won = weight(winner);
+  for (Token at = winner;;) {
     at = without(at);
-    if (!ties(at)) return;
+    if (at.sym >= terms || at.begin != winner.begin || at.end != winner.end ||
+        weight(at) != won)
+      return;
     if (flagged(at.sym) && !takes(at)) continue;
     if (!keep(at)) return;
   }

@@ -76,7 +76,8 @@ int run(int argc, char** argv) try {
   if (paths.dir == nullptr) return exit_status(GenCode::usage);
 
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<View>();
-  if (cursiv::engine::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
+  const auto reached = cursiv::engine::kLlLower<G>.reached;
+  if (cursiv::engine::refuse_self_bounded_arms(CURSIV_GEN_NAME, image, reached))
     return exit_status(GenCode::refused);
 
   const cursiv::engine::LlLowered& low = cursiv::engine::LlLowering<G>::table();
@@ -123,7 +124,7 @@ int run(int argc, char** argv) try {
 
   report(a);
   cursiv::engine::report_warnings(
-      CURSIV_GEN_NAME, image, a.cfg, a.cfg,
+      CURSIV_GEN_NAME, image, reached, a.cfg, a.cfg,
       [&](std::uint16_t r) { return a.cfg.rule_name(r); });
   return exit_status(GenCode::ok);
 } catch (const std::exception& error) {

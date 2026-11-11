@@ -12,6 +12,7 @@ struct LrReduceName {
   std::uint16_t slot = 0;
   ElementId row = kNoElement;
   bool fold = false;  // compose the returned row with the site
+  bool leaf = false;  // a terminal's slot: its frame always holds a record
 
   auto operator<=>(const LrReduceName&) const = default;
 };

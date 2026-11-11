@@ -1,5 +1,5 @@
 #include "cursiv/lr/gen/LrLowerer.hpp"
-#include "cursiv/lr/gen/lr_lower_define.hpp"
+#include "cursiv/lr/gen/lr_productions.hpp"
 #include "cursiv/lr/gen/lr_lower_epsilon.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
@@ -123,21 +123,9 @@ Descent<LrShapeId> LrLowerer::build_skip(unsigned cfg, ImageId e) {
   co_return node;
 }
 
-Descent<LrShapeId> LrLowerer::build_made(unsigned cfg, ImageId e) {
+Descent<LrShapeId> LrLowerer::build_create(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
   const LrShapeId node = co_await build(cfg, child_at(n, 0));
-  if (n.kind == ImageKind::nest) {
-    if (_p.e[node].kind == LrShape::none || _p.e[node].kind == LrShape::end) {
-      _o.fault.raise(GrammarFaultCode::directiveOnNoPosition, _p.owner);
-      co_return node;
-    }
-    // The receiver is complete before the payload starts. In particular an
-    // optional following nest must not become part of this receiver's CST.
-    const auto marker = mark(
-        cfg,
-        _p.push(LrLowerNode{.kind = LrShape::seq, .made = {row_id(n.row)}}));
-    co_return gather(cfg, LrShape::seq, {marker, node});
-  }
   _p.e[node].made.push_back(row_id(n.row));
   co_return node;
 }
@@ -190,13 +178,8 @@ Descent<LrShapeId> LrLowerer::build(unsigned cfg, ImageId e) {
   switch (n.kind) {
     case ImageKind::eof:
       co_return mark(cfg, _p.push(LrLowerNode{LrShape::end}));
-    case ImageKind::unordered:
-      co_return co_await build_unordered(cfg, e);
     case ImageKind::skip:
       co_return co_await build_skip(cfg, e);
-    case ImageKind::create:
-    case ImageKind::nest:
-      co_return co_await build_made(cfg, e);
     case ImageKind::notOf: {
       if (const ImageNode k = at(child_at(n, 0));
           k.kind == ImageKind::trigger) {
@@ -229,7 +212,7 @@ std::uint16_t LrLowerer::stop_rule(DynSet terms, std::uint8_t trailing) {
   const std::uint16_t prod = lr_push_prod(_o, _p, aux, {});
   _cfg.stopCuts.push_back(std::move(terms));
   if (prod != kNoRow)
-    _cfg.prodBuild[prod].stop =
+    _cfg.prods[prod].stop =
         static_cast<std::uint16_t>(_cfg.stopCuts.size());
   lr_close_region(_cfg, prod, trailing);
   _p.stopNt.push_back(static_cast<std::uint16_t>(aux + 1u));

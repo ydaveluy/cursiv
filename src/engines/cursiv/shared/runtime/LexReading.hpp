@@ -39,6 +39,17 @@ struct LexBodies {
   const ByteSet* openers = nullptr;
 };
 
+// Those of the table a tape reads: an LL table holds pointers, an LR one
+// arrays.
+template <const auto& T>
+constexpr LexBodies lex_bodies(const LexTape<T>&) {
+  if constexpr (requires { T.derived; })
+    return {T.derived.lexBodies.data(), T.derived.lexBodyTerms.data(),
+            T.derived.lexOpeners.data()};
+  else
+    return {T.lexBodies, T.lexBodyTerms, T.lexOpeners};
+}
+
 inline bool lex_line_end_at(const char* src, TextOffset i) {
   return src[i] == '\n' || src[i] == '\r';
 }
@@ -97,9 +108,9 @@ std::uint16_t lex_hop(const Tape& tape, std::uint16_t k, const char* src,
 // refused: the body it last entered resumes past the refused byte, but stops
 // short of a line end. `reached` rises to how far the walks read.
 template <class Tape>
-LexReading lex_reading(const Tape& tape, const LexBodies& derived,
-                       const char* src, TextOffset len, std::uint16_t mode,
-                       TextOffset p, TextOffset& reached) {
+LexReading lex_reading(const Tape& tape, const char* src, TextOffset len,
+                       std::uint16_t mode, TextOffset p, TextOffset& reached) {
+  const LexBodies derived = lex_bodies(tape);
   LexReading out;
   if (p >= len ||
       !derived.openers[mode].has(static_cast<unsigned char>(src[p])))
@@ -121,7 +132,7 @@ LexReading lex_reading(const Tape& tape, const LexBodies& derived,
     [[maybe_unused]] std::size_t hops = 0;
     for (;;) {
       [[maybe_unused]] std::uint16_t k = kNoRelay;
-      if constexpr (requires { tape.relay(s); }) {
+      if constexpr (Tape::kRelays) {
         k = tape.relay(s);
         if (k != kNoRelay) {
           TextOffset seen = i;
@@ -152,7 +163,7 @@ LexReading lex_reading(const Tape& tape, const LexBodies& derived,
         hops = 0;
         continue;
       }
-      if constexpr (requires { tape.relay(s); }) {
+      if constexpr (Tape::kRelays) {
         if (hops < tape.relay_count()) {
           TextOffset seen = i;
           nx = lex_hop(tape, k, src, len, i, seen);
@@ -218,8 +229,7 @@ inline TextOffset lex_cut(TextOffset p, const LexReading& r) {
 // where no token starts. `reached` rises to how far the walks read; the
 // readings of open tokens use up `budget`.
 template <class Tape, class Blank, class Poll>
-TextOffset lex_unmatched_end(const Tape& tape, const LexBodies& derived,
-                             const char* src, TextOffset len,
+TextOffset lex_unmatched_end(const Tape& tape, const char* src, TextOffset len,
                              std::uint16_t mode, TextOffset p, Blank&& blank,
                              TextOffset& reached, LexReadBudget& budget,
                              Poll&& poll) {
@@ -236,7 +246,7 @@ TextOffset lex_unmatched_end(const Tape& tape, const LexBodies& derived,
     if (s.term != kInvalidSymbol && s.end > q) break;
     if (!budget.spent()) {
       TextOffset read = q;
-      const LexReading r = lex_reading(tape, derived, src, len, mode, q, read);
+      const LexReading r = lex_reading(tape, src, len, mode, q, read);
       budget.spend(q, read);
       if (read > reached) reached = read;
       if (r.term != kInvalidSymbol) break;

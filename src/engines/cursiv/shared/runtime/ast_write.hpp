@@ -13,7 +13,6 @@
 #include "cursiv/shared/runtime/Pending.hpp"
 #include "cursiv/shared/runtime/ast_conv.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
-#include "cursiv/syntax-tree/AstBuildError.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
@@ -58,10 +57,10 @@ template <class F>
 CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
                                             AstNode* owner,
                                             const ConvSlot* conv,
-                                            std::uint16_t field, ActKind kind,
+                                            std::uint16_t field,
                                             std::uint16_t alt) {
   using X = typename F::held;
-  (void)field, (void)kind, (void)alt;
+  (void)field, (void)alt;
   auto& member = ast_cast_unchecked<typename F::owner>(owner)->*F::ptr;
   if constexpr (F::content == FieldContent::node) {
     using T = std::remove_pointer_t<X>;
@@ -70,10 +69,7 @@ CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
         "a node member points at a class deriving from cursiv::AstNode "
         "-- the builder wires `parent` and the type tag through that "
         "base");
-    if (p.value == nullptr) {
-      ctx.fail(AstBuildError::malformed_cst, p.root);
-      return;
-    }
+    if (p.value == nullptr) broken_tape(p.root);
     let_go(node_held(member), owner, ctx.detached);
     place<X>(member, ast_cast_unchecked<T>(p.value));
     p.value->parent = owner;
@@ -130,18 +126,14 @@ CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
           return;
         }
       }
-      ctx.fail(AstBuildError::malformed_cst, p.root);
-      return;
+      broken_tape(p.root);
     }
-    if (conv == nullptr) {
-      ctx.fail(AstBuildError::malformed_cst, p.root);
-      return;
-    }
+    if (conv == nullptr) broken_tape(p.root);
     if (run_conv(ctx, p.text, *conv, member)) let_go(held, owner, ctx.detached);
   } else {
     // `?=` writes the fact of a match, into a `bool` member.
     if constexpr (std::is_same_v<X, bool>) {
-      if (kind == ActKind::flag) {
+      if (p.kind == ActKind::flag) {
         const CstNode& n = (*ctx.cst)[p.root];
         if (!n.recovered || n.begin != n.end) place<bool>(member, true);
         return;

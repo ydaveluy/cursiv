@@ -13,7 +13,7 @@ static std::uint16_t lr_authored(const LrBuildCfg& c, std::uint16_t nt) {
   if (nt >= c.nnts || nt < c.nnts - c.auxCount) return nt;
   for (std::uint16_t k = 0; k < c.nprods; ++k) {
     const LrLowProd& q = c.prods[k];
-    const std::uint16_t own = c.prodBuild[k].owner;
+    const std::uint16_t own = c.prods[k].owner;
     if (own >= c.nnts || own == nt) continue;
     if (q.lhs == nt) return own;
     for (unsigned i = 0; i < q.len; ++i) {

@@ -11,7 +11,6 @@
 #include <stdexcept>
 #include <vector>
 
-#include "cursiv/lr/runtime/LrGssPool.hpp"
 #include "cursiv/lr/runtime/LrGssRope.hpp"
 #include "cursiv/lr/runtime/LrGssRuns.hpp"
 
@@ -38,7 +37,7 @@ class LrGssForest {
   }
 
   // A fresh node, with no alternative yet.
-  Id node() { return static_cast<Id>(_nodes.push_back(Node{})); }
+  Id node() { return static_cast<Id>(_nodes.append(1, Node{})); }
 
   // The producer emits each path once; election also tolerates duplicates.
   // Words follow every child unless `at` places each before one.
@@ -59,7 +58,7 @@ class LrGssForest {
     else
       (void)_choiceAt.append(at);
     const auto id = static_cast<Id>(
-        _alternatives.push_back({childRange, choiceRange, step, none, kind}));
+        _alternatives.append(1, {childRange, choiceRange, step, none, kind}));
     Node& n = _nodes[node];
     if (n.alternative == none)
       n.first = id;
@@ -208,7 +207,7 @@ class LrGssForest {
   [[nodiscard]] std::size_t choiceWords() const { return _choices.size(); }
 
  private:
-  using Spell = LrGssRope<LrGssNoAgg>;
+  using Spell = LrGssRope;
 
   // Offsets into the arenas, which never outgrow 32 bits.
   struct Range {
@@ -438,8 +437,8 @@ class LrGssForest {
     }
   }
 
-  LrGssPool<Node> _nodes;
-  LrGssPool<Alternative> _alternatives;
+  LrGssRuns<Node, 12> _nodes;
+  LrGssRuns<Alternative, 12> _alternatives;
   LrGssRuns<Id> _children;
   // Every alternative's choices, kept once as they were added, and the child
   // each stands before.

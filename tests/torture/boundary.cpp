@@ -37,7 +37,7 @@ void generic_typo_runs_keep_the_terminal_guard() {
     std::uint64_t read = 0;
     bool cut = false;
     const auto candidates = cursiv::engine::lr_rescan_candidates<g::kTable>(
-        c, 0, 0, static_cast<cursiv::TextOffset>(text.size()), read, cut);
+        c, 0, 0, ~cursiv::TextOffset{0}, read, cut);
     return candidates.empty() ? cursiv::engine::Typo{} : candidates.front();
   };
   for (const auto text : {"he llo x", "he\tllo x", "he\nllo x", "he\rllo x",

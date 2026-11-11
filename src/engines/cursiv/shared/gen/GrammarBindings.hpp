@@ -6,7 +6,7 @@
 #include <type_traits>
 
 #include "cursiv/grammar/GrammarUtils.hpp"
-#include "cursiv/shared/gen/RowOf.hpp"
+#include "cursiv/shared/gen/Row.hpp"
 #include "cursiv/shared/gen/RuleRows.hpp"
 #include "cursiv/shared/gen/reached.hpp"
 #include "cursiv/shared/runtime/ast_fields.hpp"

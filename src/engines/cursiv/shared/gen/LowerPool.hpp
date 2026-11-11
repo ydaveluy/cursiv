@@ -10,6 +10,15 @@
 
 namespace cursiv::engine {
 
+// The actions one column of one element needs, innermost first.
+using Acts = std::vector<std::uint16_t>;
+
+inline Acts cat(const Acts& a, const Acts& b) {
+  Acts o = a;
+  o.insert(o.end(), b.begin(), b.end());
+  return o;
+}
+
 struct LowerPool {
   std::unordered_map<std::uint64_t, std::uint16_t> termIndex{};
   std::unordered_map<std::uint64_t, std::uint16_t> gapCond{};

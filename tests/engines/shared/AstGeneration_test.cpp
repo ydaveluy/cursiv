@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
-#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -187,72 +186,6 @@ void twin_cycles_read_each_lazy_rule_body_once() {
   }
 }
 
-template <auto Expression>
-struct Operator {};
-
-void nested_template_arguments_remain_qualified() {
-  // An already qualified spelling stays so, independently of the compiler's
-  // pretty form; GCC's class value also needs expression parentheses.
-  CHECK(cursiv::engine::gen_qualified(
-            "astgen::Operator<cursiv::Lit<cursiv::str<3>{\"is\"}, false, "
-            "cursiv::detail::WordBound>()>") ==
-        "::astgen::Operator<(cursiv::Lit<cursiv::str<3>{\"is\"}, false, "
-        "cursiv::detail::WordBound>())>");
-  const auto spelling = cursiv::engine::gen_qualified(
-      cursiv::detail::raw_type_name<Operator<cursiv::kw<"is">>>());
-  CHECK(spelling.starts_with("::astgen::Operator<"));
-  CHECK(spelling.find("detail::WordBound") != std::string::npos);
-  CHECK(spelling.find("false, WordBound") == std::string::npos);
-  using Repeated = Operator<cursiv::many(cursiv::lit<"x">)>;
-  const auto repeated =
-      cursiv::engine::gen_qualified(cursiv::detail::raw_type_name<Repeated>());
-  CHECK(repeated.find("kUnbounded") != std::string::npos);
-  const auto nested = cursiv::engine::gen_qualified(
-      cursiv::detail::raw_type_name<
-          Operator<cursiv::many(cursiv::lit<"x">) + cursiv::lit<"y">>>());
-  CHECK(nested.find("kUnbounded") != std::string::npos);
-
-  const auto maximum = std::to_string(cursiv::kUnbounded);
-  const auto maximum_literal =
-      maximum + (std::numeric_limits<std::size_t>::digits >
-                         std::numeric_limits<long long>::digits
-                     ? "ull"
-                     : "");
-  CHECK(repeated.find(maximum) == std::string::npos);
-  CHECK(nested.find(maximum) == std::string::npos);
-  CHECK(cursiv::engine::gen_qualified("cursiv::Repeat<0," + maximum +
-                                      ",astgen::Token>") ==
-        "::cursiv::Repeat<0,::cursiv::kUnbounded,astgen::Token>");
-  CHECK(cursiv::engine::gen_qualified("cursiv::Repeat<" + maximum +
-                                      ",7,astgen::Token>") ==
-        "::cursiv::Repeat<" + maximum_literal + ",7,astgen::Token>");
-  CHECK(cursiv::engine::gen_qualified("cursiv::Repeat<2,7,astgen::Token>") ==
-        "::cursiv::Repeat<2,7,astgen::Token>");
-  CHECK(cursiv::engine::gen_qualified("astgen::Repeat<0," + maximum +
-                                      ",astgen::Token>") ==
-        "::astgen::Repeat<0," + maximum_literal + ",astgen::Token>");
-  CHECK(cursiv::engine::gen_qualified("astgen::cursiv::Repeat<0," + maximum +
-                                      ",astgen::Token>") ==
-        "::astgen::cursiv::Repeat<0," + maximum_literal + ",astgen::Token>");
-  const std::string quoted =
-      "astgen::Literal<\"cursiv::Repeat<0," + maximum + ",Token>\">";
-  CHECK(cursiv::engine::gen_qualified(quoted) == "::" + quoted);
-
-  CHECK(cursiv::engine::gen_qualified(
-            cursiv::detail::raw_type_name<
-                Operator<std::numeric_limits<long long>::min()>>()) ==
-        "::astgen::Operator<(-9223372036854775807ll - 1)>");
-  CHECK(cursiv::engine::gen_qualified(
-            "astgen::Operator<-9223372036854775808L>") ==
-        "::astgen::Operator<(-9223372036854775807l - 1)>");
-  CHECK(
-      cursiv::engine::gen_qualified("astgen::Operator<18446744073709551615>") ==
-      "::astgen::Operator<18446744073709551615ull>");
-  CHECK(cursiv::engine::gen_widen(
-            "\"-9223372036854775808 18446744073709551615\"") ==
-        "\"-9223372036854775808 18446744073709551615\"");
-}
-
 struct Base : cursiv::Extends<cursiv::AstNode> {
   string_view name;
 };
@@ -374,7 +307,7 @@ void long_refused_words_emit_bounded_functions() {
   lead.add(0xC3);
   head.words.back().push_back({{}, lead, true});
   // A decoded word boundary needs no separate scalar pool.
-  const auto source = head.source("inline", "refuses", {"word, 1u", "nullptr"});
+  const auto source = head.source("refuses", {"word, 1u", "nullptr"});
   CHECK(source.find("nullptr") == std::string::npos);
   CHECK(source.size() < 1024 * 1024);
   unsigned depth = 0, deepest = 0;
@@ -648,7 +581,6 @@ void ast_generation_cases_run() {
   astgen::a_flag_after_a_nest_writes_the_new_node();
   astgen::writes_follow_the_current_node_across_nests_and_turns();
   astgen::twin_cycles_read_each_lazy_rule_body_once();
-  astgen::nested_template_arguments_remain_qualified();
   astgen::reflection_only_types_need_no_factory(
       cursiv::engine::ast_registry<astgen::G,
                                    cursiv::engine::LrLowering<astgen::G>>());

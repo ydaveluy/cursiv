@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <numeric>
 #include <span>
 #include <utility>
@@ -29,8 +28,8 @@ std::vector<unsigned> productions_by_rule(const LrBuildCfg& g) {
   std::vector<unsigned> order(g.nprods);
   std::iota(order.begin(), order.end(), 0u);
   std::ranges::stable_sort(order, [&](unsigned a, unsigned b) {
-    return std::pair(g.prods[a].lhs, g.prodBuild[a].priorityAlt) <
-           std::pair(g.prods[b].lhs, g.prodBuild[b].priorityAlt);
+    return std::pair(g.prods[a].lhs, g.prods[a].priorityAlt) <
+           std::pair(g.prods[b].lhs, g.prods[b].priorityAlt);
   });
   return order;
 }
@@ -83,7 +82,7 @@ void lr_elect_words(LrBuildTable& A) {
   for (unsigned p = 0; p < nP; ++p) ++from[g.prods[p].lhs + 1u];
   for (unsigned n = 0; n < nN; ++n) from[n + 1] += from[n];
   const auto alt = [&](unsigned i) {
-    return g.prodBuild[order[i]].priorityAlt;
+    return g.prods[order[i]].priorityAlt;
   };
 
   std::vector word(nP, kNoWord);
@@ -161,11 +160,10 @@ void lr_elect_words(LrBuildTable& A) {
   for (unsigned p = 0; p < nP; ++p) {
     A.electAt[p] = static_cast<std::uint32_t>(A.electWord.size());
     const LrLowProd& q = g.prods[p];
-    const LrProdBuild& b = g.prodBuild[p];
     const std::uint32_t armAt = turn[p] ? 1u : 0u;
     entries.clear();
     if (word[p] != kNoWord) entries.push_back({armAt, 1, word[p]});
-    for (std::uint32_t d = b.decideAt; d < b.decideAt + b.decideLen; ++d)
+    for (std::uint32_t d = q.decideAt; d < q.decideAt + q.decideLen; ++d)
       entries.push_back(
           {std::max(g.decisions[d] >> 16, armAt), 2, g.decisions[d] & 0xffffu});
     for (unsigned i = turn[p] ? 1u : 0u; i < q.len; ++i)
@@ -269,15 +267,11 @@ void lr_elect_runs(LrBuildTable& A) {
   A.electTwinNext.assign(nP, kLrNoTwin);
   A.electRhsAt.assign(nP + 1u, 0);
   A.electRhs.clear();
-  std::map<std::vector<std::uint32_t>, std::uint32_t> classOf;
-  std::vector<std::uint32_t> key;
+  const std::vector<std::uint32_t> classOf = lr_reduce_classes(g);
   std::vector<std::vector<unsigned>> members;
   for (unsigned p = 0; p < nP; ++p) {
-    lr_reduce_key(g, p, key);
-    const auto [at, fresh] =
-        classOf.try_emplace(key, static_cast<std::uint32_t>(members.size()));
-    if (fresh) members.emplace_back();
-    members[at->second].push_back(p);
+    if (classOf[p] == members.size()) members.emplace_back();
+    members[classOf[p]].push_back(p);
   }
   // Two productions an election cannot tell apart need not be found again.
   const auto same = [&](unsigned p, unsigned q) {

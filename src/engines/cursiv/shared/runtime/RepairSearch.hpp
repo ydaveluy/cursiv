@@ -1,6 +1,7 @@
-// The parts of a repair search shared by both engines: its budget, the paths,
-// the queue, dominance between readings and the election among the cheapest
-// goals. An engine brings its readings and edits.
+// The parts of a repair search shared by both engines: what a reading holds
+// for it, its budget, the paths, the queue, dominance between readings, the
+// race and the election among the cheapest goals. An engine brings its
+// readings and edits.
 #pragma once
 
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <unordered_map>
 #include <vector>
 
@@ -27,6 +29,70 @@ inline constexpr TextOffset kRepairReachAll = 0xFFFFFFFFu;
 // The steps a race between goals of one cost may take: past them, the text has
 // said what it can of the fault, and their key and rank decide.
 inline constexpr std::uint32_t kRepairRaceSteps = 1024;
+
+// Where a point stands in the fault it is repairing, `[abandon] (ins)* (rep |
+// del+)?`; the phases are in the order the fault goes through them.
+enum class RepairPhase : std::uint8_t {
+  // No edit yet at this point.
+  beforeEdit,
+  // The abandon is made: insertions, a replacement or deletions go on from it.
+  afterAbandon,
+  // An insertion is made, and more may follow where it stands.
+  inserting,
+  // Bytes were dropped or a trivia skipped: only more of them.
+  discardOnly,
+};
+
+// What a slot of the search stands for. A generator is queued directly and
+// never admitted: it has no future of its own, only edits of the reading it
+// was made from not yet made.
+enum class RepairWork : std::uint8_t {
+  // A reading, read forward.
+  read,
+  // Abandons of a refused reading.
+  enumerateAbandons,
+  // The insertions of a refused reading that no required run reaches.
+  enumerateInsertions,
+  // The replacement of the word in hand by the keyword its reading is forced
+  // to, at the cost of its deletion and the keyword's insertion.
+  forcedReplacement,
+};
+
+// What a reading of either engine holds for the search: its key, where it
+// stands in its fault and what its slot stands for.
+struct RepairReading {
+  // The key; the rank is read through `link`.
+  std::uint32_t cost = 0;
+  std::uint32_t lost = 0;
+  std::uint32_t edits = 0;
+  std::uint32_t faults = 0;
+  std::uint32_t invented = 0;
+  std::uint32_t link = kNoEditLink;
+  // Real tokens since the last edit, as far as the engine's goal counts them.
+  std::uint8_t shifts = 0;
+  RepairPhase phase = RepairPhase::beforeEdit;
+  RepairWork work = RepairWork::read;
+  bool done = false;
+  // No edit yet at this point: the next one opens a fault. A generator has
+  // counted the fault it opens when it was made, and is never counted again.
+  bool fresh = true;
+  // Dominated, or an arm its own action refused: never read again.
+  bool gone = false;
+  // Named by a queue entry: its slot outlives the edit that created it.
+  bool queued = false;
+
+  bool generates() const { return work != RepairWork::read; }
+
+  // Which edits may come next at the point: an abandon before any edit; a
+  // replacement until bytes are dropped; an insertion until then too, but in
+  // front of bytes no alphabet reads (`garbage`), one at most.
+  bool mayAbandon() const { return phase == RepairPhase::beforeEdit; }
+  bool mayReplace() const { return phase <= RepairPhase::inserting; }
+  bool mayInsert(bool garbage) const {
+    return phase < RepairPhase::inserting ||
+           (phase == RepairPhase::inserting && !garbage);
+  }
+};
 
 // A reading queued at `f`, with the rest of its key and the order it was
 // queued in.
@@ -111,6 +177,17 @@ struct RepairSearch {
     rs[at].queued = true;
   }
 
+  // A copy of generator `from` queued at the least its edits cost, `extra`
+  // more than its reading: it counts the edit and the fault it opens here.
+  template <class R>
+  void defer(std::vector<R>& rs, const R& from, std::uint32_t extra) {
+    R& g = rs.emplace_back(from);
+    g.cost += extra;
+    g.edits += 1;
+    g.faults += g.fresh ? 1u : 0u;
+    queue(rs, g.cost, g, static_cast<std::uint32_t>(rs.size()) - 1, 0, false);
+  }
+
   RepairEntry pop() {
     std::pop_heap(heap.begin(), heap.end(), repair_entry_after);
     const RepairEntry e = heap.back();
@@ -158,6 +235,109 @@ CURSIV_ALWAYS_INLINE inline bool repair_merge(RepairSearch<G>& s,
   if (x.gone || (k < 0 && x.*A <= r.*A)) {
     x.gone = true;
     kept = i;
+  }
+  return false;
+}
+
+// What a step leaves of a reading: past a token, inside one's actions, refused,
+// at the end of the text, or unread where the share ran out.
+enum class RepairRead : std::uint8_t { shifted, inside, refused, done, spent };
+
+// The goals read on with no edit: `reach[k]` is where candidate `k`'s furthest
+// reading was refused, or `kRepairReachAll`; `of[g]` is goal `g`'s candidate.
+// The reading furthest back steps until all agree or `e.kSteps` pass; true if
+// the share ran out. Engine `e` steps a reading, says how it and its forks
+// stand, and joins the readings that meet past a token.
+template <class G, class R, class E>
+bool repair_race(const RepairSearch<G>& s, std::vector<R>& rs,
+                 const std::vector<std::uint32_t>& of,
+                 std::vector<TextOffset>& reach, const CancellationPoll& stop,
+                 E e) {
+  // Reading `rs[base + k]` races for the candidates `ofs[k]`.
+  const auto base = static_cast<std::uint32_t>(rs.size());
+  std::vector<std::vector<std::uint32_t>> ofs;
+  std::vector<std::uint32_t> queue;
+  const auto behind = [&](std::uint32_t a, std::uint32_t b) {
+    return e.pos(rs[a]) > e.pos(rs[b]);
+  };
+  const auto enqueue = [&](std::uint32_t i) {
+    queue.push_back(i);
+    std::ranges::push_heap(queue, behind);
+  };
+  std::ranges::fill(reach, 0);
+  for (std::uint32_t g = 0; g < s.goals.size(); ++g) {
+    if (rs[s.goals[g]].done) {
+      reach[of[g]] = kRepairReachAll;
+      continue;
+    }
+    const R r = rs[s.goals[g]];
+    rs.push_back(r);
+    ofs.push_back({of[g]});
+    enqueue(base + static_cast<std::uint32_t>(ofs.size()) - 1);
+  }
+  const auto reach_all = [&](std::uint32_t i) {
+    for (const std::uint32_t k : ofs[i - base]) reach[k] = kRepairReachAll;
+  };
+  const auto level = [&] {
+    const std::vector<std::uint32_t>& first = ofs[queue[0] - base];
+    TextOffset least = kRepairReachAll;
+    for (const std::uint32_t q : queue) {
+      if (ofs[q - base] != first) return false;
+      least = std::min(least, e.pos(rs[q]));
+    }
+    for (std::uint32_t k = 0; k < reach.size(); ++k)
+      if (!std::ranges::binary_search(first, k) && reach[k] >= least)
+        return false;
+    return true;
+  };
+  const auto place = [&](std::uint32_t i) {
+    switch (e.stands(i)) {
+      case RepairRead::refused: {
+        const TextOffset at = e.refused(i);
+        for (const std::uint32_t k : ofs[i - base])
+          reach[k] = std::max(reach[k], at);
+        return;
+      }
+      case RepairRead::done:
+        reach_all(i);
+        return;
+      case RepairRead::shifted:
+        if (const std::uint32_t kept = e.join(i); kept != i) {
+          std::vector<std::uint32_t> both;
+          std::ranges::set_union(ofs[kept - base], ofs[i - base],
+                                 std::back_inserter(both));
+          ofs[kept - base] = std::move(both);
+          return;
+        }
+        [[fallthrough]];
+      default:
+        enqueue(i);
+    }
+  };
+  std::vector<std::uint32_t> forks;
+  std::uint32_t steps = 0;
+  while (!queue.empty()) {
+    stop.poll();
+    const bool decided = steps >= e.kSteps || level();
+    if (decided || e.spent()) {
+      for (const std::uint32_t q : queue) reach_all(q);
+      return !decided;
+    }
+    std::ranges::pop_heap(queue, behind);
+    const std::uint32_t i = queue.back();
+    queue.pop_back();
+    steps += e.step(i, forks);
+    if (e.stands(i) == RepairRead::spent) {
+      reach_all(i);
+      for (const std::uint32_t q : queue) reach_all(q);
+      return true;
+    }
+    for (const std::uint32_t j : forks) {
+      assert(j == base + ofs.size());
+      ofs.push_back(std::vector(ofs[i - base]));
+      place(j);
+    }
+    place(i);
   }
   return false;
 }

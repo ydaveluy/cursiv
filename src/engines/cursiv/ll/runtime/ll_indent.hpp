@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -52,6 +53,15 @@ template <const auto& T>
 inline bool ll_mode_ends(std::uint16_t mode) {
   return ll_end_stands<T>([&](auto t) { return T.mode_admits(mode, t); });
 }
+
+// The terminals a lexer reads that are no trivia, one bit each.
+template <const auto& T>
+inline constexpr auto kLlVisibleTerms = [] {
+  std::array<std::uint64_t, T.termWords> mask{};
+  for (std::uint16_t t = 1; t < T.nterms; ++t)
+    if (!T.terms[t].trivia) mask[t >> 6] |= std::uint64_t{1} << (t & 63);
+  return mask;
+}();
 
 // Whether a reading at bracket depth `depth` crosses `t` as a blank: a trivia,
 // or inside brackets a line it joins.

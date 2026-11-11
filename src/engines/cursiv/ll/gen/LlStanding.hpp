@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <span>
 #include <utility>
 #include <vector>
 
@@ -20,73 +19,7 @@ struct LlStanding {
 
   explicit LlStanding(const LlBuiltProgram& b) : point(b.cfg.nnodes) {
     const auto& g = b.cfg;
-    // Per position, the condition ids at its head: what `point` is spread
-    // from, freed once it is.
-    std::vector<DynSet> lead(g.nnodes);
-    std::vector<std::uint8_t> done(g.nnodes, 0);
-    // Children before their parent, on a stack of its own: an alias chain may
-    // be as long as the grammar, and the native stack is not.
-    struct Walk {
-      std::uint16_t id;
-      std::uint32_t next = 0;
-      DynSet out{};
-    };
-    const auto read_by = [&](const LlNode& n) -> std::span<const std::uint16_t> {
-      if (n.kind == LlShape::seq || n.kind == LlShape::alt ||
-          n.kind == LlShape::rep)
-        return g.children(n);
-      return {};
-    };
-    // A climb reads its operand first.
-    const auto body_of = [&](const LlNode& n) {
-      std::uint16_t callee = n.sym;
-      while (g.rules[callee].climb != kNoRow)
-        callee = g.climbs[g.rules[callee].climb].primary;
-      return g.rules[callee].body;
-    };
-    std::vector<Walk> walks;
-    const auto enter = [&](std::uint16_t id) {
-      done[id] = 1;
-      walks.push_back({id});
-    };
-    for (std::uint32_t root = 0; root < g.nnodes; ++root) {
-      if (done[root] != 0) continue;
-      enter(static_cast<std::uint16_t>(root));
-      while (!walks.empty()) {
-        const std::size_t top = walks.size() - 1;
-        const std::uint16_t id = walks[top].id;
-        const LlNode& n = g.nodes[id];
-        if (n.kind == LlShape::call) {
-          const std::uint16_t body = body_of(n);
-          if (body != kNoRow && done[body] == 0) {
-            enter(body);
-            continue;
-          }
-          if (body != kNoRow) walks[top].out = lead[body];
-        } else if (n.kind == LlShape::condition) {
-          if (b.cut[n.sym].none()) walks[top].out.set(n.sym);
-        } else {
-          const std::span<const std::uint16_t> childIds = read_by(n);
-          bool descended = false;
-          while (walks[top].next < childIds.size()) {
-            const std::uint16_t child = childIds[walks[top].next];
-            if (done[child] == 0) {
-              enter(child);
-              descended = true;
-              break;
-            }
-            walks[top].out |= lead[child];
-            ++walks[top].next;
-            if (n.kind == LlShape::seq && !b.nullable[child])
-              walks[top].next = static_cast<std::uint32_t>(childIds.size());
-          }
-          if (descended) continue;
-        }
-        lead[id] = std::move(walks[top].out);
-        walks.pop_back();
-      }
-    }
-
+    const auto& lead = b.lead;
     struct Visit {
       std::uint16_t id;
       DynSet inherited;

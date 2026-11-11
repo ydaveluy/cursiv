@@ -207,7 +207,7 @@ void every_distinct_reading_is_a_ranked_candidate() {
   std::uint64_t read = 0;
   bool cut = false;
   const auto candidates = cursiv::engine::lr_rescan_candidates<g::kTable>(
-      c, 0, 0, static_cast<cursiv::TextOffset>(text.size()), read, cut);
+      c, 0, 0, ~cursiv::TextOffset{0}, read, cut);
   CHECK(candidates.size() > 1);
   for (std::size_t i = 1; i < candidates.size(); ++i) {
     const auto& a = candidates[i - 1];
@@ -1013,8 +1013,8 @@ void the_reading_ends_where_the_lexer_does(const char* lang,
           cursiv::engine::lr_match_halt<A>(text.data(), len, mode, i, halt);
       if (want.term == cursiv::engine::kInvalidSymbol) continue;
       TextOffset reached = i;
-      const cursiv::engine::LexReading read =
-          cursiv::engine::lr_lex_reading<A>(text.data(), len, mode, i, reached);
+      const cursiv::engine::LexReading read = cursiv::engine::lex_reading(
+          cursiv::engine::LrLexTape<A>{}, text.data(), len, mode, i, reached);
       if (halt > want.end) {
         if (read.term == cursiv::engine::kInvalidSymbol && reached > halt &&
             bad++ < 3)
@@ -1041,8 +1041,8 @@ void the_reading_ends_where_the_lexer_does(const char* lang,
             bent[k] = static_cast<char>(x);
             reached = i;
             const cursiv::engine::LexReading r =
-                cursiv::engine::lr_lex_reading<A>(bent.data(), len, mode, i,
-                                                  reached);
+                cursiv::engine::lex_reading(cursiv::engine::LrLexTape<A>{},
+                                            bent.data(), len, mode, i, reached);
             ++broken;
             if (r.term != want.term || r.end != want.end || !r.closed) {
               if (bad++ < 3)

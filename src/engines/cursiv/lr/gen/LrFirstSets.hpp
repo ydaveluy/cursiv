@@ -17,6 +17,8 @@ struct LrFirstSets {
   const LrBuildCfg* g = nullptr;
   std::vector<std::uint8_t> nullable;
   std::vector<DynSet> first;
+  // Per production, the position its symbols derive nothing from.
+  std::vector<std::uint16_t> nullFrom;
 
   void add(DynSet& set, std::uint16_t sym) const {
     if (is_term(sym))
@@ -33,7 +35,7 @@ struct LrFirstSets {
       add(s, y);
       if (is_term(y) || !nullable[nt_index(y)]) return s;
     }
-    if (g->prodBuild[prod].endOnly)
+    if (g->prods[prod].endOnly)
       s.set(kEofSymbol);
     else
       s |= la;
@@ -101,7 +103,7 @@ inline std::vector<DynSet> lr_first(const LrBuildCfg& g,
       if (!nullable[nt_index(sym)]) break;
     }
     if constexpr (!Last)
-      if (i == q.len && g.prodBuild[p].endOnly) {
+      if (i == q.len && q.endOnly) {
         changed = !into.test(kEofSymbol) || changed;
         into.set(kEofSymbol);
       }
@@ -126,7 +128,7 @@ inline std::vector<DynSet> lr_follow(
     const unsigned p = queue.next();
     const auto& q = g.prods[p];
     DynSet suffix;
-    if (g.prodBuild[p].endOnly)
+    if (q.endOnly)
       suffix.set(kEofSymbol);
     else
       suffix = follow[q.lhs];
@@ -151,8 +153,8 @@ inline std::vector<DynSet> lr_follow(
 // body after a symbol that ends in it, or what follows the rule where nothing
 // of the body is left to read.
 inline std::vector<DynSet> lr_terminal_follow(const LrBuildCfg& g,
-                                              const LrFirstSets& fs) {
-  const std::vector<DynSet> follow = lr_follow(g, fs.nullable, fs.first);
+                                              const LrFirstSets& fs,
+                                              std::span<const DynSet> follow) {
   const std::vector<DynSet> last = lr_first<true>(g, fs.nullable);
   std::vector<DynSet> out(g.nterms);
   for (unsigned p = 0; p < g.nprods; ++p) {
@@ -174,8 +176,16 @@ inline std::vector<DynSet> lr_terminal_follow(const LrBuildCfg& g,
 }
 
 inline LrFirstSets lr_first_sets(const LrBuildCfg& g) {
-  LrFirstSets fs{&g, lr_nullable(g, true), {}};
+  LrFirstSets fs{&g, lr_nullable(g, true), {}, {}};
   fs.first = lr_first(g, fs.nullable);
+  for (unsigned p = 0; p < g.nprods; ++p) {
+    const auto& q = g.prods[p];
+    unsigned from = q.len;
+    while (from > 0 && !is_term(g.sym_at(q, from - 1)) &&
+           fs.nullable[nt_index(g.sym_at(q, from - 1))])
+      --from;
+    fs.nullFrom.push_back(static_cast<std::uint16_t>(from));
+  }
   return fs;
 }
 

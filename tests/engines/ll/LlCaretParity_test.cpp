@@ -409,6 +409,12 @@ void each_member_a_token_fills_is_named_as_the_descent_names_it() {
        {"member:twice ", "member:through ", "member:lone ", "member:both ",
         "member:lone lx.", "member:lone lx.a ", "member:lone lx; lone "})
     CHECK(end(*lr, text) == end(*ll, text));
+  // A rule that reads itself first, in a left recursion two calls enter: past
+  // its left operand no token opens it, whichever call entered.
+  for (const std::string text : {"member:loops lo ib ", "member:loops li ib "}) {
+    CHECK(end(*lr, text) == (Names{"!", ";", "ID:name/Chained"}));
+    CHECK(end(*lr, text) == end(*ll, text));
+  }
   // Only a site says what a token fills: elsewhere in the grammar the terminal
   // writes a member, which a site past a keyword does not.
   CHECK(end(*lr, "member:bare ") == Names{"TICK"});

@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <iterator>
 #include <set>
-#include <span>
 #include <tuple>
 #include <unordered_set>
 #include <utility>
@@ -48,12 +47,10 @@ class LexOvertakes {
   // Those of `candidates` that read over one of `beside` or over a trivia.
   DynSet over(const DynSet& candidates, const DynSet& beside) {
     DynSet out;
-    each_bit(candidates.w.data(), candidates.w.size(), [&](std::size_t a) {
-      if (a >= _g.nterms || _trivia.test(static_cast<unsigned>(a))) return;
-      if (reads_over(static_cast<unsigned>(a), beside) ||
-          takes_trivia(static_cast<unsigned>(a)))
-        out.set(static_cast<unsigned>(a));
-    });
+    for (const unsigned a : candidates.members())
+      if (a < _g.nterms && !_trivia.test(a) &&
+          (reads_over(a, beside) || takes_trivia(a)))
+        out.set(a);
     return out;
   }
 
@@ -72,11 +69,9 @@ class LexOvertakes {
     if (_past[a].intersects(beside)) return true;
     _ask = beside;
     _ask.andnot(_asked[a]);
-    bool over = false;
-    each_bit(_ask.w.data(), _ask.w.size(), [&](std::size_t b) {
-      over = over || (b < _g.nterms && runs_past(static_cast<unsigned>(b), a));
-    });
-    return over;
+    for (const unsigned b : _ask.members())
+      if (b < _g.nterms && runs_past(b, a)) return true;
+    return false;
   }
 
   // The pairs walked, the graph states their walks stepped, and those the sweep
@@ -95,10 +90,9 @@ class LexOvertakes {
     if (_tied[a] == 0) {
       bool over = false;
       if (_startOf[a] >= 0)
-        each_bit(_trivia.w.data(), _trivia.w.size(), [&](std::size_t b) {
-          over = over || (b < _g.nterms && _startOf[b] >= 0 &&
-                          walk(static_cast<unsigned>(b), a, true));
-        });
+        for (const unsigned b : _trivia.members())
+          over =
+              over || (b < _g.nterms && _startOf[b] >= 0 && walk(b, a, true));
       _tied[a] = over ? 2 : 1;
     }
     return _tied[a] == 2;
@@ -179,7 +173,7 @@ class LexOvertakes {
         _open.set(t);
         continue;
       }
-      for (const int x : sorted_closure(std::span<const int>(&_startOf[t], 1)))
+      for (const int x : _nfa.sorted_closure(_startOf[t]))
         root.push_back(std::uint64_t{t} << 32 | static_cast<std::uint32_t>(x));
     }
     _sweepSeen.insert(root);
@@ -201,10 +195,8 @@ class LexOvertakes {
       _endsWithin.resize(_g.nterms);
       for (std::size_t a = 0; a < _g.nterms; ++a) {
         _sweepEndsWithin[a] |= _open;
-        each_bit(_sweepEndsWithin[a].w.data(), _sweepEndsWithin[a].w.size(),
-                 [&](std::size_t b) {
-                   _endsWithin[a].push_back(static_cast<std::uint16_t>(b));
-                 });
+        for (const unsigned b : _sweepEndsWithin[a].members())
+          _endsWithin[a].push_back(static_cast<std::uint16_t>(b));
       }
       _swept = true;
       sweep_end();
@@ -227,10 +219,7 @@ class LexOvertakes {
       if (standing.empty() || standing.back() != t) standing.push_back(t);
       if (st.accept >= 0 && (ending.empty() || ending.back() != t))
         ending.push_back(t);
-      if (st.set >= 0) {
-        reads[k] = sets[st.set];
-        if (st.minus >= 0) reads[k].andnot(sets[st.minus]);
-      }
+      if (st.set >= 0) reads[k] = lex_edge_bytes(sets, st);
       left |= reads[k];
     }
     _sweepReads += ending.size() * standing.size();
@@ -241,13 +230,7 @@ class LexOvertakes {
       const auto byte = static_cast<unsigned char>(c);
       if (!left.has(byte)) continue;
       _sweepReads += at.size();
-      ByteSet together = left;
-      for (const ByteSet& on : reads)
-        if (on.has(byte))
-          together &= on;
-        else
-          together.andnot(on);
-      left.andnot(together);
+      left.andnot(lex_read_alike(left, reads, byte));
       std::vector<Item> next;
       for (std::size_t k = 0; k < at.size();) {
         const std::uint64_t t = at[k] >> 32;
@@ -256,7 +239,7 @@ class LexOvertakes {
           if (reads[k].has(byte))
             leads.push_back(_nfa.s[static_cast<std::uint32_t>(at[k])].t1);
         if (leads.empty()) continue;
-        for (const int x : sorted_closure(leads))
+        for (const int x : _nfa.sorted_closure(leads))
           next.push_back(t << 32 | static_cast<std::uint32_t>(x));
       }
       if (!next.empty() && _sweepSeen.insert(next).second) {
@@ -266,11 +249,6 @@ class LexOvertakes {
     }
   }
 
-  std::vector<int> sorted_closure(std::span<const int> roots) const {
-    std::vector<int> out = _nfa.eclose(roots);
-    std::ranges::sort(out);
-    return out;
-  }
 
   // Where a token that may follow `b` starts, a trivia included.
   const std::vector<int>& after(unsigned b) {
@@ -278,12 +256,10 @@ class LexOvertakes {
       _nextKnown[b] = true;
       std::vector<int> starts;
       const DynSet next = _followers[b] | _trivia;
-      each_bit(next.w.data(), next.w.size(), [&](std::size_t u) {
+      for (const unsigned u : next.members())
         if (u != 0 && u < _g.nterms && _startOf[u] >= 0)
           starts.push_back(_startOf[u]);
-      });
-      _next[b] = _nfa.eclose(std::span<const int>(starts));
-      std::ranges::sort(_next[b]);
+      _next[b] = _nfa.sorted_closure(starts);
     }
     return _next[b];
   }
@@ -332,11 +308,8 @@ class LexOvertakes {
         for (const std::vector<int>& wx : xs)
           push({wa, wx, phase, words(allowed)});
     };
-    std::vector<int> first = _nfa.eclose(_startOf[a]);
-    std::vector<int> second = _nfa.eclose(_startOf[b]);
-    std::ranges::sort(first);
-    std::ranges::sort(second);
-    enter(std::move(first), std::move(second), 0, ByteSet{});
+    enter(_nfa.sorted_closure(_startOf[a]), _nfa.sorted_closure(_startOf[b]), 0,
+          ByteSet{});
     for (std::size_t i = 0; i < work.size(); ++i) {
       if (unsure || seen.size() > kMost) return true;
       const auto [ra, rx, phase, allowed] = work[i];
@@ -354,25 +327,18 @@ class LexOvertakes {
           lex_subset_reads(_nfa, sets, ra) & lex_subset_reads(_nfa, sets, rx);
       if (phase == 1)
         left &= ByteSet{{allowed[0], allowed[1], allowed[2], allowed[3]}};
+      std::vector<ByteSet> reads;
+      for (const std::vector<int>* sub : {&ra, &rx})
+        for (const int x : *sub)
+          if (const LexNfaState& st = _nfa.s[static_cast<std::size_t>(x)];
+              st.set >= 0)
+            reads.push_back(lex_edge_bytes(sets, st));
       for (unsigned c = 0; c < 256; ++c) {
         const auto byte = static_cast<unsigned char>(c);
         if (!left.has(byte)) continue;
         _walkReads += ra.size() + rx.size();
-        // Every edge of both subsets reads the bytes of `together` as it reads
-        // `byte`: they step where it steps, and are taken with it.
-        ByteSet together = left;
-        for (const std::vector<int>* sub : {&ra, &rx})
-          for (const int x : *sub) {
-            const LexNfaState& st = _nfa.s[static_cast<std::size_t>(x)];
-            if (st.set < 0) continue;
-            ByteSet on = sets[st.set];
-            if (st.minus >= 0) on.andnot(sets[st.minus]);
-            if (on.has(byte))
-              together &= on;
-            else
-              together.andnot(on);
-          }
-        left.andnot(together);
+        // The bytes both subsets read as they read `byte` are taken with it.
+        left.andnot(lex_read_alike(left, reads, byte));
         auto na = lex_nfa_step(_nfa, sets, ra, byte);
         auto nx = lex_nfa_step(_nfa, sets, rx, byte);
         if (na.empty() || nx.empty()) continue;

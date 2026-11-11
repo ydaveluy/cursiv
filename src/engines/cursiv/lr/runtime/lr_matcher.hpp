@@ -92,15 +92,6 @@ inline TextOffset lr_else_reach(std::uint16_t s, const char* src, TextOffset i,
   return i + 1;
 }
 
-template <const auto& A>
-constexpr auto lr_refused_from(const char* src, TextOffset from,
-                               TextOffset len) {
-  return [=](unsigned t) {
-    return LexTape<A>{}.refuses(static_cast<SymbolId>(t), src + from,
-                                len - from);
-  };
-}
-
 // The tape of the table: a state's election is written as fallback rows;
 // `Skips`, with the terminals a refused word took off the position.
 template <const auto& A, bool Skips = false>
@@ -182,7 +173,7 @@ inline Scan lr_match_halt(const char* src, TextOffset len, std::uint16_t mode,
 }
 
 // The same with the terminals of `skip` off the position: a flagged winner
-// the stack refused, read again.
+// the stack refused, read again, at the priority of its reading.
 template <const auto& A>
 inline Scan lr_match_without(const char* src, TextOffset len,
                              std::uint16_t mode, TextOffset from,
@@ -190,7 +181,11 @@ inline Scan lr_match_without(const char* src, TextOffset len,
   typename LrLexTape<A>::Skip off{};
   for (const SymbolId t : skip) off.set(t);
   const typename LrLexTape<A>::Skipping tape{.skip = &off};
-  return lex_match_halt(tape, src, len, mode, from, halt);
+  Scan out = lex_match_halt(tape, src, len, mode, from, halt);
+  if (out.term != kInvalidSymbol)
+    out.priority = static_cast<std::uint8_t>(lex_reading_priority(
+        LrLexTape<A>{}, src, len, mode, from, out.end, out.term));
+  return out;
 }
 
 // The token the table's own walk reads, no generated walk asked: what a test

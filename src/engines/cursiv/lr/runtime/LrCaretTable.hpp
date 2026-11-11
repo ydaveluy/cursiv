@@ -108,8 +108,6 @@ struct LrCaretTable {
   std::span<const std::uint64_t> held;
 
   std::span<const TermInfo> terms;
-  // The terminals' names and spellings, as `TermInfo` places them.
-  const char* names = nullptr;
   std::span<const LrProduction> prods;
   std::span<const LrReducePlan> reductions;
   // Per state, the one state a move goes to it from, or `kDeadState` where

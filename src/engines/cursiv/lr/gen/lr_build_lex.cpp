@@ -29,7 +29,6 @@
 #include "cursiv/shared/gen/LexRelayGen.hpp"
 #include "cursiv/shared/gen/LexSuccessors.hpp"
 #include "cursiv/shared/gen/PredicateModes.hpp"
-#include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/gen/lex_reserve.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
@@ -53,7 +52,7 @@ std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
     for (const LrAction& action : A.action_row(state)) {
       if (action.kind == LrActionKind::reduce) {
         const auto& p = A.cfg.prods[action.arg];
-        if (A.cfg.prodBuild[action.arg].regionExit && p.gap == 0) {
+        if (p.regionExit && p.gap == 0) {
           after.set(action.term);
         } else if (p.gap != 0) {
           inside.set(action.term);
@@ -96,21 +95,20 @@ std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
     };
     for (const LrItem& it : clos[pick[f]]) {
       const auto& p = A.cfg.prods[it.prod];
-      const auto& build = A.cfg.prodBuild[it.prod];
       if (const auto b = A.cfg.nt_after(it.prod, it.dot);
           b != kNoRow && !A.nullable[b] && first[b].test(kEofSymbol) &&
           !first[b].more_than_one())
         continue;
-      if (it.dot == 0 && calledAt[p.lhs] == gen && !build.closesRegion &&
-          !(p.len == 0 && build.endOnly))
+      if (it.dot == 0 && calledAt[p.lhs] == gen && !p.closesRegion &&
+          !(p.len == 0 && p.endOnly))
         continue;
       const std::uint8_t c = A.cfg.cfg_at(it.prod, it.dot);
-      if (it.dot == p.len && !build.endOnly && p.gap == 0 &&
-          (p.len != 0 || build.regionExit)) {
+      if (it.dot == p.len && !p.endOnly && p.gap == 0 &&
+          (p.len != 0 || p.regionExit)) {
         // A completed enclosing region can share this state with a list's
         // completed internal turn. Read ahead outside the region; reducing
         // the internal turn re-enters its own mode before any next shift.
-        note(build.regionExit ? exiting : completed, c);
+        note(p.regionExit ? exiting : completed, c);
       } else {
         note(active, c);
       }
@@ -170,7 +168,7 @@ std::vector<DynSet> lr_section_reads(const LrBuildCfg& g) {
     const LrLowProd& q = g.prods[k];
     for (unsigned i = 0; i < q.len; ++i)
       if (const std::uint16_t y = g.sym_at(q, i); is_term(y))
-        own[g.prodBuild[k].sectionCfg].set(y);
+        own[g.prods[k].sectionCfg].set(y);
   }
   return own;
 }
@@ -281,6 +279,20 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
 
 namespace {
 
+// The terminal of `among` the election at DFA state `s` puts first, of those
+// `stands` keeps; -1 for none.
+template <class Stands = bool (*)(unsigned)>
+int lr_dfa_first(
+    const LrBuildTable& A, std::uint16_t s, const DynSet& among,
+    Stands&& stands = [](unsigned) { return true; }) {
+  int best = -1;
+  for (const unsigned t : among.members())
+    if (stands(t) &&
+        (best < 0 || A.dfa_before(s, t, static_cast<unsigned>(best))))
+      best = static_cast<int>(t);
+  return best;
+}
+
 // The shortest text a mode reads from `from` to stand in `to`, each byte the
 // lowest printable one of its class where the class holds one.
 std::string lr_dfa_text(const LrBuildTable& A, const LexAlphabet& alpha,
@@ -313,7 +325,6 @@ std::string lr_dfa_text(const LrBuildTable& A, const LexAlphabet& alpha,
 void lr_lex_dfa(LrBuildTable& A, const LexAlphabet& alpha,
                 const LexModes& modes) {
   auto& g = A.cfg;
-  LexKeywordCut cut = alpha.cut;
   const auto push_relay = [&A](const LexRelayGen& row) {
     A.relays[A.nrelays] = row;
     return std::size_t{A.nrelays++};
@@ -340,7 +351,7 @@ void lr_lex_dfa(LrBuildTable& A, const LexAlphabet& alpha,
       A.accStand[A.accBoundBase[self] + rank] = stand;
     }
   };
-  lex_build_dfa(A, alpha, cut, modes.set, push_relay, write);
+  lex_build_dfa(A, alpha, modes.set, push_relay, write);
   A.accBoundBase[A.ndfa] = static_cast<std::uint32_t>(A.accBound.size());
   // A state that accepts nothing still has its sets.
   A.dfaAcc.row(0, A.ndfa);
@@ -359,14 +370,12 @@ std::vector<DynSet> lr_lex_reserve(LrBuildTable& A) {
       },
       [&](std::size_t s, auto&& each) {
         const auto state = static_cast<std::uint16_t>(s);
-        const DynSet& accS = A.dfa_acc_set(state);
-        each_bit(accS.w.data(), accS.w.size(), [&](std::size_t bit) {
-          const auto t = static_cast<unsigned>(bit);
-          if (t == 0) return;
+        for (const unsigned t : A.dfa_acc_set(state).members()) {
+          if (t == 0) continue;
           each(t, A.dfa_acc_bound(state, t), A.dfa_acc_priority(state, t));
           if (const auto stand = A.dfa_acc_stand(state, t); stand != kNoSet)
             each(t, stand, unsigned{kKeywordPriority});
-        });
+        }
       },
       [&](std::size_t s, unsigned u) { A.dfaRes[s].set(u); },
       [&](std::size_t s, unsigned u) { A.dfaRelayRes[s].set(u); });
@@ -376,13 +385,8 @@ std::vector<DynSet> lr_lex_reserve(LrBuildTable& A) {
     if (A.dfaAccept[s] == 0) continue;
     const DynSet& res = A.dfa_res_set(s);
     if (!res.test(A.dfaAccept[s] - 1u)) continue;
-    const DynSet& accS = A.dfa_acc_set(s);
-    int best = -1;
-    each_bit(accS.w.data(), accS.w.size(), [&](std::size_t bit) {
-      const auto t = static_cast<unsigned>(bit);
-      if (t == 0 || res.test(t)) return;
-      if (best < 0 || A.dfa_before(s, t, static_cast<unsigned>(best)))
-        best = static_cast<int>(t);
+    const int best = lr_dfa_first(A, s, A.dfa_acc_set(s), [&](unsigned t) {
+      return t != 0 && !res.test(t);
     });
     if (best >= 0) A.dfaAccept[s] = static_cast<std::uint16_t>(best + 1);
   }
@@ -452,15 +456,10 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
       const std::uint16_t* const nr =
           nextRow + static_cast<std::size_t>(s) * ncls;
       keys.clear();
-      each_bit(v.acc[s].w.data(), v.acc[s].w.size(), [&](std::size_t t) {
-        if (const std::uint16_t own =
-                A.dfa_acc_bound(s, static_cast<unsigned>(t));
-            own != kNoSet && lex_word_set(g, own))
-          keys.push_back(own);
-        const std::uint16_t stand =
-            A.dfa_acc_stand(s, static_cast<unsigned>(t));
-        if (stand != kNoSet && lex_word_set(g, stand)) keys.push_back(stand);
-      });
+      for (const unsigned t : v.acc[s].members())
+        for (const std::uint16_t own :
+             {A.dfa_acc_bound(s, t), A.dfa_acc_stand(s, t)})
+          if (own != kNoSet && lex_word_set(g, own)) keys.push_back(own);
       for (unsigned c = 0; c < ncls; ++c) {
         const std::uint16_t r = nr[c];
         if (r == kDeadState) continue;
@@ -509,12 +508,7 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
       if (!A.relays[r].gate) acc.set(A.relays[r].term);
     DynSet lifted = accSet[s];
     lifted.andnot(wordAt[s]);
-    int lwin = -1;
-    each_bit(lifted.w.data(), lifted.w.size(), [&](std::size_t t) {
-      if (lwin < 0 || A.dfa_before(s, static_cast<unsigned>(t),
-                                   static_cast<unsigned>(lwin)))
-        lwin = static_cast<int>(t);
-    });
+    const int lwin = lr_dfa_first(A, s, lifted);
     if (lwin >= 0) {
       lifted.reset(static_cast<unsigned>(lwin));
       acc |= lifted;
@@ -726,23 +720,15 @@ void lr_lex_candidates(LrBuildTable& A, const LexAlphabet& alpha,
   bool ends = false;
   for (std::uint16_t s = 0; s < A.ndfa; ++s) {
     acc[s] = A.dfaAcc[s];
-    each_bit(A.dfaAcc[s].w.data(), A.dfaAcc[s].w.size(), [&](std::size_t t) {
-      if (const std::uint16_t b = A.dfa_acc_bound(s, static_cast<unsigned>(t));
-          !lex_bound_ends(g, b))
-        return;
-      acc[s].reset(static_cast<unsigned>(t));
-      ends = true;
-    });
+    for (const unsigned t : A.dfa_acc_set(s).members())
+      if (lex_bound_ends(g, A.dfa_acc_bound(s, t))) {
+        acc[s].reset(t);
+        ends = true;
+      }
     const DynSet& res = A.dfa_res_set(s);
-    int best = -1, open = -1;
-    each_bit(acc[s].w.data(), acc[s].w.size(), [&](std::size_t t) {
-      const auto u = static_cast<unsigned>(t);
-      if (best < 0 || A.dfa_before(s, u, static_cast<unsigned>(best)))
-        best = static_cast<int>(u);
-      if (!res.test(u) &&
-          (open < 0 || A.dfa_before(s, u, static_cast<unsigned>(open))))
-        open = static_cast<int>(u);
-    });
+    int best = lr_dfa_first(A, s, acc[s]);
+    const int open =
+        lr_dfa_first(A, s, acc[s], [&](unsigned t) { return !res.test(t); });
     if (best >= 0 && res.test(static_cast<unsigned>(best)) && open >= 0)
       best = open;
     accept[s] = best < 0 ? 0 : static_cast<std::uint16_t>(best + 1);
@@ -861,8 +847,7 @@ void lr_lex_condition_flags(LrBuildTable& A) {
         }
       const DynSet& acc = A.dfa_acc_set(s);
       const DynSet& res = A.dfa_res_set(s);
-      each_bit(acc.w.data(), acc.w.size(), [&](std::size_t bit) {
-        const auto u = static_cast<unsigned>(bit);
+      for (const unsigned u : acc.members()) {
         // A match that reads on past `u`, where `u` may stand, takes its text:
         // with no boundary, any the walk reads on to.
         const std::uint16_t bound = A.dfa_acc_bound(s, u);
@@ -880,14 +865,12 @@ void lr_lex_condition_flags(LrBuildTable& A) {
         }
         // So does one the walk elects over `u` on the same text, or that
         // reserves its spelling.
-        each_bit(acc.w.data(), acc.w.size(), [&](std::size_t t) {
-          if (res.test(u) || A.dfa_before(s, static_cast<unsigned>(t), u))
-            taking.set(static_cast<unsigned>(t));
-        });
+        for (const unsigned t : acc.members())
+          if (res.test(u) || A.dfa_before(s, t, u)) taking.set(t);
         taking &= asked[m];
         taking.reset(u);
         flags |= taking;
-      });
+      }
     }
     if (flags.none()) continue;
     A.modeFlag.row(0, A.nmodes)[m] |= flags;
@@ -914,25 +897,18 @@ void lr_derive_lexical(const LrBuildTable& a, LrDerivedRows& rows) {
         const auto& open = a.dfa_acc_set(s);
         const auto& closed = a.dfa_res_set(s);
         bool reserved = false;
-        each_bit(open.w.data(), open.w.size(), [&](std::size_t bit) {
-          if (a.cfg.terms[bit].trivia) return;
-          for (const auto own :
-               {a.dfa_acc_bound(s, static_cast<unsigned>(bit)),
-                a.dfa_acc_stand(s, static_cast<unsigned>(bit))})
+        for (const unsigned t : open.members()) {
+          if (a.cfg.terms[t].trivia) continue;
+          for (const auto own : {a.dfa_acc_bound(s, t), a.dfa_acc_stand(s, t)})
             reserved = reserved || (own != kNoSet && lex_word_set(a.cfg, own) &&
                                     !refuses(own));
+        }
+        const int best = lr_dfa_first(a, s, open, [&](unsigned t) {
+          const auto own = a.dfa_acc_bound(s, t);
+          return !(reserved && closed.test(t)) &&
+                 (own == kNoSet || !refuses(own));
         });
-        SymbolId best = kInvalidSymbol;
-        each_bit(open.w.data(), open.w.size(), [&](std::size_t bit) {
-          const auto t = static_cast<unsigned>(bit);
-          if (reserved && closed.test(t)) return;
-          if (const auto own = a.dfa_acc_bound(s, t);
-              own != kNoSet && refuses(own))
-            return;
-          if (best == kInvalidSymbol || a.dfa_before(s, t, best))
-            best = static_cast<SymbolId>(t);
-        });
-        return best;
+        return best < 0 ? kInvalidSymbol : static_cast<SymbolId>(best);
       };
       const auto add = [&](unsigned char byte, SymbolId term,
                            std::uint8_t scalar) {
@@ -950,21 +926,18 @@ void lr_derive_lexical(const LrBuildTable& a, LrDerivedRows& rows) {
       // stands there is elected as the text is read, wherever anything may.
       ByteSet classed;
       const auto& accS = a.dfa_acc_set(s);
-      each_bit(accS.w.data(), accS.w.size(), [&](std::size_t bit) {
-        const auto t = static_cast<unsigned>(bit);
+      for (const unsigned t : accS.members())
         for (const auto own : {a.dfa_acc_bound(s, t), a.dfa_acc_stand(s, t)})
           if (own != kNoSet && lex_set_scalars(a.cfg, own) != 0)
             classed |= lex_decode_bytes(a.cfg, own);
-      });
       const auto stands = [&](unsigned char byte) {
-        bool any = false;
-        each_bit(accS.w.data(), accS.w.size(), [&](std::size_t bit) {
-          const auto t = static_cast<unsigned>(bit);
-          if (any || t + 1u == a.dfaAccept[s]) return;
-          const auto own = a.dfa_acc_bound(s, t);
-          any = own == kNoSet || !a.cfg.sets[own].has(byte);
-        });
-        return any;
+        for (const unsigned t : accS.members()) {
+          if (t + 1u == a.dfaAccept[s]) continue;
+          if (const auto own = a.dfa_acc_bound(s, t);
+              own == kNoSet || !a.cfg.sets[own].has(byte))
+            return true;
+        }
+        return false;
       };
       for (unsigned b = 0; b < 256; ++b) {
         const auto byte = static_cast<unsigned char>(b);

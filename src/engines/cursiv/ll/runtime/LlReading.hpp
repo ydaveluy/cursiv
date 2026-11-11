@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "cursiv/ll/runtime/LlAhead.hpp"
-#include "cursiv/shared/runtime/PathRank.hpp"
+#include "cursiv/shared/runtime/RepairSearch.hpp"
 #include "cursiv/text/TextOffset.hpp"
 
 namespace cursiv::engine {
@@ -35,56 +35,32 @@ struct LlFacts {
   std::uint64_t key = 0;
 };
 
-struct LlReading {
+struct LlReading : RepairReading {
   // The positions it stands on: a run of the search's pool, sorted.
   std::uint32_t cfg = 0;
   std::uint32_t ncfg = 0;
   LlAhead ahead;
   // The end of the text it has taken: what a condition on a gap reads from.
   TextOffset gapFrom = 0;
-  bool done = false;
   // Its surviving readings name one root arm, the one a plan replay enters.
   // Terminal roots have that property from their first position.
   bool decided = true;
-  // Dominated: never read again.
-  bool gone = false;
-  // Named by a queue entry: its slot outlives the edit that created it.
-  bool queued = false;
-  // No edit yet at this point: the next one opens a fault.
-  bool fresh = true;
   // Its next token is the descent's token in hand, whose gap the descent
   // crossed under the point's own trivia: it is read where it begins.
   bool inHand = false;
-
-  // The key; the rank is read through `link`.
-  std::uint32_t cost = 0;
-  std::uint32_t lost = 0;
-  std::uint32_t edits = 0;
-  std::uint32_t faults = 0;
-  std::uint32_t invented = 0;
-  std::uint32_t link = kNoEditLink;
-  // Author tokens read on this path, including re-readings. Unlike shifts,
-  // this never resets: call starts use it to cost an abandon exactly. A race
-  // costs nothing and holds the place in the text here (`ll_search_race`).
-  std::uint32_t tokens = 0;
-
-  // Real tokens since the last edit, up to `kLlArmReach`.
-  std::uint8_t shifts = 0;
-  // Where the point stands in `(ins)* (rep | del+)?`; in front of bytes no
-  // alphabet reads, one insertion at most.
-  std::uint8_t phase = 0;
   // The last edit was a required insertion: the next one costs nothing.
   bool afterRequired = false;
+  // Author tokens read on this path, including re-readings. Unlike shifts,
+  // this never resets: call starts use it to cost an abandon exactly. A race
+  // costs nothing and holds the place in the text here (`LlSearchRace`).
+  std::uint32_t tokens = 0;
 
-  // Stands for the insertions of `genFrom` not yet made that no plan asks for;
-  // `genKeep` is the rank base of the terminals left. With `genReplace`, for
-  // replacing its word in hand by the keyword its positions are forced to.
-  bool gen = false;
-  bool genReplace = false;
+  // A generator's payload: the reading it was made from and what it keeps,
+  // the rank base of the terminals left for insertions, the rank for a
+  // replacement, the depth for an abandon.
   std::uint32_t genFrom = 0;
   std::uint32_t genKeep = 0;
-  // A deferred abandon: the call branch, its rank and exact continuation.
-  bool genAbandon = false;
+  // Of an abandon: the call branch, its rank and exact continuation.
   std::uint32_t genRet = 0, genParent = 0, genChoice = 0;
   std::int64_t genStart = 0;
   std::uint16_t genAlt = 0, genMissing = 0;

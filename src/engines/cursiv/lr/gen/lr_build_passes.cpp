@@ -26,8 +26,8 @@
 #include "cursiv/lr/table/LrAction.hpp"
 #include "cursiv/lr/table/LrColdTables.hpp"
 #include "cursiv/shared/gen/PartitionRefine.hpp"
+#include "cursiv/shared/gen/SetPool.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
-#include "cursiv/shared/gen/set_dedup.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/utils/RoundMarks.hpp"
@@ -83,13 +83,13 @@ std::vector<std::uint32_t> lr_kept_cells(LrBuildTable& A, std::uint32_t n,
     if constexpr (!lr_merges<decltype(keep)>) ++width;
   });
   std::vector<std::uint32_t> out(std::size_t{n} * width);
-  std::vector<std::uint16_t> rank(n);
+  std::vector<std::uint16_t> rank;
   unsigned c = 0;
   A.each_state_column([&]<class T>(Vec<T>& column, auto keep) {
     if constexpr (!lr_merges<decltype(keep)>) {
       // A column no pass filled reads empty cells.
       const T* const cell = column.row(0, n);
-      if constexpr (std::is_same_v<T, DynSet>) set_dedup(cell, n, rank.data());
+      if constexpr (std::is_same_v<T, DynSet>) rank = SetPool(cell, n).of;
       for (std::uint32_t s = 0; s < n; ++s) {
         if constexpr (std::is_same_v<T, DynSet>)
           out[std::size_t{s} * width + c] = rank[s];
@@ -157,13 +157,11 @@ void lr_share_action_rows(LrBuildTable& A) {
 // `a` covers `b` when b's set is inside a's and their trivia agree. A token
 // b flags as hiding a competitor still needs b's walk: its reader re-lexes it.
 void lr_subsume_modes(LrBuildTable& A, const LexModes& modes) {
-  const std::uint32_t nm = A.nmodes;
-  const std::size_t subWords = (std::size_t{nm} * nm + 63u) / 64u;
-  std::uint64_t* const sub = A.modeSub.row(0, subWords);
-  for (std::size_t w = 0; w < subWords; ++w) sub[w] = 0;
+  const std::size_t rowWords = A.mode_sub_words();
+  std::uint64_t* const sub = A.modeSub.row(0, A.nmodes * rowWords);
+  std::fill_n(sub, A.nmodes * rowWords, 0);
   modes.cover(true, [&](std::size_t a, std::size_t b) {
-    const std::size_t i = a * nm + b;
-    sub[i >> 6] |= std::uint64_t{1} << (i & 63u);
+    sub[b * rowWords + (a >> 6)] |= std::uint64_t{1} << (a & 63u);
   });
 }
 
@@ -282,36 +280,37 @@ std::vector<std::uint16_t> lr_shift_terms(const LrBuildTable& a) {
   return terms;
 }
 
-void lr_reduce_key(const LrBuildCfg& g, unsigned p,
-                   std::vector<std::uint32_t>& key) {
-  const LrLowProd& pr = g.prods[p];
-  const LrProdBuild& pb = g.prodBuild[p];
-  key = {pr.lhs,
-         pr.len,
-         pr.node,
-         pb.owner,
-         static_cast<std::uint32_t>(pb.tailCfg) |
-             (static_cast<std::uint32_t>(pr.gap) << 8),
-         static_cast<std::uint32_t>(pb.endOnly) |
-             (static_cast<std::uint32_t>(pb.regionExit) << 1)};
-  for (unsigned i = 0; i < pr.len; ++i) {
-    const std::uint16_t sy = g.sym_at(pr, i);
-    const auto row = g.row_at(pr, i);
-    key.push_back(row);
-    key.push_back(row == kNoRow ? 0u
-                  : is_term(sy) ? g.terms[sy].element
-                                : 0xffffffffu);
+std::vector<std::uint32_t> lr_reduce_classes(const LrBuildCfg& g) {
+  std::vector<std::uint32_t> cls(g.nprods), key;
+  std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> ids;
+  for (unsigned p = 0; p < g.nprods; ++p) {
+    const LrLowProd& pr = g.prods[p];
+    key = {pr.lhs,
+           pr.len,
+           pr.node,
+           pr.owner,
+           static_cast<std::uint32_t>(pr.tailCfg) |
+               (static_cast<std::uint32_t>(pr.gap) << 8),
+           static_cast<std::uint32_t>(pr.endOnly) |
+               (static_cast<std::uint32_t>(pr.regionExit) << 1)};
+    for (unsigned i = 0; i < pr.len; ++i) {
+      const std::uint16_t sy = g.sym_at(pr, i);
+      const auto row = g.row_at(pr, i);
+      key.push_back(row);
+      key.push_back(row == kNoRow ? 0u
+                    : is_term(sy) ? g.terms[sy].element
+                                  : 0xffffffffu);
+    }
+    cls[p] = ids.try_emplace(key, static_cast<std::uint32_t>(ids.size()))
+                 .first->second;
   }
+  return cls;
 }
 
 // States with the same rows towards the same classes are one: partition
 // refinement to the fixpoint, one representative per class, unreachable states
-// swept. A tag stays held unless known false.
+// swept.
 void lr_minimize_states(LrBuildTable& A) {
-  for (std::size_t s = 0; s < A.tagKnown.size(); ++s) {
-    A.tagKnown[s].andnot(A.tagTruth[s]);
-    A.tagTruth[s] = {};
-  }
   const auto shiftTerm = lr_shift_terms(A);
   const auto& g = A.cfg;
   const std::uint32_t n = A.nstates;
@@ -326,16 +325,7 @@ void lr_minimize_states(LrBuildTable& A) {
 
   // Reductions are equivalent by their fixed grammar data. Their lhs is a
   // nonterminal id, never a state class, so this partition is computed once.
-  std::vector<std::uint32_t> pc(g.nprods);
-  {
-    std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> ids;
-    std::vector<std::uint32_t> key;
-    for (std::uint32_t p = 0; p < g.nprods; ++p) {
-      lr_reduce_key(g, p, key);
-      pc[p] = ids.try_emplace(key, static_cast<std::uint32_t>(ids.size()))
-                  .first->second;
-    }
-  }
+  const std::vector<std::uint32_t> pc = lr_reduce_classes(g);
 
   std::vector<std::uint32_t> key, guardKey;
   std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> guardIds;
@@ -658,10 +648,9 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
 
 bool lr_unit_passes(const LrBuildCfg& g, unsigned p) {
   const LrLowProd& pr = g.prods[p];
-  const LrProdBuild& pb = g.prodBuild[p];
   return pr.len == 1 && pr.node == kNoRow && g.row_at(pr, 0) == kNoRow &&
-         g.cfg_at(static_cast<std::uint16_t>(p), 0) == 0 && pb.tailCfg == 0 &&
-         !pb.endOnly && p != g.startProd && pr.gap == 0;
+         g.cfg_at(static_cast<std::uint16_t>(p), 0) == 0 && pr.tailCfg == 0 &&
+         !pr.endOnly && p != g.startProd && pr.gap == 0;
 }
 
 // A pass-through reduce is dispatch, not work: every edge into such a state is

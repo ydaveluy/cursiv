@@ -5,30 +5,12 @@
 #include <stdexcept>
 
 #include "cursiv/lr/gen/lr_intern_name.hpp"
-#include "cursiv/lr/gen/lr_lower_define.hpp"
+#include "cursiv/lr/gen/lr_productions.hpp"
 #include "cursiv/lr/gen/lr_lower_passes.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 
 namespace cursiv::engine {
-
-namespace {
-
-void lr_note_lead(ChainPool& w, std::span<const WriteKind> kind) {
-  for (std::uint16_t i = 0; i < w.nchains; ++i) {
-    const Chain& ch = w.chains[i];
-    for (std::uint16_t k = 0; k < ch.count; ++k) {
-      if (const WriteKind what = kind[w.acts[ch.off + k]];
-          what != WriteKind::assign && what != WriteKind::append &&
-          what != WriteKind::flag)
-        continue;
-      w.chainBuild[i].lead = w.acts[ch.off + k];
-      break;
-    }
-  }
-}
-
-}  // namespace
 
 std::uint16_t LrLowerer::intern_name(std::string_view text) {
   return lr_intern_name(_cfg, text);
@@ -91,7 +73,7 @@ LrLowered LrLowerer::run() {
           [](const TermInfo& t) { return t.synthetic == kSyntheticDedent; })) {
     std::uint8_t end = 0;
     for (std::uint16_t q = 0; q < _cfg.nprods; ++q) {
-      if (!_cfg.prodBuild[q].endOnly) continue;
+      if (!_cfg.prods[q].endOnly) continue;
       if (end == 0)
         end = static_cast<std::uint8_t>(gap_cond(0, _lex.make(ImageKind::eof)) +
                                         1u);
@@ -108,17 +90,18 @@ LrLowered LrLowerer::run() {
   lr_drop_twins(_o);
   lr_drop_unread_stops(_o);
   if (_d.entryCreate != nullptr &&
-      descend(creates(body_in(0, entry), _d.entryCreate))) {
+      descend(holds(body_in(0, entry), [&](const ImageNode& n) {
+        return n.kind == ImageKind::create && n.row == _d.entryCreate;
+      }))) {
     const std::uint16_t r = row_id(_d.entryCreate);
     _cfg.entryRow = _o.writes.intern_chain(&r, 1);
   }
   _o.writes.note_makes(_rowKind);
   lr_run_passes(_o, _rowKind);
   for (std::uint16_t k = 0; k < _cfg.nprods; ++k)
-    if (_cfg.prodBuild[k].turn)
-      _cfg.prodBuild[k].turnNode = _o.writes.turn_chain(_cfg.prods[k].node);
+    if (_cfg.prods[k].turn)
+      _cfg.prods[k].turnNode = _o.writes.turn_chain(_cfg.prods[k].node);
   _o.writes.note_makes(_rowKind);
-  lr_note_lead(_o.writes, _rowKind);
   return std::move(_o);
 }
 

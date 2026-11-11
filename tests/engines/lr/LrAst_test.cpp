@@ -609,10 +609,10 @@ void a_precedence_table() {
   CHECK(c.nprods == 6);
   // Tightest binds hardest: the table declares them tightest first, and a
   // level's number is what the resolution compares.
-  CHECK(prod(0).len == 3 && c.prodBuild[0].prec == 2);
-  CHECK(c.prodBuild[1].prec == 1 && c.prodBuild[2].prec == 1);
+  CHECK(prod(0).len == 3 && c.prods[0].prec == 2);
+  CHECK(c.prods[1].prec == 1 && c.prods[2].prec == 1);
   // The operand ends the chain and sits on no level.
-  CHECK(prod(3).len == 1 && c.prodBuild[3].prec == 0);
+  CHECK(prod(3).len == 1 && c.prods[3].prec == 0);
   // A production of the table is `E op E`: both operands are the rule itself.
   CHECK(xsym(0, 0) == xsym(0, 2) && xsym(0, 0) == nt_sym(c.entryNt));
   // The level and the associativity are the operator's: a shift/reduce covered
@@ -624,7 +624,7 @@ void a_precedence_table() {
   // An operator keeps its level wherever it stands in its production.
   const auto& far = XF::cfg();
   CHECK(!XF::table().fault);
-  CHECK(far.prods[1].len == 258 && far.prodBuild[1].prec == 2);
+  CHECK(far.prods[1].len == 258 && far.prods[1].prec == 2);
   const std::uint16_t star = far.sym_at(far.prods[1], 256);
   CHECK(is_term(star) && far.termBuild[star].prec == 2);
   CHECK(far.termBuild[far.sym_at(far.prods[4], 0)].prec == 0);
@@ -641,7 +641,7 @@ void a_precedence_table() {
   CHECK(n.nprods == c.nprods && n.nnts == c.nnts && n.nterms == c.nterms);
   for (unsigned k = 0; k < c.nprods; ++k) {
     CHECK(n.prods[k].len == c.prods[k].len);
-    CHECK(n.prodBuild[k].prec == c.prodBuild[k].prec);
+    CHECK(n.prods[k].prec == c.prods[k].prec);
   }
   // The three named operators write the member through one row, as three
   // literals do, so the productions share a class and the automaton holds one

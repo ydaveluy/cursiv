@@ -16,7 +16,11 @@ namespace cursiv::engine {
 template <class Cfg>
 class LexRightLinear {
  public:
-  explicit LexRightLinear(Cfg& g) : _g(g), _facts(g.nlex) {}
+  // `empty` and `productive` say, per node, whether it may read nothing and
+  // whether it may read a text.
+  LexRightLinear(Cfg& g, const std::vector<std::uint8_t>& empty,
+                 const std::vector<std::uint8_t>& productive)
+      : _g(g), _empty(empty), _productive(productive), _regular(g.nlex) {}
 
   void run() {
     std::vector<bool> visited(_g.nlex);
@@ -37,11 +41,10 @@ class LexRightLinear {
       }
       if (!std::ranges::all_of(prefix,
                                [&](auto child) {
-                                 const auto f = facts(child);
-                                 return f.regular && f.productive;
+                                 return regular(child) && _productive[child];
                                }) ||
-          std::ranges::all_of(
-              prefix, [&](auto child) { return facts(child).nullable; }))
+          std::ranges::all_of(prefix,
+                              [&](auto child) { return _empty[child] != 0; }))
         continue;
       // A full graph keeps its original recognizer; an optimization must not
       // introduce a new size refusal or leave a partly rewritten prefix.
@@ -63,61 +66,34 @@ class LexRightLinear {
   }
 
  private:
-  struct Facts {
-    bool regular = false;
-    bool productive = false;
-    bool nullable = false;
-    std::uint8_t state = 0;
-  };
-
   Cfg& _g;
-  std::vector<Facts> _facts;
+  const std::vector<std::uint8_t>& _empty;
+  const std::vector<std::uint8_t>& _productive;
+  // Per node, whether it is regular: 0 not asked, 1 no, 2 yes.
+  std::vector<std::uint8_t> _regular;
   std::uint16_t _prefixSeq = 0;
 
-  Facts facts(std::uint16_t at) { return descend(facts_walk(at)); }
-  Descent<Facts> facts_walk(std::uint16_t at) {
-    if (at >= _facts.size()) co_return Facts{};
-    if (_facts[at].state == 2) co_return _facts[at];
-    if (_facts[at].state == 1) co_return Facts{};
-    _facts[at].state = 1;
+  // Whether `at` holds classes, sequences, choices and plain repetitions
+  // alone: calls, captures, lookaheads, guards, searches, virtual tokens and
+  // skipper regions are not proven.
+  bool regular(std::uint16_t at) { return descend(regular_walk(at)); }
+  Descent<bool> regular_walk(std::uint16_t at) {
+    if (at >= _regular.size()) co_return false;
+    if (_regular[at] != 0) co_return _regular[at] == 2;
+    _regular[at] = 1;
     const LexNode e = _g.lex[at];
-    Facts f;
-    switch (e.kind) {
-      case LexKind::chars:
-        f = {true, _g.sets[e.a].any(), false};
-        break;
-      case LexKind::seq:
-      case LexKind::alt: {
-        const bool seq = e.kind == LexKind::seq;
-        f = {true, seq, seq};
-        for (unsigned i = 0; i < e.b; ++i) {
-          const auto child = co_await facts_walk(_g.lexChild[e.a + i]);
-          f.regular = f.regular && child.regular;
-          f.productive = seq ? f.productive && child.productive
-                             : f.productive || child.productive;
-          f.nullable =
-              seq ? f.nullable && child.nullable : f.nullable || child.nullable;
-        }
-        break;
-      }
-      case LexKind::rep: {
-        const auto child = co_await facts_walk(e.a);
-        // A phrase's repetition may have trivia between iterations. A
-        // nullable repeated body must retain the original recursion refusal.
-        f.regular = child.regular && e.b == kNoLexNode &&
-                    (e.max <= 1 || !child.nullable);
-        f.productive = e.min == 0 || child.productive;
-        f.nullable = e.min == 0 || child.nullable;
-        break;
-      }
-      default:
-        // Calls, captures, lookaheads, word/end guards, searches, virtual
-        // tokens and skipper regions are not proven.
-        break;
+    bool yes = e.kind == LexKind::chars;
+    if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
+      yes = true;
+      for (unsigned i = 0; i < e.b; ++i)
+        if (!co_await regular_walk(_g.lexChild[e.a + i])) yes = false;
+    } else if (e.kind == LexKind::rep && e.b == kNoLexNode) {
+      // A phrase's repetition may have trivia between iterations. A
+      // nullable repeated body must retain the original recursion refusal.
+      yes = co_await regular_walk(e.a) && (e.max <= 1 || !_empty[e.a]);
     }
-    f.state = 2;
-    _facts[at] = f;
-    co_return f;
+    if (yes) _regular[at] = 2;
+    co_return yes;
   }
 
   bool tail(std::uint16_t at, std::uint16_t root, bool optional,
@@ -142,16 +118,6 @@ class LexRightLinear {
     return true;
   }
 
-  void sequence(std::uint16_t root, std::vector<std::uint16_t>& out) const {
-    for (std::vector todo{root}; !todo.empty();) {
-      const std::uint16_t at = todo.back();
-      todo.pop_back();
-      if (const LexNode e = _g.lex[at]; e.kind == LexKind::seq)
-        for (unsigned i = e.b; i-- > 0;) todo.push_back(_g.lexChild[e.a + i]);
-      else
-        out.push_back(at);
-    }
-  }
 
   bool same(std::uint16_t a, std::uint16_t b) const {
     return lex_same_graph(_g, a, b, [](const LexNode& x, const LexNode& y) {
@@ -167,11 +133,11 @@ class LexRightLinear {
                    std::vector<std::uint16_t>& prefix) {
     if (!tail(recursive, root, false, prefix)) return false;
     std::vector<std::uint16_t> x, y;
-    sequence(base, x);
-    for (const auto child : prefix) sequence(child, y);
+    lex_parts(_g, base, x);
+    for (const auto child : prefix) lex_parts(_g, child, y);
     return x.size() == y.size() &&
            std::ranges::equal(x, y, [&](std::uint16_t p, std::uint16_t q) {
-             return facts(p).regular && facts(q).regular && same(p, q);
+             return regular(p) && regular(q) && same(p, q);
            });
   }
 };

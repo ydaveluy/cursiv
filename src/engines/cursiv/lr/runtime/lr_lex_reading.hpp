@@ -1,4 +1,4 @@
-// The lexer's refused reading of a token, as the table engine reads it.
+// The bytes no terminal matches, as the table engine reads them.
 #pragma once
 
 #include <cstdint>
@@ -9,18 +9,6 @@
 
 namespace cursiv::engine {
 
-template <const auto& A>
-inline constexpr LexBodies kLrLexBodies{A.derived.lexBodies.data(),
-                                        A.derived.lexBodyTerms.data(),
-                                        A.derived.lexOpeners.data()};
-
-template <const auto& A>
-LexReading lr_lex_reading(const char* src, TextOffset len, std::uint16_t mode,
-                          TextOffset p, TextOffset& reached) {
-  return lex_reading(LrLexTape<A>{}, kLrLexBodies<A>, src, len, mode, p,
-                     reached);
-}
-
 // The unmatched text at `p` (`lex_unmatched_end`), lexed with the fault mode
 // of `mode`, up to a blank of `mode`.
 template <const auto& A, class Poll>
@@ -28,7 +16,7 @@ TextOffset lr_unmatched_end(const char* src, TextOffset len, std::uint16_t mode,
                             TextOffset p, TextOffset& reached,
                             LexReadBudget& budget, Poll&& poll) {
   return lex_unmatched_end(
-      LrLexTape<A>{}, kLrLexBodies<A>, src, len, lr_err_mode<A>(mode), p,
+      LrLexTape<A>{}, src, len, lr_err_mode<A>(mode), p,
       [mode](unsigned char b) { return lr_skips<A>(mode, b); }, reached, budget,
       poll);
 }

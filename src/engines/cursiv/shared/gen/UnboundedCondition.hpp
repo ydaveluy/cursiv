@@ -80,20 +80,6 @@ bool phrase_keeps_runs(const Cfg& c, std::uint16_t node) {
   return false;
 }
 
-// The parts of a phrase read one after the other: a sequence's, nested
-// sequences flattened, or the phrase alone.
-template <class Cfg>
-void phrase_parts(const Cfg& c, std::uint16_t node,
-                  std::vector<std::uint16_t>& out) {
-  for (std::vector todo{node}; !todo.empty();) {
-    const std::uint16_t at = todo.back();
-    todo.pop_back();
-    if (const LexNode& e = c.lex[at]; e.kind == LexKind::seq)
-      for (unsigned i = e.b; i-- > 0;) todo.push_back(c.lexChild[e.a + i]);
-    else
-      out.push_back(at);
-  }
-}
 
 // What condition `cond` reads without end, as `rule` asks it: one finding per
 // rule and spelled run.

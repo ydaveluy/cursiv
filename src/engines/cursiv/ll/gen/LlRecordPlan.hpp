@@ -53,9 +53,9 @@ class LlRecordPlan {
     const auto count = _cfg.nnodes + _cfg.nrules;
     std::vector<std::vector<std::uint32_t>> handsUsers(count),
         opensUsers(count);
-    std::vector<bool> hands(count, true), opens(count, false);
+    _hands.assign(count, true);
+    _opens.assign(count, false);
     std::vector<std::uint32_t> noHands, doesOpen;
-    const auto rule = [&](std::uint16_t r) { return _cfg.nnodes + r; };
     const auto supplies = [&](std::uint32_t from, std::uint32_t to) {
       handsUsers[from].push_back(to);
     };
@@ -75,12 +75,12 @@ class LlRecordPlan {
                    only != kNoRow) {
           supplies(only, id);
         } else {
-          hands[id] = false;
+          _hands[id] = false;
           noHands.push_back(id);
         }
       }
       if (opens_chain(n.row)) {
-        opens[id] = true;
+        _opens[id] = true;
         doesOpen.push_back(id);
       } else if (n.kind == LlShape::call) {
         opensInto(rule(n.sym), id);
@@ -93,13 +93,13 @@ class LlRecordPlan {
       const auto id = rule(r);
       if (u.climb != kNoRow) {
         supplies(rule(_cfg.climbs[u.climb].primary), id);
-        opens[id] = true;
+        _opens[id] = true;
         doesOpen.push_back(id);
       } else if (u.body != kNoRow) {
         supplies(u.body, id);
         opensInto(u.body, id);
       } else {
-        hands[id] = false;
+        _hands[id] = false;
         noHands.push_back(id);
       }
     }
@@ -114,18 +114,15 @@ class LlRecordPlan {
             todo.push_back(user);
           }
     };
-    propagate(hands, handsUsers, noHands, false);
-    propagate(opens, opensUsers, doesOpen, true);
-    _nodeHands.assign(hands.begin(), hands.begin() + _cfg.nnodes);
-    _hands.assign(hands.begin() + _cfg.nnodes, hands.end());
-    _opens.assign(opens.begin() + _cfg.nnodes, opens.end());
+    propagate(_hands, handsUsers, noHands, false);
+    propagate(_opens, opensUsers, doesOpen, true);
   }
 
   // Whether every reading of a position hands back a record. Moving a chain
   // down to a group's only position keeps the guarantee of both.
-  bool hands(std::uint16_t node) const { return _nodeHands[node]; }
-  bool rule_hands(std::uint16_t rule) const { return _hands[rule]; }
-  bool rule_opens(std::uint16_t rule) const { return _opens[rule]; }
+  bool hands(std::uint16_t node) const { return _hands[node]; }
+  bool rule_hands(std::uint16_t r) const { return _hands[rule(r)]; }
+  bool rule_opens(std::uint16_t r) const { return _opens[rule(r)]; }
   const std::vector<std::uint16_t>& rule_rows(std::uint16_t rule) const {
     return _ruleRows[rule];
   }
@@ -141,7 +138,7 @@ class LlRecordPlan {
   void own_joins(std::uint16_t id, Join&& join, Sink&& sink) {
     assert(!_nodeRows.empty());
     const LlNode& n = _cfg.nodes[id];
-    if (_cfg.nodeBuild[id].foldStep) return;
+    if (n.foldStep) return;
     std::vector<std::uint16_t> inner;
     if (n.kind == LlShape::call) {
       inner = _ruleRows[n.sym];
@@ -176,10 +173,9 @@ class LlRecordPlan {
     _ruleRows.assign(_cfg.nrules, {});
     const auto count = _cfg.nnodes + _cfg.nrules;
     std::vector<std::vector<std::uint32_t>> users(count);
-    const auto rule = [&](std::uint16_t r) { return _cfg.nnodes + r; };
     for (std::uint32_t id = 0; id < _cfg.nnodes; ++id) {
       const LlNode& n = _cfg.nodes[id];
-      if (n.owns && _cfg.nodeBuild[id].foldStep) continue;
+      if (n.owns && n.foldStep) continue;
       if (n.kind == LlShape::call) {
         users[rule(n.sym)].push_back(id);
       } else if (group(n)) {
@@ -259,6 +255,9 @@ class LlRecordPlan {
  private:
   enum class Source { last, sole };
 
+  // A rule's place after the positions, where one fact covers both.
+  std::uint32_t rule(std::uint16_t r) const { return _cfg.nnodes + r; }
+
   static bool group(const LlNode& n) {
     return n.kind == LlShape::seq || n.kind == LlShape::alt ||
            n.kind == LlShape::rep;
@@ -322,7 +321,8 @@ class LlRecordPlan {
 
   const LlLowCfg& _cfg;
   const ChainPool& _writes;
-  std::vector<bool> _nodeHands, _hands, _opens;
+  // Per position, then per rule from `nnodes` on.
+  std::vector<bool> _hands, _opens;
   std::span<const std::uint8_t> _nullable;
   std::vector<std::uint16_t> _last, _required;
   std::vector<std::vector<std::uint16_t>> _nodeRows, _ruleRows;

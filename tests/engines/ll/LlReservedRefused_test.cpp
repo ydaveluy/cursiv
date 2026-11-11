@@ -20,7 +20,6 @@
 #include "cursiv/ll/runtime/ll_search.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/lr_rescan.hpp"
-#include "cursiv/lr/runtime/lr_search.hpp"
 #include "cursiv/shared/runtime/TypoCandidates.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/LlTerms.hpp"
@@ -116,7 +115,7 @@ std::vector<cursiv::engine::Typo> lr_names(std::string_view text) {
   std::uint64_t read = 0;
   bool cut = false;
   return cursiv::engine::lr_rescan_candidates<lr::kTable>(
-      c, 0, 0, static_cast<cursiv::TextOffset>(text.size()), read, cut);
+      c, 0, 0, ~cursiv::TextOffset{0}, read, cut);
 }
 
 std::vector<cursiv::engine::Typo> ll_names(std::string_view text) {
@@ -162,22 +161,6 @@ void a_refused_keyword_reserves_nothing_from_a_misspelling() {
   CHECK(whole("in-place"));
   CHECK(whole("inx-place"));
   CHECK(!whole("in place"));
-  // A search's bound reads as the search does: the keyword's refusal is told at
-  // its token, wherever that stands in the text.
-  {
-    const std::string_view text = "x in-place";
-    cursiv::Cst cst(text);
-    cursiv::CstBuilder builder(cst);
-    cursiv::engine::LrContext c(text, builder);
-    cursiv::engine::LrSearch s(c.len, cursiv::engine::RepairBudget{},
-                               c.indentArena);
-    cursiv::engine::lr_search_reset(s);
-    bool found = false;
-    for (const cursiv::engine::Typo& t :
-         cursiv::engine::lr_search_misread<lr::kTable>(c, s, 2))
-      found = found || (t.term == name && t.end == len(text));
-    CHECK(found);
-  }
   namespace ll = tllrefused::generated::Ll;
   const auto llName =
       cursiv::engine::ll_match_text<ll::kTable>("inx", 3, ll::kTable.errMode, 0)
@@ -316,9 +299,9 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
   // Past the terminal the first reading would not have taken, the replay still
   // stands: the next items, and a caret inside one of them.
   const std::vector<std::string> item{
-      "-",      "IN",      "NAME",    "attached:", "cell:",
-      "head:",  "inside:", "marked:", "note:",     "pending:",
-      "plain:", "shared:", "sp:",     "spelt:"};
+      "-",       "IN",      "NAME",   "attached:", "cell:",  "head:",
+      "inside:", "marked:", "note:",  "pending:",  "plain:", "ranked:",
+      "shared:", "sp:",     "spelt:", "weighed:"};
   for (const std::string& text :
        {std::string{"shared: X c"}, std::string{"shared: X a c"}, far + " c"}) {
     const auto at = static_cast<cursiv::TextOffset>(text.size());
@@ -348,6 +331,14 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
     CHECK(parse_clean(*ll, text) && parse_clean(*lr, text));
     CHECK(offered(*ll, text, 8) == marks);
     CHECK(offered(*lr, text, 8) == marks);
+  }
+  // Behind a refused literal the keyword stands alone: the name it reserves is
+  // no reading of the word, so only the keyword's arm goes on.
+  for (const cursiv::Parser* p : {ll.get(), lr.get()}) {
+    CHECK(parse_clean(*p, "ranked: on!c") && !parse_clean(*p, "ranked: on!b"));
+    CHECK(parse_clean(*p, "ranked: x!b") && parse_clean(*p, "ranked: X!"));
+    for (const char* text : {"ranked: on!", "ranked: on! ", "ranked: on!c"})
+      CHECK(offered(*p, text, 11) == std::vector<std::string>{"c"});
   }
   // A keyword refused where a trivia ties leaves the position to the trivia,
   // and completion reads on past it.
@@ -608,6 +599,9 @@ void run() {
       {"in-place", "in - place "},
       {"in-placex", "IN - placex "},
       {"x in-place in", "x in - place IN "},
+      {"weighed:on!q", " "},
+      {"weighed: on !", "IN "},
+      {"weighed: on!", "IN "},
   };
   check(*tllrefused::generated::Ll::create_parser(),
         tllrefused::generated::Lr::create_parser().get(), plain_items, plain);

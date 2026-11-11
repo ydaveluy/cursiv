@@ -4,6 +4,7 @@
 #include "trivialr/generated/Lr/Parser.hpp"
 #include "trivialr/generated/Lr/Table.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/ll/runtime/LlSearch.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/lr_matcher.hpp"
 #include "cursiv/lr/runtime/lr_states.hpp"
@@ -52,17 +53,35 @@ void a_blank_keeps_its_head_refusal(const cursiv::Parser& parser) {
 }
 
 // A comment left open is kept as the trivia it would be, in a grammar whose
-// other regions read its bytes as a token: the two engines repair it the same.
+// other regions read its bytes as a token. One the lexer refused in its middle
+// is skipped too, and the note spans every byte the fault takes: the comments
+// skipped in a row and the bytes dropped beside them.
 void an_open_comment_is_skipped_where_it_is_trivia(const cursiv::Parser& ll,
                                                    const cursiv::Parser& lr) {
-  const std::string_view text = "ranked:a /*open";
-  const cursiv::ParseResult a = ll.parse(text);
-  const cursiv::ParseResult b = lr.parse(text);
-  CHECK(a.diagnostics.size() == 1 && b.diagnostics.size() == 1);
-  if (a.diagnostics.size() != 1 || b.diagnostics.size() != 1) return;
-  const auto& x = a.diagnostics.front();
-  const auto& y = b.diagnostics.front();
-  CHECK(x.kind == y.kind && x.begin == y.begin && x.end == y.end);
+  const struct {
+    std::string_view text;
+    cursiv::TextOffset begin, end;
+  } cases[] = {
+      {"ranked:a /*open", 9, 15},
+      {"ranked:a /* x * y */ b", 9, 20},
+      {"ranked:a /* x * y */ /* z * w */ b", 9, 32},
+      {"ranked:a /* x * y */ @ b", 9, 22},
+      {"ranked:a @ /* x * y */ b", 9, 22},
+      {"ranked:a /* x * y */ @ /* z * w */ b", 9, 34},
+  };
+  for (const auto& sample : cases)
+    for (const cursiv::Parser* const parser : {&ll, &lr}) {
+      const cursiv::ParseResult r = parser->parse(sample.text);
+      const bool spans =
+          r.diagnostics.size() == 1 &&
+          r.diagnostics.front().kind == cursiv::DiagnosticKind::replaced &&
+          r.diagnostics.front().begin == sample.begin &&
+          r.diagnostics.front().end == sample.end;
+      if (!spans)
+        std::printf("  [%s] %.*s\n", parser == &ll ? "Ll" : "Lr",
+                    static_cast<int>(sample.text.size()), sample.text.data());
+      CHECK(spans);
+    }
 }
 
 // The trivia in front of a region's first token is its caller's, which skips
@@ -284,6 +303,32 @@ void a_trivia_taken_as_a_token_stays_a_candidate(const cursiv::Parser& p) {
   }
 }
 
+// Each comment left open is skipped as the trivia it would be, however many
+// the text holds.
+void each_open_comment_is_skipped(const cursiv::Parser& parser) {
+  constexpr std::size_t kComments = 64;
+  std::string text = "ranked:";
+  for (std::size_t i = 0; i < kComments; ++i) text += "a /* x\nb c d\n";
+  const cursiv::ParseResult r = parser.parse(text);
+  std::size_t skipped = 0;
+  for (const cursiv::ParseDiagnostic& d : r.diagnostics)
+    if (d.kind == cursiv::DiagnosticKind::replaced) ++skipped;
+  CHECK(skipped == kComments && r.diagnostics.size() == kComments);
+}
+
+// A comment left open is read for where it ends, by the two readings that ask:
+// the walk that looks for a misspelling stops inside it.
+void an_open_comment_is_no_misspelling(const cursiv::Parser& ll) {
+  std::string text = "ranked:a /* x\n";
+  for (unsigned i = 0; i < 4000; ++i) text += "b c d\n";
+  cursiv::engine::LlSearchWork::current() = {};
+  const cursiv::ParseResult r = ll.parse(text);
+  CHECK(r.diagnostics.size() == 1);
+  CHECK(cursiv::engine::LlSearchWork::current().work * 2 *
+            cursiv::engine::kRepairLexBytes <
+        5 * text.size());
+}
+
 void run() {
   a_reading_reads_on_from_a_runs_last_byte();
   a_caret_answers_for_what_is_typed_in_a_gap(
@@ -292,6 +337,7 @@ void run() {
   an_open_comment_is_skipped_where_it_is_trivia(
       *ttrivia::generated::Ll::create_parser(),
       *ttrivia::generated::Lr::create_parser());
+  an_open_comment_is_no_misspelling(*ttrivia::generated::Ll::create_parser());
   for (const auto make : {&ttrivia::generated::Ll::create_parser,
                           &ttrivia::generated::Lr::create_parser}) {
     two_ignored_terminals_may_read_one_text(*make(), "tied:");
@@ -300,6 +346,7 @@ void run() {
     a_run_of_blanks_reads_on_from_its_last_byte(*make());
     a_tie_stands_only_behind_its_first_byte(*make());
     a_trivia_taken_as_a_token_stays_a_candidate(*make());
+    each_open_comment_is_skipped(*make());
     a_region_head_is_its_callers(*make());
     an_implied_condition_reads_the_trivia_of_its_place(*make());
   }

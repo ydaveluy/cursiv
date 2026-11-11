@@ -81,18 +81,22 @@ struct ChainPool {
     return intern_joined(a, b, doc);
   }
 
+  // The actions chain `c` names, in order.
+  std::vector<std::uint16_t> run(std::uint16_t c) const {
+    const Chain x = chains[c];
+    return {acts.data() + x.off, acts.data() + x.off + x.count};
+  }
+
   // The same run as a turn's own chain.
   std::uint16_t turn_chain(std::uint16_t c) {
     if (c == kNoRow) return kNoRow;
-    const Chain x = chains[c];
-    const std::vector<std::uint16_t> run(acts.data() + x.off,
-                                         acts.data() + x.off + x.count);
-    return intern(run.data(), run.size(), true, chainBuild[c].doc);
+    const std::vector<std::uint16_t> same = run(c);
+    return intern(same.data(), same.size(), true, chainBuild[c].doc);
   }
 
   // A chain opens a record when it starts with a creation, hands a node back
   // when it starts with a creation or a close, and nests when it starts with a
-  // nest.
+  // nest. Its lead is its first write of a member.
   void note_makes(std::span<const WriteKind> kind) {
     for (std::uint16_t i = 0; i < nchains; ++i) {
       const Chain& ch = chains[i];
@@ -104,6 +108,11 @@ struct ChainPool {
       cb.creates = first == WriteKind::create || first == WriteKind::climb;
       cb.makes = cb.creates || first == WriteKind::close;
       cb.nest = first == WriteKind::nest;
+      for (std::uint16_t k = 0; k < ch.count && cb.lead == kNoRow; ++k)
+        if (const WriteKind what = kind[acts[ch.off + k]];
+            what == WriteKind::assign || what == WriteKind::append ||
+            what == WriteKind::flag)
+          cb.lead = acts[ch.off + k];
     }
   }
 

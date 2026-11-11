@@ -9,7 +9,6 @@
 #include <span>
 #include <string_view>
 
-#include "cursiv/ll/table/LlCellBuild.hpp"
 #include "cursiv/ll/table/LlClimb.hpp"
 #include "cursiv/ll/table/LlDecision.hpp"
 #include "cursiv/ll/table/LlNode.hpp"
@@ -44,11 +43,6 @@ struct LlLowCfg : LowerPools {
   Vec<LlClimbOp> climbOps{};
 
   Vec<std::uint8_t> ruleCfg{};
-
-  // What only the lowering reads, beside the cells and not in them: a table
-  // is emitted without any of it.
-  Vec<LlNodeBuild> nodeBuild{};
-  Vec<LlDecisionBuild> decisionBuild{};
 
   std::span<const std::uint16_t> children(const LlNode& node) const {
     if (node.kind == LlShape::rep) return {&node.sym, 1};

@@ -50,7 +50,7 @@ class LlStampPlan {
   // A group whose record is a nest turn.
   bool turns(std::uint16_t id) const {
     const LlNode& n = node(id);
-    return n.owns && !_a.cfg.nodeBuild[id].foldStep && n.row != kNoRow &&
+    return n.owns && !n.foldStep && n.row != kNoRow &&
            _a.writes.chainBuild[n.row].nest;
   }
 
@@ -121,8 +121,7 @@ class LlStampPlan {
 
   bool writes_named(std::uint16_t id) const {
     const LlNode& n = node(id);
-    return n.owns && n.kind != LlShape::empty && !turns(id) &&
-           !_a.cfg.nodeBuild[id].foldStep &&
+    return n.owns && n.kind != LlShape::empty && !turns(id) && !n.foldStep &&
            _a.ownBase[id + 1] == _a.ownBase[id] && !reaches_back(id);
   }
 

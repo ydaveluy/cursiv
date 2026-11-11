@@ -4,7 +4,6 @@
 #include "cursiv/ll/gen/ll_build.hpp"
 
 #include <algorithm>
-#include <bit>
 #include <cstdint>
 #include <deque>
 #include <iterator>
@@ -58,6 +57,17 @@ struct Pending {
   }
 };
 
+constexpr std::uint32_t kNoElement = ~std::uint32_t{0};
+
+// An element is a position, or `nnodes` plus a rule. What a rule's element
+// reads its facts from: its body, or the rule of a climb's operand;
+// `kNoElement` where it has neither.
+std::uint32_t rule_source(const Cfg& c, std::uint32_t id) {
+  const LlRuleInfo& u = c.rules[id - c.nnodes];
+  if (u.climb != kNoRow) return c.nnodes + c.climbs[u.climb].primary;
+  return u.body != kNoRow ? u.body : kNoElement;
+}
+
 // Who reads each element, and the order the analyses visit them in: positions
 // before their groups, then rules. One graph serves every analysis.
 struct ShapeGraph {
@@ -72,15 +82,9 @@ struct ShapeGraph {
       else
         for (const auto child : c.children(n)) users[child].push_back(id);
     }
-    for (std::uint16_t r = 1; r < c.nrules; ++r) {
-      const LlRuleInfo& u = c.rules[r];
-      const auto id = c.nnodes + r;
-      if (u.climb != kNoRow) {
-        users[c.nnodes + c.climbs[u.climb].primary].push_back(id);
-      } else if (u.body != kNoRow) {
-        users[u.body].push_back(id);
-      }
-    }
+    for (std::uint32_t id = c.nnodes + 1; id < users.size(); ++id)
+      if (const auto from = rule_source(c, id); from != kNoElement)
+        users[from].push_back(id);
     // Each element comes after what it reads, as far as cycles allow, so a fact
     // reaches its reader whole. The fixpoint does not depend on the order.
     const auto cycles = StrongComponents<>::of(users);
@@ -95,22 +99,26 @@ struct ShapeGraph {
 };
 
 template <class Update>
-void propagate_shapes(const ShapeGraph& g, std::uint64_t* work,
+void propagate_shapes(const ShapeGraph& g, std::uint64_t& work,
                       Update&& update) {
   Pending pending(g.users.size());
   for (const std::uint32_t id : g.order) pending.push(id);
   while (!pending.empty()) {
     const auto id = pending.pop();
-    if (work) ++*work;
+    ++work;
     if (update(id))
       for (const auto user : g.users[id]) pending.push(user);
   }
 }
 
-bool node_nullable(const Cfg& c, std::uint16_t id,
-                   std::span<const std::uint8_t> nullable,
-                   std::span<const std::uint8_t> ruleNullable,
-                   bool endMarkNullable = false) {
+bool element_nullable(const Cfg& c, std::uint32_t id,
+                      std::span<const std::uint8_t> nullable,
+                      bool endMarkNullable) {
+  // A climb with no operator in the text is its operand alone.
+  if (id >= c.nnodes) {
+    const auto from = rule_source(c, id);
+    return from != kNoElement && nullable[from] != 0;
+  }
   switch (const LlNode& n = c.nodes[id]; n.kind) {
     case LlShape::term:
       return false;
@@ -123,7 +131,7 @@ bool node_nullable(const Cfg& c, std::uint16_t id,
     case LlShape::implied:
       return true;
     case LlShape::call:
-      return ruleNullable[n.sym] != 0;
+      return nullable[c.nnodes + n.sym] != 0;
     case LlShape::seq:
       return std::ranges::all_of(c.children(n),
                                  [&](auto k) { return nullable[k] != 0; });
@@ -136,38 +144,19 @@ bool node_nullable(const Cfg& c, std::uint16_t id,
   return false;
 }
 
+// Whether each element can read nothing.
 std::vector<std::uint8_t> compute_nullable(const Cfg& c,
                                            const ShapeGraph& shapes,
-                                           std::vector<std::uint8_t>& nullable,
-                                           bool endMarkNullable = false,
-                                           std::uint64_t* work = nullptr) {
-  nullable.assign(c.nnodes, 0);
-  std::vector<std::uint8_t> ruleNullable(c.nrules, 0);
+                                           std::uint64_t& work,
+                                           bool endMarkNullable = false) {
+  std::vector<std::uint8_t> nullable(c.nnodes + c.nrules, 0);
   propagate_shapes(shapes, work, [&](std::uint32_t id) {
-    bool empty;
-    std::uint8_t* value;
-    if (id < c.nnodes) {
-      empty = node_nullable(c, static_cast<std::uint16_t>(id), nullable,
-                            ruleNullable, endMarkNullable);
-      value = &nullable[id];
-    } else {
-      const auto r = static_cast<std::uint16_t>(id - c.nnodes);
-      const LlRuleInfo& u = c.rules[r];
-      // A climb with no operator in the text is its operand alone.
-      std::uint8_t v = 0;
-      if (u.climb != kNoRow) {
-        v = ruleNullable[c.climbs[u.climb].primary];
-      } else if (u.body != kNoRow) {
-        v = nullable[u.body];
-      }
-      empty = v != 0;
-      value = &ruleNullable[r];
-    }
-    if (!empty || *value) return false;
-    *value = 1;
+    if (nullable[id] || !element_nullable(c, id, nullable, endMarkNullable))
+      return false;
+    nullable[id] = 1;
     return true;
   });
-  return ruleNullable;
+  return nullable;
 }
 
 // Adds `t` to `set`; true when it was new.
@@ -177,47 +166,43 @@ bool put(DynSet& set, unsigned t) {
   return true;
 }
 
-bool node_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
-                std::vector<DynSet>& first,
-                const std::vector<DynSet>& ruleFirst,
-                const std::vector<DynSet>& impliedHeads, std::uint16_t id) {
-  const LlNode& n = c.nodes[id];
-  DynSet& out = first[id];
-  switch (n.kind) {
-    case LlShape::term:
-      return put(out, n.sym);
-    case LlShape::endMark: {
-      const bool eof = put(out, kEofSymbol);
-      return put(out, n.sym) || eof;
+// What stands at the head of each element: a group's members up to the first
+// of a sequence that must read, a call's rule, and what `leaf` puts for any
+// other position.
+template <class Leaf>
+std::vector<DynSet> head_sets(const Cfg& c, const ShapeGraph& shapes,
+                              std::span<const std::uint8_t> nullable,
+                              std::uint64_t& work, Leaf&& leaf) {
+  std::vector<DynSet> heads(c.nnodes + c.nrules);
+  propagate_shapes(shapes, work, [&](std::uint32_t id) {
+    DynSet& out = heads[id];
+    if (id >= c.nnodes) {
+      const auto from = rule_source(c, id);
+      return from != kNoElement && out.add(heads[from]);
     }
-    case LlShape::empty:
-    case LlShape::condition:
-      return false;
-    case LlShape::implied:
-      return out.add(impliedHeads[n.min]);
-    case LlShape::call:
-      return out.add(ruleFirst[n.sym]);
-    case LlShape::seq:
-    case LlShape::alt: {
-      bool grew = false;
-      for (const auto k : c.children(n)) {
-        grew = out.add(first[k]) || grew;
-        if (n.kind == LlShape::seq && !nullable[k]) break;
+    const LlNode& n = c.nodes[id];
+    switch (n.kind) {
+      case LlShape::call:
+        return out.add(heads[c.nnodes + n.sym]);
+      case LlShape::seq:
+      case LlShape::alt:
+      case LlShape::rep: {
+        bool grew = false;
+        for (const auto k : c.children(n)) {
+          grew = out.add(heads[k]) || grew;
+          if (n.kind == LlShape::seq && !nullable[k]) break;
+        }
+        return grew;
       }
-      return grew;
+      default:
+        return leaf(n, out);
     }
-    case LlShape::rep:
-      return out.add(first[n.sym]);
-  }
-  return false;
+  });
+  return heads;
 }
 
-void compute_first(const Cfg& c, const ShapeGraph& shapes,
-                   const std::vector<std::uint8_t>& nullable,
-                   std::vector<DynSet>& first, std::vector<DynSet>& ruleFirst,
-                   std::uint64_t* work = nullptr) {
-  first.assign(c.nnodes, DynSet{});
-  ruleFirst.assign(c.nrules, DynSet{});
+void compute_first(Built& b, const ShapeGraph& shapes, std::uint64_t& work) {
+  const Cfg& c = b.cfg;
   // What can start an implied token's condition: the tokens it stands before.
   std::vector<DynSet> impliedHeads(c.ngapConds);
   const std::vector<DynSet> firsts = condition_firsts(c);
@@ -229,17 +214,30 @@ void compute_first(const Cfg& c, const ShapeGraph& shapes,
       else
         impliedHeads[k].set(t);
     }
-  propagate_shapes(shapes, work, [&](std::uint32_t id) {
-    if (id < c.nnodes)
-      return node_first(c, nullable, first, ruleFirst, impliedHeads,
-                        static_cast<std::uint16_t>(id));
-    const auto r = static_cast<std::uint16_t>(id - c.nnodes);
-    const LlRuleInfo& u = c.rules[r];
-    if (u.climb != kNoRow)
-      return ruleFirst[r].add(ruleFirst[c.climbs[u.climb].primary]);
-    if (u.body != kNoRow) return ruleFirst[r].add(first[u.body]);
-    return false;
-  });
+  const auto leaf = [&](const LlNode& n, DynSet& out) {
+    switch (n.kind) {
+      case LlShape::term:
+        return put(out, n.sym);
+      case LlShape::endMark: {
+        const bool eof = put(out, kEofSymbol);
+        return put(out, n.sym) || eof;
+      }
+      case LlShape::implied:
+        return out.add(impliedHeads[n.min]);
+      default:
+        return false;
+    }
+  };
+  b.first = head_sets(c, shapes, b.nullable, work, leaf);
+}
+
+// The conditions no cut decides that stand at the head of each element.
+void compute_lead(Built& b, const ShapeGraph& shapes, std::uint64_t& work) {
+  const auto leaf = [&](const LlNode& n, DynSet& out) {
+    return n.kind == LlShape::condition && b.cut[n.sym].none() &&
+           put(out, n.sym);
+  };
+  b.lead = head_sets(b.cfg, shapes, b.nullable, work, leaf);
 }
 
 // The rules this position may call before it consumes a token; a cycle here is
@@ -391,19 +389,26 @@ void refuse_skipped_terminal(Built& b) {
 // waits on such a rule: it derives no finite text. Only a token of the same
 // sequence as the `eof` counts.
 void refuse_unproductive(Built& b, const ShapeGraph& shapes,
-                         std::uint64_t* work) {
+                         std::uint64_t& work) {
   const Cfg& c = b.cfg;
-  std::vector<std::uint8_t> node(c.nnodes, 0), rule(c.nrules, 0);
-  const auto productive = [&](const LlNode& n) {
-    switch (n.kind) {
+  std::vector<std::uint8_t> productive(c.nnodes + c.nrules, 0);
+  const auto rule = [&](std::uint16_t r) {
+    return productive[c.nnodes + r] != 0;
+  };
+  const auto derives = [&](std::uint32_t id) {
+    if (id >= c.nnodes) {
+      const auto from = rule_source(c, id);
+      return from != kNoElement && productive[from] != 0;
+    }
+    switch (const LlNode& n = c.nodes[id]; n.kind) {
       case LlShape::call:
-        return rule[n.sym] != 0;
+        return rule(n.sym);
       case LlShape::seq: {
         const auto k = c.children(n);
         bool ended = false;
         for (const auto child : k) {
           const LlShape s = c.nodes[child].kind;
-          if (!node[child] ||
+          if (!productive[child] ||
               (ended && (s == LlShape::term || s == LlShape::implied)))
             return false;
           ended = ended || s == LlShape::endMark;
@@ -412,28 +417,16 @@ void refuse_unproductive(Built& b, const ShapeGraph& shapes,
       }
       case LlShape::alt:
         return std::ranges::any_of(c.children(n),
-                                   [&](auto k) { return node[k] != 0; });
+                                   [&](auto k) { return productive[k] != 0; });
       case LlShape::rep:
-        return n.min == 0 || node[n.sym] != 0;
+        return n.min == 0 || productive[n.sym] != 0;
       default:
         return true;
     }
   };
   propagate_shapes(shapes, work, [&](std::uint32_t id) {
-    bool p;
-    std::uint8_t* value;
-    if (id < c.nnodes) {
-      p = productive(c.nodes[id]);
-      value = &node[id];
-    } else {
-      const auto r = static_cast<std::uint16_t>(id - c.nnodes);
-      const LlRuleInfo& u = c.rules[r];
-      p = u.body != kNoRow && node[u.body];
-      if (u.climb != kNoRow) p = rule[c.climbs[u.climb].primary] != 0;
-      value = &rule[r];
-    }
-    if (!p || *value) return false;
-    *value = 1;
+    if (productive[id] || !derives(id)) return false;
+    productive[id] = 1;
     return true;
   });
   // The rule to name is the one the others wait on.
@@ -442,20 +435,20 @@ void refuse_unproductive(Built& b, const ShapeGraph& shapes,
     std::vector<std::uint16_t> nodes;
     if (u.climb != kNoRow) {
       const std::uint16_t primary = c.climbs[u.climb].primary;
-      return rule[primary] ? kNoRow : primary;
+      return rule(primary) ? kNoRow : primary;
     }
     if (u.body != kNoRow) nodes.push_back(u.body);
     while (!nodes.empty()) {
       const LlNode& n = c.nodes[nodes.back()];
       nodes.pop_back();
-      if (n.kind == LlShape::call && !rule[n.sym]) return n.sym;
+      if (n.kind == LlShape::call && !rule(n.sym)) return n.sym;
       const auto childIds = c.children(n);
       nodes.insert(nodes.end(), childIds.rbegin(), childIds.rend());
     }
     return kNoRow;
   };
   for (std::uint16_t r = 1; r < c.nrules; ++r) {
-    if (!b.liveRules[r] || rule[r]) continue;
+    if (!b.liveRules[r] || rule(r)) continue;
     std::vector<bool> seen(c.nrules, false);
     std::uint16_t at = r;
     for (;;) {
@@ -471,19 +464,17 @@ void refuse_unproductive(Built& b, const ShapeGraph& shapes,
 
 // The skip configuration of the trivia before each token: that of the group
 // holding both tokens. Every gap one point reads must agree. One bit per
-// configuration.
+// configuration. Every fact is per element.
 struct Gaps {
   const Built& b;
   std::vector<std::uint8_t> silent{}, consumes{}, freshOut{};
-  std::vector<std::uint8_t> ruleSilent{}, ruleConsumes{}, ruleFreshOut{};
   // Whether some empty derivation reads a condition. A nullable call can
   // delegate an optional exit only when no empty path reads one.
-  std::vector<std::uint8_t> emptyReads{}, ruleEmptyReads{};
-  // Per position: the gaps before its first token from a token that nothing
-  // peeked after, the gaps across it where it reads nothing, and the gaps
-  // after its last token.
+  std::vector<std::uint8_t> emptyReads{};
+  // The gaps before its first token from a token that nothing peeked after,
+  // the gaps across it where it reads nothing, and the gaps after its last
+  // token.
   std::vector<DynSet> pre{}, span{}, after{};
-  std::vector<DynSet> rulePre{}, ruleSpan{}, ruleAfter{};
   // Whether a callee's first positions take the gaps of its callers.
   bool entries = true;
   // Per sequence, one past its last member that consumes and one past its last
@@ -495,11 +486,10 @@ struct Gaps {
     s.set(k);
     return s;
   }
-  unsigned cfg(std::uint16_t id) const { return b.cfg.nodeBuild[id].cfg; }
-  unsigned section(std::uint16_t id) const {
-    return b.cfg.nodeBuild[id].section;
-  }
+  unsigned cfg(std::uint16_t id) const { return b.cfg.nodes[id].cfg; }
+  unsigned section(std::uint16_t id) const { return b.cfg.nodes[id].section; }
   unsigned rule_cfg(std::uint16_t r) const { return b.cfg.ruleCfg[r]; }
+  std::uint32_t rule(std::uint16_t r) const { return b.cfg.nnodes + r; }
   const LlNode& node(std::uint16_t id) const { return b.cfg.nodes[id]; }
   std::uint16_t child(const LlNode& n, unsigned i) const {
     return b.cfg.childIds[n.sym + i];
@@ -508,25 +498,22 @@ struct Gaps {
   // Whether a position may pass without peeking, may consume, and may end
   // on a token with no peek after it: least fixpoints, a rule reaching itself
   // before it consumes being refused.
-  void compute_shape(const ShapeGraph& shapes, std::uint64_t* work) {
+  void compute_shape(const ShapeGraph& shapes, std::uint64_t& work) {
     propagate_shapes(shapes, work, [&](std::uint32_t id) {
       bool moved = false;
-      const auto raise = [&](std::vector<std::uint8_t>& v, std::size_t i,
-                             bool x) {
-        if (x && !v[i]) v[i] = 1, moved = true;
+      const auto raise = [&](std::vector<std::uint8_t>& v, bool x) {
+        if (x && !v[id]) v[id] = 1, moved = true;
       };
       if (id >= b.cfg.nnodes) {
-        const auto r = static_cast<std::uint16_t>(id - b.cfg.nnodes);
-        const LlRuleInfo& u = b.cfg.rules[r];
+        const LlRuleInfo& u = b.cfg.rules[id - b.cfg.nnodes];
         if (u.climb != kNoRow) {
-          raise(ruleConsumes, r, true);
-          raise(ruleEmptyReads, r,
-                ruleEmptyReads[b.cfg.climbs[u.climb].primary]);
+          raise(consumes, true);
+          raise(emptyReads, emptyReads[rule(b.cfg.climbs[u.climb].primary)]);
         } else if (u.body != kNoRow) {
-          raise(ruleSilent, r, silent[u.body]);
-          raise(ruleConsumes, r, consumes[u.body]);
-          raise(ruleFreshOut, r, freshOut[u.body]);
-          raise(ruleEmptyReads, r, emptyReads[u.body]);
+          raise(silent, silent[u.body]);
+          raise(consumes, consumes[u.body]);
+          raise(freshOut, freshOut[u.body]);
+          raise(emptyReads, emptyReads[u.body]);
         }
         return moved;
       }
@@ -548,10 +535,10 @@ struct Gaps {
           er = true;
           break;
         case LlShape::call:
-          si = ruleSilent[n.sym];
-          co = ruleConsumes[n.sym];
-          fr = ruleFreshOut[n.sym];
-          er = ruleEmptyReads[n.sym];
+          si = silent[rule(n.sym)];
+          co = consumes[rule(n.sym)];
+          fr = freshOut[rule(n.sym)];
+          er = emptyReads[rule(n.sym)];
           break;
         case LlShape::seq: {
           si = true;
@@ -580,10 +567,10 @@ struct Gaps {
           er = n.max != 0 && b.nullable[n.sym] && emptyReads[n.sym];
           break;
       }
-      raise(silent, id, si);
-      raise(consumes, id, co);
-      raise(freshOut, id, fr);
-      raise(emptyReads, id, er);
+      raise(silent, si);
+      raise(consumes, co);
+      raise(freshOut, fr);
+      raise(emptyReads, er);
       return moved;
     });
   }
@@ -603,9 +590,8 @@ struct Gaps {
   }
 
   // The gap sets over the shape facts `g` holds: both passes read one shape.
-  void compute_sets(const Gaps& g, std::uint64_t* work) {
+  void compute_sets(const Gaps& g, std::uint64_t& work) {
     Pending pending(b.cfg.nnodes + b.cfg.nrules);
-    const auto rule = [&](std::uint16_t r) { return b.cfg.nnodes + r; };
     const auto add = [&](DynSet& to, const DynSet& x, std::uint32_t target) {
       if (to.add(x)) pending.push(target);
     };
@@ -613,7 +599,7 @@ struct Gaps {
     for (std::uint32_t at = b.cfg.nnodes; at-- > 0;) pending.push(at);
     while (!pending.empty()) {
       const auto at = pending.pop();
-      if (work) ++*work;
+      ++work;
       if (at >= b.cfg.nnodes) {
         const auto r = static_cast<std::uint16_t>(at - b.cfg.nnodes);
         const LlRuleInfo& u = b.cfg.rules[r];
@@ -622,17 +608,17 @@ struct Gaps {
           // operator or the end of the climb.
           const LlClimb& cl = b.cfg.climbs[u.climb];
           const DynSet own = bit(rule_cfg(r));
-          const DynSet in = rulePre[r] | own;
-          const DynSet out = ruleAfter[r] | own;
-          add(rulePre[cl.primary], in, rule(cl.primary));
-          add(ruleAfter[cl.primary], out, rule(cl.primary));
+          const DynSet in = pre[at] | own;
+          const DynSet out = after[at] | own;
+          add(pre[rule(cl.primary)], in, rule(cl.primary));
+          add(after[rule(cl.primary)], out, rule(cl.primary));
           add(pre[cl.selectNode], out, cl.selectNode);
           add(span[cl.selectNode], own, cl.selectNode);
           add(after[cl.selectNode], own, cl.selectNode);
         } else if (u.body != kNoRow) {
-          add(pre[u.body], rulePre[r], u.body);
-          add(span[u.body], ruleSpan[r], u.body);
-          add(after[u.body], ruleAfter[r], u.body);
+          add(pre[u.body], pre[at], u.body);
+          add(span[u.body], span[at], u.body);
+          add(after[u.body], after[at], u.body);
         }
         continue;
       }
@@ -641,10 +627,10 @@ struct Gaps {
       switch (n.kind) {
         case LlShape::call:
           if (entries) {
-            add(rulePre[n.sym], pre[id], rule(n.sym));
-            add(ruleSpan[n.sym], span[id], rule(n.sym));
+            add(pre[rule(n.sym)], pre[id], rule(n.sym));
+            add(span[rule(n.sym)], span[id], rule(n.sym));
           }
-          add(ruleAfter[n.sym], after[id], rule(n.sym));
+          add(after[rule(n.sym)], after[id], rule(n.sym));
           break;
         case LlShape::alt:
           // The gap in front of an arm's first token is the choice's.
@@ -707,39 +693,29 @@ struct Gaps {
 };
 
 void compute_gaps(Built& b, const ShapeGraph& shapes,
-                  const LexAlphabet& alphabet, LlBuildWork* work) {
+                  const LexAlphabet& alphabet, LlBuildWork& work) {
   const std::uint32_t nn = b.cfg.nnodes;
-  const std::uint16_t nr = b.cfg.nrules;
+  const std::size_t elements = nn + b.cfg.nrules;
   b.gapCfg.assign(nn, 0);
   b.headCfg.assign(nn, 0);
   b.callerPeek.assign(nn, 0);
   b.readHeadCfg.assign(nn, 0);
-  b.climbCfg.assign(b.cfg.nclimbs, 0);
   for (std::uint32_t id = 0; id < nn; ++id)
-    b.gapCfg[id] = b.headCfg[id] = b.readHeadCfg[id] = b.cfg.nodeBuild[id].cfg;
-  for (std::uint16_t r = 1; r < nr; ++r)
-    if (b.cfg.rules[r].climb != kNoRow)
-      b.climbCfg[b.cfg.rules[r].climb] = b.cfg.ruleCfg[r];
+    b.gapCfg[id] = b.headCfg[id] = b.readHeadCfg[id] = b.cfg.nodes[id].cfg;
   if (b.cfg.cfgTriviaAt.size() <= 2) return;
   Gaps g{b};
-  g.silent = g.consumes = g.freshOut = std::vector<std::uint8_t>(nn, 0);
-  g.ruleSilent = g.ruleConsumes = g.ruleFreshOut =
-      std::vector<std::uint8_t>(nr, 0);
-  g.emptyReads.assign(nn, 0);
-  g.ruleEmptyReads.assign(nr, 0);
-  g.compute_shape(shapes, work ? &work->gapShape : nullptr);
+  g.silent = g.consumes = g.freshOut = g.emptyReads =
+      std::vector<std::uint8_t>(elements, 0);
+  g.compute_shape(shapes, work.gapShape);
   g.note_later();
   // The document opens and ends under the grammar's own configuration.
   const auto compute_gap_sets = [&](Gaps& x) {
-    x.pre.assign(nn, DynSet{});
-    x.span.assign(nn, DynSet{});
-    x.after.assign(nn, DynSet{});
-    x.rulePre.assign(nr, DynSet{});
-    x.ruleSpan.assign(nr, DynSet{});
-    x.ruleAfter.assign(nr, DynSet{});
-    x.rulePre[b.cfg.entryRule] = x.ruleSpan[b.cfg.entryRule] =
-        x.ruleAfter[b.cfg.entryRule] = Gaps::bit(0);
-    x.compute_sets(g, work ? &work->gapSets : nullptr);
+    x.pre.assign(elements, DynSet{});
+    x.span.assign(elements, DynSet{});
+    x.after.assign(elements, DynSet{});
+    const auto entry = x.rule(b.cfg.entryRule);
+    x.pre[entry] = x.span[entry] = x.after[entry] = Gaps::bit(0);
+    x.compute_sets(g, work.gapSets);
   };
   compute_gap_sets(g);
   // A call site peeks its callee's first token: callers that cross the gap
@@ -747,21 +723,14 @@ void compute_gaps(Built& b, const ShapeGraph& shapes,
   Gaps local{.b = b, .entries = false};
   compute_gap_sets(local);
 
-  const auto lowest = [](const DynSet& s) {
-    std::uint32_t w = 0;
-    while (s.word(w) == 0) ++w;
-    return w * 64u + static_cast<unsigned>(std::countr_zero(s.word(w)));
-  };
+  const auto lowest = [](const DynSet& s) { return *s.members().begin(); };
   const auto one = [&](const DynSet& set, const DynSet& own,
                        std::uint8_t& out) {
     if (set.none()) return;
     const DynSet* at = &set;
     if (set.more_than_one()) {
-      DynSet rest = set;
-      rest.reset(lowest(set));
-      for (; rest.any(); rest.reset(lowest(rest)))
-        if (b.cfg.section_cfg_at(lowest(set)) !=
-            b.cfg.section_cfg_at(lowest(rest))) {
+      for (const unsigned k : set.members())
+        if (b.cfg.section_cfg_at(lowest(set)) != b.cfg.section_cfg_at(k)) {
           lower_refuse(b.cfg, LowerFail::sectionPointShared);
           return;
         }
@@ -782,16 +751,13 @@ void compute_gaps(Built& b, const ShapeGraph& shapes,
     const auto own = g.cfg(id);
     const DynSet& configs = g.after[id];
     bool same = true;
-    each_bit(configs.w.data(), configs.w.size(), [&](std::size_t k) {
+    for (const unsigned k : configs.members())
       same = same && k + 1u < b.cfg.cfgTriviaAt.size() &&
-             b.cfg.section_cfg_at(static_cast<unsigned>(k)) ==
-                 b.cfg.section_cfg_at(own);
-    });
+             b.cfg.section_cfg_at(k) == b.cfg.section_cfg_at(own);
     if (!same || first.none() || !separated.disjoint(first, b.after[id]))
       return false;
-    each_bit(configs.w.data(), configs.w.size(), [&](std::size_t k) {
-      same = same && separated.peek_safe(first, own, static_cast<unsigned>(k));
-    });
+    for (const unsigned k : configs.members())
+      same = same && separated.peek_safe(first, own, k);
     return same;
   };
   for (std::uint32_t at = 0; at < nn; ++at) {
@@ -854,14 +820,6 @@ void compute_gaps(Built& b, const ShapeGraph& shapes,
         break;
     }
   }
-  for (std::uint16_t r = 1; r < nr; ++r) {
-    const LlRuleInfo& u = b.cfg.rules[r];
-    if (u.climb == kNoRow) continue;
-    const LlClimb& cl = b.cfg.climbs[u.climb];
-    if (g.ruleFreshOut[cl.primary] != 0)
-      one(Gaps::bit(g.rule_cfg(r)) | g.ruleAfter[r],
-          Gaps::bit(g.rule_cfg(r)) | local.ruleAfter[r], b.climbCfg[u.climb]);
-  }
   b.afterCfg.assign(nn, kNoRow);
   for (std::uint32_t id = 0; id < nn; ++id) {
     const DynSet& set = g.after[id];
@@ -880,7 +838,7 @@ void refuse_section_lookahead(Built& b) {
     const LlNode& n = b.cfg.nodes[id];
     if (n.kind != LlShape::seq) continue;
     for (unsigned i = 1; i < n.count; ++i) {
-      if (b.cfg.nodeBuild[b.cfg.childIds[n.sym + i]].section == 0) continue;
+      if (b.cfg.nodes[b.cfg.childIds[n.sym + i]].section == 0) continue;
       // Only a terminal opener is checked: any other opener ends on the last
       // token it reads, and no last set is built.
       const LlNode& open = b.cfg.nodes[b.cfg.childIds[n.sym + i - 1]];
@@ -891,7 +849,7 @@ void refuse_section_lookahead(Built& b) {
   for (std::uint16_t d = 0; d < b.cfg.ndecisions; ++d) {
     const LlDecision& dec = b.cfg.decisions[d];
     if (dec.how == LlPredict::single) continue;
-    for (unsigned a = 0; a < b.cfg.decisionBuild[d].nalts; ++a)
+    for (unsigned a = 0; a < dec.nalts; ++a)
       if (b.laSet[dec.set + a].intersects(opens))
         lower_refuse(b.cfg, LowerFail::sectionPointShared);
   }
@@ -955,10 +913,8 @@ struct Follow {
 };
 
 void compute_after(const Cfg& c, const std::vector<std::uint8_t>& nullable,
-                   const std::vector<DynSet>& first,
-                   const std::vector<DynSet>& ruleFirst,
-                   std::vector<DynSet>& after, std::vector<DynSet>& ruleFollow,
-                   std::uint64_t* work) {
+                   const std::vector<DynSet>& first, std::vector<DynSet>& after,
+                   std::vector<DynSet>& ruleFollow, std::uint64_t& work) {
   after.assign(c.nnodes, DynSet{});
   ruleFollow.assign(c.nrules, DynSet{});
   // The document ends after the entry, and nothing else may.
@@ -967,7 +923,7 @@ void compute_after(const Cfg& c, const std::vector<std::uint8_t>& nullable,
   for (std::uint16_t r = 1; r < c.nrules; ++r) f.grown.push(r);
   while (!f.grown.empty()) {
     const auto r = static_cast<std::uint16_t>(f.grown.pop());
-    if (work) ++*work;
+    ++work;
     const LlRuleInfo& u = c.rules[r];
     if (u.climb != kNoRow) {
       // An operand is followed by an operator of the table, or by whatever
@@ -980,7 +936,7 @@ void compute_after(const Cfg& c, const std::vector<std::uint8_t>& nullable,
       after[cl.selectNode].add(ruleFollow[r]);
       const auto& select = c.nodes[cl.selectNode];
       for (unsigned i = 0; i < cl.opCount; ++i)
-        f.walk(c.childIds[select.sym + i], ruleFirst[cl.primary]);
+        f.walk(c.childIds[select.sym + i], first[c.nnodes + cl.primary]);
       f.walk(c.childIds[select.sym + cl.opCount], ruleFollow[r]);
     } else if (u.body != kNoRow) {
       f.walk(u.body, ruleFollow[r]);
@@ -1101,7 +1057,7 @@ void AtnGen::build(std::uint16_t id, std::uint32_t from, std::uint32_t to,
         b.nodeAfter[id] = to;
         break;
       case LlShape::call:
-        b.nodeFollow[id] = b.nodeAfter[id] = to;
+        b.nodeAfter[id] = to;
         call(from, n.sym, to, id);
         break;
       case LlShape::seq: {
@@ -1177,7 +1133,6 @@ void build_climb(AtnGen& g, std::uint16_t rule, LlClimb& cl, std::uint32_t from,
 void build_atn(Built& b) {
   b.returnNode.clear();
   AtnGen g{b};
-  b.nodeFollow.assign(b.cfg.nnodes, 0);
   // The state the graph stands in once each position is read, what a caret
   // seeds its closure from: a call stands after its own return state, where
   // a caret walks up to name the member a token inside the rule fills.
@@ -1486,7 +1441,7 @@ Descent<LlEntry> entry_cost(const Built& b, std::uint16_t id,
   co_return {kLlCostless, false};
 }
 
-void compute_repair(Built& b, std::uint64_t* work) {
+void compute_repair(Built& b, std::uint64_t& work) {
   std::vector rule(b.cfg.nrules, kLlCostless);
   std::vector<std::vector<std::uint16_t>> users(b.cfg.nrules);
   Pending pending(b.cfg.nrules);
@@ -1513,7 +1468,7 @@ void compute_repair(Built& b, std::uint64_t* work) {
   }
   while (!pending.empty()) {
     const auto r = static_cast<std::uint16_t>(pending.pop());
-    if (work) ++*work;
+    ++work;
     const LlRuleInfo& u = b.cfg.rules[r];
     const std::uint32_t k =
         u.climb != kNoRow ? rule[b.cfg.climbs[u.climb].primary]
@@ -1535,15 +1490,15 @@ void compute_repair(Built& b, std::uint64_t* work) {
           descend(entry_cost(b, b.cfg.childIds[n.sym + i], rule, false)).cost;
       if (k < best) best = k, dec.repair = i;
     }
-    b.cfg.decisionBuild[d].repairCost = best > kLlRepairCostless
-                                            ? kLlRepairCostless
-                                            : static_cast<std::uint16_t>(best);
+    dec.repairCost = best > kLlRepairCostless
+                         ? kLlRepairCostless
+                         : static_cast<std::uint16_t>(best);
   }
 }
 
 // The positions an invocation of a rule can read first, before it has read
 // anything: only there does the rule's caller state what the token fills.
-void compute_head_nodes(Built& b, const std::vector<std::uint8_t>& nullable) {
+void compute_head_nodes(Built& b) {
   b.nodeHead.assign(b.cfg.nnodes, 0);
   RoundMarks seen(b.nstates);
   std::vector<std::uint32_t> todo;
@@ -1559,7 +1514,7 @@ void compute_head_nodes(Built& b, const std::vector<std::uint8_t>& nullable) {
       for (std::uint32_t i = 0; i < q.nedges; ++i) {
         const LlAtnEdge& e = b.edges[q.edge + i];
         if (e.kind == LlEdgeKind::atom ||
-            (e.kind == LlEdgeKind::rule && !nullable[e.label]))
+            (e.kind == LlEdgeKind::rule && !b.nullable[b.cfg.nnodes + e.label]))
           continue;
         const std::uint32_t next =
             e.kind == LlEdgeKind::rule ? e.follow : e.target;
@@ -1694,7 +1649,7 @@ void compute_decisions(Built& b, const LlBuildOptions& opt) {
     if (opt.staticPredict) give_the_turn_what_it_dominates(b, atn, dec);
     // No arm reads a token of an arm before it.
     bool disjoint = opt.staticPredict;
-    const unsigned nalts = b.cfg.decisionBuild[d].nalts;
+    const unsigned nalts = dec.nalts;
     DynSet read;
     for (unsigned i = 0; disjoint && i < nalts; ++i)
       disjoint = !read.intersects(b.laSet[base + i]) &&
@@ -1728,7 +1683,7 @@ void compute_decisions(Built& b, const LlBuildOptions& opt) {
 // an entry is written from. A pair asked again reads its chain back.
 class ChainJoin {
  public:
-  ChainJoin(Built& b, std::uint64_t* reads) : b(b), _reads(reads) {}
+  ChainJoin(Built& b, std::uint64_t& reads) : b(b), _reads(reads) {}
 
   std::uint16_t operator()(std::uint16_t held, std::uint16_t over) {
     const ChainBuild left =
@@ -1758,7 +1713,7 @@ class ChainJoin {
     const std::uint64_t key = std::uint64_t{right.makes && !right.creates} << 32 |
                               std::uint64_t{held} << 16 | over;
     if (const auto at = _made.find(key); at != _made.end()) return at->second;
-    if (_reads != nullptr) ++*_reads;
+    ++_reads;
     const std::uint16_t r = intern(held, over, right);
     if (r != kNoRow) _made.emplace(key, r);
     return r;
@@ -1784,24 +1739,23 @@ class ChainJoin {
   }
 
   Built& b;
-  std::uint64_t* _reads;
+  std::uint64_t& _reads;
   std::unordered_map<std::uint64_t, std::uint16_t> _made;
 };
 
-void compute_fusion(Built& b, LlBuildWork* work) {
+void compute_fusion(Built& b, LlBuildWork& work) {
   b.origin.assign(b.writes.nchains, LlFuse{kNoRow, kNoRow});
-  ChainJoin join(b, work ? &work->joins : nullptr);
+  ChainJoin join(b, work.joins);
   for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id) {
     const LlNode& n = b.cfg.nodes[id];
     if (!n.owns || n.kind != LlShape::seq || n.count != 1 || n.row == kNoRow ||
-        !b.writes.chainBuild[n.row].nest || b.cfg.nodeBuild[id].foldStep)
+        !b.writes.chainBuild[n.row].nest || n.foldStep)
       continue;
     const LlNode& only = b.cfg.nodes[b.cfg.childIds[n.sym]];
     if (only.kind != LlShape::term) continue;
     const std::uint16_t stated =
         only.row == kNoRow ? n.row : join(n.row, only.row);
-    b.cfg.nodeBuild[id].leafRow =
-        join(b.cfg.terms[only.sym].element, stated);
+    b.cfg.nodes[id].leafRow = join(b.cfg.terms[only.sym].element, stated);
   }
   // A terminal's own conversion joins its position's chain first: what a leaf
   // carries is then one row, and every walk below reads it as such.
@@ -1812,7 +1766,7 @@ void compute_fusion(Built& b, LlBuildWork* work) {
     n.row = n.row == kNoRow ? own : join(own, n.row);
   }
   LlRecordPlan records(b.cfg, b.writes);
-  records.count_rows(work ? &work->rows : nullptr);
+  records.count_rows(&work.rows);
   records.compute_rows(b.nullable, join);
   b.fuseBase.assign(b.cfg.nnodes + 1, 0);
   for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id) {
@@ -2067,44 +2021,43 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   b.cfg = low.cfg;
   b.writes = low.writes;
   b.fault = low.fault;
+  // A pass nobody counts writes to `uncounted`.
+  LlBuildWork uncounted;
+  LlBuildWork& work = opt.work ? *opt.work : uncounted;
   b.liveRules = reached_from(b.cfg, b.cfg.entryRule);
   refuse_skipped_terminal(b);
   const ShapeGraph shapes(b.cfg);
-  const auto ruleNullable =
-      compute_nullable(b.cfg, shapes, b.nullable, false,
-                       opt.work ? &opt.work->nullable : nullptr);
+  b.nullable = compute_nullable(b.cfg, shapes, work.nullable);
   // EOF constrains FIRST but still makes no progress through the input.
-  std::vector<std::uint8_t> empty;
-  compute_nullable(b.cfg, shapes, empty, true);
+  const auto empty = compute_nullable(b.cfg, shapes, uncounted.nullable, true);
   // A refused grammar skips the walks below: a counted repetition of a body
   // that reads nothing nests as deep as its bound, and the refusal must be
   // reported before any walk follows that depth.
   if (b.fault) return b;
-  compute_first(b.cfg, shapes, b.nullable, b.first, b.ruleFirst,
-                opt.work ? &opt.work->first : nullptr);
+  compute_first(b, shapes, work.first);
   refuse_left_recursion(b, empty);
-  refuse_unproductive(b, shapes, opt.work ? &opt.work->productive : nullptr);
+  refuse_unproductive(b, shapes, work.productive);
   // Nor does one refused here: a left-cyclic rule has no fixpoint for the walks
   // below, and the follow pass would descend it for ever.
   if (b.fault) return b;
-  compute_after(b.cfg, b.nullable, b.first, b.ruleFirst, b.after, b.ruleFollow,
-                opt.work ? &opt.work->follow : nullptr);
+  compute_after(b.cfg, b.nullable, b.first, b.after, b.ruleFollow, work.follow);
   compute_cuts(b);
+  compute_lead(b, shapes, uncounted.first);
   build_atn(b);
   LexAlphabet alphabet;
   alphabet.terminals(b, [](LlLowCfg& g, std::string_view text) {
     return g.intern_name(text);
   });
   if (b.cfg.lowerFail()) return b;
-  compute_gaps(b, shapes, alphabet, opt.work);
+  compute_gaps(b, shapes, alphabet, work);
   compute_decisions(b, opt);
   refuse_section_lookahead(b);
-  compute_repair(b, opt.work ? &opt.work->repair : nullptr);
-  compute_fusion(b, opt.work);
+  compute_repair(b, work.repair);
+  compute_fusion(b, work);
   if (b.writes.capped) b.cap_hit(kTooManyChains);
-  ll_build_lexer(b, alphabet, opt.work ? &opt.work->overtakes : nullptr);
+  ll_build_lexer(b, alphabet, &work.overtakes);
   if (b.cfg.lowerFail()) return b;
-  compute_head_nodes(b, ruleNullable);
+  compute_head_nodes(b);
   compute_episode_flags(b);
   return b;
 }

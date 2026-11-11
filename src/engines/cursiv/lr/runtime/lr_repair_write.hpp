@@ -29,12 +29,6 @@
 
 namespace cursiv::engine {
 
-// The trivia before the token in hand, written as the drive writes it.
-template <const auto& A>
-inline void lr_write_trivia(LrContext& c) {
-  lr_record_trivia<kTermsRecorded<A.cfg>, A.stamp>(c, kLrTermElem<A>.data());
-}
-
 // The goto decides first (a guarded one by the tag of the span's first state,
 // or by `holds` where the span is empty): one that leads to no state writes
 // nothing.
@@ -104,21 +98,21 @@ bool lr_write_apply(LrContext& c, LrWriteReading& w, std::uint32_t at) {
       // Before the first token, the comments in front of the text stand
       // outside it: what the repair adds goes after them.
       if (c.shifts == 0) {
-        lr_write_trivia<A>(c);
+        lr_record_trivia<A>(c);
         if (c.tape.held() > c.committed) c.committed = c.tape.held();
       }
       c.stack.push(
           LrFrame{state, row, c.tape.len(), c.committed, c.tape.len()});
       c.tape.repaired_leaf(c.committed, c.committed, A.stamp.make(row, state));
     } else if (held) {
-      lr_write_trivia<A>(c);
+      lr_record_trivia<A>(c);
       c.stack.push(
           LrFrame{state, row, c.tape.len(), w.la.begin, c.tape.len()});
       c.tape.repaired_leaf(w.la.begin, w.la.end, A.stamp.make(row, state));
       c.committed = w.la.end;
       ++c.shifts;
     } else {
-      lr_write_trivia<A>(c);
+      lr_record_trivia<A>(c);
       lr_push_leaf<A.stamp>(c, to, row, w.la.begin, w.la.end);
     }
     if constexpr (kIndented<A.cfg>) lr_read_indent_shift<A>(c, w);

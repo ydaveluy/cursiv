@@ -48,7 +48,7 @@ CURSIV_NOINLINE inline bool ll_climb_reads_on(const LlContext& c) {
 template <const auto& T>
 inline bool ll_climb_exits(const LlContext& c, std::uint16_t sym) {
   if (ll_callers_take<T>(c, sym)) return true;
-  return c.laValid && sym == c.la.sym && ll_climb_reads_on<T>(c);
+  return c.laMode != kNoMode && sym == c.la.sym && ll_climb_reads_on<T>(c);
 }
 
 }  // namespace cursiv::engine

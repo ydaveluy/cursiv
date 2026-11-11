@@ -60,11 +60,10 @@ struct LlContext {
   std::uint32_t zeroWidth = 0;
 
   Token la{};
-  // The alphabet `la` was read with, `kInvalidSymbol` while there is none:
-  // a token read under one mode is re-read when a point wants another.
+  // The alphabet `la` was read with, `kNoMode` while no token is in hand: a
+  // token read under one mode is re-read when a point wants another.
   // `kLaHeld` is the token a condition held on: no alphabet reads it again.
-  std::uint16_t laMode = kInvalidSymbol;
-  bool laValid = false;
+  std::uint16_t laMode = kNoMode;
 
   // Unbounded: whitespace and comments alternate, so nothing bounds how many
   // runs sit between two tokens.
@@ -72,7 +71,8 @@ struct LlContext {
   // How far trivia has been read past `at`: an ignored run is the cursor's
   // advance and never an entry above.
   TextOffset pendEnd = 0;
-  // Trivia already written to the tape cannot be rescanned by a later site.
+  // Where the next read starts: the cursor, or past the trivia already written
+  // to the tape, which no later site reads again. Never behind `at`.
   TextOffset triviaAt = 0;
   std::vector<IndentLevel> indentArena;
   IndentAt indent;
@@ -128,7 +128,7 @@ struct LlContext {
 
 inline void ll_return(LlContext& c) {
   c.stack.pop_back();
-  if (c.stack.size() == c.abandonDepth) {
+  if (c.give && c.stack.size() == c.abandonDepth) {
     c.give = false;
     c.abandonDepth = ~std::size_t{0};
     // An abandon that wrote no record gave nothing up on the tape.

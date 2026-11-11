@@ -15,8 +15,6 @@ enum class LlShape : std::uint8_t {
 };
 
 struct LlNode {
-  // The configuration a position is read under stands in `LlNodeBuild`:
-  // construction reads it, a descent never does.
   LlShape kind{};
   // term: the terminal | call: the nonterminal | seq,alt: the child base |
   // rep: the child.
@@ -41,6 +39,23 @@ struct LlNode {
   // The choice this position is: `alt` picks an arm, `rep` decides each turn.
   // `kNoRow` for everything that decides nothing.
   std::uint16_t decision = kNoRow;
+  // The skip configuration the position is read under: its region, zero for the
+  // grammar's. A rule whose body opens a region has its own interior and the
+  // caller's entry, so this belongs to the position.
+  std::uint8_t cfg = 0;
+  // The section a call opens, its configuration plus one: the descent enters
+  // it reading that grammar alone.
+  std::uint8_t section = 0;
+  // The repetition of the turns of a left recursion.
+  bool leftFold = false;
+  // A normalized fold closes each turn over the already consumed prefix.
+  bool foldStep = false;
+  // A nest over one terminal: the row that terminal carries where the nest
+  // has no receiver to wrap and makes no record, its own and the nest's in one.
+  std::uint16_t leafRow = kNoRow;
+  // A turn of a counted repetition's optional tail, and the sequence that
+  // joins it to the next: the tail is one chain, written out flat.
+  bool countedTail = false;
 
   constexpr bool operator==(const LlNode&) const = default;
 };

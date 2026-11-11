@@ -22,7 +22,6 @@
 #include "cursiv/ll/runtime/LlEpisodeMemo.hpp"
 #include "cursiv/ll/runtime/LlHistory.hpp"
 #include "cursiv/ll/runtime/LlPlan.hpp"
-#include "cursiv/ll/runtime/LlThread.hpp"
 #include "cursiv/ll/runtime/ll_indent.hpp"
 #include "cursiv/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/ll/runtime/ll_read.hpp"
@@ -40,20 +39,6 @@ inline std::uint16_t ll_decided_arm(const std::vector<LlThread>& threads) {
   return threads.front().root;
 }
 
-// The readings as one key: the same readings met twice are one, whatever order
-// they were reached in.
-using LlThreadSetKey =
-    std::vector<std::tuple<std::uint32_t, std::uint64_t, std::uint16_t>>;
-inline void ll_thread_set_key(const LlEpisodeSim& sim,
-                              const std::vector<LlThread>& threads,
-                              LlThreadSetKey& key) {
-  key.clear();
-  for (const LlThread& t : threads)
-    key.emplace_back(t.state, sim.stacks().canon(t.stack), t.root);
-  std::sort(key.begin(), key.end());
-  key.erase(std::unique(key.begin(), key.end()), key.end());
-}
-
 // The arms that cannot win, one bit each: an arm that stands, at every
 // place, with an earlier arm on the same stack reads nothing that one does not.
 // With lexical choices tracked, `best` stays and others go where all stand.
@@ -61,8 +46,16 @@ inline std::uint64_t ll_arms_outread(const LlEpisodeSim& sim,
                                      const std::vector<LlThread>& threads,
                                      bool tracked, std::uint16_t best) {
   if (threads.size() < 2) return 0;
-  thread_local LlThreadSetKey threadKey;
-  ll_thread_set_key(sim, threads, threadKey);
+  // The readings as one set of state, stack and arm, in order.
+  thread_local std::vector<
+      std::tuple<std::uint32_t, std::uint64_t, std::uint16_t>>
+      threadKey;
+  threadKey.clear();
+  for (const LlThread& t : threads)
+    threadKey.emplace_back(t.state, sim.stacks().canon(t.stack), t.root);
+  std::sort(threadKey.begin(), threadKey.end());
+  threadKey.erase(std::unique(threadKey.begin(), threadKey.end()),
+                  threadKey.end());
   const auto place = [](const auto& s) {
     return std::pair{std::get<0>(s), std::get<1>(s)};
   };
@@ -125,29 +118,12 @@ inline void ll_plan_dead_end(const LlHistory& arms, LlHistory::Node common,
       {n.at, n.zeroWidth, static_cast<std::uint16_t>(n.word >> 16), kNoRow});
 }
 
-// The descent follows the plan: it is installed with the ways its refusals
-// below hold on, where it has any.
-template <const auto& T>
-inline LlPlan::Generation ll_plan_install(
-    const LlContext& c, std::vector<LlPlanEntry>& entries,
-    std::vector<LlPlanWay>* ways = nullptr) {
-  return ll_episode_cache<T>().plan.install(entries, ways, c.repaired.count());
-}
-
 // The descent took `arm` at a choice the plan did not answer.
 template <const auto& T>
 inline void ll_plan_went(const LlContext& c, std::uint16_t decision,
                          std::uint16_t arm) {
   auto& active = *ll_episode_session_slot<T>();
   if (active.has_value()) active->plan.went(decision, c.at, c.zeroWidth, arm);
-}
-
-// The decisions the readings have gone by since the plan was installed, added
-// after it; false when another plan has replaced it.
-template <const auto& T>
-inline bool ll_plan_extend(LlPlan::Generation generation,
-                           const std::vector<LlPlanEntry>& path) {
-  return ll_episode_cache<T>().plan.extend(generation, path);
 }
 
 // What the plan of the parse says of a choice where the descent stands.
@@ -181,7 +157,21 @@ class LlEpisode {
         if (!held) walk.reset();
       }
     } release{_walk, _held};
-    return solve(ties);
+    std::uint16_t remembered = kNoRow;
+    // What ties was read for this one run: nothing keys an answer on it.
+    _kept = ties == nullptr ? memo() : nullptr;
+    _conditioned = ties != nullptr;
+    if (_kept != nullptr) _q = question();
+    if (recall(remembered)) return remembered;
+    auto& scratch = ll_scratch<T.termWords>();
+    LlLookRead first;
+    ll_first_read<T>(ctx(), dec(), scratch.viable, scratch.read, &first, ties);
+    touch(first);
+    _firstTerms = scratch.read;
+    _firstTop = first.top;
+    // Only a plain attempt asks to start over, and it starts over tracked.
+    const std::uint16_t arm = attempt(first.different);
+    return arm != kRestart ? arm : attempt(true);
   }
 
   // The episode that stopped where its choice was made, with readings left,
@@ -224,24 +214,6 @@ class LlEpisode {
     if (_held && _heldBy == owner) abandon();
     // What a stopped run read is no later parse's.
     _steps = 0;
-  }
-
-  std::uint16_t solve(const std::vector<std::uint16_t>* ties) {
-    std::uint16_t remembered = kNoRow;
-    // What ties was read for this one run: nothing keys an answer on it.
-    _kept = ties == nullptr ? memo() : nullptr;
-    _conditioned = ties != nullptr;
-    if (_kept != nullptr) _q = question();
-    if (recall(remembered)) return remembered;
-    auto& scratch = ll_scratch<T.termWords>();
-    LlLookRead first;
-    ll_first_read<T>(ctx(), dec(), scratch.viable, scratch.read, &first, ties);
-    touch(first);
-    _firstTerms = scratch.read;
-    _firstTop = first.top;
-    // Only a plain attempt asks to start over, and it starts over tracked.
-    const std::uint16_t arm = attempt(first.different);
-    return arm != kRestart ? arm : attempt(true);
   }
 
   // What the episode has read since it was last asked.
@@ -413,7 +385,7 @@ class LlEpisode {
     const TextOffset first = ctx().la.end - ctx().la.begin;
     return {begin, gap, first,
             ll_remembered_hash(
-                _walk->key,
+                _walk->context,
                 std::string_view(ctx().src + begin, ctx().la.end - begin),
                 first, gap, ctx().la.sym, ctx().section)};
   }
@@ -434,7 +406,7 @@ class LlEpisode {
         _kept->find(_q.hash, room, [&](const LlRemembered& k) {
           return k.term == ctx().la.sym && k.first == _q.first &&
                  k.gap == _q.gap && k.section == ctx().section &&
-                 k.context == _walk->key && k.length <= room &&
+                 k.context == _walk->context && k.length <= room &&
                  (!k.ended || k.length == room) &&
                  std::memcmp(ctx().src + _q.begin, ctx().src + k.from,
                              k.length) == 0;
@@ -443,7 +415,8 @@ class LlEpisode {
     if constexpr (T.ngapConds != 0) _took = true;
     if (row->count != 0) {
       _kept->place(*row, _q.begin, _entries);
-      ll_plan_install<T>(ctx(), _entries);
+      ll_episode_cache<T>().plan.install(_entries, nullptr,
+                                         ctx().repaired.count());
     } else {
       // The arm remembered may leave the way of the refusals below.
       ll_episode_cache<T>().plan.drop_below();
@@ -456,7 +429,7 @@ class LlEpisode {
     if (_kept == nullptr) return;
     if constexpr (T.ngapConds != 0)
       if (refused()) return;
-    LlRemembered row{.context = _walk->key,
+    LlRemembered row{.context = _walk->context,
                      .from = _q.begin,
                      .first = _q.first,
                      .gap = _q.gap,
@@ -606,7 +579,7 @@ class LlEpisode {
     for (std::size_t i = 0; i < path.size() && !named; ++i)
       named = path[i].at == _want.at && path[i].zeroWidth == _want.zeroWidth &&
               path[i].decision == _want.decision;
-    if (!named || !ll_plan_extend<T>(_plan, path)) return kLost;
+    if (!named || !ll_episode_cache<T>().plan.extend(_plan, path)) return kLost;
     _planAt = _common;
     return kHeldOn;
   }
@@ -705,13 +678,13 @@ class LlEpisode {
 
   std::uint16_t done() {
     if (_resumed) {
-      if (!ll_plan_extend<T>(_plan, _entries)) return kLost;
+      if (!ll_episode_cache<T>().plan.extend(_plan, _entries)) return kLost;
     } else {
       remember();
       // The memo keeps the choice asked; the refusals below are the plan's.
       _entries.insert(_entries.end(), _below.begin(), _below.end());
-      _plan = ll_plan_install<T>(ctx(), _entries,
-                                 _below.empty() ? nullptr : &_ways);
+      _plan = ll_episode_cache<T>().plan.install(
+          _entries, _below.empty() ? nullptr : &_ways, ctx().repaired.count());
     }
     return _answer;
   }
@@ -1526,7 +1499,7 @@ class LlEpisode {
         note_death(_stepping, x.begin);
       return;
     }
-    if constexpr (T.ngapConds != 0) _took = true;
+    if constexpr (T.ngapConds != 0) _took = _took || x.begin == ctx().la.begin;
     std::uint32_t zeroWidth = 0;
     if constexpr (kIndented<T>)
       zeroWidth = x.end != x.begin ? 0 : x.zeroWidth + 1;

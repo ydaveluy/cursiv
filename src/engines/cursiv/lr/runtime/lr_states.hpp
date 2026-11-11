@@ -104,31 +104,14 @@ CURSIV_ALWAYS_INLINE inline Token lr_cross_trivia(
 }
 
 // The token at `from` under one alphabet, trivia crossed, unrecorded, by the
-// drive's walk at bracket depth `depth`. `Short` ends the text at `end`;
-// `refused` says the walk died past its match.
-template <const auto& A, bool Short = false>
+// drive's walk at bracket depth `depth`.
+template <const auto& A>
 CURSIV_NOINLINE inline Token lr_scan_at(const LrContext& c, std::uint16_t mode,
-                        TextOffset from, std::uint32_t depth,
-                        bool* refused = nullptr, TextOffset end = 0,
-                        TextOffset* reached = nullptr) {
-  const TextOffset len = Short ? end : c.len;
-  const Token t = lr_cross_trivia<A>(
-      c, mode, from, len, depth,
-      [&](TextOffset p) {
-        if constexpr (Short) {
-          TextOffset halt = p;
-          const Scan s = lr_match_halt<A>(c.src, len, mode, p, halt);
-          if (halt > *reached) *reached = halt;
-          if (refused != nullptr) *refused = halt > s.end;
-          return s;
-        } else {
-          return c.drive->walk(c.src, len, mode, p);
-        }
-      },
+                                        TextOffset from, std::uint32_t depth) {
+  return lr_cross_trivia<A>(
+      c, mode, from, c.len, depth,
+      [&](TextOffset p) { return c.drive->walk(c.src, c.len, mode, p); },
       [](TextOffset, const Token*) { /* the crossed trivia is not wanted */ });
-  if constexpr (Short)
-    if (t.sym == kEofSymbol) *reached = t.begin;
-  return t;
 }
 
 // Whether the lexer, choosing once for every parse at one place, elects `u`
@@ -204,9 +187,21 @@ inline constexpr std::array<ElementId, A.cfg.nterms> kLrTermElem = [] {
   return e;
 }();
 
+// The trivia before the token in hand, recorded.
+template <const auto& A>
+CURSIV_ALWAYS_INLINE inline void lr_record_trivia(LrContext& c) {
+  if constexpr (kTermsRecorded<A.cfg>) {
+    if (!c.pending.empty()) [[unlikely]]
+      lr_record_pending<A.stamp>(c, kLrTermElem<A>.data());
+  }
+}
+
+// The cursor past what the matcher held, its trivia recorded. A shift moves
+// `committed` itself and calls the records alone.
 template <const auto& A>
 inline void lr_flush_trivia(LrContext& c) {
-  lr_flush<kTermsRecorded<A.cfg>, A.stamp>(c, kLrTermElem<A>.data());
+  lr_record_trivia<A>(c);
+  if (c.pendEnd > c.committed) c.committed = c.pendEnd;
 }
 
 template <const auto& A>

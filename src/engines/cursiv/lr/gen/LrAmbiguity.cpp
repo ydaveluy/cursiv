@@ -13,8 +13,8 @@ namespace {
 
 // A production no condition or end assertion has a say in.
 bool plain(const LrBuildCfg& c, std::uint16_t k) {
-  const LrProdBuild& b = c.prodBuild[k];
-  return c.prods[k].gap == 0 && !b.endOnly && b.stop == 0;
+  const LrLowProd& q = c.prods[k];
+  return q.gap == 0 && !q.endOnly && q.stop == 0;
 }
 
 bool spells_only(const LrBuildCfg& c, const LrLowProd& q, std::uint16_t sym) {
@@ -93,7 +93,7 @@ std::vector<LrAmbiguity> lr_find_ambiguities(const LrBuildCfg& c) {
       if (is_term(x) || is_term(y)) continue;
       const std::uint16_t item = runs[nt_index(x)];
       if (item == kNoRow || item != runs[nt_index(y)]) continue;
-      const LrAmbiguity a{c.prodBuild[k].owner, item};
+      const LrAmbiguity a{c.prods[k].owner, item};
       if (std::ranges::find(found, a) == found.end()) found.push_back(a);
     }
   }

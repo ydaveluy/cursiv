@@ -42,8 +42,6 @@ struct TermBuild {
   // The words a body that is a choice of them reads, in the grammar's own
   // text: what an editor offers for a terminal that spells none alone.
   std::vector<std::string_view> words;
-
-  constexpr bool operator==(const TermBuild&) const = default;
 };
 
 struct LowerPools : LowerVerdicts {

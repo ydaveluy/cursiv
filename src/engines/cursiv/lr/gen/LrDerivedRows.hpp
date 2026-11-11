@@ -38,8 +38,6 @@ struct LrDerivedRows {
   std::vector<std::uint8_t> lexBodies{};
   std::vector<std::uint16_t> lexBodyTerms{};
   std::vector<ByteSet> lexOpeners{};
-  SetPool after{};
-  SetPool modeWant{};
 };
 
 }  // namespace cursiv::engine

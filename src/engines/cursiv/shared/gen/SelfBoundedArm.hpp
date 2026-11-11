@@ -3,6 +3,7 @@
 // rule per level says what is meant.
 #pragma once
 
+#include <span>
 #include <string>
 #include <vector>
 
@@ -19,8 +20,9 @@ struct SelfBoundedArm {
   bool operator==(const SelfBoundedArm&) const = default;
 };
 
-// Each arm once per rule, in the order the rules were reached.
-std::vector<SelfBoundedArm> self_bounded_arms(GrammarImage& image);
+// Each arm once per rule of `reached`, in that order.
+std::vector<SelfBoundedArm> self_bounded_arms(
+    GrammarImage& image, std::span<const ImageRuleDesc* const> reached);
 
 std::string self_bounded_arm_text(const SelfBoundedArm& a);
 

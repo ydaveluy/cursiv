@@ -27,11 +27,10 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
 void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
                    const std::vector<unsigned>& pick);
 
-// What makes two reductions one for the states that fuse: their fixed
-// grammar data, not their symbols, nor the configurations their positions
-// were read under, which no reduction reads again.
-void lr_reduce_key(const LrBuildCfg& g, unsigned p,
-                   std::vector<std::uint32_t>& key);
+// Per production, the class of those that are one reduction for the states
+// that fuse, numbered as first met: one by their fixed grammar data, not their
+// symbols, nor the configurations their positions were read under.
+std::vector<std::uint32_t> lr_reduce_classes(const LrBuildCfg& g);
 
 void lr_minimize_states(LrBuildTable& A);
 

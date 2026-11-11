@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "cursiv/lr/gen/LrLowerPool.hpp"
-#include "cursiv/lr/gen/lr_lower_define.hpp"
+#include "cursiv/lr/gen/lr_productions.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
@@ -58,7 +58,7 @@ inline std::uint16_t lr_optional_aux(LrLowered& o, const LrLowerPool& p,
   lr_push_prod(o, p, aux, std::span(&inner, 1));
   const auto absent = lr_push_prod(o, p, aux, {}, {}, s.endAlt);
   lr_close_region(o.cfg, absent, s.trailing);
-  if (s.endAlt && absent != kNoRow) o.cfg.prodBuild[absent].tailCfg = s.cfg;
+  if (s.endAlt && absent != kNoRow) o.cfg.prods[absent].tailCfg = s.cfg;
   s.sym = nt_sym(aux);
   s.optional = false;
   s.endAlt = false;
@@ -69,7 +69,7 @@ inline std::uint16_t lr_optional_aux(LrLowered& o, const LrLowerPool& p,
 // subset is written too: a rule keeps an empty right-hand side where every
 // position may be left out.
 inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
-                            std::vector<LrLowerSlot> slots, const LrActs& node,
+                            std::vector<LrLowerSlot> slots, const Acts& node,
                             std::uint16_t priority = kNoRow) {
   LrBuildCfg& c = o.cfg;
   if (priority == kNoRow) priority = lr_priority_alt(c, lhs);
@@ -135,7 +135,7 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
         if (aux == kNoRow) {
           aux = lr_new_aux(c);
           const auto end = lr_push_prod(o, p, aux, {}, {}, true);
-          if (end != kNoRow) c.prodBuild[end].tailCfg = endCfg;
+          if (end != kNoRow) c.prods[end].tailCfg = endCfg;
         }
         keptSlots[len] = {.sym = nt_sym(aux), .cfg = endCfg};
         ++len;
@@ -163,7 +163,7 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
     const std::uint16_t k = lr_push_prod(
         o, p, lhs, std::span(keptSlots).first(stop != 0 ? 0u : len), node,
         endOnly, 0, priority, static_cast<std::uint16_t>(greedy));
-    if (stop != 0 && k != kNoRow) c.prodBuild[k].stop = stop;
+    if (stop != 0 && k != kNoRow) c.prods[k].stop = stop;
     lr_decide(c, k, arms);
     // A condition takes no position, and the last one reads past the region:
     // a production of nothing else closes it.
@@ -174,7 +174,7 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
                     !bare      ? std::uint8_t{0}
                     : len == 0 ? pendingTrailing
                                : keptSlots[len - 1].trailing);
-    if (endOnly && !asserted && k != kNoRow) c.prodBuild[k].tailCfg = endCfg;
+    if (endOnly && !asserted && k != kNoRow) c.prods[k].tailCfg = endCfg;
   }
 }
 
@@ -237,19 +237,19 @@ inline Descent<std::vector<LrLowerSlot>> lr_slots_for_sequence(
 inline Descent<void> lr_emit_sequence(LrLowered& o, LrLowerPool& p,
                                       std::uint16_t lhs,
                                       std::span<const LrShapeId> children,
-                                      std::uint8_t cfg, const LrActs& made,
-                                      const LrActs& row) {
+                                      std::uint8_t cfg, const Acts& made,
+                                      const Acts& row) {
   const auto priority = lr_priority_alt(o.cfg, lhs);
   const bool turning = p.turning;
   std::vector<LrLowerSlot> slots =
       co_await lr_slots_for_sequence(o, p, children, cfg);
   p.turning = turning;
-  lr_emit_subsets(o, p, lhs, std::move(slots), lr_cat(made, row), priority);
+  lr_emit_subsets(o, p, lhs, std::move(slots), cat(made, row), priority);
 }
 
 inline Descent<void> lr_emit_one(LrLowered& o, LrLowerPool& p,
                                  std::uint16_t lhs, LrShapeId at,
-                                 const LrActs& made, const LrActs& row) {
+                                 const Acts& made, const Acts& row) {
   if (const LrLowerNode& e = p.e[at]; e.kind == LrShape::seq) {
     co_await lr_emit_sequence(o, p, lhs,
                               std::span(p.child).subspan(e.sym, e.count), e.cfg,
@@ -258,15 +258,15 @@ inline Descent<void> lr_emit_one(LrLowered& o, LrLowerPool& p,
   }
   // `made` and `row` are already the production's chain.
   const auto priority = lr_priority_alt(o.cfg, lhs);
-  std::vector slots{co_await lr_slot_for(o, p, at, LrActs{}, LrActs{})};
-  lr_emit_subsets(o, p, lhs, std::move(slots), lr_cat(made, row), priority);
+  std::vector slots{co_await lr_slot_for(o, p, at, Acts{}, Acts{})};
+  lr_emit_subsets(o, p, lhs, std::move(slots), cat(made, row), priority);
 }
 
 // Each item of an unordered group once, in any order; an optional item stands
 // in its present form, and the group may end where only such items are left.
 inline Descent<void> lr_emit_unordered(LrLowered& o, LrLowerPool& p,
                                        std::uint16_t lhs, LrShapeId at,
-                                       const LrActs& made, const LrActs& row) {
+                                       const Acts& made, const Acts& row) {
   const LrLowerNode& e = p.e[at];
   const std::size_t n = e.count;
   const std::vector<LrShapeId> children(p.child.begin() + e.sym,
@@ -278,15 +278,12 @@ inline Descent<void> lr_emit_unordered(LrLowered& o, LrLowerPool& p,
   const auto too_wide = [&] {
     lower_refuse_rule(o.cfg, LowerFail::unorderedTooWide, p.owner);
   };
-  bool turns = false;
-  for (const LrShapeId k : children)
-    if (!turns) turns = co_await p.holds_turn(k);
-  if (n > unordered_most(turns)) {
+  if (n > unordered_most(e.unorderedTurns)) {
     too_wide();
     co_return;
   }
   // A nest depends on the preceding positions, so its orders stay whole.
-  if (turns) {
+  if (e.unorderedTurns) {
     std::uint64_t count = 1;
     for (std::size_t i = 2; i <= n; ++i) {
       if (count > (0xffffu - o.cfg.nprods) / i) {
@@ -307,7 +304,7 @@ inline Descent<void> lr_emit_unordered(LrLowered& o, LrLowerPool& p,
       co_await lr_emit_sequence(o, p, lhs, positions, e.cfg, made, row);
       if (o.cfg.lowerFail()) co_return;
       for (std::uint16_t k = before; k < o.cfg.nprods; ++k)
-        if (o.cfg.prods[k].lhs == lhs) o.cfg.prodBuild[k].permuted = true;
+        if (o.cfg.prods[k].lhs == lhs) o.cfg.prods[k].permuted = true;
     } while (std::ranges::next_permutation(order).found);
     co_return;
   }
@@ -351,8 +348,8 @@ inline Descent<void> lr_emit_unordered(LrLowered& o, LrLowerPool& p,
     if (states[mask] == kNoRow) continue;
     const auto push = [&](std::span<const LrLowerSlot> slots) {
       const auto k = lr_push_prod(o, p, states[mask], slots,
-                                  mask == full ? lr_cat(made, row) : LrActs{});
-      if (k != kNoRow) o.cfg.prodBuild[k].permuted = true;
+                                  mask == full ? cat(made, row) : Acts{});
+      if (k != kNoRow) o.cfg.prods[k].permuted = true;
       return k;
     };
     for (std::size_t i = 0; i < n; ++i) {
@@ -380,19 +377,19 @@ inline Descent<void> lr_emit_unordered(LrLowered& o, LrLowerPool& p,
 // `made` and `row` are the actions standing over `at`, already resolved.
 inline Descent<void> lr_emit_alts(LrLowered& o, LrLowerPool& p,
                                   std::uint16_t lhs, LrShapeId at,
-                                  const LrActs& made, const LrActs& row) {
+                                  const Acts& made, const Acts& row) {
   const LrLowerNode& e = p.e[at];
   if (e.kind == LrShape::alt)
     for (unsigned i = 0; i < e.count; ++i) {
       const LrShapeId k = p.child[e.sym + i];
       // A directive over a choice distributes over its alternatives.
-      co_await lr_emit_alts(o, p, lhs, k, lr_cat(p.e[k].made, made),
-                            lr_cat(p.e[k].row, row));
+      co_await lr_emit_alts(o, p, lhs, k, cat(p.e[k].made, made),
+                            cat(p.e[k].row, row));
     }
   else if (p.passClose != kNoRow && e.kind == LrShape::sym &&
            !is_term(static_cast<std::uint16_t>(e.sym)) && made.size() == 1 &&
            made.front() == p.passClose && row.empty())
-    co_await lr_emit_one(o, p, lhs, at, LrActs{}, row);
+    co_await lr_emit_one(o, p, lhs, at, Acts{}, row);
   else
     co_await lr_emit_one(o, p, lhs, at, made, row);
 }

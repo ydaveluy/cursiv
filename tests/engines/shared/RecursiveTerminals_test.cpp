@@ -404,6 +404,12 @@ struct Graph {
   }
 };
 
+void fold(Graph& g) {
+  const auto empty = cursiv::engine::lex_empty_nodes(g);
+  const auto productive = cursiv::engine::lex_empty_nodes(g, true);
+  cursiv::engine::LexRightLinear<Graph>{g, empty, productive}.run();
+}
+
 using Endpoints = std::set<unsigned>;
 
 class Oracle {
@@ -535,7 +541,7 @@ void endpoint_differential() {
          {Form::optional, Form::base_first, Form::recursive_first}) {
       auto before = grammar(shape, form), after = before;
       const auto root = before.termBuild[1].lex;
-      cursiv::engine::LexRightLinear<Graph>{after}.run();
+      fold(after);
       CHECK(after.lex[root].kind == LexKind::call);
       CHECK(after.lex[root].b == kNoLexNode);
       const auto closure = after.lex[after.lex[root].a];
@@ -544,7 +550,7 @@ void endpoint_differential() {
       CHECK(before.lexChild == after.lexChild);
       const auto once = after.lex;
       const auto count = after.nlex;
-      cursiv::engine::LexRightLinear<Graph>{after}.run();
+      fold(after);
       CHECK(after.nlex == count && after.lex == once);
       for (unsigned n = 0; n <= 8; ++n)
         for (unsigned bits = 0; bits < (1u << n); ++bits) {
@@ -559,7 +565,7 @@ void endpoint_differential() {
       const auto caller =
           before.list(LexKind::seq, {call, before.character('a')});
       auto called = before;
-      cursiv::engine::LexRightLinear<Graph>{called}.run();
+      fold(called);
       CHECK(called.lex[call].kind == LexKind::call);
       for (unsigned n = 0; n < 9; ++n) {
         const std::string text(n, 'a');
@@ -582,7 +588,7 @@ void excluded_shapes() {
     const auto root = g.termBuild[1].lex;
     g.lex[g.lexChild[g.lex[root].a]].kind = kind;
     const auto old = g.lex;
-    cursiv::engine::LexRightLinear<Graph>{g}.run();
+    fold(g);
     CHECK(g.lex == old);
   }
   {
@@ -590,7 +596,7 @@ void excluded_shapes() {
     const auto root = g.termBuild[1].lex;
     g.lex[g.lexChild[g.lex[root].a]] = LexNode{LexKind::seq, 0, 0};
     const auto old = g.lex;
-    cursiv::engine::LexRightLinear<Graph>{g}.run();
+    fold(g);
     CHECK(g.lex == old);  // E itself is nullable
   }
   {
@@ -598,14 +604,14 @@ void excluded_shapes() {
     const auto root = g.termBuild[1].lex;
     g.lexChild[g.lex[root].a] = g.repeat(g.list(LexKind::seq, {}), 0, kEndless);
     const auto old = g.lex;
-    cursiv::engine::LexRightLinear<Graph>{g}.run();
+    fold(g);
     CHECK(g.lex == old);  // nullable repetition must keep its refusal
   }
   {
     auto g = grammar(Prefix::single, Form::optional);
     g.sets[0] = {};
     const auto old = g.lex;
-    cursiv::engine::LexRightLinear<Graph>{g}.run();
+    fold(g);
     CHECK(g.lex == old);  // unproductive E
   }
 }
@@ -617,7 +623,7 @@ void shared_roots_and_limits() {
     g.termBuild[2].lex = root;
     g.nterms = 3;
     const auto count = g.nlex;
-    cursiv::engine::LexRightLinear<Graph>{g}.run();
+    fold(g);
     CHECK(g.termBuild[1].lex == root && g.termBuild[2].lex == root);
     CHECK(g.lex[root].kind == LexKind::call && g.lex[root].b == kNoLexNode);
     CHECK(g.nlex == count + 2);
@@ -631,7 +637,7 @@ void shared_roots_and_limits() {
       const auto count = g.nlex;
       const auto old = g.lex;
       const unsigned needed = shape == Prefix::single ? 1 : 2;
-      cursiv::engine::LexRightLinear<Graph>{g}.run();
+      fold(g);
       if (spare < needed) {
         CHECK(g.nlex == count && g.lex == old);
       } else {

@@ -29,9 +29,9 @@
 #include "cursiv/lr/gen/lr_build_elect.hpp"
 #include "cursiv/lr/gen/lr_build_fold.hpp"
 #include "cursiv/lr/gen/lr_build_passes.hpp"
+#include "cursiv/lr/gen/lr_completion_sites.hpp"
 #include "cursiv/lr/gen/lr_emit_parser.hpp"
 #include "cursiv/lr/gen/lr_emit_table.hpp"
-#include "cursiv/lr/gen/lr_entry_rows.hpp"
 #include "cursiv/lr/gen/lr_intern_name.hpp"
 #include "cursiv/lr/gen/lr_lower_epsilon.hpp"
 #include "cursiv/lr/gen/lr_lower_passes.hpp"
@@ -40,8 +40,8 @@
 #include "cursiv/lr/table/LrProgramRows.hpp"
 #include "cursiv/shared/gen/LexRelayGen.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/shared/gen/SetPool.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
-#include "cursiv/shared/gen/set_dedup.hpp"
 #include "cursiv/shared/gen/stamp_split.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
@@ -58,20 +58,10 @@ namespace {
 // A production of `lhs` over `syms`, added at the end of the build's rows.
 void add_production(cursiv::engine::LrBuildCfg& g, std::uint16_t lhs,
                     const std::vector<std::uint16_t>& syms) {
-  const auto p = g.nprods++;
-  g.prods[p] = cursiv::engine::LrLowProd{};
-  g.prods[p].lhs = lhs;
-  g.prods[p].at = g.nslots;
-  g.prods[p].len = static_cast<std::uint16_t>(syms.size());
-  g.prods[p].node = cursiv::engine::kNoRow;
-  g.prodBuild[p] = cursiv::engine::LrProdBuild{};
-  g.prodBuild[p].owner = cursiv::engine::kNoRow;
-  for (const std::uint16_t x : syms) {
-    g.slots[g.nslots] = cursiv::engine::LrLowSlot{};
-    g.slots[g.nslots].row = cursiv::engine::kNoRow;
-    g.slotCfg[g.nslots] = 0;
-    g.slotSym[g.nslots++] = x;
-  }
+  g.prods[g.nprods++] = {.lhs = lhs,
+                         .at = g.nslots,
+                         .len = static_cast<std::uint16_t>(syms.size())};
+  for (const std::uint16_t x : syms) g.slots[g.nslots++] = {.sym = x};
 }
 
 }  // namespace
@@ -85,14 +75,13 @@ void stable_set_classes() {
   using namespace cursiv::engine;
   const auto check = [](const std::vector<DynSet>& rows) {
     std::map<std::vector<std::uint64_t>, unsigned> classes;
-    std::vector<std::uint16_t> expected, actual(rows.size());
+    std::vector<std::uint16_t> expected;
     for (const auto& row : rows)
       expected.push_back(static_cast<std::uint16_t>(
           classes.try_emplace(row.w, classes.size()).first->second));
-    const auto n = static_cast<unsigned>(rows.size());
-    CHECK(set_dedup(rows.data(), n, actual.data()) == classes.size());
-    CHECK(actual == expected);
-    CHECK(set_dedup(rows.data(), n, nullptr) == classes.size());
+    const SetPool pool(rows.data(), static_cast<unsigned>(rows.size()));
+    CHECK(pool.sets.size() == classes.size());
+    CHECK(pool.of == expected);
   };
   check({});
   check(std::vector<DynSet>(100));
@@ -456,6 +445,7 @@ void blocks_share_values_without_changing_columns() {
       {0, 30, 30, 40, 0, 0, 0, 0, 1, 2, 3},
       {0, 10, 10, 20, 0, 0, 0, 0, 1, 2, 3}};
   for (const auto& row : rows) m.append(row, 0);
+  m.finish();
   CHECK(m.rows[0] == m.rows[2] && m.rows[0] != m.rows[1]);
   CHECK(m.blocks.size() == 4 && m.blocks[1] == m.blocks[3]);
   const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> view{
@@ -467,14 +457,6 @@ void blocks_share_values_without_changing_columns() {
     CHECK(view.get(state, 0xffffu) == 0);
   }
   CHECK(m.index_bits() == 8 && m.value_bits() == 8);
-  // Two distinct rows of eleven values: shared rows of values are smallest.
-  m.finish();
-  CHECK(m.blocks.empty() && m.rows == std::vector<std::uint32_t>{0, 11, 0});
-  const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> packed{
-      m.rows, m.blocks, m.values, 11, 0};
-  for (unsigned state = 0; state < rows.size(); ++state)
-    for (unsigned col = 0; col < rows[state].size(); ++col)
-      CHECK(packed.get(state, col) == rows[state][col]);
 
   LrProgramMatrix wide;
   for (unsigned i = 0; i < 65537; ++i) {
@@ -483,9 +465,6 @@ void blocks_share_values_without_changing_columns() {
     CHECK(wide.index_bits() == (i < 256 ? 8u : i < 65536 ? 16u : 32u));
   }
   CHECK(wide.value_bits() == 64);
-  // Every row distinct, one value wide: the values alone are smallest.
-  wide.finish();
-  CHECK(wide.rows.empty() && wide.blocks.empty());
   const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> wideView{
       wide.rows, wide.blocks, wide.values, 1, 0};
   CHECK(wideView.get(65536, 0) == (std::uint64_t{1} << 40) + 65536);
@@ -944,7 +923,7 @@ void long_optional_bodies_stay_linear() {
       }
       if (low.cfg.prods[p].lhs == 1) {
         CHECK(low.cfg.prods[p].len <= count);
-        CHECK(low.cfg.prodBuild[p].priorityAlt == 42);
+        CHECK(low.cfg.prods[p].priorityAlt == 42);
       }
     }
     for (unsigned t = 1; t <= count; ++t) CHECK(present[t]);
@@ -1090,18 +1069,16 @@ void auxiliary_self_markers_are_outside_the_symbol_domain() {
   for (std::uint16_t p = 0; p < 3; ++p) {
     cfg.prods[p] = {
         .lhs = static_cast<std::uint16_t>(kNtBase - 3 + p), .at = p, .len = 1};
-    cfg.prodBuild[p] = {};
     cfg.slots[p] = {};
-    cfg.slotCfg[p] = 0;
   }
   // The last legal symbol (0xffff) is a call in A, a self reference in B.
-  cfg.slotSym[0] = nt_sym(kNtBase - 1);
-  cfg.slotSym[1] = nt_sym(kNtBase - 2);
-  cfg.slotSym[2] = 1;
+  cfg.slots[0].sym = nt_sym(kNtBase - 1);
+  cfg.slots[1].sym = nt_sym(kNtBase - 2);
+  cfg.slots[2].sym = 1;
   lr_intern_aux(cfg);
   CHECK(cfg.nprods == 3);
-  CHECK(cfg.slotSym[0] == nt_sym(kNtBase - 1));
-  CHECK(cfg.slotSym[1] == nt_sym(kNtBase - 2));
+  CHECK(cfg.slots[0].sym == nt_sym(kNtBase - 1));
+  CHECK(cfg.slots[1].sym == nt_sym(kNtBase - 2));
 }
 
 void first_sets_include_the_last_nonterminal() {
@@ -1110,12 +1087,11 @@ void first_sets_include_the_last_nonterminal() {
   cfg.nterms = 2;
   cfg.nprods = 2;
   cfg.nslots = 2;
-  cfg.prodBuild.row(0, cfg.nprods);
   const auto last = static_cast<std::uint16_t>(kNtBase - 1);
   cfg.prods[0] = {.lhs = 0, .at = 0, .len = 1};
   cfg.prods[1] = {.lhs = last, .at = 1, .len = 1};
-  cfg.slotSym[0] = nt_sym(last);
-  cfg.slotSym[1] = 1;
+  cfg.slots[0].sym = nt_sym(last);
+  cfg.slots[1].sym = 1;
   const auto fs = lr_first_sets(cfg);
   CHECK(fs.first[0].test(1));
   CHECK(fs.first[last].test(1));
@@ -1142,7 +1118,7 @@ std::vector<DynSet> first_by_passes(const LrBuildCfg& g,
         if (!nullable[nt_index(sym)]) break;
       }
       if constexpr (!Last)
-        if (i == q.len && g.prodBuild[p].endOnly) into.set(kEofSymbol);
+        if (i == q.len && g.prods[p].endOnly) into.set(kEofSymbol);
       changed = !(into == first[q.lhs]) || changed;
       first[q.lhs] = std::move(into);
     }
@@ -1160,7 +1136,7 @@ std::vector<DynSet> follow_by_passes(const LrBuildCfg& g,
     for (unsigned p = 0; p < g.nprods; ++p) {
       const auto& q = g.prods[p];
       DynSet suffix;
-      if (g.prodBuild[p].endOnly)
+      if (g.prods[p].endOnly)
         suffix.set(kEofSymbol);
       else
         suffix = follow[q.lhs];
@@ -1189,7 +1165,7 @@ std::vector<std::uint8_t> nullable_by_passes(const LrBuildCfg& g,
     changed = false;
     for (unsigned p = 0; p < g.nprods; ++p) {
       const auto& q = g.prods[p];
-      if (nullable[q.lhs] != 0 || (beforeToken && g.prodBuild[p].endOnly))
+      if (nullable[q.lhs] != 0 || (beforeToken && g.prods[p].endOnly))
         continue;
       bool empty = true;
       for (unsigned i = 0; i < q.len && empty; ++i) {
@@ -1216,15 +1192,14 @@ void first_and_follow_agree_with_the_passes() {
     cfg.nnts = 1 + below(8);
     cfg.nterms = 2 + below(5);
     cfg.nprods = 1 + below(16);
-    cfg.prodBuild.row(0, cfg.nprods);
     for (unsigned p = 0; p < cfg.nprods; ++p) {
       const auto len = static_cast<std::uint16_t>(below(5));
       cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(below(cfg.nnts)),
                       .at = cfg.nslots,
                       .len = len};
-      cfg.prodBuild[p].endOnly = below(8) == 0;
+      cfg.prods[p].endOnly = below(8) == 0;
       for (unsigned i = 0; i < len; ++i)
-        cfg.slotSym[cfg.nslots++] =
+        cfg.slots[cfg.nslots++].sym =
             below(2) == 0 ? nt_sym(static_cast<std::uint16_t>(below(cfg.nnts)))
                           : static_cast<std::uint16_t>(1 + below(cfg.nterms - 1));
     }
@@ -1248,11 +1223,10 @@ void first_and_follow_stay_linear_on_a_chain() {
     cfg.nterms = 2;
     cfg.nprods = kNtBase;
     cfg.nslots = kNtBase;
-    cfg.prodBuild.row(0, cfg.nprods);
     for (unsigned n = 0; n < kNtBase; ++n) {
       const auto p = static_cast<std::uint16_t>(ascending ? n : kNtBase - 1u - n);
       cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(n), .at = p, .len = 1};
-      cfg.slotSym[p] = n + 1 == kNtBase
+      cfg.slots[p].sym = n + 1 == kNtBase
                            ? std::uint16_t{1}
                            : nt_sym(static_cast<std::uint16_t>(n + 1));
     }
@@ -1273,12 +1247,11 @@ void nullable_stays_linear_on_a_chain() {
   cfg.nterms = 2;
   cfg.nprods = kNtBase;
   cfg.nslots = kNtBase - 1;
-  cfg.prodBuild.row(0, cfg.nprods);
   for (unsigned n = 0; n < kNtBase; ++n) {
     const auto p = static_cast<std::uint16_t>(n);
     const bool last = n + 1 == kNtBase;
     cfg.prods[p] = {.lhs = p, .at = p, .len = static_cast<std::uint16_t>(last ? 0 : 1)};
-    if (!last) cfg.slotSym[p] = nt_sym(static_cast<std::uint16_t>(n + 1));
+    if (!last) cfg.slots[p].sym = nt_sym(static_cast<std::uint16_t>(n + 1));
   }
   const auto begin = std::chrono::steady_clock::now();
   const auto nullable = lr_nullable(cfg, true);
@@ -1294,14 +1267,14 @@ void unit_cycle_checks_use_bounded_stack_space() {
   cfg.nslots = kNtBase;
   for (std::uint16_t p = 0; p < kNtBase; ++p) {
     cfg.prods[p] = {.lhs = p, .at = p, .len = 1};
-    cfg.slotSym[p] = p + 1 == kNtBase ? 1 : nt_sym(p + 1);
+    cfg.slots[p].sym = p + 1 == kNtBase ? 1 : nt_sym(p + 1);
   }
   const std::vector<std::uint8_t> empty(kNtBase, 0);
   lr_no_rule_without_production(low);
   CHECK(!low.fault);
   lr_no_unit_cycle(low, empty);
   CHECK(!low.fault);
-  cfg.slotSym[kNtBase - 1] = nt_sym(1);
+  cfg.slots[kNtBase - 1].sym = nt_sym(1);
   lr_no_unit_cycle(low, empty);
   CHECK(low.fault.code == GrammarFaultCode::unitProductionCycle);
   CHECK(low.fault.rule != 0);  // The augmented start is outside the cycle.
@@ -1314,7 +1287,7 @@ void left_recursion_splitting_uses_bounded_stack_space() {
   cfg.nnts = length + 1;
   cfg.nprods = length + 2;
   cfg.prods[0] = {.lhs = 0, .at = 0, .len = 1};
-  cfg.slotSym[0] = nt_sym(1);
+  cfg.slots[0].sym = nt_sym(1);
   cfg.leftLoop[0] = kNoRow;
   // Every turn consumes x; A1 also has a finite base. The cycle is legal
   // left recursion, not a non-consuming unit cycle.
@@ -1322,11 +1295,11 @@ void left_recursion_splitting_uses_bounded_stack_space() {
     cfg.leftLoop[i] = 0;
     cfg.prods[i] = {.lhs = static_cast<std::uint16_t>(i),
                      .at = 2u * i - 1u, .len = 2};
-    cfg.slotSym[2u * i - 1u] = nt_sym(i == length ? 1u : i + 1u);
-    cfg.slotSym[2u * i] = 1;
+    cfg.slots[2u * i - 1u].sym = nt_sym(i == length ? 1u : i + 1u);
+    cfg.slots[2u * i].sym = 1;
   }
   cfg.prods[length + 1u] = {.lhs = 1, .at = 2u * length + 1u, .len = 1};
-  cfg.slotSym[2u * length + 1u] = 1;
+  cfg.slots[2u * length + 1u].sym = 1;
   lr_split_loops(low);
   CHECK(cfg.nnts == length + 1u && cfg.nprods == length + 2u);
   for (unsigned i = 1; i <= length; ++i)
@@ -1339,7 +1312,6 @@ void left_recursion_splitting_restores_each_siblings_path() {
   cfg.nnts = 4;
   cfg.nprods = 7;
   cfg.nts.row(0, cfg.nnts);
-  cfg.prodBuild.row(0, cfg.nprods);
   const std::vector<std::vector<std::uint16_t>> bodies{
       {nt_sym(1), nt_sym(2)}, {nt_sym(2), 1}, {nt_sym(3), 2},
       {3}, {nt_sym(3), 4}, {nt_sym(1), 5}, {nt_sym(1), 6}};
@@ -1348,11 +1320,8 @@ void left_recursion_splitting_restores_each_siblings_path() {
     cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(lhs[p]),
                      .at = cfg.nslots,
                      .len = static_cast<std::uint16_t>(bodies[p].size())};
-    for (const auto sym : bodies[p]) {
-      cfg.slotSym[cfg.nslots] = sym;
-      cfg.slots[cfg.nslots] = {};
-      cfg.slotCfg[cfg.nslots++] = 0;
-    }
+    for (const auto sym : bodies[p])
+      cfg.slots[cfg.nslots++] = {.sym = sym};
   }
   cfg.leftLoop.v = {kNoRow, 0, 0, 0};
   lr_split_loops(low);
@@ -1374,12 +1343,8 @@ LrBuildTable election_aliases(unsigned length) {
     cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(p),
                      .at = cfg.nslots,
                      .len = static_cast<std::uint16_t>(body.size())};
-    cfg.prodBuild[p] = {};
-    for (const auto sym : body) {
-      cfg.slotSym[cfg.nslots] = sym;
-      cfg.slots[cfg.nslots] = {};
-      cfg.slotCfg[cfg.nslots++] = 0;
-    }
+    for (const auto sym : body)
+      cfg.slots[cfg.nslots++] = {.sym = sym};
   };
   add_production(0,
                  {nt_sym(1), nt_sym(static_cast<std::uint16_t>(length + 1u))});
@@ -1460,12 +1425,8 @@ void alias_diamonds_keep_the_first_alternative_run() {
       cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(lhs[p]),
                       .at = cfg.nslots,
                       .len = static_cast<std::uint16_t>(bodies[p].size())};
-      cfg.prodBuild[p] = {};
-      for (const auto sym : bodies[p]) {
-        cfg.slotSym[cfg.nslots] = sym;
-        cfg.slots[cfg.nslots] = {};
-        cfg.slotCfg[cfg.nslots++] = 0;
-      }
+      for (const auto sym : bodies[p])
+        cfg.slots[cfg.nslots++] = {.sym = sym};
       if (std::ranges::find(spelling, p) != spelling.end()) {
         a.electWord.insert(a.electWord.end(), {10u * p + 1u, 10u * p + 2u});
         a.electPos.insert(a.electPos.end(), {0, 1});
@@ -1507,18 +1468,14 @@ void twins_share_one_list() {
   for (unsigned p = 0; p < kTwins; ++p) {
     // `0: (p + 1) (kTwins + 1)`, the same but for its own decision.
     cfg.prods[p] = {.lhs = 0, .at = cfg.nslots, .len = 2};
-    cfg.prodBuild[p] = {};
-    for (const unsigned nt : {p + 1u, kTwins + 1u}) {
-      cfg.slotSym[cfg.nslots] = nt_sym(static_cast<std::uint16_t>(nt));
-      cfg.slots[cfg.nslots] = {};
-      cfg.slotCfg[cfg.nslots++] = 0;
-    }
+    for (const unsigned nt : {p + 1u, kTwins + 1u})
+      cfg.slots[cfg.nslots++] = {.sym = nt_sym(static_cast<std::uint16_t>(nt))};
     a.electWord.push_back(100u + p);
     a.electPos.push_back(0);
     a.electAt.push_back(static_cast<std::uint32_t>(a.electWord.size()));
   }
   lr_elect_runs(a);
-  CHECK(a.sizes().electTwins <= kTwins);
+  CHECK(a.electTwinFirst.size() <= kTwins);
   for (unsigned p = 0; p < kTwins; ++p) {
     unsigned n = 0;
     for (auto q = a.electTwinFirst[p]; q != kLrNoTwin; q = a.electTwinNext[q])
@@ -1630,16 +1587,13 @@ void precomposition_keeps_bare_records_through_renames() {
     g.nterms = 3;
     a.writes.nchains = 4;
     g.prods.row(0, 4);
-    g.prodBuild.row(0, 4);
     g.slots.row(0, 4);
-    g.slotSym.row(0, 4);
-    g.slotCfg.row(0, 4);
     g.terms.row(0, 3);
     g.terms[1].element = kNoRow;
     g.terms[2].element = wrappedLeaf ? 2 : 1;
     for (unsigned p = 0; p < 4; ++p) g.prods[p] = {.lhs = 0, .at = p, .len = 1};
-    g.slotSym[0] = 1;
-    g.slotSym[1] = 2;
+    g.slots[0].sym = 1;
+    g.slots[1].sym = 2;
     if (wrappedLeaf) {
       g.prods[0].node = 3;
       g.slots[0].row = 2;
@@ -1649,9 +1603,9 @@ void precomposition_keeps_bare_records_through_renames() {
       g.prods[2].lhs = 1;
       g.slots[2].row = 2;
     }
-    g.slotSym[2] = nt_sym(0);
+    g.slots[2].sym = nt_sym(0);
     g.prods[3].lhs = 2;
-    g.slotSym[3] = nt_sym(wrappedLeaf ? 0 : 1);
+    g.slots[3].sym = nt_sym(wrappedLeaf ? 0 : 1);
     g.slots[3].row = 1;
     CHECK(lr_fold_chains(a));
     LrDerivedRows plans;
@@ -1674,7 +1628,7 @@ void precomposition_keeps_bare_records_through_renames() {
         for (unsigned prod = wrappedLeaf ? 3 : 2; prod < 4; ++prod) {
           const auto& n = plans.reduceNames[plans.reductions[prod].names];
           if (planned && !n.fold)
-            lr_name_row_at(c, frame, n.row);
+            lr_name_row_at(c, frame, n.row, n.leaf);
           else
             lr_name_row(c, frame, g.slots[prod].row, folds);
         }
@@ -1693,10 +1647,7 @@ void substituted_reductions_keep_the_returned_row() {
   g.nterms = 3;
   a.writes.nchains = 4;
   g.prods.row(0, 4);
-  g.prodBuild.row(0, 4);
   g.slots.row(0, 4);
-  g.slotSym.row(0, 4);
-  g.slotCfg.row(0, 4);
   g.terms.row(0, 3);
   g.terms[1].element = 1;
   g.terms[2].element = 2;
@@ -1704,15 +1655,13 @@ void substituted_reductions_keep_the_returned_row() {
   g.prods[1] = {.lhs = 1, .at = 1, .len = 1};
   g.prods[2] = {.lhs = 2, .at = 2, .len = 1};
   g.prods[3] = {.lhs = 2, .at = 3, .len = 1};
-  g.slotSym[0] = 1;
-  g.slotSym[1] = 2;
-  g.slotSym[2] = nt_sym(0);
-  g.slotSym[3] = nt_sym(1);
+  g.slots[0].sym = 1;
+  g.slots[1].sym = 2;
+  g.slots[2].sym = nt_sym(0);
+  g.slots[3].sym = nt_sym(1);
   g.slots[2].row = g.slots[3].row = 3;
-  std::vector<std::uint32_t> objectKey, arrayKey;
-  lr_reduce_key(g, 2, objectKey);
-  lr_reduce_key(g, 3, arrayKey);
-  CHECK(objectKey == arrayKey);
+  const std::vector<std::uint32_t> classOf = lr_reduce_classes(g);
+  CHECK(classOf[2] == classOf[3]);
   CHECK(lr_fold_chains(a));
   LrDerivedRows plans;
   lr_derive_reductions(a, plans);
@@ -1731,7 +1680,7 @@ void substituted_reductions_keep_the_returned_row() {
       LrFrame frame{0, held, 0, 0, 0};
       const auto& n = plans.reduceNames[plans.reductions[2].names];
       if (planned && !n.fold)
-        lr_name_row_at(c, frame, n.row);
+        lr_name_row_at(c, frame, n.row, n.leaf);
       else
         lr_name_row(c, frame, 3, folds);
       return c.tape.at(0).engine;
@@ -1740,9 +1689,7 @@ void substituted_reductions_keep_the_returned_row() {
   }
   for (unsigned p = 0; p < g.nprods; ++p)
     for (unsigned q = 0; q < g.nprods; ++q) {
-      lr_reduce_key(g, p, objectKey);
-      lr_reduce_key(g, q, arrayKey);
-      if (objectKey != arrayKey) continue;
+      if (classOf[p] != classOf[q]) continue;
       const auto& x = plans.reductions[p];
       const auto& y = plans.reductions[q];
       CHECK(x.count == y.count);

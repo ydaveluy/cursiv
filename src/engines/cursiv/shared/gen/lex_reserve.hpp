@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <vector>
 
-#include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
@@ -101,9 +100,8 @@ LexReserved lex_reserve(const Cfg& g, const View& v, std::size_t ndfa,
     out.standing[s] = words.intersects(open);
     bool readers = false;
     if (s < pending.size())
-      each_bit(pending[s].w.data(), pending[s].w.size(), [&](std::size_t t) {
+      for (const unsigned t : pending[s].members())
         readers = readers || t == 0 || t >= g.nterms || !g.terms[t].trivia;
-      });
     if (!reserving && !readers) continue;
     const DynSet& acc = accepted(s);
     for (const unsigned u : acc.members()) {

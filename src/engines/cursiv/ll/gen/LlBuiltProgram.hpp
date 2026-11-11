@@ -44,12 +44,14 @@ struct LlBuiltProgram : ShapeOverflow {
   std::vector<std::uint32_t> callerAt{};
   std::vector<std::uint32_t> returnClass{};
 
-  // Per position, then per rule: what may begin here and what may follow; and
-  // per position, whether it can read nothing.
+  // Per position, then per rule from `cfg.nnodes` on: what may begin here,
+  // whether it can read nothing, and the conditions no cut decides that stand
+  // at its head.
   std::vector<DynSet> first{};
-  std::vector<DynSet> after{};
   std::vector<std::uint8_t> nullable{};
-  std::vector<DynSet> ruleFirst{};
+  std::vector<DynSet> lead{};
+  // What may follow a position, and a rule.
+  std::vector<DynSet> after{};
   std::vector<DynSet> ruleFollow{};
   // What a position may begin with, plus what follows it when it can read
   // nothing.
@@ -141,14 +143,13 @@ struct LlBuiltProgram : ShapeOverflow {
   // over it: what fills the node is not what writes it into the region above.
   // `kNoRow` for a chain nobody joined.
   std::vector<LlFuse> origin{};
-  // The state a call returns into, per call position of the program.
-  std::vector<std::uint32_t> nodeFollow{};
   // The position each atom edge of the graph belongs to, so a caret can say
   // which element would consume the token it offers.
   std::vector<std::uint16_t> edgeNode{};
   // The call position returning into each state, absent for synthetic calls.
   std::vector<std::uint16_t> returnNode{};
-  // The state the graph stands in once each position is read.
+  // The state the graph stands in once each position is read: the one a call
+  // returns into.
   std::vector<std::uint32_t> nodeAfter{};
   // Whether a position can be the first its rule's invocation reads.
   std::vector<std::uint8_t> nodeHead{};
@@ -162,7 +163,6 @@ struct LlBuiltProgram : ShapeOverflow {
   // entry gap before delegating that decision to its callee.
   std::vector<std::uint8_t> callerPeek{};
   std::vector<std::uint8_t> readHeadCfg{};
-  std::vector<std::uint8_t> climbCfg{};
   // The configuration the gap after a term is read under, where every reading
   // that may follow agrees, and the alphabet that reads it.
   std::vector<std::uint16_t> afterCfg{};

@@ -8,7 +8,6 @@
 
 #include "cursiv/lr/table/LrBitSet.hpp"
 #include "cursiv/lr/table/LrLowCfg.hpp"
-#include "cursiv/lr/table/LrLowSizes.hpp"
 #include "cursiv/lr/table/LrSetStore.hpp"
 #include "cursiv/lr/table/LrSizes.hpp"
 #include "cursiv/lr/table/LrTableFacts.hpp"
@@ -17,11 +16,11 @@
 
 namespace cursiv::engine {
 
-template <LrSizes S, LrLowSizes C, const auto& Cold, const auto& Derived>
+template <LrSizes S, const auto& Cold, const auto& Derived>
 struct LrFrozenTable : LrTableFacts {
   using TermSet = LrBitSet<S.termBits()>;
 
-  LrLowCfg<C> cfg{};
+  LrLowCfg<S> cfg{};
 
   std::array<std::uint16_t, S.states> mode{};
 
@@ -55,15 +54,16 @@ struct LrFrozenTable : LrTableFacts {
   // `from` covers `to`: a token lexed in `from` stands in `to` unless the
   // state has no action for it or `to` flags it in `modeWin`. An indented
   // table has no matrix, and no mode covers another.
-  std::array<std::uint64_t,
-             S.indented ? 0 : (std::size_t{S.modes} * S.modes + 63) / 64>
-      modeSub{};
+  static constexpr std::size_t kSubWords = (S.modes + 63u) / 64u;
+  std::array<std::uint64_t, S.indented ? 0 : S.modes * kSubWords> modeSub{};
+  // A row of modes per `to`: where they fit one word, a site that names `to`
+  // reads a constant.
   constexpr bool mode_sub(unsigned from, unsigned to) const {
     if constexpr (S.indented) {
       return false;
     } else {
-      const auto i = std::size_t{from} * S.modes + to;
-      return ((modeSub[i >> 6] >> (i & 63u)) & 1u) != 0;
+      const std::size_t word = kSubWords == 1 ? 0 : from >> 6;
+      return ((modeSub[to * kSubWords + word] >> (from & 63u)) & 1u) != 0;
     }
   }
 

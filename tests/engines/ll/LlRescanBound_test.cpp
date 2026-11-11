@@ -97,8 +97,8 @@ void a_skipped_run_ends_with_its_letter() {
 // asked for, a long token is not read to its end.
 template <const auto& T>
 void a_walk_reads_the_stop_as_it_steps() {
-  std::string word = "abc";
-  word.append(100000, 'd');
+  // Blanks: a token the walk still wants at its end.
+  const std::string word(100000, ' ');
   const auto len = static_cast<cursiv::TextOffset>(word.size());
   std::array<std::uint64_t, T.termWords> want{};
   want.fill(~std::uint64_t{0});

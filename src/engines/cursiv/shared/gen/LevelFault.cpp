@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "cursiv/shared/gen/OperatorWords.hpp"
+#include "cursiv/shared/gen/WrittenReads.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/utils/CaseFold.hpp"
@@ -190,15 +191,10 @@ Descent<OperatorWords> Reader::words(ImageId id) {
       break;
     case ImageKind::choice:
     case ImageKind::doc:
-    case ImageKind::assign:
-    case ImageKind::append:
-    case ImageKind::flag:
-    case ImageKind::create:
-    case ImageKind::nest:
     case ImageKind::skip:
       break;
     default:
-      unlisted = true;
+      unlisted = !is_directive_kind(n.kind);
   }
   for (std::size_t i = 0; i < parts(id).size(); ++i) {
     const OperatorWords w = co_await words(parts(id)[i]);

@@ -14,8 +14,6 @@
 #include "cursiv/lr/gen/LrFinalTable.hpp"
 #include "cursiv/lr/gen/LrProgramLayout.hpp"
 #include "cursiv/lr/gen/LrProgramMatrix.hpp"
-#include "cursiv/lr/table/LrDerivedSizes.hpp"
-#include "cursiv/lr/table/LrLowSizes.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
 #include "cursiv/lr/table/LrSizes.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
@@ -33,12 +31,6 @@ namespace cursiv::engine {
 
 namespace {
 
-LrSizes lr_sizes(const LrBuildTable& table, const LrProgramLayout& layout) {
-  LrSizes sizes = table.sizes();
-  sizes.orderWords = static_cast<unsigned>(layout.exact.size());
-  return sizes;
-}
-
 std::vector<std::uint8_t> lr_guarded_columns(const LrBuildTable& table) {
   std::vector<std::uint8_t> guarded(table.cfg.nnts, 0);
   for (const auto& e : table.gotoRows.edges)
@@ -50,24 +42,80 @@ struct LrTableEmitter : TextBuilder {
   explicit LrTableEmitter(const LrFinalTable& done)
       : a(done.table()),
         guarded(lr_guarded_columns(a)),
-        S(lr_sizes(a, done.programs())),
         programs(done.programs()),
-        names(a.cfg, std::span(a.relays.data(), a.nrelays)) {}
+        names(a.cfg, std::span(a.relays.data(), a.nrelays)) {
+    measure();
+  }
 
   const LrBuildTable& a;
   const std::vector<std::uint8_t> guarded;
-  const LrSizes S;
   bool aggregate = false;
   const LrProgramLayout& programs;
 
   const LexNamePool names;
+  // The extent of every array, and its fields as `kSizes` spells them.
+  LrSizes S{};
+  std::string sizes{};
 
-  LrLowSizes low_sizes() const {
+  // One extent, kept in `S` and spelled where it is not zero.
+  void extent(unsigned LrSizes::* field, std::string_view name, std::size_t n) {
+    S.*field = static_cast<unsigned>(n);
+    if (n != 0) sizes += concat(sizes.empty() ? "." : ",.", name, "=", n);
+  }
+  // Every extent, in the order `LrSizes` declares them.
+  void measure() {
     const auto& c = a.cfg;
-    return LrLowSizes{static_cast<unsigned>(names.bytes.size()), c.nsets,
-                      c.nterms, c.nprods,
-                      static_cast<unsigned>(c.wordRanges.size()),
-                      static_cast<unsigned>(c.scalarRanges.size())};
+    const std::size_t bounds = a.accBound.size();
+    extent(&LrSizes::terms, "terms", c.nterms);
+    extent(&LrSizes::prods, "prods", c.nprods);
+    extent(&LrSizes::states, "states", a.nstates);
+    extent(&LrSizes::modes, "modes", a.nmodes);
+    extent(&LrSizes::cls, "cls", a.ncls);
+    extent(&LrSizes::dfa, "dfa", a.ndfa);
+    extent(&LrSizes::dfaAccSets, "dfaAccSets", a.dfaAccPool.sets.size());
+    extent(&LrSizes::dfaResSets, "dfaResSets", a.dfaResPool.sets.size());
+    extent(&LrSizes::modeWinSets, "modeWinSets", a.modeWinPool.sets.size());
+    extent(&LrSizes::modeLongers, "modeLongers",
+           a.longer_modes() ? a.nmodes : 0);
+    extent(&LrSizes::modeBacktracks, "modeBacktracks", a.modeBacktrack.size());
+    extent(&LrSizes::modeFlagSets, "modeFlagSets", a.modeFlagPool.sets.size());
+    extent(&LrSizes::accBounds, "accBounds", bounds);
+    extent(&LrSizes::relays, "relays", a.nrelays);
+    extent(&LrSizes::followSets, "followSets", a.followPool.sets.size());
+    extent(&LrSizes::closeSets, "closeSets", a.closePool.sets.size());
+    extent(&LrSizes::dfaRelayResSets, "dfaRelayResSets",
+           a.relayReserves() ? a.dfaRelayResPool.sets.size() : 0);
+    extent(&LrSizes::accStands, "accStands", a.standing() ? bounds : 0);
+    extent(&LrSizes::accPriorities, "accPriorities",
+           a.prioritized() ? bounds : 0);
+    extent(&LrSizes::errModes, "errModes", a.errModeOf.size());
+    extent(&LrSizes::insertLists, "insertLists", a.insertAt.size() - 1);
+    extent(&LrSizes::insertWords, "insertWords", a.insertWord.size());
+    extent(&LrSizes::electWords, "electWords", a.electWord.size());
+    extent(&LrSizes::electWatches, "electWatches", a.electWatch.size());
+    extent(&LrSizes::electChains, "electChains", a.electChainKey.size());
+    extent(&LrSizes::electChainWords, "electChainWords",
+           a.electChainWord.size());
+    extent(&LrSizes::electTwins, "electTwins", a.electTwinFirst.size());
+    extent(&LrSizes::electRhsSyms, "electRhsSyms", a.electRhs.size());
+    extent(&LrSizes::orderWords, "orderWords", programs.exact.size());
+    extent(&LrSizes::nameChars, "nameChars", names.bytes.size());
+    extent(&LrSizes::sets, "sets", c.nsets);
+    extent(&LrSizes::wordRanges, "wordRanges", c.wordRanges.size());
+    extent(&LrSizes::scalarRanges, "scalarRanges", c.scalarRanges.size());
+    extent(&LrSizes::lexElseRows, "lexElseRows", a.lexElseRows.size());
+    extent(&LrSizes::typoSucc, "typoSucc", a.typoSucc.size());
+    extent(&LrSizes::reduceNames, "reduceNames", a.reduceNames.size());
+    extent(&LrSizes::expectItems, "expectItems", a.expectItems.size());
+    extent(&LrSizes::expectPool, "expectPool", a.expectPool.size());
+    extent(&LrSizes::rowLhsRows, "rowLhsRows",
+           a.rowLhsBase.empty() ? 0 : a.rowLhsBase.size() - 1);
+    extent(&LrSizes::rowLhs, "rowLhs", a.rowLhs.size());
+    extent(&LrSizes::typoReachSets, "typoReachSets", a.typoReach.sets.size());
+    S.indented = a.indented();
+    if (S.indented) sizes += ",.indented=true";
+    S.gotoClasses = a.nconflicts != 0 || a.multiCand;
+    if (!S.gotoClasses) sizes += ",.gotoClasses=false";
   }
 
   void u32(unsigned long long v) { write(v, "u"); }
@@ -151,6 +199,7 @@ struct LrTableEmitter : TextBuilder {
     f("slot", n.slot, d.slot);
     f("row", n.row, d.row);
     f("fold", n.fold, d.fold);
+    f("leaf", n.leaf, d.leaf);
     cell(f);
   }
   void cell(const LexRelayGen& r) { write(lex_relay_source(r, names)); }
@@ -198,47 +247,6 @@ struct LrTableEmitter : TextBuilder {
     array(member, src, n, src.size());
   }
 
-  void emit_sizes() {
-    write(
-        "inline constexpr ::cursiv::engine::LrSizes "
-        "kSizes{.terms=",
-        S.terms, ",.prods=", S.prods, ",.states=", S.states,
-        ",.modes=", S.modes, ",.cls=", S.cls, ",.dfa=", S.dfa,
-        ","
-        ".dfaAccSets=",
-        S.dfaAccSets, ",.dfaResSets=", S.dfaResSets,
-        ",.modeWinSets=", S.modeWinSets);
-    const auto field = [&](std::string_view name, unsigned n) {
-      if (n != 0) write(",.", name, "=", n);
-    };
-    field("modeLongers", S.modeLongers);
-    field("modeBacktracks", S.modeBacktracks);
-    field("modeFlagSets", S.modeFlagSets);
-    write(",.accBounds=", S.accBounds, ",.relays=", S.relays,
-          ",.followSets=", S.followSets, ",.closeSets=", S.closeSets);
-    field("dfaRelayResSets", S.dfaRelayResSets);
-    field("accStands", S.accStands);
-    field("accPriorities", S.accPriorities);
-    field("errModes", S.errModes);
-    if (S.indented) write(",.indented=true");
-    field("insertLists", S.insertLists);
-    field("insertWords", S.insertWords);
-    field("electWords", S.electWords);
-    field("electWatches", S.electWatches);
-    field("electChains", S.electChains);
-    field("electChainWords", S.electChainWords);
-    field("electTwins", S.electTwins);
-    field("electRhsSyms", S.electRhsSyms);
-    field("orderWords", S.orderWords);
-    if (!S.gotoClasses) write(",.gotoClasses=false");
-    line("};");
-    const LrLowSizes L = low_sizes();
-    line("inline constexpr ::cursiv::engine::LrLowSizes kLow{", L.nameChars,
-         ",", L.sets, ",", L.terms, ",", L.prods, ",", L.wordRanges,
-         L.scalarRanges != 0 ? concat(",", L.scalarRanges) : std::string(),
-         "};");
-  }
-
   void emit_cold() {
     aggregate = true;
     line("inline constexpr ::cursiv::engine::LrColdTables<kSizes> kCold{");
@@ -251,8 +259,7 @@ struct LrTableEmitter : TextBuilder {
     array("soleReduce", a.soleReduce, S.states);
     array("readsToken", a.readsToken, S.states);
     if (S.gotoClasses) array("gotoClass", a.gotoClass, S.states);
-    array("closePool", a.closePool.sets);
-    array("closeOf", a.closePool.of);
+    emit_pool_member("close", a.closePool);
     line("  .closeMax = ", a.closeMax, "u,");
     if (S.insertWords != 0) {
       array("insertOf", a.insertOf, S.states);
@@ -317,23 +324,22 @@ struct LrTableEmitter : TextBuilder {
           ",.entryRow=", c.entryRow, ",.wordBytes=");
     cell(c.wordBytes);
     line("};");
-    const LrLowSizes L = low_sizes();
-    array("cfg.names", names.bytes, L.nameChars);
-    array("cfg.sets", c.sets, L.sets);
-    array("cfg.setDecode", c.setDecode, L.sets);
-    array("cfg.terms", c.terms, L.terms);
+    array("cfg.names", names.bytes, S.nameChars);
+    array("cfg.sets", c.sets, S.sets);
+    array("cfg.setDecode", c.setDecode, S.sets);
+    array("cfg.terms", c.terms, S.terms);
     std::vector<LrProduction> prods(c.nprods);
     for (unsigned p = 0; p < c.nprods; ++p)
       prods[p] = {c.prods[p].lhs, c.prods[p].node, c.prods[p].len,
                   c.prods[p].gap, guarded[c.prods[p].lhs]};
-    array("cfg.prods", prods, L.prods);
-    array("cfg.wordRanges", c.wordRanges, L.wordRanges);
-    if (L.scalarRanges != 0) {
+    array("cfg.prods", prods, S.prods);
+    array("cfg.wordRanges", c.wordRanges, S.wordRanges);
+    if (S.scalarRanges != 0) {
       std::vector<std::uint32_t> scalars(c.nsets);
       for (std::uint16_t i = 0; i < c.nsets; ++i)
         scalars[i] = lex_set_scalars(c, i);
       array("cfg.setScalars", scalars);
-      array("cfg.scalarRanges", c.scalarRanges, L.scalarRanges);
+      array("cfg.scalarRanges", c.scalarRanges, S.scalarRanges);
     }
   }
 
@@ -356,8 +362,7 @@ struct LrTableEmitter : TextBuilder {
       array("errModeOf", a.errModeOf, S.errModes);
       array("modeEnd", a.modeEnd, S.errModes);
     }
-    if (!S.indented)
-      array("modeSub", a.modeSub, (std::size_t{S.modes} * S.modes + 63) / 64);
+    if (!S.indented) array("modeSub", a.modeSub, S.modes * a.mode_sub_words());
     array("dfaNext", a.dfaNext, std::size_t{S.dfa} * S.cls);
     array("dfaAccept", a.dfaAccept, S.dfa);
     emit_pool("dfaAcc.pool", "dfaAcc.of", a.dfaAccPool);
@@ -374,26 +379,8 @@ struct LrTableEmitter : TextBuilder {
   }
 
   void emit_derived() {
-    const auto D = a.derivedSizes();
     line(
-        "inline constexpr ::cursiv::engine::LrDerivedSizes "
-        "kDerivedSizes{.lexElseRows=",
-        D.lexElseRows,
-        ","
-        ".typoSucc=",
-        D.typoSucc, ",.reduceNames=", D.reduceNames,
-        ","
-        ".expectItems=",
-        D.expectItems, ",.expectPool=", D.expectPool,
-        ",.rowLhsRows=", D.rowLhsRows, ",.rowLhs=", D.rowLhs,
-        ","
-        ".typoReachSets=",
-        D.typoReachSets, ",.afterSets=", D.afterSets,
-        ",.modeWantSets=", D.modeWantSets, "};");
-    line(
-        "inline constexpr ::cursiv::engine::LrDerivedTables<kSizes, "
-        "kDerivedSizes> "
-        "kDerived{");
+        "inline constexpr ::cursiv::engine::LrDerivedTables<kSizes> kDerived{");
     aggregate = true;
     array("skipSet", a.skipSet);
     array("skipStop", a.skipStop);
@@ -416,8 +403,6 @@ struct LrTableEmitter : TextBuilder {
     array("lexBodies", a.lexBodies);
     array("lexBodyTerms", a.lexBodyTerms);
     array("lexOpeners", a.lexOpeners);
-    emit_pool_member("after", a.after);
-    emit_pool_member("modeWant", a.modeWant);
     line("};");
     aggregate = false;
   }
@@ -435,13 +420,32 @@ struct LrTableEmitter : TextBuilder {
     line("  },");
   }
 
+  // An array a guard site reads its own cells of: every unit sees them.
   template <class Values>
-  void program_array(std::string_view type, std::string_view name,
-                     const Values& values) {
+  void guard_array(std::string_view type, std::string_view name,
+                   const Values& values) {
     write("inline constexpr ", type, " ", name, "[] = {");
     cells(values, values.size());
     if (values.empty()) write("{}");
     line("};");
+  }
+
+  // The definitions of the programs' arrays, which one unit holds for all.
+  std::string programData{};
+
+  // An array of the programs: declared to every unit, its definition kept
+  // for the end of the header.
+  template <class Values>
+  void program_array(std::string_view type, std::string_view name,
+                     const Values& values) {
+    const auto decl = concat("const ", type, " ", name, "[",
+                             std::max<std::size_t>(values.size(), 1), "]");
+    line("extern ", decl, ";");
+    const std::size_t at = size();
+    write(decl, " = {");
+    cells(values, values.size());
+    line("};");
+    programData += cut_from(at);
   }
 
   void program_matrix(const LrProgramMatrix& matrix, std::string_view name,
@@ -449,23 +453,12 @@ struct LrTableEmitter : TextBuilder {
                       unsigned absent) {
     const auto row = concat("::std::uint", matrix.row_bits(), "_t");
     const auto index = concat("::std::uint", matrix.index_bits(), "_t");
-    // A layer the matrix does not fill is an empty span.
-    const auto layer = [&](std::string_view type, std::string_view part,
-                           const std::vector<std::uint32_t>& cells) {
-      if (cells.empty()) return std::string("{}");
-      std::string array = concat(name, part);
-      program_array(type, array, cells);
-      return array;
-    };
-    const std::string rows = layer(row, "Rows", matrix.rows);
-    const std::string blocks = layer(index, "Blocks", matrix.blocks);
+    program_array(row, concat(name, "Rows"), matrix.rows);
+    program_array(index, concat(name, "Blocks"), matrix.blocks);
     program_array(value, concat(name, "Values"), matrix.values);
     line("inline constexpr ::cursiv::engine::LrProgramRows<", row, ", ", index,
-         ", ", value, "> ", name,
-         "{\n"
-         "    ",
-         rows, ", ", blocks, ", ", name, "Values, ", columns, "u, ", absent,
-         "u};");
+         ", ", value, "> ", name, "{\n    ", name, "Rows, ", name, "Blocks, ",
+         name, "Values, ", columns, "u, ", absent, "u};");
   }
 
   void emit_programs() {
@@ -500,15 +493,15 @@ struct LrTableEmitter : TextBuilder {
       ops.insert(ops.end(), g.conds.begin(), g.conds.end());
       ops.insert(ops.end(), g.to.begin(), g.to.end());
     }
-    program_array("::std::uint32_t", "kGuardAt", at);
-    program_array("::std::uint16_t", "kGuardOps", ops);
+    guard_array("::std::uint32_t", "kGuardAt", at);
+    guard_array("::std::uint16_t", "kGuardOps", ops);
     const std::size_t words = (std::size_t{a.nstates} + 63u) / 64u;
     std::vector<std::uint64_t> held(words * a.cfg.ngapConds, 0);
     for (unsigned k = 0; k < a.cfg.ngapConds; ++k)
       for (unsigned s = 0; s < a.nstates; ++s)
-        if (!a.tagKnown[s].test(k) || a.tagTruth[s].test(k))
+        if (!a.tagFalse[s].test(k))
           held[k * words + s / 64u] |= std::uint64_t{1} << (s % 64u);
-    program_array("::std::uint64_t", "kHeld", held);
+    guard_array("::std::uint64_t", "kHeld", held);
   }
 
   static bool any_words(const std::vector<HeadMatcher>& heads) {
@@ -541,13 +534,13 @@ struct LrTableEmitter : TextBuilder {
     write(LexicalPredicateEmitter(a.cfg,
                                   ::std::span(a.relays.data(), a.nrelays), "")
               .declarations());
-    emit_sizes();
+    line("inline constexpr ::cursiv::engine::LrSizes kSizes{", sizes, "};");
     emit_cold();
     emit_derived();
     emit_programs();
     emit_guards();
     line(
-        "struct Table : ::cursiv::engine::LrFrozenTable<kSizes, kLow, kCold, "
+        "struct Table : ::cursiv::engine::LrFrozenTable<kSizes, kCold, "
         "kDerived> {\n"
         "  static constexpr auto& programs = kPrograms;\n"
         "  static constexpr auto& gotoPrograms = kGotoPrograms;");
@@ -606,6 +599,10 @@ struct LrTableEmitter : TextBuilder {
           {"kTable.cfg.wordRanges.data(), kTable.cfg.wordRanges.size()",
            "kTable.cfg.scalarRanges.data()"}));
     line("\n}  // namespace ", ns);
+    // The unit that defines `CURSIV_TABLE_DATA` holds the programs.
+    line("\n#ifdef CURSIV_TABLE_DATA\nnamespace ", ns, " {");
+    write(programData);
+    line("}  // namespace ", ns, "\n#endif");
   }
 };
 

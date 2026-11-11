@@ -26,17 +26,13 @@
 
 namespace cursiv::engine {
 
-// The work one cost may spend before a search bounds what its readings
-// still cost: most repairs are found before a bound pays off.
-inline constexpr std::uint64_t kLrBoundAfter = 1024;
-
 inline constexpr std::uint32_t kLrNoConfig = 0xFFFFFFFFu;
 inline constexpr TextOffset kLrNoOpen = 0xFFFFFFFFu;
 
 struct LrSearch : RepairSearch<LrEdit> {
   LrSearch(TextOffset len, const RepairBudget& b,
-           const std::vector<IndentLevel>& levels)
-      : RepairSearch(len, b), seen(0, FutureHash{}, FutureSame{&levels}) {}
+           const std::vector<IndentLevel>& levels);
+  ~LrSearch();
 
   // What the conditions had read of long gaps when the search last counted.
   std::uint64_t gapsCounted = 0;
@@ -68,7 +64,7 @@ struct LrSearch : RepairSearch<LrEdit> {
     LrVirtualAt virt;
     IndentAt indent;
     std::uint8_t shifts;
-    LrRepairPhase phase;
+    RepairPhase phase;
     bool fresh, done;
     bool operator==(const Future&) const = default;
     static Future of(const LrConfig& r) {
@@ -134,71 +130,6 @@ struct LrSearch : RepairSearch<LrEdit> {
   // Scratch the misspelling walks reuse in turn.
   TypoScratch typoScratch;
   std::unordered_map<TextOffset, Token> written;
-  // What the bound reads of the text, never past `horizon`: every mode's tokens
-  // at a position, the bytes a mode reading none drops, the re-readings and the
-  // least due. `refused`: a lexer stopped mid-token.
-  struct Ahead {
-    std::vector<Token> tokens;
-    std::vector<Token> dropped;
-    bool refused = false;
-  };
-  std::unordered_map<TextOffset, Ahead> ahead;
-  std::unordered_map<TextOffset, std::vector<Typo>> misread;
-  FlatMap<std::uint32_t> costAhead;
-  // The calls of the walk over what a reading still costs, in flight: kept
-  // here, not on the native stack, whose depth the text would set. Each
-  // resumes at its `phase`.
-  enum class CostPhase : std::uint8_t {
-    outer,
-    outerRet,
-    more,
-    inner,
-    innerRet,
-    drop,
-    dropRet,
-    droppedFirst,
-    droppedTypo,
-    droppedTypoRet,
-  };
-  struct CostFrame {
-    CostPhase phase = CostPhase::outer;
-    SymbolId prev = 0;
-    std::uint32_t run = 0;
-    std::uint32_t best = 0;
-    // The edit cost on the way to the call in flight.
-    std::uint32_t cost = 0;
-    // The token ahead being taken or dropped, the tokens at its start, and
-    // the re-readings of the token a drop stands on.
-    std::uint32_t i = 0;
-    std::uint32_t j = 0;
-    TextOffset p = 0;
-    std::uint64_t key = 0;
-    Token t{};
-    const Ahead* ahead = nullptr;
-    const Ahead* more = nullptr;
-    const std::vector<Typo>* typos = nullptr;
-  };
-  std::vector<CostFrame> costStack;
-  TextOffset horizon = 0;
-  std::uint64_t boundAfter = kLrBoundAfter;
-  // A bound in flight, and whether one of its walks could not read a token
-  // whole; the positions where one could not, known to read nothing.
-  bool bounding = false;
-  bool boundShort = false;
-  FlatMap<std::uint8_t> unread;
-  // What the table does with an invented token before its reading: the
-  // reductions it makes (their productions and the states they go to, and the
-  // states the stack stands on above its own) and the shift that takes it.
-  struct Chain {
-    static constexpr std::uint32_t kRoom = 16;
-    std::uint16_t prod[kRoom];
-    std::uint16_t to[kRoom];
-    std::uint16_t above[kRoom];
-    std::uint16_t shift = 0;
-    std::uint32_t n = 0;
-    std::uint32_t attempts = 0;
-  };
-  Chain chain;
   // A frozen reading a search sets out from: its stack, and how far down its
   // records the author's tokens are counted. Past the tape stand the tokens
   // of a reading the graph has not written: all the author's.

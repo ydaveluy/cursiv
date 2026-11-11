@@ -8,9 +8,6 @@
 #include <vector>
 
 #include "cursiv/lr/gen/LrLowProd.hpp"
-#include "cursiv/lr/gen/LrLowSlot.hpp"
-#include "cursiv/lr/gen/LrNtInfo.hpp"
-#include "cursiv/lr/gen/LrProdBuild.hpp"
 #include "cursiv/lr/table/LrLowFacts.hpp"
 #include "cursiv/shared/gen/LowerPools.hpp"
 #include "cursiv/shared/gen/Vec.hpp"
@@ -19,6 +16,15 @@
 #include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {
+
+// A nonterminal's name, for the dumps and the diagnostics.
+struct LrNtInfo {
+  std::uint16_t nameOff = 0, nameLen = 0;
+  // A rule that builds a node, as neither a data rule nor an auxiliary does.
+  bool node = false;
+
+  constexpr bool operator==(const LrNtInfo&) const = default;
+};
 
 struct LrBuildCfg : LrLowFacts, LowerPools {
   // What only construction reads: never frozen, so no reader mistakes a
@@ -35,21 +41,14 @@ struct LrBuildCfg : LrLowFacts, LowerPools {
   // For a section's own configuration, its entry's reading.
   Vec<std::uint16_t> cfgEntry{};
 
-  Vec<LrProdBuild> prodBuild{};
   // The tokens each commit exit is refused on; a production's `stop` names one.
   std::vector<DynSet> stopCuts{};
   Vec<std::uint32_t> decisions{};
   // The left recursion each nonterminal stands in, `kNoRow` outside any.
   Vec<std::uint16_t> leftLoop{};
-  // A position's symbol, the configuration the boundary in front of it is
-  // read under, and the condition it is passed under plus one
-  // (`lr_guard_positions`).
-  Vec<std::uint16_t> slotSym{};
-  Vec<std::uint8_t> slotCfg{};
-  Vec<std::uint8_t> slotGuard{};
 
   std::uint16_t sym_at(const LrLowProd& p, unsigned i) const {
-    return slotSym[p.at + i];
+    return slots[p.at + i].sym;
   }
   std::uint16_t row_at(const LrLowProd& p, unsigned i) const {
     return slots[p.at + i].row;
@@ -71,11 +70,11 @@ struct LrBuildCfg : LrLowFacts, LowerPools {
   // states itself.
   std::uint8_t cfg_at(std::uint16_t p, unsigned i) const {
     const LrLowProd& q = prods[p];
-    return i == q.len ? prodBuild[p].tailCfg : slotCfg[q.at + i];
+    return i == q.len ? q.tailCfg : slots[q.at + i].cfg;
   }
   // `i == len` is the reduction's own guard.
   std::uint8_t guard_at(const LrLowProd& p, unsigned i) const {
-    return i == p.len ? p.gap : slotGuard[p.at + i];
+    return i == p.len ? p.gap : slots[p.at + i].guard;
   }
   // `leftLoop`, read past its end as `kNoRow`.
   std::uint16_t loop_of(unsigned nt) const {

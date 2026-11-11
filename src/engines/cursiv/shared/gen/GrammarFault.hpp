@@ -3,14 +3,16 @@
 // part. The walk goes on writing a well-formed value.
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "cursiv/shared/table/WriteKind.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
 namespace cursiv::engine {
 
@@ -57,25 +59,11 @@ struct GrammarFault {
 
 // The code's name, which the refusal tests match.
 constexpr std::string_view grammar_fault_name(GrammarFaultCode c) {
-  constexpr std::string_view names[] = {"none",
-                                        "nullableRepetition",
-                                        "nullableUnorderedItem",
-                                        "ruleWithoutProduction",
-                                        "twoEndMarks",
-                                        "optionalEndMark",
-                                        "optionalCondition",
-                                        "unitProductionCycle",
-                                        "hiddenLeftRecursion",
-                                        "leftRecursion",
-                                        "precedenceClash",
-                                        "infixOperatorNotText",
-                                        "directiveOnNoPosition",
-                                        "tooManyPrecedences",
-                                        "skippedTerminal",
-                                        "postfixBinaryClash"};
-  static_assert(std::size(names) ==
-                static_cast<std::size_t>(GrammarFaultCode::postfixBinaryClash) +
-                    1);
+  using Code = GrammarFaultCode;
+  constexpr auto count = static_cast<std::size_t>(Code::postfixBinaryClash) + 1;
+  constexpr auto names = []<std::size_t... I>(std::index_sequence<I...>) {
+    return std::array{enumerator_name<static_cast<Code>(I)>()...};
+  }(std::make_index_sequence<count>{});
   return names[static_cast<std::size_t>(c)];
 }
 

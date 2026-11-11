@@ -35,7 +35,6 @@
 #include "cursiv/lr/runtime/lr_lookahead.hpp"
 #include "cursiv/lr/runtime/lr_repair_write.hpp"
 #include "cursiv/lr/runtime/lr_search.hpp"
-#include "cursiv/lr/runtime/lr_search_bound.hpp"
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/Check.hpp"
@@ -112,19 +111,19 @@ void a_stop_at_recovery_discards_the_partial_tree() {
 // allows, and a generator names the one reading it was made from and the one
 // meaning of its payload.
 void phases_and_generators_name_what_they_stand_for() {
-  using cursiv::engine::LrRepairPhase;
-  using cursiv::engine::LrWorkKind;
+  using cursiv::engine::RepairPhase;
+  using cursiv::engine::RepairWork;
   cursiv::engine::LrConfig reading;
-  CHECK(!reading.generates() && reading.work == LrWorkKind::read);
+  CHECK(!reading.generates() && reading.work == RepairWork::read);
   struct Allowed {
-    LrRepairPhase phase;
+    RepairPhase phase;
     bool abandon, replace, insert, insertBeforeGarbage;
   };
   for (const Allowed& a :
-       {Allowed{LrRepairPhase::beforeEdit, true, true, true, true},
-        Allowed{LrRepairPhase::afterAbandon, false, true, true, true},
-        Allowed{LrRepairPhase::inserting, false, true, true, false},
-        Allowed{LrRepairPhase::discardOnly, false, false, false, false}}) {
+       {Allowed{RepairPhase::beforeEdit, true, true, true, true},
+        Allowed{RepairPhase::afterAbandon, false, true, true, true},
+        Allowed{RepairPhase::inserting, false, true, true, false},
+        Allowed{RepairPhase::discardOnly, false, false, false, false}}) {
     reading.phase = a.phase;
     CHECK(reading.mayAbandon() == a.abandon);
     CHECK(reading.mayReplace() == a.replace);
@@ -133,15 +132,15 @@ void phases_and_generators_name_what_they_stand_for() {
   }
 
   const auto inserts = cursiv::engine::LrConfig::insertGenerator(reading, 3, 7);
-  CHECK(inserts.generates() && inserts.work == LrWorkKind::enumerateInsertions);
+  CHECK(inserts.generates() && inserts.work == RepairWork::enumerateInsertions);
   CHECK(inserts.source() == 3 && inserts.insertRank() == 7);
   const auto replaces =
       cursiv::engine::LrConfig::replaceGenerator(reading, 4, 9);
-  CHECK(replaces.generates() && replaces.work == LrWorkKind::forcedReplacement);
+  CHECK(replaces.generates() && replaces.work == RepairWork::forcedReplacement);
   CHECK(replaces.source() == 4 && replaces.insertRank() == 9);
   auto abandons =
       cursiv::engine::LrConfig::abandonGenerator(reading, 2, 5, 11, 13, 4);
-  CHECK(abandons.generates() && abandons.work == LrWorkKind::enumerateAbandons);
+  CHECK(abandons.generates() && abandons.work == RepairWork::enumerateAbandons);
   CHECK(abandons.source() == 2 && abandons.abandonDepth() == 5 &&
         abandons.abandonNode() == 11 && abandons.abandonBegin() == 13 &&
         abandons.armNext == 4);
@@ -161,7 +160,7 @@ void insertion_allowance_is_part_of_the_future() {
   cursiv::engine::LrSearch s(c.len, kUnbounded, c.indentArena);
   cursiv::engine::lr_search_start(c, s);
   s.configs[0].fresh = false;
-  s.configs[0].phase = cursiv::engine::LrRepairPhase::inserting;
+  s.configs[0].phase = cursiv::engine::RepairPhase::inserting;
   auto free = s.configs[0];
   free.freeInserts = 2;
   free.link = s.link(cursiv::engine::LrEdit{.choice = 1});
@@ -179,7 +178,7 @@ void insertion_allowance_is_part_of_the_future() {
   cursiv::engine::lr_search_admit(s, 3);
   CHECK(s.configs[2].gone && !s.configs[3].gone);
 
-  auto closeRow = gdm::kTable.cold.close_row(c.stack.top().state);
+  auto closeRow = gdm::kTable.cold.close[c.stack.top().state];
   const auto term = static_cast<cursiv::engine::SymbolId>(closeRow.take());
   CHECK(term < gdm::kTable.cfg.nterms);
   for (unsigned i = 0; i < 2; ++i) {
@@ -206,7 +205,7 @@ void unread_bytes_take_one_insertion() {
   std::uint32_t one = cursiv::engine::kLrNoConfig;
   for (std::uint32_t i = 1; i < s.configs.size(); ++i)
     if (!s.configs[i].generates() &&
-        s.configs[i].phase == cursiv::engine::LrRepairPhase::inserting &&
+        s.configs[i].phase == cursiv::engine::RepairPhase::inserting &&
         s.configs[i].la.begin == c.la.begin)
       one = i;
   CHECK(one != cursiv::engine::kLrNoConfig);
@@ -233,7 +232,7 @@ void merged_path_keeps_its_source_rank() {
   cursiv::engine::lr_search_root(s, c, c.committed, c.stack, c.tape.len(), 1,
                                  true);
   s.heap.clear();
-  auto closeRow = gdm::kTable.cold.close_row(c.stack.top().state);
+  auto closeRow = gdm::kTable.cold.close[c.stack.top().state];
   const auto term = static_cast<cursiv::engine::SymbolId>(closeRow.take());
   CHECK(term < gdm::kTable.cfg.nterms);
   std::uint32_t first = cursiv::engine::kLrNoConfig,
@@ -331,64 +330,34 @@ std::vector<Key> keys_of(cursiv::engine::LrContext& c,
 }
 
 // Every edit sequence from the roots `setup` sets out, up to cost `most`:
-// the least key a goal reaches. No goal under a refused reading is cheaper than
-// its bound says.
+// the least key a goal reaches.
 template <const auto& A, class Setup>
-Key enumerate(cursiv::engine::LrContext& c, std::uint32_t most,
-              std::string_view text, Setup setup, const Rank& rank) {
+Key enumerate(cursiv::engine::LrContext& c, std::uint32_t most, Setup setup,
+              const Rank& rank) {
   cursiv::engine::LrSearch s(c.len, kUnbounded, c.indentArena);
   if (!setup(s)) return kNoKey;
   std::vector<cursiv::engine::RepairEntry> todo(s.heap);
   s.heap.clear();
   std::vector<std::uint32_t> goals;
-  std::vector<std::pair<std::uint32_t, std::uint32_t>> refused;
   while (!todo.empty()) {
     const cursiv::engine::RepairEntry e = todo.back();
     todo.pop_back();
     const cursiv::engine::LrConfig& x = s.configs[e.at];
     if (x.gone || x.cost > most) continue;
     s.seen.clear();
-    if (x.work == cursiv::engine::LrWorkKind::enumerateInsertions) {
+    if (x.work == cursiv::engine::RepairWork::enumerateInsertions) {
       cursiv::engine::lr_search_inserts<A>(c, s, e.at);
-    } else if (x.work == cursiv::engine::LrWorkKind::forcedReplacement) {
+    } else if (x.work == cursiv::engine::RepairWork::forcedReplacement) {
       cursiv::engine::lr_search_replace<A>(c, s, e.at);
-    } else if (x.work == cursiv::engine::LrWorkKind::enumerateAbandons) {
+    } else if (x.work == cursiv::engine::RepairWork::enumerateAbandons) {
       cursiv::engine::lr_search_abandon<A>(c, s, e.at, ~std::uint32_t{0});
     } else if (cursiv::engine::lr_search_goal(x)) {
       goals.push_back(e.at);
     } else {
-      refused.emplace_back(e.at, cursiv::engine::lr_search_bound<A>(c, s, x));
       cursiv::engine::lr_search_expand<A>(c, s, e.at);
     }
     todo.insert(todo.end(), s.heap.begin(), s.heap.end());
     s.heap.clear();
-  }
-  std::vector<std::uint32_t> owner(s.links.size(), cursiv::engine::kLrNoConfig);
-  for (std::uint32_t i = 0; i < s.configs.size(); ++i)
-    if (!s.configs[i].generates() &&
-        owner[s.configs[i].link] == cursiv::engine::kLrNoConfig)
-      owner[s.configs[i].link] = i;
-  std::vector<std::uint64_t> below(s.configs.size(), ~std::uint64_t{0});
-  for (const cursiv::engine::LrConfig& g : s.configs) {
-    if (g.generates() || g.gone || !cursiv::engine::lr_search_goal(g)) continue;
-    const std::uint64_t k = (std::uint64_t{g.cost} << 32) | g.lost;
-    for (std::uint32_t l = g.link; l != cursiv::engine::kNoEditLink;
-         l = s.links[l].parent)
-      if (owner[l] != cursiv::engine::kLrNoConfig)
-        below[owner[l]] = std::min(below[owner[l]], k);
-  }
-  for (const auto& [i, costAhead] : refused) {
-    const cursiv::engine::LrConfig& x = s.configs[i];
-    const std::uint64_t floor =
-        (std::uint64_t{x.cost + costAhead / cursiv::engine::kLrCostScale}
-         << 32) |
-        (x.lost + costAhead % cursiv::engine::kLrCostScale);
-    if (below[i] == ~std::uint64_t{0} || floor <= below[i]) continue;
-    std::printf("FAIL: `%.*s` bounds a reading at %llx, a goal under it %llx\n",
-                static_cast<int>(text.size()), text.data(),
-                static_cast<unsigned long long>(floor),
-                static_cast<unsigned long long>(below[i]));
-    ++failures;
   }
   std::erase_if(goals, [&](std::uint32_t g) { return s.configs[g].gone; });
   std::uint32_t cheapest = ~0u;
@@ -415,7 +384,6 @@ template <const auto& A, class Setup>
 Key elect(cursiv::engine::LrContext& c, Setup setup, const Rank& rank,
           std::uint32_t& cost) {
   cursiv::engine::LrSearch s(c.len, kUnbounded, c.indentArena);
-  s.boundAfter = 0;
   cost = ~0u;
   if (!setup(s)) return kNoKey;
   bool exhausted = false;
@@ -438,7 +406,7 @@ void agree(cursiv::engine::LrContext& c, std::string_view text, Setup setup,
   constexpr std::uint32_t kMost = 3 * cursiv::engine::kRepairEdit;
   std::uint32_t cost = 0;
   const Key elected = elect<A>(c, setup, rank, cost);
-  const Key least = enumerate<A>(c, kMost, text, setup, rank);
+  const Key least = enumerate<A>(c, kMost, setup, rank);
   if (cost <= kMost ? elected == least : least == kNoKey) return;
   std::printf("FAIL: `%.*s` elects ", static_cast<int>(text.size()),
               text.data());
@@ -1169,36 +1137,6 @@ void matches_the_emitted_automata() {
       if (A.next_byte(A.modeStart[mode], static_cast<unsigned char>(b)) ==
           cursiv::engine::kDeadState)
         CHECK(!openers[mode].has(static_cast<unsigned char>(b)));
-
-  std::vector<Set> after(A.cfg.nterms), wanted(A.modeStart.size());
-  for (std::uint32_t s = 0; s < A.mode.size(); ++s) {
-    wanted[A.mode[s]] |= A.cold.follow[s];
-    for (unsigned term = 0; term < A.cfg.nterms; ++term) {
-      std::uint32_t first;
-      unsigned count;
-      cursiv::engine::lr_action_run<A>(
-          s, static_cast<cursiv::engine::SymbolId>(term), first, count);
-      for (unsigned k = 0; k < count; ++k) {
-        const auto action = cursiv::engine::lr_shadow_action<A>(first + k);
-        if (action.kind == cursiv::engine::LrActionKind::shift)
-          after[term] |= A.cold.follow[action.arg];
-        if constexpr (cursiv::engine::kLrGuarded<A>)
-          if (action.kind == cursiv::engine::LrActionKind::guard) {
-            const auto at = A.guardAt[action.arg];
-            const unsigned conditions = A.guardOps[at];
-            for (unsigned outcome = 0; outcome < (1u << conditions);
-                 ++outcome) {
-              const auto to = A.guardOps[at + 1u + conditions + outcome];
-              if (to != 0xffffu) after[term] |= A.cold.follow[to];
-            }
-          }
-      }
-    }
-  }
-  for (unsigned term = 0; term < A.cfg.nterms; ++term)
-    CHECK(A.derived.after[term] == after[term]);
-  for (std::size_t mode = 0; mode < A.modeStart.size(); ++mode)
-    CHECK(A.derived.modeWant[mode] == wanted[mode]);
 }
 
 }  // namespace

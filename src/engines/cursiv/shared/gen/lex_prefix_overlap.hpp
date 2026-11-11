@@ -25,12 +25,21 @@ inline ByteSet lex_subset_reads(const LexNfaPool& n, const ByteSet* sets,
   ByteSet out;
   for (const int x : sub) {
     const LexNfaState& st = n.s[static_cast<std::size_t>(x)];
-    if (st.set < 0) continue;
-    ByteSet on = sets[st.set];
-    if (st.minus >= 0) on.andnot(sets[st.minus]);
-    out |= on;
+    if (st.set >= 0) out |= lex_edge_bytes(sets, st);
   }
   return out;
+}
+
+// The bytes of `left` every edge of `reads` reads as it reads `byte`: they
+// step a subset where `byte` steps it.
+inline ByteSet lex_read_alike(ByteSet left, const std::vector<ByteSet>& reads,
+                              unsigned char byte) {
+  for (const ByteSet& on : reads)
+    if (on.has(byte))
+      left &= on;
+    else
+      left.andnot(on);
+  return left;
 }
 
 // The closure of where the edges of `from` that `takes` lead, sorted.
@@ -42,9 +51,7 @@ std::vector<int> lex_nfa_leads(const LexNfaPool& n,
     const LexNfaState& s = n.s[static_cast<std::size_t>(x)];
     if (s.set >= 0 && takes(s)) work.push_back(s.t1);
   }
-  std::vector<int> to = n.eclose(work);
-  std::ranges::sort(to);
-  return to;
+  return n.sorted_closure(work);
 }
 
 inline std::vector<int> lex_nfa_step(const LexNfaPool& n, const ByteSet* sets,
@@ -61,9 +68,7 @@ inline std::vector<int> lex_nfa_step_any(const LexNfaPool& n,
                                          const std::vector<int>& from,
                                          const ByteSet& want) {
   return lex_nfa_leads(n, from, [&](const LexNfaState& s) {
-    ByteSet on = sets[s.set];
-    if (s.minus >= 0) on.andnot(sets[s.minus]);
-    return on.intersects(want);
+    return lex_edge_bytes(sets, s).intersects(want);
   });
 }
 
@@ -213,11 +218,7 @@ LexOverlap lex_pair_search(const LexNfaPool& n, const ByteSet* sets, int a,
             seen.insert(at).second)
           work.push_back(std::move(at));
   };
-  std::vector<int> first = n.eclose(a);
-  std::vector<int> second = n.eclose(b);
-  std::ranges::sort(first);
-  std::ranges::sort(second);
-  enter({std::move(first), {}}, {std::move(second), {}}, false);
+  enter({n.sorted_closure(a), {}}, {n.sorted_closure(b), {}}, false);
   const auto stuck = [](const LexWalkSide& side) {
     return side.first.empty() && side.second.empty();
   };

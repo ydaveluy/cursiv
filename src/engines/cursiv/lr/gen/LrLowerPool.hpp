@@ -32,9 +32,6 @@ enum class LrShape : std::uint8_t {
   end
 };
 
-// The actions one column of one element needs, innermost first.
-using LrActs = std::vector<std::uint16_t>;
-
 using LrShapeId = std::size_t;
 
 struct LrLowerNode {
@@ -43,8 +40,8 @@ struct LrLowerNode {
   std::size_t count = 0;  // seq,alt: child count
   std::uint32_t min = 0, max = 0;
   // What a directive over this element writes, and the record it opens.
-  LrActs row{};
-  LrActs made{};
+  Acts row{};
+  Acts made{};
   // The hover text of this use of a token.
   std::string_view doc{};
   // The skip configuration the boundary before this element is read under:
@@ -59,6 +56,8 @@ struct LrLowerNode {
   // unordered: the items the text may leave out, one bit each. Each stands in
   // its present form, and the group may end where only these are left.
   std::uint32_t unorderedOptional = 0;
+  // unordered: a nest stands under the group.
+  bool unorderedTurns = false;
 };
 
 // What one element is to the right-hand side it stands in, and the actions
@@ -76,16 +75,10 @@ struct LrLowerSlot {
   // A choice one branch of which is the end assertion alone: dropping the
   // slot is that branch.
   bool endAlt = false;
-  LrActs made{};
-  LrActs row{};
+  Acts made{};
+  Acts row{};
   std::string_view doc{};
 };
-
-inline LrActs lr_cat(const LrActs& a, const LrActs& b) {
-  LrActs o = a;
-  o.insert(o.end(), b.begin(), b.end());
-  return o;
-}
 
 // What the walk holds while it runs, beside what both lowerings keep.
 struct LrLowerPool : LowerPool {
@@ -134,12 +127,12 @@ struct LrLowerPool : LowerPool {
 
   // Actions whose record wraps what stands before it: a nest's checkpoint,
   // the one position that writes a nest.
-  bool turns(const LrActs& made) const {
+  bool turns(const Acts& made) const {
     return !made.empty() && rowKind[made.front()] == WriteKind::nest;
   }
   // Flags run after their operand in the same construction context. Unlike
   // assign/append, they do not give that operand a separate current node.
-  bool only_flags(const LrActs& rows) const {
+  bool only_flags(const Acts& rows) const {
     return std::ranges::all_of(rows, [&](std::uint16_t r) {
       return rowKind[r] == WriteKind::flag;
     });
@@ -168,19 +161,6 @@ struct LrLowerPool : LowerPool {
     if (n.kind == LrShape::alt || n.kind == LrShape::unordered)
       for (std::size_t i = 0; i < n.count; ++i)
         if (co_await head_turns(child[n.sym + i])) co_return true;
-    co_return false;
-  }
-
-  Descent<bool> holds_turn(LrShapeId at) const {
-    const LrLowerNode& n = e[at];
-    for (const std::uint16_t r : n.made)
-      if (rowKind[r] == WriteKind::nest) co_return true;
-    if (n.kind == LrShape::rep || n.kind == LrShape::scope)
-      co_return co_await holds_turn(n.sym);
-    if (n.kind == LrShape::seq || n.kind == LrShape::alt ||
-        n.kind == LrShape::unordered)
-      for (std::size_t i = 0; i < n.count; ++i)
-        if (co_await holds_turn(child[n.sym + i])) co_return true;
     co_return false;
   }
 

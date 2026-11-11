@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -21,15 +22,17 @@
 namespace cursiv::engine {
 
 // The dead branches, branches that repeat earlier ones, flags that may read
-// nothing, repetitions of a run and literals that may stop inside a word that a
-// grammar spells: a warning each.
-void report_grammar_warnings(std::string_view grammar, GrammarImage& image);
+// nothing, repetitions of a run and literals that may stop inside a word that
+// the rules of `reached` spell: a warning each.
+void report_grammar_warnings(std::string_view grammar, GrammarImage& image,
+                             std::span<const ImageRuleDesc* const> reached);
 
 // Warns, in this order, of each condition of `conds` read to the end of an
 // unbounded run, each lexical check of `lex` that could not conclude, then the
 // warnings of `image`. `rule_name` names a rule by its index.
 template <class CondCfg, class LexCfg, class RuleName>
 void report_warnings(std::string_view grammar, GrammarImage& image,
+                     std::span<const ImageRuleDesc* const> reached,
                      const CondCfg& conds, const LexCfg& lex,
                      RuleName rule_name) {
   const auto n = static_cast<int>(grammar.size());
@@ -39,7 +42,7 @@ void report_warnings(std::string_view grammar, GrammarImage& image,
   for (const LexCheckIncomplete& k : lex.lexIncomplete)
     std::fprintf(stderr, "%.*s: warning: %s\n", n, grammar.data(),
                  lex_check_incomplete_text(lex, k).c_str());
-  report_grammar_warnings(grammar, image);
+  report_grammar_warnings(grammar, image, reached);
 }
 
 // What a generator's arguments name: the directory it writes to, and the
@@ -75,7 +78,8 @@ GenPaths gen_paths(int argc, char** argv, const char* options,
 
 // An arm that begins and ends with its own rule, a refusal each: true where
 // there was one.
-bool refuse_self_bounded_arms(std::string_view grammar, GrammarImage& image);
+bool refuse_self_bounded_arms(std::string_view grammar, GrammarImage& image,
+                              std::span<const ImageRuleDesc* const> reached);
 
 // A terminal that matches the empty string is a token the lexer never hands
 // back: `terminal` names the first one, empty where there is none.

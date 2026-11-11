@@ -71,7 +71,6 @@ void a_closing_walk_reads_the_closer() {
     cursiv::engine::LlContext context(text, builder);
     context.at = 7;
     context.la = {7, 11, close};
-    context.laValid = true;
     context.laMode = dec.mode;
     context.stack.push_back(
         table.atn

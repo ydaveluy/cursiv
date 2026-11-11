@@ -85,6 +85,25 @@ struct Quoted : cursiv::GrammarSpec {
   using hidden = NOTE;
 };
 
+// A keyword its gap may refuse where a trivia ties with it: the trivia is
+// crossed, up to the token that closes the section. An item behind `=` ends
+// on `;`, so the section cannot close behind its name.
+struct Hushed : cursiv::GrammarSpec {
+  struct WS : terminal<some(cr<" ">)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct MUTE : terminal<cr<"N">> {};
+  struct Item : rule<create<ast::Item>(assign<&ast::Item::text>(ref<ID>) +
+                                       option(gap::none + kw<"N">))> {};
+  struct Ended
+      : rule<create<ast::Marked>(lit<"="> + assign<&ast::Item::text>(ref<ID>) +
+                                 option(gap::none + kw<"N">) + lit<";">)> {};
+  struct Root : rule<create<ast::Items>(many(
+                    append<&ast::Items::items>(ref<Item> | ref<Ended>)))> {};
+  using entry = Root;
+  using ignored = WS;
+  using hidden = MUTE;
+};
+
 template <class In>
 struct Host : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<" ">)> {};
@@ -153,6 +172,7 @@ struct Suite : Last {
                      (lit<"inlast:"> + ref<Host<Last>::Root>) |
                      (lit<"inreach:"> + ref<Host<Reach>::Root>) |
                      (lit<"inquoted:"> + ref<Host<Quoted>::Root>) |
+                     (lit<"inhushed:"> + ref<Host<Hushed>::Root>) |
                      (lit<"values:"> + ref<SectionValues::Root>)> {};
   using entry = Root;
 };

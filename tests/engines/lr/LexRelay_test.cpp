@@ -26,7 +26,6 @@
 #include "cursiv/lr/gen/lr_build.hpp"
 #include "cursiv/lr/runtime/lr_matcher.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
-#include "cursiv/shared/runtime/LexAdapter.hpp"
 #include "cursiv/shared/runtime/LexMarkRun.hpp"
 #include "cursiv/shared/runtime/LexNestedSearch.hpp"
 #include "cursiv/shared/runtime/LexRelay.hpp"
@@ -40,48 +39,6 @@
 #include "nested/generated/G/Table.hpp"
 
 namespace {
-
-// A table's adapters declare what they offer, and the check refuses one that
-// lost it: a skipping adapter without `qualified`, or a relay without its run,
-// would otherwise compile and read the other branch.
-namespace declared {
-
-using Plain = cursiv::engine::LrLexTape<tnestedlex::generated::G::kTable>;
-using Skipping =
-    cursiv::engine::LrLexTape<tnestedlex::generated::G::kTable, true>;
-
-struct LostQualified : Skipping {
-  cursiv::engine::SymbolId qualified(std::uint16_t, const char*,
-                                     cursiv::TextOffset, cursiv::TextOffset,
-                                     cursiv::TextOffset&) const = delete;
-};
-struct LostRun : Plain {
-  cursiv::TextOffset run(std::uint16_t, const char*, cursiv::TextOffset,
-                         cursiv::TextOffset) const = delete;
-};
-struct LostRelay : Plain {
-  std::uint16_t relay(std::uint16_t) const = delete;
-};
-
-static_assert(Plain::kRelays && !Plain::kQualified && Skipping::kQualified);
-static_assert(cursiv::engine::LexCursor<Plain> &&
-              cursiv::engine::LexCursor<Skipping>);
-static_assert(cursiv::engine::LexAcceptanceDeclared<Plain> &&
-              cursiv::engine::LexAcceptanceDeclared<Skipping>);
-static_assert(cursiv::engine::LexRelaysDeclared<Plain> &&
-              cursiv::engine::LexRelaysDeclared<Skipping>);
-
-static_assert(LostQualified::kQualified &&
-              cursiv::engine::LexBoundaryFallback<LostQualified> &&
-              !cursiv::engine::LexQualifiedAcceptance<LostQualified>);
-static_assert(!cursiv::engine::LexAcceptanceDeclared<LostQualified>);
-static_assert(cursiv::engine::LexOffersRelay<LostRun> &&
-              !cursiv::engine::LexRelaysDeclared<LostRun>);
-static_assert(LostRelay::kRelays &&
-              !cursiv::engine::LexOffersRelay<LostRelay> &&
-              !cursiv::engine::LexRelaysDeclared<LostRelay>);
-
-}  // namespace declared
 
 using Items = std::vector<std::string>;
 

@@ -17,6 +17,8 @@ struct LowerDesc {
   std::span<const ImageRuleDesc* const> terms;
   std::span<const ImageRuleDesc* const> predicateTerms;
   std::span<const ImageRuleDesc* const> nts;
+  // The rules the grammar reaches, in the order reached.
+  std::span<const ImageRuleDesc* const> reached;
   std::span<const AstRowDesc* const> rows;
   const ImageRuleDesc* entry = nullptr;
   ImageClassDesc bound{};

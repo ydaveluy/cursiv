@@ -11,7 +11,7 @@
 #include "cursiv/lr/gen/LrBuckets.hpp"
 #include "cursiv/lr/gen/LrLowered.hpp"
 #include "cursiv/lr/gen/lr_copy_prod.hpp"
-#include "cursiv/lr/gen/lr_lower_define.hpp"
+#include "cursiv/lr/gen/lr_productions.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 
@@ -119,7 +119,7 @@ inline void lr_split_loops(LrLowered& o) {
           if (at == kNoRow) throw LowerRefused(LowerFail::tooManyProductions);
         }
         if (place.goes[i] >= 0)
-          c.slotSym[c.prods[at].at] = nt_sym(places[place.goes[i]].nt);
+          c.slots[c.prods[at].at].sym = nt_sym(places[place.goes[i]].nt);
       }
     }
   }

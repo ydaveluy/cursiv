@@ -1,83 +1,31 @@
-// Failed DFA suffixes belong to their state and position. Acceptances and
-// echoing relays remain the full matcher's responsibility; a relay that only
-// asserts is a state read like another, its reach part of the halt.
+// The walks of one text that match nothing: each failed suffix is read once.
 #pragma once
 
-#include <algorithm>
 #include <cstdint>
-#include <unordered_map>
-#include <vector>
 
+#include "cursiv/shared/runtime/LexSuffixSession.hpp"
 #include "cursiv/text/TextOffset.hpp"
-#include "cursiv/shared/table/LexRelay.hpp"
-#include "cursiv/shared/table/Token.hpp"
 
 namespace cursiv::engine {
 
 template <class Tape>
 class LexFailedWalks {
  public:
+  // Whether the walk of `mode` from `from` fails, `halt` where it stopped
+  // reading. An acceptance or a relay it crosses leaves it to the full matcher.
   template <class Poll>
   bool fails(const Tape& tape, const char* src, TextOffset len,
              std::uint16_t mode, TextOffset from, TextOffset& halt,
              Poll&& poll) {
-    std::uint16_t state = tape.start(mode);
-    TextOffset at = from;
-    TextOffset head = 0;
-    TextOffset stop = 0;
-    _points.clear();
-    for (;;) {
-      if (tape.accept(state) != 0) return false;
-      if (at % kStride == 0) {
-        poll();
-        const std::uint64_t key = (std::uint64_t{at} << 16) | state;
-        if (const auto it = _known.find(key); it != _known.end()) {
-          stop = it->second;
-          break;
-        }
-        _points.push_back(Point{key, 0});
-      }
-      if constexpr (requires { tape.relay(state); })
-        for (auto k = tape.relay(state); k != kNoRelay;
-             k = tape.relay_of(k).next) {
-          const LexRelay& relay = tape.relay_of(k);
-          TextOffset seen = at;
-          if (relay.asserts == nullptr || relay.asserts(src, len, at, seen))
-            return false;
-          TextOffset& reach = _points.empty() ? head : _points.back().reach;
-          reach = std::max(reach, seen);
-        }
-      if (at >= len) {
-        stop = len;
-        break;
-      }
-      const auto next = tape.step(state, static_cast<unsigned char>(src[at]));
-      if (next == kDeadState) {
-        stop = at;
-        break;
-      }
-      state = next;
-      ++at;
-    }
-    // A key answers for the walk from itself on, not for what was read before.
-    for (auto it = _points.rbegin(); it != _points.rend(); ++it) {
-      stop = std::max(stop, it->reach);
-      _known.emplace(it->key, stop);
-    }
-    halt = std::max(stop, head);
-    return true;
+    const auto walk =
+        _walks.match<true>(tape, src, len, tape.start(mode), from, from,
+                           [&](TextOffset) { poll(); });
+    if (walk.available) halt = walk.halt;
+    return walk.available;
   }
 
  private:
-  static constexpr TextOffset kStride = 16;
-  // A key reached, and how far the assertions read from there up to the next
-  // key.
-  struct Point {
-    std::uint64_t key;
-    TextOffset reach;
-  };
-  std::unordered_map<std::uint64_t, TextOffset> _known;
-  std::vector<Point> _points;
+  LexSuffixCache _walks;
 };
 
 }  // namespace cursiv::engine

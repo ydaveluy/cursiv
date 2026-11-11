@@ -44,7 +44,6 @@ class LlLowerer : public LowerWalk<LlLowerer, LlLowered, llow::Pool> {
   }
   Descent<std::uint16_t> build_repeat(unsigned cfg, ImageId e);
   Descent<std::uint16_t> build_create(unsigned cfg, ImageId e);
-  Descent<std::uint16_t> build_nest(unsigned cfg, ImageId e);
   Descent<std::uint16_t> build_closed(unsigned cfg, ImageId e);
   Descent<std::uint16_t> build_write(unsigned cfg, ImageId e);
   Descent<std::uint16_t> build_flag(unsigned cfg, ImageId e);

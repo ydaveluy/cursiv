@@ -7,7 +7,6 @@
 #include <map>
 #include <optional>
 #include <span>
-#include <unordered_map>
 #include <vector>
 
 #include "cursiv/lr/gen/LrBuckets.hpp"
@@ -32,11 +31,9 @@ void lr_compact_prods(Cfg& c, Pred&& drop) {
   for (std::uint16_t k = 0; k < c.nprods; ++k) {
     if (drop(k)) continue;
     if (k == c.startProd) c.startProd = n;
-    c.prodBuild[n] = c.prodBuild[k];
     c.prods[n++] = c.prods[k];
   }
   c.prods.truncate(n);
-  c.prodBuild.truncate(n);
   c.nprods = n;
 }
 
@@ -56,12 +53,11 @@ void lr_intern_aux(Cfg& c) {
     std::vector<std::uint32_t> key;
     for (const std::uint16_t k : ix.of(a)) {
       const LrLowProd& x = c.prods[k];
-      const LrProdBuild& b = c.prodBuild[k];
-      key.insert(key.end(), {x.len, x.node, x.gap, b.prec, b.endOnly, b.tailCfg,
-                             b.closesRegion, b.regionExit, b.priorityAlt,
-                             b.prioritySubset, b.turn, b.decideLen, b.stop});
-      key.insert(key.end(), c.decisions.v.begin() + b.decideAt,
-                 c.decisions.v.begin() + b.decideAt + b.decideLen);
+      key.insert(key.end(), {x.len, x.node, x.gap, x.prec, x.endOnly, x.tailCfg,
+                             x.closesRegion, x.regionExit, x.priorityAlt,
+                             x.prioritySubset, x.turn, x.decideLen, x.stop});
+      key.insert(key.end(), c.decisions.v.begin() + x.decideAt,
+                 c.decisions.v.begin() + x.decideAt + x.decideLen);
       for (unsigned i = 0; i < x.len; ++i) {
         const std::uint16_t s = c.sym_at(x, i);
         key.insert(key.end(), {s == nt_sym(a) ? 0x10000u : s, c.row_at(x, i),
@@ -88,7 +84,7 @@ void lr_intern_aux(Cfg& c) {
     if (!moved) break;
     for (std::uint16_t k = 0; k < c.nprods; ++k)
       c.each_nt(c.prods[k], [&](unsigned i, std::uint16_t nt) {
-        if (repl[nt] != nt) c.slotSym[c.prods[k].at + i] = nt_sym(repl[nt]);
+        if (repl[nt] != nt) c.slots[c.prods[k].at + i].sym = nt_sym(repl[nt]);
       });
   }
 
@@ -112,36 +108,12 @@ inline void lr_no_rule_without_production(LrLowered& o) {
       if (const std::uint16_t sym = c.sym_at(q, i);
           !is_term(sym) || !c.terms[sym].trivia)
         continue;
-      o.fault.raise(GrammarFaultCode::skippedTerminal, c.prodBuild[k].owner);
+      o.fault.raise(GrammarFaultCode::skippedTerminal, c.prods[k].owner);
       return;
     }
   }
-  std::vector<std::uint16_t> unresolved(c.nprods, 0);
-  std::vector<std::vector<std::uint16_t>> users(c.nnts);
-  std::vector<bool> productive(c.nnts, false);
-  std::vector<std::uint16_t> work;
-  for (std::uint16_t k = 0; k < c.nprods; ++k) {
-    const LrLowProd& q = c.prods[k];
-    c.each_nt(q, [&](unsigned, std::uint16_t nt) {
-      ++unresolved[k];
-      users[nt].push_back(k);
-    });
-    if (unresolved[k] == 0 && !productive[q.lhs]) {
-      productive[q.lhs] = true;
-      work.push_back(q.lhs);
-    }
-  }
-  while (!work.empty()) {
-    const std::uint16_t nt = work.back();
-    work.pop_back();
-    for (const std::uint16_t k : users[nt]) {
-      const std::uint16_t lhs = c.prods[k].lhs;
-      if (--unresolved[k] == 0 && !productive[lhs]) {
-        productive[lhs] = true;
-        work.push_back(lhs);
-      }
-    }
-  }
+  const std::vector<std::uint8_t> productive =
+      lr_derives(c, [](unsigned) { return true; });
   // The rule to name is the one the others wait on: it has no production, or
   // the walk through what blocks it comes back on itself.
   for (std::uint16_t i = 0; i < c.nnts; ++i) {
@@ -174,79 +146,38 @@ inline void lr_drop_twins(LrLowered& o) {
   LrBuildCfg& c = o.cfg;
   std::vector<bool> gone(c.nprods, false);
   // What twins agree on: everything but the writes and the source rank.
-  const auto equivalent = [&](std::uint16_t a, std::uint16_t b) {
+  const auto kind_of = [&](std::uint16_t k) {
+    const LrLowProd& x = c.prods[k];
+    std::vector<std::uint32_t> key{
+        x.lhs,     x.len,          x.gap,        x.endOnly, x.prec,
+        x.tailCfg, x.closesRegion, x.regionExit, x.turn,    x.stop};
+    for (unsigned i = 0; i < x.len; ++i)
+      key.insert(key.end(), {c.sym_at(x, i), c.cfg_at(k, i)});
+    return key;
+  };
+  // In the order a rule lists them, each is compared with the one kept of its
+  // kind: it either drops, or drops that one and takes its place, so one pass
+  // keeps the first-ranked.
+  std::map<std::vector<std::uint32_t>, std::uint16_t> kept;
+  for (std::uint16_t b = 0; b < c.nprods; ++b) {
+    const auto [held, fresh] = kept.try_emplace(kind_of(b), b);
+    if (fresh) continue;
+    const std::uint16_t a = held->second;
     const LrLowProd& x = c.prods[a];
     const LrLowProd& y = c.prods[b];
-    const LrProdBuild& bx = c.prodBuild[a];
-    const LrProdBuild& by = c.prodBuild[b];
-    if (x.lhs != y.lhs || x.len != y.len || x.gap != y.gap ||
-        bx.endOnly != by.endOnly || bx.prec != by.prec ||
-        bx.tailCfg != by.tailCfg || bx.closesRegion != by.closesRegion ||
-        bx.regionExit != by.regionExit || bx.turn != by.turn ||
-        bx.stop != by.stop)
-      return false;
+    bool writes = x.node != y.node;
     for (unsigned i = 0; i < x.len; ++i)
-      if (c.sym_at(x, i) != c.sym_at(y, i) || c.cfg_at(a, i) != c.cfg_at(b, i))
-        return false;
-    return true;
-  };
-  // The hash only selects the candidates `equivalent` then confirms.
-  const auto hash_of = [&](std::uint16_t a) {
-    const LrLowProd& x = c.prods[a];
-    const LrProdBuild& bx = c.prodBuild[a];
-    std::uint64_t h = 0x9e3779b97f4a7c15ULL;
-    const auto mix = [&](std::uint64_t v) {
-      h = (h ^ v) * 0xff51afd7ed558ccdULL;
-      h ^= h >> 32;
-    };
-    mix(x.lhs);
-    mix(x.len);
-    mix(x.gap);
-    mix(std::uint64_t{bx.endOnly} | std::uint64_t{bx.closesRegion} << 1 |
-        std::uint64_t{bx.turn} << 2 | std::uint64_t{bx.regionExit} << 3 |
-        std::uint64_t{bx.prec} << 8 | std::uint64_t{bx.tailCfg} << 16 |
-        std::uint64_t{bx.stop} << 24);
-    for (unsigned i = 0; i < x.len; ++i)
-      mix(std::uint64_t{c.sym_at(x, i)} << 8 | c.cfg_at(a, i));
-    return h;
-  };
-  // Twins share a left-hand side and, in the order the rule lists them, each
-  // is compared with the one kept of its kind: it either drops, or drops that
-  // one and takes its place, so one pass keeps the first-ranked.
-  const auto ix = lr_by_lhs(c);
-  std::unordered_multimap<std::uint64_t, std::uint16_t> kindOf;
-  for (std::uint16_t g = 0; g < c.nnts; ++g) {
-    for (const std::uint16_t b : ix.of(g)) {
-      const std::uint64_t h = hash_of(b);
-      std::uint16_t* held = nullptr;
-      for (auto [it, end] = kindOf.equal_range(h); it != end; ++it)
-        if (equivalent(it->second, b)) {
-          held = &it->second;
-          break;
-        }
-      if (!held) {
-        kindOf.emplace(h, b);
-        continue;
-      }
-      const std::uint16_t a = *held;
-      const LrLowProd& x = c.prods[a];
-      const LrLowProd& y = c.prods[b];
-      const LrProdBuild& bx = c.prodBuild[a];
-      const LrProdBuild& by = c.prodBuild[b];
-      bool writes = x.node != y.node;
-      for (unsigned i = 0; i < x.len; ++i)
-        writes = writes || c.row_at(x, i) != c.row_at(y, i);
-      if (writes && bx.permuted && by.permuted) {
-        gone[b] = true;
-        continue;
-      }
-      // Source priority decides which duplicate stays.
-      const bool preferB = by.priorityAlt < bx.priorityAlt ||
-                           (by.priorityAlt == bx.priorityAlt &&
-                            by.prioritySubset > bx.prioritySubset);
-      gone[preferB ? a : b] = true;
-      if (preferB) *held = b;
+      writes = writes || c.row_at(x, i) != c.row_at(y, i);
+    if (writes && x.permuted && y.permuted) {
+      gone[b] = true;
+      continue;
     }
+    // Source priority decides which duplicate stays.
+    const bool preferB =
+        y.priorityAlt < x.priorityAlt ||
+        (y.priorityAlt == x.priorityAlt && y.prioritySubset > x.prioritySubset);
+    gone[preferB ? a : b] = true;
+    if (preferB) held->second = b;
   }
   lr_compact_prods(c, [&](std::uint16_t k) { return gone[k]; });
 }
@@ -262,7 +193,7 @@ inline void lr_drop_unread_stops(LrLowered& o) {
   }
   lr_compact_prods(c, [&](std::uint16_t k) {
     const std::uint16_t lhs = c.prods[k].lhs;
-    return c.prodBuild[k].stop != 0 && !read[lhs] && counts[lhs] == 1;
+    return c.prods[k].stop != 0 && !read[lhs] && counts[lhs] == 1;
   });
 }
 
@@ -457,7 +388,7 @@ inline void lr_move_chains_down(LrLowered& o, const std::vector<bool>& hands,
   for (std::uint16_t k = 0; k < c.nprods; ++k) {
     LrLowProd& q = c.prods[k];
     // A turn creates its own record: it reaches back past its position.
-    if (q.node == kNoRow || q.len != 1 || c.prodBuild[k].turn) continue;
+    if (q.node == kNoRow || q.len != 1 || q.turn) continue;
     const std::uint16_t sym = c.sym_at(q, 0);
     if (!is_term(sym) && !hands[nt_index(sym)]) continue;
     if (lr_chain_creates(o, q.node) &&
@@ -486,11 +417,10 @@ inline void lr_sink_word_rules(LrLowered& o, std::span<const WriteKind> kind) {
   std::vector<bool> sinks(c.nnts, true);
   for (std::uint16_t k = 0; k < c.nprods; ++k) {
     const LrLowProd& q = c.prods[k];
-    const LrProdBuild& b = c.prodBuild[k];
     const std::uint16_t r = q.len == 1 ? c.row_at(q, 0) : kNoRow;
     const std::uint16_t sym = q.len == 1 ? c.sym_at(q, 0) : kNoRow;
-    if (q.len != 1 || q.node != kNoRow || q.gap != 0 || b.endOnly ||
-        b.closesRegion || b.regionExit || b.turn || b.stop != 0 ||
+    if (q.len != 1 || q.node != kNoRow || q.gap != 0 || q.endOnly ||
+        q.closesRegion || q.regionExit || q.turn || q.stop != 0 ||
         !is_term(sym) || c.terms[sym].element != kNoRow || !only_converts(r) ||
         (row[q.lhs] != kNoRow && row[q.lhs] != r)) {
       sinks[q.lhs] = false;
@@ -569,12 +499,12 @@ inline Descent<std::uint16_t> lr_clone_opening(
       const std::size_t slot = c.prods[copy].at + i;
       if (is_term(sym)) {
         if (const auto s = swap.find(sym); s != swap.end())
-          c.slotSym[slot] = s->second;
+          c.slots[slot].sym = s->second;
         break;
       }
       const std::uint16_t inner = nt_index(sym);
       if (fl.first[inner].intersects(keys))
-        c.slotSym[slot] = nt_sym(
+        c.slots[slot].sym = nt_sym(
             co_await lr_clone_opening(c, fl, ix, inner, swap, keys, made));
       if (!fl.nullable[inner]) break;
     }
@@ -630,12 +560,12 @@ inline void lr_bind_infix_ops(LrLowered& o) {
     rewrote = true;
     const std::size_t slot = c.prods[op.prod].at + op.slot;
     if (is_term(sym)) {
-      c.slotSym[slot] = swap.begin()->second;
+      c.slots[slot].sym = swap.begin()->second;
     } else {
       std::map<std::uint16_t, std::uint16_t> made;
       DynSet keys;
       for (const auto& [t, unused] : swap) keys.set(t);
-      c.slotSym[slot] = nt_sym(descend(
+      c.slots[slot].sym = nt_sym(descend(
           lr_clone_opening(c, fl, ix, nt_index(sym), swap, keys, made)));
     }
   }

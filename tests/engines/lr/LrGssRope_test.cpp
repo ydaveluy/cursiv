@@ -13,17 +13,13 @@
 #include <vector>
 
 #include "cursiv/lr/runtime/LrGssIndex.hpp"
-#include "cursiv/lr/runtime/LrGssPool.hpp"
 #include "cursiv/lr/runtime/LrGssRope.hpp"
 #include "cursiv/lr/runtime/LrGssRuns.hpp"
 #include "cursiv/Check.hpp"
 
 namespace {
 
-using cursiv::engine::LrGssForkAgg;
-using cursiv::engine::LrGssNoAgg;
-using Spell = cursiv::engine::LrGssRope<LrGssNoAgg>;
-using Forks = cursiv::engine::LrGssRope<LrGssForkAgg>;
+using Spell = cursiv::engine::LrGssRope;
 
 Spell::Id chunk(Spell& rope, const std::vector<std::uint32_t>& values) {
   Spell::Id r = Spell::none;
@@ -156,27 +152,6 @@ void a_long_run_appended_or_prepended_stays_shallow() {
   CHECK(rope.nodes() < 64 * std::size_t{kCount});
 }
 
-void forks_are_found_by_position() {
-  std::mt19937 rng(5);
-  Forks rope;
-  Forks::Id r = Forks::none;
-  std::vector<std::uint32_t> places;
-  std::uint32_t at = 0;
-  for (unsigned i = 0; i != 2000; ++i) {
-    at += rng() % 3;
-    places.push_back(at);
-    r = rope.concat(r, rope.leaf(i, LrGssForkAgg{at}));
-  }
-  for (unsigned probe = 0; probe != 200; ++probe) {
-    const std::uint32_t p = rng() % (at + 3);
-    const auto cut =
-        rope.first_where(r, [p](const LrGssForkAgg& a) { return a.at >= p; });
-    const auto expected = static_cast<std::uint32_t>(
-        std::ranges::lower_bound(places, p) - places.begin());
-    CHECK(cut == expected);
-  }
-}
-
 // A node is made once: what is joined the same is the same node, whichever way
 // it was reached, and a value that differs is a node of its own.
 void what_is_joined_the_same_is_one_node() {
@@ -192,9 +167,6 @@ void what_is_joined_the_same_is_one_node() {
   CHECK(chunk(rope, other) != a);
   CHECK(rope.leaf(4) == rope.leaf(4));
   CHECK(rope.leaf(4) != rope.leaf(5));
-  Forks forks;
-  CHECK(forks.leaf(9, LrGssForkAgg{2}) != forks.leaf(9, LrGssForkAgg{3}));
-  CHECK(forks.leaf(9, LrGssForkAgg{2}) == forks.leaf(9, LrGssForkAgg{2}));
 }
 
 void virtual_lengths_are_checked_before_they_wrap() {
@@ -355,47 +327,27 @@ void sequences_that_collide_under_a_polynomial_hash_are_told_apart() {
 
 }  // namespace
 
-namespace gss_pool {
+namespace gss_runs {
 namespace {
+
+using Runs = cursiv::engine::LrGssRuns<std::uint32_t, 3>;
 
 struct Cell {
   std::uint32_t at = 7;
   std::uint16_t twice = 0;
 };
 
-void a_reference_survives_the_growth_that_follows() {
-  cursiv::engine::LrGssPool<Cell, 4> pool;
-  const std::size_t first = pool.push_back({1, 2});
-  const Cell* held = &pool[first];
+void single_values_take_every_offset_and_never_move() {
+  cursiv::engine::LrGssRuns<Cell, 4> cells;
+  const std::size_t first = cells.append(1, {1, 2});
+  const Cell* held = &cells[first];
   for (std::uint32_t i = 2; i != 1000; ++i)
-    CHECK(pool.push_back({i, static_cast<std::uint16_t>(2 * i)}) == i - 1);
-  CHECK(pool.size() == 999);
-  CHECK(&pool[first] == held && held->at == 1 && held->twice == 2);
+    CHECK(cells.append(1, {i, static_cast<std::uint16_t>(2 * i)}) == i - 1);
+  CHECK(cells.size() == 999);
+  CHECK(&cells[first] == held && held->at == 1 && held->twice == 2);
   for (std::uint32_t i = 2; i != 1000; ++i)
-    CHECK(pool[i - 1].at == i && pool[i - 1].twice == 2 * i);
+    CHECK(cells[i - 1].at == i && cells[i - 1].twice == 2 * i);
 }
-
-void a_cleared_pool_starts_over() {
-  cursiv::engine::LrGssPool<Cell, 4> pool;
-  for (std::uint32_t i = 0; i != 100; ++i) (void)pool.push_back({i, 0});
-  pool.clear();
-  CHECK(pool.size() == 0);
-  CHECK(pool.push_back({5, 6}) == 0);
-  CHECK(pool[0].at == 5 && pool[0].twice == 6);
-}
-
-}  // namespace
-
-void run() {
-  a_reference_survives_the_growth_that_follows();
-  a_cleared_pool_starts_over();
-}
-}  // namespace gss_pool
-
-namespace gss_runs {
-namespace {
-
-using Runs = cursiv::engine::LrGssRuns<std::uint32_t, 3>;
 
 void every_run_stays_in_one_piece_whatever_its_length() {
   Runs runs;
@@ -467,6 +419,7 @@ void a_run_past_32_bit_offsets_is_refused() {
 }  // namespace
 
 void run() {
+  single_values_take_every_offset_and_never_move();
   every_run_stays_in_one_piece_whatever_its_length();
   a_run_filled_the_same_reads_the_same();
   a_cleared_run_store_starts_over();
@@ -622,7 +575,6 @@ void run() {
 }  // namespace gss_index
 
 int main() {
-  gss_pool::run();
   gss_runs::run();
   gss_index::run();
 
@@ -630,7 +582,6 @@ int main() {
   two_ropes_share_the_prefix_they_share();
   parts_join_in_order_whatever_joins_first();
   a_long_run_appended_or_prepended_stays_shallow();
-  forks_are_found_by_position();
   what_is_joined_the_same_is_one_node();
   virtual_lengths_are_checked_before_they_wrap();
   a_deep_shared_avl_tree_keeps_its_cursor_and_frontier_in_bounds();

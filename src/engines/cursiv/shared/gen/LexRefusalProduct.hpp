@@ -251,8 +251,7 @@ struct LexRefusalProduct {
     for (int x : cl) {
       const LexNfaState st = n.s[static_cast<std::size_t>(x)];
       if (st.set >= 0) {
-        ByteSet on = g.sets[st.set] & pickSet;
-        if (st.minus >= 0) on.andnot(g.sets[st.minus]);
+        const ByteSet on = lex_edge_bytes(g.sets.data(), st) & pickSet;
         if (on.any()) {
           const int to = done ? st.t1 : level(k, memo, lvl + 1, st.t1, -1);
           // A level that keeps nothing is not an edge.
@@ -349,8 +348,8 @@ std::vector<bool> lex_matcher_takes(LexNfaPool& n, Cfg& g,
                                     const std::vector<int>& offsets) {
   std::vector<bool> taken(n.guards.size(), false);
   for (std::size_t k = 0; k < n.guards.size(); ++k) taken[k] = offsets[k] == 0;
-  // A trial only appends to the set pools, so cutting them back to their sizes
-  // undoes it.
+  // A trial only appends to the set pools, so cutting them and their index
+  // back to their sizes undoes it.
   const auto nsets = g.nsets;
   const auto setsSize = g.sets.size();
   const auto decodeSize = g.setDecode.size();
@@ -385,6 +384,8 @@ std::vector<bool> lex_matcher_takes(LexNfaPool& n, Cfg& g,
       break;
     }
     g.nsets = nsets;
+    std::erase_if(g.setIndex,
+                  [&](const auto& set) { return set.second >= nsets; });
     g.sets.truncate(setsSize);
     g.setDecode.truncate(decodeSize);
     g.setScalars.truncate(scalarsSize);

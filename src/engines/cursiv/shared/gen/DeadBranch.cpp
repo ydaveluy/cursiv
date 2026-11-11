@@ -68,19 +68,11 @@ class Dead {
   // One for a branch that is `eof` bare, two for one under a directive.
   Descent<unsigned> end_arm(ImageId id) const {
     const ImageNode& n = node(id);
-    switch (n.kind) {
-      case ImageKind::assign:
-      case ImageKind::append:
-      case ImageKind::flag:
-      case ImageKind::create:
-      case ImageKind::nest:
-        co_return co_await end_arm(child_at(n, 0)) ? 2u : 0u;
-      case ImageKind::skip:
-      case ImageKind::doc:
-        co_return co_await end_arm(child_at(n, 0));
-      default:
-        co_return is_eof(id) ? 1u : 0u;
-    }
+    if (is_directive_kind(n.kind))
+      co_return co_await end_arm(child_at(n, 0)) ? 2u : 0u;
+    if (n.kind == ImageKind::skip || n.kind == ImageKind::doc)
+      co_return co_await end_arm(child_at(n, 0));
+    co_return is_eof(id) ? 1u : 0u;
   }
 
   // A write over a creation stands on a rule of its own.
@@ -204,17 +196,13 @@ class Dead {
 
   Descent<void> walk(ImageId id, Arm a) {
     const ImageNode n = node(id);
+    // A directive, prose or region over a branch is still that branch.
+    if (is_directive_kind(n.kind) || n.kind == ImageKind::doc ||
+        n.kind == ImageKind::skip) {
+      co_await walk_child(child_at(n, 0), a);
+      co_return;
+    }
     switch (n.kind) {
-      // A directive, prose or region over a branch is still that branch.
-      case ImageKind::assign:
-      case ImageKind::append:
-      case ImageKind::flag:
-      case ImageKind::create:
-      case ImageKind::nest:
-      case ImageKind::doc:
-      case ImageKind::skip:
-        co_await walk_child(child_at(n, 0), a);
-        co_return;
       case ImageKind::choice: {
         const std::vector<Arm> arms = arms_of(n);
         for (std::uint32_t i = 0; i < n.count; ++i)

@@ -112,8 +112,7 @@ struct Asking {
   std::uint16_t operator()(cursiv::TextOffset at, std::uint8_t section = 0) {
     context.at = at;
     context.triviaAt = at;
-    context.laValid = false;
-    context.laMode = cursiv::engine::kInvalidSymbol;
+    context.laMode = cursiv::engine::kNoMode;
     context.section = section;
     cursiv::engine::ll_peek<T>(context, T.decisions[0].mode);
     cursiv::engine::ll_episode_engine<T>().abandon();
@@ -326,7 +325,7 @@ void document_end_elects_default_trivia_before_other_regions() {
   builder.leaf(0, 4,
                cursiv::engine::StampLayout{}.make(cursiv::engine::kNoRow, 0));
   cursiv::engine::LlContext context(text, builder);
-  context.at = 4;
+  context.at = context.triviaAt = 4;
   CHECK(cursiv::engine::ll_tail<table>(context));
   cursiv::engine::ll_flush_trivia<table>(context);
   CHECK(!context.repaired && context.la.sym == cursiv::engine::kEofSymbol);

@@ -10,7 +10,6 @@ namespace cursiv::engine {
 
 void LrProgramMatrix::append(std::span<const std::uint64_t> row,
                              std::uint64_t absent) {
-  _columns = static_cast<unsigned>(row.size());
   std::vector<std::uint32_t> run;
   for (std::size_t at = 0; at < row.size(); at += 8) {
     std::array<std::uint64_t, 8> block;
@@ -44,50 +43,9 @@ void LrProgramMatrix::append(std::span<const std::uint64_t> row,
 }
 
 void LrProgramMatrix::finish() {
-  const std::size_t distinct = _runs.size();
   _pool = {};
   _empty.reset();
   _runs = {};
-  const std::size_t stride = (std::size_t{_columns} + 7) / 8;
-  const std::size_t states = rows.size();
-  const unsigned ib = index_bits(), vb = value_bits();
-  // The bits of a form, by whether it shares rows and stores blocks.
-  const auto size = [&](bool shared, bool blocked) {
-    const std::size_t width = blocked ? stride : _columns;
-    const std::size_t last = distinct == 0 ? 0 : (distinct - 1) * width;
-    return (shared ? states * bits(last) : 0) +
-           (shared ? distinct : states) * width * (blocked ? ib : vb) +
-           (blocked ? values.size() * vb : 0);
-  };
-  bool shared = false, blocked = false;
-  for (const bool s : {false, true})
-    for (const bool b : {false, true})
-      if (size(s, b) < size(shared, blocked)) shared = s, blocked = b;
-  // Where the run of each stored row starts in `blocks`.
-  const std::size_t lines = shared ? distinct : states;
-  const auto run = [&](std::size_t i) {
-    return shared ? i * stride : std::size_t{rows[i]};
-  };
-  if (!blocked) {
-    std::vector<std::uint64_t> packed;
-    packed.reserve(lines * _columns);
-    for (std::size_t i = 0; i < lines; ++i)
-      for (unsigned c = 0; c < _columns; ++c)
-        packed.push_back(values[blocks[run(i) + c / 8] * 8 + c % 8]);
-    values = std::move(packed);
-    blocks = {};
-    if (shared)
-      for (std::uint32_t& r : rows)
-        r = static_cast<std::uint32_t>(r / stride * _columns);
-  } else if (!shared) {
-    std::vector<std::uint32_t> packed;
-    packed.reserve(lines * stride);
-    for (std::size_t i = 0; i < lines; ++i)
-      packed.insert(packed.end(), blocks.begin() + run(i),
-                    blocks.begin() + run(i) + stride);
-    blocks = std::move(packed);
-  }
-  if (!shared) rows = {};
 }
 
 unsigned LrProgramMatrix::bits(std::uint64_t max) {

@@ -5,50 +5,14 @@
 #include <utility>
 
 #include "cursiv/parser/Parser.hpp"
-#include "cursiv/ll/runtime/ll_matcher.hpp"
-#include "cursiv/shared/runtime/LexAdapter.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/KeywordRelayGrammar.hpp"
 
 #include "semanticll/generated/Ll/Module.hpp"
-#include "semanticll/generated/Ll/Table.hpp"
 
 namespace ll_keyword_relay_cases {
 
 namespace {
-
-// A tape of a table with relays declares its relays and its qualified
-// acceptance, with and without skipping; a tape missing either fails the check.
-namespace declared {
-
-using Plain = cursiv::engine::LlLexTape<tllsemantic::generated::Ll::kTable>;
-using Skipping =
-    cursiv::engine::LlLexTape<tllsemantic::generated::Ll::kTable, true>;
-
-struct LostQualified : Plain {
-  cursiv::engine::SymbolId qualified(std::uint16_t, const char*,
-                                     cursiv::TextOffset, cursiv::TextOffset,
-                                     cursiv::TextOffset&) const = delete;
-};
-struct LostRun : Skipping {
-  cursiv::TextOffset run(std::uint16_t, const char*, cursiv::TextOffset,
-                         cursiv::TextOffset) const = delete;
-};
-
-static_assert(Plain::kRelays && Plain::kQualified && Skipping::kQualified);
-static_assert(cursiv::engine::LexCursor<Plain> &&
-              cursiv::engine::LexCursor<Skipping>);
-static_assert(cursiv::engine::LexAcceptanceDeclared<Plain> &&
-              cursiv::engine::LexAcceptanceDeclared<Skipping>);
-static_assert(cursiv::engine::LexRelaysDeclared<Plain> &&
-              cursiv::engine::LexRelaysDeclared<Skipping>);
-
-static_assert(LostQualified::kQualified &&
-              !cursiv::engine::LexAcceptanceDeclared<LostQualified>);
-static_assert(cursiv::engine::LexOffersRelay<LostRun> &&
-              !cursiv::engine::LexRelaysDeclared<LostRun>);
-
-}  // namespace declared
 
 std::string shown(const cursiv::ParseResult& r) {
   std::string out;

@@ -22,7 +22,6 @@
 #include "cursiv/shared/gen/LexRelayGen.hpp"
 #include "cursiv/shared/gen/LexSuccessors.hpp"
 #include "cursiv/shared/gen/PredicateModes.hpp"
-#include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/gen/lex_reserve.hpp"
 #include "cursiv/shared/table/Token.hpp"
@@ -37,7 +36,7 @@ std::vector<DynSet> ll_section_reads(const LlLowCfg& g) {
   std::vector<DynSet> own(sectionOf.size());
   for (std::uint32_t id = 0; id < g.nnodes; ++id)
     if (g.nodes[id].kind == LlShape::term)
-      own[sectionOf[g.nodeBuild[id].cfg]].set(g.nodes[id].sym);
+      own[sectionOf[g.nodes[id].cfg]].set(g.nodes[id].sym);
   return own;
 }
 
@@ -103,8 +102,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   for (std::uint16_t d = 0; d < g.ndecisions; ++d) {
     LlDecision& dec = g.decisions[d];
     DynSet want;
-    for (std::uint16_t a = 0; a < g.decisionBuild[d].nalts; ++a)
-      want |= b.laSet[dec.set + a];
+    for (std::uint16_t a = 0; a < dec.nalts; ++a) want |= b.laSet[dec.set + a];
     const DynSet& stands = standing.point[dec.node];
     b.decStands[d] = stands.any() ? 1 : 0;
     const DynSet beyond = standing_firsts(stands);
@@ -115,8 +113,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
         b.readHeadMode[d] =
             intern(want | skip(b.readHeadCfg, dec.node), beyond);
         b.readMode[d] =
-            intern(want | skips[g.nodeBuild[dec.node].cfg] | modes.joins,
-                   beyond);
+            intern(want | skips[g.nodes[dec.node].cfg] | modes.joins, beyond);
       }
     }
   }
@@ -252,7 +249,7 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
             [&](const auto& a) { return a.bound != built.dfaBound[self]; }) ||
         !r.stands.empty();
   };
-  lex_build_dfa(built, alpha, alpha.cut, modeSet, push_relay, write);
+  lex_build_dfa(built, alpha, modeSet, push_relay, write);
   LexSuccessors successors(built.dfaNext.data(), built.ndfa, built.ncls);
   built.typoSuccBase = std::move(successors.base);
   built.typoSucc = std::move(successors.states);
@@ -460,8 +457,7 @@ void ll_flag_choices(LlBuiltProgram& b, const LexAlphabet& alpha,
     const LlDecision& dec = g.decisions[d];
     if (!b.liveRules[dec.rule] || exits.ends[dec.state] == 0) continue;
     DynSet caller;
-    for (unsigned a = 0; a < g.decisionBuild[d].nalts; ++a)
-      caller |= b.laSet[dec.set + a];
+    for (unsigned a = 0; a < dec.nalts; ++a) caller |= b.laSet[dec.set + a];
     caller.andnot(exits.reads[dec.state]);
     caller.andnot(modes.trivia);
     // What the token is read beside: the tokens of the alphabet, that of each
@@ -495,7 +491,7 @@ void ll_build_lexer(LlBuiltProgram& b, LexAlphabet& alpha,
     if (multi == 0) continue;
     if (multi == 2) {
       bool readsTie = false;
-      for (unsigned i = 0; i < b.cfg.decisionBuild[d].nalts; ++i)
+      for (unsigned i = 0; i < decision.nalts; ++i)
         readsTie = readsTie ||
                    b.laSet[decision.set + i].intersects(modeTie[decision.mode]);
       if (!readsTie) continue;

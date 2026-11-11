@@ -3,6 +3,7 @@
 // emitted parser names only where its table narrowed the row.
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 
 #include "cursiv/grammar/ElementId.hpp"
@@ -23,23 +24,6 @@ CURSIV_COLD CURSIV_NOINLINE inline void lr_record_pending(
   for (const Token& t : c.pending)
     c.tape.hidden<L>(t.begin, t.end, termElem[t.sym]);
   c.pending.clear();
-}
-template <bool Recorded, StampLayout L = StampLayout{}>
-CURSIV_ALWAYS_INLINE inline void lr_record_trivia(
-    LrContext& c, [[maybe_unused]] const ElementId* termElem) {
-  if constexpr (Recorded) {
-    if (!c.pending.empty()) [[unlikely]]
-      lr_record_pending<L>(c, termElem);
-  }
-}
-
-// The cursor past what the matcher held. A shift moves `committed` itself and
-// calls the records alone.
-template <bool Recorded, StampLayout L = StampLayout{}>
-CURSIV_ALWAYS_INLINE inline void lr_flush(LrContext& c,
-                                          const ElementId* termElem) {
-  lr_record_trivia<Recorded, L>(c, termElem);
-  if (c.pendEnd > c.committed) c.committed = c.pendEnd;
 }
 
 // The leaf onto the tape and its frame onto the stack. Generated shifts enter
@@ -99,11 +83,13 @@ CURSIV_ALWAYS_INLINE inline void lr_name_row(LrContext& c, LrFrame& f,
   f.row = row;
 }
 
-// The same, for a leaf: its pair was folded at build time.
+// The same, where the pair was folded at build time. A leaf always wrote its
+// record.
 template <StampLayout L = StampLayout{}>
 CURSIV_ALWAYS_INLINE inline void lr_name_row_at(LrContext& c, LrFrame& f,
-                                                ElementId row) {
-  if (f.word == kLrNoWord) return;  // the symbol wrote no record of its own
+                                                ElementId row, bool leaf) {
+  assert(!leaf || f.word != kLrNoWord);
+  if (!leaf && f.word == kLrNoWord) return;
   c.tape.rename<L>(f.word, row);
   f.row = row;
 }

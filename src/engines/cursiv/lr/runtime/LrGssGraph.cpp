@@ -130,9 +130,8 @@ void LrGssGraph::seed(const LrStack& stack, const Reading& start,
     if (previous != none) {
       const Id f = _forest.node();
       _forest.add(f, {}, none, {});
-      _edges.push_back(Edge{previous, f, v, kSeedSymbol});
-      _vertices[v].edges = _vertices[v].lastEdge =
-          static_cast<Id>(_edges.size() - 1);
+      _vertices[v].edges = _vertices[v].lastEdge = static_cast<Id>(
+          _edges.append(1, Edge{previous, f, v, kSeedSymbol}));
     }
     previous = v;
   }
@@ -217,7 +216,7 @@ Id LrGssGraph::intern(Id to, Id from, std::uint32_t symbol, bool held,
   made = e == fresh;
   if (!made) return e;
   const Id f = _forest.node();
-  _edges.push_back(Edge{from, f, to, symbol});
+  _edges.append(1, Edge{from, f, to, symbol});
   if (held) return e;
   Vertex& v = _vertices[to];
   if (v.edges == none) {
@@ -261,7 +260,7 @@ void LrGssGraph::edge(Id to, Id from, std::uint32_t symbol,
   else
     _forest.add(f, children, step, words, at,
                 token ? LrGssForest::Kind::token : LrGssForest::Kind::inner);
-  _arcs.push_back(Arc{to, s.vertex, token ? s.reading.la.end : 0});
+  _arcs.append(1, Arc{to, s.vertex, token ? s.reading.la.end : 0});
   if (_held != none) {
     const auto ahead = static_cast<std::uint8_t>(
         std::min(_vertices[s.vertex].ahead + std::uint32_t{token},
@@ -458,7 +457,7 @@ void LrGssGraph::set_best(Id v, Id edge) {
                : under;
   x.forks = _digest.join(_vertices[under].forks,
                          _digest.of(_forest, _edges[edge].forest,
-                                    [this](Id step) { return facts(step); }));
+                                    [this](Id step) { return forking(step); }));
 }
 
 void LrGssGraph::note_cut(Id v) {
@@ -467,11 +466,10 @@ void LrGssGraph::note_cut(Id v) {
   if (at > _cutEnd) _cutEnd = at;
 }
 
-LrGssDigest::Facts LrGssGraph::facts(Id step) const {
+bool LrGssGraph::forking(Id step) const {
   const Id v = _steps[step].vertex;
-  const bool fork = (step != 0 && _steps[step - 1].vertex == v) ||
-                    (step + 1 < _steps.size() && _steps[step + 1].vertex == v);
-  return {_vertices[v].reading.at, fork};
+  return (step != 0 && _steps[step - 1].vertex == v) ||
+         (step + 1 < _steps.size() && _steps[step + 1].vertex == v);
 }
 
 LrGssGraph::Id LrGssGraph::ancestor(Id v, std::uint32_t depth) const {
@@ -531,7 +529,7 @@ LrGssGraph::Order LrGssGraph::written(Id a, Id b) {
 LrGssGraph::Order LrGssGraph::forked(
     Id top, Id c, const std::array<ComparedStack, 2>& stacks) {
   const TextOffset at = _vertices[top].reading.at;
-  const auto of = [this](Id step) { return facts(step); };
+  const auto of = [this](Id step) { return forking(step); };
   for (int side = 0; side != 2; ++side) {
     auto& ends = side == 0 ? _partedLeft : _partedRight;
     ends.clear();
@@ -539,8 +537,15 @@ LrGssGraph::Order LrGssGraph::forked(
       const Rope::Id rope = _digest.of(_forest, forest, of);
       if (rope == Rope::none) return;
       const Rope& forks = _digest.forks();
-      const auto cut = forks.first_where(
-          rope, [at](const LrGssForkAgg& a) { return a.at >= at; });
+      // Fork steps stand in reading order: the first at `at` or past it.
+      Rope::Length cut = 0;
+      for (Rope::Length end = forks.length(rope); cut != end;) {
+        const Rope::Length mid = cut + (end - cut) / 2;
+        if (step_at(forks.at(rope, mid)) < at)
+          cut = mid + 1;
+        else
+          end = mid;
+      }
       Rope::Cursor cur;
       for (cur.seek(forks, rope, cut); !cur.done(); cur.next())
         ends.emplace_back(_steps[cur.value()].vertex, cur.value());
@@ -570,7 +575,7 @@ void LrGssGraph::load(std::size_t side, const ComparedStack& stack, Id shared) {
   for (const Rope::Id rope :
        {_vertices[stack.from].forks,
         _digest.of(_forest, _edges[stack.edge].forest,
-                   [this](Id step) { return facts(step); })})
+                   [this](Id step) { return forking(step); })})
     if (rope != Rope::none) {
       s.held[count++] = rope;
       s.total += _digest.forks().length(rope);
@@ -598,7 +603,7 @@ LrGssGraph::Order LrGssGraph::fork_scan(TextOffset at) {
       index -= forks.length(s.frames[s.frame++]);
     if (s.frame == s.frames.size()) continue;
     s.cursor.seek(forks, s.frames[s.frame], index);
-    before = before || s.cursor.agg().at < at;
+    before = before || step_at(s.cursor.value()) < at;
   }
   if (!before) return {};
   std::array<Id, 2> held{none, none};
@@ -620,7 +625,7 @@ LrGssGraph::Order LrGssGraph::fork_scan(TextOffset at) {
           s.cursor.seek(forks, s.frames[s.frame], 0);
       } else {
         const Id step = s.cursor.value();
-        const TextOffset when = s.cursor.agg().at;
+        const TextOffset when = step_at(step);
         s.cursor.next();
         if (when >= at) {
           over[side] = true;
@@ -883,11 +888,14 @@ std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
     Ranked ranked;
     std::size_t free;
   };
-  const auto of = [this](Id step) { return facts(step); };
+  const auto of = [this](Id step) { return forking(step); };
   const auto ranked = [&](Source s) {
     std::vector<Rope::Length> steps(1, 0);
     std::vector<std::uint32_t> from;
     std::vector<Rope::Id> ropes;
+    steps.reserve(s.forests.size() + 1);
+    from.reserve(s.forests.size() + 1);
+    ropes.reserve(s.forests.size());
     for (const Id f : s.forests) {
       (void)_forest.elect(f);
       from.push_back(static_cast<std::uint32_t>(ropes.size()));

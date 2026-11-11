@@ -16,13 +16,11 @@
 
 #include "cursiv/lr/gen/LrAmbiguity.hpp"
 #include "cursiv/lr/gen/LrFinalTable.hpp"
-#include "cursiv/lr/gen/LrIdentity.hpp"
 #include "cursiv/lr/gen/LrLowering.hpp"
 #include "cursiv/lr/gen/lr_build.hpp"
 #include "cursiv/lr/gen/lr_completion_sites.hpp"
 #include "cursiv/lr/gen/lr_emit_parser.hpp"
 #include "cursiv/lr/gen/lr_emit_table.hpp"
-#include "cursiv/lr/gen/lr_entry_rows.hpp"
 #include "cursiv/lr/gen/lr_fault_message.hpp"
 #include "cursiv/lr/gen/lr_term_run.hpp"
 #include "cursiv/shared/gen/AsWritten.hpp"
@@ -254,9 +252,10 @@ int run(int argc, char** argv) try {
       [&](std::string_view arg) { return args.take(arg); });
   if (paths.dir == nullptr) return exit_status(GenCode::usage);
   cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<View>();
-  if (cursiv::engine::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
-    return exit_status(GenCode::refused);
   auto desc = cursiv::engine::kLrLower<G>;
+  if (cursiv::engine::refuse_self_bounded_arms(CURSIV_GEN_NAME, image,
+                                               desc.reached))
+    return exit_status(GenCode::refused);
   desc.optionalGate = args.optionalGate;
   const auto low = cursiv::engine::lr_lower(image, desc);
   if (refuse_ungated(low))
@@ -304,7 +303,7 @@ int run(int argc, char** argv) try {
   report_ambiguities(low.cfg);
   const auto& cfg = low.cfg;
   cursiv::engine::report_warnings(
-      CURSIV_GEN_NAME, image, cfg, a.cfg, [&](std::uint16_t r) {
+      CURSIV_GEN_NAME, image, desc.reached, cfg, a.cfg, [&](std::uint16_t r) {
         return r < cfg.nnts ? cfg.nt_name(r) : std::string_view{};
       });
   if (std::getenv("CURSIV_CONFLICTS") != nullptr) report_each_conflict(a);

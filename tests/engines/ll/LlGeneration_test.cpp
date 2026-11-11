@@ -47,13 +47,10 @@ void record_sources_keep_nullable_suffixes_and_only_required_children() {
                             .sym = static_cast<std::uint16_t>(2 * i),
                             .min = 0,
                             .max = 1};
-    cfg.nodeBuild[2 * i] = {};
-    cfg.nodeBuild[2 * i + 1] = {};
     cfg.childIds[i] = static_cast<std::uint16_t>(2 * i + 1);
   }
   cfg.nodes[2 * count] = {
       .kind = cursiv::engine::LlShape::seq, .sym = 0, .count = count};
-  cfg.nodeBuild[2 * count] = {};
   cfg.rules[1].body = 2 * count;
   cursiv::engine::ChainPool writes;
   for (unsigned i = 0; i < 4; ++i) writes.chainBuild[i] = {};
@@ -85,12 +82,10 @@ void record_sources_keep_nullable_suffixes_and_only_required_children() {
   deep.nnodes = count;
   deep.nchildIds = count - 1;
   deep.nodes[0] = {.kind = cursiv::engine::LlShape::term, .sym = 1, .row = 2};
-  deep.nodeBuild[0] = {};
   for (unsigned i = 1; i < count; ++i) {
     deep.nodes[i] = {.kind = cursiv::engine::LlShape::seq,
                      .sym = static_cast<std::uint16_t>(i - 1),
                      .count = 1};
-    deep.nodeBuild[i] = {};
     deep.childIds[i - 1] = static_cast<std::uint16_t>(i - 1);
   }
   deep.nodes[count - 1].owns = true;
@@ -109,7 +104,6 @@ void record_aliases_propagate_changes_without_rejoining_every_rule() {
   cfg.nnodes = count;
   for (unsigned r = 1; r <= count; ++r) {
     cfg.rules[r].body = static_cast<std::uint16_t>(r - 1);
-    cfg.nodeBuild[r - 1] = {};
     cfg.nodes[r - 1] =
         r < count
             ? cursiv::engine::LlNode{.kind = cursiv::engine::LlShape::call,
@@ -161,7 +155,6 @@ void record_rows_keep_the_order_of_first_arrival_through_aliases() {
   cfg.nodes[2] = {.kind = cursiv::engine::LlShape::alt, .sym = 0, .count = 2};
   cfg.nodes[3] = {.kind = cursiv::engine::LlShape::call, .sym = 3};
   cfg.nodes[4] = {.kind = cursiv::engine::LlShape::term, .sym = 1, .row = 0};
-  for (unsigned id = 0; id < cfg.nnodes; ++id) cfg.nodeBuild[id] = {};
   cfg.childIds[0] = 0;
   cfg.childIds[1] = 1;
   cfg.rules[1].body = 2;
@@ -260,8 +253,9 @@ cursiv::engine::LlBuildWork analyse_aliases(unsigned count,
     const auto caller = i == 0 ? tail : alias(i - 1);
     const auto callee = alias(i);
     const auto node = cfg.nnodes++;
-    cfg.nodes[node] = {.kind = cursiv::engine::LlShape::call, .sym = callee};
-    cfg.nodeBuild[node] = {.cfg = cfg.ruleCfg[tail]};
+    cfg.nodes[node] = {.kind = cursiv::engine::LlShape::call,
+                       .sym = callee,
+                       .cfg = cfg.ruleCfg[tail]};
     cfg.rules[caller].body = static_cast<std::uint16_t>(node);
     cfg.ruleCfg[callee] = cfg.ruleCfg[tail];
     cfg.rules[callee] = {};
@@ -274,7 +268,7 @@ cursiv::engine::LlBuildWork analyse_aliases(unsigned count,
   CHECK(!built.fault && !built.cfg.lowerFail() && !built.overflow);
   for (unsigned r = base; r < cfg.nrules; ++r) {
     CHECK(built.nullable[cfg.rules[r].body] == Nullable);
-    CHECK(built.ruleFirst[r] == built.ruleFirst[tail]);
+    CHECK(built.first[cfg.nnodes + r] == built.first[cfg.nnodes + tail]);
     CHECK(built.ruleFollow[r] == built.ruleFollow[tail]);
   }
   return work;

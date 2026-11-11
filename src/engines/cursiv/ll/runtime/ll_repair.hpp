@@ -44,7 +44,8 @@ CURSIV_NOINLINE inline NodeId ll_exit_at_end(LlContext& c,
                                              std::uint32_t engine) {
   const CstRun& run = c.tape.stream();
   const NodeCount n = run.records();
-  if (c.laValid && !ll_called_first(c) && (n == 0 || !run.at(n - 1).hidden))
+  if (c.laMode != kNoMode && !ll_called_first(c) &&
+      (n == 0 || !run.at(n - 1).hidden))
     begin = n != 0 ? std::max(c.at, run.at(n - 1).end) : c.at;
   return c.tape.exit(open, begin, engine);
 }
@@ -132,7 +133,7 @@ inline std::uint16_t ll_nest_receiver(LlContext& c, CstBuilder::Open region,
 template <const auto& T>
 inline void ll_repair_peek(LlContext& c) {
   const std::uint16_t mode = ll_err_mode<T>(c.section);
-  if (!c.laValid) {
+  if (c.laMode == kNoMode) {
     ll_peek<T>(c, mode);
     return;
   }
@@ -176,7 +177,7 @@ inline void ll_write_insert(LlContext& c, std::uint16_t term, std::uint16_t row,
   if constexpr (kIndented<T>)
     if (indent_moves<T>(term)) {
       indent_shift_invented<T>(c.indentArena, c.indent, Token{at, at, term});
-      c.laValid = false;
+      c.laMode = kNoMode;
     }
 }
 
@@ -216,11 +217,10 @@ inline void ll_skip(LlContext& c, std::uint16_t term, TextOffset end) {
   f.read = term;
   f.end = end;
   f.at = end;
-  c.at = end;
+  c.at = c.triviaAt = end;
   c.heldEnd = end;
   c.invented = 0;
-  c.laValid = false;
-  c.laMode = kInvalidSymbol;
+  c.laMode = kNoMode;
 }
 
 // A token nothing wants goes on the tape as its own record, so all the text is
@@ -259,9 +259,8 @@ CURSIV_NOINLINE inline bool ll_drop(LlContext& c) {
     c.invented = 0;
     c.heldEnd = end;
   }
-  c.at = end;
-  c.laValid = false;
-  c.laMode = kInvalidSymbol;
+  c.at = c.triviaAt = end;
+  c.laMode = kNoMode;
   return true;
 }
 
@@ -291,7 +290,6 @@ inline void ll_take_typo(LlContext& c, std::uint16_t mode, const Typo& t,
   }
   c.la = Token{c.la.begin, t.end, t.term};
   c.laMode = mode;
-  c.laValid = true;
   c.repaired.mark();
 }
 
@@ -361,15 +359,20 @@ inline bool ll_implied_holds(LlContext& c, std::uint16_t mode,
   return true;
 }
 
-// One terminal, matched or repaired. A position that reads on after an edit
-// is filled and the descent goes on. An implied token's `condition` is asked
-// again past the last edit.
+// One terminal, matched or repaired: a position that reads on after an edit
+// is filled and the descent goes on, an implied token's `condition` asked
+// again past the last edit. Shared per table, not compiled into every leaf.
 template <const auto& T>
-CURSIV_NOINLINE inline void ll_expect_repair(LlContext& c, std::uint16_t mode,
-                                             std::uint16_t term,
-                                             std::uint16_t row,
-                                             std::uint16_t pos,
-                                             std::uint16_t condition) {
+CURSIV_NOINLINE inline void ll_expect(LlContext& c, std::uint16_t mode,
+                                      std::uint16_t term, std::uint16_t row,
+                                      std::uint16_t pos = 0,
+                                      std::uint16_t condition = kNoRow) {
+  if (c.give) return;
+  ll_peek<T>(c, mode);
+  if (c.la.sym == term) {
+    ll_consume<T>(c, row, pos);
+    return;
+  }
   const LlRoot root{kNoRow, static_cast<std::uint16_t>(pos - 1)};
   bool again = true;
   for (;;) {
@@ -441,22 +444,6 @@ CURSIV_NOINLINE inline void ll_expect_repair(LlContext& c, std::uint16_t mode,
   }
 }
 
-// Keep the sound path at its call site. The search and its many re-reads are
-// shared per table, so a large grammar does not compile them into every leaf.
-template <const auto& T>
-CURSIV_ALWAYS_INLINE inline void ll_expect(LlContext& c, std::uint16_t mode,
-                                           std::uint16_t term,
-                                           std::uint16_t row,
-                                           std::uint16_t pos = 0,
-                                           std::uint16_t condition = kNoRow) {
-  if (c.give) return;
-  ll_peek<T>(c, mode);
-  if (c.la.sym == term) [[likely]]
-    ll_consume<T>(c, row, pos);
-  else
-    ll_expect_repair<T>(c, mode, term, row, pos, condition);
-}
-
 // Whether `mode` reads `term` off its one byte alone.
 template <const auto& T>
 constexpr bool ll_byte_reads(std::uint16_t mode, std::uint16_t term) {
@@ -470,32 +457,41 @@ constexpr bool ll_byte_reads(std::uint16_t mode, std::uint16_t term) {
   }
 }
 
-// The terminal a position expects, read in place when nothing is in hand: a
-// one-byte literal taken at its byte past the blanks, any other token read as
-// `ll_peek` does. Then matched as `ll_expect` matches.
+// The terminal a position expects. Nothing in hand, it is read in place: a
+// one-byte literal at its byte past the blanks, any other token as `ll_peek`
+// reads it. The token in hand is taken where `ll_peek` would keep it.
 template <const auto& T, std::uint16_t Mode, std::uint16_t Term>
 CURSIV_ALWAYS_INLINE inline void ll_expect(LlContext& c, std::uint16_t row,
                                            std::uint16_t pos = 0) {
+  static_assert(T.mode_admits(Mode, Term));
   if (c.give) return;
-  if constexpr (ll_byte_reads<T>(Mode, Term)) {
-    if (!c.laValid && ll_in_place<T>(c)) {
-      constexpr auto kByte = static_cast<unsigned char>(T.term_text(Term)[0]);
-      const TextOffset p =
-          ll_past_skip_run<T>(c, Mode, std::max(c.at, c.triviaAt));
-      if (p < c.len && static_cast<unsigned char>(c.src[p]) == kByte) {
-        c.pending.clear();
-        c.pendEnd = p;
-        c.la = Token{p, p + 1, Term, Mode};
-        c.laValid = true;
-        c.laMode = Mode;
-        ll_consume<T>(c, row, pos);
-        return;
+  if (c.laMode == kNoMode) {
+    bool read = false;
+    if constexpr (ll_byte_reads<T>(Mode, Term)) {
+      if (ll_in_place<T>(c)) {
+        constexpr auto kByte = static_cast<unsigned char>(T.term_text(Term)[0]);
+        const TextOffset p = ll_past_skip_run<T>(c, Mode, c.triviaAt);
+        if (p < c.len && static_cast<unsigned char>(c.src[p]) == kByte) {
+          c.pending.clear();
+          c.pendEnd = p;
+          c.la = Token{p, p + 1, Term, Mode};
+          c.laMode = Mode;
+          read = true;
+        }
       }
+    } else {
+      read = ll_probe<T>(c, Mode);
     }
-  } else {
-    if (!c.laValid) ll_probe<T>(c, Mode);
+    if (!read) ll_peek_read<T>(c, Mode);
   }
-  ll_expect<T>(c, Mode, Term, row, pos);
+  constexpr bool kPhysical =
+      !kIndented<T> || (Term != kEofSymbol && T.terms[Term].synthetic == 0);
+  if (c.la.sym == Term && (c.laMode == Mode || c.laMode == kLaHeld ||
+                           (kPhysical && T.mode_covers(c.laMode, Mode))))
+      [[likely]]
+    ll_consume<T>(c, row, pos);
+  else
+    ll_expect<T>(c, Mode, Term, row, pos);
 }
 
 // An arm of a choice that reads one terminal and nothing else, as data: a
@@ -505,20 +501,14 @@ struct LlTermArm {
   std::uint16_t term, mode, row, pos;
 };
 
-// The arm's terminal where a repair chose the arm: matched or repaired. The
-// choice has read the token in hand, so the in-place read has nothing to add.
-template <const auto& T>
-CURSIV_NOINLINE inline void ll_expect_arm(LlContext& c, const LlTermArm& a) {
-  ll_expect<T>(c, a.mode, a.term, a.row, a.pos);
-}
-
-// The arm a choice selected, taken where the token in hand is its terminal.
+// The arm a choice selected, taken where the token in hand is its terminal;
+// where a repair chose the arm, matched or repaired.
 template <const auto& T>
 CURSIV_ALWAYS_INLINE inline void ll_take_arm(LlContext& c, const LlTermArm& a) {
   if (c.la.sym == a.term) [[likely]]
     ll_consume<T>(c, a.row, a.pos);
   else
-    ll_expect_arm<T>(c, a);
+    ll_expect<T>(c, a.mode, a.term, a.row, a.pos);
 }
 
 // How the climb of `decision` stands before `sym`: 1 where an operator takes
@@ -670,8 +660,7 @@ inline bool ll_tail(LlContext& c) {
   // The entry may end inside a region that reads whitespace as visible text:
   // the gap behind it is the document's, so the token it held and the gap in
   // front of it are read again under the document's own trivia.
-  c.laValid = false;
-  c.laMode = kInvalidSymbol;
+  c.laMode = kNoMode;
   ll_peek<T>(c, T.tailMode);
   if (c.la.sym == kEofSymbol) return true;
   ll_repair_peek<T>(c);

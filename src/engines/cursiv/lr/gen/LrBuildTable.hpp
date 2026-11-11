@@ -16,13 +16,10 @@
 #include "cursiv/lr/gen/LrDerivedRows.hpp"
 #include "cursiv/lr/gen/LrGotoRows.hpp"
 #include "cursiv/lr/gen/LrGuard.hpp"
-#include "cursiv/lr/gen/LrIdentity.hpp"
 #include "cursiv/lr/gen/LrPeek.hpp"
 #include "cursiv/lr/table/LrAction.hpp"
 #include "cursiv/lr/table/LrColdTables.hpp"
-#include "cursiv/lr/table/LrDerivedSizes.hpp"
 #include "cursiv/lr/table/LrFusedRow.hpp"
-#include "cursiv/lr/table/LrSizes.hpp"
 #include "cursiv/lr/table/LrTableFacts.hpp"
 #include "cursiv/shared/gen/ChainPool.hpp"
 #include "cursiv/shared/gen/HeadMatcher.hpp"
@@ -56,6 +53,10 @@ struct LrCaretSite {
   bool entered = false;
   auto operator<=>(const LrCaretSite&) const = default;
 };
+
+// Which states the construction keeps apart: the wider graph is built only
+// where the core's merge may have made an ambiguity.
+enum class LrIdentity : std::uint8_t { core_plus_lookaheads, core };
 
 // Optional construction counters: what each pass came to.
 struct LrBuildWork {
@@ -133,8 +134,8 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   Vec<std::uint16_t> modeEnd{};
   // Per section, the mode its text is read in, whole.
   std::vector<std::uint16_t> sectionErr{};
-  // Mode a covers mode b (bit a*nmodes+b): the token a answered is the one b
-  // would answer.
+  // Mode a covers mode b (bit a of b's row of modes): the token a answered is
+  // the one b would answer.
   Vec<std::uint64_t> modeSub{};
   // Per mode, the winners whose bytes may hide a competitor reading there.
   Vec<DynSet> modeWin{};
@@ -190,13 +191,12 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
     gotoRows = std::move(rows);
   }
 
-  // The programs of `guard` actions and guarded gotos, and per state what its
-  // tag knows of the gap its span opened on and which conditions held there.
+  // The programs of `guard` actions and guarded gotos, and per state the
+  // conditions its tag knows did not hold on the gap its span opened on.
   std::vector<LrGuard> guards{};
   // The sets of sites that actions and guards name by index. Zero holds none.
   std::vector<std::vector<LrCaretSite>> siteSets{{}};
-  Vec<DynSet> tagKnown{};
-  Vec<DynSet> tagTruth{};
+  Vec<DynSet> tagFalse{};
 
   // The terminals a state needs, and the longest any production's shortest
   // reading runs.
@@ -256,8 +256,7 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
     // The terminals of the action row: a copy's row holds its root's.
     f(follow, LrStateCopy{});
     f(mode, LrStateCopy{});
-    f(tagKnown, LrStateCopy{});
-    f(tagTruth, LrStateCopy{});
+    f(tagFalse, LrStateCopy{});
     f(insertOf, LrStateCopy{});
     f(closeRow, LrStateComposed{});
     f(stateSym, LrStateMerge{kLrNoStateSym});
@@ -372,67 +371,17 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
         return true;
     return false;
   }
+  // The 64-bit words of one row of `modeSub`.
+  std::size_t mode_sub_words() const { return (nmodes + 63u) / 64u; }
   bool mode_covers(unsigned from, unsigned to) const {
-    const std::size_t i = std::size_t{from} * nmodes + to;
-    return ((modeSub[i >> 6] >> (i & 63u)) & 1u) != 0;
+    const std::size_t at = to * mode_sub_words() + (from >> 6);
+    return ((modeSub[at] >> (from & 63u)) & 1u) != 0;
   }
 
   LrAction action(std::uint32_t i) const { return actions[i]; }
   std::span<const LrAction> action_row(std::uint32_t state) const {
     if (actionCount[state] == 0) return {};
     return {actions.data() + actionBase[state], actionCount[state]};
-  }
-
-  LrSizes sizes() const {
-    return LrSizes{
-        .terms = cfg.nterms,
-        .prods = cfg.nprods,
-        .states = nstates,
-        .modes = nmodes,
-        .cls = ncls,
-        .dfa = ndfa,
-        .dfaAccSets = static_cast<unsigned>(dfaAccPool.sets.size()),
-        .dfaResSets = static_cast<unsigned>(dfaResPool.sets.size()),
-        .modeWinSets = static_cast<unsigned>(modeWinPool.sets.size()),
-        .modeLongers = longer_modes() ? nmodes : 0u,
-        .modeBacktracks = static_cast<unsigned>(modeBacktrack.size()),
-        .modeFlagSets = static_cast<unsigned>(modeFlagPool.sets.size()),
-        .accBounds = static_cast<unsigned>(accBound.size()),
-        .relays = nrelays,
-        .followSets = static_cast<unsigned>(followPool.sets.size()),
-        .closeSets = static_cast<unsigned>(closePool.sets.size()),
-        .dfaRelayResSets =
-            relayReserves() ? static_cast<unsigned>(dfaRelayResPool.sets.size())
-                            : 0u,
-        .accStands = standing() ? static_cast<unsigned>(accBound.size()) : 0u,
-        .accPriorities =
-            prioritized() ? static_cast<unsigned>(accBound.size()) : 0u,
-        .errModes = static_cast<unsigned>(errModeOf.size()),
-        .indented = indented(),
-        .insertLists = static_cast<unsigned>(insertAt.size() - 1u),
-        .insertWords = static_cast<unsigned>(insertWord.size()),
-        .electWords = static_cast<unsigned>(electWord.size()),
-        .electWatches = static_cast<unsigned>(electWatch.size()),
-        .electChains = static_cast<unsigned>(electChainKey.size()),
-        .electChainWords = static_cast<unsigned>(electChainWord.size()),
-        .electTwins = static_cast<unsigned>(electTwinFirst.size()),
-        .electRhsSyms = static_cast<unsigned>(electRhs.size()),
-        .gotoClasses = nconflicts != 0 || multiCand};
-  }
-
-  LrDerivedSizes derivedSizes() const {
-    return LrDerivedSizes{
-        .lexElseRows = static_cast<unsigned>(lexElseRows.size()),
-        .typoSucc = static_cast<unsigned>(typoSucc.size()),
-        .reduceNames = static_cast<unsigned>(reduceNames.size()),
-        .expectItems = static_cast<unsigned>(expectItems.size()),
-        .expectPool = static_cast<unsigned>(expectPool.size()),
-        .rowLhsRows = static_cast<unsigned>(
-            rowLhsBase.empty() ? 0 : rowLhsBase.size() - 1),
-        .rowLhs = static_cast<unsigned>(rowLhs.size()),
-        .typoReachSets = static_cast<unsigned>(typoReach.sets.size()),
-        .afterSets = static_cast<unsigned>(after.sets.size()),
-        .modeWantSets = static_cast<unsigned>(modeWant.sets.size())};
   }
 };
 

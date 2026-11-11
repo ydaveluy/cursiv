@@ -16,7 +16,6 @@
 #include "cursiv/shared/gen/GrammarBindings.hpp"
 #include "cursiv/shared/gen/GrammarRefusals.hpp"
 #include "cursiv/shared/gen/Row.hpp"
-#include "cursiv/shared/gen/RowOf.hpp"
 #include "cursiv/shared/gen/WritesOnce.hpp"
 #include "cursiv/shared/gen/ast_refusals.hpp"
 #include "cursiv/shared/gen/reached.hpp"

@@ -30,22 +30,21 @@ std::uint32_t lex_set_scalars(const Cfg& g, std::uint16_t s) {
 }
 
 // The set with these bytes, decoding and scalars, interned once. Returns its
-// pool index, kept in step with the pool, which a trial may have cut back.
+// pool index.
 template <class Cfg>
 std::uint16_t lex_intern_set(Cfg& c, const ByteSet& s,
                              std::uint16_t decode = kNoSet,
                              std::uint32_t scalars = 0) {
-  SetIndex& x = c.setIndex;
-  x.sync(c);
   const SetKey key{s, decode, scalars};
-  if (const std::uint16_t* const at = x.find(key)) return *at;
+  if (const auto at = c.setIndex.find(key); at != c.setIndex.end())
+    return at->second;
   // Never pass the sentinel on as an NFA edge's set index.
   if (c.nsets == kNoSet) throw LowerRefused(LowerFail::tokenGraphTooLarge);
   c.sets[c.nsets] = s;
   c.setDecode[c.nsets] = decode;
   if (scalars != 0 || c.nsets < c.setScalars.size())
     c.setScalars[c.nsets] = scalars;
-  x.add(key);
+  c.setIndex.emplace(key, c.nsets);
   return c.nsets++;
 }
 
@@ -66,22 +65,14 @@ bool lex_word_set(const Cfg& g, std::uint16_t s) {
          std::ranges::find(g.keywordBounds.v, s) != g.keywordBounds.v.end();
 }
 
-// The sets that are word classes: the sets are interned, so one stands for
-// each.
+// The sets that are word classes, ascending: the sets are interned, so one
+// stands for each.
 template <class Cfg>
 std::vector<std::uint16_t> lex_word_bounds(const Cfg& g) {
   std::vector<std::uint16_t> words;
   for (std::uint16_t s = 0; s < g.nsets; ++s)
     if (lex_word_set(g, s)) words.push_back(s);
   return words;
-}
-
-template <class Cfg>
-std::vector<std::uint8_t> lex_word_flags(const Cfg& g) {
-  std::vector<std::uint8_t> flags(g.nsets, 0);
-  for (std::uint16_t s = 0; s < g.nsets; ++s)
-    flags[s] = lex_word_set(g, s) ? 1 : 0;
-  return flags;
 }
 
 // Whether a bound refuses every byte: its acceptance stands only where no byte

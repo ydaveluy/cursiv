@@ -143,15 +143,18 @@ std::vector<std::uint8_t> lex_call_ancestors(const Cfg& g) {
   return calls;
 }
 
+// Per node, whether it may read nothing; with `productive`, whether it may
+// read a text at all.
 template <class Cfg>
-std::vector<std::uint8_t> lex_empty_nodes(const Cfg& g) {
-  std::vector<std::uint8_t> empty(g.nlex);
+std::vector<std::uint8_t> lex_empty_nodes(const Cfg& g,
+                                          bool productive = false) {
+  std::vector<std::uint8_t> facts(g.nlex);
+  const auto known = [&](auto k) { return facts[k] != 0; };
   least_fixpoint([&](auto&& set) {
     for (std::uint16_t at = 0; at < g.nlex; ++at)
-      set(empty[at],
-          lex_derives(g, at, [&](auto k) { return empty[k] != 0; }, false));
+      set(facts[at], lex_derives(g, at, known, productive));
   });
-  return empty;
+  return facts;
 }
 
 template <class Cfg>
@@ -178,18 +181,7 @@ void validate_lex_recursion(Cfg& g) {
   for (std::uint16_t t = 1; t < g.nterms; ++t) reach(body, t, false);
   for (std::uint16_t t = 1; t < g.nterms; ++t)
     if (calls[g.termBuild[t].lex]) reach(owner, t, true);
-  std::vector<std::uint8_t> empty(g.nlex), productive(g.nlex);
-  const auto fill_facts = [&](auto& facts, bool any_text) {
-    least_fixpoint([&](auto&& set) {
-      for (std::uint16_t at = 0; at < g.nlex; ++at)
-        if (owner[at] != 0)
-          set(facts[at],
-              lex_derives(
-                  g, at, [&](auto k) { return facts[k] != 0; }, any_text));
-    });
-  };
-  fill_facts(empty, false);
-  fill_facts(productive, true);
+  const auto empty = lex_empty_nodes(g), productive = lex_empty_nodes(g, true);
 
   std::vector<std::uint32_t> starts{0}, edges;
   for (std::uint16_t at = 0; at < g.nlex; ++at) {
@@ -231,7 +223,7 @@ void validate_lex_recursion(Cfg& g) {
       lower_refuse(g, LowerFail::terminalEmpty, t);
       return;
     }
-  LexRightLinear<Cfg>{g}.run();
+  LexRightLinear<Cfg>{g, empty, productive}.run();
 }
 
 // The bytes `node` may open on, and whether it may read nothing.

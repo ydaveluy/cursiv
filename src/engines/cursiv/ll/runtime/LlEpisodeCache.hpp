@@ -1,4 +1,4 @@
-// What the episodes of a parse keep between them: the stack pools, the plan,
+// What the episodes of a parse keep between them: the stack pool, the plan,
 // the plans keyed by the text they read, and the walk that gives an episode the
 // descent's stack.
 #pragma once
@@ -23,13 +23,10 @@ namespace cursiv::engine {
 // a sim each for the two ways of reading, the plan the last episode made for
 // the descent to follow, and what they read.
 struct LlEpisodeCache {
-  // The descent's stacks, as nodes that stay: the plans kept are named by them.
-  std::optional<LlReturnPool> exact;
-  // The stacks an episode makes, which go when it ends or is let go.
-  std::optional<LlReturnPool> temporary;
-  // Where each node of `exact` stands in `temporary`.
-  std::vector<std::uint32_t> copyOf;
-  // How deep each copied frame stands, by its node in `temporary`.
+  // The descent's stacks, as nodes that stay and name the plans kept, under
+  // the stacks an episode makes, which go when it ends or is let go.
+  std::optional<LlReturnPool> pool;
+  // How deep each frame of the descent stands, by its node.
   std::vector<LlCopyDepth> copyDepth;
   std::optional<LlEpisodeSim> plain, tracked;
   LlPlan plan;
@@ -53,16 +50,15 @@ inline LlEpisodeCache& ll_episode_cache() {
   return active.has_value() ? *active : active.emplace();
 }
 
-// A pool of the parse's cache, made at its first ask: `exact`, or `temporary`.
+// The pool of the parse's cache, made at its first ask.
 template <const auto& T>
-inline LlReturnPool& ll_pool(bool exact) {
+inline LlReturnPool& ll_pool() {
   LlEpisodeCache& cache = ll_episode_cache<T>();
-  auto& pool = exact ? cache.exact : cache.temporary;
-  if (!pool) {
-    pool.emplace();
-    pool->read_returns_by_class(T.atn.returnClass);
+  if (!cache.pool) {
+    cache.pool.emplace();
+    cache.pool->read_returns_by_class(T.atn.returnClass);
   }
-  return *pool;
+  return *cache.pool;
 }
 
 // The sim of the parse's episodes, over the pool they read in.
@@ -71,7 +67,7 @@ inline LlEpisodeSim& ll_episode_sim(bool tracked) {
   auto& cache = ll_episode_cache<T>();
   auto& slot = tracked ? cache.tracked : cache.plain;
   if (!slot) {
-    slot.emplace(T.atn, ll_pool<T>(false), tracked);
+    slot.emplace(T.atn, ll_pool<T>(), tracked);
     slot->rank_arms_over_lexes(T.repeatScopes);
     slot->share_calls(T.sharedRules);
     slot->read_copy_depths(&cache.copyDepth);
@@ -93,49 +89,43 @@ inline std::uint32_t ll_document_context(LlReturnPool& pool) {
   return cache.document;
 }
 
-// The descent's stack, copied into the episodes' pool. Each copied frame
-// keeps its depth, so a walk that reaches one over the episode's frames answers
-// without walking up the descent's depth.
-inline std::uint32_t ll_copy_stack(LlEpisodeCache& cache, std::uint32_t stack) {
-  LlCtxPool& from = cache.exact->contexts();
-  LlCtxPool& to = cache.temporary->contexts();
-  // `copyOf` and `copyDepth` are never cleared: they hold only because the
-  // copied frames are made outside a walk, which would take them back with its
-  // own.
-  assert(!to.scratching());
+// The descent's stack in the parse's pool. Each of its frames keeps its depth,
+// so a walk that reaches one over the episode's frames answers without walking
+// up the descent's depth.
+template <const auto& T>
+inline std::uint32_t ll_descent_stack(const LlContext& c) {
+  LlEpisodeCache& cache = ll_episode_cache<T>();
+  LlReturnPool& pool = ll_pool<T>();
+  // The frames are made outside a walk, which would take them back with its
+  // own: `copyDepth` is never cleared.
+  assert(!pool.contexts().scratching());
+  const std::uint32_t stack =
+      c.stack.context(pool, ll_document_context<T>(pool));
+  const auto indexed = [&](std::uint32_t at) {
+    return at < cache.copyDepth.size() && cache.copyDepth[at].depth != 0;
+  };
   std::vector<std::uint32_t> chain;
-  std::uint32_t at = stack, base = kLlCtxNone;
-  for (; at != kLlCtxNone; at = from.parent(at, 0)) {
-    if (at < cache.copyOf.size() && cache.copyOf[at] != kLlCtxNone) {
-      base = cache.copyOf[at];
-      break;
-    }
+  for (std::uint32_t at = stack; at != kLlCtxNone && !indexed(at);
+       at = pool.contexts().parent(at, 0))
     chain.push_back(at);
-  }
-  for (std::size_t i = chain.size(); i-- > 0;) {
-    const std::uint32_t parent = base;
-    base = to.push(parent, from.ret(chain[i], 0));
-    if (cache.copyOf.size() <= chain[i])
-      cache.copyOf.resize(chain[i] + 1, kLlCtxNone);
-    cache.copyOf[chain[i]] = base;
-    if (cache.copyDepth.size() <= base) cache.copyDepth.resize(base + 1);
-    if (cache.copyDepth[base].depth == 0)
-      cache.copyDepth[base] = LlCopyDepth::over(cache.copyDepth, parent);
-  }
-  return base;
+  // A frame is made after the one under it: the top one is the last.
+  if (!chain.empty() && cache.copyDepth.size() <= chain.front())
+    cache.copyDepth.resize(chain.front() + 1);
+  for (std::size_t i = chain.size(); i-- > 0;)
+    cache.copyDepth[chain[i]] =
+        LlCopyDepth::over(cache.copyDepth, pool.contexts().parent(chain[i], 0));
+  return stack;
 }
 
 // The stack of the descent for one episode: a node of the pool that stays,
-// which names the episode's question, and the same stack in the pool the
-// episode reads in, whose nodes go when it ends.
+// which names the episode's question; the nodes the episode makes over it go
+// when it ends.
 template <const auto& T>
 struct LlExactWalk {
   explicit LlExactWalk(const LlContext& c)
-      : _cache(&ll_episode_cache<T>()),
-        _pool(ll_pool<T>(false)),
-        key(c.stack.context(ll_pool<T>(true),
-                            ll_document_context<T>(ll_pool<T>(true)))),
-        context(ll_copy_stack(*_cache, key)),
+      : context(ll_descent_stack<T>(c)),
+        _cache(&ll_episode_cache<T>()),
+        _pool(ll_pool<T>()),
         _holds(_pool.contexts().begin_scratch()) {}
   ~LlExactWalk() {
     if (!_holds) return;
@@ -146,14 +136,11 @@ struct LlExactWalk {
   LlExactWalk(const LlExactWalk&) = delete;
   LlExactWalk& operator=(const LlExactWalk&) = delete;
 
+  const std::uint32_t context;
+
  private:
   LlEpisodeCache* _cache;
   LlReturnPool& _pool;
-
- public:
-  std::uint32_t key, context;
-
- private:
   bool _holds;
 };
 

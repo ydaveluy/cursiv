@@ -1,11 +1,14 @@
 // Runs of values appended in chunks that never move, each run in one piece: an
-// offset names a run for good, and growth copies nothing.
+// offset names a run for good, and growth copies nothing, so the peak is the
+// live size. A chunk is not written until its values are. Runs of one value
+// take every offset in turn.
 #pragma once
 
 #include <cstddef>
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "cursiv/utils/macros.hpp"
@@ -14,6 +17,8 @@ namespace cursiv::engine {
 
 template <class T, unsigned Shift = 14>
 class LrGssRuns {
+  static_assert(std::is_trivially_copyable_v<T>);
+
  public:
   [[nodiscard]] std::size_t size() const { return _appended; }
 
@@ -48,21 +53,12 @@ class LrGssRuns {
   // The offset of `n` values for the caller to write in one piece: the rest of
   // the chunk, or new chunks side by side, published together. A run that would
   // end past 32-bit offsets throws `std::length_error` and makes nothing.
-  std::size_t reserve(std::size_t n) {
+  CURSIV_ALWAYS_INLINE std::size_t reserve(std::size_t n) {
     std::size_t at = _end;
-    if (n > kChunk || (at & kMask) + n > kChunk) at = (at + kMask) & ~kMask;
-    if (n > kMostValues || at > kMostValues - n) too_many();
-    if (n != 0) {
-      const std::size_t need = ((at + n - 1) >> Shift) + 1;
-      if (const std::size_t had = _slots.size(); had < need) {
-        _owned.push_back(
-            std::make_unique_for_overwrite<T[]>((need - had) << Shift));
-        _slots.resize(need);
-        T* base = _owned.back().get();
-        for (std::size_t i = had; i != need; ++i)
-          _slots[i] = base + ((i - had) << Shift);
-      }
-    }
+    const bool fits =
+        n <= kChunk - (at & kMask) && (at >> Shift) != _slots.size();
+    if (!fits) [[unlikely]]
+      at = make(n);
     _end = at + n;
     _appended += n;
     return at;
@@ -81,8 +77,35 @@ class LrGssRuns {
     throw std::length_error("cursiv: GSS runs exceed their 32-bit offsets");
   }
 
+  // Where a run the last chunk has no room for starts, its chunks made.
+  CURSIV_NOINLINE std::size_t make(std::size_t n) {
+    std::size_t at = _end;
+    if (n > kChunk - (at & kMask)) at = (at + kMask) & ~kMask;
+    if (n > kMostValues || at > kMostValues - n) too_many();
+    if (n != 0) {
+      const std::size_t need = ((at + n - 1) >> Shift) + 1;
+      if (const std::size_t had = _slots.size(); had < need) {
+        const std::size_t count = (need - had) << Shift;
+        _owned.push_back(Block(std::allocator<T>().allocate(count), {count}));
+        _slots.resize(need);
+        T* base = _owned.back().get();
+        for (std::size_t i = had; i != need; ++i)
+          _slots[i] = base + ((i - had) << Shift);
+      }
+    }
+    return at;
+  }
+
+  struct Free {
+    std::size_t count;
+    void operator()(T* block) const {
+      std::allocator<T>().deallocate(block, count);
+    }
+  };
+  using Block = std::unique_ptr<T[], Free>;
+
   std::vector<T*> _slots;
-  std::vector<std::unique_ptr<T[]>> _owned;
+  std::vector<Block> _owned;
   std::size_t _end = 0;
   std::size_t _appended = 0;
 };

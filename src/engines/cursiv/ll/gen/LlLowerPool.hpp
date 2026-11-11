@@ -37,9 +37,6 @@ enum class Shape : std::uint8_t {
 // `cfg.fault` and the walk carries on writing a well-formed value: the check
 // after the lowering reports it once, naming the rule (`GrammarFault.hpp`).
 
-// The actions one column of one element needs, innermost first.
-using Acts = std::vector<std::uint16_t>;
-
 [[noreturn]] inline void too_many_positions() {
   throw LowerRefused(LowerFail::tooManyPositions);
 }
@@ -84,20 +81,17 @@ struct Pool : LowerPool {
   }
 };
 
-Acts cat(const Acts& a, const Acts& b);
-
 // Position `node`, as the choice the parse makes there, created where the
 // shape holds one. The construction decides what separates its arms; the
 // lowering only says where a decision stands.
 std::uint16_t with_decision(LlLowered& o, std::uint16_t node,
                             std::uint16_t nalts, std::uint16_t owner);
 
-std::uint16_t put_node(LlLowered& o, const LlNode& n,
-                       const LlNodeBuild& b = {});
+std::uint16_t put_node(LlLowered& o, const LlNode& n);
 
-std::uint16_t put_group(LlLowered& o, LlShape kind,
-                        std::span<const std::uint16_t> ids, std::uint16_t row,
-                        const LlNodeBuild& b);
+// Position `n` over the children `ids`.
+std::uint16_t put_group(LlLowered& o, LlNode n,
+                        std::span<const std::uint16_t> ids);
 
 // `made` and `row` are the whole chain over this position, its own included. A
 // choice never carries one: a directive over it goes to each arm, so a write

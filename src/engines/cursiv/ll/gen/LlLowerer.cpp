@@ -8,8 +8,6 @@
 
 namespace cursiv::engine {
 
-using llow::Acts;
-using llow::cat;
 using llow::emit;
 using llow::put_node;
 using llow::too_many_positions;
@@ -97,8 +95,7 @@ std::uint16_t LlLowerer::climb_chain(const void* row) {
 void LlLowerer::emit_op(unsigned cfg, ImageId op, const void* opRow,
                         std::uint8_t prec, Association group) {
   const std::uint32_t opRule = op_rule_of(op);
-  const bool buildsNode =
-      opRule != kNoImage && (node_rule(opRule) || infix_rule(opRule));
+  const bool buildsNode = op_builds_node(op);
   std::vector<std::uint32_t> reading;
   const std::uint16_t built = descend(build_operator(cfg, op, reading));
   // Whether each way through the operator reads one token, conditions aside.
@@ -165,12 +162,10 @@ void LlLowerer::emit_climb(unsigned cfg, std::uint32_t rule,
     std::vector<std::uint16_t> arms;
     for (unsigned i = 0; i < cl.opCount; ++i)
       arms.push_back(_cfg.climbOps[cl.opBase + i].body);
-    arms.push_back(put_node(_o, LlNode{.kind = LlShape::empty},
-                            LlNodeBuild{static_cast<std::uint8_t>(cfg)}));
+    const auto at = static_cast<std::uint8_t>(cfg);
+    arms.push_back(put_node(_o, LlNode{.kind = LlShape::empty, .cfg = at}));
     cl.selectNode = llow::with_decision(
-        _o,
-        llow::put_group(_o, LlShape::alt, arms, kNoRow,
-                        LlNodeBuild{static_cast<std::uint8_t>(cfg)}),
+        _o, llow::put_group(_o, LlNode{.kind = LlShape::alt, .cfg = at}, arms),
         static_cast<std::uint16_t>(arms.size()), lhs);
   }
   _cfg.rules[lhs].climb = _cfg.nclimbs;

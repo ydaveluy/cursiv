@@ -15,6 +15,7 @@
 #include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/runtime/PredicateState.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv::engine {
 
@@ -80,6 +81,44 @@ class LexicalCaptures {
   std::map<std::vector<Binding>, std::uint32_t> _interned;
   std::vector<const std::vector<Binding>*> _environments;
 };
+
+// The cursors of `in` that `read` moves past a reading.
+template <class Read>
+CURSIV_ALWAYS_INLINE inline LexicalState lexical_each(const LexicalState& in,
+                                                      Read&& read) {
+  LexicalState out;
+  for (std::size_t k = 0; k < in.size(); ++k)
+    if (auto c = in[k]; read(c.at)) out.add(c);
+  return out;
+}
+
+// Whether the text `c` captured under `tag` is spelled again at `c`, which
+// then ends past it.
+inline bool lexical_echoed(const LexicalCaptures& captures, std::uint32_t tag,
+                           const char* src, TextOffset len, LexicalCursor& c,
+                           TextOffset& seen) {
+  const auto* capture = captures.find(c.captures, tag);
+  if (capture == nullptr) return false;
+  const TextOffset width = capture->end - capture->begin;
+  for (TextOffset j = 0; j < width; ++j) {
+    seen = std::max(seen, c.at + j < len ? c.at + j + 1 : len);
+    if (c.at + j >= len || src[c.at + j] != src[capture->begin + j])
+      return false;
+  }
+  c.at += width;
+  return true;
+}
+
+// Moves `p` to the farthest cursor of `ends`, where one is past it.
+inline bool lexical_farthest(const LexicalState& ends, LexicalCursor& p) {
+  if (ends.empty()) return false;
+  auto q = ends[0];
+  for (std::size_t x = 1; x < ends.size(); ++x)
+    if (ends[x].at > q.at) q = ends[x];
+  if (q.at <= p.at) return false;
+  p = q;
+  return true;
+}
 
 inline PredicateState lexical_endpoints(const LexicalState& state) {
   PredicateState out;

@@ -88,9 +88,7 @@ struct LexLoneLeadExpansion {
       for (const int x : n.eclose(work.q)) {
         const LexNfaState st = n.s[static_cast<std::size_t>(x)];
         if (st.set >= 0) {
-          ByteSet edge = g.sets[static_cast<std::size_t>(st.set)];
-          if (st.minus >= 0)
-            edge.andnot(g.sets[static_cast<std::size_t>(st.minus)]);
+          const ByteSet edge = lex_edge_bytes(g.sets.data(), st);
           const ByteSet next = g.sets[work.rest.front()];
           const ByteSet inside = edge & next;
           ByteSet outside = edge;

@@ -102,29 +102,6 @@ ImageId Lowerer::body_in(unsigned cfg, std::uint32_t rule) {
   return out;
 }
 
-Descent<bool> Lowerer::has_rows(ImageId id) const {
-  switch (at(id).kind) {
-    case ImageKind::create:
-    case ImageKind::nest:
-    case ImageKind::assign:
-    case ImageKind::append:
-    case ImageKind::flag:
-      co_return true;
-    default:
-      for (const ImageId k : _im.shape_children(id))
-        if (co_await has_rows(k)) co_return true;
-      co_return false;
-  }
-}
-
-Descent<bool> Lowerer::creates(ImageId id, const void* row) const {
-  if (const ImageNode& n = at(id); n.kind == ImageKind::create && n.row == row)
-    co_return true;
-  for (const ImageId k : _im.shape_children(id))
-    if (co_await creates(k, row)) co_return true;
-  co_return false;
-}
-
 bool Lowerer::reads_under(unsigned cfg, std::uint32_t rule) const {
   const ImageRuleDesc* const ownerGrammar = _im.rules[rule].desc->ownerGrammar;
   const std::uint32_t section = _cfgs[cfg].section;
@@ -178,36 +155,6 @@ ImageId Lowerer::token_core(ImageId id) const {
   }
 }
 
-void Lowerer::note_docs() {
-  std::unordered_map<std::string_view, std::string_view> first;
-  std::vector<ImageId> pending;
-  const auto walk = [&](ImageId root) {
-    pending.push_back(root);
-    while (!pending.empty()) {
-      const ImageId id = pending.back();
-      pending.pop_back();
-      if (const ImageNode n = at(id);
-          n.kind == ImageKind::doc &&
-          at(child_at(n, 0)).kind == ImageKind::lit) {
-        const std::string_view word = at(child_at(n, 0)).text;
-        const auto [text, fresh] = first.try_emplace(word, n.text);
-        if (!fresh && text->second != n.text) _docsDiffer.insert(word);
-      }
-      for (const ImageId k : _im.shape_children(id)) pending.push_back(k);
-    }
-  };
-  for (const std::uint32_t rule : _ntRule) {
-    const ImageStageDesc& st = stage(rule);
-    if (st.kind != ImageRuleKind::infix) {
-      walk(_im.node(*st.body, _im.folds(rule)));
-      continue;
-    }
-    for (std::uint32_t i = 0; i < st.levelCount; ++i)
-      for (std::uint32_t j = 0; j < st.levels[i].count; ++j)
-        walk(_im.node(*st.levels[i].ops[j].op, _im.folds(rule)));
-  }
-}
-
 void Lowerer::index() {
   const auto rules = [&](std::span<const ImageRuleDesc* const> list) {
     std::vector<std::uint32_t> out;
@@ -216,7 +163,6 @@ void Lowerer::index() {
   };
   _termRule = rules(_d.terms);
   _ntRule = rules(_d.nts);
-  note_docs();
   for (std::uint32_t i = 0; i < _termRule.size(); ++i)
     _termIdx.emplace(_termRule[i], i);
   for (std::uint32_t i = 0; i < _ntRule.size(); ++i)
@@ -289,8 +235,15 @@ void Lowerer::open_configs() {
                         sectionCfg);
     }
   };
+  // The text each documented word was first given.
+  std::unordered_map<std::string_view, std::string_view> docOf;
   walk = [&](ImageId id, unsigned sectionCfg) -> Descent<void> {
-    if (const ImageNode n = at(id); n.kind == ImageKind::skip) {
+    const ImageNode n = at(id);
+    if (n.kind == ImageKind::doc && at(child_at(n, 0)).kind == ImageKind::lit) {
+      const std::string_view word = at(child_at(n, 0)).text;
+      const auto [text, fresh] = docOf.try_emplace(word, n.text);
+      if (!fresh && text->second != n.text) _docsDiffer.insert(word);
+    } else if (n.kind == ImageKind::skip) {
       const auto ignore = listed(n.a, n.m),
                  hide = listed(static_cast<std::uint32_t>(n.a + n.m), n.n);
       Config c;
@@ -307,6 +260,14 @@ void Lowerer::open_configs() {
         }
         push(std::move(c), ignore, hide);
       }
+    } else if ((n.kind == ImageKind::andOf || n.kind == ImageKind::notOf) &&
+               co_await holds(id, [](const ImageNode& k) {
+                 return k.kind == ImageKind::embed;
+               })) {
+      refuse_lowering(
+          "`section<G>(open, close)` is allowed in a rule, not in a condition: a "
+          "condition tests text and cannot parse a grammar -- test the token "
+          "that opens the section");
     } else if (n.kind == ImageKind::embed &&
                at(child_at(n, 0)).kind == ImageKind::seq &&
                at(child_at(n, 0)).count == 3) {
@@ -517,13 +478,6 @@ bool Lowerer::clone_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs) {
   return true;
 }
 
-Descent<bool> Lowerer::buries(ImageId id) const {
-  if (at(id).kind == ImageKind::nest) co_return true;
-  for (const ImageId k : _im.shape_children(id))
-    if (co_await buries(k)) co_return true;
-  co_return false;
-}
-
 // The repetition of an unordered item the text may leave out, `option(x)`,
 // `many(x)` or `repeat<0, n>(x)` seen through regions only; else `kNoImage`.
 ImageId Lowerer::optional_item(ImageId item) const {
@@ -558,7 +512,8 @@ void Lowerer::refuse_empty_items() {
         repeated.raise(GrammarFaultCode::nullableRepetition,
                        static_cast<std::uint16_t>(i + 1));
       if (n.kind != ImageKind::unordered) continue;
-      const bool nests = descend(buries(id));
+      const bool nests = descend(holds(
+          id, [](const ImageNode& x) { return x.kind == ImageKind::nest; }));
       for (std::uint32_t k = 0; k < n.count; ++k) {
         const ImageId item = child_at(n, k);
         const ImageId optional = optional_item(item);
@@ -731,6 +686,20 @@ std::vector<ImageId> Lowerer::gap_runs(const std::vector<ImageId>& children) {
   }
   flush();
   return out;
+}
+
+bool Lowerer::op_builds_node(ImageId op) const {
+  for (std::vector todo{op}; !todo.empty();) {
+    const ImageNode& n = at(todo.back());
+    todo.pop_back();
+    if (n.kind == ImageKind::ref && (node_rule(n.a) || infix_rule(n.a)))
+      return true;
+    if (n.kind != ImageKind::seq && n.kind != ImageKind::choice) continue;
+    for (std::uint32_t i = 0; i < n.count; ++i)
+      if (!is_condition_node(_im, child_at(n, i)))
+        todo.push_back(child_at(n, i));
+  }
+  return false;
 }
 
 std::uint32_t Lowerer::op_rule_of(ImageId op) const {

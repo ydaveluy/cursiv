@@ -22,52 +22,26 @@
 
 namespace cursiv::engine {
 
-// A gap program as native position transforms, one function per node.
 template <class Cfg>
-class GapProgramEmitter {
+class GapEmitter : private TextBuilder {
  public:
-  GapProgramEmitter(const Cfg& cfg, std::string boundary,
-                    std::string_view linkage)
+  GapEmitter(const Cfg& cfg, std::string sets, std::string boundary,
+             std::string_view linkage = "static")
       : _cfg(cfg),
+        _sets(std::move(sets)),
         _boundary(std::move(boundary)),
         _linkage(linkage),
-        _used(cfg.nlex) {}
-
-  // Lists `root` and what it reads, each after its children.
-  void add(std::uint16_t root) {
-    lex_post_order(
-        root,
-        [&](std::uint16_t id, auto&& push) {
-          if (_used[id]) return false;
-          _used[id] = true;
-          if (const auto& e = _cfg.lex[id];
-              e.kind == LexKind::seq || e.kind == LexKind::alt)
-            for (unsigned i = 0; i < e.b; ++i) push(_cfg.lexChild[e.a + i]);
-          else if (e.kind == LexKind::rep && e.max != 0)
-            push(e.a);
-          return true;
-        },
-        [&](std::uint16_t id) { _order.push_back(id); });
+        _walked(cfg.nlex),
+        _used(cfg.nlex) {
+    for (const GapLeaf& leaf : cfg.gapLeaves.v)
+      if (leaf.kind == GapLeafKind::has || leaf.kind == GapLeafKind::is)
+        ask(leaf.node, leaf.kind == GapLeafKind::is);
+      else if (leaf.reads_tokens())
+        phrase(leaf.node);
   }
 
-  // Whether the source reads the boundary: a class test and a guard do, no
-  // other node of a program does.
-  bool reads_boundary() const {
-    return std::ranges::any_of(_order, [&](std::uint16_t id) {
-      const LexKind kind = _cfg.lex[id].kind;
-      return kind == LexKind::chars || kind == LexKind::nguard;
-    });
-  }
-
-  std::string expression(std::uint16_t id, bool whole, std::string_view text,
-                         std::string_view size) const {
-    return concat("::cursiv::engine::gap_matches<", whole, ">(", text, ", ",
-                  size,
-                  ", [&](const auto& in) { return "
-                  "gap_pattern_",
-                  id, "(", text, ", ", size, ", in); })");
-  }
-
+  // The pattern checks, then the programs as native position transforms, one
+  // function per node.
   std::string source() const {
     TextBuilder out;
     for (const auto id : _order) {
@@ -133,39 +107,17 @@ class GapProgramEmitter {
       }
       out.line("}");
     }
-    return out.take();
+    return text() + out.take();
   }
 
- private:
-  const Cfg& _cfg;
-  std::string _boundary;
-  std::string_view _linkage;
-  std::vector<bool> _used;
-  std::vector<std::uint16_t> _order;
-};
-
-template <class Cfg>
-class GapEmitter : private TextBuilder {
- public:
-  GapEmitter(const Cfg& cfg, std::string sets, std::string boundary,
-             std::string_view linkage = "static")
-      : _cfg(cfg),
-        _sets(std::move(sets)),
-        _linkage(linkage),
-        _program(cfg, std::move(boundary), linkage),
-        _walked(cfg.nlex) {
-    for (const GapLeaf& leaf : cfg.gapLeaves.v)
-      if (leaf.kind == GapLeafKind::has || leaf.kind == GapLeafKind::is)
-        ask(leaf.node, leaf.kind == GapLeafKind::is);
-      else if (leaf.reads_tokens())
-        phrase(leaf.node);
+  // Whether the source names the boundary the emitter was given: a class
+  // test and a guard of a program do, no other gap does.
+  bool reads_boundary() const {
+    return std::ranges::any_of(_order, [&](std::uint16_t id) {
+      const LexKind kind = _cfg.lex[id].kind;
+      return kind == LexKind::chars || kind == LexKind::nguard;
+    });
   }
-
-  std::string source() const { return text() + _program.source(); }
-
-  // Whether the source names the boundary the emitter was given: a gap that
-  // reads only the sets, or has a constant answer, does not.
-  bool reads_boundary() const { return _program.reads_boundary(); }
 
   // Whether the `size` bytes at `text` hold gap `node`, or are it, `whole`.
   std::string expression(std::uint16_t node, bool whole,
@@ -186,7 +138,11 @@ class GapEmitter : private TextBuilder {
       case How::program:
         break;
     }
-    return _program.expression(node, whole, text, size);
+    return concat("::cursiv::engine::gap_matches<", whole, ">(", text, ", ",
+                  size,
+                  ", [&](const auto& in) { return "
+                  "gap_pattern_",
+                  node, "(", text, ", ", size, ", in); })");
   }
   std::string expression(unsigned leaf) const {
     return expression(_cfg.gapLeaves[leaf].node,
@@ -211,9 +167,26 @@ class GapEmitter : private TextBuilder {
         }))
       return;
     Asked a{node, whole, simple_gap(node, whole)};
-    if (a.how == How::program) _program.add(node);
+    if (a.how == How::program) add(node);
     _asked.push_back(a);
   }
+  // Lists the program `root` and what it reads, each after its children.
+  void add(std::uint16_t root) {
+    lex_post_order(
+        root,
+        [&](std::uint16_t id, auto&& push) {
+          if (_used[id]) return false;
+          _used[id] = true;
+          if (const auto& e = _cfg.lex[id];
+              e.kind == LexKind::seq || e.kind == LexKind::alt)
+            for (unsigned i = 0; i < e.b; ++i) push(_cfg.lexChild[e.a + i]);
+          else if (e.kind == LexKind::rep && e.max != 0)
+            push(e.a);
+          return true;
+        },
+        [&](std::uint16_t id) { _order.push_back(id); });
+  }
+
   // The gaps a phrase asks where it stands.
   void phrase(std::uint16_t root) {
     for (std::vector todo{root}; !todo.empty();) {
@@ -331,10 +304,13 @@ class GapEmitter : private TextBuilder {
 
   const Cfg& _cfg;
   std::string _sets;
+  std::string _boundary;
   std::string_view _linkage;
-  GapProgramEmitter<Cfg> _program;
   std::vector<bool> _walked;
   std::vector<Asked> _asked;
+  // The nodes of the programs, each after what it reads.
+  std::vector<bool> _used;
+  std::vector<std::uint16_t> _order;
 };
 
 }  // namespace cursiv::engine

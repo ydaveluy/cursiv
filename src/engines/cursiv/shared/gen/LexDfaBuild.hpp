@@ -40,8 +40,6 @@ struct LexNfaSubsets {
   std::vector<std::uint64_t> pool;
   std::vector<std::uint32_t> off, lo, hi;
   std::vector<std::uint64_t> cur;  // the one being built
-  std::vector<std::size_t> touched;  // the words of `cur` that became non-zero
-  std::size_t tn = 0;      // ...and how many of them, the room being fixed
   std::vector<int> stack;  // the epsilon walk, explicit
   std::size_t curLo = 0, curHi = 0;
   // Sized for the subsets, which number with the NFA's states.
@@ -59,8 +57,6 @@ struct LexNfaSubsets {
     // Room for the deepest walk: the mark is tested at the pop, and a state
     // expands at most once, pushing at most two.
     stack.assign(nstates * 2 + 4, 0);
-    touched.assign(words, 0);
-    tn = 0;
     curLo = words;
     curHi = 0;
     ix.init(nstates);
@@ -72,7 +68,6 @@ struct LexNfaSubsets {
     int* const st = stack.data();
     const LexNfaState* const ns = n.s.data();
     std::uint64_t* const cw = cur.data();
-    std::size_t* const tw = touched.data();
     std::size_t sp = 0;
     st[sp++] = s;
     while (sp != 0) {
@@ -80,7 +75,6 @@ struct LexNfaSubsets {
       const std::size_t k = static_cast<std::size_t>(x) >> 6;
       const std::uint64_t b = std::uint64_t{1} << (x & 63);
       if (cw[k] & b) continue;
-      if (cw[k] == 0) tw[tn++] = k;
       cw[k] |= b;
       curLo = std::min(k, curLo);
       curHi = std::max(k, curHi);
@@ -91,9 +85,9 @@ struct LexNfaSubsets {
     }
   }
 
-  // Interns the row being built and clears it: every word it holds is in
-  // `touched`, so zeroing those words empties it whole. Equal content gives
-  // the same span, so the span is part of the identity and not a hint.
+  // Interns the row being built and clears it: its span holds every word it
+  // set. Equal content gives the same span, so the span is part of the
+  // identity and not a hint.
   unsigned intern() {
     std::uint64_t* const cw = cur.data();
     const std::uint32_t* const lop = lo.data();
@@ -123,9 +117,7 @@ struct LexNfaSubsets {
       for (std::size_t k = curLo; k <= curHi; ++k) pool.push_back(cw[k]);
       ix.add(h, found);
     }
-    const std::size_t* const tw = touched.data();
-    for (std::size_t q = 0; q < tn; ++q) cw[tw[q]] = 0;
-    tn = 0;
+    for (std::size_t k = curLo; k <= curHi; ++k) cw[k] = 0;
     curLo = words;
     curHi = 0;
     return found;
@@ -193,7 +185,7 @@ struct LexDfaBuild {
   LexDfaBuild(const LexNfaPool& n, const ByteSet* sets, std::size_t nsets,
               const std::vector<unsigned>& repByte, unsigned classes,
               const LexKeywordCut& cut, const TermInfo* terms,
-              std::span<const std::uint8_t> words = {})
+              std::span<const std::uint16_t> words = {})
       : _nfa(n),
         _cut(cut),
         _terms(terms),
@@ -478,7 +470,8 @@ struct LexDfaBuild {
   const LexNfaPool& _nfa;
   const LexKeywordCut& _cut;
   const TermInfo* const _terms;
-  const std::span<const std::uint8_t> _words;
+  // The sets that are word classes, ascending.
+  const std::span<const std::uint16_t> _words;
   const unsigned _ncls;
   const std::size_t _clsWords;
   // What an NFA state consumes, as a mask of byte classes.
@@ -531,7 +524,7 @@ struct LexDfaBuild {
   }
 
   bool word_bound(std::uint16_t bound) const {
-    return bound != kNoSet && bound < _words.size() && _words[bound] != 0;
+    return std::ranges::binary_search(_words, bound);
   }
 
   // What the first `mn` members accept and launch. A `plain` read only decides
@@ -607,7 +600,7 @@ struct LexDfaBuild {
   // of members left.
   std::size_t detach(std::size_t mn, std::vector<LexDfaReading::Gate>& gates,
                      std::vector<std::uint32_t>& gated) {
-    if (!_cut.active) return mn;
+    if (_cut.trivia.empty()) return mn;
     int* const mw = _mem.data();
     std::vector<std::uint32_t> stands;
     std::vector<std::uint16_t> relayed;
@@ -707,19 +700,19 @@ struct LexDfaBuild {
 // what a state accepts, its relay chain already in `b.dfaRelay`; `push`
 // appends a row to `b.relays` and returns its index.
 template <class Built, class Push, class Write>
-void lex_build_dfa(Built& b, const LexAlphabet& alpha, LexKeywordCut& cut,
+void lex_build_dfa(Built& b, const LexAlphabet& alpha,
                    const std::vector<DynSet>& modeSet, const Push& push,
                    const Write& write) {
   auto& g = b.cfg;
-  const std::vector<std::uint8_t> words = lex_word_flags(g);
+  const std::vector<std::uint16_t> words = lex_word_bounds(g);
   LexDfaBuild dfa(alpha.nfa, g.sets.data(), g.sets.size(), alpha.repByte,
-                  alpha.ncls, cut, g.terms.data(), words);
+                  alpha.ncls, alpha.cut, g.terms.data(), words);
   LexRelayChains chains;
   for (unsigned m = 0; m < b.nmodes; ++m)
     b.modeStart[m] = dfa.start(modeSet[m], alpha.startOf);
   lex_relay_seed(dfa, alpha.nfa.relays, push);
   dfa.fill(b, [&](std::uint16_t self, const LexDfaReading& r) {
-    b.dfaRelay[self] = chains.launched(g, cut, r, b.relays, push);
+    b.dfaRelay[self] = chains.launched(g, alpha.cut, r, b.relays, push);
     write(self, r);
   });
   for (unsigned m = 0; m < b.nmodes; ++m)

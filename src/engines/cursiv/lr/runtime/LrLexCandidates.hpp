@@ -28,11 +28,11 @@ class LrLexCandidates {
     const unsigned end = Base[st + 1u];
     if (begin == end) return;
     const auto& res = A.dfa_res_set(st);
-    const auto refused = lr_refused_from<A>(src, _start, len);
     TextOffset unseen = at;
     const bool reserved =
-        res.any() && lex_reserves<A>(st, src, at, len, unseen,
-                                     [&](SymbolId t) { return !refused(t); });
+        res.any() && lex_reserves<A>(st, src, at, len, unseen, [&](SymbolId t) {
+          return !LexTape<A>{}.refuses(t, src + _start, len - _start);
+        });
     if (reserved) drop_if([&](const Scan& o) { return res.test(o.term); });
     for (auto k = begin; k < end; ++k)
       if ((!reserved || !res.test(Terms[k])) &&
@@ -60,7 +60,7 @@ class LrLexCandidates {
         for (std::uint32_t k = 0; k < n; ++k) {
           if (held[k].term == kInvalidSymbol || held[k].priority == 0) continue;
           const TextOffset end = held[k].end;
-          const std::uint16_t walked = walk_to(first, src, start, end);
+          const std::uint16_t walked = tape.state_at(first, src, start, end);
           drop_if([&](const Scan& o) {
             return o.end == end && walked != kDeadState &&
                    tape.takes(walked,
@@ -200,44 +200,40 @@ class LrLexCandidates {
     if constexpr (Max <= kSmall) {
       add_small(term, end, priority);
     } else {
-      if (_count < kSmall && _index.size == 0) {
+      if (_count < kSmall && _index.size == 0)
         add_small(term, end, priority);
-        return;
-      }
-      if (_index.size == 0) reindex(std::bit_ceil(2u * _count));
-      unsigned at = place(term);
-      if (index()[at] != kInvalidSymbol) {
-        keep(index()[at], end, priority);
-        return;
-      }
-      if (2u * (_count + 1u) > _index.size) {
-        reindex(2u * _index.size);
-        at = place(term);
-      }
-      assert(_count < _cap && "a position filled the room its table sized");
-      if (_count < _cap) {
-        index()[at] = static_cast<SymbolId>(_count);
-        _out[_count++] = Scan{end, term, priority};
-      }
+      else
+        add_indexed(term, end, priority);
     }
   }
 
-  static std::uint16_t walk_to(std::uint16_t st, const char* src,
-                               TextOffset from, TextOffset end) {
-    for (auto at = from; at < end && st != kDeadState; ++at)
-      st = A.next_byte(st, static_cast<unsigned char>(src[at]));
-    return st;
+  // Out of line: a walk writes the small insertion at each state, not this.
+  CURSIV_NOINLINE void add_indexed(SymbolId term, TextOffset end,
+                                   std::uint8_t priority) {
+    if (_index.size == 0) reindex(std::bit_ceil(2u * _count));
+    unsigned at = place(term);
+    if (index()[at] != kInvalidSymbol) {
+      keep(index()[at], end, priority);
+      return;
+    }
+    if (2u * (_count + 1u) > _index.size) {
+      reindex(2u * _index.size);
+      at = place(term);
+    }
+    assert(_count < _cap && "a position filled the room its table sized");
+    if (_count < _cap) {
+      index()[at] = static_cast<SymbolId>(_count);
+      _out[_count++] = Scan{end, term, priority};
+    }
   }
 
   static bool reserved_at(std::uint16_t st, const char* src, TextOffset len,
                           TextOffset from, Scan match) {
-    st = walk_to(st, src, from, match.end);
-    if (st == kDeadState) return false;
-    const auto refused = lr_refused_from<A>(src, from, len);
+    st = LexTape<A>{}.state_at(st, src, from, match.end);
     TextOffset unseen = match.end;
-    return A.dfa_res_set(st).test(match.term) &&
-           lex_reserves<A>(st, src, match.end, len, unseen,
-                           [&](SymbolId t) { return !refused(t); });
+    return st != kDeadState &&
+           LexTape<A>{}.reserves(st, match.term, src, from, match.end, len,
+                                 unseen);
   }
 };
 

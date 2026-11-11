@@ -11,21 +11,17 @@
 
 namespace cursiv::engine {
 
+// A directive says what the position under it writes.
+constexpr bool is_directive_kind(ImageKind kind) {
+  return kind == ImageKind::create || kind == ImageKind::nest ||
+         kind == ImageKind::assign || kind == ImageKind::append ||
+         kind == ImageKind::flag;
+}
+
 // A directive, prose, mark or region over one operand reads what it does.
-inline bool over_operand(ImageKind kind) {
-  switch (kind) {
-    case ImageKind::doc:
-    case ImageKind::mark:
-    case ImageKind::skip:
-    case ImageKind::assign:
-    case ImageKind::append:
-    case ImageKind::flag:
-    case ImageKind::create:
-    case ImageKind::nest:
-      return true;
-    default:
-      return false;
-  }
+constexpr bool over_operand(ImageKind kind) {
+  return is_directive_kind(kind) || kind == ImageKind::doc ||
+         kind == ImageKind::mark || kind == ImageKind::skip;
 }
 
 // A condition takes no position, bare or under a repetition or a wrapper whose

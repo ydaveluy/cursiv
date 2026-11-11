@@ -53,7 +53,7 @@ inline void ll_implied(LlContext& c, std::uint16_t mode, std::uint16_t term,
                        std::uint16_t condition, std::uint16_t row,
                        std::uint16_t pos = 0) {
   if (c.give) return;
-  if (!c.laValid) ll_peek<T>(c, mode);
+  if (c.laMode == kNoMode) ll_peek<T>(c, mode);
   if (c.la.sym == term)
     ll_consume<T>(c, row, pos);
   else if (!ll_implied_holds<T>(c, mode, condition, row, pos))

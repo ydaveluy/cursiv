@@ -108,8 +108,10 @@ cursiv::AstNode* make(cursiv::engine::AstBuildCtx& context, cursiv::NodeId id) {
   return node;
 }
 
-void entry(cursiv::engine::AstReducer& builder, cursiv::NodeId id) {
-  builder.push_made(id, builder.create<make, nullptr, false>(0, id));
+void entry(cursiv::engine::AstReducer& builder, cursiv::NodeId id,
+           const cursiv::CstNode& node) {
+  builder.create<make, nullptr, false>(id, node, 0, cursiv::kNoField,
+                                       cursiv::ActKind::create);
 }
 
 const cursiv::AstMetaData metadata{};
@@ -135,7 +137,7 @@ cursiv::Cst tape(std::string_view text) {
 void drive(cursiv::engine::LlContext& context) {
   context.last = context.tape.leaf(0, context.len,
                                    cursiv::engine::StampLayout{}.make(0, 0));
-  context.at = context.len;
+  context.at = context.triviaAt = context.len;
 }
 
 }  // namespace ast_cancellation
@@ -296,8 +298,7 @@ struct PredictionAt {
   std::uint16_t operator()(cursiv::TextOffset at) {
     context.at = at;
     context.triviaAt = at;
-    context.laValid = false;
-    context.laMode = cursiv::engine::kInvalidSymbol;
+    context.laMode = cursiv::engine::kNoMode;
     cursiv::engine::ll_peek<table>(context, table.decisions[decision].mode);
     return cursiv::engine::ll_episode<table>(context, decision);
   }
@@ -1073,28 +1074,27 @@ void remaining_prefixes_walk_deep_paths_and_keep_the_shortest_readings() {
 // The stack the descent stands on is one node of the pool, and an ask costs
 // the frames that changed since the last.
 void a_return_stack_pushes_only_the_frames_that_changed() {
-  constexpr const auto& table = tpar::generated::Ll::kTable;
-  cursiv::engine::LlSimulation sim(table.atn);
+  cursiv::engine::LlReturnPool pool;
   cursiv::engine::LlReturnStack stack;
-  CHECK(stack.context(sim) == cursiv::engine::kLlCtxNone);
+  CHECK(stack.context(pool) == cursiv::engine::kLlCtxNone);
   stack.push_back(3);
   stack.push_back(4);
-  const auto two = stack.context(sim);
-  const auto nodes = sim.contexts().size();
+  const auto two = stack.context(pool);
+  const auto nodes = pool.contexts().size();
   CHECK(two != cursiv::engine::kLlCtxNone && nodes == 2);
-  CHECK(stack.context(sim) == two && sim.contexts().size() == nodes);
+  CHECK(stack.context(pool) == two && pool.contexts().size() == nodes);
   stack.push_back(5);
-  const auto three = stack.context(sim);
-  CHECK(three != two && sim.contexts().size() == nodes + 1);
+  const auto three = stack.context(pool);
+  CHECK(three != two && pool.contexts().size() == nodes + 1);
   stack.pop_back();
-  CHECK(stack.context(sim) == two && sim.contexts().size() == nodes + 1);
+  CHECK(stack.context(pool) == two && pool.contexts().size() == nodes + 1);
   stack.push_back(5);
-  CHECK(stack.context(sim) == three && sim.contexts().size() == nodes + 1);
+  CHECK(stack.context(pool) == three && pool.contexts().size() == nodes + 1);
   cursiv::engine::LlReturnStack other;
   other.push_back(3);
   other.push_back(4);
   other.push_back(5);
-  CHECK(other.context(sim) == three);
+  CHECK(other.context(pool) == three);
 }
 
 void an_abandon_replays_equivalent_returns_without_collapsing_frames() {
@@ -1201,7 +1201,6 @@ void an_optional_prefix_keeps_its_token_due_across_a_required_call() {
     s.limit = 10000;
     s.sim.resume();
     s.sim.share_epsilon_contexts();
-    s.sim.track_calls();
     s.sim.keep_steps();
     s.sim.at_token(source == 1 ? 1 : 0);
     auto ctx = cursiv::engine::kLlCtxNone;
@@ -1335,9 +1334,8 @@ void trailing_trivia_is_read_after_the_entry_region() {
     builder.leaf(0, 10,
                  cursiv::engine::StampLayout{}.make(cursiv::engine::kNoRow, 0));
     cursiv::engine::LlContext context(text, builder);
-    context.at = context.pendEnd = 10;
+    context.at = context.triviaAt = context.pendEnd = 10;
     context.la = cursiv::engine::Token{10, 10, cursiv::engine::kInvalidSymbol};
-    context.laValid = true;
     if (classified) {
       const auto scan = cursiv::engine::ll_match_text<table>(
           text.data(), text.size(), table.errMode, 10);
@@ -2031,7 +2029,7 @@ void drive(cursiv::engine::LlContext& c) {
   kept.plan.install(planned, nullptr, 0);
   if (explode) throw std::runtime_error("drive exception");
   c.last = c.tape.leaf(0, c.len, cursiv::engine::StampLayout{}.make(0, 0));
-  c.at = c.len;
+  c.at = c.triviaAt = c.len;
 }
 cursiv::AstNode* make(cursiv::engine::AstBuildCtx& ctx, cursiv::NodeId id) {
   auto* node = static_cast<Node*>(cursiv::engine::make_node<Node>(ctx, id));
@@ -2074,8 +2072,10 @@ cursiv::AstNode* make(cursiv::engine::AstBuildCtx& ctx, cursiv::NodeId id) {
   if (stop) stop->request_stop();
   return node;
 }
-void entry(cursiv::engine::AstReducer& builder, cursiv::NodeId id) {
-  builder.push_made(id, builder.create<make, nullptr, false>(0, id));
+void entry(cursiv::engine::AstReducer& builder, cursiv::NodeId id,
+           const cursiv::CstNode& node) {
+  builder.create<make, nullptr, false>(id, node, 0, cursiv::kNoField,
+                                       cursiv::ActKind::create);
 }
 const cursiv::AstMetaData metadata{};
 const cursiv::engine::MakeFn makes[] = {make};

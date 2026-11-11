@@ -31,6 +31,7 @@
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/utils/white_space.hpp"
 #include "cursiv/syntax-tree/CstLeaf.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/utils/macros.hpp"
 
 namespace cursiv::engine {
@@ -329,16 +330,15 @@ class CaretStacks {
     _gapFrom = gapFrom;
   }
   bool indented() const { return _indent != 0 || _dedent != 0 || _bracketed; }
-  // Whether the conditions asked up to a record's end read no byte a candidate
-  // replaces, so the record keeps what the tape decided. `token_end(n, none)`
-  // is where the `n`-th token after the record ends, `none` where fewer follow.
-  template <class TokenEnd>
-  bool keeps_tape(TextOffset end, TokenEnd&& token_end) const {
+  // Whether the conditions asked up to the end of record `id` read no byte a
+  // candidate replaces, so the record keeps what the tape decided.
+  bool keeps_tape(const Cst& cst, NodeId id) const {
+    const TextOffset end = cst[id].end;
     if (_edge == kNoEdge || _table.cond == nullptr) return true;
     if (end >= _edge || end + std::uint64_t{_widest.look} > _edge) return false;
     if (_widest.tokens == 0) return true;
     return _widest.tokens < kUnboundedTokens &&
-           token_end(_widest.tokens + 1u, kNoEdge) <= _edge;
+           token_end_from(cst, id + 1u, _widest.tokens + 1u, kNoEdge) <= _edge;
   }
   // The text a candidate's conditions read past it ends at or before `end`.
   void read_through(TextOffset end) { _readEnd = end; }
@@ -395,6 +395,25 @@ class CaretStacks {
           _skip.push_back(t.sym);
           return rescan(std::span<const SymbolId>(_skip), t.begin);
         });
+  }
+  // The readings that tie with `winner`, which `refused` left: each the stacks
+  // take goes to `sink` until it answers false. `weight` is that of the token
+  // `rescan` last read.
+  template <class Taken, class Rescan, class Sink>
+  void refused_ties(std::uint16_t mode, const Token& winner,
+                    const unsigned& weight, Taken&& taken, Rescan&& rescan,
+                    Sink&& sink) {
+    if (_table.modeMulti[mode] != 1 || _table.scan == nullptr ||
+        _table.maxCands < 2 || winner.sym >= _table.terms.size())
+      return;
+    lr_refused_ties(
+        winner, _table.terms.size(),
+        [&](const Token& t) {
+          _skip.push_back(t.sym);
+          return rescan(std::span<const SymbolId>(_skip), t.begin);
+        },
+        [&](const Token&) { return weight; },
+        [&](SymbolId sym) { return _table.flagged(mode, sym); }, taken, sink);
   }
   // A reduction the leaf at the edge was read through before its shift: the
   // state that took it, whose mode read the leaf first, and the rule.
@@ -502,7 +521,7 @@ class CaretStacks {
   void indentation(TextOffset at, TextOffset held) {
     if (_indent == 0 && _dedent == 0) return;
     _ready.clear();
-    close(
+    close_shared(
         [&](Id head, const Token& token) -> std::span<const Token> {
           if (_frames[head].laMode != kDeadState && token.sym != 0 &&
               (token.sym == _indent || token.sym == _dedent))
@@ -541,7 +560,7 @@ class CaretStacks {
       for (const auto sym : _implied)
         _impliedTokens.push_back(Token{at, at, sym});
       _loose = true;
-      close(
+      close_shared(
           [&](Id head, const Token& held) -> std::span<const Token> {
             if (_frames[head].laMode != kDeadState && implied_of(held.sym) >= 0)
               return {&held, 1};
@@ -587,7 +606,7 @@ class CaretStacks {
       typed_as(term, word);
       judge(at);
     }
-    close(
+    close_shared(
         [&](Id head, const Token& held) -> std::span<const Token> {
           const Frame& frame = _frames[head];
           if (!_dead.empty() && _dead[frame.context.assumes] != 0) return {};
@@ -644,8 +663,7 @@ class CaretStacks {
           _longerToken = hand;
           return {&_longerToken, 1};
         },
-        [&](Id from, const LrAction& action, const Token& read,
-            std::uint32_t) {
+        [&](Id from, const LrAction& action, const Token& read, std::uint32_t) {
           if (read.begin < at) return;
           if (read.sym == term)
             _shifted.emplace_back(_frames[from].state, action.arg);
@@ -779,7 +797,7 @@ class CaretStacks {
     forget_scans();
     _next.reset(_rank);
     _asWritten = true;
-    close(
+    close_shared(
         [&](Id head, const Token& held) -> std::span<const Token> {
           const Frame& frame = _frames[head];
           if (frame.laMode != kDeadState && implied_of(held.sym) >= 0)
@@ -1098,6 +1116,16 @@ class CaretStacks {
       }
     }
     _closing = false;
+  }
+
+  // `close` off the replay's path: the callbacks go by reference, so these
+  // closures share one instantiation.
+  void close_shared(
+      function_ref<std::span<const Token>(Id, const Token&)> reads,
+      function_ref<void(Id, const LrAction&, const Token&, std::uint32_t)>
+          shift,
+      function_ref<void(Id, const Token&)> error = [](Id, const Token&) {}) {
+    close(reads, shift, error);
   }
 
   // The implied token the drive inserts before a candidate the state refuses:
@@ -1448,14 +1476,14 @@ class CaretStacks {
     const bool inside = frame.context.indent.depth != 0;
     unsigned weight = 0;
     // A trivia left where a terminal is refused is crossed, as the drive does.
-    const auto without = [&](TextOffset from) {
+    const auto without = [&](std::span<const SymbolId> skip, TextOffset from) {
       const auto len = static_cast<TextOffset>(_text.size());
       for (TextOffset p = from;;) {
         p = past_skip_run(mode, p);
         if (p == len) return Token{p, p, kEofSymbol};
         TextOffset halt = 0;
         const Scan t =
-            _table.lexWithout(_text.data(), len, mode, p, _skip, halt);
+            _table.lexWithout(_text.data(), len, mode, p, skip, halt);
         weight = lex_weight(t.priority);
         if (t.term == kInvalidSymbol || t.end <= p)
           return Token{p, p, kInvalidSymbol};
@@ -1464,31 +1492,13 @@ class CaretStacks {
       }
     };
     Token winner = seen.won;
-    if (!refused(mode, winner, stands,
-                 [&](std::span<const SymbolId>, TextOffset from) {
-                   return without(from);
-                 }))
+    if (!refused(mode, winner, stands, without))
       return {_tokens.data() + seen.first, seen.count};
     _unrefused.assign(1, winner);
-    if (_table.modeMulti[mode] != 1 || _table.scan == nullptr ||
-        _table.maxCands < 2 || winner.sym >= _table.terms.size())
-      return _unrefused;
-    const unsigned won = weight;
-    lr_refused_ties(
-        winner,
-        [&](const Token& t) {
-          _skip.push_back(t.sym);
-          return without(t.begin);
-        },
-        [&](const Token& t) {
-          return t.sym < _table.terms.size() && t.begin == winner.begin &&
-                 t.end == winner.end && weight == won;
-        },
-        [&](SymbolId sym) { return _table.flagged(mode, sym); }, stands,
-        [&](const Token& t) {
-          _unrefused.push_back(t);
-          return _unrefused.size() < _table.maxCands;
-        });
+    refused_ties(mode, winner, weight, stands, without, [&](const Token& t) {
+      _unrefused.push_back(t);
+      return _unrefused.size() < _table.maxCands;
+    });
     return _unrefused;
   }
 
@@ -1947,12 +1957,9 @@ class CaretReplay {
       if (_table.chooses || term == kInvalidSymbol || _table.synthetic(term))
         return false;
     }
-    NodeId k = id + 1;
-    while (k < _cst.size() && (_cst[k].subtreeSize != 1 || _cst[k].hidden)) ++k;
+    const NodeId k = token_after(id);
     if (_firstRepair <= (k < _cst.size() ? _cst[k].begin : n.end) ||
-        !_stacks.keeps_tape(n.end, [&](unsigned count, TextOffset none) {
-          return token_end_from(_cst, id + 1u, count, none);
-        }))
+        !_stacks.keeps_tape(_cst, id))
       return false;
     const std::span<const std::uint16_t> preds = _table.preds;
     _states.clear();
@@ -1964,15 +1971,25 @@ class CaretReplay {
       _states.push_back(s);
     }
     std::ranges::reverse(_states);
-    // The end of the last token, as `jump` takes it.
-    NodeId l = id;
-    while (l > _cst.subtree_begin(id) &&
-           (_cst[l].subtreeSize != 1 || _cst[l].hidden ||
-            _cst[l].begin == _cst[l].end))
-      --l;
-    _stacks.seed(_states, n.end, _cst[l].end);
+    _stacks.seed(_states, n.end, token_end(id, _cst.subtree_begin(id)));
     _gathered = id + 1;
     return true;
+  }
+
+  // The first token after record `id`, or the tape's size.
+  NodeId token_after(NodeId id) const {
+    do ++id;
+    while (id < _cst.size() && (_cst[id].subtreeSize != 1 || _cst[id].hidden));
+    return id;
+  }
+
+  // The end of the last token with a width from `last` down to `first`, as
+  // `jump` takes it.
+  TextOffset token_end(NodeId last, NodeId first) const {
+    while (last > first && (_cst[last].subtreeSize != 1 || _cst[last].hidden ||
+                            _cst[last].begin == _cst[last].end))
+      --last;
+    return _cst[last].end;
   }
 
   // No repair inside the record, nor on the token after it: the tape may
@@ -1985,9 +2002,7 @@ class CaretReplay {
     const auto it = std::lower_bound(_repairs.begin(), _repairs.end(),
                                      _cst.subtree_begin(id));
     if (it != _repairs.end() && *it <= id) return false;
-    NodeId k = id + 1;
-    while (k < _cst.size() && (_cst[k].subtreeSize != 1 || _cst[k].hidden))
-      ++k;
+    const NodeId k = token_after(id);
     return k == _cst.size() || !_cst[k].recovered;
   }
 
@@ -2020,9 +2035,7 @@ class CaretReplay {
       if (_table.stamp.row(n) == kNoElement)
         _jobs.push_back(Job{job.id, _stacks.rank(), true});
     } else if (n.end <= _horizon && clean(job.id) &&
-               _stacks.keeps_tape(n.end, [&](unsigned count, TextOffset none) {
-                 return token_end_from(_cst, job.id + 1u, count, none);
-               })) {
+               _stacks.keeps_tape(_cst, job.id)) {
       const auto row = _table.stamp.row(n);
       const auto lhs = _table.row_lhs(row);
       NodeId f = _cst.subtree_begin(job.id);
@@ -2034,14 +2047,10 @@ class CaretReplay {
                                 : kInvalidSymbol;
       if (!lhs.empty() && t.subtreeSize == 1 && t.begin != t.end &&
           term != kInvalidSymbol && term != 0 && !_table.synthetic(term)) {
-        // The record's own last token with a width: it is clean, so one
-        // stands at or after its first.
-        NodeId l = job.id - 1;
-        while (l > f && (_cst[l].subtreeSize != 1 || _cst[l].hidden ||
-                         _cst[l].begin == _cst[l].end))
-          --l;
+        // The record is clean: a token with a width stands at or after its
+        // first.
         if (_stacks.jump(Token{t.begin, t.end, term}, lhs, n.end,
-                         _cst[l].end)) {
+                         token_end(job.id - 1, f))) {
           if (_stacks.indented()) carry(f, job.id);
           return true;
         }
@@ -2180,17 +2189,14 @@ void lr_next_features_at(const LrCaretTable& table,
   // the leaf and the token before it; otherwise the leaf is asked in the mode
   // that admits everything.
   bool spliceable = leaf && (!pre || pre.end == leaf.begin || !skipped);
-  for (NodeId id = pre ? cst.next_leaf(pre.id) : 0; spliceable && id < leaf.id;
-       id = cst.next_leaf(id)) {
-    const CstLeaf between = cst.as_leaf(id);
-    const auto state = table.stamp.state(cst[between.id]);
+  for (NodeId i = pre ? pre.id + 1 : 0; spliceable && i < leaf.id; ++i) {
+    const CstNode& n = cst[i];
+    const auto state = table.stamp.state(n);
     spliceable =
-        between.hidden || (between.begin == between.end && !between.recovered &&
-                           state < table.shiftTerm.size() &&
-                           table.synthetic(table.shiftTerm[state]));
+        !n.recovered && (n.subtreeSize != 1 || n.hidden ||
+                         (n.begin == n.end && state < table.shiftTerm.size() &&
+                          table.synthetic(table.shiftTerm[state])));
   }
-  for (NodeId i = pre ? pre.id + 1 : 0; spliceable && i < leaf.id; ++i)
-    if (cst[i].recovered) spliceable = false;
   std::string splice;
   std::vector<Scan> room(table.scan != nullptr ? table.maxCands : 0);
   // What the position reads this terminal as, the only reading that makes it
@@ -2237,43 +2243,25 @@ void lr_next_features_at(const LrCaretTable& table,
           return;
         }
         Scan s = reads(m, reading, h);
-        std::vector<SymbolId> off;
         unsigned weight = 0;
-        const auto without = [&] {
-          const Scan r = reads(m, reading, h, off);
+        const auto without = [&](std::span<const SymbolId> skip, TextOffset) {
+          const Scan r = reads(m, reading, h, skip);
           weight = lex_weight(r.priority);
           return Token{leaf.begin, leaf.begin + r.end, r.term};
         };
         const auto edge = [&](const Token& t) { return stacks.edge_takes(t); };
         if (Token la{leaf.begin, leaf.begin + s.end, s.term};
             s.term != reading && s.end != 0 &&
-            stacks.refused(m, la, edge,
-                           [&](std::span<const SymbolId> skip, TextOffset) {
-                             off.assign(skip.begin(), skip.end());
-                             return without();
-                           })) {
+            stacks.refused(m, la, edge, without)) {
           s = Scan{la.end - leaf.begin, la.sym};
           // The reading may be one of those that tie with the new winner.
-          if (la.sym != reading && table.modeMulti[m] == 1 && !room.empty() &&
-              la.sym < table.terms.size()) {
-            const unsigned won = weight;
-            lr_refused_ties(
-                la,
-                [&](const Token& t) {
-                  off.push_back(t.sym);
-                  return without();
-                },
-                [&](const Token& t) {
-                  return t.sym < table.terms.size() && t.end == la.end &&
-                         weight == won;
-                },
-                [&](SymbolId sym) { return table.flagged(m, sym); }, edge,
-                [&](const Token& t) {
-                  if (t.sym != reading) return true;
-                  s = Scan{t.end - leaf.begin, t.sym};
-                  return false;
-                });
-          }
+          if (la.sym != reading)
+            stacks.refused_ties(m, la, weight, edge, without,
+                                [&](const Token& t) {
+                                  if (t.sym != reading) return true;
+                                  s = Scan{t.end - leaf.begin, t.sym};
+                                  return false;
+                                });
         }
         if (s.term == reading && s.end == at - leaf.begin) ok = true;
         halt = std::max(halt, h);

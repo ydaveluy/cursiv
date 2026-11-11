@@ -469,8 +469,8 @@ cursiv::TextOffset unmatched_by_walks(const char* src, cursiv::TextOffset len,
     if (halt > reached) reached = halt;
     if (s.term != cursiv::engine::kInvalidSymbol && s.end > q) break;
     if (opens.has(static_cast<unsigned char>(src[q])) &&
-        cursiv::engine::lr_lex_reading<kTable>(src, len, kTable.errMode, q,
-                                               reached)
+        cursiv::engine::lex_reading(cursiv::engine::LrLexTape<kTable>{}, src,
+                                    len, kTable.errMode, q, reached)
                 .term != cursiv::engine::kInvalidSymbol)
       break;
     ++q;

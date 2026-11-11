@@ -22,41 +22,6 @@
 
 namespace cursiv::engine {
 
-// What a lookahead may read next, as a mask over the grammar's terminals: one
-// tokenisation serves every depth, a spelling two terminals match reads as each
-// one still admitted, and a prediction allocates nothing.
-template <std::size_t Words>
-class LlMask {
- public:
-  void reset() { _w.fill(0); }
-  void set(std::uint16_t t) { _w[t >> 6] |= std::uint64_t{1} << (t & 63); }
-  void reset(std::uint16_t t) { _w[t >> 6] &= ~(std::uint64_t{1} << (t & 63)); }
-  bool test(std::uint16_t t) const {
-    const std::uint32_t k = t >> 6;
-    return k < Words && ((_w[k] >> (t & 63)) & 1) != 0;
-  }
-  std::uint64_t word(std::uint32_t k) const { return k < Words ? _w[k] : 0; }
-  void assign(const std::uint64_t* row,
-              const std::array<std::uint64_t, Words>& mask) {
-    for (std::size_t k = 0; k < Words; ++k) _w[k] = row[k] & mask[k];
-  }
-  void add(const LlMask& other) {
-    for (std::size_t k = 0; k < Words; ++k) _w[k] |= other._w[k];
-  }
-  bool operator==(const LlMask&) const = default;
-
- private:
-  std::array<std::uint64_t, Words> _w{};
-};
-
-template <const auto& T>
-inline constexpr auto kLlVisibleTerms = [] {
-  std::array<std::uint64_t, T.termWords> mask{};
-  for (std::uint16_t t = 1; t < T.nterms; ++t)
-    if (!T.terms[t].trivia) mask[t >> 6] |= std::uint64_t{1} << (t & 63);
-  return mask;
-}();
-
 // The scratch a prediction reads and writes, kept between calls: it is the hot
 // path of every choice the construction left open.
 template <std::size_t Words>

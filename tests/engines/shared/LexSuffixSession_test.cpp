@@ -20,6 +20,8 @@ using cursiv::engine::SymbolId;
 // Mode 1 recognizes only `>`; mode 2 an `a` word bounded against `b`.
 struct Tape {
   static constexpr bool kRefuses = false;
+  static constexpr bool kQualified = false;
+  static constexpr bool kRelays = false;
   std::uint64_t* steps;
 
   std::uint16_t start(std::uint16_t mode) const {
@@ -80,8 +82,13 @@ struct RefusingTape : Tape {
 };
 
 struct RelayTape : Tape {
+  static constexpr bool kRelays = true;
+  const cursiv::engine::LexRelay* relayed;
   std::uint16_t relay(std::uint16_t state) const {
     return state == 2 ? 0 : cursiv::engine::kNoRelay;
+  }
+  const cursiv::engine::LexRelay& relay_of(std::uint16_t) const {
+    return *relayed;
   }
 };
 
@@ -182,10 +189,23 @@ void a_long_suffix_reads_the_stop() {
   }
 }
 
+// A token shorter than a stride is walked again at each read.
+void a_short_read_keeps_no_point() {
+  std::uint64_t steps = 0;
+  const Tape tape{&steps};
+  const std::string text = "ab ab";
+  const auto len = static_cast<TextOffset>(text.size());
+  cursiv::engine::LexSuffixSession<Tape> session(text.data(), len);
+  CHECK(read(tape, text, 0, 0, nullptr).end == 2);
+  const auto once = steps;
+  CHECK(read(tape, text, 0, 0, nullptr).end == 2);
+  CHECK(once != 0 && steps == 2 * once);
+}
+
 void sessions_restore_their_parent_and_never_reuse_another_parse() {
   std::uint64_t steps = 0;
   const Tape tape{&steps};
-  std::string text = "a > a ?";
+  std::string text = "a > a > a > a > a > a ?";
   const auto len = static_cast<TextOffset>(text.size());
   unsigned fallbacks = 0;
   CHECK(read(tape, text, 0, 0, nullptr, &fallbacks).term == 0);
@@ -194,16 +214,17 @@ void sessions_restore_their_parent_and_never_reuse_another_parse() {
     cursiv::engine::LexSuffixSession<Tape> session(text.data(), len);
     CHECK(read(tape, text, 0, 0, nullptr).term == 0);
     try {
-      const std::string other = "a > a !";
+      const std::string other = "a > a > a > a > a > a !";
       cursiv::engine::LexSuffixSession<Tape> nested(other.data(), len);
       CHECK(read(tape, other, 0, 0, nullptr).term == 1);
       throw std::runtime_error("unwind the nested session");
     } catch (const std::runtime_error&) {
     }
+    // The outer session still holds its points: the read stops at the first.
     const auto before = steps;
     CHECK(read(tape, text, 0, 0, nullptr).term == 0);
-    CHECK(steps == before);
-    const std::string other = "a > a !";
+    CHECK(steps - before == cursiv::engine::LexSuffixCache::kStride);
+    const std::string other = "a > a > a > a > a > a !";
     CHECK(read(tape, other, 0, 0, nullptr, &fallbacks).term == 1);
     CHECK(read(tape, std::string_view(text).substr(0, 3), 0, 0, nullptr,
                &fallbacks)
@@ -230,23 +251,41 @@ void context_dependent_tokens_keep_the_normal_matcher() {
     CHECK(read(tape, text, 2, 0, nullptr, &fallbacks).term == 0);
     CHECK(fallbacks == 1);
   }
-  {
-    const RelayTape tape{{&steps}};
+  // An echo, or an assertion that holds, hands the token to the matcher; an
+  // assertion that fails is a state read like another, its reach counted.
+  static bool holds = false;
+  const cursiv::engine::LexRelay echo{};
+  const cursiv::engine::LexRelay assertion{
+      .asserts = [](const char*, TextOffset size, TextOffset, TextOffset& far) {
+        far = size;
+        return holds;
+      }};
+  for (const auto* relay : {&echo, &assertion, &assertion}) {
+    const RelayTape tape{{&steps}, relay};
     cursiv::engine::LexSuffixSession<RelayTape> session(text.data(), len);
+    TextOffset seen = 0;
     const auto out = cursiv::engine::LexSuffixSession<RelayTape>::match(
-        tape, text.data(), len, 0, 0, nullptr, [&] {
+        tape, text.data(), len, 0, 0, &seen, [&] {
           ++fallbacks;
           return Scan{len, 42};
         });
-    CHECK(out.term == 42 && out.end == len);
-    CHECK(fallbacks == 2);
+    if (relay == &assertion && !holds) {
+      CHECK(out.term == 1 && out.end == len && seen == len);
+      CHECK(fallbacks == 2);
+      holds = true;
+    } else {
+      CHECK(out.term == 42 && out.end == len && seen == 0);
+    }
   }
+  CHECK(fallbacks == 3);
 }
 
 // A accepts one 'a', LONG one or more 'a' then 'b'. On a document of only
 // 'a', each token is short but the failed longer reading reaches its end.
 struct BackupTape {
   static constexpr bool kRefuses = false;
+  static constexpr bool kQualified = false;
+  static constexpr bool kRelays = false;
   std::uint64_t* steps;
   std::uint16_t start(std::uint16_t mode) const { return mode == 0 ? 0 : 4; }
   std::uint16_t step(std::uint16_t state, unsigned char byte) const {
@@ -399,6 +438,10 @@ void generated_walks_continue_from_a_state_without_losing_their_prefix() {
     const auto prefix =
         cursiv::engine::lex_walk_from(tape, text.data(), len, initial, 0, halt);
     CHECK(prefix.term == 1 && prefix.end == 1 && halt == 512);
+    // A tail of `kBacktrackTail` bytes shares nothing.
+    (void)Session::finish(tape, text.data(), len, initial, 0,
+                          prefix.end + cursiv::engine::kBacktrackTail, prefix);
+    CHECK(!Session::has_backtracked());
     const auto kept =
         Session::finish(tape, text.data(), len, initial, 0, halt, prefix);
     CHECK(kept.term == prefix.term && kept.end == prefix.end);
@@ -420,6 +463,7 @@ void generated_walks_continue_from_a_state_without_losing_their_prefix() {
 
 int main() {
   cached_suffixes_agree_with_complete_walks();
+  a_short_read_keeps_no_point();
   many_short_guards_share_a_long_successful_or_failed_suffix();
   a_long_suffix_reads_the_stop();
   sessions_restore_their_parent_and_never_reuse_another_parse();

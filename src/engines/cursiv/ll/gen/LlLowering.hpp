@@ -7,7 +7,6 @@
 #include "cursiv/ll/gen/LlLowered.hpp"
 #include "cursiv/ll/gen/LlRewrite.hpp"
 #include "cursiv/shared/gen/LowerDescOf.hpp"
-#include "cursiv/shared/gen/LoweringShell.hpp"
 
 namespace cursiv::engine {
 

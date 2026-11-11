@@ -12,6 +12,23 @@ target_include_directories(recover_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(recover_bench PRIVATE cursiv::bench arithmeticsCore
     domainmodelCore)
 
+# The same lane over the growth grammar of the suites, whose texts fork the LR
+# graph stack. Its parser is compiled here at the optimisation the products
+# use, in a binary of its own.
+if(TARGET growthGenerated)
+  get_target_property(_growthParser growthGenerated
+      CURSIV_GENERATED_PARSER_SOURCES)
+  add_executable(growth_bench EXCLUDE_FROM_ALL recover_bench/main.cpp
+      ${_growthParser})
+  set_source_files_properties(${_growthParser} PROPERTIES
+      COMPILE_OPTIONS $<$<CONFIG:Release>:-O2>)
+  add_dependencies(growth_bench growth_generate)
+  target_compile_definitions(growth_bench PRIVATE GROWTH_BENCH)
+  target_include_directories(growth_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(growth_bench PRIVATE cursiv::bench
+      $<COMPILE_ONLY:growthGenerated> cursiv::engine::lr)
+endif()
+
 # What a completion costs in the middle of a large document, in each engine:
 # conditions that read two terminals, generated here at
 # the optimisation the products use.

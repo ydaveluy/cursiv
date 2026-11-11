@@ -29,6 +29,7 @@
 #include "ceilings/generated/G/Module.hpp"
 #include "ceilings/generated/G/Parser.hpp"
 #include "ceilings/generated/G/Table.hpp"
+#include "engines/lr/LrStand.hpp"
 #include "engines/lr/RankGrowthGrammar.hpp"
 #include "room221/generated/G/Parser.hpp"
 #include "room221/generated/G/Table.hpp"
@@ -694,16 +695,17 @@ void a_long_document_reads_as_the_taken_block() {
   CHECK(spans == read<taken::kTable>("take " + text, &taken::kDrive, reference));
 }
 
+// The two searches are compared, not where a budget stops them.
 void a_long_document_repairs_its_end_as_the_taken_block() {
   const std::string text = equations(100) + "g x =";
   cursiv::Cst held, reference;
   cursiv::engine::LrParseStats stats;
   const std::string open = "open " + text, take = "take " + text;
-  CHECK(cursiv::engine::lr_parser<loose::kTable>.parse(open, held, &stats,
-                                                       &loose::kDrive));
+  CHECK(cursiv::engine::lr_parser<loose::kTable>.parse(
+      open, held, &stats, &loose::kDrive, checks::kUnbounded));
   CHECK(stats.episodeSearches > 0);
-  CHECK(cursiv::engine::lr_parser<taken::kTable>.parse(take, reference, nullptr,
-                                                       &taken::kDrive));
+  CHECK(cursiv::engine::lr_parser<taken::kTable>.parse(
+      take, reference, nullptr, &taken::kDrive, checks::kUnbounded));
   CHECK(!held.diagnostics().empty());
   CHECK(held.diagnostics().size() == reference.diagnostics().size());
   CHECK(held.size() == reference.size());

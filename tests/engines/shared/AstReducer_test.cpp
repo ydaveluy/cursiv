@@ -73,7 +73,7 @@ bool root_writer(cursiv::engine::AstReducer& b,
                  const cursiv::engine::Made& m) {
   if (p.field != 0) return false;
   ++writes;
-  b.write<ChildField, nullptr, false>(0, p, m);
+  b.write<ChildField, nullptr>(0, p, m);
   return true;
 }
 bool child_writer(cursiv::engine::AstReducer&, const cursiv::engine::Pending&,
@@ -82,40 +82,41 @@ bool child_writer(cursiv::engine::AstReducer&, const cursiv::engine::Pending&,
 }
 constexpr cursiv::engine::AstApplyFn applies[] = {root_writer, child_writer};
 
-void root(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
-  b.push_made(id, b.create<makes[0], root_writer, false>(0, id));
+void root(cursiv::engine::AstReducer& b, cursiv::NodeId id,
+          const cursiv::CstNode& n) {
+  b.create<makes[0], root_writer, false>(id, n, 0, cursiv::kNoField,
+                                         cursiv::ActKind::create);
 }
-void adopt(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
-  const auto m = b.adopt<false>(1, id);
-  if (!b.failed()) b.defer_write(id, 0, cursiv::ActKind::assign, m);
+void adopt(cursiv::engine::AstReducer& b, cursiv::NodeId id,
+           const cursiv::CstNode& n) {
+  b.adopt<false>(id, n, 1, 0, cursiv::ActKind::assign);
 }
-void child(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
-  b.push_made(id, b.create<makes[1], child_writer, false>(1, id));
+void child(cursiv::engine::AstReducer& b, cursiv::NodeId id,
+           const cursiv::CstNode& n) {
+  b.create<makes[1], child_writer, false>(id, n, 1, cursiv::kNoField,
+                                          cursiv::ActKind::create);
 }
-void direct(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
+void direct(cursiv::engine::AstReducer& b, cursiv::NodeId id,
+            const cursiv::CstNode& n) {
   const auto h =
-      b.node_write(id, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
-  const auto m = b.create<makes[0], root_writer, false>(0, id);
-  if (b.failed()) return;
+      b.node_write(id, n, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
+  const auto m = b.create<makes[0], root_writer, false>(
+      id, n, 0, cursiv::kNoField, cursiv::ActKind::create);
   ++writes;
-  b.fill<ChildField, nullptr, false, false>(0, h, m);
-  if (b.failed()) return;
-  b.push_made(id, m);
+  b.fill<ChildField, nullptr, false>(0, h, m);
 }
-void direct_twice(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
+void direct_twice(cursiv::engine::AstReducer& b, cursiv::NodeId id,
+                  const cursiv::CstNode& n) {
   const auto first =
-      b.node_write(id, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
+      b.node_write(id, n, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
   const auto second =
-      b.node_write(id, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
-  const auto m = b.create<makes[0], root_writer, false>(0, id);
-  if (b.failed()) return;
+      b.node_write(id, n, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
+  const auto m = b.create<makes[0], root_writer, false>(
+      id, n, 0, cursiv::kNoField, cursiv::ActKind::create);
   ++writes;
-  b.fill<ChildField, nullptr, false, false>(0, first, m);
-  if (b.failed()) return;
+  b.fill<ChildField, nullptr, false>(0, first, m);
   ++writes;
-  b.fill<ChildField, nullptr, false, false>(0, second, m);
-  if (b.failed()) return;
-  b.push_made(id, m);
+  b.fill<ChildField, nullptr, false>(0, second, m);
 }
 constexpr cursiv::engine::AstEntryFn entries[] = {root, adopt, child, direct,
                                                   direct_twice};
@@ -267,30 +268,33 @@ bool expr_writer(cursiv::engine::AstReducer&, const cursiv::engine::Pending&,
 bool num_writer(cursiv::engine::AstReducer& b, const cursiv::engine::Pending& p,
                 const cursiv::engine::Made& m) {
   if (p.field != 0) return false;
-  b.write<FlagField, nullptr, false>(0, p, m);
+  b.write<FlagField, nullptr>(0, p, m);
   return true;
 }
 bool call_writer(cursiv::engine::AstReducer& b,
                  const cursiv::engine::Pending& p,
                  const cursiv::engine::Made& m) {
   if (p.field != 1) return false;
-  b.write<CalleeField, nullptr, false>(1, p, m);
+  b.write<CalleeField, nullptr>(1, p, m);
   return true;
 }
 constexpr cursiv::engine::AstApplyFn applies[] = {expr_writer, num_writer,
                                                   call_writer};
 
 // The receiver, then its flag set on whatever the region is when it applies.
-void number(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
-  b.push_made(id, b.create<makes[1], num_writer, true>(1, id));
+void number(cursiv::engine::AstReducer& b, cursiv::NodeId id,
+            const cursiv::CstNode& n) {
+  b.create<makes[1], num_writer, true>(id, n, 1, cursiv::kNoField,
+                                       cursiv::ActKind::create);
   b.defer_effect(id, 1, 0, cursiv::ActKind::flag);
 }
-void turn(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
+void turn(cursiv::engine::AstReducer& b, cursiv::NodeId id,
+          const cursiv::CstNode&) {
   b.defer_effect(id, 2, 1, cursiv::ActKind::nest);
 }
-void close(cursiv::engine::AstReducer& b, cursiv::NodeId id) {
-  const auto m = b.adopt<true>(0, id);
-  if (!b.failed()) b.push_made(id, m);
+void close(cursiv::engine::AstReducer& b, cursiv::NodeId id,
+           const cursiv::CstNode& n) {
+  b.adopt<true>(id, n, 0, cursiv::kNoField, cursiv::ActKind::create);
 }
 constexpr cursiv::engine::AstEntryFn entries[] = {number, turn, close};
 constexpr std::uint8_t turns[] = {0, 1, 0};
@@ -558,11 +562,11 @@ void an_inserted_name_leaves_references_and_handles_untouched() {
                                      .kind = cursiv::ActKind::assign,
                                      .narrow = 3};
     cursiv::engine::write_into<cursiv::detail::field_tag<&Names::one>>(
-        ctx, p, &names, &slot, 0, p.kind, 0);
+        ctx, p, &names, &slot, 0, 0);
     cursiv::engine::write_into<cursiv::detail::field_tag<&Names::maybe>>(
-        ctx, p, &names, &slot, 1, p.kind, 0);
+        ctx, p, &names, &slot, 1, 0);
     cursiv::engine::write_into<cursiv::detail::field_tag<&Names::many>>(
-        ctx, p, &names, &slot, 2, p.kind, 0);
+        ctx, p, &names, &slot, 2, 0);
   };
   write(missing);
   CHECK(names.one.refText == "before");
@@ -594,7 +598,7 @@ void an_inserted_name_leaves_references_and_handles_untouched() {
                                    .text = missing,
                                    .kind = cursiv::ActKind::assign};
   cursiv::engine::write_into<cursiv::detail::field_tag<&Names::one>>(
-      ctx, p, &empty, &slot, 0, p.kind, 0);
+      ctx, p, &empty, &slot, 0, 0);
   CHECK(empty.one.refText.empty());
   CHECK(empty.one.refText.data() == tree.text(missing).data());
   CHECK(references.handles.size() == 4);

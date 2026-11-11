@@ -19,9 +19,7 @@
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/LrParseStats.hpp"
 #include "cursiv/lr/runtime/LrParser.hpp"
-#include "cursiv/lr/runtime/LrSearch.hpp"
 #include "cursiv/lr/runtime/lr_rescan.hpp"
-#include "cursiv/lr/runtime/lr_search_bound.hpp"
 #include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/Check.hpp"
 #include "edges/generated/G/Module.hpp"
@@ -851,54 +849,6 @@ void the_engines_tell_a_cancelled_scan() {
   }
 }
 
-// The bound re-reads a byte as every state may: what the search re-reads in
-// any state, the bound re-reads at `at` too.
-template <const auto& A>
-void the_bound_rereads_what_every_state_rereads(const std::string& text,
-                                                cursiv::TextOffset at) {
-  using namespace cursiv;
-  using namespace cursiv::engine;
-  LrRoom room(text);
-  LrSearch s(static_cast<TextOffset>(text.size()),
-             {.floor = ~std::uint64_t{0},
-              .perByte = 0,
-              .perSearch = ~std::uint64_t{0},
-              .perParse = ~std::uint64_t{0}},
-             room.context.indentArena);
-  s.limit = ~std::uint64_t{0};
-  s.bounding = true;
-  const std::vector<Typo> bound = lr_search_misread<A>(room.context, s, at);
-  unsigned asked = 0;
-  for (std::uint32_t state = 0; state < A.mode.size(); ++state) {
-    std::uint64_t read = 0;
-    bool cut = false;
-    for (const Typo& y : lr_rescan_candidates<A>(room.context, state, at,
-                                                 kLrBoundReach, read, cut)) {
-      ++asked;
-      bool found = false;
-      for (const Typo& z : bound)
-        found = found || (z.term == y.term && z.end == y.end);
-      CHECK(found);
-    }
-  }
-  CHECK(asked != 0);
-}
-
-// A state of the section lexes its faults with the section's alphabet. `<` is
-// the host's token, not the section's: in the section `<aaaab` reads as
-// `LONG` with its first byte misspelt.
-void the_bound_rereads_what_a_section_state_rereads() {
-  the_bound_rereads_what_every_state_rereads<tsection::generated::Lr::kTable>(
-      "<<aaaab>", 1);
-}
-
-// A section's text ends at its closer: `abx` read as `abc` ends there, though
-// the closer's first byte goes on with a word.
-void the_bound_rereads_up_to_a_section_closer() {
-  the_bound_rereads_what_every_state_rereads<tedges::generated::G::kTable>(
-      "closed:<abxend", 8);
-}
-
 void both_engines_read_the_run_as_one_fault() {
   const auto ll = tsection::generated::Ll::create_parser();
   const auto lr = tsection::generated::Lr::create_parser();
@@ -919,8 +869,6 @@ void run() {
   a_whole_parse_of_the_run_is_linear({});
   a_whole_parse_of_the_run_is_linear({64, 0, 64, 64});
   the_engines_tell_a_cancelled_scan();
-  the_bound_rereads_what_a_section_state_rereads();
-  the_bound_rereads_up_to_a_section_closer();
   both_engines_read_the_run_as_one_fault();
 }
 }  // namespace case_sectiontail

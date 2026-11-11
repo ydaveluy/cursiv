@@ -23,42 +23,15 @@ namespace cursiv::engine {
 struct AstEmitter : TextBuilder {
   using Run = std::vector<std::uint16_t>;
 
-  // A statement's piece: a constant, when `param` names one of the body's
-  // parameters, or the text around them.
-  struct Piece {
-    std::string text;
-    int param = -1;
-    Piece(const char* t) : text(t) {}
-    Piece(std::string t, int p = -1) : text(std::move(t)), param(p) {}
-  };
-
-  // `text` writes the constants in; `form` names them `C<k>`, so bodies that
-  // differ only in their constants share one form.
+  // One entry's statements, and how many nodes and pendings it has named.
   struct Body {
     std::string text;
-    std::string form;
-    std::vector<std::string> args;
     unsigned made = 0;
     unsigned held = 0;
-    Piece param(std::string value) {
-      args.push_back(value);
-      return {std::move(value), static_cast<int>(args.size()) - 1};
-    }
-    void say(std::initializer_list<Piece> pieces) {
+    void say(std::initializer_list<std::string_view> pieces) {
       text += "  ";
-      form += "  ";
-      for (const Piece& p : pieces) {
-        text += p.text;
-        form += p.param < 0 ? p.text : "C" + std::to_string(p.param);
-      }
+      for (const std::string_view p : pieces) text += p;
       text += "\n";
-      form += "\n";
-    }
-    void say(const std::string& s) { say({Piece(s)}); }
-    // One guard where nothing stands between two.
-    void guard() {
-      const std::string g = "  if (b.failed()) return;\n";
-      if (!text.ends_with(g)) say("if (b.failed()) return;");
     }
   };
 
@@ -68,24 +41,10 @@ struct AstEmitter : TextBuilder {
   std::string header;
 
   std::vector<std::string> names;
-  // Whether any entry denotes something other than its bytes.
-  bool anyText = false;
-  // Whether every entry gives its parent the text its payload denotes: one
-  // table then answers both.
-  bool sharedCalls = false;
-  // Whether the scheduler converts some record's children before its text.
-  bool anyInputs = false;
-  // Whether a grammar tells a call that read nothing from a token with no
-  // width.
-  bool anyCalls = false;
-  // Whether a data rule of the grammar passes a value other than text.
-  bool anyValues = false;
 
   // The built classes, which lead the registry's types: only a node of one is
   // made or written to.
   std::size_t built = 0;
-  // Whether a write takes a node off the stack, the one reader of `kTakeBits`.
-  bool takesNodes = false;
   // The members a node of each built class takes off a pending, and each
   // member's tag.
   std::vector<std::vector<std::uint16_t>> accepted;
@@ -132,20 +91,23 @@ struct AstEmitter : TextBuilder {
   void check_base_chains() const;
   std::string write_pending(Body& b, std::uint16_t r) const;
   // Two passes: a fill takes its node payload off the region before the
-  // creation consumes what is left.
-  unsigned fill_run(Body& b, std::uint16_t cr, const Run& held) const;
-  void run_held(Body& b, const Run& held, const Run& over, int cr,
-                int heldMade) const;
+  // creation consumes what is left. The creation hands its node to the write
+  // of row `result`, if any; `read` where a later statement names the node.
+  unsigned fill_run(Body& b, std::uint16_t cr, const Run& held, int result,
+                    bool read) const;
+  // `makerRow`, if any, is the creation of run `maker` that `cr` closes.
+  void run_held(Body& b, const Run& maker, int makerRow, const Run& held,
+                const Run& over, int cr) const;
   Body entry_body(std::uint32_t e) const;
-  // One function per distinct program; programs that differ only in their
-  // constants share one macro where it spells less.
+  // One function per distinct program.
   void emit_entries();
 
   void emit_types();
-  void emit_fields();
+  // `kTakeBits`, named where a write takes a node off the stack, its one
+  // reader.
+  std::string_view emit_fields();
   // The slot's address, or none.
   static std::string conv_addr(std::uint16_t slot);
-  const char* variant_flag(std::uint16_t f) const;
   // The class's writer, or the shared refusal where it declares no member a
   // pending can name.
   std::string applier_name(std::uint16_t t) const;
@@ -190,11 +152,16 @@ struct AstEmitter : TextBuilder {
                             bool data);
   static std::string text_conv(const AstRowGen& g);
   static std::string text_fn(const ConvPlan& p, const TextPlan& t);
-  void emit_conversions();
+  // The conversion tables the grammar needs, by name; empty for one it does
+  // not.
+  struct ConvTables {
+    std::string_view texts, calls, callRecords, textInputs, values;
+  };
+  ConvTables emit_conversions();
   // A table of flags, named only where one is set: a grammar without a turn's
   // twin rows names no table.
-  bool emit_flags(std::string_view name,
-                  const std::vector<std::uint8_t>& cells);
+  std::string_view emit_flags(std::string_view name,
+                              const std::vector<std::uint8_t>& cells);
 
   std::string run();
 };

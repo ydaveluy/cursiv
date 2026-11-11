@@ -41,20 +41,21 @@ class LexReifier {
                std::uint8_t flags = 0, std::uint32_t a = kNoImage,
                std::uint64_t m = 0, std::uint64_t n = 0,
                std::string_view text = {});
+
+  std::uint16_t push(LexNode node) { return _c.push_lex(node); }
+  std::uint16_t group(LexKind kind, std::span<const std::uint16_t> children,
+                      std::uint32_t min = 0);
+
+ private:
   ImageId make_not(ImageId k) {
     return make(ImageKind::notOf, std::span(&k, 1));
   }
   ImageId make_class(const ImageClassDesc& cls);
-
-  std::uint16_t push(LexNode node) { return _c.push_lex(node); }
   std::uint16_t push_child(std::uint16_t child) {
     return _c.push_lex_child(child);
   }
-  std::uint16_t group(LexKind kind, std::span<const std::uint16_t> children,
-                      std::uint32_t min = 0);
   std::uint16_t intern(const ByteSet& set, std::uint16_t decode = kNoSet);
 
- private:
   struct Guard {
     bool word = false;
     bool words = false;

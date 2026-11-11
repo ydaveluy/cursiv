@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "cursiv/lr/table/LrBitSet.hpp"
 #include "cursiv/lr/table/LrSetStore.hpp"
 #include "cursiv/lr/table/LrSizes.hpp"
 
@@ -21,7 +20,6 @@ inline constexpr std::uint32_t kLrExitWord = ~std::uint32_t{0};
 
 template <LrSizes S>
 struct LrColdTables {
-  using TermSet = LrBitSet<S.termBits()>;
   using AccBoundOffset = std::conditional_t<(S.accBounds <= 0xFFFFu),
                                             std::uint16_t, std::uint32_t>;
 
@@ -45,8 +43,7 @@ struct LrColdTables {
 
   // The terminals a state needs, one set per distinct row, and the most
   // tokens any production's shortest reading holds.
-  std::array<TermSet, S.closeSets> closePool{};
-  std::array<std::uint16_t, S.states> closeOf{};
+  LrSetStore<S, S.states, S.closeSets> close{};
   std::uint64_t closeMax = 0;
 
   // The written order of the terminals a repair may insert in a state, where
@@ -90,10 +87,6 @@ struct LrColdTables {
   std::array<std::uint16_t, S.electTwins> electTwinNext{};
   std::array<std::uint32_t, S.electTwins != 0 ? S.prods + 1 : 0> electRhsAt{};
   std::array<std::uint16_t, S.electRhsSyms> electRhs{};
-
-  constexpr const TermSet& close_row(std::uint16_t s) const {
-    return closePool[closeOf[s]];
-  }
 };
 
 }  // namespace cursiv::engine

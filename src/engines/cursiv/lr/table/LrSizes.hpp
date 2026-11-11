@@ -28,9 +28,6 @@ struct LrSizes {
   unsigned accPriorities = 0;
   // A mode per mode where the grammar embeds others, none where it does not.
   unsigned errModes = 0;
-  // The grammar inserts an indentation token or brackets a line: its reader
-  // lexes every token afresh, so the table keeps no mode matrix.
-  bool indented = false;
   // The lists of the written order of insertions, and their terminals.
   unsigned insertLists = 0, insertWords = 0;
   unsigned electWords = 0, electWatches = 0, electChains = 0,
@@ -38,6 +35,16 @@ struct LrSizes {
   // The 64-bit words of the bits that say which cells the table orders as the
   // election does.
   unsigned orderWords = 0;
+  // The lowering the table keeps: the bytes of the names, the byte sets, and
+  // the scalars past ASCII of the word class and of the sets decoding another.
+  unsigned nameChars = 0, sets = 0, wordRanges = 0, scalarRanges = 0;
+  unsigned lexElseRows = 0, typoSucc = 0, reduceNames = 0;
+  // The continuations summed over the states, and the distinct ones.
+  unsigned expectItems = 0, expectPool = 0;
+  unsigned rowLhsRows = 0, rowLhs = 0, typoReachSets = 0;
+  // The grammar inserts an indentation token or brackets a line: its reader
+  // lexes every token afresh, so the table keeps no mode matrix.
+  bool indented = false;
   // False where no conflict or multiple candidate can split a reading: only
   // the decision of a cell or a position reads a state's goto class.
   bool gotoClasses = true;

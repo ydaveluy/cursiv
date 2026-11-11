@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <vector>
 
 namespace cursiv::engine {
 
@@ -16,15 +17,24 @@ struct LrItem {
   bool operator==(const LrItem&) const = default;
 };
 
-// The rows of a flat pool, one per state.
+// A flat pool cut in rows, one per state. A row holds only until the pool
+// grows.
 template <class T>
 struct LrPoolRows {
-  const T* items = nullptr;
-  const std::uint32_t* at = nullptr;
-  const std::uint32_t* len = nullptr;
+  std::vector<T> pool;
+  std::vector<std::uint32_t> at, len;
 
   std::span<const T> operator[](std::size_t s) const {
-    return {items + at[s], len[s]};
+    return {pool.data() + at[s], len[s]};
+  }
+  void append(std::size_t s, std::span<const T> row) {
+    if (at.size() <= s) {
+      at.resize(s + 1);
+      len.resize(s + 1);
+    }
+    at[s] = static_cast<std::uint32_t>(pool.size());
+    len[s] = static_cast<std::uint32_t>(row.size());
+    pool.insert(pool.end(), row.begin(), row.end());
   }
 };
 

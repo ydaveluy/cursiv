@@ -54,6 +54,21 @@ struct Base : cursiv::GrammarSpec {
                                    (ref<E2> + gap::none + kw<"V"> + lit<"r">) |
                                    (ref<Six> + lit<"!">) |
                                    (ref<Seven> + lit<"?">)))> {};
+  // A literal its gap may refuse, over a keyword and the name it reserves:
+  // what refuses the literal leaves the keyword, which still reserves the name.
+  struct Weighed
+      : rule<create<Item>(lit<"weighed:"> +
+                          ((gap::none + lit<"on!"> + lit<"q">) |
+                           (assign<&Item::name>(ref<NAME>) + lit<"!">) |
+                           (flag<&Item::keyword>(kw<"on">) + lit<"!">)))> {};
+  // The same where two terminals tie in the mode, each arm going on its own
+  // way: the name the keyword reserves is no tie of the keyword.
+  struct Ranked : rule<create<Item>(
+                      lit<"ranked:"> +
+                      ((gap::none + lit<"on!"> + lit<"q">) |
+                       (assign<&Item::name>(ref<NAME>) + lit<"!"> + lit<"b">) |
+                       (flag<&Item::keyword>(kw<"on">) + lit<"!"> + lit<"c">) |
+                       (ref<One> + lit<"!">) | (ref<Two> + lit<"?">)))> {};
   // A keyword refused where a trivia ties with it: the trivia is crossed.
   struct Hushed : terminal<cr<"N">> {};
   struct Note : rule<create<Item>(lit<"note:"> +
@@ -117,7 +132,9 @@ struct Base : cursiv::GrammarSpec {
                                          ref<Same1> | ref<Same2>)> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(
                     ref<Spliced> | ref<Spelt> | ref<Inside> | ref<Part> |
-                    ref<Tied> | ref<Attached> | ref<Cell> | ref<Note> |
+                    ref<Tied> | ref<Weighed> | ref<Ranked> | ref<Attached> |
+                    ref<Cell> |
+                    ref<Note> |
                     ref<Marked> | ref<Plain> | ref<Head> | ref<Pending>)))> {};
   using entry = Root;
   using ignored = list<WS, Sharp>;

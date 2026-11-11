@@ -18,11 +18,11 @@
 #define CURSIV_LL_COLD_PATHS(How, T)                                          \
   How template void cursiv::engine::ll_peek_read<T>(                          \
       ::cursiv::engine::LlContext&, ::std::uint16_t, ::cursiv::engine::Scan); \
-  How template void cursiv::engine::ll_expect_repair<T>(                      \
+  How template void cursiv::engine::ll_peek_held<T>(                          \
+      ::cursiv::engine::LlContext&, ::std::uint16_t);                         \
+  How template void cursiv::engine::ll_expect<T>(                             \
       ::cursiv::engine::LlContext&, ::std::uint16_t, ::std::uint16_t,         \
       ::std::uint16_t, ::std::uint16_t, ::std::uint16_t);                     \
-  How template void cursiv::engine::ll_expect_arm<T>(                         \
-      ::cursiv::engine::LlContext&, const ::cursiv::engine::LlTermArm&);      \
   How template bool cursiv::engine::ll_drop<T>(::cursiv::engine::LlContext&); \
   How template ::std::uint16_t cursiv::engine::ll_choice_fix<T>(              \
       ::cursiv::engine::LlContext&, ::std::uint16_t, ::std::uint16_t);        \
@@ -43,6 +43,11 @@
   How template void cursiv::engine::ll_condition_node<T>(             \
       ::cursiv::engine::LlContext&, ::std::uint16_t, ::std::uint16_t, \
       ::std::uint16_t)
+
+// ...those of a table with conditions whose descent asks the prediction...
+#define CURSIV_LL_PREDICT_CONDITION_COLD_PATHS(How, T)             \
+  How template ::std::uint16_t cursiv::engine::ll_read_stopped<T>( \
+      ::cursiv::engine::LlContext&, ::std::uint16_t)
 
 // ...and those of a table with a precedence climb.
 #define CURSIV_LL_CLIMB_COLD_PATHS(How, T)                             \

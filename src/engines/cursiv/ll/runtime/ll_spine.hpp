@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstLeaf.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 
@@ -45,6 +46,28 @@ inline void ll_ancestors_near(const Cst& cst, std::span<const NodeId> known,
        at != kNoNode && at != id; at = ll_child_holding(cst, at, id))
     out.push_back(at);
 }
+
+// The records that hold the last token before a caret.
+class LlSpine {
+ public:
+  LlSpine(const Cst& cst, const CstLeaf& leaf) : _cst(cst), _leaf(leaf) {}
+
+  // Looked for when first asked: the walk down to a token costs a hop for each
+  // later sibling at every level.
+  std::span<const NodeId> records() const {
+    if (!_read) {
+      _read = true;
+      if (_leaf) ll_ancestors(_cst, _leaf.id, _records);
+    }
+    return _records;
+  }
+
+ private:
+  const Cst& _cst;
+  CstLeaf _leaf;
+  mutable bool _read = false;
+  mutable std::vector<NodeId> _records;
+};
 
 // The rules the stamped records among them name, the innermost first. False
 // where a repair touched one: its content is not the grammar's.

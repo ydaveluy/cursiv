@@ -14,10 +14,11 @@ namespace cursiv::engine {
 // walks an automaton the construction closed; `adaptive` is the episode's.
 enum class LlPredict : std::uint8_t { single, staged, adaptive };
 
+// The cost of an arm no token can stand for: it asserts the end of the text.
+inline constexpr std::uint16_t kLlRepairCostless = 0xFFFFu;
+
 struct LlDecision {
-  // The position it decides. How many arms it decides between, and what its
-  // repair costs, stand in `LlDecisionBuild`: the emitted program writes the
-  // arms, so a descent never counts them.
+  // The position it decides.
   std::uint16_t node = kNoRow;
   LlPredict how = LlPredict::single;
   // One row of terminals per arm, which is the whole of a `single`.
@@ -35,6 +36,12 @@ struct LlDecision {
   // fewest invented tokens. A choice whose arms are all expensive still has
   // a cheapest, and taking it beats matching nothing.
   std::uint16_t repair = 0;
+  // The arms it decides between.
+  std::uint16_t nalts = 0;
+  // What the cheapest arm costs in invented tokens. A choice whose cheapest arm
+  // is a whole construct is skipped instead, unless the text has ended. The
+  // emitter reads it to decide whether to write the repair.
+  std::uint16_t repairCost = 0;
 
   constexpr bool operator==(const LlDecision&) const = default;
 };

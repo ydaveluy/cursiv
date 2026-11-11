@@ -206,6 +206,27 @@ void run() {
     CHECK(blocks("<a \"b c> <d>") == "a,\"b c,|d,|");
     CHECK(blocks("<a /* b c> <d>") == "a,|d,|");
   }
+  // A keyword its gap refuses, tied with a trivia in front of the token that
+  // closes the section: the trivia is crossed and the section ends there, with
+  // a fault where the item still wants its `;`.
+  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+    const auto blocks = [&](std::string_view text) {
+      const std::string source = "inhushed:" + std::string(text);
+      const auto r = parser->parse(source);
+      std::string out;
+      if (const auto* d = r.value_as<ast::Doc>())
+        for (const ast::Block* b : d->blocks) out += items(b->items) + '|';
+      return out + diagnostics(r, 0);
+    };
+    CHECK(blocks("<aN>") == "a,|");
+    CHECK(blocks("<a N>") == "a,|");
+    CHECK(blocks("<a N b>") == "a,b,|");
+    CHECK(blocks("<a N N b N>") == "a,b,|");
+    CHECK(blocks("<=aN;>") == "a!,|");
+    CHECK(blocks("<=a N;>") == "a!,|");
+    CHECK(blocks("<=a N>") == "a!,| 0@12-12");
+    CHECK(blocks("<=a N > <b>") == "a!,|b,| 0@12-12");
+  }
   // A predicate of the last word that reads to the caret is answered by what
   // is typed there: behind `x ` the word is the last one on the document's
   // text, and a word typed after it makes `x` an item before the last.

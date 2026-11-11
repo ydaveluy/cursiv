@@ -82,6 +82,21 @@ constexpr std::uint16_t lex_token_body(const Cfg& g, const LexNode& e) {
   return g.termBuild[e.a].lex;
 }
 
+// The nodes `node` reads one after the other: a sequence's, nested sequences
+// flattened, or `node` alone.
+template <class Cfg>
+void lex_parts(const Cfg& g, std::uint16_t node,
+               std::vector<std::uint16_t>& out) {
+  for (std::vector todo{node}; !todo.empty();) {
+    const std::uint16_t at = todo.back();
+    todo.pop_back();
+    if (const LexNode& e = g.lex[at]; e.kind == LexKind::seq)
+      for (unsigned i = e.b; i-- > 0;) todo.push_back(g.lexChild[e.a + i]);
+    else
+      out.push_back(at);
+  }
+}
+
 // Whether the graphs at `x` and `y` read alike: `same(a, b)` compares two
 // nodes' kinds and own fields, a sequence's or choice's width among them;
 // their children, and a repetition's body, then compare in turn.

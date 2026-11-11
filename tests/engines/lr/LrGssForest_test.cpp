@@ -518,9 +518,8 @@ using cursiv::engine::LrGssDigest;
 using cursiv::engine::LrGssForest;
 using Id = LrGssForest::Id;
 
-// Every step is taken at position 5; those below 5 are the only step of their
-// vertex.
-LrGssDigest::Facts facts(Id step) { return {5, step >= 5}; }
+// The steps below 5 are the only step of their vertex.
+bool forking(Id step) { return step >= 5; }
 
 std::vector<Id> forks(const LrGssDigest& digest, LrGssDigest::Rope::Id rope) {
   std::vector<Id> out;
@@ -538,7 +537,7 @@ void the_fork_steps_come_in_the_order_the_reading_took_them() {
   forest.add(left, {}, 7, {});
   forest.add(right, {}, 2, {});
   forest.add(parent, children, 9, {});
-  const auto rope = digest.of(forest, parent, facts);
+  const auto rope = digest.of(forest, parent, forking);
   CHECK(forks(digest, rope) == std::vector<Id>({7, 9}));
   CHECK(digest.forks().length(rope) == 2);
 }
@@ -548,7 +547,7 @@ void a_step_that_forked_nothing_is_left_out() {
   LrGssDigest digest;
   const Id node = forest.node();
   forest.add(node, {}, 3, {});
-  CHECK(digest.of(forest, node, facts) == LrGssDigest::Rope::none);
+  CHECK(digest.of(forest, node, forking) == LrGssDigest::Rope::none);
 }
 
 // Every fork step a derivation took at the position it ends on is read, however
@@ -565,11 +564,8 @@ void a_derivation_ending_on_many_forks_keeps_every_one() {
                step, {});
     below = node;
   }
-  const auto rope = digest.of(forest, below, facts);
+  const auto rope = digest.of(forest, below, forking);
   CHECK(digest.forks().length(rope) == kSteps);
-  const auto cut = digest.forks().first_where(
-      rope, [](const cursiv::engine::LrGssForkAgg& a) { return a.at >= 5; });
-  CHECK(cut == 0);
   CHECK(forks(digest, rope).size() == kSteps);
 }
 

@@ -164,19 +164,26 @@ class Lowerer {
            group);
     }
   }
-  void note_docs();
   bool docs_differ(const ImageNode& doc) const {
     return _docsDiffer.contains(at(child_at(doc, 0)).text);
   }
   ImageId body_in(unsigned cfg, std::uint32_t rule);
-  Descent<bool> has_rows(ImageId id) const;
-  Descent<bool> creates(ImageId id, const void* row) const;
+  // Whether the tree under `id` holds a node `is` accepts.
+  template <class Is>
+  Descent<bool> holds(ImageId id, Is is) const {
+    if (is(at(id))) co_return true;
+    for (const ImageId k : _im.shape_children(id))
+      if (co_await holds(k, is)) co_return true;
+    co_return false;
+  }
   bool reads_under(unsigned cfg, std::uint32_t rule) const;
   unsigned region_of(unsigned cfg, const ImageNode& skip) const;
   unsigned section_of(std::uint32_t grammar, ImageId end) const;
   ImageId token_core(ImageId id) const;
   std::uint32_t op_rule_of(ImageId op) const;
-  Descent<bool> buries(ImageId id) const;
+  // Whether a way through operator `op`, conditions aside, reads a rule that
+  // builds a node.
+  bool op_builds_node(ImageId op) const;
   ImageId optional_item(ImageId item) const;
   void index();
   void declare();
@@ -369,7 +376,8 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
   }
   // An unordered group: each optional item is read in its present form, `x`
   // for `option(x)` and one turn at least for any other repetition, and
-  // marked, one bit each, as one the text may leave out.
+  // marked, one bit each, as one the text may leave out. A group that holds a
+  // nest is marked too.
   Descent<Id> build_unordered(unsigned cfg, ImageId e) {
     const std::vector<ImageId> items = children_of(at(e));
     const Id group = co_await build_children(cfg, Shape::unordered, items);
@@ -386,10 +394,23 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
         item.min = 1;
     }
     _p.e[group].unorderedOptional = optional;
+    _p.e[group].unorderedTurns = co_await holds(
+        e, [](const ImageNode& n) { return n.kind == ImageKind::nest; });
     co_return group;
   }
+  // A nest's checkpoint, an empty sequence that carries its row, then its
+  // payload: the receiver is complete before the payload starts.
+  Descent<Id> build_nest(unsigned cfg, ImageId e) {
+    const ImageNode n = at(e);
+    const Id body = co_await self().build(cfg, child_at(n, 0));
+    if (_p.e[body].kind == Shape::none || _p.e[body].kind == Shape::end)
+      _o.fault.raise(GrammarFaultCode::directiveOnNoPosition, _p.owner);
+    const Id checkpoint = gather(cfg, Shape::seq, {});
+    _p.e[checkpoint].made.push_back(row_id(n.row));
+    co_return gather(cfg, Shape::seq, {checkpoint, body});
+  }
   // A node both engines build the same, through `Self`'s own handling of a
-  // repetition, a write, a flag, a condition and an implied token.
+  // repetition, a creation, a write, a flag, a condition and an implied token.
   Descent<Id> build_shared(unsigned cfg, ImageId e, const ImageNode n) {
     switch (n.kind) {
       case ImageKind::ref:
@@ -404,8 +425,14 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
       case ImageKind::choice:
         if (descend(gap(e))) co_return self().build_condition(cfg, e);
         co_return co_await build_children(cfg, Shape::alt, children_of(n));
+      case ImageKind::unordered:
+        co_return co_await build_unordered(cfg, e);
       case ImageKind::repeat:
         co_return co_await self().build_repeat(cfg, e);
+      case ImageKind::create:
+        co_return co_await self().build_create(cfg, e);
+      case ImageKind::nest:
+        co_return co_await build_nest(cfg, e);
       case ImageKind::assign:
       case ImageKind::append:
         co_return co_await self().build_write(cfg, e);

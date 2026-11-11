@@ -33,6 +33,15 @@ struct LlTypoTape : TypoTape<T> {
     ++*this->read;
     return T.next_byte(s, b);
   }
+  // A walk standing where no terminal it wants can end offers nothing more:
+  // inside a comment, it would read on to the comment's end for nothing.
+  bool alive(std::uint16_t s) const {
+    if (T.lexLive == nullptr) return true;
+    const LlTermRow live = T.dfa_live_set(s);
+    for (std::uint32_t k = 0; k < T.termWords; ++k)
+      if ((live.w[k] & want[k]) != 0) return true;
+    return false;
+  }
   // A keyword the source as written spells reserves its spelling away from
   // every reading through it, unless its own condition refuses it there.
   bool original(std::uint16_t s, TextOffset p) {

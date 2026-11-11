@@ -79,7 +79,7 @@ struct cond_refs : refs<E> {};
 template <class E, class K, class... Ks>
 struct cond_refs<E, TypeList<K, Ks...>>
     : tl_cat<typename cond_refs<K>::type, typename cond_refs<Ks>::type...> {};
-// A section in a condition is refused by name when the image is walked.
+// A section in a condition is refused by name when the grammar is lowered.
 template <class G, class E>
 struct cond_refs<Embed<G, E>, TypeList<E>> {
   using type = TypeList<>;
@@ -113,18 +113,14 @@ struct reached_refs<S, ConditionRule<R>>
 
 // To the fixpoint: `Seen` is both the answer and the guard, so no rule is
 // walked twice and a cycle terminates.
+template <class S>
+struct reached_calls {
+  template <class R>
+  using of = reached_refs<S, R>;
+};
 template <class S, class Seen, class Front>
-struct closure;
-template <class S, class Seen>
-struct closure<S, Seen, TypeList<>> {
-  using type = Seen;
-};
-template <class S, class Seen, class... Fs>
-struct closure<S, Seen, TypeList<Fs...>> {
-  using next = dedupe_t<tl_cat_t<typename reached_refs<S, Fs>::type...>>;
-  using fresh = typename tl_minus<next, Seen>::type;
-  using type = typename closure<S, tl_cat_t<Seen, fresh>, fresh>::type;
-};
+using closure =
+    cursiv::detail::calls_closure<reached_calls<S>::template of, Seen, Front>;
 
 // A stage hands back the rules in force; the graph is keyed by the names an
 // author wrote.

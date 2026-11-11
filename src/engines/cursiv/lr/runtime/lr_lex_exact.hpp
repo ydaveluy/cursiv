@@ -167,7 +167,7 @@ CURSIV_NOINLINE std::uint32_t lr_refused_candidates(
   room[0] = Scan{la.end, la.sym, priority(la)};
   std::uint32_t n = 1;
   lr_refused_ties(
-      la,
+      la, A.cfg.nterms,
       [&](const Token& at) {
         skip.set(at.sym);
         return lr_scan_skipping<A>(c, mode, la.begin, depth, skip,
@@ -175,11 +175,7 @@ CURSIV_NOINLINE std::uint32_t lr_refused_candidates(
                                      /* what crosses a trivia ties with nothing */
                                    });
       },
-      [&](const Token& at) {
-        return at.sym < A.cfg.nterms && at.begin == la.begin &&
-               at.end == la.end &&
-               lex_weight(priority(at)) == lex_weight(room[0].priority);
-      },
+      [&](const Token& at) { return lex_weight(priority(at)); },
       [&](SymbolId sym) { return A.flagged(mode, sym); }, takes,
       [&](const Token& at) {
         room[n++] = Scan{at.end, at.sym, priority(at)};

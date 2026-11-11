@@ -343,70 +343,6 @@ struct LexRunShape {
   }
 };
 
-// Writes the advance of `var` over a run of `stay` bytes, eight at a time where
-// the set has a SWAR shape; `setName` names the set as `in_set` reads it. Each
-// run's exit label is its own.
-class LexRunEmitter {
- public:
-  void advance(TextBuilder& o, const ByteSet& stay, std::string_view var,
-               std::string_view setName, bool content = true) {
-    LexRunShape r = LexRunShape::of(stay);
-    if (!content) r.ranges = false;
-    if (!r.swar && !r.ranges) {
-      o.line("    while (", var, " < len && in_set<", setName,
-             ">("
-             "static_cast<unsigned char>(src[",
-             var, "]))) ++", var, ";");
-      return;
-    }
-    const unsigned id = _runId++;
-    o.line("    while (len - ", var,
-           " >= 8) {\n"
-           "      const ::std::uint64_t w = ld64(src + ",
-           var, ");");
-    if (r.swar) {
-      assert(r.lo <= LexRunShape::kSwarBelowMax &&
-             "lt8 answers no byte above it");
-      o.write("      const ::std::uint64_t bad = lt8(w, ", r.lo, ")");
-      for (unsigned k = 0; k < r.n; ++k) o.write(" | eq8(w, ", r.b[k], ")");
-    } else {
-      o.write("      const ::std::uint64_t bad = (~(");
-      std::string_view sep;
-      for (unsigned k = 0; k < r.nr; ++k) {
-        const bool folded = r.paired(k);
-        if (folded && (r.from[k] & 0x20u)) continue;
-        o.write(sep, "rng8(w, ", r.from[k], ", ", r.to[k],
-                folded ? ", 0x5f" : "", ")");
-        sep = " | ";
-      }
-      o.write(r.high ? ") & kHi & ~w)" : ") & kHi) | (w & kHi)");
-    }
-    o.line(
-        ";\n"
-        "      if (bad) { ",
-        var,
-        " += static_cast<::cursiv::TextOffset>("
-        "::std::countr_zero(bad) >> 3); goto Lrun",
-        id,
-        "; }\n"
-        "      ",
-        var,
-        " += 8;\n"
-        "    }\n"
-        "    while (",
-        var, " < len && in_set<", setName,
-        ">("
-        "static_cast<unsigned char>(src[",
-        var, "]))) \n++", var,
-        ";\n"
-        "Lrun",
-        id, ":;");
-  }
-
- private:
-  unsigned _runId = 0;
-};
-
 // What the state blocks ask of the automaton `View` names (`LexFirstByte.hpp`),
 // besides the runs `lex_run_blind` crosses blind: a state whose every live
 // edge loops on itself, accepting without a bound...
@@ -462,7 +398,6 @@ struct LexStateBlocks : TextBuilder {
   explicit LexStateBlocks(View v) : view(v) {}
 
   const View view;
-  LexRunEmitter runs;
 
   bool blind(unsigned st) const {
     return lex_run_blind(view, static_cast<std::uint16_t>(st));
@@ -516,42 +451,95 @@ struct LexStateBlocks : TextBuilder {
     line("  match.state = ", st, ";");
     line("  goto Wdone;");
   }
+  // The advance of `var` over a run of `stay` bytes, eight at a time where the
+  // set has a SWAR shape; `setName` names the set as `in_set` reads it. Each
+  // run's exit label is its own.
   void emit_run_adv(const ByteSet& stay, std::string_view var,
                     std::string_view setName, bool content = true) {
-    runs.advance(*this, stay, var, setName, content);
+    LexRunShape r = LexRunShape::of(stay);
+    if (!content) r.ranges = false;
+    if (!r.swar && !r.ranges) {
+      line("    while (", var, " < len && in_set<", setName,
+           ">("
+           "static_cast<unsigned char>(src[",
+           var, "]))) ++", var, ";");
+      return;
+    }
+    const unsigned id = _runId++;
+    line("    while (len - ", var,
+         " >= 8) {\n"
+         "      const ::std::uint64_t w = ld64(src + ",
+         var, ");");
+    if (r.swar) {
+      assert(r.lo <= LexRunShape::kSwarBelowMax &&
+             "lt8 answers no byte above it");
+      write("      const ::std::uint64_t bad = lt8(w, ", r.lo, ")");
+      for (unsigned k = 0; k < r.n; ++k) write(" | eq8(w, ", r.b[k], ")");
+    } else {
+      write("      const ::std::uint64_t bad = (~(");
+      std::string_view sep;
+      for (unsigned k = 0; k < r.nr; ++k) {
+        const bool folded = r.paired(k);
+        if (folded && (r.from[k] & 0x20u)) continue;
+        write(sep, "rng8(w, ", r.from[k], ", ", r.to[k], folded ? ", 0x5f" : "",
+              ")");
+        sep = " | ";
+      }
+      write(r.high ? ") & kHi & ~w)" : ") & kHi) | (w & kHi)");
+    }
+    line(
+        ";\n"
+        "      if (bad) { ",
+        var,
+        " += static_cast<::cursiv::TextOffset>("
+        "::std::countr_zero(bad) >> 3); goto Lrun",
+        id,
+        "; }\n"
+        "      ",
+        var,
+        " += 8;\n"
+        "    }\n"
+        "    while (",
+        var, " < len && in_set<", setName,
+        ">("
+        "static_cast<unsigned char>(src[",
+        var, "]))) ++", var,
+        ";\n"
+        "Lrun",
+        id, ":;");
   }
-};
-
-// The relay rests' runs as the function `name` (`relay_run` of a table): per
-// state a rest reaches and crosses blind, the advance over the bytes that keep
-// it there; `relays` are the table's relays, `v` its automaton.
-template <class View, class Relays>
-void lex_emit_relay_runs(TextBuilder& o, const LexDfaEmitter& dfa,
-                         LexRunEmitter& runs, const View& v,
-                         const Relays& relays, std::string_view name) {
-  o.line("::cursiv::TextOffset ", name,
+  // The relay rests' runs as the function `name` (`relay_run` of a table): per
+  // state a rest reaches and crosses blind, the advance over the bytes that
+  // keep it there; `relays` are the table's relays.
+  template <class Relays>
+  void emit_relay_runs(const LexDfaEmitter& dfa, const Relays& relays,
+                       std::string_view name) {
+    line("::cursiv::TextOffset ", name,
          "(::std::uint16_t state, const char* src,\n"
          "    ::cursiv::TextOffset len, ::cursiv::TextOffset i) {\n"
          "  (void)src;\n  (void)len;\n  switch (state) {");
-  std::vector<std::uint8_t> used(dfa.states(), 0);
-  for (const LexRelay& r : relays)
-    for (const unsigned st : dfa.states_from(r.resume)) used[st] = 1;
-  for (unsigned st = 0; st < dfa.states(); ++st) {
-    if (!used[st] || !lex_run_blind(v, static_cast<std::uint16_t>(st)))
-      continue;
-    const ByteSet stay = dfa.stay(st);
-    if (!stay.any()) continue;
-    o.line("    case ", st, "u: {");
-    o.line(
-        "    static constexpr ::std::array<::std::uint64_t, 4> kStay{"
-        "{",
-        stay.w[0], "ull,", stay.w[1], "ull,", stay.w[2], "ull,", stay.w[3],
-        "ull}};");
-    runs.advance(o, stay, "i", "kStay");
-    o.line("    return i;\n    }");
+    std::vector<std::uint8_t> used(dfa.states(), 0);
+    for (const LexRelay& r : relays)
+      for (const unsigned st : dfa.states_from(r.resume)) used[st] = 1;
+    for (unsigned st = 0; st < dfa.states(); ++st) {
+      if (!used[st] || !blind(st)) continue;
+      const ByteSet stay = dfa.stay(st);
+      if (!stay.any()) continue;
+      line("    case ", st, "u: {");
+      line(
+          "    static constexpr ::std::array<::std::uint64_t, 4> kStay{"
+          "{",
+          stay.w[0], "ull,", stay.w[1], "ull,", stay.w[2], "ull,", stay.w[3],
+          "ull}};");
+      emit_run_adv(stay, "i", "kStay");
+      line("    return i;\n    }");
+    }
+    line("    default: return i;\n  }\n}");
   }
-  o.line("    default: return i;\n  }\n}");
-}
+
+ private:
+  unsigned _runId = 0;
+};
 
 // The byte-run helpers a generated walk reads, from the shared runtime.
 inline void lex_emit_byte_runs(TextBuilder& o) {

@@ -44,7 +44,7 @@ struct LrDeriving {
     rows.lexBodyTerms = std::move(bodyRows.terms);
     rows.lexOpeners = std::move(bodyRows.openers);
     const auto& into = bodyRows.into;
-    std::vector<DynSet> reach(n), after(a.cfg.nterms), want(a.nmodes);
+    std::vector<DynSet> reach(n);
     for (std::size_t s = 0; s < n; ++s)
       reach[s] = a.dfa_acc_set(static_cast<std::uint16_t>(s));
     std::vector<std::uint8_t> queued(n, 0);
@@ -64,16 +64,7 @@ struct LrDeriving {
       for (const auto from : into[s])
         if (reach[from].add(reach[s])) queue(from);
     }
-
-    for (std::uint32_t s = 0; s < a.nstates; ++s) {
-      want[a.mode[s]] |= a.follow[s];
-      for (const LrAction& x : a.action_row(s))
-        a.each_target(x,
-                      [&](std::uint16_t to) { after[x.term] |= a.follow[to]; });
-    }
     rows.typoReach = SetPool(reach.data(), static_cast<unsigned>(n));
-    rows.after = SetPool(after.data(), a.cfg.nterms);
-    rows.modeWant = SetPool(want.data(), a.nmodes);
   }
 
   ElementId canonical(ElementId row) const {
@@ -219,7 +210,7 @@ struct LrDeriving {
       for (const auto e : a.gotoRows[s])
         row.insert(row.end(), {e.nt, e.to, e.guard});
       for (unsigned k = 0; k < a.cfg.ngapConds; ++k)
-        row.push_back(!a.tagKnown[s].test(k) || a.tagTruth[s].test(k));
+        row.push_back(!a.tagFalse[s].test(k));
       rows.gotoClass[s] = classes
                               .try_emplace(row, static_cast<std::uint16_t>(
                                                     classes.size()))

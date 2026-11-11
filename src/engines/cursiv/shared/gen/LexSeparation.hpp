@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "cursiv/shared/gen/LexAlphabet.hpp"
-#include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/gen/lex_prefix_overlap.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 
@@ -27,16 +26,11 @@ class LexSeparation {
     ByteSet x, y;
     if (!heads(a, x) || !heads(b, y)) return false;
     if (!x.intersects(y)) return true;
-    bool apart = true;
-    each_bit(a.w.data(), a.w.size(), [&](std::size_t t) {
-      if (!apart) return;
-      each_bit(b.w.data(), b.w.size(), [&](std::size_t u) {
-        if (apart && _heads[t]->intersects(*_heads[u]))
-          apart = separated(static_cast<unsigned>(t), static_cast<unsigned>(u),
-                            prefixes);
-      });
-    });
-    return apart;
+    for (const unsigned t : a.members())
+      for (const unsigned u : b.members())
+        if (_heads[t]->intersects(*_heads[u]) && !separated(t, u, prefixes))
+          return false;
+    return true;
   }
 
   // Whether one peek under the trivia of configuration `out` may stand for an
@@ -61,18 +55,15 @@ class LexSeparation {
 
   bool heads(const DynSet& terms, ByteSet& out) {
     if (_heads.empty()) _heads.resize(_g.nterms);
-    bool known = true;
-    each_bit(terms.w.data(), terms.w.size(), [&](std::size_t t) {
-      if (t >= _alphabet.startOf.size() || _alphabet.startOf[t] < 0) {
-        known = false;
-        return;
-      }
+    for (const unsigned t : terms.members()) {
+      if (t >= _alphabet.startOf.size() || _alphabet.startOf[t] < 0)
+        return false;
       auto& head = _heads[t];
       if (!head) head = lex_first_bytes(_g, _g.termBuild[t].lex).first;
-      known = known && head->any();
+      if (!head->any()) return false;
       out |= *head;
-    });
-    return known;
+    }
+    return true;
   }
 
   bool separated(unsigned a, unsigned b, bool prefixes) {

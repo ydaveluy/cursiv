@@ -99,8 +99,7 @@ struct LlWalkEmitter : LexStateBlocks<LlLexView> {
 )");
     lex_emit_walk(*this, dfa, *this, {a.modeStart.data(), a.nmodes}, relays(),
                   "");
-    if (relays())
-      lex_emit_relay_runs(*this, dfa, runs, view, a.relays, "relay_run");
+    if (relays()) emit_relay_runs(dfa, a.relays, "relay_run");
     write(R"(#ifdef __clang__
 #pragma clang diagnostic pop
 #else

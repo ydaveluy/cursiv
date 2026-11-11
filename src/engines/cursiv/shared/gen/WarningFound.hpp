@@ -21,7 +21,9 @@ namespace cursiv::engine {
 
 class WarningFound {
  public:
-  explicit WarningFound(GrammarImage& image);
+  // `reached` are the rules the grammar reaches, in the order reached.
+  WarningFound(GrammarImage& image,
+               std::span<const ImageRuleDesc* const> reached);
 
   GrammarImage& image() { return _image; }
   WrittenReads& reads() { return _reads; }

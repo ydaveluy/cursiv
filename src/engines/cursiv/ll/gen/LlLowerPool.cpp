@@ -12,43 +12,30 @@
 
 namespace cursiv::engine::llow {
 
-Acts cat(const Acts& a, const Acts& b) {
-  Acts o = a;
-  o.insert(o.end(), b.begin(), b.end());
-  return o;
-}
-
-std::uint16_t put_node(LlLowered& o, const LlNode& n,
-                       const LlNodeBuild& b) {
+std::uint16_t put_node(LlLowered& o, const LlNode& n) {
   if (o.cfg.nnodes >= kNoRow) too_many_positions();
   const auto id = static_cast<std::uint16_t>(o.cfg.nnodes);
-  o.cfg.nodeBuild[o.cfg.nnodes] = b;
   o.cfg.nodes[o.cfg.nnodes++] = n;
   return id;
 }
 
-std::uint16_t put_group(LlLowered& o, LlShape kind,
-                        std::span<const std::uint16_t> ids, std::uint16_t row,
-                        const LlNodeBuild& b) {
+std::uint16_t put_group(LlLowered& o, LlNode n,
+                        std::span<const std::uint16_t> ids) {
   if (std::uint64_t{o.cfg.nchildIds} + ids.size() > kNoRow)
     too_many_positions();
-  const auto base = static_cast<std::uint16_t>(o.cfg.nchildIds);
+  n.sym = static_cast<std::uint16_t>(o.cfg.nchildIds);
+  n.count = static_cast<std::uint16_t>(ids.size());
   std::ranges::copy(ids, o.cfg.childIds.row(o.cfg.nchildIds, ids.size()));
   o.cfg.nchildIds += ids.size();
-  return put_node(o,
-                  LlNode{.kind = kind,
-                         .sym = base,
-                         .count = static_cast<std::uint16_t>(ids.size()),
-                         .row = row},
-                  b);
+  return put_node(o, n);
 }
 
 std::uint16_t with_decision(LlLowered& o, std::uint16_t node,
                             std::uint16_t nalts, std::uint16_t owner) {
   if (o.cfg.ndecisions >= kNoRow) too_many_positions();
   o.cfg.nodes[node].decision = static_cast<std::uint16_t>(o.cfg.ndecisions);
-  o.cfg.decisionBuild[o.cfg.ndecisions].nalts = nalts;
-  o.cfg.decisions[o.cfg.ndecisions++] = LlDecision{.node = node, .rule = owner};
+  o.cfg.decisions[o.cfg.ndecisions++] =
+      LlDecision{.node = node, .rule = owner, .nalts = nalts};
   return node;
 }
 
@@ -96,9 +83,13 @@ inline Descent<std::uint16_t> emit_seq(LlLowered& o, const Pool& p,
   std::vector<std::uint16_t> ids(e.count);
   for (unsigned i = 0; i < e.count; ++i)
     ids[i] = co_await emit_item(o, p, p.child[e.sym + i], owner);
-  co_return put_group(
-      o, LlShape::seq, ids, o.writes.intern_cat(made, row),
-      LlNodeBuild{.cfg = e.cfg, .section = e.section, .foldStep = e.foldStep});
+  co_return put_group(o,
+                      LlNode{.kind = LlShape::seq,
+                             .row = o.writes.intern_cat(made, row),
+                             .cfg = e.cfg,
+                             .section = e.section,
+                             .foldStep = e.foldStep},
+                      ids);
 }
 
 inline Descent<std::uint16_t> emit_alt(LlLowered& o, const Pool& p,
@@ -116,8 +107,7 @@ inline Descent<std::uint16_t> emit_alt(LlLowered& o, const Pool& p,
                            cat(p.e[k].row, row), owner);
   }
   const std::uint16_t id = put_group(
-      o, LlShape::alt, ids, kNoRow,
-      LlNodeBuild{.cfg = e.cfg, .section = e.section});
+      o, LlNode{.kind = LlShape::alt, .cfg = e.cfg, .section = e.section}, ids);
   co_return with_decision(o, id, e.count, owner);
 }
 
@@ -128,8 +118,10 @@ inline Descent<std::uint16_t> emit_unordered(LlLowered& o, const Pool& p,
   const auto group = [&](LlShape kind, const std::vector<std::uint16_t>& ids,
                          std::uint16_t rule, std::uint16_t chain = kNoRow,
                          bool foldStep = false) {
-    const auto id = put_group(o, kind, ids, chain,
-                              LlNodeBuild{.cfg = e.cfg, .foldStep = foldStep});
+    const auto id = put_group(
+        o,
+        LlNode{.kind = kind, .row = chain, .cfg = e.cfg, .foldStep = foldStep},
+        ids);
     return kind == LlShape::alt
                ? with_decision(o, id, static_cast<std::uint16_t>(ids.size()),
                                rule)
@@ -186,11 +178,11 @@ inline Descent<std::uint16_t> emit_unordered(LlLowered& o, const Pool& p,
       if (remaining == 0) {
         arms.push_back(item);
       } else {
-        const auto suffix = put_node(o,
-                                     LlNode{.kind = LlShape::call,
-                                            .sym = static_cast<std::uint16_t>(
-                                                baseRule + remaining - 1u)},
-                                     LlNodeBuild{.cfg = e.cfg});
+        const auto suffix = put_node(
+            o,
+            LlNode{.kind = LlShape::call,
+                   .sym = static_cast<std::uint16_t>(baseRule + remaining - 1u),
+                   .cfg = e.cfg});
         arms.push_back(group(LlShape::seq, {item, suffix}, aux));
       }
     }
@@ -200,20 +192,22 @@ inline Descent<std::uint16_t> emit_unordered(LlLowered& o, const Pool& p,
     // item still read is the preferred reading, and its absence is the
     // caller's to read past.
     if (ends(mask))
-      body = with_decision(
-          o,
-          put_node(
-              o, LlNode{.kind = LlShape::rep, .sym = body, .min = 0, .max = 1},
-              LlNodeBuild{.cfg = e.cfg}),
-          2, aux);
+      body = with_decision(o,
+                           put_node(o, LlNode{.kind = LlShape::rep,
+                                              .sym = body,
+                                              .min = 0,
+                                              .max = 1,
+                                              .cfg = e.cfg}),
+                           2, aux);
     o.cfg.rules[aux].body = body;
   }
   co_return put_node(
-      o,
-      LlNode{.kind = LlShape::call,
-             .sym = static_cast<std::uint16_t>(baseRule + subsets - 2u),
-             .row = o.writes.intern_cat(made, row)},
-      LlNodeBuild{.cfg = e.cfg, .section = e.section, .foldStep = e.foldStep});
+      o, LlNode{.kind = LlShape::call,
+                .sym = static_cast<std::uint16_t>(baseRule + subsets - 2u),
+                .row = o.writes.intern_cat(made, row),
+                .cfg = e.cfg,
+                .section = e.section,
+                .foldStep = e.foldStep});
 }
 
 Descent<std::uint16_t> emit(LlLowered& o, const Pool& p, std::uint16_t at,
@@ -222,12 +216,12 @@ Descent<std::uint16_t> emit(LlLowered& o, const Pool& p, std::uint16_t at,
   const Node& e = p.e[at];
   const auto place = [&](LlShape kind, std::uint16_t sym,
                          std::uint32_t min = 0) {
-    return put_node(o,
-                    LlNode{.kind = kind,
-                           .sym = sym,
-                           .min = min,
-                           .row = o.writes.intern_cat(made, row, e.doc)},
-                    LlNodeBuild{e.cfg, e.section});
+    return put_node(o, LlNode{.kind = kind,
+                              .sym = sym,
+                              .min = min,
+                              .row = o.writes.intern_cat(made, row, e.doc),
+                              .cfg = e.cfg,
+                              .section = e.section});
   };
   switch (e.kind) {
     case Shape::sym:
@@ -254,8 +248,8 @@ Descent<std::uint16_t> emit(LlLowered& o, const Pool& p, std::uint16_t at,
       if ((e.max != kEndless && (e.max > 1 || e.min == e.max)) ||
           e.min > 1) {
         // Each counted occurrence is its own call site: the body and the ATN
-        // are both expanded, as the body and the caret read one
-        // nodeFollow/nodeAfter. Nested options keep one ordered prefix.
+        // are both expanded, as the body and the caret read one `nodeAfter`.
+        // Nested options keep one ordered prefix.
         const std::uint64_t turns = e.max == kEndless ? e.min : e.max;
         const std::uint64_t optional = e.max == kEndless ? 0 : e.max - e.min;
         if (const std::uint64_t spelt =
@@ -264,19 +258,23 @@ Descent<std::uint16_t> emit(LlLowered& o, const Pool& p, std::uint16_t at,
           co_return refuse_node(o, LowerFail::tooManyPositions, owner);
         const auto sequence = [&](const std::vector<std::uint16_t>& ids,
                                   std::uint16_t chain, bool outer = false) {
-          return put_group(o, ids.empty() ? LlShape::empty : LlShape::seq, ids,
-                           chain,
-                           LlNodeBuild{.cfg = e.cfg,
-                                       .section = e.section,
-                                       .foldStep = outer && e.foldStep});
+          return put_group(
+              o,
+              LlNode{.kind = ids.empty() ? LlShape::empty : LlShape::seq,
+                     .row = chain,
+                     .cfg = e.cfg,
+                     .section = e.section,
+                     .foldStep = outer && e.foldStep},
+              ids);
         };
         const auto repetition = [&](std::uint16_t child,
                                     std::uint32_t maximum) {
-          const auto id = put_node(
-              o,
-              LlNode{
-                  .kind = LlShape::rep, .sym = child, .min = 0, .max = maximum},
-              LlNodeBuild{.cfg = e.cfg, .section = e.section});
+          const auto id = put_node(o, LlNode{.kind = LlShape::rep,
+                                             .sym = child,
+                                             .min = 0,
+                                             .max = maximum,
+                                             .cfg = e.cfg,
+                                             .section = e.section});
           return with_decision(o, id, 2, owner);
         };
         std::vector<std::uint16_t> ids;
@@ -292,25 +290,25 @@ Descent<std::uint16_t> emit(LlLowered& o, const Pool& p, std::uint16_t at,
             auto child = co_await body();
             if (tail != kNoRow) {
               child = sequence({child, tail}, kNoRow);
-              o.cfg.nodeBuild[child].countedTail = true;
+              o.cfg.nodes[child].countedTail = true;
             }
             tail = repetition(child, 1);
-            o.cfg.nodeBuild[tail].countedTail = true;
+            o.cfg.nodes[tail].countedTail = true;
           }
           ids.push_back(tail);
         }
         co_return sequence(ids, o.writes.intern_cat(made, row), true);
       }
       const std::uint16_t child = co_await body();
-      const std::uint16_t id = put_node(
-          o,
-          LlNode{.kind = LlShape::rep,
-                 .sym = child,
-                 .min = e.min,
-                 .max = e.max,
-                 .row = o.writes.intern_cat(made, row)},
-          LlNodeBuild{
-              .cfg = e.cfg, .section = e.section, .leftFold = e.leftFold});
+      const std::uint16_t id =
+          put_node(o, LlNode{.kind = LlShape::rep,
+                             .sym = child,
+                             .min = e.min,
+                             .max = e.max,
+                             .row = o.writes.intern_cat(made, row),
+                             .cfg = e.cfg,
+                             .section = e.section,
+                             .leftFold = e.leftFold});
       // The turn is the choice: one arm enters the body, the other leaves.
       co_return with_decision(o, id, 2, owner);
     }
@@ -325,7 +323,7 @@ void move_chains_down(LlLowered& o, const LlRecordPlan& plan) {
   for (std::uint32_t i = 0; i < o.cfg.nnodes; ++i) {
     const auto id = static_cast<std::uint16_t>(i);
     LlNode& n = o.cfg.nodes[id];
-    if (n.row == kNoRow || o.cfg.nodeBuild[id].foldStep) continue;
+    if (n.row == kNoRow || n.foldStep) continue;
     const std::uint16_t only = plan.single_position(id);
     if (only == kNoRow || !plan.hands(only)) continue;
     LlNode& child = o.cfg.nodes[only];
@@ -363,11 +361,11 @@ Descent<void> emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
                                   std::vector<std::uint16_t> after) {
   const Node& n = p.e[at];
   if (n.kind == Shape::sym && is_term(n.sym)) {
-    const auto token = put_node(o,
-                                LlNode{.kind = LlShape::term,
-                                       .sym = n.sym,
-                                       .row = o.writes.intern_cat(made, row, n.doc)},
-                                LlNodeBuild{cfg});
+    const auto token =
+        put_node(o, LlNode{.kind = LlShape::term,
+                           .sym = n.sym,
+                           .row = o.writes.intern_cat(made, row, n.doc),
+                           .cfg = cfg});
     const auto guard = [&](const std::vector<std::uint16_t>& conditions) {
       if (conditions.empty()) return kNoRow;
       const auto condition = conditions.size() == 1
@@ -375,9 +373,9 @@ Descent<void> emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
                                  : o.cfg.gap_conjoin(conditions);
       return condition == kNoRow
                  ? kNoRow
-                 : put_node(
-                       o, LlNode{.kind = LlShape::condition, .sym = condition},
-                       LlNodeBuild{cfg});
+                 : put_node(o, LlNode{.kind = LlShape::condition,
+                                      .sym = condition,
+                                      .cfg = cfg});
     };
     const auto head = guard(before);
     const auto tail = guard(after);
@@ -388,8 +386,8 @@ Descent<void> emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
       if (head != kNoRow) run[count++] = head;
       run[count++] = token;
       if (tail != kNoRow) run[count++] = tail;
-      body = put_group(o, LlShape::seq, std::span(run, count), kNoRow,
-                       LlNodeBuild{cfg});
+      body = put_group(o, LlNode{.kind = LlShape::seq, .cfg = cfg},
+                       std::span(run, count));
     }
     o.cfg.climbOps[o.cfg.nclimbOps++] =
         LlClimbOp{.body = body, .prec = prec, .assoc = group};

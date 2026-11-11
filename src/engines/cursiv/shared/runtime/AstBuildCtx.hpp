@@ -14,7 +14,6 @@
 #include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
-#include "cursiv/syntax-tree/AstBuildError.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
@@ -26,6 +25,15 @@ namespace cursiv::engine {
 struct AstActions;
 struct TextValues;
 
+// Thrown at the record that shows a tape the table never wrote: `CstBuilder`
+// is public, so a caller can build one. The build reports it there.
+struct BrokenTape {
+  NodeId id;
+};
+[[noreturn]] CURSIV_COLD CURSIV_NOINLINE inline void broken_tape(NodeId id) {
+  throw BrokenTape{id};
+}
+
 struct AstBuildCtx {
   const Cst* cst = nullptr;
   AstArena* arena = nullptr;
@@ -35,8 +43,6 @@ struct AstBuildCtx {
   std::vector<ParseDiagnostic>* diags = nullptr;
   std::pmr::vector<AstNode*>* nodes = nullptr;
   const AstActions* actions = nullptr;
-  AstBuildError error = AstBuildError::none;
-  NodeId errorNode = kNoNode;
   // A tape no repair touched holds no invented record.
   bool repaired = false;
   bool detached = false;
@@ -56,7 +62,6 @@ struct AstBuildCtx {
   std::size_t madeCount = 0;
   AstNode* made[kMadeRun]{};
 
-  bool failed() const { return error != AstBuildError::none; }
   // Text a view of the tree names, which the tree keeps.
   std::string_view keep_text(std::string_view text) const {
     return cst->keep_text({&text, 1});
@@ -75,13 +80,6 @@ struct AstBuildCtx {
   CURSIV_NOINLINE void list_made() {
     nodes->insert(nodes->end(), made, made + madeCount);
     madeCount = 0;
-  }
-  // First failure wins: the later ones are its consequences.
-  void fail(AstBuildError why, NodeId id) {
-    if (!failed()) {
-      error = why;
-      errorNode = id;
-    }
   }
   // Collect and continue: an out-of-range literal must not cost an editor its
   // AST.

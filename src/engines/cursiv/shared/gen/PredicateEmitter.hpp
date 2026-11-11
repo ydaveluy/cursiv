@@ -399,7 +399,7 @@ class PredicateEmitter {
     const std::string name = concat("predicate_holds_", root);
     _holds.try_emplace(root, name);
     std::vector<std::uint16_t> parts;
-    phrase_parts(_g, root, parts);
+    lex_parts(_g, root, parts);
     rest_of(name, parts, 0, "::cursiv::engine::predicate_some");
   }
 
@@ -466,7 +466,7 @@ class PredicateEmitter {
       }
       const std::string name = concat("predicate_part_", _nparts++);
       std::vector<std::uint16_t> parts;
-      phrase_parts(_g, arm, parts);
+      lex_parts(_g, arm, parts);
       rest_of(name, parts, 0, rest);
       arms += concat("    holds = ", name,
                      "(src, len, ::cursiv::engine::PredicateState{p}, seen) || "

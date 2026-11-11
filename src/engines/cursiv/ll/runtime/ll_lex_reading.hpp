@@ -14,15 +14,6 @@
 
 namespace cursiv::engine {
 
-template <const auto& T>
-inline LexReading ll_lex_reading(const char* src, TextOffset len,
-                                 std::uint16_t mode, TextOffset p,
-                                 TextOffset& reached) {
-  return lex_reading(LlLexTape<T>{},
-                     LexBodies{T.lexBodies, T.lexBodyTerms, T.lexOpeners}, src,
-                     len, mode, p, reached);
-}
-
 // The lexer's refused reading of the token at `p`: the open token its body
 // needs, if any. In a section the text ends at the closing token; the search
 // for it stops at the reading's end and counts with it.
@@ -31,11 +22,11 @@ inline LexReading ll_open_reading(LlContext& c, TextOffset p) {
   if (c.reads.spent()) return LexReading{};
   const auto mode = ll_err_mode<T>(c.section);
   TextOffset reached = p;
-  LexReading r = ll_lex_reading<T>(c.src, c.len, mode, p, reached);
+  LexReading r = lex_reading(LlLexTape<T>{}, c.src, c.len, mode, p, reached);
   if (const TextOffset end = ll_text_end<T>(c, p, reached, reached);
       end < c.len) {
     TextOffset again = p;
-    r = ll_lex_reading<T>(c.src, end, mode, p, again);
+    r = lex_reading(LlLexTape<T>{}, c.src, end, mode, p, again);
   }
   c.reads.spend(p, reached);
   return r;
@@ -48,8 +39,7 @@ inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from,
                                    TextOffset len, TextOffset& reached) {
   const auto mode = ll_err_mode<T>(c.section);
   return lex_unmatched_end(
-      LlLexTape<T>{}, LexBodies{T.lexBodies, T.lexBodyTerms, T.lexOpeners},
-      c.src, len, mode, from,
+      LlLexTape<T>{}, c.src, len, mode, from,
       [&]([[maybe_unused]] unsigned char b) {
         if constexpr (T.skipSet != nullptr)
           return kLlBytes<T, &LlTable::skipSet>[mode][b];

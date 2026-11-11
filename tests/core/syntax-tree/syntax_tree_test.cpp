@@ -63,7 +63,6 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/shared/gen/AstRowOf.hpp"
-#include "cursiv/shared/gen/RowOf.hpp"
 #include "cursiv/shared/runtime/AstConvThunks.hpp"
 #include "cursiv/shared/runtime/AstReducer.hpp"
 #include "cursiv/shared/runtime/ast_fields.hpp"
@@ -731,24 +730,24 @@ void assigning_again_keeps_one_reference_site() {
                                                   void*) { return false; }};
   const auto one = field_of(refl(), kTag<Rec>, "one");
   cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::one>>(
-      ctx, again, rec, &text, one, cursiv::ActKind::assign, 0);
+      ctx, again, rec, &text, one, 0);
   CHECK(rec->one.refText == "ee" &&
         cursiv::detail::RefAccess::handle(rec->one) == 0);
   CHECK(r.references->handles.size() == 4);
   cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::one>>(
-      ctx, again, rec, &refuses, one, cursiv::ActKind::assign, 0);
+      ctx, again, rec, &refuses, one, 0);
   CHECK(rec->one.refText == "ee" &&
         cursiv::detail::RefAccess::handle(rec->one) == 0);
   CHECK(r.references->handles.size() == 4);
   // An optional keeps its site the same way.
   const auto held = field_of(refl(), kTag<Rec>, "maybe");
   cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
-      ctx, again, rec, &text, held, cursiv::ActKind::assign, 0);
+      ctx, again, rec, &text, held, 0);
   CHECK(rec->maybe->refText == "ee" &&
         cursiv::detail::RefAccess::handle(*rec->maybe) == 1);
   CHECK(r.references->handles.size() == 4);
   cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
-      ctx, again, rec, &refuses, held, cursiv::ActKind::assign, 0);
+      ctx, again, rec, &refuses, held, 0);
   CHECK(rec->maybe->refText == "ee" && r.references->handles.size() == 4);
 }
 
@@ -776,13 +775,12 @@ void a_write_replaces_the_node_of(auto hold) {
   cursiv::engine::AstBuildCtx ctx;
   if constexpr (F::content == cursiv::detail::FieldContent::variant) {
     const cursiv::engine::Pending value{.kind = cursiv::ActKind::assign};
-    cursiv::engine::write_into<F>(ctx, value, &holder, &refuses, 0, value.kind,
-                                  0);
+    cursiv::engine::write_into<F>(ctx, value, &holder, &refuses, 0, 0);
     CHECK(before.parent == &holder && !ctx.detached);
   }
   const cursiv::engine::Pending node{.kind = cursiv::ActKind::assign,
                                      .value = &after};
-  cursiv::engine::write_into<F>(ctx, node, &holder, nullptr, 0, node.kind, 0);
+  cursiv::engine::write_into<F>(ctx, node, &holder, nullptr, 0, 0);
   CHECK(before.parent == nullptr && ctx.detached);
   CHECK(after.parent == &holder && ctx.attached == 1);
   if constexpr (F::content == cursiv::detail::FieldContent::variant) {
@@ -795,8 +793,7 @@ void a_write_replaces_the_node_of(auto hold) {
           return true;
         }};
     const cursiv::engine::Pending value{.kind = cursiv::ActKind::assign};
-    cursiv::engine::write_into<F>(ctx, value, &holder, &number, 0, value.kind,
-                                  0);
+    cursiv::engine::write_into<F>(ctx, value, &holder, &number, 0, 0);
     CHECK(after.parent == nullptr && ctx.detached);
   }
 }
@@ -840,9 +837,9 @@ void a_copied_reference_cannot_claim_another_slots_handle() {
   const auto maybe = field_of(refl(), kTag<Rec>, "maybe");
   const auto first = r.references->handles.size();
   cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::one>>(
-      ctx, p, &copied, &conv, one, cursiv::ActKind::assign, 0);
+      ctx, p, &copied, &conv, one, 0);
   cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
-      ctx, p, &copied, &conv, maybe, cursiv::ActKind::assign, 0);
+      ctx, p, &copied, &conv, maybe, 0);
   CHECK(r.references->handles.size() == first + 2);
   CHECK(cursiv::detail::RefAccess::handle(copied.one) == first &&
         cursiv::detail::RefAccess::handle(*copied.maybe) == first + 1);

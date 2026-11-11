@@ -35,7 +35,6 @@
 #include "cursiv/lr/gen/lr_completion_sites.hpp"
 #include "cursiv/lr/gen/lr_emit_parser.hpp"
 #include "cursiv/lr/gen/lr_emit_table.hpp"
-#include "cursiv/lr/gen/lr_entry_rows.hpp"
 #include "cursiv/lr/gen/lr_term_run.hpp"
 #include "cursiv/shared/gen/AstRegistryBuilder.hpp"
 #include "cursiv/shared/gen/KeepFirst.hpp"
@@ -237,6 +236,7 @@ struct RuntimeGrammar {
     LowerDesc desc;
     desc.terms = terms;
     desc.nts = nts;
+    desc.reached = nts;
     desc.rows = rowList;
     desc.entry = entry;
     desc.bound = grammar.bound;
@@ -1212,7 +1212,7 @@ void deep_nesting_generates_on_a_small_stack() {
       g.entry = root;
       g.lowered<int>([&](cursiv::detail::GrammarImage& image,
                          const LowerDesc& desc) {
-        CHECK(!refuse_self_bounded_arms("Deep", image));
+        CHECK(!refuse_self_bounded_arms("Deep", image, desc.reached));
         if (lr) {
           auto graph = std::make_unique<LrBuildTable>(
               lr_build_automaton(lr_lower(image, desc)));
@@ -1233,7 +1233,7 @@ void deep_nesting_generates_on_a_small_stack() {
             (void)ll_emit_parser_files(*done, "deep",
                                        ll_emit_table(*done, "deep"));
         }
-        report_grammar_warnings("Deep", image);
+        report_grammar_warnings("Deep", image, desc.reached);
         return 0;
       });
     }

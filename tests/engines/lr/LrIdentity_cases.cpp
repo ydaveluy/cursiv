@@ -21,7 +21,6 @@
 #include "cursiv/utils/TypeName.hpp"
 #include "cursiv/lr/gen/LrFinalTable.hpp"
 #include "cursiv/lr/gen/LrGotoRows.hpp"
-#include "cursiv/lr/gen/LrIdentity.hpp"
 #include "cursiv/lr/gen/LrLowering.hpp"
 #include "cursiv/lr/gen/lr_build.hpp"
 #include "cursiv/lr/gen/lr_build_derived.hpp"
@@ -29,7 +28,6 @@
 #include "cursiv/lr/gen/lr_build_passes.hpp"
 #include "cursiv/lr/gen/lr_completion_sites.hpp"
 #include "cursiv/lr/gen/lr_emit_parser.hpp"
-#include "cursiv/lr/gen/lr_entry_rows.hpp"
 #include "cursiv/lr/gen/lr_term_run.hpp"
 #include "cursiv/lr/table/LrActionKind.hpp"
 #include "cursiv/shared/gen/AstRegistry.hpp"
@@ -91,20 +89,17 @@ void reads(std::string_view src) {
   CHECK(doc != nullptr && cursiv::ast_cast<Child>(doc->child) != nullptr);
 }
 
-// A tag reads as held unless known false. Two tags whose words differ only in
-// where known ends and truth begins stay apart; a condition known to hold and
-// one nothing is known of fuse.
-void minimization_reads_condition_tags_as_held() {
+// States whose tags know different conditions false stay apart, and states
+// whose tags agree fuse.
+void minimization_keeps_false_condition_tags_apart() {
   using cursiv::engine::DynSet;
   // Two states the same but for their tags, minimised: how many stand, and
   // where the first one's goto leads.
-  const auto minimized = [](std::array<DynSet, 2> known,
-                            std::array<DynSet, 2> truth) {
+  const auto minimized = [](std::array<DynSet, 2> tagFalse) {
     Built a;
     a.nstates = a.nactions = 2;
     a.cfg.nnts = a.cfg.nterms = a.cfg.nprods = 1;
     a.cfg.prods[0] = {};
-    a.cfg.prodBuild[0] = {};
     for (unsigned s = 0; s < 2; ++s) {
       a.actionBase[s] = s;
       a.actionCount[s] = 1;
@@ -114,23 +109,20 @@ void minimization_reads_condition_tags_as_held() {
       a.mode[s] = 0;
       a.closeRow[s] = {};
       a.follow[s].set(0);
-      a.tagKnown[s] = known[s];
-      a.tagTruth[s] = truth[s];
-      CHECK(known[s].covers(truth[s]));
+      a.tagFalse[s] = tagFalse[s];
     }
     cursiv::engine::lr_minimize_states(a);
     return std::pair{unsigned{a.nstates}, unsigned{a.gotoRows[0][0].to}};
   };
-  CHECK(minimized(
-            {DynSet{{~0ull, 1, 0x000100000001ffffull}}, DynSet{{~0ull, 1}}},
-            {DynSet{}, DynSet{{0xffff000100000001ull}}}) == std::pair{2u, 1u});
-  CHECK(minimized({DynSet{}, DynSet{{1}}}, {DynSet{}, DynSet{{1}}}).first == 1);
+  CHECK(minimized({DynSet{{~0ull, 1, 0x000100000001ffffull}},
+                   DynSet{{~0ull, 1}}}) == std::pair{2u, 1u});
+  CHECK(minimized({DynSet{{1}}, DynSet{{1}}}).first == 1);
 }
 
 }  // namespace
 
 void run() {
-  minimization_reads_condition_tags_as_held();
+  minimization_keeps_false_condition_tags_apart();
   // The control: the core graph really is the broken one -- its merge made
   // a cell the grammar does not order, and the detector named it.
   const cursiv::engine::LrLowered& low = cursiv::engine::LrLowering<G>::table();
@@ -139,9 +131,10 @@ void run() {
   CHECK(picked->nOrdered != 0);
   CHECK(picked->nMergeInduced != 0);
 
-  if (picked->nMergeInduced != 0) {
-    std::unique_ptr<Built> wide =
-        std::make_unique<Built>(cursiv::engine::lr_build_wide(low));
+  // The election a generator runs.
+  if (picked->nMergeInduced != 0 || picked->nImpliedMixed != 0) {
+    std::unique_ptr<Built> wide = std::make_unique<Built>(
+        cursiv::engine::lr_build_wide(low, picked.get()));
     if (cursiv::engine::lr_wider_stands(*picked, *wide))
       picked = std::move(wide);
   }
@@ -188,6 +181,20 @@ void run() {
     CHECK(cursiv::engine::lr_wider_stands(*core, *wide));
     wide->overflow = true;
     CHECK(!cursiv::engine::lr_wider_stands(*core, *wide));
+  }
+
+  // A core that mixed implied tokens asks the wider graph too, which stands
+  // with as many ambiguities left.
+  {
+    const cursiv::engine::LrLowered& asi =
+        cursiv::engine::LrLowering<tasi::cases::G>::table();
+    const std::unique_ptr<Built> core =
+        std::make_unique<Built>(cursiv::engine::lr_build_automaton(asi));
+    const std::unique_ptr<Built> wide = std::make_unique<Built>(
+        cursiv::engine::lr_build_wide(asi, core.get()));
+    CHECK(core->nMergeInduced == 0 && core->nImpliedMixed != 0);
+    CHECK(wide->nAmbiguities == core->nAmbiguities);
+    CHECK(cursiv::engine::lr_wider_stands(*core, *wide));
   }
 
   reads<ast::AChild>("a c d");
@@ -452,8 +459,8 @@ std::unique_ptr<cursiv::engine::LrLowered> without_conditions(
   cursiv::engine::lr_guard_positions(g, plain->writes);
   std::vector<char> called(g.nnts, 0);
   for (std::uint32_t i = 0; i < g.nslots; ++i)
-    if (!cursiv::engine::is_term(g.slotSym[i]))
-      called[cursiv::engine::nt_index(g.slotSym[i])] = 1;
+    if (!cursiv::engine::is_term(g.slots[i].sym))
+      called[cursiv::engine::nt_index(g.slots[i].sym)] = 1;
   for (unsigned p = 0; p < g.nprods; ++p)
     if (called[g.prods[p].lhs]) g.prods[p].gap = 0;
   return plain;

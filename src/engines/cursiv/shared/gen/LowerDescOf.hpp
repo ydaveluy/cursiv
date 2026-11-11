@@ -1,5 +1,6 @@
-// What a lowering reads of a grammar, as constant descriptors: each rule's
-// stage, the actions it publishes, and the symbols in numbering order.
+// What a lowering reads of a grammar: the rules it numbers and the actions it
+// publishes, as types and as constant descriptors, and the table it lowers to
+// once.
 #pragma once
 
 #include <cstdint>
@@ -12,13 +13,33 @@
 #include "cursiv/shared/gen/AstRowOf.hpp"
 #include "cursiv/shared/gen/Distribute.hpp"
 #include "cursiv/shared/gen/LowerDesc.hpp"
-#include "cursiv/shared/gen/LowerFacts.hpp"
 #include "cursiv/shared/gen/RuleRows.hpp"
 #include "cursiv/shared/gen/optional_shape.hpp"
+#include "cursiv/shared/gen/reached.hpp"
 #include "cursiv/shared/gen/spec_row.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 
 namespace cursiv::engine {
+
+// What the walk is given, keyed on the grammar alone so the lists stay out of
+// every `lay<>` mangled name. `Rewrite` is the engine's.
+template <class G, class Rewrite>
+struct LowerFacts {
+  using resolved = ResolveOverride<G>;
+  using materialized = MaterializeCreate<resolved>;
+  // The rules `entry`, `ignored` and `hidden` reach, in the symbol order,
+  // named by the grammar alone.
+  using declared = reached_of<resolved>;
+  using predicate_terms = predicate_only_t<resolved>;
+  using staged = typename Rewrite::template stages<materialized, declared>;
+  using stage = typename staged::stage;
+  using rules = typename staged::rules;
+  using terms = dedupe_t<
+      tl_cat_t<typename sift<stage, rules, true>::type, predicate_terms>>;
+  using nts = typename sift<stage, rules, false>::type;
+  using rows =
+      typename AllRows<stage, rules, Rewrite::template infix_src>::type;
+};
 
 struct LoweringTag {};
 
@@ -149,6 +170,7 @@ consteval LowerDesc lower_desc() {
   d.terms = rule_list<V, typename F::terms>();
   d.predicateTerms = rule_list<V, typename F::predicate_terms>();
   d.nts = rule_list<V, typename F::nts>();
+  d.reached = rule_list<V, typename F::declared::type>();
   d.rows = []<class... Rs>(TypeList<Rs...>) {
     return std::span<const AstRowDesc* const>(kRows<St, Rs...> + 1,
                                               sizeof...(Rs));
@@ -171,5 +193,32 @@ consteval LowerDesc lower_desc() {
   d.optionalGate = kOptionalGate;
   return d;
 }
+
+// `Lower` lowers the image `View` reads, as `Desc` describes it. An id is a
+// position in one of these lists, which a reader builds its thunks from.
+template <class View, class Lowered,
+          Lowered (*Lower)(GrammarImage&, const LowerDesc&),
+          const LowerDesc& Desc>
+struct LoweringShell {
+  using facts = typename View::facts;
+  using rewrite = typename View::rewrite;
+  using stage = typename facts::stage;
+  using rules = typename facts::rules;
+  using terminals = typename facts::terms;
+  using nonterminals = typename facts::nts;
+  using actions = typename facts::rows;
+
+  static Lowered lower() {
+    GrammarImage image = grammar_image<View>();
+    return Lower(image, Desc);
+  }
+
+  static const Lowered& table() {
+    static const Lowered one = lower();
+    return one;
+  }
+
+  static const auto& cfg() { return table().cfg; }
+};
 
 }  // namespace cursiv::engine

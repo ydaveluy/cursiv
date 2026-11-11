@@ -208,8 +208,8 @@ void a_cancelled_token_stops_the_ast_before_work() {
 }
 
 void stop_after_an_ast_entry(cursiv::engine::AstReducer& builder,
-                             cursiv::NodeId id) {
-  stoppedEntry(builder, id);
+                             cursiv::NodeId id, const cursiv::CstNode& node) {
+  stoppedEntry(builder, id, node);
   astStop->request_stop();
 }
 
@@ -252,10 +252,10 @@ std::vector<cursiv::engine::AstEntryFn> countedEntries;
 std::vector<cursiv::ElementId> rowById;
 std::size_t entryCalls = 0;
 
-void count_an_ast_entry(cursiv::engine::AstReducer& builder,
-                        cursiv::NodeId id) {
+void count_an_ast_entry(cursiv::engine::AstReducer& builder, cursiv::NodeId id,
+                        const cursiv::CstNode& node) {
   if (++entryCalls == 1 && astStop != nullptr) astStop->request_stop();
-  countedEntries[rowById[id]](builder, id);
+  countedEntries[rowById[id]](builder, id, node);
 }
 
 std::size_t entries_built(const std::string& src,
@@ -289,11 +289,12 @@ std::vector<cursiv::NodeCount> extentById;
 bool stoppedInside = false;
 
 void stop_before_a_long_entry(cursiv::engine::AstReducer& builder,
-                              cursiv::NodeId id) {
-  if (extentById[id] < 1000) return countedEntries[rowById[id]](builder, id);
+                              cursiv::NodeId id, const cursiv::CstNode& node) {
+  if (extentById[id] < 1000)
+    return countedEntries[rowById[id]](builder, id, node);
   astStop->request_stop();
   try {
-    countedEntries[rowById[id]](builder, id);
+    countedEntries[rowById[id]](builder, id, node);
   } catch (const cursiv::OperationCancelled&) {
     stoppedInside = true;
     throw;

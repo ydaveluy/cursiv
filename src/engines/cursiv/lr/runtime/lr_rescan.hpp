@@ -54,10 +54,11 @@ struct LrTypoTape : TypoTape<A> {
   bool reserves(std::uint16_t s, TextOffset p) const {
     if (!A.dfa_res_set(s).any()) return false;
     TextOffset unseen = p;
-    const auto refused =
-        lr_refused_from<A>(this->src, this->head, this->docLen);
-    return lex_reserves<A>(s, this->src, p, this->docLen, unseen,
-                           [&](SymbolId t) { return !refused(t); });
+    return lex_reserves<A>(
+        s, this->src, p, this->docLen, unseen, [&](SymbolId t) {
+          return !LexTape<A>{}.refuses(t, this->src + this->head,
+                                       this->docLen - this->head);
+        });
   }
   // A spelling a keyword reserved is not a word terminal, whatever it cost the
   // walk to reach it. Declaration order breaks ties.
@@ -113,23 +114,23 @@ template <const auto& A>
 LexReading lr_open_reading(const LrContext& c, std::uint16_t mode,
                            std::uint16_t m, TextOffset p, TextOffset end,
                            TextOffset& reached, std::uint64_t& read) {
-  LexReading r = lr_lex_reading<A>(c.src, end, m, p, reached);
+  LexReading r = lex_reading(LrLexTape<A>{}, c.src, end, m, p, reached);
   if (const TextOffset close = lr_text_end<A>(c, mode, p, reached, read);
       close < reached) {
     reached = p;
-    r = lr_lex_reading<A>(c.src, close, m, p, reached);
+    r = lex_reading(LrLexTape<A>{}, c.src, close, m, p, reached);
   }
   return r;
 }
 
 // The re-readings of a misspelling from `at` over the terminals `state` can act
 // on, each (terminal, end) once at its least cost: cheapest, then longest, then
-// declaration order. `reach` and `most` bound the walk; `read` counts bytes.
+// declaration order. `reach` bounds how far a path reads and the bytes all of
+// them read, which `read` counts.
 template <const auto& A>
 std::vector<Typo> lr_rescan_candidates(LrContext& c, std::uint32_t state,
                                        TextOffset at, TextOffset reach,
                                        std::uint64_t& read, bool& cut,
-                                       std::uint64_t most = ~std::uint64_t{0},
                                        TypoScratch* scratch = nullptr) {
   auto want = A.cold.follow[state];
   // A word the source as written spells behind a terminal's head refuses
@@ -159,7 +160,7 @@ std::vector<Typo> lr_rescan_candidates(LrContext& c, std::uint32_t state,
   TypoCandidates found;
   const auto keep = [&](const Typo& candidate) { found.add(candidate); };
   const TypoBounds bounds{c.src, horizon, len,     &read,
-                          &cut,  most,    scratch, &c.stop};
+                          &cut,  reach,   scratch, &c.stop};
   typo_each(LrTypoTape<A>{{bounds, at}, &want, &c.stats.searchStops},
             A.modeStart[A.mode[state]], at, plain, keep);
   return found.ranked();

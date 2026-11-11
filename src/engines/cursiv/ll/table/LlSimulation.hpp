@@ -7,6 +7,7 @@
 #include <bit>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -141,7 +142,7 @@ class LlCtxPool {
  public:
   // The nodes made so far: a node is only meaningful against the pool that
   // made it, until it is cleared.
-  std::size_t size() const { return _n.size(); }
+  std::size_t size() const { return _node.size(); }
 
   // The nodes made between these two are a walk's own, and go all at once
   // when it ends; the ones before stay. False where a walk already holds the
@@ -149,16 +150,13 @@ class LlCtxPool {
   bool begin_scratch() {
     if (_scratching) return false;
     _scratching = true;
-    _mark = _n.size();
+    _mark = _node.size();
     return true;
   }
   void end_scratch() {
-    if (_n.size() > _mark) {
-      _pair.resize(_base[_mark]);
-      _starts.resize(_base[_mark] / 2);
-      _base.resize(_mark);
-      _link.resize(_mark);
-      _n.resize(_mark);
+    if (_node.size() > _mark) {
+      _frame.resize(_node[_mark].base);
+      _node.resize(_mark);
     }
     _scratchIndex.clear();
     _memo.clear();
@@ -176,8 +174,9 @@ class LlCtxPool {
 
   std::uint32_t push(std::uint32_t parent, std::uint32_t ret,
                      std::int64_t start = 0) {
-    const std::uint32_t pair[2] = {ret, parent};
-    return intern(pair, 1, &start);
+    const std::uint32_t frame[kFrame] = {ret, parent,
+                                         static_cast<std::uint32_t>(start)};
+    return intern(frame, 1);
   }
 
   // The two stacks as one: a return both name goes to one place, parents
@@ -191,23 +190,20 @@ class LlCtxPool {
     return join(a, b);
   }
 
-  unsigned count(std::uint32_t c) const { return _n[c]; }
+  unsigned count(std::uint32_t c) const { return _node[c].n; }
   std::uint32_t ret(std::uint32_t c, unsigned i) const {
-    return _pair[_base[c] + 2 * i];
+    return frame(c, i)[0];
   }
   std::uint32_t parent(std::uint32_t c, unsigned i) const {
-    return _pair[_base[c] + 2 * i + 1];
+    return frame(c, i)[1];
   }
   std::int64_t start(std::uint32_t c, unsigned i) const {
-    return _starts[_base[c] / 2 + i];
+    return static_cast<std::int32_t>(frame(c, i)[2]);
   }
 
   void clear() {
-    _pair.clear();
-    _starts.clear();
-    _base.clear();
-    _n.clear();
-    _link.clear();
+    _frame.clear();
+    _node.clear();
     _index.clear();
     _scratchIndex.clear();
     _memo.clear();
@@ -220,14 +216,21 @@ class LlCtxPool {
   // readings apart instead, which costs configurations and never precision.
   static constexpr unsigned kLlCtxWidth = 16;
 
-  // `pairs` and `starts` are written up to `n` and read no further: a join asked
-  // for at every reading does not wipe them first.
+  // Words per frame: the state it returns to, its parent, and its start as 32
+  // signed bits.
+  static constexpr unsigned kFrame = 3;
+
+  const std::uint32_t* frame(std::uint32_t c, unsigned i) const {
+    return &_frame[_node[c].base + kFrame * i];
+  }
+
+  // `frames` is written up to `n` and read no further: a join asked for at
+  // every reading does not wipe it first.
   struct Join {
     Join(std::uint32_t x, std::uint32_t y) : a(x), b(y) {}
     std::uint32_t a, b;
     unsigned i = 0, j = 0, n = 0;
-    std::uint32_t pairs[2 * kLlCtxWidth];
-    std::int64_t starts[kLlCtxWidth];
+    std::uint32_t frames[kFrame * kLlCtxWidth];
   };
 
   static std::uint64_t merge_key(std::uint32_t a, std::uint32_t b) {
@@ -242,13 +245,14 @@ class LlCtxPool {
     for (;;) {
       Join& q = _joins.back();
       bool pending = false, apart = false;
-      while (q.i < _n[q.a] || q.j < _n[q.b]) {
-        const auto ra = q.i < _n[q.a] ? ret(q.a, q.i) : kLlCtxNone;
-        const auto rb = q.j < _n[q.b] ? ret(q.b, q.j) : kLlCtxNone;
+      while (q.i < count(q.a) || q.j < count(q.b)) {
+        const auto ra = q.i < count(q.a) ? ret(q.a, q.i) : kLlCtxNone;
+        const auto rb = q.j < count(q.b) ? ret(q.b, q.j) : kLlCtxNone;
         if (q.n == kLlCtxWidth) {
           apart = true;
           break;
         }
+        std::uint32_t* joined = q.frames + kFrame * q.n;
         std::uint32_t p;
         if (ra == rb) {
           if (start(q.a, q.i) != start(q.b, q.j)) {
@@ -274,22 +278,22 @@ class LlCtxPool {
               break;
             }
           }
-          q.starts[q.n] = start(q.a, q.i);
+          joined[2] = frame(q.a, q.i)[2];
           ++q.i;
           ++q.j;
         } else if (ra < rb) {
-          q.starts[q.n] = start(q.a, q.i);
+          joined[2] = frame(q.a, q.i)[2];
           p = parent(q.a, q.i++);
         } else {
-          q.starts[q.n] = start(q.b, q.j);
+          joined[2] = frame(q.b, q.j)[2];
           p = parent(q.b, q.j++);
         }
-        q.pairs[2 * q.n] = std::min(ra, rb);
-        q.pairs[2 * q.n + 1] = p;
+        joined[0] = std::min(ra, rb);
+        joined[1] = p;
         ++q.n;
       }
       if (pending) continue;
-      const auto result = apart ? kLlCtxApart : intern(q.pairs, q.n, q.starts);
+      const auto result = apart ? kLlCtxApart : intern(q.frames, q.n);
       bool fresh = false;
       _memo.at(merge_key(q.a, q.b), fresh) = result;
       _joins.pop_back();
@@ -297,40 +301,34 @@ class LlCtxPool {
     }
   }
 
-  static std::uint64_t hash(const std::uint32_t* pairs, unsigned n,
-                            const std::int64_t* starts) {
+  static std::uint64_t hash(const std::uint32_t* frames, unsigned n) {
     std::uint64_t h = 1469598103934665603ull;
-    for (unsigned k = 0; k < 2 * n; ++k) h = (h ^ pairs[k]) * 1099511628211ull;
-    for (unsigned k = 0; k < n; ++k)
-      h = (h ^ static_cast<std::uint64_t>(starts[k])) * 1099511628211ull;
+    for (unsigned k = 0; k < kFrame * n; ++k)
+      h = (h ^ frames[k]) * 1099511628211ull;
     return h;
   }
 
-  std::uint32_t find(std::uint32_t head, const std::uint32_t* pairs,
-                     unsigned n, const std::int64_t* starts) const {
-    for (std::uint32_t id = head; id != kLlCtxNone; id = _link[id]) {
-      if (_n[id] != n) continue;
-      bool same = true;
-      for (unsigned k = 0; same && k < 2 * n; ++k)
-        same = _pair[_base[id] + k] == pairs[k];
-      for (unsigned k = 0; same && k < n; ++k)
-        same = start(id, k) == starts[k];
-      if (same) return id;
+  std::uint32_t find(std::uint32_t head, const std::uint32_t* frames,
+                     unsigned n) const {
+    for (std::uint32_t id = head; id != kLlCtxNone; id = _node[id].link) {
+      if (_node[id].n != n) continue;
+      const std::uint32_t* held = frame(id, 0);
+      unsigned k = 0;
+      while (k < kFrame * n && held[k] == frames[k]) ++k;
+      if (k == kFrame * n) return id;
     }
     return kLlCtxNone;
   }
 
   // A walk's nodes are looked up after the ones that stay, and are chained
   // apart from them: they go without the index forgetting a thing.
-  std::uint32_t intern(const std::uint32_t* pairs, unsigned n,
-                       const std::int64_t* starts) {
-    const std::uint64_t h = hash(pairs, n, starts);
+  std::uint32_t intern(const std::uint32_t* frames, unsigned n) {
+    const std::uint64_t h = hash(frames, n);
     bool fresh = false;
     std::uint32_t* heads = nullptr;
     if (_scratching) {
       if (const std::uint32_t* kept = _index.find(h))
-        if (const std::uint32_t id = find(*kept, pairs, n, starts);
-            id != kLlCtxNone)
+        if (const std::uint32_t id = find(*kept, frames, n); id != kLlCtxNone)
           return id;
       heads = &_scratchIndex.at(h, fresh);
     } else {
@@ -338,28 +336,25 @@ class LlCtxPool {
     }
     std::uint32_t& head = *heads;
     if (!fresh)
-      if (const std::uint32_t id = find(head, pairs, n, starts);
-          id != kLlCtxNone)
+      if (const std::uint32_t id = find(head, frames, n); id != kLlCtxNone)
         return id;
-    const auto id = static_cast<std::uint32_t>(_n.size());
-    _link.push_back(fresh ? kLlCtxNone : head);
+    const auto id = static_cast<std::uint32_t>(_node.size());
+    _node.push_back({.base = static_cast<std::uint32_t>(_frame.size()),
+                     .link = fresh ? kLlCtxNone : head,
+                     .n = static_cast<std::uint16_t>(n)});
     head = id;
-    _base.push_back(static_cast<std::uint32_t>(_pair.size()));
-    _n.push_back(static_cast<std::uint16_t>(n));
-    for (unsigned k = 0; k < n; ++k) {
-      _pair.push_back(pairs[2 * k]);
-      _pair.push_back(pairs[2 * k + 1]);
-      _starts.push_back(starts[k]);
-    }
+    for (unsigned k = 0; k < kFrame * n; ++k) _frame.push_back(frames[k]);
     return id;
   }
 
-  std::vector<std::uint32_t> _pair;
-  std::vector<std::int64_t> _starts;
-  std::vector<std::uint32_t> _base;
-  std::vector<std::uint16_t> _n;
-  // Hash collisions link through pool nodes, avoiding per-hash allocations.
-  std::vector<std::uint32_t> _link;
+  // Where a node's frames begin and how many they are, and the next node of
+  // its hash chain: collisions link through the pool, with no allocation.
+  struct Node {
+    std::uint32_t base, link;
+    std::uint16_t n;
+  };
+  std::vector<Node> _node;
+  std::vector<std::uint32_t> _frame;
   LlRoundTable<std::uint64_t, LlKeyHash> _index;
   LlRoundTable<std::uint64_t, LlKeyHash> _scratchIndex;
   LlRoundTable<std::uint64_t, LlKeyHash> _memo;
@@ -402,24 +397,20 @@ class LlReturnPool {
   // A tail call leaves no frame over a known caller; over an unknown one the
   // frame is what says which rule the walk is leaving.
   std::uint32_t push_return(std::uint32_t ctx, std::uint32_t follow) {
-    if (follow == kNoFollow) return ctx;
     if ((follow & kLlTailReturn) == 0) return _ctx.push(ctx, follow);
     return ctx == kLlCtxNone ? _ctx.push(ctx, follow & ~kLlTailReturn) : ctx;
   }
 
   LlCtxPool& contexts() { return _ctx; }
 
- protected:
-  static constexpr std::uint32_t kNoFollow = ~std::uint32_t{0};
-  LlCtxPool _ctx;
-
  private:
+  LlCtxPool _ctx;
   const std::uint32_t* _classes = nullptr;
 };
 
 // One step of the walk over a set of configurations. `alts` is what the set
 // still admits; a set every configuration of which names one arm is decided.
-class LlSimulation : public LlReturnPool {
+class LlSimulation {
  public:
   explicit LlSimulation(const LlAtnView& atn, std::uint32_t closureLimit = 0)
       : _atn(atn), _limit(closureLimit) {}
@@ -441,22 +432,14 @@ class LlSimulation : public LlReturnPool {
     _shareEpsilon = true;
     if (_rank.empty()) rank_states();
   }
-  // Repair weighing also steps one set by the same terminals again and again:
-  // a step is kept, by set and terminals, while its contexts last.
+  // Repair weighing and a caret's replay step one set by the same terminals
+  // again and again: a step is kept, by set and terminals, while its contexts
+  // last.
   void keep_steps() { _keepSteps = true; }
-  // Recovery keeps even tail calls: leaving one must name the exact call,
-  // and its cost depends on how many author tokens it has read.
-  void track_calls() {
-    _keepCalls = true;
-    LlReturnPool::read_returns_by_class(nullptr);
-  }
+  // The token every call keeps with its frame from here on: leaving one names
+  // the exact call, and its cost depends on the tokens it has read.
   void at_token(std::int64_t token) { _callFrom = token; }
-  std::uint32_t push_return(std::uint32_t ctx, std::uint32_t follow) {
-    if (!_keepCalls) return LlReturnPool::push_return(ctx, follow);
-    return follow == kNoFollow
-               ? ctx
-               : _ctx.push(ctx, follow & ~kLlTailReturn, _callFrom);
-  }
+  LlCtxPool& contexts() { return _ctx; }
 
   // The contexts stand: an exploration interns them once and resumes from
   // sets that name them.
@@ -474,10 +457,7 @@ class LlSimulation : public LlReturnPool {
   void forget() {
     reset();
     _ctx.clear();
-    _kept.clear();
-    _keptConfigs.clear();
-    _keptTerms.clear();
-    _keptIndex.clear();
+    forget_steps();
     _truncated = _unbound = false;
   }
 
@@ -552,18 +532,27 @@ class LlSimulation : public LlReturnPool {
   // terminals match counts as all of them, as a guarded keyword and the bare
   // literal do. False when no reading survives.
   bool step(const std::uint16_t* terms, std::size_t n) {
-    if (!_keepSteps) return advance(Labelled{terms, n, labels(terms, n)});
-    return kept_step(terms, n);
+    const auto walk = [&] {
+      return advance(Labelled{terms, n, labels(terms, n)});
+    };
+    return _keepSteps ? kept_step(terms, n, walk) : walk();
   }
   bool step(std::uint16_t term) { return step(&term, 1); }
 
   // The step a caret replays over a token it did not read itself: the edges
   // `takes(edge index)` names, whatever they carry; an implied token is read
-  // across the condition that stands for it.
+  // across the condition that stands for it. `terms`, where given, are all
+  // `takes` reads beside the edge: the step is kept under them, and the steps
+  // kept go when they outgrow `kKeptCap`.
   template <class Takes>
-  bool step_edges(Takes&& takes) {
-    return advance(
-        [&](std::uint32_t at, const LlAtnEdge&) { return takes(at); });
+  bool step_edges(Takes&& takes, std::span<const std::uint16_t> terms = {}) {
+    const auto walk = [&] {
+      return advance(
+          [&](std::uint32_t at, const LlAtnEdge&) { return takes(at); });
+    };
+    if (!_keepSteps || terms.empty()) return walk();
+    if (_keptConfigs.size() > kKeptCap) forget_steps();
+    return kept_step(terms.data(), terms.size(), walk);
   }
 
   // A reading stands where a rule ends that has callers, and which of them it
@@ -655,12 +644,20 @@ class LlSimulation : public LlReturnPool {
     }
   }
 
-  // The set, the terminals and the pool decide a step, and the pool holds
-  // every context a step walked before made: that step is answered as it was.
-  bool kept_step(const std::uint16_t* terms, std::size_t n) {
+  void forget_steps() {
+    _kept.clear();
+    _keptConfigs.clear();
+    _keptTerms.clear();
+    _keptIndex.clear();
+  }
+
+  // The set, the terminals and the pool decide the step `walk` takes, and the
+  // pool holds every context a step walked before made: that step is answered
+  // as it was.
+  template <class Walk>
+  bool kept_step(const std::uint16_t* terms, std::size_t n, Walk&& walk) {
     std::uint64_t h = 1469598103934665603ull ^ (_truncated ? 1u : 0u);
-    const std::int64_t from = _keepCalls ? _callFrom : -1;
-    h = (h ^ static_cast<std::uint64_t>(from)) * 1099511628211ull;
+    h = (h ^ static_cast<std::uint64_t>(_callFrom)) * 1099511628211ull;
     for (const LlConfig& c : _cur) {
       h = (h ^ (std::uint64_t{c.state} << 32 | c.ctx)) * 1099511628211ull;
       h = (h ^ c.alt) * 1099511628211ull;
@@ -672,7 +669,7 @@ class LlSimulation : public LlReturnPool {
       for (std::uint32_t k = head; k != kNoFollow; k = _kept[k].next) {
         const Kept& e = _kept[k];
         if (e.fromSize != _cur.size() || e.termCount != n ||
-            e.truncated != _truncated || e.callFrom != from ||
+            e.truncated != _truncated || e.callFrom != _callFrom ||
             !std::equal(_cur.begin(), _cur.end(),
                         _keptConfigs.begin() + e.from) ||
             !std::equal(terms, terms + n, _keptTerms.begin() + e.terms))
@@ -683,7 +680,7 @@ class LlSimulation : public LlReturnPool {
         return !_cur.empty();
       }
     Kept e;
-    e.callFrom = from;
+    e.callFrom = _callFrom;
     e.truncated = _truncated;
     e.next = fresh ? kNoFollow : head;
     e.from = static_cast<std::uint32_t>(_keptConfigs.size());
@@ -694,7 +691,7 @@ class LlSimulation : public LlReturnPool {
     _keptTerms.insert(_keptTerms.end(), terms, terms + n);
     const bool was = _unbound;
     _unbound = false;
-    const bool read = advance(Labelled{terms, n, labels(terms, n)});
+    const bool read = walk();
     e.unbound = _unbound;
     _unbound = _unbound || was;
     e.to = static_cast<std::uint32_t>(_keptConfigs.size());
@@ -828,7 +825,8 @@ class LlSimulation : public LlReturnPool {
         _stop.poll();
         Pending next = _pending.back();
         _pending.pop_back();
-        next.config.ctx = push_return(next.config.ctx, next.follow);
+        if (next.follow != kNoFollow)
+          next.config.ctx = _ctx.push(next.config.ctx, next.follow, _callFrom);
         visit(next.config, out, conditions);
         if (_immediate && _budget != 0 && _visits > _budget) return false;
       }
@@ -1021,10 +1019,11 @@ class LlSimulation : public LlReturnPool {
       else if (e.kind == LlEdgeKind::rule)
         _pending.push_back(
             {LlConfig{.state = e.target, .ctx = cur.ctx, .alt = cur.alt},
-             return_of(e.follow)});
+             e.follow});
     }
   }
 
+  static constexpr std::uint32_t kNoFollow = ~std::uint32_t{0};
   static constexpr std::size_t kLinearLabels = 8;
   // The entries of a position a new stack tries to join, latest first; one that
   // joins none of them takes a entry of its own, so a long right-recursive list
@@ -1043,7 +1042,7 @@ class LlSimulation : public LlReturnPool {
   // Where a kept step's set, its terminals and the set it reached lie in the
   // flat arrays, and whether it returned into the unknown caller.
   struct Kept {
-    std::int64_t callFrom = -1;
+    std::int64_t callFrom = 0;
     std::uint32_t next = 0;
     std::uint32_t from = 0, fromSize = 0, terms = 0, termCount = 0;
     std::uint32_t to = 0, toSize = 0;
@@ -1053,10 +1052,10 @@ class LlSimulation : public LlReturnPool {
   std::vector<LlConfig> _keptConfigs;
   std::vector<std::uint16_t> _keptTerms;
   LlRoundTable<std::uint64_t, LlKeyHash> _keptIndex;
-  bool _keepCalls = false;
   std::int64_t _callFrom = 0;
 
   const LlAtnView& _atn;
+  LlCtxPool _ctx;
   std::vector<LlConfig> _cur, _next;
   LlRoundTable<LlConfig, LlConfigHash> _seen;
   // Where a reading of one position and one arm already stands, so a second

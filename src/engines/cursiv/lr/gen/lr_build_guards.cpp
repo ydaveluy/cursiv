@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "cursiv/lr/gen/LrLowProd.hpp"
-#include "cursiv/lr/gen/LrLowSlot.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
@@ -36,8 +35,7 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
   for (unsigned p = 0; p < nP; ++p) {
     const LrLowProd& q = g.prods[p];
     const bool bare = q.node == kNoRow || writes.chains[q.node].count == 0;
-    if (q.len == 0 && q.gap != 0 && bare && count[q.lhs] == 1 &&
-        !g.prodBuild[p].endOnly)
+    if (q.len == 0 && q.gap != 0 && bare && count[q.lhs] == 1 && !q.endOnly)
       cond[q.lhs] = q.gap;
   }
   const auto cond_of = [&](std::uint16_t s) -> std::uint8_t {
@@ -66,32 +64,22 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
     return bare(after) && !bare(before) ? before : after;
   };
   std::vector<LrLowSlot> slots;
-  std::vector<std::uint16_t> sym;
-  std::vector<std::uint8_t> cfgs, guard;
-  const auto push = [&](LrLowSlot s, std::uint16_t x, std::uint8_t c,
-                        std::uint8_t k) {
-    slots.push_back(s);
-    sym.push_back(x);
-    cfgs.push_back(c);
-    guard.push_back(k);
-  };
   // Where each old position goes: a condition on the one it guards.
   std::vector<std::uint32_t> moved;
   for (unsigned p = 0; p < nP; ++p) {
     LrLowProd& q = g.prods[p];
-    LrProdBuild& b = g.prodBuild[p];
-    const auto at = static_cast<std::uint32_t>(sym.size());
+    const auto at = static_cast<std::uint32_t>(slots.size());
     const auto self = static_cast<std::uint16_t>(p);
     moved.assign(q.len + 1u, 0);
     std::uint32_t mapped = 0;
     const auto mark_moved = [&](unsigned upTo) {
       for (; mapped < upTo; ++mapped)
-        moved[mapped] = static_cast<std::uint32_t>(sym.size()) - at;
+        moved[mapped] = static_cast<std::uint32_t>(slots.size()) - at;
     };
     for (unsigned i = 0; i < q.len;) {
       if (cond_of(g.sym_at(q, i)) == 0) {
         mark_moved(i + 1u);
-        push(g.slots[q.at + i], g.sym_at(q, i), g.cfg_at(self, i), 0);
+        slots.push_back({g.row_at(q, i), g.sym_at(q, i), g.cfg_at(self, i), 0});
         ++i;
         continue;
       }
@@ -108,44 +96,41 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
       const std::uint8_t before = g.cfg_at(self, first);
       if (i < q.len) {
         mark_moved(i + 1u);
-        push(LrLowSlot{writes.concat(row, g.row_at(q, i))}, g.sym_at(q, i),
-             edge(before, g.cfg_at(self, i)), k);
+        slots.push_back({writes.concat(row, g.row_at(q, i)), g.sym_at(q, i),
+                         edge(before, g.cfg_at(self, i)), k});
         ++i;
       } else if (row != kNoRow) {
         // Nothing follows to carry the run's writes: it stays a reduction,
         // on the boundary past it.
-        const std::uint8_t past = edge(before, b.tailCfg);
+        const std::uint8_t past = edge(before, q.tailCfg);
         for (unsigned j = first; j < q.len; ++j) {
           mark_moved(j + 1u);
-          push(g.slots[q.at + j], g.sym_at(q, j), past, 0);
+          slots.push_back({g.row_at(q, j), g.sym_at(q, j), past, 0});
         }
       } else {
         q.gap = join(q.gap, k);
-        b.tailCfg = edge(before, b.tailCfg);
+        q.tailCfg = edge(before, q.tailCfg);
       }
     }
     mark_moved(q.len + 1u);
-    for (std::uint32_t d = b.decideAt; d < b.decideAt + b.decideLen; ++d) {
+    for (std::uint32_t d = q.decideAt; d < q.decideAt + q.decideLen; ++d) {
       std::uint32_t& x = g.decisions[d];
       x = moved[x >> 16] << 16 | (x & 0xffffu);
     }
     q.at = at;
-    q.len = static_cast<std::uint16_t>(sym.size() - at);
+    q.len = static_cast<std::uint16_t>(slots.size() - at);
   }
   // A condition no position names waits on nothing: its empty rule must not
   // flag the grammar as one that gates reductions.
   std::vector named(nN, std::uint8_t{});
-  for (const std::uint16_t s : sym)
-    if (!is_term(s)) named[nt_index(s)] = 1;
+  for (const LrLowSlot& s : slots)
+    if (!is_term(s.sym)) named[nt_index(s.sym)] = 1;
   for (unsigned p = 0; p < nP; ++p) {
     LrLowProd& q = g.prods[p];
     if (cond[q.lhs] != 0 && q.len == 0 && named[q.lhs] == 0) q.gap = 0;
   }
-  g.nslots = static_cast<std::uint32_t>(sym.size());
+  g.nslots = static_cast<std::uint32_t>(slots.size());
   g.slots.v = std::move(slots);
-  g.slotSym.v = std::move(sym);
-  g.slotCfg.v = std::move(cfgs);
-  g.slotGuard.v = std::move(guard);
   return ok && !writes.capped;
 }
 

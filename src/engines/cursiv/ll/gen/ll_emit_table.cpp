@@ -15,7 +15,6 @@
 #include "cursiv/ll/gen/LlLexView.hpp"
 #include "cursiv/shared/gen/CLiteral.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
-#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/gen/GapConditionEmitter.hpp"
 #include "cursiv/shared/gen/GapEmitter.hpp"
 #include "cursiv/shared/gen/GapReach.hpp"
@@ -47,18 +46,17 @@ std::string range(const unicode::Range& r) {
 }
 
 struct Out : TextBuilder {
-  // The arrays left out, empty or not wanted: a reference to one is null.
-  std::vector<std::string_view> emptyArrays;
+  // The arrays written: a reference to any other is null.
+  std::vector<std::string_view> arrays;
 
   // One array, wrapped: a line per twelve entries keeps the generated file
-  // readable and the compiler's own line table short.
+  // readable and the compiler's own line table short. An empty one is left
+  // out.
   template <class V, class F>
   void array(std::string_view type, std::string_view name, const V& v,
              F&& one) {
-    if (v.empty()) {
-      emptyArrays.push_back(name);
-      return;
-    }
+    if (v.empty()) return;
+    arrays.push_back(name);
     write("inline constexpr ", type, " ", name, "[] = {");
     for (std::size_t i = 0; i < v.size(); ++i) {
       if (i % 12 == 0) write("\n    ");
@@ -73,12 +71,8 @@ struct Out : TextBuilder {
     array(type, name, v, u);
   }
 
-  void omit(std::string_view name) { emptyArrays.push_back(name); }
-
   std::string_view ref(std::string_view name) const {
-    return std::ranges::find(emptyArrays, name) == emptyArrays.end()
-               ? name
-               : "nullptr";
+    return std::ranges::find(arrays, name) == arrays.end() ? "nullptr" : name;
   }
   void ptr(std::string_view field, std::string_view name) {
     if (ref(name) != "nullptr") line("    .", field, " = ", name, ",");
@@ -357,9 +351,8 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
         "::std::uint16_t ll_staged_predict(const ::cursiv::engine::LlContext&, "
         "::std::uint16_t);");
   o.line(lexical.declarations());
-  if (pool.bytes.empty()) {
-    o.omit("kNames");
-  } else {
+  if (!pool.bytes.empty()) {
+    o.arrays.push_back("kNames");
     o.line("inline constexpr char kNames[] =");
     const std::string_view names(pool.bytes.data(), pool.bytes.size());
     for (std::size_t at = 0; at < names.size(); at += 60)
@@ -369,10 +362,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
 
   o.array("::cursiv::engine::ByteSet", "kSets",
           std::span(g.sets.data(), g.nsets), byte_set);
-  if (decoding)
-    o.array("::std::uint16_t", "kSetDecode", g.setDecode.v);
-  else
-    o.omit("kSetDecode");
+  if (decoding) o.array("::std::uint16_t", "kSetDecode", g.setDecode.v);
   o.array("::cursiv::engine::TermInfo", "kTerms",
           std::span(g.terms.data(), g.nterms), [&](const TermInfo& x) {
             return concat("{", pool(x.nameOff), "u,", x.nameLen, "u,",
@@ -432,14 +422,8 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   const auto any = [](const std::vector<std::uint64_t>& set) {
     return std::ranges::any_of(set, [](std::uint64_t w) { return w != 0; });
   };
-  if (any(blanks.skip))
-    o.array("::std::uint64_t", "kSkipSet", blanks.skip);
-  else
-    o.omit("kSkipSet");
-  if (any(blanks.stop))
-    o.array("::std::uint64_t", "kSkipStop", blanks.stop);
-  else
-    o.omit("kSkipStop");
+  if (any(blanks.skip)) o.array("::std::uint64_t", "kSkipSet", blanks.skip);
+  if (any(blanks.stop)) o.array("::std::uint64_t", "kSkipStop", blanks.stop);
   o.array("::std::uint16_t", "kByteTerms", byteTerms.rows);
   o.array("::std::uint32_t", "kModeBytes", byteTerms.at);
   o.array("::std::uint16_t", "kLexNext",
@@ -514,7 +498,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   std::vector<std::uint64_t> first(std::size_t{g.ndecisions} * words, 0);
   for (std::uint16_t d = 0; d < g.ndecisions; ++d) {
     const LlDecision& dec = g.decisions[d];
-    for (std::uint16_t i = 0; i < g.decisionBuild[d].nalts; ++i)
+    for (std::uint16_t i = 0; i < dec.nalts; ++i)
       for (std::uint32_t k = 0; k < words; ++k)
         first[std::size_t{d} * words + k] |= a.laSet[dec.set + i].word(k);
   }
@@ -550,13 +534,13 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
       return concat("{", x.from, "u,", x.to, "u}");
     });
 
-  if (!a.lookMode.empty()) o.array("::std::uint16_t", "kLookMode", a.lookMode);
+  o.array("::std::uint16_t", "kLookMode", a.lookMode);
   if (!a.sectionErr.empty()) {
     o.array("::std::uint16_t", "kSectionErr", a.sectionErr);
     o.array("::std::uint16_t", "kSectionEnd", a.sectionEnd);
     std::vector<std::uint8_t> nodeSection(g.nnodes, 0);
     for (std::uint32_t id = 0; id < g.nnodes; ++id)
-      if (const auto h = g.section_cfg_at(g.nodeBuild[id].cfg); h != 0)
+      if (const auto h = g.section_cfg_at(g.nodes[id].cfg); h != 0)
         nodeSection[id] = static_cast<std::uint8_t>(h + 1u);
     o.array("::std::uint8_t", "kNodeSection", nodeSection);
   }
@@ -610,8 +594,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
       o.line("inline constexpr ::cursiv::engine::LexBoundary kGapBoundary{",
              o.ref("kSets"), ", ", o.ref("kSetDecode"), ", {}, ",
              o.ref("kWordRanges"), ", ", g.wordRanges.size(), "u, ",
-             classes ? "kSetScalars" : "nullptr", ", ",
-             classes ? "kScalarRanges" : "nullptr", "};");
+             o.ref("kSetScalars"), ", ", o.ref("kScalarRanges"), "};");
     o.line(gaps.source());
     const auto leaf = [&](unsigned l, bool partial) -> std::string {
       switch (g.gapLeaves[l].kind) {
@@ -646,8 +629,9 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
       fn.line("  switch (k) {");
       for (unsigned k = 0; k < g.ngapConds; ++k)
         fn.line("    case ", k, "u: return ",
-                GapConditionEmitter(g).source(
-                    k, [&](unsigned l) { return leaf(l, partial); }, partial),
+                gap_condition_source(
+                    g, k, [&](unsigned l) { return leaf(l, partial); },
+                    partial),
                 ";");
       fn.line("    default: return 0;\n  }\n}");
     }
@@ -718,10 +702,8 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.line("    .wordBytes = ", byte_set(g.wordBytes), ",");
   o.ptr("wordRanges", "kWordRanges");
   o.line("    .nwordRanges = ", g.wordRanges.size(), "u,");
-  if (classes) {
-    o.ptr("setScalars", "kSetScalars");
-    o.ptr("scalarRanges", "kScalarRanges");
-  }
+  o.ptr("setScalars", "kSetScalars");
+  o.ptr("scalarRanges", "kScalarRanges");
   if (refusing)
     o.line(
         "    .head_refuses = &head_refuses,\n    .head_reach = &head_reach,\n"
@@ -731,11 +713,11 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.line("    .ncls = ", a.ncls, "u,");
   o.line("    .nmodes = ", a.nmodes, "u,\n    .errMode = ", a.errMode,
          "u,\n    .tailMode = ", a.tailMode, "u,");
-  if (!a.lookMode.empty()) o.ptr("lookMode", "kLookMode");
+  o.ptr("lookMode", "kLookMode");
   o.ptr("modeStart", "kModeStart");
   o.ptr("modeMulti", "kModeMulti");
   o.ptr("modeBacktrack", "kModeBacktrack");
-  if (longer) o.ptr("modeLonger", "kModeLonger");
+  o.ptr("modeLonger", "kModeLonger");
   o.ptr("modeTrivia", "kModeTrivia");
   o.ptr("modeJoinedTrivia", joinedApart ? "kModeJoinedTrivia" : "kModeTrivia");
   o.ptr("modeTerms", "kModeTerms");
@@ -756,7 +738,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.ptr("dfaBound", "kLexBound");
   o.ptr("lexChoiceAt", "kLexChoiceAt");
   o.ptr("lexChoices", "kLexChoices");
-  if (lexChecks) o.ptr("lexChecks", "kLexChecks");
+  o.ptr("lexChecks", "kLexChecks");
   if (!a.relays.empty()) {
     o.ptr("dfaRelay", "kLexRelay");
     o.ptr("relays", "kRelays");
@@ -765,16 +747,12 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   }
   o.ptr("lexAcc", "kLexAcc");
   o.ptr("lexAccAt", "kLexAccAt");
-  if (reserving) {
-    o.ptr("lexRes", "kLexRes");
-    o.ptr("lexResAt", "kLexResAt");
-  }
+  o.ptr("lexRes", "kLexRes");
+  o.ptr("lexResAt", "kLexResAt");
   o.ptr("lexLive", "kLexLive");
   o.ptr("lexLiveAt", "kLexLiveAt");
-  if (relayReserving) {
-    o.ptr("lexRelayRes", "kLexRelayRes");
-    o.ptr("lexRelayResAt", "kLexRelayResAt");
-  }
+  o.ptr("lexRelayRes", "kLexRelayRes");
+  o.ptr("lexRelayResAt", "kLexRelayResAt");
   o.ptr("wordBounds", "kWordBounds");
   if (reserving) o.line("    .reserves = true,");
   o.line("    .termWords = ", words, "u,");
@@ -785,14 +763,10 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.line("            .callerBase = ", o.ref("kCallerBase"), ",");
   o.line("            .callerAt = ", o.ref("kCallerAt"), ",");
   o.line("            .returnClass = ", o.ref("kReturnClass"), "},");
-  if (callers) {
-    o.ptr("callerReads", "kCallerReads");
-    o.ptr("callerReadAt", "kCallerReadAt");
-  }
-  if (flagging) {
-    o.ptr("decFlag", "kDecFlag");
-    o.ptr("decFlagAt", "kDecFlagAt");
-  }
+  o.ptr("callerReads", "kCallerReads");
+  o.ptr("callerReadAt", "kCallerReadAt");
+  o.ptr("decFlag", "kDecFlag");
+  o.ptr("decFlagAt", "kDecFlagAt");
   if (staged) o.line("    .staged = &ll_staged_predict,");
   o.ptr("sharedRules", "kSharedRules");
   o.ptr("repeatScopes", "kRepeatScopes");

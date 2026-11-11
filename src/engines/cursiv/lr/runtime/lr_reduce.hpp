@@ -51,13 +51,17 @@ CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
   if (plan.form == LrReduceForm::through) return kNoElement;
   assert(p.len < c.stack.size());
   const std::uint32_t base = c.stack.size() - p.len;
+  // The frame of the production's slot `k`, read from the top.
+  const auto slot = [&](std::uint32_t k) CURSIV_ALWAYS_INLINE -> LrFrame& {
+    return c.stack.under(p.len - 1u - k);
+  };
   if (plan.flushes) lr_flush_trivia<A>(c);
   const auto name = [&](const auto& n) CURSIV_ALWAYS_INLINE {
-    LrFrame& f = c.stack[base + n.slot];
+    LrFrame& f = slot(n.slot);
     if (n.fold)
       lr_name_row<A.stamp>(c, f, n.row, folds);
     else
-      lr_name_row_at<A.stamp>(c, f, n.row);
+      lr_name_row_at<A.stamp>(c, f, n.row, n.leaf);
   };
   if constexpr (std::is_integral_v<Prod>) {
     for (unsigned k = 0; k < plan.count; ++k)
@@ -69,12 +73,11 @@ CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
       (name(A.derived.reduceNames[fixed.names + K]), ...);
     }(std::make_integer_sequence<unsigned, fixed.count>{});
   }
-  const std::uint32_t pendWord =
-      plan.carries() ? c.stack[base].word : kLrNoWord;
+  const std::uint32_t pendWord = plan.carries() ? slot(0).word : kLrNoWord;
   const bool last =
       pendWord != kLrNoWord && (pendWord + 1 == c.tape.len() ||
                                 lr_last_real_word<A.stamp>(c, pendWord));
-  const ElementId held = last ? c.stack[base].row : kNoElement;
+  const ElementId held = last ? slot(0).row : kNoElement;
   // A turn's record reaches back over what the frame below it created. Grouping
   // that slips a record in, so it waits for the renames above.
   bool reach = false;

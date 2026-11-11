@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <queue>
 #include <unordered_map>
 #include <utility>
@@ -34,7 +33,7 @@ bool lr_fold_chains(LrBuildTable& A) {
   // A turn or a leaf without a row can leave rec incomplete through a unit.
   std::vector<bool> unsafe(nN, false);
   for (unsigned p = 0; p < nP; ++p)
-    if (g.prodBuild[p].turnNode != kNoRow) unsafe[wprods[p].lhs] = true;
+    if (g.prods[p].turnNode != kNoRow) unsafe[wprods[p].lhs] = true;
   // What each nonterminal hands back, in the order it came.
   std::vector<std::vector<ElementId>> handed(nN);
   const auto mark = [&](unsigned B, unsigned e) {
@@ -232,7 +231,8 @@ void lr_derive_reductions(const LrBuildTable& a, LrDerivedRows& rows) {
         held = a.soleRow[nt_index(sym)];
       const bool fold = !is_term(sym) && held == kNoRow;
       const auto row = fold ? site : named_row(held, site);
-      rows.reduceNames.push_back({static_cast<std::uint16_t>(k), row, fold});
+      rows.reduceNames.push_back(
+          {static_cast<std::uint16_t>(k), row, fold, is_term(sym)});
       ++plan.count;
     }
     if (p.len == 1 && p.node == kNoRow && plan.count == 0)
@@ -241,23 +241,22 @@ void lr_derive_reductions(const LrBuildTable& a, LrDerivedRows& rows) {
       plan.form = p.len == 1 ? LrReduceForm::foldClose : LrReduceForm::close;
     else if (p.folds)
       plan.form = LrReduceForm::carry;
-    plan.flushes =
-        (p.len == 0 && opens[p.lhs] &&
-         a.cfg.prodBuild[i].turnNode == kNoRow) ||
-        (a.cfg.prodBuild[i].endOnly && a.cfg.prodBuild[i].tailCfg != 0);
+    plan.flushes = (p.len == 0 && opens[p.lhs] && p.turnNode == kNoRow) ||
+                   (p.endOnly && p.tailCfg != 0);
     if (plan.flushes && plan.form == LrReduceForm::through)
       plan.form = LrReduceForm::carry;
-    plan.turnRow = a.cfg.prodBuild[i].turnNode;
-    plan.regionExit = a.cfg.prodBuild[i].regionExit &&
-                      !a.cfg.prodBuild[i].endOnly;
+    plan.turnRow = p.turnNode;
+    plan.regionExit = p.regionExit && !p.endOnly;
     rows.reductions.push_back(plan);
   }
-  // The automaton may substitute any production with the same reduction key.
-  std::map<std::vector<std::uint32_t>, std::pair<unsigned, bool>> classes;
-  std::vector<std::uint32_t> key;
+  // The automaton may substitute any production of a reduction class: each
+  // class keeps its first production, and whether two of its members name
+  // differently.
+  const std::vector<std::uint32_t> classOf = lr_reduce_classes(a.cfg);
+  std::vector<std::pair<unsigned, bool>> classes;
   for (unsigned p = 0; p < a.cfg.nprods; ++p) {
-    lr_reduce_key(a.cfg, p, key);
-    auto& [leader, mixed] = classes.try_emplace(key, p, false).first->second;
+    if (classOf[p] == classes.size()) classes.emplace_back(p, false);
+    auto& [leader, mixed] = classes[classOf[p]];
     const auto& one = rows.reductions[leader];
     const auto& plan = rows.reductions[p];
     for (unsigned k = 0; k < plan.count; ++k)
@@ -265,8 +264,7 @@ void lr_derive_reductions(const LrBuildTable& a, LrDerivedRows& rows) {
         mixed = true;
   }
   for (unsigned p = 0; p < a.cfg.nprods; ++p) {
-    lr_reduce_key(a.cfg, p, key);
-    if (!classes.at(key).second) continue;
+    if (!classes[classOf[p]].second) continue;
     const auto& plan = rows.reductions[p];
     for (unsigned k = 0; k < plan.count; ++k) {
       auto& n = rows.reduceNames[plan.names + k];

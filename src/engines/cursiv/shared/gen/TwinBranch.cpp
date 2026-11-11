@@ -18,21 +18,6 @@ namespace {
 // The first word of a key's shape.
 enum : std::uint64_t { kEmpty = 1, kSeq, kChoice, kRegion, kOther };
 
-// A write or prose over an operand reads what the operand reads.
-bool reads_operand(ImageKind kind) {
-  switch (kind) {
-    case ImageKind::assign:
-    case ImageKind::append:
-    case ImageKind::flag:
-    case ImageKind::create:
-    case ImageKind::nest:
-    case ImageKind::doc:
-      return true;
-    default:
-      return false;
-  }
-}
-
 // How deep a run read by its first item present may nest runs of its own.
 constexpr unsigned kRunDepth = 16;
 // The most positions a call opens into: a longer body is compared whole.
@@ -78,7 +63,9 @@ Descent<std::uint32_t> TwinReader::key(ImageId id) {
 
 Descent<std::uint32_t> TwinReader::shape(ImageId id) {
   const ImageNode n = _im.nodes[id];
-  if (reads_operand(n.kind)) co_return co_await key(child_at(id, 0));
+  // A write or prose over an operand reads what the operand reads.
+  if (is_directive_kind(n.kind) || n.kind == ImageKind::doc)
+    co_return co_await key(child_at(id, 0));
   switch (n.kind) {
     case ImageKind::epsilon:
       co_return intern({kEmpty});
@@ -204,7 +191,8 @@ void TwinReader::analyse_calls(std::uint32_t rule) {
 // is that branch.
 Descent<void> TwinReader::flatten(ImageId id, std::vector<Item>& out) {
   const ImageNode n = _im.nodes[id];
-  if (reads_operand(n.kind)) co_return co_await flatten(child_at(id, 0), out);
+  if (is_directive_kind(n.kind) || n.kind == ImageKind::doc)
+    co_return co_await flatten(child_at(id, 0), out);
   switch (n.kind) {
     case ImageKind::epsilon:
       co_return;
@@ -320,30 +308,17 @@ Descent<ImageId> TwinReader::drop_node(ImageId id) {
     co_return it->second;
   const ImageNode n = _im.nodes[id];
   ImageId out = id;
-  switch (n.kind) {
-    case ImageKind::choice:
-      out = co_await drop_choice(id);
-      break;
-    case ImageKind::seq:
-      out = co_await drop_sequence(id);
-      break;
-    case ImageKind::repeat:
-    case ImageKind::unordered:
-    case ImageKind::skip:
-    case ImageKind::doc:
-    case ImageKind::assign:
-    case ImageKind::append:
-    case ImageKind::flag:
-    case ImageKind::create:
-    case ImageKind::nest: {
-      const std::vector<ImageId> was = children(id);
-      std::vector<ImageId> now;
-      for (const ImageId k : was) now.push_back(co_await drop_node(k));
-      if (now != was) out = _im.derive(n, now);
-      break;
-    }
-    default:
-      break;
+  if (n.kind == ImageKind::choice) {
+    out = co_await drop_choice(id);
+  } else if (n.kind == ImageKind::seq) {
+    out = co_await drop_sequence(id);
+  } else if (is_directive_kind(n.kind) || n.kind == ImageKind::repeat ||
+             n.kind == ImageKind::unordered || n.kind == ImageKind::skip ||
+             n.kind == ImageKind::doc) {
+    const std::vector<ImageId> was = children(id);
+    std::vector<ImageId> now;
+    for (const ImageId k : was) now.push_back(co_await drop_node(k));
+    if (now != was) out = _im.derive(n, now);
   }
   _dropped.emplace(id, out);
   co_return out;

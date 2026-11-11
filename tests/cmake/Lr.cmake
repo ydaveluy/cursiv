@@ -59,10 +59,3 @@ cursiv_grammar(shorterlr engines/lr/RefusedShorterGrammar.hpp trefusedshorter::L
 
 # The LL suite's lexical-predicate grammar, generated for LR.
 cursiv_grammar(lexicalpredicateslr engines/ll/LexicalPredicatesGrammar.hpp tlexicalpredicates::Lr ENGINE LR)
-
-if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
-  # The bound's walk keeps its depth off the native stack, at the recursion's
-  # cost.
-  cursiv_test(LrBoundDepth_test engines/lr/LrBoundDepth_test.cpp
-      arithmeticsGenerated)
-endif()

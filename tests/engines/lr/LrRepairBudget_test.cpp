@@ -113,10 +113,8 @@ void a_rescanned_token_keeps_its_mode_for_the_election() {
     CHECK(own.mode != cursiv::engine::kNoMode && own.mode != table.errMode);
     if (own.mode == cursiv::engine::kNoMode) return;
     CHECK(beats<table>(context, keyword, own));
-    cursiv::TextOffset reached = keyword.begin;
-    const auto shortRead = cursiv::engine::lr_scan_at<table, true>(
-        context, own.mode, keyword.begin, 0, nullptr, keyword.end - 1,
-        &reached);
+    const cursiv::engine::Token shortRead{keyword.begin, keyword.end - 1,
+                                          own.sym, own.mode};
     const cursiv::engine::Token tokens[] = {keyword, identifier, own,
                                             shortRead};
     for (const auto& a : tokens)

@@ -14,7 +14,7 @@
 #include "cursiv/lr/runtime/LrGssDigest.hpp"
 #include "cursiv/lr/runtime/LrGssForest.hpp"
 #include "cursiv/lr/runtime/LrGssIndex.hpp"
-#include "cursiv/lr/runtime/LrGssPool.hpp"
+#include "cursiv/lr/runtime/LrGssRuns.hpp"
 #include "cursiv/lr/runtime/LrStack.hpp"
 #include "cursiv/lr/runtime/LrVirtualAt.hpp"
 #include "cursiv/lr/runtime/lr_refusal.hpp"
@@ -147,8 +147,7 @@ class LrGssGraph {
             std::span<const std::uint32_t> wrap,
             std::span<const std::uint16_t> wrapAt);
   void watch(Pop pop) {
-    const auto id = static_cast<Id>(_pops.size());
-    _pops.push_back(pop);
+    const auto id = static_cast<Id>(_pops.append(1, pop));
     Vertex& v = _vertices[pop.vertex];
     // The seed's lowest vertex has frames under it the graph does not hold.
     if (pop.vertex == 0 && _seedBase != 0) _underflow = true;
@@ -346,7 +345,11 @@ class LrGssGraph {
   void note_cut(Id v);
   void set_best(Id v, Id edge);
   Order parted_order(Id top);
-  LrGssDigest::Facts facts(Id step) const;
+  // Whether the vertex that took `step` took others, and where it stands.
+  bool forking(Id step) const;
+  TextOffset step_at(Id step) const {
+    return _vertices[_steps[step].vertex].reading.at;
+  }
   Order fork_order(const Step& x, const Step& y) const;
   void chain(Id v);
   bool linear(Id v) const;
@@ -369,9 +372,9 @@ class LrGssGraph {
   LrGssForest _forest;
   LrGssDigest _digest;
   std::vector<Vertex> _vertices;
-  LrGssPool<Edge> _edges;
+  LrGssRuns<Edge, 12> _edges;
   std::vector<Step> _steps;
-  LrGssPool<Pop> _pops;
+  LrGssRuns<Pop, 12> _pops;
   // Publishing an edge queues work; it cannot recurse into this scratch buffer.
   std::vector<Id> _children;
   std::vector<std::uint32_t> _childSymbols;
@@ -383,7 +386,7 @@ class LrGssGraph {
   std::vector<Shift> _shifts;
   std::deque<std::pair<Id, Id>> _ready;
   std::vector<std::pair<Id, Id>> _accepts;
-  LrGssPool<Arc> _arcs;
+  LrGssRuns<Arc, 12> _arcs;
   std::vector<std::array<TextOffset, kRepairValidateShifts>> _readEnds;
   std::vector<std::pair<Id, Reading>> _frozen;
   std::vector<std::uint32_t> _tokens;

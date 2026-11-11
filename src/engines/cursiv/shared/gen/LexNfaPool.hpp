@@ -15,8 +15,10 @@
 
 #include "cursiv/shared/gen/LexRelayGen.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 
 namespace cursiv::engine {
 
@@ -50,6 +52,13 @@ struct LexNfaState {
 
   int plain() const { return loneLeadBound ? plainBound : bound; }
 };
+
+// The bytes a consuming state reads: its set, less what a refusal subtracts.
+inline ByteSet lex_edge_bytes(const ByteSet* sets, const LexNfaState& st) {
+  ByteSet on = sets[st.set];
+  if (st.minus >= 0) on.andnot(sets[st.minus]);
+  return on;
+}
 
 // A relay while the graph is built: its row, and the NFA state the walk
 // resumes from past the echo -- a DFA state only once the subsets exist.
@@ -99,7 +108,7 @@ struct LexNfaPool {
   int relay(int k) { return push({.relay = k}); }
   // One sink per terminal and class: two literals of one terminal ending on
   // the same boundary end up in one DFA state, as they do on a plain match.
-  int match_bounded(int accepts, int bound, bool lit = false) {
+  int match_bounded(int accepts, int bound, bool lit) {
     return sink({.accept = accepts, .bound = bound, .lit = lit});
   }
   int match_lone_lead(int accepts, int bound, int plain, bool lit = false) {
@@ -125,11 +134,7 @@ struct LexNfaPool {
 
   // What `roots` reach without consuming, in depth-first preorder, once each.
   std::vector<int> eclose(std::span<const int> roots) const {
-    if (_seen.size() < s.size()) _seen.resize(s.size(), 0);
-    if (++_pass == 0) {
-      std::ranges::fill(_seen, 0u);
-      _pass = 1;
-    }
+    _seen.next();
     std::vector<int> set;
     for (const int root : roots) {
       if (root < 0) continue;
@@ -137,8 +142,7 @@ struct LexNfaPool {
       while (!_todo.empty()) {
         const int at = _todo.back();
         _todo.pop_back();
-        if (_seen[static_cast<std::size_t>(at)] == _pass) continue;
-        _seen[static_cast<std::size_t>(at)] = _pass;
+        if (!_seen.first(static_cast<std::size_t>(at))) continue;
         set.push_back(at);
         const LexNfaState& st = s[static_cast<std::size_t>(at)];
         if (st.set >= 0) continue;
@@ -150,6 +154,12 @@ struct LexNfaPool {
   }
   std::vector<int> eclose(int at) const {
     return eclose(std::span<const int>(&at, 1));
+  }
+  // The same, ascending; `roots` is one state or several.
+  std::vector<int> sorted_closure(const auto& roots) const {
+    std::vector<int> set = eclose(roots);
+    std::ranges::sort(set);
+    return set;
   }
 
   // The walk of a run up to its first closer, off the lowering's table: one
@@ -189,10 +199,9 @@ struct LexNfaPool {
   // The holes of the guards created so far, by the word refused and the
   // continuation it narrows.
   std::map<std::pair<std::uint16_t, int>, int> _guardOf;
-  // One mark per state, set by the pass that reached it.
-  mutable std::vector<std::uint32_t> _seen;
+  // The states the closure being walked has reached.
+  mutable RoundMarks _seen;
   mutable std::vector<int> _todo;
-  mutable std::uint32_t _pass = 0;
 };
 
 }  // namespace cursiv::engine

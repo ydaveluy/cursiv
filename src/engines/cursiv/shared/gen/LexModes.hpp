@@ -10,7 +10,7 @@
 #include "cursiv/shared/gen/ChainIndex.hpp"
 #include "cursiv/shared/gen/LexRecursion.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
-#include "cursiv/shared/gen/set_dedup.hpp"
+#include "cursiv/shared/gen/SetPool.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/Token.hpp"
 

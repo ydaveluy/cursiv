@@ -37,7 +37,7 @@ class LrLowerer : public LowerWalk<LrLowerer, LrLowered, LrLowerPool> {
   }
   Descent<LrShapeId> build_repeat(unsigned cfg, ImageId e);
   Descent<LrShapeId> build_skip(unsigned cfg, ImageId e);
-  Descent<LrShapeId> build_made(unsigned cfg, ImageId e);
+  Descent<LrShapeId> build_create(unsigned cfg, ImageId e);
   Descent<LrShapeId> build_write(unsigned cfg, ImageId e);
   Descent<LrShapeId> build_flag(unsigned cfg, ImageId e);
   LrShapeId build_condition(unsigned cfg, ImageId e);
@@ -58,7 +58,7 @@ class LrLowerer : public LowerWalk<LrLowerer, LrLowered, LrLowerPool> {
   void define_infix(unsigned cfg, std::uint32_t rule, std::uint16_t lhs);
   void emit_op(unsigned cfg, std::uint16_t lhs, ImageId op, const void* opRow,
                const LrLowerSlot& left, const LrLowerSlot& right,
-               const LrActs& node, std::uint8_t prec, Association group);
+               const Acts& node, std::uint8_t prec, Association group);
   LrLowerSlot infix_side(unsigned cfg, const void* row,
                          std::uint16_t sym) const;
 

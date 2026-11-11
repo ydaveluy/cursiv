@@ -53,8 +53,9 @@ std::string flag_warning_text(const FlagWarning& w) {
 
 }  // namespace
 
-void report_grammar_warnings(std::string_view grammar, GrammarImage& image) {
-  WarningFound found(image);
+void report_grammar_warnings(std::string_view grammar, GrammarImage& image,
+                             std::span<const ImageRuleDesc* const> reached) {
+  WarningFound found(image, reached);
   warn_each(grammar, dead_branches(found), dead_branch_text);
   warn_each(grammar, twin_branches(found), twin_branch_text);
   warn_each(grammar, flag_warnings(found), flag_warning_text);
@@ -62,8 +63,9 @@ void report_grammar_warnings(std::string_view grammar, GrammarImage& image) {
   warn_each(grammar, word_lit_warnings(found), word_lit_warning_text);
 }
 
-bool refuse_self_bounded_arms(std::string_view grammar, GrammarImage& image) {
-  const auto found = self_bounded_arms(image);
+bool refuse_self_bounded_arms(std::string_view grammar, GrammarImage& image,
+                              std::span<const ImageRuleDesc* const> reached) {
+  const auto found = self_bounded_arms(image, reached);
   for (const SelfBoundedArm& a : found)
     std::fprintf(stderr, "%.*s: refused (selfBoundedArm)\ncursiv: %s\n",
                  static_cast<int>(grammar.size()), grammar.data(),

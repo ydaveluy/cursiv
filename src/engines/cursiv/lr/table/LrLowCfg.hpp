@@ -8,14 +8,14 @@
 
 #include "cursiv/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/lr/table/LrLowFacts.hpp"
-#include "cursiv/lr/table/LrLowSizes.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
+#include "cursiv/lr/table/LrSizes.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
 namespace cursiv::engine {
 
-template <LrLowSizes S>
+template <LrSizes S>
 struct LrLowCfg : LrLowFacts {
   std::array<char, S.nameChars> names{};
   std::array<ByteSet, S.sets> sets{};

@@ -4,7 +4,6 @@
 #include <utility>
 
 #include "cursiv/ll/gen/LlFinalProgram.hpp"
-#include "cursiv/shared/gen/chain_run.hpp"
 #include "cursiv/shared/table/WriteKind.hpp"
 
 namespace cursiv::engine {
@@ -19,10 +18,10 @@ void ll_entry_runs(const LlBuiltProgram& a, std::uint16_t i,
   for (;;) {
     const auto from = a.origin[i];
     if (from.from == kNoRow) {
-      runs.push_back(chain_run(a, i));
+      runs.push_back(a.writes.run(i));
       break;
     }
-    runs.push_back(chain_run(a, from.to));
+    runs.push_back(a.writes.run(from.to));
     i = from.from;
   }
   std::reverse(runs.begin(), runs.end());

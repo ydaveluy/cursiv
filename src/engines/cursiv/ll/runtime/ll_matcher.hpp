@@ -41,13 +41,31 @@ inline bool ll_lex_accepts(std::uint16_t state, SymbolId term, const char* src,
   return false;
 }
 
-// The terminals a refused word took off the position.
-template <const auto& T>
-struct LlTermSkip {
-  std::array<std::uint64_t, T.termWords> w{};
+// A set of the grammar's terminals, as a mask: what a lookahead may read next,
+// every terminal a spelling still admits in one tokenisation, or what a refused
+// word took off a position.
+template <std::size_t Words>
+class LlMask {
+ public:
+  void reset() { _w.fill(0); }
+  void set(std::uint16_t t) { _w[t >> 6] |= std::uint64_t{1} << (t & 63); }
+  void reset(std::uint16_t t) { _w[t >> 6] &= ~(std::uint64_t{1} << (t & 63)); }
+  bool test(std::uint16_t t) const {
+    const std::uint32_t k = t >> 6;
+    return k < Words && ((_w[k] >> (t & 63)) & 1) != 0;
+  }
+  std::uint64_t word(std::uint32_t k) const { return k < Words ? _w[k] : 0; }
+  void assign(const std::uint64_t* row,
+              const std::array<std::uint64_t, Words>& mask) {
+    for (std::size_t k = 0; k < Words; ++k) _w[k] = row[k] & mask[k];
+  }
+  void add(const LlMask& other) {
+    for (std::size_t k = 0; k < Words; ++k) _w[k] |= other._w[k];
+  }
+  bool operator==(const LlMask&) const = default;
 
-  void set(SymbolId t) { w[t >> 6] |= std::uint64_t{1} << (t & 63u); }
-  bool test(SymbolId t) const { return ((w[t >> 6] >> (t & 63u)) & 1u) != 0; }
+ private:
+  std::array<std::uint64_t, Words> _w{};
 };
 
 // The terminals refusing words behind their head.
@@ -75,7 +93,8 @@ struct LlElected {
 template <const auto& T, bool Skips>
 CURSIV_NOINLINE LlElected ll_elect(std::uint16_t s, const char* src,
                                    TextOffset at, TextOffset len,
-                                   TextOffset far, const LlTermSkip<T>* skip) {
+                                   TextOffset far,
+                                   const LlMask<T.termWords>* skip) {
   const SymbolId t = lex_elect<T>(
       s, src, at, len, far, [&](SymbolId u) { return Skips && skip->test(u); });
   return {t, far};
@@ -86,7 +105,7 @@ CURSIV_NOINLINE LlElected ll_elect(std::uint16_t s, const char* src,
 // position.
 template <const auto& T, bool Skips = false>
 struct LlLexTape : LexTape<T> {
-  using Skip = LlTermSkip<T>;
+  using Skip = LlMask<T.termWords>;
   using Skipping = LlLexTape<T, true>;
   // A state's election is `qualified`'s, skipping or not.
   static constexpr bool kQualified = true;

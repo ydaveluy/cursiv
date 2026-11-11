@@ -39,7 +39,8 @@ struct ValueSlot {
 };
 
 class AstReducer;
-using AstEntryFn = void (*)(AstReducer&, NodeId);
+// One record's run: the record and its place on the tape.
+using AstEntryFn = void (*)(AstReducer&, NodeId, const CstNode&);
 // One class's writer: it writes the pending value into a node of that class,
 // or returns false when the class has no such member.
 using AstApplyFn = bool (*)(AstReducer&, const Pending&, const Made&);

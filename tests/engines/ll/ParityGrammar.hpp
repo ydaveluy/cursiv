@@ -261,9 +261,23 @@ struct Members : cursiv::GrammarSpec {
   struct Picked : rule<create<ast::Hold>(
                       kw<"picked"> + ref<Pick> +
                       append<&ast::Hold::turns>(ref<Deep>) + lit<";">)> {};
+  // A rule that reads itself first, in a left recursion two calls enter.
+  struct Outer;
+  struct Inner
+      : rule<create<ast::Chained>(assign<&ast::Chained::left>(ref<Inner>) +
+                                  assign<&ast::Chained::name>(ref<ID>)) |
+             create<ast::Fact>(assign<&ast::Fact::operand>(ref<Outer>) +
+                               lit<"!">) |
+             create<ast::Lit>(kw<"ib">)> {};
+  struct Outer : rule<ref<Inner> | create<ast::Lit>(kw<"oa">)> {};
+  struct Loops : rule<create<ast::Hold>(
+                     kw<"loops"> +
+                     ((kw<"lo"> + assign<&ast::Hold::first>(ref<Outer>)) |
+                      (kw<"li"> + assign<&ast::Hold::first>(ref<Inner>))) +
+                     lit<";">)> {};
   struct Stmt : rule<ref<Twice> | ref<Through> | ref<Lone> | ref<Both> |
                      ref<Ticked> | ref<Bare> | ref<Named> | ref<Plain> |
-                     ref<Marks> | ref<Turns> | ref<Picked>> {};
+                     ref<Marks> | ref<Turns> | ref<Picked> | ref<Loops>> {};
   struct UnitRule : rule<create<ast::Holds>(
                         many(append<&ast::Holds::holds>(ref<Stmt>)))> {};
 };
