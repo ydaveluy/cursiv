@@ -7,8 +7,9 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/DecisionSource.hpp"
+#include "cursiv/grammar/ElementId.hpp"
+#include "cursiv/utils/ctstring.hpp"
 
 namespace cursiv::fuzzer::detail {
 
@@ -18,12 +19,34 @@ enum class SpellStyle : std::uint8_t { shortest, low, high, random };
 
 inline constexpr unsigned kSpellStyles = 4;
 
+// What an assertion forbids the next byte spelled: the refusal ends there.
+struct Veto {
+  CharSet bytes{};
+  bool on = false;
+
+  void forbid(const CharSet& s) {
+    bytes.merge(s);
+    on = true;
+  }
+  void clear() {
+    if (!on) return;
+    bytes = CharSet{};
+    on = false;
+  }
+  [[nodiscard]] bool forbids(unsigned char b) const {
+    return on && bytes.test(b);
+  }
+};
+
 struct GrammarLexicon {
   virtual ~GrammarLexicon() = default;
 
-  // The bytes a terminal rule spells; empty when its expression spells none.
+  // The bytes a terminal rule or a literal spells, empty when its expression
+  // spells none; `after` is what its last assertion forbids the byte after
+  // them.
   [[nodiscard]] virtual std::string spell(ElementId, SpellStyle,
-                                          DecisionSource&) const = 0;
+                                          DecisionSource&,
+                                          Veto& after) const = 0;
   // A spelling the grammar already owns as a literal belongs to that literal,
   // never to a terminal that happens to reach it.
   [[nodiscard]] virtual bool reserved(std::string_view) const = 0;

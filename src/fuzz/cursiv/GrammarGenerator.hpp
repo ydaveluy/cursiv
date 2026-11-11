@@ -50,8 +50,7 @@ struct GrammarGenerator {
     w.d.tree = g.kindOf(entry) == ElementKind::infix_rule
                    ? infix_chain(entry, w, built)
                    : rule_node(entry, w, built);
-    w.d.complete = w.ok;
-    if (w.d.complete) build_text(w.d);
+    w.d.complete = w.ok && build_text(w.d);
     return std::move(w.d);
   }
 
@@ -119,11 +118,15 @@ struct GrammarGenerator {
     const std::span<const ElementId> children = g.childrenOf(e);
     switch (g.kindOf(e)) {
       case ElementKind::literal:
-        emit(e, std::string(g.textOf(e)), w);
+      case ElementKind::terminal_rule: {
+        Veto after;
+        std::string text =
+            g.kindOf(e) == ElementKind::literal
+                ? lex.spell(e, SpellStyle::shortest, *w.src, after)
+                : terminal_value(e, after, w);
+        emit(e, std::move(text), after, w);
         return;
-      case ElementKind::terminal_rule:
-        emit(e, terminal_value(e, w), w);
-        return;
+      }
       case ElementKind::infix_rule:
       case ElementKind::parser_rule:
       case ElementKind::data_type_rule: {
@@ -399,7 +402,7 @@ struct GrammarGenerator {
     walk(children[0], assign, f, w);
   }
 
-  void emit(ElementId e, std::string text, Walk& w) const {
+  void emit(ElementId e, std::string text, const Veto& after, Walk& w) const {
     if (text.empty() || w.ended) {
       ++w.d.unrendered;
       w.ok = false;
@@ -409,18 +412,20 @@ struct GrammarGenerator {
     const bool attached = (w.bare != 0 && w.d.tokens.size() > w.bareFrom) ||
                           readsSeparator || w.fed;
     w.fed = readsSeparator;
-    w.d.tokens.push_back(GrammarToken{e, std::move(text), {}, attached, 0, 0});
+    w.d.tokens.push_back(
+        GrammarToken{e, std::move(text), {}, attached, 0, 0, after});
   }
 
   // The value of a named terminal, from its own expression. A spelling the
   // grammar reserves as a literal is refused: that word is the literal's.
-  [[nodiscard]] std::string terminal_value(ElementId e, Walk& w) const {
+  [[nodiscard]] std::string terminal_value(ElementId e, Veto& after,
+                                           Walk& w) const {
     for (unsigned t = 0; t < kSpellTries; ++t) {
       const auto style = cheap(w) || t + 1 == kSpellTries
                              ? SpellStyle::shortest
                              : static_cast<SpellStyle>(w.src->choose(
                                    DecisionKind::style, kSpellStyles));
-      std::string s = lex.spell(e, style, *w.src);
+      std::string s = lex.spell(e, style, *w.src, after);
       if (s.empty() || lex.reserved(s)) continue;
       w.d.styles |= 1u << static_cast<unsigned>(style);
       return s;
@@ -429,9 +434,9 @@ struct GrammarGenerator {
   }
 
   // The separators: one ignored word in front of every token but the first,
-  // and none inside a region that ignores nothing. The document is built once:
-  // nothing here reads the text back.
-  void build_text(GrammarDerivation& d) const {
+  // and none inside a region that ignores nothing. False where a token's last
+  // assertion forbids the byte after it: the text is then no sentence.
+  [[nodiscard]] bool build_text(GrammarDerivation& d) const {
     const std::string_view sep = lex.separator();
     d.text.clear();
     for (std::size_t i = 0; i < d.tokens.size(); ++i) {
@@ -442,6 +447,13 @@ struct GrammarGenerator {
       d.text += t.text;
       t.end = static_cast<std::uint32_t>(d.text.size());
     }
+    for (const GrammarToken& t : d.tokens)
+      if (t.end < d.text.size() &&
+          t.after.forbids(static_cast<unsigned char>(d.text[t.end]))) {
+        ++d.unrendered;
+        return false;
+      }
+    return true;
   }
 };
 

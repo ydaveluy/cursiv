@@ -627,7 +627,8 @@ template <class L>
 struct value_walk;
 template <class... Fs>
 struct value_walk<TypeList<Fs...>> {
-  static void run(const AstNode& n, ValueYield yield) {
+  static void run([[maybe_unused]] const AstNode& n,
+                  [[maybe_unused]] ValueYield yield) {
     (yield_field<Fs>(n, yield), ...);
   }
 };

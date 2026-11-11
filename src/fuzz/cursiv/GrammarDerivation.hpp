@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "cursiv/AstUnwritten.hpp"
+#include "cursiv/GrammarLexicon.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 
 namespace cursiv::fuzzer::detail {
@@ -19,6 +20,7 @@ struct GrammarToken {
   bool attached =
       false;  // in a region that ignores nothing: no trivia before it
   std::uint32_t begin = 0, end = 0;
+  Veto after;  // what its last assertion forbids the byte after it
 };
 
 struct GrammarDerivation {

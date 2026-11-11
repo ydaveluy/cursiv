@@ -11,7 +11,13 @@
 #include <type_traits>
 #include <vector>
 
+#include "cursiv/DecisionSource.hpp"
+#include "cursiv/DeclaredModel.hpp"
+#include "cursiv/FixedSource.hpp"
+#include "cursiv/GrammarLexicon.hpp"
+#include "cursiv/GrammarModel.hpp"
 #include "cursiv/grammar/ElementId.hpp"
+#include "cursiv/grammar/InGrammar.hpp"
 #include "cursiv/grammar/RuleTraits.hpp"
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/grammar/word_final_in.hpp"
@@ -19,11 +25,6 @@
 #include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/ctstring.hpp"
 #include "cursiv/utils/typelist.hpp"
-#include "cursiv/DecisionSource.hpp"
-#include "cursiv/DeclaredModel.hpp"
-#include "cursiv/FixedSource.hpp"
-#include "cursiv/GrammarLexicon.hpp"
-#include "cursiv/GrammarModel.hpp"
 
 namespace cursiv::fuzzer::detail {
 
@@ -39,25 +40,12 @@ inline constexpr std::size_t kNoSpell = ~std::size_t{0};
 // ignored the refusal could close a string literal in its own middle.
 struct SpellCtx {
   DecisionSource& src;
-  CharSet veto{};
-  bool vetoed = false;
+  Veto veto{};
 
-  void forbid(const CharSet& s) {
-    veto.merge(s);
-    vetoed = true;
-  }
-  void clear() {
-    if (!vetoed) return;
-    veto = CharSet{};
-    vetoed = false;
-  }
-  [[nodiscard]] bool forbids(unsigned char b) const {
-    return vetoed && veto.test(b);
-  }
   // Whether the next byte spelled may be `b`: the refusal ends there.
   bool admits(char b) {
-    const bool ok = !forbids(static_cast<unsigned char>(b));
-    clear();
+    const bool ok = !veto.forbids(static_cast<unsigned char>(b));
+    veto.clear();
     return ok;
   }
 };
@@ -70,7 +58,7 @@ struct SpellCtx {
   unsigned count = 0;
   const auto in = [&](unsigned b) {
     const auto c = static_cast<unsigned char>(b);
-    return s.test(c) && !cx.forbids(c);
+    return s.test(c) && !cx.veto.forbids(c);
   };
   for (unsigned b = 0; b < 256; ++b) {
     if (!in(b)) continue;
@@ -92,7 +80,7 @@ struct SpellCtx {
         break;
       }
   }
-  cx.clear();
+  cx.veto.clear();
   if (pick < 0) return false;
   out.push_back(static_cast<char>(pick));
   return true;
@@ -216,6 +204,27 @@ struct SpellDeeper<C, E, 0> {
   static bool run(std::string&, SpellStyle, SpellCtx&) { return false; }
 };
 
+// What a literal's guard asserts after its text: a refusal as written, the
+// grammar's word boundary where the word ends in it, and any other guard as a
+// lookahead, which the walk cannot honour.
+template <class C, str S, bool CI, class Gd>
+struct lit_guard {
+  using type = And<Gd>;
+};
+template <class C, str S, bool CI, class E>
+struct lit_guard<C, S, CI, Not<E>> {
+  using type = Not<E>;
+};
+template <class C, str S, bool CI>
+struct lit_guard<C, S, CI, void> {
+  using type = Epsilon;
+};
+template <class C, str S, bool CI>
+struct lit_guard<C, S, CI, cursiv::detail::WordBound>
+    : lit_guard<C, S, CI,
+                typename cursiv::detail::scoped_guard<
+                    C, S, CI, cursiv::detail::WordBound>::type> {};
+
 template <class C, str S, bool CI, class Gd, unsigned D>
 struct SpellOf<C, Lit<S, CI, Gd>, D> {
   static constexpr std::size_t min = S.size();
@@ -225,10 +234,11 @@ struct SpellOf<C, Lit<S, CI, Gd>, D> {
     l.set(static_cast<unsigned char>(S[S.size() - 1]));
     return Reach{f, l, false};
   }
-  static bool run(std::string& out, SpellStyle, SpellCtx& cx) {
+  static bool run(std::string& out, SpellStyle st, SpellCtx& cx) {
     if (!cx.admits(S[0])) return false;
     out += S.view();
-    return true;
+    return Spell<C, typename lit_guard<C, S, CI, Gd>::type, D>::run(out, st,
+                                                                    cx);
   }
 };
 
@@ -358,13 +368,23 @@ struct SpellOf<C, Repeat<Mn, Mx, E>, D> {
   }
 };
 
-// What a refusal names, when it names a class: everything else the walk
-// cannot honour, so a spelling the lexer then reads short is a refused
-// document, not a silent one.
-template <class E>
-[[nodiscard]] constexpr const CharSet* vetoed_by() {
-  return kVetoOf<E>;
-}
+// What a refusal names, when it names a class or a terminal reading one:
+// everything else the walk cannot honour, so a spelling the lexer then reads
+// short is a refused document, not a silent one.
+template <class C, class E, unsigned D>
+struct vetoed_by {
+  static constexpr const CharSet* value = kVetoOf<E>;
+};
+template <class C, class R, unsigned D>
+struct vetoed_by<C, Ref<R>, D>
+    : vetoed_by<
+          C,
+          std::remove_cvref_t<typename cursiv::Normalize<C>::template body<R>>,
+          D - 1> {};
+template <class C, class R>
+struct vetoed_by<C, Ref<R>, 0> {
+  static constexpr const CharSet* value = nullptr;
+};
 
 // An assertion spells nothing. One that refuses a class forbids its first
 // bytes to the next byte spelled, whatever spells it; any other refuses the
@@ -374,9 +394,10 @@ struct SpellOf<C, Not<E>, D> {
   static constexpr std::size_t min = 0;
   static constexpr Reach reach() { return Reach{{}, {}, true}; }
   static bool run(std::string&, SpellStyle, [[maybe_unused]] SpellCtx& cx) {
-    constexpr const CharSet* kVeto = vetoed_by<std::remove_cvref_t<E>>();
+    constexpr const CharSet* kVeto =
+        vetoed_by<C, std::remove_cvref_t<E>, D>::value;
     if constexpr (kVeto != nullptr) {
-      cx.forbid(*kVeto);
+      cx.veto.forbid(*kVeto);
       return true;
     } else {
       return false;
@@ -448,11 +469,15 @@ struct SpellOf<C, Create<T, E>, D> : Spell<C, E, D> {};
 template <class C, class T, auto P, class E, unsigned D>
 struct SpellOf<C, Nest<T, P, E>, D> : Spell<C, E, D> {};
 
-template <class C, class R>
-bool spell_terminal(std::string& out, SpellStyle st, DecisionSource& src) {
+// One token's spelling, and in `after` what its last assertion forbids the
+// byte after it.
+template <class C, class E>
+bool spell_token(std::string& out, SpellStyle st, DecisionSource& src,
+                 Veto& after) {
   SpellCtx cx{src};
-  return Spell<C, typename cursiv::Normalize<C>::template body<R>,
-               kSpellDepth>::run(out, st, cx);
+  const bool spelled = Spell<C, E, kSpellDepth>::run(out, st, cx);
+  after = cx.veto;
+  return spelled;
 }
 
 template <class C, class R>
@@ -461,16 +486,18 @@ constexpr Reach reach_terminal() {
                kSpellDepth>::reach();
 }
 
-using SpellFn = bool (*)(std::string&, SpellStyle, DecisionSource&);
+using SpellFn = bool (*)(std::string&, SpellStyle, DecisionSource&, Veto&);
 using ReachFn = Reach (*)();
 
 template <class C, class E>
 consteval SpellFn spell_entry() {
   using T = std::remove_cvref_t<E>;
-  if constexpr (requires { typename T::kind; }) {
-    if constexpr (is_terminal_rule<T>) return &spell_terminal<C, T>;
-  }
-  return nullptr;
+  if constexpr (model::kind_of<T>() == ElementKind::terminal_rule)
+    return &spell_token<C, typename cursiv::Normalize<C>::template body<T>>;
+  else if constexpr (model::kind_of<T>() == ElementKind::literal)
+    return &spell_token<C, T>;
+  else
+    return nullptr;
 }
 
 // A function: only the separator, known at construction, turns a `Reach` into
@@ -548,11 +575,13 @@ struct CursivLexicon final : GrammarLexicon {
   }
 
   [[nodiscard]] std::string spell(ElementId e, SpellStyle st,
-                                  DecisionSource& src) const override {
+                                  DecisionSource& src,
+                                  Veto& after) const override {
     using Rows = lex_rows<C, typename model::positions_for<C>::type>;
+    after = Veto{};
     if (e >= Rows::kSpell.size() || Rows::kSpell[e] == nullptr) return {};
     std::string out;
-    if (!Rows::kSpell[e](out, st, src)) return {};
+    if (!Rows::kSpell[e](out, st, src, after)) return {};
     return out;
   }
 

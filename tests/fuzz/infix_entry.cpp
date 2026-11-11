@@ -16,6 +16,7 @@
 #include "cursiv/FixedSource.hpp"
 #include "cursiv/FuzzLane.hpp"
 #include "cursiv/GrammarCost.hpp"
+#include "cursiv/GrammarGenerator.hpp"
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstBuilder.hpp"
@@ -147,21 +148,69 @@ void a_long_repetition_costs_its_rounds() {
   CHECK(cost[1] == 4096 && cost[0] == 4096);
 }
 
+// A word, then a number: the separator the walk writes between them is a tab.
+// A word no digit may follow stands there; one no whitespace may follow does
+// not.
+namespace fveto {
+struct Doc : cursiv::Extends<cursiv::AstNode> {
+  string_view word;
+  string_view num;
+};
+struct Spaced : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct WORD : terminal<some(cr<"a-z">) + !d> {};
+  struct NUM : terminal<some(d)> {};
+  struct DIGIT : terminal<d> {};
+  struct Root : rule<create<Doc>(assign<&Doc::word>(ref<WORD>) +
+                                 assign<&Doc::num>(ref<NUM>))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+struct Tight : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct WORD : terminal<some(cr<"a-z">) + !s> {};
+  struct NUM : terminal<some(d)> {};
+  struct Root : rule<create<Doc>(assign<&Doc::word>(ref<WORD>) +
+                                 assign<&Doc::num>(ref<NUM>))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+// No trivia, so tokens follow one another: a keyword's word boundary refuses
+// a word after it but not a bracket, and a guard that is no class refuses the
+// literal.
+struct Glued : cursiv::GrammarSpec {
+  struct WORD : terminal<some(cr<"a-z">)> {};
+  struct Root : rule<create<Doc>(kw<"go"> + assign<&Doc::word>(ref<WORD>))> {};
+  using entry = Root;
+};
+struct Opened : cursiv::GrammarSpec {
+  struct Root : rule<create<Doc>(kw<"go"> + lit<"(">)> {};
+  using entry = Root;
+};
+struct Unheld : cursiv::GrammarSpec {
+  struct Root : rule<create<Doc>(lit<"go", !lit<"x">> + lit<"(">)> {};
+  using entry = Root;
+};
+}  // namespace fveto
+
+// What a spelling writes with the first choice of every decision, or nothing
+// when it refuses.
+template <class C = finfix::InfixEntryG, class E>
+std::optional<std::string> spelled(E) {
+  namespace fd = cursiv::fuzzer::detail;
+  fd::FixedSource first;
+  fd::SpellCtx cx{first};
+  std::string out;
+  if (!fd::Spell<C, E, fd::kSpellDepth>::run(out, fd::SpellStyle::shortest, cx))
+    return std::nullopt;
+  return out;
+}
+
 // What an assertion refuses holds for the next character spelled, whatever
 // spells it; a refusal past ASCII refuses every character past ASCII.
 void a_refusal_holds_for_the_next_character() {
-  namespace fd = cursiv::fuzzer::detail;
   using cursiv::cr;
   using cursiv::lit;
-  const auto spelled = [](auto e) -> std::optional<std::string> {
-    fd::FixedSource first;
-    fd::SpellCtx cx{first};
-    std::string out;
-    if (!fd::Spell<finfix::InfixEntryG, decltype(e), fd::kSpellDepth>::run(
-            out, fd::SpellStyle::shortest, cx))
-      return std::nullopt;
-    return out;
-  };
   CHECK(spelled(!cr<"ab"> + (lit<"a"> | lit<"c">)) == std::nullopt);
   CHECK(spelled(!cr<"ab"> + (lit<"c"> | lit<"a">)) == "c");
   CHECK(spelled(!cr<"ab"> + cr<"a-c">) == "c");
@@ -170,10 +219,50 @@ void a_refusal_holds_for_the_next_character() {
   CHECK(spelled(!cr<"é"> + cr<"a">) == "a");
 }
 
+// A literal's guard refuses after its text: a class, a terminal that reads
+// one, or a keyword's word boundary where the word ends in it. Any other guard
+// refuses the spelling.
+void a_literal_guard_holds_after_its_text() {
+  using cursiv::cr;
+  using cursiv::kw;
+  using cursiv::lit;
+  using cursiv::ref;
+  using G = fveto::Spaced;
+  CHECK(spelled(lit<"a", !cr<"b">> + cr<"b-c">) == "ac");
+  CHECK(spelled<G>(lit<"a", !ref<G::DIGIT>> + cr<"0~">) == "a~");
+  CHECK(spelled(kw<"if"> + cr<"0~">) == "if~");
+  CHECK(spelled(kw<"["> + cr<"0~">) == "[0");
+  CHECK(spelled(lit<"a", !lit<"b">> + cr<"b-c">) == std::nullopt);
+  CHECK(spelled<G>(lit<"a", !ref<G::NUM>> + cr<"b">) == std::nullopt);
+}
+
+// Whether the walk writes a sentence of `G` with the first choice of every
+// decision: what a token's last assertion refuses holds for the byte after it.
+template <class G>
+bool walks_a_sentence() {
+  namespace fd = cursiv::fuzzer::detail;
+  const fd::GrammarCost cost(fd::kDeclaredModel<G>, fd::kActions<G>);
+  const fd::GrammarGenerator gen{fd::kDeclaredModel<G>,
+                                 fd::kLexicon<G>,
+                                 fd::kActions<G>,
+                                 cost,
+                                 8,
+                                 nullptr};
+  fd::FixedSource first;
+  cursiv::fuzzer::WalkTree tree;
+  return gen.generate(first, tree).complete;
+}
+
 int main() {
   a_subtree_holds_its_children_whole();
+  CHECK(walks_a_sentence<fveto::Spaced>());
+  CHECK(!walks_a_sentence<fveto::Tight>());
+  CHECK(!walks_a_sentence<fveto::Glued>());
+  CHECK(walks_a_sentence<fveto::Opened>());
+  CHECK(!walks_a_sentence<fveto::Unheld>());
   a_long_repetition_costs_its_rounds();
   a_refusal_holds_for_the_next_character();
+  a_literal_guard_holds_after_its_text();
   namespace g = finfix::generated::InfixEntryG;
   const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
   const std::unique_ptr<cursiv::AstReflection> reflection =
