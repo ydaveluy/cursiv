@@ -96,7 +96,7 @@ node tools/wasi-run.mjs --host-module /path/to/host.mjs server.wasm --stdio
 ```
 
 The module exports `createHost(context)`, which may be asynchronous and returns
-`{ imports, env, instantiated }`, each optional. For example:
+`{ imports, env, instantiated, threadData }`, each optional. For example:
 
 ```js
 export function createHost({ memory }) {
@@ -121,7 +121,9 @@ host environment; `PWD` always reflects the actual working directory.
 
 `instantiated(instance)` runs on each thread after the module's start function
 and before `_start` or the thread's entry point. A host can use it to load more
-code into that instance.
+code into that instance. Each thread has its own host: `threadData()` runs on a
+thread as it starts another, and a copy of its result is the new thread's
+`context.threadData`, such as a list of the code to load again.
 
 `CURSIV_WASI_HOST_MODULE` selects the same module without a command-line flag.
 An explicit flag takes precedence. The selection reaches the command and its

@@ -348,14 +348,16 @@ test('application hosts extend imports and environment for commands and nested t
     const directory = mkdtempSync(join(tmpdir(), 'cursiv-wasi-extension-'));
     try {
       const host = join(directory, 'host #?% é.mjs');
-      writeFileSync(host, `export async function createHost({ memory, args, runner, hostModule }) {
+      writeFileSync(host, `export async function createHost({ memory, args, runner, hostModule, threadData }) {
   if (args.length !== 3 || args[1] !== '--host-module' || args[2] !== 'payload')
     throw new Error('Module arguments were consumed by the runner');
   if (!runner.endsWith('wasi-run.mjs') || !hostModule.endsWith('host #?% é.mjs'))
     throw new Error('Host context lost its resolved paths');
-  let instantiated = null;
+  let instantiated = null, counted = threadData ?? 0;
   return { instantiated(instance) { instantiated = instance; },
+    threadData: () => counted,
     env: { GENERIC_HOST_VALUE: 'application' }, imports: { contract: {
+    count() { return ++counted; },
     check(pointer, size) {
       if (instantiated?.exports === undefined) return 0;
       const bytes = new Uint8Array(memory().buffer, pointer, size);
@@ -375,9 +377,13 @@ test('application hosts extend imports and environment for commands and nested t
 #endif
 __attribute__((import_module("contract"), import_name("check")))
 extern int check(char*, int);
+__attribute__((import_module("contract"), import_name("count")))
+extern int count(void);
 static void* call(void* unused) {
   char value[] = "memory from wasm";
   if (check(value, sizeof(value)-1) != 37 || value[0] != 'M') abort();
+  // A thread counts on from what its creator had counted.
+  if (count() < 2) abort();
   return NULL;
 }
 int main(int argc, char** argv) {
@@ -385,6 +391,7 @@ int main(int argc, char** argv) {
   if (!getenv("GENERIC_HOST_VALUE") || strcmp(getenv("GENERIC_HOST_VALUE"), "application")) return 61;
   if (!getenv("CURSIV_WASI_HOST_MODULE")) return 62;
   if (!getenv("PWD") || !strstr(getenv("PWD"), "cursiv-wasi-extension-")) return 63;
+  if (count() != 1) return 67;
 #ifdef WITH_THREADS
   pthread_t thread;
   if (pthread_create(&thread, NULL, call, NULL)) return 64;

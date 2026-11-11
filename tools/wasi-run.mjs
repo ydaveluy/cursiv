@@ -6,7 +6,7 @@ import { existsSync, readdirSync, realpathSync, writeSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { availableParallelism } from 'node:os';
 import { setFlagsFromString } from 'node:v8';
-import { Worker, isMainThread, workerData, threadId } from 'node:worker_threads';
+import { Worker, isMainThread, parentPort, workerData, threadId } from 'node:worker_threads';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join, resolve, win32 } from 'node:path';
 
@@ -148,16 +148,16 @@ function wasiFor(args, environment, hostModule, preopens) {
   });
 }
 
-// An application host exports createHost({ memory, args, runner, hostModule }),
-// which returns { imports, env, instantiated }; the runner owns WASI and
-// threads. See docs/recipes/wasm.md.
-async function applicationHost(hostModule, memory, args) {
+// An application host exports createHost({ memory, args, runner, hostModule,
+// threadData }), which returns { imports, env, instantiated, threadData }; the
+// runner owns WASI and threads. See docs/recipes/wasm.md.
+async function applicationHost(hostModule, memory, args, threadData) {
   if (!hostModule) return {};
   const extension = await import(pathToFileURL(hostModule));
   if (typeof extension.createHost !== 'function')
     throw new Error('A WASI host module must export createHost(context)');
   return await extension.createHost({ memory, args,
-    runner: fileURLToPath(import.meta.url), hostModule }) ?? {};
+    runner: fileURLToPath(import.meta.url), hostModule, threadData }) ?? {};
 }
 
 // The import section's memory entry: `flags` then `min` then, when the flags
@@ -248,31 +248,27 @@ const withMemory = (instance, memory) =>
 const validThreadId = (id) => id > 0 && id < 2 ** 29;
 
 // The words threads share with the supervisor, the main thread: the exit code
-// (-1 while running), a bell the supervisor waits on, and one thread request at
-// a time, with its lock, state, start argument and answer.
-const EXIT = 0, BELL = 1, LOCK = 2, REQUEST = 3, START_ARG = 4, ANSWER = 5, CONTROL_WORDS = 6;
+// (-1 while running), then one thread request at a time, with its lock, state
+// and answer.
+const EXIT = 0, LOCK = 1, REQUEST = 2, ANSWER = 3, CONTROL_WORDS = 4;
 const ASKED = 1, ANSWERED = 2;
-function ring(control) {
-  Atomics.add(control, BELL, 1);
-  Atomics.notify(control, BELL);
-}
 
 // One process exit, shared even by a child whose parent is blocked in WASM.
 // The supervisor waits asynchronously, so traps cannot strand a pthread_join.
 const exited = Symbol('WASI process exit');
 function exitProcess(control, code) {
-  if (Atomics.compareExchange(control, EXIT, -1, code & 0xff) === -1) ring(control);
+  if (Atomics.compareExchange(control, EXIT, -1, code & 0xff) === -1)
+    Atomics.notify(control, EXIT);
 }
 
 // Asks the supervisor for a thread's worker, since a worker blocked in WASM
 // would never learn of its failure. Answers the thread's ID, or -1.
-function threadRequester(control) {
+function threadRequester(control, host) {
   return (startArg) => {
     while (Atomics.compareExchange(control, LOCK, 0, 1) !== 0) Atomics.wait(control, LOCK, 1);
     try {
-      Atomics.store(control, START_ARG, startArg);
       Atomics.store(control, REQUEST, ASKED);
-      ring(control);
+      parentPort.postMessage({ startArg, threadData: host.threadData?.() });
       while (Atomics.load(control, REQUEST) === ASKED) Atomics.wait(control, REQUEST, ASKED);
       return Atomics.load(control, ANSWER);
     } finally {
@@ -299,14 +295,19 @@ async function supervise(control, workerData) {
       console.error(error);
       exitProcess(control, 1);
     });
+    worker.on('message', ({ startArg, threadData }) => {
+      Atomics.store(control, ANSWER, thread(startArg, threadData));
+      Atomics.store(control, REQUEST, ANSWERED);
+      Atomics.notify(control, REQUEST);
+    });
     return worker;
   };
   const command = start({ command: true });
   command.on('exit', (code) => exitProcess(control, code || 1));
-  const thread = (startArg) => {
+  const thread = (startArg, threadData) => {
     let worker;
     try {
-      worker = start({ startArg });
+      worker = start({ startArg, threadData });
     } catch {
       return -1;
     }
@@ -317,24 +318,15 @@ async function supervise(control, workerData) {
     worker.on('exit', (code) => { if (code !== 0) exitProcess(control, 1); });
     return worker.threadId;
   };
-  for (;;) {
-    const bell = Atomics.load(control, BELL);
-    if (Atomics.load(control, EXIT) !== -1) return;
-    if (Atomics.load(control, REQUEST) === ASKED) {
-      Atomics.store(control, ANSWER, thread(Atomics.load(control, START_ARG)));
-      Atomics.store(control, REQUEST, ANSWERED);
-      Atomics.notify(control, REQUEST);
-      continue;
-    }
-    await Atomics.waitAsync(control, BELL, bell).value;
-  }
+  while (Atomics.load(control, EXIT) === -1)
+    await Atomics.waitAsync(control, EXIT, -1).value;
 }
 
 async function execute(module, memory, args, command, needsThreads, control,
-                       startArg, hostModule) {
+                       startArg, hostModule, threadData) {
   let instance;
   const extension = await applicationHost(hostModule,
-    () => memory ?? instance?.exports.memory, args);
+    () => memory ?? instance?.exports.memory, args, threadData);
   const preopens = preopensFor(process.platform);
   const wasi = wasiFor(args, extension.env, hostModule, preopens);
   const importObject = wasi.getImportObject();
@@ -351,7 +343,7 @@ async function execute(module, memory, args, command, needsThreads, control,
     };
   }
   if (needsThreads)
-    importObject.wasi = { ...importObject.wasi, 'thread-spawn': threadRequester(control) };
+    importObject.wasi = { ...importObject.wasi, 'thread-spawn': threadRequester(control, extension) };
   if (memory)
     for (const entry of WebAssembly.Module.imports(module))
       if (entry.kind === 'memory')
@@ -438,11 +430,11 @@ if (isMainThread && process.argv[1] && realpathSync(process.argv[1]) === fileURL
 } else if (!isMainThread && validThreadId(threadId) && workerData?.module instanceof WebAssembly.Module) {
   // An out-of-range ID must never enter WASI: its creator returns failure and
   // may release startArg before this worker has finished starting up.
-  const { module, memory, startArg, args, command = false, hostModule } = workerData;
+  const { module, memory, startArg, args, command = false, hostModule, threadData } = workerData;
   const control = new Int32Array(workerData.control);
   try {
     const result = await execute(module, memory, args, command, true, control,
-                                 startArg, hostModule);
+                                 startArg, hostModule, threadData);
     if (command) exitProcess(control, result.code);
   } catch (error) {
     if (error !== exited) {
