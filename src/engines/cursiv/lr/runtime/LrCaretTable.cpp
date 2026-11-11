@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -37,12 +38,12 @@ namespace cursiv::engine {
 namespace {
 
 // A repair can root an invented record outside the entry subtree, so walk
-// the full leaf order. `rank` follows the answer; `skipped` marks given-up
+// the full leaf order. `behind` follows the answer; `skipped` marks given-up
 // text.
-CstLeaf read_leaf_before(const Cst& cst, StampLayout stamp, NodeCount& rank,
+CstLeaf read_leaf_before(const Cst& cst, StampLayout stamp, NodeId& behind,
                          bool* skipped) {
-  while (rank > 0) {
-    const CstLeaf leaf = cst.leaf(--rank);
+  while (behind > 0) {
+    const CstLeaf leaf = cst.as_leaf(behind = cst.leaf_before(behind));
     const bool gaveup = leaf.recovered && stamp.state(cst[leaf.id]) == 0;
     if (gaveup && skipped != nullptr) *skipped = true;
     if (leaf.hidden) continue;
@@ -313,6 +314,20 @@ class CaretStacks {
   }
 
   std::size_t rank() const { return _rank; }
+  // One reading whose states from the start state up are `states`, its top
+  // read to `at`: the stacks a replay starting there stands on.
+  void seed(std::span<const std::uint16_t> states, TextOffset at,
+            TextOffset gapFrom) {
+    assert(_frames.size() == 1 && _heads.size() == 1 && _rank == 0);
+    for (const std::uint16_t state : states) {
+      _frames.push_back(Frame{
+          .state = state, .laMode = kDeadState, .at = at, .rank = 0, .la = {}});
+      _frames.back().parent = _heads.front();
+      _heads.front() = _frames.size() - 1;
+    }
+    _rank = 1;
+    _gapFrom = gapFrom;
+  }
   bool indented() const { return _indent != 0 || _dedent != 0 || _bracketed; }
   // Whether the conditions asked up to a record's end read no byte a candidate
   // replaces, so the record keeps what the tape decided. `token_end(n, none)`
@@ -1884,15 +1899,20 @@ class CaretReplay {
         _cst(cst),
         _stacks(stacks),
         _horizon(horizon),
-        _stop(cancelToken) {}
+        _stop(cancelToken) {
+    for (const ParseDiagnostic& d : cst.diagnostics())
+      if (d.isSyntax()) _firstRepair = std::min(_firstRepair, d.begin);
+  }
 
   // The records under `prefix` in order, then the repairs `events` names. Out
   // of line: inlined, the caller's register pressure falls on every job.
   CURSIV_NOINLINE bool run(NodeId prefix, std::span<const NodeId> events) {
     for (std::size_t i = events.size(); i-- > 0;)
       _jobs.push_back(Job{events[i], 0, false});
+    // The replay starts past the nearest record it can start from.
     for (NodeId r = prefix; r > 0; r = _cst.subtree_begin(r - 1)) {
       _stop.poll();
+      if (r != prefix && starts_after(r - 1)) break;
       _jobs.push_back(Job{r - 1, 0, false});
     }
     while (!_jobs.empty()) {
@@ -1910,6 +1930,50 @@ class CaretReplay {
     std::size_t rank;
     bool close;
   };
+
+  // Starts the replay past `id` where it can: with no repair up to the next
+  // token and one reading, the stack under the state `id` was stamped with is
+  // known when each of its states has one predecessor down to the start state.
+  bool starts_after(NodeId id) {
+    const CstNode& n = _cst[id];
+    const auto state = _table.stamp.state(n);
+    if (_table.preds.empty() || n.hidden || n.recovered || n.begin == n.end ||
+        n.end > _horizon || state == 0 || state >= _table.mode.size() ||
+        std::ranges::find(_unknown, state) != _unknown.end())
+      return false;
+    if (n.subtreeSize == 1) {
+      // Several readings of one leaf are several stacks.
+      const SymbolId term = _table.shiftTerm[state];
+      if (_table.chooses || term == kInvalidSymbol || _table.synthetic(term))
+        return false;
+    }
+    NodeId k = id + 1;
+    while (k < _cst.size() && (_cst[k].subtreeSize != 1 || _cst[k].hidden)) ++k;
+    if (_firstRepair <= (k < _cst.size() ? _cst[k].begin : n.end) ||
+        !_stacks.keeps_tape(n.end, [&](unsigned count, TextOffset none) {
+          return token_end_from(_cst, id + 1u, count, none);
+        }))
+      return false;
+    const std::span<const std::uint16_t> preds = _table.preds;
+    _states.clear();
+    for (std::uint16_t s = state; s != 0; s = preds[s]) {
+      if (s == kDeadState || _states.size() == kStartDepth) {
+        _unknown.push_back(state);
+        return false;
+      }
+      _states.push_back(s);
+    }
+    std::ranges::reverse(_states);
+    // The end of the last token, as `jump` takes it.
+    NodeId l = id;
+    while (l > _cst.subtree_begin(id) &&
+           (_cst[l].subtreeSize != 1 || _cst[l].hidden ||
+            _cst[l].begin == _cst[l].end))
+      --l;
+    _stacks.seed(_states, n.end, _cst[l].end);
+    _gathered = id + 1;
+    return true;
+  }
 
   // No repair inside the record, nor on the token after it: the tape may
   // close a record before the token a repair invents for it. The repairs are
@@ -2016,18 +2080,25 @@ class CaretReplay {
   // The repairs among the records before `_gathered`, in order.
   std::vector<NodeId> _repairs;
   NodeId _gathered = 0;
+  // Where the first repair begins, the stack a replay starts from, and the
+  // states whose stack is not known from them alone.
+  TextOffset _firstRepair = ~TextOffset{0};
+  std::vector<std::uint16_t> _states;
+  std::vector<std::uint16_t> _unknown;
+  // The deepest stack rebuilt.
+  static constexpr std::size_t kStartDepth = 256;
   std::vector<Job> _jobs;
 };
 
 // The end past which no record is stepped over whole, the replay ending on leaf
-// `rank`: a cell after a record resolves within kLrLookBudget tokens, plus one
+// `last`: a cell after a record resolves within kLrLookBudget tokens, plus one
 // for the lexer's peek. An unresolved cell has no such bound.
 TextOffset jump_horizon(const LrCaretTable& table, const Cst& cst,
-                        NodeCount rank) {
+                        NodeId last) {
   if (!table.chooses) return static_cast<TextOffset>(cst.text().size());
   unsigned seen = 0;
-  for (NodeCount r = rank + 1; r-- > 0;) {
-    const CstLeaf l = cst.leaf(r);
+  for (NodeId r = last + 1; r > 0;) {
+    const CstLeaf l = cst.as_leaf(r = cst.leaf_before(r));
     if (l.hidden || l.begin == l.end) continue;
     if (++seen == kLrLookBudget + 2u) return l.end;
   }
@@ -2037,24 +2108,24 @@ TextOffset jump_horizon(const LrCaretTable& table, const Cst& cst,
 // A caret separated from a token the repair invented only by bytes that were
 // blanks before the invention stands in the same gap, so it may precede it.
 void step_before_invented(const LrCaretTable& table, const Cst& cst,
-                          TextOffset at, CstLeaf& leaf, NodeCount& rank,
+                          TextOffset at, CstLeaf& leaf,
                           const CancellationToken& cancelToken) {
   const std::string_view text = cst.text();
-  for (NodeCount k = rank + 1; leaf && k-- > 0;) {
-    const CstLeaf l = cst.leaf(k);
+  for (NodeId k = leaf ? leaf.id + 1 : 0; k > 0;) {
+    const CstLeaf l = cst.as_leaf(k = cst.leaf_before(k));
     if (l.recovered) {
       if (l.begin != l.end || table.stamp.state(cst[l.id]) == 0) return;
-      NodeCount r = k;
-      const CstLeaf before = read_leaf_before(cst, table.stamp, r, nullptr);
+      NodeId behind = k;
+      const CstLeaf before =
+          read_leaf_before(cst, table.stamp, behind, nullptr);
       CaretStacks probe(table, text);
-      CaretReplay replay(table, cst, probe,
-                         before ? jump_horizon(table, cst, r) : TextOffset{0},
-                         cancelToken);
+      CaretReplay replay(
+          table, cst, probe,
+          before ? jump_horizon(table, cst, before.id) : TextOffset{0},
+          cancelToken);
       if (replay.run(before ? before.id + 1 : 0, {}) &&
-          probe.reads_blanks_to(at)) {
+          probe.reads_blanks_to(at))
         leaf = before;
-        rank = r;
-      }
       return;
     }
     if (l.hidden || l.begin == l.end) continue;
@@ -2080,13 +2151,13 @@ void lr_next_features_at(const LrCaretTable& table,
                          std::vector<NextFeature>& out,
                          const CancellationToken& cancelToken) {
   if (!StampedGrammar::caret_in(cst, at, resume)) return;
-  NodeCount rank = cst.leaves_before(at);
-  CstLeaf leaf = read_leaf_before(cst, table.stamp, rank, nullptr);
-  step_before_invented(table, cst, at, leaf, rank, cancelToken);
-  const NodeCount leafRank = rank;
+  NodeId behind = cst.leaf_after(at);
+  CstLeaf leaf = read_leaf_before(cst, table.stamp, behind, nullptr);
+  step_before_invented(table, cst, at, leaf, cancelToken);
   const std::string_view text = cst.text();
   bool skipped = false;
-  const CstLeaf pre = read_leaf_before(cst, table.stamp, rank, &skipped);
+  behind = leaf ? leaf.id : 0;
+  const CstLeaf pre = read_leaf_before(cst, table.stamp, behind, &skipped);
   const auto valid = [&](const CstLeaf& n) {
     return !n || (n.begin <= n.end && n.end <= at);
   };
@@ -2109,8 +2180,9 @@ void lr_next_features_at(const LrCaretTable& table,
   // the leaf and the token before it; otherwise the leaf is asked in the mode
   // that admits everything.
   bool spliceable = leaf && (!pre || pre.end == leaf.begin || !skipped);
-  for (NodeCount r = pre ? rank + 1 : 0; spliceable && r < leafRank; ++r) {
-    const CstLeaf between = cst.leaf(r);
+  for (NodeId id = pre ? cst.next_leaf(pre.id) : 0; spliceable && id < leaf.id;
+       id = cst.next_leaf(id)) {
+    const CstLeaf between = cst.as_leaf(id);
     const auto state = table.stamp.state(cst[between.id]);
     spliceable =
         between.hidden || (between.begin == between.end && !between.recovered &&
@@ -2288,21 +2360,21 @@ void lr_next_features_at(const LrCaretTable& table,
   events.resize(dropped);
 
   CaretReplay replay(table, cst, stacks,
-                     leaf ? jump_horizon(table, cst, leafRank) : TextOffset{0},
+                     leaf ? jump_horizon(table, cst, leaf.id) : TextOffset{0},
                      cancelToken);
   if (!replay.run(prefix, events)) return;
   if (attached) stacks.name_readings(leafTerm);
-  const NodeCount held = cst.leaves_before(at);
-  stacks.indentation(at, held > 0 ? cst.leaf(held - 1).end : 0);
+  const NodeId held = cst.leaf_after(at);
+  stacks.indentation(at, held > 0 ? cst[cst.leaf_before(held)].end : 0);
   // A comment that ends at the caret and closes on nothing goes on over what is
   // typed: `//` then `entity` is one comment. A candidate is offered where the
   // comment, read again with it behind, still ends here.
   CaretStacks::Trivia comment;
   const std::uint16_t commentMode = table.mode[shifted];
-  NodeCount behind = held;
-  while (behind > 0 && cst.leaf(behind - 1).begin == cst.leaf(behind - 1).end)
-    --behind;
-  const CstLeaf before = behind > 0 ? cst.leaf(behind - 1) : CstLeaf{};
+  CstLeaf before{};
+  for (NodeId behind = held; behind > 0 && before.begin == before.end;)
+    before = cst.as_leaf(behind = cst.leaf_before(behind));
+  if (before.begin == before.end) before = {};
   if (before.hidden && !before.recovered && before.end == at) {
     TextOffset halt = 0;
     const Scan s = table.lex(text.data(), static_cast<TextOffset>(text.size()),

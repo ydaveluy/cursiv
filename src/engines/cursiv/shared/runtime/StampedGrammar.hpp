@@ -110,9 +110,9 @@ struct StampedGrammar final : Grammar {
   static bool caret_in(const Cst& cst, TextOffset& at, TextOffset& resume) {
     if (!cst.engine_stamped() || at > resume || resume > cst.text().size())
       return false;
-    const NodeCount rank = cst.leaves_before(at);
-    if (rank < cst.leaf_count() && cst.leaf(rank).begin < at) {
-      const CstLeaf inside = cst.leaf(rank);
+    const NodeId after = cst.leaf_after(at);
+    if (after < cst.size() && cst[after].begin < at) {
+      const CstLeaf inside = cst.as_leaf(after);
       at = inside.begin;
       resume = std::max(resume, inside.end);
     }

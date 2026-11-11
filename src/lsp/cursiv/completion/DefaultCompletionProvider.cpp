@@ -49,9 +49,8 @@ namespace {
 // The owner of the leaf holding `offset`, else of the last one before it: null
 // where neither stands. Trivia and what a repair discarded hold nothing.
 [[nodiscard]] AstNode* node_at(const Cst& cst, TextOffset offset) {
-  const NodeCount rank = cst.leaves_before(offset);
-  if (rank < cst.leaf_count())
-    if (const CstLeaf at = cst.leaf(rank);
+  if (const NodeId after = cst.leaf_after(offset); after < cst.size())
+    if (const CstLeaf at = cst.as_leaf(after);
         at.begin <= offset && offset < at.end && !at.hidden && !at.recovered)
       return owner_of_leaf(cst, at.id);
   return owner_at(cst, offset);
@@ -63,9 +62,9 @@ namespace {
 [[nodiscard]] bool caret_in_unread_text(const Cst& cst, TextOffset caret) {
   // The first leaf ending past the caret is the only one that can hold it:
   // ends never decrease, so every earlier leaf closed before it.
-  const NodeCount rank = cst.leaves_before(caret);
-  if (rank >= cst.leaf_count()) return false;
-  const CstLeaf leaf = cst.leaf(rank);
+  const NodeId after = cst.leaf_after(caret);
+  if (after == cst.size()) return false;
+  const CstLeaf leaf = cst.as_leaf(after);
   return (leaf.hidden || leaf.recovered) && leaf.begin < caret &&
          caret < leaf.end;
 }
@@ -250,9 +249,9 @@ DefaultCompletionProvider::findDataTypeRuleStart(const Cst& cst,
                     detail::word_scalar(scalar_at(text.data() + offset,
                                                   text.size() - offset, len));
   const TextOffset at = word || offset == 0 ? offset : offset - 1;
-  const NodeCount rank = cst.leaves_before(at);
-  if (rank >= cst.leaf_count()) return std::nullopt;
-  const CstLeaf leaf = cst.leaf(rank);
+  const NodeId after = cst.leaf_after(at);
+  if (after == cst.size()) return std::nullopt;
+  const CstLeaf leaf = cst.as_leaf(after);
   if (leaf.hidden || leaf.begin > at || at >= leaf.end) return std::nullopt;
   // A data rule of one token has no record but its leaf.
   NodeId found = grammar.recordIsDataRule(cst[leaf.id]) ? leaf.id : kNoNode;
@@ -279,15 +278,16 @@ DefaultCompletionProvider::backtrackToAnyToken(const Cst& cst,
   };
   CompletionBacktrackingInformation out;
   out.nextTokenStart = out.nextTokenEnd = offset;
-  const NodeCount rank = cst.leaves_before(offset);
-  for (NodeCount r = rank; r > 0; --r)
-    if (const CstLeaf before = cst.leaf(r - 1); is_token(before)) {
+  const NodeId first = cst.leaf_after(offset);
+  for (NodeId r = first; r > 0;)
+    if (const CstLeaf before = cst.as_leaf(r = cst.leaf_before(r));
+        is_token(before)) {
       out.previousTokenStart = before.begin;
       out.previousTokenEnd = before.end;
       break;
     }
-  for (NodeCount r = rank; r < cst.leaf_count(); ++r)
-    if (const CstLeaf after = cst.leaf(r); is_token(after)) {
+  for (NodeId r = first; r < cst.size(); r = cst.next_leaf(r))
+    if (const CstLeaf after = cst.as_leaf(r); is_token(after)) {
       if (after.begin < offset) {
         out.nextTokenStart = after.begin;
         out.nextTokenEnd = after.end;

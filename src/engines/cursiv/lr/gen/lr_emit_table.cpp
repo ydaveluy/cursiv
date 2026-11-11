@@ -411,6 +411,7 @@ struct LrTableEmitter : TextBuilder {
     line("  },");
     array("rowLhsBase", a.rowLhsBase);
     array("rowLhs", a.rowLhs);
+    array("preds", a.preds);
     emit_pool_member("typoReach", a.typoReach);
     array("lexBodies", a.lexBodies);
     array("lexBodyTerms", a.lexBodyTerms);

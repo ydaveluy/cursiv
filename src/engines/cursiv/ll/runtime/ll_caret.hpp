@@ -70,19 +70,18 @@ inline bool ll_dedent(const Cst& cst, StampLayout stamp, const CstLeaf& leaf) {
 // Where the gap in front of `offset` begins: the end of the last leaf before
 // it that is not trivia, the text the parse dropped included.
 inline TextOffset ll_gap_from(const Cst& cst, TextOffset offset) {
-  for (NodeCount rank = cst.leaves_before(offset); rank-- > 0;) {
-    const CstLeaf leaf = cst.leaf(rank);
+  for (NodeId at = cst.leaf_after(offset); at > 0;) {
+    const CstLeaf leaf = cst.as_leaf(at = cst.leaf_before(at));
     if (!leaf.hidden && leaf.begin != leaf.end) return leaf.end;
   }
   return 0;
 }
 
-// The last such token that starts before `offset`. `rank` is where it stands.
+// The last such token that starts before `offset`.
 inline CstLeaf ll_leaf_before(const Cst& cst, StampLayout stamp,
-                              TextOffset offset, NodeCount& rank) {
-  rank = cst.leaves_before(offset);
-  while (rank-- > 0) {
-    const CstLeaf leaf = cst.leaf(rank);
+                              TextOffset offset) {
+  for (NodeId behind = cst.leaf_after(offset); behind > 0;) {
+    const CstLeaf leaf = cst.as_leaf(behind = cst.leaf_before(behind));
     if (leaf.begin < offset && ll_replayable(cst, stamp, leaf)) return leaf;
   }
   return {};
@@ -93,7 +92,7 @@ inline CstLeaf ll_leaf_before(const Cst& cst, StampLayout stamp,
 // and inside it the line's end is a blank. The token before the closer, then.
 template <const auto& T>
 inline CstLeaf ll_before_invented_closer(const Cst& cst, StampLayout stamp,
-                                         const CstLeaf& leaf, NodeCount& rank) {
+                                         const CstLeaf& leaf) {
   if constexpr (!kBracketed<T>) {
     return leaf;
   } else {
@@ -106,14 +105,12 @@ inline CstLeaf ll_before_invented_closer(const Cst& cst, StampLayout stamp,
     };
     if (!leaf || !is(term_of(leaf), [](const TermInfo& t) { return t.joins; }))
       return leaf;
-    NodeCount at = rank;
     bool closes = false;
-    while (at > 0) {
-      const CstLeaf before = cst.leaf(--at);
+    for (NodeId behind = leaf.id; behind > 0;) {
+      const CstLeaf before = cst.as_leaf(behind = cst.leaf_before(behind));
       if (before.hidden) continue;
       if (!ll_invented(before)) {
         if (!closes || !ll_replayable(cst, stamp, before)) return leaf;
-        rank = at;
         return before;
       }
       closes = closes ||
@@ -252,42 +249,56 @@ inline void ll_first_of_each(std::vector<LlConfig>& configs) {
 
 // The widths a replay takes in turn: a few tokens, then back to the first token
 // of each record around the last token, innermost first, then the whole text.
-// After a width whose first token named an arm, the next one doubles.
+// After a width whose first token named an arm, the next one doubles. A record
+// is counted only as far as the next width asks.
 class LlReplayWidth {
  public:
   LlReplayWidth(const Cst& cst, StampLayout stamp, const LlSpine& spine,
-                NodeCount end, const CancellationPoll& stop)
-      : _cst(cst), _stamp(stamp), _spine(spine), _rank(end), _stop(stop) {}
+                NodeId end, const CancellationPoll& stop)
+      : _cst(cst), _stamp(stamp), _spine(spine), _behind(end), _stop(stop) {}
 
   unsigned next(bool named = false) {
     if (_round++ == 0) return _last = 0;
-    const unsigned wider =
-        _held != 0 ? std::exchange(_held, 0u) : record(named);
-    if (!_few && _last < kLlReplayLeaves &&
-        (wider == 0 || wider > kLlReplayLeaves)) {
-      _few = true;
-      _held = wider;
-      return _last = kLlReplayLeaves;
+    unsigned wider = 0;
+    if (_held != 0) {
+      wider = std::exchange(_held, 0u);
+      if (wider == kMore) wider = record(_heldNamed, _heldLast);
+    } else if (!_few && _last < kLlReplayLeaves) {
+      wider = record(named, _last, kLlReplayLeaves + 1u);
+      if (wider == 0 || wider > kLlReplayLeaves) {
+        _few = true;
+        _held = wider;
+        _heldNamed = named;
+        _heldLast = _last;
+        return _last = kLlReplayLeaves;
+      }
+    } else {
+      wider = record(named, _last);
     }
-    return _last = wider != 0 ? wider : _cst.leaf_count();
+    return _last = wider != 0 ? wider : _cst.size();
   }
 
  private:
-  unsigned record(bool named) {
+  // Past `most` leaves counted, the width is only known to be wider.
+  static constexpr unsigned kMore = ~0u;
+
+  unsigned record(bool named, unsigned last, unsigned most = kMore) {
     if (!_opened) {
       _opened = true;
       _level = _spine.records().size();
+      _bound = _behind;
     }
     for (;;) {
-      if (named ? _seen > _last && _seen >= 2u * _last : _seen > _last + 1u)
+      while (_behind > _bound) {
+        _stop.poll();
+        _behind = _cst.leaf_before(_behind);
+        if (ll_replayable(_cst, _stamp, _cst.as_leaf(_behind))) ++_seen;
+        if (_seen > most) return kMore;
+      }
+      if (named ? _seen > last && _seen >= 2u * last : _seen > last + 1u)
         return named ? _seen : _seen - 1u;
       if (_level == 0) return 0;
-      const NodeCount stop =
-          _cst.leaves_before(_cst[_spine.records()[--_level]].begin);
-      while (_rank > stop) {
-        _stop.poll();
-        if (ll_replayable(_cst, _stamp, _cst.leaf(--_rank))) ++_seen;
-      }
+      _bound = _cst.leaf_after(_cst[_spine.records()[--_level]].begin);
     }
   }
 
@@ -295,12 +306,16 @@ class LlReplayWidth {
   StampLayout _stamp;
   const LlSpine& _spine;
   std::size_t _level = 0;
-  NodeCount _rank;
+  // The leaf the count has reached, and the first one of the record counted.
+  NodeId _behind;
+  NodeId _bound = 0;
   const CancellationPoll& _stop;
   unsigned _seen = 0;
   unsigned _last = 0;
   unsigned _held = 0;
+  unsigned _heldLast = 0;
   unsigned _round = 0;
+  bool _heldNamed = false;
   bool _opened = false;
   bool _few = false;
 };
@@ -519,20 +534,20 @@ inline bool ll_names_arm(const LlCtxPool& pool, std::uint32_t state,
   return false;
 }
 
-// Replays the readings after the tokens before rank `end`: the last `window` of
-// them, or all from the start. The result says how far the stack is known;
+// Replays the readings after the tokens before record `end`: the last `window`
+// of them, or all from the start. The result says how far the stack is known;
 // `tail` keeps the steps whose conditions reach the caret.
 template <const auto& T>
 inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
-                          const LlSpine& spine, NodeCount end, unsigned window,
+                          const LlSpine& spine, NodeId end, unsigned window,
                           bool bound, bool& exact, LlTail& tail,
                           const CancellationPoll& stop) {
   std::vector<CstLeaf> taken;
-  NodeCount rank = end;
+  NodeId behind = end;
   unsigned read = 0;
-  while (rank > 0 && read <= window) {
+  while (behind > 0 && read <= window) {
     stop.poll();
-    const CstLeaf leaf = cst.leaf(--rank);
+    const CstLeaf leaf = cst.as_leaf(behind = cst.leaf_before(behind));
     if (ll_replayable(cst, stamp, leaf)) {
       taken.push_back(leaf);
       ++read;
@@ -716,7 +731,7 @@ inline bool ll_trivia_to(std::string_view text, std::uint16_t mode,
 // A run that matches no level names nothing.
 template <const auto& T>
 inline std::vector<SymbolId> ll_indents_at(const Cst& cst, StampLayout stamp,
-                                           NodeCount count, TextOffset from,
+                                           NodeId end, TextOffset from,
                                            TextOffset at,
                                            const CancellationPoll& stop) {
   std::vector<SymbolId> found;
@@ -724,16 +739,16 @@ inline std::vector<SymbolId> ll_indents_at(const Cst& cst, StampLayout stamp,
   constexpr SymbolId dedent = kSyntheticTerm<T, kSyntheticDedent>;
   if constexpr (indent != 0 || dedent != 0) {
     const char* const text = cst.text().data();
-    const NodeCount before = cst.leaves_before(at);
-    const TextOffset held = before > 0 ? cst.leaf(before - 1).end : 0;
+    const NodeId before = cst.leaf_after(at);
+    const TextOffset held = before > 0 ? cst[cst.leaf_before(before)].end : 0;
     if (!indent_line_start(text, from, [held] { return held; })) return found;
     const IndentRun blanks = indent_run(text, from, at);
     if (blanks.stop != at) return found;
     std::vector<IndentLevel> levels;
     IndentAt open;
-    for (NodeCount rank = 0; rank < count; ++rank) {
+    for (NodeId id = 0; id < end; id = cst.next_leaf(id)) {
       stop.poll();
-      const CstLeaf leaf = cst.leaf(rank);
+      const CstLeaf leaf = cst.as_leaf(id);
       const std::uint16_t pos = stamp.state(cst[leaf.id]);
       if (leaf.hidden || pos == 0 || pos > T.nafter ||
           T.nodes[pos - 1].term == kNoRow)
@@ -763,9 +778,8 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
                                 const CancellationToken& cancelToken) {
   if (!StampedGrammar::caret_in(cst, at, resume)) return;
   const StampLayout stamp = grammar.stamp();
-  NodeCount rank = 0;
-  CstLeaf leaf = ll_leaf_before(cst, stamp, at, rank);
-  leaf = ll_before_invented_closer<T>(cst, stamp, leaf, rank);
+  CstLeaf leaf = ll_leaf_before(cst, stamp, at);
+  leaf = ll_before_invented_closer<T>(cst, stamp, leaf);
   const std::uint16_t pos = leaf ? stamp.state(cst[leaf.id]) : 0;
   if (pos > T.nafter) return;
   const std::uint32_t seed = pos == 0 ? T.atnStart : T.nodeAfter[pos - 1];
@@ -800,10 +814,11 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   // A comment that ends at the caret and closes on nothing goes on over what is
   // typed: `//` then `entity` is one comment. A candidate is offered where the
   // comment, read again with it behind, still ends here.
-  NodeCount behind = cst.leaves_before(at);
-  while (behind > 0 && cst.leaf(behind - 1).begin == cst.leaf(behind - 1).end)
-    --behind;
-  const CstLeaf prior = behind > 0 ? cst.leaf(behind - 1) : CstLeaf{};
+  CstLeaf prior{};
+  for (NodeId behind = cst.leaf_after(at);
+       behind > 0 && prior.begin == prior.end;)
+    prior = cst.as_leaf(behind = cst.leaf_before(behind));
+  if (prior.begin == prior.end) prior = {};
   const TextOffset gapFrom = ll_gap_from(cst, at);
   // What the blanks and comments between the last token and the caret come to
   // under one candidate's alphabet: whether they reach the caret, and the
@@ -934,13 +949,13 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   // A replay that ends on a stack it only knows from some token on cannot say
   // what the readings that return past that token go on to read: those are
   // asked again from further back.
-  const NodeCount before = leaf ? cst.leaves_before(leaf.begin) : 0;
+  const NodeId before = leaf ? cst.leaf_after(leaf.begin) : 0;
   const LlSpine spine(cst, leaf);
   // The stop, read as the replay steps leaves.
   const CancellationPoll stop(cancelToken);
   LlReplayWidth widths(cst, stamp, spine, before, stop);
-  const std::vector<SymbolId> indentsAhead =
-      ll_indents_at<T>(cst, stamp, leaf ? rank + 1 : 0, gapFrom, at, stop);
+  const std::vector<SymbolId> indentsAhead = ll_indents_at<T>(
+      cst, stamp, leaf ? cst.next_leaf(leaf.id) : 0, gapFrom, at, stop);
   bool named = false;
   LlSimulation sim(T.atn);
   for (unsigned window = widths.next();; window = widths.next(named)) {

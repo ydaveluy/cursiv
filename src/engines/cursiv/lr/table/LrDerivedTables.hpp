@@ -40,6 +40,10 @@ struct LrDerivedTables {
   // replay steps over it as one goto. A row whose run is empty is walked.
   std::array<std::uint32_t, D.rowLhsRows + 1> rowLhsBase{};
   std::array<std::uint16_t, D.rowLhs> rowLhs{};
+  // Per state, the one state a shift or a goto reaches it from, or 0xFFFF where
+  // none or several do or the move may leave a level or a bracket open: a stack
+  // whose states each have one down to the start state is known from its top.
+  std::array<std::uint16_t, S.states> preds{};
 
   LrSetStore<S, S.dfa, D.typoReachSets> typoReach{};
   std::array<std::uint8_t, S.dfa> lexBodies{};

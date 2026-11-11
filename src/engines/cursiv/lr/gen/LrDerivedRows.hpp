@@ -32,6 +32,7 @@ struct LrDerivedRows {
   std::vector<std::uint16_t> shiftTerm{};
   std::vector<std::uint32_t> rowLhsBase{};
   std::vector<std::uint16_t> rowLhs{};
+  std::vector<std::uint16_t> preds{};
 
   SetPool typoReach{};
   std::vector<std::uint8_t> lexBodies{};

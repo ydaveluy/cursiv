@@ -244,10 +244,10 @@ std::vector<CstNodeView> find_hidden_nodes(const AstNode& node,
 CstLeaf find_leaf_before_offset(const Cst& cst, TextOffset offset) {
   if (!cst.has_entry()) return {};
   const NodeId first = cst.entry_begin();
-  // Ends never decrease, so the leaves ending at or before the caret are a
-  // prefix of the index, and the answer is the last eligible one of it.
-  for (NodeCount rank = cst.leaves_before(offset); rank-- > 0;) {
-    const CstLeaf leaf = cst.leaf(rank);
+  // Ends never decrease, so the leaves ending at or before the caret come
+  // before the first one ending past it, and the answer is the last eligible.
+  for (NodeId at = cst.leaf_after(offset); at > 0;) {
+    const CstLeaf leaf = cst.as_leaf(at = cst.leaf_before(at));
     if (leaf.id < first) break;
     if (leaf.hidden || leaf.recovered || leaf.begin == leaf.end) continue;
     return leaf;
@@ -276,19 +276,20 @@ CstLeaf detail::word_at(const Cst& cst, TextOffset offset) {
   const auto word = [&](const CstLeaf& leaf) {
     return !leaf.hidden && leaf.end > leaf.begin && ends_a_word(text, leaf);
   };
-  const NodeCount rank = cst.leaves_before(offset);
-  // Every leaf ending at the caret sits at the top of the rank -- a repair's
-  // zero-width record can stand over the word the author typed.
-  for (NodeCount r = rank; r > 0; --r) {
-    const CstLeaf before = cst.leaf(r - 1);
+  const NodeId after = cst.leaf_after(offset);
+  // Every leaf ending at the caret comes just before the first one ending past
+  // it -- a repair's zero-width record can stand over the word the author
+  // typed.
+  for (NodeId r = after; r > 0;) {
+    const CstLeaf before = cst.as_leaf(r = cst.leaf_before(r));
     if (before.end != offset) break;
     if (word(before)) return before;
   }
   // `<=`: a caret at a word's own start writes in that word's place. Asked at
   // the caret alone it would answer nothing but punctuation -- every spelling
   // ending in a letter lexes into the word behind it.
-  if (rank < cst.leaf_count())
-    if (const CstLeaf at = cst.leaf(rank); at.begin <= offset && word(at))
+  if (after < cst.size())
+    if (const CstLeaf at = cst.as_leaf(after); at.begin <= offset && word(at))
       return at;
   return {};
 }

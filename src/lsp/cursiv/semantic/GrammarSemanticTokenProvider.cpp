@@ -113,13 +113,13 @@ void GrammarSemanticTokenProvider::computeHighlighting(
     return from < end && to > begin;
   };
 
-  // The window's leaves, by rank: from the first one ending past `begin` to
-  // the last one starting before `end`.
+  // The window's leaves: from the first one ending past `begin` to the last
+  // one starting before `end`, `past` the leaf after it or `size()`.
   const bool whole = begin == 0 && end >= cst.text().size();
-  const NodeCount first = whole ? 0 : cst.leaves_before(begin);
-  NodeCount past = first;
-  while (!whole && past < cst.leaf_count() && cst.leaf(past).begin < end)
-    ++past;
+  const NodeId first = whole ? 0 : cst.leaf_after(begin);
+  NodeId past = first;
+  while (!whole && past < cst.size() && cst[past].begin < end)
+    past = cst.next_leaf(past);
 
   // 1. Declarations and their owners, nested as the outline nests them.
   const auto declare = [&](const CstNodeView& nameNode, bool owner) {
@@ -137,11 +137,11 @@ void GrammarSemanticTokenProvider::computeHighlighting(
       if (owner != detail::NamedNodes::kNoOwner) owns[owner] = true;
     for (std::size_t i = 0; i < named.nodes.size(); ++i)
       declare(named.nameNodes[i], owns[i]);
-  } else if (first < cst.leaf_count() && past > 0) {
+  } else if (first < cst.size() && past > 0) {
     // A name lies in its node's record, so only the nodes whose record holds a
     // leaf of the window, or the gap it falls in, are asked.
-    const NodeId lo = cst.leaf(first).id;
-    const NodeId hi = cst.leaf(past - 1).id;
+    const NodeId lo = first;
+    const NodeId hi = cst.leaf_before(past);
     const OwnedNodes all = parsed.nodes();
     std::vector<const AstNode*> touching;
     auto at = std::ranges::lower_bound(all, lo, {}, &AstNode::cstNodeId);
@@ -216,8 +216,8 @@ void GrammarSemanticTokenProvider::computeHighlighting(
   if (whole) {
     cst.visit_leaves(colourLeaf);
   } else {
-    for (NodeCount rank = first; rank < past; ++rank)
-      colourLeaf(cst.leaf(rank));
+    for (NodeId id = first; id < past; id = cst.next_leaf(id))
+      colourLeaf(cst.as_leaf(id));
   }
 }
 

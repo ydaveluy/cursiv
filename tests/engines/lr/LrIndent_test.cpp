@@ -288,6 +288,13 @@ int main() {
     CHECK(offers_over(*joined, "joined a[b\n  ||]\n", "]"));
     CHECK(offers_over(*joined, "joined a[b\n  ||]\n", ","));
     CHECK(offers_over(*joined, "joined a[b[c,\n  d\n  ||", ","));
+    // A replay that starts past the items of a suite a rule opened keeps its
+    // level: at the items' indentation the next item is offered.
+    std::string suite = "single %\n";
+    for (int i = 0; i < 40; ++i) suite += "  ab\n";
+    suite += "  ";
+    CHECK(offers(*joined, suite, static_cast<cursiv::TextOffset>(suite.size()),
+                 "ID"));
   }
   // A comment that ends at the caret goes on over what is typed there: no
   // word is offered inside it, and the line's own end still is.

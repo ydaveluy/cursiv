@@ -51,10 +51,9 @@ struct NameRole {
                                                    TextOffset end) {
   const Grammar* const grammar = cst.grammar();
   if (grammar == nullptr) return std::nullopt;
-  const NodeCount rank = begin == 0 ? 0 : cst.leaves_before(begin - 1);
-  if (rank >= cst.leaf_count()) return std::nullopt;
-  for (NodeId id = cst.leaf(rank).id; id < cst.size() && cst[id].end <= end;
-       ++id) {
+  const NodeId first = begin == 0 ? 0 : cst.leaf_after(begin - 1);
+  if (first == cst.size()) return std::nullopt;
+  for (NodeId id = first; id < cst.size() && cst[id].end <= end; ++id) {
     const CstNode& record = cst[id];
     if (record.begin != begin || record.end != end || record.hidden != 0)
       continue;

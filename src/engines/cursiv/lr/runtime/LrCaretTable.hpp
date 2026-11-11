@@ -112,6 +112,9 @@ struct LrCaretTable {
   const char* names = nullptr;
   std::span<const LrProduction> prods;
   std::span<const LrReducePlan> reductions;
+  // Per state, the one state a move goes to it from, or `kDeadState` where
+  // none or several do or the move may leave a level or a bracket open.
+  std::span<const std::uint16_t> preds;
   // The sample words each terminal is read as, per mode; null where the table
   // asks no condition.
   const LrSampleReads* sampleReads = nullptr;

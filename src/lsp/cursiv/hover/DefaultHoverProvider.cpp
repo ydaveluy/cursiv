@@ -30,10 +30,9 @@ namespace {
   if (const CstNode& entry = cst[cst.entry_root()];
       offset < entry.begin || offset >= entry.end)
     return kNoNode;
-  const NodeCount rank = cst.leaves_before(offset);
-  if (rank == cst.leaf_count()) return kNoNode;
-  const CstLeaf leaf = cst.leaf(rank);
-  return leaf.begin <= offset ? leaf.id : kNoNode;
+  const NodeId after = cst.leaf_after(offset);
+  if (after == cst.size()) return kNoNode;
+  return cst[after].begin <= offset ? after : kNoNode;
 }
 
 }  // namespace

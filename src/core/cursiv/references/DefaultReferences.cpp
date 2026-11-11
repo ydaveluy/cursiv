@@ -74,9 +74,9 @@ const CoreServices* language_of(const Document& document,
 [[nodiscard]] const AstNode* node_at(const Document& document,
                                      TextOffset offset) {
   const Cst& cst = document.parseResult.cst();
-  const NodeCount rank = cst.leaves_before(offset);
-  if (rank >= cst.leaf_count()) return nullptr;
-  const CstLeaf leaf = cst.leaf(rank);
+  const NodeId after = cst.leaf_after(offset);
+  if (after == cst.size()) return nullptr;
+  const CstLeaf leaf = cst.as_leaf(after);
   if (leaf.begin > offset) return nullptr;
   return owner_of_leaf(cst, leaf.id);
 }

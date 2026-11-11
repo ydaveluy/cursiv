@@ -78,9 +78,8 @@ struct TokenSpan {
                                            const CancellationToken& token) {
   std::vector<NodeId> chain;
   const AstNode* owner = nullptr;
-  if (const NodeCount rank = cst.leaves_before(offset);
-      rank < cst.leaf_count()) {
-    owner = owner_of_leaf(cst, cst.leaf(rank).id);
+  if (const NodeId after = cst.leaf_after(offset); after < cst.size()) {
+    owner = owner_of_leaf(cst, after);
     while (owner != nullptr && owner->cstNodeId != kNoNode &&
            !covers(cst[owner->cstNodeId], offset))
       owner = owner->parent;

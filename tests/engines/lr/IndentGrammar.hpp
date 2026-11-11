@@ -144,6 +144,21 @@ struct Words : cursiv::GrammarSpec {
 };
 }  // namespace joined
 
+// A suite a rule opens alone, its items behind: each state inside it has one
+// predecessor, down to the rule that read the indent.
+namespace single {
+struct G : joined::Words {
+  struct Head : rule<create<ast::Node>(lit<"%"> + ref<NEWLINE> + ref<INDENT>)> {
+  };
+  struct Item : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>) +
+                                       ref<NEWLINE>)> {};
+  struct Root : rule<create<ast::Node>(
+                    append<&ast::Node::body>(ref<Head>) +
+                    many(append<&ast::Node::body>(ref<Item>)) + ref<DEDENT>)> {
+  };
+};
+}  // namespace single
+
 // One reading freezes before the newline. The other's indent covers bytes,
 // but its newline and name are only two real validation tokens: at EOF the
 // earlier reading can still repair one semicolon rather than three closers.
@@ -363,11 +378,11 @@ struct G : joined::Words {
 };
 }  // namespace marked
 
-// Three bracket and newline cases use the same lexical policy.
+// The bracket, newline and suite cases use the same lexical policy.
 struct G : Plain {
-  struct Case : rule<ref<Plain::Root> |
-                     (kw<"joined"> + ref<joined::G::Top>) |
-                     (kw<"guarded"> + ref<guarded::G::Root>)> {};
+  struct Case : rule<ref<Plain::Root> | (kw<"joined"> + ref<joined::G::Top>) |
+                     (kw<"guarded"> + ref<guarded::G::Root>) |
+                     (kw<"single"> + ref<single::G::Root>)> {};
   using entry = Case;
 };
 

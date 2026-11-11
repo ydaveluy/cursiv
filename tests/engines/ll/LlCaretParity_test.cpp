@@ -462,9 +462,10 @@ void a_frame_of_many_predecessors_costs_their_number() {
   CHECK(!next.empty());
 }
 
-// A stop requested before the question throws once the replay reaches a poll.
+// A stop requested before the question throws once the replay reaches a poll:
+// the repair at the start keeps the replay as long as the prefix.
 void a_stopped_question_throws_in_the_replay() {
-  std::string text = "fork:";
+  std::string text = "fork:pr ; ";
   for (int i = 0; i < 4000; ++i) text += "pr a; ";
   const auto at = static_cast<cursiv::TextOffset>(text.size());
   cursiv::CancellationTokenSource stop;

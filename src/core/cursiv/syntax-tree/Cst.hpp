@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -28,7 +29,7 @@
 #include "cursiv/utils/macros.hpp"
 
 // The concrete syntax tree: a postorder run of 16-byte records, indexed by
-// node id. A `const Cst&` changes only the two indexes built on first use.
+// node id. A `const Cst&` changes only the index built on first use.
 
 namespace cursiv {
 
@@ -74,8 +75,6 @@ class Cst {
     _enginesTape = other._enginesTape;
     _grammar = other._grammar;
     _owned = other._owned;
-    _leaves = std::move(other._leaves);
-    _leafIndex = other._leafIndex;
     _nodeRecords = std::move(other._nodeRecords);
     _nodeIndex = other._nodeIndex;
     _translation = std::move(other._translation);
@@ -143,8 +142,6 @@ class Cst {
     _enginesTape = false;
     _grammar = nullptr;
     _owned = {};
-    _leaves.clear();
-    _leafIndex = 0;
     _nodeRecords.clear();
     _nodeIndex = 0;
     _translation.reset();
@@ -237,35 +234,42 @@ class Cst {
     }
   }
 
-  // The leaves by rank, which is document order: ends never decrease, so a
-  // caret is one binary search away. The index is built once, on the first
-  // question -- a service that never asks a caret never pays for it.
+  // The leaves are found from the records: ends never decrease over them, so a
+  // caret is one bisection away, and record 0 is a leaf. A walk steps from one
+  // leaf to the next over the parents that close between them.
 
-  [[nodiscard]] CstLeaf leaf(NodeCount rank) const {
-    ensure_leaf_index();
-    const NodeId id = _leaves[rank];
+  // Record `id`, which has no child, as a leaf.
+  [[nodiscard]] CstLeaf as_leaf(NodeId id) const {
     return leaf_of(id, node(id));
   }
-  // What bounds a rank: `leaves_before` answers one past the last leaf behind a
-  // caret, which is a valid rank only against this.
-  [[nodiscard]] NodeCount leaf_count() const {
-    ensure_leaf_index();
-    return static_cast<NodeCount>(_leaves.size());
-  }
 
-  // How many leaves end at or before `offset` -- the rank one past the last
-  // leaf a caret sits behind.
-  [[nodiscard]] NodeCount leaves_before(TextOffset offset) const {
-    ensure_leaf_index();
-    NodeCount lo = 0, hi = static_cast<NodeCount>(_leaves.size());
+  // The first leaf ending past `offset`, or `size()`. A parent that read
+  // blanks past its last leaf can be the first record ending past it; its
+  // leaves then all end before, and the answer is the next leaf.
+  [[nodiscard]] NodeId leaf_after(TextOffset offset) const {
+    NodeId lo = 0, hi = size();
     while (lo < hi) {
-      const NodeCount mid = std::midpoint(lo, hi);
-      if (node(_leaves[mid]).end <= offset)
+      const NodeId mid = std::midpoint(lo, hi);
+      if (node(mid).end <= offset)
         lo = mid + 1;
       else
         hi = mid;
     }
-    return lo;
+    return lo == size() || childless(lo) ? lo : next_leaf(lo);
+  }
+
+  // The last leaf before record `at`, which is above 0; `at` may be `size()`.
+  [[nodiscard]] NodeId leaf_before(NodeId at) const {
+    do --at;
+    while (!childless(at));
+    return at;
+  }
+
+  // The first leaf after record `id`, or `size()`.
+  [[nodiscard]] NodeId next_leaf(NodeId id) const {
+    do ++id;
+    while (id < size() && !childless(id));
+    return id;
   }
 
  private:
@@ -274,14 +278,18 @@ class Cst {
 
   // Marks the records as written by an engine.
   void bind_stream() {
-    _leaves.clear();
     _enginesTape = true;
-    _leafIndex = 0;
     _nodeRecords.clear();
     _nodeIndex = 0;
   }
 
   void bind_entry(NodeId begin, NodeId end, NodeId root) {
+    // What `leaf_after` bisects on, checked once a parse is over.
+    assert(std::ranges::is_sorted(size() != 0
+                                      ? std::span(&_stream.at(0), size())
+                                      : std::span<const CstNode>{},
+                                  {}, &CstNode::end) &&
+           "record ends never decrease");
     _entryBegin = begin;
     _entryEnd = end;
     _entryRoot = root;
@@ -315,28 +323,6 @@ class Cst {
     return CstLeaf{id, n.begin, n.end, n.hidden != 0, n.recovered != 0};
   }
 
-  void ensure_leaf_index() const {
-    if (!published(_leafIndex)) [[unlikely]]
-      index_leaves();
-  }
-  // Builds the leaf index once.
-  CURSIV_NOINLINE void index_leaves() const {
-    build_once(_leafIndex, [this] {
-      // Room for every record, the room past the leaves never written; Wasm
-      // memory charges for that room, so there the leaves are counted first.
-      std::size_t room = size();
-      if constexpr (sizeof(void*) < 8) {
-        room = 0;
-        for (NodeId id = 0; id < size(); ++id)
-          room += node(id).subtreeSize == 1 ? 1 : 0;
-      }
-      _leaves.clear();
-      _leaves.reserve(room);
-      for (NodeId id = 0; id < size(); ++id)
-        if (node(id).subtreeSize == 1) _leaves.push_back(id);
-    });
-  }
-
   // The walks of `CstUtils`, which ask `carries_node` of every record they
   // pass: a construction's search must stop at a nested node's record.
   friend struct detail::CstWalk;
@@ -352,8 +338,8 @@ class Cst {
   // read it live.
   CURSIV_NOINLINE void index_nodes() const;
 
-  // Builds an index once and publishes it. One lock for every index, so a
-  // second reader waits instead of building it too. `build` clears the list.
+  // Builds the index once and publishes it: a second reader waits instead of
+  // building it too. `build` clears the list.
   template <class Build>
   void build_once(std::uint8_t& flag, Build&& build) const {
     const std::lock_guard lock(_indexLock);
@@ -392,11 +378,6 @@ class Cst {
   bool _enginesTape = false;
   const Grammar* _grammar = nullptr;
   OwnedNodes _owned;
-  // Built on the first caret question and never after: a rank in it is
-  // document order, so a caret is one bisection away.
-  mutable std::vector<NodeId> _leaves;
-  // Whether the leaf index a reader depends on is already visible to it.
-  mutable std::uint8_t _leafIndex = 0;
   // Built on the first walk of `CstUtils` and never after: bit `id` says a
   // node of `_owned` was built from record `id`.
   mutable std::vector<std::uint64_t> _nodeRecords;

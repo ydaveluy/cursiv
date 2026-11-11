@@ -25,6 +25,7 @@
 #include "cursiv/shared/gen/SetPool.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
+#include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
 namespace cursiv::engine {
@@ -82,6 +83,85 @@ struct LrDeriving {
   // The nonterminals a written row's record may reduce to. A production that
   // may start with a nullable symbol leaves its row unnamed: its record sits on
   // an empty frame, and the goto would leave from it.
+  // Per state, the one state whose shifts and gotos reach it, or `kDeadState`;
+  // `kDeadState` too where the move may leave a level or a bracket open.
+  void preds(LrDerivedRows& rows) const {
+    const auto& g = a.cfg;
+    const auto levels = [&](std::uint16_t t) {
+      return g.terms[t].synthetic == kSyntheticIndent   ? 1
+             : g.terms[t].synthetic == kSyntheticDedent ? -1
+                                                        : 0;
+    };
+    // What every text of a rule does to the levels and the brackets: what it
+    // adds, and the lowest it reaches, unknown where two texts differ.
+    struct Moves {
+      int level = 0, lowLevel = 0, depth = 0, lowDepth = 0;
+      bool operator==(const Moves&) const = default;
+    };
+    enum class Known : std::uint8_t { no, yes, mixed };
+    std::vector<Known> known(g.nnts, Known::no);
+    std::vector<Moves> moves(g.nnts);
+    for (bool changed = true; changed;) {
+      changed = false;
+      for (unsigned p = 0; p < g.nprods; ++p) {
+        const LrLowProd& q = g.prods[p];
+        if (known[q.lhs] == Known::mixed) continue;
+        Moves m;
+        Known at = Known::yes;
+        for (unsigned i = 0; i < q.len && at == Known::yes; ++i) {
+          const std::uint16_t y = g.sym_at(q, i);
+          Moves by;
+          if (!is_term(y)) {
+            at = known[nt_index(y)];
+            by = moves[nt_index(y)];
+          } else {
+            by.level = levels(y);
+            by.depth = g.terms[y].delim;
+            by.lowLevel = std::min(by.level, 0);
+            by.lowDepth = std::min(by.depth, 0);
+          }
+          m.lowLevel = std::min(m.lowLevel, m.level + by.lowLevel);
+          m.lowDepth = std::min(m.lowDepth, m.depth + by.lowDepth);
+          m.level += by.level;
+          m.depth += by.depth;
+        }
+        if (at == Known::no) continue;
+        const Known was = known[q.lhs];
+        if (at == Known::mixed || (was == Known::yes && moves[q.lhs] != m))
+          known[q.lhs] = Known::mixed;
+        else if (was == Known::no)
+          known[q.lhs] = Known::yes, moves[q.lhs] = m;
+        changed = changed || known[q.lhs] != was;
+      }
+    }
+    // A rule whose every text closes what it opens and no other.
+    const auto closed = [&](std::uint16_t nt) {
+      return known[nt] == Known::yes && moves[nt] == Moves{};
+    };
+    rows.preds.assign(a.nstates, kDeadState);
+    std::vector<bool> reached(a.nstates, false), open(a.nstates, false);
+    for (std::uint32_t s = 0; s < a.nstates; ++s) {
+      const auto from = [&](bool opens) {
+        return [&, opens](std::uint16_t to) {
+          open[to] = open[to] || opens;
+          if (!reached[to]) {
+            reached[to] = true;
+            rows.preds[to] = static_cast<std::uint16_t>(s);
+          } else if (rows.preds[to] != s) {
+            rows.preds[to] = kDeadState;
+          }
+        };
+      };
+      for (const LrAction& x : a.action_row(s))
+        a.each_target(x,
+                      from(levels(x.term) != 0 || g.terms[x.term].delim != 0));
+      for (const LrGotoRows::Edge& e : a.gotoRows[s])
+        a.each_goto_target(e, from(!closed(e.nt)));
+    }
+    for (std::uint32_t s = 0; s < a.nstates; ++s)
+      if (open[s]) rows.preds[s] = kDeadState;
+  }
+
   void row_lhs(LrDerivedRows& rows, std::size_t nrows) const {
     const auto& c = a.cfg;
     const std::vector<std::uint8_t>& nullable = a.nullable;
@@ -231,6 +311,7 @@ void lr_derive_tables(LrBuildTable& a, std::span<const ElementId> sites) {
   d.repair_states(r);
   if (a.nconflicts != 0 || a.multiCand) d.goto_classes(r);
   d.row_lhs(r, sites.size());
+  d.preds(r);
   r.shiftTerm = lr_shift_terms(a);
   d.expect(r);
   LexSkipRuns blanks = lex_skip_runs(LrLexView{a});

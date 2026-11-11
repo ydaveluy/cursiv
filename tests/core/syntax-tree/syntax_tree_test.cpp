@@ -3256,29 +3256,37 @@ void insert_across_a_reallocation() {
   CHECK(cst.size() == 4098 && cst[4097].begin == 4096);
 }
 
-// The first caret questions, asked at once from several threads: one builds
-// the leaf index while the others wait for it, and all read the same one.
-void concurrent_first_questions_share_one_index() {
-  std::string big(20000, 'x');
-  cursiv::Cst cst{std::string_view(big)};
+// The leaves are found from the records: the first ending past an offset, the
+// one before a record and the next one, over parents, trivia and an empty
+// record.
+void leaves_are_found_from_the_records() {
+  const std::string_view text = "ab cd ef";
+  cursiv::Cst cst{text};
   {
     cursiv::CstBuilder b(cst);
-    for (int i = 0; i < 10000; ++i)
-      b.leaf(static_cast<cursiv::TextOffset>(2 * i),
-             static_cast<cursiv::TextOffset>(2 * i + 1), 0);
+    const auto outer = b.enter();
+    (void)b.leaf(0, 2, 0);      // 0
+    (void)b.hidden(2, 3, 0);    // 1
+    (void)b.leaf(3, 5, 0);      // 2
+    (void)b.exit(outer, 0, 0);  // 3, a parent
+    (void)b.hidden(5, 6, 0);    // 4, trailing trivia
+    const auto last = b.enter();
+    (void)b.exit(b.enter(), 6, 0);  // 5, an empty record
+    (void)b.leaf(6, 8, 0);          // 6
+    (void)b.exit(last, 6, 0);       // 7, a parent
   }
-  std::array<cursiv::NodeCount, 8> ranks{};
-  std::latch start(ranks.size());
-  {
-    std::vector<std::jthread> askers;
-    for (std::size_t t = 0; t < ranks.size(); ++t)
-      askers.emplace_back([&, t] {
-        start.arrive_and_wait();
-        ranks[t] = cst.leaves_before(10001);
-      });
-  }
-  for (const cursiv::NodeCount rank : ranks) CHECK(rank == 5001);
-  CHECK(cst.leaf_count() == 10000);
+  CHECK(cst.size() == 8 && !cst.childless(3) && !cst.childless(7));
+  CHECK(cst.leaf_after(0) == 0 && cst.leaf_after(1) == 0);
+  CHECK(cst.leaf_after(2) == 1 && cst.leaf_after(3) == 2);
+  CHECK(cst.leaf_after(5) == 4 && cst.leaf_after(6) == 6);
+  CHECK(cst.leaf_after(8) == cst.size() && cst.leaf_after(99) == cst.size());
+  CHECK(cst.leaf_before(4) == 2 && cst.leaf_before(6) == 5);
+  CHECK(cst.leaf_before(cst.size()) == 6 && cst.leaf_before(1) == 0);
+  CHECK(cst.next_leaf(2) == 4 && cst.next_leaf(4) == 5);
+  CHECK(cst.next_leaf(6) == cst.size());
+  const cursiv::CstLeaf trivia = cst.as_leaf(4);
+  CHECK(trivia.id == 4 && trivia.hidden && trivia.begin == 5 &&
+        trivia.end == 6);
 }
 
 }  // namespace
@@ -3296,7 +3304,7 @@ void run() {
   exit_inserts_before_trailing_trivia();
   empty_composite_keeps_the_order();
   insert_across_a_reallocation();
-  concurrent_first_questions_share_one_index();
+  leaves_are_found_from_the_records();
 }
 
 }  // namespace cst
