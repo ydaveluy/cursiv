@@ -13,9 +13,10 @@ let monaco, editor, languages, current = null;
 const registered = new Map();   // Monaco language id -> { refresh }
 const viewStates = new Map();
 
-function setStatus(phase, text) {
+function setStatus(phase, text, detail = '') {
   state.phase = phase;
   $('server-state').dataset.phase = phase;
+  $('server-state').title = detail;
   $('server-text').textContent = text;
   $('restart').hidden = phase !== 'stopped';
 }
@@ -232,6 +233,8 @@ async function startSession(session, wantedDoc) {
       for (const version of d.sent.keys()) if (version <= p.version) d.sent.delete(version);
     }
     state.diagnostics[p.uri] = p.diagnostics;
+    // A build that published has succeeded: an earlier failure is over.
+    $('server-message').textContent = '';
     monaco.editor.setModelMarkers(d.model, 'cursiv', p.diagnostics.map((diag) => ({
       severity: [, monaco.MarkerSeverity.Error, monaco.MarkerSeverity.Warning,
                  monaco.MarkerSeverity.Info, monaco.MarkerSeverity.Hint][diag.severity ?? 1],
@@ -242,7 +245,15 @@ async function startSession(session, wantedDoc) {
     updateTabs();
     if (p.uri === state.document) updateDiagnosticsStatus();
   });
-  server.on('window/showMessage', (p) => console.info(`[${lang.id}]`, p.message));
+  // Errors and warnings show in the status bar; the rest goes to the console.
+  server.on('window/showMessage', (p) => {
+    if (session.disposed) return;
+    console.info(`[${lang.id}]`, p.message);
+    if (p.type <= 2) {
+      $('server-message').textContent = p.message;
+      $('server-message').title = p.message;
+    }
+  });
   server.on('window/logMessage', (p) => console.debug(`[${lang.id}]`, p.message));
 
   const init = await server.request('initialize', {
@@ -291,7 +302,8 @@ async function startSession(session, wantedDoc) {
     registered.get(languageId).refresh();
   }
   state.startMs = Math.round(performance.now() - t0);
-  setStatus('ready', `Server ready · ${(server.size / 1048576).toFixed(1)} MB module · started in ${state.startMs} ms`);
+  setStatus('ready', 'Server ready',
+            `${(server.size / 1048576).toFixed(1)} MB module, started in ${state.startMs} ms`);
 }
 
 async function main() {

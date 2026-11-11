@@ -90,6 +90,7 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--md-default-fg-color); font-family: var(--md-code-font-family);
 }
+.cursiv-demo .message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--demo-error); }
 .cursiv-demo .right { display: flex; gap: .8rem; margin-left: auto; white-space: nowrap; }
 
 @media (max-width: 44.9375em) {

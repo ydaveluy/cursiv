@@ -37,6 +37,7 @@ definition, rename and formatting all come from it.
       <span class="warn" title="Warnings">▲ <b id="diag-warnings">0</b></span>
       <span id="diag-info" class="info"></span>
       <span id="diag-first" class="first"></span>
+      <span id="server-message" class="message"></span>
     </span>
     <span class="right"><span id="build-time" title="From the last edit to its diagnostics"></span><span id="cursor">Ln 1, Col 1</span><span id="language-id"></span></span>
   </div>
