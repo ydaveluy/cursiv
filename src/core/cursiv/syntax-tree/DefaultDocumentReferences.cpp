@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -103,10 +104,13 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
 
   AstNode* const target = found->node;
   if (target == nullptr) return failed();
+  assert(found->type == target->type &&
+         "a description carries the type of its node");
   // A target the site cannot hold is not an answer: the scope decided it was
-  // visible, the site -- its narrowing included -- decides it fits.
+  // visible, the site -- its narrowing included -- decides it fits, by the type
+  // the description carries: the node itself is not read.
   const std::uint8_t which =
-      detail::RefFilter{&ops, narrow}.branch(target->type);
+      detail::RefFilter{&ops, narrow}.branch(found->type);
   if (which == kNoBranch) return failed();
   // Named: a braced return zeroes the padding through the stack first.
   const Answer resolved{target, RefState::Resolved, which};
@@ -257,7 +261,9 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
   const detail::RefFilter filter{&ops, narrow};
   for (const AstNodeDescription* const entry : found) {
     if (entry == nullptr || entry->node == nullptr) continue;
-    const std::uint8_t which = filter.branch(entry->node->type);
+    assert(entry->type == entry->node->type &&
+           "a description carries the type of its node");
+    const std::uint8_t which = filter.branch(entry->type);
     if (which != kNoBranch) out.push_back({entry->node, which});
   }
   return out.empty() ? RefState::ErrorNotFound : RefState::Resolved;

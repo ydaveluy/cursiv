@@ -16,8 +16,9 @@ struct AstNodeDescription {
   // A view into the parse result: the document's text, or a node's `string`.
   // Every route that frees a parse purges the index rows first.
   std::string_view name;
-  // The node's type as the process knows it: the tag's address, resolved once,
-  // so filtering a scope is one bit test per candidate.
+  // The type of `node`, always: scopes filter on it and the linker picks a
+  // reference's branch from it, without reading the node. The tag's address,
+  // so a filter is one bit test per candidate.
   const AstTypeTag* type = nullptr;
 
   DocumentId documentId = kNoDocument;
