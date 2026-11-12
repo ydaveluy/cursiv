@@ -1,6 +1,6 @@
-# A project outside this tree, built and run as a consumer would: its tree
-# holds no generated source, it names no engine header, and touching its own
-# unit rebuilds only that unit and the link.
+# A consumer's project: no generated source in its tree, no engine header
+# named, and touching its own unit rebuilds that unit and the link. Configured
+# alone, then built in the scaffolded project's tree, where Cursiv is compiled.
 cmake_minimum_required(VERSION 3.30)
 
 file(READ ${SOURCE}/main.cpp _app)
@@ -14,7 +14,7 @@ execute_process(
     COMMAND ${CMAKE_COMMAND} -S ${SOURCE} -B ${WORK} -G Ninja
             -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_CXX_COMPILER=${CXX}
-            -DCMAKE_CXX_FLAGS=-fstack-protector-strong
+            "-DCMAKE_CXX_FLAGS=${FLAGS}"
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
             -DCURSIV_SOURCE_DIR=${CURSIV}
             -DCURSIV_BUILD_TESTS=OFF
@@ -49,30 +49,42 @@ if(NOT _count EQUAL 3)
                       "of 3. The last command:\n${_command}")
 endif()
 
-execute_process(COMMAND ${CMAKE_COMMAND} --build ${WORK} -- -n
-    RESULT_VARIABLE _rc OUTPUT_VARIABLE _plan ERROR_VARIABLE _plan)
-if(NOT _rc EQUAL 0 OR _plan MATCHES "CMakeFiles[/\\](cursivCli|cursivLsp|cursivMcp|cursivTest|lsp|lspgen)[.]dir[/\\]")
-  message(FATAL_ERROR "A core-only consumer builds unused services:\n${_plan}")
+# Every command of the default target, from a tree where nothing is built.
+execute_process(COMMAND ${CMAKE_COMMAND} --build ${WORK} -- -t commands all
+    OUTPUT_VARIABLE _plan COMMAND_ERROR_IS_FATAL ANY)
+if(_plan MATCHES "CMakeFiles[/\\](cursivCli|cursivLsp|cursivMcp|cursivTest|lsp|lspgen)[.]dir[/\\]")
+  message(FATAL_ERROR "A core-only consumer builds unused services: ${CMAKE_MATCH_1}")
 endif()
 
+# The consumer becomes a directory of the scaffolded project: the build that
+# follows compiles its own sources and nothing of Cursiv.
+set(_build ${PROJECT}/build)
+file(APPEND ${PROJECT}/CMakeLists.txt "add_subdirectory(\"${SOURCE}\" consumer)\n")
+execute_process(COMMAND ${CMAKE_COMMAND} -S ${PROJECT} -B ${_build}
+    RESULT_VARIABLE _rc OUTPUT_VARIABLE _log ERROR_VARIABLE _log)
+if(NOT _rc EQUAL 0)
+  message(FATAL_ERROR "the scaffolded project did not take the consumer (${_rc})\n${_log}")
+endif()
 string(TIMESTAMP _b0 "%s")
-execute_process(COMMAND ${CMAKE_COMMAND} --build ${WORK}
+execute_process(COMMAND ${CMAKE_COMMAND} --build ${_build}
                         --target consumer tiny_bench tiny_generated_bench tiny_services_bench
                 RESULT_VARIABLE _rc)
 string(TIMESTAMP _b1 "%s")
-math(EXPR _built "${_b1} - ${_b0}")
 if(NOT _rc EQUAL 0)
   message(FATAL_ERROR "consumer build failed (${_rc})")
 endif()
+# The whole build: Cursiv and the scaffolded project, then the consumer.
+file(READ ${_build}/seconds _built)
+math(EXPR _built "${_built} + ${_b1} - ${_b0}")
 
-execute_process(COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${WORK}
+execute_process(COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${_build}
                         --output-on-failure -R consumer_benchmark
                 RESULT_VARIABLE _rc)
 if(NOT _rc EQUAL 0)
   message(FATAL_ERROR "consumer benchmark failed (${_rc})")
 endif()
 
-set(_consumer ${WORK}/consumer)
+set(_consumer ${_build}/consumer/consumer)
 if(EXISTS ${_consumer}.exe)
   string(APPEND _consumer .exe)
 endif()
@@ -83,35 +95,29 @@ endif()
 
 # A transitive grammar include must rebuild the generator and rerun generation.
 file(TOUCH ${SOURCE}/core/tiny/ast.hpp)
-execute_process(COMMAND ${CMAKE_COMMAND} --build ${WORK} --target consumer
+execute_process(COMMAND ${CMAKE_COMMAND} --build ${_build} --target consumer
     RESULT_VARIABLE _rc OUTPUT_VARIABLE _log ERROR_VARIABLE _log)
 if(NOT _rc EQUAL 0 OR NOT _log MATCHES "tiny: writing")
   message(FATAL_ERROR "a grammar include did not trigger generation\n${_log}")
 endif()
 
-# Touching the application's own unit plans that unit and the link, nothing
+# Touching the application's own unit compiles that unit and links it, nothing
 # of the module; its time is judged against the whole build's.
 file(TOUCH ${SOURCE}/main.cpp)
-execute_process(COMMAND ${CMAKE_COMMAND} --build ${WORK} --target consumer
-                        -- -n
-                OUTPUT_VARIABLE _plan RESULT_VARIABLE _rc)
-if(NOT _rc EQUAL 0)
-  message(FATAL_ERROR "consumer plan failed (${_rc})")
-endif()
-string(REGEX MATCHALL "\\[[0-9]+/[0-9]+\\] [^\n]*" _edges "${_plan}")
-list(LENGTH _edges _planned)
-if(NOT _planned EQUAL 2)
-  message(FATAL_ERROR "touching the application's unit plans ${_planned} steps, "
-                      "not its compile and its link: the module is not holding "
-                      "the metaprogram\n${_plan}")
-endif()
 string(TIMESTAMP _t0 "%s")
-execute_process(COMMAND ${CMAKE_COMMAND} --build ${WORK} --target consumer
-                RESULT_VARIABLE _rc)
+execute_process(COMMAND ${CMAKE_COMMAND} --build ${_build} --target consumer
+    RESULT_VARIABLE _rc OUTPUT_VARIABLE _log ERROR_VARIABLE _log)
 string(TIMESTAMP _t1 "%s")
 math(EXPR _dt "${_t1} - ${_t0}")
 if(NOT _rc EQUAL 0)
-  message(FATAL_ERROR "consumer rebuild failed (${_rc})")
+  message(FATAL_ERROR "consumer rebuild failed (${_rc})\n${_log}")
+endif()
+string(REGEX MATCHALL "\\[[0-9]+/[0-9]+\\] (Building|Linking) [^\n]*" _steps "${_log}")
+list(LENGTH _steps _count)
+if(NOT _count EQUAL 2)
+  message(FATAL_ERROR "touching the application's unit compiles and links "
+                      "${_count} times, not once each: the module is not holding "
+                      "the metaprogram\n${_log}")
 endif()
 math(EXPR _share "${_dt} * 5")
 if(_dt GREATER 2 AND _share GREATER _built)

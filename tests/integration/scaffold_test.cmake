@@ -73,11 +73,18 @@ string(JSON _json SET "${_json}" repository keywords match [["stale"]])
 file(WRITE ${_syntax} "${_json}")
 
 # One configure and one build over a tree without generated sources, as the
-# scaffolded README prints them.
+# scaffolded README prints them. `fetchcontent_test` builds its consumer in
+# this tree: Cursiv is compiled here, strict and under the consumer's flags.
 _step("the configure" ${CMAKE_COMMAND} -S ${_project} -B ${_project}/build
       -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=${CXX}
+      "-DCMAKE_CXX_FLAGS=${FLAGS}" -DCURSIV_WARNINGS_AS_ERRORS=ON
       -DCURSIV_SOURCE_DIR=${CURSIV})
+string(TIMESTAMP _t0 "%s")
 _step("the build" ${CMAKE_COMMAND} --build ${_project}/build)
+string(TIMESTAMP _t1 "%s")
+# The consumer's own unit is judged against the time of this build.
+math(EXPR _built "${_t1} - ${_t0}")
+file(WRITE ${_project}/build/seconds ${_built})
 file(READ ${_syntax} _json)
 string(JSON _match GET "${_json}" repository keywords match)
 if(NOT _match STREQUAL [[\b(person|Hello)\b]])

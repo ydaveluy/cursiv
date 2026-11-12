@@ -1,14 +1,11 @@
 # A minimal consumer: fetch cursiv, declare a language, link the module the
-# build generates. Built by `fetchcontent_test`; it includes no cursiv header
-# but the generated one.
+# build generates, include no cursiv header but the generated one. Configured
+# alone, then built as a directory of another project, by `fetchcontent_test`.
 cmake_minimum_required(VERSION 3.30)
 project(cursiv_consumer LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-add_compile_options(
-    $<$<COMPILE_LANGUAGE:CXX>:-Werror=c++23-extensions>
-    $<$<COMPILE_LANGUAGE:CXX>:-Werror=c++26-extensions>)
 
 include(FetchContent)
 FetchContent_Declare(cursiv SOURCE_DIR ${CURSIV_SOURCE_DIR})

@@ -65,31 +65,41 @@ if(TARGET cursivAllocator)
   endif()
 endif()
 
-# A project outside this tree fetches, builds and runs Cursiv. Host only: the
-# test configures a second CMake project.
+# A language made by `docs/cursiv-new.cmake`, then a project outside this tree
+# that fetches Cursiv and joins that build: Cursiv is compiled once for both.
+# Host only: the tests configure other CMake projects.
 if(NOT CMAKE_CROSSCOMPILING)
-  add_test(NAME fetchcontent_test COMMAND ${CMAKE_COMMAND}
-      -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/integration/consumer
-      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/integration/consumer-build
-      -DCURSIV=${CURSIV_SOURCE_ROOT}
-      -DCXX=${CMAKE_CXX_COMPILER}
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/integration/fetchcontent_test.cmake)
-  # It compiles a consumer project and times one of its units: a wall budget
-  # only means something when nothing else is compiling beside it.
-  set_tests_properties(fetchcontent_test PROPERTIES TIMEOUT 600
-      RESOURCE_LOCK cursiv_build RUN_SERIAL TRUE)
+  set(_scaffold ${CMAKE_CURRENT_BINARY_DIR}/integration/scaffold)
+  # The consumer's own flags, which the shared build compiles Cursiv under.
+  string(JOIN " " _flags -fstack-protector-strong
+      -Werror=c++23-extensions -Werror=c++26-extensions)
 
-  # A language made by `docs/cursiv-new.cmake`, taken through its README:
-  # configure, generate, configure, build, parse.
+  # The new language, taken through its README: configure, generate,
+  # configure, build, parse.
   add_test(NAME scaffold_test COMMAND ${CMAKE_COMMAND}
       -DSCAFFOLD=${CURSIV_SOURCE_ROOT}/docs/cursiv-new.cmake
       -DGENERATE=${CURSIV_SOURCE_ROOT}/cmake/GenerateScaffold.cmake
-      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/integration/scaffold
+      -DWORK=${_scaffold}
       -DCURSIV=${CURSIV_SOURCE_ROOT}
       -DCXX=${CMAKE_CXX_COMPILER}
+      "-DFLAGS=${_flags}"
       -P ${CMAKE_CURRENT_SOURCE_DIR}/integration/scaffold_test.cmake)
   set_tests_properties(scaffold_test PROPERTIES TIMEOUT 900
-      RESOURCE_LOCK cursiv_build)
+      RESOURCE_LOCK cursiv_build FIXTURES_SETUP scaffold_build)
+
+  add_test(NAME fetchcontent_test COMMAND ${CMAKE_COMMAND}
+      -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/integration/consumer
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/integration/consumer-build
+      -DPROJECT=${_scaffold}/no
+      -DCURSIV=${CURSIV_SOURCE_ROOT}
+      -DCXX=${CMAKE_CXX_COMPILER}
+      "-DFLAGS=${_flags}"
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/integration/fetchcontent_test.cmake)
+  # It times one of the consumer's units: a wall budget only means something
+  # when nothing else is compiling beside it.
+  set_tests_properties(fetchcontent_test PROPERTIES TIMEOUT 600
+      RESOURCE_LOCK cursiv_build RUN_SERIAL TRUE
+      FIXTURES_REQUIRED scaffold_build)
 
   # Bad grammar arguments are refused at configure time, before any compile.
   add_test(NAME refused_grammar_name_test COMMAND ${CMAKE_COMMAND}
