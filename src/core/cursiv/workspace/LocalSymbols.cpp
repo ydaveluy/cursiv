@@ -63,6 +63,9 @@ void LocalSymbols::build_index() {
   if (count > std::size_t{1} << 31u)
     throw std::length_error("cursiv: too many local symbols in one document");
 
+  // The groups' slots in the order their containers were first met: the order
+  // the entries lie in and the name table is filled in, whatever the addresses.
+  std::vector<std::uint32_t> met;
   // One container already defines the only group: no counting or source
   // permutation is needed, whatever names or declarations it contains.
   const AstNode* const firstContainer = _containerOf.front();
@@ -72,7 +75,9 @@ void LocalSymbols::build_index() {
                   })) {
     _groups.assign(table_size(1), Group{});
     _groupMask = _groups.size() - 1;
-    _groups[static_cast<std::size_t>(mix(firstContainer)) & _groupMask] =
+    met.push_back(static_cast<std::uint32_t>(
+        static_cast<std::size_t>(mix(firstContainer)) & _groupMask));
+    _groups[met.front()] =
         Group{firstContainer, 0, static_cast<std::uint32_t>(count)};
     const std::size_t words = _groups.size() / 2;
     _held = std::make_unique<std::uint64_t[]>(1 + words);
@@ -145,6 +150,9 @@ void LocalSymbols::build_index() {
         const std::size_t bit = held_bit(m.container, _held[0]);
         _held[1 + (bit >> 6u)] |= std::uint64_t{1} << (bit & 63u);
       }
+    met.reserve(containers);
+    for (std::uint32_t k = 0; k < containers; ++k)
+      met.push_back(holders[k].slot);
 
     // A group already in one source run needs no permutation. Group order
     // is private; declaration order inside every group stays exactly as read.
@@ -153,20 +161,19 @@ void LocalSymbols::build_index() {
       if (_entries.capacity() != count)
         std::vector<AstNodeDescription>(_entries).swap(_entries);
     } else {
-      // 2. Where each group starts, in table order. The scatter below keeps the
-      // declaration order inside each group.
+      // 2. Where each group starts, in the order the containers were met. The
+      // scatter below keeps the declaration order inside each group.
       std::uint32_t next = 0;
-      for (Group& g : _groups) {
-        if (g.container == nullptr) continue;
+      for (std::uint32_t k = 0; k < containers; ++k) {
+        Group& g = _groups[met[k]];
         g.begin = next;
+        holders[k].next = next;
         next += g.count;
       }
 
       // 3. The counting sort, by destination: each position learns which entry
       // it takes, then the entries are copied in position order, so the new array
       // is written once and never cleared first.
-      for (std::uint32_t k = 0; k < containers; ++k)
-        holders[k].next = _groups[holders[k].slot].begin;
       const auto from = std::make_unique_for_overwrite<std::uint32_t[]>(count);
       for (std::size_t i = 0; i < count; ++i)
         from[holders[holderOf[i]].next++] = static_cast<std::uint32_t>(i);
@@ -184,14 +191,14 @@ void LocalSymbols::build_index() {
   }
 
   // 4. The name table, after the last move: its keys are views of the entries'
-  // names. Each group's run is walked backwards so homonyms are prepended in
+  // names. The groups go in the order they were met, the first keeping its
+  // slots; each run is walked backwards so homonyms are prepended in
   // declaration order.
   _names.assign(table_size(count), NameSlot{});
   _nameMask = _names.size() - 1;
   _nextSameName.assign(count, kNone);
-  for (std::size_t g = _groups.size(); g-- > 0;) {
+  for (const std::uint32_t g : met) {
     const AstNode* container = _groups[g].container;
-    if (container == nullptr) continue;
     const std::uint64_t containerHash = mix(container);
     const std::uint32_t begin = _groups[g].begin;
     for (std::uint32_t i = begin + _groups[g].count; i-- > begin;) {
