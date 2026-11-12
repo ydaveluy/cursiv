@@ -203,6 +203,29 @@ void an_unclosed_last_declaration_costs_no_other() {
       }
 }
 
+// A search stopped short of any goal follows the reading that went past the
+// most of the author's tokens: a quoted text reading the rest of the document
+// is one token, the two stray quotes dropped are two. One floor per engine.
+void a_long_token_does_not_win_a_search_without_a_goal() {
+  const std::string text = "say:say a = 'b'; say c = d; say e = f; say g = h;";
+  for (const auto& [predictive, floor] : {std::pair{false, std::uint64_t{48}},
+                                          std::pair{true, std::uint64_t{96}}}) {
+    const auto engine =
+        parser(predictive, {.floor = floor, .perByte = 0, .perSearch = kAll,
+                            .perParse = kAll});
+    const auto result = engine->parse(text);
+    CHECK(result.accepted && bounded(result));
+    std::vector<cursiv::ParseDiagnostic> edits;
+    for (const auto& note : result.diagnostics)
+      if (note.kind != cursiv::DiagnosticKind::bounded) edits.push_back(note);
+    CHECK(edits.size() == 2 &&
+          edits[0].kind == cursiv::DiagnosticKind::deleted &&
+          edits[0].begin == 12 && edits[0].end == 13 &&
+          edits[1].kind == cursiv::DiagnosticKind::deleted &&
+          edits[1].begin == 14 && edits[1].end == 15);
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -215,5 +238,6 @@ int main() {
   a_fault_behind_a_long_list_does_not_cost_its_square();
   a_starved_parser_still_observes_cancellation();
   an_unclosed_last_declaration_costs_no_other();
+  a_long_token_does_not_win_a_search_without_a_goal();
   return cursiv::test::report("LlRepairBudget_test");
 }

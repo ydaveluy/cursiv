@@ -800,13 +800,16 @@ void lr_search_root(LrSearch& s, const Reading& v, TextOffset at,
 
 void lr_search_start(const LrContext& c, LrSearch& s);
 
-// With no goal before the work ran out, the reading that got furthest.
+// With no goal before the work ran out, the reading that went past the most
+// of the author's tokens, read or dropped; of two that tie, the one that got
+// furthest.
 template <const auto& A>
 std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
                             bool& raced) {
   s.gapsCounted = c.gaps.read();
   constexpr std::uint32_t kNone = kLrNoConfig;
   std::uint32_t furthest = kNone;
+  std::int64_t most = 0;
   std::uint32_t finished = kNone;
   exhausted = false;
   raced = false;
@@ -847,7 +850,12 @@ std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
       s.goals.push_back(e.at);
       continue;
     }
-    if (furthest == kNone || x.at > s.configs[furthest].at) furthest = e.at;
+    if (const std::int64_t went = x.run.tokens() + s.links[x.link].dropped;
+        furthest == kNone ||
+        std::pair{went, x.at} > std::pair{most, s.configs[furthest].at}) {
+      furthest = e.at;
+      most = went;
+    }
     // Queued as if a re-reading went on from it: where none does, it costs a
     // whole edit.
     if (x.freeInserts == 0 && e.f < x.cost + kRepairEdit &&

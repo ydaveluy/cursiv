@@ -1243,11 +1243,14 @@ bool ll_same_edits(const std::vector<LlEdit>& links, std::uint32_t a,
 // another drops it.
 void ll_search_reset(LlSearch& s);
 
-// With no goal before the work ran out, the reading that got furthest.
+// With no goal before the work ran out, the reading that went past the most
+// of the author's tokens, read or dropped; of two that tie, the one that got
+// furthest.
 template <const auto& T>
 std::uint32_t ll_search_run(LlContext& c, LlSearch& s, bool& exhausted,
                             bool& raced) {
   std::uint32_t furthest = kLlNoNode;
+  std::uint32_t most = 0;
   exhausted = raced = false;
   while (!s.heap.empty()) {
     c.stop.poll();
@@ -1275,9 +1278,13 @@ std::uint32_t ll_search_run(LlContext& c, LlSearch& s, bool& exhausted,
       s.goals.push_back(e.at);
       continue;
     }
-    if (furthest == kLlNoNode ||
-        s.nodes[e.at].gapFrom > s.nodes[furthest].gapFrom)
+    if (const LlReading& x = s.nodes[e.at];
+        furthest == kLlNoNode ||
+        std::pair{x.tokens + s.links[x.link].dropped, x.gapFrom} >
+            std::pair{most, s.nodes[furthest].gapFrom}) {
       furthest = e.at;
+      most = x.tokens + s.links[x.link].dropped;
+    }
     // A refused reading needs at least one re-reading, or a whole edit
     // where none can take its token. Future typos can change both a token and
     // its successors, so they cannot raise this bound. Required runs stay free.

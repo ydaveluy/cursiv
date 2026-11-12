@@ -37,6 +37,8 @@ struct LrEdit {
   std::uint32_t low = 0;
   // What the reading it was made from had cost.
   std::uint32_t cost = 0;
+  // The author's tokens its path dropped, itself included.
+  std::uint32_t dropped = 0;
 };
 
 }  // namespace cursiv::engine

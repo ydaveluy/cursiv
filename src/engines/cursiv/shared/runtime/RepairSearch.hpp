@@ -161,6 +161,9 @@ struct RepairSearch {
 
   std::uint32_t link(const Edit& g) {
     links.push_back(g);
+    links.back().dropped =
+        (g.kind == Edit::del ? 1u : 0u) +
+        (g.parent != kNoEditLink ? links[g.parent].dropped : 0u);
     return static_cast<std::uint32_t>(links.size()) - 1;
   }
 

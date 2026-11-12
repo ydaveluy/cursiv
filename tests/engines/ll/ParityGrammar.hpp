@@ -299,7 +299,8 @@ struct Quotes : cursiv::GrammarSpec {
   struct Say
       : rule<create<ast::Let>(
             kw<"say"> + assign<&ast::Let::name>(ref<ID>) + lit<"="> +
-            tight(lit<"`"> + option(ref<TEXT>) + lit<"`">) + lit<";">)> {};
+            (tight(lit<"`"> + option(ref<TEXT>) + lit<"`">) | ref<ID>) +
+            lit<";">)> {};
   struct UnitRule : rule<many(append<&ast::Unit::lets>(ref<Say>))> {};
 };
 

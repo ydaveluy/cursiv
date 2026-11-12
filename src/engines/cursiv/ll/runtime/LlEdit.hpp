@@ -31,6 +31,8 @@ struct LlEdit {
   // in hand begins.
   TextOffset at = 0;
   TextOffset begin = 0;
+  // The author's tokens its path dropped, itself included.
+  std::uint32_t dropped = 0;
 };
 
 }  // namespace cursiv::engine
