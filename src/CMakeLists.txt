@@ -26,11 +26,14 @@ target_include_directories(cursivEngineShared PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engines>)
 target_link_libraries(cursivEngineShared PUBLIC cursiv::core)
 
-add_library(cursivEngineLl INTERFACE)
+file(GLOB_RECURSE CURSIV_ENGINE_LL_SOURCES CONFIGURE_DEPENDS
+     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/ll/runtime/*.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/ll/table/*.cpp)
+add_library(cursivEngineLl STATIC ${CURSIV_ENGINE_LL_SOURCES})
 add_library(cursiv::engine::ll ALIAS cursivEngineLl)
-target_include_directories(cursivEngineLl INTERFACE
+target_include_directories(cursivEngineLl PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engines>)
-target_link_libraries(cursivEngineLl INTERFACE cursiv::engine::shared)
+target_link_libraries(cursivEngineLl PUBLIC cursiv::engine::shared)
 
 file(GLOB_RECURSE CURSIV_ENGINE_LR_SOURCES CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/lr/runtime/*.cpp)

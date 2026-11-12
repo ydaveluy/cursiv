@@ -52,8 +52,8 @@ struct LlRoot {
 };
 
 struct LlSearch : RepairSearch<LlEdit> {
-  LlSearch(const LlAtnView& atn, TextOffset len, const RepairBudget& b = {})
-      : RepairSearch(len, b), sim(atn) {}
+  LlSearch(const LlAtnView& atn, TextOffset len, const RepairBudget& b = {});
+  ~LlSearch();
 
   LlSimulation sim;
   // The visits of the simulation already counted in `work`.
