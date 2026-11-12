@@ -1,5 +1,5 @@
 // `+=` over a rule that returns the whole list: it adds one element.
-// expect LR: adds one element, and this
+// expect LR at compile: adds one element, and this
 #pragma once
 
 #include <string>

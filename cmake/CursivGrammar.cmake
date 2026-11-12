@@ -38,13 +38,26 @@ function(cursiv_engine_parts engine outMain outLib)
   set(${outLib} "cursiv::${_engine}_gen" PARENT_SCOPE)
 endfunction()
 
+# What a target holding generators links and is compiled with. Generators run
+# briefly; large grammars need generous compile-time limits.
+function(cursiv_generator_build target engine)
+  cursiv_engine_parts("${engine}" _main _lib)
+  target_link_libraries(${target} PRIVATE cursiv::core ${_lib})
+  target_compile_options(${target} PRIVATE -O0 -pipe
+      $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fbracket-depth=16384>
+      $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=2147483647>
+      $<$<CXX_COMPILER_ID:GNU>:--param=ggc-min-expand=200>
+      $<$<CXX_COMPILER_ID:GNU>:--param=ggc-min-heapsize=1000000>)
+  set_target_properties(${target} PROPERTIES CXX_SCAN_FOR_MODULES OFF)
+endfunction()
+
 function(cursiv_grammar_generator name header ns gns id exts fileNames roots engine)
   string(REPLACE ";" "," _exts "${exts}")
   string(REPLACE ";" "," _fileNames "${fileNames}")
   cursiv_engine_parts("${engine}" _main _lib)
   add_executable(${name}_gen EXCLUDE_FROM_ALL ${_main})
   target_include_directories(${name}_gen PRIVATE ${roots})
-  target_link_libraries(${name}_gen PRIVATE cursiv::core ${_lib})
+  cursiv_generator_build(${name}_gen "${engine}")
   target_compile_definitions(${name}_gen PRIVATE
       CURSIV_GEN_HEADER="${header}"
       CURSIV_GEN_GRAMMAR=${ns}
@@ -53,15 +66,9 @@ function(cursiv_grammar_generator name header ns gns id exts fileNames roots eng
       CURSIV_GEN_ID="${id}"
       CURSIV_GEN_EXTENSIONS="${_exts}"
       CURSIV_GEN_FILE_NAMES="${_fileNames}")
-  # Generators run briefly; large grammars need generous compile-time limits.
-  target_compile_options(${name}_gen PRIVATE -O0 -pipe
-      $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fbracket-depth=16384>
-      $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=2147483647>
-      $<$<CXX_COMPILER_ID:GNU>:--param=ggc-min-expand=200>
-      $<$<CXX_COMPILER_ID:GNU>:--param=ggc-min-heapsize=1000000>)
   # The cross build always invokes flat Release host paths.
   set_target_properties(${name}_gen PROPERTIES
-      CXX_SCAN_FOR_MODULES OFF RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/gen
+      RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/gen
       RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/gen)
 endfunction()
 

@@ -1,6 +1,6 @@
 // A flag around a call changes nothing: the call still adopts a node beside
 // the `create`, so the alternative builds two nodes.
-// expect LR: this alternative can create two nodes
+// expect LR at compile: this alternative can create two nodes
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,6 +1,6 @@
 // A directive's payload creates its own node, and a nest inside that region
 // buries it in a member of another family.
-// expect LR: this nest stores the current node in a member that cannot hold it
+// expect LR at compile: this nest stores the current node in a member that cannot hold it
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,5 +1,5 @@
 // `flag` sets a flag: the member it names is a bool.
-// expect LR: flag<&T::m>: the member must be bool
+// expect LR at compile: flag<&T::m>: the member must be bool
 #pragma once
 
 #include "refusals/head.hpp"

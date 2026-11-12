@@ -1,6 +1,6 @@
 // An infix rule writes `left` and `right` itself: here they hold `Other`, a
 // class that neither the primary nor the infix rule builds.
-// expect LR: this member holds a node of its own type
+// expect LR at compile: this member holds a node of its own type
 #pragma once
 
 #include "refusals/head.hpp"

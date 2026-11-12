@@ -3,7 +3,11 @@ function(cursiv_test name src)
   target_link_libraries(${name} PRIVATE cursiv::test cursiv::engine::ll
       cursiv::engine::lr ${ARGN})
   target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME ${name} COMMAND ${name})
+  # The executable that runs the test: its own, unless a batch takes it.
+  set_target_properties(${name} PROPERTIES CURSIV_TEST_HOST ${name})
+  set_property(GLOBAL APPEND PROPERTY CURSIV_TESTS ${name})
+  add_test(NAME ${name} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
+      $<TARGET_FILE:$<TARGET_PROPERTY:${name},CURSIV_TEST_HOST>>)
   # Each pool of a wasm test starts a thread per worker, and one per host CPU
   # would take most of a short test's time.
   if(CMAKE_SYSTEM_NAME STREQUAL "WASI")

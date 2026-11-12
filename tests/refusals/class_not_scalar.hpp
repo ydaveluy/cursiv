@@ -1,6 +1,6 @@
 // A surrogate is not a Unicode character: no class holds it, and the
 // spelling does not compile.
-// expect LR: names a value that is not a Unicode character
+// expect LR at compile: names a value that is not a Unicode character
 #pragma once
 
 #include "refusals/head.hpp"

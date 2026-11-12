@@ -1,6 +1,6 @@
 // A directive over a quantifier that holds no node: it gives no value, so the
 // member would be written from nothing.
-// expect LR: applies to an expression that gives no value
+// expect LR at compile: applies to an expression that gives no value
 #pragma once
 
 #include "refusals/head.hpp"

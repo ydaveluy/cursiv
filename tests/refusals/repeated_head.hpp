@@ -1,6 +1,6 @@
 // A helper rule that repeats a call to an AST rule: each turn adopts a node of
 // its own, and the rule returns only the first.
-// expect LR: this alternative can create two nodes.*each turn of a repetition
+// expect LR at compile: this alternative can create two nodes.*each turn of a repetition
 #pragma once
 
 #include "refusals/head.hpp"

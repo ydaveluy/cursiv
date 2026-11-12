@@ -1,6 +1,6 @@
 // An optional nest: when it is absent, two turns write `text` on the same
 // node.
-// expect LR: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Item::text
+// expect LR at compile: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Item::text
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

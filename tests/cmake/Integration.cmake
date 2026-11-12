@@ -5,6 +5,8 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI" AND CURSIV_WASI_THREADS)
   cursiv_test(WasiThreads_test integration/WasiThreads_test.cpp)
+  # The lanes below run the executable itself, with a mode.
+  set_target_properties(WasiThreads_test PROPERTIES CURSIV_TEST_ALONE ON)
   set_tests_properties(WasiThreads_test PROPERTIES TIMEOUT 30)
   foreach(_mode IN ITEMS worker-exit7 worker-trap)
     add_test(NAME WasiThreads_${_mode} COMMAND WasiThreads_test ${_mode})

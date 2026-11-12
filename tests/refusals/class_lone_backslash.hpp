@@ -1,6 +1,6 @@
 // A backslash opens an escape: one that ends the spelling escapes nothing,
 // and the spelling does not compile.
-// expect LR: ends with a lone backslash
+// expect LR at compile: ends with a lone backslash
 #pragma once
 
 #include "refusals/head.hpp"

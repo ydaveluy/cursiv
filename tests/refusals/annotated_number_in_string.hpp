@@ -1,5 +1,5 @@
 // `as<T>` gives a value: a number is not text a `string` can hold.
-// expect LR: no conversion from this value to the member type
+// expect LR at compile: no conversion from this value to the member type
 #pragma once
 
 #include <string>

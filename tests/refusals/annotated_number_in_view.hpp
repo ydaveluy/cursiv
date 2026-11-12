@@ -1,5 +1,5 @@
 // `as<T>` gives a value: a number is not text a `string_view` can hold.
-// expect LR: a string_view member cannot hold this value
+// expect LR at compile: a string_view member cannot hold this value
 #pragma once
 
 #include <string>

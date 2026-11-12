@@ -47,7 +47,6 @@ cursiv_grammar(triviapredictll engines/ll/ConditionsGrammar.hpp tllconditions::T
 cursiv_grammar(unitsll engines/ll/ExplicitUnitGrammar.hpp tllunit::Ll ENGINE LL)
 cursiv_grammar_pair(unordered engines/ll/UnorderedGrammar.hpp tunordered::Lr tunordered::Ll)
 cursiv_grammar_pair(unorderedopt engines/ll/UnorderedOptionalGrammar.hpp toptional::Lr toptional::Ll)
-cursiv_grammar_pair(unorderedturns engines/ll/UnorderedTurnsGrammar.hpp tunorderedturns::Lr tunorderedturns::Ll)
 cursiv_grammar(widechoicell engines/ll/WideChoiceGrammar.hpp twidechoice::Ll ENGINE LL)
 cursiv_grammar(wideposll engines/ll/WidePositionsGrammar.hpp twidepos::Ll ENGINE LL)
 
@@ -108,7 +107,7 @@ cursiv_test(LlWidePositions_test engines/ll/LlWidePositions_test.cpp
     wideposllGenerated)
 cursiv_test(Unordered_test engines/ll/Unordered_test.cpp
     unorderedllGenerated unorderedlrGenerated unorderedoptllGenerated unorderedoptlrGenerated
-    unorderedturnsllGenerated unorderedturnslrGenerated cursivLlGen cursivLrGen)
+    cursivLlGen cursivLrGen)
 
 # A shallow template budget catches per-element recursion in the wide choice.
 if(TARGET widechoicell_gen)

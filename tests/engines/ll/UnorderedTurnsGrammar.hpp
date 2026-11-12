@@ -38,7 +38,5 @@ struct Base : cursiv::GrammarSpec {
              eof> {};
   using entry = Root;
 };
-struct Ll : Base {};
-struct Lr : Base {};
 
 }  // namespace tunorderedturns

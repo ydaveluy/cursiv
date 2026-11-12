@@ -1,5 +1,5 @@
 // A flag written by an adopted rule counts as an earlier write.
-// expect LR: WrittenOverAdopted<.*refuse::G::Root.*Item::on
+// expect LR at compile: WrittenOverAdopted<.*refuse::G::Root.*Item::on
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

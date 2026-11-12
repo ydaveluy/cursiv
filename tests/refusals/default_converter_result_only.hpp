@@ -1,6 +1,6 @@
 // A `default_converter` with no `convert` converts nothing: a type of one's
 // own needs a `convert` in the specialization.
-// expect LR: no default_converter<T> for this type
+// expect LR at compile: no default_converter<T> for this type
 #pragma once
 
 #include "refusals/head.hpp"

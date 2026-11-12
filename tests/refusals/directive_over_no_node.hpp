@@ -1,6 +1,6 @@
 // A directive over a choice applies to each alternative: a member that takes a
 // node refuses an alternative that may hold none.
-// expect LR: applies to an expression that can match without a node
+// expect LR at compile: applies to an expression that can match without a node
 #pragma once
 
 #include <cstdint>

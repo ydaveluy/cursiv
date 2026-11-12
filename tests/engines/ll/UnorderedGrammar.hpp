@@ -2,6 +2,7 @@
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
+#include "engines/ll/UnorderedTurnsGrammar.hpp"
 
 namespace tunordered {
 
@@ -116,8 +117,20 @@ struct Base : cursiv::GrammarSpec {
   using ignored = WS;
   using hidden = list<COMMENT>;
 };
-struct Ll : Base {};
-struct Lr : Base {};
+
+// Two unordered grammars behind one entry: the first with the suite's trivia,
+// the second with none.
+struct Suite : cursiv::GrammarSpec {
+  struct Entry
+      : rule<(lit<"group:"> + ref<Base::Root>) |
+             skip(ignore<>, hide<>,
+                  lit<"turns:"> + ref<tunorderedturns::Base::Root>)> {};
+  using entry = Entry;
+  using ignored = Base::WS;
+  using hidden = Base::COMMENT;
+};
+struct Ll : Suite {};
+struct Lr : Suite {};
 
 // The widest groups both engines spell: eleven positions, and six nests,
 // whose orders stay whole -- and the next one wider, which both refuse.

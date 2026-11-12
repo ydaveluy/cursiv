@@ -1,5 +1,5 @@
 // A literal other than `true` or `false`, written whole into a bool member.
-// expect LR: [ '‘]BoolLiteral.*refuse::ast::Flag::enabled.*!
+// expect LR at compile: [ '‘]BoolLiteral.*refuse::ast::Flag::enabled.*!
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,6 +1,6 @@
-// The base of every refusal fixture: one skipper and one name. Nothing runs:
-// ctest matches what the generation prints against the `// expect` lines.
-#pragma once
+// The base of every refusal fixture: one skipper and one name, read once for
+// each fixture under that fixture's own namespace, so without include guard.
+// Nothing runs: ctest matches what is printed against the `// expect` lines.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"

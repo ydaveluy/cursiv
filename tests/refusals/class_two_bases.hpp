@@ -1,5 +1,5 @@
 // A class deriving twice from cursiv::AstNode: no pointer to it converts.
-// expect LR: this rule builds a class that reaches cursiv::AstNode through two bases
+// expect LR at compile: this rule builds a class that reaches cursiv::AstNode through two bases
 #pragma once
 
 #include "refusals/head.hpp"

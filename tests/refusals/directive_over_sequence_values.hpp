@@ -1,6 +1,6 @@
 // A directive over a sequence: only a node passes through one, so a member
 // that also takes values would never get the value of a rule inside.
-// expect LR: only a node passes through a sequence
+// expect LR at compile: only a node passes through a sequence
 #pragma once
 
 #include <cstdint>

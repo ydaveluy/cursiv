@@ -1,6 +1,6 @@
 // Two parents both override a rule and the child restates it with `super`:
 // the restatement chooses between them, so `super` names neither.
-// expect LR: so .super. in the override here names neither
+// expect LR at compile: so .super. in the override here names neither
 #pragma once
 
 #include "refusals/head.hpp"

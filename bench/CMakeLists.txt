@@ -70,26 +70,18 @@ target_include_directories(recovery_metric PRIVATE
 target_compile_definitions(recovery_metric PRIVATE
     CURSIV_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-# Its smoke lane: the same driver over arithmetics alone, a few documents, and
-# a check that the report is well formed -- no threshold on what it says.
 if(CURSIV_BUILD_TESTS)
-  add_executable(recovery_metric_smoke recovery_metric/main.cpp
-      recovery_metric/arithmetics.cpp)
-  target_link_libraries(recovery_metric_smoke PRIVATE cursiv::bench
-      cursiv::test cursiv::engine::ll cursiv::engine::lr arithmeticsCore)
-  target_include_directories(recovery_metric_smoke PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR})
-  target_compile_definitions(recovery_metric_smoke PRIVATE
-      CURSIV_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  set_target_properties(recovery_metric PROPERTIES EXCLUDE_FROM_ALL OFF)
+  # Its smoke lane: arithmetics alone, a few documents, and a check that the
+  # report is well formed -- no threshold on what it says.
   add_test(NAME recovery_metric_smoke
       COMMAND ${CMAKE_COMMAND}
-          -DMETRIC=$<TARGET_FILE:recovery_metric_smoke>
+          -DMETRIC=$<TARGET_FILE:recovery_metric>
           "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
           -DOUT=${CMAKE_CURRENT_BINARY_DIR}/recovery_metric_smoke
           -P ${CMAKE_CURRENT_SOURCE_DIR}/recovery_metric/smoke.cmake)
 
   # Its lane: each class stays within one document of the recorded figures.
-  set_target_properties(recovery_metric PROPERTIES EXCLUDE_FROM_ALL OFF)
   add_test(NAME recovery_metric_lane
       COMMAND ${CMAKE_COMMAND}
           -DMETRIC=$<TARGET_FILE:recovery_metric>

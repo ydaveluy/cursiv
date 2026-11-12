@@ -1,6 +1,6 @@
 // A `string_view` member over a converter that builds a string: as a variant's
 // only text.
-// expect LR: a variant member takes a value that matches exactly one
+// expect LR at compile: a variant member takes a value that matches exactly one
 #pragma once
 
 #include <optional>

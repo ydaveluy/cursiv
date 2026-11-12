@@ -1,5 +1,5 @@
 // An enumerator is a number, and this one does not fit the member.
-// expect LR: this rule gives a number this member cannot always hold
+// expect LR at compile: this rule gives a number this member cannot always hold
 #pragma once
 
 #include <string_view>

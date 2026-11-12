@@ -1,6 +1,6 @@
 // The write after the nest and the next turn's write before it go to the
 // same wrapper.
-// expect LR: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Item::text
+// expect LR at compile: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Item::text
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

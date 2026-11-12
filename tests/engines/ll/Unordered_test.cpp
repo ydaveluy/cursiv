@@ -17,12 +17,11 @@
 #include "engines/ll/UnorderedOptionalGrammar.hpp"
 #include "engines/ll/UnorderedTurnsGrammar.hpp"
 #include "support/AstText.hpp"
+#include "support/CaseParser.hpp"
 #include "unorderedll/generated/Ll/Module.hpp"
 #include "unorderedlr/generated/Lr/Module.hpp"
 #include "unorderedoptll/generated/Ll/Module.hpp"
 #include "unorderedoptlr/generated/Lr/Module.hpp"
-#include "unorderedturnsll/generated/Ll/Module.hpp"
-#include "unorderedturnslr/generated/Lr/Module.hpp"
 
 namespace {
 
@@ -291,8 +290,8 @@ void engines_agree(const cursiv::Parser& ll, const cursiv::Parser& lr,
 
 void engines_agree_on_records() {
   namespace g = tunordered::generated;
-  const auto ll = g::Ll::create_parser();
-  const auto lr = g::Lr::create_parser();
+  const auto ll = support::case_parser(g::Ll::create_parser(), "group:");
+  const auto lr = support::case_parser(g::Lr::create_parser(), "group:");
   const auto llAst = g::Ll::create_ast_reflection();
   const auto lrAst = g::Lr::create_ast_reflection();
   for (const auto text :
@@ -308,9 +307,9 @@ void engines_agree_on_records() {
 // A loop inside an operand is decided in the operand's own rule: `+1` after
 // `name` is a label, as it is outside any unordered group.
 void loop_in_operand() {
-  namespace g = tunorderedturns::generated;
-  const auto ll = g::Ll::create_parser();
-  const auto lr = g::Lr::create_parser();
+  namespace g = tunordered::generated;
+  const auto ll = support::case_parser(g::Ll::create_parser(), "turns:");
+  const auto lr = support::case_parser(g::Lr::create_parser(), "turns:");
   const auto llAst = g::Ll::create_ast_reflection();
   const auto lrAst = g::Lr::create_ast_reflection();
   for (const auto text :
@@ -489,8 +488,9 @@ void engines_agree_on_optional_items() {
 int main() {
   engines_agree_on_records();
   loop_in_operand();
-  const auto ll = tunordered::generated::Ll::create_parser();
-  const auto lr = tunordered::generated::Lr::create_parser();
+  namespace g = tunordered::generated;
+  const auto ll = support::case_parser(g::Ll::create_parser(), "group:");
+  const auto lr = support::case_parser(g::Lr::create_parser(), "group:");
   exercise(*ll);
   exercise(*lr);
   lowering_paths(*ll);

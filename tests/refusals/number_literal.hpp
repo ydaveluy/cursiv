@@ -1,5 +1,5 @@
 // A literal that spells no number, written whole into a number member.
-// expect LR: [ '‘]NumberLiteral.*refuse::ast::Count::value
+// expect LR at compile: [ '‘]NumberLiteral.*refuse::ast::Count::value
 #pragma once
 
 #include "refusals/head.hpp"

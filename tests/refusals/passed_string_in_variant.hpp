@@ -1,6 +1,6 @@
 // A built string a data rule passes on is no number: a variant cannot read it
 // as one.
-// expect LR: a variant member takes a value that matches exactly one
+// expect LR at compile: a variant member takes a value that matches exactly one
 #pragma once
 
 #include <string>

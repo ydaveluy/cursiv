@@ -1,5 +1,5 @@
 // The operand writes in the same context, before the flag sets its member.
-// expect LR: WrittenAgain<.*refuse::G::Root.*Item::on
+// expect LR at compile: WrittenAgain<.*refuse::G::Root.*Item::on
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

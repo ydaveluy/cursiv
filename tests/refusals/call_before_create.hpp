@@ -1,6 +1,6 @@
 // An unassigned call to an AST rule, then a `create`: the alternative builds
 // two nodes.
-// expect LR: this alternative can create two nodes
+// expect LR at compile: this alternative can create two nodes
 #pragma once
 
 #include "refusals/head.hpp"

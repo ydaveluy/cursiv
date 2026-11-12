@@ -1,5 +1,5 @@
 // `as<T>` makes a `T`, and an `int8` cannot hold every `int64`.
-// expect LR: this rule gives a number this member cannot always hold
+// expect LR at compile: this rule gives a number this member cannot always hold
 #pragma once
 
 #include "refusals/head.hpp"

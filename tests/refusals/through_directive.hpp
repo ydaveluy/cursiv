@@ -1,4 +1,4 @@
-// expect LR: is inside a through
+// expect LR at compile: is inside a through
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

@@ -1,6 +1,6 @@
 // A commit as an alternative of a choice: it is allowed only as the item of a
 // quantifier.
-// expect LR: commit.prefix, body. must be the direct item of option, many, some or repeat
+// expect LR at compile: commit.prefix, body. must be the direct item of option, many, some or repeat
 #pragma once
 
 #include "refusals/head.hpp"

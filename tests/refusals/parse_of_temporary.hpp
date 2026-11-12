@@ -1,5 +1,5 @@
 // A temporary dies at the end of the expression, and the tree would view its text.
-// expect LR: this name is a temporary that owns its text
+// expect LR at compile: this name is a temporary that owns its text
 #pragma once
 
 #include <string>

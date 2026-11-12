@@ -1,6 +1,6 @@
 // A call adopts its node, and a write after it goes there: a member the
 // called rule may have written is written twice.
-// expect LR: [ '‘]WrittenOverAdopted<.*refuse::G::Root.*refuse::ast::Item::name
+// expect LR at compile: [ '‘]WrittenOverAdopted<.*refuse::G::Root.*refuse::ast::Item::name
 #pragma once
 
 #include "refusals/head.hpp"

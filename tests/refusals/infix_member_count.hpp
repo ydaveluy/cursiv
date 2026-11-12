@@ -1,6 +1,6 @@
 // An infix rule naming one of its members: it names all three, or none to use
 // `left`, `op` and `right`.
-// expect LR: an infix rule names zero or three members
+// expect LR at compile: an infix rule names zero or three members
 #pragma once
 
 #include "refusals/head.hpp"

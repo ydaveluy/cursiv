@@ -23,3 +23,5 @@ else()
 endif()
 
 include(cmake/BatchLanguages.cmake)
+include(cmake/BatchTests.cmake)
+cursiv_batch_tests()

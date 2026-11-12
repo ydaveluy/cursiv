@@ -1,5 +1,5 @@
 // Repeating a flag writes the same scalar on each turn.
-// expect LR: WrittenEachTurn<.*refuse::G::Root.*Item::on
+// expect LR at compile: WrittenEachTurn<.*refuse::G::Root.*Item::on
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

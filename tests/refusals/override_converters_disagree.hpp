@@ -1,6 +1,6 @@
 // Two parents override a terminal with different converters, and the child's
 // restatement names none: the terminal's value type is left undecided.
-// expect LR: two parent grammars give this rule different converters
+// expect LR at compile: two parent grammars give this rule different converters
 #pragma once
 
 #include <cstdint>

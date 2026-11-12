@@ -1,6 +1,6 @@
 // A converter's whole variant replaces the one the member holds, and an
 // alternative that cannot be assigned leaves the variant without an assignment.
-// expect LR: this member's type cannot be assigned
+// expect LR at compile: this member's type cannot be assigned
 #pragma once
 
 #include <cstdint>

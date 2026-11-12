@@ -1,6 +1,6 @@
 // A choice whose other branch does not nest: the next turn writes `text` on
 // the same node.
-// expect LR: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Item::text
+// expect LR at compile: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Item::text
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

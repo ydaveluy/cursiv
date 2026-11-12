@@ -76,13 +76,11 @@ struct Block : cursiv::Extends<cursiv::AstNode> {
 struct QuickStart : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct COMMENT : terminal<through(lit<"//">, &eol | eof)> {};
-  struct ID
-      : terminal<(uc::XID_Start | cr<"_">)+many(uc::XID_Continue | cr<"_">)> {};
+  struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
   struct INTEGER : terminal<as<std::int64_t>(some(d))> {};
 
   using ignored = WS;
   using hidden = COMMENT;
-  static constexpr auto word_boundary = uc::XID_Continue | cr<"_">;
 
   struct VariableRule
       : rule<kw<"let"> + assign<&ast::Variable::name>(ref<ID>) + lit<"="> +

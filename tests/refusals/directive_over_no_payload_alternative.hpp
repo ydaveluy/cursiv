@@ -1,6 +1,6 @@
 // A directive over a choice applies to each alternative: one that gives no
 // value is refused, even beside one that does.
-// expect LR: applies to an expression that gives no value
+// expect LR at compile: applies to an expression that gives no value
 #pragma once
 
 #include "refusals/head.hpp"

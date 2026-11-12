@@ -1,6 +1,6 @@
 // A built string a data rule passes on is no number: the member cannot read it
 // as one.
-// expect LR: no conversion from this value to the member type
+// expect LR at compile: no conversion from this value to the member type
 #pragma once
 
 #include <string>

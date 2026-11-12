@@ -1,5 +1,5 @@
 // A list moves what it holds as it grows, and this type cannot be moved.
-// expect LR: a list moves its elements as it grows
+// expect LR at compile: a list moves its elements as it grows
 #pragma once
 
 #include <string>

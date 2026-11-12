@@ -1,6 +1,6 @@
 // A nest inside the node written into `item` starts no new `Holder`: each turn
 // writes `item` again.
-// expect LR: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Holder::item
+// expect LR at compile: WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Holder::item
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

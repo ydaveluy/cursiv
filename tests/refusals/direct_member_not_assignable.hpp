@@ -1,5 +1,5 @@
 // Nothing can replace the first value of a member that cannot be assigned.
-// expect LR: this member's type cannot be assigned
+// expect LR at compile: this member's type cannot be assigned
 #pragma once
 
 #include <string>

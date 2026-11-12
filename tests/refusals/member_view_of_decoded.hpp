@@ -1,5 +1,5 @@
 // A `string_view` member over a data rule that decodes a terminal's slice.
-// expect LR: a string_view member cannot hold this value
+// expect LR at compile: a string_view member cannot hold this value
 #pragma once
 
 #include <string>

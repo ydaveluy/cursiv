@@ -1,6 +1,6 @@
 // A `string_view` member over a converter that builds a string: behind a
 // ConversionResult.
-// expect LR: a string_view member cannot hold this value
+// expect LR at compile: a string_view member cannot hold this value
 #pragma once
 
 #include <optional>

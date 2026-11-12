@@ -2,7 +2,8 @@
 # and the JSON parses with every count of each class. The counts' values are
 # not judged here.
 execute_process(
-    COMMAND ${EMULATOR} ${METRIC} --docs 3 --reps 1 --json ${OUT}.json
+    COMMAND ${EMULATOR} ${METRIC} --only arithmetics --docs 3 --reps 1
+            --json ${OUT}.json
     OUTPUT_VARIABLE text
     RESULT_VARIABLE code)
 if(NOT code EQUAL 0)

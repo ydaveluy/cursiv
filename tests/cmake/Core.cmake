@@ -10,6 +10,8 @@ cursiv_test(grammar_test core/grammar/grammar_test.cpp cursiv::lsp duallrGenerat
     spelldashedGenerated sentblobGenerated sentwordGenerated sentfreeGenerated derivebaseGenerated
     derivedialectGenerated deriveruleGenerated
     derivetextdialectGenerated derivetextdialectllGenerated docswideGenerated docswidellGenerated)
+# It reads the names of the types it declares, as a grammar's text spells them.
+set_target_properties(grammar_test PROPERTIES CURSIV_TEST_ALONE ON)
 cursiv_grammar(docswide engines/lr/WideDocsGrammar.hpp tdocs::G ENGINE LR)
 cursiv_grammar(docswidell engines/lr/WideDocsGrammar.hpp tdocs::Ll ENGINE LL)
 cursiv_grammar(derivebase core/grammar/DerivedGrammar.hpp tderive::Base)
@@ -23,6 +25,8 @@ cursiv_test(threads_test core/threads_test.cpp)
 cursiv_test(TypeList_test core/utils/TypeList_test.cpp)
 target_compile_options(TypeList_test PRIVATE -ftemplate-depth=100)
 cursiv_test(utils_test core/utils/utils_test.cpp cursiv::lsp wsCore)
+# It instantiates a template of the library explicitly, at global scope.
+set_target_properties(utils_test PROPERTIES CURSIV_TEST_ALONE ON)
 # Replaces the global allocator, which the thread sanitizer's runtime also
 # defines: the two do not link.
 if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
