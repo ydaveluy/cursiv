@@ -93,8 +93,8 @@ class LlEpisodeSim {
   // `pool` holds the stacks of the descent and the ones the episode makes. A
   // tracked episode keeps the rules each reading completed, and the readings
   // that share a closure, as the lexer reads an LR state's items.
-  LlEpisodeSim(const LlAtnView& atn, LlReturnPool& pool, bool tracked)
-      : _atn(atn), _pool(pool), _tracked(tracked) {}
+  LlEpisodeSim(const LlAtnView& atn, LlReturnPool& pool, bool tracked);
+  ~LlEpisodeSim();
 
   // The decisions whose arms rank before any lexical choice, a flag each, or
   // none where there are none.
@@ -147,12 +147,7 @@ class LlEpisodeSim {
   }
 
   // An episode that grew large gives its memory back.
-  void trim() {
-    const auto each = [](auto&... x) { (x.trim(), ...); };
-    each(_arms, _lexes, _reduces, _seen, _at, _held, _crossed, _calls, _flat,
-         _below, _relatedProcessed, _relatedFlags, _relatedBaseCount,
-         _relatedBases);
-  }
+  void trim();
 
   // Whether one reading precedes another: the lexical choices first, then the
   // decisions, each by the first word where they part; except where the

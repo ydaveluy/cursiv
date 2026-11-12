@@ -20,7 +20,6 @@
 #include "cursiv/syntax-tree/CstLeaf.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/text/TextOffset.hpp"
-#include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
@@ -31,27 +30,13 @@ struct StampedGrammar final : Grammar {
       : _f(&meta), _stamp(stamp) {}
 
   bool recordWrites(const CstNode& n,
-                    std::string_view f) const noexcept override {
-    const ElementId e = _stamp.row(n);
-    return holds(e) && !f.empty() && answer(e).writes(f);
-  }
+                    std::string_view f) const noexcept override;
   bool recordFills(const CstNode& n,
-                   std::string_view f) const noexcept override {
-    const ElementId e = _stamp.row(n);
-    return holds(e) && !f.empty() && answer(e).fills(f);
-  }
-  std::string_view recordFeature(const CstNode& n) const noexcept override {
-    return rowFeature(_stamp.row(n));
-  }
-  std::string_view recordRule(const CstNode& n) const noexcept override {
-    const ElementId e = _stamp.row(n);
-    return holds(e) ? _f->names[answer(e).rule] : std::string_view{};
-  }
+                   std::string_view f) const noexcept override;
+  std::string_view recordFeature(const CstNode& n) const noexcept override;
+  std::string_view recordRule(const CstNode& n) const noexcept override;
 
-  bool recordIsDataRule(const CstNode& n) const noexcept override {
-    const ElementId e = _stamp.row(n);
-    return holds(e) && answer(e).dataRule;
-  }
+  bool recordIsDataRule(const CstNode& n) const noexcept override;
 
   // The same answer from a row and not a record: a continuation has no
   // record yet -- the table names the site a shift would write in.
@@ -66,43 +51,15 @@ struct StampedGrammar final : Grammar {
   }
 
   std::span<const std::string_view> terminalSpellings(
-      std::uint16_t t) const noexcept override {
-    return t < _f->terminalCount ? _f->terminals[t].spellings
-                                 : std::span<const std::string_view>{};
-  }
-  std::string_view terminalName(std::uint16_t t) const noexcept override {
-    return t < _f->terminalCount ? _f->terminals[t].name : std::string_view{};
-  }
-  std::string_view terminalDoc(std::uint16_t t) const noexcept override {
-    return t < _f->terminalCount ? _f->terminals[t].doc : std::string_view{};
-  }
+      std::uint16_t t) const noexcept override;
+  std::string_view terminalName(std::uint16_t t) const noexcept override;
+  std::string_view terminalDoc(std::uint16_t t) const noexcept override;
   // A linear scan is enough: a hover runs once per keystroke.
-  std::string_view spellingDoc(std::string_view text) const noexcept override {
-    if (text.empty()) return {};
-    for (std::uint16_t t = 0; t < _f->terminalCount; ++t) {
-      const auto& term = _f->terminals[t];
-      if (term.doc.empty()) continue;
-      for (const std::string_view spelling : term.spellings)
-        if (term.folded ? folded_equal(spelling, text) : spelling == text)
-          return term.doc;
-    }
-    return {};
-  }
+  std::string_view spellingDoc(std::string_view text) const noexcept override;
   // A linear scan: a lookup asks it once, and only of a word it met written in
   // another case.
-  bool spellingFolds(std::string_view keyword) const noexcept override {
-    for (std::uint16_t t = 0; t < _f->terminalCount; ++t) {
-      const auto& term = _f->terminals[t];
-      if (!term.folded) continue;
-      for (const std::string_view spelling : term.spellings)
-        if (folded_equal(spelling, keyword)) return true;
-    }
-    return false;
-  }
-  std::string_view recordDoc(const CstNode& n) const noexcept override {
-    const ElementId e = _stamp.row(n);
-    return holds(e) ? _f->names[answer(e).doc] : std::string_view{};
-  }
+  bool spellingFolds(std::string_view keyword) const noexcept override;
+  std::string_view recordDoc(const CstNode& n) const noexcept override;
 
   // Whether a caret at `at`, its candidate replacing the text to `resume`, has
   // an answer in the tree. A caret inside a token, a comment or dropped text

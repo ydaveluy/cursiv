@@ -3,7 +3,6 @@
 // the other. The terminals are named in the grammar's order.
 #pragma once
 
-#include <algorithm>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -74,7 +73,7 @@ class TiedInserts {
   void open() { _seen.next(); }
 
   // The terminals named, in the order the grammar declares them.
-  static void order(std::vector<ElementId>& terms) { std::ranges::sort(terms); }
+  static void order(std::vector<ElementId>& terms);
 
  private:
   // What the links from `from` up to `shared` held, and, where `first`, the
