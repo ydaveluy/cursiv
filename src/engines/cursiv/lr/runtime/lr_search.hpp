@@ -1033,7 +1033,8 @@ bool lr_search_closers(LrContext& c, LrSearch& s) {
 }
 
 // The first edit that holds: the token dropped, or at the end the required
-// insertions, else a wrap. Each widens the span a bound decided.
+// insertions, else the frames given up above the deepest stack that takes the
+// token in hand. Each widens the span a bound decided.
 template <const auto& A>
 LrExit lr_search_degraded(LrContext& c, LrSearch& s) {
   if (s.degraded) ++c.stats.degradedPauses;
@@ -1069,16 +1070,35 @@ LrExit lr_search_degraded(LrContext& c, LrSearch& s) {
     s.plan.clear();
     s.next = 0;
   }
+  // The frames under those given up, as a walk reads a stack.
+  struct Kept {
+    const LrStack& stack;
+    std::uint32_t frames;
+    std::uint32_t size() const { return frames; }
+    std::uint32_t state_at(std::uint32_t i) const { return stack.state_at(i); }
+  };
+  std::uint32_t keep = std::max<std::uint32_t>(c.stack.size(), 2) - 1;
+  for (; keep > 1; --keep)
+    if (const Kept kept{c.stack, keep};
+        lr_stack_takes<A>(
+            LrStackOverlay<Kept>(kept), c.la.sym,
+            [&](unsigned k) { return c.drive->cond(c, k, c.virt.from, c.la); },
+            c.walkMemo))
+      break;
   RepairFault& f = s.fault;
   f.open = true;
   f.abandon = true;
   f.missing = lr_search_missing<A>(state);
-  f.begin = c.stack.size() > 1 ? c.stack[1].begin : c.committed;
-  lr_write_abandon<A>(c, 1, A.cfg.entryRow);
+  f.begin = keep < c.stack.size() ? c.stack[keep].begin : c.committed;
+  lr_write_abandon<A>(c, keep, keep == 1 ? A.cfg.entryRow : kNoRow);
   c.cost += kRepairEdit;
   f.end = c.committed;
   lr_search_note(c, s);
   s.boundedEnd = c.committed;
+  if (keep != 1) {
+    c.laMode = kNoMode;
+    return lr_resume(c);
+  }
   lr_flush_trivia<A>(c);
   return LrExit::accept;
 }

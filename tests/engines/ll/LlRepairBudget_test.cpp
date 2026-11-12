@@ -173,6 +173,36 @@ void a_starved_parser_still_observes_cancellation() {
   }
 }
 
+// Past the budget at the end of the text, the table engine gives up the
+// declaration the fault stands in and no other; the descent closes it. The
+// declarations before it keep the records of the text without it.
+void an_unclosed_last_declaration_costs_no_other() {
+  for (const std::string_view before : {"let a = 1; let b = 2; ", ""})
+    for (const std::string_view tail :
+         {"let c = (1 + ", "let c = (((", "let c = f(1, "})
+      for (const bool predictive : {false, true}) {
+        const std::string text = std::string(before) + std::string(tail);
+        const auto engine = parser(predictive, kBudgets[0]);
+        const auto whole = engine->parse(before);
+        const auto cut = engine->parse(text);
+        CHECK(whole.accepted && whole.diagnostics.empty() && cut.accepted);
+        const auto& was = whole.cst();
+        const auto& is = cut.cst();
+        bool kept = is.size() > was.size();
+        for (cursiv::NodeId i = 0; kept && i + 1 < was.size(); ++i)
+          kept = is[i].begin == was[i].begin && is[i].end == was[i].end &&
+                 is[i].subtreeSize == was[i].subtreeSize && !is[i].recovered;
+        CHECK(kept);
+        if (predictive) continue;
+        CHECK(is[is.size() - 1].recovered == before.empty());
+        CHECK(cut.diagnostics.size() == 2 &&
+              cut.diagnostics[0].kind == cursiv::DiagnosticKind::incomplete &&
+              cut.diagnostics[0].begin == before.size() &&
+              cut.diagnostics[1].kind == cursiv::DiagnosticKind::bounded &&
+              cut.diagnostics[1].begin == before.size());
+      }
+}
+
 }  // namespace
 
 int main() {
@@ -184,5 +214,6 @@ int main() {
   a_race_does_not_cost_the_bracket();
   a_fault_behind_a_long_list_does_not_cost_its_square();
   a_starved_parser_still_observes_cancellation();
+  an_unclosed_last_declaration_costs_no_other();
   return cursiv::test::report("LlRepairBudget_test");
 }
