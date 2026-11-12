@@ -107,9 +107,9 @@ class LocalSymbols {
       const NameSlot& slot = _names[at];
       if (slot.container == nullptr) return nullptr;
       if (slot.container != container || slot.tag != tag) continue;
-      const std::string_view held = _entries[slot.first].name;
-      spelled = held == name;
-      if (spelled || folded_equal(held, name)) {
+      const auto match = detail::name_match(_entries[slot.first].name, name);
+      if (match != detail::NameMatch::None) {
+        spelled = match == detail::NameMatch::Exact;
         first = slot.first;
         break;
       }

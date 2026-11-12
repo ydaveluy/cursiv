@@ -68,6 +68,10 @@ void every_byte_is_compared_folded() {
       std::string upper = name;
       upper[at] = static_cast<char>(upper[at] - 'a' + 'A');
       CHECK(cursiv::folded_equal(name, upper));
+      CHECK(cursiv::detail::name_match(name, upper) ==
+            cursiv::detail::NameMatch::Folded);
+      CHECK(cursiv::detail::name_match(name, std::string(name)) ==
+            cursiv::detail::NameMatch::Exact);
       CHECK(cursiv::folded_hash(name) == cursiv::folded_hash(upper));
       std::string other = name;
       other[at] = '_';

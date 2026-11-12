@@ -47,12 +47,13 @@ struct LargeGroup {
   }
 };
 
-// The document of each target. A short walk remembers nothing; a long one is
-// remembered, and the next one stops where it reaches it, so a deep chain is
-// walked once.
+// The document of each target. A target answers for its siblings; past that,
+// a short walk remembers nothing, and a long one is remembered: the next one
+// stops where it reaches it, so a deep chain is walked once.
 class TargetDocuments {
  public:
   [[nodiscard]] const Document* of(const AstNode& node) {
+    if (node.parent != nullptr && node.parent == _parent) return _document;
     const AstNode* at = &node;
     std::size_t steps = 0;
     const Document* targetDocument = nullptr;
@@ -72,11 +73,16 @@ class TargetDocuments {
     if (steps > kShort)
       for (const AstNode* p = &node; p != at; p = p->parent)
         _known.emplace(p, targetDocument);
+    _parent = node.parent;
+    _document = targetDocument;
     return targetDocument;
   }
 
  private:
   static constexpr std::size_t kShort = 64;
+  // The last target's parent, and the document found from it.
+  const AstNode* _parent = nullptr;
+  const Document* _document = nullptr;
   std::unordered_map<const AstNode*, const Document*> _known;
 };
 

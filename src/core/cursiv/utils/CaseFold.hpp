@@ -198,29 +198,50 @@ inline constexpr std::uint64_t kHashMix = 0x9e3779b97f4a7c15ull;
   return detail::hash_avalanche(h);
 }
 
-// A word at a time up to ASCII case, which is what nearly every lookup
-// compares: names of different sizes never match, and a word that differs
-// matters only where it holds a byte past ASCII.
-[[nodiscard]] inline bool folded_equal(std::string_view a,
-                                       std::string_view b) noexcept {
-  if (a.size() != b.size()) return false;
+namespace detail {
+
+// How two names compare: `Folded` when only case tells them apart.
+enum class NameMatch : unsigned { None, Folded, Exact };
+
+// A word at a time, which is what nearly every lookup compares: names of
+// different sizes never match, and a word that differs matters only where it
+// holds a byte past ASCII.
+[[nodiscard]] inline NameMatch name_match(std::string_view a,
+                                          std::string_view b) noexcept {
+  using enum NameMatch;
+  if (a.size() != b.size()) return None;
   constexpr std::uint64_t kHigh = 0x8080808080808080ull;
   const char* pa = a.data();
   const char* pb = b.data();
   std::size_t n = a.size();
+  // Past ASCII, the whole names are compared a scalar at a time.
+  const auto scalars = [&](std::uint64_t wa, std::uint64_t wb) {
+    return ((wa | wb) & kHigh) != 0 &&
+                   folded_scalars_equal(a.data(), b.data(), a.size())
+               ? Folded
+               : None;
+  };
+  NameMatch match = Exact;
   for (; n >= 8; pa += 8, pb += 8, n -= 8) {
-    const std::uint64_t wa = detail::load<std::uint64_t>(pa);
-    const std::uint64_t wb = detail::load<std::uint64_t>(pb);
-    if (detail::fold_word(wa) != detail::fold_word(wb))
-      return ((wa | wb) & kHigh) != 0 &&
-             detail::folded_scalars_equal(a.data(), b.data(), a.size());
+    const std::uint64_t wa = load<std::uint64_t>(pa);
+    const std::uint64_t wb = load<std::uint64_t>(pb);
+    if (wa == wb) continue;
+    if (fold_word(wa) != fold_word(wb)) return scalars(wa, wb);
+    match = Folded;
   }
-  if (n == 0) return true;
-  const std::uint64_t wa = detail::load_tail(pa, n);
-  const std::uint64_t wb = detail::load_tail(pb, n);
-  return detail::fold_word(wa) == detail::fold_word(wb) ||
-         (((wa | wb) & kHigh) != 0 &&
-          detail::folded_scalars_equal(a.data(), b.data(), a.size()));
+  if (n == 0) return match;
+  const std::uint64_t wa = load_last(pa, n, a.size());
+  const std::uint64_t wb = load_last(pb, n, a.size());
+  if (wa == wb) return match;
+  return fold_word(wa) == fold_word(wb) ? Folded : scalars(wa, wb);
+}
+
+}  // namespace detail
+
+// Whether two names are the same up to case.
+[[nodiscard]] inline bool folded_equal(std::string_view a,
+                                       std::string_view b) noexcept {
+  return detail::name_match(a, b) != detail::NameMatch::None;
 }
 
 }  // namespace cursiv

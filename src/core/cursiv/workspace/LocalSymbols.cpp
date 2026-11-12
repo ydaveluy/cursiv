@@ -342,10 +342,7 @@ LocalSymbols::NameMatches LocalSymbols::find_held(
     const NameSlot& slot = _names[at];
     if (slot.container == nullptr) return {};
     if (slot.container == container && slot.tag == tag) {
-      // Exact first: it implies the folded match, and it is what nearly every
-      // query spells.
-      const std::string_view held = _entries[slot.first].name;
-      if (held == name || folded_equal(held, name))
+      if (folded_equal(_entries[slot.first].name, name))
         return NameMatches{this, slot.first};
     }
     at = (at + 1) & _nameMask;
