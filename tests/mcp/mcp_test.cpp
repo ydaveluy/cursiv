@@ -403,9 +403,9 @@ struct HookedLock final : cursiv::WorkspaceLock {
     if (after) after(rank);
     return admitted;
   }
-  void endMutation() override { inner->endMutation(); }
-  [[nodiscard]] bool mutationEnded() const override {
-    return inner->mutationEnded();
+  void allowImmediateReads() override { inner->allowImmediateReads(); }
+  [[nodiscard]] bool immediateReadsAllowed() const override {
+    return inner->immediateReadsAllowed();
   }
   void cancelWrite() override { inner->cancelWrite(); }
 
@@ -1172,7 +1172,7 @@ void validate_sets_nothing_back_under_an_admitted_reader() {
       int verdicts = 0;
       bool inside = false;
       bool asked = false;
-      bool toldPastMutationEnd = false;
+      bool toldAfterAllowing = false;
       bool slowBesideReader = false;
       void onDocumentPhase(cursiv::Document& document,
                            cursiv::DocumentState reached,
@@ -1188,7 +1188,7 @@ void validate_sets_nothing_back_under_an_admitted_reader() {
       void onUpdate(std::span<const std::string_view> changed,
                     std::span<const std::string_view>) override {
         std::unique_lock hold(mutex);
-        toldPastMutationEnd = toldPastMutationEnd || lock->mutationEnded();
+        toldAfterAllowing = toldAfterAllowing || lock->immediateReadsAllowed();
         if (verdicts == 0 ||
             std::ranges::none_of(changed, [](std::string_view uri) {
               return uri.find("/.mcp-scratch/") != std::string_view::npos;
@@ -1276,7 +1276,7 @@ void validate_sets_nothing_back_under_an_admitted_reader() {
     CHECK(watch.verdicts == 1);
     CHECK(!watch.slowBesideReader);
     CHECK(!changedUnderReader);
-    CHECK(!watch.toldPastMutationEnd);
+    CHECK(!watch.toldAfterAllowing);
     CHECK(own.shared.documents->all().size() == (built ? 1U : 0U));
   }
 }

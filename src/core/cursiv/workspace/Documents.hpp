@@ -37,9 +37,9 @@ class Documents {
       std::string_view uri, std::string text,
       const CancellationToken& cancelToken = kNoCancel) = 0;
 
-  // The document for `uri`, read from disk if it is not held yet. A mutation of
-  // the store like `addDocument`: called from a write before its mutation ends
-  // -- never from a build's phases, which read the store unlocked beside it.
+  // The document for `uri`, read from disk if it is not held yet. It changes
+  // the store like `addDocument`: a write calls it before it allows immediate
+  // reads -- never a build's phases, which read the store unlocked beside it.
   virtual std::shared_ptr<Document> getOrCreateDocument(
       std::string_view uri,
       const CancellationToken& cancelToken = kNoCancel) = 0;

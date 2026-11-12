@@ -148,8 +148,8 @@ void DefaultDocumentBuilder::runPhase(std::span<Document* const> all,
       }
     };
     if (!_documentPhaseListeners.empty()) {
-      // Unpublished, the write's mutation has not ended: told on this thread,
-      // whose reads run inline.
+      // Unpublished, the write does not allow immediate reads yet: told on
+      // this thread, whose reads run inline.
       if (published)
         _shared.taskScheduler->parallelFor(kNoCancel, indices, tell);
       else
@@ -402,7 +402,7 @@ void DefaultDocumentBuilder::buildDocuments(
       }
   }
 
-  if (!prepareContent) _shared.workspaceLock->endMutation();
+  if (!prepareContent) _shared.workspaceLock->allowImmediateReads();
 
   const auto publishContent = [&] {
     for (const auto& heldDocument : held) {
@@ -413,7 +413,7 @@ void DefaultDocumentBuilder::buildDocuments(
         continue;
       if (index.isAffected(*d, changed)) rebuild(d);
     }
-    _shared.workspaceLock->endMutation();
+    _shared.workspaceLock->allowImmediateReads();
   };
 
   runPhase(work,
@@ -456,7 +456,7 @@ void DefaultDocumentBuilder::buildDocuments(
   } catch (...) {
     // Linked but not indexed is a state the document cannot keep: back to
     // `ComputedScopes`, so the next build relinks it. Its memo is dropped
-    // there, before that build ends its mutation.
+    // there, before that build allows immediate reads.
     for (Document* d : work)
       if (d->state.load() == DocumentState::Linked)
         d->state = DocumentState::ComputedScopes;
@@ -623,10 +623,10 @@ void DefaultDocumentBuilder::resetToState(Document& document,
 void DefaultDocumentBuilder::resetDocument(Document& document,
                                            DocumentState state) const {
   // The lock's contract for `buildDocuments`, checked where it can be
-  // broken: once the mutation ends, an `Immediate` read may hold this tree,
-  // and dropping a parse is what invalidates every pointer into it.
-  assert(!_shared.workspaceLock->mutationEnded() &&
-         "a document may not be reset once the write's mutation has ended");
+  // broken: once the write allows them, an `Immediate` read may hold this
+  // tree, and dropping a parse is what invalidates every pointer into it.
+  assert(!_shared.workspaceLock->immediateReadsAllowed() &&
+         "a document may not be reset once the write allows immediate reads");
   IndexManager& index = *_shared.indexManager;
   const CoreServices* language = languageOf(document);
   using enum DocumentState;

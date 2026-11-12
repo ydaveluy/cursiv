@@ -585,9 +585,9 @@ void run() {
 
 }  // namespace published
 
-// The reader/writer lock: entry order, superseded and durable writes, the read
-// inside a write, a cancelled gate wait, and the `Immediate` read that enters
-// once a write's mutation ends.
+// The reader/writer lock: entry order, superseded and protected writes, the
+// read inside a write, a cancelled gate wait, and the `Immediate` read that
+// enters once a write allows it.
 namespace workspace_lock {
 
 namespace {
@@ -632,55 +632,55 @@ void a_newer_write_supersedes_the_running_one() {
   CHECK(order == std::vector<std::string>({"first", "second"}));
 }
 
-// `cancelWrite` on a durable write takes effect when its mutation ends: the
-// mutation is kept, what follows is cancelled.
-void cancel_write_takes_effect_at_a_durable_mutation_end() {
+// `cancelWrite` on a protected write takes effect when it allows immediate
+// reads: what comes before is kept, what follows is cancelled.
+void cancel_write_waits_for_a_protected_write_to_allow_reads() {
   cursiv::DefaultWorkspaceLock lock;
   std::atomic<bool> entered{false};
   std::atomic<bool> cancelled{false};
-  bool cancelledBeforeMutationEnd = false;
+  bool cancelledWhileProtected = false;
   bool sawCancel = false;
   std::jthread writer([&] {
     lock.write(
         [&](const cursiv::CancellationToken& token) {
           entered = true;
           wait_for(cancelled);
-          cancelledBeforeMutationEnd = token.stop_requested();
-          lock.endMutation();
+          cancelledWhileProtected = token.stop_requested();
+          lock.allowImmediateReads();
           while (!token.stop_requested()) std::this_thread::yield();
           sawCancel = true;
         },
-        WorkspaceLock::WriteMode::Durable);
+        WorkspaceLock::WriteMode::Protected);
   });
   wait_for(entered);
   lock.cancelWrite();
   cancelled = true;
   writer.join();
-  CHECK(!cancelledBeforeMutationEnd);
+  CHECK(!cancelledWhileProtected);
   CHECK(sawCancel);
 }
 
-// A later write does not cancel a durable one's mutation; it runs after it.
-// Once the later write enters, the token ends up cancelled whichever side of
-// the mutation end it entered on, so the wait below always ends.
-void a_durable_write_keeps_its_mutation() {
+// Until it allows immediate reads, a protected write is not cancelled by a
+// later one, which runs after it. Once the later write enters, the token ends
+// up cancelled whichever side of that call it entered on, so the wait ends.
+void a_protected_write_is_not_cancelled_until_it_allows_reads() {
   cursiv::DefaultWorkspaceLock lock;
   std::vector<std::string> order;
   std::atomic<bool> entered{false};
   std::atomic<bool> posted{false};
-  bool cancelledBeforeMutationEnd = false;
+  bool cancelledWhileProtected = false;
 
   std::jthread first([&] {
     lock.write(
         [&](const cursiv::CancellationToken& token) {
           entered = true;
           wait_for(posted);
-          cancelledBeforeMutationEnd = token.stop_requested();
-          lock.endMutation();
+          cancelledWhileProtected = token.stop_requested();
+          lock.allowImmediateReads();
           while (!token.stop_requested()) std::this_thread::yield();
           order.emplace_back("first");
         },
-        WorkspaceLock::WriteMode::Durable);
+        WorkspaceLock::WriteMode::Protected);
   });
   wait_for(entered);
   std::jthread second([&] {
@@ -691,7 +691,7 @@ void a_durable_write_keeps_its_mutation() {
   });
   first.join();
   second.join();
-  CHECK(!cancelledBeforeMutationEnd);
+  CHECK(!cancelledWhileProtected);
   CHECK(order == std::vector<std::string>({"first", "second"}));
 }
 
@@ -725,23 +725,23 @@ void a_cancelled_gate_wait_returns_false() {
   release = true;
 }
 
-// An `Immediate` read runs beside a write past its mutation, without waiting
-// for the write's tail. A `Normal` one in the same window waits.
-void an_immediate_read_runs_beside_a_write_past_its_mutation() {
+// An `Immediate` read runs beside a write that allows it, without waiting for
+// the write's tail. A `Normal` one in the same window waits.
+void an_immediate_read_runs_beside_a_write_that_allows_it() {
   cursiv::DefaultWorkspaceLock lock;
-  std::atomic<bool> mutationEnded{false};
+  std::atomic<bool> allowed{false};
   std::atomic<bool> immediateDone{false};
   std::atomic<bool> release{false};
   std::atomic<bool> normalDone{false};
 
   std::jthread writer([&] {
     lock.write([&](const cursiv::CancellationToken&) {
-      lock.endMutation();
-      mutationEnded = true;
+      lock.allowImmediateReads();
+      allowed = true;
       while (!release.load()) std::this_thread::yield();
     });
   });
-  wait_for(mutationEnded);
+  wait_for(allowed);
 
   std::jthread normal([&] {
     (void)lock.read([&] {}, {}, WorkspaceLock::ReadPriority::Normal);
@@ -760,24 +760,24 @@ void an_immediate_read_runs_beside_a_write_past_its_mutation() {
   CHECK(normalDone.load());
 }
 
-// ...and not before the mutation ends: it drops parses, and a reader let in
+// ...and not before: until then the write drops parses, and a reader let in
 // there would hold pointers into freed memory.
-void an_immediate_read_waits_out_the_mutation() {
+void an_immediate_read_waits_until_the_write_allows_it() {
   cursiv::DefaultWorkspaceLock lock;
-  std::atomic<bool> mutating{false};
+  std::atomic<bool> writing{false};
   std::atomic<bool> readEntered{false};
-  std::atomic<bool> endMutation{false};
+  std::atomic<bool> allow{false};
 
   std::jthread writer([&] {
     lock.write([&](const cursiv::CancellationToken&) {
-      mutating = true;
-      while (!endMutation.load()) std::this_thread::yield();
-      // Nothing was let in while the mutation ran.
+      writing = true;
+      while (!allow.load()) std::this_thread::yield();
+      // Nothing was let in before the write allowed it.
       CHECK(!readEntered.load());
-      lock.endMutation();
+      lock.allowImmediateReads();
     });
   });
-  wait_for(mutating);
+  wait_for(writing);
 
   std::jthread reader([&] {
     (void)lock.read([&] { readEntered = true; }, {},
@@ -786,7 +786,7 @@ void an_immediate_read_waits_out_the_mutation() {
   // Give the reader every chance to get in early; it must not.
   for (int i = 0; i < 1000; ++i) std::this_thread::yield();
   CHECK(!readEntered.load());
-  endMutation = true;
+  allow = true;
   reader.join();
   writer.join();
   CHECK(readEntered.load());
@@ -821,22 +821,22 @@ void a_write_waits_for_immediate_readers() {
   CHECK(wrote.load());
 }
 
-// `endMutation` off the writer's own thread opens nothing: a caller with no
-// write in hand cannot admit itself.
-void end_mutation_is_the_writers_alone() {
+// `allowImmediateReads` off the writer's own thread opens nothing: a caller
+// with no write in hand cannot admit itself.
+void only_the_writer_allows_immediate_reads() {
   cursiv::DefaultWorkspaceLock lock;
-  std::atomic<bool> mutating{false};
+  std::atomic<bool> writing{false};
   std::atomic<bool> readEntered{false};
   std::atomic<bool> release{false};
 
   std::jthread writer([&] {
     lock.write([&](const cursiv::CancellationToken&) {
-      mutating = true;
+      writing = true;
       while (!release.load()) std::this_thread::yield();
     });
   });
-  wait_for(mutating);
-  lock.endMutation();  // not the writer's thread: a no-op
+  wait_for(writing);
+  lock.allowImmediateReads();  // not the writer's thread: a no-op
 
   std::jthread reader([&] {
     (void)lock.read([&] { readEntered = true; }, {},
@@ -850,40 +850,41 @@ void end_mutation_is_the_writers_alone() {
   CHECK(readEntered.load());
 }
 
-// `mutationEnded`: false with no write, false through the mutation, true
-// from its end to the end of the action, and false again after.
-void mutation_ended_says_when_a_mutation_may_not_run() {
+// `immediateReadsAllowed`: false with no write, false until the write calls
+// `allowImmediateReads`, true from there to the end of the action, and false
+// again after.
+void immediate_reads_allowed_says_when_nothing_may_be_reset() {
   cursiv::DefaultWorkspaceLock lock;
-  CHECK(!lock.mutationEnded());
+  CHECK(!lock.immediateReadsAllowed());
 
-  std::atomic<bool> mutating{false};
+  std::atomic<bool> writing{false};
   std::atomic<bool> go{false};
   std::atomic<bool> release{false};
-  bool duringMutation = true;
-  bool afterMutationEnd = false;
+  bool beforeAllowing = true;
+  bool afterAllowing = false;
 
   std::jthread writer([&] {
     lock.write([&](const cursiv::CancellationToken&) {
-      mutating = true;
+      writing = true;
       wait_for(go);
-      duringMutation = lock.mutationEnded();
-      lock.endMutation();
-      afterMutationEnd = lock.mutationEnded();
+      beforeAllowing = lock.immediateReadsAllowed();
+      lock.allowImmediateReads();
+      afterAllowing = lock.immediateReadsAllowed();
       wait_for(release);
     });
   });
-  wait_for(mutating);
+  wait_for(writing);
   // Asked from outside the writer too: the answer is the serving write's, not
   // the asker's.
-  CHECK(!lock.mutationEnded());
+  CHECK(!lock.immediateReadsAllowed());
   go = true;
-  while (!lock.mutationEnded()) std::this_thread::yield();
+  while (!lock.immediateReadsAllowed()) std::this_thread::yield();
   release = true;
   writer.join();
 
-  CHECK(!duringMutation);
-  CHECK(afterMutationEnd);
-  CHECK(!lock.mutationEnded());
+  CHECK(!beforeAllowing);
+  CHECK(afterAllowing);
+  CHECK(!lock.immediateReadsAllowed());
 }
 
 // The declared contract: an escaping `OperationCancelled` is absorbed, any
@@ -918,15 +919,15 @@ void write_absorbs_a_cancellation_and_propagates_anything_else() {
 void run() {
   a_write_runs_and_a_read_sees_it();
   a_newer_write_supersedes_the_running_one();
-  cancel_write_takes_effect_at_a_durable_mutation_end();
-  a_durable_write_keeps_its_mutation();
+  cancel_write_waits_for_a_protected_write_to_allow_reads();
+  a_protected_write_is_not_cancelled_until_it_allows_reads();
   a_read_inside_a_write_runs_inline();
   a_cancelled_gate_wait_returns_false();
-  an_immediate_read_runs_beside_a_write_past_its_mutation();
-  an_immediate_read_waits_out_the_mutation();
+  an_immediate_read_runs_beside_a_write_that_allows_it();
+  an_immediate_read_waits_until_the_write_allows_it();
   a_write_waits_for_immediate_readers();
-  end_mutation_is_the_writers_alone();
-  mutation_ended_says_when_a_mutation_may_not_run();
+  only_the_writer_allows_immediate_reads();
+  immediate_reads_allowed_says_when_nothing_may_be_reset();
   write_absorbs_a_cancellation_and_propagates_anything_else();
 }
 

@@ -33,8 +33,8 @@ DefaultWorkspaceLock::~DefaultWorkspaceLock() noexcept {
   if (latest.stop_possible()) latest.request_stop();
   {
     std::unique_lock lock(_m);
-    // Everyone out: gated reads, immediate reads running beside a write past
-    // its mutation, and every entered write.
+    // Everyone out: gated reads, immediate reads running beside a write, and
+    // every entered write.
     _cv.wait(lock, [this]() {
       return _inGate == 0 && _readers == 0 && _writersPending == 0 &&
              !_writeHeld;
@@ -56,12 +56,12 @@ void DefaultWorkspaceLock::write(WriteAction action, WriteMode mode) {
     std::scoped_lock lock(_m);
     ticket = _ticketNext++;
     ++_writersPending;
-    // A durable latest is not superseded: its mutation is protected until it
-    // ends and hands the guard back. Everything else keeps the low-latency
-    // model: the newest write wins.
-    if (!_latestDurable) superseded = _latest;
+    // A protected latest is not cancelled here but at the end of its
+    // protection. Everything else keeps the low-latency model: the newest
+    // write wins.
+    if (!_latestProtected) superseded = _latest;
     _latest = mine;
-    _latestDurable = mode == WriteMode::Durable;
+    _latestProtected = mode == WriteMode::Protected;
     _latestCancelled = false;
   }
   // Outside the lock: see the destructor.
@@ -73,8 +73,8 @@ void DefaultWorkspaceLock::write(WriteAction action, WriteMode mode) {
       return _ticketServing == ticket && !_writeHeld && _readers == 0;
     });
     _writeHeld = true;
-    _mutationEnded = false;
-    _activeDurable = mode == WriteMode::Durable;
+    _immediateReadsAllowed = false;
+    _activeProtected = mode == WriteMode::Protected;
     _active = mine;
     // From here to the end of the action this thread's reads are the writer's
     // own and run inline in `read()`.
@@ -96,12 +96,12 @@ void DefaultWorkspaceLock::write(WriteAction action, WriteMode mode) {
   // out. Only `request_stop` runs outside it, as it calls user callbacks.
   {
     std::scoped_lock lock(_m);
-    // A write that never ended its mutation hands the durability guard back
-    // here, so no mode outlives its action.
-    if (!_mutationEnded) (void)endMutationLocked();
+    // A write that never allowed immediate reads ends its protection here,
+    // so no mode outlives its action.
+    if (!_immediateReadsAllowed) (void)endProtectionLocked();
     _writeHeld = false;
-    _mutationEnded = false;
-    _activeDurable = false;
+    _immediateReadsAllowed = false;
+    _activeProtected = false;
     --_writersPending;
     ++_ticketServing;
     _active = std::stop_source{std::nostopstate};
@@ -125,13 +125,14 @@ bool DefaultWorkspaceLock::read(ReadAction action,
     }
     ++_inGate;
     // Writers first: `_writersPending` counts waiting writes and the serving
-    // one. An `Immediate` read waits only for the mutation to end, and still
-    // counts as a reader, so the next write drains it before any reset.
+    // one. An `Immediate` read waits only for the serving write to allow it,
+    // and counts as a reader, so the next write drains it before any reset.
     const bool proceed =
         priority == ReadPriority::Immediate
             ? _cv.wait(lock, token,
                        [this]() {
-                         return _stopping || !_writeHeld || _mutationEnded;
+                         return _stopping || !_writeHeld ||
+                                _immediateReadsAllowed;
                        })
             : _cv.wait(lock, token, [this]() {
                 return _stopping || (!_writeHeld && _writersPending == 0);
@@ -163,13 +164,13 @@ bool DefaultWorkspaceLock::read(ReadAction action,
   return true;
 }
 
-// Ends durability, and returns whether the write cancels itself at once: a
-// newer write is waiting, or a cancel came while the mutation was protected.
-bool DefaultWorkspaceLock::endMutationLocked() {
-  if (!_activeDurable) return false;
-  _activeDurable = false;
+// Ends the protection, and returns whether the write cancels itself at once:
+// a newer write is waiting, or a cancel came while it was protected.
+bool DefaultWorkspaceLock::endProtectionLocked() {
+  if (!_activeProtected) return false;
+  _activeProtected = false;
   if (_writersPending > 1) return true;
-  _latestDurable = false;
+  _latestProtected = false;
   if (_latestCancelled) {
     _latestCancelled = false;
     return true;
@@ -177,32 +178,32 @@ bool DefaultWorkspaceLock::endMutationLocked() {
   return false;
 }
 
-void DefaultWorkspaceLock::endMutation() {
+void DefaultWorkspaceLock::allowImmediateReads() {
   bool cancelSelf = false;
   {
     std::scoped_lock lock(_m);
-    // Only the write itself may end its mutation: a caller from anywhere else
-    // would end a mutation it does not own.
+    // Only the write itself may allow them: a caller from anywhere else would
+    // let reads in beside a write it does not own.
     if (_writerThread != std::this_thread::get_id() || !_writeHeld) return;
-    if (_mutationEnded) return;
-    _mutationEnded = true;
-    cancelSelf = endMutationLocked();
+    if (_immediateReadsAllowed) return;
+    _immediateReadsAllowed = true;
+    cancelSelf = endProtectionLocked();
     _cv.notify_all();
   }
   // Outside the mutex, as every `request_stop` here is.
   if (cancelSelf && _active.stop_possible()) _active.request_stop();
 }
 
-bool DefaultWorkspaceLock::mutationEnded() const {
+bool DefaultWorkspaceLock::immediateReadsAllowed() const {
   std::scoped_lock lock(_m);
-  return _writeHeld && _mutationEnded;
+  return _writeHeld && _immediateReadsAllowed;
 }
 
 void DefaultWorkspaceLock::cancelWrite() {
   std::stop_source latest{std::nostopstate};
   {
     std::scoped_lock lock(_m);
-    if (_latestDurable) {
+    if (_latestProtected) {
       _latestCancelled = true;
       return;
     }

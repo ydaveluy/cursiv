@@ -160,9 +160,9 @@ std::shared_ptr<Document> DefaultDocuments::createDocument(
 
 std::shared_ptr<Document> DefaultDocuments::getOrCreateDocument(
     std::string_view uri, const CancellationToken& token) {
-  assert(!_shared.workspaceLock->mutationEnded() &&
-         "getOrCreateDocument mutates the store: a write calls it before its "
-         "mutation ends, never in a build phase");
+  assert(!_shared.workspaceLock->immediateReadsAllowed() &&
+         "getOrCreateDocument changes the store: a write calls it before it "
+         "allows immediate reads, never in a build phase");
   if (std::shared_ptr<Document> held = getDocument(uri)) return held;
   std::shared_ptr<Document> document =
       _shared.documentFactory->fromUri(uri, token);

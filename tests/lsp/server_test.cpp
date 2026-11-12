@@ -2150,9 +2150,9 @@ void the_on_type_triggers_are_a_union_over_the_languages() {
   CHECK(typed(kSecond, "}") == 0);
 }
 
-// The scan writes durably. A document update installs its text whatever
-// arrives behind it, and leaves its build to the next one.
-void only_the_scan_writes_durably() {
+// The scan is a protected write. A document update installs its text
+// whatever arrives behind it, and leaves its build to the next one.
+void only_the_scan_is_a_protected_write() {
   const World world(true);
   (void)world.handshake(world.folderParams());
   world.open(kBroken);
@@ -2167,7 +2167,7 @@ void only_the_scan_writes_durably() {
   using enum cursiv::WorkspaceLock::WriteMode;
   CHECK(world.lock->modes.size() >= 5);
   for (std::size_t i = 0; i < world.lock->modes.size(); ++i)
-    CHECK(world.lock->modes[i] == (i == 0 ? Durable : Supersedable));
+    CHECK(world.lock->modes[i] == (i == 0 ? Protected : Supersedable));
 }
 
 // Opening a file with the text the scan already read installs nothing but
@@ -2321,7 +2321,7 @@ void run() {
   a_closed_file_outside_the_folders_keeps_its_saved_content();
   a_closed_untitled_buffer_leaves_the_workspace();
   the_on_type_triggers_are_a_union_over_the_languages();
-  only_the_scan_writes_durably();
+  only_the_scan_is_a_protected_write();
   an_open_on_known_bytes_still_builds();
   a_command_may_write_to_the_workspace();
   the_watcher_follows_the_clients_capability();
@@ -2416,13 +2416,13 @@ struct Server final : cursiv::DefaultLanguageServer {
     if (writeOnOpen) {
       shared.workspaceLock->write(
           [&](const cursiv::CancellationToken& token) {
-            shared.workspaceLock->endMutation();
+            shared.workspaceLock->allowImmediateReads();
             entered.count_down();
             writeStarted.set_value();
             release.wait();
             openCancelled = token.stop_requested();
           },
-          cursiv::WorkspaceLock::WriteMode::Durable);
+          cursiv::WorkspaceLock::WriteMode::Protected);
       return;
     }
     entered.count_down();
@@ -3089,7 +3089,7 @@ void a_request_does_not_wait_for_the_validation_before_it() {
 }
 
 // Any other notification may write more than once: a request behind it waits
-// for all of it, even once its first build has gone past its mutation.
+// for all of it, even once its first build allows immediate reads.
 void a_custom_notification_holds_the_requests_behind_it() {
   std::latch building{1};
   std::latch release{1};
@@ -3149,8 +3149,7 @@ void a_cut_edit_releases_the_requests_behind_it() {
       "textDocument/didChange",
       R"({"textDocument":{"uri":"untitled:one","version":3},"contentChanges":[{"text":"z"}]})");
   // Each edit cancels the write in flight as it is queued: the second one
-  // cancels the first, which stops at its `endMutation`, before any build
-  // phase.
+  // cancels the first, which stops after its changes, before any build phase.
   s.lock->awaitCancels(2);
   held.releaseFirst.count_down();
   held.second.wait();

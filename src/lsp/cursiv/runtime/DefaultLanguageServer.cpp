@@ -558,7 +558,7 @@ void DefaultLanguageServer::initialized() {
         [&](const CancellationToken& token) {
           _shared.workspaceManager->initializeWorkspace(_folders, token);
         },
-        WorkspaceLock::WriteMode::Durable);
+        WorkspaceLock::WriteMode::Protected);
   } catch (const std::exception& failure) {
     showError(std::string("cursiv: workspace scan failed: ") + failure.what());
   }
@@ -919,7 +919,7 @@ void DefaultLanguageServer::onConfigurationSectionUpdate(
         }
         if (affected) buildUpdate({}, {}, token);
       },
-      WorkspaceLock::WriteMode::Durable);
+      WorkspaceLock::WriteMode::Protected);
 }
 
 // The three `did` arms are dispatched with no lock: a handler that decides

@@ -527,7 +527,7 @@ void add_lifecycle_handlers(Session& session, SharedCoreServices& shared) {
               [&](const CancellationToken& token) {
                 shared.documentBuilder->build({}, {}, token);
               },
-              WorkspaceLock::WriteMode::Durable);
+              WorkspaceLock::WriteMode::Protected);
         },
         false);
     session.queue.drain();

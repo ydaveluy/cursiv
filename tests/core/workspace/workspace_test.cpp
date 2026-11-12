@@ -1331,7 +1331,7 @@ void phase_callbacks_read_after_homonym_invalidation() {
             ++admitted;
             if (dependent->state.load() < cursiv::DocumentState::Linked)
               ++invalidated;
-            if (!lock->mutationEnded() ||
+            if (!lock->immediateReadsAllowed() ||
                 dependent->parseResult.value != root ||
                 dependent->buildRevision != revision)
               ++wrong;
@@ -1771,8 +1771,8 @@ void a_failed_update_listener_answers_the_waiters(bool update) {
 }
 
 // What `routeDocument` does against a build that never stops: wait for the
-// state, be admitted beside the write past its mutation, ask again, then read
-// the tree. Without the second ask, TSan reports a race and `torn` counts.
+// state, be admitted beside the running write, ask again, then read the
+// tree. Without the second ask, TSan reports a race and `torn` counts.
 void a_request_reads_beside_a_running_build() {
   const World world;
   const std::string uri = "file:///live.ws";
@@ -1814,7 +1814,7 @@ void a_request_reads_beside_a_running_build() {
           if (d->state.load() < cursiv::DocumentState::Parsed) return;
           const cursiv::Cst& cst = d->parseResult.cst();
           // A tree that says `Parsed` and holds nothing is what a reader let
-          // into the mutation would see.
+          // in before the write allows it would see.
           if (cst.size() == 0 || cst.text(cst.entry_root()).empty()) ++torn;
           ++served;
         },
@@ -2698,9 +2698,9 @@ struct LoadingScope final : cursiv::DefaultScopeProvider {
   }
 };
 
-// The store is mutated from a write, before its mutation ends; a build phase
-// that does it races every worker and reader beside it, and a debug build
-// stops it. Run in a child, the abort being the verdict.
+// The store is changed from a write, before it allows immediate reads; a
+// build phase that does it races every worker and reader beside it, and a
+// debug build stops it. Run in a child, the abort being the verdict.
 void the_store_refuses_a_load_from_a_build_phase() {
   const pid_t child = fork();
   if (child == 0) {

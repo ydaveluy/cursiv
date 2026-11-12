@@ -26,15 +26,15 @@ class DefaultWorkspaceLock : public WorkspaceLock {
              WriteMode mode = WriteMode::Supersedable) override;
   [[nodiscard]] bool read(ReadAction action, const CancellationToken& = {},
                           ReadPriority = ReadPriority::Normal) override;
-  void endMutation() override;
-  [[nodiscard]] bool mutationEnded() const override;
+  void allowImmediateReads() override;
+  [[nodiscard]] bool immediateReadsAllowed() const override;
   void cancelWrite() override;
 
  private:
-  // The durability handoff, mutex held: true when the serving write must now
-  // cancel its own token. Called once per write, by `endMutation` or -- for
-  // a write that never ends its mutation -- by its end.
-  bool endMutationLocked();
+  // Ends the serving write's protection, mutex held: true when it must now
+  // cancel its own token. Called once per write, by `allowImmediateReads` or
+  // -- for a write that never calls it -- by its end.
+  bool endProtectionLocked();
 
   mutable std::mutex _m;
   // `condition_variable_any`: its `stop_token` overload registers the callback
@@ -49,16 +49,16 @@ class DefaultWorkspaceLock : public WorkspaceLock {
   std::size_t _inGate = 0;           // threads that entered the gate
   bool _writeHeld = false;
   bool _stopping = false;
-  // The serving write is past its mutation, so `Immediate` reads may run. Set
-  // by `endMutation()` on the writer's thread; false while no write holds.
-  bool _mutationEnded = false;
-  // Whether `_latest` may still be superseded. Raised when a Durable write
-  // becomes the latest; lowered when its mutation ends if nothing newer
-  // arrived, or when a newer write replaces it as the latest.
-  bool _latestDurable = false;
-  // The serving write is durable: its mutation end hands the guard back.
-  bool _activeDurable = false;
-  // `cancelWrite` reached a durable latest: its mutation end cancels it.
+  // `Immediate` reads may run beside the serving write. Set by
+  // `allowImmediateReads()` on the writer's thread; false while no write holds.
+  bool _immediateReadsAllowed = false;
+  // No newer write cancels `_latest`. Raised when a `Protected` write becomes
+  // the latest; lowered when its protection ends if nothing newer arrived, or
+  // when a newer write replaces it as the latest.
+  bool _latestProtected = false;
+  // The serving write is still protected.
+  bool _activeProtected = false;
+  // `cancelWrite` reached a protected latest: the end of protection cancels it.
   bool _latestCancelled = false;
   // The thread of the serving write, set with exclusivity and cleared after its
   // action; a default id matches no thread.

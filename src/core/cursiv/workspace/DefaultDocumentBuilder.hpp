@@ -84,7 +84,7 @@ class DefaultDocumentBuilder : public DocumentBuilder {
 
   // The phases, over documents that already carry their request; `update`
   // rebuilds documents it was not asked about, with their own options. Every
-  // reset precedes the mutation's end: later phases only advance documents.
+  // reset precedes `allowImmediateReads`: later phases only advance documents.
   virtual void buildDocuments(std::span<Document* const>,
                               const CancellationToken&) const;
 

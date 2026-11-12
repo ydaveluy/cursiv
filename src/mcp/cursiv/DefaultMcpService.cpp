@@ -530,7 +530,7 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
                 [&](const CancellationToken& writeToken) {
                   shared.documentBuilder->update({}, {&uriView, 1}, writeToken);
                 },
-                WorkspaceLock::WriteMode::Durable);
+                WorkspaceLock::WriteMode::Protected);
           } catch (...) {
             lease.abandon();
             throw;
@@ -593,7 +593,7 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
                   result = {out.empty() ? "No diagnostics: the text is valid."
                                         : std::move(out)};
                 },
-                WorkspaceLock::WriteMode::Durable);
+                WorkspaceLock::WriteMode::Protected);
           }
         } catch (...) {
           // The failure that ended the call is the one reported.
