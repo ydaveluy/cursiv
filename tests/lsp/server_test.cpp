@@ -78,6 +78,7 @@
 #include "cursiv/workspace/ConfigurationProvider.hpp"
 #include "cursiv/workspace/DefaultConfigurationProvider.hpp"
 #include "cursiv/workspace/DefaultDocumentFactory.hpp"
+#include "cursiv/workspace/DefaultIndexManager.hpp"
 #include "cursiv/workspace/DefaultNotebookDocuments.hpp"
 #include "cursiv/workspace/DefaultWorkspaceLock.hpp"
 #include "cursiv/workspace/DefaultWorkspaceManager.hpp"
@@ -2149,9 +2150,9 @@ void the_on_type_triggers_are_a_union_over_the_languages() {
   CHECK(typed(kSecond, "}") == 0);
 }
 
-// Every write a notification makes is durable: what the client already
-// committed on its side is installed whatever arrives behind it.
-void every_notification_writes_durably() {
+// The scan writes durably. A document update installs its text whatever
+// arrives behind it, and leaves its build to the next one.
+void only_the_scan_writes_durably() {
   const World world(true);
   (void)world.handshake(world.folderParams());
   world.open(kBroken);
@@ -2163,9 +2164,10 @@ void every_notification_writes_durably() {
                      .type = lsp::FileChangeType::Changed});
   world.server().didChangeWatchedFiles(params);
 
+  using enum cursiv::WorkspaceLock::WriteMode;
   CHECK(world.lock->modes.size() >= 5);
-  for (const cursiv::WorkspaceLock::WriteMode mode : world.lock->modes)
-    CHECK(mode == cursiv::WorkspaceLock::WriteMode::Durable);
+  for (std::size_t i = 0; i < world.lock->modes.size(); ++i)
+    CHECK(world.lock->modes[i] == (i == 0 ? Durable : Supersedable));
 }
 
 // Opening a file with the text the scan already read installs nothing but
@@ -2319,7 +2321,7 @@ void run() {
   a_closed_file_outside_the_folders_keeps_its_saved_content();
   a_closed_untitled_buffer_leaves_the_workspace();
   the_on_type_triggers_are_a_union_over_the_languages();
-  every_notification_writes_durably();
+  only_the_scan_writes_durably();
   an_open_on_known_bytes_still_builds();
   a_command_may_write_to_the_workspace();
   the_watcher_follows_the_clients_capability();
@@ -3196,14 +3198,16 @@ void the_answers_follow_the_installed_scheduler() {
 }
 
 // Edits queued behind a build leave their builds to the last of them, as a
-// newer write supersedes an older one: each text is installed, and one build
-// follows them all.
+// newer write supersedes an older one: each text is installed, then one parse
+// and one build follow them all, whatever else the workspace holds.
 void queued_edits_leave_their_builds_to_the_last() {
   struct Counted final : cursiv::DocumentUpdateListener,
+                         cursiv::DocumentPhaseListener,
                          cursiv::BuildPhaseListener {
     std::latch held{1};
     std::latch release{1};
     std::atomic<int> updates{0};
+    std::atomic<int> parsed{0};
     std::atomic<int> validated{0};
     void onUpdate(std::span<const std::string_view>,
                   std::span<const std::string_view>) override {
@@ -3211,46 +3215,137 @@ void queued_edits_leave_their_builds_to_the_last() {
       held.count_down();
       release.wait();
     }
+    void onDocumentPhase(cursiv::Document&, cursiv::DocumentState reached,
+                         const cursiv::CancellationToken&) override {
+      if (reached == cursiv::DocumentState::Parsed) ++parsed;
+    }
     void onBuildPhase(cursiv::DocumentState reached,
                       std::span<cursiv::Document* const>,
                       const cursiv::CancellationToken&) override {
       if (reached == cursiv::DocumentState::Validated) ++validated;
     }
-  } counted;
-  Session s([](Server& server) {
-    (void)support::add_workspace<cursiv::LspServices>(server.shared);
-  });
-  s.initialize();
-  // Scanned: an edit queued from here cancels the write in flight.
-  s.shared.workspaceManager->initializeWorkspace({});
-  s.shared.workspaceLock->write([&](const cursiv::CancellationToken&) {
-    s.shared.documents->addDocument(s.shared.documentFactory->create(
-        cursiv::TextDocument::create("untitled:one", "workspace", 1, "x")));
-  });
-  s.shared.documentBuilder->addDocumentUpdateListener(counted);
-  s.shared.documentBuilder->addBuildPhaseListener(counted);
-  const auto edit = [&](int version) {
-    s.notify("textDocument/didChange",
-             R"({"textDocument":{"uri":"untitled:one","version":)" +
-                 std::to_string(version) + R"(},"contentChanges":[{"text":"e)" +
-                 std::to_string(version) + R"("}]})");
   };
-  edit(2);
-  counted.held.wait();
-  for (int version = 3; version != 8; ++version) edit(version);
-  // Every edit queued, each cancelling the write in flight as it came.
-  s.lock->awaitCancels(6);
-  counted.release.count_down();
-  // Drained: every edit and the last build are over; the shutdown builds once.
-  s.request(2, "shutdown");
-  CHECK(!s.answer().get().error.has_value());
-  CHECK(counted.validated == 2);
-  const auto document = s.shared.documents->getDocument("untitled:one");
-  CHECK(document != nullptr && document->textDocument().getText() == "e7");
-  s.notify("exit");
-  CHECK(s.running.get() == 0);
-  s.shared.documentBuilder->removeBuildPhaseListener(counted);
-  s.shared.documentBuilder->removeDocumentUpdateListener(counted);
+  for (const bool neighbour : {false, true}) {
+    Counted counted;
+    Session s([](Server& server) {
+      (void)support::add_workspace<cursiv::LspServices>(server.shared);
+    });
+    s.initialize();
+    // Scanned: an edit queued from here cancels the write in flight.
+    s.shared.workspaceManager->initializeWorkspace({});
+    s.shared.workspaceLock->write([&](const cursiv::CancellationToken& token) {
+      s.shared.documents->addDocument(s.shared.documentFactory->create(
+          cursiv::TextDocument::create("untitled:one", "workspace", 1, "x")));
+      if (!neighbour) return;
+      const auto built = s.shared.documentFactory->create(
+          cursiv::TextDocument::create("untitled:two", "workspace", 1,
+                                       "datatype T\n"));
+      s.shared.documents->addDocument(built);
+      cursiv::Document* const documents[] = {built.get()};
+      s.shared.documentBuilder->build(documents, {}, token);
+    });
+    s.shared.documentBuilder->addDocumentUpdateListener(counted);
+    s.shared.documentBuilder->addDocumentPhaseListener(counted);
+    s.shared.documentBuilder->addBuildPhaseListener(counted);
+    const auto edit = [&](int version) {
+      s.notify("textDocument/didChange",
+               R"({"textDocument":{"uri":"untitled:one","version":)" +
+                   std::to_string(version) +
+                   R"(},"contentChanges":[{"text":"e)" +
+                   std::to_string(version) + R"("}]})");
+    };
+    edit(2);
+    counted.held.wait();
+    for (int version = 3; version != 8; ++version) edit(version);
+    // Every edit queued, each cancelling the write in flight as it came.
+    s.lock->awaitCancels(6);
+    counted.release.count_down();
+    // Drained: every edit and the last build are over; the shutdown builds
+    // once.
+    s.request(2, "shutdown");
+    CHECK(!s.answer().get().error.has_value());
+    CHECK(counted.parsed == 1);
+    CHECK(counted.validated == 2);
+    const auto document = s.shared.documents->getDocument("untitled:one");
+    CHECK(document != nullptr && document->textDocument().getText() == "e7" &&
+          document->state.load() == cursiv::DocumentState::Validated &&
+          !document->diagnostics.empty());
+    s.notify("exit");
+    CHECK(s.running.get() == 0);
+    s.shared.documentBuilder->removeBuildPhaseListener(counted);
+    s.shared.documentBuilder->removeDocumentPhaseListener(counted);
+    s.shared.documentBuilder->removeDocumentUpdateListener(counted);
+  }
+}
+
+// An edit cuts the build in flight inside its content phase, whatever else
+// the workspace holds, with or without worker threads.
+void an_edit_cuts_the_content_phase_in_flight() {
+  struct HeldIndex final : cursiv::DefaultIndexManager {
+    using DefaultIndexManager::DefaultIndexManager;
+    std::latch indexing{1};
+    std::atomic<bool> armed{false};
+    std::atomic<bool> cut{false};
+    void updateContent(const cursiv::Document& document,
+                       const cursiv::CancellationToken& token) override {
+      if (armed.exchange(false)) {
+        indexing.count_down();
+        // A build that cannot be cut reports it instead of hanging the test.
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        while (!token.stop_requested() &&
+               std::chrono::steady_clock::now() < deadline)
+          std::this_thread::yield();
+        cut = token.stop_requested();
+      }
+      DefaultIndexManager::updateContent(document, token);
+    }
+  };
+  for (const auto& [workers, neighbour] :
+       {std::pair{"1", false}, {"1", true}, {"0", true}}) {
+    const WorkersSetting setting(workers);
+    HeldIndex* index = nullptr;
+    Session s([&](Server& server) {
+      (void)support::add_workspace<cursiv::LspServices>(server.shared);
+      auto held = std::make_unique<HeldIndex>(server.shared);
+      index = held.get();
+      server.shared.indexManager = std::move(held);
+    });
+    s.initialize();
+    // Scanned: an edit queued from here cancels the write in flight.
+    s.shared.workspaceManager->initializeWorkspace({});
+    s.shared.workspaceLock->write([&](const cursiv::CancellationToken& token) {
+      s.shared.documents->addDocument(s.shared.documentFactory->create(
+          cursiv::TextDocument::create("untitled:one", "workspace", 1, "x")));
+      if (!neighbour) return;
+      const auto built = s.shared.documentFactory->create(
+          cursiv::TextDocument::create("untitled:two", "workspace", 1,
+                                       "datatype T\n"));
+      s.shared.documents->addDocument(built);
+      cursiv::Document* const documents[] = {built.get()};
+      s.shared.documentBuilder->build(documents, {}, token);
+    });
+    index->armed = true;
+    s.notify("textDocument/didChange", kEdit);
+    index->indexing.wait();
+    s.notify(
+        "textDocument/didChange",
+        R"({"textDocument":{"uri":"untitled:one","version":3},"contentChanges":[{"text":"z"}]})");
+    s.request(2, "shutdown");
+    CHECK(!s.answer().get().error.has_value());
+    CHECK(index->cut);
+    const auto document = s.shared.documents->getDocument("untitled:one");
+    CHECK(document != nullptr && document->textDocument().getText() == "z" &&
+          document->state.load() == cursiv::DocumentState::Validated &&
+          !document->diagnostics.empty());
+    if (neighbour) {
+      const auto other = s.shared.documents->getDocument("untitled:two");
+      CHECK(other != nullptr &&
+            other->state.load() == cursiv::DocumentState::Validated &&
+            other->diagnostics.empty());
+    }
+    s.notify("exit");
+    CHECK(s.running.get() == 0);
+  }
 }
 
 }  // namespace
@@ -3259,6 +3354,7 @@ void run() {
   custom_methods_reach_the_language();
   custom_messages_wait_for_the_session();
   queued_edits_leave_their_builds_to_the_last();
+  an_edit_cuts_the_content_phase_in_flight();
   the_answers_follow_the_installed_scheduler();
   a_failure_of_any_kind_is_answered();
   a_retried_initialize_keeps_only_its_own_shapes();

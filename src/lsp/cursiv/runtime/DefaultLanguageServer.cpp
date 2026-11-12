@@ -1524,9 +1524,10 @@ std::optional<lsp::LSPAny> DefaultLanguageServer::executeCommand(
   return handler->executeCommand(params.command, arguments, token);
 }
 
-// Mutate, then build, in one durable write. The build always runs, then the
-// first failure goes on. Room for `most` records comes before the mutation, so
-// an installed text always reaches the build.
+// Mutate, then build, in one write the next update supersedes past its
+// changes. The build always runs, then the first failure goes on. Room for
+// `most` records comes before the mutation, so an installed text always
+// reaches the build.
 void DefaultLanguageServer::writeAndPublish(
     std::size_t most, cursiv::function_ref<void(TextChanges&)> mutate) {
   _shared.workspaceLock->write(
@@ -1551,8 +1552,7 @@ void DefaultLanguageServer::writeAndPublish(
         }
         buildUpdate(changed, deleted, token);
         if (failure) std::rethrow_exception(failure);
-      },
-      WorkspaceLock::WriteMode::Durable);
+      });
 }
 
 void DefaultLanguageServer::buildUpdate(
