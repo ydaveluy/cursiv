@@ -221,7 +221,7 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
   };
 
   // A mode is tight where its configuration reads as a token some terminal
-  // the grammar skips.
+  // a configuration of its grammar skips.
   std::vector<std::uint8_t> tightMode;
   std::vector<bool> tightSet;
   // What the states of each configuration read.

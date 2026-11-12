@@ -70,6 +70,20 @@ struct Refusing : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// A region that ends on items the text may leave out, called from a region
+// that skips blanks: the blank behind it is the caller's.
+struct Ending : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Root
+      : rule<create<ast::Node>(
+            ((kw<"opt"> + tight(lit<"!"> + option(lit<"?">))) |
+             (kw<"rep"> + tight(lit<"!"> + many(lit<"?">))) |
+             (kw<"any"> + tight(unordered(lit<"!">, option(lit<"?">))))) +
+            lit<";">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 }  // namespace ttrivia
 
 // A closing tag that opens on an operator: where the implied `;` may stand,
@@ -393,6 +407,8 @@ struct Suite : cursiv::GrammarSpec {
                                   ref<Tied::Root> + eof)) |
              (lit<"ranked:"> + skip(ignore<Ranked::WS>, hide<Ranked::NOTE>,
                                     ref<Ranked::Root> + eof)) |
+             (lit<"ending:"> + skip(ignore<Ending::WS>, hide<>,
+                                    ref<Ending::Root> + eof)) |
              (lit<"bracketed:"> + skip(ignore<Bracketed::WS>,
                                        hide<Bracketed::NOTE>,
                                        ref<Bracketed::Root> + eof)) |

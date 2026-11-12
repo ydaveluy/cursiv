@@ -93,7 +93,7 @@ struct LowerPools : LowerVerdicts {
   Vec<std::uint8_t> cfgSection{};
   Vec<std::uint16_t> cfgEnd{};
   // Configuration `k` names no trivia at all (bare), and reads as a token
-  // some terminal the grammar skips (short).
+  // some terminal a configuration of its grammar skips (short).
   Vec<std::uint8_t> cfgBare{};
   Vec<std::uint8_t> cfgShort{};
   // The terminal a region's own symbol reads in another role, zero where a

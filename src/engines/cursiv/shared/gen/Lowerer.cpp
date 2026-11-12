@@ -385,14 +385,16 @@ void Lowerer::declare_config(unsigned k) {
   _c.cfgTriviaAt[k] = static_cast<std::uint32_t>(_c.cfgTrivia.size());
   bool shortened = false;
   for (const std::uint32_t rule : _skipped) {
-    if (role_in(k, rule) != 0)
+    if (role_in(k, rule) != 0) {
       _c.cfgTrivia.v.push_back(sym_of(k, rule));
-    else
-      shortened |= role_in(cf.sectionCfg, rule) != 0;
+      continue;
+    }
+    for (unsigned j = 0; j < _cfgs.size() && !shortened; ++j)
+      shortened = _cfgs[j].sectionCfg == cf.sectionCfg && role_in(j, rule) != 0;
   }
   _c.cfgSection[k] = static_cast<std::uint8_t>(cf.sectionCfg);
   _c.cfgBare[k] = k != cf.sectionCfg && cf.ignore.empty() && cf.hide.empty();
-  _c.cfgShort[k] = k != cf.sectionCfg && shortened;
+  _c.cfgShort[k] = shortened;
 }
 
 void Lowerer::delimit_spelled(ImageId spelled, std::int8_t d) {

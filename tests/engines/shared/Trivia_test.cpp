@@ -303,6 +303,22 @@ void a_trivia_taken_as_a_token_stays_a_candidate(const cursiv::Parser& p) {
   }
 }
 
+// A region that ends on items the text leaves out hands the blank behind it
+// to the region that called it.
+void a_region_end_leaves_the_blank_to_its_caller(const cursiv::Parser& parser) {
+  for (const std::string_view text :
+       {"ending:opt ! ;", "ending:opt !? ;", "ending:rep ! ;",
+        "ending:rep !?? ;", "ending:any ! ;", "ending:any ?! ;"}) {
+    const cursiv::ParseResult r = parser.parse(text);
+    const bool clean = r.accepted && r.diagnostics.empty();
+    CHECK(clean);
+    if (!clean) std::printf("  %s\n", std::string(text).c_str());
+  }
+  // A blank inside the region is still none of its own.
+  const cursiv::ParseResult inside = parser.parse("ending:opt ! ? ;");
+  CHECK(!inside.accepted || !inside.diagnostics.empty());
+}
+
 // Each comment left open is skipped as the trivia it would be, however many
 // the text holds.
 void each_open_comment_is_skipped(const cursiv::Parser& parser) {
@@ -348,6 +364,7 @@ void run() {
     a_trivia_taken_as_a_token_stays_a_candidate(*make());
     each_open_comment_is_skipped(*make());
     a_region_head_is_its_callers(*make());
+    a_region_end_leaves_the_blank_to_its_caller(*make());
     an_implied_condition_reads_the_trivia_of_its_place(*make());
   }
   a_trivia_terminal_is_no_bracket<ttrivia::generated::Ll::kTable>();
