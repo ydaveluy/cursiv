@@ -106,6 +106,9 @@ struct LrContext {
   CancellationPoll stop;
   // What the deletions may still read of open tokens, over the whole parse.
   mutable LexReadBudget reads;
+  // The alternatives one graph may hold, and the parse's graphs together.
+  std::uint64_t perGraph = ~std::uint64_t{0};
+  std::uint64_t graphBudget = ~std::uint64_t{0};
 };
 
 }  // namespace cursiv::engine

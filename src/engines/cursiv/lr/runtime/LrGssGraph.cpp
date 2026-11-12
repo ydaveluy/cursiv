@@ -754,11 +754,11 @@ std::uint32_t LrGssGraph::validated(Id v) {
 }
 
 // A dead arm is a repair's source until a competitor validates it, so the text
-// goes back only past that: at the first vertex opened with enough real tokens
-// past a lone held one, its stack one path. The drive reads the rest again.
-bool LrGssGraph::hand_back(Id v, TextOffset openedAt) {
-  bool alone = _fresh.size() == 1 && _accepts.empty() &&
-               _vertices[v].reading.at > openedAt;
+// goes back only past that, on one path; a graph past `room` gives it back at
+// once, on the stack ranked first. The drive reads the rest again.
+bool LrGssGraph::hand_back(Id v, TextOffset openedAt, std::uint64_t room) {
+  const bool past = _accepts.empty() && _vertices[v].reading.at > openedAt;
+  bool alone = _fresh.size() == 1 && past;
   if (alone) {
     prune(v);
     alone = linear(v);
@@ -773,6 +773,19 @@ bool LrGssGraph::hand_back(Id v, TextOffset openedAt) {
     back = _held;
   if (back != none) {
     accept(back, none);
+    return true;
+  }
+  if (past && _forest.alternatives() > room) {
+    std::vector<std::pair<Id, Reading>> tops;
+    tops.reserve(_fresh.size());
+    for (const auto& [at, u] : _fresh)
+      tops.emplace_back(u, _vertices[u].reading);
+    std::ranges::sort(tops, {}, &std::pair<Id, Reading>::first);
+    const std::vector<Source> first = stacks(tops, 1);
+    // The span a cut decided starts where the graph set out.
+    if (_cut != 0) _cutBegin = _vertices[_seedDepth - 1].reading.at;
+    _forest.add(_root, first.front().forests, none, {});
+    _accepted = true;
     return true;
   }
   if (alone) {
@@ -868,6 +881,14 @@ TextOffset LrGssGraph::read_past() {
 
 std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
   const TextOffset past = read_past();
+  std::erase_if(_frozen, [past](const std::pair<Id, Reading>& f) {
+    return past > f.second.la.begin;
+  });
+  return stacks(_frozen, cap);
+}
+
+std::vector<LrGssGraph::Source> LrGssGraph::stacks(
+    std::span<const std::pair<Id, Reading>> tops, std::size_t cap) {
   std::vector<Source> out;
   if (cap == 0) return out;
   // A stack with its frames elected and the fork steps below each, once
@@ -883,7 +904,7 @@ std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
   };
   // A candidate's upper edges are fixed; its `free` lower edges are the best
   // completion below them. Splitting at the first edge that differs partitions
-  // the remaining paths without visiting every stack under a frozen reading.
+  // the remaining paths without visiting every stack under a reading.
   struct Candidate {
     Ranked ranked;
     std::size_t free;
@@ -969,10 +990,9 @@ std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
     if (pending.size() > room) pending.pop_back();
     return true;
   };
-  for (const auto& [v, r] : _frozen) {
-    if (past > r.la.begin) continue;
-    // Most frozen readings have very few stacks. Keep their direct walk; an
-    // extra path detects overflow before any ranked stack is discarded.
+  for (const auto& [v, r] : tops) {
+    // Most readings have very few stacks. Keep their direct walk; an extra
+    // path detects overflow before any ranked stack is discarded.
     const std::size_t begin = found.size();
     each_path<true>(v, via, next, &path, [&] {
       found.push_back(Ranked{
@@ -1019,8 +1039,8 @@ std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
     }
   }
   merge_sort(found, earlier);
-  // The cap holds over every frozen reading together: the stacks ranked first
-  // stand, and the readings the others were on are cut.
+  // The cap holds over every reading together: the stacks ranked first stand,
+  // and the readings the others were on are cut.
   if (found.size() > cap) {
     for (std::size_t k = cap; k < found.size(); ++k)
       cut.push_back(found[k].source.vertices.back());

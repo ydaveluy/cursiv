@@ -191,8 +191,8 @@ void DefaultDocumentValidator::processParsingErrors(
                                       : kParseRepaired;
     Diagnostic diagnostic;
     diagnostic.range = TextRange{d.begin, d.end};
-    // `bounded` is no fault of the author: it says the repairs around it may
-    // not be the best.
+    // `bounded` is no fault of the author: it says the reading or the repairs
+    // around it may not be the best.
     diagnostic.severity = d.kind == DiagnosticKind::bounded
                               ? DiagnosticSeverity::Information
                               : DiagnosticSeverity::Error;

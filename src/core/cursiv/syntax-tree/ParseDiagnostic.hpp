@@ -24,8 +24,8 @@ enum class DiagnosticKind : std::uint8_t {
   incomplete,
   // The tree parsed; turning a matched text into a value did not.
   conversion_error,
-  // Recovery hit its work limit on this span and kept the cheapest reading
-  // found; reported, never silent.
+  // The parser hit a work limit on this span and kept the reading it ranked
+  // first, or the cheapest repair found; reported, never silent.
   bounded,
 };
 

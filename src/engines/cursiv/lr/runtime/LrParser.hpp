@@ -62,8 +62,9 @@ struct LrParser {
       "reader indexes them by");
 
   // The result, and the tree: `accepted` means the start production reduced
-  // over the whole document. `budget` is what its repairs may spend. A stop
-  // is observed at cold boundaries and leaves the caller's tree empty.
+  // over the whole document. `budget` is what its repairs may spend and its
+  // graphs may hold. A stop is observed at cold boundaries and leaves the
+  // caller's tree empty.
   bool parse(std::string_view text, Cst& cst, LrParseStats* stats,
              const LrDrive* drive, const RepairBudget& budget = {},
              const CancellationToken& cancelToken = kNoCancel) const try {
@@ -86,6 +87,8 @@ struct LrParser {
     c.drive = drive;
     LrSearch search(c.len, budget, c.indentArena);
     c.search = &search;
+    c.perGraph = budget.graphFloor;
+    c.graphBudget = graph_allot(budget, c.len);
     install_hooks(c);
     c.stack.push(LrFrame{0, kNoElement, 0, 0, kLrNoWord});
     const bool accepted = run(c) == LrExit::accept;

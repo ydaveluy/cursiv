@@ -28,8 +28,11 @@ struct LrParseStats {
   // derivations' words leaving them open and the generator having proved that
   // order the election's: the elections that order decides.
   std::uint32_t tableElections = 0;
-  // The most alternatives one graph held: what the readings of a split cost.
+  // The most alternatives one graph held, what the readings of a split cost;
+  // those the graphs held together; the graphs cut for holding too many.
   std::uint32_t alternatives = 0;
+  std::uint64_t graphsHeld = 0;
+  std::uint32_t graphStops = 0;
   // Pauses a planned step did not hold at; searches set out from a graph's
   // frozen readings.
   std::uint32_t planDrops = 0;

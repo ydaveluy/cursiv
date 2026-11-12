@@ -36,8 +36,8 @@ struct LrSearch : RepairSearch<LrEdit> {
 
   // What the conditions had read of long gaps when the search last counted.
   std::uint64_t gapsCounted = 0;
-  // A span a bound decided, open over the faults written since its search
-  // set out; a degraded parse's stays open to the end.
+  // A span a bound decided, a search's or a cut graph's, open over the faults
+  // written since it set out; a degraded parse's stays open to the end.
   bool bounded = false;
   TextOffset boundedBegin = 0;
   TextOffset boundedEnd = 0;

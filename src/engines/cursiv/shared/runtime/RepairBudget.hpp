@@ -1,6 +1,6 @@
-// What a repair search costs and may spend: an edit's cost, a
-// misspelling's, the tokens that validate a repair, and the reads a parse's
-// repairs are allowed, with the most one search takes of what is left.
+// What a parse may spend past its text: an edit's cost, a misspelling's, the
+// tokens that validate a repair, the reads its repairs are allowed with the
+// most one search takes, and the alternatives its graphs may hold.
 #pragma once
 
 #include <algorithm>
@@ -75,11 +75,18 @@ inline constexpr std::uint64_t kRepairPerSearch = std::uint64_t{1} << 19;
 // What bounds a parse's repair whatever the document's length: its latency.
 inline constexpr std::uint64_t kRepairPerParse = std::uint64_t{1} << 21;
 
+// The alternatives one LR graph may hold, and what each byte of the document
+// adds to those its graphs may hold together.
+inline constexpr std::uint64_t kGraphFloor = std::uint64_t{1} << 20;
+inline constexpr std::uint64_t kGraphPerByte = 16;
+
 struct RepairBudget {
   std::uint64_t floor = kRepairFloor;
   std::uint64_t perByte = kRepairPerByte;
   std::uint64_t perSearch = kRepairPerSearch;
   std::uint64_t perParse = kRepairPerParse;
+  std::uint64_t graphFloor = kGraphFloor;
+  std::uint64_t graphPerByte = kGraphPerByte;
 };
 
 // What a parse of `len` bytes may spend: a bound given as the largest count
@@ -87,6 +94,11 @@ struct RepairBudget {
 inline std::uint64_t repair_allot(const RepairBudget& b, TextOffset len) {
   return std::min(saturating_add(saturating_mul(len, b.perByte), b.floor),
                   b.perParse);
+}
+
+// The alternatives the graphs of a parse of `len` bytes may hold together.
+inline std::uint64_t graph_allot(const RepairBudget& b, TextOffset len) {
+  return saturating_add(saturating_mul(len, b.graphPerByte), b.graphFloor);
 }
 
 }  // namespace cursiv::engine

@@ -84,8 +84,11 @@ class LrGss {
     c.stats.tableElections += g.tabled();
     c.stats.alternatives = std::max(
         c.stats.alternatives, static_cast<std::uint32_t>(g.alternatives()));
+    c.stats.graphsHeld += g.alternatives();
+    const bool cut = end == Ending::handed && g.cut() != 0;
+    if (cut) ++c.stats.graphStops;
     const LrExit exit = end == Ending::frozen ? graph.repair() : LrExit::accept;
-    graph.say_bounded();
+    graph.say_bounded(cut);
     return end == Ending::handed ? lr_resume(c) : exit;
   }
 
@@ -120,6 +123,10 @@ class LrGss {
       start.laMode = _c.laMode;
       start.pendEnd = _c.pendEnd;
     }
+    // What the parse's graphs may still hold, up to one graph's share.
+    const std::uint64_t room = std::min(
+        _c.perGraph,
+        _c.graphBudget - std::min(_c.graphBudget, _c.stats.graphsHeld));
     // The graph holds the stack's top frames only, as many as its reductions
     // reach: a reduction below them reads the episode again, seeded wider.
     bool collapsed = false;
@@ -140,7 +147,7 @@ class LrGss {
         TextOffset at;
         if (!next_vertex(v, at)) break;
         _g.finish_before(at);
-        if (_g.hand_back(v, openedAt)) {
+        if (_g.hand_back(v, openedAt, room)) {
           collapsed = true;
           break;
         }
@@ -162,17 +169,25 @@ class LrGss {
     return collapsed ? Ending::handed : Ending::accepted;
   }
 
-  // The span of the frozen readings whose stacks a search could not all take,
-  // said once the episode has written its path.
-  void say_bounded() {
+  // The span of the readings the graph dropped. A graph `cut` for what it held
+  // opens the span the parse's bounds decide; one a search could not take whole
+  // is said once the episode has written its path.
+  void say_bounded(bool cut) {
     if (_g.cut() == 0) return;
+    LrSearch& s = *_c.search;
     // The open fault is noted where the reading has gone on from it: what the
     // span says comes after it.
-    if (_c.shifts != _c.search->wroteShifts) lr_search_note(_c, *_c.search);
+    if (_c.shifts != s.wroteShifts) lr_search_note(_c, s);
+    const TextOffset end = std::max(_g.cut_end(), _c.committed);
+    if (cut) {
+      lr_search_open(s, _g.cut_begin(), _c.cost);
+      s.boundedEnd = end;
+      return;
+    }
     RepairNote note{};
     note.kind = DiagnosticKind::bounded;
     note.begin = _g.cut_begin();
-    note.end = std::max(_g.cut_end(), _c.committed);
+    note.end = end;
     _c.notes.push_back(std::move(note));
   }
 

@@ -45,8 +45,8 @@ class ParserErrorMessageProvider {
   [[nodiscard]] virtual std::string buildIncompleteMessage(
       const Grammar& grammar, const ParseDiagnostic& diagnostic,
       std::string_view text) const = 0;
-  // A span where recovery hit its work limit: the repairs around it may not
-  // be the best.
+  // A span where the parser hit its work limit: the reading or the repairs
+  // around it may not be the best.
   [[nodiscard]] virtual std::string buildBoundedMessage(
       const Grammar& grammar, const ParseDiagnostic& diagnostic,
       std::string_view text) const = 0;

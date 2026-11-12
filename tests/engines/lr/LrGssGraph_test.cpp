@@ -303,6 +303,27 @@ void the_cap_holds_over_every_frozen_reading() {
           capped[i].forests == all[i].forests);
 }
 
+// A graph holding more than it may is cut before its next vertex opens: the
+// unopened stack ranked first is its derivation, and the span of the cut
+// starts where the graph set out.
+void a_graph_past_its_room_keeps_the_stack_ranked_first() {
+  LrGssGraph g;
+  g.seed(Frames({0}), at(0, 4));
+  const Id root = open_next(g);
+  for (const std::uint32_t word : {3u, 2u, 1u})
+    shift(g, root, 7, 5, word, {word});
+  Id v = LrGssGraph::none;
+  TextOffset p = 0;
+  CHECK(g.next_vertex(v, p) && p == 5);
+  g.finish_before(p);
+  CHECK(!g.hand_back(v, 4) && g.cut() == 0);
+  CHECK(g.hand_back(v, 4, 0));
+  const auto steps = g.elected();
+  CHECK(steps.size() == 1);
+  if (!steps.empty()) CHECK(tag(g, steps[0]) == 1);
+  CHECK(g.cut() != 0 && g.cut_begin() == 4 && g.cut_end() == 5);
+}
+
 // A packed stack holds exponentially many paths. The first two are selected
 // without enumerating all of them; equal ranks retain the first DFS paths.
 void frozen_stacks_share_prefixes_and_keep_equal_rank_order() {
@@ -621,6 +642,7 @@ int main() {
   synthetic_shifts_do_not_validate_or_expire_frozen_readings();
   frozen_stacks_are_ranked_before_the_cap();
   the_cap_holds_over_every_frozen_reading();
+  a_graph_past_its_room_keeps_the_stack_ranked_first();
   frozen_stacks_share_prefixes_and_keep_equal_rank_order();
   bounded_frozen_stacks_match_exhaustive_election();
   repeated_reductions_keep_their_nested_rank();

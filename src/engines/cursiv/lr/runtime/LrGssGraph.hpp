@@ -113,8 +113,8 @@ class LrGssGraph {
   }
   void accept_at(Id v, Id step) { _accepts.emplace_back(v, step); }
 
-  // Frozen readings with more stacks than a search takes, and the span of
-  // vertices they were on.
+  // Readings dropped for more stacks than a search takes or more alternatives
+  // than the graph may hold, and the span they were read over.
   [[nodiscard]] std::uint32_t cut() const { return _cut; }
   [[nodiscard]] TextOffset cut_begin() const { return _cutBegin; }
   [[nodiscard]] TextOffset cut_end() const { return _cutEnd; }
@@ -222,10 +222,11 @@ class LrGssGraph {
 
   // Vertices before `before` gain no edge any more; neither do their forests.
   void finish_before(TextOffset before);
-  // Whether the text goes back to the drive before `v` opens: at `v` when its
-  // pruned stack has one path that validated the dead arms, else at the last
-  // lone vertex before it. That stack is then the graph's one derivation.
-  bool hand_back(Id v, TextOffset openedAt);
+  // Whether the text goes back to the drive before `v` opens, on the graph's
+  // one derivation: a lone stack that validated the dead arms or, past `room`
+  // alternatives, the unopened stack ranked first, the others cut.
+  bool hand_back(Id v, TextOffset openedAt,
+                 std::uint64_t room = ~std::uint64_t{0});
   // The derivations every accept closes; false for none.
   bool close();
   std::vector<Id> elected();
@@ -304,6 +305,10 @@ class LrGssGraph {
   };
 
   void clear();
+  // The stacks under `tops` ranked first in written order, at most `cap`; the
+  // readings the others were on are cut.
+  std::vector<Source> stacks(std::span<const std::pair<Id, Reading>> tops,
+                             std::size_t cap);
   Id intern(Id to, Id from, std::uint32_t symbol, bool held, bool& made);
   void queue(Id v);
   void prune(Id u);

@@ -20,12 +20,16 @@
 #include "cursiv/lr/runtime/lr_derivation.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/text/TextOffset.hpp"
 #include "engines/lr/GrowthGrammars.hpp"
 #include "growth/generated/G/Module.hpp"
 #include "growth/generated/G/Parser.hpp"
@@ -79,15 +83,21 @@ std::string repeat(const std::string& unit, unsigned n) {
 struct Read {
   cursiv::engine::LrParseStats stats;
   bool clean = false;
+  std::vector<std::array<cursiv::TextOffset, 3>> spans;
+  std::vector<cursiv::ParseDiagnostic> notes;
 };
 
 template <const auto& T>
-Read read(const std::string& text, const cursiv::engine::LrDrive* drive) {
+Read read(const std::string& text, const cursiv::engine::LrDrive* drive,
+          const cursiv::engine::RepairBudget& budget = {}) {
   Read r;
   cursiv::Cst cst;
   const bool ok =
-      cursiv::engine::lr_parser<T>.parse(text, cst, &r.stats, drive);
+      cursiv::engine::lr_parser<T>.parse(text, cst, &r.stats, drive, budget);
   r.clean = ok && cst.diagnostics().empty();
+  for (cursiv::NodeId i = 0; i < cst.size(); ++i)
+    r.spans.push_back({cst[i].begin, cst[i].end, cst[i].subtreeSize});
+  r.notes.assign(cst.diagnostics().begin(), cst.diagnostics().end());
   return r;
 }
 
@@ -120,11 +130,15 @@ template <const auto& T>
 double per_alternative(const cursiv::bench::PerfCounters& counters,
                        const std::string& text,
                        const cursiv::engine::LrDrive* drive) {
+  // The cost is read on graphs of any size: no ceiling cuts them.
+  static constexpr cursiv::engine::RepairBudget roomy{
+      .graphFloor = ~std::uint64_t{0}};
   cursiv::Cst cst;
   cursiv::engine::LrParseStats stats;
   const cursiv::bench::PerfSample from = counters.read();
   counters.enable();
-  const bool ok = cursiv::engine::lr_parser<T>.parse(text, cst, &stats, drive);
+  const bool ok =
+      cursiv::engine::lr_parser<T>.parse(text, cst, &stats, drive, roomy);
   counters.disable();
   const cursiv::bench::PerfSample spent =
       cursiv::bench::perf_delta(from, counters.read());
@@ -222,6 +236,52 @@ void an_element_left_void_long_after_it_opened_reads_as_the_election_ranks_it() 
   for (const unsigned n : {60u, 200u, 400u}) html_tree(breaks(n), n + 1, n);
   for (const unsigned n : {60u, 100u, 150u}) html_tree(voids(n), 2 * n + 1, n);
   html_tree(repeat("<a>", 100) + repeat("</a>", 100), 100, 0);
+}
+
+// A graph holding no more than it may is not asked to give anything up: with
+// room for its alternatives and not one more, the text reads as it does freely.
+void a_graph_within_its_ceiling_reads_the_same() {
+  const std::string text =
+      "html <div>" + repeat("<p><br>X</p>", 40) + "</div>";
+  const Read free = read<html::G::kTable>(text, &html::G::kDrive);
+  CHECK(free.clean && free.stats.graphStops == 0);
+  CHECK(free.stats.graphsHeld >= free.stats.alternatives);
+  const Read exact = read<html::G::kTable>(
+      text, &html::G::kDrive,
+      {.graphFloor = free.stats.graphsHeld, .graphPerByte = 0});
+  CHECK(exact.clean && exact.stats.graphStops == 0);
+  CHECK(exact.stats.alternatives == free.stats.alternatives);
+  CHECK(exact.spans == free.spans);
+}
+
+// A text that reads in more ways than its graphs may hold: each graph is cut
+// to the reading ranked first and the parse goes on from it. One graph and
+// all of them together stay within the allowance, and one span says so.
+void a_graph_past_its_ceiling_is_cut_and_says_so() {
+  const std::string text =
+      "html <div>" + repeat("<p><br>X</p>", 700) + "</div>";
+  const auto size = static_cast<cursiv::TextOffset>(text.size());
+  const cursiv::engine::RepairBudget tight{.graphFloor = 1u << 14,
+                                           .graphPerByte = 4};
+  const Read cut = read<html::G::kTable>(text, &html::G::kDrive, tight);
+  CHECK(cut.stats.graphStops != 0);
+  // A graph is asked between two positions: it holds what the last one added.
+  CHECK(cut.stats.alternatives <= 2 * tight.graphFloor);
+  // Past the allowance a graph holds its seed and the arms of one token.
+  CHECK(cut.stats.graphsHeld <=
+        cursiv::engine::graph_allot(tight, size) + std::uint64_t{64} * size);
+  // The reading ranked first leaves its elements open: the span it was
+  // decided over, then the close tag the end lacks.
+  CHECK(cut.notes.size() == 2);
+  if (cut.notes.size() != 2) return;
+  CHECK(cut.notes[0].kind == cursiv::DiagnosticKind::bounded);
+  CHECK(cut.notes[0].begin <= text.find("<br>"));
+  CHECK(cut.notes[0].end >= text.rfind("<p>"));
+  CHECK(cut.notes[1].kind == cursiv::DiagnosticKind::inserted);
+  CHECK(cut.notes[1].begin == size && cut.notes[1].end == size);
+  const Read again = read<html::G::kTable>(text, &html::G::kDrive, tight);
+  CHECK(again.spans == cut.spans);
+  CHECK(again.stats.graphsHeld == cut.stats.graphsHeld);
 }
 
 namespace call = tgrowth::generated;
@@ -331,6 +391,8 @@ int main() {
   a_run_inside_a_run_never_forks();
   an_optional_close_after_content_costs_a_power();
   an_element_left_void_long_after_it_opened_reads_as_the_election_ranks_it();
+  a_graph_within_its_ceiling_reads_the_same();
+  a_graph_past_its_ceiling_is_cut_and_says_so();
   an_undelimited_argument_list_costs_a_power();
   a_chain_written_twice_costs_its_length();
   an_alternative_costs_the_same_however_long_the_text();
