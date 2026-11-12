@@ -332,6 +332,15 @@ void the_labels_of_an_arm_fill_their_lines() {
         " case 103:\n    case 104: case 105: ++i; goto W7;\n");
 }
 
+void the_rows_of_a_table_are_text() {
+  cursiv::TextBuilder out;
+  const std::uint16_t cells[] = {0xFFFF, 0, 0xD800, 0x7F, 9};
+  cursiv::engine::text_rows(out, cells, 2);
+  CHECK(out.take() ==
+        "    u\"\\xffff\\x0\"\n    u\"\\xd800\\x7f\"\n"
+        "    u\"\\x9\"\n");
+}
+
 struct LexCfg : cursiv::engine::LowerPools {
   std::uint16_t nterms = 0;
   cursiv::engine::ByteSet wordBytes;
@@ -604,6 +613,7 @@ void ast_generation_cases_run() {
   astgen::a_truncated_operator_product_keeps_every_opening();
   astgen::long_refused_words_emit_bounded_functions();
   astgen::the_labels_of_an_arm_fill_their_lines();
+  astgen::the_rows_of_a_table_are_text();
   astgen::named_heads_compare_the_scalars_after_the_same_lead_byte();
   astgen::a_longer_mode_cannot_consume_the_last_slot_twice();
   astgen::lone_lead_expansion_keeps_predicate_cycles_and_their_exits();

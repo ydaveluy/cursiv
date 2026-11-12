@@ -166,7 +166,8 @@ struct LlTable {
   // The walk of every mode, generated: the token a mode reads at a position,
   // as `lex_walk` reads it over these rows.
   Scan (*walk)(const char*, TextOffset, std::uint16_t, TextOffset) = nullptr;
-  const std::uint16_t* lexNext = nullptr;
+  // A row of classes per state of the automaton, written as text.
+  const char16_t* lexNext = nullptr;
   const std::uint32_t* typoSuccBase = nullptr;
   const std::uint16_t* typoSucc = nullptr;
   // What a reader of a refused token needs off the automaton: the states that

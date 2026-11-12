@@ -1,8 +1,13 @@
 // How every emitter writes a table and the labels of a `switch` arm.
 #pragma once
 
+#include <algorithm>
+#include <charconv>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -39,6 +44,22 @@ std::string emit_table(std::string_view decl, const Items& items,
   if (std::ranges::empty(items) && !empty.empty()) out.line(empty, ",");
   out.close("};");
   return out.take();
+}
+
+// The cells of a table as adjacent UTF-16 literals, `width` cells a line: the
+// compiler reads a line as one token.
+inline void text_rows(TextBuilder& out, std::span<const std::uint16_t> cells,
+                      std::size_t width) {
+  for (std::size_t at = 0; at < cells.size(); at += width) {
+    std::string row = "    u\"";
+    for (const std::uint16_t cell :
+         cells.subspan(at, std::min(width, cells.size() - at))) {
+      char hex[4];
+      row += "\\x";
+      row.append(hex, std::to_chars(hex, hex + 4, cell, 16).ptr);
+    }
+    out.line(row, "\"");
+  }
 }
 
 // `case` labels several a line, then the arm they read where one is given:

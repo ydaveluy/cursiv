@@ -365,7 +365,9 @@ struct LrTableEmitter : TextBuilder {
       array("modeEnd", a.modeEnd, S.endModes);
     }
     if (!S.indented) array("modeSub", a.modeSub, S.modes * a.mode_sub_words());
-    array("dfaNext", a.dfaNext, std::size_t{S.dfa} * S.cls);
+    line("  t.dfaNext = {{");
+    text_rows(*this, {a.dfaNext.data(), std::size_t{S.dfa} * S.cls}, S.cls);
+    line("  }};");
     array("dfaAccept", a.dfaAccept, S.dfa);
     emit_pool("dfaAcc.pool", "dfaAcc.of", a.dfaAccPool);
     emit_pool("dfaRes.pool", "dfaRes.of", a.dfaResPool);

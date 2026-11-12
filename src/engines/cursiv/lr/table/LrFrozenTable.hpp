@@ -67,7 +67,9 @@ struct LrFrozenTable : LrTableFacts {
     }
   }
 
-  std::array<std::uint16_t, S.dfa * S.cls> dfaNext{};
+  // A row of classes per state, written as text: the cell past the rows ends
+  // it.
+  std::array<char16_t, S.dfa * S.cls + 1> dfaNext{};
   // Terminal + 1 ; 0 = not accepting.
   std::array<std::uint16_t, S.dfa> dfaAccept{};
   // Every terminal accepted there, not only the winner.

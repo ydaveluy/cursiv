@@ -15,6 +15,7 @@
 #include "cursiv/ll/gen/LlLexView.hpp"
 #include "cursiv/shared/gen/CLiteral.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/gen/GapConditionEmitter.hpp"
 #include "cursiv/shared/gen/GapEmitter.hpp"
 #include "cursiv/shared/gen/GapReach.hpp"
@@ -426,8 +427,12 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   if (any(blanks.stop)) o.array("::std::uint64_t", "kSkipStop", blanks.stop);
   o.array("::std::uint16_t", "kByteTerms", byteTerms.rows);
   o.array("::std::uint32_t", "kModeBytes", byteTerms.at);
-  o.array("::std::uint16_t", "kLexNext",
-          std::span(a.dfaNext.data(), std::size_t{a.ndfa} * a.ncls));
+  if (a.ndfa != 0) {
+    o.arrays.push_back("kLexNext");
+    o.line("inline constexpr char16_t kLexNext[] = {");
+    text_rows(o, {a.dfaNext.data(), std::size_t{a.ndfa} * a.ncls}, a.ncls);
+    o.line("};");
+  }
   o.array("::std::uint32_t", "kTypoSuccBase", a.typoSuccBase);
   o.array("::std::uint16_t", "kTypoSucc", a.typoSucc);
   o.array("::std::uint8_t", "kLexBodies", a.lexBodies);
