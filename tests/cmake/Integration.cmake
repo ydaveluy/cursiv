@@ -75,7 +75,7 @@ if(NOT CMAKE_CROSSCOMPILING)
       -Werror=c++23-extensions -Werror=c++26-extensions)
 
   # The new language, taken through its README: configure, generate,
-  # configure, build, parse.
+  # configure, build, parse. Its build takes every core: it runs alone.
   add_test(NAME scaffold_test COMMAND ${CMAKE_COMMAND}
       -DSCAFFOLD=${CURSIV_SOURCE_ROOT}/docs/cursiv-new.cmake
       -DGENERATE=${CURSIV_SOURCE_ROOT}/cmake/GenerateScaffold.cmake
@@ -85,7 +85,7 @@ if(NOT CMAKE_CROSSCOMPILING)
       "-DFLAGS=${_flags}"
       -P ${CMAKE_CURRENT_SOURCE_DIR}/integration/scaffold_test.cmake)
   set_tests_properties(scaffold_test PROPERTIES TIMEOUT 900
-      RESOURCE_LOCK cursiv_build FIXTURES_SETUP scaffold_build)
+      RESOURCE_LOCK cursiv_build RUN_SERIAL TRUE FIXTURES_SETUP scaffold_build)
 
   add_test(NAME fetchcontent_test COMMAND ${CMAKE_COMMAND}
       -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/integration/consumer
