@@ -84,7 +84,7 @@ TextOffset lr_text_end(const LrContext& c, std::uint16_t mode, TextOffset at,
                        TextOffset upto, std::uint64_t& read) {
   const SymbolId close = lr_mode_close<A>(mode);
   if (close == kEofSymbol) return c.len;
-  const std::uint16_t err = lr_err_mode<A>(mode);
+  const std::uint16_t err = lr_mode_text<A>(mode);
   LexFailedWalks<LrLexTape<A>> failed;
   TextOffset reached = at;
   for (TextOffset p = at; p < c.len && p < upto;) {

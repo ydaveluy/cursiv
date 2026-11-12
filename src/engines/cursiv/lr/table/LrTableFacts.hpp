@@ -19,8 +19,8 @@ struct LrTableFacts {
   std::uint8_t cls[256]{};
   std::uint8_t ncls = 0;
   bool multiCand = false;
-  // The mode that lexes everything, for a repair to name what a state could
-  // not lex.
+  // The mode a fault is lexed with in the document's configuration: every
+  // terminal where the grammar has one.
   std::uint16_t errMode = 0;
   // Terminals one position may match at once.
   std::uint16_t maxCands = 0;

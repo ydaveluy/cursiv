@@ -1250,7 +1250,7 @@ class CaretStacks {
 
   // The candidate typed as `word` is the token the lexer reads over the word
   // and the text behind it, which can run on past the word: in the mode of the
-  // reading that takes it, the one that admits everything until one does.
+  // reading that takes it, the document's fault mode until one does.
   void typed_as(SymbolId term, std::string_view word) {
     _typedTerm = term;
     _typedWord = static_cast<TextOffset>(_typedAt + word.size());
@@ -2187,7 +2187,7 @@ void lr_next_features_at(const LrCaretTable& table,
     stacks.read_through(phrase_end(cst, resume, tokens));
   // Only trivia, or a zero-width token the drive inserted, may stand between
   // the leaf and the token before it; otherwise the leaf is asked in the mode
-  // that admits everything.
+  // a fault behind it is lexed with.
   bool spliceable = leaf && (!pre || pre.end == leaf.begin || !skipped);
   for (NodeId i = pre ? pre.id + 1 : 0; spliceable && i < leaf.id; ++i) {
     const CstNode& n = cst[i];
@@ -2271,7 +2271,9 @@ void lr_next_features_at(const LrCaretTable& table,
       else
         for (const auto& read : stacks.leaf_reads())
           if (read.term == reading) ask(read.mode);
-      if (!asked) ask(spliceable ? table.mode[preState] : table.errMode);
+      if (!asked)
+        ask(spliceable ? table.mode[preState]
+                       : table.errModeOf(table.mode[shifted]));
       return ok;
     });
   };

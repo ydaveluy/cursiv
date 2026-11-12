@@ -535,6 +535,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     });
 
   o.array("::std::uint16_t", "kLookMode", a.lookMode);
+  o.array("::std::uint16_t", "kErrModeOf", a.errModeOf);
   if (!a.sectionErr.empty()) {
     o.array("::std::uint16_t", "kSectionErr", a.sectionErr);
     o.array("::std::uint16_t", "kSectionEnd", a.sectionEnd);
@@ -713,6 +714,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.line("    .ncls = ", a.ncls, "u,");
   o.line("    .nmodes = ", a.nmodes, "u,\n    .errMode = ", a.errMode,
          "u,\n    .tailMode = ", a.tailMode, "u,");
+  o.ptr("errModeOf", "kErrModeOf");
   o.ptr("lookMode", "kLookMode");
   o.ptr("modeStart", "kModeStart");
   o.ptr("modeMulti", "kModeMulti");

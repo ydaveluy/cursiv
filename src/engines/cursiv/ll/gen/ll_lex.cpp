@@ -29,6 +29,9 @@
 namespace cursiv::engine {
 namespace {
 
+// No configuration: a mode no position reads under.
+constexpr std::uint8_t kNoCfg = 0xff;
+
 // What each section's grammar reads, by the section's own configuration: the
 // terminals of its positions and operators.
 std::vector<DynSet> ll_section_reads(const LlLowCfg& g) {
@@ -40,6 +43,27 @@ std::vector<DynSet> ll_section_reads(const LlLowCfg& g) {
   return own;
 }
 
+// The positions of the rules the entry reaches.
+std::vector<bool> ll_live_nodes(const LlBuiltProgram& b) {
+  const auto& g = b.cfg;
+  std::vector<bool> live(g.nnodes, false);
+  std::vector<std::uint16_t> nodes;
+  for (std::uint16_t r = 1; r < g.nrules; ++r) {
+    if (!b.liveRules[r]) continue;
+    const LlRuleInfo& u = g.rules[r];
+    if (u.body != kNoRow) nodes.push_back(u.body);
+    if (u.climb != kNoRow && g.climbs[u.climb].selectNode != kNoRow)
+      nodes.push_back(g.climbs[u.climb].selectNode);
+    while (!nodes.empty()) {
+      const std::uint16_t id = nodes.back();
+      nodes.pop_back();
+      live[id] = true;
+      for (const auto k : g.children(g.nodes[id])) nodes.push_back(k);
+    }
+  }
+  return live;
+}
+
 // Where a token is read, and what may stand there: a position lexes the
 // terminals it expects, a choice what its arms admit, both with the trivia the
 // point skips. A blank a region does not skip stops the walk.
@@ -48,9 +72,11 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   LexModes modes(g);
   const DynSet& trivia = modes.trivia;
   const auto& skips = modes.skips;
+  const auto cfg_at = [&](const std::vector<std::uint8_t>& at, std::size_t i) {
+    return i < at.size() && at[i] < skips.size() ? at[i] : std::uint8_t{0};
+  };
   const auto skip = [&](const std::vector<std::uint8_t>& at, std::size_t i) {
-    return skips[i < at.size() && at[i] < skips.size() ? at[i] : 0] |
-           modes.joins;
+    return skips[cfg_at(at, i)] | modes.joins;
   };
   // Where an implied token may stand, the text its condition reads must lex, or
   // a shorter token is taken. After an insertion the same text is read again
@@ -60,11 +86,27 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   for (std::uint32_t id = 0; id < g.nnodes; ++id)
     if (const LlNode& n = g.nodes[id]; n.kind == LlShape::implied)
       implied[n.sym] |= firsts[n.min];
-  const auto intern = [&](DynSet want, DynSet beyond = {}) {
+  const auto intern = [&](DynSet want, DynSet beyond = {},
+                          std::uint32_t tag = 0) {
     for (const auto& [u, heads] : implied)
       if (want.test(u)) beyond |= heads;
-    return modes.intern(want, 0, longer_firsts(g, want, beyond));
+    return modes.intern(want, tag, longer_firsts(g, want, beyond));
   };
+  // What the positions the entry reaches read, by configuration, and the
+  // configuration each position's mode reads under: a section's mode is no
+  // mode of its caller's.
+  std::vector<DynSet> own(skips.size());
+  std::vector<std::uint8_t> cfgOf;
+  const auto read = [&](bool reached, std::uint8_t k, DynSet want,
+                        DynSet beyond = {}) {
+    if (reached) own[k] |= want;
+    const std::uint16_t m =
+        intern(std::move(want), std::move(beyond), g.section_cfg_at(k));
+    if (cfgOf.size() <= m) cfgOf.resize(m + 1u, kNoCfg);
+    cfgOf[m] = k;
+    return m;
+  };
+  const std::vector<bool> live = ll_live_nodes(b);
 
   const LlStanding standing(b);
   const auto standing_firsts = [&](const DynSet& conditions) {
@@ -75,24 +117,27 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   };
   for (std::uint32_t id = 0; id < g.nnodes; ++id) {
     LlNode& n = g.nodes[id];
+    const std::uint8_t k = cfg_at(b.gapCfg, id);
     if (n.kind == LlShape::condition || n.kind == LlShape::implied) {
       DynSet want = skip(b.gapCfg, id);
       if (n.kind == LlShape::implied)
         want.set(n.sym);
       else
         want |= b.after[id];
-      n.mode = intern(want, n.kind == LlShape::condition
-                                ? standing_firsts(standing.point[id])
-                                : DynSet{});
+      n.mode = read(live[id], k, want,
+                    n.kind == LlShape::condition
+                        ? standing_firsts(standing.point[id])
+                        : DynSet{});
     } else if (n.kind == LlShape::endMark || n.kind == LlShape::term) {
       DynSet want = skip(b.gapCfg, id);
       want.set(n.sym);
-      n.mode = intern(want);
+      n.mode = read(live[id], k, want);
     } else if (n.kind == LlShape::call && g.cfgTriviaAt.size() > 2 &&
                (b.nullable[id] || !b.first[id].test(kEofSymbol) ||
                 b.first[id].more_than_one())) {
-      n.mode = intern(b.lookahead(static_cast<std::uint16_t>(id), b.after[id]) |
-                      skip(b.gapCfg, id));
+      n.mode = read(live[id], k,
+                    b.lookahead(static_cast<std::uint16_t>(id), b.after[id]) |
+                        skip(b.gapCfg, id));
     }
   }
   b.headMode.assign(g.ndecisions, 0);
@@ -106,14 +151,18 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
     const DynSet& stands = standing.point[dec.node];
     b.decStands[d] = stands.any() ? 1 : 0;
     const DynSet beyond = standing_firsts(stands);
-    dec.mode = intern(want | skip(b.gapCfg, dec.node), beyond);
+    const bool reached = b.liveRules[dec.rule];
+    dec.mode = read(reached, cfg_at(b.gapCfg, dec.node),
+                    want | skip(b.gapCfg, dec.node), beyond);
     if (g.nodes[dec.node].kind == LlShape::rep) {
-      b.headMode[d] = intern(want | skip(b.headCfg, dec.node), beyond);
+      b.headMode[d] = read(reached, cfg_at(b.headCfg, dec.node),
+                           want | skip(b.headCfg, dec.node), beyond);
       if (b.callerPeek[dec.node]) {
-        b.readHeadMode[d] =
-            intern(want | skip(b.readHeadCfg, dec.node), beyond);
+        b.readHeadMode[d] = read(reached, cfg_at(b.readHeadCfg, dec.node),
+                                 want | skip(b.readHeadCfg, dec.node), beyond);
         b.readMode[d] =
-            intern(want | skips[g.nodes[dec.node].cfg] | modes.joins, beyond);
+            read(reached, g.nodes[dec.node].cfg,
+                 want | skips[g.nodes[dec.node].cfg] | modes.joins, beyond);
       }
     }
   }
@@ -124,7 +173,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   b.errMode = modes.error_mode(g);
   DynSet tail = skips[0];
   tail.set(kEofSymbol);
-  b.tailMode = intern(tail);
+  b.tailMode = read(true, 0, tail);
   const auto& sectionOf = g.cfgSection;
   b.sectionErr.clear();
   b.sectionEnd.clear();
@@ -182,6 +231,17 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
       if (b.afterCfg[id] < skips.size())
         b.afterGap[id] = intern(skips[b.afterCfg[id]] | modes.joins);
   }
+  // A fault mode lexes its own faults; a mode no position reads under, every
+  // terminal.
+  b.errModeOf.clear();
+  if (own.size() > 1) {
+    const auto faultOf = modes.fault_modes(g, std::move(own));
+    cfgOf.resize(modes.set.size(), kNoCfg);
+    for (std::size_t k = 0; k < faultOf.size(); ++k)
+      cfgOf[faultOf[k]] = static_cast<std::uint8_t>(k);
+    for (const std::uint8_t k : cfgOf)
+      b.errModeOf.push_back(k != kNoCfg ? faultOf[k] : b.errMode);
+  }
   b.modeTrivia.clear();
   b.modeJoinedTrivia.clear();
   // By index: interning a trivia set may append a mode while it is read.
@@ -196,6 +256,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
     b.modeJoinedTrivia.push_back(intern(joined));
   }
   b.nmodes = static_cast<std::uint16_t>(modes.set.size());
+  if (!b.errModeOf.empty()) b.errModeOf.resize(b.nmodes, b.errMode);
   b.modeLonger = modes.longerMode;
   b.modeHeads = modes.heads(g);
   return modes;

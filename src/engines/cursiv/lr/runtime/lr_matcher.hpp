@@ -196,14 +196,25 @@ inline Scan lr_match_text(const char* src, TextOffset len, std::uint16_t mode,
   return lex_match(LrLexTape<A>{}, src, len, mode, from);
 }
 
-// The mode a state reading `mode` lexes a fault with: every terminal, or in a
-// section its grammar's and the token that closes it.
+// The mode a state reading `mode` lexes a fault with: the terminals of its
+// configuration, every terminal where the grammar has one.
 template <const auto& A>
 constexpr std::uint16_t lr_err_mode([[maybe_unused]] std::uint16_t mode) {
   if constexpr (A.errModeOf.size() == 0) {
     return A.errMode;
   } else {
     return A.errModeOf[mode];
+  }
+}
+
+// The mode the text of `mode`'s section is read in, whole: every terminal of
+// its grammar and the token that closes it. Outside a section, `errMode`.
+template <const auto& A>
+constexpr std::uint16_t lr_mode_text([[maybe_unused]] std::uint16_t mode) {
+  if constexpr (A.modeText.size() == 0) {
+    return A.errMode;
+  } else {
+    return A.modeText[mode];
   }
 }
 

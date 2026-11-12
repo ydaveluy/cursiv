@@ -129,7 +129,7 @@ struct LrSearch : RepairSearch<LrEdit> {
   std::vector<Typo> cutTypos;
   // Scratch the misspelling walks reuse in turn.
   TypoScratch typoScratch;
-  std::unordered_map<TextOffset, Token> written;
+  std::unordered_map<std::uint64_t, Token> written;
   // A frozen reading a search sets out from: its stack, and how far down its
   // records the author's tokens are counted. Past the tape stand the tokens
   // of a reading the graph has not written: all the author's.

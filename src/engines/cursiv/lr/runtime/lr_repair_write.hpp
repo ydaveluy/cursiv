@@ -171,7 +171,7 @@ bool lr_write_token(LrContext& c, SymbolId term, bool reread, TextOffset end,
 }
 
 // The extent a deletion takes of the token in hand: its own, or, where its mode
-// read none, the longest reading or refusal of the mode that lexes everything,
+// read none, the longest reading or refusal of the mode a fault is lexed with,
 // else the unmatched text. The walks stop at `end`; `reached` rises with them.
 template <const auto& A>
 TextOffset lr_error_end(const LrContext& c, std::uint16_t mode, const Token& t,
@@ -212,9 +212,8 @@ TextOffset lr_error_end(const LrContext& c, std::uint16_t mode,
   return lr_error_end<A>(c, mode, t, c.len, reached);
 }
 
-// The token in hand as the mode that lexes everything reads it where its own
-// read nothing, in a section under its grammar's: what conditions ask about a
-// re-reading of it.
+// The token in hand as the mode a fault is lexed with reads it where its own
+// read nothing: what conditions ask about a re-reading of it.
 template <const auto& A>
 CURSIV_ALWAYS_INLINE inline Token lr_written(const LrContext& c, const Token& t,
                                              std::uint16_t mode) {
@@ -238,31 +237,31 @@ void lr_drop_levels(LrContext& c, LrVirtualAt& virt, IndentAt& indent,
 }
 
 // A state that reads no token reduces one production on every token: its
-// construct is whole, so it closes before a repair's record, which stands
-// outside it. Not where the levels may insert a zero-width token first.
-template <const auto& A>
-void lr_close_whole(LrContext& c, TextOffset resume) {
+// construct is whole, so `reduce` closes it before a repair's record, which
+// stands outside it. Not one that takes the trivia before the next token, nor
+// where the levels may insert a zero-width token first.
+template <const auto& A, class State, class Reduce>
+void lr_close_whole(State&& state, Reduce&& reduce) {
   if constexpr (!kIndented<A.cfg>) {
     for (;;) {
-      const std::uint32_t state = c.stack.top().state;
-      const std::uint16_t p = A.cold.soleReduce[state];
-      if (A.cold.readsToken[state] != 0 || p == kLrNoProd ||
-          A.cfg.prods[p].gap != 0 || A.cfg.prods[p].len == 0)
-        return;
-      const Token next =
-          lr_scan_at<A>(c, A.mode[state], resume, c.indent.depth);
-      if (next.sym == kInvalidSymbol) return;
-      std::uint32_t first = 0;
-      unsigned count = 0;
-      lr_action_run<A>(state, next.sym, first, count);
-      if (count != 1 ||
-          lr_shadow_action<A>(first).kind != LrActionKind::reduce ||
-          !lr_write_reduce<A>(c, p, [](unsigned) { return false; }))
+      const std::uint32_t at = state();
+      const std::uint16_t p = A.cold.soleReduce[at];
+      if (A.cold.readsToken[at] != 0 || p == kLrNoProd ||
+          A.cfg.prods[p].gap != 0 || A.cfg.prods[p].len == 0 ||
+          A.derived.reductions[p].flushes || !reduce(p))
         return;
     }
   } else {
-    (void)c, (void)resume;
+    (void)state, (void)reduce;
   }
+}
+template <const auto& A>
+void lr_close_whole(LrContext& c) {
+  lr_close_whole<A>([&c] { return c.stack.top().state; },
+                    [&c](std::uint16_t p) {
+                      return lr_write_reduce<A>(
+                          c, p, [](unsigned) { return false; });
+                    });
 }
 
 // Drop the token in hand, up to `end`: an error leaf over the author's bytes,
@@ -271,7 +270,7 @@ template <const auto& A>
 void lr_write_delete(LrContext& c, TextOffset end) {
   const Token t = c.la;
   lr_drop_levels<A>(c, c.virt, c.indent, t);
-  lr_close_whole<A>(c, end > t.begin ? end : t.begin);
+  lr_close_whole<A>(c);
   lr_flush_trivia<A>(c);
   const TextOffset at = t.begin > c.committed ? t.begin : c.committed;
   c.tape.repaired_leaf(at, end > at ? end : at, A.stamp.make(kNoRow, 0));
@@ -285,7 +284,7 @@ void lr_write_delete(LrContext& c, TextOffset end) {
 template <const auto& A>
 void lr_write_skip(LrContext& c, SymbolId term, TextOffset end) {
   const TextOffset at = c.la.begin > c.committed ? c.la.begin : c.committed;
-  lr_close_whole<A>(c, end);
+  lr_close_whole<A>(c);
   lr_flush_trivia<A>(c);
   if constexpr (kTermsRecorded<A.cfg>)
     if (kLrTermMask<A, true>.test(term))

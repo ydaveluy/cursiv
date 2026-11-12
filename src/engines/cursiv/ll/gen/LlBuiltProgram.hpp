@@ -80,8 +80,8 @@ struct LlBuiltProgram : ShapeOverflow {
   std::uint8_t cls[256]{};
   std::uint8_t ncls = 0;
   std::uint16_t nmodes = 0;
-  // The mode no position owns: it lexes every terminal, so a repair can name
-  // the token the parse could not even read.
+  // The mode no position owns: it lexes every terminal, as a fault is lexed
+  // where the grammar has one configuration.
   std::uint16_t errMode = 0;
   // The document's end: the grammar's own trivia, then the input's end.
   std::uint16_t tailMode = 0;
@@ -191,6 +191,9 @@ struct LlBuiltProgram : ShapeOverflow {
   // `LlTable`. Empty where none is flagged.
   std::vector<std::uint8_t> sharedRules{};
   std::vector<std::uint8_t> repeatScopes{};
+  // Per mode, the mode a fault is lexed with: see `LlTable`. Empty where the
+  // grammar has one configuration.
+  std::vector<std::uint16_t> errModeOf{};
   // Per section configuration where the grammar embeds others: see
   // `LlTable`. Empty where it embeds none.
   std::vector<std::uint16_t> sectionErr{};

@@ -414,7 +414,8 @@ int main() {
        {"tie: if", "atendhost: [  a ]", "trailing: \n", "turn: ", "calls: ",
         "callermany: ", "keywordtrivia: bc   ", "keywordtrivia:shared\n",
         "%% trailing:", "calls: a) ", "calls: a a }", "calls: a a\nb",
-        "conditionedtrivia: a) ", "conditionedtrivia: ) a"})
+        "conditionedtrivia: a) ", "conditionedtrivia: ) a",
+        "conditionedtrivia: a; b c"})
     one_tree(all, text);
 
   // The lexer chooses the keyword at each occurrence of a statement, whatever

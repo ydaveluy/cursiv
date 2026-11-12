@@ -132,7 +132,7 @@ inline std::uint16_t ll_nest_receiver(LlContext& c, CstBuilder::Open region,
 // again it would split into tokens the repair finds nothing wrong with.
 template <const auto& T>
 inline void ll_repair_peek(LlContext& c) {
-  const std::uint16_t mode = ll_err_mode<T>(c.section);
+  const std::uint16_t mode = ll_err_mode<T>(c.laMode, c.section);
   if (c.laMode == kNoMode) {
     ll_peek<T>(c, mode);
     return;
@@ -251,7 +251,7 @@ CURSIV_NOINLINE inline bool ll_drop(LlContext& c) {
   f.end = span;
   f.at = end;
   f.resume = kNoElement;
-  f.dropMode = ll_err_mode<T>(c.section);
+  f.dropMode = ll_err_mode<T>(c.laMode, c.section);
   const NodeId id = c.tape.leaf(c.la.begin, span, T.stamp.make(kNoRow, 0));
   ll_mark(c, id);
   // No byte taken: the inventions before it still count.
@@ -301,6 +301,8 @@ inline void ll_write(LlContext& c, std::uint16_t mode, const LlEdit& g) {
     case LlEdit::ins:
       return;
     case LlEdit::del:
+      // Bytes no terminal matches end where the search read them to.
+      if (c.la.end == c.la.begin) c.la.end = g.end;
       ll_drop<T>(c);
       break;
     case LlEdit::rep:
@@ -376,9 +378,9 @@ CURSIV_NOINLINE inline void ll_expect(LlContext& c, std::uint16_t mode,
   const LlRoot root{kNoRow, static_cast<std::uint16_t>(pos - 1)};
   bool again = true;
   for (;;) {
-    // Read again under the alphabet that admits everything: a token this point
-    // refuses is still a token, and a repair that could not see it whole would
-    // invent one over bytes that are there.
+    // Read again under the alphabet of the point's configuration: a token this
+    // point refuses is still a token, and a repair that could not see it whole
+    // would invent one over bytes that are there.
     ll_repair_peek<T>(c);
     const LlPause pause = pos != 0 ? ll_pause<T>(c, root)
                                    : LlPause{nullptr, kNoRow, true};
@@ -665,7 +667,7 @@ inline bool ll_tail(LlContext& c) {
   if (c.la.sym == kEofSymbol) return true;
   ll_repair_peek<T>(c);
   while (c.la.sym != kEofSymbol && ll_drop<T>(c))
-    ll_peek<T>(c, ll_err_mode<T>(c.section));
+    ll_peek<T>(c, ll_err_mode<T>(c.laMode, c.section));
   return false;
 }
 
@@ -678,11 +680,13 @@ inline LlSection ll_section_open(LlContext& c, std::uint8_t section) {
 }
 
 // What stands before the end of the text, as a grammar alone drops what
-// follows its entry: up to the end, or to the token that closes the section.
+// follows its entry: up to the end, or to the token that closes the section,
+// each token read as the first fault is.
 template <const auto& T>
 inline void ll_drop_to_end(LlContext& c) {
   ll_repair_peek<T>(c);
-  while (!ll_ends<T>(c, c.la.sym) && ll_drop<T>(c)) ll_repair_peek<T>(c);
+  const std::uint16_t mode = c.laMode;
+  while (!ll_ends<T>(c, c.la.sym) && ll_drop<T>(c)) ll_peek<T>(c, mode);
 }
 
 // An `eof` that a token may follow: the text stops here. Read under a

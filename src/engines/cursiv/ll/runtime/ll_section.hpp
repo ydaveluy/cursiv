@@ -17,14 +17,27 @@
 
 namespace cursiv::engine {
 
-// The mode a fault is lexed with: every terminal, or inside `section` (as
-// `LlContext::section` names it) every terminal of its grammar and the token
-// that closes it.
+// The mode the text of `section` (as `LlContext::section` names it) is read
+// in, whole: every terminal of its grammar and the token that closes it.
 template <const auto& T>
-constexpr std::uint16_t ll_err_mode(std::uint8_t section) {
-  return T.nsections != 0 && T.sectionErr != nullptr && section != 0
-             ? T.sectionErr[section - 1u]
-             : T.errMode;
+constexpr std::uint16_t ll_section_mode(std::uint8_t section) {
+  return T.sectionErr[section - 1u];
+}
+
+// The mode a fault is lexed with at a point reading `mode`: the terminals of
+// its configuration. With no mode in hand, those of `section`, or of the
+// document's own configuration.
+template <const auto& T>
+constexpr std::uint16_t ll_err_mode(std::uint16_t mode,
+                                    [[maybe_unused]] std::uint8_t section) {
+  if constexpr (T.errModeOf == nullptr) {
+    return T.errMode;
+  } else {
+    if (mode < T.nmodes) return T.errModeOf[mode];
+    if constexpr (T.nsections != 0)
+      if (section != 0) return ll_section_mode<T>(section);
+    return T.errModeOf[T.tailMode];
+  }
 }
 
 // Whether `sym` ends the text the descent reads: the end of input, or in a
@@ -56,7 +69,7 @@ TextOffset ll_text_end(const LlContext& c, TextOffset at, TextOffset upto,
     if (c.section == 0) return c.len;
     const TextOffset len = std::min(clip, c.len);
     LexFailedWalks<LlLexTape<T>> failed;
-    const auto mode = ll_err_mode<T>(c.section);
+    const auto mode = ll_section_mode<T>(c.section);
     for (TextOffset p = at; p < len && p <= upto;) {
       c.stop.poll();
       TextOffset halt = p;

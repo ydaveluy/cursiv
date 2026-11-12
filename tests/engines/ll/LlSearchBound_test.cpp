@@ -119,7 +119,7 @@ void an_artificial_end_is_no_dedent_or_section_end() {
     cursiv::engine::LlSearch s(table.atn, c.len, kTiny);
     s.limit = 1;
     CHECK(cursiv::engine::ll_search_reading<table>(
-              c, s, 1, cursiv::engine::ll_err_mode<table>(c.section))
+              c, s, 1, cursiv::engine::ll_err_mode<table>(c.laMode, c.section))
               .term == cursiv::engine::kInvalidSymbol);
     CHECK(s.readings.empty() && cursiv::engine::ll_search_spent(s) &&
           s.work <= 3);

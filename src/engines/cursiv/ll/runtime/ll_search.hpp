@@ -306,7 +306,7 @@ Token ll_search_peek_ahead(const LlContext& c, LlSearch& s, LlAhead& ahead,
   if (!cross && c.la.sym < T.nterms && c.la.sym != kEofSymbol &&
       !T.mode_admits(T.errMode, c.la.sym))
     return c.la;
-  const auto mode = ll_err_mode<T>(c.section);
+  const auto mode = ll_err_mode<T>(look != kNoRow ? look : c.laMode, c.section);
   TextOffset p = ahead.p;
   bool head = ahead.head;
   for (;;) {
@@ -389,8 +389,8 @@ std::uint16_t ll_search_look(const LlConfig* cfg, std::size_t n,
 }
 
 // The token in hand as the positions' alphabet reads it, as the descent does:
-// the broad alphabet may read a token over a blank they skip. The descent's own
-// token is read where it begins, its gap being the point's.
+// the fault's alphabet may read a token over a blank they skip. The descent's
+// own token is read where it begins, its gap being the point's.
 template <const auto& T>
 Token ll_search_peek(const LlContext& c, LlSearch& s, LlReading& r) {
   LlMask<T.termWords> viable;
@@ -421,6 +421,7 @@ void ll_search_terms(const LlContext& c, LlSearch& s, const LlConfig* cfg,
   }
   LlMask<T.termWords> viable;
   bool any = false;
+  bool broad = true;
   std::uint32_t last = ~0u;
   for (std::size_t k = 0; k < n && !ll_search_spent(s); ++k) {
     const std::uint32_t state = cfg[k].state;
@@ -429,14 +430,16 @@ void ll_search_terms(const LlContext& c, LlSearch& s, const LlConfig* cfg,
     for (const auto& a : ll_atoms<T>().at(state)) {
       viable.set(a.label);
       any = true;
+      broad = broad && ll_err_mode<T>(a.mode, c.section) == tok.mode;
     }
   }
   if (!any || ll_search_spent(s)) return;
-  // Under the broad alphabet two terminals never tie, and a wider one read this
-  // token: where the positions want it, no walk under theirs reads otherwise.
-  if (T.nrelays == 0 && !LexTape<T>::kRefuses &&
-      tok.mode == ll_err_mode<T>(c.section) && T.modeMulti[tok.mode] == 0 &&
-      tok.sym < T.nterms && viable.test(tok.sym)) {
+  // Under the alphabet a fault of the positions is lexed with, two terminals
+  // never tie, and a wider one read this token: where they want it, no walk
+  // under theirs reads otherwise.
+  if (T.nrelays == 0 && !LexTape<T>::kRefuses && broad &&
+      T.modeMulti[tok.mode] == 0 && tok.sym < T.nterms &&
+      viable.test(tok.sym)) {
     out.push_back(tok.sym);
     ++s.work;
     return;
@@ -803,7 +806,7 @@ const LexReading& ll_search_reading(LlContext& c, LlSearch& s, TextOffset p,
 
 // The alphabet reading `r`'s token is read under for what the lexer refused:
 // its positions' own where they share one, as the descent reads it. Under the
-// broad one, a trivia another region reads as a token is that token.
+// fault's, a trivia another region reads as a token is that token.
 template <const auto& T>
 std::uint16_t ll_search_lex_mode(const LlContext& c, const LlSearch& s,
                                  const LlReading& r) {
@@ -811,7 +814,7 @@ std::uint16_t ll_search_lex_mode(const LlContext& c, const LlSearch& s,
   const auto look =
       ll_search_look<T>(s.pool.data() + r.cfg, r.ncfg, viable,
                         kIndented<T> && r.ahead.at.depth != 0);
-  return look != kNoRow ? look : ll_err_mode<T>(c.section);
+  return look != kNoRow ? look : ll_err_mode<T>(c.laMode, c.section);
 }
 
 // The token in hand read as `term` up to `end` at `cost`: `rep` where its
@@ -935,25 +938,30 @@ const std::vector<Typo>& ll_search_typos(LlContext& c, LlSearch& s,
       ->second.typos;
 }
 
+// What a deletion of `tok` takes on reading `bi`: of a token left open, the
+// opener its positions' alphabet reads, else the fault's.
 template <const auto& T>
-TextOffset ll_search_drop_end(LlContext& c, LlSearch& s, const Token& tok) {
+TextOffset ll_search_drop_end(LlContext& c, LlSearch& s, std::uint32_t bi,
+                              const Token& tok) {
   if (tok.end != tok.begin) return tok.end;
-  if (const auto it = s.drops.find(tok.begin); it != s.drops.end())
+  const std::uint16_t own = ll_search_lex_mode<T>(c, s, s.nodes[bi]);
+  const std::uint64_t key = std::uint64_t{tok.begin} << 16 | own;
+  if (const auto it = s.drops.find(key); it != s.drops.end())
     return it->second;
-  // The deletion is written with what the parse may still read of open tokens.
-  const LexReading r =
-      c.reads.spent() ? LexReading{}
-                      : ll_search_reading<T>(c, s, tok.begin,
-                                             ll_err_mode<T>(c.section));
-  if (ll_search_spent(s)) return tok.begin;
-  if (r.term != kInvalidSymbol)
-    return s.drops.emplace(tok.begin, lex_cut(tok.begin, r)).first->second;
+  for (const std::uint16_t mode : {own, ll_err_mode<T>(c.laMode, c.section)}) {
+    const LexReading r = c.reads.spent()
+                             ? LexReading{}
+                             : ll_search_reading<T>(c, s, tok.begin, mode);
+    if (ll_search_spent(s)) return tok.begin;
+    if (r.term != kInvalidSymbol)
+      return s.drops.emplace(key, lex_cut(tok.begin, r)).first->second;
+  }
   const TextOffset cap = ll_search_walk_end(c, s, tok.begin);
   TextOffset reached = tok.begin;
   const TextOffset end = ll_unmatched_end<T>(c, tok.begin, cap, reached);
   ++s.work;
   if (!ll_search_walked(c, s, tok.begin, cap, reached))
-    s.drops.emplace(tok.begin, end);
+    s.drops.emplace(key, end);
   return end;
 }
 
@@ -1103,7 +1111,7 @@ void ll_search_replace(LlContext& c, LlSearch& s, std::uint32_t gi) {
   if (ll_search_spent(s)) return;
   const SymbolId term = ll_search_forced<T>(c, s, from);
   if (term == kInvalidSymbol) return;
-  const TextOffset end = ll_search_drop_end<T>(c, s, tok);
+  const TextOffset end = ll_search_drop_end<T>(c, s, from, tok);
   for (const Typo& t : ll_search_typos<T>(c, s, from, tok))
     if (t.end == end && t.term == term) return;
   // The alphabet the keyword is read under, as the walk reads it.
@@ -1126,6 +1134,29 @@ void ll_search_replace(LlContext& c, LlSearch& s, std::uint32_t gi) {
       q != kLlNoNode)
     ll_search_admit<T>(s, q);
   ll_search_trim(s, pools);
+}
+
+// Whether no alphabet of the text reads a token at `p`, as one unit of bytes
+// tells: a position an insertion reaches may read what the fault's
+// configuration does not.
+template <const auto& T>
+bool ll_search_unread([[maybe_unused]] const LlContext& c,
+                      [[maybe_unused]] LlSearch& s,
+                      [[maybe_unused]] TextOffset p) {
+  if constexpr (T.errModeOf == nullptr) {
+    return true;
+  } else {
+    std::uint16_t mode = T.errMode;
+    if constexpr (T.nsections != 0)
+      if (c.section != 0) mode = ll_section_mode<T>(c.section);
+    const TextOffset near =
+        c.len - p > kRepairLexBytes ? p + kRepairLexBytes : c.len;
+    TextOffset halt = p;
+    ++s.work;
+    return ll_match_text<T>(c.src, near, mode, p, halt).term ==
+               kInvalidSymbol &&
+           (halt < near || near == c.len);
+  }
 }
 
 // The edits the canonical form admits, in rank order: re-readings, required
@@ -1166,7 +1197,8 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
   ++choice;
   // Bytes no alphabet reads refuse every reading the same: insertions in front
   // of them are told apart only past them, so one is made there, never a run.
-  const bool garbage = !atEnd && !synthetic && tok.sym == kInvalidSymbol;
+  const bool garbage = !atEnd && !synthetic && tok.sym == kInvalidSymbol &&
+                       ll_search_unread<T>(c, s, tok.begin);
   if (b.mayInsert(garbage)) {
     // Only a required run is free past its first, so the other terminals wait
     // behind one entry until a reading that costly is asked for.
@@ -1197,7 +1229,7 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
   }
   if (!atEnd) {
     const TextOffset end =
-        synthetic ? tok.end : ll_search_drop_end<T>(c, s, tok);
+        synthetic ? tok.end : ll_search_drop_end<T>(c, s, bi, tok);
     const LlSearchCheckpoint pools(s);
     const std::uint32_t e =
         ll_search_child(s, bi, LlEdit::del, 0, end, choice++, tok.begin);

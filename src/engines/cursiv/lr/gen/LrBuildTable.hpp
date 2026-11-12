@@ -129,8 +129,10 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   Vec<std::uint8_t> modeMulti{};
   // A mode that crosses no trivia: a region's own.
   Vec<std::uint8_t> modeTight{};
-  // Per mode, where the grammar embeds others: see `LrFrozenTable`.
+  // Per mode, where the grammar has more than one configuration, and where
+  // it embeds others: see `LrFrozenTable`.
   Vec<std::uint16_t> errModeOf{};
+  Vec<std::uint16_t> modeText{};
   Vec<std::uint16_t> modeEnd{};
   // Per section, the mode its text is read in, whole.
   std::vector<std::uint16_t> sectionErr{};

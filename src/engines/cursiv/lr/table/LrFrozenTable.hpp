@@ -85,11 +85,14 @@ struct LrFrozenTable : LrTableFacts {
   std::array<LexRelay, S.relays> relays{};
   static constexpr std::uint16_t nrelays = S.relays;
 
-  // Per mode, where the grammar embeds others: the mode a fault is lexed with,
-  // and the section's closing token, which a repair never invents, drops or
-  // reads as another. `kEofSymbol` elsewhere.
+  // Per mode, where the grammar has more than one configuration: the mode a
+  // fault is lexed with.
   std::array<std::uint16_t, S.errModes> errModeOf{};
-  std::array<std::uint16_t, S.errModes> modeEnd{};
+  // Per mode, where the grammar embeds others: the mode its section's text is
+  // read in, whole, and the section's closing token, which a repair never
+  // invents, drops or reads as another. `kEofSymbol` elsewhere.
+  std::array<std::uint16_t, S.endModes> modeText{};
+  std::array<std::uint16_t, S.endModes> modeEnd{};
 
   constexpr std::uint16_t next_byte(std::uint16_t s, unsigned char b) const {
     return dfaNext[std::size_t{s} * ncls + cls[b]];

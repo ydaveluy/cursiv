@@ -89,6 +89,7 @@ struct LrTableEmitter : TextBuilder {
     extent(&LrSizes::accPriorities, "accPriorities",
            a.prioritized() ? bounds : 0);
     extent(&LrSizes::errModes, "errModes", a.errModeOf.size());
+    extent(&LrSizes::endModes, "endModes", a.modeEnd.size());
     extent(&LrSizes::insertLists, "insertLists", a.insertAt.size() - 1);
     extent(&LrSizes::insertWords, "insertWords", a.insertWord.size());
     extent(&LrSizes::electWords, "electWords", a.electWord.size());
@@ -358,9 +359,10 @@ struct LrTableEmitter : TextBuilder {
     if (S.modeFlagSets != 0)
       emit_pool("modeFlag.pool", "modeFlag.of", a.modeFlagPool);
     array("modeTight", a.modeTight, S.modes);
-    if (S.errModes != 0) {
-      array("errModeOf", a.errModeOf, S.errModes);
-      array("modeEnd", a.modeEnd, S.errModes);
+    if (S.errModes != 0) array("errModeOf", a.errModeOf, S.errModes);
+    if (S.endModes != 0) {
+      array("modeText", a.modeText, S.endModes);
+      array("modeEnd", a.modeEnd, S.endModes);
     }
     if (!S.indented) array("modeSub", a.modeSub, S.modes * a.mode_sub_words());
     array("dfaNext", a.dfaNext, std::size_t{S.dfa} * S.cls);

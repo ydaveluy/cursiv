@@ -139,21 +139,46 @@ const LexReading& lr_search_reading(const LrContext& c, LrSearch& s,
   return s.readings.emplace(key, r).first->second;
 }
 
-// The token in hand as the mode that lexes everything reads it where its own
-// read nothing: one lexeme, read once per search; in a section, as the
-// state's grammar reads it, which is no reading of the whole search.
+// The token in hand as the mode a fault is lexed with reads it where its own
+// read nothing: one lexeme, read once per search and fault mode.
 template <const auto& A>
 Token lr_search_written(const LrContext& c, LrSearch& s, const Token& t,
                         std::uint16_t mode) {
   if (t.sym != kInvalidSymbol || t.begin >= c.len) return t;
-  if constexpr (A.errModeOf.size() != 0) {
-    ++s.work;
-    return lr_written<A>(c, t, mode);
-  }
-  if (const auto it = s.written.find(t.begin); it != s.written.end())
+  const std::uint64_t key =
+      (std::uint64_t{t.begin} << 16) | lr_err_mode<A>(mode);
+  if (const auto it = s.written.find(key); it != s.written.end())
     return it->second;
   ++s.work;
-  return s.written.emplace(t.begin, lr_written<A>(c, t, mode)).first->second;
+  return s.written.emplace(key, lr_written<A>(c, t, mode)).first->second;
+}
+
+// Whether no alphabet of the text `mode` reads in reads a token at `p`, as one
+// unit of bytes tells: a state an insertion reaches may read what the fault's
+// configuration does not. A section's text has one alphabet, any other one per
+// configuration.
+template <const auto& A>
+bool lr_search_unread([[maybe_unused]] const LrContext& c,
+                      [[maybe_unused]] LrSearch& s,
+                      [[maybe_unused]] std::uint16_t mode,
+                      [[maybe_unused]] TextOffset p) {
+  if constexpr (A.errModeOf.size() == 0) {
+    return true;
+  } else {
+    const TextOffset near =
+        c.len - p > kRepairLexBytes ? p + kRepairLexBytes : c.len;
+    const auto unread = [&](std::uint16_t m) {
+      TextOffset halt = p;
+      ++s.work;
+      return lr_match_halt<A>(c.src, near, m, p, halt).term == kInvalidSymbol &&
+             (halt < near || near == c.len);
+    };
+    if (const std::uint16_t text = lr_mode_text<A>(mode); text != A.errMode)
+      return unread(text);
+    for (std::uint16_t m = 0; m < A.errModeOf.size(); ++m)
+      if (A.errModeOf[m] == m && !unread(m)) return false;
+    return true;
+  }
 }
 
 // The re-readings of the bytes at `at` in `state`, their walk counted as work
@@ -328,6 +353,15 @@ inline bool lr_search_insertable(std::uint32_t state, SymbolId t, bool atEnd) {
          (atEnd || t != lr_text_close<A>(state));
 }
 
+// Reading `i` closes its whole constructs as the writer does before a
+// deletion's or a skip's record.
+template <const auto& A>
+void lr_search_close_whole(LrContext& c, LrSearch& s, std::uint32_t i) {
+  LrSearchPool<A> x{c, s};
+  lr_close_whole<A>([&] { return s.configs[i].run.back(); },
+                    [&](std::uint16_t p) { return x.reduce(i, p); });
+}
+
 // Its readings go to `s.out`; a required insertion that goes on a run of them
 // costs nothing.
 template <const auto& A>
@@ -415,6 +449,7 @@ bool lr_search_reread(LrContext& c, LrSearch& s, std::uint32_t bi,
     r.at = end;
     r.laMode = kNoMode;
     r.phase = RepairPhase::discardOnly;
+    lr_search_close_whole<A>(c, s, e);
   } else {
     lr_pin(r, term, true, end, written, A.mode[r.run.back()]);
   }
@@ -558,7 +593,8 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
   // them are told apart only past them, so one is made there, never a run.
   const bool garbage =
       !atEnd && !synthetic && written.sym == kInvalidSymbol &&
-      lr_search_reading<A>(c, s, mode, b.la.begin).term == kInvalidSymbol;
+      lr_search_reading<A>(c, s, mode, b.la.begin).term == kInvalidSymbol &&
+      lr_search_unread<A>(c, s, mode, b.la.begin);
   if (b.mayInsert(garbage)) {
     // Only a required run costs nothing past its first, so the terminals that
     // cannot be required wait behind one entry until a reading that costly is
@@ -605,6 +641,7 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
     r.lost += synthetic ? 0u : 1u;
     r.phase = RepairPhase::discardOnly;
     r.freeInserts = 0;
+    lr_search_close_whole<A>(c, s, e);
     lr_search_read<A>(c, s, e);
     lr_search_admit_out(s, pools);
   }

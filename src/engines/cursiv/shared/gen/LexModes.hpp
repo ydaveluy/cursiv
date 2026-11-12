@@ -80,8 +80,8 @@ struct LexModes {
     return set[a].covers(set[b]) && longer[a].covers(longer[b]);
   }
 
-  // The mode that lexes every terminal, so a repair can name a token the
-  // parse could not read.
+  // The mode that lexes every terminal: a grammar of one configuration lexes
+  // a fault with it, to name a token the parse could not read.
   template <class Cfg>
   std::uint16_t error_mode(const Cfg& g) {
     DynSet all;
@@ -90,9 +90,29 @@ struct LexModes {
     return intern(all);
   }
 
-  // Per section configuration, the mode a fault in it lexes: its grammar's
-  // terminals `own`, its trivia and the token that closes it, so a fault is
-  // never read as a token of the caller's. Outside any section, `err`.
+  // Per configuration, the mode a fault in it lexes: the terminals `own` its
+  // positions read, what the configurations of its grammar skip and, in a
+  // section, its closing token. No token of another configuration's alone.
+  template <class Cfg>
+  std::vector<std::uint16_t> fault_modes(const Cfg& g,
+                                         std::vector<DynSet> own) {
+    std::vector<DynSet> skipped(own.size());
+    for (std::size_t k = 0; k < own.size(); ++k)
+      skipped[g.section_cfg_at(static_cast<unsigned>(k))] |= skips[k];
+    std::vector<std::uint16_t> out(own.size());
+    for (std::size_t k = 0; k < own.size(); ++k) {
+      const std::uint8_t h = g.section_cfg_at(static_cast<unsigned>(k));
+      own[k] |= skipped[h];
+      if (h != 0) own[k].set(g.cfgEnd[h]);
+      own[k].reset(kEofSymbol);
+      out[k] = intern(own[k]);
+    }
+    return out;
+  }
+
+  // Per section configuration, the mode its text is read in, whole: its
+  // grammar's terminals `own`, its trivia and the token that closes it.
+  // Outside any section, `err`.
   template <class Cfg>
   std::vector<std::uint16_t> section_modes(const Cfg& g,
                                            std::vector<DynSet> own,

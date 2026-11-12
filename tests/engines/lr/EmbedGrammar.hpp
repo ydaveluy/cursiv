@@ -263,12 +263,21 @@ struct Doc : cursiv::GrammarSpec {
   struct Hexes : rule<create<ast::Block>(
                      kw<"hexes"> + assign<&ast::Block::script>(
                                        section<Hexed>(lit<"<">, lit<">">)))> {};
+  // A quoted text is every byte up to its closing quote: a `#` opens no
+  // comment between the quotes, and no rule outside them reads the text.
+  struct TEXT : terminal<some(cr<"^`">)> {};
+  struct Quoted : rule<create<ast::Block>(
+                      kw<"quote"> +
+                      skip(ignore<WS>, hide<>,
+                           lit<"`"> + assign<&ast::Block::opener>(ref<TEXT>) +
+                               lit<"`">))> {};
 };
 
 struct DocLl : Doc {
-  struct Line : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> |
-                      ref<Small> | ref<Narrowed> | ref<Dashed> | ref<Widened> |
-                      ref<Lettered> | ref<Sequenced> | ref<Hexes>)+ref<NL>> {};
+  struct Line
+      : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> | ref<Small> |
+              ref<Narrowed> | ref<Dashed> | ref<Widened> | ref<Lettered> |
+              ref<Sequenced> | ref<Hexes> | ref<Quoted>)+ref<NL>> {};
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Line>)))> {};
   using entry = Root;
@@ -283,7 +292,8 @@ struct DocLr : Doc {
   struct Line
       : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> | ref<Small> |
               ref<Narrowed> | ref<Dashed> | ref<Widened> | ref<Lettered> |
-              ref<Sequenced> | ref<Hexes> | ref<Code>)+ref<NL>> {};
+              ref<Sequenced> | ref<Hexes> | ref<Quoted> | ref<Code>)+ref<NL>> {
+  };
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Line>)))> {};
   using entry = Root;

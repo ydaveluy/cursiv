@@ -8,12 +8,17 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/ll/runtime/LlSearch.hpp"
 #include "cursiv/Check.hpp"
+#include "cursiv/ll/runtime/LlSearch.hpp"
+#include "cursiv/lr/runtime/LrParseStats.hpp"
+#include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
 #include "embedll/generated/DocLl/GrammarSource.hpp"
 #include "embedll/generated/DocLl/Module.hpp"
 #include "embedlr/generated/DocLr/GrammarSource.hpp"
 #include "embedlr/generated/DocLr/Module.hpp"
+#include "embedlr/generated/DocLr/Parser.hpp"
+#include "embedlr/generated/DocLr/Table.hpp"
 #include "engines/lr/EmbedGrammar.hpp"
 #include "engines/lr/ParseChecks.hpp"
 
@@ -151,6 +156,22 @@ void a_fault_is_read_with_the_sections_terminals(const Parser& p) {
         doc->blocks.begin()[1]->count == 2 && !r.diagnostics.empty());
   for (const cursiv::ParseDiagnostic& d : r.diagnostics)
     CHECK(d.begin >= 7 && d.end <= 8);
+}
+
+// A text only the quotes read, or a section's comment, is no token of a fault
+// in the document: the fault is the word typed, and the lines behind it stand.
+void a_fault_is_read_with_its_configurations_terminals(const Parser& p) {
+  CHECK(clean(p, "quote `a # b`\n"));
+  for (const auto& [text, end] : {std::pair{"count 12\ncount 0x2\n", 8u},
+                                  std::pair{"count rem 0x2\ncount 0x2\n", 9u},
+                                  std::pair{"count @ 0x2\ncount 0x2\n", 7u}}) {
+    const ParseResult r = p.parse(text);
+    const auto* doc = r.value_as<tembed::ast::Doc>();
+    CHECK(r.accepted && doc != nullptr && doc->blocks.size() == 2 &&
+          doc->blocks.begin()[1]->count == 2 && r.diagnostics.size() == 1);
+    for (const cursiv::ParseDiagnostic& d : r.diagnostics)
+      CHECK(d.begin == 6 && d.end == end);
+  }
 }
 
 void the_word_boundary_and_the_keywords_are_the_sections(const Parser& p) {
@@ -301,6 +322,7 @@ void each(const char* name, const Parser& p, std::string_view dump) {
   the_caret_and_the_repair_read_the_section(p);
   a_missing_close_is_inserted_at_the_end(p);
   a_fault_is_read_with_the_sections_terminals(p);
+  a_fault_is_read_with_its_configurations_terminals(p);
   the_dump_qualifies_the_section(dump);
   a_section_keeps_its_own_word_class(p);
   a_misspelt_keyword_takes_a_number_behind_it(p);
@@ -321,6 +343,23 @@ void the_end_of_a_section_is_the_end_of_the_text(const Parser& p) {
         names_terminal(p, r, "%>"));
 }
 
+// The lines behind a fault cost its repair nothing, in either engine.
+void the_text_behind_a_fault_costs_nothing(const Parser& ll) {
+  const auto work = [&](unsigned lines) {
+    std::string text = "count 12\n";
+    for (unsigned i = 0; i < lines; ++i) text += "count 0x2\n";
+    cursiv::engine::LlSearchWork::current() = {};
+    const ParseResult r = ll.parse(text);
+    CHECK(r.accepted && r.diagnostics.size() == 1);
+    cursiv::Cst cst;
+    cursiv::engine::LrParseStats stats;
+    CHECK(cursiv::engine::lr_parser<tembed::generated::DocLr::kTable>.parse(
+        text, cst, &stats, &tembed::generated::DocLr::kDrive));
+    return std::pair{cursiv::engine::LlSearchWork::current().work, stats.work};
+  };
+  CHECK(work(400) == work(200));
+}
+
 }  // namespace
 
 int main() {
@@ -332,5 +371,6 @@ int main() {
   // At the end of the text, a number is offered behind the misspelt keyword.
   CHECK(checks::offers_named(*lr, "hexes <hx", 9, 9, "Hexed::NUMBER"));
   a_long_section_does_not_cost_a_fault_its_share(*ll);
+  the_text_behind_a_fault_costs_nothing(*ll);
   return cursiv::test::report("Embed_test");
 }

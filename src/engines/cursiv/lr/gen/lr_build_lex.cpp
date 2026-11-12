@@ -224,6 +224,8 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
   // the grammar skips.
   std::vector<std::uint8_t> tightMode;
   std::vector<bool> tightSet;
+  // What the states of each configuration read.
+  std::vector<DynSet> own(r.skips.size());
   {
     const std::uint8_t* const cs = cfgState.data();
     const DynSet* const fol = A.follow.row(0, A.nstates);
@@ -236,6 +238,7 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
       want |= r.skips[cs[f]];
       want |= r.joins;
       want.reset(kEofSymbol);
+      own[cs[f]] |= want;
       mod[f] = r.intern(want, sections ? tag(f, cs[f]) : 0,
                         longer_firsts(g, want, beyond));
       if (tightSet.size() <= mod[f]) {
@@ -248,16 +251,26 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
       }
     }
   }
-  A.errMode = r.error_mode(g);
+  // A fault is lexed in its configuration's mode, a mode no state reads under
+  // in the document's: every terminal where the grammar has one configuration.
+  std::vector<std::uint16_t> faultOf;
+  if (own.size() > 1) faultOf = r.fault_modes(g, std::move(own));
+  A.errMode = faultOf.empty() ? r.error_mode(g) : faultOf[0];
   predicate_modes(g, r);
+  if (sections)
+    A.sectionErr = r.section_modes(g, lr_section_reads(g), A.errMode);
+  if (!faultOf.empty()) {
+    std::uint16_t* const err = A.errModeOf.row(0, r.set.size());
+    std::fill_n(err, r.set.size(), A.errMode);
+    for (const std::uint16_t m : faultOf) err[m] = m;
+    for (unsigned f = 0; f < A.nstates; ++f)
+      err[A.mode[f]] = faultOf[cfgState[f]];
+  }
   if (sections) {
-    const auto errOf = r.section_modes(g, lr_section_reads(g), A.errMode);
-    A.sectionErr = errOf;
-    const auto n = r.set.size();
-    std::uint16_t* const err = A.errModeOf.row(0, n);
-    std::uint16_t* const end = A.modeEnd.row(0, n);
-    for (std::size_t m = 0; m < n; ++m) {
-      err[m] = errOf[r.tag[m] >> 16];
+    std::uint16_t* const text = A.modeText.row(0, r.set.size());
+    std::uint16_t* const end = A.modeEnd.row(0, r.set.size());
+    for (std::size_t m = 0; m < r.set.size(); ++m) {
+      text[m] = A.sectionErr[r.tag[m] >> 16];
       end[m] = static_cast<std::uint16_t>(r.tag[m]);
     }
   }

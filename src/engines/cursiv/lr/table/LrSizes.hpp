@@ -26,8 +26,9 @@ struct LrSizes {
   unsigned accStands = 0;
   // Zero where no terminal is read as a literal or a keyword.
   unsigned accPriorities = 0;
-  // A mode per mode where the grammar embeds others, none where it does not.
-  unsigned errModes = 0;
+  // A mode per mode where the grammar has more than one configuration, and
+  // where it embeds others; none where it does not.
+  unsigned errModes = 0, endModes = 0;
   // The lists of the written order of insertions, and their terminals.
   unsigned insertLists = 0, insertWords = 0;
   unsigned electWords = 0, electWatches = 0, electChains = 0,

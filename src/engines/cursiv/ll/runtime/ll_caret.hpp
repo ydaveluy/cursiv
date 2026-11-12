@@ -807,6 +807,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
       alphabet(pos != 0 ? T.nodes[pos - 1].mode : T.errMode);
   // What a fault at the leaf is lexed with, as the repair that read it.
   const std::uint16_t leafErr = ll_err_mode<T>(
+      pos != 0 ? T.nodes[pos - 1].mode : kNoMode,
       pos != 0 && T.nodeSection != nullptr ? T.nodeSection[pos - 1] : 0);
   // The gap in front of a region's first token is its caller's, so a token is
   // not always reached across the gap its own position crosses.

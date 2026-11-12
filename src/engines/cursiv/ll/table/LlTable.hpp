@@ -126,6 +126,9 @@ struct LlTable {
   std::uint16_t nmodes = 0;
   std::uint16_t errMode = 0;
   std::uint16_t tailMode = 0;
+  // Per mode, the mode a fault is lexed with: the terminals of the mode's
+  // configuration. Null where the grammar has one, which reads `errMode`.
+  const std::uint16_t* errModeOf = nullptr;
   // What a lookahead crosses trivia with, per choice: the error mode read
   // under the choice's skip configuration. Null where every choice reads the
   // grammar's.
@@ -222,9 +225,9 @@ struct LlTable {
   const std::uint8_t* sharedRules = nullptr;
   const std::uint8_t* repeatScopes = nullptr;
 
-  // Per section configuration: the mode a fault is lexed with, its grammar's
-  // terminals and its closing token, and that token, which a repair there never
-  // invents or drops; per position, the section it stands in, as
+  // Per section configuration: the mode its text is read in, whole, its
+  // grammar's terminals and its closing token, and that token, which a repair
+  // there never invents or drops; per position, the section it stands in, as
   // `LlContext::section` names it. Null where the grammar embeds none.
   const std::uint16_t* sectionErr = nullptr;
   const std::uint16_t* sectionEnd = nullptr;
