@@ -9,6 +9,13 @@ if(_app MATCHES "#include \"cursiv/")
                       "so the application does not have to")
 endif()
 
+# The scaffolded project's build fetched what Cursiv depends on.
+set(_lsp ${PROJECT}/build/_deps/lsp_framework-src)
+set(_fetched -DFETCHCONTENT_SOURCE_DIR_LSP_FRAMEWORK=${_lsp})
+file(GLOB _allocator ${PROJECT}/build/_deps/cursiv_mimalloc-*-src)
+if(_allocator)
+  list(APPEND _fetched -DFETCHCONTENT_SOURCE_DIR_CURSIV_MIMALLOC=${_allocator})
+endif()
 file(REMOVE_RECURSE ${WORK})
 execute_process(
     COMMAND ${CMAKE_COMMAND} -S ${SOURCE} -B ${WORK} -G Ninja
@@ -19,6 +26,7 @@ execute_process(
             -DCURSIV_SOURCE_DIR=${CURSIV}
             -DCURSIV_BUILD_TESTS=OFF
             -DCURSIV_WARNINGS_AS_ERRORS=ON
+            ${_fetched}
     RESULT_VARIABLE _rc)
 if(NOT _rc EQUAL 0)
   message(FATAL_ERROR "consumer configure failed (${_rc})")
@@ -137,7 +145,7 @@ execute_process(
             -DCURSIV_SOURCE_DIR=${CURSIV}
             -DCURSIV_BUILD_TESTS=OFF
             -DCURSIV_MIMALLOC=OFF
-            -DFETCHCONTENT_SOURCE_DIR_LSP_FRAMEWORK=${WORK}/_deps/lsp_framework-src
+            -DFETCHCONTENT_SOURCE_DIR_LSP_FRAMEWORK=${_lsp}
     RESULT_VARIABLE _rc OUTPUT_VARIABLE _log ERROR_VARIABLE _log)
 if(NOT _rc EQUAL 0)
   message(FATAL_ERROR "cross consumer configure failed (${_rc})\n${_log}")
