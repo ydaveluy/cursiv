@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "cursiv/shared/table/Token.hpp"
-#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/text/scalar_at.hpp"
 

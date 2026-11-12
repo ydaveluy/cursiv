@@ -7,7 +7,6 @@
 
 #include "cursiv/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/grammar/unicode/UnicodeRanges.hpp"
-#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {

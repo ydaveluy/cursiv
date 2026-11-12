@@ -16,7 +16,6 @@
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
-#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/utils/Utf8.hpp"
 #include "cursiv/utils/macros.hpp"
 

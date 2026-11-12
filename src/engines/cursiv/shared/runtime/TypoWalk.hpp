@@ -14,7 +14,6 @@
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
-#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/shared/utils/inside_scalar.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Utf8.hpp"

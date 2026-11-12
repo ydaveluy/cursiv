@@ -9,7 +9,6 @@
 #include "cursiv/shared/runtime/lex_scalar_in.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
-#include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Utf8.hpp"
 #include "cursiv/utils/macros.hpp"
