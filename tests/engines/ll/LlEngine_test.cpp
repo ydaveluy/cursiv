@@ -1337,10 +1337,12 @@ void trailing_trivia_is_read_after_the_entry_region() {
     context.at = context.triviaAt = context.pendEnd = 10;
     context.la = cursiv::engine::Token{10, 10, cursiv::engine::kInvalidSymbol};
     if (classified) {
+      const auto mode = cursiv::engine::ll_err_mode<table>(
+          cursiv::engine::kNoMode, context.section);
       const auto scan = cursiv::engine::ll_match_text<table>(
-          text.data(), text.size(), table.errMode, 10);
+          text.data(), text.size(), mode, 10);
       context.la = cursiv::engine::Token{10, scan.end, scan.term};
-      context.laMode = table.errMode;
+      context.laMode = mode;
       CHECK(table.terms[scan.term].trivia);
     }
     CHECK(cursiv::engine::ll_tail<table>(context));

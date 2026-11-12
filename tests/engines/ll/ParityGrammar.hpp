@@ -290,6 +290,19 @@ struct Itself : cursiv::GrammarSpec {
                      create<ast::Lit>(kw<"s0">)> {};
 };
 
+// A text between quotes is every byte up to the closing quote, read in a
+// region that skips nothing: no rule outside the quotes reads it.
+struct Quotes : cursiv::GrammarSpec {
+  using WS = Base::WS;
+  using ID = Base::ID;
+  struct TEXT : terminal<some(cr<"^`">)> {};
+  struct Say
+      : rule<create<ast::Let>(
+            kw<"say"> + assign<&ast::Let::name>(ref<ID>) + lit<"="> +
+            tight(lit<"`"> + option(ref<TEXT>) + lit<"`">) + lit<";">)> {};
+  struct UnitRule : rule<many(append<&ast::Unit::lets>(ref<Say>))> {};
+};
+
 // The declaration recovery cases use the same identifier and whitespace as
 // the expression language. Their own scope keeps comments out of declarations.
 struct Suite : Base {
@@ -299,6 +312,7 @@ struct Suite : Base {
                               (lit<"fork:"> + ref<Forks::UnitRule> + eof)) |
                      (lit<"rep:"> + ref<Repairs::UnitRule> + eof) |
                      (lit<"member:"> + ref<Members::UnitRule> + eof) |
+                     (lit<"say:"> + ref<Quotes::UnitRule> + eof) |
                      ref<Itself::Self>> {};
   using entry = Root;
 };

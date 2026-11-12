@@ -131,6 +131,13 @@ void a_missing_operand_does_not_take_the_next_keyword() {
   agree(e, "rep:sums 1 + sums 2;");
 }
 
+// A text between quotes is its region's alone, closed or left open.
+void a_quoted_text_is_read_by_its_region() {
+  const auto e = parity();
+  agree(e, "say:say a = `b (c`;", false);
+  agree(e, "say:say a = `b (c;");
+}
+
 // A search that had to read deeper than its first frames chose over those
 // frames: the arm its path enters is named over them too.
 void a_choice_past_the_first_frames_enters_the_elected_arm() {
@@ -268,6 +275,7 @@ int main() {
   a_planned_run_of_closers_is_written_whole();
   unmatched_bytes_stop_at_an_open_token();
   a_missing_operand_does_not_take_the_next_keyword();
+  a_quoted_text_is_read_by_its_region();
   a_deleted_token_answers_no_condition();
   a_choice_past_the_first_frames_enters_the_elected_arm();
   return cursiv::test::report("LlRecoveryParity_test");

@@ -104,7 +104,7 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
   TextOffset far = from;
   std::uint16_t best = kDeadState;
   bool shorter = false;
-  std::array<std::uint64_t, T.termWords> previous;
+  std::array<std::uint64_t, T.termWords> previous, read;
   std::conditional_t<Collect, std::array<TextOffset, T.nterms>,
                      std::array<TextOffset, 0>>
       terminalEnd;
@@ -183,12 +183,15 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
             terminalPriority[term] = static_cast<std::uint8_t>(
                 tape.priority(st, term, src, i, len, far));
           }
-        if (different != nullptr) {
-          if ((previous[k] & ~bits) != 0) shorter = true;
-          previous[k] = bits;
-        }
+        if (different != nullptr) read[k] = bits;
       }
       if (any != 0) {
+        // A terminal the readings admit ends short of another they admit.
+        if (different != nullptr) {
+          for (std::uint32_t k = 0; k < T.termWords; ++k)
+            if ((previous[k] & ~read[k]) != 0) shorter = true;
+          previous = read;
+        }
         end = i;
         best = st;
       }

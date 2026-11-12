@@ -44,7 +44,7 @@ void a_clipped_token_is_not_memoized() {
   cursiv::engine::LlContext c(text, builder, kTiny);
   cursiv::engine::LlSearch s(kPlain.atn, c.len, kTiny);
   s.limit = 1;
-  const auto mode = kPlain.errMode;
+  const auto mode = cursiv::engine::ll_err_mode<kPlain>(c.laMode, c.section);
   auto& row = cursiv::engine::ll_search_row<kPlain>(s, 0);
   const auto clipped =
       cursiv::engine::ll_search_scan<kPlain>(c, s, row, mode, 0);
