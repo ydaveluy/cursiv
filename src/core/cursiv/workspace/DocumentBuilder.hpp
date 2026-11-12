@@ -76,9 +76,9 @@ class DocumentBuilder {
   virtual void build(std::span<Document* const>, const BuildOptions& = {},
                      const CancellationToken& = {}) const = 0;
 
-  // Changed targets and changed exports invalidate their dependants; unresolved
-  // references are retried too. Custom visibility rules extend `isAffected`.
-  // Every reset precedes publication, while the workspace excludes readers.
+  // Applies the changes, then builds: the token cuts the build, never the
+  // changes. A changed target or export resets its dependants and unresolved
+  // references are retried (`isAffected`), all before readers are let in.
   virtual void update(std::span<const std::string_view> changed,
                       std::span<const std::string_view> deleted,
                       const CancellationToken& = {}) const = 0;
