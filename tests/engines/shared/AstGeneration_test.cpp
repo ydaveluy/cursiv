@@ -17,6 +17,7 @@
 #include "cursiv/shared/gen/AstEmitter.hpp"
 #include "cursiv/shared/gen/AstRegistry.hpp"
 #include "cursiv/shared/gen/AstRowOf.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/gen/GrammarBindings.hpp"
 #include "cursiv/shared/gen/HeadMatcher.hpp"
 #include "cursiv/shared/gen/LexBacktrack.hpp"
@@ -318,6 +319,19 @@ void long_refused_words_emit_bounded_functions() {
   CHECK(depth == 0 && deepest < 16);
 }
 
+void the_labels_of_an_arm_fill_their_lines() {
+  cursiv::TextBuilder out;
+  cursiv::engine::case_rows(
+      out,
+      [](auto&& put) {
+        for (unsigned v = 96; v < 106; ++v) put(v);
+      },
+      "++i; goto W7;");
+  CHECK(out.take() ==
+        "    case 96: case 97: case 98: case 99: case 100: case 101: case 102:"
+        " case 103:\n    case 104: case 105: ++i; goto W7;\n");
+}
+
 struct LexCfg : cursiv::engine::LowerPools {
   std::uint16_t nterms = 0;
   cursiv::engine::ByteSet wordBytes;
@@ -589,6 +603,7 @@ void ast_generation_cases_run() {
                                    cursiv::engine::LlLowering<astgen::G>>());
   astgen::a_truncated_operator_product_keeps_every_opening();
   astgen::long_refused_words_emit_bounded_functions();
+  astgen::the_labels_of_an_arm_fill_their_lines();
   astgen::named_heads_compare_the_scalars_after_the_same_lead_byte();
   astgen::a_longer_mode_cannot_consume_the_last_slot_twice();
   astgen::lone_lead_expansion_keeps_predicate_cycles_and_their_exits();

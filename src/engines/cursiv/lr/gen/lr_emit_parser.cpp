@@ -400,20 +400,6 @@ inline constexpr RowsTape kRowsTape{};
     if (!a.dfaBacktrack.empty()) line("  goto Wdone;");
   }
 
-  // `case` labels several a line: the compiler folds a run of them as a range.
-  template <class Each>
-  void case_rows(Each&& each) {
-    std::string row = "   ";
-    each([&](unsigned v) {
-      const std::string label = concat(" case ", v, ":");
-      if (row.size() + label.size() > 80) {
-        line(row);
-        row = "   ";
-      }
-      row += label;
-    });
-    line(row);
-  }
   void emit_moves() {
     // Wrappers over `lr_moves.hpp` with what this grammar knows at compile
     // time.
@@ -533,7 +519,9 @@ inline constexpr RowsTape kRowsTape{};
     if (!byStay.empty()) {
       line("    switch (state) {");
       for (const auto& [words, states] : byStay) {
-        for (const unsigned st : states) line("    case ", st, ":");
+        case_rows(*this, [&](auto&& put) {
+          for (const unsigned st : states) put(st);
+        });
         line("    {");
         ByteSet stay{};
         std::ranges::copy(words, stay.w);
@@ -664,7 +652,7 @@ inline constexpr RowsTape kRowsTape{};
     const auto st = kTable.next_byte(first, static_cast<unsigned char>(src[from]));
     switch (st) {
 )");
-    case_rows([&](auto&& put) {
+    case_rows(*this, [&](auto&& put) {
       for (const auto st : knownEnds) put(st);
     });
     write(
@@ -1491,7 +1479,7 @@ again:
   void flush_cases() {
     if (!caseOpen) return;
     caseOpen = false;
-    case_rows([&](auto&& put) {
+    case_rows(*this, [&](auto&& put) {
       for (unsigned t = caseLo; t <= caseHi; ++t) put(t);
     });
   }
@@ -1765,7 +1753,7 @@ again:
     if (!literals.empty() || walked.any()) {
       line("    switch (static_cast<unsigned char>(src[p])) {");
       for (const LrAction& x : literals) {
-        case_rows([&](auto&& put) {
+        case_rows(*this, [&](auto&& put) {
           put(static_cast<unsigned char>(a.cfg.term_text(x.term)[0]));
         });
         line("    {");
@@ -1789,7 +1777,7 @@ again:
       }
       for (const auto& [run, read] : reads) {
         const auto& [bytes, terms] = read;
-        case_rows([&](auto&& put) {
+        case_rows(*this, [&](auto&& put) {
           for (unsigned b = 0; b < 256; ++b)
             if (bytes.has(static_cast<unsigned char>(b))) put(b);
         });
@@ -1820,7 +1808,7 @@ again:
           for (const unsigned t : terms.members()) {
             if (done[t]) continue;
             const LrAction& x = *plain(t);
-            case_rows([&](auto&& put) {
+            case_rows(*this, [&](auto&& put) {
               for (const unsigned u : terms.members()) {
                 if (u < t || done[u]) continue;
                 if (const LrAction& y = *plain(u);

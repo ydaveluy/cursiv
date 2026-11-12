@@ -164,18 +164,11 @@ class LexDfaEmitter {
       return cond;
     };
 
-    const auto emit_edge = [&](const EdgeGroup& g, std::string_view ind) {
-      switch (g.kind) {
-        case EdgeKind::done:
-          out.line(ind, "goto ", done(), ";");
-          return;
-        case EdgeKind::direct:
-          out.line(ind, "++i; goto W", g.to, ";");
-          return;
-        case EdgeKind::table:
-          out.line(ind, "++i; st = ", g.to, "; goto Wtab;");
-          return;
-      }
+    const auto edge = [&](const EdgeGroup& g) {
+      if (g.kind == EdgeKind::done) return concat("goto ", done(), ";");
+      return g.kind == EdgeKind::direct
+                 ? concat("++i; goto W", g.to, ";")
+                 : concat("++i; st = ", g.to, "; goto Wtab;");
     };
     const auto only_done = [&] {
       return groups.empty() ||
@@ -190,7 +183,7 @@ class LexDfaEmitter {
             (g.kind == EdgeKind::direct && g.to == to))
           continue;
         out.line("  if (", byte_test(g), ") {");
-        emit_edge(g, "    ");
+        out.line("    ", edge(g));
         out.line("  }");
       }
       out.line("  goto WC", to, ";");
@@ -230,7 +223,7 @@ class LexDfaEmitter {
         out.line("  b = static_cast<unsigned char>(src[i]);");
     }
     if (groups.size() == 1) {
-      emit_edge(groups.front(), "  ");
+      out.line("  ", edge(groups.front()));
       return;
     }
     // `default` is the arm gcc reaches last: the token end, else the widest.
@@ -249,14 +242,17 @@ class LexDfaEmitter {
     out.line(byteCases ? "  switch (b) {" : "  switch (kTable.cls[b]) {");
     for (auto it = groups.begin(); it != groups.end(); ++it) {
       if (it == def) continue;
-      for (const unsigned c : it->cls)
-        out.line("    case ",
-                 byteCases ? std::ranges::find(_cls, c) - _cls.begin() : c,
-                 ":");
-      emit_edge(*it, "      ");
+      case_rows(
+          out,
+          [&](auto&& put) {
+            for (const unsigned c : it->cls)
+              put(byteCases ? static_cast<unsigned>(std::ranges::find(_cls, c) -
+                                                    _cls.begin())
+                            : c);
+          },
+          edge(*it));
     }
-    out.line("    default:");
-    emit_edge(*def, "      ");
+    out.line("    default: ", edge(*def));
     out.line("  }");
   }
 
