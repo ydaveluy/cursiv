@@ -575,8 +575,9 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
       "bool head_refuses(::cursiv::engine::SymbolId t, const char* p,\n"
       "    ::cursiv::TextOffset rest)";
   const std::string_view headReachFn =
-      "::cursiv::TextOffset head_reach(unsigned m, const char* p,\n"
-      "    ::cursiv::TextOffset rest)";
+      "::cursiv::TextOffset head_reach(unsigned m,\n"
+      "    [[maybe_unused]] const char* p,\n"
+      "    [[maybe_unused]] ::cursiv::TextOffset rest)";
   const std::string_view termReachFn =
       "::cursiv::TextOffset term_reach(::cursiv::engine::SymbolId t, const "
       "char* p,\n"

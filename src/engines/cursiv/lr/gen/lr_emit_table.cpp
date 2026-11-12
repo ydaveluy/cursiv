@@ -591,8 +591,9 @@ struct LrTableEmitter : TextBuilder {
           a.termHeads, a.modeHeads,
           "inline bool Table::head_refuses(::cursiv::engine::SymbolId t, "
           "const char* p,\n    ::cursiv::TextOffset rest)",
-          "inline ::cursiv::TextOffset Table::head_reach(unsigned m, "
-          "const char* p,\n    ::cursiv::TextOffset rest)",
+          "inline ::cursiv::TextOffset Table::head_reach(unsigned m,\n"
+          "    [[maybe_unused]] const char* p,\n"
+          "    [[maybe_unused]] ::cursiv::TextOffset rest)",
           {"kTable.cfg.wordRanges.data(), kTable.cfg.wordRanges.size()",
            "kTable.cfg.scalarRanges.data()"}));
     if (trailing())
