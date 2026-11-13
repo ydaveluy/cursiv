@@ -52,8 +52,9 @@ struct SpellCtx {
 
 // Which byte of a set to spell; the two boundaries are named styles since
 // a set is a range and a lexer's off-by-one lives at its ends.
-[[nodiscard]] inline bool spell_byte(const CharSet& s, SpellStyle st,
-                                     SpellCtx& cx, std::string& out) {
+[[nodiscard]] inline bool spell_byte(const cursiv::detail::CharSet& s,
+                                     SpellStyle st, SpellCtx& cx,
+                                     std::string& out) {
   int lo = -1, hi = -1, nice = -1;
   unsigned count = 0;
   const auto in = [&](unsigned b) {
@@ -98,30 +99,31 @@ struct SpellCtx {
 
 // The ASCII characters of a class.
 template <std::uint64_t M, bool N, str S>
-inline constexpr CharSet kClassAscii = [] {
-  CharSet s;
+inline constexpr cursiv::detail::CharSet kClassAscii = [] {
+  cursiv::detail::CharSet s;
   for (unsigned b = 0; b < 0x80; ++b)
-    if (cursiv::detail::word_class<CpSet<M, N, S>>::has(b))
+    if (cursiv::detail::word_class<cursiv::detail::CpSet<M, N, S>>::has(b))
       s.set(static_cast<unsigned char>(b));
   return s;
 }();
 // The first bytes refusing a class forbids: its ASCII characters, and every
 // byte past ASCII when it may hold a scalar there.
 template <std::uint64_t M, bool N, str S>
-inline constexpr CharSet kClassVeto = [] {
+inline constexpr cursiv::detail::CharSet kClassVeto = [] {
   bool beyond = N || M != 0;
   cursiv::detail::for_class_ranges(S.view(), [&beyond](char32_t, char32_t hi) {
     beyond = beyond || hi >= 0x80;
   });
-  CharSet s = kClassAscii<M, N, S>;
+  cursiv::detail::CharSet s = kClassAscii<M, N, S>;
   for (unsigned b = 0x80; beyond && b < 0x100; ++b)
     s.set(static_cast<unsigned char>(b));
   return s;
 }();
 template <class E>
-inline constexpr const CharSet* kVetoOf = nullptr;
+inline constexpr const cursiv::detail::CharSet* kVetoOf = nullptr;
 template <std::uint64_t M, bool N, str S>
-inline constexpr const CharSet* kVetoOf<CpSet<M, N, S>> = &kClassVeto<M, N, S>;
+inline constexpr const cursiv::detail::CharSet*
+    kVetoOf<cursiv::detail::CpSet<M, N, S>> = &kClassVeto<M, N, S>;
 
 template <class C, class E, unsigned D>
 struct SpellOf;
@@ -134,8 +136,8 @@ struct Spell : SpellOf<C, std::remove_cvref_t<E>, D> {};
 // Where an expression can begin and end, in bytes, with nullability so a
 // sequence knows how far the two sets reach.
 struct Reach {
-  CharSet first{};
-  CharSet last{};
+  cursiv::detail::CharSet first{};
+  cursiv::detail::CharSet last{};
   bool nullable = false;
 };
 
@@ -169,11 +171,13 @@ constexpr Reach reach_alt(std::initializer_list<Reach> parts) {
   return out;
 }
 
-constexpr Reach reach_one(const CharSet& s) { return Reach{s, s, false}; }
+constexpr Reach reach_one(const cursiv::detail::CharSet& s) {
+  return Reach{s, s, false};
+}
 
 // Every byte, as `any` accepts: only the walk keeps to printable bytes.
-inline constexpr CharSet kEveryByte = [] {
-  CharSet s;
+inline constexpr cursiv::detail::CharSet kEveryByte = [] {
+  cursiv::detail::CharSet s;
   for (unsigned b = 0; b < 256; ++b) s.set(static_cast<unsigned char>(b));
   return s;
 }();
@@ -209,15 +213,15 @@ struct SpellDeeper<C, E, 0> {
 // lookahead, which the walk cannot honour.
 template <class C, str S, bool CI, class Gd>
 struct lit_guard {
-  using type = And<Gd>;
+  using type = cursiv::detail::And<Gd>;
 };
 template <class C, str S, bool CI, class E>
-struct lit_guard<C, S, CI, Not<E>> {
-  using type = Not<E>;
+struct lit_guard<C, S, CI, cursiv::detail::Not<E>> {
+  using type = cursiv::detail::Not<E>;
 };
 template <class C, str S, bool CI>
 struct lit_guard<C, S, CI, void> {
-  using type = Epsilon;
+  using type = cursiv::detail::Epsilon;
 };
 template <class C, str S, bool CI>
 struct lit_guard<C, S, CI, cursiv::detail::WordBound>
@@ -226,10 +230,10 @@ struct lit_guard<C, S, CI, cursiv::detail::WordBound>
                     C, S, CI, cursiv::detail::WordBound>::type> {};
 
 template <class C, str S, bool CI, class Gd, unsigned D>
-struct SpellOf<C, Lit<S, CI, Gd>, D> {
+struct SpellOf<C, cursiv::detail::Lit<S, CI, Gd>, D> {
   static constexpr std::size_t min = S.size();
   static constexpr Reach reach() {
-    CharSet f, l;
+    cursiv::detail::CharSet f, l;
     f.set(static_cast<unsigned char>(S[0]));
     l.set(static_cast<unsigned char>(S[S.size() - 1]));
     return Reach{f, l, false};
@@ -244,15 +248,15 @@ struct SpellOf<C, Lit<S, CI, Gd>, D> {
 
 // Prose spells nothing: the word under it is what the walk writes.
 template <class C, class E, str T, unsigned D>
-struct SpellOf<C, Doc<E, T>, D> : SpellOf<C, E, D> {};
+struct SpellOf<C, cursiv::detail::Doc<E, T>, D> : SpellOf<C, E, D> {};
 
 // A class is spelled in ASCII where it holds any, else by its first scalar.
 template <class C, std::uint64_t M, bool N, str S, unsigned D>
-struct SpellOf<C, CpSet<M, N, S>, D> {
+struct SpellOf<C, cursiv::detail::CpSet<M, N, S>, D> {
   static constexpr bool ascii = kClassAscii<M, N, S>.count() != 0;
   static constexpr std::size_t min = ascii ? 1 : 2;
   static constexpr Reach reach() {
-    CharSet s = kClassAscii<M, N, S>;
+    cursiv::detail::CharSet s = kClassAscii<M, N, S>;
     if (!ascii)
       for (unsigned b = 0xC2; b <= 0xF4; ++b)
         s.set(static_cast<unsigned char>(b));
@@ -261,7 +265,7 @@ struct SpellOf<C, CpSet<M, N, S>, D> {
   static bool run(std::string& out, SpellStyle st, SpellCtx& cx) {
     if (ascii) return spell_byte(kClassAscii<M, N, S>, st, cx, out);
     for (char32_t cp = 0x80; cp <= 0x10FFFF; ++cp)
-      if (cursiv::detail::word_class<CpSet<M, N, S>>::has(cp)) {
+      if (cursiv::detail::word_class<cursiv::detail::CpSet<M, N, S>>::has(cp)) {
         const std::size_t at = out.size();
         append_scalar(out, cp);
         return cx.admits(out[at]);
@@ -272,14 +276,14 @@ struct SpellOf<C, CpSet<M, N, S>, D> {
 
 // `any` is every byte; spelling it outside the printable range would put
 // control bytes in a document nothing asked to test.
-inline constexpr CharSet kPrintable = [] {
-  CharSet s;
+inline constexpr cursiv::detail::CharSet kPrintable = [] {
+  cursiv::detail::CharSet s;
   for (unsigned b = 0x21; b <= 0x7e; ++b) s.set(static_cast<unsigned char>(b));
   return s;
 }();
 
 template <class C, unsigned D>
-struct SpellOf<C, Byte, D> {
+struct SpellOf<C, cursiv::detail::Byte, D> {
   static constexpr std::size_t min = 1;
   static constexpr Reach reach() { return reach_one(kEveryByte); }
   static bool run(std::string& out, SpellStyle st, SpellCtx& cx) {
@@ -288,17 +292,18 @@ struct SpellOf<C, Byte, D> {
 };
 
 template <class C, unsigned D>
-struct SpellOf<C, cursiv::detail::AnyChar, D> : SpellOf<C, Byte, D> {};
+struct SpellOf<C, cursiv::detail::AnyChar, D>
+    : SpellOf<C, cursiv::detail::Byte, D> {};
 
 template <class C, unsigned D>
-struct SpellOf<C, Epsilon, D> {
+struct SpellOf<C, cursiv::detail::Epsilon, D> {
   static constexpr std::size_t min = 0;
   static constexpr Reach reach() { return Reach{{}, {}, true}; }
   static bool run(std::string&, SpellStyle, SpellCtx&) { return true; }
 };
 
 template <class C, class... Es, unsigned D>
-struct SpellOf<C, Seq<Es...>, D> {
+struct SpellOf<C, cursiv::detail::Seq<Es...>, D> {
   static constexpr std::size_t min = spell_sum({Spell<C, Es, D>::min...});
   static constexpr Reach reach() {
     return reach_seq({Spell<C, Es, D>::reach()...});
@@ -309,7 +314,7 @@ struct SpellOf<C, Seq<Es...>, D> {
 };
 
 template <class C, class... Es, unsigned D>
-struct SpellOf<C, Unordered<Es...>, D> {
+struct SpellOf<C, cursiv::detail::Unordered<Es...>, D> {
   static constexpr std::size_t min = spell_sum({Spell<C, Es, D>::min...});
   static constexpr Reach reach() {
     return reach_alt({Spell<C, Es, D>::reach()...});
@@ -320,7 +325,7 @@ struct SpellOf<C, Unordered<Es...>, D> {
 };
 
 template <class C, class... Es, unsigned D>
-struct SpellOf<C, Choice<Es...>, D> {
+struct SpellOf<C, cursiv::detail::Choice<Es...>, D> {
   using Fn = bool (*)(std::string&, SpellStyle, SpellCtx&);
   static constexpr std::size_t kMins[] = {Spell<C, Es, D>::min...};
   static constexpr Fn kAlts[] = {&Spell<C, Es, D>::run...};
@@ -346,7 +351,7 @@ struct SpellOf<C, Choice<Es...>, D> {
 };
 
 template <class C, std::size_t Mn, std::size_t Mx, class E, unsigned D>
-struct SpellOf<C, Repeat<Mn, Mx, E>, D> {
+struct SpellOf<C, cursiv::detail::Repeat<Mn, Mx, E>, D> {
   static constexpr std::size_t min =
       Mn == 0 ? std::size_t{0}
               : (Spell<C, E, D>::min == kNoSpell ? kNoSpell
@@ -373,28 +378,28 @@ struct SpellOf<C, Repeat<Mn, Mx, E>, D> {
 // short is a refused document, not a silent one.
 template <class C, class E, unsigned D>
 struct vetoed_by {
-  static constexpr const CharSet* value = kVetoOf<E>;
+  static constexpr const cursiv::detail::CharSet* value = kVetoOf<E>;
 };
 template <class C, class R, unsigned D>
-struct vetoed_by<C, Ref<R>, D>
-    : vetoed_by<
-          C,
-          std::remove_cvref_t<typename cursiv::Normalize<C>::template body<R>>,
-          D - 1> {};
+struct vetoed_by<C, cursiv::detail::Ref<R>, D>
+    : vetoed_by<C,
+                std::remove_cvref_t<
+                    typename cursiv::detail::Normalize<C>::template body<R>>,
+                D - 1> {};
 template <class C, class R>
-struct vetoed_by<C, Ref<R>, 0> {
-  static constexpr const CharSet* value = nullptr;
+struct vetoed_by<C, cursiv::detail::Ref<R>, 0> {
+  static constexpr const cursiv::detail::CharSet* value = nullptr;
 };
 
 // An assertion spells nothing. One that refuses a class forbids its first
 // bytes to the next byte spelled, whatever spells it; any other refuses the
 // spelling.
 template <class C, class E, unsigned D>
-struct SpellOf<C, Not<E>, D> {
+struct SpellOf<C, cursiv::detail::Not<E>, D> {
   static constexpr std::size_t min = 0;
   static constexpr Reach reach() { return Reach{{}, {}, true}; }
   static bool run(std::string&, SpellStyle, [[maybe_unused]] SpellCtx& cx) {
-    constexpr const CharSet* kVeto =
+    constexpr const cursiv::detail::CharSet* kVeto =
         vetoed_by<C, std::remove_cvref_t<E>, D>::value;
     if constexpr (kVeto != nullptr) {
       cx.veto.forbid(*kVeto);
@@ -405,13 +410,13 @@ struct SpellOf<C, Not<E>, D> {
   }
 };
 template <class C, unsigned D>
-struct SpellOf<C, Eof, D> {
+struct SpellOf<C, cursiv::detail::Eof, D> {
   static constexpr std::size_t min = 0;
   static constexpr Reach reach() { return Reach{{}, {}, true}; }
   static bool run(std::string&, SpellStyle, SpellCtx&) { return false; }
 };
 template <class C, class E, unsigned D>
-struct SpellOf<C, And<E>, D> {
+struct SpellOf<C, cursiv::detail::And<E>, D> {
   static constexpr std::size_t min = 0;
   static constexpr Reach reach() { return Reach{{}, {}, true}; }
   static bool run(std::string&, SpellStyle, SpellCtx&) { return false; }
@@ -424,21 +429,21 @@ struct closed_by {
   using type = Cl;
 };
 template <class L>
-struct closed_by<Choice<L, Eof>> {
+struct closed_by<cursiv::detail::Choice<L, cursiv::detail::Eof>> {
   using type = L;
 };
 template <class L0, class L1, class L2, class... Ls>
-struct closed_by<Choice<L0, L1, L2, Ls...>> {
-  using rest = Choice<L1, L2, Ls...>;
+struct closed_by<cursiv::detail::Choice<L0, L1, L2, Ls...>> {
+  using rest = cursiv::detail::Choice<L1, L2, Ls...>;
   using type = cursiv::detail::cond_t<
       std::is_same_v<typename closed_by<rest>::type, rest>,
-      Choice<L0, L1, L2, Ls...>,
-      typename cursiv::detail::ChoiceCat<
-          L0, typename closed_by<rest>::type>::type>;
+      cursiv::detail::Choice<L0, L1, L2, Ls...>,
+      typename cursiv::detail::ChoiceCat<L0,
+                                         typename closed_by<rest>::type>::type>;
 };
 
 template <class C, class O, class Cl0, unsigned D>
-struct SpellOf<C, Through<O, Cl0>, D> {
+struct SpellOf<C, cursiv::detail::Through<O, Cl0>, D> {
   using Cl = typename closed_by<Cl0>::type;
   static constexpr std::size_t min =
       spell_sum({Spell<C, O, D>::min, Spell<C, Cl, D>::min});
@@ -453,21 +458,22 @@ struct SpellOf<C, Through<O, Cl0>, D> {
 };
 
 template <class C, class R, unsigned D>
-struct SpellOf<C, Ref<R>, D>
-    : SpellDeeper<C, typename cursiv::Normalize<C>::template body<R>, D> {};
+struct SpellOf<C, cursiv::detail::Ref<R>, D>
+    : SpellDeeper<C, typename cursiv::detail::Normalize<C>::template body<R>,
+                  D> {};
 
 template <class C, class I, class H, class E, unsigned D>
-struct SpellOf<C, Skip<I, H, E>, D> : Spell<C, E, D> {};
+struct SpellOf<C, cursiv::detail::Skip<I, H, E>, D> : Spell<C, E, D> {};
 template <class C, auto Sp, class E, unsigned D>
-struct SpellOf<C, Assign<Sp, E>, D> : Spell<C, E, D> {};
+struct SpellOf<C, cursiv::detail::Assign<Sp, E>, D> : Spell<C, E, D> {};
 template <class C, auto Sp, class E, unsigned D>
-struct SpellOf<C, Append<Sp, E>, D> : Spell<C, E, D> {};
+struct SpellOf<C, cursiv::detail::Append<Sp, E>, D> : Spell<C, E, D> {};
 template <class C, auto P, class E, unsigned D>
-struct SpellOf<C, Flag<P, E>, D> : Spell<C, E, D> {};
+struct SpellOf<C, cursiv::detail::Flag<P, E>, D> : Spell<C, E, D> {};
 template <class C, class T, class E, unsigned D>
-struct SpellOf<C, Create<T, E>, D> : Spell<C, E, D> {};
+struct SpellOf<C, cursiv::detail::Create<T, E>, D> : Spell<C, E, D> {};
 template <class C, class T, auto P, class E, unsigned D>
-struct SpellOf<C, Nest<T, P, E>, D> : Spell<C, E, D> {};
+struct SpellOf<C, cursiv::detail::Nest<T, P, E>, D> : Spell<C, E, D> {};
 
 // One token's spelling, and in `after` what its last assertion forbids the
 // byte after it.
@@ -482,7 +488,7 @@ bool spell_token(std::string& out, SpellStyle st, DecisionSource& src,
 
 template <class C, class R>
 constexpr Reach reach_terminal() {
-  return Spell<C, typename cursiv::Normalize<C>::template body<R>,
+  return Spell<C, typename cursiv::detail::Normalize<C>::template body<R>,
                kSpellDepth>::reach();
 }
 
@@ -493,7 +499,8 @@ template <class C, class E>
 consteval SpellFn spell_entry() {
   using T = std::remove_cvref_t<E>;
   if constexpr (model::kind_of<T>() == ElementKind::terminal_rule)
-    return &spell_token<C, typename cursiv::Normalize<C>::template body<T>>;
+    return &spell_token<
+        C, typename cursiv::detail::Normalize<C>::template body<T>>;
   else if constexpr (model::kind_of<T>() == ElementKind::literal)
     return &spell_token<C, T>;
   else
@@ -517,7 +524,8 @@ consteval ReachFn reach_entry() {
 template <class E>
 inline constexpr bool region_ignores_nothing = false;
 template <class H, class E>
-inline constexpr bool region_ignores_nothing<Skip<TypeList<>, H, E>> = true;
+inline constexpr bool
+    region_ignores_nothing<cursiv::detail::Skip<TypeList<>, H, E>> = true;
 
 template <class C, class L>
 struct lex_rows;
@@ -541,7 +549,7 @@ struct lex_separator<C, TypeList<R0, Rs...>> {
     FixedSource none;
     SpellCtx cx{none};
     std::string out;
-    if (!Spell<C, typename cursiv::Normalize<C>::template body<R0>,
+    if (!Spell<C, typename cursiv::detail::Normalize<C>::template body<R0>,
                kSpellDepth>::run(out, SpellStyle::shortest, cx))
       return {};
     return out;
@@ -553,7 +561,8 @@ struct CursivLexicon final : GrammarLexicon {
   // The literal column comes off the erased model: a spelling the grammar owns
   // is the same whichever path asks for it.
   explicit CursivLexicon(const GrammarModel& g)
-      : _sep(lex_separator<C, typename cursiv::Normalize<C>::ignored>::of()) {
+      : _sep(lex_separator<
+             C, typename cursiv::detail::Normalize<C>::ignored>::of()) {
     using Rows = lex_rows<C, typename model::positions_for<C>::type>;
     _readsSeparator.assign(Rows::kReach.size(), false);
     for (std::size_t e = 0; e < Rows::kReach.size(); ++e) {

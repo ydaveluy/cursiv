@@ -145,8 +145,9 @@ namespace grammar_detail {
 )");
   out.write(funs);
   out.write('\n');
-  out.write(emit_table("constexpr ::cursiv::GrammarMetaData::Answer kAnswers[]",
-                       answers, std::identity{}, "{}"));
+  out.write(emit_table(
+      "constexpr ::cursiv::detail::GrammarMetaData::Answer kAnswers[]", answers,
+      std::identity{}, "{}"));
   out.write(emit_table(
       "constexpr ::std::uint16_t kRecordAnswers[]", recordAnswers,
       [](std::size_t a) { return concat(a, "u"); }, "0u"));
@@ -193,7 +194,7 @@ namespace grammar_detail {
   out.write(R"(
 }  // namespace grammar_detail
 
-constexpr ::cursiv::GrammarMetaData kGrammarMetaData{
+constexpr ::cursiv::detail::GrammarMetaData kGrammarMetaData{
     .answers = grammar_detail::kAnswers,
     .recordAnswers = grammar_detail::kRecordAnswers,
     .names = grammar_detail::kNames,
@@ -220,7 +221,7 @@ std::string emit_records_decl(std::string_view ns) {
 
 namespace )",
                 ns, R"( {
-extern const ::cursiv::GrammarMetaData kGrammarMetaData;
+extern const ::cursiv::detail::GrammarMetaData kGrammarMetaData;
 }
 )");
 }

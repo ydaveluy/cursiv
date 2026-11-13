@@ -15,7 +15,7 @@
 #include "cursiv/shared/gen/WrittenReads.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/shared/utils/GrammarPrinter.hpp"
-#include "cursiv/utils/RoundMarks.hpp"
+#include "cursiv/shared/utils/RoundMarks.hpp"
 
 namespace cursiv::engine {
 

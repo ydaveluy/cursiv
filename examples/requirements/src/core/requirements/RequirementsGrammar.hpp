@@ -13,24 +13,24 @@ inline constexpr auto unquote = [](std::string_view t) {
   return t.substr(1, t.size() - 2);
 };
 
-inline constexpr auto contactKw = cursiv::ikw<"contact">.doc<
-    "The person to ask about this file.">();
-inline constexpr auto environmentKw = cursiv::ikw<"environment">.doc<
-    "Declares an environment that requirements and tests can apply to.">();
-inline constexpr auto reqKw = cursiv::ikw<"req">.doc<
-    "Declares a requirement: its name, then its text.">();
-inline constexpr auto applicableKw = cursiv::ikw<"applicable">.doc<
-    "Starts the environments this applies to: `applicable for A, B`.">();
-inline constexpr auto forKw = cursiv::ikw<"for">.doc<
-    "Lists the environments after `applicable`.">();
-inline constexpr auto tstKw = cursiv::ikw<"tst">.doc<
-    "Declares a test: its name, then the requirements it covers.">();
-inline constexpr auto testfileKw = cursiv::ikw<"testfile">.doc<
-    "The file that implements the test.">();
-inline constexpr auto testsKw = cursiv::ikw<"tests">.doc<
-    "Lists the requirements this test covers.">();
-
 struct Rules : cursiv::GrammarSpec {
+  static constexpr auto contactKw =
+      ikw<"contact">.doc<"The person to ask about this file.">();
+  static constexpr auto environmentKw = ikw<"environment">.doc<
+      "Declares an environment that requirements and tests can apply to.">();
+  static constexpr auto reqKw =
+      ikw<"req">.doc<"Declares a requirement: its name, then its text.">();
+  static constexpr auto applicableKw = ikw<"applicable">.doc<
+      "Starts the environments this applies to: `applicable for A, B`.">();
+  static constexpr auto forKw =
+      ikw<"for">.doc<"Lists the environments after `applicable`.">();
+  static constexpr auto tstKw = ikw<"tst">.doc<
+      "Declares a test: its name, then the requirements it covers.">();
+  static constexpr auto testfileKw =
+      ikw<"testfile">.doc<"The file that implements the test.">();
+  static constexpr auto testsKw =
+      ikw<"tests">.doc<"Lists the requirements this test covers.">();
+
   struct WS : terminal<some(s)> {};
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ML_COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};

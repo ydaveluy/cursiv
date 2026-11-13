@@ -20,7 +20,7 @@ inline constexpr std::uint16_t kLrNoState = 0xFFFFu;
 
 class LrTape {
  public:
-  explicit LrTape(CstRun& trunk) : _trunk(trunk) {}
+  explicit LrTape(detail::CstRun& trunk) : _trunk(trunk) {}
 
   LrTape(const LrTape&) = delete;
   LrTape& operator=(const LrTape&) = delete;
@@ -105,7 +105,7 @@ class LrTape {
   void pending_close(NodeCount at) { _pend = at; }
 
  private:
-  CstRun& _trunk;
+  detail::CstRun& _trunk;
   // The last record a cascade of reductions closed, still without its state.
   NodeCount _pend = kLrNoPending;
 };

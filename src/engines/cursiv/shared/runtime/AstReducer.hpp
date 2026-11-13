@@ -55,7 +55,7 @@ inline NodeId payload_node(const Cst& c, NodeId id, const CstNode& n) {
 // cycle.
 template <class Check, class Drop>
 void prune_orphans(std::pmr::vector<AstNode*>& nodes,
-                   std::vector<RefHandle>& handles, const AstNode* root,
+                   std::vector<detail::RefHandle>& handles, const AstNode* root,
                    Check check, Drop drop) {
   const auto key = [](const AstNode* node) {
     return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(node));
@@ -82,7 +82,7 @@ void prune_orphans(std::pmr::vector<AstNode*>& nodes,
   std::vector<bool> kept(nodes.size());
   for (std::size_t i = nodes.size(); i-- > 0;) kept[i] = reached(nodes[i]);
   // Checked before any node is freed: the walk above reads their parents.
-  for (RefHandle& handle : handles)
+  for (detail::RefHandle& handle : handles)
     if (handle.owner != nullptr && !reached(handle.owner))
       handle.owner = nullptr;
   std::size_t n = 0;
@@ -195,7 +195,7 @@ class AstReducer {
   CURSIV_ALWAYS_INLINE Pending text_write(NodeId id, const CstNode& n,
                                           std::uint16_t field,
                                           std::uint16_t conv, std::uint8_t nar,
-                                          ActKind kind) const {
+                                          detail::ActKind kind) const {
     const auto text = payload_node(*_ctx.cst, id, n);
     return Pending{id, text, kNoIndex, field, conv, kind, nar, nullptr};
   }
@@ -203,7 +203,7 @@ class AstReducer {
   // region gets to it.
   CURSIV_ALWAYS_INLINE Pending node_write(NodeId id, const CstNode& n,
                                           std::uint16_t field, std::uint8_t nar,
-                                          ActKind kind) {
+                                          detail::ActKind kind) {
     const Made got = take_node_for(field, id, n);
     return effect(id, got.type, field, kind, got.value, nar);
   }
@@ -213,7 +213,7 @@ class AstReducer {
   // grammar can wrap. Not forced inline: one copy per class serves its records.
   template <MakeFn Mk, AstApplyFn Ap, bool Nest>
   Made create(NodeId id, const CstNode& n, std::uint16_t type,
-              std::uint16_t field, ActKind kind) {
+              std::uint16_t field, detail::ActKind kind) {
     Pending* const first = suffix_begin(id, n);
     const Made made = consume<Ap, Nest>(Made{Mk(_ctx, id), type}, first, id, id);
     // The factory anchors the new node; only a nest can return another one.
@@ -227,7 +227,7 @@ class AstReducer {
   // own.
   template <bool Nest>
   Made adopt(NodeId id, const CstNode& n, std::uint16_t type,
-             std::uint16_t field, ActKind kind) {
+             std::uint16_t field, detail::ActKind kind) {
     Pending* const first = suffix_begin(id, n);
     Made owner = take_node_if(
         first, [this, type](std::uint16_t vt) { return _m.derives(type, vt); });
@@ -265,28 +265,31 @@ class AstReducer {
   // to a second node the region above opens.
   CURSIV_ALWAYS_INLINE void flag(NodeId id, std::uint16_t field,
                                  const Made& m) {
-    const Pending p = effect(id, kNoIndex, field, ActKind::flag, nullptr);
+    const Pending p =
+        effect(id, kNoIndex, field, detail::ActKind::flag, nullptr);
     if (!_f.applies[m.type](*this, p, m) && !under_repair(id)) broken_tape(id);
   }
 
   // A write the record defers, from a run that opened no node.
   CURSIV_ALWAYS_INLINE void defer_write(NodeId id, const CstNode& n,
                                         std::uint16_t field, std::uint16_t conv,
-                                        std::uint8_t nar, ActKind kind) {
+                                        std::uint8_t nar,
+                                        detail::ActKind kind) {
     push_raw(conv != kNoIndex ? text_write(id, n, field, conv, nar, kind)
                               : node_write(id, n, field, nar, kind));
   }
   // One more write of the node a creation or an adoption returned.
   CURSIV_ALWAYS_INLINE void defer_write(NodeId id, std::uint16_t field,
-                                        ActKind kind, const Made& m) {
+                                        detail::ActKind kind, const Made& m) {
     push_raw(effect(id, m.type, field, kind, m.value));
   }
 
   // A nest's pending carries the class it builds: nothing else reads `type` on
   // an effect.
   CURSIV_ALWAYS_INLINE void defer_effect(NodeId id, std::uint16_t type,
-                                         std::uint16_t field, ActKind kind) {
-    if (kind == ActKind::nest) ++_nests;
+                                         std::uint16_t field,
+                                         detail::ActKind kind) {
+    if (kind == detail::ActKind::nest) ++_nests;
     push_raw(effect(id, type, field, kind, nullptr));
   }
 
@@ -302,7 +305,7 @@ class AstReducer {
     if constexpr (F::storage == FieldStorage::vector) {
       auto& member =
           ast_cast_unchecked<typename F::owner>(owner.value)->*F::ptr;
-      if (p.kind != ActKind::assign && member.capacity() == 0)
+      if (p.kind != detail::ActKind::assign && member.capacity() == 0)
         member.reserve(elements_from(p, field));
     }
     write_into<F>(_ctx, p, owner.value, Cv, field, alt);
@@ -381,7 +384,8 @@ class AstReducer {
     const Pending* const end = _top;
     if (&p < _stack || &p >= end) return 1;
     std::size_t count = 0;
-    for (const Pending* at = &p; at != end && at->kind != ActKind::nest; ++at)
+    for (const Pending* at = &p; at != end && at->kind != detail::ActKind::nest;
+         ++at)
       if (at->field == field) ++count;
     return count;
   }
@@ -405,7 +409,7 @@ class AstReducer {
   Pending* _top;
   Pending* _end;
   const AstActions& _f;
-  const AstMetaData& _m;
+  const detail::AstMetaData& _m;
   AstBuildCtx _ctx;
   // A node was re-anchored: the list is out of record order.
   bool _moved = false;
@@ -556,7 +560,7 @@ class AstReducer {
   static constexpr NodeId kStopRecords = 64 * 1024;
 
   static Pending effect(NodeId id, std::uint16_t type, std::uint16_t field,
-                        ActKind kind, AstNode* value,
+                        detail::ActKind kind, AstNode* value,
                         std::uint8_t nar = kNoNarrow) {
     return Pending{id, id, type, field, kNoIndex, kind, nar, value};
   }
@@ -584,7 +588,8 @@ class AstReducer {
     const Pending* const last = _top;
     for (Pending* at = first; at != last; ++at) {
       Pending& p = *at;
-      if (p.value == nullptr || p.kind != ActKind::create || !accept(p.type))
+      if (p.value == nullptr || p.kind != detail::ActKind::create ||
+          !accept(p.type))
         continue;
       const Made taken{p.value, p.type};
       p.value = nullptr;
@@ -632,7 +637,7 @@ class AstReducer {
   void collect_wraps(const Pending* first, NodeId owner) {
     _wraps.clear();
     for (const Pending* p = first; p != _top; ++p)
-      if (p->kind == ActKind::nest)
+      if (p->kind == detail::ActKind::nest)
         _wraps.push_back(WrapAt{.begin = turn_begin(p->root), .at = p});
     if (_ctx.repaired) index_wrap_repairs(owner);
     // Equal starts: the enclosing (later) pending first.
@@ -715,8 +720,9 @@ class AstReducer {
           current = wrap(n, current, wrapAt.begin);
         }
       }
-      if (p.kind == ActKind::assign || p.kind == ActKind::append ||
-          p.kind == ActKind::flag) {
+      if (p.kind == detail::ActKind::assign ||
+          p.kind == detail::ActKind::append ||
+          p.kind == detail::ActKind::flag) {
         // Only a wrap moves the region to another class.
         const bool direct =
             Ap != nullptr && (!Nest || current.type == owner.type);
@@ -738,7 +744,7 @@ class AstReducer {
   // and T is what the rest of the region is. Two nests chain outwards.
   Made wrap(const Pending& p, const Made& current, NodeId begin) {
     assert(p.type != kNoIndex && _f.makes[p.type] != nullptr &&
-           p.field != kNoField &&
+           p.field != detail::kNoField &&
            "a nest row names a buildable type and a node member of it");
     const FieldDesc& f = _m.fields[p.field];
     assert(f.target != kNoIndex &&
@@ -764,8 +770,8 @@ class AstReducer {
       anchor(current.value, p.root);
     }
     const Made wrapper{_f.makes[p.type](_ctx, p.root), p.type};
-    const Pending in =
-        effect(p.root, current.type, p.field, ActKind::assign, current.value);
+    const Pending in = effect(p.root, current.type, p.field,
+                              detail::ActKind::assign, current.value);
     if (!_f.applies[wrapper.type](*this, in, wrapper)) [[unlikely]]
       broken_tape(p.root);
     return wrapper;

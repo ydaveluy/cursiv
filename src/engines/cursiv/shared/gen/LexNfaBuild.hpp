@@ -20,7 +20,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
-#include "cursiv/utils/RoundMarks.hpp"
+#include "cursiv/shared/utils/RoundMarks.hpp"
 
 namespace cursiv::engine {
 

@@ -42,8 +42,8 @@
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
-#include "cursiv/utils/StrongComponents.hpp"
-#include "cursiv/utils/RoundMarks.hpp"
+#include "cursiv/shared/utils/RoundMarks.hpp"
+#include "cursiv/shared/utils/StrongComponents.hpp"
 
 namespace cursiv::engine {
 namespace {

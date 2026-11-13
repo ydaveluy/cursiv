@@ -66,7 +66,7 @@ void a_closing_walk_reads_the_closer() {
   const std::string_view text = "#\"\"\"\nx\n\"\"\"#\n";
   const auto at_the_closer = [&](auto&& ask) {
     cursiv::Cst tree(text);
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     builder.bind_stream();
     cursiv::engine::LlContext context(text, builder);
     context.at = 7;

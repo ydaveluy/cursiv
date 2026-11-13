@@ -102,8 +102,9 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 }  // namespace ast
 
 struct G : tpasses::Words {
-  struct Root : rule<create<ast::Doc>(repeat<2, cursiv::kUnbounded>(
-                    append<&ast::Doc::names>(ref<ID>)))> {};
+  struct Root
+      : rule<create<ast::Doc>(repeat<2, cursiv::GrammarSpec::kUnbounded>(
+            append<&ast::Doc::names>(ref<ID>)))> {};
 };
 
 }  // namespace trepeat

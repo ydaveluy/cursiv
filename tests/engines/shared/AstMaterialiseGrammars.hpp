@@ -91,10 +91,10 @@ struct Base : cursiv::GrammarSpec {
 };
 
 template <unsigned N>
-inline constexpr auto stacked_flags = cursiv::nest<Box, &Box::in>(
-    stacked_flags<N - 1>);
+inline constexpr auto stacked_flags =
+    cursiv::GrammarSpec::nest<Box, &Box::in>(stacked_flags<N - 1>);
 template <>
-inline constexpr auto stacked_flags<0> = cursiv::kw<"x">;
+inline constexpr auto stacked_flags<0> = cursiv::GrammarSpec::kw<"x">;
 
 struct StackedFlags : Base {
   struct Root : rule<create<Flags>(

@@ -1,4 +1,5 @@
-// Marks over ids that a new round empties whole: a round costs only what it marks.
+// Marks over ids that a new round empties whole: a round costs only what it
+// marks.
 #pragma once
 
 #include <algorithm>
@@ -7,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 class RoundMarks {
  public:
@@ -31,4 +32,4 @@ class RoundMarks {
   std::uint32_t _round = 1;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

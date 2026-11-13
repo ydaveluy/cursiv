@@ -26,7 +26,7 @@ namespace {
 template <class G>
 constexpr auto reached() {
   using namespace cursiv::engine;
-  return rule_list<G, reached_t<cursiv::ResolveOverride<G>>>();
+  return rule_list<G, reached_t<cursiv::detail::ResolveOverride<G>>>();
 }
 
 }  // namespace
@@ -236,12 +236,13 @@ struct Holder : cursiv::Extends<cursiv::AstNode> {
 };
 struct Prose : Base {
   struct Ended
-      : rule<lit<"e"> + cursiv::Doc<std::remove_cvref_t<decltype(eof)>, "end">{} +
+      : rule<lit<"e"> +
+             cursiv::detail::Doc<std::remove_cvref_t<decltype(eof)>, "end">{} +
              ref<C>> {};
-  struct Made
-      : rule<lit<"m"> + eof +
-             assign<&Holder::item>(
-                 cursiv::Doc<decltype(create<Doc>(lit<"x">)), "made">{})> {};
+  struct Made : rule<lit<"m"> + eof +
+                     assign<&Holder::item>(
+                         cursiv::detail::Doc<decltype(create<Doc>(lit<"x">)),
+                                             "made">{})> {};
   struct Root : rule<create<Doc>(many(ref<Ended> | ref<Made>))> {};
   using entry = Root;
 };
@@ -380,7 +381,7 @@ struct G : cursiv::GrammarSpec {
 
 template <class R>
 cursiv::detail::ImageId call(cursiv::detail::GrammarImage& image) {
-  return image.node(cursiv::detail::kNode<G, cursiv::Ref<R>>);
+  return image.node(cursiv::detail::kNode<G, cursiv::detail::Ref<R>>);
 }
 
 template <class R>

@@ -36,10 +36,10 @@ namespace cursiv {
 // Defined at the end of this header: `Cst` returns one, and it needs `Cst`
 // complete.
 class ReverseNodeRange;
-class CstBuilder;
 
 namespace detail {
 struct CstWalk;
+class CstBuilder;
 }
 namespace engine {
 struct AstBuildCtx;
@@ -274,7 +274,7 @@ class Cst {
 
  private:
   // The only writer: an engine finishes the tree through the builder.
-  friend class CstBuilder;
+  friend class detail::CstBuilder;
 
   // Marks the records as written by an engine.
   void bind_stream() {
@@ -373,7 +373,7 @@ class Cst {
   std::vector<ParseDiagnostic> _diagnostics;
   // The records the engine appended, or the ones a caller built by hand
   // through `CstBuilder`.
-  CstRun _stream;
+  detail::CstRun _stream;
   // Whether an engine wrote the records, rather than `CstBuilder`.
   bool _enginesTape = false;
   const Grammar* _grammar = nullptr;

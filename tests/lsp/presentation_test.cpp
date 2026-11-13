@@ -76,11 +76,11 @@ struct CountingReferences final : cursiv::DocumentReferences {
   Answer resolve(std::uint32_t rank) const override {
     return inner->resolve(rank);
   }
-  cursiv::RefState resolveAll(std::uint32_t rank,
-                              cursiv::MultiRefItems& out) const override {
+  cursiv::RefState resolveAll(
+      std::uint32_t rank, cursiv::detail::MultiRefItems& out) const override {
     return inner->resolveAll(rank, out);
   }
-  void force(std::span<const cursiv::RefHandle> which,
+  void force(std::span<const cursiv::detail::RefHandle> which,
              const cursiv::CancellationToken& token) override {
     inner->force(which, token);
   }

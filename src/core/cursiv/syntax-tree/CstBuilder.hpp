@@ -24,6 +24,8 @@ namespace cursiv {
 
 struct Grammar;
 
+namespace detail {
+
 class CstBuilder {
  public:
   // A strong four-byte token: a count cannot be forged, and a node id cannot
@@ -133,5 +135,7 @@ class CstBuilder {
   Cst& _cst;
   NodeId lastVisibleNodeId = kNoNode;
 };
+
+}  // namespace detail
 
 }  // namespace cursiv

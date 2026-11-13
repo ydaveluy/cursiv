@@ -47,8 +47,8 @@ inline constexpr bool kWindowsPaths =
 // RFC 3986 unreserved, all that stays bare in a component: a drive letter's `:`
 // travels as `%3A`. A fixed ASCII table, never `isalnum`: an active 8-bit locale
 // would otherwise call a UTF-8 path byte alphanumeric and leave it unescaped.
-inline constexpr CharSet kUnreserved = [] {
-  CharSet s;
+inline constexpr detail::CharSet kUnreserved = [] {
+  detail::CharSet s;
   for (int c = 'a'; c <= 'z'; ++c) s.set(static_cast<unsigned char>(c));
   for (int c = 'A'; c <= 'Z'; ++c) s.set(static_cast<unsigned char>(c));
   for (int c = '0'; c <= '9'; ++c) s.set(static_cast<unsigned char>(c));
@@ -58,13 +58,13 @@ inline constexpr CharSet kUnreserved = [] {
 }();
 
 // A path keeps its separators, and an IP literal its brackets and colons.
-inline constexpr CharSet kPathBare = [] {
-  CharSet s = kUnreserved;
+inline constexpr detail::CharSet kPathBare = [] {
+  detail::CharSet s = kUnreserved;
   s.set(static_cast<unsigned char>('/'));
   return s;
 }();
-inline constexpr CharSet kAuthorityBare = [] {
-  CharSet s = kUnreserved;
+inline constexpr detail::CharSet kAuthorityBare = [] {
+  detail::CharSet s = kUnreserved;
   for (const char c : std::string_view("[]:"))
     s.set(static_cast<unsigned char>(c));
   return s;
@@ -78,7 +78,7 @@ char to_hex(unsigned char value) noexcept {
   return static_cast<char>(value < 10 ? '0' + value : 'A' + (value - 10));
 }
 
-std::string percent_encode(std::string_view text, const CharSet& bare) {
+std::string percent_encode(std::string_view text, const detail::CharSet& bare) {
   if (std::ranges::all_of(text, [&](char c) {
         return bare.test(static_cast<unsigned char>(c));
       }))
@@ -252,7 +252,7 @@ std::string rooted_path_to_uri(const std::filesystem::path& path) {
 
 // Whether `text` is one component as a URI writes it, escapes in upper case and
 // only where `bare` asks for them.
-bool is_encoded(std::string_view text, const CharSet& bare) {
+bool is_encoded(std::string_view text, const detail::CharSet& bare) {
   for (std::size_t i = 0; i < text.size(); ++i) {
     if (bare.test(static_cast<unsigned char>(text[i]))) continue;
     if (text[i] != '%' || i + 2 >= text.size()) return false;

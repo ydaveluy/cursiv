@@ -727,7 +727,7 @@ struct LrRoom {
   explicit LrRoom(const std::string& text)
       : cst(text), builder(cst), context(text, builder) {}
   cursiv::Cst cst;
-  cursiv::CstBuilder builder;
+  cursiv::detail::CstBuilder builder;
   cursiv::engine::LrContext context;
 };
 
@@ -746,7 +746,7 @@ struct LlRoom {
     context.section = ll_section_of_inner<kLl>();
   }
   cursiv::Cst cst;
-  cursiv::CstBuilder builder;
+  cursiv::detail::CstBuilder builder;
   cursiv::engine::LlContext context;
 };
 

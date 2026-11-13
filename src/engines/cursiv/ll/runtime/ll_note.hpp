@@ -25,7 +25,7 @@ inline void ll_mark(LlContext& c, NodeId id) {
 // the walk stops below the word.
 template <const auto& T>
 inline void ll_mark_misspelt(LlContext& c, TextOffset begin, TextOffset end) {
-  CstRun& run = c.tape.stream();
+  detail::CstRun& run = c.tape.stream();
   for (NodeCount x = run.records(); x-- > 0;) {
     CstNode& r = run.at(x);
     if (r.end < end) return;

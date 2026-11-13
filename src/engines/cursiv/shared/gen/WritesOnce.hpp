@@ -262,7 +262,7 @@ struct unordered_writes<St, TypeList<Es...>, Seen,
 template <class St, class... Es, class Seen>
 struct writes_once<St, Unordered<Es...>, Seen>
     : unordered_writes<St, TypeList<Es...>, Seen,
-                        std::index_sequence_for<Es...>> {};
+                       std::index_sequence_for<Es...>> {};
 
 template <class Fault>
 struct repeated_write {

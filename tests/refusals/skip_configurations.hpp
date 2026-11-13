@@ -27,17 +27,18 @@ constexpr auto region(std::index_sequence<Bits...>) {
       (Mask & (1u << Bits)) != 0, cursiv::TypeList<Parts::Token<Bits>>,
       cursiv::TypeList<>>...>;
   return []<class... Ts>(cursiv::TypeList<Ts...>) {
-    return cursiv::skip(cursiv::ignore<Ts...>, cursiv::hide<>,
-                        cursiv::lit<"x"> + cursiv::lit<"y">);
+    return cursiv::GrammarSpec::skip(
+        cursiv::GrammarSpec::ignore<Ts...>, cursiv::GrammarSpec::hide<>,
+        cursiv::GrammarSpec::lit<"x"> + cursiv::GrammarSpec::lit<"y">);
   }(Tokens{});
 }
 
 template <std::size_t... Is>
 constexpr auto regions(std::index_sequence<Is...>) {
   // A flat sequence avoids normalizing every growing prefix.
-  return cursiv::Seq<cursiv::Lit<"begin">,
-                     decltype(region<Is + 1>(
-                         std::make_index_sequence<8>{}))...>{};
+  return cursiv::detail::Seq<cursiv::detail::Lit<"begin">,
+                             decltype(region<Is + 1>(
+                                 std::make_index_sequence<8>{}))...>{};
 }
 
 struct G : Parts {

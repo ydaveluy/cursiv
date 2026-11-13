@@ -14,7 +14,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
-#include "cursiv/utils/StrongComponents.hpp"
+#include "cursiv/shared/utils/StrongComponents.hpp"
 
 namespace cursiv::engine {
 

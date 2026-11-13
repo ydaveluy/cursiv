@@ -280,7 +280,8 @@ static_assert(
     std::is_same_v<cursiv::detail::rule_type_t<Grammar::Primary>, Element>);
 static_assert(
     std::is_same_v<cursiv::detail::rule_type_t<Grammar::Parent>, Element>);
-static_assert(!cursiv::Normalize<Grammar>::rewritten<Grammar::Expression>);
+static_assert(
+    !cursiv::detail::Normalize<Grammar>::rewritten<Grammar::Expression>);
 
 namespace {
 

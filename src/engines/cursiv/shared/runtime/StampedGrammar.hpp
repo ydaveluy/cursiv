@@ -26,7 +26,8 @@
 namespace cursiv::engine {
 
 struct StampedGrammar final : Grammar {
-  StampedGrammar(const GrammarMetaData& meta, StampLayout stamp) noexcept
+  StampedGrammar(const detail::GrammarMetaData& meta,
+                 StampLayout stamp) noexcept
       : _f(&meta), _stamp(stamp) {}
 
   bool recordWrites(const CstNode& n,
@@ -124,11 +125,11 @@ struct StampedGrammar final : Grammar {
 
  private:
   bool holds(ElementId e) const noexcept { return e < _f->recordCount; }
-  const GrammarMetaData::Answer& answer(ElementId e) const noexcept {
+  const detail::GrammarMetaData::Answer& answer(ElementId e) const noexcept {
     return _f->answers[_f->recordAnswers[e]];
   }
 
-  const GrammarMetaData* _f;
+  const detail::GrammarMetaData* _f;
   StampLayout _stamp;
 };
 

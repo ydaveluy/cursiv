@@ -40,7 +40,7 @@ static_assert(kIdentifier != cursiv::engine::kInvalidSymbol);
 void a_clipped_token_is_not_memoized() {
   const std::string text = std::string(131072, 'a') + ';';
   cursiv::Cst tree(text);
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   cursiv::engine::LlContext c(text, builder, kTiny);
   cursiv::engine::LlSearch s(kPlain.atn, c.len, kTiny);
   s.limit = 1;
@@ -72,7 +72,7 @@ void a_clipped_token_is_not_memoized() {
 void a_guard_reads_only_its_share_of_a_long_gap() {
   const std::string text = "a" + std::string(131072, ' ') + "b";
   cursiv::Cst tree(text);
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   cursiv::engine::LlContext c(text, builder, kTiny);
   cursiv::engine::LlSearch s(kObserved.atn, c.len, kTiny);
   s.limit = 1;
@@ -99,7 +99,7 @@ void an_artificial_end_is_no_dedent_or_section_end() {
     constexpr const auto& table = tllindent::generated::Ll::kTable;
     const std::string text = std::string(131072, ' ') + "let";
     cursiv::Cst tree(text);
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     cursiv::engine::LlContext c(text, builder, kTiny);
     cursiv::engine::LlSearch s(table.atn, c.len, kTiny);
     s.limit = 1;
@@ -113,7 +113,7 @@ void an_artificial_end_is_no_dedent_or_section_end() {
     constexpr const auto& table = tsection::generated::Ll::kTable;
     const std::string text = "<" + std::string(131072, 'a') + ">";
     cursiv::Cst tree(text);
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     cursiv::engine::LlContext c(text, builder, kTiny);
     c.section = 1;
     cursiv::engine::LlSearch s(table.atn, c.len, kTiny);

@@ -101,29 +101,51 @@ void writes_follow_the_current_node_across_nests_and_turns() {
   using namespace cursiv::detail;
   using namespace cursiv::engine;
   using Twice = WriteEachTurn<field_tag<&WriteNode::text>>;
-  constexpr auto write = assign<&WriteNode::text>(lit<"a">);
-  constexpr auto wrap = nest<&WriteNode::inner>(lit<"!">);
-  CHECK((std::is_same_v<WriteFault<some(write + option(wrap))>, Twice>));
-  CHECK((std::is_same_v<WriteFault<some(write + (wrap | lit<"?">))>, Twice>));
-  CHECK((std::is_same_v<WriteFault<some(write + wrap + write)>, Twice>));
+  constexpr auto write =
+      GrammarSpec::assign<&WriteNode::text>(GrammarSpec::lit<"a">);
+  constexpr auto wrap =
+      GrammarSpec::nest<&WriteNode::inner>(GrammarSpec::lit<"!">);
   CHECK((std::is_same_v<
-         WriteFault<some(assign<&WriteNode::child>(create<WriteNode>(
-             write + wrap)))>, WriteEachTurn<field_tag<&WriteNode::child>>>));
+         WriteFault<GrammarSpec::some(write + GrammarSpec::option(wrap))>,
+         Twice>));
+  CHECK((std::is_same_v<
+         WriteFault<GrammarSpec::some(write + (wrap | GrammarSpec::lit<"?">))>,
+         Twice>));
+  CHECK((std::is_same_v<WriteFault<GrammarSpec::some(write + wrap + write)>,
+                        Twice>));
+  CHECK((std::is_same_v<
+         WriteFault<GrammarSpec::some(GrammarSpec::assign<&WriteNode::child>(
+             GrammarSpec::create<WriteNode>(write + wrap)))>,
+         WriteEachTurn<field_tag<&WriteNode::child>>>));
 
   // These nests always replace the current node. A child payload's nest,
   // however, leaves the parent's context alone.
-  CHECK((std::is_same_v<WriteFault<write + some(wrap + write)>, NoWriteFault>));
-  CHECK((std::is_same_v<WriteFault<write + (wrap | nest<&WriteNode::inner>(
-                  lit<"?">)) + write>, NoWriteFault>));
-  CHECK((std::is_same_v<WriteFault<some(append<&WriteNode::children>(
-             create<WriteNode>(write + wrap)))>, NoWriteFault>));
-  CHECK((std::is_same_v<WriteFault<write + option(wrap) + write>,
-                        WriteAgain<field_tag<&WriteNode::text>>>));
-  CHECK((std::is_same_v<WriteFault<write + repeat<1>(wrap) + write>,
+  CHECK((std::is_same_v<WriteFault<write + GrammarSpec::some(wrap + write)>,
                         NoWriteFault>));
-  CHECK((std::is_same_v<WriteFault<write + unordered(wrap,
-             nest<&WriteNode::inner>(lit<"?">)) + write>, NoWriteFault>));
-  CHECK((std::is_same_v<WriteFault<many(unordered(wrap, write))>, Twice>));
+  CHECK((std::is_same_v<WriteFault<write +
+                                   (wrap | GrammarSpec::nest<&WriteNode::inner>(
+                                               GrammarSpec::lit<"?">)) +
+                                   write>,
+                        NoWriteFault>));
+  CHECK((std::is_same_v<
+         WriteFault<GrammarSpec::some(GrammarSpec::append<&WriteNode::children>(
+             GrammarSpec::create<WriteNode>(write + wrap)))>,
+         NoWriteFault>));
+  CHECK((std::is_same_v<WriteFault<write + GrammarSpec::option(wrap) + write>,
+                        WriteAgain<field_tag<&WriteNode::text>>>));
+  CHECK(
+      (std::is_same_v<WriteFault<write + GrammarSpec::repeat<1>(wrap) + write>,
+                      NoWriteFault>));
+  CHECK(
+      (std::is_same_v<WriteFault<write +
+                                 GrammarSpec::unordered(
+                                     wrap, GrammarSpec::nest<&WriteNode::inner>(
+                                               GrammarSpec::lit<"?">)) +
+                                 write>,
+                      NoWriteFault>));
+  CHECK((std::is_same_v<
+         WriteFault<GrammarSpec::many(GrammarSpec::unordered(wrap, write))>,
+         Twice>));
 
   // A called rule's buried node is not the node it returns. The finite
   // closure also handles recursive adoption and an infix's lone primary.
@@ -135,8 +157,9 @@ void writes_follow_the_current_node_across_nests_and_turns() {
   CHECK((!tl_has<wrote<&WriteNode::text>, Wrapped>::value));
   CHECK((tl_has<wrote<&WriteNode::text>, Expr>::value));
   CHECK((tl_has<wrote<&WriteNode::op>, Expr>::value));
-  CHECK((std::is_same_v<WriteFault<ref<RecursiveWrites::Expr> + write>,
-                        WriteOverAdopted<field_tag<&WriteNode::text>>>));
+  CHECK((std::is_same_v<
+         WriteFault<GrammarSpec::ref<RecursiveWrites::Expr> + write>,
+         WriteOverAdopted<field_tag<&WriteNode::text>>>));
 
   const auto ll = ast_registry<ReturnedWrites, LlLowering<ReturnedWrites>>();
   const auto lr = ast_registry<ReturnedWrites, LrLowering<ReturnedWrites>>();

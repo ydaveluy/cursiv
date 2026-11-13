@@ -1,8 +1,10 @@
 # Grammar reference
 
-You declare a grammar as a C++ type derived from `cursiv::GrammarSpec`.
-Terminals read text, rules combine tokens, and directives fill your AST. To
-learn step by step, start with [Write a grammar](../learn/write-a-grammar.md).
+You declare a grammar as a C++ type derived from `cursiv::GrammarSpec`. The
+names on this page, such as `lit`, `many` and `assign`, are its members, so
+you write them inside the grammar. Terminals read text, rules combine tokens,
+and directives fill your AST. To learn step by step, start with
+[Write a grammar](../learn/write-a-grammar.md).
 
 The syntax is the same for both engines, LR (the default and recommended one)
 and LL, within their [support limits](refusals.md#where-the-engines-differ).

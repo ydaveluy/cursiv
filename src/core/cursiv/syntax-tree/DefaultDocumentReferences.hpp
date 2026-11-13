@@ -21,13 +21,13 @@
 namespace cursiv {
 
 struct DefaultDocumentReferences : DocumentReferences {
-  explicit DefaultDocumentReferences(const AstMetaData& meta) noexcept
+  explicit DefaultDocumentReferences(const detail::AstMetaData& meta) noexcept
       : _f(meta) {}
 
   [[nodiscard]] Answer resolve(std::uint32_t rank) const override;
 
   // Defined in `ReferenceResolution.cpp`, with the resolution frames.
-  void force(std::span<const RefHandle> which,
+  void force(std::span<const detail::RefHandle> which,
              const CancellationToken& cancelToken) override;
 
   void forceAt(const Cst& cst, TextOffset offset,
@@ -47,18 +47,19 @@ struct DefaultDocumentReferences : DocumentReferences {
 
   void reset() noexcept override;
 
-  RefState resolveAll(std::uint32_t rank, MultiRefItems& out) const override;
+  RefState resolveAll(std::uint32_t rank,
+                      detail::MultiRefItems& out) const override;
 
  private:
   // The site as plain data. `reference` is the field index, so nothing is
   // looked up.
-  ReferenceInfo info(const RefHandle& h, std::string_view text,
+  ReferenceInfo info(const detail::RefHandle& h, std::string_view text,
                      std::uint8_t narrow) const;
 
   // One reference's share of `visitResolved` and `visitUnresolved`.
-  void visit_resolved(const Cst& cst, const RefHandle& h,
+  void visit_resolved(const Cst& cst, const detail::RefHandle& h,
                       ResolvedReferenceVisitor visitor) const;
-  void visit_unresolved(const Cst& cst, const RefHandle& h,
+  void visit_unresolved(const Cst& cst, const detail::RefHandle& h,
                         UnresolvedReferenceVisitor visitor) const;
 
   // The ranks whose name touches `[begin, end]`, in rank order.
@@ -76,7 +77,7 @@ struct DefaultDocumentReferences : DocumentReferences {
     std::uint32_t rank = 0;
   };
 
-  const AstMetaData& _f;
+  const detail::AstMetaData& _f;
   // Built on the first question about a caret or a range: names never move
   // once the table is built, and a table no one asks pays nothing.
   mutable std::vector<NameAt> _names;

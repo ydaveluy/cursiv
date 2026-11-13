@@ -28,10 +28,12 @@ struct NarrowedSite : cursiv::GrammarSpec {
   };
   struct K2 : rule<create<Kind2> + kw<"two"> + assign<&Kind2::name>(ref<ID>)> {
   };
-  struct U : rule<create<Use> + kw<"use"> +
-                  assign<cursiv::xref<&Use::what, Kind1>>(ref<ID>) +
-                  option(kw<"all"> +
-                         assign<cursiv::xref<&Use::all, Kind1>>(ref<ID>))> {};
+  struct U
+      : rule<create<Use> + kw<"use"> +
+             assign<cursiv::GrammarSpec::xref<&Use::what, Kind1>>(ref<ID>) +
+             option(kw<"all"> +
+                    assign<cursiv::GrammarSpec::xref<&Use::all, Kind1>>(
+                        ref<ID>))> {};
   struct Root : rule<create<Doc> +
                      some(append<&Doc::items>(ref<K1> | ref<K2> | ref<U>))> {};
   using entry = Root;

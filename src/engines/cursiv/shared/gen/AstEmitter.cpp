@@ -79,15 +79,15 @@ AstEmitter::Run AstEmitter::spare(std::uint16_t cr, const Run& l) const {
 const char* AstEmitter::act_name(ActKind k) {
   switch (k) {
     case ActKind::assign:
-      return "::cursiv::ActKind::assign";
+      return "::cursiv::detail::ActKind::assign";
     case ActKind::append:
-      return "::cursiv::ActKind::append";
+      return "::cursiv::detail::ActKind::append";
     case ActKind::flag:
-      return "::cursiv::ActKind::flag";
+      return "::cursiv::detail::ActKind::flag";
     case ActKind::nest:
-      return "::cursiv::ActKind::nest";
+      return "::cursiv::detail::ActKind::nest";
     case ActKind::create:
-      return "::cursiv::ActKind::create";
+      return "::cursiv::detail::ActKind::create";
     case ActKind::none:
       break;
   }
@@ -679,7 +679,7 @@ std::string emit_ast_decl(std::string_view ns) {
 
 namespace )",
                 ns, R"( {
-extern const ::cursiv::AstMetaData kAstMetaData;
+extern const ::cursiv::detail::AstMetaData kAstMetaData;
 extern const ::cursiv::engine::AstActions kAstActions;
 }
 )");

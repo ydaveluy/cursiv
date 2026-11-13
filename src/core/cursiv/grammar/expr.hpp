@@ -23,7 +23,7 @@
 // body can be a template argument. `operator+` flattens sequences and
 // normalizes each into one head creation and a chain of nests (see below).
 
-namespace cursiv {
+namespace cursiv::detail {
 
 struct GrammarNode {};
 
@@ -38,8 +38,6 @@ concept Expr = std::is_base_of_v<GrammarNode, std::remove_cvref_t<T>> &&
 inline constexpr std::size_t kUnbounded =
     std::numeric_limits<std::size_t>::max();
 
-namespace detail {
-
 // The guard of `kw<>`: the grammar's `word_boundary`, resolved once the
 // grammar is known.
 struct WordBound {};
@@ -48,20 +46,16 @@ struct WordBound {};
 struct NoGuard {};
 inline constexpr NoGuard no_guard{};
 
-
-}  // namespace detail
-
 // Exact text, behind every literal spelling. `CI` folds case; `Guard` runs
 // right after the match, with no skipper between: `void` is none,
-// `detail::WordBound` the grammar's `word_boundary`, else applied as written.
+// `WordBound` the grammar's `word_boundary`, else applied as written.
 template <class E, str T>
 struct Doc;
 
 template <str S, bool CI = false, class Guard = void>
 struct Lit : GrammarNode {
   static_assert(S.size() > 0, "lit<> needs a non-empty literal");
-  static_assert(std::is_void_v<Guard> ||
-                    std::is_same_v<Guard, detail::WordBound> ||
+  static_assert(std::is_void_v<Guard> || std::is_same_v<Guard, WordBound> ||
                     std::derived_from<Guard, GrammarNode>,
                 "lit<S, G>: the guard G must be a grammar expression, "
                 "checked right after the text, such as "
@@ -91,10 +85,8 @@ struct Doc : GrammarNode {
 template <std::uint64_t Props, bool Not, str Spec>
 struct CpSet : GrammarNode {};
 
-namespace detail {
 // One character: a scalar, or the byte where none starts.
 using AnyChar = CpSet<0, true, "">;
-}  // namespace detail
 
 // One raw byte, whatever it is.
 struct Byte : GrammarNode {};
@@ -191,12 +183,10 @@ struct Ref : GrammarNode {};
 template <class C, class E>
 struct As : GrammarNode {};
 
-namespace detail {
 template <auto Body, class... Opts>
 struct Rule;
 template <template <auto, class> class Directive, auto S, class E>
 struct directive_operand;
-}  // namespace detail
 
 // `E` is `Seq<open, Ref<G>, close>`: `G`'s entry between two tokens of the
 // caller. A directive over the section is written on the `Ref<G>`.
@@ -205,12 +195,9 @@ struct Embed : GrammarNode {};
 
 // The overridden body, inside an override's body; `plug` splices the
 // parent's body over it. A template, so each walk's refusal fires on use.
-namespace detail {
 template <class = void>
 struct SuperT : GrammarNode {};
 using Super = SuperT<>;
-}  // namespace detail
-inline constexpr detail::Super super{};
 
 // The empty payload of a bare `create<T>`: matches nothing, consumes nothing,
 // never fails. It is what makes the empty alternative spellable.
@@ -233,8 +220,6 @@ struct Create<T, Epsilon> : GrammarNode {
   }
 };
 
-namespace detail {
-
 template <class E>
 inline constexpr bool is_create = false;
 template <class T, class E>
@@ -251,12 +236,6 @@ inline constexpr bool is_nest = false;
 template <auto P, class N>
 struct XRef {};
 
-}  // namespace detail
-
-template <auto P, class N>
-inline constexpr detail::XRef<P, N> xref{};
-
-namespace detail {
 template <class T, auto S>
 struct spec_of {
   static constexpr auto ptr = S;
@@ -277,18 +256,17 @@ using spec_narrow_t = typename spec_t<S>::narrow;
 template <auto S>
 using spec_class_t =
     typename member_traits<std::remove_cv_t<decltype(spec_ptr<S>)>>::class_type;
-}  // namespace detail
 
 // The member receives the match.
 template <auto S, class E>
 struct Assign : GrammarNode {
-  using node_type = detail::spec_class_t<S>;
+  using node_type = spec_class_t<S>;
 };
 
 // The container member receives one element per match.
 template <auto S, class E>
 struct Append : GrammarNode {
-  using node_type = detail::spec_class_t<S>;
+  using node_type = spec_class_t<S>;
 };
 
 // `?=`: the bool member is set to true when E matched.
@@ -309,8 +287,6 @@ struct Nest : GrammarNode {
       "nest<T, &C::f>: the member must belong to T (or a base of T)");
 };
 
-namespace detail {
-
 template <class T, auto Ptr, class E>
 inline constexpr bool is_nest<Nest<T, Ptr, E>> = true;
 
@@ -318,8 +294,6 @@ template <class... Rs>
 struct IgnoreTag {};
 template <class... Rs>
 struct HideTag {};
-
-}  // namespace detail
 
 // A skip-configuration region: between E's elements, and in the rules E
 // calls, the skipper runs these rules until an inner skip() sets its own.
@@ -362,60 +336,16 @@ struct UnaryLevel {
   static constexpr auto op_pointer = OpPtr;
   static constexpr auto operand_pointer = OperandPtr;
 };
-namespace detail {
 template <class L>
 inline constexpr bool is_unary_level =
     L::kGroup == Association::prefix || L::kGroup == Association::postfix;
-}  // namespace detail
 template <class... Ls>
 struct Levels {
   static constexpr std::size_t size = sizeof...(Ls);
   template <std::size_t I>
-  using at = detail::pack_at_t<I, Ls...>;
+  using at = pack_at_t<I, Ls...>;
 };
 
-// `left`, `right` and `nonassoc` yield a table of one level; `levels(...)`
-// lists several. `levels(left(a), right(b))` is
-// `Levels<LeftAssoc<a>, RightAssoc<b>>`; operators match longest first.
-template <Expr Op>
-constexpr auto left(Op) {
-  return Levels<LeftAssoc<std::remove_cvref_t<Op>>>{};
-}
-template <Expr Op>
-constexpr auto right(Op) {
-  return Levels<RightAssoc<std::remove_cvref_t<Op>>>{};
-}
-template <Expr Op>
-constexpr auto nonassoc(Op) {
-  return Levels<NonAssoc<std::remove_cvref_t<Op>>>{};
-}
-// `prefix<&U::op, &U::operand>(op)` builds the class declaring `op`;
-// `prefix<U>(op)` builds `U` through its members `op` and `operand`.
-// `postfix` names the operand first, as the text reads.
-template <auto OpPtr, auto OperandPtr, Expr Op>
-constexpr auto prefix(Op) {
-  return Levels<UnaryLevel<Association::prefix,
-                           typename member_traits<decltype(OpPtr)>::class_type,
-                           OpPtr, OperandPtr, std::remove_cvref_t<Op>>>{};
-}
-template <class T, Expr Op>
-constexpr auto prefix(Op) {
-  return Levels<UnaryLevel<Association::prefix, T, &T::op, &T::operand,
-                           std::remove_cvref_t<Op>>>{};
-}
-template <auto OperandPtr, auto OpPtr, Expr Op>
-constexpr auto postfix(Op) {
-  return Levels<UnaryLevel<Association::postfix,
-                           typename member_traits<decltype(OpPtr)>::class_type,
-                           OpPtr, OperandPtr, std::remove_cvref_t<Op>>>{};
-}
-template <class T, Expr Op>
-constexpr auto postfix(Op) {
-  return Levels<UnaryLevel<Association::postfix, T, &T::op, &T::operand,
-                           std::remove_cvref_t<Op>>>{};
-}
-
-namespace detail {
 // The level a table of one holds, as a list; none for anything else.
 template <class T>
 struct sole_level {
@@ -432,7 +362,7 @@ struct levels_of<TypeList<Ls...>> {
   using type = Levels<Ls...>;
 };
 
-// A function object, so the cursiv::GrammarSpec base can re-expose it.
+// A function object: `GrammarSpec` holds it as a member.
 struct LevelsFn {
   template <class... Ts>
   constexpr auto operator()(Ts...) const {
@@ -446,10 +376,6 @@ struct LevelsFn {
     return typename levels_of<Ls>::type{};
   }
 };
-}  // namespace detail
-inline constexpr detail::LevelsFn levels{};
-
-namespace detail {
 
 // One declaration for the whole file; the specialisations are at the bottom,
 // after the algebra they fold through.
@@ -670,19 +596,17 @@ struct cat_seq<A, B, Rest...>
 template <class... Es>
 using cat_seq_t = typename cat_seq<Es...>::type;
 
-}  // namespace detail
-
 template <Expr A, Expr B>
 constexpr auto operator+(A, B) {
-  return typename detail::normalize_seq<typename detail::SeqCat<
+  return typename normalize_seq<typename SeqCat<
       std::remove_cvref_t<A>, std::remove_cvref_t<B>>::type>::type{};
 }
 
 // The ordered choice: the arm written first wins a tie.
 template <Expr A, Expr B>
 constexpr auto operator|(A, B) {
-  return typename detail::ChoiceCat<std::remove_cvref_t<A>,
-                                    std::remove_cvref_t<B>>::type{};
+  return typename ChoiceCat<std::remove_cvref_t<A>,
+                            std::remove_cvref_t<B>>::type{};
 }
 
 template <Expr E>
@@ -694,7 +618,8 @@ constexpr auto operator&(E) {
   return And<std::remove_cvref_t<E>>{};
 }
 
-namespace detail {
+// The end of a line, which consumes its terminator: `\r\n` before `\r`.
+using Eol = decltype(Lit<"\n">{} | Lit<"\r\n">{} | Lit<"\r">{});
 
 // `lit<S>` has no guard; `lit<S, G>` carries the one it was given. A terminal
 // named there stands for the body the current grammar spells: a class, a word
@@ -722,19 +647,6 @@ consteval auto make_ikw() {
   return Lit<S, holds_a_letter<S>(), WordBound>{};
 }
 
-}  // namespace detail
-
-// `kw<S>` is `lit<S, !boundary>` when S ends in the grammar's
-// `word_boundary` class, else plain `lit<S>`: `kw<"if">` refuses `iffy`,
-// `kw<"[">` accepts `[abc`. `lit<S, G>` applies the guard `G` as written.
-template <str S, auto G = detail::no_guard>
-inline constexpr auto lit =
-    detail::make_lit<S, false, std::remove_cvref_t<decltype(G)>>();
-template <str S>
-inline constexpr Lit<S, false, detail::WordBound> kw{};
-template <str S>
-inline constexpr auto ikw = detail::make_ikw<S>();
-namespace detail {
 template <ClassFault Fault>
 consteval void class_refused() {
   static_assert(Fault != ClassFault::lone_backslash,
@@ -871,16 +783,10 @@ consteval auto cp_join() {
     return CpSet<0, true, join_left_out_spelled<SB, MB, SA, MA>()>{};
   }
 }
-}  // namespace detail
-// A class of characters: a bracket expression of std::regex (ECMAScript), its
-// brackets left out, spelling scalars -- `\xHH`, `\uHHHH` and `\u{H...}` are
-// scalars too. A leading `^` complements among all characters.
-template <str Spec>
-inline constexpr auto cr = detail::cr_of<Spec>();
 // Classes join into one class, and `~` complements among all characters.
 template <std::uint64_t A, bool NA, str SA, std::uint64_t B, bool NB, str SB>
 constexpr auto operator|(CpSet<A, NA, SA>, CpSet<B, NB, SB>) {
-  return detail::cp_join<A, NA, SA, B, NB, SB>();
+  return cp_join<A, NA, SA, B, NB, SB>();
 }
 template <std::uint64_t M, bool N, str S>
 constexpr auto operator~(CpSet<M, N, S>) {
@@ -893,106 +799,26 @@ constexpr auto operator~(CpSet<M, N, S>) {
 template <class B>
   requires std::same_as<std::remove_cvref_t<B>, Byte>
 constexpr auto operator~(B) {
-  static_assert(detail::dependent_false<B>,
+  static_assert(dependent_false<B>,
                 "cursiv: `byte` is one raw byte, not a class, so it has no "
                 "complement: write the class, `~cr<...>`");
   return Byte{};
 }
 template <std::uint64_t M, bool N, str S>
 constexpr auto operator|(CpSet<M, N, S>, Byte) {
-  static_assert(detail::dependent_false<CpSet<M, N, S>>,
+  static_assert(dependent_false<CpSet<M, N, S>>,
                 "cursiv: `byte` is one raw byte, not a class, so it cannot be "
                 "joined to a class: give each its own alternative");
   return Byte{};
 }
 template <std::uint64_t M, bool N, str S>
 constexpr auto operator|(Byte, CpSet<M, N, S>) {
-  static_assert(detail::dependent_false<CpSet<M, N, S>>,
+  static_assert(dependent_false<CpSet<M, N, S>>,
                 "cursiv: `byte` is one raw byte, not a class, so it cannot be "
                 "joined to a class: give each its own alternative");
   return Byte{};
 }
-// The Unicode properties, which hold scalars only: a general category and its
-// majors, and the identifier, space and alphabetic properties.
-struct uc {
-  template <unicode::Property P>
-  using of = CpSet<detail::cp_bit(P), false, "">;
-  static constexpr of<unicode::Property::L> L{};
-  static constexpr of<unicode::Property::M> M{};
-  static constexpr of<unicode::Property::N> N{};
-  static constexpr of<unicode::Property::P> P{};
-  static constexpr of<unicode::Property::S> S{};
-  static constexpr of<unicode::Property::Z> Z{};
-  static constexpr of<unicode::Property::C> C{};
-  static constexpr of<unicode::Property::Lu> Lu{};
-  static constexpr of<unicode::Property::Ll> Ll{};
-  static constexpr of<unicode::Property::Lt> Lt{};
-  static constexpr of<unicode::Property::Lm> Lm{};
-  static constexpr of<unicode::Property::Lo> Lo{};
-  static constexpr of<unicode::Property::Mn> Mn{};
-  static constexpr of<unicode::Property::Mc> Mc{};
-  static constexpr of<unicode::Property::Me> Me{};
-  static constexpr of<unicode::Property::Nd> Nd{};
-  static constexpr of<unicode::Property::Nl> Nl{};
-  static constexpr of<unicode::Property::No> No{};
-  static constexpr of<unicode::Property::Pc> Pc{};
-  static constexpr of<unicode::Property::Pd> Pd{};
-  static constexpr of<unicode::Property::Ps> Ps{};
-  static constexpr of<unicode::Property::Pe> Pe{};
-  static constexpr of<unicode::Property::Pi> Pi{};
-  static constexpr of<unicode::Property::Pf> Pf{};
-  static constexpr of<unicode::Property::Po> Po{};
-  static constexpr of<unicode::Property::Sm> Sm{};
-  static constexpr of<unicode::Property::Sc> Sc{};
-  static constexpr of<unicode::Property::Sk> Sk{};
-  static constexpr of<unicode::Property::So> So{};
-  static constexpr of<unicode::Property::Zs> Zs{};
-  static constexpr of<unicode::Property::Zl> Zl{};
-  static constexpr of<unicode::Property::Zp> Zp{};
-  static constexpr of<unicode::Property::Cc> Cc{};
-  static constexpr of<unicode::Property::Cf> Cf{};
-  static constexpr of<unicode::Property::Co> Co{};
-  static constexpr of<unicode::Property::XID_Start> XID_Start{};
-  static constexpr of<unicode::Property::XID_Continue> XID_Continue{};
-  static constexpr of<unicode::Property::White_Space> White_Space{};
-  static constexpr of<unicode::Property::Alphabetic> Alphabetic{};
-};
-inline constexpr detail::AnyChar any{};
-inline constexpr Byte byte{};
-template <class R>
-inline constexpr Ref<R> ref{};
 
-// The six regex classes: space, word, digit, and their complements.
-inline constexpr auto s = cr<R"(\s)">;
-inline constexpr auto S = ~s;
-inline constexpr auto w = cr<"a-zA-Z0-9_">;
-inline constexpr auto W = ~w;
-inline constexpr auto d = cr<"0-9">;
-inline constexpr auto D = ~d;
-
-// End of line, which consumes its terminator (`\r\n` before `\r`), and end
-// of input, which is zero-width.
-inline constexpr auto eol = lit<"\n"> | lit<"\r\n"> | lit<"\r">;
-// Inside a terminal, `eof` tests the raw buffer end; in a rule it tests
-// the end after the active skipper has consumed trivia.
-inline constexpr Eof eof{};
-
-// The conditions on the gap before the current token, by name.
-struct gap {
-  template <Expr E>
-  static constexpr GapHas<std::remove_cvref_t<E>> has(E) { return {}; }
-  template <Expr E>
-  static constexpr GapIs<std::remove_cvref_t<E>> is(E) { return {}; }
-  static constexpr GapHas<std::remove_cvref_t<decltype(eol)>> line{};
-  static constexpr GapIs<Epsilon> none{};
-};
-template <Expr T, Expr C>
-constexpr auto implied(T, C) {
-  using Tok = std::remove_cvref_t<T>;
-  return Choice<Tok, Implied<Tok, std::remove_cvref_t<C>>>{};
-}
-
-namespace detail {
 // A separated list's item may not be a create or a nest: the creation algebra
 // would hoist a create over the whole list, folding the separator into each
 // item's region, and a nest would absorb the repetition after it.
@@ -1009,13 +835,10 @@ using committed_tail =
 template <class P, class B, class Sep>
 using committed_list = Commit<
     P, std::remove_cvref_t<decltype(B{} + committed_tail<P, B, Sep>{})>>;
-}  // namespace detail
 
-// Function objects, so the cursiv::GrammarSpec base can re-expose them as
-// members. The separated forms spell `a (sep a)*`; no dedicated node comes of
-// them.
+// Function objects, which `GrammarSpec` holds as members. The separated forms
+// spell `a (sep a)*`; no dedicated node comes of them.
 
-namespace detail {
 struct SomeFn {
   template <Expr E>
   constexpr auto operator()(E) const {
@@ -1039,10 +862,7 @@ struct SomeFn {
     return P{} + B{} + committed_tail<P, B, std::remove_cvref_t<Sep>>{};
   }
 };
-}  // namespace detail
-inline constexpr detail::SomeFn some{};
 
-namespace detail {
 struct ManyFn {
   template <Expr E>
   constexpr auto operator()(E) const {
@@ -1050,7 +870,7 @@ struct ManyFn {
   }
   template <Expr E, Expr Sep>
   constexpr auto operator()(E e, Sep sep) const {
-    return Repeat<0, 1, std::remove_cvref_t<decltype(some(e, sep))>>{};
+    return Repeat<0, 1, std::remove_cvref_t<decltype(SomeFn{}(e, sep))>>{};
   }
   template <class P, class B, Expr Sep>
   constexpr auto operator()(Commit<P, B>, Sep) const {
@@ -1061,27 +881,16 @@ struct ManyFn {
     return Repeat<0, 1, committed_list<P, B, std::remove_cvref_t<Sep>>>{};
   }
 };
-}  // namespace detail
-inline constexpr detail::ManyFn many{};
 
-template <Expr P, Expr B>
-constexpr auto commit(P, B) {
-  return Commit<std::remove_cvref_t<P>, std::remove_cvref_t<B>>{};
-}
-
-namespace detail {
 struct OptionFn {
   template <Expr E>
   constexpr auto operator()(E) const {
     return Repeat<0, 1, std::remove_cvref_t<E>>{};
   }
 };
-}  // namespace detail
-inline constexpr detail::OptionFn option{};
 
 // The unordered group: each item once, in any order. A nested group stays
 // one item. Every item must read input.
-namespace detail {
 struct UnorderedFn {
   template <Expr... Es>
   constexpr auto operator()(Es...) const {
@@ -1104,33 +913,7 @@ struct MarkFn {
     return {};
   }
 };
-}  // namespace detail
 
-inline constexpr detail::UnorderedFn unordered{};
-template <std::size_t Min, std::size_t Max = Min>
-inline constexpr detail::RepeatFn<Min, Max> repeat{};
-template <class Tag>
-inline constexpr detail::MarkFn<Tag> mark{};
-template <class Tag>
-inline constexpr Same<Tag> same{};
-inline constexpr Indent indent{};
-inline constexpr Dedent dedent{};
-
-template <Expr A, Expr B>
-constexpr auto through(A, B) {
-  return Through<std::remove_cvref_t<A>, std::remove_cvref_t<B>>{};
-}
-
-template <class G, Expr O, Expr C>
-constexpr auto section(O, C) {
-  return Embed<G,
-               Seq<std::remove_cvref_t<O>, Ref<G>, std::remove_cvref_t<C>>>{};
-}
-
-template <class T>
-inline constexpr Create<T, Epsilon> create{};
-
-namespace detail {
 template <auto S>
 struct AssignFn {
   template <Expr E>
@@ -1165,49 +948,16 @@ struct SkipFn {
     return Skip<TypeList<Is...>, TypeList<Hs...>, cat_seq_t<E0, Es...>>{};
   }
 };
-}  // namespace detail
 
-template <auto S>
-inline constexpr detail::AssignFn<S> assign{};
-template <auto S>
-inline constexpr detail::AppendFn<S> append{};
-template <auto Ptr>
-inline constexpr detail::FlagFn<Ptr> flag{};
-
-template <class... Rs>
-inline constexpr detail::IgnoreTag<Rs...> ignore{};
-template <class... Rs>
-inline constexpr detail::HideTag<Rs...> hide{};
-inline constexpr detail::SkipFn skip{};
-
-namespace detail {
 struct TightFn {
   template <Expr E>
   constexpr auto operator()(E e) const {
-    return skip(ignore<>, hide<>, e);
+    return SkipFn{}(IgnoreTag<>{}, HideTag<>{}, e);
   }
 };
-}  // namespace detail
-inline constexpr detail::TightFn tight{};
-
-// Two spellings, one node: `nest<T, &T::f>` names the wrapper, `nest<&T::f>`
-// lets the member's class name it.
-template <class T, auto Ptr, Expr E>
-constexpr Nest<T, Ptr, std::remove_cvref_t<E>> nest(E) {
-  return {};
-}
-template <auto Ptr, Expr E>
-constexpr Nest<typename member_traits<decltype(Ptr)>::class_type, Ptr,
-               std::remove_cvref_t<E>>
-nest(E) {
-  return {};
-}
-
-}  // namespace cursiv
 
 // Rebuilding helpers shared by the authoring, compiling and optimizing
 // layers: a list of parts back to a shape, a choice's parts as a list.
-namespace cursiv::detail {
 
 // Flattening without create absorption: a create a rewrite introduces is a
 // bounded region.

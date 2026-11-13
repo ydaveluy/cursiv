@@ -15,9 +15,7 @@
 // members, written by the generator for `DefaultAstReflection`. Nothing here
 // builds a node: that is `AstActions`.
 
-namespace cursiv {
-
-namespace detail {
+namespace cursiv::detail {
 
 // 0xFFFF reads "no entry" in every column of the registries, `field` included
 // (`kNoField` is the same value, spelled for the element table).
@@ -53,30 +51,28 @@ using YieldFn = void (*)(
     const AstNode&,
     cursiv::function_ref<void(std::string_view, std::uint32_t, AstNode&)>);
 
-}  // namespace detail
-
 struct AstMetaData {
   const AstTypeTag* const* types = nullptr;
-  const detail::TagSet* subtypes = nullptr;
+  const TagSet* subtypes = nullptr;
   // One row of `typeWords` per type: the types that derive from it.
   const std::uint64_t* derivesBits = nullptr;
   std::uint16_t typeCount = 0;
   std::uint16_t typeWords = 0;
 
-  const detail::FieldDesc* fields = nullptr;
+  const FieldDesc* fields = nullptr;
   // `refOps`, `acceptBits` and `referenceTags` have one row per member below
   // `referenceBound`; with `referenceRows`, they are null for a grammar with
   // no reference member.
   const RefOps* refOps = nullptr;
   // One row of `typeWords` per member: what a reference site accepts.
   const std::uint64_t* acceptBits = nullptr;
-  const detail::PropertyRow* propertyRows = nullptr;
+  const PropertyRow* propertyRows = nullptr;
   const AstTypeTag* const* referenceTags = nullptr;
   // One dispatch per known type, with inherited members selected at generation.
-  const detail::YieldFn* memberVisitors = nullptr;
+  const YieldFn* memberVisitors = nullptr;
   // One per known type, null for a class no rule builds.
-  const detail::NewNodeFn* newNodes = nullptr;
-  detail::YieldFn unknownMembers = nullptr;
+  const NewNodeFn* newNodes = nullptr;
+  YieldFn unknownMembers = nullptr;
   std::span<const std::uint16_t> referenceFields;
   const std::span<const std::uint16_t>* referenceRows = nullptr;
   std::uint16_t fieldCount = 0;
@@ -101,11 +97,11 @@ struct AstMetaData {
             1u) != 0;
   }
 
-  constexpr std::uint16_t field_alt_of(const detail::FieldDesc& f,
+  constexpr std::uint16_t field_alt_of(const FieldDesc& f,
                                        std::uint16_t sub) const {
     for (std::uint16_t i = 0; i < f.target_count; ++i)
       if (derives(f.targets[i], sub)) return i;
-    return detail::kNoIndex;
+    return kNoIndex;
   }
 };
-}  // namespace cursiv
+}  // namespace cursiv::detail

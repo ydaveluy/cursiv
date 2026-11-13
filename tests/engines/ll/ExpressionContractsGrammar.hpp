@@ -13,13 +13,14 @@
 namespace tllexpressions {
 
 struct Ll : tllindirect::Combined {
-  struct Root
-      : cursiv::GrammarSpec::rule<
-            cursiv::ref<tllindirect::Combined::Root> |
-            (cursiv::lit<"factor:"> + cursiv::ref<tllprefix::Base::Root>) |
-            (cursiv::lit<"loop:"> + cursiv::ref<tinfixloop::Combined::Root>) |
-            cursiv::ref<toperatorcondition::Suite::Root> |
-            cursiv::ref<tcaretcases::Ll::Root>> {};
+  struct Root : cursiv::GrammarSpec::rule<
+                    cursiv::GrammarSpec::ref<tllindirect::Combined::Root> |
+                    (cursiv::GrammarSpec::lit<"factor:"> +
+                     cursiv::GrammarSpec::ref<tllprefix::Base::Root>) |
+                    (cursiv::GrammarSpec::lit<"loop:"> +
+                     cursiv::GrammarSpec::ref<tinfixloop::Combined::Root>) |
+                    cursiv::GrammarSpec::ref<toperatorcondition::Suite::Root> |
+                    cursiv::GrammarSpec::ref<tcaretcases::Ll::Root>> {};
   using entry = Root;
 };
 

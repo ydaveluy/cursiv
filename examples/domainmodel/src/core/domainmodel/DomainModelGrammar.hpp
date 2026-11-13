@@ -5,18 +5,18 @@
 
 namespace dm {
 
-inline constexpr auto packageKw = cursiv::ikw<"package">.doc<
-    "Groups types under a qualified name: `package blog.archive { ... }`.">();
-inline constexpr auto datatypeKw = cursiv::ikw<"datatype">.doc<
-    "Declares a basic type, such as `String`.">();
-inline constexpr auto entityKw = cursiv::ikw<"entity">.doc<
-    "Declares an entity and its features, between `{` and `}`.">();
-inline constexpr auto extendsKw = cursiv::ikw<"extends">.doc<
-    "Names the entity this one inherits its features from.">();
-inline constexpr auto manyKw = cursiv::ikw<"many">.doc<
-    "Marks a feature that holds several values.">();
-
 struct DomainModel : cursiv::GrammarSpec {
+  static constexpr auto packageKw = ikw<"package">.doc<
+      "Groups types under a qualified name: `package blog.archive { ... }`.">();
+  static constexpr auto datatypeKw =
+      ikw<"datatype">.doc<"Declares a basic type, such as `String`.">();
+  static constexpr auto entityKw = ikw<"entity">.doc<
+      "Declares an entity and its features, between `{` and `}`.">();
+  static constexpr auto extendsKw = ikw<"extends">.doc<
+      "Names the entity this one inherits its features from.">();
+  static constexpr auto manyKw =
+      ikw<"many">.doc<"Marks a feature that holds several values.">();
+
   struct WS : terminal<some(s)> {};
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ML_COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};

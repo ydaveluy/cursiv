@@ -33,7 +33,7 @@ struct LrSearch;
 enum class LrSplit : std::uint8_t { none, cell, position };
 
 struct LrContext {
-  LrContext(std::string_view text, CstBuilder& cstBuilder);
+  LrContext(std::string_view text, detail::CstBuilder& cstBuilder);
   ~LrContext();
 
   LrTape tape;

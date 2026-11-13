@@ -8,11 +8,15 @@ namespace cursiv {
 
 struct AstNode;
 
+namespace detail {
+
 struct MultiRefItem {
   AstNode* target = nullptr;
   std::uint8_t which = 0;
 };
 
 using MultiRefItems = std::vector<MultiRefItem>;
+
+}  // namespace detail
 
 }  // namespace cursiv

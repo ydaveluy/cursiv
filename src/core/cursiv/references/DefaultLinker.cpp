@@ -128,7 +128,7 @@ void DefaultLinker::link(Document& document,
   if (references.document != &document) references.document = &document;
   // A long list is resolved in runs spread over the pool, so a large document
   // does not link on one thread while the others wait for it.
-  const auto force = [&](std::span<const RefHandle> run) {
+  const auto force = [&](std::span<const detail::RefHandle> run) {
     references.force(run, cancelToken);
   };
   shared.taskScheduler->parallelFor(cancelToken, std::span(references.handles),

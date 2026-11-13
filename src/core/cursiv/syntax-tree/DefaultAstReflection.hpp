@@ -18,7 +18,7 @@
 namespace cursiv {
 
 struct DefaultAstReflection : AstReflection {
-  explicit DefaultAstReflection(const AstMetaData& meta);
+  explicit DefaultAstReflection(const detail::AstMetaData& meta);
 
   // Read from the tag, which holds the closure of its bases.
   [[nodiscard]] bool isSubtype(
@@ -106,10 +106,12 @@ struct DefaultAstReflection : AstReflection {
 
   // One work-list entry, described. `text` is what the site spells, if read;
   // `document` stays null.
-  [[nodiscard]] ReferenceInfo referenceInfo(const RefHandle& handle,
+  [[nodiscard]] ReferenceInfo referenceInfo(const detail::RefHandle& handle,
                                             std::string_view text = {}) const;
 
-  [[nodiscard]] const AstMetaData& metaData() const noexcept { return _f; }
+  [[nodiscard]] const detail::AstMetaData& metaData() const noexcept {
+    return _f;
+  }
 
  private:
   struct TagSlot {
@@ -123,7 +125,7 @@ struct DefaultAstReflection : AstReflection {
     return (reinterpret_cast<std::uintptr_t>(tag) >> 4) & _mask;
   }
 
-  const AstMetaData& _f;
+  const detail::AstMetaData& _f;
   std::vector<TagSlot> _byTag;
   std::size_t _mask = 0;
 };

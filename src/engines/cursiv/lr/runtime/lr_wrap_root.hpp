@@ -13,7 +13,7 @@ namespace cursiv::engine {
 // root that names a row, is wrapped with the root. Returns the root or its
 // wrapper.
 template <StampLayout L>
-NodeId lr_wrap_root(CstRun& stream, NodeId root, ElementId entryRow) {
+NodeId lr_wrap_root(detail::CstRun& stream, NodeId root, ElementId entryRow) {
   const NodeCount records = stream.records();
   const NodeId lo = root + 1 - stream.at(root).subtreeSize;
   // A whole document usually sits under the root: the two ends are the walk.

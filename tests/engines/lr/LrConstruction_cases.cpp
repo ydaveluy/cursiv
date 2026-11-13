@@ -853,8 +853,8 @@ void bounds_are_checked_before_narrowing() {
   // if constexpr still requires its discarded branch to be well-formed.
 #if SIZE_MAX > UINT32_MAX
   constexpr std::size_t large = std::size_t{1} << 32;
-  CHECK((LrLowering<Repeated<large + 1, kUnbounded>>::cfg().lowerWhy ==
-         LowerFail::productionTooWide));
+  CHECK((LrLowering<Repeated<large + 1, GrammarSpec::kUnbounded>>::cfg()
+             .lowerWhy == LowerFail::productionTooWide));
   CHECK((LrLowering<Repeated<0, large + 1>>::cfg().lowerWhy ==
          LowerFail::productionTooWide));
   CHECK(
@@ -1009,16 +1009,25 @@ void a_word_read_past_a_match_is_refused() {
     CHECK(a.cfg.lowerFail());
     CHECK(a.cfg.lowerWhy == LowerFail::wordPastMatch);
   };
-  refused.template operator()<lit<"##", !lit<"abc">> |
-                              (cr<"#"> + lit<"#", !lit<"abc">>)>();
-  refused.template operator()<lit<"#"> | lit<"##", !lit<"abc">> | lit<"##">>();
-  refused.template operator()<lit<"##", !lit<"abc">> | lit<"##", !lit<"def">>>();
-  refused.template operator()<some(cr<"a">) + !lit<"bc">>();
+  refused
+      .template operator()<GrammarSpec::lit<"##", !GrammarSpec::lit<"abc">> |
+                           (GrammarSpec::cr<"#"> +
+                            GrammarSpec::lit<"#", !GrammarSpec::lit<"abc">>)>();
+  refused.template operator()<GrammarSpec::lit<"#"> |
+                              GrammarSpec::lit<"##", !GrammarSpec::lit<"abc">> |
+                              GrammarSpec::lit<"##">>();
+  refused
+      .template operator()<GrammarSpec::lit<"##", !GrammarSpec::lit<"abc">> |
+                           GrammarSpec::lit<"##", !GrammarSpec::lit<"def">>>();
+  refused.template operator()<GrammarSpec::some(GrammarSpec::cr<"a">) +
+                              !GrammarSpec::lit<"bc">>();
 }
 
 void a_word_behind_a_fixed_head_is_asked_by_a_matcher() {
   const auto a = lr_build_automaton(
-      LrLowering<WordPastMatch<cr<"#"> + lit<"#", !lit<"abc">>>>::table());
+      LrLowering<WordPastMatch<
+          GrammarSpec::cr<"#"> +
+          GrammarSpec::lit<"#", !GrammarSpec::lit<"abc">>>>::table());
   CHECK(!a.overflow && !a.cfg.lowerFail());
   bool asked = false;
   for (const HeadMatcher& h : a.termHeads)
@@ -1027,8 +1036,10 @@ void a_word_behind_a_fixed_head_is_asked_by_a_matcher() {
 }
 
 void a_word_refused_at_the_head_of_every_branch_is_asked_once() {
-  const auto a = lr_build_automaton(LrLowering<WordPastMatch<
-      !lit<"\xef\xbb\xbf"> + (any | lit<"x">)>>::table());
+  const auto a = lr_build_automaton(
+      LrLowering<
+          WordPastMatch<!GrammarSpec::lit<"\xef\xbb\xbf"> +
+                        (GrammarSpec::any | GrammarSpec::lit<"x">)>>::table());
   CHECK(!a.overflow && !a.cfg.lowerFail());
   CHECK(std::ranges::any_of(a.termHeads, [](const HeadMatcher& h) {
     return h.offset == 0 && h.words.size() == 1;
@@ -1036,8 +1047,11 @@ void a_word_refused_at_the_head_of_every_branch_is_asked_once() {
 }
 
 void a_word_the_graph_reads_whole_stays_in_it() {
-  const auto a = lr_build_automaton(LrLowering<WordPastMatch<
-      lit<"<!"> + !lit<"--"> + some(cr<"a-z">) + lit<">">>>::table());
+  const auto a = lr_build_automaton(
+      LrLowering<
+          WordPastMatch<GrammarSpec::lit<"<!"> + !GrammarSpec::lit<"--"> +
+                        GrammarSpec::some(GrammarSpec::cr<"a-z">) +
+                        GrammarSpec::lit<">">>>::table());
   CHECK(!a.overflow && !a.cfg.lowerFail());
   for (const HeadMatcher& h : a.termHeads) CHECK(h.words.empty());
 }
@@ -1505,8 +1519,9 @@ void lexical_pools_cannot_wrap() {
         LowerFail::tokenGraphTooLarge));
   }
   // Guard products also intern sets after the initial lexical lowering.
-  using Guard =
-      WordPastMatch<some(cr<"#">) + !lit<"abc"> + !cr<"b"> + cr<"a-d">>;
+  using Guard = WordPastMatch<GrammarSpec::some(GrammarSpec::cr<"#">) +
+                              !GrammarSpec::lit<"abc"> + !GrammarSpec::cr<"b"> +
+                              GrammarSpec::cr<"a-d">>;
   auto low = LrLowering<Guard>::table();
   low.cfg.sets[65534] = {};
   low.cfg.setDecode[65534] = 0;
@@ -1534,8 +1549,9 @@ void sets_are_interned_once() {
   CHECK(!sectioned.cfg.lowerFail());
   once(sectioned);
   // A guard product interns after the lowering, whatever its verdict.
-  using Guard =
-      WordPastMatch<some(cr<"#">) + !lit<"abc"> + !cr<"b"> + cr<"a-d">>;
+  using Guard = WordPastMatch<GrammarSpec::some(GrammarSpec::cr<"#">) +
+                              !GrammarSpec::lit<"abc"> + !GrammarSpec::cr<"b"> +
+                              GrammarSpec::cr<"a-d">>;
   auto guarded = lr_build_automaton(LrLowering<Guard>::table());
   once(guarded);
 }
@@ -1619,7 +1635,7 @@ void precomposition_keeps_bare_records_through_renames() {
     for (ElementId leaf : {kNoRow, ElementId{1}}) {
       const auto write = [&](bool planned) {
         Cst tree("x");
-        CstBuilder builder(tree);
+        detail::CstBuilder builder(tree);
         LrContext c("x", builder);
         ElementId held = wrappedLeaf ? folds(2, 3) : leaf;
         CHECK(!wrappedLeaf || held != kNoRow);
@@ -1674,7 +1690,7 @@ void substituted_reductions_keep_the_returned_row() {
   for (ElementId held : {ElementId{1}, ElementId{2}}) {
     const auto write = [&](bool planned) {
       Cst tree("x");
-      CstBuilder builder(tree);
+      detail::CstBuilder builder(tree);
       LrContext c("x", builder);
       c.tape.leaf<StampLayout{}>(0, 1, held, 0);
       LrFrame frame{0, held, 0, 0, 0};

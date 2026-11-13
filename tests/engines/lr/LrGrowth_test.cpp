@@ -325,7 +325,7 @@ void a_chain_written_twice_costs_its_length() {
 
 void colliding_fingerprints_do_not_elect_a_derivation() {
   cursiv::Cst cst("");
-  cursiv::CstBuilder builder(cst);
+  cursiv::detail::CstBuilder builder(cst);
   cursiv::engine::LrContext c("", builder);
   c.stack.push({0, 0, 0, 0, cursiv::engine::kLrNoWord});
   cursiv::engine::LrShadow a, b;

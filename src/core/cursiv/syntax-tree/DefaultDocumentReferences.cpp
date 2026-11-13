@@ -78,7 +78,7 @@ auto contained(const Document* document, std::string_view name, Lookup lookup)
 DocumentReferences::Answer DefaultDocumentReferences::resolve(
     std::uint32_t rank) const {
   if (rank >= handles.size()) return {};
-  const RefHandle& h = handles[rank];
+  const detail::RefHandle& h = handles[rank];
   if (h.owner == nullptr) return {};
   // Before the document reaches `ComputedScopes`, a failure is not kept: the
   // reference stays `Unresolved` and is asked again later.
@@ -91,7 +91,7 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
   };
   const Linker* const l = linker.load(std::memory_order_acquire);
   if (l == nullptr) return failed();
-  const RefOps& ops = _f.refOps[h.field];
+  const detail::RefOps& ops = _f.refOps[h.field];
   // Read once for the site and the filter, and only when the member declares
   // narrowings, so the common case skips the indirect call.
   const std::uint8_t narrow =
@@ -111,7 +111,7 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
   // the description carries: the node itself is not read.
   const std::uint8_t which =
       detail::RefFilter{&ops, narrow}.branch(found->type);
-  if (which == kNoBranch) return failed();
+  if (which == detail::kNoBranch) return failed();
   // Named: a braced return zeroes the padding through the stack first.
   const Answer resolved{target, RefState::Resolved, which};
   return resolved;
@@ -126,14 +126,14 @@ void DefaultDocumentReferences::forceAt(const Cst& cst, TextOffset offset,
 
 void DefaultDocumentReferences::visitResolved(
     const Cst& cst, ResolvedReferenceVisitor visitor) const {
-  for (const RefHandle& h : handles) visit_resolved(cst, h, visitor);
+  for (const detail::RefHandle& h : handles) visit_resolved(cst, h, visitor);
 }
 
 void DefaultDocumentReferences::visit_resolved(
-    const Cst& cst, const RefHandle& h,
+    const Cst& cst, const detail::RefHandle& h,
     ResolvedReferenceVisitor visitor) const {
   if (h.owner == nullptr) return;
-  const RefOps& ops = _f.refOps[h.field];
+  const detail::RefOps& ops = _f.refOps[h.field];
   // A single reference, the common site, is read in one call.
   if (!ops.multi) {
     const detail::SingleRefRead read = ops.single(*h.owner, h.index);
@@ -153,7 +153,7 @@ void DefaultDocumentReferences::visit_resolved(
 }
 
 bool DefaultDocumentReferences::anyUnresolved() const noexcept {
-  return std::ranges::any_of(handles, [&](const RefHandle& h) {
+  return std::ranges::any_of(handles, [&](const detail::RefHandle& h) {
     return h.owner != nullptr &&
            has_error(_f.refOps[h.field].state(*h.owner, h.index));
   });
@@ -161,14 +161,14 @@ bool DefaultDocumentReferences::anyUnresolved() const noexcept {
 
 void DefaultDocumentReferences::visitUnresolved(
     const Cst& cst, UnresolvedReferenceVisitor visitor) const {
-  for (const RefHandle& h : handles) visit_unresolved(cst, h, visitor);
+  for (const detail::RefHandle& h : handles) visit_unresolved(cst, h, visitor);
 }
 
 void DefaultDocumentReferences::visit_unresolved(
-    const Cst& cst, const RefHandle& h,
+    const Cst& cst, const detail::RefHandle& h,
     UnresolvedReferenceVisitor visitor) const {
   if (h.owner == nullptr) return;
-  const RefOps& ops = _f.refOps[h.field];
+  const detail::RefOps& ops = _f.refOps[h.field];
   const RefState why = ops.state(*h.owner, h.index);
   if (!has_error(why)) return;
   // Anchored on the name and not on the node that holds it: the word the
@@ -204,7 +204,7 @@ std::vector<std::uint32_t> DefaultDocumentReferences::ranks_in(
   // back, a reach before `begin` says no earlier name ends inside the window.
   auto from = std::ranges::upper_bound(_names, end, {}, &NameAt::begin);
   while (from != _names.begin() && (--from)->reach >= begin) {
-    const RefHandle& h = handles[from->rank];
+    const detail::RefHandle& h = handles[from->rank];
     if (cst[_f.refOps[h.field].name_id(*h.owner, h.index)].end >= begin)
       at.push_back(from->rank);
   }
@@ -219,7 +219,7 @@ void DefaultDocumentReferences::index_names(const Cst& cst) const {
   _names.clear();
   _names.reserve(handles.size());
   for (std::uint32_t rank = 0; rank < handles.size(); ++rank) {
-    const RefHandle& h = handles[rank];
+    const detail::RefHandle& h = handles[rank];
     if (h.owner == nullptr) continue;
     const NodeId at = _f.refOps[h.field].name_id(*h.owner, h.index);
     if (at != kNoNode) _names.push_back({cst[at].begin, cst[at].end, rank});
@@ -236,18 +236,18 @@ void DefaultDocumentReferences::index_names(const Cst& cst) const {
 }
 
 void DefaultDocumentReferences::reset() noexcept {
-  for (const RefHandle& h : handles)
+  for (const detail::RefHandle& h : handles)
     if (h.owner != nullptr) _f.refOps[h.field].reset(*h.owner, h.index);
 }
 
-RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
-                                               MultiRefItems& out) const {
+RefState DefaultDocumentReferences::resolveAll(
+    std::uint32_t rank, detail::MultiRefItems& out) const {
   out.clear();
   const Linker* const l = linker.load(std::memory_order_acquire);
   if (l == nullptr || rank >= handles.size()) return RefState::ErrorNotFound;
-  const RefHandle& h = handles[rank];
+  const detail::RefHandle& h = handles[rank];
   if (h.owner == nullptr) return RefState::ErrorNotFound;
-  const RefOps& ops = _f.refOps[h.field];
+  const detail::RefOps& ops = _f.refOps[h.field];
 
   const std::uint8_t narrow =
       ops.narrow_count != 0 ? ops.narrow_of(*h.owner, h.index) : kNoNarrow;
@@ -264,12 +264,12 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
     assert(entry->type == entry->node->type &&
            "a description carries the type of its node");
     const std::uint8_t which = filter.branch(entry->type);
-    if (which != kNoBranch) out.push_back({entry->node, which});
+    if (which != detail::kNoBranch) out.push_back({entry->node, which});
   }
   return out.empty() ? RefState::ErrorNotFound : RefState::Resolved;
 }
 
-ReferenceInfo DefaultDocumentReferences::info(const RefHandle& h,
+ReferenceInfo DefaultDocumentReferences::info(const detail::RefHandle& h,
                                               std::string_view text,
                                               std::uint8_t narrow) const {
   const detail::FieldDesc& field = _f.fields[h.field];

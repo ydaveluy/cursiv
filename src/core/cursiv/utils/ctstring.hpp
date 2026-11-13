@@ -19,6 +19,8 @@ struct str {
   constexpr std::string_view view() const { return {data, N - 1}; }
 };
 
+namespace detail {
+
 // A flat 256-entry table, so `test` is one indexed byte load.
 struct CharSet {
   bool table[256]{};
@@ -45,5 +47,7 @@ struct CharSet {
     return n;
   }
 };
+
+}  // namespace detail
 
 }  // namespace cursiv

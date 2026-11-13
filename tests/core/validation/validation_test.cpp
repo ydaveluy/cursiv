@@ -1305,7 +1305,7 @@ struct Fixture {
       : document(cursiv::TextDocument::create(
             "file:///anchors", "anchors", 0, repeated_pairs(pairs * 2))) {
     cursiv::Cst cst(document.textDocument().getText());
-    cursiv::CstBuilder builder(cst);
+    cursiv::detail::CstBuilder builder(cst);
     const auto outer = builder.enter();
     const auto fill = [&](cursiv::AstNode& node, std::uint32_t begin) {
       const auto open = builder.enter();

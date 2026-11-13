@@ -9,7 +9,7 @@
 
 namespace cursiv::engine {
 
-LrContext::LrContext(std::string_view text, CstBuilder& cstBuilder)
+LrContext::LrContext(std::string_view text, detail::CstBuilder& cstBuilder)
     : tape(cstBuilder.stream()),
       src(text.data()),
       len(static_cast<TextOffset>(text.size())),

@@ -889,10 +889,10 @@ struct Box : Flags {
 }  // namespace ast
 
 template <unsigned N>
-constexpr auto stacked =
-    nest<ast::Box, &ast::Box::in>(flag<&ast::Flags::on>(stacked<N - 1>));
+constexpr auto stacked = GrammarSpec::nest<ast::Box, &ast::Box::in>(
+    GrammarSpec::flag<&ast::Flags::on>(stacked<N - 1>));
 template <>
-constexpr auto stacked<0> = kw<"x">;
+constexpr auto stacked<0> = GrammarSpec::kw<"x">;
 
 constexpr unsigned kDeep = 20;
 

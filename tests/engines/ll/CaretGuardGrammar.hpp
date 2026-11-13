@@ -35,10 +35,11 @@ struct Base : cursiv::GrammarSpec {
   struct Narrowed
       : rule<create<Link>(
             kw<"narrow"> +
-            ((&(ref<ID> + lit<"+">) +
-              assign<cursiv::xref<&Link::to, First>>(ref<Name>) + lit<"+">) |
-             (&(ref<ID> + lit<"-">) +
-              assign<cursiv::xref<&Link::other, Second>>(ref<Name>) +
+            ((&(ref<ID> + lit<"+">)+assign<
+                  cursiv::GrammarSpec::xref<&Link::to, First>>(ref<Name>) +
+              lit<"+">) |
+             (&(ref<ID> + lit<"-">)+assign<
+                  cursiv::GrammarSpec::xref<&Link::other, Second>>(ref<Name>) +
               lit<"-">)))> {};
   struct Keyed
       : rule<create<Link>(

@@ -17,7 +17,9 @@ constexpr cursiv::str<3> guard_word() {
 }
 template <std::size_t... Is>
 constexpr auto guarded_shifts(std::index_sequence<Is...>) {
-  return ((cursiv::gap::has(cursiv::lit<guard_word<Is>()>) + cursiv::lit<"x">) |
+  return ((cursiv::GrammarSpec::gap::has(
+               cursiv::GrammarSpec::lit<guard_word<Is>()>) +
+           cursiv::GrammarSpec::lit<"x">) |
           ...);
 }
 

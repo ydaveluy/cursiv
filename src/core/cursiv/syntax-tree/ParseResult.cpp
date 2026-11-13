@@ -67,7 +67,7 @@ void ParseResult::bind_grammar(const Grammar& grammar) noexcept {
                         [](const AstNode* a, const AstNode* b) {
                           return a->cstNodeId < b->cstNodeId;
                         }));
-  CstBuilder(*_cst).bind_model(grammar, _nodes);
+  detail::CstBuilder(*_cst).bind_model(grammar, _nodes);
 }
 
 void ParseResult::bind_grammar(std::shared_ptr<const Grammar> grammar) noexcept {
@@ -80,7 +80,7 @@ void ParseResult::bind_translation(
     std::string_view document, std::unique_ptr<SourceTranslation> translation) {
   assert(_cst->translation() == nullptr && "a result binds one translation");
   const SourceTranslation& bound = *translation;
-  CstBuilder(*_cst).bind_translation(document, std::move(translation));
+  detail::CstBuilder(*_cst).bind_translation(document, std::move(translation));
   bound.to_document(std::span(diagnostics));
   const auto errors = bound.errors();
   diagnostics.insert(diagnostics.end(), errors.begin(), errors.end());

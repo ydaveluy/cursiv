@@ -13,9 +13,9 @@
 #include "cursiv/shared/gen/OperatorWords.hpp"
 #include "cursiv/shared/gen/WrittenReads.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/shared/utils/StrongComponents.hpp"
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/utils/CaseFold.hpp"
-#include "cursiv/utils/StrongComponents.hpp"
 
 namespace cursiv::engine {
 

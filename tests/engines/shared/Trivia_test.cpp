@@ -246,7 +246,7 @@ void a_reading_reads_on_from_a_runs_last_byte() {
     ++asked;
     const std::string_view text = "  _\n b";
     cursiv::Cst tree(text);
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     builder.bind_stream();
     cursiv::engine::LrContext context(text, builder);
     context.drive = &ttrivia::generated::Lr::kDrive;

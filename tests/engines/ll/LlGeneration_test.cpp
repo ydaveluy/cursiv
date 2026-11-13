@@ -459,7 +459,7 @@ struct EmbeddedAliasedPrimary : cursiv::GrammarSpec {
 void externally_called_expressions_stay_complete() {
   using Aliased = tllindirect::WithAliases<tllindirect::ExposedPrimary>;
   using Reached = cursiv::engine::reached_t<
-      cursiv::Normalize<tllindirect::AliasedPrimaryLl>>;
+      cursiv::detail::Normalize<tllindirect::AliasedPrimaryLl>>;
   static_assert(cursiv::detail::tl_has<Aliased::Alias, Reached>::value);
   static_assert(cursiv::detail::tl_has<Aliased::Alias2, Reached>::value);
   static_assert(
@@ -562,9 +562,10 @@ void parser_files_have_a_stable_partition_contract() {
 template <unsigned N>
 constexpr auto keyword_choice() {
   if constexpr (N == 0)
-    return cursiv::kw<"z">;
+    return cursiv::GrammarSpec::kw<"z">;
   else
-    return (cursiv::kw<"p"> + keyword_choice<N - 1>()) | cursiv::kw<"b">;
+    return (cursiv::GrammarSpec::kw<"p"> + keyword_choice<N - 1>()) |
+           cursiv::GrammarSpec::kw<"b">;
 }
 template <unsigned N>
 struct KeywordChoices : cursiv::GrammarSpec {
@@ -604,12 +605,15 @@ void nested_choices_spell_each_arm_once() {
 // A choice of keywords alone is a table: a keyword more costs the source a
 // table entry and a case, not a reading of its own.
 constexpr auto kFourWords =
-    cursiv::kw<"a"> | cursiv::kw<"b"> | cursiv::kw<"c"> | cursiv::kw<"d">;
+    cursiv::GrammarSpec::kw<"a"> | cursiv::GrammarSpec::kw<"b"> |
+    cursiv::GrammarSpec::kw<"c"> | cursiv::GrammarSpec::kw<"d">;
 constexpr auto kSixteenWords =
-    kFourWords | cursiv::kw<"e"> | cursiv::kw<"f"> | cursiv::kw<"g"> |
-    cursiv::kw<"h"> | cursiv::kw<"i"> | cursiv::kw<"j"> | cursiv::kw<"k"> |
-    cursiv::kw<"l"> | cursiv::kw<"m"> | cursiv::kw<"n"> | cursiv::kw<"o"> |
-    cursiv::kw<"p">;
+    kFourWords | cursiv::GrammarSpec::kw<"e"> | cursiv::GrammarSpec::kw<"f"> |
+    cursiv::GrammarSpec::kw<"g"> | cursiv::GrammarSpec::kw<"h"> |
+    cursiv::GrammarSpec::kw<"i"> | cursiv::GrammarSpec::kw<"j"> |
+    cursiv::GrammarSpec::kw<"k"> | cursiv::GrammarSpec::kw<"l"> |
+    cursiv::GrammarSpec::kw<"m"> | cursiv::GrammarSpec::kw<"n"> |
+    cursiv::GrammarSpec::kw<"o"> | cursiv::GrammarSpec::kw<"p">;
 template <bool Wide>
 struct WordChoices : cursiv::GrammarSpec {
   static constexpr auto Words = [] {

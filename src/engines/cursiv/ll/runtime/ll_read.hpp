@@ -556,7 +556,7 @@ CURSIV_ALWAYS_INLINE inline void ll_join(LlContext& c, NodeId was,
 
 // Whether record `at` is trivia, or a repair whose subtree names no row.
 template <const auto& T>
-inline bool ll_states_nothing(const CstRun& run, NodeCount at) {
+inline bool ll_states_nothing(const detail::CstRun& run, NodeCount at) {
   const CstNode& r = run.at(at);
   if (r.hidden) return true;
   if (!r.recovered) return false;
@@ -573,7 +573,7 @@ template <const auto& T>
 inline bool ll_reuse_subtree(LlContext& c, NodeCount from, const LlFuse* f,
                              unsigned n) {
   if (n == 0 || c.last == kNoNode) return false;
-  CstRun& run = c.tape.stream();
+  detail::CstRun& run = c.tape.stream();
   NodeCount now = run.records();
   if (c.last + 1u != now) [[unlikely]] {
     while (now > c.last + 1u && ll_states_nothing<T>(run, now - 1))

@@ -50,7 +50,8 @@ struct TruncatedBound : cursiv::GrammarSpec {
   using entry = Root;
 };
 struct NullableUnbounded : cursiv::GrammarSpec {
-  struct Root : rule<repeat<2, cursiv::kUnbounded>(option(lit<"a">))> {};
+  struct Root
+      : rule<repeat<2, cursiv::GrammarSpec::kUnbounded>(option(lit<"a">))> {};
   using entry = Root;
 };
 template <std::size_t Min, std::size_t Max>

@@ -7,7 +7,7 @@
 // What a pointer to member says about itself: the class it writes into, the
 // type it holds, and the identifier it renders as.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 // Splits a pointer-to-member into its class and member type.
 template <class P>
@@ -17,10 +17,6 @@ struct member_traits<M C::*> {
   using class_type = C;
   using type = M;
 };
-
-}  // namespace cursiv
-
-namespace cursiv::detail {
 
 // Decoration, not a key: dispatch goes by field index. The pointer renders as
 // `&Owner::field`, so the last `::`-component of it is the identifier.

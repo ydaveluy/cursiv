@@ -32,7 +32,7 @@ void guarded_offers_follow_the_token() {
   if (guard == kLlNoNode) return;
   for (const bool reuse : {false, true}) {
     Cst tree("1 in \n in 2");
-    CstBuilder builder(tree);
+    detail::CstBuilder builder(tree);
     LlContext c(tree.text(), builder);
     LlSearch search(table.atn, c.len);
     search.limit = 10000;

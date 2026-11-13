@@ -15,7 +15,7 @@
 // `AstMetaData`, and the action a record applies to the tree. Read by
 // services; nothing here needs a grammar.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 enum class ActKind : std::uint8_t {
   none,
@@ -27,8 +27,6 @@ enum class ActKind : std::uint8_t {
 };
 // "Names no member", in every column of the registries.
 inline constexpr std::uint16_t kNoField = 0xFFFF;
-
-namespace detail {
 
 // The three storage forms a handle factory distinguishes; `RefHandle::index`
 // exists for the vector one.
@@ -146,5 +144,4 @@ void place(M& member, V&& value) {
   }
 }
 
-}  // namespace detail
-}  // namespace cursiv
+}  // namespace cursiv::detail

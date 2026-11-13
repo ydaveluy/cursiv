@@ -210,9 +210,7 @@ inline constexpr ImageDesc kNode<V, Doc<E, T>> =
 template <class V, class E>
 inline constexpr ImageDesc kNode<V, GapHas<E>> =
     Draft(ImageKind::gapHas)
-        .flags(static_cast<std::uint8_t>(
-            std::is_same_v<E, std::remove_cvref_t<decltype(eol)>> ? kGapLine
-                                                                  : 0))
+        .flags(static_cast<std::uint8_t>(std::is_same_v<E, Eol> ? kGapLine : 0))
         .children(1, kChildren<V, E>);
 template <class V, class E>
 inline constexpr ImageDesc kNode<V, GapIs<E>> =
@@ -485,7 +483,8 @@ consteval ImageGrammarDesc grammar_of() {
   g.hiddenCount = static_cast<std::uint32_t>(tl_size<Hd>::value);
   g.bound = class_of_bound<
       std::remove_cvref_t<decltype(ResolveOverride<G>::word_boundary)>>::value;
-  g.plain = class_of_bound<std::remove_cvref_t<decltype(w)>>::value;
+  g.plain =
+      class_of_bound<std::remove_cvref_t<decltype(GrammarSpec::w)>>::value;
   g.caseInsensitive = ResolveOverride<G>::case_insensitive;
   return g;
 }

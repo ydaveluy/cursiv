@@ -7,11 +7,9 @@
 // The generated tables a `Grammar` implementation reads: one answer per record
 // entry and one row per terminal.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 struct AstMetaData;
-
-namespace detail {
 
 // A terminal's name and spellings: a literal has one spelling and no name, a
 // terminal that reads a choice of words has both, and a pattern terminal has a
@@ -22,8 +20,6 @@ struct GrammarTerminal {
   bool folded = false;
   std::span<const std::string_view> spellings{};
 };
-
-}  // namespace detail
 
 struct GrammarMetaData {
   using AskFn = bool (*)(std::string_view);
@@ -58,7 +54,7 @@ struct GrammarMetaData {
   const std::uint8_t* narrows = nullptr;
   std::uint32_t recordCount = 0;
 
-  const detail::GrammarTerminal* terminals = nullptr;
+  const GrammarTerminal* terminals = nullptr;
   std::uint16_t terminalCount = 0;
 };
-}  // namespace cursiv
+}  // namespace cursiv::detail

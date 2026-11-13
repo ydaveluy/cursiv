@@ -305,10 +305,13 @@ void an_echo_under_another_tag_is_refused() {
   std::printf("  an echo answers to its own mark alone\n");
 }
 
-using Upper = decltype(cursiv::some(cursiv::cr<"A-Z">));
-using MaybeUpper = decltype(cursiv::many(cursiv::cr<"A-Z">));
-using Blanks = decltype(cursiv::many(cursiv::cr<R"( \t)">));
-using Semi = decltype(cursiv::lit<";">);
+using Upper =
+    decltype(cursiv::GrammarSpec::some(cursiv::GrammarSpec::cr<"A-Z">));
+using MaybeUpper =
+    decltype(cursiv::GrammarSpec::many(cursiv::GrammarSpec::cr<"A-Z">));
+using Blanks =
+    decltype(cursiv::GrammarSpec::many(cursiv::GrammarSpec::cr<R"( \t)">));
+using Semi = decltype(cursiv::GrammarSpec::lit<";">);
 
 // The compact relay needs a pad that stops before the echo. The general
 // recognizer also admits overlapping classes and an unbounded empty echo.
@@ -316,47 +319,56 @@ void a_closer_run_stops_where_the_echo_starts() {
   CHECK(lowers<PaddedBare<Upper, Blanks>>() == cursiv::engine::LowerFail::none);
   CHECK(lowers<Padded<MaybeUpper, Blanks, Semi>>() ==
         cursiv::engine::LowerFail::none);
-  CHECK(lowers<PaddedBare<Upper, decltype(cursiv::many(cursiv::cr<" A">))>>() ==
+  CHECK(lowers<PaddedBare<Upper, decltype(cursiv::GrammarSpec::many(
+                                     cursiv::GrammarSpec::cr<" A">))>>() ==
         cursiv::engine::LowerFail::none);
   CHECK(lowers<PaddedBare<MaybeUpper, Blanks>>() ==
         cursiv::engine::LowerFail::none);
-  CHECK(lowers<Padded<MaybeUpper, decltype(cursiv::many(cursiv::cr<" ;">)),
+  CHECK(lowers<Padded<MaybeUpper,
+                      decltype(cursiv::GrammarSpec::many(
+                          cursiv::GrammarSpec::cr<" ;">)),
                       Semi>>() == cursiv::engine::LowerFail::none);
 }
 
 void a_recursive_terminal_accepts_composed_delimiters() {
-  using A = decltype(cursiv::lit<"a">);
-  using B = decltype(cursiv::lit<"b">);
-  CHECK(lowers<Recursive<decltype(A{} | cursiv::lit<"c">), B>>() ==
+  using A = decltype(cursiv::GrammarSpec::lit<"a">);
+  using B = decltype(cursiv::GrammarSpec::lit<"b">);
+  CHECK(lowers<Recursive<decltype(A{} | cursiv::GrammarSpec::lit<"c">), B>>() ==
+        cursiv::engine::LowerFail::none);
+  CHECK(lowers<Recursive<A, decltype(B{} | cursiv::GrammarSpec::lit<"c"> |
+                                     cursiv::GrammarSpec::eof)>>() ==
+        cursiv::engine::LowerFail::none);
+  CHECK(lowers<Recursive<decltype(A{} | cursiv::GrammarSpec::cr<"cd">), B>>() ==
         cursiv::engine::LowerFail::none);
   CHECK(
-      lowers<Recursive<A, decltype(B{} | cursiv::lit<"c"> | cursiv::eof)>>() ==
+      lowers<Recursive<decltype(A{} | cursiv::GrammarSpec::lit<kLong>), B>>() ==
       cursiv::engine::LowerFail::none);
-  CHECK(lowers<Recursive<decltype(A{} | cursiv::cr<"cd">), B>>() ==
+  CHECK(lowers<Recursive<decltype(cursiv::GrammarSpec::lit<kLong>), B>>() ==
         cursiv::engine::LowerFail::none);
-  CHECK(lowers<Recursive<decltype(A{} | cursiv::lit<kLong>), B>>() ==
+  CHECK(
+      lowers<Recursive<A, decltype(B{} | cursiv::GrammarSpec::lit<kLong>)>>() ==
+      cursiv::engine::LowerFail::none);
+  CHECK(lowers<Recursive<A, decltype(cursiv::GrammarSpec::lit<kLong>)>>() ==
         cursiv::engine::LowerFail::none);
-  CHECK(lowers<Recursive<decltype(cursiv::lit<kLong>), B>>() ==
+  CHECK(lowers<Recursive<decltype(cursiv::GrammarSpec::lit<kLong>),
+                         decltype(B{} | cursiv::GrammarSpec::lit<"c">)>>() ==
         cursiv::engine::LowerFail::none);
-  CHECK(lowers<Recursive<A, decltype(B{} | cursiv::lit<kLong>)>>() ==
-        cursiv::engine::LowerFail::none);
-  CHECK(lowers<Recursive<A, decltype(cursiv::lit<kLong>)>>() ==
-        cursiv::engine::LowerFail::none);
-  CHECK(lowers<Recursive<decltype(cursiv::lit<kLong>),
-                         decltype(B{} | cursiv::lit<"c">)>>() ==
-        cursiv::engine::LowerFail::none);
-  CHECK(lowers<Recursive<decltype(A{} | cursiv::lit<"c">),
-                         decltype(cursiv::lit<kLong>)>>() ==
+  CHECK(lowers<Recursive<decltype(A{} | cursiv::GrammarSpec::lit<"c">),
+                         decltype(cursiv::GrammarSpec::lit<kLong>)>>() ==
         cursiv::engine::LowerFail::none);
 }
 
 void nested_delimiter_choices_are_flattened_for_the_native_search() {
-  using A = cursiv::Lit<"a">;
-  using B = cursiv::Lit<"b">;
+  using A = cursiv::detail::Lit<"a">;
+  using B = cursiv::detail::Lit<"b">;
   using Open =
-      cursiv::Choice<A, cursiv::Choice<cursiv::Lit<"c">, cursiv::Lit<"d">>>;
+      cursiv::detail::Choice<A,
+                             cursiv::detail::Choice<cursiv::detail::Lit<"c">,
+                                                    cursiv::detail::Lit<"d">>>;
   using Close =
-      cursiv::Choice<B, cursiv::Choice<cursiv::Lit<"e">, cursiv::Lit<"f">>>;
+      cursiv::detail::Choice<B,
+                             cursiv::detail::Choice<cursiv::detail::Lit<"e">,
+                                                    cursiv::detail::Lit<"f">>>;
   const auto built = cursiv::engine::lr_build_automaton(
       cursiv::engine::LrLowering<Recursive<Open, Close>>::table());
   CHECK(built.cfg.lowerWhy == cursiv::engine::LowerFail::none);
@@ -375,8 +387,8 @@ void nested_delimiter_choices_are_flattened_for_the_native_search() {
 // a UTF-8 continuation byte, which may stand inside a character, is not
 // searched for byte by byte.
 void a_continuation_byte_delimiter_is_not_searched_natively() {
-  using Open = cursiv::Lit<"(">;
-  using Close = cursiv::Lit<"\xA9">;
+  using Open = cursiv::detail::Lit<"(">;
+  using Close = cursiv::detail::Lit<"\xA9">;
   const auto natively = [](const auto& built) {
     for (std::size_t k = 0; k < built.nrelays; ++k)
       if (built.relays[k].nested) return true;

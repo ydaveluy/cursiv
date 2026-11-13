@@ -37,9 +37,9 @@ struct BrokenTape {
 struct AstBuildCtx {
   const Cst* cst = nullptr;
   AstArena* arena = nullptr;
-  std::vector<RefHandle>* refs = nullptr;
+  std::vector<detail::RefHandle>* refs = nullptr;
   // What a reference asks when it is read, set when it is written.
-  const RefResolver* resolver = nullptr;
+  const detail::RefResolver* resolver = nullptr;
   std::vector<ParseDiagnostic>* diags = nullptr;
   std::pmr::vector<AstNode*>* nodes = nullptr;
   const AstActions* actions = nullptr;

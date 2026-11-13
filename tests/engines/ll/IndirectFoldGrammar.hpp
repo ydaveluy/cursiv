@@ -66,32 +66,35 @@ struct ExposedWrapper : Base {
 
 template <class Public>
 struct WithAliases : cursiv::extends<Public> {
-  struct Alias2
-      : cursiv::GrammarSpec::rule<cursiv::ref<typename Base::GlobRule>> {};
-  struct Alias : cursiv::GrammarSpec::rule<cursiv::ref<Alias2>> {};
+  struct Alias2 : cursiv::GrammarSpec::rule<
+                      cursiv::GrammarSpec::ref<typename Base::GlobRule>> {};
+  struct Alias : cursiv::GrammarSpec::rule<cursiv::GrammarSpec::ref<Alias2>> {};
   template <class>
   struct override;
   template <class R>
     requires std::is_same_v<R, Base::Primary>
   struct override<R>
       : cursiv::GrammarSpec::rule<
-            cursiv::ref<typename Base::Atom> |
-            (cursiv::lit<"("> + cursiv::ref<typename Base::Expr> +
-             cursiv::lit<")">) |
-            cursiv::ref<Alias> |
-            cursiv::create<Wrapped>(cursiv::assign<&Wrapped::value>(
-                                        cursiv::ref<typename Base::Expr>) +
-                                    cursiv::lit<"!">)> {};
+            cursiv::GrammarSpec::ref<typename Base::Atom> |
+            (cursiv::GrammarSpec::lit<"("> +
+             cursiv::GrammarSpec::ref<typename Base::Expr> +
+             cursiv::GrammarSpec::lit<")">) |
+            cursiv::GrammarSpec::ref<Alias> |
+            cursiv::GrammarSpec::create<Wrapped>(
+                cursiv::GrammarSpec::assign<&Wrapped::value>(
+                    cursiv::GrammarSpec::ref<typename Base::Expr>) +
+                cursiv::GrammarSpec::lit<"!">)> {};
 };
 struct AliasedPrimaryLl : WithAliases<ExposedPrimary> {};
 struct AliasedWrapperLl : WithAliases<ExposedWrapper> {};
 
 struct Combined : WithAliases<Base> {
-  struct Root
-      : cursiv::GrammarSpec::rule<
-            cursiv::ref<Base::Root> |
-            (cursiv::lit<"primary:"> + cursiv::ref<ExposedPrimary::Root>) |
-            (cursiv::lit<"wrapper:"> + cursiv::ref<ExposedWrapper::Root>)> {};
+  struct Root : cursiv::GrammarSpec::rule<
+                    cursiv::GrammarSpec::ref<Base::Root> |
+                    (cursiv::GrammarSpec::lit<"primary:"> +
+                     cursiv::GrammarSpec::ref<ExposedPrimary::Root>) |
+                    (cursiv::GrammarSpec::lit<"wrapper:"> +
+                     cursiv::GrammarSpec::ref<ExposedWrapper::Root>)> {};
   using entry = Root;
 };
 struct Ll : Combined {};

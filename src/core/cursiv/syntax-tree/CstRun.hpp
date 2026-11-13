@@ -17,7 +17,7 @@
 // order they close, record index is the node id -- what an engine writes is
 // what every reader reads.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 // The records, and how many. The buffer is not a vector: a vector's only way
 // to hand out room is `resize`, which value-initialises what the writer is
@@ -237,4 +237,4 @@ class CstRun {
   std::pmr::memory_resource* _mem = nullptr;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

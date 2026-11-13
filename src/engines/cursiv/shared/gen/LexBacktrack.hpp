@@ -7,10 +7,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "cursiv/utils/StrongComponents.hpp"
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/shared/utils/StrongComponents.hpp"
 
 namespace cursiv::engine {
 

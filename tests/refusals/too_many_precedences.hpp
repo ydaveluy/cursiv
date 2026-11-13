@@ -19,7 +19,8 @@ struct Bin : cursiv::Extends<cursiv::AstNode> {
 
 template <std::size_t... Is>
 constexpr auto plus_levels(std::index_sequence<Is...>) {
-  return cursiv::levels(((void)Is, cursiv::left(cursiv::lit<"+">))...);
+  return cursiv::GrammarSpec::levels(
+      ((void)Is, cursiv::GrammarSpec::left(cursiv::GrammarSpec::lit<"+">))...);
 }
 
 struct G : Base {

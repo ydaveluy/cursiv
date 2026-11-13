@@ -66,20 +66,21 @@ struct nodes_held_of {
 };
 template <class L, class R>
   requires(is_node_rule<named_rule_t<R>> || is_infix_rule<named_rule_t<R>>)
-struct nodes_held<L, Ref<R>> : nodes_held_of<L, rule_type_t<named_rule_t<R>>> {
-};
+struct nodes_held<L, detail::Ref<R>>
+    : nodes_held_of<L, rule_type_t<named_rule_t<R>>> {};
 template <class L, class T, class E>
-struct nodes_held<L, Create<T, E>> : nodes_held_of<L, T> {};
+struct nodes_held<L, detail::Create<T, E>> : nodes_held_of<L, T> {};
 template <class L, class... Es>
-struct nodes_held<L, Seq<Es...>> {
+struct nodes_held<L, detail::Seq<Es...>> {
   static constexpr unsigned lo = nodes_cap((0u + ... + nodes_held<L, Es>::lo)),
                             hi = nodes_cap((0u + ... + nodes_held<L, Es>::hi));
   static constexpr bool repeated = (nodes_held<L, Es>::repeated || ...);
 };
 template <class L, class... Es>
-struct nodes_held<L, Unordered<Es...>> : nodes_held<L, Seq<Es...>> {};
+struct nodes_held<L, detail::Unordered<Es...>>
+    : nodes_held<L, detail::Seq<Es...>> {};
 template <class L, class E0, class... Es>
-struct nodes_held<L, Choice<E0, Es...>> {
+struct nodes_held<L, detail::Choice<E0, Es...>> {
   static constexpr unsigned lo =
       std::min({nodes_held<L, E0>::lo, nodes_held<L, Es>::lo...});
   static constexpr unsigned hi =
@@ -88,18 +89,18 @@ struct nodes_held<L, Choice<E0, Es...>> {
       nodes_held<L, E0>::repeated || (nodes_held<L, Es>::repeated || ...);
 };
 template <class L, std::size_t Mn, std::size_t Mx, class E>
-struct nodes_held<L, Repeat<Mn, Mx, E>> {
+struct nodes_held<L, detail::Repeat<Mn, Mx, E>> {
   static constexpr unsigned lo = nodes_times(Mn, nodes_held<L, E>::lo),
                             hi = nodes_times(Mx, nodes_held<L, E>::hi);
   static constexpr bool repeated =
       nodes_held<L, E>::repeated || (Mx > 1 && nodes_held<L, E>::hi != 0);
 };
 template <class L, class E, str T>
-struct nodes_held<L, Doc<E, T>> : nodes_held<L, E> {};
+struct nodes_held<L, detail::Doc<E, T>> : nodes_held<L, E> {};
 template <class L, class I, class H, class E>
-struct nodes_held<L, Skip<I, H, E>> : nodes_held<L, E> {};
+struct nodes_held<L, detail::Skip<I, H, E>> : nodes_held<L, E> {};
 template <class L, class G, class E>
-struct nodes_held<L, Embed<G, E>> : nodes_held<L, E> {};
+struct nodes_held<L, detail::Embed<G, E>> : nodes_held<L, E> {};
 
 // The absent arm of an at-most-once repetition writes nothing, so the item
 // alone is counted.
@@ -108,7 +109,7 @@ struct once_item {
   using type = E;
 };
 template <std::size_t Mn, class E>
-struct once_item<Repeat<Mn, 1, E>> : once_item<E> {};
+struct once_item<detail::Repeat<Mn, 1, E>> : once_item<E> {};
 
 template <class T, class... Us>
 consteval bool bases_stated_of(TypeList<Us...>) {
@@ -305,7 +306,7 @@ consteval bool check_writes(TypeList<Srcs...>) {
 template <class E, class Children = typename ExprShape<E>::children>
 inline constexpr bool inner_text_payload = false;
 template <class R>
-inline constexpr bool inner_text_payload<Ref<R>> =
+inline constexpr bool inner_text_payload<detail::Ref<R>> =
     !is_node_rule<named_rule_t<R>> && !is_infix_rule<named_rule_t<R>>;
 template <class E, class... Ks>
   requires(grouping<E> || transparent<E>)
@@ -326,7 +327,7 @@ template <class E, class... Ks>
 inline constexpr bool builds_a_node<E, TypeList<Ks...>> =
     holds_directive<E> || (builds_a_node<Ks> || ...);
 template <class R>
-inline constexpr bool builds_a_node<Ref<R>, TypeList<>> =
+inline constexpr bool builds_a_node<detail::Ref<R>, TypeList<>> =
     is_node_rule<named_rule_t<R>> || is_infix_rule<named_rule_t<R>>;
 
 // A shape that gives no value gives its member the node in its span: only a
@@ -360,7 +361,7 @@ struct dir_payload_ok {
 // The directive distributes over a choice, so each alternative is checked on
 // its own: the payloads of the others do not stand in for one that has none.
 template <auto P, class... As>
-struct dir_payload_ok<P, Choice<As...>> {
+struct dir_payload_ok<P, detail::Choice<As...>> {
   static consteval bool check() {
     return (dir_payload_ok<P, As>::check() && ...);
   }
@@ -427,12 +428,12 @@ inline constexpr bool spec_ok =
     check_lit_writes<spec_ptr<S>>(typename lit_payloads<E>::type{});
 
 template <auto S, class E>
-struct payloads_ok<Assign<S, E>, TypeList<E>>
+struct payloads_ok<detail::Assign<S, E>, TypeList<E>>
     : std::bool_constant<spec_ok<S, E, false> && payloads_ok<E>::value> {};
 // `+=` reaches the same held type, the container's element being it. Which
 // storage it may name is `dir_storage_ok`'s question.
 template <auto S, class E>
-struct payloads_ok<Append<S, E>, TypeList<E>>
+struct payloads_ok<detail::Append<S, E>, TypeList<E>>
     : std::bool_constant<spec_ok<S, E, true> && payloads_ok<E>::value> {};
 
 // A creation holding a second one: the writer over it takes one node and the
@@ -448,7 +449,7 @@ consteval bool holds_one_node() {
   return true;
 }
 template <class T, class E>
-struct payloads_ok<Create<T, E>, TypeList<E>>
+struct payloads_ok<detail::Create<T, E>, TypeList<E>>
     : std::bool_constant<holds_one_node<E>() && payloads_ok<E>::value> {};
 
 template <auto P>
@@ -459,7 +460,7 @@ consteval bool nest_ok() {
   return true;
 }
 template <class T, auto P, class E>
-struct payloads_ok<Nest<T, P, E>, TypeList<E>>
+struct payloads_ok<detail::Nest<T, P, E>, TypeList<E>>
     : std::bool_constant<nest_ok<P>() && holds_one_node<E>() &&
                          payloads_ok<E>::value> {};
 
@@ -504,7 +505,7 @@ consteval bool infix_ops_ok(std::index_sequence<Is...>) {
 template <auto P, class R>
 consteval bool infix_member_belongs() {
   using Owner =
-      typename member_traits<std::remove_cv_t<decltype(P)>>::class_type;
+      typename detail::member_traits<std::remove_cv_t<decltype(P)>>::class_type;
   static_assert(
       std::is_base_of_v<Owner, typename R::node_type>,
       "cursiv: an infix member must belong to its node type or a base");

@@ -425,14 +425,14 @@ std::shared_ptr<const Payload> payload(int value) {
 }
 
 void a_fresh_slot_reads_nothing() {
-  const cursiv::Published<Payload> slot;
+  const cursiv::detail::Published<Payload> slot;
   const auto read = slot.read();
   CHECK(!read);
   CHECK(read.get() == nullptr);
 }
 
 void what_is_published_is_what_is_read() {
-  cursiv::Published<Payload> slot;
+  cursiv::detail::Published<Payload> slot;
   slot.publish(payload(7));
 
   const auto read = slot.read();
@@ -444,7 +444,7 @@ void what_is_published_is_what_is_read() {
 // Replacing is not freeing: a reader that took the pointer before the swap
 // keeps reading the value it took.
 void a_held_read_keeps_the_replaced_value_alive() {
-  cursiv::Published<Payload> slot;
+  cursiv::detail::Published<Payload> slot;
   slot.publish(payload(1));
 
   const auto held = slot.read();
@@ -461,7 +461,7 @@ void a_held_read_keeps_the_replaced_value_alive() {
 // ...and once the reader is gone, the next publication lets it go. Without
 // this, an editing session would keep every snapshot it ever built.
 void nothing_is_retained_once_the_readers_leave() {
-  cursiv::Published<Payload> slot;
+  cursiv::detail::Published<Payload> slot;
   for (int round = 0; round < 50; ++round) {
     slot.publish(payload(round));
     CHECK(slot.retainedCount() == 0);
@@ -473,7 +473,7 @@ void nothing_is_retained_once_the_readers_leave() {
 // A value is freed with no lock of its slot held: its destructor may use the
 // slot again.
 void a_freed_value_may_use_its_slot() {
-  cursiv::Published<int> slot;
+  cursiv::detail::Published<int> slot;
   std::size_t retained = 1;
   slot.publish(std::shared_ptr<const int>(new int(1), [&](const int* value) {
     delete value;
@@ -487,7 +487,7 @@ void a_freed_value_may_use_its_slot() {
 
 void a_reader_that_outlives_the_slot_is_not_the_contract() {
   {
-    cursiv::Published<Payload> slot;
+    cursiv::detail::Published<Payload> slot;
     slot.publish(payload(3));
     CHECK(Payload::live.load() == 1);
   }
@@ -497,7 +497,7 @@ void a_reader_that_outlives_the_slot_is_not_the_contract() {
 // Readers spin on `read()` while writers replace the value under them; a value
 // freed too early shows as a broken payload here, and as a sanitizer report.
 void readers_and_writers_race() {
-  cursiv::Published<Payload> slot;
+  cursiv::detail::Published<Payload> slot;
   slot.publish(payload(0));
 
   std::atomic<bool> stop{false};
@@ -542,7 +542,7 @@ void readers_and_writers_race() {
 // Clearing is what an invalidation does, and a reader must see the
 // absence rather than a stale value.
 void clearing_leaves_nothing_to_read() {
-  cursiv::Published<Payload> slot;
+  cursiv::detail::Published<Payload> slot;
   slot.publish(payload(5));
   slot.clear();
   CHECK(!slot.read());
@@ -551,7 +551,7 @@ void clearing_leaves_nothing_to_read() {
 // A slot hammered by writers with no reader must not grow: the reclamation runs
 // on the publication path, so it has to keep up on its own.
 void a_write_only_slot_does_not_grow() {
-  cursiv::Published<Payload> slot;
+  cursiv::detail::Published<Payload> slot;
   std::atomic<bool> stop{false};
   std::vector<std::thread> writers;
   writers.reserve(4);

@@ -26,9 +26,11 @@ struct Base : cursiv::GrammarSpec {
   struct Nonempty : rule<create<Document>(
       lit<"some:"> + tight(lit<"["> + some(item)) +
       lit<"]"> + lit<".">)> {};
-  struct AtLeastTwo : rule<create<Document>(
-      lit<"two:"> + tight(lit<"["> + repeat<2, cursiv::kUnbounded>(item)) +
-      lit<"]"> + lit<".">)> {};
+  struct AtLeastTwo
+      : rule<create<Document>(
+            lit<"two:"> +
+            tight(lit<"["> + repeat<2, cursiv::GrammarSpec::kUnbounded>(item)) +
+            lit<"]"> + lit<".">)> {};
   // The empty arm ends the region immediately after '['. The decision may
   // inspect ']' through caller trivia, but a chosen X still reads tightly.
   struct Optional : rule<create<Document>(

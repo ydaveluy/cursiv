@@ -37,7 +37,7 @@ namespace detail {
 // The owner class a member pointer writes into.
 template <auto Member>
 using MemberOwner =
-    typename cursiv::member_traits<decltype(Member)>::class_type;
+    typename cursiv::detail::member_traits<decltype(Member)>::class_type;
 
 // The fluent base: everything every arm can say. `Derived` is the CRTP leaf,
 // so each setter returns the most-derived builder and `.property` stays

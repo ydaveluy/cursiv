@@ -5,13 +5,13 @@
 
 namespace arith {
 
-inline constexpr auto moduleKw = cursiv::ikw<"module">.doc<
-    "Starts the document and names the module.">();
-inline constexpr auto defKw = cursiv::ikw<"def">.doc<
-    "Defines a constant, `def pi: 3.14;`, or a function, "
-    "`def area(r): pi * r ^ 2;`.">();
-
 struct Arith : cursiv::GrammarSpec {
+  static constexpr auto moduleKw =
+      ikw<"module">.doc<"Starts the document and names the module.">();
+  static constexpr auto defKw = ikw<"def">.doc<
+      "Defines a constant, `def pi: 3.14;`, or a function, "
+      "`def area(r): pi * r ^ 2;`.">();
+
   struct WS : terminal<some(s)> {};
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ML_COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};

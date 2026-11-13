@@ -34,8 +34,9 @@ struct Base : cursiv::GrammarSpec {
                        repeat<2, 4>(append<&Range::items>(ref<ItemRule>)))> {};
   struct OptionalCount : rule<create<Range>(repeat<0, 3>(
                              append<&Range::items>(ref<ItemRule>)))> {};
-  struct AtLeastThree : rule<create<Range>(repeat<3, cursiv::kUnbounded>(
-                            append<&Range::items>(ref<ItemRule>)))> {};
+  struct AtLeastThree
+      : rule<create<Range>(repeat<3, cursiv::GrammarSpec::kUnbounded>(
+            append<&Range::items>(ref<ItemRule>)))> {};
   struct Wide : rule<create<Range>(
                     repeat<0, 40>(append<&Range::items>(ref<ItemRule>)))> {};
   struct Spread : rule<create<Range>(

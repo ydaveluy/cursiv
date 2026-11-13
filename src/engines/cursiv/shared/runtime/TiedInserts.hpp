@@ -9,7 +9,7 @@
 
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/shared/runtime/PathRank.hpp"
-#include "cursiv/utils/RoundMarks.hpp"
+#include "cursiv/shared/utils/RoundMarks.hpp"
 
 namespace cursiv::engine {
 

@@ -30,7 +30,7 @@
 #include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/table/Token.hpp"
-#include "cursiv/utils/RoundMarks.hpp"
+#include "cursiv/shared/utils/RoundMarks.hpp"
 
 namespace cursiv::engine {
 namespace {

@@ -122,7 +122,7 @@ struct Asking {
 
   std::string_view text;
   cursiv::Cst tree;
-  cursiv::CstBuilder builder;
+  cursiv::detail::CstBuilder builder;
   cursiv::engine::LlContext context;
 };
 }  // namespace cache_test
@@ -289,7 +289,7 @@ constexpr auto open = [] {
 void an_implied_position_reads_a_refused_token_again() {
   using refused_test::base;
   cursiv::Cst tree("abc");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   builder.bind_stream();
   const cursiv::engine::LlContext context(tree.text(), builder);
   for (std::uint16_t mode = 0; mode < base.nmodes; ++mode) {
@@ -320,7 +320,7 @@ void document_end_elects_default_trivia_before_other_regions() {
   CHECK(scan.term != cursiv::engine::kInvalidSymbol &&
         !table.terms[scan.term].trivia);
   cursiv::Cst tree(text);
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   builder.bind_stream();
   builder.leaf(0, 4,
                cursiv::engine::StampLayout{}.make(cursiv::engine::kNoRow, 0));
@@ -491,7 +491,7 @@ constexpr cursiv::engine::LlTable headTable{.condition = guarded_head,
 void prediction_keeps_head_guard_reads_beyond_the_candidate() {
   for (const std::string_view text : {"abcdef trailer", "abcdeg trailer", "a"}) {
     cursiv::Cst tree(text);
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     builder.bind_stream();
     cursiv::engine::LlContext context(text, builder);
     cursiv::engine::LlLookRead dependency;

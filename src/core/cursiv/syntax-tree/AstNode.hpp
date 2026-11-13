@@ -328,6 +328,8 @@ enum class RefState : std::uint8_t {
 
 constexpr bool has_error(RefState s) { return s >= RefState::ErrorNotFound; }
 
+namespace detail {
+
 // Resolution re-enters this protocol when a scope provider reads
 // references. A read that would wait on its own thread, or on a thread that
 // waits on it, answers `ErrorCycle`.
@@ -347,8 +349,6 @@ struct RefResolver {
   virtual RefState resolveAll(std::uint32_t handle,
                               MultiRefItems& out) const = 0;
 };
-
-namespace detail {
 
 // Private control value: an observed computation must publish under the wait
 // coordinator's lock. No owner or mutex is stored in the reference itself.
@@ -427,7 +427,7 @@ struct reference {
   // hand-built tree, where reading resolves nothing. A copy, made while nothing
   // resolves the source, keeps it: it reads the source's site, and only the
   // source is reset by a relink.
-  const RefResolver* _resolver = nullptr;
+  const detail::RefResolver* _resolver = nullptr;
   // The CST node the name was read from. Declared after the pointers so it and
   // the three below share one tail word instead of opening a hole.
   NodeId _nodeId = kNoNode;
@@ -511,8 +511,8 @@ struct multi_reference {
 
  private:
   friend struct detail::RefAccess;
-  mutable MultiRefItems _items;  // written by a read, see `reference`
-  const RefResolver* _resolver = nullptr;
+  mutable detail::MultiRefItems _items;  // written by a read, see `reference`
+  const detail::RefResolver* _resolver = nullptr;
   // The CST node of the name, and the tail word it shares -- see `reference`.
   NodeId _nodeId = kNoNode;
   std::uint32_t _handle = 0;
@@ -623,7 +623,6 @@ struct RefAccess {
     ref.bind(at, text, narrowing);
   }
 };
-}  // namespace detail
 
 // The linker's work list entry. Never a direct pointer to the reference object:
 // a vector<reference<T>> relocates its elements as it grows, while the owner
@@ -638,8 +637,6 @@ static_assert(sizeof(void*) != 8 || sizeof(RefHandle) == 16);
 
 inline constexpr std::uint8_t kNoBranch = 0xFF;
 
-namespace detail {
-
 // The one shape a type filter has: a tag in, the candidate index it satisfies
 // out, `kNoBranch` for none.
 using RefBranchFn = std::uint8_t (*)(const AstTypeTag*) noexcept;
@@ -650,8 +647,6 @@ struct SingleRefRead {
   NodeId name = kNoNode;
   AstNode* target = nullptr;
 };
-
-}  // namespace detail
 
 // What a linker can do to a reference it only knows by `RefHandle`. One entry
 // per field, indexed by `RefHandle::field`; a non-reference field is null.
@@ -697,8 +692,6 @@ struct RefOps {
 
   void (*reset)(AstNode& owner, std::uint32_t index) noexcept = nullptr;
 };
-
-namespace detail {
 
 // One reference site's type filter: the field's row plus the site's declared
 // narrowing.

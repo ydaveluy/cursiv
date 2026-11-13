@@ -1,5 +1,5 @@
 // The declarative grammar as a tree of positions, from its own types through
-// `cursiv::Normalize<G>`, independent of any engine.
+// `cursiv::detail::Normalize<G>`, independent of any engine.
 #pragma once
 
 #include <array>
@@ -50,23 +50,24 @@ template <class E>
 struct refs_impl : refs_form<E> {};
 // A region's configuration names rules: they are reachable through it.
 template <class... Is, class... Hs, class E>
-struct refs_impl<Skip<TypeList<Is...>, TypeList<Hs...>, E>>
+struct refs_impl<cursiv::detail::Skip<TypeList<Is...>, TypeList<Hs...>, E>>
     : tl_cat<TypeList<Is...>, TypeList<Hs...>, typename refs<E>::type> {};
 template <class R>
-struct refs_impl<Ref<R>> {
+struct refs_impl<cursiv::detail::Ref<R>> {
   using type = TypeList<R>;
 };
 // A literal's guard is an expression the lexer runs, so a rule named only
 // there is still reachable. Two states of the slot are not expressions:
 // `void`, and the `WordBound` sentinel the lowering resolves.
-template <class Gd, bool Real = std::is_base_of_v<GrammarNode, Gd>>
+template <class Gd,
+          bool Real = std::is_base_of_v<cursiv::detail::GrammarNode, Gd>>
 struct guard_refs {
   using type = TypeList<>;
 };
 template <class Gd>
 struct guard_refs<Gd, true> : refs<Gd> {};
 template <str S, bool CI, class Gd>
-struct refs_impl<Lit<S, CI, Gd>> : guard_refs<Gd> {};
+struct refs_impl<cursiv::detail::Lit<S, CI, Gd>> : guard_refs<Gd> {};
 
 // The primary an infix rule climbs over is reached by declaration, not by its
 // synthesised body.
@@ -136,42 +137,42 @@ struct local_impl {
 template <class E>
 using local = local_impl<E>;
 template <str S, bool CI, class Gd>
-struct local_impl<Lit<S, CI, Gd>> {
-  using type = TypeList<Lit<S, CI, Gd>>;
+struct local_impl<cursiv::detail::Lit<S, CI, Gd>> {
+  using type = TypeList<cursiv::detail::Lit<S, CI, Gd>>;
 };
 template <class E>
-struct local_impl<Trigger<E>> : local<E> {};
+struct local_impl<cursiv::detail::Trigger<E>> : local<E> {};
 // Prose takes no position: the word under it does.
 template <class E, str T>
-struct local_impl<Doc<E, T>> : local<E> {};
+struct local_impl<cursiv::detail::Doc<E, T>> : local<E> {};
 template <std::uint64_t M, bool N, str S>
-struct local_impl<CpSet<M, N, S>> {
-  using type = TypeList<CpSet<M, N, S>>;
+struct local_impl<cursiv::detail::CpSet<M, N, S>> {
+  using type = TypeList<cursiv::detail::CpSet<M, N, S>>;
 };
 template <>
-struct local_impl<Byte> {
-  using type = TypeList<Byte>;
+struct local_impl<cursiv::detail::Byte> {
+  using type = TypeList<cursiv::detail::Byte>;
 };
 template <>
-struct local_impl<Eof> {
-  using type = TypeList<Eof>;
+struct local_impl<cursiv::detail::Eof> {
+  using type = TypeList<cursiv::detail::Eof>;
 };
 // An implied token and a gap condition: one zero-width position each, whose
 // condition stands on no position.
 template <class T, class C>
-struct local_impl<Implied<T, C>> {
-  using type = TypeList<Implied<T, C>>;
+struct local_impl<cursiv::detail::Implied<T, C>> {
+  using type = TypeList<cursiv::detail::Implied<T, C>>;
 };
 template <class E>
-struct local_impl<GapHas<E>> {
-  using type = TypeList<GapHas<E>>;
+struct local_impl<cursiv::detail::GapHas<E>> {
+  using type = TypeList<cursiv::detail::GapHas<E>>;
 };
 template <class E>
-struct local_impl<GapIs<E>> {
-  using type = TypeList<GapIs<E>>;
+struct local_impl<cursiv::detail::GapIs<E>> {
+  using type = TypeList<cursiv::detail::GapIs<E>>;
 };
 template <>
-struct local_impl<Epsilon> {
+struct local_impl<cursiv::detail::Epsilon> {
   using type = TypeList<>;
 };
 template <class D>
@@ -181,47 +182,56 @@ struct local_impl<cursiv::detail::SuperT<D>> {
 // One position, not three: the run is lexed inside the token, so the
 // operands never stand on the tape.
 template <class O, class Cl>
-struct local_impl<Through<O, Cl>> {
-  using type = TypeList<Through<O, Cl>>;
+struct local_impl<cursiv::detail::Through<O, Cl>> {
+  using type = TypeList<cursiv::detail::Through<O, Cl>>;
 };
 template <class... Es>
-struct local_impl<Seq<Es...>>
-    : tl_cat<TypeList<Seq<Es...>>, typename local<Es>::type...> {};
+struct local_impl<cursiv::detail::Seq<Es...>>
+    : tl_cat<TypeList<cursiv::detail::Seq<Es...>>,
+             typename local<Es>::type...> {};
 template <class... Es>
-struct local_impl<Choice<Es...>>
-    : tl_cat<TypeList<Choice<Es...>>, typename local<Es>::type...> {};
+struct local_impl<cursiv::detail::Choice<Es...>>
+    : tl_cat<TypeList<cursiv::detail::Choice<Es...>>,
+             typename local<Es>::type...> {};
 template <class... Es>
-struct local_impl<Unordered<Es...>>
-    : tl_cat<TypeList<Unordered<Es...>>, typename local<Es>::type...> {};
+struct local_impl<cursiv::detail::Unordered<Es...>>
+    : tl_cat<TypeList<cursiv::detail::Unordered<Es...>>,
+             typename local<Es>::type...> {};
 template <std::size_t Mn, std::size_t Mx, class E>
-struct local_impl<Repeat<Mn, Mx, E>>
-    : tl_cat<TypeList<Repeat<Mn, Mx, E>>, typename local<E>::type> {};
+struct local_impl<cursiv::detail::Repeat<Mn, Mx, E>>
+    : tl_cat<TypeList<cursiv::detail::Repeat<Mn, Mx, E>>,
+             typename local<E>::type> {};
 template <class E>
-struct local_impl<Not<E>> : tl_cat<TypeList<Not<E>>, typename local<E>::type> {
-};
+struct local_impl<cursiv::detail::Not<E>>
+    : tl_cat<TypeList<cursiv::detail::Not<E>>, typename local<E>::type> {};
 template <class E>
-struct local_impl<And<E>> : tl_cat<TypeList<And<E>>, typename local<E>::type> {
+struct local_impl<cursiv::detail::And<E>>
+    : tl_cat<TypeList<cursiv::detail::And<E>>, typename local<E>::type> {};
+template <auto P, class E>
+struct local_impl<cursiv::detail::Assign<P, E>>
+    : tl_cat<TypeList<cursiv::detail::Assign<P, E>>, typename local<E>::type> {
 };
 template <auto P, class E>
-struct local_impl<Assign<P, E>>
-    : tl_cat<TypeList<Assign<P, E>>, typename local<E>::type> {};
+struct local_impl<cursiv::detail::Append<P, E>>
+    : tl_cat<TypeList<cursiv::detail::Append<P, E>>, typename local<E>::type> {
+};
 template <auto P, class E>
-struct local_impl<Append<P, E>>
-    : tl_cat<TypeList<Append<P, E>>, typename local<E>::type> {};
-template <auto P, class E>
-struct local_impl<Flag<P, E>>
-    : tl_cat<TypeList<Flag<P, E>>, typename local<E>::type> {};
+struct local_impl<cursiv::detail::Flag<P, E>>
+    : tl_cat<TypeList<cursiv::detail::Flag<P, E>>, typename local<E>::type> {};
 template <class T, class E>
-struct local_impl<Create<T, E>>
-    : tl_cat<TypeList<Create<T, E>>, typename local<E>::type> {};
+struct local_impl<cursiv::detail::Create<T, E>>
+    : tl_cat<TypeList<cursiv::detail::Create<T, E>>, typename local<E>::type> {
+};
 template <class I, class H, class E>
-struct local_impl<Skip<I, H, E>>
-    : tl_cat<TypeList<Skip<I, H, E>>, typename local<E>::type> {};
+struct local_impl<cursiv::detail::Skip<I, H, E>>
+    : tl_cat<TypeList<cursiv::detail::Skip<I, H, E>>, typename local<E>::type> {
+};
 template <class T, auto P, class E>
-struct local_impl<Nest<T, P, E>>
-    : tl_cat<TypeList<Nest<T, P, E>>, typename local<E>::type> {};
+struct local_impl<cursiv::detail::Nest<T, P, E>>
+    : tl_cat<TypeList<cursiv::detail::Nest<T, P, E>>, typename local<E>::type> {
+};
 template <class R>
-struct local_impl<Ref<R>> {
+struct local_impl<cursiv::detail::Ref<R>> {
   using type = TypeList<>;
 };
 
@@ -240,7 +250,7 @@ struct op_position {
   using type = E;
 };
 template <class R>
-struct op_position<Ref<R>> {
+struct op_position<cursiv::detail::Ref<R>> {
   using type = cursiv::detail::declared_of_t<R>;
 };
 template <class L>
@@ -290,15 +300,15 @@ struct shape_kind {
                 "than let it read as a group");
 };
 template <str S, bool CI, class Gd>
-struct shape_kind<Lit<S, CI, Gd>> {
+struct shape_kind<cursiv::detail::Lit<S, CI, Gd>> {
   static constexpr ElementKind value = ElementKind::literal;
 };
 template <std::uint64_t M, bool N, str S>
-struct shape_kind<CpSet<M, N, S>> {
+struct shape_kind<cursiv::detail::CpSet<M, N, S>> {
   static constexpr ElementKind value = ElementKind::character_range;
 };
 template <>
-struct shape_kind<Byte> {
+struct shape_kind<cursiv::detail::Byte> {
   static constexpr ElementKind value = ElementKind::any_character;
 };
 template <>
@@ -306,67 +316,70 @@ struct shape_kind<cursiv::detail::AnyChar> {
   static constexpr ElementKind value = ElementKind::any_character;
 };
 template <class O, class Cl>
-struct shape_kind<Through<O, Cl>> {
+struct shape_kind<cursiv::detail::Through<O, Cl>> {
   static constexpr ElementKind value = ElementKind::through;
 };
 template <class... Es>
-struct shape_kind<Seq<Es...>> {
+struct shape_kind<cursiv::detail::Seq<Es...>> {
   static constexpr ElementKind value = ElementKind::group;
 };
 template <class... Es>
-struct shape_kind<Choice<Es...>> {
+struct shape_kind<cursiv::detail::Choice<Es...>> {
   static constexpr ElementKind value = ElementKind::ordered_choice;
 };
 template <class... Es>
-struct shape_kind<Unordered<Es...>> {
+struct shape_kind<cursiv::detail::Unordered<Es...>> {
   static constexpr ElementKind value = ElementKind::unordered_group;
 };
 template <std::size_t Mn, std::size_t Mx, class E>
-struct shape_kind<Repeat<Mn, Mx, E>> {
+struct shape_kind<cursiv::detail::Repeat<Mn, Mx, E>> {
   static constexpr ElementKind value = ElementKind::repetition;
 };
 template <>
-struct shape_kind<Eof> {
+struct shape_kind<cursiv::detail::Eof> {
   static constexpr ElementKind value = ElementKind::not_predicate;
 };
 template <class E>
-struct shape_kind<Not<E>> {
+struct shape_kind<cursiv::detail::Not<E>> {
   static constexpr ElementKind value = ElementKind::not_predicate;
 };
 template <class E>
-struct shape_kind<And<E>> {
+struct shape_kind<cursiv::detail::And<E>> {
   static constexpr ElementKind value = ElementKind::and_predicate;
 };
 // Zero-width where a condition holds, which the walk cannot impose: an
 // assertion.
 template <class T, class C>
-struct shape_kind<Implied<T, C>> : shape_kind<And<C>> {};
+struct shape_kind<cursiv::detail::Implied<T, C>>
+    : shape_kind<cursiv::detail::And<C>> {};
 template <class E>
-struct shape_kind<GapHas<E>> : shape_kind<And<E>> {};
+struct shape_kind<cursiv::detail::GapHas<E>>
+    : shape_kind<cursiv::detail::And<E>> {};
 template <class E>
-struct shape_kind<GapIs<E>> : shape_kind<And<E>> {};
+struct shape_kind<cursiv::detail::GapIs<E>>
+    : shape_kind<cursiv::detail::And<E>> {};
 template <auto P, class E>
-struct shape_kind<Assign<P, E>> {
+struct shape_kind<cursiv::detail::Assign<P, E>> {
   static constexpr ElementKind value = ElementKind::assignment;
 };
 template <auto P, class E>
-struct shape_kind<Append<P, E>> {
+struct shape_kind<cursiv::detail::Append<P, E>> {
   static constexpr ElementKind value = ElementKind::assignment;
 };
 template <auto P, class E>
-struct shape_kind<Flag<P, E>> {
+struct shape_kind<cursiv::detail::Flag<P, E>> {
   static constexpr ElementKind value = ElementKind::assignment;
 };
 template <class T, class E>
-struct shape_kind<Create<T, E>> {
+struct shape_kind<cursiv::detail::Create<T, E>> {
   static constexpr ElementKind value = ElementKind::create;
 };
 template <class T, auto P, class E>
-struct shape_kind<Nest<T, P, E>> {
+struct shape_kind<cursiv::detail::Nest<T, P, E>> {
   static constexpr ElementKind value = ElementKind::nest;
 };
 template <class I, class H, class E>
-struct shape_kind<Skip<I, H, E>> {
+struct shape_kind<cursiv::detail::Skip<I, H, E>> {
   static constexpr ElementKind value = ElementKind::skip_region;
 };
 
@@ -392,7 +405,7 @@ struct text_of {
   static constexpr std::string_view value{};
 };
 template <str S, bool CI, class Gd>
-struct text_of<Lit<S, CI, Gd>> {
+struct text_of<cursiv::detail::Lit<S, CI, Gd>> {
   static constexpr std::string_view value = S.view();
 };
 
@@ -412,17 +425,17 @@ struct feature_of {
   static constexpr std::string_view value{};
 };
 template <auto Sp, class E>
-struct feature_of<Assign<Sp, E>> {
+struct feature_of<cursiv::detail::Assign<Sp, E>> {
   static constexpr std::string_view value =
       cursiv::detail::member_identifier<cursiv::detail::spec_ptr<Sp>>();
 };
 template <auto Sp, class E>
-struct feature_of<Append<Sp, E>> {
+struct feature_of<cursiv::detail::Append<Sp, E>> {
   static constexpr std::string_view value =
       cursiv::detail::member_identifier<cursiv::detail::spec_ptr<Sp>>();
 };
 template <auto P, class E>
-struct feature_of<Flag<P, E>> {
+struct feature_of<cursiv::detail::Flag<P, E>> {
   static constexpr std::string_view value =
       cursiv::detail::member_identifier<P>();
 };
@@ -433,7 +446,7 @@ struct bounds_of {
   static constexpr std::uint16_t max = 0;
 };
 template <std::size_t Mn, std::size_t Mx, class E>
-struct bounds_of<Repeat<Mn, Mx, E>> {
+struct bounds_of<cursiv::detail::Repeat<Mn, Mx, E>> {
   static constexpr std::uint16_t min =
       Mn >= kModelUnbounded ? kModelUnbounded : static_cast<std::uint16_t>(Mn);
   static constexpr std::uint16_t max =
@@ -460,12 +473,12 @@ struct child_target {
   using type = K;
 };
 template <class R>
-struct child_target<Ref<R>> {
+struct child_target<cursiv::detail::Ref<R>> {
   using type = R;
 };
 // Prose spells no position either: the word under it is the child.
 template <class E, str T>
-struct child_target<Doc<E, T>> : child_target<E> {};
+struct child_target<cursiv::detail::Doc<E, T>> : child_target<E> {};
 template <class L, class K>
 inline constexpr ElementId row_of_child =
     index_of<typename child_target<std::remove_cvref_t<K>>::type, L>::value <
@@ -577,7 +590,7 @@ struct table_of<S, TypeList<Es...>> {
 
 template <class G>
 struct positions_for {
-  using stage = cursiv::Normalize<G>;
+  using stage = cursiv::detail::Normalize<G>;
   using seeds =
       dedupe_t<tl_cat_t<TypeList<typename stage::entry>,
                         typename stage::ignored, typename stage::hidden>>;
@@ -601,14 +614,14 @@ template <class G, class R>
 inline constexpr ElementId call_row =
     row_of<G, R> != kNoElement
         ? row_of<G, R>
-        : row_of<G, typename cursiv::Normalize<G>::template rule<R>>;
+        : row_of<G, typename cursiv::detail::Normalize<G>::template rule<R>>;
 
 // An infix operator is spelled, or it calls the terminal or the data rule
 // that reads it -- and then it is that rule's row, like any other call.
 template <class G, class E>
 inline constexpr ElementId op_row = row_of<G, E>;
 template <class G, class R>
-inline constexpr ElementId op_row<G, Ref<R>> = call_row<G, R>;
+inline constexpr ElementId op_row<G, cursiv::detail::Ref<R>> = call_row<G, R>;
 
 }  // namespace cursiv::fuzzer::detail::model
 
@@ -619,7 +632,7 @@ namespace cursiv::fuzzer::detail {
 template <class G>
 struct DeclaredModel final : GrammarModel {
  private:
-  using stage = cursiv::Normalize<G>;
+  using stage = cursiv::detail::Normalize<G>;
   using positions = typename model::positions_for<G>::type;
   using table = model::table_of<stage, positions>;
   static constexpr auto& kLayout = table::kLayout;

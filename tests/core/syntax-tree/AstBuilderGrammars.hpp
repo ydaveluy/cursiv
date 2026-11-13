@@ -661,8 +661,9 @@ struct All : cursiv::GrammarSpec {
   struct NarrowID : terminal<some(cr<"a-z">)> {};
   struct NarrowRoot
       : rule<create<narrow::Site> + kw<"use"> +
-             assign<cursiv::xref<&narrow::Site::broad, narrow::Kind1>>(
-                 ref<NarrowID>)> {};
+             assign<cursiv::GrammarSpec::xref<&narrow::Site::broad,
+                                              narrow::Kind1>>(ref<NarrowID>)> {
+  };
 
   struct DeferID : terminal<some(cr<"a-z">)> {};
   struct DeferPetR

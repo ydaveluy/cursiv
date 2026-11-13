@@ -55,7 +55,7 @@ struct ByteSet {
   friend constexpr bool operator==(const ByteSet&, const ByteSet&) = default;
 };
 
-constexpr ByteSet bytes_of(const CharSet& cs) {
+constexpr ByteSet bytes_of(const detail::CharSet& cs) {
   ByteSet s;
   for (unsigned b = 0; b < 256; ++b)
     if (cs.test(static_cast<unsigned char>(b)))

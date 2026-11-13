@@ -23,11 +23,13 @@ struct Parts : cursiv::GrammarSpec {
 };
 template <std::size_t... Is>
 constexpr auto choice(std::index_sequence<Is...>) {
-  return (cursiv::ref<Parts::A<Is>> | ...);
+  return (cursiv::GrammarSpec::ref<Parts::A<Is>> | ...);
 }
 template <class Stmt, std::size_t... Is>
 constexpr auto callers(std::index_sequence<Is...>) {
-  return ((cursiv::ref<Parts::X<Is>> + cursiv::ref<Stmt>) | ...);
+  return ((cursiv::GrammarSpec::ref<Parts::X<Is>> +
+           cursiv::GrammarSpec::ref<Stmt>) |
+          ...);
 }
 struct G : Parts {
   struct WS : terminal<some(s)> {};
@@ -59,10 +61,11 @@ struct Parts : cursiv::GrammarSpec {
 };
 template <std::size_t... Is>
 constexpr auto cells(std::index_sequence<Is...>) {
-  return ((cursiv::ref<Parts::X<Is>> +
-           ((cursiv::ref<Parts::A<Is>> + cursiv::lit<"q"> + cursiv::lit<"z">) |
-            (cursiv::ref<Parts::B<Is>> + cursiv::lit<"q"> +
-             cursiv::lit<"w">))) |
+  return ((cursiv::GrammarSpec::ref<Parts::X<Is>> +
+           ((cursiv::GrammarSpec::ref<Parts::A<Is>> +
+             cursiv::GrammarSpec::lit<"q"> + cursiv::GrammarSpec::lit<"z">) |
+            (cursiv::GrammarSpec::ref<Parts::B<Is>> +
+             cursiv::GrammarSpec::lit<"q"> + cursiv::GrammarSpec::lit<"w">))) |
           ...);
 }
 struct G : Parts {
@@ -87,7 +90,7 @@ constexpr cursiv::str<4> word() {
 }
 template <std::size_t... Is>
 constexpr auto words(std::index_sequence<Is...>) {
-  return (cursiv::kw<word<Is>()> | ...);
+  return (cursiv::GrammarSpec::kw<word<Is>()> | ...);
 }
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -107,7 +110,7 @@ constexpr cursiv::str<2> byte() {
 }
 template <std::size_t... Is>
 constexpr auto bytes(std::index_sequence<Is...>) {
-  return (cursiv::lit<byte<Is>()> | ...);
+  return (cursiv::GrammarSpec::lit<byte<Is>()> | ...);
 }
 template <std::size_t Count>
 struct G : cursiv::GrammarSpec {

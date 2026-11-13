@@ -123,10 +123,10 @@ struct RuntimeGrammar {
     return repeat(0, 1, k);
   }
   const cursiv::detail::ImageDesc* many(const cursiv::detail::ImageDesc* k) {
-    return repeat(0, kUnbounded, k);
+    return repeat(0, GrammarSpec::kUnbounded, k);
   }
   const cursiv::detail::ImageDesc* some(const cursiv::detail::ImageDesc* k) {
-    return repeat(1, kUnbounded, k);
+    return repeat(1, GrammarSpec::kUnbounded, k);
   }
   const cursiv::detail::ImageDesc* call(
       const cursiv::detail::ImageRuleDesc* r) {

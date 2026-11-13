@@ -45,8 +45,9 @@ inline void ll_finish(LlContext& c) {
 template <const auto& T>
 class LlLanguageParser final : public Parser {
  public:
-  LlLanguageParser(const GrammarMetaData& grammar, const AstActions& actions,
-                   void (*drive)(LlContext&), const RepairBudget& budget = {})
+  LlLanguageParser(const detail::GrammarMetaData& grammar,
+                   const AstActions& actions, void (*drive)(LlContext&),
+                   const RepairBudget& budget = {})
       : _grammar(std::make_shared<StampedGrammar>(grammar, T.stamp)),
         _actions(&actions),
         _drive(drive),
@@ -69,10 +70,10 @@ class LlLanguageParser final : public Parser {
     LexSuffixSession<LlLexTape<T>> predicateSession(
         text.data(), static_cast<TextOffset>(text.size()));
     Cst cst(text);
-    CstBuilder builder(cst);
+    detail::CstBuilder builder(cst);
     builder.reserve_stream(text.size());
     // The descent polls nothing: the stream reads the stop as it fills.
-    CstRun::Watch watch(builder.stream(), cancelToken);
+    detail::CstRun::Watch watch(builder.stream(), cancelToken);
     builder.bind_stream();
     LlContext c(text, builder, _budget);
     c.stop = CancellationPoll(cancelToken);

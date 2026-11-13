@@ -10,7 +10,7 @@
 #include "cursiv/shared/gen/optional_shape.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/shared/utils/GrammarPrinter.hpp"
-#include "cursiv/utils/StrongComponents.hpp"
+#include "cursiv/shared/utils/StrongComponents.hpp"
 
 namespace cursiv::engine {
 namespace {

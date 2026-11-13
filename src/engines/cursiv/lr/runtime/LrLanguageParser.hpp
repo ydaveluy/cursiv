@@ -33,8 +33,9 @@ namespace cursiv::engine {
 template <const auto& A>
 class LrLanguageParser final : public Parser {
  public:
-  LrLanguageParser(const GrammarMetaData& grammar, const AstActions& actions,
-                   const LrDrive& drive, const RepairBudget& budget = {})
+  LrLanguageParser(const detail::GrammarMetaData& grammar,
+                   const AstActions& actions, const LrDrive& drive,
+                   const RepairBudget& budget = {})
       : _grammar(std::make_shared<StampedGrammar>(grammar, A.stamp)),
         _actions(&actions),
         _drive(&drive),

@@ -110,7 +110,7 @@ void check(const cursiv::Parser& ll, const cursiv::Parser* lr, Spell spell,
 std::vector<cursiv::engine::Typo> lr_names(std::string_view text) {
   namespace lr = tllrefused::generated::Lr;
   cursiv::Cst cst(text);
-  cursiv::CstBuilder builder(cst);
+  cursiv::detail::CstBuilder builder(cst);
   cursiv::engine::LrContext c(text, builder);
   std::uint64_t read = 0;
   bool cut = false;
@@ -122,7 +122,7 @@ std::vector<cursiv::engine::Typo> ll_names(std::string_view text) {
   namespace ll = tllrefused::generated::Ll;
   constexpr const auto& table = ll::kTable;
   cursiv::Cst cst(text);
-  cursiv::CstBuilder builder(cst);
+  cursiv::detail::CstBuilder builder(cst);
   cursiv::engine::LlContext c(text, builder);
   const auto name =
       cursiv::engine::ll_match_text<table>("inx", 3, table.errMode, 0).term;
@@ -202,7 +202,7 @@ void a_word_refused_at_a_cut_runs_into_it() {
   // A search whose budget ends inside a token keeps nothing of it.
   const std::string word(2 * cursiv::engine::kRepairLexBytes, 'x');
   cursiv::Cst tree(word);
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   cursiv::engine::LlContext c(word, builder);
   cursiv::engine::LlSearch s(table.atn, c.len);
   s.limit = 1;

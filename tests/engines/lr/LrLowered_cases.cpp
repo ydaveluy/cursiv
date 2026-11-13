@@ -806,7 +806,7 @@ void run() {
     samples.push_back(std::move(text));
   }
   Cst tree("");
-  CstBuilder builder(tree);
+  detail::CstBuilder builder(tree);
   LrContext c("", builder);
   for (const auto& sample : samples) {
     const std::string text = "prefix" + sample + (rng() % 2 ? ";" : "");

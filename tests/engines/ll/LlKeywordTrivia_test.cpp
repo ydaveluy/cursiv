@@ -187,10 +187,12 @@ struct Uncut : cursiv::GrammarSpec {
   using ignored = WS;
   using hidden = REMARK;
 };
-using LongRemark = decltype(cursiv::ikw<"ΥΠΕΡΣΥΝΤΡΙΠΤΙΚΟΤΑΤΟΣ"> +
-                            cursiv::many(cursiv::cr<R"(^\r\n)">));
+using LongRemark =
+    decltype(cursiv::GrammarSpec::ikw<"ΥΠΕΡΣΥΝΤΡΙΠΤΙΚΟΤΑΤΟΣ"> +
+             cursiv::GrammarSpec::many(cursiv::GrammarSpec::cr<R"(^\r\n)">));
 using HashRemark =
-    decltype(cursiv::lit<"#"> + cursiv::many(cursiv::cr<R"(^\r\n)">));
+    decltype(cursiv::GrammarSpec::lit<"#"> +
+             cursiv::GrammarSpec::many(cursiv::GrammarSpec::cr<R"(^\r\n)">));
 
 template <class G>
 cursiv::engine::LowerFail lexer_refusal() {

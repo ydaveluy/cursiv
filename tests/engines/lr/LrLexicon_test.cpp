@@ -201,7 +201,7 @@ void the_continuation_decides_the_repaired_span() {
 void every_distinct_reading_is_a_ranked_candidate() {
   const std::string text = "ab;";
   cursiv::Cst cst;
-  cursiv::CstBuilder builder(cst);
+  cursiv::detail::CstBuilder builder(cst);
   cursiv::engine::LrContext c(text, builder);
   c.drive = &g::kDrive;
   std::uint64_t read = 0;

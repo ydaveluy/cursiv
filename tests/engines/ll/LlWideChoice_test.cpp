@@ -11,7 +11,7 @@
 
 namespace {
 
-static_assert([]<class... Keywords>(cursiv::Choice<Keywords...>) {
+static_assert([]<class... Keywords>(cursiv::detail::Choice<Keywords...>) {
   return sizeof...(Keywords) > 100;
 }(twidechoice::Base::Words));
 static_assert(twidechoice::generated::Ll::kTable.nafter > 255);

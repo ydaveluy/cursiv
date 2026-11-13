@@ -74,10 +74,10 @@ struct LrParser {
     text = cst.text();
     LexSuffixSession<LrLexTape<A>> predicateSession(
         text.data(), static_cast<TextOffset>(text.size()));
-    CstBuilder builder(cst);
+    detail::CstBuilder builder(cst);
     builder.reserve_stream(text.size());
     // The drive polls nothing: the stream reads the stop as it fills.
-    CstRun::Watch watch(builder.stream(), cancelToken);
+    detail::CstRun::Watch watch(builder.stream(), cancelToken);
     LrContext c(text, builder);
     c.stop = CancellationPoll(cancelToken);
     if constexpr (kTermsRecorded<A.cfg>) c.pending.reserve(8);
@@ -105,7 +105,7 @@ struct LrParser {
     // A reading no repair could finish names no entry. The root is the
     // last visible record: a comment after the last token sits on the
     // stream behind it.
-    CstRun& stream = builder.stream();
+    detail::CstRun& stream = builder.stream();
     NodeId root = accepted ? last_visible(stream) : kNoNode;
     if (root != kNoNode)
       root = lr_wrap_root<A.stamp>(stream, root, A.cfg.entryRow);
@@ -141,7 +141,7 @@ struct LrParser {
   // The last record of the derivation: a comment after the last token, or a
   // skip region a repair filed there, sits behind the root and cannot be the
   // entry. Asked once, at the bind.
-  static NodeId last_visible(const CstRun& stream) {
+  static NodeId last_visible(const detail::CstRun& stream) {
     for (NodeCount i = stream.records(); i-- > 0;) {
       const CstNode& r = stream.at(i);
       if (r.hidden) continue;

@@ -12,7 +12,8 @@
 
 namespace cursiv {
 
-DefaultAstReflection::DefaultAstReflection(const AstMetaData& meta) : _f(meta) {
+DefaultAstReflection::DefaultAstReflection(const detail::AstMetaData& meta)
+    : _f(meta) {
   // A power of two at least twice the class count: half-full, so the linear
   // probe stops within a slot or two.
   std::size_t n = 8;
@@ -100,7 +101,7 @@ std::span<const std::uint16_t> DefaultAstReflection::referenceTargets(
 const AstTypeTag* DefaultAstReflection::referenceNarrowTarget(
     std::uint16_t reference, std::uint8_t narrow) const noexcept {
   if (reference >= _f.referenceBound) return nullptr;
-  const RefOps& ops = _f.refOps[reference];
+  const detail::RefOps& ops = _f.refOps[reference];
   return narrow < ops.narrow_count ? ops.narrow_tags[narrow] : nullptr;
 }
 
@@ -123,10 +124,10 @@ AcceptSet DefaultAstReflection::referenceAccepts(
              : AcceptSet{};
 }
 
-ReferenceInfo DefaultAstReflection::referenceInfo(const RefHandle& handle,
-                                                  std::string_view text) const {
+ReferenceInfo DefaultAstReflection::referenceInfo(
+    const detail::RefHandle& handle, std::string_view text) const {
   if (handle.field >= _f.referenceBound || handle.owner == nullptr) return {};
-  const RefOps& ops = _f.refOps[handle.field];
+  const detail::RefOps& ops = _f.refOps[handle.field];
   return {.container = handle.owner,
           .referenceText = text,
           .property = fieldName(handle.field),

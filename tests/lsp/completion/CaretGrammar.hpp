@@ -127,14 +127,17 @@ struct Caret : cursiv::GrammarSpec {
                                lit<";">)> {};
   // Two sites of `Link::to`: `see` binds an `Alpha` alone, `any` whatever the
   // member accepts.
-  struct SeeR : rule<create<ast::Link>(
-                    kw<"see"> +
-                    assign<cursiv::xref<&ast::Link::to, ast::Alpha>>(ref<ID>) +
-                    lit<";">)> {};
+  struct SeeR
+      : rule<create<ast::Link>(
+            kw<"see"> +
+            assign<cursiv::GrammarSpec::xref<&ast::Link::to, ast::Alpha>>(
+                ref<ID>) +
+            lit<";">)> {};
   // The reference is last but for an optional, so one branch of the rule is
   // the reference alone: completion must still see one write of `Bond::to`.
   struct TieBody
-      : rule<assign<cursiv::xref<&ast::Bond::to, ast::Beta>>(ref<ID>) +
+      : rule<assign<cursiv::GrammarSpec::xref<&ast::Bond::to, ast::Beta>>(
+                 ref<ID>) +
              option(assign<&ast::Bond::note>(ref<ID>))> {};
   struct TieR
       : rule<create<ast::Tie>(

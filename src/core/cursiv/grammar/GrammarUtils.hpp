@@ -11,8 +11,8 @@
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/utils/typelist.hpp"
 
-namespace cursiv {
-namespace detail::ov {
+namespace cursiv::detail {
+namespace ov {
 
 // The grammars a grammar extends; empty at the root.
 template <class G>
@@ -312,7 +312,7 @@ consteval auto bound_of() {
                   "two parent grammars declare different `word_boundary` "
                   "classes: declare `word_boundary` in this grammar to choose "
                   "one");
-    return std::remove_cvref_t<decltype(w)>{};
+    return std::remove_cvref_t<decltype(GrammarSpec::w)>{};
   }
 }
 
@@ -330,7 +330,7 @@ consteval bool case_of() {
   }
 }
 
-}  // namespace detail::ov
+}  // namespace ov
 
 // First stage: the rule a reference names in `G`, the declared one unless an
 // override replaces it.
@@ -338,26 +338,24 @@ template <class G>
 struct ResolveOverride {
   // Whether this grammar, or one it extends, overrides `R`.
   template <class R>
-  static constexpr bool overrides = detail::ov::overrides_rule<G, R>;
+  static constexpr bool overrides = ov::overrides_rule<G, R>;
 
   // The rule a reference to `R` actually names here.
   template <class R>
-  using rule = typename detail::ov::eff_rule<G, R>::type;
+  using rule = typename ov::eff_rule<G, R>::type;
 
   // That rule's body, with `super` replaced and a root `create` removed.
   template <class R>
-  using body = typename detail::ov::stage_body<rule<R>>::type;
+  using body = typename ov::stage_body<rule<R>>::type;
 
   // Every stage republishes the whole surface: the next stage has no other
   // way to reach it.
   using entry = rule<typename G::entry>;
-  using ignored = typename detail::ov::as_rules<G, typename G::ignored>::type;
-  using hidden = typename detail::ov::as_rules<G, typename G::hidden>::type;
-  static constexpr auto word_boundary = detail::ov::bound_of<G>();
-  static constexpr bool case_insensitive = detail::ov::case_of<G>();
+  using ignored = typename ov::as_rules<G, typename G::ignored>::type;
+  using hidden = typename ov::as_rules<G, typename G::hidden>::type;
+  static constexpr auto word_boundary = ov::bound_of<G>();
+  static constexpr bool case_insensitive = ov::case_of<G>();
 };
-
-namespace detail {
 
 // Whether grammar G folds the case of literal `S`: G is case-insensitive and
 // `S` holds a letter with another case.
@@ -369,11 +367,9 @@ consteval bool folds_case() {
     return false;
 }
 
-}  // namespace detail
-
 // A node rule's creation is either spelled in every alternative or carried by
 // the rule's own element. Two shapes, one meaning; this leaves only the first.
-namespace detail::mat {
+namespace mat {
 
 // What one expression is to the head of its alternative, in one walk:
 //   heads    it gives the head on every path: a creation, or an adopted call
@@ -710,14 +706,14 @@ struct materialize<RT, RootClass, Choice<As...>, Over> {
 // terminal or data rule builds nothing.
 template <class X, bool Node = is_node_rule<X>>
 struct rule_body {
-  using type = typename detail::ov::stage_body<X>::type;
+  using type = typename ov::stage_body<X>::type;
 };
 template <class X>
 struct rule_body<X, true>
     : materialize<
           rule_type_t<X>,
           typename root_create_class<std::remove_cv_t<decltype(X::body)>>::type,
-          typename detail::ov::stage_body<X>::type, is_overridden<X>> {};
+          typename ov::stage_body<X>::type, is_overridden<X>> {};
 
 // The stage hands back a rule, not a body on the side: asking the rule and
 // asking the stage must not give two answers.
@@ -752,9 +748,8 @@ inline constexpr bool node_kept<X, true> = [] {
 
 // An unchanged body keeps its rule: a wrapper would double every instantiation
 // keyed on the rule.
-template <class X,
-          bool Same = std::is_same_v<typename rule_body<X>::type,
-                                     typename detail::ov::stage_body<X>::type>>
+template <class X, bool Same = std::is_same_v<typename rule_body<X>::type,
+                                              typename ov::stage_body<X>::type>>
 struct mat_rule {
   static_assert(node_kept<X>);
   using type = Materialized<X, typename rule_body<X>::type{}>;
@@ -772,7 +767,7 @@ struct mat_each<TypeList<Xs...>> {
   using type = TypeList<typename mat_rule<Xs>::type...>;
 };
 
-}  // namespace detail::mat
+}  // namespace mat
 
 // The creation, spelled: every alternative of a node rule heads itself here,
 // so the rule's own element is a pure label in every grammar. `S` is the stage
@@ -780,11 +775,10 @@ struct mat_each<TypeList<Xs...>> {
 template <class S>
 struct MaterializeCreate {
   template <class R>
-  using rule =
-      typename detail::mat::mat_rule<typename S::template rule<R>>::type;
+  using rule = typename mat::mat_rule<typename S::template rule<R>>::type;
 
   template <class R>
-  using body = typename detail::ov::stage_body<rule<R>>::type;
+  using body = typename ov::stage_body<rule<R>>::type;
 
   // Whether this stage rewrote the rule. A root `create` is removed before
   // this reads it, so `rule<create<T>(x)>` is rewritten to the same body.
@@ -794,9 +788,9 @@ struct MaterializeCreate {
 
   // `entry` and the lists hold this stage's rules, so asking through them or
   // through `rule` gives one answer.
-  using entry = typename detail::mat::mat_rule<typename S::entry>::type;
-  using ignored = typename detail::mat::mat_each<typename S::ignored>::type;
-  using hidden = typename detail::mat::mat_each<typename S::hidden>::type;
+  using entry = typename mat::mat_rule<typename S::entry>::type;
+  using ignored = typename mat::mat_each<typename S::ignored>::type;
+  using hidden = typename mat::mat_each<typename S::hidden>::type;
   static constexpr auto word_boundary = S::word_boundary;
   static constexpr bool case_insensitive = S::case_insensitive;
 };
@@ -805,4 +799,4 @@ struct MaterializeCreate {
 template <class G>
 using Normalize = MaterializeCreate<ResolveOverride<G>>;
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

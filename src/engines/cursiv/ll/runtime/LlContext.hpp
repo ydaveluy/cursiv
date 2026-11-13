@@ -40,7 +40,7 @@ class LlRepairFlag {
 inline constexpr std::uint16_t kLaHeld = 0xFFFEu;
 
 struct LlContext {
-  LlContext(std::string_view text, CstBuilder& builder,
+  LlContext(std::string_view text, detail::CstBuilder& builder,
             const RepairBudget& repairBudget = {})
       : tape(builder),
         src(text.data()),
@@ -48,7 +48,7 @@ struct LlContext {
         reads(len),
         budget(repairBudget) {}
 
-  CstBuilder& tape;
+  detail::CstBuilder& tape;
   const char* src;
   TextOffset len;
   // Read by the cold walks only: prediction past its automaton, repairs.

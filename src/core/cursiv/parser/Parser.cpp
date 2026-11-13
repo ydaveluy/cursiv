@@ -24,8 +24,8 @@ constexpr const char* kNested =
 // offsets: what the engine's completion reads.
 Cst engine_tree(const Cst& cst, const SourceTranslation& translation) {
   Cst tree(translation.text());
-  CstBuilder builder(tree);
-  CstRun& run = builder.stream();
+  detail::CstBuilder builder(tree);
+  detail::CstRun& run = builder.stream();
   run.reserve_for(cst.size());
   for (NodeId id = 0; id < cst.size(); ++id) {
     run.leaf(0, 0, 0);

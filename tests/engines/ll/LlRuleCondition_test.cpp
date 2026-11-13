@@ -96,7 +96,7 @@ bool reads_ab_dot(const Cfg& g) {
 template <class E>
 struct named;
 template <class R>
-struct named<cursiv::Ref<R>> {
+struct named<cursiv::detail::Ref<R>> {
   using type = R;
 };
 using Inline =

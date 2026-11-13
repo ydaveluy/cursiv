@@ -16,7 +16,7 @@
 // An immutable value read without a lock and replaced from time to time. A
 // replaced value is freed once every reader stripe has moved past it.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 // Not for a value written as often as it is read: each publish replaces the
 // whole value.
@@ -165,4 +165,4 @@ class Published {
   std::array<std::uint64_t, kStripes> _idleAfter{};
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

@@ -62,7 +62,7 @@ void a_rescanned_token_keeps_its_mode_for_the_election() {
   for (const std::string_view text :
        {"module", " module", "/* comment */module"}) {
     cursiv::Cst tree(text);
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     builder.bind_stream();
     cursiv::engine::LrContext context(text, builder);
     context.drive = &garith::kDrive;

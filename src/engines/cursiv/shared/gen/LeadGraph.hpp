@@ -10,7 +10,7 @@
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
-#include "cursiv/utils/StrongComponents.hpp"
+#include "cursiv/shared/utils/StrongComponents.hpp"
 #include "cursiv/utils/typelist.hpp"
 
 namespace cursiv::engine {

@@ -34,10 +34,10 @@ using UnresolvedReferenceVisitor = cursiv::function_ref<void(
 using ResolvedReferenceVisitor = cursiv::function_ref<void(
     TextOffset begin, TextOffset end, const AstNode& target, bool multi)>;
 
-struct DocumentReferences : RefResolver {
+struct DocumentReferences : detail::RefResolver {
   // The work list, in the order the builder wrote it: the rank a reference
   // carries indexes this.
-  std::vector<RefHandle> handles;
+  std::vector<detail::RefHandle> handles;
 
   ImportedNames importedNames;
 
@@ -52,7 +52,7 @@ struct DocumentReferences : RefResolver {
 
   // Resolves the references `which`, all or a run of them. Cancellation
   // propagates; any other exception from a provider fails that one reference.
-  virtual void force(std::span<const RefHandle> which,
+  virtual void force(std::span<const detail::RefHandle> which,
                      const CancellationToken& cancelToken) = 0;
 
   // Resolves the references whose name holds `offset` or ends there: a caret

@@ -351,7 +351,7 @@ bool DefaultIndexManager::visitReferences(
   return std::ranges::all_of(it->second, visitor);
 }
 
-cursiv::Published<DefaultIndexManager::Exports>::Read
+cursiv::detail::Published<DefaultIndexManager::Exports>::Read
 DefaultIndexManager::exportsView() const {
   if (auto live = _exports.read(); live) return live;
 

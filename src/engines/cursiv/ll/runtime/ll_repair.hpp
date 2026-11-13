@@ -39,10 +39,10 @@ inline bool ll_called_first(const LlContext& c) {
 // trivia already stands past the text, the record stays after it.
 template <const auto& T>
 CURSIV_NOINLINE inline NodeId ll_exit_at_end(LlContext& c,
-                                             CstBuilder::Open open,
+                                             detail::CstBuilder::Open open,
                                              TextOffset begin,
                                              std::uint32_t engine) {
-  const CstRun& run = c.tape.stream();
+  const detail::CstRun& run = c.tape.stream();
   const NodeCount n = run.records();
   if (c.laMode != kNoMode && !ll_called_first(c) &&
       (n == 0 || !run.at(n - 1).hidden))
@@ -52,7 +52,8 @@ CURSIV_NOINLINE inline NodeId ll_exit_at_end(LlContext& c,
 
 // A node's record, as the text bounds it.
 template <const auto& T>
-CURSIV_ALWAYS_INLINE inline NodeId ll_exit(LlContext& c, CstBuilder::Open open,
+CURSIV_ALWAYS_INLINE inline NodeId ll_exit(LlContext& c,
+                                           detail::CstBuilder::Open open,
                                            TextOffset begin,
                                            std::uint32_t engine) {
   if (c.at < begin && c.la.sym == kEofSymbol) [[unlikely]]
@@ -64,7 +65,7 @@ CURSIV_ALWAYS_INLINE inline NodeId ll_exit(LlContext& c, CstBuilder::Open open,
 // that end, which is the region's, unless trivia was written behind them.
 inline void ll_span_region_end(LlContext& c) {
   if (c.regionMark == kNoNode) return;
-  CstRun& run = c.tape.stream();
+  detail::CstRun& run = c.tape.stream();
   bool trivia = false;
   for (NodeCount k = c.regionMark; k < run.records(); ++k)
     trivia = trivia || run.at(k).hidden;
@@ -77,8 +78,8 @@ inline void ll_span_region_end(LlContext& c) {
 // Descent abandoned after the invention/depth limit still closes its regions.
 // Keep that evidence on the record, even when no child could be written.
 template <const auto& T>
-inline NodeId ll_close(LlContext& c, CstBuilder::Open open, TextOffset begin,
-                       std::uint32_t engine) {
+inline NodeId ll_close(LlContext& c, detail::CstBuilder::Open open,
+                       TextOffset begin, std::uint32_t engine) {
   const NodeId id = ll_exit<T>(c, open, begin, engine);
   if (c.give) {
     ll_mark(c, id);
@@ -92,13 +93,13 @@ inline NodeId ll_close(LlContext& c, CstBuilder::Open open, TextOffset begin,
 // record said anything, or holding only what an elected abandon gave up, it
 // says nothing, since no node was built.
 template <const auto& T>
-inline NodeId ll_close_over(LlContext& c, CstBuilder::Open open,
+inline NodeId ll_close_over(LlContext& c, detail::CstBuilder::Open open,
                             TextOffset begin, std::uint32_t engine) {
   // Only a repair gives anything up.
   if (!c.repaired) [[likely]]
     return ll_exit<T>(c, open, begin, engine);
   const NodeId id = ll_close<T>(c, open, begin, engine);
-  CstRun& run = c.tape.stream();
+  detail::CstRun& run = c.tape.stream();
   const NodeId first = id + 1 - run.at(id).subtreeSize;
   const bool holds = first <= c.lost && c.lost < id;
   if (!c.give && !holds) return id;
@@ -115,9 +116,10 @@ inline NodeId ll_close_over(LlContext& c, CstBuilder::Open open,
 // the turn's record reaches back over as its first child, under a record of
 // its own where it spans more than one.
 template <const auto& T>
-inline std::uint16_t ll_nest_receiver(LlContext& c, CstBuilder::Open region,
+inline std::uint16_t ll_nest_receiver(LlContext& c,
+                                      detail::CstBuilder::Open region,
                                       TextOffset begin, NodeCount from) {
-  const CstRun& run = c.tape.stream();
+  const detail::CstRun& run = c.tape.stream();
   unsigned seen = 0;
   for (NodeCount x = run.records(); x > from && seen < 2;
        x -= run.at(x - 1).subtreeSize)
@@ -159,7 +161,7 @@ inline void ll_write_insert(LlContext& c, std::uint16_t term, std::uint16_t row,
   // A record never goes behind the tape: where the trivia before the token
   // already stands, the record goes after it, still naming where the text
   // stops.
-  const CstRun& run = c.tape.stream();
+  const detail::CstRun& run = c.tape.stream();
   const TextOffset floor =
       run.records() != 0 ? run.at(run.records() - 1).end : 0;
   const TextOffset at = c.at > floor ? c.at : floor;
@@ -322,7 +324,7 @@ inline void ll_write(LlContext& c, std::uint16_t mode, const LlEdit& g) {
         return;
       }
       const NodeCount from = c.stack.begin(keep);
-      CstRun& run = c.tape.stream();
+      detail::CstRun& run = c.tape.stream();
       LlRepairRun& f = ll_run<T>(c);
       f.abandon = true;
       f.begin = from < run.records() ? run.at(from).begin : c.at;
@@ -353,7 +355,7 @@ inline bool ll_implied_holds(LlContext& c, std::uint16_t mode,
                              std::uint16_t pos) {
   if (!ll_condition<T>(c, condition, ll_normal_token<T>(c, c.la, mode), c.at))
     return false;
-  const CstRun& run = c.tape.stream();
+  const detail::CstRun& run = c.tape.stream();
   const TextOffset floor =
       run.records() != 0 ? run.at(run.records() - 1u).end : 0;
   const TextOffset at = std::max(c.at, floor);

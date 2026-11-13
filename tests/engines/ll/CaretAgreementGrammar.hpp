@@ -43,8 +43,9 @@ struct Base : cursiv::GrammarSpec {
   struct Narrow
       : rule<create<Link>(
             kw<"narrow"> +
-            ((assign<cursiv::xref<&Link::to, First>>(ref<Name>) + lit<"+">) |
-             (assign<cursiv::xref<&Link::to, Second>>(ref<Name>) +
+            ((assign<cursiv::GrammarSpec::xref<&Link::to, First>>(ref<Name>) +
+              lit<"+">) |
+             (assign<cursiv::GrammarSpec::xref<&Link::to, Second>>(ref<Name>) +
               lit<"-">)))> {};
   struct Same : rule<create<Link>(
                     kw<"same"> + ((assign<&Link::to>(ref<Name>) + lit<"+">) |
@@ -53,15 +54,16 @@ struct Base : cursiv::GrammarSpec {
   struct SameNarrow
       : rule<create<Link>(
             kw<"filtered"> +
-            ((assign<cursiv::xref<&Link::to, First>>(ref<Name>) + lit<"+">) |
-             (assign<cursiv::xref<&Link::to, First>>(ref<Name>) + lit<"-">)))> {
-  };
+            ((assign<cursiv::GrammarSpec::xref<&Link::to, First>>(ref<Name>) +
+              lit<"+">) |
+             (assign<cursiv::GrammarSpec::xref<&Link::to, First>>(ref<Name>) +
+              lit<"-">)))> {};
   struct Mixed
       : rule<create<Link>(
             kw<"mixed"> +
             ((assign<&Link::to>(ref<Name>) + lit<"+">) |
-             (assign<cursiv::xref<&Link::to, First>>(ref<Name>) + lit<"-">)))> {
-  };
+             (assign<cursiv::GrammarSpec::xref<&Link::to, First>>(ref<Name>) +
+              lit<"-">)))> {};
   struct Field
       : rule<create<Link>(kw<"field"> +
                           ((assign<&Link::to>(ref<Name>) + lit<"+">) |

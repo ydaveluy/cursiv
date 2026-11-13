@@ -3621,8 +3621,8 @@ void a_tape_is_declined_and_not_answered_from_the_start_state() {
   const std::string text = R"({"a":1})";
   cursiv::Cst tape(text);
   {
-    cursiv::CstBuilder builder(tape);
-    const cursiv::CstBuilder::Open all = builder.enter();
+    cursiv::detail::CstBuilder builder(tape);
+    const cursiv::detail::CstBuilder::Open all = builder.enter();
     builder.leaf(0, 1, cursiv::kNoElement);
     builder.leaf(1, 4, cursiv::kNoElement);
     builder.leaf(4, 5, cursiv::kNoElement);
@@ -3667,9 +3667,9 @@ void a_stamp_past_the_table_is_declined() {
   const auto answers = [&](std::uint32_t at, std::uint32_t before) {
     cursiv::Cst tape(text);
     {
-      cursiv::CstBuilder builder(tape);
+      cursiv::detail::CstBuilder builder(tape);
       builder.bind_stream();
-      const cursiv::CstBuilder::Open all = builder.enter();
+      const cursiv::detail::CstBuilder::Open all = builder.enter();
       builder.leaf(0, 1, before);
       builder.leaf(1, 4, before);
       builder.leaf(4, 5, at);

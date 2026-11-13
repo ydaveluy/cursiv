@@ -23,7 +23,7 @@ inline constexpr cursiv::engine::RepairBudget kUnbounded{
 template <const auto& A>
 struct Stand {
   cursiv::Cst cst;
-  cursiv::CstBuilder builder;
+  cursiv::detail::CstBuilder builder;
   cursiv::engine::LrContext c;
   std::vector<cursiv::engine::Scan> room;
 

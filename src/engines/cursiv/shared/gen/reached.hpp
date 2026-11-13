@@ -230,7 +230,8 @@ std::false_type declares_rule(const void*);
 template <class S, class E>
 inline constexpr bool reads_token = word_of<E>;
 template <class S, class... Es>
-inline constexpr bool reads_token<S, Choice<Es...>> = (reads_token<S, Es> && ...);
+inline constexpr bool reads_token<S, Choice<Es...>> =
+    (reads_token<S, Es> && ...);
 template <class S, class R>
 inline constexpr bool reads_token<S, Ref<R>> =
     is_terminal_rule<typename S::template rule<declared_of_t<R>>>;

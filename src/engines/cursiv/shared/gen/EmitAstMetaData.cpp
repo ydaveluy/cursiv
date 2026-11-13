@@ -177,7 +177,8 @@ std::string emit_ast_metadata(const AstRegistry& registry,
   if (const std::size_t bound = registry.reference_bound(); bound != 0) {
     const auto rows = std::views::iota(std::size_t{0}, bound);
     out.write(emit_table(
-        "constexpr ::cursiv::RefOps kRefOps[]", rows, [&](std::size_t f) {
+        "constexpr ::cursiv::detail::RefOps kRefOps[]", rows,
+        [&](std::size_t f) {
           return is_ref_content(fields[f].content)
                      ? concat("::cursiv::engine::ref_ops_of<", tags[f], ", ",
                               narrow_list(fields[f].narrows), ">()")
@@ -226,7 +227,7 @@ std::string emit_ast_metadata(const AstRegistry& registry,
 std::string emit_ast_metadata_record(const AstRegistry& registry) {
   const std::size_t bound = registry.reference_bound();
   const bool ref = bound != 0;
-  return concat(R"(constexpr ::cursiv::AstMetaData kAstMetaData{
+  return concat(R"(constexpr ::cursiv::detail::AstMetaData kAstMetaData{
     .types = ast_detail::kTypes,
     .subtypes = ast_detail::kSubtypes,
     .derivesBits = ast_detail::kDerives,

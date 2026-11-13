@@ -66,7 +66,7 @@ void explicit_statement_newlines_win_over_their_trivia_twin() {
   }());
   {
     cursiv::Cst tree("\n  b");
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     builder.bind_stream();
     cursiv::engine::LlContext context(tree.text(), builder);
     const auto scan =
@@ -78,7 +78,7 @@ void explicit_statement_newlines_win_over_their_trivia_twin() {
   }
   {
     cursiv::Cst tree("\na");
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     builder.bind_stream();
     cursiv::engine::LlContext context(tree.text(), builder);
     cursiv::engine::LlMask<table.termWords> viable;
@@ -113,7 +113,7 @@ void explicit_statement_newlines_win_over_their_trivia_twin() {
   {
     // Inside brackets the same newline remains a blank.
     cursiv::Cst tree("\n");
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     builder.bind_stream();
     cursiv::engine::LlContext context(tree.text(), builder);
     context.indent.depth = 1;

@@ -558,10 +558,11 @@ void a_wide_nullable_closure_keeps_candidate_order() {
   const std::string_view spellings[] = {"x", "y"};
   const cursiv::detail::GrammarTerminal words[] = {
       {}, {{}, {}, false, {spellings, 1}}, {{}, {}, false, {spellings + 1, 1}}};
-  const cursiv::GrammarMetaData meta{.terminals = words, .terminalCount = 3};
+  const cursiv::detail::GrammarMetaData meta{.terminals = words,
+                                             .terminalCount = 3};
   const cursiv::engine::StampedGrammar grammar(meta, table.stamp);
   cursiv::Cst c("");
-  cursiv::CstBuilder builder(c);
+  cursiv::detail::CstBuilder builder(c);
   builder.bind_stream();
   std::vector<cursiv::NextFeature> out;
   const auto start = std::chrono::steady_clock::now();

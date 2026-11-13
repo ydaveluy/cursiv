@@ -11,7 +11,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace cursiv {
+namespace cursiv::engine {
 
 // `N`, the vertex count where it is a constant: the answer is then arrays,
 // and a constant expression may hold it.
@@ -125,4 +125,4 @@ struct StrongComponents {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::engine

@@ -21,16 +21,16 @@ inline constexpr unsigned kSpellStyles = 4;
 
 // What an assertion forbids the next byte spelled: the refusal ends there.
 struct Veto {
-  CharSet bytes{};
+  cursiv::detail::CharSet bytes{};
   bool on = false;
 
-  void forbid(const CharSet& s) {
+  void forbid(const cursiv::detail::CharSet& s) {
     bytes.merge(s);
     on = true;
   }
   void clear() {
     if (!on) return;
-    bytes = CharSet{};
+    bytes = cursiv::detail::CharSet{};
     on = false;
   }
   [[nodiscard]] bool forbids(unsigned char b) const {

@@ -11,8 +11,10 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 
 namespace cursiv {
-struct AstMetaData;
 struct AstNode;
+namespace detail {
+struct AstMetaData;
+}
 }  // namespace cursiv
 
 namespace cursiv::engine {
@@ -46,7 +48,7 @@ using AstEntryFn = void (*)(AstReducer&, NodeId, const CstNode&);
 using AstApplyFn = bool (*)(AstReducer&, const Pending&, const Made&);
 
 struct AstActions {
-  const AstMetaData* meta = nullptr;
+  const detail::AstMetaData* meta = nullptr;
 
   const MakeFn* makes = nullptr;
 

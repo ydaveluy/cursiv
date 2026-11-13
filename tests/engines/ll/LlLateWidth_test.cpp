@@ -57,7 +57,7 @@ void a_long_shared_prefix_is_read_whole() {
   for (unsigned i = 0; i < 128; ++i) text += "word;";
   text += "5px!";
   cursiv::Cst tree(text);
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   builder.bind_stream();
   cursiv::engine::LlContext context(text, builder);
   cursiv::engine::ll_peek<table>(context, table.decisions[decision].mode);

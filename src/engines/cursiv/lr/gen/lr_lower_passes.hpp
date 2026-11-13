@@ -19,7 +19,7 @@
 #include "cursiv/shared/gen/InfixOp.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
-#include "cursiv/utils/StrongComponents.hpp"
+#include "cursiv/shared/utils/StrongComponents.hpp"
 
 namespace cursiv::engine {
 

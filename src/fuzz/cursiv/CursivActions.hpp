@@ -126,11 +126,11 @@ struct made_type {
   using type = void;
 };
 template <class T, class E>
-struct made_type<Create<T, E>> {
+struct made_type<cursiv::detail::Create<T, E>> {
   using type = T;
 };
 template <class T, auto P, class E>
-struct made_type<Nest<T, P, E>> {
+struct made_type<cursiv::detail::Nest<T, P, E>> {
   using type = T;
 };
 
@@ -140,28 +140,28 @@ struct directive {
   static constexpr bool is_one = false;
 };
 template <auto Sp, class E>
-struct directive<Assign<Sp, E>> {
+struct directive<cursiv::detail::Assign<Sp, E>> {
   static constexpr bool is_one = true;
   static constexpr bool enable = false;
   static constexpr auto ptr = cursiv::detail::spec_ptr<Sp>;
   using payload = E;
 };
 template <auto Sp, class E>
-struct directive<Append<Sp, E>> {
+struct directive<cursiv::detail::Append<Sp, E>> {
   static constexpr bool is_one = true;
   static constexpr bool enable = false;
   static constexpr auto ptr = cursiv::detail::spec_ptr<Sp>;
   using payload = E;
 };
 template <auto P, class E>
-struct directive<Flag<P, E>> {
+struct directive<cursiv::detail::Flag<P, E>> {
   static constexpr bool is_one = true;
   static constexpr bool enable = true;
   static constexpr auto ptr = P;
   using payload = E;
 };
 template <class T, auto P, class E>
-struct directive<Nest<T, P, E>> {
+struct directive<cursiv::detail::Nest<T, P, E>> {
   static constexpr bool is_one = true;
   static constexpr bool enable = false;
   static constexpr auto ptr = P;
@@ -275,7 +275,7 @@ struct payload_rule {
 };
 template <class C, class R>
 struct payload_rule<C, R, true> {
-  using resolved = typename cursiv::Normalize<C>::template rule<R>;
+  using resolved = typename cursiv::detail::Normalize<C>::template rule<R>;
   using type = std::conditional_t<std::is_void_v<resolved>, R, resolved>;
 };
 
@@ -363,11 +363,11 @@ Write write_text_of(AstNode& owner, [[maybe_unused]] ElementId payload,
 template <class E>
 inline constexpr bool root_creates = false;
 template <class T, class E>
-inline constexpr bool root_creates<Create<T, E>> = true;
+inline constexpr bool root_creates<cursiv::detail::Create<T, E>> = true;
 template <class C, class R>
 inline constexpr bool rule_creates =
     root_creates<cursiv::detail::declared_body_t<
-        typename cursiv::Normalize<C>::template rule<R>>>;
+        typename cursiv::detail::Normalize<C>::template rule<R>>>;
 
 template <class C, class E>
 consteval MakeFn make_entry() {
@@ -485,9 +485,9 @@ template <class C, class R>
 Write fold_of(ElementId op, AstNode& node, AstNode* lhs, std::string_view text,
               AstNode* rhs) {
   using N = typename R::node_type;
-  using LT = std::remove_pointer_t<typename member_traits<
+  using LT = std::remove_pointer_t<typename cursiv::detail::member_traits<
       std::remove_cv_t<decltype(R::left_pointer)>>::type>;
-  using RT = std::remove_pointer_t<typename member_traits<
+  using RT = std::remove_pointer_t<typename cursiv::detail::member_traits<
       std::remove_cv_t<decltype(R::right_pointer)>>::type>;
   if (!node_is<N>(&node) || !node_is<LT>(lhs) || !node_is<RT>(rhs))
     return Write::not_modelled;

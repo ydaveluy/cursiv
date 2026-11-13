@@ -771,18 +771,6 @@ struct rule_of<Body, As<C, E>> {
 
 }  // namespace detail
 
-// `as<T>(e)` converts with `default_converter<T>`; `as<X>(e)`, for a constant
-// X, with the callable X or to the value X.
-template <class T, Expr E>
-constexpr auto as(E) {
-  return detail::as_with<T, std::remove_cvref_t<E>>();
-}
-template <auto X, Expr E>
-constexpr auto as(E) {
-  return detail::as_with<typename detail::as_conv<X>::type,
-                         std::remove_cvref_t<E>>();
-}
-
 namespace detail {
 
 // One converter per rule: the slot holds at most one option.
@@ -1645,8 +1633,9 @@ struct extends : Parents... {
 };
 
 // Everything a grammar spells, as members, so a derived grammar writes
-// `terminal<cr<"a-z"> + many(w)>` unqualified. A generated grammar needs an
-// `entry`; `ignored` and `hidden` default to nothing.
+// `terminal<cr<"a-z"> + many(w)>` unqualified; outside a grammar the same names
+// are `GrammarSpec::lit<"x">`. A generated grammar needs an `entry`; `ignored`
+// and `hidden` default to nothing.
 struct GrammarSpec {
   template <class... Ts>
   using list = TypeList<Ts...>;
@@ -1666,31 +1655,39 @@ struct GrammarSpec {
   using ignored = TypeList<>;
   using hidden = TypeList<>;
 
-  // Forwarded to `expr.hpp`, so both spellings of a token agree: `kw<"end">`
-  // takes this grammar's `word_boundary`.
+  // `kw<S>` is `lit<S, !boundary>` when S ends in the grammar's
+  // `word_boundary` class, else plain `lit<S>`: `kw<"if">` refuses `iffy`,
+  // `kw<"[">` accepts `[abc`. `lit<S, G>` applies the guard `G` as written.
   template <str S, auto G = detail::no_guard>
-  static constexpr auto lit = cursiv::lit<S, G>;
+  static constexpr auto lit =
+      detail::make_lit<S, false, std::remove_cvref_t<decltype(G)>>();
   template <str S>
-  static constexpr auto kw = cursiv::kw<S>;
+  static constexpr detail::Lit<S, false, detail::WordBound> kw{};
   template <str S>
-  static constexpr auto ikw = cursiv::ikw<S>;
+  static constexpr auto ikw = detail::make_ikw<S>();
+  // A class of characters: a bracket expression of std::regex (ECMAScript), its
+  // brackets left out, spelling scalars -- `\xHH`, `\uHHHH` and `\u{H...}` are
+  // scalars too. A leading `^` complements among all characters.
   template <str Spec>
-  static constexpr auto cr = cursiv::cr<Spec>;
+  static constexpr auto cr = detail::cr_of<Spec>();
   static constexpr detail::AnyChar any{};
-  static constexpr Byte byte{};
+  static constexpr detail::Byte byte{};
   template <class R>
-  static constexpr Ref<R> ref{};
+  static constexpr detail::Ref<R> ref{};
   static constexpr detail::Super super{};
 
   template <class T>
-  static constexpr Create<T, Epsilon> create{};
-  template <class T, Expr E>
-  static constexpr auto as(E e) {
-    return cursiv::as<T>(e);
+  static constexpr detail::Create<T, detail::Epsilon> create{};
+  // `as<T>(e)` converts with `default_converter<T>`; `as<X>(e)`, for a constant
+  // X, with the callable X or to the value X.
+  template <class T, detail::Expr E>
+  static constexpr auto as(E) {
+    return detail::as_with<T, std::remove_cvref_t<E>>();
   }
-  template <auto X, Expr E>
-  static constexpr auto as(E e) {
-    return cursiv::as<X>(e);
+  template <auto X, detail::Expr E>
+  static constexpr auto as(E) {
+    return detail::as_with<typename detail::as_conv<X>::type,
+                           std::remove_cvref_t<E>>();
   }
   template <auto P, class N>
   static constexpr detail::XRef<P, N> xref{};
@@ -1700,47 +1697,82 @@ struct GrammarSpec {
   static constexpr detail::AppendFn<S> append{};
   template <auto P>
   static constexpr detail::FlagFn<P> flag{};
-  template <class T, auto P, Expr E>
-  static constexpr auto nest(E e) {
-    return cursiv::nest<T, P>(e);
+  // Two spellings, one node: `nest<T, &T::f>` names the wrapper, `nest<&T::f>`
+  // lets the member's class name it.
+  template <class T, auto P, detail::Expr E>
+  static constexpr detail::Nest<T, P, std::remove_cvref_t<E>> nest(E) {
+    return {};
   }
-  template <auto P, Expr E>
-  static constexpr auto nest(E e) {
-    return cursiv::nest<P>(e);
+  template <auto P, detail::Expr E>
+  static constexpr detail::Nest<
+      typename detail::member_traits<decltype(P)>::class_type, P,
+      std::remove_cvref_t<E>>
+  nest(E) {
+    return {};
   }
-  template <Expr A, Expr B>
-  static constexpr auto through(A open, B close) {
-    return cursiv::through(open, close);
+  template <detail::Expr A, detail::Expr B>
+  static constexpr auto through(A, B) {
+    return detail::Through<std::remove_cvref_t<A>, std::remove_cvref_t<B>>{};
   }
-  template <Expr P, Expr B>
-  static constexpr auto commit(P prefix, B body) {
-    return cursiv::commit(prefix, body);
+  template <detail::Expr P, detail::Expr B>
+  static constexpr auto commit(P, B) {
+    return detail::Commit<std::remove_cvref_t<P>, std::remove_cvref_t<B>>{};
   }
-  template <class G, Expr A, Expr B>
-  static constexpr auto section(A open, B close) {
-    return cursiv::section<G>(open, close);
+  template <class G, detail::Expr A, detail::Expr B>
+  static constexpr auto section(A, B) {
+    return detail::Embed<G, detail::Seq<std::remove_cvref_t<A>, detail::Ref<G>,
+                                        std::remove_cvref_t<B>>>{};
+  }
+  // `implied(tok, cond)` reads `tok`, or stands for it where `cond` holds and
+  // the current token is refused.
+  template <detail::Expr T, detail::Expr C>
+  static constexpr auto implied(T, C) {
+    using Tok = std::remove_cvref_t<T>;
+    return detail::Choice<Tok, detail::Implied<Tok, std::remove_cvref_t<C>>>{};
   }
 
-  static constexpr auto left = [](Expr auto op) { return cursiv::left(op); };
-  static constexpr auto right = [](Expr auto op) { return cursiv::right(op); };
-  static constexpr auto nonassoc = [](Expr auto op) {
-    return cursiv::nonassoc(op);
+  // `left`, `right` and `nonassoc` yield a table of one level; `levels(...)`
+  // lists several. `levels(left(a), right(b))` is
+  // `Levels<LeftAssoc<a>, RightAssoc<b>>`; operators match longest first.
+  static constexpr auto left = [](detail::Expr auto op) {
+    return detail::Levels<
+        detail::LeftAssoc<std::remove_cvref_t<decltype(op)>>>{};
   };
-  template <auto OpPtr, auto OperandPtr, Expr E>
-  static constexpr auto prefix(E op) {
-    return cursiv::prefix<OpPtr, OperandPtr>(op);
+  static constexpr auto right = [](detail::Expr auto op) {
+    return detail::Levels<
+        detail::RightAssoc<std::remove_cvref_t<decltype(op)>>>{};
+  };
+  static constexpr auto nonassoc = [](detail::Expr auto op) {
+    return detail::Levels<
+        detail::NonAssoc<std::remove_cvref_t<decltype(op)>>>{};
+  };
+  // `prefix<&U::op, &U::operand>(op)` builds the class declaring `op`;
+  // `prefix<U>(op)` builds `U` through its members `op` and `operand`.
+  // `postfix` names the operand first, as the text reads.
+  template <auto OpPtr, auto OperandPtr, detail::Expr E>
+  static constexpr auto prefix(E) {
+    return detail::Levels<detail::UnaryLevel<
+        Association::prefix,
+        typename detail::member_traits<decltype(OpPtr)>::class_type, OpPtr,
+        OperandPtr, std::remove_cvref_t<E>>>{};
   }
-  template <class T, Expr E>
-  static constexpr auto prefix(E op) {
-    return cursiv::prefix<T>(op);
+  template <class T, detail::Expr E>
+  static constexpr auto prefix(E) {
+    return detail::Levels<detail::UnaryLevel<
+        Association::prefix, T, &T::op, &T::operand, std::remove_cvref_t<E>>>{};
   }
-  template <auto OperandPtr, auto OpPtr, Expr E>
-  static constexpr auto postfix(E op) {
-    return cursiv::postfix<OperandPtr, OpPtr>(op);
+  template <auto OperandPtr, auto OpPtr, detail::Expr E>
+  static constexpr auto postfix(E) {
+    return detail::Levels<detail::UnaryLevel<
+        Association::postfix,
+        typename detail::member_traits<decltype(OpPtr)>::class_type, OpPtr,
+        OperandPtr, std::remove_cvref_t<E>>>{};
   }
-  template <class T, Expr E>
-  static constexpr auto postfix(E op) {
-    return cursiv::postfix<T>(op);
+  template <class T, detail::Expr E>
+  static constexpr auto postfix(E) {
+    return detail::Levels<
+        detail::UnaryLevel<Association::postfix, T, &T::op, &T::operand,
+                           std::remove_cvref_t<E>>>{};
   }
   static constexpr detail::LevelsFn levels{};
   static constexpr detail::SkipFn skip{};
@@ -1758,19 +1790,62 @@ struct GrammarSpec {
   template <class Tag>
   static constexpr detail::MarkFn<Tag> mark{};
   template <class Tag>
-  static constexpr Same<Tag> same{};
-  static constexpr Indent indent{};
-  static constexpr Dedent dedent{};
+  static constexpr detail::Same<Tag> same{};
+  static constexpr detail::Indent indent{};
+  static constexpr detail::Dedent dedent{};
 
   // The six classes of regex: space, word, digit, and their complements.
-  static constexpr auto s = cursiv::s;
-  static constexpr auto S = cursiv::S;
-  static constexpr auto w = cursiv::w;
-  static constexpr auto W = cursiv::W;
-  static constexpr auto d = cursiv::d;
-  static constexpr auto D = cursiv::D;
-  using uc = cursiv::uc;
-  using gap = cursiv::gap;
+  static constexpr auto s = cr<R"(\s)">;
+  static constexpr auto S = ~s;
+  static constexpr auto w = cr<"a-zA-Z0-9_">;
+  static constexpr auto W = ~w;
+  static constexpr auto d = cr<"0-9">;
+  static constexpr auto D = ~d;
+  // The Unicode properties, which hold scalars only: a general category and its
+  // majors, and the identifier, space and alphabetic properties.
+  struct uc {
+    template <unicode::Property P>
+    using of = detail::CpSet<detail::cp_bit(P), false, "">;
+    static constexpr of<unicode::Property::L> L{};
+    static constexpr of<unicode::Property::M> M{};
+    static constexpr of<unicode::Property::N> N{};
+    static constexpr of<unicode::Property::P> P{};
+    static constexpr of<unicode::Property::S> S{};
+    static constexpr of<unicode::Property::Z> Z{};
+    static constexpr of<unicode::Property::C> C{};
+    static constexpr of<unicode::Property::Lu> Lu{};
+    static constexpr of<unicode::Property::Ll> Ll{};
+    static constexpr of<unicode::Property::Lt> Lt{};
+    static constexpr of<unicode::Property::Lm> Lm{};
+    static constexpr of<unicode::Property::Lo> Lo{};
+    static constexpr of<unicode::Property::Mn> Mn{};
+    static constexpr of<unicode::Property::Mc> Mc{};
+    static constexpr of<unicode::Property::Me> Me{};
+    static constexpr of<unicode::Property::Nd> Nd{};
+    static constexpr of<unicode::Property::Nl> Nl{};
+    static constexpr of<unicode::Property::No> No{};
+    static constexpr of<unicode::Property::Pc> Pc{};
+    static constexpr of<unicode::Property::Pd> Pd{};
+    static constexpr of<unicode::Property::Ps> Ps{};
+    static constexpr of<unicode::Property::Pe> Pe{};
+    static constexpr of<unicode::Property::Pi> Pi{};
+    static constexpr of<unicode::Property::Pf> Pf{};
+    static constexpr of<unicode::Property::Po> Po{};
+    static constexpr of<unicode::Property::Sm> Sm{};
+    static constexpr of<unicode::Property::Sc> Sc{};
+    static constexpr of<unicode::Property::Sk> Sk{};
+    static constexpr of<unicode::Property::So> So{};
+    static constexpr of<unicode::Property::Zs> Zs{};
+    static constexpr of<unicode::Property::Zl> Zl{};
+    static constexpr of<unicode::Property::Zp> Zp{};
+    static constexpr of<unicode::Property::Cc> Cc{};
+    static constexpr of<unicode::Property::Cf> Cf{};
+    static constexpr of<unicode::Property::Co> Co{};
+    static constexpr of<unicode::Property::XID_Start> XID_Start{};
+    static constexpr of<unicode::Property::XID_Continue> XID_Continue{};
+    static constexpr of<unicode::Property::White_Space> White_Space{};
+    static constexpr of<unicode::Property::Alphabetic> Alphabetic{};
+  };
 
   // The characters a keyword may not run into, so `kw<"if">` does not match
   // inside `iffy`. Override it like `ignored`, such as
@@ -1782,14 +1857,30 @@ struct GrammarSpec {
   // Between an opener and its closer the indentation says nothing: a
   // grammar with `indent`/`dedent` names its brackets here, literals or
   // terminals -- `static constexpr auto indent_open = lit<"("> | ref<LBRACK>;`.
-  static constexpr Epsilon indent_open{};
-  static constexpr Epsilon indent_close{};
+  static constexpr detail::Epsilon indent_open{};
+  static constexpr detail::Epsilon indent_close{};
   // The terminal that ends a statement; between an opener and its closer it
   // is trivia.
   using indent_newline = void;
-  static constexpr auto eol = cursiv::eol;
-  static constexpr auto eof = cursiv::eof;
-  static constexpr std::size_t kUnbounded = cursiv::kUnbounded;
+  // End of line, which consumes its terminator (`\r\n` before `\r`), and end
+  // of input, which is zero-width: inside a terminal, `eof` tests the raw
+  // buffer end; in a rule, the end after the active skipper has read trivia.
+  static constexpr detail::Eol eol{};
+  static constexpr detail::Eof eof{};
+  // The conditions on the gap before the current token, by name.
+  struct gap {
+    template <detail::Expr E>
+    static constexpr detail::GapHas<std::remove_cvref_t<E>> has(E) {
+      return {};
+    }
+    template <detail::Expr E>
+    static constexpr detail::GapIs<std::remove_cvref_t<E>> is(E) {
+      return {};
+    }
+    static constexpr detail::GapHas<detail::Eol> line{};
+    static constexpr detail::GapIs<detail::Epsilon> none{};
+  };
+  static constexpr std::size_t kUnbounded = detail::kUnbounded;
 };
 
 }  // namespace cursiv

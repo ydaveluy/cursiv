@@ -72,7 +72,7 @@ void a_stack_past_its_offsets_is_refused() {
   if constexpr (sizeof(std::size_t) >= 8) {
     static constexpr std::uint32_t kBytes[] = {0xFFFFFFF0u};
     cursiv::Cst tree("");
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     cursiv::engine::LlContext c("", builder);
     cursiv::engine::LlMachine machine;
     bool refused = false;
@@ -110,11 +110,11 @@ cursiv::AstNode* make(cursiv::engine::AstBuildCtx& context, cursiv::NodeId id) {
 
 void entry(cursiv::engine::AstReducer& builder, cursiv::NodeId id,
            const cursiv::CstNode& node) {
-  builder.create<make, nullptr, false>(id, node, 0, cursiv::kNoField,
-                                       cursiv::ActKind::create);
+  builder.create<make, nullptr, false>(id, node, 0, cursiv::detail::kNoField,
+                                       cursiv::detail::ActKind::create);
 }
 
-const cursiv::AstMetaData metadata{};
+const cursiv::detail::AstMetaData metadata{};
 const cursiv::engine::MakeFn makes[] = {make};
 const cursiv::engine::AstEntryFn entries[] = {entry};
 const cursiv::engine::AstActions actions{
@@ -122,7 +122,7 @@ const cursiv::engine::AstActions actions{
 
 cursiv::Cst tape(std::string_view text) {
   cursiv::Cst tree(text);
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   builder.bind_stream();
   const auto opened = builder.enter();
   for (cursiv::TextOffset at = 0; at < text.size(); ++at)
@@ -203,7 +203,7 @@ void the_parser_propagates_cancellation_to_ast_materialisation() {
 void ast_materialisation_rejects_an_invalid_entry_extent() {
   for (const cursiv::NodeCount extent : {0u, 2u}) {
     cursiv::Cst tree("x");
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     builder.bind_stream();
     const auto root =
         builder.leaf(0, 1, cursiv::engine::StampLayout{}.make(0, 0));
@@ -305,7 +305,7 @@ struct PredictionAt {
 
   std::string_view text;
   cursiv::Cst tree;
-  cursiv::CstBuilder builder;
+  cursiv::detail::CstBuilder builder;
   cursiv::engine::LlContext context;
   std::uint16_t decision;
 };
@@ -1140,7 +1140,7 @@ void a_search_reads_keywords_in_the_shared_alphabet() {
       if (atom.label == identifier) cfg[1].state = s;
     }
   cursiv::Cst tree("export");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   cursiv::engine::LlContext c("export", builder);
   cursiv::engine::LlSearch search(table.atn, c.len);
   search.limit = 10000;
@@ -1194,7 +1194,7 @@ void an_optional_prefix_keeps_its_token_due_across_a_required_call() {
   // caller without that evidence, which must grant no free insertion.
   for (unsigned source = 0; source < 4; ++source) {
     cursiv::Cst tree("export");
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     if (source == 2) builder.leaf(0, 6, 0);
     cursiv::engine::LlContext c("export", builder);
     cursiv::engine::LlSearch s(table.atn, c.len);
@@ -1329,7 +1329,7 @@ void trailing_trivia_is_read_after_the_entry_region() {
   const std::string_view text = "let a = 1;\n// tail\n";
   for (const bool classified : {false, true}) {
     cursiv::Cst tree(text);
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     builder.bind_stream();
     builder.leaf(0, 10,
                  cursiv::engine::StampLayout{}.make(cursiv::engine::kNoRow, 0));
@@ -1677,7 +1677,7 @@ void repairs_before_trailing_whitespace_keep_parent_spans_valid() {
   // A group opens at the next visible token, while recovery inserts before
   // the ignored gap preceding it. The parent must cover that earlier child.
   cursiv::Cst tree("x  ");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   const auto open = builder.enter();
   builder.leaf(1, 1, 0);
   const auto parent = builder.exit(open, 3, 0);
@@ -1861,7 +1861,7 @@ using StripFirstConverter =
 // must leave the field at its default instead of stripping an empty value.
 void data_conversions_require_every_part_to_have_been_written() {
   cursiv::Cst tree(" ");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   builder.bind_stream();
   const auto open = builder.enter();
   const auto missing = builder.leaf(0, 0, 0);
@@ -1883,7 +1883,7 @@ void data_conversions_require_every_part_to_have_been_written() {
   CHECK(value == "default");
 
   cursiv::Cst written("@name");
-  cursiv::CstBuilder writtenBuilder(written);
+  cursiv::detail::CstBuilder writtenBuilder(written);
   writtenBuilder.bind_stream();
   const auto leaf = writtenBuilder.leaf(0, 5, 0);
   context.cst = &written;
@@ -2076,10 +2076,10 @@ cursiv::AstNode* make(cursiv::engine::AstBuildCtx& ctx, cursiv::NodeId id) {
 }
 void entry(cursiv::engine::AstReducer& builder, cursiv::NodeId id,
            const cursiv::CstNode& node) {
-  builder.create<make, nullptr, false>(id, node, 0, cursiv::kNoField,
-                                       cursiv::ActKind::create);
+  builder.create<make, nullptr, false>(id, node, 0, cursiv::detail::kNoField,
+                                       cursiv::detail::ActKind::create);
 }
-const cursiv::AstMetaData metadata{};
+const cursiv::detail::AstMetaData metadata{};
 const cursiv::engine::MakeFn makes[] = {make};
 const cursiv::engine::AstEntryFn entries[] = {entry};
 const cursiv::engine::AstActions actions{

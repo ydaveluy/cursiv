@@ -193,7 +193,7 @@ struct RefusingResource : std::pmr::memory_resource {
 
 void reservation_sizes_do_not_wrap() {
   RefusingResource memory;
-  cursiv::CstRun run;
+  cursiv::detail::CstRun run;
   run.bind(&memory);
   bool threw = false;
   try {
@@ -299,7 +299,7 @@ void a_stopped_parse_frees_what_it_built() {
 }
 
 void a_failed_replacement_keeps_the_published_value_alive() {
-  cursiv::Published<int> published;
+  cursiv::detail::Published<int> published;
   auto first = std::make_shared<const int>(1);
   const std::weak_ptr<const int> life = first;
   published.publish(std::move(first));

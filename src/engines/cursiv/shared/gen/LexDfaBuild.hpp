@@ -13,20 +13,20 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/shared/gen/PartitionRefine.hpp"
-#include "cursiv/utils/StrongComponents.hpp"
 #include "cursiv/shared/gen/ChainIndex.hpp"
 #include "cursiv/shared/gen/LexAlphabet.hpp"
 #include "cursiv/shared/gen/LexKeywordCut.hpp"
 #include "cursiv/shared/gen/LexNfaPool.hpp"
 #include "cursiv/shared/gen/LexRelayGen.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/shared/gen/PartitionRefine.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/shared/utils/StrongComponents.hpp"
 
 namespace cursiv::engine {
 

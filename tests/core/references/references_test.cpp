@@ -72,8 +72,8 @@ namespace {
 // One reference site, filled by hand, which is what `ReferenceInfo` is for: a
 // content assist has no reference object either. The columns come off the
 // generated metadata, indexed by the handle's own row.
-cursiv::ReferenceInfo site_of(const cursiv::AstMetaData& meta,
-                              const cursiv::RefHandle& h,
+cursiv::ReferenceInfo site_of(const cursiv::detail::AstMetaData& meta,
+                              const cursiv::detail::RefHandle& h,
                               std::string_view text) {
   return {.container = h.owner,
           .referenceText = text,
@@ -1025,11 +1025,11 @@ struct WiderSiteReferences final : cursiv::DocumentReferences {
   Answer resolve(std::uint32_t rank) const override {
     return inner->resolve(rank);
   }
-  cursiv::RefState resolveAll(std::uint32_t rank,
-                              cursiv::MultiRefItems& out) const override {
+  cursiv::RefState resolveAll(
+      std::uint32_t rank, cursiv::detail::MultiRefItems& out) const override {
     return inner->resolveAll(rank, out);
   }
-  void force(std::span<const cursiv::RefHandle> which,
+  void force(std::span<const cursiv::detail::RefHandle> which,
              const cursiv::CancellationToken& token) override {
     inner->force(which, token);
   }
@@ -1833,7 +1833,7 @@ void the_whole_candidate_set_is_honoured() {
   CHECK(document->parseResult.references->handles.size() == 2);
 
   for (std::size_t i = 0; i < 2; ++i) {
-    const cursiv::RefHandle& handle =
+    const cursiv::detail::RefHandle& handle =
         document->parseResult.references->handles[i];
     const cursiv::ReferenceInfo context = site(*document, i);
     const std::string_view text =

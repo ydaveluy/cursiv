@@ -142,7 +142,7 @@ class DefaultIndexManager : public IndexManager,
   // write changed the rows it was built from.
   class IncomingView {
    public:
-    explicit IncomingView(Published<Incoming>::Read published) noexcept
+    explicit IncomingView(detail::Published<Incoming>::Read published) noexcept
         : _published(std::move(published)) {}
     explicit IncomingView(std::shared_ptr<const Incoming> own) noexcept
         : _own(std::move(own)) {}
@@ -151,7 +151,7 @@ class DefaultIndexManager : public IndexManager,
     }
 
    private:
-    std::optional<Published<Incoming>::Read> _published;
+    std::optional<detail::Published<Incoming>::Read> _published;
     std::shared_ptr<const Incoming> _own;
   };
 
@@ -187,8 +187,8 @@ class DefaultIndexManager : public IndexManager,
   // Null once a write drops it, before changing its table; the next reader
   // rebuilds and publishes it, unless a write came in since. Published rather
   // than atomic: the scope path reads the export view once per reference.
-  mutable Published<Exports> _exports;
-  mutable Published<Incoming> _incoming;
+  mutable detail::Published<Exports> _exports;
+  mutable detail::Published<Incoming> _incoming;
 
   // `_mutex` held by the caller.
   bool dropContent(DocumentId document);
@@ -197,7 +197,7 @@ class DefaultIndexManager : public IndexManager,
   void affectImporters(const Exported& exports);
   // Each takes `_mutex` only when nothing is published. The handle keeps the
   // snapshot alive for the whole read, as the answers point into it.
-  [[nodiscard]] Published<Exports>::Read exportsView() const;
+  [[nodiscard]] detail::Published<Exports>::Read exportsView() const;
   [[nodiscard]] IncomingView incomingView() const;
 };
 

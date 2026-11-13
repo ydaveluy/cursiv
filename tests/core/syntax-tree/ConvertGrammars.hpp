@@ -354,7 +354,7 @@ struct G : cursiv::GrammarSpec {
                        option(lit<"!"> +
                               assign<&dv::Doc::quote>(ref<QUOTED>))> {};
   struct CompName : rule<ref<ID> + lit<"."> + ref<QUOTED>> {};
-  struct CompRoot : rule<cursiv::create<comp::N> +
+  struct CompRoot : rule<cursiv::GrammarSpec::create<comp::N> +
                          assign<&comp::N::name>(ref<CompName>)> {};
   struct COPIED : terminal<as<materialized::copy_unquoted>(
                       lit<"\""> + many(cr<"a-z">) + lit<"\"">)> {};

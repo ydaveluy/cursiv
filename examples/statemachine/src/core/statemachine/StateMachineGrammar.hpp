@@ -5,24 +5,22 @@
 
 namespace sm {
 
-namespace x = cursiv;
-
-inline constexpr auto statemachineKw = x::ikw<"statemachine">.doc<
-    "Starts the document and names the state machine.">();
-inline constexpr auto eventsKw =
-    x::ikw<"events">.doc<"Opens the events the machine reacts to.">();
-inline constexpr auto initialStateKw =
-    x::ikw<"initialState">.doc<"The state the machine starts in.">();
-inline constexpr auto stateKw =
-    x::ikw<"state">.doc<"Declares a state, closed by `end`.">();
-inline constexpr auto endKw =
-    x::ikw<"end">.doc<"Closes the state opened by `state`.">();
-inline constexpr auto commandsKw =
-    x::ikw<"commands">.doc<"Opens the commands that states can run.">();
-inline constexpr auto actionsKw = x::ikw<"actions">.doc<
-    "Lists the commands the state runs, between `{` and `}`.">();
-
 struct SM : cursiv::GrammarSpec {
+  static constexpr auto statemachineKw = ikw<"statemachine">.doc<
+      "Starts the document and names the state machine.">();
+  static constexpr auto eventsKw =
+      ikw<"events">.doc<"Opens the events the machine reacts to.">();
+  static constexpr auto initialStateKw =
+      ikw<"initialState">.doc<"The state the machine starts in.">();
+  static constexpr auto stateKw =
+      ikw<"state">.doc<"Declares a state, closed by `end`.">();
+  static constexpr auto endKw =
+      ikw<"end">.doc<"Closes the state opened by `state`.">();
+  static constexpr auto commandsKw =
+      ikw<"commands">.doc<"Opens the commands that states can run.">();
+  static constexpr auto actionsKw = ikw<"actions">.doc<
+      "Lists the commands the state runs, between `{` and `}`.">();
+
   struct WS : terminal<some(s)> {};
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ML_COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};

@@ -5,17 +5,15 @@
 
 namespace ws {
 
-namespace x = cursiv;
-
-// Keyword documentation, which a hover on the keyword shows.
-inline constexpr auto packageKw =
-    x::ikw<"package">.doc<"Opens a package, the scope its members answer in.">();
-inline constexpr auto entityKw =
-    x::ikw<"entity">.doc<"Declares an entity, closed by `}`.">();
-inline constexpr auto datatypeKw =
-    x::ikw<"datatype">.doc<"Declares a data type a feature may name.">();
-
 struct Workspace : cursiv::GrammarSpec {
+  // Keyword documentation, which a hover on the keyword shows.
+  static constexpr auto packageKw =
+      ikw<"package">.doc<"Opens a package, the scope its members answer in.">();
+  static constexpr auto entityKw =
+      ikw<"entity">.doc<"Declares an entity, closed by `}`.">();
+  static constexpr auto datatypeKw =
+      ikw<"datatype">.doc<"Declares a data type a feature may name.">();
+
   struct WS : terminal<some(s)> {};
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ML_COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};

@@ -31,7 +31,7 @@ std::size_t said(std::string_view text, cursiv::DiagnosticKind kind) {
 void generic_typo_runs_keep_the_terminal_guard() {
   const auto rescan = [](std::string_view text) {
     cursiv::Cst cst;
-    cursiv::CstBuilder builder(cst);
+    cursiv::detail::CstBuilder builder(cst);
     cursiv::engine::LrContext c(text, builder);
     c.drive = &g::kDrive;
     std::uint64_t read = 0;

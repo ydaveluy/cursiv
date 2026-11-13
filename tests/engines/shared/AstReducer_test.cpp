@@ -29,7 +29,7 @@ void only_retained_owners_keep_active_reference_ranks() {
   tree[9].parent = &tree[8];
   tree[10].parent = &tree[9];
   std::pmr::vector<cursiv::AstNode*> nodes;
-  std::vector<cursiv::RefHandle> handles;
+  std::vector<cursiv::detail::RefHandle> handles;
   for (auto& node : tree) {
     nodes.push_back(&node);
     handles.push_back({.owner = &node});
@@ -56,12 +56,12 @@ constexpr std::uint16_t targets[] = {1};
 constexpr cursiv::detail::FieldDesc fields[] = {
     {"child", cursiv::detail::FieldContent::node,
      cursiv::detail::FieldStorage::direct, 1, 0, targets, 1}};
-constexpr cursiv::AstMetaData meta{.derivesBits = derives,
-                                   .typeCount = 2,
-                                   .typeWords = 1,
-                                   .fields = fields,
-                                   .referenceFields = {},
-                                   .fieldCount = 1};
+constexpr cursiv::detail::AstMetaData meta{.derivesBits = derives,
+                                           .typeCount = 2,
+                                           .typeWords = 1,
+                                           .fields = fields,
+                                           .referenceFields = {},
+                                           .fieldCount = 1};
 constexpr cursiv::engine::MakeFn makes[] = {&cursiv::engine::make_node<Root>,
                                             &cursiv::engine::make_node<Child>};
 // The one member takes the child's family.
@@ -84,35 +84,35 @@ constexpr cursiv::engine::AstApplyFn applies[] = {root_writer, child_writer};
 
 void root(cursiv::engine::AstReducer& b, cursiv::NodeId id,
           const cursiv::CstNode& n) {
-  b.create<makes[0], root_writer, false>(id, n, 0, cursiv::kNoField,
-                                         cursiv::ActKind::create);
+  b.create<makes[0], root_writer, false>(id, n, 0, cursiv::detail::kNoField,
+                                         cursiv::detail::ActKind::create);
 }
 void adopt(cursiv::engine::AstReducer& b, cursiv::NodeId id,
            const cursiv::CstNode& n) {
-  b.adopt<false>(id, n, 1, 0, cursiv::ActKind::assign);
+  b.adopt<false>(id, n, 1, 0, cursiv::detail::ActKind::assign);
 }
 void child(cursiv::engine::AstReducer& b, cursiv::NodeId id,
            const cursiv::CstNode& n) {
-  b.create<makes[1], child_writer, false>(id, n, 1, cursiv::kNoField,
-                                          cursiv::ActKind::create);
+  b.create<makes[1], child_writer, false>(id, n, 1, cursiv::detail::kNoField,
+                                          cursiv::detail::ActKind::create);
 }
 void direct(cursiv::engine::AstReducer& b, cursiv::NodeId id,
             const cursiv::CstNode& n) {
-  const auto h =
-      b.node_write(id, n, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
+  const auto h = b.node_write(id, n, 0, cursiv::kNoNarrow,
+                              cursiv::detail::ActKind::assign);
   const auto m = b.create<makes[0], root_writer, false>(
-      id, n, 0, cursiv::kNoField, cursiv::ActKind::create);
+      id, n, 0, cursiv::detail::kNoField, cursiv::detail::ActKind::create);
   ++writes;
   b.fill<ChildField, nullptr, false>(0, h, m);
 }
 void direct_twice(cursiv::engine::AstReducer& b, cursiv::NodeId id,
                   const cursiv::CstNode& n) {
-  const auto first =
-      b.node_write(id, n, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
-  const auto second =
-      b.node_write(id, n, 0, cursiv::kNoNarrow, cursiv::ActKind::assign);
+  const auto first = b.node_write(id, n, 0, cursiv::kNoNarrow,
+                                  cursiv::detail::ActKind::assign);
+  const auto second = b.node_write(id, n, 0, cursiv::kNoNarrow,
+                                   cursiv::detail::ActKind::assign);
   const auto m = b.create<makes[0], root_writer, false>(
-      id, n, 0, cursiv::kNoField, cursiv::ActKind::create);
+      id, n, 0, cursiv::detail::kNoField, cursiv::detail::ActKind::create);
   ++writes;
   b.fill<ChildField, nullptr, false>(0, first, m);
   ++writes;
@@ -128,7 +128,7 @@ const cursiv::engine::AstActions actions{.meta = &meta,
                                          .takeBits = takeBits};
 
 // The tree closed on `top` and accepted, reduced with the write count reset.
-cursiv::ParseResult reduce(cursiv::Cst&& c, cursiv::CstBuilder& b,
+cursiv::ParseResult reduce(cursiv::Cst&& c, cursiv::detail::CstBuilder& b,
                            cursiv::NodeId top,
                            const cursiv::engine::AstActions& with = actions) {
   b.bind_entry(0, c.size(), top);
@@ -145,7 +145,7 @@ void an_adoption_takes_the_node_its_body_built(bool node, bool ownRepair,
                                                bool unrelatedRepair,
                                                bool badExtent = false) {
   cursiv::Cst c("xx");
-  cursiv::CstBuilder b(c);
+  cursiv::detail::CstBuilder b(c);
   b.bind_stream();
   const auto opened = b.enter();
   if (unrelatedRepair) {
@@ -181,7 +181,7 @@ void an_adoption_takes_the_node_its_body_built(bool node, bool ownRepair,
 // A node member given no node is a broken tree, repaired or not.
 void a_direct_write_without_its_node_is_broken(bool repaired) {
   cursiv::Cst c("");
-  cursiv::CstBuilder b(c);
+  cursiv::detail::CstBuilder b(c);
   b.bind_stream();
   const auto top = b.leaf(0, 0, kStamp.make(3, 0));
   b.stream().at(top).recovered = repaired;
@@ -194,7 +194,7 @@ void a_direct_write_without_its_node_is_broken(bool repaired) {
 
 void repeated_node_writes_keep_source_order_and_skip_other_families() {
   cursiv::Cst c("abcd");
-  cursiv::CstBuilder b(c);
+  cursiv::detail::CstBuilder b(c);
   b.bind_stream();
   const auto opened = b.enter();
   b.leaf(0, 1, kStamp.make(2, 0));
@@ -215,7 +215,7 @@ void repeated_node_writes_keep_source_order_and_skip_other_families() {
 
 void a_node_no_member_takes_leaves_the_node_list() {
   cursiv::Cst c("ab");
-  cursiv::CstBuilder b(c);
+  cursiv::detail::CstBuilder b(c);
   b.bind_stream();
   const auto opened = b.enter();
   const auto taken = b.leaf(0, 1, kStamp.make(2, 0));
@@ -250,12 +250,12 @@ constexpr cursiv::detail::FieldDesc fields[] = {
      0},
     {"callee", cursiv::detail::FieldContent::node,
      cursiv::detail::FieldStorage::direct, 0, 2, targets, 1}};
-constexpr cursiv::AstMetaData meta{.derivesBits = derives,
-                                   .typeCount = 3,
-                                   .typeWords = 1,
-                                   .fields = fields,
-                                   .referenceFields = {},
-                                   .fieldCount = 2};
+constexpr cursiv::detail::AstMetaData meta{.derivesBits = derives,
+                                           .typeCount = 3,
+                                           .typeWords = 1,
+                                           .fields = fields,
+                                           .referenceFields = {},
+                                           .fieldCount = 2};
 constexpr cursiv::engine::MakeFn makes[] = {&cursiv::engine::make_node<Expr>,
                                             &cursiv::engine::make_node<Num>,
                                             &cursiv::engine::make_node<Call>};
@@ -284,17 +284,18 @@ constexpr cursiv::engine::AstApplyFn applies[] = {expr_writer, num_writer,
 // The receiver, then its flag set on whatever the region is when it applies.
 void number(cursiv::engine::AstReducer& b, cursiv::NodeId id,
             const cursiv::CstNode& n) {
-  b.create<makes[1], num_writer, true>(id, n, 1, cursiv::kNoField,
-                                       cursiv::ActKind::create);
-  b.defer_effect(id, 1, 0, cursiv::ActKind::flag);
+  b.create<makes[1], num_writer, true>(id, n, 1, cursiv::detail::kNoField,
+                                       cursiv::detail::ActKind::create);
+  b.defer_effect(id, 1, 0, cursiv::detail::ActKind::flag);
 }
 void turn(cursiv::engine::AstReducer& b, cursiv::NodeId id,
           const cursiv::CstNode&) {
-  b.defer_effect(id, 2, 1, cursiv::ActKind::nest);
+  b.defer_effect(id, 2, 1, cursiv::detail::ActKind::nest);
 }
 void close(cursiv::engine::AstReducer& b, cursiv::NodeId id,
            const cursiv::CstNode& n) {
-  b.adopt<true>(id, n, 0, cursiv::kNoField, cursiv::ActKind::create);
+  b.adopt<true>(id, n, 0, cursiv::detail::kNoField,
+                cursiv::detail::ActKind::create);
 }
 constexpr cursiv::engine::AstEntryFn entries[] = {number, turn, close};
 constexpr std::uint8_t turns[] = {0, 1, 0};
@@ -321,7 +322,7 @@ std::string reduce_turn(const cursiv::engine::AstActions& actions,
                         bool stateSays, bool abandoned,
                         unsigned badExtent = 0) {
   cursiv::Cst c("1(");
-  cursiv::CstBuilder b(c);
+  cursiv::detail::CstBuilder b(c);
   b.bind_stream();
   const auto all = b.enter();
   const auto region = b.enter();
@@ -384,7 +385,7 @@ void a_chain_of(const cursiv::ParseResult& r, unsigned count) {
 void unrelated_repairs_leave_a_long_nest_chain_intact() {
   constexpr unsigned count = 2048;
   cursiv::Cst c("1(");
-  cursiv::CstBuilder b(c);
+  cursiv::detail::CstBuilder b(c);
   b.bind_stream();
   const auto all = b.enter();
   b.leaf(0, 1, kStamp.make(0, 0));
@@ -403,11 +404,11 @@ void a_deep_repair_keeps_turns_over_an_earlier_receiver() {
   std::string source(count + 1, '(');
   source[0] = '1';
   cursiv::Cst c(source);
-  cursiv::CstBuilder b(c);
+  cursiv::detail::CstBuilder b(c);
   b.bind_stream();
   const auto all = b.enter();
   b.leaf(0, 1, kStamp.make(0, 0));
-  std::vector<cursiv::CstBuilder::Open> open;
+  std::vector<cursiv::detail::CstBuilder::Open> open;
   for (unsigned i = 0; i < count; ++i) open.push_back(b.enter());
   const auto bad = b.enter();
   for (unsigned i = 0; i < count; ++i)
@@ -428,7 +429,7 @@ void a_deep_repair_keeps_turns_over_an_earlier_receiver() {
 void the_first_repair_below_the_consumer_decides_the_turn() {
   for (bool outerRepair : {false, true}) {
     cursiv::Cst c("1(");
-    cursiv::CstBuilder b(c);
+    cursiv::detail::CstBuilder b(c);
     b.bind_stream();
     const auto all = b.enter();
     const auto outer = b.enter();
@@ -454,7 +455,7 @@ void the_first_repair_below_the_consumer_decides_the_turn() {
 void only_a_nest_outside_the_repair_changes_its_receiver() {
   for (bool outside : {false, true}) {
     cursiv::Cst c("1(");
-    cursiv::CstBuilder b(c);
+    cursiv::detail::CstBuilder b(c);
     b.bind_stream();
     const auto all = b.enter();
     b.leaf(0, 1, kStamp.make(0, 0));
@@ -488,7 +489,7 @@ void raw_text_writes_keep_the_storage_contract() {
     for (const bool recovered : {false, true})
       for (const bool empty : {false, true}) {
         cursiv::Cst tree("abc");
-        cursiv::CstBuilder builder(tree);
+        cursiv::detail::CstBuilder builder(tree);
         builder.bind_stream();
         const auto id = builder.leaf(0, empty ? 0 : 3, kStamp.make(0, 0));
         builder.stream().at(id).recovered = recovered;
@@ -537,12 +538,12 @@ struct Names : cursiv::Extends<cursiv::AstNode> {
 
 void an_inserted_name_leaves_references_and_handles_untouched() {
   cursiv::Cst tree("abc");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   builder.bind_stream();
   const auto missing = builder.leaf(0, 0, kStamp.make(0, 0));
   builder.stream().at(missing).recovered = true;
   const auto written = builder.leaf(0, 3, kStamp.make(0, 0));
-  const cursiv::AstMetaData meta{};
+  const cursiv::detail::AstMetaData meta{};
   cursiv::DefaultDocumentReferences references(meta);
   cursiv::engine::AstBuildCtx ctx;
   ctx.cst = &tree;
@@ -558,9 +559,9 @@ void an_inserted_name_leaves_references_and_handles_untouched() {
       names.one, cursiv::kNoNode, std::string_view("before"));
   const auto write = [&](cursiv::NodeId id) {
     const cursiv::engine::Pending p{.root = id,
-                                     .text = id,
-                                     .kind = cursiv::ActKind::assign,
-                                     .narrow = 3};
+                                    .text = id,
+                                    .kind = cursiv::detail::ActKind::assign,
+                                    .narrow = 3};
     cursiv::engine::write_into<cursiv::detail::field_tag<&Names::one>>(
         ctx, p, &names, &slot, 0, 0);
     cursiv::engine::write_into<cursiv::detail::field_tag<&Names::maybe>>(
@@ -595,8 +596,8 @@ void an_inserted_name_leaves_references_and_handles_untouched() {
   builder.stream().at(missing).recovered = false;
   Names empty;
   const cursiv::engine::Pending p{.root = missing,
-                                   .text = missing,
-                                   .kind = cursiv::ActKind::assign};
+                                  .text = missing,
+                                  .kind = cursiv::detail::ActKind::assign};
   cursiv::engine::write_into<cursiv::detail::field_tag<&Names::one>>(
       ctx, p, &empty, &slot, 0, 0);
   CHECK(empty.one.refText.empty());
@@ -615,7 +616,7 @@ struct Custom {
 
 void custom_and_constant_conversions_keep_their_meaning() {
   cursiv::Cst tree("abc");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   builder.bind_stream();
   const auto id = builder.leaf(0, 3, kStamp.make(0, 0));
   cursiv::engine::AstBuildCtx ctx;
@@ -643,7 +644,7 @@ void custom_and_constant_conversions_keep_their_meaning() {
 
 void a_data_rule_still_joins_its_visible_parts() {
   cursiv::Cst tree("a b");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   builder.bind_stream();
   const auto opened = builder.enter();
   builder.leaf(0, 1, kStamp.make(0, 0));
@@ -719,7 +720,7 @@ void an_independent_query_keeps_its_own_cache_until_it_returns() {
     throw 17;
   };
   cursiv::Cst tree("a");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   const auto id = builder.leaf(0, 1, kStamp.make(0, 0));
   cursiv::engine::TextValues parent;
   parent.calls.try_emplace(id, child, "stale");
@@ -746,8 +747,8 @@ void an_independent_query_keeps_its_own_cache_until_it_returns() {
 void deep_conversions_keep_order_and_stop_at_constants() {
   constexpr unsigned depth = 16384;
   cursiv::Cst tree("a");
-  cursiv::CstBuilder builder(tree);
-  std::vector<cursiv::CstBuilder::Open> open;
+  cursiv::detail::CstBuilder builder(tree);
+  std::vector<cursiv::detail::CstBuilder::Open> open;
   for (unsigned i = 0; i < depth; ++i) open.push_back(builder.enter());
   builder.leaf(0, 1, kStamp.make(0, 0));
   cursiv::NodeId root = 0;
@@ -776,7 +777,7 @@ void deep_conversions_keep_order_and_stop_at_constants() {
 
 void a_failed_conversion_stops_before_later_siblings() {
   cursiv::Cst tree("ab");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   const auto all = builder.enter();
   auto child = builder.enter();
   builder.leaf(0, 1, kStamp.make(0, 0));
@@ -823,8 +824,8 @@ void raw_nested_text_is_joined_once_and_parts_keep_their_groups() {
       std::pmr::set_default_resource(&memory);
   cursiv::Cst tree(source);
   std::pmr::set_default_resource(previous);
-  cursiv::CstBuilder builder(tree);
-  std::vector<cursiv::CstBuilder::Open> open;
+  cursiv::detail::CstBuilder builder(tree);
+  std::vector<cursiv::detail::CstBuilder::Open> open;
   for (unsigned i = 0; i <= depth; ++i) {
     open.push_back(builder.enter());
     builder.leaf(2 * i, 2 * i + 1, kStamp.make(0, 0));
@@ -852,7 +853,7 @@ void raw_nested_text_is_joined_once_and_parts_keep_their_groups() {
 
 void invented_text_never_runs_its_converter() {
   cursiv::Cst tree("a");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   const auto open = builder.enter();
   const auto invented = builder.leaf(0, 0, kStamp.make(1, 0));
   builder.stream().at(invented).recovered = true;

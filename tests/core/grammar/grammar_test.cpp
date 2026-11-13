@@ -69,63 +69,101 @@ struct R1;
 
 // A complement is the class of the other characters, and a class like any
 // other.
-static_assert(std::is_same_v<std::remove_const_t<decltype(S)>, decltype(~s)>);
-static_assert(std::is_same_v<std::remove_const_t<decltype(W)>, decltype(~w)>);
-static_assert(std::is_same_v<std::remove_const_t<decltype(D)>, decltype(~d)>);
-static_assert(std::is_same_v<std::remove_const_t<decltype(S)>,
-                             std::remove_const_t<decltype(cr<R"(\S)">)>>);
-static_assert(std::is_same_v<std::remove_const_t<decltype(W)>,
-                             std::remove_const_t<decltype(cr<R"(\W)">)>>);
-static_assert(std::is_same_v<std::remove_const_t<decltype(D)>,
-                             std::remove_const_t<decltype(cr<R"(\D)">)>>);
-static_assert(std::is_same_v<decltype(s | S), cursiv::detail::AnyChar>);
-static_assert(std::is_same_v<decltype(w | W), cursiv::detail::AnyChar>);
-static_assert(std::is_same_v<decltype(W | w), cursiv::detail::AnyChar>);
-static_assert(std::is_same_v<decltype(d | D), cursiv::detail::AnyChar>);
-static_assert(std::is_same_v<decltype(~S), std::remove_const_t<decltype(s)>>);
-static_assert(std::is_same_v<decltype(GrammarSpec::S), decltype(S)>);
-static_assert(std::is_same_v<decltype(GrammarSpec::W), decltype(W)>);
-static_assert(std::is_same_v<decltype(GrammarSpec::D), decltype(D)>);
+static_assert(std::is_same_v<std::remove_const_t<decltype(GrammarSpec::S)>,
+                             decltype(~GrammarSpec::s)>);
+static_assert(std::is_same_v<std::remove_const_t<decltype(GrammarSpec::W)>,
+                             decltype(~GrammarSpec::w)>);
+static_assert(std::is_same_v<std::remove_const_t<decltype(GrammarSpec::D)>,
+                             decltype(~GrammarSpec::d)>);
+static_assert(
+    std::is_same_v<std::remove_const_t<decltype(GrammarSpec::S)>,
+                   std::remove_const_t<decltype(GrammarSpec::cr<R"(\S)">)>>);
+static_assert(
+    std::is_same_v<std::remove_const_t<decltype(GrammarSpec::W)>,
+                   std::remove_const_t<decltype(GrammarSpec::cr<R"(\W)">)>>);
+static_assert(
+    std::is_same_v<std::remove_const_t<decltype(GrammarSpec::D)>,
+                   std::remove_const_t<decltype(GrammarSpec::cr<R"(\D)">)>>);
+static_assert(std::is_same_v<decltype(GrammarSpec::s | GrammarSpec::S),
+                             cursiv::detail::AnyChar>);
+static_assert(std::is_same_v<decltype(GrammarSpec::w | GrammarSpec::W),
+                             cursiv::detail::AnyChar>);
+static_assert(std::is_same_v<decltype(GrammarSpec::W | GrammarSpec::w),
+                             cursiv::detail::AnyChar>);
+static_assert(std::is_same_v<decltype(GrammarSpec::d | GrammarSpec::D),
+                             cursiv::detail::AnyChar>);
+static_assert(std::is_same_v<decltype(~GrammarSpec::S),
+                             std::remove_const_t<decltype(GrammarSpec::s)>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::S), decltype(GrammarSpec::S)>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::W), decltype(GrammarSpec::W)>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::D), decltype(GrammarSpec::D)>);
 
 // An expression as a template argument, round-tripped intact.
 template <auto Body>
 struct holder {
   static constexpr auto body = Body;
 };
-using H = holder<lit<"a"> + many(cr<"0-9">)>;
-static_assert(std::is_same_v<decltype(H::body),
-                             const decltype(lit<"a"> + many(cr<"0-9">))>);
+using H =
+    holder<GrammarSpec::lit<"a"> + GrammarSpec::many(GrammarSpec::cr<"0-9">)>;
+static_assert(
+    std::is_same_v<decltype(H::body),
+                   const decltype(GrammarSpec::lit<"a"> +
+                                  GrammarSpec::many(GrammarSpec::cr<"0-9">))>);
 
 // Flattening: one type whatever the parenthesisation.
-static_assert(std::is_same_v<decltype((lit<"a"> + lit<"b">)+lit<"c">),
-                             Seq<Lit<"a">, Lit<"b">, Lit<"c">>>);
-static_assert(std::is_same_v<decltype(lit<"a"> + (lit<"b"> + lit<"c">)),
-                             Seq<Lit<"a">, Lit<"b">, Lit<"c">>>);
-static_assert(std::is_same_v<decltype((lit<"a"> | lit<"b">) | lit<"c">),
-                             Choice<Lit<"a">, Lit<"b">, Lit<"c">>>);
+static_assert(
+    std::is_same_v<
+        decltype((GrammarSpec::lit<"a"> +
+                  GrammarSpec::lit<"b">)+GrammarSpec::lit<"c">),
+        detail::Seq<detail::Lit<"a">, detail::Lit<"b">, detail::Lit<"c">>>);
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::lit<"a"> +
+                 (GrammarSpec::lit<"b"> + GrammarSpec::lit<"c">)),
+        detail::Seq<detail::Lit<"a">, detail::Lit<"b">, detail::Lit<"c">>>);
+static_assert(
+    std::is_same_v<
+        decltype((GrammarSpec::lit<"a"> | GrammarSpec::lit<"b">) |
+                 GrammarSpec::lit<"c">),
+        detail::Choice<detail::Lit<"a">, detail::Lit<"b">, detail::Lit<"c">>>);
 
 // Absorption: a create in a sequence is the region over the sequence.
-static_assert(
-    std::is_same_v<decltype(lit<"a"> + create<ast::Node>(lit<"b">) + lit<"c">),
-                   Create<ast::Node, Seq<Lit<"a">, Lit<"b">, Lit<"c">>>>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::lit<"a"> +
+                       GrammarSpec::create<ast::Node>(GrammarSpec::lit<"b">) +
+                       GrammarSpec::lit<"c">),
+              detail::Create<ast::Node,
+                             detail::Seq<detail::Lit<"a">, detail::Lit<"b">,
+                                         detail::Lit<"c">>>>);
 
 // A bare `create<T>` is an expression, the node with the empty payload, and
 // the call form names a payload. The empty payload is the identity of
 // concatenation.
-static_assert(std::is_same_v<decltype(create<ast::Node>),
-                             const Create<ast::Node, Epsilon>>);
-static_assert(std::is_same_v<decltype(create<ast::Node> + lit<"b">),
-                             decltype(create<ast::Node>(lit<"b">))>);
-static_assert(std::is_same_v<decltype(lit<"a"> + create<ast::Node>),
-                             decltype(create<ast::Node>(lit<"a">))>);
-static_assert(std::is_same_v<decltype(lit<"a"> + create<ast::Node> + lit<"b">),
-                             decltype(create<ast::Node>(lit<"a"> + lit<"b">))>);
+static_assert(std::is_same_v<decltype(GrammarSpec::create<ast::Node>),
+                             const detail::Create<ast::Node, detail::Epsilon>>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::create<ast::Node> + GrammarSpec::lit<"b">),
+              decltype(GrammarSpec::create<ast::Node>(GrammarSpec::lit<"b">))>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::lit<"a"> + GrammarSpec::create<ast::Node>),
+              decltype(GrammarSpec::create<ast::Node>(GrammarSpec::lit<"a">))>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::lit<"a"> + GrammarSpec::create<ast::Node> +
+                       GrammarSpec::lit<"b">),
+              decltype(GrammarSpec::create<ast::Node>(GrammarSpec::lit<"a"> +
+                                                      GrammarSpec::lit<"b">))>);
 // ...and alone it is the empty alternative, the one thing the call form cannot
 // spell: `('a' {X} | {Y})`.
 static_assert(
-    std::is_same_v<decltype((lit<"a"> + create<ast::Node>) | create<ast::Mid>),
-                   cursiv::Choice<cursiv::Create<ast::Node, Lit<"a">>,
-                                  cursiv::Create<ast::Mid, cursiv::Epsilon>>>);
+    std::is_same_v<
+        decltype((GrammarSpec::lit<"a"> + GrammarSpec::create<ast::Node>) |
+                 GrammarSpec::create<ast::Mid>),
+        cursiv::detail::Choice<
+            cursiv::detail::Create<ast::Node, detail::Lit<"a">>,
+            cursiv::detail::Create<ast::Mid, cursiv::detail::Epsilon>>>);
 
 // A create absorbs elements up to the nest that bounds it, and each nest
 // absorbs what follows up to the next one. Confluence holds: every
@@ -137,74 +175,113 @@ struct W1 : ast::Node {
 struct W2 : ast::Node {
   ast::Node* held = nullptr;
 };
-inline constexpr auto n1 = nest<W1, &W1::held>(lit<"d">);
-inline constexpr auto n2 = nest<W2, &W2::held>(lit<"f">);
+inline constexpr auto n1 =
+    GrammarSpec::nest<W1, &W1::held>(GrammarSpec::lit<"d">);
+inline constexpr auto n2 =
+    GrammarSpec::nest<W2, &W2::held>(GrammarSpec::lit<"f">);
 
-using One = Seq<Create<ast::Node, Seq<Lit<"a">, Lit<"b">, Lit<"c">>>,
-                Nest<W1, &W1::held, Seq<Lit<"d">, Lit<"e">>>>;
-static_assert(std::is_same_v<decltype(lit<"a"> + create<ast::Node>(lit<"b">) +
-                                      lit<"c"> + n1 + lit<"e">),
-                             One>);
-static_assert(std::is_same_v<decltype((lit<"a"> + create<ast::Node>(lit<"b">)) +
-                                      (lit<"c"> + n1 + lit<"e">)),
-                             One>);
-static_assert(std::is_same_v<decltype(lit<"a"> + (create<ast::Node>(lit<"b">) +
-                                                  lit<"c">)+(n1 + lit<"e">)),
-                             One>);
+using One = detail::Seq<
+    detail::Create<ast::Node, detail::Seq<detail::Lit<"a">, detail::Lit<"b">,
+                                          detail::Lit<"c">>>,
+    detail::Nest<W1, &W1::held,
+                 detail::Seq<detail::Lit<"d">, detail::Lit<"e">>>>;
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::lit<"a"> +
+                       GrammarSpec::create<ast::Node>(GrammarSpec::lit<"b">) +
+                       GrammarSpec::lit<"c"> + n1 + GrammarSpec::lit<"e">),
+              One>);
+static_assert(std::is_same_v<
+              decltype((GrammarSpec::lit<"a"> +
+                        GrammarSpec::create<ast::Node>(GrammarSpec::lit<"b">)) +
+                       (GrammarSpec::lit<"c"> + n1 + GrammarSpec::lit<"e">)),
+              One>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::lit<"a"> +
+                       (GrammarSpec::create<ast::Node>(GrammarSpec::lit<"b">) +
+                        GrammarSpec::lit<"c">)+(n1 + GrammarSpec::lit<"e">)),
+              One>);
 
-using Two = Seq<Create<ast::Node, Seq<Lit<"a">, Lit<"b">, Lit<"c">>>,
-                Nest<W1, &W1::held, Seq<Lit<"d">, Lit<"e">>>,
-                Nest<W2, &W2::held, Seq<Lit<"f">, Lit<"g">>>>;
-static_assert(std::is_same_v<decltype(lit<"a"> + create<ast::Node>(lit<"b">) +
-                                      lit<"c"> + n1 + lit<"e"> + n2 + lit<"g">),
-                             Two>);
+using Two = detail::Seq<
+    detail::Create<ast::Node, detail::Seq<detail::Lit<"a">, detail::Lit<"b">,
+                                          detail::Lit<"c">>>,
+    detail::Nest<W1, &W1::held,
+                 detail::Seq<detail::Lit<"d">, detail::Lit<"e">>>,
+    detail::Nest<W2, &W2::held,
+                 detail::Seq<detail::Lit<"f">, detail::Lit<"g">>>>;
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::lit<"a"> +
+                       GrammarSpec::create<ast::Node>(GrammarSpec::lit<"b">) +
+                       GrammarSpec::lit<"c"> + n1 + GrammarSpec::lit<"e"> + n2 +
+                       GrammarSpec::lit<"g">),
+              Two>);
 static_assert(
-    std::is_same_v<decltype((lit<"a"> + create<ast::Node>(lit<"b">) +
-                             lit<"c">)+(n1 + lit<"e">)+(n2 + lit<"g">)),
-                   Two>);
+    std::is_same_v<
+        decltype((GrammarSpec::lit<"a"> +
+                  GrammarSpec::create<ast::Node>(GrammarSpec::lit<"b">) +
+                  GrammarSpec::lit<"c">)+(n1 +
+                                          GrammarSpec::lit<
+                                              "e">)+(n2 +
+                                                     GrammarSpec::lit<"g">)),
+        Two>);
 
 // Adoption: nothing creates the head, so the leading element stays bare --
 // the node comes from the reference and the nest wraps what it built.
 static_assert(
-    std::is_same_v<decltype(ref<R1> + n1 + lit<"e">),
-                   Seq<Ref<R1>, Nest<W1, &W1::held, Seq<Lit<"d">, Lit<"e">>>>>);
+    std::is_same_v<decltype(GrammarSpec::ref<R1> + n1 + GrammarSpec::lit<"e">),
+                   detail::Seq<detail::Ref<R1>,
+                               detail::Nest<W1, &W1::held,
+                                            detail::Seq<detail::Lit<"d">,
+                                                        detail::Lit<"e">>>>>);
 
 // Appending past a nest agrees with writing the whole run inside the create
 // in one go: absorbing into a region re-folds that region's body.
 static_assert(
-    std::is_same_v<decltype(create<ast::Node>(lit<"a"> + n1) + lit<"e">),
-                   decltype(create<ast::Node>(lit<"a"> + n1 + lit<"e">))>);
+    std::is_same_v<
+        decltype(GrammarSpec::create<ast::Node>(GrammarSpec::lit<"a"> + n1) +
+                 GrammarSpec::lit<"e">),
+        decltype(GrammarSpec::create<ast::Node>(GrammarSpec::lit<"a"> + n1 +
+                                                GrammarSpec::lit<"e">))>);
 
 // Any bracketing of one element run yields the same canonical type, even
 // where a group's own elements look bare alone.
-static_assert(
-    std::is_same_v<decltype(lit<"a"> +
-                            (create<ast::Node>(lit<"b">) + lit<"c"> + n1) +
-                            (lit<"e"> + n2) + lit<"g">),
-                   Two>);
 static_assert(std::is_same_v<
-              decltype((lit<"a"> + create<ast::Node>(lit<"b">)) +
-                       (lit<"c"> + nest<W1, &W1::held>(lit<"d"> + lit<"e">))),
+              decltype(GrammarSpec::lit<"a"> +
+                       (GrammarSpec::create<ast::Node>(GrammarSpec::lit<"b">) +
+                        GrammarSpec::lit<"c"> + n1) +
+                       (GrammarSpec::lit<"e"> + n2) + GrammarSpec::lit<"g">),
+              Two>);
+static_assert(std::is_same_v<
+              decltype((GrammarSpec::lit<"a"> +
+                        GrammarSpec::create<ast::Node>(GrammarSpec::lit<"b">)) +
+                       (GrammarSpec::lit<"c"> +
+                        GrammarSpec::nest<W1, &W1::held>(
+                            GrammarSpec::lit<"d"> + GrammarSpec::lit<"e">))),
               One>);
 // A group of bare elements spliced between two nests joins the nest before
 // it, one element at a time.
 static_assert(
-    std::is_same_v<decltype(n1 + (lit<"e"> + lit<"f">)+n2),
-                   Seq<Nest<W1, &W1::held, Seq<Lit<"d">, Lit<"e">, Lit<"f">>>,
-                       Nest<W2, &W2::held, Lit<"f">>>>);
+    std::is_same_v<
+        decltype(n1 + (GrammarSpec::lit<"e"> + GrammarSpec::lit<"f">)+n2),
+        detail::Seq<detail::Nest<W1, &W1::held,
+                                 detail::Seq<detail::Lit<"d">, detail::Lit<"e">,
+                                             detail::Lit<"f">>>,
+                    detail::Nest<W2, &W2::held, detail::Lit<"f">>>>);
 // ...and a group ending in a create followed by a group starting bare: the
 // create absorbs across the splice, rightwards, with no nest to bound it.
 static_assert(std::is_same_v<
-              decltype((lit<"a"> + create<ast::Node>(lit<"b">)) +
-                       (lit<"c"> + lit<"d">)),
-              Create<ast::Node, Seq<Lit<"a">, Lit<"b">, Lit<"c">, Lit<"d">>>>);
+              decltype((GrammarSpec::lit<"a"> +
+                        GrammarSpec::create<ast::Node>(GrammarSpec::lit<"b">)) +
+                       (GrammarSpec::lit<"c"> + GrammarSpec::lit<"d">)),
+              detail::Create<ast::Node,
+                             detail::Seq<detail::Lit<"a">, detail::Lit<"b">,
+                                         detail::Lit<"c">, detail::Lit<"d">>>>);
 
 // A long run written one `+` at a time is one flat sequence, and a run with
 // nothing to absorb is not folded again at each `+`: no recursion grows with
 // its length.
 template <std::size_t... Is>
 constexpr auto long_run(std::index_sequence<Is...>) {
-  return (... + (static_cast<void>(Is), lit<"a">));
+  return (... + (static_cast<void>(Is), GrammarSpec::lit<"a">));
 }
 static_assert(detail::tl_size<detail::ExprShape<decltype(long_run(
                   std::make_index_sequence<600>{}))>::children>::value == 600);
@@ -212,221 +289,348 @@ static_assert(detail::tl_size<detail::ExprShape<decltype(long_run(
 
 // Combinators, and the separated forms that spell `a (sep a)*`.
 static_assert(
-    std::is_same_v<decltype(option(lit<"a">)), Repeat<0, 1, Lit<"a">>>);
+    std::is_same_v<decltype(GrammarSpec::option(GrammarSpec::lit<"a">)),
+                   detail::Repeat<0, 1, detail::Lit<"a">>>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::some(GrammarSpec::lit<"a">)),
+              detail::Repeat<1, GrammarSpec::kUnbounded, detail::Lit<"a">>>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::many(GrammarSpec::lit<"a">)),
+              detail::Repeat<0, GrammarSpec::kUnbounded, detail::Lit<"a">>>);
 static_assert(
-    std::is_same_v<decltype(some(lit<"a">)), Repeat<1, kUnbounded, Lit<"a">>>);
-static_assert(
-    std::is_same_v<decltype(many(lit<"a">)), Repeat<0, kUnbounded, Lit<"a">>>);
-static_assert(
-    std::is_same_v<decltype(repeat<2, 5>(lit<"a">)), Repeat<2, 5, Lit<"a">>>);
+    std::is_same_v<decltype(GrammarSpec::repeat<2, 5>(GrammarSpec::lit<"a">)),
+                   detail::Repeat<2, 5, detail::Lit<"a">>>);
 // A run inside a run, an option, an item that may be empty and an exact count
 // stay as written.
 static_assert(
-    std::is_same_v<decltype(many(some(lit<"a">))),
-                   Repeat<0, kUnbounded, Repeat<1, kUnbounded, Lit<"a">>>>);
+    std::is_same_v<
+        decltype(GrammarSpec::many(GrammarSpec::some(GrammarSpec::lit<"a">))),
+        detail::Repeat<
+            0, GrammarSpec::kUnbounded,
+            detail::Repeat<1, GrammarSpec::kUnbounded, detail::Lit<"a">>>>);
 static_assert(
-    std::is_same_v<decltype(some(some(lit<"a">))),
-                   Repeat<1, kUnbounded, Repeat<1, kUnbounded, Lit<"a">>>>);
-static_assert(std::is_same_v<decltype(option(some(lit<"a">))),
-                             Repeat<0, 1, Repeat<1, kUnbounded, Lit<"a">>>>);
+    std::is_same_v<
+        decltype(GrammarSpec::some(GrammarSpec::some(GrammarSpec::lit<"a">))),
+        detail::Repeat<
+            1, GrammarSpec::kUnbounded,
+            detail::Repeat<1, GrammarSpec::kUnbounded, detail::Lit<"a">>>>);
 static_assert(
-    std::is_same_v<decltype(many(many(lit<"a">))),
-                   Repeat<0, kUnbounded, Repeat<0, kUnbounded, Lit<"a">>>>);
-static_assert(std::is_same_v<decltype(some(option(lit<"a">))),
-                             Repeat<1, kUnbounded, Repeat<0, 1, Lit<"a">>>>);
-static_assert(std::is_same_v<decltype(repeat<2>(some(lit<"a">))),
-                             Repeat<2, 2, Repeat<1, kUnbounded, Lit<"a">>>>);
+    std::is_same_v<
+        decltype(GrammarSpec::option(GrammarSpec::some(GrammarSpec::lit<"a">))),
+        detail::Repeat<
+            0, 1,
+            detail::Repeat<1, GrammarSpec::kUnbounded, detail::Lit<"a">>>>);
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::many(GrammarSpec::many(GrammarSpec::lit<"a">))),
+        detail::Repeat<
+            0, GrammarSpec::kUnbounded,
+            detail::Repeat<0, GrammarSpec::kUnbounded, detail::Lit<"a">>>>);
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::some(GrammarSpec::option(GrammarSpec::lit<"a">))),
+        detail::Repeat<1, GrammarSpec::kUnbounded,
+                       detail::Repeat<0, 1, detail::Lit<"a">>>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::repeat<2>(
+                       GrammarSpec::some(GrammarSpec::lit<"a">))),
+                   detail::Repeat<2, 2,
+                                  detail::Repeat<1, GrammarSpec::kUnbounded,
+                                                 detail::Lit<"a">>>>);
 
 // A commit is the item of its quantifier, and in a separated list a later
 // item's prefix opens with the separator.
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::many(GrammarSpec::commit(GrammarSpec::lit<"a">,
+                                                       GrammarSpec::lit<"b">))),
+        detail::Repeat<0, GrammarSpec::kUnbounded,
+                       detail::Commit<detail::Lit<"a">, detail::Lit<"b">>>>);
 static_assert(std::is_same_v<
-              decltype(many(commit(lit<"a">, lit<"b">))),
-              Repeat<0, kUnbounded, Commit<Lit<"a">, Lit<"b">>>>);
-static_assert(std::is_same_v<
-              decltype(repeat<1, 2>(commit(lit<"a">, lit<"b">))),
-              Repeat<1, 2, Commit<Lit<"a">, Lit<"b">>>>);
-static_assert(std::is_same_v<
-              decltype(some(commit(lit<"a">, lit<"b">), lit<",">)),
-              Seq<Lit<"a">, Lit<"b">,
-                  Repeat<0, kUnbounded,
-                         Commit<Seq<Lit<",">, Lit<"a">>, Lit<"b">>>>>);
-static_assert(std::is_same_v<
-              decltype(many(commit(lit<"a">, lit<"b">), lit<",">)),
-              Repeat<0, 1,
-                     Commit<Lit<"a">,
-                            Seq<Lit<"b">,
-                                Repeat<0, kUnbounded,
-                                       Commit<Seq<Lit<",">, Lit<"a">>,
-                                              Lit<"b">>>>>>>);
+              decltype(GrammarSpec::repeat<1, 2>(GrammarSpec::commit(
+                  GrammarSpec::lit<"a">, GrammarSpec::lit<"b">))),
+              detail::Repeat<
+                  1, 2, detail::Commit<detail::Lit<"a">, detail::Lit<"b">>>>);
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::some(GrammarSpec::commit(GrammarSpec::lit<"a">,
+                                                       GrammarSpec::lit<"b">),
+                                   GrammarSpec::lit<",">)),
+        detail::Seq<detail::Lit<"a">, detail::Lit<"b">,
+                    detail::Repeat<0, GrammarSpec::kUnbounded,
+                                   detail::Commit<detail::Seq<detail::Lit<",">,
+                                                              detail::Lit<"a">>,
+                                                  detail::Lit<"b">>>>>);
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::many(GrammarSpec::commit(GrammarSpec::lit<"a">,
+                                                       GrammarSpec::lit<"b">),
+                                   GrammarSpec::lit<",">)),
+        detail::Repeat<
+            0, 1,
+            detail::Commit<
+                detail::Lit<"a">,
+                detail::Seq<
+                    detail::Lit<"b">,
+                    detail::Repeat<0, GrammarSpec::kUnbounded,
+                                   detail::Commit<detail::Seq<detail::Lit<",">,
+                                                              detail::Lit<"a">>,
+                                                  detail::Lit<"b">>>>>>>);
 
 // A rule reads a commit as its item and a condition on the exits: every exit
 // is guarded by `!prefix` but the one at Max.
 namespace commits {
-using A = Lit<"a">;
-using B = Lit<"b">;
-using Stop = Not<Trigger<A>>;
+using A = detail::Lit<"a">;
+using B = detail::Lit<"b">;
+using Stop = detail::Not<detail::Trigger<A>>;
 static_assert(
-    std::is_same_v<detail::commit_free_t<decltype(many(commit(A{}, B{})))>,
-                   Seq<Repeat<0, kUnbounded, Seq<A, B>>, Stop>>);
+    std::is_same_v<detail::commit_free_t<decltype(GrammarSpec::many(
+                       GrammarSpec::commit(A{}, B{})))>,
+                   detail::Seq<detail::Repeat<0, GrammarSpec::kUnbounded,
+                                              detail::Seq<A, B>>,
+                               Stop>>);
 static_assert(
-    std::is_same_v<detail::commit_free_t<decltype(some(commit(A{}, B{})))>,
-                   Seq<Repeat<1, kUnbounded, Seq<A, B>>, Stop>>);
-static_assert(
-    std::is_same_v<detail::commit_free_t<decltype(option(commit(A{}, B{})))>,
-                   Choice<Seq<A, B>, Stop>>);
-static_assert(
-    std::is_same_v<
-        detail::commit_free_t<decltype(flag<&ast::Node::many>(
-            option(commit(A{}, B{}))))>,
-        Flag<&ast::Node::many, Choice<Seq<A, B>, Stop>>>);
-static_assert(std::is_same_v<
-              detail::commit_free_t<decltype(repeat<2>(commit(A{}, B{})))>,
-              Repeat<2, 2, Seq<A, B>>>);
-static_assert(std::is_same_v<
-              detail::commit_free_t<decltype(repeat<1, 3>(commit(A{}, B{})))>,
-              Seq<A, B, Choice<Seq<A, B, Choice<Seq<A, B>, Stop>>, Stop>>>);
+    std::is_same_v<detail::commit_free_t<decltype(GrammarSpec::some(
+                       GrammarSpec::commit(A{}, B{})))>,
+                   detail::Seq<detail::Repeat<1, GrammarSpec::kUnbounded,
+                                              detail::Seq<A, B>>,
+                               Stop>>);
+static_assert(std::is_same_v<detail::commit_free_t<decltype(GrammarSpec::option(
+                                 GrammarSpec::commit(A{}, B{})))>,
+                             detail::Choice<detail::Seq<A, B>, Stop>>);
 static_assert(
     std::is_same_v<
-        detail::commit_free_t<decltype(lit<"x"> + many(commit(A{}, B{})) +
-                                       lit<"y">)>,
-        Seq<Lit<"x">, Repeat<0, kUnbounded, Seq<A, B>>, Stop, Lit<"y">>>);
+        detail::commit_free_t<decltype(GrammarSpec::flag<&ast::Node::many>(
+            GrammarSpec::option(GrammarSpec::commit(A{}, B{}))))>,
+        detail::Flag<&ast::Node::many,
+                     detail::Choice<detail::Seq<A, B>, Stop>>>);
 static_assert(
-    std::is_same_v<detail::commit_free_t<decltype(lit<"x"> + lit<"y">)>,
-                   Seq<Lit<"x">, Lit<"y">>>);
+    std::is_same_v<detail::commit_free_t<decltype(GrammarSpec::repeat<2>(
+                       GrammarSpec::commit(A{}, B{})))>,
+                   detail::Repeat<2, 2, detail::Seq<A, B>>>);
+static_assert(
+    std::is_same_v<
+        detail::commit_free_t<
+            decltype(GrammarSpec::repeat<1, 3>(GrammarSpec::commit(A{}, B{})))>,
+        detail::Seq<
+            A, B,
+            detail::Choice<
+                detail::Seq<A, B, detail::Choice<detail::Seq<A, B>, Stop>>,
+                Stop>>>);
+static_assert(std::is_same_v<
+              detail::commit_free_t<
+                  decltype(GrammarSpec::lit<"x"> +
+                           GrammarSpec::many(GrammarSpec::commit(A{}, B{})) +
+                           GrammarSpec::lit<"y">)>,
+              detail::Seq<
+                  detail::Lit<"x">,
+                  detail::Repeat<0, GrammarSpec::kUnbounded, detail::Seq<A, B>>,
+                  Stop, detail::Lit<"y">>>);
+static_assert(
+    std::is_same_v<detail::commit_free_t<decltype(GrammarSpec::lit<"x"> +
+                                                  GrammarSpec::lit<"y">)>,
+                   detail::Seq<detail::Lit<"x">, detail::Lit<"y">>>);
 
 // ...and stands nowhere else.
-static_assert(detail::holds_commit<decltype(many(commit(A{}, B{})))>);
-static_assert(!detail::misplaced_commit<decltype(many(commit(A{}, B{})))>);
+static_assert(detail::holds_commit<
+              decltype(GrammarSpec::many(GrammarSpec::commit(A{}, B{})))>);
 static_assert(!detail::misplaced_commit<
-              decltype(lit<"x"> + option(some(commit(A{}, B{}), lit<",">)))>);
-static_assert(detail::misplaced_commit<decltype(commit(A{}, B{}))>);
-static_assert(detail::misplaced_commit<decltype(commit(A{}, B{}) + lit<"x">)>);
-static_assert(detail::misplaced_commit<decltype(commit(A{}, B{}) | lit<"x">)>);
-static_assert(detail::misplaced_commit<decltype(many(!commit(A{}, B{})))>);
-static_assert(!detail::holds_commit<decltype(lit<"x"> + many(lit<"y">))>);
+              decltype(GrammarSpec::many(GrammarSpec::commit(A{}, B{})))>);
+static_assert(
+    !detail::misplaced_commit<decltype(GrammarSpec::lit<"x"> +
+                                       GrammarSpec::option(GrammarSpec::some(
+                                           GrammarSpec::commit(A{}, B{}),
+                                           GrammarSpec::lit<",">)))>);
+static_assert(
+    detail::misplaced_commit<decltype(GrammarSpec::commit(A{}, B{}))>);
+static_assert(detail::misplaced_commit<decltype(GrammarSpec::commit(A{}, B{}) +
+                                                GrammarSpec::lit<"x">)>);
+static_assert(detail::misplaced_commit<decltype(GrammarSpec::commit(A{}, B{}) |
+                                                GrammarSpec::lit<"x">)>);
+static_assert(detail::misplaced_commit<
+              decltype(GrammarSpec::many(!GrammarSpec::commit(A{}, B{})))>);
+static_assert(
+    !detail::holds_commit<decltype(GrammarSpec::lit<"x"> +
+                                   GrammarSpec::many(GrammarSpec::lit<"y">))>);
 }  // namespace commits
 // `kw<".">` carries a sentinel: a factory is spelled before the grammar's
 // `word_boundary` declaration exists to resolve it. Under the default the
 // guard cannot fire, so the compiled form is `lit<".">`.
-static_assert(std::is_same_v<
-              decltype(some(ref<R1>, kw<".">)),
-              Seq<Ref<R1>,
-                  Repeat<0, kUnbounded,
-                         Seq<Lit<".", false, detail::WordBound>, Ref<R1>>>>>);
 static_assert(
     std::is_same_v<
-        decltype(many(ref<R1>, kw<".">)),
-        Repeat<0, 1,
-               Seq<Ref<R1>,
-                   Repeat<0, kUnbounded,
-                          Seq<Lit<".", false, detail::WordBound>, Ref<R1>>>>>>);
-static_assert(std::is_same_v<std::remove_cv_t<decltype(kw<".">)>,
-                             Lit<".", false, detail::WordBound>>);
+        decltype(GrammarSpec::some(GrammarSpec::ref<R1>, GrammarSpec::kw<".">)),
+        detail::Seq<detail::Ref<R1>,
+                    detail::Repeat<
+                        0, GrammarSpec::kUnbounded,
+                        detail::Seq<detail::Lit<".", false, detail::WordBound>,
+                                    detail::Ref<R1>>>>>);
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::many(GrammarSpec::ref<R1>, GrammarSpec::kw<".">)),
+        detail::Repeat<
+            0, 1,
+            detail::Seq<
+                detail::Ref<R1>,
+                detail::Repeat<
+                    0, GrammarSpec::kUnbounded,
+                    detail::Seq<detail::Lit<".", false, detail::WordBound>,
+                                detail::Ref<R1>>>>>>);
+static_assert(std::is_same_v<std::remove_cv_t<decltype(GrammarSpec::kw<".">)>,
+                             detail::Lit<".", false, detail::WordBound>>);
 
 // `lit<S, G>` is the custom path: the guard is an expression the lexer runs
 // right after the text, held in the type exactly as spelled. Unlike `kw<>`,
 // nothing checks whether it can fire.
 static_assert(
-    std::is_same_v<std::remove_cv_t<decltype(lit<"toto", !lit<"titi">>)>,
-                   Lit<"toto", false, Not<Lit<"titi">>>>);
-static_assert(std::is_same_v<std::remove_cv_t<decltype(lit<"a", cr<"0-9">>)>,
-                             Lit<"a", false, CpSet<0, false, "0-9">>>);
+    std::is_same_v<
+        std::remove_cv_t<
+            decltype(GrammarSpec::lit<"toto", !GrammarSpec::lit<"titi">>)>,
+        detail::Lit<"toto", false, detail::Not<detail::Lit<"titi">>>>);
+static_assert(
+    std::is_same_v<std::remove_cv_t<
+                       decltype(GrammarSpec::lit<"a", GrammarSpec::cr<"0-9">>)>,
+                   detail::Lit<"a", false, detail::CpSet<0, false, "0-9">>>);
 
 // Classes join into one class from either side, spelled in order.
-static_assert(std::is_same_v<decltype(cr<"a-z_"> | uc::L),
-                             decltype(uc::L | cr<"a-z_">)>);
 static_assert(
-    std::is_same_v<decltype(cr<"$"> | uc::Nd),
-                   CpSet<detail::cp_bit(unicode::Property::Nd), false, "$">>);
+    std::is_same_v<decltype(GrammarSpec::cr<"a-z_"> | GrammarSpec::uc::L),
+                   decltype(GrammarSpec::uc::L | GrammarSpec::cr<"a-z_">)>);
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::cr<"$"> | GrammarSpec::uc::Nd),
+        detail::CpSet<detail::cp_bit(unicode::Property::Nd), false, "$">>);
 // The syntax characters are spelled `\xNN`.
-static_assert(std::is_same_v<decltype(cr<R"(+\\-)"> | uc::Nd),
-                             CpSet<detail::cp_bit(unicode::Property::Nd), false,
-                                   "+\\x2d\\x5c">>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::cr<R"(+\\-)"> | GrammarSpec::uc::Nd),
+                   detail::CpSet<detail::cp_bit(unicode::Property::Nd), false,
+                                 "+\\x2d\\x5c">>);
 
 // A union is one class, and `~` complements among all characters, ill-formed
 // bytes included: twice gives the class back.
 static_assert(
-    std::is_same_v<decltype(cr<"a-z"> | cr<"0-9">), CpSet<0, false, "0-9a-z">>);
+    std::is_same_v<decltype(GrammarSpec::cr<"a-z"> | GrammarSpec::cr<"0-9">),
+                   detail::CpSet<0, false, "0-9a-z">>);
 static_assert(
-    std::is_same_v<decltype(~(cr<"a"> | cr<"b">)), CpSet<0, true, "ab">>);
+    std::is_same_v<decltype(~(GrammarSpec::cr<"a"> | GrammarSpec::cr<"b">)),
+                   detail::CpSet<0, true, "ab">>);
 static_assert(
-    std::is_same_v<decltype(~cr<"a"> | cr<"b">), CpSet<0, true, "a">>);
+    std::is_same_v<decltype(~GrammarSpec::cr<"a"> | GrammarSpec::cr<"b">),
+                   detail::CpSet<0, true, "a">>);
 static_assert(
-    std::is_same_v<decltype(~cr<"a"> | ~cr<"a-b">), CpSet<0, true, "a">>);
+    std::is_same_v<decltype(~GrammarSpec::cr<"a"> | ~GrammarSpec::cr<"a-b">),
+                   detail::CpSet<0, true, "a">>);
 static_assert(
-    std::is_same_v<decltype(~cr<"ab">), std::remove_cv_t<decltype(cr<"^ab">)>>);
+    std::is_same_v<decltype(~GrammarSpec::cr<"ab">),
+                   std::remove_cv_t<decltype(GrammarSpec::cr<"^ab">)>>);
 static_assert(
-    std::is_same_v<decltype(~cr<"^ab">), std::remove_cv_t<decltype(cr<"ab">)>>);
-static_assert(std::is_same_v<decltype(~cr<"ab">), CpSet<0, true, "ab">>);
-static_assert(std::is_same_v<decltype(~~cr<"ab">), CpSet<0, false, "ab">>);
-static_assert(std::is_same_v<decltype(~cr<R"(\D)">), CpSet<0, false, "0-9">>);
-static_assert(std::is_same_v<decltype(~~cr<R"(\D)">), CpSet<0, true, "0-9">>);
+    std::is_same_v<decltype(~GrammarSpec::cr<"^ab">),
+                   std::remove_cv_t<decltype(GrammarSpec::cr<"ab">)>>);
+static_assert(std::is_same_v<decltype(~GrammarSpec::cr<"ab">),
+                             detail::CpSet<0, true, "ab">>);
+static_assert(std::is_same_v<decltype(~~GrammarSpec::cr<"ab">),
+                             detail::CpSet<0, false, "ab">>);
+static_assert(std::is_same_v<decltype(~GrammarSpec::cr<R"(\D)">),
+                             detail::CpSet<0, false, "0-9">>);
+static_assert(std::is_same_v<decltype(~~GrammarSpec::cr<R"(\D)">),
+                             detail::CpSet<0, true, "0-9">>);
 
 // A keyword states the boundary only where its spelling ends in the class: its
 // last scalar is in it.
-using XC = std::remove_cvref_t<decltype(uc::XID_Continue)>;
+using XC = std::remove_cvref_t<decltype(GrammarSpec::uc::XID_Continue)>;
 static_assert(detail::word_final_in<"if", XC>());
 static_assert(!detail::word_final_in<"(", XC>());
 static_assert(detail::word_final_in<"où", XC>());
 static_assert(!detail::word_final_in<"→", XC>());
-static_assert(detail::word_final_in<"IF", CpSet<0, false, "a-z">, true>());
-static_assert(!detail::word_final_in<"IF", CpSet<0, false, "a-z">>());
 static_assert(
-    detail::word_final_in<
-        "été", std::remove_cvref_t<decltype(cr<R"(\u{80}-\u{10FFFF})">)>>());
-static_assert(!detail::word_final_in<"été", CpSet<0, false, "a-z">>());
-static_assert(
-    detail::word_final_in<"if+", std::remove_cvref_t<decltype(~uc::L)>>());
+    detail::word_final_in<"IF", detail::CpSet<0, false, "a-z">, true>());
+static_assert(!detail::word_final_in<"IF", detail::CpSet<0, false, "a-z">>());
+static_assert(detail::word_final_in<
+              "été", std::remove_cvref_t<
+                         decltype(GrammarSpec::cr<R"(\u{80}-\u{10FFFF})">)>>());
+static_assert(!detail::word_final_in<"été", detail::CpSet<0, false, "a-z">>());
+static_assert(detail::word_final_in<
+              "if+", std::remove_cvref_t<decltype(~GrammarSpec::uc::L)>>());
 
 // Unary ! and & are the lookaheads, and the only `&`: the unordered group is
 // `unordered(...)`, whose items stay whole -- a group given as an item is one.
 template <class A, class B>
 concept binary_and = requires(A a, B b) { a & b; };
-static_assert(std::is_same_v<decltype(!lit<"a">), Not<Lit<"a">>>);
-static_assert(std::is_same_v<decltype(&lit<"a">), And<Lit<"a">>>);
-static_assert(!binary_and<Lit<"a">, Lit<"b">>);
-static_assert(std::is_same_v<decltype(unordered(lit<"a">, lit<"b">, lit<"c">)),
-                             Unordered<Lit<"a">, Lit<"b">, Lit<"c">>>);
+static_assert(std::is_same_v<decltype(!GrammarSpec::lit<"a">),
+                             detail::Not<detail::Lit<"a">>>);
+static_assert(std::is_same_v<decltype(&GrammarSpec::lit<"a">),
+                             detail::And<detail::Lit<"a">>>);
+static_assert(!binary_and<detail::Lit<"a">, detail::Lit<"b">>);
 static_assert(
-    std::is_same_v<decltype(unordered(unordered(lit<"a">, lit<"b">), lit<"c">)),
-                   Unordered<Unordered<Lit<"a">, Lit<"b">>, Lit<"c">>>);
+    std::is_same_v<decltype(GrammarSpec::unordered(GrammarSpec::lit<"a">,
+                                                   GrammarSpec::lit<"b">,
+                                                   GrammarSpec::lit<"c">)),
+                   detail::Unordered<detail::Lit<"a">, detail::Lit<"b">,
+                                     detail::Lit<"c">>>);
 static_assert(
-    std::is_same_v<decltype(unordered(lit<"a">, unordered(lit<"b">, lit<"c">))),
-                   Unordered<Lit<"a">, Unordered<Lit<"b">, Lit<"c">>>>);
+    std::is_same_v<
+        decltype(GrammarSpec::unordered(
+            GrammarSpec::unordered(GrammarSpec::lit<"a">,
+                                   GrammarSpec::lit<"b">),
+            GrammarSpec::lit<"c">)),
+        detail::Unordered<detail::Unordered<detail::Lit<"a">, detail::Lit<"b">>,
+                          detail::Lit<"c">>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::unordered(
+                       GrammarSpec::lit<"a">,
+                       GrammarSpec::unordered(GrammarSpec::lit<"b">,
+                                              GrammarSpec::lit<"c">))),
+                   detail::Unordered<
+                       detail::Lit<"a">,
+                       detail::Unordered<detail::Lit<"b">, detail::Lit<"c">>>>);
 static_assert(std::is_same_v<decltype(GrammarSpec::unordered),
-                             decltype(cursiv::unordered)>);
+                             decltype(cursiv::GrammarSpec::unordered)>);
 
 // A precedence table: `left`/`right`/`nonassoc` make a table of one, and
 // `levels(...)` lists them, tightest-binding first. `>>` joins nothing.
 template <class A, class B>
 concept shifts = requires(A a, B b) { a >> b; };
 static_assert(
-    std::is_same_v<
-        decltype(levels(left(lit<"*">), right(lit<"^">), nonassoc(lit<"<">))),
-        Levels<LeftAssoc<Lit<"*">>, RightAssoc<Lit<"^">>, NonAssoc<Lit<"<">>>>);
+    std::is_same_v<decltype(GrammarSpec::levels(
+                       GrammarSpec::left(GrammarSpec::lit<"*">),
+                       GrammarSpec::right(GrammarSpec::lit<"^">),
+                       GrammarSpec::nonassoc(GrammarSpec::lit<"<">))),
+                   detail::Levels<detail::LeftAssoc<detail::Lit<"*">>,
+                                  detail::RightAssoc<detail::Lit<"^">>,
+                                  detail::NonAssoc<detail::Lit<"<">>>>);
 static_assert(
-    std::is_same_v<decltype(levels(left(lit<"+">))), decltype(left(lit<"+">))>);
-static_assert(!shifts<decltype(left(lit<"*">)), decltype(left(lit<"+">))>);
-static_assert(std::is_same_v<decltype(GrammarSpec::nonassoc(lit<"<">)),
-                             Levels<NonAssoc<Lit<"<">>>>);
-static_assert(std::is_same_v<
-              decltype(GrammarSpec::levels(GrammarSpec::left(lit<"*">),
-                                           GrammarSpec::nonassoc(lit<"<">))),
-              Levels<LeftAssoc<Lit<"*">>, NonAssoc<Lit<"<">>>>);
+    std::is_same_v<
+        decltype(GrammarSpec::levels(GrammarSpec::left(GrammarSpec::lit<"+">))),
+        decltype(GrammarSpec::left(GrammarSpec::lit<"+">))>);
+static_assert(!shifts<decltype(GrammarSpec::left(GrammarSpec::lit<"*">)),
+                      decltype(GrammarSpec::left(GrammarSpec::lit<"+">))>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::nonassoc(GrammarSpec::lit<"<">)),
+                   detail::Levels<detail::NonAssoc<detail::Lit<"<">>>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::levels(
+                       GrammarSpec::left(GrammarSpec::lit<"*">),
+                       GrammarSpec::nonassoc(GrammarSpec::lit<"<">))),
+                   detail::Levels<detail::LeftAssoc<detail::Lit<"*">>,
+                                  detail::NonAssoc<detail::Lit<"<">>>>);
 
 // The trivia: a grammar's settings are participles, `ignored` and `hidden`,
 // and the tags of a `skip()` region verbs, `ignore<>` and `hide<>`.
 static_assert(std::is_same_v<GrammarSpec::ignored, TypeList<>>);
 static_assert(std::is_same_v<GrammarSpec::hidden, TypeList<>>);
-static_assert(
-    std::is_same_v<decltype(skip(ignore<R1>, hide<>, lit<"a"> + lit<"b">)),
-                   Skip<TypeList<R1>, TypeList<>, Seq<Lit<"a">, Lit<"b">>>>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::skip(
+                  GrammarSpec::ignore<R1>, GrammarSpec::hide<>,
+                  GrammarSpec::lit<"a"> + GrammarSpec::lit<"b">)),
+              detail::Skip<TypeList<R1>, TypeList<>,
+                           detail::Seq<detail::Lit<"a">, detail::Lit<"b">>>>);
 static_assert(
     std::is_same_v<decltype(GrammarSpec::skip(GrammarSpec::ignore<>,
-                                              GrammarSpec::hide<R1>, lit<"a">)),
-                   Skip<TypeList<>, TypeList<R1>, Lit<"a">>>);
-static_assert(std::is_same_v<decltype(tight(lit<"a">)),
-                             Skip<TypeList<>, TypeList<>, Lit<"a">>>);
+                                              GrammarSpec::hide<R1>,
+                                              GrammarSpec::lit<"a">)),
+                   detail::Skip<TypeList<>, TypeList<R1>, detail::Lit<"a">>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::tight(GrammarSpec::lit<"a">)),
+                   detail::Skip<TypeList<>, TypeList<>, detail::Lit<"a">>>);
 
 // `as<X>(e)` annotates `e` with a converter: a constant, a type's default
 // converter, or a callable. In a rule's body it becomes a data rule over `e`,
@@ -434,55 +638,78 @@ static_assert(std::is_same_v<decltype(tight(lit<"a">)),
 enum class Kind { one, two };
 struct Late;
 using detail::Rule;
-struct Phrase : Rule<lit<"p">> {};
+struct Phrase : Rule<GrammarSpec::lit<"p">> {};
 using detail::parts_conv;
 using detail::text_conv;
 using detail::value_conv;
-static_assert(std::is_same_v<decltype(as<Kind::one>(lit<"+">)),
-                             As<value_conv<Kind::one>, Lit<"+">>>);
-static_assert(std::is_same_v<decltype(as<Kind::two>(ref<Late>)),
-                             As<value_conv<Kind::two>, Ref<Late>>>);
-static_assert(std::is_same_v<decltype(GrammarSpec::as<Kind::one>(lit<"+">)),
-                             decltype(cursiv::as<Kind::one>(lit<"+">))>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::as<Kind::one>(GrammarSpec::lit<"+">)),
+                   detail::As<value_conv<Kind::one>, detail::Lit<"+">>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::as<Kind::two>(GrammarSpec::ref<Late>)),
+                   detail::As<value_conv<Kind::two>, detail::Ref<Late>>>);
 static_assert(
     std::is_same_v<
-        std::remove_cv_t<decltype(Rule<as<Kind::one>(ref<Phrase>)>::body)>,
-        Ref<Rule<ref<Phrase>, value_conv<Kind::one>>>>);
+        decltype(GrammarSpec::as<Kind::one>(GrammarSpec::lit<"+">)),
+        decltype(cursiv::GrammarSpec::as<Kind::one>(GrammarSpec::lit<"+">))>);
 static_assert(
     std::is_same_v<
-        std::remove_cv_t<
-            decltype(Rule<lit<"x"> +
-                          as<Kind::two>(kw<"is"> + kw<"not">)>::body)>,
-        Seq<Lit<"x">, Ref<Rule<kw<"is"> + kw<"not">, value_conv<Kind::two>>>>>);
+        std::remove_cv_t<decltype(Rule<GrammarSpec::as<Kind::one>(
+                                      GrammarSpec::ref<Phrase>)>::body)>,
+        detail::Ref<Rule<GrammarSpec::ref<Phrase>, value_conv<Kind::one>>>>);
+static_assert(
+    std::is_same_v<
+        std::remove_cv_t<decltype(Rule<GrammarSpec::lit<"x"> +
+                                       GrammarSpec::as<Kind::two>(
+                                           GrammarSpec::kw<"is"> +
+                                           GrammarSpec::kw<"not">)>::body)>,
+        detail::Seq<
+            detail::Lit<"x">,
+            detail::Ref<Rule<GrammarSpec::kw<"is"> + GrammarSpec::kw<"not">,
+                             value_conv<Kind::two>>>>>);
 static_assert(
     std::is_same_v<cursiv::detail::rule_type_t<
-                       Rule<kw<"is"> + kw<"not">, value_conv<Kind::two>>>,
+                       Rule<GrammarSpec::kw<"is"> + GrammarSpec::kw<"not">,
+                            value_conv<Kind::two>>>,
                    Kind>);
 inline constexpr auto first_char = [](std::string_view t) { return t[0]; };
 inline constexpr auto part_count = [](Parts p) { return p.size(); };
 inline constexpr auto seven = [] { return 7; };
-static_assert(std::is_same_v<decltype(as<double>(some(d))),
-                             As<double, decltype(some(d))>>);
-static_assert(std::is_same_v<decltype(as<first_char>(lit<"x">)),
-                             As<text_conv<first_char>, Lit<"x">>>);
-static_assert(
-    std::is_same_v<decltype(as<part_count>(lit<"x"> + lit<"y">)),
-                   As<parts_conv<part_count>, Seq<Lit<"x">, Lit<"y">>>>);
-static_assert(std::is_same_v<decltype(as<seven>(lit<"x">)),
-                             As<text_conv<seven>, Lit<"x">>>);
-static_assert(std::is_same_v<decltype(as<true>(lit<"x">)),
-                             As<value_conv<true>, Lit<"x">>>);
-// Around a whole body, the conversion is the rule's own.
-static_assert(std::is_same_v<GrammarSpec::terminal<as<double>(some(d))>,
-                             cursiv::detail::TerminalRule<some(d), double>>);
-static_assert(std::is_same_v<GrammarSpec::rule<as<Kind::one>(kw<"plus">)>,
-                             Rule<kw<"plus">, value_conv<Kind::one>>>);
-static_assert(std::is_same_v<GrammarSpec::rule<as<part_count>(some(d))>,
-                             Rule<some(d), parts_conv<part_count>>>);
 static_assert(
     std::is_same_v<
-        cursiv::detail::rule_type_t<GrammarSpec::rule<as<seven>(some(d))>>,
-        int>);
+        decltype(GrammarSpec::as<double>(GrammarSpec::some(GrammarSpec::d))),
+        detail::As<double, decltype(GrammarSpec::some(GrammarSpec::d))>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::as<first_char>(GrammarSpec::lit<"x">)),
+                   detail::As<text_conv<first_char>, detail::Lit<"x">>>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::as<part_count>(GrammarSpec::lit<"x"> +
+                                                   GrammarSpec::lit<"y">)),
+              detail::As<parts_conv<part_count>,
+                         detail::Seq<detail::Lit<"x">, detail::Lit<"y">>>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::as<seven>(GrammarSpec::lit<"x">)),
+                   detail::As<text_conv<seven>, detail::Lit<"x">>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::as<true>(GrammarSpec::lit<"x">)),
+                   detail::As<value_conv<true>, detail::Lit<"x">>>);
+// Around a whole body, the conversion is the rule's own.
+static_assert(std::is_same_v<GrammarSpec::terminal<GrammarSpec::as<double>(
+                                 GrammarSpec::some(GrammarSpec::d))>,
+                             cursiv::detail::TerminalRule<
+                                 GrammarSpec::some(GrammarSpec::d), double>>);
+static_assert(
+    std::is_same_v<
+        GrammarSpec::rule<GrammarSpec::as<Kind::one>(GrammarSpec::kw<"plus">)>,
+        Rule<GrammarSpec::kw<"plus">, value_conv<Kind::one>>>);
+static_assert(std::is_same_v<
+              GrammarSpec::rule<GrammarSpec::as<part_count>(
+                  GrammarSpec::some(GrammarSpec::d))>,
+              Rule<GrammarSpec::some(GrammarSpec::d), parts_conv<part_count>>>);
+static_assert(std::is_same_v<
+              cursiv::detail::rule_type_t<GrammarSpec::rule<
+                  GrammarSpec::as<seven>(GrammarSpec::some(GrammarSpec::d))>>,
+              int>);
 
 // `infix<Primary, T, Levels>` climbs over `T::left`, `T::op` and `T::right`
 // and builds a `T`, even where a base of `T` declares the members. Naming the
@@ -495,66 +722,101 @@ struct Operands {
 };
 struct Binary : Operands {};
 }  // namespace ast
-static_assert(std::is_same_v<
-              GrammarSpec::infix<R1, ast::Binary, left(lit<"+">)>::node_type,
-              ast::Binary>);
 static_assert(
     std::is_same_v<
-        GrammarSpec::infix<R1, ast::Binary, left(lit<"+">)>,
-        GrammarSpec::infix<R1, ast::Binary, left(lit<"+">), &ast::Binary::left,
-                           &ast::Binary::op, &ast::Binary::right>>);
+        GrammarSpec::infix<R1, ast::Binary,
+                           GrammarSpec::left(GrammarSpec::lit<"+">)>::node_type,
+        ast::Binary>);
+static_assert(std::is_same_v<
+              GrammarSpec::infix<R1, ast::Binary,
+                                 GrammarSpec::left(GrammarSpec::lit<"+">)>,
+              GrammarSpec::infix<
+                  R1, ast::Binary, GrammarSpec::left(GrammarSpec::lit<"+">),
+                  &ast::Binary::left, &ast::Binary::op, &ast::Binary::right>>);
 
 // The directives.
-static_assert(std::is_same_v<decltype(assign<&ast::Node::child>(ref<R1>)),
-                             Assign<&ast::Node::child, Ref<R1>>>);
-static_assert(std::is_same_v<decltype(append<&ast::Node::child>(ref<R1>)),
-                             Append<&ast::Node::child, Ref<R1>>>);
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::assign<&ast::Node::child>(GrammarSpec::ref<R1>)),
+        detail::Assign<&ast::Node::child, detail::Ref<R1>>>);
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::append<&ast::Node::child>(GrammarSpec::ref<R1>)),
+        detail::Append<&ast::Node::child, detail::Ref<R1>>>);
 // A directive leaves hover prose on its token and preserves ordinary
 // choices and trivia scopes; only a section operand needs distribution.
 static_assert(
-    std::is_same_v<decltype(assign<&ast::Node::many>(lit<"true">.doc<"on">())),
-                   Assign<&ast::Node::many, Doc<Lit<"true">, "on">>>);
-static_assert(std::is_same_v<
-              decltype(assign<&ast::Node::many>(lit<"true"> | lit<"false">)),
-              Assign<&ast::Node::many, Choice<Lit<"true">, Lit<"false">>>>);
+    std::is_same_v<decltype(GrammarSpec::assign<&ast::Node::many>(
+                       GrammarSpec::lit<"true">.doc<"on">())),
+                   detail::Assign<&ast::Node::many,
+                                  detail::Doc<detail::Lit<"true">, "on">>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::assign<&ast::Node::many>(
+                       GrammarSpec::lit<"true"> | GrammarSpec::lit<"false">)),
+                   detail::Assign<&ast::Node::many,
+                                  detail::Choice<detail::Lit<"true">,
+                                                 detail::Lit<"false">>>>);
 static_assert(
     std::is_same_v<
-        decltype(assign<&ast::Node::many>(tight(lit<"true">))),
-        Assign<&ast::Node::many, Skip<TypeList<>, TypeList<>, Lit<"true">>>>);
-static_assert(std::is_same_v<
-              decltype(flag<&ast::Node::many>(kw<"many">)),
-              Flag<&ast::Node::many, Lit<"many", false, detail::WordBound>>>);
+        decltype(GrammarSpec::assign<&ast::Node::many>(
+            GrammarSpec::tight(GrammarSpec::lit<"true">))),
+        detail::Assign<&ast::Node::many, detail::Skip<TypeList<>, TypeList<>,
+                                                      detail::Lit<"true">>>>);
 static_assert(
-    std::is_same_v<decltype(nest<ast::Node, &ast::Node::child>(lit<"x">)),
-                   Nest<ast::Node, &ast::Node::child, Lit<"x">>>);
+    std::is_same_v<
+        decltype(GrammarSpec::flag<&ast::Node::many>(GrammarSpec::kw<"many">)),
+        detail::Flag<&ast::Node::many,
+                     detail::Lit<"many", false, detail::WordBound>>>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::nest<ast::Node, &ast::Node::child>(
+                  GrammarSpec::lit<"x">)),
+              detail::Nest<ast::Node, &ast::Node::child, detail::Lit<"x">>>);
 
 // `through` stays one node.
-static_assert(std::is_same_v<decltype(through(lit<"/*">, lit<"*/">)),
-                             Through<Lit<"/*">, Lit<"*/">>>);
-static_assert(std::is_same_v<decltype(through(lit<"/*">, lit<"*/"> + lit<"x">)),
-                             Through<Lit<"/*">, Seq<Lit<"*/">, Lit<"x">>>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::through(GrammarSpec::lit<"/*">,
+                                                 GrammarSpec::lit<"*/">)),
+                   detail::Through<detail::Lit<"/*">, detail::Lit<"*/">>>);
+static_assert(
+    std::is_same_v<
+        decltype(GrammarSpec::through(GrammarSpec::lit<"/*">,
+                                      GrammarSpec::lit<"*/"> +
+                                          GrammarSpec::lit<"x">)),
+        detail::Through<detail::Lit<"/*">,
+                        detail::Seq<detail::Lit<"*/">, detail::Lit<"x">>>>);
 
 // A section is one node; a directive over it applies to the grammar's entry.
-static_assert(std::is_same_v<decltype(section<R1>(lit<"<">, lit<">">)),
-                             Embed<R1, Seq<Lit<"<">, Ref<R1>, Lit<">">>>>);
+static_assert(std::is_same_v<
+              decltype(GrammarSpec::section<R1>(GrammarSpec::lit<"<">,
+                                                GrammarSpec::lit<">">)),
+              detail::Embed<R1, detail::Seq<detail::Lit<"<">, detail::Ref<R1>,
+                                            detail::Lit<">">>>>);
 static_assert(
     std::is_same_v<
-        decltype(assign<&ast::Node::child>(section<R1>(lit<"<">, lit<">">))),
-        Embed<R1, Seq<Lit<"<">, Assign<&ast::Node::child, Ref<R1>>,
-                      Lit<">">>>>);
+        decltype(GrammarSpec::assign<&ast::Node::child>(
+            GrammarSpec::section<R1>(GrammarSpec::lit<"<">,
+                                     GrammarSpec::lit<">">))),
+        detail::Embed<
+            R1, detail::Seq<detail::Lit<"<">,
+                            detail::Assign<&ast::Node::child, detail::Ref<R1>>,
+                            detail::Lit<">">>>>);
 static_assert(
     std::is_same_v<
-        decltype(append<&ast::Node::child>(section<R1>(lit<"<">, lit<">">))),
-        Embed<R1, Seq<Lit<"<">, Append<&ast::Node::child, Ref<R1>>,
-                      Lit<">">>>>);
+        decltype(GrammarSpec::append<&ast::Node::child>(
+            GrammarSpec::section<R1>(GrammarSpec::lit<"<">,
+                                     GrammarSpec::lit<">">))),
+        detail::Embed<
+            R1, detail::Seq<detail::Lit<"<">,
+                            detail::Append<&ast::Node::child, detail::Ref<R1>>,
+                            detail::Lit<">">>>>);
 
 // A class is keyed on its canonical spelling, not on the text it was written
 // as: get the spelling wrong and a grammar silently parses a class it never
 // declared.
 template <cursiv::str Spec>
-using CR = std::remove_cv_t<decltype(cr<Spec>)>;
+using CR = std::remove_cv_t<decltype(GrammarSpec::cr<Spec>)>;
 template <std::uint64_t M, bool N, cursiv::str Sp>
-constexpr std::string_view spelled(CpSet<M, N, Sp>) {
+constexpr std::string_view spelled(detail::CpSet<M, N, Sp>) {
   return Sp.view();
 }
 
@@ -568,8 +830,8 @@ static_assert(std::is_same_v<CR<"a-zA-Z_">, CR<"_A-Za-z">>);
 static_assert(std::is_same_v<CR<"0-9">, CR<"0123456789">>);
 // A negation twice, and a complement escape inside a negation, are the class
 // again.
-static_assert(
-    std::is_same_v<decltype(~~cr<R"(\x00-\x1f)">), CR<R"(\x00-\x1f)">>);
+static_assert(std::is_same_v<decltype(~~GrammarSpec::cr<R"(\x00-\x1f)">),
+                             CR<R"(\x00-\x1f)">>);
 static_assert(std::is_same_v<CR<R"(^\D)">, CR<"0-9">>);
 // Different sets stay different types, including neighbours one byte apart.
 static_assert(!std::is_same_v<CR<"a-z">, CR<"a-y">>);
@@ -579,30 +841,33 @@ static_assert(!std::is_same_v<CR<R"(\x00)">, CR<"">>);
 
 // The key is the readable form: the text a backtrace, `nm -C` and a compiler
 // diagnostic show.
-static_assert(spelled(cr<"za-y">) == "a-z");
-static_assert(spelled(cr<"a-zA-Z0-9_">) == "0-9A-Z_a-z");
-static_assert(spelled(cr<" \t\r\n\f\v">) == "\\x09-\\x0d ");
-static_assert(spelled(cr<"^\n\r">) == "\\x0a\\x0d");
+static_assert(spelled(GrammarSpec::cr<"za-y">) == "a-z");
+static_assert(spelled(GrammarSpec::cr<"a-zA-Z0-9_">) == "0-9A-Z_a-z");
+static_assert(spelled(GrammarSpec::cr<" \t\r\n\f\v">) == "\\x09-\\x0d ");
+static_assert(spelled(GrammarSpec::cr<"^\n\r">) == "\\x0a\\x0d");
 // A two-character run spells its characters; three or more spell a range.
-static_assert(spelled(cr<"ab">) == "ab");
-static_assert(spelled(cr<"abc">) == "a-c");
+static_assert(spelled(GrammarSpec::cr<"ab">) == "ab");
+static_assert(spelled(GrammarSpec::cr<"abc">) == "a-c");
 // `-`, `^` and `\` are always escaped, so the only bare `-` in a key is a range
 // operator.
-static_assert(spelled(cr<R"(\x2d-\x2f)">) == "\\x2d-/");
+static_assert(spelled(GrammarSpec::cr<R"(\x2d-\x2f)">) == "\\x2d-/");
 // Past ASCII, a scalar is spelled by its width.
-static_assert(spelled(cr<"é">) == "\\xe9");
-static_assert(spelled(cr<"€">) == "\\u20ac");
-static_assert(spelled(cr<"😀">) == "\\u{1f600}");
-static_assert(spelled(cr<R"(\u{80}-\u{10FFFF})">) == "\\x80-\\u{10ffff}");
+static_assert(spelled(GrammarSpec::cr<"é">) == "\\xe9");
+static_assert(spelled(GrammarSpec::cr<"€">) == "\\u20ac");
+static_assert(spelled(GrammarSpec::cr<"😀">) == "\\u{1f600}");
+static_assert(spelled(GrammarSpec::cr<R"(\u{80}-\u{10FFFF})">) ==
+              "\\x80-\\u{10ffff}");
 
-static_assert(std::is_same_v<std::remove_cv_t<decltype(ikw<"and">)>,
-                             Lit<"and", true, detail::WordBound>>);
+static_assert(
+    std::is_same_v<std::remove_cv_t<decltype(GrammarSpec::ikw<"and">)>,
+                   detail::Lit<"and", true, detail::WordBound>>);
 
 // The generic classes exist and are CpSets (usable by every grammar).
-static_assert(std::is_same_v<std::remove_cv_t<decltype(s)>,
-                             std::remove_cv_t<decltype(cr<R"(\s)">)>>);
-static_assert(!std::is_same_v<std::remove_cv_t<decltype(w)>,
-                              std::remove_cv_t<decltype(d)>>);
+static_assert(
+    std::is_same_v<std::remove_cv_t<decltype(GrammarSpec::s)>,
+                   std::remove_cv_t<decltype(GrammarSpec::cr<R"(\s)">)>>);
+static_assert(!std::is_same_v<std::remove_cv_t<decltype(GrammarSpec::w)>,
+                              std::remove_cv_t<decltype(GrammarSpec::d)>>);
 
 // A set's key reads back as that set: every singleton, the ranges around
 // the encodings' edges, and 20 000 random sets from one seed.
@@ -668,10 +933,10 @@ namespace source_test {
 using namespace cursiv;
 using namespace cursiv::engine;
 namespace left {
-struct ID : cursiv::detail::TerminalRule<lit<"left">> {};
+struct ID : cursiv::detail::TerminalRule<GrammarSpec::lit<"left">> {};
 }  // namespace left
 namespace right {
-struct ID : cursiv::detail::TerminalRule<lit<"right">> {};
+struct ID : cursiv::detail::TerminalRule<GrammarSpec::lit<"right">> {};
 }  // namespace right
 struct Node : AstNode {
   string_view ID;
@@ -783,8 +1048,8 @@ using base_body = std::remove_cv_t<decltype(R::body)>;
 template <class Body, class... Tail>
 struct spliced;
 template <class... Bs, class... Tail>
-struct spliced<Seq<Bs...>, Tail...> {
-  using type = Seq<Bs..., Tail...>;
+struct spliced<detail::Seq<Bs...>, Tail...> {
+  using type = detail::Seq<Bs..., Tail...>;
 };
 template <class Body, class... Tail>
 using spliced_t = typename spliced<Body, Tail...>::type;
@@ -792,7 +1057,7 @@ using spliced_t = typename spliced<Body, Tail...>::type;
 // Identity, not a forwarding wrapper: a new type here would double every
 // instantiation keyed on the rule, for a grammar that overrides nothing.
 
-using Plain = ResolveOverride<Doc>;
+using Plain = detail::ResolveOverride<Doc>;
 
 static_assert(std::same_as<Plain::rule<Doc::ID>, Doc::ID>);
 static_assert(std::same_as<Plain::rule<Doc::Root>, Doc::Root>);
@@ -808,7 +1073,7 @@ struct Wide : extends<Doc> {
   struct override<T> : terminal<cr<"a-zA-Z_$"> + many(w | lit<"$">)> {};
 };
 
-using Wid = ResolveOverride<Wide>;
+using Wid = detail::ResolveOverride<Wide>;
 
 static_assert(Wid::overrides<Doc::ID>);
 // The override is a new type that remembers the rule it stands for: a
@@ -879,7 +1144,7 @@ CURSIV_OV(RepOneR, OneR, rule, many(super))
 #undef CURSIV_OV
 
 template <class G, class R>
-using eff = typename ResolveOverride<G>::template body<R>;
+using eff = typename detail::ResolveOverride<G>::template body<R>;
 
 // Substituting an empty creation must preserve its boundary: the suffix is
 // outside `super`, even though spelling `create<N> + suffix` would absorb it.
@@ -895,9 +1160,10 @@ struct SuffixedCreation : extends<EmptyCreation> {
     requires std::same_as<T, EmptyCreation::Root>
   struct override<T> : rule<super + lit<"suffix">> {};
 };
-static_assert(std::same_as<eff<SuffixedCreation, EmptyCreation::Root>,
-                           Seq<Create<EmptyCreation::Node, Epsilon>,
-                               Lit<"suffix">>>);
+static_assert(std::same_as<
+              eff<SuffixedCreation, EmptyCreation::Root>,
+              detail::Seq<detail::Create<EmptyCreation::Node, detail::Epsilon>,
+                          detail::Lit<"suffix">>>);
 
 // A bare `super` gives the base body back, whatever its shape.
 static_assert(std::same_as<eff<BareT, Shapes::SeqT>, base_body<Shapes::SeqT>>);
@@ -938,10 +1204,12 @@ static_assert(
     std::same_as<eff<CatSeqT, Shapes::SeqT>, eff<CatSeqR, Shapes::SeqR>>);
 static_assert(
     std::same_as<eff<AltAltT, Shapes::AltT>, eff<AltAltR, Shapes::AltR>>);
-static_assert(std::same_as<ResolveOverride<CatSeqT>::rule<Shapes::SeqT>::kind,
-                           Shapes::SeqT::kind>);
-static_assert(std::same_as<ResolveOverride<CatSeqR>::rule<Shapes::SeqR>::kind,
-                           Shapes::SeqR::kind>);
+static_assert(
+    std::same_as<detail::ResolveOverride<CatSeqT>::rule<Shapes::SeqT>::kind,
+                 Shapes::SeqT::kind>);
+static_assert(
+    std::same_as<detail::ResolveOverride<CatSeqR>::rule<Shapes::SeqR>::kind,
+                 Shapes::SeqR::kind>);
 
 struct Thrice : extends<CatSeqT> {
   template <class>
@@ -956,7 +1224,7 @@ struct SpelledTwice : GrammarSpec {
   using entry = Body;
 };
 
-static_assert(ResolveOverride<Thrice>::overrides<Shapes::SeqT>);
+static_assert(detail::ResolveOverride<Thrice>::overrides<Shapes::SeqT>);
 static_assert(
     std::same_as<eff<Thrice, Shapes::SeqT>, base_body<SpelledTwice::Body>>);
 
@@ -964,7 +1232,7 @@ static_assert(
 // effective: the question is asked of the grammar, and it answers up the chain.
 struct Quiet : extends<Thrice> {};
 
-static_assert(ResolveOverride<Quiet>::overrides<Shapes::SeqT>);
+static_assert(detail::ResolveOverride<Quiet>::overrides<Shapes::SeqT>);
 static_assert(
     std::same_as<eff<Quiet, Shapes::SeqT>, eff<Thrice, Shapes::SeqT>>);
 
@@ -975,11 +1243,11 @@ struct Untouched : extends<Shapes> {};
 
 struct Merged : extends<CatSeqT, Untouched> {};
 
-static_assert(ResolveOverride<Merged>::overrides<Shapes::SeqT>);
+static_assert(detail::ResolveOverride<Merged>::overrides<Shapes::SeqT>);
 static_assert(
     std::same_as<eff<Merged, Shapes::SeqT>, eff<CatSeqT, Shapes::SeqT>>);
-static_assert(
-    std::same_as<ResolveOverride<Merged>::rule<Shapes::AltR>, Shapes::AltR>);
+static_assert(std::same_as<detail::ResolveOverride<Merged>::rule<Shapes::AltR>,
+                           Shapes::AltR>);
 
 // ...and while both sides reach one override through their common ancestor:
 // they restate nothing, so there is one answer and not two.
@@ -987,7 +1255,7 @@ struct Left : extends<Thrice> {};
 struct Right : extends<Thrice> {};
 struct Joined : extends<Left, Right> {};
 
-static_assert(ResolveOverride<Joined>::overrides<Shapes::SeqT>);
+static_assert(detail::ResolveOverride<Joined>::overrides<Shapes::SeqT>);
 static_assert(
     std::same_as<eff<Joined, Shapes::SeqT>, eff<Thrice, Shapes::SeqT>>);
 
@@ -1005,8 +1273,9 @@ struct Slotted : extends<Doc> {
   struct override<T> : terminal<as<Tagged>(super)> {};
 };
 
-static_assert(std::same_as<ResolveOverride<Slotted>::rule<Doc::ID>::slot,
-                           TypeList<Tagged>>);
+static_assert(
+    std::same_as<detail::ResolveOverride<Slotted>::rule<Doc::ID>::slot,
+                 TypeList<Tagged>>);
 static_assert(std::same_as<Plain::rule<Doc::ID>::slot, TypeList<>>);
 
 // Two sides that restate a rule apart join where a grammar restates it once
@@ -1019,7 +1288,7 @@ struct Chosen : extends<CatSeqT, PreSeqT> {
   struct override<T> : terminal<lit<"a">> {};
 };
 
-static_assert(ResolveOverride<Chosen>::overrides<Shapes::SeqT>);
+static_assert(detail::ResolveOverride<Chosen>::overrides<Shapes::SeqT>);
 static_assert(std::same_as<eff<Chosen, Shapes::SeqT>, base_body<Shapes::OneT>>);
 
 // ...and where one side states a converter and the other none, the
@@ -1033,8 +1302,9 @@ struct Retagged : extends<Slotted, Wide> {
   struct override<T> : terminal<as<Tagged>(lit<"id">)> {};
 };
 
-static_assert(std::same_as<ResolveOverride<Retagged>::rule<Doc::ID>::slot,
-                           TypeList<Tagged>>);
+static_assert(
+    std::same_as<detail::ResolveOverride<Retagged>::rule<Doc::ID>::slot,
+                 TypeList<Tagged>>);
 
 // The resolution is a push: a grammar is asked rule by rule, never for the
 // list of what it overrides. So a declaration for a rule outside the entry's
@@ -1052,9 +1322,10 @@ struct Reaching : extends<Doc> {
   struct override<T> : terminal<lit<"always">> {};
 };
 
-static_assert(ResolveOverride<Reaching>::overrides<Elsewhere::Never>);
-static_assert(!ResolveOverride<Reaching>::overrides<Doc::ID>);
-static_assert(std::same_as<ResolveOverride<Reaching>::rule<Doc::ID>, Doc::ID>);
+static_assert(detail::ResolveOverride<Reaching>::overrides<Elsewhere::Never>);
+static_assert(!detail::ResolveOverride<Reaching>::overrides<Doc::ID>);
+static_assert(
+    std::same_as<detail::ResolveOverride<Reaching>::rule<Doc::ID>, Doc::ID>);
 
 struct Made;
 
@@ -1064,8 +1335,8 @@ struct Built : GrammarSpec {
   using entry = Node;
 };
 
-static_assert(
-    std::same_as<ResolveOverride<Built>::body<Built::Node>, Ref<Built::ID>>);
+static_assert(std::same_as<detail::ResolveOverride<Built>::body<Built::Node>,
+                           detail::Ref<Built::ID>>);
 
 // `MaterializeCreate`: the creation a node rule implies, spelled out first
 // in its body.
@@ -1098,24 +1369,25 @@ struct Spelled : GrammarSpec {
   using entry = Plain;
 };
 
-using M = Normalize<G>;
-using R = ResolveOverride<G>;
+using M = detail::Normalize<G>;
+using R = detail::ResolveOverride<G>;
 
 // A body's alternatives, each asked whether it heads itself. This is the
 // invariant the transformation exists to establish.
 template <class B>
 inline constexpr bool every_alt_heads = detail::mat::look_heads<B>;
 template <class... As>
-inline constexpr bool every_alt_heads<Choice<As...>> =
+inline constexpr bool every_alt_heads<detail::Choice<As...>> =
     (detail::mat::look_heads<As> && ...);
 
 // Nothing headed it: the whole alternative becomes the region of one creation.
 static_assert(M::rewritten<G::Plain>);
-static_assert(std::same_as<M::body<G::Plain>, Create<Node, R::body<G::Plain>>>);
+static_assert(
+    std::same_as<M::body<G::Plain>, detail::Create<Node, R::body<G::Plain>>>);
 // Written or implied, the creation gives one body: a root `create` is
 // dropped, so both arrive here needing one.
-static_assert(
-    std::same_as<M::body<G::Plain>, Normalize<Spelled>::body<Spelled::Plain>>);
+static_assert(std::same_as<M::body<G::Plain>,
+                           detail::Normalize<Spelled>::body<Spelled::Plain>>);
 
 // Every alternative headed itself: nothing to do, and the body is untouched.
 static_assert(!M::rewritten<G::Both>);
@@ -1124,8 +1396,8 @@ static_assert(std::same_as<M::body<G::Both>, R::body<G::Both>>);
 // One branch needed it: the other keeps the creation it spelled, and the arity
 // of the choice does not move -- an alternative in is an alternative out.
 static_assert(M::rewritten<G::Mixed>);
-static_assert(
-    std::same_as<M::body<G::Mixed>, Normalize<Spelled>::body<Spelled::Mixed>>);
+static_assert(std::same_as<M::body<G::Mixed>,
+                           detail::Normalize<Spelled>::body<Spelled::Mixed>>);
 
 // A rule that builds no node, and a terminal, need none.
 static_assert(!M::rewritten<G::Data>);
@@ -1151,24 +1423,29 @@ struct Flat : GrammarSpec {
   using entry = SeqPlain;
 };
 
-using F = Normalize<Flat>;
-using FR = ResolveOverride<Flat>;
+using F = detail::Normalize<Flat>;
+using FR = detail::ResolveOverride<Flat>;
 
 static_assert(F::rewritten<Flat::SeqPlain>);
 static_assert(
-    std::same_as<F::body<Flat::SeqPlain>,
-                 Create<Node, Seq<Lit<"a">, Assign<&Node::name, Ref<G::ID>>>>>);
+    std::same_as<
+        F::body<Flat::SeqPlain>,
+        detail::Create<Node, detail::Seq<detail::Lit<"a">,
+                                         detail::Assign<&Node::name,
+                                                        detail::Ref<G::ID>>>>>);
 
 // The absorbed create came back over exactly the region it had claimed.
 static_assert(std::same_as<F::body<Flat::SeqInner>, base_body<Flat::SeqInner>>);
 
 static_assert(!F::rewritten<Flat::RefAdopt>);
-static_assert(std::same_as<F::body<Flat::RefAdopt>, Ref<Flat::Sub>>);
+static_assert(std::same_as<F::body<Flat::RefAdopt>, detail::Ref<Flat::Sub>>);
 
 static_assert(F::rewritten<Flat::RepMany>);
 // Each further turn of a repetition of a head is a head of its own.
-static_assert(!detail::mat::look<Repeat<1, 1, Ref<Flat::Sub>>>::inside);
-static_assert(detail::mat::look<Repeat<1, kUnbounded, Ref<Flat::Sub>>>::inside);
+static_assert(
+    !detail::mat::look<detail::Repeat<1, 1, detail::Ref<Flat::Sub>>>::inside);
+static_assert(detail::mat::look<detail::Repeat<
+                  1, GrammarSpec::kUnbounded, detail::Ref<Flat::Sub>>>::inside);
 
 // ...and every one of them heads itself afterwards.
 static_assert(every_alt_heads<F::body<Flat::SeqPlain>>);
@@ -1202,24 +1479,31 @@ struct G : GrammarSpec {
   using entry = AN;
 };
 
-using M = Normalize<G>;
-using R = ResolveOverride<G>;
+using M = detail::Normalize<G>;
+using R = detail::ResolveOverride<G>;
 
 // The head is the class declaring the members written, an `Inner`; the rule
 // returns the wrapper, a `Wrap`.
 static_assert(std::same_as<cursiv::detail::rule_type_t<R::rule<G::AN>>, Wrap>);
-static_assert(std::same_as<M::body<G::AN>,
-                           Seq<Create<Inner, Assign<&Inner::name, Ref<G::ID>>>,
-                               Nest<Wrap, &Wrap::inner, Lit<"!">>>>);
+static_assert(
+    std::same_as<
+        M::body<G::AN>,
+        detail::Seq<detail::Create<Inner, detail::Assign<&Inner::name,
+                                                         detail::Ref<G::ID>>>,
+                    detail::Nest<Wrap, &Wrap::inner, detail::Lit<"!">>>>);
 
 // A repetition holding a nest sets the same boundary, which the DSL's
 // algebra alone would lose.
 static_assert(
     std::same_as<cursiv::detail::rule_type_t<R::rule<G::ANR>>, Inner>);
-static_assert(std::same_as<M::body<G::ANR>,
-                           Seq<Create<Inner, Assign<&Inner::name, Ref<G::ID>>>,
-                               Repeat<0, static_cast<std::size_t>(-1),
-                                      Nest<Wrap, &Wrap::inner, Lit<"!">>>>>);
+static_assert(
+    std::same_as<
+        M::body<G::ANR>,
+        detail::Seq<detail::Create<Inner, detail::Assign<&Inner::name,
+                                                         detail::Ref<G::ID>>>,
+                    detail::Repeat<
+                        0, static_cast<std::size_t>(-1),
+                        detail::Nest<Wrap, &Wrap::inner, detail::Lit<"!">>>>>);
 
 //     A returns A : name=ID | ref<B>;   where B's class derives from A
 // One branch writes the head and needs a creation, the other has it built and
@@ -1243,7 +1527,7 @@ struct Fam : GrammarSpec {
   using entry = ARule;
 };
 
-using FM = Normalize<Fam>;
+using FM = detail::Normalize<Fam>;
 
 // The rule answers what both branches are: the class the writes name, and the
 // one the callee builds -- their common base, which here is the first.
@@ -1255,8 +1539,10 @@ static_assert(std::same_as<cursiv::detail::rule_type_t<Fam::ARule>, Inner>);
 static_assert(FM::rewritten<Fam::ARule>);
 static_assert(
     std::same_as<FM::body<Fam::ARule>,
-                 Choice<Create<Inner, Assign<&Inner::name, Ref<G::ID>>>,
-                        Ref<Fam::BRule>>>);
+                 detail::Choice<
+                     detail::Create<Inner, detail::Assign<&Inner::name,
+                                                          detail::Ref<G::ID>>>,
+                     detail::Ref<Fam::BRule>>>);
 static_assert(detail::mat::look_heads<FM::body<Fam::ARule>>);
 
 // A branch that leaves the family: the rule can only answer the base both
@@ -1275,7 +1561,7 @@ struct Chain : GrammarSpec {
   using entry = Post;
 };
 
-using CM = Normalize<Chain>;
+using CM = detail::Normalize<Chain>;
 
 // The rule answers what both paths are: the node the callee built, and the
 // wrapper the chain leaves -- their common base.
@@ -1284,7 +1570,7 @@ static_assert(std::same_as<cursiv::detail::rule_type_t<Chain::Post>, Inner>);
 // No creation is needed, and the body is untouched.
 static_assert(!CM::rewritten<Chain::Post>);
 static_assert(std::same_as<CM::body<Chain::Post>,
-                           ResolveOverride<Chain>::body<Chain::Post>>);
+                           detail::ResolveOverride<Chain>::body<Chain::Post>>);
 static_assert(detail::mat::look_heads<CM::body<Chain::Post>>);
 
 // One head, then a chain of wrappers:
@@ -1305,7 +1591,7 @@ struct Shape : GrammarSpec {
   using entry = Two;
 };
 
-using ShM = Normalize<Shape>;
+using ShM = detail::Normalize<Shape>;
 
 // One branch of a nested choice, or a call to a rule of the family, is a
 // second head:
@@ -1313,18 +1599,27 @@ using ShM = Normalize<Shape>;
 //   create<N>(a) + (ref<B>       | 'c')   refused, B building a node
 //   create<N>(a) + ('c'          | 'd')   legal
 static_assert(
-    !one_head<Create<
-        Inner, Seq<Lit<"a">, Choice<Create<Inner, Lit<"b">>, Lit<"c">>>>>);
+    !one_head<detail::Create<
+        Inner,
+        detail::Seq<detail::Lit<"a">,
+                    detail::Choice<detail::Create<Inner, detail::Lit<"b">>,
+                                   detail::Lit<"c">>>>>);
 static_assert(
-    one_head<Create<Inner, Seq<Lit<"a">, Choice<Lit<"c">, Lit<"d">>>>>);
+    one_head<detail::Create<
+        Inner,
+        detail::Seq<detail::Lit<"a">,
+                    detail::Choice<detail::Lit<"c">, detail::Lit<"d">>>>>);
 
 // A chain of nests is one head and N wrappers: the second nest has the first
 // one's wrapper in front of it, which is a current node like any other.
 static_assert(one_head<ShM::body<Shape::Two>>);
-static_assert(std::same_as<ShM::body<Shape::Two>,
-                           Seq<Create<Inner, Assign<&Inner::name, Ref<G::ID>>>,
-                               Nest<Wrap, &Wrap::inner, Lit<"!">>,
-                               Nest<Wrap, &Wrap::inner, Lit<"?">>>>);
+static_assert(
+    std::same_as<
+        ShM::body<Shape::Two>,
+        detail::Seq<detail::Create<Inner, detail::Assign<&Inner::name,
+                                                         detail::Ref<G::ID>>>,
+                    detail::Nest<Wrap, &Wrap::inner, detail::Lit<"!">>,
+                    detail::Nest<Wrap, &Wrap::inner, detail::Lit<"?">>>>);
 
 // ...and the shape holds after the stage for the ones seen above.
 static_assert(one_head<ShM::body<Shape::Some>>);
@@ -1345,15 +1640,17 @@ struct Two : GrammarSpec {
 
 // The same node, so everything downstream reads one shape.
 static_assert(std::same_as<base_body<Two::Long>, base_body<Two::Short>>);
-static_assert(std::same_as<Normalize<Two>::body<Two::Long>,
-                           Normalize<Two>::body<Two::Short>>);
+static_assert(std::same_as<detail::Normalize<Two>::body<Two::Long>,
+                           detail::Normalize<Two>::body<Two::Short>>);
 
 // A member declared in a base names that base: `&Wrap::name` is an
 // `Inner` member, so the short form deduces `Inner`.
-static_assert(std::same_as<decltype(nest<&Wrap::name>(lit<"!">)),
-                           Nest<Inner, &Wrap::name, Lit<"!">>>);
-static_assert(std::same_as<decltype(nest<Wrap, &Wrap::name>(lit<"!">)),
-                           Nest<Wrap, &Wrap::name, Lit<"!">>>);
+static_assert(std::same_as<
+              decltype(GrammarSpec::nest<&Wrap::name>(GrammarSpec::lit<"!">)),
+              detail::Nest<Inner, &Wrap::name, detail::Lit<"!">>>);
+static_assert(std::same_as<decltype(GrammarSpec::nest<Wrap, &Wrap::name>(
+                               GrammarSpec::lit<"!">)),
+                           detail::Nest<Wrap, &Wrap::name, detail::Lit<"!">>>);
 
 // ...and the other way round. Where the rule's answer is the common base of
 // a choice, a branch that writes a derived class's members builds that
@@ -1364,13 +1661,16 @@ struct Split : GrammarSpec {
   using entry = Deep;
 };
 
-using SM = Normalize<Split>;
+using SM = detail::Normalize<Split>;
 
 static_assert(std::same_as<cursiv::detail::rule_type_t<Split::Deep>, Inner>);
 static_assert(
-    std::same_as<SM::body<Split::Deep>,
-                 Choice<Create<Inner, Lit<"b">>,
-                        Create<Wrap, Assign<&Wrap::inner, Ref<G::ID>>>>>);
+    std::same_as<
+        SM::body<Split::Deep>,
+        detail::Choice<
+            detail::Create<Inner, detail::Lit<"b">>,
+            detail::Create<Wrap,
+                           detail::Assign<&Wrap::inner, detail::Ref<G::ID>>>>>);
 
 // Every alternative heads itself afterwards, wrapper or not.
 static_assert(detail::mat::look_heads<M::body<G::AN>>);
@@ -1435,7 +1735,7 @@ struct G : GrammarSpec {
   struct Stated : rule<create<Leafy>(assign<&Leafy::name>(ref<ID>))> {};
   using entry = Many;
 };
-using R = ResolveOverride<G>;
+using R = detail::ResolveOverride<G>;
 
 static_assert(
     std::same_as<cursiv::detail::rule_type_t<R::rule<G::Many>>, Base>);
@@ -1460,9 +1760,12 @@ static_assert(
 static_assert(
     std::same_as<cursiv::detail::rule_type_t<R::rule<G::Stated>>, Leafy>);
 // Its head is still the class it creates.
-static_assert(std::same_as<Normalize<G>::body<G::RootWrapped>,
-                           Seq<Create<Leaf, Assign<&Leaf::name, Ref<G::ID>>>,
-                               std::remove_cvref_t<decltype(G::Either)>>>);
+static_assert(
+    std::same_as<
+        detail::Normalize<G>::body<G::RootWrapped>,
+        detail::Seq<detail::Create<
+                        Leaf, detail::Assign<&Leaf::name, detail::Ref<G::ID>>>,
+                    std::remove_cvref_t<decltype(G::Either)>>>);
 
 }  // namespace hand
 
@@ -1540,11 +1843,11 @@ struct Restated : extends<G> {
 
 // The creation is needed on the body the grammar compiles: the override's, not
 // the base's -- and the answer heads itself either way.
-static_assert(
-    std::same_as<Normalize<Restated>::body<G::Plain>, Create<Node, Lit<"x">>>);
-static_assert(
-    !std::same_as<Normalize<Restated>::body<G::Plain>, M::body<G::Plain>>);
-static_assert(every_alt_heads<Normalize<Restated>::body<G::Plain>>);
+static_assert(std::same_as<detail::Normalize<Restated>::body<G::Plain>,
+                           detail::Create<Node, detail::Lit<"x">>>);
+static_assert(!std::same_as<detail::Normalize<Restated>::body<G::Plain>,
+                            M::body<G::Plain>>);
+static_assert(every_alt_heads<detail::Normalize<Restated>::body<G::Plain>>);
 
 }  // namespace mk
 
@@ -1582,10 +1885,10 @@ struct Wider : extends<Base> {
   struct override<U> : terminal<lit<"#"> + many(cr<R"(^\n)">)> {};
 };
 
-using P0 = ResolveOverride<Base>;
-using P1 = ResolveOverride<Wider>;
-using M0 = MaterializeCreate<P0>;
-using M1 = MaterializeCreate<P1>;
+using P0 = detail::ResolveOverride<Base>;
+using P1 = detail::ResolveOverride<Wider>;
+using M0 = detail::MaterializeCreate<P0>;
+using M1 = detail::MaterializeCreate<P1>;
 
 // `ignored` may be a rule or a list; it comes out a list either way.
 static_assert(std::same_as<P0::ignored, TypeList<Base::WS>>);
@@ -1638,12 +1941,14 @@ static_assert(std::same_as<M1::hidden, P1::hidden>);
 
 // ...and it is still the stage that materialises: the entry needed a head.
 static_assert(M0::rewritten<Base::Root>);
-static_assert(std::same_as<M0::body<Base::Root>,
-                           Create<Node, Assign<&Node::name, Ref<Base::ID>>>>);
+static_assert(
+    std::same_as<M0::body<Base::Root>,
+                 detail::Create<Node, detail::Assign<&Node::name,
+                                                     detail::Ref<Base::ID>>>>);
 
 // A third stage could be written against either: what a stage publishes is
 // what a grammar publishes, so the chain has no last link by construction.
-using M2 = MaterializeCreate<M0>;
+using M2 = detail::MaterializeCreate<M0>;
 static_assert(std::same_as<M2::ignored, P0::ignored>);
 static_assert(std::same_as<M2::body<Base::Root>, M0::body<Base::Root>>);
 // Running it again changes nothing -- not even the rule's identity: every
@@ -1671,16 +1976,17 @@ using namespace cursiv;
 
 // `kw<>` carries a sentinel, not a decision: which characters bound a token
 // is what a grammar declares, and none is in scope at a factory.
-static_assert(std::is_same_v<std::remove_cv_t<decltype(kw<"if">)>,
-                             Lit<"if", false, detail::WordBound>>);
-static_assert(std::is_same_v<std::remove_cv_t<decltype(kw<"[">)>,
-                             Lit<"[", false, detail::WordBound>>);
-static_assert(std::is_same_v<std::remove_cv_t<decltype(ikw<"if">)>,
-                             Lit<"if", true, detail::WordBound>>);
+static_assert(std::is_same_v<std::remove_cv_t<decltype(GrammarSpec::kw<"if">)>,
+                             detail::Lit<"if", false, detail::WordBound>>);
+static_assert(std::is_same_v<std::remove_cv_t<decltype(GrammarSpec::kw<"[">)>,
+                             detail::Lit<"[", false, detail::WordBound>>);
+static_assert(std::is_same_v<std::remove_cv_t<decltype(GrammarSpec::ikw<"if">)>,
+                             detail::Lit<"if", true, detail::WordBound>>);
 
 // `lit<S>` has no guard: the node parameter stays void where none was handed.
 static_assert(
-    std::is_same_v<std::remove_cv_t<decltype(lit<"toto">)>, Lit<"toto">>);
+    std::is_same_v<std::remove_cv_t<decltype(GrammarSpec::lit<"toto">)>,
+                   detail::Lit<"toto">>);
 
 const cursiv::Parser& spellplain() {
   return support::parser_of<&tspell::generated::Plain::create_parser>();
@@ -1762,10 +2068,12 @@ static_assert(cursiv::detail::holds_a_letter<"if">());
 static_assert(cursiv::detail::holds_a_letter<"IF">());
 static_assert(!cursiv::detail::holds_a_letter<"==">());
 static_assert(!cursiv::detail::holds_a_letter<"5">());
-static_assert(std::same_as<std::remove_cvref_t<decltype(cursiv::ikw<"==">)>,
-                           std::remove_cvref_t<decltype(cursiv::kw<"==">)>>);
-static_assert(!std::same_as<std::remove_cvref_t<decltype(cursiv::ikw<"if">)>,
-                            std::remove_cvref_t<decltype(cursiv::kw<"if">)>>);
+static_assert(
+    std::same_as<std::remove_cvref_t<decltype(cursiv::GrammarSpec::ikw<"==">)>,
+                 std::remove_cvref_t<decltype(cursiv::GrammarSpec::kw<"==">)>>);
+static_assert(!std::same_as<
+              std::remove_cvref_t<decltype(cursiv::GrammarSpec::ikw<"if">)>,
+              std::remove_cvref_t<decltype(cursiv::GrammarSpec::kw<"if">)>>);
 // A letter is any character with another case, ASCII or not.
 static_assert(cursiv::detail::holds_a_letter<"ΣΟΦΊΑ">());
 static_assert(!cursiv::detail::holds_a_letter<"中文">());
@@ -1787,7 +2095,8 @@ void run() {
 // Outside the anonymous namespace, so its qualified name is stable across
 // compilers when it collides with Dg::ID in one closure.
 namespace dumpcol {
-struct ID : cursiv::detail::TerminalRule<cursiv::some(cursiv::cr<"0-9">)> {};
+struct ID : cursiv::detail::TerminalRule<cursiv::GrammarSpec::some(
+                cursiv::GrammarSpec::cr<"0-9">)> {};
 }  // namespace dumpcol
 
 // The rendering: every shape's spelling, bracketing by precedence, the
@@ -1837,9 +2146,9 @@ struct D2 : cursiv::extends<Dg> {
 }  // namespace
 
 namespace {
-struct R3 : cursiv::GrammarSpec::rule<cursiv::create<ast::Node> +
-                                      cursiv::ref<Dg::ID> +
-                                      cursiv::ref<dumpcol::ID>> {};
+struct R3 : cursiv::GrammarSpec::rule<cursiv::GrammarSpec::create<ast::Node> +
+                                      cursiv::GrammarSpec::ref<Dg::ID> +
+                                      cursiv::GrammarSpec::ref<dumpcol::ID>> {};
 
 // data rule, converter-typed terminal, no-skipper grammar.
 struct Q : cursiv::GrammarSpec {
@@ -1945,14 +2254,19 @@ struct G : cursiv::GrammarSpec {
 // A level of its own class, by class or by members; a table answers the
 // common base of the classes its levels build.
 static_assert(
-    std::is_same_v<decltype(levels(prefix<Neg>(lit<"-">), left(lit<"*">))),
-                   Levels<UnaryLevel<Association::prefix, Neg, &Neg::op,
-                                     &Neg::operand, Lit<"-">>,
-                          LeftAssoc<Lit<"*">>>>);
-static_assert(std::is_same_v<
-              decltype(GrammarSpec::postfix<&Fact::arg, &Fact::bang>(lit<"!">)),
-              Levels<UnaryLevel<Association::postfix, Fact, &Fact::bang,
-                                &Fact::arg, Lit<"!">>>>);
+    std::is_same_v<
+        decltype(GrammarSpec::levels(
+            GrammarSpec::prefix<Neg>(GrammarSpec::lit<"-">),
+            GrammarSpec::left(GrammarSpec::lit<"*">))),
+        detail::Levels<detail::UnaryLevel<Association::prefix, Neg, &Neg::op,
+                                          &Neg::operand, detail::Lit<"-">>,
+                       detail::LeftAssoc<detail::Lit<"*">>>>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::postfix<&Fact::arg, &Fact::bang>(
+                       GrammarSpec::lit<"!">)),
+                   detail::Levels<detail::UnaryLevel<Association::postfix, Fact,
+                                                     &Fact::bang, &Fact::arg,
+                                                     detail::Lit<"!">>>>);
 static_assert(std::is_same_v<cursiv::detail::rule_type_t<G::Expr>, Expr>);
 }  // namespace Q3u
 
@@ -1988,46 +2302,65 @@ struct SkipDerived : cursiv::extends<SkipBase> {
 }  // namespace Q5
 
 void run() {
-  expect(support::dump_expr<decltype(kw<"let"> + lit<"x"> + ikw<"or">)>(),
+  expect(support::dump_expr<decltype(GrammarSpec::kw<"let"> +
+                                     GrammarSpec::lit<"x"> +
+                                     GrammarSpec::ikw<"or">)>(),
          R"("let" 'x' "or"~)", "tokens");
-  expect(support::dump_expr<decltype(cr<"a-zA-Z_">)>(), "[A-Z_a-z]", "class");
-  expect(support::dump_expr<decltype(cr<"À-ÿ">)>(), "\\p{\\xc0-\\xff}",
-         "scalars");
-  expect(support::dump_expr<decltype(any)>(), ".", "every character");
-  expect(support::dump_expr<decltype(byte)>(), "\\C", "a byte");
-  expect(support::dump_expr<decltype(cursiv::eof)>(), "!.", "the end");
-  expect(support::dump_expr<decltype(!byte)>(), "!\\C", "no byte");
-  expect(support::dump_expr<decltype(~cr<"a">)>(), "\\p{^a}",
+  expect(support::dump_expr<decltype(GrammarSpec::cr<"a-zA-Z_">)>(),
+         "[A-Z_a-z]", "class");
+  expect(support::dump_expr<decltype(GrammarSpec::cr<"À-ÿ">)>(),
+         "\\p{\\xc0-\\xff}", "scalars");
+  expect(support::dump_expr<decltype(GrammarSpec::any)>(), ".",
+         "every character");
+  expect(support::dump_expr<decltype(GrammarSpec::byte)>(), "\\C", "a byte");
+  expect(support::dump_expr<decltype(cursiv::GrammarSpec::eof)>(), "!.",
+         "the end");
+  expect(support::dump_expr<decltype(!GrammarSpec::byte)>(), "!\\C", "no byte");
+  expect(support::dump_expr<decltype(~GrammarSpec::cr<"a">)>(), "\\p{^a}",
          "complemented scalars");
-  expect(support::dump_expr<decltype(uc::L | uc::Nd)>(), "\\p{L|Nd}",
-         "properties");
-  expect(support::dump_expr<decltype((kw<"a"> | kw<"b">)+kw<"c">)>(),
-         R"(("a" | "b") "c")", "brackets");
-  expect(support::dump_expr<decltype(many(kw<"a">))>(), "\"a\"*", "many");
+  expect(
+      support::dump_expr<decltype(GrammarSpec::uc::L | GrammarSpec::uc::Nd)>(),
+      "\\p{L|Nd}", "properties");
+  expect(
+      support::dump_expr<decltype((
+          GrammarSpec::kw<"a"> | GrammarSpec::kw<"b">)+GrammarSpec::kw<"c">)>(),
+      R"(("a" | "b") "c")", "brackets");
+  expect(
+      support::dump_expr<decltype(GrammarSpec::many(GrammarSpec::kw<"a">))>(),
+      "\"a\"*", "many");
   // A raw expression view has no grammar, so a `kw<>` that names no class of
   // its own prints its guard as spelled: the grammar resolves it, and
   // `compiled<>` is where it shows.
-  expect(support::dump_expr<decltype(some(kw<"a">, kw<",">))>(),
+  expect(support::dump_expr<decltype(GrammarSpec::some(
+             GrammarSpec::kw<"a">, GrammarSpec::kw<",">))>(),
          R"("a" ("," "a")*)", "separated");
-  expect(support::dump_expr<decltype(repeat<2, 5>(kw<"a">))>(), "\"a\"{2,5}",
-         "bounded");
-  expect(support::dump_expr<decltype(!kw<"a"> + any)>(), "!\"a\" .",
-         "lookahead");
-  expect(support::dump_expr<decltype(unordered(kw<"x">, kw<"y">))>(),
+  expect(support::dump_expr<decltype(GrammarSpec::repeat<2, 5>(
+             GrammarSpec::kw<"a">))>(),
+         "\"a\"{2,5}", "bounded");
+  expect(
+      support::dump_expr<decltype(!GrammarSpec::kw<"a"> + GrammarSpec::any)>(),
+      "!\"a\" .", "lookahead");
+  expect(support::dump_expr<decltype(GrammarSpec::unordered(
+             GrammarSpec::kw<"x">, GrammarSpec::kw<"y">))>(),
          R"(unordered("x", "y"))", "unordered");
   // A group given as an item prints as one, and a choice needs no brackets
   // between the commas.
-  expect(support::dump_expr<decltype(unordered(unordered(kw<"x">, kw<"y">),
-                                               kw<"z"> | kw<"w">))>(),
+  expect(support::dump_expr<decltype(GrammarSpec::unordered(
+             GrammarSpec::unordered(GrammarSpec::kw<"x">, GrammarSpec::kw<"y">),
+             GrammarSpec::kw<"z"> | GrammarSpec::kw<"w">))>(),
          R"(unordered(unordered("x", "y"), "z" | "w"))", "nested unordered");
-  expect(support::dump_expr<decltype(assign<&ast::Node::name>(ref<Dg::ID>))>(),
+  expect(support::dump_expr<decltype(GrammarSpec::assign<&ast::Node::name>(
+             GrammarSpec::ref<Dg::ID>))>(),
          "name=ID", "assign");
-  expect(support::dump_expr<decltype(flag<&ast::Node::many>(kw<"many">))>(),
+  expect(support::dump_expr<decltype(GrammarSpec::flag<&ast::Node::many>(
+             GrammarSpec::kw<"many">))>(),
          "many?=\"many\"", "flag");
-  expect(support::dump_expr<decltype(create<ast::Node>(kw<"n"> + any))>(),
+  expect(support::dump_expr<decltype(GrammarSpec::create<ast::Node>(
+             GrammarSpec::kw<"n"> + GrammarSpec::any))>(),
          "{Node} \"n\" .", "region");
-  expect(support::dump_expr<decltype(nest<ast::Node, &ast::Node::target>(
-             kw<".">))>(),
+  expect(support::dump_expr<
+             decltype(GrammarSpec::nest<ast::Node, &ast::Node::target>(
+                 GrammarSpec::kw<".">))>(),
          "{Node.target=} \".\"", "nest");
 
   expect(support::dump_declared<Q4::G>(),
@@ -2063,33 +2396,42 @@ void run() {
          "closure");
 
   // The positive lookahead.
-  expect(support::dump_expr<decltype(&lit<"a">)>(), "&'a'", "and");
+  expect(support::dump_expr<decltype(&GrammarSpec::lit<"a">)>(), "&'a'", "and");
 
   // Prefix and postfix bind apart: a directive moved across a repetition is a
   // visible diff.
-  expect(support::dump_expr<decltype(assign<&ast::Node::name>(
-             many(ref<Dg::ID>)))>(),
+  expect(support::dump_expr<decltype(GrammarSpec::assign<&ast::Node::name>(
+             GrammarSpec::many(GrammarSpec::ref<Dg::ID>)))>(),
          "name=ID*", "label of many");
-  expect(support::dump_expr<decltype(many(
-             assign<&ast::Node::name>(ref<Dg::ID>)))>(),
-         "(name=ID)*", "many of label");
-  expect(support::dump_expr<decltype(!many(kw<"a">))>(), "!\"a\"*",
-         "not of many");
-  expect(support::dump_expr<decltype(many(!kw<"a"> + any))>(), "(!\"a\" .)*",
-         "many of lookahead");
+  expect(
+      support::dump_expr<decltype(GrammarSpec::many(
+          GrammarSpec::assign<&ast::Node::name>(GrammarSpec::ref<Dg::ID>)))>(),
+      "(name=ID)*", "many of label");
+  expect(
+      support::dump_expr<decltype(!GrammarSpec::many(GrammarSpec::kw<"a">))>(),
+      "!\"a\"*", "not of many");
+  expect(support::dump_expr<decltype(GrammarSpec::many(!GrammarSpec::kw<"a"> +
+                                                       GrammarSpec::any))>(),
+         "(!\"a\" .)*", "many of lookahead");
 
   // Three shapes that print as the source that builds them.
   expect(
-      support::dump_expr<decltype(implied(lit<";">, gap::line) | lit<"}">)>(),
+      support::dump_expr<decltype(GrammarSpec::implied(GrammarSpec::lit<";">,
+                                                       GrammarSpec::gap::line) |
+                                  GrammarSpec::lit<"}">)>(),
       "implied(';', gap::line) | '}'", "implied in a wider choice");
-  expect(support::dump_expr<decltype(some(many(lit<"a">)))>(), "('a'*)+",
-         "repetition of a repetition");
+  expect(support::dump_expr<decltype(GrammarSpec::some(
+             GrammarSpec::many(GrammarSpec::lit<"a">)))>(),
+         "('a'*)+", "repetition of a repetition");
   expect(support::dump_expr<detail::commit_free_t<
-             decltype(many(commit(lit<"a">, lit<"b">)) + lit<"c">)>>(),
+             decltype(GrammarSpec::many(GrammarSpec::commit(
+                          GrammarSpec::lit<"a">, GrammarSpec::lit<"b">)) +
+                      GrammarSpec::lit<"c">)>>(),
          "('a' 'b')* !'a' 'c'", "commit");
-  expect(
-      support::dump_expr<decltype(mark<Open>(some(lit<"=">)) + same<Close>)>(),
-      "mark<Open>('='+) same<Close>", "tagged runs");
+  expect(support::dump_expr<decltype(GrammarSpec::mark<Open>(GrammarSpec::some(
+                                         GrammarSpec::lit<"=">)) +
+                                     GrammarSpec::same<Close>)>(),
+         "mark<Open>('='+) same<Close>", "tagged runs");
 
   // An infix rule prints its declaration, not the synthesized chain -- and
   // the node it builds with the three members it writes, which nothing else
@@ -2141,9 +2483,10 @@ void run() {
   }
 
   // A nest does not absorb its sequence: composite payloads are bracketed.
-  expect(support::dump_expr<decltype(lit<"a"> +
-                                     nest<ast::Node, &ast::Node::target>(
-                                         lit<"b"> + lit<"c">))>(),
+  expect(support::dump_expr<
+             decltype(GrammarSpec::lit<"a"> +
+                      GrammarSpec::nest<ast::Node, &ast::Node::target>(
+                          GrammarSpec::lit<"b"> + GrammarSpec::lit<"c">))>(),
          "'a' {Node.target=} ('b' 'c')", "nest bounded");
 
   // Two rules named ID in one closure: the second keeps its qualified name.
@@ -2528,7 +2871,7 @@ bool holds(const LexCodePoints& c, char32_t cp) {
 }
 
 template <std::uint64_t M, bool N, str S>
-LexCodePoints points(CpSet<M, N, S>) {
+LexCodePoints points(detail::CpSet<M, N, S>) {
   return LexCodePoints::of(M, N, S.view());
 }
 
@@ -2552,11 +2895,12 @@ void a_spelling_reads_as_scalars() {
 
 // A union reads as the spelling that holds them all.
 void a_union_reads_as_one_spelling() {
-  CHECK(same_below(points(cr<R"(+\\-)"> | cr<R"(é)">), points(cr<R"(é+\\-)">),
-                   0x100));
-  CHECK(same_below(points(cr<R"(\\-^a)"> | uc::Nd),
-                   points(cr<R"(\\-^aé)"> | uc::Nd), 0xE9));
-  const auto outside = points(~cr<R"(-\\^)">);
+  CHECK(same_below(points(GrammarSpec::cr<R"(+\\-)"> | GrammarSpec::cr<R"(é)">),
+                   points(GrammarSpec::cr<R"(é+\\-)">), 0x100));
+  CHECK(same_below(points(GrammarSpec::cr<R"(\\-^a)"> | GrammarSpec::uc::Nd),
+                   points(GrammarSpec::cr<R"(\\-^aé)"> | GrammarSpec::uc::Nd),
+                   0xE9));
+  const auto outside = points(~GrammarSpec::cr<R"(-\\^)">);
   CHECK(!holds(outside, U'\\') && !holds(outside, U'-') &&
         !holds(outside, U'^') && holds(outside, U'a'));
 }
@@ -2564,7 +2908,7 @@ void a_union_reads_as_one_spelling() {
 // Whether a class of code points holds exactly `in` among `probe`; a class
 // the generator refuses holds nothing.
 template <std::uint64_t M, bool N, str S>
-bool holds_exactly(CpSet<M, N, S> set, std::u32string_view probe,
+bool holds_exactly(detail::CpSet<M, N, S> set, std::u32string_view probe,
                    std::u32string_view in) {
   try {
     const LexCodePoints c = points(set);
@@ -2580,26 +2924,27 @@ bool holds_exactly(CpSet<M, N, S> set, std::u32string_view probe,
 // Each side of a union reads as it did alone: a literal `-` at the seam opens
 // no range, and a `\0` before a digit stays NUL.
 void a_union_reads_each_side_as_alone() {
-  CHECK(holds_exactly(cr<R"(é\0)"> | cr<"1ü">,
+  CHECK(holds_exactly(GrammarSpec::cr<R"(é\0)"> | GrammarSpec::cr<"1ü">,
                       std::u32string_view(U"\u00e9\0\u00011\u00fc", 5),
                       std::u32string_view(U"\u00e9\0\u00fc1", 4)));
-  CHECK(holds_exactly(cr<R"(é-)"> | cr<R"(ü)">, U"\u00e9-\u00ea\u00fc",
-                      U"\u00e9-\u00fc"));
-  CHECK(holds_exactly(cr<R"(é)"> | cr<R"(-ü)">, U"\u00e9-\u00ea\u00fc",
-                      U"\u00e9-\u00fc"));
-  CHECK(holds_exactly(cr<R"(é-)"> | cr<R"(-ü)">, U"\u00e9-\u00ea\u00fc",
-                      U"\u00e9-\u00fc"));
-  CHECK(holds_exactly(cr<R"(aé-)"> | cr<"z">, U"a\u00e9-mz", U"a\u00e9-z"));
-  CHECK(holds_exactly(cr<R"(é\\)"> | cr<R"(x41ü)">, U"\u00e9\\x41A\u00fc",
-                      U"\u00e9\\x41\u00fc"));
-  using Joined = decltype(cr<R"(é-)"> | cr<R"(ü)">);
+  CHECK(holds_exactly(GrammarSpec::cr<R"(é-)"> | GrammarSpec::cr<R"(ü)">,
+                      U"\u00e9-\u00ea\u00fc", U"\u00e9-\u00fc"));
+  CHECK(holds_exactly(GrammarSpec::cr<R"(é)"> | GrammarSpec::cr<R"(-ü)">,
+                      U"\u00e9-\u00ea\u00fc", U"\u00e9-\u00fc"));
+  CHECK(holds_exactly(GrammarSpec::cr<R"(é-)"> | GrammarSpec::cr<R"(-ü)">,
+                      U"\u00e9-\u00ea\u00fc", U"\u00e9-\u00fc"));
+  CHECK(holds_exactly(GrammarSpec::cr<R"(aé-)"> | GrammarSpec::cr<"z">,
+                      U"a\u00e9-mz", U"a\u00e9-z"));
+  CHECK(holds_exactly(GrammarSpec::cr<R"(é\\)"> | GrammarSpec::cr<R"(x41ü)">,
+                      U"\u00e9\\x41A\u00fc", U"\u00e9\\x41\u00fc"));
+  using Joined = decltype(GrammarSpec::cr<R"(é-)"> | GrammarSpec::cr<R"(ü)">);
   CHECK(detail::word_class<Joined>::has(U'-'));
   CHECK(!detail::word_class<Joined>::has(U'\u00ea'));
   // A dash after a range already read alone: the seam leaves it as spelled.
-  CHECK(holds_exactly(cr<R"(à-é)"> | cr<R"(-ü)">,
+  CHECK(holds_exactly(GrammarSpec::cr<R"(à-é)"> | GrammarSpec::cr<R"(-ü)">,
                       U"\u00e0\u00e5\u00e9-\u00ea\u00fc",
                       U"\u00e0\u00e5\u00e9-\u00fc"));
-  CHECK(holds_exactly(cr<R"(à-é-)"> | cr<R"(ü)">,
+  CHECK(holds_exactly(GrammarSpec::cr<R"(à-é-)"> | GrammarSpec::cr<R"(ü)">,
                       U"\u00e0\u00e5\u00e9-\u00ea\u00fc",
                       U"\u00e0\u00e5\u00e9-\u00fc"));
 }

@@ -23,11 +23,11 @@
 #include "cursiv/Check.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/shared/utils/RoundMarks.hpp"
 #include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/ConcurrentTable.hpp"
 #include "cursiv/utils/DocumentCache.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
-#include "cursiv/utils/RoundMarks.hpp"
 #include "cursiv/utils/SimpleCache.hpp"
 #include "cursiv/utils/UriTrie.hpp"
 #include "cursiv/utils/UriUtils.hpp"
@@ -1787,7 +1787,7 @@ void run() {
 namespace round_marks {
 
 void run() {
-  cursiv::RoundMarks marks(2);
+  cursiv::engine::RoundMarks marks(2);
   // Past its first size, and each id once a round.
   CHECK(marks.first(0) && !marks.first(0) && marks.first(9) && !marks.first(9));
   marks.next();

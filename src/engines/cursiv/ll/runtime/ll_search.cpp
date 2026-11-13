@@ -50,7 +50,7 @@ std::uint32_t ll_search_calls(LlSearch& s, std::uint32_t ctx) {
 
 std::uint32_t ll_search_source_tokens(const LlContext& c, LlSearch& s,
                                       std::uint32_t frame, std::uint32_t most) {
-  const CstRun& run = c.tape.stream();
+  const detail::CstRun& run = c.tape.stream();
   const std::size_t base = c.stack.size() - s.sourceTokens.size();
   for (std::size_t i = c.stack.size(); i-- > frame;) {
     if (s.sourceTokens[i - base] != kLlNoNode) continue;

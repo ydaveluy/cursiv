@@ -28,13 +28,13 @@ using namespace cursiv::engine;
 namespace {
 
 template <std::uint64_t M, bool N, str Sp>
-constexpr std::string_view spelled(CpSet<M, N, Sp>) {
+constexpr std::string_view spelled(detail::CpSet<M, N, Sp>) {
   return Sp.view();
 }
 template <str S>
-constexpr std::string_view key = spelled(cr<S>);
+constexpr std::string_view key = spelled(GrammarSpec::cr<S>);
 template <str S>
-using CR = std::remove_cvref_t<decltype(cr<S>)>;
+using CR = std::remove_cvref_t<decltype(GrammarSpec::cr<S>)>;
 
 // The escapes.
 static_assert(key<R"(\x41)"> == "A");
@@ -53,8 +53,9 @@ static_assert(key<R"(\w)"> == "0-9A-Z_a-z");
 static_assert(
     key<R"(\s)"> ==
     key<R"(\t-\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF)">);
-static_assert(std::is_same_v<CR<R"(\D)">, CpSet<0, true, "0-9">>);
-static_assert(std::is_same_v<CR<R"(\W)">, CpSet<0, true, "0-9A-Z_a-z">>);
+static_assert(std::is_same_v<CR<R"(\D)">, detail::CpSet<0, true, "0-9">>);
+static_assert(
+    std::is_same_v<CR<R"(\W)">, detail::CpSet<0, true, "0-9A-Z_a-z">>);
 static_assert(std::is_same_v<CR<R"(\S)">, CR<R"(^\s)">>);
 static_assert(std::is_same_v<CR<R"(a\D)">, CR<R"(\D)">>);
 static_assert(std::is_same_v<CR<R"(^\D)">, CR<"0-9">>);
@@ -69,14 +70,16 @@ static_assert(key<R"(\/)"> == "/");
 static_assert(key<R"(\.)"> == ".");
 static_assert(key<R"(\x80-\xff)"> == "\\x80-\\xff");
 static_assert(std::is_same_v<CR<R"(\d)">, CR<"0-9">>);
-static_assert(std::is_same_v<CR<R"(\w)">, std::remove_cvref_t<decltype(w)>>);
-static_assert(std::is_same_v<CR<R"(\s)">, std::remove_cvref_t<decltype(s)>>);
+static_assert(
+    std::is_same_v<CR<R"(\w)">, std::remove_cvref_t<decltype(GrammarSpec::w)>>);
+static_assert(
+    std::is_same_v<CR<R"(\s)">, std::remove_cvref_t<decltype(GrammarSpec::s)>>);
 
 // A `-` is a range operator between two atoms, itself anywhere else.
 static_assert(key<"a-c"> == "a-c");
 static_assert(key<"-a"> == "\\x2da");
 static_assert(key<"a-"> == "\\x2da");
-static_assert(std::is_same_v<CR<"^-a">, CpSet<0, true, "\\x2da">>);
+static_assert(std::is_same_v<CR<"^-a">, detail::CpSet<0, true, "\\x2da">>);
 static_assert(key<"a-c-x"> == "\\x2da-cx");
 static_assert(key<"a-c--0"> == "\\x2d-0a-c");
 static_assert(key<R"(a\-c)"> == "\\x2dac");
@@ -88,22 +91,33 @@ static_assert(key<R"(\u0030-\u0039)"> == "0-9");
 // A leading `^` negates; a lone one, or one further on, is itself.
 static_assert(key<"^"> == "\\x5e");
 static_assert(key<"a^"> == "\\x5ea");
-static_assert(std::is_same_v<CR<"^^">, CpSet<0, true, "\\x5e">>);
-static_assert(std::is_same_v<CR<R"(^\n)">, CpSet<0, true, "\\x0a">>);
+static_assert(std::is_same_v<CR<"^^">, detail::CpSet<0, true, "\\x5e">>);
+static_assert(std::is_same_v<CR<R"(^\n)">, detail::CpSet<0, true, "\\x0a">>);
 
 // `\x` is U+00HH, whichever way a scalar is spelled.
-static_assert(std::is_same_v<CR<R"(\u00e9)">, CpSet<0, false, "\\xe9">>);
+static_assert(
+    std::is_same_v<CR<R"(\u00e9)">, detail::CpSet<0, false, "\\xe9">>);
 static_assert(std::is_same_v<CR<"é">, CR<R"(\xe9)">>);
-static_assert(std::is_same_v<CR<R"(^\u00e9)">, CpSet<0, true, "\\xe9">>);
-static_assert(std::is_same_v<decltype(~cr<"é">), CR<"^é">>);
-static_assert(std::is_same_v<decltype(~~cr<"a">), CR<"a">>);
-static_assert(std::is_same_v<decltype(~~cr<R"(\D)">), CR<R"(\D)">>);
+static_assert(
+    std::is_same_v<CR<R"(^\u00e9)">, detail::CpSet<0, true, "\\xe9">>);
+static_assert(std::is_same_v<decltype(~GrammarSpec::cr<"é">), CR<"^é">>);
+static_assert(std::is_same_v<decltype(~~GrammarSpec::cr<"a">), CR<"a">>);
+static_assert(
+    std::is_same_v<decltype(~~GrammarSpec::cr<R"(\D)">), CR<R"(\D)">>);
 
 // Joining letters to a complement removes them from the excluded scalars.
-static_assert(std::is_same_v<decltype(~cr<"a"> | uc::L), detail::AnyChar>);
-static_assert(std::is_same_v<decltype(uc::L | ~cr<"a">), detail::AnyChar>);
-static_assert(std::is_same_v<decltype(~cr<"a!"> | uc::L), CpSet<0, true, "!">>);
-static_assert(std::is_same_v<decltype(uc::L | ~cr<"a!">), CpSet<0, true, "!">>);
+static_assert(
+    std::is_same_v<decltype(~GrammarSpec::cr<"a"> | GrammarSpec::uc::L),
+                   detail::AnyChar>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::uc::L | ~GrammarSpec::cr<"a">),
+                   detail::AnyChar>);
+static_assert(
+    std::is_same_v<decltype(~GrammarSpec::cr<"a!"> | GrammarSpec::uc::L),
+                   detail::CpSet<0, true, "!">>);
+static_assert(
+    std::is_same_v<decltype(GrammarSpec::uc::L | ~GrammarSpec::cr<"a!">),
+                   detail::CpSet<0, true, "!">>);
 
 constexpr bool difference_is(std::string_view a, std::string_view b,
                              std::initializer_list<unicode::Range> want) {
@@ -181,7 +195,7 @@ static_assert(holds<R"(\é)">(0xE9));
 // A letter as the C library's `iswalpha` sees it: letters, letter numbers and
 // the signs that spell a sound, such as a Devanagari vowel sign, but no digit
 // and no virama.
-using Alphabetic = std::remove_cvref_t<decltype(uc::Alphabetic)>;
+using Alphabetic = std::remove_cvref_t<decltype(GrammarSpec::uc::Alphabetic)>;
 static_assert(detail::word_class<Alphabetic>::has(U'a') &&
               detail::word_class<Alphabetic>::has(0x2160) &&
               detail::word_class<Alphabetic>::has(0x093E) &&
@@ -190,7 +204,7 @@ static_assert(!detail::word_class<Alphabetic>::has(U'1') &&
               !detail::word_class<Alphabetic>::has(U'_') &&
               !detail::word_class<Alphabetic>::has(0x094D));
 
-using Space = std::remove_cvref_t<decltype(uc::White_Space)>;
+using Space = std::remove_cvref_t<decltype(GrammarSpec::uc::White_Space)>;
 static_assert(detail::word_class<Space>::has(U'\t') &&
               detail::word_class<Space>::has(U'\r') &&
               detail::word_class<Space>::has(U' ') &&
@@ -215,7 +229,7 @@ static_assert(!detail::word_class<Space>::has(0x08) &&
               !detail::word_class<Space>::has(0x3001) &&
               !detail::word_class<Space>::has(0xFEFF));
 
-using Other = std::remove_cvref_t<decltype(uc::C)>;
+using Other = std::remove_cvref_t<decltype(GrammarSpec::uc::C)>;
 static_assert(detail::word_class<Other>::has(0x0378));
 static_assert(detail::word_class<Other>::has(0x10FFFF));
 static_assert(detail::word_class<Other>::has(0x0000));

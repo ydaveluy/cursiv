@@ -491,7 +491,7 @@ Descent<void> Emit::group(std::uint16_t id, std::uint16_t hand) {
   const bool folds =
       n.kind == LlShape::seq && n.count == 2 && at(child_at(n, 1)).leftFold;
   const bool counted = oc != 0 || region || folds;
-  const std::string o = local(held, "::cursiv::CstBuilder::Open", "o");
+  const std::string o = local(held, "::cursiv::detail::CstBuilder::Open", "o");
   const std::string b = local(held, "::cursiv::TextOffset", "b");
   const std::string f = local(held && counted, "::cursiv::NodeCount", "f");
   const std::string l =
@@ -602,7 +602,7 @@ Descent<void> Emit::sequence(std::uint16_t id, std::uint16_t hand) {
       open("{");
       scoped = true;
     }
-    start.open = local(held, "::cursiv::CstBuilder::Open", "o");
+    start.open = local(held, "::cursiv::detail::CstBuilder::Open", "o");
     start.begin = local(held, "::cursiv::TextOffset", "b");
     start.count = local(held, "::cursiv::NodeCount", "f");
     const std::string decl =
@@ -1142,7 +1142,7 @@ void Emit::climb(std::uint16_t r) {
     atomics = atomics || atomic;
   }
   for (const auto& [type, n] : {std::pair{"unsigned", "least"},
-                                {"::cursiv::CstBuilder::Open", "o"},
+                                {"::cursiv::detail::CstBuilder::Open", "o"},
                                 {"::cursiv::TextOffset", "b"},
                                 {"::cursiv::NodeId", "w0"},
                                 {"::cursiv::TextOffset", "before"},

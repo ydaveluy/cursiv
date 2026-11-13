@@ -250,12 +250,12 @@ namespace cursiv {
 
 // Here, beside the frames: resolving a batch is a phase, and its root frame is
 // where a wait under it finds `cancelToken`.
-void DefaultDocumentReferences::force(std::span<const RefHandle> which,
+void DefaultDocumentReferences::force(std::span<const detail::RefHandle> which,
                                       const CancellationToken& cancelToken) {
   if (which.empty()) return;
   detail::Frame root{.cancelToken = &cancelToken};
   const detail::Filed filed(root);
-  for (const RefHandle& h : which) {
+  for (const detail::RefHandle& h : which) {
     throw_if_cancelled(cancelToken);
     if (h.owner == nullptr) continue;
     try {

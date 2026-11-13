@@ -6,7 +6,7 @@
 #include <span>
 #include <vector>
 
-#include "cursiv/utils/RoundMarks.hpp"
+#include "cursiv/shared/utils/RoundMarks.hpp"
 
 namespace cursiv::engine {
 

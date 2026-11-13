@@ -34,10 +34,11 @@ struct Parts : cursiv::GrammarSpec {
 // `Early`, the first `Before` alternatives, `B`, and `After` more.
 template <std::size_t... Bs, std::size_t... As>
 constexpr auto pick(std::index_sequence<Bs...>, std::index_sequence<As...>) {
-  const auto head =
-      (cursiv::ref<Parts::Early> | ... | cursiv::ref<Parts::A<Bs>>);
-  const auto middle = head | cursiv::ref<Parts::B>;
-  return (middle | ... | cursiv::ref<Parts::A<sizeof...(Bs) + As>>);
+  const auto head = (cursiv::GrammarSpec::ref<Parts::Early> | ... |
+                     cursiv::GrammarSpec::ref<Parts::A<Bs>>);
+  const auto middle = head | cursiv::GrammarSpec::ref<Parts::B>;
+  return (middle | ... |
+          cursiv::GrammarSpec::ref<Parts::A<sizeof...(Bs) + As>>);
 }
 
 struct G : Parts {

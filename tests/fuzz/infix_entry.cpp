@@ -30,17 +30,20 @@ using ClosedBy =
     typename cursiv::fuzzer::detail::closed_by<std::remove_cvref_t<E>>::type;
 template <class E>
 using Plain = std::remove_cvref_t<E>;
-static_assert(std::is_same_v<ClosedBy<decltype(cursiv::lit<"*/"> | cursiv::eof)>,
-                             Plain<decltype(cursiv::lit<"*/">)>>);
-static_assert(
-    std::is_same_v<ClosedBy<decltype(cursiv::lit<"a"> | cursiv::lit<"b"> |
-                                     cursiv::eof)>,
-                   Plain<decltype(cursiv::lit<"a"> | cursiv::lit<"b">)>>);
-static_assert(
-    std::is_same_v<ClosedBy<decltype(cursiv::lit<"a"> | cursiv::lit<"b"> |
-                                     cursiv::lit<"c">)>,
-                   Plain<decltype(cursiv::lit<"a"> | cursiv::lit<"b"> |
-                                  cursiv::lit<"c">)>>);
+static_assert(std::is_same_v<ClosedBy<decltype(cursiv::GrammarSpec::lit<"*/"> |
+                                               cursiv::GrammarSpec::eof)>,
+                             Plain<decltype(cursiv::GrammarSpec::lit<"*/">)>>);
+static_assert(std::is_same_v<ClosedBy<decltype(cursiv::GrammarSpec::lit<"a"> |
+                                               cursiv::GrammarSpec::lit<"b"> |
+                                               cursiv::GrammarSpec::eof)>,
+                             Plain<decltype(cursiv::GrammarSpec::lit<"a"> |
+                                            cursiv::GrammarSpec::lit<"b">)>>);
+static_assert(std::is_same_v<ClosedBy<decltype(cursiv::GrammarSpec::lit<"a"> |
+                                               cursiv::GrammarSpec::lit<"b"> |
+                                               cursiv::GrammarSpec::lit<"c">)>,
+                             Plain<decltype(cursiv::GrammarSpec::lit<"a"> |
+                                            cursiv::GrammarSpec::lit<"b"> |
+                                            cursiv::GrammarSpec::lit<"c">)>>);
 
 // A tree far deeper than the stack compares, and the path to a divergence is
 // spelled from the root.
@@ -79,7 +82,7 @@ void trees_compare_at_any_depth(const cursiv::Parser& parser,
 void a_subtree_holds_its_children_whole() {
   const auto judged = [](cursiv::NodeCount last) {
     cursiv::Cst cst("ab");
-    cursiv::CstBuilder b(cst);
+    cursiv::detail::CstBuilder b(cst);
     b.stream().leaf(0, 1, 0);
     b.stream().close(0, 1, 2, 0);
     b.stream().leaf(1, 2, 0);
@@ -92,7 +95,7 @@ void a_subtree_holds_its_children_whole() {
 
   // Ends never go back along the run, from one root to the next too.
   cursiv::Cst roots("ab");
-  cursiv::CstBuilder b(roots);
+  cursiv::detail::CstBuilder b(roots);
   b.stream().leaf(1, 2, 0);
   b.stream().leaf(0, 1, 0);
   const auto back = cursiv::fuzzer::detail::CstInvariants{}.run(roots, "ab");
@@ -209,31 +212,41 @@ std::optional<std::string> spelled(E) {
 // What an assertion refuses holds for the next character spelled, whatever
 // spells it; a refusal past ASCII refuses every character past ASCII.
 void a_refusal_holds_for_the_next_character() {
-  using cursiv::cr;
-  using cursiv::lit;
-  CHECK(spelled(!cr<"ab"> + (lit<"a"> | lit<"c">)) == std::nullopt);
-  CHECK(spelled(!cr<"ab"> + (lit<"c"> | lit<"a">)) == "c");
-  CHECK(spelled(!cr<"ab"> + cr<"a-c">) == "c");
-  CHECK(spelled(!cr<"é"> + cr<"é">) == std::nullopt);
-  CHECK(spelled(!cr<"é"> + lit<"é">) == std::nullopt);
-  CHECK(spelled(!cr<"é"> + cr<"a">) == "a");
+  CHECK(spelled(!cursiv::GrammarSpec::cr<"ab"> +
+                (cursiv::GrammarSpec::lit<"a"> |
+                 cursiv::GrammarSpec::lit<"c">)) == std::nullopt);
+  CHECK(spelled(!cursiv::GrammarSpec::cr<"ab"> +
+                (cursiv::GrammarSpec::lit<"c"> |
+                 cursiv::GrammarSpec::lit<"a">)) == "c");
+  CHECK(spelled(!cursiv::GrammarSpec::cr<"ab"> +
+                cursiv::GrammarSpec::cr<"a-c">) == "c");
+  CHECK(spelled(!cursiv::GrammarSpec::cr<"é"> + cursiv::GrammarSpec::cr<"é">) ==
+        std::nullopt);
+  CHECK(spelled(!cursiv::GrammarSpec::cr<"é"> +
+                cursiv::GrammarSpec::lit<"é">) == std::nullopt);
+  CHECK(spelled(!cursiv::GrammarSpec::cr<"é"> + cursiv::GrammarSpec::cr<"a">) ==
+        "a");
 }
 
 // A literal's guard refuses after its text: a class, a terminal that reads
 // one, or a keyword's word boundary where the word ends in it. Any other guard
 // refuses the spelling.
 void a_literal_guard_holds_after_its_text() {
-  using cursiv::cr;
-  using cursiv::kw;
-  using cursiv::lit;
-  using cursiv::ref;
   using G = fveto::Spaced;
-  CHECK(spelled(lit<"a", !cr<"b">> + cr<"b-c">) == "ac");
-  CHECK(spelled<G>(lit<"a", !ref<G::DIGIT>> + cr<"0~">) == "a~");
-  CHECK(spelled(kw<"if"> + cr<"0~">) == "if~");
-  CHECK(spelled(kw<"["> + cr<"0~">) == "[0");
-  CHECK(spelled(lit<"a", !lit<"b">> + cr<"b-c">) == std::nullopt);
-  CHECK(spelled<G>(lit<"a", !ref<G::NUM>> + cr<"b">) == std::nullopt);
+  CHECK(spelled(cursiv::GrammarSpec::lit<"a", !cursiv::GrammarSpec::cr<"b">> +
+                cursiv::GrammarSpec::cr<"b-c">) == "ac");
+  CHECK(spelled<G>(
+            cursiv::GrammarSpec::lit<"a", !cursiv::GrammarSpec::ref<G::DIGIT>> +
+            cursiv::GrammarSpec::cr<"0~">) == "a~");
+  CHECK(spelled(cursiv::GrammarSpec::kw<"if"> +
+                cursiv::GrammarSpec::cr<"0~">) == "if~");
+  CHECK(spelled(cursiv::GrammarSpec::kw<"["> + cursiv::GrammarSpec::cr<"0~">) ==
+        "[0");
+  CHECK(spelled(cursiv::GrammarSpec::lit<"a", !cursiv::GrammarSpec::lit<"b">> +
+                cursiv::GrammarSpec::cr<"b-c">) == std::nullopt);
+  CHECK(spelled<G>(
+            cursiv::GrammarSpec::lit<"a", !cursiv::GrammarSpec::ref<G::NUM>> +
+            cursiv::GrammarSpec::cr<"b">) == std::nullopt);
 }
 
 // Whether the walk writes a sentence of `G` with the first choice of every

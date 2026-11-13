@@ -148,7 +148,7 @@ void scratch_arrays_preserve_values_without_running_initializers() {
 
   // Origins may span several words and grow while active readings are held.
   Cst tree("");
-  CstBuilder builder(tree);
+  detail::CstBuilder builder(tree);
   LrContext context("", builder);
   auto* origins = lr_origin_room<130>(context, 2);
   origins[0].set(129);
@@ -241,7 +241,7 @@ constexpr EmptyGuardTable emptyGuard{};
 void a_refused_empty_goto_leaves_the_token_to_the_fallback() {
   for (const std::string_view text : {"+", "-", "?"}) {
     Cst tree(text);
-    CstBuilder builder(tree);
+    detail::CstBuilder builder(tree);
     LrContext c(text, builder);
     c.stack.push(LrFrame{0, kNoElement, 0, 0, kLrNoWord});
     const LrDrive drive{
@@ -305,7 +305,7 @@ void abandoning_a_suffix_discards_only_its_pending_close() {
   for (const ElementId row : {kNoRow, ElementId{7}}) {
     for (const auto pending : {0u, 2u, kLrNoPending}) {
       Cst tree("ab");
-      CstBuilder builder(tree);
+      detail::CstBuilder builder(tree);
       LrContext c("ab", builder);
       c.tape.leaf<kStamp>(0, 1, 8, 1);
       c.tape.leaf<kStamp>(1, 2, kNoRow, 2);
@@ -325,7 +325,7 @@ void abandoning_a_suffix_discards_only_its_pending_close() {
 // it still ends the derivation.
 void adjacency_skips_a_recovered_region_without_rows() {
   Cst tree("ab");
-  CstBuilder builder(tree);
+  detail::CstBuilder builder(tree);
   builder.stream().leaf(0, 1, kStamp.make(3, 1));
   builder.stream().leaf(1, 2, kStamp.make(kNoRow, 2));
   builder.stream().repaired_close(1, 2, 2, kStamp.make(kNoRow, 0));
@@ -394,9 +394,9 @@ namespace wrapping {
 
 namespace {
 
-using cursiv::CstRun;
 using cursiv::kNoElement;
 using cursiv::NodeId;
+using cursiv::detail::CstRun;
 
 constexpr cursiv::engine::StampLayout kStamp{};
 constexpr cursiv::ElementId kEntry = 7, kRow = 3;

@@ -19,16 +19,16 @@
 #include "cursiv/ll/gen/ll_lex.hpp"
 #include "cursiv/ll/runtime/LlEpisodeSim.hpp"
 #include "cursiv/ll/table/LlSimulation.hpp"
-#include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/LexRecursion.hpp"
 #include "cursiv/shared/gen/LexSeparation.hpp"
+#include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/PredicateModes.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
-#include "cursiv/utils/StrongComponents.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/Token.hpp"
-#include "cursiv/utils/RoundMarks.hpp"
+#include "cursiv/shared/utils/RoundMarks.hpp"
+#include "cursiv/shared/utils/StrongComponents.hpp"
 
 namespace cursiv::engine {
 namespace {

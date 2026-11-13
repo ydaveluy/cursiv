@@ -14,7 +14,7 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {};
 }  // namespace ast
 template <std::size_t... Is>
 constexpr auto run(std::index_sequence<Is...>) {
-  return ((void(Is), cursiv::lit<"a">) + ...);
+  return ((void(Is), cursiv::GrammarSpec::lit<"a">)+...);
 }
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};

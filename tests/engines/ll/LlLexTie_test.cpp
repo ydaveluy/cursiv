@@ -55,7 +55,7 @@ void a_reserved_spelling_ties_no_mode_that_reserves_it() {
 void a_visible_token_beats_the_blank_in_a_lookahead() {
   constexpr auto& T = tllunit::generated::Ll::kTable;
   cursiv::Cst tree(" a");
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   builder.bind_stream();
   cursiv::engine::LlContext context(tree.text(), builder);
   cursiv::engine::LlMask<T.termWords> viable;

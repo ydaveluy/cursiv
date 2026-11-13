@@ -249,7 +249,7 @@ struct Sites : cursiv::GrammarSpec {
     else if constexpr (I == 8 && LastSite == Last::owner)
       return create<Other>(assign<&Other::to>(payload));
     else if constexpr (I == 8 && LastSite == Last::narrow)
-      return assign<cursiv::xref<&Doc::to, Narrow>>(payload);
+      return assign<cursiv::GrammarSpec::xref<&Doc::to, Narrow>>(payload);
     else
       return assign<&Doc::to>(payload);
   }

@@ -123,7 +123,7 @@ void the_caret_far_down_a_long_rule_is_offered_what_comes_next() {
   const cursiv::engine::StampedGrammar grammar(
       twidepos::generated::Ll::kGrammarMetaData, kStamp);
   cursiv::Cst tree(text);
-  cursiv::CstBuilder builder(tree);
+  cursiv::detail::CstBuilder builder(tree);
   builder.bind_stream();
   const auto open = builder.enter();
   for (std::uint16_t i = 0; i < kPositions; ++i)

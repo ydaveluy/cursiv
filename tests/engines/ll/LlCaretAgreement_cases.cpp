@@ -142,7 +142,7 @@ void an_unstamped_tree_does_not_supply_engine_positions() {
   for (const bool withLeaf : {false, true}) {
     constexpr std::string_view text = "use target+";
     cursiv::Cst tree(text);
-    cursiv::CstBuilder builder(tree);
+    cursiv::detail::CstBuilder builder(tree);
     if (withLeaf) {
       const auto opened = builder.enter();
       builder.leaf(0, text.size(), 0);
