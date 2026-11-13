@@ -2589,6 +2589,7 @@ void custom_methods_reach_the_language() {
   // A throwing notification is reported to the sink; the session goes on.
   struct FailedNotes final : cursiv::ObservabilitySink {
     std::mutex m;
+    std::condition_variable told;
     std::vector<std::string> said;
     void publish(const cursiv::Observation& observation) noexcept override {
       if (observation.code != cursiv::ObservationCode::NotificationThrew)
@@ -2596,6 +2597,7 @@ void custom_methods_reach_the_language() {
       try {
         const std::scoped_lock lock(m);
         said.push_back(observation.message);
+        told.notify_all();
       } catch (...) {  // NOLINT(bugprone-empty-catch): the check reads `said`
       }
     }
@@ -2663,6 +2665,17 @@ void custom_methods_reach_the_language() {
   s.notify("workspace/didChangeWorkspaceFolders",
            R"({"event":{"added":[{"uri":"file:///a","name":"a"}],"removed":[]}})");
   CHECK(s.server->foldersAdded.get_future().get() == "a");
+  // A second one finds its promise set and throws: the sink names the method.
+  s.notify("workspace/didChangeWorkspaceFolders",
+           R"({"event":{"added":[{"uri":"file:///b","name":"b"}],"removed":[]}})");
+  {
+    std::unique_lock lock(failed->m);
+    failed->told.wait_for(lock, std::chrono::seconds(30),
+                          [&] { return failed->said.size() == 2; });
+    CHECK(failed->said.size() == 2 &&
+          failed->said.back().starts_with(
+              "workspace/didChangeWorkspaceFolders threw: "));
+  }
 
   // What the language sends is what a client of its own reads.
   const auto next = [&] {

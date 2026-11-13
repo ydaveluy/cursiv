@@ -971,9 +971,7 @@ void add_workspace_handlers(Session& session) {
       }));
 
   endpoint.onWorkspaceDidChangeWorkspaceFolders(notification(
-      session,
-      std::string(
-          lsp::notifications::WorkspaceDidChangeWorkspaceFolders::Method),
+      session, lsp::notifications::WorkspaceDidChangeWorkspaceFolders::Method,
       false, [&server](const lsp::DidChangeWorkspaceFoldersParams& params) {
         server.didChangeWorkspaceFolders(params);
       }));
