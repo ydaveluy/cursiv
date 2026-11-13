@@ -108,6 +108,9 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
+          # The rules cut everywhere go against how the tree is written (see
+          # `.clang-tidy`); shadowing and coroutine parameters are cut only
+          # where the grammar's short names and the parsers' coroutines live.
           args: >-
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
             -Dsonar.organization=ydaveluy
@@ -118,8 +121,52 @@ jobs:
             -Dsonar.tests=tests
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.cpp.file.suffixes=.cpp,.hpp
-            -Dsonar.issue.ignore.multicriteria=benchlog,benchpath
+            -Dsonar.issue.ignore.multicriteria=benchlog,benchpath,nesting,complexity,corocomplexity,lambdalength,ternary,breaks,params,fields,methods,onedecl,suffix,carray,stdbyte,loopform,assignexpr,capture,capturethis,syncfield,memoryorder,shadowcore,shadowengines,coroparam
             -Dsonar.issue.ignore.multicriteria.benchlog.ruleKey=cppsecurity:S5145
             -Dsonar.issue.ignore.multicriteria.benchlog.resourceKey=src/bench/**/*
             -Dsonar.issue.ignore.multicriteria.benchpath.ruleKey=cppsecurity:S2083
             -Dsonar.issue.ignore.multicriteria.benchpath.resourceKey=src/bench/**/*
+            -Dsonar.issue.ignore.multicriteria.nesting.ruleKey=cpp:S134
+            -Dsonar.issue.ignore.multicriteria.nesting.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.complexity.ruleKey=cpp:S3776
+            -Dsonar.issue.ignore.multicriteria.complexity.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.corocomplexity.ruleKey=cpp:S6194
+            -Dsonar.issue.ignore.multicriteria.corocomplexity.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.lambdalength.ruleKey=cpp:S1188
+            -Dsonar.issue.ignore.multicriteria.lambdalength.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.ternary.ruleKey=cpp:S3358
+            -Dsonar.issue.ignore.multicriteria.ternary.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.breaks.ruleKey=cpp:S924
+            -Dsonar.issue.ignore.multicriteria.breaks.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.params.ruleKey=cpp:S107
+            -Dsonar.issue.ignore.multicriteria.params.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.fields.ruleKey=cpp:S1820
+            -Dsonar.issue.ignore.multicriteria.fields.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.methods.ruleKey=cpp:S1448
+            -Dsonar.issue.ignore.multicriteria.methods.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.onedecl.ruleKey=cpp:S1659
+            -Dsonar.issue.ignore.multicriteria.onedecl.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.suffix.ruleKey=cpp:S818
+            -Dsonar.issue.ignore.multicriteria.suffix.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.carray.ruleKey=cpp:S5945
+            -Dsonar.issue.ignore.multicriteria.carray.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.stdbyte.ruleKey=cpp:S6022
+            -Dsonar.issue.ignore.multicriteria.stdbyte.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.loopform.ruleKey=cpp:S886
+            -Dsonar.issue.ignore.multicriteria.loopform.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.assignexpr.ruleKey=cpp:S1121
+            -Dsonar.issue.ignore.multicriteria.assignexpr.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.capture.ruleKey=cpp:S3608
+            -Dsonar.issue.ignore.multicriteria.capture.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.capturethis.ruleKey=cpp:S5019
+            -Dsonar.issue.ignore.multicriteria.capturethis.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.syncfield.ruleKey=cpp:S8379
+            -Dsonar.issue.ignore.multicriteria.syncfield.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.memoryorder.ruleKey=cpp:S8417
+            -Dsonar.issue.ignore.multicriteria.memoryorder.resourceKey=**/*
+            -Dsonar.issue.ignore.multicriteria.shadowcore.ruleKey=cpp:S1117
+            -Dsonar.issue.ignore.multicriteria.shadowcore.resourceKey=src/core/**/*
+            -Dsonar.issue.ignore.multicriteria.shadowengines.ruleKey=cpp:S1117
+            -Dsonar.issue.ignore.multicriteria.shadowengines.resourceKey=src/engines/**/*
+            -Dsonar.issue.ignore.multicriteria.coroparam.ruleKey=cpp:S6391
+            -Dsonar.issue.ignore.multicriteria.coroparam.resourceKey=src/engines/**/*
