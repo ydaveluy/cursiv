@@ -127,8 +127,8 @@ std::optional<std::string> with_keyword_match(std::string_view json,
       while (end < json.size() && json[end] != '"')
         end += json[end] == '\\' ? 2 : 1;
       if (end >= json.size()) return std::nullopt;
-      const std::size_t next = json.find_first_not_of(" \t\n\r", end + 1);
-      if (next < json.size() && json[next] == ':') {
+      if (const std::size_t next = json.find_first_not_of(" \t\n\r", end + 1);
+          next < json.size() && json[next] == ':') {
         key = json.substr(at + 1, end - at - 1);
         // A key that repeats on the path hides what the earlier one held.
         if (!open.empty() && open.size() <= kPath.size() &&

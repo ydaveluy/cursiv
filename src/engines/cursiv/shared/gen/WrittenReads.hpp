@@ -13,15 +13,15 @@ namespace cursiv::engine {
 
 // A directive says what the position under it writes.
 constexpr bool is_directive_kind(ImageKind kind) {
-  return kind == ImageKind::create || kind == ImageKind::nest ||
-         kind == ImageKind::assign || kind == ImageKind::append ||
-         kind == ImageKind::flag;
+  using enum ImageKind;
+  return kind == create || kind == nest || kind == assign || kind == append ||
+         kind == flag;
 }
 
 // A directive, prose, mark or region over one operand reads what it does.
 constexpr bool over_operand(ImageKind kind) {
-  return is_directive_kind(kind) || kind == ImageKind::doc ||
-         kind == ImageKind::mark || kind == ImageKind::skip;
+  using enum ImageKind;
+  return is_directive_kind(kind) || kind == doc || kind == mark || kind == skip;
 }
 
 // A condition takes no position, bare or under a repetition or a wrapper whose

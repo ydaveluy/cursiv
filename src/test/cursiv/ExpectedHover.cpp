@@ -31,9 +31,9 @@ Disposable expectHover(const LspServices& services,
   const detail::DisposeOnThrow cleanup(disposable);
 
   std::optional<lsp::Hover> hover;
-  const auto* const caret =
-      detail::markerAt(marked.indices, expectedHover.index);
-  if (caret != nullptr && services.hoverProvider != nullptr)
+  if (const auto* const caret =
+          detail::markerAt(marked.indices, expectedHover.index);
+      caret != nullptr && services.hoverProvider != nullptr)
     hover = services.hoverProvider->getHoverContent(
         *document, to_lsp(document->textDocument().positionAt(*caret)),
         kNoCancel);

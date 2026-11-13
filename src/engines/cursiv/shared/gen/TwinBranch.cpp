@@ -190,23 +190,24 @@ void TwinReader::analyse_calls(std::uint32_t rule) {
 // and calls read in place open, and a choice whose branches all read the same
 // is that branch.
 Descent<void> TwinReader::flatten(ImageId id, std::vector<Item>& out) {
+  using enum ImageKind;
   const ImageNode n = _im.nodes[id];
-  if (is_directive_kind(n.kind) || n.kind == ImageKind::doc)
+  if (is_directive_kind(n.kind) || n.kind == doc)
     co_return co_await flatten(child_at(id, 0), out);
   switch (n.kind) {
-    case ImageKind::epsilon:
+    case epsilon:
       co_return;
-    case ImageKind::seq:
+    case seq:
       for (const ImageId k : children(id)) co_await flatten(k, out);
       co_return;
-    case ImageKind::ref:
+    case ref:
       if (const std::vector<Item>* body = co_await called(n.a);
           body != nullptr) {
         out.insert(out.end(), body->begin(), body->end());
         co_return;
       }
       break;
-    case ImageKind::choice:
+    case choice:
       if ((co_await branch_keys(id)).size() == 1) {
         co_await flatten(child_at(id, 0), out);
         co_return;
@@ -304,17 +305,17 @@ ImageId TwinReader::drop(ImageId body, std::vector<TwinFound>* found) {
 // Conditions, calls, regions of another grammar and the folds a lowering
 // makes are read as written.
 Descent<ImageId> TwinReader::drop_node(ImageId id) {
+  using enum ImageKind;
   if (const auto it = _dropped.find(id); it != _dropped.end())
     co_return it->second;
   const ImageNode n = _im.nodes[id];
   ImageId out = id;
-  if (n.kind == ImageKind::choice) {
+  if (n.kind == choice) {
     out = co_await drop_choice(id);
-  } else if (n.kind == ImageKind::seq) {
+  } else if (n.kind == seq) {
     out = co_await drop_sequence(id);
-  } else if (is_directive_kind(n.kind) || n.kind == ImageKind::repeat ||
-             n.kind == ImageKind::unordered || n.kind == ImageKind::skip ||
-             n.kind == ImageKind::doc) {
+  } else if (is_directive_kind(n.kind) || n.kind == repeat ||
+             n.kind == unordered || n.kind == skip || n.kind == doc) {
     const std::vector<ImageId> was = children(id);
     std::vector<ImageId> now;
     for (const ImageId k : was) now.push_back(co_await drop_node(k));

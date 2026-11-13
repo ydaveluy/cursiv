@@ -72,8 +72,9 @@ template <const auto& A, class Stack, class Holds>
 bool lr_reduce_walk(Stack& stack, SymbolId term, Holds&& holds, bool& whole) {
   for (;;) {
     std::uint32_t prod = 0;
-    const int act = lr_state_act<A>(stack.back(), term, holds, prod);
-    if (act >= 0) return act != 0;
+    if (const int act = lr_state_act<A>(stack.back(), term, holds, prod);
+        act >= 0)
+      return act != 0;
     if (!lr_reduce_allowed<A>(prod, holds)) return false;
     if (A.cfg.prods[prod].len + 1u > stack.size()) {
       whole = false;

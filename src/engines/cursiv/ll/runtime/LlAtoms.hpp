@@ -27,12 +27,12 @@ class LlAtoms {
     for (std::uint32_t s = 0; s < T.atn.nstates; ++s) {
       const LlAtnState& state = T.atn.state(s);
       for (std::uint32_t i = 0; i < state.nedges; ++i) {
+        using enum LlEdgeKind;
         const LlAtnEdge& e = T.atn.edge(state.edge + i);
-        if (e.kind != LlEdgeKind::atom && e.kind != LlEdgeKind::condition)
-          continue;
+        if (e.kind != atom && e.kind != condition) continue;
         const std::uint16_t hop = T.edgeNode[state.edge + i];
         if (hop != kNoRow) _reads.emplace_back(hop, s);
-        if (e.kind != LlEdgeKind::atom) continue;
+        if (e.kind != atom) continue;
         if (e.label == kEofSymbol) continue;
         _atoms.push_back(
             Atom{e.label, hop != kNoRow ? T.nodes[hop].mode : T.errMode});

@@ -187,7 +187,7 @@ GenCode write_common_artifacts(const std::string& dir,
   std::vector<SourceFile> files;
   std::vector<GenCode> codes;
   const auto put = [&](std::string path, std::string_view text, GenCode code) {
-    files.push_back({std::move(path), text});
+    files.emplace_back(std::move(path), text);
     codes.push_back(code);
   };
   const auto at = [&](std::string_view file) { return concat(dir, "/", file); };

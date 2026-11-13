@@ -121,15 +121,15 @@ class SpellsKeyword {
   bool operator()(NodeId id) const noexcept {
     const CstNode& n = (*_cst)[id];
     if (n.subtreeSize != 1 || n.hidden != 0) return false;
-    const std::string_view text = _cst->spelling(id);
-    if (text != _keyword && !(folded_equal(text, _keyword) && folds()))
+    if (const std::string_view text = _cst->spelling(id);
+        text != _keyword && !(folded_equal(text, _keyword) && folds()))
       return false;
     return _grammar->recordRule(n).empty();
   }
 
  private:
   bool folds() const noexcept {
-    if (!_folds) _folds = _grammar->spellingFolds(_keyword);
+    if (!_folds.has_value()) _folds = _grammar->spellingFolds(_keyword);
     return *_folds;
   }
 

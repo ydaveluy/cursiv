@@ -62,20 +62,21 @@ bool consumes(const LowerPools& c, std::uint16_t node) {
 // parse keeps their rounds: where `free`, no repetition holds `node`.
 void endless_runs(const LowerPools& c, std::uint16_t node, bool free,
                   std::vector<std::pair<std::uint16_t, bool>>& out) {
+  using enum LexKind;
   for (std::vector todo{std::pair{node, free}}; !todo.empty();) {
     const auto [at, unheld] = todo.back();
     todo.pop_back();
     const LexNode& e = c.lex[at];
-    if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
+    if (e.kind == positive || e.kind == negative) {
       todo.emplace_back(e.a, true);
-    } else if (e.kind == LexKind::rep) {
+    } else if (e.kind == rep) {
       // A kept run's rounds read its item from each token: a run inside it is
       // read to its end each time.
       const bool endless = e.max == kEndless && consumes(c, e.a);
       const bool kept = unheld && phrase_kept_run(c, at);
       if (endless) out.emplace_back(at, kept);
       if (!endless || kept) todo.emplace_back(e.a, false);
-    } else if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
+    } else if (e.kind == seq || e.kind == alt) {
       for (unsigned i = e.b; i-- > 0;)
         todo.emplace_back(c.lexChild[e.a + i], unheld);
     }

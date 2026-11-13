@@ -55,9 +55,9 @@ class LrGssRuns {
   // end past 32-bit offsets throws `std::length_error` and makes nothing.
   CURSIV_ALWAYS_INLINE std::size_t reserve(std::size_t n) {
     std::size_t at = _end;
-    const bool fits =
-        n <= kChunk - (at & kMask) && (at >> Shift) != _slots.size();
-    if (!fits) [[unlikely]]
+    if (const bool fits =
+            n <= kChunk - (at & kMask) && (at >> Shift) != _slots.size();
+        !fits) [[unlikely]]
       at = make(n);
     _end = at + n;
     _appended += n;

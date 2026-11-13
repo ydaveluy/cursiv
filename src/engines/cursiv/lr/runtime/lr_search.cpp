@@ -41,7 +41,7 @@ void lr_search_trim(LrSearch& s, const LrSearchCheckpoint& m) {
 }
 
 void lr_search_admit(LrSearch& s, std::uint32_t i) {
-  LrConfig& r = s.configs[i];
+  const LrConfig& r = s.configs[i];
   assert(!r.generates());
   const std::uint32_t h =
       !lr_search_goal(r) && r.freeInserts == 0 ? kRepairReread : 0;

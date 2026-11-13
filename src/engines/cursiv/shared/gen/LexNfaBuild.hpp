@@ -239,16 +239,15 @@ struct LexNfaBuild {
   }
 
   bool assertions(std::uint16_t node) const {
+    using enum LexKind;
     for (std::vector todo{node}; !todo.empty();) {
       const LexNode& e = g.lex[todo.back()];
       todo.pop_back();
-      if (e.kind == LexKind::positive || e.kind == LexKind::negative)
-        return true;
-      if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
+      if (e.kind == positive || e.kind == negative) return true;
+      if (e.kind == seq || e.kind == alt) {
         for (unsigned i = 0; i < e.b; ++i) todo.push_back(g.lexChild[e.a + i]);
-      } else if (e.kind == LexKind::rep || e.kind == LexKind::mark ||
-                 e.kind == LexKind::through_lit ||
-                 e.kind == LexKind::through_same) {
+      } else if (e.kind == rep || e.kind == mark || e.kind == through_lit ||
+                 e.kind == through_same) {
         todo.push_back(e.a);
       }
     }
@@ -358,17 +357,18 @@ struct LexNfaBuild {
   RoundMarks _seen{g.nlex};
 
   bool guards_read_outer_marks(std::uint16_t node) {
+    using enum LexKind;
     std::vector<std::uint32_t> marks;
     std::vector<std::uint16_t> guards;
-    std::vector<std::uint16_t> todo{node};
+    std::vector todo{node};
     _seen.next();
     while (!todo.empty()) {
       const std::uint16_t at = todo.back();
       todo.pop_back();
       if (at == kNoLexNode || !_seen.first(at)) continue;
       const LexNode& e = g.lex[at];
-      if (e.kind == LexKind::mark) marks.push_back(e.min);
-      if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
+      if (e.kind == mark) marks.push_back(e.min);
+      if (e.kind == positive || e.kind == negative) {
         guards.push_back(e.a);
         continue;
       }
@@ -382,9 +382,8 @@ struct LexNfaBuild {
       todo.pop_back();
       if (at == kNoLexNode || !_seen.first(at)) continue;
       if (const LexNode& e = g.lex[at];
-          (e.kind == LexKind::same &&
-           std::ranges::find(marks, e.min) != marks.end()) ||
-          (e.kind == LexKind::through_same &&
+          (e.kind == same && std::ranges::find(marks, e.min) != marks.end()) ||
+          (e.kind == through_same &&
            std::ranges::find(marks, e.max) != marks.end()))
         return true;
       lex_children(g, at, [&](auto child) { todo.push_back(child); }, false);
@@ -572,7 +571,7 @@ struct LexNfaBuild {
   // loop whose head is not built yet may read anything.
   bool reads_decoded(const ByteSet& decoded, int out) const {
     if (!decoded.any()) return false;
-    std::vector<int> walks{out};
+    std::vector walks{out};
     for (std::size_t i = 0; i < walks.size(); ++i)
       for (const int at : n.eclose(walks[i])) {
         const LexNfaState& st = n.s[static_cast<std::size_t>(at)];
@@ -590,9 +589,10 @@ struct LexNfaBuild {
   // Thompson, built backwards from the fragment's exit.
   Descent<int> run(std::uint16_t node, int out) {
     switch (const LexNode& e = g.lex[node]; e.kind) {
-      case LexKind::chars:
+      using enum LexKind;
+      case chars:
         co_return n.chars(e.a, out);
-      case LexKind::seq: {
+      case seq: {
         int s = out;
         unsigned i = e.b;
         if (const unsigned at = choice_among_conditions(e); at < e.b) {
@@ -614,12 +614,12 @@ struct LexNfaBuild {
         }
         while (i-- > 0) {
           const auto child = g.lexChild[e.a + i];
-          if (g.lex[child].kind == LexKind::nguard && g.lex[child].max != 0) {
+          if (g.lex[child].kind == nguard && g.lex[child].max != 0) {
             s = n.chars_lone_lead(g.lex[g.lexChild[e.a + i - 1]].a, child, s);
             --i;
             continue;
           }
-          if (g.lex[child].kind == LexKind::same) {
+          if (g.lex[child].kind == same) {
             // The echo: the walk stops here and the search resumes at `s`.
             const int k =
                 i < 2 || g.lex[g.lexChild[e.a + i - 2]].min != g.lex[child].min
@@ -635,23 +635,23 @@ struct LexNfaBuild {
         }
         co_return s;
       }
-      case LexKind::mark:
+      case mark:
         co_return co_await run(e.a, out);
-      case LexKind::same:
+      case same:
         throw std::logic_error("cursiv: an echo needs recognition");
-      case LexKind::indent:
-      case LexKind::dedent:
-      case LexKind::implied:
-      case LexKind::skip:
-      case LexKind::token:
-      case LexKind::gap_has:
-      case LexKind::gap_is:
-      case LexKind::end_mark:
+      case indent:
+      case dedent:
+      case implied:
+      case skip:
+      case token:
+      case gap_has:
+      case gap_is:
+      case end_mark:
         lower_refuse(g, LowerFail::indentShape, n.term);
         co_return out;
-      case LexKind::through_same: {
+      case through_same: {
         const auto& opener = g.lex[e.a];
-        if (opener.kind != LexKind::seq || opener.b < 2 ||
+        if (opener.kind != seq || opener.b < 2 ||
             g.lex[g.lexChild[opener.a + opener.b - 2]].min != e.max)
           throw std::logic_error("cursiv: an echo needs recognition");
         const int k = relay(opener, opener.b - 2, out, g.lexChild[e.b],
@@ -659,19 +659,19 @@ struct LexNfaBuild {
                             e.min > 2 ? g.lexChild[e.b + 2] : kNoLexNode, true);
         co_return co_await run(e.a, n.relay(k));
       }
-      case LexKind::alt:
+      case alt:
         co_return co_await each_arm(node, out, &LexNfaBuild::run);
-      case LexKind::through_lit:
+      case through_lit:
         co_return co_await run(e.a, n.through(g, e, out));
-      case LexKind::through_nested: {
+      case through_nested: {
         const int k =
             nested_relay(g.lexChild[e.b], g.lexChild[e.b + 1], e.max != 0, out);
         co_return co_await run(e.a, n.relay(k));
       }
-      case LexKind::positive:
-      case LexKind::negative:
-      case LexKind::nguard: {
-        if (e.kind == LexKind::nguard) {
+      case positive:
+      case negative:
+      case nguard: {
+        if (e.kind == nguard) {
           const bool oneClass = e.min == 1 && e.a == kNoSet;
           bool crossing = nativeGuards && !oneClass;
           if (nativeGuards && !crossing) {
@@ -692,7 +692,7 @@ struct LexNfaBuild {
         r.row.predicate = node;
         co_return n.relay(lex_push_relay(n, r, out));
       }
-      case LexKind::rep: {
+      case rep: {
         // Thompson repetition, each occurrence built backwards.
         int tail = out;
         if (e.max == kEndless) {
@@ -709,7 +709,7 @@ struct LexNfaBuild {
           tail = co_await run(e.a, tail);
         co_return tail;
       }
-      case LexKind::call:
+      case call:
         throw std::logic_error("cursiv: a lexical call needs recognition");
     }
     throw std::logic_error(

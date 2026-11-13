@@ -217,7 +217,7 @@ std::vector<lsp::Uint> AbstractSemanticTokenProvider::encode(
   if (tail != tokens.begin()) --tail;
   while (tail != tokens.begin() && !before(*tail, *(tail - 1))) --tail;
   std::ranges::stable_sort(tokens.begin(), tail, before);
-  std::ranges::inplace_merge(tokens.begin(), tail, tokens.end(), before);
+  std::ranges::inplace_merge(tokens, tail, before);
 
   std::vector<lsp::Uint> data;
   if (tokens.empty()) return data;

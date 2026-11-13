@@ -251,8 +251,8 @@ struct LexRefusalProduct {
     for (int x : cl) {
       const LexNfaState st = n.s[static_cast<std::size_t>(x)];
       if (st.set >= 0) {
-        const ByteSet on = lex_edge_bytes(g.sets.data(), st) & pickSet;
-        if (on.any()) {
+        if (const ByteSet on = lex_edge_bytes(g.sets.data(), st) & pickSet;
+            on.any()) {
           const int to = done ? st.t1 : level(k, memo, lvl + 1, st.t1, -1);
           // A level that keeps nothing is not an edge.
           if (to >= 0) {

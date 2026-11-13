@@ -36,9 +36,9 @@ Disposable expectGoToDefinition(
   const detail::DisposeOnThrow cleanup(disposable);
 
   std::vector<lsp::LocationLink> links;
-  const auto* const caret =
-      detail::markerAt(marked.indices, expectedGoToDefinition.index);
-  if (caret != nullptr && services.definitionProvider != nullptr)
+  if (const auto* const caret =
+          detail::markerAt(marked.indices, expectedGoToDefinition.index);
+      caret != nullptr && services.definitionProvider != nullptr)
     if (std::optional<std::vector<lsp::LocationLink>> found =
             services.definitionProvider->getDefinition(
                 *document, to_lsp(document->textDocument().positionAt(*caret)),

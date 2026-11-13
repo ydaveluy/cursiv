@@ -547,6 +547,7 @@ void ll_build_lexer(LlBuiltProgram& b, LexAlphabet& alpha,
   // cannot decide a choice; prediction must retain all those readings.
   b.decEnded.assign(b.cfg.ndecisions, 0);
   for (std::uint16_t d = 0; d < b.cfg.ndecisions; ++d) {
+    using enum LlPredict;
     auto& decision = b.cfg.decisions[d];
     const std::uint8_t multi = b.modeMulti[decision.mode];
     if (multi == 0) continue;
@@ -557,10 +558,10 @@ void ll_build_lexer(LlBuiltProgram& b, LexAlphabet& alpha,
                    b.laSet[decision.set + i].intersects(modeTie[decision.mode]);
       if (!readsTie) continue;
       b.decEnded[d] = 1;
-      if (decision.how == LlPredict::single) continue;
+      if (decision.how == single) continue;
     }
-    if (decision.how == LlPredict::adaptive) continue;
-    decision.how = LlPredict::adaptive;
+    if (decision.how == adaptive) continue;
+    decision.how = adaptive;
     ++b.nadaptive;
   }
   ll_flag_choices(b, alpha, modes, walks);

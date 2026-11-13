@@ -42,7 +42,7 @@ bool LlSimulation::leave(std::uint32_t depth, std::uint32_t ret) {
     }
   }
   _cur.swap(_next);
-  std::sort(_cur.begin(), _cur.end());
+  std::ranges::sort(_cur);
   return !_cur.empty();
 }
 
@@ -97,7 +97,7 @@ void LlSimulation::expand_sources() {
   forget_deltas();
   _sources.clear();
   // One order for one set, so the step kept for it is found again.
-  std::sort(_next.begin(), _next.end());
+  std::ranges::sort(_next);
 }
 
 bool LlSimulation::one_at_a_time(std::uint64_t budget) {
@@ -125,7 +125,7 @@ bool LlSimulation::drain(std::vector<LlConfig>& out,
       if (_immediate && _budget != 0 && _visits > _budget) return false;
     }
     if (_ready.empty() || _capped || (_stopAtSplit && _split)) return true;
-    std::pop_heap(_ready.begin(), _ready.end(), std::greater<>{});
+    std::ranges::pop_heap(_ready, std::greater<>{});
     const auto at = static_cast<std::uint32_t>(_ready.back());
     _ready.pop_back();
     const LlConfig held{
@@ -179,7 +179,7 @@ void LlSimulation::defer(std::uint32_t at, const LlConfig& cur,
   if (held == kLlCtxApart) {
     held = cur.ctx;
     _ready.push_back(std::uint64_t{_rank[cur.state]} << 32 | at);
-    std::push_heap(_ready.begin(), _ready.end(), std::greater<>{});
+    std::ranges::push_heap(_ready, std::greater<>{});
     return;
   }
   const std::uint32_t joined = _ctx.merge(held, cur.ctx);
@@ -200,10 +200,10 @@ void LlSimulation::visit(const LlConfig& cur, std::vector<LlConfig>& out,
   bool conditional = false;
   if (!_shareEpsilon || conditions != nullptr)
     for (std::uint32_t i = 0; i < s.nedges; ++i) {
+      using enum LlEdgeKind;
       const auto kind = _atn.edge(s.edge + i).kind;
-      conditional = conditional || kind == LlEdgeKind::condition;
-      ready =
-          ready || kind == LlEdgeKind::atom || kind == LlEdgeKind::condition;
+      conditional = conditional || kind == condition;
+      ready = ready || kind == atom || kind == condition;
     }
   bool first = false, joined = false;
   std::uint32_t* latest = nullptr;

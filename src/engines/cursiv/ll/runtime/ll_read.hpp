@@ -211,8 +211,8 @@ CURSIV_ALWAYS_INLINE inline bool ll_probe(LlContext& c, std::uint16_t mode) {
   if (p < c.len) {
     const Scan sc = ll_scan_text<T>(c.src, c.len, mode, p);
     if (sc.term == kInvalidSymbol || sc.end == p) return false;
-    const std::uint64_t visible = kLlVisibleTerms<T>[sc.term >> 6];
-    if (((visible >> (sc.term & 63)) & 1) == 0) {
+    if (const std::uint64_t visible = kLlVisibleTerms<T>[sc.term >> 6];
+        ((visible >> (sc.term & 63)) & 1) == 0) {
       ll_peek_read<T>(c, mode, sc);
       return true;
     }

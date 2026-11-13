@@ -20,7 +20,7 @@ inline void ll_indent_copy(const LlContext& c, LlLookIndent& state) {
   for (auto level = c.indent.head; level != kNoIndent;
        level = c.indentArena[level].prev)
     state.arena.push_back(c.indentArena[level]);
-  std::reverse(state.arena.begin(), state.arena.end());
+  std::ranges::reverse(state.arena);
   for (std::size_t i = 0; i < state.arena.size(); ++i)
     state.arena[i].prev =
         i == 0 ? kNoIndent : static_cast<std::uint32_t>(i - 1u);

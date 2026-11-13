@@ -134,8 +134,9 @@ CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
     // `?=` writes the fact of a match, into a `bool` member.
     if constexpr (std::is_same_v<X, bool>) {
       if (p.kind == ActKind::flag) {
-        const CstNode& n = (*ctx.cst)[p.root];
-        if (!n.recovered || n.begin != n.end) place<bool>(member, true);
+        if (const CstNode& n = (*ctx.cst)[p.root];
+            !n.recovered || n.begin != n.end)
+          place<bool>(member, true);
         return;
       }
     }

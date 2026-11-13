@@ -89,8 +89,8 @@ std::optional<TextRange> ValidationAcceptor::anchorSpan(
       nodeDocument != nullptr ? nodeDocument
                               : (_cst != nullptr ? _document : nullptr);
   if (document == nullptr) return std::nullopt;
-  const Cst* const cst = &document->parseResult.cst();
-  if (_anchorCst != cst || _anchorNode != node.cstNodeId) {
+  if (const Cst* const cst = &document->parseResult.cst();
+      _anchorCst != cst || _anchorNode != node.cstNodeId) {
     _anchors.clear();
     _anchorCst = cst;
     _anchorNode = node.cstNodeId;

@@ -218,8 +218,8 @@ template <const auto& A>
 CURSIV_ALWAYS_INLINE inline Token lr_written(const LrContext& c, const Token& t,
                                              std::uint16_t mode) {
   if (t.sym != kInvalidSymbol || t.begin >= c.len) return t;
-  const Scan s = c.drive->walk(c.src, c.len, lr_err_mode<A>(mode), t.begin);
-  if (s.term != kInvalidSymbol && s.end > t.begin)
+  if (const Scan s = c.drive->walk(c.src, c.len, lr_err_mode<A>(mode), t.begin);
+      s.term != kInvalidSymbol && s.end > t.begin)
     return Token{t.begin, s.end, s.term};
   return t;
 }

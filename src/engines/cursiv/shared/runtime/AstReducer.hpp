@@ -195,7 +195,7 @@ class AstReducer {
   CURSIV_ALWAYS_INLINE Pending text_write(NodeId id, const CstNode& n,
                                           std::uint16_t field,
                                           std::uint16_t conv, std::uint8_t nar,
-                                          ActKind kind) {
+                                          ActKind kind) const {
     const auto text = payload_node(*_ctx.cst, id, n);
     return Pending{id, text, kNoIndex, field, conv, kind, nar, nullptr};
   }
@@ -335,8 +335,7 @@ class AstReducer {
   static void sort_by_record(std::pmr::vector<AstNode*>& nodes) {
     // The sorted prefix stays in place, and a sorted list allocates nothing.
     // Reserve first: a throw half way would lose nodes and duplicate others.
-    const auto sorted =
-        std::is_sorted_until(nodes.begin(), nodes.end(), by_record);
+    const auto sorted = std::ranges::is_sorted_until(nodes, by_record);
     if (sorted == nodes.end()) return;
     std::vector<AstNode*> unsorted;
     unsorted.reserve(static_cast<std::size_t>(nodes.end() - sorted));
@@ -348,7 +347,7 @@ class AstReducer {
         nodes[kept++] = *at;
     }
     nodes.resize(kept);
-    std::sort(unsorted.begin(), unsorted.end(), by_record);
+    std::ranges::sort(unsorted, by_record);
     nodes.insert(nodes.end(), unsorted.begin(), unsorted.end());
     std::inplace_merge(nodes.begin(), nodes.begin() + kept, nodes.end(),
                        by_record);
@@ -432,7 +431,7 @@ class AstReducer {
   // Doubling, not sizing to the tape, whose page faults cost more.
   CURSIV_COLD CURSIV_NOINLINE void grow_stack() {
     const auto depth = static_cast<std::size_t>(_top - _stack);
-    Pending* const q =
+    const auto q =
         static_cast<Pending*>(::operator new(2 * depth * sizeof(Pending)));
     std::copy_n(_stack, depth, q);
     ::operator delete(_stack);
@@ -492,8 +491,8 @@ class AstReducer {
   // to left, then descend only the one containing that ancestor.
   CURSIV_COLD NodeId repair_between(NodeId nest, NodeId owner) const {
     const std::size_t base = _repairBegins.size() / 2;
-    std::size_t at = std::lower_bound(_repairRoots.begin(), _repairRoots.end(),
-                                    owner) - _repairRoots.begin();
+    std::size_t at =
+        std::ranges::lower_bound(_repairRoots, owner) - _repairRoots.begin();
     if (at == 0) return kNoNode;
     at += base;
     while (at > 1) {
@@ -582,7 +581,7 @@ class AstReducer {
   // erased: `consume` relies on the order, and every reader tests `value`.
   template <class Accept>
   Made take_node_if(Pending* first, Accept accept) {
-    Pending* const last = _top;
+    const Pending* const last = _top;
     for (Pending* at = first; at != last; ++at) {
       Pending& p = *at;
       if (p.value == nullptr || p.kind != ActKind::create || !accept(p.type))
@@ -611,13 +610,12 @@ class AstReducer {
 
   // Where a turn's effects begin: past its first child, the receiver, when
   // its checkpoint says it reached back to one.
-  NodeId turn_begin(NodeId root) {
+  NodeId turn_begin(NodeId root) const {
     const Cst& c = *_ctx.cst;
     if (c[root].subtreeSize == 0 || c[root].subtreeSize > root + 1u)
       broken_tape(root);
     const NodeId begin = c.subtree_begin(root);
-    const bool turned = reaches_receiver(root);
-    if (!turned) return begin;
+    if (const bool turned = reaches_receiver(root); !turned) return begin;
     NodeId first = root - 1;
     for (NodeId x = root; x > begin;) {
       const NodeCount size = c[x - 1].subtreeSize;
@@ -641,8 +639,8 @@ class AstReducer {
     const auto before = [](const WrapAt& a, const WrapAt& b) {
       return a.begin != b.begin ? a.begin < b.begin : a.at > b.at;
     };
-    if (!std::is_sorted(_wraps.begin(), _wraps.end(), before))
-      std::sort(_wraps.begin(), _wraps.end(), before);
+    if (!std::ranges::is_sorted(_wraps, before))
+      std::ranges::sort(_wraps, before);
   }
 
   // Only a pending nest outside the repair can change the receiver before a

@@ -1170,7 +1170,7 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
   std::vector<std::uint32_t> read(ntr);
   {
     constexpr std::uint32_t kUnnamed = 0xffffffffu;
-    std::vector<std::uint32_t> shifted(ns, kUnnamed);
+    std::vector shifted(ns, kUnnamed);
     for (std::uint32_t d = 0; d < ntr; ++d) {
       std::uint32_t& name = shifted[gt.pool[d].to];
       if (name == kUnnamed) {
@@ -3880,7 +3880,7 @@ class LrInsertOrder {
     lr_sort_unique(states);
     const auto [at, fresh] = _listIds.try_emplace(
         std::move(states), static_cast<std::uint32_t>(_lists.size()));
-    if (fresh) _lists.push_back({&at->first});
+    if (fresh) _lists.emplace_back(&at->first);
     return at->second;
   }
 

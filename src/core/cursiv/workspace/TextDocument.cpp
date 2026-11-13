@@ -288,7 +288,7 @@ void TextDocument::patchLineIndex(TextOffset from, TextOffset to,
                        starts.end(), to) -
       starts.begin());
   const auto moved = [&](TextOffset start) {
-    return static_cast<TextOffset>(start - to + from + inserted);
+    return start - to + from + inserted;
   };
   const TextOffset end = next < lines ? moved(starts[next]) : size();
   std::vector<TextOffset> fresh;

@@ -68,8 +68,8 @@ void LocalSymbols::build_index() {
   std::vector<std::uint32_t> met;
   // One container already defines the only group: no counting or source
   // permutation is needed, whatever names or declarations it contains.
-  const AstNode* const firstContainer = _containerOf.front();
-  if (std::all_of(_containerOf.begin() + 1, _containerOf.end(),
+  if (const AstNode* const firstContainer = _containerOf.front();
+      std::all_of(_containerOf.begin() + 1, _containerOf.end(),
                   [firstContainer](const AstNode* at) {
                     return at == firstContainer;
                   })) {
@@ -341,10 +341,9 @@ LocalSymbols::NameMatches LocalSymbols::find_held(
   for (;;) {
     const NameSlot& slot = _names[at];
     if (slot.container == nullptr) return {};
-    if (slot.container == container && slot.tag == tag) {
-      if (folded_equal(_entries[slot.first].name, name))
-        return NameMatches{this, slot.first};
-    }
+    if (slot.container == container && slot.tag == tag &&
+        folded_equal(_entries[slot.first].name, name))
+      return NameMatches{this, slot.first};
     at = (at + 1) & _nameMask;
   }
 }

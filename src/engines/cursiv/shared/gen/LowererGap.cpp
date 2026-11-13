@@ -523,8 +523,8 @@ void Lowerer::check_implied_token(unsigned cfg, ImageId e) {
                             (n.kind == ImageKind::ref && terminal_rule(n.a));
        n = at(e))
     e = n.kind == ImageKind::doc ? child_at(n, 0) : body_in(cfg, n.a);
-  const ImageNode n = at(e);
-  if (n.kind != ImageKind::lit || (n.flags & (kLitGuardWord | kLitGuardExpr)))
+  if (const ImageNode n = at(e);
+      n.kind != ImageKind::lit || (n.flags & (kLitGuardWord | kLitGuardExpr)))
     refuse_lowering(
         "in `implied(tok, cond)`, `tok` must be a literal with no guard, or "
         "a terminal whose body is one: the parser inserts it with zero width "

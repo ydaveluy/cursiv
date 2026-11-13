@@ -390,9 +390,9 @@ template <const auto& A, LrSplit Split, class Seed>
 CURSIV_ALWAYS_INLINE inline unsigned lr_resolve_seeded(
     LrContext& c, std::uint32_t state, unsigned count, Seed seed) {
   assert(c.drive != nullptr);
-  const std::size_t at =
-      std::size_t{state} * 2 + (Split == LrSplit::cell ? 0 : 1);
-  if (at >= c.unresolved.size() || c.unresolved[at] <= c.la.begin) {
+  if (const std::size_t at =
+          std::size_t{state} * 2 + (Split == LrSplit::cell ? 0 : 1);
+      at >= c.unresolved.size() || c.unresolved[at] <= c.la.begin) {
     const std::size_t levels = c.indentArena.size();
     const std::size_t n = lr_seed_arms<A>(c, count, seed);
     const unsigned r = lr_resolve_arm<A>(c, n, count);

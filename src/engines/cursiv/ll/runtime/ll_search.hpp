@@ -343,9 +343,10 @@ Token ll_search_peek_ahead(const LlContext& c, LlSearch& s, LlAhead& ahead,
     const Scan sc = ll_search_scan<T>(c, s, ll_search_row<T>(s, p), mode, p);
     if (ll_search_spent(s) || sc.term == kInvalidSymbol || sc.end == p)
       return Token{p, p, kInvalidSymbol};
-    const bool blank =
-        cross && look == kNoRow && ll_blank<T>(sc.term, ahead.at.depth);
-    if (!blank) return Token{p, sc.end, sc.term, mode};
+    if (const bool blank =
+            cross && look == kNoRow && ll_blank<T>(sc.term, ahead.at.depth);
+        !blank)
+      return Token{p, sc.end, sc.term, mode};
     p = sc.end;
     head = false;
   }
@@ -365,11 +366,11 @@ std::uint16_t ll_search_look(const LlConfig* cfg, std::size_t n,
   for (std::size_t k = 0; k < n; ++k) {
     const auto& state = T.atn.state(cfg[k].state);
     for (std::uint32_t j = 0; j < state.nedges; ++j) {
+      using enum LlEdgeKind;
       const auto e = state.edge + j;
       const auto& edge = T.atn.edge(e);
-      if (edge.kind != LlEdgeKind::atom && edge.kind != LlEdgeKind::condition)
-        continue;
-      if (edge.kind == LlEdgeKind::atom && edge.label != kEofSymbol &&
+      if (edge.kind != atom && edge.kind != condition) continue;
+      if (edge.kind == atom && edge.label != kEofSymbol &&
           !(joined && T.terms[edge.label].joins))
         viable.set(edge.label);
       const auto hop = T.edgeNode[e];
@@ -397,7 +398,7 @@ Token ll_search_peek(const LlContext& c, LlSearch& s, LlReading& r) {
       return it->second;
   const Token t =
       ll_search_peek_ahead<T>(c, s, r.ahead, look, viable, !r.inHand);
-  if (memo && !ll_search_spent(s)) s.lexed.emplace(r.ahead.p, t);
+  if (memo && !ll_search_spent(s)) s.lexed.try_emplace(r.ahead.p, t);
   return t;
 }
 
@@ -580,12 +581,13 @@ void ll_search_at_end(const LlContext& c, const LlSearch& s,
 // this token must evaluate its guards again against the next one.
 template <const auto& T>
 RepairRead ll_search_step(LlContext& c, LlSearch& s, std::uint32_t i) {
-  if (ll_search_spent(s)) return RepairRead::spent;
+  using enum RepairRead;
+  if (ll_search_spent(s)) return spent;
   c.stop.poll();
   Token tok = ll_search_peek<T>(c, s, s.nodes[i]);
-  if (ll_search_spent(s)) return RepairRead::spent;
+  if (ll_search_spent(s)) return spent;
   LlReading& r = s.nodes[i];
-  if (tok.sym == kInvalidSymbol) return RepairRead::refused;
+  if (tok.sym == kInvalidSymbol) return refused;
   s.work += 8;
   ll_search_load(s, r);
   ll_search_at_end<T>(c, s, r.ahead, tok);
@@ -596,14 +598,14 @@ RepairRead ll_search_step(LlContext& c, LlSearch& s, std::uint32_t i) {
   if (passed && !ends)
     ll_search_terms<T>(c, s, s.sim.configs().data(), s.sim.configs().size(),
                        tok, s.terms);
-  if (ll_search_spent(s)) return RepairRead::spent;
+  if (ll_search_spent(s)) return spent;
   s.sim.at_token(r.tokens + (!ends && !ll_search_synthetic<T>(tok) ? 1 : 0));
   if (passed && (ends ? s.sim.step(tok.sym)
                       : s.sim.step(s.terms.data(), s.terms.size()))) {
     ll_search_keep<T>(s, r);
     if (ends) {
       r.done = true;
-      return RepairRead::done;
+      return done;
     }
     r.gapFrom = tok.end;
     r.inHand = false;
@@ -616,9 +618,9 @@ RepairRead ll_search_step(LlContext& c, LlSearch& s, std::uint32_t i) {
       r.phase = RepairPhase::beforeEdit;
       r.afterRequired = false;
     }
-    return RepairRead::shifted;
+    return shifted;
   }
-  return RepairRead::refused;
+  return refused;
 }
 
 // Reading `i` reads until it is refused, holds or ends: true where its share
@@ -743,7 +745,7 @@ const LexReading& ll_search_reading(LlContext& c, LlSearch& s, TextOffset p,
       lex_reading(LlLexTape<T>{}, c.src, end, mode, p, reached);
   ++s.work;
   if (ll_search_walked(c, s, p, end, reached, textEnd)) return kNone;
-  return s.readings.emplace(key, r).first->second;
+  return s.readings.try_emplace(key, r).first->second;
 }
 
 // The alphabet reading `r`'s token is read under for what the lexer refused:
@@ -963,8 +965,8 @@ void ll_search_abandon(LlContext& c, LlSearch& s, std::uint32_t gi,
   r.lost += lost;
   r.phase = RepairPhase::afterAbandon;
   r.afterRequired = false;
-  const RepairRead read = ll_search_step<T>(c, s, e);
-  if (read == RepairRead::shifted || read == RepairRead::done)
+  if (const RepairRead read = ll_search_step<T>(c, s, e);
+      read == RepairRead::shifted || read == RepairRead::done)
     ll_search_add<T>(c, s, e);
   ll_search_trim(s, pools);
 }
@@ -1063,10 +1065,10 @@ void ll_search_replace(LlContext& c, LlSearch& s, std::uint32_t gi) {
     if (((f.bits[m * T.termWords + (term >> 6)] >> (term & 63u)) & 1u) != 0)
       start = T.modeStart[f.modes[m]];
   // One spelling held against the table: no walk, so nothing to count.
-  const TypoTape<T> tape{
-      {.src = c.src, .extent = c.len, .docLen = c.len, .read = nullptr},
-      tok.begin};
-  if (start == kDeadState || ll_search_spent(s) ||
+  if (const TypoTape<T> tape{
+          {.src = c.src, .extent = c.len, .docLen = c.len, .read = nullptr},
+          tok.begin};
+      start == kDeadState || ll_search_spent(s) ||
       !tape.replaces(start, term, end))
     return;
   const LlSearchCheckpoint pools(s);
@@ -1139,9 +1141,9 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
   ++choice;
   // Bytes no alphabet reads refuse every reading the same: insertions in front
   // of them are told apart only past them, so one is made there, never a run.
-  const bool garbage = !atEnd && !synthetic && tok.sym == kInvalidSymbol &&
-                       ll_search_unread<T>(c, s, tok.begin);
-  if (b.mayInsert(garbage)) {
+  if (const bool garbage = !atEnd && !synthetic && tok.sym == kInvalidSymbol &&
+                           ll_search_unread<T>(c, s, tok.begin);
+      b.mayInsert(garbage)) {
     // Only a required run is free past its first, so the other terminals wait
     // behind one entry until a reading that costly is asked for.
     const std::uint32_t insertRank = choice;
@@ -1262,15 +1264,16 @@ std::uint32_t ll_search_run(LlContext& c, LlSearch& s, bool& exhausted,
       break;
     }
     switch (s.nodes[e.at].work) {
-      case RepairWork::read:
+      using enum RepairWork;
+      case read:
         break;
-      case RepairWork::enumerateInsertions:
+      case enumerateInsertions:
         ll_search_inserts<T>(c, s, e.at);
         continue;
-      case RepairWork::forcedReplacement:
+      case forcedReplacement:
         ll_search_replace<T>(c, s, e.at);
         continue;
-      case RepairWork::enumerateAbandons:
+      case enumerateAbandons:
         ll_search_abandon<T>(c, s, e.at, e.f);
         continue;
     }
@@ -1334,8 +1337,8 @@ std::uint32_t ll_search_root(LlContext& c, LlSearch& s, const LlRoot& root,
       sim.seed(state, ctx);
       roots.insert(roots.end(), sim.configs().begin(), sim.configs().end());
     }
-    std::sort(roots.begin(), roots.end());
-    roots.erase(std::unique(roots.begin(), roots.end()), roots.end());
+    std::ranges::sort(roots);
+    roots.erase(std::ranges::unique(roots).begin(), roots.end());
   }
   sim.load(roots);
   LlReading r;
@@ -1405,8 +1408,7 @@ std::uint16_t ll_search_arm_of(LlContext& c, LlSearch& s,
         return arm;
     }
     if (planned) {
-      const LlEdit& g = s.plan[k++];
-      if (g.kind == LlEdit::ins) {
+      if (const LlEdit& g = s.plan[k++]; g.kind == LlEdit::ins) {
         if (!sim.step(g.term)) return first ? kNoRow : arm;
         if constexpr (kIndented<T>)
           if (indent_moves<T>(g.term)) {

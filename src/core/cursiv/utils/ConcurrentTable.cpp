@@ -128,7 +128,7 @@ struct TableEpochs::State {
 // to live memory.
 TableEpochs::State& TableEpochs::state() noexcept {
   alignas(State) static unsigned char storage[sizeof(State)];
-  static State* const s = new (storage) State;
+  static auto* const s = new (storage) State;
   return *s;
 }
 
@@ -155,9 +155,8 @@ std::atomic<std::uint64_t>* TableEpochs::takeSlot() noexcept {
   State& s = state();
   if (s.held.load(std::memory_order_relaxed) >= kSlots) return nullptr;
   for (std::size_t at = 0; at < kSlots; ++at) {
-    bool taken = false;
-    if (!s.slots[at].taken.compare_exchange_strong(taken, true,
-                                                   std::memory_order_acq_rel))
+    if (bool taken = false; !s.slots[at].taken.compare_exchange_strong(
+            taken, true, std::memory_order_acq_rel))
       continue;
     s.held.fetch_add(1, std::memory_order_relaxed);
     // Sequentially consistent, as the scan's read of it: a scan that

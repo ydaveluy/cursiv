@@ -88,8 +88,8 @@ class LlStackSet {
       auto& at = _pending.back();
       Cell& c = _cells[index(at.cell)];
       if (at.next < c.members.size()) {
-        const auto child = c.members[at.next++].stack;
-        if (is_cell(child) && !_cells[index(child)].shaped)
+        if (const auto child = c.members[at.next++].stack;
+            is_cell(child) && !_cells[index(child)].shaped)
           _pending.push_back({child});
         continue;
       }

@@ -49,12 +49,11 @@ std::uint16_t LrLowerer::open_tail(std::uint16_t reading, std::uint8_t tail) {
 
 // A condition, bare or under a repetition or a scope: it takes no position.
 bool LrLowerer::is_condition(LrShapeId at) const {
-  while (_p.e[at].kind == LrShape::rep || _p.e[at].kind == LrShape::scope)
-    at = _p.e[at].sym;
+  using enum LrShape;
+  while (_p.e[at].kind == rep || _p.e[at].kind == scope) at = _p.e[at].sym;
   const auto& node = _p.e[at];
-  return (node.kind == LrShape::seq && node.count == 0) ||
-         (node.kind == LrShape::sym &&
-          _p.is_gap(static_cast<std::uint16_t>(node.sym)));
+  return (node.kind == seq && node.count == 0) ||
+         (node.kind == sym && _p.is_gap(static_cast<std::uint16_t>(node.sym)));
 }
 
 Descent<void> LrLowerer::ambient(LrShapeId at, bool open, std::uint8_t edge) {

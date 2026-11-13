@@ -139,11 +139,12 @@ struct LrLowerPool : LowerPool {
   }
   // A position whose first reading is a nest turn.
   Descent<bool> head_turns(LrShapeId at) const {
+    using enum LrShape;
     const LrLowerNode& n = e[at];
     if (turns(n.made)) co_return true;
     if (!n.made.empty() || !only_flags(n.row)) co_return false;
-    if (n.kind == LrShape::rep) co_return co_await head_turns(n.sym);
-    if (n.kind == LrShape::seq) {
+    if (n.kind == rep) co_return co_await head_turns(n.sym);
+    if (n.kind == seq) {
       for (std::size_t i = 0; i < n.count; ++i) {
         const LrShapeId at = child[n.sym + i];
         if (co_await head_turns(at)) co_return true;
@@ -151,14 +152,14 @@ struct LrLowerPool : LowerPool {
         // Conditions and flags do not replace a receiver. A creation or a
         // value write does; a token means this is not the head.
         if (!before.made.empty() || !only_flags(before.row) ||
-            (before.kind != LrShape::none && before.kind != LrShape::end &&
-             !(before.kind == LrShape::sym &&
+            (before.kind != none && before.kind != end &&
+             !(before.kind == sym &&
                is_gap(static_cast<std::uint16_t>(before.sym)))))
           co_return false;
       }
       co_return false;
     }
-    if (n.kind == LrShape::alt || n.kind == LrShape::unordered)
+    if (n.kind == alt || n.kind == unordered)
       for (std::size_t i = 0; i < n.count; ++i)
         if (co_await head_turns(child[n.sym + i])) co_return true;
     co_return false;
@@ -170,11 +171,11 @@ struct LrLowerPool : LowerPool {
   }
 
   Descent<LrShapeId> copy(LrShapeId at) {
+    using enum LrShape;
     LrLowerNode n = e[at];
-    if (n.kind == LrShape::rep || n.kind == LrShape::scope) {
+    if (n.kind == rep || n.kind == scope) {
       n.sym = co_await copy(n.sym);
-    } else if (n.kind == LrShape::seq || n.kind == LrShape::alt ||
-               n.kind == LrShape::unordered) {
+    } else if (n.kind == seq || n.kind == alt || n.kind == unordered) {
       std::vector<LrShapeId> fresh;
       fresh.reserve(n.count);
       for (std::size_t i = 0; i < n.count; ++i)

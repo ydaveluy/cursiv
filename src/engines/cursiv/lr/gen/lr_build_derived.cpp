@@ -90,7 +90,7 @@ struct LrDeriving {
       bool operator==(const Moves&) const = default;
     };
     enum class Known : std::uint8_t { no, yes, mixed };
-    std::vector<Known> known(g.nnts, Known::no);
+    std::vector known(g.nnts, Known::no);
     std::vector<Moves> moves(g.nnts);
     for (bool changed = true; changed;) {
       changed = false;
@@ -120,8 +120,10 @@ struct LrDeriving {
         const Known was = known[q.lhs];
         if (at == Known::mixed || (was == Known::yes && moves[q.lhs] != m))
           known[q.lhs] = Known::mixed;
-        else if (was == Known::no)
-          known[q.lhs] = Known::yes, moves[q.lhs] = m;
+        else if (was == Known::no) {
+          known[q.lhs] = Known::yes;
+          moves[q.lhs] = m;
+        }
         changed = changed || known[q.lhs] != was;
       }
     }

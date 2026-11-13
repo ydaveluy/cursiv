@@ -179,10 +179,10 @@ void DefaultCompletionProvider::buildContexts(
 
   // All a data rule holds up to the caret is what is typed of it, so a comment
   // inside it matches nothing.
-  if (const auto rule = findDataTypeRuleStart(cst, offset); rule.has_value())
-    if (!ask(rule->first, rule->second, rule->first,
-             text.substr(rule->first, offset - rule->first)))
-      return;
+  if (const auto rule = findDataTypeRuleStart(cst, offset);
+      rule.has_value() && !ask(rule->first, rule->second, rule->first,
+                               text.substr(rule->first, offset - rule->first)))
+    return;
 
   const CompletionBacktrackingInformation tokens =
       backtrackToAnyToken(cst, offset);
@@ -317,7 +317,7 @@ std::vector<lsp::CompletionItem> DefaultCompletionProvider::deduplicateItems(
       const unsigned kind = item.kind.has_value()
                                 ? static_cast<unsigned>(*item.kind)
                                 : ~0u;
-      doubled[i] = !seen.insert(ItemKey{kind, item.label, detail}).second;
+      doubled[i] = !seen.emplace(kind, item.label, detail).second;
       any = any || doubled[i];
     }
     if (!any) return items;
@@ -388,8 +388,8 @@ void DefaultCompletionProvider::completionForCrossReference(
       reference, context, [&](const AstNodeDescription& candidate) {
         throw_if_cancelled(context.cancelToken);
         if (!matcher.match(context.identifier, candidate.name)) return true;
-        if (!seen.insert(Seen{candidate.name, candidate.type,
-                              candidate.documentId, candidate.symbolId})
+        if (!seen.emplace(candidate.name, candidate.type, candidate.documentId,
+                          candidate.symbolId)
                  .second)
           return true;
         CompletionValueItem item =

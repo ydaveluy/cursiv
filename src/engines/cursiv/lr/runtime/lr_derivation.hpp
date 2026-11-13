@@ -58,8 +58,8 @@ CURSIV_ALWAYS_INLINE inline void lr_derivation_push(
   const auto at = static_cast<std::uint32_t>(c.derivation.size());
   const std::uint32_t word = prod == kLrNoProd ? s.lexRank : 0u;
   const std::uint32_t state = s.run.back();
-  c.derivation.push_back(
-      {s.derivation, state, word, s.la.sym, prod, end, s.la.begin, mode});
+  c.derivation.emplace_back(s.derivation, state, word, s.la.sym, prod, end,
+                            s.la.begin, mode);
   // Two cells that read the same get the same path.
   s.path =
       (s.path ^

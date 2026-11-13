@@ -317,8 +317,7 @@ inline void lr_add_bare_records(LrLowered& o) {
 // Other productions occupy the final, unused bucket.
 inline LrBuckets<std::uint16_t> lr_record_users(const LrBuildCfg& c) {
   return {c.nnts + 1u, c.nprods, [&](std::uint32_t k) {
-            const LrLowProd& q = c.prods[k];
-            if (q.len == 1) {
+            if (const LrLowProd& q = c.prods[k]; q.len == 1) {
               const std::uint16_t sym = c.sym_at(q, 0);
               if (!is_term(sym)) return nt_index(sym);
             }
@@ -413,13 +412,13 @@ inline void lr_sink_word_rules(LrLowered& o, std::span<const WriteKind> kind) {
         return false;
     return chain.count != 0;
   };
-  std::vector<std::uint16_t> row(c.nnts, kNoRow);
+  std::vector row(c.nnts, kNoRow);
   std::vector<bool> sinks(c.nnts, true);
   for (std::uint16_t k = 0; k < c.nprods; ++k) {
     const LrLowProd& q = c.prods[k];
     const std::uint16_t r = q.len == 1 ? c.row_at(q, 0) : kNoRow;
-    const std::uint16_t sym = q.len == 1 ? c.sym_at(q, 0) : kNoRow;
-    if (q.len != 1 || q.node != kNoRow || q.gap != 0 || q.endOnly ||
+    if (const std::uint16_t sym = q.len == 1 ? c.sym_at(q, 0) : kNoRow;
+        q.len != 1 || q.node != kNoRow || q.gap != 0 || q.endOnly ||
         q.closesRegion || q.regionExit || q.turn || q.stop != 0 ||
         !is_term(sym) || c.terms[sym].element != kNoRow || !only_converts(r) ||
         (row[q.lhs] != kNoRow && row[q.lhs] != r)) {

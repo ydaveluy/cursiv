@@ -222,8 +222,8 @@ class LexSuffixSession {
   CURSIV_NOINLINE static Scan shared(Tape tape, const char* src, TextOffset len,
                                      std::uint16_t state, TextOffset from,
                                      Scan out) {
-    LexSuffixSession* const session = active();
-    if (session != nullptr && src == session->_src && len == session->_len &&
+    if (LexSuffixSession* const session = active();
+        session != nullptr && src == session->_src && len == session->_len &&
         session->read(tape, state, from, from).available)
       session->_backtracking = true;
     return out;

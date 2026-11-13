@@ -590,21 +590,19 @@ bool DefaultDocumentBuilder::requestUnfinished(const Document& document) const {
 
 void DefaultDocumentBuilder::letGoOf(
     const std::unordered_set<DocumentId>& moved, bool repair) const {
+  using enum DocumentState;
   const IndexManager& index = *_shared.indexManager;
   for (const std::shared_ptr<Document>& doc : _shared.documents->all()) {
     Document* const d = doc.get();
     if (moved.contains(d->id)) continue;
     if ((repair && d->hasLinkingErrors()) || index.isAffected(*d, moved))
-      resetDocument(*d, DocumentState::ComputedScopes);
-    else if (!moved.empty() &&
-             d->state.load() < DocumentState::IndexedReferences) {
+      resetDocument(*d, ComputedScopes);
+    else if (!moved.empty() && d->state.load() < IndexedReferences) {
       // Unindexed resolutions have no dependency row to protect their targets.
       if (const CoreServices* language = languageOf(*d); language != nullptr) {
         language->linker->unlink(*d);
-        if (d->state.load() == DocumentState::Linked)
-          d->state = DocumentState::ComputedScopes;
-        if (d->state.load() >= DocumentState::ComputedScopes)
-          bindReferences(*d, *language);
+        if (d->state.load() == Linked) d->state = ComputedScopes;
+        if (d->state.load() >= ComputedScopes) bindReferences(*d, *language);
       }
     }
   }

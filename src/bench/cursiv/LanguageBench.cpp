@@ -55,15 +55,16 @@ constexpr std::size_t kFullSizes[] = {
 
 constexpr const char* shape_name(Shape shape) {
   switch (shape) {
-    case Shape::ManySmall:
+    using enum Shape;
+    case ManySmall:
       return "many-small";
-    case Shape::Medium:
+    case Medium:
       return "medium";
-    case Shape::FewLarge:
+    case FewLarge:
       return "few-large";
-    case Shape::Mixed:
+    case Mixed:
       return "mixed";
-    case Shape::Count:
+    case Count:
       break;
   }
   return "";

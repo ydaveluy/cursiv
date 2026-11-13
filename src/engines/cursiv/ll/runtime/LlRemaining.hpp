@@ -149,9 +149,9 @@ class LlRemaining {
 
   bool stands(std::uint32_t s) const {
     if (T.atn.state(s).kind == LlAtnKind::ruleStop) return true;
-    for (const LlAtnEdge& e : T.atn.outgoing(s))
-      if (e.kind != LlEdgeKind::epsilon) return true;
-    return false;
+    return std::ranges::any_of(T.atn.outgoing(s), [&](const LlAtnEdge& e) {
+      return e.kind != LlEdgeKind::epsilon;
+    });
   }
 
   // The terminals that begin the shortest ways out of the positions `from`
@@ -171,11 +171,9 @@ class LlRemaining {
     while (!todo.empty()) {
       Frame& f = todo.back();
       const auto& state = T.atn.state(f.state);
-      if (f.next == 0) {
-        if (!seen.first(f.state)) {
-          todo.pop_back();
-          continue;
-        }
+      if (f.next == 0 && !seen.first(f.state)) {
+        todo.pop_back();
+        continue;
       }
       if (f.next == state.nedges) {
         todo.pop_back();

@@ -386,14 +386,15 @@ void Emit::call_site(std::uint16_t id) {
 // call may leave the step to resume at a label, so a record open across it
 // keeps its handles in the frame.
 Descent<bool> Emit::may_suspend(std::uint16_t id) {
+  using enum LlShape;
   if (memo.suspends.empty()) memo.suspends.assign(a.cfg.nnodes, -1);
   if (memo.suspends[id] >= 0) co_return memo.suspends[id] != 0;
   const LlNode& n = at(id);
-  bool any = n.kind == LlShape::call && !plain(n.sym);
-  if (n.kind == LlShape::seq || n.kind == LlShape::alt)
+  bool any = n.kind == call && !plain(n.sym);
+  if (n.kind == seq || n.kind == alt)
     for (unsigned i = 0; i < n.count; ++i)
       any = co_await may_suspend(child_at(n, i)) || any;
-  if (n.kind == LlShape::rep) {
+  if (n.kind == rep) {
     // A tail of counted options is walked, never descended: it may be as
     // deep as the count.
     std::uint16_t turn = id;
@@ -409,20 +410,21 @@ Descent<bool> Emit::may_suspend(std::uint16_t id) {
 
 // Whether a position has a reading that calls no rule with a frame.
 Descent<bool> Emit::clean(std::uint16_t id) {
+  using enum LlShape;
   if (memo.clean.empty()) memo.clean.assign(a.cfg.nnodes, -1);
   if (memo.clean[id] >= 0) co_return memo.clean[id] != 0;
   const LlNode& n = at(id);
   bool any = true;
-  if (n.kind == LlShape::call) any = plain(n.sym);
-  if (n.kind == LlShape::seq)
+  if (n.kind == call) any = plain(n.sym);
+  if (n.kind == seq)
     for (unsigned i = 0; i < n.count && any; ++i)
       any = co_await clean(child_at(n, i));
-  if (n.kind == LlShape::alt) {
+  if (n.kind == alt) {
     any = false;
     for (unsigned i = 0; i < n.count && !any; ++i)
       any = co_await clean(child_at(n, i));
   }
-  if (n.kind == LlShape::rep && n.min != 0) any = co_await clean(n.sym);
+  if (n.kind == rep && n.min != 0) any = co_await clean(n.sym);
   memo.clean[id] = any ? 1 : 0;
   co_return any;
 }
@@ -1529,7 +1531,7 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   // machine's unit sizes every one of them.
   const std::size_t budget =
       std::max<std::size_t>(32768, (bytes + kParserUnits - 1) / kParserUnits);
-  std::vector<std::string> sources(kParserUnits, std::string(kGenerated));
+  std::vector sources(kParserUnits, std::string(kGenerated));
   std::size_t next = 0;
   unsigned filled = 0;
   for (unsigned u = 0; u < kParserUnits && next < bodies.size();

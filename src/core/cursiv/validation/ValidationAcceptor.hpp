@@ -267,28 +267,32 @@ class ValidationAcceptor {
              std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<Node> error(const Node& node,
       Message&& message, std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Error, std::move(message), code);
+    return make(node, DiagnosticSeverity::Error, std::forward<Message>(message),
+                code);
   }
   template <class Node, class Message>
     requires std::derived_from<Node, AstNode> &&
              std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<Node> warning(const Node& node,
       Message&& message, std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Warning, std::move(message), code);
+    return make(node, DiagnosticSeverity::Warning,
+                std::forward<Message>(message), code);
   }
   template <class Node, class Message>
     requires std::derived_from<Node, AstNode> &&
              std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<Node> information(const Node& node,
       Message&& message, std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Information, std::move(message), code);
+    return make(node, DiagnosticSeverity::Information,
+                std::forward<Message>(message), code);
   }
   template <class Node, class Message>
     requires std::derived_from<Node, AstNode> &&
              std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<Node> hint(const Node& node,
       Message&& message, std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Hint, std::move(message), code);
+    return make(node, DiagnosticSeverity::Hint, std::forward<Message>(message),
+                code);
   }
 
   // Over a span the check computed itself. No node, so no
@@ -318,25 +322,29 @@ class ValidationAcceptor {
     requires std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<AstNode> error(TextRange span,
       Message&& message, std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Error, std::move(message), code);
+    return make(span, DiagnosticSeverity::Error, std::forward<Message>(message),
+                code);
   }
   template <class Message>
     requires std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<AstNode> warning(TextRange span,
       Message&& message, std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Warning, std::move(message), code);
+    return make(span, DiagnosticSeverity::Warning,
+                std::forward<Message>(message), code);
   }
   template <class Message>
     requires std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<AstNode> information(TextRange span,
       Message&& message, std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Information, std::move(message), code);
+    return make(span, DiagnosticSeverity::Information,
+                std::forward<Message>(message), code);
   }
   template <class Message>
     requires std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<AstNode> hint(TextRange span,
       Message&& message, std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Hint, std::move(message), code);
+    return make(span, DiagnosticSeverity::Hint, std::forward<Message>(message),
+                code);
   }
 
   // The immediate arms, which every builder emits through: the one place the
@@ -409,8 +417,8 @@ class ValidationAcceptor {
                                          DiagnosticSeverity severity,
                                          Message&& message,
                                          std::string_view code) const {
-    ValidationDiagnosticBuilder<Node> builder(*this, severity,
-                                               std::move(message), node);
+    ValidationDiagnosticBuilder<Node> builder(
+        *this, severity, std::forward<Message>(message), node);
     if (!code.empty()) builder.code(code);
     return builder;
   }
@@ -420,8 +428,8 @@ class ValidationAcceptor {
                                             DiagnosticSeverity severity,
                                             Message&& message,
                                             std::string_view code) const {
-    ValidationDiagnosticBuilder<AstNode> builder(*this, severity,
-                                                  std::move(message), span);
+    ValidationDiagnosticBuilder<AstNode> builder(
+        *this, severity, std::forward<Message>(message), span);
     if (!code.empty()) builder.code(code);
     return builder;
   }
@@ -469,7 +477,9 @@ inline detail::ValidationDiagnosticBuilderBase<Derived>::
                                     Message&& message, const AstNode& node)
     : _acceptor(&acceptor),
       _node(&node),
-      _diagnostic{acceptor.spanOf(node), severity, std::move(message), {}} {}
+      _diagnostic{
+          acceptor.spanOf(node), severity, std::forward<Message>(message), {}} {
+}
 
 template <class Derived>
 template <class Message>
@@ -479,7 +489,7 @@ inline detail::ValidationDiagnosticBuilderBase<Derived>::
                                     DiagnosticSeverity severity,
                                     Message&& message, TextRange span)
     : _acceptor(&acceptor),
-      _diagnostic{span, severity, std::move(message), {}} {}
+      _diagnostic{span, severity, std::forward<Message>(message), {}} {}
 
 template <class Derived>
 inline Derived&

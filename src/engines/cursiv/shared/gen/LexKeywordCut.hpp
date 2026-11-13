@@ -126,7 +126,7 @@ struct LexKeywordCut {
     std::set<std::pair<std::uint16_t, std::vector<std::uint16_t>>> rests;
     for (const std::uint32_t tag : stands) {
       const Keyword& word = keywords[(tag >> 16) - 1];
-      std::vector<std::uint16_t> rest{
+      std::vector rest{
           static_cast<std::uint16_t>(word.sets.size() - (tag & 0xffffu))};
       rest.insert(
           rest.end(),

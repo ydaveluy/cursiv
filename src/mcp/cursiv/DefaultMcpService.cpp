@@ -283,8 +283,8 @@ ScratchInput scratch_input(const json::Value& arguments,
     return input;
   }
   if (language != nullptr) {
-    const LanguageMetaData& meta = language->languageMetaData;
-    if (!meta.fileExtensions.empty())
+    if (const LanguageMetaData& meta = language->languageMetaData;
+        !meta.fileExtensions.empty())
       input.name = "text" + normalize_extension(meta.fileExtensions.front());
     else if (!meta.fileNames.empty())
       input.name = meta.fileNames.front();

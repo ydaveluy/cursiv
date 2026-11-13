@@ -320,7 +320,8 @@ inline Descent<LrLowerSlot> lr_slot_for(LrLowered& o, LrLowerPool& p,
                                         LrShapeId at, const Acts& made,
                                         const Acts& row) {
   switch (const LrLowerNode& e = p.e[at]; e.kind) {
-    case LrShape::sym:
+    using enum LrShape;
+    case sym:
       co_return LrLowerSlot{.sym = static_cast<std::uint16_t>(e.sym),
                             .cfg = e.cfg,
                             .leading = e.leading,
@@ -330,24 +331,24 @@ inline Descent<LrLowerSlot> lr_slot_for(LrLowered& o, LrLowerPool& p,
                             .doc = e.doc};
     // An item that takes no position has no record for a directive to attach
     // to.
-    case LrShape::none:
+    case none:
       if (!made.empty() || !row.empty())
         o.fault.raise(GrammarFaultCode::directiveOnNoPosition, p.owner);
       co_return LrLowerSlot{
           .none = true, .leading = e.leading, .trailing = e.trailing};
-    case LrShape::end:
+    case end:
       if (!made.empty() || !row.empty())
         o.fault.raise(GrammarFaultCode::directiveOnNoPosition, p.owner);
       co_return LrLowerSlot{.end = true,
                             .cfg = e.cfg,
                             .leading = e.leading,
                             .trailing = e.trailing};
-    case LrShape::alt:
+    case alt:
       co_return co_await lr_slot_for_alt(o, p, at, made, row);
-    case LrShape::unordered:
-    case LrShape::seq:
+    case unordered:
+    case seq:
       co_return co_await lr_slot_for_group(o, p, at, made, row);
-    case LrShape::scope: {
+    case scope: {
       // Like a named rule returning its node: internal actions belong to the
       // callee, external directives to the call site.
       const std::uint16_t aux = lr_new_aux(o.cfg);
@@ -358,7 +359,7 @@ inline Descent<LrLowerSlot> lr_slot_for(LrLowered& o, LrLowerPool& p,
       slot.row = row;
       co_return slot;
     }
-    case LrShape::rep:
+    case rep:
       co_return co_await lr_slot_for_rep(o, p, at, made, row);
   }
   co_return LrLowerSlot{};

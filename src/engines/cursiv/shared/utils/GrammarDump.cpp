@@ -21,7 +21,7 @@ std::size_t escape_end(std::string_view line, std::size_t i) {
 }
 
 std::vector<Place> places(std::string_view line) {
-  std::vector<Place> out(line.size(), Place::plain);
+  std::vector out(line.size(), Place::plain);
   for (std::size_t i = 0; i < line.size();) {
     const char c = line[i];
     std::size_t end = i + 1;

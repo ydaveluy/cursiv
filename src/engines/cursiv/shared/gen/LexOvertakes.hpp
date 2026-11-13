@@ -60,11 +60,10 @@ class LexOvertakes {
   bool reads_over(unsigned a, const DynSet& beside) {
     sweep_on();
     if (_swept && !_open.test(a)) {
-      for (const std::uint16_t b : _endsWithin[a])
-        if (beside.test(b) &&
-            (_asked[a].test(b) ? _past[a].test(b) : runs_past(b, a)))
-          return true;
-      return false;
+      return std::ranges::any_of(_endsWithin[a], [&](const std::uint16_t b) {
+        return beside.test(b) &&
+               (_asked[a].test(b) ? _past[a].test(b) : runs_past(b, a));
+      });
     }
     if (_past[a].intersects(beside)) return true;
     _ask = beside;

@@ -152,9 +152,10 @@ class Dead {
 
   // The choice an `either` element stands for, under what keeps it one.
   Descent<ImageId> choice_of(ImageId id) const {
+    using enum ImageKind;
     if (const ImageNode& n = node(id);
-        n.kind == ImageKind::skip || n.kind == ImageKind::doc ||
-        (n.kind == ImageKind::repeat && n.m == 1 && n.n == 1))
+        n.kind == skip || n.kind == doc ||
+        (n.kind == repeat && n.m == 1 && n.n == 1))
       co_return co_await choice_of(child_at(n, 0));
     co_return id;
   }
@@ -162,11 +163,12 @@ class Dead {
   // Whether `eof` stands as a position anywhere under the expression: a
   // condition holds none, and a rule called is walked on its own.
   Descent<bool> eof_in(ImageId id) {
+    using enum ImageKind;
     if (_eof.size() <= id) _eof.resize(_im.nodes.size(), 0);
     if (_eof[id] != 0) co_return _eof[id] == 2;
     const ImageNode& n = node(id);
-    bool holds = n.kind == ImageKind::eof;
-    if (!holds && n.kind != ImageKind::notOf && n.kind != ImageKind::andOf)
+    bool holds = n.kind == eof;
+    if (!holds && n.kind != notOf && n.kind != andOf)
       for (const ImageId k : _im.shape_children(id))
         if (co_await eof_in(k)) {
           holds = true;

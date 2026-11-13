@@ -56,7 +56,7 @@ struct LexSkipRuns {
 // there says where it began, so the read may begin later.
 template <class Dfa>
 bool lex_reads_only_dropped(const Dfa& d, std::uint16_t from) {
-  std::vector<std::uint16_t> states{from};
+  std::vector states{from};
   std::unordered_set<std::uint16_t> seen{from};
   for (std::size_t i = 0; i < states.size(); ++i) {
     const std::uint16_t s = states[i];

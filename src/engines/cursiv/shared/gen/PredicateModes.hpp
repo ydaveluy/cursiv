@@ -27,6 +27,7 @@ struct PredicateModes {
 
   // Folds `root`'s first terminals and nullability, its children first.
   void read(std::uint16_t root) {
+    using enum LexKind;
     for (std::vector todo{std::pair{root, false}}; !todo.empty();) {
       const auto [at, folds] = todo.back();
       todo.pop_back();
@@ -35,30 +36,28 @@ struct PredicateModes {
         if (done[at]) continue;
         done[at] = true;
         todo.emplace_back(at, true);
-        if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
+        if (e.kind == seq || e.kind == alt) {
           for (unsigned i = e.b; i-- > 0;)
             todo.emplace_back(g.lexChild[e.a + i], false);
-        } else if (e.kind == LexKind::rep || e.kind == LexKind::positive ||
-                   e.kind == LexKind::negative) {
+        } else if (e.kind == rep || e.kind == positive || e.kind == negative) {
           todo.emplace_back(e.a, false);
         }
         continue;
       }
       nullable[at] = true;
-      if (e.kind == LexKind::token) {
+      if (e.kind == token) {
         first[at].set(e.a);
         nullable[at] = false;
-      } else if (e.kind == LexKind::rep) {
+      } else if (e.kind == rep) {
         first[at] = first[e.a];
         nullable[at] = e.min == 0 || nullable[e.a];
-      } else if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
-        nullable[at] = e.kind == LexKind::seq;
+      } else if (e.kind == seq || e.kind == alt) {
+        nullable[at] = e.kind == seq;
         for (unsigned i = 0; i < e.b; ++i) {
           const auto child = g.lexChild[e.a + i];
-          if (e.kind == LexKind::alt || nullable[at]) first[at] |= first[child];
-          nullable[at] = e.kind == LexKind::alt
-                             ? nullable[at] || nullable[child]
-                             : nullable[at] && nullable[child];
+          if (e.kind == alt || nullable[at]) first[at] |= first[child];
+          nullable[at] = e.kind == alt ? nullable[at] || nullable[child]
+                                       : nullable[at] && nullable[child];
         }
       }
     }
@@ -68,6 +67,7 @@ struct PredicateModes {
     std::vector<bool> reached(g.nlex);
     std::vector<std::pair<std::uint16_t, DynSet>> todo;
     const auto visit = [&](std::uint16_t root, const DynSet& from) {
+      using enum LexKind;
       todo.emplace_back(root, from);
       while (!todo.empty()) {
         const auto [at, after] = std::move(todo.back());
@@ -77,7 +77,7 @@ struct PredicateModes {
         follow[at] |= after;
         read(at);
         const LexNode e = g.lex[at];
-        if (e.kind == LexKind::seq) {
+        if (e.kind == seq) {
           DynSet next = after;
           for (unsigned i = e.b; i-- > 0;) {
             const auto child = g.lexChild[e.a + i];
@@ -87,16 +87,16 @@ struct PredicateModes {
             else
               next = first[child];
           }
-        } else if (e.kind == LexKind::alt) {
+        } else if (e.kind == alt) {
           for (unsigned i = 0; i < e.b; ++i)
             todo.emplace_back(g.lexChild[e.a + i], after);
-        } else if (e.kind == LexKind::rep) {
+        } else if (e.kind == rep) {
           todo.emplace_back(e.a, first[e.a] | after);
           // A round's skipper also elects against the reading that stops.
           if (e.b != kNoLexNode) todo.emplace_back(e.b, first[e.a] | after);
-        } else if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
+        } else if (e.kind == positive || e.kind == negative) {
           todo.emplace_back(e.a, DynSet{});
-        } else if (e.kind == LexKind::skip) {
+        } else if (e.kind == skip) {
           for (unsigned i = 0; i < e.b; ++i) read(g.lexChild[e.a + i]);
         }
       }

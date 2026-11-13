@@ -64,8 +64,9 @@ constexpr void for_each_other_case(char32_t cp, Each&& each) {
 [[nodiscard]] constexpr bool has_cased_letter(std::string_view text) {
   for (std::size_t i = 0; i < text.size();) {
     std::size_t len = 0;
-    const char32_t cp = scalar_at(text.data() + i, text.size() - i, len);
-    if (len != 0 && has_other_case(cp)) return true;
+    if (const char32_t cp = scalar_at(text.data() + i, text.size() - i, len);
+        len != 0 && has_other_case(cp))
+      return true;
     i += len != 0 ? len : 1;
   }
   return false;

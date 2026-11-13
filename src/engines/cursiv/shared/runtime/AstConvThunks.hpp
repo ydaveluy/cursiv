@@ -173,11 +173,11 @@ inline std::optional<std::string_view> evaluate_text(AstBuildCtx& ctx,
   const auto enter = [&](NodeId node, TextFn call, bool reads) {
     const auto begin = dependencies.size();
     if (reads) text_dependencies(ctx, node, dependencies);
-    frames.push_back({node, call, begin, begin});
+    frames.emplace_back(node, call, begin, begin);
   };
   text_dependencies(ctx, id, dependencies);
   if (dependencies.empty()) return fn(ctx, id);
-  frames.push_back({id, fn, 0, 0});
+  frames.emplace_back(id, fn, 0, 0);
   for (;;) {
     Frame& current = frames.back();
     if (current.next != dependencies.size()) {
@@ -301,8 +301,8 @@ CURSIV_NOINLINE inline std::optional<std::string_view> joined_parts(
 template <bool Data, bool Text = true, bool Base = false>
 std::optional<std::string_view> payload_text(AstBuildCtx& ctx, NodeId id) {
   if constexpr (Data) {
-    const CstNode& n = (*ctx.cst)[id];
-    if (n.subtreeSize == 1 && !n.hidden && !n.recovered) [[likely]] {
+    if (const CstNode& n = (*ctx.cst)[id];
+        n.subtreeSize == 1 && !n.hidden && !n.recovered) [[likely]] {
       if (Base || !converts_text<Text>(ctx) ||
           ctx.actions->text_at(ctx.stamp.row(n)) == nullptr)
         return ctx.cst->text(n);
@@ -381,13 +381,14 @@ template <class T>
 bool pass_value(AstBuildCtx& ctx, NodeId id, std::optional<T>& out) {
   const Cst& cst = *ctx.cst;
   for (NodeId at = id;;) {
-    const ValueSlot* const slot = ctx.actions->value_at(ctx.stamp.row(cst[at]));
-    if (slot != nullptr && slot->fn != nullptr)
+    if (const ValueSlot* const slot =
+            ctx.actions->value_at(ctx.stamp.row(cst[at]));
+        slot != nullptr && slot->fn != nullptr)
       return slot->type == &value_tag<T> && slot->fn(ctx, at, &out);
     NodeId only = kNoNode;
     for (const NodeId child : cst.reverse_children(at)) {
-      const CstNode& n = cst[child];
-      if (n.hidden || dropped_token(ctx, n)) continue;
+      if (const CstNode& n = cst[child]; n.hidden || dropped_token(ctx, n))
+        continue;
       if (only != kNoNode) return false;
       only = child;
     }
@@ -517,8 +518,8 @@ bool invoke_conv(AstBuildCtx& ctx, NodeId id, void* out) {
 // text, never one a repair invented.
 template <class Cv, bool Data = false>
 std::optional<std::string_view> denoted_text(AstBuildCtx& ctx, NodeId id) {
-  std::string_view value;
-  if (invoke_conv<Cv, std::string_view, 0, Data, true, false, true>(ctx, id,
+  if (std::string_view value;
+      invoke_conv<Cv, std::string_view, 0, Data, true, false, true>(ctx, id,
                                                                     &value))
     return value;
   return std::nullopt;

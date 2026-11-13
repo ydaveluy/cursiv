@@ -386,7 +386,7 @@ class LlEpisodeSim {
             out.back().decision == decision)
           out.back().arms |= bit;
         else
-          out.push_back({e.at, e.zeroWidth, decision, bit});
+          out.emplace_back(e.at, e.zeroWidth, decision, bit);
         at = next;
       }
       if (ends || out.size() - first > 1)

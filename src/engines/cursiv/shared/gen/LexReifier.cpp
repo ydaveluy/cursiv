@@ -38,7 +38,7 @@ struct CaseGroup {
 // two bytes; `é` and `É` are one group, `C3` then `A9` or `89`; the cases of
 // `σ` start on two bytes, so they are two groups.
 std::vector<CaseGroup> case_groups(char32_t cp) {
-  std::vector<char32_t> cases{cp};
+  std::vector cases{cp};
   for_each_other_case(cp, [&](char32_t other) { cases.push_back(other); });
   std::vector<CaseGroup> out;
   for (const char32_t c : cases) {

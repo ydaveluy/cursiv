@@ -70,14 +70,14 @@ Descent<std::uint16_t> LlLowerer::build_write(unsigned cfg, ImageId e) {
 }
 
 Descent<std::uint16_t> LlLowerer::build_flag(unsigned cfg, ImageId e) {
+  using enum Shape;
   const ImageNode n = at(e);
   std::uint16_t at_ = co_await build(cfg, child_at(n, 0));
   // The absent arm is a position of its own: its record stands before the
   // gap, as an implied token does.
-  if (_p.e[at_].kind == Shape::rep && _p.e[at_].min == 0 &&
-      _p.e[at_].max == 1) {
+  if (_p.e[at_].kind == rep && _p.e[at_].min == 0 && _p.e[at_].max == 1) {
     const std::uint16_t item = _p.e[at_].sym;
-    at_ = gather(cfg, Shape::alt, {item, _p.push(Node{Shape::none})});
+    at_ = gather(cfg, alt, {item, _p.push(Node{none})});
   }
   _p.e[at_].row.push_back(row_id(n.row));
   co_return at_;

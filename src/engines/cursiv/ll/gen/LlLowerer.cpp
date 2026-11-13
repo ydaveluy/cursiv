@@ -100,21 +100,21 @@ void LlLowerer::emit_op(unsigned cfg, ImageId op, const void* opRow,
   const std::uint16_t built = descend(build_operator(cfg, op, reading));
   // Whether each way through the operator reads one token, conditions aside.
   bool whole = true;
-  std::vector<std::uint16_t> todo{built};
+  std::vector todo{built};
   while (whole && !todo.empty()) {
+    using enum Shape;
     const Node& n = _p.e[todo.back()];
     todo.pop_back();
-    if (n.kind == Shape::sym) {
+    if (n.kind == sym) {
       whole = is_term(n.sym);
-    } else if (n.kind == Shape::alt) {
+    } else if (n.kind == alt) {
       for (unsigned i = 0; i < n.count; ++i)
         todo.push_back(_p.child[n.sym + i]);
-    } else if (n.kind == Shape::seq) {
+    } else if (n.kind == seq) {
       unsigned tokens = 0;
       for (unsigned i = 0; i < n.count; ++i) {
         const auto k = _p.child[n.sym + i];
-        if (_p.e[k].kind == Shape::condition || _p.e[k].kind == Shape::none)
-          continue;
+        if (_p.e[k].kind == condition || _p.e[k].kind == none) continue;
         ++tokens;
         todo.push_back(k);
       }

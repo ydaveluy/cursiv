@@ -120,25 +120,26 @@ bool element_nullable(const Cfg& c, std::uint32_t id,
     return from != kNoElement && nullable[from] != 0;
   }
   switch (const LlNode& n = c.nodes[id]; n.kind) {
-    case LlShape::term:
+    using enum LlShape;
+    case term:
       return false;
     // The end assertion reads no token but refuses any input that has one:
     // its lookahead starts with `$end`, so it is not empty.
-    case LlShape::endMark:
+    case endMark:
       return endMarkNullable;
-    case LlShape::empty:
-    case LlShape::condition:
-    case LlShape::implied:
+    case empty:
+    case condition:
+    case implied:
       return true;
-    case LlShape::call:
+    case call:
       return nullable[c.nnodes + n.sym] != 0;
-    case LlShape::seq:
+    case seq:
       return std::ranges::all_of(c.children(n),
                                  [&](auto k) { return nullable[k] != 0; });
-    case LlShape::alt:
+    case alt:
       return std::ranges::any_of(c.children(n),
                                  [&](auto k) { return nullable[k] != 0; });
-    case LlShape::rep:
+    case rep:
       return n.min == 0 || nullable[n.sym] != 0;
   }
   return false;
@@ -182,15 +183,16 @@ std::vector<DynSet> head_sets(const Cfg& c, const ShapeGraph& shapes,
     }
     const LlNode& n = c.nodes[id];
     switch (n.kind) {
-      case LlShape::call:
+      using enum LlShape;
+      case call:
         return out.add(heads[c.nnodes + n.sym]);
-      case LlShape::seq:
-      case LlShape::alt:
-      case LlShape::rep: {
+      case seq:
+      case alt:
+      case rep: {
         bool grew = false;
         for (const auto k : c.children(n)) {
           grew = out.add(heads[k]) || grew;
-          if (n.kind == LlShape::seq && !nullable[k]) break;
+          if (n.kind == seq && !nullable[k]) break;
         }
         return grew;
       }
@@ -216,13 +218,14 @@ void compute_first(Built& b, const ShapeGraph& shapes, std::uint64_t& work) {
     }
   const auto leaf = [&](const LlNode& n, DynSet& out) {
     switch (n.kind) {
-      case LlShape::term:
+      using enum LlShape;
+      case term:
         return put(out, n.sym);
-      case LlShape::endMark: {
+      case endMark: {
         const bool eof = put(out, kEofSymbol);
         return put(out, n.sym) || eof;
       }
-      case LlShape::implied:
+      case implied:
         return out.add(impliedHeads[n.min]);
       default:
         return false;
@@ -246,7 +249,7 @@ void compute_lead(Built& b, const ShapeGraph& shapes, std::uint64_t& work) {
 void left_calls(const Built& b, const std::vector<std::uint8_t>& empty,
                 std::uint16_t root, std::vector<bool>& seen,
                 std::vector<std::uint16_t>& out) {
-  std::vector<std::uint16_t> todo{root};
+  std::vector todo{root};
   while (!todo.empty()) {
     const LlNode& n = b.cfg.nodes[todo.back()];
     todo.pop_back();
@@ -332,7 +335,10 @@ std::vector<bool> reached_from(const Cfg& c, std::uint16_t from) {
   std::vector<std::uint16_t> rules{from}, nodes;
   seen[from] = true;
   const auto rule = [&](std::uint16_t r) {
-    if (r < c.nrules && !seen[r]) seen[r] = true, rules.push_back(r);
+    if (r < c.nrules && !seen[r]) {
+      seen[r] = true;
+      rules.push_back(r);
+    }
   };
   while (!rules.empty()) {
     const LlRuleInfo& u = c.rules[rules.back()];
@@ -401,24 +407,24 @@ void refuse_unproductive(Built& b, const ShapeGraph& shapes,
       return from != kNoElement && productive[from] != 0;
     }
     switch (const LlNode& n = c.nodes[id]; n.kind) {
-      case LlShape::call:
+      using enum LlShape;
+      case call:
         return rule(n.sym);
-      case LlShape::seq: {
+      case seq: {
         const auto k = c.children(n);
         bool ended = false;
         for (const auto child : k) {
           const LlShape s = c.nodes[child].kind;
-          if (!productive[child] ||
-              (ended && (s == LlShape::term || s == LlShape::implied)))
+          if (!productive[child] || (ended && (s == term || s == implied)))
             return false;
-          ended = ended || s == LlShape::endMark;
+          ended = ended || s == endMark;
         }
         return true;
       }
-      case LlShape::alt:
+      case alt:
         return std::ranges::any_of(c.children(n),
                                    [&](auto k) { return productive[k] != 0; });
-      case LlShape::rep:
+      case rep:
         return n.min == 0 || productive[n.sym] != 0;
       default:
         return true;
@@ -502,11 +508,14 @@ struct Gaps {
     propagate_shapes(shapes, work, [&](std::uint32_t id) {
       bool moved = false;
       const auto raise = [&](std::vector<std::uint8_t>& v, bool x) {
-        if (x && !v[id]) v[id] = 1, moved = true;
+        if (x && !v[id]) {
+          v[id] = 1;
+          moved = true;
+        }
       };
       if (id >= b.cfg.nnodes) {
-        const LlRuleInfo& u = b.cfg.rules[id - b.cfg.nnodes];
-        if (u.climb != kNoRow) {
+        if (const LlRuleInfo& u = b.cfg.rules[id - b.cfg.nnodes];
+            u.climb != kNoRow) {
           raise(consumes, true);
           raise(emptyReads, emptyReads[rule(b.cfg.climbs[u.climb].primary)]);
         } else if (u.body != kNoRow) {
@@ -602,8 +611,7 @@ struct Gaps {
       ++work;
       if (at >= b.cfg.nnodes) {
         const auto r = static_cast<std::uint16_t>(at - b.cfg.nnodes);
-        const LlRuleInfo& u = b.cfg.rules[r];
-        if (u.climb != kNoRow) {
+        if (const LlRuleInfo& u = b.cfg.rules[r]; u.climb != kNoRow) {
           // An operand stands after the operator it follows, and before the
           // operator or the end of the climb.
           const LlClimb& cl = b.cfg.climbs[u.climb];
@@ -879,10 +887,11 @@ struct Follow {
       after[visit.id].add(visit.follow);
       const LlNode& n = c.nodes[visit.id];
       switch (n.kind) {
-        case LlShape::call:
+        using enum LlShape;
+        case call:
           if (ruleFollow[n.sym].add(visit.follow)) grown.push(n.sym);
           break;
-        case LlShape::seq: {
+        case seq: {
           const auto k = c.children(n);
           DynSet acc = std::move(visit.follow);
           const auto begin = pending.size();
@@ -895,11 +904,11 @@ struct Follow {
           std::reverse(pending.begin() + begin, pending.end());
           break;
         }
-        case LlShape::alt:
-        case LlShape::rep: {
+        case alt:
+        case rep: {
           // A turn is followed by the next one, or whatever follows the loop.
           DynSet inner = std::move(visit.follow);
-          if (n.kind == LlShape::rep && n.max > 1) inner |= first[n.sym];
+          if (n.kind == rep && n.max > 1) inner |= first[n.sym];
           const auto children = c.children(n);
           for (auto k = children.rbegin(); k != children.rend(); ++k)
             pending.emplace_back(*k, inner);
@@ -1114,14 +1123,15 @@ void AtnGen::build(std::uint16_t id, std::uint32_t from, std::uint32_t to,
 // operator alone; the descent checks the operator's level.
 void build_climb(AtnGen& g, std::uint16_t rule, LlClimb& cl, std::uint32_t from,
                  std::uint32_t to) {
+  using enum LlAtnKind;
   Built& b = g.b;
   const std::uint32_t entry =
-      g.add(LlAtnKind::basic, rule, b.cfg.nodes[cl.selectNode].decision);
+      g.add(basic, rule, b.cfg.nodes[cl.selectNode].decision);
   cl.atnEntry = entry;
   g.call(from, cl.primary, entry);
   for (unsigned i = 0; i < cl.opCount; ++i) {
-    const std::uint32_t afterOp = g.add(LlAtnKind::basic, rule);
-    const std::uint32_t before = g.add(LlAtnKind::basic, rule);
+    const std::uint32_t afterOp = g.add(basic, rule);
+    const std::uint32_t before = g.add(basic, rule);
     g.eps(entry, before);
     const auto& select = b.cfg.nodes[cl.selectNode];
     g.build(b.cfg.childIds[select.sym + i], before, afterOp, rule);
@@ -1395,19 +1405,20 @@ Descent<LlEntry> entry_cost(const Built& b, std::uint16_t id,
                             const std::vector<std::uint32_t>& rule, bool opened,
                             bool whole = false) {
   switch (const LlNode& n = b.cfg.nodes[id]; n.kind) {
-    case LlShape::term:
+    using enum LlShape;
+    case term:
       co_return {1, false};
-    case LlShape::empty:
-    case LlShape::implied:
+    case empty:
+    case implied:
       co_return {0, false};
     // A repair never invents the end of input: asserting that the text ends
     // where it does not would silently accept what the assertion refuses.
-    case LlShape::endMark:
-    case LlShape::condition:
+    case endMark:
+    case condition:
       co_return {kLlCostless, false};
-    case LlShape::call:
+    case call:
       co_return {rule[n.sym], false};
-    case LlShape::seq: {
+    case seq: {
       std::uint32_t sum = 0;
       for (unsigned i = 0; i < n.count; ++i) {
         const LlEntry k = co_await entry_cost(b, b.cfg.childIds[n.sym + i],
@@ -1422,7 +1433,7 @@ Descent<LlEntry> entry_cost(const Built& b, std::uint16_t id,
       }
       co_return {sum, false};
     }
-    case LlShape::alt: {
+    case alt: {
       LlEntry best;
       for (unsigned i = 0; i < n.count; ++i) {
         const LlEntry k = co_await entry_cost(b, b.cfg.childIds[n.sym + i],
@@ -1431,7 +1442,7 @@ Descent<LlEntry> entry_cost(const Built& b, std::uint16_t id,
       }
       co_return best;
     }
-    case LlShape::rep: {
+    case rep: {
       if (n.min == 0) co_return {0, opened && !whole};
       const LlEntry k = co_await entry_cost(b, n.sym, rule, opened, whole);
       if (k.cost == kLlCostless) co_return {kLlCostless, false};
@@ -1488,7 +1499,10 @@ void compute_repair(Built& b, std::uint64_t& work) {
     for (std::uint16_t i = 0; i < n.count; ++i) {
       const std::uint32_t k =
           descend(entry_cost(b, b.cfg.childIds[n.sym + i], rule, false)).cost;
-      if (k < best) best = k, dec.repair = i;
+      if (k < best) {
+        best = k;
+        dec.repair = i;
+      }
     }
     dec.repairCost = best > kLlRepairCostless
                          ? kLlRepairCostless
@@ -1578,14 +1592,13 @@ std::vector<std::uint16_t> loop_exits(const Built& b) {
 bool reads_short_of(const LlAtnView& atn, std::uint32_t from,
                     std::uint32_t stop, DynSet& out) {
   std::vector<std::uint8_t> seen(atn.nstates, 0);
-  std::vector<std::uint32_t> todo{from};
+  std::vector todo{from};
   while (!todo.empty()) {
     const std::uint32_t s = todo.back();
     todo.pop_back();
     if (s == stop || seen[s] != 0) continue;
     seen[s] = 1;
-    const LlAtnState& q = atn.state(s);
-    if (q.kind == LlAtnKind::ruleStop)
+    if (const LlAtnState& q = atn.state(s); q.kind == LlAtnKind::ruleStop)
       todo.insert(todo.end(), atn.callerAt + atn.callerBase[q.rule],
                   atn.callerAt + atn.callerBase[q.rule + 1]);
     for (const LlAtnEdge& e : atn.outgoing(s)) {
@@ -1604,16 +1617,18 @@ bool reads_short_of(const LlAtnView& atn, std::uint32_t from,
 // so the token goes to the turn.
 void give_the_turn_what_it_dominates(Built& b, const LlAtnView& atn,
                                      const LlDecision& dec) {
-  const LlNode& n = b.cfg.nodes[dec.node];
-  if (n.kind != LlShape::rep || b.nullable[n.sym]) return;
+  if (const LlNode& n = b.cfg.nodes[dec.node];
+      n.kind != LlShape::rep || b.nullable[n.sym])
+    return;
   DynSet& out = b.laSet[dec.set + 1];
   DynSet both = out;
   both &= b.laSet[dec.set];
   if (both.none()) return;
   DynSet read;
-  const std::uint32_t target =
-      atn.edge(atn.state(dec.state).edge + 1u).target;
-  if (!reads_short_of(atn, target, dec.state, read)) return;
+  if (const std::uint32_t target =
+          atn.edge(atn.state(dec.state).edge + 1u).target;
+      !reads_short_of(atn, target, dec.state, read))
+    return;
   if (!read.intersects(both)) out.andnot(both);
 }
 

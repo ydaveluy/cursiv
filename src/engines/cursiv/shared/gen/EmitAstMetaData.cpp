@@ -81,7 +81,7 @@ std::string emit_ast_members(const AstRegistry& registry,
       "nullptr"));
   out.write(emit_table(
       "constexpr ::cursiv::detail::NewNodeFn kNewNodes[]", typeIds,
-      [&](std::size_t t) -> std::string {
+      [&](std::size_t t) {
         return types[t].built ? concat("&::cursiv::detail::new_ast_node<",
                                        types[t].source, ">")
                               : "nullptr";

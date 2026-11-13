@@ -81,7 +81,7 @@ class DefaultLanguageServer : public LanguageServer,
                               private ConfigurationSectionListener {
  public:
   explicit DefaultLanguageServer(SharedLspServices& shared,
-                                 RequestStates states = {}) noexcept
+                                 const RequestStates& states = {}) noexcept
       : _shared(shared), _states(states) {}
   ~DefaultLanguageServer() noexcept override;
 
@@ -259,7 +259,7 @@ class DefaultLanguageServer : public LanguageServer,
   void changeText(const lsp::VersionedTextDocumentIdentifier& document,
                   std::span<const lsp::TextDocumentContentChangeEvent> edits,
                   TextChanges& changes);
-  void closeText(std::string_view uri, TextChanges& changes);
+  void closeText(std::string_view uri, TextChanges& changes) const;
 
   // The route every request about one document takes: state, lock, document,
   // service, call. The URI is explicit: a hierarchy item names its document.

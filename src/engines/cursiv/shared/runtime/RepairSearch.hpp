@@ -106,8 +106,8 @@ template <class A, class B>
 CURSIV_ALWAYS_INLINE inline std::strong_ordering repair_key_order(
     std::uint32_t costA, const A& a, std::uint32_t costB, const B& b) {
   const std::uint64_t ka = (std::uint64_t{costA} << 32) | a.lost;
-  const std::uint64_t kb = (std::uint64_t{costB} << 32) | b.lost;
-  if (ka != kb) return ka <=> kb;
+  if (const std::uint64_t kb = (std::uint64_t{costB} << 32) | b.lost; ka != kb)
+    return ka <=> kb;
   if (a.edits != b.edits) return a.edits <=> b.edits;
   return ((std::uint64_t{a.faults} << 32) | a.invented) <=>
          ((std::uint64_t{b.faults} << 32) | b.invented);
@@ -176,7 +176,7 @@ struct RepairSearch {
     heap.push_back(RepairEntry{f, r.lost + lost, r.edits,
                                r.faults + (opens ? 1u : 0u), r.invented, seq++,
                                at});
-    std::push_heap(heap.begin(), heap.end(), repair_entry_after);
+    std::ranges::push_heap(heap, repair_entry_after);
     rs[at].queued = true;
   }
 
@@ -192,7 +192,7 @@ struct RepairSearch {
   }
 
   RepairEntry pop() {
-    std::pop_heap(heap.begin(), heap.end(), repair_entry_after);
+    std::ranges::pop_heap(heap, repair_entry_after);
     const RepairEntry e = heap.back();
     heap.pop_back();
     return e;
@@ -321,8 +321,8 @@ bool repair_race(const RepairSearch<G>& s, std::vector<R>& rs,
   std::uint32_t steps = 0;
   while (!queue.empty()) {
     stop.poll();
-    const bool decided = steps >= e.kSteps || level();
-    if (decided || e.spent()) {
+    if (const bool decided = steps >= e.kSteps || level();
+        decided || e.spent()) {
       for (const std::uint32_t q : queue) reach_all(q);
       return !decided;
     }

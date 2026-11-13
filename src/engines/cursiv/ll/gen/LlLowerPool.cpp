@@ -344,11 +344,10 @@ void move_chains_down(LlLowered& o, const LlRecordPlan& plan) {
 // always, and a call whose rule creates none or that turns.
 void add_own_records(LlLowered& o, const LlRecordPlan& plan) {
   for (std::uint32_t id = 0; id < o.cfg.nnodes; ++id) {
+    using enum LlShape;
     LlNode& n = o.cfg.nodes[id];
-    if (n.row == kNoRow || n.kind == LlShape::term ||
-        n.kind == LlShape::implied)
-      continue;
-    n.owns = n.kind != LlShape::call || !plan.rule_hands(n.sym) ||
+    if (n.row == kNoRow || n.kind == term || n.kind == implied) continue;
+    n.owns = n.kind != call || !plan.rule_hands(n.sym) ||
              o.writes.chainBuild[n.row].nest;
   }
 }

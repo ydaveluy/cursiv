@@ -691,12 +691,12 @@ std::vector<ImageId> Lowerer::gap_runs(const std::vector<ImageId>& children) {
 }
 
 bool Lowerer::op_builds_node(ImageId op) const {
+  using enum ImageKind;
   for (std::vector todo{op}; !todo.empty();) {
     const ImageNode& n = at(todo.back());
     todo.pop_back();
-    if (n.kind == ImageKind::ref && (node_rule(n.a) || infix_rule(n.a)))
-      return true;
-    if (n.kind != ImageKind::seq && n.kind != ImageKind::choice) continue;
+    if (n.kind == ref && (node_rule(n.a) || infix_rule(n.a))) return true;
+    if (n.kind != seq && n.kind != choice) continue;
     for (std::uint32_t i = 0; i < n.count; ++i)
       if (!is_condition_node(_im, child_at(n, i)))
         todo.push_back(child_at(n, i));

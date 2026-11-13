@@ -105,9 +105,10 @@ class NamedHead {
     return lex_same_graph(_g, x, y, [&](const LexNode& e, const LexNode& f) {
       if (e.kind != f.kind || e.min != f.min || e.max != f.max) return false;
       switch (e.kind) {
-        case LexKind::chars:
+        using enum LexKind;
+        case chars:
           return same_set(e.a, f.a);
-        case LexKind::nguard:
+        case nguard:
           if ((e.a == kNoSet) != (f.a == kNoSet) ||
               (e.a != kNoSet && !same_set(e.a, f.a)))
             return false;
@@ -115,10 +116,10 @@ class NamedHead {
             if (!same_set(_g.lexChild[e.b + k], _g.lexChild[f.b + k]))
               return false;
           return true;
-        case LexKind::seq:
-        case LexKind::alt:
+        case seq:
+        case alt:
           return e.b == f.b;
-        case LexKind::rep:
+        case rep:
           return true;
         default:
           return false;

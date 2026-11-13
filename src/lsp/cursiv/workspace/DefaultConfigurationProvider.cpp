@@ -240,7 +240,7 @@ void DefaultConfigurationProvider::updateConfiguration(
     // not revalidated for it.
     const std::optional<std::uint64_t> revision =
         updateSectionConfiguration(section, value);
-    if (!revision) continue;
+    if (!revision.has_value()) continue;
     // Notify outside the cache lock: listeners may read the new settings.
     deliver(section, value, *revision, failure);
   }

@@ -217,8 +217,8 @@ std::string format_authority(std::string_view authority, Read read) {
   }
   std::string_view port;
   const std::size_t colon = authority.rfind(':');
-  const std::size_t close = authority.rfind(']');
-  if (colon != std::string_view::npos &&
+  if (const std::size_t close = authority.rfind(']');
+      colon != std::string_view::npos &&
       (close == std::string_view::npos || close < colon)) {
     port = authority.substr(colon);
     authority = authority.substr(0, colon);
@@ -257,8 +257,8 @@ bool is_encoded(std::string_view text, const CharSet& bare) {
     if (bare.test(static_cast<unsigned char>(text[i]))) continue;
     if (text[i] != '%' || i + 2 >= text.size()) return false;
     const int high = from_hex(text[i + 1]);
-    const int low = from_hex(text[i + 2]);
-    if (high < 0 || low < 0 || to_upper_hex(text[i + 1]) != text[i + 1] ||
+    if (const int low = from_hex(text[i + 2]);
+        high < 0 || low < 0 || to_upper_hex(text[i + 1]) != text[i + 1] ||
         to_upper_hex(text[i + 2]) != text[i + 2] ||
         bare.test(static_cast<unsigned char>(high * 16 + low)))
       return false;
@@ -284,9 +284,9 @@ bool is_normal_uri(const UriParts& parts) {
       !parts.path.starts_with('/'))
     return false;
   // The letter before an escaped colon, which lowers.
-  const std::string_view drive =
-      parts.path.substr(parts.path.starts_with('/') ? 1 : 0, 4);
-  if (drive.size() == 4 && drive.substr(1) == "%3A" &&
+  if (const std::string_view drive =
+          parts.path.substr(parts.path.starts_with('/') ? 1 : 0, 4);
+      drive.size() == 4 && drive.ends_with("%3A") &&
       is_ascii_letter(drive[0]) && !lower(drive[0]))
     return false;
   if (parts.marked && parts.query.empty()) return false;

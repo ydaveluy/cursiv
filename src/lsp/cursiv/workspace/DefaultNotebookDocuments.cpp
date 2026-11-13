@@ -157,7 +157,7 @@ void DefaultNotebookDocuments::didClose(
 }
 
 void DefaultNotebookDocuments::indexCells(
-    const std::string& uri, const std::vector<std::string>& previous,
+    std::string_view uri, const std::vector<std::string>& previous,
     CellIndex cells) noexcept {
   for (const std::string& cell : previous)
     if (const auto at = _cells.find(cell);

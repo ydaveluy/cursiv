@@ -32,8 +32,8 @@ Disposable expectHighlight(const LspServices& services,
   Disposable disposable = detail::documentDisposable(services, document);
   const detail::DisposeOnThrow cleanup(disposable);
   std::vector<lsp::DocumentHighlight> highlights;
-  const auto* const caret = detail::markerAt(marked.indices, input.index);
-  if (caret != nullptr && services.documentHighlightProvider != nullptr)
+  if (const auto* const caret = detail::markerAt(marked.indices, input.index);
+      caret != nullptr && services.documentHighlightProvider != nullptr)
     highlights = services.documentHighlightProvider->getDocumentHighlight(
         *document, to_lsp(document->textDocument().positionAt(*caret)),
         kNoCancel);

@@ -98,6 +98,7 @@ struct ChainPool {
   // when it starts with a creation or a close, and nests when it starts with a
   // nest. Its lead is its first write of a member.
   void note_makes(std::span<const WriteKind> kind) {
+    using enum WriteKind;
     for (std::uint16_t i = 0; i < nchains; ++i) {
       const Chain& ch = chains[i];
       // Every chain has a build half, the empty ones included: the pool is
@@ -105,13 +106,12 @@ struct ChainPool {
       ChainBuild& cb = chainBuild[i];
       if (ch.count == 0) continue;  // a record that says nothing opens nothing
       const WriteKind first = kind[acts[ch.off]];
-      cb.creates = first == WriteKind::create || first == WriteKind::climb;
-      cb.makes = cb.creates || first == WriteKind::close;
-      cb.nest = first == WriteKind::nest;
+      cb.creates = first == create || first == climb;
+      cb.makes = cb.creates || first == close;
+      cb.nest = first == nest;
       for (std::uint16_t k = 0; k < ch.count && cb.lead == kNoRow; ++k)
         if (const WriteKind what = kind[acts[ch.off + k]];
-            what == WriteKind::assign || what == WriteKind::append ||
-            what == WriteKind::flag)
+            what == assign || what == append || what == flag)
           cb.lead = acts[ch.off + k];
     }
   }

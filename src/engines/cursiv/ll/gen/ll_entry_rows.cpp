@@ -24,7 +24,7 @@ void ll_entry_runs(const LlBuiltProgram& a, std::uint16_t i,
     runs.push_back(a.writes.run(from.to));
     i = from.from;
   }
-  std::reverse(runs.begin(), runs.end());
+  std::ranges::reverse(runs);
 }
 
 // What fills the node a record built, and what writes that node into the

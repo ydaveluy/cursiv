@@ -521,8 +521,7 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
       if (!A.relays[r].gate) acc.set(A.relays[r].term);
     DynSet lifted = accSet[s];
     lifted.andnot(wordAt[s]);
-    const int lwin = lr_dfa_first(A, s, lifted);
-    if (lwin >= 0) {
+    if (const int lwin = lr_dfa_first(A, s, lifted); lwin >= 0) {
       lifted.reset(static_cast<unsigned>(lwin));
       acc |= lifted;
     }
@@ -740,9 +739,9 @@ void lr_lex_candidates(LrBuildTable& A, const LexAlphabet& alpha,
       }
     const DynSet& res = A.dfa_res_set(s);
     int best = lr_dfa_first(A, s, acc[s]);
-    const int open =
-        lr_dfa_first(A, s, acc[s], [&](unsigned t) { return !res.test(t); });
-    if (best >= 0 && res.test(static_cast<unsigned>(best)) && open >= 0)
+    if (const int open = lr_dfa_first(A, s, acc[s],
+                                      [&](unsigned t) { return !res.test(t); });
+        best >= 0 && res.test(static_cast<unsigned>(best)) && open >= 0)
       best = open;
     accept[s] = best < 0 ? 0 : static_cast<std::uint16_t>(best + 1);
     if (best >= 0) bound[s] = A.dfa_acc_bound(s, static_cast<unsigned>(best));

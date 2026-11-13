@@ -50,7 +50,7 @@ class DefaultNotebookDocuments : public NotebookDocuments {
   // Moves the notebook `uri` from its `previous` cells to `cells` without
   // allocating: `_cells` already has room. Callers prepare what may fail first,
   // so a reader never sees half an update.
-  void indexCells(const std::string& uri,
+  void indexCells(std::string_view uri,
                   const std::vector<std::string>& previous,
                   CellIndex cells) noexcept;
 

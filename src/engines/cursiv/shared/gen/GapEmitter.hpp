@@ -175,12 +175,12 @@ class GapEmitter : private TextBuilder {
     lex_post_order(
         root,
         [&](std::uint16_t id, auto&& push) {
+          using enum LexKind;
           if (_used[id]) return false;
           _used[id] = true;
-          if (const auto& e = _cfg.lex[id];
-              e.kind == LexKind::seq || e.kind == LexKind::alt)
+          if (const auto& e = _cfg.lex[id]; e.kind == seq || e.kind == alt)
             for (unsigned i = 0; i < e.b; ++i) push(_cfg.lexChild[e.a + i]);
-          else if (e.kind == LexKind::rep && e.max != 0)
+          else if (e.kind == rep && e.max != 0)
             push(e.a);
           return true;
         },
@@ -196,20 +196,21 @@ class GapEmitter : private TextBuilder {
       _walked[at] = true;
       const LexNode& e = _cfg.lex[at];
       switch (e.kind) {
-        case LexKind::gap_has:
-        case LexKind::gap_is:
-          ask(e.a, e.kind == LexKind::gap_is);
+        using enum LexKind;
+        case gap_has:
+        case gap_is:
+          ask(e.a, e.kind == gap_is);
           break;
-        case LexKind::seq:
-        case LexKind::alt:
+        case seq:
+        case alt:
           for (unsigned i = e.b; i-- > 0;)
             todo.push_back(_cfg.lexChild[e.a + i]);
           break;
-        case LexKind::rep:
+        case rep:
           if (e.max != 0) todo.push_back(e.a);
           break;
-        case LexKind::positive:
-        case LexKind::negative:
+        case positive:
+        case negative:
           todo.push_back(e.a);
           break;
         default:

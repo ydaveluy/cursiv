@@ -707,13 +707,13 @@ void DefaultLanguageServer::updateVersion(Document& document,
 // and the document stays. Only a URI with nothing saved behind it, such as an
 // `untitled:` buffer or a notebook cell, leaves.
 void DefaultLanguageServer::closeText(std::string_view uri,
-                                      TextChanges& changes) {
+                                      TextChanges& changes) const {
   const std::shared_ptr<Document> closing = _shared.documents->getDocument(uri);
   if (closing == nullptr) return;
-  const bool saved = has_saved_content(
-      *_shared.fileSystemProvider, _shared.textDocumentContentProvider.get(),
-      closing->uri);
-  if (saved) {
+  if (const bool saved = has_saved_content(
+          *_shared.fileSystemProvider,
+          _shared.textDocumentContentProvider.get(), closing->uri);
+      saved) {
     changes.changed.emplace_back(uri);
   } else {
     std::erase(changes.changed, uri);

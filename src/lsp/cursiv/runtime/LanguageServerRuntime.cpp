@@ -183,7 +183,7 @@ class NotificationQueue {
     // The task's place is made first and moved in without allocating: an
     // update refused for want of memory cancels nothing.
     std::list<Task> place;
-    place.push_back({std::move(task), method, update});
+    place.emplace_back(std::move(task), method, update);
     // Cancel before publishing: once queued, this task may already be the
     // latest writer, even before notify_all. Cancellation runs callbacks, so
     // it must also stay outside the queue mutex.
@@ -1082,8 +1082,7 @@ void add_mcp_tunnel(Session& session, const McpService& service) {
           lsp::json::Value&& params, const CancellationToken& token) {
         std::optional<lsp::json::Value> response =
             server->handle(std::move(params), token);
-        return response.has_value() ? std::move(*response)
-                                    : lsp::json::Value(nullptr);
+        return std::move(response).value_or(lsp::json::Value(nullptr));
       });
   session.endpoint.onCustomRequest(
       "cursiv/mcp", [&session, answer = std::move(answer)](

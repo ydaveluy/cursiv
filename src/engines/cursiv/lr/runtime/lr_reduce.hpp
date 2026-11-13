@@ -93,8 +93,8 @@ CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
         reach = true;
         break;
       }
-      const auto& frame = c.stack[receiver];
-      if (p.len != 0 || receiver == 0 || frame.open != end ||
+      if (const auto& frame = c.stack[receiver];
+          p.len != 0 || receiver == 0 || frame.open != end ||
           frame.begin != c.committed || frame.row != kNoElement ||
           frame.word != kLrNoWord)
         break;

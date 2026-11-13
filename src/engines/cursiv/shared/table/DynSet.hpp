@@ -140,7 +140,7 @@ struct DynSet {
     bool one = false;
     for (const std::uint64_t x : w) {
       if (!x) continue;
-      if (one || (x & (x - 1))) return true;
+      if (one || !std::has_single_bit(x)) return true;
       one = true;
     }
     return false;

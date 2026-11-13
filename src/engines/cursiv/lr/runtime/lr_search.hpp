@@ -136,7 +136,7 @@ const LexReading& lr_search_reading(const LrContext& c, LrSearch& s,
   const LexReading r = lr_open_reading<A>(c, mode, mode, p, end, reached, read);
   s.work += 1 + read / kRepairLexBytes;
   if (lr_search_walked(c, s, p, end, reached)) return kNone;
-  return s.readings.emplace(key, r).first->second;
+  return s.readings.try_emplace(key, r).first->second;
 }
 
 // The token in hand as the mode a fault is lexed with reads it where its own
@@ -197,7 +197,7 @@ const std::vector<Typo>& lr_search_typos(LrContext& c, LrSearch& s,
   std::vector<Typo> found =
       lr_rescan_candidates<A>(c, state, at, reach, read, cut, &s.typoScratch);
   s.work += 1 + read / kRepairLexBytes;
-  if (!cut) return s.typos.emplace(key, std::move(found)).first->second;
+  if (!cut) return s.typos.try_emplace(key, std::move(found)).first->second;
   lr_search_cut(s);
   s.cutTypos = std::move(found);
   return s.cutTypos;
@@ -262,12 +262,12 @@ struct LrSearchPool {
       return it->second;
     ++s.work;
     const Token t = lr_scan_at<A>(c, mode, r.at, r.indent.depth);
-    s.lexed.emplace(key, t);
+    s.lexed.try_emplace(key, t);
     return t;
   }
-  void lexed() {}
-  void kept_at(std::size_t) {}
-  void stepped() {}
+  void lexed() const {}
+  void kept_at(std::size_t) const {}
+  void stepped() const {}
 };
 
 // What the search walked between its units of work since it last counted, at a
@@ -506,9 +506,10 @@ void lr_search_lexical(LrContext& c, LrSearch& s, std::uint32_t bi,
 // a walk its share cut may have found one.
 template <const auto& A>
 bool lr_search_rereads(LrContext& c, LrSearch& s, const LrConfig& b) {
-  const bool synthetic =
-      b.la.sym < A.cfg.nterms && A.cfg.terms[b.la.sym].synthetic != 0;
-  if (b.la.begin >= c.len || synthetic) return false;
+  if (const bool synthetic =
+          b.la.sym < A.cfg.nterms && A.cfg.terms[b.la.sym].synthetic != 0;
+      b.la.begin >= c.len || synthetic)
+    return false;
   const std::uint32_t state = b.run.back();
   if (lr_search_reading<A>(c, s, A.mode[state], b.la.begin).term !=
       kInvalidSymbol)
@@ -680,8 +681,9 @@ void lr_search_abandon(LrContext& c, LrSearch& s, std::uint32_t gi,
                      begin = s.cactus.begin_parent(begin)) {
     if (lr_search_spent(s)) return;
     ++s.work;
-    const std::uint32_t below = s.cactus.parent(node);
-    if (!A.cold.follow[s.cactus.state(below)].test(la)) continue;
+    if (const std::uint32_t below = s.cactus.parent(node);
+        !A.cold.follow[s.cactus.state(below)].test(la))
+      continue;
     const std::int64_t at = s.cactus.begin_of(begin);
     // Counted only as far as this cost reaches: past it, a floor.
     const std::int64_t lost =
@@ -830,15 +832,16 @@ std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
       break;
     }
     switch (s.configs[e.at].work) {
-      case RepairWork::read:
+      using enum RepairWork;
+      case read:
         break;
-      case RepairWork::enumerateInsertions:
+      case enumerateInsertions:
         lr_search_inserts<A>(c, s, e.at);
         continue;
-      case RepairWork::forcedReplacement:
+      case forcedReplacement:
         lr_search_replace<A>(c, s, e.at);
         continue;
-      case RepairWork::enumerateAbandons:
+      case enumerateAbandons:
         lr_search_abandon<A>(c, s, e.at, e.f);
         continue;
     }

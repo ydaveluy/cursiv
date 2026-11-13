@@ -120,10 +120,11 @@ Wording wording(const Grammar& grammar, const ParseDiagnostic& d,
   // "Unexpected '+'." says it all.
   const std::vector<std::string_view> named =
       expected_spellings(grammar, d, kMaxNamed);
-  const bool echoes =
-      !w.found.empty() &&
-      std::ranges::find(named, std::string_view(w.found)) != named.end();
-  if (!echoes) w.expected = spell_expected(named);
+  if (const bool echoes =
+          !w.found.empty() &&
+          std::ranges::find(named, std::string_view(w.found)) != named.end();
+      !echoes)
+    w.expected = spell_expected(named);
   // A position with no spelling is named by its terminal or rule:
   // "Expecting STRING." says more than "Syntax error".
   if (w.expected.empty()) w.expected = named_below(grammar, d.element);

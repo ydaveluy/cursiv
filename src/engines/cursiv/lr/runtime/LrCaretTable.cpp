@@ -194,9 +194,9 @@ class CaretStacks {
     _tape = &leaf;
     close(
         [&](Id head, const Token& held) -> std::span<const Token> {
-          const Frame& frame = _frames[head];
           // An indent stands behind the form feeds of its line's blanks.
-          if (virt != kInvalidSymbol &&
+          if (const Frame& frame = _frames[head];
+              virt != kInvalidSymbol &&
               (frame.at == leaf.begin ||
                (virt == _indent && frame.at < leaf.begin &&
                 indent_run(_text.data(), frame.at, leaf.begin).stop ==
@@ -244,8 +244,8 @@ class CaretStacks {
     bool several = false;
     close(
         [&](Id head, const Token&) -> std::span<const Token> {
-          const Frame& frame = _frames[head];
-          if (!trivia_to(head, _table.mode[frame.state], frame.at, first.begin))
+          if (const Frame& frame = _frames[head];
+              !trivia_to(head, _table.mode[frame.state], frame.at, first.begin))
             return {};
           return {&first, 1};
         },
@@ -539,8 +539,8 @@ class CaretStacks {
           context.assumes = assumes;
           add(_closure, action.arg, token.end, from, {}, kDeadState, context);
         });
-    std::sort(_ready.begin(), _ready.end());
-    _ready.erase(std::unique(_ready.begin(), _ready.end()), _ready.end());
+    std::ranges::sort(_ready);
+    _ready.erase(std::ranges::unique(_ready).begin(), _ready.end());
     _heads.assign(_ready.begin(), _ready.end());
   }
 
@@ -653,8 +653,7 @@ class CaretStacks {
               : read.term == kInvalidSymbol || read.end == 0
                   ? Token{at, at, kInvalidSymbol}
                   : Token{at, at + read.end, read.term};
-          const int q = implied_before(frame, hand);
-          if (q >= 0) {
+          if (const int q = implied_before(frame, hand); q >= 0) {
             _virt = Token{at, at, _implied[q]};
             return {&_virt, 1};
           }
@@ -943,8 +942,8 @@ class CaretStacks {
       next->clear();
       for (const Id at : *layer)
         each_parent(_frames[at], [&](Id parent) { next->push_back(parent); });
-      std::sort(next->begin(), next->end());
-      next->erase(std::unique(next->begin(), next->end()), next->end());
+      std::ranges::sort(*next);
+      next->erase(std::ranges::unique(*next).begin(), next->end());
       std::swap(layer, next);
     }
     return *layer;
@@ -1070,8 +1069,8 @@ class CaretStacks {
             continue;
           }
           if (action.kind == LrActionKind::reduce) {
-            auto assumes = context.assumes;
-            if (take(_table.prods[action.arg].gap, asked, assumes) &&
+            if (auto assumes = context.assumes;
+                take(_table.prods[action.arg].gap, asked, assumes) &&
                 reduce_by(action.arg, assumes))
               viable = true;
             continue;
@@ -1206,9 +1205,9 @@ class CaretStacks {
     const auto len = static_cast<TextOffset>(_text.size());
     if (held.sym != kInvalidSymbol || held.begin >= len) return held;
     TextOffset halt = 0;
-    const Scan s =
-        _table.lex(_text.data(), len, _table.errModeOf(mode), held.begin, halt);
-    if (s.term != kInvalidSymbol && s.end > held.begin)
+    if (const Scan s = _table.lex(_text.data(), len, _table.errModeOf(mode),
+                                  held.begin, halt);
+        s.term != kInvalidSymbol && s.end > held.begin)
       return Token{held.begin, s.end, s.term};
     return held;
   }
@@ -1281,7 +1280,7 @@ class CaretStacks {
       return _table.cond(_text, gap - 1, _gapFrom, token, true, nullptr);
     _asked = true;
     const bool holds = spliced(gap, _gapFrom, token);
-    if (_keeping) _answers.push_back({gap, _gapFrom, token, holds});
+    if (_keeping) _answers.emplace_back(gap, _gapFrom, token, holds);
     return holds;
   }
   // The condition on the candidate's text, which begins at `_conditionFrom`.
@@ -1336,9 +1335,10 @@ class CaretStacks {
   // The same for a guard, when any condition it asks is one of them.
   bool defers_any(const Token& token, std::uint32_t target) const {
     if (_candidate || _loose || _asWritten) return false;
-    for (const std::uint16_t condition : _table.conditions_of(target))
-      if (reaches(token, condition + 1u)) return true;
-    return false;
+    return std::ranges::any_of(_table.conditions_of(target),
+                               [&](const std::uint16_t condition) {
+                                 return reaches(token, condition + 1u);
+                               });
   }
 
   // Whether condition `gap` may hold on `token`; a deferred one holds as an
@@ -1440,7 +1440,7 @@ class CaretStacks {
       const Assumed& a = _assumed[i];
       if (a.token.end > at) continue;
       const bool may = spliced(a.gap, a.from, a.token);
-      if (_keeping) _answers.push_back({a.gap, a.from, a.token, may});
+      if (_keeping) _answers.emplace_back(a.gap, a.from, a.token, may);
       _refuted[i] = a.holds ? !may : may && _known;
     }
     _dead.assign(_links.size(), 0);
@@ -1510,9 +1510,9 @@ class CaretStacks {
         return i;
     const auto first = static_cast<std::uint32_t>(_tokens.size());
     const Token won = scan(mode, from, inside);
-    _scanned.push_back(
-        Scanned{mode, inside, from, first,
-                static_cast<std::uint32_t>(_tokens.size() - first), won});
+    _scanned.emplace_back(mode, inside, from, first,
+                          static_cast<std::uint32_t>(_tokens.size() - first),
+                          won);
     return _scanned.size() - 1;
   }
 
@@ -1918,12 +1918,12 @@ class CaretReplay {
   // of line: inlined, the caller's register pressure falls on every job.
   CURSIV_NOINLINE bool run(NodeId prefix, std::span<const NodeId> events) {
     for (std::size_t i = events.size(); i-- > 0;)
-      _jobs.push_back(Job{events[i], 0, false});
+      _jobs.emplace_back(events[i], 0, false);
     // The replay starts past the nearest record it can start from.
     for (NodeId r = prefix; r > 0; r = _cst.subtree_begin(r - 1)) {
       _stop.poll();
       if (r != prefix && starts_after(r - 1)) break;
-      _jobs.push_back(Job{r - 1, 0, false});
+      _jobs.emplace_back(r - 1, 0, false);
     }
     while (!_jobs.empty()) {
       _stop.poll();
@@ -1957,8 +1957,8 @@ class CaretReplay {
       if (_table.chooses || term == kInvalidSymbol || _table.synthetic(term))
         return false;
     }
-    const NodeId k = token_after(id);
-    if (_firstRepair <= (k < _cst.size() ? _cst[k].begin : n.end) ||
+    if (const NodeId k = token_after(id);
+        _firstRepair <= (k < _cst.size() ? _cst[k].begin : n.end) ||
         !_stacks.keeps_tape(_cst, id))
       return false;
     const std::span<const std::uint16_t> preds = _table.preds;
@@ -1999,9 +1999,10 @@ class CaretReplay {
     if (!_cst.recovered()) return true;
     for (; _gathered <= id; ++_gathered)
       if (_cst[_gathered].recovered) _repairs.push_back(_gathered);
-    const auto it = std::lower_bound(_repairs.begin(), _repairs.end(),
-                                     _cst.subtree_begin(id));
-    if (it != _repairs.end() && *it <= id) return false;
+    if (const auto it =
+            std::ranges::lower_bound(_repairs, _cst.subtree_begin(id));
+        it != _repairs.end() && *it <= id)
+      return false;
     const NodeId k = token_after(id);
     return k == _cst.size() || !_cst[k].recovered;
   }
@@ -2033,7 +2034,7 @@ class CaretReplay {
       // The unwind comes after the content it gave up on; a wrap's content
       // simply stands.
       if (_table.stamp.row(n) == kNoElement)
-        _jobs.push_back(Job{job.id, _stacks.rank(), true});
+        _jobs.emplace_back(job.id, _stacks.rank(), true);
     } else if (n.end <= _horizon && clean(job.id) &&
                _stacks.keeps_tape(_cst, job.id)) {
       const auto row = _table.stamp.row(n);
@@ -2057,7 +2058,7 @@ class CaretReplay {
       }
     }
     for (const NodeId child : _cst.reverse_children(job.id))
-      _jobs.push_back(Job{child, 0, false});
+      _jobs.emplace_back(child, 0, false);
     return true;
   }
 
@@ -2304,8 +2305,8 @@ void lr_next_features_at(const LrCaretTable& table,
       return spliced(leaf.begin, spelling, [&](TextOffset& halt) {
         const auto len = static_cast<TextOffset>(splice.size());
         const Scan now = table.lex(splice.data(), len, m, 0, halt);
-        const bool read = now.term != kInvalidSymbol && now.end != 0;
-        if (read ? now.term == was.term && leaf.begin + now.end == was.end
+        if (const bool read = now.term != kInvalidSymbol && now.end != 0;
+            read ? now.term == was.term && leaf.begin + now.end == was.end
                  : none)
           return true;
         if (reduces(state, now.term, prod)) return true;

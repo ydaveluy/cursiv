@@ -89,13 +89,14 @@ class Reader {
   std::span<const ImageId> parts(ImageId id) const {
     const ImageNode n = at(id);
     switch (n.kind) {
-      case ImageKind::andOf:
-      case ImageKind::notOf:
-      case ImageKind::through:
-      case ImageKind::embed:
-      case ImageKind::ref:
+      using enum ImageKind;
+      case andOf:
+      case notOf:
+      case through:
+      case embed:
+      case ref:
         return {};
-      case ImageKind::implied:
+      case implied:
         return {_im.children.data() + n.first, 1};
       default:
         return _im.shape_children(id);

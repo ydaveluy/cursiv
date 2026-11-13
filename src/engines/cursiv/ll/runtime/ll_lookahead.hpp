@@ -136,8 +136,8 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
   for (;;) {
     if (T.dfaAccept[st] != 0 && i < len && T.lex_bounded(st))
       far = std::max(far, tape.bound_reach(st, src, i, len));
-    const bool checked = T.lexChecks != nullptr && T.lexChecks[st] != 0;
-    if (T.dfaAccept[st] != 0 &&
+    if (const bool checked = T.lexChecks != nullptr && T.lexChecks[st] != 0;
+        T.dfaAccept[st] != 0 &&
         (checked || !lex_bound_refuses(LlLexTape<T>{}, st, src, i, len))) {
       // Word by word, not terminal by terminal: the match asks this at every
       // accepting state it passes, and a grammar has ninety terminals where
@@ -230,9 +230,9 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
       std::uint64_t bits =
           acc[k] & (reserve ? ~res[k] : ~std::uint64_t{0}) & viable.word(k);
       while (bits != 0) {
-        const auto term = static_cast<std::uint16_t>(
-            k * 64 + static_cast<unsigned>(std::countr_zero(bits)));
-        if (ll_lex_accepts<T>(best, term, src, end, len, far))
+        if (const auto term = static_cast<std::uint16_t>(
+                k * 64 + static_cast<unsigned>(std::countr_zero(bits)));
+            ll_lex_accepts<T>(best, term, src, end, len, far))
           out.push_back(term);
         bits &= bits - 1;
       }
@@ -283,8 +283,7 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
             behind.set(term);
             if (as != 0) fixed.set(term);
             strongest = std::max(strongest, tape.taking(term, as));
-            if (std::find(out.begin(), out.end(), term) == out.end())
-              out.push_back(term);
+            if (std::ranges::find(out, term) == out.end()) out.push_back(term);
           });
       // A reading behind conditions that a literal's or keyword's branch read
       // takes the spelling of the readings that end with it.
@@ -306,7 +305,7 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
     }
     // Relay rests report their last position, which may be a failing byte.
     if (far < len) ++far;
-    std::sort(out.begin(), out.end());
+    std::ranges::sort(out);
   }
   if (top != nullptr) {
     *top = 0;
@@ -323,7 +322,7 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
       const auto strong = [&](std::uint16_t term) {
         return priorityOf(term) == strongest;
       };
-      const auto cut = std::stable_partition(out.begin(), out.end(), strong);
+      const auto cut = std::ranges::stable_partition(out, strong).begin();
       if (cut != out.end()) *top = static_cast<std::size_t>(cut - out.begin());
     }
   }
@@ -420,12 +419,12 @@ inline std::uint16_t ll_read_mode(std::uint32_t state) {
   if constexpr (T.lookMode != nullptr) {
     const LlAtnState& s = T.atn.state(state);
     for (std::uint32_t i = 0; i < s.nedges; ++i) {
+      using enum LlEdgeKind;
       const auto& edge = T.atn.edge(s.edge + i);
-      if (edge.kind != LlEdgeKind::atom && edge.kind != LlEdgeKind::condition)
-        continue;
-      const std::uint16_t hop = T.edgeNode[s.edge + i];
-      if (hop != kNoRow) return T.nodes[hop].mode;
-      if (edge.kind == LlEdgeKind::atom)
+      if (edge.kind != atom && edge.kind != condition) continue;
+      if (const std::uint16_t hop = T.edgeNode[s.edge + i]; hop != kNoRow)
+        return T.nodes[hop].mode;
+      if (edge.kind == atom)
         return edge.label == kEofSymbol ? T.tailMode : kNoRow;
     }
   }

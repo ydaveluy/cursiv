@@ -53,8 +53,9 @@ inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from,
 template <const auto& T>
 inline TextOffset ll_drop_end(LlContext& c, const Token& t) {
   if (t.end != t.begin) return t.end;
-  const LexReading r = ll_open_reading<T>(c, t.begin);
-  if (r.term != kInvalidSymbol) return lex_cut(t.begin, r);
+  if (const LexReading r = ll_open_reading<T>(c, t.begin);
+      r.term != kInvalidSymbol)
+    return lex_cut(t.begin, r);
   TextOffset reached = t.begin;
   return ll_unmatched_end<T>(c, t.begin, c.len, reached);
 }

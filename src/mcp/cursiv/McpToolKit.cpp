@@ -103,10 +103,11 @@ McpToolPosition tool_position(const json::Value& arguments) {
   if (file == nullptr || !file->isString())
     throw std::invalid_argument("'file' names the document");
   const std::optional<std::int32_t> lineNumber = detail::tool_integer(line, 1);
-  if (!lineNumber) throw std::invalid_argument("'line' is 1-based");
+  if (!lineNumber.has_value()) throw std::invalid_argument("'line' is 1-based");
   const std::optional<std::int32_t> columnNumber =
       detail::tool_integer(column, 1);
-  if (!columnNumber) throw std::invalid_argument("'column' is 1-based");
+  if (!columnNumber.has_value())
+    throw std::invalid_argument("'column' is 1-based");
   return {tool_file_uri(file->string()),
           static_cast<std::uint32_t>(*lineNumber - 1),
           static_cast<std::uint32_t>(*columnNumber - 1)};
@@ -187,25 +188,26 @@ McpToolResult route_document_tool(
     // write runs beside.
     if (!shared.workspaceLock->read(
             [&] {
+              using enum Admission;
               const std::shared_ptr<Document> document =
                   shared.documents->getDocument(id);
               if (document == nullptr) {
-                admission = Admission::Gone;
+                admission = Gone;
                 return;
               }
               if (document->language == nullptr) {
-                admission = Admission::Lagging;
+                admission = Lagging;
                 return;
               }
               if (workspace && builder.currentState() < target) return;
               // Under a queued read the build is over: a document still below
               // the workspace's state was left out of it.
               if (document->state.load() < target) {
-                if (workspace) admission = Admission::Lagging;
+                if (workspace) admission = Lagging;
                 return;
               }
               body(*document, *document->language, out);
-              admission = Admission::Ran;
+              admission = Ran;
             },
             token,
             workspace ? WorkspaceLock::ReadPriority::Normal
