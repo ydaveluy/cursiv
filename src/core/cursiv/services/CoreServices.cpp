@@ -38,7 +38,7 @@ void CoreServices::visitServices(
   yield({"grammarSource", false, grammarSource != nullptr});
   yield({"astReflection", true, astReflection != nullptr});
   yield({"nameProvider", true, nameProvider != nullptr});
-  yield({"astNodeLocator", true, astNodeLocator != nullptr});
+  yield({"astNodeLocator", false, astNodeLocator != nullptr});
   yield({"astNodeDescriptionProvider", true,
          astNodeDescriptionProvider != nullptr});
   yield({"referenceDescriptionProvider", true,

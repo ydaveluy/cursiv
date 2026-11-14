@@ -1121,7 +1121,7 @@ void a_conversion_error_does_not_withhold_formatting() {
   // The workspace language has no conversion that can fail, so the test adds
   // the diagnostic itself.
   cursiv::ParseDiagnostic failed;
-  failed.kind = cursiv::DiagnosticKind::conversion_error;
+  failed.kind = cursiv::DiagnosticKind::ConversionError;
   failed.begin = 17;
   failed.end = 21;
   document->parseResult.diagnostics.push_back(failed);

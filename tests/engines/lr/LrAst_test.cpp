@@ -49,7 +49,7 @@ void a_nest_on_the_creations_record_wraps_the_node_made_there(
   const std::string doc = "$a !";
   const cursiv::ParseResult r = p.parse(doc);
   CHECK(clean(r));
-  const Wrap* const w = cursiv::ast_cast<Wrap>(r.value_as<Node>());
+  const Wrap* const w = cursiv::ast_cast<Wrap>(r.valueAs<Node>());
   CHECK(w != nullptr && w->inner != nullptr);
   CHECK(w != nullptr && cursiv::ast_cast<Wrap>(w->inner) == nullptr);
 }
@@ -58,7 +58,7 @@ void a_close_adopts_the_node_before_its_nest_wraps_it(const cursiv::Parser& p) {
   const std::string doc = "$b abc !";
   const cursiv::ParseResult r = p.parse(doc);
   CHECK(clean(r));
-  const Wrap* const w = cursiv::ast_cast<Wrap>(r.value_as<Node>());
+  const Wrap* const w = cursiv::ast_cast<Wrap>(r.valueAs<Node>());
   CHECK(w != nullptr && w->inner != nullptr && w->inner->name == "abc");
 }
 
@@ -68,7 +68,7 @@ void an_empty_run_of_nests_leaves_the_node_made_on_the_leaf(
     const std::string doc = "$e abc";
     const cursiv::ParseResult r = p.parse(doc);
     CHECK(clean(r));
-    Node* const n = r.value_as<Node>();
+    Node* const n = r.valueAs<Node>();
     CHECK(n != nullptr && n->name == "abc");
     CHECK(cursiv::ast_cast<Wrap>(n) == nullptr);
   }
@@ -76,7 +76,7 @@ void an_empty_run_of_nests_leaves_the_node_made_on_the_leaf(
     const std::string doc = "$e abc ! !";
     const cursiv::ParseResult r = p.parse(doc);
     CHECK(clean(r));
-    const Wrap* const outer = cursiv::ast_cast<Wrap>(r.value_as<Node>());
+    const Wrap* const outer = cursiv::ast_cast<Wrap>(r.valueAs<Node>());
     CHECK(outer != nullptr && outer->inner != nullptr);
     const Wrap* const mid =
         outer == nullptr ? nullptr : cursiv::ast_cast<Wrap>(outer->inner);
@@ -100,7 +100,7 @@ void inline_creations_keep_their_own_payloads(const cursiv::Parser& p) {
     const std::string doc = "$n abc";
     const auto r = p.parse(doc);
     CHECK(clean(r));
-    const Node* const n = r.value_as<Node>();
+    const Node* const n = r.valueAs<Node>();
     CHECK(n && n->child && n->child->child);
     if (n && n->child && n->child->child) {
       CHECK(n != n->child && n->child != n->child->child);
@@ -112,7 +112,7 @@ void inline_creations_keep_their_own_payloads(const cursiv::Parser& p) {
   for (const std::string doc : {"$t abc", "$c abc", "$c ?"}) {
     const auto r = p.parse(doc);
     CHECK(clean(r));
-    const Node* const n = r.value_as<Node>();
+    const Node* const n = r.valueAs<Node>();
     CHECK(n && n->child);
     if (!n || !n->child) continue;
     CHECK(n->name.empty() && n->alias.empty());
@@ -126,7 +126,7 @@ void inline_creations_keep_their_own_payloads(const cursiv::Parser& p) {
     const std::string doc = "$m abc def";
     const auto r = p.parse(doc);
     CHECK(clean(r));
-    const Node* const n = r.value_as<Node>();
+    const Node* const n = r.valueAs<Node>();
     CHECK(n && n->children.size() == 2);
     if (n && n->children.size() == 2) {
       CHECK(n->children[0]->name == "abc" && n->children[1]->name == "def");
@@ -140,7 +140,7 @@ void a_capsule_preserves_options_and_region_edges(const cursiv::Parser& p) {
   for (const std::string doc : {"$o", "$o abc", "$z", "$z abc"}) {
     const auto r = p.parse(doc);
     CHECK(clean(r));
-    const Node* const n = r.value_as<Node>();
+    const Node* const n = r.valueAs<Node>();
     CHECK(n != nullptr);
     if (!n) continue;
     CHECK((n->child != nullptr) == (doc != "$o"));
@@ -150,7 +150,7 @@ void a_capsule_preserves_options_and_region_edges(const cursiv::Parser& p) {
     const std::string doc = "$s  abc:def  ;";
     const auto r = p.parse(doc);
     CHECK(clean(r));
-    const Node* const n = r.value_as<Node>();
+    const Node* const n = r.valueAs<Node>();
     CHECK(n && n->child && n->child->name == "abc" && n->child->alias == "def");
   }
   for (const std::string doc : {"$s abc :def;", "$s abc: def;"})
@@ -163,7 +163,7 @@ void nests_wrap_the_captured_child(const cursiv::Parser& p) {
       const std::string doc = prefix + std::string(count, '!');
       const auto r = p.parse(doc);
       CHECK(clean(r));
-      const Node* const n = r.value_as<Node>();
+      const Node* const n = r.valueAs<Node>();
       CHECK(n && n->child);
       if (!n || !n->child) continue;
       CHECK(n->name.empty() && n->child->parent == n);
@@ -187,7 +187,7 @@ void text_actions_run_once_per_declared_occurrence(const cursiv::Parser& p) {
     tfused::conversions = 0;
     const auto result = p.parse(text);
     CHECK(clean(result));
-    const auto* node = result.value_as<Node>();
+    const auto* node = result.valueAs<Node>();
     CHECK(node && node->texts.size() == expected.size());
     CHECK(tfused::conversions == expected.size());
     CHECK(result.nodes().size() == 1);
@@ -204,7 +204,7 @@ void text_actions_run_once_per_declared_occurrence(const cursiv::Parser& p) {
   for (const std::string text : {"$h", "$h + abc"}) {
     const auto result = p.parse(text);
     CHECK(clean(result));
-    const auto* node = result.value_as<Node>();
+    const auto* node = result.valueAs<Node>();
     CHECK(node);
     if (!node) continue;
     CHECK((node->child != nullptr) == (text == "$h + abc"));
@@ -219,7 +219,7 @@ void a_bare_word_does_not_acquire_another_arms_flag(const cursiv::Parser& p) {
     const std::string input = "$k " + std::string(word);
     const auto r = p.parse(input);
     CHECK(clean(r));
-    const Node* const n = r.value_as<Node>();
+    const Node* const n = r.valueAs<Node>();
     CHECK(n && !n->flagged && n->child);
     if (n && n->child) CHECK(n->child->flagged == (word == "END"));
   }
@@ -258,7 +258,7 @@ std::string root_name(const Engine& engine, std::string_view text,
   const cursiv::ParseResult r = engine->parse(text);
   nodes = r.nodes().size();
   if (!r.accepted || !r.diagnostics.empty()) return "<refused>";
-  const auto* const clade = r.value_as<tadopt::ast::Clade>();
+  const auto* const clade = r.valueAs<tadopt::ast::Clade>();
   if (clade == nullptr) return "<not a clade>";
   // The root's record is the document's, tokens beside the clade included.
   const cursiv::CstNode& root = r.cst()[clade->cstNodeId];
@@ -288,7 +288,7 @@ void run() {
   {
     const auto e = tadopt::generated::G::create_parser();
     const cursiv::ParseResult r = e->parse("inner A;");
-    const auto* const doc = r.value_as<tadopt::ast::Doc>();
+    const auto* const doc = r.valueAs<tadopt::ast::Doc>();
     CHECK(r.accepted && doc != nullptr && doc->clade != nullptr &&
           doc->clade->name == "A");
     std::printf("inner: %zu node(s)\n", r.nodes().size());
@@ -308,7 +308,7 @@ void reads(const std::unique_ptr<::cursiv::Parser>& parser) {
   using Doc = tshadow::cursiv::std::ast::Doc;
   const ::cursiv::ParseResult r = parser->parse("a bc d");
   CHECK(r.accepted && r.diagnostics.empty());
-  const Doc* const doc = r.value_as<Doc>();
+  const Doc* const doc = r.valueAs<Doc>();
   CHECK(doc != nullptr && doc->items.size() == 3 && doc->items[1] == "bc");
 }
 
@@ -329,7 +329,7 @@ namespace {
 
 bool reads(const cursiv::Parser& parser) {
   const cursiv::ParseResult r = parser.parse("word");
-  const auto* const word = r.value_as<tsibling::Word>();
+  const auto* const word = r.valueAs<tsibling::Word>();
   return r.accepted && word != nullptr && word->name == "word";
 }
 
@@ -618,7 +618,7 @@ void a_precedence_table() {
   // The level and the associativity are the operator's: a shift/reduce covered
   // by one is decided at construction, not by a fork.
   CHECK(c.termBuild[xsym(0, 1)].prec == 2);
-  CHECK(c.termBuild[xsym(0, 1)].assoc == cursiv::Association::left);
+  CHECK(c.termBuild[xsym(0, 1)].assoc == cursiv::Association::Left);
   CHECK(!X::table().fault);
 
   // An operator keeps its level wherever it stands in its production.

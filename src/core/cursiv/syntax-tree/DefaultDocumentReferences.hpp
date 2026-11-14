@@ -3,7 +3,9 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "cursiv/syntax-tree/AstMetaData.hpp"
@@ -57,16 +59,16 @@ struct DefaultDocumentReferences : DocumentReferences {
                      std::uint8_t narrow) const;
 
   // One reference's share of `visitResolved` and `visitUnresolved`.
-  void visit_resolved(const Cst& cst, const detail::RefHandle& h,
-                      ResolvedReferenceVisitor visitor) const;
-  void visit_unresolved(const Cst& cst, const detail::RefHandle& h,
-                        UnresolvedReferenceVisitor visitor) const;
+  void forEachResolved(const Cst& cst, const detail::RefHandle& h,
+                       ResolvedReferenceVisitor visitor) const;
+  void forEachUnresolved(const Cst& cst, const detail::RefHandle& h,
+                         UnresolvedReferenceVisitor visitor) const;
 
   // The ranks whose name touches `[begin, end]`, in rank order.
-  [[nodiscard]] std::vector<std::uint32_t> ranks_in(const Cst& cst,
-                                                    TextOffset begin,
-                                                    TextOffset end) const;
-  void index_names(const Cst& cst) const;
+  [[nodiscard]] std::vector<std::uint32_t> ranksIn(const Cst& cst,
+                                                   TextOffset begin,
+                                                   TextOffset end) const;
+  void indexNames(const Cst& cst) const;
 
   // A named reference by where its name begins, and the furthest end of the
   // names up to it in this order: walking back from the end of a window, a
@@ -83,6 +85,14 @@ struct DefaultDocumentReferences : DocumentReferences {
   mutable std::vector<NameAt> _names;
   mutable std::mutex _indexing;
   mutable std::atomic<bool> _indexed{false};
+  // Set when a resolution answers a failure, cleared by `reset`: what
+  // `anyUnresolved` reads.
+  mutable std::atomic<bool> _anyFailed{false};
+  void keepFailure(std::uint32_t rank, std::string what) const;
+  // What each lookup that threw said, by rank, until `reset`; a refused
+  // allocation leaves it unsaid.
+  mutable std::mutex _failuresLock;
+  mutable std::unordered_map<std::uint32_t, std::string> _failures;
 };
 
 }  // namespace cursiv

@@ -20,24 +20,24 @@ DefaultDocumentHighlightProvider::getDocumentHighlight(
     const CancellationToken& token) const {
   std::vector<lsp::DocumentHighlight> highlights;
   throw_if_cancelled(token);
-  const Declaration found = _core.references->findDeclaration(
+  const Declaration found = services.references->findDeclarations(
       document, document.textDocument().offsetAt(from_lsp(position)), token);
 
   // The server routes a request to the container of the asking document, so
-  // `_core`'s name provider is the target's language exactly when the two
+  // `services`'s name provider is the target's language exactly when the two
   // documents are the same -- the only case a name is measured here.
-  const NameProvider& names = *_core.nameProvider;
+  const NameProvider& names = *services.nameProvider;
   const auto options = [&](const AstNode& target) {
     // The declaration joins the answer only if it is here to be drawn: a caret
     // on a reference whose declaration lives in another file paints the
     // occurrences here and stops.
     const bool declared = target.getDocument() == &document &&
-                          names.getNameNode(target, &document).has_value();
+                          names.getNameNode(target, &document);
     return FindReferencesOptions{declared, document.id};
   };
   for (const ReferenceDescription& reference :
        detail::collect_references_per_declaration(
-           *_core.references, found.targets, options, token))
+           *services.references, found.targets, options, token))
     highlights.push_back(createDocumentHighlight(document, reference));
   return highlights;
 }

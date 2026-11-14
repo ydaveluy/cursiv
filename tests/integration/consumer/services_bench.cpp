@@ -42,7 +42,7 @@ struct Hints final : cursiv::InlayHintProvider {
   }
 };
 
-bool register_language(cursiv::SharedCoreServices& shared) {
+void register_language(cursiv::SharedCoreServices& shared) {
   auto services = std::make_unique<cursiv::LspServices>(
       dynamic_cast<cursiv::SharedLspServices&>(shared));
   cursiv::install_default_core_services(*services);
@@ -54,7 +54,6 @@ bool register_language(cursiv::SharedCoreServices& shared) {
   services->formatter = std::make_unique<Formatter>();
   services->inlayHintProvider = std::make_unique<Hints>();
   shared.serviceRegistry->registerServices(std::move(services));
-  return true;
 }
 
 int main(int argc, char** argv) {

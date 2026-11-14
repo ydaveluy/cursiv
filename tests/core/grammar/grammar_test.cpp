@@ -2258,13 +2258,13 @@ static_assert(
         decltype(GrammarSpec::levels(
             GrammarSpec::prefix<Neg>(GrammarSpec::lit<"-">),
             GrammarSpec::left(GrammarSpec::lit<"*">))),
-        detail::Levels<detail::UnaryLevel<Association::prefix, Neg, &Neg::op,
+        detail::Levels<detail::UnaryLevel<Association::Prefix, Neg, &Neg::op,
                                           &Neg::operand, detail::Lit<"-">>,
                        detail::LeftAssoc<detail::Lit<"*">>>>);
 static_assert(
     std::is_same_v<decltype(GrammarSpec::postfix<&Fact::arg, &Fact::bang>(
                        GrammarSpec::lit<"!">)),
-                   detail::Levels<detail::UnaryLevel<Association::postfix, Fact,
+                   detail::Levels<detail::UnaryLevel<Association::Postfix, Fact,
                                                      &Fact::bang, &Fact::arg,
                                                      detail::Lit<"!">>>>);
 static_assert(std::is_same_v<cursiv::detail::rule_type_t<G::Expr>, Expr>);
@@ -2637,11 +2637,11 @@ void words_with_a_text_per_use(const cursiv::Parser& parser,
   expect(g.spellingDoc("twin").empty(), engine,
          "a word with several texts has none of its own");
   const cursiv::ParseResult low = parser.parse("use twin low");
-  const auto* const word = low.value_as<tdual::Word>();
+  const auto* const word = low.valueAs<tdual::Word>();
   expect(word != nullptr && word->name == "low", engine,
          "a data rule's value keeps its text");
   const cursiv::ParseResult named = parser.parse("use twin named");
-  const auto* const member = named.value_as<tdual::Word>();
+  const auto* const member = named.valueAs<tdual::Word>();
   expect(member != nullptr && member->name == "named", engine,
          "a write keeps its value");
 }
@@ -2978,9 +2978,8 @@ namespace derived {
 namespace {
 
 const tderive::ast::Doc* doc_of(const cursiv::ParseResult& r) {
-  return r.accepted && !r.cst().recovered()
-             ? r.value_as<tderive::ast::Doc>()
-             : nullptr;
+  return r.accepted && !r.cst().recovered() ? r.valueAs<tderive::ast::Doc>()
+                                            : nullptr;
 }
 
 void a_dialect_reads_what_its_base_reads() {

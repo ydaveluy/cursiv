@@ -5,7 +5,7 @@
 
 #include <cstddef>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/shared/utils/inside_scalar.hpp"
 #include "cursiv/text/scalar_at.hpp"
 

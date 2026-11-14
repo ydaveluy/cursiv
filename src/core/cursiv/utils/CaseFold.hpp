@@ -1,12 +1,14 @@
 #pragma once
 
+#include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
 #include <string_view>
 
-#include "cursiv/grammar/unicode/UnicodeFold.hpp"
+#include "cursiv/text/unicode/UnicodeFold.hpp"
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/utils/macros.hpp"
 
@@ -198,6 +200,16 @@ inline constexpr std::uint64_t kHashMix = 0x9e3779b97f4a7c15ull;
     return detail::folded_scalars_hash(name.data(), name.size());
   return detail::hash_avalanche(h);
 }
+
+namespace detail {
+
+// The size of an open-addressed table keyed by `folded_hash`: the smallest
+// power of two that leaves it at most half full, so a linear probe stays short.
+[[nodiscard]] inline std::size_t table_size(std::size_t entries) noexcept {
+  return std::bit_ceil(std::max<std::size_t>(entries * 2, 1));
+}
+
+}  // namespace detail
 
 namespace detail {
 

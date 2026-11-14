@@ -42,11 +42,14 @@ inline constexpr bool has_default_convert =
     std::is_same_v<M, std::string_view> || std::is_same_v<M, std::string> ||
     std::is_same_v<M, bool> || from_chars_number<M> || std::is_enum_v<M>;
 
+// What the library's own converters derive from.
+struct BuiltInConverter {};
+
 }  // namespace detail
 
-// The customisation point, for a target of your own:
-//   `static ConversionResult<T> convert(std::string_view)`
-// Unspecialised, it is the named refusal in `rule_type`.
+// The customisation point for a target of your own: `static
+// ConversionResult<T> convert(std::string_view)`. It converts `as<T>(e)` and
+// every member of type T a rule writes with no converter of its own.
 template <class T>
 struct default_converter;
 
@@ -61,7 +64,7 @@ struct ConversionResult {
   static constexpr ConversionResult err(std::string msg) {
     return {
         std::nullopt,
-        {.kind = DiagnosticKind::conversion_error, .message = std::move(msg)}};
+        {.kind = DiagnosticKind::ConversionError, .message = std::move(msg)}};
   }
 };
 
@@ -212,10 +215,21 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
 
 template <class T>
   requires detail::has_default_convert<T>
-struct default_converter<T> {
+struct default_converter<T> : detail::BuiltInConverter {
   static constexpr ConversionResult<T> convert(std::string_view text) {
     return default_convert<T>(text);
   }
 };
+
+namespace detail {
+// Whether a language wrote `default_converter<T>` with a `convert`.
+template <class T>
+consteval bool written_converter() {
+  if constexpr (requires { default_converter<T>::convert(std::string_view{}); })
+    return !std::is_base_of_v<BuiltInConverter, default_converter<T>>;
+  else
+    return false;
+}
+}  // namespace detail
 
 }  // namespace cursiv

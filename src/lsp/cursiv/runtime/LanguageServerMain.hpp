@@ -14,7 +14,7 @@ namespace detail {
 
 [[nodiscard]] int run_language_server_main_on(
     int argc, char** argv, std::string_view serverName,
-    const std::function<bool(SharedLspServices&)>& registerLanguageServices,
+    const std::function<void(SharedLspServices&)>& registerLanguageServices,
     SharedLspServices& sharedServices);
 
 }  // namespace detail
@@ -26,7 +26,7 @@ template <class TShared = SharedLspServices>
   requires std::derived_from<TShared, SharedLspServices>
 [[nodiscard]] int run_language_server_main(
     int argc, char** argv, std::string_view serverName,
-    const std::function<bool(SharedLspServices&)>& registerLanguageServices) {
+    const std::function<void(SharedLspServices&)>& registerLanguageServices) {
   TShared sharedServices;
   return detail::run_language_server_main_on(
       argc, argv, serverName, registerLanguageServices, sharedServices);

@@ -521,7 +521,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     const auto ops = std::span(g.climbOps.data() + g.climbs[k].opBase,
                                g.climbs[k].opCount);
     if (std::ranges::none_of(ops, [](const LlClimbOp& op) {
-          return op.assoc == Association::non;
+          return op.assoc == Association::Non;
         }))
       continue;
     steps.resize(a.nodeAfter.size());
@@ -529,7 +529,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
       if (const std::uint16_t n = g.atomic_operator(op.body); n != kNoRow)
         steps[n] = (std::uint32_t(k + 1u) << 16) |
                    (std::uint32_t{op.prec} << 1) |
-                   (op.assoc == Association::non ? 1u : 0u);
+                   (op.assoc == Association::Non ? 1u : 0u);
   }
   o.array("::std::uint32_t", "kNodeStep", steps);
   o.array("::std::uint16_t", "kEdgeNode", a.edgeNode);

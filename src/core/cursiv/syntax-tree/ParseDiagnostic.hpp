@@ -15,23 +15,23 @@ namespace cursiv {
 enum class DiagnosticKind : std::uint8_t {
   // A missing construct was assumed: no source text was consumed, and
   // `begin == end` is where an editor puts an insertion caret.
-  inserted,
+  Inserted,
   // Source text was skipped to reach a point the parse could go on from.
-  deleted,
+  Deleted,
   // Source text was consumed as the expected construct -- a misspelling.
-  replaced,
+  Replaced,
   // The input ended before the expected construct.
-  incomplete,
+  Incomplete,
   // The tree parsed; turning a matched text into a value did not.
-  conversion_error,
+  ConversionError,
   // The parser hit a work limit on this span and kept the reading it ranked
   // first, or the cheapest repair found; reported, never silent.
-  bounded,
+  Bounded,
 };
 
 // Only a range locates it: a caller that knows a node fills the range from it.
 struct ParseDiagnostic {
-  DiagnosticKind kind = DiagnosticKind::conversion_error;
+  DiagnosticKind kind = DiagnosticKind::ConversionError;
   // A deletion that starts with a line's indentation whose blanks differ from
   // the open block's in the same place: a tab against a space.
   bool mixedIndent = false;
@@ -50,8 +50,8 @@ struct ParseDiagnostic {
   // From the parse or a repair, not from a conversion; `bounded` is only a
   // note and repairs nothing.
   [[nodiscard]] constexpr bool isSyntax() const noexcept {
-    return kind != DiagnosticKind::conversion_error &&
-           kind != DiagnosticKind::bounded;
+    return kind != DiagnosticKind::ConversionError &&
+           kind != DiagnosticKind::Bounded;
   }
 };
 

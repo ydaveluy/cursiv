@@ -39,6 +39,7 @@
 #include "cursiv/references/DefaultScopeComputation.hpp"
 #include "cursiv/references/DefaultScopeProvider.hpp"
 #include "cursiv/references/Linker.hpp"
+#include "cursiv/references/NameProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
@@ -51,7 +52,10 @@
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/utils/Utf8.hpp"
 #include "cursiv/validation/DocumentValidator.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
+#include "cursiv/validation/ValidationRegistry.hpp"
+#include "cursiv/workspace/AstNodeDescriptionProvider.hpp"
 #include "cursiv/workspace/AstNodeLocator.hpp"
 #include "cursiv/workspace/DefaultDocumentBuilder.hpp"
 #include "cursiv/workspace/DefaultDocumentFactory.hpp"
@@ -313,7 +317,7 @@ void exports_keep_uri_order(bool interrupt) {
   CHECK(!use->hasLinkingErrors());
   CHECK(use->diagnostics.empty());
   const auto* entity = cursiv::ast_cast<ws::ast::Entity>(
-      use->parseResult.value_as<ws::ast::Workspace>()->elements[0]);
+      use->parseResult.valueAs<ws::ast::Workspace>()->elements[0]);
   const auto* target = entity->features[0]->type.get();
   CHECK(target != nullptr);
   CHECK(target != nullptr && target->getDocument() == first);
@@ -364,6 +368,49 @@ void an_update_honors_an_overridden_affected_check() {
   CHECK(!dependent->hasLinkingErrors());
   const std::unordered_set<cursiv::DocumentId> moved = {dependent->id, target->id};
   CHECK(world.shared.indexManager->isAffected(*dependent, moved));
+}
+
+// Among the documents that read nothing from the change, an update links again
+// those `shouldRelink` names, and those alone.
+void an_update_honors_an_overridden_relink_check() {
+  struct Relinking final : cursiv::DefaultDocumentBuilder {
+    using DefaultDocumentBuilder::DefaultDocumentBuilder;
+    cursiv::DocumentId forced = cursiv::kNoDocument;
+    bool shouldRelink(
+        const cursiv::Document& document,
+        const std::unordered_set<cursiv::DocumentId>&) const override {
+      return document.id == forced;
+    }
+  };
+  World world;
+  auto builder = std::make_unique<Relinking>(world.shared);
+  Relinking* const relinking = builder.get();
+  world.shared.documentBuilder = std::move(builder);
+  cursiv::Document* const target = world.add("file:///target.ws", "datatype Type");
+  cursiv::Document* const broken =
+      world.add("file:///broken.ws", "entity B { f : Missing }");
+  cursiv::Document* const forced =
+      world.add("file:///forced.ws", "datatype Other");
+  cursiv::Document* documents[] = {target, broken, forced};
+  world.shared.documentBuilder->build(documents);
+  CHECK(broken->hasLinkingErrors());
+  relinking->forced = forced->id;
+
+  struct Linked final : cursiv::DocumentPhaseListener {
+    std::mutex mutex;
+    std::map<cursiv::DocumentId, int> count;
+    void onDocumentPhase(cursiv::Document& document, cursiv::DocumentState state,
+                         const cursiv::CancellationToken&) override {
+      const std::scoped_lock lock(mutex);
+      if (state == cursiv::DocumentState::Linked) ++count[document.id];
+    }
+  } linked;
+  world.shared.documentBuilder->addDocumentPhaseListener(linked);
+  const std::string_view changed[] = {target->uri};
+  world.shared.documentBuilder->update(changed, {});
+  world.shared.documentBuilder->removeDocumentPhaseListener(linked);
+  CHECK(linked.count[forced->id] == 1);
+  CHECK(linked.count[broken->id] == 0);
 }
 
 // Names a scope computation copies live as long as the parse, so a document
@@ -428,10 +475,10 @@ void a_document_keeps_text_from_its_parts() {
       world.add("file:///kept.ws", "datatype T\n");
   const std::string outer = "pkg";
   const std::string_view kept =
-      document->keep_text(outer, ".", std::string_view("Type"));
+      document->keepText(outer, ".", std::string_view("Type"));
   CHECK(kept == "pkg.Type");
   CHECK(kept.data() != outer.data());
-  const std::string_view empty = document->keep_text(std::string_view{});
+  const std::string_view empty = document->keepText(std::string_view{});
   CHECK(empty.empty() && empty.data() != nullptr);
 }
 
@@ -492,9 +539,9 @@ void concurrent_linking_waits_for_a_candidates_own_reference() {
   auto* a = world.add("file:///a.ws", "entity A extends B { }");
   auto* b = world.add("file:///b.ws", "entity B extends C { } entity C { }");
   auto* aa = cursiv::ast_cast<ws::ast::Entity>(
-      a->parseResult.value_as<ws::ast::Workspace>()->elements[0]);
+      a->parseResult.valueAs<ws::ast::Workspace>()->elements[0]);
   auto* bb = cursiv::ast_cast<ws::ast::Entity>(
-      b->parseResult.value_as<ws::ast::Workspace>()->elements[0]);
+      b->parseResult.valueAs<ws::ast::Workspace>()->elements[0]);
   cursiv::Document* documents[] = {a, b};
   auto build = std::async(std::launch::async, [&] {
     world.shared.documentBuilder->build(documents);
@@ -530,9 +577,9 @@ void references_to_a_later_document_can_resolve_lazily() {
     CHECK(b->state.load() == cursiv::DocumentState::Validated);
     CHECK(a->diagnostics.empty() && b->diagnostics.empty());
     const auto* aa = cursiv::ast_cast<ws::ast::Entity>(
-        a->parseResult.value_as<ws::ast::Workspace>()->elements[0]);
+        a->parseResult.valueAs<ws::ast::Workspace>()->elements[0]);
     const auto* bb = cursiv::ast_cast<ws::ast::Entity>(
-        b->parseResult.value_as<ws::ast::Workspace>()->elements[0]);
+        b->parseResult.valueAs<ws::ast::Workspace>()->elements[0]);
     CHECK(aa->superType.get() == bb);
     CHECK(bb->superType.get() != nullptr);
   };
@@ -555,7 +602,7 @@ struct HuntingScopes final : cursiv::DefaultScopeComputation {
       const cursiv::Document& document,
       const cursiv::CancellationToken& token) const override {
     for (const auto* element :
-         document.parseResult.value_as<ws::ast::Workspace>()->elements)
+         document.parseResult.valueAs<ws::ast::Workspace>()->elements)
       if (const auto* entity = cursiv::ast_cast<ws::ast::Entity>(element))
         if (const auto* found = services.shared().indexManager->findByName(
                 entity->superType.refText, true, {}, *services.astReflection))
@@ -591,7 +638,7 @@ void a_reference_read_while_scoping_is_read_again() {
     int kept = 0;
     for (int i = 0; i + 1 < kChain; ++i)
       if (cursiv::ast_cast<ws::ast::Entity>(
-              chain[i]->parseResult.value_as<ws::ast::Workspace>()->elements[0])
+              chain[i]->parseResult.valueAs<ws::ast::Workspace>()->elements[0])
               ->superType.resolve() != cursiv::RefState::Resolved)
         ++kept;
     CHECK(kept == 0);
@@ -869,7 +916,7 @@ class PhaseLogPerDocument final : public cursiv::DocumentPhaseListener {
 };
 
 const cursiv::AstNode* referenced_type(const cursiv::Document& document) {
-  const auto* root = document.parseResult.value_as<ws::ast::Workspace>();
+  const auto* root = document.parseResult.valueAs<ws::ast::Workspace>();
   if (root == nullptr || root->elements.empty()) return nullptr;
   const auto* entity = cursiv::ast_cast<ws::ast::Entity>(root->elements[0]);
   if (entity == nullptr || entity->features.empty()) return nullptr;
@@ -1248,7 +1295,7 @@ void a_listener_waiting_on_its_own_state_is_answered() {
   } thrower;
   cursiv::CancellationTokenSource watchdog;
   struct Waiter final : cursiv::DocumentPhaseListener {
-    const cursiv::DocumentBuilder* builder = nullptr;
+    cursiv::DocumentBuilder* builder = nullptr;
     cursiv::CancellationToken token;
     std::mutex m;
     std::vector<cursiv::WaitOutcome> outcomes;
@@ -1524,10 +1571,9 @@ void a_changed_folder_takes_its_documents_down() {
   CHECK(b->state.load() == cursiv::DocumentState::Validated);
 }
 
-// An unfinished request survives: a build interrupted before honouring its
-// ask keeps that ask through the next `build`, and only a build that finished
-// lets a later one replace it.
-void an_interrupted_request_is_not_replaced() {
+// A build asks what it says: an earlier one, interrupted before the document
+// was validated, leaves nothing that outlasts the next `build`.
+void a_build_replaces_an_interrupted_request() {
   const World world;
   cursiv::Document* const a =
       world.add("file:///a.ws", "entity E { f : Missing }\n");
@@ -1545,14 +1591,8 @@ void an_interrupted_request_is_not_replaced() {
   CHECK(cancelled);
   CHECK(a->state.load() < cursiv::DocumentState::Validated);
 
-  // The default ask (validating) does not replace the interrupted one.
   world.shared.documentBuilder->build(set);
-  CHECK(a->state.load() == cursiv::DocumentState::IndexedReferences);
-  CHECK(a->diagnostics.empty());  // the original no-validation ask held
-
-  // Honoured now, so the next ask takes: the guard is about completion, not a
-  // one-way lock.
-  world.shared.documentBuilder->build(set);
+  CHECK(a->state.load() == cursiv::DocumentState::Validated);
   CHECK(!a->diagnostics.empty());
 }
 
@@ -1581,7 +1621,7 @@ void a_wait_answers_all_its_outcomes() {
   cursiv::Document* const set[] = {a};
   world.shared.documentBuilder->build(set);
 
-  const cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
+  cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
   CHECK(builder.waitUntil(cursiv::DocumentState::Validated) ==
         cursiv::WaitOutcome::Reached);
   CHECK(builder.waitUntil(cursiv::DocumentState::Validated, a->id) ==
@@ -1600,7 +1640,7 @@ void a_wait_can_precede_the_first_build() {
   using namespace std::chrono_literals;
   const World world;
   auto* const document = world.add("file:///first.ws", "datatype A\n");
-  const auto& builder = *world.shared.documentBuilder;
+  auto& builder = *world.shared.documentBuilder;
   cursiv::CancellationTokenSource stop;
   auto workspace = std::async(std::launch::async, [&] {
     return builder.waitUntil(cursiv::DocumentState::Validated,
@@ -1667,10 +1707,10 @@ void a_failed_build_answers_its_waiters() {
 void a_refused_record_publishes_no_diagnostic() {
   struct RefusingBuilder final : cursiv::DefaultDocumentBuilder {
     using DefaultDocumentBuilder::DefaultDocumentBuilder;
-    mutable std::atomic<bool> refuse{true};
+    std::atomic<bool> refuse{true};
     void markAsCompleted(
         const cursiv::Document& document,
-        std::span<const cursiv::ValidationCategory* const> ran) const override {
+        std::span<const cursiv::ValidationCategory* const> ran) override {
       if (refuse.exchange(false)) throw std::bad_alloc();
       DefaultDocumentBuilder::markAsCompleted(document, ran);
     }
@@ -1779,7 +1819,7 @@ void a_request_reads_beside_a_running_build() {
   cursiv::Document* const document =
       world.add(uri, "datatype String\nentity E { f : String }\n");
   cursiv::WorkspaceLock& lock = *world.shared.workspaceLock;
-  const cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
+  cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
   const cursiv::DocumentId id = world.shared.documents->getDocumentId(uri);
 
   // One build first: the race is about a document that has a tree to lose.
@@ -1815,7 +1855,7 @@ void a_request_reads_beside_a_running_build() {
           const cursiv::Cst& cst = d->parseResult.cst();
           // A tree that says `Parsed` and holds nothing is what a reader let
           // in before the write allows it would see.
-          if (cst.size() == 0 || cst.text(cst.entry_root()).empty()) ++torn;
+          if (cst.size() == 0 || cst.text(cst.entryRoot()).empty()) ++torn;
           ++served;
         },
         {}, cursiv::WorkspaceLock::ReadPriority::Immediate);
@@ -1837,7 +1877,7 @@ void a_request_reads_the_index_beside_a_running_build() {
   cursiv::Document* const b =
       world.add("file:///user.ws", "entity E { f : Shared }\n");
   cursiv::WorkspaceLock& lock = *world.shared.workspaceLock;
-  const cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
+  cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
   cursiv::IndexManager& index = *world.shared.indexManager;
 
   cursiv::Document* const set[] = {a, b};
@@ -2186,7 +2226,7 @@ void an_update_drops_unindexed_resolutions(cursiv::DocumentState stopAfter,
 
   lock.write([&](const cursiv::CancellationToken& token) {
     if (!deleted) builder.build(targets, {}, token);
-    builder.build(consumers, {}, token);
+    builder.build(consumers, {false, {}}, token);
   });
   CHECK(consumer->state.load() == cursiv::DocumentState::IndexedReferences);
   CHECK(consumer->hasLinkingErrors());
@@ -2363,6 +2403,120 @@ void a_reset_to_parsed_takes_the_exports_down() {
   CHECK(exported() == 0);
 }
 
+// A walk over some documents sees their exports alone, each document once,
+// in URI order whatever order they are asked in.
+void a_walk_over_some_documents_sees_those_alone() {
+  const World world;
+  cursiv::Document* const b = world.add("file:///b.ws", "datatype B\n");
+  cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
+  cursiv::Document* const c = world.add("file:///c.ws", "datatype C\n");
+  cursiv::Document* const set[] = {a, b, c};
+  world.shared.documentBuilder->build(set);
+  const auto names = [&](std::span<const cursiv::DocumentId> asked) {
+    std::vector<std::string_view> found;
+    (void)world.shared.indexManager->visitElements(
+        nullptr, asked, [&](const cursiv::AstNodeDescription& d) {
+          found.push_back(d.name);
+          return true;
+        });
+    return found;
+  };
+  const cursiv::DocumentId twice[] = {c->id, a->id, c->id};
+  CHECK(names(twice) == (std::vector<std::string_view>{"A", "C"}));
+  const cursiv::DocumentId one[] = {b->id};
+  CHECK(names(one) == (std::vector<std::string_view>{"B"}));
+}
+
+// A scope computation that hands its table back as it filled it.
+struct PlainScopes final : cursiv::DefaultScopeComputation {
+  using DefaultScopeComputation::DefaultScopeComputation;
+  [[nodiscard]] cursiv::LocalSymbols collectLocalSymbols(
+      const cursiv::Document& document,
+      const cursiv::CancellationToken&) const override {
+    cursiv::LocalSymbols symbols;
+    for (cursiv::AstNode* const node : document.parseResult.nodes())
+      if (node->parent != nullptr && cursiv::is_named(*node))
+        if (const auto described =
+                services.astNodeDescriptionProvider->createDescription(
+                    *node, {}, &document))
+          symbols.add(node->parent, *described);
+    return symbols;
+  }
+};
+
+// The builder makes the table readable: its author adds entries, no more.
+void a_scope_table_is_readable_as_its_author_filled_it() {
+  World world([](cursiv::CoreServices& ws) {
+    ws.scopeComputation = std::make_unique<PlainScopes>(ws);
+  });
+  const cursiv::Document* const d = world.built(
+      "file:///p.ws", "package p {\n datatype T\n entity E { f : T }\n}\n");
+  const auto* const package = cursiv::ast_cast<ws::ast::PackageDeclaration>(
+      d->parseResult.valueAs<ws::ast::Workspace>()->elements[0]);
+  const auto* const entity =
+      cursiv::ast_cast<ws::ast::Entity>(package->elements[1]);
+  CHECK(entity->features[0]->type.get() == package->elements[0]);
+}
+
+// Unlinking forgets what was resolved, not how to resolve: a reference read
+// afterwards is resolved again.
+void an_unlinked_reference_resolves_again() {
+  const World world;
+  const cursiv::Document* const d =
+      world.built("file:///u.ws", "datatype T\nentity E { f : T }\n");
+  const auto* const model = d->parseResult.valueAs<ws::ast::Workspace>();
+  const auto* const entity =
+      cursiv::ast_cast<ws::ast::Entity>(model->elements[1]);
+  CHECK(entity->features[0]->type.get() == model->elements[0]);
+  world.ws->linker->unlink(
+      *world.shared.documents->getDocument("file:///u.ws"));
+  CHECK(entity->features[0]->type.get() == model->elements[0]);
+}
+
+// A document the store does not hold has no identity to index under.
+void a_document_outside_the_store_is_refused() {
+  const World world;
+  const std::shared_ptr<cursiv::Document> loose =
+      world.shared.documentFactory->fromString("datatype A\n", "file:///l.ws");
+  cursiv::Document* const set[] = {loose.get()};
+  CHECK(support::throws<cursiv::DocumentStoreError>(
+      [&] { world.shared.documentBuilder->build(set); }));
+}
+
+// A listener is told the name each document is known by, whatever spelling
+// the caller used.
+void an_update_names_documents_as_the_store_does() {
+  const World world;
+  (void)world.built("file:///n/a.ws", "datatype A\n");
+  struct Told final : cursiv::DocumentUpdateListener {
+    std::vector<std::string> changed;
+    void onUpdate(std::span<const std::string_view> uris,
+                  std::span<const std::string_view>) override {
+      changed.assign(uris.begin(), uris.end());
+    }
+  } told;
+  cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
+  builder.addDocumentUpdateListener(told);
+  const std::string_view twice[] = {"FILE:///n/a.ws", "file:///n/./a.ws"};
+  builder.update(twice, {});
+  builder.removeDocumentUpdateListener(told);
+  CHECK(told.changed == std::vector<std::string>{"file:///n/a.ws"});
+}
+
+// Once its build has let immediate reads in, a write resets nothing.
+void a_reset_after_the_build_of_its_write_is_refused() {
+  const World world;
+  cursiv::Document* const a = world.built("file:///a.ws", "datatype A\n");
+  world.shared.workspaceLock->write([&](const cursiv::CancellationToken&) {
+    const std::string_view changed[] = {a->uri};
+    world.shared.documentBuilder->update(changed, {});
+    CHECK(support::throws<std::logic_error>([&] {
+      world.shared.documentBuilder->resetToState(
+          *a, cursiv::DocumentState::Changed);
+    }));
+  });
+}
+
 // A listener that gives up does not silence the one after it.
 void every_listener_receives_each_state() {
   const World world;
@@ -2489,8 +2643,9 @@ void a_build_reports_what_it_builds() {
   CHECK(told.deleted == 0);
 }
 
-// Built without validation is done, not still waiting for every category.
-void a_build_without_validation_is_complete() {
+// Built without validation is done until an update, which asks its own
+// request of every document not yet validated.
+void an_update_validates_what_was_built_without_validation() {
   const World world;
   cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
   cursiv::Document* const set[] = {a};
@@ -2503,12 +2658,8 @@ void a_build_without_validation_is_complete() {
             cursiv::DocumentState::Validated, a->id) ==
         cursiv::WaitOutcome::Unreachable);
   world.shared.documentBuilder->removeDocumentPhaseListener(phases);
-  PhaseLog received;
-  world.shared.documentBuilder->addBuildPhaseListener(received);
   world.shared.documentBuilder->update({}, {});
-  world.shared.documentBuilder->removeBuildPhaseListener(received);
-  CHECK(!received.counts.empty());
-  CHECK(received.counts.back() == 0);
+  CHECK(a->state.load() == cursiv::DocumentState::Validated);
 }
 
 // Updates validate the built-in and fast categories by default; callers can
@@ -2529,6 +2680,29 @@ void an_update_builds_with_the_update_options() {
   builder.update(changed, {});
   CHECK(a->state.load() == cursiv::DocumentState::IndexedReferences);
   CHECK(a->diagnostics.empty());
+}
+
+// An update compares each document with what it asks now: a category added
+// to its options runs on a document validated before.
+void an_update_runs_a_category_added_to_its_options() {
+  const World world([](cursiv::CoreServices& language) {
+    language.validationRegistry->registerAfterDocument(
+        [](const cursiv::Document&, cursiv::ValidationAcceptor& accept,
+           const cursiv::CancellationToken&) {
+          accept.accept(cursiv::TextRange{0, 0},
+                        cursiv::DiagnosticSeverity::Warning, "slow check ran");
+        },
+        &cursiv::slow);
+  });
+  cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
+  const cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
+  const std::string_view changed[] = {"file:///a.ws"};
+  builder.update(changed, {});
+  CHECK(a->state.load() == cursiv::DocumentState::Validated);
+  CHECK(a->diagnostics.empty());
+  builder.updateBuildOptions().validationCategories.push_back(&cursiv::slow);
+  builder.update({}, {});
+  CHECK(a->diagnostics.size() == 1);
 }
 
 // A file the store does not hold waits unparsed for the parse phase: the
@@ -2735,6 +2909,7 @@ void run() {
   exports_keep_uri_order(false);
   exports_keep_uri_order(true);
   an_update_honors_an_overridden_affected_check();
+  an_update_honors_an_overridden_relink_check();
   a_relinked_document_keeps_its_scopes();
   a_document_keeps_text_from_its_parts();
   a_new_homonym_retargets_without_reparsing(false, false);
@@ -2786,7 +2961,7 @@ void run() {
   every_document_is_reported_on_its_own();
   the_scopes_are_barred_before_the_first_link();
   a_changed_folder_takes_its_documents_down();
-  an_interrupted_request_is_not_replaced();
+  a_build_replaces_an_interrupted_request();
   a_duplicate_in_the_set_builds_once();
   a_wait_answers_all_its_outcomes();
   a_wait_can_precede_the_first_build();
@@ -2803,12 +2978,19 @@ void run() {
   a_state_reached_once_is_reported_once();
   a_deleted_documents_request_dies_with_it();
   a_reset_to_parsed_takes_the_exports_down();
+  a_walk_over_some_documents_sees_those_alone();
+  a_scope_table_is_readable_as_its_author_filled_it();
+  an_unlinked_reference_resolves_again();
+  a_document_outside_the_store_is_refused();
+  an_update_names_documents_as_the_store_does();
+  a_reset_after_the_build_of_its_write_is_refused();
   every_listener_receives_each_state();
   a_throwing_listener_silences_none_after_it();
   an_update_listener_that_throws_silences_none_after_it();
   a_build_reports_what_it_builds();
-  a_build_without_validation_is_complete();
+  an_update_validates_what_was_built_without_validation();
   an_update_builds_with_the_update_options();
+  an_update_runs_a_category_added_to_its_options();
 }
 
 }  // namespace document_builder
@@ -2851,7 +3033,7 @@ void a_text_becomes_a_parsed_document() {
   CHECK(d != nullptr);
   CHECK(d->uri == "file:///w/a.ws");
   CHECK(d->state.load() == cursiv::DocumentState::Parsed);
-  CHECK(d->parseSucceeded());
+  CHECK(d->parseResult.accepted);
   CHECK(d->hasAst());
   CHECK(!d->parseRecovered());
   // The language routed by extension is set on the text document.
@@ -2912,7 +3094,7 @@ void a_uri_is_read_from_the_disk_it_names() {
   const auto d = world.factory.fromUri(uri);
   CHECK(d->uri == uri);
   CHECK(d->textDocument().getText() == kSource);
-  CHECK(d->parseSucceeded());
+  CHECK(d->parseResult.accepted);
 
   // Nothing readable behind it is not a document.
   CHECK(throws([&] {
@@ -2951,7 +3133,7 @@ void an_update_reads_the_disk_again() {
   world.factory.update(*d);
   CHECK(d->buildRevision == revision + 1);
   CHECK(d->textDocument().getText() == edited);
-  CHECK(d->parseSucceeded());
+  CHECK(d->parseResult.accepted);
 
   // An open document outranks the disk.
   d->isOpen = true;
@@ -2984,7 +3166,7 @@ void an_update_reparses_from_scratch() {
   CHECK(d->parseResult.value->getDocument() == d.get());
   CHECK(d->diagnostics.empty());
   CHECK(d->buildRevision == before + 1);
-  CHECK(d->parseSucceeded());
+  CHECK(d->parseResult.accepted);
   CHECK(d->hasAst());
 }
 
@@ -3006,7 +3188,7 @@ void a_text_document_becomes_a_parsed_document() {
       "file:///w/a.ws", "workspace", 7, std::string(kSource)));
   CHECK(d != nullptr);
   CHECK(d->textDocument().version() == 7);
-  CHECK(d->parseSucceeded() && d->hasAst());
+  CHECK(d->parseResult.accepted && d->hasAst());
 
   // `create` parses nothing: the document waits at `Changed`, its language
   // resolved and named, for `update` to parse it.
@@ -3020,7 +3202,7 @@ void a_text_document_becomes_a_parsed_document() {
   CHECK(!waiting->hasAst());
   world.factory.update(*waiting);
   CHECK(waiting->state.load() == cursiv::DocumentState::Parsed);
-  CHECK(waiting->parseSucceeded() && waiting->hasAst());
+  CHECK(waiting->parseResult.accepted && waiting->hasAst());
 }
 
 // Unlike `fromString`, `fromTextDocument` does not renormalize the
@@ -3121,7 +3303,7 @@ void a_fresh_document_has_derived_nothing() {
   CHECK(d.id == cursiv::kNoDocument);
   CHECK(d.state.load() == cursiv::DocumentState::Changed);
   CHECK(!d.hasAst());
-  CHECK(!d.parseSucceeded());
+  CHECK(!d.parseResult.accepted);
   CHECK(!d.parseRecovered());
   CHECK(d.diagnostics.empty());
   CHECK(d.buildRevision == 0);
@@ -3135,17 +3317,17 @@ void a_fresh_document_has_derived_nothing() {
 void only_syntax_counts_as_recovered() {
   cursiv::Document d(text("file:///a"));
   cursiv::ParseDiagnostic bad;
-  bad.kind = cursiv::DiagnosticKind::conversion_error;
+  bad.kind = cursiv::DiagnosticKind::ConversionError;
   d.parseResult.diagnostics.push_back(bad);
   CHECK(!d.parseRecovered());
 
   cursiv::ParseDiagnostic bound;
-  bound.kind = cursiv::DiagnosticKind::bounded;
+  bound.kind = cursiv::DiagnosticKind::Bounded;
   d.parseResult.diagnostics.push_back(bound);
   CHECK(!d.parseRecovered());
 
   cursiv::ParseDiagnostic repair;
-  repair.kind = cursiv::DiagnosticKind::deleted;
+  repair.kind = cursiv::DiagnosticKind::Deleted;
   d.parseResult.diagnostics.push_back(repair);
   CHECK(d.parseRecovered());
 }
@@ -3826,7 +4008,7 @@ void a_symbol_knows_what_points_at_it() {
   // The `String` datatype is what `age : String` names.
   const cursiv::AstNode* const target =
       document->parseResult.references->handles.front().owner;
-  (void)target;
+  CHECK(&cursiv::root_of(*target) == document->parseResult.value);
 
   const cursiv::AstNodeDescription* string = nullptr;
   (void)world.shared.indexManager->visitElements(
@@ -3866,6 +4048,26 @@ void a_symbol_knows_what_points_at_it() {
         return true;
       });
   CHECK(now == 2);
+
+  // The rows stay in source order as a document stops pointing at the symbol
+  // and points at it again.
+  const auto third =
+      world.built("file:///c.ws", "entity Third { g : String }\n");
+  const auto sources = [&] {
+    std::vector<cursiv::DocumentId> found;
+    (void)world.shared.indexManager->visitReferences(
+        declaring, symbol, [&found](const cursiv::ReferenceDescription& row) {
+          found.push_back(row.sourceDocumentId);
+          return true;
+        });
+    return found;
+  };
+  const std::vector all{document->id, other->id, third->id};
+  CHECK(sources() == all);
+  (void)world.shared.indexManager->removeReferences(other->id);
+  CHECK(sources() == (std::vector{document->id, third->id}));
+  world.shared.indexManager->updateReferences(*other);
+  CHECK(sources() == all);
 
   // A symbol nobody names has no incoming edge.
   CHECK(world.shared.indexManager->visitReferences(
@@ -4207,7 +4409,7 @@ void run() {
 }  // namespace index_manager
 
 // What one document declares, by container and by name: the order the
-// source wrote, and the flat storage `build_index` turns it into.
+// source wrote, and the flat storage `buildIndex` turns it into.
 namespace local_symbols {
 
 namespace {
@@ -4232,8 +4434,8 @@ std::vector<const cursiv::AstNodeDescription*> by_name(
     const cursiv::LocalSymbols& symbols, const cursiv::AstNode* container,
     std::string_view name) {
   std::vector<const cursiv::AstNodeDescription*> found;
-  symbols.find(container, name, cursiv::LocalSymbols::hash_name(name))
-      .for_each([&](const cursiv::AstNodeDescription& entry) {
+  symbols.find(container, name, cursiv::LocalSymbols::hashName(name))
+      .forEach([&](const cursiv::AstNodeDescription& entry) {
         found.push_back(&entry);
         return true;
       });
@@ -4242,7 +4444,7 @@ std::vector<const cursiv::AstNodeDescription*> by_name(
 
 void nothing_is_declared_until_something_is() {
   cursiv::LocalSymbols symbols;
-  symbols.build_index();
+  symbols.buildIndex();
   CHECK(symbols.empty());
   CHECK(symbols.empty());
   CHECK(symbols.forContainer(nullptr).empty());
@@ -4255,7 +4457,7 @@ void entries_keep_the_order_the_source_wrote() {
   symbols.add(container, named("b", cursiv::NodeId{1}));
   symbols.add(container, named("a", cursiv::NodeId{2}));
   symbols.add(container, named("c", cursiv::NodeId{3}));
-  symbols.build_index();
+  symbols.buildIndex();
 
   CHECK(!symbols.empty());
   CHECK(symbols.size() == 3);
@@ -4275,7 +4477,7 @@ void a_name_declared_twice_keeps_both_in_order() {
   symbols.add(container, named("x", cursiv::NodeId{1}));
   symbols.add(container, named("y", cursiv::NodeId{2}));
   symbols.add(container, named("x", cursiv::NodeId{3}));
-  symbols.build_index();
+  symbols.buildIndex();
 
   const auto x = by_name(symbols, container, "x");
   CHECK(x.size() == 2);
@@ -4292,7 +4494,7 @@ void the_index_survives_growth() {
   const auto* const container = reinterpret_cast<const cursiv::AstNode*>(0x10);
   for (cursiv::NodeId i{0}; i < cursiv::NodeId{512}; ++i)
     symbols.add(container, named("n" + std::to_string(i % 8), i));
-  symbols.build_index();
+  symbols.buildIndex();
 
   CHECK(symbols.forContainer(container).size() == 512);
   const auto n0 = by_name(symbols, container, "n0");
@@ -4310,7 +4512,7 @@ void each_container_owns_its_own() {
   const auto* const b = reinterpret_cast<const cursiv::AstNode*>(0x20);
   symbols.add(a, named("x", cursiv::NodeId{1}));
   symbols.add(b, named("x", cursiv::NodeId{2}));
-  symbols.build_index();
+  symbols.buildIndex();
 
   CHECK(symbols.size() == 2);
   CHECK(by_name(symbols, a, "x")[0]->symbolId == cursiv::NodeId{1});
@@ -4347,7 +4549,7 @@ void grouping_keeps_each_containers_declarations_and_homonyms() {
       for (std::size_t position = 0; position < std::size(names); ++position)
         for (std::size_t group = 0; group < groups; ++group) add(group, position);
     }
-    symbols.build_index();
+    symbols.buildIndex();
     CHECK(symbols.size() == groups * std::size(names));
     for (std::size_t group = 0; group < groups; ++group) {
       const auto entries = symbols.forContainer(&containers[group]);
@@ -4381,7 +4583,7 @@ void find_folds_the_case_and_keeps_the_order() {
   symbols.add(container, named("Foo", cursiv::NodeId{1}));
   symbols.add(container, named("fOO", cursiv::NodeId{2}));
   symbols.add(container, named("Bar", cursiv::NodeId{3}));
-  symbols.build_index();
+  symbols.buildIndex();
 
   const auto folded = by_name(symbols, container, "foo");
   CHECK(folded.size() == 2);
@@ -4397,16 +4599,16 @@ void a_callback_cannot_change_the_lookup_spelling() {
   const auto* const container = reinterpret_cast<const cursiv::AstNode*>(0x10);
   symbols.add(container, named("Alpha", cursiv::NodeId{1}));
   symbols.add(container, named("ALPHA", cursiv::NodeId{2}));
-  symbols.build_index();
+  symbols.buildIndex();
 
   std::string_view name = "Alpha";
   unsigned visited = 0;
-  const auto* found = symbols.firstNamed(
-      container, name, cursiv::LocalSymbols::hash_name(name), true,
-      [&](const cursiv::AstNodeDescription&) {
-        name = "ALPHA";
-        return ++visited != 1;
-      });
+  const auto* found =
+      symbols.firstNamed(container, name, cursiv::LocalSymbols::hashName(name),
+                         true, [&](const cursiv::AstNodeDescription&) {
+                           name = "ALPHA";
+                           return ++visited != 1;
+                         });
   CHECK(found == nullptr);
   CHECK(visited == 1);
   CHECK(name == "ALPHA");
@@ -4423,12 +4625,12 @@ void a_query_keeps_its_policy_across_containers() {
   symbols.add(a, named("Alpha", cursiv::NodeId{3}));
   symbols.add(b, named("ALPHA", cursiv::NodeId{4}));
   symbols.add(b, named("Alpha", cursiv::NodeId{5}));
-  symbols.build_index();
+  symbols.buildIndex();
 
   const cursiv::LocalSymbols::NameQuery exact{
-      "Alpha", cursiv::LocalSymbols::hash_name("Alpha"), true};
+      "Alpha", cursiv::LocalSymbols::hashName("Alpha"), true};
   const cursiv::LocalSymbols::NameQuery folded{
-      "alpha", cursiv::LocalSymbols::hash_name("alpha"), false};
+      "alpha", cursiv::LocalSymbols::hashName("alpha"), false};
   const auto first = [&](const cursiv::AstNode* container,
                           const cursiv::LocalSymbols::NameQuery& query) {
     return symbols.firstNamed(
@@ -4456,7 +4658,7 @@ void a_container_sharing_a_bit_holds_nothing() {
   };
   for (std::uintptr_t k = 0; k < 8; ++k)
     symbols.add(at(k), named("x", static_cast<cursiv::NodeId>(k)));
-  symbols.build_index();
+  symbols.buildIndex();
   bool nothing = true;
   for (std::uintptr_t k = 8; k < 8 + 4096; ++k)
     nothing = nothing && by_name(symbols, at(k), "x").empty() &&
@@ -4521,7 +4723,7 @@ void a_deep_walk_reaches_the_holders_in_order() {
     cursiv::LocalSymbols symbols;
     for (const std::size_t at : held)
       symbols.add(chain[at], named("x", static_cast<cursiv::NodeId>(at)));
-    symbols.build_index();
+    symbols.buildIndex();
 
     std::vector<const cursiv::AstNode*> expected;
     for (const std::size_t at : held) expected.push_back(chain[at]);
@@ -5439,8 +5641,8 @@ void the_scan_builds_what_the_folders_hold() {
   CHECK(world.shared.workspaceManager->workspaceFolders().size() == 1);
 
   // Resolved once the documents are in: no wait left.
-  const std::shared_future<void> ready = world.shared.workspaceManager->ready();
-  CHECK(ready.wait_for(std::chrono::seconds(0)) == std::future_status::ready);
+  CHECK(world.shared.workspaceManager->isReady());
+  CHECK(world.shared.workspaceManager->waitUntilReady());
 }
 
 // A second scan links what was broken against what arrived, on the same parse.
@@ -5594,7 +5796,7 @@ void a_scan_updates_existing_links_and_keeps_the_requested_options() {
   const auto revision = use->buildRevision;
   const auto target = [&] {
     const auto* entity = cursiv::ast_cast<ws::ast::Entity>(
-        use->parseResult.value_as<ws::ast::Workspace>()->elements[0]);
+        use->parseResult.valueAs<ws::ast::Workspace>()->elements[0]);
     const auto* resolved = entity->features[0]->type.get();
     return resolved == nullptr ? std::string{} : resolved->getDocument()->uri;
   };
@@ -5626,6 +5828,30 @@ void the_initial_options_govern_the_first_build() {
   CHECK(a->diagnostics.empty());  // asked for none, published none
 }
 
+// The first scan asks what an update asks, so a keystroke gives its
+// diagnostics again: neither runs a slow check unasked.
+void the_scan_asks_what_an_update_asks() {
+  World world;
+  world.shared.serviceRegistry->all()[0]
+      ->validationRegistry->registerAfterDocument(
+          [](const cursiv::Document&, cursiv::ValidationAcceptor& accept,
+             const cursiv::CancellationToken&) {
+            accept.accept(cursiv::TextRange{0, 0},
+                          cursiv::DiagnosticSeverity::Warning,
+                          "slow check ran");
+          },
+          &cursiv::slow);
+  world.disk->addFile("file:///w/a.ws", "datatype A\n");
+  const cursiv::WorkspaceFolder folders[] = {{"file:///w", "w"}};
+  world.shared.workspaceManager->initializeWorkspace(folders);
+  const auto a = world.shared.documents->getDocument("file:///w/a.ws");
+  CHECK(a != nullptr && a->state.load() == cursiv::DocumentState::Validated);
+  CHECK(a != nullptr && a->diagnostics.empty());
+  const std::string_view changed[] = {"file:///w/a.ws"};
+  world.shared.documentBuilder->update(changed, {});
+  CHECK(a != nullptr && a->diagnostics.empty());
+}
+
 // `ready` resolves whatever the scan met, a hook that throws included: the
 // failure still reaches the caller, and nobody awaiting the scan is left
 // waiting forever.
@@ -5645,8 +5871,7 @@ void ready_resolves_when_the_scan_throws() {
   CHECK(support::throws<std::runtime_error>([&] {
     world.shared.workspaceManager->initializeWorkspace({});
   }));
-  CHECK(world.shared.workspaceManager->ready().wait_for(
-            std::chrono::seconds(0)) == std::future_status::ready);
+  CHECK(world.shared.workspaceManager->isReady());
 }
 
 #if !defined(__wasi__) || defined(_REENTRANT)
@@ -5725,8 +5950,7 @@ void a_failure_stops_the_scan_where_the_walk_reaches_it() {
   CHECK(store.hasDocument("file:///w/a.ws"));
   CHECK(!store.hasDocument("file:///w/b.ws"));
   CHECK(!store.hasDocument("file:///w/c.ws"));
-  CHECK(world.shared.workspaceManager->ready().wait_for(
-            std::chrono::seconds(0)) == std::future_status::ready);
+  CHECK(world.shared.workspaceManager->isReady());
 }
 
 }  // namespace
@@ -5742,6 +5966,7 @@ void run() {
   the_scan_relinks_an_open_document_built_before_startup();
   a_scan_updates_existing_links_and_keeps_the_requested_options();
   the_initial_options_govern_the_first_build();
+  the_scan_asks_what_an_update_asks();
   ready_resolves_when_the_scan_throws();
 #if !defined(__wasi__) || defined(_REENTRANT)
   the_scan_parses_a_folder_on_the_pool();

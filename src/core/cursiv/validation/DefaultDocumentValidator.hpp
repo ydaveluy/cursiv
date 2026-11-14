@@ -4,10 +4,11 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/services/Diagnostic.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/text/TextRange.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/DocumentValidator.hpp"
 #include "cursiv/validation/ValidateSingleNodeOptions.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
@@ -24,17 +25,16 @@ struct ParseDiagnostic;
 class ValidationAcceptor;
 class ValidationRegistry;
 
-class DefaultDocumentValidator : public DocumentValidator {
+class DefaultDocumentValidator : public DocumentValidator,
+                                 protected DefaultCoreService {
  public:
   explicit DefaultDocumentValidator(const CoreServices& core) noexcept
-      : _core(core) {}
-
-  using DocumentValidator::validateDocument;
+      : DefaultCoreService(core) {}
 
   // Appends: the parse diagnostics, then the linking errors, then the checks'.
   void validateDocument(const Document&, std::vector<Diagnostic>&,
-                        const ValidationOptions&,
-                        const CancellationToken&) const override;
+                        const ValidationOptions& = {},
+                        const CancellationToken& = {}) const override;
   ~DefaultDocumentValidator() noexcept override = default;
 
  protected:
@@ -55,42 +55,35 @@ class DefaultDocumentValidator : public DocumentValidator {
   // The registry's checks over every node of the tree. Builds the acceptor the
   // three parts below write through; it lives on this frame, so its sink stays
   // valid for the whole walk.
-  virtual void validateAst(
-      const Document&, std::vector<Diagnostic>&,
-      std::span<const ValidationCategory* const> categories,
-      const CancellationToken&) const;
+  virtual void validateAst(const Document&, std::vector<Diagnostic>&,
+                           const ValidationOptions& options,
+                           const CancellationToken&) const;
 
   // The three parts, separately overridable: what a hook collects is ready
   // before the first node check reads it, and what the walk accumulated is
   // whole before an after hook reports on it.
   virtual void validateAstBefore(const Document&, ValidationAcceptor&,
-                                 std::span<const ValidationCategory* const>,
+                                 const ValidationOptions&,
                                  const CancellationToken&) const;
   virtual void validateAstNodes(const Document&, ValidationAcceptor&,
-                                std::span<const ValidationCategory* const>,
+                                const ValidationOptions&,
                                 const CancellationToken&) const;
   virtual void validateAstAfter(const Document&, ValidationAcceptor&,
-                                std::span<const ValidationCategory* const>,
+                                const ValidationOptions&,
                                 const CancellationToken&) const;
-
-  // Asked once for every node before the first check: a node can skip its own
-  // checks or its whole subtree, as the walk visits children first.
-  [[nodiscard]] virtual ValidateSingleNodeOptions validateSingleNodeOptions(
-      const AstNode&, std::span<const ValidationCategory* const>) const;
-  // Whether the walk asks `validateSingleNodeOptions` at all. The default
-  // accepts every node and costs nothing; an override of the options answers
-  // true here too, or it is never asked.
-  [[nodiscard]] virtual bool asksNodeOptions() const noexcept { return false; }
 
   // The `source` of every diagnostic of this pass. A language that publishes
   // under another name overrides this one function.
   [[nodiscard]] virtual std::string_view getSource() const noexcept;
 
   [[nodiscard]] const ValidationRegistry* validationRegistry() const noexcept;
-  [[nodiscard]] const CoreServices& core() const noexcept { return _core; }
 
  private:
-  const CoreServices& _core;
+  // Asked for every node before the first check, from several threads on a
+  // large tree: a node can skip its own checks or its whole subtree. Private:
+  // an override answers every node itself, `kValidateEachNode` to keep one.
+  [[nodiscard]] virtual ValidateSingleNodeOptions validateSingleNodeOptions(
+      const AstNode&, const ValidationOptions&) const;
 };
 
 }  // namespace cursiv

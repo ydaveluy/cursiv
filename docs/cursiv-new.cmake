@@ -654,31 +654,20 @@ int main(int argc, char** argv) {
 ]==])
 _cursiv_new_emit([==[src/lsp/@CURSIV_NEW_ID@/LspModule.cpp]==] [==[#include "@CURSIV_NEW_ID@/LspModule.hpp"
 
-#include <memory>
-#include <utility>
-
-#include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/ServiceRegistry.hpp"
-#include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/LspLanguage.hpp"
 #include "@CURSIV_NEW_ID@/CoreServices.hpp"
 
 namespace @CURSIV_NEW_ID@ {
 
-void install_lsp_module(@CURSIV_NEW_CLASS@Services& services) {
-  cursiv::install_default_lsp_services(services);
-}
+void install_lsp_module(@CURSIV_NEW_CLASS@Services& /*services*/) {}
 
 // Creates the services of this language for the language server: the
 // defaults, then the core module, then the LSP module.
-bool register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
-  auto& shared =
-      dynamic_cast<@CURSIV_NEW_CLASS@SharedServices&>(sharedServices);
-  auto services = std::make_unique<@CURSIV_NEW_CLASS@Services>(shared);
-  cursiv::install_default_core_services(*services);
-  install_core_module(*services);
-  install_lsp_module(*services);
-  shared.serviceRegistry->registerServices(std::move(services));
-  return true;
+void register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
+  cursiv::register_lsp_language<@CURSIV_NEW_CLASS@Services,
+                                @CURSIV_NEW_CLASS@SharedServices,
+                                install_core_module, install_lsp_module>(
+      sharedServices);
 }
 
 }  // namespace @CURSIV_NEW_ID@
@@ -690,13 +679,13 @@ _cursiv_new_emit([==[src/lsp/@CURSIV_NEW_ID@/LspModule.hpp]==] [==[#pragma once
 
 namespace @CURSIV_NEW_ID@ {
 
-// Installs the editor services: the defaults, then your own, such as a
-// formatter or a hover provider. Add yours in LspModule.cpp.
+// Installs your own editor services, such as a formatter or a hover
+// provider, over the defaults. Add yours in LspModule.cpp.
 void install_lsp_module(@CURSIV_NEW_CLASS@Services& services);
 
 // Adds this language to the workspace of the language server; `main` passes
 // it to the server.
-bool register_lsp_services(cursiv::SharedCoreServices& sharedServices);
+void register_lsp_services(cursiv::SharedCoreServices& sharedServices);
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])

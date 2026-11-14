@@ -29,7 +29,7 @@ bool read_items(const cursiv::Parser& p, std::string_view head,
     got = {"<refused>"};
   } else {
     for (const trefuse::ast::Item* const it :
-         r.value_as<trefuse::ast::Doc>()->items)
+         r.valueAs<trefuse::ast::Doc>()->items)
       got.emplace_back(it->alias.empty()
                            ? std::string(it->name)
                            : std::string(it->name) + "=" +

@@ -73,12 +73,11 @@ constexpr std::array<std::string_view, 8> kCategoryTypes = {
   const Cst& cst = document.parseResult.cst();
   const OwnedNodes all = document.parseResult.nodes();
   const NodeId id = node.cstNodeId;
-  for (auto at = std::ranges::lower_bound(all, cst.subtree_begin(id), {},
+  for (auto at = std::ranges::lower_bound(all, cst.subtreeBegin(id), {},
                                           &AstNode::cstNodeId);
        at != all.end() && (*at)->cstNodeId <= id; ++at) {
     throw_if_cancelled(token);
-    if (*at == &node || !names.getNameNode(**at, &document).has_value())
-      continue;
+    if (*at == &node || !names.getNameNode(**at, &document)) continue;
     for (const AstNode* p = (*at)->parent; p != nullptr; p = p->parent)
       if (p == &node) return true;
   }
@@ -106,7 +105,7 @@ void GrammarSemanticTokenProvider::computeHighlighting(
 
   const ParseResult& parsed = document.parseResult;
   const Cst& cst = parsed.cst();
-  const Grammar& grammar = _core.parser->getGrammar();
+  const Grammar& grammar = services.parser->getGrammar();
   // A token touches the window when it neither ends before it nor starts
   // after it; one cut by the edge is coloured whole.
   const auto touches = [&](TextOffset from, TextOffset to) {
@@ -116,10 +115,10 @@ void GrammarSemanticTokenProvider::computeHighlighting(
   // The window's leaves: from the first one ending past `begin` to the last
   // one starting before `end`, `past` the leaf after it or `size()`.
   const bool whole = begin == 0 && end >= cst.text().size();
-  const NodeId first = whole ? 0 : cst.leaf_after(begin);
+  const NodeId first = whole ? 0 : cst.leafAfter(begin);
   NodeId past = first;
   while (!whole && past < cst.size() && cst[past].begin < end)
-    past = cst.next_leaf(past);
+    past = cst.nextLeaf(past);
 
   // 1. Declarations and their owners, nested as the outline nests them.
   const auto declare = [&](const CstNodeView& nameNode, bool owner) {
@@ -131,7 +130,7 @@ void GrammarSemanticTokenProvider::computeHighlighting(
   };
   if (whole) {
     const detail::NamedNodes named =
-        detail::collect_named_nodes(document, *_core.nameProvider, token);
+        detail::collect_named_nodes(document, *services.nameProvider, token);
     std::vector<bool> owns(named.nodes.size(), false);
     for (const std::size_t owner : named.owners)
       if (owner != detail::NamedNodes::kNoOwner) owns[owner] = true;
@@ -141,7 +140,7 @@ void GrammarSemanticTokenProvider::computeHighlighting(
     // A name lies in its node's record, so only the nodes whose record holds a
     // leaf of the window, or the gap it falls in, are asked.
     const NodeId lo = first;
-    const NodeId hi = cst.leaf_before(past);
+    const NodeId hi = cst.leafBefore(past);
     const OwnedNodes all = parsed.nodes();
     std::vector<const AstNode*> touching;
     auto at = std::ranges::lower_bound(all, lo, {}, &AstNode::cstNodeId);
@@ -149,16 +148,16 @@ void GrammarSemanticTokenProvider::computeHighlighting(
       touching.push_back(*at);
     for (const AstNode* p = at != all.end() ? *at : nullptr; p != nullptr;
          p = p->parent)
-      if (p->cstNodeId < cst.size() && cst.subtree_begin(p->cstNodeId) <= hi)
+      if (p->cstNodeId < cst.size() && cst.subtreeBegin(p->cstNodeId) <= hi)
         touching.push_back(p);
     for (const AstNode* const node : touching) {
       throw_if_cancelled(token);
       if (const auto nameNode =
-              _core.nameProvider->getNameNode(*node, &document);
-          nameNode.has_value() && nameNode->end() > nameNode->begin() &&
-          touches(nameNode->begin(), nameNode->end()))
-        declare(*nameNode,
-                owns_a_name(document, *_core.nameProvider, *node, token));
+              services.nameProvider->getNameNode(*node, &document);
+          nameNode && nameNode.end() > nameNode.begin() &&
+          touches(nameNode.begin(), nameNode.end()))
+        declare(nameNode,
+                owns_a_name(document, *services.nameProvider, *node, token));
     }
   }
 
@@ -182,7 +181,7 @@ void GrammarSemanticTokenProvider::computeHighlighting(
   }
 
   // 3. Every leaf of the whole tree, not just the entry's range: a comment
-  // before the first keyword sits before `entry_begin` but is still text the
+  // before the first keyword sits before `entryBegin` but is still text the
   // editor colours.
   const std::string_view source = cst.text();
   const auto colourLeaf = [&](const CstLeaf& leaf) {
@@ -214,10 +213,10 @@ void GrammarSemanticTokenProvider::computeHighlighting(
     colour(leaf.begin, leaf.end, category);
   };
   if (whole) {
-    cst.visit_leaves(colourLeaf);
+    cst.visitLeaves(colourLeaf);
   } else {
-    for (NodeId id = first; id < past; id = cst.next_leaf(id))
-      colourLeaf(cst.as_leaf(id));
+    for (NodeId id = first; id < past; id = cst.nextLeaf(id))
+      colourLeaf(cst.asLeaf(id));
   }
 }
 

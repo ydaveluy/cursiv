@@ -66,8 +66,8 @@ void check_claims(const cursiv::Cst& cst, const std::string& name) {
         wrapped = true;
     if (wrapped) continue;
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics()) {
-      if (d.kind == cursiv::DiagnosticKind::inserted ||
-          d.kind == cursiv::DiagnosticKind::conversion_error)
+      if (d.kind == cursiv::DiagnosticKind::Inserted ||
+          d.kind == cursiv::DiagnosticKind::ConversionError)
         continue;
       if (d.begin < n.end && n.begin < d.end) {
         std::printf("  CLAIM %s: diagnostic [%u,%u) covers live leaf [%u,%u)\n",

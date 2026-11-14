@@ -116,6 +116,18 @@ struct Chosen : Base {
   };
 };
 
+// Words read in any case: the member takes the enumerator they spell.
+struct Folded : Base {
+  struct Root : rule<create<ast::Doc>(
+                         assign<&ast::Doc::op>(ikw<"not"> + ikw<"equal">)) +
+                     eof> {};
+};
+
+struct AnyCase : Base {
+  struct Root
+      : rule<create<ast::Doc>(assign<&ast::Doc::op>(ikw<"equal">)) + eof> {};
+};
+
 struct Suite : Base {
   struct Root : rule<(lit<"dotted:"> + ref<Dotted::Root>) |
                      (lit<"enumerated:"> + ref<Enumerated::Root>) |
@@ -127,7 +139,9 @@ struct Suite : Base {
                      (lit<"held:"> + ref<Held::Root>) |
                      (lit<"tight:"> + ref<Tight::Root>) |
                      (lit<"skipped:"> + ref<Skipped::Root>) |
-                     (lit<"chosen:"> + ref<Chosen::Root>)> {};
+                     (lit<"chosen:"> + ref<Chosen::Root>) |
+                     (lit<"folded:"> + ref<Folded::Root>) |
+                     (lit<"anycase:"> + ref<AnyCase::Root>)> {};
   using entry = Root;
 };
 

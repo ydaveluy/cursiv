@@ -133,7 +133,7 @@ struct Rule {
 // `postfix`, or `left` for every binary level.
 template <class L, Association A>
 inline constexpr bool level_is =
-    A == Association::left ? !is_unary_level<L> : L::kGroup == A;
+    A == Association::Left ? !is_unary_level<L> : L::kGroup == A;
 template <class Lvls, Association A>
 struct level_ops;
 template <class... Ls, Association A>
@@ -294,11 +294,11 @@ struct cat_list<TypeList<Es...>> : cat_seq<Es...> {};
 template <class Primary, class Lvls>
 struct infix_body {
   using operand = typename cat_list<tl_cat_t<
-      typename any_of_turns<level_ops_t<Lvls, Association::prefix>>::type,
+      typename any_of_turns<level_ops_t<Lvls, Association::Prefix>>::type,
       TypeList<Ref<Primary>>>>::type;
   using turns = typename any_of_turns<tl_cat_t<
-      typename joins_of<level_ops_t<Lvls, Association::left>, operand>::type,
-      level_ops_t<Lvls, Association::postfix>>>::type;
+      typename joins_of<level_ops_t<Lvls, Association::Left>, operand>::type,
+      level_ops_t<Lvls, Association::Postfix>>>::type;
   using type = typename cat_list<tl_cat_t<TypeList<operand>, turns>>::type;
 };
 
@@ -858,20 +858,12 @@ struct branch_type;
 template <class Branches>
 struct common_base_of;
 
-// Whether E is `create<T>(...)` or `nest<T, &P>(...)` at its top level: an
-// alternative that builds its own node, not one that writes into the rule's.
-template <class E>
-inline constexpr bool is_self_creating = false;
-template <class T, class E>
-inline constexpr bool is_self_creating<Create<T, E>> = true;
-template <class T, auto P, class E>
-inline constexpr bool is_self_creating<Nest<T, P, E>> = true;
-
 // An alternative resolves its own node when a creation it always reaches
-// decides the type: at its root, further along its sequence, or in every
-// branch of a choice. A repetition or a directive's payload does not.
+// decides the type: at its root (`create` or `nest`), further along its
+// sequence, or in every branch of a choice. A repetition or a directive's
+// payload does not.
 template <class E>
-inline constexpr bool is_self_resolving = is_self_creating<E>;
+inline constexpr bool is_self_resolving = step_kind<E> != 0;
 template <class... Es>
 inline constexpr bool is_self_resolving<Seq<Es...>> =
     (is_self_resolving<Es> || ...);
@@ -1080,6 +1072,9 @@ template <class In, class P>
 inline constexpr bool buries_ok = true;
 template <class In, class G, class C>
 inline constexpr bool buries_ok<In, G* C::*> = all_derive<In, G>;
+template <class In, class G, class A, class C>
+inline constexpr bool buries_ok<In, std::vector<G*, A> C::*> =
+    all_derive<In, G>;
 
 template <class In, class E, bool Check = true>
 struct in_hand {
@@ -1752,26 +1747,26 @@ struct GrammarSpec {
   template <auto OpPtr, auto OperandPtr, detail::Expr E>
   static constexpr auto prefix(E) {
     return detail::Levels<detail::UnaryLevel<
-        Association::prefix,
+        Association::Prefix,
         typename detail::member_traits<decltype(OpPtr)>::class_type, OpPtr,
         OperandPtr, std::remove_cvref_t<E>>>{};
   }
   template <class T, detail::Expr E>
   static constexpr auto prefix(E) {
     return detail::Levels<detail::UnaryLevel<
-        Association::prefix, T, &T::op, &T::operand, std::remove_cvref_t<E>>>{};
+        Association::Prefix, T, &T::op, &T::operand, std::remove_cvref_t<E>>>{};
   }
   template <auto OperandPtr, auto OpPtr, detail::Expr E>
   static constexpr auto postfix(E) {
     return detail::Levels<detail::UnaryLevel<
-        Association::postfix,
+        Association::Postfix,
         typename detail::member_traits<decltype(OpPtr)>::class_type, OpPtr,
         OperandPtr, std::remove_cvref_t<E>>>{};
   }
   template <class T, detail::Expr E>
   static constexpr auto postfix(E) {
     return detail::Levels<
-        detail::UnaryLevel<Association::postfix, T, &T::op, &T::operand,
+        detail::UnaryLevel<Association::Postfix, T, &T::op, &T::operand,
                            std::remove_cvref_t<E>>>{};
   }
   static constexpr detail::LevelsFn levels{};

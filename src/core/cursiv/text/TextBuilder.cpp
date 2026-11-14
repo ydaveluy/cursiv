@@ -15,7 +15,7 @@ constexpr std::size_t kLongestNumber = 20;
 
 }  // namespace
 
-std::string TextBuilder::cut_from(std::size_t at) {
+std::string TextBuilder::cutFrom(std::size_t at) {
   std::string cut = _text.substr(at);
   _text.resize(at);
   _started = !_text.empty() && _text.back() != '\n';
@@ -27,45 +27,45 @@ std::string TextBuilder::take() {
   return std::exchange(_text, {});
 }
 
-void TextBuilder::add_text(std::string_view text) {
+void TextBuilder::addText(std::string_view text) {
   // A part may view this builder's own text, which the writes below move.
   if (std::less_equal<>()(_text.data(), text.data()) &&
       std::less<>()(text.data(), _text.data() + _text.size()))
-    return add_text(std::string(text));
+    return addText(std::string(text));
   for (auto end = text.find('\n'); end != std::string_view::npos;
        end = text.find('\n')) {
-    start_line();
+    startLine();
     _text += text.substr(0, end);
-    end_line();
+    endLine();
     text.remove_prefix(end + 1);
   }
   if (!text.empty()) {
-    start_line();
+    startLine();
     _text += text;
   }
 }
 
-void TextBuilder::add_number(long long value) {
+void TextBuilder::addNumber(long long value) {
   std::array<char, kLongestNumber> digits;
   const auto end =
       std::to_chars(digits.data(), digits.data() + digits.size(), value).ptr;
-  add_text(std::string_view(digits.data(), end));
+  addText(std::string_view(digits.data(), end));
 }
 
-void TextBuilder::add_number(unsigned long long value) {
+void TextBuilder::addNumber(unsigned long long value) {
   std::array<char, kLongestNumber> digits;
   const auto end =
       std::to_chars(digits.data(), digits.data() + digits.size(), value).ptr;
-  add_text(std::string_view(digits.data(), end));
+  addText(std::string_view(digits.data(), end));
 }
 
-void TextBuilder::start_line() {
+void TextBuilder::startLine() {
   if (_started) return;
   _started = true;
   if (_indent != 0) _text.append(std::min(_indent, _options.maxIndent), ' ');
 }
 
-void TextBuilder::end_line() {
+void TextBuilder::endLine() {
   // No blanks at the end of a line: `npos + 1` is a line of blanks only.
   _text.resize(_text.find_last_not_of(" \t\v\f\r") + 1);
   _text += '\n';

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <future>
 #include <span>
 #include <string>
 #include <string_view>
@@ -34,9 +33,9 @@ class WorkspaceManager {
   [[nodiscard]] virtual std::span<const WorkspaceFolder> workspaceFolders()
       const noexcept = 0;
 
-  // What the first build of a workspace is asked for. An embedder that wants
-  // the startup scan to skip validating sets it here, before the first scan;
-  // read by that scan alone, later builds carry their own options.
+  // What the first scan asks, read by that scan alone: `built_in` and `fast`,
+  // as an update does by default. Set it before the first scan, for instance
+  // to skip validation at startup.
   [[nodiscard]] virtual BuildOptions& initialBuildOptions() noexcept = 0;
   [[nodiscard]] virtual const BuildOptions& initialBuildOptions()
       const noexcept = 0;
@@ -58,10 +57,12 @@ class WorkspaceManager {
   // workspace folder holds is judged alone.
   [[nodiscard]] virtual bool isIncluded(const FileSystemNode& entry) const = 0;
 
-  // Resolved once the documents are in the store, not when the build ends: wait
-  // for analysis with `DocumentBuilder::waitUntil`. Set once, by the first
-  // scan.
-  [[nodiscard]] virtual std::shared_future<void> ready() const = 0;
+  // Whether the first scan put its documents in the store: they are found,
+  // not yet analysed. Wait for analysis with `DocumentBuilder::waitUntil`.
+  [[nodiscard]] virtual bool isReady() const noexcept = 0;
+  // Waits for it. False when `cancelToken` stops the wait first.
+  [[nodiscard]] virtual bool waitUntilReady(
+      const CancellationToken& cancelToken = kNoCancel) const = 0;
 };
 
 }  // namespace cursiv

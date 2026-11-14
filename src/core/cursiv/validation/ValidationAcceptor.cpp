@@ -10,11 +10,11 @@
 #include <string_view>
 #include <utility>
 
-#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/CstNodeView.hpp"
 #include "cursiv/syntax-tree/CstUtils.hpp"
 #include "cursiv/syntax-tree/SourceTranslation.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/Document.hpp"
 
 namespace cursiv {
@@ -66,7 +66,7 @@ TextRange ValidationAcceptor::spanOfName(std::string_view borrowed,
 
 // Where a member was written. An anchor that missed is `nullopt`, and the
 // builder keeps the range it had -- the node's own unless it was given one.
-std::optional<TextRange> ValidationAcceptor::featureSpan(
+std::optional<TextRange> ValidationAcceptor::propertySpan(
     const AstNode& node, std::string_view member,
     std::size_t index) const noexcept {
   return anchorSpan(node, member, index, false);
@@ -105,11 +105,11 @@ std::optional<TextRange> ValidationAcceptor::anchorSpan(
       if (index == 0) {
         const auto at =
             keyword ? find_node_for_keyword(node, name, index, document)
-                    : find_node_for_feature(node, name, index, document);
-        if (at.has_value()) return TextRange{at->begin(), at->end()};
+                    : find_node_for_property(node, name, index, document);
+        if (at) return TextRange{at.begin(), at.end()};
       } else {
         auto nodes = keyword ? find_nodes_for_keyword(node, name, document)
-                             : find_nodes_for_feature(node, name, document);
+                             : find_nodes_for_property(node, name, document);
         _anchors.emplace_back(std::string(name), keyword, std::move(nodes));
         found = _anchors.end() - 1;
       }

@@ -1,6 +1,8 @@
 #pragma once
 
-#include <future>
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -33,9 +35,11 @@ class DefaultWorkspaceManager : public WorkspaceManager,
       const noexcept override {
     return _folders;
   }
-  [[nodiscard]] std::shared_future<void> ready() const override {
-    return _ready;
+  [[nodiscard]] bool isReady() const noexcept override {
+    return _ready.load(std::memory_order_acquire);
   }
+  [[nodiscard]] bool waitUntilReady(
+      const CancellationToken& cancelToken = kNoCancel) const override;
 
   // The default policy: hidden entries and the usual build directories out, a
   // file in when the registry claims it. The registry is also the build's
@@ -63,6 +67,10 @@ class DefaultWorkspaceManager : public WorkspaceManager,
   }
 
  protected:
+  // Says the documents are in the store. The first scan calls it once,
+  // whatever it met, so that no one waits forever; later calls do nothing.
+  void markReady() noexcept;
+
   // Documents not on disk, such as a builtin library. Runs
   // before any folder, so it wins over a file with the same URI, and runs even
   // with no folder.
@@ -76,13 +84,12 @@ class DefaultWorkspaceManager : public WorkspaceManager,
       const WorkspaceFolder& folder) const;
 
  private:
-  BuildOptions _initialBuildOptions;
+  BuildOptions _initialBuildOptions = detail::typing_build_options();
   std::vector<WorkspaceFolder> _folders;
-  // Set exactly once, by the first scan; `_resolved` is only touched inside
-  // the write action, and the future is what crosses threads.
-  std::promise<void> _readyPromise;
-  std::shared_future<void> _ready = _readyPromise.get_future().share();
-  bool _resolved = false;
+  // Set once, by `markReady`; the lock is taken to wait and to wake.
+  std::atomic<bool> _ready{false};
+  mutable std::mutex _readyMutex;
+  mutable std::condition_variable_any _readyCv;
 };
 
 }  // namespace cursiv

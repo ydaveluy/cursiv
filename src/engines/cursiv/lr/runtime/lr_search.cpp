@@ -239,7 +239,7 @@ void lr_search_bounded(LrContext& c, LrSearch& s) {
   s.bounded = false;
   s.boundedLeast = ~std::uint64_t{0};
   RepairNote n{};
-  n.kind = DiagnosticKind::bounded;
+  n.kind = DiagnosticKind::Bounded;
   n.begin = s.boundedBegin;
   n.end = s.boundedEnd > s.boundedBegin ? s.boundedEnd : s.boundedBegin;
   if (!c.notes.empty() && c.notes.back().end > n.end)

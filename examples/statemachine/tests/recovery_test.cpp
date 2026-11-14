@@ -20,7 +20,7 @@ void run(Lane& lane) {
   {
     const auto seed = document("valid.statemachine");
     const auto before = engine->parse(seed);
-    const auto* expected = before.value_as<sm::ast::Statemachine>();
+    const auto* expected = before.valueAs<sm::ast::Statemachine>();
     CHECK(expected);
     for (const bool replace : {false, true}) {
       auto text = seed;
@@ -29,7 +29,7 @@ void run(Lane& lane) {
       else
         text.insert(0, 1, 'a');
       const auto result = engine->parse(text);
-      const auto* model = result.value_as<sm::ast::Statemachine>();
+      const auto* model = result.valueAs<sm::ast::Statemachine>();
       CHECK(result.accepted && model);
       if (!model || !expected) continue;
       // A letter written before the head, or in place of one of its

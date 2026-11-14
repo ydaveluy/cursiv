@@ -78,13 +78,12 @@ RequirementsCoreLanguage create_core_services(
   return {std::move(shared), one, other};
 }
 
-bool register_core_services(cursiv::SharedCoreServices& sharedServices) {
+void register_core_services(cursiv::SharedCoreServices& sharedServices) {
   auto& shared = dynamic_cast<RequirementsSharedCoreServices&>(sharedServices);
   sharedServices.serviceRegistry->registerServices(
       create_requirements_core_services(shared));
   sharedServices.serviceRegistry->registerServices(
       create_tests_core_services(shared));
-  return true;
 }
 
 }  // namespace req

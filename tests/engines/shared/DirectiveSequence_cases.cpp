@@ -28,7 +28,7 @@ std::string read(const cursiv::Parser& parser, std::string_view text,
                  std::string (*show)(const ast::Doc&)) {
   const std::string source = "dir:" + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
-  const auto* const doc = r.value_as<ast::Doc>();
+  const auto* const doc = r.valueAs<ast::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr)
     return "<refused>";
   return show(*doc);
@@ -129,6 +129,13 @@ void a_choice_gives_the_value_of_its_arm(const cursiv::Parser& p) {
   check(p, "chosen:", "x", op_of, "<refused>");
 }
 
+void a_word_read_in_any_case_names_its_enumerator(const cursiv::Parser& p) {
+  check(p, "folded:", "not equal", op_of, "NOTEQUAL");
+  check(p, "folded:", "Not EQUAL", op_of, "NOTEQUAL");
+  check(p, "anycase:", "equal", op_of, "equal");
+  check(p, "anycase:", "EQUAL", op_of, "equal");
+}
+
 void every_engine(const cursiv::Parser& p) {
   a_sequence_stores_its_parts_joined(p);
   trivia_is_left_out(p);
@@ -141,6 +148,7 @@ void every_engine(const cursiv::Parser& p) {
   a_sequence_holding_one_node_gives_that_node(p);
   a_region_stays_with_its_sequence(p);
   a_choice_gives_the_value_of_its_arm(p);
+  a_word_read_in_any_case_names_its_enumerator(p);
 }
 
 }  // namespace
@@ -174,10 +182,10 @@ Parsed read(const cursiv::Parser& parser, std::string_view source,
             bool misspelt) {
   const std::string input = "dir:data:" + std::string(source);
   const cursiv::ParseResult r = parser.parse(input);
-  const auto* name = r.value_as<Name>();
+  const auto* name = r.valueAs<Name>();
   const bool expected =
       misspelt ? r.diagnostics.size() == 1 &&
-                     r.diagnostics[0].kind == cursiv::DiagnosticKind::replaced
+                     r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced
                : r.diagnostics.empty();
   Parsed out;
   out.clean = r.accepted && expected && name != nullptr;
@@ -344,7 +352,7 @@ std::string read(const cursiv::Parser& parser, std::string_view text,
                  std::string (*show)(const T&)) {
   const std::string source = "dir:" + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
-  const auto* const root = r.value_as<T>();
+  const auto* const root = r.valueAs<T>();
   if (!r.accepted || !r.diagnostics.empty() || root == nullptr)
     return "<refused>";
   return show(*root);
@@ -363,8 +371,8 @@ std::string wrapped_tree(const Parsers& p, std::string_view text) {
     return "<refused>";
   const auto name = p.wrappedReflection->getTypeMetaData(r.value->type).name;
   if (name != "Wrap")
-    return "decl " + std::string(r.value_as<ast::Decl>()->name);
-  const auto* const wrap = r.value_as<ast::Wrap>();
+    return "decl " + std::string(r.valueAs<ast::Decl>()->name);
+  const auto* const wrap = r.valueAs<ast::Wrap>();
   if (wrap->inner == nullptr) return "wrap <no inner>";
   return "wrap bang=" + yes(wrap->bang) + " of decl " +
          std::string(wrap->inner->name);

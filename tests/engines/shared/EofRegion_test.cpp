@@ -26,7 +26,7 @@ void run() {
       const auto result = parser->parse(input);
       CHECK(result.accepted && !result.cst().recovered() &&
             result.diagnostics.empty());
-      const auto* document = result.value_as<teofregion::Document>();
+      const auto* document = result.valueAs<teofregion::Document>();
       const auto count = source.ends_with(" b") ? 3u : 2u;
       CHECK(document && document->parts.size() == count);
       if (!document || document->parts.size() != count) continue;
@@ -54,7 +54,7 @@ void run() {
       const auto result = parser->parse(input);
       CHECK(result.accepted && !result.cst().recovered() &&
             result.diagnostics.empty());
-      const auto* doc = result.value_as<teofregion::ChainDocument>();
+      const auto* doc = result.valueAs<teofregion::ChainDocument>();
       CHECK(doc);
       if (doc && source.starts_with("node"))
         CHECK(doc->empty && doc->empty->parent == doc);
@@ -74,7 +74,7 @@ void run() {
       const auto result = parser->parse(source);
       CHECK(result.accepted && !result.cst().recovered() &&
             result.diagnostics.empty());
-      CHECK(result.value_as<teofregion::ChainDocument>());
+      CHECK(result.valueAs<teofregion::ChainDocument>());
     }
     const auto invalid = parser->parse(" x");
     CHECK(!invalid.accepted || invalid.cst().recovered() ||
@@ -97,7 +97,7 @@ void run() {
       const std::string input = "nullable:" + std::string(source) + "@END@";
       const auto r = parser->parse(input);
       CHECK(r.accepted && !r.cst().recovered() && r.diagnostics.empty());
-      const auto* root = r.value_as<tnullableregion::Block>();
+      const auto* root = r.valueAs<tnullableregion::Block>();
       CHECK(root);
       if (!root) continue;
       if (source.empty() || source.starts_with("  #")) {
@@ -169,7 +169,7 @@ void run() {
       CHECK(result.accepted);
       CHECK(!result.cst().recovered());
       CHECK(result.diagnostics.empty());
-      const auto* document = result.value_as<tregionalreadmode::Doc>();
+      const auto* document = result.valueAs<tregionalreadmode::Doc>();
       CHECK(document);
       const std::size_t prefix = !test.prefix.empty();
       const std::size_t count = 1u + prefix + !test.suffix.empty();
@@ -219,9 +219,9 @@ std::string read(const cursiv::Parser& parser, std::string_view text,
                  bool inside = false) {
   const std::string source = "bytecond:" + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
-  const auto* doc = r.value_as<tbytecond::ast::Doc>();
+  const auto* doc = r.valueAs<tbytecond::ast::Doc>();
   if (inside) {
-    const auto* section = r.value_as<tbytecond::ast::Section>();
+    const auto* section = r.valueAs<tbytecond::ast::Section>();
     doc = section != nullptr ? section->doc : nullptr;
   }
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr)

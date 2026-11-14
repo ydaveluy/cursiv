@@ -100,7 +100,7 @@ class PerfCounters {
   };
 
 #ifdef __linux__
-  static bool pmu_type(const char* path, std::uint32_t& type) noexcept {
+  static bool pmuType(const char* path, std::uint32_t& type) noexcept {
     std::FILE* file = std::fopen(path, "r");
     if (file == nullptr) return false;
     unsigned value = 0;
@@ -110,7 +110,7 @@ class PerfCounters {
     return found;
   }
 
-  bool open_group(std::uint32_t pmuType) noexcept {
+  bool openGroup(std::uint32_t pmuType) noexcept {
     static constexpr std::uint64_t kEvent[kCount] = {
         PERF_COUNT_HW_CPU_CYCLES, PERF_COUNT_HW_INSTRUCTIONS,
         PERF_COUNT_HW_BRANCH_MISSES, PERF_COUNT_HW_CACHE_MISSES};
@@ -142,11 +142,11 @@ class PerfCounters {
 #ifdef __linux__
     std::uint32_t core = 0, atom = 0;
     const bool hybrid =
-        pmu_type("/sys/bus/event_source/devices/cpu_core/type", core) &&
-        pmu_type("/sys/bus/event_source/devices/cpu_atom/type", atom);
+        pmuType("/sys/bus/event_source/devices/cpu_core/type", core) &&
+        pmuType("/sys/bus/event_source/devices/cpu_atom/type", atom);
     if (hybrid) {
-      if (!open_group(core) || !open_group(atom)) close();
-    } else if (!open_group(0)) {
+      if (!openGroup(core) || !openGroup(atom)) close();
+    } else if (!openGroup(0)) {
       close();
     }
 #endif

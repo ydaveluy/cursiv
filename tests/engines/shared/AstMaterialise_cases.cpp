@@ -52,7 +52,7 @@ void expect(const Pair& readers, std::string_view text, std::string_view want) {
     const auto result = r.parser->parse(source);
     CHECK(result.accepted && result.diagnostics.empty() &&
           !result.cst().recovered());
-    CHECK(result.error == cursiv::AstBuildError::none);
+    CHECK(result.error == cursiv::AstBuildError::None);
     const std::string got = tree(r, result);
     if (got != want)
       std::printf("'%.*s'\n  built %s\n  wants %.*s\n",
@@ -91,7 +91,7 @@ void part_span(const cursiv::ParseResult& result, const cursiv::AstNode* node,
 void successive_assigned_and_appended_values_keep_their_spans(const Reader& e) {
   const std::string source = "mat:payloadcreate:a; b.c; d[2]";
   const auto result = e.parser->parse(source);
-  const auto* holder = result.value_as<tmaterialise::Holder>();
+  const auto* holder = result.valueAs<tmaterialise::Holder>();
   CHECK(result.accepted && !result.cst().recovered() &&
         result.diagnostics.empty() && holder && holder->children.size() == 2);
   if (!holder || holder->children.size() != 2) return;
@@ -110,7 +110,7 @@ void successive_assigned_and_appended_values_keep_their_spans(const Reader& e) {
 
   const std::string adoptedSource = "chained:a.b c";
   const auto adopted = e.parser->parse(adoptedSource);
-  const auto* block = adopted.value_as<ttree::ast::Block>();
+  const auto* block = adopted.valueAs<ttree::ast::Block>();
   CHECK(adopted.accepted && !adopted.cst().recovered() &&
         adopted.diagnostics.empty() && block && block->atoms.size() == 2);
   if (!block || block->atoms.size() != 2) return;
@@ -129,7 +129,7 @@ void stacked_wrappers_and_post_operand_flags_keep_their_meaning(const Reader& e)
   const auto result = e.parser->parse(source);
   CHECK(result.accepted && !result.cst().recovered() &&
         result.diagnostics.empty() &&
-        result.error == cursiv::AstBuildError::none);
+        result.error == cursiv::AstBuildError::None);
   const auto* root = cursiv::ast_cast<tmaterialise::Box>(result.value);
   CHECK(root && !root->parent && root->cstNodeId < result.cst().size());
   if (!root || root->cstNodeId >= result.cst().size()) return;
@@ -167,7 +167,7 @@ void recursive_call_arguments_close_before_the_callers_effects(const Reader& e) 
     const auto result = e.parser->parse(source);
     CHECK(result.accepted && !result.cst().recovered() &&
           result.diagnostics.empty());
-    CHECK(result.error == cursiv::AstBuildError::none);
+    CHECK(result.error == cursiv::AstBuildError::None);
     CHECK(result.nodes().size() == 2 * depth + 1);
     const auto* current = cursiv::ast_cast<tmaterialise::Expr>(result.value);
     const cursiv::AstNode* parent = nullptr;
@@ -219,7 +219,7 @@ void run() {
          "atoms3=Var{} }");
   for (const Reader& r : chain) {
     const auto result = r.parser->parse("mat:atomchain:A $a B");
-    const auto* block = result.value_as<tmaterialise::Block>();
+    const auto* block = result.valueAs<tmaterialise::Block>();
     CHECK(block != nullptr && block->atoms.size() == 3);
     if (block == nullptr || block->atoms.size() != 3) continue;
     CHECK(std::get<std::string_view>(block->atoms[0]) == "A");
@@ -235,7 +235,7 @@ void run() {
          "Row{items0=Row{} items1=Row{items0=Row{} } }");
   for (const Reader& r : flanked) {
     const auto result = r.parser->parse("mat:flanked:[1, [2], 3]");
-    const auto* row = result.value_as<tmaterialise::Row>();
+    const auto* row = result.valueAs<tmaterialise::Row>();
     CHECK(row != nullptr && row->items.size() == 3);
     if (row == nullptr || row->items.size() != 3) continue;
     CHECK(std::get<std::int64_t>(row->items[0]) == 1);
@@ -269,10 +269,10 @@ void run() {
   expect(group, "; $b", "Holder{children0=Var{} }");
   for (const Reader& r : group) {
     const auto flagged = r.parser->parse("mat:flaggroup:!$a");
-    const auto* holder = flagged.value_as<tmaterialise::Holder>();
+    const auto* holder = flagged.valueAs<tmaterialise::Holder>();
     CHECK(holder != nullptr && holder->flag);
     const auto plain = r.parser->parse("mat:flaggroup:; $b");
-    holder = plain.value_as<tmaterialise::Holder>();
+    holder = plain.valueAs<tmaterialise::Holder>();
     CHECK(holder != nullptr && !holder->flag);
   }
 
@@ -316,7 +316,7 @@ void run() {
   expect(terminal, "new.target", "Target{}");
   for (const Reader& r : terminal) {
     const auto result = r.parser->parse("mat:unassignedterminal:fn f");
-    const auto* var = result.value_as<tmaterialise::Var>();
+    const auto* var = result.valueAs<tmaterialise::Var>();
     CHECK(var != nullptr && var->name == "f");
   }
 
@@ -328,9 +328,9 @@ void run() {
       const auto result = r.parser->parse(text);
       CHECK(result.accepted && !result.diagnostics.empty());
       CHECK(result.value != nullptr ||
-            result.error == cursiv::AstBuildError::no_entry);
+            result.error == cursiv::AstBuildError::NoEntry);
       for (const cursiv::ParseDiagnostic& d : result.diagnostics)
-        CHECK(d.kind != cursiv::DiagnosticKind::conversion_error);
+        CHECK(d.kind != cursiv::DiagnosticKind::ConversionError);
     }
   const auto held = givenUp[0].parser->parse("mat:givenup:x n a ? ;");
   CHECK(tree(givenUp[0], held) == "Holder{}");
@@ -438,9 +438,9 @@ void exact_prefixes(const Engine& e, std::string_view mode, const PrefixCase& c,
   };
   verify(result.accepted && !result.cst().recovered() &&
              result.diagnostics.empty() &&
-             result.error == cursiv::AstBuildError::none,
+             result.error == cursiv::AstBuildError::None,
          "clean acceptance without AST build errors");
-  const auto* statement = result.value_as<ast::Stmt>();
+  const auto* statement = result.valueAs<ast::Stmt>();
   verify(statement && statement->value && !statement->parent,
          "detached statement owns the expression");
   if (!statement || !statement->value) {
@@ -464,7 +464,7 @@ void exact_prefixes(const Engine& e, std::string_view mode, const PrefixCase& c,
   seen.reserve(c.nodes.size() + 1);
   seen.insert(statement);
   std::size_t roots = 0;
-  e.reflection->visitMembers(*statement, [&](auto, auto, const auto& child) {
+  e.reflection->visitProperties(*statement, [&](auto, auto, const auto& child) {
     ++roots;
     verify(&child == statement->value, "statement has exactly its value child");
   });
@@ -497,10 +497,10 @@ void exact_prefixes(const Engine& e, std::string_view mode, const PrefixCase& c,
              "span is inside the live input", index);
     }
     const std::size_t firstChild = pending.size();
-    e.reflection->visitMembers(*current.node,
-                               [&](auto, auto, const auto& child) {
-                                 pending.push_back({&child, index});
-                               });
+    e.reflection->visitProperties(*current.node,
+                                  [&](auto, auto, const auto& child) {
+                                    pending.push_back({&child, index});
+                                  });
     std::reverse(pending.begin() + static_cast<std::ptrdiff_t>(firstChild),
                  pending.end());
   }

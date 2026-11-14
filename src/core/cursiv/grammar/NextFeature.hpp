@@ -12,8 +12,9 @@
 namespace cursiv {
 
 struct NextFeature {
-  // The element itself -- a literal to insert, a token category to name.
-  ElementId feature = kNoElement;
+  // The terminal that may come -- a literal to insert, a token category to
+  // name -- as the engine numbers it: what `Grammar::terminalSpellings` reads.
+  std::uint16_t feature = kNoElement;
   // The member being filled, empty when none. This is what turns a token into
   // a cross-reference: the grammar names the member, the tree names the class.
   std::string_view property{};

@@ -114,10 +114,10 @@ Write store(typename F::owner& o, V&& v) {
                 std::is_void_v<A> &&
                 !std::is_same_v<std::remove_cvref_t<V>, typename F::held> &&
                 !std::is_same_v<std::remove_cvref_t<V>, typename F::member>) {
-    return Write::not_modelled;
+    return Write::NotModelled;
   } else {
     cursiv::detail::place<A>(o.*F::ptr, std::forward<V>(v));
-    return Write::modelled;
+    return Write::Modelled;
   }
 }
 
@@ -221,24 +221,24 @@ template <class E>
 Write write_node_of(AstNode& owner, AstNode* child) {
   using D = directive<E>;
   using F = cursiv::detail::field_tag<D::ptr>;
-  if (!node_is<typename F::owner>(&owner)) return Write::not_modelled;
+  if (!node_is<typename F::owner>(&owner)) return Write::NotModelled;
   auto& o = *cursiv::detail::ast_cast_unchecked<typename F::owner>(&owner);
   using Held = typename F::held;
   if constexpr (F::content == cursiv::detail::FieldContent::node) {
     using T = std::remove_pointer_t<Held>;
-    if (!node_is<T>(child)) return Write::not_modelled;
+    if (!node_is<T>(child)) return Write::NotModelled;
     return store<F, Held>(o, cursiv::detail::ast_cast_unchecked<T>(child));
   } else if constexpr (F::content == cursiv::detail::FieldContent::variant) {
     using A = node_alt_t<Held>;
     if constexpr (std::is_void_v<A>) {
-      return Write::not_modelled;
+      return Write::NotModelled;
     } else {
       using T = std::remove_pointer_t<A>;
-      if (!node_is<T>(child)) return Write::not_modelled;
+      if (!node_is<T>(child)) return Write::NotModelled;
       return store<F, A>(o, cursiv::detail::ast_cast_unchecked<T>(child));
     }
   } else {
-    return Write::not_modelled;
+    return Write::NotModelled;
   }
 }
 
@@ -248,7 +248,7 @@ template <class F, class A, class Res>
 Write accept(typename F::owner& o, Res&& r) {
   using R = std::remove_cvref_t<Res>;
   if constexpr (cursiv::engine::is_conversion_result<R>) {
-    if (!r) return Write::modelled;
+    if (!r) return Write::Modelled;
     return store<F, A>(o, std::move(*r.value));
   } else {
     return store<F, A>(o, std::forward<Res>(r));
@@ -287,12 +287,12 @@ Write one_text([[maybe_unused]] typename F::owner& o,
                [[maybe_unused]] bool fallback,
                [[maybe_unused]] std::string_view text) {
   if constexpr (!cursiv::detail::is_text_payload<S>) {
-    return Write::not_modelled;
+    return Write::NotModelled;
   } else {
     using R = typename S::rule;
     constexpr ElementId kRow = payload_row<C, R>();
     if (fallback ? kRow != kNoElement : kRow != payload)
-      return Write::not_modelled;
+      return Write::NotModelled;
     // The name picks the source; the resolved rule converts it.
     using RR = typename payload_rule<C, R>::type;
     using A = typename cursiv::engine::conv_alt<
@@ -304,11 +304,11 @@ Write one_text([[maybe_unused]] typename F::owner& o,
       } else {
         // A converter reading `Parts`, or a value a data rule passes on, is
         // not modelled.
-        return Write::not_modelled;
+        return Write::NotModelled;
       }
     } else if constexpr (std::is_void_v<A> ||
                          !cursiv::detail::has_default_convert<A>) {
-      return Write::not_modelled;
+      return Write::NotModelled;
     } else {
       return accept<F, A>(o, default_convert<A>(text));
     }
@@ -325,12 +325,12 @@ struct text_sources<C, F, TypeList<Ss...>> {
     bool done = false;
     // The rule that spelled it first, the bare matcher only if none did.
     ((done = done ||
-             one_text<C, F, Ss>(o, payload, false, text) == Write::modelled),
+             one_text<C, F, Ss>(o, payload, false, text) == Write::Modelled),
      ...);
     ((done = done ||
-             one_text<C, F, Ss>(o, payload, true, text) == Write::modelled),
+             one_text<C, F, Ss>(o, payload, true, text) == Write::Modelled),
      ...);
-    return done ? Write::modelled : Write::not_modelled;
+    return done ? Write::Modelled : Write::NotModelled;
   }
 };
 
@@ -339,7 +339,7 @@ Write write_text_of(AstNode& owner, [[maybe_unused]] ElementId payload,
                     [[maybe_unused]] std::string_view text) {
   using D = directive<E>;
   using F = cursiv::detail::field_tag<D::ptr>;
-  if (!node_is<typename F::owner>(&owner)) return Write::not_modelled;
+  if (!node_is<typename F::owner>(&owner)) return Write::NotModelled;
   auto& o = *cursiv::detail::ast_cast_unchecked<typename F::owner>(&owner);
 
   if constexpr (D::enable) {
@@ -424,7 +424,7 @@ struct infix_ops<C, R, std::index_sequence<Is...>> {
   using Level =
       ops_of_level<C, level_alts_t<Lvls, I>,
                    static_cast<std::uint8_t>(sizeof...(Is) - I),
-                   Lvls::template at<I>::kGroup == Association::right>;
+                   Lvls::template at<I>::kGroup == Association::Right>;
   static constexpr std::size_t kN = (std::size_t{0} + ... + Level<Is>::size);
   static constexpr std::array<InfixOp, kN> kOps = []() consteval {
     std::array<InfixOp, kN> out{};
@@ -478,7 +478,7 @@ Write write_op(ElementId chosen, N& n, std::string_view text,
         ? (n.*R::op_pointer = op_value<Ops>(text), done = true)
         : false),
    ...);
-  return done ? Write::modelled : Write::not_modelled;
+  return done ? Write::Modelled : Write::NotModelled;
 }
 
 template <class C, class R>
@@ -490,16 +490,16 @@ Write fold_of(ElementId op, AstNode& node, AstNode* lhs, std::string_view text,
   using RT = std::remove_pointer_t<typename cursiv::detail::member_traits<
       std::remove_cv_t<decltype(R::right_pointer)>>::type>;
   if (!node_is<N>(&node) || !node_is<LT>(lhs) || !node_is<RT>(rhs))
-    return Write::not_modelled;
+    return Write::NotModelled;
   N& n = *cursiv::detail::ast_cast_unchecked<N>(&node);
   n.*R::left_pointer = cursiv::detail::ast_cast_unchecked<LT>(lhs);
   using Alts = typename level_alts_all<
       typename R::levels,
       std::make_index_sequence<R::levels::size>>::type;
-  if (write_op<C, R>(op, n, text, Alts{}) == Write::not_modelled)
-    return Write::not_modelled;
+  if (write_op<C, R>(op, n, text, Alts{}) == Write::NotModelled)
+    return Write::NotModelled;
   n.*R::right_pointer = cursiv::detail::ast_cast_unchecked<RT>(rhs);
-  return Write::modelled;
+  return Write::Modelled;
 }
 
 using FoldFn = Write (*)(ElementId, AstNode&, AstNode*, std::string_view,
@@ -589,15 +589,15 @@ void yield_one(std::string_view name, std::uint32_t index, const X& v,
                ValueYield yield) {
   if constexpr (cursiv::detail::is_ref_content(F::content)) {
     if constexpr (F::content == cursiv::detail::FieldContent::reference)
-      yield(name, index, ValueKind::text, v.refText);
+      yield(name, index, ValueKind::Text, v.refText);
     else
-      yield(name, index, ValueKind::unreadable, {});
+      yield(name, index, ValueKind::Unreadable, {});
   } else {
     std::string out;
     if (Render<X>::run(v, out))
-      yield(name, index, ValueKind::text, out);
+      yield(name, index, ValueKind::Text, out);
     else
-      yield(name, index, ValueKind::unreadable, out);
+      yield(name, index, ValueKind::Unreadable, out);
   }
 }
 
@@ -616,7 +616,7 @@ void yield_field(const AstNode& n, ValueYield yield) {
       if ((o.*F::ptr).has_value())
         yield_one<F>(F::name, kNone, *(o.*F::ptr), yield);
       else
-        yield(F::name, kNone, ValueKind::unset, {});
+        yield(F::name, kNone, ValueKind::Unset, {});
     } else {
       yield_one<F>(F::name, kNone, o.*F::ptr, yield);
     }
@@ -658,20 +658,20 @@ struct CursivActions final : GrammarActions {
   Write fold(ElementId e, ElementId op, AstNode& node, AstNode* left,
              std::string_view text, AstNode* right) const override {
     if (e >= Rows::kFold.size() || Rows::kFold[e] == nullptr)
-      return Write::not_modelled;
+      return Write::NotModelled;
     return Rows::kFold[e](op, node, left, text, right);
   }
 
-  Write write_node(ElementId e, AstNode& owner, AstNode* child) const override {
+  Write writeNode(ElementId e, AstNode& owner, AstNode* child) const override {
     if (e >= Rows::kNode.size() || Rows::kNode[e] == nullptr)
-      return Write::not_modelled;
+      return Write::NotModelled;
     return Rows::kNode[e](owner, child);
   }
 
-  Write write_text(ElementId e, ElementId payload, AstNode& owner,
-                   std::string_view text) const override {
+  Write writeText(ElementId e, ElementId payload, AstNode& owner,
+                  std::string_view text) const override {
     if (e >= Rows::kText.size() || Rows::kText[e] == nullptr)
-      return Write::not_modelled;
+      return Write::NotModelled;
     return Rows::kText[e](owner, payload, text);
   }
 

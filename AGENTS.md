@@ -41,6 +41,16 @@ Source directories:
 - A fix never adds a sentence to an existing comment or doc section: rewrite
   it so it reads as written once.
 
+## Naming
+
+The public surface follows one rule; `detail` and the engines' internals are
+not held to it.
+
+- Types are `PascalCase`. Member functions and fields are `camelCase`, private
+  fields `_name`. Free functions and grammar DSL names are `snake_case`.
+- Constants are `kName`. Enumerators are `PascalCase`.
+- A named slot of an AST node is a `property`.
+
 ## VS Code extensions
 
 `examples/*/vscode/` contains TypeScript extension projects, built with npm.

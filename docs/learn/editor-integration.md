@@ -78,7 +78,6 @@ module. For example, after defining `MyLangHoverProvider`:
 
 ```cpp title="src/lsp/mylang/LspModule.cpp"
 void install_lsp_module(MyLangServices& services) {
-  cursiv::install_default_lsp_services(services);
   services.hoverProvider = std::make_unique<MyLangHoverProvider>(services);
 }
 ```

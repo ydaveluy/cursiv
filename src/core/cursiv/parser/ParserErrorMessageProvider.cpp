@@ -20,17 +20,17 @@ std::string ParserErrorMessageProvider::buildMessage(
   if (!diagnostic.message.empty()) return diagnostic.message;
   switch (diagnostic.kind) {
     using enum DiagnosticKind;
-    case inserted:
+    case Inserted:
       return buildInsertedMessage(grammar, diagnostic, text);
-    case deleted:
+    case Deleted:
       return buildDeletedMessage(grammar, diagnostic, text);
-    case replaced:
+    case Replaced:
       return buildMismatchTokenMessage(grammar, diagnostic, text);
-    case incomplete:
+    case Incomplete:
       return buildIncompleteMessage(grammar, diagnostic, text);
-    case bounded:
+    case Bounded:
       return buildBoundedMessage(grammar, diagnostic, text);
-    case conversion_error:
+    case ConversionError:
       break;
   }
   return "Syntax error";

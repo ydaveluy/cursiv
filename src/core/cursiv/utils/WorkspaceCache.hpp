@@ -63,7 +63,10 @@ WorkspaceCache<K, V, Hash, KeyEqual>::WorkspaceCache(
     throw std::invalid_argument(
         "cursiv: a WorkspaceCache state must be one a build reaches, not "
         "Changed");
-  if (_builder == nullptr) return;
+  if (_builder == nullptr)
+    throw std::logic_error(
+        "cursiv: a WorkspaceCache is built once the shared services hold their "
+        "document builder, which empties it");
   _builder->addBuildPhaseListener(*this);
   try {
     _builder->addDocumentUpdateListener(*this);
@@ -75,7 +78,6 @@ WorkspaceCache<K, V, Hash, KeyEqual>::WorkspaceCache(
 
 template <class K, class V, class Hash, class KeyEqual>
 WorkspaceCache<K, V, Hash, KeyEqual>::~WorkspaceCache() noexcept {
-  if (_builder == nullptr) return;
   _builder->removeBuildPhaseListener(*this);
   _builder->removeDocumentUpdateListener(*this);
 }

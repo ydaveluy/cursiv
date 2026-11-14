@@ -85,14 +85,14 @@ std::vector<lsp::Position> positions(const Document& document) {
     return !leaf.hidden && leaf.begin != leaf.end;
   };
   std::size_t tokens = 0;
-  cst.visit_leaves([&](const CstLeaf& leaf) { tokens += token(leaf) ? 1 : 0; });
+  cst.visitLeaves([&](const CstLeaf& leaf) { tokens += token(leaf) ? 1 : 0; });
   const auto count = std::min<std::size_t>(tokens, 9);
   const auto rank_of = [&](std::size_t i) {
     return count == 1 ? 0 : i * (tokens - 1) / (count - 1);
   };
   std::vector<lsp::Position> result;
   std::size_t rank = 0;
-  cst.visit_leaves([&](const CstLeaf& leaf) {
+  cst.visitLeaves([&](const CstLeaf& leaf) {
     if (!token(leaf)) return;
     if (result.size() < count && rank_of(result.size()) == rank)
       result.push_back(to_lsp(document.textDocument().positionAt(leaf.begin)));

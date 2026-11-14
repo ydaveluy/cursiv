@@ -175,11 +175,11 @@ void one_edit(const cursiv::Parser& parser, const char* text,
   CHECK(result.diagnostics.size() == 1);
   if (result.diagnostics.size() == 1) {
     const auto& d = result.diagnostics.front();
-    CHECK(d.kind == cursiv::DiagnosticKind::replaced);
+    CHECK(d.kind == cursiv::DiagnosticKind::Replaced);
     CHECK(d.begin == begin);
     CHECK(d.end == end);
   }
-  if (const auto* doc = result.value_as<ttyporead::Doc>())
+  if (const auto* doc = result.valueAs<ttyporead::Doc>())
     CHECK(doc->value == std::string_view(source).substr(begin, end - begin));
 }
 
@@ -266,7 +266,7 @@ void run() {
         "reserve united;ok"}) {
     const auto r = parser->parse(text);
     CHECK(r.accepted && r.diagnostics.size() == 1 &&
-          r.diagnostics[0].kind == cursiv::DiagnosticKind::replaced);
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced);
   }
   for (const auto text :
        {"upcab", "uqcab", "upcz", "uqcz", "rx cad", "guards a_z"}) {
@@ -278,7 +278,7 @@ void run() {
     CHECK(r.accepted && r.diagnostics.empty());
     CHECK(r.value != nullptr);
     if (r.value) {
-      const auto* doc = r.value_as<taudit::Doc>();
+      const auto* doc = r.valueAs<taudit::Doc>();
       const auto* held = text[0] == '(' ? doc->child : doc;
       CHECK(held && held->text == std::string_view(text + 1, 1));
     }
@@ -287,7 +287,7 @@ void run() {
     const auto r = parser->parse("f");
     CHECK(r.accepted && r.diagnostics.empty());
     CHECK(r.value != nullptr);
-    if (r.value) CHECK(r.value_as<taudit::Doc>()->text.empty());
+    if (r.value) CHECK(r.valueAs<taudit::Doc>()->text.empty());
     const auto invalid = parser->parse("fe");
     CHECK(invalid.accepted && invalid.diagnostics.size() == 1);
   }
@@ -296,7 +296,7 @@ void run() {
     CHECK(r.accepted && r.diagnostics.empty());
     CHECK(r.value != nullptr);
     if (r.value) {
-      const auto* doc = r.value_as<taudit::Doc>();
+      const auto* doc = r.valueAs<taudit::Doc>();
       CHECK(doc->child && doc->child->child);
       if (doc->child && doc->child->child) {
         CHECK(doc->child->parent == doc);
@@ -309,44 +309,43 @@ void run() {
     const auto r = parser->parse("join j j");
     CHECK(r.accepted && r.diagnostics.empty());
     CHECK(r.value != nullptr);
-    if (r.value) CHECK(r.value_as<taudit::Doc>()->text == "12");
+    if (r.value) CHECK(r.valueAs<taudit::Doc>()->text == "12");
     CHECK(taudit::conversions == 2);
     taudit::conversions = 0;
     const auto single = parser->parse("single j");
     CHECK(single.accepted && single.diagnostics.empty());
-    CHECK(single.value && single.value_as<taudit::Doc>()->text == "1");
+    CHECK(single.value && single.valueAs<taudit::Doc>()->text == "1");
     CHECK(taudit::conversions == 1);
     taudit::conversions = 0;
     const auto wrapped = parser->parse("wrapped j");
     CHECK(wrapped.accepted && wrapped.diagnostics.empty());
-    CHECK(wrapped.value && wrapped.value_as<taudit::Doc>()->text == "wrapped");
+    CHECK(wrapped.value && wrapped.valueAs<taudit::Doc>()->text == "wrapped");
     CHECK(taudit::conversions == 1);
     const auto singlefail = parser->parse("singlefail bad");
     CHECK(singlefail.accepted && !singlefail.diagnostics.empty());
     CHECK(singlefail.value &&
-          singlefail.value_as<taudit::Doc>()->text == "unchanged");
+          singlefail.valueAs<taudit::Doc>()->text == "unchanged");
     const auto constants = parser->parse("const k k");
     CHECK(constants.accepted && constants.diagnostics.empty());
     CHECK(constants.value != nullptr);
     if (constants.value)
-      CHECK(constants.value_as<taudit::Doc>()->text == "constantconstant");
+      CHECK(constants.valueAs<taudit::Doc>()->text == "constantconstant");
     const auto failed = parser->parse("fail bad bad");
     CHECK(failed.accepted && !failed.diagnostics.empty());
     CHECK(failed.value != nullptr);
-    if (failed.value)
-      CHECK(failed.value_as<taudit::Doc>()->text == "unchanged");
+    if (failed.value) CHECK(failed.valueAs<taudit::Doc>()->text == "unchanged");
   }
   for (const auto text : {"partdirect part", "partjoined part"}) {
     taudit::conversions = 0;
     const auto r = parser->parse(text);
     CHECK(r.accepted && r.diagnostics.empty());
-    CHECK(r.value && r.value_as<taudit::Doc>()->text == "converted part");
+    CHECK(r.value && r.valueAs<taudit::Doc>()->text == "converted part");
     CHECK(taudit::conversions == 1);
   }
   {
     auto r = parser->parse("flag");
     CHECK(r.accepted && r.diagnostics.empty());
-    CHECK(r.value && r.value_as<taudit::Doc>()->flagged);
+    CHECK(r.value && r.valueAs<taudit::Doc>()->flagged);
     parser.reset();
     const auto* grammar = r.cst().grammar();
     CHECK(grammar != nullptr);
@@ -373,7 +372,7 @@ void run() {
   const auto p = twide::generated::G::create_parser();
   const cursiv::ParseResult r = p->parse("k000 k519 k300");
   CHECK(r.accepted && r.diagnostics.empty());
-  const auto* const doc = r.value_as<twide::ast::Doc>();
+  const auto* const doc = r.valueAs<twide::ast::Doc>();
   CHECK(doc != nullptr && doc->words.size() == 3 && doc->words[1] == "k519");
   CHECK(!p->parse("k520").diagnostics.empty());
 }
@@ -438,7 +437,7 @@ void run() {
   const std::string text = "'ab' 'cd' 'ef'";
   const cursiv::ParseResult r = engine->parse(text);
   CHECK(r.accepted && r.diagnostics.empty());
-  const auto* const doc = r.value_as<tmemconv::ast::Doc>();
+  const auto* const doc = r.valueAs<tmemconv::ast::Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) return;
   CHECK(doc->direct == "ab");
@@ -1387,7 +1386,7 @@ void a_refused_election_ranks_a_token_before_a_trivia() {
   const std::unique_ptr<cursiv::Parser> p = tv::create_parser();
   for (const char* t : {"ab!", "ba!"}) {
     const cursiv::ParseResult r = p->parse(t);
-    const auto* doc = r.value_as<tguard::Items>();
+    const auto* doc = r.valueAs<tguard::Items>();
     CHECK(r.accepted && r.diagnostics.empty() && doc != nullptr &&
           doc->items.size() == 2 && doc->items[0] == std::string_view(t, 2) &&
           doc->items[1] == "!");
@@ -1612,7 +1611,7 @@ void run() {
   }
   const auto r = parser->parse(doc);
   CHECK(r.accepted && r.diagnostics.empty());
-  const auto* d = r.value_as<trefusedheads::Doc>();
+  const auto* d = r.valueAs<trefusedheads::Doc>();
   CHECK(d != nullptr && d->items.size() == want.size());
   if (d != nullptr && d->items.size() == want.size())
     for (std::size_t i = 0; i < want.size(); ++i) {
@@ -1652,7 +1651,7 @@ struct Case {
 };
 
 std::string tokens(const cursiv::ParseResult& r) {
-  const auto* d = r.value_as<trefusedshorter::Doc>();
+  const auto* d = r.valueAs<trefusedshorter::Doc>();
   if (d == nullptr) return "<none>";
   std::string out;
   for (const trefusedshorter::Item* i : d->items)
@@ -1770,7 +1769,7 @@ namespace case_samewordcandidates {
 namespace {
 
 std::string items(const cursiv::ParseResult& r) {
-  const auto* d = r.value_as<tsameword::Doc>();
+  const auto* d = r.valueAs<tsameword::Doc>();
   if (d == nullptr) return "<none>";
   std::string out;
   for (const tsameword::Item* i : d->items) {
@@ -1832,7 +1831,7 @@ void reads_as_the_keyword(Parser& parser, const std::string& text,
                           unsigned n) {
   const auto r = parser->parse(text);
   CHECK(r.accepted && r.diagnostics.empty());
-  const auto* doc = r.template value_as<tkeyword::Doc>();
+  const auto* doc = r.template valueAs<tkeyword::Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) return;
   CHECK(doc->keyed != nullptr && doc->named == nullptr);

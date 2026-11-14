@@ -29,8 +29,6 @@
 #include "cursiv/references/References.hpp"
 #include "cursiv/references/ScopeProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/services/LanguageMetaData.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
@@ -47,8 +45,10 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/text/lower_case.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/validation/DefaultCodeActionProtocol.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/SpellingActions.hpp"
 #include "cursiv/workspace/AstNodeDescription.hpp"
 #include "cursiv/workspace/Document.hpp"
@@ -549,7 +549,7 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
             }
             shared.workspaceLock->write(
                 [&](const CancellationToken& writeToken) {
-                  const DocumentBuilder& builder = *shared.documentBuilder;
+                  DocumentBuilder& builder = *shared.documentBuilder;
                   if (builder.currentState() < DocumentState::Validated) {
                     // Under the write's token alone: work the request gave up
                     // on would wait for a write that may never come.
@@ -654,17 +654,16 @@ void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
                           out += owningDocument->uri;
                           const CoreServices* const language =
                               owningDocument->language;
-                          const std::optional<CstNodeView> nameNode =
+                          const CstNodeView nameNode =
                               language == nullptr || description.node == nullptr
-                                  ? std::nullopt
+                                  ? CstNodeView{}
                                   : language->nameProvider->getNameNode(
                                         *description.node,
                                         owningDocument.get());
                           // A node built by hand has no record to point at: its
                           // uri alone says where it lives.
-                          const NodeId at = nameNode.has_value()
-                                                ? nameNode->id
-                                                : description.symbolId;
+                          const NodeId at =
+                              nameNode ? nameNode.id : description.symbolId;
                           if (const Cst& cst =
                                   owningDocument->parseResult.cst();
                               at != kNoNode && at < cst.size()) {
@@ -705,7 +704,8 @@ void DefaultMcpService::registerReferencesTool(McpServer& server) const {
               const TextOffset offset = document.textDocument().offsetAt(
                   Position{at.line, at.column});
               const Declaration declaration =
-                  language.references->findDeclaration(document, offset, token);
+                  language.references->findDeclarations(document, offset,
+                                                        token);
               if (!declaration) {
                 if (declaration.span.begin != declaration.span.end)
                   out = "the name here resolves to nothing";
@@ -757,7 +757,8 @@ void DefaultMcpService::registerHoverTool(McpServer& server) const {
               const TextOffset offset = document.textDocument().offsetAt(
                   Position{at.line, at.column});
               const Declaration declaration =
-                  language.references->findDeclaration(document, offset, token);
+                  language.references->findDeclarations(document, offset,
+                                                        token);
               if (!declaration) return;
               const std::string_view name =
                   document.textDocument().getText().substr(
@@ -836,7 +837,8 @@ void DefaultMcpService::registerRenameTool(McpServer& server) const {
               const TextOffset offset = document.textDocument().offsetAt(
                   Position{at.line, at.column});
               const Declaration declaration =
-                  language.references->findDeclaration(document, offset, token);
+                  language.references->findDeclarations(document, offset,
+                                                        token);
               if (declaration.span.begin == declaration.span.end) return;
               const std::string_view name =
                   document.textDocument().getText().substr(

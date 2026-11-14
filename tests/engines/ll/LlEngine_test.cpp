@@ -178,7 +178,7 @@ void ast_conversion_observes_cancellation_before_return() {
       cursiv::engine::AstReducer::build<cursiv::engine::StampLayout{}>(
           actions, tape("x"));
   CHECK(complete.value != nullptr &&
-        complete.error == cursiv::AstBuildError::none);
+        complete.error == cursiv::AstBuildError::None);
 }
 
 void the_parser_propagates_cancellation_to_ast_materialisation() {
@@ -213,7 +213,7 @@ void ast_materialisation_rejects_an_invalid_entry_extent() {
     const auto result =
         cursiv::engine::AstReducer::build<cursiv::engine::StampLayout{}>(
             ast_cancellation::actions, std::move(tree));
-    CHECK(result.error == cursiv::AstBuildError::malformed_cst &&
+    CHECK(result.error == cursiv::AstBuildError::MalformedCst &&
           result.value == nullptr && !result.diagnostics.empty());
   }
 }
@@ -227,16 +227,16 @@ void ast_with_spans(const cursiv::AstReflection& reflection,
   const auto& span = tree[node.cstNodeId];
   text +=
       '[' + std::to_string(span.begin) + ',' + std::to_string(span.end) + "]{";
-  reflection.visitMembers(node,
-                          [&](std::string_view member, std::uint32_t index,
-                              cursiv::AstNode& child) {
-                            text += member;
-                            if (index != cursiv::AstReflection::kNoIndex)
-                              text += std::to_string(index);
-                            text += '=';
-                            ast_with_spans(reflection, tree, child, text);
-                            text += ' ';
-                          });
+  reflection.visitProperties(node,
+                             [&](std::string_view member, std::uint32_t index,
+                                 cursiv::AstNode& child) {
+                               text += member;
+                               if (index != cursiv::AstReflection::kNoIndex)
+                                 text += std::to_string(index);
+                               text += '=';
+                               ast_with_spans(reflection, tree, child, text);
+                               text += ' ';
+                             });
   text += '}';
 }
 
@@ -336,7 +336,7 @@ void predictions_keep_the_end_they_depended_on() {
   for (const std::string_view text : {"show name;", "show name();"}) {
     const auto result = parser->parse(text);
     CHECK(result.accepted && result.diagnostics.empty());
-    const auto* unit = result.value_as<tpar::ast::Unit>();
+    const auto* unit = result.valueAs<tpar::ast::Unit>();
     CHECK(unit != nullptr && unit->shows.size() == 1);
     if (unit == nullptr || unit->shows.size() != 1) continue;
     CHECK(unit->shows[0]->items.size() == 1);
@@ -1570,7 +1570,7 @@ void a_repair_names_what_the_other_engine_names() {
   CHECK(a.diagnostics.size() == 1 && b.diagnostics.size() == 1);
   for (std::size_t i = 0; i < a.diagnostics.size(); ++i) {
     const cursiv::ParseDiagnostic& d = a.diagnostics[i];
-    CHECK(d.kind == cursiv::DiagnosticKind::deleted && d.begin == 10 &&
+    CHECK(d.kind == cursiv::DiagnosticKind::Deleted && d.begin == 10 &&
           d.end == 11);
     const auto spellings = ll->getGrammar().terminalSpellings(d.element);
     CHECK(spellings.size() == 1 && spellings.front() == "+" && d.also.empty());
@@ -1580,7 +1580,7 @@ void a_repair_names_what_the_other_engine_names() {
   const cursiv::ParseResult e = lr->parse("show x as 2;");
   CHECK(c.diagnostics.size() == 1 && e.diagnostics.size() == 1);
   for (const cursiv::ParseDiagnostic& d : c.diagnostics) {
-    CHECK(d.kind == cursiv::DiagnosticKind::inserted);
+    CHECK(d.kind == cursiv::DiagnosticKind::Inserted);
     CHECK(ll->getGrammar().terminalName(d.element) == "ID");
     if (e.diagnostics.size() != 1) continue;
     const cursiv::ParseDiagnostic& other = e.diagnostics[0];
@@ -1627,7 +1627,7 @@ void a_skip_to_the_end_of_the_text_reads_nothing() {
   CHECK(a.diagnostics.size() == b.diagnostics.size());
   for (std::size_t i = 0; i < a.diagnostics.size() && i < b.diagnostics.size();
        ++i)
-    CHECK(a.diagnostics[i].kind == cursiv::DiagnosticKind::inserted &&
+    CHECK(a.diagnostics[i].kind == cursiv::DiagnosticKind::Inserted &&
           a.diagnostics[i].begin == b.diagnostics[i].begin &&
           a.diagnostics[i].end == b.diagnostics[i].end);
 }
@@ -1689,7 +1689,7 @@ void repairs_before_trailing_whitespace_keep_parent_spans_valid() {
         "let a = 1 /*gap*/ 1; /*tail*/"}) {
     const auto result = parser->parse(text);
     CHECK(!result.diagnostics.empty());
-    const auto* unit = result.value_as<tpar::ast::Unit>();
+    const auto* unit = result.valueAs<tpar::ast::Unit>();
     CHECK(unit != nullptr && !unit->lets.empty());
     if (unit != nullptr && !unit->lets.empty())
       CHECK(unit->lets[0]->name == "a");
@@ -1758,7 +1758,7 @@ void a_misspelt_keyword_is_read_as_the_one_it_spells() {
   CHECK(r.value != nullptr);
   bool replaced = false;
   for (const cursiv::ParseDiagnostic& d : r.diagnostics)
-    replaced = replaced || d.kind == cursiv::DiagnosticKind::replaced;
+    replaced = replaced || d.kind == cursiv::DiagnosticKind::Replaced;
   CHECK(replaced);
   // Both statements, not just the one before the fault.
   const cursiv::ParseResult whole = ll->parse("export let a = 1; let b = 2;");
@@ -1774,7 +1774,7 @@ void a_word_that_spells_no_keyword_is_skipped() {
   CHECK(r.value != nullptr);
   bool deleted = false;
   for (const cursiv::ParseDiagnostic& d : r.diagnostics)
-    deleted = deleted || d.kind == cursiv::DiagnosticKind::deleted;
+    deleted = deleted || d.kind == cursiv::DiagnosticKind::Deleted;
   CHECK(deleted);
   const cursiv::ParseResult whole = ll->parse("let a = 1; let b = 2;");
   CHECK(whole.accepted && whole.diagnostics.empty());
@@ -1798,7 +1798,7 @@ void the_precedence_table_says_what_the_grammar_said() {
   const auto first = built.cfg.atomic_operator(op[0].body);
   CHECK(first != cursiv::engine::kNoRow);
   for (unsigned i = 0; i < 4; ++i) {
-    CHECK(op[i].assoc == cursiv::Association::left);
+    CHECK(op[i].assoc == cursiv::Association::Left);
     const auto leaf = built.cfg.atomic_operator(op[i].body);
     CHECK(leaf != cursiv::engine::kNoRow);
     if (leaf == cursiv::engine::kNoRow || first == cursiv::engine::kNoRow)
@@ -2199,7 +2199,7 @@ void generated_public_ast_is_unchanged() {
         CHECK(x == y);
       }
       if (std::string_view(text) == "let a = call(1,2);") {
-        const auto* unit = a.value_as<tpar::ast::Unit>();
+        const auto* unit = a.valueAs<tpar::ast::Unit>();
         CHECK(unit && unit->lets.size() == 1);
         if (unit && unit->lets.size() == 1) {
           const auto* declaration = unit->lets[0];

@@ -45,7 +45,7 @@ int generate(const GenerateOptions& options) {
   shared.fileSystemProvider =
       std::make_unique<cursiv::LocalFileSystemProvider>();
   cursiv::install_default_shared_core_services(shared);
-  if (!kRegister(shared)) return cursiv::kFatal;
+  kRegister(shared);
 
   // Scan the file's folder too, so a declaration from a file beside it
   // resolves. A missing file is reported before that scan.

@@ -71,15 +71,15 @@ std::string_view QualifiedNameProvider::keepQualifiedName(
           || qualifier.parent->type
                  != &cursiv::ast_type_tag<ast::PackageDeclaration>))
     return keepQualifiedName(document, qualifier.name, name);
-  // The temporary qualifier remains alive while keep_text copies its parts.
+  // The temporary qualifier remains alive while keepText copies its parts.
   return keepQualifiedName(document, qualifierOf(document, qualifier), name);
 }
 
 std::string_view QualifiedNameProvider::keepQualifiedName(
     const cursiv::Document& document, std::string_view qualifier,
     std::string_view name) const {
-  if (qualifier.empty()) return document.keep_text(name);
-  return document.keep_text(qualifier, ".", name);
+  if (qualifier.empty()) return document.keepText(name);
+  return document.keepText(qualifier, ".", name);
 }
 
 }  // namespace dm

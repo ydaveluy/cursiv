@@ -15,14 +15,14 @@
 
 #include "cursiv/references/ScopeProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/DocumentReferences.hpp"
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
 #include "cursiv/text/TextRange.hpp"
 #include "cursiv/utils/CaseFold.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 #include "cursiv/validation/DefaultCodeActionProtocol.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/DocumentValidator.hpp"
 #include "cursiv/workspace/AstNodeDescription.hpp"
 #include "cursiv/workspace/Document.hpp"
@@ -136,21 +136,25 @@ std::vector<JsonValue::Array> detail::spelling_actions(
         return asked(*d);
       }))
     return rows;
-  // The sites counted in the order the validator lists them, so the first
-  // ones are the same whichever diagnostics ask.
-  unsigned rank = 0;
+  // The sites one request is served, in the order the validator lists them.
+  unsigned spelt = 0;
   references->visitUnresolved(
       document.parseResult.cst(),
       [&](RefState why, TextOffset begin, TextOffset end,
           const ReferenceInfo& site) {
-        if (why != RefState::ErrorNotFound || begin == end) return;
-        if (rank++ >= kSpelledSites) return;
+        if (why != RefState::ErrorNotFound || begin == end ||
+            spelt == kSpelledSites)
+          return;
+        bool here = false;
         for (std::size_t i = 0; i < diagnostics.size(); ++i) {
           const Diagnostic& d = *diagnostics[i];
           if (asked(d) && d.range.begin == begin && d.range.end == end &&
-              rows[i].empty())
+              rows[i].empty()) {
             rows[i] = near_names(document, *document.language, site, d.range);
+            here = true;
+          }
         }
+        if (here) ++spelt;
       });
   return rows;
 }

@@ -39,7 +39,7 @@ struct Pair {
 
 inline bool clean(const cursiv::ParseResult& parsed) {
   return parsed.accepted && parsed.diagnostics.empty() &&
-         parsed.error == cursiv::AstBuildError::none;
+         parsed.error == cursiv::AstBuildError::None;
 }
 
 // Both engines build one tree: the same records, spans and standing.

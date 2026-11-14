@@ -150,7 +150,7 @@ Parsed parse(std::string_view text, const cursiv::engine::LrDrive& drive,
   Parsed p;
   p.accepted =
       cursiv::engine::lr_parser<A>.parse(text, cst, &p.stats, &drive, budget);
-  p.entry = cst.has_entry();
+  p.entry = cst.hasEntry();
   p.notes.assign(cst.diagnostics().begin(), cst.diagnostics().end());
   return p;
 }
@@ -209,8 +209,8 @@ void a_deep_nest_past_the_budget_is_closed() {
     bool wrapped = false;
     bool closed = false;
     for (const cursiv::ParseDiagnostic& n : p.notes) {
-      wrapped = wrapped || n.kind == cursiv::DiagnosticKind::incomplete;
-      closed = closed || (n.kind != cursiv::DiagnosticKind::bounded &&
+      wrapped = wrapped || n.kind == cursiv::DiagnosticKind::Incomplete;
+      closed = closed || (n.kind != cursiv::DiagnosticKind::Bounded &&
                           n.end == text.size());
     }
     CHECK(!wrapped && closed);
@@ -268,7 +268,7 @@ void a_completion_the_grammar_makes_long_is_cut() {
   CHECK(p.accepted && p.stats.degradedStops != 0);
   bool bounded = false;
   for (const cursiv::ParseDiagnostic& n : p.notes)
-    bounded = bounded || n.kind == cursiv::DiagnosticKind::bounded;
+    bounded = bounded || n.kind == cursiv::DiagnosticKind::Bounded;
   CHECK(bounded);
 }
 
@@ -289,7 +289,7 @@ void unmatched_text_is_one_fault() {
   const std::string text = "module m f(1, " + std::string(1000000, '@') + " );";
   const Parsed p = parse<garith::kTable>(text, garith::kDrive);
   CHECK(p.accepted && p.notes.size() == 1 &&
-        p.notes[0].kind == cursiv::DiagnosticKind::replaced);
+        p.notes[0].kind == cursiv::DiagnosticKind::Replaced);
 }
 
 // A condition reads a long gap once, whoever asks, and the search pays for

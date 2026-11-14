@@ -43,14 +43,14 @@ std::unique_ptr<cursiv::Parser> parser(
 
 bool bounded(const cursiv::ParseResult& result) {
   return std::ranges::any_of(result.diagnostics, [](const auto& note) {
-    return note.kind == cursiv::DiagnosticKind::bounded;
+    return note.kind == cursiv::DiagnosticKind::Bounded;
   });
 }
 
 void repaired(const cursiv::Parser& engine, const std::string& text,
               bool mustBeBounded) {
   const auto result = engine.parse(text);
-  CHECK(result.accepted && result.value && result.cst().has_entry());
+  CHECK(result.accepted && result.value && result.cst().hasEntry());
   CHECK(result.cst().recovered());
   if (mustBeBounded) CHECK(bounded(result));
   CHECK(std::ranges::any_of(result.diagnostics,
@@ -196,9 +196,9 @@ void an_unclosed_last_declaration_costs_no_other() {
         if (predictive) continue;
         CHECK(is[is.size() - 1].recovered == before.empty());
         CHECK(cut.diagnostics.size() == 2 &&
-              cut.diagnostics[0].kind == cursiv::DiagnosticKind::incomplete &&
+              cut.diagnostics[0].kind == cursiv::DiagnosticKind::Incomplete &&
               cut.diagnostics[0].begin == before.size() &&
-              cut.diagnostics[1].kind == cursiv::DiagnosticKind::bounded &&
+              cut.diagnostics[1].kind == cursiv::DiagnosticKind::Bounded &&
               cut.diagnostics[1].begin == before.size());
       }
 }
@@ -217,11 +217,11 @@ void a_long_token_does_not_win_a_search_without_a_goal() {
     CHECK(result.accepted && bounded(result));
     std::vector<cursiv::ParseDiagnostic> edits;
     for (const auto& note : result.diagnostics)
-      if (note.kind != cursiv::DiagnosticKind::bounded) edits.push_back(note);
+      if (note.kind != cursiv::DiagnosticKind::Bounded) edits.push_back(note);
     CHECK(edits.size() == 2 &&
-          edits[0].kind == cursiv::DiagnosticKind::deleted &&
+          edits[0].kind == cursiv::DiagnosticKind::Deleted &&
           edits[0].begin == 12 && edits[0].end == 13 &&
-          edits[1].kind == cursiv::DiagnosticKind::deleted &&
+          edits[1].kind == cursiv::DiagnosticKind::Deleted &&
           edits[1].begin == 14 && edits[1].end == 15);
   }
 }

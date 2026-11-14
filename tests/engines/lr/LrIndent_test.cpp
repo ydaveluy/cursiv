@@ -38,7 +38,7 @@ void spell(const tindent::ast::Node* n, std::string& out) {
 template <class Engine>
 std::string parse_with(const Engine& engine, std::string_view text) {
   const cursiv::ParseResult r = engine->parse(text);
-  const auto* const doc = r.value_as<tindent::ast::Node>();
+  const auto* const doc = r.valueAs<tindent::ast::Node>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr) return "";
   std::string out;
   spell(doc, out);
@@ -58,7 +58,7 @@ bool recovers(std::string_view text) {
 template <class Engine>
 long first_end(const Engine& engine, std::string_view text) {
   const cursiv::ParseResult r = engine->parse(text);
-  const auto* const doc = r.value_as<tindent::ast::Node>();
+  const auto* const doc = r.valueAs<tindent::ast::Node>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr ||
       doc->body.empty())
     return -1;
@@ -92,17 +92,17 @@ void an_indent_keeps_an_earlier_repair_reading_alive() {
         const std::string input = prefix + tail;
         const auto r = engine->parse(input);
         CHECK(r.accepted && r.diagnostics.size() == 1);
-        const auto* node = r.value_as<tvirtual::Node>();
+        const auto* node = r.valueAs<tvirtual::Node>();
         CHECK(node && node->first && !node->second);
         for (const auto& d : r.diagnostics) {
-          CHECK(d.kind == cursiv::DiagnosticKind::inserted);
+          CHECK(d.kind == cursiv::DiagnosticKind::Inserted);
           CHECK(d.begin == prefix.size() && d.end == prefix.size());
           const auto spellings =
               engine->getGrammar().terminalSpellings(d.element);
           CHECK(spellings.size() == 1 && spellings.front() == ";");
         }
         unsigned invented = 0;
-        r.cst().visit_leaves([&](const cursiv::CstLeaf& leaf) {
+        r.cst().visitLeaves([&](const cursiv::CstLeaf& leaf) {
           if (leaf.recovered && leaf.begin == leaf.end) ++invented;
         });
         CHECK(invented == 1);
@@ -115,7 +115,7 @@ void an_indent_keeps_an_earlier_repair_reading_alive() {
         for (const auto& text : {prefix + ";" + tail, prefix + tail + "!@$"}) {
           const auto valid = engine->parse(text);
           CHECK(valid.accepted && valid.diagnostics.empty());
-          const auto* root = valid.value_as<tvirtual::Node>();
+          const auto* root = valid.valueAs<tvirtual::Node>();
           CHECK(root && root->first == (text == prefix + ";" + tail) &&
                 root->second == (text == prefix + tail + "!@$"));
         }
@@ -329,8 +329,8 @@ int main() {
     const auto r = repaired->parse(text);
     CHECK(r.accepted && r.diagnostics.size() == 1);
     if (r.diagnostics.size() == 1)
-      CHECK(r.diagnostics[0].kind == cursiv::DiagnosticKind::replaced);
-    const auto* doc = r.value_as<tindent::ast::Node>();
+      CHECK(r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced);
+    const auto* doc = r.valueAs<tindent::ast::Node>();
     CHECK(doc != nullptr);
     std::string tree;
     if (doc) spell(doc, tree);

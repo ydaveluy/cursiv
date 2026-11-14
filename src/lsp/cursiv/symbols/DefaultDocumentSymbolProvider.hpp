@@ -20,7 +20,7 @@ namespace cursiv {
 class DefaultDocumentSymbolProvider : public DocumentSymbolProvider {
  public:
   explicit DefaultDocumentSymbolProvider(const LspServices& core) noexcept
-      : _core(core) {}
+      : services(core) {}
 
   [[nodiscard]] std::vector<lsp::DocumentSymbol> getSymbols(
       const Document& document,
@@ -33,10 +33,7 @@ class DefaultDocumentSymbolProvider : public DocumentSymbolProvider {
       const Document& document, const AstNode& node, TextRange span,
       CstNodeView nameNode, std::string_view computedName) const;
 
-  [[nodiscard]] const LspServices& core() const noexcept { return _core; }
-
- private:
-  const LspServices& _core;
+  const LspServices& services;
 };
 
 }  // namespace cursiv

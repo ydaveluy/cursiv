@@ -67,8 +67,8 @@ inline bool ll_dedent(const Cst& cst, StampLayout stamp, const CstLeaf& leaf) {
 // Where the gap in front of `offset` begins: the end of the last leaf before
 // it that is not trivia, the text the parse dropped included.
 inline TextOffset ll_gap_from(const Cst& cst, TextOffset offset) {
-  for (NodeId at = cst.leaf_after(offset); at > 0;) {
-    const CstLeaf leaf = cst.as_leaf(at = cst.leaf_before(at));
+  for (NodeId at = cst.leafAfter(offset); at > 0;) {
+    const CstLeaf leaf = cst.asLeaf(at = cst.leafBefore(at));
     if (!leaf.hidden && leaf.begin != leaf.end) return leaf.end;
   }
   return 0;
@@ -77,8 +77,8 @@ inline TextOffset ll_gap_from(const Cst& cst, TextOffset offset) {
 // The last such token that starts before `offset`.
 inline CstLeaf ll_leaf_before(const Cst& cst, StampLayout stamp,
                               TextOffset offset) {
-  for (NodeId behind = cst.leaf_after(offset); behind > 0;) {
-    const CstLeaf leaf = cst.as_leaf(behind = cst.leaf_before(behind));
+  for (NodeId behind = cst.leafAfter(offset); behind > 0;) {
+    const CstLeaf leaf = cst.asLeaf(behind = cst.leafBefore(behind));
     if (leaf.begin < offset && ll_replayable(cst, stamp, leaf)) return leaf;
   }
   return {};
@@ -104,7 +104,7 @@ inline CstLeaf ll_before_invented_closer(const Cst& cst, StampLayout stamp,
       return leaf;
     bool closes = false;
     for (NodeId behind = leaf.id; behind > 0;) {
-      const CstLeaf before = cst.as_leaf(behind = cst.leaf_before(behind));
+      const CstLeaf before = cst.asLeaf(behind = cst.leafBefore(behind));
       if (before.hidden) continue;
       if (!ll_invented(before)) {
         if (!closes || !ll_replayable(cst, stamp, before)) return leaf;
@@ -135,7 +135,7 @@ inline bool ll_chains_nothing(const Cst& cst, StampLayout stamp,
     while (cst[last].subtreeSize != 1 || cst[last].hidden);
     if (last != leaf.id) break;
     std::uint32_t op = 0;
-    for (const NodeId child : cst.reverse_children(records[i])) {
+    for (const NodeId child : cst.reverseChildren(records[i])) {
       const std::uint16_t pos =
           cst[child].subtreeSize == 1 ? stamp.state(cst[child]) : 0;
       if (pos != 0 && pos <= T.nafter &&
@@ -288,14 +288,14 @@ class LlReplayWidth {
     for (;;) {
       while (_behind > _bound) {
         _stop.poll();
-        _behind = _cst.leaf_before(_behind);
-        if (ll_replayable(_cst, _stamp, _cst.as_leaf(_behind))) ++_seen;
+        _behind = _cst.leafBefore(_behind);
+        if (ll_replayable(_cst, _stamp, _cst.asLeaf(_behind))) ++_seen;
         if (_seen > most) return kMore;
       }
       if (named ? _seen > last && _seen >= 2u * last : _seen > last + 1u)
         return named ? _seen : _seen - 1u;
       if (_level == 0) return 0;
-      _bound = _cst.leaf_after(_cst[_spine.records()[--_level]].begin);
+      _bound = _cst.leafAfter(_cst[_spine.records()[--_level]].begin);
     }
   }
 
@@ -546,7 +546,7 @@ inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
   unsigned read = 0;
   while (behind > 0 && read <= window) {
     stop.poll();
-    const CstLeaf leaf = cst.as_leaf(behind = cst.leaf_before(behind));
+    const CstLeaf leaf = cst.asLeaf(behind = cst.leafBefore(behind));
     if (ll_replayable(cst, stamp, leaf)) {
       taken.push_back(leaf);
       ++read;
@@ -741,16 +741,16 @@ inline std::vector<SymbolId> ll_indents_at(const Cst& cst, StampLayout stamp,
   constexpr SymbolId dedent = kSyntheticTerm<T, kSyntheticDedent>;
   if constexpr (indent != 0 || dedent != 0) {
     const char* const text = cst.text().data();
-    const NodeId before = cst.leaf_after(at);
-    const TextOffset held = before > 0 ? cst[cst.leaf_before(before)].end : 0;
+    const NodeId before = cst.leafAfter(at);
+    const TextOffset held = before > 0 ? cst[cst.leafBefore(before)].end : 0;
     if (!indent_line_start(text, from, [held] { return held; })) return found;
     const IndentRun blanks = indent_run(text, from, at);
     if (blanks.stop != at) return found;
     std::vector<IndentLevel> levels;
     IndentAt open;
-    for (NodeId id = 0; id < end; id = cst.next_leaf(id)) {
+    for (NodeId id = 0; id < end; id = cst.nextLeaf(id)) {
       stop.poll();
-      const CstLeaf leaf = cst.as_leaf(id);
+      const CstLeaf leaf = cst.asLeaf(id);
       const std::uint16_t pos = stamp.state(cst[leaf.id]);
       if (leaf.hidden || pos == 0 || pos > T.nafter ||
           T.nodes[pos - 1].term == kNoRow)
@@ -818,9 +818,9 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   // typed: `//` then `entity` is one comment. A candidate is offered where the
   // comment, read again with it behind, still ends here.
   CstLeaf prior{};
-  for (NodeId behind = cst.leaf_after(at);
+  for (NodeId behind = cst.leafAfter(at);
        behind > 0 && prior.begin == prior.end;)
-    prior = cst.as_leaf(behind = cst.leaf_before(behind));
+    prior = cst.asLeaf(behind = cst.leafBefore(behind));
   if (prior.begin == prior.end) prior = {};
   const TextOffset gapFrom = ll_gap_from(cst, at);
   // What the blanks and comments between the last token and the caret come to
@@ -952,13 +952,13 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   // A replay that ends on a stack it only knows from some token on cannot say
   // what the readings that return past that token go on to read: those are
   // asked again from further back.
-  const NodeId before = leaf ? cst.leaf_after(leaf.begin) : 0;
+  const NodeId before = leaf ? cst.leafAfter(leaf.begin) : 0;
   const LlSpine spine(cst, leaf);
   // The stop, read as the replay steps leaves.
   const CancellationPoll stop(cancelToken);
   LlReplayWidth widths(cst, stamp, spine, before, stop);
   const std::vector<SymbolId> indentsAhead = ll_indents_at<T>(
-      cst, stamp, leaf ? cst.next_leaf(leaf.id) : 0, gapFrom, at, stop);
+      cst, stamp, leaf ? cst.nextLeaf(leaf.id) : 0, gapFrom, at, stop);
   bool named = false;
   LlSimulation sim(T.atn);
   sim.keep_steps();

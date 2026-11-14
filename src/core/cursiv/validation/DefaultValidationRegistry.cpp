@@ -14,7 +14,6 @@
 
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
@@ -22,6 +21,7 @@
 #include "cursiv/text/TextRange.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/macros.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/DocumentValidator.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
@@ -30,12 +30,6 @@
 
 namespace cursiv {
 namespace {
-
-[[nodiscard]] bool runs(ValidationCategories categories,
-                        const ValidationCategory* category) noexcept {
-  return categories.empty() ||
-         std::ranges::find(categories, category) != categories.end();
-}
 
 // Room for one more element, grown as `push_back` grows, so the push that
 // follows cannot fail half-way through a registration.
@@ -89,7 +83,7 @@ void DefaultValidationRegistry::handleException(std::exception_ptr failure,
                         {}};
   set_data_code(diagnostic, kValidationError);
   accept.accept(std::move(diagnostic));
-  _core.shared().observabilitySink->publish(
+  services.shared().observabilitySink->publish(
       {.severity = ObservationSeverity::Warning,
        .code = node != nullptr ? ObservationCode::ValidationCheckThrew
                                : ObservationCode::ValidationPreparationThrew,
@@ -98,7 +92,7 @@ void DefaultValidationRegistry::handleException(std::exception_ptr failure,
                                        : "a validation preparation threw: ") +
            what,
        .uri = document.uri,
-       .languageId = std::string(_core.languageMetaData.languageId)});
+       .languageId = std::string(services.languageMetaData.languageId)});
 }
 
 // Multiplicative hashing: the product's upper half is the well-mixed one.
@@ -157,7 +151,7 @@ DefaultValidationRegistry::entriesOf(const AstTypeTag* type) {
 }
 
 void DefaultValidationRegistry::fileDocumentCheck(
-    std::vector<ValidationPreparationEntry>& into, ValidationPreparation check,
+    std::vector<DocumentCheckEntry>& into, DocumentCheck check,
     const ValidationCategory* category) {
   if (!check) return;
   // The reserved category, refused as discovery refuses it for a per-node
@@ -194,7 +188,7 @@ void DefaultValidationRegistry::registerCheck(
   const bool catchAll = registration.target == nullptr;
   std::span<const AstTypeTag* const> family;
   if (!catchAll) {
-    family = _core.astReflection->getAllSubTypes(registration.target);
+    family = services.astReflection->getAllSubTypes(registration.target);
     // Refused before anything changes: a target no reflection names could never
     // fire. The usual cause is a grammar's reflection added after its checks.
     if (family.empty())
@@ -245,12 +239,12 @@ CURSIV_NOINLINE void DefaultValidationRegistry::runMatched(
   if (_typeCount != 0)
     if (const Row& typed = _byType[slotOf(node.type)]; typed.type != nullptr)
       for (const Entry& entry : typed.entries)
-        if (runs(categories, entry.category))
+        if (detail::runs_category(categories, entry.category))
           run_one(*this, *entry.check, node, accept, token);
   // Then the checks no type filters, after the typed ones: people read the
   // diagnostic list, so its order matters.
   for (const Entry& entry : _everyNode)
-    if (runs(categories, entry.category))
+    if (detail::runs_category(categories, entry.category))
       run_one(*this, *entry.check, node, accept, token);
 }
 

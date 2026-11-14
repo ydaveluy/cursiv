@@ -104,7 +104,7 @@ void a_stop_at_recovery_discards_the_partial_tree() {
   stopAfterPause = nullptr;
   CHECK(cancelled && recordsBeforeStop != 0);
   CHECK(cst.text().empty() && cst.size() == 0 && !cst.accepted() &&
-        !cst.has_entry() && cst.diagnostics().empty());
+        !cst.hasEntry() && cst.diagnostics().empty());
 }
 
 // A point in front of the bytes it refuses may do what the phase it stands in
@@ -715,7 +715,7 @@ void a_missing_terminator_is_inserted_where_the_construct_closes() {
     CHECK(ok);
     unsigned n = 0;
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
-      n += d.kind == cursiv::DiagnosticKind::inserted ? 1u : 0u;
+      n += d.kind == cursiv::DiagnosticKind::Inserted ? 1u : 0u;
     CHECK(n == cst.diagnostics().size());
     return n;
   };
@@ -752,7 +752,7 @@ void a_refused_word_at_the_end_is_not_an_open_token() {
     CHECK(ok);
     CHECK(cst.diagnostics().size() == 1);
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
-      CHECK(d.kind == cursiv::DiagnosticKind::replaced && d.begin == 0 &&
+      CHECK(d.kind == cursiv::DiagnosticKind::Replaced && d.begin == 0 &&
             d.end == std::string_view(text).size());
   }
 }
@@ -768,7 +768,7 @@ void a_token_refused_in_its_middle_ends_at_its_closer() {
         text, cst, nullptr, &memconv_g::kDrive));
     CHECK(cst.diagnostics().size() == 1);
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
-      CHECK(d.kind == cursiv::DiagnosticKind::replaced && d.begin == begin &&
+      CHECK(d.kind == cursiv::DiagnosticKind::Replaced && d.begin == begin &&
             d.end == end);
   };
   one("'ab@d' 'e' 'f'", 0, 6);
@@ -794,7 +794,7 @@ void an_open_comment_ends_where_the_code_resumes() {
     CHECK(cst.diagnostics().size() == 1);
     const auto at = static_cast<cursiv::TextOffset>(text.find("/*"));
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
-      CHECK(d.kind == cursiv::DiagnosticKind::replaced && d.begin == at &&
+      CHECK(d.kind == cursiv::DiagnosticKind::Replaced && d.begin == at &&
             d.end == at + comment.size());
   }
 }
@@ -806,7 +806,7 @@ void a_deletion_names_the_token_it_resumes_on() {
   const cursiv::ParseResult r = parser->parse("module m f(1 ?);");
   CHECK(r.diagnostics.size() == 1);
   for (const cursiv::ParseDiagnostic& d : r.diagnostics) {
-    CHECK(d.kind == cursiv::DiagnosticKind::deleted && d.begin == 13 &&
+    CHECK(d.kind == cursiv::DiagnosticKind::Deleted && d.begin == 13 &&
           d.end == 14);
     const auto spellings = parser->getGrammar().terminalSpellings(d.element);
     CHECK(spellings.size() == 1 && spellings.front() == ")");
@@ -866,12 +866,12 @@ void a_fault_per_member_is_said_once_each() {
   CHECK(cursiv::engine::lr_parser<arith_g::kTable>.parse(text, cst, &stats,
                                                          &arith_g::kDrive));
   const auto& d = cst.diagnostics();
-  const auto bounded = std::ranges::find(d, cursiv::DiagnosticKind::bounded,
+  const auto bounded = std::ranges::find(d, cursiv::DiagnosticKind::Bounded,
                                          &cursiv::ParseDiagnostic::kind);
   CHECK(stats.budgetStops == 1 && bounded != d.end() &&
         bounded->end == text.size());
   if (bounded == d.end()) return;
-  const auto said = std::ranges::count(d, cursiv::DiagnosticKind::replaced,
+  const auto said = std::ranges::count(d, cursiv::DiagnosticKind::Replaced,
                                        &cursiv::ParseDiagnostic::kind);
   CHECK(static_cast<std::size_t>(said) + 1 == d.size());
   CHECK(said == std::count(text.begin(), text.begin() + bounded->begin + 1,
@@ -952,7 +952,7 @@ void a_document_of_invalid_bytes_is_read_in_one_pass() {
   // budget.
   unsigned bounded = 0;
   for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
-    bounded += d.kind == cursiv::DiagnosticKind::bounded ? 1u : 0u;
+    bounded += d.kind == cursiv::DiagnosticKind::Bounded ? 1u : 0u;
   CHECK(cst.diagnostics().size() == 4096);
   CHECK(bounded == 0);
 }
@@ -1264,12 +1264,12 @@ int main() {
   // value stays.
   {
     const auto d = repaired<ga::kTable>("module m f(1 2);", ga::kDrive);
-    CHECK(d.size() == 1 && d[0].kind == cursiv::DiagnosticKind::inserted);
+    CHECK(d.size() == 1 && d[0].kind == cursiv::DiagnosticKind::Inserted);
   }
   // Parentheses needed at the end, however many: one fault, closed.
   {
     const auto d = repaired<ga::kTable>("module m ((((((((((((1", ga::kDrive);
-    CHECK(d.size() == 1 && d[0].kind == cursiv::DiagnosticKind::inserted);
+    CHECK(d.size() == 1 && d[0].kind == cursiv::DiagnosticKind::Inserted);
   }
   // A run of extra openers is one fault; past what the budget pays for
   // searching, still a few, and the bound says so.
@@ -1282,7 +1282,7 @@ int main() {
     const auto d =
         repaired<gdm::kTable>("entity A " + std::string(600, '{'), gdm::kDrive);
     CHECK(d.size() <= 4 && !d.empty() &&
-          d.back().kind == cursiv::DiagnosticKind::bounded);
+          d.back().kind == cursiv::DiagnosticKind::Bounded);
   }
   // A search stopped by its own share says so over its fault, the searches
   // after it finish as one, and the next fault is searched for; only the
@@ -1293,17 +1293,17 @@ int main() {
         kDoc, gdm::kDrive,
         cursiv::engine::RepairBudget{
             .floor = 1u << 16, .perByte = 64, .perSearch = 1024});
-    CHECK(own.size() == 3 && own[0].kind == cursiv::DiagnosticKind::deleted &&
-          own[1].kind == cursiv::DiagnosticKind::bounded &&
+    CHECK(own.size() == 3 && own[0].kind == cursiv::DiagnosticKind::Deleted &&
+          own[1].kind == cursiv::DiagnosticKind::Bounded &&
           own[1].begin == own[0].begin && own[1].end == own[0].end &&
-          own[2].kind == cursiv::DiagnosticKind::inserted &&
+          own[2].kind == cursiv::DiagnosticKind::Inserted &&
           own[2].begin == 28);
     const auto all = repaired<gdm::kTable>(
         kDoc, gdm::kDrive,
         cursiv::engine::RepairBudget{
             .floor = 512, .perByte = 0, .perSearch = ~std::uint64_t{0}});
-    CHECK(!says(all, cursiv::DiagnosticKind::inserted));
-    CHECK(!all.empty() && all.back().kind == cursiv::DiagnosticKind::bounded &&
+    CHECK(!says(all, cursiv::DiagnosticKind::Inserted));
+    CHECK(!all.empty() && all.back().kind == cursiv::DiagnosticKind::Bounded &&
           all.back().end == kDoc.size());
   }
   // A parse's budget grows with the document up to one ceiling.
@@ -1321,7 +1321,7 @@ int main() {
   // the enclosing level closes nothing, whatever the state would take.
   {
     const auto d = repaired_indent("a:\n  b\n    c\n    d\n  e\nf\n");
-    CHECK(d.size() == 1 && d[0].kind == cursiv::DiagnosticKind::deleted);
+    CHECK(d.size() == 1 && d[0].kind == cursiv::DiagnosticKind::Deleted);
   }
   // A token inserted at a line start leaves the line's run to the token the
   // author wrote: the drive reads it as the search did.

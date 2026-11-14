@@ -61,8 +61,8 @@ void the_grammar_is_reachable_without_the_template() {
   const cursiv::ParseResult r = service().parse("datatype String\n");
   CHECK(static_cast<bool>(r));
   const cursiv::Cst& cst = r.cst();
-  CHECK(g.recordRule(cst[cst.entry_root()]).empty() ||
-        !g.recordRule(cst[cst.entry_root()]).empty());
+  CHECK(g.recordRule(cst[cst.entryRoot()]).empty() ||
+        !g.recordRule(cst[cst.entryRoot()]).empty());
   // A terminal is spelled or it is named, never both and never neither.
   CHECK(!g.terminalSpellings(1).empty() || !g.terminalName(1).empty());
 }
@@ -90,7 +90,7 @@ void a_parse_through_the_interface_builds_the_same_tree() {
         direct.references->handles.size());
   CHECK(through.references->handles[0].field ==
         direct.references->handles[0].field);
-  CHECK(through.error == cursiv::AstBuildError::none && through.accepted);
+  CHECK(through.error == cursiv::AstBuildError::None && through.accepted);
 }
 
 // Full parses and repairs must stop at the view's end and borrow its bytes.
@@ -160,7 +160,7 @@ void a_broken_text_still_answers() {
   // A repair keeps its whole record through the type-erased interface: a kind
   // and a place, not just a count.
   const cursiv::ParseDiagnostic& d = r.diagnostics.front();
-  CHECK(d.kind != cursiv::DiagnosticKind::conversion_error);
+  CHECK(d.kind != cursiv::DiagnosticKind::ConversionError);
   CHECK(d.end >= d.begin);
   CHECK(d.element != cursiv::kNoElement);
 }
@@ -447,7 +447,7 @@ Engine engine(Make make) {
 
 std::vector<std::string> names(const cursiv::ParseResult& r) {
   std::vector<std::string> out;
-  if (const auto* unit = r.value_as<ttrans::Unit>())
+  if (const auto* unit = r.valueAs<ttrans::Unit>())
     for (const ttrans::Decl* d : unit->decls) out.emplace_back(d->name);
   return out;
 }
@@ -460,7 +460,7 @@ bool same(const cursiv::ParseDiagnostic& a, const cursiv::ParseDiagnostic& b) {
 // The leaf whose span starts at `begin`, visible or hidden.
 TextRange leaf_at(const cursiv::Cst& cst, TextOffset begin) {
   TextRange found{~0u, ~0u};
-  cst.visit_leaves([&](const cursiv::CstLeaf& l) {
+  cst.visitLeaves([&](const cursiv::CstLeaf& l) {
     if (l.begin == begin && found.begin == ~0u) found = {l.begin, l.end};
   });
   return found;
@@ -504,7 +504,7 @@ cursiv::ParseResult check_against_decoded(const Engine& e,
   const cursiv::Cst& rc = r.cst();
   const cursiv::Cst& pc = p.cst();
   CHECK(rc.size() == pc.size());
-  CHECK(rc.entry_root() == pc.entry_root());
+  CHECK(rc.entryRoot() == pc.entryRoot());
   for (cursiv::NodeId id = 0; id < rc.size() && id < pc.size(); ++id) {
     const cursiv::CstNode& a = rc[id];
     const cursiv::CstNode& b = pc[id];
@@ -567,7 +567,7 @@ void a_malformed_escape_is_reported_where_it_stands(const Engine& e) {
   CHECK(r.diagnostics.size() == 1);
   if (r.diagnostics.size() == 1) {
     const auto& d = r.diagnostics.front();
-    CHECK(d.kind == cursiv::DiagnosticKind::conversion_error);
+    CHECK(d.kind == cursiv::DiagnosticKind::ConversionError);
     CHECK(d.begin == 7 && d.end == 11 && d.message == "malformed escape");
   }
 }
@@ -592,7 +592,7 @@ void a_name_span_maps_back_to_the_document(const Engine& e) {
   cursiv::Document document(cursiv::TextDocument::create(
       "file:///t", "t", 0, "class f\\u006fo; class bar;"));
   document.parseResult = e.unicode->parse(document.textDocument().getText());
-  const auto* unit = document.parseResult.value_as<ttrans::Unit>();
+  const auto* unit = document.parseResult.valueAs<ttrans::Unit>();
   CHECK(unit != nullptr && unit->decls.size() == 2);
   if (unit == nullptr || unit->decls.size() != 2) return;
   const auto discard = [](cursiv::Diagnostic&&) {};
@@ -612,14 +612,14 @@ void a_keyword_anchor_reads_the_parsed_spelling(const Engine& e) {
     cursiv::Document document(
         cursiv::TextDocument::create("file:///t", "t", 0, std::move(text)));
     document.parseResult = parser.parse(document.textDocument().getText());
-    const auto* unit = document.parseResult.value_as<ttrans::Unit>();
+    const auto* unit = document.parseResult.valueAs<ttrans::Unit>();
     CHECK(unit != nullptr && unit->decls.size() == 1);
     std::optional<TextRange> found;
     if (unit == nullptr || unit->decls.size() != 1) return found;
     if (const auto keyword = cursiv::find_node_for_keyword(
             *unit->decls[0], "class", 0, &document)) {
-      CHECK(keyword->cst->spelling(keyword->id) == "class");
-      found = TextRange{keyword->begin(), keyword->end()};
+      CHECK(keyword.cst->spelling(keyword.id) == "class");
+      found = TextRange{keyword.begin(), keyword.end()};
     }
     return found;
   };

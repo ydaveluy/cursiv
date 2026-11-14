@@ -82,7 +82,7 @@ void run() {
   source += " b";
   const auto repeated = p->parse(source);
   CHECK(repeated.accepted && repeated.diagnostics.empty());
-  const auto* doc = repeated.value_as<tcommit::Doc>();
+  const auto* doc = repeated.valueAs<tcommit::Doc>();
   CHECK(doc != nullptr && doc->words.size() == 64);
   if (doc != nullptr)
     for (const auto word : doc->words) CHECK(word == "a");
@@ -412,7 +412,7 @@ std::string join(const std::vector<std::string>& words) {
 std::string shape(const cursiv::ParseResult& r) {
   std::vector<std::string> words, extra;
   std::size_t marks = 0;
-  if (const auto* doc = r.value_as<twideoptional::ast::Doc>()) {
+  if (const auto* doc = r.valueAs<twideoptional::ast::Doc>()) {
     for (const std::string_view w : doc->words) words.emplace_back(w);
     for (const std::string_view w : doc->extra) extra.emplace_back(w);
     marks = doc->marks.size();

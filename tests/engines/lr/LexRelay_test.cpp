@@ -46,7 +46,7 @@ using Items = std::vector<std::string>;
 template <class Engine>
 bool items(const Engine& engine, std::string_view text, Items& out) {
   const cursiv::ParseResult r = engine->parse(text);
-  const auto* const doc = r.value_as<tbackref::ast::Doc>();
+  const auto* const doc = r.valueAs<tbackref::ast::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr) return false;
   out.assign(doc->items.begin(), doc->items.end());
   return true;
@@ -410,7 +410,7 @@ std::string joined(const cursiv::Parser& p, const std::string& doc) {
   const cursiv::ParseResult r = p.parse(doc);
   if (!r.accepted || !r.diagnostics.empty()) return "<refused>";
   std::string out;
-  for (const auto item : r.value_as<Doc>()->items) {
+  for (const auto item : r.valueAs<Doc>()->items) {
     if (!out.empty()) out += ' ';
     out += item;
   }
@@ -483,7 +483,7 @@ void a_nested_run_ends_at_depth_zero() {
                                       "<*x*>"}) {
     const auto r = overlap->parse(text);
     CHECK(r.accepted && r.diagnostics.empty());
-    const auto* doc = r.value_as<tnestedlex::ast::Doc>();
+    const auto* doc = r.valueAs<tnestedlex::ast::Doc>();
     CHECK(doc && doc->items.size() == 1 && doc->items[0] == text);
   }
   CHECK(overlap->parse("if!").diagnostics.empty());

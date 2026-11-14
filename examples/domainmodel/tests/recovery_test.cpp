@@ -26,12 +26,12 @@ void split_keywords_preserve_the_package(const cursiv::Parser& engine) {
         else
           text.insert(start + offset, 1, blank);
         const auto result = engine.parse(text);
-        const auto* model = result.value_as<dm::ast::DomainModel>();
+        const auto* model = result.valueAs<dm::ast::DomainModel>();
         CHECK(result.accepted && model && model->elements.size() == 6);
         CHECK(result.diagnostics.size() == 1);
         if (result.diagnostics.size() == 1) {
           const auto& d = result.diagnostics[0];
-          CHECK(d.kind == cursiv::DiagnosticKind::replaced);
+          CHECK(d.kind == cursiv::DiagnosticKind::Replaced);
           CHECK(d.begin == start && d.end == start + (replace ? 6u : 7u));
         }
         if (!model || model->elements.size() != 6) continue;
@@ -82,7 +82,7 @@ void run(Lane& lane) {
     // entity and the empty entity whose closing brace is missing.
     const auto text = document("06_truncated.dmodel");
     const auto result = engine->parse(text);
-    const auto* model = result.value_as<dm::ast::DomainModel>();
+    const auto* model = result.valueAs<dm::ast::DomainModel>();
     const auto reflection = dm::generated::DomainModel::create_ast_reflection();
     CHECK(result.accepted && model);
     const dm::ast::PackageDeclaration* baz = nullptr;

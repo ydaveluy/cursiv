@@ -20,7 +20,7 @@ struct InfixOp {
   std::uint16_t prod = 0;   // `lhs -> left op right`, conditions around the op
   std::uint16_t owner = 0;  // the table, whose operators alone may clash
   std::uint8_t prec = 0;
-  Association group = Association::left;
+  Association group = Association::Left;
   std::uint16_t slot = 1;  // where the operator stands in `prod`
 };
 

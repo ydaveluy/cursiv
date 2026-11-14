@@ -8,9 +8,9 @@
 #include <string_view>
 
 #include "cursiv/grammar/expr.hpp"
-#include "cursiv/grammar/unicode/UnicodeProperty.hpp"
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
-#include "cursiv/grammar/unicode/UnicodeRanges.hpp"
+#include "cursiv/text/unicode/UnicodeProperty.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRanges.hpp"
 #include "cursiv/text/ClassItem.hpp"
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/utils/CaseFold.hpp"
@@ -46,7 +46,7 @@ constexpr bool class_holds(std::uint64_t m, bool n, std::string_view spec,
                            char32_t cp) {
   bool in = spec_holds(spec, cp);
   for (unsigned i = 0;
-       !in && i < static_cast<unsigned>(unicode::Property::count); ++i)
+       !in && i < static_cast<unsigned>(unicode::Property::Count); ++i)
     if ((m >> i) & 1)
       in = unicode::within(unicode::kTables[i].data(),
                            unicode::kTables[i].size(), cp);

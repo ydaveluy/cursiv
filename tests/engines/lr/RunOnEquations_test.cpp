@@ -51,7 +51,7 @@ void reads_the_elected_tree(bool inner, unsigned n) {
   const auto lr = trunon::generated::Lr::create_parser();
   const auto a = lr->parse(text);
   CHECK(a.accepted && a.diagnostics.empty());
-  const auto* x = a.value_as<trunon::Doc>();
+  const auto* x = a.valueAs<trunon::Doc>();
   CHECK(x != nullptr);
   if (x == nullptr) return;
   CHECK(shape_of(*x) == elected(inner, n));
@@ -83,7 +83,7 @@ void a_broken_document_is_repaired() {
         const std::string text = equations(form, n) + std::string(tail);
         const auto r = lr->parse(text);
         CHECK(r.accepted && !r.diagnostics.empty());
-        CHECK(r.value_as<trunon::Doc>() != nullptr);
+        CHECK(r.valueAs<trunon::Doc>() != nullptr);
       }
 }
 

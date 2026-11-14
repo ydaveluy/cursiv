@@ -11,17 +11,17 @@
 #include <variant>
 #include <vector>
 
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
+#include "cursiv/actions/JsonBridge.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/text/LspPosition.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 #include "cursiv/validation/DefaultCodeActionProtocol.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/SpellingActions.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/actions/JsonBridge.hpp"
-#include "cursiv/text/LspPosition.hpp"
 #include "lsp/types.h"
 #include "lsp/uri.h"
 

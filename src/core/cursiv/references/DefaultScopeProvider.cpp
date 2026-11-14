@@ -15,14 +15,6 @@ namespace cursiv {
 
 namespace {
 
-// The site's document, carried by the reference table rather than walked up to,
-// or found from the container for a site outside a linked document.
-const Document* scope_of(const ReferenceInfo& context) {
-  if (context.document != nullptr) return context.document;
-  return context.container == nullptr ? nullptr
-                                      : context.container->getDocument();
-}
-
 // A name the site looked for past its own document: a later export of it may
 // change what the site resolves to.
 void record_import(const Document& document, std::uint64_t nameHash) {
@@ -44,7 +36,7 @@ const AstTypeTag* narrowed_to(const AstReflection& reflection,
 bool DefaultScopeProvider::visitScopeEntries(
     const ReferenceInfo& context,
     cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
-  const Document* const document = scope_of(context);
+  const Document* const document = detail::document_of(context);
   if (document == nullptr) return true;
 
   // Computed once for the walk, with this language's reflection: a description
@@ -104,7 +96,7 @@ bool DefaultScopeProvider::visitGlobalScopeEntries(
 bool DefaultScopeProvider::visitScopeEntries(
     const ReferenceInfo& context, std::string_view name,
     cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
-  const Document* const document = scope_of(context);
+  const Document* const document = detail::document_of(context);
   if (name.empty() || document == nullptr) return true;
 
   const AstReflection& reflection = *services.astReflection;
@@ -114,11 +106,11 @@ bool DefaultScopeProvider::visitScopeEntries(
 
   // Each level gives the entries whose folded name matches; a case-sensitive
   // policy then checks each spelling.
-  const std::uint64_t nameHash = LocalSymbols::hash_name(name);
+  const std::uint64_t nameHash = LocalSymbols::hashName(name);
   const LocalSymbols& symbols = document->localSymbols;
   const auto stopsAt = [&](const AstNode* scope) {
     return !symbols.find(scope, name, nameHash)
-                .for_each([&](const AstNodeDescription& entry) {
+                .forEach([&](const AstNodeDescription& entry) {
                   if (caseSensitive && entry.name != name) return true;
                   return !reflection.acceptsTag(accepts, entry.type) ||
                          !reflection.isSubtype(entry.type, narrowed) ||
@@ -133,7 +125,7 @@ bool DefaultScopeProvider::visitScopeEntries(
 
 const AstNodeDescription* DefaultScopeProvider::getScopeEntry(
     const ReferenceInfo& context, std::string_view name) const {
-  const Document* const document = scope_of(context);
+  const Document* const document = detail::document_of(context);
   if (name.empty() || document == nullptr) return nullptr;
 
   const AstReflection& reflection = *services.astReflection;
@@ -143,7 +135,7 @@ const AstNodeDescription* DefaultScopeProvider::getScopeEntry(
 
   // Hashed once for the whole walk up: the name does not change from one
   // ancestor to the next.
-  const std::uint64_t nameHash = LocalSymbols::hash_name(name);
+  const std::uint64_t nameHash = LocalSymbols::hashName(name);
   const LocalSymbols::NameQuery query{name, nameHash, caseSensitive};
   const LocalSymbols& symbols = document->localSymbols;
   const AstNodeDescription* found = nullptr;

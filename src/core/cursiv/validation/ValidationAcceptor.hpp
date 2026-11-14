@@ -13,14 +13,14 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/CstNodeView.hpp"
 #include "cursiv/syntax-tree/MemberTraits.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/utils/JsonValue.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 
 // What a check emits and where it goes. The sink and document must outlive
 // one validation pass; indexed anchors are cached only for the current node.
@@ -210,12 +210,12 @@ class ValidationDiagnosticBuilder final
   ValidationDiagnosticBuilder& property(std::size_t index = 0) noexcept {
     static constexpr std::string_view kMember =
         cursiv::detail::member_identifier<Member>();
-    this->anchorOnFeature(kMember, index);
+    this->anchorOnProperty(kMember, index);
     return *this;
   }
 
  private:
-  void anchorOnFeature(std::string_view member, std::size_t index) noexcept;
+  void anchorOnProperty(std::string_view member, std::size_t index) noexcept;
 };
 
 class ValidationAcceptor {
@@ -230,35 +230,78 @@ class ValidationAcceptor {
   ValidationAcceptor(Sink sink, const Document& document,
                      std::string_view source) noexcept;
 
-  // The four severity arms, each a builder. The three-argument form also sets
-  // the code.
+  // A diagnostic of any severity, as a builder. The four arms below are its
+  // shorthands; the last argument sets the code.
+  template <class Node>
+  ValidationDiagnosticBuilder<Node> diagnostic(const Node& node,
+                                               DiagnosticSeverity severity,
+                                               std::string_view message,
+                                               std::string_view code) const {
+    ValidationDiagnosticBuilder<Node> builder(*this, severity, message, node);
+    if (!code.empty()) builder.code(code);
+    return builder;
+  }
+  ValidationDiagnosticBuilder<AstNode> diagnostic(TextRange span,
+                                                  DiagnosticSeverity severity,
+                                                  std::string_view message,
+                                                  std::string_view code) const {
+    ValidationDiagnosticBuilder<AstNode> builder(*this, severity, message,
+                                                 span);
+    if (!code.empty()) builder.code(code);
+    return builder;
+  }
+
+  template <class Node, class Message>
+    requires std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<Node> diagnostic(const Node& node,
+                                               DiagnosticSeverity severity,
+                                               Message&& message,
+                                               std::string_view code) const {
+    ValidationDiagnosticBuilder<Node> builder(
+        *this, severity, std::forward<Message>(message), node);
+    if (!code.empty()) builder.code(code);
+    return builder;
+  }
+  template <class Message>
+    requires std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<AstNode> diagnostic(TextRange span,
+                                                  DiagnosticSeverity severity,
+                                                  Message&& message,
+                                                  std::string_view code) const {
+    ValidationDiagnosticBuilder<AstNode> builder(
+        *this, severity, std::forward<Message>(message), span);
+    if (!code.empty()) builder.code(code);
+    return builder;
+  }
+
+  // The four severity arms.
   template <class Node>
     requires std::derived_from<Node, AstNode>
   ValidationDiagnosticBuilder<Node> error(const Node& node,
                                           std::string_view message,
                                           std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Error, message, code);
+    return diagnostic(node, DiagnosticSeverity::Error, message, code);
   }
   template <class Node>
     requires std::derived_from<Node, AstNode>
   ValidationDiagnosticBuilder<Node> warning(const Node& node,
                                             std::string_view message,
                                             std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Warning, message, code);
+    return diagnostic(node, DiagnosticSeverity::Warning, message, code);
   }
   template <class Node>
     requires std::derived_from<Node, AstNode>
   ValidationDiagnosticBuilder<Node> information(
       const Node& node, std::string_view message,
       std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Information, message, code);
+    return diagnostic(node, DiagnosticSeverity::Information, message, code);
   }
   template <class Node>
     requires std::derived_from<Node, AstNode>
   ValidationDiagnosticBuilder<Node> hint(const Node& node,
                                          std::string_view message,
                                          std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Hint, message, code);
+    return diagnostic(node, DiagnosticSeverity::Hint, message, code);
   }
 
   // An owned message is moved in; a view uses the arms above.
@@ -267,32 +310,32 @@ class ValidationAcceptor {
              std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<Node> error(const Node& node,
       Message&& message, std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Error, std::forward<Message>(message),
-                code);
+    return diagnostic(node, DiagnosticSeverity::Error,
+                      std::forward<Message>(message), code);
   }
   template <class Node, class Message>
     requires std::derived_from<Node, AstNode> &&
              std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<Node> warning(const Node& node,
       Message&& message, std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Warning,
-                std::forward<Message>(message), code);
+    return diagnostic(node, DiagnosticSeverity::Warning,
+                      std::forward<Message>(message), code);
   }
   template <class Node, class Message>
     requires std::derived_from<Node, AstNode> &&
              std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<Node> information(const Node& node,
       Message&& message, std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Information,
-                std::forward<Message>(message), code);
+    return diagnostic(node, DiagnosticSeverity::Information,
+                      std::forward<Message>(message), code);
   }
   template <class Node, class Message>
     requires std::derived_from<Node, AstNode> &&
              std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<Node> hint(const Node& node,
       Message&& message, std::string_view code = {}) const {
-    return make(node, DiagnosticSeverity::Hint, std::forward<Message>(message),
-                code);
+    return diagnostic(node, DiagnosticSeverity::Hint,
+                      std::forward<Message>(message), code);
   }
 
   // Over a span the check computed itself. No node, so no
@@ -300,51 +343,51 @@ class ValidationAcceptor {
   ValidationDiagnosticBuilder<AstNode> error(TextRange span,
                                              std::string_view message,
                                              std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Error, message, code);
+    return diagnostic(span, DiagnosticSeverity::Error, message, code);
   }
   ValidationDiagnosticBuilder<AstNode> warning(
       TextRange span, std::string_view message,
       std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Warning, message, code);
+    return diagnostic(span, DiagnosticSeverity::Warning, message, code);
   }
   ValidationDiagnosticBuilder<AstNode> information(
       TextRange span, std::string_view message,
       std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Information, message, code);
+    return diagnostic(span, DiagnosticSeverity::Information, message, code);
   }
   ValidationDiagnosticBuilder<AstNode> hint(TextRange span,
                                             std::string_view message,
                                             std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Hint, message, code);
+    return diagnostic(span, DiagnosticSeverity::Hint, message, code);
   }
 
   template <class Message>
     requires std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<AstNode> error(TextRange span,
       Message&& message, std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Error, std::forward<Message>(message),
-                code);
+    return diagnostic(span, DiagnosticSeverity::Error,
+                      std::forward<Message>(message), code);
   }
   template <class Message>
     requires std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<AstNode> warning(TextRange span,
       Message&& message, std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Warning,
-                std::forward<Message>(message), code);
+    return diagnostic(span, DiagnosticSeverity::Warning,
+                      std::forward<Message>(message), code);
   }
   template <class Message>
     requires std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<AstNode> information(TextRange span,
       Message&& message, std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Information,
-                std::forward<Message>(message), code);
+    return diagnostic(span, DiagnosticSeverity::Information,
+                      std::forward<Message>(message), code);
   }
   template <class Message>
     requires std::same_as<Message, std::string>
   ValidationDiagnosticBuilder<AstNode> hint(TextRange span,
       Message&& message, std::string_view code = {}) const {
-    return make(span, DiagnosticSeverity::Hint, std::forward<Message>(message),
-                code);
+    return diagnostic(span, DiagnosticSeverity::Hint,
+                      std::forward<Message>(message), code);
   }
 
   // The immediate arms, which every builder emits through: the one place the
@@ -372,7 +415,7 @@ class ValidationAcceptor {
 
   // The CST anchors behind `.property`/`.keyword`. `nullopt` means "no better
   // anchor": the caller keeps what it has.
-  [[nodiscard]] std::optional<TextRange> featureSpan(
+  [[nodiscard]] std::optional<TextRange> propertySpan(
       const AstNode& node, std::string_view member,
       std::size_t index) const noexcept;
   [[nodiscard]] std::optional<TextRange> keywordSpan(
@@ -391,48 +434,6 @@ class ValidationAcceptor {
                                      bool keyword) const noexcept;
   // The CST a node was read into, null where it was read into none.
   const Cst* cstOf(const AstNode& node) const noexcept;
-
-  template <class Node>
-  ValidationDiagnosticBuilder<Node> make(const Node& node,
-                                         DiagnosticSeverity severity,
-                                         std::string_view message,
-                                         std::string_view code) const {
-    ValidationDiagnosticBuilder<Node> builder(*this, severity, message, node);
-    if (!code.empty()) builder.code(code);
-    return builder;
-  }
-  ValidationDiagnosticBuilder<AstNode> make(TextRange span,
-                                            DiagnosticSeverity severity,
-                                            std::string_view message,
-                                            std::string_view code) const {
-    ValidationDiagnosticBuilder<AstNode> builder(*this, severity, message,
-                                                 span);
-    if (!code.empty()) builder.code(code);
-    return builder;
-  }
-
-  template <class Node, class Message>
-    requires std::same_as<Message, std::string>
-  ValidationDiagnosticBuilder<Node> make(const Node& node,
-                                         DiagnosticSeverity severity,
-                                         Message&& message,
-                                         std::string_view code) const {
-    ValidationDiagnosticBuilder<Node> builder(
-        *this, severity, std::forward<Message>(message), node);
-    if (!code.empty()) builder.code(code);
-    return builder;
-  }
-  template <class Message>
-    requires std::same_as<Message, std::string>
-  ValidationDiagnosticBuilder<AstNode> make(TextRange span,
-                                            DiagnosticSeverity severity,
-                                            Message&& message,
-                                            std::string_view code) const {
-    ValidationDiagnosticBuilder<AstNode> builder(
-        *this, severity, std::forward<Message>(message), span);
-    if (!code.empty()) builder.code(code);
-    return builder;
-  }
 
   Sink _sink;
   const Document* _document;
@@ -521,11 +522,11 @@ inline void detail::ValidationDiagnosticBuilderBase<Derived>::emit() {
 }
 
 template <class Node>
-inline void ValidationDiagnosticBuilder<Node>::anchorOnFeature(
+inline void ValidationDiagnosticBuilder<Node>::anchorOnProperty(
     std::string_view member, std::size_t index) noexcept {
   if (this->acceptor() != nullptr && this->node() != nullptr)
     if (const std::optional<TextRange> found =
-            this->acceptor()->featureSpan(*this->node(), member, index);
+            this->acceptor()->propertySpan(*this->node(), member, index);
         found.has_value())
       this->setRange(*found);
 }

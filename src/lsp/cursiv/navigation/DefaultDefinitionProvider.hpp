@@ -7,24 +7,23 @@
 #include <optional>
 #include <vector>
 
+#include "cursiv/navigation/DefinitionProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
-#include "cursiv/navigation/DefinitionProvider.hpp"
 
 namespace cursiv {
 
-class DefaultDefinitionProvider : public DefinitionProvider {
+class DefaultDefinitionProvider : public DefinitionProvider,
+                                  protected DefaultCoreService {
  public:
   explicit DefaultDefinitionProvider(const CoreServices& core) noexcept
-      : _core(core) {}
+      : DefaultCoreService(core) {}
 
   [[nodiscard]] std::optional<std::vector<lsp::LocationLink>> getDefinition(
       const Document& document, lsp::Position position,
       const CancellationToken& token = {}) const override;
-
- private:
-  const CoreServices& _core;
 };
 
 }  // namespace cursiv

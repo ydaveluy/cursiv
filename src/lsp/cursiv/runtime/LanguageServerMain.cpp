@@ -149,7 +149,7 @@ int run_mcp(std::string_view folderPath, SharedLspServices& shared) {
 
 int run_language_server_main_on(
     int argc, char** argv, std::string_view serverName,
-    const std::function<bool(SharedLspServices&)>& registerLanguageServices,
+    const std::function<void(SharedLspServices&)>& registerLanguageServices,
     SharedLspServices& sharedServices) {
   // A language server reads the disk, and says so: without this, the shared
   // default would be the empty provider.
@@ -158,10 +158,7 @@ int run_language_server_main_on(
         std::make_unique<LocalFileSystemProvider>();
   install_default_shared_lsp_services(sharedServices);
   try {
-    if (registerLanguageServices && !registerLanguageServices(sharedServices)) {
-      std::cerr << serverName << ": no language could be registered\n";
-      return 1;
-    }
+    if (registerLanguageServices) registerLanguageServices(sharedServices);
   } catch (const std::exception& error) {
     std::cerr << serverName << ": " << error.what() << '\n';
     return 1;

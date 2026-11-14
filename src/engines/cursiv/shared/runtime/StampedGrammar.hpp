@@ -66,11 +66,11 @@ struct StampedGrammar final : Grammar {
   // an answer in the tree. A caret inside a token, a comment or dropped text
   // is asked at that leaf's start: the answer replaces the leaf.
   static bool caret_in(const Cst& cst, TextOffset& at, TextOffset& resume) {
-    if (!cst.engine_stamped() || at > resume || resume > cst.text().size())
+    if (!cst.engineStamped() || at > resume || resume > cst.text().size())
       return false;
-    if (const NodeId after = cst.leaf_after(at);
+    if (const NodeId after = cst.leafAfter(at);
         after < cst.size() && cst[after].begin < at) {
-      const CstLeaf inside = cst.as_leaf(after);
+      const CstLeaf inside = cst.asLeaf(after);
       at = inside.begin;
       resume = std::max(resume, inside.end);
     }

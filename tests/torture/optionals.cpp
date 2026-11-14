@@ -58,7 +58,7 @@ void one(const cursiv::Parser& parser, const std::string& text,
     ++failures;
     return;
   }
-  const ast::Opts* o = r.value_as<ast::Opts>();
+  const ast::Opts* o = r.valueAs<ast::Opts>();
   CHECK(o != nullptr);
   if (o == nullptr) return;
   for (unsigned i = 0; i < kClauses; ++i)
@@ -116,7 +116,7 @@ void separated_one(const cursiv::Parser& parser, const std::string& text,
     ++failures;
     return;
   }
-  const ast::Separated* o = r.value_as<ast::Separated>();
+  const ast::Separated* o = r.valueAs<ast::Separated>();
   CHECK(o != nullptr);
   if (o == nullptr) return;
   for (unsigned i = 0; i < kSeparatedClauses; ++i)
@@ -148,13 +148,13 @@ void entangled(const cursiv::Parser& parser) {
   {
     const cursiv::ParseResult r = parser.parse("entangled rec a rec b");
     CHECK(clean(r));
-    CHECK(r.value_as<ast::Recs>() != nullptr);
+    CHECK(r.valueAs<ast::Recs>() != nullptr);
   }
   {
     const cursiv::ParseResult r =
         parser.parse("entangled rec a k1 x k4 y k8 z rec b");
     CHECK(clean(r));
-    const ast::Recs* m = r.value_as<ast::Recs>();
+    const ast::Recs* m = r.valueAs<ast::Recs>();
     CHECK(m != nullptr && m->items.size() == 1);
     if (m == nullptr || m->items.empty()) return;
     const ast::Rec& rec = *m->items[0];
@@ -179,7 +179,7 @@ void torture_optionals() {
   // It remains a real token here, even though the other cases ignore it.
   const auto newline = parser->parse("newline:sample\n");
   CHECK(clean(newline));
-  const auto* doc = newline.value_as<tnl::ast::Doc>();
+  const auto* doc = newline.valueAs<tnl::ast::Doc>();
   CHECK(doc != nullptr && doc->name == "sample");
   CHECK(!clean(parser->parse("newline:sample")));
 }

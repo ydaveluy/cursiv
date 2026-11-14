@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "cursiv/grammar/unicode/UnicodeProperty.hpp"
+#include "cursiv/text/unicode/UnicodeProperty.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/text/ClassItem.hpp"
 #include "cursiv/text/ClassRanges.hpp"
@@ -54,7 +54,7 @@ constexpr void cp_name_emit(std::uint64_t props, bool complement,
   put("\\p{");
   if (complement) sink('^');
   bool first = true;
-  for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::count); ++i)
+  for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::Count); ++i)
     if ((props >> i) & 1) {
       if (!first) sink('|');
       first = false;

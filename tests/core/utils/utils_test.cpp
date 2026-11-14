@@ -21,6 +21,7 @@
 #endif
 
 #include "cursiv/Check.hpp"
+#include "cursiv/Version.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/shared/utils/RoundMarks.hpp"
@@ -49,6 +50,11 @@ inline constexpr bool kWindowsPaths =
 #include <thread>
 #include <vector>
 #endif
+
+// The version is three numbers a language can test at preprocessing.
+static_assert(CURSIV_VERSION_MAJOR * 10000 + CURSIV_VERSION_MINOR * 100 +
+                  CURSIV_VERSION_PATCH >=
+              300);
 
 // The folded comparison and hash across every split a word boundary
 // makes: the hash reads the last word of a name a word long overlapping the
@@ -922,6 +928,15 @@ void a_cleared_value_can_read_a_growing_document_cache() {
   CHECK(observed == 9);
 }
 
+// A cache built before the builder exists would never be emptied: refused.
+void a_cache_needs_the_builder_that_empties_it() {
+  cursiv::SharedCoreServices bare;
+  CHECK(support::throws<std::logic_error>(
+      [&] { const cursiv::WorkspaceCache<int> cache(bare); }));
+  CHECK(support::throws<std::logic_error>(
+      [&] { const cursiv::DocumentCache<int, int> cache(bare); }));
+}
+
 void a_workspace_value_uses_the_same_invalidation_lifecycle() {
   World world;
   cursiv::Document* const document = world.add("file:///a.ws", "datatype A\n");
@@ -1743,6 +1758,7 @@ void run() {
   value_providers_and_consumers_can_reenter();
   a_cleared_value_can_reenter_the_cache_when_destroyed();
   a_cleared_value_can_read_a_growing_document_cache();
+  a_cache_needs_the_builder_that_empties_it();
   a_stale_answer_holds_back_no_collection();
   a_workspace_value_uses_the_same_invalidation_lifecycle();
   single_value_caches_do_not_require_hashable_values();

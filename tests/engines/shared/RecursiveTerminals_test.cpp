@@ -31,7 +31,7 @@ namespace {
 void check(const cursiv::Parser& parser, std::string_view text, bool expected) {
   const auto result = parser.parse(text);
   const bool actual = result.accepted && result.diagnostics.empty() &&
-                      result.value_as<trecursive::Node>() != nullptr;
+                      result.valueAs<trecursive::Node>() != nullptr;
   if (actual != expected)
     std::printf("recursive terminal input=%.*s expected=%d actual=%d\n",
                 static_cast<int>(text.size() > 80 ? 80 : text.size()),
@@ -139,7 +139,7 @@ void exercise(const cursiv::Parser& parser) {
     check(parser, text, false);
 
   const auto pair = parser.parse("pair:/**/x/* /* */ */");
-  const auto* node = pair.value_as<trecursive::Node>();
+  const auto* node = pair.valueAs<trecursive::Node>();
   CHECK(node != nullptr);
   if (node != nullptr) {
     CHECK(node->parts.size() == 2);
@@ -214,7 +214,7 @@ void check(const cursiv::Parser& parser, std::string_view prefix,
   const std::string source =
       "rightlinear:" + std::string(prefix) + std::string(body);
   const auto r = parser.parse(source);
-  const auto* node = r.value_as<trightlinear::Node>();
+  const auto* node = r.valueAs<trightlinear::Node>();
   const bool clean =
       r.accepted && !r.cst().recovered() && r.diagnostics.empty() && node;
   if (clean != expected)

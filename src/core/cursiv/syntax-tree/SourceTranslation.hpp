@@ -55,12 +55,12 @@ class SourceTranslation {
   [[nodiscard]] std::optional<TextOffset> translated(
       TextOffset offset) const noexcept;
   // The spans a parse of the text wrote, moved to the document's offsets.
-  void to_document(std::span<ParseDiagnostic> diagnostics) const noexcept;
+  void toDocument(std::span<ParseDiagnostic> diagnostics) const noexcept;
   // The records and repairs of the tree this translation is bound to, back at
   // the spans the parse wrote: a bound inside a piece widened on the way to
   // the document, and several tokens of one piece share that widened span.
-  void to_text(std::span<CstNode> records) const noexcept;
-  void to_text(std::span<ParseDiagnostic> repairs) const noexcept;
+  void toText(std::span<CstNode> records) const noexcept;
+  void toText(std::span<ParseDiagnostic> repairs) const noexcept;
 
  private:
   friend class Cst;
@@ -77,8 +77,8 @@ class SourceTranslation {
   void bind(std::span<CstNode> records, std::span<ParseDiagnostic> repairs);
   // Record `index` of the bound tree, at `span` in the document, back at the
   // span the parse wrote.
-  [[nodiscard]] TextRange text_of(std::uint32_t index,
-                                  TextRange span) const noexcept;
+  [[nodiscard]] TextRange textOf(std::uint32_t index,
+                                 TextRange span) const noexcept;
 
   std::string_view _source;
   // How much of the source the pieces have consumed.

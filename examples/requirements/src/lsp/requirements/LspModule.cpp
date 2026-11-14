@@ -79,13 +79,12 @@ RequirementsLanguage create_lsp_services(
   return {std::move(shared), one, other};
 }
 
-bool register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
+void register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
   auto& shared = dynamic_cast<RequirementsSharedServices&>(sharedServices);
   sharedServices.serviceRegistry->registerServices(
       create_requirements_lsp_services(shared));
   sharedServices.serviceRegistry->registerServices(
       create_tests_lsp_services(shared));
-  return true;
 }
 
 }  // namespace req

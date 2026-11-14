@@ -100,10 +100,10 @@ struct FaultCorpus {
     for (NodeId id = 0; id < cst.size(); ++id) {
       if (cst[id].subtreeSize == 1) continue;
       std::uint32_t open = kNoRank, close = kNoRank;
-      const NodeId first = cst.subtree_begin(id);
+      const NodeId first = cst.subtreeBegin(id);
       for (NodeId c = id; c > first;) {
         const NodeId child = c - 1;
-        c = cst.subtree_begin(child);
+        c = cst.subtreeBegin(child);
         const CstNode& k = cst[child];
         if (k.hidden || (k.subtreeSize == 1 && k.begin == k.end)) continue;
         const std::uint32_t r = k.subtreeSize == 1 ? rank(child) : kNoRank;
@@ -140,7 +140,7 @@ struct FaultCorpus {
   [[nodiscard]] std::size_t pick(std::size_t n) { return rng.next() % n; }
 
   // Rank of each record in the token list: the tokens of record `id` are
-  // `[at[subtree_begin(id)], at[id + 1])`.
+  // `[at[subtreeBegin(id)], at[id + 1])`.
   [[nodiscard]] static std::vector<std::uint32_t> token_rank(
       const RepairTwin& twin) {
     const Cst& cst = twin.result.cst();
@@ -156,7 +156,7 @@ struct FaultCorpus {
 
   [[nodiscard]] static std::pair<std::uint32_t, std::uint32_t> span_tokens(
       const std::vector<std::uint32_t>& at, const Cst& cst, NodeId id) {
-    return {at[cst.subtree_begin(id)], at[id + 1]};
+    return {at[cst.subtreeBegin(id)], at[id + 1]};
   }
 
   [[nodiscard]] static std::string_view closer_of(std::string_view open) {

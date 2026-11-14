@@ -4,8 +4,8 @@
 
 #include <iterator>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
-#include "cursiv/grammar/unicode/UnicodeRanges.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRanges.hpp"
 
 namespace cursiv::detail {
 

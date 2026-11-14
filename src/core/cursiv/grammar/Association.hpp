@@ -7,6 +7,6 @@
 
 namespace cursiv {
 
-enum class Association : std::uint8_t { left, right, non, prefix, postfix };
+enum class Association : std::uint8_t { Left, Right, Non, Prefix, Postfix };
 
 }  // namespace cursiv

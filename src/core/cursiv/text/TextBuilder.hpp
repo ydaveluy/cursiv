@@ -70,7 +70,7 @@ class TextBuilder {
   template <class... Parts>
   TextBuilder& line(const Parts&... parts) {
     (add(parts), ...);
-    end_line();
+    endLine();
     return *this;
   }
 
@@ -97,7 +97,7 @@ class TextBuilder {
 
   [[nodiscard]] std::size_t size() const noexcept { return _text.size(); }
   // The text written since `at`, taken out.
-  [[nodiscard]] std::string cut_from(std::size_t at);
+  [[nodiscard]] std::string cutFrom(std::size_t at);
 
   void reserve(std::size_t bytes) { _text.reserve(bytes); }
 
@@ -110,16 +110,16 @@ class TextBuilder {
   template <class Part>
   void add(const Part& part) {
     if constexpr (std::is_convertible_v<const Part&, std::string_view>) {
-      add_text(part);
+      addText(part);
     } else if constexpr (std::is_same_v<Part, char>) {
-      add_text(std::string_view(&part, 1));
+      addText(std::string_view(&part, 1));
     } else if constexpr (std::integral<Part> && !std::is_same_v<Part, bool>) {
       if constexpr (std::is_signed_v<Part>)
-        add_number(static_cast<long long>(part));
+        addNumber(static_cast<long long>(part));
       else
-        add_number(static_cast<unsigned long long>(part));
+        addNumber(static_cast<unsigned long long>(part));
     } else {
-      add_text(std::format("{}", part));
+      addText(std::format("{}", part));
     }
   }
 
@@ -127,7 +127,7 @@ class TextBuilder {
   void add(const detail::Joined<Items, Cell>& list) {
     std::string_view separator;
     for (const auto& item : list.items) {
-      add_text(separator);
+      addText(separator);
       add(std::invoke(list.cell, item));
       separator = list.separator;
     }
@@ -135,11 +135,11 @@ class TextBuilder {
 
   // Out of line: generators are compiled without optimisation, where a string
   // operation written here would cost many times what it costs there.
-  void add_text(std::string_view text);
-  void add_number(long long value);
-  void add_number(unsigned long long value);
-  void start_line();
-  void end_line();
+  void addText(std::string_view text);
+  void addNumber(long long value);
+  void addNumber(unsigned long long value);
+  void startLine();
+  void endLine();
 
   std::string _text;
   std::size_t _indent = 0;

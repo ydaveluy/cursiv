@@ -3,8 +3,8 @@
 #include <span>
 #include <vector>
 
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
+#include "cursiv/utils/JsonValue.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/Document.hpp"
 
 // The "did you mean" fixes of a linking error: names in the reference's scope

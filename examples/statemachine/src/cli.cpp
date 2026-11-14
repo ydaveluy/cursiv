@@ -44,7 +44,7 @@ int generate(const GenerateOptions& options) {
   shared.fileSystemProvider =
       std::make_unique<cursiv::LocalFileSystemProvider>();
   cursiv::install_default_shared_core_services(shared);
-  if (!kRegister(shared)) return cursiv::kFatal;
+  kRegister(shared);
 
   // The file alone, not its folder: the generated program declares only this
   // machine's states and events, so a name from a neighbour is unresolved.

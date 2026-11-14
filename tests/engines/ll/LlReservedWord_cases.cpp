@@ -18,7 +18,7 @@ namespace {
 
 std::string names(const cursiv::ParseResult& r) {
   std::string out;
-  const auto* d = r.value_as<tllreserved::Doc>();
+  const auto* d = r.valueAs<tllreserved::Doc>();
   if (d == nullptr) return "<none>";
   for (const tllreserved::Item* i : d->items)
     out += std::string(i->guarded ? "?" : "") + std::string(i->name) + ' ';
@@ -27,7 +27,7 @@ std::string names(const cursiv::ParseResult& r) {
 
 std::string reserved(const cursiv::ParseResult& r) {
   std::string out;
-  const auto* d = r.value_as<tllreservedassert::Doc>();
+  const auto* d = r.valueAs<tllreservedassert::Doc>();
   if (d == nullptr) return "<none>";
   for (const tllreservedassert::Item* i : d->items)
     out += std::string(i->keyword ? "?" : "") + std::string(i->name) + ' ';
@@ -59,7 +59,7 @@ void run() {
     CHECK(!ll->parse(input).diagnostics.empty());
   }
   const auto ruled = ll->parse("reserved:a; ----");
-  const auto* doc = ruled.value_as<tllreserved::Doc>();
+  const auto* doc = ruled.valueAs<tllreserved::Doc>();
   CHECK(ruled.accepted && ruled.diagnostics.empty() && doc && doc->ruled);
   CHECK(!ll->parse("reserved:a; ----\n").diagnostics.empty());
   // A repair reads no refused word on into the text behind it: the name
@@ -74,7 +74,7 @@ void run() {
   const auto escaped =
       ell->parse("in\\u0041; in x; x\\u0041y; \\u0061b; ab:; in ab;");
   CHECK(escaped.accepted && escaped.diagnostics.empty());
-  const auto* d = escaped.value_as<tllescape::Doc>();
+  const auto* d = escaped.valueAs<tllescape::Doc>();
   std::string got;
   if (d != nullptr)
     for (const tllescape::Item* i : d->items)

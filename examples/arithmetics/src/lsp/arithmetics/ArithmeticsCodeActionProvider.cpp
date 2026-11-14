@@ -9,10 +9,10 @@
 
 #include "arithmetics/Interpreter.hpp"
 #include "arithmetics/validation/ArithmeticsValidator.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/text/LspPosition.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/JsonValue.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 

@@ -9,17 +9,19 @@
 #include <span>
 #include <string_view>
 
+#include "cursiv/navigation/RenameProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
-#include "cursiv/navigation/RenameProvider.hpp"
 
 namespace cursiv {
 
-class DefaultRenameProvider : public RenameProvider {
+class DefaultRenameProvider : public RenameProvider,
+                              protected DefaultCoreService {
  public:
   explicit DefaultRenameProvider(const CoreServices& core) noexcept
-      : _core(core) {}
+      : DefaultCoreService(core) {}
   ~DefaultRenameProvider() noexcept override = default;
 
   [[nodiscard]] std::optional<lsp::Range> prepareRename(
@@ -32,7 +34,6 @@ class DefaultRenameProvider : public RenameProvider {
       const CancellationToken& token = {}) const override;
 
  protected:
-  [[nodiscard]] const CoreServices& core() const noexcept { return _core; }
 
  private:
   // Substitutes `newName` at the spans of `declaringDocument` and reads the
@@ -43,8 +44,6 @@ class DefaultRenameProvider : public RenameProvider {
                                       std::span<const TextRange> spans,
                                       std::string_view newName,
                                       const CancellationToken& token) const;
-
-  const CoreServices& _core;
 };
 
 }  // namespace cursiv

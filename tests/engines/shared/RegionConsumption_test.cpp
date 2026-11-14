@@ -24,7 +24,7 @@ bool clean(const cursiv::ParseResult& result) {
 void accepts(const Reading& reading, std::string_view source,
              std::size_t count) {
   const auto result = reading.parser.parse(source);
-  const auto* doc = result.value_as<tregionconsumption::Document>();
+  const auto* doc = result.valueAs<tregionconsumption::Document>();
   if (!clean(result))
     std::fprintf(stderr, "region consumption [%s]: expected clean %.*s\n",
                  reading.engine, int(source.size()), source.data());

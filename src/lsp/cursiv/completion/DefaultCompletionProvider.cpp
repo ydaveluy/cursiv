@@ -19,7 +19,7 @@
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
-#include "cursiv/grammar/unicode/UnicodeRanges.hpp"
+#include "cursiv/text/unicode/UnicodeRanges.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/references/ScopeProvider.hpp"
@@ -49,8 +49,8 @@ namespace {
 // The owner of the leaf holding `offset`, else of the last one before it: null
 // where neither stands. Trivia and what a repair discarded hold nothing.
 [[nodiscard]] AstNode* node_at(const Cst& cst, TextOffset offset) {
-  if (const NodeId after = cst.leaf_after(offset); after < cst.size())
-    if (const CstLeaf at = cst.as_leaf(after);
+  if (const NodeId after = cst.leafAfter(offset); after < cst.size())
+    if (const CstLeaf at = cst.asLeaf(after);
         at.begin <= offset && offset < at.end && !at.hidden && !at.recovered)
       return owner_of_leaf(cst, at.id);
   return owner_at(cst, offset);
@@ -62,9 +62,9 @@ namespace {
 [[nodiscard]] bool caret_in_unread_text(const Cst& cst, TextOffset caret) {
   // The first leaf ending past the caret is the only one that can hold it:
   // ends never decrease, so every earlier leaf closed before it.
-  const NodeId after = cst.leaf_after(caret);
+  const NodeId after = cst.leafAfter(caret);
   if (after == cst.size()) return false;
-  const CstLeaf leaf = cst.as_leaf(after);
+  const CstLeaf leaf = cst.asLeaf(after);
   return (leaf.hidden || leaf.recovered) && leaf.begin < caret &&
          caret < leaf.end;
 }
@@ -102,7 +102,7 @@ struct ItemKeyHash {
     return !n.hidden && (!grammar.recordFeature(n).empty() ||
                          (n.subtreeSize > 1 && grammar.recordRule(n).empty()));
   };
-  for (NodeId k = cst.subtree_begin(record); k < from; ++k)
+  for (NodeId k = cst.subtreeBegin(record); k < from; ++k)
     if (writes(k)) return false;
   for (NodeId k = to; k < record; ++k)
     if (writes(k)) return false;
@@ -249,9 +249,9 @@ DefaultCompletionProvider::findDataTypeRuleStart(const Cst& cst,
                     detail::word_scalar(scalar_at(text.data() + offset,
                                                   text.size() - offset, len));
   const TextOffset at = word || offset == 0 ? offset : offset - 1;
-  const NodeId after = cst.leaf_after(at);
+  const NodeId after = cst.leafAfter(at);
   if (after == cst.size()) return std::nullopt;
-  const CstLeaf leaf = cst.as_leaf(after);
+  const CstLeaf leaf = cst.asLeaf(after);
   if (leaf.hidden || leaf.begin > at || at >= leaf.end) return std::nullopt;
   // A data rule of one token has no record but its leaf.
   NodeId found = grammar.recordIsDataRule(cst[leaf.id]) ? leaf.id : kNoNode;
@@ -263,7 +263,7 @@ DefaultCompletionProvider::findDataTypeRuleStart(const Cst& cst,
         !writes_nothing(cst, grammar, i, from, to))
       break;
     found = i;
-    from = cst.subtree_begin(i);
+    from = cst.subtreeBegin(i);
     to = i;
   }
   if (found == kNoNode) return std::nullopt;
@@ -278,16 +278,16 @@ DefaultCompletionProvider::backtrackToAnyToken(const Cst& cst,
   };
   CompletionBacktrackingInformation out;
   out.nextTokenStart = out.nextTokenEnd = offset;
-  const NodeId first = cst.leaf_after(offset);
+  const NodeId first = cst.leafAfter(offset);
   for (NodeId r = first; r > 0;)
-    if (const CstLeaf before = cst.as_leaf(r = cst.leaf_before(r));
+    if (const CstLeaf before = cst.asLeaf(r = cst.leafBefore(r));
         is_token(before)) {
       out.previousTokenStart = before.begin;
       out.previousTokenEnd = before.end;
       break;
     }
-  for (NodeId r = first; r < cst.size(); r = cst.next_leaf(r))
-    if (const CstLeaf after = cst.as_leaf(r); is_token(after)) {
+  for (NodeId r = first; r < cst.size(); r = cst.nextLeaf(r))
+    if (const CstLeaf after = cst.asLeaf(r); is_token(after)) {
       if (after.begin < offset) {
         out.nextTokenStart = after.begin;
         out.nextTokenEnd = after.end;

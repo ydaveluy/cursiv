@@ -6,8 +6,8 @@
 #include <memory>
 #include <vector>
 
-#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/Disposable.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 
 namespace cursiv {
 struct CoreServices;

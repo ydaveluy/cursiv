@@ -500,7 +500,7 @@ void a_parse_has_a_share_of_repair_and_says_so() {
     const auto result = parser->parse(input);
     CHECK(result.accepted && result.value);
     return std::ranges::any_of(result.diagnostics, [](const auto& d) {
-      return d.kind == cursiv::DiagnosticKind::bounded;
+      return d.kind == cursiv::DiagnosticKind::Bounded;
     });
   };
   CHECK(!told(4000));

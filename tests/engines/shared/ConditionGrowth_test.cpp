@@ -34,7 +34,7 @@ std::string repeat(std::string_view unit, unsigned n) {
 // The items a parser reads, or one mark where it refuses the text.
 Items items(const cursiv::Parser& parser, const std::string& text) {
   const auto r = parser.parse(text);
-  const auto* doc = r.value_as<tcondgrowth::Doc>();
+  const auto* doc = r.valueAs<tcondgrowth::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr)
     return {"refused"};
   return {doc->items.begin(), doc->items.end()};

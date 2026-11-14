@@ -49,19 +49,19 @@ DefaultWorkspaceSymbolProvider::getWorkspaceSymbol(
   if (document == nullptr) return std::nullopt;
   // The name's own record is asked for here, per hit, never per description.
   const CoreServices* const language = document->language;
-  const std::optional<CstNodeView> nameNode =
+  const CstNodeView nameNode =
       language == nullptr || astDescription.node == nullptr
-          ? std::nullopt
+          ? CstNodeView{}
           : language->nameProvider->getNameNode(*astDescription.node,
                                                 document.get());
-  if (!nameNode.has_value()) return std::nullopt;
+  if (!nameNode) return std::nullopt;
   lsp::WorkspaceSymbol symbol;
   symbol.name = std::string(astDescription.name);
   symbol.kind = _shared.nodeKindProvider->getSymbolKind(astDescription);
   lsp::Location location;
   location.uri = lsp::Uri::parse(document->uri);
   location.range = to_lsp(
-      document->textDocument().rangeAt(nameNode->begin(), nameNode->end()));
+      document->textDocument().rangeAt(nameNode.begin(), nameNode.end()));
   symbol.location = std::move(location);
   return symbol;
 }

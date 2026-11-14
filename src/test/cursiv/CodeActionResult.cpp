@@ -15,10 +15,10 @@
 #include "cursiv/TextDocumentParams.hpp"
 #include "cursiv/ValidationHelper.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
-#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/LspServices.hpp"
 #include "cursiv/text/LspPosition.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 

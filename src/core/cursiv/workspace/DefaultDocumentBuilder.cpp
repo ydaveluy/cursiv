@@ -6,14 +6,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <format>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -23,9 +26,11 @@
 #include "cursiv/references/Linker.hpp"
 #include "cursiv/references/ScopeComputation.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/syntax-tree/DocumentReferences.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/UriUtils.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/DocumentValidator.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
@@ -63,19 +68,14 @@ void tell_every(const std::vector<Listener*>& listeners, Tell&& tell) {
 }  // namespace
 
 DefaultDocumentBuilder::DefaultDocumentBuilder(SharedCoreServices& shared)
-    : _shared(shared), _updateBuildOptions{true, {&built_in, &fast}} {}
-
-const CoreServices* DefaultDocumentBuilder::languageOf(
-    const Document& document) const noexcept {
-  return document.language;
-}
+    : _shared(shared), _updateBuildOptions(detail::typing_build_options()) {}
 
 std::vector<Document*> DefaultDocumentBuilder::pending(
     std::span<Document* const> all, DocumentState phaseEnd) const {
   std::vector<Document*> work;
   work.reserve(all.size());
   for (Document* d : all)
-    if (d->state.load() < phaseEnd && languageOf(*d) != nullptr &&
+    if (d->state.load() < phaseEnd && d->language != nullptr &&
         (phaseEnd != DocumentState::Validated ||
          getBuildOptions(*d).validation))
       work.push_back(d);
@@ -86,11 +86,10 @@ std::vector<Document*> DefaultDocumentBuilder::pending(
   return work;
 }
 
-void DefaultDocumentBuilder::runPhase(std::span<Document* const> all,
-                                      std::initializer_list<Step> steps,
-                                      const CancellationToken& token,
-                                      std::optional<cursiv::function_ref<void()>>
-                                          beforePublish) const {
+void DefaultDocumentBuilder::runPhase(
+    std::span<Document* const> all, std::initializer_list<Step> steps,
+    const CancellationToken& token,
+    std::optional<cursiv::function_ref<void()>> beforePublish) {
   const DocumentState phaseEnd = (steps.end() - 1)->state;
   const std::vector<Document*> work = pending(all, phaseEnd);
   // Tested even when there is nothing to do: a workspace whose whole tail is
@@ -105,7 +104,7 @@ void DefaultDocumentBuilder::runPhase(std::span<Document* const> all,
     if (entries[i] >= step.state) return;
     throw_if_cancelled(token);
     Document& d = *work[i];
-    step.body(d, *languageOf(d), token);
+    step.body(d, *d.language, token);
     d.state = step.state;
     wakeDocumentWaiters(d);
     if (!beforePublish) notifyDocumentPhase(d, step.state, token);
@@ -174,24 +173,23 @@ void DefaultDocumentBuilder::runPhase(std::span<Document* const> all,
 
 void DefaultDocumentBuilder::notifyBuildPhase(
     std::span<Document* const> documents, DocumentState state,
-    const CancellationToken& token) const {
+    const CancellationToken& token) {
   tell_every(_phaseListeners, [&](BuildPhaseListener& listener) {
     listener.onBuildPhase(state, documents, token);
   });
 }
 
 bool DefaultDocumentBuilder::resultsAreIncomplete(
-    const Document& document) const {
-  const CoreServices* const language = languageOf(document);
+    const Document& document, const BuildOptions& options) const {
+  const CoreServices* const language = document.language;
   if (language == nullptr) return false;
-  const BuildOptions options = getBuildOptions(document);
   return options.validation &&
          !findMissingValidationCategories(document, *language,
                                           options.validationCategories)
               .empty();
 }
 
-void DefaultDocumentBuilder::cleanUpDeleted(std::string_view uri) const {
+void DefaultDocumentBuilder::cleanUpDeleted(std::string_view uri) {
   Documents& store = *_shared.documents;
   if (const std::shared_ptr<Document> d = store.getDocument(uri))
     resetDocument(*d, DocumentState::Changed);
@@ -199,8 +197,7 @@ void DefaultDocumentBuilder::cleanUpDeleted(std::string_view uri) const {
 }
 
 void DefaultDocumentBuilder::markAsCompleted(
-    const Document& document,
-    std::span<const ValidationCategory* const> ran) const {
+    const Document& document, std::span<const ValidationCategory* const> ran) {
   const std::scoped_lock lock(_stateMutex);
   ValidatedRecord& record = _validated[document.id];
   if (record.revision != document.buildRevision) {
@@ -218,7 +215,9 @@ void DefaultDocumentBuilder::markAsCompleted(
 std::vector<std::string> DefaultDocumentBuilder::findChangedUris(
     std::string_view changed) const {
   // The common case, and the cheap one: the workspace already holds it.
-  if (_shared.documents->hasDocument(changed)) return {std::string(changed)};
+  if (const std::shared_ptr<Document> held =
+          _shared.documents->getDocument(changed))
+    return {held->uri};
 
   const FileSystemProvider& files = *_shared.fileSystemProvider;
   const WorkspaceManager& workspace = *_shared.workspaceManager;
@@ -228,7 +227,7 @@ std::vector<std::string> DefaultDocumentBuilder::findChangedUris(
     // inside a folder the scan leaves out brings nothing in.
     if (!workspace.isIncluded(entry)) return {};
     if (entry.isDirectory) return workspace.searchFolder(changed);
-    return {std::string(changed)};
+    return {normalize_uri(changed)};
   } catch (const FileSystemError&) {
     // Nothing readable there: a deletion reported as a change, a race with the
     // editor. It touched nothing this workspace can name.
@@ -238,15 +237,14 @@ std::vector<std::string> DefaultDocumentBuilder::findChangedUris(
 
 void DefaultDocumentBuilder::emitUpdate(
     std::span<const std::string_view> changed,
-    std::span<const std::string_view> deleted) const {
+    std::span<const std::string_view> deleted) {
   tell_every(_updateListeners, [&](DocumentUpdateListener& listener) {
     listener.onUpdate(changed, deleted);
   });
 }
 
 void DefaultDocumentBuilder::notifyDocumentPhase(
-    Document& document, DocumentState state,
-    const CancellationToken& token) const {
+    Document& document, DocumentState state, const CancellationToken& token) {
   tell_every(_documentPhaseListeners, [&](DocumentPhaseListener& listener) {
     try {
       listener.onDocumentPhase(document, state, token);
@@ -290,11 +288,19 @@ BuildOptions DefaultDocumentBuilder::getBuildOptions(
     const Document& document) const {
   const std::scoped_lock lock(_stateMutex);
   const auto at = _buildOptions.find(document.id);
-  return at == _buildOptions.end() ? _updateBuildOptions : at->second.options;
+  if (at != _buildOptions.end()) return at->second.options;
+  return document.language != nullptr
+             ? updateBuildOptionsFor(*document.language)
+             : _updateBuildOptions;
+}
+
+BuildOptions DefaultDocumentBuilder::updateBuildOptionsFor(
+    const CoreServices&) const {
+  return _updateBuildOptions;
 }
 
 void DefaultDocumentBuilder::prepareBuild(std::span<Document* const> documents,
-                                          const BuildOptions& options) const {
+                                          const BuildOptions& options) {
   const std::scoped_lock lock(_stateMutex);
   for (const Document* const d : documents) {
     // An unfinished request survives: a document keeps what it was asked
@@ -308,8 +314,23 @@ void DefaultDocumentBuilder::prepareBuild(std::span<Document* const> documents,
 
 void DefaultDocumentBuilder::build(std::span<Document* const> documents,
                                    const BuildOptions& options,
-                                   const CancellationToken& token) const {
+                                   const CancellationToken& token) {
+  // The index and the requests are keyed by the store's identities.
+  for (const Document* const d : documents)
+    if (_shared.documents->getDocument(d->id).get() != d)
+      throw DocumentStoreError(
+          std::format("cursiv: '{}' is built once the store holds it: add it "
+                      "with Documents::addDocument",
+                      d->uri));
   runAttempt([&] {
+    {
+      // A document not yet validated takes this request, whatever an earlier
+      // build left unfinished.
+      const std::scoped_lock lock(_stateMutex);
+      for (const Document* const d : documents)
+        if (d->state.load() != DocumentState::Validated)
+          _buildOptions.erase(d->id);
+    }
     prepareBuild(documents, options);
     std::vector<std::string_view> uris;
     uris.reserve(documents.size());
@@ -339,8 +360,7 @@ void DefaultDocumentBuilder::build(std::span<Document* const> documents,
 }
 
 void DefaultDocumentBuilder::buildDocuments(
-    std::span<Document* const> documents,
-    const CancellationToken& token) const {
+    std::span<Document* const> documents, const CancellationToken& token) {
   IndexManager& index = *_shared.indexManager;
   const DocumentFactory& factory = *_shared.documentFactory;
 
@@ -386,19 +406,17 @@ void DefaultDocumentBuilder::buildDocuments(
   for (Document* d : work) {
     // A document `Validated` by a narrower request re-enters the validating
     // phase alone: the tree, the scopes and both index halves stand.
-    if (d->state.load() == DocumentState::Validated && resultsAreIncomplete(*d))
+    if (d->state.load() == DocumentState::Validated &&
+        resultsAreIncomplete(*d, getBuildOptions(*d)))
       d->state = DocumentState::IndexedReferences;
     // Below `IndexedReferences` a memoised resolution has no index row to
     // protect it from the next reset: dropped here, while the write still
     // excludes every reader.
     if (d->state.load() < DocumentState::IndexedReferences)
-      if (const CoreServices* language = languageOf(*d); language != nullptr) {
+      if (const CoreServices* language = d->language; language != nullptr) {
         language->linker->unlink(*d);
         if (d->state.load() == DocumentState::Linked)
           d->state = DocumentState::ComputedScopes;
-        // A resumed document may retain its scopes and skip that phase.
-        if (d->state.load() >= DocumentState::ComputedScopes)
-          bindReferences(*d, *language);
       }
   }
 
@@ -486,15 +504,14 @@ void DefaultDocumentBuilder::buildDocuments(
 
 void DefaultDocumentBuilder::update(std::span<const std::string_view> changed,
                                     std::span<const std::string_view> deleted,
-                                    const CancellationToken& token) const {
+                                    const CancellationToken& token) {
   runAttempt(
       [&] { buildDocuments(applyUpdate(changed, deleted, token), token); });
 }
 
 std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
     std::span<const std::string_view> changed,
-    std::span<const std::string_view> deleted,
-    const CancellationToken& token) const {
+    std::span<const std::string_view> deleted, const CancellationToken& token) {
   Documents& store = *_shared.documents;
 
   // Expanded first, and everything below reads the expansion: a folder reported
@@ -512,8 +529,8 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   // A deleted folder is every document under it, the same way.
   std::vector<std::string> gone;
   for (const std::string_view uri : deleted) {
-    if (store.hasDocument(uri)) {
-      gone.emplace_back(uri);
+    if (const std::shared_ptr<Document> held = store.getDocument(uri)) {
+      gone.push_back(held->uri);
       continue;
     }
     for (const std::shared_ptr<Document>& d : store.getDocuments(uri))
@@ -546,19 +563,14 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
         resetDocument(*d, DocumentState::Changed);
   for (const std::string_view uri : deletedUris) cleanUpDeleted(uri);
 
-  // Changed documents get the update's request. One the store lacks is
-  // installed empty at `Changed` for the parse phase; `findChangedUris` has
-  // already dropped what no language claims.
+  // A changed document the store lacks is installed empty at `Changed` for
+  // the parse phase; `findChangedUris` has already dropped what no language
+  // claims.
   const DocumentFactory& factory = *_shared.documentFactory;
-  std::vector<Document*> requested;
-  for (const std::string_view uri : changedUris) {
+  for (const std::string_view uri : changedUris)
     if (!store.hasDocument(uri))
       store.addDocument(
           factory.create(TextDocument::create(std::string(uri), {}, 0, {})));
-    if (const std::shared_ptr<Document> d = store.getDocument(uri))
-      requested.push_back(d.get());
-  }
-  prepareBuild(requested, _updateBuildOptions);
 
   // Reported once the store reflects it: a subscriber told of a deletion finds
   // the document gone unless it was recreated by the same update, and every
@@ -570,46 +582,63 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   throw_if_cancelled(token);
 
   // What to build: a state below the last, a request no build finished, a
-  // category the request still needs. A document whose request stops at
-  // `IndexedReferences` passes through with nothing left to run.
+  // category the update asks and the document lacks. Each takes the update's
+  // request, unless a cancelled build left it one to finish.
+  std::unordered_set<DocumentId> unfinished;
+  {
+    const std::scoped_lock lock(_stateMutex);
+    for (const auto& [id, request] : _buildOptions)
+      if (!request.completed) unfinished.insert(id);
+  }
+  std::unordered_map<const CoreServices*,
+                     std::pair<BuildOptions, std::vector<Document*>>>
+      asked;
   std::vector<Document*> work;
   for (const std::shared_ptr<Document>& doc : store.all()) {
     Document* const d = doc.get();
-    if (d->state.load() < DocumentState::Validated || requestUnfinished(*d) ||
-        resultsAreIncomplete(*d))
+    auto [at, fresh] = asked.try_emplace(d->language);
+    if (fresh)
+      at->second.first = d->language != nullptr
+                             ? updateBuildOptionsFor(*d->language)
+                             : _updateBuildOptions;
+    if (d->state.load() < DocumentState::Validated ||
+        unfinished.contains(d->id) ||
+        resultsAreIncomplete(*d, at->second.first)) {
       work.push_back(d);
+      at->second.second.push_back(d);
+    }
   }
+  for (const auto& [language, request] : asked)
+    prepareBuild(request.second, request.first);
   return work;
 }
 
-bool DefaultDocumentBuilder::requestUnfinished(const Document& document) const {
-  const std::scoped_lock lock(_stateMutex);
-  const auto at = _buildOptions.find(document.id);
-  return at != _buildOptions.end() && !at->second.completed;
-}
-
 void DefaultDocumentBuilder::letGoOf(
-    const std::unordered_set<DocumentId>& moved, bool repair) const {
+    const std::unordered_set<DocumentId>& moved, bool repair) {
   using enum DocumentState;
   const IndexManager& index = *_shared.indexManager;
   for (const std::shared_ptr<Document>& doc : _shared.documents->all()) {
     Document* const d = doc.get();
     if (moved.contains(d->id)) continue;
-    if ((repair && d->hasLinkingErrors()) || index.isAffected(*d, moved))
+    if ((repair && shouldRelink(*d, moved)) || index.isAffected(*d, moved))
       resetDocument(*d, ComputedScopes);
     else if (!moved.empty() && d->state.load() < IndexedReferences) {
       // Unindexed resolutions have no dependency row to protect their targets.
-      if (const CoreServices* language = languageOf(*d); language != nullptr) {
+      if (const CoreServices* language = d->language; language != nullptr) {
         language->linker->unlink(*d);
         if (d->state.load() == Linked) d->state = ComputedScopes;
-        if (d->state.load() >= ComputedScopes) bindReferences(*d, *language);
       }
     }
   }
 }
 
+bool DefaultDocumentBuilder::shouldRelink(
+    const Document& document, const std::unordered_set<DocumentId>&) const {
+  return document.hasLinkingErrors();
+}
+
 void DefaultDocumentBuilder::resetToState(Document& document,
-                                          DocumentState state) const {
+                                          DocumentState state) {
   // `Changed` destroys the tree: a resolved reference into it is a pointer, so
   // every document that read it lets go first.
   if (state == DocumentState::Changed &&
@@ -619,14 +648,16 @@ void DefaultDocumentBuilder::resetToState(Document& document,
 }
 
 void DefaultDocumentBuilder::resetDocument(Document& document,
-                                           DocumentState state) const {
+                                           DocumentState state) {
   // The lock's contract for `buildDocuments`, checked where it can be
   // broken: once the write allows them, an `Immediate` read may hold this
   // tree, and dropping a parse is what invalidates every pointer into it.
-  assert(!_shared.workspaceLock->immediateReadsAllowed() &&
-         "a document may not be reset once the write allows immediate reads");
+  if (_shared.workspaceLock->immediateReadsAllowed())
+    throw std::logic_error(
+        "cursiv: a document is reset before its write allows immediate "
+        "reads: one build per write, and no reset from a listener");
   IndexManager& index = *_shared.indexManager;
-  const CoreServices* language = languageOf(document);
+  const CoreServices* language = document.language;
   using enum DocumentState;
   // Made before anything is undone: a refused allocation leaves the document
   // and its index rows as they were.
@@ -639,7 +670,13 @@ void DefaultDocumentBuilder::resetDocument(Document& document,
       index.removeContent(document.id);
       [[fallthrough]];
     case IndexedContent:
-      document.localSymbols.clear();  // undoes `ComputedScopes`
+      // Undoes `ComputedScopes`: without its scopes no reference is readable.
+      document.localSymbols.clear();
+      if (DocumentReferences* const references =
+              document.parseResult.references.get()) {
+        references->linker.store(nullptr, std::memory_order_release);
+        references->document.store(nullptr, std::memory_order_relaxed);
+      }
       [[fallthrough]];
     case ComputedScopes:
       // Undoes `Linked` in a tree that stays, for any target below `Linked`:
@@ -668,9 +705,6 @@ void DefaultDocumentBuilder::resetDocument(Document& document,
   // symbols included, and makes the text replaceable.
   if (empty) document.parseResult = std::move(*empty);
   if (document.state.load() > state) document.state = state;
-  if (state == ComputedScopes && document.state.load() == ComputedScopes &&
-      language != nullptr)
-    bindReferences(document, *language);
 }
 
 void DefaultDocumentBuilder::computeLocalScopes(
@@ -678,6 +712,7 @@ void DefaultDocumentBuilder::computeLocalScopes(
     const CancellationToken& token) {
   document.localSymbols =
       language.scopeComputation->collectLocalSymbols(document, token);
+  document.localSymbols.buildIndex();
   bindReferences(document, language);
 }
 
@@ -727,15 +762,19 @@ DefaultDocumentBuilder::findMissingValidationCategories(
 void DefaultDocumentBuilder::validate(
     Document& document, const CoreServices& language,
     std::span<const ValidationCategory* const> categories,
-    const CancellationToken& token) const {
+    const CancellationToken& token) {
   const std::vector<const ValidationCategory*> missing =
       findMissingValidationCategories(document, language, categories);
 
   // What an earlier, narrower build already published: a later one appends
-  // its categories rather than replacing them.
-  std::vector<Diagnostic> all = document.diagnostics;
+  // its categories rather than replacing them. The room the last list took is
+  // asked at once.
+  std::vector<Diagnostic> all;
+  all.reserve(document.diagnostics.capacity());
+  all = document.diagnostics;
   if (!missing.empty())
-    language.documentValidator->validateDocument(document, all, missing, token);
+    language.documentValidator->validateDocument(
+        document, all, {.categories = missing}, token);
 
   // Recorded before the diagnostics are published, which cannot fail: a
   // record that throws publishes nothing, and the next build runs the same
@@ -747,8 +786,7 @@ void DefaultDocumentBuilder::validate(
 // One `build` or `update` call is one attempt. The workspace state drops
 // first. A failure answers waiters with `BuildFailed`; a cancellation does
 // not, as the write that supersedes it answers them.
-void DefaultDocumentBuilder::runAttempt(
-    cursiv::function_ref<void()> body) const {
+void DefaultDocumentBuilder::runAttempt(cursiv::function_ref<void()> body) {
   const std::uint64_t attempt = beginAttempt();
   try {
     body();
@@ -760,7 +798,7 @@ void DefaultDocumentBuilder::runAttempt(
   }
 }
 
-std::uint64_t DefaultDocumentBuilder::beginAttempt() const {
+std::uint64_t DefaultDocumentBuilder::beginAttempt() {
   // Two builds never overlap: `build` runs under the workspace lock's
   // exclusivity, so `_buildAttempt` is monotone with nothing to arbitrate.
   const std::scoped_lock lock(_stateMutex);
@@ -779,7 +817,7 @@ void DefaultDocumentBuilder::wakeDocumentWaiters(
   _stateCv.notify_all();
 }
 
-void DefaultDocumentBuilder::publishWorkspaceState(DocumentState state) const {
+void DefaultDocumentBuilder::publishWorkspaceState(DocumentState state) {
   {
     const std::scoped_lock lock(_stateMutex);
     _currentState = state;
@@ -791,7 +829,7 @@ void DefaultDocumentBuilder::publishWorkspaceState(DocumentState state) const {
 // A build failure is signalled, not carried: the exception is rethrown to
 // `build`'s caller, and a waiter only learns the state will not come. Attempts
 // start at one and `_failedAttempt` at zero, so the rank is the flag.
-void DefaultDocumentBuilder::publishFailure(std::uint64_t attempt) const {
+void DefaultDocumentBuilder::publishFailure(std::uint64_t attempt) {
   {
     const std::scoped_lock lock(_stateMutex);
     _failedAttempt = attempt;

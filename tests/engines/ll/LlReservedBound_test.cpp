@@ -262,7 +262,7 @@ Scan expected(const Lexicon& lx, const std::vector<const Spelled*>& of,
 }
 
 std::string shape(const cursiv::ParseResult& r) {
-  const auto* d = r.value_as<tllbound::Doc>();
+  const auto* d = r.valueAs<tllbound::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || d == nullptr) return "<refused>";
   std::string out;
   for (const tllbound::Item* i : d->items)

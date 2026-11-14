@@ -37,7 +37,7 @@ class NameProvider {
 
   // Absent when the name has no source range. `document` holds the tree the
   // node's `cstNodeId` indexes; null means the node's own document.
-  [[nodiscard]] virtual std::optional<CstNodeView> getNameNode(
+  [[nodiscard]] virtual CstNodeView getNameNode(
       const AstNode& node, const Document* document = nullptr) const = 0;
 };
 

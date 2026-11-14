@@ -1,6 +1,7 @@
 // Documentation comments: the comment a provider binds to a node, the parse of
 // a doc comment, and the markdown the documentation provider renders.
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -11,6 +12,7 @@
 
 #include "comments/generated/Comments/Module.hpp"
 #include "core/documentation/CommentsGrammar.hpp"
+#include "cursiv/Check.hpp"
 #include "cursiv/documentation/CommentNode.hpp"
 #include "cursiv/documentation/DefaultCommentProvider.hpp"
 #include "cursiv/documentation/DefaultDocumentationProvider.hpp"
@@ -23,7 +25,6 @@
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/IndexManager.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/Check.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
 
@@ -621,29 +622,27 @@ void a_range_covers_its_children() {
   CHECK(see.toMarkdown() == "*@see* — A");
 }
 
-// A tag name is ASCII: a name that cannot open stays an empty-named tag with
-// its word as content, one that opens cuts at the first non-ASCII byte, and a
-// non-ASCII inline marker is plain text.
-void a_tag_name_is_ascii() {
+// A tag name is a letter, then letters and numbers, in any script. A name that cannot open stays an empty-named tag with its word as
+// content.
+void a_tag_name_is_letters_in_any_script() {
   const cursiv::DocComment accent =
-      cursiv::parse_doc_comment("/** @\xC3\xA9tat oui */");
-  CHECK(accent.getTag("\xC3\xA9tat") == nullptr);
-  CHECK(accent.elements.size() == 1);
-  CHECK(accent.elements[0].kind == cursiv::DocCommentNode::Kind::Tag);
-  CHECK(accent.elements[0].name.empty());
-  CHECK(accent.elements[0].children[0].text == "\xC3\xA9tat oui");
+      cursiv::parse_doc_comment("/** @\xC3\xA9tat2 oui */");
+  CHECK(accent.getTag("\xC3\xA9tat2") != nullptr);
 
-  const cursiv::DocComment cut = cursiv::parse_doc_comment(
-      "/** @d\xC3\xA9pr\xC3\xA9"
-      "ci\xC3\xA9 oui */");
-  CHECK(cut.elements[0].name == "d");
+  const cursiv::DocComment digit = cursiv::parse_doc_comment("/** @2nd oui */");
+  CHECK(digit.elements.size() == 1);
+  CHECK(digit.elements[0].kind == cursiv::DocCommentNode::Kind::Tag);
+  CHECK(digit.elements[0].name.empty());
+  CHECK(digit.elements[0].children[0].text == "2nd oui");
 
   const cursiv::DocComment inlineAccent =
       cursiv::parse_doc_comment("/** pre {@\xC3\xA9tat X} post */");
   CHECK(inlineAccent.elements.size() == 1);
-  CHECK(inlineAccent.elements[0].children.size() == 1);
-  CHECK(inlineAccent.elements[0].children[0].kind ==
-        cursiv::DocCommentNode::Kind::Line);
+  CHECK(std::ranges::any_of(inlineAccent.elements[0].children,
+                            [](const cursiv::DocCommentNode& child) {
+                              return child.inlineTag &&
+                                     child.name == "\xC3\xA9tat";
+                            }));
 }
 
 // An empty `line` marker disables its half at the parse too: the line keeps
@@ -780,7 +779,7 @@ void run() {
   a_start_position_offsets_every_range();
   the_inline_tag_splits_into_line_tag_line();
   a_range_covers_its_children();
-  a_tag_name_is_ascii();
+  a_tag_name_is_letters_in_any_script();
   an_empty_line_marker_keeps_the_line();
   links_render_to_markdown();
   inline_link_trims_and_falls_back_on_empty_display();
@@ -830,6 +829,58 @@ void a_doc_comment_renders_to_markdown() {
   const std::optional<std::string> text =
       docs.getDocumentation(*w.element(*doc, 0), doc.get());
   CHECK(text.has_value() && *text == "The person.");
+}
+
+// A language words links and tags its own way, and looks a link's name up its
+// own way, by overriding one hook each.
+void the_provider_hooks_take_effect() {
+  struct Reworded final : cursiv::DefaultDocumentationProvider {
+    using DefaultDocumentationProvider::DefaultDocumentationProvider;
+    std::optional<std::string> documentationLinkRenderer(
+        const cursiv::AstNode&, const cursiv::Document&, std::string_view name,
+        std::string_view) const override {
+      return "<" + std::string(name) + ">";
+    }
+    std::optional<std::string> documentationTagRenderer(
+        const cursiv::AstNode&, const cursiv::Document&, std::string_view name,
+        std::string_view content, bool inlineTag) const override {
+      // An inline `{@link}` is left to the link renderer.
+      if (inlineTag) return std::nullopt;
+      return "[" + std::string(name) + ":" + std::string(content) + "]";
+    }
+  };
+  struct Looking final : cursiv::DefaultDocumentationProvider {
+    using DefaultDocumentationProvider::DefaultDocumentationProvider;
+    mutable int local = 0;
+    mutable int global = 0;
+    std::optional<cursiv::AstNodeDescription> findNameInLocalSymbols(
+        const cursiv::AstNode& node, const cursiv::Document& document,
+        std::string_view name) const override {
+      ++local;
+      return DefaultDocumentationProvider::findNameInLocalSymbols(
+          node, document, name);
+    }
+    std::optional<cursiv::AstNodeDescription> findNameInGlobalScope(
+        const cursiv::AstNode& node, const cursiv::Document& document,
+        std::string_view name) const override {
+      ++global;
+      return DefaultDocumentationProvider::findNameInGlobalScope(node, document,
+                                                                 name);
+    }
+  };
+  const World w;
+  const auto lib = w.built("file:///w/lib.ws", "datatype Remote\n");
+  const auto doc =
+      w.built("file:///w/b.ws",
+              "/** See {@link Remote}.\n * @since two */\nentity Person { }\n");
+  const Reworded reworded(*w.ws);
+  const auto text = reworded.getDocumentation(*w.element(*doc, 0), doc.get());
+  CHECK(text && text->find("<Remote>") != std::string::npos);
+  CHECK(text && text->find("[since:two]") != std::string::npos);
+  const Looking looking(*w.ws);
+  (void)looking.getDocumentation(*w.element(*doc, 0), doc.get());
+  CHECK(looking.local == 1 && looking.global == 1);
+  (void)lib;
 }
 
 // A comment that is not a documentation comment is nobody's documentation:
@@ -978,6 +1029,7 @@ void a_tag_renders_with_its_marker() {
 
 void run() {
   a_doc_comment_renders_to_markdown();
+  the_provider_hooks_take_effect();
   a_plain_block_is_nobodys_documentation();
   a_link_resolves_to_the_declaration();
   an_unresolved_link_is_its_target();

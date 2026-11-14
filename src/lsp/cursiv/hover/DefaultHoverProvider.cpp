@@ -26,11 +26,11 @@ namespace {
 
 // A gap between leaves, or text outside the entry, has no record.
 [[nodiscard]] NodeId leaf_at(const Cst& cst, TextOffset offset) {
-  if (!cst.has_entry()) return kNoNode;
-  if (const CstNode& entry = cst[cst.entry_root()];
+  if (!cst.hasEntry()) return kNoNode;
+  if (const CstNode& entry = cst[cst.entryRoot()];
       offset < entry.begin || offset >= entry.end)
     return kNoNode;
-  const NodeId after = cst.leaf_after(offset);
+  const NodeId after = cst.leafAfter(offset);
   if (after == cst.size()) return kNoNode;
   return cst[after].begin <= offset ? after : kNoNode;
 }
@@ -54,7 +54,7 @@ std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
     NodeId leaf = leaf_at(cst, offset);
     if (leaf == kNoNode && offset > 0) leaf = leaf_at(cst, offset - 1);
     if (leaf == kNoNode) return std::nullopt;
-    const Grammar& grammar = _core.parser->getGrammar();
+    const Grammar& grammar = services.parser->getGrammar();
     std::string_view doc = grammar.recordDoc(cst[leaf]);
     if (doc.empty()) doc = grammar.spellingDoc(cst.spelling(leaf));
     if (doc.empty()) return std::nullopt;
@@ -71,7 +71,7 @@ std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
   // A name under the caret means the declaration it denotes; its prose comes
   // from the declaring language's `DocumentationProvider`.
   const Declaration found =
-      _core.references->findDeclaration(document, offset, token);
+      services.references->findDeclarations(document, offset, token);
   if (!found) return keywordHover();
 
   // Every target contributes its prose, the pieces joined with a space.

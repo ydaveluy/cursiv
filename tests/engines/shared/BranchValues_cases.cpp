@@ -37,12 +37,12 @@ const auto& engines() {
 
 bool clean(const cursiv::ParseResult& r) {
   return r.accepted && r.diagnostics.empty() &&
-         r.error == cursiv::AstBuildError::none && r.value != nullptr;
+         r.error == cursiv::AstBuildError::None && r.value != nullptr;
 }
 
 // Each item as `name=value`, the value being the flag, the size or the name.
 std::string items(const cursiv::ParseResult& r) {
-  const auto* in = r.value_as<ast::Items>();
+  const auto* in = r.valueAs<ast::Items>();
   if (!clean(r) || in == nullptr) return "refused";
   std::string out;
   for (const ast::Item* i : in->items) {
@@ -65,7 +65,7 @@ void built(std::string_view text, std::string_view want, Show show) {
   for (unsigned e = 0; e < 2; ++e) {
     const std::string source(text);
     const cursiv::ParseResult r = engines()[e]->parse(source);
-    const auto* in = r.value_as<ast::Items>();
+    const auto* in = r.valueAs<ast::Items>();
     std::string got = r.diagnostics.empty() ? "clean " : "";
     if (in != nullptr)
       for (const ast::Item* i : in->items)

@@ -73,12 +73,12 @@ struct TokenSpan {
 // a step of any selection. The first leaf ending past the offset names the
 // innermost node covering it: its owners give the outer steps, the tree below
 // it the inner ones. Without one, the roots are walked backwards via
-// `subtree_begin`. Empty when no visible record covers the offset.
+// `subtreeBegin`. Empty when no visible record covers the offset.
 [[nodiscard]] std::vector<NodeId> chain_at(const Cst& cst, TextOffset offset,
                                            const CancellationToken& token) {
   std::vector<NodeId> chain;
   const AstNode* owner = nullptr;
-  if (const NodeId after = cst.leaf_after(offset); after < cst.size()) {
+  if (const NodeId after = cst.leafAfter(offset); after < cst.size()) {
     owner = owner_of_leaf(cst, after);
     while (owner != nullptr && owner->cstNodeId != kNoNode &&
            !covers(cst[owner->cstNodeId], offset))
@@ -101,13 +101,13 @@ struct TokenSpan {
         if (cst[root].hidden == 0) found = root;
         break;
       }
-      cursor = cst.subtree_begin(root);
+      cursor = cst.subtreeBegin(root);
     }
   }
   while (found != kNoNode) {
     chain.push_back(found);
     NodeId next = kNoNode;
-    for (const NodeId child : cst.reverse_children(found)) {
+    for (const NodeId child : cst.reverseChildren(found)) {
       throw_if_cancelled(token);
       if (cst[child].hidden == 0 && covers(cst[child], offset)) {
         next = child;

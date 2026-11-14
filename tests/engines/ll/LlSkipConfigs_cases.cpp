@@ -29,7 +29,7 @@ std::string text(unsigned skipped, unsigned inside) {
 }
 
 std::string words(const cursiv::ParseResult& r) {
-  const auto* doc = r.value_as<tskipcfg::Doc>();
+  const auto* doc = r.valueAs<tskipcfg::Doc>();
   std::string out;
   if (doc != nullptr)
     for (const std::string_view w : doc->words) out += std::string(w) + ",";

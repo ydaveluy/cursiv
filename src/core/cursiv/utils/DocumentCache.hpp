@@ -202,7 +202,10 @@ DocumentCache<K, V, Hash, KeyEqual>::DocumentCache(
       *state != DocumentState::IndexedReferences)
     throw std::invalid_argument(
         "cursiv: a DocumentCache evicts on Linked or IndexedReferences");
-  if (_builder == nullptr) return;
+  if (_builder == nullptr)
+    throw std::logic_error(
+        "cursiv: a DocumentCache is built once the shared services hold their "
+        "document builder, which empties it");
   if (state.has_value()) _builder->addDocumentPhaseListener(*this);
   try {
     _builder->addDocumentUpdateListener(*this);
@@ -214,7 +217,6 @@ DocumentCache<K, V, Hash, KeyEqual>::DocumentCache(
 
 template <class K, class V, class Hash, class KeyEqual>
 DocumentCache<K, V, Hash, KeyEqual>::~DocumentCache() noexcept {
-  if (_builder == nullptr) return;
   if (_state.has_value()) _builder->removeDocumentPhaseListener(*this);
   _builder->removeDocumentUpdateListener(*this);
 }

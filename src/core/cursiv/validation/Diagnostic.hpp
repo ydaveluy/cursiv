@@ -8,8 +8,8 @@
 #include <variant>
 #include <vector>
 
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/text/TextRange.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 
 // What a document reports, in the shape a client publishes it: severity, code
 // and its description, tags, related locations, a machine payload. Extensions
@@ -105,10 +105,9 @@ inline constexpr std::string_view kDataCode = "code";
 
 // Adds it to what `data` already holds.
 inline void set_data_code(Diagnostic& d, std::string_view code) {
-  JsonValue::Object payload;
-  if (d.data.has_value() && d.data->isObject()) payload = d.data->object();
-  payload.insert_or_assign(std::string(kDataCode), std::string(code));
-  d.data = JsonValue(std::move(payload));
+  if (!d.data.has_value() || !d.data->isObject())
+    d.data = JsonValue(JsonValue::Object{});
+  d.data->object().insert_or_assign(std::string(kDataCode), std::string(code));
 }
 
 }  // namespace cursiv

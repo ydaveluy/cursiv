@@ -42,7 +42,7 @@
 #include "cursiv/VirtualFileSystemProvider.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
-#include "cursiv/services/Diagnostic.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedLspServices.hpp"
 #include "cursiv/workspace/Document.hpp"

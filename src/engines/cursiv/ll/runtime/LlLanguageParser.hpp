@@ -45,9 +45,8 @@ inline void ll_finish(LlContext& c) {
 template <const auto& T>
 class LlLanguageParser final : public Parser {
  public:
-  LlLanguageParser(const detail::GrammarMetaData& grammar,
-                   const AstActions& actions, void (*drive)(LlContext&),
-                   const RepairBudget& budget = {})
+  LlLanguageParser(const GrammarMetaData& grammar, const AstActions& actions,
+                   void (*drive)(LlContext&), const RepairBudget& budget = {})
       : _grammar(std::make_shared<StampedGrammar>(grammar, T.stamp)),
         _actions(&actions),
         _drive(drive),
@@ -70,10 +69,10 @@ class LlLanguageParser final : public Parser {
     LexSuffixSession<LlLexTape<T>> predicateSession(
         text.data(), static_cast<TextOffset>(text.size()));
     Cst cst(text);
-    detail::CstBuilder builder(cst);
+    CstBuilder builder(cst);
     builder.reserve_stream(text.size());
     // The descent polls nothing: the stream reads the stop as it fills.
-    detail::CstRun::Watch watch(builder.stream(), cancelToken);
+    CstRun::Watch watch(builder.stream(), cancelToken);
     builder.bind_stream();
     LlContext c(text, builder, _budget);
     c.stop = CancellationPoll(cancelToken);
@@ -88,9 +87,9 @@ class LlLanguageParser final : public Parser {
     // Converting the tree is another phase; answer a stop requested after
     // the descent's last periodic poll before materialising the AST.
     throw_if_cancelled(cancelToken);
-    ParseResult out =
-        AstReducer::build<T.stamp>(*_actions, std::move(cst), cancelToken);
-    out.bind_grammar(_grammar);
+    ParseResult out = AstReducer::build<T.stamp>(*_actions, std::move(cst),
+                                                 cancelToken, _grammar.get());
+    out.bindGrammar(_grammar);
     return out;
   }
 

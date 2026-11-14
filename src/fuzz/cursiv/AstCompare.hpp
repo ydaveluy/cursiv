@@ -91,7 +91,7 @@ struct AstCompare {
     r.got = std::move(got);
   }
 
-  static void append_step(std::string& at, const Child& c) {
+  static void appendStep(std::string& at, const Child& c) {
     at += '/';
     at += c.name;
     if (c.index != AstReflection::kNoIndex)
@@ -99,7 +99,7 @@ struct AstCompare {
   }
 
   [[nodiscard]] static std::string step(std::string at, const Child& c) {
-    append_step(at, c);
+    appendStep(at, c);
     return at;
   }
 
@@ -112,17 +112,17 @@ struct AstCompare {
 
   [[nodiscard]] static std::string shown(const Value& v) {
     switch (v.kind) {
-      case ValueKind::unset:
+      case ValueKind::Unset:
         return v.name + " unset";
-      case ValueKind::unreadable:
+      case ValueKind::Unreadable:
         return v.name + " set";
-      case ValueKind::text:
+      case ValueKind::Text:
         break;
     }
     return v.name + "=" + v.text;
   }
 
-  [[nodiscard]] static std::string name_of(const AstNode& n) {
+  [[nodiscard]] static std::string nameOf(const AstNode& n) {
     return n.type != nullptr ? std::string(n.type->name) : std::string("?");
   }
 
@@ -137,9 +137,10 @@ struct AstCompare {
 
   [[nodiscard]] std::vector<Child> children(const AstNode& n) const {
     std::vector<Child> out;
-    refl.visitMembers(n, [&](std::string_view p, std::uint32_t i, AstNode& c) {
-      out.push_back(Child{std::string(p), i, &c});
-    });
+    refl.visitProperties(n,
+                         [&](std::string_view p, std::uint32_t i, AstNode& c) {
+                           out.push_back(Child{std::string(p), i, &c});
+                         });
     return out;
   }
 
@@ -161,7 +162,7 @@ struct AstCompare {
   // child on that way.
   [[nodiscard]] static std::string path(std::span<const Frame> walk) {
     std::string out;
-    for (const Frame& f : walk) append_step(out, f.a[f.next - 1]);
+    for (const Frame& f : walk) appendStep(out, f.a[f.next - 1]);
     return out;
   }
 
@@ -170,7 +171,7 @@ struct AstCompare {
              std::span<const AstUnwritten> unwritten, Result& r) const {
     if (a.type != b.type) {
       const std::string at = path(walk);
-      fail(r, at.empty() ? "/" : at, name_of(a), name_of(b));
+      fail(r, at.empty() ? "/" : at, nameOf(a), nameOf(b));
       return;
     }
     std::vector<Value> va = values(a);
@@ -181,8 +182,8 @@ struct AstCompare {
     // table disagreeing with itself, not a tree.
     if (va.size() != vb.size()) {
       fail(r, path(walk),
-           name_of(a) + ": " + std::to_string(va.size()) + " values",
-           name_of(b) + ": " + std::to_string(vb.size()) + " values");
+           nameOf(a) + ": " + std::to_string(va.size()) + " values",
+           nameOf(b) + ": " + std::to_string(vb.size()) + " values");
       return;
     }
     for (std::size_t i = 0; i < va.size(); ++i) {
@@ -190,13 +191,13 @@ struct AstCompare {
       const Value& y = vb[i];
       // Whether an optional member holds a value reads even where the value
       // does not.
-      const bool unset = x.kind == ValueKind::unset;
-      if (unset != (y.kind == ValueKind::unset)) {
+      const bool unset = x.kind == ValueKind::Unset;
+      if (unset != (y.kind == ValueKind::Unset)) {
         fail(r, path(walk) + "/" + x.name, shown(x), shown(y));
         continue;
       }
       if (unset) continue;
-      if (x.kind == ValueKind::unreadable || y.kind == ValueKind::unreadable) {
+      if (x.kind == ValueKind::Unreadable || y.kind == ValueKind::Unreadable) {
         r.blind.push_back(x.name);
         continue;
       }
@@ -211,8 +212,7 @@ struct AstCompare {
     drop(unwritten, a, cb);
     if (ca.size() != cb.size()) {
       const std::string at = path(walk);
-      fail(r, at.empty() ? "/" : at, list(name_of(a), ca),
-           list(name_of(b), cb));
+      fail(r, at.empty() ? "/" : at, list(nameOf(a), ca), list(nameOf(b), cb));
       return;
     }
     if (!ca.empty()) walk.push_back(Frame{std::move(ca), std::move(cb)});

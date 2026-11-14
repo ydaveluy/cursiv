@@ -46,7 +46,7 @@ std::string read(const Parser& p, std::string_view text,
   const auto result = p->parse(input);
   CHECK(result.diagnostics.empty());
   std::string out;
-  if (const auto* doc = result.template value_as<Doc>())
+  if (const auto* doc = result.template valueAs<Doc>())
     for (const Assign* s : doc->statements) {
       out += std::string(s->target);
       for (const Part* part : s->parts) out += "." + std::string(part->text);
@@ -110,7 +110,7 @@ std::string parts_of(const Parser& p, std::string_view text) {
   const auto result = p->parse(text);
   CHECK(result.diagnostics.empty());
   std::string out;
-  if (const auto* doc = result.template value_as<Parts>())
+  if (const auto* doc = result.template valueAs<Parts>())
     for (const Part* part : doc->parts) out += std::string(part->text) + ' ';
   return out;
 }
@@ -260,13 +260,13 @@ int main() {
   for (const auto* parser : {&ll}) {
     const auto missing = (*parser)->parse("x.REM = ;");
     CHECK(!missing.diagnostics.empty());
-    const auto* doc = missing.template value_as<Doc>();
+    const auto* doc = missing.template valueAs<Doc>();
     CHECK(doc && !doc->statements.empty() &&
           !doc->statements[0]->parts.empty() &&
           doc->statements[0]->parts[0]->text == "REM");
     const auto after = (*parser)->parse("x. = a; y.REM = b;");
     CHECK(!after.diagnostics.empty());
-    const auto* later = after.template value_as<Doc>();
+    const auto* later = after.template valueAs<Doc>();
     CHECK(later && !later->statements.empty() &&
           !later->statements.back()->parts.empty() &&
           later->statements.back()->parts.back()->text == "REM");

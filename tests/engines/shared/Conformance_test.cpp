@@ -115,7 +115,7 @@ int main() {
     const auto* node = exactly<ast::Kept>(r);
     const bool ok =
         node != nullptr && node->value == "kept" && r.diagnostics.size() == 1 &&
-        r.diagnostics[0].kind == cursiv::DiagnosticKind::conversion_error;
+        r.diagnostics[0].kind == cursiv::DiagnosticKind::ConversionError;
     if (!ok) std::printf("%s [5 if]: wrong conversion\n", kEngine[i]);
     CHECK(ok);
   }

@@ -126,7 +126,7 @@ void SourceTranslation::replace(std::size_t begin, std::size_t end,
 
 void SourceTranslation::error(std::size_t begin, std::size_t end,
                               std::string message) {
-  _errors.push_back({.kind = DiagnosticKind::conversion_error,
+  _errors.push_back({.kind = DiagnosticKind::ConversionError,
                      .begin = static_cast<TextOffset>(begin),
                      .end = static_cast<TextOffset>(end),
                      .message = std::move(message)});
@@ -153,7 +153,7 @@ std::optional<TextOffset> SourceTranslation::translated(
   return across<kSource, kText>(_pieces, next, offset, false);
 }
 
-void SourceTranslation::to_document(
+void SourceTranslation::toDocument(
     std::span<ParseDiagnostic> diagnostics) const noexcept {
   move<kText, kSource>(_pieces, diagnostics, [](std::size_t, TextRange) {});
 }
@@ -168,8 +168,8 @@ void SourceTranslation::bind(std::span<CstNode> records,
   move<kText, kSource>(_pieces, records, keep(_records));
   move<kText, kSource>(_pieces, repairs, keep(_repairs));
 }
-TextRange SourceTranslation::text_of(std::uint32_t index,
-                                     TextRange span) const noexcept {
+TextRange SourceTranslation::textOf(std::uint32_t index,
+                                    TextRange span) const noexcept {
   if (const auto kept = std::ranges::partition_point(
           _records, [index](const Kept& k) { return k.index < index; });
       kept != _records.end() && kept->index == index)
@@ -178,10 +178,10 @@ TextRange SourceTranslation::text_of(std::uint32_t index,
                        [](std::size_t, TextRange) {});
   return span;
 }
-void SourceTranslation::to_text(std::span<CstNode> records) const noexcept {
+void SourceTranslation::toText(std::span<CstNode> records) const noexcept {
   move_back(_pieces, std::span<const Kept>(_records), records);
 }
-void SourceTranslation::to_text(
+void SourceTranslation::toText(
     std::span<ParseDiagnostic> repairs) const noexcept {
   move_back(_pieces, std::span<const Kept>(_repairs), repairs);
 }

@@ -31,7 +31,7 @@ struct FaultPairing {
       if (a > hi || b < lo) return kNone;
       return b < at ? at - b : a > end ? a - end : 0;
     };
-    if (d.kind != DiagnosticKind::incomplete) return gap(d.begin, d.end);
+    if (d.kind != DiagnosticKind::Incomplete) return gap(d.begin, d.end);
     return std::min(gap(d.begin, d.begin), gap(d.end, d.end));
   }
 

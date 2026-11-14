@@ -14,7 +14,9 @@
 #include <vector>
 
 // An immutable value read without a lock and replaced from time to time. A
-// replaced value is freed once every reader stripe has moved past it.
+// replaced value is freed once every reader stripe has moved past it. Apart
+// from `ConcurrentTable`'s epochs: a read here stays open through a whole
+// visit, which would hold back every table's reclamation.
 
 namespace cursiv::detail {
 

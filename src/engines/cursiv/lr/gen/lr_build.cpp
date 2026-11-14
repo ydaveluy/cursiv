@@ -3468,9 +3468,9 @@ void lr_drop_by_precedence(const LrBuildCfg& g, const LrAction* merged,
       if (k == sh || merged[k].kind != LrActionKind::reduce) continue;
       const std::uint8_t pp = g.prods[merged[k].arg].prec;
       if (pp == 0) continue;
-      if (pp == tk.prec && tk.assoc == Association::non)
+      if (pp == tk.prec && tk.assoc == Association::Non)
         drop[sh] = drop[k] = 1;
-      else if (pp > tk.prec || (pp == tk.prec && tk.assoc == Association::left))
+      else if (pp > tk.prec || (pp == tk.prec && tk.assoc == Association::Left))
         drop[sh] = 1;
       else
         drop[k] = 1;

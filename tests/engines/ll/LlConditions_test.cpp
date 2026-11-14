@@ -381,7 +381,7 @@ void a_given_up_tag_leaves_no_node() {
     if (a.value) support::ast_of(*reflection, *a.value, out);
     CHECK(out == tree);
     CHECK(a.diagnostics.size() == 1 &&
-          a.diagnostics[0].kind == cursiv::DiagnosticKind::incomplete &&
+          a.diagnostics[0].kind == cursiv::DiagnosticKind::Incomplete &&
           a.diagnostics[0].begin == at && a.diagnostics[0].end == at + 1);
   }
 }

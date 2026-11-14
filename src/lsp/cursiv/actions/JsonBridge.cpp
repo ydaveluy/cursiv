@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <utility>
 
-#include "cursiv/services/JsonValue.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 
 namespace cursiv::detail {
 

@@ -32,7 +32,7 @@ inline TextOffset phrase_end(const Cst& cst, TextOffset resume,
                              unsigned tokens) {
   const auto end = static_cast<TextOffset>(cst.text().size());
   if (tokens >= kUnboundedTokens) return end;
-  return token_end_from(cst, cst.leaf_after(resume), tokens, end);
+  return token_end_from(cst, cst.leafAfter(resume), tokens, end);
 }
 
 }  // namespace cursiv::engine

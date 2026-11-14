@@ -3,27 +3,22 @@
 #include <memory>
 #include <string>
 
-#include "arithmetics/generated/Arith/Module.hpp"
 #include "arithmetics/LspServices.hpp"
+#include "arithmetics/generated/Arith/Module.hpp"
+#include "cursiv/services/LspLanguage.hpp"
 #include "cursiv/workspace/FileSystemProvider.hpp"
 
 namespace arith {
 
 void install_lsp_module(ArithmeticsServices& services);
 
-std::unique_ptr<ArithmeticsServices> create_lsp_services(
-    ArithmeticsSharedServices& sharedServices,
-    std::string languageId = std::string(arith::generated::Arith::kLanguageId));
-
 // The shared services and the language, created in one call.
-struct ArithmeticsLanguage {
-  std::unique_ptr<ArithmeticsSharedServices> shared;
-  ArithmeticsServices& language;
-};
+using ArithmeticsLanguage =
+    cursiv::CoreLanguage<ArithmeticsServices, ArithmeticsSharedServices>;
 
 ArithmeticsLanguage create_lsp_services(
     std::unique_ptr<cursiv::FileSystemProvider> files = nullptr);
 
-bool register_lsp_services(cursiv::SharedCoreServices& sharedServices);
+void register_lsp_services(cursiv::SharedCoreServices& sharedServices);
 
 }  // namespace arith

@@ -14,7 +14,6 @@
 
 #include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
-#include "cursiv/references/LinkingError.hpp"
 #include "cursiv/references/ScopeProvider.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -70,7 +69,6 @@ std::string not_found_message(const AstReflection& reflection,
                               std::uint16_t reference, std::uint8_t narrow,
                               std::string_view text) {
   constexpr std::string_view kHead = "Could not resolve reference to ";
-  constexpr std::string_view kExpecting = "Expecting ";
   constexpr std::string_view kNamed = " named '";
   constexpr std::string_view kTail = "'.";
   const AstTypeTag* const narrowed =
@@ -78,7 +76,7 @@ std::string not_found_message(const AstReflection& reflection,
   std::string message;
   message.reserve(kHead.size() + 32 + kNamed.size() + text.size() +
                   kTail.size());
-  message.append(narrowed != nullptr ? kExpecting : kHead);
+  message.append(kHead);
   if (narrowed != nullptr)
     message.append(narrowed->name);
   else
@@ -90,9 +88,7 @@ std::string not_found_message(const AstReflection& reflection,
 // A lookup that failed before its document reached `ComputedScopes`, as a
 // direct `link` call can, is a warning to the sink.
 void say_if_early(const ReferenceInfo& reference, ObservabilitySink& sink) {
-  const Document* document = reference.document;
-  if (document == nullptr && reference.container != nullptr)
-    document = reference.container->getDocument();
+  const Document* const document = detail::document_of(reference);
   if (document != nullptr && document->state.load(std::memory_order_relaxed) <
                                  DocumentState::ComputedScopes)
     sink.publish({.severity = ObservationSeverity::Warning,
@@ -105,15 +101,29 @@ void say_if_early(const ReferenceInfo& reference, ObservabilitySink& sink) {
 }  // namespace
 
 LinkingError DefaultLinker::createLinkingError(
-    const ReferenceInfo& reference, RefState why,
-    const AstNodeDescription* description) const {
-  if (why == RefState::ErrorCycle)
-    return {std::format("Cyclic reference resolution detected for '{}'.",
-                        reference.referenceText),
-            reference, description};
-  return {not_found_message(*services.astReflection, reference.reference,
-                            reference.narrow, reference.referenceText),
-          reference, description};
+    const ReferenceInfo& reference, LinkingFailure why,
+    const AstNodeDescription* targetDescription) const {
+  const auto message = [&]() -> std::string {
+    using enum LinkingFailure;
+    switch (why) {
+      case Cycle:
+        return std::format("Cyclic reference resolution detected for '{}'.",
+                           reference.referenceText);
+      case Threw:
+        if (reference.failure.empty())
+          return std::format(
+              "An error occurred while resolving reference to '{}'.",
+              reference.referenceText);
+        return std::format(
+            "An error occurred while resolving reference to '{}': {}",
+            reference.referenceText, reference.failure);
+      case NotFound:
+        break;
+    }
+    return not_found_message(*services.astReflection, reference.reference,
+                             reference.narrow, reference.referenceText);
+  };
+  return {message(), reference, targetDescription};
 }
 
 void DefaultLinker::link(Document& document,
@@ -143,8 +153,6 @@ void DefaultLinker::unlink(Document& document) const {
   DocumentReferences& references = *table;
   references.reset();
   references.importedNames.clear();
-  references.linker = nullptr;
-  references.document = nullptr;
 }
 
 const AstNodeDescription* DefaultLinker::getCandidate(

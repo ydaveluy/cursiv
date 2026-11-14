@@ -15,7 +15,7 @@ class DefaultNameProvider : public NameProvider, protected DefaultCoreService {
   [[nodiscard]] std::optional<std::string_view> getName(
       const AstNode& node) const override;
 
-  [[nodiscard]] std::optional<CstNodeView> getNameNode(
+  [[nodiscard]] CstNodeView getNameNode(
       const AstNode& node, const Document* document = nullptr) const override;
 
  private:

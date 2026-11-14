@@ -272,7 +272,7 @@ void the_tables_read_back() {
   CHECK(fields_are_coherent(r));
 
   // Bounds-checked, like every other index-keyed query here.
-  CHECK(r.fieldName(m.fieldCount).empty());
+  CHECK(r.propertyName(m.fieldCount).empty());
   CHECK(r.referenceOwner(m.fieldCount) == nullptr);
   CHECK(r.referenceTargets(m.fieldCount).empty());
   CHECK(r.referenceAccepts(m.fieldCount).empty());
@@ -288,7 +288,7 @@ void the_tables_read_back() {
   // A value field points at nothing.
   CHECK(r.referenceTargets(field_of(r, kTag<Base>, "name")).empty());
   // The field key is the table's index, and the identifier reads back.
-  CHECK(r.fieldName(targetAt) == "target");
+  CHECK(r.propertyName(targetAt) == "target");
 
   // The keyed lookup a caller holding only a container and a name goes
   // through -- the completion and MCP path into the same table.
@@ -334,8 +334,8 @@ using namespace tab::climbs;
 void two_climbs_over_one_class_keep_their_own_members() {
   cursiv::ParseResult r = engine().parse("$twoclimbs 1+2 3@4");
   CHECK(r.accepted);
-  auto* const h = r.value_as<Holder2>();
-  CHECK(r.error == cursiv::AstBuildError::none);
+  auto* const h = r.valueAs<Holder2>();
+  CHECK(r.error == cursiv::AstBuildError::None);
   if (h == nullptr || h->a == nullptr || h->b == nullptr) {
     CHECK(false);
     return;
@@ -370,14 +370,14 @@ void adopts_and_wraps() {
   {
     cursiv::ParseResult r = engine().parse("$region abc");
     CHECK(r.accepted && static_cast<bool>(r));
-    Node* const n = r.value_as<Node>();
+    Node* const n = r.valueAs<Node>();
     CHECK(n != nullptr && n->name == "abc");
     CHECK(cursiv::ast_cast<Wrap>(n) == nullptr);
   }
   {
     cursiv::ParseResult r = engine().parse("$region abc * *");
     CHECK(r.accepted && static_cast<bool>(r));
-    Node* const outer = r.value_as<Node>();
+    Node* const outer = r.valueAs<Node>();
     CHECK(outer != nullptr);
     CHECK(cursiv::ast_cast<Wrap>(outer) != nullptr);
     Node* const mid = static_cast<Wrap*>(outer)->inner;
@@ -445,20 +445,20 @@ using namespace tab::wiring;
 void builds_doc() {
   cursiv::ParseResult r = engine().parse("doc item a item b");
   CHECK(r.accepted && static_cast<bool>(r));
-  auto* doc = r.value_as<Doc>();
+  auto* doc = r.valueAs<Doc>();
   CHECK(doc && doc->items.size() == 2);
   CHECK(doc->items[0]->name == "a" && doc->items[1]->name == "b");
   CHECK(doc->items[0]->parent == doc && doc->items[1]->parent == doc);
   CHECK(doc->parent == nullptr);
   CHECK(r.cst().text(doc->items[0]->cstNodeId) == "item a");
-  CHECK(r.diagnostics.empty() && r.error == cursiv::AstBuildError::none);
+  CHECK(r.diagnostics.empty() && r.error == cursiv::AstBuildError::None);
   // The tag is written at construction, so the dynamic question answers
   // without the grammar.
   CHECK(cursiv::ast_cast<Node>(doc->items[0]) != nullptr);
   CHECK(doc->type->name == "Doc");
   // A node keeps an ID, never a tree pointer: the tree it indexes is the
   // result's, and the reader is the one holding it.
-  CHECK(doc->cstNodeId == r.cst().entry_root());
+  CHECK(doc->cstNodeId == r.cst().entryRoot());
 
   // One entry per node created, sorted by the node it was built from.
   CHECK(r.nodes().size() == 3);
@@ -477,16 +477,16 @@ void structural_errors() {
   cursiv::ParseResult none =
       cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
           tab::generated::All::kAstActions, std::move(empty));
-  CHECK(!none && none.error == cursiv::AstBuildError::no_entry);
+  CHECK(!none && none.error == cursiv::AstBuildError::NoEntry);
   CHECK(none.value == nullptr);
 
   // Trailing garbage does not reject: the recovery reads past it and the
   // verdict lives in `recovered()` -- the AST is built anyway, since
   // completion works on broken documents.
   cursiv::ParseResult tail = engine().parse("doc item a %%%");
-  CHECK(tail.cst().has_entry() && tail.cst().accepted() &&
+  CHECK(tail.cst().hasEntry() && tail.cst().accepted() &&
         tail.cst().recovered());
-  auto* doc = tail.value_as<Doc>();
+  auto* doc = tail.valueAs<Doc>();
   CHECK(doc != nullptr && doc->items.size() == 1);
 }
 
@@ -506,11 +506,11 @@ void a_hand_built_entry_is_answered_not_trusted() {
       b.leaf(0, 3, 0);
       b.bind_entry(0, cst.size(), 5000000);
     }
-    CHECK(!cst.has_entry());
+    CHECK(!cst.hasEntry());
     cursiv::ParseResult r =
         cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
             acts, std::move(cst));
-    CHECK(!r && r.error == cursiv::AstBuildError::no_entry);
+    CHECK(!r && r.error == cursiv::AstBuildError::NoEntry);
     CHECK(r.value == nullptr);
   }
   // (2) In range and unreducible. A single hidden leaf as the root: the scan
@@ -524,11 +524,11 @@ void a_hand_built_entry_is_answered_not_trusted() {
       b.hidden(0, 3, 0);
       b.bind_entry(0, cst.size(), 0);
     }
-    CHECK(cst.has_entry());
+    CHECK(cst.hasEntry());
     cursiv::ParseResult r =
         cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
             acts, std::move(cst));
-    CHECK(!r && r.error == cursiv::AstBuildError::malformed_cst);
+    CHECK(!r && r.error == cursiv::AstBuildError::MalformedCst);
     CHECK(r.value == nullptr);
   }
   // (3) The root exists, but its extent underflows or reaches before the tape.
@@ -541,11 +541,11 @@ void a_hand_built_entry_is_answered_not_trusted() {
       b.bind_stream();
       b.bind_entry(0, cst.size(), 0);
     }
-    CHECK(cst.has_entry());
+    CHECK(cst.hasEntry());
     cursiv::ParseResult r =
         cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
             acts, std::move(cst));
-    CHECK(!r && r.error == cursiv::AstBuildError::malformed_cst);
+    CHECK(!r && r.error == cursiv::AstBuildError::MalformedCst);
     CHECK(r.value == nullptr);
   }
 }
@@ -571,7 +571,7 @@ cursiv::ParseResult parse_full() {
 void whole_vocabulary() {
   cursiv::ParseResult r = parse_full();
   CHECK(static_cast<bool>(r) && r.diagnostics.empty());
-  auto* rec = r.value_as<Rec>();
+  auto* rec = r.valueAs<Rec>();
   CHECK(rec != nullptr);
   CHECK(rec->targets.size() == 2 && rec->targets[0]->name == "aa");
   CHECK(rec->targets[1]->parent == rec);
@@ -624,7 +624,7 @@ void whole_vocabulary() {
 void minimal_document() {
   cursiv::ParseResult r = engine().parse("see aa");
   CHECK(r.accepted && static_cast<bool>(r));
-  auto* rec = r.value_as<Rec>();
+  auto* rec = r.valueAs<Rec>();
   CHECK(rec != nullptr);
   CHECK(!rec->flagged);
   CHECK(!rec->level.has_value());  // an option not taken writes nothing
@@ -638,7 +638,7 @@ void minimal_document() {
 void other_variant_branch() {
   cursiv::ParseResult r = engine().parse("tag abc see aa");
   CHECK(r.accepted && static_cast<bool>(r));
-  auto* rec = r.value_as<Rec>();
+  auto* rec = r.valueAs<Rec>();
   CHECK(rec != nullptr && rec->tag.index() == 1);
   CHECK(std::get<1>(rec->tag) == "abc");
 }
@@ -648,7 +648,7 @@ void other_variant_branch() {
 void conversion_failure_continues() {
   cursiv::ParseResult r = engine().parse("small 5000 see aa also bb");
   CHECK(r.accepted && static_cast<bool>(r));
-  auto* rec = r.value_as<Rec>();
+  auto* rec = r.valueAs<Rec>();
   CHECK(rec != nullptr);
   CHECK(rec->small == 0);
   CHECK(r.diagnostics.size() == 1);
@@ -657,12 +657,12 @@ void conversion_failure_continues() {
                               r.diagnostics[0].end - r.diagnostics[0].begin) ==
         "5000");
   CHECK(rec->one.refText == "aa" && rec->also.size() == 1);
-  CHECK(r.error == cursiv::AstBuildError::none);
+  CHECK(r.error == cursiv::AstBuildError::None);
 }
 
 void assigning_again_keeps_one_reference_site() {
   auto r = engine().parse("$rebind aa cc ee ff");
-  auto* rec = r.value_as<Rec>();
+  auto* rec = r.valueAs<Rec>();
   CHECK(r.accepted && rec && r.diagnostics.empty());
   if (!rec || !rec->maybe || rec->also.size() != 2) return;
   CHECK(rec->one.refText == "aa" && rec->maybe->refText == "cc");
@@ -814,7 +814,7 @@ void a_write_replaces_the_node_a_member_held() {
 void a_copied_reference_cannot_claim_another_slots_handle() {
   const std::string text = "$rebind aa cc ee ff";
   auto r = engine().parse(text);
-  auto* rec = r.value_as<Rec>();
+  auto* rec = r.valueAs<Rec>();
   CHECK(rec && rec->maybe && rec->also.size() == 2);
   if (!rec || !rec->maybe || rec->also.size() != 2) return;
   Rec copied;
@@ -922,28 +922,28 @@ void every_alternative_is_kept() {
 void each_payload_goes_to_its_own_slot() {
   const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult rb = engine.parse("$exact true");
-  auto* b = rb.value_as<Val>();
+  auto* b = rb.valueAs<Val>();
   CHECK(rb.accepted);
   CHECK(b != nullptr && std::holds_alternative<bool>(b->v));
   CHECK(b != nullptr && std::get<bool>(b->v));
 
   cursiv::ParseResult rf = engine.parse("$exact false");
-  auto* f = rf.value_as<Val>();
+  auto* f = rf.valueAs<Val>();
   CHECK(f != nullptr && std::holds_alternative<bool>(f->v));
   CHECK(f != nullptr && !std::get<bool>(f->v));
 
   cursiv::ParseResult rn = engine.parse("$exact 42");
-  auto* n = rn.value_as<Val>();
+  auto* n = rn.valueAs<Val>();
   CHECK(n != nullptr && std::holds_alternative<double>(n->v));
   CHECK(n != nullptr && std::get<double>(n->v) == 42.0);
 
   cursiv::ParseResult rp = engine.parse("$exact 50%");
-  auto* p = rp.value_as<Val>();
+  auto* p = rp.valueAs<Val>();
   CHECK(p != nullptr && std::holds_alternative<double>(p->v));
   CHECK(p != nullptr && std::get<double>(p->v) == 0.5);
 
   cursiv::ParseResult rs = engine.parse("$exact abc");
-  auto* s = rs.value_as<Val>();
+  auto* s = rs.valueAs<Val>();
   CHECK(s != nullptr && std::holds_alternative<std::string_view>(s->v));
   CHECK(s != nullptr && std::get<std::string_view>(s->v) == "abc");
 }
@@ -975,13 +975,13 @@ void the_annotated_rule_keeps_its_own_entry() {
 void annotated_terminal_goes_to_its_annotated_slot() {
   const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult rn = engine.parse("$annot 42");
-  auto* const n = rn.value_as<Val>();
-  CHECK(rn.error == cursiv::AstBuildError::none && rn.diagnostics.empty());
+  auto* const n = rn.valueAs<Val>();
+  CHECK(rn.error == cursiv::AstBuildError::None && rn.diagnostics.empty());
   CHECK(n != nullptr && std::holds_alternative<std::int64_t>(n->v));
   CHECK(n != nullptr && std::get<std::int64_t>(n->v) == 42);
 
   cursiv::ParseResult rw = engine.parse("$annot abc");
-  auto* const w = rw.value_as<Val>();
+  auto* const w = rw.valueAs<Val>();
   CHECK(w != nullptr && std::holds_alternative<std::string_view>(w->v));
   CHECK(w != nullptr && std::get<std::string_view>(w->v) == "abc");
 }
@@ -1003,8 +1003,8 @@ static_assert(
 
 void the_validated_alternative_is_the_written_one() {
   cursiv::ParseResult r = engine().parse("$annot2 42");
-  auto* const v = r.value_as<Num>();
-  CHECK(r.error == cursiv::AstBuildError::none);
+  auto* const v = r.valueAs<Num>();
+  CHECK(r.error == cursiv::AstBuildError::None);
   CHECK(v != nullptr && std::holds_alternative<std::int32_t>(v->n));
   CHECK(v != nullptr && std::get<std::int32_t>(v->n) == 42);
 }
@@ -1041,8 +1041,8 @@ static_assert(
 void an_override_runs_the_converter_it_inherited(const cursiv::Parser& parser,
                                                  const char* engine) {
   cursiv::ParseResult r = parser.parse("0X1f");
-  CHECK(r.error == cursiv::AstBuildError::none && r.diagnostics.empty());
-  const N* n = r.value_as<N>();
+  CHECK(r.error == cursiv::AstBuildError::None && r.diagnostics.empty());
+  const N* n = r.valueAs<N>();
   if (n == nullptr || n->n != 4000) {
     std::printf("FAIL %s: 0X1f converted to %llu\n", engine,
                 n == nullptr ? 0ull : static_cast<unsigned long long>(n->n));
@@ -1062,8 +1062,8 @@ static_assert(std::is_same_v<cursiv::detail::converter_rule_t<DecimalHex>,
 void an_override_naming_a_target_converts_to_it(const cursiv::Parser& parser,
                                                const char* engine) {
   cursiv::ParseResult r = parser.parse("dec 10");
-  CHECK(r.error == cursiv::AstBuildError::none && r.diagnostics.empty());
-  const N* n = r.value_as<N>();
+  CHECK(r.error == cursiv::AstBuildError::None && r.diagnostics.empty());
+  const N* n = r.valueAs<N>();
   if (n == nullptr || n->n != 10) {
     std::printf("FAIL %s: 10 converted to %llu\n", engine,
                 n == nullptr ? 0ull : static_cast<unsigned long long>(n->n));
@@ -1083,8 +1083,8 @@ static_assert(std::is_same_v<cursiv::detail::converter_rule_t<ChainHex>,
 void an_override_keeps_the_converter_it_replaced(const cursiv::Parser& parser,
                                                  const char* engine) {
   cursiv::ParseResult r = parser.parse("ten 0Y1f");
-  CHECK(r.error == cursiv::AstBuildError::none && r.diagnostics.empty());
-  const N* n = r.value_as<N>();
+  CHECK(r.error == cursiv::AstBuildError::None && r.diagnostics.empty());
+  const N* n = r.valueAs<N>();
   if (n == nullptr || n->n != 40) {
     std::printf("FAIL %s: 0Y1f converted to %llu\n", engine,
                 n == nullptr ? 0ull : static_cast<unsigned long long>(n->n));
@@ -1101,8 +1101,8 @@ namespace precreate {
 void a_create_keeps_the_writes_before_it(const cursiv::Parser& parser,
                                         const char* engine) {
   cursiv::ParseResult r = parser.parse("fn run ()");
-  CHECK(r.error == cursiv::AstBuildError::none && r.diagnostics.empty());
-  const auto* f = r.value_as<tdual::Function>();
+  CHECK(r.error == cursiv::AstBuildError::None && r.diagnostics.empty());
+  const auto* f = r.valueAs<tdual::Function>();
   if (f == nullptr || f->name != "run") {
     std::printf("FAIL %s: the Function lost the name written before it\n",
                 engine);
@@ -1132,15 +1132,15 @@ void both_families_are_reachable() {
 void both_node_alternatives_build() {
   const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult ra = engine.parse("@ax");
-  auto* const ha = ra.value_as<H>();
-  CHECK(ra.error == cursiv::AstBuildError::none);
+  auto* const ha = ra.valueAs<H>();
+  CHECK(ra.error == cursiv::AstBuildError::None);
   CHECK(ha != nullptr && std::holds_alternative<A*>(ha->v));
   CHECK(ha != nullptr && std::get<A*>(ha->v)->a == "ax");
 
   // The second alternative -- the one a head-only target cannot find.
   cursiv::ParseResult rb = engine.parse("#by");
-  auto* const hb = rb.value_as<H>();
-  CHECK(rb.error == cursiv::AstBuildError::none);
+  auto* const hb = rb.valueAs<H>();
+  CHECK(rb.error == cursiv::AstBuildError::None);
   CHECK(hb != nullptr && std::holds_alternative<B*>(hb->v));
   CHECK(hb != nullptr && std::get<B*>(hb->v)->b == "by");
   CHECK(hb != nullptr && std::get<B*>(hb->v)->parent == hb);
@@ -1150,11 +1150,11 @@ void both_node_alternatives_build() {
 void the_variant_child_is_visited() {
   const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult ra = engine.parse("@ax");
-  auto* const ha = ra.value_as<H>();
+  auto* const ha = ra.valueAs<H>();
   CHECK(ha != nullptr);
   if (ha == nullptr) return;
   std::string seen;
-  refl().visitMembers(
+  refl().visitProperties(
       *ha, [&](std::string_view name, std::uint32_t, cursiv::AstNode& c) {
         seen += name;
         seen += c.parent == ha ? "+" : "-";
@@ -1172,7 +1172,7 @@ using namespace tab::nested;
 // a walk up finds the nearest node of a class, the node itself first.
 void a_walk_reads_what_a_node_contains() {
   cursiv::ParseResult r = engine().parse("$nest pub a . b !!");
-  N* const outer = r.value_as<N>();
+  N* const outer = r.valueAs<N>();
   CHECK(outer != nullptr && outer->child != nullptr);
   if (outer == nullptr || outer->child == nullptr) return;
   std::vector<const cursiv::AstNode*> all;
@@ -1185,7 +1185,7 @@ void a_walk_reads_what_a_node_contains() {
   cursiv::visit_contents(refl(), *outer, [&](cursiv::AstNode&) { ++direct; });
   cursiv::visit_all_contents(refl(), *outer, [&](cursiv::AstNode&) {
     ++pruned;
-    return cursiv::AstWalk::prune;
+    return cursiv::AstWalk::Prune;
   });
   CHECK(direct != 0 && pruned == direct && pruned < all.size());
   CHECK(cursiv::container_of_type<N>(all.back()) != nullptr);
@@ -1196,7 +1196,7 @@ void a_walk_reads_what_a_node_contains() {
 void nest_chain() {
   cursiv::ParseResult r = engine().parse("$nest pub a . b !!");
   CHECK(r.accepted && static_cast<bool>(r));
-  N* const outer = r.value_as<N>();
+  N* const outer = r.valueAs<N>();
   CHECK(outer != nullptr);
   // Two nests, so a chain of two wrappers over the node the rule built.
   N* const middle = outer->child;
@@ -1245,7 +1245,7 @@ void a_wrapper_makes_room_for_its_own_list() {
   const cursiv::ParseResult r = engine().parse(text);
   CHECK(r.accepted && static_cast<bool>(r));
   int wrappers = 0;
-  for (const Listed* at = r.value_as<Listed>(); at != nullptr;
+  for (const Listed* at = r.valueAs<Listed>(); at != nullptr;
        at = cursiv::ast_cast<Listed>(at->child)) {
     ++wrappers;
     CHECK(at->items.size() == 2 && at->items.capacity() <= 4);
@@ -1256,7 +1256,7 @@ void a_wrapper_makes_room_for_its_own_list() {
 void wrapper_owns_what_follows_the_nest() {
   cursiv::ParseResult r = engine().parse("$wrapper a ! ?");
   CHECK(r.accepted && static_cast<bool>(r));
-  Wrap* const w = r.value_as<Wrap>();
+  Wrap* const w = r.valueAs<Wrap>();
   CHECK(w != nullptr && cursiv::ast_cast<Wrap>(w) != nullptr);
   if (w == nullptr) return;
   // The flag reached the wrapper, and the rule's own node kept the name.
@@ -1281,7 +1281,7 @@ void wrapper_owns_what_follows_the_nest() {
 void adopts_the_wrapper_as_itself() {
   cursiv::ParseResult r = engine().parse("$adopt a ! b !");
   CHECK(r.accepted && static_cast<bool>(r));
-  auto* doc = r.value_as<tab::adoptwrap::Doc>();
+  auto* doc = r.valueAs<tab::adoptwrap::Doc>();
   CHECK(doc != nullptr && doc->items.size() == 2);
   // What went into the vector is the wrapper, and it answers as one.
   CHECK(cursiv::ast_cast<Wrap>(doc->items[0]) != nullptr);
@@ -1307,7 +1307,7 @@ cursiv::ParseResult parse(std::string_view text) {
 void move_keeps_the_views_valid() {
   cursiv::ParseResult r = vocab::parse_full();
   const cursiv::Cst* const before = &r.cst();
-  auto* const rec = r.value_as<tab::vocab::Rec>();
+  auto* const rec = r.valueAs<tab::vocab::Rec>();
   const cursiv::NodeId root = rec->cstNodeId;
 
   std::vector<cursiv::ParseResult> box;
@@ -1329,9 +1329,9 @@ void move_keeps_the_views_valid() {
 void move_assignment_takes_the_new_tree() {
   cursiv::ParseResult a = parse("x aa");
   cursiv::ParseResult b = parse("x bb");
-  CHECK(a.value_as<Node>()->name == "aa");
+  CHECK(a.valueAs<Node>()->name == "aa");
   a = std::move(b);
-  CHECK(a.value_as<Node>()->name == "bb");
+  CHECK(a.valueAs<Node>()->name == "bb");
   CHECK(a.nodes().size() == 1 && a.nodes()[0] == a.value);
 }
 
@@ -1339,7 +1339,7 @@ void self_assignment_is_a_no_op() {
   cursiv::ParseResult a = parse("x aa");
   cursiv::ParseResult& self = a;
   a = std::move(self);
-  CHECK(a.value_as<Node>()->name == "aa");
+  CHECK(a.valueAs<Node>()->name == "aa");
 }
 
 }  // namespace move
@@ -1359,7 +1359,7 @@ std::int32_t leaf_value(Expr* e) {
 void infix_tree() {
   cursiv::ParseResult r = engine().parse("$climb 1+2*3");
   CHECK(r.accepted && static_cast<bool>(r));
-  auto* root = r.value_as<Bin>();
+  auto* root = r.valueAs<Bin>();
   CHECK(root != nullptr && cursiv::ast_cast<Bin>(root) != nullptr);
   CHECK(root->op == "+");
   CHECK(leaf_value(root->left) == 1);
@@ -1378,7 +1378,7 @@ void infix_left_nesting_and_trivia() {
   // Spaces put hidden children between the three semantic ones.
   cursiv::ParseResult r = engine().parse("$climb 1 * 2 + 3");
   CHECK(r.accepted && static_cast<bool>(r));
-  auto* root = r.value_as<Bin>();
+  auto* root = r.valueAs<Bin>();
   CHECK(root != nullptr && root->op == "+");
   CHECK(cursiv::ast_cast<Bin>(root->left) != nullptr &&
         leaf_value(root->right) == 3);
@@ -1393,7 +1393,7 @@ void infix_single_primary() {
   // No operator, no climb record: the entry's result is the primary.
   CHECK(cursiv::ast_cast<Num>(r.value) != nullptr);
   CHECK(cursiv::ast_cast<Bin>(r.value) == nullptr);
-  CHECK(r.value_as<Num>()->value == 7);
+  CHECK(r.valueAs<Num>()->value == 7);
 }
 
 }  // namespace climb
@@ -1407,9 +1407,9 @@ using namespace tab::hoist;
 void a_hoisted_write_reaches_the_branch() {
   cursiv::ParseResult r = engine().parse("$hoist x[ y]");
   CHECK(r.accepted && static_cast<bool>(r) &&
-        r.error == cursiv::AstBuildError::none);
+        r.error == cursiv::AstBuildError::None);
   CHECK(r.diagnostics.empty());
-  auto* const bag = r.value_as<Bag>();
+  auto* const bag = r.valueAs<Bag>();
   CHECK(bag && bag->items.size() == 2);
   if (bag == nullptr || bag->items.size() != 2) return;
   // Each U adopted its branch's node -- no Base of its own was made...
@@ -1433,7 +1433,7 @@ void one(const cursiv::Parser& engine, std::string_view src,
          std::string_view want) {
   cursiv::ParseResult r = engine.parse(src);
   CHECK(r.accepted && static_cast<bool>(r));
-  auto* const doc = r.value_as<Doc>();
+  auto* const doc = r.valueAs<Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) return;
   // A real node -- 0x1 is what a fuse over a lost creation leaves behind.
@@ -1460,7 +1460,7 @@ using namespace tab::spell;
 Flag* built(std::string_view text, cursiv::ParseResult& out) {
   out = engine().parse(text);
   if (!out.accepted) return nullptr;
-  return out ? out.value_as<Flag>() : nullptr;
+  return out ? out.valueAs<Flag>() : nullptr;
 }
 
 void a_spelling_the_member_reads_still_converts() {
@@ -1513,7 +1513,7 @@ static_assert(takes<std::string, tab::All::TextID>);
 void the_law_leaves_the_safe_combinations_alone() {
   cursiv::ParseResult r = engine().parse("$text abc 'xy' 42 HELLO");
   CHECK(r.accepted && static_cast<bool>(r) && r.diagnostics.empty());
-  const N* const n = r.value_as<N>();
+  const N* const n = r.valueAs<N>();
   CHECK(n != nullptr);
   if (n == nullptr) return;
   CHECK(n->slice == "abc");
@@ -1522,7 +1522,7 @@ void the_law_leaves_the_safe_combinations_alone() {
   CHECK(n->built == "hello");
   // A `string_view` member holds a slice of the document; only a converter that
   // builds its text needs a `string`, which owns its bytes.
-  const std::string_view src = r.cst().text(r.cst().entry_root());
+  const std::string_view src = r.cst().text(r.cst().entryRoot());
   const auto inside = [src](std::string_view v) {
     return v.data() >= src.data() &&
            v.data() + v.size() <= src.data() + src.size();
@@ -1540,14 +1540,23 @@ using namespace tab::own;
 
 void a_specialised_converter_reaches_its_own_target() {
   cursiv::ParseResult r = engine().parse("$own 42");
-  auto* n = r.value_as<Node>();
+  auto* n = r.valueAs<Node>();
+  CHECK(n != nullptr && n->share.v == 42);
+  CHECK(r.diagnostics.empty());
+}
+
+// A member of that type written with no converter of its own is converted by
+// it too.
+void a_member_of_that_type_is_converted_by_it() {
+  cursiv::ParseResult r = engine().parse("$ownplain 42");
+  auto* n = r.valueAs<Node>();
   CHECK(n != nullptr && n->share.v == 42);
   CHECK(r.diagnostics.empty());
 }
 
 void its_refusal_is_a_diagnostic_and_not_a_crash() {
   cursiv::ParseResult r = engine().parse("$own 240");
-  auto* n = r.value_as<Node>();
+  auto* n = r.valueAs<Node>();
   CHECK(n != nullptr && n->share.v == 0);
   CHECK(r.diagnostics.size() == 1 &&
         r.diagnostics[0].message.find("over 100") != std::string::npos);
@@ -1561,7 +1570,7 @@ using namespace tab::optnode;
 
 std::string walk(const cursiv::AstNode& n) {
   std::string out;
-  refl().visitMembers(
+  refl().visitProperties(
       n, [&](std::string_view name, std::uint32_t, cursiv::AstNode&) {
         out += name;
         out += ';';
@@ -1572,7 +1581,7 @@ std::string walk(const cursiv::AstNode& n) {
 void the_reflection_walks_the_optional_child() {
   cursiv::ParseResult r = engine().parse("$opt a b");
   CHECK(r.accepted);
-  auto* bag = r.value_as<Bag>();
+  auto* bag = r.valueAs<Bag>();
   CHECK(bag != nullptr && bag->tail.has_value());
   if (bag == nullptr) return;
   CHECK(walk(*bag) == "head;tail;");
@@ -1581,7 +1590,7 @@ void the_reflection_walks_the_optional_child() {
 void an_absent_one_yields_nothing() {
   cursiv::ParseResult r = engine().parse("$opt a");
   CHECK(r.accepted);
-  auto* bag = r.value_as<Bag>();
+  auto* bag = r.valueAs<Bag>();
   CHECK(bag != nullptr && !bag->tail.has_value());
   if (bag == nullptr) return;
   CHECK(walk(*bag) == "head;");
@@ -1598,7 +1607,7 @@ using namespace tab::inl;
 void the_inline_slot_converts() {
   cursiv::ParseResult r = engine().parse("$inl ff 10");
   CHECK(r.accepted && !!r);
-  auto* d = r.value_as<Doc>();
+  auto* d = r.valueAs<Doc>();
   CHECK(d != nullptr && d->nums.size() == 2);
   CHECK(d->nums[0]->value == 255.0 && d->nums[1]->value == 16.0);
 }
@@ -1648,7 +1657,7 @@ using namespace tab::deferred;
 void writes_go_to_the_branch_node() {
   cursiv::ParseResult r = engine().parse("pets rex #fast dog ! @big tom cat");
   CHECK(r.accepted && static_cast<bool>(r));
-  auto* doc = r.value_as<Doc>();
+  auto* doc = r.valueAs<Doc>();
   CHECK(doc && doc->pets.size() == 2);
   // The branch decided the class; the upstream name, the upstream tag and the
   // downstream tag all reached the node it created.
@@ -1659,14 +1668,36 @@ void writes_go_to_the_branch_node() {
   CHECK(static_cast<Dog*>(doc->pets[0])->good);
   CHECK(cursiv::ast_cast<Cat>(doc->pets[1]) != nullptr);
   CHECK(doc->pets[1]->name == "tom" && doc->pets[1]->tags.empty());
-  CHECK(r.diagnostics.empty() && r.error == cursiv::AstBuildError::none);
+  CHECK(r.diagnostics.empty() && r.error == cursiv::AstBuildError::None);
 }
 
 }  // namespace deferred
 
 }  // namespace
 
+// A class may name a property like a field of every node: the free accessors
+// still read the node's own.
+void the_accessors_read_past_a_property_of_the_same_name() {
+  struct Masking : cursiv::AstNode {
+    int parent = 7;
+    int type = 8;
+    int cstNodeId = 9;
+  };
+  cursiv::AstNode above;
+  Masking node;
+  node.AstNode::parent = &above;
+  node.AstNode::cstNodeId = 42;
+  CHECK(node.parent == 7);
+  CHECK(cursiv::parent_of(node) == &above);
+  CHECK(cursiv::type_of(node) == node.AstNode::type);
+  CHECK(cursiv::cst_node_id_of(node) == 42);
+  // The root is the top of the tree, the document above it left out.
+  CHECK(&cursiv::root_of(node) == &above);
+  CHECK(&cursiv::root_of(above) == &above);
+}
+
 void run() {
+  the_accessors_read_past_a_property_of_the_same_name();
   // The tables the generator wrote, read back through the reflection.
   hier::the_tables_read_back();
   infix::the_climb_contributes_its_members();
@@ -1720,6 +1751,7 @@ void run() {
   spell::a_spelling_the_member_reads_still_converts();
   textlaw::the_law_leaves_the_safe_combinations_alone();
   own::a_specialised_converter_reaches_its_own_target();
+  own::a_member_of_that_type_is_converted_by_it();
   own::its_refusal_is_a_diagnostic_and_not_a_crash();
   optnode::the_reflection_walks_the_optional_child();
   optnode::an_absent_one_yields_nothing();
@@ -1763,7 +1795,7 @@ void cst_node_view_and_bind_round_trip() {
   const cursiv::ParseResult parsed = engine().parse("abc");
   CHECK(parsed.accepted);
   const cursiv::Cst& cst = parsed.cst();
-  const cursiv::CstNodeView v{&cst, cst.entry_root()};
+  const cursiv::CstNodeView v{&cst, cst.entryRoot()};
   CHECK(static_cast<bool>(v));
   CHECK(v.text() == "abc");
   CHECK(v.begin() == 0 && v.end() == 3);
@@ -1772,7 +1804,7 @@ void cst_node_view_and_bind_round_trip() {
   // bind round-trip: the name is a view the writer hands over, and the
   // position is an ID the caller resolves against the tree it already has.
   cursiv::reference<N> r;
-  cursiv::detail::RefAccess::bind(r, cst.entry_root(), "a.b");
+  cursiv::detail::RefAccess::bind(r, cst.entryRoot(), "a.b");
   CHECK(r.refText == "a.b" &&
         cst.text(cursiv::detail::RefAccess::node_id(r)) == "abc" &&
         r.resolve() == cursiv::RefState::Unresolved);
@@ -1927,31 +1959,11 @@ void a_two_candidate_reference_answers_by_branch() {
   CHECK(r.get<A2>() == nullptr);
 }
 
-// A copy takes the members' values and none of the source's identity; an
-// assignment keeps the target's own.
-void a_copy_takes_no_identity() {
-  D source;
-  source.payload = 7;
-  source.type = &cursiv::ast_type_tag<D>;
-  const D copy = source;
-  CHECK(copy.payload == 7 && copy.type == nullptr);
-
-  A2 holder;
-  D2 d;
-  d.type = &cursiv::ast_type_tag<D2>;
-  d.parent = &holder;
-  d.cstNodeId = 3;
-  const C2 sliced = d;
-  CHECK(sliced.type == nullptr && sliced.parent == nullptr &&
-        sliced.cstNodeId == cursiv::kNoNode);
-  CHECK(cursiv::ast_cast<D2>(&sliced) == nullptr);
-  C2 other;
-  other.type = &cursiv::ast_type_tag<C2>;
-  static_cast<C2&>(d) = other;
-  CHECK(d.type == &cursiv::ast_type_tag<D2> && d.parent == &holder &&
-        d.cstNodeId == 3);
-  CHECK(cursiv::ast_cast<D2>(&d) == &d);
-}
+// No node is copied, whatever class it is built on.
+static_assert(!std::is_copy_constructible_v<D> &&
+              !std::is_copy_assignable_v<D> &&
+              !std::is_copy_constructible_v<C2> &&
+              !std::is_copy_assignable_v<C2>);
 
 }  // namespace
 
@@ -1964,7 +1976,6 @@ void run() {
   the_closure_is_transitive();
   ast_cast_accepts_the_family_and_refuses_the_rest();
   a_two_candidate_reference_answers_by_branch();
-  a_copy_takes_no_identity();
 }
 
 }  // namespace ast_node
@@ -1979,7 +1990,7 @@ struct Manual : Extends<Derived> {};
 std::vector<std::string> children(const AstReflection& reflection,
                                   const AstNode& node) {
   std::vector<std::string> result;
-  reflection.visitMembers(
+  reflection.visitProperties(
       node, [&](std::string_view name, std::uint32_t index, AstNode& child) {
         CHECK(child.type == &ast_type_tag<Child>);
         result.push_back(std::string(name) + ':' + std::to_string(index));
@@ -1987,11 +1998,12 @@ std::vector<std::string> children(const AstReflection& reflection,
   return result;
 }
 
-void check(const Parser& parser, const AstReflection& reflection) {
+void check(const Parser& parser, const AstReflection& served) {
+  const auto& reflection = static_cast<const DefaultAstReflection&>(served);
   auto parsed =
       parser.parse("child a child b tail child c item child d target a");
   CHECK(parsed.accepted && parsed.diagnostics.empty());
-  auto* root = parsed.value_as<Derived>();
+  auto* root = parsed.valueAs<Derived>();
   CHECK(root != nullptr);
   if (root == nullptr) return;
   const auto seen = children(reflection, *root);
@@ -2055,7 +2067,7 @@ void keyword_template_converters_compile_and_parse() {
                                                         : "keyword is");
     CHECK(result.accepted && !result.cst().recovered() &&
           result.diagnostics.empty());
-    const auto* value = result.value_as<tconv::comp::N>();
+    const auto* value = result.valueAs<tconv::comp::N>();
     CHECK(value && value->name == "is");
   }
 }
@@ -2093,11 +2105,11 @@ void defaults() {
 void text_helpers_keep_empty_values_present() {
   const cursiv::Document document(
       cursiv::TextDocument::create("file:///kept", "kept", 0, ""));
-  const auto copied = document.keep_text(std::string_view{});
+  const auto copied = document.keepText(std::string_view{});
   CHECK(copied.empty() && copied.data() != nullptr);
 
   std::string text = "value";
-  const auto owned = document.keep_text(text);
+  const auto owned = document.keepText(text);
   text[0] = 'x';
   CHECK(owned == "value");
 
@@ -2107,7 +2119,7 @@ void text_helpers_keep_empty_values_present() {
                               std::numeric_limits<std::size_t>::max() / 2 + 1);
   bool refused = false;
   try {
-    (void)document.keep_text(half, half);
+    (void)document.keepText(half, half);
   } catch (const std::bad_alloc&) {
     refused = true;
   }
@@ -2121,7 +2133,7 @@ void converters_answer_classes_of_their_own() {
         "values %1 %22 %333 ; maybe %4 either %5 ^6 ~abcd $7 $8 $9 #payload "
         "@1 , @2 then @3 <123> sets @5 @5 @6 maps @7 @7 @8");
     CHECK(parsed && parsed.diagnostics.empty());
-    const auto* doc = parsed.value_as<values::Doc>();
+    const auto* doc = parsed.valueAs<values::Doc>();
     CHECK(doc != nullptr);
     if (doc != nullptr) {
       CHECK(doc->one.raw == "%1");
@@ -2149,7 +2161,7 @@ void converters_answer_classes_of_their_own() {
     // so.
     const auto parsed =
         engine().parse("values %1 ; either %2 ^0 ~a $1 #x @1 then @2 <0>");
-    const auto* doc = parsed.value_as<values::Doc>();
+    const auto* doc = parsed.valueAs<values::Doc>();
     CHECK(doc != nullptr && doc->guarded.raw.empty() && doc->numbers.empty());
     CHECK(parsed.diagnostics.size() == 2);
   }
@@ -2161,7 +2173,7 @@ void a_class_reached_by_two_paths_is_one_node() {
   const auto parsed =
       engine().parse("diamond first : int &hello second : text &world");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<diamond::Doc>();
+  const auto* doc = parsed.valueAs<diamond::Doc>();
   CHECK(doc != nullptr && doc->fields.size() == 2);
   if (doc == nullptr || doc->fields.size() != 2) return;
   const cursiv::AstNode* const node = doc->fields[1];
@@ -2202,7 +2214,7 @@ void a_class_reached_by_two_paths_links_and_validates() {
   const cursiv::Document* const document = world.built(
       "file:///a.conv",
       "diamond first : int &hello second : text &world use second use missing");
-  const auto* const doc = document->parseResult.value_as<diamond::Doc>();
+  const auto* const doc = document->parseResult.valueAs<diamond::Doc>();
   CHECK(doc != nullptr && doc->fields.size() == 2 && doc->uses.size() == 2);
   if (doc == nullptr || doc->fields.size() != 2 || doc->uses.size() != 2)
     return;
@@ -2231,7 +2243,7 @@ void a_terminal_feeds_a_view_and_a_decoded_string() {
   const std::string source = R"(chain "a\\b" "a\\b")";
   const auto parsed = engine().parse(source);
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<chain::Doc>();
+  const auto* doc = parsed.valueAs<chain::Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) return;
   CHECK(doc->raw == R"(a\\b)");
@@ -2244,7 +2256,7 @@ void a_terminal_feeds_a_view_and_a_decoded_string() {
 void a_passed_on_string_builds_a_class() {
   const auto parsed = engine().parse(R"(chain "a" "b" @tag)");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<chain::Doc>();
+  const auto* doc = parsed.valueAs<chain::Doc>();
   CHECK(doc != nullptr && doc->boxed.text == "tag");
 }
 
@@ -2253,7 +2265,7 @@ void a_passed_on_string_builds_a_class() {
 void a_value_with_no_default_constructor_fills_a_list() {
   const auto parsed = engine().parse(R"(chain "a" "b" $one $two $three #word)");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<chain::Doc>();
+  const auto* doc = parsed.valueAs<chain::Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) return;
   CHECK(doc->first.has_value() && doc->first->text == "one");
@@ -2266,7 +2278,7 @@ void a_value_with_no_default_constructor_fills_a_list() {
 void a_direct_member_with_no_empty_state_is_written_in_place() {
   const auto parsed = engine().parse(R"(chain "a" "b" !word)");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<chain::Doc>();
+  const auto* doc = parsed.valueAs<chain::Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) return;
   CHECK(doc->only.text == "word");
@@ -2278,15 +2290,15 @@ void a_named_type_converts_before_the_member_takes_it() {
   // An integer is a fair value for a floating member.
   const auto ratio = engine().parse(R"(chain "a" "b" ratio 3)");
   CHECK(ratio && ratio.diagnostics.empty());
-  const auto* whole = ratio.value_as<chain::Doc>();
+  const auto* whole = ratio.valueAs<chain::Doc>();
   CHECK(whole != nullptr && whole->ratio == 3.0);
   const auto fits = engine().parse(R"(chain "a" "b" small 127)");
   CHECK(fits && fits.diagnostics.empty());
-  const auto* doc = fits.value_as<chain::Doc>();
+  const auto* doc = fits.valueAs<chain::Doc>();
   CHECK(doc != nullptr && doc->wide == 127);
   const auto wide = engine().parse(R"(chain "a" "b" small 128)");
   CHECK(!wide.diagnostics.empty());
-  const auto* refused = wide.value_as<chain::Doc>();
+  const auto* refused = wide.valueAs<chain::Doc>();
   CHECK(refused != nullptr && refused->wide == -1);
 }
 
@@ -2295,7 +2307,7 @@ void a_value_never_assigned_fills_a_list() {
   const auto parsed =
       engine().parse(R"(chain "a" "b" constant =first =second =third)");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<chain::Doc>();
+  const auto* doc = parsed.valueAs<chain::Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) return;
   CHECK(doc->constText.has_value() && doc->constText->text == "first");
@@ -2306,7 +2318,7 @@ void a_value_never_assigned_fills_a_list() {
 void a_passed_on_value_needs_no_empty_state() {
   const auto parsed = engine().parse(R"(chain "a" "b" pass $word)");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<chain::Doc>();
+  const auto* doc = parsed.valueAs<chain::Doc>();
   CHECK(doc != nullptr && doc->passed.has_value() &&
         doc->passed->text == "word");
 }
@@ -2314,7 +2326,7 @@ void a_passed_on_value_needs_no_empty_state() {
 void a_variant_with_no_empty_state_takes_its_alternative() {
   const auto parsed = engine().parse(R"(chain "a" "b" pick !one !two 7)");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<chain::Doc>();
+  const auto* doc = parsed.valueAs<chain::Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) return;
   CHECK(std::get<chain::Ident>(doc->pick).text == "one");
@@ -2328,7 +2340,7 @@ void a_converter_answers_a_member_whole() {
   const auto parsed =
       engine().parse(R"(chain "a" "b" answer ?word ?one ?two maybe *some)");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<chain::Doc>();
+  const auto* doc = parsed.valueAs<chain::Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) return;
   CHECK(std::get<std::string>(doc->answer) == "word");
@@ -2338,23 +2350,23 @@ void a_converter_answers_a_member_whole() {
   CHECK(doc->maybe == "some");
   const auto none = engine().parse(R"(chain "a" "b" maybe *none)");
   CHECK(none && none.diagnostics.empty());
-  const auto* empty = none.value_as<chain::Doc>();
+  const auto* empty = none.valueAs<chain::Doc>();
   CHECK(empty != nullptr && !empty->maybe.has_value());
 }
 
 void a_member_takes_what_it_can_be_assigned() {
   const auto parsed = engine().parse(R"(chain "a" "b" latch @word)");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<chain::Doc>();
+  const auto* doc = parsed.valueAs<chain::Doc>();
   CHECK(doc != nullptr && doc->latch.text == "word");
   // A root of another class is not one of these.
-  CHECK(parsed.value_as<deep::Box>() == nullptr);
+  CHECK(parsed.valueAs<deep::Box>() == nullptr);
 }
 
 void a_final_class_still_converts() {
   const auto parsed = engine().parse(R"(chain "a" "b" trimmed ^word)");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<chain::Doc>();
+  const auto* doc = parsed.valueAs<chain::Doc>();
   CHECK(doc != nullptr && doc->trimmed == "word");
 }
 
@@ -2439,7 +2451,7 @@ void a_reference_names_its_target_without_a_type() {
       tconv::generated::G::create_ast_reflection());
   const cursiv::Document* const document = world.built(
       "file:///target.conv", "diamond first : int &hello use first use none");
-  const auto* const doc = document->parseResult.value_as<diamond::Doc>();
+  const auto* const doc = document->parseResult.valueAs<diamond::Doc>();
   CHECK(doc != nullptr && doc->uses.size() == 2);
   if (doc == nullptr || doc->uses.size() != 2) return;
   CHECK(doc->uses[0]->target.target() == doc->fields[0]);
@@ -2469,7 +2481,7 @@ void a_document_keeps_its_text_past_its_nodes() {
 void a_list_of_booleans_holds_its_values() {
   const auto parsed = engine().parse("diamond bits + - +");
   CHECK(parsed && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<diamond::Doc>();
+  const auto* doc = parsed.valueAs<diamond::Doc>();
   CHECK(doc != nullptr && doc->bits == std::vector<bool>({true, false, true}));
 }
 
@@ -2478,7 +2490,7 @@ void empty_materialized_members_keep_their_value() {
        {"materialized \"\" ``", "materialized \"ab\" `cd`"}) {
     const auto parsed = engine().parse(text);
     CHECK(parsed && parsed.diagnostics.empty());
-    const auto* doc = parsed.value_as<materialized::Doc>();
+    const auto* doc = parsed.valueAs<materialized::Doc>();
     CHECK(doc != nullptr);
     if (doc == nullptr) continue;
     CHECK(doc->copied == (text == "materialized \"\" ``" ? "" : "ab"));
@@ -2496,7 +2508,7 @@ void empty_joined_parts_keep_their_value() {
                                           ? "$conv:blank \"\" \"\""
                                           : "blank \"\" \"\"");
     CHECK(parsed && parsed.diagnostics.empty());
-    const auto* value = parsed.value_as<comp::N>();
+    const auto* value = parsed.valueAs<comp::N>();
     CHECK(value != nullptr);
     if (value == nullptr) continue;
     CHECK(value->name.empty() && value->name.data() != nullptr);
@@ -2579,6 +2591,11 @@ void enum_defaults() {
   auto bad = cursiv::default_converter<Vis>::convert("nope");
   CHECK(!bad && bad.error.message.find("enumerator") != std::string::npos);
   static_assert(cursiv::detail::has_default_convert<Vis>);
+  // An enumeration with no fixed underlying type holds few values: only they
+  // are probed.
+  enum Plain { alpha, beta };
+  auto b = cursiv::default_converter<Plain>::convert("beta");
+  CHECK(b && *b.value == beta);
 }
 
 // The probe is a window of values, not the run [0, 64): a sentinel below zero
@@ -2606,7 +2623,7 @@ void a_repair_invents_no_value() {
                           "init state\nOff end"}) {
     const cursiv::ParseResult r = engine().parse(text);
     CHECK(r.cst().recovered());
-    const auto* n = r.value_as<inv::N>();
+    const auto* n = r.valueAs<inv::N>();
     CHECK(n != nullptr);
     // Neither resuming inside `state` nor joining it to `Off` may evade the
     // leading !kw<"state">, which already refused the original spelling.
@@ -2617,14 +2634,14 @@ void a_repair_invents_no_value() {
   const cursiv::ParseResult c = engine().parse("init Off end");
   CHECK(c.accepted);
   CHECK(!c.cst().recovered());
-  const auto* m = c.value_as<inv::N>();
+  const auto* m = c.valueAs<inv::N>();
   CHECK(m != nullptr && m->name == "Off");
 }
 
 void a_leaf_converter_composes() {
   const cursiv::ParseResult r = engine().parse("a . 'b'");
   CHECK(r.accepted);
-  const auto* n = r.value_as<comp::N>();
+  const auto* n = r.valueAs<comp::N>();
   CHECK(n != nullptr);
   // "a.b", not "a.'b'": the quotes are not part of what the parts denote.
   if (n != nullptr) CHECK(n->name == "a.b");
@@ -2635,12 +2652,12 @@ void a_leaf_converter_composes() {
 void an_empty_call_gives_its_text() {
   const cursiv::ParseResult none = engine().parse("emptycall abc");
   CHECK(none.accepted && none.diagnostics.empty());
-  const auto* n0 = none.value_as<comp::N>();
+  const auto* n0 = none.valueAs<comp::N>();
   CHECK(n0 != nullptr);
   if (n0 != nullptr) CHECK(n0->name == "noneabc");
   const cursiv::ParseResult some = engine().parse("emptycall ! abc");
   CHECK(some.accepted && some.diagnostics.empty());
-  const auto* n1 = some.value_as<comp::N>();
+  const auto* n1 = some.valueAs<comp::N>();
   CHECK(n1 != nullptr);
   if (n1 != nullptr) CHECK(n1->name == "!abc");
 }
@@ -2651,7 +2668,7 @@ void a_converter_without_input_runs_no_call() {
   for (const char* const text : {"fixed !ab.c/d", "fixed !az.c/d"}) {
     const cursiv::ParseResult r = engine().parse(text);
     CHECK(r.accepted && r.diagnostics.empty());
-    const auto* n = r.value_as<comp::N>();
+    const auto* n = r.valueAs<comp::N>();
     CHECK(n != nullptr);
     if (n != nullptr) CHECK(n->name == "fixed/d");
   }
@@ -2662,7 +2679,7 @@ void parts_on_data_rule() {
   // apart, the trivia between them is not part of the name.
   const cursiv::ParseResult r = separated().parse("$nest pub a . b");
   CHECK(r.accepted);
-  const auto* n1 = r.value_as<tab::nested::N>();
+  const auto* n1 = r.valueAs<tab::nested::N>();
   CHECK(n1 != nullptr && n1->name == "a.b");
 
   // No spaces: the same value, and the view is a slice of the source rather
@@ -2671,7 +2688,7 @@ void parts_on_data_rule() {
   const cursiv::ParseResult r2 = separated().parse("$nest pub a.b");
   CHECK(r2.accepted);
   const std::string_view src = r2.cst().text();
-  const auto* n2 = r2.value_as<tab::nested::N>();
+  const auto* n2 = r2.valueAs<tab::nested::N>();
   CHECK(n2 != nullptr && n2->name == "a.b");
   CHECK(n2->name.data() >= src.data() &&
         n2->name.data() + n2->name.size() <= src.data() + src.size());
@@ -2733,7 +2750,7 @@ void parts_are_atoms_at(const char* lvl) {
   // e . f / g . h -> the seven atoms, never the three direct children
   // (QN, "/", QN) whose own trivia would have survived the join. The value
   // the builder writes is the proof: it is what the leaves denote, joined.
-  const auto* doc = r.value_as<dv::Doc>();
+  const auto* doc = r.valueAs<dv::Doc>();
   CHECK(doc != nullptr);
   if (doc == nullptr) {
     std::printf("  (at %s)\n", lvl);
@@ -2972,7 +2989,7 @@ void basics() {
   CHECK(cst.text(2) == "cd");
   CHECK(cst.text(3) == "ab cd");
   CHECK(cst[0].engine == 0 && cst[3].engine == 2);
-  CHECK(cst.subtree_begin(3) == 0);
+  CHECK(cst.subtreeBegin(3) == 0);
   CHECK(cst.contains(3, 1));
 
   // The predicate bits: leaves are leaves, the trivia leaf is hidden, nothing
@@ -2983,7 +3000,7 @@ void basics() {
 
   // Reverse children: last child first, hidden leaf included.
   std::vector<cursiv::NodeId> children;
-  for (cursiv::NodeId id : cst.reverse_children(3)) children.push_back(id);
+  for (cursiv::NodeId id : cst.reverseChildren(3)) children.push_back(id);
   CHECK(children.size() == 3);
   CHECK(children[0] == 2 && children[1] == 1 && children[2] == 0);
 }
@@ -3107,9 +3124,9 @@ void entry_defaults() {
   cursiv::Cst cst{"ab cd"};
   build_pair(cst);
   // Entry binding is the parser's (a friend); a bare tree has none.
-  CHECK(!cst.has_entry());
+  CHECK(!cst.hasEntry());
   CHECK(!cst.accepted());
-  CHECK(cst.entry_root() == cursiv::kNoNode);
+  CHECK(cst.entryRoot() == cursiv::kNoNode);
 }
 
 void moved_from_is_empty() {
@@ -3122,10 +3139,10 @@ void moved_from_is_empty() {
 
   CHECK(cst.size() == 0);
   CHECK(cst.text().empty());
-  CHECK(!cst.has_entry());
+  CHECK(!cst.hasEntry());
   CHECK(!cst.accepted());
-  CHECK(cst.entry_root() == cursiv::kNoNode);
-  CHECK(cst.entry_begin() == 0 && cst.entry_end() == 0);
+  CHECK(cst.entryRoot() == cursiv::kNoNode);
+  CHECK(cst.entryBegin() == 0 && cst.entryEnd() == 0);
 
   // Reusable afterwards: `reset` rebuilds the pool the move took away.
   cst.reset("zz");
@@ -3150,9 +3167,9 @@ void moved_from_is_empty() {
 void diagnostics_follow_the_tree() {
   cursiv::Cst cst{"ab cd"};
   cursiv::detail::CstBuilder b(cst);
-  b.note_repair(cursiv::DiagnosticKind::deleted, cursiv::kNoElement, 0, 2);
+  b.note_repair(cursiv::DiagnosticKind::Deleted, cursiv::kNoElement, 0, 2);
   CHECK(cst.recovered() && cst.diagnostics().size() == 1);
-  CHECK(cst.diagnostics()[0].kind == cursiv::DiagnosticKind::deleted);
+  CHECK(cst.diagnostics()[0].kind == cursiv::DiagnosticKind::Deleted);
 
   cursiv::Cst taken = std::move(cst);
   CHECK(taken.recovered() && taken.diagnostics().size() == 1);
@@ -3162,10 +3179,10 @@ void diagnostics_follow_the_tree() {
   // not recovered by it alone.
   cursiv::Cst bounded{"ab cd"};
   cursiv::detail::CstBuilder(bounded).note_repair(
-      cursiv::DiagnosticKind::bounded, cursiv::kNoElement, 0, 5);
+      cursiv::DiagnosticKind::Bounded, cursiv::kNoElement, 0, 5);
   CHECK(!bounded.recovered() && bounded.diagnostics().size() == 1);
   cursiv::detail::CstBuilder(bounded).note_repair(
-      cursiv::DiagnosticKind::deleted, cursiv::kNoElement, 0, 2);
+      cursiv::DiagnosticKind::Deleted, cursiv::kNoElement, 0, 2);
   CHECK(bounded.recovered());
 
   // A second parse on the same tree starts clean.
@@ -3178,7 +3195,7 @@ void diagnostics_follow_the_tree() {
   cursiv::Cst closers{"ab"};
   cursiv::detail::CstBuilder c(closers);
   const auto insert = [&c](std::vector<cursiv::ElementId> also) {
-    c.note_repair(cursiv::DiagnosticKind::inserted, 1, 1, 1, std::move(also));
+    c.note_repair(cursiv::DiagnosticKind::Inserted, 1, 1, 1, std::move(also));
   };
   insert({2});
   insert({2});
@@ -3276,15 +3293,15 @@ void leaves_are_found_from_the_records() {
     (void)b.exit(last, 6, 0);       // 7, a parent
   }
   CHECK(cst.size() == 8 && !cst.childless(3) && !cst.childless(7));
-  CHECK(cst.leaf_after(0) == 0 && cst.leaf_after(1) == 0);
-  CHECK(cst.leaf_after(2) == 1 && cst.leaf_after(3) == 2);
-  CHECK(cst.leaf_after(5) == 4 && cst.leaf_after(6) == 6);
-  CHECK(cst.leaf_after(8) == cst.size() && cst.leaf_after(99) == cst.size());
-  CHECK(cst.leaf_before(4) == 2 && cst.leaf_before(6) == 5);
-  CHECK(cst.leaf_before(cst.size()) == 6 && cst.leaf_before(1) == 0);
-  CHECK(cst.next_leaf(2) == 4 && cst.next_leaf(4) == 5);
-  CHECK(cst.next_leaf(6) == cst.size());
-  const cursiv::CstLeaf trivia = cst.as_leaf(4);
+  CHECK(cst.leafAfter(0) == 0 && cst.leafAfter(1) == 0);
+  CHECK(cst.leafAfter(2) == 1 && cst.leafAfter(3) == 2);
+  CHECK(cst.leafAfter(5) == 4 && cst.leafAfter(6) == 6);
+  CHECK(cst.leafAfter(8) == cst.size() && cst.leafAfter(99) == cst.size());
+  CHECK(cst.leafBefore(4) == 2 && cst.leafBefore(6) == 5);
+  CHECK(cst.leafBefore(cst.size()) == 6 && cst.leafBefore(1) == 0);
+  CHECK(cst.nextLeaf(2) == 4 && cst.nextLeaf(4) == 5);
+  CHECK(cst.nextLeaf(6) == cst.size());
+  const cursiv::CstLeaf trivia = cst.asLeaf(4);
   CHECK(trivia.id == 4 && trivia.hidden && trivia.begin == 5 &&
         trivia.end == 6);
 }
@@ -3563,10 +3580,10 @@ void a_feature_is_found_and_an_owned_child_is_a_boundary() {
   const Parsed p("doc item aa item bb");
   // `name` is written inside each Item, which owns its node: asked of the
   // root, the walk must not answer with a grandchild's member.
-  CHECK(cursiv::find_nodes_for_feature(p.root(), "name").empty());
+  CHECK(cursiv::find_nodes_for_property(p.root(), "name").empty());
   // Asked of the Item itself, it answers.
   const std::vector<cursiv::CstNodeView> names =
-      cursiv::find_nodes_for_feature(*p.doc().items[0], "name");
+      cursiv::find_nodes_for_property(*p.doc().items[0], "name");
   CHECK(names.size() == 1);
   if (!names.empty()) CHECK(names[0].text() == "aa");
 }
@@ -3584,10 +3601,10 @@ void a_keyword_node_answers_for_its_own_keyword(Engine engine) {
   CHECK(own.size() == 1);
   if (!own.empty()) CHECK(own[0].id == mark.cstNodeId);
   const auto one = cursiv::find_node_for_keyword(mark, "mark");
-  CHECK(one.has_value());
-  if (one) CHECK(one->id == mark.cstNodeId);
+  CHECK(one);
+  if (one) CHECK(one.id == mark.cstNodeId);
   CHECK(cursiv::find_nodes_for_keyword(p.root(), "mark").empty());
-  CHECK(!cursiv::find_node_for_keyword(p.root(), "mark").has_value());
+  CHECK(!cursiv::find_node_for_keyword(p.root(), "mark"));
   CHECK(cursiv::find_nodes_for_keyword(p.root(), "item").size() == 1);
 }
 
@@ -3595,11 +3612,11 @@ void a_keyword_node_answers_for_its_own_keyword(Engine engine) {
 void an_out_of_range_index_clamps() {
   const Parsed p("doc item aa item bb");
   const auto second = cursiv::find_node_for_keyword(p.root(), "item", 1);
-  CHECK(second.has_value());
+  CHECK(second);
   const auto far = cursiv::find_node_for_keyword(p.root(), "item", 9);
-  CHECK(far.has_value());
-  if (second && far) CHECK(far->id == second->id);
-  CHECK(!cursiv::find_node_for_keyword(p.root(), "absent", 0).has_value());
+  CHECK(far);
+  if (second && far) CHECK(far.id == second.id);
+  CHECK(!cursiv::find_node_for_keyword(p.root(), "absent", 0));
 }
 
 // A keyword fused under `?=` is the directive's own record, relabelled; it is
@@ -3621,8 +3638,8 @@ void a_folded_keyword_is_found_in_any_case(Engine engine) {
   const Parsed cased("EvEnTs aa", engine);
   CHECK(cursiv::find_nodes_for_keyword(cased.root(), "events").size() == 1);
   const auto upper = cursiv::find_node_for_keyword(cased.root(), "EVENTS");
-  CHECK(upper.has_value());
-  if (upper) CHECK(upper->text() == "EvEnTs");
+  CHECK(upper);
+  if (upper) CHECK(upper.text() == "EvEnTs");
   const Parsed exact("state aa", engine);
   CHECK(cursiv::find_nodes_for_keyword(exact.root(), "state").size() == 1);
   CHECK(cursiv::find_nodes_for_keyword(exact.root(), "STATE").empty());
@@ -3640,7 +3657,7 @@ void interior_nodes_walk_the_extent() {
   // Whatever sits between the first and third `item` covers the second.
   bool coversSecond = false;
   for (const cursiv::NodeId id : mid)
-    coversSecond |= p.r.cst().subtree_begin(id) <= kws[1].id && kws[1].id <= id;
+    coversSecond |= p.r.cst().subtreeBegin(id) <= kws[1].id && kws[1].id <= id;
   CHECK(coversSecond);
   CHECK(cursiv::interior_nodes(p.r.cst(), cursiv::kNoNode, kws[2].id).empty());
 }
@@ -3717,9 +3734,9 @@ void the_tree_names_the_grammar_that_built_it() {
   }
   CHECK(bare.grammar() == nullptr);
   cursiv::AstNode root;
-  root.cstNodeId = bare.entry_root();
-  CHECK(cursiv::find_nodes_for_feature(root, "name").empty());
-  CHECK(!cursiv::find_node_for_feature(root, "name"));
+  root.cstNodeId = bare.entryRoot();
+  CHECK(cursiv::find_nodes_for_property(root, "name").empty());
+  CHECK(!cursiv::find_node_for_property(root, "name"));
   CHECK(cursiv::find_nodes_for_keyword(root, "doc").empty());
   CHECK(!cursiv::find_node_for_keyword(root, "doc"));
   CHECK(cursiv::find_hidden_nodes(root, "NOTE").empty());
@@ -3762,25 +3779,25 @@ void index_zero_answers_what_the_list_answers() {
   CHECK(keywords.size() == 3);
   const auto first = cursiv::find_node_for_keyword(p.root(), "item");
   const auto zero = cursiv::find_node_for_keyword(p.root(), "item", 0);
-  CHECK(first.has_value() && zero.has_value() && !keywords.empty());
+  CHECK(first && zero && !keywords.empty());
   if (first && zero && !keywords.empty()) {
-    CHECK(first->id == keywords.front().id);
-    CHECK(zero->id == keywords.front().id);
+    CHECK(first.id == keywords.front().id);
+    CHECK(zero.id == keywords.front().id);
   }
 
   // `name` is the member the Item's own record fills: the node answers for
   // itself, in both spellings.
   const cursiv::AstNode& item = *doc->items[1];
   const std::vector<cursiv::CstNodeView> names =
-      cursiv::find_nodes_for_feature(item, "name");
-  const auto name = cursiv::find_node_for_feature(item, "name");
-  CHECK(!names.empty() && name.has_value());
-  if (!names.empty() && name) CHECK(name->id == names.front().id);
-  if (name) CHECK(name->text() == "bb");
+      cursiv::find_nodes_for_property(item, "name");
+  const auto name = cursiv::find_node_for_property(item, "name");
+  CHECK(!names.empty() && name);
+  if (!names.empty() && name) CHECK(name.id == names.front().id);
+  if (name) CHECK(name.text() == "bb");
 
-  CHECK(cursiv::find_nodes_for_feature(p.root(), "nosuch").empty());
-  CHECK(!cursiv::find_node_for_feature(p.root(), "nosuch").has_value());
-  CHECK(!cursiv::find_node_for_keyword(p.root(), "nosuch").has_value());
+  CHECK(cursiv::find_nodes_for_property(p.root(), "nosuch").empty());
+  CHECK(!cursiv::find_node_for_property(p.root(), "nosuch"));
+  CHECK(!cursiv::find_node_for_keyword(p.root(), "nosuch"));
 }
 
 // Every index answers the list's clamped entry, on both sides -- including a
@@ -3792,20 +3809,20 @@ void every_index_clamps_to_the_list() {
   CHECK(keywords.size() == 3);
   for (const std::size_t k : {0u, 1u, 2u, 3u, 99u}) {
     const auto at = cursiv::find_node_for_keyword(p.root(), "item", k);
-    CHECK(at.has_value());
+    CHECK(at);
     if (at && !keywords.empty())
-      CHECK(at->id ==
+      CHECK(at.id ==
             keywords[std::min<std::size_t>(k, keywords.size() - 1)].id);
   }
   const auto* doc = static_cast<Doc*>(p.r.value);
   if (doc == nullptr || doc->items.empty()) return;
   const cursiv::AstNode& item = *doc->items[0];
   const std::vector<cursiv::CstNodeView> names =
-      cursiv::find_nodes_for_feature(item, "name");
+      cursiv::find_nodes_for_property(item, "name");
   CHECK(names.size() == 1);
-  const auto past = cursiv::find_node_for_feature(item, "name", 5);
-  CHECK(past.has_value());
-  if (past && !names.empty()) CHECK(past->id == names.front().id);
+  const auto past = cursiv::find_node_for_property(item, "name", 5);
+  CHECK(past);
+  if (past && !names.empty()) CHECK(past.id == names.front().id);
 }
 
 // A tree with a long member list: every answer equals the same walk that asks
@@ -3831,7 +3848,7 @@ void the_cursor_answers_what_a_search_answers() {
       return std::binary_search(ownedIds.begin(), ownedIds.end(), id);
     };
     const auto walk = [&](auto&& self, cursiv::NodeId at) -> void {
-      for (const cursiv::NodeId child : cst.reverse_children(at)) {
+      for (const cursiv::NodeId child : cst.reverseChildren(at)) {
         if (!writerFirst && owned(child)) continue;
         if (matches(child)) {
           out.push_back(child);
@@ -3880,7 +3897,7 @@ void the_cursor_answers_what_a_search_answers() {
     for (const std::string_view word : {"item", "mark"})
       CHECK(same(cursiv::find_nodes_for_keyword(*node, word),
                  keywordAt(root, word)));
-    CHECK(same(cursiv::find_nodes_for_feature(*node, "name"),
+    CHECK(same(cursiv::find_nodes_for_property(*node, "name"),
                withOwn(root, reference(root, name, true))));
   }
 }
@@ -4240,7 +4257,7 @@ void exceptions_wake_the_readers() {
   observed(ref);
   release.count_down();
   producer.join(); reader.join();
-  CHECK(threw && result == RefState::ErrorNotFound);
+  CHECK(threw && result == RefState::ErrorThrown);
 }
 
 void rebinding_a_multi_reference_discards_its_previous_targets() {
@@ -4579,10 +4596,44 @@ void an_outgrown_run_gives_its_buffer_back() {
   CHECK(memory.peak == peak);
 }
 
+// A large request the current block served is not a block of its own:
+// handing it back returns nothing, and the block goes on serving.
+void a_large_request_inside_a_block_stays_in_it() {
+  struct Counting final : std::pmr::memory_resource {
+    std::size_t returned = 0;
+
+   private:
+    void* do_allocate(std::size_t bytes, std::size_t align) override {
+      return std::pmr::new_delete_resource()->allocate(bytes, align);
+    }
+    void do_deallocate(void* p, std::size_t bytes, std::size_t align) override {
+      ++returned;
+      std::pmr::new_delete_resource()->deallocate(p, bytes, align);
+    }
+    [[nodiscard]] bool do_is_equal(
+        const std::pmr::memory_resource& other) const noexcept override {
+      return this == &other;
+    }
+  } upstream;
+  constexpr std::size_t kLarge =
+      cursiv::detail::BlockArena::kCap / 2 + (std::size_t{64} << 10);
+  {
+    cursiv::detail::BlockArena pool(cursiv::detail::BlockArena::kCap,
+                                    &upstream);
+    (void)pool.allocate(8, 8);
+    void* const large = pool.allocate(kLarge, 16);
+    pool.deallocate(large, kLarge, 16);
+    CHECK(upstream.returned == 0);
+    (void)pool.allocate(8, 8);
+  }
+  CHECK(upstream.returned == 1);
+}
+
 void run() {
   a_growing_document_reuses_its_blocks();
   a_request_past_the_address_space_is_refused();
   an_outgrown_run_gives_its_buffer_back();
+  a_large_request_inside_a_block_stays_in_it();
 }
 
 }  // namespace block_arena

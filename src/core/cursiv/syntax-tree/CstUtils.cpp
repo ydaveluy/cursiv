@@ -22,18 +22,18 @@
 
 namespace cursiv {
 
-// The one reader of `Cst::carries_node`, which a walk asks of every record
+// The one reader of `Cst::carriesNode`, which a walk asks of every record
 // it passes.
 namespace detail {
 struct CstWalk {
-  static bool carries_node(const Cst& cst, NodeId id) {
-    return cst.carries_node(id);
+  static bool carriesNode(const Cst& cst, NodeId id) {
+    return cst.carriesNode(id);
   }
 };
 }  // namespace detail
 
-void Cst::index_nodes() const {
-  build_once(_nodeIndex, [this] {
+void Cst::indexNodes() const {
+  buildOnce(_nodeIndex, [this] {
     _nodeRecords.assign((std::size_t{size()} + 63) / 64, 0);
     for (const AstNode* const node : _owned)
       if (const NodeId id = node->cstNodeId; id < size())
@@ -50,12 +50,12 @@ template <bool kWriterFirst, class Match, class Take>
 void walk(const Cst& cst, NodeId root, const Match& matches, const Take& take) {
   if (root == kNoNode || root >= cst.size()) return;
   const auto opens = [&cst](NodeId id) {
-    return detail::CstWalk::carries_node(cst, id);
+    return detail::CstWalk::carriesNode(cst, id);
   };
-  const NodeId begin = cst.subtree_begin(root);
+  const NodeId begin = cst.subtreeBegin(root);
   for (NodeId cursor = root; cursor > begin;) {
     const NodeId child = cursor - 1;
-    const NodeId past = cst.subtree_begin(child);
+    const NodeId past = cst.subtreeBegin(child);
     const bool childless = past == child;
     if constexpr (!kWriterFirst) {
       if (!childless && opens(child)) {
@@ -94,18 +94,16 @@ std::vector<CstNodeView> collect(const CstNodeView& node,
 
 // The last match the reverse walk reaches is the first in document order.
 template <bool kWriterFirst, class Match>
-std::optional<CstNodeView> first_of(const CstNodeView& node,
-                                    const Match& matches) {
-  std::optional<CstNodeView> first;
+CstNodeView first_of(const CstNodeView& node, const Match& matches) {
+  CstNodeView first;
   const Cst& cst = *node.cst;
   walk<kWriterFirst>(cst, node.id, matches,
                      [&](NodeId id) { first = CstNodeView{&cst, id}; });
   return first;
 }
 
-std::optional<CstNodeView> clamped(const std::vector<CstNodeView>& found,
-                                   std::size_t index) {
-  if (found.empty()) return std::nullopt;
+CstNodeView clamped(const std::vector<CstNodeView>& found, std::size_t index) {
+  if (found.empty()) return {};
   return found[std::min(index, found.size() - 1)];
 }
 
@@ -139,17 +137,6 @@ class SpellsKeyword {
   mutable std::optional<bool> _folds;
 };
 
-// The record `node` was built from, in its document's tree: where a search
-// starts. Nothing for a node no document holds, or one whose record that tree
-// does not have.
-CstNodeView record_of(const AstNode& node, const Document* document) {
-  if (document == nullptr) document = node.getDocument();
-  if (document == nullptr) return {};
-  const Cst& cst = document->parseResult.cst();
-  if (node.cstNodeId >= cst.size()) return {};
-  return CstNodeView{&cst, node.cstNodeId};
-}
-
 std::vector<CstNodeView> writers_of(const CstNodeView& node,
                                     std::string_view feature) {
   const Grammar* const grammar = grammar_of(node);
@@ -164,12 +151,11 @@ std::vector<CstNodeView> writers_of(const CstNodeView& node,
   return found;
 }
 
-std::optional<CstNodeView> writer_of(const CstNodeView& node,
-                                     std::string_view feature,
-                                     std::size_t index) {
+CstNodeView writer_of(const CstNodeView& node, std::string_view feature,
+                      std::size_t index) {
   if (index != 0) return clamped(writers_of(node, feature), index);
   const Grammar* const grammar = grammar_of(node);
-  if (grammar == nullptr || feature.empty()) return std::nullopt;
+  if (grammar == nullptr || feature.empty()) return {};
   const Cst& cst = *node.cst;
   if (grammar->recordFills(cst[node.id], feature)) return node;
   return first_of<true>(
@@ -185,12 +171,11 @@ std::vector<CstNodeView> spellings_of(const CstNodeView& node,
   return collect<false>(node, spells);
 }
 
-std::optional<CstNodeView> spelling_of(const CstNodeView& node,
-                                       std::string_view keyword,
-                                       std::size_t index) {
+CstNodeView spelling_of(const CstNodeView& node, std::string_view keyword,
+                        std::size_t index) {
   if (index != 0) return clamped(spellings_of(node, keyword), index);
   const Grammar* const grammar = grammar_of(node);
-  if (grammar == nullptr || keyword.empty()) return std::nullopt;
+  if (grammar == nullptr || keyword.empty()) return {};
   const SpellsKeyword spells(*node.cst, *grammar, keyword);
   if (spells(node.id)) return node;
   return first_of<false>(node, spells);
@@ -209,45 +194,50 @@ std::vector<CstNodeView> hidden_of(const CstNodeView& node,
 
 }  // namespace
 
-std::vector<CstNodeView> find_nodes_for_feature(const AstNode& node,
-                                                std::string_view feature,
-                                                const Document* document) {
-  return writers_of(record_of(node, document), feature);
+CstNodeView cst_node_of(const AstNode& node, const Document* document) {
+  if (document == nullptr) document = node.getDocument();
+  if (document == nullptr) return {};
+  const Cst& cst = document->parseResult.cst();
+  if (node.cstNodeId >= cst.size()) return {};
+  return CstNodeView{&cst, node.cstNodeId};
 }
 
-std::optional<CstNodeView> find_node_for_feature(const AstNode& node,
+std::vector<CstNodeView> find_nodes_for_property(const AstNode& node,
                                                  std::string_view feature,
-                                                 std::size_t index,
                                                  const Document* document) {
-  return writer_of(record_of(node, document), feature, index);
+  return writers_of(cst_node_of(node, document), feature);
+}
+
+CstNodeView find_node_for_property(const AstNode& node,
+                                   std::string_view feature, std::size_t index,
+                                   const Document* document) {
+  return writer_of(cst_node_of(node, document), feature, index);
 }
 
 std::vector<CstNodeView> find_nodes_for_keyword(const AstNode& node,
                                                 std::string_view keyword,
                                                 const Document* document) {
-  return spellings_of(record_of(node, document), keyword);
+  return spellings_of(cst_node_of(node, document), keyword);
 }
 
-std::optional<CstNodeView> find_node_for_keyword(const AstNode& node,
-                                                 std::string_view keyword,
-                                                 std::size_t index,
-                                                 const Document* document) {
-  return spelling_of(record_of(node, document), keyword, index);
+CstNodeView find_node_for_keyword(const AstNode& node, std::string_view keyword,
+                                  std::size_t index, const Document* document) {
+  return spelling_of(cst_node_of(node, document), keyword, index);
 }
 
 std::vector<CstNodeView> find_hidden_nodes(const AstNode& node,
                                            std::string_view ruleName,
                                            const Document* document) {
-  return hidden_of(record_of(node, document), ruleName);
+  return hidden_of(cst_node_of(node, document), ruleName);
 }
 
 CstLeaf find_leaf_before_offset(const Cst& cst, TextOffset offset) {
-  if (!cst.has_entry()) return {};
-  const NodeId first = cst.entry_begin();
+  if (!cst.hasEntry()) return {};
+  const NodeId first = cst.entryBegin();
   // Ends never decrease, so the leaves ending at or before the caret come
   // before the first one ending past it, and the answer is the last eligible.
-  for (NodeId at = cst.leaf_after(offset); at > 0;) {
-    const CstLeaf leaf = cst.as_leaf(at = cst.leaf_before(at));
+  for (NodeId at = cst.leafAfter(offset); at > 0;) {
+    const CstLeaf leaf = cst.asLeaf(at = cst.leafBefore(at));
     if (leaf.id < first) break;
     if (leaf.hidden || leaf.recovered || leaf.begin == leaf.end) continue;
     return leaf;
@@ -276,12 +266,12 @@ CstLeaf detail::word_at(const Cst& cst, TextOffset offset) {
   const auto word = [&](const CstLeaf& leaf) {
     return !leaf.hidden && leaf.end > leaf.begin && ends_a_word(text, leaf);
   };
-  const NodeId after = cst.leaf_after(offset);
+  const NodeId after = cst.leafAfter(offset);
   // Every leaf ending at the caret comes just before the first one ending past
   // it -- a repair's zero-width record can stand over the word the author
   // typed.
   for (NodeId r = after; r > 0;) {
-    const CstLeaf before = cst.as_leaf(r = cst.leaf_before(r));
+    const CstLeaf before = cst.asLeaf(r = cst.leafBefore(r));
     if (before.end != offset) break;
     if (word(before)) return before;
   }
@@ -289,7 +279,7 @@ CstLeaf detail::word_at(const Cst& cst, TextOffset offset) {
   // the caret alone it would answer nothing but punctuation -- every spelling
   // ending in a letter lexes into the word behind it.
   if (after < cst.size())
-    if (const CstLeaf at = cst.as_leaf(after); at.begin <= offset && word(at))
+    if (const CstLeaf at = cst.asLeaf(after); at.begin <= offset && word(at))
       return at;
   return {};
 }
@@ -300,10 +290,10 @@ std::vector<NodeId> interior_nodes(const Cst& cst, NodeId open, NodeId close) {
     return interior;
   if (open > close) std::swap(open, close);
   NodeId parent = close + 1;
-  while (parent < cst.size() && cst.subtree_begin(parent) > open) ++parent;
+  while (parent < cst.size() && cst.subtreeBegin(parent) > open) ++parent;
   if (parent == cst.size()) return interior;
   bool behindClose = false;
-  for (const NodeId child : cst.reverse_children(parent)) {
+  for (const NodeId child : cst.reverseChildren(parent)) {
     if (cst.contains(child, open)) break;
     if (cst.contains(child, close))
       behindClose = true;

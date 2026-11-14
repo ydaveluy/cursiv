@@ -143,7 +143,7 @@ std::string names(const Engine& engine, std::string_view head,
                   std::string_view body) {
   const std::string text = std::string(head) + std::string(body);
   const cursiv::ParseResult r = engine->parse(text);
-  const auto* const doc = r.value_as<tsoft::ast::Doc>();
+  const auto* const doc = r.valueAs<tsoft::ast::Doc>();
   if (!r.accepted || doc == nullptr) return "<refused>";
   std::string out;
   for (const auto n : doc->names) {
@@ -192,7 +192,7 @@ char child(const cursiv::Parser& p, std::string_view head,
   const std::string text = std::string(head) + std::string(body);
   const cursiv::ParseResult r = p.parse(text);
   if (!r.accepted || !r.diagnostics.empty()) return '-';
-  const auto* const d = r.value_as<trank::ast::Doc>();
+  const auto* const d = r.valueAs<trank::ast::Doc>();
   if (d == nullptr || d->child == nullptr) return '-';
   if (cursiv::ast_cast<trank::ast::AChild>(d->child) != nullptr) return 'A';
   if (cursiv::ast_cast<trank::ast::BChild>(d->child) != nullptr) return 'B';
@@ -229,7 +229,7 @@ const ast::Child* child_of(const cursiv::Parser& p, std::string_view body) {
   text = "decide " + std::string(body);
   r = p.parse(text);
   CHECK(r.accepted);
-  const auto* doc = r.value_as<ast::Doc>();
+  const auto* doc = r.valueAs<ast::Doc>();
   return doc != nullptr ? doc->child : nullptr;
 }
 
@@ -258,7 +258,7 @@ void run() {
     const std::string text = "munch " + std::string(n, 'a');
     const cursiv::ParseResult r = engine->parse(text);
     CHECK(r.accepted && r.diagnostics.empty());
-    const auto* const doc = r.value_as<tmunch::ast::Doc>();
+    const auto* const doc = r.valueAs<tmunch::ast::Doc>();
     CHECK(doc != nullptr);
     // One name per byte: the long spelling never closes, so the short one
     // takes every position.
@@ -268,7 +268,7 @@ void run() {
   const std::string closed = "munch " + std::string(64, 'a') + "b";
   const cursiv::ParseResult r = engine->parse(closed);
   CHECK(r.accepted && r.diagnostics.empty());
-  if (const auto* const doc = r.value_as<tmunch::ast::Doc>())
+  if (const auto* const doc = r.valueAs<tmunch::ast::Doc>())
     CHECK(doc->parts.size() == 1);
   std::printf("  a run read one name at a time, and closed read as one\n");
 }
@@ -431,7 +431,7 @@ std::string read(std::string_view text) {
   const std::string doc = "after " + std::string(text);
   const cursiv::ParseResult r = p->parse(doc);
   if (!r.accepted || !r.diagnostics.empty()) return "<refused>";
-  const auto* const s = r.value_as<Stmt>();
+  const auto* const s = r.valueAs<Stmt>();
   if (s == nullptr) return "<no stmt>";
   if (s->value == nullptr) return "";
   std::string out;
@@ -469,7 +469,7 @@ std::string read(std::string_view text) {
   const cursiv::ParseResult r = p->parse(doc);
   if (!r.accepted || !r.diagnostics.empty()) return "<refused>";
   std::string out;
-  spell(r.value_as<pa::Decl>()->type, out);
+  spell(r.valueAs<pa::Decl>()->type, out);
   return out;
 }
 
@@ -555,7 +555,7 @@ std::string verdict(std::string_view text) {
   const std::string doc = "nest " + std::string(text);
   const cursiv::ParseResult r = p->parse(doc);
   if (!r.accepted) return "refused";
-  if (r.error != cursiv::AstBuildError::none || r.value == nullptr)
+  if (r.error != cursiv::AstBuildError::None || r.value == nullptr)
     return "no tree";
   for (const auto* node : r.nodes()) {
     const auto* ancestor = node;
@@ -589,9 +589,9 @@ void long_postfix_chain_beside_a_fault() {
   const auto p = tsmall::generated::G::create_parser();
   const std::string input = "nest " + text;
   const auto r = p->parse(input);
-  CHECK(r.accepted && r.error == cursiv::AstBuildError::none);
+  CHECK(r.accepted && r.error == cursiv::AstBuildError::None);
   CHECK(!r.diagnostics.empty() || !r.cst().diagnostics().empty());
-  const auto* model = r.value_as<Model>();
+  const auto* model = r.valueAs<Model>();
   CHECK(model != nullptr && !model->stmts.empty());
   if (model == nullptr || model->stmts.empty()) return;
   const Expr* expr = model->stmts[0]->expr;
@@ -613,9 +613,9 @@ void long_postfix_chain() {
   const auto p = tsmall::generated::G::create_parser();
   const std::string doc = "nest " + text;
   const auto r = p->parse(doc);
-  CHECK(r.accepted && r.error == cursiv::AstBuildError::none);
+  CHECK(r.accepted && r.error == cursiv::AstBuildError::None);
   CHECK(r.diagnostics.empty());
-  const auto* model = r.value_as<Model>();
+  const auto* model = r.valueAs<Model>();
   CHECK(model != nullptr && model->stmts.size() == 1);
   if (model == nullptr || model->stmts.size() != 1) return;
   const cursiv::AstNode* owner = model->stmts[0];
@@ -672,13 +672,13 @@ cursiv::ParseResult parse(std::string_view text) {
 }
 
 const Decl* first(const cursiv::ParseResult& r) {
-  const auto* const m = r.value_as<Model>();
+  const auto* const m = r.valueAs<Model>();
   return m == nullptr || m->decls.empty() ? nullptr : m->decls[0];
 }
 
 bool converted_nothing(const cursiv::ParseResult& r) {
   for (const auto& d : r.diagnostics)
-    if (d.kind == cursiv::DiagnosticKind::conversion_error) return false;
+    if (d.kind == cursiv::DiagnosticKind::ConversionError) return false;
   return true;
 }
 

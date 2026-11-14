@@ -27,12 +27,12 @@ namespace cursiv {
 
 namespace {
 
-// Covers every record the entry emitted, not just `entry_root`'s node: a
+// Covers every record the entry emitted, not just `entryRoot`'s node: a
 // trailing comment the entry consumed sits past the root. Node ids are
 // postorder, so this is a min/max fold, not a first/last read.
 [[nodiscard]] TextRange entry_span(const Cst& cst) {
-  const NodeId begin = cst.entry_begin();
-  const NodeId end = cst.entry_end();
+  const NodeId begin = cst.entryBegin();
+  const NodeId end = cst.entryEnd();
   if (end <= begin) return TextRange{};
   TextRange span{cst[begin].begin, cst[begin].end};
   for (NodeId i = begin + 1; i < end; ++i) {
@@ -50,7 +50,7 @@ lsp::DocumentSymbol DefaultDocumentSymbolProvider::createSymbol(
   lsp::DocumentSymbol symbol;
   symbol.name =
       std::string(computedName.empty() ? nameNode.text() : computedName);
-  symbol.kind = _core.lspShared.nodeKindProvider->getSymbolKind(node);
+  symbol.kind = services.lspShared.nodeKindProvider->getSymbolKind(node);
   symbol.range = to_lsp(document.textDocument().rangeAt(span.begin, span.end));
   symbol.selectionRange =
       to_lsp(document.textDocument().rangeAt(nameNode.begin(), nameNode.end()));
@@ -64,7 +64,7 @@ std::vector<lsp::DocumentSymbol> DefaultDocumentSymbolProvider::getSymbols(
 
   const Cst& cst = document.parseResult.cst();
   const detail::NamedNodes named =
-      detail::collect_named_nodes(document, *_core.nameProvider, token);
+      detail::collect_named_nodes(document, *services.nameProvider, token);
   std::optional<TextRange> entry;
 
   std::vector<lsp::DocumentSymbol> symbols;
@@ -73,12 +73,12 @@ std::vector<lsp::DocumentSymbol> DefaultDocumentSymbolProvider::getSymbols(
     throw_if_cancelled(token);
     const AstNode& node = *named.nodes[i];
     const NodeId id = node.cstNodeId;
-    if (id == cst.entry_root() && !entry.has_value()) entry = entry_span(cst);
+    if (id == cst.entryRoot() && !entry.has_value()) entry = entry_span(cst);
     const TextRange span =
-        id == cst.entry_root() ? *entry : TextRange{cst[id].begin, cst[id].end};
+        id == cst.entryRoot() ? *entry : TextRange{cst[id].begin, cst[id].end};
     symbols.push_back(createSymbol(
         document, node, span, named.nameNodes[i],
-        _core.nameProvider->getName(node).value_or(std::string_view{})));
+        services.nameProvider->getName(node).value_or(std::string_view{})));
   }
 
   // The owner of a symbol is its nearest named ancestor; unnamed nodes

@@ -76,13 +76,13 @@ using Kind = cursiv::DiagnosticKind;
 
 void one_diagnostic_more_is_spurious() {
   const std::vector<metric::FaultWindow> w{window(10, 20, 15)};
-  std::vector<cursiv::ParseDiagnostic> d{said(Kind::inserted, 15, 15)};
+  std::vector<cursiv::ParseDiagnostic> d{said(Kind::Inserted, 15, 15)};
   auto p = metric::FaultPairing::pair(w, d);
   CHECK(p.found == 1 && p.missed == 0 && p.spurious == 0);
-  d.push_back(said(Kind::deleted, 12, 13));
+  d.push_back(said(Kind::Deleted, 12, 13));
   p = metric::FaultPairing::pair(w, d);
   CHECK(p.found == 1 && p.spurious == 1);
-  d.push_back(said(Kind::deleted, 100, 101));
+  d.push_back(said(Kind::Deleted, 100, 101));
   p = metric::FaultPairing::pair(w, d);
   CHECK(p.found == 1 && p.spurious == 2);
 }
@@ -92,8 +92,8 @@ void one_diagnostic_more_is_spurious() {
 void the_pairing_answers_the_most_faults() {
   const std::vector<metric::FaultWindow> w{window(10, 20, 14),
                                            window(12, 22, 21)};
-  const std::vector<cursiv::ParseDiagnostic> d{said(Kind::inserted, 14, 14),
-                                               said(Kind::inserted, 19, 19)};
+  const std::vector<cursiv::ParseDiagnostic> d{said(Kind::Inserted, 14, 14),
+                                               said(Kind::Inserted, 19, 19)};
   const auto p = metric::FaultPairing::pair(w, d);
   CHECK(p.found == 2 && p.spurious == 0);
   CHECK(p.answer[0] == 0 && p.answer[1] == 1);
@@ -134,14 +134,16 @@ void a_diagnostic_never_buys_back_a_spurious_one() {
 // text it covers.
 void a_wide_abandonment_answers_by_its_ends() {
   const std::vector<metric::FaultWindow> w{window(50, 60, 55)};
-  CHECK(metric::FaultPairing::pair(w, {{said(Kind::incomplete, 0, 200)}})
-            .found == 0);
-  CHECK(metric::FaultPairing::pair(w, {{said(Kind::incomplete, 0, 57)}})
+  CHECK(
+      metric::FaultPairing::pair(w, {{said(Kind::Incomplete, 0, 200)}}).found ==
+      0);
+  CHECK(
+      metric::FaultPairing::pair(w, {{said(Kind::Incomplete, 0, 57)}}).found ==
+      1);
+  CHECK(metric::FaultPairing::pair(w, {{said(Kind::Incomplete, 52, 200)}})
             .found == 1);
-  CHECK(metric::FaultPairing::pair(w, {{said(Kind::incomplete, 52, 200)}})
-            .found == 1);
-  CHECK(metric::FaultPairing::pair(w, {{said(Kind::deleted, 0, 200)}})
-            .found == 1);
+  CHECK(metric::FaultPairing::pair(w, {{said(Kind::Deleted, 0, 200)}}).found ==
+        1);
 }
 
 void a_case_maps_the_twin() {
@@ -170,7 +172,7 @@ void the_text_is_aligned_not_counted() {
   CHECK(windows.size() == 1 && windows[0].coreFirst == windows[0].coreLast);
   const std::vector<cursiv::CstLeaf> got{leaf(0, 1), leaf(2, 3),
                                          leaf(4, 5, true), leaf(6, 7)};
-  const std::vector<cursiv::ParseDiagnostic> d{said(Kind::deleted, 4, 5)};
+  const std::vector<cursiv::ParseDiagnostic> d{said(Kind::Deleted, 4, 5)};
   const auto none = [](std::size_t, cursiv::ElementId) { return false; };
   const auto t = metric::TextKept::of(twin, c, windows, got, d, none);
   CHECK(t.eligible == 3 && t.kept == 2 && t.deleted == 1);
@@ -195,22 +197,22 @@ void an_insertion_that_restores_is_no_invention() {
     return expected == kComma && token == 3;
   };
   auto t = metric::TextKept::of(twin, c, windows, got,
-                                {{said(Kind::inserted, 6, 6, kComma)}}, comma);
+                                {{said(Kind::Inserted, 6, 6, kComma)}}, comma);
   CHECK(t.restored == 1 && t.invented == 0);
   CHECK(t.eligible == 5 && t.kept == 5);
   t = metric::TextKept::of(twin, c, windows, got,
-                           {{said(Kind::inserted, 6, 6, kPlus)}}, comma);
+                           {{said(Kind::Inserted, 6, 6, kPlus)}}, comma);
   CHECK(t.restored == 0 && t.invented == 1);
   // The `x` dropped where the comma was missing: a value lost, not kept.
   const std::vector<cursiv::CstLeaf> lost{leaf(0, 1), leaf(2, 3),
                                           leaf(4, 5, true), leaf(7, 8),
                                           leaf(9, 10)};
   t = metric::TextKept::of(twin, c, windows, lost,
-                           {{said(Kind::deleted, 4, 5)}}, comma);
+                           {{said(Kind::Deleted, 4, 5)}}, comma);
   CHECK(t.kept == 4 && t.deleted == 1);
   // Under an abandonment the leaves stand, and are not kept.
   t = metric::TextKept::of(twin, c, windows, got,
-                           {{said(Kind::incomplete, 2, 10)}}, comma);
+                           {{said(Kind::Incomplete, 2, 10)}}, comma);
   CHECK(t.kept == 1 && t.abandoned == 4);
 }
 
@@ -285,15 +287,15 @@ struct SaidValues final : cursiv::fuzzer::GrammarActions {
                              cursiv::AstNode* right) const override {
     return kDmActions.fold(e, op, node, left, text, right);
   }
-  cursiv::fuzzer::Write write_node(cursiv::ElementId e, cursiv::AstNode& owner,
-                                   cursiv::AstNode* child) const override {
-    return kDmActions.write_node(e, owner, child);
+  cursiv::fuzzer::Write writeNode(cursiv::ElementId e, cursiv::AstNode& owner,
+                                  cursiv::AstNode* child) const override {
+    return kDmActions.writeNode(e, owner, child);
   }
-  cursiv::fuzzer::Write write_text(cursiv::ElementId e,
-                                   cursiv::ElementId payload,
-                                   cursiv::AstNode& owner,
-                                   std::string_view text) const override {
-    return kDmActions.write_text(e, payload, owner, text);
+  cursiv::fuzzer::Write writeText(cursiv::ElementId e,
+                                  cursiv::ElementId payload,
+                                  cursiv::AstNode& owner,
+                                  std::string_view text) const override {
+    return kDmActions.writeText(e, payload, owner, text);
   }
   std::optional<std::string> denote(cursiv::ElementId e,
                                     std::string_view text) const override {
@@ -332,18 +334,18 @@ void a_node_is_kept_by_values_read_whole() {
   using K = cursiv::fuzzer::ValueKind;
 
   SaidValues moved;
-  moved.values[entity(ra.value)] = {{"name", K::text, "x\037b#0=y"},
-                                    {"b", K::text, ""}};
-  moved.values[entity(rb.value)] = {{"name", K::text, "x"},
-                                    {"b", K::text, "y\037b#0="}};
+  moved.values[entity(ra.value)] = {{"name", K::Text, "x\037b#0=y"},
+                                    {"b", K::Text, ""}};
+  moved.values[entity(rb.value)] = {{"name", K::Text, "x"},
+                                    {"b", K::Text, "y\037b#0="}};
   const metric::AstOverlap byMoved{*reflection, moved};
   CHECK(!byMoved.same(*ra.value, *rb.value));
   const auto m = byMoved.run(*ra.value, rb.value, none);
   CHECK(m.total == 3 && m.kept == 2);
 
   SaidValues unread;
-  unread.values[entity(ra.value)] = {{"name", K::unreadable, ""}};
-  unread.values[entity(rb.value)] = {{"name", K::unreadable, ""}};
+  unread.values[entity(ra.value)] = {{"name", K::Unreadable, ""}};
+  unread.values[entity(rb.value)] = {{"name", K::Unreadable, ""}};
   const metric::AstOverlap byUnread{*reflection, unread};
   CHECK(!byUnread.same(*ra.value, *rb.value));
   metric::RepairVerdict v;

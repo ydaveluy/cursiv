@@ -42,7 +42,7 @@ int generate(const GenerateOptions& options) {
   shared.fileSystemProvider =
       std::make_unique<cursiv::LocalFileSystemProvider>();
   cursiv::install_default_shared_core_services(shared);
-  if (!req::register_core_services(shared)) return cursiv::kFatal;
+  req::register_core_services(shared);
 
   // The whole folder: a coverage summary is about the `.tst` files beside the
   // `.req`, so a build of the one file alone would report nothing covered. A

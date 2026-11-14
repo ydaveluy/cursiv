@@ -58,7 +58,7 @@ class Cst {
         _pool(std::make_unique<detail::BlockArena>(kFirstBuffer)) {
     _stream.bind(_pool.get());
   }
-  explicit Cst(std::string_view text) : Cst() { set_text(text); }
+  explicit Cst(std::string_view text) : Cst() { setText(text); }
   // Hand-written so a moved-from tree reports itself empty: `= default` copies
   // the scalars, leaving the source claiming a size over storage it gave away.
   Cst(Cst&& other) noexcept { *this = std::move(other); }
@@ -97,7 +97,7 @@ class Cst {
       _pool = std::make_unique<detail::BlockArena>(kFirstBuffer);
     _stream.bind(_pool.get());
     clear();
-    set_text(text);
+    setText(text);
   }
 
  private:
@@ -111,7 +111,7 @@ class Cst {
   friend struct Document;
   // Joins `parts` into text that lives as long as the tree. A null view means
   // an unwritten member, even at length zero.
-  std::string_view keep_text(std::span<const std::string_view> parts) const {
+  std::string_view keepText(std::span<const std::string_view> parts) const {
     std::size_t size = 0;
     for (const std::string_view part : parts) {
       if (part.size() > std::numeric_limits<std::size_t>::max() - size)
@@ -147,7 +147,7 @@ class Cst {
     _translation.reset();
   }
 
-  void set_text(std::string_view text) {
+  void setText(std::string_view text) {
     // Checked once: every offset in the tree is 32 bits, so a larger document
     // would report wrong spans rather than an error.
     if (text.size() > kMaxDocument)
@@ -164,9 +164,9 @@ class Cst {
   NodeCount size() const { return _stream.records(); }
 
   // The entry is explicit because hidden trivia can be roots of the forest, so
-  // neither zero nor `size()-1` finds it. `has_entry()` means the entry rule
+  // neither zero nor `size()-1` finds it. `hasEntry()` means the entry rule
   // completed; a parse may still reject text after it and keep the root.
-  bool has_entry() const { return _entryRoot != kNoNode; }
+  bool hasEntry() const { return _entryRoot != kNoNode; }
   bool accepted() const { return _accepted; }
   // Whether a repair happened, read from the diagnostics: `accepted() &&
   // !recovered()` is a clean parse, `accepted() && recovered()` a repaired one.
@@ -179,9 +179,9 @@ class Cst {
   std::span<const ParseDiagnostic> diagnostics() const {
     return {_diagnostics.data(), _diagnostics.size()};
   }
-  NodeId entry_root() const { return _entryRoot; }
-  NodeId entry_begin() const { return _entryBegin; }
-  NodeId entry_end() const { return _entryEnd; }
+  NodeId entryRoot() const { return _entryRoot; }
+  NodeId entryBegin() const { return _entryBegin; }
+  NodeId entryEnd() const { return _entryEnd; }
 
   const CstNode& operator[](NodeId id) const { return node(id); }
 
@@ -194,26 +194,26 @@ class Cst {
   std::string_view spelling(NodeId id) const noexcept {
     const CstNode& n = node(id);
     if (_translation == nullptr) return text(n);
-    const TextRange at = _translation->text_of(id, {n.begin, n.end});
+    const TextRange at = _translation->textOf(id, {n.begin, n.end});
     return _translation->text().substr(at.begin, at.end - at.begin);
   }
 
   // Postorder gives the last child in constant time, not the next sibling:
-  // walk `[subtree_begin(id), id]`, or `reverse_children` reversed.
-  NodeId subtree_begin(NodeId id) const {
+  // walk `[subtreeBegin(id), id]`, or `reverseChildren` reversed.
+  NodeId subtreeBegin(NodeId id) const {
     const NodeId extent = node(id).subtreeSize;
     return id - (extent - 1);
   }
   bool childless(NodeId id) const { return node(id).subtreeSize == 1; }
   bool contains(NodeId ancestor, NodeId descendant) const {
-    return descendant >= subtree_begin(ancestor) && descendant <= ancestor;
+    return descendant >= subtreeBegin(ancestor) && descendant <= ancestor;
   }
 
-  ReverseNodeRange reverse_children(NodeId parent) const;
+  ReverseNodeRange reverseChildren(NodeId parent) const;
 
   // Whether an engine wrote the records. Hand-built records carry no engine
   // data: check this before reading it.
-  [[nodiscard]] bool engine_stamped() const { return _enginesTape; }
+  [[nodiscard]] bool engineStamped() const { return _enginesTape; }
   // The grammar of the engine's records; null when no language parser
   // finished the tree.
   [[nodiscard]] const Grammar* grammar() const { return _grammar; }
@@ -227,10 +227,10 @@ class Cst {
   // The leaves in document order, without the index: a linear consumer pays
   // nothing for a record it does not read. `f` takes a `const CstLeaf&`.
   template <class F>
-  void visit_leaves(F&& f) const {
+  void visitLeaves(F&& f) const {
     for (NodeId id = 0; id < size(); ++id) {
       const CstNode& n = node(id);
-      if (n.subtreeSize == 1) f(leaf_of(id, n));
+      if (n.subtreeSize == 1) f(leafOf(id, n));
     }
   }
 
@@ -239,14 +239,12 @@ class Cst {
   // leaf to the next over the parents that close between them.
 
   // Record `id`, which has no child, as a leaf.
-  [[nodiscard]] CstLeaf as_leaf(NodeId id) const {
-    return leaf_of(id, node(id));
-  }
+  [[nodiscard]] CstLeaf asLeaf(NodeId id) const { return leafOf(id, node(id)); }
 
   // The first leaf ending past `offset`, or `size()`. A parent that read
   // blanks past its last leaf can be the first record ending past it; its
   // leaves then all end before, and the answer is the next leaf.
-  [[nodiscard]] NodeId leaf_after(TextOffset offset) const {
+  [[nodiscard]] NodeId leafAfter(TextOffset offset) const {
     NodeId lo = 0, hi = size();
     while (lo < hi) {
       const NodeId mid = std::midpoint(lo, hi);
@@ -255,18 +253,18 @@ class Cst {
       else
         hi = mid;
     }
-    return lo == size() || childless(lo) ? lo : next_leaf(lo);
+    return lo == size() || childless(lo) ? lo : nextLeaf(lo);
   }
 
   // The last leaf before record `at`, which is above 0; `at` may be `size()`.
-  [[nodiscard]] NodeId leaf_before(NodeId at) const {
+  [[nodiscard]] NodeId leafBefore(NodeId at) const {
     do --at;
     while (!childless(at));
     return at;
   }
 
   // The first leaf after record `id`, or `size()`.
-  [[nodiscard]] NodeId next_leaf(NodeId id) const {
+  [[nodiscard]] NodeId nextLeaf(NodeId id) const {
     do ++id;
     while (id < size() && !childless(id));
     return id;
@@ -277,14 +275,14 @@ class Cst {
   friend class detail::CstBuilder;
 
   // Marks the records as written by an engine.
-  void bind_stream() {
+  void bindStream() {
     _enginesTape = true;
     _nodeRecords.clear();
     _nodeIndex = 0;
   }
 
-  void bind_entry(NodeId begin, NodeId end, NodeId root) {
-    // What `leaf_after` bisects on, checked once a parse is over.
+  void bindEntry(NodeId begin, NodeId end, NodeId root) {
+    // What `leafAfter` bisects on, checked once a parse is over.
     assert(std::ranges::is_sorted(size() != 0
                                       ? std::span(&_stream.at(0), size())
                                       : std::span<const CstNode>{},
@@ -294,11 +292,11 @@ class Cst {
     _entryEnd = end;
     _entryRoot = root;
   }
-  void bind_accepted(bool accepted) { _accepted = accepted; }
+  void bindAccepted(bool accepted) { _accepted = accepted; }
   // Set once a build is over: `owned` must not grow after this. `addressof`,
   // not `&`: the grammar DSL overloads the operator, and `Grammar` is only
   // declared here.
-  void bind_model(const Grammar& grammar, OwnedNodes owned) {
+  void bindModel(const Grammar& grammar, OwnedNodes owned) {
     _grammar = std::addressof(grammar);
     _owned = owned;
     _nodeRecords.clear();
@@ -307,11 +305,11 @@ class Cst {
   // Moves a parse of the translated text to the document's offsets, and
   // keeps the text its AST points into. The text is bound first: a node's
   // destructor may read it.
-  void bind_translation(std::string_view document,
-                        std::unique_ptr<SourceTranslation> translation) {
+  void bindTranslation(std::string_view document,
+                       std::unique_ptr<SourceTranslation> translation) {
     SourceTranslation& bound = *translation;
     _translation = std::move(translation);
-    set_text(document);
+    setText(document);
     bound.bind(
         size() != 0 ? std::span(&_stream.at(0), size()) : std::span<CstNode>{},
         std::span(_diagnostics));
@@ -319,29 +317,29 @@ class Cst {
 
   const CstNode& node(NodeId id) const { return _stream.at(id); }
 
-  static CstLeaf leaf_of(NodeId id, const CstNode& n) {
+  static CstLeaf leafOf(NodeId id, const CstNode& n) {
     return CstLeaf{id, n.begin, n.end, n.hidden != 0, n.recovered != 0};
   }
 
-  // The walks of `CstUtils`, which ask `carries_node` of every record they
+  // The walks of `CstUtils`, which ask `carriesNode` of every record they
   // pass: a construction's search must stop at a nested node's record.
   friend struct detail::CstWalk;
 
   // Whether a node of `owned()` was built from the record: one bit a record,
   // so a walk asks it at no search.
-  [[nodiscard]] bool carries_node(NodeId id) const {
+  [[nodiscard]] bool carriesNode(NodeId id) const {
     if (!published(_nodeIndex)) [[unlikely]]
-      index_nodes();
+      indexNodes();
     return ((_nodeRecords[id / 64] >> (id % 64)) & 1U) != 0;
   }
   // Defined in `CstUtils.cpp`, where `AstNode` is complete and the walks that
   // read it live.
-  CURSIV_NOINLINE void index_nodes() const;
+  CURSIV_NOINLINE void indexNodes() const;
 
   // Builds the index once and publishes it: a second reader waits instead of
   // building it too. `build` clears the list.
   template <class Build>
-  void build_once(std::uint8_t& flag, Build&& build) const {
+  void buildOnce(std::uint8_t& flag, Build&& build) const {
     const std::lock_guard lock(_indexLock);
     if (!published(flag)) {
       build();
@@ -406,7 +404,7 @@ class ReverseNodeRange {
 
     NodeId operator*() const { return _cursor - 1; }
     iterator& operator++() {
-      _cursor = _cst->subtree_begin(_cursor - 1);
+      _cursor = _cst->subtreeBegin(_cursor - 1);
       return *this;
     }
     iterator operator++(int) {
@@ -435,8 +433,8 @@ class ReverseNodeRange {
   NodeId _lastCursor;
 };
 
-inline ReverseNodeRange Cst::reverse_children(NodeId parent) const {
-  return ReverseNodeRange(this, parent, subtree_begin(parent));
+inline ReverseNodeRange Cst::reverseChildren(NodeId parent) const {
+  return ReverseNodeRange(this, parent, subtreeBegin(parent));
 }
 
 }  // namespace cursiv

@@ -58,7 +58,7 @@ class QualifiedScopeComputation final : public cursiv::DefaultScopeComputation {
           name = std::string(package->name) + "." + name;
       }
 
-      const auto stored = document.keep_text(name);
+      const auto stored = document.keepText(name);
       if (auto description = services.astNodeDescriptionProvider->createDescription(
               *node, stored, &document))
         exported.push_back(*description);
@@ -70,9 +70,9 @@ class QualifiedScopeComputation final : public cursiv::DefaultScopeComputation {
 }  // namespace dm
 ```
 
-A description does not copy its name, so `keep_text` stores the computed name
+A description does not copy its name, so `keepText` stores the computed name
 with the document, which frees it at the next parse. It also takes the parts of a
-name, as in `keep_text(outer, ".", inner)`, and writes them in one piece. Each call
+name, as in `keepText(outer, ".", inner)`, and writes them in one piece. Each call
 adds to the document's memory, so call it only from a scope computation, which
 runs once per parse; resetting a document to `IndexedContent` or `Parsed` runs it
 again. Do not resolve references here: other documents may not have exported their

@@ -76,7 +76,7 @@ void spell(const ast::Expr& expr, std::string& out) {
 std::string read(const cursiv::Parser& parser, std::string_view text) {
   const std::string source(text);
   const cursiv::ParseResult r = parser.parse(source);
-  const auto* const doc = r.value_as<ast::Doc>();
+  const auto* const doc = r.valueAs<ast::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr ||
       doc->value == nullptr)
     return "<refused>";
@@ -183,7 +183,7 @@ void as_assigns_its_constant(const cursiv::Parser& p) {
                                    {"stated:NOT SAME", Op::NOTEQUAL},
                                    {"stated:NOT\n  SAME", Op::NOTEQUAL}}) {
     const cursiv::ParseResult r = p.parse(text);
-    const auto* const doc = r.value_as<ast::Doc>();
+    const auto* const doc = r.valueAs<ast::Doc>();
     const auto* const coded =
         doc == nullptr ? nullptr : cursiv::ast_cast<ast::Coded>(doc->value);
     CHECK(r.accepted && r.diagnostics.empty() && coded != nullptr);
@@ -211,7 +211,7 @@ void a_data_rule_passes_its_alternative_value(const cursiv::Parser& p) {
         {"visible:inline protected a", Vis::Protected},
         {"visible:inline private a", Vis::Private}}) {
     const cursiv::ParseResult r = p.parse(text);
-    const auto* const decl = r.value_as<ast::Decl>();
+    const auto* const decl = r.valueAs<ast::Decl>();
     CHECK(r.accepted && r.diagnostics.empty() && decl != nullptr);
     if (decl != nullptr) CHECK(decl->vis == want && decl->name == "a");
   }
@@ -223,11 +223,11 @@ void a_dropped_token_leaves_the_passed_value(const cursiv::Parser& p) {
   for (const std::string_view text :
        {"visible:region protected = a", "visible:regioned protected = a"}) {
     const cursiv::ParseResult r = p.parse(text);
-    const auto* const decl = r.value_as<ast::Decl>();
+    const auto* const decl = r.valueAs<ast::Decl>();
     CHECK(r.accepted && r.diagnostics.size() == 1 && decl != nullptr);
     if (r.diagnostics.size() == 1) {
       const auto& d = r.diagnostics.front();
-      CHECK(d.kind == cursiv::DiagnosticKind::deleted &&
+      CHECK(d.kind == cursiv::DiagnosticKind::Deleted &&
             text.substr(d.begin, d.end - d.begin) == "=");
     }
     if (decl != nullptr)
@@ -242,7 +242,7 @@ void a_condition_ending_a_region_reads_past_the_callers_trivia(
     const cursiv::Parser& p) {
   const auto reads = [&](std::string_view head, const std::string& text) {
     const cursiv::ParseResult r = p.parse(text);
-    const auto* const decl = r.value_as<ast::Decl>();
+    const auto* const decl = r.valueAs<ast::Decl>();
     CHECK(r.accepted && r.diagnostics.empty() && decl != nullptr);
     if (decl != nullptr)
       CHECK(decl->vis == Vis::Protected && decl->name == "a" &&
@@ -271,10 +271,10 @@ void a_condition_ending_a_region_reads_past_the_callers_trivia(
 // the member keeps its default.
 void an_invented_keyword_leaves_the_member_unwritten(const cursiv::Parser& p) {
   const cursiv::ParseResult r = p.parse("visible:wordy protected a");
-  const auto* const decl = r.value_as<ast::Decl>();
+  const auto* const decl = r.valueAs<ast::Decl>();
   CHECK(r.accepted && r.diagnostics.size() == 1 && decl != nullptr);
   if (r.diagnostics.size() == 1)
-    CHECK(r.diagnostics.front().kind == cursiv::DiagnosticKind::inserted);
+    CHECK(r.diagnostics.front().kind == cursiv::DiagnosticKind::Inserted);
   if (decl != nullptr) CHECK(decl->vis == Vis::Private && decl->name == "a");
 }
 
@@ -285,7 +285,7 @@ void binary_builds_the_class_it_names(const cursiv::Parser& p) {
   check(p, "derived:", "a != b := c != d",
         "((a NOTEQUAL b) equal (c NOTEQUAL d))");
   const cursiv::ParseResult r = p.parse("derived:a != b := c");
-  const auto* const doc = r.value_as<ast::Doc>();
+  const auto* const doc = r.valueAs<ast::Doc>();
   const auto* const top =
       doc == nullptr ? nullptr : cursiv::ast_cast<ast::Recoded>(doc->value);
   CHECK(top != nullptr);
@@ -360,7 +360,7 @@ void check_marked(const cursiv::Parser& p, std::string_view text,
                   std::string_view expected) {
   const std::string source = "marking:" + std::string(text);
   const cursiv::ParseResult r = p.parse(source);
-  const auto* const doc = r.value_as<ast::MarkedDoc>();
+  const auto* const doc = r.valueAs<ast::MarkedDoc>();
   std::string got = "<refused>";
   if (r.accepted && r.diagnostics.empty() && doc != nullptr &&
       doc->value != nullptr) {
@@ -462,7 +462,7 @@ void spell(const tnonassoc::ast::Expr& expr, std::string& out) {
 std::string read(const cursiv::Parser& parser, std::string_view text) {
   const std::string source = "nonassoc:" + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
-  const auto* const doc = r.value_as<tnonassoc::ast::Document>();
+  const auto* const doc = r.valueAs<tnonassoc::ast::Document>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr ||
       doc->value == nullptr)
     return "<refused>";
@@ -616,7 +616,7 @@ void check_tree(const cursiv::AstReflection& reflection, const cursiv::Cst& cst,
     const auto& outer = cst[parent->cstNodeId];
     CHECK(outer.begin <= span.begin && span.end <= outer.end);
   }
-  reflection.visitMembers(
+  reflection.visitProperties(
       node, [&](std::string_view, std::uint32_t, cursiv::AstNode& child) {
         check_tree(reflection, cst, child, &node);
       });
@@ -741,7 +741,7 @@ void spell(const ast::Expr& expr, std::string& out) {
 }
 
 const ast::Expr* value(const cursiv::ParseResult& r) {
-  const auto* const doc = r.value_as<ast::Doc>();
+  const auto* const doc = r.valueAs<ast::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr) return nullptr;
   return doc->value;
 }
@@ -858,7 +858,7 @@ void a_newline_ends_what_reads_it(const cursiv::Parser& p) {
     const std::string source =
         std::string(sample.section) + std::string(sample.text);
     const cursiv::ParseResult r = p.parse(source);
-    const auto* const lines = r.value_as<ast::Lines>();
+    const auto* const lines = r.valueAs<ast::Lines>();
     const std::size_t read = lines != nullptr ? lines->items.size() : 0;
     const bool ok = r.accepted && r.diagnostics.empty() &&
                     !r.cst().recovered() && read == sample.statements;

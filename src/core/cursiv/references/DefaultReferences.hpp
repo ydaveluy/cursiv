@@ -14,7 +14,7 @@ class DefaultReferences : public References, protected DefaultCoreService {
  public:
   using DefaultCoreService::DefaultCoreService;
 
-  [[nodiscard]] Declaration findDeclaration(
+  [[nodiscard]] Declaration findDeclarations(
       const Document& document, TextOffset offset,
       const CancellationToken& cancelToken = kNoCancel) const override;
 
@@ -37,7 +37,7 @@ class DefaultReferences : public References, protected DefaultCoreService {
       const AstNode& node, const CancellationToken& cancelToken) const;
 
  private:
-  // Both lookups of `findDeclaration` at one offset. The retry one byte back
+  // Both lookups of `findDeclarations` at one offset. The retry one byte back
   // covers both together, so a name never loses to a neighbour it touches.
   [[nodiscard]] Declaration at(const Document& document, TextOffset offset,
                                const CancellationToken& cancelToken) const;

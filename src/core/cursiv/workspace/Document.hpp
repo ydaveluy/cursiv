@@ -8,9 +8,9 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/DocumentState.hpp"
 #include "cursiv/workspace/LocalSymbols.hpp"
@@ -57,7 +57,6 @@ struct Document : AstNode {
   // first, so an editor sees its own file before the rest of the store.
   bool isOpen = false;
 
-  [[nodiscard]] bool parseSucceeded() const noexcept;
   [[nodiscard]] bool hasAst() const noexcept;
   // Syntax only: a conversion that failed is not a document that was repaired.
   [[nodiscard]] bool parseRecovered() const noexcept;
@@ -74,9 +73,9 @@ struct Document : AstNode {
   // caller holds the document's write.
   template <std::convertible_to<std::string_view>... Parts>
     requires(sizeof...(Parts) != 0)
-  std::string_view keep_text(const Parts&... parts) const {
+  std::string_view keepText(const Parts&... parts) const {
     const std::string_view views[]{std::string_view(parts)...};
-    return keep_parts(views);
+    return keepParts(views);
   }
 
   explicit Document(TextDocument textDocument, std::string uri = {});
@@ -87,7 +86,7 @@ struct Document : AstNode {
   Document& operator=(Document&&) = delete;
 
  private:
-  std::string_view keep_parts(std::span<const std::string_view> parts) const;
+  std::string_view keepParts(std::span<const std::string_view> parts) const;
   void resetForRebuild();
 
   TextDocument _textDocument;

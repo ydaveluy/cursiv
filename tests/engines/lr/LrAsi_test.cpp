@@ -48,7 +48,7 @@ bool items(std::string_view head, std::string_view text,
   std::string got = "<refused>";
   if (r.accepted && r.diagnostics.empty()) {
     got.clear();
-    for (const auto* const item : r.value_as<Doc>()->items) {
+    for (const auto* const item : r.valueAs<Doc>()->items) {
       if (!got.empty()) got += ' ';
       spell(item, got);
     }
@@ -110,7 +110,7 @@ std::string read(std::string_view body) {
   const std::string text = current->text(body);
   const cursiv::ParseResult r = current->p.parse(text);
   if (!r.accepted || !r.diagnostics.empty()) return "<refused>";
-  const auto* const doc = r.value_as<tasi::ast::Doc>();
+  const auto* const doc = r.valueAs<tasi::ast::Doc>();
   std::string out;
   for (std::size_t i = 0; i < doc->body.size(); ++i) {
     if (i) out += ' ';
@@ -181,12 +181,12 @@ std::string optgap(std::string_view text) {
   const cursiv::ParseResult r = cases().parse(doc);
   if (!r.accepted || !r.diagnostics.empty()) {
     for (const auto& d : r.diagnostics)
-      if (d.kind != cursiv::DiagnosticKind::conversion_error)
+      if (d.kind != cursiv::DiagnosticKind::ConversionError)
         return "<repaired>";
     return "<silent>";
   }
   std::string got;
-  for (const auto name : r.value_as<tasi::optgap::ast::Doc>()->names) {
+  for (const auto name : r.valueAs<tasi::optgap::ast::Doc>()->names) {
     if (!got.empty()) got += ' ';
     got += name;
   }
@@ -343,7 +343,7 @@ long first_end(std::string_view text) {
   const std::string whole = std::string(head) + std::string(text);
   const cursiv::ParseResult r = cases().parse(whole);
   if (!r.accepted || !r.diagnostics.empty()) return -1;
-  const auto* const doc = r.value_as<tasi::ast::Doc>();
+  const auto* const doc = r.valueAs<tasi::ast::Doc>();
   return doc->body.empty()
              ? -1
              : static_cast<long>(r.cst()[doc->body[0]->cstNodeId].end) -
@@ -524,7 +524,7 @@ int main() {
     const cursiv::ParseResult r = opt.p.parse(text);
     const auto at = static_cast<cursiv::TextOffset>(opt.head.size());
     CHECK(r.accepted && r.diagnostics.size() == 1 &&
-          r.diagnostics[0].kind == cursiv::DiagnosticKind::replaced &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced &&
           r.diagnostics[0].begin == at + 3 && r.diagnostics[0].end == at + 5);
   }
   // The state's entry reads a literal the empty option's guarded goto

@@ -1,6 +1,6 @@
 // What a directive does to the tree, with the grammar erased: the node it
 // creates, the member it writes, a node's values read back as text. A write it
-// cannot model answers `Write::not_modelled`, never a guess.
+// cannot model answers `Write::NotModelled`, never a guess.
 #pragma once
 
 #include <cstdint>
@@ -20,7 +20,7 @@ namespace cursiv::fuzzer {
 
 // A value read back: its text, the fact that no reader reaches it, or an
 // optional member that holds nothing.
-enum class ValueKind : std::uint8_t { text, unreadable, unset };
+enum class ValueKind : std::uint8_t { Text, Unreadable, Unset };
 
 // One operator of a precedence table: the element that spells it, the step it
 // sits on -- tightest binds hardest -- and which way a chain of equals groups.
@@ -53,7 +53,7 @@ class WalkTree {
 
 // What the walk could say of a write. A conversion the engine refuses is
 // `modelled`: the engine writes nothing there, and neither does the walk.
-enum class Write : bool { not_modelled, modelled };
+enum class Write : bool { NotModelled, Modelled };
 
 struct GrammarActions {
   virtual ~GrammarActions() = default;
@@ -69,12 +69,12 @@ struct GrammarActions {
   virtual Write fold(ElementId, ElementId, AstNode& node, AstNode* left,
                      std::string_view op, AstNode* right) const = 0;
 
-  virtual Write write_node(ElementId, AstNode& owner, AstNode* child) const = 0;
+  virtual Write writeNode(ElementId, AstNode& owner, AstNode* child) const = 0;
   // `payload` is the element that spelled the text: a directive spread
   // over a choice reaches one member through several rules, and the
   // conversion is the rule's, not the directive's.
-  virtual Write write_text(ElementId, ElementId payload, AstNode& owner,
-                           std::string_view text) const = 0;
+  virtual Write writeText(ElementId, ElementId payload, AstNode& owner,
+                          std::string_view text) const = 0;
 
   // What a leaf denotes: its own converter applied, or the raw text; nothing
   // when the converter refuses it. A data rule's value is its parts joined by

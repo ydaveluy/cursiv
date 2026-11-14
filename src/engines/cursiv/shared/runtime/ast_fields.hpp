@@ -182,8 +182,9 @@ consteval bool admits() {
       else if constexpr (std::is_same_v<X, AstNode::string>)
         return source_spells<typename Src::rule>;
       else
-        // With no converter, the member converts the matched text itself.
-        return has_default_convert<X>;
+        // With no converter, the member converts the matched text itself, or
+        // its type's own converter does.
+        return has_default_convert<X> || written_converter<X>();
     } else {
       return false;
     }

@@ -348,13 +348,13 @@ int bad = 0;
 
 const char* kindName(cursiv::DiagnosticKind k) {
   switch (k) {
-    case cursiv::DiagnosticKind::inserted:
+    case cursiv::DiagnosticKind::Inserted:
       return "inserted";
-    case cursiv::DiagnosticKind::deleted:
+    case cursiv::DiagnosticKind::Deleted:
       return "deleted";
-    case cursiv::DiagnosticKind::replaced:
+    case cursiv::DiagnosticKind::Replaced:
       return "replaced";
-    case cursiv::DiagnosticKind::incomplete:
+    case cursiv::DiagnosticKind::Incomplete:
       return "incomplete";
     default:
       return "conversion";

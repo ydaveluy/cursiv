@@ -69,7 +69,7 @@ std::string read(const cursiv::Parser& parser, std::string_view text,
                  std::string_view prefix = {}) {
   const std::string source = std::string(prefix) + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
-  const auto* const doc = r.value_as<tchars::ast::Doc>();
+  const auto* const doc = r.valueAs<tchars::ast::Doc>();
   if (!accepted(r) || doc == nullptr) return "<refused>";
   std::string out;
   for (const tchars::ast::Item* const item : doc->items) {
@@ -544,7 +544,7 @@ void check(const cursiv::Parser& parser, std::string_view source,
            bool expected) {
   const std::string input = "unicode:" + std::string(source);
   const auto result = parser.parse(input);
-  const auto* node = result.value_as<trepeatedunicode::Node>();
+  const auto* node = result.valueAs<trepeatedunicode::Node>();
   const bool clean = result.accepted && !result.cst().recovered() &&
                      result.diagnostics.empty() && node;
   CHECK(clean == expected);
@@ -638,7 +638,7 @@ std::vector<std::string> dot_items(const cursiv::Parser& p,
   if (!r.accepted || !r.diagnostics.empty()) return {"<refused>"};
   std::vector<std::string> out;
   for (const tunicode::ast::Item* const it :
-       r.value_as<tunicode::ast::Doc>()->items)
+       r.valueAs<tunicode::ast::Doc>()->items)
     out.emplace_back(it->name);
   return out;
 }
@@ -653,7 +653,7 @@ bool cased(std::string_view text, std::vector<std::string> want) {
   const auto result = wide().parse(document);
   std::vector<std::string> got;
   if (!result.accepted || !result.diagnostics.empty()) return want == std::vector<std::string>{"<refused>"};
-  for (const auto* item : result.value_as<tunicode::ast::Doc>()->items)
+  for (const auto* item : result.valueAs<tunicode::ast::Doc>()->items)
     got.emplace_back(item->cond ? "<if>" : item->where ? "<où>" : std::string(item->name));
   return got == want;
 }
@@ -667,7 +667,7 @@ bool names(const cursiv::Parser& p, const std::string& doc,
     got = {"<refused>"};
   } else {
     for (const tunicode::ast::Item* const it :
-         r.value_as<tunicode::ast::Doc>()->items)
+         r.valueAs<tunicode::ast::Doc>()->items)
       got.emplace_back(it->name);
   }
   if (got == want) return true;

@@ -28,12 +28,12 @@ struct Slot {
 std::optional<Slot> slot_of(const AstReflection& reflection,
                             const AstNode& container, const AstNode& child) {
   std::optional<Slot> found;
-  reflection.visitMembers(container,
-                          [&](std::string_view property, std::uint32_t index,
-                              const AstNode& candidate) {
-                            if (!found.has_value() && &candidate == &child)
-                              found = Slot{property, index};
-                          });
+  reflection.visitProperties(container,
+                             [&](std::string_view property, std::uint32_t index,
+                                 const AstNode& candidate) {
+                               if (!found.has_value() && &candidate == &child)
+                                 found = Slot{property, index};
+                             });
   return found;
 }
 
@@ -104,7 +104,7 @@ AstNode* DefaultAstNodeLocator::getAstNode(AstNode& node,
     }
 
     AstNode* next = nullptr;
-    services.astReflection->visitMembers(
+    services.astReflection->visitProperties(
         *at, [&](std::string_view name, std::uint32_t index, AstNode& child) {
           if (next == nullptr && name == property && index == wanted)
             next = &child;

@@ -48,7 +48,7 @@ void DefaultFoldingRangeProvider::collectFolding(
     std::vector<const AstNode*> pending;
     const auto enter = [&](const AstNode& node) {
       const std::size_t first = pending.size();
-      reflection.visitMembers(
+      reflection.visitProperties(
           node, [&](std::string_view, std::uint32_t, const AstNode& child) {
             pending.push_back(&child);
           });
@@ -94,7 +94,7 @@ void DefaultFoldingRangeProvider::collectCommentFolding(
   NodeId past = cst.size();
   if (&node != document.parseResult.value) {
     if (node.cstNodeId == kNoNode) return;
-    first = cst.subtree_begin(node.cstNodeId);
+    first = cst.subtreeBegin(node.cstNodeId);
     past = node.cstNodeId + 1;
   }
   const auto kComment =

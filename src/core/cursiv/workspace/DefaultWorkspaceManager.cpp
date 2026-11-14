@@ -124,6 +124,21 @@ std::vector<std::string> DefaultWorkspaceManager::searchFolder(
   return kept;
 }
 
+bool DefaultWorkspaceManager::waitUntilReady(
+    const CancellationToken& cancelToken) const {
+  if (isReady()) return true;
+  std::unique_lock lock(_readyMutex);
+  return _readyCv.wait(lock, cancelToken, [this] { return isReady(); });
+}
+
+void DefaultWorkspaceManager::markReady() noexcept {
+  {
+    const std::scoped_lock lock(_readyMutex);
+    _ready.store(true, std::memory_order_release);
+  }
+  _readyCv.notify_all();
+}
+
 void DefaultWorkspaceManager::initializeWorkspace(
     std::span<const WorkspaceFolder> folders,
     const CancellationToken& cancelToken) {
@@ -137,13 +152,6 @@ void DefaultWorkspaceManager::initializeWorkspace(
       store.addDocument(factory.fromString(std::move(text), uri));
   };
 
-  // Ready resolves before the build: the documents are findable, not analysed.
-  // Once, from the first scan, whatever it met, so no consumer waits forever.
-  const auto resolveReady = [this] {
-    if (_resolved) return;
-    _resolved = true;
-    _readyPromise.set_value();
-  };
 
   try {
     _folders.assign(folders.begin(), folders.end());
@@ -187,10 +195,10 @@ void DefaultWorkspaceManager::initializeWorkspace(
       }
     }
   } catch (...) {
-    resolveReady();
+    markReady();
     throw;
   }
-  resolveReady();
+  markReady();
 
   // (3) One build over the whole store, not over the documents this call
   // added: a document already there and still broken links against what just

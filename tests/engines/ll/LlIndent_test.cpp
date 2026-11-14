@@ -161,7 +161,7 @@ void dropped_dedents_split_no_token() {
     const auto result = ll->parse(text);
     CHECK(!result.diagnostics.empty());
     for (const auto& d : result.diagnostics) {
-      if (d.kind != cursiv::DiagnosticKind::deleted || d.begin == d.end)
+      if (d.kind != cursiv::DiagnosticKind::Deleted || d.begin == d.end)
         continue;
       CHECK(d.begin == 0 || !letter(text[d.begin - 1]) ||
             !letter(text[d.begin]));
@@ -177,10 +177,10 @@ void dropped_dedents_split_no_token() {
 void a_dropped_indent_leaves_the_name_it_splits(const cursiv::Parser& p) {
   for (const std::string_view text : {"dotted a.\nb\n", "dotted a.\n  b\n"}) {
     const auto result = p.parse(text);
-    const auto* root = result.value_as<tindent::ast::Node>();
+    const auto* root = result.valueAs<tindent::ast::Node>();
     CHECK(result.accepted && result.diagnostics.size() == 1 && root);
     for (const auto& d : result.diagnostics)
-      CHECK(d.kind == cursiv::DiagnosticKind::deleted &&
+      CHECK(d.kind == cursiv::DiagnosticKind::Deleted &&
             text.substr(d.begin, d.end - d.begin) == "\n");
     if (root != nullptr) CHECK(root->name == "a.b");
   }
@@ -332,7 +332,7 @@ void repairs_agree_with_the_table_engine(
       const auto& y = b.diagnostics[i];
       CHECK(x.kind == y.kind && x.begin == y.begin && x.end == y.end &&
             x.element == y.element && x.also == y.also);
-      CHECK(x.kind != cursiv::DiagnosticKind::incomplete);
+      CHECK(x.kind != cursiv::DiagnosticKind::Incomplete);
     }
     std::string s, t;
     support::ast_of(*rl, *a.value, s);
@@ -555,7 +555,7 @@ template <class Parser>
 void closes(const Parser& parser, std::string_view text, std::size_t levels) {
   const auto result = parser->parse(text);
   CHECK(result.accepted && result.diagnostics.empty());
-  CHECK(result.template value_as<tlldedentrun::Marks>()->dedents.size() ==
+  CHECK(result.template valueAs<tlldedentrun::Marks>()->dedents.size() ==
         levels);
 }
 

@@ -9,8 +9,8 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/grammar/unicode/UnicodeLower.hpp"
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeLower.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::detail {

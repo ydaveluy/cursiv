@@ -28,13 +28,9 @@ std::optional<ReferenceInfo> reference_at_caret(const AstReflection& reflection,
     for (AstNode* at = container; at != nullptr; at = at->parent) {
       reference = reflection.referenceIndexOf(at->type, feature);
       if (reference != kNoReference) break;
-      const TypeMetaData meta = reflection.getTypeMetaData(at->type);
-      for (const PropertyMetaData& q : meta.properties)
+      for (const PropertyMetaData& q :
+           reflection.getTypeMetaData(at->type).properties)
         declared = declared || q.name == feature;
-      for (const AstTypeTag* base : meta.superTypes)
-        for (const PropertyMetaData& q :
-             reflection.getTypeMetaData(base).properties)
-          declared = declared || q.name == feature;
     }
     if (reference == kNoReference) {
       if (declared) return std::nullopt;

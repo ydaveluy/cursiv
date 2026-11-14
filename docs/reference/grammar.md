@@ -394,7 +394,7 @@ struct STRING : terminal<as<unquote>(through(lit<"\"">, lit<"\"">))> {};
 
 | `X` | Value |
 |---|---|
-| A type `T` | `cursiv::default_converter<T>`, built in for `string_view`, `boolean`, sized integers, `float32`/`float64` and enumerations by enumerator name. For other types, specialize it with `static ConversionResult<T> convert(std::string_view text)`. |
+| A type `T` | `cursiv::default_converter<T>`, built in for `string_view`, `boolean`, sized integers, `float32`/`float64` and enumerations by enumerator name. For other types, specialize it with `static ConversionResult<T> convert(std::string_view text)`: it then also converts every member of type `T` written without a converter. |
 | A function `f` | `f(text)`, `f(parts)` or `f()`. |
 | Another constant | The constant itself, such as an enumerator. |
 

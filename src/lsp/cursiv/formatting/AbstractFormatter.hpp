@@ -18,7 +18,11 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/formatting/Formatter.hpp"
+#include "cursiv/formatting/FormattingAction.hpp"
+#include "cursiv/formatting/FormattingRules.hpp"
 #include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
@@ -26,9 +30,6 @@
 #include "cursiv/syntax-tree/CstUtils.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
-#include "cursiv/formatting/Formatter.hpp"
-#include "cursiv/formatting/FormattingAction.hpp"
-#include "cursiv/formatting/FormattingRules.hpp"
 
 // What a language's author writes, and the base that turns it into edits.
 // Dispatch uses `node->type`, the exact runtime type.
@@ -40,7 +41,7 @@ class NodeFormatter {
   // The AST class that declares the member `Ptr` points to: a rule may name a
   // member of its node's class or of one of its bases.
   template <auto Ptr>
-  using feature_owner = typename detail::field_tag<Ptr>::owner;
+  using property_owner = typename detail::field_tag<Ptr>::owner;
 
  public:
   NodeFormatter(const Document& document, const AstNode* node,
@@ -67,7 +68,7 @@ class NodeFormatter {
 
   // The record that writes `Feature`; the first when the member is a list.
   template <auto Feature>
-    requires std::derived_from<NodeT, feature_owner<Feature>>
+    requires std::derived_from<NodeT, property_owner<Feature>>
   [[nodiscard]] FormattingRegion property() const {
     return property<Feature>(std::size_t{0});
   }
@@ -75,25 +76,25 @@ class NodeFormatter {
   // The `index`-th record writing `Feature`, clamped to the last one; found as
   // a member-anchored diagnostic finds it.
   template <auto Feature>
-    requires std::derived_from<NodeT, feature_owner<Feature>>
+    requires std::derived_from<NodeT, property_owner<Feature>>
   [[nodiscard]] FormattingRegion property(std::size_t index) const {
     if (!searchable()) return FormattingRegion(_cst, {}, _collector);
-    const std::optional<CstNodeView> at = find_node_for_feature(
+    const CstNodeView at = find_node_for_property(
         *_node, cursiv::detail::member_identifier<Feature>(), index, _document);
-    if (!at.has_value()) return FormattingRegion(_cst, {}, _collector);
-    return FormattingRegion(at->id, _cst, _collector);
+    if (!at) return FormattingRegion(_cst, {}, _collector);
+    return FormattingRegion(at.id, _cst, _collector);
   }
 
   // Every record that writes any of the given members, member by member in
   // the order given.
   template <auto... Features>
     requires(sizeof...(Features) > 0 &&
-             (std::derived_from<NodeT, feature_owner<Features>> && ...))
+             (std::derived_from<NodeT, property_owner<Features>> && ...))
   [[nodiscard]] FormattingRegion properties() const {
     std::vector<NodeId> found;
     if (searchable())
       (appendIds(found,
-                 find_nodes_for_feature(
+                 find_nodes_for_property(
                      *_node, cursiv::detail::member_identifier<Features>(),
                      _document)),
        ...);
@@ -107,10 +108,10 @@ class NodeFormatter {
     if (!searchable()) return FormattingRegion(_cst, {}, _collector);
     // The first one is found without listing the others.
     if (index == 0) {
-      const std::optional<CstNodeView> first =
+      const CstNodeView first =
           find_node_for_keyword(*_node, keyword, 0, _document);
       if (!first) return FormattingRegion(_cst, {}, _collector);
-      return FormattingRegion(first->id, _cst, _collector);
+      return FormattingRegion(first.id, _cst, _collector);
     }
     const std::vector<CstNodeView> found =
         find_nodes_for_keyword(*_node, keyword, _document);
@@ -203,7 +204,7 @@ class FormattingBuilder {
   FormattingCollector* _collector;
 };
 
-class AbstractFormatter : public Formatter {
+class AbstractFormatter : public Formatter, protected DefaultCoreService {
  public:
   [[nodiscard]] std::vector<lsp::TextEdit> formatDocument(
       const Document& document, const lsp::DocumentFormattingParams& params,
@@ -220,7 +221,8 @@ class AbstractFormatter : public Formatter {
       const CancellationToken& token = {}) const override;
 
  protected:
-  explicit AbstractFormatter(const CoreServices& core) noexcept : _core(core) {}
+  explicit AbstractFormatter(const CoreServices& core) noexcept
+      : DefaultCoreService(core) {}
 
   // Declared as members so a rule reads `oneSpace` and `formatBlock`
   // directly, never namespace-qualified.
@@ -304,7 +306,6 @@ class AbstractFormatter : public Formatter {
     return formatMultilineComment(comment.text(), options);
   }
 
-  [[nodiscard]] const CoreServices& core() const noexcept { return _core; }
 
   // Registers a rule method of this formatter for exactly `NodeT`.
   template <class NodeT, class FormatterT>
@@ -363,7 +364,6 @@ class AbstractFormatter : public Formatter {
   using HiddenCallback =
       std::function<void(const AbstractFormatter&, HiddenNodeFormatter&)>;
 
-  const CoreServices& _core;
   std::unordered_map<const AstTypeTag*, FormatCallback> _formatters;
   std::map<std::string, HiddenCallback, std::less<>> _hiddenFormatters;
 };

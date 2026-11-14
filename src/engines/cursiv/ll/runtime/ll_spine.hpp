@@ -16,9 +16,9 @@ namespace cursiv::engine {
 
 // The child of `parent` that holds node `id`.
 inline NodeId ll_child_holding(const Cst& cst, NodeId parent, NodeId id) {
-  const NodeId first = cst.subtree_begin(parent);
+  const NodeId first = cst.subtreeBegin(parent);
   for (NodeId cursor = parent; cursor > first;) {
-    const NodeId begin = cst.subtree_begin(cursor - 1);
+    const NodeId begin = cst.subtreeBegin(cursor - 1);
     if (begin <= id) return cursor - 1;
     cursor = begin;
   }
@@ -28,7 +28,7 @@ inline NodeId ll_child_holding(const Cst& cst, NodeId parent, NodeId id) {
 // The records that hold node `id`, the entry's first.
 inline void ll_ancestors(const Cst& cst, NodeId id, std::vector<NodeId>& out) {
   out.clear();
-  for (NodeId at = cst.entry_root();
+  for (NodeId at = cst.entryRoot();
        at != kNoNode && at != id && cst.contains(at, id);
        at = ll_child_holding(cst, at, id))
     out.push_back(at);

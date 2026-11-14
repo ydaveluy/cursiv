@@ -71,7 +71,7 @@ bool apply(const cursiv::ParseResult& r, std::string& text, bool& spelled) {
   };
   const cursiv::Cst& cst = r.cst();
   for (const cursiv::ParseDiagnostic& d : r.diagnostics) {
-    bool covered = d.kind != cursiv::DiagnosticKind::replaced;
+    bool covered = d.kind != cursiv::DiagnosticKind::Replaced;
     for (cursiv::NodeId i = 0; i < cst.size() && !covered; ++i)
       covered =
           cst[i].recovered && d.begin <= cst[i].begin && cst[i].end <= d.end;
@@ -338,7 +338,7 @@ void an_abandon_to_the_start_state_replays() {
   const std::string text = "tailops a +b;";
   const cursiv::ParseResult r = parser->parse(text);
   CHECK(r.accepted && r.diagnostics.size() == 1 &&
-        r.diagnostics[0].kind == cursiv::DiagnosticKind::incomplete);
+        r.diagnostics[0].kind == cursiv::DiagnosticKind::Incomplete);
   const auto at_end = offered(*parser, text + " ", text.size() + 1);
   CHECK(at_end == offered(*parser, "tailops b; ", 11));
   CHECK(!at_end.empty());

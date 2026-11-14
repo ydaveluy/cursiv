@@ -164,10 +164,10 @@ void an_adoption_takes_the_node_its_body_built(bool node, bool ownRepair,
   const auto top = b.exit(opened, 0, kStamp.make(0, 0));
   b.stream().at(top).recovered = parentRepair;
   if (ownRepair || parentRepair || childRepair || unrelatedRepair)
-    b.note_repair(cursiv::DiagnosticKind::deleted, cursiv::kNoElement, 0, 0);
+    b.note_repair(cursiv::DiagnosticKind::Deleted, cursiv::kNoElement, 0, 0);
   const auto result = reduce(std::move(c), b, top);
   const bool good = node && !badExtent;
-  CHECK((result.error == cursiv::AstBuildError::none) == good);
+  CHECK((result.error == cursiv::AstBuildError::None) == good);
   CHECK((result.value != nullptr) == good);
   if (good) {
     const auto* r = cursiv::ast_cast<Root>(result.value);
@@ -186,9 +186,9 @@ void a_direct_write_without_its_node_is_broken(bool repaired) {
   const auto top = b.leaf(0, 0, kStamp.make(3, 0));
   b.stream().at(top).recovered = repaired;
   if (repaired)
-    b.note_repair(cursiv::DiagnosticKind::inserted, cursiv::kNoElement, 0, 0);
+    b.note_repair(cursiv::DiagnosticKind::Inserted, cursiv::kNoElement, 0, 0);
   const auto result = reduce(std::move(c), b, top);
-  CHECK(result.error == cursiv::AstBuildError::malformed_cst);
+  CHECK(result.error == cursiv::AstBuildError::MalformedCst);
   CHECK(result.value == nullptr && writes == 1);
 }
 
@@ -203,8 +203,8 @@ void repeated_node_writes_keep_source_order_and_skip_other_families() {
   b.leaf(3, 4, kStamp.make(2, 0));
   const auto top = b.exit(opened, 0, kStamp.make(4, 0));
   const auto result = reduce(std::move(c), b, top);
-  CHECK(result.error == cursiv::AstBuildError::none);
-  const auto* r = result.value_as<Root>();
+  CHECK(result.error == cursiv::AstBuildError::None);
+  const auto* r = result.valueAs<Root>();
   CHECK(r != nullptr && r->child != nullptr);
   if (r == nullptr || r->child == nullptr) return;
   CHECK(r->child->cstNodeId == second);
@@ -222,8 +222,8 @@ void a_node_no_member_takes_leaves_the_node_list() {
   b.leaf(1, 2, kStamp.make(2, 0));
   const auto top = b.exit(opened, 0, kStamp.make(3, 0));
   const auto result = reduce(std::move(c), b, top);
-  CHECK(result.error == cursiv::AstBuildError::none);
-  const auto* r = result.value_as<Root>();
+  CHECK(result.error == cursiv::AstBuildError::None);
+  const auto* r = result.valueAs<Root>();
   CHECK(r != nullptr && r->child != nullptr && r->child->cstNodeId == taken);
   CHECK(result.nodes().size() == 2);
   for (const cursiv::AstNode* node : result.nodes())
@@ -336,9 +336,9 @@ std::string reduce_turn(const cursiv::engine::AstActions& actions,
   if (badExtent != 0)
     b.stream().at(token).subtreeSize = badExtent == 1 ? 0 : cursiv::kNoNode;
   if (abandoned)
-    b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 0, 2);
+    b.note_repair(cursiv::DiagnosticKind::Incomplete, cursiv::kNoElement, 0, 2);
   const auto r = reduce(std::move(c), b, top, actions);
-  if (r.error != cursiv::AstBuildError::none || r.value == nullptr)
+  if (r.error != cursiv::AstBuildError::None || r.value == nullptr)
     return "error";
   const auto* call = cursiv::ast_cast<Call>(r.value);
   const auto* num =
@@ -369,7 +369,7 @@ void a_turn_reads_the_same_by_state_or_by_row() {
 
 // `count` calls down to a flagged number, each the parent of its callee.
 void a_chain_of(const cursiv::ParseResult& r, unsigned count) {
-  CHECK(r.error == cursiv::AstBuildError::none);
+  CHECK(r.error == cursiv::AstBuildError::None);
   CHECK(r.nodes().size() == count + 1);
   unsigned depth = 0;
   const cursiv::AstNode* current = r.value;
@@ -395,7 +395,7 @@ void unrelated_repairs_leave_a_long_nest_chain_intact() {
     b.stream().at(leaf).recovered = true;
   }
   const auto top = b.exit(all, 0, kStamp.make(2, 0));
-  b.note_repair(cursiv::DiagnosticKind::inserted, cursiv::kNoElement, 2, 2);
+  b.note_repair(cursiv::DiagnosticKind::Inserted, cursiv::kNoElement, 2, 2);
   a_chain_of(reduce(std::move(c), b, top, nest::byState), count);
 }
 
@@ -418,8 +418,8 @@ void a_deep_repair_keeps_turns_over_an_earlier_receiver() {
   for (unsigned i = count; i-- > 0;)
     b.exit(open[i], 1, kStamp.make(cursiv::kNoElement, 0));
   const auto top = b.exit(all, 0, kStamp.make(2, 0));
-  b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 1,
-                 count + 1);
+  b.note_repair(cursiv::DiagnosticKind::Incomplete, cursiv::kNoElement, 1,
+                count + 1);
   const auto start = std::chrono::steady_clock::now();
   const auto r = reduce(std::move(c), b, top, nest::byState);
   CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(5));
@@ -443,9 +443,9 @@ void the_first_repair_below_the_consumer_decides_the_turn() {
     const auto top = b.exit(all, 0, kStamp.make(2, 0));
     // A repair on the consumer itself does not give up its own effects.
     b.stream().at(top).recovered = true;
-    b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 0, 2);
+    b.note_repair(cursiv::DiagnosticKind::Incomplete, cursiv::kNoElement, 0, 2);
     const auto r = reduce(std::move(c), b, top, nest::byState);
-    CHECK(r.error == cursiv::AstBuildError::none);
+    CHECK(r.error == cursiv::AstBuildError::None);
     CHECK(r.nodes().size() == (outerRepair ? 1u : 2u));
     CHECK((cursiv::ast_cast<nest::Num>(r.value) != nullptr) == outerRepair);
     CHECK((cursiv::ast_cast<nest::Call>(r.value) != nullptr) == !outerRepair);
@@ -468,9 +468,9 @@ void only_a_nest_outside_the_repair_changes_its_receiver() {
                           kStamp.make(outside ? 1 : cursiv::kNoElement, 0));
     b.stream().at(outside ? a : z).recovered = true;
     const auto top = b.exit(all, 0, kStamp.make(2, 0));
-    b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 1, 2);
+    b.note_repair(cursiv::DiagnosticKind::Incomplete, cursiv::kNoElement, 1, 2);
     const auto r = reduce(std::move(c), b, top, nest::byState);
-    CHECK(r.error == cursiv::AstBuildError::none);
+    CHECK(r.error == cursiv::AstBuildError::None);
     CHECK(r.nodes().size() == (outside ? 2u : 3u));
     const auto* call = cursiv::ast_cast<nest::Call>(r.value);
     CHECK(call != nullptr);

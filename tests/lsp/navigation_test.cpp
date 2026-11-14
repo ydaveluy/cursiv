@@ -162,10 +162,9 @@ void a_hierarchy_item_keeps_the_selected_overload() {
   for (std::size_t index = 0; index < targets.size(); ++index) {
     const auto name =
         world.language->nameProvider->getNameNode(*targets[index]);
-    CHECK(name.has_value());
+    CHECK(name);
     if (!name) continue;
-    const auto position =
-        documents[0]->textDocument().positionAt(name->begin());
+    const auto position = documents[0]->textDocument().positionAt(name.begin());
     const auto* selected = cursiv::hierarchy_node_of_item(
         *world.shared.documents, *world.language->references,
         lsp::Uri::parse(documents[0]->uri),
@@ -340,7 +339,7 @@ void the_declaration_joins_only_when_asked() {
 void distinct_ranges_at_one_start_are_preserved() {
   World world;
   const auto documents = world.built({{"file:///w/a.ws", std::string(kLib)}});
-  const auto declaration = world.services.language.references->findDeclaration(
+  const auto declaration = world.services.language.references->findDeclarations(
       *documents[0], 10, cursiv::kNoCancel);
   CHECK(declaration.targets.size() == 1);
   if (declaration.targets.size() != 1) return;
@@ -350,7 +349,7 @@ void distinct_ranges_at_one_start_are_preserved() {
     SharedStartReferences(cursiv::Declaration selected,
                           cursiv::DocumentId source)
         : declaration(std::move(selected)), document(source) {}
-    cursiv::Declaration findDeclaration(
+    cursiv::Declaration findDeclarations(
         const cursiv::Document&, cursiv::TextOffset,
         const cursiv::CancellationToken&) const override {
       return declaration;

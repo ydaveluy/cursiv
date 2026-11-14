@@ -31,13 +31,13 @@ Cst engine_tree(const Cst& cst, const SourceTranslation& translation) {
     run.leaf(0, 0, 0);
     run.at(id) = cst[id];
   }
-  if (cst.size() != 0) translation.to_text({&run.at(0), cst.size()});
-  if (cst.engine_stamped()) builder.bind_stream();
-  builder.bind_entry(cst.entry_begin(), cst.entry_end(), cst.entry_root());
+  if (cst.size() != 0) translation.toText({&run.at(0), cst.size()});
+  if (cst.engineStamped()) builder.bind_stream();
+  builder.bind_entry(cst.entryBegin(), cst.entryEnd(), cst.entryRoot());
   builder.bind_accepted(cst.accepted());
   std::vector<ParseDiagnostic> repairs(cst.diagnostics().begin(),
                                        cst.diagnostics().end());
-  translation.to_text(std::span(repairs));
+  translation.toText(std::span(repairs));
   for (ParseDiagnostic& d : repairs)
     builder.note_repair(d.kind, d.element, d.begin, d.end, std::move(d.also),
                         d.mixedIndent);
@@ -74,7 +74,7 @@ class TranslatingParser final : public Parser {
     // A parser in between hid the inner translation from the wrap.
     if (result.cst().translation() != nullptr)
       throw std::invalid_argument(kNested);
-    result.bind_translation(text, std::move(owned));
+    result.bindTranslation(text, std::move(owned));
     return result;
   }
 

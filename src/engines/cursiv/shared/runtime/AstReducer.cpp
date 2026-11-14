@@ -4,7 +4,8 @@
 
 namespace cursiv::engine {
 
-template ParseResult AstReducer::build<StampLayout{}>(
-    const AstActions&, Cst&&, const CancellationToken&);
+template ParseResult AstReducer::build<StampLayout{}>(const AstActions&, Cst&&,
+                                                      const CancellationToken&,
+                                                      const Grammar*);
 
 }  // namespace cursiv::engine

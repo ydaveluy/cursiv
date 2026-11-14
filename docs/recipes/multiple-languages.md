@@ -55,13 +55,13 @@ void install_tests_core_module(RequirementsCoreServices& services) {
   req::generated::Tests::install_generated_module(services);
 }
 
-bool register_core_services(cursiv::SharedCoreServices& shared) {
-  return cursiv::register_language<
-             RequirementsCoreServices, RequirementsSharedCoreServices,
-             install_requirements_core_module>(shared) &&
-         cursiv::register_language<
-             RequirementsCoreServices, RequirementsSharedCoreServices,
-             install_tests_core_module>(shared);
+void register_core_services(cursiv::SharedCoreServices& shared) {
+  cursiv::register_language<RequirementsCoreServices,
+                            RequirementsSharedCoreServices,
+                            install_requirements_core_module>(shared);
+  cursiv::register_language<RequirementsCoreServices,
+                            RequirementsSharedCoreServices,
+                            install_tests_core_module>(shared);
 }
 
 }  // namespace req

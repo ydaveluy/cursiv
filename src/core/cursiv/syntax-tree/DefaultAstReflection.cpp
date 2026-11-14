@@ -1,5 +1,6 @@
 #include "cursiv/syntax-tree/DefaultAstReflection.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -26,6 +27,36 @@ DefaultAstReflection::DefaultAstReflection(const detail::AstMetaData& meta)
     while (_byTag[at].tag != nullptr) at = (at + 1) & _mask;
     _byTag[at] = {tag, i};
   }
+  _superTypes.resize(meta.typeCount);
+  _properties.resize(meta.typeCount);
+  std::vector<bool> filled(meta.typeCount);
+  // A base's properties come before the class's own; a base reached twice
+  // gives its properties once.
+  const auto fill = [&](const auto& self, std::uint16_t i) -> void {
+    if (filled[i]) return;
+    filled[i] = true;
+    std::vector<PropertyMetaData>& all = _properties[i];
+    const std::span bases{meta.types[i]->bases, meta.types[i]->baseCount};
+    for (const AstTypeTag* const base : bases) {
+      // Direct: no other base stands between the class and this one.
+      if (std::ranges::any_of(bases, [&](const AstTypeTag* other) {
+            return other != base && other->derivesFrom(base);
+          }))
+        continue;
+      _superTypes[i].push_back(base);
+      const std::uint16_t known = typeIndexOf(base);
+      if (known == kNoType) continue;
+      self(self, known);
+      for (const PropertyMetaData& inherited : _properties[known])
+        if (std::ranges::none_of(all, [&](const PropertyMetaData& held) {
+              return held.name.data() == inherited.name.data();
+            }))
+          all.push_back(inherited);
+    }
+    const detail::PropertyRow row = meta.propertyRows[i];
+    all.insert(all.end(), row.at, row.at + row.count);
+  };
+  for (std::uint16_t i = 0; i < meta.typeCount; ++i) fill(fill, i);
 }
 
 TypeMetaData DefaultAstReflection::getTypeMetaData(
@@ -35,9 +66,7 @@ TypeMetaData DefaultAstReflection::getTypeMetaData(
   if (i == kNoType)
     return TypeMetaData{
         type != nullptr ? type->name : std::string_view{}, {}, {}};
-  const detail::PropertyRow row = _f.propertyRows[i];
-  return TypeMetaData{
-      type->name, {type->bases, type->baseCount}, {row.at, row.count}};
+  return TypeMetaData{type->name, _superTypes[i], _properties[i]};
 }
 
 std::span<const AstTypeTag* const> DefaultAstReflection::getAllTypes()
@@ -58,7 +87,7 @@ const AstTypeTag* DefaultAstReflection::typeTagOf(
   return _f.tag_of(type);
 }
 
-std::string_view DefaultAstReflection::fieldName(
+std::string_view DefaultAstReflection::propertyName(
     std::uint16_t field) const noexcept {
   return field < _f.fieldCount ? _f.fields[field].name : std::string_view{};
 }
@@ -113,7 +142,7 @@ const AstTypeTag* DefaultAstReflection::referenceOwner(
 
 std::string_view DefaultAstReflection::referenceProperty(
     std::uint16_t reference) const noexcept {
-  return fieldName(reference);
+  return propertyName(reference);
 }
 
 AcceptSet DefaultAstReflection::referenceAccepts(
@@ -128,17 +157,18 @@ ReferenceInfo DefaultAstReflection::referenceInfo(
     const detail::RefHandle& handle, std::string_view text) const {
   if (handle.field >= _f.referenceBound || handle.owner == nullptr) return {};
   const detail::RefOps& ops = _f.refOps[handle.field];
-  return {.container = handle.owner,
-          .referenceText = text,
-          .property = fieldName(handle.field),
-          .index = _f.fields[handle.field].storage == detail::FieldStorage::vector
-                       ? std::optional<std::uint32_t>(handle.index)
-                       : std::nullopt,
-          // The work list already names the row; nothing to look up.
-          .reference = handle.field,
-          .narrow = ops.narrow_count != 0
-                        ? ops.narrow_of(*handle.owner, handle.index)
-                        : kNoNarrow};
+  return {
+      .container = handle.owner,
+      .referenceText = text,
+      .property = propertyName(handle.field),
+      .index = _f.fields[handle.field].storage == detail::FieldStorage::vector
+                   ? std::optional<std::uint32_t>(handle.index)
+                   : std::nullopt,
+      // The work list already names the row; nothing to look up.
+      .reference = handle.field,
+      .narrow = ops.narrow_count != 0
+                    ? ops.narrow_of(*handle.owner, handle.index)
+                    : kNoNarrow};
 }
 
 }  // namespace cursiv

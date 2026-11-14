@@ -243,10 +243,10 @@ constexpr HeadGroup kSharedGroups[] = {
 
 std::string dump(const cursiv::AstReflection& r, const cursiv::AstNode& n) {
   std::string children;
-  r.visitMembers(n,
-                 [&](std::string_view, std::uint32_t, cursiv::AstNode& child) {
-                   children += dump(r, child);
-                 });
+  r.visitProperties(
+      n, [&](std::string_view, std::uint32_t, cursiv::AstNode& child) {
+        children += dump(r, child);
+      });
   const std::string name(r.getTypeMetaData(n.type).name);
   if (name == "Val")
     return name + '[' +

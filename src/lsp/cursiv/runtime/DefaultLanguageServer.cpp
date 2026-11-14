@@ -22,24 +22,6 @@
 #include <variant>
 #include <vector>
 
-#include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/ServiceRegistry.hpp"
-#include "cursiv/syntax-tree/AstNode.hpp"
-#include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/utils/CaseFold.hpp"
-#include "cursiv/utils/FunctionRef.hpp"
-#include "cursiv/utils/UriUtils.hpp"
-#include "cursiv/workspace/Document.hpp"
-#include "cursiv/workspace/DocumentBuilder.hpp"
-#include "cursiv/workspace/DocumentFactory.hpp"
-#include "cursiv/workspace/DocumentId.hpp"
-#include "cursiv/workspace/DocumentState.hpp"
-#include "cursiv/workspace/Documents.hpp"
-#include "cursiv/workspace/FileSystemProvider.hpp"
-#include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/workspace/WorkspaceLock.hpp"
-#include "cursiv/workspace/WorkspaceManager.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
 #include "cursiv/actions/CodeLensProvider.hpp"
 #include "cursiv/actions/DocumentLinkProvider.hpp"
@@ -64,15 +46,33 @@
 #include "cursiv/semantic/InlayHintProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/semantic/SignatureHelpProvider.hpp"
+#include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/ExecuteCommandHandler.hpp"
 #include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/symbols/DocumentSymbolProvider.hpp"
 #include "cursiv/symbols/WorkspaceSymbolProvider.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/text/LspPosition.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/CaseFold.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/utils/UriUtils.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/ConfigurationProvider.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/DocumentSaveHandler.hpp"
+#include "cursiv/workspace/DocumentState.hpp"
+#include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/FileOperationHandler.hpp"
+#include "cursiv/workspace/FileSystemProvider.hpp"
 #include "cursiv/workspace/NotebookDocuments.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
+#include "cursiv/workspace/WorkspaceLock.hpp"
+#include "cursiv/workspace/WorkspaceManager.hpp"
 #include "lsp/types.h"
 
 namespace cursiv {
@@ -905,7 +905,7 @@ void DefaultLanguageServer::onConfigurationSectionUpdate(
     std::string_view section, const lsp::LSPAny&) {
   _shared.workspaceLock->write(
       [&](const CancellationToken& token) {
-        const DocumentBuilder& builder = *_shared.documentBuilder;
+        DocumentBuilder& builder = *_shared.documentBuilder;
         bool affected = false;
         for (const std::shared_ptr<Document>& document :
              _shared.documents->all()) {
@@ -1010,11 +1010,7 @@ void DefaultLanguageServer::addDocumentVersion(lsp::CodeAction& action,
 bool DefaultLanguageServer::awaitScan(const CancellationToken& token,
                                       bool required) const {
   if (!required && !_scanPending.load()) return true;
-  const std::shared_future<void> ready = _shared.workspaceManager->ready();
-  while (ready.wait_for(std::chrono::milliseconds(10)) !=
-         std::future_status::ready)
-    if (token.stop_requested()) return false;
-  return true;
+  return _shared.workspaceManager->waitUntilReady(token);
 }
 
 // The lookup is a read of the store like any other -- a write rehashes the map

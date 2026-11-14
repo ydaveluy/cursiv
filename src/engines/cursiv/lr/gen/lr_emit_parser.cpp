@@ -91,7 +91,7 @@ struct LrParserEmitter : LexStateBlocks<LrLexView> {
   std::string capture(F&& f) {
     const std::size_t at = size();
     f();
-    return cut_from(at);
+    return cutFrom(at);
   }
 
   // `decl = {cells};`, `none` standing in for no cell; a column is sixteen

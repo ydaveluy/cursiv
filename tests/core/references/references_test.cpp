@@ -4,6 +4,7 @@
 #include "cursiv/references/References.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -19,17 +20,22 @@
 
 #include "core/references/NarrowedSiteGrammar.hpp"
 #include "core/references/SharedRecordGrammar.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectedFindReferences.hpp"
 #include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/DefaultLinker.hpp"
 #include "cursiv/references/DefaultNameProvider.hpp"
+#include "cursiv/references/DefaultReferences.hpp"
 #include "cursiv/references/DefaultScopeComputation.hpp"
 #include "cursiv/references/DefaultScopeProvider.hpp"
 #include "cursiv/references/LinkingError.hpp"
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/LspServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
 #include "cursiv/syntax-tree/AstMetaData.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
@@ -48,13 +54,10 @@
 #include "cursiv/workspace/IndexManager.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
 #include "cursiv/workspace/WorkspaceLock.hpp"
-#include "cursiv/services/LspServices.hpp"
-#include "cursiv/services/SharedLspServices.hpp"
-#include "cursiv/Check.hpp"
-#include "cursiv/ExpectedFindReferences.hpp"
 #include "languages/multiref/MultiRefGrammar.hpp"
 #include "multiref/generated/MultiG/AstReflection.hpp"
 #include "multiref/generated/MultiG/Module.hpp"
+#include "narrowedsite/generated/NarrowedSite/AstReflection.hpp"
 #include "narrowedsite/generated/NarrowedSite/Module.hpp"
 #include "sharedrecord/generated/SharedRecord/Module.hpp"
 #include "support/Throws.hpp"
@@ -188,18 +191,31 @@ void a_nested_public_lookup_keeps_its_message() {
         "Could not resolve reference to Type named 'Absent'.");
 }
 
-// `unlink` clears every answer.
+// `unlink` clears every answer: the next read asks the scope again.
 void unlink_forgets_every_answer() {
+  struct Counting final : cursiv::DefaultScopeProvider {
+    using DefaultScopeProvider::DefaultScopeProvider;
+    mutable int asked = 0;
+    const cursiv::AstNodeDescription* getScopeEntry(
+        const cursiv::ReferenceInfo& context,
+        std::string_view name) const override {
+      ++asked;
+      return DefaultScopeProvider::getScopeEntry(context, name);
+    }
+  };
   const World world;
   const auto document =
       world.scoped("datatype String\nentity Person { age : String }\n");
+  auto provider = std::make_unique<Counting>(*world.ws);
+  const Counting* const counting = provider.get();
+  world.ws->scopeProvider = std::move(provider);
   world.ws->linker->link(*document);
   CHECK(World::feature(*document).type.get() != nullptr);
+  CHECK(counting->asked == 1);  // kept: a second read asks nothing
 
   world.ws->linker->unlink(*document);
-  // Nobody answers now, so the read fails rather than handing back a stale
-  // target.
-  CHECK(World::feature(*document).type.get() == nullptr);
+  CHECK(World::feature(*document).type.get() != nullptr);
+  CHECK(counting->asked == 2);
 }
 
 void the_candidate_is_the_scope_s_first_fit() {
@@ -267,11 +283,8 @@ void the_failure_names_the_expected_type() {
               document->parseResult.references->handles.front(), "String");
 
   CHECK(world.ws->linker->getCandidate(site) == nullptr);
-  const cursiv::LinkingError refused =
-      world.ws->linker->createLinkingError(site);
-  CHECK(refused.message ==
+  CHECK(world.ws->linker->createLinkingError(site).message ==
         "Could not resolve reference to Entity named 'String'.");
-  CHECK(refused.targetDescription == nullptr);
 }
 
 // A name nothing declares reads the same way, and that is deliberate: the
@@ -341,6 +354,42 @@ struct ChasingProvider final : cursiv::DefaultScopeProvider {
   }
 };
 
+// A language says what a declaration's group is and where it is declared, and
+// the queries follow: the declaration answers with its group, and a reference
+// search lists the declaration sites it gives.
+void the_self_hooks_take_effect() {
+  struct Hooked final : cursiv::DefaultReferences {
+    using DefaultReferences::DefaultReferences;
+    mutable int nodes = 0;
+    mutable int sites = 0;
+    std::vector<const cursiv::AstNode*> getSelfNodes(
+        const cursiv::AstNode& node,
+        const cursiv::CancellationToken& token) const override {
+      ++nodes;
+      return DefaultReferences::getSelfNodes(node, token);
+    }
+    std::vector<cursiv::ReferenceDescription> getSelfReferences(
+        const cursiv::AstNode& node,
+        const cursiv::CancellationToken& token) const override {
+      ++sites;
+      return DefaultReferences::getSelfReferences(node, token);
+    }
+  };
+  World world;
+  const auto document =
+      world.scoped("datatype String\nentity P { age : String }\n");
+  world.ws->linker->link(*document);
+  const Hooked references(*world.ws);
+  const auto text = document->textDocument().getText();
+  const auto at = static_cast<cursiv::TextOffset>(text.find("String"));
+  const cursiv::Declaration found = references.findDeclarations(*document, at);
+  CHECK(references.nodes == 1 && found.targets.size() == 1);
+  if (found.targets.empty()) return;
+  (void)references.findReferences(*found.targets.front(),
+                                  {.includeDeclaration = true});
+  CHECK(references.sites == 1);
+}
+
 // A provider reading through its own resolution says cycle, not "not found",
 // and so does the diagnostic, in the linker's words.
 void a_cycle_is_told_apart_from_a_missing_name() {
@@ -381,6 +430,64 @@ void every_link_of_a_loop_says_cycle() {
   CHECK(b.superType.resolve() == cursiv::RefState::ErrorCycle);
 }
 
+// A provider that reads the candidate's own reference before it answers, and
+// counts how many of its calls stand on one another.
+struct NestingProvider final : cursiv::DefaultScopeProvider {
+  using DefaultScopeProvider::DefaultScopeProvider;
+
+  mutable std::atomic<std::size_t> deepest{0};
+
+  [[nodiscard]] const cursiv::AstNodeDescription* getScopeEntry(
+      const cursiv::ReferenceInfo& context,
+      std::string_view name) const override {
+    thread_local std::size_t standing = 0;
+    struct Call {
+      Call() noexcept { ++standing; }
+      ~Call() { --standing; }
+    } const call;
+    std::size_t seen = deepest.load();
+    while (seen < standing && !deepest.compare_exchange_weak(seen, standing)) {
+    }
+    const cursiv::AstNodeDescription* const found =
+        cursiv::DefaultScopeProvider::getScopeEntry(context, name);
+    if (found != nullptr && found->node != nullptr)
+      if (const auto* const entity =
+              cursiv::ast_cast<const ws::ast::Entity>(found->node))
+        (void)entity->superType.get();
+    return found;
+  }
+};
+
+// A chain of forward references nests one resolution per link. Past a bound
+// of native stack the deepest link is resolved first: every link resolves, and
+// the calls never stand as deep as the chain is long.
+void a_long_chain_resolves_on_a_bounded_stack() {
+  constexpr std::size_t kLinks = 20000;
+  std::string text;
+  for (std::size_t i = 0; i < kLinks; ++i)
+    text += "entity E" + std::to_string(i) + " extends E" +
+            std::to_string(i + 1) + " { }\n";
+  text += "entity E" + std::to_string(kLinks) + " { }\n";
+  World world;
+  // One thread walks the whole list, so nothing but the bound cuts the chain.
+  world.shared.taskScheduler = std::make_unique<cursiv::TaskScheduler>(0);
+  const auto document = world.scoped(text);
+  auto provider = std::make_unique<NestingProvider>(*world.ws);
+  const NestingProvider& measured = *provider;
+  world.ws->scopeProvider = std::move(provider);
+  world.ws->linker->link(*document);
+
+  const auto& refs = *document->parseResult.references;
+  CHECK(refs.handles.size() == kLinks);
+  std::size_t resolved = 0;
+  for (const auto& handle : refs.handles)
+    if (static_cast<const ws::ast::Entity*>(handle.owner)
+            ->superType.resolve() == cursiv::RefState::Resolved)
+      ++resolved;
+  CHECK(resolved == kLinks);
+  CHECK(measured.deepest.load() < kLinks / 4);
+}
+
 struct ThrowingProvider final : cursiv::DefaultScopeProvider {
   using DefaultScopeProvider::DefaultScopeProvider;
 
@@ -417,8 +524,25 @@ void a_throwing_provider_fails_only_its_reference() {
       *static_cast<const ws::ast::Feature*>(refs.handles.front().owner);
   const auto& sound =
       *static_cast<const ws::ast::Feature*>(refs.handles.back().owner);
-  CHECK(boomed.type.resolve() == cursiv::RefState::ErrorNotFound);
+  CHECK(boomed.type.resolve() == cursiv::RefState::ErrorThrown);
   CHECK(sound.type.get() != nullptr);
+  // Said as a failure of the lookup, not as a name nobody declares.
+  std::vector<std::string> messages;
+  refs.visitUnresolved(
+      document->parseResult.cst(),
+      [&](cursiv::RefState why, cursiv::TextOffset, cursiv::TextOffset,
+          const cursiv::ReferenceInfo& site) {
+        messages.push_back(world.ws->linker
+                               ->createLinkingError(
+                                   site, why == cursiv::RefState::ErrorThrown
+                                             ? cursiv::LinkingFailure::Threw
+                                             : cursiv::LinkingFailure::NotFound)
+                               .message);
+      });
+  CHECK(messages ==
+        std::vector<std::string>{
+            "An error occurred while resolving reference to 'Boom': provider "
+            "exploded"});
 }
 
 // Throws on `Boom`, and reads each found entity's own reference without
@@ -462,7 +586,7 @@ void a_throwing_provider_stays_on_its_reference() {
     threw = true;
   }
   CHECK(!threw);
-  CHECK(b.superType.resolve() == cursiv::RefState::ErrorNotFound);
+  CHECK(b.superType.resolve() == cursiv::RefState::ErrorThrown);
 }
 
 // Moves the site's document past `ComputedScopes` while it looks, as the
@@ -672,6 +796,14 @@ void a_narrow_that_fits_still_resolves() {
   CHECK(site.what.get() != nullptr);
   CHECK(cursiv::ast_cast<Kind1>(cursiv::detail::RefAccess::target(site.what)) !=
         nullptr);
+
+  // The site holds the narrowed class and no other the member declares.
+  const cursiv::ReferenceInfo info =
+      site_of(tns::generated::NarrowedSite::kAstMetaData,
+              document->parseResult.references->handles.front(), "a");
+  const cursiv::AstReflection& reflection = *world.lang->astReflection;
+  CHECK(reflection.accepts(info, &cursiv::ast_type_tag<Kind1>));
+  CHECK(!reflection.accepts(info, &cursiv::ast_type_tag<Kind2>));
 }
 
 // A failed narrowing draws no edge: navigation follows what resolved.
@@ -715,12 +847,10 @@ struct Reworded final : cursiv::DefaultLinker {
   using DefaultLinker::DefaultLinker;
 
   [[nodiscard]] cursiv::LinkingError createLinkingError(
-      const cursiv::ReferenceInfo& site, cursiv::RefState why,
+      const cursiv::ReferenceInfo& site, cursiv::LinkingFailure,
       const cursiv::AstNodeDescription* description) const override {
-    cursiv::LinkingError error =
-        DefaultLinker::createLinkingError(site, why, description);
-    error.message = "not that kind: '" + std::string(site.referenceText) + "'";
-    return error;
+    return {"not that kind: '" + std::string(site.referenceText) + "'", site,
+            description};
   }
 };
 
@@ -739,7 +869,7 @@ void the_diagnostic_names_the_site_s_class() {
   std::vector<cursiv::Diagnostic> diagnostics;
   world.lang->documentValidator->validateDocument(
       *document, diagnostics, cursiv::ValidationOptions{}, {});
-  CHECK(has(diagnostics, "Expecting Kind1 named 'b'."));
+  CHECK(has(diagnostics, "Could not resolve reference to Kind1 named 'b'."));
 
   world.lang->linker = std::make_unique<Reworded>(*world.lang);
   world.lang->linker->unlink(*document);
@@ -769,7 +899,7 @@ void a_derived_linker_keeps_its_lookup_and_error_hooks() {
       return DefaultLinker::getCandidates(site);
     }
     cursiv::LinkingError createLinkingError(
-        const cursiv::ReferenceInfo& site, cursiv::RefState why,
+        const cursiv::ReferenceInfo& site, cursiv::LinkingFailure why,
         const cursiv::AstNodeDescription* description) const override {
       ++errors;
       auto error = DefaultLinker::createLinkingError(site, why, description);
@@ -792,7 +922,8 @@ void a_derived_linker_keeps_its_lookup_and_error_hooks() {
       *document, diagnostics, cursiv::ValidationOptions{}, {});
   CHECK(hooked->errors == 2);
   CHECK(std::ranges::count_if(diagnostics, [](const cursiv::Diagnostic& d) {
-          return d.message == "custom: Expecting Kind1 named 'b'.";
+          return d.message ==
+                 "custom: Could not resolve reference to Kind1 named 'b'.";
         }) == 2);
 }
 
@@ -816,6 +947,7 @@ void early_single_and_multi_failures_are_said() {
 }  // namespace
 
 void run() {
+  the_self_hooks_take_effect();
   a_name_points_at_what_it_declares();
   reading_a_reference_resolves_it();
   an_unknown_name_resolves_to_nothing();
@@ -828,6 +960,7 @@ void run() {
   the_policy_decides_what_a_reference_reaches();
   a_cycle_is_told_apart_from_a_missing_name();
   every_link_of_a_loop_says_cycle();
+  a_long_chain_resolves_on_a_bounded_stack();
   a_throwing_provider_fails_only_its_reference();
   a_throwing_provider_stays_on_its_reference();
   an_early_failure_is_judged_where_the_read_began();
@@ -926,17 +1059,17 @@ void the_name_node_is_the_text_it_was_read_from() {
   // answer, one lookup cheaper.
   const auto nameNode = provider().getNameNode(*person);
   const auto passed = provider().getNameNode(*person, &p.document);
-  CHECK(nameNode.has_value());
-  CHECK(passed.has_value() && passed->id == nameNode->id);
-  CHECK(static_cast<bool>(*nameNode));
-  CHECK(nameNode->text() == "Person");
-  CHECK(nameNode->begin() == src.find("Person"));
-  CHECK(nameNode->end() == src.find("Person") + 6);
+  CHECK(nameNode);
+  CHECK(passed && passed.id == nameNode.id);
+  CHECK(static_cast<bool>(nameNode));
+  CHECK(nameNode.text() == "Person");
+  CHECK(nameNode.begin() == src.find("Person"));
+  CHECK(nameNode.end() == src.find("Person") + 6);
 }
 
 void an_unnamed_node_has_no_name_node() {
   const Parsed p("datatype String\n");
-  CHECK(!provider().getNameNode(*p.result.value).has_value());
+  CHECK(!provider().getNameNode(*p.result.value));
 }
 
 // A node built by hand belongs to no tree: it has a name and no range.
@@ -948,7 +1081,7 @@ void a_handmade_node_has_a_name_and_no_range() {
   CHECK(provider().getName(made) ==
         std::optional<std::string_view>("Invented"));
   CHECK(made.cstNodeId == cursiv::kNoNode);
-  CHECK(!provider().getNameNode(made).has_value());
+  CHECK(!provider().getNameNode(made));
 }
 
 // A declared name that matched nothing is the empty name, not "no name": the
@@ -1003,7 +1136,8 @@ void navigation_uses_the_documents_language_id() {
   world.shared.documents->addDocument(document);
   cursiv::Document* const set[] = {document.get()};
   world.shared.documentBuilder->build(set);
-  const auto declaration = world.mref->references->findDeclaration(*document, 14);
+  const auto declaration =
+      world.mref->references->findDeclarations(*document, 14);
   CHECK(declaration.targets.size() == 2);
   if (declaration.targets.size() != 2) return;
   const auto references = world.mref->references->findReferences(
@@ -1081,7 +1215,7 @@ void a_group_is_its_own_sites_targets() {
       std::move(document->parseResult.references),
       *document->parseResult.value);
   const auto declaration =
-      world.mref->references->findDeclaration(*document, 14);
+      world.mref->references->findDeclarations(*document, 14);
   CHECK(declaration.targets.size() == 2);
   CHECK(std::ranges::find(declaration.targets, document->parseResult.value) ==
         declaration.targets.end());
@@ -1131,7 +1265,7 @@ void navigation_resolves_a_reference_at_computed_scopes() {
   bool cancelled = false;
   (void)lock.read([&] {
     try {
-      (void)world.ws->references->findDeclaration(
+      (void)world.ws->references->findDeclarations(
           *document, offset, lookupCancellation.get_token());
     } catch (const cursiv::OperationCancelled&) {
       cancelled = true;
@@ -1140,7 +1274,8 @@ void navigation_resolves_a_reference_at_computed_scopes() {
   CHECK(cancelled);
   customScope->source = nullptr;
   (void)lock.read([&] {
-    const auto found = world.ws->references->findDeclaration(*document, offset);
+    const auto found =
+        world.ws->references->findDeclarations(*document, offset);
     CHECK(found.targets.size() == 1);
     CHECK(found.span.begin == offset && found.span.end == offset + 1);
   });
@@ -1148,8 +1283,9 @@ void navigation_resolves_a_reference_at_computed_scopes() {
 
 // The grammar knows at compile time that it holds one.
 void the_grammar_confesses_its_multi_reference() {
-  CHECK(
-      fmulti::generated::MultiG::create_ast_reflection()->hasMultiReference());
+  const auto reflection = fmulti::generated::MultiG::create_ast_reflection();
+  CHECK(static_cast<const cursiv::DefaultAstReflection&>(*reflection)
+            .hasMultiReference());
 }
 
 // `SELECT t FROM t, t`: one written column name, both table items at once.
@@ -1166,7 +1302,7 @@ void a_declaration_stands_for_its_group(bool declaresMulti) {
   // Caret on the first table item's name: the answer is the whole group,
   // whichever member the caret sat on.
   const cursiv::Declaration found =
-      world.mref->references->findDeclaration(*document, 14);
+      world.mref->references->findDeclarations(*document, 14);
   CHECK(found.targets.size() == 2);
   if (found.targets.size() != 2) return;
 
@@ -1216,10 +1352,10 @@ void two_documents_built_together_keep_their_own_group() {
   world.shared.documentBuilder->build(set);
 
   const cursiv::Declaration foundA =
-      world.mref->references->findDeclaration(*a, 14);
+      world.mref->references->findDeclarations(*a, 14);
   CHECK(foundA.targets.size() == 2);
   const cursiv::Declaration foundB =
-      world.mref->references->findDeclaration(*b, 14);
+      world.mref->references->findDeclarations(*b, 14);
   CHECK(foundB.targets.size() == 3);
 }
 
@@ -1231,7 +1367,7 @@ void a_shared_site_keeps_the_first_target_s_row() {
   for (int i = 0; i < 39; ++i) text += ", t";
   cursiv::Document* const document = world.built(std::move(text));
   const cursiv::Declaration found =
-      world.mref->references->findDeclaration(*document, 7);
+      world.mref->references->findDeclarations(*document, 7);
   CHECK(found.targets.size() == 40);
   if (found.targets.size() != 40) return;
   const std::vector<cursiv::ReferenceDescription> rows =
@@ -1256,7 +1392,7 @@ void a_multi_reference_tracks_new_global_candidates(bool ignoreCase) {
         const cursiv::Document& document,
         const cursiv::CancellationToken& token) const override {
       std::vector<cursiv::AstNodeDescription> exported;
-      const auto* model = document.parseResult.value_as<fmulti::ast::Model>();
+      const auto* model = document.parseResult.valueAs<fmulti::ast::Model>();
       if (model == nullptr || model->query == nullptr) return exported;
       for (auto* item : model->query->items) {
         cursiv::throw_if_cancelled(token);
@@ -1302,7 +1438,7 @@ void a_multi_reference_tracks_new_global_candidates(bool ignoreCase) {
     CHECK(consumer->buildRevision == revision);
     CHECK(consumer->state.load() == cursiv::DocumentState::Validated);
     CHECK(!consumer->hasLinkingErrors());
-    const auto* model = consumer->parseResult.value_as<fmulti::ast::Model>();
+    const auto* model = consumer->parseResult.valueAs<fmulti::ast::Model>();
     CHECK(model != nullptr && model->query != nullptr &&
           model->query->pick != nullptr);
     if (model == nullptr || model->query == nullptr || model->query->pick == nullptr)
@@ -1376,7 +1512,7 @@ void a_throwing_provider_stays_on_its_multi_reference(bool failedFirst) {
   cursiv::Document* const bad =
       add("SELECT Boom FROM good", "file:///bad.mref");
   const auto pick = [](const cursiv::Document& document) -> fmulti::ast::Pick& {
-    return *document.parseResult.value_as<fmulti::ast::Model>()->query->pick;
+    return *document.parseResult.valueAs<fmulti::ast::Model>()->query->pick;
   };
   peeking->other = &pick(*bad);
 
@@ -1391,7 +1527,7 @@ void a_throwing_provider_stays_on_its_multi_reference(bool failedFirst) {
   CHECK(pick(*good).name.resolve() == cursiv::RefState::Resolved);
   CHECK(pick(*good).name.size() == 1);
   CHECK(good->diagnostics.empty());
-  CHECK(pick(*bad).name.resolve() == cursiv::RefState::ErrorNotFound);
+  CHECK(pick(*bad).name.resolve() == cursiv::RefState::ErrorThrown);
   CHECK(bad->diagnostics.size() == 1);
 }
 
@@ -1404,7 +1540,7 @@ struct ExportPair final : cursiv::DefaultScopeComputation {
       const cursiv::Document& document,
       const cursiv::CancellationToken&) const override {
     std::vector<cursiv::AstNodeDescription> exported;
-    auto* const model = document.parseResult.value_as<tsr::Model>();
+    auto* const model = document.parseResult.valueAs<tsr::Model>();
     if (model == nullptr || model->pair == nullptr) return exported;
     addExportedSymbol(*model->pair, exported, document);
     if (model->pair->child != nullptr)
@@ -1446,7 +1582,7 @@ void two_nodes_on_one_record_are_two_targets() {
       world.built("file:///same.srm", "same;same");
   //                                   012345678
 
-  const auto* const model = raw->parseResult.value_as<tsr::Model>();
+  const auto* const model = raw->parseResult.valueAs<tsr::Model>();
   CHECK(model != nullptr && model->pair != nullptr &&
         model->pair->child != nullptr && model->use != nullptr);
   if (model == nullptr || model->pair == nullptr ||
@@ -1640,8 +1776,8 @@ void local_symbols_are_bound_to_their_container() {
   // One name's entries at one container, through the built name table.
   const auto at = [&](const cursiv::AstNode* container, std::string_view name) {
     std::vector<const cursiv::AstNodeDescription*> found;
-    symbols.find(container, name, cursiv::LocalSymbols::hash_name(name))
-        .for_each([&](const cursiv::AstNodeDescription& entry) {
+    symbols.find(container, name, cursiv::LocalSymbols::hashName(name))
+        .forEach([&](const cursiv::AstNodeDescription& entry) {
           found.push_back(&entry);
           return true;
         });
@@ -1763,7 +1899,8 @@ void a_site_index_says_what_the_member_is() {
   const auto document =
       world.scoped("datatype String\nentity Person { age : String }\n");
   const cursiv::ReferenceInfo context = site(*document);
-  const cursiv::AstReflection& reflection = *world.ws->astReflection;
+  const auto& reflection = static_cast<const cursiv::DefaultAstReflection&>(
+      *world.ws->astReflection);
 
   // `Feature::type` is a single `reference<Type>`, not a multi one.
   CHECK(!reflection.isMultiReference(context.reference));
@@ -1817,8 +1954,10 @@ void a_site_can_be_filled_by_hand() {
   cursiv::ReferenceInfo typed;
   typed.container = real.container;
   typed.property = "type";
-  typed.reference = world.ws->astReflection->referenceIndexOf(
-      &cursiv::ast_type_tag<cursiv::reference<ws::ast::Type>>);
+  typed.reference =
+      static_cast<const cursiv::DefaultAstReflection&>(*world.ws->astReflection)
+          .referenceIndexOf(
+              &cursiv::ast_type_tag<cursiv::reference<ws::ast::Type>>);
   CHECK(typed.reference == real.reference);
   CHECK(world.ws->scopeProvider->getScopeEntry(typed, "String") != nullptr);
   CHECK(!world.visible(typed).empty());

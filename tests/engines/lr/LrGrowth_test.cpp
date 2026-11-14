@@ -48,7 +48,7 @@ void html_tree(const std::string& text, unsigned elements, unsigned texts) {
   const std::string source = "html " + text;
   const auto result = parser->parse(source);
   CHECK(result.accepted && result.diagnostics.empty() && result.value != nullptr);
-  const auto* root = result.value_as<tghtml::ast::Elem>();
+  const auto* root = result.valueAs<tghtml::ast::Elem>();
   CHECK(root != nullptr && root->name == (texts == 0 ? "a" : "div"));
   std::vector<const cursiv::AstNode*> pending{result.value};
   unsigned gotElements = 0, gotTexts = 0;
@@ -193,7 +193,7 @@ void a_run_inside_a_run_never_forks() {
 
   auto lr = fasta::Lr::create_parser();
   const auto result = lr->parse(text);
-  const auto* doc = result.value_as<tgfasta::ast::Document>();
+  const auto* doc = result.valueAs<tgfasta::ast::Document>();
   CHECK(doc != nullptr && doc->sections.size() == 2);
   const auto* run =
       doc ? cursiv::ast_cast<tgfasta::ast::Run>(doc->sections[1]) : nullptr;
@@ -274,10 +274,10 @@ void a_graph_past_its_ceiling_is_cut_and_says_so() {
   // decided over, then the close tag the end lacks.
   CHECK(cut.notes.size() == 2);
   if (cut.notes.size() != 2) return;
-  CHECK(cut.notes[0].kind == cursiv::DiagnosticKind::bounded);
+  CHECK(cut.notes[0].kind == cursiv::DiagnosticKind::Bounded);
   CHECK(cut.notes[0].begin <= text.find("<br>"));
   CHECK(cut.notes[0].end >= text.rfind("<p>"));
-  CHECK(cut.notes[1].kind == cursiv::DiagnosticKind::inserted);
+  CHECK(cut.notes[1].kind == cursiv::DiagnosticKind::Inserted);
   CHECK(cut.notes[1].begin == size && cut.notes[1].end == size);
   const Read again = read<html::G::kTable>(text, &html::G::kDrive, tight);
   CHECK(again.spans == cut.spans);
@@ -298,7 +298,7 @@ void an_undelimited_argument_list_costs_a_power() {
   auto lr = call::G::create_parser();
   const std::string source = "call " + names(160);
   const auto result = lr->parse(source);
-  const auto* program = result.value_as<tgcall::ast::Program>();
+  const auto* program = result.valueAs<tgcall::ast::Program>();
   CHECK(program != nullptr && program->statements.size() == 1);
   const auto* head =
       program ? cursiv::ast_cast<tgcall::ast::Call>(program->statements[0])

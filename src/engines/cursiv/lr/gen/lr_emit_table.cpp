@@ -449,7 +449,7 @@ struct LrTableEmitter : TextBuilder {
     write(decl, " = {");
     cells(values, values.size());
     line("};");
-    programData += cut_from(at);
+    programData += cutFrom(at);
   }
 
   void program_matrix(const LrProgramMatrix& matrix, std::string_view name,

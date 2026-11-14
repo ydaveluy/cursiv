@@ -30,8 +30,8 @@ class Interpreter::Machine {
   [[nodiscard]] std::optional<double> run(const ast::Expression& expression,
                                           std::size_t* remaining) {
     // Most divisors a validator asks about are a number as written.
-    if (expression.type == &cursiv::ast_type_tag<ast::NumberLiteral>)
-      return static_cast<const ast::NumberLiteral&>(expression).value;
+    if (const auto* number = cursiv::ast_cast<ast::NumberLiteral>(&expression))
+      return number->value;
     _remaining = remaining;
     if (remaining != nullptr) _constants.clear();
     // Only the calls a failed run left open: clearing the whole set would

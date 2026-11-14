@@ -5,8 +5,8 @@
 #include <iterator>
 #include <string_view>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
-#include "cursiv/grammar/unicode/UnicodeRanges.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRanges.hpp"
 #include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {

@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/lr/table/LrLowFacts.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
 #include "cursiv/lr/table/LrSizes.hpp"

@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
@@ -37,9 +38,9 @@ struct BrokenTape {
 struct AstBuildCtx {
   const Cst* cst = nullptr;
   AstArena* arena = nullptr;
-  std::vector<detail::RefHandle>* refs = nullptr;
+  std::vector<RefHandle>* refs = nullptr;
   // What a reference asks when it is read, set when it is written.
-  const detail::RefResolver* resolver = nullptr;
+  const RefResolver* resolver = nullptr;
   std::vector<ParseDiagnostic>* diags = nullptr;
   std::pmr::vector<AstNode*>* nodes = nullptr;
   const AstActions* actions = nullptr;
@@ -56,6 +57,8 @@ struct AstBuildCtx {
   std::size_t attached = 0;
   // Scoped to one text query; independent writes still run their converters.
   TextValues* textValues = nullptr;
+  // The grammar being read, when its parser builds the tree.
+  const Grammar* grammar = nullptr;
   // Nodes created and not yet on `nodes`, which takes them in batches: a store
   // here is cheaper than the list's append call.
   static constexpr std::size_t kMadeRun = 256;
@@ -64,10 +67,10 @@ struct AstBuildCtx {
 
   // Text a view of the tree names, which the tree keeps.
   std::string_view keep_text(std::string_view text) const {
-    return cst->keep_text({&text, 1});
+    return cst->keepText({&text, 1});
   }
   std::string_view keep_text(std::span<const std::string_view> parts) const {
-    return cst->keep_text(parts);
+    return cst->keepText(parts);
   }
   // In creation order, the list's order. If the list refuses a node, the
   // reducer's teardown destroys it.
@@ -84,7 +87,7 @@ struct AstBuildCtx {
   // Collect and continue: an out-of-range literal must not cost an editor its
   // AST.
   void diag(std::string message, NodeId id) {
-    diags->push_back(place({.kind = DiagnosticKind::conversion_error,
+    diags->push_back(place({.kind = DiagnosticKind::ConversionError,
                             .message = std::move(message)},
                            id));
   }

@@ -12,7 +12,7 @@
 
 #include "cursiv/Check.hpp"
 #include "cursiv/grammar/expr.hpp"
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/grammar/word_final_in.hpp"
 #include "cursiv/shared/gen/LexCodePoints.hpp"
 #include "cursiv/text/ClassItem.hpp"
@@ -144,6 +144,11 @@ static_assert(difference_is(R"(\u{0}-\u{10ffff})", R"(\u{10ffff})",
 static_assert(difference_is(R"(\u{0}-\u{10ffff})", R"(\u{0})",
                             {{1, 0x10ffff}}));
 static_assert(difference_is(R"(\u{0}\u{10ffff})", R"(\u{0}-\u{10ffff})", {}));
+// A difference is a set of scalars: no bound lands on a surrogate.
+static_assert(difference_is(R"(\u{80}-\u{10ffff})", R"(\u{e000}-\u{f8ff})",
+                            {{0x80, 0xd7ff}, {0xf900, 0x10ffff}}));
+static_assert(difference_is(R"(\u{0}-\u{10ffff})", R"(\u{0}-\u{d7ff})",
+                            {{0xe000, 0x10ffff}}));
 
 constexpr bool union_is(std::string_view a, std::string_view b,
                         std::initializer_list<unicode::Range> want) {
@@ -374,11 +379,11 @@ void a_builder_goes_back_to_a_place() {
   w.write("kept ");
   const std::size_t at = w.size();
   w.write("gone\nmore");
-  CHECK(w.cut_from(at) == "gone\n    more");
+  CHECK(w.cutFrom(at) == "gone\n    more");
   w.line("on");
   const std::size_t next = w.size();
   w.line("gone");
-  CHECK(w.cut_from(next) == "    gone\n");
+  CHECK(w.cutFrom(next) == "    gone\n");
   w.line("next");
   CHECK(w.text() == "    kept on\n    next\n");
 }

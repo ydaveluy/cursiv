@@ -32,7 +32,7 @@ using Pair = std::array<std::unique_ptr<cursiv::Parser>, 2>;
 
 bool read(const cursiv::ParseResult& r) {
   return r.accepted && r.diagnostics.empty() &&
-         r.error == cursiv::AstBuildError::none && r.value != nullptr;
+         r.error == cursiv::AstBuildError::None && r.value != nullptr;
 }
 
 }  // namespace
@@ -227,7 +227,8 @@ void members_are_visited_in_declaration_order(const Engine& e) {
 
 void properties_follow_the_class(const Engine& e) {
   CHECK(properties(e, &cursiv::ast_type_tag<Base>) == "first link second ");
-  CHECK(properties(e, &cursiv::ast_type_tag<Derived>) == "third items ");
+  CHECK(properties(e, &cursiv::ast_type_tag<Derived>) ==
+        "first link second third items ");
 }
 
 void a_type_the_grammar_does_not_name_is_visited_the_same_way(const Engine& e) {
@@ -238,7 +239,7 @@ void a_type_the_grammar_does_not_name_is_visited_the_same_way(const Engine& e) {
   node.second = &b;
   node.first = &a;
   std::string seen;
-  e.reflection->visitMembers(
+  e.reflection->visitProperties(
       node, [&](std::string_view property, std::uint32_t, cursiv::AstNode&) {
         seen += std::string(property) + ' ';
       });
@@ -368,7 +369,7 @@ namespace ast = tnestedrun::ast;
 
 const ast::Groups* read(const cursiv::ParseResult& r) {
   if (!r.accepted || !r.diagnostics.empty() ||
-      r.error != cursiv::AstBuildError::none || r.value == nullptr ||
+      r.error != cursiv::AstBuildError::None || r.value == nullptr ||
       r.value->type != &cursiv::ast_type_tag<ast::Groups>)
     return nullptr;
   return static_cast<const ast::Groups*>(r.value);

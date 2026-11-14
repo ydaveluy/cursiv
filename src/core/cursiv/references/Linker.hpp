@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 #include "cursiv/references/LinkingError.hpp"
@@ -14,6 +15,14 @@
 namespace cursiv {
 
 struct Document;
+
+// How a reference failed, as its diagnostic tells it.
+enum class LinkingFailure : std::uint8_t {
+  NotFound,
+  Cycle,
+  // The lookup itself failed: a provider threw.
+  Threw,
+};
 
 class Linker {
  public:
@@ -38,12 +47,13 @@ class Linker {
   [[nodiscard]] virtual std::vector<const AstNodeDescription*> getCandidates(
       const ReferenceInfo& reference) const = 0;
 
-  // The error for a failed reference, `why` saying how: a name found nowhere or
-  // a cycle. Every message comes from here: override it for a custom one.
-  // `description` is what the name did reach, when the caller has one.
+  // The error for a failed reference: `why` says how it failed,
+  // `targetDescription` what the name did reach, when the caller has one.
+  // Every message comes from here: override it for a custom one.
   [[nodiscard]] virtual LinkingError createLinkingError(
-      const ReferenceInfo& reference, RefState why = RefState::ErrorNotFound,
-      const AstNodeDescription* description = nullptr) const = 0;
+      const ReferenceInfo& reference,
+      LinkingFailure why = LinkingFailure::NotFound,
+      const AstNodeDescription* targetDescription = nullptr) const = 0;
 };
 
 }  // namespace cursiv

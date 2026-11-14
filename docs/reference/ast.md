@@ -140,12 +140,12 @@ const cursiv::AstReflection& reflection = *services.astReflection;
 // The nodes directly inside `node`.
 cursiv::visit_contents(reflection, node, [&](cursiv::AstNode& child) { /* ... */ });
 
-// Every node below `node`, a parent first. Return AstWalk::prune to skip what
+// Every node below `node`, a parent first. Return AstWalk::Prune to skip what
 // a node contains, or return nothing to read them all.
 cursiv::visit_all_contents(reflection, node, [&](cursiv::AstNode& child) {
   return cursiv::ast_cast<ast::Comment>(&child) != nullptr
-             ? cursiv::AstWalk::prune
-             : cursiv::AstWalk::enter;
+             ? cursiv::AstWalk::Prune
+             : cursiv::AstWalk::Enter;
 });
 
 // The node itself or the nearest node containing it of that class, or null.
@@ -179,8 +179,10 @@ if (comment != cursiv::kNoNode) {
 | `type` | The runtime type tag; `type->name` names the class |
 | `cstNodeId` | The concrete syntax tree (CST) node it was built from |
 
-A copy of a node takes its members but none of these: it has no type tag, so
-`ast_cast` refuses it, and assigning to a node keeps the node's own. Its
-references read the source's sites: the copy is valid only while the source's
-parse stands, and a relink resets only the source. Copy a node only while no
-thread resolves its references.
+A property of your grammar may have one of these names, and then hides the
+member in its class: `entity.parent` is the property. `cursiv::parent_of(node)`,
+`cursiv::type_of(node)` and `cursiv::cst_node_id_of(node)` always read the
+node's own.
+
+A node cannot be copied or assigned: it is one place in one tree. Make a new
+one with `AstReflection::createNode` and set its properties.

@@ -13,10 +13,10 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
-#include "cursiv/text/TextOffset.hpp"
 #include "cursiv/ValidationResult.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/JsonValue.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 
 namespace cursiv {
 struct AstNode;

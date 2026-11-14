@@ -88,8 +88,8 @@ std::optional<lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
     const cursiv::Document& document, lsp::Position position,
     std::string_view newName, const cursiv::CancellationToken& token) const {
   const QualifiedNameProvider& names = *_dm.qualifiedNameProvider;
-  const cursiv::References& references = *core().references;
-  const cursiv::Documents& store = *core().shared().documents;
+  const cursiv::References& references = *services.references;
+  const cursiv::Documents& store = *services.shared().documents;
 
   // The declaration edit is the base's: what a new name may be, and where a
   // declaration writes it, is not this language's business.
@@ -97,7 +97,7 @@ std::optional<lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
       cursiv::DefaultRenameProvider::rename(document, position, newName, token);
   if (!edit.has_value()) return edit;
 
-  const cursiv::Declaration found = references.findDeclaration(
+  const cursiv::Declaration found = references.findDeclarations(
       document, document.textDocument().offsetAt(cursiv::from_lsp(position)),
       token);
   if (!found || found.targets.empty()) return edit;

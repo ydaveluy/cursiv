@@ -67,7 +67,7 @@ void generic_typo_runs_keep_the_terminal_guard() {
   const auto prefix = rescan("he lloExtra x");
   CHECK(prefix.term != cursiv::engine::kInvalidSymbol && prefix.end == 6);
   // A normal separator between already valid tokens is left alone.
-  CHECK(said("hello world", cursiv::DiagnosticKind::replaced) == 0);
+  CHECK(said("hello world", cursiv::DiagnosticKind::Replaced) == 0);
 }
 
 }  // namespace
@@ -75,12 +75,12 @@ void generic_typo_runs_keep_the_terminal_guard() {
 void torture_boundary() {
   generic_typo_runs_keep_the_terminal_guard();
   // Spelled right: no diagnostic.
-  CHECK(said("hello x", cursiv::DiagnosticKind::replaced) == 0);
-  CHECK(said("hello x", cursiv::DiagnosticKind::deleted) == 0);
+  CHECK(said("hello x", cursiv::DiagnosticKind::Replaced) == 0);
+  CHECK(said("hello x", cursiv::DiagnosticKind::Deleted) == 0);
   // Misspelled, and the boundary is clear: one repair, and it is the word.
-  CHECK(said("helxo x", cursiv::DiagnosticKind::replaced) == 1);
+  CHECK(said("helxo x", cursiv::DiagnosticKind::Replaced) == 1);
   // ...and before a byte the boundary refuses, there is no misspelling to
   // find: `hello;` is not a valid parse, so `helxo;` is not a repair of one.
-  CHECK(said("helxo; x", cursiv::DiagnosticKind::replaced) == 0);
-  CHECK(said("hello; x", cursiv::DiagnosticKind::replaced) == 0);
+  CHECK(said("helxo; x", cursiv::DiagnosticKind::Replaced) == 0);
+  CHECK(said("hello; x", cursiv::DiagnosticKind::Replaced) == 0);
 }

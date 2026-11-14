@@ -25,7 +25,7 @@ using Items = std::vector<std::string>;
 void check(const cursiv::Parser& parser, std::string_view text,
            const Items& expected) {
   const auto r = parser.parse(text);
-  const auto* d = r.value_as<tlexbackends::Document>();
+  const auto* d = r.valueAs<tlexbackends::Document>();
   const bool clean = r.accepted && r.diagnostics.empty() && d;
   if (!clean)
     std::fprintf(stderr, "lexical backend rejected: %.*s\n",
@@ -103,7 +103,7 @@ void check(const cursiv::Parser& parser, std::string_view source,
            bool expected) {
   const std::string input = "capture:" + std::string(source);
   const auto result = parser.parse(input);
-  const auto* node = result.value_as<tcaptures::Node>();
+  const auto* node = result.valueAs<tcaptures::Node>();
   const bool clean = result.accepted && result.diagnostics.empty() && node;
   if (clean != expected)
     std::printf("capture input=%.*s expected=%d actual=%d\n",
@@ -191,7 +191,7 @@ void check(const cursiv::Parser& parser, std::string_view prefix,
       std::string(prefix) + std::string(body) + std::string(suffix);
   const std::string input = "capture:" + source;
   const auto r = parser.parse(input);
-  const auto* node = r.value_as<tthrough::Node>();
+  const auto* node = r.valueAs<tthrough::Node>();
   const bool clean =
       r.accepted && !r.cst().recovered() && r.diagnostics.empty() && node;
   if (clean != expected)
@@ -282,7 +282,7 @@ namespace {
 const trulethrough::Node* read(const cursiv::ParseResult& r) {
   const bool clean =
       r.accepted && !r.cst().recovered() && r.diagnostics.empty();
-  return clean ? r.value_as<trulethrough::Node>() : nullptr;
+  return clean ? r.valueAs<trulethrough::Node>() : nullptr;
 }
 
 void text(const cursiv::Parser& parser, std::string_view source,

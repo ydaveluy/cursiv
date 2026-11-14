@@ -43,7 +43,7 @@ void abandoned(const cursiv::Parser& parser,
   auto expected = spans.begin();
   for (const auto& diagnostic : result.diagnostics) {
     if (expected == spans.end()) break;
-    right = right && diagnostic.kind == cursiv::DiagnosticKind::incomplete &&
+    right = right && diagnostic.kind == cursiv::DiagnosticKind::Incomplete &&
             diagnostic.begin == prefix.size() + expected->first &&
             diagnostic.end == prefix.size() + expected->second &&
             parser.getGrammar().terminalName(diagnostic.element) == "ID" &&

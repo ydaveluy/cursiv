@@ -9,16 +9,16 @@
 namespace cursiv {
 
 enum class AstBuildError : std::uint8_t {
-  none,
+  None,
   // The entry rule matched nothing, or the repairs gave up every node it
   // would have built: fatal, there is nothing to build from.
-  no_entry,
+  NoEntry,
   // The document was rejected after its entry matched; the tree still exists,
   // and completion needs it.
-  not_accepted,
+  NotAccepted,
   // A node the tree requires could not be built, or the records were not
   // written for this builder.
-  malformed_cst
+  MalformedCst
 };
 
 }  // namespace cursiv

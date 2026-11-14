@@ -17,7 +17,7 @@ using namespace tlllatewidth;
 void expect_value(const cursiv::ParseResult& parsed, unsigned count,
                   bool dimension) {
   CHECK(parsed.accepted && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<Document>();
+  const auto* doc = parsed.valueAs<Document>();
   CHECK(doc && doc->value);
   if (!doc || !doc->value) return;
   const auto* value = doc->value;

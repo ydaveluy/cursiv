@@ -34,7 +34,7 @@ void two_ignored_terminals_may_read_one_text(const cursiv::Parser& parser,
                                              std::string_view mode) {
   const std::string source = std::string(mode) + "a  b \t c";
   const cursiv::ParseResult r = parser.parse(source);
-  const auto* const root = r.value_as<ttrivia::ast::Node>();
+  const auto* const root = r.valueAs<ttrivia::ast::Node>();
   CHECK(r.accepted && r.diagnostics.empty() && root != nullptr);
   CHECK(root != nullptr && root->body.size() == 3);
 }
@@ -43,7 +43,7 @@ void two_ignored_terminals_may_read_one_text(const cursiv::Parser& parser,
 // that would open it are refused, however the lexer crosses blanks.
 void a_blank_keeps_its_head_refusal(const cursiv::Parser& parser) {
   const cursiv::ParseResult inside = parser.parse("refusing:a \t\t b\tc");
-  const auto* const root = inside.value_as<ttrivia::ast::Node>();
+  const auto* const root = inside.valueAs<ttrivia::ast::Node>();
   CHECK(inside.accepted && inside.diagnostics.empty() && root != nullptr);
   CHECK(root != nullptr && root->body.size() == 3);
   for (const std::string_view text : {"refusing:a\t\tb", "refusing:\t\ta"}) {
@@ -74,7 +74,7 @@ void an_open_comment_is_skipped_where_it_is_trivia(const cursiv::Parser& ll,
       const cursiv::ParseResult r = parser->parse(sample.text);
       const bool spans =
           r.diagnostics.size() == 1 &&
-          r.diagnostics.front().kind == cursiv::DiagnosticKind::replaced &&
+          r.diagnostics.front().kind == cursiv::DiagnosticKind::Replaced &&
           r.diagnostics.front().begin == sample.begin &&
           r.diagnostics.front().end == sample.end;
       if (!spans)
@@ -170,7 +170,7 @@ void a_run_of_blanks_reads_on_from_its_last_byte(const cursiv::Parser& p) {
     CHECK(clean == sample.clean);
     if (clean != sample.clean) std::printf("  %s\n", source.c_str());
     // A continuation read as a word would leave a clean document with one more.
-    const auto* const root = r.value_as<ttrivia::ast::Node>();
+    const auto* const root = r.valueAs<ttrivia::ast::Node>();
     if (sample.clean) CHECK(root != nullptr && root->body.size() == sample.items);
   }
   // A choice that reads on across such a gap.
@@ -282,7 +282,8 @@ void a_tie_stands_only_behind_its_first_byte(const cursiv::Parser& p) {
     CHECK(clean);
     if (!clean) std::printf("  %s\n", sample.text.c_str());
     std::vector<std::string> names;
-    if (const auto* const root = r.value_as<ttrivia::ast::Node>(); root != nullptr)
+    if (const auto* const root = r.valueAs<ttrivia::ast::Node>();
+        root != nullptr)
       for (const auto* const item : root->body)
         names.emplace_back(item->name);
     CHECK(names == sample.names);
@@ -328,7 +329,7 @@ void each_open_comment_is_skipped(const cursiv::Parser& parser) {
   const cursiv::ParseResult r = parser.parse(text);
   std::size_t skipped = 0;
   for (const cursiv::ParseDiagnostic& d : r.diagnostics)
-    if (d.kind == cursiv::DiagnosticKind::replaced) ++skipped;
+    if (d.kind == cursiv::DiagnosticKind::Replaced) ++skipped;
   CHECK(skipped == kComments && r.diagnostics.size() == kComments);
 }
 
@@ -396,7 +397,7 @@ std::string_view prefix;
 std::string read(const cursiv::Parser& parser, std::string_view text) {
   const std::string source = std::string(prefix) + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
-  const auto* const doc = r.value_as<timpliedtag::ast::Doc>();
+  const auto* const doc = r.valueAs<timpliedtag::ast::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr)
     return "<refused>";
   std::string out;
@@ -479,7 +480,7 @@ void check(const cursiv::Parser& parser, std::string_view text,
   // The AST holds views into the text it was read from: keep it alive.
   const std::string source = "region:" + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
-  const auto* const root = r.value_as<tregion::ast::Group>();
+  const auto* const root = r.valueAs<tregion::ast::Group>();
   std::string got = "<refused>";
   if (r.accepted && r.diagnostics.empty() && !r.cst().recovered() &&
       root != nullptr) {
@@ -611,7 +612,7 @@ void a_block_ends_before_its_newline(const cursiv::Parser& parser,
     // The AST holds views into the text it was read from: keep it alive.
     const std::string source = "lines:" + std::string(sample.text);
     const cursiv::ParseResult r = parser.parse(source);
-    const auto* const lines = r.value_as<tunary::ast::Lines>();
+    const auto* const lines = r.valueAs<tunary::ast::Lines>();
     const std::size_t read = lines != nullptr ? lines->items.size() : 0;
     const bool ok = r.accepted && r.diagnostics.empty() &&
                     !r.cst().recovered() && read == sample.statements;

@@ -582,7 +582,7 @@ void a_refused_record_keeps_no_part_of_it() {
       shared.documentFactory->fromString("datatype D\n", "file:///d.ws");
   bool finished = false;
   for (int step = 0; step < 8 && !finished; ++step) {
-    const Recording builder(shared);
+    Recording builder(shared);
     builder.markAsCompleted(*document, first);
     bool refused = false;
     fail_allocation(step);
@@ -737,7 +737,7 @@ void a_refused_emission_fails_the_pass() {
     fail_allocation(step);
     try {
       language.documentValidator->validateDocument(*document, diagnostics,
-                                                   only);
+                                                   {.categories = only});
     } catch (const std::bad_alloc&) {
       refused = true;
     }
@@ -819,8 +819,7 @@ void a_refused_scan_still_sets_ready() {
     }
     failAfter.store(-1, std::memory_order_release);
     finished = !refused;
-    CHECK(shared.workspaceManager->ready().wait_for(std::chrono::seconds(0)) ==
-          std::future_status::ready);
+    CHECK(shared.workspaceManager->isReady());
   }
   CHECK(finished);
 }

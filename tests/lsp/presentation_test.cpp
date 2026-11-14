@@ -31,8 +31,6 @@
 #include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/semantic/SignatureHelpProvider.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/services/LspServices.hpp"
 #include "cursiv/symbols/DocumentSymbolProvider.hpp"
 #include "cursiv/symbols/WorkspaceSymbolProvider.hpp"
@@ -42,7 +40,9 @@
 #include "cursiv/syntax-tree/DocumentReferences.hpp"
 #include "cursiv/syntax-tree/MultiRefItems.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 #include "cursiv/validation/DefaultCodeActionProtocol.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/DefaultDocuments.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
@@ -331,9 +331,9 @@ struct QueryMatcher final : cursiv::FuzzyMatcher {
 struct UnplacedNames final : cursiv::DefaultNameProvider {
   using DefaultNameProvider::DefaultNameProvider;
 
-  std::optional<cursiv::CstNodeView> getNameNode(
-      const cursiv::AstNode&, const cursiv::Document*) const override {
-    return std::nullopt;
+  cursiv::CstNodeView getNameNode(const cursiv::AstNode&,
+                                  const cursiv::Document*) const override {
+    return {};
   }
 };
 

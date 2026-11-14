@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
       shared.fileSystemProvider =
           std::make_unique<cursiv::LocalFileSystemProvider>();
       cursiv::install_default_shared_core_services(shared);
-      if (!kRegister(shared)) return cursiv::kFatal;
+      kRegister(shared);
       return arith::eval_file(argv[2], shared, std::cout, std::cerr);
     });
   return cursiv::run_cli<arith::ArithmeticsSharedCoreServices>(argc, argv,

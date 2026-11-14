@@ -9,8 +9,8 @@
 
 #include "cursiv/grammar/Association.hpp"
 #include "cursiv/grammar/RuleTraits.hpp"
-#include "cursiv/grammar/unicode/UnicodeProperty.hpp"
-#include "cursiv/grammar/unicode/UnicodeRanges.hpp"
+#include "cursiv/text/unicode/UnicodeProperty.hpp"
+#include "cursiv/text/unicode/UnicodeRanges.hpp"
 #include "cursiv/syntax-tree/MemberTraits.hpp"
 #include "cursiv/text/ClassItem.hpp"
 #include "cursiv/text/ClassRanges.hpp"
@@ -306,17 +306,17 @@ struct Skip : GrammarNode {};
 template <class Op>
 struct LeftAssoc {
   using op_expr = Op;
-  static constexpr Association kGroup = Association::left;
+  static constexpr Association kGroup = Association::Left;
 };
 template <class Op>
 struct RightAssoc {
   using op_expr = Op;
-  static constexpr Association kGroup = Association::right;
+  static constexpr Association kGroup = Association::Right;
 };
 template <class Op>
 struct NonAssoc {
   using op_expr = Op;
-  static constexpr Association kGroup = Association::non;
+  static constexpr Association kGroup = Association::Non;
 };
 // A unary level: its operator stands before the operand (`prefix`) or after
 // it (`postfix`) and builds a `Node` of its own. Its operand is read at its
@@ -338,7 +338,7 @@ struct UnaryLevel {
 };
 template <class L>
 inline constexpr bool is_unary_level =
-    L::kGroup == Association::prefix || L::kGroup == Association::postfix;
+    L::kGroup == Association::Prefix || L::kGroup == Association::Postfix;
 template <class... Ls>
 struct Levels {
   static constexpr std::size_t size = sizeof...(Ls);
@@ -609,6 +609,24 @@ constexpr auto operator|(A, B) {
                             std::remove_cvref_t<B>>::type{};
 }
 
+// An expression joined to what is not one, such as a character or a string.
+template <class A, class B>
+  requires(Expr<A> != Expr<B>)
+constexpr auto operator+(A, B) {
+  static_assert(dependent_false<A>,
+                "a grammar expression is joined to something that is not one: "
+                "write a word or a character as `lit<\"x\">`, a rule as "
+                "`ref<Rule>`");
+}
+template <class A, class B>
+  requires(Expr<A> != Expr<B>)
+constexpr auto operator|(A, B) {
+  static_assert(dependent_false<A>,
+                "a grammar expression is joined to something that is not one: "
+                "write a word or a character as `lit<\"x\">`, a rule as "
+                "`ref<Rule>`");
+}
+
 template <Expr E>
 constexpr auto operator!(E) {
   return Not<std::remove_cvref_t<E>>{};
@@ -692,14 +710,13 @@ consteval auto cp_tail() {
   for (std::size_t i = 1; i < Spec.size(); ++i) buf[i - 1] = Spec[i];
   return str<Spec.size()>(buf);
 }
-enum class ClassOp : unsigned char { unite, intersect, minus, outside };
+enum class ClassOp : unsigned char { unite, intersect, outside };
 template <str A, str B, ClassOp Op>
 consteval ClassRanges class_ranges() {
   const ClassRanges a = ClassRanges::of(A.view());
   const ClassRanges b = ClassRanges::of(B.view());
   return Op == ClassOp::unite       ? a.united(b)
          : Op == ClassOp::intersect ? a.intersected(b)
-         : Op == ClassOp::minus     ? a.minus(b)
                                     : a.complemented();
 }
 template <str A, str B, ClassOp Op>
@@ -741,7 +758,7 @@ consteval std::uint64_t cp_bit(unicode::Property p) {
 template <std::uint64_t M>
 consteval ClassRanges props_ranges() {
   ClassRanges out;
-  for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::count); ++i)
+  for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::Count); ++i)
     if ((M >> i) & 1)
       out.r.insert(out.r.end(), unicode::kTables[i].begin(),
                    unicode::kTables[i].end());
@@ -959,19 +976,20 @@ struct TightFn {
 // Rebuilding helpers shared by the authoring, compiling and optimizing
 // layers: a list of parts back to a shape, a choice's parts as a list.
 
-// Flattening without create absorption: a create a rewrite introduces is a
-// bounded region.
-template <class... Es>
-struct flat_seq;
-template <class E>
-struct flat_seq<E> {
+// A set flattens as its operator does: `a | b | z` is one choice of three, so
+// a choice spliced into a choice joins it rather than nesting. A create a
+// rewrite introduces stays a bounded region.
+template <template <class...> class Sh, class... Es>
+struct flat_of;
+template <template <class...> class Sh, class E>
+struct flat_of<Sh, E> {
   using type = E;
 };
-template <class A, class B, class... Rest>
-struct flat_seq<A, B, Rest...>
-    : flat_seq<typename FlatCat<Seq, A, B>::type, Rest...> {};
-template <class... Es>
-using flat_seq_t = typename flat_seq<Es...>::type;
+template <template <class...> class Sh, class A, class B, class... Rest>
+struct flat_of<Sh, A, B, Rest...>
+    : flat_of<Sh, typename FlatCat<Sh, A, B>::type, Rest...> {};
+template <template <class...> class Sh, class... Es>
+using flat_of_t = typename flat_of<Sh, Es...>::type;
 
 // One part is the shape: a choice of one is no choice (Seq and the choices
 // assert arity two at class scope).
@@ -982,7 +1000,7 @@ struct seq_of<TypeList<E>> {
   using type = E;
 };
 template <class... Es>
-struct seq_of<TypeList<Es...>> : flat_seq<Es...> {};
+struct seq_of<TypeList<Es...>> : flat_of<Seq, Es...> {};
 template <class L>
 struct or_of;
 template <class E>

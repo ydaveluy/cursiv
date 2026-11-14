@@ -5,8 +5,8 @@
 
 #include <span>
 
-#include "cursiv/grammar/unicode/UnicodeProperty.hpp"
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeProperty.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 
 namespace cursiv::unicode {
 

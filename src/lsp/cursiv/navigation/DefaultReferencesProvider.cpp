@@ -21,13 +21,13 @@ std::vector<lsp::Location> DefaultReferencesProvider::findReferences(
     const Document& document, lsp::Position position, bool includeDeclaration,
     const CancellationToken& token) const {
   throw_if_cancelled(token);
-  const References& references = *_core.references;
+  const References& references = *services.references;
 
-  const Declaration found = references.findDeclaration(
+  const Declaration found = references.findDeclarations(
       document, document.textDocument().offsetAt(from_lsp(position)), token);
   const FindReferencesOptions options{includeDeclaration, kNoDocument};
   return detail::reference_locations(
-      *_core.shared().documents,
+      *services.shared().documents,
       detail::collect_references_per_declaration(
           references, found.targets,
           [&options](const AstNode&) { return options; }, token));

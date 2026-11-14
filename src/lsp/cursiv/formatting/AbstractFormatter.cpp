@@ -213,10 +213,10 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
   if (!document.hasAst()) return {};
   const ParseResult& parsed = document.parseResult;
   const Cst& cst = parsed.cst();
-  if (!cst.has_entry()) return {};
+  if (!cst.hasEntry()) return {};
 
   detail::FormattingActions actions(cst.size());
-  const AstReflection& reflection = *_core.astReflection;
+  const AstReflection& reflection = *services.astReflection;
   if (cst.grammar() == nullptr) return {};
   FormattingBuilder builder(document, actions);
 
@@ -239,10 +239,11 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
       continue;
     if (placed) format(builder, node);
     children.clear();
-    reflection.visitMembers(*node, [&children](std::string_view, std::uint32_t,
-                                               const AstNode& child) {
-      children.push_back(&child);
-    });
+    reflection.visitProperties(
+        *node,
+        [&children](std::string_view, std::uint32_t, const AstNode& child) {
+          children.push_back(&child);
+        });
     pending.insert(pending.end(), children.rbegin(), children.rend());
   }
 

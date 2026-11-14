@@ -36,21 +36,21 @@ struct CstInvariants {
 
       // Children backwards, from `id - 1`: their subtrees must tile the
       // parent's, and their spans must stay inside it without overlapping.
-      const cursiv::NodeId low = c.subtree_begin(id);
+      const cursiv::NodeId low = c.subtreeBegin(id);
       if (id == low) continue;
       cursiv::TextOffset after = x.end;
       cursiv::TextOffset first = x.end;
       for (cursiv::NodeId k = id; k > low;) {
         const cursiv::NodeId child = k - 1;
         const cursiv::CstNode& childNode = c[child];
-        if (c.subtree_begin(child) < low)
+        if (c.subtreeBegin(child) < low)
           return fail(child, "a child's subtree leaves its parent's");
         if (childNode.begin < x.begin || childNode.end > x.end)
           return fail(child, "a child's span leaves its parent's");
         if (childNode.end > after)
           return fail(child, "a child ends after the one behind it begins");
         after = first = childNode.begin;
-        k = c.subtree_begin(child);
+        k = c.subtreeBegin(child);
       }
       if (first != x.begin)
         return fail(id, "a record reaches in front of its first child");

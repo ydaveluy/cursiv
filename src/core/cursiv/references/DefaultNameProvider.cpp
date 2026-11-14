@@ -20,12 +20,12 @@ std::optional<std::string_view> DefaultNameProvider::getName(
 
 // Which record of the node's own subtree wrote its `name`, asked of the
 // grammar: a name a converter rewrote still has its source range.
-std::optional<CstNodeView> DefaultNameProvider::getNameNode(
-    const AstNode& node, const Document* document) const {
+CstNodeView DefaultNameProvider::getNameNode(const AstNode& node,
+                                             const Document* document) const {
   // Ask the class first: a record may create two nodes over one span, so a
   // class that declares no name has no name node, whatever its records wrote.
-  if (!is_named(node)) return std::nullopt;
-  return find_node_for_feature(node, kNameFeature, 0, document);
+  if (!is_named(node)) return {};
+  return find_node_for_property(node, kNameFeature, 0, document);
 }
 
 }  // namespace cursiv

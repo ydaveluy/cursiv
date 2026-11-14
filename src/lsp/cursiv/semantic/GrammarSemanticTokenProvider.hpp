@@ -3,28 +3,27 @@
 // syntax rules.
 #pragma once
 
+#include "cursiv/semantic/AbstractSemanticTokenProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
-#include "cursiv/semantic/AbstractSemanticTokenProvider.hpp"
 
 namespace cursiv {
 
 // Colours with the legend's `keyword`, `type`, `variable`, `property`,
 // `number`, `string`, `comment` and `operator` types, and no modifier.
-class GrammarSemanticTokenProvider : public AbstractSemanticTokenProvider {
+class GrammarSemanticTokenProvider : public AbstractSemanticTokenProvider,
+                                     protected DefaultCoreService {
  public:
   explicit GrammarSemanticTokenProvider(const CoreServices& core) noexcept
-      : _core(core) {}
+      : DefaultCoreService(core) {}
 
  protected:
   void computeHighlighting(const Document& document, TextOffset begin,
                            TextOffset end, SemanticTokenAcceptor accept,
                            const CancellationToken& token) const override;
-
- private:
-  const CoreServices& _core;
 };
 
 }  // namespace cursiv

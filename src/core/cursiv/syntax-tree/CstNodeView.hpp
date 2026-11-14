@@ -6,8 +6,8 @@
 
 namespace cursiv {
 
-// A position plus its tree, for a data-rule converter, which is handed text
-// and no tree. Everything else keeps a bare `NodeId`.
+// A record with its tree: what the CST lookups answer. An empty view tests
+// false.
 struct CstNodeView {
   const Cst* cst = nullptr;
   NodeId id = kNoNode;

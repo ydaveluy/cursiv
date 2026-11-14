@@ -66,7 +66,7 @@ void a_named_literal_beats_a_named_terminal_at_equal_length(
   const std::unique_ptr<cursiv::Parser> parser = engine.parser();
   const cursiv::ParseResult r = parser->parse("fn f() { end; let; }");
   CHECK(r.cst().accepted() && !r.cst().recovered());
-  auto* const file = r.value_as<ast::File>();
+  auto* const file = r.valueAs<ast::File>();
   CHECK(file != nullptr);
   if (file == nullptr || file->fns.size() != 1) return;
   auto* const block = static_cast<ast::Block*>(file->fns[0]->body);

@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/shared/gen/LexCodePoints.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/SetIndex.hpp"

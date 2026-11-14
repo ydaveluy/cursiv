@@ -144,7 +144,7 @@ struct GrammarGenerator {
         if (assign != kNoElement) {
           AstNode* const to = f.node;
           if (to == nullptr ||
-              act.write_node(assign, *to, sub) == Write::not_modelled)
+              act.writeNode(assign, *to, sub) == Write::NotModelled)
             refuse(assign, to, w);
           else
             w.written = true;
@@ -167,7 +167,7 @@ struct GrammarGenerator {
         f.adopted = nullptr;
         f.node = act.make(e, *w.ar);
         if (f.node == nullptr || inner == nullptr ||
-            act.write_node(e, *f.node, inner) == Write::not_modelled)
+            act.writeNode(e, *f.node, inner) == Write::NotModelled)
           refuse(e, f.node, w);
         for (const ElementId c : children) walk(c, assign, f, w);
         return;
@@ -300,7 +300,7 @@ struct GrammarGenerator {
       AstNode* const node = act.make(e, *w.ar);
       if (node == nullptr || lhs == nullptr || rhs == nullptr ||
           act.fold(e, o.element, *node, lhs, w.ar->stash(op), rhs) ==
-              Write::not_modelled) {
+              Write::NotModelled) {
         refuse(e, node, w);
         return nullptr;
       }
@@ -344,7 +344,7 @@ struct GrammarGenerator {
       }
     }
     const ElementId from = rule != kNoElement ? rule : w.d.tokens[first].elem;
-    if (act.write_text(e, from, *to, w.ar->stash(value)) == Write::not_modelled)
+    if (act.writeText(e, from, *to, w.ar->stash(value)) == Write::NotModelled)
       refuse(e, to, w);
   }
 

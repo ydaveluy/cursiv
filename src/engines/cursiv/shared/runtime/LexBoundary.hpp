@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/shared/runtime/lex_scalar_in.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"

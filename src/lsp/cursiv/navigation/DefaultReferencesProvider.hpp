@@ -6,24 +6,23 @@
 
 #include <vector>
 
+#include "cursiv/navigation/ReferencesProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
-#include "cursiv/navigation/ReferencesProvider.hpp"
 
 namespace cursiv {
 
-class DefaultReferencesProvider : public ReferencesProvider {
+class DefaultReferencesProvider : public ReferencesProvider,
+                                  protected DefaultCoreService {
  public:
   explicit DefaultReferencesProvider(const CoreServices& core) noexcept
-      : _core(core) {}
+      : DefaultCoreService(core) {}
 
   [[nodiscard]] std::vector<lsp::Location> findReferences(
       const Document& document, lsp::Position position, bool includeDeclaration,
       const CancellationToken& token = {}) const override;
-
- private:
-  const CoreServices& _core;
 };
 
 }  // namespace cursiv

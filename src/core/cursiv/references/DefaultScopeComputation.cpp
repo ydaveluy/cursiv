@@ -21,7 +21,7 @@ std::vector<AstNodeDescription> DefaultScopeComputation::collectExportedSymbols(
   return collectExportedSymbolsForNode(
       *root, document,
       [&](function_ref<void(AstNode&)> visit) {
-        services.astReflection->visitMembers(
+        services.astReflection->visitProperties(
             *root, [&](std::string_view, std::uint32_t, AstNode& child) {
               visit(child);
             });
@@ -61,7 +61,7 @@ LocalSymbols DefaultScopeComputation::collectLocalSymbols(
   // Collected flat in declaration order, grouped and indexed once: nothing is
   // inserted after this, so nothing moves and the addresses handed out below
   // are final.
-  symbols.build_index();
+  symbols.buildIndex();
   return symbols;
 }
 

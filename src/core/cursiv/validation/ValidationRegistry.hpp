@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <exception>
 #include <functional>
@@ -30,14 +31,14 @@ using ValidationCheck = std::function<void(const AstNode&, ValidationAcceptor&,
 // A document-level check, run once per pass around the per-node walk. A check
 // that must see the whole document at once, such as duplicate names, goes
 // here, with its state on its own stack.
-using ValidationPreparation = std::function<void(
-    const Document&, ValidationAcceptor&, const CancellationToken&)>;
+using DocumentCheck = std::function<void(const Document&, ValidationAcceptor&,
+                                         const CancellationToken&)>;
 
-// A hook declares its category at registration, as a per-node check does in
-// its return type: the incremental build must know which pass it belongs to.
-struct ValidationPreparationEntry {
+// A hook declares its category at registration, as a per-node check does: the
+// incremental build must know which pass it belongs to.
+struct DocumentCheckEntry {
   const ValidationCategory* category = &fast;
-  ValidationPreparation check;
+  DocumentCheck check;
 };
 
 // A registration the registry cannot honour. A throw, not an assert: the
@@ -65,12 +66,25 @@ struct ValidationCheckRegistration {
 // path passes: a document is not `Validated` until all its checks have run.
 using ValidationCategories = std::span<const ValidationCategory* const>;
 
+namespace detail {
+
+// Whether a pass asked for `categories` runs `category`: naming none runs all.
+[[nodiscard]] inline bool runs_category(
+    ValidationCategories categories,
+    const ValidationCategory* category) noexcept {
+  return categories.empty() ||
+         std::ranges::find(categories, category) != categories.end();
+}
+
+}  // namespace detail
+
 class ValidationRegistry {
  public:
   virtual ~ValidationRegistry() noexcept = default;
 
   // Files one discovered check under `category`. Called at bootstrap, on one
-  // thread; after that the registry is read concurrently and never written.
+  // thread; after that the registry is only read. A check runs on several
+  // threads at once over a large document: it keeps its state on its stack.
   virtual void registerCheck(ValidationCheckRegistration,
                              const ValidationCategory* category = &fast) = 0;
 
@@ -86,7 +100,7 @@ class ValidationRegistry {
   template <auto Method, class Object>
   [[nodiscard]] static ValidationCheckRegistration makeValidationCheck(
       const Object& validator) {
-    return make_check<Method>(validator, /*exactTypeOnly=*/false);
+    return makeCheck<Method>(validator, /*exactTypeOnly=*/false);
   }
   template <auto Method, class Object>
   static ValidationCheckRegistration makeValidationCheck(const Object&&) =
@@ -95,7 +109,7 @@ class ValidationRegistry {
   template <auto Method, class Object>
   [[nodiscard]] static ValidationCheckRegistration makeExactValidationCheck(
       const Object& validator) {
-    return make_check<Method>(validator, /*exactTypeOnly=*/true);
+    return makeCheck<Method>(validator, /*exactTypeOnly=*/true);
   }
   template <auto Method, class Object>
   static ValidationCheckRegistration makeExactValidationCheck(const Object&&) =
@@ -104,15 +118,15 @@ class ValidationRegistry {
   // `built_in` is refused: it names the runtime's own half. Same rule as
   // `registerCheck`: registered once, on one thread, then only read.
   virtual void registerBeforeDocument(
-      ValidationPreparation, const ValidationCategory* category = &fast) = 0;
+      DocumentCheck, const ValidationCategory* category = &fast) = 0;
   virtual void registerAfterDocument(
-      ValidationPreparation, const ValidationCategory* category = &fast) = 0;
+      DocumentCheck, const ValidationCategory* category = &fast) = 0;
   // What was filed, in registration order, for the validator to run around
   // the walk.
-  [[nodiscard]] virtual std::span<const ValidationPreparationEntry>
-  checksBefore() const noexcept = 0;
-  [[nodiscard]] virtual std::span<const ValidationPreparationEntry>
-  checksAfter() const noexcept = 0;
+  [[nodiscard]] virtual std::span<const DocumentCheckEntry> checksBefore()
+      const noexcept = 0;
+  [[nodiscard]] virtual std::span<const DocumentCheckEntry> checksAfter()
+      const noexcept = 0;
 
   // Every check applicable to `node` whose category `categories` admits; one
   // that throws does not abort the pass. Const and shared, the documents of a
@@ -167,7 +181,7 @@ class ValidationRegistry {
   // the validator carries must be safe to read concurrently: the check holds it
   // by address, and any memo behind it answers for its own threading.
   template <auto M, class V>
-  [[nodiscard]] static ValidationCheckRegistration make_check(
+  [[nodiscard]] static ValidationCheckRegistration makeCheck(
       const V& held, bool exactTypeOnly) {
     static_assert(
         is_check<decltype(M)>,

@@ -47,7 +47,7 @@ using Cases = std::span<const std::pair<std::string_view, std::string_view>>;
 using Spell = std::string (*)(const cursiv::ParseResult&);
 
 std::string plain_items(const cursiv::ParseResult& r) {
-  const auto* d = r.value_as<tllrefused::Doc>();
+  const auto* d = r.valueAs<tllrefused::Doc>();
   if (d == nullptr) return "<none>";
   std::string out;
   for (const tllrefused::Item* i : d->items)
@@ -56,7 +56,7 @@ std::string plain_items(const cursiv::ParseResult& r) {
 }
 
 std::string memo_items(const cursiv::ParseResult& r) {
-  const auto* d = r.value_as<tllrefused::Doc>();
+  const auto* d = r.valueAs<tllrefused::Doc>();
   if (d == nullptr) return "<none>";
   std::string out;
   for (const tllrefused::Item* i : d->items)
@@ -65,7 +65,7 @@ std::string memo_items(const cursiv::ParseResult& r) {
 }
 
 std::string several_items(const cursiv::ParseResult& r) {
-  const auto* d = r.value_as<tllrefusedglr::Doc>();
+  const auto* d = r.valueAs<tllrefusedglr::Doc>();
   if (d == nullptr) return "<none>";
   std::string out;
   for (const tllrefusedglr::Item* i : d->items)
@@ -76,7 +76,7 @@ std::string several_items(const cursiv::ParseResult& r) {
 }
 
 std::string peek_items(const cursiv::ParseResult& r) {
-  const auto* d = r.value_as<tllrefusedpeek::Doc>();
+  const auto* d = r.valueAs<tllrefusedpeek::Doc>();
   if (d == nullptr) return "<none>";
   std::string out;
   for (const tllrefusedpeek::Item* i : d->items)
@@ -458,7 +458,7 @@ void a_dangling_mark_goes_to_the_deepest_level() {
   const auto lr = tllrefused::generated::Lr::create_parser();
   const auto nest = [](const cursiv::Parser& p, const std::string& text) {
     const auto r = p.parse(text);
-    const auto* d = r.value_as<tllrefused::Doc>();
+    const auto* d = r.valueAs<tllrefused::Doc>();
     std::string out = r.diagnostics.empty() ? "" : "!";
     if (d != nullptr)
       for (const tllrefused::Item* i : d->items) out += nest_of(*i) + ' ';
@@ -565,7 +565,7 @@ void a_splice_is_no_token_behind_a_run(const cursiv::Parser& parser) {
   const auto children = [&](const std::string& text) {
     const auto result = parser.parse(text);
     CHECK(result.accepted && result.diagnostics.empty());
-    const auto* const doc = result.value_as<tllrefused::Doc>();
+    const auto* const doc = result.valueAs<tllrefused::Doc>();
     return doc != nullptr && doc->items.size() == 1
                ? doc->items[0]->children.size()
                : std::size_t{99};

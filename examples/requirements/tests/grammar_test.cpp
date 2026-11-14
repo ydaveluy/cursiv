@@ -282,7 +282,7 @@ void coverage_follows_a_test_retargeted_to_a_homonym() {
     const auto test = disk.services.shared->documents->getDocument(kTst);
     const auto* const model =
         test == nullptr ? nullptr
-                        : test->parseResult.value_as<req::ast::TestModel>();
+                        : test->parseResult.valueAs<req::ast::TestModel>();
     if (model == nullptr || model->tests.empty()
         || model->tests.front()->requirements.empty())
       return {};

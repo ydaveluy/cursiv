@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.30)
-project(cursiv LANGUAGES CXX)
+# The version is written once, in the header a language can test.
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/src/core/cursiv/Version.hpp"
+    _cursiv_version
+    REGEX "^#define CURSIV_VERSION_(MAJOR|MINOR|PATCH) [0-9]+$")
+list(TRANSFORM _cursiv_version REPLACE "^#define CURSIV_VERSION_[A-Z]+ " "")
+list(JOIN _cursiv_version "." _cursiv_version)
+project(cursiv VERSION ${_cursiv_version} LANGUAGES CXX)
 # Reject cross-build options on native configurations.
 if(DEFINED CURSIV_WASI_THREADS AND NOT CMAKE_CROSSCOMPILING)
   message(FATAL_ERROR

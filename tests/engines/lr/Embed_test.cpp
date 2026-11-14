@@ -93,7 +93,7 @@ std::string ast(const cursiv::AstNode* n) {
 
 // The node the document's first block holds.
 const cursiv::AstNode* first_block(const ParseResult& r, bool script) {
-  const auto* doc = r.value_as<tembed::ast::Doc>();
+  const auto* doc = r.valueAs<tembed::ast::Doc>();
   if (doc == nullptr || doc->blocks.empty()) return nullptr;
   const tembed::ast::Block* b = *doc->blocks.begin();
   if (b == nullptr) return nullptr;
@@ -119,7 +119,7 @@ void a_missing_close_is_inserted_at_the_end(const Parser& p) {
   const ParseResult r = p.parse("json ''' [1]\n");
   CHECK(r.accepted && ast(first_block(r, false)) == "[1,]" &&
         !r.diagnostics.empty() &&
-        r.diagnostics.front().kind == cursiv::DiagnosticKind::inserted &&
+        r.diagnostics.front().kind == cursiv::DiagnosticKind::Inserted &&
         r.diagnostics.front().begin == 12 && names_terminal(p, r, "'''"));
   for (const std::string_view text :
        {"json '''[1]\ncount 0x2\n", "json '''[1]''\ncount 0x2\n"}) {
@@ -150,7 +150,7 @@ void a_long_section_does_not_cost_a_fault_its_share(const Parser& ll) {
 void a_fault_is_read_with_the_sections_terminals(const Parser& p) {
   CHECK(clean(p, "tiny {a;};\n"));
   const ParseResult r = p.parse("tiny {a#};\ncount 0x2\n");
-  const auto* doc = r.value_as<tembed::ast::Doc>();
+  const auto* doc = r.valueAs<tembed::ast::Doc>();
   CHECK(r.accepted && doc != nullptr && doc->blocks.size() == 2 &&
         ast(doc->blocks.begin()[0]->json) == "on" &&
         doc->blocks.begin()[1]->count == 2 && !r.diagnostics.empty());
@@ -166,7 +166,7 @@ void a_fault_is_read_with_its_configurations_terminals(const Parser& p) {
                                   std::pair{"count rem 0x2\ncount 0x2\n", 9u},
                                   std::pair{"count @ 0x2\ncount 0x2\n", 7u}}) {
     const ParseResult r = p.parse(text);
-    const auto* doc = r.value_as<tembed::ast::Doc>();
+    const auto* doc = r.valueAs<tembed::ast::Doc>();
     CHECK(r.accepted && doc != nullptr && doc->blocks.size() == 2 &&
           doc->blocks.begin()[1]->count == 2 && r.diagnostics.size() == 1);
     for (const cursiv::ParseDiagnostic& d : r.diagnostics)
@@ -186,7 +186,7 @@ void the_word_boundary_and_the_keywords_are_the_sections(const Parser& p) {
 void an_override_stays_outside(const Parser& p) {
   const ParseResult r = p.parse("count 0x1f\n");
   CHECK(r.accepted && r.diagnostics.empty());
-  const auto* doc = r.value_as<tembed::ast::Doc>();
+  const auto* doc = r.valueAs<tembed::ast::Doc>();
   CHECK(doc != nullptr && doc->blocks.size() == 1 &&
         (*doc->blocks.begin())->count == 31);
   CHECK(repaired(p, "count 31\n", 5, 6));
@@ -209,7 +209,7 @@ void the_tree_holds_the_section(const Parser& p) {
       p.parse("json '''{\"a\": [1, x2], \"b\": {}}'''\nraw (<true>)\n");
   CHECK(r.accepted && r.diagnostics.empty());
   CHECK(ast(first_block(r, false)) == "{\"a\":[1,2,],\"b\":{},}");
-  const auto* doc = r.value_as<tembed::ast::Doc>();
+  const auto* doc = r.valueAs<tembed::ast::Doc>();
   CHECK(doc != nullptr && doc->blocks.size() == 2 &&
         ast(doc->blocks.begin()[1]->json) == "on");
 }
@@ -225,7 +225,7 @@ void a_section_writes_a_sequence(const Parser& p) {
 // writes the delimiter.
 void a_directive_stands_over_the_section_or_a_delimiter(const Parser& p) {
   const ParseResult r = p.parse("each (1) (true)\n");
-  const auto* doc = r.value_as<tembed::ast::Doc>();
+  const auto* doc = r.valueAs<tembed::ast::Doc>();
   CHECK(r.accepted && r.diagnostics.empty() && doc != nullptr &&
         doc->blocks.size() == 1);
   if (doc == nullptr || doc->blocks.size() != 1) return;
@@ -258,7 +258,7 @@ void the_caret_and_the_repair_read_the_section(const Parser& p) {
   CHECK(offered(p, "narrow < get a ; ").find('>') != std::string::npos);
   const ParseResult r = p.parse("json '''[1,,2]'''\ncount 0x2\n");
   CHECK(r.accepted && !r.diagnostics.empty());
-  const auto* doc = r.value_as<tembed::ast::Doc>();
+  const auto* doc = r.valueAs<tembed::ast::Doc>();
   CHECK(doc != nullptr && doc->blocks.size() == 2 &&
         doc->blocks.begin()[1]->count == 2);
 }

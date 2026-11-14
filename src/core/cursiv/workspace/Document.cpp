@@ -19,6 +19,13 @@ Document::Document(TextDocument textDocument, std::string uri)
   type = &ast_type_tag<Document>;
 }
 
+const AstNode& root_of(const AstNode& node) noexcept {
+  const AstNode* root = &node;
+  while (root->parent != nullptr && ast_cast<Document>(root->parent) == nullptr)
+    root = root->parent;
+  return *root;
+}
+
 const Document* AstNode::getDocument() const noexcept {
   const AstNode* top = this;
   while (top->parent != nullptr) top = top->parent;
@@ -28,9 +35,7 @@ const Document* AstNode::getDocument() const noexcept {
 
 // The nodes first: a destructor may read a `string_view` of the text held here,
 // and that text goes before the parse result would.
-Document::~Document() { parseResult.destroy_nodes(); }
-
-bool Document::parseSucceeded() const noexcept { return parseResult.accepted; }
+Document::~Document() { parseResult.destroyNodes(); }
 
 bool Document::hasAst() const noexcept { return parseResult.value != nullptr; }
 
@@ -45,9 +50,9 @@ bool Document::hasLinkingErrors() const noexcept {
   return references != nullptr && references->anyUnresolved();
 }
 
-std::string_view Document::keep_parts(
+std::string_view Document::keepParts(
     std::span<const std::string_view> parts) const {
-  return parseResult.cst().keep_text(parts);
+  return parseResult.cst().keepText(parts);
 }
 
 const TextDocument& Document::textDocument() const noexcept {

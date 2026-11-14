@@ -30,7 +30,7 @@ std::filesystem::path local_path(std::string_view uri) {
 // Use the reported size for the first allocation, then read to EOF. A file
 // may grow after stat, and some virtual files report zero for nonempty data.
 template <class Bytes>
-Bytes read_whole(std::string_view uri, std::ios::openmode mode) {
+Bytes read_whole(std::string_view uri) {
   const std::filesystem::path path = local_path(uri);
   std::error_code ec;
   const std::uintmax_t size = std::filesystem::file_size(path, ec);
@@ -41,7 +41,7 @@ Bytes read_whole(std::string_view uri, std::ios::openmode mode) {
       size > static_cast<std::uintmax_t>(
                  std::numeric_limits<std::streamsize>::max()))
     throw FileSystemError(std::format("cursiv: '{}' is too large to read", uri));
-  std::ifstream in(path, mode);
+  std::ifstream in(path, std::ios::binary);
   if (!in) throw FileSystemError(std::format("cursiv: cannot read '{}'", uri));
   Bytes bytes(static_cast<std::size_t>(size), typename Bytes::value_type{});
   in.read(reinterpret_cast<char*>(bytes.data()),
@@ -91,11 +91,11 @@ bool LocalFileSystemProvider::exists(std::string_view uri) const {
 
 std::vector<std::uint8_t> LocalFileSystemProvider::readBinary(
     std::string_view uri) const {
-  return read_whole<std::vector<std::uint8_t>>(uri, std::ios::binary);
+  return read_whole<std::vector<std::uint8_t>>(uri);
 }
 
 std::string LocalFileSystemProvider::readFile(std::string_view uri) const {
-  return read_whole<std::string>(uri, std::ios::in);
+  return read_whole<std::string>(uri);
 }
 
 std::vector<FileSystemNode> LocalFileSystemProvider::readDirectory(

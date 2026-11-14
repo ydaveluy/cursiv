@@ -164,12 +164,12 @@ struct Lane {
     std::string text;
     for (const std::string& l : lines) text += l + "\n";
     // Only the reference that was read is refreshed.
-    const std::string path = reference_path();
+    const std::string path = referencePath();
     if (write) {
       // An engine's own file stands only while its repairs differ: once they
       // read like the shared file again, the copy goes.
-      if (path != shared_reference_path() &&
-          cursiv::test::read_file(shared_reference_path()) == text) {
+      if (path != sharedReferencePath() &&
+          cursiv::test::read_file(sharedReferencePath()) == text) {
         std::filesystem::remove(path);
         return;
       }
@@ -210,14 +210,14 @@ struct Lane {
   }
 
  private:
-  static std::string shared_reference_path() {
+  static std::string sharedReferencePath() {
     return std::string(CURSIV_RECOVERY_CORPUS) + "/REFERENCE.txt";
   }
 
   // Where this engine's own reference stands, when it has one. Without it, this
   // engine reads the corpus as the shared file says, and `--write` refreshes
   // that file rather than creating this one.
-  static std::string own_reference_path() {
+  static std::string ownReferencePath() {
     const std::string dir(CURSIV_RECOVERY_CORPUS);
 #if defined(CURSIV_ENGINE_LR)
     return dir + "/REFERENCE-lr.txt";
@@ -231,9 +231,9 @@ struct Lane {
   // The reference a lane is held to is the engine's own where its repairs
   // differ: a corpus with no `REFERENCE-<engine>.txt` beside it is one every
   // engine reads the same way.
-  static std::string reference_path() {
-    const std::string own = own_reference_path();
-    return std::filesystem::exists(own) ? own : shared_reference_path();
+  static std::string referencePath() {
+    const std::string own = ownReferencePath();
+    return std::filesystem::exists(own) ? own : sharedReferencePath();
   }
 };
 

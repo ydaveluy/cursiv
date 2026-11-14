@@ -112,7 +112,7 @@ void a_break_behind_the_operator_parts_what_it_would_join() {
 void the_operator_text_leaves_the_condition_out() {
   const auto ll = g::Ll::create_parser();
   const auto result = ll->parse("after:1\n+ 2");
-  const auto* document = result.value_as<toperatorcondition::Document>();
+  const auto* document = result.valueAs<toperatorcondition::Document>();
   const auto* sum =
       document == nullptr
           ? nullptr

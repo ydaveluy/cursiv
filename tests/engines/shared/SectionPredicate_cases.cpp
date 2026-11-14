@@ -58,13 +58,13 @@ struct Reader {
 std::string alone(const Reader& p, std::string_view text) {
   const std::string source = p.source(text);
   const auto r = p.parser.parse(source);
-  return items(r.value_as<ast::Items>()) + diagnostics(r, p.prefix.size());
+  return items(r.valueAs<ast::Items>()) + diagnostics(r, p.prefix.size());
 }
 
 std::string embedded(const Reader& p, std::string_view text) {
   const std::string host = p.source('<' + std::string(text) + '>');
   const auto r = p.parser.parse(host);
-  const auto* d = r.value_as<ast::Doc>();
+  const auto* d = r.valueAs<ast::Doc>();
   const std::string tree = d == nullptr || d->blocks.size() != 1
                                ? "-"
                                : items((*d->blocks.begin())->items);
@@ -96,7 +96,7 @@ void section_values(const cursiv::Parser& parser) {
                                          {"nested:!", 7},
                                          {"measure:[ 12 ]", 4}}) {
     const auto r = read(source);
-    const auto* values = r.value_as<ast::Values>();
+    const auto* values = r.valueAs<ast::Values>();
     const bool good =
         conformance_test::clean(r) && values && values->number == expected;
     if (!good)
@@ -105,7 +105,7 @@ void section_values(const cursiv::Parser& parser) {
   }
   {
     const auto r = read("append:[1] ! [ 3 ]");
-    const auto* values = r.value_as<ast::Values>();
+    const auto* values = r.valueAs<ast::Values>();
     CHECK(conformance_test::clean(r) && values && values->numbers.size() == 3);
     if (values && values->numbers.size() == 3)
       CHECK(values->numbers[0] == 1 && values->numbers[1] == 7 &&
@@ -113,21 +113,21 @@ void section_values(const cursiv::Parser& parser) {
   }
   {
     const auto r = read("append:[999999999999999999999999999999] [2]");
-    const auto* values = r.value_as<ast::Values>();
+    const auto* values = r.valueAs<ast::Values>();
     CHECK(r.accepted && r.diagnostics.size() == 1 &&
-          r.diagnostics[0].kind == cursiv::DiagnosticKind::conversion_error &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::ConversionError &&
           values && values->numbers.size() == 1 && values->numbers[0] == 2);
   }
   for (const auto& [source, expected] :
        {std::pair{"node:( alpha )", "alpha"}, {"node:!", ""}}) {
     const auto r = read(source);
-    const auto* values = r.value_as<ast::Values>();
+    const auto* values = r.valueAs<ast::Values>();
     CHECK(conformance_test::clean(r) && values && values->node &&
           values->node->text == expected && values->node->parent == values);
   }
   {
     const auto r = read("nodes:(alpha) ! ( beta )");
-    const auto* values = r.value_as<ast::Values>();
+    const auto* values = r.valueAs<ast::Values>();
     CHECK(conformance_test::clean(r) && values && values->nodes.size() == 3);
     if (values && values->nodes.size() == 3) {
       CHECK(values->nodes[0]->text == "alpha" &&
@@ -137,7 +137,7 @@ void section_values(const cursiv::Parser& parser) {
   }
   {
     const auto r = read("text:[ 12 ]");
-    const auto* values = r.value_as<ast::Values>();
+    const auto* values = r.valueAs<ast::Values>();
     CHECK(conformance_test::clean(r) && values && values->text == "[12]");
   }
 }
@@ -199,7 +199,7 @@ void run() {
       const std::string source = "inquoted:" + std::string(text);
       const auto r = parser->parse(source);
       std::string out;
-      if (const auto* d = r.value_as<ast::Doc>())
+      if (const auto* d = r.valueAs<ast::Doc>())
         for (const ast::Block* b : d->blocks) out += items(b->items) + '|';
       return out;
     };
@@ -214,7 +214,7 @@ void run() {
       const std::string source = "inhushed:" + std::string(text);
       const auto r = parser->parse(source);
       std::string out;
-      if (const auto* d = r.value_as<ast::Doc>())
+      if (const auto* d = r.valueAs<ast::Doc>())
         for (const ast::Block* b : d->blocks) out += items(b->items) + '|';
       return out + diagnostics(r, 0);
     };

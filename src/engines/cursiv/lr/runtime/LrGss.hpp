@@ -185,7 +185,7 @@ class LrGss {
       return;
     }
     RepairNote note{};
-    note.kind = DiagnosticKind::bounded;
+    note.kind = DiagnosticKind::Bounded;
     note.begin = _g.cut_begin();
     note.end = end;
     _c.notes.push_back(std::move(note));

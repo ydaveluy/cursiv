@@ -63,7 +63,7 @@ void run() {
     CHECK(r.accepted && !r.diagnostics.empty());
     if (text[1] == ' ') {
       bool insertedBeforeTrivia = false;
-      r.cst().visit_leaves([&](const cursiv::CstLeaf& leaf) {
+      r.cst().visitLeaves([&](const cursiv::CstLeaf& leaf) {
         insertedBeforeTrivia =
             insertedBeforeTrivia ||
             (leaf.recovered && leaf.begin == kSpliceHead + 1 &&
@@ -258,7 +258,7 @@ void run() {
     const std::string text = "virtual:" + std::string(body);
     const auto r = implied->parse(text);
     CHECK(r.accepted && r.diagnostics.empty());
-    const auto* root = r.value_as<tvirtual::Node>();
+    const auto* root = r.valueAs<tvirtual::Node>();
     CHECK(root && root->child);
     if (!root || !root->child) continue;
     const bool first = body.starts_with("px;");
@@ -270,7 +270,7 @@ void run() {
     const std::string text = "joined virt " + std::string(body);
     const auto r = indented->parse(text);
     CHECK(r.accepted && r.diagnostics.empty());
-    const auto* root = r.value_as<tvirtual::Node>();
+    const auto* root = r.valueAs<tvirtual::Node>();
     CHECK(root && root->first && !root->second);
   }
 }
@@ -288,13 +288,13 @@ void run() {
                                  std::string(distance, 'n') + arm + '!';
         const auto r = parser->parse(text);
         CHECK(r.accepted && r.diagnostics.empty());
-        const auto* root = r.value_as<treducecells::Node>();
+        const auto* root = r.valueAs<treducecells::Node>();
         CHECK(root && root->first == (arm == 'a') &&
               root->second == (arm == 'b'));
         const std::string cutText = text.substr(0, text.size() - 1);
         const auto repaired = parser->parse(cutText);
         CHECK(repaired.accepted && repaired.diagnostics.size() == 1);
-        const auto* fixed = repaired.value_as<treducecells::Node>();
+        const auto* fixed = repaired.valueAs<treducecells::Node>();
         CHECK(fixed && fixed->first == (arm == 'a') &&
               fixed->second == (arm == 'b'));
       }
@@ -516,7 +516,7 @@ void run() {
     const std::string source(text);
     const auto result = parser->parse(source);
     CHECK(result.accepted && result.diagnostics.empty());
-    const auto* root = result.value_as<tcontinued::ast::Node>();
+    const auto* root = result.valueAs<tcontinued::ast::Node>();
     const bool multiple = text.find("x y") != std::string_view::npos;
     CHECK(root && root->body.size() == (multiple ? 2u : 1u));
     if (!root || root->body.empty()) continue;

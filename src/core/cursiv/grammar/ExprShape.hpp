@@ -15,8 +15,8 @@ namespace cursiv::detail {
 template <class E>
 struct ExprShape {
   static_assert(dependent_false<E>,
-                "this combinator is not in the grammar vocabulary: give it an "
-                "ExprShape<> (children + rebind) before any walk can see it");
+                "this is not a grammar expression: write a word or a character "
+                "as `lit<\"x\">`, a rule as `ref<Rule>`");
 };
 
 // An atom, and the two operands that are not expressions: a literal's guard

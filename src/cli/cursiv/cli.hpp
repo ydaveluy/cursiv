@@ -58,7 +58,7 @@ namespace detail {
 // name what they serve.
 [[nodiscard]] int run_cli_on(
     int argc, char** argv,
-    const std::function<bool(SharedCoreServices&)>& registerLanguageServices,
+    const std::function<void(SharedCoreServices&)>& registerLanguageServices,
     SharedCoreServices& sharedServices);
 
 }  // namespace detail
@@ -70,7 +70,7 @@ template <class TShared = SharedCoreServices>
   requires std::derived_from<TShared, SharedCoreServices>
 [[nodiscard]] int run_cli(
     int argc, char** argv,
-    const std::function<bool(SharedCoreServices&)>& registerLanguageServices) {
+    const std::function<void(SharedCoreServices&)>& registerLanguageServices) {
   TShared sharedServices;
   return detail::run_cli_on(argc, argv, registerLanguageServices,
                             sharedServices);

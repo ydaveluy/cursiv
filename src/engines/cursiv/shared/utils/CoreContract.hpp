@@ -155,6 +155,7 @@ using cursiv::detail::owner_grammar_of;
 using cursiv::detail::pack_at_t;
 using cursiv::detail::payload_of;
 using cursiv::detail::place;
+using cursiv::detail::probed_name;
 using cursiv::detail::public_ref_state;
 using cursiv::detail::raw_type_name;
 using cursiv::detail::reached_by;
@@ -201,5 +202,6 @@ using cursiv::detail::ViewBase;
 using cursiv::detail::word_final_in;
 using cursiv::detail::word_of;
 using cursiv::detail::WordBound;
+using cursiv::detail::written_converter;
 
 }  // namespace cursiv::engine

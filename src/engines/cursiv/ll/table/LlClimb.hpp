@@ -14,7 +14,7 @@ struct LlClimbOp {
   std::uint16_t body = kNoRow;
   // Tightest highest, so a step's number is what the climb compares.
   std::uint8_t prec = 0;
-  Association assoc = Association::left;
+  Association assoc = Association::Left;
 
   constexpr bool operator==(const LlClimbOp&) const = default;
 };

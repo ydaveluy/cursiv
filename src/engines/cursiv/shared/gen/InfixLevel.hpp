@@ -59,9 +59,9 @@ using level_t = typename level_of<I, K, Climb>::type;
 template <class I, std::size_t K, bool Climb, class L = level_at<I, K>,
           Association A = L::kGroup>
 struct level_body {
-  using Left = cond_t<A == Association::left, level_t<I, K, Climb>,
+  using Left = cond_t<A == Association::Left, level_t<I, K, Climb>,
                       level_t<I, K - 1, Climb>>;
-  using Right = cond_t<A == Association::right, level_t<I, K, Climb>,
+  using Right = cond_t<A == Association::Right, level_t<I, K, Climb>,
                        level_t<I, K - 1, Climb>>;
   using type = Choice<Create<typename I::node_type,
                              Seq<Assign<I::left_pointer, Ref<Left>>,
@@ -70,7 +70,7 @@ struct level_body {
                       Ref<level_t<I, K - 1, Climb>>>;
 };
 template <class I, std::size_t K, bool Climb, class L>
-struct level_body<I, K, Climb, L, Association::prefix> {
+struct level_body<I, K, Climb, L, Association::Prefix> {
   using type =
       Choice<Create<typename L::node_type,
                     Seq<Assign<L::op_pointer, typename L::op_expr>,
@@ -78,7 +78,7 @@ struct level_body<I, K, Climb, L, Association::prefix> {
              Ref<level_t<I, K - 1, Climb>>>;
 };
 template <class I, std::size_t K, bool Climb, class L>
-struct level_body<I, K, Climb, L, Association::postfix> {
+struct level_body<I, K, Climb, L, Association::Postfix> {
   using type =
       Choice<Create<typename L::node_type,
                     Seq<Assign<L::operand_pointer, Ref<level_t<I, K, Climb>>>,

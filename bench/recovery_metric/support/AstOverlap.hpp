@@ -134,7 +134,7 @@ struct AstOverlap {
       self.actions.visitValues(
           n, [&](std::string_view p, std::uint32_t i, fuzzer::ValueKind k,
                  std::string_view text) {
-            if (k == fuzzer::ValueKind::unreadable) {
+            if (k == fuzzer::ValueKind::Unreadable) {
               o.blind = true;
               return;
             }
@@ -143,7 +143,7 @@ struct AstOverlap {
             s += std::to_string(i);
             // An unset member has no `=` and a value leads with its length:
             // none reads as an empty value or as the next member.
-            if (k == fuzzer::ValueKind::text) {
+            if (k == fuzzer::ValueKind::Text) {
               s += '=';
               s += std::to_string(text.size());
               s += ':';
@@ -156,7 +156,7 @@ struct AstOverlap {
 
     std::vector<Child> children(const AstNode& n) const {
       std::vector<Child> out;
-      self.reflection.visitMembers(
+      self.reflection.visitProperties(
           n, [&](std::string_view p, std::uint32_t i, AstNode& c) {
             out.push_back(Child{std::string(p), i, &c});
           });

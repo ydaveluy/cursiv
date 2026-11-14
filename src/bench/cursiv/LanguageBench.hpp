@@ -28,24 +28,24 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/ScopeComputation.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/LanguageMetaData.hpp"
+#include "cursiv/services/LspServices.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/CstUtils.hpp"
 #include "cursiv/syntax-tree/DocumentReferences.hpp"
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/WorkspaceLock.hpp"
-#include "cursiv/services/LspServices.hpp"
-#include "cursiv/services/SharedLspServices.hpp"
 
 namespace cursiv::bench {
 
@@ -447,10 +447,10 @@ inline void dump_build(const std::string& name,
 // `resident` is `--rss`: one build, read for resident bytes alone. Otherwise
 // each repetition is a counted build, when the PMU answers, then a timed one.
 template <class Shared>
-void ws_stages(int iterations, bool resident, std::size_t workers,
-               const char* languageId, const char* extension,
-               const std::string& src, Row& row,
-               bool (*register_)(cursiv::SharedCoreServices&)) {
+void ws_stages(
+    int iterations, bool resident, std::size_t workers, const char* languageId,
+    const char* extension, const std::string& src, Row& row,
+    const std::function<void(cursiv::SharedCoreServices&)>& register_) {
   using namespace cursiv;
   enum class Probe : std::uint8_t { Clock, Counters, Resident };
 
@@ -474,12 +474,12 @@ void ws_stages(int iterations, bool resident, std::size_t workers,
         probe == Probe::Counters ? alone : pool;
     shared.taskScheduler = std::move(scheduler);
     install_default_shared_lsp_services(shared);
-    if (!register_(shared)) refused(languageId, "not registered");
+    register_(shared);
     const CoreServices& core = shared.serviceRegistry->getServices(
         std::string("file:///bench/main") + extension);
 
     Documents& docs = *shared.documents;
-    const DocumentBuilder& builder = *shared.documentBuilder;
+    DocumentBuilder& builder = *shared.documentBuilder;
     const std::shared_ptr<Document> held = unparsed_input(
         core, std::string("file:///bench/main") + extension, src);
     docs.addDocument(held);
@@ -611,10 +611,11 @@ inline void warm_pool(cursiv::TaskScheduler& scheduler, std::size_t workers) {
 // repetitions: `total` from `Changed` to `Validated`, `link` from
 // `IndexedContent` on. `register_` installs the checks the server runs.
 template <class Shared>
-void multi_stages(int iterations, const char* languageId, const char* extension,
-                  const std::vector<std::string>& files,
-                  const std::vector<std::size_t>& workerPoints, MultiRow& row,
-                  bool (*register_)(cursiv::SharedCoreServices&)) {
+void multi_stages(
+    int iterations, const char* languageId, const char* extension,
+    const std::vector<std::string>& files,
+    const std::vector<std::size_t>& workerPoints, MultiRow& row,
+    const std::function<void(cursiv::SharedCoreServices&)>& register_) {
   using namespace cursiv;
 
   for (const std::size_t workers : workerPoints) {
@@ -625,10 +626,10 @@ void multi_stages(int iterations, const char* languageId, const char* extension,
       shared.taskScheduler = std::make_unique<TaskScheduler>(workers);
       warm_pool(*shared.taskScheduler, workers);
       install_default_shared_lsp_services(shared);
-      if (!register_(shared)) refused(languageId, "not registered");
+      register_(shared);
 
       Documents& docs = *shared.documents;
-      const DocumentBuilder& builder = *shared.documentBuilder;
+      DocumentBuilder& builder = *shared.documentBuilder;
       std::vector<std::shared_ptr<Document>> held;
       std::vector<Document*> all;
       held.reserve(files.size());
@@ -700,16 +701,17 @@ void lsp_stages(int iterations, SharedLspServices& shared,
                 const LspServices& services, const Document& document,
                 Row& row);
 
-template <class Shared, bool (*register_)(SharedCoreServices&)>
+template <class Shared, auto register_>
 std::unique_ptr<Shared> language_host() {
   auto shared = std::make_unique<Shared>();
   install_default_shared_lsp_services(*shared);
-  if (!register_(*shared) || shared->serviceRegistry->all().empty())
+  register_(*shared);
+  if (shared->serviceRegistry->all().empty())
     refused("language", "not registered for the benchmark");
   return shared;
 }
 
-template <class Shared, bool (*register_)(SharedCoreServices&)>
+template <class Shared, auto register_>
 void measure_lsp(int iterations, const std::string& src, Row& row) {
   auto shared = language_host<Shared, register_>();
   const CoreServices& core = *shared->serviceRegistry->all().front();
@@ -735,7 +737,7 @@ void measure_lsp(int iterations, const std::string& src, Row& row) {
 
 // Metadata strings must outlive the descriptor. The registration hook is the
 // language server's hook, including its custom providers and validation checks.
-template <class Shared, bool (*register_)(SharedCoreServices&)>
+template <class Shared, auto register_>
 Language make_language(const char* name, const char* languageId,
                        const char* extension,
                        std::string (*corpus)(std::size_t) = nullptr,
@@ -789,7 +791,7 @@ Language make_language(const char* name, const char* languageId,
 
 // A language executable needs only its shared services and registration hook.
 // Optional generators enable the sizes and the multi-document worker curve.
-template <class Shared, bool (*register_)(SharedCoreServices&)>
+template <class Shared, auto register_>
 int run_language(int argc, char** argv,
                  std::string (*corpus)(std::size_t) = nullptr,
                  std::string (*multiFile)(std::size_t, std::size_t) = nullptr,

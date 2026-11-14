@@ -37,9 +37,22 @@ struct ReferenceInfo {
   // The site's narrowing: an index into the member's `RefOps::narrows`, or
   // `kNoNarrow`.
   std::uint8_t narrow = kNoNarrow;
+
+  // What the lookup of a failed site threw, for its diagnostic. Empty
+  // otherwise.
+  std::string_view failure = {};
 };
 
 namespace detail {
+
+// The site's document, carried by the reference table rather than walked up
+// to, or found from the container for a site outside a linked document.
+[[nodiscard]] inline const Document* document_of(
+    const ReferenceInfo& reference) noexcept {
+  if (reference.document != nullptr) return reference.document;
+  return reference.container == nullptr ? nullptr
+                                        : reference.container->getDocument();
+}
 
 // The cross-reference `next` fills with `container` at the caret, as a
 // completion asks the scope. A node made for the occasion is owned by

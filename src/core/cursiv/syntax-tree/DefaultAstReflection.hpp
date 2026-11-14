@@ -35,7 +35,7 @@ struct DefaultAstReflection : AstReflection {
                : AstNodePtr{};
   }
 
-  void visitMembers(
+  void visitProperties(
       const AstNode& node,
       cursiv::function_ref<void(std::string_view, std::uint32_t, AstNode&)>
           yield) const override {
@@ -74,20 +74,19 @@ struct DefaultAstReflection : AstReflection {
   [[nodiscard]] const AstTypeTag* typeTagOf(
       std::uint16_t type) const noexcept override;
 
-  [[nodiscard]] std::string_view fieldName(
-      std::uint16_t field) const noexcept override;
-
-  [[nodiscard]] std::uint16_t referenceIndexOf(
-      const AstTypeTag* referenceType) const noexcept override;
-
   [[nodiscard]] std::uint16_t referenceIndexOf(
       const AstTypeTag* container,
       std::string_view feature) const noexcept override;
 
-  [[nodiscard]] bool isMultiReference(
-      std::uint16_t reference) const noexcept override;
-
-  [[nodiscard]] bool hasMultiReference() const noexcept override;
+  // The index protocol of the generated tables, which no service reads
+  // through the interface. `propertyName` names the member a field index keys;
+  // the one-argument `referenceIndexOf` gives the row of a reference type.
+  [[nodiscard]] std::string_view propertyName(
+      std::uint16_t field) const noexcept;
+  [[nodiscard]] std::uint16_t referenceIndexOf(
+      const AstTypeTag* referenceType) const noexcept;
+  [[nodiscard]] bool isMultiReference(std::uint16_t reference) const noexcept;
+  [[nodiscard]] bool hasMultiReference() const noexcept;
 
   [[nodiscard]] std::span<const std::uint16_t> referenceTargets(
       std::uint16_t reference) const noexcept override;
@@ -128,6 +127,10 @@ struct DefaultAstReflection : AstReflection {
   const detail::AstMetaData& _f;
   std::vector<TagSlot> _byTag;
   std::size_t _mask = 0;
+  // What `getTypeMetaData` gives per type index: the tables hold the closure
+  // of a class's bases and the properties it declares.
+  std::vector<std::vector<const AstTypeTag*>> _superTypes;
+  std::vector<std::vector<PropertyMetaData>> _properties;
 };
 
 }  // namespace cursiv

@@ -89,20 +89,6 @@ struct standing_parent {
 template <class R, class G>
 using standing_t = typename standing_parent<R, G>::type;
 
-// A set flattens as its operator does: `a | b | z` is one choice of three, so
-// a choice spliced into a choice joins it rather than nesting.
-template <template <class...> class Sh, class... Es>
-struct flat_of;
-template <template <class...> class Sh, class E>
-struct flat_of<Sh, E> {
-  using type = E;
-};
-template <template <class...> class Sh, class A, class B, class... Rest>
-struct flat_of<Sh, A, B, Rest...>
-    : flat_of<Sh, typename FlatCat<Sh, A, B>::type, Rest...> {};
-template <template <class...> class Sh, class... Es>
-using flat_of_t = typename flat_of<Sh, Es...>::type;
-
 // The splice, the only walk that rebuilds a body: `super` becomes the body
 // the parents made effective, and every other node is rebuilt over its
 // children.
@@ -123,7 +109,7 @@ struct plug<B, SuperT<D>, TypeList<>> {
 // items stays one item.
 template <class B, class... Es>
 struct plug<B, Seq<Es...>, TypeList<Es...>> {
-  using type = flat_seq_t<plug_t<B, Es>...>;
+  using type = flat_of_t<Seq, plug_t<B, Es>...>;
 };
 template <class B, class... Es>
 struct plug<B, Choice<Es...>, TypeList<Es...>> {
@@ -330,6 +316,32 @@ consteval bool case_of() {
   }
 }
 
+// A grammar's `ignored` and `hidden` lists; empty by default.
+template <class G>
+struct ignored_of {
+  static_assert(tl_size<typename parents_of<G>::type>::value < 2,
+                "two parent grammars declare different `ignored` lists: "
+                "declare `ignored` in this grammar to choose one");
+  using type = TypeList<>;
+};
+template <class G>
+  requires requires { typename G::ignored; }
+struct ignored_of<G> {
+  using type = typename G::ignored;
+};
+template <class G>
+struct hidden_of {
+  static_assert(tl_size<typename parents_of<G>::type>::value < 2,
+                "two parent grammars declare different `hidden` lists: "
+                "declare `hidden` in this grammar to choose one");
+  using type = TypeList<>;
+};
+template <class G>
+  requires requires { typename G::hidden; }
+struct hidden_of<G> {
+  using type = typename G::hidden;
+};
+
 }  // namespace ov
 
 // First stage: the rule a reference names in `G`, the declared one unless an
@@ -348,11 +360,21 @@ struct ResolveOverride {
   template <class R>
   using body = typename ov::stage_body<rule<R>>::type;
 
+  static_assert(requires { typename G::entry; },
+                "this grammar names no entry rule: declare `using entry = "
+                "...;` with the rule a document is read as");
+  static_assert(
+      !requires { typename G::ignore; } && !requires { typename G::hide; },
+      "this grammar declares `ignore` or `hide` as a setting: the "
+      "settings are `using ignored = ...;` and `using hidden = "
+      "...;`. `ignore<...>` and `hide<...>` are the arguments of "
+      "skip()");
   // Every stage republishes the whole surface: the next stage has no other
   // way to reach it.
   using entry = rule<typename G::entry>;
-  using ignored = typename ov::as_rules<G, typename G::ignored>::type;
-  using hidden = typename ov::as_rules<G, typename G::hidden>::type;
+  using ignored =
+      typename ov::as_rules<G, typename ov::ignored_of<G>::type>::type;
+  using hidden = typename ov::as_rules<G, typename ov::hidden_of<G>::type>::type;
   static constexpr auto word_boundary = ov::bound_of<G>();
   static constexpr bool case_insensitive = ov::case_of<G>();
 };

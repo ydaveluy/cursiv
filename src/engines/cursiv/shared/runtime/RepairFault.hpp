@@ -32,7 +32,7 @@ struct RepairFault {
 
 // The columns of a `ParseDiagnostic`, buffered until the parse ends.
 struct RepairNote {
-  DiagnosticKind kind = DiagnosticKind::deleted;
+  DiagnosticKind kind = DiagnosticKind::Deleted;
   bool mixedIndent = false;
   ElementId element = kNoElement;
   TextOffset begin = 0;
@@ -41,15 +41,15 @@ struct RepairNote {
 };
 
 inline RepairNote repair_note(RepairFault& f) {
-  RepairNote n{DiagnosticKind::deleted, false, f.resume, f.begin, f.end, {}};
+  RepairNote n{DiagnosticKind::Deleted, false, f.resume, f.begin, f.end, {}};
   if (f.abandon) {
-    n.kind = DiagnosticKind::incomplete;
+    n.kind = DiagnosticKind::Incomplete;
     n.element = f.missing;
   } else if (f.rep || (f.ins && f.del)) {
-    n.kind = DiagnosticKind::replaced;
+    n.kind = DiagnosticKind::Replaced;
     n.element = f.rep ? f.read : f.first;
   } else if (f.ins) {
-    n.kind = DiagnosticKind::inserted;
+    n.kind = DiagnosticKind::Inserted;
     n.element = f.first;
     n.begin = f.point;
     n.end = f.point;

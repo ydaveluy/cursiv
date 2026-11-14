@@ -53,7 +53,7 @@ struct RepairJudge {
     v.tree = got.value != nullptr;
 
     std::vector<CstLeaf> leaves;
-    cst.visit_leaves([&](const CstLeaf& l) { leaves.push_back(l); });
+    cst.visitLeaves([&](const CstLeaf& l) { leaves.push_back(l); });
     const Cst& twinCst = twin.result.cst();
     const Grammar* grammar = twinCst.grammar();
     const auto restores = [&](std::size_t token, ElementId expected) {

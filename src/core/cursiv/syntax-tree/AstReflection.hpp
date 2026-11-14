@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/ReferenceInfo.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
 // Type-erased questions about a language's AST types, for services.
@@ -26,8 +27,8 @@ struct PropertyMetaData {
   const AstTypeTag* referenceType = nullptr;
 };
 
-// What a class declares. `superTypes` holds every base, transitively, not only
-// the direct ones.
+// A class as its language sees it: its direct bases, and its properties in
+// declaration order, the inherited ones first.
 struct TypeMetaData {
   std::string_view name;
   std::span<const AstTypeTag* const> superTypes;
@@ -67,7 +68,7 @@ struct AstReflection {
   // Every node `node` directly contains, with the member that holds it and,
   // for a list member, its index; `kNoIndex` for a member that holds one.
   static constexpr std::uint32_t kNoIndex = ~std::uint32_t{0};
-  virtual void visitMembers(
+  virtual void visitProperties(
       const AstNode& node,
       cursiv::function_ref<void(std::string_view property, std::uint32_t index,
                                 AstNode& child)>
@@ -80,31 +81,10 @@ struct AstReflection {
   [[nodiscard]] virtual const AstTypeTag* typeTagOf(
       std::uint16_t type) const noexcept = 0;
 
-  // The member a field index names -- the key a `RefHandle` and the builder
-  // carry, where `getTypeMetaData` keys the same members by class. Empty for
-  // a row this grammar does not have.
-  [[nodiscard]] virtual std::string_view fieldName(
-      std::uint16_t field) const noexcept = 0;
-
-  // The reference row a `reference<Ts...>` type is indexed by, `kNoReference`
-  // when this grammar declares no such member. For a caller that holds a type
-  // and not a site.
-  [[nodiscard]] virtual std::uint16_t referenceIndexOf(
-      const AstTypeTag* referenceType) const noexcept = 0;
-
   // The reference index of the member `feature` of class `container`, as a
   // completion has it at a caret. `kNoReference` when it is not a reference.
   [[nodiscard]] virtual std::uint16_t referenceIndexOf(
       const AstTypeTag* container, std::string_view feature) const noexcept = 0;
-
-  // Whether the member holds several targets -- a `multi_reference` against
-  // a `reference`. False for `kNoReference`.
-  [[nodiscard]] virtual bool isMultiReference(
-      std::uint16_t reference) const noexcept = 0;
-
-  // Whether any member of this grammar does. It says nothing of the groups
-  // its declarations join: another grammar's references can form them.
-  [[nodiscard]] virtual bool hasMultiReference() const noexcept = 0;
 
   // The types a reference declares, by index -- a set, because a member may
   // name several. Subtypes are not listed: `referenceAccepts` below resolves
@@ -131,6 +111,14 @@ struct AstReflection {
   // `kNoReference` or an index past the last reference.
   [[nodiscard]] virtual AcceptSet referenceAccepts(
       std::uint16_t reference) const noexcept = 0;
+
+  // Whether a reference site can hold a node of `type`: a type its member
+  // declares, within the site's narrowing.
+  [[nodiscard]] bool accepts(const ReferenceInfo& site,
+                             const AstTypeTag* type) const noexcept {
+    return acceptsTag(referenceAccepts(site.reference), type) &&
+           isSubtype(type, referenceNarrowTarget(site.reference, site.narrow));
+  }
 
   // Whether `bits` accepts `tag`, through this language's type index; a tag it
   // does not know gets `kNoType`, which no set accepts.

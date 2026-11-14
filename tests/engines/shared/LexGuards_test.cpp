@@ -22,7 +22,7 @@ using Items = std::vector<std::string>;
 // The items a parser reads, or one mark where it refuses the text.
 Items items(const cursiv::Parser& parser, std::string_view text) {
   const auto r = parser.parse(text);
-  const auto* doc = r.value_as<tlexguards::Doc>();
+  const auto* doc = r.valueAs<tlexguards::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr)
     return {"refused"};
   return {doc->items.begin(), doc->items.end()};
@@ -81,7 +81,7 @@ void an_assertion_reads_a_run_of_many_refusals(const cursiv::Parser& p) {
 // where it refuses the text.
 Items links(const cursiv::Parser& parser, std::string_view text) {
   const auto r = parser.parse(text);
-  const auto* doc = r.value_as<tlexguards::Links>();
+  const auto* doc = r.valueAs<tlexguards::Links>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr)
     return {"refused"};
   Items out;

@@ -67,7 +67,7 @@ void expect_shape(const cursiv::Parser& parser, std::string_view source,
   const std::string input = std::string(kPrefix) + std::string(source);
   const auto parsed = parser.parse(input);
   CHECK(parsed.accepted && parsed.diagnostics.empty());
-  const auto* doc = parsed.value_as<Document>();
+  const auto* doc = parsed.valueAs<Document>();
   CHECK(doc != nullptr && doc->parent == nullptr);
   if (doc == nullptr) return;
   std::string shape, spans;
@@ -84,7 +84,7 @@ void outer_choice_keeps_its_priority(const cursiv::Parser& parser) {
     const std::string input = std::string(kPrefix) + std::string(text);
     const auto result = parser.parse(input);
     CHECK(result.accepted && result.diagnostics.empty());
-    const auto* document = result.value_as<Document>();
+    const auto* document = result.valueAs<Document>();
     CHECK(document != nullptr && document->values.size() == 1);
     if (document == nullptr || document->values.size() != 1) continue;
     const auto* wrapped = cursiv::ast_cast<NS>(document->values[0]);
@@ -123,7 +123,7 @@ void outer_choice_keeps_its_priority(const cursiv::Parser& parser) {
     const std::string input = std::string(kPrefix) + std::string(text);
     const auto result = parser.parse(input);
     CHECK(result.accepted && result.diagnostics.empty());
-    const auto* document = result.value_as<Document>();
+    const auto* document = result.valueAs<Document>();
     CHECK(document != nullptr && document->values.size() == 1);
     if (document == nullptr || document->values.size() != 1) continue;
     const auto* wrapped = cursiv::ast_cast<NSAppend>(document->values[0]);
@@ -144,7 +144,7 @@ void outer_choice_keeps_its_priority(const cursiv::Parser& parser) {
     const std::string input = std::string(kPrefix) + std::string(text);
     const auto result = parser.parse(input);
     CHECK(result.accepted && result.diagnostics.empty());
-    const auto* document = result.value_as<Document>();
+    const auto* document = result.valueAs<Document>();
     CHECK(document != nullptr && document->values.size() == 1);
     if (document == nullptr || document->values.size() != 1) continue;
     const auto* wrapped = cursiv::ast_cast<NS>(document->values[0]);

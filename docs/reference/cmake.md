@@ -22,6 +22,9 @@ FetchContent_MakeAvailable(cursiv)
 Configure with `-DCURSIV_SOURCE_DIR=/path/to/cursiv` to use a local checkout;
 scaffolded projects accept the same option.
 
+`cursiv/Version.hpp` defines `CURSIV_VERSION_MAJOR`, `CURSIV_VERSION_MINOR` and
+`CURSIV_VERSION_PATCH`, for code that builds against several versions.
+
 ## The targets you link
 
 | Target | Provides |

@@ -1365,7 +1365,7 @@ LlSearch& ll_search_of(LlContext& c) {
 template <const auto& T>
 void ll_search_bounded(LlContext& c, bool whole) {
   ll_note_run<T>(c);
-  c.tape.note_repair(DiagnosticKind::bounded, kNoElement, c.at,
+  c.tape.note_repair(DiagnosticKind::Bounded, kNoElement, c.at,
                      whole ? c.len : std::max(c.at, c.la.end));
 }
 

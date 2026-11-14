@@ -117,7 +117,7 @@ void a_planned_run_of_closers_is_written_whole() {
   agree(e, text);
   for (const cursiv::Parser* parser : {e.ll.get(), e.lr.get()}) {
     const auto parsed = parser->parse(text);
-    const auto* unit = parsed.value_as<tpar::ast::Unit>();
+    const auto* unit = parsed.valueAs<tpar::ast::Unit>();
     CHECK(unit && unit->lets.size() == 2);
     if (unit != nullptr && unit->lets.size() == 2)
       CHECK(unit->lets[1] && unit->lets[1]->name == "b");
@@ -222,7 +222,7 @@ void a_misspelt_second_word_is_read_again() {
         std::pair{"decl:pub struct a {} pub strcut b {}", 2u}}) {
     agree(e, text);
     const auto parsed = e.ll->parse(text);
-    const auto* unit = parsed.value_as<tpar::ast::Unit>();
+    const auto* unit = parsed.valueAs<tpar::ast::Unit>();
     CHECK(unit && unit->lets.size() == count && unit->shows.empty());
     if (unit != nullptr)
       for (std::size_t i = 0; i < unit->lets.size(); ++i)

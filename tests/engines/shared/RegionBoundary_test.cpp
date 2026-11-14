@@ -31,7 +31,7 @@ bool clean(const cursiv::ParseResult& result) {
 void accepts(const Reading& parser, std::string_view source,
              std::size_t count, std::string_view expected = "x") {
   const auto result = parser.parse(source);
-  const auto* doc = result.value_as<Document>();
+  const auto* doc = result.valueAs<Document>();
   if (!clean(result))
     std::fprintf(stderr, "region boundary [%s]: expected clean %.*s\n",
                  parser.engine, int(source.size()), source.data());
@@ -120,7 +120,7 @@ void hidden_trivia_is_kept_only_outside_the_region(const Reading& parser) {
   const std::string_view source = "required:~[xx~]~.";
   const auto result = parser.parse(source);
   CHECK(clean(result));
-  const auto* doc = result.value_as<Document>();
+  const auto* doc = result.valueAs<Document>();
   CHECK(doc && doc->items.size() == 2 && result.nodes().size() == 1);
   CHECK(result.cst().text() == source);
   unsigned notes = 0;
@@ -179,7 +179,7 @@ void a_nest_at_the_head_keeps_the_callers_gap(const Reading& parser) {
       std::fprintf(stderr, "region boundary [%s]: expected clean %.*s\n",
                    parser.engine, int(source.size()), source.data());
     CHECK(clean(result));
-    const auto* doc = result.value_as<Document>();
+    const auto* doc = result.valueAs<Document>();
     CHECK(doc && doc->items.size() == 1 && doc->in && doc->in->parent == doc);
     CHECK(result.cst().text() == source);
   }

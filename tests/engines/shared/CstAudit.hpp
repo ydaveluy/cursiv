@@ -110,11 +110,11 @@ void audit_cst_structure(const cursiv::ParseResult& r, std::string_view text,
   if (!r.accepted) return;
 
   // An accepted document is covered by its root.
-  if (!cst.has_entry()) {
+  if (!cst.hasEntry()) {
     say("A11 accepted without an entry root");
     return;
   }
-  const cursiv::NodeId root = cst.entry_root();
+  const cursiv::NodeId root = cst.entryRoot();
   if (root >= n) {
     std::snprintf(b, sizeof b, "A12 entry root %u past the run (%u)", root, n);
     say(b);

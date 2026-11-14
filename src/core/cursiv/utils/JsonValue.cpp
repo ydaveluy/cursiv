@@ -1,4 +1,4 @@
-#include "cursiv/services/JsonValue.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 
 #include <algorithm>
 #include <cassert>

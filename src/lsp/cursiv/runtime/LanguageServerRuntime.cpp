@@ -219,8 +219,7 @@ class NotificationQueue {
  private:
   [[nodiscard]] bool scanned() const {
     if (_manager == nullptr) return true;
-    return _manager->ready().wait_for(std::chrono::seconds(0)) ==
-           std::future_status::ready;
+    return _manager->isReady();
   }
 
   void run() {

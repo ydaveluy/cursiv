@@ -51,7 +51,7 @@ struct NameRole {
                                                    TextOffset end) {
   const Grammar* const grammar = cst.grammar();
   if (grammar == nullptr) return std::nullopt;
-  const NodeId first = begin == 0 ? 0 : cst.leaf_after(begin - 1);
+  const NodeId first = begin == 0 ? 0 : cst.leafAfter(begin - 1);
   if (first == cst.size()) return std::nullopt;
   for (NodeId id = first; id < cst.size() && cst[id].end <= end; ++id) {
     const CstNode& record = cst[id];
@@ -63,7 +63,7 @@ struct NameRole {
     if (owner == nullptr) continue;
     // A qualified name may hold a segment the repair inserted.
     bool repaired = false;
-    for (NodeId at = cst.subtree_begin(id); at <= id && !repaired; ++at)
+    for (NodeId at = cst.subtreeBegin(id); at <= id && !repaired; ++at)
       repaired = cst[at].recovered != 0;
     return NameRole{feature, owner->type, repaired};
   }
@@ -76,10 +76,10 @@ std::optional<lsp::Range> DefaultRenameProvider::prepareRename(
     const Document& document, lsp::Position position,
     const CancellationToken& token) const {
   throw_if_cancelled(token);
-  // The span is the leaf range of either arm of `findDeclaration` -- a
+  // The span is the leaf range of either arm of `findDeclarations` -- a
   // cross-reference or a declaration's own name -- so one call answers both.
   // An unresolved reference is still renamable: `rename` fixes the typo alone.
-  const Declaration found = _core.references->findDeclaration(
+  const Declaration found = services.references->findDeclarations(
       document, document.textDocument().offsetAt(from_lsp(position)), token);
   if (!found && found.span.end <= found.span.begin) return std::nullopt;
   return to_lsp(
@@ -143,10 +143,10 @@ std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
     const Document& document, lsp::Position position, std::string_view newName,
     const CancellationToken& token) const {
   throw_if_cancelled(token);
-  const References& references = *_core.references;
-  const Documents& store = *_core.shared().documents;
+  const References& references = *services.references;
+  const Documents& store = *services.shared().documents;
 
-  const Declaration found = references.findDeclaration(
+  const Declaration found = references.findDeclarations(
       document, document.textDocument().offsetAt(from_lsp(position)), token);
   if (!found) {
     // The unresolved reference, renamed alone: no declaration to walk from, so
@@ -174,10 +174,10 @@ std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
   const CoreServices* declaring = declaringDocument->language;
   const NameProvider* names =
       declaring == nullptr ? nullptr : declaring->nameProvider.get();
-  if (const std::optional<CstNodeView> declared =
-          names == nullptr ? std::nullopt
+  if (const CstNodeView declared =
+          names == nullptr ? CstNodeView{}
                            : names->getNameNode(*target, declaringDocument);
-      !declared || !*declared)
+      !declared)
     return std::nullopt;
 
   const std::vector<ReferenceDescription> rows =

@@ -4,12 +4,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "cursiv/text/unicode/UnicodeRanges.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv {
 
@@ -25,6 +29,20 @@ bool is_alpha(char c) noexcept {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 bool is_alnum(char c) noexcept { return is_alpha(c) || (c >= '0' && c <= '9'); }
+
+// The end of the tag name at `at`, `at` itself for none: a Unicode letter,
+// then letters and numbers.
+std::size_t tag_name_end(std::string_view text, std::size_t at) noexcept {
+  for (bool first = true;; first = false) {
+    std::size_t length = 0;
+    const char32_t c = scalar_at(text.data() + at, text.size() - at, length);
+    if (length == 0 ||
+        !(unicode::within(unicode::kL, std::size(unicode::kL), c) ||
+          (!first && unicode::within(unicode::kN, std::size(unicode::kN), c))))
+      return at;
+    at += length;
+  }
+}
 
 std::string_view trim(std::string_view text) {
   std::size_t begin = 0;
@@ -130,13 +148,7 @@ std::optional<BlockTagMatch> match_block_tag(std::string_view line,
     return std::nullopt;
   }
   const std::size_t nameStart = cursor;
-  ++cursor;
-  if (cursor < line.size() && is_alpha(line[cursor])) {
-    ++cursor;
-    while (cursor < line.size() && is_alnum(line[cursor])) {
-      ++cursor;
-    }
-  }
+  cursor = tag_name_end(line, cursor + 1);
   return BlockTagMatch{cursor - index,
                        line.substr(nameStart, cursor - nameStart)};
 }
@@ -166,14 +178,10 @@ std::vector<InlineTagMatch> find_inline_tags(std::string_view fragment) {
       continue;
     }
     const std::size_t nameStart = cursor;
-    ++cursor;
-    if (cursor >= fragment.size() || !is_alpha(fragment[cursor])) {
+    cursor = tag_name_end(fragment, cursor + 1);
+    if (cursor == nameStart + 1) {
       ++pos;
       continue;
-    }
-    ++cursor;
-    while (cursor < fragment.size() && is_alnum(fragment[cursor])) {
-      ++cursor;
     }
     const std::size_t nameEnd = cursor;
     const std::size_t wsStart = cursor;

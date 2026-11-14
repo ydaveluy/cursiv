@@ -101,22 +101,22 @@ class CstBuilder {
   CstRun& stream() { return _cst._stream; }
   const CstRun& stream() const { return _cst._stream; }
   // Marks the records as written by an engine.
-  void bind_stream() { _cst.bind_stream(); }
+  void bind_stream() { _cst.bindStream(); }
   void reserve_stream(std::size_t words) { _cst._stream.reserve_for(words); }
 
   // Set by a completed pass. A root with no record binds nothing, and the AST
   // build then answers `no_entry` rather than reading past the end.
   void bind_entry(NodeId begin, NodeId end, NodeId root) noexcept {
     const bool in_range = root == kNoNode || root < _cst.size();
-    _cst.bind_entry(begin, end, in_range ? root : kNoNode);
+    _cst.bindEntry(begin, end, in_range ? root : kNoNode);
   }
-  void bind_accepted(bool accepted) noexcept { _cst.bind_accepted(accepted); }
+  void bind_accepted(bool accepted) noexcept { _cst.bindAccepted(accepted); }
   void bind_model(const Grammar& grammar, OwnedNodes owned) noexcept {
-    _cst.bind_model(grammar, owned);
+    _cst.bindModel(grammar, owned);
   }
   void bind_translation(std::string_view document,
                         std::unique_ptr<SourceTranslation> translation) {
-    _cst.bind_translation(document, std::move(translation));
+    _cst.bindTranslation(document, std::move(translation));
   }
 
  private:

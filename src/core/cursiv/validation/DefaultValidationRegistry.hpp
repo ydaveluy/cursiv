@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
@@ -23,28 +24,29 @@ namespace cursiv {
 
 struct CoreServices;
 
-class DefaultValidationRegistry : public ValidationRegistry {
+class DefaultValidationRegistry : public ValidationRegistry,
+                                  protected DefaultCoreService {
  public:
   explicit DefaultValidationRegistry(const CoreServices& core) noexcept
-      : _core(core) {}
+      : DefaultCoreService(core) {}
 
   // Precondition: the language's `astReflection` is installed.
   void registerCheck(ValidationCheckRegistration,
                      const ValidationCategory* category) override;
 
-  void registerBeforeDocument(ValidationPreparation check,
+  void registerBeforeDocument(DocumentCheck check,
                               const ValidationCategory* category) override {
     fileDocumentCheck(_before, std::move(check), category);
   }
-  void registerAfterDocument(ValidationPreparation check,
+  void registerAfterDocument(DocumentCheck check,
                              const ValidationCategory* category) override {
     fileDocumentCheck(_after, std::move(check), category);
   }
-  [[nodiscard]] std::span<const ValidationPreparationEntry> checksBefore()
+  [[nodiscard]] std::span<const DocumentCheckEntry> checksBefore()
       const noexcept override {
     return _before;
   }
-  [[nodiscard]] std::span<const ValidationPreparationEntry> checksAfter()
+  [[nodiscard]] std::span<const DocumentCheckEntry> checksAfter()
       const noexcept override {
     return _after;
   }
@@ -75,8 +77,8 @@ class DefaultValidationRegistry : public ValidationRegistry {
   };
 
   // Refuses `built_in` (reserved) and a null check; notes the category.
-  void fileDocumentCheck(std::vector<ValidationPreparationEntry>& into,
-                         ValidationPreparation check,
+  void fileDocumentCheck(std::vector<DocumentCheckEntry>& into,
+                         DocumentCheck check,
                          const ValidationCategory* category);
   [[nodiscard]] std::size_t hashSlotOf(const AstTypeTag* type) const noexcept;
   // The slot holding `type`, or the empty one where it would go.
@@ -86,7 +88,6 @@ class DefaultValidationRegistry : public ValidationRegistry {
   void runMatched(const AstNode&, ValidationAcceptor&, ValidationCategories,
                   const CancellationToken&) const;
 
-  const CoreServices& _core;
   // Open-addressed on the tag, power of two, at most a quarter full.
   std::vector<Row> _byType;
   std::size_t _typeMask = 0;
@@ -100,8 +101,8 @@ class DefaultValidationRegistry : public ValidationRegistry {
   // The checks no type filters -- those whose target is `cursiv::AstNode`.
   std::vector<Entry> _everyNode;
   // The document-level hooks, in registration order.
-  std::vector<ValidationPreparationEntry> _before;
-  std::vector<ValidationPreparationEntry> _after;
+  std::vector<DocumentCheckEntry> _before;
+  std::vector<DocumentCheckEntry> _after;
   // Registrations, not index rows: one check on a base counts once.
   std::size_t _count = 0;
   std::vector<const ValidationCategory*> _categories;

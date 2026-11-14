@@ -148,6 +148,10 @@ struct base_closure<T> {
 
 template <class T>
 struct bases_of {
+  static_assert(
+      requires { sizeof(T); },
+      "ast_type_tag<T> needs the definition of T: include the header "
+      "that defines the class");
   using types = typename base_closure<T>::type;
   static constexpr std::size_t kCount = tl_size<types>::value;
   static constexpr auto kTags = []<class... Bs>(TypeList<Bs...>) consteval {
@@ -168,11 +172,10 @@ struct Document;
 
 struct AstNode {
   AstNode() = default;
-  // A copy takes the members' values but none of the source's identity: no
-  // tag, parent or CST node. An assignment likewise leaves the target its
-  // own.
-  AstNode(const AstNode&) noexcept {}
-  AstNode& operator=(const AstNode&) noexcept { return *this; }
+  // A node is one place in one tree, so it is never copied: its arena or
+  // `AstReflection::createNode` makes it.
+  AstNode(const AstNode&) = delete;
+  AstNode& operator=(const AstNode&) = delete;
   virtual ~AstNode() = default;
 
   AstNode* parent = nullptr;
@@ -215,6 +218,23 @@ struct AstNode {
   template <class... Ts>
   using multi_reference = cursiv::multi_reference<Ts...>;
 };
+
+// A node's own fields, read past a property of the same name: a grammar may
+// call a property `parent`, `type` or `cstNodeId`.
+[[nodiscard]] constexpr AstNode* parent_of(const AstNode& node) noexcept {
+  return node.parent;
+}
+[[nodiscard]] constexpr const AstTypeTag* type_of(
+    const AstNode& node) noexcept {
+  return node.type;
+}
+[[nodiscard]] constexpr NodeId cst_node_id_of(const AstNode& node) noexcept {
+  return node.cstNodeId;
+}
+
+// The root of the tree `node` is in: the node whose parent is its document,
+// or that has no parent. Defined in `workspace/Document.cpp`.
+[[nodiscard]] const AstNode& root_of(const AstNode& node) noexcept;
 
 // Every node pays for the base, so its size is checked.
 static_assert(sizeof(void*) != 8 || sizeof(AstNode) == 32);
@@ -323,7 +343,9 @@ enum class RefState : std::uint8_t {
   Resolving,
   Resolved,
   ErrorNotFound,
-  ErrorCycle
+  ErrorCycle,
+  // The lookup itself failed: a provider threw while resolving.
+  ErrorThrown
 };
 
 constexpr bool has_error(RefState s) { return s >= RefState::ErrorNotFound; }
@@ -343,7 +365,8 @@ struct RefResolver {
 
   virtual ~RefResolver() noexcept = default;
   // Computes the answer; the caller stores it. `Unresolved` is not stored: the
-  // next read asks again. Any other failure is `ErrorNotFound`.
+  // next read asks again. A lookup that threw is `ErrorThrown`, any other
+  // failure `ErrorNotFound`.
   [[nodiscard]] virtual Answer resolve(std::uint32_t handle) const = 0;
   // Overload-set form: the targets go into `out`.
   virtual RefState resolveAll(std::uint32_t handle,
@@ -404,7 +427,7 @@ void refuse_owning_bind() {
       "this name is a temporary that owns its text and is destroyed at the "
       "end of the expression, but what receives it keeps only a view of it. "
       "Bind text that lives as long as the tree: a slice of the parsed "
-      "document, or text the document keeps (`document.keep_text(text)`)");
+      "document, or text the document keeps (`document.keepText(text)`)");
 }
 
 }  // namespace detail

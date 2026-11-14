@@ -695,7 +695,7 @@ cursiv::ParseResult parse(std::string_view src) {
 void the_precedence_levels_still_apply() {
   cursiv::ParseResult r = parse("region [a.b] 1 + 2 * 3");
   CHECK(static_cast<bool>(r) && r.diagnostics.empty());
-  auto* doc = r.value_as<ast::Doc>();
+  auto* doc = r.valueAs<ast::Doc>();
   CHECK(doc != nullptr && doc->items.size() == 2);
   CHECK(cursiv::ast_cast<ast::Key>(doc->items[0]) != nullptr);
   const auto* sum = cursiv::ast_cast<ast::Bin>(doc->items[1]);
@@ -720,7 +720,7 @@ void the_island_hands_its_node_up() {
   cursiv::ParseResult r = engine().parse("wri [a.b] [c]");
   CHECK(r.accepted);
   CHECK(static_cast<bool>(r) && r.diagnostics.empty());
-  auto* doc = r.value_as<ast::Doc>();
+  auto* doc = r.valueAs<ast::Doc>();
   CHECK(doc != nullptr && doc->items.size() == 2);
   if (doc == nullptr || doc->items.size() != 2) return;
   const auto* first = cursiv::ast_cast<ast::Key>(doc->items[0]);
@@ -765,7 +765,7 @@ void the_parser_reads_it() {
       p->parse("wide one + - * / % ^ & | ~ < > = : ; , . ? @ two");
   CHECK(r.accepted);
   CHECK(static_cast<bool>(r) && r.diagnostics.empty());
-  auto* row = r.value_as<twidealt::ast::Row>();
+  auto* row = r.valueAs<twidealt::ast::Row>();
   CHECK(row != nullptr);
   if (row == nullptr) return;
   CHECK(row->head == "one");

@@ -84,7 +84,7 @@ syntax, reference and validation diagnostics. Read reference targets with
 
 ```cpp
 if (document->hasAst()) {
-  const auto* model = document->parseResult.value_as<recipe::ast::Model>();
+  const auto* model = document->parseResult.valueAs<recipe::ast::Model>();
   for (const recipe::ast::Recipe* r : model->recipes) {
     if (r == nullptr) continue;
     for (const recipe::ast::Use* use : r->uses) {
@@ -97,7 +97,7 @@ if (document->hasAst()) {
 ```
 
 `get()` returns null for an unresolved name. A reference with one target type
-also supports `->`, `*` and a boolean test. `value_as<Model>()` does not check
+also supports `->`, `*` and a boolean test. `valueAs<Model>()` does not check
 the type; it is safe here because Recipe's entry rule returns a `Model`.
 
 To skip validation, pass `BuildOptions` with `validation = false`. See

@@ -156,9 +156,9 @@ class Lowerer {
       const ImageStageLevelDesc& level = st.levels[i];
       const auto prec = static_cast<std::uint8_t>(st.levelCount - i);
       const Association group =
-          level.group == ImageGroup::right ? Association::right
-          : level.group == ImageGroup::non ? Association::non
-                                           : Association::left;
+          level.group == ImageGroup::right ? Association::Right
+          : level.group == ImageGroup::non ? Association::Non
+                                           : Association::Left;
       for (std::uint32_t j = 0; j < level.count; ++j)
         op(_im.node(*level.ops[j].op, _im.folds(rule)), level.ops[j].row, prec,
            group);

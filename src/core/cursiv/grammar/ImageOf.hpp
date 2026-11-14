@@ -315,13 +315,13 @@ inline constexpr ImageDesc kNode<V, Skip<TypeList<Is...>, TypeList<Hs...>, E>> =
 
 constexpr ImageGroup image_group(Association a) {
   switch (a) {
-    case Association::right:
+    case Association::Right:
       return ImageGroup::right;
-    case Association::non:
+    case Association::Non:
       return ImageGroup::non;
-    case Association::prefix:
+    case Association::Prefix:
       return ImageGroup::prefix;
-    case Association::postfix:
+    case Association::Postfix:
       return ImageGroup::postfix;
     default:
       return ImageGroup::left;
@@ -472,8 +472,8 @@ struct RuleMaker {
 template <class V>
 consteval ImageGrammarDesc grammar_of() {
   using G = view_grammar_t<V>;
-  using Ig = typename ov::as_rules<G, typename G::ignored>::type;
-  using Hd = typename ov::as_rules<G, typename G::hidden>::type;
+  using Ig = typename ResolveOverride<G>::ignored;
+  using Hd = typename ResolveOverride<G>::hidden;
   ImageGrammarDesc g;
   g.name = type_name<G>();
   g.entry = &kRule<V, declared_of_t<typename G::entry>>;

@@ -49,7 +49,7 @@ class References {
 
   // Precondition: called under the workspace read lock. A caret one past the
   // last character is still on the word, as a CST span is half-open.
-  [[nodiscard]] virtual Declaration findDeclaration(
+  [[nodiscard]] virtual Declaration findDeclarations(
       const Document& document, TextOffset offset,
       const CancellationToken& cancelToken = kNoCancel) const = 0;
 

@@ -67,15 +67,6 @@ class DefaultIndexManager : public IndexManager,
   ~DefaultIndexManager() noexcept override = default;
 
  private:
-  // What points at a symbol, for rename and find-references.
-  struct Target {
-    DocumentId document;
-    NodeId symbol;
-    bool operator==(const Target&) const = default;
-  };
-  struct TargetHash {
-    [[nodiscard]] std::size_t operator()(const Target& t) const noexcept;
-  };
 
   static constexpr unsigned kShardBits = 6;
   static constexpr std::size_t kShards = std::size_t{1} << kShardBits;
@@ -104,6 +95,8 @@ class DefaultIndexManager : public IndexManager,
     // Owning: a write replaces a row's holder, and a reader still walking this
     // snapshot keeps the row it is on.
     std::vector<std::pair<DocumentId, std::shared_ptr<const Exported>>> rows;
+    // Where each document's row is, for a walk over a few documents.
+    std::unordered_map<DocumentId, std::uint32_t> rowAt;
     // Built from the rows so a lookup does not scan every export. Keyed by the
     // folded name's hash: a run may hold a colliding name, which a reader
     // filters.
@@ -130,13 +123,21 @@ class DefaultIndexManager : public IndexManager,
         std::string_view name) const;
     void fill(Shard& shard, std::size_t at) const;
   };
+  // What points at one symbol, sorted by source document, then position.
+  using IncomingRows = std::vector<ReferenceDescription>;
+  // What points into one document, by symbol.
+  using IncomingSymbols =
+      std::unordered_map<NodeId, std::shared_ptr<const IncomingRows>>;
+  // For rename and find-references. Shared per document and per symbol, so a
+  // view rebuilt after a write keeps everything the write did not touch.
   struct Incoming {
-    std::unordered_map<Target, std::vector<ReferenceDescription>, TargetHash>
-        byTarget;
+    std::unordered_map<DocumentId, std::shared_ptr<const IncomingSymbols>>
+        byDocument;
   };
   struct Referenced {
     std::vector<ReferenceDescription> descriptions;
-    std::uint64_t targets = 0;
+    // The other documents it points into, each once, sorted.
+    std::vector<DocumentId> targets;
   };
   // What `visitReferences` walks: the published view, or a reader's own when a
   // write changed the rows it was built from.
@@ -164,8 +165,15 @@ class DefaultIndexManager : public IndexManager,
   std::unordered_map<DocumentId, std::shared_ptr<Exported>> _exported;
   // Shared, so a reader groups and sorts them after releasing the lock.
   std::unordered_map<DocumentId, std::shared_ptr<const Referenced>> _references;
-  // Counts the releases of `_incoming`, under `_mutex`: a view is published
-  // only if no release happened since its rows were read.
+  // The last incoming view, and each document whose references changed since
+  // with its row in that view, null for none: a reader rebuilds only the
+  // symbols they point at. Before the first view, a reader builds it whole.
+  mutable std::shared_ptr<const Incoming> _lastIncoming;
+  mutable std::unordered_map<DocumentId, std::shared_ptr<const Referenced>>
+      _changedSources;
+  mutable std::atomic<bool> _incomingStale{false};
+  // Counts the reference writes, under `_mutex`: a view is published only if
+  // no write happened since its rows were read.
   std::uint64_t _referenceWrites = 0;
   struct Import {
     std::uint64_t name;
@@ -184,16 +192,17 @@ class DefaultIndexManager : public IndexManager,
   // own content drop clears it, or a cancelled relink would be forgotten.
   std::unordered_set<DocumentId> _affected;
 
-  // Null once a write drops it, before changing its table; the next reader
-  // rebuilds and publishes it, unless a write came in since. Published rather
-  // than atomic: the scope path reads the export view once per reference.
+  // Rebuilt by the next reader after a write, and published unless another
+  // write came in since. Published rather than atomic: the scope path reads
+  // the export view once per reference.
   mutable detail::Published<Exports> _exports;
   mutable detail::Published<Incoming> _incoming;
 
   // `_mutex` held by the caller.
   bool dropContent(DocumentId document);
   bool dropReferences(DocumentId document);
-  void clearIncoming();
+  // Says the references of `source` are about to change.
+  void noteIncoming(DocumentId source);
   void affectImporters(const Exported& exports);
   // Each takes `_mutex` only when nothing is published. The handle keeps the
   // snapshot alive for the whole read, as the answers point into it.

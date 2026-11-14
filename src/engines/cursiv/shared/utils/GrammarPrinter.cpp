@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "cursiv/grammar/expr.hpp"
-#include "cursiv/grammar/unicode/UnicodeProperty.hpp"
+#include "cursiv/text/unicode/UnicodeProperty.hpp"
 #include "cursiv/grammar/word_final_in.hpp"
 #include "cursiv/shared/utils/ClassSpelling.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"

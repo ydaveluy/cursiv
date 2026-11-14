@@ -14,20 +14,18 @@
 namespace cursiv {
 
 // What a walk does past a node.
-enum class AstWalk : std::uint8_t { enter, prune };
+enum class AstWalk : std::uint8_t { Enter, Prune };
 
 // Each node `node` directly contains, in member order.
 template <class Visit>
 void visit_contents(const AstReflection& reflection, const AstNode& node,
                     Visit&& visit) {
-  reflection.visitMembers(
-      node, [&](std::string_view, std::uint32_t, AstNode& child) {
-        visit(child);
-      });
+  reflection.visitProperties(node, [&](std::string_view, std::uint32_t,
+                                       AstNode& child) { visit(child); });
 }
 
 // Each node below `root`, a parent before what it contains, in member order.
-// `visit` may return `AstWalk::prune` to skip what a node contains. The walk
+// `visit` may return `AstWalk::Prune` to skip what a node contains. The walk
 // keeps its own stack: a deep tree costs no native stack.
 template <class Visit>
 void visit_all_contents(const AstReflection& reflection, const AstNode& root,
@@ -47,7 +45,7 @@ void visit_all_contents(const AstReflection& reflection, const AstNode& root,
     if constexpr (std::is_void_v<decltype(visit(node))>) {
       visit(node);
       enter(node);
-    } else if (visit(node) != AstWalk::prune) {
+    } else if (visit(node) != AstWalk::Prune) {
       enter(node);
     }
   }

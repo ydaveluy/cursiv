@@ -10,12 +10,12 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
-#include "cursiv/grammar/unicode/UnicodeRanges.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRanges.hpp"
 #include "cursiv/grammar/word_final_in.hpp"
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/text/scalar_at.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 
 namespace cursiv::engine {
 

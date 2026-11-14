@@ -15,39 +15,23 @@
 namespace sm {
 
 void install_lsp_module(StateMachineServices& services) {
-  cursiv::install_default_lsp_services(services);
   services.semanticTokenProvider =
       std::make_unique<const cursiv::GrammarSemanticTokenProvider>(services);
   services.formatter = std::make_unique<const StatemachineFormatter>(services);
 }
 
-std::unique_ptr<StateMachineServices> create_lsp_services(
-    StateMachineSharedServices& sharedServices, std::string languageId) {
-  auto services = std::make_unique<StateMachineServices>(sharedServices);
-  services->languageMetaData.languageId = std::move(languageId);
-  cursiv::install_default_core_services(*services);
-  install_core_module(*services);
-  install_lsp_module(*services);
-  return services;
-}
-
 StateMachineLanguage create_lsp_services(
     std::unique_ptr<cursiv::FileSystemProvider> files) {
-  auto shared = std::make_unique<StateMachineSharedServices>();
-  shared->fileSystemProvider =
-      files != nullptr ? std::move(files)
-                       : std::make_unique<cursiv::EmptyFileSystemProvider>();
-  cursiv::install_default_shared_lsp_services(*shared);
-  auto services = create_lsp_services(*shared);
-  StateMachineServices& language = *services;
-  shared->serviceRegistry->registerServices(std::move(services));
-  return {std::move(shared), language};
+  return cursiv::create_lsp_language<StateMachineServices,
+                                     StateMachineSharedServices,
+                                     install_core_module, install_lsp_module>(
+      std::move(files));
 }
 
-bool register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
-  sharedServices.serviceRegistry->registerServices(create_lsp_services(
-      dynamic_cast<StateMachineSharedServices&>(sharedServices)));
-  return true;
+void register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
+  cursiv::register_lsp_language<StateMachineServices,
+                                StateMachineSharedServices, install_core_module,
+                                install_lsp_module>(sharedServices);
 }
 
 }  // namespace sm

@@ -58,9 +58,10 @@ void run() {
   // A repaired keyword keeps its source text; a refused conversion leaves
   // the member at its default.
   constexpr std::array repaired{
-      std::tuple{"literal litera;", "#litera", cursiv::DiagnosticKind::replaced},
-      std::tuple{"keyed ky.name;", "ky.name", cursiv::DiagnosticKind::replaced},
-      std::tuple{"checked !az.b;", "", cursiv::DiagnosticKind::conversion_error},
+      std::tuple{"literal litera;", "#litera",
+                 cursiv::DiagnosticKind::Replaced},
+      std::tuple{"keyed ky.name;", "ky.name", cursiv::DiagnosticKind::Replaced},
+      std::tuple{"checked !az.b;", "", cursiv::DiagnosticKind::ConversionError},
   };
   for (const auto& [text, expected, kind] : repaired) {
     const std::string input = "data:" + std::string(text);

@@ -148,7 +148,7 @@ void an_unstamped_tree_does_not_supply_engine_positions() {
       builder.leaf(0, text.size(), 0);
       builder.exit(opened, 0, 0);
     }
-    CHECK(!tree.engine_stamped());
+    CHECK(!tree.engineStamped());
     for (cursiv::TextOffset at = 0; at <= text.size(); ++at) {
       std::vector<cursiv::NextFeature> output{{123u, "kept", 7u, nullptr}};
       const auto* data = output.data();

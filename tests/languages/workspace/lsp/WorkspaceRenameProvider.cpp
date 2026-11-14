@@ -87,15 +87,15 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
     const cursiv::Document& document, lsp::Position position,
     std::string_view newName, const cursiv::CancellationToken& token) const {
   const QualifiedNameProvider& names = *_dm.qualifiedNameProvider;
-  const cursiv::References& references = *core().references;
-  const cursiv::Documents& store = *core().shared().documents;
+  const cursiv::References& references = *services.references;
+  const cursiv::Documents& store = *services.shared().documents;
 
   // The base checks the new name and edits the declaration.
   std::optional<lsp::WorkspaceEdit> edit =
       cursiv::DefaultRenameProvider::rename(document, position, newName, token);
   if (!edit.has_value()) return edit;
 
-  const cursiv::Declaration found = references.findDeclaration(
+  const cursiv::Declaration found = references.findDeclarations(
       document, document.textDocument().offsetAt(cursiv::from_lsp(position)),
       token);
   if (!found || found.targets.empty()) return edit;

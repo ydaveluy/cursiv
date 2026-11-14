@@ -29,7 +29,7 @@ void valid(const cursiv::Parser& parser, std::string_view text,
            std::string_view values = {}) {
   const auto result = parser.parse(text);
   CHECK(result.accepted && result.diagnostics.empty());
-  const auto* node = result.value_as<tunordered::Record>();
+  const auto* node = result.valueAs<tunordered::Record>();
   CHECK(node != nullptr);
   if (!node) return;
   std::string seen;
@@ -157,7 +157,7 @@ void exercise(const cursiv::Parser& parser) {
 }
 
 const tunordered::Wrap* wrap_of(const cursiv::ParseResult& result) {
-  const auto* node = result.value_as<tunordered::Record>();
+  const auto* node = result.valueAs<tunordered::Record>();
   return node ? cursiv::ast_cast<tunordered::Wrap>(node->expression) : nullptr;
 }
 
@@ -318,7 +318,7 @@ void loop_in_operand() {
     engines_agree(*ll, *lr, *llAst, *lrAst, text);
   for (const auto text : {"?name +1 x;", "?;name +1 x"}) {
     const auto result = ll->parse(text);
-    const auto* doc = result.value_as<tunorderedturns::Doc>();
+    const auto* doc = result.valueAs<tunorderedturns::Doc>();
     CHECK(doc != nullptr);
     if (doc)
       CHECK(doc->tails.empty() && doc->labels.size() == 2 &&
@@ -341,7 +341,7 @@ const toptional::Record* accepted(const cursiv::ParseResult& result,
     std::fprintf(stderr, "not accepted: %.*s\n", static_cast<int>(text.size()),
                  text.data());
   CHECK(clean);
-  const auto* node = result.value_as<toptional::Record>();
+  const auto* node = result.valueAs<toptional::Record>();
   CHECK(node != nullptr);
   return clean ? node : nullptr;
 }

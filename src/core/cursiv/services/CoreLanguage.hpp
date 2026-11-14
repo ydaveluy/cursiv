@@ -51,11 +51,10 @@ template <class TServices, class TShared, void (*install)(TServices&)>
 // Registers the language in an existing workspace, whose shared services must
 // be a `TShared`.
 template <class TServices, class TShared, void (*install)(TServices&)>
-bool register_language(SharedCoreServices& sharedServices) {
+void register_language(SharedCoreServices& sharedServices) {
   sharedServices.serviceRegistry->registerServices(
       create_core_services<TServices, TShared, install>(
           dynamic_cast<TShared&>(sharedServices)));
-  return true;
 }
 
 }  // namespace cursiv

@@ -29,8 +29,8 @@ inline void ast_of(const cursiv::AstReflection& r, const cursiv::AstNode& n,
   const auto meta = r.getTypeMetaData(n.type);
   out += meta.name;
   out += '{';
-  r.visitMembers(n, [&](std::string_view p, std::uint32_t i,
-                        const cursiv::AstNode& child) {
+  r.visitProperties(n, [&](std::string_view p, std::uint32_t i,
+                           const cursiv::AstNode& child) {
     out += p;
     if (i != cursiv::AstReflection::kNoIndex) out += std::to_string(i);
     out += '=';
@@ -45,7 +45,7 @@ inline void spans_of(const cursiv::AstReflection& r, const cursiv::Cst& cst,
   const cursiv::CstNode& at = cst[n.cstNodeId];
   out += r.getTypeMetaData(n.type).name;
   out += '[' + std::to_string(at.begin) + ',' + std::to_string(at.end) + ')';
-  r.visitMembers(
+  r.visitProperties(
       n, [&](std::string_view, std::uint32_t, const cursiv::AstNode& child) {
         out += ' ';
         spans_of(r, cst, child, out);

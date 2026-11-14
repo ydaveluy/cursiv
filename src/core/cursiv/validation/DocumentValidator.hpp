@@ -4,8 +4,8 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/workspace/Document.hpp"
 
@@ -49,22 +49,8 @@ class DocumentValidator {
  public:
   virtual ~DocumentValidator() noexcept = default;
   virtual void validateDocument(const Document&, std::vector<Diagnostic>&,
-                                const ValidationOptions&,
-                                const CancellationToken&) const = 0;
-
-  // Shortcuts: some categories only, or every check.
-  void validateDocument(const Document& document,
-                        std::vector<Diagnostic>& diagnostics,
-                        std::span<const ValidationCategory* const> categories,
-                        const CancellationToken& token = {}) const {
-    validateDocument(document, diagnostics,
-                     ValidationOptions{.categories = categories}, token);
-  }
-  void validateDocument(const Document& document,
-                        std::vector<Diagnostic>& diagnostics,
-                        const CancellationToken& token = {}) const {
-    validateDocument(document, diagnostics, ValidationOptions{}, token);
-  }
+                                const ValidationOptions& = {},
+                                const CancellationToken& = {}) const = 0;
 };
 
 }  // namespace cursiv

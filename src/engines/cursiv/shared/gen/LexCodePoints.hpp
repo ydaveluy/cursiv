@@ -15,8 +15,8 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
-#include "cursiv/grammar/unicode/UnicodeRanges.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRanges.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/utils/CoreContract.hpp"
 #include "cursiv/shared/utils/inside_scalar.hpp"
@@ -48,7 +48,7 @@ struct LexCodePoints {
   static LexCodePoints of(std::uint64_t props, bool complement,
                           std::string_view spec) {
     LexCodePoints out;
-    for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::count);
+    for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::Count);
          ++i)
       if ((props >> i) & 1)
         out.ranges.insert(out.ranges.end(), unicode::kTables[i].begin(),

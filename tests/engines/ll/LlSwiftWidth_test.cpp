@@ -20,7 +20,7 @@ void a_completed_entry_survives_an_unfinished_shorter_reading() {
         "#\"\"\"a\"\"\"#\n#\"\"\"b\"\"\"#\n"}) {
     const auto parsed = ll->parse(text);
     CHECK(parsed.accepted && parsed.diagnostics.empty());
-    const auto* doc = parsed.value_as<Document>();
+    const auto* doc = parsed.valueAs<Document>();
     CHECK(doc && doc->parent == nullptr);
     if (!doc) continue;
     CHECK(doc->values.size() == (text == "#\"\"\"a\"\"\"#\n#\"\"\"b\"\"\"#\n" ? 2u : 1u));

@@ -819,7 +819,7 @@ Descent<void> Emit::arm(std::uint16_t id, std::uint16_t hand) {
   if (!step) {
     moved.body =
         concat("CURSIV_NOINLINE void s", moved.tag,
-               "(::cursiv::engine::LlContext& c) {\n", cut_from(from), "}\n\n");
+               "(::cursiv::engine::LlContext& c) {\n", cutFrom(from), "}\n\n");
     line("s", moved.tag, "(c);");
     arms.push_back(std::move(moved));
     co_return;
@@ -827,7 +827,7 @@ Descent<void> Emit::arm(std::uint16_t id, std::uint16_t hand) {
   moved.step = memo.steps++;
   moved.frame = frame_of(moved.tag, took);
   moved.body = step_head(moved.tag, resumed);
-  moved.body += cut_from(from);
+  moved.body += cutFrom(from);
   moved.body += "  return ::cursiv::engine::kLlDone;\n}\n\n";
   taken.resize(took);
   labels.resize(resumed);
@@ -1135,8 +1135,8 @@ void Emit::climb(std::uint16_t r) {
   bool anyNon = false, anyRight = false, bodies = false, atomics = false;
   for (std::uint16_t k = 0; k < cl.opCount; ++k) {
     const LlClimbOp& op = a.cfg.climbOps[cl.opBase + k];
-    anyNon = anyNon || op.assoc == Association::non;
-    anyRight = anyRight || op.assoc == Association::right;
+    anyNon = anyNon || op.assoc == Association::Non;
+    anyRight = anyRight || op.assoc == Association::Right;
     const bool atomic = a.cfg.atomic_operator(op.body) != kNoRow;
     bodies = bodies || !atomic;
     atomics = atomics || atomic;
@@ -1159,9 +1159,10 @@ void Emit::climb(std::uint16_t r) {
   const auto grouping = [&](const LlClimbOp& op, std::string_view to = "f.") {
     std::string stated;
     if (anyRight)
-      stated += concat(" ", to, "right = ", op.assoc == Association::right, ";");
+      stated +=
+          concat(" ", to, "right = ", op.assoc == Association::Right, ";");
     if (anyNon)
-      stated += concat(" ", to, "non = ", op.assoc == Association::non, ";");
+      stated += concat(" ", to, "non = ", op.assoc == Association::Non, ";");
     return stated;
   };
   line("f.least = c.arg;");

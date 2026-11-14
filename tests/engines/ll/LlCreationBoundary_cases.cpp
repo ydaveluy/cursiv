@@ -57,7 +57,7 @@ void expect_tree(const cursiv::Parser& parser, std::string_view text,
   const std::string source = "creation:" + std::string(text);
   const auto parsed = parser.parse(source);
   CHECK(parsed.accepted && parsed.diagnostics.empty());
-  const auto* root = parsed.value_as<tllcreation::Node>();
+  const auto* root = parsed.valueAs<tllcreation::Node>();
   CHECK(root != nullptr);
   if (!root) return;
   std::unordered_set<const cursiv::AstNode*> nodes;

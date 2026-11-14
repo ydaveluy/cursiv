@@ -508,7 +508,7 @@ void emit_gap_edits(NodeId previous, NodeId node,
 }
 
 // The roots of the physical forest, in document order. Leading trivia can be a
-// root of its own (it precedes the entry rule), so neither `entry_root()` nor
+// root of its own (it precedes the entry rule), so neither `entryRoot()` nor
 // id 0 is a sound place to start: the tape is walked whole.
 [[nodiscard]] std::vector<NodeId> forest_roots(const Cst& cst) {
   std::vector<NodeId> roots;
@@ -516,7 +516,7 @@ void emit_gap_edits(NodeId previous, NodeId node,
   while (next > 0) {
     const NodeId root = next - 1;
     roots.push_back(root);
-    next = cst.subtree_begin(root);
+    next = cst.subtreeBegin(root);
   }
   std::ranges::reverse(roots);
   return roots;
@@ -692,9 +692,9 @@ std::vector<lsp::TextEdit> run_formatting(
     }
 
     stack.push_back(Frame{.id = id, .saved = initial, .exit = true});
-    // `reverse_children` yields the last child first, so pushing in that order
+    // `reverseChildren` yields the last child first, so pushing in that order
     // pops them back in document order.
-    for (const NodeId child : cst.reverse_children(id))
+    for (const NodeId child : cst.reverseChildren(id))
       stack.push_back(Frame{.id = child, .saved = 0, .exit = false});
   }
 

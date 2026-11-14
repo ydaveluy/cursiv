@@ -643,6 +643,10 @@ struct All : cursiv::GrammarSpec {
   struct OwnPCT : terminal<as<own::Percent>(some(d))> {};
   struct OwnRoot
       : rule<create<own::Node>(assign<&own::Node::share>(ref<OwnPCT>))> {};
+  // The same member written from plain digits: its type's converter applies.
+  struct OwnDIGITS : terminal<some(d)> {};
+  struct OwnPlain
+      : rule<create<own::Node>(assign<&own::Node::share>(ref<OwnDIGITS>))> {};
 
   struct OptID : terminal<some(cr<"a-z">)> {};
   struct OptIt
@@ -692,8 +696,9 @@ struct All : cursiv::GrammarSpec {
              (kw<"$listed"> + ref<ListedRoot>) |
              (kw<"$adopt"> + ref<AdoptDoc>) | (kw<"$climb"> + ref<ClimbE>) |
              (kw<"$hoist"> + ref<HoistRoot>) | (kw<"$text"> + ref<TextRoot>) |
-             (kw<"$own"> + ref<OwnRoot>) | (kw<"$rebind"> + ref<RebindRoot>) |
-             (kw<"$opt"> + ref<OptRoot>) | (kw<"$inl"> + ref<InlRoot>)> {};
+             (kw<"$own"> + ref<OwnRoot>) | (kw<"$ownplain"> + ref<OwnPlain>) |
+             (kw<"$rebind"> + ref<RebindRoot>) | (kw<"$opt"> + ref<OptRoot>) |
+             (kw<"$inl"> + ref<InlRoot>)> {};
   using entry = Entry;
   using ignored = WS;
 };

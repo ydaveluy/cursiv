@@ -256,15 +256,28 @@ constexpr std::string_view enumerator_name() {
     return {};
 }
 
+// The name of the value probed at `I`, empty when it names no enumerator. An
+// enumeration with no fixed underlying type holds only the values its
+// enumerators span: the others are not probed.
+template <class M, int I>
+constexpr std::string_view probed_name() {
+  if constexpr (
+      requires { M{0}; } ||
+      requires {
+        typename std::integral_constant<M, static_cast<M>(I + kEnumProbeMin)>;
+      })
+    return enumerator_name<static_cast<M>(I + kEnumProbeMin)>();
+  else
+    return {};
+}
+
 // The enumerator whose name is `text`, or nothing. Probing one value per index
 // keeps every comparison against a literal.
 template <class M, int... I>
 constexpr bool find_enumerator(std::string_view text, M& out,
                                std::integer_sequence<int, I...>) {
-  constexpr auto at = [](int i) { return static_cast<M>(i + kEnumProbeMin); };
-  return (... ||
-          (!enumerator_name<at(I)>().empty() && enumerator_name<at(I)>() == text
-               ? (out = at(I), true)
-               : false));
+  return (... || (!probed_name<M, I>().empty() && probed_name<M, I>() == text
+                      ? (out = static_cast<M>(I + kEnumProbeMin), true)
+                      : false));
 }
 }  // namespace cursiv::detail

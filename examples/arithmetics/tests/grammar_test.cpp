@@ -23,19 +23,19 @@
 #include "arithmetics/Interpreter.hpp"
 #include "arithmetics/LspModule.hpp"
 #include "arithmetics/validation/ArithmeticsValidator.hpp"
-#include "cursiv/actions/CodeActionProvider.hpp"
-#include "cursiv/cli.hpp"
-#include "cursiv/services/CoreLanguage.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
-#include "cursiv/text/TextOffset.hpp"
-#include "cursiv/validation/ValidationAcceptor.hpp"
-#include "cursiv/workspace/Document.hpp"
-#include "cursiv/workspace/LocalFileSystemProvider.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/ExpectDiagnosticOptions.hpp"
 #include "cursiv/ValidationHelper.hpp"
 #include "cursiv/ValidationResult.hpp"
+#include "cursiv/actions/CodeActionProvider.hpp"
+#include "cursiv/cli.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/JsonValue.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/LocalFileSystemProvider.hpp"
 
 namespace {
 
@@ -499,8 +499,8 @@ void every_evaluation_is_said() {
   shared.fileSystemProvider =
       std::make_unique<cursiv::LocalFileSystemProvider>();
   cursiv::install_default_shared_core_services(shared);
-  CHECK(cursiv::register_language<Services, Shared, arith::install_core_module>(
-      shared));
+  cursiv::register_language<Services, Shared, arith::install_core_module>(
+      shared);
   std::ostringstream out;
   std::ostringstream err;
   const int status = arith::eval_file(file.string(), shared, out, err);

@@ -1,6 +1,5 @@
 #include "domainmodel/references/DomainModelScopeComputation.hpp"
 
-#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -18,18 +17,6 @@
 
 namespace dm {
 
-namespace {
-
-// The family is asked once, not per node: the erased `isInstance` scans the
-// grammar's classes to find the tag it was handed, and a scope computation
-// visits every node of the document.
-bool in_family(std::span<const cursiv::AstTypeTag* const> family,
-               const cursiv::AstTypeTag* tag) noexcept {
-  return std::ranges::find(family, tag) != family.end();
-}
-
-}  // namespace
-
 DomainModelScopeComputation::DomainModelScopeComputation(
     const DomainModelCoreServices& services) noexcept
     : cursiv::DefaultScopeComputation(services), _dm(services) {}
@@ -44,11 +31,9 @@ DomainModelScopeComputation::collectExportedSymbols(
   std::vector<cursiv::AstNodeDescription> exported;
   if (document.parseResult.value == nullptr) return exported;
 
-  const std::span<const cursiv::AstTypeTag* const> types =
-      _dm.astReflection->getAllSubTypes(&cursiv::ast_type_tag<ast::Type>);
   for (cursiv::AstNode* const node : document.parseResult.nodes()) {
     cursiv::throw_if_cancelled(cancelToken);
-    if (in_family(types, node->type))
+    if (cursiv::ast_cast<ast::Type>(node) != nullptr)
       addExportedSymbol(*node, exported, document);
   }
   return exported;
@@ -81,14 +66,13 @@ cursiv::LocalSymbols DomainModelScopeComputation::collectLocalSymbols(
     const cursiv::Document& document,
     const cursiv::CancellationToken& cancelToken) const {
   cursiv::LocalSymbols symbols;
-  const cursiv::AstNode* const root = document.parseResult.value;
-  if (root == nullptr || root->type != &cursiv::ast_type_tag<ast::DomainModel>)
-    return symbols;
+  const auto* const root =
+      cursiv::ast_cast<ast::DomainModel>(document.parseResult.value);
+  if (root == nullptr) return symbols;
 
   symbols.reserve(document.parseResult.nodes().size() / 4);
-  processContainer(*root, static_cast<const ast::DomainModel&>(*root).elements,
-                   document, symbols, cancelToken);
-  symbols.build_index();
+  processContainer(*root, root->elements, document, symbols, cancelToken);
+  symbols.buildIndex();
   return symbols;
 }
 
@@ -97,9 +81,6 @@ void DomainModelScopeComputation::processContainer(
     std::span<ast::AbstractElement* const> elements,
     const cursiv::Document& document, cursiv::LocalSymbols& symbols,
     const cursiv::CancellationToken& cancelToken) const {
-  const std::span<const cursiv::AstTypeTag* const> types =
-      _dm.astReflection->getAllSubTypes(&cursiv::ast_type_tag<ast::Type>);
-
   // One `Level` per open container, so packages nested a thousand deep hold
   // no native frame each. Each collects what it declares in element order,
   // its nested packages' names at their places.
@@ -123,11 +104,11 @@ void DomainModelScopeComputation::processContainer(
       cursiv::throw_if_cancelled(cancelToken);
       if (element == nullptr) continue;
 
-      if (in_family(types, element->type)) {
+      if (cursiv::ast_cast<ast::Type>(element) != nullptr) {
         if (element->name.empty()) continue;
         const std::string_view name =
             qualifier.empty() ? element->name
-                              : document.keep_text(qualifier, element->name)
+                              : document.keepText(qualifier, element->name)
                                     .substr(qualifier.size());
         if (auto description =
                 _dm.astNodeDescriptionProvider->createDescription(
@@ -135,13 +116,12 @@ void DomainModelScopeComputation::processContainer(
           level.declared.push_back(*std::move(description));
         continue;
       }
-      if (element->type == &cursiv::ast_type_tag<ast::PackageDeclaration>) {
-        const auto& package =
-            static_cast<const ast::PackageDeclaration&>(*element);
-        open.push_back({&package, package.elements, 0, {}, qualifier.size()});
+      if (const auto* const package =
+              cursiv::ast_cast<ast::PackageDeclaration>(element)) {
+        open.push_back({package, package->elements, 0, {}, qualifier.size()});
         // A package whose name is missing qualifies nothing.
-        if (!package.name.empty()) {
-          qualifier += package.name;
+        if (!package->name.empty()) {
+          qualifier += package->name;
           qualifier += '.';
         }
       }

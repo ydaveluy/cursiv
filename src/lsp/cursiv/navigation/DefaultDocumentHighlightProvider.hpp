@@ -6,18 +6,20 @@
 
 #include <vector>
 
+#include "cursiv/navigation/DocumentHighlightProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
-#include "cursiv/navigation/DocumentHighlightProvider.hpp"
 
 namespace cursiv {
 
-class DefaultDocumentHighlightProvider : public DocumentHighlightProvider {
+class DefaultDocumentHighlightProvider : public DocumentHighlightProvider,
+                                         protected DefaultCoreService {
  public:
   explicit DefaultDocumentHighlightProvider(const CoreServices& core) noexcept
-      : _core(core) {}
+      : DefaultCoreService(core) {}
 
   [[nodiscard]] std::vector<lsp::DocumentHighlight> getDocumentHighlight(
       const Document& document, lsp::Position position,
@@ -28,9 +30,6 @@ class DefaultDocumentHighlightProvider : public DocumentHighlightProvider {
   // first target's row. The default sets no kind.
   [[nodiscard]] virtual lsp::DocumentHighlight createDocumentHighlight(
       const Document& document, const ReferenceDescription& reference) const;
-
- private:
-  const CoreServices& _core;
 };
 
 }  // namespace cursiv

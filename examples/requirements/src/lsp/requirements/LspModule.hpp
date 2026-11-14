@@ -30,6 +30,6 @@ struct RequirementsLanguage {
 RequirementsLanguage create_lsp_services(
     std::unique_ptr<cursiv::FileSystemProvider> files = nullptr);
 
-bool register_lsp_services(cursiv::SharedCoreServices& sharedServices);
+void register_lsp_services(cursiv::SharedCoreServices& sharedServices);
 
 }  // namespace req

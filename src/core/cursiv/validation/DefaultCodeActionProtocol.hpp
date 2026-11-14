@@ -4,8 +4,8 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/text/TextRange.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 
 // The wire schema of the default quick fixes: edit objects under
 // `kDefaultCodeActionsKey` in a diagnostic's `data`, written by the validator

@@ -43,7 +43,7 @@ inline bool repaired(const cursiv::Parser& p, std::string_view text) {
 inline std::string leaves(const cursiv::Parser& p, std::string_view text) {
   const cursiv::ParseResult r = p.parse(text);
   std::string out;
-  r.cst().visit_leaves([&](const cursiv::CstLeaf& l) {
+  r.cst().visitLeaves([&](const cursiv::CstLeaf& l) {
     if (l.begin == l.end) return;
     if (!out.empty()) out += ' ';
     const std::string s(text.substr(l.begin, l.end - l.begin));

@@ -15,7 +15,7 @@
 
 #include "arithmetics/Interpreter.hpp"
 #include "arithmetics/Operator.hpp"
-#include "cursiv/services/JsonValue.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 #include "cursiv/workspace/Document.hpp"
 
 namespace arith {

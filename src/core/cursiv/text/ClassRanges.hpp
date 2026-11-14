@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/text/ClassItem.hpp"
 
 namespace cursiv::detail {
@@ -92,15 +92,23 @@ struct ClassRanges {
     return w;
   }
 
+  // What a set operation leaves, among scalars: a bound that would land on a
+  // surrogate moves off them.
+  constexpr void left(char32_t lo, char32_t hi) {
+    if (lo >= 0xD800 && lo <= 0xDFFF) lo = 0xE000;
+    if (hi >= 0xD800 && hi <= 0xDFFF) hi = 0xD7FF;
+    if (lo <= hi) r.push_back({lo, hi});
+  }
+
   constexpr ClassRanges complemented() const {
     ClassRanges out;
     out.r.reserve(r.size() + 1);
     char32_t next = 0;
     for (const unicode::Range& x : r) {
-      if (x.lo > next) out.r.push_back({next, x.lo - 1});
+      if (x.lo > next) out.left(next, x.lo - 1);
       next = x.hi + 1;
     }
-    if (next <= 0x10FFFF) out.r.push_back({next, 0x10FFFF});
+    if (next <= 0x10FFFF) out.left(next, 0x10FFFF);
     return out;
   }
 
@@ -117,7 +125,7 @@ struct ClassRanges {
       while (i < o.r.size() && o.r[i].hi < next) ++i;
       while (i < o.r.size() && o.r[i].lo <= x.hi) {
         const unicode::Range& cut = o.r[i];
-        if (cut.lo > next) out.r.push_back({next, cut.lo - 1});
+        if (cut.lo > next) out.left(next, cut.lo - 1);
         if (cut.hi >= x.hi) {
           next = x.hi + 1;
           break;
@@ -125,7 +133,7 @@ struct ClassRanges {
         next = cut.hi + 1;
         ++i;
       }
-      if (next <= x.hi) out.r.push_back({next, x.hi});
+      if (next <= x.hi) out.left(next, x.hi);
     }
     return out;
   }

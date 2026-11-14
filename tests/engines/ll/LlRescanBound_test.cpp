@@ -202,7 +202,7 @@ int main() {
     const auto parsed = parser.parse(test.text);
     CHECK(parsed.accepted);
     CHECK(marks(parsed) == test.diagnostics);
-    const auto* doc = parsed.value_as<tllrescan::Doc>();
+    const auto* doc = parsed.valueAs<tllrescan::Doc>();
     CHECK(doc != nullptr);
     if (doc == nullptr) return;
     std::vector<std::string_view> items;
@@ -211,27 +211,34 @@ int main() {
   };
   using enum cursiv::DiagnosticKind;
   const auto nll = gen::NarrowLl::create_parser();
-  for (const Case& test : {
-           Case{".a bd ac;", {{inserted, 0, 0}, {replaced, 1, 8}}, {"", ""}},
-           Case{"bb.a.c;", {{replaced, 0, 2}, {replaced, 3, 6}}, {"", "a.c"}},
-           Case{";aa;bc;", {{inserted, 0, 0}, {replaced, 1, 6}}, {"", "aa;bc"}},
-           Case{"c;a;bc;da", {{replaced, 0, 1}, {replaced, 2, 6}, {deleted, 7, 9}},
-                {"", "a;bc"}},
-           Case{". a;bc;.", {{inserted, 0, 0}, {replaced, 2, 6}, {inserted, 7, 7}},
-                {"", "a;bc", ""}}})
+  for (const Case& test :
+       {Case{".a bd ac;", {{Inserted, 0, 0}, {Replaced, 1, 8}}, {"", ""}},
+        Case{"bb.a.c;", {{Replaced, 0, 2}, {Replaced, 3, 6}}, {"", "a.c"}},
+        Case{";aa;bc;", {{Inserted, 0, 0}, {Replaced, 1, 6}}, {"", "aa;bc"}},
+        Case{"c;a;bc;da",
+             {{Replaced, 0, 1}, {Replaced, 2, 6}, {Deleted, 7, 9}},
+             {"", "a;bc"}},
+        Case{". a;bc;.",
+             {{Inserted, 0, 0}, {Replaced, 2, 6}, {Inserted, 7, 7}},
+             {"", "a;bc", ""}}})
     check(*nll, test);
   const auto sll = gen::ShadowLl::create_parser();
-  for (const Case& test : {
-           Case{" .ac;c b;", {{inserted, 0, 0}, {replaced, 2, 4}, {replaced, 5, 8}},
-                {"", "ac", ""}},
-           Case{"c;axc;c z", {{replaced, 0, 1}, {replaced, 2, 5}, {deleted, 6, 9}},
-                {"", "axc"}},
-           Case{" .a;c;a", {{inserted, 0, 0}, {replaced, 2, 5}, {deleted, 6, 7}},
-                {"", "a;c"}},
-           Case{"b.ab;z zb", {{replaced, 0, 1}, {replaced, 2, 4}, {deleted, 5, 9}},
-                {"", "ab"}},
-           Case{";ba;a.c;", {{inserted, 0, 0}, {replaced, 1, 3}, {replaced, 4, 7}},
-                {"", "", "a.c"}}})
+  for (const Case& test :
+       {Case{" .ac;c b;",
+             {{Inserted, 0, 0}, {Replaced, 2, 4}, {Replaced, 5, 8}},
+             {"", "ac", ""}},
+        Case{"c;axc;c z",
+             {{Replaced, 0, 1}, {Replaced, 2, 5}, {Deleted, 6, 9}},
+             {"", "axc"}},
+        Case{" .a;c;a",
+             {{Inserted, 0, 0}, {Replaced, 2, 5}, {Deleted, 6, 7}},
+             {"", "a;c"}},
+        Case{"b.ab;z zb",
+             {{Replaced, 0, 1}, {Replaced, 2, 4}, {Deleted, 5, 9}},
+             {"", "ab"}},
+        Case{";ba;a.c;",
+             {{Inserted, 0, 0}, {Replaced, 1, 3}, {Replaced, 4, 7}},
+             {"", "", "a.c"}}})
     check(*sll, test);
   return cursiv::test::report("LlRescanBound_test");
 }

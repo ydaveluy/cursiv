@@ -19,22 +19,22 @@
 #include <pthread.h>
 #endif
 
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectDiagnosticOptions.hpp"
+#include "cursiv/ValidationHelper.hpp"
+#include "cursiv/ValidationResult.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/ScopeComputation.hpp"
 #include "cursiv/services/CoreLanguage.hpp"
-#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/text/TextOffset.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/MemoryFileSystemProvider.hpp"
-#include "cursiv/Check.hpp"
-#include "cursiv/ExpectDiagnosticOptions.hpp"
-#include "cursiv/ValidationHelper.hpp"
-#include "cursiv/ValidationResult.hpp"
 #include "domainmodel/CoreServices.hpp"
 #include "domainmodel/Generator.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
@@ -464,8 +464,7 @@ void qualified_names_borrow_the_documents_own_text() {
   const auto empty = names.keepQualifiedName(
       document, std::string_view{}, std::string_view{});
   CHECK(empty.empty() && empty.data() != nullptr);
-  for (int i = 0; i < 32; ++i)
-    (void)document.keep_text(std::string(4096, 'x'));
+  for (int i = 0; i < 32; ++i) (void)document.keepText(std::string(4096, 'x'));
   CHECK(flat == std::string_view("a\0b.E\0F", 7));
   CHECK(single == std::string_view("p.E\0F", 5));
   CHECK(nested == std::string_view("p.q.E\0F", 7));

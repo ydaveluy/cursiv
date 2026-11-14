@@ -3,7 +3,6 @@
 #include <vector>
 
 #include "cursiv/references/Linker.hpp"
-#include "cursiv/references/LinkingError.hpp"
 #include "cursiv/services/DefaultCoreService.hpp"
 
 namespace cursiv {
@@ -22,8 +21,9 @@ class DefaultLinker : public Linker, protected DefaultCoreService {
       const ReferenceInfo& reference) const override;
 
   [[nodiscard]] LinkingError createLinkingError(
-      const ReferenceInfo& reference, RefState why = RefState::ErrorNotFound,
-      const AstNodeDescription* description = nullptr) const override;
+      const ReferenceInfo& reference,
+      LinkingFailure why = LinkingFailure::NotFound,
+      const AstNodeDescription* targetDescription = nullptr) const override;
 
   ~DefaultLinker() noexcept override = default;
 };

@@ -109,7 +109,7 @@ void exercise(const cursiv::Parser& parser) {
     const std::string good = std::string(prefix) + "abc";
     check(parser, good, true);
     const auto parsed = parser.parse(good);
-    const auto* node = parsed.value_as<tlexicalpredicates::Node>();
+    const auto* node = parsed.valueAs<tlexicalpredicates::Node>();
     CHECK(node && node->text == "ab");
     for (const auto tail : {"ab", "abd", "a bc", "ab c", "ab/*x*/c"})
       check(parser, std::string(prefix) + tail, false);
@@ -397,8 +397,8 @@ void predicates_compose_without_consuming(const cursiv::Parser& parser) {
     const std::string text = std::string("@") + std::string(suffix);
     const auto result = parser.parse(text);
     CHECK(result.accepted && result.diagnostics.empty());
-    CHECK(result.value_as<tpredicates::Node>() != nullptr);
-    if (const auto* node = result.value_as<tpredicates::Node>())
+    CHECK(result.valueAs<tpredicates::Node>() != nullptr);
+    if (const auto* node = result.valueAs<tpredicates::Node>())
       CHECK(node->text == suffix.substr(0, suffix.find_first_of(" {/*")));
     CHECK(clean(parser, std::string(":") + std::string(suffix)));
   }

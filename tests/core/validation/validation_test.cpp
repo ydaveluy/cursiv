@@ -2,6 +2,7 @@
 // report through, and the sentence a repair is said in.
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -23,8 +24,6 @@
 #include "cursiv/references/DefaultScopeProvider.hpp"
 #include "cursiv/services/CoreLanguage.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
@@ -36,9 +35,11 @@
 #include "cursiv/text/TextRange.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 #include "cursiv/validation/DefaultCodeActionProtocol.hpp"
 #include "cursiv/validation/DefaultDocumentValidator.hpp"
 #include "cursiv/validation/DefaultValidationRegistry.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/DocumentValidator.hpp"
 #include "cursiv/validation/SpellingActions.hpp"
 #include "cursiv/validation/ValidateSingleNodeOptions.hpp"
@@ -118,14 +119,13 @@ struct SelectiveValidator final : cursiv::DefaultDocumentValidator {
   bool skipEntity = false;
   bool skipUnderEntity = false;
   bool skipUnderPackage = false;
-  mutable std::size_t optionsAsked = 0;
+  mutable std::atomic<std::size_t> optionsAsked{0};
   cursiv::CancellationTokenSource* cancelOnOptions = nullptr;
 
  protected:
-  [[nodiscard]] bool asksNodeOptions() const noexcept override { return true; }
   [[nodiscard]] cursiv::ValidateSingleNodeOptions validateSingleNodeOptions(
       const cursiv::AstNode& node,
-      std::span<const cursiv::ValidationCategory* const>) const override {
+      const cursiv::ValidationOptions&) const override {
     ++optionsAsked;
     if (cancelOnOptions != nullptr) cancelOnOptions->request_stop();
     if (skipUnderPackage &&
@@ -337,7 +337,7 @@ void node_options_are_interruptible() {
   std::vector<cursiv::Diagnostic> diagnostics;
   CHECK(support::throws<cursiv::OperationCancelled>([&] {
     world.language->documentValidator->validateDocument(
-        *document, diagnostics, cancellation.get_token());
+        *document, diagnostics, {}, cancellation.get_token());
   }));
   CHECK(measured->optionsAsked == 1);
   CHECK(world.validator.everyNode == 0);
@@ -615,10 +615,10 @@ void a_provider_rewords_the_shapes_it_overrides() {
   const cursiv::Grammar& grammar = world.language->parser->getGrammar();
   for (const cursiv::ParseDiagnostic& d : document->parseResult.diagnostics) {
     std::string message = plain.buildMessage(grammar, d, text);
-    if (d.kind == cursiv::DiagnosticKind::deleted) {
+    if (d.kind == cursiv::DiagnosticKind::Deleted) {
       message = "skipped: " + message;
       ++skipped;
-    } else if (d.kind == cursiv::DiagnosticKind::inserted) {
+    } else if (d.kind == cursiv::DiagnosticKind::Inserted) {
       message = "missing: " + message;
       ++missing;
     }
@@ -636,6 +636,51 @@ void a_provider_rewords_the_shapes_it_overrides() {
   broken->parseResult.accepted = false;
   broken->parseResult.diagnostics.clear();
   CHECK(find_message(world.validate(*broken), "left over") != nullptr);
+}
+
+// Each part of the pass is a hook a language can take over: the walk around
+// the checks, and the repairs a recovered error offers.
+void the_validator_hooks_take_effect() {
+  struct Hooked final : cursiv::DefaultDocumentValidator {
+    using DefaultDocumentValidator::DefaultDocumentValidator;
+    mutable int before = 0;
+    mutable int nodes = 0;
+    mutable int after = 0;
+    mutable int repairs = 0;
+    void validateAstBefore(const cursiv::Document&, cursiv::ValidationAcceptor&,
+                           const cursiv::ValidationOptions&,
+                           const cursiv::CancellationToken&) const override {
+      ++before;
+    }
+    void validateAstNodes(const cursiv::Document&, cursiv::ValidationAcceptor&,
+                          const cursiv::ValidationOptions&,
+                          const cursiv::CancellationToken&) const override {
+      ++nodes;
+    }
+    void validateAstAfter(const cursiv::Document&, cursiv::ValidationAcceptor&,
+                          const cursiv::ValidationOptions&,
+                          const cursiv::CancellationToken&) const override {
+      ++after;
+    }
+    void attachRepairActions(const cursiv::Document&, cursiv::TextRange,
+                             const cursiv::ParseDiagnostic&,
+                             cursiv::Diagnostic&) const override {
+      ++repairs;
+    }
+  };
+  World world;
+  auto validator = std::make_unique<Hooked>(*world.language);
+  const Hooked& hooked = *validator;
+  world.language->documentValidator = std::move(validator);
+  world.registry->registerCheck(
+      Registry::makeValidationCheck<&TestValidator::onEntity>(world.validator));
+  const cursiv::Document* const document =
+      world.build("file:///a.ws", "datatype String\nentity A { x  String }\n",
+                  cursiv::BuildOptions{false, {}});
+  const std::vector<cursiv::Diagnostic> diagnostics = world.validate(*document);
+  CHECK(hooked.before == 1 && hooked.nodes == 1 && hooked.after == 1);
+  CHECK(hooked.repairs >= 1);
+  CHECK(find_message(diagnostics, "entity seen") == nullptr);
 }
 
 // The two stops: after a repaired parse, after a broken link -- each keeps
@@ -833,6 +878,9 @@ void a_document_broken_everywhere_stops_being_spelt() {
     if (!names_in(rows).empty()) ++spelt;
   CHECK(broken.size() == 70);
   CHECK(spelt == 64);
+  // The bound is on what one request is served: asked alone, the last site
+  // is spelt too.
+  CHECK(names_in(fixes_of(*document, *broken.back())).size() == 1);
 }
 
 // A work-bound note is no repair: with a clean tree the checks still run under
@@ -845,7 +893,7 @@ void a_bound_alone_is_no_parse_fault() {
   cursiv::Document* const document = world.build("file:///a.ws", text);
   CHECK(document->parseResult.diagnostics.empty());
   cursiv::ParseDiagnostic bound;
-  bound.kind = cursiv::DiagnosticKind::bounded;
+  bound.kind = cursiv::DiagnosticKind::Bounded;
   document->parseResult.diagnostics.push_back(bound);
   CHECK(find_message(
             world.validate(*document, {.stopAfterParsingErrors = true}),
@@ -1052,10 +1100,39 @@ void large_walk_keeps_its_diagnostics_without_workers() {
   }
 }
 
+// A refusal holds on a walk spread over workers as on a single one.
+void a_large_walk_honours_the_node_options() {
+  struct Check {
+    void onNode(const cursiv::AstNode& node,
+                cursiv::ValidationAcceptor& accept) const {
+      accept.hint(node, "seen");
+    }
+  } check;
+  std::string text = "datatype String\n";
+  for (std::size_t i = 0; i < 1024; ++i)
+    text += "entity E" + std::to_string(i) + " { x : String }\n";
+  for (const std::size_t workers : {0u, 4u}) {
+    World world;
+    world.shared.taskScheduler =
+        std::make_unique<cursiv::TaskScheduler>(workers);
+    auto validator = std::make_unique<SelectiveValidator>(*world.language);
+    validator->skipEntity = true;
+    validator->skipUnderEntity = true;
+    world.language->documentValidator = std::move(validator);
+    world.registry->registerCheck(
+        Registry::makeValidationCheck<&Check::onNode>(check));
+    const cursiv::Document* const document =
+        world.build("file:///large.ws", text, cursiv::BuildOptions{false, {}});
+    CHECK(world.validate(*document).size() == 2);  // the root and the type
+  }
+}
+
 }  // namespace
 
 void run() {
+  the_validator_hooks_take_effect();
   absent_categories_skip_the_node_walk();
+  a_large_walk_honours_the_node_options();
   node_options_are_interruptible();
   nested_pruning_preserves_checks_on_siblings();
   dispatch_follows_the_family_and_exact_stays_exact();
@@ -1210,7 +1287,7 @@ void deep_packages_name_their_types_at_every_level() {
   const auto document = disk.services.shared->documents->getDocument(kA);
   CHECK(document != nullptr);
   if (document == nullptr) return;
-  const auto* const root = document->parseResult.value_as<ws::ast::Workspace>();
+  const auto* const root = document->parseResult.valueAs<ws::ast::Workspace>();
   const auto* const entity =
       root == nullptr ? nullptr
                       : cursiv::ast_cast<ws::ast::Entity>(root->elements[0]);
@@ -1320,7 +1397,7 @@ struct Fixture {
     root.parent = &document;
     cursiv::ParseResult parsed(std::move(cst));
     parsed.value = &root;
-    parsed.bind_grammar(grammar);
+    parsed.bindGrammar(grammar);
     document.parseResult = std::move(parsed);
   }
 };
@@ -1340,12 +1417,12 @@ void indexed_anchors_reuse_their_collections() {
     Fixture fixture(pairs);
     cursiv::ValidationAcceptor accept(discard, fixture.document, "anchors");
     for (std::uint32_t i = 0; i < pairs; ++i) {
-      check_span(accept.featureSpan(fixture.first, "items", i), i, i + 1);
+      check_span(accept.propertySpan(fixture.first, "items", i), i, i + 1);
       check_span(accept.keywordSpan(fixture.first, "x", i), i * 2, i * 2 + 1);
     }
     CHECK(fixture.grammar.writes <= pairs * 4);
     CHECK(fixture.grammar.rules <= pairs * 2);
-    check_span(accept.featureSpan(fixture.first, "items", pairs * 4),
+    check_span(accept.propertySpan(fixture.first, "items", pairs * 4),
                pairs * 2 - 1, pairs * 2);
     check_span(accept.keywordSpan(fixture.first, "x", pairs * 4),
                pairs * 2 - 2, pairs * 2 - 1);
@@ -1357,17 +1434,17 @@ void cached_anchors_keep_their_name_and_kind() {
   const auto discard = [](cursiv::Diagnostic&&) {};
   cursiv::ValidationAcceptor accept(discard, fixture.document, "anchors");
   std::string name = "items";
-  check_span(accept.featureSpan(fixture.first, name, 1), 1, 2);
+  check_span(accept.propertySpan(fixture.first, name, 1), 1, 2);
   const auto calls = fixture.grammar.writes;
   name.assign("other");
-  check_span(accept.featureSpan(fixture.first, "items", 2), 2, 3);
+  check_span(accept.propertySpan(fixture.first, "items", 2), 2, 3);
   CHECK(fixture.grammar.writes == calls);
-  check_span(accept.featureSpan(fixture.first, "x", 1), 3, 4);
+  check_span(accept.propertySpan(fixture.first, "x", 1), 3, 4);
   check_span(accept.keywordSpan(fixture.first, "x", 1), 2, 3);
-  check_span(accept.featureSpan(fixture.first, "x", 0), 1, 2);
+  check_span(accept.propertySpan(fixture.first, "x", 0), 1, 2);
   check_span(accept.keywordSpan(fixture.first, "x", 0), 0, 1);
-  check_span(accept.featureSpan(fixture.first, "self", 1), 0, 1);
-  check_span(accept.featureSpan(fixture.first, "self", 0), 0, 16);
+  check_span(accept.propertySpan(fixture.first, "self", 1), 0, 1);
+  check_span(accept.propertySpan(fixture.first, "self", 0), 0, 16);
 }
 
 void switching_nodes_and_missing_anchors_preserve_ranges() {
@@ -1377,17 +1454,17 @@ void switching_nodes_and_missing_anchors_preserve_ranges() {
     diagnostics.push_back(std::move(diagnostic));
   };
   cursiv::ValidationAcceptor accept(collect, fixture.document, "anchors");
-  check_span(accept.featureSpan(fixture.first, "items", 1), 1, 2);
-  check_span(accept.featureSpan(fixture.second, "items", 1), 17, 18);
-  check_span(accept.featureSpan(fixture.first, "items", 1), 1, 2);
-  CHECK(!accept.featureSpan(fixture.first, "missing", 1).has_value());
+  check_span(accept.propertySpan(fixture.first, "items", 1), 1, 2);
+  check_span(accept.propertySpan(fixture.second, "items", 1), 17, 18);
+  check_span(accept.propertySpan(fixture.first, "items", 1), 1, 2);
+  CHECK(!accept.propertySpan(fixture.first, "missing", 1).has_value());
   const auto calls = fixture.grammar.writes;
-  CHECK(!accept.featureSpan(fixture.first, "missing", 5).has_value());
+  CHECK(!accept.propertySpan(fixture.first, "missing", 5).has_value());
   CHECK(fixture.grammar.writes == calls);
   CHECK(!accept.keywordSpan(fixture.first, "missing", 5).has_value());
   CHECK(!accept.keywordSpan(fixture.first, "missing", 0).has_value());
   cursiv::AstNode detached;
-  CHECK(!accept.featureSpan(detached, "items", 1).has_value());
+  CHECK(!accept.propertySpan(detached, "items", 1).has_value());
   CHECK(!accept.keywordSpan(detached, "x", 1).has_value());
   // A missing anchor keeps the range the builder had: the node's own, or the
   // one it was given.
@@ -1417,7 +1494,7 @@ void related_nodes_use_their_own_documents_cst() {
   const auto& related = diagnostics.front().relatedInformation.front();
   CHECK(related.uri == "file:///other");
   CHECK(related.range.begin == 16 && related.range.end == 32);
-  check_span(accept.featureSpan(target.second, "items", 1), 17, 18);
+  check_span(accept.propertySpan(target.second, "items", 1), 17, 18);
   check_span(accept.keywordSpan(target.second, "x", 1), 18, 19);
   accept.error(target.second, "foreign name").keyword("x");
   CHECK(diagnostics.back().range.begin == 16 &&
@@ -1430,9 +1507,9 @@ void anchor_caches_distinguish_documents_with_the_same_node_ids() {
   const auto discard = [](cursiv::Diagnostic&&) {};
   cursiv::ValidationAcceptor accept(discard, source.document, "anchors");
   CHECK(source.first.cstNodeId == target.first.cstNodeId);
-  check_span(accept.featureSpan(source.first, "items", 1), 1, 2);
+  check_span(accept.propertySpan(source.first, "items", 1), 1, 2);
   CHECK(target.grammar.writes == 0);
-  check_span(accept.featureSpan(target.first, "items", 1), 1, 2);
+  check_span(accept.propertySpan(target.first, "items", 1), 1, 2);
   CHECK(target.grammar.writes > 0);
 }
 
@@ -1584,7 +1661,7 @@ std::string deleted_over(std::string_view text, cursiv::TextOffset begin,
                          cursiv::TextOffset end, bool mixedIndent = false) {
   const auto engine = tmsg::generated::MessageG::create_parser();
   cursiv::ParseDiagnostic d;
-  d.kind = cursiv::DiagnosticKind::deleted;
+  d.kind = cursiv::DiagnosticKind::Deleted;
   d.mixedIndent = mixedIndent;
   d.begin = begin;
   d.end = end;
@@ -1596,7 +1673,7 @@ void a_tight_region_deletion_still_names_the_expectation() {
   const std::unique_ptr<cursiv::Parser> engine =
       tmsg::generated::MessageG::create_parser();
   const std::string message =
-      message_for(*engine, "[a ]", cursiv::DiagnosticKind::deleted);
+      message_for(*engine, "[a ]", cursiv::DiagnosticKind::Deleted);
   CHECK(!message.empty());
   CHECK(message != "Syntax error");
   CHECK(message == "Expecting ']'.");
@@ -1661,7 +1738,7 @@ void a_tab_and_space_mix_says_so() {
 void the_end_of_input_is_named_in_words() {
   const auto engine = tmsg::generated::MessageG::create_parser();
   cursiv::ParseDiagnostic d;
-  d.kind = cursiv::DiagnosticKind::inserted;
+  d.kind = cursiv::DiagnosticKind::Inserted;
   d.element = 0;
   CHECK(cursiv::DefaultParserErrorMessageProvider{}.buildMessage(
             engine->getGrammar(), d, "1;") == "Expecting end of input.");

@@ -1,8 +1,8 @@
 #pragma once
 
 // A category is an object whose address is its identity: `inline constexpr`
-// gives it one address program-wide. A check's return type is its category,
-// `void` meaning `fast`. The description is for display only, and may be null.
+// gives it one address program-wide. A check is filed under one when it is
+// registered, `fast` by default. The description is for display only.
 namespace cursiv {
 
 struct ValidationCategory {

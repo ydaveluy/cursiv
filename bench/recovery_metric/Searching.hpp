@@ -37,14 +37,14 @@ Ceilings ceilings(std::string_view text,
     // The predictive engine reports its work ceiling on the diagnostics;
     // the other counters describe the table engine's speculative machinery.
     for (const auto& d : result.diagnostics)
-      counts[2] += d.kind == cursiv::DiagnosticKind::bounded;
+      counts[2] += d.kind == cursiv::DiagnosticKind::Bounded;
   } else {
     cursiv::Cst cst;
     cursiv::engine::LrParseStats stats{};
     (void)cursiv::engine::lr_parser<Table>.parse(text, cst, &stats, &Drive,
                                                  budget);
     for (const auto& d : cst.diagnostics())
-      counts[2] += d.kind == cursiv::DiagnosticKind::bounded;
+      counts[2] += d.kind == cursiv::DiagnosticKind::Bounded;
     counts[0] = stats.searchStops;
     counts[1] = stats.lookStops;
     counts[3] = stats.reachStops;

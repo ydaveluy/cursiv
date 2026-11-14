@@ -19,7 +19,7 @@
 
 namespace cursiv {
 
-// Uses `References::findDeclaration`, as rename, references and highlight do,
+// Uses `References::findDeclarations`, as rename, references and highlight do,
 // so a caret resolves the same way for all four.
 std::optional<std::vector<lsp::LocationLink>>
 DefaultDefinitionProvider::getDefinition(const Document& document,
@@ -28,9 +28,9 @@ DefaultDefinitionProvider::getDefinition(const Document& document,
   throw_if_cancelled(token);
   if (!document.hasAst()) return std::nullopt;
 
-  const References& references = *_core.references;
+  const References& references = *services.references;
 
-  const Declaration found = references.findDeclaration(
+  const Declaration found = references.findDeclarations(
       document, document.textDocument().offsetAt(from_lsp(position)), token);
   if (!found) return std::nullopt;
   std::vector<lsp::LocationLink> links;
@@ -53,8 +53,7 @@ DefaultDefinitionProvider::getDefinition(const Document& document,
     const CstNodeView nameNode =
         language == nullptr
             ? CstNodeView{}
-            : language->nameProvider->getNameNode(*target, targetDocument)
-                  .value_or(CstNodeView{});
+            : language->nameProvider->getNameNode(*target, targetDocument);
 
     lsp::LocationLink link;
     link.targetUri = lsp::Uri::parse(targetDocument->uri);

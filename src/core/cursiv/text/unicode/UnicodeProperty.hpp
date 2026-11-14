@@ -49,7 +49,7 @@ enum class Property : unsigned {
   XID_Continue,
   White_Space,
   Alphabetic,
-  count
+  Count
 };
 
 namespace detail {

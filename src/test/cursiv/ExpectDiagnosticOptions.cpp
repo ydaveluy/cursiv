@@ -11,20 +11,20 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
+#include "cursiv/ExpectFunction.hpp"
+#include "cursiv/ExpectationError.hpp"
+#include "cursiv/RangeUtils.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/CstNodeView.hpp"
 #include "cursiv/syntax-tree/CstUtils.hpp"
+#include "cursiv/text/LspPosition.hpp"
 #include "cursiv/text/TextRange.hpp"
+#include "cursiv/utils/JsonValue.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/text/LspPosition.hpp"
-#include "cursiv/ExpectFunction.hpp"
-#include "cursiv/ExpectationError.hpp"
-#include "cursiv/RangeUtils.hpp"
 
 namespace cursiv::test {
 
@@ -43,10 +43,10 @@ std::optional<TextRange> anchorOf(const ValidationResult& result,
     const CstNode& own = cst[node.cstNodeId];
     return TextRange{own.begin, own.end};
   }
-  const std::optional<CstNodeView> at = find_node_for_feature(
+  const CstNodeView at = find_node_for_property(
       node, *options.property, options.propertyIndex.value_or(0), &document);
-  if (!at.has_value()) return std::nullopt;
-  return TextRange{at->begin(), at->end()};
+  if (!at) return std::nullopt;
+  return TextRange{at.begin(), at.end()};
 }
 
 }  // namespace

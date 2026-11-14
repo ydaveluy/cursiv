@@ -85,7 +85,7 @@ void reads(std::string_view src) {
   const cursiv::ParseResult r = engine().parse(src);
   CHECK(r.accepted);
   CHECK(static_cast<bool>(r) && r.diagnostics.empty());
-  auto* doc = r.value_as<ast::Doc>();
+  auto* doc = r.valueAs<ast::Doc>();
   CHECK(doc != nullptr && cursiv::ast_cast<Child>(doc->child) != nullptr);
 }
 
@@ -819,7 +819,7 @@ void nested(const cursiv::Parser& parser, std::string_view operand, bool type) {
   const auto result = parser.parse(text);
   CHECK(result.accepted && result.diagnostics.empty());
   CHECK(!result.cst().recovered());
-  const auto* doc = result.value_as<tdeferred::Doc>();
+  const auto* doc = result.valueAs<tdeferred::Doc>();
   CHECK(doc != nullptr);
   const auto* quant =
       doc ? cursiv::ast_cast<tdeferred::Quant>(doc->value) : nullptr;

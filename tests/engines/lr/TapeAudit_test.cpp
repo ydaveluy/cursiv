@@ -103,9 +103,9 @@ void say(const std::string& lang, const std::string& text) {
 // Whether the run is a forest.
 bool forest(const cursiv::ParseResult& r) {
   const cursiv::Cst& cst = r.cst();
-  if (!r.accepted || !cst.has_entry() || cst.entry_root() >= cst.size())
+  if (!r.accepted || !cst.hasEntry() || cst.entryRoot() >= cst.size())
     return false;
-  const cursiv::NodeId root = cst.entry_root();
+  const cursiv::NodeId root = cst.entryRoot();
   const cursiv::NodeId lo = root + 1 - cst[root].subtreeSize;
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
     if (i >= lo && i <= root) continue;
@@ -179,7 +179,7 @@ void run() {
                           const cursiv::AstNode* v) {
     std::string s;
     if (v == nullptr) return std::string("<no ast>");
-    refl.visitMembers(
+    refl.visitProperties(
         *v, [&](std::string_view, std::uint32_t, cursiv::AstNode& child) {
           s += refl.getTypeMetaData(child.type).name;
           s += ' ';

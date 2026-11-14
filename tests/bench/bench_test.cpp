@@ -177,13 +177,12 @@ class WithoutReferences final : public cursiv::Parser {
   std::unique_ptr<const cursiv::Parser> parser_;
 };
 
-bool register_language(cursiv::SharedCoreServices& shared) {
+void register_language(cursiv::SharedCoreServices& shared) {
   auto services = ws::create_lsp_services(
       dynamic_cast<ws::WorkspaceSharedServices&>(shared));
   services->parser =
       std::make_unique<WithoutReferences>(std::move(services->parser));
   shared.serviceRegistry->registerServices(std::move(services));
-  return true;
 }
 
 void a_parser_without_references_counts_none() {

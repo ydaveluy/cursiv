@@ -39,15 +39,15 @@ void install_core_module(MyLangCoreServices& services) {
 }
 ```
 
-Replace editor providers the same way in `install_lsp_module`, after
-`cursiv::install_default_lsp_services(services)`.
+Replace editor providers the same way in `install_lsp_module`: the defaults
+are installed before it runs.
 
 Replace shared services in the function that registers your languages
 (`register_lsp_services` in the scaffold). It runs after the shared defaults
 are installed:
 
 ```cpp title="lsp/LspModule.cpp"
-bool register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
+void register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
   auto& shared = dynamic_cast<MyLangSharedServices&>(sharedServices);
   shared.executeCommandHandler = std::make_unique<MyCommandHandler>();
   // ...then create and register the language services, as the scaffold does.

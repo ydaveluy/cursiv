@@ -70,29 +70,30 @@ class DocumentBuilder {
   virtual void addDocumentUpdateListener(DocumentUpdateListener&) = 0;
   virtual void removeDocumentUpdateListener(DocumentUpdateListener&) = 0;
 
-  // Options are remembered per document; a request a cancelled build left
-  // unfinished is kept until a build ends it. `Validated` means validated for
+  // Options are remembered per document, and replace what an earlier build
+  // asked of a document not yet validated. `Validated` means validated for
   // the categories asked so far: a wider request runs only the missing ones.
   virtual void build(std::span<Document* const>, const BuildOptions& = {},
-                     const CancellationToken& = {}) const = 0;
+                     const CancellationToken& = {}) = 0;
 
   // Applies the changes, then builds: the token cuts the build, never the
   // changes. A changed target or export resets its dependants and unresolved
   // references are retried (`isAffected`), all before readers are let in.
   virtual void update(std::span<const std::string_view> changed,
                       std::span<const std::string_view> deleted,
-                      const CancellationToken& = {}) const = 0;
+                      const CancellationToken& = {}) = 0;
 
-  // What a changed document is rebuilt with: `built_in` and `fast` unless set
-  // otherwise here. Every other document keeps its own request.
+  // What an update asks of every document it builds: `built_in` and `fast`
+  // unless set otherwise here. A request a cancelled build left unfinished is
+  // finished first.
   [[nodiscard]] virtual BuildOptions& updateBuildOptions() noexcept = 0;
   [[nodiscard]] virtual const BuildOptions& updateBuildOptions()
       const noexcept = 0;
 
-  // Going back to state k undoes k+1, k+2, ... up to the last. Back to
-  // `Changed`, the tree goes, and every document with a
-  // reference into it goes back to `ComputedScopes` first.
-  virtual void resetToState(Document&, DocumentState) const = 0;
+  // Undoes every state above the one given. Back to `Changed`, the tree goes,
+  // and every document with a reference into it goes back to `ComputedScopes`
+  // first. Throws `std::logic_error` once its write has built.
+  virtual void resetToState(Document&, DocumentState) = 0;
 
   // Waits for a state, not a build; `Unreachable` when the document cannot get
   // there. A cancelled build answers nothing, so pass a token when no further

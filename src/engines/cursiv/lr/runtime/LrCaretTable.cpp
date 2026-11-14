@@ -44,7 +44,7 @@ namespace {
 CstLeaf read_leaf_before(const Cst& cst, StampLayout stamp, NodeId& behind,
                          bool* skipped) {
   while (behind > 0) {
-    const CstLeaf leaf = cst.as_leaf(behind = cst.leaf_before(behind));
+    const CstLeaf leaf = cst.asLeaf(behind = cst.leafBefore(behind));
     const bool gaveup = leaf.recovered && stamp.state(cst[leaf.id]) == 0;
     if (gaveup && skipped != nullptr) *skipped = true;
     if (leaf.hidden) continue;
@@ -1920,7 +1920,7 @@ class CaretReplay {
     for (std::size_t i = events.size(); i-- > 0;)
       _jobs.emplace_back(events[i], 0, false);
     // The replay starts past the nearest record it can start from.
-    for (NodeId r = prefix; r > 0; r = _cst.subtree_begin(r - 1)) {
+    for (NodeId r = prefix; r > 0; r = _cst.subtreeBegin(r - 1)) {
       _stop.poll();
       if (r != prefix && starts_after(r - 1)) break;
       _jobs.emplace_back(r - 1, 0, false);
@@ -1971,7 +1971,7 @@ class CaretReplay {
       _states.push_back(s);
     }
     std::ranges::reverse(_states);
-    _stacks.seed(_states, n.end, token_end(id, _cst.subtree_begin(id)));
+    _stacks.seed(_states, n.end, token_end(id, _cst.subtreeBegin(id)));
     _gathered = id + 1;
     return true;
   }
@@ -2000,7 +2000,7 @@ class CaretReplay {
     for (; _gathered <= id; ++_gathered)
       if (_cst[_gathered].recovered) _repairs.push_back(_gathered);
     if (const auto it =
-            std::ranges::lower_bound(_repairs, _cst.subtree_begin(id));
+            std::ranges::lower_bound(_repairs, _cst.subtreeBegin(id));
         it != _repairs.end() && *it <= id)
       return false;
     const NodeId k = token_after(id);
@@ -2039,7 +2039,7 @@ class CaretReplay {
                _stacks.keeps_tape(_cst, job.id)) {
       const auto row = _table.stamp.row(n);
       const auto lhs = _table.row_lhs(row);
-      NodeId f = _cst.subtree_begin(job.id);
+      NodeId f = _cst.subtreeBegin(job.id);
       while (f < job.id && _cst[f].hidden) ++f;
       const CstNode& t = _cst[f];
       const auto first = _table.stamp.state(t);
@@ -2057,7 +2057,7 @@ class CaretReplay {
         }
       }
     }
-    for (const NodeId child : _cst.reverse_children(job.id))
+    for (const NodeId child : _cst.reverseChildren(job.id))
       _jobs.emplace_back(child, 0, false);
     return true;
   }
@@ -2108,7 +2108,7 @@ TextOffset jump_horizon(const LrCaretTable& table, const Cst& cst,
   if (!table.chooses) return static_cast<TextOffset>(cst.text().size());
   unsigned seen = 0;
   for (NodeId r = last + 1; r > 0;) {
-    const CstLeaf l = cst.as_leaf(r = cst.leaf_before(r));
+    const CstLeaf l = cst.asLeaf(r = cst.leafBefore(r));
     if (l.hidden || l.begin == l.end) continue;
     if (++seen == kLrLookBudget + 2u) return l.end;
   }
@@ -2122,7 +2122,7 @@ void step_before_invented(const LrCaretTable& table, const Cst& cst,
                           const CancellationToken& cancelToken) {
   const std::string_view text = cst.text();
   for (NodeId k = leaf ? leaf.id + 1 : 0; k > 0;) {
-    const CstLeaf l = cst.as_leaf(k = cst.leaf_before(k));
+    const CstLeaf l = cst.asLeaf(k = cst.leafBefore(k));
     if (l.recovered) {
       if (l.begin != l.end || table.stamp.state(cst[l.id]) == 0) return;
       NodeId behind = k;
@@ -2161,7 +2161,7 @@ void lr_next_features_at(const LrCaretTable& table,
                          std::vector<NextFeature>& out,
                          const CancellationToken& cancelToken) {
   if (!StampedGrammar::caret_in(cst, at, resume)) return;
-  NodeId behind = cst.leaf_after(at);
+  NodeId behind = cst.leafAfter(at);
   CstLeaf leaf = read_leaf_before(cst, table.stamp, behind, nullptr);
   step_before_invented(table, cst, at, leaf, cancelToken);
   const std::string_view text = cst.text();
@@ -2355,8 +2355,8 @@ void lr_next_features_at(const LrCaretTable& table,
                      cancelToken);
   if (!replay.run(prefix, events)) return;
   if (attached) stacks.name_readings(leafTerm);
-  const NodeId held = cst.leaf_after(at);
-  stacks.indentation(at, held > 0 ? cst[cst.leaf_before(held)].end : 0);
+  const NodeId held = cst.leafAfter(at);
+  stacks.indentation(at, held > 0 ? cst[cst.leafBefore(held)].end : 0);
   // A comment that ends at the caret and closes on nothing goes on over what is
   // typed: `//` then `entity` is one comment. A candidate is offered where the
   // comment, read again with it behind, still ends here.
@@ -2364,7 +2364,7 @@ void lr_next_features_at(const LrCaretTable& table,
   const std::uint16_t commentMode = table.mode[shifted];
   CstLeaf before{};
   for (NodeId behind = held; behind > 0 && before.begin == before.end;)
-    before = cst.as_leaf(behind = cst.leaf_before(behind));
+    before = cst.asLeaf(behind = cst.leafBefore(behind));
   if (before.begin == before.end) before = {};
   if (before.hidden && !before.recovered && before.end == at) {
     TextOffset halt = 0;

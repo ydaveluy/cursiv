@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -17,18 +16,24 @@ namespace cursiv {
 struct AstNode;
 struct Document;
 
-// The records of `node`'s own construction that write `feature`, in
+// The record `node` was built from: the first record of its own
+// construction. An empty view for a node no document holds, or one whose
+// record that tree does not have.
+[[nodiscard]] CstNodeView cst_node_of(const AstNode& node,
+                                      const Document* document = nullptr);
+
+// The records of `node`'s own construction that write `property`, in
 // document order. A record that opens a node of its own ends the search down
 // that branch. Empty for a tree that names no grammar.
-[[nodiscard]] std::vector<CstNodeView> find_nodes_for_feature(
-    const AstNode& node, std::string_view feature,
+[[nodiscard]] std::vector<CstNodeView> find_nodes_for_property(
+    const AstNode& node, std::string_view property,
     const Document* document = nullptr);
 
 // The `index`-th in source order, clamped to the last one written -- a list
-// member is what the index is for. Nothing only when the member was never
-// written at all.
-[[nodiscard]] std::optional<CstNodeView> find_node_for_feature(
-    const AstNode& node, std::string_view feature, std::size_t index = 0,
+// member is what the index is for. An empty view only when the member was
+// never written at all.
+[[nodiscard]] CstNodeView find_node_for_property(
+    const AstNode& node, std::string_view property, std::size_t index = 0,
     const Document* document = nullptr);
 
 // Every visible record of `node`'s own construction that spells `keyword`
@@ -38,7 +43,7 @@ struct Document;
     const AstNode& node, std::string_view keyword,
     const Document* document = nullptr);
 
-[[nodiscard]] std::optional<CstNodeView> find_node_for_keyword(
+[[nodiscard]] CstNodeView find_node_for_keyword(
     const AstNode& node, std::string_view keyword, std::size_t index = 0,
     const Document* document = nullptr);
 

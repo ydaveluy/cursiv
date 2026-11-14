@@ -18,15 +18,11 @@ class LspDocumentBuilder : public DefaultDocumentBuilder {
   explicit LspDocumentBuilder(SharedLspServices& shared);
 
  protected:
-  void prepareBuild(std::span<Document* const>,
-                    const BuildOptions&) const override;
-  void buildDocuments(std::span<Document* const>,
-                      const CancellationToken&) const override;
+  // The client's `validation` setting of the language, when it has one.
+  [[nodiscard]] BuildOptions updateBuildOptionsFor(
+      const CoreServices& language) const override;
 
  private:
-  // `updateBuildOptions` when the document's language has no configuration.
-  [[nodiscard]] BuildOptions configuredBuildOptions(const Document&) const;
-
   SharedLspServices& _lsp;
 };
 

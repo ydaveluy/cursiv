@@ -33,9 +33,8 @@ namespace cursiv::engine {
 template <const auto& A>
 class LrLanguageParser final : public Parser {
  public:
-  LrLanguageParser(const detail::GrammarMetaData& grammar,
-                   const AstActions& actions, const LrDrive& drive,
-                   const RepairBudget& budget = {})
+  LrLanguageParser(const GrammarMetaData& grammar, const AstActions& actions,
+                   const LrDrive& drive, const RepairBudget& budget = {})
       : _grammar(std::make_shared<StampedGrammar>(grammar, A.stamp)),
         _actions(&actions),
         _drive(&drive),
@@ -56,9 +55,9 @@ class LrLanguageParser final : public Parser {
       const CancellationToken& cancelToken = kNoCancel) const override {
     Cst cst;
     lr_parser<A>.parse(text, cst, nullptr, _drive, _budget, cancelToken);
-    ParseResult out =
-        AstReducer::build<A.stamp>(*_actions, std::move(cst), cancelToken);
-    out.bind_grammar(_grammar);
+    ParseResult out = AstReducer::build<A.stamp>(*_actions, std::move(cst),
+                                                 cancelToken, _grammar.get());
+    out.bindGrammar(_grammar);
     return out;
   }
 

@@ -12,7 +12,6 @@
 #include "cursiv/documentation/DocComment.hpp"
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
@@ -70,18 +69,14 @@ DefaultDocumentationProvider::documentationLinkRenderer(
   }
 
   // The target document may belong to another language: ask its name provider.
-  const CoreServices* const language =
-      target->language != nullptr
-          ? target->language
-          : shared.serviceRegistry->findServices(
-                target->uri, target->textDocument().languageId());
+  const CoreServices* const language = target->language;
   if (language == nullptr) return std::nullopt;
-  const std::optional<CstNodeView> site =
+  const CstNodeView site =
       language->nameProvider->getNameNode(*description->node, target);
   if (!site) return std::nullopt;
 
   // 1-based, lines and columns both.
-  const Position at = target->textDocument().positionAt(site->begin());
+  const Position at = target->textDocument().positionAt(site.begin());
   const std::string_view uri(target->uri);
   return std::format("[{}]({})", display,
                      normalize_uri(std::format("{}#L{},{}",
@@ -102,12 +97,12 @@ std::optional<AstNodeDescription>
 DefaultDocumentationProvider::findNameInLocalSymbols(
     const AstNode& node, const Document& document,
     std::string_view name) const {
-  const std::uint64_t hash = LocalSymbols::hash_name(name);
+  const std::uint64_t hash = LocalSymbols::hashName(name);
   const LocalSymbols& symbols = document.localSymbols;
   std::optional<AstNodeDescription> found;
   symbols.walkScopes(&node, &document, [&](const AstNode* scope) {
     symbols.find(scope, name, hash)
-        .for_each([&](const AstNodeDescription& entry) {
+        .forEach([&](const AstNodeDescription& entry) {
           if (entry.name != name) return true;
           found = entry;
           return false;

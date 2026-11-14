@@ -58,7 +58,7 @@ struct Case {
 void expect_tree(const cursiv::Parser& parser, const Case& c) {
   const auto parsed = parser.parse(c.text);
   CHECK(parsed.accepted && parsed.diagnostics.empty());
-  const auto* document = parsed.value_as<Document>();
+  const auto* document = parsed.valueAs<Document>();
   CHECK(document != nullptr && document->parent == nullptr);
   if (document == nullptr) return;
   std::string actual, spans;
@@ -76,7 +76,7 @@ void expect_tree(const cursiv::Parser& parser, const Case& c) {
 
 void typed_payload_survives_the_rewrite(const cursiv::Parser& parser) {
   const auto arithmetic = parser.parse("1+2*3");
-  const auto* doc = arithmetic.value_as<Document>();
+  const auto* doc = arithmetic.valueAs<Document>();
   CHECK(doc != nullptr && doc->values.size() == 1);
   if (doc != nullptr && doc->values.size() == 1) {
     const auto* sum = cursiv::ast_cast<Binary>(doc->values[0]);
@@ -97,7 +97,7 @@ void typed_payload_survives_the_rewrite(const cursiv::Parser& parser) {
 
   for (const std::string_view text : {"id*", "*id"}) {
     const auto result = parser.parse(text);
-    const auto* root = result.value_as<Document>();
+    const auto* root = result.valueAs<Document>();
     CHECK(root != nullptr && root->values.size() == 1);
     if (root == nullptr || root->values.size() != 1) continue;
     const auto* glob = cursiv::ast_cast<Glob>(root->values[0]);
@@ -110,7 +110,7 @@ void typed_payload_survives_the_rewrite(const cursiv::Parser& parser) {
   }
 
   const auto wrapped = parser.parse("1!!");
-  const auto* root = wrapped.value_as<Document>();
+  const auto* root = wrapped.valueAs<Document>();
   CHECK(root != nullptr && root->values.size() == 1);
   if (root == nullptr || root->values.size() != 1) return;
   const auto* outer = cursiv::ast_cast<Wrapped>(root->values[0]);

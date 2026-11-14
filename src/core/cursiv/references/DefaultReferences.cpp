@@ -12,7 +12,6 @@
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/references/References.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
@@ -30,14 +29,6 @@
 namespace cursiv {
 
 namespace {
-
-const CoreServices* language_of(const Document& document,
-                                const ServiceRegistry& registry) {
-  return document.language != nullptr
-             ? document.language
-             : registry.findServices(document.uri,
-                                     document.textDocument().languageId());
-}
 
 // What a reference under the caret denotes: its name's span and every target.
 // The narrowest enclosing span wins, whatever the work list order. A name that
@@ -74,9 +65,9 @@ const CoreServices* language_of(const Document& document,
 [[nodiscard]] const AstNode* node_at(const Document& document,
                                      TextOffset offset) {
   const Cst& cst = document.parseResult.cst();
-  const NodeId after = cst.leaf_after(offset);
+  const NodeId after = cst.leafAfter(offset);
   if (after == cst.size()) return nullptr;
-  const CstLeaf leaf = cst.as_leaf(after);
+  const CstLeaf leaf = cst.asLeaf(after);
   if (leaf.begin > offset) return nullptr;
   return owner_of_leaf(cst, leaf.id);
 }
@@ -97,9 +88,8 @@ struct RowHash {
                                            const Document& document,
                                            const NameProvider* names) {
   if (names != nullptr)
-    if (const std::optional<CstNodeView> name =
-            names->getNameNode(node, &document))
-      return *name;
+    if (const CstNodeView name = names->getNameNode(node, &document))
+      return name;
   const Cst& cst = document.parseResult.cst();
   if (node.cstNodeId == kNoNode || node.cstNodeId >= cst.size()) return {};
   return CstNodeView{&cst, node.cstNodeId};
@@ -121,14 +111,13 @@ Declaration DefaultReferences::at(const Document& document, TextOffset offset,
   Declaration found;
   const AstNode* const node = node_at(document, offset);
   if (node == nullptr) return found;
-  const CoreServices* const language =
-      language_of(document, *shared.serviceRegistry);
+  const CoreServices* const language = document.language;
   if (language == nullptr) return found;
-  const std::optional<CstNodeView> name =
+  const CstNodeView name =
       language->nameProvider->getNameNode(*node, &document);
-  if (!name || offset < name->begin() || offset >= name->end()) return found;
+  if (!name || offset < name.begin() || offset >= name.end()) return found;
 
-  found.span = TextRange{name->begin(), name->end()};
+  found.span = TextRange{name.begin(), name.end()};
   // The group, not the member: a declaration a multi reference targets stands
   // for its whole overload set, whichever member the caret sat on.
   found.targets = getSelfNodes(*node, cancelToken);
@@ -184,15 +173,13 @@ std::vector<ReferenceDescription> DefaultReferences::getSelfReferences(
   std::vector<ReferenceDescription> rows;
   // Hashed, not scanned: a group may hold thousands of members.
   std::unordered_set<ReferenceDescription, RowHash> drawn;
-  const ServiceRegistry& registry = *shared.serviceRegistry;
   for (const AstNode* const member : getSelfNodes(node, cancelToken)) {
     throw_if_cancelled(cancelToken);
     const Document* const declaringDocument = member->getDocument();
     if (declaringDocument == nullptr || member->cstNodeId == kNoNode) continue;
     // The name node comes from the language that built the member, not from
     // the one that referenced it.
-    const CoreServices* const language =
-        language_of(*declaringDocument, registry);
+    const CoreServices* const language = declaringDocument->language;
     const NameProvider* const names =
         language == nullptr ? nullptr : language->nameProvider.get();
     const CstNodeView site =
@@ -211,7 +198,7 @@ std::vector<ReferenceDescription> DefaultReferences::getSelfReferences(
   return rows;
 }
 
-Declaration DefaultReferences::findDeclaration(
+Declaration DefaultReferences::findDeclarations(
     const Document& document, TextOffset offset,
     const CancellationToken& cancelToken) const {
   throw_if_cancelled(cancelToken);

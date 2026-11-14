@@ -115,7 +115,7 @@ bool each_part_below(AstBuildCtx& ctx, NodeId id, Visit&& visit) {
   const Cst& cst = *ctx.cst;
   SmallRun<NodeId, 16> pending;
   const auto open = [&](NodeId at) {
-    for (const NodeId c : cst.reverse_children(at)) pending.push_back(c);
+    for (const NodeId c : cst.reverseChildren(at)) pending.push_back(c);
   };
   open(id);
   while (!pending.empty()) {
@@ -323,11 +323,47 @@ CURSIV_COLD bool never_written(const AstBuildCtx& ctx, NodeId id) {
   };
   if (invented(id)) return true;
   if constexpr (Data)
-    for (NodeId i = cst.subtree_begin(id); i < id; ++i) {
+    for (NodeId i = cst.subtreeBegin(id); i < id; ++i) {
       ctx.stop.poll();
       if (invented(i) && !dropped_token(ctx, cst[i])) return true;
     }
   return false;
+}
+
+// The enumerator a payload names up to case, when the grammar reads each of
+// its words in any case: `PRIV` is `Vis::priv` where `priv` is such a word.
+// Two enumerators that fold alike answer neither.
+template <class A, bool Data, bool Text, bool Base, int... I>
+CURSIV_COLD CURSIV_NOINLINE bool folded_enumerator(
+    AstBuildCtx& ctx, NodeId id, std::string_view text, A& out,
+    std::integer_sequence<int, I...>) {
+  const auto parts = payload_parts<Data, Text, Base>(ctx, id);
+  if (ctx.grammar == nullptr || !parts) return false;
+  for (const std::string_view part : as_parts(*parts))
+    if (!ctx.grammar->spellingFolds(part)) return false;
+  // A probed value may wrap onto an enumerator already seen.
+  bool found = false;
+  bool ambiguous = false;
+  const auto take = [&](int value, std::string_view name) {
+    if (name.empty() || !folded_equal(name, text)) return;
+    const A named = static_cast<A>(value);
+    ambiguous = ambiguous || (found && named != out);
+    out = named;
+    found = true;
+  };
+  (take(I + kEnumProbeMin, probed_name<A, I>()), ...);
+  return found && !ambiguous;
+}
+
+// The default conversion of an enum member, with that second reading.
+template <class A, bool Data, bool Text, bool Base>
+CURSIV_ALWAYS_INLINE inline ConversionResult<A> or_folded_enumerator(
+    AstBuildCtx& ctx, NodeId id, std::string_view text,
+    ConversionResult<A> converted) {
+  if (A named{}; !converted && folded_enumerator<A, Data, Text, Base>(
+                                   ctx, id, text, named, enum_probes{}))
+    return ConversionResult<A>::ok(named);
+  return converted;
 }
 
 // How a converter's answer is taken: a positioned result that failed has said
@@ -386,7 +422,7 @@ bool pass_value(AstBuildCtx& ctx, NodeId id, std::optional<T>& out) {
         slot != nullptr && slot->fn != nullptr)
       return slot->type == &value_tag<T> && slot->fn(ctx, at, &out);
     NodeId only = kNoNode;
-    for (const NodeId child : cst.reverse_children(at)) {
+    for (const NodeId child : cst.reverseChildren(at)) {
       if (const CstNode& n = cst[child]; n.hidden || dropped_token(ctx, n))
         continue;
       if (only != kNoNode) return false;
@@ -441,8 +477,20 @@ CURSIV_ALWAYS_INLINE inline bool convert_payload(AstBuildCtx& ctx, NodeId id,
     if (!pass_value(ctx, id, value)) return false;
     store(*std::move(value));
     return true;
+  } else if constexpr (std::is_enum_v<A> &&
+                       std::is_same_v<CR, default_converter<A>>) {
+    const auto text = payload_text<Data, Text, Base>(ctx, id);
+    return text && take_conversion(ctx, id,
+                                   or_folded_enumerator<A, Data, Text, Base>(
+                                       ctx, id, *text, CR::convert(*text)),
+                                   store);
   } else if constexpr (!std::is_void_v<CR>) {
     return convert_with<CR>(
+        ctx, id, [&] { return payload_parts<Data, Text, Base>(ctx, id); },
+        [&] { return payload_text<Data, Text, Base>(ctx, id); }, store);
+  } else if constexpr (written_converter<A>()) {
+    // A converter a language wrote for the member's type, built-in or not.
+    return convert_with<default_converter<A>>(
         ctx, id, [&] { return payload_parts<Data, Text, Base>(ctx, id); },
         [&] { return payload_text<Data, Text, Base>(ctx, id); }, store);
   } else {
@@ -470,7 +518,13 @@ CURSIV_ALWAYS_INLINE inline bool convert_payload(AstBuildCtx& ctx, NodeId id,
             return true;
           }
         }
-        return take_conversion(ctx, id, default_convert<A>(text), store);
+        if constexpr (std::is_enum_v<A>)
+          return take_conversion(ctx, id,
+                                 or_folded_enumerator<A, Data, Text, Base>(
+                                     ctx, id, text, default_convert<A>(text)),
+                                 store);
+        else
+          return take_conversion(ctx, id, default_convert<A>(text), store);
       }
     };
     // One token's text is never absent, and a view passed on is held in

@@ -57,12 +57,13 @@
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/services/AbstractExecuteCommandHandler.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/services/ExecuteCommandHandler.hpp"
 #include "cursiv/services/LspServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/services/SharedLspServices.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/DefaultAstReflection.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/text/LspPosition.hpp"
@@ -751,7 +752,16 @@ void virtual_content_waits_for_the_workspace_scan(bool withFolders) {
     DeferredWorkspace(cursiv::SharedCoreServices& shared,
                       std::shared_future<void> ready)
         : DefaultWorkspaceManager(shared), loaded(std::move(ready)) {}
-    std::shared_future<void> ready() const override { return loaded; }
+    bool isReady() const noexcept override {
+      return loaded.wait_for(std::chrono::seconds(0)) ==
+             std::future_status::ready;
+    }
+    bool waitUntilReady(const cursiv::CancellationToken& token) const override {
+      while (loaded.wait_for(std::chrono::milliseconds(1)) !=
+             std::future_status::ready)
+        if (token.stop_requested()) return false;
+      return true;
+    }
   };
   World world;
   std::promise<void> loaded;
@@ -1189,7 +1199,7 @@ void an_update_always_reaches_a_build() {
     mutable bool refusalAhead = false;
     void update(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted,
-                const cursiv::CancellationToken& token) const override {
+                const cursiv::CancellationToken& token) override {
       ++updates;
       refusalAhead = refuseAfter >= 0;
       LspDocumentBuilder::update(changed, deleted, token);
@@ -1261,7 +1271,7 @@ void a_failed_build_is_shown_once_until_one_succeeds() {
     mutable bool cancels = false;
     void update(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted,
-                const cursiv::CancellationToken& token) const override {
+                const cursiv::CancellationToken& token) override {
       if (fails) throw std::runtime_error("out of room");
       if (cancels) cursiv::OperationCancelled::raise();
       LspDocumentBuilder::update(changed, deleted, token);
@@ -3392,9 +3402,8 @@ namespace language_server_main {
 
 namespace {
 
-bool register_workspace(cursiv::SharedLspServices& shared) {
+void register_workspace(cursiv::SharedLspServices& shared) {
   (void)support::add_workspace<cursiv::LspServices>(shared);
-  return true;
 }
 
 // `a.ws` declares a type; `sub/b.ws` asks for one at its caret.
@@ -3630,7 +3639,7 @@ void a_tape_is_declined_and_not_answered_from_the_start_state() {
     builder.leaf(6, 7, cursiv::kNoElement);
     builder.exit(all, 0, cursiv::kNoElement);
   }
-  CHECK(!tape.engine_stamped());
+  CHECK(!tape.engineStamped());
   CHECK(tape.grammar() == nullptr);
   std::vector<cursiv::NextFeature> out;
   const std::unique_ptr<cursiv::Parser> engine =
@@ -3642,7 +3651,7 @@ void a_tape_is_declined_and_not_answered_from_the_start_state() {
   namespace g = fdoc::generated::DocG;
   cursiv::Cst stream;
   cursiv::engine::lr_parser<g::kTable>.parse(text, stream, nullptr, &g::kDrive);
-  CHECK(stream.engine_stamped());
+  CHECK(stream.engineStamped());
   CHECK(stream.grammar() ==
         nullptr);  // the engine wrote it, no parser finished it
   engine->nextFeaturesAt(stream, 5, 5, out);
@@ -3677,7 +3686,7 @@ void a_stamp_past_the_table_is_declined() {
       builder.leaf(6, 7, at);
       builder.exit(all, 0, at);
     }
-    CHECK(tape.engine_stamped());
+    CHECK(tape.engineStamped());
     std::vector<cursiv::NextFeature> out;
     engine->nextFeaturesAt(tape, 5, 5, out);
     return out.size();
@@ -3707,11 +3716,13 @@ void a_language_with_no_provider_misses_no_slot() {
 // A grammar that declares no reference keeps no reference tables: every
 // member answers as no reference, and no lookup finds one.
 void a_grammar_without_references_answers_none() {
-  const std::unique_ptr<cursiv::AstReflection> reflection =
+  const std::unique_ptr<cursiv::AstReflection> made =
       fdoc::generated::DocG::create_ast_reflection();
+  const auto* const reflection =
+      static_cast<const cursiv::DefaultAstReflection*>(made.get());
   CHECK(!reflection->hasMultiReference());
   std::uint16_t fields = 0;
-  for (; !reflection->fieldName(fields).empty(); ++fields) {
+  for (; !reflection->propertyName(fields).empty(); ++fields) {
     CHECK(!reflection->isMultiReference(fields));
     CHECK(reflection->referenceNarrowTarget(fields, 0) == nullptr);
     CHECK(reflection->referenceAccepts(fields).empty());
@@ -3720,7 +3731,7 @@ void a_grammar_without_references_answers_none() {
   for (const cursiv::AstTypeTag* const type : reflection->getAllTypes()) {
     CHECK(reflection->referenceIndexOf(type) == cursiv::kNoReference);
     for (std::uint16_t f = 0; f < fields; ++f)
-      CHECK(reflection->referenceIndexOf(type, reflection->fieldName(f)) ==
+      CHECK(reflection->referenceIndexOf(type, reflection->propertyName(f)) ==
             cursiv::kNoReference);
   }
 }

@@ -37,6 +37,6 @@ RequirementsCoreLanguage create_core_services(
 
 // Both, in one call: a binary that served one would refuse half its own
 // example -- a `.tst` names the requirements of the `.req` beside it.
-bool register_core_services(cursiv::SharedCoreServices& sharedServices);
+void register_core_services(cursiv::SharedCoreServices& sharedServices);
 
 }  // namespace req

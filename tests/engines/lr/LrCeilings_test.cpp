@@ -739,8 +739,8 @@ void a_cut_span_is_said_behind_the_fault_before_it() {
   const auto& found = cst.diagnostics();
   CHECK(found.size() > 1);
   if (found.size() < 2) return;
-  CHECK(found[0].kind == cursiv::DiagnosticKind::deleted);
-  CHECK(found[1].kind == cursiv::DiagnosticKind::bounded);
+  CHECK(found[0].kind == cursiv::DiagnosticKind::Deleted);
+  CHECK(found[1].kind == cursiv::DiagnosticKind::Bounded);
   for (std::size_t i = 1; i < found.size(); ++i)
     CHECK(found[i - 1].end <= found[i].end);
 }
@@ -755,7 +755,7 @@ void a_deep_nest_binds_each_else_to_the_nearest_if() {
   for (unsigned i = 0; i != kElses; ++i) text += " else e" + std::to_string(i);
   const auto result = deep::create_parser()->parse(text);
   CHECK(result.accepted && result.diagnostics.empty());
-  const auto* stmt = result.value_as<tdang::ast::Stmt>();
+  const auto* stmt = result.valueAs<tdang::ast::Stmt>();
   for (unsigned level = 0; level != kIfs; ++level) {
     CHECK(stmt != nullptr);
     if (stmt == nullptr) return;
@@ -797,7 +797,7 @@ void run() {
     const std::string input = second ? text + "!" : text;
     const auto result = parser->parse(input);
     CHECK(result.accepted && result.diagnostics.empty());
-    const auto* node = result.value_as<trankgrowth::Node>();
+    const auto* node = result.valueAs<trankgrowth::Node>();
     CHECK(node && node->first == !second && node->second == second);
   }
 }

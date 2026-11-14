@@ -50,12 +50,12 @@ struct TextKept {
       if (l.hidden || l.begin == l.end) continue;
       if (!l.recovered)
         live.push_back(l);
-      else if (!covered(l, DiagnosticKind::replaced))
+      else if (!covered(l, DiagnosticKind::Replaced))
         skipped.push_back(l);
     }
     const auto abandoned = [&](TextOffset b, TextOffset e) {
       for (const ParseDiagnostic& d : diagnostics)
-        if (d.kind == DiagnosticKind::incomplete && d.begin <= b && e <= d.end)
+        if (d.kind == DiagnosticKind::Incomplete && d.begin <= b && e <= d.end)
           return true;
       return false;
     };
@@ -110,12 +110,12 @@ struct TextKept {
     };
     for (const CstLeaf& l : got) {
       if (!l.recovered || l.hidden) continue;
-      const DiagnosticKind kind = l.begin == l.end ? DiagnosticKind::inserted
-                                                   : DiagnosticKind::replaced;
+      const DiagnosticKind kind = l.begin == l.end ? DiagnosticKind::Inserted
+                                                   : DiagnosticKind::Replaced;
       const ParseDiagnostic* said = nullptr;
       for (const ParseDiagnostic& d : diagnostics)
         if (d.kind == kind && d.begin <= l.begin && l.end <= d.end &&
-            (kind == DiagnosticKind::replaced || d.begin == l.begin)) {
+            (kind == DiagnosticKind::Replaced || d.begin == l.begin)) {
           said = &d;
           break;
         }

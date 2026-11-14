@@ -4,26 +4,25 @@
 
 #include <optional>
 
+#include "cursiv/hover/HoverProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
-#include "cursiv/hover/HoverProvider.hpp"
 
 // A declaration's prose comes from the language that declares it.
 
 namespace cursiv {
 
-class DefaultHoverProvider : public HoverProvider {
+class DefaultHoverProvider : public HoverProvider,
+                             protected DefaultCoreService {
  public:
   explicit DefaultHoverProvider(const CoreServices& core) noexcept
-      : _core(core) {}
+      : DefaultCoreService(core) {}
 
   [[nodiscard]] std::optional<lsp::Hover> getHoverContent(
       const Document& document, lsp::Position position,
       const CancellationToken& token = {}) const override;
-
- private:
-  const CoreServices& _core;
 };
 
 }  // namespace cursiv

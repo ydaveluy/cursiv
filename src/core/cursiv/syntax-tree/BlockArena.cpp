@@ -64,13 +64,16 @@ void* BlockArena::do_allocate(std::size_t bytes, std::size_t align) {
 void BlockArena::do_deallocate(void* p, std::size_t bytes,
                                std::size_t align) noexcept {
   if (sizeof(Block) + align + bytes <= kCap / 2) return;
-  for (Block** at = &_blocks; *at != nullptr; at = &(*at)->prev)
+  for (Block** at = &_blocks; *at != nullptr; at = &(*at)->prev) {
+    // The block being filled is no request's own, even where one starts it.
+    if (reinterpret_cast<char*>(*at) + (*at)->size == _end) continue;
     if (aligned(reinterpret_cast<char*>(*at + 1), align) == p) {
       Block* const gone = *at;
       *at = gone->prev;
       _upstream->deallocate(gone, gone->size, gone->align);
       return;
     }
+  }
 }
 
 void BlockArena::release() noexcept {

@@ -4,13 +4,13 @@
 #include <string>
 #include <utility>
 
-#include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/validation/DocumentValidator.hpp"
-#include "cursiv/workspace/Document.hpp"
 #include "cursiv/DocumentDisposable.hpp"
 #include "cursiv/ExpectDiagnosticOptions.hpp"
 #include "cursiv/ParseHelper.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
+#include "cursiv/validation/DocumentValidator.hpp"
+#include "cursiv/workspace/Document.hpp"
 
 namespace cursiv::test {
 

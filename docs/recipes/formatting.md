@@ -65,12 +65,10 @@ changes those defaults.
 
 ## Install it
 
-Include `RecipeFormatter.hpp` in your LSP module and install the formatter
-after the default services:
+Include `RecipeFormatter.hpp` in your LSP module and install the formatter:
 
 ```cpp title="src/lsp/recipe/LspModule.cpp"
 void install_lsp_module(RecipeServices& services) {
-  cursiv::install_default_lsp_services(services);
   services.formatter = std::make_unique<RecipeFormatter>(services);
 }
 ```

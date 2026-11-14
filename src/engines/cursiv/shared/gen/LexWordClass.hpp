@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 

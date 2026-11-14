@@ -27,22 +27,22 @@ ParseResult::ParseResult(Cst&& tree)
 // `= default` would keep `value` over a tree it gave away.
 ParseResult::ParseResult(ParseResult&& src) noexcept { *this = std::move(src); }
 
-ParseResult::~ParseResult() { destroy_nodes(); }
+ParseResult::~ParseResult() { destroyNodes(); }
 
-void ParseResult::destroy_detached(std::span<AstNode* const> gone) noexcept {
+void ParseResult::destroyDetached(std::span<AstNode* const> gone) noexcept {
   for (AstNode* const node : gone) node->~AstNode();
 }
 
 // No order is needed: a node's destructor frees what its members own, and a
 // child is a plain pointer, so this never recurses.
-void ParseResult::destroy_nodes() noexcept {
-  destroy_detached(_nodes);
+void ParseResult::destroyNodes() noexcept {
+  destroyDetached(_nodes);
   _nodes.clear();
 }
 
 ParseResult& ParseResult::operator=(ParseResult&& src) noexcept {
   if (this == &src) return *this;
-  destroy_nodes();
+  destroyNodes();
   std::destroy_at(&_nodes);  // on this pool, which goes with the tree
   _cst = std::move(src._cst);
   _grammarOwner = std::move(src._grammarOwner);
@@ -61,7 +61,7 @@ ParseResult& ParseResult::operator=(ParseResult&& src) noexcept {
 
 const Cst& ParseResult::cst() const noexcept { return *_cst; }
 
-void ParseResult::bind_grammar(const Grammar& grammar) noexcept {
+void ParseResult::bindGrammar(const Grammar& grammar) noexcept {
   // The key is read off the nodes: written before the sort, never after.
   assert(std::is_sorted(_nodes.begin(), _nodes.end(),
                         [](const AstNode* a, const AstNode* b) {
@@ -70,24 +70,24 @@ void ParseResult::bind_grammar(const Grammar& grammar) noexcept {
   detail::CstBuilder(*_cst).bind_model(grammar, _nodes);
 }
 
-void ParseResult::bind_grammar(std::shared_ptr<const Grammar> grammar) noexcept {
+void ParseResult::bindGrammar(std::shared_ptr<const Grammar> grammar) noexcept {
   _grammarOwner = std::move(grammar);
-  bind_grammar(*_grammarOwner);
+  bindGrammar(*_grammarOwner);
 }
 
 // The tree takes the text first: its nodes point into it.
-void ParseResult::bind_translation(
+void ParseResult::bindTranslation(
     std::string_view document, std::unique_ptr<SourceTranslation> translation) {
   assert(_cst->translation() == nullptr && "a result binds one translation");
   const SourceTranslation& bound = *translation;
   detail::CstBuilder(*_cst).bind_translation(document, std::move(translation));
-  bound.to_document(std::span(diagnostics));
+  bound.toDocument(std::span(diagnostics));
   const auto errors = bound.errors();
   diagnostics.insert(diagnostics.end(), errors.begin(), errors.end());
 }
 
 ParseResult::operator bool() const noexcept {
-  return accepted && value != nullptr && error == AstBuildError::none;
+  return accepted && value != nullptr && error == AstBuildError::None;
 }
 
 }  // namespace cursiv

@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "cursiv/grammar/Association.hpp"
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/shared/gen/LexCheckIncomplete.hpp"
 #include "cursiv/shared/gen/LexWordClass.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
@@ -37,7 +37,7 @@ struct TermBuild {
   std::uint8_t prec = 0;  // the precedence step this terminal opens
   bool folded = false;
   bool predicateOnly = false;
-  Association assoc = Association::left;
+  Association assoc = Association::Left;
   bool charset = false;  // written as a character range
   // The words a body that is a choice of them reads, in the grammar's own
   // text: what an editor offers for a terminal that spells none alone.

@@ -46,7 +46,7 @@ cursiv::ParseResult elect(std::string_view doc,
 }
 
 const ast::Case* case_of(const cursiv::ParseResult& r) {
-  return r.value_as<ast::Case>();
+  return r.valueAs<ast::Case>();
 }
 
 // One cell, both reductions kept: the look-ahead elects the earlier complete
@@ -118,7 +118,7 @@ struct Dangling {
 };
 
 const Stmt* deep_if_root(const cursiv::ParseResult& r) {
-  return r.value_as<Stmt>();
+  return r.valueAs<Stmt>();
 }
 const Stmt* deep_if_rev_root(const cursiv::ParseResult& r) {
   const ast::Case* c = case_of(r);
@@ -150,7 +150,7 @@ void small_ast_checks() {
   {
     cursiv::ParseResult r = cursiv::engine::AstReducer::build<e::kTable.stamp>(
         e::kAstActions, std::move(cst));
-    const Stmt* root = r.value_as<Stmt>();
+    const Stmt* root = r.valueAs<Stmt>();
     CHECK(root != nullptr);
     CHECK(root->cond == "a");
     CHECK(root->then_ != nullptr && root->then_->cond == "x");
@@ -164,7 +164,7 @@ void small_ast_checks() {
   {
     cursiv::ParseResult r = cursiv::engine::AstReducer::build<e::kTable.stamp>(
         e::kAstActions, std::move(cst2));
-    const Stmt* root = r.value_as<Stmt>();
+    const Stmt* root = r.valueAs<Stmt>();
     CHECK(root != nullptr && root->cond == "a");
     CHECK(root->else_ == nullptr);
     const Stmt* inner = root->then_;
@@ -178,8 +178,8 @@ void small_ast_checks() {
   cursiv::Cst cst3;
   const std::string_view text = "if a then if b then x else e";
   CHECK(accepts<e::kTable>(text, &e::kDrive, cst3));
-  CHECK(cst3[cst3.entry_root()].begin == 0);
-  CHECK(cst3[cst3.entry_root()].end == text.size());
+  CHECK(cst3[cst3.entryRoot()].begin == 0);
+  CHECK(cst3[cst3.entryRoot()].end == text.size());
 
   // The same text, arms declared in the opposite order: the outer if keeps
   // its first arm, the one with an else.

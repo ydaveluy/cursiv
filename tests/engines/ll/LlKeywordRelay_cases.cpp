@@ -16,7 +16,7 @@ namespace {
 
 std::string shown(const cursiv::ParseResult& r) {
   std::string out;
-  const auto* d = r.value_as<tkwrelay::Doc>();
+  const auto* d = r.valueAs<tkwrelay::Doc>();
   if (d == nullptr) return "<none>";
   for (const tkwrelay::Item* i : d->items) {
     out += i->keyword ? std::string("KW") : std::string(i->name);
@@ -31,7 +31,7 @@ constexpr std::string_view kKeywords = "KW x iff KW whilex i ";
 
 std::string picked(const cursiv::ParseResult& r) {
   std::string out;
-  const auto* d = r.value_as<tkwrelay::Picks>();
+  const auto* d = r.valueAs<tkwrelay::Picks>();
   if (d == nullptr) return "<none>";
   for (const tkwrelay::Pick* i : d->items) {
     out += i->first.empty() ? "2:" : "1:";

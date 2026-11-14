@@ -21,7 +21,6 @@
 
 #include "cursiv/references/ScopeComputation.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
@@ -39,20 +38,6 @@ namespace cursiv {
 
 namespace {
 
-// The document's own language when the factory resolved one, else what the
-// registry says of its URI and buffer: null skips the document, it never fails
-// the phase.
-const CoreServices* language_of(const SharedCoreServices& shared,
-                                const Document& document) {
-  if (document.language != nullptr) return document.language;
-  return shared.serviceRegistry->findServices(
-      document.uri, document.textDocument().languageId());
-}
-
-// At most half full, so a probe stays short and always finds a free slot.
-std::size_t table_size(std::size_t entries) noexcept {
-  return std::bit_ceil(std::max<std::size_t>(entries * 2, 1));
-}
 
 }  // namespace
 
@@ -93,7 +78,7 @@ void DefaultIndexManager::Exports::fill(Shard& shard, std::size_t at) const {
   // built.
   if (count > std::numeric_limits<std::uint32_t>::max())
     throw std::length_error("cursiv: too many exported names in one shard");
-  shard.slots.assign(table_size(count), {});
+  shard.slots.assign(detail::table_size(count), {});
   for (const auto& [id, exported] : rows)
     for (const auto& entry : group(*exported)) {
       auto& slot = shard.slots[shard.slotOf(entry.hash)];
@@ -109,18 +94,9 @@ void DefaultIndexManager::Exports::fill(Shard& shard, std::size_t at) const {
           entry.element;
 }
 
-std::size_t DefaultIndexManager::TargetHash::operator()(
-    const Target& t) const noexcept {
-  const std::size_t d =
-      std::hash<std::uint32_t>{}(static_cast<std::uint32_t>(t.document));
-  const std::size_t s =
-      std::hash<std::uint32_t>{}(static_cast<std::uint32_t>(t.symbol));
-  return d ^ (s + 0x9e3779b9u + (d << 6u) + (d >> 2u));
-}
-
 void DefaultIndexManager::updateContent(const Document& document,
                                         const CancellationToken& cancelToken) {
-  const CoreServices* const language = language_of(shared, document);
+  const CoreServices* const language = document.language;
   if (language == nullptr) return;
   // Computed here, off the lock and with the token: this walk is the phase's
   // whole cost.
@@ -159,7 +135,7 @@ void DefaultIndexManager::updateReferences(
     const Document& document, const CancellationToken& cancelToken) {
   throw_if_cancelled(cancelToken);
   // The language's own provider says what the document points at.
-  const CoreServices* const language = language_of(shared, document);
+  const CoreServices* const language = document.language;
   if (language == nullptr) return;
 
   // Collected off the lock, as the exports are.
@@ -168,19 +144,23 @@ void DefaultIndexManager::updateReferences(
       language->referenceDescriptionProvider->createDescriptions(document,
                                                                  cancelToken);
   for (const auto& reference : referenced.descriptions)
-    if (!reference.local)
-      referenced.targets |= std::uint64_t{1}
-                            << (static_cast<std::uint32_t>(
-                                    reference.targetDocumentId) & 63);
+    if (!reference.local &&
+        (referenced.targets.empty() ||
+         referenced.targets.back() != reference.targetDocumentId))
+      referenced.targets.push_back(reference.targetDocumentId);
+  std::ranges::sort(referenced.targets);
+  referenced.targets.erase(std::ranges::unique(referenced.targets).begin(),
+                           referenced.targets.end());
   const auto* references = document.parseResult.references.get();
   auto names = references == nullptr ? std::vector<std::uint64_t>{}
                                       : references->importedNames.snapshot();
   auto row = std::make_shared<const Referenced>(std::move(referenced));
 
   const std::scoped_lock lock(_mutex);
-  // Before the tables change, as in `updateContent`: dropping a row releases
-  // the view, and a document that had none releases it here.
-  if (!dropReferences(document.id)) clearIncoming();
+  // Before the tables change: the incoming view keeps the row it was built
+  // from, or notes that the document had none.
+  (void)dropReferences(document.id);
+  noteIncoming(document.id);
   if (!names.empty()) {
     auto& imports = _importedNames[document.id];
     imports.reserve(names.size());
@@ -233,7 +213,7 @@ bool DefaultIndexManager::dropContent(DocumentId document) {
 
 bool DefaultIndexManager::dropReferences(DocumentId document) {
   const auto old = _references.find(document);
-  if (old != _references.end()) clearIncoming();
+  if (old != _references.end()) noteIncoming(document);
   if (const auto imported = _importedNames.find(document);
       imported != _importedNames.end()) {
     for (const auto& entry : imported->second) {
@@ -254,10 +234,14 @@ bool DefaultIndexManager::dropReferences(DocumentId document) {
   return true;
 }
 
-// Released first, counted after: a release that throws changes nothing.
-void DefaultIndexManager::clearIncoming() {
-  _incoming.clear();
+void DefaultIndexManager::noteIncoming(DocumentId source) {
   ++_referenceWrites;
+  _incomingStale.store(true, std::memory_order_release);
+  if (_lastIncoming == nullptr) return;
+  const auto row = _references.find(source);
+  // The first change since the view keeps the row the view was built from.
+  _changedSources.try_emplace(source,
+                              row != _references.end() ? row->second : nullptr);
 }
 
 void DefaultIndexManager::affectImporters(const Exported& exports) {
@@ -275,22 +259,16 @@ bool DefaultIndexManager::isAffected(
   if (_affected.contains(document.id)) return true;
   if (changed.empty()) return false;
   const auto it = _references.find(document.id);
-  if (it == _references.end() || it->second->targets == 0) return false;
-  // A disjoint mask rules out every target; collisions still need exact IDs.
-  // A changed set larger than the edges is cheaper to check edge by edge.
-  const auto& edges = it->second->descriptions;
-  if (changed.size() < edges.size() &&
-      std::ranges::none_of(changed, [&](DocumentId id) {
-        return (it->second->targets &
-                (std::uint64_t{1} << (static_cast<std::uint32_t>(id) & 63))) !=
-               0;
-      }))
-    return false;
-  // A local edge is the document's own: its change resets it whole, and it
-  // does not affect itself.
-  return std::ranges::any_of(edges, [&](const ReferenceDescription& reference) {
-    return !reference.local && changed.contains(reference.targetDocumentId);
-  });
+  if (it == _references.end()) return false;
+  // Its own change resets it whole: only the other documents it points into
+  // count, and the smaller of the two sets is the one walked.
+  const std::vector<DocumentId>& targets = it->second->targets;
+  if (changed.size() < targets.size())
+    return std::ranges::any_of(changed, [&](DocumentId id) {
+      return std::ranges::binary_search(targets, id);
+    });
+  return std::ranges::any_of(
+      targets, [&](DocumentId id) { return changed.contains(id); });
 }
 
 // No lock across the visitor: it is the caller's code and it reaches back into
@@ -299,18 +277,28 @@ bool DefaultIndexManager::visitElements(
     const AstTypeTag* type, std::span<const DocumentId> documents,
     cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
   const auto view = exportsView();
-  std::vector<DocumentId> asked(documents.begin(), documents.end());
-  std::ranges::sort(asked);
-  for (const auto& [id, elements] : view->rows) {
-    if (!documents.empty() && !std::ranges::binary_search(asked, id)) continue;
-    for (const AstNodeDescription& element : elements->elements) {
+  const auto visit = [&](const Exported& exported) {
+    for (const AstNodeDescription& element : exported.elements) {
       if (type != nullptr &&
           (element.type == nullptr || !element.type->derivesFrom(type)))
         continue;
       if (!visitor(element)) return false;
     }
-  }
-  return true;
+    return true;
+  };
+  if (documents.empty())
+    return std::ranges::all_of(
+        view->rows, [&](const auto& row) { return visit(*row.second); });
+  // The documents asked alone, in the view's order.
+  std::vector<std::uint32_t> rows;
+  rows.reserve(documents.size());
+  for (const DocumentId id : documents)
+    if (const auto at = view->rowAt.find(id); at != view->rowAt.end())
+      rows.push_back(at->second);
+  std::ranges::sort(rows);
+  rows.erase(std::ranges::unique(rows).begin(), rows.end());
+  return std::ranges::all_of(
+      rows, [&](std::uint32_t at) { return visit(*view->rows[at].second); });
 }
 
 const AstNodeDescription* DefaultIndexManager::findByName(
@@ -346,9 +334,11 @@ bool DefaultIndexManager::visitReferences(
   // The guard stands for the whole walk: it is what keeps the snapshot from
   // being released under the visitor.
   const auto view = incomingView();
-  const auto it = view->byTarget.find(Target{targetDocument, targetSymbol});
-  if (it == view->byTarget.end()) return true;
-  return std::ranges::all_of(it->second, visitor);
+  const auto document = view->byDocument.find(targetDocument);
+  if (document == view->byDocument.end()) return true;
+  const auto symbol = document->second->find(targetSymbol);
+  if (symbol == document->second->end()) return true;
+  return std::ranges::all_of(*symbol->second, visitor);
 }
 
 cursiv::detail::Published<DefaultIndexManager::Exports>::Read
@@ -367,48 +357,128 @@ DefaultIndexManager::exportsView() const {
                     [](const auto& row) -> const std::string& {
                       return row.second->uri;
                     });
+  built->rowAt.reserve(built->rows.size());
+  for (std::uint32_t at = 0; at < built->rows.size(); ++at)
+    built->rowAt.emplace(built->rows[at].first, at);
   _exports.publish(std::move(built));
   return _exports.read();
 }
 
-// Only what resolved is stored, so nothing is filtered again here.
+namespace {
+
+// What a source points at, in position order.
+void sort_by_position(std::vector<ReferenceDescription>& list) {
+  constexpr auto at = [](const ReferenceDescription& r) {
+    return std::tuple{r.sourceDocumentId, r.sourceBegin, r.sourceEnd};
+  };
+  if (!std::ranges::is_sorted(list, {}, at)) std::ranges::sort(list, {}, at);
+}
+
+}  // namespace
+
+// Only what resolved is stored, so nothing is filtered again here. Every list
+// is in source order, whatever order the tables hashed the documents into: a
+// reader that takes the first row that fits must find the same one twice.
 DefaultIndexManager::IncomingView DefaultIndexManager::incomingView() const {
-  if (auto live = _incoming.read(); live) return IncomingView(std::move(live));
+  if (!_incomingStale.load(std::memory_order_acquire))
+    if (auto live = _incoming.read(); live)
+      return IncomingView(std::move(live));
 
   // The rows are taken under the lock and grouped after it, so writers do not
-  // wait for the whole workspace's references to be sorted.
-  std::vector<std::shared_ptr<const Referenced>> rows;
+  // wait for them: every row for a first view, else the changed sources' rows
+  // then and now.
+  using Row = std::shared_ptr<const Referenced>;
+  struct Change {
+    DocumentId source;
+    Row then;
+    Row now;
+  };
+  std::shared_ptr<const Incoming> last;
+  std::vector<Change> changes;
   std::uint64_t writes = 0;
   {
     const std::scoped_lock lock(_mutex);
-    if (auto live = _incoming.read(); live)
-      return IncomingView(std::move(live));
-    rows.reserve(_references.size());
-    for (const auto& [id, referenced] : _references) rows.push_back(referenced);
+    if (!_incomingStale.load(std::memory_order_relaxed))
+      if (auto live = _incoming.read(); live)
+        return IncomingView(std::move(live));
+    last = _lastIncoming;
+    if (last == nullptr) {
+      for (const auto& [source, row] : _references)
+        changes.push_back({source, nullptr, row});
+    } else {
+      for (const auto& [source, then] : _changedSources) {
+        const auto now = _references.find(source);
+        changes.push_back(
+            {source, then, now != _references.end() ? now->second : nullptr});
+      }
+    }
     writes = _referenceWrites;
+  }
+  std::ranges::sort(changes, {}, &Change::source);
+
+  // Per symbol, each changed source with what it points there now, in source
+  // order: a source that pointed there only then has an empty list.
+  std::unordered_map<
+      DocumentId, std::unordered_map<
+                      NodeId, std::vector<std::pair<DocumentId, IncomingRows>>>>
+      touched;
+  for (const Change& change : changes) {
+    const auto slot = [&](const ReferenceDescription& r) -> IncomingRows& {
+      auto& list = touched[r.targetDocumentId][r.targetSymbolId];
+      if (list.empty() || list.back().first != change.source)
+        list.emplace_back(change.source, IncomingRows{});
+      return list.back().second;
+    };
+    if (change.then != nullptr)
+      for (const ReferenceDescription& r : change.then->descriptions)
+        (void)slot(r);
+    if (change.now != nullptr)
+      for (const ReferenceDescription& r : change.now->descriptions)
+        slot(r).push_back(r);
   }
 
   auto built = std::make_shared<Incoming>();
-  for (const auto& referenced : rows)
-    for (const ReferenceDescription& reference : referenced->descriptions)
-      built
-          ->byTarget[Target{reference.targetDocumentId,
-                            reference.targetSymbolId}]
-          .push_back(reference);
-  // In source order, whatever order the table hashed the documents into: a
-  // reader that takes the first row that fits must find the same one twice.
-  for (auto& [target, references] : built->byTarget)
-    std::ranges::sort(references, {}, [](const ReferenceDescription& r) {
-      return std::tuple{r.sourceDocumentId, r.sourceBegin, r.sourceEnd};
-    });
+  if (last != nullptr) built->byDocument = last->byDocument;
+  for (auto& [document, symbols] : touched) {
+    const auto held = built->byDocument.find(document);
+    auto entry = held != built->byDocument.end()
+                     ? std::make_shared<IncomingSymbols>(*held->second)
+                     : std::make_shared<IncomingSymbols>();
+    for (auto& [symbol, sources] : symbols) {
+      const auto before = entry->find(symbol);
+      const std::span<const ReferenceDescription> old =
+          before != entry->end() ? std::span(*before->second)
+                                 : std::span<const ReferenceDescription>{};
+      // The references of every other source stay where they were.
+      auto into = std::make_shared<IncomingRows>();
+      auto o = old.begin();
+      for (auto& [source, now] : sources) {
+        for (; o != old.end() && o->sourceDocumentId < source; ++o)
+          into->push_back(*o);
+        while (o != old.end() && o->sourceDocumentId == source) ++o;
+        sort_by_position(now);
+        into->insert(into->end(), now.begin(), now.end());
+      }
+      into->insert(into->end(), o, old.end());
+      if (into->empty())
+        entry->erase(symbol);
+      else
+        entry->insert_or_assign(symbol, std::move(into));
+    }
+    if (entry->empty())
+      built->byDocument.erase(document);
+    else
+      built->byDocument.insert_or_assign(document, std::move(entry));
+  }
 
   const std::scoped_lock lock(_mutex);
   // A write since the rows were taken: this view is still right for this
   // reader, but is not published.
   if (writes != _referenceWrites) return IncomingView(std::move(built));
-  // Another reader built the same rows first.
-  if (auto live = _incoming.read(); live) return IncomingView(std::move(live));
-  _incoming.publish(std::move(built));
+  _incoming.publish(built);
+  _lastIncoming = std::move(built);
+  _changedSources.clear();
+  _incomingStale.store(false, std::memory_order_release);
   return IncomingView(_incoming.read());
 }
 

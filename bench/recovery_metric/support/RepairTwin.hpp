@@ -42,7 +42,7 @@ struct RepairTwin {
     if (!cst.accepted() || cst.recovered() || twin->result.value == nullptr)
       return nullptr;
     const Grammar* grammar = cst.grammar();
-    cst.visit_leaves([&](const CstLeaf& leaf) {
+    cst.visitLeaves([&](const CstLeaf& leaf) {
       if (leaf.begin == leaf.end) return;
       if (leaf.hidden) {
         twin->hidden.push_back(leaf);

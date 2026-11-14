@@ -21,7 +21,6 @@
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -32,6 +31,7 @@
 #include "cursiv/utils/HostDirectory.hpp"
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/utils/Utf8.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
@@ -294,7 +294,7 @@ void dump_cst(const Document& document, const Grammar& grammar,
   // Not gated on the AST: the tree is whatever the parser built, and a
   // badly damaged document is exactly the one whose tree a reader needs.
   const cursiv::Cst& cst = document.parseResult.cst();
-  if (!cst.has_entry()) {
+  if (!cst.hasEntry()) {
     out << "(no tree: the entry rule did not complete)\n";
     return;
   }
@@ -307,7 +307,7 @@ void dump_cst(const Document& document, const Grammar& grammar,
   };
   const std::vector<std::string_view> classes =
       ast_classes(document.parseResult);
-  std::vector<Frame> stack{{cst.entry_root(), 0}};
+  std::vector<Frame> stack{{cst.entryRoot(), 0}};
   while (!stack.empty()) {
     const Frame frame = stack.back();
     stack.pop_back();
@@ -334,9 +334,9 @@ void dump_cst(const Document& document, const Grammar& grammar,
     }
     out << '\n';
 
-    // `reverse_children` yields the last child first, so pushing in that
+    // `reverseChildren` yields the last child first, so pushing in that
     // order pops them back in source order.
-    for (const cursiv::NodeId child : cst.reverse_children(frame.id))
+    for (const cursiv::NodeId child : cst.reverseChildren(frame.id))
       stack.push_back({child, frame.depth + 1});
   }
 }
@@ -411,7 +411,7 @@ void write_json_offset(std::ostream& out, TextOffset offset) {
 void dump_cst_json(const Document& document, const Grammar& grammar,
                    std::ostream& out) {
   const cursiv::Cst& cst = document.parseResult.cst();
-  if (!cst.has_entry()) {
+  if (!cst.hasEntry()) {
     out << "null\n";
     return;
   }
@@ -425,7 +425,7 @@ void dump_cst_json(const Document& document, const Grammar& grammar,
   };
   const std::vector<std::string_view> classes =
       ast_classes(document.parseResult);
-  std::vector<Frame> stack{{cst.entry_root(), false, false}};
+  std::vector<Frame> stack{{cst.entryRoot(), false, false}};
   while (!stack.empty()) {
     const Frame frame = stack.back();
     stack.pop_back();
@@ -458,10 +458,10 @@ void dump_cst_json(const Document& document, const Grammar& grammar,
     out << ",\"children\":[";
     stack.push_back({frame.id, true, false});
     const std::size_t before = stack.size();
-    // `reverse_children` yields the last child first, so pushing in that
+    // `reverseChildren` yields the last child first, so pushing in that
     // order pops them back in source order; the last one pushed is first
     // in source order, whose comma is then cleared.
-    for (const cursiv::NodeId child : cst.reverse_children(frame.id))
+    for (const cursiv::NodeId child : cst.reverseChildren(frame.id))
       stack.push_back({child, false, true});
     if (stack.size() > before) stack.back().comma = false;
   }
@@ -519,7 +519,7 @@ namespace detail {
 
 int run_cli_on(
     int argc, char** argv,
-    const std::function<bool(SharedCoreServices&)>& registerLanguageServices,
+    const std::function<void(SharedCoreServices&)>& registerLanguageServices,
     SharedCoreServices& shared) {
   return run_command([&] {
     // A CLI reads the disk, and says so: without this, the shared default
@@ -527,12 +527,9 @@ int run_cli_on(
     if (shared.fileSystemProvider == nullptr)
       shared.fileSystemProvider = std::make_unique<LocalFileSystemProvider>();
     install_default_shared_core_services(shared);
-    // The registry owns the languages. A language it refuses says why, as a
-    // fatal run does.
-    if (registerLanguageServices && !registerLanguageServices(shared)) {
-      std::cerr << "no language could be registered\n";
-      return kFatal;
-    }
+    // The registry owns the languages. A language it refuses throws, and the
+    // run ends as a fatal one does.
+    if (registerLanguageServices) registerLanguageServices(shared);
 
     const std::string_view program = argc > 0 ? argv[0] : "cli";
     const ServiceRegistry& registry = *shared.serviceRegistry;

@@ -5,8 +5,8 @@
 #include <string_view>
 #include <utility>
 
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/text/TextRange.hpp"
+#include "cursiv/utils/JsonValue.hpp"
 
 namespace cursiv::detail {
 

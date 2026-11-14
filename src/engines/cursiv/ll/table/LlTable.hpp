@@ -8,7 +8,7 @@
 #include <span>
 #include <string_view>
 
-#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/ll/table/LlAtnView.hpp"
 #include "cursiv/ll/table/LlDecision.hpp"

@@ -17,7 +17,7 @@ static_assert([]<class... Keywords>(cursiv::detail::Choice<Keywords...>) {
 static_assert(twidechoice::generated::Ll::kTable.nafter > 255);
 
 std::string words(const cursiv::ParseResult& r) {
-  const auto* d = r.value_as<twidechoice::Doc>();
+  const auto* d = r.valueAs<twidechoice::Doc>();
   if (d == nullptr) return "<none>";
   std::string out;
   for (const auto w : d->words) out += std::string(w) + ' ';

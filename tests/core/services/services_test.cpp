@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/observability/ObservationFormat.hpp"
 #include "cursiv/observability/StderrObservabilitySink.hpp"
@@ -26,12 +27,12 @@
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/CoreServicesFor.hpp"
 #include "cursiv/services/DefaultServiceRegistry.hpp"
-#include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/JsonValue.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/ServiceSlot.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/utils/JsonValue.hpp"
+#include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/DefaultAstNodeLocator.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/Documents.hpp"
@@ -39,7 +40,6 @@
 #include "cursiv/workspace/FileSystemProvider.hpp"
 #include "cursiv/workspace/MemoryFileSystemProvider.hpp"
 #include "cursiv/workspace/WorkspaceManager.hpp"
-#include "cursiv/Check.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
@@ -128,8 +128,8 @@ void what_is_written_is_no_longer_missing() {
   s.astReflection = ws::generated::Workspace::create_ast_reflection();
   CHECK(s.firstMissingService() == "nameProvider");
   s.nameProvider = std::make_unique<cursiv::DefaultNameProvider>(s);
-  CHECK(s.firstMissingService() == "astNodeLocator");
-  s.astNodeLocator = std::make_unique<cursiv::DefaultAstNodeLocator>(s);
+  // The node locator is optional: nothing in the framework reads it.
+  CHECK(s.astNodeLocator == nullptr);
   CHECK(s.firstMissingService() == "astNodeDescriptionProvider");
 
   // A module that pre-installed a service keeps it: the defaults fill holes,
@@ -955,8 +955,7 @@ void a_refused_root_is_said_and_the_others_are_read() {
   }
   CHECK(!thrown);
   CHECK(shared.documents->getDocument("file:///w/a.ws") != nullptr);
-  CHECK(shared.workspaceManager->ready().wait_for(std::chrono::seconds(0)) ==
-        std::future_status::ready);
+  CHECK(shared.workspaceManager->isReady());
   CHECK(capture->seen.size() == 1);
   CHECK(!capture->seen.empty() &&
         capture->seen[0].code ==

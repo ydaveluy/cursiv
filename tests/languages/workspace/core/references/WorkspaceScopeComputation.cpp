@@ -31,7 +31,7 @@ bool in_family(std::span<const cursiv::AstTypeTag* const> family,
 // pool, freed by the same reset that drops the index rows pointing into it.
 std::string_view keep(const cursiv::Document& document,
                       const std::string& name) {
-  return document.keep_text(name);
+  return document.keepText(name);
 }
 
 }  // namespace
@@ -94,7 +94,7 @@ cursiv::LocalSymbols WorkspaceScopeComputation::collectLocalSymbols(
   symbols.reserve(document.parseResult.nodes().size() / 4);
   processContainer(*root, static_cast<const ast::Workspace&>(*root).elements,
                    document, symbols, cancelToken);
-  symbols.build_index();
+  symbols.buildIndex();
   return symbols;
 }
 
@@ -133,7 +133,7 @@ void WorkspaceScopeComputation::processContainer(
         if (element->name.empty()) continue;
         const std::string_view name =
             qualifier.empty() ? element->name
-                              : document.keep_text(qualifier, element->name)
+                              : document.keepText(qualifier, element->name)
                                     .substr(qualifier.size());
         if (auto description =
                 _dm.astNodeDescriptionProvider->createDescription(

@@ -39,7 +39,7 @@ std::string items(const cursiv::Parser& p, std::string_view text,
                   std::string_view prefix = "rules:") {
   const std::string source = std::string(prefix) + std::string(text);
   const auto r = p.parse(source);
-  const auto* d = r.value_as<tllrcond::Doc>();
+  const auto* d = r.valueAs<tllrcond::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || d == nullptr) return "<refused>";
   std::string out;
   for (const tllrcond::Item* i : d->items) {
@@ -113,7 +113,7 @@ std::string items(const cursiv::Parser& p, std::string_view text,
                   std::string_view prefix = {}) {
   const std::string source = std::string(prefix) + std::string(text);
   const auto r = p.parse(source);
-  const auto* d = r.value_as<tllterm::Doc>();
+  const auto* d = r.valueAs<tllterm::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || d == nullptr) return "<refused>";
   std::string out;
   for (const tllterm::Item* i : d->items) out += std::string(i->text) + ' ';

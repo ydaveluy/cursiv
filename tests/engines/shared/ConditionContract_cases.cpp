@@ -36,7 +36,7 @@ void reads(const char* engine, const cursiv::Parser& p, std::string_view text,
 void reads_as(const char* engine, const cursiv::Parser& p,
               std::string_view text, std::string_view name) {
   const auto r = p.parse(text);
-  const auto* holder = r.value_as<tcondcontract::Holder>();
+  const auto* holder = r.valueAs<tcondcontract::Holder>();
   const bool got = r.accepted && r.diagnostics.empty() && holder != nullptr &&
                    holder->name == name;
   if (!got)
@@ -148,7 +148,7 @@ void run() {
     reads(name, p, "climbed - >", true);
     reads(name, p, "climbed ->", false);
     const auto r = p.parse("abc");
-    const auto* holder = r.value_as<tcondcontract::Holder>();
+    const auto* holder = r.valueAs<tcondcontract::Holder>();
     const bool got = r.accepted && r.diagnostics.empty() && holder != nullptr &&
                      holder->name == "abc";
     for (const auto& d : r.diagnostics)

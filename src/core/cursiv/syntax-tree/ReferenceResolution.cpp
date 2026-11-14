@@ -1,5 +1,6 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
@@ -7,14 +8,86 @@
 #include <mutex>
 #include <span>
 #include <stop_token>
+#include <vector>
 
 #include "cursiv/syntax-tree/DefaultDocumentReferences.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv::detail {
 namespace {
 
 static_assert(public_ref_state(kRefObserved) == RefState::Resolving);
-static_assert(static_cast<unsigned>(RefState::ErrorCycle) < 0x80);
+static_assert(static_cast<unsigned>(RefState::ErrorThrown) < 0x80);
+
+// Nested resolutions are bounded by stretches of native stack of this size:
+// see `resolve_far`.
+constexpr unsigned kStretchBits = 15;
+
+// The lookup of a slow path: one answer goes to `target` and `which`, several
+// go to `items`.
+CURSIV_ALWAYS_INLINE inline RefState look_up(const RefResolver* resolver,
+                                             std::uint32_t handle,
+                                             AstNode** target,
+                                             std::uint8_t* which,
+                                             MultiRefItems* items) {
+  if (items != nullptr) return resolver->resolveAll(handle, *items);
+  const auto answer = resolver->resolve(handle);
+  *target = answer.target;
+  *which = answer.which;
+  return answer.state;
+}
+
+CURSIV_ALWAYS_INLINE inline void forget(AstNode** target, std::uint8_t* which,
+                                        MultiRefItems* items) noexcept {
+  if (items != nullptr) {
+    items->clear();
+  } else {
+    *target = nullptr;
+    *which = 0;
+  }
+}
+
+// What a slow path was called with, kept to make the same call again.
+struct Asked {
+  RefState* state;
+  const RefResolver* resolver;
+  std::uint32_t handle;
+  AstNode** target;
+  std::uint8_t* which;
+  MultiRefItems* items;
+
+  RefState again() const {
+    return items != nullptr
+               ? resolve_all_slow(*state, resolver, handle, *items)
+               : resolve_one_slow(*state, resolver, handle, *target, *which);
+  }
+};
+
+// A nested resolution given up for want of stack. It leaves as a cancelled one
+// does, and the resolution that drives its nest asks it again.
+struct PutOff final : OperationCancelled {
+  explicit PutOff(const Asked& asked) : asked(asked) {}
+  Asked asked;
+};
+
+// What a driving resolution was handed back: `waiting` is asked again newest
+// first, and no reference in `refs` is put off a second time.
+struct PutOffs {
+  std::vector<Asked> waiting;
+  std::vector<const void*> refs;
+
+  void take(const Asked& asked) {
+    refs.push_back(asked.state);
+    waiting.push_back(asked);
+  }
+  void ask() {
+    while (!waiting.empty()) {
+      (void)waiting.back().again();
+      waiting.pop_back();
+    }
+  }
+};
 
 // One resolution in flight, or the root of a phase. Linked by `prev`, a
 // thread's frames are what it is computing, newest first; another thread reads
@@ -25,6 +98,8 @@ struct Frame {
   // A root's: the phase's token, found by any wait above it.
   const CancellationToken* cancelToken = nullptr;
   Frame* prev = nullptr;
+  // A driving resolution's: what its nest put off.
+  const PutOffs* putOffs = nullptr;
   // Set by whichever thread finds the cycle this resolution stands in.
   std::atomic<bool> cycle{false};
 };
@@ -182,23 +257,11 @@ void publish(RefState& state, RefState result) noexcept {
     if (&w->target == &state) w->wake.notify_one();
 }
 
+// Computes under `frame`: the answer published, or what leaves cleared and
+// published.
 template <class Compute, class Clear>
-RefState resolve_guarded(RefState& state, Compute compute, Clear clear) {
-  const std::atomic_ref st(state);
-  RefState current = st.load(std::memory_order_acquire);
-  for (;;) {
-    if (ref_running(current)) {
-      current = wait_for_reference(state);
-      continue;
-    }
-    if (current != RefState::Unresolved) return current;
-    if (st.compare_exchange_strong(current, RefState::Resolving,
-                                    std::memory_order_acq_rel,
-                                    std::memory_order_acquire))
-      break;
-  }
-  Frame frame{.ref = &state};
-  const Filed filed(frame);
+CURSIV_ALWAYS_INLINE inline RefState settle(RefState& state, const Frame& frame,
+                                            Compute compute, Clear clear) {
   try {
     RefState result = compute();
     if (frame.cycle.load(std::memory_order_relaxed) && has_error(result))
@@ -213,9 +276,79 @@ RefState resolve_guarded(RefState& state, Compute compute, Clear clear) {
     clear();
     publish(state, frame.cycle.load(std::memory_order_relaxed)
                        ? RefState::ErrorCycle
-                       : RefState::ErrorNotFound);
+                       : RefState::ErrorThrown);
     throw;
   }
+}
+
+// A nested resolution that starts in another stretch of native stack than the
+// one before it. The first of a nest drives: later ones are put off to it and
+// asked again from there, so a nest stays within about two stretches.
+CURSIV_COLD CURSIV_NOINLINE RefState resolve_far(Frame& frame,
+                                                 const Asked& asked) {
+  RefState& state = *asked.state;
+  const auto compute = [&] {
+    return look_up(asked.resolver, asked.handle, asked.target, asked.which,
+                   asked.items);
+  };
+  const auto clear = [&]() noexcept {
+    forget(asked.target, asked.which, asked.items);
+  };
+  for (const Frame* f = frame.prev; f != nullptr && f->ref != nullptr;
+       f = f->prev) {
+    if (f->putOffs == nullptr) continue;
+    const std::vector<const void*>& refs = f->putOffs->refs;
+    if (std::ranges::find(refs, frame.ref) != refs.end())
+      return settle(state, frame, compute, clear);
+    publish(state, RefState::Unresolved);
+    throw PutOff(asked);
+  }
+  PutOffs putOffs;
+  frame.putOffs = &putOffs;
+  return settle(
+      state, frame,
+      [&] {
+        for (;;) {
+          try {
+            putOffs.ask();
+            return compute();
+          } catch (const PutOff& putOff) {
+            clear();
+            putOffs.take(putOff.asked);
+          }
+        }
+      },
+      clear);
+}
+
+// `compute` and `clear` are the lookup as the usual path inlines it; the
+// values after them are the same lookup as a far resolution keeps it.
+template <class Compute, class Clear>
+RefState resolve_guarded(RefState& state, Compute compute, Clear clear,
+                         const RefResolver* resolver, std::uint32_t handle,
+                         AstNode** target, std::uint8_t* which,
+                         MultiRefItems* items) {
+  const std::atomic_ref st(state);
+  RefState current = st.load(std::memory_order_acquire);
+  for (;;) {
+    if (ref_running(current)) {
+      current = wait_for_reference(state);
+      continue;
+    }
+    if (current != RefState::Unresolved) return current;
+    if (st.compare_exchange_strong(current, RefState::Resolving,
+                                   std::memory_order_acq_rel,
+                                   std::memory_order_acquire))
+      break;
+  }
+  Frame frame{.ref = &state};
+  const Filed filed(frame);
+  if (((reinterpret_cast<std::uintptr_t>(&frame) ^
+        reinterpret_cast<std::uintptr_t>(frame.prev)) >>
+       kStretchBits) != 0 &&
+      frame.prev != nullptr && frame.prev->ref != nullptr) [[unlikely]]
+    return resolve_far(frame, {&state, resolver, handle, target, which, items});
+  return settle(state, frame, compute, clear);
 }
 
 }  // namespace
@@ -225,23 +358,17 @@ RefState resolve_one_slow(RefState& state, const RefResolver* resolver,
                           std::uint8_t& which) {
   return resolve_guarded(
       state,
-      [&] {
-        const auto answer = resolver->resolve(handle);
-        target = answer.target;
-        which = answer.which;
-        return answer.state;
-      },
-      [&]() noexcept {
-        target = nullptr;
-        which = 0;
-      });
+      [&] { return look_up(resolver, handle, &target, &which, nullptr); },
+      [&]() noexcept { forget(&target, &which, nullptr); }, resolver, handle,
+      &target, &which, nullptr);
 }
 
 RefState resolve_all_slow(RefState& state, const RefResolver* resolver,
                           std::uint32_t handle, MultiRefItems& out) {
   return resolve_guarded(
-      state, [&] { return resolver->resolveAll(handle, out); },
-      [&]() noexcept { out.clear(); });
+      state, [&] { return look_up(resolver, handle, nullptr, nullptr, &out); },
+      [&]() noexcept { forget(nullptr, nullptr, &out); }, resolver, handle,
+      nullptr, nullptr, &out);
 }
 
 }  // namespace cursiv::detail
@@ -264,7 +391,7 @@ void DefaultDocumentReferences::force(std::span<const detail::RefHandle> which,
       throw;
     } catch (...) {
       // A provider that threw failed one reference -- published as
-      // `ErrorNotFound` by the resolution guard -- not the whole list.
+      // `ErrorThrown` by the resolution guard -- not the whole list.
     }
   }
 }

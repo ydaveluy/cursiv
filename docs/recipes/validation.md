@@ -14,7 +14,9 @@ void checkNoDuplicateUse(const ast::Recipe& recipe,
 ```
 
 The type of the first parameter selects the nodes: this check runs on every
-`Recipe` node. You do not walk the tree yourself.
+`Recipe` node. You do not walk the tree yourself. A large document is checked
+on several threads at once, so a check keeps what it computes in local
+variables, not in the validator.
 
 ```cpp title="src/core/recipe/validation/RecipeValidator.cpp"
 #include "recipe/validation/RecipeValidator.hpp"

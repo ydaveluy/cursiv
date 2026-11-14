@@ -35,9 +35,9 @@ class ParseResult {
   // it indexes. See `nodes()`.
   std::pmr::vector<AstNode*> _nodes;
   friend struct Document;
-  void destroy_nodes() noexcept;
+  void destroyNodes() noexcept;
   // Runs the destructors of `gone`; their memory stays with the pool.
-  static void destroy_detached(std::span<AstNode* const> gone) noexcept;
+  static void destroyDetached(std::span<AstNode* const> gone) noexcept;
   friend class engine::AstReducer;
 
  public:
@@ -55,13 +55,13 @@ class ParseResult {
   [[nodiscard]] const Cst& cst() const noexcept;
   // Called by the language parser once the build is over, so readers get the
   // grammar from the tree.
-  void bind_grammar(const Grammar& grammar) noexcept;
-  void bind_grammar(std::shared_ptr<const Grammar> grammar) noexcept;
+  void bindGrammar(const Grammar& grammar) noexcept;
+  void bindGrammar(std::shared_ptr<const Grammar> grammar) noexcept;
   // Called by a translating parser: the tree and diagnostics move to the
   // document's offsets, and the translator's errors join them. A failure
   // leaves the result fit only to be destroyed.
-  void bind_translation(std::string_view document,
-                        std::unique_ptr<SourceTranslation> translation);
+  void bindTranslation(std::string_view document,
+                       std::unique_ptr<SourceTranslation> translation);
 
   AstNode* value = nullptr;
   // Held by pointer: this result moves, and every reference of the tree
@@ -69,14 +69,14 @@ class ParseResult {
   std::unique_ptr<DocumentReferences> references;
   // What the repairs said, then what the conversions added, in one list.
   std::vector<ParseDiagnostic> diagnostics;
-  AstBuildError error = AstBuildError::none;
+  AstBuildError error = AstBuildError::None;
   bool accepted = false;
 
   explicit operator bool() const noexcept;
 
   // The root as a `T`, null when it is not one.
   template <class T>
-  T* value_as() const {
+  T* valueAs() const {
     return const_cast<T*>(ast_cast<T>(value));
   }
 

@@ -32,13 +32,6 @@ void LocalSymbols::clear() noexcept {
 }
 namespace {
 
-// The smallest power of two that leaves the table at most half full, so a
-// linear probe stays short. Never zero: an empty table still has to answer.
-[[nodiscard]] std::size_t table_size(std::size_t entries) noexcept {
-  std::size_t size = 1;
-  while (size < entries * 2) size <<= 1u;
-  return size;
-}
 
 }  // namespace
 
@@ -49,15 +42,16 @@ void LocalSymbols::reserve(std::size_t entries) {
 
 void LocalSymbols::add(const AstNode* container,
                        AstNodeDescription description) {
-  // Null is the empty slot of every table `build_index` builds.
+  // Null is the empty slot of every table `buildIndex` builds.
   assert(container != nullptr && "a local symbol needs a container");
   _entries.push_back(std::move(description));
   _containerOf.push_back(container);
 }
 
-void LocalSymbols::build_index() {
+void LocalSymbols::buildIndex() {
   const std::size_t count = _entries.size();
-  if (count == 0) return;
+  // Indexing drops `_containerOf`: an indexed table has nothing left to do.
+  if (count == 0 || _containerOf.empty()) return;
   // Positions, counts and slots are 32 bits, and a table is at least twice its
   // entries: more than 2^31 entries is refused before anything changes.
   if (count > std::size_t{1} << 31u)
@@ -73,7 +67,7 @@ void LocalSymbols::build_index() {
                   [firstContainer](const AstNode* at) {
                     return at == firstContainer;
                   })) {
-    _groups.assign(table_size(1), Group{});
+    _groups.assign(detail::table_size(1), Group{});
     _groupMask = _groups.size() - 1;
     met.push_back(static_cast<std::uint32_t>(
         static_cast<std::size_t>(mix(firstContainer)) & _groupMask));
@@ -82,7 +76,7 @@ void LocalSymbols::build_index() {
     const std::size_t words = _groups.size() / 2;
     _held = std::make_unique<std::uint64_t[]>(1 + words);
     _held[0] = words * 64 - 1;
-    const std::size_t bit = held_bit(firstContainer, _held[0]);
+    const std::size_t bit = heldBit(firstContainer, _held[0]);
     _held[1 + (bit >> 6u)] |= std::uint64_t{1} << (bit & 63u);
     if (_entries.capacity() != count)
       std::vector<AstNodeDescription>(_entries).swap(_entries);
@@ -98,7 +92,7 @@ void LocalSymbols::build_index() {
       std::uint32_t slot;
       std::uint32_t next;
     };
-    const std::size_t wideSize = table_size(count);
+    const std::size_t wideSize = detail::table_size(count);
     const std::size_t wideMask = wideSize - 1;
     std::vector<std::uint64_t> taken((wideSize + 63) / 64);
     const auto isTaken = [&](std::size_t at) {
@@ -134,7 +128,7 @@ void LocalSymbols::build_index() {
       ++holders[lastHolder].count;
       holderOf[i] = lastHolder;
     }
-    _groups.assign(table_size(containers), Group{});
+    _groups.assign(detail::table_size(containers), Group{});
     _groupMask = _groups.size() - 1;
     // Sixty-four bits per container at least, so a false "maybe" is rare.
     const std::size_t words = _groups.size() / 2;
@@ -147,7 +141,7 @@ void LocalSymbols::build_index() {
         while (_groups[at].container != nullptr) at = (at + 1) & _groupMask;
         _groups[at] = Group{m.container, m.next, m.count};
         m.slot = static_cast<std::uint32_t>(at);
-        const std::size_t bit = held_bit(m.container, _held[0]);
+        const std::size_t bit = heldBit(m.container, _held[0]);
         _held[1 + (bit >> 6u)] |= std::uint64_t{1} << (bit & 63u);
       }
     met.reserve(containers);
@@ -194,7 +188,7 @@ void LocalSymbols::build_index() {
   // names. The groups go in the order they were met, the first keeping its
   // slots; each run is walked backwards so homonyms are prepended in
   // declaration order.
-  _names.assign(table_size(count), NameSlot{});
+  _names.assign(detail::table_size(count), NameSlot{});
   _nameMask = _names.size() - 1;
   _nextSameName.assign(count, kNone);
   for (const std::uint32_t g : met) {
@@ -203,7 +197,7 @@ void LocalSymbols::build_index() {
     const std::uint32_t begin = _groups[g].begin;
     for (std::uint32_t i = begin + _groups[g].count; i-- > begin;) {
       const std::string_view name = _entries[i].name;
-      const std::uint64_t hash = containerHash ^ hash_name(name);
+      const std::uint64_t hash = containerHash ^ hashName(name);
       const auto tag = static_cast<std::uint32_t>(hash >> 32u);
       std::size_t at = static_cast<std::size_t>(hash) & _nameMask;
       for (;;) {
@@ -292,7 +286,7 @@ const LocalSymbols::Shortcut* LocalSymbols::shortcut(
       if (!each_shortcut(
               tree->parseResult.nodes(), document, kStride,
               [&](const AstNode* at) {
-                return may_hold(at) && group(at) != nullptr;
+                return mayHold(at) && group(at) != nullptr;
               },
               [&](const AstNode* at, const AstNode* holder) {
                 found.push_back(Shortcut{at, holder});
@@ -300,7 +294,7 @@ const LocalSymbols::Shortcut* LocalSymbols::shortcut(
         found.clear();
       shortcuts->top = document;
       if (!found.empty()) {
-        shortcuts->table.assign(table_size(found.size()), Shortcut{});
+        shortcuts->table.assign(detail::table_size(found.size()), Shortcut{});
         shortcuts->mask = shortcuts->table.size() - 1;
         for (const Shortcut& entry : found) {
           std::size_t at =
@@ -330,11 +324,11 @@ const LocalSymbols::Shortcut* LocalSymbols::shortcut(
   }
 }
 
-LocalSymbols::NameMatches LocalSymbols::find_held(
+LocalSymbols::NameMatches LocalSymbols::findHeld(
     const AstNode* container, std::string_view name,
     std::uint64_t nameHash) const noexcept {
   assert((_entries.empty() || !_names.empty()) &&
-         "LocalSymbols::build_index() has to run before the first lookup");
+         "LocalSymbols::buildIndex() has to run before the first lookup");
   const std::uint64_t hash = mix(container) ^ nameHash;
   const auto tag = static_cast<std::uint32_t>(hash >> 32u);
   std::size_t at = static_cast<std::size_t>(hash) & _nameMask;
@@ -351,7 +345,7 @@ LocalSymbols::NameMatches LocalSymbols::find_held(
 const LocalSymbols::Group* LocalSymbols::group(
     const AstNode* container) const noexcept {
   assert((_entries.empty() || !_groups.empty()) &&
-         "LocalSymbols::build_index() has to run before the first lookup");
+         "LocalSymbols::buildIndex() has to run before the first lookup");
   if (_groups.empty()) return nullptr;
   std::size_t at = static_cast<std::size_t>(mix(container)) & _groupMask;
   for (;;) {
@@ -364,7 +358,7 @@ const LocalSymbols::Group* LocalSymbols::group(
 
 std::span<const AstNodeDescription> LocalSymbols::forContainer(
     const AstNode* container) const noexcept {
-  const Group* g = may_hold(container) ? group(container) : nullptr;
+  const Group* g = mayHold(container) ? group(container) : nullptr;
   return g == nullptr ? std::span<const AstNodeDescription>{}
                       : std::span<const AstNodeDescription>(
                             _entries.data() + g->begin, g->count);

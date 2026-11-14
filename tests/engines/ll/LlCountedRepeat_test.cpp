@@ -183,7 +183,7 @@ std::string join(const auto& words) {
 }
 
 std::string shape(const cursiv::ParseResult& r) {
-  const auto* doc = r.value_as<tscope::ast::Doc>();
+  const auto* doc = r.valueAs<tscope::ast::Doc>();
   if (doc == nullptr) return "-";
   std::string out = join(doc->p) + "|";
   for (const auto* item : doc->r) out += std::string(item->text) + ",";
@@ -306,7 +306,7 @@ int main() {
     auto a = ll->parse(text), b = lr->parse(text);
     CHECK(a.accepted && b.accepted && a.diagnostics.empty() &&
           b.diagnostics.empty());
-    const auto *x = a.value_as<Document>(), *y = b.value_as<Document>();
+    const auto *x = a.valueAs<Document>(), *y = b.valueAs<Document>();
     CHECK(x && y);
     if (!x || !y) continue;
     CHECK(x->entries.size() == y->entries.size());
@@ -380,7 +380,7 @@ int main() {
   const auto items = [&](const std::string& text) -> std::size_t {
     const std::string source = "long:" + text;
     const auto a = ll->parse(source);
-    const auto* document = a.value_as<Document>();
+    const auto* document = a.valueAs<Document>();
     if (!a.accepted || !a.diagnostics.empty() || document == nullptr ||
         document->entries.size() != 1)
       return ~std::size_t{0};
@@ -398,7 +398,7 @@ int main() {
   // A construct too long to count is no cheaper to invent for it: the repair
   // of an unknown character keeps the entry around it.
   const auto dear = ll->parse("long:dear @;");
-  const auto* document = dear.value_as<Document>();
+  const auto* document = dear.valueAs<Document>();
   CHECK(document != nullptr && document->entries.size() == 1);
   return cursiv::test::report("LlCountedRepeat_test");
 }
