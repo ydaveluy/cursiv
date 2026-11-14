@@ -3085,7 +3085,7 @@ void a_uri_is_read_from_the_disk_it_names() {
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
   {
-    std::ofstream out(dir / "a.ws");
+    std::ofstream out(dir / "a.ws", std::ios::binary);
     out << kSource;
   }
   const std::string uri = cursiv::path_to_file_uri((dir / "a.ws").string());
@@ -3118,7 +3118,7 @@ void an_update_reads_the_disk_again() {
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
   {
-    std::ofstream out(dir / "a.ws");
+    std::ofstream out(dir / "a.ws", std::ios::binary);
     out << kSource;
   }
   const std::string uri = cursiv::path_to_file_uri((dir / "a.ws").string());
@@ -3126,7 +3126,7 @@ void an_update_reads_the_disk_again() {
   const auto d = world.factory.fromUri(uri);
   const std::string edited = "datatype Other\n";
   {
-    std::ofstream out(dir / "a.ws");
+    std::ofstream out(dir / "a.ws", std::ios::binary);
     out << edited;
   }
   const auto revision = d->buildRevision;
@@ -3138,7 +3138,7 @@ void an_update_reads_the_disk_again() {
   // An open document outranks the disk.
   d->isOpen = true;
   {
-    std::ofstream out(dir / "a.ws");
+    std::ofstream out(dir / "a.ws", std::ios::binary);
     out << kSource;
   }
   world.factory.update(*d);
