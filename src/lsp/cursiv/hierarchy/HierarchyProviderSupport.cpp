@@ -49,7 +49,7 @@ const AstNode* hierarchy_node_of_item(const Documents& store,
     if (document->language != nullptr) {
       const auto name = document->language->nameProvider->getNameNode(
           *target, document.get());
-      if (name && name && name.begin() == offset) return target;
+      if (name && name.begin() == offset) return target;
     }
     const CstNodeView node{&document->parseResult.cst(), target->cstNodeId};
     if (!node || offset < node.begin() || offset >= node.end()) continue;
