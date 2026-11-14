@@ -54,7 +54,7 @@ inline constexpr bool kWindowsPaths =
 // The version is three numbers a language can test at preprocessing.
 static_assert(CURSIV_VERSION_MAJOR * 10000 + CURSIV_VERSION_MINOR * 100 +
                   CURSIV_VERSION_PATCH >=
-              300);
+              200);
 
 // The folded comparison and hash across every split a word boundary
 // makes: the hash reads the last word of a name a word long overlapping the
