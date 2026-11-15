@@ -286,9 +286,11 @@ void DefaultDocumentBuilder::removeDocumentUpdateListener(
 
 BuildOptions DefaultDocumentBuilder::getBuildOptions(
     const Document& document) const {
-  const std::scoped_lock lock(_stateMutex);
-  const auto at = _buildOptions.find(document.id);
-  if (at != _buildOptions.end()) return at->second.options;
+  {
+    const std::scoped_lock lock(_stateMutex);
+    const auto at = _buildOptions.find(document.id);
+    if (at != _buildOptions.end()) return at->second.options;
+  }
   return document.language != nullptr
              ? updateBuildOptionsFor(*document.language)
              : _updateBuildOptions;
@@ -324,12 +326,10 @@ void DefaultDocumentBuilder::build(std::span<Document* const> documents,
                       d->uri));
   runAttempt([&] {
     {
-      // A document not yet validated takes this request, whatever an earlier
-      // build left unfinished.
+      // Each document takes this request, whatever an earlier build left
+      // unfinished: a validated one then runs only the categories it lacks.
       const std::scoped_lock lock(_stateMutex);
-      for (const Document* const d : documents)
-        if (d->state.load() != DocumentState::Validated)
-          _buildOptions.erase(d->id);
+      for (const Document* const d : documents) _buildOptions.erase(d->id);
     }
     prepareBuild(documents, options);
     std::vector<std::string_view> uris;
@@ -408,15 +408,14 @@ void DefaultDocumentBuilder::buildDocuments(
     // phase alone: the tree, the scopes and both index halves stand.
     if (d->state.load() == DocumentState::Validated &&
         resultsAreIncomplete(*d, getBuildOptions(*d)))
-      d->state = DocumentState::IndexedReferences;
+      lower(*d, DocumentState::IndexedReferences);
     // Below `IndexedReferences` a memoised resolution has no index row to
     // protect it from the next reset: dropped here, while the write still
     // excludes every reader.
     if (d->state.load() < DocumentState::IndexedReferences)
       if (const CoreServices* language = d->language; language != nullptr) {
         language->linker->unlink(*d);
-        if (d->state.load() == DocumentState::Linked)
-          d->state = DocumentState::ComputedScopes;
+        lower(*d, DocumentState::ComputedScopes);
       }
   }
 
@@ -477,7 +476,7 @@ void DefaultDocumentBuilder::buildDocuments(
     // there, before that build allows immediate reads.
     for (Document* d : work)
       if (d->state.load() == DocumentState::Linked)
-        d->state = DocumentState::ComputedScopes;
+        lower(*d, DocumentState::ComputedScopes);
     throw;
   }
 
@@ -626,7 +625,7 @@ void DefaultDocumentBuilder::letGoOf(
       // Unindexed resolutions have no dependency row to protect their targets.
       if (const CoreServices* language = d->language; language != nullptr) {
         language->linker->unlink(*d);
-        if (d->state.load() == Linked) d->state = ComputedScopes;
+        lower(*d, ComputedScopes);
       }
     }
   }
@@ -704,7 +703,14 @@ void DefaultDocumentBuilder::resetDocument(Document& document,
   // The tree goes last: dropping it invalidates every pointer above, the local
   // symbols included, and makes the text replaceable.
   if (empty) document.parseResult = std::move(*empty);
+  lower(document, state);
+}
+
+void DefaultDocumentBuilder::lower(Document& document, DocumentState state) {
   if (document.state.load() > state) document.state = state;
+  tell_every(_updateListeners, [&](DocumentUpdateListener& listener) {
+    listener.onReset(document, state);
+  });
 }
 
 void DefaultDocumentBuilder::computeLocalScopes(

@@ -488,7 +488,7 @@ void a_crashing_hook_costs_itself_not_the_pass() {
 
   bool observed = false;
   for (const cursiv::Observation& o : world.sink->seen)
-    if (o.code == cursiv::ObservationCode::ValidationPreparationThrew &&
+    if (o.code == cursiv::ObservationCode::DocumentCheckThrew &&
         o.uri == document->uri)
       observed = true;
   CHECK(observed);

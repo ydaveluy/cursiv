@@ -16,7 +16,7 @@ namespace cursiv::engine {
 // `read` answers true or a frame must read something. True where `read` did.
 template <const auto& T, class Read>
 inline bool ll_caller_rows(const LlContext& c, Read&& read) {
-  static_assert(T.callerReadAt != nullptr);
+  static_assert(T.has(LlPart::CallerReadAt));
   // The document reads its end once the entry returns.
   constexpr std::uint32_t document =
       T.atn.edge(T.atn.state(T.atnStart).edge).follow;

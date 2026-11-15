@@ -20,7 +20,7 @@ namespace cursiv::engine {
 template <const auto& T>
 inline LexReading ll_open_reading(LlContext& c, TextOffset p) {
   if (c.reads.spent()) return LexReading{};
-  const auto mode = ll_err_mode<T>(c.laMode, c.section);
+  const auto mode = ll_err_mode<T>(c);
   TextOffset reached = p;
   LexReading r = lex_reading(LlLexTape<T>{}, c.src, c.len, mode, p, reached);
   if (const TextOffset end = ll_text_end<T>(c, p, reached, reached);
@@ -37,11 +37,11 @@ inline LexReading ll_open_reading(LlContext& c, TextOffset p) {
 template <const auto& T>
 inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from,
                                    TextOffset len, TextOffset& reached) {
-  const auto mode = ll_err_mode<T>(c.laMode, c.section);
+  const auto mode = ll_err_mode<T>(c);
   return lex_unmatched_end(
       LlLexTape<T>{}, c.src, len, mode, from,
       [&]([[maybe_unused]] unsigned char b) {
-        if constexpr (T.skipSet != nullptr)
+        if constexpr (T.has(LlPart::SkipSet))
           return kLlBytes<T, &LlTable::skipSet>[mode][b];
         return false;
       },

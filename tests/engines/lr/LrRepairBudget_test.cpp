@@ -261,6 +261,24 @@ void a_run_of_closers_stops_at_a_searchs_share() {
   CHECK(p.stats.work <= 2 * kShare);
 }
 
+// Past a search's share at the end, the frames to give up are found in time
+// linear in the stack: under each frame of the `a =` run the end reduces down
+// to the `(`, which refuses it, and trying every depth whole costs its square.
+void giving_up_frames_at_the_end_costs_no_square() {
+  constexpr std::uint64_t kShare = 1000;
+  const cursiv::engine::RepairBudget budget{.floor = 3,
+                                            .perByte = 0,
+                                            .perSearch = kShare,
+                                            .perParse = ~std::uint64_t{0}};
+  std::string text = "infix (";
+  for (unsigned i = 0; i < 50000; ++i) text += "a = ";
+  text += std::string(1000, '(');
+  const auto start = std::chrono::steady_clock::now();
+  const Parsed p = parse<gd::kTable>(text, gd::kDrive, budget);
+  CHECK(std::chrono::steady_clock::now() - start < 5s);
+  CHECK(p.accepted && p.entry && p.stats.degradedStops != 0);
+}
+
 // A completion the grammar makes as long as 2^63 tokens is cut at the share
 // one search has, and the parse says so.
 void a_completion_the_grammar_makes_long_is_cut() {
@@ -335,6 +353,7 @@ int main() {
   the_closers_of_a_deep_nest_hold_one_reading();
   a_forked_closer_costs_one_reading();
   a_run_of_closers_stops_at_a_searchs_share();
+  giving_up_frames_at_the_end_costs_no_square();
   a_completion_the_grammar_makes_long_is_cut();
   an_unbounded_budget_stays_unbounded();
   every_loop_stops_at_its_share();

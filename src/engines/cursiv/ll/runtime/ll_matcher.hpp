@@ -9,6 +9,7 @@
 #include <cstdint>
 
 #include "cursiv/utils/macros.hpp"
+#include "cursiv/ll/table/LlTable.hpp"
 #include "cursiv/shared/runtime/LexBoundary.hpp"
 #include "cursiv/shared/runtime/LexTape.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
@@ -19,7 +20,7 @@ template <const auto& T>
 inline bool ll_lex_accepts(std::uint16_t state, SymbolId term, const char* src,
                            TextOffset at, TextOffset len,
                            TextOffset& inspected) {
-  if constexpr (T.lexChecks == nullptr) return true;
+  if constexpr (!T.has(LlPart::LexChecks)) return true;
   if (T.lexChecks[state] == 0) {
     const auto bound = T.dfaBound[state];
     if (bound == kNoSet || at >= len) return true;
@@ -117,7 +118,7 @@ struct LlLexTape : LexTape<T> {
   CURSIV_ALWAYS_INLINE SymbolId qualified(std::uint16_t s, const char* src,
                                           TextOffset at, TextOffset len,
                                           TextOffset& far) const {
-    if (T.lexChecks == nullptr || T.lexChecks[s] == 0) {
+    if (!T.has(LlPart::LexChecks) || T.lexChecks[s] == 0) {
       const auto t = static_cast<SymbolId>(T.dfaAccept[s] - 1u);
       const bool skipped = Skips && skip->test(t);
       if (!skipped && (T.dfaBound[s] == kNoSet || at >= len)) return t;

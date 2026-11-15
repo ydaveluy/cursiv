@@ -349,7 +349,7 @@ Write write_text_of(AstNode& owner, [[maybe_unused]] ElementId payload,
     // spells, and resolving it is the linker's verdict, not the walk's.
     typename F::held slot{};
     slot.refText = text;
-    return store<F, typename F::held>(o, slot);
+    return store<F, typename F::held>(o, std::move(slot));
   } else {
     return text_sources<C, F,
                         typename cursiv::detail::payload_of<

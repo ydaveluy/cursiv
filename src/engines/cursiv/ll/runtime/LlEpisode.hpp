@@ -697,7 +697,7 @@ class LlEpisode {
   // grammar has regions, the first token it reads names it.
   std::pair<std::uint16_t, std::uint16_t> look_of(const LlThread& t) const {
     std::uint16_t mode = T.look_mode(dec());
-    if constexpr (T.lookMode != nullptr) {
+    if constexpr (T.has(LlPart::LookMode)) {
       if (const std::uint16_t own = ll_read_mode<T>(t.state); own != kNoRow)
         mode = own;
       return {ll_skips_of<T>(mode, joined()), mode};
@@ -771,12 +771,12 @@ class LlEpisode {
   // Whether the condition edge is the insertion of an implied token: the only
   // condition position that names a terminal.
   static bool implied_edge(std::uint32_t edge) {
-    return T.edgeNode != nullptr && T.nodes[T.edgeNode[edge]].term != kNoRow;
+    return T.has(LlPart::EdgeNode) && T.nodes[T.edgeNode[edge]].term != kNoRow;
   }
 
   // Whether trivia stands at `at` under the skip configuration of some reading.
   bool blank_for_any(const std::vector<LlThread>& threads, TextOffset at) {
-    if constexpr (T.lookMode == nullptr) {
+    if constexpr (!T.has(LlPart::LookMode)) {
       return blank_at(at, look_of(threads.front()).second);
     } else {
       std::vector<std::uint16_t> seen;
@@ -794,7 +794,7 @@ class LlEpisode {
   // Whether some reading crosses the gap under another skip configuration than
   // the lead's.
   bool crosses_apart(const std::vector<LlThread>& threads) const {
-    if constexpr (T.lookMode != nullptr) {
+    if constexpr (T.has(LlPart::LookMode)) {
       const auto lead = look_of(threads.front()).first;
       for (const LlThread& t : threads)
         if (look_of(t).first != lead) return true;
@@ -1141,7 +1141,7 @@ class LlEpisode {
       top = next.top;
       x.begin = next.token.begin;
       x.end = next.token.end;
-      if constexpr (T.lookMode != nullptr)
+      if constexpr (T.has(LlPart::LookMode))
         if (!one_crossing(threads, viable, from, next, read, preAt, preHeld))
           return Verdict::restart;
     }

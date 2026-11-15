@@ -1036,8 +1036,8 @@ void a_document_value_is_partitioned_and_can_be_read_without_computing() {
 }
 
 // A change clears an unstaged answer when the update is reported, and a staged
-// one when its document reaches the cache's state. A deletion clears either at
-// once; the other document keeps its answer throughout.
+// one as its document goes back, then again when it reaches the cache's state.
+// A deletion clears either at once; the other document keeps its answer.
 void document_values_follow_updates_states_and_deletions() {
   for (const cursiv::DocumentState eviction :
        {cursiv::DocumentState::Linked,
@@ -1071,7 +1071,8 @@ void document_values_follow_updates_states_and_deletions() {
         if (state == static_cast<cursiv::DocumentState>(
                          static_cast<unsigned>(eviction) - 1)) {
           CHECK(!plain.get(own).has_value());
-          CHECK(staged.get(own) == 21);
+          CHECK(!staged.get(own).has_value());
+          CHECK(staged.get(own, [] { return 24; }) == 24);
           ++before;
         }
         if (state == eviction) {
@@ -1099,6 +1100,88 @@ void document_values_follow_updates_states_and_deletions() {
     CHECK(staged.get(other) == 22);
     CHECK(observer.reached == 1);  // a deleted document reaches no state
   }
+}
+
+// `b` reads `a`: the change of `a` sends `b` back to `ComputedScopes`, its tree
+// kept. What a staged cache held for `b` may point into the old `a`, so it is
+// gone before the rebuild lets a reader in, whatever state `b` stood at.
+void a_staged_value_goes_when_its_document_goes_back() {
+  for (const cursiv::DocumentState eviction :
+       {cursiv::DocumentState::Linked,
+        cursiv::DocumentState::IndexedReferences}) {
+    World world;
+    cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
+    cursiv::Document* const b =
+        world.add("file:///b.ws", "entity B { x: A }\n");
+    cursiv::Document* const documents[] = {a, b};
+    world.shared.documentBuilder->build(documents);
+    cursiv::DocumentCache<int> perDocument(world.shared, eviction);
+    cursiv::WorkspaceCache<int> whole(world.shared, eviction);
+
+    // Told as `a` is parsed again, while `b` waits below the state.
+    struct Observer : cursiv::DocumentPhaseListener {
+      cursiv::DocumentCache<int>& perDocument;
+      cursiv::WorkspaceCache<int>& whole;
+      cursiv::DocumentId a, b;
+      int told = 0;
+      Observer(cursiv::DocumentCache<int>& p, cursiv::WorkspaceCache<int>& w,
+               cursiv::DocumentId x, cursiv::DocumentId y)
+          : perDocument(p), whole(w), a(x), b(y) {}
+      void onDocumentPhase(cursiv::Document& document,
+                           cursiv::DocumentState state,
+                           const cursiv::CancellationToken&) override {
+        if (document.id != a || state != cursiv::DocumentState::Parsed) return;
+        CHECK(!perDocument.get(b).has_value());
+        CHECK(whole.get([] { return 2; }) == 2);
+        ++told;
+      }
+    } observer(perDocument, whole, a->id, b->id);
+    world.shared.documentBuilder->addDocumentPhaseListener(observer);
+    const std::string_view changed[] = {"file:///a.ws"};
+
+    // From the state the build left `b` at.
+    CHECK(perDocument.get(b->id, [] { return 1; }) == 1);
+    CHECK(whole.get([] { return 1; }) == 1);
+    world.shared.documentBuilder->update(changed, {});
+    CHECK(observer.told == 1);
+
+    // From `ComputedScopes`, where `b` stays: its value may still read `a`.
+    world.shared.documentBuilder->resetToState(
+        *b, cursiv::DocumentState::ComputedScopes);
+    CHECK(perDocument.get(b->id, [] { return 1; }) == 1);
+    CHECK(whole.get([] { return 1; }) == 1);
+    world.shared.documentBuilder->update(changed, {});
+    CHECK(observer.told == 2);
+    world.shared.documentBuilder->removeDocumentPhaseListener(observer);
+  }
+}
+
+// A listener of the update of `a` sends `b` back to `Changed`: `b` is parsed
+// again though the update never names it, and what a cache without a state
+// held for it read the tree that went.
+void a_value_goes_with_the_tree_it_read() {
+  World world;
+  cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
+  cursiv::Document* const b = world.add("file:///b.ws", "datatype B\n");
+  cursiv::Document* const documents[] = {a, b};
+  world.shared.documentBuilder->build(documents);
+  cursiv::DocumentCache<int> cache(world.shared);
+  struct Resets : cursiv::DocumentUpdateListener {
+    cursiv::DocumentBuilder& builder;
+    cursiv::Document& other;
+    Resets(cursiv::DocumentBuilder& to, cursiv::Document& d)
+        : builder(to), other(d) {}
+    void onUpdate(std::span<const std::string_view>,
+                  std::span<const std::string_view>) override {
+      builder.resetToState(other, cursiv::DocumentState::Changed);
+    }
+  } resets(*world.shared.documentBuilder, *b);
+  CHECK(cache.get(b->id, [] { return 1; }) == 1);
+  world.shared.documentBuilder->addDocumentUpdateListener(resets);
+  const std::string_view changed[] = {"file:///a.ws"};
+  world.shared.documentBuilder->update(changed, {});
+  world.shared.documentBuilder->removeDocumentUpdateListener(resets);
+  CHECK(!cache.get(b->id).has_value());
 }
 
 #if !defined(__wasi__) || defined(_REENTRANT)
@@ -1200,10 +1283,10 @@ void a_stateless_workspace_cache_empties_on_any_update() {
   CHECK(cache.get(1, provider) == 2);  // the update emptied it
 }
 
-// With an eviction state, a change empties the cache when the rebuild reaches
-// that state, and a deletion when it is reported (a deleted document reaches
-// no state). The two variants below tell the staged mode from the stateless
-// one.
+// With an eviction state, a change empties the cache as the document goes back
+// and when the rebuild reaches that state, and a deletion when it is reported
+// (a deleted document reaches no state). The two variants below tell the
+// staged mode from the stateless one.
 void a_staged_workspace_cache_empties_at_its_state() {
   World world;
   cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
@@ -1764,6 +1847,8 @@ void run() {
   single_value_caches_do_not_require_hashable_values();
   a_document_value_is_partitioned_and_can_be_read_without_computing();
   document_values_follow_updates_states_and_deletions();
+  a_staged_value_goes_when_its_document_goes_back();
+  a_value_goes_with_the_tree_it_read();
 #if !defined(__wasi__) || defined(_REENTRANT)
   document_value_providers_are_invalidated_only_by_their_partition();
   value_providers_do_not_wait_and_clear_rejects_stale_publication();

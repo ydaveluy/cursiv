@@ -1,5 +1,8 @@
 # Behaviour tests do not need the backend cost of full Release optimisation.
 add_compile_options($<$<CONFIG:Release>:-O1>)
+# `-fsanitize=undefined` implies this flag, under which g++ cannot compare
+# addresses in a constant expression: no grammar may need that.
+add_compile_options($<$<CXX_COMPILER_ID:GNU>:-fno-delete-null-pointer-checks>)
 
 # Unit tests skip Binaryen, which Clang runs at link; benchmarks in the sibling
 # directory keep it.

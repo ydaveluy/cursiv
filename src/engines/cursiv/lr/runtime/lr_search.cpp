@@ -163,7 +163,8 @@ void lr_search_start(const LrContext& c, LrSearch& s) {
   lr_search_reset(s);
   s.costBase = c.cost;
   // A fault a stopped search left open goes on.
-  lr_search_root(s, c, c.committed, c.stack, c.tape.len(), 0, !s.fault.open);
+  lr_search_root(s, c, c.committed, c.stack, c.tape.len(), 0, 0,
+                 !s.fault.open);
 }
 
 void lr_search_plan(const LrContext& c, LrSearch& s, std::uint32_t ci,

@@ -76,7 +76,7 @@ inline const LlMask<T.termWords>& ll_unrefused_mask(
 template <const auto& T>
 inline bool ll_wants_ahead(std::uint16_t st,
                            const LlMask<T.termWords>& wanted) {
-  if (T.lexLive == nullptr) return true;
+  if (!T.has(LlPart::LexLive)) return true;
   const std::uint64_t* const live = T.dfa_live_set(st).w;
   for (std::uint32_t k = 0; k < T.termWords; ++k)
     if ((live[k] & wanted.word(k)) != 0) return true;
@@ -136,7 +136,7 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
   for (;;) {
     if (T.dfaAccept[st] != 0 && i < len && T.lex_bounded(st))
       far = std::max(far, tape.bound_reach(st, src, i, len));
-    if (const bool checked = T.lexChecks != nullptr && T.lexChecks[st] != 0;
+    if (const bool checked = T.has(LlPart::LexChecks) && T.lexChecks[st] != 0;
         T.dfaAccept[st] != 0 &&
         (checked || !lex_bound_refuses(LlLexTape<T>{}, st, src, i, len))) {
       // Word by word, not terminal by terminal: the match asks this at every
@@ -329,7 +329,7 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
   if (different != nullptr && shorter) *different = true;
   // What a refused word the matcher asked read counts, whichever terminal
   // was elected: its reach is a halt, the byte there read.
-  if constexpr (T.termReach != nullptr)
+  if constexpr (T.has(LlPart::TermReach))
     if (from < len)
       for (const std::uint16_t t : kLlRefusing<T>)
         if (wanted.test(t)) {
@@ -416,7 +416,7 @@ inline void ll_first_read(const LlContext& c, const LlTable::Decision& dec,
 // Conditions and document EOF retain their own skip configuration.
 template <const auto& T>
 inline std::uint16_t ll_read_mode(std::uint32_t state) {
-  if constexpr (T.lookMode != nullptr) {
+  if constexpr (T.has(LlPart::LookMode)) {
     const LlAtnState& s = T.atn.state(state);
     for (std::uint32_t i = 0; i < s.nedges; ++i) {
       using enum LlEdgeKind;

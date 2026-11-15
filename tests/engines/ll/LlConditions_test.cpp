@@ -84,10 +84,12 @@ constexpr auto gapTable = [] {
   t.atn = {states, 8, edges, starts, callers, returns, nullptr};
   t.atnStart = 6;
   t.edgeNode = nullptr;
+  ll_terms::set_part(t, cursiv::engine::LlPart::EdgeNode, false);
   t.nrules = 2;
   t.decisions = decisions;
   t.ndecisions = 1;
   t.condition = line_condition;
+  ll_terms::set_part(t, cursiv::engine::LlPart::Condition, true);
   t.ngapConds = 2;
   return t;
 }();
@@ -97,6 +99,7 @@ constexpr auto sectionTable = [] {
   t.condition = end_condition;
   t.nsections = 2;
   t.sectionEnd = sectionEnds;
+  ll_terms::set_part(t, cursiv::engine::LlPart::SectionEnd, true);
   return t;
 }();
 
@@ -485,8 +488,11 @@ bool guarded_head(const char* text, cursiv::TextOffset len, unsigned,
   const std::string_view input(text, len);
   return input.starts_with('a') && !input.starts_with("abcdef");
 }
-constexpr cursiv::engine::LlTable headTable{.condition = guarded_head,
-                                            .ngapConds = 1};
+constexpr auto headTable = [] {
+  cursiv::engine::LlTable t{.condition = guarded_head, .ngapConds = 1};
+  ll_terms::set_part(t, cursiv::engine::LlPart::Condition, true);
+  return t;
+}();
 
 void prediction_keeps_head_guard_reads_beyond_the_candidate() {
   for (const std::string_view text : {"abcdef trailer", "abcdeg trailer", "a"}) {

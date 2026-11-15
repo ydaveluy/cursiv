@@ -33,7 +33,9 @@ struct LrColdTables {
   std::array<std::uint16_t, S.accStands> accStand{};
   std::array<std::uint8_t, S.accPriorities> accPriority{};
 
-  // The production every reduce of a state names, if one.
+  // The production every reduce of a state names, if one; one neither guarded
+  // nor a region exit only where the state neither accepts nor refuses a token
+  // of its level.
   std::array<std::uint16_t, S.states> soleReduce{};
   std::array<std::uint8_t, S.states> readsToken{};
   // States that take the same gotos and hold the same conditions of the gap

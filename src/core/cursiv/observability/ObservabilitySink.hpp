@@ -25,9 +25,9 @@ enum class ObservationCode : std::uint8_t {
   // the pass carried on. Reported here too: a throwing check is a bug of the
   // language, not of the document.
   ValidationCheckThrew,
-  // A document-level preparation hook threw; likewise, with the diagnostic on
-  // the whole document.
-  ValidationPreparationThrew,
+  // A document check threw; likewise, with the diagnostic on the whole
+  // document.
+  DocumentCheckThrew,
   // A file the scan or an update found and then could not read: the scan leaves
   // it out of the store, an update leaves it empty, and the others are read.
   WorkspaceDocumentReadFailed,

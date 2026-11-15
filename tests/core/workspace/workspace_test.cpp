@@ -1613,6 +1613,39 @@ void a_duplicate_in_the_set_builds_once() {
   for (const std::size_t count : received.counts) CHECK(count <= 1);
 }
 
+// A language's options may read the builder: they are asked off its lock.
+void a_language_option_hook_may_read_the_builder() {
+  struct Reading final : cursiv::DefaultDocumentBuilder {
+    using DefaultDocumentBuilder::DefaultDocumentBuilder;
+    const cursiv::Document* built = nullptr;
+    mutable bool asking = false;
+    cursiv::BuildOptions updateBuildOptionsFor(
+        const cursiv::CoreServices& language) const override {
+      if (built != nullptr && !asking) {
+        asking = true;
+        (void)getBuildOptions(*built);
+        asking = false;
+      }
+      return DefaultDocumentBuilder::updateBuildOptionsFor(language);
+    }
+    cursiv::BuildOptions optionsOf(const cursiv::Document& d) const {
+      return getBuildOptions(d);
+    }
+  };
+  World world;
+  auto builder = std::make_unique<Reading>(world.shared);
+  Reading* const reading = builder.get();
+  world.shared.documentBuilder = std::move(builder);
+  cursiv::Document* const built = world.add("file:///built.ws", "datatype A");
+  cursiv::Document* const set[] = {built};
+  world.shared.documentBuilder->build(set);
+  reading->built = built;
+  const cursiv::Document* const fresh =
+      world.add("file:///fresh.ws", "datatype B");
+  CHECK(reading->optionsOf(*fresh).validation ==
+        reading->updateBuildOptions().validation);
+}
+
 // The four answers of a wait: reached now, unreachable for a document that is
 // not there, cancelled before anything.
 void a_wait_answers_all_its_outcomes() {
@@ -2705,6 +2738,56 @@ void an_update_runs_a_category_added_to_its_options() {
   CHECK(a->diagnostics.size() == 1);
 }
 
+// A build asks a validated document for what it asks now, whatever a build
+// cut short left recorded: the category it lacks runs.
+void a_build_runs_a_category_a_cut_build_did_not_ask() {
+  World world([](cursiv::CoreServices& language) {
+    language.validationRegistry->registerAfterDocument(
+        [](const cursiv::Document&, cursiv::ValidationAcceptor& accept,
+           const cursiv::CancellationToken&) {
+          accept.accept(cursiv::TextRange{0, 0},
+                        cursiv::DiagnosticSeverity::Warning, "slow check ran");
+        },
+        &cursiv::slow);
+  });
+  // One thread, so `a` is validated before `b`, and the cut falls between.
+  world.shared.taskScheduler = std::make_unique<cursiv::TaskScheduler>(0);
+  cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
+  cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
+  cursiv::Document* const b = world.add("file:///b.ws", "datatype B\n");
+  cursiv::CancellationTokenSource source;
+  struct Cut final : cursiv::DocumentPhaseListener {
+    cursiv::CancellationTokenSource* source = nullptr;
+    const cursiv::Document* after = nullptr;
+    void onDocumentPhase(cursiv::Document& document,
+                         cursiv::DocumentState state,
+                         const cursiv::CancellationToken&) override {
+      if (state == cursiv::DocumentState::Validated && &document == after)
+        source->request_stop();
+    }
+  } cut;
+  cut.source = &source;
+  cut.after = a;
+  builder.addDocumentPhaseListener(cut);
+  cursiv::Document* const both[] = {a, b};
+  bool cancelled = false;
+  try {
+    builder.build(both, builder.updateBuildOptions(), source.get_token());
+  } catch (const cursiv::OperationCancelled&) {
+    cancelled = true;
+  }
+  builder.removeDocumentPhaseListener(cut);
+  CHECK(cancelled);
+  CHECK(a->state.load() == cursiv::DocumentState::Validated);
+  CHECK(a->diagnostics.empty());
+
+  cursiv::BuildOptions wider = builder.updateBuildOptions();
+  wider.validationCategories.push_back(&cursiv::slow);
+  cursiv::Document* const one[] = {a};
+  builder.build(one, wider);
+  CHECK(a->diagnostics.size() == 1);
+}
+
 // A file the store does not hold waits unparsed for the parse phase: the
 // write that installs it parses nothing, so the parse runs in parallel and
 // under the token. A cancelled update leaves it unparsed; the next parses it.
@@ -2964,6 +3047,7 @@ void run() {
   a_build_replaces_an_interrupted_request();
   a_duplicate_in_the_set_builds_once();
   a_wait_answers_all_its_outcomes();
+  a_language_option_hook_may_read_the_builder();
   a_wait_can_precede_the_first_build();
   a_document_knows_its_links_are_broken();
   a_failed_build_answers_its_waiters();
@@ -2991,6 +3075,7 @@ void run() {
   an_update_validates_what_was_built_without_validation();
   an_update_builds_with_the_update_options();
   an_update_runs_a_category_added_to_its_options();
+  a_build_runs_a_category_a_cut_build_did_not_ask();
 }
 
 }  // namespace document_builder

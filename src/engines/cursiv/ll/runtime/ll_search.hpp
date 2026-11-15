@@ -300,7 +300,8 @@ Token ll_search_peek_ahead(const LlContext& c, LlSearch& s, LlAhead& ahead,
   if (!cross && c.la.sym < T.nterms && c.la.sym != kEofSymbol &&
       !T.mode_admits(T.errMode, c.la.sym))
     return c.la;
-  const auto mode = ll_err_mode<T>(look != kNoRow ? look : c.laMode, c.section);
+  const auto mode =
+      look != kNoRow ? ll_err_mode<T>(look, c.section) : ll_err_mode<T>(c);
   TextOffset p = ahead.p;
   bool head = ahead.head;
   for (;;) {
@@ -352,14 +353,14 @@ Token ll_search_peek_ahead(const LlContext& c, LlSearch& s, LlAhead& ahead,
   }
 }
 
-// A single skip configuration belongs to the active positions, even where
-// there is no choice (and thus no lookMode table). Mixed configurations keep
-// the broad reading; none may impose its trivia on the others.
+// The mode of the active positions where they all skip the same trivia, even
+// where there is no choice (and thus no lookMode table). Where they skip
+// different trivia, `kNoRow`: the token is read as a fault at the descent's.
 template <const auto& T>
 std::uint16_t ll_search_look(const LlConfig* cfg, std::size_t n,
                              LlMask<T.termWords>& viable, bool joined) {
-  if constexpr (T.edgeNode == nullptr || T.modeTrivia == nullptr ||
-                T.modeJoinedTrivia == nullptr)
+  if constexpr (!T.has(LlPart::EdgeNode) || !T.has(LlPart::ModeTrivia) ||
+                !T.has(LlPart::ModeJoinedTrivia))
     return kNoRow;
   const auto blanks = joined ? T.modeJoinedTrivia : T.modeTrivia;
   std::uint16_t mode = kNoRow;
@@ -758,7 +759,7 @@ std::uint16_t ll_search_lex_mode(const LlContext& c, const LlSearch& s,
   const auto look =
       ll_search_look<T>(s.pool.data() + r.cfg, r.ncfg, viable,
                         kIndented<T> && r.ahead.at.depth != 0);
-  return look != kNoRow ? look : ll_err_mode<T>(c.laMode, c.section);
+  return look != kNoRow ? look : ll_err_mode<T>(c);
 }
 
 // The token in hand read as `term` up to `end` at `cost`: `rep` where its
@@ -892,7 +893,7 @@ TextOffset ll_search_drop_end(LlContext& c, LlSearch& s, std::uint32_t bi,
   const std::uint64_t key = std::uint64_t{tok.begin} << 16 | own;
   if (const auto it = s.drops.find(key); it != s.drops.end())
     return it->second;
-  for (const std::uint16_t mode : {own, ll_err_mode<T>(c.laMode, c.section)}) {
+  for (const std::uint16_t mode : {own, ll_err_mode<T>(c)}) {
     const LexReading r = c.reads.spent()
                              ? LexReading{}
                              : ll_search_reading<T>(c, s, tok.begin, mode);
@@ -1087,7 +1088,7 @@ template <const auto& T>
 bool ll_search_unread([[maybe_unused]] const LlContext& c,
                       [[maybe_unused]] LlSearch& s,
                       [[maybe_unused]] TextOffset p) {
-  if constexpr (T.errModeOf == nullptr) {
+  if constexpr (!T.has(LlPart::ErrModeOf)) {
     return true;
   } else {
     std::uint16_t mode = T.errMode;

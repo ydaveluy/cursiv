@@ -367,7 +367,21 @@ struct Percent {
   int v = 0;
 };
 
+enum class Level { low, high };
+
 }  // namespace tab::own
+
+// An enum's own converter, which reads abbreviations only.
+template <>
+struct cursiv::default_converter<tab::own::Level> {
+  static constexpr cursiv::ConversionResult<tab::own::Level> convert(
+      std::string_view t) {
+    using R = cursiv::ConversionResult<tab::own::Level>;
+    if (t == "LO") return R::ok(tab::own::Level::low);
+    if (t == "HI") return R::ok(tab::own::Level::high);
+    return R::err("not LO or HI");
+  }
+};
 
 template <>
 struct cursiv::default_converter<tab::own::Percent> {
@@ -386,6 +400,7 @@ namespace tab::own {
 
 struct Node : cursiv::Extends<cursiv::AstNode> {
   Percent share;
+  Level level = Level::low;
 };
 
 }  // namespace tab::own
@@ -647,6 +662,9 @@ struct All : cursiv::GrammarSpec {
   struct OwnDIGITS : terminal<some(d)> {};
   struct OwnPlain
       : rule<create<own::Node>(assign<&own::Node::share>(ref<OwnDIGITS>))> {};
+  struct OwnLevel : rule<create<own::Node>(
+                        assign<&own::Node::level>(as<own::Level>(ikw<"high">)))> {
+  };
 
   struct OptID : terminal<some(cr<"a-z">)> {};
   struct OptIt
@@ -697,6 +715,7 @@ struct All : cursiv::GrammarSpec {
              (kw<"$adopt"> + ref<AdoptDoc>) | (kw<"$climb"> + ref<ClimbE>) |
              (kw<"$hoist"> + ref<HoistRoot>) | (kw<"$text"> + ref<TextRoot>) |
              (kw<"$own"> + ref<OwnRoot>) | (kw<"$ownplain"> + ref<OwnPlain>) |
+             (kw<"$ownlevel"> + ref<OwnLevel>) |
              (kw<"$rebind"> + ref<RebindRoot>) | (kw<"$opt"> + ref<OptRoot>) |
              (kw<"$inl"> + ref<InlRoot>)> {};
   using entry = Entry;

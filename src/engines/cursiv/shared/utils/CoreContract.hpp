@@ -70,6 +70,7 @@ using cursiv::detail::Doc;
 using cursiv::detail::Embed;
 using cursiv::detail::enum_probes;
 using cursiv::detail::enumerator_name;
+using cursiv::detail::find_enumerator;
 using cursiv::detail::Epsilon;
 using cursiv::detail::erased_src_t;
 using cursiv::detail::ExprShape;

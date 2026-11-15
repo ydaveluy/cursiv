@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/grammar/Association.hpp"
 #include "cursiv/lr/gen/LrLexView.hpp"
 #include "cursiv/lr/gen/LrLowProd.hpp"
 #include "cursiv/lr/gen/lr_build_fold.hpp"
@@ -71,9 +72,6 @@ struct LrDeriving {
     return row == kNoElement ? kNoElement : sites[row];
   }
 
-  // The nonterminals a written row's record may reduce to. A production that
-  // may start with a nullable symbol leaves its row unnamed: its record sits on
-  // an empty frame, and the goto would leave from it.
   // Per state, the one state whose shifts and gotos reach it, or `kDeadState`;
   // `kDeadState` too where the move may leave a level or a bracket open.
   void preds(LrDerivedRows& rows) const {
@@ -155,6 +153,9 @@ struct LrDeriving {
       if (open[s]) rows.preds[s] = kDeadState;
   }
 
+  // The nonterminals a written row's record may reduce to. A production that
+  // may start with a nullable symbol leaves its row unnamed: its record sits on
+  // an empty frame, and the goto would leave from it.
   void row_lhs(LrDerivedRows& rows, std::size_t nrows) const {
     const auto& c = a.cfg;
     const std::vector<std::uint8_t>& nullable = a.nullable;
@@ -181,22 +182,41 @@ struct LrDeriving {
     rows.rowLhsBase.push_back(static_cast<std::uint32_t>(rows.rowLhs.size()));
   }
 
+  // Whether state `s` leaves without action a token of production `p`'s own
+  // level, one that groups nothing: the goto after `p` may take that token.
+  bool level_refuses(std::uint32_t s, std::uint16_t p) const {
+    const std::uint8_t step = a.cfg.prods[p].prec;
+    for (unsigned t = 0; step != 0 && t < a.cfg.nterms; ++t)
+      if (a.cfg.termBuild[t].prec == step &&
+          a.cfg.termBuild[t].assoc == Association::Non && !a.follow[s].test(t))
+        return true;
+    return false;
+  }
+
+  // The production every reduce of a state names: a guarded one or a region
+  // exit wherever no other is reduced, any other only where neither an
+  // accept nor its level's refusal stands beside it.
   void repair_states(LrDerivedRows& rows) const {
     rows.soleReduce.assign(a.nstates, kLrNoProd);
     rows.readsToken.resize(a.nstates);
     for (std::uint32_t s = 0; s < a.nstates; ++s) {
       auto& sole = rows.soleReduce[s];
-      bool multiple = false;
+      bool multiple = false, accepts = false;
       bool reads = a.actionCount[s] == 0;
       for (const LrAction& x : a.action_row(s)) {
         reads = reads || lr_takes_token(x.kind);
+        accepts = accepts || x.kind == LrActionKind::accept;
         if (x.kind != LrActionKind::reduce) continue;
         if (sole == kLrNoProd)
           sole = x.arg;
         else if (sole != x.arg)
           multiple = true;
       }
-      if (multiple) sole = kLrNoProd;
+      if (multiple ||
+          (sole != kLrNoProd && a.cfg.prods[sole].gap == 0 &&
+           !rows.reductions[sole].regionExit &&
+           (accepts || level_refuses(s, sole))))
+        sole = kLrNoProd;
       rows.readsToken[s] = reads;
     }
   }
@@ -301,6 +321,7 @@ void lr_derive_tables(LrBuildTable& a, std::span<const ElementId> sites) {
     throw std::logic_error("LR: completion sites do not cover the record rows");
   const LrDeriving d{a, sites};
   LrDerivedRows r;
+  lr_derive_reductions(a, r);
   d.repair_states(r);
   if (a.nconflicts != 0 || a.multiCand) d.goto_classes(r);
   d.row_lhs(r, sites.size());
@@ -312,7 +333,6 @@ void lr_derive_tables(LrBuildTable& a, std::span<const ElementId> sites) {
   r.skipStop = std::move(blanks.stop);
   lr_derive_lexical(a, r);
   d.repair_tables(r);
-  lr_derive_reductions(a, r);
   static_cast<LrDerivedRows&>(a) = std::move(r);
   a.modeWinPool = SetPool(a.modeWin.data(), a.nmodes);
   if (a.modeFlag.size() != 0)

@@ -777,11 +777,12 @@ std::uint64_t lr_edits_fold(const std::vector<LrEdit>& links, std::uint32_t l);
 void lr_search_reset(LrSearch& s);
 
 // A root is refused, so it costs at least one edit. Adding its frames costs
-// as much as reading that many bytes.
+// as much as reading that many bytes. `past`: the author's tokens its frames
+// hold beyond where the search set out.
 template <class Reading>
 void lr_search_root(LrSearch& s, const Reading& v, TextOffset at,
-                    const LrStack& frames, NodeCount len, std::uint32_t choice,
-                    bool fresh) {
+                    const LrStack& frames, NodeCount len, std::uint32_t past,
+                    std::uint32_t choice, bool fresh) {
   const auto src = static_cast<std::uint32_t>(s.sources.size());
   const LrCactus::Top top = s.cactus.add(frames, src);
   s.work += frames.size() / kRepairLexBytes;
@@ -793,6 +794,7 @@ void lr_search_root(LrSearch& s, const Reading& v, TextOffset at,
   root.virt = v.virt;
   root.indent = v.indent;
   root.link = s.link(LrEdit{.choice = choice});
+  s.links[root.link].dropped = past;
   root.fresh = fresh;
   s.sources.push_back(LrSearch::Source{.frames = &frames, .scanned = len});
   s.configs.push_back(root);
@@ -803,8 +805,8 @@ void lr_search_root(LrSearch& s, const Reading& v, TextOffset at,
 void lr_search_start(const LrContext& c, LrSearch& s);
 
 // With no goal before the work ran out, the reading that went past the most
-// of the author's tokens, read or dropped; of two that tie, the one that got
-// furthest.
+// of the author's tokens since the search set out, read or dropped; of two
+// that tie, the one that got furthest.
 template <const auto& A>
 std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
                             bool& raced) {
@@ -1081,21 +1083,36 @@ LrExit lr_search_degraded(LrContext& c, LrSearch& s) {
     s.plan.clear();
     s.next = 0;
   }
-  // The frames under those given up, as a walk reads a stack.
+  // The frames under those given up, as a walk reads a stack. The depths tried
+  // read at most `kRepairLexBytes` frames per frame of the stack, each paid as
+  // a byte; past that the whole text is given up.
   struct Kept {
     const LrStack& stack;
     std::uint32_t frames;
+    std::uint64_t& read;
     std::uint32_t size() const { return frames; }
-    std::uint32_t state_at(std::uint32_t i) const { return stack.state_at(i); }
+    std::uint32_t state_at(std::uint32_t i) const {
+      ++read;
+      return stack.state_at(i);
+    }
   };
+  std::uint64_t read = 0;
+  const std::uint64_t most = saturating_mul(c.stack.size(), kRepairLexBytes);
   std::uint32_t keep = std::max<std::uint32_t>(c.stack.size(), 2) - 1;
-  for (; keep > 1; --keep)
-    if (const Kept kept{c.stack, keep};
+  for (; keep > 1; --keep) {
+    c.stop.poll();
+    if (const Kept kept{c.stack, keep, read};
         lr_stack_takes<A>(
             LrStackOverlay<Kept>(kept), c.la.sym,
             [&](unsigned k) { return c.drive->cond(c, k, c.virt.from, c.la); },
             c.walkMemo))
       break;
+    if (read > most) {
+      keep = 1;
+      break;
+    }
+  }
+  s.work += read / kRepairLexBytes;
   RepairFault& f = s.fault;
   f.open = true;
   f.abandon = true;

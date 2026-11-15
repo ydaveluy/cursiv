@@ -30,7 +30,7 @@ constexpr std::uint16_t ll_section_mode(std::uint8_t section) {
 template <const auto& T>
 constexpr std::uint16_t ll_err_mode(std::uint16_t mode,
                                     [[maybe_unused]] std::uint8_t section) {
-  if constexpr (T.errModeOf == nullptr) {
+  if constexpr (!T.has(LlPart::ErrModeOf)) {
     return T.errMode;
   } else {
     if (mode < T.nmodes) return T.errModeOf[mode];
@@ -40,12 +40,19 @@ constexpr std::uint16_t ll_err_mode(std::uint16_t mode,
   }
 }
 
+// The same at the token in hand: a token a condition holds was read under its
+// own mode.
+template <const auto& T>
+constexpr std::uint16_t ll_err_mode(const LlContext& c) {
+  return ll_err_mode<T>(c.laMode == kLaHeld ? c.la.mode : c.laMode, c.section);
+}
+
 // Whether `sym` ends the text the descent reads: the end of input, or in a
 // section the token that closes it.
 template <const auto& T>
 constexpr bool ll_ends(const LlContext& c, std::uint16_t sym) {
   return sym == kEofSymbol ||
-         (T.nsections != 0 && T.sectionEnd != nullptr && c.section != 0 &&
+         (T.nsections != 0 && T.has(LlPart::SectionEnd) && c.section != 0 &&
           sym == T.sectionEnd[c.section - 1u]);
 }
 

@@ -53,14 +53,14 @@ struct LlThreadKeyHash {
   }
 };
 
-// Where a frame copied from the descent stands in its stack: how many frames
-// it has under it, and a frame further down, chosen so that the frame at any
-// depth is reached in a logarithmic number of steps.
+// Where a frame of the descent's stack stands in it: how many frames it has
+// under it, and a frame further down, chosen so that the frame at any depth is
+// reached in a logarithmic number of steps.
 struct LlCopyDepth {
   std::uint32_t depth = 0;
   std::uint32_t jump = kLlCtxNone;
 
-  // The entry of a frame copied over `parent`. Its jump goes as far as the
+  // The entry of a frame pushed over `parent`. Its jump goes as far as the
   // parent's jump goes on from the one it reaches, where the two spans are
   // equal, and to the parent otherwise.
   static LlCopyDepth over(const std::vector<LlCopyDepth>& depths,
@@ -103,8 +103,8 @@ class LlEpisodeSim {
   // The rules, flagged by rule, whose callers share its body. Unset, none.
   void share_calls(const std::uint8_t* shared) { _shares = shared; }
 
-  // The depths of the copied frames, which the cache of the parse keeps.
-  // Unset, the walks go down a copied stack as they go down the episode's own.
+  // The depths of the descent's frames, which the cache of the parse keeps.
+  // Unset, the walks go down the descent's stack as they go down the episode's.
   void read_copy_depths(const std::vector<LlCopyDepth>* depths) {
     _copyDepths = depths;
   }
@@ -816,14 +816,14 @@ class LlEpisodeSim {
     return false;
   }
 
-  // A frame made before the episode's walk began: the descent's stack, copied
-  // for the episode, with no cell under it. The walks down a stack stop there,
-  // so they cost the frames the episode made rather than the descent's depth.
+  // A frame of the descent's stack, made before the episode's walk began: a
+  // node of the pool that stays, with no cell under it. Walks down a stack stop
+  // there, so they cost the frames the episode made, not the descent's depth.
   bool copied(std::uint32_t stack) const {
     return _pool.contexts().before_walk(stack);
   }
 
-  // A copied frame's `LlCopyDepth`, or null: with it, a walk that reaches the
+  // A descent frame's `LlCopyDepth`, or null: with it, a walk that reaches the
   // descent's frames is answered there.
   const LlCopyDepth* copy_depth(std::uint32_t stack) const {
     if (_copyDepths == nullptr || stack >= _copyDepths->size() ||
@@ -832,9 +832,9 @@ class LlEpisodeSim {
     return &(*_copyDepths)[stack];
   }
 
-  // Whether the copied frame `a`, whose entry is `r`, is `b` with frames
-  // over it. The unknown caller is under every copied stack; a frame not
-  // copied is under none, since copied frames stand only on copied frames.
+  // Whether the descent frame `a`, whose entry is `r`, is `b` with frames over
+  // it. The unknown caller is under every descent frame; a frame the episode
+  // made is under none, since the descent's frames stand only on its own.
   bool copied_stands_on(std::uint32_t a, const LlCopyDepth& r,
                         std::uint32_t b) {
     if (a == b || b == kLlCtxNone) return true;
@@ -916,8 +916,8 @@ class LlEpisodeSim {
     return bottom;
   }
 
-  // Whether `a` is `b` with frames over it. The walk stops at the first copied
-  // frame, which knows its depth: it costs the frames the episode made.
+  // Whether `a` is `b` with frames over it. The walk stops at the descent's
+  // first frame, which knows its depth: it costs the frames the episode made.
   bool stands_on(std::uint32_t a, std::uint32_t b) {
     for (;;) {
       if (a == b) return true;
@@ -975,7 +975,7 @@ class LlEpisodeSim {
     if (const auto* flags = _relatedFlags.find(key(stack));
         flags != nullptr && (*flags & ancestor) != 0)
       return true;
-    // A member on the copied frames: the bases that stand on `stack`.
+    // A member on the descent's frames: the bases that stand on `stack`.
     if (stack == kLlCtxNone || copy_depth(stack) != nullptr)
       for (std::uint32_t k = 0; k < nbases; ++k)
         if (stands_on(base(k), stack)) return true;
@@ -987,8 +987,9 @@ class LlEpisodeSim {
       if (copy_depth(stack) != nullptr) break;
       stack = _pool.contexts().parent(stack, 0);
     }
-    // Where the stack reaches the copied frames, a member among them is a base
-    // that it stands on; the unknown caller, a member too, ends every chain.
+    // Where the stack reaches the descent's frames, a member among them is a
+    // base that it stands on; the unknown caller, a member too, ends every
+    // chain.
     if (const auto* flags = _relatedFlags.find(key(kLlCtxNone));
         flags != nullptr && (*flags & root) != 0)
       return true;
@@ -1116,7 +1117,7 @@ class LlEpisodeSim {
   LlRoundTable<LlThreadKey, LlThreadKeyHash> _at;
   LlRoundTable<std::uint64_t, LlKeyHash> _below;
   LlRoundTable<std::uint64_t, LlKeyHash> _relatedProcessed, _relatedFlags;
-  // The copied frames that the chains of a cell's members end on, listed per
+  // The descent's frames that the chains of a cell's members end on, listed per
   // cell: how many, and each by its place in the list.
   LlRoundTable<std::uint64_t, LlKeyHash> _relatedBaseCount;
   LlRoundTable<std::uint64_t, LlKeyHash> _relatedBases;

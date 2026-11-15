@@ -27,9 +27,9 @@
 namespace cursiv {
 
 // A cache partitioned by document: a rebuild empties only that document's
-// entries, at the update or, with `state` (`Linked` or `IndexedReferences`),
-// once its listeners hear that state; a read that waited for it may still see
-// the old ones. A value may read its own document and, with `state`, its
+// entries, at the update and as its tree goes or, with `state` (`Linked` or
+// `IndexedReferences`), as the document goes back below it and again once its
+// listeners hear it. A value may read its own document and, with `state`, its
 // references' targets; one that reads further belongs in a `WorkspaceCache`.
 //
 // DocumentCache<V> holds one value per document. get(document, provider)
@@ -115,6 +115,11 @@ class DocumentCache : private DocumentPhaseListener,
   void onDocumentPhase(Document& document, DocumentState reached,
                        const CancellationToken&) override {
     if (_state.has_value() && reached == *_state) clear(document.id);
+  }
+
+  void onReset(const Document& document, DocumentState state) override {
+    if (_state.has_value() ? state < *_state : state == DocumentState::Changed)
+      clear(document.id);
   }
 
   void onUpdate(std::span<const std::string_view> changed,

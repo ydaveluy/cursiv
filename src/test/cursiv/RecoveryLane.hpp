@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef CURSIV_RECOVERY_CORPUS
+#error "define CURSIV_RECOVERY_CORPUS as the folder of the broken documents"
+#endif
+
 #include <cstdio>
 #include <filesystem>
 #include <map>

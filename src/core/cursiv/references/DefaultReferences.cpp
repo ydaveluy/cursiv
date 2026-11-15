@@ -56,7 +56,11 @@ namespace {
         if (failed && failed->end - failed->begin <= end - begin) return;
         failed = TextRange{begin, end};
       });
-  if (!found && failed) found.span = *failed;
+  if (failed && (!found || failed->end - failed->begin <
+                              found.span.end - found.span.begin)) {
+    found.span = *failed;
+    found.targets.clear();
+  }
   return found;
 }
 

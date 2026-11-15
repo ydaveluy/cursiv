@@ -32,6 +32,7 @@ bool observed_condition(const char* src, cursiv::TextOffset len, unsigned id,
 constexpr auto kObserved = [] {
   auto t = kPredicates;
   t.condition = observed_condition;
+  ll_terms::set_part(t, cursiv::engine::LlPart::Condition, true);
   return t;
 }();
 constexpr auto kIdentifier = ll_terms::named<kPredicates>("ID");
@@ -44,7 +45,7 @@ void a_clipped_token_is_not_memoized() {
   cursiv::engine::LlContext c(text, builder, kTiny);
   cursiv::engine::LlSearch s(kPlain.atn, c.len, kTiny);
   s.limit = 1;
-  const auto mode = cursiv::engine::ll_err_mode<kPlain>(c.laMode, c.section);
+  const auto mode = cursiv::engine::ll_err_mode<kPlain>(c);
   auto& row = cursiv::engine::ll_search_row<kPlain>(s, 0);
   const auto clipped =
       cursiv::engine::ll_search_scan<kPlain>(c, s, row, mode, 0);
@@ -119,7 +120,7 @@ void an_artificial_end_is_no_dedent_or_section_end() {
     cursiv::engine::LlSearch s(table.atn, c.len, kTiny);
     s.limit = 1;
     CHECK(cursiv::engine::ll_search_reading<table>(
-              c, s, 1, cursiv::engine::ll_err_mode<table>(c.laMode, c.section))
+              c, s, 1, cursiv::engine::ll_err_mode<table>(c))
               .term == cursiv::engine::kInvalidSymbol);
     CHECK(s.readings.empty() && cursiv::engine::ll_search_spent(s) &&
           s.work <= 3);

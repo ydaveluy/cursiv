@@ -97,8 +97,8 @@ if (document->hasAst()) {
 ```
 
 `get()` returns null for an unresolved name. A reference with one target type
-also supports `->`, `*` and a boolean test. `valueAs<Model>()` does not check
-the type; it is safe here because Recipe's entry rule returns a `Model`.
+also supports `->`, `*` and a boolean test. `valueAs<Model>()` returns null
+when the root is not a `Model`; Recipe's entry rule always returns one.
 
 To skip validation, pass `BuildOptions` with `validation = false`. See
 [Document lifecycle](../reference/services.md#document-lifecycle).

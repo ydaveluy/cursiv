@@ -61,6 +61,7 @@
 #include "cursiv/lr/gen/LrLowering.hpp"
 #include "cursiv/lr/gen/lr_build.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/ranges/DefaultSelectionRangeProvider.hpp"
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/shared/gen/AstRowOf.hpp"
 #include "cursiv/shared/runtime/AstConvThunks.hpp"
@@ -90,7 +91,9 @@
 #include "cursiv/utils/typelist.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
+#include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/ReferenceDescriptionProvider.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
 #include "dualll/generated/Ll/Module.hpp"
 #include "duallr/generated/Lr/Module.hpp"
 #include "support/World.hpp"
@@ -175,26 +178,12 @@ using namespace tab::hier;
 using cursiv::detail::FieldContent;
 using cursiv::detail::FieldStorage;
 
-// Distinct types, distinct addresses -- the identity is the address.
-static_assert(kTag<Mid> != kTag<Leaf>);
-static_assert(kTag<Mid> != kTag<Base>);
 static_assert(kTag<Mid>->name == "Mid");
 static_assert(kTag<Leaf>->name == "Leaf");
-
-// The three-level fold: a Mid-tagged and a Leaf-tagged node are both Base,
-// only the Leaf-tagged one is a Leaf -- and a tag answers its own family, self
-// first.
-static_assert(kTag<Mid>->derivesFrom(kTag<Base>));
-static_assert(kTag<Leaf>->derivesFrom(kTag<Base>));
-static_assert(kTag<Leaf>->derivesFrom(kTag<Mid>));
-static_assert(kTag<Leaf>->derivesFrom(kTag<Leaf>));
-static_assert(!kTag<Mid>->derivesFrom(kTag<Leaf>));
-static_assert(!kTag<Holder>->derivesFrom(kTag<Base>));
-static_assert(!kTag<Base>->derivesFrom(kTag<Leaf>));
 static_assert(cursiv::ast_cast<Base>(nullptr) == nullptr);
 
 // The same question through a node, which is how a service asks it.
-constexpr bool node_queries() {
+bool node_queries() {
   Mid m;
   m.type = kTag<Mid>;
   Leaf l;
@@ -207,7 +196,22 @@ constexpr bool node_queries() {
          l.type->name == "Leaf" && untagged.type == nullptr &&
          cursiv::ast_cast<Base>(&untagged) == nullptr;
 }
-static_assert(node_queries());
+
+// Distinct types, distinct addresses: the identity is the address, so it is
+// read at run time. A Mid-tagged and a Leaf-tagged node are both Base, only
+// the Leaf-tagged one is a Leaf, and a tag answers its own family.
+void a_tag_answers_its_family() {
+  CHECK(kTag<Mid> != kTag<Leaf>);
+  CHECK(kTag<Mid> != kTag<Base>);
+  CHECK(kTag<Mid>->derivesFrom(kTag<Base>));
+  CHECK(kTag<Leaf>->derivesFrom(kTag<Base>));
+  CHECK(kTag<Leaf>->derivesFrom(kTag<Mid>));
+  CHECK(kTag<Leaf>->derivesFrom(kTag<Leaf>));
+  CHECK(!kTag<Mid>->derivesFrom(kTag<Leaf>));
+  CHECK(!kTag<Holder>->derivesFrom(kTag<Base>));
+  CHECK(!kTag<Base>->derivesFrom(kTag<Leaf>));
+  CHECK(node_queries());
+}
 
 void the_tables_read_back() {
   const cursiv::DefaultAstReflection& r = refl();
@@ -353,11 +357,10 @@ namespace region {
 
 using namespace tab::region;
 
-static_assert(kTag<Wrap>->derivesFrom(kTag<Node>));
-static_assert(!kTag<Node>->derivesFrom(kTag<Wrap>));
-
 // A nest names both the type it creates and the member it moves into.
 void the_nest_names_a_node_member() {
+  CHECK(kTag<Wrap>->derivesFrom(kTag<Node>));
+  CHECK(!kTag<Node>->derivesFrom(kTag<Wrap>));
   const cursiv::DefaultAstReflection& r = refl();
   CHECK(desc_of(r, kTag<Wrap>, "inner").content ==
         cursiv::detail::FieldContent::node);
@@ -811,49 +814,12 @@ void a_write_replaces_the_node_a_member_held() {
       [](NodeHolder& h, Target* t) { h.both = t; });
 }
 
-void a_copied_reference_cannot_claim_another_slots_handle() {
-  const std::string text = "$rebind aa cc ee ff";
-  auto r = engine().parse(text);
-  auto* rec = r.valueAs<Rec>();
-  CHECK(rec && rec->maybe && rec->also.size() == 2);
-  if (!rec || !rec->maybe || rec->also.size() != 2) return;
-  Rec copied;
-  copied.one = rec->one;
-  copied.maybe = rec->maybe;
-  cursiv::detail::RefAccess::state(copied.one) = cursiv::RefState::Resolved;
-  cursiv::detail::RefAccess::state(*copied.maybe) = cursiv::RefState::Resolved;
-  cursiv::engine::AstBuildCtx ctx;
-  ctx.cst = &r.cst();
-  ctx.refs = &r.references->handles;
-  ctx.resolver = r.references.get();
-  const cursiv::engine::Pending p{
-      .root = cursiv::detail::RefAccess::node_id(rec->also[0]),
-      .text = cursiv::detail::RefAccess::node_id(rec->also[0]),
-      .kind = cursiv::detail::ActKind::assign};
-  const cursiv::engine::ConvSlot conv{
-      .fn = [](cursiv::engine::AstBuildCtx& c, cursiv::NodeId id, void* out) {
-        *static_cast<cursiv::AstNode::string_view*>(out) = c.cst->text(id);
-        return true;
-      }};
-  const auto one = field_of(refl(), kTag<Rec>, "one");
-  const auto maybe = field_of(refl(), kTag<Rec>, "maybe");
-  const auto first = r.references->handles.size();
-  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::one>>(
-      ctx, p, &copied, &conv, one, 0);
-  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
-      ctx, p, &copied, &conv, maybe, 0);
-  CHECK(r.references->handles.size() == first + 2);
-  CHECK(cursiv::detail::RefAccess::handle(copied.one) == first &&
-        cursiv::detail::RefAccess::handle(*copied.maybe) == first + 1);
-  CHECK(cursiv::detail::RefAccess::state(copied.one) ==
-            cursiv::RefState::Unresolved &&
-        cursiv::detail::RefAccess::state(*copied.maybe) ==
-            cursiv::RefState::Unresolved);
-  CHECK(copied.one.refText == "ee" && copied.maybe->refText == "ee");
-  CHECK(rec->one.refText == "aa" && rec->maybe->refText == "cc");
-  CHECK(r.references->handles[first].owner == &copied &&
-        r.references->handles[first + 1].owner == &copied);
-}
+// A reference is one site of one tree: never copied, only moved into place.
+static_assert(!std::is_copy_constructible_v<cursiv::reference<Target>> &&
+              !std::is_copy_assignable_v<cursiv::reference<Target>> &&
+              !std::is_copy_constructible_v<cursiv::multi_reference<Target>> &&
+              !std::is_copy_assignable_v<cursiv::multi_reference<Target>> &&
+              std::is_nothrow_move_constructible_v<cursiv::reference<Target>>);
 
 }  // namespace vocab
 
@@ -1562,6 +1528,16 @@ void its_refusal_is_a_diagnostic_and_not_a_crash() {
         r.diagnostics[0].message.find("over 100") != std::string::npos);
 }
 
+// An enum's own converter is its only reading: a word read in any case is not
+// taken for the enumerator it spells once that converter refuses it.
+void an_enum_converter_is_the_only_reading() {
+  cursiv::ParseResult r = engine().parse("$ownlevel HIGH");
+  auto* n = r.valueAs<Node>();
+  CHECK(n != nullptr && n->level == Level::low);
+  CHECK(r.diagnostics.size() == 1 &&
+        r.diagnostics[0].message.find("not LO or HI") != std::string::npos);
+}
+
 }  // namespace own
 
 namespace optnode {
@@ -1699,6 +1675,7 @@ void the_accessors_read_past_a_property_of_the_same_name() {
 void run() {
   the_accessors_read_past_a_property_of_the_same_name();
   // The tables the generator wrote, read back through the reflection.
+  hier::a_tag_answers_its_family();
   hier::the_tables_read_back();
   infix::the_climb_contributes_its_members();
   region::the_nest_names_a_node_member();
@@ -1719,7 +1696,6 @@ void run() {
   vocab::conversion_failure_continues();
   vocab::assigning_again_keeps_one_reference_site();
   vocab::a_write_replaces_the_node_a_member_held();
-  vocab::a_copied_reference_cannot_claim_another_slots_handle();
   exact::each_payload_goes_to_its_own_slot();
   annot::annotated_terminal_goes_to_its_annotated_slot();
   annot2::the_validated_alternative_is_the_written_one();
@@ -1753,6 +1729,7 @@ void run() {
   own::a_specialised_converter_reaches_its_own_target();
   own::a_member_of_that_type_is_converted_by_it();
   own::its_refusal_is_a_diagnostic_and_not_a_crash();
+  own::an_enum_converter_is_the_only_reading();
   optnode::the_reflection_walks_the_optional_child();
   optnode::an_absent_one_yields_nothing();
   inl::the_inline_slot_converts();
@@ -3500,6 +3477,36 @@ void two_overlapping_bytes_are_decided_by_the_state() {
   CHECK(!reads<OverlapG>("a*"));
 }
 
+// Every visible record that holds others around the caret is a step of a
+// selection: around a parenthesised operand, the node and the parentheses
+// are two. A leaf may give way to the word just before the caret.
+void every_record_around_the_caret_is_a_selection_step() {
+  cursiv::Document document(
+      cursiv::TextDocument::create("mem:/e.e", "e", 1, "(1+2)*3"));
+  document.parseResult =
+      engine<InfixG>().parse(document.textDocument().getText());
+  const cursiv::Cst& cst = document.parseResult.cst();
+  for (std::uint32_t offset = 0; offset < 7; ++offset) {
+    const lsp::Position caret{0, offset};
+    const std::vector<lsp::SelectionRange> answer =
+        cursiv::DefaultSelectionRangeProvider{}.getSelectionRanges(
+            document, {&caret, 1});
+    for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
+      const cursiv::CstNode& node = cst[id];
+      if (node.hidden != 0 || cst.subtreeBegin(id) == id ||
+          offset < node.begin || offset >= node.end)
+        continue;
+      bool step = false;
+      for (const lsp::SelectionRange* at = answer.empty() ? nullptr
+                                                          : &answer.front();
+           at != nullptr; at = at->parent.get())
+        step = step || (at->range.start.character == node.begin &&
+                        at->range.end.character == node.end);
+      CHECK(step);
+    }
+  }
+}
+
 void infix_binds_by_its_levels() {
   CHECK(reads<InfixG>("1+2*3"));
   CHECK(reads<InfixG>("(1+2)*3"));
@@ -3529,6 +3536,7 @@ void run() {
   a_frontier_of_one_byte_refuses_the_digit_behind_it();
   two_overlapping_bytes_are_decided_by_the_state();
   infix_binds_by_its_levels();
+  every_record_around_the_caret_is_a_selection_step();
 }
 
 }  // namespace cst_node

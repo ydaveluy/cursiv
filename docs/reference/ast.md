@@ -118,6 +118,9 @@ Check `.get()` for null before you use the target. Read the targets of a
 `multi_reference<T>` with `.size()` and `.get(index)`, or `.get<T>(index)`
 with several candidate types.
 
+A reference cannot be copied: it is one place in one tree, as a node is. Read
+it where it stands, through `const auto&`.
+
 ## Identify a node's type
 
 `ast_cast<T>` returns the node as a `T` when its class is `T` or derives

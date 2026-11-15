@@ -119,11 +119,16 @@ inline constexpr cursiv::detail::CharSet kClassVeto = [] {
     s.set(static_cast<unsigned char>(b));
   return s;
 }();
+// The bytes refusing `E` forbids, when `E` is a class.
 template <class E>
-inline constexpr const cursiv::detail::CharSet* kVetoOf = nullptr;
+struct veto_of {
+  static constexpr bool any = false;
+};
 template <std::uint64_t M, bool N, str S>
-inline constexpr const cursiv::detail::CharSet*
-    kVetoOf<cursiv::detail::CpSet<M, N, S>> = &kClassVeto<M, N, S>;
+struct veto_of<cursiv::detail::CpSet<M, N, S>> {
+  static constexpr bool any = true;
+  static constexpr const cursiv::detail::CharSet& set = kClassVeto<M, N, S>;
+};
 
 template <class C, class E, unsigned D>
 struct SpellOf;
@@ -377,9 +382,7 @@ struct SpellOf<C, cursiv::detail::Repeat<Mn, Mx, E>, D> {
 // everything else the walk cannot honour, so a spelling the lexer then reads
 // short is a refused document, not a silent one.
 template <class C, class E, unsigned D>
-struct vetoed_by {
-  static constexpr const cursiv::detail::CharSet* value = kVetoOf<E>;
-};
+struct vetoed_by : veto_of<E> {};
 template <class C, class R, unsigned D>
 struct vetoed_by<C, cursiv::detail::Ref<R>, D>
     : vetoed_by<C,
@@ -387,9 +390,7 @@ struct vetoed_by<C, cursiv::detail::Ref<R>, D>
                     typename cursiv::detail::Normalize<C>::template body<R>>,
                 D - 1> {};
 template <class C, class R>
-struct vetoed_by<C, cursiv::detail::Ref<R>, 0> {
-  static constexpr const cursiv::detail::CharSet* value = nullptr;
-};
+struct vetoed_by<C, cursiv::detail::Ref<R>, 0> : veto_of<void> {};
 
 // An assertion spells nothing. One that refuses a class forbids its first
 // bytes to the next byte spelled, whatever spells it; any other refuses the
@@ -399,10 +400,9 @@ struct SpellOf<C, cursiv::detail::Not<E>, D> {
   static constexpr std::size_t min = 0;
   static constexpr Reach reach() { return Reach{{}, {}, true}; }
   static bool run(std::string&, SpellStyle, [[maybe_unused]] SpellCtx& cx) {
-    constexpr const cursiv::detail::CharSet* kVeto =
-        vetoed_by<C, std::remove_cvref_t<E>, D>::value;
-    if constexpr (kVeto != nullptr) {
-      cx.veto.forbid(*kVeto);
+    using Veto = vetoed_by<C, std::remove_cvref_t<E>, D>;
+    if constexpr (Veto::any) {
+      cx.veto.forbid(Veto::set);
       return true;
     } else {
       return false;

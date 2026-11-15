@@ -30,7 +30,7 @@ template <const auto& T>
 CURSIV_ALWAYS_INLINE inline Scan ll_scan_text(const char* src, TextOffset len,
                                               std::uint16_t mode,
                                               TextOffset from) {
-  if constexpr (T.byteTerms != nullptr) {
+  if constexpr (T.has(LlPart::ByteTerms)) {
     const SymbolId t =
         T.byteTerms[T.modeBytes[mode] + static_cast<unsigned char>(src[from])];
     if (t != kInvalidSymbol) return Scan{from + 1, t};
@@ -41,7 +41,7 @@ CURSIV_ALWAYS_INLINE inline Scan ll_scan_text(const char* src, TextOffset len,
 // The token the lexer matches at `from` under `mode`.
 template <const auto& T>
 inline Scan ll_scan(const LlContext& c, std::uint16_t mode, TextOffset from) {
-  if constexpr (T.nsections != 0 && T.sectionEnd != nullptr)
+  if constexpr (T.nsections != 0 && T.has(LlPart::SectionEnd))
     if (c.section != 0 &&
         T.sectionEnd[c.section - 1u] < T.nterms &&
         !T.mode_admits(mode, T.sectionEnd[c.section - 1u])) {
@@ -76,14 +76,14 @@ template <const auto& T>
 CURSIV_ALWAYS_INLINE inline TextOffset ll_past_skip_run(const LlContext& c,
                                                         std::uint16_t mode,
                                                         TextOffset p) {
-  if constexpr (T.skipSet == nullptr) {
+  if constexpr (!T.has(LlPart::SkipSet)) {
     return p;
   } else {
     const bool* const blank = kLlBytes<T, &LlTable::skipSet>[mode];
     return lex_past_run(
         c.src, p, c.len, [&](unsigned char b) { return blank[b]; },
         [&]([[maybe_unused]] unsigned char b) {
-          if constexpr (T.skipStop == nullptr)
+          if constexpr (!T.has(LlPart::SkipStop))
             return false;
           else
             return kLlBytes<T, &LlTable::skipStop>[mode][b];
@@ -236,8 +236,8 @@ inline void ll_hold(LlContext& c) {
 }
 
 // The same, once a repair at the point is done: the repair reads under the
-// widest alphabet, but the arm entered reads no terminal the point's lexer
-// removes. `held` is the token held before, if any.
+// fault mode of the point's configuration, but the arm entered reads no
+// terminal the point's lexer removes. `held` is the token held before, if any.
 template <const auto& T>
 inline void ll_rehold(LlContext& c, const Token& held, std::uint16_t mode) {
   if (held.sym == kInvalidSymbol || c.laMode == kNoMode) return;
@@ -274,7 +274,8 @@ inline bool ll_held_takes(const LlContext& c, SymbolId term) {
 // reading in it takes `sym`, a condition standing there names it.
 template <const auto& T>
 constexpr bool ll_lengthens(std::uint16_t mode, std::uint16_t sym) {
-  return T.has_longer() && mode < T.nmodes && T.longer_mode(mode) != kNoMode &&
+  return T.has_longer() && mode < T.nmodes && sym < T.nterms &&
+         T.longer_mode(mode) != kNoMode &&
          T.mode_admits(T.longer_mode(mode), sym);
 }
 

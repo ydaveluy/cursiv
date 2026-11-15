@@ -434,7 +434,8 @@ void refuse_owning_bind() {
 
 // A cross-reference as an AST field: the name now, one target of Ts... once
 // read; reading resolves. `refText` points into the source text and does not
-// outlive the `ParseResult`; it is not NUL-terminated.
+// outlive the `ParseResult`; it is not NUL-terminated. A reference is one site
+// of one tree, so it is never copied: read it where it stands.
 template <class... Ts>
 struct reference {
   static_assert(sizeof...(Ts) >= 1);
@@ -442,14 +443,18 @@ struct reference {
                 "a reference has at most 255 candidate types");
   AstNode::string_view refText;
 
+  reference() = default;
+  reference(const reference&) = delete;
+  reference& operator=(const reference&) = delete;
+  reference(reference&&) noexcept = default;
+  reference& operator=(reference&&) noexcept = default;
+
  private:
   friend struct detail::RefAccess;
   // Written by a read (`resolve`), hence mutable.
   mutable AstNode* _target = nullptr;
   // Installed once by the document over the build's work list; null on a
-  // hand-built tree, where reading resolves nothing. A copy, made while nothing
-  // resolves the source, keeps it: it reads the source's site, and only the
-  // source is reset by a relink.
+  // hand-built tree, where reading resolves nothing.
   const detail::RefResolver* _resolver = nullptr;
   // The CST node the name was read from. Declared after the pointers so it and
   // the three below share one tail word instead of opening a hole.
@@ -524,7 +529,7 @@ struct reference {
 };
 
 // One name resolving to several targets. `items` is filled after the build, by
-// a read.
+// a read. Never copied, as `reference`.
 template <class... Ts>
 struct multi_reference {
   static_assert(sizeof...(Ts) >= 1);
@@ -545,9 +550,9 @@ struct multi_reference {
 
  public:
   multi_reference() = default;
-  multi_reference(const multi_reference&) = default;
+  multi_reference(const multi_reference&) = delete;
   multi_reference(multi_reference&&) noexcept = default;
-  multi_reference& operator=(const multi_reference&) = default;
+  multi_reference& operator=(const multi_reference&) = delete;
   multi_reference& operator=(multi_reference&&) noexcept = default;
 
   // Same rule and same return contract as `reference::resolve`.

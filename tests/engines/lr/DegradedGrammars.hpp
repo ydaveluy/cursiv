@@ -3,7 +3,8 @@
 // Where the closers of a text that ends open are inserted: a nest whose closer
 // comes after forty words its state offers first, a grammar whose shortest
 // completion is 2^63 tokens, and a chain of rules the table forks four times
-// over.
+// over. Then what a repair closes before it: two operator levels, and a case
+// the entry's state both accepts and reduces.
 
 #include <cstddef>
 
@@ -14,6 +15,17 @@ namespace tdegraded {
 
 namespace ast {
 struct Node : cursiv::Extends<cursiv::AstNode> {};
+struct Name : cursiv::Extends<Node> {
+  string_view name;
+};
+struct Binary : cursiv::Extends<Node> {
+  Node* left = nullptr;
+  string_view op;
+  Node* right = nullptr;
+};
+struct Wrapped : cursiv::Extends<Node> {
+  cursiv::AstNode* inner = nullptr;
+};
 }  // namespace ast
 
 struct Nest : cursiv::GrammarSpec {
@@ -94,11 +106,31 @@ struct Forked : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// `<` groups nothing and binds tighter than `=`, which groups to the right.
+struct Infix : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct E;
+  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
+                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct E : infix<Primary, ast::Binary,
+                   levels(nonassoc(lit<"<">), right(lit<"=">))> {};
+  using entry = E;
+  using ignored = WS;
+};
+
+// A case followed by `!` is wrapped: the state after `one` reduces to the
+// entry, whose state accepts the end and reduces into `Wrapped` on `!`.
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
+  struct Root;
+  struct Wrapped
+      : rule<create<ast::Wrapped>(assign<&ast::Wrapped::inner>(ref<Root>))> {};
   struct Root
       : rule<(kw<"nest"> + ref<Nest::Root>) | (kw<"deep"> + ref<Deep::S>) |
-             (kw<"forked"> + ref<Forked::Root>)> {};
+             (kw<"forked"> + ref<Forked::Root>) |
+             (kw<"infix"> + ref<Infix::E>) | create<ast::Node>(kw<"one">) |
+             (ref<Wrapped> + lit<"!">)> {};
   using entry = Root;
   using ignored = WS;
 };

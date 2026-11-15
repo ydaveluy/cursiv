@@ -134,7 +134,7 @@ inline std::uint16_t ll_nest_receiver(LlContext& c,
 // again it would split into tokens the repair finds nothing wrong with.
 template <const auto& T>
 inline void ll_repair_peek(LlContext& c) {
-  const std::uint16_t mode = ll_err_mode<T>(c.laMode, c.section);
+  const std::uint16_t mode = ll_err_mode<T>(c);
   if (c.laMode == kNoMode) {
     ll_peek<T>(c, mode);
     return;
@@ -253,7 +253,7 @@ CURSIV_NOINLINE inline bool ll_drop(LlContext& c) {
   f.end = span;
   f.at = end;
   f.resume = kNoElement;
-  f.dropMode = ll_err_mode<T>(c.laMode, c.section);
+  f.dropMode = ll_err_mode<T>(c);
   const NodeId id = c.tape.leaf(c.la.begin, span, T.stamp.make(kNoRow, 0));
   ll_mark(c, id);
   // No byte taken: the inventions before it still count.
@@ -451,7 +451,7 @@ CURSIV_NOINLINE inline void ll_expect(LlContext& c, std::uint16_t mode,
 // Whether `mode` reads `term` off its one byte alone.
 template <const auto& T>
 constexpr bool ll_byte_reads(std::uint16_t mode, std::uint16_t term) {
-  if constexpr (T.byteTerms == nullptr) {
+  if constexpr (!T.has(LlPart::ByteTerms)) {
     return false;
   } else {
     const std::string_view text = T.term_text(term);
@@ -669,7 +669,7 @@ inline bool ll_tail(LlContext& c) {
   if (c.la.sym == kEofSymbol) return true;
   ll_repair_peek<T>(c);
   while (c.la.sym != kEofSymbol && ll_drop<T>(c))
-    ll_peek<T>(c, ll_err_mode<T>(c.laMode, c.section));
+    ll_peek<T>(c, ll_err_mode<T>(c));
   return false;
 }
 
@@ -697,7 +697,7 @@ template <const auto& T>
 inline void ll_end(LlContext& c, std::uint16_t mode) {
   ll_peek<T>(c, mode);
   if (!ll_ends<T>(c, c.la.sym)) ll_drop_to_end<T>(c);
-  if constexpr (T.modeTrivia != nullptr)
+  if constexpr (T.has(LlPart::ModeTrivia))
     if (T.modeTrivia[mode] != T.modeTrivia[T.tailMode] &&
         ll_ends<T>(c, c.la.sym)) {
       c.regionEnd = c.la.begin;

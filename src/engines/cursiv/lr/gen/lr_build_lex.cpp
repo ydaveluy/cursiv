@@ -207,17 +207,17 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
   for (unsigned t = 1; t < nT; ++t)
     if (g.terms[t].synthetic == kSyntheticImplied)
       implied.emplace_back(t, impliedFirsts[g.terms[t].cond]);
-  // A mode is also keyed by the section its states read, and the token that
-  // ends their text: a section's state never shares its mode with an outside
-  // one, nor a state that reads the closing token with one that reduces on it.
+  // A mode is also keyed by the configuration its states read under, their
+  // section and the token that ends their text: a state that reads the closing
+  // token never shares its mode with one that reduces on it.
   const bool sections = g.sections();
   const auto tag = [&](unsigned f, std::uint8_t k) -> std::uint32_t {
     const std::uint8_t h = g.section_cfg_at(k);
-    if (h == 0) return 0;
+    if (h == 0) return LexModes::cfg_tag(k);
     std::uint16_t end = g.cfgEnd[h];
     for (const LrAction& action : A.action_row(f))
       if (action.term == end && action.kind == LrActionKind::shift) end = 0;
-    return (std::uint32_t{h} << 16) | end;
+    return LexModes::cfg_tag(k) | (std::uint32_t{h} << 16) | end;
   };
 
   // A mode is tight where its configuration reads as a token some terminal
@@ -239,8 +239,7 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
       want |= r.joins;
       want.reset(kEofSymbol);
       own[cs[f]] |= want;
-      mod[f] = r.intern(want, sections ? tag(f, cs[f]) : 0,
-                        longer_firsts(g, want, beyond));
+      mod[f] = r.intern(want, tag(f, cs[f]), longer_firsts(g, want, beyond));
       if (tightSet.size() <= mod[f]) {
         tightSet.resize(mod[f] + 1u, false);
         tightMode.resize(mod[f] + 1u, 0);
@@ -270,7 +269,7 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
     std::uint16_t* const text = A.modeText.row(0, r.set.size());
     std::uint16_t* const end = A.modeEnd.row(0, r.set.size());
     for (std::size_t m = 0; m < r.set.size(); ++m) {
-      text[m] = A.sectionErr[r.tag[m] >> 16];
+      text[m] = A.sectionErr[(r.tag[m] >> 16) & 0xffu];
       end[m] = static_cast<std::uint16_t>(r.tag[m]);
     }
   }

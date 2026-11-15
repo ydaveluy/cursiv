@@ -1221,6 +1221,57 @@ void a_group_is_its_own_sites_targets() {
         declaration.targets.end());
 }
 
+// A name that resolved over [0, 10), and inside it one that failed over
+// [3, 6). The document's own references are kept, unread, for their tree.
+struct NestedFailureReferences final : cursiv::DocumentReferences {
+  NestedFailureReferences(std::unique_ptr<cursiv::DocumentReferences> in,
+                          const cursiv::AstNode& node)
+      : inner(std::move(in)), target(&node) {}
+  std::unique_ptr<cursiv::DocumentReferences> inner;
+  const cursiv::AstNode* target;
+
+  Answer resolve(std::uint32_t) const override { return {}; }
+  cursiv::RefState resolveAll(std::uint32_t,
+                              cursiv::detail::MultiRefItems&) const override {
+    return cursiv::RefState::ErrorNotFound;
+  }
+  void force(std::span<const cursiv::detail::RefHandle>,
+             const cursiv::CancellationToken&) override {}
+  void forceAt(const cursiv::Cst&, cursiv::TextOffset,
+               const cursiv::CancellationToken&) override {}
+  void visitResolved(const cursiv::Cst&,
+                     cursiv::ResolvedReferenceVisitor visitor) const override {
+    visitor(0, 10, *target, false);
+  }
+  void reset() noexcept override {}
+  [[nodiscard]] bool anyUnresolved() const noexcept override { return true; }
+  void visitUnresolved(
+      const cursiv::Cst&,
+      cursiv::UnresolvedReferenceVisitor visitor) const override {
+    visitor(cursiv::RefState::ErrorNotFound, 3, 6, {});
+  }
+  void visitIn(const cursiv::Cst& cst, cursiv::TextOffset, cursiv::TextOffset,
+               cursiv::ResolvedReferenceVisitor resolved,
+               cursiv::UnresolvedReferenceVisitor unresolved) const override {
+    visitResolved(cst, resolved);
+    visitUnresolved(cst, unresolved);
+  }
+};
+
+// The narrowest name under the caret keeps it, even one that resolved to
+// nothing: the target of the name around it is not offered.
+void a_failed_name_inside_a_resolved_one_keeps_the_caret() {
+  World world;
+  cursiv::Document* const document = world.built("SELECT t FROM t, t");
+  document->parseResult.references = std::make_unique<NestedFailureReferences>(
+      std::move(document->parseResult.references),
+      *document->parseResult.value);
+  const auto declaration =
+      world.mref->references->findDeclarations(*document, 4);
+  CHECK(declaration.targets.empty());
+  CHECK(declaration.span.begin == 3 && declaration.span.end == 6);
+}
+
 void navigation_resolves_a_reference_at_computed_scopes() {
   linker::World world;
   cursiv::CancellationTokenSource lookupCancellation;
@@ -1700,6 +1751,7 @@ void run() {
   an_unresolved_reference_names_every_type_it_accepts();
   navigation_uses_the_documents_language_id();
   a_group_is_its_own_sites_targets();
+  a_failed_name_inside_a_resolved_one_keeps_the_caret();
   navigation_resolves_a_reference_at_computed_scopes();
   a_declaration_stands_for_its_group(true);
   a_declaration_stands_for_its_group(false);

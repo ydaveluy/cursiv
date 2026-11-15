@@ -119,11 +119,9 @@ struct dedupe<TypeList<Ts...>> {
 
 #else
 
-// Each element keeps its place when no earlier one is the same type: a type
-// is told by the address of its own tag, so one constant evaluation per pack
-// answers and no function is named after the pack.
-template <class T>
-inline constexpr char dedupe_tag = 0;
+// Each element keeps its place when no earlier one is the same type. Types
+// are compared by position, never by address: g++ cannot compare two
+// addresses in a constant expression under `-fsanitize=undefined`.
 template <class... Ts>
 struct dedupe_pack {
   static constexpr std::size_t n = sizeof...(Ts);
@@ -131,16 +129,20 @@ struct dedupe_pack {
     std::size_t at[n == 0 ? 1 : n]{};
     std::size_t size = 0;
   };
+  // Where `T` first occurs in the pack.
+  template <class T>
+  static consteval std::size_t first() {
+    constexpr bool same[] = {__is_same(T, Ts)...};
+    std::size_t i = 0;
+    while (!same[i]) ++i;
+    return i;
+  }
   static constexpr Kept kept = [] {
     Kept k;
     if constexpr (n != 0) {
-      constexpr const char* tags[] = {&dedupe_tag<Ts>...};
-      for (std::size_t i = 0; i < n; ++i) {
-        bool fresh = true;
-        for (std::size_t j = 0; fresh && j < k.size; ++j)
-          fresh = tags[k.at[j]] != tags[i];
-        if (fresh) k.at[k.size++] = i;
-      }
+      constexpr std::size_t firsts[] = {first<Ts>()...};
+      for (std::size_t i = 0; i < n; ++i)
+        if (firsts[i] == i) k.at[k.size++] = i;
     }
     return k;
   }();

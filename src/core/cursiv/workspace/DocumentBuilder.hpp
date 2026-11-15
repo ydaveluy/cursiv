@@ -47,14 +47,19 @@ class DocumentPhaseListener {
                                const CancellationToken&) = 0;
 };
 
-// What the workspace lost or gained, told before the rebuild: the only news of
-// a deletion. A listener may send another document back down with
-// `resetToState`, and the rebuild builds it too.
+// What an update changes: the documents it names, and those the builder sends
+// back down because of them.
 class DocumentUpdateListener {
  public:
   virtual ~DocumentUpdateListener() noexcept = default;
+  // Once per update, before the rebuild: the only news of a deletion. A
+  // listener may send another document back down with `resetToState`, and the
+  // rebuild builds it too.
   virtual void onUpdate(std::span<const std::string_view> changed,
                         std::span<const std::string_view> deleted) = 0;
+  // Each time the builder sends a document back to `state`, such as one that
+  // reads a changed document; told even when it already stood there.
+  virtual void onReset(const Document&, DocumentState) {}
 };
 
 class DocumentBuilder {
@@ -71,8 +76,8 @@ class DocumentBuilder {
   virtual void removeDocumentUpdateListener(DocumentUpdateListener&) = 0;
 
   // Options are remembered per document, and replace what an earlier build
-  // asked of a document not yet validated. `Validated` means validated for
-  // the categories asked so far: a wider request runs only the missing ones.
+  // asked of it. `Validated` means validated for the categories asked so far:
+  // a wider request runs only the missing ones.
   virtual void build(std::span<Document* const>, const BuildOptions& = {},
                      const CancellationToken& = {}) = 0;
 

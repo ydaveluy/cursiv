@@ -38,6 +38,8 @@
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/Check.hpp"
+#include "degraded/generated/G/Parser.hpp"
+#include "degraded/generated/G/Table.hpp"
 #include "engines/lr/LrStand.hpp"
 #include "election/generated/Election/Parser.hpp"
 #include "election/generated/Election/Table.hpp"
@@ -229,8 +231,8 @@ void merged_path_keeps_its_source_rank() {
   CHECK(gdm::kDrive.enter(c) == cursiv::engine::LrExit::pause);
   cursiv::engine::LrSearch s(c.len, kUnbounded, c.indentArena);
   cursiv::engine::lr_search_start(c, s);
-  cursiv::engine::lr_search_root(s, c, c.committed, c.stack, c.tape.len(), 1,
-                                 true);
+  cursiv::engine::lr_search_root(s, c, c.committed, c.stack, c.tape.len(), 0,
+                                 1, true);
   s.heap.clear();
   auto closeRow = gdm::kTable.cold.close[c.stack.top().state];
   const auto term = static_cast<cursiv::engine::SymbolId>(closeRow.take());
@@ -814,6 +816,25 @@ void a_deletion_names_the_token_it_resumes_on() {
   }
 }
 
+// A deletion first closes what its state reduces on every token, and nothing
+// more: not where the state also accepts the end, nor where a level that
+// groups nothing refused a token the reduction's goto would take.
+void a_deletion_closes_only_what_every_token_reduces() {
+  namespace g = tdegraded::generated::G;
+  const auto one = repaired<g::kTable>("one ?", g::kDrive);
+  CHECK(one.size() == 1);
+  for (const cursiv::ParseDiagnostic& d : one)
+    CHECK(d.kind == cursiv::DiagnosticKind::Deleted && d.begin == 4 &&
+          d.end == 5);
+  const std::string chain = "infix a < b ? < c";
+  const auto fault = static_cast<cursiv::TextOffset>(chain.find('?'));
+  CHECK(std::ranges::any_of(
+      repaired<g::kTable>(chain, g::kDrive),
+      [&](const cursiv::ParseDiagnostic& d) { return d.end > fault + 1; }));
+  repairs_through<g::kTable>(g::kDrive, "one ?");
+  repairs_through<g::kTable>(g::kDrive, chain);
+}
+
 }  // namespace
 
 void run() {
@@ -821,6 +842,7 @@ void run() {
   an_extra_indent_is_said_once();
   a_refused_word_at_the_end_is_not_an_open_token();
   a_deletion_names_the_token_it_resumes_on();
+  a_deletion_closes_only_what_every_token_reduces();
   a_token_refused_in_its_middle_ends_at_its_closer();
   an_open_comment_ends_where_the_code_resumes();
 }

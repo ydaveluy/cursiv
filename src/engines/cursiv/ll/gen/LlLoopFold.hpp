@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -238,8 +239,9 @@ struct LoopKey {
   std::uint8_t len = 0;
   std::array<char, kKeyChars> text{};
   // The operators of one infix never share a token: a table whose levels
-  // share an operator text is refused.
-  const void* infix = nullptr;
+  // share an operator text is refused. Named, as an address cannot be
+  // compared in a constant expression under `-fsanitize=undefined`.
+  std::string_view infix;
   std::uint8_t level = 0;
 };
 template <class E>
@@ -279,21 +281,19 @@ struct recipe_key<Append<Sp, E>> : recipe_key<E> {};
 template <auto P, class E>
 struct recipe_key<Flag<P, E>> : recipe_key<E> {};
 
-template <class I>
-inline constexpr char infix_tag = 0;
 template <class RR>
 consteval void operator_key(LoopKey& k) {
   if constexpr (requires {
                   RR::operator_level;
                   typename RR::operator_infix;
                 }) {
-    k.infix = &infix_tag<typename RR::operator_infix>;
+    k.infix = type_name<typename RR::operator_infix>();
     k.level = static_cast<std::uint8_t>(RR::operator_level);
   }
 }
 
 constexpr bool loop_keys_apart(const LoopKey& a, const LoopKey& b) {
-  if (a.infix != nullptr && a.infix == b.infix && a.level != b.level)
+  if (!a.infix.empty() && a.infix == b.infix && a.level != b.level)
     return true;
   if (!a.known || !b.known) return false;
   if (!a.ci && !b.ci) {

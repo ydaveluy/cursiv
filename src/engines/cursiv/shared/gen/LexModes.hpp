@@ -23,7 +23,8 @@ struct LexModes {
   // theirs, its own at equal length. `kNoMode` where there are none.
   std::vector<DynSet> longer;
   std::vector<std::uint16_t> longerMode;
-  // A mode is keyed by its tag too: modes of different tags never merge.
+  // A mode is keyed by its tag too, whose top byte is the configuration the
+  // mode belongs to (`cfg_tag`): modes of different tags never merge.
   std::vector<std::uint32_t> tag;
   DynSet trivia;
   // The line terminal of a bracketed grammar whose trivia read no line ending:
@@ -53,6 +54,12 @@ struct LexModes {
     for (std::size_t k = 0; k + 1 < g.cfgTriviaAt.size(); ++k)
       for (std::uint32_t i = g.cfgTriviaAt[k]; i < g.cfgTriviaAt[k + 1]; ++i)
         skips[k].set(g.cfgTrivia[i]);
+  }
+
+  // The tag of a mode of configuration `k`: no two configurations share a
+  // mode, so a mode has the one fault mode of its configuration.
+  static constexpr std::uint32_t cfg_tag(unsigned k) {
+    return std::uint32_t{k} << 24;
   }
 
   std::uint16_t intern(const DynSet& want, std::uint32_t at = 0,
@@ -105,7 +112,7 @@ struct LexModes {
       own[k] |= skipped[h];
       if (h != 0) own[k].set(g.cfgEnd[h]);
       own[k].reset(kEofSymbol);
-      out[k] = intern(own[k]);
+      out[k] = intern(own[k], cfg_tag(static_cast<unsigned>(k)));
     }
     return out;
   }
@@ -124,7 +131,7 @@ struct LexModes {
     for (std::size_t h = 1; h < own.size(); ++h)
       if (g.cfgSection[h] == h) {
         own[h].set(g.cfgEnd[h]);
-        out[h] = intern(own[h]);
+        out[h] = intern(own[h], cfg_tag(static_cast<unsigned>(h)));
       }
     return out;
   }

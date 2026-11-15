@@ -86,10 +86,10 @@ void DefaultValidationRegistry::handleException(std::exception_ptr failure,
   services.shared().observabilitySink->publish(
       {.severity = ObservationSeverity::Warning,
        .code = node != nullptr ? ObservationCode::ValidationCheckThrew
-                               : ObservationCode::ValidationPreparationThrew,
+                               : ObservationCode::DocumentCheckThrew,
        .message =
            std::string(node != nullptr ? "a validation check threw: "
-                                       : "a validation preparation threw: ") +
+                                       : "a document check threw: ") +
            what,
        .uri = document.uri,
        .languageId = std::string(services.languageMetaData.languageId)});

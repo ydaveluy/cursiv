@@ -16,9 +16,9 @@ namespace cursiv {
 
 struct Document;
 
-// A cache for the whole workspace, emptied by every build: at the update, or,
-// with `state`, once its listeners hear that state; a read that waited for it
-// may still see the old value. Pass the state the provider reads, such as
+// A cache for the whole workspace, emptied by every build: at the update and as
+// a tree goes, or, with `state`, as a document goes back below it and again
+// once its listeners hear it. Pass the state the provider reads, such as
 // `Linked` for a cache read by a validator.
 //
 // WorkspaceCache<V> holds one value, without a key. get(provider) returns a
@@ -48,6 +48,11 @@ class WorkspaceCache : public SimpleCache<K, V, Hash, KeyEqual>,
   void onUpdate(std::span<const std::string_view>,
                 std::span<const std::string_view> deleted) override {
     if (!_state.has_value() || !deleted.empty()) this->clear();
+  }
+
+  void onReset(const Document&, DocumentState state) override {
+    if (_state.has_value() ? state < *_state : state == DocumentState::Changed)
+      this->clear();
   }
 
   DocumentBuilder* _builder = nullptr;

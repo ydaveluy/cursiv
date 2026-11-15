@@ -78,7 +78,8 @@ template <class Node, class Base>
 consteval bool AstBase() {
   static_assert(
       std::is_same_v<Node, Base> || !std::is_base_of_v<Base, Node> ||
-          cursiv::ast_type_tag<Node>.derivesFrom(&cursiv::ast_type_tag<Base>),
+          cursiv::detail::tl_has<
+              Base, typename cursiv::detail::base_closure<Node>::type>::value,
       "this class derives from an AST base without `Extends`: a reference "
       "to the base would never resolve to it. Declare it `Extends<Base>`");
   return true;

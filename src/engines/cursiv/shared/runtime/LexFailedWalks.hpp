@@ -12,7 +12,8 @@ template <class Tape>
 class LexFailedWalks {
  public:
   // Whether the walk of `mode` from `from` fails, `halt` where it stopped
-  // reading. An acceptance or a relay it crosses leaves it to the full matcher.
+  // reading. An acceptance, an echo or an assertion that holds leaves it to the
+  // full matcher.
   template <class Poll>
   bool fails(const Tape& tape, const char* src, TextOffset len,
              std::uint16_t mode, TextOffset from, TextOffset& halt,

@@ -63,7 +63,8 @@ if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
     repaircostGenerated
     paritylrGenerated
     asicasesGenerated
-    nestedGenerated)
+    nestedGenerated
+    degradedGenerated)
 
   # A parse past its repair budget ends, accepted, whatever it met.
   cursiv_grammar(insertloop engines/lr/InsertionLoopGrammars.hpp tinsertloop::G ENGINE LR)

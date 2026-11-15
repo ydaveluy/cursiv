@@ -123,7 +123,7 @@ template <const auto& T>
 inline bool ll_chains_nothing(const Cst& cst, StampLayout stamp,
                               const LlSpine& spine, const CstLeaf& leaf,
                               std::uint16_t hop) {
-  if constexpr (T.nodeStep == nullptr) return false;
+  if constexpr (!T.has(LlPart::NodeStep)) return false;
   const std::uint32_t step = hop != kNoRow ? T.nodeStep[hop] : 0u;
   if ((step & 1u) == 0 || !leaf) return false;
   const auto records = spine.records();
@@ -808,11 +808,11 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   // What a fault at the leaf is lexed with, as the repair that read it.
   const std::uint16_t leafErr = ll_err_mode<T>(
       pos != 0 ? T.nodes[pos - 1].mode : kNoMode,
-      pos != 0 && T.nodeSection != nullptr ? T.nodeSection[pos - 1] : 0);
+      pos != 0 && T.has(LlPart::NodeSection) ? T.nodeSection[pos - 1] : 0);
   // The gap in front of a region's first token is its caller's, so a token is
   // not always reached across the gap its own position crosses.
   std::uint16_t afterGap = kNoRow;
-  if (T.nodeAfterGap != nullptr)
+  if (T.has(LlPart::NodeAfterGap))
     afterGap = pos == 0 ? T.tailMode : T.nodeAfterGap[pos - 1];
   // A comment that ends at the caret and closes on nothing goes on over what is
   // typed: `//` then `entity` is one comment. A candidate is offered where the
@@ -896,7 +896,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   const auto reads_as = [&](const Scan& s, SymbolId term, std::uint16_t mode) {
     if (s.term == kInvalidSymbol) return false;
     if (term == kNoRow || s.term == term) return true;
-    if (T.modeMulti == nullptr || T.modeMulti[mode] == 0) return false;
+    if (!T.has(LlPart::ModeMulti) || T.modeMulti[mode] == 0) return false;
     std::vector<std::uint16_t> tiedTerms;
     LlMask<T.termWords> readable;
     readable.assign(T.modeTerms + std::size_t{mode} * T.termWords,

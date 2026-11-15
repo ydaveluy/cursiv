@@ -478,7 +478,8 @@ CURSIV_ALWAYS_INLINE inline bool convert_payload(AstBuildCtx& ctx, NodeId id,
     store(*std::move(value));
     return true;
   } else if constexpr (std::is_enum_v<A> &&
-                       std::is_same_v<CR, default_converter<A>>) {
+                       std::is_same_v<CR, default_converter<A>> &&
+                       !written_converter<A>()) {
     const auto text = payload_text<Data, Text, Base>(ctx, id);
     return text && take_conversion(ctx, id,
                                    or_folded_enumerator<A, Data, Text, Base>(

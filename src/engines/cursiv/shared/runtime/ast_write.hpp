@@ -96,18 +96,10 @@ CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
     std::uint32_t index = 0;
     if constexpr (F::storage == FieldStorage::vector) {
       index = static_cast<std::uint32_t>(member.size() - 1);
-    } else {
-      // Reassigning a scalar keeps its location, once verified: a copied
-      // reference may carry another member's handle.
-      const auto*& resolver = RefAccess::resolver(slot);
-      const std::uint32_t handle = RefAccess::handle(slot);
-      if (resolver == ctx.resolver && resolver != nullptr &&
-          handle < ctx.refs->size()) {
-        const RefHandle& previous = (*ctx.refs)[handle];
-        if (previous.owner == owner && previous.field == field &&
-            previous.index == 0)
-          return;
-      }
+    } else if (ctx.resolver != nullptr &&
+               RefAccess::resolver(slot) == ctx.resolver) {
+      // Reassigning a scalar keeps the location this build gave it.
+      return;
     }
     // A handle, never a pointer: a vector of references relocates as it grows,
     // the owner does not.

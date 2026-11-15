@@ -79,8 +79,8 @@ class DefaultDocumentBuilder : public DocumentBuilder {
   [[nodiscard]] virtual BuildOptions getBuildOptions(const Document&) const;
 
   // What an update asks of a document of `language`: `updateBuildOptions()`,
-  // unless a language is configured otherwise. Asked once per language and
-  // update.
+  // unless a language is configured otherwise. Asked off the builder's lock,
+  // from any worker.
   [[nodiscard]] virtual BuildOptions updateBuildOptionsFor(
       const CoreServices& language) const;
 
@@ -150,6 +150,9 @@ class DefaultDocumentBuilder : public DocumentBuilder {
   void letGoOf(const std::unordered_set<DocumentId>& moved, bool repair);
   // Resets one document's state, and not the documents that read it.
   void resetDocument(Document& document, DocumentState state);
+  // Where every document state goes down. The caches kept per state forget the
+  // document even when its state stays, as its resolutions may have gone.
+  void lower(Document& document, DocumentState state);
 
   // One state of a phase and the work that reaches it.
   struct Step {

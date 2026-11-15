@@ -215,7 +215,8 @@ class LrGss {
       _c.stop.poll();
       const Reading& r = sources[k].reading;
       const NodeCount len = frames_of(sources[k], frames[k]);
-      lr_search_root(s, r, r.at, frames[k], len, k, true);
+      lr_search_root(s, r, r.at, frames[k], len, len - _c.tape.len(), k,
+                     true);
     }
     bool exhausted = false, raced = false;
     const std::uint32_t elected = lr_search_run<A>(_c, s, exhausted, raced);

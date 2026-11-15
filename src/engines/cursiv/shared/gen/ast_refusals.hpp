@@ -247,13 +247,19 @@ consteval bool enum_literal(std::integer_sequence<int, I...>) {
   }(std::make_index_sequence<values.second>{});
 }
 
+// An enum literal is looked up by name alone: the conversion's failure message
+// names the type, which is no constant expression under `-fsanitize=undefined`.
 template <auto Member, str Literal, class Value>
 consteval bool LiteralConversion() {
-  if constexpr (!default_convert<Value>(Literal.view()).value.has_value()) {
-    if constexpr (std::is_same_v<Value, bool>)
+  if constexpr (std::is_same_v<Value, bool>) {
+    if constexpr (!default_convert<bool>(Literal.view()).value.has_value())
       return ::BoolLiteral<Member, Literal>();
-    else
-      return enum_literal<Member, Literal, Value>(enum_probes{});
+  } else if constexpr (![] {
+                         Value found{};
+                         return find_enumerator<Value>(Literal.view(), found,
+                                                       enum_probes{});
+                       }()) {
+    return enum_literal<Member, Literal, Value>(enum_probes{});
   }
   return true;
 }

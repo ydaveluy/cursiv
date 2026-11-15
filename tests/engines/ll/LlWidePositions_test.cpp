@@ -86,8 +86,10 @@ constexpr auto kTable = [] {
   table.nodes = kNodes.data();
   table.nodeAfter = kAfter.data();
   table.nodeAfterGap = nullptr;
+  ll_terms::set_part(table, cursiv::engine::LlPart::NodeAfterGap, false);
   table.nafter = kPositions;
   table.edgeNode = kEdgeNodes.data();
+  ll_terms::set_part(table, cursiv::engine::LlPart::EdgeNode, true);
   table.returnNode = kReturnNodes.data();
   table.atnStart = 0;
   table.atn = {.states = kStates.data(), .nstates = kStates.size(),

@@ -55,8 +55,8 @@ std::string_view to_string(ObservationCode code) noexcept {
       return "ScopeReadBeforeComputed";
     case ValidationCheckThrew:
       return "ValidationCheckThrew";
-    case ValidationPreparationThrew:
-      return "ValidationPreparationThrew";
+    case DocumentCheckThrew:
+      return "DocumentCheckThrew";
     case WorkspaceDocumentReadFailed:
       return "WorkspaceDocumentReadFailed";
     case ReferenceResolutionThrew:

@@ -3,18 +3,28 @@
 // engines.
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "cursiv/Check.hpp"
+#include "cursiv/ll/runtime/LlLanguageParser.hpp"
 #include "cursiv/ll/runtime/LlSearch.hpp"
+#include "cursiv/lr/runtime/LrLanguageParser.hpp"
 #include "cursiv/lr/runtime/LrParseStats.hpp"
 #include "cursiv/lr/runtime/LrParser.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
+#include "embedll/generated/DocLl/AstReflection.hpp"
+#include "embedll/generated/DocLl/Grammar.hpp"
 #include "embedll/generated/DocLl/GrammarSource.hpp"
 #include "embedll/generated/DocLl/Module.hpp"
+#include "embedll/generated/DocLl/Parser.hpp"
+#include "embedll/generated/DocLl/Table.hpp"
+#include "embedlr/generated/DocLr/AstReflection.hpp"
+#include "embedlr/generated/DocLr/Grammar.hpp"
 #include "embedlr/generated/DocLr/GrammarSource.hpp"
 #include "embedlr/generated/DocLr/Module.hpp"
 #include "embedlr/generated/DocLr/Parser.hpp"
@@ -343,6 +353,44 @@ void the_end_of_a_section_is_the_end_of_the_text(const Parser& p) {
         names_terminal(p, r, "%>"));
 }
 
+// A token a gap condition holds is a token of the region that read it: a
+// repair with no search to make drops it whole, in either engine.
+void a_held_token_is_read_with_its_regions_terminals() {
+  constexpr cursiv::engine::RepairBudget none{
+      .floor = 0, .perByte = 0, .perSearch = 0, .perParse = 0};
+  namespace ll = tembed::generated::DocLl;
+  namespace lr = tembed::generated::DocLr;
+  const cursiv::engine::LlLanguageParser<ll::kTable> starvedLl(
+      ll::kGrammarMetaData, ll::kAstActions, ll::kDrive, none);
+  const cursiv::engine::LrLanguageParser<lr::kTable> starvedLr(
+      lr::kGrammarMetaData, lr::kAstActions, lr::kDrive, none);
+  for (const Parser* p : {static_cast<const Parser*>(&starvedLl),
+                          static_cast<const Parser*>(&starvedLr)}) {
+    const ParseResult r = p->parse("glue -0x1::!\n");
+    std::vector<cursiv::ParseDiagnostic> syntax;
+    for (const cursiv::ParseDiagnostic& d : r.diagnostics)
+      if (d.isSyntax()) syntax.push_back(d);
+    CHECK(r.accepted && syntax.size() == 1 &&
+          syntax[0].kind == cursiv::DiagnosticKind::Deleted &&
+          syntax[0].begin == 9 && syntax[0].end == 11);
+  }
+}
+
+// A configuration lexes its faults with one mode, which lexes its own: the
+// region's fault mode stays apart from the mode the document reads a number
+// with, though both lex the same terminals.
+void a_mode_has_its_configurations_fault_mode() {
+  const auto& lr = tembed::generated::DocLr::kTable;
+  for (const std::uint16_t m : lr.mode)
+    CHECK(lr.errModeOf[lr.errModeOf[m]] == lr.errModeOf[m]);
+  // Every position that skips the document's trivia is the document's.
+  const auto& ll = tembed::generated::DocLl::kTable;
+  const std::uint16_t blanks = ll.modeTrivia[ll.tailMode];
+  for (const auto& n : tembed::generated::DocLl::kNodes)
+    if (n.term != cursiv::engine::kNoRow && ll.modeTrivia[n.mode] == blanks)
+      CHECK(ll.errModeOf[n.mode] == ll.errModeOf[ll.tailMode]);
+}
+
 // The lines behind a fault cost its repair nothing, in either engine.
 void the_text_behind_a_fault_costs_nothing(const Parser& ll) {
   const auto work = [&](unsigned lines) {
@@ -372,5 +420,7 @@ int main() {
   CHECK(checks::offers_named(*lr, "hexes <hx", 9, 9, "Hexed::NUMBER"));
   a_long_section_does_not_cost_a_fault_its_share(*ll);
   the_text_behind_a_fault_costs_nothing(*ll);
+  a_held_token_is_read_with_its_regions_terminals();
+  a_mode_has_its_configurations_fault_mode();
   return cursiv::test::report("Embed_test");
 }

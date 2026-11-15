@@ -37,7 +37,9 @@ struct LrEdit {
   std::uint32_t low = 0;
   // What the reading it was made from had cost.
   std::uint32_t cost = 0;
-  // The author's tokens its path dropped, itself included.
+  // The author's tokens its path passed that its reading did not shift: those
+  // it dropped, itself included, and those its root's frames hold beyond
+  // where the search set out.
   std::uint32_t dropped = 0;
 };
 

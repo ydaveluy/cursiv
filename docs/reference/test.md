@@ -123,8 +123,10 @@ Call `count_expectations()` first to report every failure, and return
 ## Recovery and fuzz
 
 `cursiv/RecoveryLane.hpp` compares how the parser repairs broken
-documents with a reference file, `REFERENCE.txt`. Run the test with `--write`
-to regenerate it. If the LL and LR parsers repair a document differently,
+documents with a reference file, `REFERENCE.txt`. The test target defines
+`CURSIV_RECOVERY_CORPUS` as the folder that holds them, as
+`examples/cmake/Tests.cmake` does. Run the test with `--write` to regenerate
+the reference. If the LL and LR parsers repair a document differently,
 copy `REFERENCE.txt` to `REFERENCE-ll.txt` or `REFERENCE-lr.txt` beside it;
 `--write` then updates that copy for that parser.
 

@@ -271,13 +271,29 @@ struct Doc : cursiv::GrammarSpec {
                       skip(ignore<WS>, hide<>,
                            lit<"`"> + assign<&ast::Block::opener>(ref<TEXT>) +
                                lit<"`">))> {};
+  // A region that skips the document's comments alone and reads a number
+  // after its first token: what a fault in it is lexed with is what the
+  // document reads a number with.
+  struct Kept
+      : rule<create<ast::Block>(
+            kw<"keep"> +
+            skip(ignore<>, hide<CM>,
+                 lit<"="> + assign<&ast::Block::count>(ref<Json::NUMBER>)))> {};
+  // A number a gap condition ends, read tight: `::` follows it in one arm and
+  // `!` in the other, and only the region reads either.
+  struct Glued : rule<ref<Json::NUMBER> + gap::none> {};
+  struct Glue
+      : rule<create<ast::Block>(
+            kw<"glue"> +
+            tight((lit<"+"> + ref<Glued> + lit<"::"> + ref<Json::NUMBER>) |
+                  (lit<"-"> + ref<Glued> + lit<"!">)))> {};
 };
 
 struct DocLl : Doc {
-  struct Line
-      : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> | ref<Small> |
-              ref<Narrowed> | ref<Dashed> | ref<Widened> | ref<Lettered> |
-              ref<Sequenced> | ref<Hexes> | ref<Quoted>)+ref<NL>> {};
+  struct Line : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> |
+                      ref<Small> | ref<Narrowed> | ref<Dashed> | ref<Widened> |
+                      ref<Lettered> | ref<Sequenced> | ref<Hexes> |
+                      ref<Quoted> | ref<Kept> | ref<Glue>)+ref<NL>> {};
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Line>)))> {};
   using entry = Root;
@@ -292,8 +308,8 @@ struct DocLr : Doc {
   struct Line
       : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> | ref<Small> |
               ref<Narrowed> | ref<Dashed> | ref<Widened> | ref<Lettered> |
-              ref<Sequenced> | ref<Hexes> | ref<Quoted> | ref<Code>)+ref<NL>> {
-  };
+              ref<Sequenced> | ref<Hexes> | ref<Quoted> | ref<Kept> |
+              ref<Glue> | ref<Code>)+ref<NL>> {};
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Line>)))> {};
   using entry = Root;

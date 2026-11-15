@@ -93,15 +93,14 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
     return modes.intern(want, tag, longer_firsts(g, want, beyond));
   };
   // What the positions the entry reaches read, by configuration, and the
-  // configuration each position's mode reads under: a section's mode is no
-  // mode of its caller's.
+  // configuration each position's mode reads under, which keys the mode.
   std::vector<DynSet> own(skips.size());
   std::vector<std::uint8_t> cfgOf;
   const auto read = [&](bool reached, std::uint8_t k, DynSet want,
                         DynSet beyond = {}) {
     if (reached) own[k] |= want;
     const std::uint16_t m =
-        intern(std::move(want), std::move(beyond), g.section_cfg_at(k));
+        intern(std::move(want), std::move(beyond), LexModes::cfg_tag(k));
     if (cfgOf.size() <= m) cfgOf.resize(m + 1u, kNoCfg);
     cfgOf[m] = k;
     return m;
@@ -183,9 +182,9 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
     for (std::size_t h = 1; h < sectionOf.size(); ++h)
       if (sectionOf[h] == h) b.sectionEnd[h] = g.cfgEnd[h];
   }
-  // For a choice in a region, what its configuration skips and every token it
-  // does not read in another role: a lookahead crosses no other trivia, and in
-  // a section no token its grammar does not read.
+  // For a choice in a region, a mode of its configuration: what it skips and
+  // every token it does not read in another role. A lookahead crosses no other
+  // trivia, and in a section no token its grammar does not read.
   b.lookMode.clear();
   if (skips.size() > 1) {
     std::vector byCfg(skips.size(), kNoRow);
@@ -197,7 +196,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
         for (std::uint16_t t = 1; t < g.nterms; ++t)
           if (!trivia.test(t) && modes.set[b.sectionErr[sectionOf[k]]].test(t))
             all.set(t);
-        byCfg[k] = intern(all);
+        byCfg[k] = intern(all, {}, LexModes::cfg_tag(k));
       }
       if (byCfg[k] == kNoRow) {
         DynSet all = skips[k];
@@ -214,7 +213,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
           if (!trivia.test(t) && !recast.test(t) &&
               !g.termBuild[t].predicateOnly)
             all.set(t);
-        byCfg[k] = intern(all);
+        byCfg[k] = intern(all, {}, LexModes::cfg_tag(k));
       }
       b.lookMode[d] = byCfg[k];
     }

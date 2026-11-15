@@ -42,6 +42,36 @@ using LlConditionRead = bool (*)(const char*, TextOffset, unsigned,
 using LlConditionNamed = unsigned (*)(const char*, TextOffset, unsigned,
                                       const Token&, TextOffset);
 
+// The parts a table may lack, one bit each of `LlTable::parts`. Presence is
+// read there, not off a pointer: under `-fsanitize=undefined`, g++ cannot
+// compare an inline array's address to null in a constant expression.
+enum class LlPart : std::uint8_t {
+  Condition,
+  ConditionNamed,
+  NodeAfterGap,
+  NodeStep,
+  EdgeNode,
+  TermReach,
+  ErrModeOf,
+  LookMode,
+  ModeMulti,
+  ModeBacktrack,
+  ModeLonger,
+  ModeTrivia,
+  ModeJoinedTrivia,
+  SkipSet,
+  SkipStop,
+  ByteTerms,
+  LexChoices,
+  LexChecks,
+  LexRes,
+  LexLive,
+  LexRelayRes,
+  CallerReadAt,
+  SectionEnd,
+  NodeSection,
+};
+
 struct LlTable {
   struct Node {
     std::uint16_t row = kNoRow;
@@ -136,11 +166,11 @@ struct LlTable {
   const std::uint16_t* modeStart = nullptr;
   const std::uint8_t* modeMulti = nullptr;
   const std::uint8_t* modeBacktrack = nullptr;
-  constexpr bool has_backtrack() const { return modeBacktrack != nullptr; }
+  constexpr bool has_backtrack() const { return has(LlPart::ModeBacktrack); }
   // Per mode, the mode that lexes what it takes for the length of its token
   // alone; null where no mode has one.
   const std::uint16_t* modeLonger = nullptr;
-  constexpr bool has_longer() const { return modeLonger != nullptr; }
+  constexpr bool has_longer() const { return has(LlPart::ModeLonger); }
   constexpr std::uint16_t longer_mode(std::uint16_t mode) const {
     return modeLonger[mode];
   }
@@ -237,6 +267,12 @@ struct LlTable {
 
   StampLayout stamp{};
 
+  // The `LlPart`s this table has.
+  std::uint32_t parts = 0;
+  constexpr bool has(LlPart p) const {
+    return ((parts >> static_cast<unsigned>(p)) & 1u) != 0;
+  }
+
   // Whether the wider alphabet admits all the narrower one does. The bound
   // check states that `wide` names a row, which no reader can tell from the
   // pointer.
@@ -260,18 +296,18 @@ struct LlTable {
     return LlTermRow{lexLive + lexLiveAt[s], termWords};
   }
   constexpr LlTermRow dfa_res_set(std::uint16_t s) const {
-    return lexRes == nullptr
+    return !has(LlPart::LexRes)
                ? LlTermRow{}
                : LlTermRow{lexRes + lexResAt[s], termWords};
   }
   constexpr LlTermRow dfa_relay_res_set(std::uint16_t s) const {
-    return lexRelayRes == nullptr
+    return !has(LlPart::LexRelayRes)
                ? LlTermRow{}
                : LlTermRow{lexRelayRes + lexRelayResAt[s], termWords};
   }
   template <class F>
   constexpr bool each_accept(std::uint16_t s, F&& f) const {
-    if (lexChoices == nullptr) return false;
+    if (!has(LlPart::LexChoices)) return false;
     const auto first = lexChoiceAt[std::size_t{s} * 2];
     const auto end = first + lexChoiceAt[std::size_t{s} * 2 + 1];
     for (auto r = first; r < end; ++r)
@@ -281,10 +317,11 @@ struct LlTable {
     return false;
   }
   constexpr bool lex_bounded(std::uint16_t s) const {
-    return dfaBound[s] != kNoSet || (lexChecks != nullptr && lexChecks[s] != 0);
+    return dfaBound[s] != kNoSet ||
+           (has(LlPart::LexChecks) && lexChecks[s] != 0);
   }
   constexpr std::uint16_t look_mode(const Decision& d) const {
-    return lookMode != nullptr
+    return has(LlPart::LookMode)
                ? lookMode[static_cast<std::size_t>(&d - decisions)]
                : errMode;
   }
@@ -311,7 +348,7 @@ template <const auto& T>
 inline bool ll_condition_text(std::string_view text, std::uint16_t condition,
                               const Token& token, TextOffset gapFrom,
                               bool atEnd = false, TextOffset* seen = nullptr) {
-  if constexpr (T.condition == nullptr)
+  if constexpr (!T.has(LlPart::Condition))
     return false;
   else
     return T.condition(text.data(), static_cast<TextOffset>(text.size()),
@@ -325,7 +362,7 @@ template <const auto& T>
 inline unsigned ll_condition_named(std::string_view text,
                                    std::uint16_t condition, const Token& token,
                                    TextOffset gapFrom) {
-  if constexpr (T.conditionNamed == nullptr)
+  if constexpr (!T.has(LlPart::ConditionNamed))
     return 0;
   else
     return T.conditionNamed(text.data(), static_cast<TextOffset>(text.size()),

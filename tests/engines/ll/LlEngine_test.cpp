@@ -1188,6 +1188,7 @@ void an_optional_prefix_keeps_its_token_due_across_a_required_call() {
     t.nrules = 2;
     t.atn = {states, 5, edges, starts, callers, returns};
     t.edgeNode = edgeNodes;
+    ll_terms::set_part(t, cursiv::engine::LlPart::EdgeNode, true);
     return t;
   }();
   // No prefix; a simulated real prefix; a real caller's CST prefix; and a
@@ -2007,6 +2008,7 @@ namespace {
 constexpr auto table = [] {
   auto copy = tpar::generated::Ll::kTable;
   copy.lexChoices = nullptr;
+  ll_terms::set_part(copy, cursiv::engine::LlPart::LexChoices, false);
   return copy;
 }();
 thread_local unsigned errors = 0, calls = 0;

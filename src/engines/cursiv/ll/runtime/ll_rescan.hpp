@@ -36,7 +36,7 @@ struct LlTypoTape : TypoTape<T> {
   // A walk standing where no terminal it wants can end offers nothing more:
   // inside a comment, it would read on to the comment's end for nothing.
   bool alive(std::uint16_t s) const {
-    if (T.lexLive == nullptr) return true;
+    if (!T.has(LlPart::LexLive)) return true;
     const LlTermRow live = T.dfa_live_set(s);
     for (std::uint32_t k = 0; k < T.termWords; ++k)
       if ((live.w[k] & want[k]) != 0) return true;

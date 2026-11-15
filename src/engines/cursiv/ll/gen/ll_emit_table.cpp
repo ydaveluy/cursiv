@@ -13,6 +13,7 @@
 
 #include "cursiv/ll/gen/LlFinalProgram.hpp"
 #include "cursiv/ll/gen/LlLexView.hpp"
+#include "cursiv/ll/table/LlTable.hpp"
 #include "cursiv/shared/gen/CLiteral.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitTable.hpp"
@@ -77,6 +78,15 @@ struct Out : TextBuilder {
   }
   void ptr(std::string_view field, std::string_view name) {
     if (ref(name) != "nullptr") line("    .", field, " = ", name, ",");
+  }
+
+  // The `LlPart`s written, which the table states in `parts`.
+  std::uint32_t parts = 0;
+  void has(LlPart p) { parts |= 1u << static_cast<unsigned>(p); }
+  void part(LlPart p, std::string_view field, std::string_view name) {
+    if (ref(name) == "nullptr") return;
+    has(p);
+    ptr(field, name);
   }
 };
 
@@ -691,6 +701,8 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.line("    .ndecisions = ", g.ndecisions, "u,");
   if (g.ngapConds != 0) {
     o.line("    .condition = &condition, .conditionNamed = &condition_named,");
+    o.has(LlPart::Condition);
+    o.has(LlPart::ConditionNamed);
     o.line("    .ngapConds = ", g.ngapConds, "u,");
     const CondReach reach = GapReach(g).widest();
     o.line("    .condReach = {", reach.look, "u, ", reach.tail, "u, ",
@@ -698,10 +710,10 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   }
   o.ptr("decFirst", "kDecFirst");
   o.ptr("nodeAfter", "kNodeAfter");
-  o.ptr("nodeAfterGap", "kNodeAfterGap");
-  o.ptr("nodeStep", "kNodeStep");
+  o.part(LlPart::NodeAfterGap, "nodeAfterGap", "kNodeAfterGap");
+  o.part(LlPart::NodeStep, "nodeStep", "kNodeStep");
   o.line("    .nafter = ", (unsigned)a.nodeAfter.size(), "u,");
-  o.ptr("edgeNode", "kEdgeNode");
+  o.part(LlPart::EdgeNode, "edgeNode", "kEdgeNode");
   o.ptr("returnNode", "kReturnNode");
   o.line("    .atnStart = ", a.atnEntry, "u,");
   o.ptr("sets", "kSets");
@@ -711,29 +723,32 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.line("    .nwordRanges = ", g.wordRanges.size(), "u,");
   o.ptr("setScalars", "kSetScalars");
   o.ptr("scalarRanges", "kScalarRanges");
-  if (refusing)
+  if (refusing) {
     o.line(
         "    .head_refuses = &head_refuses,\n    .head_reach = &head_reach,\n"
         "    .termReach = &term_reach,");
+    o.has(LlPart::TermReach);
+  }
   if (trailing) o.line("    .tailRefuses = &tail_refuses,");
   o.ptr("cls", "kCls");
   o.line("    .ncls = ", a.ncls, "u,");
   o.line("    .nmodes = ", a.nmodes, "u,\n    .errMode = ", a.errMode,
          "u,\n    .tailMode = ", a.tailMode, "u,");
-  o.ptr("errModeOf", "kErrModeOf");
-  o.ptr("lookMode", "kLookMode");
+  o.part(LlPart::ErrModeOf, "errModeOf", "kErrModeOf");
+  o.part(LlPart::LookMode, "lookMode", "kLookMode");
   o.ptr("modeStart", "kModeStart");
-  o.ptr("modeMulti", "kModeMulti");
-  o.ptr("modeBacktrack", "kModeBacktrack");
-  o.ptr("modeLonger", "kModeLonger");
-  o.ptr("modeTrivia", "kModeTrivia");
-  o.ptr("modeJoinedTrivia", joinedApart ? "kModeJoinedTrivia" : "kModeTrivia");
+  o.part(LlPart::ModeMulti, "modeMulti", "kModeMulti");
+  o.part(LlPart::ModeBacktrack, "modeBacktrack", "kModeBacktrack");
+  o.part(LlPart::ModeLonger, "modeLonger", "kModeLonger");
+  o.part(LlPart::ModeTrivia, "modeTrivia", "kModeTrivia");
+  o.part(LlPart::ModeJoinedTrivia, "modeJoinedTrivia",
+         joinedApart ? "kModeJoinedTrivia" : "kModeTrivia");
   o.ptr("modeTerms", "kModeTerms");
   o.ptr("modeSub", "kModeSub");
   o.line("    .subWords = ", a.subWords, "u,");
-  o.ptr("skipSet", "kSkipSet");
-  o.ptr("skipStop", "kSkipStop");
-  o.ptr("byteTerms", "kByteTerms");
+  o.part(LlPart::SkipSet, "skipSet", "kSkipSet");
+  o.part(LlPart::SkipStop, "skipStop", "kSkipStop");
+  o.part(LlPart::ByteTerms, "byteTerms", "kByteTerms");
   o.ptr("modeBytes", "kModeBytes");
   o.line("    .walk = &walk_all,");
   o.ptr("lexNext", "kLexNext");
@@ -745,8 +760,8 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.ptr("dfaAccept", "kLexAccept");
   o.ptr("dfaBound", "kLexBound");
   o.ptr("lexChoiceAt", "kLexChoiceAt");
-  o.ptr("lexChoices", "kLexChoices");
-  o.ptr("lexChecks", "kLexChecks");
+  o.part(LlPart::LexChoices, "lexChoices", "kLexChoices");
+  o.part(LlPart::LexChecks, "lexChecks", "kLexChecks");
   if (!a.relays.empty()) {
     o.ptr("dfaRelay", "kLexRelay");
     o.ptr("relays", "kRelays");
@@ -755,11 +770,11 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   }
   o.ptr("lexAcc", "kLexAcc");
   o.ptr("lexAccAt", "kLexAccAt");
-  o.ptr("lexRes", "kLexRes");
+  o.part(LlPart::LexRes, "lexRes", "kLexRes");
   o.ptr("lexResAt", "kLexResAt");
-  o.ptr("lexLive", "kLexLive");
+  o.part(LlPart::LexLive, "lexLive", "kLexLive");
   o.ptr("lexLiveAt", "kLexLiveAt");
-  o.ptr("lexRelayRes", "kLexRelayRes");
+  o.part(LlPart::LexRelayRes, "lexRelayRes", "kLexRelayRes");
   o.ptr("lexRelayResAt", "kLexRelayResAt");
   o.ptr("wordBounds", "kWordBounds");
   if (reserving) o.line("    .reserves = true,");
@@ -772,7 +787,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.line("            .callerAt = ", o.ref("kCallerAt"), ",");
   o.line("            .returnClass = ", o.ref("kReturnClass"), "},");
   o.ptr("callerReads", "kCallerReads");
-  o.ptr("callerReadAt", "kCallerReadAt");
+  o.part(LlPart::CallerReadAt, "callerReadAt", "kCallerReadAt");
   o.ptr("decFlag", "kDecFlag");
   o.ptr("decFlagAt", "kDecFlagAt");
   if (staged) o.line("    .staged = &ll_staged_predict,");
@@ -780,12 +795,13 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.ptr("repeatScopes", "kRepeatScopes");
   if (!a.sectionErr.empty()) {
     o.ptr("sectionErr", "kSectionErr");
-    o.ptr("sectionEnd", "kSectionEnd");
-    o.ptr("nodeSection", "kNodeSection");
+    o.part(LlPart::SectionEnd, "sectionEnd", "kSectionEnd");
+    o.part(LlPart::NodeSection, "nodeSection", "kNodeSection");
     o.line("    .nsections = ", a.sectionErr.size(), "u,");
   }
   if (a.stamp != StampLayout{})
     o.line("    .stamp = {.rowBits = ", a.stamp.rowBits, "u},");
+  o.line("    .parts = ", o.parts, "u,");
   o.line("};");
   o.line("");
   if (compiledPredicates)
