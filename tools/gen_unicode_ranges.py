@@ -84,7 +84,7 @@ out = [
 ]
 for name in props:
     out.append(f'  {name},')
-out += ['  count', '};', '', 'namespace detail {', '',
+out += ['  Count', '};', '', 'namespace detail {', '',
         '// For a dump alone: what a property is called.',
         'inline constexpr std::string_view kNames[] = {']
 for name in props:

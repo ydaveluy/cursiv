@@ -1,3 +1,9 @@
 # The scaffold's templates are not C++ until they are substituted: clang-format
 # reads `@CURSIV_NEW_ID@` as three tokens and splits the placeholder in two.
 templates/project/**
+
+# The Unicode tables are kept as tools/gen_unicode_ranges.py writes them.
+src/core/cursiv/text/unicode/UnicodeProperty.hpp
+src/core/cursiv/text/unicode/UnicodeRanges.hpp
+src/core/cursiv/text/unicode/UnicodeLower.hpp
+src/core/cursiv/text/unicode/UnicodeFold.hpp
