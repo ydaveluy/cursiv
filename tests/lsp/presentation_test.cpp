@@ -56,6 +56,13 @@
 
 namespace {
 
+// Unoptimised wasm runs the same work several times slower.
+#if defined(__wasi__) && !defined(NDEBUG)
+constexpr int kSlowdown = 10;
+#else
+constexpr int kSlowdown = 1;
+#endif
+
 // A new URI for each document, so tests never share one.
 struct UniqueUriWorld : support::LspWorkspace {
   mutable unsigned nextUri = 0;
@@ -476,7 +483,8 @@ void many_carets_read_the_records_once() {
   const auto answer = world.ws->selectionRangeProvider->getSelectionRanges(
       *document, carets, cursiv::kNoCancel);
   CHECK(answer.size() == carets.size());
-  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
+  CHECK(std::chrono::steady_clock::now() - begin <
+        std::chrono::seconds(2 * kSlowdown));
 }
 
 // A non-ASCII word is one word, and a non-ASCII dash ends one.
@@ -1439,7 +1447,8 @@ void a_wide_payload_is_matched_in_one_pass() {
   params.context.diagnostics.push_back(std::move(echo));
   const cursiv::DefaultCodeActionProvider provider;
   CHECK(provider.getCodeActions(document, params).size() == 1);
-  CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(1));
+  CHECK(std::chrono::steady_clock::now() - start <
+        std::chrono::seconds(kSlowdown));
 }
 
 void an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads() {

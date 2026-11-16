@@ -1452,7 +1452,7 @@ struct adopt_cycles<Flag<P, E>, Seen, TypeList<E>> : adopt_cycles<E, Seen> {};
 // An alternative that commits nothing adopts. `'(' Expression ')'` writes no
 // member and creates nothing, so what it produces is the node it wraps.
 template <class A, class Seen>
-struct branch_type_from<A, Seen, TypeList<>> {
+struct branch_type_from<A, Seen, TypeList<>, false> {
   using L = typename adopt_cands<A, Seen>::type;
   static constexpr bool cycles = adopt_cycles<A, Seen>::value;
   static_assert(!std::is_same_v<L, TypeList<>> || cycles,
