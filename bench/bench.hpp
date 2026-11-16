@@ -1,40 +1,27 @@
 // The corpus generators, one per shipped grammar.
 #pragma once
 
-#include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <fstream>
 #include <ratio>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
-// What a throughput bench needs: deterministic generators and a driver with
-// the CLI the measurement scripts expect. Keep it small.
+// What a throughput bench needs: a stopwatch and deterministic generators.
+// Keep it small.
 
 namespace bench {
 
-// The stopwatch and the corpus reader. The measurement loops stay in the
-// tools, whose protocols differ on purpose.
+// The stopwatch. The measurement loops stay in the tools, whose protocols
+// differ on purpose.
 inline double seconds_of(auto&& fn) {
   const auto t0 = std::chrono::steady_clock::now();
   fn();
   return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
       .count();
-}
-
-inline std::string slurp(const char* path) {
-  std::ifstream f(path);
-  std::stringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
 }
 
 // splitmix64, never seeded from the clock: a given size produces a
@@ -71,61 +58,6 @@ inline std::string makeIdent(std::string_view prefix, std::size_t index,
   return id;
 }
 
-// `BIN <bytes|path> <reps>`, so one parse and three parses of the same input
-// can be differenced to remove startup and generation. No arguments runs a
-// few sizes.
-template <class Generate, class Parse>
-int run(int argc, char** argv, Generate generate, Parse parse) {
-  // A leading digit is a size, not a path: the CLI takes either.
-  const auto load = [](const char* arg) {
-    return std::isdigit(static_cast<unsigned char>(arg[0])) ? std::string()
-                                                            : slurp(arg);
-  };
-
-  if (argc >= 3) {
-    const std::string fromFile = load(argv[1]);
-    const std::string source =
-        fromFile.empty() ? generate(std::strtoul(argv[1], nullptr, 10))
-                         : fromFile;
-    const int reps = std::atoi(argv[2]);
-    std::size_t acc = 0;
-    for (int i = 0; i < reps; ++i) acc += parse(source) ? 1u : 0u;
-    std::printf("%zu/%d parsed, %zu bytes\n", acc, reps, source.size());
-    return acc == static_cast<std::size_t>(reps) ? 0 : 1;
-  }
-
-  const std::string fromFile = argc >= 2 ? load(argv[1]) : std::string();
-  std::printf("%10s %12s %10s\n", "bytes", "ms", "MiB/s");
-  // A corpus given by path is measured whole: a prefix of a document is rarely
-  // one. The sizes run from what an editor reparses per keystroke to a hundred
-  // MiB, which shows any growth worse than linear.
-  const std::vector<std::size_t> sizes =
-      fromFile.empty() ? std::vector<std::size_t>{std::size_t{4} << 10,
-                                                  std::size_t{64} << 10,
-                                                  std::size_t{1} << 20,
-                                                  std::size_t{16} << 20,
-                                                  std::size_t{128} << 20}
-                       : std::vector<std::size_t>{fromFile.size()};
-  for (std::size_t n : sizes) {
-    const std::string source = fromFile.empty() ? generate(n) : fromFile;
-    double best = 1e30;
-    for (int round = 0; round < 5; ++round) {
-      const auto t0 = std::chrono::steady_clock::now();
-      const bool ok = parse(source);
-      const auto t1 = std::chrono::steady_clock::now();
-      if (!ok) {
-        std::printf("REJECTED at %zu bytes\n", source.size());
-        return 1;
-      }
-      best = std::min(
-          best, std::chrono::duration<double, std::milli>(t1 - t0).count());
-    }
-    std::printf("%10zu %12.3f %10.1f\n", source.size(), best,
-                double(source.size()) / (1024.0 * 1024.0) / (best / 1000.0));
-  }
-  return 0;
-}
-
 }  // namespace bench
 // Synthetic arithmetics-source generator: expressions nested 3 to 5
 // operators deep over all six operators, so the precedence climb is walked
@@ -157,7 +89,8 @@ inline std::string genArithLeaf(std::uint64_t& state,
     }
     return std::to_string(intPart);
   }
-  if (choice == 1 && !params.empty()) {
+  // A parameter when one is asked, or when no function is declared yet.
+  if ((choice == 1 && !params.empty()) || funcs.empty()) {
     return params[bench::splitmix64(state) % params.size()];
   }
   const ArithFuncInfo& f = funcs[bench::splitmix64(state) % funcs.size()];

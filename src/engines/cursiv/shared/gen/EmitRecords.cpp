@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <span>
 #include <stdexcept>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "cursiv/shared/gen/CLiteral.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
@@ -167,12 +171,31 @@ namespace grammar_detail {
   // spellings.
   std::vector<std::string_view> spellings;
   std::vector<std::size_t> spellingAt;
+  // Where each word stands in the pool, in order: a list is looked for there.
+  std::unordered_map<std::string_view, std::vector<std::size_t>> starts;
   for (const TerminalGen& t : terminals) {
-    const auto run = std::ranges::search(spellings, t.spellings);
-    spellingAt.push_back(
-        static_cast<std::size_t>(run.begin() - spellings.begin()));
-    if (run.empty())
-      spellings.insert(spellings.end(), t.spellings.begin(), t.spellings.end());
+    std::size_t at = 0;
+    bool held = t.spellings.empty();
+    if (!held)
+      if (const auto word = starts.find(t.spellings.front());
+          word != starts.end())
+        for (const std::size_t from : word->second)
+          if (from + t.spellings.size() <= spellings.size() &&
+              std::ranges::equal(
+                  std::span(spellings).subspan(from, t.spellings.size()),
+                  t.spellings)) {
+            at = from;
+            held = true;
+            break;
+          }
+    if (!held) {
+      at = spellings.size();
+      for (const std::string_view word : t.spellings) {
+        starts[word].push_back(spellings.size());
+        spellings.push_back(word);
+      }
+    }
+    spellingAt.push_back(at);
   }
   if (!spellings.empty())
     out.write(emit_table("constexpr ::std::string_view kSpellings[]", spellings,

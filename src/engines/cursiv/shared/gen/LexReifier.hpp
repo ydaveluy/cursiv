@@ -3,6 +3,7 @@
 // token are one key.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <span>
@@ -10,6 +11,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "cursiv/grammar/GrammarImage.hpp"
@@ -91,7 +93,7 @@ class LexReifier {
   Descent<ImageId> resolve_in(unsigned cfg, ImageId id);
   Descent<ImageId> resolve_rule(unsigned cfg, std::uint32_t rule);
   Descent<ImageId> resolve_seq(unsigned cfg, ImageId id);
-  Descent<bool> has_captures(ImageId id) const;
+  Descent<bool> has_captures(ImageId id);
   Descent<bool> consumes(ImageId id) const;
   bool eof_lit(ImageId id) const;
   ImageId without_eof(ImageId lit);
@@ -146,6 +148,11 @@ class LexReifier {
   std::map<ImageId, ImageId> _canon;
   // The rules being resolved: a call back into one stays a call.
   std::unordered_set<std::uint32_t> _resolving;
+  // How many such calls were made. A rule whose resolution made none reads the
+  // same from anywhere, and is resolved once per configuration.
+  std::size_t _callsBack = 0;
+  std::map<std::pair<unsigned, std::uint32_t>, ImageId> _resolved;
+  std::map<ImageId, bool> _captures;
   std::map<ImageId, std::uint16_t> _codePoints;
 };
 

@@ -166,15 +166,24 @@ inline bool indent_token(const char* src, const std::vector<IndentLevel>& arena,
                          SymbolId dedentTerm, TextOffset p, TextOffset run,
                          TextOffset q, Token& out) {
   const IndentLevel* top = head == kNoIndent ? nullptr : &arena[head];
-  const auto cmp = indent_cmp(src, top, run, q - run);
-  if (cmp == 2)
+  const TextOffset n = q - run;
+  const auto cmp = indent_cmp(src, top, run, n);
+  if (cmp == 2) {
     out = Token{run, q, kInvalidSymbol};
-  else if (cmp == 1 && indentTerm != 0)
+  } else if (cmp == 1 && indentTerm != 0) {
     out = Token{run, q, indentTerm};
-  else if (cmp == -1 && dedentTerm != 0)
-    out = Token{p, p, dedentTerm};
-  else
+  } else if (cmp == -1 && dedentTerm != 0) {
+    // A dedent closes the levels down to the outer one the run equals.
+    std::uint32_t to = top->prev;
+    while (to != kNoIndent &&
+           (arena[to].len > n || (arena[to].len == n && arena[to].virt)))
+      to = arena[to].prev;
+    out = indent_cmp(src, to == kNoIndent ? nullptr : &arena[to], run, n) == 0
+              ? Token{p, p, dedentTerm}
+              : Token{run, q, kInvalidSymbol};
+  } else {
     return false;
+  }
   return true;
 }
 

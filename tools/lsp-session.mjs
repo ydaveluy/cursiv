@@ -4,14 +4,8 @@
 // are zero-based UTF-16 positions in the last document.
 
 import { readFile } from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
 import * as path from 'node:path';
-import { startSession } from './session-client.mjs';
-
-// As an editor spells it: on Windows a lower-case drive letter, its colon escaped.
-const fileUri = (file) => pathToFileURL(path.resolve(file)).toString()
-    .replace(/^file:\/\/\/([A-Za-z]):/,
-             (_, drive) => `file:///${drive.toLowerCase()}%3A`);
+import { fileUri, startSession } from './session-client.mjs';
 
 const argv = process.argv.slice(2);
 const rest = [];

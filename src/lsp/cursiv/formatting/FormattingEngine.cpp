@@ -598,17 +598,21 @@ std::vector<lsp::TextEdit> run_formatting(
     bool exit;
   };
   std::vector<Frame> stack;
+  // Where the frames of nodes still to visit stand in `stack`, the next last.
+  std::vector<std::size_t> pending;
+  const auto push = [&](Frame frame) {
+    if (!frame.exit) pending.push_back(stack.size());
+    stack.push_back(frame);
+  };
   {
     const std::vector<NodeId> roots = forest_roots(cst);
     for (unsigned int root : std::views::reverse(roots))
-      stack.push_back(Frame{.id = root, .saved = 0, .exit = false});
+      push(Frame{.id = root, .saved = 0, .exit = false});
   }
   // The node after the one just popped, its children not yet pushed: its next
   // sibling, or the nearest ancestor's -- what an `append` targets.
-  const auto next_node = [&stack]() {
-    for (const Frame& frame : std::views::reverse(stack))
-      if (!frame.exit) return frame.id;
-    return kNoNode;
+  const auto next_node = [&]() {
+    return pending.empty() ? kNoNode : stack[pending.back()].id;
   };
 
   // An `append` whose target is a hidden record shapes that record's margin
@@ -629,6 +633,7 @@ std::vector<lsp::TextEdit> run_formatting(
     throw_if_cancelled(token);
     const Frame frame = stack.back();
     stack.pop_back();
+    if (!frame.exit) pending.pop_back();
     if (frame.exit) {
       context.indentation = frame.saved;
       continue;
@@ -670,6 +675,9 @@ std::vector<lsp::TextEdit> run_formatting(
       if (cst.childless(id)) context.indentation = before;
     }
 
+    // The level an `append` sets starts past its source: at the source's exit
+    // when the source has an inside.
+    std::int32_t after = initial;
     if (const FormattingAction* append =
             actions.find(id, FormattingMode::Append);
         append != nullptr) {
@@ -683,6 +691,9 @@ std::vector<lsp::TextEdit> run_formatting(
         const std::int32_t before = context.indentation;
         emit_gap_edits(id, next, *append, context, sink);
         if (cst.childless(next)) context.indentation = before;
+        after = checked_count(static_cast<std::int64_t>(initial) +
+                              context.indentation - before);
+        if (!cst.childless(id)) context.indentation = before;
       }
     }
 
@@ -691,11 +702,11 @@ std::vector<lsp::TextEdit> run_formatting(
       continue;
     }
 
-    stack.push_back(Frame{.id = id, .saved = initial, .exit = true});
+    push(Frame{.id = id, .saved = after, .exit = true});
     // `reverseChildren` yields the last child first, so pushing in that order
     // pops them back in document order.
     for (const NodeId child : cst.reverseChildren(id))
-      stack.push_back(Frame{.id = child, .saved = 0, .exit = false});
+      push(Frame{.id = child, .saved = 0, .exit = false});
   }
 
   const bool sorted = sink.sorted();

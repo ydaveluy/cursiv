@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <span>
@@ -108,6 +109,7 @@ TextDocument& TextDocument::operator=(TextDocument&& o) noexcept {
     _lineStarts = std::move(o._lineStarts);
     _asciiLines = std::move(o._asciiLines);
     _wellFormedLines = std::move(o._wellFormedLines);
+    _marks = std::move(o._marks);
     _lineIndexReady.store(o._lineIndexReady.load(std::memory_order_relaxed),
                           std::memory_order_release);
   }
@@ -204,7 +206,7 @@ Position TextDocument::positionAt(TextOffset offset) const {
   at = std::min(at, lineEnd(line));
   TextOffset from = _lineStarts[line];
   if (asciiLine(line)) return {line, at - from};
-  return {line, advanceUtf16(from, at, wellFormedLine(line))};
+  return {line, columnAt(line, from, 0, at)};
 }
 
 TextOffset TextDocument::offsetAt(const Position& position) const {
@@ -218,6 +220,13 @@ TextOffset TextDocument::offsetAt(const Position& position) const {
                : static_cast<TextOffset>(begin + position.character);
   TextOffset at = begin;
   std::uint32_t units = 0;
+  const std::span<const Mark> marks = marksOf(position.line);
+  if (const auto after =
+          std::ranges::upper_bound(marks, position.character, {}, &Mark::units);
+      after != marks.begin()) {
+    at = std::prev(after)->at;
+    units = std::prev(after)->units;
+  }
   const char* const p = _text.data();
   // Whole words while one keeps the count at or under the column asked, and
   // only where the word ends on a boundary of a well-formed line.
@@ -279,6 +288,7 @@ void TextDocument::replaceText(std::size_t from, std::size_t to,
 // first old line start past `to`; the later lines move by the length change.
 void TextDocument::patchLineIndex(TextOffset from, TextOffset to,
                                   TextOffset inserted) {
+  _marks.clear();
   std::vector<TextOffset>& starts = _lineStarts;
   const std::size_t lines = starts.size();
   std::size_t first = lineOf(from);
@@ -316,6 +326,7 @@ void TextDocument::dropLineIndex() {
   _lineStarts.clear();
   _asciiLines.clear();
   _wellFormedLines.clear();
+  _marks.clear();
   _lineIndexReady.store(false, std::memory_order_release);
 }
 
@@ -339,6 +350,39 @@ std::uint32_t TextDocument::advanceUtf16(TextOffset& from, TextOffset to,
   }
   from = at;
   return units;
+}
+
+std::span<const TextDocument::Mark> TextDocument::marksOf(
+    std::uint32_t line) const {
+  const TextOffset start = _lineStarts[line];
+  const TextOffset end = lineEnd(line);
+  if (end - start <= kMarkSpan) return {};
+  const std::scoped_lock lock(_lineIndexMutex);
+  auto [row, fresh] = _marks.try_emplace(line);
+  if (fresh) {
+    const bool wellFormed = wellFormedLine(line);
+    TextOffset at = start;
+    std::uint32_t units = 0;
+    row->second.reserve((end - start) / kMarkSpan);
+    for (TextOffset next = start + kMarkSpan; next < end; next += kMarkSpan) {
+      units += advanceUtf16(at, next, wellFormed);
+      row->second.push_back({at, units});
+    }
+  }
+  return row->second;
+}
+
+std::uint32_t TextDocument::columnAt(std::uint32_t line, TextOffset& from,
+                                     std::uint32_t units, TextOffset to) const {
+  if (to - from > kMarkSpan) {
+    const std::span<const Mark> marks = marksOf(line);
+    if (const auto after = std::ranges::upper_bound(marks, to, {}, &Mark::at);
+        after != marks.begin() && std::prev(after)->at > from) {
+      from = std::prev(after)->at;
+      units = std::prev(after)->units;
+    }
+  }
+  return units + advanceUtf16(from, to, wellFormedLine(line));
 }
 
 void TextDocument::ensureLineIndex() const {
@@ -501,14 +545,13 @@ Position TextDocument::Cursor::onLine(TextOffset at) {
   // lies inside it. Keep the decoder's boundary, which can be past `at`, so
   // the next offset inside that same scalar does not count it again.
   if (at > _decodedAt)
-    _character += _document.advanceUtf16(_decodedAt, at, _wellFormed);
+    _character = _document.columnAt(_line, _decodedAt, _character, at);
   return {_line, _character};
 }
 
 void TextDocument::Cursor::selectLine() {
   _lineEnd = _document.lineEnd(_line);
   _ascii = _document.asciiLine(_line);
-  _wellFormed = _document.wellFormedLine(_line);
   _decodedAt = _document._lineStarts[_line];
   _character = 0;
 }

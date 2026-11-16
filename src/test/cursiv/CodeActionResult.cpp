@@ -12,6 +12,7 @@
 #include "cursiv/Disposable.hpp"
 #include "cursiv/DocumentDisposable.hpp"
 #include "cursiv/ExpectFunction.hpp"
+#include "cursiv/RangeUtils.hpp"
 #include "cursiv/TextDocumentParams.hpp"
 #include "cursiv/ValidationHelper.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
@@ -84,11 +85,9 @@ CodeActionResult testCodeAction(const LspServices& services, std::string input,
   // Only the edits filed under this document change its text; an action may
   // edit other documents as well.
   std::vector<TextEdit> converted;
-  if (action.edit.has_value() && action.edit->changes.has_value())
-    for (const auto& [uri, edits] : *action.edit->changes)
-      if (uri.toString() == text.uri())
-        for (const lsp::TextEdit& edit : edits)
-          converted.emplace_back(from_lsp(edit.range), edit.newText);
+  if (action.edit.has_value())
+    for (const lsp::TextEdit& edit : detail::editsFor(*action.edit, text.uri()))
+      converted.emplace_back(from_lsp(edit.range), edit.newText);
   expectedFunction(converted.empty() ? "false" : "true", "true",
                    "the code action carries no edit for this document");
   const std::string updated = TextDocument::applyEdits(text, converted);

@@ -12,12 +12,15 @@
 #include "cursiv/DocumentDisposable.hpp"
 #include "cursiv/ExpectationError.hpp"
 #include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/LanguageMetaData.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/workspace/BuildOptions.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
 #include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
 
 namespace cursiv::test {
 
@@ -33,16 +36,18 @@ std::shared_ptr<Document> parseHelper(const CoreServices& services,
                                       std::string text,
                                       const ParseHelperOptions& options) {
   const SharedCoreServices& shared = services.shared();
+  const LanguageMetaData& meta = services.languageMetaData;
   std::string uri = options.documentUri;
   if (uri.empty()) {
-    const std::vector<std::string>& extensions =
-        services.languageMetaData.fileExtensions;
     uri = "file:///" + std::to_string(nextDocumentId.fetch_add(1));
-    if (!extensions.empty()) uri += extensions.front();
+    if (!meta.fileExtensions.empty())
+      uri += normalize_extension(meta.fileExtensions.front());
   }
 
+  // Named by its language, which no other one claiming the URI can take.
   std::shared_ptr<Document> document =
-      shared.documentFactory->fromString(std::move(text), uri);
+      shared.documentFactory->fromTextDocument(TextDocument::create(
+          std::move(uri), meta.languageId, 0, std::move(text)));
   shared.documents->addDocument(document);
   // A build that throws leaves the workspace as it found it.
   Disposable added = detail::documentDisposable(services, document);

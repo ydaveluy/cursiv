@@ -7,6 +7,7 @@
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/workspace/Document.hpp"
 
 namespace cursiv::detail {
 
@@ -16,6 +17,8 @@ std::optional<ReferenceInfo> reference_at_caret(const AstReflection& reflection,
                                                 const NextFeature& next,
                                                 AstNodePtr& entered) {
   const std::string_view feature = next.property;
+  // Before any node, the caret reads from the root.
+  if (container == nullptr) container = document.parseResult.value;
   if (feature.empty() || container == nullptr) return std::nullopt;
 
   std::uint16_t reference = kNoReference;

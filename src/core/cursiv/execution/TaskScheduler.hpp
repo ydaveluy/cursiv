@@ -60,7 +60,8 @@ template <class Range, class F>
 void TaskScheduler::parallelFor(const CancellationToken& token, Range&& range,
                                 F&& task, std::size_t minParallelCount) {
   throw_if_cancelled(token);
-  const auto begin = std::ranges::begin(range);
+  // One iterator, never copied: an input range's may only move.
+  auto current = std::ranges::begin(range);
   const auto end = std::ranges::end(range);
 
   if constexpr (std::ranges::random_access_range<Range> &&
@@ -69,7 +70,7 @@ void TaskScheduler::parallelFor(const CancellationToken& token, Range&& range,
     if (count == 0) return;
     if (_pool != nullptr && count > 1 && count >= minParallelCount) {
       parallelForIndexed(token, count, [&](std::size_t index) {
-        task(*(begin + static_cast<std::ptrdiff_t>(index)));
+        task(*(current + static_cast<std::ptrdiff_t>(index)));
       });
       return;
     }
@@ -78,7 +79,7 @@ void TaskScheduler::parallelFor(const CancellationToken& token, Range&& range,
   // The inline path polls rather than testing per item: the token is an atomic
   // load, which a tight range of cheap bodies would feel.
   std::size_t polls = 0;
-  for (auto current = begin; current != end; ++current) {
+  for (; current != end; ++current) {
     if ((polls++ & 0x3f) == 0) throw_if_cancelled(token);
     task(*current);
   }

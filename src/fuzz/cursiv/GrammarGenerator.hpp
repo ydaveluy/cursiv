@@ -72,9 +72,6 @@ struct GrammarGenerator {
     // The value rule the assignment being walked descended into: its converter
     // is the payload's, and a token of its own names another element.
     ElementId valueRule = kNoElement;
-    // Whether the assignment being walked reached its member, saved and
-    // restored per assignment.
-    bool written = false;
   };
 
   // What one rule's body collected: the node it built, and the node a bare
@@ -141,16 +138,7 @@ struct GrammarGenerator {
             w.valueRule = e;
           return;
         }
-        if (assign != kNoElement) {
-          AstNode* const to = f.node;
-          if (to == nullptr ||
-              act.writeNode(assign, *to, sub) == Write::NotModelled)
-            refuse(assign, to, w);
-          else
-            w.written = true;
-        } else if (f.adopted == nullptr) {
-          f.adopted = sub;
-        }
+        if (f.adopted == nullptr) f.adopted = sub;
         return;
       }
       case ElementKind::assignment:
@@ -237,9 +225,14 @@ struct GrammarGenerator {
     unsigned n = 0;
     if (w.ok && !cheap(w) && !ops.empty())
       n = w.src->choose(DecisionKind::byte, kGrammarOpCap + 1);
+    std::vector<const InfixOp*> next;
     for (unsigned i = 0; i < n && w.ok; ++i) {
-      const InfixOp& o = ops[w.src->choose(DecisionKind::entry,
-                                           static_cast<unsigned>(ops.size()))];
+      next.clear();
+      for (const InfixOp& o : ops)
+        if (may_follow(chain, o)) next.push_back(&o);
+      if (next.empty()) break;
+      const InfixOp& o = *next[w.src->choose(
+          DecisionKind::entry, static_cast<unsigned>(next.size()))];
       const std::size_t before = w.d.tokens.size();
       Frame none;
       walk(o.element, kNoElement, none, w);
@@ -285,6 +278,17 @@ struct GrammarGenerator {
     return root;
   }
 
+  // Whether `o` may follow `chain`: a non-associative level never groups two
+  // of its operators, and only a looser one between them keeps them apart.
+  [[nodiscard]] static bool may_follow(const std::vector<InfixOp>& chain,
+                                       const InfixOp& o) {
+    if (o.group != Association::Non) return true;
+    for (auto it = chain.rbegin(); it != chain.rend() && it->prec >= o.prec;
+         ++it)
+      if (it->prec == o.prec) return false;
+    return true;
+  }
+
   [[nodiscard]] AstNode* climb(ElementId e,
                                const std::vector<AstNode*>& operands,
                                const std::vector<InfixOp>& chain,
@@ -295,8 +299,9 @@ struct GrammarGenerator {
       const InfixOp o = chain[at];
       const std::string op = texts[at];
       ++at;
-      AstNode* const rhs = climb(e, operands, chain, texts, at,
-                                 o.right ? o.prec : o.prec + 1u, w);
+      AstNode* const rhs =
+          climb(e, operands, chain, texts, at,
+                o.group == Association::Right ? o.prec : o.prec + 1u, w);
       AstNode* const node = act.make(e, *w.ar);
       if (node == nullptr || lhs == nullptr || rhs == nullptr ||
           act.fold(e, o.element, *node, lhs, w.ar->stash(op), rhs) ==
@@ -310,20 +315,24 @@ struct GrammarGenerator {
   }
 
   // A member is written from one node or one token. A value of several tokens,
-  // which a data rule joins, is only named.
+  // which a data rule joins, is only named. The operand builds in a frame of
+  // its own: the node it ends with, created, called or nested, is the value.
   void assign_member(ElementId e, Frame& f, Walk& w) const {
     AstNode* const to = f.node;
     const std::size_t first = w.d.tokens.size();
-    const bool outer = w.written;
     const ElementId outerRule = w.valueRule;
-    w.written = false;
     w.valueRule = kNoElement;
-    for (const ElementId c : g.childrenOf(e)) walk(c, e, f, w);
-    const bool written = w.written;
+    Frame operand{f.rule, nullptr, nullptr};
+    for (const ElementId c : g.childrenOf(e)) walk(c, e, operand, w);
     const ElementId rule = w.valueRule;
-    w.written = outer;
     w.valueRule = outerRule;
-    if (!w.ok || written) return;
+    if (!w.ok) return;
+    if (AstNode* const value =
+            operand.node != nullptr ? operand.node : operand.adopted) {
+      if (to == nullptr || act.writeNode(e, *to, value) == Write::NotModelled)
+        refuse(e, to, w);
+      return;
+    }
     const std::size_t last = w.d.tokens.size();
     if (to == nullptr || last == first ||
         (last > first + 1 && rule == kNoElement)) {

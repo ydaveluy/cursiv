@@ -75,14 +75,14 @@ namespace {
 
 // A scheme is a letter, then letters, digits, '+', '-' or '.', then ':' --
 // `untitled:Note` and `file:/w/a` as much as `file:///w/a`. One letter is a
-// drive, as in `C:\w`, so a path.
+// drive, as in `C:\w`, so a path, unless an authority follows: `x://host/a`.
 bool has_scheme(std::string_view text) {
   const auto letter = [](char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
   };
   const std::size_t colon = text.find(':');
-  if (colon == std::string_view::npos || colon < 2 || !letter(text.front()))
-    return false;
+  if (colon == std::string_view::npos || !letter(text.front())) return false;
+  if (colon < 2) return colon == 1 && text.substr(2).starts_with("//");
   return std::ranges::all_of(text.substr(1, colon - 1), [&](char c) {
     return letter(c) || (c >= '0' && c <= '9') || c == '+' || c == '-' ||
            c == '.';

@@ -118,6 +118,12 @@ void a_sequence_groups_as_its_level_says(const cursiv::Parser& p) {
   check(p, "grouped:", "a E F b", "(a EF b)");
   check(p, "grouped:", "a E F b E F c", "<refused>");
   check(p, "grouped:", "a E F b A B c", "(a EF (b AB c))");
+  // Behind the chain's operand, a caret is offered no operator of its step.
+  const std::string chained = "grouped:a E F b ";
+  const std::vector<std::string> offered = caret_offers::offered(
+      p, chained, static_cast<cursiv::TextOffset>(chained.size()));
+  CHECK(std::ranges::find(offered, "E") == offered.end());
+  CHECK(std::ranges::find(offered, "A") != offered.end());
 }
 
 void a_terminal_keeps_its_value(const cursiv::Parser& p) {

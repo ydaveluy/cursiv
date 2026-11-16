@@ -76,6 +76,11 @@ namespace detail {
 // inside; empty between words. What completes there replaces it.
 [[nodiscard]] CstLeaf word_at(const Cst& cst, TextOffset offset);
 
+// The text the parser read between two offsets of the document: its own text,
+// or the translated text; empty where a bound is inside a replaced piece.
+[[nodiscard]] std::string_view read_text(const Cst& cst, TextOffset begin,
+                                         TextOffset end);
+
 }  // namespace detail
 
 }  // namespace cursiv

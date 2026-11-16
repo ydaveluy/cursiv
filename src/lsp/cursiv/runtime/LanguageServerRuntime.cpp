@@ -1004,72 +1004,63 @@ void add_workspace_handlers(Session& session) {
       }));
 }
 
-// The explorer's six, the only routes registered conditionally: the
-// handler's options are the registration, so an arm nobody announced
-// is one nothing would ever send.
+// The explorer's six, routed with a handler whatever its options: the
+// handshake announces them, and a client sends only what it announced.
 void add_file_operation_handlers(Session& session,
                                  const SharedLspServices& shared) {
   lsp::ServerEndpoint& endpoint = session.endpoint;
   LanguageServer& server = session.server;
-  const FileOperationHandler* files = shared.fileOperationHandler.get();
-  if (files == nullptr) return;
-  const lsp::FileOperationOptions& options = files->fileOperationOptions();
+  if (shared.fileOperationHandler == nullptr) return;
 
-  if (options.didCreate.has_value())
-    endpoint.onWorkspaceDidCreateFiles(notification(
-        session, lsp::notifications::WorkspaceDidCreateFiles::Method, false,
-        [&server](const lsp::CreateFilesParams& params) {
-          server.didCreateFiles(params);
-        }));
+  endpoint.onWorkspaceDidCreateFiles(
+      notification(session, lsp::notifications::WorkspaceDidCreateFiles::Method,
+                   false, [&server](const lsp::CreateFilesParams& params) {
+                     server.didCreateFiles(params);
+                   }));
 
-  if (options.didRename.has_value())
-    endpoint.onWorkspaceDidRenameFiles(notification(
-        session, lsp::notifications::WorkspaceDidRenameFiles::Method, false,
-        [&server](const lsp::RenameFilesParams& params) {
-          server.didRenameFiles(params);
-        }));
+  endpoint.onWorkspaceDidRenameFiles(
+      notification(session, lsp::notifications::WorkspaceDidRenameFiles::Method,
+                   false, [&server](const lsp::RenameFilesParams& params) {
+                     server.didRenameFiles(params);
+                   }));
 
-  if (options.didDelete.has_value())
-    endpoint.onWorkspaceDidDeleteFiles(notification(
-        session, lsp::notifications::WorkspaceDidDeleteFiles::Method, false,
-        [&server](const lsp::DeleteFilesParams& params) {
-          server.didDeleteFiles(params);
-        }));
+  endpoint.onWorkspaceDidDeleteFiles(
+      notification(session, lsp::notifications::WorkspaceDidDeleteFiles::Method,
+                   false, [&server](const lsp::DeleteFilesParams& params) {
+                     server.didDeleteFiles(params);
+                   }));
 
   // Null is "nothing to change": the client moves the files with no edit
   // first.
-  if (options.willCreate.has_value())
-    endpoint.onWorkspaceWillCreateFiles(
-        request(session, [&server](const lsp::CreateFilesParams& params,
-                                   const CancellationToken& token) {
-          lsp::WorkspaceWillCreateFilesResult result;
-          if (std::optional<lsp::WorkspaceEdit> edit =
-                  server.willCreateFiles(params, token))
-            result = std::move(*edit);
-          return result;
-        }));
+  endpoint.onWorkspaceWillCreateFiles(
+      request(session, [&server](const lsp::CreateFilesParams& params,
+                                 const CancellationToken& token) {
+        lsp::WorkspaceWillCreateFilesResult result;
+        if (std::optional<lsp::WorkspaceEdit> edit =
+                server.willCreateFiles(params, token))
+          result = std::move(*edit);
+        return result;
+      }));
 
-  if (options.willRename.has_value())
-    endpoint.onWorkspaceWillRenameFiles(
-        request(session, [&server](const lsp::RenameFilesParams& params,
-                                   const CancellationToken& token) {
-          lsp::WorkspaceWillRenameFilesResult result;
-          if (std::optional<lsp::WorkspaceEdit> edit =
-                  server.willRenameFiles(params, token))
-            result = std::move(*edit);
-          return result;
-        }));
+  endpoint.onWorkspaceWillRenameFiles(
+      request(session, [&server](const lsp::RenameFilesParams& params,
+                                 const CancellationToken& token) {
+        lsp::WorkspaceWillRenameFilesResult result;
+        if (std::optional<lsp::WorkspaceEdit> edit =
+                server.willRenameFiles(params, token))
+          result = std::move(*edit);
+        return result;
+      }));
 
-  if (options.willDelete.has_value())
-    endpoint.onWorkspaceWillDeleteFiles(
-        request(session, [&server](const lsp::DeleteFilesParams& params,
-                                   const CancellationToken& token) {
-          lsp::WorkspaceWillDeleteFilesResult result;
-          if (std::optional<lsp::WorkspaceEdit> edit =
-                  server.willDeleteFiles(params, token))
-            result = std::move(*edit);
-          return result;
-        }));
+  endpoint.onWorkspaceWillDeleteFiles(
+      request(session, [&server](const lsp::DeleteFilesParams& params,
+                                 const CancellationToken& token) {
+        lsp::WorkspaceWillDeleteFilesResult result;
+        if (std::optional<lsp::WorkspaceEdit> edit =
+                server.willDeleteFiles(params, token))
+          result = std::move(*edit);
+        return result;
+      }));
 }
 
 // MCP over the LSP wire as one request: the params carry an MCP message, the

@@ -3,6 +3,7 @@
 #include <span>
 #include <vector>
 
+#include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/JsonValue.hpp"
 #include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/Document.hpp"
@@ -16,6 +17,7 @@ namespace cursiv::detail {
 // first. None for a diagnostic that is not a not-found reference, or past the
 // first sites of its document. The references are walked once per request.
 [[nodiscard]] std::vector<JsonValue::Array> spelling_actions(
-    const Document& document, std::span<const Diagnostic* const> diagnostics);
+    const Document& document, std::span<const Diagnostic* const> diagnostics,
+    const CancellationToken& token = {});
 
 }  // namespace cursiv::detail

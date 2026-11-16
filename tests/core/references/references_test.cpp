@@ -23,6 +23,7 @@
 #include "cursiv/Check.hpp"
 #include "cursiv/ExpectedFindReferences.hpp"
 #include "cursiv/execution/TaskScheduler.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/DefaultLinker.hpp"
@@ -1660,6 +1661,58 @@ void two_nodes_on_one_record_are_two_targets() {
   }
 }
 
+// A caret before any node reads its reference from the root: the rule the
+// grammar opens there still owns the member.
+void a_reference_before_any_node_reads_from_the_root() {
+  support::World<> world;
+  const cursiv::CoreServices* const srm =
+      &support::add_language<cursiv::CoreServices>(
+          world.shared, {"sharedrecord", {".srm"}, {}},
+          tsr::generated::SharedRecord::create_parser(),
+          tsr::generated::SharedRecord::create_ast_reflection());
+  const cursiv::Document* const document =
+      world.built("file:///root.srm", "same;same");
+  cursiv::NextFeature next;
+  next.property = "target";
+  next.type = &cursiv::ast_type_tag<tsr::Use>;
+  next.entered = true;
+  cursiv::AstNodePtr entered;
+  const std::optional<cursiv::ReferenceInfo> info =
+      cursiv::detail::reference_at_caret(*srm->astReflection, *document,
+                                         nullptr, next, entered);
+  CHECK(info.has_value() && info->container == entered.get() &&
+        entered != nullptr && entered->parent == document->parseResult.value);
+}
+
+// ...and a reference to one of them is no reference to the other: `b`'s
+// `same` names `a`'s `Outer`, not the `Inner` on its record.
+void a_reference_to_one_node_of_a_record_is_not_the_others() {
+  support::World<> world;
+  const cursiv::CoreServices* const srm =
+      &support::add_language<cursiv::CoreServices>(
+          world.shared, {"sharedrecord", {".srm"}, {}},
+          tsr::generated::SharedRecord::create_parser(),
+          tsr::generated::SharedRecord::create_ast_reflection(),
+          [](cursiv::CoreServices& language) {
+            language.scopeComputation = std::make_unique<ExportPair>(language);
+          });
+  const cursiv::Document* const a = world.built("file:///a.srm", "inner;inner");
+  const cursiv::Document* const b = world.built("file:///b.srm", "other;same");
+  const auto* const model = a->parseResult.valueAs<tsr::Model>();
+  CHECK(model != nullptr && model->pair != nullptr &&
+        model->pair->child != nullptr);
+  if (model == nullptr || model->pair == nullptr ||
+      model->pair->child == nullptr)
+    return;
+  const auto only = [](const std::vector<cursiv::ReferenceDescription>& rows,
+                       const cursiv::Document& source) {
+    return rows.size() == 1 && rows[0].sourceDocumentId == source.id &&
+           rows[0].sourceBegin == 6;
+  };
+  CHECK(only(srm->references->findReferences(*model->pair->child, {}), *a));
+  CHECK(only(srm->references->findReferences(*model->pair, {}), *b));
+}
+
 // A window's visit is the whole table's, kept to the names that touch it, in
 // the same order: from every offset, over resolved, failed, multi, qualified
 // and repaired names. A caret is a window of no width.
@@ -1763,6 +1816,8 @@ void run() {
   a_throwing_provider_stays_on_its_multi_reference(false);
   a_throwing_provider_stays_on_its_multi_reference(true);
   two_nodes_on_one_record_are_two_targets();
+  a_reference_to_one_node_of_a_record_is_not_the_others();
+  a_reference_before_any_node_reads_from_the_root();
   every_window_visits_what_touches_it();
 }
 

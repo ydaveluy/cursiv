@@ -16,6 +16,7 @@
 #include "cursiv/ExpectFunction.hpp"
 #include "cursiv/ExpectedBase.hpp"
 #include "cursiv/ParseHelper.hpp"
+#include "cursiv/ReplacedIndices.hpp"
 
 namespace cursiv::test {
 
@@ -23,7 +24,7 @@ Disposable expectSymbols(const LspServices& services,
                          const ExpectedSymbols& input) {
   const ExpectedBase base = detail::baseOf(input);
   const std::shared_ptr<Document> document =
-      parseDocument(services, base.text, base.parseOptions);
+      parseDocument(services, replaceIndices(base).output, base.parseOptions);
   Disposable disposable = detail::documentDisposable(services, document);
   const detail::DisposeOnThrow cleanup(disposable);
   std::vector<lsp::DocumentSymbol> symbols;

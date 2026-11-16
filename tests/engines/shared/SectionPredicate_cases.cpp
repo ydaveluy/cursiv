@@ -135,6 +135,13 @@ void section_values(const cursiv::Parser& parser) {
       for (const auto* node : values->nodes) CHECK(node->parent == values);
     }
   }
+  // A choice read past `<`, a token that opens a section elsewhere only.
+  for (const auto& [source, expected] :
+       {std::pair{"pair:< a", "<a"}, {"pair:<b", "<b"}}) {
+    const auto r = read(source);
+    const auto* values = r.valueAs<ast::Values>();
+    CHECK(conformance_test::clean(r) && values && values->text == expected);
+  }
   {
     const auto r = read("text:[ 12 ]");
     const auto* values = r.valueAs<ast::Values>();

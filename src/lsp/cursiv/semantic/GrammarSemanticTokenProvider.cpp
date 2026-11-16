@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -20,6 +21,8 @@
 #include "cursiv/syntax-tree/OwnedNodes.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/text/TextOffset.hpp"
+#include "cursiv/text/scalar_at.hpp"
+#include "cursiv/text/word_scalar.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/semantic/AbstractSemanticTokenProvider.hpp"
@@ -66,19 +69,24 @@ constexpr std::array<std::string_view, 8> kCategoryTypes = {
 }
 
 // Whether a declaration lies below `node`, as `collect_named_nodes` nests
-// them; found among the nodes of its record's subtree.
+// them; found among the nodes of its record's subtree, the nearest first, so
+// a chain of declarations climbs one step each.
 [[nodiscard]] bool owns_a_name(const Document& document,
                                const NameProvider& names, const AstNode& node,
                                const CancellationToken& token) {
   const Cst& cst = document.parseResult.cst();
   const OwnedNodes all = document.parseResult.nodes();
   const NodeId id = node.cstNodeId;
-  for (auto at = std::ranges::lower_bound(all, cst.subtreeBegin(id), {},
-                                          &AstNode::cstNodeId);
-       at != all.end() && (*at)->cstNodeId <= id; ++at) {
+  const NodeId from = cst.subtreeBegin(id);
+  for (auto at = std::ranges::upper_bound(all, id, {}, &AstNode::cstNodeId);
+       at != all.begin() && (*std::prev(at))->cstNodeId >= from;) {
+    const AstNode* const candidate = *--at;
     throw_if_cancelled(token);
-    if (*at == &node || !names.getNameNode(**at, &document)) continue;
-    for (const AstNode* p = (*at)->parent; p != nullptr; p = p->parent)
+    if (candidate == &node || !names.getNameNode(*candidate, &document))
+      continue;
+    // A parent's record never comes before its child's.
+    for (const AstNode* p = candidate->parent;
+         p != nullptr && p->cstNodeId <= id; p = p->parent)
       if (p == &node) return true;
   }
   return false;
@@ -183,7 +191,6 @@ void GrammarSemanticTokenProvider::computeHighlighting(
   // 3. Every leaf of the whole tree, not just the entry's range: a comment
   // before the first keyword sits before `entryBegin` but is still text the
   // editor colours.
-  const std::string_view source = cst.text();
   const auto colourLeaf = [&](const CstLeaf& leaf) {
     throw_if_cancelled(token);
     if (leaf.end <= leaf.begin) return;
@@ -194,18 +201,19 @@ void GrammarSemanticTokenProvider::computeHighlighting(
       colour(leaf.begin, leaf.end, Category::Comment);
       return;
     }
-    const std::string_view text =
-        source.substr(leaf.begin, leaf.end - leaf.begin);
+    // Read as the parser spelled it; coloured at the document's offsets.
+    const std::string_view text = cst.spelling(leaf.id);
     Category category = Category::Keyword;
     // An empty record means the leaf is a literal the grammar spelled, not
     // text captured by a named rule.
     if (grammar.recordRule(cst[leaf.id]).empty()) {
-      // A literal that opens like a word is a keyword the grammar reserved;
-      // the rest of them is punctuation.
-      const char head = text.empty() ? '\0' : text.front();
+      // A literal that opens with a letter or `_` is a keyword the grammar
+      // reserved; the rest of them is punctuation.
+      std::size_t len = 0;
+      const char32_t head =
+          text.empty() ? U'\0' : scalar_at(text.data(), text.size(), len);
       const bool word =
-          head == '_' || (static_cast<unsigned char>(head | 0x20) >= 'a' &&
-                          static_cast<unsigned char>(head | 0x20) <= 'z');
+          detail::word_scalar(head) && (head < U'0' || head > U'9');
       category = word ? Category::Keyword : Category::Operator;
     } else if (!literal_token(text, category)) {
       return;  // an identifier that is neither declared nor referenced

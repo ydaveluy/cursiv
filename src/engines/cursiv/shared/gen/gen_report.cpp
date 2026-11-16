@@ -1,5 +1,6 @@
 #include "cursiv/shared/gen/gen_report.hpp"
 
+#include <compare>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -33,7 +34,7 @@ struct FlagWarning {
   // As the dump spells it.
   std::string flag;
 
-  bool operator==(const FlagWarning&) const = default;
+  auto operator<=>(const FlagWarning&) const = default;
 };
 
 std::vector<FlagWarning> flag_warnings(WarningFound& found) {

@@ -2,12 +2,10 @@
 
 #include <lsp/types.h>
 
-#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "cursiv/utils/Cancellation.hpp"
@@ -25,27 +23,6 @@
 #include "cursiv/ReplacedIndices.hpp"
 
 namespace cursiv::test {
-
-namespace {
-
-// The edits filed under one URI. The protocol groups by document and says
-// nothing about order, so they are read back sorted by position -- which is
-// the order the markers are in.
-std::vector<lsp::TextEdit> editsFor(const lsp::WorkspaceEdit& all,
-                                    std::string_view uri) {
-  std::vector<lsp::TextEdit> edits;
-  if (!all.changes.has_value()) return edits;
-  for (const auto& [key, filed] : *all.changes)
-    if (key.toString() == uri) edits = filed;
-  std::ranges::sort(edits, [](const lsp::TextEdit& a, const lsp::TextEdit& b) {
-    return a.range.start.line == b.range.start.line
-               ? a.range.start.character < b.range.start.character
-               : a.range.start.line < b.range.start.line;
-  });
-  return edits;
-}
-
-}  // namespace
 
 Disposable expectRename(const LspServices& services,
                         const ExpectedRename& input) {
@@ -79,8 +56,9 @@ Disposable expectRename(const LspServices& services,
     expectedFunction(edit.has_value() ? "edited" : "refused", "edited",
                      "expected the rename to file an edit");
     const std::vector<lsp::TextEdit> edits =
-        edit.has_value() ? editsFor(*edit, document->textDocument().uri())
-                         : std::vector<lsp::TextEdit>{};
+        edit.has_value()
+            ? detail::editsFor(*edit, document->textDocument().uri())
+            : std::vector<lsp::TextEdit>{};
     expectedFunction(std::to_string(edits.size()),
                      std::to_string(marked.ranges.size()),
                      "expected " + std::to_string(marked.ranges.size()) +

@@ -10,7 +10,6 @@
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/syntax-tree/CstNodeView.hpp"
-#include "cursiv/text/lower_case.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/AstNodeDescription.hpp"
 #include "cursiv/workspace/Document.hpp"
@@ -27,7 +26,10 @@ namespace cursiv {
 std::vector<lsp::WorkspaceSymbol> DefaultWorkspaceSymbolProvider::getSymbols(
     std::string_view query, const CancellationToken& cancelToken) const {
   std::vector<lsp::WorkspaceSymbol> found;
-  const std::string normalized = detail::lower_case(query);
+  // Folded as the matcher folds, ASCII alone: a name written exactly matches.
+  std::string normalized(query);
+  for (char& c : normalized)
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
   (void)_shared.indexManager->visitElements(
       nullptr, {}, [&](const AstNodeDescription& description) {
         throw_if_cancelled(cancelToken);

@@ -136,26 +136,29 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
       // even when an enclosing package is the one renamed.
       const std::string_view replacement =
           written.find('.') == std::string_view::npos ? bare : qualified;
-      if (written == replacement) continue;
 
       lsp::TextEdit rewrite;
       rewrite.range = cursiv::to_lsp(
           text.rangeAt(reference.sourceBegin, reference.sourceEnd));
       rewrite.newText = std::string(replacement);
 
-      // The base already edited this site with the bare name: replace its
-      // text, since a client refuses two edits over one span.
-      auto& rows = changes[lsp::DocumentUri::parse(std::string(source->uri))];
+      // The base edited this site with the bare name, even one already spelled
+      // as its replacement: replace that edit, since a client refuses two over
+      // one span, and add one only where it changes text.
+      const auto uri = lsp::DocumentUri::parse(std::string(source->uri));
+      if (written == replacement && !changes.contains(uri)) continue;
+      auto& rows = changes[uri];
       auto [index, fresh] = sites.try_emplace(&rows);
       if (fresh)
         for (std::size_t row = 0; row < rows.size(); ++row)
           index->second.try_emplace(site_of(rows[row]), row);
-      if (const auto [at, added] =
-              index->second.try_emplace(site_of(rewrite), rows.size());
-          added)
-        rows.push_back(std::move(rewrite));
-      else
+      if (const auto at = index->second.find(site_of(rewrite));
+          at != index->second.end()) {
         rows[at->second].newText = std::move(rewrite.newText);
+      } else if (written != replacement) {
+        index->second.emplace(site_of(rewrite), rows.size());
+        rows.push_back(std::move(rewrite));
+      }
     }
   }
   return edit;

@@ -102,8 +102,11 @@ function isWasm(file: string): boolean {
 function presetCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
     const directory = process.env.CURSIV_SERVER_DIR?.trim();
     if (!directory) return undefined;
-    const built = path.join(directory, executableName());
-    if (!fs.existsSync(built)) return undefined;
+    // A native build names the server for the host; a WASI build adds nothing.
+    const built = [executableName(), SERVER]
+        .map(name => path.join(directory, name))
+        .find(file => fs.existsSync(file));
+    if (!built) return undefined;
     if (!isWasm(built)) return { command: built, args: [] };
     for (const root of repositoryRoots(context)) {
         const run = wasmCommand(built, path.join(root, 'tools', 'wasi-run.mjs'));

@@ -554,6 +554,21 @@ struct ContainerAppendFormatter final : ws::WorkspaceFormatter {
   }
 };
 
+// An `append` on a node with children: its level starts past them.
+struct CompositeAppendFormatter final : ws::WorkspaceFormatter {
+  using WorkspaceFormatter::WorkspaceFormatter;
+  void formatWorkspace(cursiv::FormattingBuilder&,
+                       const ws::ast::Workspace*) const override {}
+  void formatEntity(cursiv::FormattingBuilder& builder,
+                    const ws::ast::Entity* entity) const override {
+    builder.getNodeFormatter(entity).node(*entity).append(indent);
+  }
+  void formatFeature(cursiv::FormattingBuilder& builder,
+                     const ws::ast::Feature* feature) const override {
+    builder.getNodeFormatter(feature).node(*feature).prepend(newLine);
+  }
+};
+
 struct OnTypeFormatter final : ws::WorkspaceFormatter {
   using WorkspaceFormatter::WorkspaceFormatter;
   [[nodiscard]] std::optional<lsp::DocumentOnTypeFormattingOptions>
@@ -1249,8 +1264,25 @@ void a_rule_on_a_container_is_ordered_before_it_is_answered() {
                               .disposeAfterCheck = true});
 }
 
+// The level an `append` sets reaches its target and what follows, not the
+// source's own inside.
+void an_append_level_starts_past_its_source() {
+  World world;
+  install<CompositeAppendFormatter>(world);
+  (void)ct::expectFormatting(world.services.language,
+                             {.before = "entity A { a: String }\n"
+                                        "entity B { b: String }\n",
+                              .after = "entity A {\n"
+                                       "a: String }\n"
+                                       "  entity B {\n"
+                                       "  b: String }\n",
+                              .options = options(),
+                              .disposeAfterCheck = true});
+}
+
 void run() {
   a_rule_on_a_container_is_ordered_before_it_is_answered();
+  an_append_level_starts_past_its_source();
   formatting_twice_is_formatting_once();
   a_document_already_in_shape_answers_no_edit();
   a_keyword_rule_shapes_every_case_of_the_word();

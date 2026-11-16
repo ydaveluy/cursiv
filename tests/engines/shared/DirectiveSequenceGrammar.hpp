@@ -27,6 +27,24 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<string_view> names;
   Box* box = nullptr;
 };
+struct Name : cursiv::Extends<cursiv::AstNode> {};
+struct Index : cursiv::Extends<cursiv::AstNode> {
+  Name* array = nullptr;
+};
+struct Indexed : cursiv::Extends<Doc> {
+  Index* index = nullptr;
+};
+struct Shouted : cursiv::Extends<Doc> {
+  vector<optional<string_view>> shouts;
+};
+struct Shape : cursiv::Extends<cursiv::AstNode> {};
+struct Leaf : cursiv::Extends<Shape> {};
+struct Wrap : cursiv::Extends<Shape> {
+  Shape* inner = nullptr;
+};
+struct Rewrapped : cursiv::Extends<Doc> {
+  Shape* shape = nullptr;
+};
 }  // namespace ast
 
 inline constexpr auto upper = [](std::string_view text) {
@@ -128,6 +146,39 @@ struct AnyCase : Base {
       : rule<create<ast::Doc>(assign<&ast::Doc::op>(ikw<"equal">)) + eof> {};
 };
 
+// The member takes the operand's final node: the `Index` its `nest` makes
+// around the `Name`, created there or by a rule.
+struct Nested : Base {
+  struct NameR : rule<create<ast::Name>(lit<"y">)> {};
+  struct Root : rule<create<ast::Indexed>(assign<&ast::Indexed::index>(
+                         (create<ast::Name>(lit<"x">) +
+                          nest<ast::Index, &ast::Index::array>(lit<"!">)) |
+                         (ref<NameR> +
+                          nest<ast::Index, &ast::Index::array>(lit<"!">)))) +
+                     eof> {};
+};
+
+// A list of optional views takes texts a converter built: the tree keeps
+// their bytes.
+struct Shouts : Base {
+  struct Root : rule<create<ast::Shouted>(many(
+                         append<&ast::Shouted::shouts>(ref<Called::Shout>))) +
+                     eof> {};
+};
+
+// A rule that calls itself before a nest, beside a branch that creates: each
+// branch decides its node, whatever the call it starts with returns.
+struct Rewrap : Base {
+  struct Shaped
+      : rule<lit<"("> +
+             ((ref<Shaped> + nest<ast::Wrap, &ast::Wrap::inner>(lit<"!">)) |
+              create<ast::Leaf>(lit<"x">)) +
+             lit<")">> {};
+  struct Root : rule<create<ast::Rewrapped>(
+                         assign<&ast::Rewrapped::shape>(ref<Shaped>)) +
+                     eof> {};
+};
+
 struct Suite : Base {
   struct Root : rule<(lit<"dotted:"> + ref<Dotted::Root>) |
                      (lit<"enumerated:"> + ref<Enumerated::Root>) |
@@ -141,7 +192,10 @@ struct Suite : Base {
                      (lit<"skipped:"> + ref<Skipped::Root>) |
                      (lit<"chosen:"> + ref<Chosen::Root>) |
                      (lit<"folded:"> + ref<Folded::Root>) |
-                     (lit<"anycase:"> + ref<AnyCase::Root>)> {};
+                     (lit<"anycase:"> + ref<AnyCase::Root>) |
+                     (lit<"nested:"> + ref<Nested::Root>) |
+                     (lit<"shouts:"> + ref<Shouts::Root>) |
+                     (lit<"rewrapped:"> + ref<Rewrap::Root>)> {};
   using entry = Root;
 };
 

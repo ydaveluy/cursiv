@@ -31,9 +31,11 @@ lsp::LSPAny to_lsp_any(const JsonValue& value) {
     return lsp::LSPAny(std::move(array));
   }
   if (value.isObject()) {
+    // The keys are unique already: each is appended, never looked up.
     lsp::json::Object object;
+    object.reserve(value.object().size());
     for (const auto& [key, element] : value.object())
-      object[key] = to_lsp_any(element);
+      object.append(key, to_lsp_any(element));
     return lsp::LSPAny(std::move(object));
   }
   return lsp::LSPAny(lsp::json::Null{});

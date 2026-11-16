@@ -1,6 +1,5 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 
-#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
@@ -8,6 +7,7 @@
 #include <mutex>
 #include <span>
 #include <stop_token>
+#include <unordered_set>
 #include <vector>
 
 #include "cursiv/syntax-tree/DefaultDocumentReferences.hpp"
@@ -75,10 +75,10 @@ struct PutOff final : OperationCancelled {
 // first, and no reference in `refs` is put off a second time.
 struct PutOffs {
   std::vector<Asked> waiting;
-  std::vector<const void*> refs;
+  std::unordered_set<const void*> refs;
 
   void take(const Asked& asked) {
-    refs.push_back(asked.state);
+    refs.insert(asked.state);
     waiting.push_back(asked);
   }
   void ask() {
@@ -297,8 +297,7 @@ CURSIV_COLD CURSIV_NOINLINE RefState resolve_far(Frame& frame,
   for (const Frame* f = frame.prev; f != nullptr && f->ref != nullptr;
        f = f->prev) {
     if (f->putOffs == nullptr) continue;
-    const std::vector<const void*>& refs = f->putOffs->refs;
-    if (std::ranges::find(refs, frame.ref) != refs.end())
+    if (f->putOffs->refs.contains(frame.ref))
       return settle(state, frame, compute, clear);
     publish(state, RefState::Unresolved);
     throw PutOff(asked);

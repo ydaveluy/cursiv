@@ -1,6 +1,8 @@
 #include "cursiv/workspace/Document.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -11,6 +13,11 @@
 #include "cursiv/workspace/TextDocument.hpp"
 
 namespace cursiv {
+
+std::uint64_t detail::next_build_revision() noexcept {
+  static std::atomic<std::uint64_t> next{0};
+  return next.fetch_add(1, std::memory_order_relaxed);
+}
 
 Document::Document(TextDocument textDocument, std::string uri)
     : uri(uri.empty() ? std::string(textDocument.uri()) : std::move(uri)),
@@ -67,7 +74,7 @@ void Document::resetForRebuild() {
   parseResult = std::move(empty);
   localSymbols.clear();
   diagnostics.clear();
-  ++buildRevision;
+  buildRevision = detail::next_build_revision();
 }
 
 }  // namespace cursiv

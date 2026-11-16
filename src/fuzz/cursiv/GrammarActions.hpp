@@ -12,6 +12,7 @@
 #include <string_view>
 #include <vector>
 
+#include "cursiv/grammar/Association.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
@@ -23,11 +24,11 @@ namespace cursiv::fuzzer {
 enum class ValueKind : std::uint8_t { Text, Unreadable, Unset };
 
 // One operator of a precedence table: the element that spells it, the step it
-// sits on -- tightest binds hardest -- and which way a chain of equals groups.
+// sits on -- tightest binds hardest -- and how a chain of equals groups.
 struct InfixOp {
   ElementId element = kNoElement;
   std::uint8_t prec = 0;
-  bool right = false;
+  Association group = Association::Left;
 };
 
 // The walk's own tree: the nodes it made and the text its members view.

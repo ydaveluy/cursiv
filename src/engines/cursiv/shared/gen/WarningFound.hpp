@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <span>
 #include <string>
 #include <utility>
@@ -87,14 +88,14 @@ inline std::vector<std::uint16_t> printed_places(const GrammarImage& image,
 template <class W, class Hit>
 std::vector<W> walk_warnings(WarningFound& found, Hit hit) {
   std::vector<W> out;
+  std::set<W> seen;
   for (const std::uint32_t rule : found.rules()) {
     const std::string name = found.name(rule);
     const ImageId body = found.body(rule);
     found.each_node({&body, 1}, [&](ImageId id) {
-      if (hit(found, id)) {
-        W w{name, found.spell(id)};
-        if (std::ranges::find(out, w) == out.end()) out.push_back(std::move(w));
-      }
+      if (hit(found, id))
+        if (W w{name, found.spell(id)}; seen.insert(w).second)
+          out.push_back(std::move(w));
       return true;
     });
   }

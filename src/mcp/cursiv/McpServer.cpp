@@ -159,10 +159,23 @@ json::Value McpServer::listResources() const {
 
 std::optional<json::Value> McpServer::handle(
     json::Value message, const CancellationToken& token) const {
+  // A batch answers each of its requests, and nothing when none is one.
+  if (message.isArray() && !message.array().empty()) {
+    json::Array answers;
+    for (json::Value& item : message.array()) {
+      if (!item.isObject())
+        answers.push_back(error_response(nullptr, rpc::Error::InvalidRequest,
+                                         "a message is a json object"));
+      else if (std::optional<json::Value> answer =
+                   handle(std::move(item), token))
+        answers.push_back(std::move(*answer));
+    }
+    if (answers.empty()) return std::nullopt;
+    return json::Value(std::move(answers));
+  }
   if (!message.isObject())
     return error_response(nullptr, rpc::Error::InvalidRequest,
-                          message.isArray() ? "batches are not supported"
-                                            : "a message is a json object");
+                          "a message is a json object");
   rpc::Message parsed;
   try {
     parsed = rpc::messageFromJson(std::move(message.object()));

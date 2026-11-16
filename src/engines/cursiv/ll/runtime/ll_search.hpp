@@ -537,11 +537,16 @@ const LlFacts& ll_search_facts(const LlContext& c, LlSearch& s,
     }
     return false;
   });
-  std::erase_if(f.due, [&](std::uint16_t t) {
-    return std::ranges::find(f.viable, t) == f.viable.end();
-  });
+  const auto in = [](const std::array<std::uint64_t, T.termWords>& set,
+                     std::uint16_t t) {
+    return ((set[t >> 6] >> (t & 63u)) & 1u) != 0;
+  };
+  std::erase_if(f.due, [&](std::uint16_t t) { return !in(had, t); });
+  std::array<std::uint64_t, T.termWords> due{};
+  for (const std::uint16_t t : f.due)
+    due[t >> 6] |= std::uint64_t{1} << (t & 63u);
   for (const std::uint16_t t : f.viable)
-    if (std::ranges::find(f.due, t) == f.due.end()) f.rest.push_back(t);
+    if (!in(due, t)) f.rest.push_back(t);
   if (ll_search_spent(s)) f.cfg = kLlNoNode;
   return f;
 }
@@ -668,22 +673,33 @@ void ll_search_each_insert(const LlContext& c, LlSearch& s,
     if (!visit(t, rank++, false)) return;
 }
 
+// The set the insertions in front of reading `bi` step from, read once for
+// all the terminals they try: false where no position survives the gap.
+template <const auto& T>
+bool ll_search_insertions_from(LlContext& c, LlSearch& s, std::uint32_t bi) {
+  ll_search_load(s, s.nodes[bi]);
+  if constexpr (T.ngapConds != 0) {
+    const Token tok = ll_search_peek<T>(c, s, s.nodes[bi]);
+    if (ll_search_spent(s) ||
+        !ll_search_filter<T>(c, s, tok, s.nodes[bi].gapFrom))
+      return false;
+  }
+  s.sim.group_steps();
+  return true;
+}
+
 // A terminal invented in front of the token in hand: the positions that read
 // it carry on, and a required one that follows a required one costs nothing.
-// Its readings are admitted, and what they leave is given back.
+// Its readings are admitted, and what they leave is given back. The set it
+// steps from is the one `ll_search_insertions_from` read.
 template <const auto& T>
 void ll_search_insert(LlContext& c, LlSearch& s, std::uint32_t bi,
                       std::uint16_t term, std::uint32_t choice, bool required,
                       TextOffset begin) {
   const LlSearchCheckpoint pools(s);
   const LlReading b = s.nodes[bi];
-  ll_search_load(s, b);
-  if constexpr (T.ngapConds != 0) {
-    const Token tok = ll_search_peek<T>(c, s, s.nodes[bi]);
-    if (ll_search_spent(s) || !ll_search_filter<T>(c, s, tok, b.gapFrom))
-      return;
-  }
-  if (!s.sim.step(term)) return;
+  s.sim.at_token(b.tokens);
+  if (!s.sim.step_grouped(term)) return;
   const std::uint32_t e =
       ll_search_child(s, bi, LlEdit::ins, term, 0, choice, begin);
   LlReading& r = s.nodes[e];
@@ -717,6 +733,7 @@ void ll_search_inserts(LlContext& c, LlSearch& s, std::uint32_t gi) {
   const Token tok = ll_search_peek<T>(c, s, s.nodes[from]);
   if (ll_search_spent(s)) return;
   const bool atEnd = ll_ends<T>(c, tok.sym);
+  if (!ll_search_insertions_from<T>(c, s, from)) return;
   ll_search_each_insert<T>(
       c, s, from, [&](std::uint16_t t, unsigned k, bool required) {
         if (ll_search_spent(s)) return false;
@@ -1149,6 +1166,8 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
     // behind one entry until a reading that costly is asked for.
     const std::uint32_t insertRank = choice;
     bool deferred = false;
+    // Read at the first required insertion, for all of them.
+    enum class From : std::uint8_t { unread, read, none } from = From::unread;
     ll_search_each_insert<T>(
         c, s, bi, [&](std::uint16_t t, unsigned k, bool required) {
           if (!ll_search_insertable<T>(c, t, atEnd)) return true;
@@ -1157,7 +1176,11 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
             deferred = true;
             return true;
           }
-          ll_search_insert<T>(c, s, bi, t, insertRank + k, true, tok.begin);
+          if (from == From::unread)
+            from = ll_search_insertions_from<T>(c, s, bi) ? From::read
+                                                          : From::none;
+          if (from == From::read)
+            ll_search_insert<T>(c, s, bi, t, insertRank + k, true, tok.begin);
           return true;
         });
     // Ranks need order, not consecutive values: two terminal-sized ranges put
@@ -1236,8 +1259,10 @@ struct LlSearchRace {
   }
 };
 
-// Two paths that make the same edits are one candidate.
-std::uint64_t ll_edits_fold(const std::vector<LlEdit>& links, std::uint32_t l);
+// Two paths that make the same edits are one candidate. The fold of the path
+// to `l` is that of its parent's, `h`, with `l`'s edit.
+std::uint64_t ll_edits_fold(const std::vector<LlEdit>& links, std::uint32_t l,
+                            std::uint64_t h);
 
 bool ll_same_edits(const std::vector<LlEdit>& links, std::uint32_t a,
                    std::uint32_t b);

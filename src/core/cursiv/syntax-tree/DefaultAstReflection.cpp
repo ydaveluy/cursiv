@@ -1,11 +1,14 @@
 #include "cursiv/syntax-tree/DefaultAstReflection.hpp"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "cursiv/syntax-tree/AstMetaData.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -30,31 +33,51 @@ DefaultAstReflection::DefaultAstReflection(const detail::AstMetaData& meta)
   _superTypes.resize(meta.typeCount);
   _properties.resize(meta.typeCount);
   std::vector<bool> filled(meta.typeCount);
+  // Where each property is declared, the row entry its class wrote: two
+  // members of one name are two properties.
+  std::vector<std::vector<const PropertyMetaData*>> declared(meta.typeCount);
+  // A class's direct bases: those no base of it reaches through its own
+  // direct bases. Found once for each class, registered or not.
+  std::unordered_map<const AstTypeTag*, std::vector<const AstTypeTag*>> direct;
+  const auto direct_of =
+      [&](const auto& self,
+          const AstTypeTag* tag) -> const std::vector<const AstTypeTag*>& {
+    if (const auto known = direct.find(tag); known != direct.end())
+      return known->second;
+    const std::span bases{tag->bases, tag->baseCount};
+    std::unordered_set<const AstTypeTag*> reached;
+    for (const AstTypeTag* const base : bases)
+      for (const AstTypeTag* const above : self(self, base))
+        reached.insert(above);
+    std::vector<const AstTypeTag*> out;
+    for (const AstTypeTag* const base : bases)
+      if (!reached.contains(base)) out.push_back(base);
+    return direct.emplace(tag, std::move(out)).first->second;
+  };
   // A base's properties come before the class's own; a base reached twice
   // gives its properties once.
   const auto fill = [&](const auto& self, std::uint16_t i) -> void {
     if (filled[i]) return;
     filled[i] = true;
     std::vector<PropertyMetaData>& all = _properties[i];
-    const std::span bases{meta.types[i]->bases, meta.types[i]->baseCount};
-    for (const AstTypeTag* const base : bases) {
-      // Direct: no other base stands between the class and this one.
-      if (std::ranges::any_of(bases, [&](const AstTypeTag* other) {
-            return other != base && other->derivesFrom(base);
-          }))
-        continue;
+    std::vector<const PropertyMetaData*>& from = declared[i];
+    std::unordered_set<const PropertyMetaData*> seen;
+    for (const AstTypeTag* const base : direct_of(direct_of, meta.types[i])) {
       _superTypes[i].push_back(base);
       const std::uint16_t known = typeIndexOf(base);
       if (known == kNoType) continue;
       self(self, known);
-      for (const PropertyMetaData& inherited : _properties[known])
-        if (std::ranges::none_of(all, [&](const PropertyMetaData& held) {
-              return held.name.data() == inherited.name.data();
-            }))
-          all.push_back(inherited);
+      for (std::size_t k = 0; k < _properties[known].size(); ++k)
+        if (seen.insert(declared[known][k]).second) {
+          all.push_back(_properties[known][k]);
+          from.push_back(declared[known][k]);
+        }
     }
     const detail::PropertyRow row = meta.propertyRows[i];
-    all.insert(all.end(), row.at, row.at + row.count);
+    for (std::size_t k = 0; k < row.count; ++k) {
+      all.push_back(row.at[k]);
+      from.push_back(&row.at[k]);
+    }
   };
   for (std::uint16_t i = 0; i < meta.typeCount; ++i) fill(fill, i);
 }

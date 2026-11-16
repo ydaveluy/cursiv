@@ -18,6 +18,7 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/CstNodeView.hpp"
 #include "cursiv/syntax-tree/CstUtils.hpp"
+#include "cursiv/syntax-tree/OwnedNodes.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
@@ -74,6 +75,23 @@ namespace {
   const CstLeaf leaf = cst.asLeaf(after);
   if (leaf.begin > offset) return nullptr;
   return owner_of_leaf(cst, leaf.id);
+}
+
+// The targets of the reference a row describes, matched by the whole span its
+// name occupies: another one may start at the same offset.
+template <class Visit>
+void visit_row_targets(const Documents& store, const ReferenceDescription& row,
+                       Visit&& visit) {
+  const std::shared_ptr<Document> source =
+      store.getDocument(row.sourceDocumentId);
+  if (source == nullptr || source->parseResult.references == nullptr) return;
+  source->parseResult.references->visitIn(
+      source->parseResult.cst(), row.sourceBegin, row.sourceBegin,
+      [&](TextOffset begin, TextOffset end, const AstNode& target, bool multi) {
+        if (begin == row.sourceBegin && end == row.sourceEnd)
+          visit(target, multi);
+      },
+      [](RefState, TextOffset, TextOffset, const ReferenceInfo&) {});
 }
 
 // A row of one group: within it, the site and the symbol tell two apart.
@@ -143,27 +161,14 @@ std::vector<const AstNode*> DefaultReferences::getSelfNodes(
       [&](const ReferenceDescription& incoming) {
         throw_if_cancelled(cancelToken);
         if (!incoming.multiReference) return true;
-        const std::shared_ptr<Document> source =
-            store.getDocument(incoming.sourceDocumentId);
-        if (source == nullptr || source->parseResult.references == nullptr)
-          return true;
-        // The multi reference the description was made from, matched by the
-        // whole span its name occupies in the source document: another one
-        // may start at the same offset.
         std::vector<const AstNode*> siblings;
         bool member = false;
-        source->parseResult.references->visitIn(
-            source->parseResult.cst(), incoming.sourceBegin,
-            incoming.sourceBegin,
-            [&](TextOffset begin, TextOffset end, const AstNode& target,
-                bool multi) {
-              if (!multi || begin != incoming.sourceBegin ||
-                  end != incoming.sourceEnd)
-                return;
-              siblings.push_back(&target);
-              member = member || &target == &node;
-            },
-            [](RefState, TextOffset, TextOffset, const ReferenceInfo&) {});
+        visit_row_targets(store, incoming,
+                          [&](const AstNode& target, bool multi) {
+                            if (!multi) return;
+                            siblings.push_back(&target);
+                            member = member || &target == &node;
+                          });
         if (!member) return true;
         overloads = std::move(siblings);
         return false;
@@ -245,10 +250,24 @@ std::vector<ReferenceDescription> DefaultReferences::findReferences(
          getSelfReferences(target, cancelToken))
       if (wanted(row.sourceDocumentId)) references.push_back(row);
 
+  // A record two nodes share keys the rows of both: a row then counts where
+  // its reference names the target itself.
+  const OwnedNodes nodes = declaringDocument->parseResult.nodes();
+  const bool twinned = std::ranges::equal_range(
+                           nodes, target.cstNodeId, {},
+                           [](const AstNode* node) { return node->cstNodeId; })
+                           .size() > 1;
   (void)index.visitReferences(declaringDocument->id, target.cstNodeId,
                               [&](const ReferenceDescription& described) {
                                 throw_if_cancelled(cancelToken);
-                                if (wanted(described.sourceDocumentId))
+                                bool names = !twinned;
+                                if (twinned)
+                                  visit_row_targets(
+                                      *shared.documents, described,
+                                      [&](const AstNode& to, bool) {
+                                        names = names || &to == &target;
+                                      });
+                                if (names && wanted(described.sourceDocumentId))
                                   references.push_back(described);
                                 return true;
                               });

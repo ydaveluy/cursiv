@@ -663,11 +663,28 @@ void a_qualified_site_keeps_its_qualifier() {
   }
 }
 
+// A qualified site already spelled as its new qualified name keeps its
+// qualifier: the base's bare edit there is replaced, not left.
+void a_qualified_site_spelled_as_its_new_name_keeps_its_qualifier() {
+  const Module world;
+  const std::vector<cursiv::Document*> documents =
+      world.built({{"file:///w/a.ws", std::string(kPackage)},
+                   {"file:///w/b.ws", std::string(kQualified)}});
+  CHECK(documents.size() == 2);
+  if (documents.size() != 2) return;
+  const std::optional<lsp::WorkspaceEdit> edit =
+      world.rename(*documents[1], 0, 17, "E");
+  if (!edit.has_value()) return;
+  for (const lsp::TextEdit& naming : editsFor(*edit, "file:///w/b.ws"))
+    CHECK(naming.newText == "p.E");
+}
+
 }  // namespace
 
 void run() {
   a_keyword_is_not_renamable();
   a_rename_crosses_the_documents_that_name_it();
+  a_qualified_site_spelled_as_its_new_name_keeps_its_qualifier();
   an_unresolved_reference_renames_its_own_site();
   a_new_name_the_language_would_not_read_back_is_refused();
   a_repaired_document_refuses_what_is_not_read_as_the_name();
@@ -1023,9 +1040,9 @@ void a_workspace_symbol_ranges_over_its_name() {
   }
 }
 
-// A declared name that matched no text still gets a symbol, so its feature
-// stays under it, not under the grandparent.
-void a_declared_name_that_matched_nothing_keeps_its_row() {
+// A declared name that matched no text gives no symbol, as the protocol has no
+// empty name: its feature goes up to the nearest named ancestor.
+void a_declared_name_that_matched_nothing_gives_no_row() {
   const World world;
   const cursiv::Document* const document =
       world.built("file:///w/a.ws", "entity { name : String }\n");
@@ -1034,15 +1051,39 @@ void a_declared_name_that_matched_nothing_keeps_its_row() {
                                                    cursiv::kNoCancel);
   CHECK(symbols.size() == 1);
   if (symbols.size() != 1) return;
+  CHECK(symbols.front().name == "name");
+  CHECK(!symbols.front().children.has_value());
+}
 
-  const lsp::DocumentSymbol& entity = symbols.front();
-  CHECK(entity.name.empty());
-  CHECK(entity.range.start.character == 0 && entity.range.end.character == 24);
-  CHECK(entity.selectionRange.start.character == 6 &&
-        entity.selectionRange.end.character == 6);
-  CHECK(entity.children.has_value() && entity.children->size() == 1);
-  if (entity.children.has_value() && entity.children->size() == 1)
-    CHECK(entity.children->front().name == "name");
+// Packages a hundred deep: the outline keeps every one, and nests no deeper
+// than its cap, the protocol's children being written and torn down by
+// recursion.
+void a_deep_outline_keeps_every_symbol_under_its_cap() {
+  const World world;
+  std::string text;
+  for (int i = 0; i < 100; ++i)
+    text += "package p" + std::to_string(i) + " {\n";
+  text += std::string(100, '}') + "\n";
+  const cursiv::Document* const document = world.built("file:///w/a.ws", text);
+  const std::vector<lsp::DocumentSymbol> symbols =
+      world.ws->documentSymbolProvider->getSymbols(*document,
+                                                   cursiv::kNoCancel);
+  std::size_t count = 0;
+  std::size_t deepest = 0;
+  std::vector<std::pair<const lsp::DocumentSymbol*, std::size_t>> walk;
+  for (const lsp::DocumentSymbol& symbol : symbols)
+    walk.emplace_back(&symbol, 1);
+  while (!walk.empty()) {
+    const auto [symbol, depth] = walk.back();
+    walk.pop_back();
+    ++count;
+    deepest = std::max(deepest, depth);
+    if (symbol->children.has_value())
+      for (const lsp::DocumentSymbol& child : *symbol->children)
+        walk.emplace_back(&child, depth + 1);
+  }
+  CHECK(count == 100);
+  CHECK(deepest == 64);
 }
 
 }  // namespace
@@ -1050,7 +1091,8 @@ void a_declared_name_that_matched_nothing_keeps_its_row() {
 void run() {
   the_outline_nests_and_points_at_the_name();
   an_unnamed_root_lists_its_named_children();
-  a_declared_name_that_matched_nothing_keeps_its_row();
+  a_declared_name_that_matched_nothing_gives_no_row();
+  a_deep_outline_keeps_every_symbol_under_its_cap();
   a_query_that_matches_nothing_answers_nothing();
   one_symbol_is_changed_through_get_workspace_symbol();
   a_resolving_provider_is_announced_and_reached();

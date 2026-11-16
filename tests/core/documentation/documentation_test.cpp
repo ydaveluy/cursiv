@@ -78,20 +78,23 @@ struct Parsed {
 
 // The comment found through the node, its tags read at their place in the
 // document. Reading every comment of a long file costs the comments, not the
-// file each time: the time is the proof.
+// file or the line before each: the time is the proof.
 void comments_read_without_the_file_before_them() {
-  std::string text;
-  for (unsigned i = 0; i < 20000; ++i)
-    text += "/** @uuid x */ entity E" + std::to_string(i) + " { }\n";
-  const Parsed p(text);
-  const cursiv::Cst& cst = p.result.cst();
-  const auto begin = std::chrono::steady_clock::now();
-  std::uint32_t last = 0;
-  for (cursiv::NodeId id = 0; id < cst.size(); ++id)
-    if (cst[id].hidden != 0 && cst.text(id).starts_with("/**"))
-      last = cursiv::parse_doc_comment(p.document, id).range.start.line;
-  CHECK(last == 19999);
-  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
+  for (const std::string_view after : {"\n", " "}) {
+    std::string text;
+    for (unsigned i = 0; i < 20000; ++i)
+      text += "/** @uuid x */ entity E" + std::to_string(i) + " { }" +
+              std::string(after);
+    const Parsed p(text);
+    const cursiv::Cst& cst = p.result.cst();
+    const auto begin = std::chrono::steady_clock::now();
+    std::uint32_t last = 0;
+    for (cursiv::NodeId id = 0; id < cst.size(); ++id)
+      if (cst[id].hidden != 0 && cst.text(id).starts_with("/**"))
+        last = cursiv::parse_doc_comment(p.document, id).range.start.line;
+    CHECK(last == (after == "\n" ? 19999u : 0u));
+    CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
+  }
 }
 
 void a_comment_node_gives_its_tags_their_place() {

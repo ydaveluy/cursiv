@@ -4,12 +4,19 @@
 import { spawn } from 'node:child_process';
 import { constants } from 'node:buffer';
 import { closeSync, openSync, readSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { setTimeout as delay } from 'node:timers/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const runner = fileURLToPath(new URL('./wasi-run.mjs', import.meta.url));
 const wasmMagic = Buffer.from([0x00, 0x61, 0x73, 0x6d]);
+
+// A file's URI as an editor spells it: on Windows a lower-case drive letter,
+// its colon escaped.
+export const fileUri = (file) => pathToFileURL(resolve(file)).toString()
+    .replace(/^file:\/\/\/([A-Za-z]):/,
+             (_, drive) => `file:///${drive.toLowerCase()}%3A`);
 
 // How long a server gets to end on its own, then after SIGTERM.
 const graceMs = 2000;

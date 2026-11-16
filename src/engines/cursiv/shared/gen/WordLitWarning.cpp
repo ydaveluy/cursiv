@@ -1,6 +1,7 @@
 #include "cursiv/shared/gen/WordLitWarning.hpp"
 
 #include <algorithm>
+#include <set>
 #include <span>
 
 #include "cursiv/grammar/word_final_in.hpp"
@@ -12,6 +13,7 @@ namespace cursiv::engine {
 
 std::vector<WordLitWarning> word_lit_warnings(WarningFound& found) {
   std::vector<WordLitWarning> out;
+  std::set<WordLitWarning> seen;
   GrammarImage& image = found.image();
   const ImageClass bound = image.bound;
   if (!bound.known) return out;
@@ -30,7 +32,7 @@ std::vector<WordLitWarning> word_lit_warnings(WarningFound& found) {
         return false;
       if (WordLitWarning w{found.name(rule), found.spell(id),
                            std::string(n.text)};
-          std::ranges::find(out, w) == out.end())
+          seen.insert(w).second)
         out.push_back(std::move(w));
       return false;
     });

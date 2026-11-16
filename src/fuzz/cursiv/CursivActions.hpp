@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -56,6 +57,10 @@ struct Render {
     } else if constexpr (std::is_enum_v<X>) {
       out = std::to_string(static_cast<long long>(v));
       return true;
+    } else if constexpr (std::is_floating_point_v<X> &&
+                         std::numeric_limits<X>::digits >
+                             std::numeric_limits<double>::digits) {
+      return false;  // wider than a double, which is all this reads
     } else if constexpr (std::is_floating_point_v<X>) {
       char buf[40];
       const int n =
@@ -398,13 +403,13 @@ consteval ElementId primary_row() {
 
 // Levels are declared tightest-first; the step a resolution compares is
 // `N - I` for level `I` of `N`.
-template <class C, class L, std::uint8_t Prec, bool Right>
+template <class C, class L, std::uint8_t Prec, Association Group>
 struct ops_of_level;
-template <class C, class... As, std::uint8_t Prec, bool Right>
-struct ops_of_level<C, TypeList<As...>, Prec, Right> {
+template <class C, class... As, std::uint8_t Prec, Association Group>
+struct ops_of_level<C, TypeList<As...>, Prec, Group> {
   static constexpr std::size_t size = sizeof...(As);
   static constexpr std::array<InfixOp, sizeof...(As)> value = {
-      InfixOp{model::op_row<C, As>, Prec, Right}...};
+      InfixOp{model::op_row<C, As>, Prec, Group}...};
 };
 
 // The operators as declared: substituting the word boundary into a `kw<>`
@@ -421,10 +426,9 @@ template <class C, class R, std::size_t... Is>
 struct infix_ops<C, R, std::index_sequence<Is...>> {
   using Lvls = typename R::levels;
   template <std::size_t I>
-  using Level =
-      ops_of_level<C, level_alts_t<Lvls, I>,
-                   static_cast<std::uint8_t>(sizeof...(Is) - I),
-                   Lvls::template at<I>::kGroup == Association::Right>;
+  using Level = ops_of_level<C, level_alts_t<Lvls, I>,
+                             static_cast<std::uint8_t>(sizeof...(Is) - I),
+                             Lvls::template at<I>::kGroup>;
   static constexpr std::size_t kN = (std::size_t{0} + ... + Level<Is>::size);
   static constexpr std::array<InfixOp, kN> kOps = []() consteval {
     std::array<InfixOp, kN> out{};

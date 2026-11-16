@@ -34,6 +34,13 @@ if(CURSIV_NEW_ID IN_LIST _cursiv_keywords
   message(FATAL_ERROR "NAME and its lowercase namespace must not be reserved "
       "C++ identifiers, nor main, std, posix or cursiv (got '${NAME}')")
 endif()
+# NAME is the grammar class: a word the project's C++ already uses would mean
+# that class where the code means something else.
+set(_cursiv_used @CURSIV_USED_WORDS@)
+if(NAME IN_LIST _cursiv_used)
+  message(FATAL_ERROR "NAME must not be a name the project's C++ already uses, "
+      "such as a rule of the starter grammar (got '${NAME}')")
+endif()
 if(NOT DEFINED EXT)
   set(EXT ".${CURSIV_NEW_ID}")
 endif()

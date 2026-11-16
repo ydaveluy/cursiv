@@ -41,8 +41,12 @@ ReplacedIndices replaceIndices(const ExpectedBase& base) {
   const std::string_view input = base.text;
 
   // One pass over the text as written, the output built as it goes: the text
-  // on each side of a marker never joins into a marker of its own.
+  // on each side of a marker never joins into a marker of its own. Each
+  // marker's next place is looked for again only once the pass is past it.
   std::size_t from = 0;
+  std::size_t next[3];
+  for (int marker = 0; marker < 3; ++marker)
+    next[marker] = input.find(markers[marker]);
   while (true) {
     // The index marker outranks the range ones at one position: `<|>` opens
     // with `<|`, and reading it as a range start would swallow every index.
@@ -50,7 +54,9 @@ ReplacedIndices replaceIndices(const ExpectedBase& base) {
     int which = -1;
     for (int marker = 0; marker < 3; ++marker) {
       if (markers[marker].empty()) continue;
-      const std::size_t found = input.find(markers[marker], from);
+      if (next[marker] != std::string_view::npos && next[marker] < from)
+        next[marker] = input.find(markers[marker], from);
+      const std::size_t found = next[marker];
       if (found == std::string_view::npos) continue;
       if (found < at || (found == at && marker < which)) {
         at = found;

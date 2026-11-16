@@ -61,7 +61,36 @@ bool LlSimulation::step(const std::uint16_t* terms, std::size_t n) {
   const auto walk = [&] {
     return advance(Labelled{terms, n, labels(terms, n)});
   };
-  return _keepSteps ? kept_step(terms, n, walk) : walk();
+  if (!_keepSteps) return walk();
+  if (_keptConfigs.size() > kKeptCap) forget_steps();
+  return kept_step(terms, n, walk);
+}
+
+void LlSimulation::group_steps() {
+  _grouped.clear();
+  for (const LlConfig c : _cur) {
+    const LlAtnState& s = _atn.state(c.state);
+    for (std::uint32_t i = 0; i < s.nedges; ++i)
+      if (const LlAtnEdge& e = _atn.edge(s.edge + i);
+          e.kind == LlEdgeKind::atom)
+        _grouped.emplace_back(
+            e.label, LlConfig{.state = e.target, .ctx = c.ctx, .alt = c.alt});
+  }
+  std::ranges::stable_sort(_grouped, {}, [](const auto& g) { return g.first; });
+}
+
+bool LlSimulation::step_grouped(std::uint16_t term) {
+  _next.clear();
+  forget_visits();
+  _conditions.clear();
+  _visited = 0;
+  _capped = false;
+  const auto [from, to] = std::ranges::equal_range(
+      _grouped, term, {}, [](const auto& g) { return g.first; });
+  for (auto at = from; at != to; ++at) feed(at->second);
+  expand_sources();
+  _cur.swap(_next);
+  return !_cur.empty();
 }
 
 const std::vector<std::uint64_t>* LlSimulation::labels(

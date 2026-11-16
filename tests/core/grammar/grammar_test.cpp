@@ -1306,6 +1306,29 @@ static_assert(
     std::same_as<detail::ResolveOverride<Retagged>::rule<Doc::ID>::slot,
                  TypeList<Tagged>>);
 
+// ...and where both sides state one converter apart, it may state none.
+struct Twin : extends<Doc> {
+  template <class>
+  struct override;
+  template <class T>
+    requires std::same_as<T, Doc::ID>
+  struct override<T> : terminal<as<Tagged>(super)> {};
+};
+
+struct Twins : extends<Slotted, Twin> {
+  using ignored = Doc::WS;
+  template <class>
+  struct override;
+  template <class T>
+    requires std::same_as<T, Doc::ID>
+  struct override<T> : terminal<lit<"id">> {};
+};
+
+static_assert(
+    std::same_as<detail::ov::slot_holder<
+                     detail::ResolveOverride<Twins>::rule<Doc::ID>>::type::slot,
+                 TypeList<Tagged>>);
+
 // The resolution is a push: a grammar is asked rule by rule, never for the
 // list of what it overrides. So a declaration for a rule outside the entry's
 // reach costs nothing and answers when asked.
@@ -2097,7 +2120,12 @@ void run() {
 namespace dumpcol {
 struct ID : cursiv::detail::TerminalRule<cursiv::GrammarSpec::some(
                 cursiv::GrammarSpec::cr<"0-9">)> {};
+struct DumpDup : cursiv::detail::TerminalRule<cursiv::GrammarSpec::some(
+                     cursiv::GrammarSpec::cr<"0-9">)> {};
 }  // namespace dumpcol
+// In the global namespace, its qualified name is its own.
+struct DumpDup : cursiv::detail::TerminalRule<cursiv::GrammarSpec::some(
+                     cursiv::GrammarSpec::cr<"a-z">)> {};
 
 // The rendering: every shape's spelling, bracketing by precedence, the
 // grammar skeleton, and that compiled<> shows the override where declared<>
@@ -2149,6 +2177,10 @@ namespace {
 struct R3 : cursiv::GrammarSpec::rule<cursiv::GrammarSpec::create<ast::Node> +
                                       cursiv::GrammarSpec::ref<Dg::ID> +
                                       cursiv::GrammarSpec::ref<dumpcol::ID>> {};
+struct R4
+    : cursiv::GrammarSpec::rule<cursiv::GrammarSpec::create<ast::Node> +
+                                cursiv::GrammarSpec::ref<dumpcol::DumpDup> +
+                                cursiv::GrammarSpec::ref<::DumpDup>> {};
 
 // data rule, converter-typed terminal, no-skipper grammar.
 struct Q : cursiv::GrammarSpec {
@@ -2495,6 +2527,13 @@ void run() {
          "terminal ID: [a-z] [0-9A-Z_a-z]*;\n"
          "terminal dumpcol::ID: [0-9]+;",
          "name collision");
+  // ...and one whose qualified name is taken too gets one spelled from the
+  // global scope.
+  expect(support::dump_closure<R4>(),
+         "R4 returns Node: DumpDup ::DumpDup;\n"
+         "terminal DumpDup: [0-9]+;\n"
+         "terminal ::DumpDup: [a-z]+;",
+         "global name collision");
 
   // data header, a converter-typed terminal, a skipperless grammar head --
   // and a ConversionResult converter, whose rule returns the value.

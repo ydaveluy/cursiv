@@ -57,6 +57,39 @@ void append_escaped(std::string& out, std::string_view word) {
   }
 }
 
+// Whether a JSON key, as written between its quotes, names `word`, an ASCII
+// word, once its escapes are read.
+bool key_names(std::string_view key, std::string_view word) {
+  const auto hex = [](char c) -> int {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+  };
+  std::size_t at = 0;
+  for (const char wanted : word) {
+    if (at == key.size()) return false;
+    char read = key[at++];
+    if (read == '\\') {
+      if (at == key.size()) return false;
+      read = key[at++];
+      if (read == 'u') {
+        int value = 0;
+        for (int i = 0; i < 4; ++i) {
+          const int digit = at < key.size() ? hex(key[at++]) : -1;
+          if (digit < 0) return false;
+          value = value * 16 + digit;
+        }
+        read = value < 0x80 ? static_cast<char>(value) : '\0';
+      } else if (read != '"' && read != '\\' && read != '/') {
+        read = '\0';  // a control character, never a letter of the word
+      }
+    }
+    if (read != wanted) return false;
+  }
+  return at == key.size();
+}
+
 }  // namespace
 
 std::string textmate_keyword_match(std::vector<TextMateKeyword> keywords) {
@@ -118,7 +151,7 @@ std::optional<std::string> with_keyword_match(std::string_view json,
           c == '{' ? '}' : ']',
           c == '{' && (open.empty() ||
                        (open.size() < kPath.size() && open.back().second &&
-                        key == kPath[open.size() - 1])));
+                        key_names(key, kPath[open.size() - 1]))));
     } else if (c == '}' || c == ']') {
       if (open.empty() || open.back().first != c) return std::nullopt;
       open.pop_back();
@@ -132,10 +165,10 @@ std::optional<std::string> with_keyword_match(std::string_view json,
         key = json.substr(at + 1, end - at - 1);
         // A key that repeats on the path hides what the earlier one held.
         if (!open.empty() && open.size() <= kPath.size() &&
-            open.back().second && key == kPath[open.size() - 1])
+            open.back().second && key_names(key, kPath[open.size() - 1]))
           found.reset();
       } else if (open.size() == kPath.size() && open.back().second &&
-                 key == kPath.back())
+                 key_names(key, kPath.back()))
         found = {at, end + 1};
       at = end;
     }

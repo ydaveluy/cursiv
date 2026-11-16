@@ -48,6 +48,17 @@ foreach(_name IN ITEMS Main MAIN Std Std17 Posix Cursiv)
   endif()
 endforeach()
 
+# A name the project's C++ already uses, which as the grammar class would hide
+# it: a rule of the starter grammar, or a word of the grammar language.
+foreach(_name IN ITEMS Model Person terminal)
+  execute_process(COMMAND ${CMAKE_COMMAND} -DNAME=${_name}
+      -DDIR=${WORK}/used-${_name} -P ${SCAFFOLD}
+      RESULT_VARIABLE _rc OUTPUT_VARIABLE _log ERROR_VARIABLE _log)
+  if(_rc EQUAL 0 OR NOT _log MATCHES "already uses" OR EXISTS ${WORK}/used-${_name})
+    message(FATAL_ERROR "the scaffold accepted name ${_name}: ${_log}")
+  endif()
+endforeach()
+
 # An extension ends file names and is written into CMake and JSON as is.
 foreach(_ext IN ITEMS "." ".bad\"" ".x/../../outside" ".a;b" "rcp")
   execute_process(COMMAND ${CMAKE_COMMAND} -DNAME=Ext "-DEXT=${_ext}"

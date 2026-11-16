@@ -403,20 +403,24 @@ void DefaultDocumentBuilder::buildDocuments(
                d->state.load() >= DocumentState::ComputedScopes;
       });
 
-  for (Document* d : work) {
-    // A document `Validated` by a narrower request re-enters the validating
-    // phase alone: the tree, the scopes and both index halves stand.
+  // A document `Validated` by a narrower request re-enters the validating phase
+  // alone: the tree, the scopes and both index halves stand.
+  for (Document* d : work)
     if (d->state.load() == DocumentState::Validated &&
         resultsAreIncomplete(*d, getBuildOptions(*d)))
       lower(*d, DocumentState::IndexedReferences);
-    // Below `IndexedReferences` a memoised resolution has no index row to
-    // protect it from the next reset: dropped here, while the write still
-    // excludes every reader.
-    if (d->state.load() < DocumentState::IndexedReferences)
-      if (const CoreServices* language = d->language; language != nullptr) {
-        language->linker->unlink(*d);
-        lower(*d, DocumentState::ComputedScopes);
-      }
+  // Below `IndexedReferences` a memoised resolution has no index row to protect
+  // it: dropped while the write still excludes every reader, in what this build
+  // builds and, when it brings new exports, everywhere.
+  for (const auto& heldDocument : held) {
+    Document* const d = heldDocument.get();
+    if (d->state.load() >= DocumentState::IndexedReferences ||
+        (changed.empty() && !scheduled.contains(d)))
+      continue;
+    if (const CoreServices* language = d->language; language != nullptr) {
+      language->linker->unlink(*d);
+      lower(*d, DocumentState::ComputedScopes);
+    }
   }
 
   if (!prepareContent) _shared.workspaceLock->allowImmediateReads();

@@ -135,18 +135,16 @@ bool lr_same_edits(const std::vector<LrEdit>& links, std::uint32_t a,
   }
 }
 
-std::uint64_t lr_edits_fold(const std::vector<LrEdit>& links, std::uint32_t l) {
-  std::uint64_t h = 0;
-  for (; links[l].parent != kNoEditLink; l = links[l].parent) {
-    const LrEdit& g = links[l];
-    if (g.kind == LrEdit::arm && !g.held) continue;
-    const std::uint64_t v =
-        (std::uint64_t{g.kind} << 56) ^ (std::uint64_t{g.term} << 40) ^
-        (std::uint64_t{g.la.sym} << 24) ^ (std::uint64_t{g.end} << 20) ^ g.at ^
-        (g.kind == LrEdit::arm ? std::uint64_t{g.choice} << 48 : 0);
-    h = (h ^ v) * 0x100000001b3ull;
-  }
-  return (h ^ l) * 0x100000001b3ull;
+std::uint64_t lr_edits_fold(const std::vector<LrEdit>& links, std::uint32_t l,
+                            std::uint64_t h) {
+  const LrEdit& g = links[l];
+  if (g.parent == kNoEditLink) return (std::uint64_t{l} + 1) * 0x100000001b3ull;
+  if (g.kind == LrEdit::arm && !g.held) return h;
+  const std::uint64_t v =
+      (std::uint64_t{g.kind} << 56) ^ (std::uint64_t{g.term} << 40) ^
+      (std::uint64_t{g.la.sym} << 24) ^ (std::uint64_t{g.end} << 20) ^ g.at ^
+      (g.kind == LrEdit::arm ? std::uint64_t{g.choice} << 48 : 0);
+  return (h ^ v) * 0x100000001b3ull;
 }
 
 void lr_search_reset(LrSearch& s) {

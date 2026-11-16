@@ -21,6 +21,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/shared/utils/CoreContract.hpp"
 
 namespace cursiv::engine {
 
@@ -83,7 +84,7 @@ struct LexRefusalProduct {
     for (std::size_t k = 0; k < n.guards.size(); ++k) {
       if (taken[k]) continue;
       std::map<std::pair<unsigned, int>, int> memo;
-      level(k, memo, 0, n.guards[k].out, n.guards[k].hole);
+      (void)descend(level(k, memo, 0, n.guards[k].out, n.guards[k].hole));
     }
   }
 
@@ -207,14 +208,15 @@ struct LexRefusalProduct {
 
   // `lvl` bytes of guard `k`'s word spelled and the continuation at `q`; each
   // level re-spells the continuation's edges, `into` the state it fills.
-  int level(std::size_t k, std::map<std::pair<unsigned, int>, int>& memo,
-            unsigned lvl, int q, int into) {
+  Descent<int> level(std::size_t k,
+                     std::map<std::pair<unsigned, int>, int>& memo,
+                     unsigned lvl, int q, int into) {
     if (const auto at = memo.find({lvl, q}); at != memo.end())
-      return at->second;
+      co_return at->second;
     const LexNode e = g.lex[n.guards[k].node];
     const bool done = lvl == e.min;
     // The word fully spelled and nothing to lift it: the reading is dead.
-    if (done && e.a == kNoSet) return -1;
+    if (done && e.a == kNoSet) co_return -1;
     const std::vector<int> cl = n.eclose(q);
     const ByteSet scalars = done ? lex_decode_bytes(g, e.a) : ByteSet{};
     // At the word's end, whether the body reads on over every byte and scalar
@@ -253,7 +255,8 @@ struct LexRefusalProduct {
       if (st.set >= 0) {
         if (const ByteSet on = lex_edge_bytes(g.sets.data(), st) & pickSet;
             on.any()) {
-          const int to = done ? st.t1 : level(k, memo, lvl + 1, st.t1, -1);
+          int to = st.t1;
+          if (!done) to = co_await level(k, memo, lvl + 1, st.t1, -1);
           // A level that keeps nothing is not an edge.
           if (to >= 0) {
             leads = leads || ByteSet{on}.andnot(g.sets[pick]).any();
@@ -336,7 +339,7 @@ struct LexRefusalProduct {
       refuse(LexRefusalFault::readsPast, k, ByteSet{});
     const int self = into >= 0 ? into : (chain < 0 ? -1 : n.hole());
     if (self >= 0) n.s[static_cast<std::size_t>(self)].t1 = chain;
-    return memo[{lvl, q}] = self;
+    co_return memo[{lvl, q}] = self;
   }
 };
 

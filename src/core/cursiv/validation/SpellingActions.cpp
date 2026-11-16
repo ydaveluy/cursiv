@@ -19,6 +19,7 @@
 #include "cursiv/syntax-tree/DocumentReferences.hpp"
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
 #include "cursiv/text/TextRange.hpp"
+#include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/JsonValue.hpp"
 #include "cursiv/validation/DefaultCodeActionProtocol.hpp"
@@ -74,7 +75,8 @@ constexpr std::size_t kMaxSuggestions = 3;
 
 JsonValue::Array near_names(const Document& document,
                             const CoreServices& language,
-                            const ReferenceInfo& site, TextRange range) {
+                            const ReferenceInfo& site, TextRange range,
+                            const CancellationToken& token) {
   JsonValue::Array rows;
   const std::string_view text = site.referenceText;
   // Under three bytes every name is a neighbour.
@@ -96,6 +98,7 @@ JsonValue::Array near_names(const Document& document,
   std::unordered_set<std::string_view> seen;
   (void)language.scopeProvider->visitScopeEntries(
       site, [&](const AstNodeDescription& entry) {
+        throw_if_cancelled(token);
         if (entry.name.size() + limit < text.size() ||
             text.size() + limit < entry.name.size())
           return true;
@@ -124,7 +127,8 @@ JsonValue::Array near_names(const Document& document,
 }  // namespace
 
 std::vector<JsonValue::Array> detail::spelling_actions(
-    const Document& document, std::span<const Diagnostic* const> diagnostics) {
+    const Document& document, std::span<const Diagnostic* const> diagnostics,
+    const CancellationToken& token) {
   std::vector<JsonValue::Array> rows(diagnostics.size());
   const DocumentReferences* const references =
       document.parseResult.references.get();
@@ -136,6 +140,12 @@ std::vector<JsonValue::Array> detail::spelling_actions(
         return asked(*d);
       }))
     return rows;
+  // The asked diagnostics by span, so a site finds its own without a scan.
+  std::vector<std::tuple<TextOffset, TextOffset, std::size_t>> wanted;
+  for (std::size_t i = 0; i < diagnostics.size(); ++i)
+    if (const Diagnostic& d = *diagnostics[i]; asked(d))
+      wanted.emplace_back(d.range.begin, d.range.end, i);
+  std::ranges::sort(wanted);
   // The sites one request is served, in the order the validator lists them.
   unsigned spelt = 0;
   references->visitUnresolved(
@@ -146,14 +156,16 @@ std::vector<JsonValue::Array> detail::spelling_actions(
             spelt == kSpelledSites)
           return;
         bool here = false;
-        for (std::size_t i = 0; i < diagnostics.size(); ++i) {
-          const Diagnostic& d = *diagnostics[i];
-          if (asked(d) && d.range.begin == begin && d.range.end == end &&
-              rows[i].empty()) {
-            rows[i] = near_names(document, *document.language, site, d.range);
+        for (auto at = std::ranges::lower_bound(
+                 wanted, std::tuple{begin, end, std::size_t{0}});
+             at != wanted.end() && std::get<0>(*at) == begin &&
+             std::get<1>(*at) == end;
+             ++at)
+          if (const std::size_t i = std::get<2>(*at); rows[i].empty()) {
+            rows[i] = near_names(document, *document.language, site,
+                                 diagnostics[i]->range, token);
             here = true;
           }
-        }
         if (here) ++spelt;
       });
   return rows;

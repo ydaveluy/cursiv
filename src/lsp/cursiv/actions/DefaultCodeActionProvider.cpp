@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -28,12 +29,18 @@
 namespace cursiv {
 namespace {
 
+// A kind asked names itself and every kind under it, the empty one all.
 [[nodiscard]] bool accepts_quick_fixes(const lsp::CodeActionContext& context) {
   if (!context.only.has_value() || context.only->empty()) return true;
-  return std::ranges::any_of(*context.only,
-                             [](const lsp::CodeActionKindEnum& kind) {
-                               return kind == lsp::CodeActionKind::QuickFix;
-                             });
+  const std::string fix =
+      lsp::CodeActionKindEnum(lsp::CodeActionKind::QuickFix);
+  return std::ranges::any_of(
+      *context.only, [&](const lsp::CodeActionKindEnum& kind) {
+        const std::string asked = kind;
+        return asked.empty() ||
+               (fix.starts_with(asked) &&
+                (fix.size() == asked.size() || fix[asked.size()] == '.'));
+      });
 }
 
 [[nodiscard]] const JsonValue* field(const JsonValue::Object& object,
@@ -52,11 +59,15 @@ namespace {
                               same_json_payload);
   if (expected.isObject() && actual.isObject()) {
     if (expected.object().size() != actual.object().size()) return false;
-    // The server's keys are unique; client objects can contain duplicates.
+    // The server's keys are unique; of a key a client repeats, the first
+    // value answers.
+    std::unordered_map<std::string_view, const lsp::LSPAny*> values;
+    for (const auto& [key, value] : actual.object())
+      values.try_emplace(key, &value);
     return std::ranges::all_of(expected.object(), [&](const auto& entry) {
       const auto& [key, value] = entry;
-      const auto* other = actual.object().find(key);
-      return other != nullptr && same_json_payload(value, *other);
+      const auto other = values.find(key);
+      return other != values.end() && same_json_payload(value, *other->second);
     });
   }
   return expected == actual;
@@ -183,7 +194,7 @@ std::vector<lsp::CodeAction> DefaultCodeActionProvider::getCodeActions(
     // request: the lookup walks the reference's whole scope.
     throw_if_cancelled(token);
     const std::vector<JsonValue::Array> spelled =
-        detail::spelling_actions(document, asked);
+        detail::spelling_actions(document, asked, token);
     for (std::size_t i = 0; i < asked.size(); ++i) {
       throw_if_cancelled(token);
       const Diagnostic& diagnostic = *asked[i];

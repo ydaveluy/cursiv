@@ -11,6 +11,7 @@
 #include "cursiv/grammar/ExprShape.hpp"
 #include "cursiv/grammar/RuleTraits.hpp"
 #include "cursiv/grammar/expr.hpp"
+#include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/utils/ctstring.hpp"
 #include "cursiv/utils/typelist.hpp"
 
@@ -1068,13 +1069,11 @@ inline constexpr bool all_derive = false;
 template <class... Ts, class C>
 inline constexpr bool all_derive<TypeList<Ts...>, C> =
     (std::is_base_of_v<C, Ts> && ...);
-template <class In, class P>
+// Judged on what the member holds, alone, in a list or optional.
+template <class In, class Held>
 inline constexpr bool buries_ok = true;
-template <class In, class G, class C>
-inline constexpr bool buries_ok<In, G* C::*> = all_derive<In, G>;
-template <class In, class G, class A, class C>
-inline constexpr bool buries_ok<In, std::vector<G*, A> C::*> =
-    all_derive<In, G>;
+template <class In, class G>
+inline constexpr bool buries_ok<In, G*> = all_derive<In, G>;
 
 template <class In, class E, bool Check = true>
 struct in_hand {
@@ -1150,7 +1149,7 @@ template <class In, class T, class E, bool Check>
 struct in_hand<In, Create<T, E>, Check> : in_hand<TypeList<T>, E, Check> {};
 template <class In, class T, auto P, class E, bool Check>
 struct in_hand<In, Nest<T, P, E>, Check> : in_hand<TypeList<T>, E, Check> {
-  static_assert(!Check || buries_ok<In, std::remove_cv_t<decltype(P)>>,
+  static_assert(!Check || buries_ok<In, typename field_tag<P>::held>,
                 "this nest stores the current node in a member that cannot "
                 "hold it: the node created or called before the nest, or the "
                 "wrapper of an earlier nest, can be of a class that does not "
@@ -1259,7 +1258,7 @@ struct start_hand<TypeList<>, true, Hw> {
   using type = cond_t<std::is_void_v<W>, TypeList<>, TypeList<W>>;
 };
 
-template <class A, class Seen, class L>
+template <class A, class Seen, class L, bool Self = is_self_resolving<A>>
 struct branch_type_from {
   using Ad = typename adopt_cands<A, Seen>::type;
   using Start = typename start_hand<
@@ -1274,6 +1273,14 @@ struct branch_type_from {
   static_assert(must_adopt<A> || !std::is_void_v<type>,
                 "the directives of this alternative write members of "
                 "unrelated classes: add create<T> to say which class to build");
+};
+// A creation or nest it always reaches decides the node: what the branch
+// adopts before is buried or replaced, so no adoption is asked -- nor the
+// type of a rule still being deduced.
+template <class A, class Seen, class L>
+struct branch_type_from<A, Seen, L, true> {
+  using type = typename common_base_of<
+      typename in_hand<TypeList<>, A, false>::type>::type;
 };
 template <class A, class Seen>
 struct branch_type : branch_type_from<A, Seen, typename cands<A>::type> {};

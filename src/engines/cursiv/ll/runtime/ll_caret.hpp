@@ -136,8 +136,14 @@ inline bool ll_chains_nothing(const Cst& cst, StampLayout stamp,
     if (last != leaf.id) break;
     std::uint32_t op = 0;
     for (const NodeId child : cst.reverseChildren(records[i])) {
+      // The token a child opens with: an operator's own, or the first of the
+      // group an operator of several tokens records.
+      NodeId first = child + 1 - cst[child].subtreeSize;
+      while (first < child &&
+             (cst[first].subtreeSize != 1 || cst[first].hidden))
+        ++first;
       const std::uint16_t pos =
-          cst[child].subtreeSize == 1 ? stamp.state(cst[child]) : 0;
+          cst[first].subtreeSize == 1 ? stamp.state(cst[first]) : 0;
       if (pos != 0 && pos <= T.nafter &&
           (T.nodeStep[pos - 1] >> 16) == (step >> 16))
         op = T.nodeStep[pos - 1];

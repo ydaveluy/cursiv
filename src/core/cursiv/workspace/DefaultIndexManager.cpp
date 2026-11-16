@@ -246,8 +246,11 @@ void DefaultIndexManager::noteIncoming(DocumentId source) {
 
 void DefaultIndexManager::affectImporters(const Exported& exports) {
   if (_importers.empty()) return;
+  // Homonyms share a hash: their importers are affected once.
+  std::unordered_set<std::uint64_t> asked;
   for (const auto& entry : exports.byShard)
-    if (const auto at = _importers.find(entry.hash); at != _importers.end())
+    if (const auto at = _importers.find(entry.hash);
+        at != _importers.end() && asked.insert(entry.hash).second)
       for (const auto& importer : at->second)
         _affected.insert(importer.document);
 }

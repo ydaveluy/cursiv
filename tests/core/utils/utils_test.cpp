@@ -361,6 +361,8 @@ void a_path_makes_a_uri_and_back() {
           "c:\\a\\b.txt");
     CHECK(cursiv::normalize_uri("file:///w/a.ws") == "file:///w/a.ws");
     CHECK(cursiv::file_uri_to_path("file://localhost/c:/a").value() == "c:\\a");
+    CHECK(cursiv::file_uri_to_path("file://local%68ost/c:/a").value() ==
+          "c:\\a");
     // A share: the host stands first, and its drive-like name is no drive.
     CHECK(cursiv::file_uri_to_path("file://server/share/a.ws").value() ==
           "\\\\server\\share\\a.ws");
@@ -381,6 +383,7 @@ void a_path_makes_a_uri_and_back() {
     CHECK(cursiv::file_uri_to_path("file:///a/b/c.txt").value() == "/a/b/c.txt");
     // Only `localhost` is a host this process can read a file from.
     CHECK(cursiv::file_uri_to_path("file://localhost/a").value() == "/a");
+    CHECK(cursiv::file_uri_to_path("file://local%68ost/a") == "/a");
     CHECK(!cursiv::file_uri_to_path("file://other-host/a").has_value());
     // A drive letter keeps its root, and one spelling: a WASI runner on Windows
     // preopens each drive under that name.

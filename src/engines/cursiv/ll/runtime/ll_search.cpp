@@ -92,16 +92,14 @@ std::uint32_t ll_search_child(LlSearch& s, std::uint32_t from,
   return static_cast<std::uint32_t>(s.nodes.size()) - 1;
 }
 
-std::uint64_t ll_edits_fold(const std::vector<LlEdit>& links, std::uint32_t l) {
-  std::uint64_t h = 0;
-  for (; links[l].parent != kNoEditLink; l = links[l].parent) {
-    const LlEdit& g = links[l];
-    h = (h ^ (std::uint64_t{g.kind} << 56) ^ (std::uint64_t{g.term} << 40) ^
-         (std::uint64_t{g.end} << 20) ^ g.state ^ g.at ^
-         (std::uint64_t{g.begin} << 8)) *
-        0x100000001b3ull;
-  }
-  return h;
+std::uint64_t ll_edits_fold(const std::vector<LlEdit>& links, std::uint32_t l,
+                            std::uint64_t h) {
+  const LlEdit& g = links[l];
+  if (g.parent == kNoEditLink) return 0;
+  return (h ^ (std::uint64_t{g.kind} << 56) ^ (std::uint64_t{g.term} << 40) ^
+          (std::uint64_t{g.end} << 20) ^ g.state ^ g.at ^
+          (std::uint64_t{g.begin} << 8)) *
+         0x100000001b3ull;
 }
 
 bool ll_same_edits(const std::vector<LlEdit>& links, std::uint32_t a,

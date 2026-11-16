@@ -491,6 +491,25 @@ void a_stopped_question_throws_in_the_replay() {
   }
 }
 
+// A stop requested before a question too short to reach a poll still throws.
+void a_stopped_short_question_throws() {
+  cursiv::CancellationTokenSource stop;
+  stop.request_stop();
+  const auto lr = tpar::generated::Lr::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
+  for (const cursiv::Parser* parser : {lr.get(), ll.get()}) {
+    const auto parsed = parser->parse("pr a; ");
+    std::vector<cursiv::NextFeature> next;
+    bool stopped = false;
+    try {
+      parser->nextFeaturesAt(parsed.cst(), 0, 0, next, stop.get_token());
+    } catch (const cursiv::OperationCancelled&) {
+      stopped = true;
+    }
+    CHECK(stopped);
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -511,5 +530,6 @@ int main() {
   each_member_a_token_fills_is_named_as_the_descent_names_it();
   a_frame_of_many_predecessors_costs_their_number();
   a_stopped_question_throws_in_the_replay();
+  a_stopped_short_question_throws();
   return cursiv::test::report("LlCaretParity_test");
 }

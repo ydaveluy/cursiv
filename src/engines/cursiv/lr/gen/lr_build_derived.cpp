@@ -90,40 +90,54 @@ struct LrDeriving {
     enum class Known : std::uint8_t { no, yes, mixed };
     std::vector known(g.nnts, Known::no);
     std::vector<Moves> moves(g.nnts);
-    for (bool changed = true; changed;) {
-      changed = false;
-      for (unsigned p = 0; p < g.nprods; ++p) {
-        const LrLowProd& q = g.prods[p];
-        if (known[q.lhs] == Known::mixed) continue;
-        Moves m;
-        Known at = Known::yes;
-        for (unsigned i = 0; i < q.len && at == Known::yes; ++i) {
-          const std::uint16_t y = g.sym_at(q, i);
-          Moves by;
-          if (!is_term(y)) {
-            at = known[nt_index(y)];
-            by = moves[nt_index(y)];
-          } else {
-            by.level = levels(y);
-            by.depth = g.terms[y].delim;
-            by.lowLevel = std::min(by.level, 0);
-            by.lowDepth = std::min(by.depth, 0);
-          }
-          m.lowLevel = std::min(m.lowLevel, m.level + by.lowLevel);
-          m.lowDepth = std::min(m.lowDepth, m.depth + by.lowDepth);
-          m.level += by.level;
-          m.depth += by.depth;
+    // A production is read again only when a rule its text names changes.
+    std::vector<std::vector<unsigned>> readers(g.nnts);
+    for (unsigned p = 0; p < g.nprods; ++p)
+      for (unsigned i = 0; i < g.prods[p].len; ++i)
+        if (const std::uint16_t y = g.sym_at(g.prods[p], i); !is_term(y))
+          readers[nt_index(y)].push_back(p);
+    std::vector<unsigned> todo(g.nprods);
+    std::vector<bool> queued(g.nprods, true);
+    for (unsigned p = 0; p < g.nprods; ++p) todo[p] = g.nprods - 1 - p;
+    while (!todo.empty()) {
+      const unsigned p = todo.back();
+      todo.pop_back();
+      queued[p] = false;
+      const LrLowProd& q = g.prods[p];
+      if (known[q.lhs] == Known::mixed) continue;
+      Moves m;
+      Known at = Known::yes;
+      for (unsigned i = 0; i < q.len && at == Known::yes; ++i) {
+        const std::uint16_t y = g.sym_at(q, i);
+        Moves by;
+        if (!is_term(y)) {
+          at = known[nt_index(y)];
+          by = moves[nt_index(y)];
+        } else {
+          by.level = levels(y);
+          by.depth = g.terms[y].delim;
+          by.lowLevel = std::min(by.level, 0);
+          by.lowDepth = std::min(by.depth, 0);
         }
-        if (at == Known::no) continue;
-        const Known was = known[q.lhs];
-        if (at == Known::mixed || (was == Known::yes && moves[q.lhs] != m))
-          known[q.lhs] = Known::mixed;
-        else if (was == Known::no) {
-          known[q.lhs] = Known::yes;
-          moves[q.lhs] = m;
-        }
-        changed = changed || known[q.lhs] != was;
+        m.lowLevel = std::min(m.lowLevel, m.level + by.lowLevel);
+        m.lowDepth = std::min(m.lowDepth, m.depth + by.lowDepth);
+        m.level += by.level;
+        m.depth += by.depth;
       }
+      if (at == Known::no) continue;
+      const Known was = known[q.lhs];
+      if (at == Known::mixed || (was == Known::yes && moves[q.lhs] != m))
+        known[q.lhs] = Known::mixed;
+      else if (was == Known::no) {
+        known[q.lhs] = Known::yes;
+        moves[q.lhs] = m;
+      }
+      if (known[q.lhs] != was)
+        for (const unsigned reader : readers[q.lhs])
+          if (!queued[reader]) {
+            queued[reader] = true;
+            todo.push_back(reader);
+          }
     }
     // A rule whose every text closes what it opens and no other.
     const auto closed = [&](std::uint16_t nt) {

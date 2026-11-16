@@ -355,8 +355,9 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
   // belongs to the file name, a literal one starts a query or fragment.
   const UriParts parts = split_uri(uri);
   std::string decoded = percent_decode(parts.path);
+  const std::string host = percent_decode(parts.authority);
   // A host with no path names no file.
-  if (decoded.empty() && !parts.authority.empty()) return std::nullopt;
+  if (decoded.empty() && !host.empty()) return std::nullopt;
   if (!decoded.starts_with('/')) decoded.insert(decoded.begin(), '/');
   // An escaped NUL would end the path where the system call stops reading and
   // open another file than the URI names.
@@ -366,8 +367,8 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
   const bool drive =
       decoded.size() >= 3 && is_ascii_letter(decoded[1]) && decoded[2] == ':';
   const bool local =
-      parts.authority.empty() ||
-      (std::ranges::equal(parts.authority, std::string_view("localhost"), {},
+      host.empty() ||
+      (std::ranges::equal(host, std::string_view("localhost"), {},
                           [](char c) { return to_lower(c); }) &&
        (!kWindowsPaths || drive));
   if (local) lower_drive_letter(decoded);
@@ -379,7 +380,7 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
   } else {
     // A share: the host is the path's first component.
     if (decoded == "/") return std::nullopt;
-    decoded.insert(0, "//" + percent_decode(parts.authority));
+    decoded.insert(0, "//" + host);
   }
   std::ranges::replace(decoded, '/', '\\');
   return decoded;

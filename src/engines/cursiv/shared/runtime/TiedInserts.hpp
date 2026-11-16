@@ -50,27 +50,41 @@ class TiedInserts {
 
   // Adds to `out`, once since `open`, the first insertion of the path ending
   // at `link` and what was kept under its links. Returns the number of links
-  // walked.
+  // walked: a link named since `open` is not walked again.
   template <class Edit, class Kind>
   std::uint32_t name(const std::vector<Edit>& links, std::uint32_t link,
                      Kind&& kind, std::vector<ElementId>& out) {
+    _walked.clear();
     std::uint32_t first = kNoElement;
-    std::uint32_t walked = 0;
-    for (std::uint32_t l = link;
-         l != kNoEditLink && links[l].parent != kNoEditLink;
-         l = links[l].parent, ++walked) {
-      if (const std::uint32_t k = kind(links[l]); k != kArm) first = k;
+    std::uint32_t l = link;
+    for (; l != kNoEditLink && links[l].parent != kNoEditLink;
+         l = links[l].parent) {
+      if (const auto named = _firstOf.find(l); named != _firstOf.end()) {
+        first = named->second;
+        break;
+      }
+      _walked.push_back(l);
       if (const auto it = _under.find(l); it != _under.end())
         for (const ElementId term : it->second)
           if (fresh(term)) out.push_back(term);
     }
+    // The insertion nearest the root, below and above where the walk stopped.
+    for (auto it = _walked.rbegin(); it != _walked.rend(); ++it) {
+      if (const std::uint32_t k = kind(links[*it]);
+          first == kNoElement && k != kArm)
+        first = k;
+      _firstOf.emplace(*it, first);
+    }
     if (first != kNoElement && fresh(static_cast<ElementId>(first)))
       out.push_back(static_cast<ElementId>(first));
-    return walked;
+    return static_cast<std::uint32_t>(_walked.size());
   }
 
   // A new set of terminals, each to be named once.
-  void open() { _seen.next(); }
+  void open() {
+    _seen.next();
+    _firstOf.clear();
+  }
 
   // The terminals named, in the order the grammar declares them.
   static void order(std::vector<ElementId>& terms);
@@ -99,6 +113,9 @@ class TiedInserts {
   }
 
   std::unordered_map<std::uint32_t, std::vector<ElementId>> _under;
+  // Per link named since `open`, the first insertion of its path.
+  std::unordered_map<std::uint32_t, std::uint32_t> _firstOf;
+  std::vector<std::uint32_t> _walked;
   std::vector<ElementId> _moved;
   RoundMarks _seen;
 };

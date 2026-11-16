@@ -499,6 +499,13 @@ class LlSimulation {
   bool step(const std::uint16_t* terms, std::size_t n);
   bool step(std::uint16_t term) { return step(&term, 1); }
 
+  // A repair tries many terminals from one set: its edges are read once,
+  // grouped by terminal in the order `step` meets them.
+  void group_steps();
+  // `step(term)` from the set `group_steps` last read, whatever `configs()`
+  // holds since.
+  bool step_grouped(std::uint16_t term);
+
   // The step a caret replays over a token it did not read itself: the edges
   // `takes(edge index)` names, whatever they carry; an implied token is read
   // across the condition that stands for it. `terms`, where given, are all
@@ -800,6 +807,8 @@ class LlSimulation {
   const LlAtnView& _atn;
   LlCtxPool _ctx;
   std::vector<LlConfig> _cur, _next;
+  // What `group_steps` read: each edge's terminal and the reading it gives.
+  std::vector<std::pair<std::uint16_t, LlConfig>> _grouped;
   LlRoundTable<LlConfig, LlConfigHash> _seen;
   // Where a reading of one position and one arm already stands, so a second
   // route to it joins instead of doubling the set.

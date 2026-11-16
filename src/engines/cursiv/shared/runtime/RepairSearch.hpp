@@ -366,18 +366,38 @@ std::uint32_t repair_elect(RepairSearch<G>& s, const std::vector<R>& rs,
     return s.goals[0];
   }
   const auto goal = [&](std::size_t k) -> const R& { return rs[s.goals[k]]; };
-  // Each goal's root, one paid walk of its path.
-  std::vector<std::uint32_t> rootOf(s.goals.size());
-  for (std::size_t k = 0; k < s.goals.size(); ++k) {
-    std::uint32_t l = goal(k).link;
-    for (; s.links[l].parent != kNoEditLink; l = s.links[l].parent) {
+  // Each goal's path, folded and rooted from its prefix's: a link the goals
+  // share is walked once.
+  struct Path {
+    std::uint64_t fold = 0;
+    std::uint32_t root = kNoEditLink;
+  };
+  std::unordered_map<std::uint32_t, Path> paths;
+  std::vector<std::uint32_t> climb;
+  const auto path = [&](std::uint32_t l) {
+    climb.clear();
+    auto known = paths.find(l);
+    for (; known == paths.end() && s.links[l].parent != kNoEditLink;
+         known = paths.find(l)) {
       stop.poll();
       ++s.work;
+      climb.push_back(l);
+      l = s.links[l].parent;
     }
-    rootOf[k] = l;
-  }
+    Path at = known != paths.end() ? known->second
+                                   : Path{Fold(s.links, l, 0), l};
+    paths.try_emplace(l, at);
+    for (auto it = climb.rbegin(); it != climb.rend(); ++it) {
+      at.fold = Fold(s.links, *it, at.fold);
+      paths.emplace(*it, at);
+    }
+    return at;
+  };
+  std::vector<std::uint32_t> rootOf(s.goals.size());
+  for (std::size_t k = 0; k < s.goals.size(); ++k)
+    rootOf[k] = path(goal(k).link).root;
   const auto hash = [&](std::uint32_t l) {
-    return static_cast<std::size_t>(Fold(s.links, l));
+    return static_cast<std::size_t>(path(l).fold);
   };
   const auto same = [&](std::uint32_t a, std::uint32_t b) {
     return Same(s.links, a, b);

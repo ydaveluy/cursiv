@@ -42,6 +42,13 @@ if(CURSIV_NEW_ID IN_LIST _cursiv_keywords
   message(FATAL_ERROR "NAME and its lowercase namespace must not be reserved "
       "C++ identifiers, nor main, std, posix or cursiv (got '${NAME}')")
 endif()
+# NAME is the grammar class: a word the project's C++ already uses would mean
+# that class where the code means something else.
+set(_cursiv_used AstNode CURSIV_NEW_CLASS CURSIV_NEW_ID CURSIV_SAMPLE CoreServices CoreServicesFor DefaultCoreService Extends GrammarSpec Greeting LspServicesFor ML_COMMENT Model ParseResult Person SL_COMMENT ServiceSlot Services SharedCoreServices SharedLspServices SharedServices V ValidationAcceptor ValidationRegistry Validator WS Z_personHello a accept append argc argv ast ast_cast auto bench char checkPersonStartsWithCapital checkUniquePersons class const constexpr continue create create_language cstdio cursiv diagnostics empty entry error fail file final for fprintf front fstream function_ref generated greetings hidden if ifstream ignored include install_core_module install_generated_module install_lsp_module int istreambuf_iterator iterator kRegister language list lit main makeValidationCheck make_unique memory message model name names namespace nullptr once override parse parser people person persons pragma property public push_back puts ref reference registerChecks register_language register_lsp_language register_lsp_services register_validation_checks result return root rule run_cli run_language run_language_server_main s services sharedServices size some std stderr string string_view struct terminal text true unique_ptr unordered_map using validationRegistry validator value vector virtual visitServices void warning what yield z zA)
+if(NAME IN_LIST _cursiv_used)
+  message(FATAL_ERROR "NAME must not be a name the project's C++ already uses, "
+      "such as a rule of the starter grammar (got '${NAME}')")
+endif()
 if(NOT DEFINED EXT)
   set(EXT ".${CURSIV_NEW_ID}")
 endif()
@@ -963,8 +970,11 @@ function isWasm(file: string): boolean {
 function presetCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
     const directory = process.env.CURSIV_SERVER_DIR?.trim();
     if (!directory) return undefined;
-    const built = path.join(directory, executableName());
-    if (!fs.existsSync(built)) return undefined;
+    // A native build names the server for the host; a WASI build adds nothing.
+    const built = [executableName(), SERVER]
+        .map(name => path.join(directory, name))
+        .find(file => fs.existsSync(file));
+    if (!built) return undefined;
     if (!isWasm(built)) return { command: built, args: [] };
     return wasmRun(built, path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
 }

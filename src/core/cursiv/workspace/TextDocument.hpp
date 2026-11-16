@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "cursiv/text/Position.hpp"
@@ -48,6 +49,7 @@ class TextDocument {
         _lineStarts(std::move(o._lineStarts)),
         _asciiLines(std::move(o._asciiLines)),
         _wellFormedLines(std::move(o._wellFormedLines)),
+        _marks(std::move(o._marks)),
         _lineIndexReady(o._lineIndexReady.load(std::memory_order_relaxed)) {
     o.setText({});
   }
@@ -117,7 +119,6 @@ class TextDocument {
     TextOffset _decodedAt = 0;
     std::uint32_t _character = 0;
     bool _ascii = false;
-    bool _wellFormed = false;
   };
 
  private:
@@ -141,6 +142,21 @@ class TextDocument {
   // U+FFFD. The boundary can be past `to` when it lies inside a subpart.
   [[nodiscard]] std::uint32_t advanceUtf16(TextOffset& from, TextOffset to,
                                          bool wellFormed) const noexcept;
+
+  // Where a block of a long line that is not ASCII starts decoding, and the
+  // line's column there: a column is counted from the last mark before it.
+  struct Mark {
+    TextOffset at;
+    std::uint32_t units;
+  };
+  static constexpr TextOffset kMarkSpan = 4096;
+  // The marks of `line`, built on the first question; none on a short line.
+  [[nodiscard]] std::span<const Mark> marksOf(std::uint32_t line) const;
+  // The column of `to` on `line`, decoding from `from` -- a boundary at column
+  // `units` -- or from the last mark before `to` when it is further on.
+  [[nodiscard]] std::uint32_t columnAt(std::uint32_t line, TextOffset& from,
+                                       std::uint32_t units,
+                                       TextOffset to) const;
 
   // Built on the first question, then patched by ranged changes. Read actions
   // run on many threads, hence the mutex.
@@ -173,6 +189,8 @@ class TextDocument {
   // One bit per line each, in line order, built with the starts.
   mutable std::vector<std::uint64_t> _asciiLines;
   mutable std::vector<std::uint64_t> _wellFormedLines;
+  // By line, under the index's lock, and dropped with any change.
+  mutable std::unordered_map<std::uint32_t, std::vector<Mark>> _marks;
   mutable std::mutex _lineIndexMutex;
   mutable std::atomic<bool> _lineIndexReady = false;
 };

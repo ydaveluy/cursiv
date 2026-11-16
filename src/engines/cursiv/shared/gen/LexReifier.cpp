@@ -204,13 +204,21 @@ Descent<ImageId> LexReifier::resolve_rule(unsigned cfg, std::uint32_t rule) {
       refuse_lowering("cursiv: a lexical call names an unreached terminal");
     return make(ImageKind::call, {}, 0, kNoImage, 1u + term);
   };
-  if (_resolving.contains(rule)) co_return call();
+  if (_resolving.contains(rule)) {
+    ++_callsBack;
+    co_return call();
+  }
+  const std::pair key{cfg, rule};
+  if (const auto at = _resolved.find(key); at != _resolved.end())
+    co_return at->second;
   const ImageId body = terminal_body(rule, _lowerer.body_in(cfg, rule));
+  const std::size_t callsBack = _callsBack;
   _resolving.insert(rule);
-  const ImageId resolved = co_await resolve_in(cfg, body);
+  ImageId out = co_await resolve_in(cfg, body);
   _resolving.erase(rule);
-  if (co_await has_captures(resolved)) co_return call();
-  co_return resolved;
+  if (co_await has_captures(out)) out = call();
+  if (_callsBack == callsBack) _resolved.emplace(key, out);
+  co_return out;
 }
 
 Descent<ImageId> LexReifier::resolve_in(unsigned cfg, ImageId id) {
@@ -318,20 +326,29 @@ Descent<ImageId> LexReifier::resolve_seq(unsigned cfg, ImageId id) {
   co_return rebuilt(id, es);
 }
 
-Descent<bool> LexReifier::has_captures(ImageId id) const {
-  const ImageNode& n = at(id);
+Descent<bool> LexReifier::has_captures(ImageId id) {
+  if (const auto at = _captures.find(id); at != _captures.end())
+    co_return at->second;
+  const ImageNode n = at(id);
+  bool found = false;
   switch (n.kind) {
     case ImageKind::mark:
     case ImageKind::same:
-      co_return true;
+      found = true;
+      break;
     case ImageKind::lit:
-      if ((n.flags & kLitGuardExpr) == 0) co_return false;
-      co_return co_await has_captures(child_at(n, 0));
+      if ((n.flags & kLitGuardExpr) != 0)
+        found = co_await has_captures(child_at(n, 0));
+      break;
     default:
       for (const ImageId k : _im.shape_children(id))
-        if (co_await has_captures(k)) co_return true;
-      co_return false;
+        if (co_await has_captures(k)) {
+          found = true;
+          break;
+        }
   }
+  _captures.emplace(id, found);
+  co_return found;
 }
 
 LexReifier::EndCloser LexReifier::end_closer(ImageId close) {

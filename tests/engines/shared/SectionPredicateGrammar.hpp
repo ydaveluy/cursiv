@@ -156,13 +156,16 @@ struct SectionValues : Last {
             skip(ignore<WS>, hide<>, node | create<ast::Item>(lit<"!">))))> {};
   struct Text : rule<number> {};
   struct Measure : rule<as<length>(number)> {};
+  // `<` opens a section elsewhere; here it opens no section in either arm.
+  struct Pair : rule<(lit<"<"> + lit<"a">) | (lit<"<"> + lit<"b">)> {};
   struct Root
       : rule<(lit<"direct:"> + ref<Direct>) | (lit<"tight:"> + ref<Tight>) |
              (lit<"scope:"> + ref<Scoped>) | (lit<"choice:"> + ref<Chosen>) |
              (lit<"nested:"> + ref<Nested>) | (lit<"append:"> + ref<Appended>) |
              (lit<"node:"> + ref<Node>) | (lit<"nodes:"> + ref<Nodes>) |
              (lit<"text:"> + assign<&ast::Values::text>(ref<Text>)) |
-             (lit<"measure:"> + assign<&ast::Values::number>(ref<Measure>))> {};
+             (lit<"measure:"> + assign<&ast::Values::number>(ref<Measure>)) |
+             (lit<"pair:"> + assign<&ast::Values::text>(ref<Pair>))> {};
   using entry = Root;
   using ignored = WS;
 };

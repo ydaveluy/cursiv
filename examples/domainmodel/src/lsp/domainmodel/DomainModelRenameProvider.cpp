@@ -143,27 +143,29 @@ std::optional<lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
       // form, even when an ancestor package is what was renamed.
       const std::string_view replacement =
           written.find('.') == std::string_view::npos ? bare : qualified;
-      if (written == replacement) continue;  // nothing to change
 
       lsp::TextEdit rewrite;
       rewrite.range = cursiv::to_lsp(
           text.rangeAt(reference.sourceBegin, reference.sourceEnd));
       rewrite.newText = std::string(replacement);
 
-      // The base already wrote the bare name at this site; ours is the one
-      // that knows whether the site is qualified, so it replaces rather than
-      // adds -- two edits over one span is a rename a client refuses.
-      auto& rows = changes[lsp::DocumentUri::parse(std::string(source->uri))];
+      // The base wrote the bare name at this site, even one already spelled as
+      // its replacement: ours replaces that edit, as two edits over one span
+      // is a rename a client refuses, and adds one only where it changes text.
+      const auto uri = lsp::DocumentUri::parse(std::string(source->uri));
+      if (written == replacement && !changes.contains(uri)) continue;
+      auto& rows = changes[uri];
       auto [index, fresh] = sites.try_emplace(&rows);
       if (fresh)
         for (std::size_t row = 0; row < rows.size(); ++row)
           index->second.try_emplace(site_of(rows[row]), row);
-      if (const auto [at, added] =
-              index->second.try_emplace(site_of(rewrite), rows.size());
-          added)
-        rows.push_back(std::move(rewrite));
-      else
+      if (const auto at = index->second.find(site_of(rewrite));
+          at != index->second.end()) {
         rows[at->second].newText = std::move(rewrite.newText);
+      } else if (written != replacement) {
+        index->second.emplace(site_of(rewrite), rows.size());
+        rows.push_back(std::move(rewrite));
+      }
     }
   }
   return edit;

@@ -81,12 +81,33 @@ std::vector<lsp::DocumentSymbol> DefaultDocumentSymbolProvider::getSymbols(
         services.nameProvider->getName(node).value_or(std::string_view{})));
   }
 
-  // The owner of a symbol is its nearest named ancestor; unnamed nodes
-  // dissolve.
+  // A symbol goes under its nearest named ancestor. Unnamed nodes dissolve, and
+  // so do nodes with an empty name, as one a repair inserted: the protocol has
+  // none. Owners come later in postorder, so the pass runs from the end.
+  constexpr std::size_t kNone = detail::NamedNodes::kNoOwner;
+  // Capped: `children` is written out and torn down by recursion. A symbol
+  // that would nest deeper sits beside its owner.
+  constexpr std::size_t kMaxDepth = 64;
+  std::vector<std::size_t> keptAt(symbols.size(), kNone);
+  std::vector<std::size_t> placed(symbols.size(), kNone);
+  std::vector<std::size_t> depth(symbols.size(), 0);
+  for (std::size_t i = symbols.size(); i-- > 0;) {
+    const std::size_t owner = named.owners[i];
+    const std::size_t up = owner == kNone ? kNone : keptAt[owner];
+    if (symbols[i].name.empty()) {
+      keptAt[i] = up;
+      continue;
+    }
+    keptAt[i] = i;
+    placed[i] = up != kNone && depth[up] + 1 == kMaxDepth ? placed[up] : up;
+    depth[i] = placed[i] == kNone ? 0 : depth[placed[i]] + 1;
+  }
+
   std::vector<lsp::DocumentSymbol> roots;
   for (std::size_t i = 0; i < symbols.size(); ++i) {
-    const std::size_t owner = named.owners[i];
-    if (owner == detail::NamedNodes::kNoOwner) {
+    if (keptAt[i] != i) continue;
+    const std::size_t owner = placed[i];
+    if (owner == kNone) {
       roots.push_back(std::move(symbols[i]));
       continue;
     }

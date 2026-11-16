@@ -249,14 +249,35 @@ void malformed_json_is_a_parse_error() {
   CHECK(id != nullptr && id->isNull());
 }
 
-void a_batch_is_refused() {
+// A batch, which a 2025-03-26 client may send, answers each request in it;
+// an empty one, or one inside another, is an invalid request.
+void a_batch_answers_each_request() {
   cursiv::McpServer server = make();
   const json::Value reply =
-      ask(server, R"([{"jsonrpc":"2.0","id":1,"method":"ping"}])");
-  const json::Value* const error = find(reply, "error");
-  const json::Value* const code =
-      error == nullptr ? nullptr : find(*error, "code");
-  CHECK(code != nullptr && code->isInteger() && code->integer() == -32600);
+      ask(server, R"([{"jsonrpc":"2.0","id":1,"method":"ping"},
+      {"jsonrpc":"2.0","method":"notifications/initialized"},
+      {"jsonrpc":"2.0","id":2,"method":"tools/list"}])");
+  CHECK(reply.isArray() && reply.array().size() == 2);
+  if (reply.isArray() && reply.array().size() == 2) {
+    CHECK(find(reply.array()[0], "result") != nullptr);
+    const json::Value* const tools = find(reply.array()[1], "result");
+    CHECK(tools != nullptr && find(*tools, "tools") != nullptr);
+  }
+  CHECK(!server
+             .handleText(
+                 R"([{"jsonrpc":"2.0","method":"notifications/initialized"}])")
+             .has_value());
+  const auto invalid = [](const json::Value& error) {
+    const json::Value* const body = find(error, "error");
+    const json::Value* const code =
+        body == nullptr ? nullptr : find(*body, "code");
+    return code != nullptr && code->isInteger() && code->integer() == -32600;
+  };
+  CHECK(invalid(ask(server, "[]")));
+  const json::Value nested =
+      ask(server, R"([[{"jsonrpc":"2.0","id":1,"method":"ping"}]])");
+  CHECK(nested.isArray() && nested.array().size() == 1 &&
+        invalid(nested.array()[0]));
 }
 
 void a_resource_is_listed_and_read() {
@@ -329,7 +350,7 @@ void run() {
   an_unknown_method_is_method_not_found();
   a_notification_answers_nothing();
   malformed_json_is_a_parse_error();
-  a_batch_is_refused();
+  a_batch_answers_each_request();
   a_resource_is_listed_and_read();
   a_name_is_registered_once();
 }
@@ -653,12 +674,19 @@ void text_document_content_serves_the_held_text() {
   World own;
   own.build({{kA, "datatype D\nentity A { x : D }\n"},
              {"file:///w/a%23b%3Fc%25d.ws", "entity P { }\n"},
-             {"untitled:Note.ws", "entity N { }\n"}});
+             {"untitled:Note.ws", "entity N { }\n"},
+             {"x://host/library.ws", "entity L { }\n"}});
   const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
   cursiv::McpServer server = std::move(*service.createServer());
   const Answer untitled = call_tool(server, "text-document-content",
                                     R"({"file":"untitled:Note.ws"})");
   CHECK(!untitled.isError && untitled.text == "entity N { }\n");
+  // One letter then an authority is a scheme; one letter then a path, a drive.
+  const Answer lettered = call_tool(server, "text-document-content",
+                                    R"({"file":"x://host/library.ws"})");
+  CHECK(!lettered.isError && lettered.text == "entity L { }\n");
+  CHECK(cursiv::tool_file_uri("C:/w/a.ws").starts_with("file:"));
+  CHECK(cursiv::tool_file_uri("C:\\w\\a.ws").starts_with("file:"));
   const Answer text = call_tool(server, "text-document-content",
                                 R"({"file":"file:///w/a.ws"})");
   CHECK(!text.isError);

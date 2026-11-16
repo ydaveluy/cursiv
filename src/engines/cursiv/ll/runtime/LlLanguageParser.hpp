@@ -100,6 +100,9 @@ class LlLanguageParser final : public Parser {
     LexSuffixSession<LlLexTape<T>> predicateSession(
         cst.text().data(), static_cast<TextOffset>(cst.text().size()));
     ll_next_features_at<T>(*_grammar, cst, at, resume, out, cancelToken);
+    // A stop requested after the replay's last periodic poll, or before a
+    // replay too short to reach one.
+    throw_if_cancelled(cancelToken);
   }
 
  private:

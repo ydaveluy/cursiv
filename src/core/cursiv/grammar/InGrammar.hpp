@@ -131,22 +131,11 @@ struct scoped_levels<G, Levels<Ls...>> {
   using type = Levels<typename scoped_level<G, Ls>::type...>;
 };
 
-// The declaration a converter comes from: the nearest override that states
-// one, else the rule as declared.
-template <class Eff, class D = ov::slot_decl_t<Eff>>
-struct slot_holder {
-  using type = D;
-};
-template <class Eff>
-struct slot_holder<Eff, void> {
-  using type = declared_of_t<Eff>;
-};
-
 template <class G, class X, class Eff = in_force_t<G, X>,
           class Kind = typename Eff::kind>
 struct in_grammar_rule {
   using kind = Kind;
-  using slot = typename slot_holder<Eff>::type::slot;
+  using slot = typename ov::slot_holder<Eff>::type::slot;
   // The unnamed rules resolved first, so each is scoped like a named one.
   static constexpr auto body = scoped_t<
       G, unnamed_data_operands_t<std::remove_cv_t<decltype(Eff::body)>>>{};

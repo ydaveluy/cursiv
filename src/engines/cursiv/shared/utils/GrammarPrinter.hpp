@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "cursiv/grammar/GrammarImage.hpp"
@@ -25,8 +27,8 @@ enum class Prec { Choice, Sequence, Prefix, Item };
 std::string decimal(std::size_t v);
 void charset(std::string& out, const CharSet& set);
 
-// Rules are named in order of first appearance: the second of two rules called
-// `Dup` in two namespaces gets its qualified name.
+// Rules are named in order of first appearance, never two alike: the second
+// `Dup` gets its qualified name, or that name spelled from the global scope.
 class GrammarPrinter {
  public:
   GrammarPrinter(GrammarImage& image, ImageView view)
@@ -69,6 +71,9 @@ class GrammarPrinter {
   GrammarImage& _image;
   ImageView _view;
   std::vector<Entry> _entries;
+  // Each rule's entry, and every name an entry took.
+  std::unordered_map<std::uint32_t, std::size_t> _entryOf;
+  std::unordered_set<std::string> _names;
   std::size_t _current = static_cast<std::size_t>(-1);
   int _synth = 0;
 };

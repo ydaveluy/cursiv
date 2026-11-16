@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <span>
+#include <unordered_set>
 #include <utility>
 
 #include "cursiv/shared/gen/WarningFound.hpp"
@@ -123,9 +124,10 @@ Descent<std::uint32_t> TwinReader::shape(ImageId id) {
 // Each distinct key once, in the order written.
 Descent<std::vector<std::uint32_t>> TwinReader::branch_keys(ImageId choice) {
   std::vector<std::uint32_t> out;
+  std::unordered_set<std::uint32_t> seen;
   for (const ImageId k : children(choice)) {
     const std::uint32_t key_ = co_await key(k);
-    if (std::ranges::find(out, key_) == out.end()) out.push_back(key_);
+    if (seen.insert(key_).second) out.push_back(key_);
   }
   co_return out;
 }

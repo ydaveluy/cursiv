@@ -25,6 +25,11 @@ namespace cursiv {
 class DocumentFactory;
 struct CoreServices;
 
+namespace detail {
+// A build revision no other build of any document has had.
+[[nodiscard]] std::uint64_t next_build_revision() noexcept;
+}  // namespace detail
+
 // A document is the root's `parent`, so walking up a tree ends on it: no
 // per-node back-pointer is needed. Its `type` tag proves the cast.
 struct Document : AstNode {
@@ -49,9 +54,10 @@ struct Document : AstNode {
 
   std::vector<Diagnostic> diagnostics;
 
-  // Bumped on every rebuild, unlike the text's version, so a key made for an
-  // older build can be told apart.
-  std::uint64_t buildRevision = 0;
+  // Taken anew on every rebuild, unlike the text's version, and shared by no
+  // other build, a document's at the same URI included: a key made for
+  // another build is told apart.
+  std::uint64_t buildRevision = detail::next_build_revision();
 
   // Whether a client is looking at it. The open documents reach every state
   // first, so an editor sees its own file before the rest of the store.

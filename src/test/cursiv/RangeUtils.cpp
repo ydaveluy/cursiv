@@ -2,8 +2,12 @@
 
 #include <lsp/types.h>
 
+#include <algorithm>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/workspace/Document.hpp"
@@ -36,6 +40,32 @@ void detail::expectSameRange(const lsp::Range& actual,
   expectedFunction(rangeToString(actual), rangeToString(expected),
                    "expected range " + rangeToString(expected) +
                        " does not match actual range " + rangeToString(actual));
+}
+
+std::vector<lsp::TextEdit> detail::editsFor(const lsp::WorkspaceEdit& edit,
+                                            std::string_view uri) {
+  std::vector<lsp::TextEdit> edits;
+  if (edit.documentChanges.has_value()) {
+    for (const auto& change : *edit.documentChanges) {
+      const auto* const text = std::get_if<lsp::TextDocumentEdit>(&change);
+      if (text == nullptr || text->textDocument.uri.toString() != uri) continue;
+      for (const auto& one : text->edits) {
+        if (const auto* const plain = std::get_if<lsp::TextEdit>(&one))
+          edits.push_back(*plain);
+        else if (const auto* const annotated =
+                     std::get_if<lsp::AnnotatedTextEdit>(&one))
+          edits.push_back(*annotated);
+      }
+    }
+  } else if (edit.changes.has_value()) {
+    for (const auto& [key, filed] : *edit.changes)
+      if (key.toString() == uri)
+        edits.insert(edits.end(), filed.begin(), filed.end());
+  }
+  std::ranges::sort(edits, {}, [](const lsp::TextEdit& e) {
+    return std::pair{e.range.start.line, e.range.start.character};
+  });
+  return edits;
 }
 
 }  // namespace cursiv::test

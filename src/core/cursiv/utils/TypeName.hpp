@@ -154,15 +154,15 @@ constexpr std::string_view raw_enum_name() {
 #endif
 }
 
+// A byte past ASCII belongs to a letter of the name, as `Été` spells one.
 constexpr bool is_identifier(std::string_view s) {
-  if (s.empty()) return false;
-  if (!((s[0] >= 'a' && s[0] <= 'z') || (s[0] >= 'A' && s[0] <= 'Z') ||
-        s[0] == '_'))
-    return false;
-  return std::ranges::all_of(s, [](char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-           (c >= '0' && c <= '9') || c == '_';
-  });
+  const auto letter = [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' ||
+           static_cast<unsigned char>(c) >= 0x80;
+  };
+  if (s.empty() || !letter(s[0])) return false;
+  return std::ranges::all_of(
+      s, [&](char c) { return letter(c) || (c >= '0' && c <= '9'); });
 }
 
 // The values probed for an enumerator's name: a few negatives, and enough

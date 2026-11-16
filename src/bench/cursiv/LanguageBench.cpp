@@ -140,7 +140,8 @@ void parse_probe(const char* name, const cursiv::Parser& engine,
                  const std::string& src) {
   {
     const cursiv::ParseResult r = engine.parse(src);
-    if (!r.cst().accepted()) refused(name, "refused by the parser");
+    if (!r.cst().accepted() || r.cst().recovered())
+      refused(name, "refused by the parser");
     if (!r || r.value == nullptr) refused(name, "refused by the builder");
   }
 
@@ -601,13 +602,42 @@ void print_multi(const MultiRow& row) {
   std::printf("\n");
 }
 
+// Names, paths and file names are free text, quotes and backslashes included.
+std::string json_escape(std::string_view text) {
+  std::string out;
+  for (const unsigned char c : text) {
+    if (c == '"' || c == '\\') {
+      out += '\\';
+      out += static_cast<char>(c);
+    } else if (c < 0x20) {
+      char buf[7];
+      std::snprintf(buf, sizeof buf, "\\u%04x", static_cast<unsigned int>(c));
+      out += buf;
+    } else {
+      out += static_cast<char>(c);
+    }
+  }
+  return out;
+}
+
+std::string csv_field(std::string_view text) {
+  if (text.find_first_of(",\"\r\n") == std::string_view::npos)
+    return std::string(text);
+  std::string out = "\"";
+  for (const char c : text) {
+    if (c == '"') out += '"';
+    out += c;
+  }
+  return out + '"';
+}
+
 std::string multi_json(const std::vector<MultiRow>& rows) {
   std::string out = "  \"multi\": [\n";
   for (std::size_t i = 0; i < rows.size(); ++i) {
     const MultiRow& row = rows[i];
-    out += R"(    {"language": ")" + row.language + R"(", "shape": ")" +
-           row.shape + R"(", "refs": ")" + refs_name(row.refs) +
-           R"(", "files": )" + std::to_string(row.files) +
+    out += R"(    {"language": ")" + json_escape(row.language) +
+           R"(", "shape": ")" + json_escape(row.shape) + R"(", "refs": ")" +
+           refs_name(row.refs) + R"(", "files": )" + std::to_string(row.files) +
            ", \"bytes\": " + std::to_string(row.bytes) +
            ", \"iterations\": " + std::to_string(row.iterations) +
            ", \"references\": " + std::to_string(row.references) +
@@ -646,16 +676,15 @@ void write_multi_csv(const std::string& path,
       const double width = threads_of(point.workers) / baseThreads;
       char buf[512];
       std::snprintf(buf, sizeof buf,
-                    "%s,%s,%s,%zu,%zu,%d,%zu,%.6f,%.6f,%.6f,%.3f,%.4f,%.4f,"
+                    "%s,%zu,%zu,%d,%zu,%.6f,%.6f,%.6f,%.3f,%.4f,%.4f,"
                     "%zu,%zu,%zu\n",
-                    row.language.c_str(), row.shape.c_str(),
                     refs_name(row.refs), row.files, row.bytes, row.iterations,
                     point.workers, point.totalMs, point.linkMs,
                     point.totalMs - point.linkMs,
                     throughput(row.bytes, point.totalMs), speedup,
                     width > 0.0 ? speedup / width : 0.0, row.references,
                     row.resolved, row.diagnostics);
-      out += buf;
+      out += csv_field(row.language) + "," + csv_field(row.shape) + "," + buf;
     }
   }
   write_file(path, out);
@@ -671,35 +700,6 @@ std::string companion_csv_path(const std::string& path,
       dot == std::string::npos || (slash != std::string::npos && dot < slash))
     return path + std::string(suffix);
   return path.substr(0, dot) + std::string(suffix) + path.substr(dot);
-}
-
-// Paths and file names belong to the input, including quotes and backslashes.
-std::string json_escape(std::string_view text) {
-  std::string out;
-  for (const unsigned char c : text) {
-    if (c == '"' || c == '\\') {
-      out += '\\';
-      out += static_cast<char>(c);
-    } else if (c < 0x20) {
-      char buf[7];
-      std::snprintf(buf, sizeof buf, "\\u%04x", static_cast<unsigned int>(c));
-      out += buf;
-    } else {
-      out += static_cast<char>(c);
-    }
-  }
-  return out;
-}
-
-std::string csv_field(std::string_view text) {
-  if (text.find_first_of(",\"\r\n") == std::string_view::npos)
-    return std::string(text);
-  std::string out = "\"";
-  for (const char c : text) {
-    if (c == '"') out += '"';
-    out += c;
-  }
-  return out + '"';
 }
 
 // `null` outside `--rss`. In it, a figure the platform did not answer is
@@ -912,13 +912,14 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
                    text.size());
       if (!first) manifest += ",\n";
       first = false;
-      manifest += R"(    {"language": ")" + std::string(language.name) +
-                  R"(", "languageId": ")" + language.languageId +
-                  R"(", "extension": ")" + language.extension +
+      manifest += R"(    {"language": ")" + json_escape(language.name) +
+                  R"(", "languageId": ")" + json_escape(language.languageId) +
+                  R"(", "extension": ")" + json_escape(language.extension) +
                   R"(", "label": ")" + label + R"(", "bytes": )" +
                   std::to_string(text.size()) + R"(, "file": ")" +
-                  std::string(language.name) + "-" + label +
-                  language.extension + "\"}";
+                  json_escape(std::string(language.name) + "-" + label +
+                              language.extension) +
+                  "\"}";
     }
   }
   manifest += "\n  ],\n  \"sets\": [\n";
@@ -951,14 +952,14 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
                      printable(dir).c_str(), files.size(), bytes);
         if (!firstSet) manifest += ",\n";
         firstSet = false;
-        manifest += R"(    {"language": ")" + std::string(language.name) +
-                    R"(", "languageId": ")" + language.languageId +
-                    R"(", "extension": ")" + language.extension +
+        manifest += R"(    {"language": ")" + json_escape(language.name) +
+                    R"(", "languageId": ")" + json_escape(language.languageId) +
+                    R"(", "extension": ")" + json_escape(language.extension) +
                     R"(", "shape": ")" + shape_name(shape) + R"(", "refs": ")" +
                     refs_name(language.multiRefs) + R"(", "files": )" +
                     std::to_string(files.size()) +
                     ", \"bytes\": " + std::to_string(bytes) + R"(, "dir": ")" +
-                    multi_set_dir(language, shape) + "\"}";
+                    json_escape(multi_set_dir(language, shape)) + "\"}";
       }
     }
   }

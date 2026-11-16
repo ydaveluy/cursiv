@@ -61,8 +61,12 @@ void the_grammar_is_reachable_without_the_template() {
   const cursiv::ParseResult r = service().parse("datatype String\n");
   CHECK(static_cast<bool>(r));
   const cursiv::Cst& cst = r.cst();
-  CHECK(g.recordRule(cst[cst.entryRoot()]).empty() ||
-        !g.recordRule(cst[cst.entryRoot()]).empty());
+  // The root converts nothing; the name's leaf converts its terminal.
+  CHECK(g.recordRule(cst[cst.entryRoot()]).empty());
+  bool named = false;
+  for (cursiv::NodeId id = 0; id < cst.size(); ++id)
+    named = named || g.recordRule(cst[id]) == "ID";
+  CHECK(named);
   // A terminal is spelled or it is named, never both and never neither.
   CHECK(!g.terminalSpellings(1).empty() || !g.terminalName(1).empty());
 }
@@ -631,6 +635,17 @@ void a_keyword_anchor_reads_the_parsed_spelling(const Engine& e) {
   CHECK(sigil && sigil->begin == 0 && sigil->end == 1);
 }
 
+// A caret behind a token stands in a word when the parsed spelling ends in
+// one: an escape that spells `;` is punctuation, one that spells `o` a letter.
+void a_word_is_read_in_the_parsed_spelling(const Engine& e) {
+  const std::string punctuation = "class A\\u003b";
+  const auto p = e.unicode->parse(punctuation);
+  CHECK(!cursiv::detail::word_at(p.cst(), TextOffset(punctuation.size())));
+  const std::string letter = "class f\\u006f";
+  const auto l = e.unicode->parse(letter);
+  CHECK(cursiv::detail::word_at(l.cst(), TextOffset(letter.size())));
+}
+
 void line_splices_join_tokens_and_comments(const Engine& e) {
   const auto keyword = check_against_decoded(e, *e.splices, line_splices,
                                              "cla\\\nss A;");
@@ -731,6 +746,7 @@ void run_engine(const Engine& e) {
   completion_refuses_a_caret_inside_an_escape(e);
   a_name_span_maps_back_to_the_document(e);
   a_keyword_anchor_reads_the_parsed_spelling(e);
+  a_word_is_read_in_the_parsed_spelling(e);
   line_splices_join_tokens_and_comments(e);
   a_piece_spelling_several_tokens_completes_as_decoded(e);
   an_inserted_keyword_keeps_the_spans_around_it(e);

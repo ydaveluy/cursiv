@@ -834,6 +834,12 @@ void run() {
             R"({"repository": {"keywords": {"match": "a", "match": "b"}}})",
             "c") ==
         R"({"repository": {"keywords": {"match": "a", "match": "c"}}})");
+  // A key is its decoded name, however its escapes spell it.
+  CHECK(with_keyword_match(
+            R"({"repo\u0073itory": {"keywords": {"match": "a"}}})", "c") ==
+        R"({"repo\u0073itory": {"keywords": {"match": "c"}}})");
+  CHECK(!with_keyword_match(R"({"\repository": {"keywords": {"match": "a"}}})",
+                            "c"));
   // Nothing where no string is at that place, a later key on the path hiding
   // the earlier one, or where brackets do not match.
   for (const std::string_view json :

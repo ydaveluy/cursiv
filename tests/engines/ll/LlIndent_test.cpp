@@ -190,7 +190,8 @@ void a_dropped_indent_leaves_the_name_it_splits(const cursiv::Parser& p) {
 // the blank it represents: no dedent is read there, and none is dropped.
 void muted_levels_add_no_dedent_at_the_end() {
   const auto ll = tllindent::generated::Ll::create_parser();
-  for (const std::string_view text : {"a\n  b", "a\n  b\n", "a:\n    b\n  c"}) {
+  for (const std::string_view text :
+       {"a\n  b", "a\n  b\n", "a:\n    b\nc\n  d"}) {
     const auto result = ll->parse(text);
     const auto& cst = result.cst();
     for (cursiv::NodeId i = 0; i < cst.size(); ++i)
@@ -212,6 +213,7 @@ void an_indentation_error_says_so() {
          {std::pair<std::string_view, std::string_view>{
               "a\n  b\nc\n", "Unexpected indentation."},
           {"a:\n    b\n  c\n", "Unexpected indentation."},
+          {"a:\n  b:\n      c\n    d\n", "Unexpected indentation."},
           {"a:\n\tb\n    c\n", mixed},
           {"a:\n    b\n\t\tc\n", mixed},
           {"a:\n\t\n  b\n   c\n", "Unexpected indentation."},
@@ -559,6 +561,13 @@ void closes(const Parser& parser, std::string_view text, std::size_t levels) {
         levels);
 }
 
+// A line shallower than the open level and equal to no outer one is an
+// indentation error, even where the grammar reads a dedent then an indent.
+template <class Parser>
+void lands_on_no_level(const Parser& parser, std::string_view text) {
+  CHECK(parser->parse(text).diagnostics.size() == 1);
+}
+
 // A dropped dedent closes a level and owns no byte: the text past it is still
 // dropped, whether the entry stops at `eof` or before the text does.
 template <class Parser>
@@ -694,6 +703,9 @@ int main() {
   const auto flatLl = dedent::FlatLl::create_parser();
   for (const auto text : {"a:\n  b:\n    c", "a:\n  b:\n    c\n"})
     closes(flatLl, text, 2);
+  closes(flatLl, "a\n  b\n      c\n  d\ne", 2);
+  for (const auto text : {"    a\n  b\n", "a\n  b\n      c\n    d\n"})
+    lands_on_no_level(flatLl, text);
   brackets_are_terminals_read(cursiv::engine::LlLowering<tdelim::Ll>::lower());
   brackets_are_terminals_read(cursiv::engine::LrLowering<tdelim::Lr>::lower());
   auto delim = std::pair{tdelim::generated::Ll::create_parser(),

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // A request is answered after the notifications sent before it: a request
 // right behind a `didChange` sees the changed document.
-import { startSession } from './session-client.mjs';
+import path from 'node:path';
+import { fileUri, startSession } from './session-client.mjs';
 
 const [serverPath, folder] = process.argv.slice(2);
 if (!serverPath || !folder) {
@@ -11,13 +12,13 @@ if (!serverPath || !folder) {
 
 const { send, waitFor, request, end: serverEnd } = startSession(serverPath);
 
-const uri = `file://${folder}/order.dmodel`;
+const uri = fileUri(path.join(folder, 'order.dmodel'));
 
 let failed = false;
 try {
   await request({ method: 'initialize', params: {
     processId: process.pid, rootUri: null, capabilities: {},
-    workspaceFolders: [{ uri: `file://${folder}`, name: 'workspace' }] } }, 'initialize');
+    workspaceFolders: [{ uri: fileUri(folder), name: 'workspace' }] } }, 'initialize');
   send({ method: 'initialized', params: {} });
 
   send({ method: 'textDocument/didOpen', params: { textDocument: {

@@ -2,6 +2,7 @@
 // another run -- written in place, or reached through a rule or a choice.
 #pragma once
 
+#include <compare>
 #include <string>
 #include <vector>
 
@@ -14,7 +15,7 @@ struct NestedRunWarning {
   // The outer repetition, as the dump spells it.
   std::string run;
 
-  bool operator==(const NestedRunWarning&) const = default;
+  auto operator<=>(const NestedRunWarning&) const = default;
 };
 
 // Each repetition once per rule, in the order the rules were reached.

@@ -31,6 +31,22 @@ foreach(_rel IN ITEMS CMakePresets.json cmake/wasi.cmake cmake/wasi-platform.cma
       "_cursiv_new_emit([==[${_rel}]==] [==[${_content}]==])\n")
 endforeach()
 
+# Every word the project's C++ spells outside comments and strings: NAME, the
+# grammar class, must be none of them.
+set(_words "")
+foreach(_rel IN LISTS _files)
+  if(_rel MATCHES "\\.(hpp|cpp)$")
+    file(READ "${_tpl_dir}/${_rel}" _content)
+    string(REGEX REPLACE "//[^\n]*" "" _content "${_content}")
+    string(REGEX REPLACE "\"([^\"\\\\]|\\\\.)*\"" "" _content "${_content}")
+    string(REGEX MATCHALL "[A-Za-z_][A-Za-z0-9_]*" _found "${_content}")
+    list(APPEND _words ${_found})
+  endif()
+endforeach()
+list(REMOVE_DUPLICATES _words)
+list(SORT _words)
+string(JOIN " " CURSIV_USED_WORDS ${_words})
+
 file(READ "${CMAKE_CURRENT_LIST_DIR}/cursiv-new.cmake.in" _head)
 string(CONFIGURE "${_head}" _head @ONLY)
 set(_banner

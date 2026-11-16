@@ -1088,16 +1088,17 @@ bool on_small_stack(void (*body)()) {
   pthread_attr_init(&attr);
   pthread_attr_setstacksize(&attr, std::size_t{1} << 18);
   pthread_t thread;
-  CHECK(pthread_create(
-            &thread, &attr,
-            [](void* at) -> void* {
-              auto* r = static_cast<Run*>(at);
-              r->body();
-              r->ran = true;
-              return nullptr;
-            },
-            &run) == 0);
-  pthread_join(thread, nullptr);
+  const bool created = pthread_create(
+                           &thread, &attr,
+                           [](void* at) -> void* {
+                             auto* r = static_cast<Run*>(at);
+                             r->body();
+                             r->ran = true;
+                             return nullptr;
+                           },
+                           &run) == 0;
+  CHECK(created);
+  if (created) pthread_join(thread, nullptr);
   pthread_attr_destroy(&attr);
   return run.ran;
 #else
@@ -1118,6 +1119,65 @@ void many_keywords_spell_on_a_small_stack() {
     g.body(root, g.member("v", g.call(g.terminal("KW", g.alt(words)))));
     g.entry = root;
     (void)ll_work(g);
+  }));
+}
+
+// A choice of words spells each of them once, in the order written.
+void a_choice_of_words_lists_each_once() {
+  RuntimeGrammar g;
+  auto* root = g.node("Root");
+  g.body(root,
+         g.member("v", g.call(g.terminal(
+                           "KW", g.alt({g.word("b"), g.word("a"), g.word("b"),
+                                        g.word("c"), g.word("a")})))));
+  g.entry = root;
+  const auto low = g.lowered<LlLowered>(ll_lower);
+  std::vector<std::vector<std::string_view>> lists;
+  for (const auto& term : low.cfg.termBuild.v)
+    if (!term.words.empty()) lists.push_back(term.words);
+  CHECK((lists == std::vector<std::vector<std::string_view>>{{"b", "a", "c"}}));
+}
+
+// Terminals forty deep, each calling the one before it twice, the last one a
+// token: each is resolved once, so the lexer's size refusal comes at once, not
+// after 2^40 steps.
+void a_terminal_called_twice_is_resolved_once() {
+  RuntimeGrammar g;
+  auto* t = g.terminal("T", g.token("x"));
+  for (unsigned i = 1; i < 40; ++i)
+    t = g.terminal(spelled("T", i), g.seq({g.call(t), g.call(t)}));
+  g.terms.erase(g.terms.begin() + 1, g.terms.end() - 1);
+  auto* root = g.node("Root");
+  g.body(root, g.member("v", g.call(t)));
+  g.entry = root;
+  LowerFail why = LowerFail::none;
+  try {
+    why = ll_build_program(g.lowered<LlLowered>(ll_lower)).cfg.lowerWhy;
+  } catch (const LowerRefused& refused) {
+    why = refused.why;
+  }
+  CHECK(why == LowerFail::tokenGraphTooLarge);
+}
+
+// A word refused five thousand bytes long inside a terminal, before as many
+// bytes: spelling its refusal keeps off the native stack.
+void a_long_refused_word_generates_on_a_small_stack() {
+  CHECK(on_small_stack([] {
+    using cursiv::detail::ImageKind;
+    RuntimeGrammar g;
+    auto* guarded = g.terminal(
+        "GUARDED",
+        g.seq({g.token("^"),
+               g.group(ImageKind::notOf, {g.token(std::string(5000, 'a'))}),
+               g.repeat(5000, 5000, g.put({.kind = ImageKind::byte}))}));
+    auto* root = g.node("Root");
+    g.body(root, g.member("v", g.call(guarded)));
+    g.entry = root;
+    try {
+      (void)ll_build_program(g.lowered<LlLowered>(ll_lower));
+    } catch (const LowerRefused&) {
+      // A refusal is an answer: the stack held.
+    }
   }));
 }
 
@@ -1374,6 +1434,9 @@ void a_table_compares_its_levels() {
 int main() {
   a_table_compares_its_levels();
   many_keywords_spell_on_a_small_stack();
+  a_choice_of_words_lists_each_once();
+  a_terminal_called_twice_is_resolved_once();
+  a_long_refused_word_generates_on_a_small_stack();
   trivia_past_an_uncut_keyword_is_refused();
   deep_nesting_generates_on_a_small_stack();
   rule_chain_generates_on_a_small_stack();

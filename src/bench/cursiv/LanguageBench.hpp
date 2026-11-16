@@ -541,12 +541,15 @@ void ws_stages(
                                    DocumentState::ComputedScopes);
         best[kLink] = clock.span(DocumentState::ComputedScopes,
                                  DocumentState::IndexedReferences);
-        // A language with no check and nothing to publish has no validation
-        // to time -- see `kValidateAbsentWhy`.
+        // A language with no check, document hooks included, and nothing to
+        // publish has no validation to time -- see `kValidateAbsentWhy`.
         const ValidationRegistry* registry = core.validationRegistry.get();
-        validated = core.documentValidator != nullptr &&
-                    ((registry != nullptr && registry->checkCount() != 0) ||
-                     !d.diagnostics.empty());
+        validated =
+            core.documentValidator != nullptr &&
+            ((registry != nullptr && (registry->checkCount() != 0 ||
+                                      !registry->checksBefore().empty() ||
+                                      !registry->checksAfter().empty())) ||
+             !d.diagnostics.empty());
         best[kValidate] = clock.span(DocumentState::IndexedReferences,
                                      DocumentState::Validated);
         break;
@@ -648,9 +651,12 @@ void multi_stages(
         clock.start();
         builder.build(all);
         shared.documentBuilder->removeBuildPhaseListener(clock);
-        for (const Document* d : all)
+        for (const Document* d : all) {
           if (d->state.load() != DocumentState::Validated)
             refused(languageId, "left below Validated by the builder");
+          if (d->parseRecovered())
+            refused(languageId, "refused by the parser inside the workspace");
+        }
         if (!clock.reached(DocumentState::Validated))
           refused(languageId, "the build drained no Validated phase");
         if (const double total = clock.span(DocumentState::Validated);

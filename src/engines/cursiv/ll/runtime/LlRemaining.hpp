@@ -161,7 +161,10 @@ class LlRemaining {
   void begin(const LlSimulation& sim, std::vector<std::uint16_t>& out,
              From&& from, std::size_t most = SIZE_MAX) const {
     thread_local RoundMarks seen;
+    thread_local RoundMarks listed;
     seen.next();
+    listed.next();
+    for (const std::uint16_t label : out) (void)listed.first(label);
     struct Frame {
       std::uint32_t state, next = 0;
     };
@@ -184,7 +187,7 @@ class LlRemaining {
       if (e.kind == LlEdgeKind::atom) {
         if (e.label != kEofSymbol &&
             T.terms[e.label].synthetic != kSyntheticImplied &&
-            std::ranges::find(out, e.label) == out.end()) {
+            listed.first(e.label)) {
           out.push_back(e.label);
           if (out.size() == most) return;
         }

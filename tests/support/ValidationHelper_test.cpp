@@ -6,6 +6,7 @@
 #include <lsp/types.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -14,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "cursiv/Check.hpp"
@@ -41,6 +43,8 @@
 #include "cursiv/TextPredicate.hpp"
 #include "cursiv/VirtualFileSystemProvider.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
+#include "cursiv/navigation/DefinitionProvider.hpp"
+#include "cursiv/navigation/RenameProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
@@ -49,6 +53,8 @@
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/FileSystemProvider.hpp"
 #include "support/Throws.hpp"
+#include "support/WorkspaceModule.hpp"
+#include "support/World.hpp"
 #include "workspace/lsp/LspModule.hpp"
 #include "workspace/lsp/LspServices.hpp"
 
@@ -112,6 +118,15 @@ void the_markers_become_offsets() {
   CHECK(inside.indices.size() == 1 && inside.indices[0] == 3);
   CHECK(inside.ranges.size() == 1);
   CHECK(inside.ranges[0].first == 1 && inside.ranges[0].second == 3);
+
+  // Each marker is looked for past the last one, once: a text of many ranges
+  // and no caret costs its length, not its length at every range.
+  std::string many;
+  for (unsigned i = 0; i < 100000; ++i) many += "<|x|>";
+  const auto begin = std::chrono::steady_clock::now();
+  const ct::ReplacedIndices ranges = ct::replaceIndices({.text = many});
+  CHECK(ranges.ranges.size() == 100000 && ranges.indices.empty());
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
 
   // The markers are the caller's: a text that spells `<|>` needs other ones.
   const ct::ReplacedIndices custom =
@@ -229,6 +244,22 @@ void a_parsed_document_joins_and_leaves_the_workspace() {
 
   ct::clearDocuments(world.language);
   CHECK(world.shared.documents->all().empty());
+}
+
+// A helper-built document is the given language's, though a later one claims
+// its extension; an extension written without its dot still names the file.
+void a_parsed_document_is_the_given_languages() {
+  World world;
+  cursiv::CoreServices& other = support::add_language<cursiv::CoreServices>(
+      world.shared, {"other", {"ws"}, {}}, support::create_workspace_parser(),
+      support::create_workspace_reflection());
+  const std::shared_ptr<cursiv::Document> mine =
+      ct::parseHelper(world.language, "datatype Int\n");
+  CHECK(mine->language == &world.language);
+  const std::shared_ptr<cursiv::Document> theirs =
+      ct::parseHelper(other, "datatype Int\n");
+  CHECK(theirs->language == &other && theirs->uri.ends_with(".ws"));
+  ct::clearDocuments(world.language);
 }
 
 void the_request_envelopes_carry_the_document() {
@@ -376,6 +407,28 @@ void the_caret_reaches_its_declaration() {
                                          .disposeAfterCheck = true};
   CHECK(passes([&] { (void)ct::expectGoToDefinition(world.language, input); }));
   CHECK(world.shared.documents->all().empty());
+
+  // The same span in another document is not the declaration.
+  struct Elsewhere final : cursiv::DefinitionProvider {
+    const cursiv::DefinitionProvider& inner;
+    explicit Elsewhere(const cursiv::DefinitionProvider& provider)
+        : inner(provider) {}
+    [[nodiscard]] std::optional<std::vector<lsp::LocationLink>> getDefinition(
+        const cursiv::Document& document, lsp::Position position,
+        const cursiv::CancellationToken& cancel) const override {
+      auto links = inner.getDefinition(document, position, cancel);
+      if (links.has_value())
+        for (lsp::LocationLink& link : *links)
+          link.targetUri = lsp::Uri::parse("file:///elsewhere.ws");
+      return links;
+    }
+  };
+  const std::unique_ptr<const cursiv::DefinitionProvider> language =
+      std::move(world.language.definitionProvider);
+  world.language.definitionProvider = std::make_unique<Elsewhere>(*language);
+  CHECK(
+      !passes([&] { (void)ct::expectGoToDefinition(world.language, input); }));
+  CHECK(world.shared.documents->all().empty());
 }
 
 void every_written_name_is_found() {
@@ -434,6 +487,22 @@ void the_outline_names_what_the_document_declares() {
         ct::ExpectedSymbolsList{.text = std::string(kModel),
                                 .expectedSymbols = {"String", "Person"},
                                 .disposeAfterCheck = true});
+  }));
+
+  // Markers are taken out before the parse, and one left unpaired fails.
+  CHECK(passes([&] {
+    (void)ct::expectSymbols(
+        world.language,
+        ct::ExpectedSymbolsList{
+            .text = "datatype <|String|>\nentity <|>Person {\n}\n",
+            .expectedSymbols = {"String", "Person"},
+            .disposeAfterCheck = true});
+  }));
+  CHECK(!passes([&] {
+    (void)ct::expectSymbols(
+        world.language, ct::ExpectedSymbolsList{.text = "datatype <|String\n",
+                                                .expectedSymbols = {"String"},
+                                                .disposeAfterCheck = true});
   }));
 
   // ...and a list that is wrong is refused rather than tolerated, even where
@@ -728,6 +797,78 @@ void a_repair_is_judged_on_its_own_document() {
   }
 }
 
+// `edit` as a client that reads versioned edits receives it.
+void as_document_changes(lsp::WorkspaceEdit& edit) {
+  if (!edit.changes.has_value()) return;
+  std::vector<std::variant<lsp::TextDocumentEdit, lsp::CreateFile,
+                           lsp::RenameFile, lsp::DeleteFile>>
+      moved;
+  for (auto& [uri, rows] : *edit.changes) {
+    lsp::TextDocumentEdit one;
+    one.textDocument.uri = uri;
+    for (lsp::TextEdit& row : rows) one.edits.emplace_back(std::move(row));
+    moved.emplace_back(std::move(one));
+  }
+  edit.changes.reset();
+  edit.documentChanges = std::move(moved);
+}
+
+// A provider may file its edits as `documentChanges`: the checks read them.
+void an_edit_filed_as_document_changes_is_read() {
+  struct Actions final : cursiv::CodeActionProvider {
+    const cursiv::CodeActionProvider& inner;
+    explicit Actions(const cursiv::CodeActionProvider& provider)
+        : inner(provider) {}
+    [[nodiscard]] std::vector<lsp::CodeAction> getCodeActions(
+        const cursiv::Document& document, const lsp::CodeActionParams& params,
+        const cursiv::CancellationToken& cancel) const override {
+      std::vector<lsp::CodeAction> actions =
+          inner.getCodeActions(document, params, cancel);
+      for (lsp::CodeAction& action : actions)
+        if (action.edit.has_value()) as_document_changes(*action.edit);
+      return actions;
+    }
+  };
+  struct Rename final : cursiv::RenameProvider {
+    const cursiv::RenameProvider& inner;
+    explicit Rename(const cursiv::RenameProvider& provider) : inner(provider) {}
+    [[nodiscard]] std::optional<lsp::Range> prepareRename(
+        const cursiv::Document& document, lsp::Position position,
+        const cursiv::CancellationToken& cancel) const override {
+      return inner.prepareRename(document, position, cancel);
+    }
+    [[nodiscard]] std::optional<lsp::WorkspaceEdit> rename(
+        const cursiv::Document& document, lsp::Position position,
+        std::string_view newName,
+        const cursiv::CancellationToken& cancel) const override {
+      auto edit = inner.rename(document, position, newName, cancel);
+      if (edit.has_value()) as_document_changes(*edit);
+      return edit;
+    }
+  };
+  World world;
+  const std::unique_ptr<const cursiv::CodeActionProvider> actions =
+      std::move(world.language.codeActionProvider);
+  world.language.codeActionProvider = std::make_unique<Actions>(*actions);
+  const std::unique_ptr<const cursiv::RenameProvider> rename =
+      std::move(world.language.renameProvider);
+  world.language.renameProvider = std::make_unique<Rename>(*rename);
+  CHECK(passes([&] {
+    ct::CodeActionResult result = ct::testCodeAction(
+        world.language, "datatype String\nentity A { x  String }\n",
+        "parse-repaired", "datatype String\nentity A { x:  String }\n");
+    result.dispose();
+  }));
+  CHECK(passes([&] {
+    (void)ct::expectRename(world.language, {.text = "datatype <|S<|>tring|>\n"
+                                                    "entity Person {\n"
+                                                    "  name: <|String|>\n"
+                                                    "}\n",
+                                            .newName = "Text",
+                                            .disposeAfterCheck = true});
+  }));
+}
+
 void the_virtual_file_system_answers_like_a_disk() {
   ct::VirtualFileSystemProvider files;
   files.insert("file:///w/a.ws", "datatype String\n");
@@ -795,6 +936,7 @@ void a_disposable_runs_once() {
 int main() {
   the_markers_become_offsets();
   a_parsed_document_joins_and_leaves_the_workspace();
+  a_parsed_document_is_the_given_languages();
   the_request_envelopes_carry_the_document();
   the_findings_are_filtered_by_what_the_check_names();
   a_clean_document_answers_no_issue();
@@ -812,6 +954,7 @@ int main() {
   the_workspace_query_reads_the_index();
   a_repair_is_offered_and_really_fixes();
   a_repair_is_judged_on_its_own_document();
+  an_edit_filed_as_document_changes_is_read();
   a_failed_check_leaves_no_document();
   the_virtual_file_system_answers_like_a_disk();
   an_installed_hook_receives_the_verdict();

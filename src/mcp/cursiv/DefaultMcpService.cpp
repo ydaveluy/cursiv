@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -87,13 +88,14 @@ void append_location(std::string& out, const Document& document,
   append_tool_position(out, document, document.parseResult.cst()[record].begin);
 }
 
-void append_diagnostics(std::string& out, const Document& document) {
+void append_diagnostics(std::string& out, const Document& document,
+                        const CancellationToken& token) {
   std::vector<const Diagnostic*> all;
   all.reserve(document.diagnostics.size());
   for (const Diagnostic& diagnostic : document.diagnostics)
     all.push_back(&diagnostic);
   const std::vector<JsonValue::Array> spelled =
-      detail::spelling_actions(document, all);
+      detail::spelling_actions(document, all, token);
   for (std::size_t i = 0; i < all.size(); ++i) {
     const Diagnostic& diagnostic = *all[i];
     out += '[';
@@ -478,7 +480,7 @@ void DefaultMcpService::registerDiagnosticsTool(McpServer& server) const {
                       continue;
                     out += document->uri;
                     out += '\n';
-                    append_diagnostics(out, *document);
+                    append_diagnostics(out, *document, token);
                   }
                 }))
           return std::move(*unread);
@@ -589,7 +591,7 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
                     return;
                   }
                   std::string out;
-                  append_diagnostics(out, *document);
+                  append_diagnostics(out, *document, either);
                   result = {out.empty() ? "No diagnostics: the text is valid."
                                         : std::move(out)};
                 },
@@ -1042,17 +1044,18 @@ namespace {
 // replace, empty for a bare insertion.
 std::vector<NextFeature> features_at(const Document& document,
                                      const Parser& parser, TextOffset offset,
-                                     CstLeaf& word) {
+                                     CstLeaf& word,
+                                     const CancellationToken& token) {
   const Cst& cst = document.parseResult.cst();
   std::vector<NextFeature> nexts;
   word = detail::word_at(cst, offset);
   if (word) {
-    parser.nextFeaturesAt(cst, word.begin, word.end, nexts);
+    parser.nextFeaturesAt(cst, word.begin, word.end, nexts, token);
     if (!nexts.empty() || offset != word.end || offset == word.begin)
       return nexts;
     word = {};
   }
-  parser.nextFeaturesAt(cst, offset, offset, nexts);
+  parser.nextFeaturesAt(cst, offset, offset, nexts, token);
   return nexts;
 }
 
@@ -1080,9 +1083,10 @@ void DefaultMcpService::registerExpectedAtTool(McpServer& server) const {
               const TextOffset offset = document.textDocument().offsetAt(
                   Position{at.line, at.column});
               std::vector<std::string> lines;
+              std::unordered_set<std::string> seen;
               CstLeaf word;
-              for (const NextFeature& next :
-                   features_at(document, *language.parser, offset, word)) {
+              for (const NextFeature& next : features_at(
+                       document, *language.parser, offset, word, token)) {
                 throw_if_cancelled(token);
                 // A keyword by its text, a terminal that reads a choice of
                 // words by each of them, any other terminal by its name.
@@ -1110,7 +1114,7 @@ void DefaultMcpService::registerExpectedAtTool(McpServer& server) const {
                 }
                 for (std::string& line : heads) {
                   line += tail;
-                  if (std::ranges::find(lines, line) == lines.end())
+                  if (seen.insert(line).second)
                     lines.push_back(std::move(line));
                 }
               }
@@ -1152,14 +1156,11 @@ void DefaultMcpService::registerScopeCandidatesTool(McpServer& server) const {
               const Cst& cst = document.parseResult.cst();
               CstLeaf word;
               const std::vector<NextFeature> features =
-                  features_at(document, *language.parser, offset, word);
+                  features_at(document, *language.parser, offset, word, token);
               // From the word's own node when the caret is in a word, as
-              // completion reads; else from the node before the caret, or the
-              // root when none precedes it.
-              AstNode* container =
+              // completion reads; else from the node before the caret.
+              AstNode* const container =
                   word ? owner_of_leaf(cst, word.id) : owner_at(cst, offset);
-              if (container == nullptr) container = document.parseResult.value;
-              if (container == nullptr) return;
               // One list per reference member, in the order the grammar names
               // them: every site the position admits is read, and the sites
               // of one member add up their offers, as a completion's do.

@@ -15,6 +15,7 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/CstNodeView.hpp"
 #include "cursiv/syntax-tree/OwnedNodes.hpp"
+#include "cursiv/syntax-tree/SourceTranslation.hpp"
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/text/word_scalar.hpp"
 #include "cursiv/utils/CaseFold.hpp"
@@ -247,24 +248,24 @@ CstLeaf find_leaf_before_offset(const Cst& cst, TextOffset offset) {
 
 namespace {
 
-// A leaf ending in anything but a word's scalar is complete, and a caret
+// A spelling ending in anything but a word's scalar is complete, and a caret
 // behind it asks what follows.
-bool ends_a_word(std::string_view text, const CstLeaf& leaf) {
-  TextOffset last = leaf.end - 1;
-  while (last > leaf.begin &&
-         (static_cast<unsigned char>(text[last]) & 0xC0u) == 0x80u)
+bool ends_a_word(std::string_view spelled) {
+  if (spelled.empty()) return false;
+  std::size_t last = spelled.size() - 1;
+  while (last > 0 &&
+         (static_cast<unsigned char>(spelled[last]) & 0xC0u) == 0x80u)
     --last;
   std::size_t len = 0;
   return detail::word_scalar(
-      scalar_at(text.data() + last, text.size() - last, len));
+      scalar_at(spelled.data() + last, spelled.size() - last, len));
 }
 
 }  // namespace
 
 CstLeaf detail::word_at(const Cst& cst, TextOffset offset) {
-  const std::string_view text = cst.text();
   const auto word = [&](const CstLeaf& leaf) {
-    return !leaf.hidden && leaf.end > leaf.begin && ends_a_word(text, leaf);
+    return !leaf.hidden && ends_a_word(read_text(cst, leaf.begin, leaf.end));
   };
   const NodeId after = cst.leafAfter(offset);
   // Every leaf ending at the caret comes just before the first one ending past
@@ -282,6 +283,16 @@ CstLeaf detail::word_at(const Cst& cst, TextOffset offset) {
     if (const CstLeaf at = cst.asLeaf(after); at.begin <= offset && word(at))
       return at;
   return {};
+}
+
+std::string_view detail::read_text(const Cst& cst, TextOffset begin,
+                                   TextOffset end) {
+  const SourceTranslation* const translation = cst.translation();
+  if (translation == nullptr) return cst.text().substr(begin, end - begin);
+  const std::optional<TextOffset> from = translation->translated(begin);
+  const std::optional<TextOffset> to = translation->translated(end);
+  if (!from || !to || *to < *from) return {};
+  return translation->text().substr(*from, *to - *from);
 }
 
 std::vector<NodeId> interior_nodes(const Cst& cst, NodeId open, NodeId close) {

@@ -2,11 +2,13 @@
 
 #include <lsp/types.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <ranges>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -66,10 +68,34 @@ struct TokenSpan {
   return {begin, end};
 }
 
+// The children of each record a request reaches, in document order, listed
+// once however many carets step through it.
+class Children {
+ public:
+  explicit Children(const Cst& cst) : _cst(cst) {}
+
+  std::span<const NodeId> of(NodeId id, const CancellationToken& token) {
+    const auto [at, fresh] = _of.try_emplace(id);
+    if (fresh) {
+      for (const NodeId child : _cst.reverseChildren(id)) {
+        throw_if_cancelled(token);
+        at->second.push_back(child);
+      }
+      std::ranges::reverse(at->second);
+    }
+    return at->second;
+  }
+
+ private:
+  const Cst& _cst;
+  std::unordered_map<NodeId, std::vector<NodeId>> _of;
+};
+
 // The chain, outermost first, hidden records excluded -- a comment is not
 // a step of any selection. Roots are walked backwards via `subtreeBegin`;
 // empty when no visible record covers the offset.
-[[nodiscard]] std::vector<NodeId> chain_at(const Cst& cst, TextOffset offset,
+[[nodiscard]] std::vector<NodeId> chain_at(const Cst& cst, Children& children,
+                                           TextOffset offset,
                                            const CancellationToken& token) {
   std::vector<NodeId> chain;
   NodeId found = kNoNode;
@@ -86,15 +112,16 @@ struct TokenSpan {
   }
   while (found != kNoNode) {
     chain.push_back(found);
-    NodeId next = kNoNode;
-    for (const NodeId child : cst.reverseChildren(found)) {
-      throw_if_cancelled(token);
-      if (cst[child].hidden == 0 && covers(cst[child], offset)) {
-        next = child;
-        break;
-      }
-    }
-    found = next;
+    // Siblings never overlap: only the last one starting at or before the
+    // offset can cover it.
+    const std::span<const NodeId> under = children.of(found, token);
+    const auto after = std::ranges::upper_bound(
+        under, offset, {}, [&](NodeId child) { return cst[child].begin; });
+    found = kNoNode;
+    if (after != under.begin())
+      if (const NodeId child = *(after - 1);
+          cst[child].hidden == 0 && covers(cst[child], offset))
+        found = child;
   }
   return chain;
 }
@@ -110,15 +137,17 @@ DefaultSelectionRangeProvider::getSelectionRanges(
   const Cst& cst = document.parseResult.cst();
 
   answer.reserve(positions.size());
+  Children children(cst);
   for (const lsp::Position& position : positions) {
     throw_if_cancelled(token);
     const TextOffset offset =
         document.textDocument().offsetAt(from_lsp(position));
-    std::vector<NodeId> chain = chain_at(cst, offset, token);
+    std::vector<NodeId> chain = chain_at(cst, children, offset, token);
     // A caret one past the last character is still on the word: a CST span
     // is half-open, so a double-click or word-wise motion often falls one
     // past the name. One retry, only when nothing covered the offset.
-    if (chain.empty() && offset > 0) chain = chain_at(cst, offset - 1, token);
+    if (chain.empty() && offset > 0)
+      chain = chain_at(cst, children, offset - 1, token);
 
     // Innermost first: the word seeds the chain, then each record must
     // contain what it grows, since the protocol requires every step's

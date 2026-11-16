@@ -1,8 +1,9 @@
 #include "cursiv/documentation/DefaultCommentProvider.hpp"
 
 #include <algorithm>
-#include <numeric>
 #include <cstddef>
+#include <cstdint>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <string>
@@ -14,7 +15,9 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/text/Position.hpp"
 #include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
 
 namespace cursiv {
 
@@ -64,12 +67,11 @@ DocComment parse_doc_comment(const Document& document, NodeId comment,
   const TextOffset begin = cst[comment].begin;
   // The text document gives the line, but its columns count code units and a
   // comment's count bytes: measure the column from the line start.
-  const std::size_t lastBreak = cst.text().substr(0, begin).find_last_of("\r\n");
-  const std::size_t lineStart =
-      lastBreak == std::string_view::npos ? 0 : lastBreak + 1;
+  const TextDocument& text = document.textDocument();
+  const std::uint32_t line = text.positionAt(begin).line;
+  const TextOffset lineStart = text.offsetAt(Position{line, 0});
   const DocCommentPosition start{
-      document.textDocument().positionAt(begin).line,
-      static_cast<std::uint32_t>(begin - lineStart), begin};
+      line, static_cast<std::uint32_t>(begin - lineStart), begin};
   return parse_doc_comment(cst.text(comment), start, options);
 }
 

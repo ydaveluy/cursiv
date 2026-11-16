@@ -2592,6 +2592,31 @@ void a_message_on_the_wire_is_well_formed() {
   }
 }
 
+// A handler may settle its options from the client's capabilities: what the
+// handshake announces is what the session answers.
+void file_operations_announced_at_the_handshake_are_routed() {
+  struct Files final : cursiv::FileOperationHandler {
+    lsp::FileOperationOptions options;
+    [[nodiscard]] const lsp::FileOperationOptions& fileOperationOptions()
+        const noexcept override {
+      return options;
+    }
+  };
+  Files* files = nullptr;
+  Session s([&](Server& server) {
+    auto held = std::make_unique<Files>();
+    files = held.get();
+    server.shared.fileOperationHandler = std::move(held);
+    server.onInitialize([&](const lsp::InitializeParams&) {
+      files->options.willRename = lsp::FileOperationRegistrationOptions{};
+    });
+  });
+  s.initialize();
+  s.request(2, "workspace/willRenameFiles", R"({"files":[]})");
+  const auto reply = s.answer().get();
+  CHECK(!reply.error.has_value());
+}
+
 // Methods the protocol does not define reach the language like standard ones:
 // refused or dropped outside the session, including after a failed
 // `initialize`, and given the value the client sent.
@@ -3382,6 +3407,7 @@ void run() {
   a_retried_initialize_keeps_only_its_own_shapes();
   an_answer_computing_as_the_stream_dies_reads_a_live_session();
   a_message_on_the_wire_is_well_formed();
+  file_operations_announced_at_the_handshake_are_routed();
   shutdown_obeys_the_handshake();
   answers_take_the_shapes_the_client_reads();
   cancellation_does_not_wait_for_an_earlier_notification();

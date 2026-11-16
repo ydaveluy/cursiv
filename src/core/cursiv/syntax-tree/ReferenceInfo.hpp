@@ -54,9 +54,9 @@ namespace detail {
                                         : reference.container->getDocument();
 }
 
-// The cross-reference `next` fills with `container` at the caret, as a
-// completion asks the scope. A node made for the occasion is owned by
-// `entered`, and the answer holds as long as it does.
+// The cross-reference `next` fills with `container` at the caret, the root
+// where no node stands there, as a completion asks the scope. A node made for
+// the occasion is owned by `entered`, and the answer holds as long as it does.
 [[nodiscard]] std::optional<ReferenceInfo> reference_at_caret(
     const AstReflection& reflection, const Document& document,
     AstNode* container, const NextFeature& next, AstNodePtr& entered);

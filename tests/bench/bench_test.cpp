@@ -8,6 +8,7 @@
 #include "cursiv/LanguageBench.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/Check.hpp"
+#include "cursiv/validation/DefaultValidationRegistry.hpp"
 #include "workspace/lsp/LspModule.hpp"
 
 using namespace cursiv::bench;
@@ -210,6 +211,29 @@ void a_parser_without_references_counts_none() {
   }
 }
 
+// A language whose validation is document hooks alone still has its validation
+// timed, though it reports nothing.
+void register_hooked_language(cursiv::SharedCoreServices& shared) {
+  auto services = ws::create_lsp_services(
+      dynamic_cast<ws::WorkspaceSharedServices&>(shared));
+  services->validationRegistry =
+      std::make_unique<cursiv::DefaultValidationRegistry>(*services);
+  services->validationRegistry->registerBeforeDocument(
+      [](const cursiv::Document&, cursiv::ValidationAcceptor&,
+         const cursiv::CancellationToken&) {});
+  shared.serviceRegistry->registerServices(std::move(services));
+}
+
+void document_hooks_are_a_validation() {
+  cursiv::bench::detail::Row row;
+  cursiv::bench::detail::ws_stages<ws::WorkspaceSharedServices>(
+      1, false, 0, "workspace", ".ws", "datatype Text", row,
+      register_hooked_language);
+  CHECK(row.diagnostics == 0);
+  CHECK(row.ms[cursiv::bench::detail::kValidate] !=
+        cursiv::bench::detail::kAbsent);
+}
+
 // A run that cannot go on returns its status for `main` to return: exiting
 // from inside would leave its services' workers running into the process
 // teardown, which Windows does not always survive.
@@ -233,6 +257,7 @@ int main() {
   keep_valid_repetition();
   every_sample_counts();
   a_parser_without_references_counts_none();
+  document_hooks_are_a_validation();
   a_failed_run_returns_its_status();
   return cursiv::test::report("bench_test");
 }

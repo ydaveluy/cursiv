@@ -13,8 +13,8 @@ class FileOperationHandler {
  public:
   virtual ~FileOperationHandler() noexcept = default;
 
-  // The options reported at the handshake. Asked once: routes are registered
-  // from them for the whole session.
+  // The options reported at the handshake, asked there once: they may be set
+  // from the client's capabilities in an `onInitialize` callback.
   [[nodiscard]] virtual const lsp::FileOperationOptions& fileOperationOptions()
       const noexcept = 0;
 

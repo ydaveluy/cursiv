@@ -2,6 +2,7 @@
 // word character: it also matches the start of a longer word.
 #pragma once
 
+#include <compare>
 #include <string>
 #include <vector>
 
@@ -15,7 +16,7 @@ struct WordLitWarning {
   std::string lit;
   std::string text;
 
-  bool operator==(const WordLitWarning&) const = default;
+  auto operator<=>(const WordLitWarning&) const = default;
 };
 
 // Each literal once per rule, in the order the rules were reached and, within

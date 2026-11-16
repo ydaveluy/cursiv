@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -71,10 +72,17 @@ class Reader {
 
  private:
   ImageNode at(ImageId id) const { return _im.nodes[id]; }
+  // Hashed as the equality compares, which still decides between the tokens
+  // of one hash.
   std::uint16_t token(const Token& t) {
-    const auto it = std::ranges::find(_tokens, t);
-    const auto i = static_cast<std::uint16_t>(it - _tokens.begin());
-    if (it == _tokens.end()) _tokens.push_back(t);
+    const std::uint64_t text =
+        t.folded ? folded_hash(t.text) : std::hash<std::string_view>{}(t.text);
+    auto& alike = _byHash[text ^ (std::uint64_t{t.rule} << 1 | t.folded)];
+    for (const std::uint16_t i : alike)
+      if (_tokens[i] == t) return i;
+    const auto i = static_cast<std::uint16_t>(_tokens.size());
+    _tokens.push_back(t);
+    alike.push_back(i);
     return i;
   }
   // A terminal of one literal or a choice of literals reads as those
@@ -107,6 +115,7 @@ class Reader {
 
   GrammarImage& _im;
   std::vector<Token> _tokens;
+  std::unordered_map<std::uint64_t, std::vector<std::uint16_t>> _byHash;
   // The rules the operators read through, by their number here.
   std::unordered_map<std::uint32_t, std::uint16_t> _local;
   std::vector<ImageId> _body;

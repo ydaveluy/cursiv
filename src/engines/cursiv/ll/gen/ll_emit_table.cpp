@@ -104,6 +104,25 @@ struct TermRows {
   }
 };
 
+// The token positions a body may open with, short of a call: another rule's
+// positions read the tokens of a call.
+void opening_terms(const Built& a, std::uint16_t body,
+                   std::vector<std::uint16_t>& out) {
+  std::vector<std::uint16_t> todo{body};
+  while (!todo.empty()) {
+    const LlNode& n = a.cfg.nodes[todo.back()];
+    if (n.kind == LlShape::term) out.push_back(todo.back());
+    todo.pop_back();
+    if (n.kind != LlShape::seq && n.kind != LlShape::alt &&
+        n.kind != LlShape::rep)
+      continue;
+    for (const std::uint16_t child : a.cfg.children(n)) {
+      todo.push_back(child);
+      if (n.kind == LlShape::seq && a.nullable[child] == 0) break;
+    }
+  }
+}
+
 // Per state, what a walk can still accept from it on, itself included: what
 // it and every state it leads to accept or relay.
 std::vector<DynSet> lex_live(const Built& a) {
@@ -523,10 +542,10 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   for (std::size_t id = 0; id < afterGap.size(); ++id)
     if (opMode[id] != kNoRow) afterGap[id] = kNoRow;
   o.array("::std::uint16_t", "kNodeAfterGap", afterGap);
-  // Per position, the operator step it reads in a climb with a step that
-  // groups nothing (`LlTable::nodeStep`). An operator of several tokens names
-  // none.
+  // Per token an operator may open with, the operator's step in a climb with
+  // a step that groups nothing (`LlTable::nodeStep`).
   std::vector<std::uint32_t> steps;
+  std::vector<std::uint16_t> opening;
   for (std::uint16_t k = 0; k < g.nclimbs; ++k) {
     const auto ops = std::span(g.climbOps.data() + g.climbs[k].opBase,
                                g.climbs[k].opCount);
@@ -535,11 +554,14 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
         }))
       continue;
     steps.resize(a.nodeAfter.size());
-    for (const LlClimbOp& op : ops)
-      if (const std::uint16_t n = g.atomic_operator(op.body); n != kNoRow)
+    for (const LlClimbOp& op : ops) {
+      opening.clear();
+      opening_terms(a, op.body, opening);
+      for (const std::uint16_t n : opening)
         steps[n] = (std::uint32_t(k + 1u) << 16) |
                    (std::uint32_t{op.prec} << 1) |
                    (op.assoc == Association::Non ? 1u : 0u);
+    }
   }
   o.array("::std::uint32_t", "kNodeStep", steps);
   o.array("::std::uint16_t", "kEdgeNode", a.edgeNode);

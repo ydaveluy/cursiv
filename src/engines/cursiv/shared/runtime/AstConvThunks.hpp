@@ -437,6 +437,12 @@ template <class CR, class M, std::size_t Alt, bool Data, bool Text = true,
           bool Guarded = true, bool Base = false>
 bool invoke_conv(AstBuildCtx& ctx, NodeId id, void* out);
 
+// Whether a slot of type `A` views text, held as it is or in an optional.
+template <class A>
+inline constexpr bool views_text = std::is_same_v<A, std::string_view>;
+template <class X>
+inline constexpr bool views_text<std::optional<X>> = views_text<X>;
+
 // What a record holds for a rule that passes its value on: its own rule's
 // conversion, into that rule's type.
 template <class R>
@@ -464,7 +470,7 @@ CURSIV_ALWAYS_INLINE inline bool convert_payload(AstBuildCtx& ctx, NodeId id,
   // out of line is a second call per converted value.
   const auto store = [&](auto&& value) CURSIV_ALWAYS_INLINE {
     // A view of a string the converter built: the tree keeps the bytes.
-    if constexpr (std::is_same_v<A, std::string_view> &&
+    if constexpr (views_text<A> &&
                   std::is_same_v<std::remove_cvref_t<decltype(value)>,
                                  std::string>)
       place<A>(slot, ctx.keep_text(value));

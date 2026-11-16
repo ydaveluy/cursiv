@@ -172,16 +172,16 @@ void DefaultCompletionProvider::buildContexts(
         cancelToken);
     return visit(context);
   };
+  // What is typed is matched as the parser read it.
   const auto typed_from = [&](TextOffset begin) {
-    const TextOffset from = std::max(begin, lineStart);
-    return text.substr(from, offset - from);
+    return detail::read_text(cst, std::max(begin, lineStart), offset);
   };
 
   // All a data rule holds up to the caret is what is typed of it, so a comment
   // inside it matches nothing.
   if (const auto rule = findDataTypeRuleStart(cst, offset);
       rule.has_value() && !ask(rule->first, rule->second, rule->first,
-                               text.substr(rule->first, offset - rule->first)))
+                               detail::read_text(cst, rule->first, offset)))
     return;
 
   const CompletionBacktrackingInformation tokens =
@@ -194,7 +194,7 @@ void DefaultCompletionProvider::buildContexts(
   bool performNext = true;
   if (tokens.previousTokenEnd == offset) {
     const TextOffset start = *tokens.previousTokenStart;
-    const std::string_view token = text.substr(start, offset - start);
+    const std::string_view token = detail::read_text(cst, start, offset);
     if (performCurrentTokenCompletion(document, token, start, offset) &&
         !ask(start, offset, nodeOffset, typed_from(start)))
       return;

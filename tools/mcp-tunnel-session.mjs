@@ -3,7 +3,7 @@
 // a didOpen with unsaved text must be the buffer's, not the disk's.
 
 import path from 'node:path';
-import { startSession } from './session-client.mjs';
+import { fileUri, startSession } from './session-client.mjs';
 
 const [serverPath, folderPath] = process.argv.slice(2);
 if (!serverPath || !folderPath) {
@@ -11,7 +11,7 @@ if (!serverPath || !folderPath) {
   process.exit(2);
 }
 const folder = path.resolve(folderPath);
-const folderUri = 'file://' + folder;
+const folderUri = fileUri(folder);
 
 const { send, request, end: serverEnd } = startSession(serverPath);
 
@@ -41,7 +41,7 @@ try {
   console.log('tools: ' + listed.tools.map((t) => t.name).join(', '));
 
   // An unsaved buffer, read through the tunnel.
-  const uri = folderUri + '/unsaved.dmodel';
+  const uri = fileUri(path.join(folder, 'unsaved.dmodel'));
   send({
     method: 'textDocument/didOpen',
     params: {

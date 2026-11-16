@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -366,6 +367,14 @@ void run() {
 
   world.ws->nameProvider = std::make_unique<UnplacedNames>(*world.ws);
   CHECK(world.shared.workspaceSymbolProvider->getSymbols("Person").empty());
+
+  // The query folds as the matcher does, ASCII alone: a name written exactly
+  // is found, whatever its other letters.
+  folding_range_provider::World accented;
+  (void)accented.built("datatype École\n");
+  const auto exact =
+      accented.shared.workspaceSymbolProvider->getSymbols("École");
+  CHECK(exact.size() == 1 && exact.front().name == "École");
 }
 
 }  // namespace symbol_edge_cases
@@ -453,6 +462,23 @@ void a_document_without_a_tree_answers_every_cursor() {
   }
 }
 
+// A caret on each of many records costs the records once, not once a caret.
+void many_carets_read_the_records_once() {
+  const World world;
+  std::string text;
+  std::vector<lsp::Position> carets;
+  for (lsp::Uint line = 0; line < 80000; ++line) {
+    text += "datatype A" + std::to_string(line) + "\n";
+    carets.push_back({line, 10});
+  }
+  const cursiv::Document* const document = world.built(std::move(text));
+  const auto begin = std::chrono::steady_clock::now();
+  const auto answer = world.ws->selectionRangeProvider->getSelectionRanges(
+      *document, carets, cursiv::kNoCancel);
+  CHECK(answer.size() == carets.size());
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
+}
+
 // A non-ASCII word is one word, and a non-ASCII dash ends one.
 void a_word_past_ascii_is_read_by_scalar() {
   const World world;
@@ -480,6 +506,7 @@ void run() {
   a_caret_nothing_covers_answers_a_clamped_empty_range();
   a_document_without_a_tree_answers_every_cursor();
   a_word_past_ascii_is_read_by_scalar();
+  many_carets_read_the_records_once();
 }
 
 }  // namespace selection_range_provider
@@ -573,6 +600,35 @@ constexpr std::string_view kModel =
     "entity Person {\n"
     "  name : String\n"
     "}\n";
+
+// A keyword is told by the spelling the parser read: written with an escape,
+// it is still a keyword.
+void an_escaped_keyword_is_a_keyword() {
+  // `\\u` and four hex digits spell one ASCII letter.
+  const auto escapes = [](std::string_view source,
+                          cursiv::SourceTranslation& out) {
+    for (auto at = source.find("\\u"); at != std::string_view::npos;
+         at = source.find("\\u", at + 6))
+      out.replace(at, at + 6,
+                  std::string(1, static_cast<char>(std::stoi(
+                                     std::string(source.substr(at + 2, 4)),
+                                     nullptr, 16))));
+  };
+  struct Translated : support::LspWorkspace {
+    explicit Translated(cursiv::SourceTranslator translate)
+        : WorkspaceWorld([translate](cursiv::LspServices& language) {
+            language.semanticTokenProvider =
+                std::make_unique<const cursiv::GrammarSemanticTokenProvider>(
+                    language);
+            language.parser = cursiv::translating_parser(
+                std::move(language.parser), translate);
+          }) {}
+  };
+  const Translated world(escapes);
+  const ct::DecodedSemanticTokensWithRanges coloured =
+      ct::highlightHelper(*world.ws, "<|\\u0064atatype|> String\n");
+  ct::expectSemanticToken(coloured, {.rangeIndex = 0, .tokenType = "keyword"});
+}
 
 void every_expected_category_is_coloured() {
   const World world;
@@ -1046,6 +1102,7 @@ void a_document_with_no_tree_is_coloured_with_nothing() {
 
 void run() {
   every_expected_category_is_coloured();
+  an_escaped_keyword_is_a_keyword();
   the_tokens_are_ordered_and_never_overlap();
   every_index_names_a_row_of_the_legend();
   a_range_is_the_full_answer_cut_to_it();
@@ -1196,7 +1253,8 @@ struct WithSourceAction final : cursiv::DefaultCodeActionProvider {
   }
 };
 
-// No `only`, or one naming quick fixes: the fix is offered.
+// No `only`, or one naming quick fixes or a kind above them, the empty root
+// included: the fix is offered. A kind under them names other fixes.
 void the_built_in_fix_answers_a_request_that_accepts_quick_fixes() {
   const World world;
   const cursiv::Document* const document =
@@ -1218,6 +1276,14 @@ void the_built_in_fix_answers_a_request_that_accepts_quick_fixes() {
       lsp::CodeActionKindEnum(lsp::CodeActionKind::QuickFix)};
   CHECK(has_kind(provider.getCodeActions(*document, params, cursiv::kNoCancel),
                  lsp::CodeActionKind::QuickFix));
+  params.context.only =
+      lsp::Array<lsp::CodeActionKindEnum>{lsp::CodeActionKindEnum("")};
+  CHECK(has_kind(provider.getCodeActions(*document, params, cursiv::kNoCancel),
+                 lsp::CodeActionKind::QuickFix));
+  params.context.only = lsp::Array<lsp::CodeActionKindEnum>{
+      lsp::CodeActionKindEnum("quickfix.other")};
+  CHECK(!has_kind(provider.getCodeActions(*document, params, cursiv::kNoCancel),
+                  lsp::CodeActionKind::QuickFix));
 }
 
 void an_only_of_another_kind_withholds_the_fix_and_still_asks_the_hook() {
@@ -1342,6 +1408,40 @@ void cancellation_precedes_a_filter_that_excludes_quick_fixes() {
   CHECK(provider.called);
 }
 
+// A payload of many fields is converted and matched in time linear in them.
+void a_wide_payload_is_matched_in_one_pass() {
+  cursiv::Document document(
+      cursiv::TextDocument::create("file:///wide.ws", "workspace", 1, "a"));
+  cursiv::Diagnostic diagnostic;
+  diagnostic.range = {0, 1};
+  diagnostic.message = "wide";
+  diagnostic.source = "audit";
+  diagnostic.severity = cursiv::DiagnosticSeverity::Warning;
+  cursiv::JsonValue::Object data;
+  data[std::string(cursiv::detail::kDefaultCodeActionsKey)] =
+      cursiv::JsonValue::Array{cursiv::detail::make_action_row(
+          cursiv::detail::kReplaceEdit, "replace", {0, 1}, "b",
+          document.buildRevision)};
+  for (std::int64_t i = 0; i < 40000; ++i)
+    data["k" + std::to_string(i)] = cursiv::JsonValue(i);
+  diagnostic.data = cursiv::JsonValue(std::move(data));
+  document.diagnostics.push_back(std::move(diagnostic));
+
+  const auto start = std::chrono::steady_clock::now();
+  lsp::CodeActionParams params;
+  params.range = {{0, 0}, {0, 1}};
+  lsp::Diagnostic echo;
+  echo.range = params.range;
+  echo.message = std::string("wide");
+  echo.severity = lsp::DiagnosticSeverity::Warning;
+  echo.source = "audit";
+  echo.data = cursiv::detail::to_lsp_any(*document.diagnostics.front().data);
+  params.context.diagnostics.push_back(std::move(echo));
+  const cursiv::DefaultCodeActionProvider provider;
+  CHECK(provider.getCodeActions(document, params).size() == 1);
+  CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(1));
+}
+
 void an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads() {
   cursiv::Document document(cursiv::TextDocument::create(
       "file:///diagnostic.ws", "workspace", 1, "a"));
@@ -1354,7 +1454,8 @@ void an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads() {
   cursiv::JsonValue::Object data;
   data[std::string(cursiv::detail::kDefaultCodeActionsKey)] =
       cursiv::JsonValue::Array{cursiv::detail::make_action_row(
-          cursiv::detail::kReplaceEdit, "replace", {0, 1}, "b", 0)};
+          cursiv::detail::kReplaceEdit, "replace", {0, 1}, "b",
+          document.buildRevision)};
   data["numbers"] = cursiv::JsonValue::Array{
       cursiv::JsonValue(1.0), cursiv::JsonValue(cursiv::JsonValue::Object{
                                   {"nested", cursiv::JsonValue(2.0)}})};
@@ -1462,6 +1563,7 @@ void run() {
   a_request_walks_the_references_once();
   cancellation_precedes_a_filter_that_excludes_quick_fixes();
   an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads();
+  a_wide_payload_is_matched_in_one_pass();
 }
 
 }  // namespace code_action_provider

@@ -837,32 +837,6 @@ void compute_gaps(Built& b, const ShapeGraph& shapes,
   }
 }
 
-// A choice read past its first token, where an arm may open on the token in
-// front of a section: its lookahead would read the section's first token
-// across the caller's trivia.
-void refuse_section_lookahead(Built& b) {
-  DynSet opens;
-  for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id) {
-    const LlNode& n = b.cfg.nodes[id];
-    if (n.kind != LlShape::seq) continue;
-    for (unsigned i = 1; i < n.count; ++i) {
-      if (b.cfg.nodes[b.cfg.childIds[n.sym + i]].section == 0) continue;
-      // Only a terminal opener is checked: any other opener ends on the last
-      // token it reads, and no last set is built.
-      const LlNode& open = b.cfg.nodes[b.cfg.childIds[n.sym + i - 1]];
-      if (open.kind == LlShape::term) opens.set(open.sym);
-    }
-  }
-  if (opens.none()) return;
-  for (std::uint16_t d = 0; d < b.cfg.ndecisions; ++d) {
-    const LlDecision& dec = b.cfg.decisions[d];
-    if (dec.how == LlPredict::single) continue;
-    for (unsigned a = 0; a < dec.nalts; ++a)
-      if (b.laSet[dec.set + a].intersects(opens))
-        lower_refuse(b.cfg, LowerFail::sectionPointShared);
-  }
-}
-
 // What follows every position, to a fixpoint: a rule's own follow feeds the
 // positions that call it, and those feed it back. Only `ruleFollow` feeds the
 // propagation, so only its growth asks for another pass.
@@ -1267,6 +1241,51 @@ LlAtnView view_of(const Built& b) {
                    .callerBase = b.callerBase.data(),
                    .callerAt = b.callerAt.data(),
                    .returnClass = b.returnClass.data()};
+}
+
+// A choice read past its first token, where an arm may read that token at
+// the position in front of a section: its lookahead would read the section's
+// first token across the caller's trivia. Where the closure cannot tell, any
+// arm opening on a section's token counts.
+void refuse_section_lookahead(Built& b) {
+  std::vector<bool> opener(b.cfg.nnodes, false);
+  DynSet opens;
+  for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id) {
+    const LlNode& n = b.cfg.nodes[id];
+    if (n.kind != LlShape::seq) continue;
+    for (unsigned i = 1; i < n.count; ++i) {
+      if (b.cfg.nodes[b.cfg.childIds[n.sym + i]].section == 0) continue;
+      // Only a terminal opener is checked: any other opener ends on the last
+      // token it reads, and no last set is built.
+      const std::uint16_t at = b.cfg.childIds[n.sym + i - 1];
+      if (b.cfg.nodes[at].kind != LlShape::term) continue;
+      opener[at] = true;
+      opens.set(b.cfg.nodes[at].sym);
+    }
+  }
+  if (opens.none()) return;
+  const LlAtnView atn = view_of(b);
+  LlSimulation sim(atn, 4096);
+  for (std::uint16_t d = 0; d < b.cfg.ndecisions; ++d) {
+    const LlDecision& dec = b.cfg.decisions[d];
+    if (dec.how == LlPredict::single) continue;
+    sim.start(dec.state, kLlCtxNone);
+    bool shared = false;
+    if (sim.capped() || sim.needs_filter()) {
+      for (unsigned a = 0; a < dec.nalts; ++a)
+        shared = shared || b.laSet[dec.set + a].intersects(opens);
+    } else {
+      for (const LlConfig& c : sim.configs()) {
+        const LlAtnState& q = atn.state(c.state);
+        for (std::uint32_t i = 0; i < q.nedges; ++i) {
+          const std::uint16_t at = b.edgeNode[q.edge + i];
+          shared = shared || (atn.edge(q.edge + i).kind == LlEdgeKind::atom &&
+                              at != kNoRow && opener[at]);
+        }
+      }
+    }
+    if (shared) lower_refuse(b.cfg, LowerFail::sectionPointShared);
+  }
 }
 
 // True where the exploration closed: the automaton is then a table, and no

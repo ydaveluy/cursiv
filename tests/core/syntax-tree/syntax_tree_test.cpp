@@ -300,6 +300,36 @@ void the_tables_read_back() {
   CHECK(r.referenceIndexOf(kTag<Holder>, "missing") == cursiv::kNoReference);
 }
 
+// Two bases each declare `x`, written with one literal as a compiler may pool
+// them, and share a base of their own: the class below has both `x`, and the
+// shared base's `y` once.
+void two_members_of_one_name_stay_two() {
+  static constexpr std::string_view kX = "x";
+  static const cursiv::PropertyMetaData top[] = {{.name = "y"}};
+  static const cursiv::PropertyMetaData left[] = {{.name = kX}};
+  static const cursiv::PropertyMetaData right[] = {{.name = kX}};
+  static const cursiv::PropertyMetaData bottom[] = {{.name = "z"}};
+  static cursiv::AstTypeTag base{.name = "Top"};
+  static const cursiv::AstTypeTag* const toBase[] = {&base};
+  static cursiv::AstTypeTag a{.baseCount = 1, .bases = toBase, .name = "A"};
+  static cursiv::AstTypeTag b{.baseCount = 1, .bases = toBase, .name = "B"};
+  static const cursiv::AstTypeTag* const toAll[] = {&a, &b, &base};
+  static cursiv::AstTypeTag d{.baseCount = 3, .bases = toAll, .name = "D"};
+  static const cursiv::AstTypeTag* const types[] = {&base, &a, &b, &d};
+  static const cursiv::detail::PropertyRow rows[] = {
+      {top, 1}, {left, 1}, {right, 1}, {bottom, 1}};
+  cursiv::detail::AstMetaData meta;
+  meta.types = types;
+  meta.typeCount = 4;
+  meta.propertyRows = rows;
+  const cursiv::DefaultAstReflection r(meta);
+  const auto properties = r.getTypeMetaData(&d).properties;
+  std::vector<std::string_view> names;
+  for (const cursiv::PropertyMetaData& property : properties)
+    names.push_back(property.name);
+  CHECK((names == std::vector<std::string_view>{"y", "x", "x", "z"}));
+}
+
 }  // namespace hier
 
 // The climb writes left/op/right; no directive names them, so nothing in the
@@ -1677,6 +1707,7 @@ void run() {
   // The tables the generator wrote, read back through the reflection.
   hier::a_tag_answers_its_family();
   hier::the_tables_read_back();
+  hier::two_members_of_one_name_stay_two();
   infix::the_climb_contributes_its_members();
   region::the_nest_names_a_node_member();
   enm::an_enum_is_a_plain_value_member();
@@ -2594,6 +2625,16 @@ void enumerators_outside_the_first_run() {
                 cursiv::detail::kEnumProbeMax > 256);
 }
 
+// An enumerator is read by its name, letters past ASCII included.
+enum class Season { Été = 0, hiver = 1 };
+
+void an_enumerator_name_past_ascii_converts() {
+  auto e = cursiv::default_converter<Season>::convert("Été");
+  CHECK(e && *e.value == Season::Été);
+  auto h = cursiv::default_converter<Season>::convert("hiver");
+  CHECK(h && *h.value == Season::hiver);
+}
+
 void a_repair_invents_no_value() {
   // `state` stands where a name was expected: the whole word is noise.
   for (const auto text : {"init state Off end", "init state\tOff end",
@@ -2922,6 +2963,7 @@ void run() {
   char_like_excluded();
   enum_defaults();
   enumerators_outside_the_first_run();
+  an_enumerator_name_past_ascii_converts();
   parts_on_data_rule();
   a_leaf_converter_composes();
   an_empty_call_gives_its_text();

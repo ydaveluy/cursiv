@@ -59,9 +59,9 @@ class McpServer {
   // workflow, not the tools, which describe themselves.
   void addInstructions(std::string_view paragraph);
 
-  // Handles one JSON-RPC message: its response, or nothing for a notification.
-  // Registrations all precede the first message. A request id is a string or a
-  // 32-bit integer.
+  // Handles one JSON-RPC message or batch: its response, or nothing for a
+  // notification. Registrations all precede the first message. A request id is
+  // a string or a 32-bit integer.
   [[nodiscard]] std::optional<lsp::json::Value> handle(
       lsp::json::Value message, const CancellationToken& = {}) const;
   // `handle` over serialized text; a parse failure answers as JSON-RPC

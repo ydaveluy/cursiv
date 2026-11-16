@@ -324,20 +324,25 @@ struct Reading {
   bool gone = false;
 };
 
-std::uint64_t depth(const std::vector<Edit>& links, std::uint32_t l) {
+std::uint64_t depth_of(const std::vector<Edit>& links, std::uint32_t l) {
   std::uint64_t d = 0;
   for (; links[l].parent != kNoEditLink; l = links[l].parent) ++d;
   return d;
 }
+// The depth of the path to `l`, from its parent's.
+std::uint64_t depth(const std::vector<Edit>& links, std::uint32_t l,
+                    std::uint64_t h) {
+  return links[l].parent == kNoEditLink ? 0 : h + 1;
+}
 bool same_depth(const std::vector<Edit>& links, std::uint32_t a,
                 std::uint32_t b) {
-  return depth(links, a) == depth(links, b);
+  return depth_of(links, a) == depth_of(links, b);
 }
 std::uint32_t kind_of(const Edit& g) { return g.kind; }
 
 constexpr std::uint32_t kDeep = 200000;
 
-// Two goals at the end of one long path, and two more on paths of their own.
+// Two goals at the end of one long path, and two more one link past it.
 cursiv::engine::RepairSearch<Edit> search(std::vector<Reading>& rs) {
   cursiv::engine::RepairSearch<Edit> s(1000, {});
   for (std::uint32_t i = 0; i < kDeep; ++i)
@@ -362,7 +367,10 @@ void an_election_reads_the_stop_and_counts_its_walks() {
         cursiv::engine::repair_elect<depth, same_depth, kind_of>(s, rs, true,
                                                                  free, race);
     CHECK(won == 0);
-    CHECK(s.work >= 4 * std::uint64_t{kDeep - 1});
+    // The long path the four goals share is walked once for their roots and
+    // once for their names.
+    CHECK(s.work >= std::uint64_t{kDeep - 1} &&
+          s.work <= 2 * std::uint64_t{kDeep} + 4);
   }
   for (const bool apart : {false, true}) {
     auto s = search(rs);

@@ -4,6 +4,9 @@
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
+#include <unordered_set>
+#include <vector>
 
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/shared/gen/AstRegistryBuilder.hpp"
@@ -315,17 +318,16 @@ void Lowerer::spell_literal(std::uint16_t t, const ImageNode& lit) {
   _c.terms[t].spelled = true;
 }
 
-// The words a choice of them reads, each once, in the order written: literals
-// with no guard of their own, and keywords. False where it reads anything
-// else, white space included: a line break is no word to offer.
+// The words a choice of them reads, in the order written: literals with no
+// guard of their own, and keywords. False where it reads anything else, white
+// space included: a line break is no word to offer.
 Descent<bool> Lowerer::list_words(ImageId id,
                                   std::vector<std::string_view>& words) const {
   const ImageNode& n = at(id);
   if (n.kind == ImageKind::lit) {
     if ((n.flags & kLitGuardExpr) != 0 || white_space_only(n.text))
       co_return false;
-    if (std::ranges::find(words, n.text) == words.end())
-      words.push_back(n.text);
+    words.push_back(n.text);
     co_return true;
   }
   if (n.kind != ImageKind::choice) co_return false;
@@ -341,10 +343,14 @@ void Lowerer::declare_term(std::uint32_t rule) {
   const std::uint16_t t = _nterms++;
   name_row(_c.terms[t], _im.rules[rule].name);
   if (body.kind == ImageKind::lit) spell_literal(t, body);
-  // A choice of words spells none of them alone, but each is a spelling.
+  // A choice of words spells none of them alone, but each is a spelling, once.
   if (std::vector<std::string_view> words;
-      body.kind == ImageKind::choice && descend(list_words(bodyId, words)))
+      body.kind == ImageKind::choice && descend(list_words(bodyId, words))) {
+    std::unordered_set<std::string_view> seen;
+    std::erase_if(words,
+                  [&](std::string_view w) { return !seen.insert(w).second; });
     _c.termBuild[t].words = std::move(words);
+  }
   const bool predicateOnly = has(_predicate, rule);
   if (!predicateOnly) {
     const std::uint16_t conv = row_id(st.convertRow);

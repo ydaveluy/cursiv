@@ -769,8 +769,10 @@ struct LrSearchRace {
 bool lr_same_edits(const std::vector<LrEdit>& links, std::uint32_t a,
                    std::uint32_t b);
 
-// Two paths that make the same edits fold the same.
-std::uint64_t lr_edits_fold(const std::vector<LrEdit>& links, std::uint32_t l);
+// Two paths that make the same edits fold the same. The fold of the path to
+// `l` is that of its parent's, `h`, with `l`'s edit; a root names itself.
+std::uint64_t lr_edits_fold(const std::vector<LrEdit>& links, std::uint32_t l,
+                            std::uint64_t h);
 
 // A plan names nodes of the cactus it was elected on: a search that makes
 // another drops it.

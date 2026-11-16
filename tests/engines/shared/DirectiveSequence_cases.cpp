@@ -55,6 +55,31 @@ std::string box_of(const ast::Doc& doc) {
   }
   return out;
 }
+std::string shape_text(const ast::Shape* shape) {
+  if (shape == nullptr) return "<none>";
+  if (const auto* const wrap = cursiv::ast_cast<ast::Wrap>(shape))
+    return "wrap(" + shape_text(wrap->inner) + ")";
+  return cursiv::ast_cast<ast::Leaf>(shape) != nullptr ? "leaf" : "<other>";
+}
+std::string shape_of(const ast::Doc& doc) {
+  const auto* const rewrapped = cursiv::ast_cast<ast::Rewrapped>(&doc);
+  return rewrapped == nullptr ? "<no shape>" : shape_text(rewrapped->shape);
+}
+std::string shouts_of(const ast::Doc& doc) {
+  const auto* const shouted = cursiv::ast_cast<ast::Shouted>(&doc);
+  if (shouted == nullptr) return "<no shouts>";
+  std::string out;
+  for (const auto& shout : shouted->shouts) {
+    if (!out.empty()) out += ' ';
+    out += shout.has_value() ? std::string(*shout) : "<none>";
+  }
+  return out;
+}
+std::string index_of(const ast::Doc& doc) {
+  const auto* const indexed = cursiv::ast_cast<ast::Indexed>(&doc);
+  if (indexed == nullptr || indexed->index == nullptr) return "<no index>";
+  return indexed->index->array != nullptr ? "index: array" : "index:";
+}
 std::string names_of(const ast::Doc& doc) {
   std::string out;
   for (const auto name : doc.names) {
@@ -134,6 +159,12 @@ void a_word_read_in_any_case_names_its_enumerator(const cursiv::Parser& p) {
   check(p, "folded:", "Not EQUAL", op_of, "NOTEQUAL");
   check(p, "anycase:", "equal", op_of, "equal");
   check(p, "anycase:", "EQUAL", op_of, "equal");
+  check(p, "nested:", "x!", index_of, "index: array");
+  check(p, "nested:", "y!", index_of, "index: array");
+  check(p, "shouts:", "!abcdefghijklmnopqrstuvwxyz !hello", shouts_of,
+        "!ABCDEFGHIJKLMNOPQRSTUVWXYZ !HELLO");
+  check(p, "rewrapped:", "(x)", shape_of, "leaf");
+  check(p, "rewrapped:", "((x)!)", shape_of, "wrap(leaf)");
 }
 
 void every_engine(const cursiv::Parser& p) {

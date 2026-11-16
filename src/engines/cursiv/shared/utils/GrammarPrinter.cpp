@@ -98,21 +98,22 @@ bool same_class(const ImageClass& a, const ImageNode& b) {
 }  // namespace
 
 std::size_t GrammarPrinter::index_for(std::uint32_t rule) {
-  for (std::size_t i = 0; i < _entries.size(); ++i)
-    if (_entries[i].rule == rule) return i;
+  if (const auto known = _entryOf.find(rule); known != _entryOf.end())
+    return known->second;
   const ImageRule& r = _image.rules[rule];
+  std::string name;
   if (r.anonymous) {
-    _entries.push_back(
-        {"$" + decimal(static_cast<std::size_t>(_synth++)), rule, {}});
-    return _entries.size() - 1;
+    name = "$" + decimal(static_cast<std::size_t>(_synth++));
+  } else {
+    name = std::string(r.name);
+    if (_names.contains(name)) name = std::string(r.qualified);
+    if (_names.contains(name)) name = "::" + std::string(r.qualified);
+    for (std::size_t n = 2; _names.contains(name); ++n)
+      name = "::" + std::string(r.qualified) + "#" + decimal(n);
   }
-  bool taken = false;
-  for (const Entry& e : _entries)
-    if (e.name == r.name) {
-      taken = true;
-      break;
-    }
-  _entries.push_back({std::string(taken ? r.qualified : r.name), rule, {}});
+  _names.insert(name);
+  _entryOf.emplace(rule, _entries.size());
+  _entries.push_back({std::move(name), rule, {}});
   return _entries.size() - 1;
 }
 

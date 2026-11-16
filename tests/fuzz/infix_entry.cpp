@@ -1,6 +1,8 @@
 // The fuzzer on grammars of its own: `infix<>` as the entry, and the implied
 // tokens and gap conditions of the asi grammar.
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -12,6 +14,7 @@
 #include "asi/generated/G/Module.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/CstInvariants.hpp"
+#include "cursiv/CursivActions.hpp"
 #include "cursiv/CursivLexicon.hpp"
 #include "cursiv/FixedSource.hpp"
 #include "cursiv/FuzzLane.hpp"
@@ -266,6 +269,99 @@ bool walks_a_sentence() {
   return gen.generate(first, tree).complete;
 }
 
+// A level that groups nothing: two of its operators are no expression.
+namespace fnonassoc {
+struct Expr : cursiv::Extends<cursiv::AstNode> {};
+struct Atom : cursiv::Extends<Expr> {
+  string_view name;
+};
+struct Binary : cursiv::Extends<Expr> {
+  Expr* left = nullptr;
+  string_view op;
+  Expr* right = nullptr;
+};
+struct G : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Primary : rule<create<Atom>(assign<&Atom::name>(ref<ID>))> {};
+  struct E : infix<Primary, Binary, levels(nonassoc(lit<"<">))> {};
+  using entry = E;
+  using ignored = WS;
+};
+}  // namespace fnonassoc
+
+// The longest chain of operators, and the first of every other choice.
+struct Chained final : cursiv::fuzzer::detail::DecisionSource {
+  unsigned choose(cursiv::fuzzer::detail::DecisionKind kind,
+                  unsigned n) override {
+    return kind == cursiv::fuzzer::detail::DecisionKind::byte &&
+                   n == cursiv::fuzzer::detail::kGrammarOpCap + 1
+               ? n - 1
+               : 0;
+  }
+};
+
+// The walk writes no two operators of a non-associative level in a row.
+void a_non_associative_level_is_not_chained() {
+  namespace fd = cursiv::fuzzer::detail;
+  using G = fnonassoc::G;
+  const fd::GrammarCost cost(fd::kDeclaredModel<G>, fd::kActions<G>);
+  const fd::GrammarGenerator gen{fd::kDeclaredModel<G>,
+                                 fd::kLexicon<G>,
+                                 fd::kActions<G>,
+                                 cost,
+                                 8,
+                                 nullptr};
+  Chained longest;
+  cursiv::fuzzer::WalkTree tree;
+  const fd::GrammarDerivation d = gen.generate(longest, tree);
+  CHECK(d.complete);
+  CHECK(std::ranges::count(d.text, '<') == 1);
+}
+
+// A node an operand creates is the member's value: the rule still builds
+// its own node.
+namespace finline {
+struct Child : cursiv::Extends<cursiv::AstNode> {};
+struct Root : cursiv::Extends<cursiv::AstNode> {
+  Child* child = nullptr;
+};
+struct G : cursiv::GrammarSpec {
+  struct Top
+      : rule<create<Root>(assign<&Root::child>(create<Child>(lit<"x">)))> {};
+  using entry = Top;
+};
+}  // namespace finline
+
+void an_operand_builds_the_value_of_its_member() {
+  namespace fd = cursiv::fuzzer::detail;
+  using G = finline::G;
+  const fd::GrammarCost cost(fd::kDeclaredModel<G>, fd::kActions<G>);
+  const fd::GrammarGenerator gen{fd::kDeclaredModel<G>,
+                                 fd::kLexicon<G>,
+                                 fd::kActions<G>,
+                                 cost,
+                                 8,
+                                 nullptr};
+  fd::FixedSource first;
+  cursiv::fuzzer::WalkTree tree;
+  const fd::GrammarDerivation d = gen.generate(first, tree);
+  CHECK(d.complete);
+  const auto* const root = cursiv::ast_cast<finline::Root>(d.tree);
+  CHECK(root != nullptr && root->child != nullptr);
+}
+
+// Two values a floating type tells apart never read as one.
+void a_wide_float_is_not_read_as_a_double() {
+  using cursiv::fuzzer::detail::Render;
+  const long double one = 1.0L;
+  const long double next = std::nextafter(one, 2.0L);
+  std::string a, b;
+  CHECK(!(Render<long double>::run(one, a) &&
+          Render<long double>::run(next, b)) ||
+        a != b);
+}
+
 int main() {
   a_subtree_holds_its_children_whole();
   CHECK(walks_a_sentence<fveto::Spaced>());
@@ -276,6 +372,9 @@ int main() {
   a_long_repetition_costs_its_rounds();
   a_refusal_holds_for_the_next_character();
   a_literal_guard_holds_after_its_text();
+  a_non_associative_level_is_not_chained();
+  a_wide_float_is_not_read_as_a_double();
+  an_operand_builds_the_value_of_its_member();
   namespace g = finfix::generated::InfixEntryG;
   const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
   const std::unique_ptr<cursiv::AstReflection> reflection =

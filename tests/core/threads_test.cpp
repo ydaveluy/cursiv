@@ -15,6 +15,7 @@
 #include <numeric>
 #include <ranges>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
@@ -71,6 +72,16 @@ void an_adl_range_runs_inline_and_in_parallel() {
                       [](int& value) { ++value; });
     CHECK(values[0] == 2 && values[1] == 3 && values[2] == 4);
   }
+}
+
+// A range read once, through an iterator that only moves, runs inline.
+void a_range_read_once_runs_inline() {
+  cursiv::TaskScheduler tasks{kWorkers};
+  std::istringstream text("1 2 3");
+  int sum = 0;
+  tasks.parallelFor(cursiv::kNoCancel, std::views::istream<int>(text),
+                    [&](int value) { sum += value; });
+  CHECK(sum == 6);
 }
 
 // The core claim: once each, none missed, none twice. A count far above the
@@ -372,6 +383,7 @@ void a_span_goes_out_in_runs_of_at_least_the_minimum() {
 
 void run() {
   an_adl_range_runs_inline_and_in_parallel();
+  a_range_read_once_runs_inline();
   every_element_runs_exactly_once();
   an_empty_range_runs_nothing();
   a_pool_without_workers_still_runs_everything();

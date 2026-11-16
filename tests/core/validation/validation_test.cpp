@@ -22,6 +22,7 @@
 #include "cursiv/parser/DefaultParserErrorMessageProvider.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/DefaultScopeProvider.hpp"
+#include "cursiv/references/ScopeProvider.hpp"
 #include "cursiv/services/CoreLanguage.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
@@ -883,6 +884,77 @@ void a_document_broken_everywhere_stops_being_spelt() {
   CHECK(names_in(fixes_of(*document, *broken.back())).size() == 1);
 }
 
+// The lookup walks each site's whole scope: a stopped request ends it.
+void a_stopped_request_stops_the_spelling() {
+  World world;
+  const cursiv::Document* const document =
+      world.build("file:///e.ws", "datatype String\nentity E { f : Strng }\n");
+  const std::vector<cursiv::Diagnostic> diagnostics = world.validate(*document);
+  std::vector<const cursiv::Diagnostic*> all;
+  for (const cursiv::Diagnostic& d : diagnostics) all.push_back(&d);
+  cursiv::CancellationTokenSource stop;
+  stop.request_stop();
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
+    (void)cursiv::detail::spelling_actions(*document, all, stop.get_token());
+  }));
+}
+
+// A stop asked while the scope is walked for a spelling ends the walk at the
+// next name, not at the end of the scope.
+void a_stop_during_the_scope_walk_ends_it() {
+  cursiv::CancellationTokenSource stop;
+  bool armed = false;
+  // Asks the stop at the first name it hands over, once armed.
+  struct Stopping final : cursiv::ScopeProvider {
+    std::unique_ptr<const cursiv::ScopeProvider> inner;
+    cursiv::CancellationTokenSource* stop = nullptr;
+    const bool* armed = nullptr;
+    const cursiv::AstNodeDescription* getScopeEntry(
+        const cursiv::ReferenceInfo& context,
+        std::string_view name) const override {
+      return inner->getScopeEntry(context, name);
+    }
+    bool visitScopeEntries(
+        const cursiv::ReferenceInfo& context,
+        cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+        const override {
+      return inner->visitScopeEntries(
+          context, [&](const cursiv::AstNodeDescription& entry) {
+            if (*armed) stop->request_stop();
+            return visitor(entry);
+          });
+    }
+    bool visitScopeEntries(
+        const cursiv::ReferenceInfo& context, std::string_view name,
+        cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+        const override {
+      return inner->visitScopeEntries(context, name, visitor);
+    }
+  };
+  cursiv::SharedCoreServices shared;
+  cursiv::install_default_shared_core_services(shared);
+  cursiv::CoreServices& language = support::add_workspace<cursiv::CoreServices>(
+      shared, [&](cursiv::CoreServices& services) {
+        auto stopping = std::make_unique<Stopping>();
+        stopping->inner = std::move(services.scopeProvider);
+        stopping->stop = &stop;
+        stopping->armed = &armed;
+        services.scopeProvider = std::move(stopping);
+      });
+  cursiv::Document* const document = support::add(
+      shared, "file:///s.ws", "datatype String\nentity E { f : Strng }\n");
+  cursiv::Document* const set[] = {document};
+  shared.documentBuilder->build(set);
+  std::vector<cursiv::Diagnostic> diagnostics;
+  language.documentValidator->validateDocument(*document, diagnostics, {});
+  std::vector<const cursiv::Diagnostic*> all;
+  for (const cursiv::Diagnostic& d : diagnostics) all.push_back(&d);
+  armed = true;
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
+    (void)cursiv::detail::spelling_actions(*document, all, stop.get_token());
+  }));
+}
+
 // A work-bound note is no repair: with a clean tree the checks still run under
 // the stop, and with a refusal the syntax error is still reported.
 void a_bound_alone_is_no_parse_fault() {
@@ -1152,6 +1224,8 @@ void run() {
   a_misspelt_reference_offers_its_neighbours();
   the_validation_looks_up_no_neighbour();
   a_document_broken_everywhere_stops_being_spelt();
+  a_stopped_request_stops_the_spelling();
+  a_stop_during_the_scope_walk_ends_it();
   an_unrepaired_parse_is_one_syntax_error();
   a_bound_alone_is_no_parse_fault();
   a_never_entered_parse_names_the_whole_document();

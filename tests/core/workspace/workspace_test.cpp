@@ -323,6 +323,31 @@ void exports_keep_uri_order(bool interrupt) {
   CHECK(target != nullptr && target->getDocument() == first);
 }
 
+// A use left at `ComputedScopes` reads its name, which no index row then
+// protects. A later build of a document that exports the name ahead of the
+// first one gives the name its new target.
+void a_build_drops_a_resolution_no_index_protects() {
+  World world;
+  cursiv::Document* second = world.add("file:///second.ws", "datatype Same");
+  cursiv::Document* use =
+      world.add("file:///use.ws", "entity Uses { f : Same }");
+  cursiv::Document* both[] = {second, use};
+  world.shared.documentBuilder->build(both);
+  world.shared.documentBuilder->resetToState(
+      *use, cursiv::DocumentState::ComputedScopes);
+  const auto target_of = [&] {
+    const auto* entity = cursiv::ast_cast<ws::ast::Entity>(
+        use->parseResult.valueAs<ws::ast::Workspace>()->elements[0]);
+    const auto* target = entity->features[0]->type.get();
+    return target != nullptr ? target->getDocument() : nullptr;
+  };
+  CHECK(target_of() == second);
+  cursiv::Document* first = world.add("file:///first.ws", "datatype Same");
+  cursiv::Document* added[] = {first};
+  world.shared.documentBuilder->build(added);
+  CHECK(target_of() == first);
+}
+
 void an_update_honors_an_overridden_affected_check() {
   World world;
   struct Affected final : cursiv::DefaultIndexManager {
@@ -769,6 +794,30 @@ void an_update_rebuilds_what_aimed_at_the_change() {
   CHECK(received.counts.front() == 1);
   CHECK(a->state.load() == cursiv::DocumentState::Validated);
   CHECK(b->state.load() == cursiv::DocumentState::Validated);
+}
+
+// A document made again at a URI another one held, through the store alone,
+// is validated as itself: nothing the builder kept of the first one counts.
+void a_document_made_again_is_validated_again() {
+  const World world;
+  cursiv::Documents& store = *world.shared.documents;
+  cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
+  {
+    const std::shared_ptr<cursiv::Document> first =
+        store.createDocument("file:///again.ws", "datatype A\n");
+    cursiv::Document* const set[] = {first.get()};
+    builder.build(set);
+    CHECK(first->state.load() == cursiv::DocumentState::Validated &&
+          first->diagnostics.empty());
+    (void)world.shared.indexManager->remove(first->id);
+    (void)store.deleteDocument(first->id);
+  }
+  const std::shared_ptr<cursiv::Document> again =
+      store.createDocument("file:///again.ws", "datatype\n");
+  cursiv::Document* const set[] = {again.get()};
+  builder.build(set);
+  CHECK(again->state.load() == cursiv::DocumentState::Validated);
+  CHECK(!again->diagnostics.empty());
 }
 
 // `deleteDocument` requires the index purged first: the incoming edge at the
@@ -2991,6 +3040,7 @@ void run() {
 #endif
   exports_keep_uri_order(false);
   exports_keep_uri_order(true);
+  a_build_drops_a_resolution_no_index_protects();
   an_update_honors_an_overridden_affected_check();
   an_update_honors_an_overridden_relink_check();
   a_relinked_document_keeps_its_scopes();
@@ -3030,6 +3080,7 @@ void run() {
   a_reset_forgets_what_was_derived();
   an_update_rebuilds_what_aimed_at_the_change();
   an_update_clears_the_incoming_edge_before_deleting_its_target();
+  a_document_made_again_is_validated_again();
   a_relinked_document_takes_the_updates_request();
   a_reset_forgets_an_interrupted_request();
   an_update_finishes_an_interrupted_request();
@@ -3391,7 +3442,8 @@ void a_fresh_document_has_derived_nothing() {
   CHECK(!d.parseResult.accepted);
   CHECK(!d.parseRecovered());
   CHECK(d.diagnostics.empty());
-  CHECK(d.buildRevision == 0);
+  // No other build shares its revision, one at the same URI included.
+  CHECK(d.buildRevision != cursiv::Document(text("file:///a")).buildRevision);
   // The result exists -- it is a value, not a pointer -- and is empty.
   CHECK(d.parseResult.cst().size() == 0);
   CHECK(!static_cast<bool>(d.parseResult));
@@ -5302,6 +5354,26 @@ void the_flag_holds_past_sixty_four_lines() {
         (cursiv::Position{66, 2}));
 }
 
+// Far into a long line that is not ASCII, a column costs a block of the line,
+// not the line before it.
+void a_far_column_costs_a_block_of_its_line() {
+  constexpr cursiv::TextOffset kUnits = 1U << 22;
+  std::string text;
+  text.reserve(2 * kUnits + 2);
+  for (cursiv::TextOffset i = 0; i < kUnits; ++i) text += "\xC3\xA9";
+  text += "\nz";
+  const cursiv::TextDocument d = doc(std::move(text));
+  const auto start = std::chrono::steady_clock::now();
+  for (cursiv::TextOffset k = 1; k <= 4000; ++k) {
+    const cursiv::TextOffset at = 2 * (kUnits - k);
+    CHECK(d.positionAt(at) == (cursiv::Position{0, at / 2}));
+    CHECK(d.offsetAt({0, at / 2}) == at);
+    CHECK(d.rangeAt(at, at + 2) ==
+          (cursiv::Range{{0, at / 2}, {0, at / 2 + 1}}));
+  }
+  CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(1));
+}
+
 }  // namespace
 
 // Both conversions count eight bytes at a time where the word ends on a
@@ -5520,6 +5592,49 @@ void ill_formed_text_answers_what_a_replacing_decoder_answers() {
   }
 }
 
+// A line many blocks long, ill-formed bytes included, answers what the
+// replacing decoder answers: both ways, and from a cursor that starts far in.
+void a_long_line_answers_what_a_replacing_decoder_answers() {
+  constexpr std::string_view kPieces[] = {
+      "abcdefgh", "a",    "\xc3\xa9", "\xe2\x82\xac", "\xf0\x9f\x98\x80",
+      "\x80",     "\xc3", "\xe2\x82", "\xf0\x9f\x98", "\xed\xa0\x80",
+      "\xff"};
+  unsigned x = 11;
+  for (int round = 0; round < 8; ++round) {
+    std::string text;
+    while (text.size() < 5 * 4096 + 77) {
+      x = (x * 1103515245U) + 12345U;
+      text += kPieces[(x >> 16U) % std::size(kPieces)];
+    }
+    const std::size_t end = text.size();
+    text += "\nz\xc3\xa9";
+    cursiv::TextDocument d = doc(text);
+    std::uint32_t column = 0;
+    std::size_t k = 0;
+    for (const Item& item : replacing_decode(text)) {
+      if (item.start >= end) break;
+      const auto at = static_cast<cursiv::TextOffset>(item.start);
+      CHECK(d.positionAt(at) == (cursiv::Position{0, column}));
+      CHECK(d.offsetAt({0, column}) == at);
+      if (++k % 97 == 0) {
+        cursiv::TextDocument::Cursor cursor(d, at);
+        CHECK(cursor.positionAt(at) == (cursiv::Position{0, column}));
+      }
+      column += static_cast<std::uint32_t>(item.units);
+    }
+    CHECK(d.positionAt(static_cast<cursiv::TextOffset>(end)) ==
+          (cursiv::Position{0, column}));
+    CHECK(d.offsetAt({0, column + 1}) == end);
+    // An edit before the marks moves every column after it.
+    const cursiv::TextDocumentContentChangeEvent change{
+        cursiv::Range{{0, 0}, {0, 0}}, "\xf0\x9f\x98\x80"};
+    cursiv::TextDocument::update(d, std::span(&change, 1), 2);
+    CHECK(d.positionAt(static_cast<cursiv::TextOffset>(end + 4)) ==
+          (cursiv::Position{0, column + 2}));
+    CHECK(d.offsetAt({0, column + 2}) == end + 4);
+  }
+}
+
 void run() {
   identity_is_readonly();
   lines_and_columns();
@@ -5529,9 +5644,11 @@ void run() {
   an_ascii_line_answers_in_bytes();
   a_pair_across_a_word_still_counts_once();
   the_flag_holds_past_sixty_four_lines();
+  a_far_column_costs_a_block_of_its_line();
   the_word_count_answers_what_a_byte_walk_answers();
   an_ill_formed_subpart_is_one_replacement();
   ill_formed_text_answers_what_a_replacing_decoder_answers();
+  a_long_line_answers_what_a_replacing_decoder_answers();
   a_range_is_a_pair();
   changes_apply_in_order();
   ranged_changes_keep_the_lines_right();

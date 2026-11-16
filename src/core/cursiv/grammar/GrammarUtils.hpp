@@ -224,13 +224,27 @@ struct slot_decl_of<Overridden<R, O, B, I>>
 template <class R>
 using slot_decl_t = typename slot_decl_of<R>::type;
 
+// The declaration a converter comes from: the nearest override that states
+// one, else the rule as declared.
+template <class R, class D = slot_decl_t<R>>
+struct slot_holder {
+  using type = D;
+};
+template <class R>
+struct slot_holder<R, void> {
+  using type = declared_of_t<R>;
+};
+
+// Two parents agree when their rules carry one converter, wherever stated.
 template <class R, class Ws>
 struct slots_agree : std::true_type {};
 template <class R, class P, class... Ps>
 struct slots_agree<R, TypeList<P, Ps...>>
     : std::bool_constant<(
-          std::is_same_v<slot_decl_t<typename eff_rule<P, R>::type>,
-                         slot_decl_t<typename eff_rule<Ps, R>::type>> &&
+          std::is_same_v<
+              typename slot_holder<typename eff_rule<P, R>::type>::type::slot,
+              typename slot_holder<
+                  typename eff_rule<Ps, R>::type>::type::slot> &&
           ...)> {};
 
 template <class X, bool Node = std::is_same_v<typename X::kind, node_kind>>

@@ -230,10 +230,45 @@ void an_unwind_keeps_its_parents_when_the_arena_grows(const World& world) {
   }
 }
 
+// A keyword typed with an escape is matched by the text the parser read.
+void an_escaped_prefix_matches_the_decoded_keyword() {
+  // `\\u` and four hex digits spell one ASCII letter.
+  const auto escapes = [](std::string_view source,
+                          cursiv::SourceTranslation& out) {
+    for (auto at = source.find("\\u"); at != std::string_view::npos;
+         at = source.find("\\u", at + 6))
+      out.replace(at, at + 6,
+                  std::string(1, static_cast<char>(std::stoi(
+                                     std::string(source.substr(at + 2, 4)),
+                                     nullptr, 16))));
+  };
+  struct Translated : support::World<cursiv::SharedLspServices> {
+    cursiv::LspServices* lang = nullptr;
+  } world;
+  world.lang = &support::add_language<cursiv::LspServices>(
+      world.shared, {"caret", {".caret"}, {}}, g::create_parser(),
+      g::create_ast_reflection(), [&](cursiv::LspServices& services) {
+        services.parser =
+            cursiv::translating_parser(std::move(services.parser), escapes);
+      });
+  bool offered = false;
+  (void)cursiv::test::expectCompletion(
+      *world.lang, cursiv::test::ExpectedCompletionCallback{
+                       .text = "f\\u006e<|>",
+                       .assertion =
+                           [&](const lsp::CompletionList& list) {
+                             for (const lsp::CompletionItem& it : list.items)
+                               offered = offered || it.label == "fn";
+                           },
+                       .disposeAfterCheck = true});
+  CHECK(offered);
+}
+
 }  // namespace
 
 void run() {
   const World world;
+  an_escaped_prefix_matches_the_decoded_keyword();
   a_repair_behind_the_caret_does_not_silence_it(world);
   a_repair_beside_a_two_token_cell_offers_nothing_new();
   an_unwind_keeps_its_parents_when_the_arena_grows(world);
