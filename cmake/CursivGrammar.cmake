@@ -45,6 +45,7 @@ function(cursiv_generator_build target engine)
   target_link_libraries(${target} PRIVATE cursiv::core ${_lib})
   target_compile_options(${target} PRIVATE -O0 -pipe
       $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fbracket-depth=16384>
+      $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fconstexpr-steps=2147483647>
       $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=2147483647>
       $<$<CXX_COMPILER_ID:GNU>:--param=ggc-min-expand=200>
       $<$<CXX_COMPILER_ID:GNU>:--param=ggc-min-heapsize=1000000>)
