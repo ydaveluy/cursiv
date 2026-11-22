@@ -30,8 +30,8 @@ namespace {
 
 template<class Context>
 void branch(Forks<Reading, Context>& forks, const Explorer& x, Context context) {
-  if (x.rereads && !forks.enter(x, x.arms)) return;
-  Reading r = x;
+  if (x.rereads && !forks.enter(x.reading(), x.arms)) return;
+  Reading r = x.reading();
   for (auto i = x.armCount; i-- > 0;) {
     r.resume = x.arms + i;
     forks.open.push_back({r, context});
@@ -151,7 +151,7 @@ class Stand : private Machine::CaretTests {
           if (added) _readers.push_back({node, from, indent, x.taken.terminal()});
           o.context.held = at->second;
         }
-        Reading next = x;
+        Reading next = x.reading();
         next.tok = {nullptr, 0};
         open.push_back({next, o.context});
       } else if (exit == Exit::refused && x.tok.terminal() == m.ended &&

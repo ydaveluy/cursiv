@@ -385,14 +385,14 @@ class Emitter {
     std::vector<std::vector<std::uint16_t>> declared(ntypes);
     _writes.resize(ntypes);
     _held.resize(ntypes);
-    for (std::uint16_t t = 0; t < ntypes; ++t)
+    for (std::size_t t = 0; t < ntypes; ++t)
       for (const AstTypeTag* const base : std::span(_types[t]->bases, _types[t]->baseCount))
         if (const auto known = _typeNumber.find(base); known != _typeNumber.end()) {
-          _subtypes[known->second].push_back(t);
+          _subtypes[known->second].push_back(static_cast<std::uint16_t>(t));
           _bases[t].push_back(known->second);
         }
-    for (std::uint16_t m = 0; m < _members.size(); ++m)
-      declared[_typeNumber.at(_members[m]->owner)].push_back(m);
+    for (std::size_t m = 0; m < _members.size(); ++m)
+      declared[_typeNumber.at(_members[m]->owner)].push_back(static_cast<std::uint16_t>(m));
     for (std::vector<std::uint16_t>& members : declared)
       std::ranges::stable_sort(members, {}, [&](std::uint16_t m) { return _members[m]->offset(); });
     for (std::size_t action = 0; action < _rows.size(); ++action) {
@@ -618,7 +618,7 @@ class Emitter {
     table("const AstTypeTag*", "kTypes", _typeWhere, "nullptr");
     // Every class that is one, itself first.
     std::vector<std::string> sets;
-    for (std::uint16_t t = 0; t < ntypes; ++t) {
+    for (std::size_t t = 0; t < ntypes; ++t) {
       std::vector<std::string> subs{"kTypes[" + std::to_string(t) + "]"};
       for (const std::uint16_t s : _subtypes[t]) subs.push_back("kTypes[" + std::to_string(s) + "]");
       const std::string name = "kSubtypes" + std::to_string(t);
@@ -631,7 +631,7 @@ class Emitter {
     std::vector<std::uint64_t> accept;
     std::vector<std::uint16_t> single;
     bool multi = false;
-    for (std::uint16_t m = 0; m < _members.size(); ++m) {
+    for (std::size_t m = 0; m < _members.size(); ++m) {
       const MemberDesc& member = *_members[m];
       const std::string a = row(_memberAction[m]);
       std::vector<std::uint16_t> targets;
@@ -647,7 +647,8 @@ class Emitter {
       yields.push_back(holds_nodes(member) ? a + ".yield" : "nullptr");
       if (m >= _references) continue;
       multi = multi || detail::is_multi_ref_content(member.content);
-      if (member.content == FieldContent::reference) single.push_back(m);
+      if (member.content == FieldContent::reference)
+        single.push_back(static_cast<std::uint16_t>(m));
       tags.push_back(a + ".referenceTag");
       // What a site of the member accepts: its candidates and their subtypes.
       std::vector<std::uint64_t> bits(words, 0);
@@ -688,14 +689,14 @@ class Emitter {
       if (kind == WriteKind::create || kind == WriteKind::climb || kind == WriteKind::nest)
         makes[_typeNumber.at(_rows[action]->type)] = row(action) + ".make";
     }
-    const auto rows_of = [&](std::string_view prefix, std::uint16_t type,
+    const auto rows_of = [&](std::string_view prefix, std::size_t type,
                              const std::vector<std::uint16_t>& members) -> std::string {
       if (members.empty()) return "{}";
       const std::string name = std::string(prefix) + std::to_string(type);
       table("::std::uint16_t", name, members, "0");
       return "::std::span<const ::std::uint16_t>(" + name + ")";
     };
-    for (std::uint16_t t = 0; t < ntypes; ++t) {
+    for (std::size_t t = 0; t < ntypes; ++t) {
       std::vector<std::uint16_t> refs, children;
       if (_held[t].empty()) {
         properties.push_back("{}");

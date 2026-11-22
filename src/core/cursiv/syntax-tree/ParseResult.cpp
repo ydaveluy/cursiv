@@ -34,7 +34,7 @@ std::string_view ParseResult::Tree::keepText(std::span<const std::string_view> p
     }
   };
   std::size_t spare = 0;
-  if (middle < parts.size()) {
+  if (last != nullptr && middle < parts.size()) {
     const auto suffix = size - prefix - last->text.size();
     const auto storage = last->storage;
     const auto left = static_cast<std::size_t>(last->text.data() - storage.data());

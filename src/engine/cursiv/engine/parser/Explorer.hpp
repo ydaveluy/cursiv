@@ -233,6 +233,9 @@ struct Reading {
   const char* at = nullptr;
   Token tok{nullptr, 0};
   Indented indented{};
+  // This part of a derived run, copied or assigned as a whole.
+  Reading& reading() noexcept { return *this; }
+  const Reading& reading() const noexcept { return *this; }
   auto site(std::uint32_t first) const {
     return std::tuple(node, first, at, tok.end, tok.head, indented.level, indented.depth);
   }

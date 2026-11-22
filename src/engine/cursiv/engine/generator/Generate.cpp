@@ -715,7 +715,8 @@ int generate(GrammarImage& image, const LowerDesc& desc, const LanguageNames& na
       const std::size_t nterms = cfg.terminals.size();
       LexDfa dfa = [&] {
         LexAutomatonBuilder lexer(image);
-        for (std::uint16_t t = 1; t < nterms; ++t) lexer.add(t, cfg.terminals[t]);
+        for (std::size_t t = 1; t < nterms; ++t)
+          lexer.add(static_cast<std::uint16_t>(t), cfg.terminals[t]);
         // The patterns the gap tests read are read by the lexer's monitors.
         for (Production& p : cfg.productions)
           for (Test& test : p.tests)
@@ -727,7 +728,7 @@ int generate(GrammarImage& image, const LowerDesc& desc, const LanguageNames& na
         return lexer.build(nterms);
       }();
       Bits always(nterms);
-      for (std::uint16_t t = 1; t < nterms; ++t)
+      for (std::size_t t = 1; t < nterms; ++t)
         if (cfg.terminals[t].trivia != Trivia::none && cfg.terminals[t].twin == 0) always.set(t);
       split_leads(cfg);
       const LexRivals rivals = lex_rivals(image, cfg, dfa);

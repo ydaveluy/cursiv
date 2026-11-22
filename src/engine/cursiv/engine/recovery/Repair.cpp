@@ -566,7 +566,7 @@ Exit Repair::step(Candidate& r) {
   if (r.pin == Pin::reread && (r.tok.head & kReplaced) &&
       (exit == Exit::accepted || !((exit == Exit::shifted ? x.taken.head : x.tok.head) & kReplaced)))
     return Exit::refused;
-  static_cast<Reading&>(r) = x;
+  r.reading() = x.reading();
   r.held = exit == Exit::refused || exit == Exit::split;
   if (r.held) return exit;
   if (exit == Exit::accepted) {
@@ -1052,7 +1052,7 @@ std::uint32_t Repair::run(bool& exhausted, bool& raced) {
         best.done = true;
         continue;
       }
-      if (exit == Exit::shifted) static_cast<Reading&>(best) = proof;
+      if (exit == Exit::shifted) best.reading() = proof.reading();
       else best.node = kNoStack;
     }
     if (spent()) {

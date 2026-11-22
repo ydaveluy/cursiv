@@ -212,7 +212,7 @@ bool Machine::settles(std::uint32_t list, const char* p, LexWork* work) {
     const char* q = p;
     for (;; ++q) {
       if (q == bound) {
-        if (q != end) {
+        if (work != nullptr && q != end) {
           work->spend(q - p + 1);
           return false;
         }

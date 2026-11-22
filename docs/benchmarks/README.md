@@ -48,15 +48,15 @@ i9-13900K. The benchmark generated the documents and ran each case five times.
 
 ### One document
 
-Phase times of the fastest build of a 4 MiB document, in milliseconds. Cycles
-per byte cover parsing and indexing. Throughput covers the whole build.
+Phase times of the fastest build of a 4 MiB document, in milliseconds.
+Throughput covers the whole build.
 
-| Language | Parse + index | Cycles/byte | Scopes | Link | Validation | Build | MiB/s |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Arithmetics | 31.9 | 35.62 | 3.2 | 4.5 | 25.3 | 64.9 | 62 |
-| DomainModel | 5.8 | 8.76 | 3.0 | 1.8 | 3.1 | 13.7 | 291 |
-| Requirements | 5.1 | 6.85 | 1.7 | 1.6 | 3.0 | 11.4 | 350 |
-| Statemachine | 4.8 | 6.31 | 1.2 | 2.1 | 2.7 | 10.7 | 372 |
+| Language | Parse + index | Scopes | Link | Validation | Build | MiB/s |
+|---|---:|---:|---:|---:|---:|---:|
+| Arithmetics | 31.9 | 3.2 | 4.5 | 25.3 | 64.9 | 62 |
+| DomainModel | 5.8 | 3.0 | 1.8 | 3.1 | 13.7 | 291 |
+| Requirements | 5.1 | 1.7 | 1.6 | 3.0 | 11.4 | 350 |
+| Statemachine | 4.8 | 1.2 | 2.1 | 2.7 | 10.7 | 372 |
 
 These builds produced 4,984 diagnostics for Arithmetics, none for DomainModel,
 70,067 for Requirements and 14,528 for Statemachine.

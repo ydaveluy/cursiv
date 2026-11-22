@@ -691,7 +691,7 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
           open.push_back({start, route});
           open.back().reading.path = kNoStack;
         }
-        Ahead r{x, x.arm, x.taken, x.invented, start.path};
+        Ahead r{x.reading(), x.arm, x.taken, x.invented, start.path};
         std::uint32_t begin = x.arms, end = begin + x.armCount;
         const bool fallback = exit == Exit::split && x.rereads &&
                               !eligible(text, stacks, x, begin, end, x.rereads);
@@ -995,7 +995,7 @@ bool Machine::reads(std::uint32_t state, const char* from, Token tok, Indented i
         if (exit == Exit::accepted || exit == Exit::refused) {
           told = exit == Exit::accepted;
         } else {
-          r = x;
+          r = x.reading();
           if (exit == Exit::shifted) a.open.push_back({r, link, o.tokens + 1});
           for (auto arm = end; arm-- > first;) {
             r.resume = arm;
@@ -1098,7 +1098,7 @@ bool takes(Machine& text, Cactus& stacks, const Reading& from,
   Routes routes;
   const auto eligible = [&](const Explorer& split, bool taken) {
     const auto boundary = split.arms + split.armCount - split.rereads;
-    q.open.push_back({split, taken ? split.arms : boundary,
+    q.open.push_back({split.reading(), taken ? split.arms : boundary,
                      taken ? boundary : split.arms + split.armCount});
   };
   for (;;) {
@@ -1150,7 +1150,7 @@ bool takes(Machine& text, Cactus& stacks, const Reading& from,
     const auto site = x.site(x.arms);
     if (!q.seen.insert(site).second) continue;
     if (!x.rereads) {
-      q.open.push_back({x, x.arms, x.arms + x.armCount});
+      q.open.push_back({x.reading(), x.arms, x.arms + x.armCount});
     } else if (q.terminal == kNoToken && same(x.tok)) {
       // Re-lexing excludes the held token. Only ordinary actions can establish this answer.
       eligible(x, true);
@@ -1158,7 +1158,7 @@ bool takes(Machine& text, Cactus& stacks, const Reading& from,
       const auto [answer, fresh] = answers.try_emplace(site, std::nullopt);
       if (fresh) {
         pending.push_back({std::move(q), x, answer});
-        q = {x.tok, kNoToken, {{x, x.arms, x.arms + x.armCount - x.rereads}}};
+        q = {x.tok, kNoToken, {{x.reading(), x.arms, x.arms + x.armCount - x.rereads}}};
       } else if (answer->second) {
         eligible(x, *answer->second);
       }

@@ -24,7 +24,11 @@ struct Members {
   using Blocks = std::map<unsigned, std::uint64_t>;
   std::unique_ptr<Blocks> rest;
 
-  Members clone() const { return {bits, first, rest ? std::make_unique<Blocks>(*rest) : nullptr}; }
+  Members clone() const {
+    Members copy{bits, first, nullptr};
+    if (rest) copy.rest = std::make_unique<Blocks>(*rest);
+    return copy;
+  }
 
   std::uint64_t get(unsigned block) const {
     if (block == first) return bits;

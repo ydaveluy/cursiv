@@ -131,7 +131,9 @@ const std::string& white_space_spelling() {
 
 // Print a scalar class in its ASCII, shorthand or Unicode-property form.
 void emit_class(std::string& out, const ImageClassDesc& cls) {
-  const auto& [props, complement, scalars] = cls;
+  const std::uint64_t props = cls.props;
+  const bool complement = cls.complement;
+  const std::string_view scalars = cls.scalars;
   if (props == 0 && complement && scalars.empty()) {
     out += '.';
     return;

@@ -159,7 +159,7 @@ std::vector<std::set<std::uint32_t>> record_shapes(Cfg& cfg, Packed& out) {
 // of a bare leaf.
 void terminal_facts(const Cfg& cfg, Packed& out) {
   const std::size_t nterms = cfg.terminals.size();
-  for (std::uint16_t t = 0; t < nterms; ++t) {
+  for (std::size_t t = 0; t < nterms; ++t) {
     const Terminal& term = cfg.terminals[t];
     out.terminalTrivia.push_back(term.trivia);
     out.terminalRank.push_back(lexical_rank(term.trivia, term.literal()));
@@ -819,7 +819,7 @@ void lexer_modes(const Cfg& cfg, const LexDfa& dfa, const std::vector<RivalRow>&
   std::vector<std::vector<std::uint16_t>> peers(nterms);
   std::vector<PackedAction> actions;
   Bits trivia(nterms), twins(nterms), passed(nterms);
-  for (std::uint16_t t = 1; t < nterms; ++t) {
+  for (std::size_t t = 1; t < nterms; ++t) {
     if (cfg.terminals[t].twin != 0)
       twins.set(t);
     else if (cfg.terminals[t].trivia != Trivia::none)
@@ -1031,13 +1031,12 @@ void lexer_modes(const Cfg& cfg, const LexDfa& dfa, const std::vector<RivalRow>&
   }
   for (Bits& set : sets) setModes.push_back(intern(std::move(set), none));
   // A fault mode reads its own faults.
-  for (auto mode = static_cast<std::uint16_t>(out.modeFault.size()); mode < modeTerminals.size();
-       ++mode)
-    out.modeFault.push_back(mode);
+  for (std::size_t mode = out.modeFault.size(); mode < modeTerminals.size(); ++mode)
+    out.modeFault.push_back(static_cast<std::uint16_t>(mode));
   out.modeCount = static_cast<std::uint16_t>(modeTerminals.size());
   for (const Bits& read : modeTerminals) {
     bool all = true;
-    for (std::uint16_t t = 1; t < nterms; ++t) {
+    for (std::size_t t = 1; t < nterms; ++t) {
       const Terminal& term = cfg.terminals[t];
       all = all && (term.trivia != Trivia::ignored || term.twin != 0 || read.test(t)) &&
             !(term.twin != 0 && term.trivia == Trivia::none && read.test(t));
@@ -1132,7 +1131,7 @@ void mode_wins(const Cfg& cfg, const LexDfa& dfa,
   std::vector<bool> beside(cfg.terminals.size(), false);
   {
     Bits trivia(cfg.terminals.size());
-    for (std::uint16_t t = 1; t < cfg.terminals.size(); ++t)
+    for (std::size_t t = 1; t < cfg.terminals.size(); ++t)
       if (cfg.terminals[t].trivia != Trivia::none) trivia.set(t);
     for (const Bits& reach : dfa.reach) out.lexTrivia.push_back(reach.intersects(trivia));
     for (std::size_t s = 1; s < dfa.nstates(); ++s)
@@ -1700,12 +1699,12 @@ void check_section_ends(const Cfg& cfg, const LexDfa& dfa, Packed& out) {
       auto& [ends, modes] = it->second;
       if (!modes.insert(state.mode).second) continue;
       if (fresh) ends = overlaps(end);
-      for (std::uint16_t t = 1; t < cfg.terminals.size(); ++t) {
+      for (std::size_t t = 1; t < cfg.terminals.size(); ++t) {
         if (t == end || cfg.terminals[t].twin == end || !out.modeTerminals[state.mode].test(t)) continue;
         if (ends.certain.test(t))
           throw Refused("the grammar closes a `section<>` on a token that the embedded grammar "
                         "also reads, or that starts one of its tokens");
-        if (ends.possible.test(t) && warned.emplace(end, t).second)
+        if (ends.possible.test(t) && warned.emplace(end, static_cast<std::uint16_t>(t)).second)
           out.warnings.push_back("terminal `" + cfg.terminals[end].name +
                                  "` closes a `section<>`, but the generator could not check that `" +
                                  cfg.terminals[t].name +
@@ -1725,7 +1724,7 @@ void dropped_bytes(const Cfg& cfg, const LexDfa& dfa, Packed& out) {
   const std::vector<Bits>& reach = dfa.reach;
   // A twin reads where its terminal does, which decides.
   Bits ignored(nterms);
-  for (std::uint16_t t = 1; t < nterms; ++t)
+  for (std::size_t t = 1; t < nterms; ++t)
     if (cfg.terminals[t].trivia == Trivia::ignored || cfg.terminals[t].twin != 0) ignored.set(t);
   const unsigned nclasses = dfa.nclasses;
   std::vector<bool> dropped(nclasses, false);
@@ -1788,12 +1787,13 @@ LexRivals lex_rivals(const GrammarImage& image, const Cfg& cfg, const LexDfa& df
   std::vector<bool> word(dfa.nclasses, false);
   for (unsigned b = 0; b < 256; ++b)
     if (bytes[b] != 0) word[dfa.classOf[b]] = true;
-  const auto add = [](RivalRow& row, std::uint16_t block, std::uint64_t bits) {
+  const auto add = [](RivalRow& row, std::size_t block, std::uint64_t bits) {
     if (!bits) return;
-    if (row.empty() || row.back().first != block) row.emplace_back(block, 0);
+    if (row.empty() || row.back().first != block)
+      row.emplace_back(static_cast<std::uint16_t>(block), 0);
     row.back().second |= bits;
   };
-  for (std::uint16_t block = 0; block < (nterms + 63) / 64; ++block) {
+  for (std::size_t block = 0; block < (nterms + 63) / 64; ++block) {
     for (std::size_t s = 1; s < dfa.nstates(); ++s) {
       const auto& accepts = dfa.acceptSets[dfa.acceptSet[s]];
       if (accepts.empty()) continue;
