@@ -152,10 +152,10 @@ void other_cases_are_every_scalar_folding_alike() {
 
 // A long text without a letter that has another case is read fast.
 void a_text_without_cased_letters_is_read_fast() {
-#if defined(__wasi__) && !defined(NDEBUG)
-  constexpr int kSlowdown = 10;  // unoptimised wasm
-#else
+#ifdef NDEBUG
   constexpr int kSlowdown = 1;
+#else
+  constexpr int kSlowdown = 10;  // unoptimised code
 #endif
   std::string han;
   for (std::size_t i = 0; i < 250000; ++i) han += "漢字書文";

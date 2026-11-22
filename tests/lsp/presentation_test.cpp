@@ -62,11 +62,11 @@
 
 namespace {
 
-// Unoptimised wasm runs the same work several times slower.
-#if defined(__wasi__) && !defined(NDEBUG)
-constexpr int kSlowdown = 10;
-#else
+// Unoptimised code runs the same work many times slower.
+#ifdef NDEBUG
 constexpr int kSlowdown = 1;
+#else
+constexpr int kSlowdown = 10;
 #endif
 
 // A new URI for each document, so tests never share one.
