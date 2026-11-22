@@ -20,14 +20,19 @@ else()
   set(CURSIV_HOST_DIR "${CMAKE_BINARY_DIR}/host-tools" CACHE INTERNAL "")
 endif()
 
+# The compile-time limits of a unit that evaluates a large grammar's analysis:
+# its generator, and the generated library that reads the grammar again.
+set(CURSIV_CONSTEXPR_LIMITS
+    "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-fconstexpr-steps=2147483647>"
+    "$<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=2147483647>"
+    CACHE INTERNAL "")
+
 # What a target holding generators links and is compiled with. Generators run
 # briefly; large grammars need generous compile-time limits.
 function(cursiv_generator_build target)
   target_link_libraries(${target} PRIVATE cursiv::core cursiv::gen)
-  target_compile_options(${target} PRIVATE -O0 -pipe
+  target_compile_options(${target} PRIVATE -O0 -pipe ${CURSIV_CONSTEXPR_LIMITS}
       $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fbracket-depth=16384>
-      $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fconstexpr-steps=2147483647>
-      $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=2147483647>
       $<$<CXX_COMPILER_ID:GNU>:--param=ggc-min-expand=200>
       $<$<CXX_COMPILER_ID:GNU>:--param=ggc-min-heapsize=1000000>)
   set_target_properties(${target} PROPERTIES CXX_SCAN_FOR_MODULES OFF)
@@ -356,6 +361,7 @@ function(_cursiv_generate_language test_only)
       $<$<AND:$<PLATFORM_ID:WASI>,$<CXX_COMPILER_ID:Clang>>:-mtail-call;-fno-optimize-sibling-calls>
       $<$<CXX_COMPILER_ID:GNU>:-fno-var-tracking>)
   target_include_directories(${_name}Generated PUBLIC ${_roots})
+  target_compile_options(${_name}Generated PRIVATE ${CURSIV_CONSTEXPR_LIMITS})
   target_link_libraries(${_name}Generated PUBLIC cursiv::engine)
   set_target_properties(${_name}Generated PROPERTIES
       CURSIV_GENERATED_DIR ${_dir}
