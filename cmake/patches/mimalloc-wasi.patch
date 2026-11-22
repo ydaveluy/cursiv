@@ -43,10 +43,46 @@ index ce72aa51..5fb66bf0 100644
    // count the slices spanned by `[page_start, page_start + page_size)` exactly
    const mi_addr_t start = mi_addr(page_start);
 diff --git a/src/prim/wasi/prim.c b/src/prim/wasi/prim.c
-index e16d6c23..b464a035 100644
+index e16d6c23..3d2da57d 100644
 --- a/src/prim/wasi/prim.c
 +++ b/src/prim/wasi/prim.c
-@@ -124,7 +124,8 @@ static void* mi_prim_mem_grow(size_t size, size_t try_alignment) {
+@@ -67,8 +67,34 @@ int _mi_prim_free(void* addr, size_t size ) {
+ static pthread_mutex_t mi_theap_grow_mutex = PTHREAD_MUTEX_INITIALIZER;
+ #endif
+ 
+-static void* mi_prim_mem_grow(size_t size, size_t try_alignment) {
++// The free part of the module's initial memory, from the linker: used before
++// growing the memory, as wasi-libc's malloc does.
++extern unsigned char __heap_base;
++extern unsigned char __heap_end;
++static uintptr_t mi_initial_next;
++
++static void* mi_initial_take(size_t size, size_t try_alignment) {
++  const size_t alignment = (try_alignment > _mi_os_page_size() ? try_alignment : _mi_os_page_size());
++  const uintptr_t end = (uintptr_t)&__heap_end;
+   void* p = NULL;
++  #if defined(MI_USE_PTHREADS)
++  pthread_mutex_lock(&mi_theap_grow_mutex);
++  #endif
++  if (mi_initial_next == 0) { mi_initial_next = (uintptr_t)&__heap_base; }
++  const uintptr_t start = mi_align_up(mi_initial_next, alignment);
++  if (start <= end && size <= end - start) {
++    mi_initial_next = start + size;
++    p = (void*)start;
++  }
++  #if defined(MI_USE_PTHREADS)
++  pthread_mutex_unlock(&mi_theap_grow_mutex);
++  #endif
++  return p;
++}
++
++static void* mi_prim_mem_grow(size_t size, size_t try_alignment) {
++  void* p = mi_initial_take(size, try_alignment);
++  if (p != NULL) return p;
+   if (try_alignment <= 1) {
+     // `sbrk` is not thread safe in general so try to protect it (we could skip this on WASM but leave it in for now)
+     #if defined(MI_USE_PTHREADS)
+@@ -124,7 +150,8 @@ static void* mi_prim_mem_grow(size_t size, size_t try_alignment) {
  int _mi_prim_alloc(void* hint_addr, size_t size, size_t try_alignment, bool commit, bool allow_large, bool* is_large, bool* is_zero, void** addr) {
    MI_UNUSED(allow_large); MI_UNUSED(commit); MI_UNUSED(hint_addr);
    *is_large = false;
@@ -56,7 +92,7 @@ index e16d6c23..b464a035 100644
    *addr = mi_prim_mem_grow(size, try_alignment);
    return (*addr != NULL ? 0 : ENOMEM);
  }
-@@ -251,28 +252,19 @@ void _mi_prim_out_stderr( const char* msg ) {
+@@ -251,28 +278,19 @@ void _mi_prim_out_stderr( const char* msg ) {
  // Environment
  //----------------------------------------------------------------
  
@@ -94,7 +130,7 @@ index e16d6c23..b464a035 100644
  }
  
  
-@@ -289,6 +281,44 @@ bool _mi_prim_random_buf(void* buf, size_t buf_len) {
+@@ -289,6 +307,44 @@ bool _mi_prim_random_buf(void* buf, size_t buf_len) {
  // Thread init/done
  //----------------------------------------------------------------
  
@@ -139,7 +175,7 @@ index e16d6c23..b464a035 100644
  void _mi_prim_thread_init_auto_done(void) {
    // nothing
  }
-@@ -301,6 +331,8 @@ void _mi_prim_thread_associate_default_theap(mi_theap_t* theap) {
+@@ -301,6 +357,8 @@ void _mi_prim_thread_associate_default_theap(mi_theap_t* theap) {
    MI_UNUSED(theap);
  }
  

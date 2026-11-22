@@ -125,7 +125,7 @@ it to the aggregate `bench` target. Declare `mylangLsp` first.
 | `CURSIV_HOST_TOOLS` | — | When cross-compiling, run the parser generators from this existing native build instead of building them in `host-tools/` inside the build directory. |
 | `CURSIV_LR_MAX_STATES` | `0` (no cap) | Set the default state limit for language generation. |
 | `CURSIV_WASI_THREADS` | `ON` with the WASI toolchain | Build the threaded WebAssembly target, which the packaged language server needs. Set it only with the WASI toolchain. |
-| `CURSIV_WASI_MAX_MEMORY` | `2147483648` (2 GiB) with WASI threads | Set the shared-memory limit in bytes. |
+| `CURSIV_WASI_MAX_MEMORY` | `2147483648` (2 GiB) with WASI threads | Set the size of the shared memory in bytes. The server reserves all of it at startup; pages it never uses take no physical memory. |
 | `CURSIV_WASI_STACK` | `1048576` (1 MiB) with the WASI toolchain | Set the main thread's stack size in bytes. |
 | `WASI_SDK` | Environment or conventional install location | Select the wasi-sdk directory; see [WebAssembly](../recipes/wasm.md). |
 

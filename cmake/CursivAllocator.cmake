@@ -63,9 +63,9 @@ target_compile_options(cursivAllocator PRIVATE -w)
 set_target_properties(cursivAllocator PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
-  # mimalloc's WASI port lacks locks, thread exit and arena reuse for large
-  # alignments, and clears new memory that is already zero: the patch fixes
-  # them. A tree it already patched is left as it is.
+  # mimalloc's WASI port lacks locks, thread exit, arena reuse for large
+  # alignments and the module's initial memory, and clears new memory that is
+  # already zero: the patch fixes them. A tree it already patched is left as it is.
   find_package(Git REQUIRED)
   set(_patch "${CMAKE_CURRENT_LIST_DIR}/patches/mimalloc-wasi.patch")
   execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check "${_patch}"

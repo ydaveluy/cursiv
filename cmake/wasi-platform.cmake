@@ -53,11 +53,12 @@ if(CURSIV_WASI_THREADS)
   # selects libpthread and shared memory; the memory must also be imported so
   # the runner can hand it to each worker.
   add_compile_options(-pthread)
-  # A shared memory declares its maximum at link time: a cap, not a
-  # reservation, a multiple of 65536 up to 4 GiB.
+  # The shared memory starts at its full size, a multiple of 65536 up to 4 GiB,
+  # and never grows: V8 shows the pages one thread adds late to the atomic and
+  # bulk-memory accesses of the others. Untouched pages use no physical memory.
   set(CURSIV_WASI_MAX_MEMORY 2147483648 CACHE STRING
-      "Shared-memory maximum handed to the linker (bytes)")
-  add_link_options("LINKER:--import-memory,--max-memory=${CURSIV_WASI_MAX_MEMORY}")
+      "Shared-memory size handed to the linker (bytes)")
+  add_link_options("LINKER:--import-memory,--initial-memory=${CURSIV_WASI_MAX_MEMORY},--max-memory=${CURSIV_WASI_MAX_MEMORY}")
 endif()
 # The linker's default stack is 64 KiB, which recursive AST walks and large
 # frames overrun: past it the stack pointer wraps into data and a store traps.
