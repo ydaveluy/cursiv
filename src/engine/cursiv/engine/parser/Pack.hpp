@@ -7,6 +7,7 @@
 #include <map>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -327,7 +328,18 @@ struct PrefixPredictions {
   std::vector<std::vector<std::uint32_t>> actions;
   // By reader's stack, the frames under it last.
   std::map<std::vector<std::uint32_t>, Row> rows;
-  std::map<std::vector<std::uint8_t>, std::uint32_t> shifts;
+  // Rows ordered by their bytes read as text: the vectors' own order, whose
+  // comparison some GCC releases flag at -O3.
+  struct BytesLess {
+    bool operator()(const std::vector<std::uint8_t>& a,
+                    const std::vector<std::uint8_t>& b) const noexcept {
+      const auto text = [](const std::vector<std::uint8_t>& v) {
+        return std::string_view(reinterpret_cast<const char*>(v.data()), v.size());
+      };
+      return text(a) < text(b);
+    }
+  };
+  std::map<std::vector<std::uint8_t>, std::uint32_t, BytesLess> shifts;
   std::map<std::vector<std::array<std::uint32_t, 2>>, std::uint32_t> plans;
   std::map<std::vector<std::uint32_t>, std::uint32_t> stacks;
   struct Path {
