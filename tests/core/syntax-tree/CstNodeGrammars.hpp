@@ -55,7 +55,16 @@ struct InfixG : cursiv::GrammarSpec {
   struct RightPrimary
       : rule<create<ast::Expr>(assign<&ast::Expr::value>(ref<NUM>))> {};
   struct RightExpr : infix<RightPrimary, ast::Expr, right(lit<"^">)> {};
-  struct Root : rule<ref<Expr> | (lit<"~"> + ref<RightExpr>)> {};
+  struct Wrapped : rule<create<ast::Expr>(assign<&ast::Expr::left>(
+      create<ast::Expr>(assign<&ast::Expr::value>(lit<"v">))))> {};
+  struct Adopted : rule<lit<"@"> + ref<Wrapped> + assign<&ast::Expr::op>(lit<"!">)> {};
+  struct Chained : rule<lit<"{"> + ref<Adopted> + assign<&ast::Expr::value>(lit<"}">)> {};
+  struct Repeated : rule<create<ast::Expr>(assign<&ast::Expr::left>(create<ast::Expr>(
+      assign<&ast::Expr::left>(create<ast::Expr>(assign<&ast::Expr::value>(lit<"w">))))))> {};
+  struct Bracketed : rule<create<ast::Expr>(assign<&ast::Expr::left>(
+      lit<"["> + create<ast::Expr>(assign<&ast::Expr::value>(lit<"b">)) + lit<"]">))> {};
+  struct Root : rule<ref<Expr> | (lit<"~"> + ref<RightExpr>) |
+                     ref<Wrapped> | ref<Adopted> | ref<Chained> | ref<Repeated> | ref<Bracketed>> {};
   using entry = Root;
   using ignored = WS;
 };

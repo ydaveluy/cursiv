@@ -14,19 +14,14 @@ terminal `WS`. Include its header, then declare the derived grammar:
 namespace json5 {
 
 struct JSON5 : cursiv::extends<json::JSON> {
-  template <class>
-  struct override;
-
-  template <class T>
-    requires std::same_as<T, JSON::WS>
-  struct override<T> : terminal<some(cr<R"( \t\n\r\v\f)"> | lit<"\xc2\xa0">
-                                     | lit<"\xef\xbb\xbf">)> {};
+  static constexpr auto extra_space = lit<"\xc2\xa0"> | lit<"\xef\xbb\xbf">;
+  using overrides = list<replace<JSON::WS, terminal<some(cr<R"( \t\n\r\v\f)"> | extra_space)>>>;
 };
 
 }  // namespace json5
 ```
 
-The `requires` clause names the base rule to replace. This `WS` also accepts
+Each `replace` pairs a target rule with its new definition. This `WS` also accepts
 non-breaking spaces and a byte-order mark, and every use of `JSON::WS` in the
 derived grammar gets it.
 
@@ -53,10 +48,7 @@ register its services.
 this one adds non-breaking spaces to the base's whitespace:
 
 ```cpp
-  template <class T>
-    requires std::same_as<T, JSON::WS>
-  struct override<T>
-      : terminal<lit<"\xc2\xa0"> | super> {};
+  using overrides = list<replace<JSON::WS, terminal<lit<"\xc2\xa0"> | super>>>;
 ```
 
 An override keeps the base rule's converter unless it supplies one with
@@ -91,6 +83,10 @@ generated. To parse a smaller piece, such as one expression typed in a REPL,
 derive a grammar that names that rule as its entry:
 
 ```cpp title="src/core/arithmetics/ExpressionGrammar.hpp"
+#pragma once
+
+#include "arithmetics/ArithmeticsGrammar.hpp"
+
 namespace arith {
 
 struct ArithExpression : cursiv::extends<Arith> {
@@ -112,11 +108,12 @@ cursiv_generate_language(ID         arithexpr
 ```
 
 ```cpp
+#include "arithmetics/ast.hpp"
 #include "arithmetics/generated/ArithExpression/Module.hpp"
 
-const auto parser = arith::generated::ArithExpression::create_parser();
+const auto parser = arith::generated::ArithExpression::createParser();
 const cursiv::ParseResult result = parser->parse("1 + 2 * 3");
-const auto* expression = cursiv::ast_cast<arith::ast::Expression>(result.value);
+const auto* expression = result.valueAs<arith::ast::Expression>();
 ```
 
 The fragment's parser holds only the rules its entry reaches. Generate one

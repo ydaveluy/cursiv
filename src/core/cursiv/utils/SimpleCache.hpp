@@ -10,7 +10,9 @@ namespace cursiv {
 
 // A thread-safe memo: SimpleCache<Key, Value> keeps one answer per key,
 // SimpleCache<Value> a single answer. Values must not point into the cache
-// (a cached `string_view` dangles after `clear`); `Hash` must not throw.
+// (a cached `string_view` dangles after `clear`). `Hash` and `KeyEqual` are
+// default-constructed at each use, so all their instances must agree, and
+// `Hash` must not throw.
 template <class K, class V = void, class Hash = std::hash<K>,
           class KeyEqual = std::equal_to<K>>
 class SimpleCache {

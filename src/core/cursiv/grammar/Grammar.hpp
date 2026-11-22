@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -7,9 +8,11 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 
 // Type-erased questions about a grammar and the CST records its engine writes.
-// Implemented from a `GrammarMetaData`.
+// Implemented by the engine from the facts its generator writes.
 
 namespace cursiv {
+
+struct AstNode;
 
 struct Grammar {
   constexpr virtual ~Grammar() = default;
@@ -21,6 +24,11 @@ struct Grammar {
   // Whether the record writes that member into the node it created.
   constexpr virtual bool recordFills(const CstNode&,
                                      std::string_view) const noexcept = 0;
+  struct PropertySites {
+    bool here;
+    bool below;
+    const AstNode* nested = nullptr;
+  };
   // The rule whose value the record's span denotes: a terminal's own name, a
   // data rule's. Empty for a record that converts nothing.
   constexpr virtual std::string_view recordRule(
@@ -29,9 +37,12 @@ struct Grammar {
   // has no record of its own, so `recordRule` of its leaf names the terminal and
   // this still answers true.
   constexpr virtual bool recordIsDataRule(const CstNode&) const noexcept = 0;
+  // Whether the leaf is a token the grammar spells, a keyword or punctuation,
+  // and not text a named terminal read. False for a record with children.
+  constexpr virtual bool recordIsLiteral(const CstNode&) const noexcept = 0;
   // The member the record writes first: the innermost directive over it, the
   // one the token itself fills.
-  constexpr virtual std::string_view recordFeature(
+  constexpr virtual std::string_view recordProperty(
       const CstNode&) const noexcept = 0;
 
   // The bytes an editor would insert: each spelling of a literal, or of a
@@ -57,6 +68,11 @@ struct Grammar {
   // different texts. Empty for any other word, which `spellingDoc` answers.
   constexpr virtual std::string_view recordDoc(
       const CstNode&) const noexcept = 0;
+  // The node at this depth among the record's owners, outermost first.
+  constexpr virtual PropertySites propertySites(const CstNode& node, std::string_view member,
+                                                 std::size_t depth, const AstNode&) const noexcept {
+    return {depth == 0 && recordFills(node, member), true};
+  }
 };
 
 }  // namespace cursiv

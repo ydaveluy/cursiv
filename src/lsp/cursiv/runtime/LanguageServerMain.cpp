@@ -72,10 +72,10 @@ int run_completion(const CompletionQuery& query,
           ? std::filesystem::absolute(std::filesystem::path(*folderPath))
           : file.parent_path();
   const std::vector<WorkspaceFolder> folders{
-      {path_to_file_uri(folder.string()), {}}};
+      {pathToFileUri(folder.string()), {}}};
   shared.workspaceManager->initializeWorkspace(folders);
 
-  const std::string uri = path_to_file_uri(file.string());
+  const std::string uri = pathToFileUri(file.string());
   const std::shared_ptr<Document> document = shared.documents->getDocument(uri);
   if (document == nullptr) {
     std::cerr << "no such document in the workspace: " << uri << '\n';
@@ -121,20 +121,12 @@ int run_mcp(std::string_view folderPath, SharedLspServices& shared) {
   const std::filesystem::path folder =
       std::filesystem::absolute(std::filesystem::path(folderPath));
   const std::vector<WorkspaceFolder> folders{
-      {path_to_file_uri(folder.string()), {}}};
+      {pathToFileUri(folder.string()), {}}};
   shared.workspaceManager->initializeWorkspace(folders);
   const std::unique_ptr<const McpServer> server = service->createServer();
-  std::string line;
-  while (std::getline(std::cin, line)) {
-    if (line.empty()) continue;
-    if (const std::optional<std::string> answer = server->handleText(line)) {
-      std::cout << *answer << '\n' << std::flush;
-      // An answer that did not go out leaves the client waiting for it.
-      if (!std::cout) {
-        std::cerr << "cannot write the MCP answer\n";
-        return 1;
-      }
-    }
+  if (!server->serveStdio(std::cin, std::cout)) {
+    std::cerr << "cannot write the MCP answer\n";
+    return 1;
   }
   // Only the end of the input ends cleanly. `std::cin`, synced with C stdio,
   // reads a failed read as the end: `ferror` tells them apart.
@@ -156,7 +148,7 @@ int run_language_server_main_on(
   if (sharedServices.fileSystemProvider == nullptr)
     sharedServices.fileSystemProvider =
         std::make_unique<LocalFileSystemProvider>();
-  install_default_shared_lsp_services(sharedServices);
+  installDefaultSharedLspServices(sharedServices);
   try {
     if (registerLanguageServices) registerLanguageServices(sharedServices);
   } catch (const std::exception& error) {

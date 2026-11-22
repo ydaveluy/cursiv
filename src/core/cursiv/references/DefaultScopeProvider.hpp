@@ -23,11 +23,11 @@ class DefaultScopeProvider : public ScopeProvider,
 
   [[nodiscard]] bool visitScopeEntries(
       const ReferenceInfo& context,
-      cursiv::function_ref<bool(const AstNodeDescription&)> visitor)
+      cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor)
       const override;
   [[nodiscard]] bool visitScopeEntries(
       const ReferenceInfo& context, std::string_view name,
-      cursiv::function_ref<bool(const AstNodeDescription&)> visitor)
+      cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor)
       const override;
   ~DefaultScopeProvider() noexcept override = default;
 
@@ -48,11 +48,11 @@ class DefaultScopeProvider : public ScopeProvider,
   [[nodiscard]] virtual bool visitGlobalScopeEntries(
       const ReferenceInfo& context, AcceptSet accepts,
       const AstReflection& reflection,
-      cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const;
+      cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const;
   [[nodiscard]] virtual bool visitGlobalScopeEntries(
       const ReferenceInfo& context, std::string_view name, AcceptSet accepts,
       const AstReflection& reflection, bool caseSensitive,
-      cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const;
+      cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const;
 };
 
 }  // namespace cursiv

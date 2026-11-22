@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cassert>
+#include <limits>
 #include <memory>
+#include <new>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -13,15 +15,49 @@
 
 namespace cursiv {
 
-ParseResult::ParseResult()
-    : _cst(std::make_unique<Cst>()),
-      _arena(_cst->memory()),
-      _nodes(_cst->memory()) {}
+std::string_view ParseResult::Tree::keepText(std::span<const std::string_view> parts, Joined* last) const {
+  std::size_t size = 0, prefix = 0;
+  auto middle = parts.size();
+  for (std::size_t i = 0; i < parts.size(); ++i) {
+    const auto part = parts[i];
+    if (part.size() > std::numeric_limits<std::size_t>::max() - size) throw std::bad_alloc();
+    if (last && !part.empty() && part.data() == last->text.data() && part.size() == last->text.size()) {
+      middle = i;
+      prefix = size;
+    }
+    size += part.size();
+  }
+  const auto copy = [](char* dest, std::span<const std::string_view> from) {
+    for (const auto part : from) {
+      if (!part.empty()) std::char_traits<char>::copy(dest, part.data(), part.size());
+      dest += part.size();
+    }
+  };
+  std::size_t spare = 0;
+  if (middle < parts.size()) {
+    const auto suffix = size - prefix - last->text.size();
+    const auto storage = last->storage;
+    const auto left = static_cast<std::size_t>(last->text.data() - storage.data());
+    if (prefix <= left && suffix <= storage.size() - left - last->text.size()) {
+      char* const begin = storage.data() + left - prefix;
+      copy(begin, parts.first(middle));
+      copy(begin + prefix + last->text.size(), parts.subspan(middle + 1));
+      return last->text = {begin, size};
+    }
+    if (size <= std::numeric_limits<std::size_t>::max() / 2) spare = size;
+  }
+  const auto capacity = std::max<std::size_t>(1, size + spare);
+  char* const storage = static_cast<char*>(cst._pool->allocate(capacity, alignof(char)));
+  char* const begin = storage + spare / 2;
+  copy(begin, parts);
+  const std::string_view text(begin, size);
+  if (last) *last = {{storage, capacity}, text};
+  return text;
+}
 
-ParseResult::ParseResult(Cst&& tree)
-    : _cst(std::make_unique<Cst>(std::move(tree))),
-      _arena(_cst->memory()),
-      _nodes(_cst->memory()) {}
+ParseResult::ParseResult() : ParseResult(Cst()) {}
+
+ParseResult::ParseResult(Cst&& tree) : _tree(std::make_unique<Tree>(std::move(tree))) {}
 
 // Hand-written so the source reports itself empty, as an assignment leaves it:
 // `= default` would keep `value` over a tree it gave away.
@@ -29,45 +65,38 @@ ParseResult::ParseResult(ParseResult&& src) noexcept { *this = std::move(src); }
 
 ParseResult::~ParseResult() { destroyNodes(); }
 
-void ParseResult::destroyDetached(std::span<AstNode* const> gone) noexcept {
-  for (AstNode* const node : gone) node->~AstNode();
-}
-
 // No order is needed: a node's destructor frees what its members own, and a
-// child is a plain pointer, so this never recurses.
+// child is a plain pointer, so this never recurses. The nodes' memory stays
+// with the pool.
 void ParseResult::destroyNodes() noexcept {
-  destroyDetached(_nodes);
-  _nodes.clear();
+  if (_tree == nullptr) return;
+  for (AstNode* const node : _tree->nodes) node->~AstNode();
+  _tree->nodes.clear();
 }
 
 ParseResult& ParseResult::operator=(ParseResult&& src) noexcept {
   if (this == &src) return *this;
   destroyNodes();
-  std::destroy_at(&_nodes);  // on this pool, which goes with the tree
-  _cst = std::move(src._cst);
+  _tree = std::move(src._tree);
   _grammarOwner = std::move(src._grammarOwner);
-  _arena = std::move(src._arena);
   value = src.value;
   references = std::move(src.references);
   diagnostics = std::move(src.diagnostics);
   error = src.error;
   accepted = src.accepted;
-  // Constructed, not assigned: an assignment would allocate on the pool
-  // given up above.
-  std::construct_at(&_nodes, std::move(src._nodes));
   src.value = nullptr;
   return *this;
 }
 
-const Cst& ParseResult::cst() const noexcept { return *_cst; }
+const Cst& ParseResult::cst() const noexcept { return _tree->cst; }
 
 void ParseResult::bindGrammar(const Grammar& grammar) noexcept {
   // The key is read off the nodes: written before the sort, never after.
-  assert(std::is_sorted(_nodes.begin(), _nodes.end(),
+  assert(std::is_sorted(_tree->nodes.begin(), _tree->nodes.end(),
                         [](const AstNode* a, const AstNode* b) {
                           return a->cstNodeId < b->cstNodeId;
                         }));
-  detail::CstBuilder(*_cst).bind_model(grammar, _nodes);
+  CstBuilder(_tree->cst).bindModel(grammar, _tree->nodes);
 }
 
 void ParseResult::bindGrammar(std::shared_ptr<const Grammar> grammar) noexcept {
@@ -78,9 +107,9 @@ void ParseResult::bindGrammar(std::shared_ptr<const Grammar> grammar) noexcept {
 // The tree takes the text first: its nodes point into it.
 void ParseResult::bindTranslation(
     std::string_view document, std::unique_ptr<SourceTranslation> translation) {
-  assert(_cst->translation() == nullptr && "a result binds one translation");
+  assert(_tree->cst.translation() == nullptr && "a result binds one translation");
   const SourceTranslation& bound = *translation;
-  detail::CstBuilder(*_cst).bind_translation(document, std::move(translation));
+  CstBuilder(_tree->cst).bindTranslation(document, std::move(translation));
   bound.toDocument(std::span(diagnostics));
   const auto errors = bound.errors();
   diagnostics.insert(diagnostics.end(), errors.begin(), errors.end());

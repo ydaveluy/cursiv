@@ -40,13 +40,13 @@ namespace {
 std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
     const Document& document, lsp::Position position,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   if (!document.hasAst()) return std::nullopt;
 
   const TextOffset offset =
-      document.textDocument().offsetAt(from_lsp(position));
-  // Last, not first: this matches the leaf's spelling and not the terminal that
-  // produced it, and a keyword is a legal name.
+      document.textDocument().offsetAt(fromLsp(position));
+  // Last, not first: a keyword is a legal name, and a name's declaration
+  // answers first. Only a literal leaf answers, never a name spelled like one.
   const auto keywordHover = [&]() -> std::optional<lsp::Hover> {
     const Cst& cst = document.parseResult.cst();
     // A CST span is half-open: a click at a keyword's very end falls one past
@@ -55,6 +55,7 @@ std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
     if (leaf == kNoNode && offset > 0) leaf = leaf_at(cst, offset - 1);
     if (leaf == kNoNode) return std::nullopt;
     const Grammar& grammar = services.parser->getGrammar();
+    if (!grammar.recordIsLiteral(cst[leaf])) return std::nullopt;
     std::string_view doc = grammar.recordDoc(cst[leaf]);
     if (doc.empty()) doc = grammar.spellingDoc(cst.spelling(leaf));
     if (doc.empty()) return std::nullopt;
@@ -64,7 +65,7 @@ std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
     content.kind = lsp::MarkupKindEnum(lsp::MarkupKind::Markdown);
     content.value = std::string(doc);
     hover.contents = std::move(content);
-    hover.range = to_lsp(document.textDocument().rangeAt(node.begin, node.end));
+    hover.range = toLsp(document.textDocument().rangeAt(node.begin, node.end));
     return hover;
   };
 
@@ -77,7 +78,7 @@ std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
   // Every target contributes its prose, the pieces joined with a space.
   std::string joined;
   for (const AstNode* target : found.targets) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     const Document* targetDocument = target->getDocument();
     if (targetDocument == nullptr) continue;
     const CoreServices* language = targetDocument->language;
@@ -99,7 +100,7 @@ std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
   hover.contents = std::move(content);
   // The range is the name as written here, the word the popup is about.
   hover.range =
-      to_lsp(document.textDocument().rangeAt(found.span.begin, found.span.end));
+      toLsp(document.textDocument().rangeAt(found.span.begin, found.span.end));
   return hover;
 }
 

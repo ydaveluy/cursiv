@@ -44,6 +44,11 @@ for (const file of copies) {
 // What the extension sources import from the editor, and what they hand it.
 const standIns = {
   vscode: `
+    export class CancellationTokenSource {
+      token = { isCancellationRequested: false };
+      cancel() { this.token.isCancellationRequested = true; }
+      dispose() {}
+    }
     export class Disposable { constructor(dispose) { this.dispose = dispose; } }
     export const Uri = { parse: (text) => text };
     export const workspace = { getConfiguration: () => ({ get: () => undefined }) };
@@ -84,14 +89,69 @@ test('the MCP bridge answers the requests it holds when it closes', { skip }, as
   while (!lines.length) await new Promise((wake) => setTimeout(wake, 5));
   const [, url, token] = /^mcp: (\S+) \(Authorization: Bearer (\S+)\)$/.exec(lines[0]);
   // Given up on after a while: an answer that never comes must not hold the test.
-  const answer = fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` },
-                              body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list' }),
+  const answer = fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`,
+                                'Mcp-Method': 'tools/list', 'MCP-Protocol-Version': '2026-07-28' },
+                              body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: { _meta: {
+                                'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                                'io.modelcontextprotocol/clientCapabilities': {},
+                              } } }),
                               signal: AbortSignal.timeout(2000) });
   await asked;
   bridge.dispose();
   const response = await answer;
   assert.equal(response.status, 503);
   assert.equal((await response.json()).id, 3);
+});
+
+test('the MCP bridge validates routing headers and propagates protocol errors', { skip }, async () => {
+  const { startMcpBridge } = await import(new URL('domainmodel/vscode/src/mcp.ts', examples));
+  let ready;
+  const listening = new Promise(resolve => { ready = resolve; });
+  const called = [];
+  const client = { async sendRequest(_, msg) {
+    if (msg.protocolVersion) {
+      assert.equal(msg.protocolVersion, '2025-11-25');
+      assert.equal(msg.message.method, 'ping');
+      return { result: {} };
+    }
+    called.push(msg.method);
+    if (msg.method === 'tools/list') return { result: { tools: [{ name: 'echo', inputSchema: {
+      properties: { nested: { properties: { label: { type: 'string', 'x-mcp-header': 'Label' } } } },
+    } }] } };
+    if (msg.method === 'tools/call') return { result: { content: [] } };
+    return { error: { code: msg.method === 'unknown' ? -32601 : -32022 } };
+  } };
+  const bridge = startMcpBridge('x', 'X', client, { appendLine: ready });
+  try {
+    const [, url, token] = /^mcp: (\S+) \(Authorization: Bearer (\S+)\)$/.exec(await listening);
+    const version = '2026-07-28';
+    const post = (method, overrides, params = {}) => fetch(url, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Mcp-Method': method,
+        'MCP-Protocol-Version': version, ...overrides },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 7, method, params: { _meta: {
+        'io.modelcontextprotocol/protocolVersion': version, 'io.modelcontextprotocol/clientCapabilities': {},
+      }, ...params } }),
+    });
+    let response = await post('tools/list', { 'Mcp-Method': 'tools/call' });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error.code, -32020);
+    assert.deepEqual(called, []);
+    const params = { name: 'echo', arguments: { nested: { label: 'été' } } };
+    response = await post('tools/call', { 'Mcp-Name': 'echo' }, params);
+    assert.equal((await response.json()).error.code, -32020);
+    assert.deepEqual(called, ['tools/list']);
+    const encoded = `=?base64?${Buffer.from('été').toString('base64')}?=`;
+    response = await post('tools/call', { 'Mcp-Name': 'echo', 'Mcp-Param-Label': encoded }, params);
+    assert.equal(response.status, 200);
+    assert.deepEqual(called, ['tools/list', 'tools/call']);
+    assert.equal((await post('unknown')).status, 404);
+    assert.equal((await post('server/discover')).status, 400);
+    response = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`,
+      'Mcp-Protocol-Version': '2025-11-25', 'Mcp-Method': 'ping' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 7, method: 'ping' }) });
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).result, {});
+  } finally { bridge.dispose(); }
 });
 
 // The extension the way VS Code starts it, on a wasm server the active preset

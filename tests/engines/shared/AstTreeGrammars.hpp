@@ -6,7 +6,7 @@
 #include "DirectiveSequenceGrammar.hpp"
 #include <cstdint>
 #include <string_view>
-// The tree grammar.md states, in both engines: the node a rule returns, the
+// The tree grammar.md states: the node a rule returns, the
 // operand of a directive building its value apart, an adopted node taking the
 // writes made before it.
 
@@ -41,6 +41,10 @@ struct Number : cursiv::Extends<Expression> {
 struct Index : cursiv::Extends<Expression> {
   Expression* array = nullptr;
   Expression* index = nullptr;
+};
+struct Postfix : cursiv::Extends<cursiv::AstNode> {
+  Postfix* child = nullptr;
+  boolean marked = false;
 };
 
 struct B : cursiv::Extends<cursiv::AstNode> {
@@ -124,6 +128,22 @@ struct Indexed : Base {
                  lit<"]">))> {};
 };
 
+struct UnorderedPostfix : Base {
+  static constexpr auto wrap = nest<&ast::Postfix::child>(lit<"!">.doc<"Wraps the preceding expression.">());
+  static constexpr auto mark = flag<&ast::Postfix::marked>(lit<"?">);
+  struct Root : rule<create<ast::Postfix>(lit<"x">) +
+                     tight(unordered(wrap, option(mark)))> {};
+  struct Tied : rule<create<ast::Postfix>(lit<"x">) +
+                     unordered(nest<&ast::Postfix::child>(
+                                   flag<&ast::Postfix::marked>(lit<"!">)),
+                               wrap)> {};
+  struct ShortFirst : rule<create<ast::Postfix>(lit<"x">) +
+                           unordered(option(nest<&ast::Postfix::child>(
+                                         flag<&ast::Postfix::marked>(lit<"!">))),
+                                     option(nest<&ast::Postfix::child>(lit<"!"> + lit<"!">))) +
+                           option(lit<"!">)> {};
+};
+
 struct Apart : Base {
   struct Root : rule<assign<&ast::A::m>(assign<&ast::B::n>(ref<ID>))> {};
 };
@@ -167,6 +187,9 @@ struct Suite : Base {
   struct Root : rule<(lit<"declared:"> + ref<Declared::Root>) |
                      (lit<"exported:"> + ref<Exported::Root>) |
                      (lit<"indexed:"> + ref<Indexed::Root>) |
+                     (lit<"postfix:"> + ref<UnorderedPostfix::Root>) |
+                     (lit<"tied:"> + ref<UnorderedPostfix::Tied>) |
+                     (lit<"short:"> + ref<UnorderedPostfix::ShortFirst>) |
                      (lit<"apart:"> + ref<Apart::Root>) |
                      (lit<"perturn:"> + ref<PerTurn::Root>) |
                      (lit<"present:"> + ref<Present::Root>) |
@@ -228,7 +251,6 @@ struct Backward : Parts {
   using ignored = WS;
 };
 
-struct BackwardLr : Backward {};
 
 }  // namespace tmember
 
@@ -337,7 +359,9 @@ struct Suite : Base {
   // Plain remains nullable; the tagged host tests the empty rule as well.
   struct Root : rule<ref<Plain::Root> |
                      (lit<"inplace:"> + ref<InPlace::Root>) |
-                     (lit<"behind:"> + ref<BehindRule::Root>)> {};
+                     (lit<"behind:"> + ref<BehindRule::Root>) |
+                     (lit<"wrap:"> + ref<ItemRule> + nest<&ast::Groups::items>(
+                         some(append<&ast::Groups::items>(ref<ItemRule>))))> {};
   using entry = Root;
 };
 }  // namespace tnestedrun
@@ -357,8 +381,6 @@ struct Combined : Base {
              (lit<"dir:"> + ref<tdirseq::Combined::Entry>)> {};
   using entry = Entry;
 };
-struct Ll : Combined {};
-struct Lr : Combined {};
 // Only cyclic adoption needs forced auxiliary optionals. Keep that lowering
 // independent without regenerating the unrelated tree/directive families.
 struct Aux : Base {

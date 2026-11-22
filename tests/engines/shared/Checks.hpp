@@ -22,7 +22,7 @@ inline void same_text(const char* engine, std::string_view input,
 
 template <class T>
 const T* exactly(const cursiv::ParseResult& r) {
-  return r.value != nullptr && r.value->type == &cursiv::ast_type_tag<T>
+  return r.value != nullptr && r.value->type == &cursiv::kAstTypeTag<T>
              ? static_cast<const T*>(r.value)
              : nullptr;
 }

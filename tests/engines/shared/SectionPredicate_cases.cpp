@@ -7,8 +7,6 @@
 #include <vector>
 
 #include "ConformanceTest.hpp"
-#include "conformancell/generated/Ll/Module.hpp"
-#include "conformancelr/generated/Lr/Module.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
@@ -16,13 +14,13 @@
 #include "engines/shared/CaretOffers.hpp"
 #include "engines/shared/ConformanceGrammars.hpp"
 #include "engines/shared/SectionPredicateGrammar.hpp"
-#include "sectionpredicatell/generated/Ll/Module.hpp"
-#include "sectionpredicatelr/generated/Lr/Module.hpp"
+#include "hushedlr/generated/Hushed/Module.hpp"
+#include "sectionpredicatelr/generated/Suite/Module.hpp"
 
 namespace section_predicate_cases {
 
 // A predicate in an embedded grammar reads what the grammar alone reads: its
-// text ends where the section does, whichever engine parses it.
+// text ends where the section does.
 
 namespace {
 
@@ -33,7 +31,7 @@ std::string items(const ast::Items* in) {
   std::string out;
   for (const ast::Item* i : in->items)
     out += std::string(i->text) +
-           (i->type == &cursiv::ast_type_tag<ast::Marked> ? "!" : "") + ',';
+           (i->type == &cursiv::kAstTypeTag<ast::Marked> ? "!" : "") + ',';
   return out;
 }
 
@@ -153,58 +151,52 @@ void section_values(const cursiv::Parser& parser) {
 
 void run() {
   namespace gen = tsecpred::generated;
-  const auto ll = gen::Ll::create_parser();
-  const auto lr = gen::Lr::create_parser();
-  section_values(*ll);
+  const auto lr = gen::Suite::createParser();
   section_values(*lr);
-  const Reader lastLl{*ll, ""};
-  const Reader lastLr{*lr, ""};
-  const Reader inLastLl{*ll, "inlast:"};
-  const Reader inLastLr{*lr, "inlast:"};
-  const Reader reachLl{*ll, "reach:"};
-  const Reader reachLr{*lr, "reach:"};
-  const Reader inReachLl{*ll, "inreach:"};
-  const Reader inReachLr{*lr, "inreach:"};
+  const auto standalone = gen::Hushed::createParser();
+  const Reader hushed{*standalone, ""};
+  CHECK(alone(hushed, "if!") == "if!,");
+  const Reader inHushed{*lr, "inhushed:"};
+  same(hushed, inHushed, "if!");
+  for (std::string_view text : {"GO!", "%!", ":!", "if-"}) same(hushed, inHushed, text);
+  CHECK(embedded(inHushed, "GO!") == "GO!,");
+  CHECK(embedded(inHushed, "%!") == "%!,");
+  CHECK(embedded(inHushed, ":!") == "");
+  CHECK(embedded(inHushed, "if-") == "");
+  const Reader last{*lr, ""};
+  const Reader inLast{*lr, "inlast:"};
+  const Reader reach{*lr, "reach:"};
+  const Reader inReach{*lr, "inreach:"};
   for (const std::string_view text : {"a", "a b", "a b c", "ab cd", " a b "}) {
-    same(lastLl, inLastLl, text);
-    same(lastLr, inLastLr, text);
-    CHECK(alone(lastLl, text) == alone(lastLr, text));
-    same(reachLl, inReachLl, text);
-    same(reachLr, inReachLr, text);
-    CHECK(alone(reachLl, text) == alone(reachLr, text));
+    same(last, inLast, text);
+    same(reach, inReach, text);
   }
-  CHECK(alone(lastLl, "a b") == "a,b!,");
-  CHECK(alone(reachLl, "a b") == "a,b,");
+  CHECK(alone(last, "a b") == "a,b!,");
+  CHECK(alone(reach, "a b") == "a,b,");
   // These predicates retain their space-only policy, including the first gap.
-  for (const Reader* reader : {&lastLl, &lastLr}) {
-    for (const std::string_view text : {"\ta b", "\na b", "a\tb", "a\nb"}) {
-      const std::string source = reader->source(text);
-      const auto parsed = reader->parser.parse(source);
-      CHECK(!parsed.accepted || !parsed.diagnostics.empty());
-    }
+  for (const std::string_view text : {"\ta b", "\na b", "a\tb", "a\nb"}) {
+    const std::string source = last.source(text);
+    const auto parsed = last.parser.parse(source);
+    CHECK(!parsed.accepted || !parsed.diagnostics.empty());
   }
   // A delimiter inside a longer token does not end the section, even when
   // the guard's own reading stops before that token does.
   for (const std::string_view text : {"a > b !", "a > b > c !"}) {
-    same(lastLl, inLastLl, text);
-    same(lastLr, inLastLr, text);
-    CHECK(alone(lastLl, text).empty());
-    CHECK(alone(lastLr, text).empty());
+    same(last, inLast, text);
+    CHECK(alone(last, text).empty());
   }
   // Every short guard shares an alphabet with LONG. A missing `!` must not
   // make section bounding read the remaining long suffix at every word.
   std::string words;
   for (unsigned i = 0; i != 8192; ++i) words += "a ";
   words += 'a';
-  same(lastLl, inLastLl, words);
-  same(lastLr, inLastLr, words);
-  CHECK(alone(lastLl, words) == alone(lastLr, words));
+  same(last, inLast, words);
   // A token left open in a section ends at the token that closes the section:
   // what it holds stays the author's, and the next block stands.
-  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+  {
     const auto blocks = [&](std::string_view text) {
       const std::string source = "inquoted:" + std::string(text);
-      const auto r = parser->parse(source);
+      const auto r = lr->parse(source);
       std::string out;
       if (const auto* d = r.valueAs<ast::Doc>())
         for (const ast::Block* b : d->blocks) out += items(b->items) + '|';
@@ -212,14 +204,17 @@ void run() {
     };
     CHECK(blocks("<a \"b c> <d>") == "a,\"b c,|d,|");
     CHECK(blocks("<a /* b c> <d>") == "a,|d,|");
+    const std::string body(256, 'b');
+    CHECK(blocks("<a \"" + body + "> <d>") == "a,\"" + body + ",|d,|");
+    CHECK(blocks("<a /*" + body + "> <d>") == "a,|d,|");
   }
   // A keyword its gap refuses, tied with a trivia in front of the token that
   // closes the section: the trivia is crossed and the section ends there, with
   // a fault where the item still wants its `;`.
-  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+  {
     const auto blocks = [&](std::string_view text) {
       const std::string source = "inhushed:" + std::string(text);
-      const auto r = parser->parse(source);
+      const auto r = lr->parse(source);
       std::string out;
       if (const auto* d = r.valueAs<ast::Doc>())
         for (const ast::Block* b : d->blocks) out += items(b->items) + '|';
@@ -237,9 +232,7 @@ void run() {
   // A predicate of the last word that reads to the caret is answered by what
   // is typed there: behind `x ` the word is the last one on the document's
   // text, and a word typed after it makes `x` an item before the last.
-  for (const cursiv::Parser* parser : {ll.get(), lr.get()})
-    CHECK((caret_offers::offered(*parser, "x ", 2) ==
-           std::vector<std::string>{"ID"}));
+  CHECK((caret_offers::offered(*lr, "x ", 2) == std::vector<std::string>{"ID"}));
 }
 
 }  // namespace section_predicate_cases
@@ -250,35 +243,35 @@ namespace conformance_section_close_cases {
 // the host spells the token that closes it: `lit<"a"> + &lit<"]">` refuses
 // `[a]`, `lit<"a"> + &eof` reads it.
 
+using conformance_test::Entry;
 using conformance_test::expect;
-using conformance_test::Pair;
 
 void run() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
 
-  const Pair atClose{"atclosehost:"};
+  const Entry atClose{"atclosehost:"};
   expect(atClose, "[a]", false);
 
-  const Pair namedClose{"namedclosehost:"};
+  const Entry namedClose{"namedclosehost:"};
   expect(namedClose, "[a]", false);
 
-  const Pair atEnd{"atendhost:"};
+  const Entry atEnd{"atendhost:"};
   expect(atEnd, "[a]", true);
 
-  const Pair namedEnd{"namedendhost:"};
+  const Entry namedEnd{"namedendhost:"};
   expect(namedEnd, "[a]", true);
 
-  const Pair bare{"barehost:"};
+  const Entry bare{"barehost:"};
   expect(bare, "[a]", true);
 
-  const Pair folded{"foldedhost:"};
+  const Entry folded{"foldedhost:"};
   expect(folded, "[ÉTÉ]", true);
   expect(folded, "[Été]", true);
 
-  const Pair absentClose{"absentclosehost:"};
+  const Entry absentClose{"absentclosehost:"};
   expect(absentClose, "[a]", true);
 
-  const Pair followed{"followedhost:"};
+  const Entry followed{"followedhost:"};
   expect(followed, "[a];", true);
   expect(followed, "[a]", false);
 }

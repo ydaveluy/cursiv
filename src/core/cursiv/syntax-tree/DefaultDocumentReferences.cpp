@@ -65,24 +65,6 @@ void say_provider_threw(const Document* document, std::string_view name,
   }
 }
 
-// A provider that throws fails the reference it was asked for: what it said
-// goes to `thrown`, the empty answer is returned, and a provider that read
-// this reference goes on. Only cancellation leaves the read.
-template <class Lookup>
-auto contained(const Document* document, std::string_view name,
-               std::optional<std::string>& thrown, Lookup lookup)
-    -> decltype(lookup()) {
-  try {
-    return lookup();
-  } catch (const OperationCancelled&) {
-    throw;
-  } catch (...) {
-    thrown = what_of(std::current_exception());
-    say_provider_threw(document, name, *thrown);
-    return {};
-  }
-}
-
 }  // namespace
 
 DocumentReferences::Answer DefaultDocumentReferences::resolve(
@@ -110,11 +92,13 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
       ops.narrow_count != 0 ? ops.narrow_of(*h.owner, h.index) : kNoNarrow;
 
   const auto name = ops.text(*h.owner, h.index);
-  std::optional<std::string> thrown;
-  const AstNodeDescription* const found = contained(
-      at, name, thrown, [&] { return l->getCandidate(info(h, name, narrow)); });
-  if (thrown) {
-    keepFailure(rank, *std::move(thrown));
+  const AstNodeDescription* found;
+  try {
+    found = l->getCandidate(info(h, name, narrow));
+  } catch (const OperationCancelled&) {
+    throw;
+  } catch (...) {
+    keepFailure(rank, at, name);
     return failed({nullptr, RefState::ErrorThrown, 0});
   }
   if (found == nullptr) return failed();
@@ -156,23 +140,7 @@ void DefaultDocumentReferences::forEachResolved(
     const Cst& cst, const detail::RefHandle& h,
     ResolvedReferenceVisitor visitor) const {
   if (h.owner == nullptr) return;
-  const detail::RefOps& ops = _f.refOps[h.field];
-  // A single reference, the common site, is read in one call.
-  if (!ops.multi) {
-    const detail::SingleRefRead read = ops.single(*h.owner, h.index);
-    if (read.target == nullptr || read.name == kNoNode) return;
-    const CstNode& n = cst[read.name];
-    visitor(n.begin, n.end, *read.target, false);
-    return;
-  }
-  const std::size_t count = ops.size(*h.owner, h.index);
-  if (count == 0) return;
-  const NodeId named = ops.name_id(*h.owner, h.index);
-  if (named == kNoNode) return;
-  const CstNode& n = cst[named];
-  for (std::size_t k = 0; k < count; ++k)
-    if (const AstNode* const target = ops.at(*h.owner, h.index, k))
-      visitor(n.begin, n.end, *target, ops.multi);
+  _f.refOps[h.field].visit(*h.owner, h.index, cst, visitor);
 }
 
 bool DefaultDocumentReferences::anyUnresolved() const noexcept {
@@ -191,7 +159,7 @@ void DefaultDocumentReferences::forEachUnresolved(
   if (h.owner == nullptr) return;
   const detail::RefOps& ops = _f.refOps[h.field];
   const RefState why = ops.state(*h.owner, h.index);
-  if (!has_error(why)) return;
+  if (!hasError(why)) return;
   // Anchored on the name and not on the node that holds it: the word the
   // editor underlines is the one the text was read from.
   TextOffset begin = 0;
@@ -213,7 +181,10 @@ void DefaultDocumentReferences::forEachUnresolved(
 }
 
 void DefaultDocumentReferences::keepFailure(std::uint32_t rank,
-                                            std::string what) const {
+                                            const Document* document,
+                                            std::string_view name) const {
+  auto what = what_of(std::current_exception());
+  say_provider_threw(document, name, what);
   try {
     const std::scoped_lock lock(_failuresLock);
     _failures.insert_or_assign(rank, std::move(what));
@@ -300,12 +271,13 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
   const Document* at = document.load(std::memory_order_acquire);
   if (at == nullptr) at = h.owner->getDocument();
   const auto name = ops.text(*h.owner, h.index);
-  std::optional<std::string> thrown;
-  const std::vector<const AstNodeDescription*> found =
-      contained(at, name, thrown,
-                [&] { return l->getCandidates(info(h, name, narrow)); });
-  if (thrown) {
-    keepFailure(rank, *std::move(thrown));
+  std::vector<const AstNodeDescription*> found;
+  try {
+    found = l->getCandidates(info(h, name, narrow));
+  } catch (const OperationCancelled&) {
+    throw;
+  } catch (...) {
+    keepFailure(rank, at, name);
     return failed(RefState::ErrorThrown);
   }
 

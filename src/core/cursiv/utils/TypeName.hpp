@@ -271,13 +271,22 @@ constexpr std::string_view probed_name() {
     return {};
 }
 
-// The enumerator whose name is `text`, or nothing. Probing one value per index
-// keeps every comparison against a literal.
+// The enumerator whose name is `text`, or that `same` holds equal to it;
+// nothing where none is, or two of different values are. Probing one value
+// per index keeps every comparison against a literal.
 template <class M, int... I>
 constexpr bool find_enumerator(std::string_view text, M& out,
-                               std::integer_sequence<int, I...>) {
-  return (... || (!probed_name<M, I>().empty() && probed_name<M, I>() == text
-                      ? (out = static_cast<M>(I + kEnumProbeMin), true)
-                      : false));
+                               std::integer_sequence<int, I...>,
+                               bool (*same)(std::string_view, std::string_view) = nullptr) {
+  bool found = false;
+  bool twice = false;
+  const auto take = [&](int value, std::string_view name) {
+    if (name.empty() || !(same == nullptr ? name == text : same(name, text))) return;
+    twice = twice || (found && static_cast<M>(value) != out);
+    out = static_cast<M>(value);
+    found = true;
+  };
+  (take(I + kEnumProbeMin, probed_name<M, I>()), ...);
+  return found && !twice;
 }
 }  // namespace cursiv::detail

@@ -1,28 +1,15 @@
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/engine/parser/Machine.hpp"
+#include "cursiv/engine/parser/Parse.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/ll/gen/LlLowering.hpp"
-#include "cursiv/lr/gen/LrLowering.hpp"
-#include "cursiv/shared/gen/LexRecursion.hpp"
-#include "cursiv/shared/gen/LexRightLinear.hpp"
-#include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/RecursiveTerminalsGrammar.hpp"
-#include "lexicalbackendsll/generated/Ll/Module.hpp"
-#include "lexicalbackendsll/generated/Ll/Table.hpp"
-#include "lexicalbackendslr/generated/Lr/Module.hpp"
-#include "lexicalbackendslr/generated/Lr/Table.hpp"
-#include <algorithm>
-#include <array>
-#include <chrono>
-#include <cstdint>
+#include "lexicalbackendslr/generated/Suite/Module.hpp"
+#include "lexicalbackendslr/generated/Suite/Table.hpp"
 #include <cstdio>
-#include <map>
-#include <set>
 #include <string>
 #include <string_view>
-#include <thread>
-#include <utility>
-#include <vector>
 
 namespace recursive_terminals_cases {
 
@@ -40,7 +27,13 @@ void check(const cursiv::Parser& parser, std::string_view text, bool expected) {
 }
 
 void exercise(const cursiv::Parser& parser) {
+  for (const auto text : {"directive:#![", "directive:#! [", "directive:#!/*a/*b*/c*/ ["}) {
+    const auto result = parser.parse(text);
+    const auto* node = result.valueAs<trecursive::Node>();
+    CHECK(result.accepted && result.diagnostics.empty() && node && node->text.empty());
+  }
   for (const auto text : {"comment:/**/!",
+                          "directive:#!/bin/sh",
                           "comment:/* /* x */ /* y */ */!",
                           "comment:/*/*/**/*/*/!",
                           "pair:/**/x/* /* */ */",
@@ -166,42 +159,58 @@ void exercise(const cursiv::Parser& parser) {
   check(parser, "echo:<" + mark + ">]" + mark + ";", true);
 }
 
+void check_window(std::string_view prefix, std::string_view text, unsigned width,
+                  bool recognized, bool atCut) {
+  using namespace cursiv::engine;
+  const auto& t = tlexbackends::generated::Suite::kTables;
+  const std::string source = std::string(prefix) + std::string(text);
+  cursiv::Cst cst(source);
+  cursiv::CstBuilder builder(cst);
+  Machine m(t, source, builder.stream(), cursiv::kNoCancel);
+  const char* begin = m.src + prefix.size();
+  m.read_to(begin, t.terminalCount);
+  CHECK(t.drive(m) == Exit::refused);
+  m.read_to(begin + width, t.terminalCount);
+  const auto answer = m.on_text([&] {
+    return m.walk(begin, t.stateMode[m.under()], 1, begin).terminal() != t.terminalCount;
+  });
+  CHECK(answer.value == recognized && answer.atCut == atCut);
+}
+
 }  // namespace
 
-constexpr std::size_t kLongToken = 8000;
-
-// One token of many endings lasts seconds: a stop reaches it while it is read.
 void a_stop_reaches_a_long_token(const cursiv::Parser& parser) {
-  const std::string text = "continuation:" + std::string(kLongToken, 'a') +
-                           std::string(kLongToken, 'b') + "!";
-  cursiv::CancellationTokenSource source;
-  std::thread stopper([&source] {
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    source.request_stop();
-  });
-  const auto begin = std::chrono::steady_clock::now();
-  bool stopped = false;
+  using namespace cursiv::engine;
+  namespace generated = tlexbackends::generated::Suite;
+  struct Stopping : Tables { cursiv::CancellationTokenSource& stop; };
+  cursiv::CancellationTokenSource stop;
+  Stopping tables{generated::kTables, stop};
+  tables.match = [](Machine& m, Matching& s) {
+    static_cast<const Stopping&>(m.t).stop.request_stop();
+    generated::kTables.match(m, s);
+    CHECK(false);  // The running matcher must observe the request.
+  };
+  const std::string text = "continuation:" + std::string(8000, 'a') + std::string(8000, 'b') + "!";
+  check(parser, text, true);
+  cursiv::Cst cst;
   try {
-    (void)parser.parse(text, source.get_token());
+    parse(tables, text, cst, stop.get_token());
+    CHECK(false);
   } catch (const cursiv::OperationCancelled&) {
-    stopped = true;
+    CHECK(cst.text().empty());
   }
-  stopper.join();
-  CHECK(stopped);
-  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
 }
 
 void run() {
-  exercise(*tlexbackends::generated::Ll::create_parser());
-  exercise(*tlexbackends::generated::Lr::create_parser());
-  a_stop_reaches_a_long_token(*tlexbackends::generated::Ll::create_parser());
-  a_stop_reaches_a_long_token(*tlexbackends::generated::Lr::create_parser());
-  const auto pureLl = tlexbackends::generated::Ll::create_parser();
-  const auto pureLr = tlexbackends::generated::Lr::create_parser();
-  for (const auto* parser : {pureLl.get(), pureLr.get()}) {
-    check(*parser, "(())", true);
-    check(*parser, "(", false);
-  }
+  const auto parser = tlexbackends::generated::Suite::createParser();
+  exercise(*parser);
+  check_window("comment:", "/* a */!", 5, false, true);
+  check_window("comment:", "/* a */!", 8, true, false);
+  check_window("scan:one:", "D1xD1y", 2, false, true);
+  check_window("scan:one:", "D1xD1y", 4, true, true);
+  a_stop_reaches_a_long_token(*parser);
+  check(*parser, "(())", true);
+  check(*parser, "(", false);
 }
 
 }  // namespace recursive_terminals_cases
@@ -225,66 +234,7 @@ void check(const cursiv::Parser& parser, std::string_view prefix,
   if (clean && expected) CHECK(node->text == body);
 }
 
-template <class Table>
-std::string_view term_name(const Table& t, unsigned i) {
-  if constexpr (requires { t.cfg.term_name(i); })
-    return t.cfg.term_name(i);
-  else
-    return t.term_name(i);
-}
-template <class Table>
-unsigned term_count(const Table& t) {
-  if constexpr (requires { t.cfg.nterms; })
-    return t.cfg.nterms;
-  else
-    return t.nterms;
-}
-template <class Table>
-bool native(const Table& table, std::string_view name) {
-  bool found = false;
-  for (unsigned i = 0; i < term_count(table); ++i)
-    found |= term_name(table, i) == name;
-  CHECK(found);
-  bool recursive = false;
-  for (unsigned i = 0; i < table.nrelays; ++i)
-    if (term_name(table, table.relays[i].term) == name)
-      recursive |= table.relays[i].recognizes != nullptr;
-  return found && !recursive;
-}
-template <class Cfg>
-bool normalized(Cfg cfg) {
-  cursiv::engine::validate_lex_recursion(cfg);
-  bool optimized = true;
-  for (auto name :
-       {"Run", "Sequence", "Ambiguous", "Alternative", "Reversed",
-        "SequenceAlternative", "Unicode", "Counted", "Variable", "BigCount"}) {
-    bool found = false;
-    for (unsigned t = 0; t < cfg.nterms; ++t) {
-      if (cfg.term_name(t) != name) continue;
-      const auto root = cfg.lex[cfg.termBuild[t].lex];
-      const auto body = root.kind == cursiv::engine::LexKind::call
-                            ? cfg.lex[root.a]
-                            : cursiv::engine::LexNode{};
-      found = root.kind == cursiv::engine::LexKind::call &&
-              root.b == cursiv::engine::kNoLexNode &&
-              body.kind == cursiv::engine::LexKind::rep && body.min == 1 &&
-              body.max == cursiv::engine::kEndless;
-    }
-    CHECK(found);
-    optimized &= found;
-  }
-  return optimized;
-}
-template <class Table>
-void check_backends(const Table& table) {
-  // Keep recognition rather than expanding a potentially huge or ambiguous
-  // regular prefix into NFA/DFA states. Only the recursive cycle is removed.
-  for (auto name : {"Run", "Sequence", "Ambiguous", "Alternative", "Reversed",
-                    "SequenceAlternative", "Unicode", "Counted", "Variable",
-                    "BigCount", "Marked", "Guarded", "EndGuarded", "Nested"})
-    CHECK(!native(table, name));
-}
-void exercise(const cursiv::Parser& parser, bool optimized) {
+void exercise(const cursiv::Parser& parser) {
   for (unsigned n = 1; n <= 12; ++n) {
     check(parser, "run:", std::string(n, 'a'));
     check(parser, "alternative:", std::string(n, 'c'));
@@ -325,341 +275,21 @@ void exercise(const cursiv::Parser& parser, bool optimized) {
   check(parser, "suffix:", "a!", false);
   check(parser, "wrapped:", "#aaa@", false);
 
-  // Fail a missing optimization before allocating quadratic endpoint caches.
-  if (optimized) {
-    check(parser, "run:", std::string(100000, 'a'));
-    check(parser, "alternative:", std::string(100000, 'c'));
-    std::string pairs;
-    for (unsigned i = 0; i < 50000; ++i) pairs += "ab";
-    check(parser, "sequence:", pairs);
-  }
+  check(parser, "run:", std::string(100000, 'a'));
+  check(parser, "alternative:", std::string(100000, 'c'));
+  std::string pairs;
+  for (unsigned i = 0; i < 50000; ++i) pairs += "ab";
+  check(parser, "sequence:", pairs);
 }
 }  // namespace
-void run() {
-  const auto ll = tlexbackends::generated::Ll::create_parser();
-  const auto lr = tlexbackends::generated::Lr::create_parser();
-  check_backends(tlexbackends::generated::Ll::kTable);
-  check_backends(tlexbackends::generated::Lr::kTable);
-  exercise(*ll, normalized(
-                    cursiv::engine::LlLowering<trightlinear::Ll>::table().cfg));
-  exercise(*lr, normalized(
-                    cursiv::engine::LrLowering<trightlinear::Lr>::table().cfg));
-}
+
+void run() { exercise(*tlexbackends::generated::Suite::createParser()); }
 
 }  // namespace lex_right_linear_cases
 
-namespace lex_right_linear_shape_cases {
-
-// Compare all endpoints against an independent small-language evaluator.
-// The generated LL/LR suite separately exercises captures and call scopes.
-namespace {
-using cursiv::engine::kEndless;
-using cursiv::engine::kNoLexNode;
-using cursiv::engine::LexKind;
-using cursiv::engine::LexNode;
-
-struct Graph {
-  std::uint16_t nlex = 0, nterms = 2;
-  std::vector<LexNode> lex = std::vector<LexNode>(256);
-  std::vector<std::uint16_t> lexChild;
-  std::vector<cursiv::engine::ByteSet> sets;
-  struct Term {
-    std::uint16_t lex = 0;
-  };
-  std::array<Term, 4> termBuild;
-
-  std::uint16_t node(LexNode value) {
-    lex[nlex] = value;
-    return nlex++;
-  }
-  std::uint16_t push_lex(LexNode value) { return node(value); }
-  std::uint16_t character(char c) {
-    cursiv::engine::ByteSet set;
-    set.add(static_cast<unsigned char>(c));
-    auto at = std::find(sets.begin(), sets.end(), set);
-    if (at == sets.end()) {
-      sets.push_back(set);
-      at = sets.end() - 1;
-    }
-    return node(
-        {LexKind::chars, static_cast<std::uint16_t>(at - sets.begin())});
-  }
-  std::uint16_t list(LexKind kind, const std::vector<std::uint16_t>& children) {
-    const auto at = static_cast<std::uint16_t>(lexChild.size());
-    lexChild.insert(lexChild.end(), children.begin(), children.end());
-    return node({kind, at, static_cast<std::uint16_t>(children.size())});
-  }
-  std::uint16_t repeat(std::uint16_t child, unsigned min, unsigned max) {
-    return node({LexKind::rep, child, kNoLexNode, min, max});
-  }
-  // Reification shares byte sets but creates distinct expression nodes.
-  std::uint16_t copy(std::uint16_t at) {
-    const auto e = lex[at];
-    if (e.kind == LexKind::chars) return node(e);
-    if (e.kind == LexKind::rep) return repeat(copy(e.a), e.min, e.max);
-    std::vector<std::uint16_t> children;
-    for (unsigned i = 0; i < e.b; ++i)
-      children.push_back(copy(lexChild[e.a + i]));
-    return list(e.kind, children);
-  }
-};
-
-void fold(Graph& g) {
-  const auto empty = cursiv::engine::lex_empty_nodes(g);
-  const auto productive = cursiv::engine::lex_empty_nodes(g, true);
-  cursiv::engine::LexRightLinear<Graph>{g, empty, productive}.run();
-}
-
-using Endpoints = std::set<unsigned>;
-
-class Oracle {
- public:
-  Oracle(const Graph& graph, const std::string& text)
-      : _g(graph), _text(text) {}
-
-  Endpoints read(unsigned at, unsigned pos) {
-    const auto key = std::pair(at, pos);
-    if (const auto found = _memo.find(key); found != _memo.end())
-      return found->second;
-    const auto e = _g.lex[at];
-    Endpoints out;
-    switch (e.kind) {
-      case LexKind::chars:
-        if (pos < _text.size() &&
-            _g.sets[e.a].has(static_cast<unsigned char>(_text[pos])))
-          out.insert(pos + 1);
-        break;
-      case LexKind::call:
-        out = read(cursiv::engine::lex_callee(_g, e), pos);
-        break;
-      case LexKind::seq:
-        out.insert(pos);
-        for (unsigned i = 0; i < e.b; ++i) {
-          Endpoints next;
-          for (const auto from : out) {
-            const auto ends = read(_g.lexChild[e.a + i], from);
-            next.insert(ends.begin(), ends.end());
-          }
-          out = std::move(next);
-        }
-        break;
-      case LexKind::alt:
-        for (unsigned i = 0; i < e.b; ++i) {
-          const auto ends = read(_g.lexChild[e.a + i], pos);
-          out.insert(ends.begin(), ends.end());
-        }
-        break;
-      case LexKind::rep: {
-        Endpoints cur{pos};
-        // Every repeated body used by the oracle consumes. No successful
-        // path can therefore need more rounds than the input has bytes.
-        for (unsigned n = 0; n <= _text.size() + 1 && n <= e.max; ++n) {
-          if (n >= e.min) out.insert(cur.begin(), cur.end());
-          Endpoints next;
-          for (const auto from : cur) {
-            const auto ends = read(e.a, from);
-            next.insert(ends.begin(), ends.end());
-          }
-          if (next.empty()) break;
-          cur = std::move(next);
-        }
-        break;
-      }
-      default:
-        CHECK(false);  // unsupported shapes are tested without this oracle
-        break;
-    }
-    return _memo[key] = out;
-  }
-
- private:
-  const Graph& _g;
-  const std::string& _text;
-  std::map<std::pair<unsigned, unsigned>, Endpoints> _memo;
-};
-
-enum class Prefix {
-  single,
-  sequence,
-  ambiguous,
-  counted,
-  variable,
-  nullable_part
-};
-enum class Form { optional, base_first, recursive_first };
-
-Graph grammar(Prefix shape, Form form) {
-  Graph g;
-  const auto a = g.character('a'), b = g.character('b');
-  std::vector<std::uint16_t> prefix;
-  switch (shape) {
-    case Prefix::single:
-      prefix = {a};
-      break;
-    case Prefix::sequence:
-      prefix = {a, b};
-      break;
-    case Prefix::ambiguous:
-      prefix = {g.list(LexKind::alt, {a, g.list(LexKind::seq, {a, b})})};
-      break;
-    case Prefix::counted:
-      prefix = {a, g.repeat(b, 1, 3)};
-      break;
-    case Prefix::variable:
-      prefix = {g.repeat(a, 1, kEndless)};
-      break;
-    case Prefix::nullable_part:
-      prefix = {g.repeat(a, 0, 1), b};
-      break;
-  }
-  const auto call = g.node({LexKind::call, kNoLexNode, 1});
-  std::uint16_t root;
-  if (form == Form::optional) {
-    prefix.push_back(g.repeat(call, 0, 1));
-    root = g.list(LexKind::seq, prefix);
-  } else {
-    std::vector<std::uint16_t> copied;
-    for (const auto child : prefix) copied.push_back(g.copy(child));
-    const auto base =
-        copied.size() == 1 ? copied[0] : g.list(LexKind::seq, copied);
-    prefix.push_back(call);
-    const auto recursive = g.list(LexKind::seq, prefix);
-    root =
-        g.list(LexKind::alt, form == Form::base_first
-                                 ? std::vector<std::uint16_t>{base, recursive}
-                                 : std::vector<std::uint16_t>{recursive, base});
-  }
-  g.termBuild[1].lex = root;
-  return g;
-}
-
-void endpoint_differential() {
-  for (const auto shape :
-       {Prefix::single, Prefix::sequence, Prefix::ambiguous, Prefix::counted,
-        Prefix::variable, Prefix::nullable_part})
-    for (const auto form :
-         {Form::optional, Form::base_first, Form::recursive_first}) {
-      auto before = grammar(shape, form), after = before;
-      const auto root = before.termBuild[1].lex;
-      fold(after);
-      CHECK(after.lex[root].kind == LexKind::call);
-      CHECK(after.lex[root].b == kNoLexNode);
-      const auto closure = after.lex[after.lex[root].a];
-      CHECK(closure.kind == LexKind::rep);
-      CHECK(closure.min == 1 && closure.max == kEndless);
-      CHECK(before.lexChild == after.lexChild);
-      const auto once = after.lex;
-      const auto count = after.nlex;
-      fold(after);
-      CHECK(after.nlex == count && after.lex == once);
-      for (unsigned n = 0; n <= 8; ++n)
-        for (unsigned bits = 0; bits < (1u << n); ++bits) {
-          std::string text(n, 'a');
-          for (unsigned i = 0; i < n; ++i)
-            if (bits & (1u << i)) text[i] = 'b';
-          CHECK(Oracle(before, text).read(root, 0) ==
-                Oracle(after, text).read(root, 0));
-        }
-
-      const auto call = before.node({LexKind::call, kNoLexNode, 1});
-      const auto caller =
-          before.list(LexKind::seq, {call, before.character('a')});
-      auto called = before;
-      fold(called);
-      CHECK(called.lex[call].kind == LexKind::call);
-      for (unsigned n = 0; n < 9; ++n) {
-        const std::string text(n, 'a');
-        CHECK(Oracle(before, text).read(caller, 0) ==
-              Oracle(called, text).read(caller, 0));
-      }
-    }
-}
-
-void excluded_shapes() {
-  // Synthetic unsupported prefixes establish the whitelist. Full generated
-  // grammars exercise their actual validity, refusal codes and scopes.
-  for (const auto kind :
-       {LexKind::call, LexKind::mark, LexKind::same, LexKind::nguard,
-        LexKind::positive, LexKind::negative, LexKind::end_mark, LexKind::token,
-        LexKind::skip, LexKind::through_lit, LexKind::through_same,
-        LexKind::through_nested, LexKind::gap_has, LexKind::gap_is,
-        LexKind::implied}) {
-    auto g = grammar(Prefix::single, Form::optional);
-    const auto root = g.termBuild[1].lex;
-    g.lex[g.lexChild[g.lex[root].a]].kind = kind;
-    const auto old = g.lex;
-    fold(g);
-    CHECK(g.lex == old);
-  }
-  {
-    auto g = grammar(Prefix::single, Form::optional);
-    const auto root = g.termBuild[1].lex;
-    g.lex[g.lexChild[g.lex[root].a]] = LexNode{LexKind::seq, 0, 0};
-    const auto old = g.lex;
-    fold(g);
-    CHECK(g.lex == old);  // E itself is nullable
-  }
-  {
-    auto g = grammar(Prefix::single, Form::optional);
-    const auto root = g.termBuild[1].lex;
-    g.lexChild[g.lex[root].a] = g.repeat(g.list(LexKind::seq, {}), 0, kEndless);
-    const auto old = g.lex;
-    fold(g);
-    CHECK(g.lex == old);  // nullable repetition must keep its refusal
-  }
-  {
-    auto g = grammar(Prefix::single, Form::optional);
-    g.sets[0] = {};
-    const auto old = g.lex;
-    fold(g);
-    CHECK(g.lex == old);  // unproductive E
-  }
-}
-
-void shared_roots_and_limits() {
-  {
-    auto g = grammar(Prefix::sequence, Form::optional);
-    const auto root = g.termBuild[1].lex;
-    g.termBuild[2].lex = root;
-    g.nterms = 3;
-    const auto count = g.nlex;
-    fold(g);
-    CHECK(g.termBuild[1].lex == root && g.termBuild[2].lex == root);
-    CHECK(g.lex[root].kind == LexKind::call && g.lex[root].b == kNoLexNode);
-    CHECK(g.nlex == count + 2);
-  }
-  for (const auto shape : {Prefix::single, Prefix::sequence})
-    for (const unsigned spare : {0u, 1u, 2u}) {
-      auto g = grammar(shape, Form::optional);
-      const auto root = g.termBuild[1].lex;
-      g.lex.resize(kNoLexNode);
-      g.nlex = static_cast<std::uint16_t>(kNoLexNode - spare);
-      const auto count = g.nlex;
-      const auto old = g.lex;
-      const unsigned needed = shape == Prefix::single ? 1 : 2;
-      fold(g);
-      if (spare < needed) {
-        CHECK(g.nlex == count && g.lex == old);
-      } else {
-        CHECK(g.nlex == count + needed);
-        CHECK(g.lex[root].kind == LexKind::call && g.lex[root].b == kNoLexNode);
-      }
-    }
-}
-}  // namespace
-
-void run() {
-  endpoint_differential();
-  excluded_shapes();
-  shared_roots_and_limits();
-}
-
-}  // namespace lex_right_linear_shape_cases
-
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   recursive_terminals_cases::run();
   lex_right_linear_cases::run();
-  lex_right_linear_shape_cases::run();
   return cursiv::test::report("RecursiveTerminals_test");
 }

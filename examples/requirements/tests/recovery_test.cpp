@@ -12,7 +12,7 @@ using namespace cursiv::test;
 void run(Lane& lane) {
   lane.lang = "requirements";
   const std::unique_ptr<cursiv::Parser> engine =
-      req::generated::Requirements::create_parser();
+      req::generated::Requirements::createParser();
   {
     const auto seed = document("valid.req");
     const auto before = project(*engine, seed);
@@ -33,7 +33,7 @@ void run(Lane& lane) {
             "04_closer_eof.req", "05_extra_token.req", "06_truncated.req",
             "07_two_faults.req", "08_head_fault.req", "09_list_delim.req",
             "10_noise.req", "11_head_typo.req"});
-  mutation_oracle(*engine, "requirements", document("valid.req"));
+  mutationOracle(*engine, "requirements", document("valid.req"));
 }
 }  // namespace
 

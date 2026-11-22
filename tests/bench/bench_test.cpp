@@ -43,7 +43,7 @@ void hybrid_coverage() {
     const auto end = onAtom
                          ? hybrid(reading(100, 0, 0), reading(100, 100, 100))
                          : hybrid(reading(100, 100, 100), reading(100, 0, 0));
-    const PerfSample delta = perf_delta(start, end);
+    const PerfSample delta = perfDelta(start, end);
     CHECK(delta.valid);
     CHECK(!delta.scaled);
     CHECK(delta.instructions == 100);
@@ -53,7 +53,7 @@ void hybrid_coverage() {
   // A migration counts both portions once, without extrapolating each PMU
   // independently to the entire thread interval.
   const PerfSample migrated =
-      perf_delta(start, hybrid(reading(100, 40, 40), reading(100, 60, 60)));
+      perfDelta(start, hybrid(reading(100, 40, 40), reading(100, 60, 60)));
   CHECK(migrated.valid);
   CHECK(!migrated.scaled);
   CHECK(migrated.instructions == 100);
@@ -63,14 +63,14 @@ void hybrid_coverage() {
 
   // Multiplexing still needs correction, using combined running coverage.
   const PerfSample contended =
-      perf_delta(start, hybrid(reading(100, 20, 20), reading(100, 30, 30)));
+      perfDelta(start, hybrid(reading(100, 20, 20), reading(100, 30, 30)));
   CHECK(contended.valid);
   CHECK(contended.scaled);
   CHECK(contended.instructions == 100);
   CHECK(contended.cycles == 200);
 
   const PerfSample unscheduled =
-      perf_delta(start, hybrid(reading(100, 0, 0), reading(100, 0, 0)));
+      perfDelta(start, hybrid(reading(100, 0, 0), reading(100, 0, 0)));
   CHECK(!unscheduled.valid);
 }
 
@@ -79,7 +79,7 @@ void cumulative_intervals() {
       hybrid(reading(1000, 400, 400), reading(1000, 600, 600));
   const PerfSample end =
       hybrid(reading(1100, 440, 440), reading(1100, 660, 660));
-  const PerfSample delta = perf_delta(start, end);
+  const PerfSample delta = perfDelta(start, end);
   CHECK(delta.valid);
   CHECK(!delta.scaled);
   CHECK(delta.instructions == 100);
@@ -89,13 +89,13 @@ void cumulative_intervals() {
   // A missing read or a reset between snapshots is not a zero-cost region.
   auto missing = end;
   missing.pmu[1].valid = false;
-  CHECK(!perf_delta(start, missing).valid);
-  CHECK(!perf_delta(end, start).valid);
+  CHECK(!perfDelta(start, missing).valid);
+  CHECK(!perfDelta(end, start).valid);
 
   PerfSample genericStart, genericEnd;
   static_cast<PerfReading&>(genericStart) = reading(100, 100, 100);
   static_cast<PerfReading&>(genericEnd) = reading(200, 150, 150);
-  const PerfSample generic = perf_delta(genericStart, genericEnd);
+  const PerfSample generic = perfDelta(genericStart, genericEnd);
   CHECK(generic.valid);
   CHECK(generic.scaled);
   CHECK(generic.instructions == 100);
@@ -191,7 +191,7 @@ void a_parser_without_references_counts_none() {
     cursiv::bench::detail::Row row;
     row.references = row.resolved = 99;
     cursiv::bench::detail::ws_stages<ws::WorkspaceSharedServices>(
-        1, false, 0, "workspace", ".ws", "datatype lowercase", row,
+        1, false, {}, 0, "workspace", ".ws", "datatype lowercase", row,
         register_language);
     CHECK(row.references == 0);
     CHECK(row.resolved == 0);
@@ -227,7 +227,7 @@ void register_hooked_language(cursiv::SharedCoreServices& shared) {
 void document_hooks_are_a_validation() {
   cursiv::bench::detail::Row row;
   cursiv::bench::detail::ws_stages<ws::WorkspaceSharedServices>(
-      1, false, 0, "workspace", ".ws", "datatype Text", row,
+      1, false, {}, 0, "workspace", ".ws", "datatype Text", row,
       register_hooked_language);
   CHECK(row.diagnostics == 0);
   CHECK(row.ms[cursiv::bench::detail::kValidate] !=
@@ -243,9 +243,9 @@ void a_failed_run_returns_its_status() {
   char unknown[] = "--unknown";
   char* readsNothing[] = {program, missing, nullptr};
   char* misspelt[] = {program, unknown, nullptr};
-  CHECK((run_language<ws::WorkspaceSharedServices, register_language>(
+  CHECK((runLanguage<ws::WorkspaceSharedServices, register_language>(
              2, readsNothing) == 1));
-  CHECK((run_language<ws::WorkspaceSharedServices, register_language>(
+  CHECK((runLanguage<ws::WorkspaceSharedServices, register_language>(
              2, misspelt) == 2));
 }
 

@@ -1,10 +1,13 @@
 #pragma once
 
+#include <cstddef>
+#include <functional>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
+#include <vector>
 
 #include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/utils/DocumentCache.hpp"
@@ -58,13 +61,36 @@ class DomainModelValidator final : public cursiv::DefaultCoreService,
   // walks went through, such as the one of `B` when `A` extends `B`.
   void onUpdate(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted) override;
-  void noteDependency(cursiv::DocumentId from,
-                      cursiv::DocumentId through) const;
 
-  mutable std::mutex _dependenciesMutex;
-  mutable std::unordered_map<cursiv::DocumentId,
-                             std::unordered_set<cursiv::DocumentId>>
-      _dependencies;
+  // An entity a walk started from or entered another document at.
+  struct Step {
+    cursiv::DocumentId document = cursiv::kNoDocument;
+    const ast::Entity* entity = nullptr;
+    bool operator==(const Step&) const = default;
+  };
+  struct StepHash {
+    [[nodiscard]] std::size_t operator()(const Step& step) const noexcept {
+      return std::hash<const ast::Entity*>{}(step.entity);
+    }
+  };
+  // Where the walk from a step last entered the next document, every step whose
+  // walk has entered here, and whether the walk ends, once known in this build.
+  struct Walked {
+    Step next;
+    std::vector<Step> from;
+    std::optional<bool> ends;
+  };
+
+  // Notes that the walk from `from` enters another document at `to`, and says
+  // whether the walk from `to` ends, if known.
+  [[nodiscard]] std::optional<bool> noteStep(const ast::Entity& from,
+                                             const ast::Entity& to) const;
+  // Notes whether the walks from `start` and from each entity it entered end.
+  void noteEnds(const ast::Entity& start,
+                std::span<const ast::Entity* const> entered, bool ends) const;
+
+  mutable std::mutex _stepsMutex;
+  mutable std::unordered_map<Step, Walked, StepHash> _steps;
 };
 
 }  // namespace dm

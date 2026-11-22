@@ -45,60 +45,57 @@ void DefaultServiceRegistry::registerServices(
         std::format("cursiv: language '{}' was built for another workspace",
                     meta.languageId));
 
-  // Every table is rewritten on the side and swapped in at the end, when the
-  // container is taken over: a throw before that leaves the registry as it was.
   const CoreServices* const language = services.get();
-  ByName byLanguageId = _byLanguageId;
-  ByName byExtension = _byExtension;
-  ByName byFileName = _byFileName;
-
-  // A re-registration drops the previous container's rows first, so they are
-  // not a collision with itself; it keeps its rank in `_all`.
-  const auto known = byLanguageId.find(meta.languageId);
-  const CoreServices* const old =
-      known != byLanguageId.end() ? known->second : nullptr;
-  if (old != nullptr) {
-    std::erase_if(byExtension,
-                  [old](const auto& row) { return row.second == old; });
-    std::erase_if(byFileName,
-                  [old](const auto& row) { return row.second == old; });
-  }
-  byLanguageId[meta.languageId] = language;
-  // A colliding key goes to the later language, with a warning naming the
-  // normalized key, published once the registration stands.
+  const CoreServices* const old = lookup(_byLanguageId, meta.languageId);
+  struct Claim {
+    ByName& table;
+    ByName::value_type& row;
+    const CoreServices* previous;
+  };
+  std::vector<Claim> claims;
+  claims.reserve(1 + meta.fileExtensions.size() + meta.fileNames.size());
   std::vector<Observation> collisions;
   const auto claim = [&](ByName& table, std::string key, const char* kind) {
-    const CoreServices*& slot = table[key];
-    if (slot != nullptr && slot != language)
-      collisions.push_back(
-          {.severity = ObservationSeverity::Warning,
-           .code = ObservationCode::LanguageMappingCollision,
-           .message = std::format("two languages claim {} '{}'", kind, key),
-           .uri = {},
-           .languageId = meta.languageId});
-    slot = language;
+    if (key.empty()) return;
+    auto& row = *table.try_emplace(std::move(key), nullptr).first;
+    if (row.second == language) return;
+    claims.push_back({table, row, row.second});
+    if (row.second && row.second != old)
+      collisions.push_back({.severity = ObservationSeverity::Warning,
+                            .code = ObservationCode::LanguageMappingCollision,
+                            .message = std::format(
+                                "two languages claim {} '{}'", kind, row.first),
+                            .uri = {},
+                            .languageId = meta.languageId});
+    row.second = language;
   };
-  // An empty key would route every file without an extension, or every URI
-  // ending in a separator: not a claim.
-  for (const std::string& extension : meta.fileExtensions)
-    if (std::string key = normalize_extension(extension); !key.empty())
-      claim(byExtension, std::move(key), "extension");
-  for (const std::string& fileName : meta.fileNames)
-    if (!fileName.empty()) claim(byFileName, fileName, "file name");
 
-  // Room for the two pushes below, so nothing past this point throws. A
-  // released container stays owned until the registry dies: documents may still
-  // use it.
-  _owned.reserve(_owned.size() + 1);
-  if (old == nullptr) _all.reserve(_all.size() + 1);
-  _owned.push_back(std::move(services));
-  if (old == nullptr)
-    _all.push_back(language);
-  else
+  // Map rows keep their addresses across rehashes. Restore every changed
+  // route if the registration cannot take ownership of the container.
+  try {
+    claim(_byLanguageId, meta.languageId, "language id");
+    for (const auto& extension : meta.fileExtensions)
+      claim(_byExtension, normalizeExtension(extension), "extension");
+    for (const auto& name : meta.fileNames)
+      claim(_byFileName, name, "file name");
+    if (!old) _all.push_back(language);
+    _owned.push_back(std::move(services));
+  } catch (...) {
+    if (!_all.empty() && _all.back() == language) _all.pop_back();
+    for (const auto& [table, row, previous] : claims) {
+      if (previous)
+        row.second = previous;
+      else
+        table.erase(row.first);
+    }
+    throw;
+  }
+  if (old) {
+    const auto obsolete = [old](const auto& row) { return row.second == old; };
+    std::erase_if(_byExtension, obsolete);
+    std::erase_if(_byFileName, obsolete);
     std::ranges::replace(_all, old, language);
-  _byLanguageId.swap(byLanguageId);
-  _byExtension.swap(byExtension);
-  _byFileName.swap(byFileName);
+  }
   for (const Observation& collision : collisions)
     shared.observabilitySink->publish(collision);
 }
@@ -114,9 +111,9 @@ const CoreServices* DefaultServiceRegistry::findServices(
   if (!languageId.empty())
     if (const CoreServices* const claimed = lookup(_byLanguageId, languageId))
       return claimed;
-  if (const CoreServices* const named = lookup(_byFileName, uri_file_name(uri)))
+  if (const CoreServices* const named = lookup(_byFileName, uriFileName(uri)))
     return named;
-  return lookup(_byExtension, uri_extension(uri));
+  return lookup(_byExtension, uriExtension(uri));
 }
 
 const CoreServices& DefaultServiceRegistry::getServices(

@@ -6,12 +6,7 @@
 #include "bench.hpp"
 #include "cursiv/CursivActions.hpp"
 #include "domainmodel/DomainModelGrammar.hpp"
-#include "domainmodel/generated/DomainModel/AstReflection.hpp"
-#include "domainmodel/generated/DomainModel/Grammar.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
-#include "domainmodel/generated/DomainModel/Parser.hpp"
-#include "domainmodel/generated/DomainModel/Table.hpp"
-#include "recovery_metric/Searching.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
 
 namespace metric = cursiv::recovery_metric;
@@ -24,8 +19,8 @@ const cursiv::fuzzer::CursivActions<dm::DomainModel> kActions{};
 const metric::Registered kLanguage{{
     .rank = 5,
     .name = "domainmodel",
-    .parser = &g::create_parser,
-    .reflection = &g::create_ast_reflection,
+    .parser = &g::createParser,
+    .reflection = &g::createAstReflection,
     .actions = &kActions,
     .documents =
         [] {
@@ -35,11 +30,6 @@ const metric::Registered kLanguage{{
               metric::source_file("examples/domainmodel/example.dmodel"),
               bench::generateDomainModelSource(3072)};
         },
-    .ceilings = &metric::ceilings<g::kTable, g::kDrive,
-                                          g::kGrammarMetaData, g::kAstActions>,
-    .searching = &metric::searching<g::kTable, g::kDrive,
-                                                g::kGrammarMetaData,
-                                                g::kAstActions>,
 }};
 
 }  // namespace

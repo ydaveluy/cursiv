@@ -11,8 +11,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 
-// The parse, with the grammar erased: a service holds one of these per
-// language and never learns which engine wrote it.
+// Language services use this interface to parse without naming the grammar type.
 
 namespace cursiv {
 
@@ -39,8 +38,8 @@ class Parser {
   }
 
   // What may be written at `at`, where the document's text resumes at `resume`
-  // (`at == resume` for an insertion), read from the element ids the engine
-  // wrote on the tree; none by default. A stop throws `OperationCancelled`.
+  // (`at == resume` for an insertion), from the element ids the engine wrote.
+  // None by default; an engine's answer throws `OperationCancelled` on a stop.
   virtual void nextFeaturesAt(
       const Cst&, TextOffset, TextOffset, std::vector<NextFeature>&,
       const CancellationToken& /*cancelToken*/ = kNoCancel) const {}
@@ -49,7 +48,7 @@ class Parser {
 // `parser` reading the text `translate` makes of each document, while
 // every offset it answers is the document's. Over a parser that already
 // translates, this throws `std::invalid_argument`.
-[[nodiscard]] std::unique_ptr<const Parser> translating_parser(
+[[nodiscard]] std::unique_ptr<const Parser> translatingParser(
     std::unique_ptr<const Parser> parser, SourceTranslator translate);
 
 }  // namespace cursiv

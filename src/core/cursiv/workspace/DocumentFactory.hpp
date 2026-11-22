@@ -41,8 +41,8 @@ class DocumentFactory {
       std::string_view uri,
       const CancellationToken& cancelToken = kNoCancel) const = 0;
 
-  // Refresh the text from its source and parse it again, ending at `Parsed`.
-  // The builder calls this only for documents below that state.
+  // Refresh the text and parse it. A parser exception leaves the document at
+  // `Changed` with the failure recorded in its diagnostics.
   virtual Document& update(
       Document& document,
       const CancellationToken& cancelToken = kNoCancel) const = 0;

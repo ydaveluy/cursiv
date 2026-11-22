@@ -1,7 +1,4 @@
-/* The tests side. ONE SERVER SERVES BOTH LANGUAGES, and OPENING THIS FOLDER is
-   what makes the requirement names below resolve: the server scans it at
-   `initialized`. This file alone, with no folder, reports every one of them
-   unresolved -- which is the measurement in ../README.md. */
+// Each test names the requirements it covers in requirements.req.
 contact: "Donald Duck"
 
 /** Checks the naming rules. */

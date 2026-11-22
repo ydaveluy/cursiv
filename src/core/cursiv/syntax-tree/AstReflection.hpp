@@ -70,7 +70,7 @@ struct AstReflection {
   static constexpr std::uint32_t kNoIndex = ~std::uint32_t{0};
   virtual void visitProperties(
       const AstNode& node,
-      cursiv::function_ref<void(std::string_view property, std::uint32_t index,
+      cursiv::FunctionRef<void(std::string_view property, std::uint32_t index,
                                 AstNode& child)>
           yield) const = 0;
 
@@ -81,10 +81,10 @@ struct AstReflection {
   [[nodiscard]] virtual const AstTypeTag* typeTagOf(
       std::uint16_t type) const noexcept = 0;
 
-  // The reference index of the member `feature` of class `container`, as a
+  // The reference index of the member `property` of class `container`, as a
   // completion has it at a caret. `kNoReference` when it is not a reference.
   [[nodiscard]] virtual std::uint16_t referenceIndexOf(
-      const AstTypeTag* container, std::string_view feature) const noexcept = 0;
+      const AstTypeTag* container, std::string_view property) const noexcept = 0;
 
   // The types a reference declares, by index -- a set, because a member may
   // name several. Subtypes are not listed: `referenceAccepts` below resolves
@@ -120,12 +120,17 @@ struct AstReflection {
            isSubtype(type, referenceNarrowTarget(site.reference, site.narrow));
   }
 
-  // Whether `bits` accepts `tag`, through this language's type index; a tag it
-  // does not know gets `kNoType`, which no set accepts.
+  // Whether `bits` accepts `tag`, through this language's type index. A class
+  // this language does not index, such as another language's subclass, is
+  // accepted when one of its bases is.
   [[nodiscard]] bool acceptsTag(AcceptSet bits,
                                 const AstTypeTag* tag) const noexcept {
     if (bits.empty()) return true;
-    return accepts(bits, typeIndexOf(tag));
+    const std::uint16_t index = typeIndexOf(tag);
+    if (index != kNoType || tag == nullptr) return accepts(bits, index);
+    for (const AstTypeTag* const base : std::span(tag->bases, tag->baseCount))
+      if (accepts(bits, typeIndexOf(base))) return true;
+    return false;
   }
 
   [[nodiscard]] static bool accepts(AcceptSet bits,

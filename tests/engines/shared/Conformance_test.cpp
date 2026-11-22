@@ -1,5 +1,6 @@
-// The conformance cases of the grammar reference, on both engines.
+// The conformance cases of the grammar reference.
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <memory>
@@ -9,8 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "conformancell/generated/Ll/Module.hpp"
-#include "conformancelr/generated/Lr/Module.hpp"
+#include "conformancelr/generated/Suite/Module.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
@@ -42,37 +42,34 @@ namespace {
 
 using conformance_test::clean;
 using conformance_test::expect;
-using conformance_test::kEngine;
-using conformance_test::Pair;
+using conformance_test::Entry;
 
 template <class T, class Check>
-void tree(const Pair& pair, std::string_view text, Check&& check,
+void tree(const Entry& entry, std::string_view text, Check&& check,
           std::source_location at = std::source_location::current()) {
-  for (unsigned i = 0; i < 2; ++i) {
-    const std::string source = pair.source(text);
-    const auto r = pair[i]->parse(source);
-    const auto* node = exactly<T>(r);
-    bool ok = clean(r) && node != nullptr && check(*node);
-    if (!ok)
-      std::printf("%s [%.*s]: wrong tree (row %u)\n", kEngine[i],
-                  static_cast<int>(text.size()), text.data(), at.line());
-    CHECK(ok);
-  }
+  const std::string source = entry.source(text);
+  const auto r = conformance_test::parser().parse(source);
+  const auto* node = exactly<T>(r);
+  const bool ok = clean(r) && node != nullptr && check(*node);
+  if (!ok)
+    std::printf("[%.*s]: wrong tree (row %u)\n", static_cast<int>(text.size()),
+                text.data(), at.line());
+  CHECK(ok);
 }
 
-// The two texts a `Won` or a `Pick` holds, on both engines.
-void won(const Pair& pair, std::string_view text, std::string_view token,
+// The two texts a `Won` or a `Pick` holds.
+void won(const Entry& entry, std::string_view text, std::string_view token,
          std::string_view name,
          std::source_location at = std::source_location::current()) {
   tree<tconformance::ast::Won>(
-      pair, text,
+      entry, text,
       [&](const auto& n) { return n.token == token && n.name == name; }, at);
 }
-void pick(const Pair& pair, std::string_view text, std::string_view literal,
+void pick(const Entry& entry, std::string_view text, std::string_view literal,
           std::string_view keyword,
           std::source_location at = std::source_location::current()) {
   tree<tconformance::ast::Pick>(
-      pair, text,
+      entry, text,
       [&](const auto& n) {
         return n.literal == literal && n.keyword == keyword;
       },
@@ -83,21 +80,21 @@ void pick(const Pair& pair, std::string_view text, std::string_view literal,
 
 int main() {
   namespace ast = tconformance::ast;
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
 
-  const Pair keyword{"keyword:"};
+  const Entry keyword{"keyword:"};
   expect(keyword, "if", true);
   expect(keyword, "ifx", false);
 
   // A keyword and a literal of one spelling tie: the arm written first wins.
-  const Pair keywordTie{"keywordtie:"};
+  const Entry keywordTie{"keywordtie:"};
   pick(keywordTie, "if(", "if", "");
-  const Pair keywordTieBoundary{"keywordtieboundary:"};
+  const Entry keywordTieBoundary{"keywordtieboundary:"};
   pick(keywordTieBoundary, "if x", "if", "");
   pick(keywordTieBoundary, "ifx", "if", "");
-  const Pair firstArm{"firstarm:"};
+  const Entry firstArm{"firstarm:"};
   tree<ast::First>(firstArm, "if then", [](const ast::First&) { return true; });
-  const Pair elected{"elected:"};
+  const Entry elected{"elected:"};
   tree<ast::First>(elected, "1 if;", [](const ast::First&) { return true; });
   tree<ast::Second>(elected, "1 if:", [](const ast::Second&) { return true; });
   won(elected, "2 if", "if", "");
@@ -109,84 +106,123 @@ int main() {
   });
   // The election comes first: its refused conversion is reported and no other
   // reading is tried.
-  for (unsigned i = 0; i < 2; ++i) {
+  {
     const std::string source = elected.source("5 if");
-    const auto r = elected[i]->parse(source);
+    const auto r = conformance_test::parser().parse(source);
     const auto* node = exactly<ast::Kept>(r);
     const bool ok =
         node != nullptr && node->value == "kept" && r.diagnostics.size() == 1 &&
         r.diagnostics[0].kind == cursiv::DiagnosticKind::ConversionError;
-    if (!ok) std::printf("%s [5 if]: wrong conversion\n", kEngine[i]);
+    if (!ok) std::printf("[5 if]: wrong conversion\n");
     CHECK(ok);
   }
 
-  const Pair literalsRank{"literalsrank:"};
+  const Entry literalsRank{"literalsrank:"};
   won(literalsRank, "if", "if", "");
   won(literalsRank, "while", "while", "");
   won(literalsRank, "iff", "", "iff");
-  const Pair literalsRankRefuses{"literalsrankrefuses:"};
+  const Entry literalsRankRefuses{"literalsrankrefuses:"};
   expect(literalsRankRefuses, "if", false);
   expect(literalsRankRefuses, "if;", true);
   expect(literalsRankRefuses, "x", true);
 
-  const Pair literalConditionRank{"literalconditionrank:"};
+  const Entry literalConditionRank{"literalconditionrank:"};
   won(literalConditionRank, "if;", "if", "");
   won(literalConditionRank, "if ;", "", "if");
   won(literalConditionRank, "x;", "", "x");
 
-  const Pair mixedRank{"mixedrank:"};
+  const Entry mixedRank{"mixedrank:"};
   pick(mixedRank, "if(", "if", "");
   pick(mixedRank, "x(", "", "x");
+  expect(mixedRank, ":{", true);
+  expect(mixedRank, ":A", true);
+  {
+    const auto source = mixedRank.source(":(");
+    const auto result = conformance_test::parser().parse(source);
+    const auto at = source.find('(');
+    CHECK(result.accepted && result.diagnostics.size() == 1 &&
+          result.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced &&
+          result.diagnostics[0].begin == at && result.diagnostics[0].end == at + 1);
+    result.cst().visitLeaves([&](const cursiv::CstLeaf& leaf) {
+      if (leaf.recovered) CHECK(leaf.begin == at && leaf.end == at + 1);
+    });
+  }
 
-  const Pair conditionedRank{"conditionedrank:"};
+  const Entry conditionedRank{"conditionedrank:"};
   pick(conditionedRank, "if;", "if", "");
   pick(conditionedRank, "if:", "if", "");
-  const Pair conditionedSwapped{"conditionedrankswapped:"};
+  const Entry conditionedSwapped{"conditionedrankswapped:"};
   pick(conditionedSwapped, "if;", "", "if");
   pick(conditionedSwapped, "if:", "", "if");
 
-  const Pair patternsTie{"patternstie:"};
+  const Entry patternsTie{"patternstie:"};
   won(patternsTie, "if", "if", "");
-  const Pair patternsTieSwapped{"patternstieswapped:"};
+  const Entry patternsTieSwapped{"patternstieswapped:"};
   won(patternsTieSwapped, "if", "", "if");
 
-  const Pair mixedRefused{"mixedrefused:"};
-  won(mixedRefused, "if;", "if", "");
-  won(mixedRefused, "x;", "", "x");
+  const Entry mixedRefused{"mixedrefused:"};
+  for (const std::string_view lead : {"", "<", ">", "="}) {
+    won(mixedRefused, std::string(lead) + "if;", "if", "");
+    won(mixedRefused, std::string(lead) + "x;", "", "x");
+  }
 
-  const Pair mixedLeading{"mixedleading:"};
+  const Entry mixedLeading{"mixedleading:"};
   won(mixedLeading, "if;", "if", "");
   won(mixedLeading, "x;", "", "x");
 
-  const Pair keywordTrivia{"keywordtrivia:"};
+  const Entry keywordTrivia{"keywordtrivia:"};
   won(keywordTrivia, "if", "", "if");
   won(keywordTrivia, "iff", "", "iff");
-  const Pair literalTrivia{"literaltrivia:"};
+  const Entry literalTrivia{"literaltrivia:"};
   won(literalTrivia, "if", "", "if");
   won(literalTrivia, "iff", "", "iff");
-  const Pair conditionedTrivia{"conditionedtrivia:"};
+  const Entry conditionedTrivia{"conditionedtrivia:"};
   won(conditionedTrivia, "if;", "", "if");
-  const Pair guardedLiteral{"guardedliteral:"};
+  const Entry guardedLiteral{"guardedliteral:"};
   won(guardedLiteral, "if;", "if", "");
   won(guardedLiteral, "if(", "", "if");
-  const Pair literalBesideGuard{"literalbesideguard:"};
+  const Entry literalBesideGuard{"literalbesideguard:"};
   won(literalBesideGuard, "if", "if", "");
   won(literalBesideGuard, "iff", "", "iff");
   // The lexer tries what the readings take, not what the state merged from
   // its callers would: `TEXT` is no competitor of `.` where a path is a key.
-  const Pair mergedLookahead{"mergedlookahead:"};
+  const Entry mergedLookahead{"mergedlookahead:"};
   expect(mergedLookahead, "a.b", true);
   expect(mergedLookahead, "a.b: [@c.d e.f]", true);
-  const Pair expectedKeyword{"expectedkeyword:"};
+  const Entry expectedKeyword{"expectedkeyword:"};
   won(expectedKeyword, "REM ; REM junk\nabc", "REM", "abc");
   // ...beyond ASCII too, where `ÿ` and `Ÿ` start on different bytes.
-  const Pair foldedKeyword{"foldedkeyword:"};
+  const Entry foldedKeyword{"foldedkeyword:"};
   won(foldedKeyword, "HAŸ ; haÿ junk\nabc", "HAŸ", "abc");
   won(foldedKeyword, "Haÿ ; abc", "Haÿ", "abc");
   expect(foldedKeyword, "haÿ ; HAŸ", false);
   expect(foldedKeyword, "HAY ; abc", false);
 
-  const Pair arms{"arms:"};
+  const Entry arms{"arms:"};
+  const Entry guarded{"caretguards:"};
+  const auto guarded_offers = [&](std::string_view text, cursiv::TextOffset resume) {
+    const auto& parser = conformance_test::parser();
+    const std::string source = guarded.source(text);
+    const auto parsed = parser.parse(source);
+    CHECK(clean(parsed));
+    const auto prefix = static_cast<cursiv::TextOffset>(guarded.prefix.size());
+    std::vector<cursiv::NextFeature> next;
+    parser.nextFeaturesAt(parsed.cst(), prefix + 1, prefix + resume, next);
+    std::vector<std::string_view> out;
+    for (const auto& f : next) {
+      if (!f.property.empty()) out.push_back(f.property);
+      else for (auto word : parser.getGrammar().terminalSpellings(f.feature)) out.push_back(word);
+    }
+    std::ranges::sort(out);
+    return out;
+  };
+  const std::vector<std::string_view> punctuation{"!!", ";"};
+  CHECK(guarded_offers("x;", 2) == punctuation);
+  CHECK(guarded_offers("x!!", 3) == punctuation);
+  CHECK((guarded_offers("p", 1) == std::vector<std::string_view>{"name"}));
+  tree<ast::Won>(guarded, "p!b+", [](const ast::Won& n) { return n.name == "!b+"; });
+  CHECK((guarded_offers("@12;", 3) == std::vector<std::string_view>{"token"}));
+  CHECK((guarded_offers("@aa:", 3) == std::vector<std::string_view>{"name", "token"}));
   tree<ast::Arms>(arms, "abc:", [](const ast::Arms& n) {
     return n.name == "abc" && n.low.empty();
   });
@@ -194,7 +230,7 @@ int main() {
     return n.low == "abc" && n.name.empty();
   });
   // Each clause: conjunction, modifier, field, operator, value.
-  const Pair fields{"fields:"};
+  const Entry fields{"fields:"};
   using Row = std::array<std::string_view, 5>;
   const auto query = [&](std::string_view text, std::vector<Row> rows,
                          std::source_location at =
@@ -224,24 +260,22 @@ int main() {
 
   // A branch, or an optional item, that reads what an earlier one reads is
   // dropped: each case reads as the rule written without it.
-  const Pair twins{"twins:"};
+  const Entry twins{"twins:"};
   const auto unchanged = [&](std::string_view twin, std::string_view text) {
     const std::string with =
         twins.source(std::string(twin) + " " + std::string(text));
     const std::string without =
         twins.source(std::string(twin) + ". " + std::string(text));
-    for (unsigned i = 0; i < 2; ++i) {
-      const auto a = twins[i]->parse(with);
-      const auto b = twins[i]->parse(without);
-      const auto* x = exactly<ast::Won>(a);
-      const auto* y = exactly<ast::Won>(b);
-      const bool ok = clean(a) && clean(b) && x != nullptr && y != nullptr &&
-                      x->token == y->token && x->name == y->name;
-      if (!ok)
-        std::printf("%s [%s]: reads unlike the rule without its twin\n",
-                    kEngine[i], with.c_str());
-      CHECK(ok);
-    }
+    const auto a = conformance_test::parser().parse(with);
+    const auto b = conformance_test::parser().parse(without);
+    const auto* x = exactly<ast::Won>(a);
+    const auto* y = exactly<ast::Won>(b);
+    const bool ok = clean(a) && clean(b) && x != nullptr && y != nullptr &&
+                    x->token == y->token && x->name == y->name;
+    if (!ok)
+      std::printf("[%s]: reads unlike the rule without its twin\n",
+                  with.c_str());
+    CHECK(ok);
   };
   for (const char* id : {"1", "2", "3", "4"}) unchanged(id, "x");
   unchanged("4", "x;");
@@ -257,7 +291,7 @@ int main() {
   won(twins, "7 x", "x", "");
   won(twins, "7 x;", "", "x");
 
-  const Pair separated{"separated:"};
+  const Entry separated{"separated:"};
   tree<ast::List>(separated, "",
                   [](const ast::List& n) { return n.items.empty(); });
   tree<ast::List>(separated, "a , a",
@@ -265,25 +299,25 @@ int main() {
   expect(separated, ",", false);
   expect(separated, "a ,", false);
 
-  const Pair trailing{"trailing:"};
+  const Entry trailing{"trailing:"};
   tree<ast::List>(trailing, "a,",
                   [](const ast::List& n) { return n.items.size() == 1; });
   tree<ast::List>(trailing, "a , a ,",
                   [](const ast::List& n) { return n.items.size() == 2; });
   expect(trailing, ",", false);
 
-  const Pair grouped{"grouped:"};
+  const Entry grouped{"grouped:"};
   tree<ast::S>(grouped, "x y z", [](const ast::S& n) {
     return n.a != nullptr && n.a->letters.size() == 2 && n.b == nullptr &&
            n.c != nullptr;
   });
-  const Pair repeated{"repeated:"};
+  const Entry repeated{"repeated:"};
   tree<ast::S>(repeated, "x y z", [](const ast::S& n) {
     return n.a != nullptr && n.a->letters.size() == 1 && n.b != nullptr &&
            n.b->letters.size() == 2 && n.c == nullptr;
   });
 
-  const Pair turn{"turn:"};
+  const Entry turn{"turn:"};
   tree<ast::Turns>(turn, "aa", [](const ast::Turns& n) {
     return n.turns.size() == 1 && n.turns[0]->letters.size() == 2;
   });
@@ -292,55 +326,55 @@ int main() {
            n.turns[1]->letters.size() == 1;
   });
 
-  const Pair turnShortFirst{"turnshortfirst:"};
+  const Entry turnShortFirst{"turnshortfirst:"};
   tree<ast::Turns>(turnShortFirst, "aa", [](const ast::Turns& n) {
     return n.turns.size() == 2 && n.turns[0]->letters.size() == 1 &&
            n.turns[1]->letters.size() == 1;
   });
 
-  const Pair tight{"tight:"};
+  const Entry tight{"tight:"};
   expect(tight, "[name]", true);
   expect(tight, "[ name ]", false);
 
-  const Pair adjacent{"adjacent:"};
+  const Entry adjacent{"adjacent:"};
   expect(adjacent, ">>", true);
   expect(adjacent, "> >", false);
-  const Pair attachedCall{"attachedcall:"};
+  const Entry attachedCall{"attachedcall:"};
   won(attachedCall, "f();", "()", "");
   won(attachedCall, "f ();", "", "()");
   won(attachedCall, " f ();", "", "()");
-  const Pair attachedCallShared{"attachedcallshared:"};
+  const Entry attachedCallShared{"attachedcallshared:"};
   won(attachedCallShared, "f();", "()", "");
   won(attachedCallShared, "f ();", "", "()");
   won(attachedCallShared, " f ();", "", "()");
-  const Pair attachedCallCalled{"attachedcallcalled:"};
+  const Entry attachedCallCalled{"attachedcallcalled:"};
   won(attachedCallCalled, "f();", "()", "");
   won(attachedCallCalled, "f ();", "", "()");
   won(attachedCallCalled, " f ();", "", "()");
 
-  const Pair closers{"closers:"};
+  const Entry closers{"closers:"};
   expect(closers, "<a>x", true);
   expect(closers, "<a>y>x", false);
 
-  const Pair longString{"longstring:"};
+  const Entry longString{"longstring:"};
   expect(longString, "[[x]]", true);
   expect(longString, "[=[x]=]", true);
   expect(longString, "[=[x]==]", false);
 
-  const Pair split{"split:"};
+  const Entry split{"split:"};
   expect(split, "ab", false);
   expect(split, "a b", true);
   expect(split, "ab c", true);
 
   // `#(` ends the call loop only where the caller in hand reads it.
-  const Pair longer{"callerlonger:"};
+  const Entry longer{"callerlonger:"};
   const auto named = [](const ast::Expression* e, std::string_view name) {
-    return e != nullptr && e->type == &cursiv::ast_type_tag<ast::Name> &&
+    return e != nullptr && e->type == &cursiv::kAstTypeTag<ast::Name> &&
            static_cast<const ast::Name*>(e)->name == name;
   };
   const auto called = [&](const ast::Expression* e, std::string_view callee,
                           std::string_view argument) {
-    if (e == nullptr || e->type != &cursiv::ast_type_tag<ast::Call>)
+    if (e == nullptr || e->type != &cursiv::kAstTypeTag<ast::Call>)
       return false;
     const auto* call = static_cast<const ast::Call*>(e);
     return named(call->callee, callee) && named(call->argument, argument);
@@ -358,23 +392,24 @@ int main() {
            named(n.statements[1], "b");
   });
 
-  const Pair many{"callermany:"};
-  const Pair upToTwo{"uptotwo:"};
-  for (const Pair* shared : {&many, &upToTwo}) {
+  const Entry many{"callermany:"};
+  const Entry upToTwo{"uptotwo:"};
+  for (const Entry* shared : {&many, &upToTwo}) {
     for (const std::string_view text :
          {"xab", "xaxab", "xa xab", "xaxa xab", "xaxaxab"})
       expect(*shared, text, false);
     expect(*shared, "xa xab y", true);
   }
-  for (const auto& parser : many) {
+  {
+    const cursiv::Parser& parser = conformance_test::parser();
     const std::string source = many.source("xaxb");
-    const auto parsed = parser->parse(source);
+    const auto parsed = parser.parse(source);
     std::vector<cursiv::NextFeature> next;
     const auto at = static_cast<cursiv::TextOffset>(many.prefix.size() + 3u);
-    parser->nextFeaturesAt(parsed.cst(), at, at, next);
+    parser.nextFeaturesAt(parsed.cst(), at, at, next);
     CHECK(next.size() == 1);
     for (const cursiv::NextFeature& f : next) {
-      const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
+      const auto spellings = parser.getGrammar().terminalSpellings(f.feature);
       CHECK(spellings.size() == 1 && spellings.front() == "ab");
     }
   }
@@ -382,34 +417,36 @@ int main() {
   // The caret reads a path as the parse does: the longer `TEXT` a merged
   // state flags is refused where the path's stack takes no `TEXT`, behind
   // the caret and in what is typed there.
-  const Pair merged{"mergedlookahead:"};
+  const Entry merged{"mergedlookahead:"};
   const std::string path = merged.source(" a.b");
-  for (cursiv::TextOffset at = 17; at <= path.size(); ++at) {
-    const auto ll = caret_offers::offered(*merged[0], path, at);
-    const auto lr = caret_offers::offered(*merged[1], path, at);
-    CHECK(!lr.empty() && ll == lr);
-  }
-  CHECK((caret_offers::offered(*merged[1], path, 19) ==
+  for (cursiv::TextOffset at = 17; at <= path.size(); ++at)
+    CHECK(!caret_offers::offered(conformance_test::parser(), path, at).empty());
+  CHECK((caret_offers::offered(conformance_test::parser(), path, 19) ==
          std::vector<std::string>{"ID"}));
 
-  const Pair word{"wordhost:"};
+  const Entry word{"wordhost:"};
   tree<ast::Leaf>(word, "[x]",
                   [](const ast::Leaf& n) { return n.text == "x"; });
 
-  const Pair calls{"calls:"};
+  const Entry calls{"calls:"};
   tree<ast::Program>(calls, "a\n(b)", [](const ast::Program& n) {
     return n.statements.size() == 1 &&
-           n.statements[0]->type == &cursiv::ast_type_tag<ast::Call>;
+           n.statements[0]->type == &cursiv::kAstTypeTag<ast::Call>;
   });
   tree<ast::Program>(calls, "a\nb", [](const ast::Program& n) {
     return n.statements.size() == 2 &&
-           n.statements[0]->type == &cursiv::ast_type_tag<ast::Name>;
+           n.statements[0]->type == &cursiv::kAstTypeTag<ast::Name>;
   });
+  const Entry memberCalls{"membercalls:"};
+  for (const std::string_view text : {"f.g(x)", "f(x).g(y)", "(f).g(x).h(y)"})
+    tree<ast::Program>(memberCalls, text, [](const ast::Program& n) {
+      return n.statements.size() == 1 &&
+             n.statements[0]->type == &cursiv::kAstTypeTag<ast::Call>;
+    });
 
-  // Where each node's span stands: an empty node where the text before it
-  // stops, a region with the trivia it crosses, a dropped token outside the
-  // construct before it.
-  const Pair all{""};
+  // Empty nodes, regions crossing trivia and dropped tokens leave a tree whose
+  // spans nest and stay in order.
+  const Entry all{""};
   for (const std::string_view text :
        {"tie: if", "atendhost: [  a ]", "trailing: \n", "turn: ", "calls: ",
         "callermany: ", "keywordtrivia: bc   ", "keywordtrivia:shared\n",
@@ -420,14 +457,12 @@ int main() {
 
   // The lexer chooses the keyword at each occurrence of a statement, whatever
   // the statements before it read.
-  const Pair closedHead{"closedhead:"};
+  const Entry closedHead{"closedhead:"};
   const std::string once = closedHead.source("b t module;");
   const std::string thrice =
       closedHead.source("b t module; b t module; b t module;");
-  for (const auto& parser : closedHead) {
-    CHECK(parser->parse(once).diagnostics.size() == 1);
-    CHECK(parser->parse(thrice).diagnostics.size() == 3);
-  }
+  CHECK(conformance_test::parser().parse(once).diagnostics.size() == 1);
+  CHECK(conformance_test::parser().parse(thrice).diagnostics.size() == 3);
 
   condition_contract_cases::run();
   template_tail_cases::run();

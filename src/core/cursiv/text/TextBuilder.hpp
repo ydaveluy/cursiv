@@ -59,17 +59,25 @@ class TextBuilder {
     std::size_t _by;
   };
 
-  // Writes `parts` on the current line, which goes on.
+  // Writes `parts` on the current line, which goes on. Text, a character or a
+  // list's separator may view this builder's text; a formatted value, an item
+  // or a cell may not.
   template <class... Parts>
   TextBuilder& write(const Parts&... parts) {
-    (add(parts), ...);
+    if ((borrows(parts) || ...)) {
+      TextBuilder copy;
+      copy.write(parts...);
+      addText(copy._text);
+    } else {
+      (add(parts), ...);
+    }
     return *this;
   }
 
   // Writes `parts` and ends the line.
   template <class... Parts>
   TextBuilder& line(const Parts&... parts) {
-    (add(parts), ...);
+    write(parts...);
     endLine();
     return *this;
   }
@@ -107,6 +115,22 @@ class TextBuilder {
   [[nodiscard]] std::string take();
 
  private:
+  // Whether a part views this builder's text, which a write moves as it grows.
+  template <class Part>
+  [[nodiscard]] bool borrows(const Part& part) const {
+    if constexpr (std::is_convertible_v<const Part&, std::string_view>)
+      return holds(part);
+    else if constexpr (std::is_same_v<Part, char>)
+      return holds(std::string_view(&part, 1));
+    else
+      return false;
+  }
+
+  template <class Items, class Cell>
+  [[nodiscard]] bool borrows(const detail::Joined<Items, Cell>& list) const {
+    return holds(list.separator);
+  }
+
   template <class Part>
   void add(const Part& part) {
     if constexpr (std::is_convertible_v<const Part&, std::string_view>) {
@@ -135,6 +159,7 @@ class TextBuilder {
 
   // Out of line: generators are compiled without optimisation, where a string
   // operation written here would cost many times what it costs there.
+  [[nodiscard]] bool holds(std::string_view text) const noexcept;
   void addText(std::string_view text);
   void addNumber(long long value);
   void addNumber(unsigned long long value);
@@ -147,9 +172,9 @@ class TextBuilder {
   Options _options;
 };
 
-// A list to write: `items` in turn, with `separator` between two. `cell` gives
-// what to write for an item, the item itself by default. Use it where it
-// stands: it keeps a reference to `items`.
+// A list to write: `items` in turn with `separator` between two, each as what
+// `cell` gives, the item itself by default. Use it where it stands: it keeps a
+// reference to `items`. No item or cell may view the builder's text.
 template <class Items, class Cell = std::identity>
   requires std::ranges::input_range<const Items>
 [[nodiscard]] detail::Joined<Items, Cell> joined(const Items& items,

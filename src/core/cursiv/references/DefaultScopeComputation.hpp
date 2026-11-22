@@ -32,7 +32,7 @@ class DefaultScopeComputation : public ScopeComputation,
   // part.
   [[nodiscard]] std::vector<AstNodeDescription> collectExportedSymbolsForNode(
       AstNode& parent, const Document& document,
-      function_ref<void(function_ref<void(AstNode&)>)> children,
+      FunctionRef<void(FunctionRef<void(AstNode&)>)> children,
       const CancellationToken& cancelToken) const;
 
   // Adds one node to the exports when it has a name. A language overrides it to

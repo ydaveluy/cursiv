@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -73,18 +74,20 @@ namespace {
   return expected == actual;
 }
 
+// `data` is the finding's data in the protocol's shape.
 [[nodiscard]] bool matches_diagnostic(const Diagnostic& diagnostic,
                                       const lsp::Range& range,
+                                      const std::optional<lsp::LSPAny>& data,
                                       const lsp::Diagnostic& candidate) {
   if (const auto* message = std::get_if<lsp::String>(&candidate.message);
       message == nullptr || *message != diagnostic.message ||
-      from_lsp(candidate.range) != from_lsp(range) ||
+      fromLsp(candidate.range) != fromLsp(range) ||
       !candidate.severity.has_value() ||
       candidate.severity->value() !=
           static_cast<lsp::Uint>(diagnostic.severity) ||
       candidate.source.value_or("") != diagnostic.source ||
       candidate.code.has_value() != diagnostic.code.has_value() ||
-      candidate.data.has_value() != diagnostic.data.has_value())
+      candidate.data.has_value() != data.has_value())
     return false;
   if (diagnostic.code.has_value()) {
     if (diagnostic.code->isString()) {
@@ -97,21 +100,51 @@ namespace {
         return false;
     }
   }
-  return !diagnostic.data.has_value() ||
-         same_json_payload(detail::to_lsp_any(*diagnostic.data),
-                           *candidate.data);
+  return !data.has_value() || same_json_payload(*data, *candidate.data);
+}
+
+// A finding the client sent, under the key `echo_of` searches it by: its range
+// and message.
+using EchoKey = std::tuple<Position, Position, std::string_view>;
+using Echo = std::pair<EchoKey, const lsp::Diagnostic*>;
+[[nodiscard]] Echo echo_entry(const lsp::Diagnostic& echo) {
+  const Range range = fromLsp(echo.range);
+  const auto* message = std::get_if<lsp::String>(&echo.message);
+  const std::string_view text =
+      message != nullptr ? std::string_view(*message) : std::string_view{};
+  return {{range.start, range.end, text}, &echo};
+}
+
+// The finding in the client's shape, so the editor groups the lightbulb with
+// the squiggle: the first of the client's findings that matches it, in the
+// client's order. `echoes` are sorted by key, ties in the client's order.
+[[nodiscard]] lsp::Diagnostic echo_of(const Document& document,
+                                      const Diagnostic& diagnostic,
+                                      std::span<const Echo> echoes) {
+  lsp::Diagnostic about;
+  about.range = toLsp(document.textDocument().rangeAt(diagnostic.range.begin,
+                                                       diagnostic.range.end));
+  about.message = diagnostic.message;
+  const Range range = fromLsp(about.range);
+  const auto candidates = std::ranges::equal_range(
+      echoes, EchoKey{range.start, range.end, diagnostic.message}, {},
+      &Echo::first);
+  if (candidates.empty()) return about;
+  std::optional<lsp::LSPAny> data;
+  if (diagnostic.data.has_value()) data = detail::to_lsp_any(*diagnostic.data);
+  for (const Echo& candidate : candidates)
+    if (matches_diagnostic(diagnostic, about.range, data, *candidate.second))
+      return *candidate.second;
+  return about;
 }
 
 // One edit row as one code action; null when the row is malformed, stale
 // (offsets of another revision) or out of bounds. A dropped fix comes back
 // with the next build.
 [[nodiscard]] std::optional<lsp::CodeAction> make_action(
-    const Document& document, const Diagnostic& diagnostic,
-    const JsonValue& row, std::span<const lsp::Diagnostic> clientDiagnostics) {
+    const Document& document, const JsonValue& row) {
   if (!row.isObject()) return std::nullopt;
   const JsonValue::Object& object = row.object();
-  // `editKind` is ignored: `begin == end` already tells an insert from a
-  // replace.
   const JsonValue* kind = field(object, detail::kKindField);
   const JsonValue* title = field(object, detail::kTitleField);
   const JsonValue* newText = field(object, detail::kNewTextField);
@@ -138,21 +171,8 @@ namespace {
   action.kind = lsp::CodeActionKind::QuickFix;
   action.isPreferred = true;
 
-  // The finding this action answers, in the client's shape, so the editor
-  // groups the lightbulb with the squiggle.
-  lsp::Diagnostic about;
-  about.range = to_lsp(document.textDocument().rangeAt(diagnostic.range.begin,
-                                                       diagnostic.range.end));
-  about.message = diagnostic.message;
-  for (const lsp::Diagnostic& candidate : clientDiagnostics)
-    if (matches_diagnostic(diagnostic, about.range, candidate)) {
-      about = candidate;
-      break;
-    }
-  action.diagnostics = lsp::Array<lsp::Diagnostic>{std::move(about)};
-
   lsp::TextEdit edit;
-  edit.range = to_lsp(document.textDocument().rangeAt(
+  edit.range = toLsp(document.textDocument().rangeAt(
       static_cast<TextOffset>(editBegin), static_cast<TextOffset>(editEnd)));
   edit.newText = newText->string();
   lsp::WorkspaceEdit workspaceEdit;
@@ -168,7 +188,7 @@ namespace {
 std::vector<lsp::CodeAction> DefaultCodeActionProvider::getCodeActions(
     const Document& document, const lsp::CodeActionParams& params,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   std::vector<lsp::CodeAction> actions;
   // The `only` filter gates the built-in quick fixes alone: the hook below
   // decides its own kinds.
@@ -176,13 +196,12 @@ std::vector<lsp::CodeAction> DefaultCodeActionProvider::getCodeActions(
     // Findings touching the request's range count: a caret on a zero-width
     // repair point must reach it.
     const TextOffset from =
-        document.textDocument().offsetAt(from_lsp(params.range.start));
+        document.textDocument().offsetAt(fromLsp(params.range.start));
     const TextOffset to =
-        document.textDocument().offsetAt(from_lsp(params.range.end));
+        document.textDocument().offsetAt(fromLsp(params.range.end));
 
-    const auto offer = [&](const Diagnostic& diagnostic, const JsonValue& row) {
-      if (std::optional<lsp::CodeAction> action = make_action(
-              document, diagnostic, row, params.context.diagnostics);
+    const auto offer = [&](const JsonValue& row) {
+      if (std::optional<lsp::CodeAction> action = make_action(document, row);
           action.has_value())
         actions.push_back(std::move(*action));
     };
@@ -190,20 +209,33 @@ std::vector<lsp::CodeAction> DefaultCodeActionProvider::getCodeActions(
     for (const Diagnostic& diagnostic : document.diagnostics)
       if (diagnostic.range.begin <= to && diagnostic.range.end >= from)
         asked.push_back(&diagnostic);
+    std::vector<Echo> echoes;
+    echoes.reserve(params.context.diagnostics.size());
+    for (const lsp::Diagnostic& echo : params.context.diagnostics)
+      echoes.push_back(echo_entry(echo));
+    std::ranges::stable_sort(echoes, {}, &Echo::first);
     // Spelling fixes are computed here, only for the findings under the
     // request: the lookup walks the reference's whole scope.
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
+    unsigned spelt = 0;
     const std::vector<JsonValue::Array> spelled =
-        detail::spelling_actions(document, asked, token);
+        detail::spelling_actions(document, asked, spelt, token);
     for (std::size_t i = 0; i < asked.size(); ++i) {
-      throw_if_cancelled(token);
+      throwIfCancelled(token);
       const Diagnostic& diagnostic = *asked[i];
+      const std::size_t first = actions.size();
       if (diagnostic.data.has_value() && diagnostic.data->isObject())
         if (const JsonValue* rows = field(diagnostic.data->object(),
                                           detail::kDefaultCodeActionsKey);
             rows != nullptr && rows->isArray())
-          for (const JsonValue& row : rows->array()) offer(diagnostic, row);
-      for (const JsonValue& row : spelled[i]) offer(diagnostic, row);
+          for (const JsonValue& row : rows->array()) offer(row);
+      for (const JsonValue& row : spelled[i]) offer(row);
+      if (actions.size() == first) continue;
+      lsp::Diagnostic about = echo_of(document, diagnostic, echoes);
+      for (std::size_t k = first; k + 1 < actions.size(); ++k)
+        actions[k].diagnostics = lsp::Array<lsp::Diagnostic>{about};
+      actions.back().diagnostics =
+          lsp::Array<lsp::Diagnostic>{std::move(about)};
     }
   }
   appendCodeActions(document, params, actions, token);

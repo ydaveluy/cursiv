@@ -10,10 +10,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI" AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_link_options(--no-wasm-opt)
 endif()
 
+include(cmake/Helpers.cmake)
+cursiv_test(LexSuffixSession_test engines/shared/LexSuffixSession_test.cpp)
+cursiv_test(Cactus_test engines/shared/Cactus_test.cpp)
+cursiv_test(AdaptiveLr_test engines/shared/AdaptiveLr_test.cpp cursiv::gen)
+cursiv_grammar(asciiword engines/shared/AsciiWordGrammar.hpp tasciiword::Words)
+cursiv_grammar(asciiwordbytes engines/shared/AsciiWordGrammar.hpp tasciiword::Bytes)
+cursiv_test(AsciiWord_test engines/shared/AsciiWord_test.cpp
+    asciiwordGenerated asciiwordbytesGenerated)
+
 # include() keeps relative paths rooted here.
 include(cmake/BatchGenerators.cmake)
-foreach(_suite IN ITEMS Helpers Core LrLowering Shared Ll Lr Workspace
-                        Torture Services Integration Refusals Regressions)
+foreach(_suite IN ITEMS Core Shared Workspace Torture Services Integration
+                        Regressions)
   include(cmake/${_suite}.cmake)
 endforeach()
 

@@ -3,9 +3,7 @@
 #include <lsp/json/json.h>
 #include <lsp/types.h>
 
-#include <cstdint>
 #include <memory>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -41,11 +39,11 @@ std::unique_ptr<McpServer> LspMcpService::createServer() const {
 void LspMcpService::registerFormatTool(McpServer& server) const {
   json::Object properties;
   properties["file"] =
-      tool_property("string", "path or file:// uri of the document");
+      toolProperty("string", "path or file:// uri of the document");
   properties["tabSize"] =
-      tool_property("integer", "spaces per level (default 2)");
+      detail::positive_integer_property("spaces per level (default 2)");
   properties["insertSpaces"] =
-      tool_property("boolean", "spaces rather than tabs (default true)");
+      toolProperty("boolean", "spaces rather than tabs (default true)");
   json::Array required;
   required.emplace_back(json::String("file"));
   server.registerTool(
@@ -56,15 +54,23 @@ void LspMcpService::registerFormatTool(McpServer& server) const {
            "as the FULL new text -- nothing is applied to the workspace. "
            "A language without a formatter refuses.",
        .inputSchema =
-           tool_object_schema(std::move(properties), std::move(required))},
-      [&shared = _shared](const json::Value& arguments,
+           toolObjectSchema(std::move(properties), std::move(required))},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
-        const json::Value* const file = tool_argument(arguments, "file");
+        const json::Value* const file = toolArgument(arguments, "file");
         if (file == nullptr || !file->isString())
           throw std::invalid_argument("'file' names the document");
+        const json::Value* tabSize = toolArgument(arguments, "tabSize");
+        const auto width = tabSize ? detail::tool_integer(tabSize, 1) : 2;
+        if (!width)
+          throw std::invalid_argument(
+              "'tabSize' must be a positive 32-bit integer");
+        const json::Value* spaces = toolArgument(arguments, "insertSpaces");
+        if (spaces && !spaces->isBoolean())
+          throw std::invalid_argument("'insertSpaces' must be a boolean");
         bool hasFormatter = false;
-        McpToolResult result = route_document_tool(
-            shared, tool_file_uri(file->string()), DocumentState::Parsed, token,
+        McpToolResult result = routeDocumentTool(
+            shared, toolFileUri(file->string()), DocumentState::Parsed, token,
             [&](const Document& document, const CoreServices& language,
                 std::string& out) {
               const auto* const lspLanguage =
@@ -76,22 +82,14 @@ void LspMcpService::registerFormatTool(McpServer& server) const {
               hasFormatter = true;
               lsp::DocumentFormattingParams params;
               params.textDocument.uri = lsp::DocumentUri::parse(document.uri);
-              params.options.tabSize = 2;
-              params.options.insertSpaces = true;
-              if (const std::optional<std::int32_t> tabSize =
-                      detail::tool_integer(tool_argument(arguments, "tabSize"),
-                                           1))
-                params.options.tabSize = static_cast<lsp::Uint>(*tabSize);
-              if (const json::Value* const insertSpaces =
-                      tool_argument(arguments, "insertSpaces");
-                  insertSpaces != nullptr && insertSpaces->isBoolean())
-                params.options.insertSpaces = insertSpaces->boolean();
-              const std::vector<lsp::TextEdit> edits =
-                  formatter->formatDocument(document, params, token);
+              params.options.tabSize = static_cast<lsp::Uint>(*width);
+              params.options.insertSpaces = !spaces || spaces->boolean();
+              auto edits = formatter->formatDocument(document, params, token);
               std::vector<TextEdit> converted;
               converted.reserve(edits.size());
-              for (const lsp::TextEdit& edit : edits)
-                converted.emplace_back(from_lsp(edit.range), edit.newText);
+              for (lsp::TextEdit& edit : edits)
+                converted.emplace_back(fromLsp(edit.range),
+                                       std::move(edit.newText));
               out =
                   TextDocument::applyEdits(document.textDocument(), converted);
             });

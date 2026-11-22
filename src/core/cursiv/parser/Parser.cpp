@@ -17,31 +17,33 @@ namespace {
 // A tree holds one translation, and its AST points into that text: binding a
 // second would free it.
 constexpr const char* kNested =
-    "cursiv: translating_parser over a parser that already translates; "
+    "cursiv: translatingParser over a parser that already translates; "
     "compose the phases in one translator";
 
 // The tree as the engine wrote it, over the translated text and at its
-// offsets: what the engine's completion reads.
-Cst engine_tree(const Cst& cst, const SourceTranslation& translation) {
+// offsets, for the engine's completion; copying its records throws on a stop.
+Cst engine_tree(const Cst& cst, const SourceTranslation& translation,
+                const CancellationToken& cancelToken) {
   Cst tree(translation.text());
-  detail::CstBuilder builder(tree);
-  detail::CstRun& run = builder.stream();
-  run.reserve_for(cst.size());
-  for (NodeId id = 0; id < cst.size(); ++id) {
-    run.leaf(0, 0, 0);
-    run.at(id) = cst[id];
+  CstBuilder builder(tree);
+  CstRun& run = builder.stream();
+  run.reserveRecords(cst.size());
+  {
+    const CstRun::Watch watch(run, cancelToken);
+    for (NodeId id = 0; id < cst.size(); ++id) {
+      run.leaf(0, 0, 0);
+      run.at(id) = cst[id];
+    }
   }
   if (cst.size() != 0) translation.toText({&run.at(0), cst.size()});
-  if (cst.engineStamped()) builder.bind_stream();
-  builder.bind_entry(cst.entryBegin(), cst.entryEnd(), cst.entryRoot());
-  builder.bind_accepted(cst.accepted());
+  builder.finish(cst.entryRoot(), cst.accepted());
   std::vector<ParseDiagnostic> repairs(cst.diagnostics().begin(),
                                        cst.diagnostics().end());
   translation.toText(std::span(repairs));
   for (ParseDiagnostic& d : repairs)
-    builder.note_repair(d.kind, d.element, d.begin, d.end, std::move(d.also),
+    builder.noteRepair(d.kind, d.element, d.begin, d.end, std::move(d.also),
                         d.mixedIndent);
-  if (cst.grammar() != nullptr) builder.bind_model(*cst.grammar(), cst.owned());
+  if (cst.grammar() != nullptr) builder.bindModel(*cst.grammar(), cst.owned());
   return tree;
 }
 
@@ -84,12 +86,13 @@ class TranslatingParser final : public Parser {
     const SourceTranslation* const translation = cst.translation();
     if (translation == nullptr)
       return _parser->nextFeaturesAt(cst, at, resume, out, cancelToken);
+    throwIfCancelled(cancelToken);
     // A caret strictly inside a replaced piece would split its spelling.
     const auto from = translation->translated(at);
     const auto to = translation->translated(resume);
     if (from.has_value() && to.has_value())
-      _parser->nextFeaturesAt(engine_tree(cst, *translation), *from, *to, out,
-                              cancelToken);
+      _parser->nextFeaturesAt(engine_tree(cst, *translation, cancelToken),
+                              *from, *to, out, cancelToken);
   }
 
  private:
@@ -99,7 +102,7 @@ class TranslatingParser final : public Parser {
 
 }  // namespace
 
-std::unique_ptr<const Parser> translating_parser(
+std::unique_ptr<const Parser> translatingParser(
     std::unique_ptr<const Parser> parser, SourceTranslator translate) {
   if (dynamic_cast<const TranslatingParser*>(parser.get()) != nullptr)
     throw std::invalid_argument(kNested);

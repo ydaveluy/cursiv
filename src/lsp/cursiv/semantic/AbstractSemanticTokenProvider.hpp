@@ -46,7 +46,7 @@ struct SemanticToken {
   std::uint32_t modifiers = 0;
 };
 
-using SemanticTokenAcceptor = function_ref<void(SemanticToken)>;
+using SemanticTokenAcceptor = FunctionRef<void(SemanticToken)>;
 
 class AbstractSemanticTokenProvider : public SemanticTokenProvider {
  public:

@@ -26,8 +26,8 @@ class DefaultAstNodeLocator : public AstNodeLocator,
   static constexpr char kIndexSeparator = '@';
 
   // One step of a path: the member that holds `node` in its container, and the
-  // place in it when the member is a list. Empty when the container holds it
-  // nowhere, which is a detached node.
+  // place in it when the member is a list. Empty for a node with no container;
+  // throws `std::invalid_argument` when its container does not hold it.
   [[nodiscard]] virtual std::string getPathSegment(const AstNode& node) const;
 };
 

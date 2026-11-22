@@ -7,16 +7,11 @@
 #include <string>
 #include <vector>
 
-#include "asi/generated/G/AstReflection.hpp"
-#include "asi/generated/G/Grammar.hpp"
 #include "asi/generated/G/Module.hpp"
-#include "asi/generated/G/Parser.hpp"
-#include "asi/generated/G/Table.hpp"
 #include "bench.hpp"
 #include "cursiv/CursivActions.hpp"
-#include "engines/lr/AsiGrammar.hpp"
+#include "grammars/AsiGrammar.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
-#include "recovery_metric/Searching.hpp"
 
 namespace metric = cursiv::recovery_metric;
 
@@ -77,8 +72,8 @@ std::string document(std::uint64_t seed, int depth) {
 const metric::Registered kLanguage{{
     .rank = 8,
     .name = "asi",
-    .parser = &g::create_parser,
-    .reflection = &g::create_ast_reflection,
+    .parser = &g::createParser,
+    .reflection = &g::createAstReflection,
     .actions = &kActions,
     .documents =
         [] {
@@ -86,10 +81,6 @@ const metric::Registered kLanguage{{
                                           document(0xa52, 3),
                                           document(0xa53, 4)};
         },
-    .ceilings = &metric::ceilings<g::kTable, g::kDrive, g::kGrammarMetaData,
-                                  g::kAstActions>,
-    .searching = &metric::searching<g::kTable, g::kDrive, g::kGrammarMetaData,
-                                    g::kAstActions>,
 }};
 
 }  // namespace

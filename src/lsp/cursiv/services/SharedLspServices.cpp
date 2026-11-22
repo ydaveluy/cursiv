@@ -28,7 +28,7 @@ SharedLspServices::~SharedLspServices() noexcept {
 }
 
 void SharedLspServices::visitServices(
-    cursiv::function_ref<void(const ServiceSlot&)> yield) const {
+    cursiv::FunctionRef<void(const ServiceSlot&)> yield) const {
   SharedCoreServices::visitServices(yield);
   yield({"workspaceSymbolProvider", true, workspaceSymbolProvider != nullptr});
   yield({"nodeKindProvider", true, nodeKindProvider != nullptr});
@@ -51,10 +51,10 @@ void SharedLspServices::visitServices(
   yield({"configurationProvider", true, configurationProvider != nullptr});
 }
 
-void install_default_shared_lsp_services(SharedLspServices& shared) {
+void installDefaultSharedLspServices(SharedLspServices& shared) {
   if (shared.documentBuilder == nullptr)
     shared.documentBuilder = std::make_unique<LspDocumentBuilder>(shared);
-  install_default_shared_core_services(shared);
+  installDefaultSharedCoreServices(shared);
   if (shared.workspaceSymbolProvider == nullptr)
     shared.workspaceSymbolProvider =
         std::make_unique<DefaultWorkspaceSymbolProvider>(shared);

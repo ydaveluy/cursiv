@@ -20,6 +20,7 @@
 
 namespace cursiv {
 struct AstNode;
+struct Document;
 }  // namespace cursiv
 
 namespace cursiv::test {
@@ -37,6 +38,8 @@ struct ExpectDiagnosticOptionsWithoutContent {
   // Where a member of `node` was written; absent takes the node's own span.
   std::optional<std::string> property{};
   std::optional<std::size_t> propertyIndex{};
+  std::optional<std::string> source{};
+  std::optional<std::vector<DiagnosticTag>> tags{};
 };
 
 struct ExpectDiagnosticOptions {
@@ -52,6 +55,8 @@ struct ExpectDiagnosticOptions {
   const AstNode* node = nullptr;
   std::optional<std::string> property{};
   std::optional<std::size_t> propertyIndex{};
+  std::optional<std::string> source{};
+  std::optional<std::vector<DiagnosticTag>> tags{};
 };
 
 // Deep equality of the two payloads, `rhs` read as a subset of `lhs`: the
@@ -67,6 +72,11 @@ void expectNoIssues(const ValidationResult& validationResult,
                     const ExpectDiagnosticOptions& filterOptions = {});
 void expectIssue(const ValidationResult& validationResult,
                  const ExpectDiagnosticOptions& filterOptions = {});
+
+void expectIssue(const Document& document,
+                 const ExpectDiagnosticOptions& options = {});
+void expectNoIssues(const Document& document,
+                    const ExpectDiagnosticOptions& options = {});
 
 void expectError(
     const ValidationResult& validationResult, std::string_view message,

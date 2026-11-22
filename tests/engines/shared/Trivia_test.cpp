@@ -1,30 +1,19 @@
-#include "triviall/generated/Ll/Module.hpp"
-#include "triviall/generated/Ll/Table.hpp"
 #include "trivialr/generated/Lr/Module.hpp"
-#include "trivialr/generated/Lr/Parser.hpp"
-#include "trivialr/generated/Lr/Table.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
-#include "cursiv/ll/runtime/LlSearch.hpp"
-#include "cursiv/lr/runtime/LrContext.hpp"
-#include "cursiv/lr/runtime/lr_matcher.hpp"
-#include "cursiv/lr/runtime/lr_states.hpp"
 #include "cursiv/parser/Parser.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/CaretOffers.hpp"
 #include "engines/shared/Checks.hpp"
 #include "engines/shared/TriviaGrammar.hpp"
 #include <cstdio>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace trivia_cases {
 
-// Trivia in both engines: two ignored terminals reading one text are no tie,
+// Trivia: two ignored terminals reading one text are no tie,
 // a blank keeps the refusal at its head, and a terminal read as trivia is no
 // bracket of the indentation.
 
@@ -56,8 +45,8 @@ void a_blank_keeps_its_head_refusal(const cursiv::Parser& parser) {
 // other regions read its bytes as a token. One the lexer refused in its middle
 // is skipped too, and the note spans every byte the fault takes: the comments
 // skipped in a row and the bytes dropped beside them.
-void an_open_comment_is_skipped_where_it_is_trivia(const cursiv::Parser& ll,
-                                                   const cursiv::Parser& lr) {
+void an_open_comment_is_skipped_where_it_is_trivia(
+    const cursiv::Parser& parser) {
   const struct {
     std::string_view text;
     cursiv::TextOffset begin, end;
@@ -69,19 +58,18 @@ void an_open_comment_is_skipped_where_it_is_trivia(const cursiv::Parser& ll,
       {"ranked:a @ /* x * y */ b", 9, 22},
       {"ranked:a /* x * y */ @ /* z * w */ b", 9, 34},
   };
-  for (const auto& sample : cases)
-    for (const cursiv::Parser* const parser : {&ll, &lr}) {
-      const cursiv::ParseResult r = parser->parse(sample.text);
-      const bool spans =
-          r.diagnostics.size() == 1 &&
-          r.diagnostics.front().kind == cursiv::DiagnosticKind::Replaced &&
-          r.diagnostics.front().begin == sample.begin &&
-          r.diagnostics.front().end == sample.end;
-      if (!spans)
-        std::printf("  [%s] %.*s\n", parser == &ll ? "Ll" : "Lr",
-                    static_cast<int>(sample.text.size()), sample.text.data());
-      CHECK(spans);
-    }
+  for (const auto& sample : cases) {
+    const cursiv::ParseResult r = parser.parse(sample.text);
+    const bool spans =
+        r.diagnostics.size() == 1 &&
+        r.diagnostics.front().kind == cursiv::DiagnosticKind::Replaced &&
+        r.diagnostics.front().begin == sample.begin &&
+        r.diagnostics.front().end == sample.end;
+    if (!spans)
+      std::printf("  %.*s\n", static_cast<int>(sample.text.size()),
+                  sample.text.data());
+    CHECK(spans);
+  }
 }
 
 // The trivia in front of a region's first token is its caller's, which skips
@@ -108,35 +96,6 @@ void an_implied_condition_reads_the_trivia_of_its_place(
     const cursiv::ParseResult r = parser.parse(text);
     CHECK(r.accepted && r.diagnostics.empty());
   }
-}
-
-template <const auto& Table>
-constexpr const auto& cfg_of() {
-  if constexpr (requires { Table.cfg.terms; })
-    return Table.cfg;
-  else
-    return Table;
-}
-
-template <const auto& Table>
-void a_trivia_terminal_is_no_bracket() {
-  constexpr const auto& cfg = cfg_of<Table>();
-  unsigned note = 0, open = 0, close = 0;
-  for (std::uint16_t t = 1; t < cfg.nterms; ++t) {
-    const auto name = cfg.term_name(t);
-    if (name == "NOTE" && cfg.terms[t].recorded) {
-      CHECK(cfg.terms[t].trivia);
-      CHECK(cfg.terms[t].delim == 0);
-      ++note;
-    } else if (name == "(") {
-      CHECK(cfg.terms[t].delim == 1);
-      ++open;
-    } else if (name == ")") {
-      CHECK(cfg.terms[t].delim == -1);
-      ++close;
-    }
-  }
-  CHECK(note == 2 && open == 1 && close == 1);
 }
 
 }  // namespace
@@ -198,8 +157,7 @@ void a_run_of_blanks_reads_on_from_its_last_byte(const cursiv::Parser& p) {
 // A caret in a gap answers for what is typed there: in a continuation's blanks
 // a word reads, behind its `_` it joins it, and behind a note's opener it goes
 // on the note.
-void a_caret_answers_for_what_is_typed_in_a_gap(const cursiv::Parser& ll,
-                                                const cursiv::Parser& lr) {
+void a_caret_answers_for_what_is_typed_in_a_gap(const cursiv::Parser& parser) {
   using Offers = std::vector<std::string>;
   const Offers none;
   const Offers word{"ID"};
@@ -220,42 +178,24 @@ void a_caret_answers_for_what_is_typed_in_a_gap(const cursiv::Parser& ll,
       {"noted:a #", 8, word},          {"noted:a #", 9, none},
       {"noted:a #b c", 9, none},       {"noted:a #b c", 10, none},
       {"noted:a #b c", 11, word},      {"noted:a ## c", 9, none},
-      {"noted:a %1 c", 9, none},       {"inside:#!", 8, closes},
+      {"noted:a %1 c", 9, none},       {"noted:a @é c", 9, none},
+      {"noted:a @𐐀 c", 9, none},       {"inside:#!", 8, closes},
       {"paired:a /*x*/", 14, equals},  {"paired:a\n/*x*/", 14, none},
       {"noted:a   c", 9, both},        {"lined:a   \nb\n", 9, ended},
   };
   for (const auto& sample : cases) {
     const std::string source(sample.text);
-    const Offers fromLl = caret_offers::offered(ll, source, sample.at);
-    const Offers fromLr = caret_offers::offered(lr, source, sample.at);
-    CHECK(fromLl == sample.offers);
-    CHECK(fromLr == sample.offers);
-    if (fromLl != sample.offers || fromLr != sample.offers)
-      std::printf("  %s at %u: ll %zu, lr %zu\n", source.c_str(), sample.at,
-                  fromLl.size(), fromLr.size());
+    const Offers got = caret_offers::offered(parser, source, sample.at);
+    CHECK(got == sample.offers);
+    if (got != sample.offers) {
+      std::printf("  %s at %u: got", source.c_str(), sample.at);
+      for (const std::string& offer : got) std::printf(" [%s]", offer.c_str());
+      std::printf(", expected");
+      for (const std::string& offer : sample.offers)
+        std::printf(" [%s]", offer.c_str());
+      std::printf("\n");
+    }
   }
-}
-
-// The reader a choice's readings cross a gap with steps back as the lexer does.
-void a_reading_reads_on_from_a_runs_last_byte() {
-  constexpr const auto& table = ttrivia::generated::Lr::kTable;
-  unsigned asked = 0;
-  for (std::uint16_t mode = 0; mode < table.modeStart.size(); ++mode) {
-    if (!cursiv::engine::mode_row_has(table.derived.skipStop.data(), mode, '_'))
-      continue;
-    ++asked;
-    const std::string_view text = "  _\n b";
-    cursiv::Cst tree(text);
-    cursiv::detail::CstBuilder builder(tree);
-    builder.bind_stream();
-    cursiv::engine::LrContext context(text, builder);
-    context.drive = &ttrivia::generated::Lr::kDrive;
-    const cursiv::engine::Token token =
-        cursiv::engine::lr_scan_at<table>(context, mode, 0, 0);
-    // A mode that reads no word still stands past the continuation.
-    CHECK(token.begin == 5);
-  }
-  CHECK(asked != 0);
 }
 
 // A scalar a name and a blank both spell, in each role, and the names around it
@@ -333,43 +273,20 @@ void each_open_comment_is_skipped(const cursiv::Parser& parser) {
   CHECK(skipped == kComments && r.diagnostics.size() == kComments);
 }
 
-// A comment left open is read for where it ends, by the two readings that ask:
-// the walk that looks for a misspelling stops inside it.
-void an_open_comment_is_no_misspelling(const cursiv::Parser& ll) {
-  std::string text = "ranked:a /* x\n";
-  for (unsigned i = 0; i < 4000; ++i) text += "b c d\n";
-  cursiv::engine::LlSearchWork::current() = {};
-  const cursiv::ParseResult r = ll.parse(text);
-  CHECK(r.diagnostics.size() == 1);
-  CHECK(cursiv::engine::LlSearchWork::current().work * 2 *
-            cursiv::engine::kRepairLexBytes <
-        5 * text.size());
-}
-
 void run() {
-  a_reading_reads_on_from_a_runs_last_byte();
-  a_caret_answers_for_what_is_typed_in_a_gap(
-      *ttrivia::generated::Ll::create_parser(),
-      *ttrivia::generated::Lr::create_parser());
-  an_open_comment_is_skipped_where_it_is_trivia(
-      *ttrivia::generated::Ll::create_parser(),
-      *ttrivia::generated::Lr::create_parser());
-  an_open_comment_is_no_misspelling(*ttrivia::generated::Ll::create_parser());
-  for (const auto make : {&ttrivia::generated::Ll::create_parser,
-                          &ttrivia::generated::Lr::create_parser}) {
-    two_ignored_terminals_may_read_one_text(*make(), "tied:");
-    two_ignored_terminals_may_read_one_text(*make(), "ranked:");
-    a_blank_keeps_its_head_refusal(*make());
-    a_run_of_blanks_reads_on_from_its_last_byte(*make());
-    a_tie_stands_only_behind_its_first_byte(*make());
-    a_trivia_taken_as_a_token_stays_a_candidate(*make());
-    each_open_comment_is_skipped(*make());
-    a_region_head_is_its_callers(*make());
-    a_region_end_leaves_the_blank_to_its_caller(*make());
-    an_implied_condition_reads_the_trivia_of_its_place(*make());
-  }
-  a_trivia_terminal_is_no_bracket<ttrivia::generated::Ll::kTable>();
-  a_trivia_terminal_is_no_bracket<ttrivia::generated::Lr::kTable>();
+  const auto parser = ttrivia::generated::Lr::createParser();
+  a_caret_answers_for_what_is_typed_in_a_gap(*parser);
+  an_open_comment_is_skipped_where_it_is_trivia(*parser);
+  two_ignored_terminals_may_read_one_text(*parser, "tied:");
+  two_ignored_terminals_may_read_one_text(*parser, "ranked:");
+  a_blank_keeps_its_head_refusal(*parser);
+  a_run_of_blanks_reads_on_from_its_last_byte(*parser);
+  a_tie_stands_only_behind_its_first_byte(*parser);
+  a_trivia_taken_as_a_token_stays_a_candidate(*parser);
+  each_open_comment_is_skipped(*parser);
+  a_region_head_is_its_callers(*parser);
+  a_region_end_leaves_the_blank_to_its_caller(*parser);
+  an_implied_condition_reads_the_trivia_of_its_place(*parser);
 }
 
 }  // namespace trivia_cases
@@ -408,12 +325,12 @@ std::string read(const cursiv::Parser& parser, std::string_view text) {
   return out;
 }
 
-const char* engine = "";
+const char* form = "";
 
 void check(const cursiv::Parser& parser, std::string_view text,
            std::string_view expected) {
   const std::string got = read(parser, text);
-  same_text(engine, text, got, expected);
+  same_text(form, text, got, expected);
 }
 
 void a_closing_tag_ends_the_statement_before_it(const cursiv::Parser& parser) {
@@ -428,19 +345,15 @@ void a_closing_tag_ends_the_statement_before_it(const cursiv::Parser& parser) {
 void run() {
   const struct {
     const char* prefix;
-    const char* ll;
-    const char* lr;
-  } forms[] = {{"implied:", "SpelledLl", "SpelledLr"},
-               {"implied:named:", "NamedLl", "NamedLr"},
-               {"implied:apart:", "ApartLl", "ApartLr"}};
-  for (const auto& form : forms) {
-    prefix = form.prefix;
-    engine = form.ll;
-    a_closing_tag_ends_the_statement_before_it(
-        *ttrivia::generated::Ll::create_parser());
-    engine = form.lr;
-    a_closing_tag_ends_the_statement_before_it(
-        *ttrivia::generated::Lr::create_parser());
+    const char* name;
+  } forms[] = {{"implied:", "Spelled"},
+               {"implied:named:", "Named"},
+               {"implied:apart:", "Apart"}};
+  const auto parser = ttrivia::generated::Lr::createParser();
+  for (const auto& entry : forms) {
+    prefix = entry.prefix;
+    form = entry.name;
+    a_closing_tag_ends_the_statement_before_it(*parser);
   }
 }
 
@@ -473,8 +386,6 @@ void spell(const tregion::ast::Item& item, std::string& out) {
   out += ')';
 }
 
-const char* engine = "";
-
 void check(const cursiv::Parser& parser, std::string_view text,
            std::string_view expected) {
   // The AST holds views into the text it was read from: keep it alive.
@@ -487,7 +398,7 @@ void check(const cursiv::Parser& parser, std::string_view text,
     got.clear();
     spell(*root, got);
   }
-  same_text(engine, text, got, expected);
+  same_text("Lr", text, got, expected);
 }
 
 void a_newline_stands_around_a_region(const cursiv::Parser& parser) {
@@ -518,14 +429,9 @@ void a_newline_is_refused_inside_a_region(const cursiv::Parser& parser) {
 }  // namespace
 
 void run() {
-  engine = "Ll";
-  a_newline_stands_around_a_region(*ttrivia::generated::Ll::create_parser());
-  a_newline_is_refused_inside_a_region(
-      *ttrivia::generated::Ll::create_parser());
-  engine = "Lr";
-  a_newline_stands_around_a_region(*ttrivia::generated::Lr::create_parser());
-  a_newline_is_refused_inside_a_region(
-      *ttrivia::generated::Lr::create_parser());
+  const auto parser = ttrivia::generated::Lr::createParser();
+  a_newline_stands_around_a_region(*parser);
+  a_newline_is_refused_inside_a_region(*parser);
 }
 
 }  // namespace region_cases
@@ -538,7 +444,7 @@ namespace leading_cases {
 
 namespace {
 
-void read(const cursiv::Parser& parser, const char* engine) {
+void read(const cursiv::Parser& parser) {
   const struct {
     const char* label;
     std::string_view source;
@@ -575,7 +481,7 @@ void read(const cursiv::Parser& parser, const char* engine) {
     }
     const bool ok = clean == sample.clean && (!sample.clean || shape);
     if (!ok)
-      std::printf("  [%s] %s: clean %d, shape %d\n", engine, sample.label,
+      std::printf("  %s: clean %d, shape %d\n", sample.label,
                   static_cast<int>(clean), static_cast<int>(shape));
     CHECK(ok);
   }
@@ -583,10 +489,7 @@ void read(const cursiv::Parser& parser, const char* engine) {
 
 }  // namespace
 
-void run() {
-  read(*ttrivia::generated::Ll::create_parser(), "Ll");
-  read(*ttrivia::generated::Lr::create_parser(), "Lr");
-}
+void run() { read(*ttrivia::generated::Lr::createParser()); }
 
 }  // namespace leading_cases
 
@@ -598,8 +501,7 @@ namespace lines_cases {
 
 namespace {
 
-void a_block_ends_before_its_newline(const cursiv::Parser& parser,
-                                     const char* engine) {
+void a_block_ends_before_its_newline(const cursiv::Parser& parser) {
   const struct {
     std::string_view text;
     std::size_t statements;
@@ -617,7 +519,7 @@ void a_block_ends_before_its_newline(const cursiv::Parser& parser,
     const bool ok = r.accepted && r.diagnostics.empty() &&
                     !r.cst().recovered() && read == sample.statements;
     if (!ok)
-      std::printf("  [%s] %.*s: %zu diagnostics, %zu statements\n", engine,
+      std::printf("  %.*s: %zu diagnostics, %zu statements\n",
                   static_cast<int>(sample.text.size()), sample.text.data(),
                   r.diagnostics.size(), read);
     CHECK(ok);
@@ -627,16 +529,13 @@ void a_block_ends_before_its_newline(const cursiv::Parser& parser,
 }  // namespace
 
 void run() {
-  a_block_ends_before_its_newline(*ttrivia::generated::Ll::create_parser(),
-                                  "Ll");
-  a_block_ends_before_its_newline(*ttrivia::generated::Lr::create_parser(),
-                                  "Lr");
+  a_block_ends_before_its_newline(*ttrivia::generated::Lr::createParser());
 }
 
 }  // namespace lines_cases
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   trivia_cases::run();
   implied_tag_cases::run();
   region_cases::run();

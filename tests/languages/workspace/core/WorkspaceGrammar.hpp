@@ -17,6 +17,7 @@ struct Workspace : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ML_COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};
+  struct IgnoredComment : terminal<through(lit<"(*">, lit<"*)">)> {};
 
   // Beyond ASCII, Latin and Greek letters, `ẞ`, and the Ohm and Kelvin signs,
   // for names that ignore case.
@@ -65,7 +66,7 @@ struct Workspace : cursiv::GrammarSpec {
                            ref<AbstractElementRule>))> {};
 
   using entry = Domainmodel;
-  using ignored = WS;
+  using ignored = list<WS, IgnoredComment>;
   using hidden = list<ML_COMMENT, SL_COMMENT>;
 };
 

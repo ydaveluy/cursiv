@@ -16,30 +16,30 @@ std::optional<ReferenceInfo> reference_at_caret(const AstReflection& reflection,
                                                 AstNode* container,
                                                 const NextFeature& next,
                                                 AstNodePtr& entered) {
-  const std::string_view feature = next.property;
+  const std::string_view property = next.property;
   // Before any node, the caret reads from the root.
   if (container == nullptr) container = document.parseResult.value;
-  if (feature.empty() || container == nullptr) return std::nullopt;
+  if (property.empty() || container == nullptr) return std::nullopt;
 
   std::uint16_t reference = kNoReference;
   if (next.type != nullptr) {
     // A newly entered rule owns the member even when an ancestor spells it too.
-    reference = reflection.referenceIndexOf(next.type, feature);
+    reference = reflection.referenceIndexOf(next.type, property);
     if (reference == kNoReference) return std::nullopt;
   } else {
     bool declared = false;
     for (AstNode* at = container; at != nullptr; at = at->parent) {
-      reference = reflection.referenceIndexOf(at->type, feature);
+      reference = reflection.referenceIndexOf(at->type, property);
       if (reference != kNoReference) break;
       for (const PropertyMetaData& q :
            reflection.getTypeMetaData(at->type).properties)
-        declared = declared || q.name == feature;
+        declared = declared || q.name == property;
     }
     if (reference == kNoReference) {
       if (declared) return std::nullopt;
       // A repair can remove the owner; only unanimous remaining types suffice.
       for (const AstTypeTag* type : reflection.getAllTypes()) {
-        const std::uint16_t at = reflection.referenceIndexOf(type, feature);
+        const std::uint16_t at = reflection.referenceIndexOf(type, property);
         if (at == kNoReference) continue;
         if (reference != kNoReference && at != reference) return std::nullopt;
         reference = at;
@@ -61,7 +61,7 @@ std::optional<ReferenceInfo> reference_at_caret(const AstReflection& reflection,
   info.document = &document;
   info.reference = reference;
   info.referenceText = {};
-  info.property = feature;
+  info.property = property;
   // The site's own narrowing, which the tree can't say: the reference isn't
   // written yet, so only the grammar knows this site accepts less than the
   // member. Two sites of one member may differ here; completion offers both.

@@ -5,14 +5,9 @@
 
 #include "bench.hpp"
 #include "cursiv/CursivActions.hpp"
-#include "recovery_metric/Searching.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
 #include "statemachine/StateMachineGrammar.hpp"
-#include "statemachine/generated/SM/AstReflection.hpp"
-#include "statemachine/generated/SM/Grammar.hpp"
 #include "statemachine/generated/SM/Module.hpp"
-#include "statemachine/generated/SM/Parser.hpp"
-#include "statemachine/generated/SM/Table.hpp"
 
 namespace metric = cursiv::recovery_metric;
 
@@ -24,8 +19,8 @@ const cursiv::fuzzer::CursivActions<sm::SM> kActions{};
 const metric::Registered kLanguage{{
     .rank = 4,
     .name = "statemachine",
-    .parser = &g::create_parser,
-    .reflection = &g::create_ast_reflection,
+    .parser = &g::createParser,
+    .reflection = &g::createAstReflection,
     .actions = &kActions,
     .documents =
         [] {
@@ -35,11 +30,6 @@ const metric::Registered kLanguage{{
               metric::source_file("examples/statemachine/example/trafficlight.statemachine"),
               bench::generateStatemachineSource(3072)};
         },
-    .ceilings = &metric::ceilings<g::kTable, g::kDrive,
-                                          g::kGrammarMetaData, g::kAstActions>,
-    .searching = &metric::searching<g::kTable, g::kDrive,
-                                                g::kGrammarMetaData,
-                                                g::kAstActions>,
 }};
 
 }  // namespace

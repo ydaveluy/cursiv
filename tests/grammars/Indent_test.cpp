@@ -1,0 +1,392 @@
+// A suite opens where a line is deeper than the one that opened it and
+// closes where a line comes back, one dedent per level, whatever the run is
+// made of; the input's end closes what is open.
+
+#include <algorithm>
+#include <cstdio>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "cursiv/grammar/Grammar.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/Check.hpp"
+#include "grammars/IndentAst.hpp"
+#include "grammars/VirtualStateGrammar.hpp"
+#include "indent/generated/G/Module.hpp"
+#include "indentfolded/generated/Cases/Module.hpp"
+#include "indentimplied/generated/Cases/Module.hpp"
+#include "indentrepaired/generated/G/Module.hpp"
+
+namespace {
+
+// The tree as `name(child child)` words.
+void spell(const tindent::ast::Node* n, std::string& out) {
+  for (const auto* const k : n->body) {
+    if (out.empty() || out.back() != '(') out += ' ';
+    out += k->name;
+    if (!k->body.empty()) {
+      out += '(';
+      spell(k, out);
+      out += ')';
+    }
+  }
+}
+
+// The tree as words, or empty where the parse complained.
+std::string parse_with(const cursiv::Parser& parser, std::string_view text) {
+  const cursiv::ParseResult r = parser.parse(text);
+  const auto* const doc = r.valueAs<tindent::ast::Node>();
+  if (!r.accepted || !r.diagnostics.empty() || doc == nullptr) return "";
+  std::string out;
+  spell(doc, out);
+  if (!out.empty()) out.erase(0, 1);
+  return out;
+}
+
+// Accepted, with some repair.
+bool recovers(const cursiv::Parser& parser, std::string_view text) {
+  const cursiv::ParseResult r = parser.parse(text);
+  return r.accepted && !r.diagnostics.empty();
+}
+
+// Where the first statement's tree ends, or -1 where the parse complained.
+long first_end(const cursiv::Parser& parser, std::string_view text) {
+  const cursiv::ParseResult r = parser.parse(text);
+  const auto* const doc = r.valueAs<tindent::ast::Node>();
+  if (!r.accepted || !r.diagnostics.empty() || doc == nullptr ||
+      doc->body.empty())
+    return -1;
+  return static_cast<long>(r.cst()[doc->body[0]->cstNodeId].end);
+}
+
+// Whether the caret over [from, to] is offered `word`: a terminal's name or one
+// of its spellings.
+bool offers_between(const cursiv::Parser& parser, std::string_view text,
+                    cursiv::TextOffset from, cursiv::TextOffset to,
+                    std::string_view word) {
+  const cursiv::ParseResult r = parser.parse(text);
+  std::vector<cursiv::NextFeature> next;
+  parser.nextFeaturesAt(r.cst(), from, to, next);
+  const auto& grammar = parser.getGrammar();
+  for (const cursiv::NextFeature& f : next) {
+    if (grammar.terminalName(f.feature) == word) return true;
+    for (const std::string_view s : grammar.terminalSpellings(f.feature))
+      if (s == word) return true;
+  }
+  return false;
+}
+
+bool offers(const cursiv::Parser& parser, std::string_view text,
+            cursiv::TextOffset at, std::string_view word) {
+  return offers_between(parser, text, at, at, word);
+}
+
+// Whether the caret over `|..|` is offered `word`.
+bool offers_over(const cursiv::Parser& parser, std::string marked,
+                 std::string_view word) {
+  const auto from = static_cast<cursiv::TextOffset>(marked.find('|'));
+  marked.erase(from, 1);
+  const auto to = static_cast<cursiv::TextOffset>(marked.find('|'));
+  marked.erase(to, 1);
+  return offers_between(parser, marked, from, to, word);
+}
+
+std::string parse(std::string_view text) {
+  static const auto parser = tindent::generated::G::createParser();
+  return parse_with(*parser, text);
+}
+
+void an_indent_keeps_an_earlier_repair_reading_alive() {
+  namespace g = tindent::folded::generated::Cases;
+  const auto engine = g::createParser();
+  for (const unsigned count : {40u, 80u}) {
+    std::string prefix = "validation x";
+    for (unsigned i = 0; i != count; ++i) prefix += " a";
+    for (const std::string_view newline : {"\n", "\r\n"}) {
+      // The form feed belongs to the run, though no blank of this grammar reads
+      // it: the graph reads the indent as the parser does.
+      for (const std::string_view indent : {"  ", "\t", "\f  "}) {
+        const std::string tail = std::string(newline) + std::string(indent) + "z";
+        const std::string input = prefix + tail;
+        const auto r = engine->parse(input);
+        CHECK(r.accepted && r.diagnostics.size() == 1);
+        const auto* node = r.valueAs<tvirtual::Node>();
+        CHECK(node && node->first && !node->second);
+        for (const auto& d : r.diagnostics) {
+          CHECK(d.kind == cursiv::DiagnosticKind::Inserted);
+          CHECK(d.begin == prefix.size() && d.end == prefix.size());
+          const auto spellings =
+              engine->getGrammar().terminalSpellings(d.element);
+          CHECK(spellings.size() == 1 && spellings.front() == ";");
+        }
+        unsigned invented = 0;
+        r.cst().visitLeaves([&](const cursiv::CstLeaf& leaf) {
+          if (leaf.recovered && leaf.begin == leaf.end) ++invented;
+        });
+        CHECK(invented == 1);
+
+        for (const auto& text : {prefix + ";" + tail, prefix + tail + "!@$"}) {
+          const auto valid = engine->parse(text);
+          CHECK(valid.accepted && valid.diagnostics.empty());
+          const auto* root = valid.valueAs<tvirtual::Node>();
+          CHECK(root && root->first == (text == prefix + ";" + tail) &&
+                root->second == (text == prefix + tail + "!@$"));
+        }
+      }
+    }
+  }
+}
+
+// The look-ahead reads on past the indent or the dedent that tells two
+// readings of a line apart.
+void an_indent_resolves_a_cell() {
+  const auto engine = tindent::synthetic::generated::Cases::createParser();
+  CHECK(parse_with(*engine, "fork a b\n  c\n    d\n  e\nf\n") ==
+        "ab(c(d) e) f");
+}
+
+// At the end of the input a reading's dedent is refused by its guard, and the
+// `;` the end implies goes on: both arms read to the end, and the first
+// written stays the parse.
+void a_refused_dedent_at_the_end_leaves_the_implied_token() {
+  const auto engine = tindent::synthetic::generated::Cases::createParser();
+  CHECK(parse_with(*engine, "ending x:\n  a\n") == "x(a)");
+  CHECK(parse_with(*engine, "ending x:\n  a\n  b") == "x(a b)");
+  CHECK(parse_with(*engine, "ending x:\n  a") == "x(a)");
+}
+
+// A level a repair dropped closes where a shallower line is read, whoever reads
+// it. A first line the indentation refuses drops its level, and every later
+// competitor is read without it, so the repair stays the only one.
+void tied_readings_share_the_levels_a_line_start_dropped() {
+  const auto engine = tindent::synthetic::generated::Cases::createParser();
+  for (const std::string_view end : {"% :", "& :"}) {
+    std::string text = "  tied h\nA";
+    for (unsigned i = 0; i < 100; ++i) text += " +";
+    text += " ";
+    text += end;
+    text += "\n  b\n";
+    text += end[0] == '%' ? "!" : "?";
+    const auto r = engine->parse(text);
+    CHECK(r.accepted && r.diagnostics.size() == 1);
+  }
+}
+
+void a_dropped_level_closes_in_the_graph() {
+  std::string text = "marked z\n    y\n    h:\n";
+  for (unsigned i = 0; i != 20; ++i) text += "  z\n";
+  text += "+\nz\n";
+  const std::size_t fault = text.size();
+  text += "    w\n";
+  const auto r =
+      tindent::synthetic::generated::Cases::createParser()->parse(text);
+  CHECK(r.accepted && r.diagnostics.size() == 2);
+  if (r.diagnostics.size() == 2) CHECK(r.diagnostics[1].begin >= fault);
+}
+
+}  // namespace
+
+int main() {
+  an_indent_keeps_an_earlier_repair_reading_alive();
+  an_indent_resolves_a_cell();
+  a_refused_dedent_at_the_end_leaves_the_implied_token();
+  a_dropped_level_closes_in_the_graph();
+  tied_readings_share_the_levels_a_line_start_dropped();
+  const auto engine = tindent::generated::G::createParser();
+  CHECK(parse("a\nb\n") == "a b");
+  CHECK(parse("a:\n  b\n  c\nd\n") == "a(b c) d");
+  CHECK(parse("a:\n  b:\n    c\n  d\ne\n") == "a(b(c) d) e");
+  // Two levels close at once, and the end of input closes what is open.
+  CHECK(parse("a:\n  b:\n    c\nd\n") == "a(b(c)) d");
+  CHECK(parse("a:\n  b:\n    c\n") == "a(b(c))");
+  CHECK(parse("a:\n  b:\n    c") == "a(b(c))");
+  // The run is compared as text: tabs, two spaces, eight -- any run deeper
+  // than the enclosing one opens, and blank lines in between count for nothing.
+  CHECK(parse("a:\n\tb:\n\t\tc\n\n\td\n\ne\n") == "a(b(c) d) e");
+  CHECK(parse("a:\n        b\nc:\n  d\n") == "a(b) c(d)");
+  // A form feed starts the run again, as in Python: a line of form feeds is
+  // blank, the blanks after the last one are the line's run, and one past
+  // content is plain trivia.
+  CHECK(parse("a:\n  b\n\f\nc\n") == "a(b) c");
+  CHECK(parse("a:\n  b:\n    c\n\fd\n") == "a(b(c)) d");
+  CHECK(recovers(*engine, "a:\n  b\n \f c\n"));
+  // ...and on the last line, where no line ending follows.
+  CHECK(parse("a\n\f") == "a");
+  CHECK(parse("a:\n  b\n\f") == "a(b)");
+  CHECK(parse("a:\n  b\n  \f") == "a(b)");
+  CHECK(parse("a:\n  b:\n    c\n\f") == "a(b(c))");
+  CHECK(parse("a:\n  b\nc\n\f") == "a(b) c");
+  CHECK(parse("a:\n  b\f") == "a(b)");
+  CHECK(parse("a:\n  b \f\n") == "a(b)");
+  // A line back to no level that was opened is no dedent the grammar takes.
+  CHECK(recovers(*engine, "a:\n    b\n  c\n"));
+  for (const std::string_view blanks : {"  ", " \t"}) {
+    const std::string text = "a:\n    b\n" + std::string(blanks) + "c\n";
+    const auto r = engine->parse(text);
+    CHECK(std::ranges::any_of(r.diagnostics, [](const auto& d) { return d.mixedIndent; }) ==
+          (blanks == " \t"));
+  }
+  // A deeper line where no suite opens is an error, and the parse goes on.
+  CHECK(recovers(*engine, "a\n  b\nc\n"));
+  CHECK(parse("a:\n  b\n") == "a(b)");
+  // EOF also ends a blank line: its run must neither open a suite nor
+  // disagree with an existing level, even when tabs and spaces differ.
+  for (const std::string_view blank : {"  ", "\t", " \t "}) {
+    CHECK(parse("a\n" + std::string(blank)) == "a");
+    CHECK(parse("a:\n  b\n" + std::string(blank)) == "a(b)");
+    const auto r = engine->parse(blank);
+    CHECK(r.accepted && r.diagnostics.empty());
+  }
+  CHECK(parse("a:\n  b:\n    c\n      ") == "a(b(c))");
+  // A dedent the end of input needs stands there, after the trivia of the
+  // suite's last line: a line at the suite's level is the suite's.
+  {
+    CHECK(first_end(*engine, "a:\n  b #x") == 9);
+    CHECK(first_end(*engine, "a:\n  b\n  #x") == 11);
+    CHECK(first_end(*engine, "a:\n  b:\n    c\n  #x") == 18);
+    // ...whether or not the end of input stands for a statement's newline.
+    const auto synthetic =
+        tindent::synthetic::generated::Cases::createParser();
+    CHECK(parse_with(*synthetic, "a:\n  b\n  c") == "a(b c)");
+    CHECK(first_end(*synthetic, "a:\n  b #x") == 9);
+    CHECK(first_end(*synthetic, "a:\n  b\n  #x") == 11);
+    CHECK(first_end(*synthetic, "a:\n  b:\n    c\n  #x") == 18);
+  }
+  CHECK(parse("a\r\n  ") == "a");
+  // Inside brackets a line is a line: no level opens or closes, and a
+  // continued line starts no logical line.
+  CHECK(parse("a[\n    b\n  c\n]\nd\n") == "a(b c) d");
+  CHECK(parse("a:\n  b \\\n\n  d\n") == "a(b d)");
+  CHECK(parse("a:\n  b #x\\\nc\n") == "a(b) c");
+  // A run neither at a level nor deeper by one -- a tab against spaces --
+  // is an error, not a line at the same level.
+  CHECK(recovers(*engine, "a:\n\tb\n  c\nd\n"));
+  CHECK(parse("a:\n\tb\n  c\nd\n").empty());
+  // A level is as wide as its run, whatever the width.
+  const std::string wide(70000, ' ');
+  CHECK(parse("a:\n" + wide + "b\n" + wide + "c\nd\n") == "a(b c) d");
+  CHECK(recovers(*engine, "a:\n" + wide + "b\n  c\nd\n"));
+  // The caret replays the indentation's tokens as the tape holds them: a
+  // suite's lines are offered past an indent and past a dedent the same.
+  CHECK(offers(*engine, "a:\n  b\n  c\n", 5, "ID"));
+  CHECK(offers(*engine, "a:\n  b\n  c\n", 9, "ID"));
+  CHECK(offers(*engine, "a:\n  b\n  c\n", 11, "ID"));
+  CHECK(offers(*engine, "a:\n  b\nc\n", 7, "ID"));
+  // Where the text ends the caret's line reads its own run: two levels
+  // close before a name, and the first line of a suite opens one.
+  CHECK(offers(*engine, "a:\n  b:\n    c\n", 14, "ID"));
+  CHECK(offers(*engine, "a:\n  ", 5, "ID"));
+  CHECK(!offers(*engine, "a:\n  ", 5, "INDENT"));
+  CHECK(!offers(*engine, "a:\n  b\n", 7, "DEDENT"));
+  // Inside a bracket a newline is a blank, even where the state before it
+  // reads the statement's newline: the list goes on past it.
+  {
+    for (const auto text : {"a[b,\n  c]\n", "a[b\n  ,c]\n", "a:\n  b[c\n  ]\n"}) {
+      const std::string source = "joined " + std::string(text);
+      const auto r = engine->parse(source);
+      CHECK(r.accepted && r.diagnostics.empty());
+    }
+    CHECK(offers(*engine, "joined a[b,\n  ", 14, "ID"));
+    CHECK(offers_over(*engine, "joined a[b\n  ||]\n", "]"));
+    CHECK(offers_over(*engine, "joined a[b\n  ||]\n", ","));
+    CHECK(offers_over(*engine, "joined a[b[c,\n  d\n  ||", ","));
+    // A replay that starts past the items of a suite a rule opened keeps its
+    // level: at the items' indentation the next item is offered.
+    std::string suite = "single %\n";
+    for (int i = 0; i < 40; ++i) suite += "  ab\n";
+    suite += "  ";
+    CHECK(offers(*engine, suite, static_cast<cursiv::TextOffset>(suite.size()),
+                 "ID"));
+  }
+  // A comment that ends at the caret goes on over what is typed there: no
+  // word is offered inside it, and the line's own end still is.
+  CHECK(!offers_over(*engine, "a # c||\nb\n", "["));
+  CHECK(!offers_over(*engine, "a # c||\nb\n", ":"));
+  CHECK(offers(*engine, "a # c\nb\n", 5, "NEWLINE"));
+  CHECK(offers_over(*engine, "a ||# c\nb\n", "["));
+  // What the end of input adds after the comment, the closers of the open
+  // suites, does not hide it.
+  CHECK(!offers_over(*engine, "a:\n  b #x||", ":"));
+  CHECK(!offers_over(*engine, "a:\n  b #x||", "["));
+  const auto bare = tindent::repaired::generated::G::createParser();
+  CHECK(parse_with(*bare, "a:\n  b:\n    c\n  d\ne\n") == "a(b(c) d) e");
+  CHECK(parse_with(*bare, "a:\n  b\n").empty() == false);
+  // The indentation is read where the newline ends. One that carries the
+  // lines of comments leaves a line of content there, whatever column a
+  // comment stands at; a comment the newline leaves is a line of content.
+  const auto folded = tindent::folded::generated::Cases::createParser();
+  CHECK(parse_with(*folded, "a:\n  b\n#x\n  c\n") == "a(b c)");
+  CHECK(parse_with(*folded, "a:\n  b\n    #x\n  c\n") == "a(b c)");
+  CHECK(parse_with(*folded, "a:\n  b\n  #x\nc\n") == "a(b) c");
+  CHECK(parse_with(*folded, "a:\n#x\n  b\n") == "a(b)");
+  CHECK(parse_with(*folded, "a:\n  b\n#x\n#y\n  c\nd\n") == "a(b c) d");
+  CHECK(parse_with(*folded, "a:\n  b #x\n  c\n") == "a(b c)");
+  {
+    const auto r = folded->parse("a:\n  b\n  #x\n      c\n");
+    CHECK(r.accepted && !r.diagnostics.empty());
+  }
+  for (const auto text : {"a[[[b]]?\nc\n", "a[[[\n  b\n]]?\nc\n",
+                          "a[[?\n  b\n]]]\nc\n"}) {
+    const auto r = bare->parse(text);
+    CHECK(r.accepted && r.diagnostics.size() == 1);
+    if (r.diagnostics.size() == 1)
+      CHECK(r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced);
+    const auto* doc = r.valueAs<tindent::ast::Node>();
+    CHECK(doc != nullptr);
+    std::string tree;
+    if (doc) spell(doc, tree);
+    CHECK(tree == " a(b) c");
+  }
+  std::printf("  the suite opens on a deeper line and closes on a shallower\n");
+  // The first line of a suite is offered its keywords as the second is.
+  {
+    const auto kw = tindent::synthetic::generated::Cases::createParser();
+    CHECK(offers_over(*kw, "suites top a:\n  |pa|", "pass"));
+    CHECK(offers_over(*kw, "suites top a:\n  |pass|\n", "pass"));
+    CHECK(offers_over(*kw, "suites top a:\n  pass\n  |pa|", "pass"));
+    // A line back at no level closes the suite; one deeper opens a level
+    // no statement takes.
+    CHECK(offers_over(*kw, "suites top a:\n  pass\n||", "top"));
+    CHECK(!offers_over(*kw, "suites top a:\n  pass\n||", "pass"));
+    CHECK(!offers_over(*kw, "suites top a:\n  pass\n    ||", "pass"));
+    // A dedent the tape added before dropped text closed the suite.
+    CHECK(offers_over(*kw, "suites top a:\n  pass\n@@ ||", "top"));
+    CHECK(!offers_over(*kw, "suites top a:\n  pass\n@@ ||", "pass"));
+  }
+  // A bracket its condition refuses opens nothing: the suite after it reads
+  // its levels.
+  {
+    CHECK(parse_with(*engine, "guarded a[b]\nc:\n  d\ne\n") == "a(b) c(d) e");
+    for (const std::string_view text :
+         {"a [b]\nc:\n  d\ne\n", "a [b\nc:\n  d\ne\n"}) {
+      const std::string source = "guarded " + std::string(text);
+      const auto r = engine->parse(source);
+      CHECK(r.accepted && !r.diagnostics.empty());
+      for (const auto& d : r.diagnostics) CHECK(d.begin < 8 + text.find('\n'));
+    }
+    // A record the tape closes before the token a repair inserts for it is
+    // walked, however far past it the caret stands.
+    std::string far = "  ] \n    #x:  ]]]block[    aother\t\n  ]b    ";
+    for (int i = 0; i < 60; ++i) far += "\nz";
+    CHECK(offers(*engine, "guarded " + far,
+                 static_cast<cursiv::TextOffset>(far.size() + 8), "NEWLINE"));
+  }
+  // A rule may open a bracket or a suite that its caller closes: past the
+  // rule, the caret still stands inside them.
+  {
+    for (const std::string_view text :
+         {"[a,\n pass]\n", "block b:\n  pass\n  pass\n"}) {
+      const std::string source = "joined " + std::string(text);
+      const auto r = engine->parse(source);
+      CHECK(r.accepted && r.diagnostics.empty());
+    }
+    CHECK(offers_over(*engine, "joined [a, |pass|]\n", "pass"));
+    CHECK(offers_over(*engine, "joined [a,\n |pass|]\n", "pass"));
+    CHECK(offers_over(*engine, "joined block b:\n  pass\n  |pass|\n", "pass"));
+  }
+  return cursiv::test::report("Indent_test");
+}

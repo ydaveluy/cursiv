@@ -27,11 +27,11 @@ class NotebookDocuments {
   [[nodiscard]] virtual std::optional<lsp::NotebookDocument>
   findNotebookDocumentForCell(std::string_view cellUri) const = 0;
 
-  // Told before the cells' text changes, so a build of the cells sees the
-  // notebook as the client has it; a request already reading can meanwhile
-  // see the notebook ahead of the cells' text.
+  // Notified before the cells' text changes. A reader may see the notebook
+  // before the cells catch up. didChange returns whether to apply the cell
+  // changes for this notebook version.
   virtual void didOpen(const lsp::DidOpenNotebookDocumentParams& params) = 0;
-  virtual void didChange(
+  virtual bool didChange(
       const lsp::DidChangeNotebookDocumentParams& params) = 0;
   virtual void didSave(const lsp::DidSaveNotebookDocumentParams& params) = 0;
   virtual void didClose(const lsp::DidCloseNotebookDocumentParams& params) = 0;

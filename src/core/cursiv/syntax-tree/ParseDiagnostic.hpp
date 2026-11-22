@@ -20,12 +20,12 @@ enum class DiagnosticKind : std::uint8_t {
   Deleted,
   // Source text was consumed as the expected construct -- a misspelling.
   Replaced,
-  // The input ended before the expected construct.
+  // A construct was given up: the text it read stays as written, and the
+  // element is what it still needed after that text.
   Incomplete,
   // The tree parsed; turning a matched text into a value did not.
   ConversionError,
-  // The parser hit a work limit on this span and kept the reading it ranked
-  // first, or the cheapest repair found; reported, never silent.
+  // Recovery reached its work limit and kept the best repair found.
   Bounded,
 };
 
@@ -47,11 +47,9 @@ struct ParseDiagnostic {
   // caller words.
   std::string message;
 
-  // From the parse or a repair, not from a conversion; `bounded` is only a
-  // note and repairs nothing.
+  // Whether the parser found a syntax error in the input.
   [[nodiscard]] constexpr bool isSyntax() const noexcept {
-    return kind != DiagnosticKind::ConversionError &&
-           kind != DiagnosticKind::Bounded;
+    return kind != DiagnosticKind::ConversionError && kind != DiagnosticKind::Bounded;
   }
 };
 

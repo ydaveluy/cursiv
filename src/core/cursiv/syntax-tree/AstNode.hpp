@@ -20,6 +20,7 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/MultiRefItems.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/utils/TypeName.hpp"
 #include "cursiv/utils/typelist.hpp"
 
@@ -41,6 +42,11 @@ struct multi_reference;
 inline constexpr std::uint8_t kNoNarrow = 0xFF;
 
 struct AstNode;
+class Cst;
+
+// One resolved target and the range of its name in the source.
+using ResolvedReferenceVisitor =
+    FunctionRef<void(TextOffset, TextOffset, const AstNode&, bool multi)>;
 
 namespace detail {
 struct RefAccess;
@@ -76,6 +82,11 @@ struct AstTypeTag {
   // The declared `name` text member of a node, read without the grammar.
   // Null for a class that declares none.
   std::string_view (*readName)(const AstNode&) noexcept = nullptr;
+  // A single direct base starts the closure. Multiple direct bases follow it in declaration order.
+  std::uint32_t directBaseCount = 0;
+  [[nodiscard]] constexpr std::span<const AstTypeTag* const> directBases() const noexcept {
+    return {directBaseCount > 1 ? bases + baseCount : bases, directBaseCount};
+  }
 };
 
 namespace detail {
@@ -121,10 +132,10 @@ struct bases_of;
 
 // The name comes from a __PRETTY_FUNCTION__ split, so no reflection is needed.
 template <class T>
-inline constexpr AstTypeTag ast_type_tag{
+inline constexpr AstTypeTag kAstTypeTag{
     static_cast<std::uint32_t>(detail::bases_of<T>::kCount),
     detail::bases_of<T>::kTags.data(), detail::offsets_of<T>(),
-    detail::type_name<T>(), detail::name_reader<T>()};
+    detail::type_name<T>(), detail::name_reader<T>(), detail::bases_of<T>::directCount};
 
 namespace detail {
 
@@ -132,16 +143,18 @@ namespace detail {
 // its own closure, deduplicated.
 template <class T>
 struct base_closure {
-  using type = TypeList<>;
+  using direct = TypeList<>;
+  using type = direct;
 };
 template <class T>
-  requires requires { typename T::ast_bases; }
+  requires requires { typename T::AstBases; }
 struct base_closure<T> {
+  using direct = typename T::AstBases;
   static consteval auto closure() {
     return []<class... Bs>(TypeList<Bs...>) consteval {
       return dedupe_t<tl_cat_t<
           tl_cat_t<TypeList<Bs>, typename base_closure<Bs>::type>...>>{};
-    }(typename T::ast_bases{});
+    }(direct{});
   }
   using type = decltype(closure());
 };
@@ -150,14 +163,15 @@ template <class T>
 struct bases_of {
   static_assert(
       requires { sizeof(T); },
-      "ast_type_tag<T> needs the definition of T: include the header "
+      "kAstTypeTag<T> needs the definition of T: include the header "
       "that defines the class");
   using types = typename base_closure<T>::type;
+  static constexpr std::uint32_t directCount = tl_size<typename base_closure<T>::direct>::value;
   static constexpr std::size_t kCount = tl_size<types>::value;
   static constexpr auto kTags = []<class... Bs>(TypeList<Bs...>) consteval {
-    return std::array<const AstTypeTag*, kCount == 0 ? 1 : kCount>{
-        &ast_type_tag<Bs>...};
-  }(types{});
+    return std::array<const AstTypeTag*, sizeof...(Bs) == 0 ? 1 : sizeof...(Bs)>{
+        &kAstTypeTag<Bs>...};
+  }(cond_t<(directCount > 1), tl_cat_t<types, typename base_closure<T>::direct>, types>{});
   // One per base, then the class's own start.
   static inline constinit std::array<std::ptrdiff_t, kCount + 1> offsets = [] {
     std::array<std::ptrdiff_t, kCount + 1> out{};
@@ -221,20 +235,20 @@ struct AstNode {
 
 // A node's own fields, read past a property of the same name: a grammar may
 // call a property `parent`, `type` or `cstNodeId`.
-[[nodiscard]] constexpr AstNode* parent_of(const AstNode& node) noexcept {
+[[nodiscard]] constexpr AstNode* parentOf(const AstNode& node) noexcept {
   return node.parent;
 }
-[[nodiscard]] constexpr const AstTypeTag* type_of(
+[[nodiscard]] constexpr const AstTypeTag* typeOf(
     const AstNode& node) noexcept {
   return node.type;
 }
-[[nodiscard]] constexpr NodeId cst_node_id_of(const AstNode& node) noexcept {
+[[nodiscard]] constexpr NodeId cstNodeIdOf(const AstNode& node) noexcept {
   return node.cstNodeId;
 }
 
 // The root of the tree `node` is in: the node whose parent is its document,
 // or that has no parent. Defined in `workspace/Document.cpp`.
-[[nodiscard]] const AstNode& root_of(const AstNode& node) noexcept;
+[[nodiscard]] const AstNode& rootOf(const AstNode& node) noexcept;
 
 // Every node pays for the base, so its size is checked.
 static_assert(sizeof(void*) != 8 || sizeof(AstNode) == 32);
@@ -243,7 +257,7 @@ static_assert(sizeof(void*) != 8 || sizeof(AstNode) == 32);
 // type of an alternation is the most derived base its branches share.
 template <class... Bs>
 struct Extends : Bs... {
-  using ast_bases = TypeList<Bs...>;
+  using AstBases = TypeList<Bs...>;
 };
 
 // The same, for a base two paths will share: each path must say so, and the
@@ -251,7 +265,7 @@ struct Extends : Bs... {
 // is one node. Only the classes declared this way pay for it.
 template <class... Bs>
 struct VirtualExtends : virtual Bs... {
-  using ast_bases = TypeList<Bs...>;
+  using AstBases = TypeList<Bs...>;
 };
 
 namespace detail {
@@ -286,7 +300,7 @@ void state_offsets(const T& node, std::ptrdiff_t* out) noexcept {
 template <class T>
 AstNode* set_type_tag(T& node) noexcept {
   AstNode* const base = &node;
-  base->type = &ast_type_tag<T>;
+  base->type = &kAstTypeTag<T>;
   if constexpr (!plain_node<T>) {
     auto* const offsets = bases_of<T>::offsets.data();
     std::atomic_ref<std::ptrdiff_t> own(offsets[bases_of<T>::kCount]);
@@ -307,7 +321,7 @@ constexpr T* ast_cast_unchecked(
         node) noexcept {
   if constexpr (plain_node<std::remove_cv_t<T>>) {
     assert(node == nullptr || node->type == nullptr ||
-           node->type->derivesFrom(&ast_type_tag<std::remove_cv_t<T>>));
+           node->type->derivesFrom(&kAstTypeTag<std::remove_cv_t<T>>));
     return static_cast<T*>(node);
   } else {
     // Through a virtual base: the tag's offsets give the address, as cheaply
@@ -318,9 +332,9 @@ constexpr T* ast_cast_unchecked(
     // No tag: fall back to `dynamic_cast`.
     if (tag == nullptr) return dynamic_cast<T*>(node);
     std::uint32_t at = tag->baseCount;
-    if (tag != &ast_type_tag<Bare>) {
+    if (tag != &kAstTypeTag<Bare>) {
       at = 0;
-      while (at != tag->baseCount && tag->bases[at] != &ast_type_tag<Bare>)
+      while (at != tag->baseCount && tag->bases[at] != &kAstTypeTag<Bare>)
         ++at;
       if (at == tag->baseCount) return nullptr;
     }
@@ -336,7 +350,7 @@ constexpr T* ast_cast_unchecked(
 }
 }  // namespace detail
 
-// Errors are contiguous and last, so `has_error` is one comparison. The message
+// Errors are contiguous and last, so `hasError` is one comparison. The message
 // is built on demand by `Linker::createLinkingError`.
 enum class RefState : std::uint8_t {
   Unresolved,
@@ -348,7 +362,7 @@ enum class RefState : std::uint8_t {
   ErrorThrown
 };
 
-constexpr bool has_error(RefState s) { return s >= RefState::ErrorNotFound; }
+constexpr bool hasError(RefState s) { return s >= RefState::ErrorNotFound; }
 
 namespace detail {
 
@@ -669,13 +683,6 @@ inline constexpr std::uint8_t kNoBranch = 0xFF;
 // out, `kNoBranch` for none.
 using RefBranchFn = std::uint8_t (*)(const AstTypeTag*) noexcept;
 
-// A single reference read whole: the CST node of its name and its target,
-// null unless the reference resolved.
-struct SingleRefRead {
-  NodeId name = kNoNode;
-  AstNode* target = nullptr;
-};
-
 // What a linker can do to a reference it only knows by `RefHandle`. One entry
 // per field, indexed by `RefHandle::field`; a non-reference field is null.
 struct RefOps {
@@ -708,15 +715,8 @@ struct RefOps {
                     std::uint32_t index) noexcept = nullptr;
   RefState (*state)(const AstNode& owner,
                     std::uint32_t index) noexcept = nullptr;
-  // 0 or 1 for a single reference, the item count for a multi one.
-  std::size_t (*size)(const AstNode& owner,
-                      std::uint32_t index) noexcept = nullptr;
-  AstNode* (*at)(const AstNode& owner, std::uint32_t index,
-                 std::size_t which) noexcept = nullptr;
-  // What `name_id`, `size` and `at` answer together, in one read of the
-  // member. Null for a multi reference.
-  detail::SingleRefRead (*single)(const AstNode& owner,
-                                  std::uint32_t index) noexcept = nullptr;
+  void (*visit)(const AstNode& owner, std::uint32_t index, const Cst& cst,
+                const ResolvedReferenceVisitor& visitor) = nullptr;
 
   void (*reset)(AstNode& owner, std::uint32_t index) noexcept = nullptr;
 };
@@ -743,7 +743,7 @@ struct RefFilter {
 template <class T>
 [[nodiscard]] constexpr const T* ast_cast(const AstNode* node) noexcept {
   return node != nullptr && node->type != nullptr &&
-                 node->type->derivesFrom(&ast_type_tag<std::remove_cv_t<T>>)
+                 node->type->derivesFrom(&kAstTypeTag<std::remove_cv_t<T>>)
              ? detail::ast_cast_unchecked<const T>(node)
              : nullptr;
 }

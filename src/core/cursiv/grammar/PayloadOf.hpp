@@ -44,8 +44,8 @@ template <class E>
 struct payload_of {
   using type = TypeList<>;
 };
-template <str S, bool CI, class Gd>
-struct payload_of<Lit<S, CI, Gd>> {
+template <str S, bool CI, class Gd, bool Keyword>
+struct payload_of<Lit<S, CI, Gd, Keyword>> {
   using type = TypeList<text_payload<void>>;
 };
 template <std::uint64_t M, bool N, str S>
@@ -114,8 +114,8 @@ template <class E>
 struct lit_payloads {
   using type = TypeList<>;
 };
-template <str S, bool CI, class Gd>
-struct lit_payloads<Lit<S, CI, Gd>> {
+template <str S, bool CI, class Gd, bool Keyword>
+struct lit_payloads<Lit<S, CI, Gd, Keyword>> {
   // A case-insensitive literal does not match its own spelling alone, so the
   // spelling is not what the member receives and nothing is decidable.
   using type = cond_t<CI, TypeList<>, TypeList<lit_payload<S>>>;
@@ -159,7 +159,7 @@ template <class E>
   requires is_wrapper<E>
 struct lit_joined<E> : lit_joined<through_t<E>> {};
 template <class R>
-  requires(is_anonymous_rule<R> && !is_terminal_rule<R> && slot_empty<R>)
+  requires(is_anonymous_rule<R> && !kIsTerminalRule<R> && slot_empty<R>)
 struct lit_payloads<Ref<R>> : lit_joined<std::remove_cv_t<decltype(R::body)>> {
 };
 

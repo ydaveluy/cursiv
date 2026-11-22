@@ -19,17 +19,17 @@
 
 namespace cursiv {
 
-std::vector<const AstNode*> hierarchy_nodes_at(
+std::vector<const AstNode*> hierarchyNodesAt(
     const References& references, const Document& document,
     lsp::Position position, const CancellationToken& cancelToken) {
   return references
       .findDeclarations(document,
-                        document.textDocument().offsetAt(from_lsp(position)),
+                        document.textDocument().offsetAt(fromLsp(position)),
                         cancelToken)
       .targets;
 }
 
-const AstNode* hierarchy_node_of_item(const Documents& store,
+const AstNode* hierarchyNodeOfItem(const Documents& store,
                                       const References& references,
                                       const lsp::DocumentUri& uri,
                                       lsp::Position selection,
@@ -37,14 +37,14 @@ const AstNode* hierarchy_node_of_item(const Documents& store,
   const std::shared_ptr<Document> document = store.getDocument(uri.toString());
   if (document == nullptr) return nullptr;
   const std::vector<const AstNode*> targets =
-      hierarchy_nodes_at(references, *document, selection, cancelToken);
+      hierarchyNodesAt(references, *document, selection, cancelToken);
   const TextOffset offset =
-      document->textDocument().offsetAt(from_lsp(selection));
+      document->textDocument().offsetAt(fromLsp(selection));
   // A declaration's own name can resolve to its whole overload set.
   const AstNode* selected = nullptr;
   TextOffset selectedWidth = 0;
   for (const AstNode* target : targets) {
-    throw_if_cancelled(cancelToken);
+    throwIfCancelled(cancelToken);
     if (target == nullptr || target->getDocument() != document.get()) continue;
     if (document->language != nullptr) {
       const auto name = document->language->nameProvider->getNameNode(

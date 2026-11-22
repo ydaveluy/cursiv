@@ -1,10 +1,11 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/CstUtils.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/workspace/Document.hpp"
 #include "cursiv/Check.hpp"
-#include "asttreell/generated/Ll/Module.hpp"
-#include "asttreelr/generated/Lr/Module.hpp"
+#include "asttreelr/generated/Combined/Module.hpp"
 #include "engines/shared/DirectiveSequenceGrammar.hpp"
 #include "engines/shared/Checks.hpp"
 #include <cstdio>
@@ -15,8 +16,8 @@
 namespace directive_sequence_cases {
 
 // A sequence of several elements that read, under `assign` or `append`, is an
-// unnamed data rule in both engines: the member takes its parts joined, and
-// one element with conditions around it keeps its own value.
+// unnamed data rule: the member takes its parts joined, and one element with
+// conditions around it keeps its own value.
 
 namespace {
 
@@ -75,10 +76,25 @@ std::string shouts_of(const ast::Doc& doc) {
   }
   return out;
 }
-std::string index_of(const ast::Doc& doc) {
-  const auto* const indexed = cursiv::ast_cast<ast::Indexed>(&doc);
-  if (indexed == nullptr || indexed->index == nullptr) return "<no index>";
-  return indexed->index->array != nullptr ? "index: array" : "index:";
+void a_nest_writes_the_preceding_operand(const cursiv::Parser& parser) {
+  for (std::string_view input : {"dir:nested:x!", "dir:nested:y!"}) {
+    cursiv::Document doc{cursiv::TextDocument{}};
+    doc.parseResult = parser.parse(input);
+    const auto* root = doc.parseResult.valueAs<ast::Indexed>();
+    CHECK(doc.parseResult.diagnostics.empty());
+    CHECK(root && root->index && root->index->array);
+    if (!root || !root->index || !root->index->array) continue;
+    const auto sites = cursiv::findNodesForProperty(*root->index, "array", &doc);
+    CHECK(sites.size() == 1 && sites.front().id == root->index->array->cstNodeId);
+  }
+  cursiv::Document doc{cursiv::TextDocument{}};
+  doc.parseResult = parser.parse("dir:nested:a!y");
+  const auto* root = doc.parseResult.valueAs<ast::Indexed>();
+  CHECK(root && root->index && root->index->items.size() == 2 && doc.parseResult.diagnostics.empty());
+  if (root && root->index) {
+    const auto sites = cursiv::findNodesForProperty(*root->index, "items", &doc);
+    CHECK(sites.size() == 2 && sites[0].text() == "a" && sites[1].text() == "y");
+  }
 }
 std::string names_of(const ast::Doc& doc) {
   std::string out;
@@ -159,8 +175,12 @@ void a_word_read_in_any_case_names_its_enumerator(const cursiv::Parser& p) {
   check(p, "folded:", "Not EQUAL", op_of, "NOTEQUAL");
   check(p, "anycase:", "equal", op_of, "equal");
   check(p, "anycase:", "EQUAL", op_of, "equal");
-  check(p, "nested:", "x!", index_of, "index: array");
-  check(p, "nested:", "y!", index_of, "index: array");
+  check(p, "anycase:", "mixed:EQUAL", op_of, "equal");
+  const auto bounded = p.parse("dir:anycase:mixed:EQUALx");
+  CHECK(bounded.accepted && bounded.diagnostics.size() == 1);
+  if (bounded.diagnostics.size() == 1)
+    CHECK(bounded.diagnostics.front().kind == cursiv::DiagnosticKind::ConversionError);
+  check(p, "onecase:", "EQUAL", op_of, "<refused>");
   check(p, "shouts:", "!abcdefghijklmnopqrstuvwxyz !hello", shouts_of,
         "!ABCDEFGHIJKLMNOPQRSTUVWXYZ !HELLO");
   check(p, "rewrapped:", "(x)", shape_of, "leaf");
@@ -180,15 +200,14 @@ void every_engine(const cursiv::Parser& p) {
   a_region_stays_with_its_sequence(p);
   a_choice_gives_the_value_of_its_arm(p);
   a_word_read_in_any_case_names_its_enumerator(p);
+  a_nest_writes_the_preceding_operand(p);
 }
 
 }  // namespace
 
 void run() {
-  engine = "Ll";
-  every_engine(*ttree::generated::Ll::create_parser());
   engine = "Lr";
-  every_engine(*ttree::generated::Lr::create_parser());
+  every_engine(*ttree::generated::Combined::createParser());
 }
 
 }  // namespace directive_sequence_cases
@@ -196,7 +215,7 @@ void run() {
 namespace data_parts_cases {
 
 // A data rule's parts are its token occurrences and its data-rule calls: a
-// call is one part, its rule's text, in both engines.
+// call is one part, its rule's text.
 
 namespace {
 
@@ -296,17 +315,16 @@ void every_engine(const cursiv::Parser& parser) {
 }  // namespace
 
 void run() {
-  every_engine(*ttree::generated::Ll::create_parser());
-  every_engine(*ttree::generated::Lr::create_parser());
+  every_engine(*ttree::generated::Combined::createParser());
 }
 
 }  // namespace data_parts_cases
 
 namespace flag_operand_cases {
 
-// A flag's operand reads and writes in the current node, in both engines: the
-// flag opens no node of its own and sets its member on the node current once
-// the operand has read -- the wrapper, if the operand nests.
+// A flag's operand reads and writes in the current node: the flag opens no
+// node of its own and sets its member on the node current once the operand has
+// read -- the wrapper, if the operand nests.
 
 namespace {
 
@@ -501,6 +519,12 @@ void a_flag_inside_a_flag_sets_its_own_member(const Parsers& p) {
   check<ast::Decl>(*p.parser, "doubled:x", show_doubled,
                    "x isArray=no hasInit=no init=<null>");
   check<ast::Decl>(*p.parser, "doubled:x(=)", show_doubled, "<refused>");
+  for (const bool closed : {false, true}) {
+    const std::string source = closed ? "dir:doubled:x(= 1)?" : "dir:doubled:x(= 1";
+    const auto repaired = p.parser->parse(source);
+    const auto* decl = repaired.valueAs<ast::Decl>();
+    CHECK(repaired.cst().recovered() && decl && decl->hasInit && decl->isArray == closed);
+  }
 }
 
 void a_create_inside_a_flag_heads_the_node_the_flag_marks(const Parsers& p) {
@@ -522,21 +546,14 @@ void every_engine(const Parsers& p) {
   a_create_inside_a_flag_heads_the_node_the_flag_marks(p);
 }
 
-Parsers ll_parsers() {
-  return {ttree::generated::Ll::create_parser(),
-          ttree::generated::Ll::create_ast_reflection()};
-}
-
 Parsers lr_parsers() {
-  return {ttree::generated::Lr::create_parser(),
-          ttree::generated::Lr::create_ast_reflection()};
+  return {ttree::generated::Combined::createParser(),
+          ttree::generated::Combined::createAstReflection()};
 }
 
 }  // namespace
 
 void run() {
-  engine = "Ll";
-  every_engine(ll_parsers());
   engine = "Lr";
   every_engine(lr_parsers());
 }

@@ -5,10 +5,9 @@ whether it fits your project.
 
 ## Benefits
 
-**Speed.** Cursiv aims to be as fast as possible. The parser and the language
-services are compiled C++, and workspaces build in parallel, so editor
-features stay responsive on large documents and workspaces. See
-[Benchmarks](../benchmarks/README.md).
+**Performance.** Your parser compiles to native code, and the workspace can
+build several documents in parallel. The [benchmarks](../benchmarks/README.md)
+give build and editor timings for the example languages.
 
 **Checked field bindings.** `assign<&ast::Person::name>` names a C++ member.
 If you rename the member and forget the grammar, the build fails.
@@ -19,8 +18,8 @@ toolchain, and your IDE navigates the grammar and the AST together.
 **Control of your data model.** You write the abstract syntax tree (AST)
 structs and choose their members.
 
-**Grammar errors are caught early.** The compiler or the generator rejects
-unsupported constructions and names the rule or member at fault. See
+**Grammar errors are caught early.** The compiler checks how grammar values
+fit your AST. The generator reports errors in tokens and parser rules. See
 [Grammar errors](../reference/refusals.md).
 
 ## Tradeoffs

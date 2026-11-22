@@ -30,6 +30,7 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 struct Name : cursiv::Extends<cursiv::AstNode> {};
 struct Index : cursiv::Extends<cursiv::AstNode> {
   Name* array = nullptr;
+  vector<Name*> items;
 };
 struct Indexed : cursiv::Extends<Doc> {
   Index* index = nullptr;
@@ -142,8 +143,16 @@ struct Folded : Base {
 };
 
 struct AnyCase : Base {
+  struct Mixed : terminal<ikw<"equal"> | repeat<5>(w)> {};
+  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::op>(ikw<"equal">) |
+                         (lit<"mixed:"> + assign<&ast::Doc::op>(ref<Mixed>) + option(lit<"x">))) + eof> {};
+};
+
+// A word read in one letter case names only the enumerator spelled so,
+// whatever another branch reads in any case.
+struct OneCase : Base {
   struct Root
-      : rule<create<ast::Doc>(assign<&ast::Doc::op>(ikw<"equal">)) + eof> {};
+      : rule<create<ast::Doc>(assign<&ast::Doc::op>(lit<"EQUAL">)) + eof> {};
 };
 
 // The member takes the operand's final node: the `Index` its `nest` makes
@@ -154,7 +163,9 @@ struct Nested : Base {
                          (create<ast::Name>(lit<"x">) +
                           nest<ast::Index, &ast::Index::array>(lit<"!">)) |
                          (ref<NameR> +
-                          nest<ast::Index, &ast::Index::array>(lit<"!">)))) +
+                          nest<ast::Index, &ast::Index::array>(lit<"!">)) |
+                         (create<ast::Name>(lit<"a">) + nest<&ast::Index::items>(
+                              lit<"!"> + append<&ast::Index::items>(ref<NameR>))))) +
                      eof> {};
 };
 
@@ -193,6 +204,7 @@ struct Suite : Base {
                      (lit<"chosen:"> + ref<Chosen::Root>) |
                      (lit<"folded:"> + ref<Folded::Root>) |
                      (lit<"anycase:"> + ref<AnyCase::Root>) |
+                     (lit<"onecase:"> + ref<OneCase::Root>) |
                      (lit<"nested:"> + ref<Nested::Root>) |
                      (lit<"shouts:"> + ref<Shouts::Root>) |
                      (lit<"rewrapped:"> + ref<Rewrap::Root>)> {};
@@ -257,10 +269,11 @@ struct Init : Base {
 };
 
 struct Counted : Base {
+  struct Pluses : rule<many(lit<"+">)> {};
   struct Root
       : rule<create<ast::Decl>(
                  assign<&ast::Decl::name>(ref<ID>) +
-                 flag<&ast::Decl::isStatic>(many(lit<"+">)) +
+                 flag<&ast::Decl::isStatic>(ref<Pluses>) +
                  flag<&ast::Decl::isConst>(repeat<0, 3>(lit<"-">)) +
                  flag<&ast::Decl::isArray>(
                      many(append<&ast::Decl::dims>(ref<DimRule>)))) +

@@ -9,7 +9,9 @@ namespace cursiv {
 
 // One writer, shared readers; a read inside a write runs inline on the
 // writer's thread. A write inside a read, or a wait or `Normal` read from a
-// read or a build worker, can deadlock. `OperationCancelled` is absorbed.
+// read or a build worker, can deadlock. An action's exception reaches the
+// caller, except an `OperationCancelled` from a write's action: `write`
+// absorbs it.
 class WorkspaceLock {
  public:
   virtual ~WorkspaceLock() noexcept = default;
@@ -27,8 +29,8 @@ class WorkspaceLock {
 
   // `write`/`read` run the action on the calling thread, so it lives on that
   // stack for the whole call; it cannot be null.
-  using WriteAction = cursiv::function_ref<void(const CancellationToken&)>;
-  using ReadAction = cursiv::function_ref<void()>;
+  using WriteAction = cursiv::FunctionRef<void(const CancellationToken&)>;
+  using ReadAction = cursiv::FunctionRef<void()>;
 
   // Which writes a read may run beside. An `Immediate` read is only correct
   // where the state it needs has already been awaited by other means -- here,
@@ -47,7 +49,8 @@ class WorkspaceLock {
   // because that is where the text is installed.
   virtual void write(WriteAction action,
                      WriteMode mode = WriteMode::Supersedable) = 0;
-  // False if the wait was cancelled; `action` was then not called.
+  // False when `action` did not run: the wait was cancelled, or the lock is
+  // being destroyed.
   [[nodiscard]] virtual bool read(ReadAction action,
                                   const CancellationToken& = {},
                                   ReadPriority = ReadPriority::Normal) = 0;

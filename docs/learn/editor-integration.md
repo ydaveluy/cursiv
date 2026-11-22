@@ -3,7 +3,8 @@
 The scaffold includes a VS Code client. It needs VS Code 1.91 or later with a
 native server, and 1.101 or later with a WebAssembly (WASI) server. You also
 need Node.js with npm, Ninja for the supplied CMake presets, and the
-recommended CMake Tools and clangd extensions.
+CMake Tools extension for the F5 build task. The recommended clangd
+extension provides C++ editing support.
 
 ## Press F5
 
@@ -18,6 +19,13 @@ shows which server runs.
 
 GCC and Clang presets run a native server. WASI presets run a WebAssembly
 module through Node.
+
+To inspect completion from a native build, pass a file and a zero-based line
+and UTF-16 column to the server. It loads the file's folder by default:
+
+```bash
+./build/src/mylang_lsp --complete-at example/hello.mylang:0:0
+```
 
 ## Distribute with WebAssembly
 

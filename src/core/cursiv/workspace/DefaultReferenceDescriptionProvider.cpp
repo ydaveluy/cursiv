@@ -31,11 +31,19 @@ struct LargeGroup {
   std::size_t first = 0;
   std::optional<std::unordered_set<ReferenceDescription, TargetHash>> seen;
 
-  // A value parameter lets the common path keep its row in registers.
+  // Scan nearby targets first and hash the rest of a long run.
   CURSIV_NOINLINE bool drawn(const std::vector<ReferenceDescription>& rows,
                              ReferenceDescription row) {
-    // Small groups never touch this state. Any rows they append invalidate
-    // the last large group, rebuilt only when another large one needs it.
+    unsigned compared = 0;
+    for (auto it = rows.rbegin();
+         it != rows.rend() && it->sourceBegin == row.sourceBegin &&
+         it->sourceEnd == row.sourceEnd;
+         ++it) {
+      if (*it == row) return true;
+      if (++compared == 16) break;
+    }
+    if (compared < 16) return false;
+
     if (!seen || rows.size() != first + seen->size()) {
       first = rows.size();
       while (first != 0 && rows[first - 1].sourceBegin == row.sourceBegin &&
@@ -105,7 +113,7 @@ DefaultReferenceDescriptionProvider::createDescriptions(
   TargetDocuments targetDocuments;
   references->visitResolved(cst, [&](TextOffset begin, TextOffset end,
                                      const AstNode& target, bool multi) {
-    throw_if_cancelled(cancelToken);
+    throwIfCancelled(cancelToken);
     const Document* const targetDocument = targetDocuments.of(target);
     const ReferenceDescription row{.sourceDocumentId = document.id,
                                    .sourceBegin = begin,
@@ -116,19 +124,9 @@ DefaultReferenceDescriptionProvider::createDescriptions(
                                    .targetSymbolId = target.cstNodeId,
                                    .local = targetDocument == &document,
                                    .multiReference = multi};
-    // The usual single target sees only the first span check. Large groups
-    // switch to hashing after a bounded scan of their most recent targets.
-    unsigned compared = 0;
-    for (auto it = rows.rbegin();
-         it != rows.rend() && it->sourceBegin == row.sourceBegin &&
-         it->sourceEnd == row.sourceEnd;
-         ++it) {
-      if (*it == row) return;
-      if (++compared == 16) {
-        if (large.drawn(rows, row)) return;
-        break;
-      }
-    }
+    if (!rows.empty() && rows.back().sourceBegin == begin &&
+        rows.back().sourceEnd == end && large.drawn(rows, row))
+      return;
     rows.push_back(row);
   });
 

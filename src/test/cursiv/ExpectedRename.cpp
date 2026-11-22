@@ -37,7 +37,7 @@ Disposable expectRename(const LspServices& services,
   std::optional<lsp::WorkspaceEdit> edit;
   if (marker != nullptr && services.renameProvider != nullptr) {
     const lsp::Position caret =
-        to_lsp(document->textDocument().positionAt(*marker));
+        toLsp(document->textDocument().positionAt(*marker));
     box = services.renameProvider->prepareRename(*document, caret, kNoCancel);
     edit = services.renameProvider->rename(*document, caret, input.newName,
                                            kNoCancel);

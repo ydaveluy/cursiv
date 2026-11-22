@@ -32,7 +32,7 @@ DomainModelScopeComputation::collectExportedSymbols(
   if (document.parseResult.value == nullptr) return exported;
 
   for (cursiv::AstNode* const node : document.parseResult.nodes()) {
-    cursiv::throw_if_cancelled(cancelToken);
+    cursiv::throwIfCancelled(cancelToken);
     if (cursiv::ast_cast<ast::Type>(node) != nullptr)
       addExportedSymbol(*node, exported, document);
   }
@@ -101,7 +101,7 @@ void DomainModelScopeComputation::processContainer(
   while (!open.empty()) {
     if (Level& level = open.back(); level.next < level.elements.size()) {
       ast::AbstractElement* const element = level.elements[level.next++];
-      cursiv::throw_if_cancelled(cancelToken);
+      cursiv::throwIfCancelled(cancelToken);
       if (element == nullptr) continue;
 
       if (cursiv::ast_cast<ast::Type>(element) != nullptr) {

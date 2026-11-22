@@ -49,7 +49,7 @@ class IndexManager {
   // the call is valid until its document's exports next change.
   [[nodiscard]] virtual bool visitElements(
       const AstTypeTag* type, std::span<const DocumentId> documents,
-      cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const = 0;
+      cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const = 0;
 
   // The first export named `name` that `accepts` (`referenceAccepts`) takes, in
   // `visitElements` order and valid as there. `reflection` is the asking
@@ -63,14 +63,14 @@ class IndexManager {
   [[nodiscard]] virtual bool visitByName(
       std::string_view name, bool caseSensitive, AcceptSet accepts,
       const AstReflection& reflection,
-      cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const = 0;
+      cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const = 0;
 
   // Every reference to one symbol, the reverse of the linker. A visitor,
   // as the rows live in a snapshot held open during the walk. False when the
   // visitor stopped.
   [[nodiscard]] virtual bool visitReferences(
       DocumentId targetDocument, NodeId targetSymbol,
-      cursiv::function_ref<bool(const ReferenceDescription&)> visitor)
+      cursiv::FunctionRef<bool(const ReferenceDescription&)> visitor)
       const = 0;
 };
 

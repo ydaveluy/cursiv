@@ -1,5 +1,5 @@
 // One faulted document compared with its twin: faults answered, text and tree
-// kept, diagnostics reported. It reads only what any engine's parse leaves.
+// kept, diagnostics reported. It reads only what a parse leaves.
 #pragma once
 
 #include <algorithm>

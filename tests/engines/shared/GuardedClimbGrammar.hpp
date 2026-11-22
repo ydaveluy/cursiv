@@ -83,6 +83,4 @@ struct Base : cursiv::GrammarSpec {
   using entry = Expression;
   using ignored = WS;
 };
-struct Ll : Base {};
-struct Lr : Base {};
 }  // namespace tguardedclimb

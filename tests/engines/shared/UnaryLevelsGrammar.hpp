@@ -75,6 +75,19 @@ struct Table : Base {
   };
 };
 
+// A table its primary reads again at its end: every climb of a chain of bodies
+// ends on the token after the last one.
+struct Bodies : Base {
+  struct E;
+  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
+                        create<ast::Wrapped>(
+                            kw<"fn"> + assign<&ast::Wrapped::value>(ref<E>))> {
+  };
+  struct E : infix<Primary, ast::Binary, left(lit<"+">)> {};
+  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) +
+                     lit<";"> + eof> {};
+};
+
 // The member forms, in an `infix<>` table, with a postfix level looser than a
 // binary one.
 struct Members : Base {
@@ -104,6 +117,32 @@ struct Cyclic : Base {
                           prefix<ast::Signed>(lit<"-">), left(lit<"*">))> {};
   struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
   };
+};
+
+struct GuardedTurns : Base {
+  struct Atom : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID> | d))> {};
+  struct Direct : rule<ref<Atom> | create<ast::Wrapped>(
+      &ref<ID> + assign<&ast::Wrapped::value>(ref<Direct>) + lit<"?">)> {};
+  struct Compound : rule<ref<Atom> | create<ast::Wrapped>(
+      (&kw<"if"> | &kw<"else">) + assign<&ast::Wrapped::value>(ref<Compound>) + lit<"?">)> {};
+  struct E;
+  struct Primary : rule<ref<Atom> | create<ast::Wrapped>(
+      (&ref<ID> | gap::line) + assign<&ast::Wrapped::value>(ref<E>) + lit<"?">)> {};
+  struct E : infix<Primary, ast::Binary, left(lit<"+">)> {};
+  struct Gap : rule<ref<Atom> | create<ast::Wrapped>(
+      gap::line + assign<&ast::Wrapped::value>(ref<Gap>) + lit<"!">)> {};
+  struct Word : rule<ref<Atom> | create<ast::Wrapped>(
+      &kw<"if"> + assign<&ast::Wrapped::value>(ref<Word>) + lit<"$">) |
+      create<ast::Wrapped>(&kw<"else"> + assign<&ast::Wrapped::value>(ref<Word>) + lit<"!">)> {};
+  struct Scoped : rule<ref<Atom> | create<ast::Wrapped>(
+      skip(ignore<>, hide<>, !kw<"if">) + assign<&ast::Wrapped::value>(ref<Scoped>) + lit<"?">)> {};
+  struct Overlap : rule<(option(lit<"!">) + ref<Atom>) | create<ast::Wrapped>(
+      &ref<ID> + assign<&ast::Wrapped::value>(ref<Overlap>) + lit<"?">)> {};
+  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(
+      (lit<"direct:"> + ref<Direct>) | (lit<"compound:"> + ref<Compound>) |
+      (lit<"infix:"> + ref<E>) |
+      (lit<"gap:"> + ref<Gap>) | (lit<"word:"> + ref<Word>) | (lit<"scoped:"> + ref<Scoped>) |
+      (lit<"overlap:"> + option(lit<"!">) + ref<Overlap>))) + eof> {};
 };
 
 inline constexpr auto elvis_text = [] { return std::string_view("?:"); };
@@ -221,8 +260,10 @@ struct Empties : Base {
 
 struct Suite : Base {
   struct Root : rule<(lit<"unary:"> + ref<Table::Root>) |
+                     (lit<"bodies:"> + ref<Bodies::Root>) |
                      (lit<"members:"> + ref<Members::Root>) |
                      (lit<"cyclic:"> + ref<Cyclic::Root>) |
+                     (lit<"guarded:"> + ref<GuardedTurns::Root>) |
                      (lit<"lines:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
                                            ref<Lines::Root> + eof)) |
                      (lit<"heads:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
@@ -236,8 +277,6 @@ struct Suite : Base {
   static constexpr auto indent_open = lit<"[">;
   static constexpr auto indent_close = lit<"]">;
 };
-struct Ll : Suite {};
-struct Lr : Suite {};
 
 // The member table alone, for a fuzz lane: its language is part of the
 // suite's, so the suite's parsers read what it writes.

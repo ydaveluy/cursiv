@@ -6,7 +6,7 @@
 #include <string_view>
 #include <variant>
 // Shapes the generator accepts: each must build the tree its directives
-// describe, in both engines.
+// describe.
 
 namespace tmaterialise {
 
@@ -75,6 +75,9 @@ struct Call : cursiv::Extends<Expr> {
   vector<Expr*> args;
   boolean flagged = false;
 };
+struct Marks : cursiv::Extends<cursiv::AstNode> {
+  boolean m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15;
+};
 
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -99,6 +102,16 @@ inline constexpr auto stacked_flags<0> = cursiv::GrammarSpec::kw<"x">;
 struct StackedFlags : Base {
   struct Root : rule<create<Flags>(
                          ref<ID> + flag<&Flags::on>(stacked_flags<20>))> {};
+};
+
+// Sixteen flags over one word share its record.
+struct MarkRun : Base {
+  struct Root
+      : rule<create<Marks>(flag<&Marks::m0>(flag<&Marks::m1>(flag<&Marks::m2>(flag<&Marks::m3>(
+            flag<&Marks::m4>(flag<&Marks::m5>(flag<&Marks::m6>(flag<&Marks::m7>(
+                flag<&Marks::m8>(flag<&Marks::m9>(flag<&Marks::m10>(flag<&Marks::m11>(
+                    flag<&Marks::m12>(flag<&Marks::m13>(flag<&Marks::m14>(
+                        flag<&Marks::m15>(lit<"x">)))))))))))))))))> {};
 };
 
 struct AtomChain : Base {
@@ -239,7 +252,8 @@ struct Suite : Base {
                      (lit<"unassignedterminal:"> + ref<UnassignedTerminal::Root>) |
                      (lit<"givenup:"> + ref<GivenUp::Root>) |
                      (lit<"passed:"> + ref<GivenUp::Passed>) |
-                     (lit<"stacked:"> + ref<StackedFlags::Root>)> {};
+                     (lit<"stacked:"> + ref<StackedFlags::Root>) |
+                     (lit<"marks:"> + ref<MarkRun::Root>)> {};
   using entry = Root;
   using ignored = WS;
 };

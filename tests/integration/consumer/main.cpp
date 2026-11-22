@@ -5,7 +5,7 @@
 #include "tiny/generated/Tiny/Module.hpp"
 
 int main() {
-  const auto parser = tiny::generated::Tiny::create_parser();
+  const auto parser = tiny::generated::Tiny::createParser();
   const cursiv::ParseResult ok = parser->parse("1 + 2 + 39");
   const cursiv::ParseResult bad = parser->parse("1 +");
   if (ok.cst().recovered() || !bad.cst().recovered()) {

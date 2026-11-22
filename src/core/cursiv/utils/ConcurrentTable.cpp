@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <chrono>
 #include <cstddef>
 #include <mutex>
 #include <new>
@@ -21,15 +20,6 @@ namespace {
 // Enough for every thread a process runs at once; past it a thread reads
 // without one, and holds back every collection while it does.
 constexpr std::size_t kSlots = 1024;
-
-// Releases between two collections: a collection fences every thread,
-// which costs microseconds, so a few releases share one. Fewer when they
-// hold a lot: a few large tables do not wait for dozens of small ones.
-constexpr std::size_t kCollectEvery = 32;
-constexpr std::size_t kCollectBytes = std::size_t{8} << 20;
-// A release also collects once the first one since the last collection
-// is this old: a value cleared once per build goes at the next build's release.
-constexpr std::chrono::milliseconds kCollectAfter{100};
 
 // Every running thread of the process passes a full fence: what a reader
 // published with a plain store is then visible, and what it loads next sees
@@ -76,36 +66,48 @@ struct TableEpochs::State {
   // costs a collection a look at the front, not a pass over the whole list.
   PendingFree* oldest = nullptr;
   PendingFree* newest = nullptr;
-  // Releases since the last collection, what they hold, and when the
-  // first came: what spaces collections out.
-  std::size_t sinceCollection = 0;
-  std::size_t bytesSinceCollection = 0;
-  std::chrono::steady_clock::time_point firstSinceCollection{};
+  // What was released below this epoch came before a finished fence: any
+  // later scan judges it without another.
+  std::uint64_t fencedBelow = 0;
 
   static Slot& slot_of(std::atomic<std::uint64_t>* epoch) noexcept {
     return *reinterpret_cast<Slot*>(reinterpret_cast<char*>(epoch) -
                                     offsetof(Slot, epoch));
   }
 
-  // Under the lock: takes off the list what was released before the oldest
-  // epoch a reader still publishes, and returns it, oldest first. The
-  // caller frees it once the lock is gone.
-  PendingFree* collectLocked() noexcept {
-    sinceCollection = 0;
-    bytesSinceCollection = 0;
-    if (oldest == nullptr) return nullptr;
-    if (fenced && !fence_every_thread()) return nullptr;
+  // The oldest epoch a reader publishes; none while a reader without a slot
+  // reads.
+  [[nodiscard]] std::uint64_t floor() const noexcept {
     std::uint64_t floor = kIdle;
     const std::size_t end = used.load(std::memory_order_seq_cst);
     for (std::size_t at = 0; at < end; ++at)
       floor = std::min(floor, slots[at].epoch.load(std::memory_order_seq_cst));
     // A reader without a slot is counted here, or loads a table after this
     // load, in that order, and so finds none of what is released.
-    if (unslotted.load(std::memory_order_seq_cst) != 0) return nullptr;
-    if (oldest->epoch >= floor) return nullptr;
+    return unslotted.load(std::memory_order_seq_cst) != 0 ? 0 : floor;
+  }
+
+  // Under the lock: takes off the list what was released before the oldest
+  // epoch a reader still publishes, and returns it, oldest first. The
+  // caller frees it once the lock is gone. It fences only when a release no
+  // fence has covered may be free.
+  PendingFree* collectLocked() noexcept {
+    if (oldest == nullptr) return nullptr;
+    std::uint64_t below = floor();
+    if (fenced) {
+      if (below > fencedBelow && newest->epoch >= fencedBelow) {
+        const std::uint64_t now = current.load(std::memory_order_relaxed);
+        if (fence_every_thread()) {
+          fencedBelow = now;
+          below = floor();
+        }
+      }
+      below = std::min(below, fencedBelow);
+    }
+    if (oldest->epoch >= below) return nullptr;
     PendingFree* const due = oldest;
     PendingFree* last = due;
-    while (last->next != nullptr && last->next->epoch < floor)
+    while (last->next != nullptr && last->next->epoch < below)
       last = last->next;
     oldest = last->next;
     if (oldest == nullptr) newest = nullptr;
@@ -145,7 +147,7 @@ struct TableEpochs::Release {
     // A guard lasts one call of a table, and thread-local destructors do not
     // nest: none is alive here.
     assert(s.depth == 0);
-    s.exiting = true;
+    s.onLeave |= kGiveBack;
     if (held && s.slot != nullptr) giveBack(s);
   }
 };
@@ -168,7 +170,7 @@ std::atomic<std::uint64_t>* TableEpochs::takeSlot() noexcept {
     }
     // Past its thread-local destructors `release` is gone and would not
     // give a slot back: the guard does, as it leaves.
-    if (!reader.exiting) release.held = true;
+    if ((reader.onLeave & kGiveBack) == 0) release.held = true;
     return &s.slots[at].epoch;
   }
   return nullptr;
@@ -180,6 +182,16 @@ void TableEpochs::giveBack(Reader& s) noexcept {
   s.slot = nullptr;
 }
 
+// The collection is taken off first: a value it frees may read and release
+// in turn.
+void TableEpochs::leave(Reader& s) noexcept {
+  if ((s.onLeave & kGiveBack) != 0 && s.slot != nullptr) giveBack(s);
+  if ((s.onLeave & kCollect) != 0) {
+    s.onLeave &= static_cast<std::uint8_t>(~kCollect);
+    collect();
+  }
+}
+
 // Counted before the reader loads a table, sequentially consistent as
 // those loads are. The count falls with release, so the reader's loads happen
 // before any free that counts no reader.
@@ -189,32 +201,34 @@ void TableEpochs::enterWithoutSlot() noexcept {
 
 void TableEpochs::leaveWithoutSlot() noexcept {
   state().unslotted.fetch_sub(1, std::memory_order_release);
+  if (Reader& s = reader; s.onLeave != 0) leave(s);
 }
 
 void TableEpochs::freeLater(PendingFree& record, void* object,
-                            void (*free)(void*), std::size_t bytes) noexcept {
+                            void (*free)(void*)) noexcept {
+  State& s = state();
+  // This thread's own guard may hold `object`: its outermost one collects.
+  Reader& r = reader;
+  assert(r.depth != 0);
+  r.onLeave |= kCollect;
+  const std::scoped_lock lock(s.mutex);
+  // The epoch moves on: a reader that reads the new one entered after
+  // `object` left its reach, and its acquire makes that visible.
+  const std::uint64_t now = current.fetch_add(1, std::memory_order_seq_cst);
+  record = PendingFree{nullptr, object, free, now};
+  if (s.newest != nullptr)
+    s.newest->next = &record;
+  else
+    s.oldest = &record;
+  s.newest = &record;
+}
+
+void TableEpochs::collect() noexcept {
   State& s = state();
   PendingFree* due = nullptr;
-  // Read before the lock, to keep it short.
-  const auto clock = std::chrono::steady_clock::now();
   {
     const std::scoped_lock lock(s.mutex);
-    // The epoch moves on: a reader that reads the new one entered after
-    // `object` left its reach, and its acquire makes that visible.
-    const std::uint64_t now = current.fetch_add(1, std::memory_order_seq_cst);
-    record = PendingFree{nullptr, object, free, now};
-    if (s.newest != nullptr)
-      s.newest->next = &record;
-    else
-      s.oldest = &record;
-    s.newest = &record;
-    s.bytesSinceCollection += bytes;
-    // The first release since a collection starts the clock.
-    if (s.sinceCollection == 0) s.firstSinceCollection = clock;
-    if (++s.sinceCollection >= kCollectEvery ||
-        s.bytesSinceCollection >= kCollectBytes ||
-        clock - s.firstSinceCollection >= kCollectAfter)
-      due = s.collectLocked();
+    due = s.collectLocked();
   }
   // Freed outside the lock: a value's destructor may release in turn.
   State::freeAll(due);

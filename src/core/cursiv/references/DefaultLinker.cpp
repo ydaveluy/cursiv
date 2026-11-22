@@ -29,9 +29,7 @@ namespace cursiv {
 
 namespace {
 
-// The fewest references a worker resolves at once: enough that handing them
-// out is cheap next to the lookups, few enough that a document of a few
-// thousand references already uses the pool.
+// Batch size for long reference lists.
 constexpr std::size_t kLinkRun = 1024;
 
 // What makes two candidates the same answer to a plural lookup.
@@ -136,13 +134,11 @@ void DefaultLinker::link(Document& document,
   // them here.
   if (references.linker != this) references.linker = this;
   if (references.document != &document) references.document = &document;
-  // A long list is resolved in runs spread over the pool, so a large document
-  // does not link on one thread while the others wait for it.
-  const auto force = [&](std::span<const detail::RefHandle> run) {
-    references.force(run, cancelToken);
-  };
-  shared.taskScheduler->parallelFor(cancelToken, std::span(references.handles),
-                                    kLinkRun, force);
+  auto& scheduler = *shared.taskScheduler;
+  scheduler.parallelFor(cancelToken, std::span(references.handles), kLinkRun,
+                        [&](std::span<const detail::RefHandle> run) {
+                          references.force(run, cancelToken);
+                        });
 }
 
 // A document with no tree has nothing to drop, and is reached: a reset to

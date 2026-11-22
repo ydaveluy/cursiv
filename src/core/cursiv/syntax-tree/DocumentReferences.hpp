@@ -26,13 +26,8 @@ class Linker;
 
 // Every reference that failed: why, where its name is written, and the site as
 // the linker saw it -- what a lookup for a near miss asks again.
-using UnresolvedReferenceVisitor = cursiv::function_ref<void(
+using UnresolvedReferenceVisitor = cursiv::FunctionRef<void(
     RefState why, TextOffset begin, TextOffset end, const ReferenceInfo& site)>;
-
-// One resolved edge: where its text is written, what it points at, and whether
-// its source names several targets.
-using ResolvedReferenceVisitor = cursiv::function_ref<void(
-    TextOffset begin, TextOffset end, const AstNode& target, bool multi)>;
 
 struct DocumentReferences : detail::RefResolver {
   // The work list, in the order the builder wrote it: the rank a reference

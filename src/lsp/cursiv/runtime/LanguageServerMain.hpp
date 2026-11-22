@@ -24,7 +24,7 @@ namespace detail {
 // recovers it by reference. Default-constructible, as the runner builds it.
 template <class TShared = SharedLspServices>
   requires std::derived_from<TShared, SharedLspServices>
-[[nodiscard]] int run_language_server_main(
+[[nodiscard]] int runLanguageServerMain(
     int argc, char** argv, std::string_view serverName,
     const std::function<void(SharedLspServices&)>& registerLanguageServices) {
   TShared sharedServices;

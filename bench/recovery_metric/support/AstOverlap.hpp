@@ -34,7 +34,7 @@ struct AstOverlap {
   };
 
   [[nodiscard]] Result run(const AstNode& want, const AstNode* got,
-                           function_ref<bool(const AstNode&)> touched) const {
+                           FunctionRef<bool(const AstNode&)> touched) const {
     Walk w{*this, touched, {}, {}, {}};
     Result r;
     r.total = w.twin(want).spared;
@@ -121,7 +121,7 @@ struct AstOverlap {
 
   struct Walk {
     const AstOverlap& self;
-    function_ref<bool(const AstNode&)> touched;
+    FunctionRef<bool(const AstNode&)> touched;
     std::unordered_map<const AstNode*, Digest> digests;
     std::unordered_map<const AstNode*, Digest> gotDigests;
     std::unordered_map<const AstNode*, Own> owns;

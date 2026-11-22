@@ -70,13 +70,13 @@ struct LspServices : virtual CoreServices {
   std::unique_ptr<const CodeActionProvider> codeActionProvider;
 
   void visitServices(
-      cursiv::function_ref<void(const ServiceSlot&)> yield) const override;
+      cursiv::FunctionRef<void(const ServiceSlot&)> yield) const override;
   // The LSP rows alone, for a container that combines several sets.
   void visitOwnServices(
-      cursiv::function_ref<void(const ServiceSlot&)> yield) const;
+      cursiv::FunctionRef<void(const ServiceSlot&)> yield) const;
 };
 
 // Installs the core defaults, then the LSP ones.
-void install_default_lsp_services(LspServices& services);
+void installDefaultLspServices(LspServices& services);
 
 }  // namespace cursiv

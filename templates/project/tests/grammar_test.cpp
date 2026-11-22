@@ -28,7 +28,7 @@ int main() {
                          std::istreambuf_iterator<char>());
 
   // Create the language services, including the parser.
-  const auto language = cursiv::create_language<
+  const auto language = cursiv::createLanguage<
       @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@CoreServices,
       @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@SharedCoreServices,
       @CURSIV_NEW_ID@::install_core_module>();

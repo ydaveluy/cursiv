@@ -41,20 +41,32 @@ std::shared_ptr<Document> parseHelper(const CoreServices& services,
   if (uri.empty()) {
     uri = "file:///" + std::to_string(nextDocumentId.fetch_add(1));
     if (!meta.fileExtensions.empty())
-      uri += normalize_extension(meta.fileExtensions.front());
+      uri += normalizeExtension(meta.fileExtensions.front());
   }
 
   // Named by its language, which no other one claiming the URI can take.
   std::shared_ptr<Document> document =
       shared.documentFactory->fromTextDocument(TextDocument::create(
           std::move(uri), meta.languageId, 0, std::move(text)));
-  shared.documents->addDocument(document);
-  // A build that throws leaves the workspace as it found it.
-  Disposable added = detail::documentDisposable(services, document);
-  const detail::DisposeOnThrow cleanup(added);
-  Document* const set[] = {document.get()};
-  shared.documentBuilder->build(set, static_cast<const BuildOptions&>(options));
+  detail::build_documents(shared, {&document, 1}, options, kNoCancel);
   return document;
+}
+
+void detail::build_documents(
+    const SharedCoreServices& shared,
+    std::span<const std::shared_ptr<Document>> documents,
+    const BuildOptions& options, const CancellationToken& cancel) {
+  if (documents.empty()) return;
+  std::vector<Document*> batch;
+  batch.reserve(documents.size());
+  auto rollback =
+      Disposable::create([&] { clearDocuments(shared, documents); });
+  const DisposeOnThrow cleanup(rollback);
+  for (const auto& document : documents) {
+    shared.documents->addDocument(document);
+    batch.push_back(document.get());
+  }
+  shared.documentBuilder->build(batch, options, cancel);
 }
 
 std::shared_ptr<Document> parseDocument(const CoreServices& services,
@@ -71,18 +83,17 @@ std::shared_ptr<Document> parseDocument(const CoreServices& services,
 
 void clearDocuments(const SharedCoreServices& shared,
                     std::span<const std::shared_ptr<Document>> documents) {
-  std::vector<std::string> uris;
-  if (documents.empty())
-    for (const std::shared_ptr<Document>& held : shared.documents->all())
-      uris.push_back(held->uri);
-  else
-    for (const std::shared_ptr<Document>& named : documents)
-      uris.push_back(named->uri);
-
+  std::vector<std::shared_ptr<Document>> all;
+  if (documents.empty()) {
+    all = shared.documents->all();
+    documents = all;
+  }
   std::vector<std::string_view> deleted;
-  deleted.reserve(uris.size());
-  for (const std::string& uri : uris) deleted.emplace_back(uri);
-  shared.documentBuilder->update({}, deleted);
+  deleted.reserve(documents.size());
+  for (const auto& document : documents)
+    if (document && shared.documents->getDocument(document->id) == document)
+      deleted.emplace_back(document->uri);
+  if (!deleted.empty()) shared.documentBuilder->update({}, deleted);
 }
 
 void clearDocuments(const CoreServices& services,

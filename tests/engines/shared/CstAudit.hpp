@@ -97,9 +97,9 @@ void audit_cst_structure(const cursiv::ParseResult& r, std::string_view text,
 
   // Trivia posted twice: two hidden leaves over one span.
   for (cursiv::NodeId i = 0; i < n; ++i) {
-    if (!cst[i].hidden || cst[i].begin == cst[i].end) continue;
+    if (!cst[i].isHidden() || cst[i].begin == cst[i].end) continue;
     for (cursiv::NodeId j = i + 1; j < n; ++j)
-      if (cst[j].hidden && cst[j].begin == cst[i].begin &&
+      if (cst[j].isHidden() && cst[j].begin == cst[i].begin &&
           cst[j].end == cst[i].end) {
         std::snprintf(b, sizeof b, "A10 hidden %u and %u both hold [%u,%u)", i,
                       j, cst[i].begin, cst[i].end);
@@ -127,7 +127,7 @@ void audit_cst_structure(const cursiv::ParseResult& r, std::string_view text,
   for (cursiv::NodeId i = 0; i < n; ++i) {
     if (i >= lo && i <= root) continue;
     const cursiv::CstNode& x = cst[i];
-    if (x.hidden || (x.recovered && x.subtreeSize == 1)) continue;
+    if (x.isHidden() || (x.isRecovered() && x.subtreeSize == 1)) continue;
     std::snprintf(b, sizeof b,
                   "A13 record %u [%u,%u) sub=%u stands outside the entry root "
                   "%u [%u,%u)",

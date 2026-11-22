@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <initializer_list>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -87,10 +88,9 @@ class DefaultDocumentBuilder : public DocumentBuilder {
   // Requests are fixed between phases, before workers read their options.
   virtual void prepareBuild(std::span<Document* const>, const BuildOptions&);
 
-  // The phases, over documents that already carry their request; `update`
-  // rebuilds documents it was not asked about, with their own options. Every
-  // reset precedes `allowImmediateReads`: later phases only advance documents.
-  virtual void buildDocuments(std::span<Document* const>,
+  // Build the explicit request, or select pending documents for an update.
+  // Reset affected documents before allowing immediate reads.
+  virtual void buildDocuments(std::optional<std::vector<Document*>> requested,
                               const CancellationToken&);
 
   // The categories of `requested` this document still needs: the request
@@ -157,7 +157,7 @@ class DefaultDocumentBuilder : public DocumentBuilder {
   // One state of a phase and the work that reaches it.
   struct Step {
     DocumentState state;
-    cursiv::function_ref<void(Document&, const CoreServices&,
+    cursiv::FunctionRef<void(Document&, const CoreServices&,
                               const CancellationToken&)>
         body;
   };
@@ -168,18 +168,17 @@ class DefaultDocumentBuilder : public DocumentBuilder {
   void runPhase(
       std::span<Document* const> all, std::initializer_list<Step> steps,
       const CancellationToken&,
-      std::optional<cursiv::function_ref<void()>> beforePublish = std::nullopt);
+      std::optional<cursiv::FunctionRef<void()>> beforePublish = std::nullopt);
 
   static void computeLocalScopes(Document&, const CoreServices&,
                                  const CancellationToken&);
   static void bindReferences(Document&, const CoreServices&);
-  // What `update` does before the phases: the store and the derived halves
-  // brought in line with the change, the listeners told. Returns the documents
-  // to build.
-  [[nodiscard]] std::vector<Document*> applyUpdate(
-      std::span<const std::string_view> changed,
-      std::span<const std::string_view> deleted, const CancellationToken&);
-  void runAttempt(cursiv::function_ref<void()> body);
+  void applyUpdate(std::span<const std::string_view> changed,
+                   std::span<const std::string_view> deleted);
+  [[nodiscard]] std::vector<Document*> prepareUpdate(
+      std::span<const std::shared_ptr<Document>> held);
+  void runAttempt(cursiv::FunctionRef<void()> body);
+  [[nodiscard]] bool completedFailure(const Document&) const;
   [[nodiscard]] std::uint64_t beginAttempt();
   // A document's new state wakes whoever waits on that document, not only at
   // the end of the phase.

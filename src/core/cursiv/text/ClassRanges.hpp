@@ -112,8 +112,29 @@ struct ClassRanges {
     return out;
   }
 
+  // Both sides are ascending: one pass keeps where they overlap. Two overlaps
+  // that only surrogates part are one range, as a complement leaves them.
   constexpr ClassRanges intersected(const ClassRanges& o) const {
-    return complemented().united(o.complemented()).complemented();
+    ClassRanges out;
+    out.r.reserve(r.size() + o.r.size());
+    const unicode::Range* a = r.data();
+    const unicode::Range* const aEnd = a + r.size();
+    const unicode::Range* b = o.r.data();
+    const unicode::Range* const bEnd = b + o.r.size();
+    while (a != aEnd && b != bEnd) {
+      const char32_t lo = std::max(a->lo, b->lo);
+      const char32_t hi = std::min(a->hi, b->hi);
+      if (a->hi < b->hi)
+        ++a;
+      else
+        ++b;
+      if (lo > hi) continue;
+      if (lo == 0xE000 && !out.r.empty() && out.r.back().hi == 0xD7FF)
+        out.r.back().hi = hi;
+      else
+        out.r.push_back({lo, hi});
+    }
+    return out;
   }
 
   constexpr ClassRanges minus(const ClassRanges& o) const {

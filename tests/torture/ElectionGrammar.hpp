@@ -1,9 +1,7 @@
 #pragma once
 
-// The ambiguous shapes of the torture test, one opening keyword each: the
-// cases share no state and each owns exactly one conflict. Rules that read
-// the same stay distinct: a rank follows the order rules are first reached in,
-// which a shared rule would carry from one case into the next.
+// Each opening keyword isolates an ambiguous shape. Distinct rules keep the
+// rank given by their first use within each case.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "torture/DanglingAst.hpp"
@@ -13,6 +11,10 @@
 namespace telect {
 
 namespace ast {
+struct Tag : cursiv::Extends<cursiv::AstNode> {
+  string_view name, close;
+  vector<Tag*> children;
+};
 struct Case : cursiv::Extends<cursiv::AstNode> {
   Top* top = nullptr;
   Hold* hold = nullptr;
@@ -118,6 +120,10 @@ struct Election : cursiv::GrammarSpec {
   struct Overlap : rule<create<ast::List>(
                        some(append<&ast::List::groups>(ref<OverlapGroup>)))> {};
 
+  struct Tag : rule<lit<"<"> + assign<&ast::Tag::name>(ref<ID>) + lit<">"> +
+                    option(many(append<&ast::Tag::children>(ref<Tag>) | lit<"#">) +
+                           lit<"<"> + lit<"/"> + assign<&ast::Tag::close>(ref<ID>) + lit<">">)> {};
+
   struct Entry
       : rule<create<ast::Case>(kw<"rankxy"> +
                                assign<&ast::Case::top>(ref<RankXY>)) |
@@ -139,7 +145,7 @@ struct Election : cursiv::GrammarSpec {
                                assign<&ast::Case::stmt>(ref<DeepIfRev>)) |
              create<ast::Case>(kw<"overlap"> +
                                assign<&ast::Case::list>(ref<Overlap>)) |
-             ref<tdang::DeepIf::Stmt>> {};
+             (kw<"tags"> + ref<Tag>) | ref<tdang::DeepIf::Stmt>> {};
 
   using entry = Entry;
   using ignored = WS;

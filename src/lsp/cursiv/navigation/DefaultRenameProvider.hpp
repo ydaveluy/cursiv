@@ -33,8 +33,6 @@ class DefaultRenameProvider : public RenameProvider,
       std::string_view newName,
       const CancellationToken& token = {}) const override;
 
- protected:
-
  private:
   // Substitutes `newName` at the spans of `declaringDocument` and reads the
   // document back: the parse verdict holds, and each replacement is an

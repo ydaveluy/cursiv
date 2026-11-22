@@ -95,11 +95,11 @@ std::vector<lsp::Position> positions(const Document& document) {
   cst.visitLeaves([&](const CstLeaf& leaf) {
     if (!token(leaf)) return;
     if (result.size() < count && rank_of(result.size()) == rank)
-      result.push_back(to_lsp(document.textDocument().positionAt(leaf.begin)));
+      result.push_back(toLsp(document.textDocument().positionAt(leaf.begin)));
     ++rank;
   });
   const auto text = document.textDocument().getText();
-  result.push_back(to_lsp(document.textDocument().positionAt(
+  result.push_back(toLsp(document.textDocument().positionAt(
       static_cast<TextOffset>(text.size()))));
   return result;
 }
@@ -254,7 +254,7 @@ void lsp_stages(int iterations, SharedLspServices& shared,
   actions.range = lsp::Range{lsp::Position{0, 0}, carets.back()};
   for (const Diagnostic& diagnostic : document.diagnostics) {
     lsp::Diagnostic converted;
-    converted.range = to_lsp(document.textDocument().rangeAt(
+    converted.range = toLsp(document.textDocument().rangeAt(
         diagnostic.range.begin, diagnostic.range.end));
     converted.message = diagnostic.message;
     actions.context.diagnostics.push_back(std::move(converted));

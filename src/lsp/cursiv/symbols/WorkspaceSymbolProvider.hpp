@@ -15,7 +15,8 @@ class WorkspaceSymbolProvider {
  public:
   virtual ~WorkspaceSymbolProvider() noexcept = default;
 
-  // The workspace symbols matching `query`, under the workspace read lock.
+  // Called under the workspace read lock. Locations may omit their range
+  // when `resolvesSymbols()` supplies it on demand.
   [[nodiscard]] virtual std::vector<lsp::WorkspaceSymbol> getSymbols(
       std::string_view query, const CancellationToken& = {}) const = 0;
 

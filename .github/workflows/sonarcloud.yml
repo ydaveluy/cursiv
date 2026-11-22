@@ -110,7 +110,7 @@ jobs:
         with:
           # The rules cut everywhere go against how the tree is written (see
           # `.clang-tidy`); shadowing and coroutine parameters are cut only
-          # where the grammar's short names and the parsers' coroutines live.
+          # where the grammar's short names and the generator's coroutines live.
           args: >-
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
             -Dsonar.organization=ydaveluy
@@ -121,7 +121,7 @@ jobs:
             -Dsonar.tests=tests
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.cpp.file.suffixes=.cpp,.hpp
-            -Dsonar.issue.ignore.multicriteria=benchlog,benchpath,nesting,complexity,corocomplexity,lambdalength,ternary,breaks,params,fields,methods,onedecl,suffix,carray,stdbyte,loopform,assignexpr,capture,capturethis,syncfield,memoryorder,shadowcore,shadowengines,coroparam
+            -Dsonar.issue.ignore.multicriteria=benchlog,benchpath,nesting,complexity,corocomplexity,lambdalength,ternary,breaks,params,fields,methods,onedecl,suffix,carray,stdbyte,loopform,assignexpr,capture,capturethis,syncfield,memoryorder,shadowcore,shadowengine,coroparam
             -Dsonar.issue.ignore.multicriteria.benchlog.ruleKey=cppsecurity:S5145
             -Dsonar.issue.ignore.multicriteria.benchlog.resourceKey=src/bench/**/*
             -Dsonar.issue.ignore.multicriteria.benchpath.ruleKey=cppsecurity:S2083
@@ -166,7 +166,7 @@ jobs:
             -Dsonar.issue.ignore.multicriteria.memoryorder.resourceKey=**/*
             -Dsonar.issue.ignore.multicriteria.shadowcore.ruleKey=cpp:S1117
             -Dsonar.issue.ignore.multicriteria.shadowcore.resourceKey=src/core/**/*
-            -Dsonar.issue.ignore.multicriteria.shadowengines.ruleKey=cpp:S1117
-            -Dsonar.issue.ignore.multicriteria.shadowengines.resourceKey=src/engines/**/*
+            -Dsonar.issue.ignore.multicriteria.shadowengine.ruleKey=cpp:S1117
+            -Dsonar.issue.ignore.multicriteria.shadowengine.resourceKey=src/engine/**/*
             -Dsonar.issue.ignore.multicriteria.coroparam.ruleKey=cpp:S6391
-            -Dsonar.issue.ignore.multicriteria.coroparam.resourceKey=src/engines/**/*
+            -Dsonar.issue.ignore.multicriteria.coroparam.resourceKey=src/engine/**/*

@@ -11,7 +11,7 @@
 namespace sm {
 
 void install_core_module(StateMachineCoreServices& services) {
-  sm::generated::SM::install_generated_module(services);
+  sm::generated::SM::installGeneratedModule(services);
 
   using V = StateMachineValidator;
   services.validator = std::make_unique<const V>(services);

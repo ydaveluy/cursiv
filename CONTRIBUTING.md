@@ -1,6 +1,6 @@
 # Contributing to Cursiv
 
-Contributions can improve the parser engines, language services, examples or
+Contributions can improve the parser engine, language services, examples or
 documentation. To build your own language with the framework, start with the
 [user guide](docs/learn/scaffold.md).
 
@@ -32,14 +32,14 @@ The build fetches its dependencies. Use `gcc-debug`, `clang-release` or
 `-DCMAKE_CXX_COMPILER=clang++-22` when your installation uses that name.
 
 On Windows, run the `gcc-*` presets in an MSYS2 UCRT64 shell. On macOS, run the
-`clang-*` presets with Xcode 26.4 or later. MSVC is not supported: generated
-parsers use computed `goto` and guaranteed tail calls.
+`clang-*` presets with Xcode 26.4 or later. MSVC is not supported: generated parsers require
+guaranteed tail calls.
 
 `CURSIV_BUILD_TESTS` builds the framework tests; `CURSIV_WARNINGS_AS_ERRORS`
 treats warnings as errors. Both default to `ON` for repository builds and
 `OFF` when Cursiv is a dependency.
 
-Add a regression test for each bug fix. Shared LL/LR contracts belong in
+Add a regression test for each bug fix. Parser contracts belong in
 `tests/engines/shared/`. Reuse grammars and executables for related cases;
 keep separate fixtures for distinct global policies or compiler contracts.
 Generate only the rules a variant tests, and keep stress cases just beyond
@@ -80,7 +80,7 @@ python3 -m http.server -b localhost -d site
 | Area | Implementation | Tests |
 |---|---|---|
 | Grammar, AST and workspaces | `src/core/cursiv/` | `tests/core/` |
-| Parser engines | `src/engines/` | `tests/engines/` |
+| Parser engine | `src/engine/` | `tests/engines/` |
 | Editor services | `src/lsp/cursiv/` | `tests/lsp/` |
 | Build integration | `cmake/` | `tests/integration/` |
 | Example languages | `examples/` | Each example's `tests/` directory |

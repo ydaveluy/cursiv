@@ -22,14 +22,14 @@ void install_lsp_module(StateMachineServices& services) {
 
 StateMachineLanguage create_lsp_services(
     std::unique_ptr<cursiv::FileSystemProvider> files) {
-  return cursiv::create_lsp_language<StateMachineServices,
+  return cursiv::createLspLanguage<StateMachineServices,
                                      StateMachineSharedServices,
                                      install_core_module, install_lsp_module>(
       std::move(files));
 }
 
 void register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
-  cursiv::register_lsp_language<StateMachineServices,
+  cursiv::registerLspLanguage<StateMachineServices,
                                 StateMachineSharedServices, install_core_module,
                                 install_lsp_module>(sharedServices);
 }

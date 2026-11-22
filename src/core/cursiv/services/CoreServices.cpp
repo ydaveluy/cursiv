@@ -32,7 +32,7 @@ CoreServices::CoreServices() noexcept = default;
 CoreServices::~CoreServices() noexcept = default;
 
 void CoreServices::visitServices(
-    cursiv::function_ref<void(const ServiceSlot&)> yield) const {
+    cursiv::FunctionRef<void(const ServiceSlot&)> yield) const {
   yield({"languageMetaData", true, !languageMetaData.languageId.empty()});
   yield({"parser", true, parser != nullptr});
   yield({"grammarSource", false, grammarSource != nullptr});
@@ -59,7 +59,7 @@ std::string_view CoreServices::firstMissingService() const {
   return detail::first_missing_service(*this);
 }
 
-void install_default_core_services(CoreServices& services) {
+void installDefaultCoreServices(CoreServices& services) {
   if (services.parserErrorMessageProvider == nullptr)
     services.parserErrorMessageProvider =
         std::make_unique<DefaultParserErrorMessageProvider>();

@@ -50,9 +50,9 @@ WorkspaceScopeComputation::collectExportedSymbols(
   if (document.parseResult.value == nullptr) return exported;
 
   const std::span<const cursiv::AstTypeTag* const> types =
-      _dm.astReflection->getAllSubTypes(&cursiv::ast_type_tag<ast::Type>);
+      _dm.astReflection->getAllSubTypes(&cursiv::kAstTypeTag<ast::Type>);
   for (cursiv::AstNode* const node : document.parseResult.nodes()) {
-    cursiv::throw_if_cancelled(cancelToken);
+    cursiv::throwIfCancelled(cancelToken);
     if (in_family(types, node->type))
       addExportedSymbol(*node, exported, document);
   }
@@ -88,7 +88,7 @@ cursiv::LocalSymbols WorkspaceScopeComputation::collectLocalSymbols(
     const cursiv::CancellationToken& cancelToken) const {
   cursiv::LocalSymbols symbols;
   const cursiv::AstNode* const root = document.parseResult.value;
-  if (root == nullptr || root->type != &cursiv::ast_type_tag<ast::Workspace>)
+  if (root == nullptr || root->type != &cursiv::kAstTypeTag<ast::Workspace>)
     return symbols;
 
   symbols.reserve(document.parseResult.nodes().size() / 4);
@@ -104,7 +104,7 @@ void WorkspaceScopeComputation::processContainer(
     const cursiv::Document& document, cursiv::LocalSymbols& symbols,
     const cursiv::CancellationToken& cancelToken) const {
   const std::span<const cursiv::AstTypeTag* const> types =
-      _dm.astReflection->getAllSubTypes(&cursiv::ast_type_tag<ast::Type>);
+      _dm.astReflection->getAllSubTypes(&cursiv::kAstTypeTag<ast::Type>);
 
   // One entry per open container, so deep nesting uses no native stack. Each
   // collects its declarations in element order, nested packages' names in
@@ -126,7 +126,7 @@ void WorkspaceScopeComputation::processContainer(
   while (!open.empty()) {
     if (Level& level = open.back(); level.next < level.elements.size()) {
       ast::AbstractElement* const element = level.elements[level.next++];
-      cursiv::throw_if_cancelled(cancelToken);
+      cursiv::throwIfCancelled(cancelToken);
       if (element == nullptr) continue;
 
       if (in_family(types, element->type)) {
@@ -141,7 +141,7 @@ void WorkspaceScopeComputation::processContainer(
           level.declared.push_back(*std::move(description));
         continue;
       }
-      if (element->type == &cursiv::ast_type_tag<ast::PackageDeclaration>) {
+      if (element->type == &cursiv::kAstTypeTag<ast::PackageDeclaration>) {
         const auto& package =
             static_cast<const ast::PackageDeclaration&>(*element);
         open.push_back({&package, package.elements, 0, {}, qualifier.size()});

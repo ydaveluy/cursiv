@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -18,6 +19,9 @@
 #include <variant>
 #include <vector>
 
+#include "cursiv/AstAssertions.hpp"
+#include "cursiv/TestWorkspace.hpp"
+#include "workspace/core/WorkspaceGrammar.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/CodeActionResult.hpp"
 #include "cursiv/DecodedSemanticTokens.hpp"
@@ -34,6 +38,7 @@
 #include "cursiv/ExpectedHighlight.hpp"
 #include "cursiv/ExpectedHover.hpp"
 #include "cursiv/ExpectedRename.hpp"
+#include "cursiv/ExpectedSelectionRanges.hpp"
 #include "cursiv/ExpectedSymbols.hpp"
 #include "cursiv/ExpectedWorkspaceSymbols.hpp"
 #include "cursiv/ParseHelper.hpp"
@@ -43,9 +48,15 @@
 #include "cursiv/TextPredicate.hpp"
 #include "cursiv/VirtualFileSystemProvider.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
+#include "cursiv/completion/CompletionProvider.hpp"
+#include "cursiv/navigation/DeclarationProvider.hpp"
 #include "cursiv/navigation/DefinitionProvider.hpp"
+#include "cursiv/navigation/ImplementationProvider.hpp"
+#include "cursiv/navigation/TypeDefinitionProvider.hpp"
 #include "cursiv/navigation/RenameProvider.hpp"
+#include "cursiv/semantic/InlayHintProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
+#include "cursiv/text/LspPosition.hpp"
 #include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedLspServices.hpp"
@@ -70,7 +81,7 @@ struct World {
 
 // A check runs to the end, or it throws: both are answers, and the test says
 // which it wanted.
-[[nodiscard]] bool passes(cursiv::function_ref<void()> check) {
+[[nodiscard]] bool passes(cursiv::FunctionRef<void()> check) {
   return !support::throws<ct::ExpectationError>(check);
 }
 
@@ -244,6 +255,14 @@ void a_parsed_document_joins_and_leaves_the_workspace() {
 
   ct::clearDocuments(world.language);
   CHECK(world.shared.documents->all().empty());
+
+  ct::ValidationHelperOptions reused;
+  reused.documentUri = named.documentUri;
+  auto old = ct::validationHelper(world.language, "datatype Old\n", reused);
+  ct::clearDocuments(world.shared);
+  auto current = ct::parseDocument(world.language, "datatype New\n", named);
+  old.dispose();
+  CHECK(world.shared.documents->getDocument(current->uri) == current);
 }
 
 // A helper-built document is the given language's, though a later one claims
@@ -317,6 +336,44 @@ void the_findings_are_filtered_by_what_the_check_names() {
                      .property = "name"});
   }));
 
+  CHECK(!passes([&] {
+    ct::expectIssue(result,
+                    {.node = result.document->parseResult.nodes().front(),
+                     .property = "name",
+                     .propertyIndex = 1});
+  }));
+  CHECK(!passes([&] { ct::expectIssue(result, {.propertyIndex = 0}); }));
+  CHECK(!passes([&] { ct::expectIssue(result, {.length = 1}); }));
+  const auto other = ct::parseDocument(world.language, "datatype string\n");
+  CHECK(!passes([&] {
+    ct::expectIssue(result, {.node = other->parseResult.nodes().front(),
+                             .property = "name"});
+  }));
+  CHECK(!passes([&] { ct::expectIssue(result, {.property = "name"}); }));
+  const std::shared_ptr<cursiv::Document> foreign[] = {other};
+  ct::clearDocuments(world.shared, foreign);
+  cursiv::Diagnostic eof;
+  const auto end = static_cast<cursiv::TextOffset>(
+      result.document->textDocument().getText().size());
+  eof.range = {end, end};
+  eof.source = "my-language";
+  eof.tags = {cursiv::DiagnosticTag::Unnecessary,
+              cursiv::DiagnosticTag::Deprecated};
+  result.diagnostics = {eof};
+  CHECK(passes([&] {
+    ct::expectIssue(result,
+                    {.source = "my-language",
+                     .tags = std::vector{cursiv::DiagnosticTag::Deprecated,
+                                         cursiv::DiagnosticTag::Unnecessary}});
+  }));
+  CHECK(!passes(
+      [&] { ct::expectIssue(result, {.source = "another-language"}); }));
+  CHECK(!passes([&] {
+    ct::expectIssue(result,
+                    {.tags = std::vector{cursiv::DiagnosticTag::Unnecessary}});
+  }));
+  CHECK(ct::filterByOptions(result, {.offset = end + 1}).empty());
+  CHECK(ct::filterByOptions(result, {.offset = end, .length = 1}).empty());
   result.dispose();
   CHECK(world.shared.documents->all().empty());
 }
@@ -338,6 +395,11 @@ void a_clean_document_answers_no_issue() {
     (void)ct::validationHelper(world.language, "entity A { x  String }\n",
                                strict);
   }));
+  strict.validation = false;
+  CHECK(!passes([&] {
+    (void)ct::validationHelper(world.language, "entity A { x  String }\n",
+                               strict);
+  }));
 }
 
 // The printer, the range comparison and the payload comparison: the three
@@ -354,6 +416,14 @@ void the_small_answers_are_what_a_message_is_built_from() {
   one.message = "said";
   const cursiv::Diagnostic set[] = {one};
   CHECK(ct::printDiagnostics(set) == "offset 4..9: said");
+
+  CHECK(ct::isDiagnosticDataEqual(1, 1.0));
+  CHECK(ct::isDiagnosticDataEqual(-0.0, 0));
+  CHECK(!ct::isDiagnosticDataEqual(true, 1));
+  CHECK(!ct::isDiagnosticDataEqual(1.5, 1));
+  CHECK(!ct::isDiagnosticDataEqual(std::int64_t{9007199254740993}, 0x1p53));
+  CHECK(!ct::isDiagnosticDataEqual("\x80", "\x81"));
+  CHECK(!ct::isDiagnosticDataEqual(std::int64_t{0x7fffffffffffffff}, 0x1p63));
 
   // The expected payload is a subset: a key it does not name is free.
   cursiv::JsonValue::Object whole;
@@ -432,6 +502,12 @@ void the_caret_reaches_its_declaration() {
 }
 
 void every_written_name_is_found() {
+  World withoutCaret;
+  CHECK(!passes([&] {
+    (void)ct::expectFindReferences(
+        withoutCaret.language,
+        {.text = "datatype <|String|>\n", .disposeAfterCheck = true});
+  }));
   World world;
   const ct::ExpectedFindReferences input{.text =
                                              "datatype <|>String\n"
@@ -566,6 +642,26 @@ void the_caret_is_offered_what_may_stand_there() {
             .expectedItems = {"", "datatype"},
             .disposeAfterCheck = true});
   }));
+
+  struct Ranked final : cursiv::CompletionProvider {
+    lsp::CompletionList getCompletion(
+        const cursiv::Document&, const lsp::CompletionParams&,
+        const cursiv::CancellationToken&) const override {
+      lsp::CompletionList list;
+      for (const auto* label : {"z", "explicit", "a"})
+        list.items.emplace_back().label = label;
+      list.items[1].sortText = "middle";
+      return list;
+    }
+  };
+  world.language.completionProvider = std::make_unique<Ranked>();
+  CHECK(passes([&] {
+    (void)ct::expectCompletion(
+        world.language,
+        ct::ExpectedCompletionItems{.text = "datatype <|>String",
+                                    .expectedItems = {"a", "explicit", "z"},
+                                    .disposeAfterCheck = true});
+  }));
 }
 
 void the_prose_of_a_declaration_reaches_its_use() {
@@ -637,6 +733,13 @@ void the_formatter_reaches_the_shape_the_language_wants() {
                                    .options = twoSpaces,
                                    .disposeAfterCheck = true};
   CHECK(passes([&] { (void)ct::expectFormatting(world.language, input); }));
+  auto onType = input;
+  onType.onType = "}";
+  CHECK(!passes([&] { (void)ct::expectFormatting(world.language, onType); }));
+  onType.before += "<|>";
+  onType.range.emplace();
+  CHECK(!passes([&] { (void)ct::expectFormatting(world.language, onType); }));
+  CHECK(world.shared.documents->all().empty());
 }
 
 void the_workspace_query_reads_the_index() {
@@ -655,6 +758,20 @@ void the_workspace_query_reads_the_index() {
                                          .expectedSymbols = {"", "Person"}});
   }));
 
+  CHECK(passes([&] {
+    ct::expectWorkspaceSymbols(
+        world.shared,
+        ct::ExpectedWorkspaceSymbolsList{.query = "Person",
+                                         .expectedSymbols = {"Person"},
+                                         .match = ct::SymbolMatch::ExactSet});
+  }));
+  CHECK(!passes([&] {
+    ct::expectWorkspaceSymbols(
+        world.shared, ct::ExpectedWorkspaceSymbolsList{
+                          .query = "Person",
+                          .match = ct::SymbolMatch::Contains,
+                          .kinds = {{"Person", lsp::SymbolKind::File}}});
+  }));
   std::size_t count = 1;
   ct::expectWorkspaceSymbols(
       world.shared,
@@ -686,7 +803,7 @@ void a_repair_is_offered_and_really_fixes() {
       ran = true;
       CHECK(result.action.has_value());
       CHECK(!result.diagnosticsAll.empty());
-      CHECK(cursiv::data_code(result.diagnosticRelevant) == "parse-repaired");
+      CHECK(cursiv::dataCode(result.diagnosticRelevant) == "parse-repaired");
       CHECK(result.document->hasAst());
       CHECK(result.document->textDocument().getText() == kBroken);
       CHECK(uri.empty() || result.document->uri == uri);
@@ -822,6 +939,11 @@ void an_edit_filed_as_document_changes_is_read() {
     [[nodiscard]] std::vector<lsp::CodeAction> getCodeActions(
         const cursiv::Document& document, const lsp::CodeActionParams& params,
         const cursiv::CancellationToken& cancel) const override {
+      CHECK(params.context.triggerKind == lsp::CodeActionTriggerKind::Invoked);
+      CHECK(params.context.diagnostics.size() == 1 &&
+            params.context.diagnostics.front().data.has_value() &&
+            ct::isRangeEqual(params.context.diagnostics.front().range,
+                             params.range));
       std::vector<lsp::CodeAction> actions =
           inner.getCodeActions(document, params, cancel);
       for (lsp::CodeAction& action : actions)
@@ -846,6 +968,16 @@ void an_edit_filed_as_document_changes_is_read() {
       return edit;
     }
   };
+  lsp::WorkspaceEdit samePosition;
+  const auto uri = lsp::Uri::parse("file:///same.ws");
+  auto& inserted = samePosition.changes.emplace()[uri];
+  for (int i = 0; i < 32; ++i)
+    inserted.emplace_back().newText = std::to_string(i);
+  const auto ordered = ct::detail::editsFor(samePosition, uri.toString());
+  CHECK(ordered.size() == inserted.size());
+  for (std::size_t i = 0; i < ordered.size(); ++i)
+    CHECK(ordered[i].newText == std::to_string(i));
+
   World world;
   const std::unique_ptr<const cursiv::CodeActionProvider> actions =
       std::move(world.language.codeActionProvider);
@@ -894,10 +1026,17 @@ void the_virtual_file_system_answers_like_a_disk() {
     CHECK(under[1].isDirectory && under[1].uri == "file:///w/sub");
   }
 
-  // Erasing a folder takes its subtree with it.
-  files.erase("file:///w/sub");
+  files.insert("file:///w/sub.ws", "sibling");
+  files.erase("");
+  const auto sorted = files.readDirectory("file:///w/");
+  CHECK(sorted.size() == 3 && sorted[1].uri == "file:///w/sub");
+  files.erase("file:///w/sub/");
+  CHECK(files.readFile("file:///w/sub.ws") == "sibling");
+  files.erase("file:///w/sub.ws");
   CHECK(!files.exists("file:///w/sub/b.ws"));
   CHECK(files.readDirectory("file:///w").size() == 1);
+  CHECK(support::throws<cursiv::FileSystemError>(
+      [&] { (void)files.readDirectory("file:///w/a.ws"); }));
 }
 
 // A foreign harness receives the verdicts: with a hook installed, a false
@@ -923,6 +1062,273 @@ void an_installed_hook_receives_the_verdict() {
   CHECK(!passes([&] { (void)ct::expectSymbols(world.language, wrong); }));
 }
 
+void named_markers_link_and_rename_a_workspace() {
+  World world;
+  ct::TestWorkspace fixture(world.shared);
+  constexpr auto lib = "file:///w/types.ws", use = "file:///w/usage.ws",
+                 more = "file:///w/other.ws";
+  auto docs =
+      fixture.parse({{use, "entity É { f: <|def><|refs:String|> }\n"},
+                     {more, "entity G { y: <|refs:String|> }\n"},
+                     {lib, "datatype <|refs><|rename><|def:String|>\n"}});
+  CHECK(docs.size() == 3 && docs.front()->uri == use);
+  CHECK(!docs.front()->hasLinkingErrors());
+  CHECK(passes([&] { fixture.expectDefinition(use, "def"); }));
+  CHECK(passes([&] { fixture.expectReferences(lib, "refs"); }));
+  CHECK(!passes([&] { fixture.expectReferences(lib, "refs", true); }));
+  CHECK(!passes([&] { fixture.expectDefinition(use, "unknown"); }));
+  const auto& file = fixture.at(use);
+  CHECK(file.lspRange("refs").start.character == 14);
+  using Ref = cursiv::reference<ws::ast::Type>;
+  const auto* ref = ct::findReference<ws::Workspace, Ref>(
+      *file.document, "String", file.range("refs"));
+  CHECK(ct::requireFound(ref, "String reference").target() ==
+        fixture.at(lib).findNode<ws::ast::DataType>("String"));
+  CHECK(!passes([&] {
+    (void)ct::requireFound(file.findNode<ws::ast::DataType>(),
+                            "local datatype");
+  }));
+  CHECK(file.findNode<ws::ast::Feature>({}, file.range("refs").begin) !=
+        nullptr);
+  auto tokens = file.semanticTokens("refs");
+  CHECK(passes([&] {
+    ct::expectSemanticToken(tokens,
+                            {.tokenType = "variable", .tokenModifiers = 0});
+  }));
+  CHECK(!passes([&] {
+    ct::expectSemanticToken(tokens,
+                            {.tokenType = "variable", .tokenModifiers = 7});
+  }));
+  struct VersionedRename final : cursiv::RenameProvider {
+    const cursiv::RenameProvider& inner;
+    int version = -1;
+    explicit VersionedRename(const cursiv::RenameProvider& p) : inner(p) {}
+    std::optional<lsp::Range> prepareRename(
+        const cursiv::Document& d, lsp::Position p,
+        const cursiv::CancellationToken& token) const override {
+      return inner.prepareRename(d, p, token);
+    }
+    std::optional<lsp::WorkspaceEdit> rename(
+        const cursiv::Document& d, lsp::Position p, std::string_view name,
+        const cursiv::CancellationToken& token) const override {
+      auto edit = inner.rename(d, p, name, token);
+      if (edit) {
+        as_document_changes(*edit);
+        std::get<lsp::TextDocumentEdit>(edit->documentChanges->back())
+            .textDocument.version = version;
+      }
+      return edit;
+    }
+  };
+  auto original = std::move(world.language.renameProvider);
+  auto versioned = std::make_unique<VersionedRename>(*original);
+  auto* control = versioned.get();
+  world.language.renameProvider = std::move(versioned);
+  CHECK(!passes([&] { fixture.rename(lib, "rename", "LongerName"); }));
+  CHECK(docs[0]->textDocument().version() == 0 &&
+        docs[2]->textDocument().version() == 0);
+  control->version = 0;
+  fixture.rename(lib, "rename", "LongerName");
+  CHECK(docs[0]->textDocument().getText() == "entity É { f: LongerName }\n");
+  CHECK(docs[1]->textDocument().getText() == "entity G { y: LongerName }\n");
+  CHECK(docs[2]->textDocument().getText() == "datatype LongerName\n");
+  CHECK(!docs[0]->hasLinkingErrors());
+  CHECK(passes([&] {
+    fixture.expectDefinition(use, "def");
+    fixture.expectReferences(lib, "refs");
+  }));
+  CHECK(passes(
+      [&] { ct::expectSemanticToken(tokens, {.tokenType = "variable"}); }));
+  CHECK(!passes([&] { (void)fixture.at(lib).range("absent"); }));
+  world.language.renameProvider = std::move(original);
+  fixture.rename(lib, "rename", "Y");
+  CHECK(docs[1]->textDocument().getText() == "entity G { y: Y }\n");
+  CHECK(passes([&] { fixture.expectDefinition(use, "def"); }));
+  fixture.erase(more);
+  CHECK(!world.shared.documents->hasDocument(more));
+  CHECK(passes([&] { fixture.expectReferences(lib, "refs"); }));
+  auto outside = ct::parseDocument(world.language, "datatype Outside\n");
+  CHECK(support::throws<cursiv::DocumentStoreError>([&] {
+    fixture.parse({{"file:///w/added.ws", "datatype New"},
+                   {outside->uri, "datatype Duplicate"}});
+  }));
+  CHECK(!world.shared.documents->hasDocument("file:///w/added.ws"));
+  fixture.clear();
+  fixture.clear();
+  CHECK(world.shared.documents->getDocument(outside->uri) == outside);
+  fixture.attach({outside, {{"name", {9, 16}, false}}});
+  CHECK(fixture.at(outside->uri).range("name").end == 16);
+  fixture.clear();
+  CHECK(world.shared.documents->all().empty());
+}
+
+void named_markers_and_ast_values_are_checked() {
+  ct::MarkerSyntax syntax{.rangeStart = "[",
+                          .rangeEnd = "]",
+                          .indexStart = "[[",
+                          .indexEnd = "]]",
+                          .delimiter = "="};
+  std::vector<ct::NamedMarker> marks;
+  CHECK(ct::extractMarkers("[a=é][[p]][b]", marks, syntax) == "éb");
+  CHECK(marks.size() == 3 && marks[0].label == "a" && marks[0].range.end == 2 &&
+        marks[1].caret && marks[1].range.begin == 2 && marks[2].label == "b");
+  World world;
+  ct::TestWorkspace fixture(world.shared);
+  auto trees = fixture.parse(
+      {{"file:///w/a.ws", "package a { datatype X entity E { many f: X } }"},
+       {"file:///w/b.ws", "package b { datatype X entity E { many f: X } }"},
+       {"file:///w/c.ws", "package c { datatype X entity E { f: X } }"}});
+  const auto get = [&](std::size_t i) {
+    return fixture.at(trees[i]->uri).findNode<ws::ast::Entity>();
+  };
+  CHECK(get(0) && get(1) && get(2));
+  const auto* one = fixture.at(trees[0]->uri).findNode<ws::ast::DataType>();
+  const auto* two = fixture.at(trees[1]->uri).findNode<ws::ast::DataType>();
+  CHECK(passes([&] { ct::expectEqualAst<ws::Workspace>(*one, *two); }));
+  CHECK(
+      !passes([&] { ct::expectEqualAst<ws::Workspace>(*get(0), *get(2)); }));
+  CHECK(!passes([&] { ct::expectEqualAst<ws::Workspace>(*one, *get(0)); }));
+  CHECK(!passes([&] {
+    ct::expectEqualAst<ws::Workspace>(
+        *one, *two, [](const auto&, const auto&) { return false; });
+  }));
+  ws::ast::DataType first, second;
+  first.name = "One";
+  second.name = "Another";
+  CHECK(!passes([&] { ct::expectEqualAst<ws::Workspace>(first, second); }));
+  ws::ast::Feature plain{}, many{};
+  many.many = true;
+  CHECK(!passes([&] { ct::expectEqualAst<ws::Workspace>(plain, many); }));
+  cursiv::CancellationTokenSource stop;
+  stop.request_stop();
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
+    fixture.parse({{"file:///w/cancelled.ws", "datatype X"}}, {}, {},
+                  stop.get_token());
+  }));
+  CHECK(!world.shared.documents->hasDocument("file:///w/cancelled.ws"));
+  auto editorDocs = fixture.parse(
+      {{"file:///w/doc.ws",
+        "datatype <|hi><|hi:Str|>\n<|fold:entity Local {\n  f: Str|>\n}\n"},
+       {"file:///w/symbol.ws", "entity Container { <|sym:f: Str|> }\n"},
+       {"file:///w/assist.ws", "entity Edit { f: <|assist> }\n"}});
+  const auto& local = fixture.at(editorDocs.front()->uri);
+  const auto items =
+      fixture.at("file:///w/assist.ws").completion("assist").items;
+  CHECK(std::ranges::find(items, "Str", &lsp::CompletionItem::label) !=
+        items.end());
+  CHECK(passes([&] { local.expectFolding("fold"); }));
+  // 'Str' occurs twice locally and in another file. A missing local highlight
+  // fails.
+  CHECK(!passes([&] { local.expectHighlights("hi"); }));
+  const auto sym = fixture.at("file:///w/symbol.ws").symbol("sym");
+  CHECK(sym && sym->name == "f");
+  CHECK(passes([&] {
+    ct::expectNoIssues(*editorDocs[1],
+                       {.severity = cursiv::DiagnosticSeverity::Error});
+  }));
+  fixture.parse({{"file:///w/full.ws", "<|full:datatype Unique|>  <|blank>\n"},
+                 {"file:///w/read.ws", "entity Read { f: <|full>Unique }"}});
+  CHECK(passes(
+      [&] { fixture.expectDefinition("file:///w/read.ws", "full", true); }));
+  CHECK(
+      !passes([&] { fixture.expectDefinition("file:///w/read.ws", "full"); }));
+  CHECK(!fixture.at("file:///w/full.ws").hover("blank"));
+  fixture.parse({{"file:///w/uses.ws",
+                  "entity More { a: <|uses:Unique|> b: <|uses:Unique|> }"}});
+  const auto painted = fixture.at("file:///w/uses.ws").semanticTokens("uses");
+  CHECK(painted.ranges.size() == 2);
+  CHECK(passes([&] { painted.expectAll("variable", 0); }));
+  CHECK(!passes([&] { painted.expectAll("variable", 1); }));
+  auto missing = painted;
+  missing.ranges.back().second++;
+  CHECK(!passes([&] { missing.expectAll("variable", 0); }));
+  fixture.clear();
+}
+
+void marked_editor_requests_reach_their_providers() {
+  World world;
+  ct::TestWorkspace fixture(world.shared);
+  constexpr auto use = "file:///w/use.ws", targets = "file:///w/targets.ws";
+  fixture.parse(
+      {{use, "entity É { f: <|decl><|impl><|type><|hint:A|> }<|none>"},
+       {targets,
+        "datatype <|decl:A|>\n<|impl:datatype B|>\ndatatype <|type:C|>"}});
+  CHECK(!passes([&] { fixture.expectDeclaration(use, "none"); }));
+  struct Destinations final : cursiv::DeclarationProvider,
+                              cursiv::ImplementationProvider,
+                              cursiv::TypeDefinitionProvider {
+    using Links = std::optional<std::vector<lsp::LocationLink>>;
+    static Links link(lsp::Position position, lsp::Uint line,
+                      const cursiv::CancellationToken& token) {
+      cursiv::throwIfCancelled(token);
+      if (position.line != 0 || position.character != 14) return {};
+      return std::vector<lsp::LocationLink>{
+          {.targetUri = lsp::Uri::parse("file:///w/targets.ws"),
+           .targetRange = {{line, 0}, {line, 10}},
+           .targetSelectionRange = {{line, 9}, {line, 10}}}};
+    }
+    Links getDeclaration(
+        const cursiv::Document&, lsp::Position p,
+        const cursiv::CancellationToken& token) const override {
+      return link(p, 0, token);
+    }
+    Links getImplementation(
+        const cursiv::Document&, lsp::Position p,
+        const cursiv::CancellationToken& token) const override {
+      return link(p, 1, token);
+    }
+    Links getTypeDefinition(
+        const cursiv::Document&, lsp::Position p,
+        const cursiv::CancellationToken& token) const override {
+      return link(p, 2, token);
+    }
+  };
+  world.language.declarationProvider = std::make_unique<Destinations>();
+  world.language.implementationProvider = std::make_unique<Destinations>();
+  world.language.typeDefinitionProvider = std::make_unique<Destinations>();
+  fixture.expectDeclaration(use, "decl");
+  fixture.expectImplementation(use, "impl", true);
+  fixture.expectTypeDefinition(use, "type");
+  fixture.expectTypeDefinition(use, "none");
+  CHECK(!passes([&] { fixture.expectDeclaration(use, "type"); }));
+  CHECK(!passes([&] { fixture.expectImplementation(use, "impl"); }));
+
+  struct Hints final : cursiv::InlayHintProvider {
+    std::vector<lsp::InlayHint> getInlayHints(
+        const cursiv::Document& doc, lsp::Range range,
+        const cursiv::CancellationToken& token) const override {
+      cursiv::throwIfCancelled(token);
+      return {{.position = range.end,
+               .label = std::string(
+                   doc.textDocument().getText(cursiv::fromLsp(range)))}};
+    }
+  };
+  const auto& file = fixture.at(use);
+  CHECK(!passes([&] { (void)file.inlayHints("hint"); }));
+  world.language.inlayHintProvider = std::make_unique<Hints>();
+  const auto hints = file.inlayHints("hint");
+  CHECK(hints.size() == 1 && hints.front().position.character == 15 &&
+        std::get<std::string>(hints.front().label) == "A");
+  cursiv::CancellationTokenSource stop;
+  stop.request_stop();
+  CHECK(support::throws<cursiv::OperationCancelled>(
+      [&] { (void)file.inlayHints("hint", stop.get_token()); }));
+  fixture.clear();
+}
+
+void a_selection_requires_the_exact_chain() {
+  World world;
+  for (const auto* text : {"datatype <|A<|>|>", "<|datatype <|A<|>|>|><||>",
+                           "datatype A<|><|>", "datatype A"}) {
+    CHECK(!passes([&] {
+      (void)ct::expectSelectionRanges(world.language, {.text = text});
+    }));
+    CHECK(world.shared.documents->all().empty());
+  }
+  (void)ct::expectSelectionRanges(
+      world.language, {.text = "<|<|>|>", .disposeAfterCheck = true});
+}
+
 void a_disposable_runs_once() {
   int runs = 0;
   ct::Disposable once = ct::Disposable::create([&runs] { ++runs; });
@@ -934,6 +1340,10 @@ void a_disposable_runs_once() {
 }  // namespace
 
 int main() {
+  marked_editor_requests_reach_their_providers();
+  a_selection_requires_the_exact_chain();
+  named_markers_link_and_rename_a_workspace();
+  named_markers_and_ast_values_are_checked();
   the_markers_become_offsets();
   a_parsed_document_joins_and_leaves_the_workspace();
   a_parsed_document_is_the_given_languages();

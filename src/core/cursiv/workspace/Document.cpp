@@ -23,10 +23,10 @@ Document::Document(TextDocument textDocument, std::string uri)
     : uri(uri.empty() ? std::string(textDocument.uri()) : std::move(uri)),
       _textDocument(std::move(textDocument)) {
   // Its own tag, so the walk up proves the cast rather than assuming it.
-  type = &ast_type_tag<Document>;
+  type = &kAstTypeTag<Document>;
 }
 
-const AstNode& root_of(const AstNode& node) noexcept {
+const AstNode& rootOf(const AstNode& node) noexcept {
   const AstNode* root = &node;
   while (root->parent != nullptr && ast_cast<Document>(root->parent) == nullptr)
     root = root->parent;
@@ -59,21 +59,30 @@ bool Document::hasLinkingErrors() const noexcept {
 
 std::string_view Document::keepParts(
     std::span<const std::string_view> parts) const {
-  return parseResult.cst().keepText(parts);
+  return parseResult._tree->keepText(parts);
 }
 
 const TextDocument& Document::textDocument() const noexcept {
   return _textDocument;
 }
 
-// The empty result is made before anything changes: a refused allocation
-// leaves the document as it was.
+void Document::reportBuildFailure(std::string_view message) {
+  diagnostics.push_back({.message = std::string(message),
+                         .source = "cursiv",
+                         .code = DiagnosticCode("language-service-error")});
+  buildFailed = true;
+}
+
+// Dropping a revision also drops any failure reported for its text.
 void Document::resetForRebuild() {
-  ParseResult empty;
-  state = DocumentState::Changed;
-  parseResult = std::move(empty);
-  localSymbols.clear();
+  if (state.load() != DocumentState::Changed) {
+    ParseResult empty;
+    state = DocumentState::Changed;
+    parseResult = std::move(empty);
+    localSymbols.clear();
+  }
   diagnostics.clear();
+  buildFailed = false;
   buildRevision = detail::next_build_revision();
 }
 

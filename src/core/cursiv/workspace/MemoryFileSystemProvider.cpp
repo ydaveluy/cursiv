@@ -21,7 +21,7 @@ namespace {
 // Both spellings of one folder name it: `mem:/src` and `mem:/src/` differ by a
 // byte and by nothing else.
 [[nodiscard]] std::string folder_prefix(std::string_view uri) {
-  std::string prefix = normalize_uri(uri);
+  std::string prefix = normalizeUri(uri);
   if (!prefix.empty() && prefix.back() != '/') prefix.push_back('/');
   return prefix;
 }
@@ -30,7 +30,7 @@ namespace {
 [[nodiscard]] const std::string& stored(
     const std::map<std::string, std::string, std::less<>>& files,
     std::string_view uri) {
-  const auto it = files.find(normalize_uri(uri));
+  const auto it = files.find(normalizeUri(uri));
   if (it == files.end())
     throw FileSystemError(std::format("cursiv: cannot read '{}'", uri));
   return it->second;
@@ -39,7 +39,16 @@ namespace {
 }  // namespace
 
 void MemoryFileSystemProvider::addFile(std::string_view uri, std::string text) {
-  _files.insert_or_assign(normalize_uri(uri), std::move(text));
+  _files.insert_or_assign(normalizeUri(uri), std::move(text));
+}
+
+void MemoryFileSystemProvider::erase(std::string_view uri) {
+  if (uri.empty()) return;
+  const std::string prefix = folder_prefix(uri);
+  _files.erase(normalizeUri(uri));
+  auto at = _files.lower_bound(prefix);
+  while (at != _files.end() && at->first.starts_with(prefix))
+    at = _files.erase(at);
 }
 
 bool MemoryFileSystemProvider::isFolder(std::string_view uri) const {
@@ -49,14 +58,14 @@ bool MemoryFileSystemProvider::isFolder(std::string_view uri) const {
 }
 
 FileSystemNode MemoryFileSystemProvider::stat(std::string_view uri) const {
-  std::string key = normalize_uri(uri);
+  std::string key = normalizeUri(uri);
   if (_files.contains(key)) return {true, false, std::move(key)};
   if (isFolder(key)) return {false, true, std::move(key)};
   throw FileSystemError(std::format("cursiv: nothing at '{}'", uri));
 }
 
 bool MemoryFileSystemProvider::exists(std::string_view uri) const {
-  const std::string key = normalize_uri(uri);
+  const std::string key = normalizeUri(uri);
   return _files.contains(key) || isFolder(key);
 }
 
@@ -92,6 +101,7 @@ std::vector<FileSystemNode> MemoryFileSystemProvider::readDirectory(
     child.back() = '0';
     at = std::prev(_files.lower_bound(child));
     child.pop_back();
+    if (_files.contains(child)) continue;
     nodes.push_back(
         {.isFile = false, .isDirectory = true, .uri = std::move(child)});
   }

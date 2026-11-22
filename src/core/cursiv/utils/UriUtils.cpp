@@ -267,7 +267,7 @@ bool is_encoded(std::string_view text, const detail::CharSet& bare) {
   return true;
 }
 
-// Whether `normalize_uri` writes `uri` back as it stands. Nearly every URI comes
+// Whether `normalizeUri` writes `uri` back as it stands. Nearly every URI comes
 // from it, and telling so allocates nothing. It may say no to a URI that would
 // be written back: a host beyond plain letters goes the long way.
 bool is_normal_uri(const UriParts& parts) {
@@ -304,7 +304,7 @@ class NormalUri {
     if (parts.scheme.empty() || is_normal_uri(parts)) {
       _view = uri;
     } else {
-      _owned = normalize_uri(uri);
+      _owned = normalizeUri(uri);
       _view = _owned;
     }
   }
@@ -320,7 +320,7 @@ class NormalUri {
 
 }  // namespace
 
-std::string normalize_uri(std::string_view uri) {
+std::string normalizeUri(std::string_view uri) {
   const UriParts parts = split_uri(uri);
   // A bare name is not a URI, and nothing here invents its scheme.
   if (parts.scheme.empty() || is_normal_uri(parts)) return std::string(uri);
@@ -347,9 +347,9 @@ std::string normalize_uri(std::string_view uri) {
   return out;
 }
 
-bool is_file_uri(std::string_view uri) { return has_file_scheme(uri); }
+bool isFileUri(std::string_view uri) { return has_file_scheme(uri); }
 
-std::optional<std::string> file_uri_to_path(std::string_view uri) {
+std::optional<std::string> fileUriToPath(std::string_view uri) {
   if (!has_file_scheme(uri)) return std::nullopt;
   // URI components are separated before decoding: an escaped '?' or '#'
   // belongs to the file name, a literal one starts a query or fragment.
@@ -359,9 +359,6 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
   // A host with no path names no file.
   if (decoded.empty() && !host.empty()) return std::nullopt;
   if (!decoded.starts_with('/')) decoded.insert(decoded.begin(), '/');
-  // An escaped NUL would end the path where the system call stops reading and
-  // open another file than the URI names.
-  if (decoded.find('\0') != std::string::npos) return std::nullopt;
   // `localhost` names this machine. On Windows, before a share rather than a
   // drive, it is the share's host.
   const bool drive =
@@ -374,19 +371,25 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
   if (local) lower_drive_letter(decoded);
   // Elsewhere a drive keeps its root, where a WASI runner preopens it, and any
   // other host names a file this process cannot open.
-  if (!kWindowsPaths) return local ? std::optional(std::move(decoded)) : std::nullopt;
-  if (local) {
-    if (drive) decoded.erase(decoded.begin());
-  } else {
-    // A share: the host is the path's first component.
-    if (decoded == "/") return std::nullopt;
-    decoded.insert(0, "//" + host);
+  if (kWindowsPaths) {
+    if (local) {
+      if (drive) decoded.erase(decoded.begin());
+    } else {
+      // A share: the host is the path's first component.
+      if (decoded == "/") return std::nullopt;
+      decoded.insert(0, "//" + host);
+    }
+    std::ranges::replace(decoded, '/', '\\');
+  } else if (!local) {
+    return std::nullopt;
   }
-  std::ranges::replace(decoded, '/', '\\');
+  // An escaped NUL, in the path or the host, would end the path where the
+  // system call stops reading and open another file than the URI names.
+  if (decoded.find('\0') != std::string::npos) return std::nullopt;
   return decoded;
 }
 
-std::string path_to_file_uri(std::string_view path) {
+std::string pathToFileUri(std::string_view path) {
   if (path.empty()) throw std::invalid_argument("an empty path names no file");
   // A share: the host is the URI's authority. Read here, since a standard path
   // may fold the two separators that say it is one.
@@ -409,7 +412,7 @@ std::string path_to_file_uri(std::string_view path) {
       std::filesystem::absolute(std::filesystem::path(path)));
 }
 
-std::string normalize_extension(std::string_view extension) {
+std::string normalizeExtension(std::string_view extension) {
   if (extension.empty()) return {};
   std::string normalized(extension);
   if (!normalized.starts_with('.')) normalized.insert(normalized.begin(), '.');
@@ -417,15 +420,15 @@ std::string normalize_extension(std::string_view extension) {
   return normalized;
 }
 
-std::string uri_file_name(std::string_view uri) {
+std::string uriFileName(std::string_view uri) {
   std::string path = percent_decode(split_uri(uri).path);
   while (path.ends_with('/')) path.pop_back();
   const std::size_t slash = path.find_last_of('/');
   return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
-std::string uri_extension(std::string_view uri) {
-  const std::string name = uri_file_name(uri);
+std::string uriExtension(std::string_view uri) {
+  const std::string name = uriFileName(uri);
   const std::size_t dot = name.find_last_of('.');
   if (dot == std::string::npos || dot == 0 || name == "..") return {};
   // Extensions are case-insensitive, as the registry expects.
@@ -434,12 +437,12 @@ std::string uri_extension(std::string_view uri) {
   return ext;
 }
 
-bool equals_uri(std::string_view left, std::string_view right) {
+bool equalsUri(std::string_view left, std::string_view right) {
   return left == right ||
          NormalUri(left).view() == NormalUri(right).view();
 }
 
-bool contains_uri(std::string_view parent, std::string_view child) {
+bool containsUri(std::string_view parent, std::string_view child) {
   const NormalUri normalizedParent(parent);
   const NormalUri normalizedChild(child);
   const UriParts p = split_uri(normalizedParent.view());
@@ -454,9 +457,9 @@ bool contains_uri(std::string_view parent, std::string_view child) {
          childPath[parentPath.size()] == '/';
 }
 
-std::string relative_uri(std::string_view from, std::string_view to) {
-  const std::string normalizedFrom = normalize_uri(from);
-  std::string normalizedTo = normalize_uri(to);
+std::string relativeUri(std::string_view from, std::string_view to) {
+  const std::string normalizedFrom = normalizeUri(from);
+  std::string normalizedTo = normalizeUri(to);
   const UriParts f = split_uri(normalizedFrom);
   const UriParts t = split_uri(normalizedTo);
   if (!same_place(f, t)) return normalizedTo;

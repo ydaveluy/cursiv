@@ -38,7 +38,7 @@ std::string ParserErrorMessageProvider::buildMessage(
 
 // The spellings of the terminals a repair expected, the first element's
 // first. None when the first has no spelling: its name says more.
-std::vector<std::string_view> expected_spellings(const Grammar& grammar,
+std::vector<std::string_view> expectedSpellings(const Grammar& grammar,
                                                  const ParseDiagnostic& d,
                                                  std::size_t limit) {
   std::vector<std::string_view> spellings;

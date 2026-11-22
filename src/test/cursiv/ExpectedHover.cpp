@@ -35,7 +35,7 @@ Disposable expectHover(const LspServices& services,
           detail::markerAt(marked.indices, expectedHover.index);
       caret != nullptr && services.hoverProvider != nullptr)
     hover = services.hoverProvider->getHoverContent(
-        *document, to_lsp(document->textDocument().positionAt(*caret)),
+        *document, toLsp(document->textDocument().positionAt(*caret)),
         kNoCancel);
 
   // Only markup is prose: the deprecated `MarkedString` arms answer nothing.

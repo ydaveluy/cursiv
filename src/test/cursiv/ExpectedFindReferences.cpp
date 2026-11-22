@@ -9,13 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/text/TextOffset.hpp"
-#include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/workspace/Document.hpp"
-#include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/navigation/ReferencesProvider.hpp"
-#include "cursiv/services/LspServices.hpp"
-#include "cursiv/text/LspPosition.hpp"
 #include "cursiv/Disposable.hpp"
 #include "cursiv/DocumentDisposable.hpp"
 #include "cursiv/ExpectFunction.hpp"
@@ -23,6 +16,13 @@
 #include "cursiv/ParseHelper.hpp"
 #include "cursiv/RangeUtils.hpp"
 #include "cursiv/ReplacedIndices.hpp"
+#include "cursiv/navigation/ReferencesProvider.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/text/LspPosition.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
 
 namespace cursiv::test {
 
@@ -36,41 +36,17 @@ Disposable expectFindReferences(
   Disposable disposable = detail::documentDisposable(services, document);
   const detail::DisposeOnThrow cleanup(disposable);
 
-  std::vector<lsp::Range> expectedRanges;
-  expectedRanges.reserve(marked.ranges.size());
+  (void)detail::markerAt(marked.indices, 0);
+  const auto uri = lsp::Uri::parse(document->uri);
+  std::vector<lsp::Location> targets;
   for (const auto& span : marked.ranges)
-    expectedRanges.push_back(detail::markedRange(*document, span));
-
-  for (const TextOffset index : marked.indices) {
-    std::vector<lsp::Location> references;
-    if (services.referencesProvider != nullptr)
-      references = services.referencesProvider->findReferences(
-          *document, to_lsp(document->textDocument().positionAt(index)),
-          expectedFindReferences.includeDeclaration, kNoCancel);
-
-    expectedFunction(std::to_string(references.size()),
-                     std::to_string(expectedRanges.size()),
-                     "found references do not match amount of expected "
-                     "references");
-
-    // Both sides in reading order, then one to one: a membership test lets an
-    // answer that repeats one marked site stand for all of them.
-    std::vector<lsp::Location> found = references;
-    std::ranges::sort(found, {}, [](const lsp::Location& location) {
-      return std::pair{location.range.start.line,
-                       location.range.start.character};
-    });
-    std::vector<lsp::Range> wanted = expectedRanges;
-    std::ranges::sort(wanted, {}, [](const lsp::Range& range) {
-      return std::pair{range.start.line, range.start.character};
-    });
-    for (std::size_t at = 0; at < wanted.size() && at < found.size(); ++at) {
-      detail::expectSameRange(found[at].range, wanted[at]);
-      expectedFunction(found[at].uri.toString(), document->uri,
-                       "reference at range " + rangeToString(found[at].range) +
-                           " is in another document");
-    }
-  }
+    targets.push_back({uri, detail::markedRange(*document, span)});
+  detail::sort_locations(targets);
+  const auto query = expectedFindReferences.includeDeclaration
+                         ? detail::NavigationQuery::ReferencesWithDeclaration
+                         : detail::NavigationQuery::References;
+  for (auto caret : marked.indices)
+    detail::check_navigation(services, *document, caret, query, targets);
 
   if (expectedFindReferences.disposeAfterCheck) disposable.dispose();
   return disposable;

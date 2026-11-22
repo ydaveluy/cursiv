@@ -80,7 +80,7 @@ struct Base : cursiv::GrammarSpec {
 struct Joined : Base {
   struct E;
   struct Primary : NameOrParen<E> {};
-  struct E : infix<Primary, ast::Text, (left(kw<"NOT"> + kw<"EQUAL">))> {};
+  struct E : infix<Primary, ast::Text, (left(kw<"NOT">.doc<"Infix negation.">() + kw<"EQUAL">))> {};
   struct Root : Document<E> {};
 };
 
@@ -93,8 +93,9 @@ struct Enumerated : Base {
 
 struct Terminal : Base {
   struct E;
+  struct NE : terminal<as<Op::NOTEQUAL>(lit<"!=">)> {};
   struct Primary : NameOrParen<E> {};
-  struct E : infix<Primary, ast::Coded, (left(ref<EQ>))> {};
+  struct E : infix<Primary, ast::Coded, (left(ref<EQ> | tight(ref<NE>)))> {};
   struct Root : Document<E> {};
 };
 
@@ -203,7 +204,7 @@ struct Stated : Base {
   struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(
                          create<ast::Coded>(assign<&ast::Coded::op>(
                              as<Op::equal>(kw<"SAME">) |
-                             as<Op::NOTEQUAL>(kw<"NOT"> + kw<"SAME">))))) +
+                             as<Op::NOTEQUAL>(kw<"NOT">.doc<"Prefix negation.">() + kw<"SAME">))))) +
                      eof> {};
 };
 
@@ -212,6 +213,8 @@ struct Stated : Base {
 // words may spell one value.
 struct Visible : Base {
   struct NOTE : terminal<lit<"#">> {};
+  struct Pub : terminal<as<Vis::Public>(kw<"public">)> {};
+  struct Priv : terminal<as<Vis::Private>(kw<"private">)> {};
   struct Visibility : rule<as<Vis::Public>(kw<"public">) |
                            as<Vis::Protected>(kw<"protected">) |
                            as<Vis::Private>(kw<"private">)> {};
@@ -251,6 +254,11 @@ struct Visible : Base {
                  (kw<"flaggedrepeated"> +
                   tight(assign<&ast::Decl::vis>(ref<Visibility>) +
                         flag<&ast::Decl::seen>(repeat<1>(&ref<ID>)))) |
+                 (kw<"scopedchoice"> + assign<&ast::Decl::vis>(
+                     tight(tight(ref<Pub> | ref<Priv>)))) |
+                 (kw<"guardedchoice"> + assign<&ast::Decl::vis>(
+                     (ref<Pub> | ref<Priv>) + &ref<ID>)) |
+                 (kw<"optionalvalue"> + assign<&ast::Decl::vis>(option(ref<Pub> | ref<Priv>))) |
                  (kw<"inline"> +
                   assign<&ast::Decl::vis>(as<Vis::Public>(kw<"public">) |
                                           as<Vis::Protected>(kw<"protected">) |
@@ -298,10 +306,10 @@ struct Lengthened : Base {
 struct Marking : Base {
   struct E;
   struct SLASH
-      : terminal<as<Mark::slash>(lit<"/">) | as<Mark::divide>(lit<"÷">)> {};
-  struct NEG : terminal<as<Mark::neg>(lit<"~">) | as<Mark::inv>(lit<"¬">)> {};
+      : rule<as<Mark::slash>(lit<"/">) | as<Mark::divide>(lit<"÷">)> {};
+  struct NEG : rule<as<Mark::neg>(lit<"~">) | as<Mark::inv>(lit<"¬">)> {};
   struct BANG
-      : terminal<as<Mark::bang>(lit<"!">) | as<Mark::query>(lit<"?">)> {};
+      : rule<as<Mark::bang>(lit<"!">) | as<Mark::query>(lit<"?">)> {};
   struct Plus : rule<as<Mark::plus>(lit<"+">)> {};
   struct Minus : rule<as<Mark::minus>(lit<"-">)> {};
   struct Sign : rule<ref<Plus> | ref<Minus>> {};
@@ -540,6 +548,4 @@ struct Suite : tinfixop::Base {
                      (lit<"election:"> + ref<telectionloop::Suite::Root>)> {};
   using entry = Root;
 };
-struct Ll : Suite {};
-struct Lr : Suite {};
 }  // namespace toperators

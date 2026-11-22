@@ -55,9 +55,8 @@ class TextDocument {
   }
   TextDocument& operator=(TextDocument&& o) noexcept;
 
-  // Read-only identity, and the client's version; disk content is
-  // version 0. A text longer than `kMaxDocument` bytes throws
-  // `std::overflow_error`.
+  // The URI, optional language ID and client version. Disk content starts at
+  // version 0. Text longer than `kMaxDocument` bytes throws `std::overflow_error`.
   [[nodiscard]] static TextDocument create(std::string uri,
                                            std::string languageId,
                                            std::int64_t version,
@@ -78,6 +77,9 @@ class TextDocument {
   [[nodiscard]] std::string_view uri() const noexcept { return _uri; }
   [[nodiscard]] std::string_view languageId() const noexcept {
     return _languageId;
+  }
+  void setDefaultLanguageId(std::string_view languageId) {
+    if (_languageId.empty()) _languageId = languageId;
   }
   [[nodiscard]] std::int64_t version() const noexcept { return _version; }
   [[nodiscard]] std::string_view getText() const noexcept { return _text; }

@@ -17,11 +17,14 @@
 
 #include "cursiv/Check.hpp"
 #include "cursiv/DecodedSemanticTokens.hpp"
+#include "cursiv/ExpectedSelectionRanges.hpp"
+#include "cursiv/TestWorkspace.hpp"
 #include "cursiv/actions/DefaultCodeActionProvider.hpp"
 #include "cursiv/actions/JsonBridge.hpp"
 #include "cursiv/completion/FuzzyMatcher.hpp"
 #include "cursiv/content/DefaultTextDocumentContentProvider.hpp"
 #include "cursiv/content/TextDocumentContentProvider.hpp"
+#include "cursiv/parser/Parser.hpp"
 #include "cursiv/ranges/DefaultFoldingRangeProvider.hpp"
 #include "cursiv/ranges/FoldingRangeProvider.hpp"
 #include "cursiv/ranges/SelectionRangeProvider.hpp"
@@ -36,6 +39,7 @@
 #include "cursiv/symbols/DocumentSymbolProvider.hpp"
 #include "cursiv/symbols/WorkspaceSymbolProvider.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNodeView.hpp"
 #include "cursiv/syntax-tree/DocumentReferences.hpp"
@@ -48,10 +52,12 @@
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
+#include "duallr/generated/D2/Module.hpp"
 #include "lsp/uri.h"
 #include "support/Editor.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
+#include "support/World.hpp"
 #include "workspace/core/ast.hpp"
 
 namespace {
@@ -234,13 +240,13 @@ void a_stack_of_line_comments_is_not_a_fold() {
 struct NoEntities final : cursiv::DefaultFoldingRangeProvider {
   using DefaultFoldingRangeProvider::DefaultFoldingRangeProvider;
   bool shouldProcess(const cursiv::AstNode& node) const override {
-    return node.type != &cursiv::ast_type_tag<ws::ast::Entity>;
+    return node.type != &cursiv::kAstTypeTag<ws::ast::Entity>;
   }
 };
 struct ClosedPackages final : cursiv::DefaultFoldingRangeProvider {
   using DefaultFoldingRangeProvider::DefaultFoldingRangeProvider;
   bool shouldProcessContent(const cursiv::AstNode& node) const override {
-    return node.type != &cursiv::ast_type_tag<ws::ast::PackageDeclaration>;
+    return node.type != &cursiv::kAstTypeTag<ws::ast::PackageDeclaration>;
   }
 };
 
@@ -390,15 +396,6 @@ namespace selection_range_provider {
 
 namespace {
 
-struct World : UniqueUriWorld {
-  [[nodiscard]] std::vector<lsp::SelectionRange> at(std::string text,
-                                                    lsp::Position caret) const {
-    const cursiv::Document* const document = built(std::move(text));
-    return ws->selectionRangeProvider->getSelectionRanges(
-        *document, {&caret, 1}, cursiv::kNoCancel);
-  }
-};
-
 [[nodiscard]] bool spans(const lsp::Range& range, lsp::Uint line,
                          lsp::Uint from, lsp::Uint to) {
   return range.start.line == line && range.start.character == from &&
@@ -406,58 +403,49 @@ struct World : UniqueUriWorld {
 }
 
 void a_selection_grows_from_the_word_to_the_document() {
-  const World world;
-  const std::vector<lsp::SelectionRange> answer = world.at(
-      "package p {\n"
-      "  datatype String\n"
-      "  entity Person {\n"
-      "    name : String\n"
-      "  }\n"
-      "}\n",
-      {3, 6});  // inside `name`
-  CHECK(answer.size() == 1);
-  if (answer.empty()) return;
+  const UniqueUriWorld world;
+  (void)cursiv::test::expectSelectionRanges(
+      *world.ws, {.text = "<|package p {\n"
+                          "  datatype String\n"
+                          "  <|entity Person {\n"
+                          "    <|<|na<|>me|> : String|>\n"
+                          "  }|>\n"
+                          "}|>\n",
+                  .disposeAfterCheck = true});
+}
 
-  // The innermost step is the word itself.
-  CHECK(spans(answer.front().range, 3, 4, 8));
-
-  // Each parent is strictly wider, and the last covers the whole text.
-  std::size_t steps = 1;
-  const lsp::SelectionRange* at = &answer.front();
-  const lsp::Range* previous = &at->range;
-  while (at->parent != nullptr) {
-    at = at->parent.get();
-    ++steps;
-    const bool wider = at->range.start.line < previous->start.line ||
-                       (at->range.start.line == previous->start.line &&
-                        at->range.start.character <= previous->start.character);
-    CHECK(wider);
-    previous = &at->range;
-  }
-  CHECK(steps > 2);
-  CHECK(at->range.start.line == 0 && at->range.start.character == 0);
+// A caret just past a word is on it, and on every record the word ends.
+void a_caret_past_a_word_grows_through_what_the_word_ends() {
+  const UniqueUriWorld world;
+  (void)cursiv::test::expectSelectionRanges(
+      *world.ws, {.text = "<|package p {\n"
+                          "  datatype String\n"
+                          "  <|entity Person {\n"
+                          "    <|name : <|String<|>|>|>\n"
+                          "  }|>\n"
+                          "}|>\n",
+                  .disposeAfterCheck = true});
 }
 
 // A caret on nothing still gets an entry, clamped inside the document like
 // every other range.
 void a_caret_nothing_covers_answers_a_clamped_empty_range() {
-  const World world;
-  // Past the last line of a two-line document.
-  const std::vector<lsp::SelectionRange> past =
-      world.at("entity E {}\n", {5, 3});
-  CHECK(past.size() == 1);
-  CHECK(!past.empty() && spans(past.front().range, 1, 0, 0));
-  CHECK(!past.empty() && past.front().parent == nullptr);
-
-  // Past the end of a whitespace-only line.
-  const std::vector<lsp::SelectionRange> beyond =
-      world.at("entity E {}\n   \n", {1, 10});
-  CHECK(beyond.size() == 1);
-  CHECK(!beyond.empty() && spans(beyond.front().range, 1, 3, 3));
+  const UniqueUriWorld world;
+  const auto check = [&](std::string text, lsp::Position caret,
+                         lsp::Uint column) {
+    const auto* doc = world.built(std::move(text));
+    const auto ranges = world.ws->selectionRangeProvider->getSelectionRanges(
+        *doc, {&caret, 1}, cursiv::kNoCancel);
+    CHECK(ranges.size() == 1 &&
+          spans(ranges.front().range, 1, column, column) &&
+          !ranges.front().parent);
+  };
+  check("entity E {}\n", {5, 3}, 0);
+  check("entity E {}\n   \n", {1, 10}, 3);
 }
 
 void a_document_without_a_tree_answers_every_cursor() {
-  const World world;
+  const UniqueUriWorld world;
   const cursiv::Document* const document = world.built("");
   const lsp::Position positions[] = {{0, 0}, {0, 0}};
   const auto answer = world.ws->selectionRangeProvider->getSelectionRanges(
@@ -471,7 +459,7 @@ void a_document_without_a_tree_answers_every_cursor() {
 
 // A caret on each of many records costs the records once, not once a caret.
 void many_carets_read_the_records_once() {
-  const World world;
+  const UniqueUriWorld world;
   std::string text;
   std::vector<lsp::Position> carets;
   for (lsp::Uint line = 0; line < 80000; ++line) {
@@ -487,30 +475,32 @@ void many_carets_read_the_records_once() {
         std::chrono::seconds(2 * kSlowdown));
 }
 
-// A non-ASCII word is one word, and a non-ASCII dash ends one.
+// A non-ASCII word is one word, and a non-ASCII dash or a stray continuation
+// byte ends one.
 void a_word_past_ascii_is_read_by_scalar() {
-  const World world;
-  // `Über` inside a comment: four characters, four UTF-16 units.
-  const std::vector<lsp::SelectionRange> umlaut = world.at(
-      "entity E {}\n/* \xC3\x9C"
-      "ber x */\n",
-      {1, 4});
-  CHECK(umlaut.size() == 1);
-  CHECK(!umlaut.empty() && spans(umlaut.front().range, 1, 3, 7));
-
-  // `alpha—beta` with an em dash and no space: the word stops at the dash.
-  const std::vector<lsp::SelectionRange> dashed = world.at(
-      "entity E {}\n/* alpha\xE2\x80\x94"
-      "beta */\n",
-      {1, 4});
-  CHECK(dashed.size() == 1);
-  CHECK(!dashed.empty() && spans(dashed.front().range, 1, 3, 8));
+  const UniqueUriWorld world;
+  const auto check = [&](std::string_view markedComment) {
+    (void)cursiv::test::expectSelectionRanges(
+        *world.ws,
+        {.text = "entity E {}\n/* " + std::string(markedComment) + " */\n",
+         .disposeAfterCheck = true});
+  };
+  check("<|Ü<|>ber|> x");
+  check("<|a<|>lpha|>—beta");
+  check("ab\x80\x80<|<|>cd|>");
+  check(
+      "<|ab<|>|>\x80\x80"
+      "cd");
+  check(
+      "ab\x80<|<|>|>\x80"
+      "cd");
 }
 
 }  // namespace
 
 void run() {
   a_selection_grows_from_the_word_to_the_document();
+  a_caret_past_a_word_grows_through_what_the_word_ends();
   a_caret_nothing_covers_answers_a_clamped_empty_range();
   a_document_without_a_tree_answers_every_cursor();
   a_word_past_ascii_is_read_by_scalar();
@@ -628,13 +618,31 @@ void an_escaped_keyword_is_a_keyword() {
             language.semanticTokenProvider =
                 std::make_unique<const cursiv::GrammarSemanticTokenProvider>(
                     language);
-            language.parser = cursiv::translating_parser(
+            language.parser = cursiv::translatingParser(
                 std::move(language.parser), translate);
           }) {}
   };
   const Translated world(escapes);
   const ct::DecodedSemanticTokensWithRanges coloured =
       ct::highlightHelper(*world.ws, "<|\\u0064atatype|> String\n");
+  ct::expectSemanticToken(coloured, {.rangeIndex = 0, .tokenType = "keyword"});
+}
+
+// A keyword a data rule reads alone is still a keyword.
+void a_keyword_alone_in_a_data_rule_is_a_keyword(
+    std::unique_ptr<cursiv::Parser> parser,
+    std::unique_ptr<cursiv::AstReflection> reflection) {
+  support::World<cursiv::SharedLspServices> world;
+  const cursiv::LspServices* const language =
+      &support::add_language<cursiv::LspServices>(
+          world.shared, {"dual", {".dual"}, {}}, std::move(parser),
+          std::move(reflection), [](cursiv::LspServices& services) {
+            services.semanticTokenProvider =
+                std::make_unique<const cursiv::GrammarSemanticTokenProvider>(
+                    services);
+          });
+  const ct::DecodedSemanticTokensWithRanges coloured =
+      ct::highlightHelper(*language, "tone <|high|>");
   ct::expectSemanticToken(coloured, {.rangeIndex = 0, .tokenType = "keyword"});
 }
 
@@ -1111,6 +1119,9 @@ void a_document_with_no_tree_is_coloured_with_nothing() {
 void run() {
   every_expected_category_is_coloured();
   an_escaped_keyword_is_a_keyword();
+  a_keyword_alone_in_a_data_rule_is_a_keyword(
+      tdual::generated::D2::createParser(),
+      tdual::generated::D2::createAstReflection());
   the_tokens_are_ordered_and_never_overlap();
   every_index_names_a_row_of_the_legend();
   a_range_is_the_full_answer_cut_to_it();
@@ -1145,6 +1156,9 @@ struct ContextEcho final : cursiv::SignatureHelpProvider {
   [[nodiscard]] std::optional<lsp::SignatureHelp> provideSignatureHelp(
       const cursiv::Document&, const lsp::SignatureHelpParams& params,
       const cursiv::CancellationToken&) const override {
+    if (params.textDocument.uri.toString() != kUri ||
+        params.position.line != 0 || params.position.character != 7)
+      return {};
     lsp::SignatureHelp help;
     lsp::SignatureInformation signature;
     const bool reopened =
@@ -1170,10 +1184,6 @@ struct World : support::LspWorkspace {
   [[nodiscard]] cursiv::LanguageServer& server() const {
     return *shared.languageServer;
   }
-
-  void open(std::string_view text) const {
-    support::open(server(), kUri, "workspace", text);
-  }
 };
 
 void the_triggers_reach_the_handshake() {
@@ -1194,26 +1204,27 @@ void the_context_reaches_the_provider() {
   const World world;
   const lsp::InitializeParams handshake;
   (void)world.server().initialize(handshake);
-  world.open("entity A {\n}\n");
-
-  lsp::SignatureHelpParams params;
-  params.textDocument.uri = lsp::Uri::parse(std::string(kUri));
-  params.position = lsp::Position{0, 7};
-  const std::optional<lsp::SignatureHelp> first =
-      world.server().signatureHelp(params, cursiv::kNoCancel);
-  CHECK(first.has_value() && !first->signatures.empty() &&
-        first->signatures.front().label == "first");
-
+  cursiv::test::TestWorkspace fixture(world.shared);
+  fixture.parse({{kUri, "entity <|call>A {\n}\n"}});
+  const auto& file = fixture.at(kUri);
+  const auto check = [&](std::optional<lsp::SignatureHelpContext> context,
+                         std::string_view label) {
+    lsp::SignatureHelpParams params;
+    params.textDocument.uri = lsp::Uri::parse(std::string(kUri));
+    params.position = file.lspRange("call").start;
+    params.context = context;
+    const auto direct = file.signatureHelp("call", std::move(context));
+    const auto served = world.server().signatureHelp(params, cursiv::kNoCancel);
+    for (const auto* result : {&direct, &served})
+      CHECK(*result && !(*result)->signatures.empty() &&
+            (*result)->signatures.front().label == label);
+  };
+  check({}, "first");
   lsp::SignatureHelpContext context;
-  context.triggerKind = lsp::SignatureHelpTriggerKindEnum(
-      lsp::SignatureHelpTriggerKind::TriggerCharacter);
+  context.triggerKind = lsp::SignatureHelpTriggerKind::TriggerCharacter;
   context.isRetrigger = true;
-  context.triggerCharacter = std::string(",");
-  params.context = std::move(context);
-  const std::optional<lsp::SignatureHelp> again =
-      world.server().signatureHelp(params, cursiv::kNoCancel);
-  CHECK(again.has_value() && !again->signatures.empty() &&
-        again->signatures.front().label == "again");
+  context.triggerCharacter = ",";
+  check(std::move(context), "again");
 }
 
 }  // namespace
@@ -1428,8 +1439,7 @@ void a_wide_payload_is_matched_in_one_pass() {
   cursiv::JsonValue::Object data;
   data[std::string(cursiv::detail::kDefaultCodeActionsKey)] =
       cursiv::JsonValue::Array{cursiv::detail::make_action_row(
-          cursiv::detail::kReplaceEdit, "replace", {0, 1}, "b",
-          document.buildRevision)};
+          "replace", {0, 1}, "b", document.buildRevision)};
   for (std::int64_t i = 0; i < 40000; ++i)
     data["k" + std::to_string(i)] = cursiv::JsonValue(i);
   diagnostic.data = cursiv::JsonValue(std::move(data));
@@ -1451,6 +1461,65 @@ void a_wide_payload_is_matched_in_one_pass() {
         std::chrono::seconds(kSlowdown));
 }
 
+// Findings the client echoes are each matched to their first echo, in about
+// the time the same request takes with no echo; each of their fixes keeps it.
+void many_echoed_findings_are_matched_in_one_pass() {
+  constexpr std::uint32_t kFindings = 16000;
+  const std::string message(64, 'm');
+  cursiv::Document document(cursiv::TextDocument::create(
+      "file:///many.ws", "workspace", 1, std::string(kFindings, 'a')));
+  lsp::CodeActionParams params;
+  params.range = {{0, 0}, {0, kFindings}};
+  lsp::Array<lsp::Diagnostic> echoes;
+  for (std::uint32_t i = 0; i < kFindings; ++i) {
+    cursiv::Diagnostic diagnostic;
+    diagnostic.range = {i, i + 1};
+    diagnostic.message = message;
+    diagnostic.source = "audit";
+    diagnostic.severity = cursiv::DiagnosticSeverity::Warning;
+    cursiv::JsonValue::Object data;
+    data[std::string(cursiv::detail::kDefaultCodeActionsKey)] =
+        cursiv::JsonValue::Array{
+            cursiv::detail::make_action_row("replace", {i, i + 1}, "b",
+                                            document.buildRevision),
+            cursiv::detail::make_action_row("replace", {i, i + 1}, "c",
+                                            document.buildRevision)};
+    diagnostic.data = cursiv::JsonValue(std::move(data));
+    lsp::Diagnostic echo;
+    echo.range = {{0, i}, {0, i + 1}};
+    echo.message = message;
+    echo.severity = lsp::DiagnosticSeverity::Warning;
+    echo.source = "audit";
+    echo.data = cursiv::detail::to_lsp_any(*diagnostic.data);
+    echo.tags =
+        lsp::Array<lsp::DiagnosticTagEnum>{lsp::DiagnosticTag::Unnecessary};
+    document.diagnostics.push_back(std::move(diagnostic));
+    echoes.push_back(std::move(echo));
+  }
+  // The same echo again, last and untagged: the first one answers.
+  echoes.push_back(echoes.front());
+  echoes.back().tags.reset();
+
+  const cursiv::DefaultCodeActionProvider provider;
+  const auto start = std::chrono::steady_clock::now();
+  const auto plain = provider.getCodeActions(document, params);
+  const auto unechoed = std::chrono::steady_clock::now();
+  params.context.diagnostics = std::move(echoes);
+  const auto actions = provider.getCodeActions(document, params);
+  const auto echoed = std::chrono::steady_clock::now();
+  CHECK(echoed - unechoed < 10 * (unechoed - start));
+  CHECK(plain.size() == 2 * kFindings && actions.size() == 2 * kFindings);
+  CHECK(std::ranges::all_of(actions, [](const lsp::CodeAction& action) {
+    if (!action.diagnostics.has_value() || action.diagnostics->size() != 1 ||
+        !action.edit.has_value() || !action.edit->changes.has_value())
+      return false;
+    const lsp::Diagnostic& about = action.diagnostics->front();
+    const lsp::TextEdit& edit = action.edit->changes->begin()->second.front();
+    return about.tags.has_value() &&
+           about.range.start.character == edit.range.start.character;
+  }));
+}
+
 void an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads() {
   cursiv::Document document(cursiv::TextDocument::create(
       "file:///diagnostic.ws", "workspace", 1, "a"));
@@ -1463,8 +1532,7 @@ void an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads() {
   cursiv::JsonValue::Object data;
   data[std::string(cursiv::detail::kDefaultCodeActionsKey)] =
       cursiv::JsonValue::Array{cursiv::detail::make_action_row(
-          cursiv::detail::kReplaceEdit, "replace", {0, 1}, "b",
-          document.buildRevision)};
+          "replace", {0, 1}, "b", document.buildRevision)};
   data["numbers"] = cursiv::JsonValue::Array{
       cursiv::JsonValue(1.0), cursiv::JsonValue(cursiv::JsonValue::Object{
                                   {"nested", cursiv::JsonValue(2.0)}})};
@@ -1573,6 +1641,7 @@ void run() {
   cancellation_precedes_a_filter_that_excludes_quick_fixes();
   an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads();
   a_wide_payload_is_matched_in_one_pass();
+  many_echoed_findings_are_matched_in_one_pass();
 }
 
 }  // namespace code_action_provider
@@ -1637,7 +1706,7 @@ void run() {
 }  // namespace text_document_content_provider
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   folding_range_provider::run();
   symbol_edge_cases::run();
   selection_range_provider::run();

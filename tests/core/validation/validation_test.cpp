@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <memory>
 #include <optional>
+#include <random>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -30,6 +32,7 @@
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/syntax-tree/DefaultAstReflection.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
@@ -59,8 +62,10 @@
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/core/CoreServices.hpp"
 #include "workspace/core/ast.hpp"
+#include "workspace/generated/Workspace/Module.hpp"
+#include "workspace/generated/Workspace/Table.hpp"
 
-// The validation pass: which checks run (filing, categories, `built_in`
+// The validation pass: which checks run (filing, categories, `kBuiltIn`
 // reserved), the document hooks, what a crashing check costs, and the
 // built-in half end to end.
 namespace document_validator {
@@ -97,12 +102,11 @@ struct TestValidator {
                  cursiv::ValidationAcceptor& accept) const {
     accept.information(feature, "feature seen");
   }
-  // Four findings a check emits backwards, two of them sharing a position:
-  // the pass returns document order, and keeps the order within a position.
+  // Equal positions straddle the two sorted runs.
   void onEntityUnordered(const ws::ast::Entity&,
                          cursiv::ValidationAcceptor& accept) const {
-    accept.warning(cursiv::TextRange{30, 31}, "last");
     accept.warning(cursiv::TextRange{10, 11}, "first");
+    accept.warning(cursiv::TextRange{30, 31}, "last");
     accept.warning(cursiv::TextRange{10, 11}, "second");
     accept.warning(cursiv::TextRange{20, 21}, "third");
   }
@@ -148,7 +152,7 @@ struct World {
   cursiv::ValidationRegistry* registry = nullptr;
 
   World() {
-    cursiv::install_default_shared_core_services(shared);
+    cursiv::installDefaultSharedCoreServices(shared);
     sink = &support::capture_observations(shared);
     language = &support::add_workspace<cursiv::CoreServices>(shared);
     registry = language->validationRegistry.get();
@@ -181,7 +185,7 @@ using Registry = cursiv::ValidationRegistry;
 const cursiv::Diagnostic* find_code(
     const std::vector<cursiv::Diagnostic>& diagnostics, std::string_view code) {
   for (const cursiv::Diagnostic& d : diagnostics)
-    if (cursiv::data_code(d) == code) return &d;
+    if (cursiv::dataCode(d) == code) return &d;
   return nullptr;
 }
 
@@ -226,7 +230,7 @@ void an_unknown_check_target_is_refused() {
   for (bool exact : {false, true}) {
     CHECK(support::throws<cursiv::ValidationRegistrationError>([&] {
       world.registry->registerCheck(
-          {&cursiv::ast_type_tag<Foreign>, exact,
+          {&cursiv::kAstTypeTag<Foreign>, exact,
            [](const cursiv::AstNode&, cursiv::ValidationAcceptor&,
               const cursiv::CancellationToken&) {}},
           &category);
@@ -235,6 +239,58 @@ void an_unknown_check_target_is_refused() {
     for (const auto* registered : world.registry->categories())
       CHECK(registered != &category);
   }
+}
+
+// A check over a family of thousands of types, spread at random so their hash
+// slots collide, files in time linear in the family and runs on every member
+// and nowhere else.
+void a_wide_family_files_in_linear_time() {
+  static constexpr std::size_t kTypes = 2000;
+  static constexpr std::size_t kGap = 512;
+  struct Wide final : cursiv::DefaultAstReflection {
+    std::allocator<cursiv::AstTypeTag> memory;
+    cursiv::AstTypeTag* pool = memory.allocate(kTypes * kGap);
+    std::vector<const cursiv::AstTypeTag*> family;
+    Wide() : DefaultAstReflection(*ws::generated::Workspace::kAst.meta) {
+      std::minstd_rand random;
+      for (std::size_t i = 0; i < kTypes; ++i)
+        family.push_back(std::construct_at(pool + i * kGap + random() % kGap));
+    }
+    Wide(const Wide&) = delete;
+    Wide& operator=(const Wide&) = delete;
+    ~Wide() override { memory.deallocate(pool, kTypes * kGap); }
+    [[nodiscard]] std::span<const cursiv::AstTypeTag* const> getAllSubTypes(
+        const cursiv::AstTypeTag* type) const noexcept override {
+      return type == family.front()
+                 ? std::span<const cursiv::AstTypeTag* const>(family)
+                 : DefaultAstReflection::getAllSubTypes(type);
+    }
+  };
+  World world;
+  const cursiv::Document* const document = world.add("file:///a.ws", "");
+  auto reflection = std::make_unique<Wide>();
+  const std::vector<const cursiv::AstTypeTag*>& family = reflection->family;
+  world.language->astReflection = std::move(reflection);
+  cursiv::DefaultValidationRegistry registry(*world.language);
+  std::size_t ran = 0;
+  const auto begin = std::chrono::steady_clock::now();
+  registry.registerCheck(
+      {.target = family.front(),
+       .check = [&ran](const cursiv::AstNode&, cursiv::ValidationAcceptor&,
+                       const cursiv::CancellationToken&) { ++ran; }},
+      &cursiv::kFast);
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
+
+  const auto discard = [](cursiv::Diagnostic&&) {};
+  cursiv::ValidationAcceptor accept(discard, *document, "test");
+  cursiv::AstNode node;
+  for (const cursiv::AstTypeTag* const tag : family) {
+    node.type = tag;
+    registry.runChecks(node, accept, {}, cursiv::kNoCancel);
+  }
+  node.type = &cursiv::kAstTypeTag<ws::ast::Entity>;
+  registry.runChecks(node, accept, {}, cursiv::kNoCancel);
+  CHECK(ran == family.size());
 }
 
 // The node hook is the second filter, after the categories: a node it refuses
@@ -262,32 +318,32 @@ void the_node_hook_takes_a_node_or_its_subtree_out() {
   CHECK(count(true, true) == 2);    // both
 }
 
-// The categories name who runs: `fast` alone skips the slow check and the
-// built-in half, `built_in` alone runs only that half, empty runs everything.
+// The categories name who runs: `kFast` alone skips the slow check and the
+// built-in half, `kBuiltIn` alone runs only that half, empty runs everything.
 void a_category_names_who_runs() {
   World world;
   world.registry->registerCheck(
       Registry::makeValidationCheck<&TestValidator::onEntity>(world.validator),
-      &cursiv::fast);
+      &cursiv::kFast);
   world.registry->registerCheck(
       Registry::makeValidationCheck<&TestValidator::onFeature>(world.validator),
-      &cursiv::slow);
+      &cursiv::kSlow);
   const cursiv::Document* const document =
       world.build("file:///a.ws", "datatype String\nentity A { x : Broken }\n");
 
-  const cursiv::ValidationCategory* const fastOnly[] = {&cursiv::fast};
+  const cursiv::ValidationCategory* const fastOnly[] = {&cursiv::kFast};
   std::vector<cursiv::Diagnostic> diagnostics =
       world.validate(*document, {.categories = fastOnly});
   CHECK(find_message(diagnostics, "entity seen") != nullptr);
   CHECK(find_message(diagnostics, "feature seen") == nullptr);
   CHECK(find_code(diagnostics, cursiv::kLinkingError) == nullptr);  // gated too
 
-  const cursiv::ValidationCategory* const slowOnly[] = {&cursiv::slow};
+  const cursiv::ValidationCategory* const slowOnly[] = {&cursiv::kSlow};
   diagnostics = world.validate(*document, {.categories = slowOnly});
   CHECK(find_message(diagnostics, "entity seen") == nullptr);
   CHECK(find_message(diagnostics, "feature seen") != nullptr);
 
-  const cursiv::ValidationCategory* const builtInOnly[] = {&cursiv::built_in};
+  const cursiv::ValidationCategory* const builtInOnly[] = {&cursiv::kBuiltIn};
   diagnostics = world.validate(*document, {.categories = builtInOnly});
   CHECK(find_message(diagnostics, "entity seen") == nullptr);
   CHECK(find_code(diagnostics, cursiv::kLinkingError) != nullptr);
@@ -300,9 +356,9 @@ void a_category_names_who_runs() {
   // What was filed is what is listed, and never the reserved name.
   const std::span<const cursiv::ValidationCategory* const> listed =
       world.registry->categories();
-  CHECK(std::ranges::find(listed, &cursiv::fast) != listed.end());
-  CHECK(std::ranges::find(listed, &cursiv::slow) != listed.end());
-  CHECK(std::ranges::find(listed, &cursiv::built_in) == listed.end());
+  CHECK(std::ranges::find(listed, &cursiv::kFast) != listed.end());
+  CHECK(std::ranges::find(listed, &cursiv::kSlow) != listed.end());
+  CHECK(std::ranges::find(listed, &cursiv::kBuiltIn) == listed.end());
 }
 
 void absent_categories_skip_the_node_walk() {
@@ -312,10 +368,10 @@ void absent_categories_skip_the_node_walk() {
   world.language->documentValidator = std::move(validator);
   world.registry->registerCheck(
       Registry::makeValidationCheck<&TestValidator::onEveryNode>(world.validator),
-      &cursiv::slow);
+      &cursiv::kSlow);
   const auto* document = world.build(
       "file:///a.ws", std::string(kSource), cursiv::BuildOptions{false, {}});
-  const cursiv::ValidationCategory* const fastOnly[] = {&cursiv::fast};
+  const cursiv::ValidationCategory* const fastOnly[] = {&cursiv::kFast};
   (void)world.validate(*document, {.categories = fastOnly});
   CHECK(measured->optionsAsked == 0);
   CHECK(world.validator.everyNode == 0);
@@ -361,7 +417,7 @@ void nested_pruning_preserves_checks_on_siblings() {
   CHECK(world.validator.everyNode == 5);  // root, String, P, y and R
 }
 
-// `built_in` names the runtime's own half; a language filing under it is
+// `kBuiltIn` names the runtime's own half; a language filing under it is
 // refused loudly, for checks and hooks the same.
 void built_in_is_refused_at_registration() {
   World world;
@@ -369,14 +425,14 @@ void built_in_is_refused_at_registration() {
     world.registry->registerCheck(
         Registry::makeValidationCheck<&TestValidator::onEntity>(
             world.validator),
-        &cursiv::built_in);
+        &cursiv::kBuiltIn);
   }));
 
   CHECK(support::throws<cursiv::ValidationRegistrationError>([&] {
     world.registry->registerBeforeDocument(
         [](const cursiv::Document&, cursiv::ValidationAcceptor&,
            const cursiv::CancellationToken&) {},
-        &cursiv::built_in);
+        &cursiv::kBuiltIn);
   }));
 }
 
@@ -399,14 +455,14 @@ void hooks_run_around_the_walk() {
                const cursiv::CancellationToken&) {
         world.validator.events.emplace_back("slow-before");
       },
-      &cursiv::slow);
+      &cursiv::kSlow);
   world.registry->registerCheck(
       Registry::makeValidationCheck<&TestValidator::onEntity>(world.validator));
   const cursiv::Document* const document =
       world.build("file:///a.ws", std::string(kSource));
 
   world.validator.events.clear();
-  const cursiv::ValidationCategory* const fastOnly[] = {&cursiv::fast};
+  const cursiv::ValidationCategory* const fastOnly[] = {&cursiv::kFast};
   (void)world.validate(*document, {.categories = fastOnly});
   const std::vector<std::string> expected = {"before", "entity", "after"};
   CHECK(world.validator.events == expected);
@@ -627,7 +683,7 @@ void a_provider_rewords_the_shapes_it_overrides() {
   }
   std::vector<std::string> published;
   for (const cursiv::Diagnostic& d : diagnostics)
-    if (cursiv::data_code(d) == cursiv::kParseRepaired)
+    if (cursiv::dataCode(d) == cursiv::kParseRepaired)
       published.push_back(d.message);
   CHECK(skipped > 0 && missing > 0);
   CHECK(published == expected);
@@ -639,8 +695,9 @@ void a_provider_rewords_the_shapes_it_overrides() {
   CHECK(find_message(world.validate(*broken), "left over") != nullptr);
 }
 
-// Each part of the pass is a hook a language can take over: the walk around
-// the checks, and the repairs a recovered error offers.
+// A language takes over each part of the pass, the walk around the checks and
+// the repairs a recovered error offers, whatever the registry holds; a
+// `kBuiltIn` pass alone runs none of the walk.
 void the_validator_hooks_take_effect() {
   struct Hooked final : cursiv::DefaultDocumentValidator {
     using DefaultDocumentValidator::DefaultDocumentValidator;
@@ -658,10 +715,12 @@ void the_validator_hooks_take_effect() {
                           const cursiv::CancellationToken&) const override {
       ++nodes;
     }
-    void validateAstAfter(const cursiv::Document&, cursiv::ValidationAcceptor&,
+    void validateAstAfter(const cursiv::Document&,
+                          cursiv::ValidationAcceptor& accept,
                           const cursiv::ValidationOptions&,
                           const cursiv::CancellationToken&) const override {
       ++after;
+      accept.information(cursiv::TextRange{0, 1}, "after seen");
     }
     void attachRepairActions(const cursiv::Document&, cursiv::TextRange,
                              const cursiv::ParseDiagnostic&,
@@ -673,13 +732,20 @@ void the_validator_hooks_take_effect() {
   auto validator = std::make_unique<Hooked>(*world.language);
   const Hooked& hooked = *validator;
   world.language->documentValidator = std::move(validator);
-  world.registry->registerCheck(
-      Registry::makeValidationCheck<&TestValidator::onEntity>(world.validator));
   const cursiv::Document* const document =
       world.build("file:///a.ws", "datatype String\nentity A { x  String }\n",
                   cursiv::BuildOptions{false, {}});
+  CHECK(find_message(world.validate(*document), "after seen") != nullptr);
+  world.registry->registerCheck(
+      Registry::makeValidationCheck<&TestValidator::onEntity>(world.validator));
+  const cursiv::ValidationCategory* const slowOnly[] = {&cursiv::kSlow};
+  CHECK(find_message(world.validate(*document, {.categories = slowOnly}),
+                     "after seen") != nullptr);
+  const cursiv::ValidationCategory* const builtInOnly[] = {&cursiv::kBuiltIn};
+  CHECK(find_message(world.validate(*document, {.categories = builtInOnly}),
+                     "after seen") == nullptr);
   const std::vector<cursiv::Diagnostic> diagnostics = world.validate(*document);
-  CHECK(hooked.before == 1 && hooked.nodes == 1 && hooked.after == 1);
+  CHECK(hooked.before == 3 && hooked.nodes == 3 && hooked.after == 3);
   CHECK(hooked.repairs >= 1);
   CHECK(find_message(diagnostics, "entity seen") == nullptr);
 }
@@ -704,7 +770,7 @@ void the_two_stops_skip_the_checks() {
   CHECK(find_code(diagnostics, cursiv::kLinkingError) != nullptr);
   CHECK(find_message(diagnostics, "entity seen") == nullptr);
 
-  const cursiv::ValidationCategory* const fastOnly[] = {&cursiv::fast};
+  const cursiv::ValidationCategory* const fastOnly[] = {&cursiv::kFast};
   for (const auto* document : {repaired, broken}) {
     diagnostics = world.validate(*document, {.categories = fastOnly,
                                             .stopAfterParsingErrors = true,
@@ -745,7 +811,8 @@ void a_linking_error_names_its_member() {
 cursiv::JsonValue::Array fixes_of(const cursiv::Document& document,
                                   const cursiv::Diagnostic& error) {
   const cursiv::Diagnostic* const one[] = {&error};
-  return cursiv::detail::spelling_actions(document, one).front();
+  unsigned spelt = 0;
+  return cursiv::detail::spelling_actions(document, one, spelt).front();
 }
 
 // The names a row set would write, nearest first.
@@ -791,8 +858,6 @@ void a_misspelt_reference_offers_its_neighbours() {
     };
     CHECK(field(cursiv::detail::kTitleField).string() ==
           "Replace with 'String'");
-    CHECK(field(cursiv::detail::kEditKindField).string() ==
-          cursiv::detail::kReplaceEdit);
     CHECK(field(cursiv::detail::kBeginField).integer() ==
           static_cast<std::int64_t>(error->range.begin));
     CHECK(field(cursiv::detail::kEndField).integer() ==
@@ -832,7 +897,7 @@ void the_validation_looks_up_no_neighbour() {
     mutable int walks = 0;
     bool visitScopeEntries(
         const cursiv::ReferenceInfo& context,
-        cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+        cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
         const override {
       ++walks;
       return DefaultScopeProvider::visitScopeEntries(context, visitor);
@@ -874,13 +939,18 @@ void a_document_broken_everywhere_stops_being_spelt() {
         d.data->object().contains(std::string(cursiv::kLinkingRefText)))
       broken.push_back(&d);
   unsigned spelt = 0;
+  unsigned named = 0;
   for (const cursiv::JsonValue::Array& rows :
-       cursiv::detail::spelling_actions(*document, broken))
-    if (!names_in(rows).empty()) ++spelt;
+       cursiv::detail::spelling_actions(*document, broken, spelt))
+    if (!names_in(rows).empty()) ++named;
   CHECK(broken.size() == 70);
-  CHECK(spelt == 64);
-  // The bound is on what one request is served: asked alone, the last site
-  // is spelt too.
+  CHECK(named == 64);
+  // The bound holds over every call of one request: a later call of the same
+  // request spells nothing, a request of its own spells the last site too.
+  const cursiv::Diagnostic* const last[] = {broken.back()};
+  CHECK(cursiv::detail::spelling_actions(*document, last, spelt)
+            .front()
+            .empty());
   CHECK(names_in(fixes_of(*document, *broken.back())).size() == 1);
 }
 
@@ -894,8 +964,10 @@ void a_stopped_request_stops_the_spelling() {
   for (const cursiv::Diagnostic& d : diagnostics) all.push_back(&d);
   cursiv::CancellationTokenSource stop;
   stop.request_stop();
+  unsigned spelt = 0;
   CHECK(support::throws<cursiv::OperationCancelled>([&] {
-    (void)cursiv::detail::spelling_actions(*document, all, stop.get_token());
+    (void)cursiv::detail::spelling_actions(*document, all, spelt,
+                                           stop.get_token());
   }));
 }
 
@@ -916,7 +988,7 @@ void a_stop_during_the_scope_walk_ends_it() {
     }
     bool visitScopeEntries(
         const cursiv::ReferenceInfo& context,
-        cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+        cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
         const override {
       return inner->visitScopeEntries(
           context, [&](const cursiv::AstNodeDescription& entry) {
@@ -926,13 +998,13 @@ void a_stop_during_the_scope_walk_ends_it() {
     }
     bool visitScopeEntries(
         const cursiv::ReferenceInfo& context, std::string_view name,
-        cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+        cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
         const override {
       return inner->visitScopeEntries(context, name, visitor);
     }
   };
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   cursiv::CoreServices& language = support::add_workspace<cursiv::CoreServices>(
       shared, [&](cursiv::CoreServices& services) {
         auto stopping = std::make_unique<Stopping>();
@@ -950,8 +1022,10 @@ void a_stop_during_the_scope_walk_ends_it() {
   std::vector<const cursiv::Diagnostic*> all;
   for (const cursiv::Diagnostic& d : diagnostics) all.push_back(&d);
   armed = true;
+  unsigned spelt = 0;
   CHECK(support::throws<cursiv::OperationCancelled>([&] {
-    (void)cursiv::detail::spelling_actions(*document, all, stop.get_token());
+    (void)cursiv::detail::spelling_actions(*document, all, spelt,
+                                           stop.get_token());
   }));
 }
 
@@ -1074,6 +1148,57 @@ void a_deletion_offers_no_quick_fix() {
         data.end());
 }
 
+// A construct given up keeps the text it read: its fix writes the token it
+// still needed after that text, and its message says so, never as a typo.
+void a_given_up_construct_keeps_its_text() {
+  World world;
+  const cursiv::ParseResult colonless = world.language->parser->parse(
+      "datatype String\nentity A { x  String }\n");
+  CHECK(!colonless.diagnostics.empty());
+  if (colonless.diagnostics.empty()) return;
+  const std::string text(kSource);
+  struct Case {
+    cursiv::TextOffset begin;
+    cursiv::TextOffset end;
+    std::string_view message;
+  };
+  const auto x = static_cast<cursiv::TextOffset>(text.find("x :"));
+  for (const auto& [begin, end, message] :
+       {Case{x, x + 1, "Expecting ':' after 'x'."},
+        Case{x, static_cast<cursiv::TextOffset>(text.size()),
+             "Expecting ':' but found end of input."}}) {
+    cursiv::Document* const document =
+        world.build("file:///a" + std::to_string(end) + ".ws", text);
+    cursiv::ParseDiagnostic given;
+    given.kind = cursiv::DiagnosticKind::Incomplete;
+    given.element = colonless.diagnostics.front().element;
+    given.begin = begin;
+    given.end = end;
+    document->parseResult.diagnostics.push_back(given);
+    const std::vector<cursiv::Diagnostic> diagnostics =
+        world.validate(*document);
+    const cursiv::Diagnostic* const repaired =
+        find_code(diagnostics, cursiv::kParseRepaired);
+    CHECK(repaired != nullptr);
+    if (repaired == nullptr || !repaired->data.has_value()) return;
+    CHECK(repaired->message == message);
+    const auto rows = repaired->data->object().find(
+        std::string(cursiv::detail::kDefaultCodeActionsKey));
+    CHECK(rows != repaired->data->object().end());
+    if (rows == repaired->data->object().end()) return;
+    CHECK(rows->second.array().size() == 1);
+    for (const cursiv::JsonValue& row : rows->second.array()) {
+      const cursiv::JsonValue::Object& edit = row.object();
+      CHECK(edit.find(std::string(cursiv::detail::kTitleField))
+                ->second.string() == "Insert ':'");
+      CHECK(edit.find(std::string(cursiv::detail::kBeginField))
+                ->second.integer() == end);
+      CHECK(edit.find(std::string(cursiv::detail::kEndField))
+                ->second.integer() == end);
+    }
+  }
+}
+
 // The build publishes a repair with its edit rows, and applying the edit
 // really fixes the document. The LSP provider's projection is in presentation.
 void a_repairs_quick_fix_really_fixes() {
@@ -1106,8 +1231,7 @@ void a_repairs_quick_fix_really_fixes() {
   CHECK(static_cast<bool>(reparsed) && reparsed.diagnostics.empty());
 }
 
-// Document order on the way out, stable within one position. The pass sorts a
-// permutation, so the order is checked here rather than left to the sort.
+// Equal offsets keep their emission order when two sorted runs merge.
 void the_answer_comes_back_in_document_order() {
   World world;
   world.registry->registerCheck(
@@ -1129,6 +1253,10 @@ void the_answer_comes_back_in_document_order() {
 // anchors must remain independent of the acceptor's cached last node.
 void large_walk_keeps_its_diagnostics_without_workers() {
   struct Check {
+    void onRoot(const ws::ast::Workspace&,
+                cursiv::ValidationAcceptor& accept) const {
+      accept.warning(cursiv::TextRange{10, 11}, "root").code("order");
+    }
     void onEntity(const ws::ast::Entity& node,
                   cursiv::ValidationAcceptor& accept) const {
       accept.warning(cursiv::TextRange{10, 11},
@@ -1148,12 +1276,45 @@ void large_walk_keeps_its_diagnostics_without_workers() {
     world.shared.taskScheduler =
         std::make_unique<cursiv::TaskScheduler>(workers);
     world.registry->registerCheck(
+        Registry::makeValidationCheck<&Check::onRoot>(check));
+    world.registry->registerCheck(
         Registry::makeValidationCheck<&Check::onEntity>(check));
+    world.registry->registerBeforeDocument(
+        [](const auto&, cursiv::ValidationAcceptor& accept, const auto&) {
+          for (unsigned i = 0; i < 513; ++i)
+            accept.hint(cursiv::TextRange{10, 11}, "before");
+        });
+    world.registry->registerAfterDocument(
+        [](const auto&, cursiv::ValidationAcceptor& accept, const auto&) {
+          accept.hint(cursiv::TextRange{10, 11}, "after");
+        });
     const cursiv::Document* const document = world.build(
         "file:///large.ws", text, cursiv::BuildOptions{false, {}});
     CHECK(document->parseResult.nodes().size() > 1024);
     std::vector<cursiv::Diagnostic> diagnostics = world.validate(*document);
-    CHECK(diagnostics.size() == 3 * 1024);
+    constexpr std::size_t nodeDiagnostics = 1 + 3 * 1024;
+    constexpr std::size_t total = 513 + nodeDiagnostics + 1;
+    CHECK(diagnostics.size() == total);
+    if (diagnostics.size() != total) return;
+    CHECK(diagnostics[512].message == "before");
+    CHECK(diagnostics[513].message == "root");
+    CHECK(diagnostics[513 + 1 + 2 * 1024].message == "after");
+
+    if (workers == 1) {
+      struct Walk : cursiv::DefaultDocumentValidator {
+        using DefaultDocumentValidator::DefaultDocumentValidator;
+        using DefaultDocumentValidator::validateAstNodes;
+        std::string_view getSource() const noexcept override { return {}; }
+      } walk(*world.language);
+      std::size_t emitted = 0;
+      const auto collect = [&](cursiv::Diagnostic&& diagnostic) {
+        CHECK(diagnostic.source == "custom");
+        ++emitted;
+      };
+      cursiv::ValidationAcceptor accept(collect, *document, "custom");
+      walk.validateAstNodes(*document, accept, {}, {});
+      CHECK(emitted == nodeDiagnostics);
+    }
     if (workers == 0) {
       serial = std::move(diagnostics);
       continue;
@@ -1170,6 +1331,41 @@ void large_walk_keeps_its_diagnostics_without_workers() {
       CHECK(diagnostics[i].code == serial[i].code);
     }
   }
+}
+
+// A diagnostic on a deep node of the validated document finds its span and
+// its anchor without walking up to the root: a deep chain reports in linear
+// time.
+void a_deep_chain_reports_every_node_in_linear_time() {
+  struct Check {
+    void onPackage(const ws::ast::PackageDeclaration& node,
+                   cursiv::ValidationAcceptor& accept) const {
+      accept.error(node, "package").keyword("package");
+    }
+  } check;
+  // Unoptimised code runs the same work many times slower.
+#ifdef NDEBUG
+  constexpr auto kLimit = std::chrono::seconds(1);
+#else
+  constexpr auto kLimit = std::chrono::seconds(15);
+#endif
+  constexpr std::size_t kDepth = 40000;
+  std::string text;
+  for (std::size_t i = 0; i < kDepth; ++i) text += "package a {";
+  text.append(kDepth, '}');
+  World world;
+  world.shared.taskScheduler = std::make_unique<cursiv::TaskScheduler>(0);
+  world.registry->registerCheck(
+      Registry::makeValidationCheck<&Check::onPackage>(check));
+  const cursiv::Document* const document =
+      world.add("file:///deep.ws", std::move(text));
+  const auto begin = std::chrono::steady_clock::now();
+  const std::vector<cursiv::Diagnostic> diagnostics = world.validate(*document);
+  CHECK(std::chrono::steady_clock::now() - begin < kLimit);
+  CHECK(diagnostics.size() == kDepth);
+  if (diagnostics.size() == kDepth)
+    CHECK(diagnostics.back().range.begin == 11 * (kDepth - 1) &&
+          diagnostics.back().range.end == 11 * (kDepth - 1) + 7);
 }
 
 // A refusal holds on a walk spread over workers as on a single one.
@@ -1209,6 +1405,7 @@ void run() {
   nested_pruning_preserves_checks_on_siblings();
   dispatch_follows_the_family_and_exact_stays_exact();
   an_unknown_check_target_is_refused();
+  a_wide_family_files_in_linear_time();
   the_node_hook_takes_a_node_or_its_subtree_out();
   a_category_names_who_runs();
   built_in_is_refused_at_registration();
@@ -1232,6 +1429,8 @@ void run() {
   anchors_are_placed_where_the_grammar_wrote();
   a_repairs_quick_fix_really_fixes();
   a_deletion_offers_no_quick_fix();
+  a_given_up_construct_keeps_its_text();
+  a_deep_chain_reports_every_node_in_linear_time();
   the_answer_comes_back_in_document_order();
   large_walk_keeps_its_diagnostics_without_workers();
 }
@@ -1261,7 +1460,7 @@ struct Disk {
   make(cursiv::MemoryFileSystemProvider*& files) {
     auto disk = std::make_unique<cursiv::MemoryFileSystemProvider>();
     files = disk.get();
-    return cursiv::create_language<ws::WorkspaceCoreServices,
+    return cursiv::createLanguage<ws::WorkspaceCoreServices,
                                    ws::WorkspaceSharedCoreServices,
                                    ws::install_core_module>(std::move(disk));
   }
@@ -1397,23 +1596,22 @@ namespace {
 
 struct CountingGrammar final : cursiv::Grammar {
   mutable std::size_t writes = 0;
-  mutable std::size_t rules = 0;
+  mutable std::size_t literals = 0;
 
   bool recordWrites(const cursiv::CstNode& node,
                     std::string_view feature) const noexcept override {
     ++writes;
-    return ((feature == "items" || feature == "self") && node.engine < 3) ||
-           (feature == "x" && node.engine == 2);
+    return ((feature == "items" || feature == "self") && node.element() < 3) ||
+           (feature == "x" && node.element() == 2);
   }
   bool recordFills(const cursiv::CstNode& node,
                    std::string_view feature) const noexcept override {
-    return feature == "self" && node.engine == 3;
+    return feature == "self" && node.element() == 3;
   }
   std::string_view recordRule(const cursiv::CstNode&) const noexcept override {
-    ++rules;
     return {};
   }
-  std::string_view recordFeature(const cursiv::CstNode&) const
+  std::string_view recordProperty(const cursiv::CstNode&) const
       noexcept override {
     return {};
   }
@@ -1437,6 +1635,10 @@ struct CountingGrammar final : cursiv::Grammar {
   bool recordIsDataRule(const cursiv::CstNode&) const noexcept override {
     return false;
   }
+  bool recordIsLiteral(const cursiv::CstNode&) const noexcept override {
+    ++literals;
+    return true;
+  }
 };
 
 std::string repeated_pairs(std::size_t pairs) {
@@ -1456,18 +1658,18 @@ struct Fixture {
       : document(cursiv::TextDocument::create(
             "file:///anchors", "anchors", 0, repeated_pairs(pairs * 2))) {
     cursiv::Cst cst(document.textDocument().getText());
-    cursiv::detail::CstBuilder builder(cst);
-    const auto outer = builder.enter();
+    cursiv::CstRun& run = cursiv::CstBuilder(cst).stream();
     const auto fill = [&](cursiv::AstNode& node, std::uint32_t begin) {
-      const auto open = builder.enter();
       for (std::uint32_t i = 0; i < pairs * 2; ++i)
-        builder.leaf(begin + i, begin + i + 1, i % 2 + 1);
-      node.cstNodeId = builder.exit(open, begin, 3);
+        run.leaf(begin + i, begin + i + 1, i % 2 + 1);
+      node.cstNodeId = run.records();
+      run.close(begin, begin + pairs * 2, pairs * 2 + 1, 3);
       node.parent = &root;
     };
     fill(first, 0);
     fill(second, pairs * 2);
-    root.cstNodeId = builder.exit(outer, 0, 3);
+    root.cstNodeId = run.records();
+    run.close(0, pairs * 4, root.cstNodeId + 1, 3);
     root.parent = &document;
     cursiv::ParseResult parsed(std::move(cst));
     parsed.value = &root;
@@ -1495,7 +1697,7 @@ void indexed_anchors_reuse_their_collections() {
       check_span(accept.keywordSpan(fixture.first, "x", i), i * 2, i * 2 + 1);
     }
     CHECK(fixture.grammar.writes <= pairs * 4);
-    CHECK(fixture.grammar.rules <= pairs * 2);
+    CHECK(fixture.grammar.literals <= pairs * 2);
     check_span(accept.propertySpan(fixture.first, "items", pairs * 4),
                pairs * 2 - 1, pairs * 2);
     check_span(accept.keywordSpan(fixture.first, "x", pairs * 4),
@@ -1671,6 +1873,28 @@ void assigning_an_enriched_builder_emits_each_pending_value_once() {
     CHECK(next.data->string() == payload);
 }
 
+void completed_batches_keep_their_storage_and_source() {
+  Fixture fixture(2);
+  std::vector<std::vector<cursiv::Diagnostic>> batches(3), collected;
+  batches.front().emplace_back().source = "worker";
+  batches.back().emplace_back();
+  const auto* first = batches.front().data();
+  const auto* last = batches.back().data();
+  const auto unexpected = [](cursiv::Diagnostic&&) { CHECK(false); };
+  cursiv::ValidationAcceptor bulk(unexpected, fixture.document, "outer", collected);
+  bulk.acceptBatches(std::move(batches));
+  CHECK(collected.size() == 2);
+  if (collected.size() != 2) return;
+  CHECK(collected.front().data() == first);
+  CHECK(collected.back().data() == last);
+
+  std::vector<std::string_view> sources;
+  const auto keep = [&](cursiv::Diagnostic&& d) { sources.push_back(d.source); };
+  cursiv::ValidationAcceptor single(keep, fixture.document, "outer");
+  single.acceptBatches(std::move(collected));
+  CHECK((sources == std::vector<std::string_view>{"worker", ""}));
+}
+
 void throwing_sinks_are_not_retried_after_builder_moves() {
   Fixture fixture(2);
   unsigned emitted = 0;
@@ -1705,6 +1929,7 @@ void run() {
   anchor_caches_distinguish_documents_with_the_same_node_ids();
   moved_builder_keeps_its_owned_message_and_emits_once();
   assigning_an_enriched_builder_emits_each_pending_value_once();
+  completed_batches_keep_their_storage_and_source();
   throwing_sinks_are_not_retried_after_builder_moves();
 }
 
@@ -1717,8 +1942,7 @@ namespace parser_error_messages {
 
 namespace {
 
-// `kind` selects one repair; `std::nullopt` takes whichever the engine made,
-// for a site each engine repairs differently.
+// Without a requested kind, use the first repair.
 std::string message_for(const cursiv::Parser& engine, std::string_view text,
                         std::optional<cursiv::DiagnosticKind> kind) {
   const cursiv::ParseResult result = engine.parse(text);
@@ -1733,7 +1957,7 @@ std::string message_for(const cursiv::Parser& engine, std::string_view text,
 // The sentence of a deletion over [begin, end) of `text`.
 std::string deleted_over(std::string_view text, cursiv::TextOffset begin,
                          cursiv::TextOffset end, bool mixedIndent = false) {
-  const auto engine = tmsg::generated::MessageG::create_parser();
+  const auto engine = tmsg::generated::MessageG::createParser();
   cursiv::ParseDiagnostic d;
   d.kind = cursiv::DiagnosticKind::Deleted;
   d.mixedIndent = mixedIndent;
@@ -1745,7 +1969,7 @@ std::string deleted_over(std::string_view text, cursiv::TextOffset begin,
 
 void a_tight_region_deletion_still_names_the_expectation() {
   const std::unique_ptr<cursiv::Parser> engine =
-      tmsg::generated::MessageG::create_parser();
+      tmsg::generated::MessageG::createParser();
   const std::string message =
       message_for(*engine, "[a ]", cursiv::DiagnosticKind::Deleted);
   CHECK(!message.empty());
@@ -1753,11 +1977,25 @@ void a_tight_region_deletion_still_names_the_expectation() {
   CHECK(message == "Expecting ']'.");
 }
 
+void a_repair_reports_a_bound_that_stops_competing_readings() {
+  const auto engine = tmsg::generated::MessageG::createParser();
+  for (const unsigned count : {8u, 1500u}) {
+    std::string text = "series:0";
+    for (unsigned i = 1; i < count; ++i) text += ",1";
+    text += '.';
+    const auto parsed = engine->parse(text);
+    const auto bounded = std::ranges::find(parsed.diagnostics, cursiv::DiagnosticKind::Bounded,
+                                           &cursiv::ParseDiagnostic::kind);
+    CHECK((bounded != parsed.diagnostics.end()) == (count == 1500));
+    if (bounded != parsed.diagnostics.end()) CHECK(bounded->begin == 7);
+  }
+}
+
 // One refusal where an operand is expected: the sentence names the fault once,
 // never echoing the token back as what it expects.
 void an_unwound_token_matching_the_expectation_is_not_echoed_twice() {
   const std::unique_ptr<cursiv::Parser> engine =
-      tmsg::generated::MessageG::create_parser();
+      tmsg::generated::MessageG::createParser();
   const std::string message = message_for(*engine, "1 + ;", std::nullopt);
   CHECK(!message.empty());
   CHECK(message != "Syntax error");
@@ -1797,6 +2035,27 @@ void a_refused_indentation_says_so() {
   CHECK(deleted_over("a\n  b\n", 2, 5) != "Unexpected indentation.");
 }
 
+// Whether a deletion takes a line's indentation is read from the blanks before
+// it, not from the whole line: many deletions on one long line stay linear.
+void deletions_on_one_long_line_are_worded_in_linear_time() {
+  const auto engine = tmsg::generated::MessageG::createParser();
+  constexpr std::size_t kGap = std::size_t{1} << 14;
+  const std::string line(kGap << 10, 'a');
+  const cursiv::DefaultParserErrorMessageProvider words;
+  cursiv::ParseDiagnostic d;
+  d.kind = cursiv::DiagnosticKind::Deleted;
+  std::size_t worded = 0;
+  const auto begin = std::chrono::steady_clock::now();
+  for (std::size_t at = 0; at < line.size(); at += kGap) {
+    d.begin = static_cast<cursiv::TextOffset>(at);
+    d.end = d.begin + 1;
+    if (words.buildMessage(engine->getGrammar(), d, line) == "Unexpected 'a'.")
+      ++worded;
+  }
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
+  CHECK(worded == line.size() / kGap);
+}
+
 // A deletion the parser marks as a tab against a space says so, whatever else
 // it took: the one cause a reader cannot see. The text alone never says it.
 void a_tab_and_space_mix_says_so() {
@@ -1810,7 +2069,7 @@ void a_tab_and_space_mix_says_so() {
 
 // The end of input is named in words, never by its table name.
 void the_end_of_input_is_named_in_words() {
-  const auto engine = tmsg::generated::MessageG::create_parser();
+  const auto engine = tmsg::generated::MessageG::createParser();
   cursiv::ParseDiagnostic d;
   d.kind = cursiv::DiagnosticKind::Inserted;
   d.element = 0;
@@ -1822,10 +2081,12 @@ void the_end_of_input_is_named_in_words() {
 
 void run() {
   a_tight_region_deletion_still_names_the_expectation();
+  a_repair_reports_a_bound_that_stops_competing_readings();
   an_unwound_token_matching_the_expectation_is_not_echoed_twice();
   a_long_deletion_does_not_split_a_multibyte_character();
   quotes_trim_before_shortening_and_flatten_line_breaks();
   a_refused_indentation_says_so();
+  deletions_on_one_long_line_are_worded_in_linear_time();
   a_tab_and_space_mix_says_so();
   the_end_of_input_is_named_in_words();
 }

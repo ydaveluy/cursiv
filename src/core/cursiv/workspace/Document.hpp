@@ -47,6 +47,11 @@ struct Document : AstNode {
   // themselves are ordered by the build's own phases.
   std::atomic<DocumentState> state = DocumentState::Changed;
 
+  // A language service failed above `state`. Its diagnostic belongs to this
+  // revision.
+  std::atomic<bool> buildFailed = false;
+  void reportBuildFailure(std::string_view message);
+
   ParseResult parseResult;
 
   // What the scope computation found: empty below `ComputedScopes`.

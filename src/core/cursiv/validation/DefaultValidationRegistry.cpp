@@ -41,9 +41,11 @@ void room_for_one(std::vector<T>& elements) {
 
 // A check that throws becomes a diagnostic on its node, and the walk goes on.
 // A cancellation goes straight through.
-void run_one(const ValidationRegistry& registry, const ValidationCheck& check,
-             const AstNode& node, ValidationAcceptor& accept,
-             const CancellationToken& token) {
+CURSIV_ALWAYS_INLINE inline void run_one(const ValidationRegistry& registry,
+                                         const ValidationCheck& check,
+                                         const AstNode& node,
+                                         ValidationAcceptor& accept,
+                                         const CancellationToken& token) {
   try {
     check(node, accept, token);
   } catch (const OperationCancelled&) {
@@ -81,7 +83,7 @@ void DefaultValidationRegistry::handleException(std::exception_ptr failure,
                         std::format("{}: {}", context, what),
                         {},
                         {}};
-  set_data_code(diagnostic, kValidationError);
+  setDataCode(diagnostic, kValidationError);
   accept.accept(std::move(diagnostic));
   services.shared().observabilitySink->publish(
       {.severity = ObservationSeverity::Warning,
@@ -112,41 +114,48 @@ std::size_t DefaultValidationRegistry::slotOf(
   return at;
 }
 
-// The multiplier changes with the table it places, once the table is
-// allocated: a refused allocation leaves both as they were.
-void DefaultValidationRegistry::rehash(std::size_t size, std::uint64_t mul) {
+// Places every tag in a new table under `mul` and says whether each landed on
+// its hash slot. A refused allocation leaves the table and multiplier as they
+// were.
+bool DefaultValidationRegistry::rehash(std::size_t size, std::uint64_t mul) {
   std::vector<Row> old = std::exchange(_byType, std::vector<Row>(size));
   _typeMask = size - 1;
   _mul = mul;
+  bool atHashSlot = true;
   for (Row& row : old)
-    if (row.type != nullptr) _byType[slotOf(row.type)] = std::move(row);
+    if (row.type != nullptr) {
+      const std::size_t at = slotOf(row.type);
+      atHashSlot = atHashSlot && at == hashSlotOf(row.type);
+      _byType[at] = std::move(row);
+    }
+  return atHashSlot;
 }
 
 std::vector<DefaultValidationRegistry::Entry>&
 DefaultValidationRegistry::entriesOf(const AstTypeTag* type) {
   if (_typeCount != 0)
     if (Row& row = _byType[slotOf(type)]; row.type == type) return row.entries;
+  // Whether every tag sits on its hash slot: kept as each tag lands, redone by
+  // each rehash. Only the tag that breaks it searches for another multiplier.
+  const bool held = _hashSlotDecides || _typeCount == 0;
+  bool atHashSlot = held;
   if ((_typeCount + 1) * 4 > _byType.size())
-    rehash(std::max<std::size_t>(16, _byType.size() * 2), _mul);
-  _byType[slotOf(type)].type = type;
+    atHashSlot = rehash(std::max<std::size_t>(16, _byType.size() * 2), _mul);
+  const std::size_t at = slotOf(type);
+  _byType[at].type = type;
   ++_typeCount;
   // Off until the search below has run: a refused one leaves this tag where
   // only the full probe finds it.
   _hashSlotDecides = false;
-  const auto allAtHashSlot = [&] {
-    for (std::size_t at = 0; at < _byType.size(); ++at)
-      if (_byType[at].type != nullptr && hashSlotOf(_byType[at].type) != at)
-        return false;
-    return true;
-  };
+  atHashSlot = atHashSlot && at == hashSlotOf(type);
   // A collision tries other multipliers before a wider table: which tags
   // collide is the addresses', not the grammar's.
-  for (unsigned tries = 1; !allAtHashSlot() && tries <= 64; ++tries)
-    rehash(tries % 8 == 0 && _byType.size() < 16 * _typeCount
-               ? _byType.size() * 2
-               : _byType.size(),
-           _mul + (0x2545f4914f6cdd1dull << 1u));
-  _hashSlotDecides = allAtHashSlot() && _everyNode.empty();
+  for (unsigned tries = 1; held && !atHashSlot && tries <= 64; ++tries)
+    atHashSlot = rehash(tries % 8 == 0 && _byType.size() < 16 * _typeCount
+                            ? _byType.size() * 2
+                            : _byType.size(),
+                        _mul + (0x2545f4914f6cdd1dull << 1u));
+  _hashSlotDecides = atHashSlot && _everyNode.empty();
   return _byType[slotOf(type)].entries;
 }
 
@@ -155,10 +164,10 @@ void DefaultValidationRegistry::fileDocumentCheck(
     const ValidationCategory* category) {
   if (!check) return;
   // The reserved category, refused as discovery refuses it for a per-node
-  // check: a hook hiding in `built_in` would change what that half means.
-  if (category == nullptr || category == &built_in)
+  // check: a hook hiding in `kBuiltIn` would change what that half means.
+  if (category == nullptr || category == &kBuiltIn)
     throw ValidationRegistrationError(
-        "a document check needs a category of its own -- `built_in` is the "
+        "a document check needs a category of its own -- `kBuiltIn` is the "
         "runtime's and null is nobody's");
   // The hook first, so a refused one publishes no category.
   const bool newCategory =
@@ -178,10 +187,10 @@ void DefaultValidationRegistry::registerCheck(
     const ValidationCategory* category) {
   if (!registration.check) return;
   // The reserved category, refused as it is for a document hook: a check hiding
-  // in `built_in` would change what that half means.
-  if (category == nullptr || category == &built_in)
+  // in `kBuiltIn` would change what that half means.
+  if (category == nullptr || category == &kBuiltIn)
     throw ValidationRegistrationError(
-        "a check needs a category of its own -- `built_in` is the runtime's "
+        "a check needs a category of its own -- `kBuiltIn` is the runtime's "
         "and null is nobody's");
   // A catch-all check needs no reflection. Otherwise an exact check is filed
   // under its own tag, and an ordinary one under every tag of its family.

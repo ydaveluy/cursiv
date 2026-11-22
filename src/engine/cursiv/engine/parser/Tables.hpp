@@ -1,0 +1,305 @@
+// What the generator writes beside a language's code and the runtime reads:
+// the lexer's automaton for the tokens the code does not read by constants,
+// and what is known of each terminal.
+#pragma once
+
+#include <algorithm>
+#include <compare>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/macros.hpp"
+#include "cursiv/text/unicode/UnicodeRange.hpp"
+
+namespace cursiv::engine {
+
+inline constexpr std::uint16_t kNoToken = 0xFFFF;
+inline constexpr std::uint32_t kNoStack = 0xFFFFFFFFu;
+// The terminal that stands for the end of input.
+inline constexpr std::uint16_t kEndOfInput = 0;
+// No production: what a token is derived by.
+inline constexpr std::uint32_t kNoProduction = 0xFFFFFFFFu;
+// Some production, which one is not told.
+inline constexpr std::uint32_t kSomeProduction = 0xFFFFFFFEu;
+
+// What must hold for a terminal to have read a token: that no word goes on
+// past the token's end, that the input ends where the lexer stands, or what
+// the conditions of a list of `Tables::waits` say of the text from there on.
+// With `match`, the automaton read the token's first bytes only: the matcher
+// reads it from its first byte.
+enum class LexTest : std::uint8_t { none, match, word, eof, waits };
+
+// A `lexWin` word below `kWinNone` is the terminal read, with no test and
+// nothing read past its end; one above it is `kWinResolved | index of a
+// resolution`.
+inline constexpr std::uint16_t kWinResolved = 0x8000;
+inline constexpr std::uint16_t kWinNone = 0x7FFF;
+
+// How the terminals ending in one lexer state read in one mode: `token`,
+// with `back` bytes read past its end, where `test` holds; else what the
+// `lexWin` word `otherwise` reads.
+struct LexResolution {
+  std::uint16_t token = kNoToken;
+  std::uint16_t otherwise = kWinNone;
+  std::uint8_t back = 0;
+  LexTest test = LexTest::none;
+  // `token` is a keyword: once read, no trivia that begins with it and reads
+  // on replaces it. Only tests name `token` in the mode: it replaces no
+  // trivia, and gives way to any token that ends where it does.
+  bool keyword : 1 = false;
+  bool named : 1 = false;
+  bool literal : 1 = false;  // The literal branch of a mixed terminal.
+  // The list of conditions a `waits` test reads; the entry the matcher reads
+  // a `match` test's terminal from.
+  std::uint16_t waits = 0;
+  friend auto operator<=>(const LexResolution&, const LexResolution&) = default;
+};
+
+// A small automaton over bytes that a condition reads text with: state 0 is
+// dead and state 1 the start. `flags[state]` has bit 0 where the text read
+// matches, bit 1 where it does if the input ends there.
+struct TextMonitor {
+  const std::uint8_t* byteClass = nullptr;
+  const std::uint16_t* next = nullptr;
+  const std::uint8_t* flags = nullptr;
+  std::uint16_t classes = 0;
+};
+
+// How a terminal stands among the tokens: read into the tree, kept beside it
+// or dropped.
+enum class Trivia : std::uint8_t { none, hidden, ignored };
+
+constexpr std::uint8_t lexical_rank(Trivia trivia, bool literal) {
+  return (trivia != Trivia::none ? 2 : 0) + !literal;
+}
+
+// What a production can find written when it closes its record: nothing, one
+// record it takes over, or several it closes under a new one.
+enum : unsigned { kRecordEmpty = 1, kRecordLone = 2, kRecordSeveral = 4 };
+
+// The tags of marks a grammar may have: each thread of the matcher holds a
+// mark of each.
+inline constexpr std::uint32_t kMatchTags = 4;
+
+struct Machine;
+struct Prediction {
+  std::uint32_t arm = kNoStack;
+  // End of the predicted token when every other reader fails to lex one.
+  TextOffset soleEnd = 0;
+};
+class Matching;
+struct Explorer;
+struct Repairer;
+struct Token;
+
+// An explorer also stops after a shift or when another reading already
+// follows its continuation. A split supplies the actions to resume from.
+enum class Exit : std::uint8_t { accepted, refused, shifted, split, joined };
+
+// The token a state reads at `p`: the first past the trivia there.
+using Reader = Token (*)(Machine&, const char* p);
+inline constexpr std::uint16_t kLexStop = 0xFFFE;
+inline constexpr std::uint16_t kLexWalk = 0xFFFF;
+
+// DFA rows share identical blocks, including each row's short final block.
+struct LexBlocks {
+  static constexpr std::uint32_t kWidth = 16;
+  const std::uint16_t* values = nullptr;
+  const std::uint32_t* offsets = nullptr;
+
+  static constexpr std::uint32_t count(std::uint32_t width) {
+    return (width + kWidth - 1) / kWidth;
+  }
+  std::uint16_t at(std::uint32_t row, std::uint32_t i) const {
+    return values[offsets[row + i / kWidth] + i % kWidth];
+  }
+};
+
+// Transition row and sets of terminals that end here or remain reachable.
+struct LexState {
+  std::uint32_t row;
+  std::uint16_t accept;
+  std::uint16_t reach;
+};
+
+// A mode's reader and its shared rows: the winner for each accept set,
+// and a bit per state where a terminal can end beyond it.
+struct LexMode {
+  Reader read;
+  LexBlocks win;
+  const std::uint8_t* onward;
+};
+
+// The end, at most `end`, of the bytes from `p` on that are flagged in `in`.
+using RunScanner = const char* (*)(const std::uint8_t* in, const char* p,
+                                   const char* end);
+
+struct Tables {
+  // The language's code: its states, which read a text, and the scanner of
+  // each set of `runSets`.
+  Exit (*drive)(Machine&) = nullptr;
+  // The same states over a machine that writes no tree, and over one that
+  // writes a token the text does not hold as written.
+  Exit (*explore)(Explorer&) = nullptr;
+  Exit (*repair)(Repairer&) = nullptr;
+  const RunScanner* runScanners = nullptr;
+
+  // The lexer's automaton. State 0 is dead and state 1 the start.
+  const std::uint8_t* byteClass = nullptr;
+  LexBlocks lexNext;
+  const LexState* lexStates = nullptr;
+  std::uint16_t transition(std::uint32_t state, unsigned cls) const {
+    return lexNext.at(lexStates[state].row, cls);
+  }
+  // Per state, one past its set of `runSets`: the bytes that keep it in that
+  // state. A set is 256 flags.
+  const std::uint8_t* lexRun = nullptr;
+  const std::uint8_t* runSets = nullptr;
+  const LexResolution* resolutions = nullptr;
+  // Per state, the offset of its counted list of successors in byte-class order.
+  const std::uint32_t* lexLeadAt = nullptr;
+  const std::uint16_t* lexLeads = nullptr;
+  // Per state, whether it reads on in a loop: the body of a token that waits
+  // for its closer, where the mode in hand ends no token there; and the bytes
+  // a token with such a body can begin with, 256 flags.
+  const std::uint8_t* lexBodies = nullptr;
+  const std::uint8_t* lexOpeners = nullptr;
+  // The grammar's word class. Per byte: 0 where no word goes on with it, 1
+  // where one does, 2 where the scalar it leads is to be read; then the
+  // class's scalars past ASCII, and whether it holds a byte that starts none.
+  const std::uint8_t* wordBytes = nullptr;
+  const unicode::Range* wordRanges = nullptr;
+  std::uint32_t wordRangeCount = 0;
+  bool wordInvalid = false;
+  // The width of the next word character, zero outside the word class.
+  CURSIV_ALWAYS_INLINE std::size_t word_width(const char* p, const char* limit) const {
+    if (p == limit) return 0;
+    const auto width = wordBytes[static_cast<unsigned char>(*p)];
+    return width > 1 ? wide_word_width(p, limit) : width;
+  }
+  [[nodiscard]] std::size_t wide_word_width(const char* p, const char* limit) const;
+  std::uint16_t lexClassCount = 0;
+
+  // Per terminal: how it stands among the tokens, its rank where several end
+  // at one place, the lowest winning, and the entry of its leaf where no
+  // directive stands over it, `kNoElement` for none. The terminal past the
+  // last stands for text no terminal reads.
+  const Trivia* terminalTrivia = nullptr;
+  const std::uint8_t* terminalRank = nullptr;
+  const std::uint16_t* terminalEntry = nullptr;
+  std::uint16_t terminalCount = 0;
+  // The terminals indentation makes, 0 where the language reads none.
+  std::uint16_t indentTerminal = 0;
+  std::uint16_t dedentTerminal = 0;
+  // Per terminal, its place where terminals are listed for a reader: the
+  // named ones, then the tokens written in the rules.
+  const std::uint16_t* terminalOrder = nullptr;
+  // Whether some terminal is kept beside the tree: the states then write
+  // what waits before each token they shift.
+  bool hides = false;
+  // Sets of terminals, a set being `followWords` words; per state, the set of
+  // those it has an action for.
+  const std::uint64_t* terminalSets = nullptr;
+  const std::uint16_t* followOf = nullptr;
+  std::uint32_t followWords = 0;
+  // Per state, one more than its list of `insertWord`, 0 for none: list `k`
+  // is `insertWord[insertAt[k]]` up to `insertWord[insertAt[k + 1]]`, the
+  // terminals a repair tries first there, in order. The others follow by
+  // number.
+  const std::uint32_t* insertOf = nullptr;
+  const std::uint32_t* insertAt = nullptr;
+  const std::uint16_t* insertWord = nullptr;
+  // Whether the state's lexical choice can depend on its stack.
+  const std::uint8_t* retries = nullptr;
+  // Per state, the keyword it acts on where it acts on nothing else and the
+  // keyword is spelled as a word; `kNoToken` for none.
+  const std::uint16_t* forced = nullptr;
+  // Per state, the set of the terminals a repair may have to insert there:
+  // the first of the shortest ends of the constructs it is in. Then the most
+  // tokens the shortest reading of a production takes.
+  const std::uint16_t* closeOf = nullptr;
+  std::uint64_t closeMost = 0;
+  // Per state, the set of the terminals whose insertion there may be
+  // required: those of its `close` set, and those it reduces on that a state
+  // reached then may need.
+  const std::uint16_t* mayCloseOf = nullptr;
+  // Per state, the mode it reads in, `kNoToken` where it reads no token; per
+  // mode, how its states read a token, null where none reads in it.
+  const std::uint16_t* stateMode = nullptr;
+  std::span<const LexMode> modes;
+  // The bytes dropped before a token without being read as one: 256 flags.
+  const std::uint8_t* skipBytes = nullptr;
+  // Per mode, the mode the text of a fault of its states is read in.
+  const std::uint16_t* modeFault = nullptr;
+  // Per mode, the terminal that closes the section its states read in,
+  // `kNoToken` where none does; null where the grammar has no section.
+  const std::uint16_t* modeClose = nullptr;
+  // The conditions a lexer leaves to be read once a token ends: list `k` is
+  // `waitWord[waitAt[k]]` up to `waitWord[waitAt[k + 1]]`, three words a
+  // condition: its monitor of `monitors`, whether it must not match, and the
+  // state its monitor is in.
+  const TextMonitor* monitors = nullptr;
+  const std::uint32_t* waitAt = nullptr;
+  const std::uint32_t* waitWord = nullptr;
+  // The matcher's automaton, read from an entry: null where no terminal
+  // needs it.
+  void (*match)(Machine&, Matching&) = nullptr;
+  // Per tie of terminals that read one text where a state expects them, a
+  // bit a set of terminals ending together that such a text leads to: a row
+  // is `tieWords` words.
+  const std::uint64_t* lexTies = nullptr;
+  std::uint32_t tieWords = 0;
+  // For elections, each production's size and rank << 2. Bit 1 marks left
+  // recursion, bit 0 a turn over a left-recursive or unordered prefix.
+  const std::uint32_t* productionSize = nullptr;
+  const std::uint32_t* productionOrder = nullptr;
+  // Lists begin with their length. Each block holds up to 16 productions
+  // or child block offsets; word 0 gives the shift for the outermost block.
+  static constexpr unsigned unitBits = 4;
+  const std::uint32_t* unitWord = nullptr;
+  std::uint32_t unitProduction(std::uint32_t list, std::uint32_t level) const {
+    constexpr auto mask = (1u << unitBits) - 1;
+    auto block = list + 1;
+    for (auto shift = unitWord[0]; shift; shift -= unitBits)
+      block = unitWord[block + ((level >> shift) & mask)];
+    return unitWord[block + (level & mask)];
+  }
+  // Unit productions crossed from a state on a symbol. Nonempty rows share
+  // sorted (symbol, hop list) pairs. A shifted token uses its terminal as symbol.
+  const std::uint32_t* productionSymbol = nullptr;
+  const std::uint32_t* derivationOf = nullptr;
+  const std::uint32_t* derivationAt = nullptr;
+  const std::uint64_t* derivationWord = nullptr;
+  std::uint32_t derivation(std::uint32_t from, std::uint32_t production, std::uint16_t terminal) const {
+    if (!derivationOf || !derivationOf[from]) return 0;
+    const auto row = derivationOf[from];
+    const auto symbol = production == kNoProduction ? terminal : productionSymbol[production];
+    const auto* end = derivationWord + derivationAt[row];
+    const auto* at = std::lower_bound(derivationWord + derivationAt[row - 1], end, std::uint64_t{symbol} << 32);
+    return at != end && (*at >> 32) == symbol ? static_cast<std::uint32_t>(*at) : 0;
+  }
+  // Per state, what a symbol read into it over the left operand of a left
+  // recursion begins: `kNoProduction` for no turn of that recursion; else
+  // the turn, and the production of the turn's second symbol it begins,
+  // `kNoProduction` where it is that symbol itself. `kSomeProduction` where
+  // the state does not tell.
+  const std::uint32_t* turnOf = nullptr;
+  const std::uint32_t* turnVia = nullptr;
+
+  // The arm a short prefix proves, kNoStack where none is proved.
+  Prediction (*predict)(Machine&) = nullptr;
+  // Per DFA accept set, the terminals sharing that end. Null when no end is shared.
+  const std::uint16_t* lexTieEnds = nullptr;
+
+  // The words of set `set` of `terminalSets`, and whether it holds `terminal`.
+  [[nodiscard]] const std::uint64_t* setOf(std::uint32_t set) const {
+    return terminalSets + std::size_t{set} * followWords;
+  }
+  [[nodiscard]] bool inSet(std::uint32_t set, std::uint16_t terminal) const {
+    return ((setOf(set)[terminal / 64] >> (terminal % 64)) & 1) != 0;
+  }
+};
+
+}  // namespace cursiv::engine

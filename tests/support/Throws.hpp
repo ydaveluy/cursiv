@@ -5,7 +5,7 @@
 namespace support {
 
 template <class Error>
-bool throws(cursiv::function_ref<void()> action) {
+bool throws(cursiv::FunctionRef<void()> action) {
   try {
     action();
   } catch (const Error&) {

@@ -25,9 +25,23 @@ struct parents_of<G> {
   using type = typename G::parents;
 };
 
-// A merely-declared `override<R>` is incomplete, so the answer is "no".
+// Index a grammar's local replacements once by target.
+template <class L>
+struct replacements;
+template <class... Rs>
+struct replacements<TypeList<Rs...>> {
+  using targets = TypeList<typename Rs::target...>;
+  using index = idx_tree<std::index_sequence_for<Rs...>, targets>;
+  static_assert((requires { index::at(std::type_identity<typename Rs::target>{}); } && ...),
+                "a grammar replaces the same target twice in its overrides list");
+  template <class R>
+  using find = tl_at_t<index_of<R, targets>::value,
+                       TypeList<typename Rs::definition..., void>>;
+};
 template <class G, class R>
-concept HasOverride = requires { typename G::template override<R>::kind; };
+using local_override = typename replacements<typename G::overrides>::template find<R>;
+template <class G, class R>
+concept HasOverride = !std::is_void_v<local_override<G, R>>;
 
 template <class G, class R>
 struct overrides_rule_of;
@@ -55,7 +69,7 @@ struct one_per_decl {
 };
 template <class R, class W, class... Ws, class Decls>
 struct one_per_decl<R, TypeList<W, Ws...>, Decls> {
-  using D = typename override_decl<W, R>::type;
+  using D = typename override_decl<W, R>::owner;
   using rest = typename one_per_decl<R, TypeList<Ws...>,
                                      tl_cat_t<Decls, TypeList<D>>>::type;
   using type =
@@ -116,8 +130,6 @@ struct plug<B, Choice<Es...>, TypeList<Es...>> {
   using type = flat_of_t<Choice, plug_t<B, Es>...>;
 };
 
-// On a bool, never a `conditional_t`: the absent branch would instantiate
-// `override<R>` on a grammar that has none.
 template <class G, class R, bool Has = HasOverride<G, R>>
 struct eff_body;
 template <class G, class R>
@@ -150,9 +162,16 @@ struct super_body {
 // Overridden: the override's body, with `super` replaced by the previous body.
 template <class G, class R>
 struct eff_body<G, R, true> {
-  using type =
-      plug_t<super_body<G, R>,
-             std::remove_cv_t<decltype(G::template override<R>::body)>>;
+  using O = local_override<G, R>;
+  static auto substituted() {
+    if constexpr (requires { typename O::expression; }) {
+      using E = plug_t<super_body<G, R>, typename O::expression>;
+      return Rule<E{}>::body;
+    } else {
+      return plug_t<super_body<G, R>, std::remove_cv_t<decltype(O::body)>>{};
+    }
+  }
+  using type = decltype(substituted());
 };
 
 template <class W, class R>
@@ -163,7 +182,7 @@ template <class G, class R, bool Here>
 struct override_decl : override_decl_up<standing_t<R, G>, R> {};
 template <class G, class R>
 struct override_decl<G, R, true> {
-  using type = typename G::template override<R>;
+  using type = local_override<G, R>;
   using owner = G;
 };
 
@@ -461,15 +480,6 @@ struct look<Nest<T, P, E>> : blank {
   static constexpr bool wraps = true, touches = true, inside = look<E>::may;
 };
 
-// Elements in order: a call is late once something before it touched the
-// node.
-template <bool Dirty, class L>
-inline constexpr bool late_in = false;
-template <bool Dirty, class E, class... Es>
-inline constexpr bool late_in<Dirty, TypeList<E, Es...>> =
-    (look<E>::adopts && Dirty) || look<E>::late ||
-    late_in<Dirty || look<E>::touches, TypeList<Es...>>;
-
 // A sequence heads with its head region, wherever the algebra put it.
 template <class... Es>
 struct look<Seq<Es...>> {
@@ -482,7 +492,15 @@ struct look<Seq<Es...>> {
   static constexpr bool inside =
       (look<Es>::inside || ...) ||
       (0u + ... + static_cast<unsigned>(look<Es>::may)) > 1u;
-  static constexpr bool late = late_in<false, TypeList<Es...>>;
+  static constexpr bool late = [] {
+    bool touched = false, found = false;
+    const auto read = [&](bool adopts, bool touches, bool late) {
+      found |= late || (touched && adopts);
+      touched |= touches;
+    };
+    (read(look<Es>::adopts, look<Es>::touches, look<Es>::late), ...);
+    return found;
+  }();
 };
 template <class... Es>
 struct look<Unordered<Es...>> : look<Seq<Es...>> {
@@ -546,29 +564,28 @@ struct alt_parts<Seq<Es...>> {
 
 // The creation claims only what stands before the first wrapper, as a spelled
 // create does.
-template <bool Stop, class Acc, class Rest>
-struct cut_step;
-template <class Acc, class Rest>
-struct cut;
-template <class... Ps>
-struct cut<TypeList<Ps...>, TypeList<>> {
-  using head = TypeList<Ps...>;
+template <class L>
+struct cut {
+  using head = L;
   using rest = TypeList<>;
 };
-template <class... Ps, class E, class... Rs>
-struct cut<TypeList<Ps...>, TypeList<E, Rs...>>
-    : cut_step<look<E>::wraps, TypeList<Ps...>, TypeList<E, Rs...>> {};
-template <class... Ps, class E, class... Rs>
-struct cut_step<true, TypeList<Ps...>, TypeList<E, Rs...>> {
-  using head = TypeList<Ps...>;
-  using rest = TypeList<E, Rs...>;
-};
-template <class... Ps, class E, class... Rs>
-struct cut_step<false, TypeList<Ps...>, TypeList<E, Rs...>>
-    : cut<TypeList<Ps..., E>, TypeList<Rs...>> {};
+template <class... Es>
+  requires (look<Es>::wraps || ...)
+struct cut<TypeList<Es...>> {
+  static constexpr std::size_t first = [] {
+    constexpr bool wraps[] = {look<Es>::wraps...};
+    std::size_t i = 0;
+    while (!wraps[i]) ++i;
+    return i;
+  }();
 
+  template <std::size_t Start, std::size_t... Is>
+  static auto slice(std::index_sequence<Is...>) -> TypeList<pack_at_t<Start + Is, Es...>...>;
+  using head = decltype(slice<0>(std::make_index_sequence<first>{}));
+  using rest = decltype(slice<first>(std::make_index_sequence<sizeof...(Es) - first>{}));
+};
 template <class A>
-using parts = cut<TypeList<>, typename alt_parts<A>::type>;
+using parts = cut<typename alt_parts<A>::type>;
 
 // The head the parts imply is the most derived class declaring the members
 // they write; the rule's class stands where they write nothing.
@@ -672,24 +689,13 @@ struct chain<TypeList<E, Rest...>, Head, Any> {
   static constexpr bool twice = (L::may && Any) || L::inside || next::twice;
   static constexpr bool bare = (wraps && !Head) || next::bare;
 };
-template <class L>
-inline constexpr bool late_call = late_in<false, L>;
-
-// An alternative that creates nothing starts on the node it adopts: a write
-// after the call goes there.
-template <class A, bool Creates = is_self_resolving<A>>
-struct hand_at_start {
-  using type = TypeList<>;
-};
-template <class A>
-struct hand_at_start<A, false> : adopt_cands<A, TypeList<>> {};
 
 // A failure here is a grammar this stage cannot complete. `Over` marks an
 // override, whose type is the base rule's.
 template <class RT, class A, bool Over>
 struct checked {
   using c = chain<typename alt_parts<A>::type>;
-  using hand = typename in_hand<typename hand_at_start<A>::type, A, true>::type;
+  using hand = typename in_hand<TypeList<>, A, true>::type;
   static_assert(!Over || all_derive<hand, RT>,
                 "this override builds a class outside the type of the rule it "
                 "overrides: every caller of the rule expects that type, so the "
@@ -710,7 +716,7 @@ struct checked {
       "and may then wrap it with nests. A branch of a choice that starts a "
       "node counts as one start, and each turn of a repetition of such a "
       "branch counts as another");
-  static_assert(!late_call<typename alt_parts<A>::type>,
+  static_assert(!look<A>::late,
                 "this alternative calls a rule that builds a node after the "
                 "current node was written, created or nested: a call adopts "
                 "its node only while the current node is still empty, and the "

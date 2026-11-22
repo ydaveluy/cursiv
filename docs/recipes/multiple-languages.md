@@ -48,18 +48,18 @@ Define one installer per language and register both in the shared services:
 namespace req {
 
 void install_requirements_core_module(RequirementsCoreServices& services) {
-  req::generated::Requirements::install_generated_module(services);
+  req::generated::Requirements::installGeneratedModule(services);
 }
 
 void install_tests_core_module(RequirementsCoreServices& services) {
-  req::generated::Tests::install_generated_module(services);
+  req::generated::Tests::installGeneratedModule(services);
 }
 
 void register_core_services(cursiv::SharedCoreServices& shared) {
-  cursiv::register_language<RequirementsCoreServices,
+  cursiv::registerLanguage<RequirementsCoreServices,
                             RequirementsSharedCoreServices,
                             install_requirements_core_module>(shared);
-  cursiv::register_language<RequirementsCoreServices,
+  cursiv::registerLanguage<RequirementsCoreServices,
                             RequirementsSharedCoreServices,
                             install_tests_core_module>(shared);
 }
@@ -67,10 +67,10 @@ void register_core_services(cursiv::SharedCoreServices& shared) {
 }  // namespace req
 ```
 
-Each call creates its own services, even with the same container class. Add
-each language's validation checks to its installer. The document's extension
-selects the language: `a.req` uses the first, `a.tst` the second. The CLI's
-`--help` lists both:
+Each call creates its own services. Register each language's checks in its
+installer. For a file on disk, an exact `FILE_NAMES` match takes priority over
+`EXTENSIONS`. Here `a.req` selects Requirements and `a.tst` selects Tests.
+The CLI's `--help` lists both:
 
 ```
 $ requirements_cli --help
@@ -93,7 +93,7 @@ The command line takes the function that registers both languages:
 #include "requirements/CoreModule.hpp"
 
 int main(int argc, char** argv) {
-  return cursiv::run_cli<req::RequirementsSharedCoreServices>(
+  return cursiv::runCli<req::RequirementsSharedCoreServices>(
       argc, argv, &req::register_core_services);
 }
 ```

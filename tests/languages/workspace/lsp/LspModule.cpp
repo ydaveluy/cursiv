@@ -13,7 +13,7 @@
 namespace ws {
 
 void install_lsp_module(WorkspaceServices& services) {
-  cursiv::install_default_lsp_services(services);
+  cursiv::installDefaultLspServices(services);
   services.semanticTokenProvider =
       std::make_unique<const cursiv::GrammarSemanticTokenProvider>(services);
   services.formatter = std::make_unique<const WorkspaceFormatter>(services);
@@ -24,7 +24,7 @@ void install_lsp_module(WorkspaceServices& services) {
 std::unique_ptr<WorkspaceServices> create_lsp_services(
     WorkspaceSharedServices& sharedServices) {
   auto services = std::make_unique<WorkspaceServices>(sharedServices);
-  cursiv::install_default_core_services(*services);
+  cursiv::installDefaultCoreServices(*services);
   install_core_module(*services);
   install_lsp_module(*services);
   return services;
@@ -32,7 +32,7 @@ std::unique_ptr<WorkspaceServices> create_lsp_services(
 
 WorkspaceLanguage create_lsp_services() {
   auto shared = std::make_unique<WorkspaceSharedServices>();
-  cursiv::install_default_shared_lsp_services(*shared);
+  cursiv::installDefaultSharedLspServices(*shared);
   auto services = create_lsp_services(*shared);
   WorkspaceServices& language = *services;
   shared->serviceRegistry->registerServices(std::move(services));

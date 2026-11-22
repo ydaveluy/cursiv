@@ -4,6 +4,6 @@
 #include "cursiv/runtime/LanguageServerMain.hpp"
 
 int main(int argc, char** argv) {
-  return cursiv::run_language_server_main<arith::ArithmeticsSharedServices>(
+  return cursiv::runLanguageServerMain<arith::ArithmeticsSharedServices>(
       argc, argv, "arithmetics-lsp", &arith::register_lsp_services);
 }

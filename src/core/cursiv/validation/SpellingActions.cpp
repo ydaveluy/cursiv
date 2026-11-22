@@ -98,13 +98,13 @@ JsonValue::Array near_names(const Document& document,
   std::unordered_set<std::string_view> seen;
   (void)language.scopeProvider->visitScopeEntries(
       site, [&](const AstNodeDescription& entry) {
-        throw_if_cancelled(token);
+        throwIfCancelled(token);
         if (entry.name.size() + limit < text.size() ||
             text.size() + limit < entry.name.size())
           return true;
         // A case that differs is the likeliest slip, ahead of any edit.
         const std::size_t distance =
-            folded_equal(entry.name, text)
+            foldedEqual(entry.name, text)
                 ? 0
                 : edit_distance(entry.name, text, limit);
         if (distance > limit) return true;
@@ -119,8 +119,8 @@ JsonValue::Array near_names(const Document& document,
       });
   for (const Near& n : near)
     rows.push_back(detail::make_action_row(
-        detail::kReplaceEdit, std::format("Replace with '{}'", n.name), range,
-        std::string(n.name), document.buildRevision));
+        std::format("Replace with '{}'", n.name), range, std::string(n.name),
+        document.buildRevision));
   return rows;
 }
 
@@ -128,14 +128,15 @@ JsonValue::Array near_names(const Document& document,
 
 std::vector<JsonValue::Array> detail::spelling_actions(
     const Document& document, std::span<const Diagnostic* const> diagnostics,
-    const CancellationToken& token) {
+    unsigned& spelt, const CancellationToken& token) {
   std::vector<JsonValue::Array> rows(diagnostics.size());
   const DocumentReferences* const references =
       document.parseResult.references.get();
   const auto asked = [](const Diagnostic& d) {
-    return data_code(d) == kLinkingError && d.range.begin != d.range.end;
+    return dataCode(d) == kLinkingError && d.range.begin != d.range.end;
   };
   if (references == nullptr || document.language == nullptr ||
+      spelt >= kSpelledSites ||
       std::ranges::none_of(diagnostics, [&](const Diagnostic* d) {
         return asked(*d);
       }))
@@ -146,14 +147,13 @@ std::vector<JsonValue::Array> detail::spelling_actions(
     if (const Diagnostic& d = *diagnostics[i]; asked(d))
       wanted.emplace_back(d.range.begin, d.range.end, i);
   std::ranges::sort(wanted);
-  // The sites one request is served, in the order the validator lists them.
-  unsigned spelt = 0;
+  // The sites are spelt in the order the validator lists them.
   references->visitUnresolved(
       document.parseResult.cst(),
       [&](RefState why, TextOffset begin, TextOffset end,
           const ReferenceInfo& site) {
         if (why != RefState::ErrorNotFound || begin == end ||
-            spelt == kSpelledSites)
+            spelt >= kSpelledSites)
           return;
         bool here = false;
         for (auto at = std::ranges::lower_bound(

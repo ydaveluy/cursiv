@@ -45,9 +45,9 @@ enum class Property : unsigned {
   Zl,
   Zp,
   Zs,
-  XID_Start,
-  XID_Continue,
-  White_Space,
+  XidStart,
+  XidContinue,
+  WhiteSpace,
   Alphabetic,
   Count
 };

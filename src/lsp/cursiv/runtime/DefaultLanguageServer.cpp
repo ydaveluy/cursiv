@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -79,36 +80,6 @@ namespace cursiv {
 
 namespace {
 
-// The two scales match by name, not by number: `Severity` is the wire
-// value, `lsp::DiagnosticSeverity` a zero-based index into the table
-// that emits it -- a cast would shift every squiggle one level.
-[[nodiscard]] lsp::DiagnosticSeverity to_lsp_severity(
-    DiagnosticSeverity severity) {
-  switch (severity) {
-    case DiagnosticSeverity::Warning:
-      return lsp::DiagnosticSeverity::Warning;
-    case DiagnosticSeverity::Information:
-      return lsp::DiagnosticSeverity::Information;
-    case DiagnosticSeverity::Hint:
-      return lsp::DiagnosticSeverity::Hint;
-    case DiagnosticSeverity::Error:
-      break;
-  }
-  return lsp::DiagnosticSeverity::Error;
-}
-
-// The same name-not-number rule as the severities above: `lsp::DiagnosticTag`
-// is a zero-based index and the wire value it emits through is one past it.
-[[nodiscard]] lsp::DiagnosticTag to_lsp_tag(DiagnosticTag tag) {
-  switch (tag) {
-    case DiagnosticTag::Deprecated:
-      return lsp::DiagnosticTag::Deprecated;
-    case DiagnosticTag::Unnecessary:
-      break;
-  }
-  return lsp::DiagnosticTag::Unnecessary;
-}
-
 // Whether a closed document has saved content to fall back to: a URI the
 // content provider serves, or one the file system provider can answer for.
 [[nodiscard]] bool has_saved_content(const FileSystemProvider& files,
@@ -120,7 +91,7 @@ namespace {
         uri.substr(0, colon == std::string_view::npos ? 0 : colon);
     if (!scheme.empty() &&
         std::ranges::any_of(content->schemes(), [&](const std::string& own) {
-          return folded_equal(own, scheme);
+          return foldedEqual(own, scheme);
         }))
       return true;
   }
@@ -219,12 +190,12 @@ void merge_semantic_tokens_options(
   if (!announced(into->range) || !announced(options.range)) into->range.reset();
 }
 
-[[nodiscard]] bool lists_markdown(
+[[nodiscard]] bool prefers_markdown(
     const std::optional<lsp::Array<lsp::MarkupKindEnum>>& formats) {
-  return formats.has_value() &&
-         std::ranges::any_of(*formats, [](const lsp::MarkupKindEnum& kind) {
-           return kind == lsp::MarkupKind::Markdown;
-         });
+  if (formats)
+    for (const auto& kind : *formats)
+      if (!kind.hasCustomValue()) return kind == lsp::MarkupKind::Markdown;
+  return false;
 }
 
 // Labels the providers' markdown as plain text, for a client that does not
@@ -236,7 +207,7 @@ void as_plain_text(lsp::MarkupContent& content) {
 
 // A `didChange`'s changes in the core's units, strings copied: the params do
 // not outlive the call.
-std::vector<TextDocumentContentChangeEvent> from_lsp(
+std::vector<TextDocumentContentChangeEvent> fromLsp(
     std::span<const lsp::TextDocumentContentChangeEvent> changes) {
   std::vector<TextDocumentContentChangeEvent> converted;
   converted.reserve(changes.size());
@@ -248,7 +219,7 @@ std::vector<TextDocumentContentChangeEvent> from_lsp(
     }
     const auto& ranged =
         std::get<lsp::TextDocumentContentChangePartial>(change);
-    converted.emplace_back(cursiv::from_lsp(ranged.range), ranged.text);
+    converted.emplace_back(cursiv::fromLsp(ranged.range), ranged.text);
   }
   return converted;
 }
@@ -303,11 +274,11 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
         _folders.emplace_back(folder.uri.toString(), folder.name);
   } else if (!params.rootUri.isNull()) {
     const std::string uri = params.rootUri->toString();
-    _folders.emplace_back(uri, uri_file_name(uri));
+    _folders.emplace_back(uri, uriFileName(uri));
   } else if (params.rootPath.has_value() && !params.rootPath->isNull() &&
              !params.rootPath->value().empty()) {
-    const std::string uri = path_to_file_uri(params.rootPath->value());
-    _folders.emplace_back(uri, uri_file_name(uri));
+    const std::string uri = pathToFileUri(params.rootPath->value());
+    _folders.emplace_back(uri, uriFileName(uri));
   }
   _scanPending = !_folders.empty();
   // Whether the client accepts the file watcher registered at `initialized`.
@@ -316,8 +287,7 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
       params.capabilities.workspace->didChangeWatchedFiles.has_value() &&
       params.capabilities.workspace->didChangeWatchedFiles->dynamicRegistration
           .value_or(false);
-  // Versioned edits let the client refuse a quick fix that went stale after
-  // it was built.
+  // Open documents carry their version in edits the client can check.
   _versionedEdits =
       params.capabilities.workspace.has_value() &&
       params.capabilities.workspace->workspaceEdit.has_value() &&
@@ -327,11 +297,11 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
   _markdownCompletion = false;
   if (const auto& text = params.capabilities.textDocument) {
     if (text->hover.has_value())
-      _markdownHover = lists_markdown(text->hover->contentFormat);
+      _markdownHover = prefers_markdown(text->hover->contentFormat);
     if (text->completion.has_value() &&
         text->completion->completionItem.has_value())
-      _markdownCompletion =
-          lists_markdown(text->completion->completionItem->documentationFormat);
+      _markdownCompletion = prefers_markdown(
+          text->completion->completionItem->documentationFormat);
   }
   if (ConfigurationProvider* configuration =
           _shared.configurationProvider.get())
@@ -491,6 +461,14 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
           _shared.workspaceSymbolProvider.get()) {
     lsp::WorkspaceSymbolOptions options;
     options.resolveProvider = symbols->resolvesSymbols();
+    const auto& workspace = params.capabilities.workspace;
+    _eagerSymbolRanges = *options.resolveProvider;
+    if (_eagerSymbolRanges && workspace && workspace->symbol &&
+        workspace->symbol->resolveSupport) {
+      const auto& properties = workspace->symbol->resolveSupport->properties;
+      _eagerSymbolRanges =
+          std::ranges::find(properties, "location.range") == properties.end();
+    }
     result.capabilities.workspaceSymbolProvider = options;
   }
   // The names are asked once, here: a command the handshake never
@@ -635,37 +613,24 @@ void DefaultLanguageServer::openText(const lsp::TextDocumentItem& item,
                                      TextChanges& changes) {
   std::string uri = item.uri.toString();
   Documents& documents = *_shared.documents;
-  const std::shared_ptr<Document> existing = documents.getDocument(uri);
-  // The language is asked about the uri the document was bound with.
-  const std::string normalized = normalize_uri(uri);
-  const bool moved =
-      existing == nullptr || existing->textDocument().getText() != item.text ||
-      existing->language != _shared.serviceRegistry->findServices(
-                                normalized, item.languageId.value());
-  // Recorded before the text moves: a text installed is a text built.
-  if (moved) {
-    std::erase(changes.deleted, uri);
-    changes.changed.push_back(uri);
+  auto document = documents.getDocument(uri);
+  if (document && document->textDocument().getText() == item.text &&
+      document->language == _shared.serviceRegistry->findServices(
+                                document->uri, item.languageId.value())) {
+    document->isOpen = true;
+    updateVersion(*document, item.version);
+    return;
   }
-  if (existing == nullptr) {
-    // Installed at `Changed`: the build parses the client's text, in
-    // parallel with the rest and under its token, so the next keystroke
-    // can cut it short.
-    documents.addDocument(_shared.documentFactory->create(
-        TextDocument::create(uri, item.languageId, item.version, item.text)));
-  } else if (moved) {
-    // The document stays the same object.
-    _shared.documentFactory->attachTextDocument(
-        *existing, TextDocument::create(uri, item.languageId,
-                                        static_cast<std::int64_t>(item.version),
-                                        item.text));
+  changes.insert_or_assign(uri, false);
+  auto text = TextDocument::create(std::move(uri), item.languageId,
+                                   item.version, item.text);
+  if (document) {
+    _shared.documentFactory->attachTextDocument(*document, std::move(text));
+  } else {
+    document = _shared.documentFactory->create(std::move(text));
+    documents.addDocument(document);
   }
-  if (const std::shared_ptr<Document> open = documents.getDocument(uri)) {
-    open->isOpen = true;
-    // The client's number over the scan's zero, whether or not the bytes
-    // moved: a diagnostic and a versioned edit report it back.
-    if (!moved) updateVersion(*open, static_cast<std::int64_t>(item.version));
-  }
+  document->isOpen = true;
 }
 
 // The text is edited in place on the same document object, its tree dropped
@@ -679,27 +644,25 @@ void DefaultLanguageServer::changeText(
   const auto version = static_cast<std::int64_t>(identifier.version);
   const std::shared_ptr<Document> document =
       _shared.documents->getDocument(uri);
-  // A change on a URI nothing opened is not this server's to guess at.
-  if (document == nullptr) return;
-  if (version < document->textDocument().version()) return;
+  if (!document || !document->isOpen ||
+      version <= document->textDocument().version())
+    return;
   // A range outside the text is clamped, not rejected -- the core's
   // `offsetAt` is total.
-  if (!_shared.documentFactory->updateTextDocument(*document, from_lsp(edits),
+  if (!_shared.documentFactory->updateTextDocument(*document, fromLsp(edits),
                                                    version)) {
     updateVersion(*document, version);
     return;
   }
-  changes.changed.push_back(std::move(uri));
+  changes.insert_or_assign(std::move(uri), false);
 }
 
 void DefaultLanguageServer::updateVersion(Document& document,
                                           std::int64_t version) {
   if (document.textDocument().version() == version) return;
   _shared.documentFactory->attachVersion(document, version);
-  // The bytes did not move, so a validated verdict stands; the client receives
-  // it again under the version it now knows the document by. A document not
-  // validated yet is published by the build that follows.
-  if (document.state.load() == DocumentState::Validated)
+  // The same bytes keep their diagnostics under the client's new version.
+  if (document.buildFailed || document.state.load() == DocumentState::Validated)
     announceDocument(document);
 }
 
@@ -710,15 +673,10 @@ void DefaultLanguageServer::closeText(std::string_view uri,
                                       TextChanges& changes) const {
   const std::shared_ptr<Document> closing = _shared.documents->getDocument(uri);
   if (closing == nullptr) return;
-  if (const bool saved = has_saved_content(
-          *_shared.fileSystemProvider,
-          _shared.textDocumentContentProvider.get(), closing->uri);
-      saved) {
-    changes.changed.emplace_back(uri);
-  } else {
-    std::erase(changes.changed, uri);
-    changes.deleted.emplace_back(uri);
-  }
+  const bool saved = has_saved_content(
+      *_shared.fileSystemProvider, _shared.textDocumentContentProvider.get(),
+      closing->uri);
+  changes.insert_or_assign(std::string(uri), !saved);
   closing->isOpen = false;
 }
 
@@ -785,10 +743,11 @@ void DefaultLanguageServer::didChangeNotebookDocument(
     }
     if (cells->textContent.has_value()) records += cells->textContent->size();
   }
+  bool accepted = true;
   deliverThenWrite(
-      notebooks, [&] { notebooks->didChange(params); }, records,
+      notebooks, [&] { accepted = notebooks->didChange(params); }, records,
       [&](TextChanges& changes) {
-        if (!cells.has_value()) return;
+        if (!accepted || !cells.has_value()) return;
         if (cells->structure.has_value()) {
           if (cells->structure->didOpen.has_value())
             for (const lsp::TextDocumentItem& cell : *cells->structure->didOpen)
@@ -827,8 +786,8 @@ void DefaultLanguageServer::didCloseNotebookDocument(
 // the notification still lets its cells move and build, then its failure goes
 // on.
 void DefaultLanguageServer::deliverThenWrite(
-    const NotebookDocuments* notebooks, cursiv::function_ref<void()> deliver,
-    std::size_t most, cursiv::function_ref<void(TextChanges&)> mutate) {
+    const NotebookDocuments* notebooks, cursiv::FunctionRef<void()> deliver,
+    std::size_t most, cursiv::FunctionRef<void(TextChanges&)> mutate) {
   std::exception_ptr failure;
   if (notebooks != nullptr) {
     try {
@@ -869,11 +828,11 @@ void DefaultLanguageServer::didChangeWatchedFiles(
           existing != nullptr) {
         if (existing->isOpen) return;
         if (!files.exists(existing->uri)) {
-          changes.deleted.push_back(std::move(uri));
+          changes.insert_or_assign(std::move(uri), true);
           return;
         }
       }
-      changes.changed.push_back(std::move(uri));
+      changes.insert_or_assign(std::move(uri), false);
     };
 
     for (const std::string& uri : order) {
@@ -942,67 +901,61 @@ void DefaultLanguageServer::didDeleteFiles(
     files->didDeleteFiles(params);
 }
 
-// The three `will` arms are read actions, like a command: the edit is computed
-// off the workspace and applied by the client, so nothing here mutates.
+std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::readFileEdit(
+    const CancellationToken& token,
+    FunctionRef<std::optional<lsp::WorkspaceEdit>(const FileOperationHandler&)>
+        request) const {
+  std::optional<lsp::WorkspaceEdit> edit;
+  if (const auto* files = _shared.fileOperationHandler.get())
+    (void)_shared.workspaceLock->read(
+        [&] {
+          edit = request(*files);
+          addDocumentVersions(edit);
+        },
+        token);
+  return edit;
+}
+
 std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::willCreateFiles(
     const lsp::CreateFilesParams& params,
     const CancellationToken& token) const {
-  std::optional<lsp::WorkspaceEdit> edit;
-  const FileOperationHandler* files = _shared.fileOperationHandler.get();
-  if (files == nullptr) return edit;
-  (void)_shared.workspaceLock->read(
-      [&]() { edit = files->willCreateFiles(params); }, token);
-  return edit;
+  return readFileEdit(
+      token, [&](const auto& files) { return files.willCreateFiles(params); });
 }
 
 std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::willRenameFiles(
     const lsp::RenameFilesParams& params,
     const CancellationToken& token) const {
-  std::optional<lsp::WorkspaceEdit> edit;
-  const FileOperationHandler* files = _shared.fileOperationHandler.get();
-  if (files == nullptr) return edit;
-  (void)_shared.workspaceLock->read(
-      [&]() { edit = files->willRenameFiles(params); }, token);
-  return edit;
+  return readFileEdit(
+      token, [&](const auto& files) { return files.willRenameFiles(params); });
 }
 
 std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::willDeleteFiles(
     const lsp::DeleteFilesParams& params,
     const CancellationToken& token) const {
-  std::optional<lsp::WorkspaceEdit> edit;
-  const FileOperationHandler* files = _shared.fileOperationHandler.get();
-  if (files == nullptr) return edit;
-  (void)_shared.workspaceLock->read(
-      [&]() { edit = files->willDeleteFiles(params); }, token);
-  return edit;
+  return readFileEdit(
+      token, [&](const auto& files) { return files.willDeleteFiles(params); });
 }
 
-// Rewrites `changes` as versioned `documentChanges` for a client that reads
-// them, so a stale click is refused. An action's own `documentChanges` stay.
-void DefaultLanguageServer::addDocumentVersion(lsp::CodeAction& action,
-                                               const Document& document) {
-  if (!action.edit.has_value() || !action.edit->changes.has_value() ||
-      action.edit->documentChanges.has_value())
+// Capture the open targets' versions under the same read lock as their edits.
+void DefaultLanguageServer::addDocumentVersions(
+    std::optional<lsp::WorkspaceEdit>& edit) const {
+  if (!_versionedEdits || !edit || !edit->changes || edit->documentChanges)
     return;
-  const lsp::DocumentUri self = lsp::Uri::parse(document.uri);
-  // The protocol mixes file creations and renames into this list; a quick
-  // fix only ever edits text, so only that arm is ever built.
-  std::vector<std::variant<lsp::TextDocumentEdit, lsp::CreateFile,
-                           lsp::RenameFile, lsp::DeleteFile>>
-      edits;
-  for (auto& [uri, rows] : *action.edit->changes) {
+  auto& edits = edit->documentChanges.emplace();
+  edits.reserve(edit->changes->size());
+  for (auto& [uri, rows] : *edit->changes) {
     lsp::TextDocumentEdit one;
     one.textDocument.uri = uri;
-    // Only this document's version is known here; another file's edits
-    // go out unversioned, which the client reads as "apply as is".
-    if (uri == self)
+    if (const auto target = _shared.documents->getDocument(uri.toString());
+        target && target->isOpen)
       one.textDocument.version =
-          static_cast<int>(document.textDocument().version());
+          static_cast<int>(target->textDocument().version());
+    one.edits.reserve(rows.size());
     for (lsp::TextEdit& row : rows) one.edits.emplace_back(std::move(row));
     edits.emplace_back(std::move(one));
   }
-  action.edit->changes.reset();
-  action.edit->documentChanges = std::move(edits);
+  edit->changes.reset();
 }
 
 // The scan resolves `ready` once its documents are in the store, which is the
@@ -1013,46 +966,27 @@ bool DefaultLanguageServer::awaitScan(const CancellationToken& token,
   return _shared.workspaceManager->waitUntilReady(token);
 }
 
-// The lookup is a read of the store like any other -- a write rehashes the map
-// it walks -- and it is over before the wait, which may not hold the readers'
-// side.
-bool DefaultLanguageServer::awaitState(std::string_view uri,
-                                       DocumentState state,
-                                       const CancellationToken& token) const {
-  DocumentId id = kNoDocument;
-  if (!_shared.workspaceLock->read(
-          [&] { id = _shared.documents->getDocumentId(uri); }, token,
-          WorkspaceLock::ReadPriority::Immediate))
-    return false;
-  return _shared.documentBuilder->waitUntil(state, id, token) ==
-         WaitOutcome::Reached;
-}
-
 // A state that is cancelled, unreachable or lost to a failed build answers
 // empty; the runtime turns a cancelled token into the protocol's refusal.
-template <class Service, class Call>
-void DefaultLanguageServer::routeDocument(
-    std::string_view uri, ServiceRequirement requirement,
-    std::unique_ptr<const Service> LspServices::* slot,
-    const CancellationToken& token, Call call) const {
+void DefaultLanguageServer::readDocument(
+    std::string_view uri, ServiceRequirement requirement, const CancellationToken& token,
+    FunctionRef<void(const LspServices&, const Document&)> read) const {
   const bool workspace =
       requirement.type == ServiceRequirement::Type::Workspace;
   if (!awaitScan(token)) return;
   // False when a later write reset the document after the wait: it is then
   // awaited again. A document below a workspace state the workspace reached was
   // left out of the build, which answers empty.
+  DocumentId id = kNoDocument;
   const auto answer = [&]() {
-    const std::shared_ptr<Document> document =
-        _shared.documents->getDocument(uri);
+    if (id == kNoDocument) id = _shared.documents->getDocumentId(uri);
+    const auto document = _shared.documents->getDocument(id);
     if (document == nullptr) return true;
     if (document->state.load() < requirement.state) return workspace;
     // The factory chose the language from both URI and languageId. It may
     // be core-only, in which case this document has no LSP provider.
     const auto* services = dynamic_cast<const LspServices*>(document->language);
-    if (services == nullptr) return true;
-    const Service* const provider = (services->*slot).get();
-    if (provider == nullptr) return true;
-    call(*provider, *document);
+    if (services) read(*services, *document);
     return true;
   };
   if (workspace) {
@@ -1060,13 +994,13 @@ void DefaultLanguageServer::routeDocument(
                                [&] { (void)answer(); });
     return;
   }
-  // Waits for the state an `Immediate` read needs, so the request reads beside
-  // the rest of the build. The state is checked again inside the lock.
-  for (bool answered = false; !answered;) {
-    if (!awaitState(uri, requirement.state, token)) return;
+  // An id survives document replacement; resolve it under the lock, then wait outside it.
+  if (!_shared.workspaceLock->read([&] { id = _shared.documents->getDocumentId(uri); }, token,
+                                   WorkspaceLock::ReadPriority::Immediate)) return;
+  while (_shared.documentBuilder->waitUntil(requirement.state, id, token) == WaitOutcome::Reached) {
+    bool answered = false;
     if (!_shared.workspaceLock->read([&] { answered = answer(); }, token,
-                                     WorkspaceLock::ReadPriority::Immediate))
-      return;
+                                     WorkspaceLock::ReadPriority::Immediate) || answered) return;
   }
 }
 
@@ -1074,7 +1008,7 @@ void DefaultLanguageServer::routeDocument(
 // inside the lock, where a write may have lowered it, and then awaited again.
 bool DefaultLanguageServer::readAtWorkspaceState(
     DocumentState state, const CancellationToken& token,
-    cursiv::function_ref<void()> read) const {
+    cursiv::FunctionRef<void()> read) const {
   const DocumentBuilder& builder = *_shared.documentBuilder;
   for (bool lowered = true; lowered;) {
     if (builder.waitUntil(state, token) != WaitOutcome::Reached) return false;
@@ -1089,98 +1023,81 @@ bool DefaultLanguageServer::readAtWorkspaceState(
   return true;
 }
 
+template <class Service, class Result, class... Params, class... Args>
+Result DefaultLanguageServer::routeDocument(
+    const lsp::DocumentUri& uri, ServiceRequirement requirement, const CancellationToken& token,
+    std::unique_ptr<const Service> LspServices::* slot, Result (Service::*method)(Params...) const,
+    const Args&... args) const {
+  Result result{};
+  readDocument(uri.toString(), requirement, token, [&](const LspServices& services, const Document& d) {
+    if (const auto& provider = services.*slot) {
+      if constexpr (std::is_invocable_v<decltype(method), const Service&, const Document&,
+                                        const Args&..., const CancellationToken&>)
+        result = ((*provider).*method)(d, args..., token);
+      else
+        result = ((*provider).*method)(args..., token);
+    }
+  });
+  return result;
+}
+
 std::vector<lsp::DocumentSymbol> DefaultLanguageServer::documentSymbol(
     const lsp::DocumentSymbolParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::DocumentSymbol> symbols;
-  routeDocument(params.textDocument.uri.toString(), _states.documentSymbol,
-                &LspServices::documentSymbolProvider, token,
-                [&](const DocumentSymbolProvider& provider, const Document& d) {
-                  symbols = provider.getSymbols(d, token);
-                });
-  return symbols;
+  return routeDocument(params.textDocument.uri, _states.documentSymbol, token,
+                       &LspServices::documentSymbolProvider, &DocumentSymbolProvider::getSymbols);
 }
 
 // The provider gets only the asking document: a target in another document,
 // even one the client never opened, carries its own positions.
 std::vector<lsp::LocationLink> DefaultLanguageServer::definition(
     const lsp::DefinitionParams& params, const CancellationToken& token) const {
-  std::vector<lsp::LocationLink> links;
-  routeDocument(params.textDocument.uri.toString(), _states.definition,
-                &LspServices::definitionProvider, token,
-                [&](const DefinitionProvider& provider, const Document& d) {
-                  if (std::optional<std::vector<lsp::LocationLink>> found =
-                          provider.getDefinition(d, params.position, token))
-                    links = std::move(*found);
-                });
-  return links;
+  return routeDocument(params.textDocument.uri, _states.definition, token,
+                       &LspServices::definitionProvider, &DefinitionProvider::getDefinition,
+                       params.position)
+      .value_or(std::vector<lsp::LocationLink>{});
 }
 
 std::vector<lsp::LocationLink> DefaultLanguageServer::declaration(
     const lsp::DeclarationParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::LocationLink> links;
-  routeDocument(params.textDocument.uri.toString(), _states.declaration,
-                &LspServices::declarationProvider, token,
-                [&](const DeclarationProvider& provider, const Document& d) {
-                  if (std::optional<std::vector<lsp::LocationLink>> found =
-                          provider.getDeclaration(d, params.position, token))
-                    links = std::move(*found);
-                });
-  return links;
+  return routeDocument(params.textDocument.uri, _states.declaration, token,
+                       &LspServices::declarationProvider, &DeclarationProvider::getDeclaration,
+                       params.position)
+      .value_or(std::vector<lsp::LocationLink>{});
 }
 
 std::vector<lsp::LocationLink> DefaultLanguageServer::typeDefinition(
     const lsp::TypeDefinitionParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::LocationLink> links;
-  routeDocument(params.textDocument.uri.toString(), _states.typeDefinition,
-                &LspServices::typeDefinitionProvider, token,
-                [&](const TypeDefinitionProvider& provider, const Document& d) {
-                  if (std::optional<std::vector<lsp::LocationLink>> found =
-                          provider.getTypeDefinition(d, params.position, token))
-                    links = std::move(*found);
-                });
-  return links;
+  return routeDocument(params.textDocument.uri, _states.typeDefinition, token,
+                       &LspServices::typeDefinitionProvider, &TypeDefinitionProvider::getTypeDefinition,
+                       params.position)
+      .value_or(std::vector<lsp::LocationLink>{});
 }
 
 std::vector<lsp::LocationLink> DefaultLanguageServer::implementation(
     const lsp::ImplementationParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::LocationLink> links;
-  routeDocument(params.textDocument.uri.toString(), _states.implementation,
-                &LspServices::implementationProvider, token,
-                [&](const ImplementationProvider& provider, const Document& d) {
-                  if (std::optional<std::vector<lsp::LocationLink>> found =
-                          provider.getImplementation(d, params.position, token))
-                    links = std::move(*found);
-                });
-  return links;
+  return routeDocument(params.textDocument.uri, _states.implementation, token,
+                       &LspServices::implementationProvider, &ImplementationProvider::getImplementation,
+                       params.position)
+      .value_or(std::vector<lsp::LocationLink>{});
 }
 
 std::vector<lsp::Location> DefaultLanguageServer::references(
     const lsp::ReferenceParams& params, const CancellationToken& token) const {
-  std::vector<lsp::Location> locations;
-  routeDocument(params.textDocument.uri.toString(), _states.references,
-                &LspServices::referencesProvider, token,
-                [&](const ReferencesProvider& provider, const Document& d) {
-                  locations = provider.findReferences(
-                      d, params.position, params.context.includeDeclaration,
-                      token);
-                });
-  return locations;
+  return routeDocument(params.textDocument.uri, _states.references, token,
+                       &LspServices::referencesProvider, &ReferencesProvider::findReferences,
+                       params.position, params.context.includeDeclaration);
 }
 
 std::optional<lsp::Range> DefaultLanguageServer::prepareRename(
     const lsp::PrepareRenameParams& params,
     const CancellationToken& token) const {
-  std::optional<lsp::Range> span;
-  routeDocument(params.textDocument.uri.toString(), _states.rename,
-                &LspServices::renameProvider, token,
-                [&](const RenameProvider& provider, const Document& d) {
-                  span = provider.prepareRename(d, params.position, token);
-                });
-  return span;
+  return routeDocument(params.textDocument.uri, _states.rename, token,
+                       &LspServices::renameProvider, &RenameProvider::prepareRename,
+                       params.position);
 }
 
 // A rename is a read action: the client applies the edits and sends
@@ -1188,50 +1105,39 @@ std::optional<lsp::Range> DefaultLanguageServer::prepareRename(
 std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::rename(
     const lsp::RenameParams& params, const CancellationToken& token) const {
   std::optional<lsp::WorkspaceEdit> edit;
-  routeDocument(params.textDocument.uri.toString(), _states.rename,
-                &LspServices::renameProvider, token,
-                [&](const RenameProvider& provider, const Document& d) {
-                  edit = provider.rename(d, params.position, params.newName,
-                                         token);
-                });
+  readDocument(params.textDocument.uri.toString(), _states.rename, token,
+               [&](const LspServices& services, const Document& d) {
+                 if (const auto& provider = services.renameProvider) {
+                   edit = provider->rename(d, params.position, params.newName,
+                                          token);
+                   addDocumentVersions(edit);
+                 }
+               });
   return edit;
 }
 
 std::vector<lsp::DocumentHighlight> DefaultLanguageServer::documentHighlight(
     const lsp::DocumentHighlightParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::DocumentHighlight> highlights;
-  routeDocument(
-      params.textDocument.uri.toString(), _states.documentHighlight,
-      &LspServices::documentHighlightProvider, token,
-      [&](const DocumentHighlightProvider& provider, const Document& d) {
-        highlights = provider.getDocumentHighlight(d, params.position, token);
-      });
-  return highlights;
+  return routeDocument(params.textDocument.uri, _states.documentHighlight, token,
+                       &LspServices::documentHighlightProvider, &DocumentHighlightProvider::getDocumentHighlight,
+                       params.position);
 }
 
 lsp::SemanticTokens DefaultLanguageServer::semanticTokensFull(
     const lsp::SemanticTokensParams& params,
     const CancellationToken& token) const {
-  lsp::SemanticTokens tokens;
-  routeDocument(params.textDocument.uri.toString(), _states.semanticTokens,
-                &LspServices::semanticTokenProvider, token,
-                [&](const SemanticTokenProvider& provider, const Document& d) {
-                  tokens = provider.semanticHighlight(d, params, token);
-                });
-  return tokens;
+  return routeDocument(params.textDocument.uri, _states.semanticTokens, token,
+                       &LspServices::semanticTokenProvider, &SemanticTokenProvider::semanticHighlight,
+                       params);
 }
 
 lsp::SemanticTokens DefaultLanguageServer::semanticTokensRange(
     const lsp::SemanticTokensRangeParams& params,
     const CancellationToken& token) const {
-  lsp::SemanticTokens tokens;
-  routeDocument(params.textDocument.uri.toString(), _states.semanticTokens,
-                &LspServices::semanticTokenProvider, token,
-                [&](const SemanticTokenProvider& provider, const Document& d) {
-                  tokens = provider.semanticHighlightRange(d, params, token);
-                });
-  return tokens;
+  return routeDocument(params.textDocument.uri, _states.semanticTokens, token,
+                       &LspServices::semanticTokenProvider, &SemanticTokenProvider::semanticHighlightRange,
+                       params);
 }
 
 // A document nothing colours answers the empty tokens whole, as `full` does.
@@ -1239,59 +1145,38 @@ lsp::OneOf<lsp::SemanticTokens, lsp::SemanticTokensDelta>
 DefaultLanguageServer::semanticTokensFullDelta(
     const lsp::SemanticTokensDeltaParams& params,
     const CancellationToken& token) const {
-  lsp::OneOf<lsp::SemanticTokens, lsp::SemanticTokensDelta> tokens;
-  routeDocument(params.textDocument.uri.toString(), _states.semanticTokens,
-                &LspServices::semanticTokenProvider, token,
-                [&](const SemanticTokenProvider& provider, const Document& d) {
-                  tokens = provider.semanticHighlightDelta(d, params, token);
-                });
-  return tokens;
+  return routeDocument(params.textDocument.uri, _states.semanticTokens, token,
+                       &LspServices::semanticTokenProvider, &SemanticTokenProvider::semanticHighlightDelta,
+                       params);
 }
 
 std::vector<lsp::InlayHint> DefaultLanguageServer::inlayHint(
     const lsp::InlayHintParams& params, const CancellationToken& token) const {
-  std::vector<lsp::InlayHint> hints;
-  routeDocument(params.textDocument.uri.toString(), _states.inlayHint,
-                &LspServices::inlayHintProvider, token,
-                [&](const InlayHintProvider& provider, const Document& d) {
-                  hints = provider.getInlayHints(d, params.range, token);
-                });
-  return hints;
+  return routeDocument(params.textDocument.uri, _states.inlayHint, token,
+                       &LspServices::inlayHintProvider, &InlayHintProvider::getInlayHints,
+                       params.range);
 }
 
 std::vector<lsp::FoldingRange> DefaultLanguageServer::foldingRange(
     const lsp::FoldingRangeParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::FoldingRange> ranges;
-  routeDocument(params.textDocument.uri.toString(), _states.foldingRange,
-                &LspServices::foldingRangeProvider, token,
-                [&](const FoldingRangeProvider& provider, const Document& d) {
-                  ranges = provider.getFoldingRanges(d, token);
-                });
-  return ranges;
+  return routeDocument(params.textDocument.uri, _states.foldingRange, token,
+                       &LspServices::foldingRangeProvider, &FoldingRangeProvider::getFoldingRanges);
 }
 
 std::vector<lsp::SelectionRange> DefaultLanguageServer::selectionRange(
     const lsp::SelectionRangeParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::SelectionRange> ranges;
-  routeDocument(params.textDocument.uri.toString(), _states.selectionRange,
-                &LspServices::selectionRangeProvider, token,
-                [&](const SelectionRangeProvider& provider, const Document& d) {
-                  ranges =
-                      provider.getSelectionRanges(d, params.positions, token);
-                });
-  return ranges;
+  return routeDocument(params.textDocument.uri, _states.selectionRange, token,
+                       &LspServices::selectionRangeProvider, &SelectionRangeProvider::getSelectionRanges,
+                       params.positions);
 }
 
 std::optional<lsp::Hover> DefaultLanguageServer::hover(
     const lsp::HoverParams& params, const CancellationToken& token) const {
-  std::optional<lsp::Hover> hover;
-  routeDocument(params.textDocument.uri.toString(), _states.hover,
-                &LspServices::hoverProvider, token,
-                [&](const HoverProvider& provider, const Document& d) {
-                  hover = provider.getHoverContent(d, params.position, token);
-                });
+  auto hover = routeDocument(params.textDocument.uri, _states.hover, token,
+                       &LspServices::hoverProvider, &HoverProvider::getHoverContent,
+                       params.position);
   if (hover.has_value() && !_markdownHover)
     if (auto* const content = std::get_if<lsp::MarkupContent>(&hover->contents))
       as_plain_text(*content);
@@ -1302,11 +1187,12 @@ lsp::CompletionList DefaultLanguageServer::completion(
     const lsp::CompletionParams& params, const CancellationToken& token) const {
   lsp::CompletionList list;
   list.isIncomplete = true;
-  routeDocument(params.textDocument.uri.toString(), _states.completion,
-                &LspServices::completionProvider, token,
-                [&](const CompletionProvider& provider, const Document& d) {
-                  list = provider.getCompletion(d, params, token);
-                });
+  readDocument(params.textDocument.uri.toString(), _states.completion, token,
+               [&](const LspServices& services, const Document& d) {
+                 if (const auto& provider = services.completionProvider) {
+                   list = provider->getCompletion(d, params, token);
+                 }
+               });
   if (!_markdownCompletion)
     for (lsp::CompletionItem& item : list.items)
       if (item.documentation.has_value())
@@ -1319,75 +1205,52 @@ lsp::CompletionList DefaultLanguageServer::completion(
 std::optional<lsp::SignatureHelp> DefaultLanguageServer::signatureHelp(
     const lsp::SignatureHelpParams& params,
     const CancellationToken& token) const {
-  std::optional<lsp::SignatureHelp> help;
-  routeDocument(params.textDocument.uri.toString(), _states.signatureHelp,
-                &LspServices::signatureHelpProvider, token,
-                [&](const SignatureHelpProvider& provider, const Document& d) {
-                  help = provider.provideSignatureHelp(d, params, token);
-                });
-  return help;
+  return routeDocument(params.textDocument.uri, _states.signatureHelp, token,
+                       &LspServices::signatureHelpProvider, &SignatureHelpProvider::provideSignatureHelp,
+                       params);
 }
 
 std::vector<lsp::CodeAction> DefaultLanguageServer::codeAction(
     const lsp::CodeActionParams& params, const CancellationToken& token) const {
   std::vector<lsp::CodeAction> actions;
-  routeDocument(params.textDocument.uri.toString(), _states.codeAction,
-                &LspServices::codeActionProvider, token,
-                [&](const CodeActionProvider& provider, const Document& d) {
-                  actions = provider.getCodeActions(d, params, token);
-                  if (_versionedEdits)
-                    for (lsp::CodeAction& action : actions)
-                      addDocumentVersion(action, d);
-                });
+  readDocument(params.textDocument.uri.toString(), _states.codeAction, token,
+               [&](const LspServices& services, const Document& d) {
+                 if (const auto& provider = services.codeActionProvider) {
+                   actions = provider->getCodeActions(d, params, token);
+                   for (auto& action : actions) addDocumentVersions(action.edit);
+                 }
+               });
   return actions;
 }
 
 std::vector<lsp::DocumentLink> DefaultLanguageServer::documentLink(
     const lsp::DocumentLinkParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::DocumentLink> links;
-  routeDocument(params.textDocument.uri.toString(), _states.documentLink,
-                &LspServices::documentLinkProvider, token,
-                [&](const DocumentLinkProvider& provider, const Document& d) {
-                  links = provider.getDocumentLinks(d, token);
-                });
-  return links;
+  return routeDocument(params.textDocument.uri, _states.documentLink, token,
+                       &LspServices::documentLinkProvider, &DocumentLinkProvider::getDocumentLinks);
 }
 
 std::vector<lsp::CodeLens> DefaultLanguageServer::codeLens(
     const lsp::CodeLensParams& params, const CancellationToken& token) const {
-  std::vector<lsp::CodeLens> lenses;
-  routeDocument(params.textDocument.uri.toString(), _states.codeLens,
-                &LspServices::codeLensProvider, token,
-                [&](const CodeLensProvider& provider, const Document& d) {
-                  lenses = provider.provideCodeLens(d, token);
-                });
-  return lenses;
+  return routeDocument(params.textDocument.uri, _states.codeLens, token,
+                       &LspServices::codeLensProvider, &CodeLensProvider::provideCodeLens);
 }
 
 // One slot and one state for the three arms, one call each.
 std::vector<lsp::TextEdit> DefaultLanguageServer::formatting(
     const lsp::DocumentFormattingParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::TextEdit> edits;
-  routeDocument(params.textDocument.uri.toString(), _states.formatting,
-                &LspServices::formatter, token,
-                [&](const Formatter& formatter, const Document& d) {
-                  edits = formatter.formatDocument(d, params, token);
-                });
-  return edits;
+  return routeDocument(params.textDocument.uri, _states.formatting, token,
+                       &LspServices::formatter, &Formatter::formatDocument,
+                       params);
 }
 
 std::vector<lsp::TextEdit> DefaultLanguageServer::rangeFormatting(
     const lsp::DocumentRangeFormattingParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::TextEdit> edits;
-  routeDocument(params.textDocument.uri.toString(), _states.formatting,
-                &LspServices::formatter, token,
-                [&](const Formatter& formatter, const Document& d) {
-                  edits = formatter.formatDocumentRange(d, params, token);
-                });
-  return edits;
+  return routeDocument(params.textDocument.uri, _states.formatting, token,
+                       &LspServices::formatter, &Formatter::formatDocumentRange,
+                       params);
 }
 
 // The characters are announced for the whole session, so a request may carry
@@ -1396,12 +1259,13 @@ std::vector<lsp::TextEdit> DefaultLanguageServer::onTypeFormatting(
     const lsp::DocumentOnTypeFormattingParams& params,
     const CancellationToken& token) const {
   std::vector<lsp::TextEdit> edits;
-  routeDocument(params.textDocument.uri.toString(), _states.formatting,
-                &LspServices::formatter, token,
-                [&](const Formatter& formatter, const Document& d) {
-                  if (formats_on(formatter, params.ch))
-                    edits = formatter.formatDocumentOnType(d, params, token);
-                });
+  readDocument(params.textDocument.uri.toString(), _states.formatting, token,
+               [&](const LspServices& services, const Document& d) {
+                 if (const auto& formatter = services.formatter) {
+                   if (formats_on(*formatter, params.ch))
+                     edits = formatter->formatDocumentOnType(d, params, token);
+                 }
+               });
   return edits;
 }
 
@@ -1411,77 +1275,51 @@ std::vector<lsp::TextEdit> DefaultLanguageServer::onTypeFormatting(
 std::vector<lsp::CallHierarchyItem> DefaultLanguageServer::prepareCallHierarchy(
     const lsp::CallHierarchyPrepareParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::CallHierarchyItem> items;
-  routeDocument(params.textDocument.uri.toString(), _states.callHierarchy,
-                &LspServices::callHierarchyProvider, token,
-                [&](const CallHierarchyProvider& provider, const Document& d) {
-                  items =
-                      provider.prepareCallHierarchy(d, params.position, token);
-                });
-  return items;
+  return routeDocument(params.textDocument.uri, _states.callHierarchy, token,
+                       &LspServices::callHierarchyProvider, &CallHierarchyProvider::prepareCallHierarchy,
+                       params.position);
 }
 
 std::vector<lsp::CallHierarchyIncomingCall>
 DefaultLanguageServer::incomingCalls(
     const lsp::CallHierarchyIncomingCallsParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::CallHierarchyIncomingCall> calls;
-  routeDocument(params.item.uri.toString(), _states.callHierarchy,
-                &LspServices::callHierarchyProvider, token,
-                [&](const CallHierarchyProvider& provider, const Document&) {
-                  calls = provider.incomingCalls(params.item, token);
-                });
-  return calls;
+  return routeDocument(params.item.uri, _states.callHierarchy, token,
+                       &LspServices::callHierarchyProvider, &CallHierarchyProvider::incomingCalls,
+                       params.item);
 }
 
 std::vector<lsp::CallHierarchyOutgoingCall>
 DefaultLanguageServer::outgoingCalls(
     const lsp::CallHierarchyOutgoingCallsParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::CallHierarchyOutgoingCall> calls;
-  routeDocument(params.item.uri.toString(), _states.callHierarchy,
-                &LspServices::callHierarchyProvider, token,
-                [&](const CallHierarchyProvider& provider, const Document&) {
-                  calls = provider.outgoingCalls(params.item, token);
-                });
-  return calls;
+  return routeDocument(params.item.uri, _states.callHierarchy, token,
+                       &LspServices::callHierarchyProvider, &CallHierarchyProvider::outgoingCalls,
+                       params.item);
 }
 
 std::vector<lsp::TypeHierarchyItem> DefaultLanguageServer::prepareTypeHierarchy(
     const lsp::TypeHierarchyPrepareParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::TypeHierarchyItem> items;
-  routeDocument(params.textDocument.uri.toString(), _states.typeHierarchy,
-                &LspServices::typeHierarchyProvider, token,
-                [&](const TypeHierarchyProvider& provider, const Document& d) {
-                  items =
-                      provider.prepareTypeHierarchy(d, params.position, token);
-                });
-  return items;
+  return routeDocument(params.textDocument.uri, _states.typeHierarchy, token,
+                       &LspServices::typeHierarchyProvider, &TypeHierarchyProvider::prepareTypeHierarchy,
+                       params.position);
 }
 
 std::vector<lsp::TypeHierarchyItem> DefaultLanguageServer::supertypes(
     const lsp::TypeHierarchySupertypesParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::TypeHierarchyItem> items;
-  routeDocument(params.item.uri.toString(), _states.typeHierarchy,
-                &LspServices::typeHierarchyProvider, token,
-                [&](const TypeHierarchyProvider& provider, const Document&) {
-                  items = provider.supertypes(params.item, token);
-                });
-  return items;
+  return routeDocument(params.item.uri, _states.typeHierarchy, token,
+                       &LspServices::typeHierarchyProvider, &TypeHierarchyProvider::supertypes,
+                       params.item);
 }
 
 std::vector<lsp::TypeHierarchyItem> DefaultLanguageServer::subtypes(
     const lsp::TypeHierarchySubtypesParams& params,
     const CancellationToken& token) const {
-  std::vector<lsp::TypeHierarchyItem> items;
-  routeDocument(params.item.uri.toString(), _states.typeHierarchy,
-                &LspServices::typeHierarchyProvider, token,
-                [&](const TypeHierarchyProvider& provider, const Document&) {
-                  items = provider.subtypes(params.item, token);
-                });
-  return items;
+  return routeDocument(params.item.uri, _states.typeHierarchy, token,
+                       &LspServices::typeHierarchyProvider, &TypeHierarchyProvider::subtypes,
+                       params.item);
 }
 
 // A query is about no document, so the state waited for is the workspace's:
@@ -1492,7 +1330,18 @@ std::vector<lsp::WorkspaceSymbol> DefaultLanguageServer::workspaceSymbol(
   std::vector<lsp::WorkspaceSymbol> symbols;
   if (!awaitScan(token)) return symbols;
   (void)readAtWorkspaceState(_states.workspaceSymbol, token, [&] {
-    symbols = _shared.workspaceSymbolProvider->getSymbols(params.query, token);
+    const auto& provider = *_shared.workspaceSymbolProvider;
+    symbols = provider.getSymbols(params.query, token);
+    if (_eagerSymbolRanges) {
+      for (auto& symbol : symbols) {
+        throwIfCancelled(token);
+        if (std::holds_alternative<lsp::LocationUriOnly>(symbol.location))
+          symbol = provider.resolveSymbol(std::move(symbol), token);
+      }
+      std::erase_if(symbols, [](const auto& symbol) {
+        return std::holds_alternative<lsp::LocationUriOnly>(symbol.location);
+      });
+    }
   });
   return symbols;
 }
@@ -1525,7 +1374,7 @@ std::optional<lsp::LSPAny> DefaultLanguageServer::executeCommand(
 // `most` records comes before the mutation, so an installed text always
 // reaches the build.
 void DefaultLanguageServer::writeAndPublish(
-    std::size_t most, cursiv::function_ref<void(TextChanges&)> mutate) {
+    std::size_t most, cursiv::FunctionRef<void(TextChanges&)> mutate) {
   _shared.workspaceLock->write(
       [&](const CancellationToken& token) {
         TextChanges changes;
@@ -1541,8 +1390,8 @@ void DefaultLanguageServer::writeAndPublish(
         }
         // Past the room made, a copy that cannot grow leaves its records out.
         try {
-          changed.assign(changes.changed.begin(), changes.changed.end());
-          deleted.assign(changes.deleted.begin(), changes.deleted.end());
+          for (const auto& [uri, gone] : changes)
+            (gone ? deleted : changed).push_back(uri);
         } catch (...) {
           if (failure == nullptr) failure = std::current_exception();
         }
@@ -1565,8 +1414,8 @@ void DefaultLanguageServer::buildUpdate(
       try {
         const std::string name =
             changed.size() + deleted.size() != 1 ? "the workspace"
-            : changed.empty() ? uri_file_name(deleted.front())
-                              : uri_file_name(changed.front());
+            : changed.empty() ? uriFileName(deleted.front())
+                              : uriFileName(changed.front());
         const char* const why = dynamic_cast<const std::bad_alloc*>(&failure)
                                     ? "out of memory"
                                     : failure.what();
@@ -1582,64 +1431,70 @@ void DefaultLanguageServer::onBuildPhase(DocumentState reached,
                                          std::span<Document* const>,
                                          const CancellationToken&) {
   if (reached == DocumentState::Linked) {
-    clearRemoved();
+    refreshAnnouncements();
   } else if (reached == DocumentState::Validated) {
     _buildFailureShown = false;
-    publishValidated();
+    publishPendingDiagnostics();
   }
 }
 
 void DefaultLanguageServer::onDocumentPhase(Document& document,
                                             DocumentState reached,
                                             const CancellationToken&) {
-  if (reached != DocumentState::Validated) return;
-  const std::scoped_lock lock(_validatedMutex);
+  if (reached == DocumentState::Validated) queueDiagnostics(document);
+}
+
+void DefaultLanguageServer::onDocumentBuildFailed(const Document& document) {
+  queueDiagnostics(document);
+}
+
+void DefaultLanguageServer::queueDiagnostics(const Document& document) {
+  const std::scoped_lock lock(_diagnosticsMutex);
   try {
-    _validated.push_back(document.id);
+    _pendingDiagnostics.push_back(document.id);
   } catch (...) {
-    // Not recorded, and not validated again by the next build: the next
-    // drain announces every validated document instead.
+    // A full publication retries any document whose record was lost.
     _announceAll = true;
   }
 }
 
-// Clears the documents the client was shown something for and which are gone.
-// One still held keeps what the client shows until its next validation.
-void DefaultLanguageServer::clearRemoved() {
+void DefaultLanguageServer::refreshAnnouncements() {
   for (auto it = _announced.begin(); it != _announced.end();) {
-    const DocumentId id = *it++;
-    if (_shared.documents->getDocument(id) == nullptr)
+    const auto [id, failed] = *it++;
+    const auto d = _shared.documents->getDocument(id);
+    if (!d)
       publishRemoval(_shared.documents->getDocumentUri(id));
+    else if (failed && !d->buildFailed && d->state >= DocumentState::Linked)
+      queueDiagnostics(*d);
   }
 }
 
-// Announces each document validated since the last drain, once, clean or not,
-// unless gone or set back since. After a failure or a lost record, the next
-// drain announces every validated document.
-void DefaultLanguageServer::publishValidated() {
-  std::vector<DocumentId> validated;
+// Publishes completed diagnostics once per document, including build failures.
+void DefaultLanguageServer::publishPendingDiagnostics() {
+  std::vector<DocumentId> pending;
   bool all = false;
   {
-    const std::scoped_lock lock(_validatedMutex);
-    validated.swap(_validated);
+    const std::scoped_lock lock(_diagnosticsMutex);
+    pending.swap(_pendingDiagnostics);
     all = std::exchange(_announceAll, false);
   }
+  const auto announce = [this](const std::shared_ptr<Document>& d) {
+    if (d &&
+        (d->buildFailed || d->state.load() >= DocumentState::IndexedReferences))
+      announceDocument(*d);
+  };
   try {
     if (all) {
-      for (const std::shared_ptr<Document>& d : _shared.documents->all())
-        if (d->state.load() == DocumentState::Validated) announceDocument(*d);
+      for (const auto& d : _shared.documents->all()) announce(d);
       return;
     }
-    std::ranges::sort(validated);
-    const auto repeated = std::ranges::unique(validated);
-    validated.erase(repeated.begin(), repeated.end());
-    for (const DocumentId id : validated) {
-      const std::shared_ptr<Document> d = _shared.documents->getDocument(id);
-      if (d != nullptr && d->state.load() == DocumentState::Validated)
-        announceDocument(*d);
-    }
+    std::ranges::sort(pending);
+    const auto repeated = std::ranges::unique(pending);
+    pending.erase(repeated.begin(), repeated.end());
+    for (const DocumentId id : pending)
+      announce(_shared.documents->getDocument(id));
   } catch (...) {
-    const std::scoped_lock lock(_validatedMutex);
+    const std::scoped_lock lock(_diagnosticsMutex);
     _announceAll = true;
     throw;
   }
@@ -1648,7 +1503,7 @@ void DefaultLanguageServer::publishValidated() {
 // Recorded before publishing: a document the client may show is cleared once
 // gone.
 void DefaultLanguageServer::announceDocument(const Document& document) {
-  _announced.insert(document.id);
+  _announced.insert_or_assign(document.id, document.buildFailed.load());
   publish(document);
 }
 
@@ -1662,63 +1517,10 @@ void DefaultLanguageServer::publish(const Document& document) const {
   // the one narrowing the protocol imposes happens here and nowhere else.
   params.version = static_cast<int>(document.textDocument().version());
 
-  // Read under the caller's lock: the next build replaces them in place.
-  const std::vector<Diagnostic>& block = document.diagnostics;
-  {
-    params.diagnostics.reserve(block.size());
-    for (const Diagnostic& d : block) {
-      lsp::Diagnostic published;
-      published.range =
-          to_lsp(document.textDocument().rangeAt(d.range.begin, d.range.end));
-      published.message = d.message;
-      published.severity = to_lsp_severity(d.severity);
-      if (!d.source.empty()) published.source = std::string(d.source);
-      // `DiagnosticCode` is LSP's `integer | string`; the wire narrows the
-      // integer to `int` here, the one place that handles both shapes.
-      if (d.code.has_value()) {
-        if (d.code->isString())
-          published.code = d.code->string();
-        else
-          published.code = static_cast<int>(d.code->integer());
-      }
-      // `data` comes back untouched in `codeAction` requests: it carries the
-      // quick fixes.
-      if (d.data.has_value()) published.data = detail::to_lsp_any(*d.data);
-      if (d.codeDescription.has_value()) {
-        lsp::CodeDescription description;
-        description.href = lsp::Uri::parse(*d.codeDescription);
-        published.codeDescription = std::move(description);
-      }
-      if (!d.tags.empty()) {
-        std::vector<lsp::DiagnosticTagEnum> tags;
-        tags.reserve(d.tags.size());
-        for (const DiagnosticTag tag : d.tags)
-          tags.emplace_back(to_lsp_tag(tag));
-        published.tags = std::move(tags);
-      }
-      // Each row names its own document (an empty `uri` means this one), whose
-      // index places it. An unheld document answers nothing.
-      if (!d.relatedInformation.empty()) {
-        std::vector<lsp::DiagnosticRelatedInformation> related;
-        related.reserve(d.relatedInformation.size());
-        for (const DiagnosticRelatedInformation& row : d.relatedInformation) {
-          const std::shared_ptr<Document> held =
-              row.uri.empty() ? nullptr
-                              : _shared.documents->getDocument(row.uri);
-          const Document* target = row.uri.empty() ? &document : held.get();
-          if (target == nullptr) continue;
-          lsp::DiagnosticRelatedInformation info;
-          info.location.uri = lsp::Uri::parse(target->uri);
-          info.location.range = to_lsp(
-              target->textDocument().rangeAt(row.range.begin, row.range.end));
-          info.message = row.message;
-          related.push_back(std::move(info));
-        }
-        if (!related.empty()) published.relatedInformation = std::move(related);
-      }
-      params.diagnostics.push_back(std::move(published));
-    }
-  }
+  params.diagnostics.reserve(document.diagnostics.size());
+  for (const Diagnostic& diagnostic : document.diagnostics)
+    params.diagnostics.push_back(
+        detail::to_lsp_diagnostic(document, diagnostic, *_shared.documents));
   client->publishDiagnostics(std::move(params));
 }
 

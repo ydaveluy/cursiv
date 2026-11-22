@@ -35,7 +35,7 @@ const AstTypeTag* narrowed_to(const AstReflection& reflection,
 
 bool DefaultScopeProvider::visitScopeEntries(
     const ReferenceInfo& context,
-    cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
+    cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const {
   const Document* const document = detail::document_of(context);
   if (document == nullptr) return true;
 
@@ -65,7 +65,7 @@ bool DefaultScopeProvider::visitScopeEntries(
 bool DefaultScopeProvider::visitGlobalScopeEntries(
     const ReferenceInfo& context, AcceptSet accepts,
     const AstReflection& reflection,
-    cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
+    cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const {
   // With no name, list everything: filtering by what the site currently spells
   // would hide every other completion.
   const AstTypeTag* const narrowed = narrowed_to(reflection, context);
@@ -81,7 +81,7 @@ bool DefaultScopeProvider::visitGlobalScopeEntries(
 bool DefaultScopeProvider::visitGlobalScopeEntries(
     const ReferenceInfo& context, std::string_view name, AcceptSet accepts,
     const AstReflection& reflection, bool caseSensitive,
-    cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
+    cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const {
   const AstTypeTag* const narrowed = narrowed_to(reflection, context);
   if (narrowed == nullptr)
     return shared.indexManager->visitByName(
@@ -95,7 +95,7 @@ bool DefaultScopeProvider::visitGlobalScopeEntries(
 
 bool DefaultScopeProvider::visitScopeEntries(
     const ReferenceInfo& context, std::string_view name,
-    cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
+    cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const {
   const Document* const document = detail::document_of(context);
   if (name.empty() || document == nullptr) return true;
 

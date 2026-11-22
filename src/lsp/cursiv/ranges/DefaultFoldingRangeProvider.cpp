@@ -25,12 +25,12 @@ namespace cursiv {
 
 std::vector<lsp::FoldingRange> DefaultFoldingRangeProvider::getFoldingRanges(
     const Document& document, const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   std::vector<lsp::FoldingRange> foldings;
   collectFolding(
       document,
       [&](lsp::FoldingRange range) {
-        throw_if_cancelled(token);
+        throwIfCancelled(token);
         foldings.push_back(std::move(range));
       },
       token);
@@ -57,7 +57,7 @@ void DefaultFoldingRangeProvider::collectFolding(
     };
     enter(root);
     while (!pending.empty()) {
-      throw_if_cancelled(token);
+      throwIfCancelled(token);
       const AstNode& node = *pending.back();
       pending.pop_back();
       if (shouldProcess(node)) collectObjectFolding(document, node, acceptor);
@@ -100,8 +100,8 @@ void DefaultFoldingRangeProvider::collectCommentFolding(
   const auto kComment =
       lsp::FoldingRangeKindEnum(lsp::FoldingRangeKind::Comment);
   for (NodeId id = first; id < past; ++id) {
-    throw_if_cancelled(token);
-    if (cst[id].hidden == 0) continue;
+    throwIfCancelled(token);
+    if (!cst[id].isHidden()) continue;
     if (std::optional<lsp::FoldingRange> range =
             toFoldingRange(document, CstNodeView{&cst, id}, kComment))
       acceptor(std::move(*range));

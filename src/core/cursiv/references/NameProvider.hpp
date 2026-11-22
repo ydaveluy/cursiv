@@ -22,7 +22,7 @@ concept NamedAstNode =
 
 // The same question for a node whose class is not known here, answered by its
 // type tag.
-[[nodiscard]] constexpr bool is_named(const AstNode& node) noexcept {
+[[nodiscard]] constexpr bool isNamed(const AstNode& node) noexcept {
   return node.type != nullptr && node.type->readName != nullptr;
 }
 

@@ -67,8 +67,14 @@ services.validationRegistry->registerChecks(
         *services.validator)});
 ```
 
-The validator must outlive the registry; the scaffold keeps it in
-`services.validator`.
+Keep the validator in `services.validator` so it stays available whenever a
+check runs. `makeValidationCheck` includes subclasses of the parameter type.
+Use `makeExactValidationCheck` for the exact type only.
+
+Checks registered this way belong to `cursiv::kFast`. For an expensive check,
+pass `&cursiv::kSlow` as the second argument of `registerChecks`. By default,
+editor updates run built-in diagnostics and fast checks. An explicit
+`documentBuilder->build(documents)` runs all categories.
 
 ## What belongs here, and what does not
 

@@ -45,9 +45,9 @@ struct Hints final : cursiv::InlayHintProvider {
 void register_language(cursiv::SharedCoreServices& shared) {
   auto services = std::make_unique<cursiv::LspServices>(
       dynamic_cast<cursiv::SharedLspServices&>(shared));
-  cursiv::install_default_core_services(*services);
-  tiny::generated::Tiny::install_generated_module(*services);
-  cursiv::install_default_lsp_services(*services);
+  cursiv::installDefaultCoreServices(*services);
+  tiny::generated::Tiny::installGeneratedModule(*services);
+  cursiv::installDefaultLspServices(*services);
   services->semanticTokenProvider =
       std::make_unique<const cursiv::GrammarSemanticTokenProvider>(*services);
   services->documentSymbolProvider = std::make_unique<Symbols>();
@@ -57,6 +57,6 @@ void register_language(cursiv::SharedCoreServices& shared) {
 }
 
 int main(int argc, char** argv) {
-  return cursiv::bench::run_language<cursiv::SharedLspServices,
+  return cursiv::bench::runLanguage<cursiv::SharedLspServices,
                                      register_language>(argc, argv);
 }

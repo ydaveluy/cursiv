@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -30,8 +31,18 @@ namespace detail {
                                                              [cp & 63u]]);
 }
 
-// Calls `each` with every other scalar that folds as `cp` does -- its other
-// cases -- the one it folds to first.
+// The fold deltas negated, ascending: a scalar that folds to `to` is `to`
+// plus one of them.
+inline constexpr auto kUnfoldOffsets = [] {
+  std::array<std::int32_t, std::size(unicode::detail::kFoldDelta)> out{};
+  for (std::size_t i = 0; i < out.size(); ++i)
+    out[i] = -unicode::detail::kFoldDelta[i];
+  std::ranges::sort(out);
+  return out;
+}();
+
+// Calls `each` with every other scalar that folds as `cp` does, its other
+// cases: the one it folds to first, then the others ascending.
 template <class Each>
 constexpr void for_each_other_case(char32_t cp, Each&& each) {
   if (cp < 0x80) {  // an ASCII letter has its other ASCII case alone
@@ -41,16 +52,10 @@ constexpr void for_each_other_case(char32_t cp, Each&& each) {
   }
   const char32_t to = fold_scalar(cp);
   if (to != cp) each(to);
-  for (std::size_t page = 2; page < std::size(unicode::detail::kFoldPage);
-       ++page) {
-    const std::uint8_t block = unicode::detail::kFoldPage[page];
-    if (block == 0) continue;
-    for (std::size_t i = 0; i < 64; ++i) {
-      const auto x = static_cast<char32_t>(page * 64 + i);
-      if (unicode::detail::kFoldBlock[block][i] != 0 && x != cp &&
-          fold_scalar(x) == to)
-        each(x);
-    }
+  for (const std::int32_t offset : kUnfoldOffsets) {
+    const auto x =
+        static_cast<char32_t>(static_cast<std::int32_t>(to) + offset);
+    if (offset != 0 && x != cp && fold_scalar(x) == to) each(x);
   }
 }
 
@@ -66,7 +71,7 @@ constexpr void for_each_other_case(char32_t cp, Each&& each) {
 [[nodiscard]] constexpr bool has_cased_letter(std::string_view text) {
   for (std::size_t i = 0; i < text.size();) {
     std::size_t len = 0;
-    if (const char32_t cp = scalar_at(text.data() + i, text.size() - i, len);
+    if (const char32_t cp = scalarAt(text.data() + i, text.size() - i, len);
         len != 0 && has_other_case(cp))
       return true;
     i += len != 0 ? len : 1;
@@ -92,23 +97,14 @@ template <class Word>
   return w;
 }
 
-// The last, partial word, in pieces of four, two and one bytes: a
-// variable-length memcpy is a call, paid once per short name -- which is
-// most names.
+// A partial word, with every byte represented and no load past its end.
 [[nodiscard]] inline std::uint64_t load_tail(const char* p,
                                              std::size_t n) noexcept {
-  std::uint64_t w = 0;
-  std::size_t at = 0;
-  if ((n & 4u) != 0) {
-    w = load<std::uint32_t>(p);
-    at = 4;
-  }
-  if ((n & 2u) != 0) {
-    w |= load<std::uint16_t>(p + at) << (8u * at);
-    at += 2;
-  }
-  if ((n & 1u) != 0) w |= load<std::uint8_t>(p + at) << (8u * at);
-  return w;
+  if (n >= 4)
+    return load<std::uint32_t>(p) | (load<std::uint32_t>(p + n - 4) << 32u);
+  if (n == 0) return 0;
+  return load<std::uint8_t>(p) | (load<std::uint8_t>(p + n / 2) << 8u) |
+         (load<std::uint8_t>(p + n - 1) << 16u);
 }
 
 // The last `n < 8` bytes of a name `whole` bytes long. A name a word long
@@ -146,7 +142,7 @@ inline constexpr std::uint64_t kHashMix = 0x9e3779b97f4a7c15ull;
     return fold_scalar(((lead & 0x1Fu) << 6u) |
                        (static_cast<unsigned char>(p[1]) & 0x3Fu));
   }
-  const char32_t cp = scalar_at(p, avail, len);
+  const char32_t cp = scalarAt(p, avail, len);
   if (len != 0) return fold_scalar(cp);
   len = 1;
   return 0x110000u + static_cast<unsigned char>(*p);
@@ -178,7 +174,7 @@ inline constexpr std::uint64_t kHashMix = 0x9e3779b97f4a7c15ull;
 // Multiply-xor over the folded words -- one pass, no temporary string. The
 // length seeds the hash, so a short name and its zero-padded tail differ. A
 // name with a non-ASCII byte hashes its folded scalars instead.
-[[nodiscard]] inline std::uint64_t folded_hash(std::string_view name) noexcept {
+[[nodiscard]] inline std::uint64_t foldedHash(std::string_view name) noexcept {
   using detail::kHashMix;
   std::uint64_t h = 0xcbf29ce484222325ull ^ (name.size() * kHashMix);
   std::uint64_t bytes = 0;
@@ -203,7 +199,7 @@ inline constexpr std::uint64_t kHashMix = 0x9e3779b97f4a7c15ull;
 
 namespace detail {
 
-// The size of an open-addressed table keyed by `folded_hash`: the smallest
+// The size of an open-addressed table keyed by `foldedHash`: the smallest
 // power of two that leaves it at most half full, so a linear probe stays short.
 [[nodiscard]] inline std::size_t table_size(std::size_t entries) noexcept {
   return std::bit_ceil(std::max<std::size_t>(entries * 2, 1));
@@ -252,7 +248,7 @@ enum class NameMatch : unsigned { None, Folded, Exact };
 }  // namespace detail
 
 // Whether two names are the same up to case.
-[[nodiscard]] inline bool folded_equal(std::string_view a,
+[[nodiscard]] inline bool foldedEqual(std::string_view a,
                                        std::string_view b) noexcept {
   return detail::name_match(a, b) != detail::NameMatch::None;
 }

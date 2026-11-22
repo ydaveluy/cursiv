@@ -3,7 +3,6 @@
 //
 //   recovery_metric [--docs N] [--seed S] [--reps R] [--only a,b]
 //                   [--json PATH] [--cpu N | --no-cost] [--trace]
-//                   [--budget FLOOR,PERBYTE,PERSEARCH,PERPARSE]
 
 #include <algorithm>
 #include <cstddef>
@@ -28,7 +27,6 @@
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "recovery_metric/support/FaultClass.hpp"
 #include "recovery_metric/support/FaultCorpus.hpp"
 #include "recovery_metric/support/FaultWindow.hpp"
@@ -54,8 +52,6 @@ struct Options {
   // One line per faulted document on stderr: its faults, windows and
   // diagnostics.
   bool trace = false;
-  // What a parse's repairs may spend, where the language's engine takes it.
-  cursiv::engine::RepairBudget budget;
   std::vector<std::string> only;
   std::string json;
 };
@@ -98,7 +94,7 @@ std::uint64_t parse(const cursiv::bench::PerfCounters& pc, int reps,
     out.emplace(parser.parse(text));
     pc.disable();
     const cursiv::bench::PerfSample d =
-        cursiv::bench::perf_delta(from, pc.read());
+        cursiv::bench::perfDelta(from, pc.read());
     if (d.valid && !d.scaled && d.instructions != 0 &&
         (best == 0 || d.instructions < best))
       best = d.instructions;
@@ -141,7 +137,7 @@ void trace(std::string_view lang, metric::FaultClass cls,
                  kKind[static_cast<int>(d.kind)].data(), d.begin, d.end);
   std::fprintf(stderr,
                " | found %u miss %u para %u%s | text %llu/%llu del %llu aband "
-               "%llu other %llu rest %u inv %u | ast %llu/%llu",
+               "%llu other %llu rest %u inv %u | ast %llu/%llu\n",
                v.found, v.missed, v.spurious, v.noop ? " noop" : "",
                static_cast<unsigned long long>(v.text.kept),
                static_cast<unsigned long long>(v.text.eligible),
@@ -150,22 +146,11 @@ void trace(std::string_view lang, metric::FaultClass cls,
                static_cast<unsigned long long>(v.text.other), v.text.restored,
                v.text.invented, static_cast<unsigned long long>(v.ast.kept),
                static_cast<unsigned long long>(v.ast.total));
-  std::fprintf(stderr, " | caps");
-  for (std::size_t i = 0;
-       i < v.ceilings.size() && i < metric::kCeilings.size(); ++i)
-    if (v.ceilings[i] != 0)
-      std::fprintf(stderr, " %.*s:%u",
-                   static_cast<int>(metric::kCeilings[i].size()),
-                   metric::kCeilings[i].data(), v.ceilings[i]);
-  std::fputc('\n', stderr);
 }
 
 struct Twin {
   std::unique_ptr<metric::RepairTwin> twin;
   std::uint64_t instructions = 0;
-  // What the valid text alone makes the parser count: a ceiling is the
-  // repair's only past it.
-  metric::Ceilings ceilings{};
 };
 
 metric::RepairReport::Section run(const metric::MetricLanguage& lang,
@@ -173,8 +158,7 @@ metric::RepairReport::Section run(const metric::MetricLanguage& lang,
                                   const cursiv::bench::PerfCounters& pc) {
   metric::RepairReport::Section s;
   s.name = std::string(lang.name);
-  const std::unique_ptr<cursiv::Parser> parser =
-      lang.searching != nullptr ? lang.searching(o.budget) : lang.parser();
+  const std::unique_ptr<cursiv::Parser> parser = lang.parser();
   const std::unique_ptr<cursiv::AstReflection> reflection = lang.reflection();
   std::vector<Twin> twins, deep;
   std::optional<cursiv::ParseResult> scratch;
@@ -186,22 +170,19 @@ metric::RepairReport::Section run(const metric::MetricLanguage& lang,
                    s.name.c_str());
       continue;
     }
-    twins.push_back(Twin{std::move(t), 0, {}});
+    twins.push_back(Twin{std::move(t), 0});
   }
   for (std::size_t i = 0; i < twins.size() && deep.size() < 2; ++i)
     if (auto t = metric::FaultCorpus::deepen(*parser, *twins[i].twin, kDeepen,
                                              o.seed + i))
-      deep.push_back(Twin{std::move(t), 0, {}});
+      deep.push_back(Twin{std::move(t), 0});
   s.twins = static_cast<unsigned>(twins.size());
   s.deepened = static_cast<unsigned>(deep.size());
   for (std::vector<Twin>* pool : {&twins, &deep})
     for (Twin& t : *pool) {
-      if (o.cost) {
-        (void)parse(pc, 1, *parser, t.twin->text, scratch);
-        t.instructions = parse(pc, o.reps + 1, *parser, t.twin->text, scratch);
-      }
-      if (lang.ceilings != nullptr)
-        t.ceilings = lang.ceilings(t.twin->text, o.budget);
+      if (!o.cost) continue;
+      (void)parse(pc, 1, *parser, t.twin->text, scratch);
+      t.instructions = parse(pc, o.reps + 1, *parser, t.twin->text, scratch);
     }
 
   const metric::RepairJudge judge{reflection.get(), lang.actions};
@@ -230,14 +211,6 @@ metric::RepairReport::Section run(const metric::MetricLanguage& lang,
           if (ins != 0 && pool[i]->instructions != 0)
             v.cost = static_cast<double>(ins) /
                      static_cast<double>(pool[i]->instructions);
-          if (lang.ceilings != nullptr) {
-            const metric::Ceilings hit =
-                lang.ceilings(c.text, o.budget);
-            for (std::size_t n = 0; n < hit.size(); ++n)
-              v.ceilings.push_back(hit[n] > pool[i]->ceilings[n]
-                                       ? hit[n] - pool[i]->ceilings[n]
-                                       : 0);
-          }
           if (o.trace) trace(lang.name, cls, *pool[i]->twin, c, *scratch, v);
           tally.add(v);
           ++taken;
@@ -246,22 +219,6 @@ metric::RepairReport::Section run(const metric::MetricLanguage& lang,
     s.rows.push_back(metric::RepairReport::Row{cls, std::move(tally)});
   }
   return s;
-}
-
-// `FLOOR,PERBYTE,PERSEARCH,PERPARSE`, each a count or `inf`.
-bool read_budget(std::string_view arg, cursiv::engine::RepairBudget& b) {
-  std::uint64_t v[4];
-  std::stringstream ss{std::string(arg)};
-  std::string part;
-  for (std::uint64_t& x : v) {
-    if (!std::getline(ss, part, ',') || part.empty()) return false;
-    char* end = nullptr;
-    x = part == "inf" ? ~std::uint64_t{0}
-                      : std::strtoull(part.c_str(), &end, 0);
-    if (part != "inf" && *end != '\0') return false;
-  }
-  b = {v[0], v[1], v[2], v[3]};
-  return !std::getline(ss, part);
 }
 
 }  // namespace
@@ -283,8 +240,6 @@ int main(int argc, char** argv) {
       o.cost = false;
     else if (a == "--trace")
       o.trace = true;
-    else if (a == "--budget" && more && read_budget(argv[i + 1], o.budget))
-      ++i;
     else if (a == "--json" && more)
       o.json = argv[++i];
     else if (a == "--only" && more) {
@@ -294,8 +249,7 @@ int main(int argc, char** argv) {
     } else {
       std::fprintf(stderr,
                    "usage: %s [--docs N] [--seed S] [--reps R] [--only a,b] "
-                   "[--json PATH] [--cpu N | --no-cost] [--trace] "
-                   "[--budget FLOOR,PERBYTE,PERSEARCH,PERPARSE]\n",
+                   "[--json PATH] [--cpu N | --no-cost] [--trace]\n",
                    argv[0]);
       return 2;
     }
@@ -303,10 +257,7 @@ int main(int argc, char** argv) {
 
   metric::RepairReport report;
   report.docs = o.docs;
-  report.budget = o.budget;
   report.seed = o.seed;
-  for (const std::string_view name : metric::kCeilings)
-    report.ceilings.push_back(name);
   const int cpu = o.cpu == -2 ? performance_core() : o.cpu;
   const bool pinned = o.cost && pin(cpu);
   const cursiv::bench::PerfCounters pc;

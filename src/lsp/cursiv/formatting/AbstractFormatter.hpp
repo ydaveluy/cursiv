@@ -66,36 +66,36 @@ class NodeFormatter {
     return FormattingRegion(_cst, std::move(found), _collector);
   }
 
-  // The record that writes `Feature`; the first when the member is a list.
-  template <auto Feature>
-    requires std::derived_from<NodeT, property_owner<Feature>>
+  // The record that writes `Property`; the first when the member is a list.
+  template <auto Property>
+    requires std::derived_from<NodeT, property_owner<Property>>
   [[nodiscard]] FormattingRegion property() const {
-    return property<Feature>(std::size_t{0});
+    return property<Property>(std::size_t{0});
   }
 
-  // The `index`-th record writing `Feature`, clamped to the last one; found as
+  // The `index`-th record writing `Property`, clamped to the last one; found as
   // a member-anchored diagnostic finds it.
-  template <auto Feature>
-    requires std::derived_from<NodeT, property_owner<Feature>>
+  template <auto Property>
+    requires std::derived_from<NodeT, property_owner<Property>>
   [[nodiscard]] FormattingRegion property(std::size_t index) const {
     if (!searchable()) return FormattingRegion(_cst, {}, _collector);
-    const CstNodeView at = find_node_for_property(
-        *_node, cursiv::detail::member_identifier<Feature>(), index, _document);
+    const CstNodeView at = findNodeForProperty(
+        *_node, cursiv::detail::member_identifier<Property>(), index, _document);
     if (!at) return FormattingRegion(_cst, {}, _collector);
     return FormattingRegion(at.id, _cst, _collector);
   }
 
   // Every record that writes any of the given members, member by member in
   // the order given.
-  template <auto... Features>
-    requires(sizeof...(Features) > 0 &&
-             (std::derived_from<NodeT, property_owner<Features>> && ...))
+  template <auto... Properties>
+    requires(sizeof...(Properties) > 0 &&
+             (std::derived_from<NodeT, property_owner<Properties>> && ...))
   [[nodiscard]] FormattingRegion properties() const {
     std::vector<NodeId> found;
     if (searchable())
       (appendIds(found,
-                 find_nodes_for_property(
-                     *_node, cursiv::detail::member_identifier<Features>(),
+                 findNodesForProperty(
+                     *_node, cursiv::detail::member_identifier<Properties>(),
                      _document)),
        ...);
     return FormattingRegion(_cst, std::move(found), _collector);
@@ -109,12 +109,12 @@ class NodeFormatter {
     // The first one is found without listing the others.
     if (index == 0) {
       const CstNodeView first =
-          find_node_for_keyword(*_node, keyword, 0, _document);
+          findNodeForKeyword(*_node, keyword, 0, _document);
       if (!first) return FormattingRegion(_cst, {}, _collector);
       return FormattingRegion(first.id, _cst, _collector);
     }
     const std::vector<CstNodeView> found =
-        find_nodes_for_keyword(*_node, keyword, _document);
+        findNodesForKeyword(*_node, keyword, _document);
     if (index >= found.size()) return FormattingRegion(_cst, {}, _collector);
     return FormattingRegion(found[index].id, _cst, _collector);
   }
@@ -126,7 +126,7 @@ class NodeFormatter {
     std::vector<NodeId> found;
     if (searchable())
       (appendIds(found,
-                 find_nodes_for_keyword(
+                 findNodesForKeyword(
                      *_node, std::string_view(std::forward<Keywords>(keywords)),
                      _document)),
        ...);
@@ -140,7 +140,7 @@ class NodeFormatter {
                                         std::size_t index = 0) const {
     if (!searchable()) return FormattingRegion(_cst, {}, _collector);
     const std::vector<CstNodeView> found =
-        find_hidden_nodes(*_node, ruleName, _document);
+        findHiddenNodes(*_node, ruleName, _document);
     if (index >= found.size()) return FormattingRegion(_cst, {}, _collector);
     return FormattingRegion(found[index].id, _cst, _collector);
   }
@@ -148,7 +148,7 @@ class NodeFormatter {
   [[nodiscard]] FormattingRegion hiddens(std::string_view ruleName) const {
     std::vector<NodeId> found;
     if (searchable())
-      appendIds(found, find_hidden_nodes(*_node, ruleName, _document));
+      appendIds(found, findHiddenNodes(*_node, ruleName, _document));
     return FormattingRegion(_cst, std::move(found), _collector);
   }
 
@@ -157,15 +157,16 @@ class NodeFormatter {
         _cst, std::vector<NodeId>(nodes.begin(), nodes.end()), _collector);
   }
 
-  // What lies between two single-record regions -- an opening and a closing
-  // brace, whose interior is what gets indented.
+  // What lies between two single-record regions, such as the braces whose
+  // content gets indented. Searched from the node: without one, nothing.
   [[nodiscard]] FormattingRegion interior(const FormattingRegion& open,
                                           const FormattingRegion& close) const {
-    if (_cst == nullptr || open.nodes().size() != 1 ||
+    if (!searchable() || open.nodes().size() != 1 ||
         close.nodes().size() != 1)
       return FormattingRegion(_cst, {}, _collector);
     return FormattingRegion(
-        _cst, interior_nodes(*_cst, open.nodes()[0], close.nodes()[0]),
+        _cst,
+        interiorNodes(*_node, open.nodes()[0], close.nodes()[0], _document),
         _collector);
   }
 
@@ -316,7 +317,7 @@ class AbstractFormatter : public Formatter, protected DefaultCoreService {
     if (method == nullptr) return;
     using Node = std::remove_cv_t<NodeT>;
     _formatters.insert_or_assign(
-        &cursiv::ast_type_tag<Node>,
+        &cursiv::kAstTypeTag<Node>,
         [method](const AbstractFormatter& self, FormattingBuilder& builder,
                  const AstNode* node) {
           (static_cast<const FormatterT&>(self).*method)(builder,

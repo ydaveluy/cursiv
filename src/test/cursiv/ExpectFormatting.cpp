@@ -18,6 +18,8 @@
 #include "cursiv/ExpectFunction.hpp"
 #include "cursiv/ExpectationError.hpp"
 #include "cursiv/ParseHelper.hpp"
+#include "cursiv/ExpectedBase.hpp"
+#include "cursiv/ReplacedIndices.hpp"
 #include "cursiv/TextDocumentParams.hpp"
 
 namespace cursiv::test {
@@ -52,15 +54,35 @@ Disposable expectFormatting(const LspServices& services,
     throw ExpectationError("cursiv: no formatter registered for language " +
                            services.languageMetaData.languageId);
 
-  const std::shared_ptr<Document> document = parseDocument(
-      services, expectedFormatting.before, expectedFormatting.parseOptions);
+  std::optional<TextOffset> caret;
+  std::string before = expectedFormatting.before;
+  if (expectedFormatting.onType) {
+    if (expectedFormatting.range || expectedFormatting.onType->empty())
+      throw ExpectationError(
+          "on-type formatting needs a trigger and excludes range formatting");
+    auto marked = replaceIndices({.text = std::move(before),
+                                  .rangeStartMarker = {},
+                                  .rangeEndMarker = {}});
+    caret = marked.singleCaret();
+    before = std::move(marked.output);
+  }
+  const auto document = parseDocument(services, std::move(before),
+                                      expectedFormatting.parseOptions);
   Disposable disposable = detail::documentDisposable(services, document);
   const detail::DisposeOnThrow cleanup(disposable);
   const lsp::FormattingOptions options =
       expectedFormatting.options.value_or(defaultOptions());
 
   std::vector<lsp::TextEdit> edits;
-  if (expectedFormatting.range.has_value()) {
+  if (caret) {
+    lsp::DocumentOnTypeFormattingParams params;
+    params.textDocument = textDocumentParams(*document);
+    params.options = options;
+    params.position = toLsp(document->textDocument().positionAt(*caret));
+    params.ch = *expectedFormatting.onType;
+    edits =
+        services.formatter->formatDocumentOnType(*document, params, kNoCancel);
+  } else if (expectedFormatting.range.has_value()) {
     lsp::DocumentRangeFormattingParams params;
     params.textDocument = textDocumentParams(*document);
     params.options = options;
@@ -77,7 +99,7 @@ Disposable expectFormatting(const LspServices& services,
   std::vector<TextEdit> converted;
   converted.reserve(edits.size());
   for (const lsp::TextEdit& edit : edits)
-    converted.emplace_back(from_lsp(edit.range), edit.newText);
+    converted.emplace_back(fromLsp(edit.range), edit.newText);
   const std::string edited =
       TextDocument::applyEdits(document->textDocument(), converted);
 

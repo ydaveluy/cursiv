@@ -2,7 +2,7 @@
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
-#include "engines/lr/LexUnicodeGrammars.hpp"
+#include "grammars/LexUnicodeGrammars.hpp"
 // A class reads one character: a well-formed scalar whole, or the byte where
 // none starts. Each reading is a terminal behind a tag, so a document names
 // the one it asks.
@@ -133,34 +133,6 @@ struct Gaps : cursiv::GrammarSpec {
   using ignored = Blank;
 };
 
-// Unicode decoding and class membership use the shared lexical machinery.
-// The full catalogue runs in Lr; this smaller entry exercises LL's token and
-// condition boundaries without duplicating all Unicode-property tables.
-struct Integration : Base {
-  struct Entry
-      : rule<(create<ast::Doc> +
-              (arm<"one:", One> | arm<"two:", Two> |
-               then<"rna:", RunNotA> | then<"rne:", RunNotAcute> |
-               then<"xa:", XThenAcute> | then<"xo:", XThenOther> |
-               then<"xg:", XGuarded> | arm<"first:", AcuteFirst> |
-               (lit<"rn1:"> + !~cr<"é"> + item<Acute>) |
-               (lit<"rn2:"> + &~cr<"é"> + item<One>) |
-               (lit<"bytes:"> + some(item<Raw>)) |
-               (lit<"rb:"> + lit<"a"> + byte + lit<"b">) |
-               (lit<"rc1:"> + &byte + lit<"x">) |
-               (lit<"rc2:"> + &byte + lit<"é">) |
-               (lit<"rc3:"> + &any + lit<"é">) |
-               (lit<"rc4:"> + &cr<"})"> + lit<"}">) |
-               (lit<"rc5:"> + &any + lit<"\xE9">) |
-               (lit<"rc6:"> + &byte + lit<"\xE9">) |
-               (lit<"rt1:"> + &byte + item<One>) |
-               (lit<"rt3:"> + &any + item<One>)) +
-              eof) |
-             (lit<"gaps:"> + skip(ignore<Gaps::Blank>, hide<>,
-                                   ref<Gaps::Root> + eof))> {};
-  using entry = Entry;
-};
-
 }  // namespace tchars
 
 namespace trepeatedunicode {
@@ -204,8 +176,6 @@ struct Suite : Base {
                           hide<>, ref<trepeatedunicode::Base::Root> + eof))> {};
   using entry = Entry;
 };
-// The complete Unicode/byte catalogue runs once; LL keeps its own integration
-// cases through Integration in the lexical-backends language.
 struct Lr : Suite {
   struct Decimal : terminal<some(uc::Nd)> {};
   struct Where : terminal<kw<"où">> {};

@@ -45,14 +45,16 @@ string(APPEND CMAKE_C_FLAGS_INIT " ${_cursiv_wasi_emul}")
 string(APPEND CMAKE_CXX_FLAGS_INIT " ${_cursiv_wasi_emul}")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_INIT
        " -lwasi-emulated-signal -lwasi-emulated-process-clocks")
+# Every unit, as the lexer's inline lane helpers must have one definition: the
+# parser reads 16 bytes at a time.
+add_compile_options(-msimd128)
 if(CURSIV_WASI_THREADS)
   # Define _REENTRANT when compiling. At link time the threaded target already
   # selects libpthread and shared memory; the memory must also be imported so
   # the runner can hand it to each worker.
   add_compile_options(-pthread)
   # A shared memory declares its maximum at link time: a cap, not a
-  # reservation, a multiple of 65536 up to 4 GiB. The 100,000-level LL stress
-  # test needs about 1 GiB.
+  # reservation, a multiple of 65536 up to 4 GiB.
   set(CURSIV_WASI_MAX_MEMORY 2147483648 CACHE STRING
       "Shared-memory maximum handed to the linker (bytes)")
   add_link_options("LINKER:--import-memory,--max-memory=${CURSIV_WASI_MAX_MEMORY}")

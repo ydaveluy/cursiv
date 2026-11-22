@@ -50,12 +50,12 @@ struct SharedCoreServices {
   std::unique_ptr<WorkspaceManager> workspaceManager;
 
   virtual void visitServices(
-      cursiv::function_ref<void(const ServiceSlot&)> yield) const;
+      cursiv::FunctionRef<void(const ServiceSlot&)> yield) const;
 
   [[nodiscard]] std::string_view firstMissingService() const;
 };
 
-// Fills the empty slots, like `install_default_core_services`.
-void install_default_shared_core_services(SharedCoreServices& shared);
+// Fills the empty slots, like `installDefaultCoreServices`.
+void installDefaultSharedCoreServices(SharedCoreServices& shared);
 
 }  // namespace cursiv

@@ -16,17 +16,17 @@ namespace dm {
 std::string QualifiedNameProvider::qualifierOf(
     const cursiv::Document&, const ast::PackageDeclaration& package) const {
   // A single component needs no reversed collection.
-  if (package.type == &cursiv::ast_type_tag<ast::PackageDeclaration>
+  if (package.type == &cursiv::kAstTypeTag<ast::PackageDeclaration>
       && (package.parent == nullptr
           || package.parent->type
-                 != &cursiv::ast_type_tag<ast::PackageDeclaration>))
+                 != &cursiv::kAstTypeTag<ast::PackageDeclaration>))
     return std::string(package.name);
 
   std::vector<std::string_view> names;
   std::size_t size = 0;
   for (const cursiv::AstNode* at = &package;
        at != nullptr
-       && at->type == &cursiv::ast_type_tag<ast::PackageDeclaration>;
+       && at->type == &cursiv::kAstTypeTag<ast::PackageDeclaration>;
        at = at->parent) {
     names.push_back(static_cast<const ast::PackageDeclaration*>(at)->name);
     size += names.back().size() + 1;
@@ -66,10 +66,10 @@ std::string QualifiedNameProvider::getQualifiedName(
 std::string_view QualifiedNameProvider::keepQualifiedName(
     const cursiv::Document& document, const ast::PackageDeclaration& qualifier,
     std::string_view name) const {
-  if (qualifier.type == &cursiv::ast_type_tag<ast::PackageDeclaration>
+  if (qualifier.type == &cursiv::kAstTypeTag<ast::PackageDeclaration>
       && (qualifier.parent == nullptr
           || qualifier.parent->type
-                 != &cursiv::ast_type_tag<ast::PackageDeclaration>))
+                 != &cursiv::kAstTypeTag<ast::PackageDeclaration>))
     return keepQualifiedName(document, qualifier.name, name);
   // The temporary qualifier remains alive while keepText copies its parts.
   return keepQualifiedName(document, qualifierOf(document, qualifier), name);

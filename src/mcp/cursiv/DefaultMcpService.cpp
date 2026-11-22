@@ -1,15 +1,16 @@
 #include "cursiv/DefaultMcpService.hpp"
 
 #include <lsp/json/json.h>
+#include <lsp/uri.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
-#include <span>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
@@ -79,29 +80,42 @@ constexpr std::size_t kMaxOutlineDepth = 16;
 constexpr std::string_view kSeverities[] = {"error", "warning", "information",
                                             "hint"};
 
+McpToolResult at_position(
+    SharedCoreServices& shared, const McpToolPosition& at, ServiceRequirement requirement,
+    const CancellationToken& token, std::string_view empty,
+    FunctionRef<void(const Document&, const CoreServices&, TextOffset, std::string&)> render) {
+  return routeDocumentTool(shared, at.uri, requirement, token,
+      [&](const Document& document, const CoreServices& language, std::string& out) {
+        render(document, language, document.textDocument().offsetAt({at.line, at.column}), out);
+        if (out.empty()) out = empty;
+      });
+}
+
 void append_location(std::string& out, const Document& document,
                      const AstNode* node) {
   out += document.uri;
   const NodeId record = node->cstNodeId;
   if (record == kNoNode) return;
   out += ':';
-  append_tool_position(out, document, document.parseResult.cst()[record].begin);
+  appendToolPosition(out, document, document.parseResult.cst()[record].begin);
 }
 
+// `spelt` counts the sites the answer has spelt, over every document it lists.
 void append_diagnostics(std::string& out, const Document& document,
-                        const CancellationToken& token) {
+                        unsigned& spelt, const CancellationToken& token) {
   std::vector<const Diagnostic*> all;
   all.reserve(document.diagnostics.size());
   for (const Diagnostic& diagnostic : document.diagnostics)
     all.push_back(&diagnostic);
   const std::vector<JsonValue::Array> spelled =
-      detail::spelling_actions(document, all, token);
+      detail::spelling_actions(document, all, spelt, token);
   for (std::size_t i = 0; i < all.size(); ++i) {
+    throwIfCancelled(token);
     const Diagnostic& diagnostic = *all[i];
     out += '[';
     out += kSeverities[static_cast<unsigned>(diagnostic.severity) - 1];
     out += " at ";
-    append_tool_position(out, document, diagnostic.range.begin);
+    appendToolPosition(out, document, diagnostic.range.begin);
     out += "] ";
     out += diagnostic.message;
     if (!diagnostic.source.empty()) {
@@ -132,27 +146,23 @@ void append_diagnostics(std::string& out, const Document& document,
   }
 }
 
-// Every site naming one of `targets`, declarations included, collected as the
-// editor's references and rename collect them.
-std::vector<ReferenceDescription> references_to(
-    const References& references, std::span<const AstNode* const> targets,
-    const CancellationToken& token) {
-  return detail::collect_references_per_declaration(
-      references, targets,
-      [](const AstNode&) {
-        return FindReferencesOptions{.includeDeclaration = true};
-      },
-      token);
-}
-
 constexpr std::string_view kCancelled = "the request was cancelled";
+
+const std::string* optional_string(const json::Value& arguments,
+                                   std::string_view key) {
+  const json::Value* const value = toolArgument(arguments, key);
+  if (value == nullptr) return nullptr;
+  if (!value->isString())
+    throw std::invalid_argument("'" + std::string(key) + "' must be a string");
+  return &value->string();
+}
 
 // Runs `body` once, under a queued read of the workspace at the given state.
 // Otherwise answers an error, `never` when that state is not coming.
 std::optional<McpToolResult> read_workspace_at(
     const SharedCoreServices& shared, DocumentState target,
     std::string_view never, const CancellationToken& token,
-    cursiv::function_ref<void()> body) {
+    cursiv::FunctionRef<void()> body) {
   for (;;) {
     if (const WaitOutcome reached =
             shared.documentBuilder->waitUntil(target, token);
@@ -173,20 +183,27 @@ std::optional<McpToolResult> read_workspace_at(
   }
 }
 
-// The grammar of the language the call names; the id is required. A miss
-// answers with the served ids.
+std::string grammar_uri(std::string_view id) {
+  // Dot segments disappear when a client resolves a hierarchical URI.
+  const char* base =
+      id == "." || id == ".." ? "cursiv://grammar/?id=" : "cursiv://grammar/";
+  return base + lsp::Uri::encode(id, "~!$&'()*+,;=:@");
+}
+
 const GrammarSource* pick_grammar(const SharedCoreServices& shared,
                                   const json::Value& arguments,
                                   std::string& error) {
-  const json::Value* const languageId = tool_argument(arguments, "languageId");
+  const json::Value* const languageId = toolArgument(arguments, "languageId");
   if (languageId == nullptr || !languageId->isString())
     throw std::invalid_argument(
         "'languageId' names the grammar; the 'languages' tool lists them");
+  if (const auto* language =
+          shared.serviceRegistry->findServices({}, languageId->string());
+      language && language->grammarSource)
+    return language->grammarSource.get();
   std::string served;
   for (const CoreServices* const language : shared.serviceRegistry->all()) {
     if (language->grammarSource == nullptr) continue;
-    if (language->languageMetaData.languageId == languageId->string())
-      return language->grammarSource.get();
     if (!served.empty()) served += ", ";
     served += language->languageMetaData.languageId;
   }
@@ -246,7 +263,7 @@ class ScratchLease {
 
 struct ScratchInput {
   std::string name;
-  std::string languageId;
+  const CoreServices* language = nullptr;
 };
 
 // Whether `name` stays one file in its slot once the uri is normalised: a dot
@@ -258,25 +275,15 @@ bool one_file(std::string_view name) {
 
 ScratchInput scratch_input(const json::Value& arguments,
                            const SharedCoreServices& shared) {
-  const CoreServices* language = nullptr;
-  if (const json::Value* const languageId =
-          tool_argument(arguments, "languageId");
-      languageId != nullptr && languageId->isString()) {
-    for (const CoreServices* const registered : shared.serviceRegistry->all())
-      if (registered->languageMetaData.languageId == languageId->string()) {
-        language = registered;
-        break;
-      }
-    if (language == nullptr)
-      throw std::invalid_argument("no language is registered as '" +
-                                  languageId->string() + "'");
-  }
   ScratchInput input;
-  if (language != nullptr)
-    input.languageId = language->languageMetaData.languageId;
-  if (const json::Value* const file = tool_argument(arguments, "file");
-      file != nullptr && file->isString()) {
-    std::string_view name = file->string();
+  if (const auto* languageId = optional_string(arguments, "languageId")) {
+    input.language = shared.serviceRegistry->findServices({}, *languageId);
+    if (input.language == nullptr)
+      throw std::invalid_argument("no language is registered as '" +
+                                  *languageId + "'");
+  }
+  if (const auto* file = optional_string(arguments, "file")) {
+    std::string_view name = *file;
     if (const auto slash = name.find_last_of("/\\");
         slash != std::string_view::npos)
       name.remove_prefix(slash + 1);
@@ -284,10 +291,10 @@ ScratchInput scratch_input(const json::Value& arguments,
     input.name = name;
     return input;
   }
-  if (language != nullptr) {
-    if (const LanguageMetaData& meta = language->languageMetaData;
+  if (input.language != nullptr) {
+    if (const LanguageMetaData& meta = input.language->languageMetaData;
         !meta.fileExtensions.empty())
-      input.name = "text" + normalize_extension(meta.fileExtensions.front());
+      input.name = "text" + normalizeExtension(meta.fileExtensions.front());
     else if (!meta.fileNames.empty())
       input.name = meta.fileNames.front();
     if (!one_file(input.name)) input.name = "text";
@@ -297,7 +304,7 @@ ScratchInput scratch_input(const json::Value& arguments,
 }
 
 std::string scratch_uri(std::uint32_t slot, std::string_view name) {
-  return path_to_file_uri("/.mcp-scratch/" + std::to_string(slot) + "/" +
+  return pathToFileUri("/.mcp-scratch/" + std::to_string(slot) + "/" +
                           std::string(name));
 }
 
@@ -305,10 +312,10 @@ std::string scratch_uri(std::uint32_t slot, std::string_view name) {
 
 DefaultMcpService::DefaultMcpService(SharedCoreServices& shared,
                                      McpServiceOptions options)
-    : _shared(shared), _options(std::move(options)) {}
+    : sharedServices(shared), serverOptions(std::move(options)) {}
 
 std::unique_ptr<McpServer> DefaultMcpService::createServer() const {
-  auto server = std::make_unique<McpServer>(_options.name, _options.version);
+  auto server = std::make_unique<McpServer>(serverOptions.name, serverOptions.version);
   server->addInstructions(
       "A cursiv language workspace. Discover with 'languages'; learn a "
       "syntax from the cursiv://grammar/<languageId> resource or the "
@@ -346,7 +353,7 @@ void DefaultMcpService::registerLanguagesTool(McpServer& server) const {
            "extensions and names it claims, and whether its grammar text is "
            "available (the 'grammar' and 'rule' tools, and the "
            "cursiv://grammar/<languageId> resource)."},
-      [&shared = _shared](const json::Value&, const CancellationToken&) {
+      [&shared = sharedServices](const json::Value&, const CancellationToken&) {
         std::string out;
         for (const CoreServices* const language :
              shared.serviceRegistry->all()) {
@@ -361,7 +368,7 @@ void DefaultMcpService::registerLanguagesTool(McpServer& server) const {
             out += name;
           }
           out += language->grammarSource != nullptr
-                     ? "  grammar: cursiv://grammar/" + meta.languageId
+                     ? "  grammar: " + grammar_uri(meta.languageId)
                      : "  (no grammar text served)";
           out += '\n';
         }
@@ -372,7 +379,7 @@ void DefaultMcpService::registerLanguagesTool(McpServer& server) const {
 
 void DefaultMcpService::registerGrammarTool(McpServer& server) const {
   json::Object properties;
-  properties["languageId"] = tool_property(
+  properties["languageId"] = toolProperty(
       "string", "which language's grammar; the 'languages' tool lists them");
   json::Array required;
   required.emplace_back(json::String("languageId"));
@@ -383,8 +390,8 @@ void DefaultMcpService::registerGrammarTool(McpServer& server) const {
            "The whole grammar of one language, as reviewable text. For a "
            "single rule and its dependencies, call 'rule'.",
        .inputSchema =
-           tool_object_schema(std::move(properties), std::move(required))},
-      [&shared = _shared](const json::Value& arguments,
+           toolObjectSchema(std::move(properties), std::move(required))},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken&) {
         std::string error;
         const GrammarSource* const grammar =
@@ -395,12 +402,12 @@ void DefaultMcpService::registerGrammarTool(McpServer& server) const {
 }
 
 void DefaultMcpService::registerGrammarResources(McpServer& server) const {
-  for (const CoreServices* const language : _shared.serviceRegistry->all()) {
+  for (const CoreServices* const language : sharedServices.serviceRegistry->all()) {
     const GrammarSource* const grammar = language->grammarSource.get();
     if (grammar == nullptr) continue;
     const std::string& id = language->languageMetaData.languageId;
     server.registerResource(
-        {.uri = "cursiv://grammar/" + id,
+        {.uri = grammar_uri(id),
          .name = id + " grammar",
          .description = "the " + id + " grammar, as reviewable text",
          .mimeType = "text/plain"},
@@ -410,8 +417,8 @@ void DefaultMcpService::registerGrammarResources(McpServer& server) const {
 
 void DefaultMcpService::registerRuleTool(McpServer& server) const {
   json::Object properties;
-  properties["name"] = tool_property("string", "the rule's name");
-  properties["languageId"] = tool_property(
+  properties["name"] = toolProperty("string", "the rule's name");
+  properties["languageId"] = toolProperty(
       "string", "which language's grammar; the 'languages' tool lists them");
   json::Array required;
   required.emplace_back(json::String("name"));
@@ -423,10 +430,10 @@ void DefaultMcpService::registerRuleTool(McpServer& server) const {
            "One grammar rule and every rule it reaches, as text. The whole "
            "grammar is the cursiv://grammar/<languageId> resource.",
        .inputSchema =
-           tool_object_schema(std::move(properties), std::move(required))},
-      [&shared = _shared](const json::Value& arguments,
+           toolObjectSchema(std::move(properties), std::move(required))},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken&) {
-        const json::Value* const name = tool_argument(arguments, "name");
+        const json::Value* const name = toolArgument(arguments, "name");
         if (name == nullptr || !name->isString())
           throw std::invalid_argument("'name' is the rule to print");
         std::string error;
@@ -449,38 +456,37 @@ void DefaultMcpService::registerRuleTool(McpServer& server) const {
 
 void DefaultMcpService::registerDiagnosticsTool(McpServer& server) const {
   json::Object properties;
-  properties["directory"] = tool_property(
-      "string", "restrict to the documents under this directory (optional)");
+  properties["directory"] = toolProperty(
+      "string",
+      "restrict to this directory (omit or leave empty for all files)");
   server.registerTool(
       {.name = "get-diagnostics",
        .title = "Get Diagnostics",
        .description =
            "Retrieves diagnostics from the language server for all files in "
            "the given directory, ordered by file.",
-       .inputSchema = tool_object_schema(std::move(properties), {})},
-      [&shared = _shared](const json::Value& arguments,
+       .inputSchema = toolObjectSchema(std::move(properties), {})},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
+        const auto* directory = optional_string(arguments, "directory");
         std::string out;
         if (std::optional<McpToolResult> unread = read_workspace_at(
                 shared, DocumentState::Validated,
                 "the workspace never reached validation", token, [&] {
-                  const json::Value* const directory =
-                      tool_argument(arguments, "directory");
-                  std::vector<std::shared_ptr<Document>> documents =
-                      directory != nullptr && directory->isString()
-                          ? shared.documents->getDocuments(
-                                tool_file_uri(directory->string()))
-                          : shared.documents->all();
-                  std::ranges::sort(documents,
-                                    [](const auto& a, const auto& b) {
-                                      return a->uri < b->uri;
-                                    });
+                  auto documents = directory && !directory->empty()
+                                       ? shared.documents->getDocuments(
+                                             toolFileUri(*directory))
+                                       : shared.documents->all();
+                  std::erase_if(documents, [&](const auto& document) {
+                    throwIfCancelled(token);
+                    return !document || document->diagnostics.empty();
+                  });
+                  std::ranges::sort(documents, {}, &Document::uri);
+                  unsigned spelt = 0;
                   for (const std::shared_ptr<Document>& document : documents) {
-                    if (document == nullptr || document->diagnostics.empty())
-                      continue;
                     out += document->uri;
                     out += '\n';
-                    append_diagnostics(out, *document, token);
+                    append_diagnostics(out, *document, spelt, token);
                   }
                 }))
           return std::move(*unread);
@@ -491,11 +497,11 @@ void DefaultMcpService::registerDiagnosticsTool(McpServer& server) const {
 
 void DefaultMcpService::registerValidateTool(McpServer& server) const {
   json::Object properties;
-  properties["text"] = tool_property("string", "the document text to validate");
+  properties["text"] = toolProperty("string", "the document text to validate");
   properties["languageId"] =
-      tool_property("string", "language of the text (or pass 'file')");
+      toolProperty("string", "language of the text (or pass 'file')");
   properties["file"] =
-      tool_property("string", "a file name whose extension picks the language");
+      toolProperty("string", "a file name whose extension picks the language");
   json::Array required;
   required.emplace_back(json::String("text"));
   server.registerTool(
@@ -507,17 +513,18 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
            "is saved: the text is discarded afterwards. Pass 'languageId' or "
            "a 'file' name to pick the language.",
        .inputSchema =
-           tool_object_schema(std::move(properties), std::move(required))},
-      [&shared = _shared](const json::Value& arguments,
+           toolObjectSchema(std::move(properties), std::move(required))},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
-        const json::Value* const text = tool_argument(arguments, "text");
+        const json::Value* const text = toolArgument(arguments, "text");
         if (text == nullptr || !text->isString())
           throw std::invalid_argument("'text' is the document to validate");
         const ScratchInput input = scratch_input(arguments, shared);
         ScratchLease lease;
         const std::string uri = scratch_uri(lease.slot(), input.name);
         const CoreServices* const language =
-            shared.serviceRegistry->findServices(uri, input.languageId);
+            input.language ? input.language
+                           : shared.serviceRegistry->findServices(uri);
         if (language == nullptr)
           return McpToolResult{"no language answers for '" + uri + "'", true};
         const std::string_view uriView = uri;
@@ -539,14 +546,15 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
           }
           installed = false;
         };
-        McpToolResult result;
+        std::optional<McpToolResult> result;
         try {
-          // One build per write: what a superseded build left is built first,
-          // alone, then the text is installed, built with every category and
-          // read in that write, so no second build sets it back under a reader.
-          for (bool answered = false; !answered;) {
-            if (token.stop_requested()) {
-              result = {std::string(kCancelled), true};
+          // Each attempt waits for the writes already queued, then runs one
+          // build: what a superseded build left, or else the text with every
+          // category, read in that write. The call retries until one answers.
+          while (!result) {
+            if (token.stop_requested() ||
+                !shared.workspaceLock->read([] {}, token)) {
+              result = McpToolResult{std::string(kCancelled), true};
               break;
             }
             shared.workspaceLock->write(
@@ -579,21 +587,26 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
                   const std::shared_ptr<Document> document =
                       shared.documents->getDocument(uri);
                   if (document == nullptr) {
-                    answered = true;
-                    result = {"the text to validate was removed", true};
+                    result = McpToolResult{"the text to validate was removed",
+                                           true};
                     return;
                   }
                   Document* const built = document.get();
                   builder.build({&built, 1}, {}, either);
-                  answered = true;
-                  if (document->state.load() < DocumentState::Validated) {
-                    result = {"the validation build did not finish", true};
+                  const bool failed = document->buildFailed;
+                  if (!failed &&
+                      document->state.load() < DocumentState::Validated) {
+                    result = McpToolResult{
+                        "the validation build did not finish", true};
                     return;
                   }
                   std::string out;
-                  append_diagnostics(out, *document, either);
-                  result = {out.empty() ? "No diagnostics: the text is valid."
-                                        : std::move(out)};
+                  unsigned spelt = 0;
+                  append_diagnostics(out, *document, spelt, either);
+                  result = McpToolResult{
+                      out.empty() ? "No diagnostics: the text is valid."
+                                  : std::move(out),
+                      failed};
                 },
                 WorkspaceLock::WriteMode::Protected);
           }
@@ -606,14 +619,14 @@ void DefaultMcpService::registerValidateTool(McpServer& server) const {
           throw;
         }
         discard();
-        return result;
+        return std::move(*result);
       });
 }
 
 void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
   json::Object properties;
   properties["query"] =
-      tool_property("string",
+      toolProperty("string",
                     "case-insensitive substring of the name (optional; empty "
                     "lists every exported symbol)");
   server.registerTool(
@@ -621,14 +634,13 @@ void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
        .title = "Workspace Symbols",
        .description = "Lists the symbols every document exports, with their "
                       "declared type and location.",
-       .inputSchema = tool_object_schema(std::move(properties), {})},
-      [&shared = _shared](const json::Value& arguments,
+       .inputSchema = toolObjectSchema(std::move(properties), {})},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
-        const json::Value* const query = tool_argument(arguments, "query");
+        const auto* query = optional_string(arguments, "query");
         // Both sides lowered by the Unicode mapping, as a client's
         // `toLowerCase` lowers them: `école` finds `École`.
-        const std::string needle = detail::lower_case(
-            query != nullptr && query->isString() ? query->string() : "");
+        const std::string needle = query ? detail::lower_case(*query) : "";
         std::string out;
         std::size_t matches = 0;
         if (std::optional<McpToolResult> unread = read_workspace_at(
@@ -636,7 +648,7 @@ void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
                 "the workspace never reached indexing", token, [&] {
                   (void)shared.indexManager->visitElements(
                       nullptr, {}, [&](const AstNodeDescription& description) {
-                        throw_if_cancelled(token);
+                        throwIfCancelled(token);
                         if (!needle.empty() &&
                             detail::lower_case(description.name).find(needle) ==
                                 std::string::npos)
@@ -670,7 +682,7 @@ void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
                                   owningDocument->parseResult.cst();
                               at != kNoNode && at < cst.size()) {
                             out += ':';
-                            append_tool_position(out, *owningDocument,
+                            appendToolPosition(out, *owningDocument,
                                                  cst[at].begin);
                           }
                         }
@@ -695,16 +707,13 @@ void DefaultMcpService::registerReferencesTool(McpServer& server) const {
        .description =
            "What the name at a position denotes, and every reference to it "
            "across the workspace (declaration included).",
-       .inputSchema = tool_position_schema()},
-      [&shared = _shared](const json::Value& arguments,
+       .inputSchema = toolPositionSchema()},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
-        const McpToolPosition at = tool_position(arguments);
-        McpToolResult result = route_document_tool(
-            shared, at.uri, WorkspaceState::IndexedReferences, token,
-            [&](const Document& document, const CoreServices& language,
-                std::string& out) {
-              const TextOffset offset = document.textDocument().offsetAt(
-                  Position{at.line, at.column});
+        const McpToolPosition at = toolPosition(arguments);
+        return at_position(shared, at, WorkspaceState::kIndexedReferences, token,
+            "nothing is denoted at this position",
+            [&](const Document& document, const CoreServices& language, TextOffset offset, std::string& out) {
               const Declaration declaration =
                   language.references->findDeclarations(document, offset,
                                                         token);
@@ -722,22 +731,21 @@ void DefaultMcpService::registerReferencesTool(McpServer& server) const {
               out += "' -- ";
               out += std::to_string(declaration.targets.size());
               out += " target(s)\n";
-              for (const ReferenceDescription& reference : references_to(
-                       *language.references, declaration.targets, token)) {
-                throw_if_cancelled(token);
+              for (const ReferenceDescription& reference :
+                   language.references->findReferences(
+                       declaration.targets, {.includeDeclaration = true},
+                       token)) {
+                throwIfCancelled(token);
                 const std::shared_ptr<Document> owningDocument =
                     shared.documents->getDocument(reference.sourceDocumentId);
                 if (owningDocument == nullptr) continue;
                 out += owningDocument->uri;
                 out += ':';
-                append_tool_position(out, *owningDocument,
+                appendToolPosition(out, *owningDocument,
                                      reference.sourceBegin);
                 out += '\n';
               }
             });
-        if (!result.isError && result.text.empty())
-          result.text = "nothing is denoted at this position";
-        return result;
       });
 }
 
@@ -748,16 +756,13 @@ void DefaultMcpService::registerHoverTool(McpServer& server) const {
        .description =
            "What the name at a position denotes: its declared type, where it "
            "is declared, and the documentation its author wrote.",
-       .inputSchema = tool_position_schema()},
-      [&shared = _shared](const json::Value& arguments,
+       .inputSchema = toolPositionSchema()},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
-        const McpToolPosition at = tool_position(arguments);
-        McpToolResult result = route_document_tool(
-            shared, at.uri, DocumentState::Linked, token,
-            [&](const Document& document, const CoreServices& language,
-                std::string& out) {
-              const TextOffset offset = document.textDocument().offsetAt(
-                  Position{at.line, at.column});
+        const McpToolPosition at = toolPosition(arguments);
+        return at_position(shared, at, DocumentState::Linked, token,
+            "nothing is denoted at this position",
+            [&](const Document& document, const CoreServices& language, TextOffset offset, std::string& out) {
               const Declaration declaration =
                   language.references->findDeclarations(document, offset,
                                                         token);
@@ -767,7 +772,7 @@ void DefaultMcpService::registerHoverTool(McpServer& server) const {
                       declaration.span.begin,
                       declaration.span.end - declaration.span.begin);
               for (const AstNode* const target : declaration.targets) {
-                throw_if_cancelled(token);
+                throwIfCancelled(token);
                 out += '\'';
                 out += name;
                 out += '\'';
@@ -797,25 +802,14 @@ void DefaultMcpService::registerHoverTool(McpServer& server) const {
                 }
               }
             });
-        if (!result.isError && result.text.empty())
-          result.text = "nothing is denoted at this position";
-        return result;
       });
 }
 
 void DefaultMcpService::registerRenameTool(McpServer& server) const {
-  json::Object properties;
-  properties["file"] =
-      tool_property("string", "path or file:// uri of the document");
-  properties["line"] = tool_property("integer", "1-based line");
-  properties["column"] =
-      tool_property("integer", "1-based column, in utf-16 units");
-  properties["newName"] = tool_property("string", "the replacement name");
-  json::Array required;
-  required.emplace_back(json::String("file"));
-  required.emplace_back(json::String("line"));
-  required.emplace_back(json::String("column"));
-  required.emplace_back(json::String("newName"));
+  json::Value schema = toolPositionSchema();
+  schema.object().get("properties").object()["newName"] =
+      toolProperty("string", "the replacement name");
+  schema.object().get("required").array().emplace_back("newName");
   server.registerTool(
       {.name = "rename",
        .title = "Rename",
@@ -824,20 +818,16 @@ void DefaultMcpService::registerRenameTool(McpServer& server) const {
            "declaration included. Nothing is applied, and the language's own "
            "naming refusals are not checked: apply the edits yourself and "
            "validate.",
-       .inputSchema =
-           tool_object_schema(std::move(properties), std::move(required))},
-      [&shared = _shared](const json::Value& arguments,
+       .inputSchema = std::move(schema)},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
-        const McpToolPosition at = tool_position(arguments);
-        const json::Value* const newName = tool_argument(arguments, "newName");
+        const McpToolPosition at = toolPosition(arguments);
+        const json::Value* const newName = toolArgument(arguments, "newName");
         if (newName == nullptr || !newName->isString())
           throw std::invalid_argument("'newName' is the replacement");
-        McpToolResult result = route_document_tool(
-            shared, at.uri, WorkspaceState::IndexedReferences, token,
-            [&](const Document& document, const CoreServices& language,
-                std::string& out) {
-              const TextOffset offset = document.textDocument().offsetAt(
-                  Position{at.line, at.column});
+        return at_position(shared, at, WorkspaceState::kIndexedReferences, token,
+            "nothing renamable at this position",
+            [&](const Document& document, const CoreServices& language, TextOffset offset, std::string& out) {
               const Declaration declaration =
                   language.references->findDeclarations(document, offset,
                                                         token);
@@ -855,9 +845,9 @@ void DefaultMcpService::registerRenameTool(McpServer& server) const {
                                     TextOffset begin, TextOffset end) {
                 out += owningDocument.uri;
                 out += ':';
-                append_tool_position(out, owningDocument, begin);
+                appendToolPosition(out, owningDocument, begin);
                 out += '-';
-                append_tool_position(out, owningDocument, end);
+                appendToolPosition(out, owningDocument, end);
                 out += '\n';
               };
               // A typo that resolved to nothing still renames itself.
@@ -865,9 +855,11 @@ void DefaultMcpService::registerRenameTool(McpServer& server) const {
                 edit(document, declaration.span.begin, declaration.span.end);
                 return;
               }
-              for (const ReferenceDescription& reference : references_to(
-                       *language.references, declaration.targets, token)) {
-                throw_if_cancelled(token);
+              for (const ReferenceDescription& reference :
+                   language.references->findReferences(
+                       declaration.targets, {.includeDeclaration = true},
+                       token)) {
+                throwIfCancelled(token);
                 const std::shared_ptr<Document> owningDocument =
                     shared.documents->getDocument(reference.sourceDocumentId);
                 if (owningDocument != nullptr)
@@ -875,9 +867,6 @@ void DefaultMcpService::registerRenameTool(McpServer& server) const {
                        reference.sourceEnd);
               }
             });
-        if (!result.isError && result.text.empty())
-          result.text = "nothing renamable at this position";
-        return result;
       });
 }
 
@@ -889,7 +878,7 @@ void DefaultMcpService::registerDocumentsTool(McpServer& server) const {
            "Lists the documents the workspace holds: uri, whether an editor "
            "holds it open, the client's version stamp, and how many "
            "diagnostics it carries so far."},
-      [&shared = _shared](const json::Value&, const CancellationToken& token) {
+      [&shared = sharedServices](const json::Value&, const CancellationToken& token) {
         std::string out;
         if (!shared.workspaceLock->read(
                 [&] {
@@ -924,7 +913,7 @@ void DefaultMcpService::registerTextDocumentContentTool(
     McpServer& server) const {
   json::Object properties;
   properties["file"] =
-      tool_property("string", "path or file:// uri of the document");
+      toolProperty("string", "path or file:// uri of the document");
   json::Array required;
   required.emplace_back(json::String("file"));
   server.registerTool(
@@ -935,13 +924,13 @@ void DefaultMcpService::registerTextDocumentContentTool(
            "unsaved editor buffer included. The 'documents' tool lists what "
            "is held.",
        .inputSchema =
-           tool_object_schema(std::move(properties), std::move(required))},
-      [&shared = _shared](const json::Value& arguments,
+           toolObjectSchema(std::move(properties), std::move(required))},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
-        const json::Value* const file = tool_argument(arguments, "file");
+        const json::Value* const file = toolArgument(arguments, "file");
         if (file == nullptr || !file->isString())
           throw std::invalid_argument("'file' names the document");
-        const std::string key = tool_file_uri(file->string());
+        const std::string key = toolFileUri(file->string());
         std::string out;
         bool found = false;
         if (!shared.workspaceLock->read(
@@ -965,7 +954,7 @@ void DefaultMcpService::registerTextDocumentContentTool(
 void DefaultMcpService::registerDocumentSymbolsTool(McpServer& server) const {
   json::Object properties;
   properties["file"] =
-      tool_property("string", "path or file:// uri of the document");
+      toolProperty("string", "path or file:// uri of the document");
   json::Array required;
   required.emplace_back(json::String("file"));
   server.registerTool(
@@ -976,14 +965,14 @@ void DefaultMcpService::registerDocumentSymbolsTool(McpServer& server) const {
            "node under its nearest named ancestor, each with its type and "
            "position, down to 16 levels below the top.",
        .inputSchema =
-           tool_object_schema(std::move(properties), std::move(required))},
-      [&shared = _shared](const json::Value& arguments,
+           toolObjectSchema(std::move(properties), std::move(required))},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
-        const json::Value* const file = tool_argument(arguments, "file");
+        const json::Value* const file = toolArgument(arguments, "file");
         if (file == nullptr || !file->isString())
           throw std::invalid_argument("'file' names the document");
-        McpToolResult result = route_document_tool(
-            shared, tool_file_uri(file->string()), DocumentState::Parsed, token,
+        McpToolResult result = routeDocumentTool(
+            shared, toolFileUri(file->string()), DocumentState::Parsed, token,
             [&](const Document& document, const CoreServices& language,
                 std::string& out) {
               const detail::NamedNodes named = detail::collect_named_nodes(
@@ -1005,7 +994,7 @@ void DefaultMcpService::registerDocumentSymbolsTool(McpServer& server) const {
               const Cst& cst = document.parseResult.cst();
               const auto print = [&](auto&& self, std::size_t i,
                                      std::size_t depth) -> void {
-                throw_if_cancelled(token);
+                throwIfCancelled(token);
                 const AstNode& node = *named.nodes[i];
                 out.append(2 * depth, ' ');
                 out += language.nameProvider->getName(node).value_or(
@@ -1016,7 +1005,7 @@ void DefaultMcpService::registerDocumentSymbolsTool(McpServer& server) const {
                   out += ')';
                 }
                 out += "  ";
-                append_tool_position(out, document, cst[node.cstNodeId].begin);
+                appendToolPosition(out, document, cst[node.cstNodeId].begin);
                 out += '\n';
                 if (owned[i].empty()) return;
                 if (depth == kMaxOutlineDepth) {
@@ -1071,35 +1060,19 @@ void DefaultMcpService::registerExpectedAtTool(McpServer& server) const {
            "position ending a word is answered in the word's place, and the "
            "answer says so first. For the valid targets of a cross-reference "
            "member, call scope-candidates.",
-       .inputSchema = tool_position_schema()},
-      [&shared = _shared](const json::Value& arguments,
+       .inputSchema = toolPositionSchema()},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
-        const McpToolPosition at = tool_position(arguments);
-        McpToolResult result = route_document_tool(
-            shared, at.uri, DocumentState::Linked, token,
-            [&](const Document& document, const CoreServices& language,
-                std::string& out) {
+        const McpToolPosition at = toolPosition(arguments);
+        return at_position(shared, at, DocumentState::Parsed, token,
+            "nothing may be written at this position",
+            [&](const Document& document, const CoreServices& language, TextOffset offset, std::string& out) {
               const Grammar& grammar = language.parser->getGrammar();
-              const TextOffset offset = document.textDocument().offsetAt(
-                  Position{at.line, at.column});
-              std::vector<std::string> lines;
               std::unordered_set<std::string> seen;
               CstLeaf word;
               for (const NextFeature& next : features_at(
                        document, *language.parser, offset, word, token)) {
-                throw_if_cancelled(token);
-                // A keyword by its text, a terminal that reads a choice of
-                // words by each of them, any other terminal by its name.
-                std::vector<std::string> heads;
-                for (const std::string_view spelled :
-                     grammar.terminalSpellings(next.feature))
-                  heads.push_back('\'' + std::string(spelled) + '\'');
-                if (heads.empty()) {
-                  const std::string_view name =
-                      grammar.terminalName(next.feature);
-                  if (name.empty()) continue;
-                  heads.push_back(std::string(name) + " (token)");
-                }
+                throwIfCancelled(token);
                 std::string tail;
                 if (!next.property.empty()) {
                   tail += "  fills '";
@@ -1112,26 +1085,30 @@ void DefaultMcpService::registerExpectedAtTool(McpServer& server) const {
                   tail += "  -- ";
                   tail += doc;
                 }
-                for (std::string& line : heads) {
+                const auto append = [&](std::string line) {
+                  throwIfCancelled(token);
                   line += tail;
-                  if (seen.insert(line).second)
-                    lines.push_back(std::move(line));
+                  const auto [row, fresh] = seen.insert(std::move(line));
+                  if (!fresh) return;
+                  if (word && out.empty()) {
+                    out += "in place of '";
+                    out += document.parseResult.cst().text().substr(
+                        word.begin, word.end - word.begin);
+                    out += "'\n";
+                  }
+                  out += *row;
+                  out += '\n';
+                };
+                const auto spellings = grammar.terminalSpellings(next.feature);
+                if (!spellings.empty()) {
+                  for (std::string_view spelled : spellings)
+                    append('\'' + std::string(spelled) + '\'');
+                } else if (const auto name = grammar.terminalName(next.feature);
+                           !name.empty()) {
+                  append(std::string(name) + " (token)");
                 }
               }
-              if (word && !lines.empty()) {
-                out += "in place of '";
-                out += document.parseResult.cst().text().substr(
-                    word.begin, word.end - word.begin);
-                out += "'\n";
-              }
-              for (const std::string& line : lines) {
-                out += line;
-                out += '\n';
-              }
             });
-        if (!result.isError && result.text.empty())
-          result.text = "nothing may be written at this position";
-        return result;
       });
 }
 
@@ -1143,16 +1120,13 @@ void DefaultMcpService::registerScopeCandidatesTool(McpServer& server) const {
            "The valid targets of each cross-reference that may be written at "
            "a position, member by member, as the scope at that site answers "
            "them.",
-       .inputSchema = tool_position_schema()},
-      [&shared = _shared](const json::Value& arguments,
+       .inputSchema = toolPositionSchema()},
+      [&shared = sharedServices](const json::Value& arguments,
                           const CancellationToken& token) {
-        const McpToolPosition at = tool_position(arguments);
-        McpToolResult result = route_document_tool(
-            shared, at.uri, DocumentState::Linked, token,
-            [&](const Document& document, const CoreServices& language,
-                std::string& out) {
-              const TextOffset offset = document.textDocument().offsetAt(
-                  Position{at.line, at.column});
+        const McpToolPosition at = toolPosition(arguments);
+        return at_position(shared, at, DocumentState::Linked, token,
+            "no cross-reference is expected at this position",
+            [&](const Document& document, const CoreServices& language, TextOffset offset, std::string& out) {
               const Cst& cst = document.parseResult.cst();
               CstLeaf word;
               const std::vector<NextFeature> features =
@@ -1160,59 +1134,47 @@ void DefaultMcpService::registerScopeCandidatesTool(McpServer& server) const {
               // From the word's own node when the caret is in a word, as
               // completion reads; else from the node before the caret.
               AstNode* const container =
-                  word ? owner_of_leaf(cst, word.id) : owner_at(cst, offset);
+                  word ? ownerOfLeaf(cst, word.id) : ownerAt(cst, offset);
               // One list per reference member, in the order the grammar names
               // them: every site the position admits is read, and the sites
               // of one member add up their offers, as a completion's do.
-              struct Member {
-                std::string_view property;
-                std::uint16_t reference = kNoReference;
-                std::string lines;
-              };
-              std::vector<Member> members;
+              std::map<std::pair<std::string_view, std::uint16_t>, std::size_t>
+                  members;
+              std::vector<std::string> groups;
               using Seen =
                   std::tuple<std::size_t, std::string_view, const AstTypeTag*>;
               std::set<Seen> seen;
-              std::vector<NextFeature> asked;
-              std::size_t matches = 0;
+              std::set<std::tuple<std::string_view, std::uint8_t,
+                                  const AstTypeTag*, bool>>
+                  asked;
               for (const NextFeature& next : features) {
-                throw_if_cancelled(token);
-                if (matches > kMaxLines) break;
+                throwIfCancelled(token);
+                if (seen.size() > kMaxLines) break;
                 // Two terminals filling one site ask the same scope.
-                const auto site = [&](const NextFeature& other) {
-                  return other.property == next.property &&
-                         other.narrow == next.narrow &&
-                         other.type == next.type &&
-                         other.entered == next.entered;
-                };
-                if (next.property.empty() || std::ranges::any_of(asked, site))
+                const auto site = std::tie(next.property, next.narrow,
+                                           next.type, next.entered);
+                if (next.property.empty() || !asked.insert(site).second)
                   continue;
-                asked.push_back(next);
                 AstNodePtr entered;
                 const std::optional<ReferenceInfo> context =
                     detail::reference_at_caret(*language.astReflection,
                                                document, container, next,
                                                entered);
                 if (!context) continue;
-                auto member =
-                    std::ranges::find_if(members, [&](const Member& m) {
-                      return m.property == next.property &&
-                             m.reference == context->reference;
-                    });
-                if (member == members.end())
-                  member = members.insert(
-                      members.end(), Member{.property = next.property,
-                                            .reference = context->reference,
-                                            .lines = {}});
-                const auto index =
-                    static_cast<std::size_t>(member - members.begin());
+                const auto [member, fresh] = members.try_emplace(
+                    std::pair{next.property, context->reference},
+                    groups.size());
+                if (fresh)
+                  groups.push_back("candidates for member '" +
+                                   std::string(next.property) + "':\n");
+                const auto index = member->second;
                 (void)language.scopeProvider->visitScopeEntries(
                     *context, [&](const AstNodeDescription& entry) {
-                      throw_if_cancelled(token);
+                      throwIfCancelled(token);
                       if (!seen.emplace(index, entry.name, entry.type).second)
                         return true;
-                      if (++matches > kMaxLines) return false;
-                      std::string& lines = members[index].lines;
+                      if (seen.size() > kMaxLines) return false;
+                      std::string& lines = groups[index];
                       lines += entry.name;
                       if (entry.type != nullptr) {
                         lines += " (";
@@ -1223,17 +1185,9 @@ void DefaultMcpService::registerScopeCandidatesTool(McpServer& server) const {
                       return true;
                     });
               }
-              for (const Member& member : members) {
-                out += "candidates for member '";
-                out += member.property;
-                out += "':\n";
-                out += member.lines;
-              }
-              if (matches > kMaxLines) out += "... more results elided\n";
+              for (const auto& lines : groups) out += lines;
+              if (seen.size() > kMaxLines) out += "... more results elided\n";
             });
-        if (!result.isError && result.text.empty())
-          result.text = "no cross-reference is expected at this position";
-        return result;
       });
 }
 

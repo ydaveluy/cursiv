@@ -1,12 +1,5 @@
 # Holds the recovery metric to `lane.tsv`: per grammar and class, no figure may
-# move past one document's worth. `-DWRITE=1` rewrites the file, and an engine
-# whose repairs differ reads `lane-<engine>.tsv` beside it.
-set(shared ${TSV})
-string(TOLOWER "${ENGINE}" engine)
-string(REGEX REPLACE "\\.tsv$" "-${engine}.tsv" own ${TSV})
-if(NOT engine STREQUAL "" AND EXISTS ${own})
-  set(TSV ${own})
-endif()
+# move past one document's worth. `-DWRITE=1` rewrites the file.
 execute_process(
     COMMAND ${EMULATOR} ${METRIC} --docs 32 --no-cost --json ${OUT}.json
     OUTPUT_VARIABLE text
@@ -36,15 +29,6 @@ endforeach()
 if(WRITE)
   list(JOIN rows "\n" out)
   string(APPEND out "\n")
-  # The engine's own file stands only while it differs from the shared one.
-  if(NOT TSV STREQUAL shared)
-    file(READ ${shared} sharedText)
-    if(sharedText STREQUAL out)
-      file(REMOVE ${TSV})
-      message(STATUS "removed ${TSV}: ${shared} says the same")
-      return()
-    endif()
-  endif()
   file(WRITE ${TSV} "${out}")
   message(STATUS "wrote ${TSV}")
   return()

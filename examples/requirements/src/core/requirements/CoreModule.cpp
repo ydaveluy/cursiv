@@ -21,7 +21,7 @@
 namespace req {
 
 void install_requirements_core_module(RequirementsCoreServices& services) {
-  req::generated::Requirements::install_generated_module(services);
+  req::generated::Requirements::installGeneratedModule(services);
 
   using V = RequirementsValidator;
   services.requirementsValidator = std::make_unique<const V>(services);
@@ -33,7 +33,7 @@ void install_requirements_core_module(RequirementsCoreServices& services) {
 }
 
 void install_tests_core_module(RequirementsCoreServices& services) {
-  req::generated::Tests::install_generated_module(services);
+  req::generated::Tests::installGeneratedModule(services);
 
   using V = TestsValidator;
   services.testsValidator = std::make_unique<const V>(services);
@@ -48,7 +48,7 @@ void install_tests_core_module(RequirementsCoreServices& services) {
 
 std::unique_ptr<RequirementsCoreServices> create_requirements_core_services(
     RequirementsSharedCoreServices& sharedServices, std::string languageId) {
-  auto services = cursiv::make_default_core_services<RequirementsCoreServices>(
+  auto services = cursiv::makeDefaultCoreServices<RequirementsCoreServices>(
       sharedServices, std::move(languageId));
   install_requirements_core_module(*services);
   return services;
@@ -56,7 +56,7 @@ std::unique_ptr<RequirementsCoreServices> create_requirements_core_services(
 
 std::unique_ptr<RequirementsCoreServices> create_tests_core_services(
     RequirementsSharedCoreServices& sharedServices, std::string languageId) {
-  auto services = cursiv::make_default_core_services<RequirementsCoreServices>(
+  auto services = cursiv::makeDefaultCoreServices<RequirementsCoreServices>(
       sharedServices, std::move(languageId));
   install_tests_core_module(*services);
   return services;
@@ -68,7 +68,7 @@ RequirementsCoreLanguage create_core_services(
   shared->fileSystemProvider =
       files != nullptr ? std::move(files)
                        : std::make_unique<cursiv::EmptyFileSystemProvider>();
-  cursiv::install_default_shared_core_services(*shared);
+  cursiv::installDefaultSharedCoreServices(*shared);
   auto requirements = create_requirements_core_services(*shared);
   auto tests = create_tests_core_services(*shared);
   RequirementsCoreServices& one = *requirements;

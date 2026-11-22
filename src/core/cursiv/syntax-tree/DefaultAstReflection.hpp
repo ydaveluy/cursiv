@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -37,13 +38,35 @@ struct DefaultAstReflection : AstReflection {
 
   void visitProperties(
       const AstNode& node,
-      cursiv::function_ref<void(std::string_view, std::uint32_t, AstNode&)>
+      cursiv::FunctionRef<void(std::string_view, std::uint32_t, AstNode&)>
           yield) const override {
     const auto type = typeIndexOf(node.type);
-    if (type != kNoType)
-      _f.memberVisitors[type](node, yield);
-    else
-      _f.unknownMembers(node, yield);
+    if (type != kNoType) {
+      for (const std::uint16_t member : _f.nodeRows[type])
+        _f.yields[member](node, yield, std::dynamic_extent);
+      return;
+    }
+    // A class this grammar does not index shows the members of its nearest
+    // indexed bases, in their order, each member once.
+    if (node.type == nullptr) return;
+    const std::span bases(node.type->bases, node.type->baseCount);
+    const auto nearest = [&](const AstTypeTag* base) {
+      return typeIndexOf(base) != kNoType &&
+             std::ranges::none_of(bases, [&](const AstTypeTag* other) {
+               return other != base && other->derivesFrom(base) &&
+                      typeIndexOf(other) != kNoType;
+             });
+    };
+    for (std::size_t at = 0; at < bases.size(); ++at) {
+      if (!nearest(bases[at])) continue;
+      for (const std::uint16_t member : _f.nodeRows[typeIndexOf(bases[at])]) {
+        const AstTypeTag* const owner = _f.types[_f.fields[member].owner];
+        if (std::ranges::none_of(bases.first(at), [&](const AstTypeTag* seen) {
+              return seen->derivesFrom(owner) && nearest(seen);
+            }))
+          _f.yields[member](node, yield, std::dynamic_extent);
+      }
+    }
   }
 
   [[nodiscard]] TypeMetaData getTypeMetaData(
@@ -76,13 +99,13 @@ struct DefaultAstReflection : AstReflection {
 
   [[nodiscard]] std::uint16_t referenceIndexOf(
       const AstTypeTag* container,
-      std::string_view feature) const noexcept override;
+      std::string_view property) const noexcept override;
 
   // The index protocol of the generated tables, which no service reads
-  // through the interface. `propertyName` names the member a field index keys;
+  // through the interface. `propertyName` maps a property index to its name;
   // the one-argument `referenceIndexOf` gives the row of a reference type.
   [[nodiscard]] std::string_view propertyName(
-      std::uint16_t field) const noexcept;
+      std::uint16_t propertyIndex) const noexcept;
   [[nodiscard]] std::uint16_t referenceIndexOf(
       const AstTypeTag* referenceType) const noexcept;
   [[nodiscard]] bool isMultiReference(std::uint16_t reference) const noexcept;
@@ -127,10 +150,6 @@ struct DefaultAstReflection : AstReflection {
   const detail::AstMetaData& _f;
   std::vector<TagSlot> _byTag;
   std::size_t _mask = 0;
-  // What `getTypeMetaData` gives per type index: the tables hold the closure
-  // of a class's bases and the properties it declares.
-  std::vector<std::vector<const AstTypeTag*>> _superTypes;
-  std::vector<std::vector<PropertyMetaData>> _properties;
 };
 
 }  // namespace cursiv

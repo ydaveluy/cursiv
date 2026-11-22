@@ -2,7 +2,7 @@
 // `nextFeaturesAt` at a few carets, reps times; compare 0 and N reps under
 // `perf stat`. `block` statements make one top-level loop, 0 makes none.
 //
-//   caret_bench <ll|lr> <statements> [reps] [block] [--print]
+//   caret_bench <statements> [reps] [block] [--print]
 
 #include <chrono>
 #include <cstddef>
@@ -14,8 +14,7 @@
 #include <string_view>
 #include <vector>
 
-#include "benchcaretll/generated/Ll/Module.hpp"
-#include "benchcaretlr/generated/Lr/Module.hpp"
+#include "benchcaret/generated/G/Module.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
@@ -52,22 +51,16 @@ std::string document(std::size_t statements, std::size_t block) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  const std::string_view engine = argc > 1 ? argv[1] : "lr";
   const std::size_t statements =
-      argc > 2 ? std::strtoul(argv[2], nullptr, 10) : 20000;
-  const int reps = argc > 3 ? std::atoi(argv[3]) : 20;
+      argc > 1 ? std::strtoul(argv[1], nullptr, 10) : 20000;
+  const int reps = argc > 2 ? std::atoi(argv[2]) : 20;
   const std::size_t block =
-      argc > 4 && argv[4][0] != '-' ? std::strtoul(argv[4], nullptr, 10) : 200;
+      argc > 3 && argv[3][0] != '-' ? std::strtoul(argv[3], nullptr, 10) : 200;
   bool print = false;
-  for (int i = 4; i < argc; ++i)
+  for (int i = 3; i < argc; ++i)
     print = print || std::string_view(argv[i]) == "--print";
-  if (engine != "ll" && engine != "lr") {
-    std::fprintf(stderr, "caret_bench: the engine is ll or lr\n");
-    return 2;
-  }
   const std::unique_ptr<cursiv::Parser> parser =
-      engine == "ll" ? tcaretphrase::generated::Ll::create_parser()
-                     : tcaretphrase::generated::Lr::create_parser();
+      tcaretphrase::generated::G::createParser();
   const std::string text = document(statements, block);
   const cursiv::ParseResult parsed = parser->parse(text);
   if (!parsed.accepted || !parsed.diagnostics.empty()) {
@@ -118,9 +111,8 @@ int main(int argc, char** argv) {
       std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
           .count();
   const double calls = static_cast<double>(reps) * carets.size();
-  std::printf(
-      "%.*s statements %zu bytes %zu calls %.0f us/call %.1f sink %zu\n",
-      static_cast<int>(engine.size()), engine.data(), statements, text.size(),
-      calls, calls != 0 ? seconds * 1e6 / calls : 0.0, sink);
+  std::printf("statements %zu bytes %zu calls %.0f us/call %.1f sink %zu\n",
+              statements, text.size(), calls,
+              calls != 0 ? seconds * 1e6 / calls : 0.0, sink);
   return 0;
 }

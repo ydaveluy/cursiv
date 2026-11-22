@@ -49,6 +49,7 @@ struct GrammarCost {
       case ElementKind::character_range:
       case ElementKind::any_character:
       case ElementKind::terminal_rule:
+      case ElementKind::through:
         return 1;
       case ElementKind::and_predicate:
       case ElementKind::not_predicate:

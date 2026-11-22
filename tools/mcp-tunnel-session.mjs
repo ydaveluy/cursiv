@@ -18,7 +18,10 @@ const { send, request, end: serverEnd } = startSession(serverPath);
 // The tunnel's answer is the MCP response itself, which can be an error too.
 const mcp = async (message) => {
   const { result: answer } = await request(
-    { method: 'cursiv/mcp', params: { jsonrpc: '2.0', ...message } }, `the tunnel's ${message.method}`);
+    { method: 'cursiv/mcp', params: { jsonrpc: '2.0', ...message, params: { ...message.params, _meta: {
+      'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+      'io.modelcontextprotocol/clientCapabilities': {},
+    } } } }, `the tunnel's ${message.method}`);
   if (answer?.id !== message.id) throw new Error(`${message.method}: answered under id ${answer?.id}`);
   if (answer.error) throw new Error(`${message.method}: ${answer.error.code}: ${answer.error.message}`);
   return answer.result;

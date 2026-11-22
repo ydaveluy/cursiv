@@ -46,7 +46,7 @@ struct G : cursiv::GrammarSpec {
 // name above is one the document never spelled contiguously.
 namespace comp {
 struct N : cursiv::Extends<cursiv::AstNode> {
-  string name;
+  string_view name;
 };
 constexpr std::string_view unquote(std::string_view t) {
   return t.size() >= 2 ? t.substr(1, t.size() - 2) : t;
@@ -364,8 +364,8 @@ struct G : cursiv::GrammarSpec {
       : rule<kw<"materialized"> +
              assign<&materialized::Doc::copied>(ref<COPIED>) +
              assign<&materialized::Doc::written>(ref<WRITTEN>)> {};
-  // Parts that are all present, each converting to empty text.
-  struct BlankName : rule<ref<COPIED> + ref<COPIED>> {};
+  // A copied piece followed by another copy or a slice of the document.
+  struct BlankName : rule<ref<COPIED> + (ref<COPIED> | ref<ID>)> {};
   struct BlankRoot
       : rule<kw<"blank"> + assign<&comp::N::name>(ref<BlankName>)> {};
   inline static constexpr auto operator_text = [](std::string_view text) {

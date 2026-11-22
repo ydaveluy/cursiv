@@ -15,7 +15,7 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 #include "cursiv/runtime/LanguageServer.hpp"
@@ -43,10 +43,10 @@ struct RequestStates {
   ServiceRequirement completion = DocumentState::Linked;
   ServiceRequirement hover = DocumentState::Linked;
   ServiceRequirement definition = DocumentState::Linked;
-  ServiceRequirement references = WorkspaceState::IndexedReferences;
-  ServiceRequirement documentHighlight = WorkspaceState::IndexedReferences;
+  ServiceRequirement references = WorkspaceState::kIndexedReferences;
+  ServiceRequirement documentHighlight = WorkspaceState::kIndexedReferences;
   // Rename and its preparation.
-  ServiceRequirement rename = WorkspaceState::IndexedReferences;
+  ServiceRequirement rename = WorkspaceState::kIndexedReferences;
   ServiceRequirement documentSymbol = DocumentState::Parsed;
   ServiceRequirement foldingRange = DocumentState::Parsed;
   ServiceRequirement selectionRange = DocumentState::Parsed;
@@ -59,10 +59,10 @@ struct RequestStates {
   ServiceRequirement declaration = DocumentState::Linked;
   ServiceRequirement typeDefinition = DocumentState::Linked;
   // What implements what is read off the inverse index.
-  ServiceRequirement implementation = WorkspaceState::IndexedReferences;
+  ServiceRequirement implementation = WorkspaceState::kIndexedReferences;
   // Each hierarchy's preparation and its two expansions.
-  ServiceRequirement callHierarchy = WorkspaceState::IndexedReferences;
-  ServiceRequirement typeHierarchy = WorkspaceState::IndexedReferences;
+  ServiceRequirement callHierarchy = WorkspaceState::kIndexedReferences;
+  ServiceRequirement typeHierarchy = WorkspaceState::kIndexedReferences;
   ServiceRequirement signatureHelp = DocumentState::IndexedReferences;
   ServiceRequirement inlayHint = DocumentState::IndexedReferences;
   ServiceRequirement documentLink = DocumentState::Parsed;
@@ -249,11 +249,9 @@ class DefaultLanguageServer : public LanguageServer,
  private:
   void updateVersion(Document& document, std::int64_t version);
 
-  // What a write's text half moved: rebuilt, or gone from the store.
-  struct TextChanges {
-    std::vector<std::string> changed;
-    std::vector<std::string> deleted;
-  };
+  // What a write's text half moved, by URI: true when it is gone from the
+  // store, false when it is rebuilt. The last event on a URI wins.
+  using TextChanges = std::unordered_map<std::string, bool>;
   // The text half of an open, a change and a close, made inside the write.
   void openText(const lsp::TextDocumentItem& item, TextChanges& changes);
   void changeText(const lsp::VersionedTextDocumentIdentifier& document,
@@ -261,30 +259,28 @@ class DefaultLanguageServer : public LanguageServer,
                   TextChanges& changes);
   void closeText(std::string_view uri, TextChanges& changes) const;
 
-  // The route every request about one document takes: state, lock, document,
-  // service, call. The URI is explicit: a hierarchy item names its document.
-  template <class Service, class Call>
-  void routeDocument(std::string_view uri, ServiceRequirement requirement,
-                     std::unique_ptr<const Service> LspServices::* slot,
-                     const CancellationToken& token, Call call) const;
+  void readDocument(std::string_view uri, ServiceRequirement, const CancellationToken&,
+                    FunctionRef<void(const LspServices&, const Document&)>) const;
+  template <class Service, class Result, class... Params, class... Args>
+  Result routeDocument(const lsp::DocumentUri&, ServiceRequirement, const CancellationToken&,
+                       std::unique_ptr<const Service> LspServices::*, Result (Service::*)(Params...) const,
+                       const Args&... args) const;
 
   // Waits outside the read, which would block the writer it waits for. False
   // means answer empty: cancelled, excluded from the build, or the build
   // failed.
   [[nodiscard]] bool awaitScan(const CancellationToken&,
                                bool required = false) const;
-  [[nodiscard]] bool awaitState(std::string_view uri, DocumentState,
-                                const CancellationToken&) const;
   // Runs `read` once every document has reached the state, beside the rest
   // of the build. False means it did not run -- cancelled, or the build
   // failed.
   bool readAtWorkspaceState(DocumentState, const CancellationToken&,
-                            cursiv::function_ref<void()> read) const;
+                            cursiv::FunctionRef<void()> read) const;
 
   // `mutate` runs in a write and lists what moved, `most` records for texts it
   // installs; a build of them follows, even when `mutate` fails.
   void writeAndPublish(std::size_t most,
-                       cursiv::function_ref<void(TextChanges&)> mutate);
+                       cursiv::FunctionRef<void(TextChanges&)> mutate);
   // Every update a write builds. A failure other than a cancellation is shown
   // to the user once until a build validates again, then goes on.
   void buildUpdate(std::span<const std::string_view> changed,
@@ -294,10 +290,10 @@ class DefaultLanguageServer : public LanguageServer,
   // The notebook receives a notification, then its cells move through
   // `writeAndPublish`.
   void deliverThenWrite(const NotebookDocuments* notebooks,
-                        cursiv::function_ref<void()> deliver, std::size_t most,
-                        cursiv::function_ref<void(TextChanges&)> mutate);
-  // `Linked` clears the documents removed, `Validated` publishes what
-  // `onDocumentPhase` recorded.
+                        cursiv::FunctionRef<void()> deliver, std::size_t most,
+                        cursiv::FunctionRef<void(TextChanges&)> mutate);
+  // Reconcile previous announcements at linking and publish diagnostics at the
+  // final barrier.
   void onBuildPhase(DocumentState, std::span<Document* const>,
                     const CancellationToken&) override;
   // Records each validated document, on the worker that validated it: a
@@ -305,10 +301,12 @@ class DefaultLanguageServer : public LanguageServer,
   // validate its documents again.
   void onDocumentPhase(Document&, DocumentState,
                        const CancellationToken&) override;
+  void onDocumentBuildFailed(const Document&) override;
+  void queueDiagnostics(const Document&);
   void onConfigurationSectionUpdate(std::string_view,
                                     const lsp::LSPAny&) override;
-  void clearRemoved();
-  void publishValidated();
+  void refreshAnnouncements();
+  void publishPendingDiagnostics();
   // `publish`, and remember that the client was shown the document.
   void announceDocument(const Document&);
   // Subscribes to the services installed when the session initializes.
@@ -320,26 +318,27 @@ class DefaultLanguageServer : public LanguageServer,
   // The dynamic registration for `workspace/didChangeWatchedFiles`, when
   // the client said it accepts one.
   void registerFileWatcher() const;
-  // Rewrites a `changes` edit as a versioned `documentChanges` one.
-  static void addDocumentVersion(lsp::CodeAction& action,
-                                 const Document& document);
+  std::optional<lsp::WorkspaceEdit> readFileEdit(
+      const CancellationToken& token,
+      FunctionRef<
+          std::optional<lsp::WorkspaceEdit>(const FileOperationHandler&)>
+          request) const;
+  void addDocumentVersions(std::optional<lsp::WorkspaceEdit>& edit) const;
 
   SharedLspServices& _shared;
   RequestStates _states;
-  // The documents the client was shown a verdict for, until they are gone.
-  std::unordered_set<DocumentId> _announced;
-  // The documents validated since the last `Validated` phase, written by the
-  // validating workers. `_announceAll` stands for a record that was lost: the
-  // next drain then announces every validated document.
-  std::mutex _validatedMutex;
-  std::vector<DocumentId> _validated;
+  // Whether the last diagnostics published for each document reported a build
+  // failure.
+  std::unordered_map<DocumentId, bool> _announced;
+  // Documents with diagnostics ready to publish. A lost record requests a full
+  // drain.
+  std::mutex _diagnosticsMutex;
+  std::vector<DocumentId> _pendingDiagnostics;
   bool _announceAll = false;
-  // Whether the client reads versioned `documentChanges`, which let it refuse
-  // a fix clicked after a later keystroke. Set at the handshake.
+  // Negotiated at initialization for edits computed from open buffers.
   bool _versionedEdits = false;
-  // Whether the client reads markdown for hover contents and for completion
-  // documentation; otherwise that prose goes as plain text. Asked at the
-  // handshake.
+  // Client preferences negotiated at initialization.
+  bool _eagerSymbolRanges = false;
   bool _markdownHover = false;
   bool _markdownCompletion = false;
   std::vector<std::function<void(const lsp::InitializeParams&)>> _onInitialize;

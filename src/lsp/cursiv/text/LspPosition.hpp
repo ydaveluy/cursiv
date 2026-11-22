@@ -12,22 +12,22 @@
 
 namespace cursiv {
 
-[[nodiscard]] constexpr Position from_lsp(const lsp::Position& p) noexcept {
+[[nodiscard]] constexpr Position fromLsp(const lsp::Position& p) noexcept {
   return Position{static_cast<std::uint32_t>(p.line),
                   static_cast<std::uint32_t>(p.character)};
 }
 
-[[nodiscard]] constexpr Range from_lsp(const lsp::Range& r) noexcept {
-  return Range{from_lsp(r.start), from_lsp(r.end)};
+[[nodiscard]] constexpr Range fromLsp(const lsp::Range& r) noexcept {
+  return Range{fromLsp(r.start), fromLsp(r.end)};
 }
 
-[[nodiscard]] constexpr lsp::Position to_lsp(Position p) noexcept {
+[[nodiscard]] constexpr lsp::Position toLsp(Position p) noexcept {
   return lsp::Position{static_cast<lsp::Uint>(p.line),
                        static_cast<lsp::Uint>(p.character)};
 }
 
-[[nodiscard]] constexpr lsp::Range to_lsp(Range r) noexcept {
-  return lsp::Range{to_lsp(r.start), to_lsp(r.end)};
+[[nodiscard]] constexpr lsp::Range toLsp(Range r) noexcept {
+  return lsp::Range{toLsp(r.start), toLsp(r.end)};
 }
 
 }  // namespace cursiv

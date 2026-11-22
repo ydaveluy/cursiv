@@ -25,6 +25,7 @@
 #include "arithmetics/validation/ArithmeticsValidator.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/ExpectDiagnosticOptions.hpp"
+#include "cursiv/ParseHelper.hpp"
 #include "cursiv/ValidationHelper.hpp"
 #include "cursiv/ValidationResult.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
@@ -48,7 +49,7 @@ constexpr std::string_view kDivByZero = "Division by zero is detected.";
 
 struct World {
   cursiv::CoreLanguage<Services, Shared> services =
-      cursiv::create_language<Services, Shared, arith::install_core_module>();
+      cursiv::createLanguage<Services, Shared, arith::install_core_module>();
 
   [[nodiscard]] ct::ValidationResult validate(std::string text) const {
     return ct::validationHelper(services.language, std::move(text));
@@ -129,6 +130,25 @@ void a_mutual_cycle_is_said_at_each_of_its_call_sites() {
   CHECK(count(said, kMessage) == 2);
   ct::expectError(said, kMessage, at(text.find("g;"), 1));
   ct::expectError(said, kMessage, at(text.rfind("f;"), 1));
+}
+
+// A cycle through another document is said only at this document's own calls,
+// and one that lies wholly in another document is not said here.
+void a_cycle_through_another_document_is_said_at_local_calls_only() {
+  const World mutual;
+  const auto other =
+      ct::parseHelper(mutual.services.language,
+                      "module b\n// a longer line first\ndef g: f;\n");
+  const std::string text = "module a\ndef f: g;\n";
+  const ct::ValidationResult said = mutual.validate(text);
+  constexpr std::string_view kMessage = "Recursion is not allowed [g()->f()]";
+  CHECK(count(said, kMessage) == 1);
+  ct::expectError(said, kMessage, at(text.find("g;"), 1));
+
+  const World foreign;
+  const auto cycle = ct::parseHelper(foreign.services.language,
+                                     "module b\n\n\ndef g: h;\ndef h: g;\n");
+  ct::expectNoIssues(foreign.validate("module a\ndef f: g;\n"));
 }
 
 void a_three_step_cycle_spells_every_step() {
@@ -381,7 +401,7 @@ void* walk(void* arg) {
   job->validator->checkDivisionsByZero(*job->document, accept, {});
   job->validator->checkFunctionRecursion(module, accept);
   for (const arith::ast::Statement* const statement : module.statements)
-    if (statement->type == &cursiv::ast_type_tag<arith::ast::Definition>)
+    if (statement->type == &cursiv::kAstTypeTag<arith::ast::Definition>)
       job->validator->checkNormalizable(
           static_cast<const arith::ast::Definition&>(*statement), accept);
   job->said = found.size();
@@ -498,8 +518,8 @@ void every_evaluation_is_said() {
   arith::ArithmeticsSharedCoreServices shared;
   shared.fileSystemProvider =
       std::make_unique<cursiv::LocalFileSystemProvider>();
-  cursiv::install_default_shared_core_services(shared);
-  cursiv::register_language<Services, Shared, arith::install_core_module>(
+  cursiv::installDefaultSharedCoreServices(shared);
+  cursiv::registerLanguage<Services, Shared, arith::install_core_module>(
       shared);
   std::ostringstream out;
   std::ostringstream err;
@@ -513,9 +533,7 @@ void every_evaluation_is_said() {
   std::filesystem::remove(file);
 }
 
-// A statement whose end is written as a colon: every operator could stand
-// there at the same cost, whatever level it binds at, and either engine names
-// the same ones, in the order the grammar declares them.
+// Every operator can replace the colon at the same cost. Expect declaration order.
 void a_misplaced_colon_names_every_operator() {
   const World world;
   const std::string text = "module m\nf(x, y):\n    x^y;\n";
@@ -527,13 +545,14 @@ void a_misplaced_colon_names_every_operator() {
 }  // namespace
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   a_literal_zero_divisor_is_an_error();
   a_call_reaching_zero_is_an_error();
   a_call_reaching_a_number_says_nothing();
   a_recursive_divisor_neither_hangs_nor_reports();
   a_definition_calling_itself_names_its_own_call();
   a_mutual_cycle_is_said_at_each_of_its_call_sites();
+  a_cycle_through_another_document_is_said_at_local_calls_only();
   a_three_step_cycle_spells_every_step();
   a_cycle_reached_through_two_siblings_is_said();
   a_call_that_returns_says_nothing();

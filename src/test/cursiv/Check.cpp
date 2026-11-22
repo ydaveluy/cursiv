@@ -10,7 +10,7 @@
 
 namespace cursiv::test {
 
-void count_expectations() {
+void countExpectations() {
   cursiv::test::setExpectFunction([](std::string_view actual,
                                      std::string_view expected,
                                      std::string_view message) {
@@ -25,7 +25,7 @@ void count_expectations() {
   });
 }
 
-std::string read_file(const std::string& path) {
+std::string readFile(const std::string& path) {
   std::ifstream in(path, std::ios::binary);
   if (!in) return {};
   std::ostringstream buf;

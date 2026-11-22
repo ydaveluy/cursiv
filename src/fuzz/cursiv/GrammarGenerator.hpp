@@ -44,12 +44,7 @@ struct GrammarGenerator {
                                            WalkTree& ar) const {
     Walk w{&src, &ar, {}, 0};
     bool built = false;
-    const ElementId entry = g.entryRule();
-    // An entry that is a climb, which `walk` never sees: the model gives it no
-    // children for `rule_node` to walk.
-    w.d.tree = g.kindOf(entry) == ElementKind::infix_rule
-                   ? infix_chain(entry, w, built)
-                   : rule_node(entry, w, built);
+    w.d.tree = rule_node(g.entryRule(), w, built);
     w.d.complete = w.ok && build_text(w.d);
     return std::move(w.d);
   }
@@ -61,12 +56,13 @@ struct GrammarGenerator {
     GrammarDerivation d;
     unsigned depth = 0;
     bool ok = true;
-    // The region that ignores nothing being written, and where it started:
-    // every token of it but the first admits no separator in front.
-    unsigned bare = 0;
-    std::size_t bareFrom = 0;
-    // The last token included the trivia beside it, so the next one takes none.
-    bool fed = false;
+    // The innermost trivia region being written, and the scope whose trivia go
+    // in front of the next token: a region's first token, and the token after
+    // the region, take the caller's. `kNoElement` is the grammar's own.
+    ElementId region = kNoElement;
+    ElementId gap = kNoElement;
+    // The last token written, which may read the trivia after it.
+    ElementId last = kNoElement;
     // The end of input was asserted: no token may follow.
     bool ended = false;
     // The value rule the assignment being walked descended into: its converter
@@ -90,9 +86,11 @@ struct GrammarGenerator {
     w.d.unwritten.push_back(AstUnwritten{on, std::string(g.featureOf(e))});
   }
 
-  // What one rule builds: the node its directives created, the node its single
-  // child handed up, or nothing at all.
+  // What one rule builds: a climb's operator chain, the node its directives
+  // created, the node its single child handed up, or nothing at all.
   [[nodiscard]] AstNode* rule_node(ElementId rule, Walk& w, bool& built) const {
+    if (g.kindOf(rule) == ElementKind::infix_rule)
+      return infix_chain(rule, w, built);
     built = false;
     if (++w.depth > kGrammarDepthCap) {
       ++w.d.capHits;
@@ -115,23 +113,25 @@ struct GrammarGenerator {
     const std::span<const ElementId> children = g.childrenOf(e);
     switch (g.kindOf(e)) {
       case ElementKind::literal:
-      case ElementKind::terminal_rule: {
+      case ElementKind::terminal_rule:
+      case ElementKind::through: {
         Veto after;
         std::string text =
-            g.kindOf(e) == ElementKind::literal
-                ? lex.spell(e, SpellStyle::shortest, *w.src, after)
-                : terminal_value(e, after, w);
+            g.kindOf(e) == ElementKind::terminal_rule
+                ? terminal_value(e, after, w)
+                : lex.spell(e, SpellStyle::shortest, *w.src, after);
         emit(e, std::move(text), after, w);
         return;
       }
       case ElementKind::infix_rule:
       case ElementKind::parser_rule:
       case ElementKind::data_type_rule: {
-        const bool climb = g.kindOf(e) == ElementKind::infix_rule;
-        if (climb ? act.primary(e) == kNoElement : children.empty()) break;
+        if (g.kindOf(e) == ElementKind::infix_rule
+                ? act.primary(e) == kNoElement
+                : children.empty())
+          break;
         bool built = false;
-        AstNode* const sub =
-            climb ? infix_chain(e, w, built) : rule_node(e, w, built);
+        AstNode* const sub = rule_node(e, w, built);
         if (!w.ok) return;
         if (!built) {
           if (assign != kNoElement && w.valueRule == kNoElement)
@@ -179,20 +179,16 @@ struct GrammarGenerator {
         }
         break;
       case ElementKind::skip_region: {
-        const unsigned wasBare = w.bare;
-        const std::size_t wasFrom = w.bareFrom;
-        if (lex.ignores_nothing(e)) {
-          ++w.bare;
-          w.bareFrom = w.d.tokens.size();
-        }
+        const ElementId caller = w.region;
+        const std::size_t first = w.d.tokens.size();
+        w.region = e;
         for (const ElementId c : children) walk(c, assign, f, w);
-        w.bare = wasBare;
-        w.bareFrom = wasFrom;
+        w.region = caller;
+        if (w.d.tokens.size() != first) w.gap = caller;
         return;
       }
       case ElementKind::group:
       case ElementKind::unordered_group:
-      case ElementKind::through:
         for (const ElementId c : children) walk(c, assign, f, w);
         return;
       default:
@@ -417,12 +413,14 @@ struct GrammarGenerator {
       w.ok = false;
       return;
     }
-    const bool readsSeparator = lex.reads_separator(e);
-    const bool attached = (w.bare != 0 && w.d.tokens.size() > w.bareFrom) ||
-                          readsSeparator || w.fed;
-    w.fed = readsSeparator;
+    // No trivia in front of the first token.
+    const std::string_view sep =
+        w.d.tokens.empty() ? std::string_view{}
+                           : lex.separator(w.gap, w.last, e);
+    w.gap = w.region;
+    w.last = e;
     w.d.tokens.push_back(
-        GrammarToken{e, std::move(text), {}, attached, 0, 0, after});
+        GrammarToken{e, std::move(text), std::string(sep), 0, 0, after});
   }
 
   // The value of a named terminal, from its own expression. A spelling the
@@ -442,15 +440,12 @@ struct GrammarGenerator {
     return {};
   }
 
-  // The separators: one ignored word in front of every token but the first,
-  // and none inside a region that ignores nothing. False where a token's last
-  // assertion forbids the byte after it: the text is then no sentence.
-  [[nodiscard]] bool build_text(GrammarDerivation& d) const {
-    const std::string_view sep = lex.separator();
+  // The tokens, each behind the trivia `emit` chose for it. False where a
+  // token's last assertion forbids the byte after it: the text is then no
+  // sentence.
+  [[nodiscard]] static bool build_text(GrammarDerivation& d) {
     d.text.clear();
-    for (std::size_t i = 0; i < d.tokens.size(); ++i) {
-      GrammarToken& t = d.tokens[i];
-      t.sep = i != 0 && !t.attached ? std::string(sep) : std::string();
+    for (GrammarToken& t : d.tokens) {
       d.text += t.sep;
       t.begin = static_cast<std::uint32_t>(d.text.size());
       d.text += t.text;

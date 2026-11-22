@@ -6,11 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
-#include <limits>
 #include <memory>
-#include <memory_resource>
 #include <mutex>
-#include <new>
 #include <numeric>
 #include <span>
 #include <stdexcept>
@@ -37,14 +34,12 @@ namespace cursiv {
 // complete.
 class ReverseNodeRange;
 
+class Cst;
 namespace detail {
-struct CstWalk;
+template <bool, class Match, class Take>
+void walk_cst(const Cst&, NodeId, const Match&, const Take&);
+}
 class CstBuilder;
-}
-namespace engine {
-struct AstBuildCtx;
-}
-struct Document;
 
 struct Grammar;
 
@@ -66,13 +61,10 @@ class Cst {
     if (this == &other) return *this;
     _text = other._text;
     _pool = std::move(other._pool);
-    _entryBegin = other._entryBegin;
-    _entryEnd = other._entryEnd;
     _entryRoot = other._entryRoot;
     _accepted = other._accepted;
     _diagnostics = std::move(other._diagnostics);
     _stream = std::move(other._stream);
-    _enginesTape = other._enginesTape;
     _grammar = other._grammar;
     _owned = other._owned;
     _nodeRecords = std::move(other._nodeRecords);
@@ -83,13 +75,9 @@ class Cst {
   }
   ~Cst() = default;
 
-  // Starts another parse, releasing the old tree and any AST on the shared
-  // resource. Call `AstArena::release()` first: the arena would allocate its
-  // next node from the freed buffers.
+  // Starts another parse and releases the shared resource. Existing AST
+  // nodes must have been destroyed first.
   void reset(std::string_view text) {
-    // The records live in the resource: unbind the run before the release and
-    // bind it again after.
-    _stream.bind(nullptr);
     // A moved-from tree has no resource left to release.
     if (_pool != nullptr)
       _pool->release();
@@ -104,42 +92,15 @@ class Cst {
   // The nodes and their list live on the pool the records do: `ParseResult`
   // alone reaches it, so nothing can hold it past a `reset`.
   friend class ParseResult;
-  std::pmr::memory_resource* memory() const { return _pool.get(); }
-
-  // The builder stores joined text here; others go through the document.
-  friend struct engine::AstBuildCtx;
-  friend struct Document;
-  // Joins `parts` into text that lives as long as the tree. A null view means
-  // an unwritten member, even at length zero.
-  std::string_view keepText(std::span<const std::string_view> parts) const {
-    std::size_t size = 0;
-    for (const std::string_view part : parts) {
-      if (part.size() > std::numeric_limits<std::size_t>::max() - size)
-        throw std::bad_alloc();
-      size += part.size();
-    }
-    auto* const out = static_cast<char*>(
-        _pool->allocate(size == 0 ? 1 : size, alignof(char)));
-    char* at = out;
-    for (const std::string_view part : parts) {
-      if (part.empty()) continue;
-      std::char_traits<char>::copy(at, part.data(), part.size());
-      at += part.size();
-    }
-    return std::string_view(out, size);
-  }
 
   // Resets every field but the resource. Not `*this = Cst{}`, which would
   // allocate a pool.
   void clear() noexcept {
     _text = std::string_view(&kEmptyDocumentByte, std::size_t{0});
-    _entryBegin = 0;
-    _entryEnd = 0;
     _entryRoot = kNoNode;
     _accepted = false;
     _diagnostics.clear();
     _stream.clear();
-    _enginesTape = false;
     _grammar = nullptr;
     _owned = {};
     _nodeRecords.clear();
@@ -180,8 +141,8 @@ class Cst {
     return {_diagnostics.data(), _diagnostics.size()};
   }
   NodeId entryRoot() const { return _entryRoot; }
-  NodeId entryBegin() const { return _entryBegin; }
-  NodeId entryEnd() const { return _entryEnd; }
+  NodeId entryBegin() const { return hasEntry() ? subtreeBegin(_entryRoot) : 0; }
+  NodeId entryEnd() const { return hasEntry() ? _entryRoot + 1 : 0; }
 
   const CstNode& operator[](NodeId id) const { return node(id); }
 
@@ -211,9 +172,6 @@ class Cst {
 
   ReverseNodeRange reverseChildren(NodeId parent) const;
 
-  // Whether an engine wrote the records. Hand-built records carry no engine
-  // data: check this before reading it.
-  [[nodiscard]] bool engineStamped() const { return _enginesTape; }
   // The grammar of the engine's records; null when no language parser
   // finished the tree.
   [[nodiscard]] const Grammar* grammar() const { return _grammar; }
@@ -272,24 +230,16 @@ class Cst {
 
  private:
   // The only writer: an engine finishes the tree through the builder.
-  friend class detail::CstBuilder;
+  friend class CstBuilder;
 
-  // Marks the records as written by an engine.
-  void bindStream() {
-    _enginesTape = true;
-    _nodeRecords.clear();
-    _nodeIndex = 0;
-  }
 
-  void bindEntry(NodeId begin, NodeId end, NodeId root) {
+  void bindEntry(NodeId root) {
     // What `leafAfter` bisects on, checked once a parse is over.
     assert(std::ranges::is_sorted(size() != 0
                                       ? std::span(&_stream.at(0), size())
                                       : std::span<const CstNode>{},
                                   {}, &CstNode::end) &&
            "record ends never decrease");
-    _entryBegin = begin;
-    _entryEnd = end;
     _entryRoot = root;
   }
   void bindAccepted(bool accepted) { _accepted = accepted; }
@@ -318,34 +268,22 @@ class Cst {
   const CstNode& node(NodeId id) const { return _stream.at(id); }
 
   static CstLeaf leafOf(NodeId id, const CstNode& n) {
-    return CstLeaf{id, n.begin, n.end, n.hidden != 0, n.recovered != 0};
+    return CstLeaf{id, n.begin, n.end, n.isHidden(), n.isRecovered()};
   }
 
-  // The walks of `CstUtils`, which ask `carriesNode` of every record they
-  // pass: a construction's search must stop at a nested node's record.
-  friend struct detail::CstWalk;
+  template <bool, class Match, class Take>
+  friend void detail::walk_cst(const Cst&, NodeId, const Match&, const Take&);
 
-  // Whether a node of `owned()` was built from the record: one bit a record,
-  // so a walk asks it at no search.
-  [[nodiscard]] bool carriesNode(NodeId id) const {
+  // The records a node of `owned()` was built from, a bit a record: a walk
+  // asks once, then reads the bits at no search.
+  [[nodiscard]] const std::uint64_t* nodeRecords() const {
     if (!published(_nodeIndex)) [[unlikely]]
       indexNodes();
-    return ((_nodeRecords[id / 64] >> (id % 64)) & 1U) != 0;
+    return _nodeRecords.data();
   }
-  // Defined in `CstUtils.cpp`, where `AstNode` is complete and the walks that
-  // read it live.
+  // Builds that index once and publishes it. Defined in `CstUtils.cpp`, where
+  // `AstNode` is complete and the walks that read it live.
   CURSIV_NOINLINE void indexNodes() const;
-
-  // Builds the index once and publishes it: a second reader waits instead of
-  // building it too. `build` clears the list.
-  template <class Build>
-  void buildOnce(std::uint8_t& flag, Build&& build) const {
-    const std::lock_guard lock(_indexLock);
-    if (!published(flag)) {
-      build();
-      publish(flag);
-    }
-  }
 
   // Whether the index a reader depends on is already visible to it. A plain
   // byte spun through `atomic_ref` and not a `std::atomic` member, which the
@@ -364,16 +302,12 @@ class Cst {
 
   std::string_view _text;
   std::unique_ptr<detail::BlockArena> _pool;
-  NodeId _entryBegin = 0;
-  NodeId _entryEnd = 0;
   NodeId _entryRoot = kNoNode;
   bool _accepted = false;
   std::vector<ParseDiagnostic> _diagnostics;
   // The records the engine appended, or the ones a caller built by hand
   // through `CstBuilder`.
-  detail::CstRun _stream;
-  // Whether an engine wrote the records, rather than `CstBuilder`.
-  bool _enginesTape = false;
+  CstRun _stream;
   const Grammar* _grammar = nullptr;
   OwnedNodes _owned;
   // Built on the first walk of `CstUtils` and never after: bit `id` says a
@@ -390,7 +324,7 @@ class Cst {
 // exclusive end of the unvisited prefix; incrementing skips a whole subtree.
 class ReverseNodeRange {
  public:
-  class iterator {
+  class Iterator {
    public:
     using iterator_category =
         std::input_iterator_tag;  // operator* is a prvalue
@@ -400,32 +334,32 @@ class ReverseNodeRange {
     using reference = NodeId;
     using iterator_concept = std::forward_iterator_tag;
 
-    iterator() = default;
+    Iterator() = default;
 
     NodeId operator*() const { return _cursor - 1; }
-    iterator& operator++() {
+    Iterator& operator++() {
       _cursor = _cst->subtreeBegin(_cursor - 1);
       return *this;
     }
-    iterator operator++(int) {
-      iterator copy = *this;
+    Iterator operator++(int) {
+      Iterator copy = *this;
       ++*this;
       return copy;
     }
-    bool operator==(const iterator&) const = default;
+    bool operator==(const Iterator&) const = default;
 
    private:
     friend class ReverseNodeRange;
-    iterator(const Cst* cst, NodeId cursor) : _cst(cst), _cursor(cursor) {}
+    Iterator(const Cst* cst, NodeId cursor) : _cst(cst), _cursor(cursor) {}
     const Cst* _cst = nullptr;
     NodeId _cursor = 0;
   };
 
-  iterator begin() const { return iterator(_cst, _firstCursor); }
-  iterator end() const { return iterator(_cst, _lastCursor); }
+  Iterator begin() const { return Iterator(_cst, _firstCursor); }
+  Iterator end() const { return Iterator(_cst, _lastCursor); }
 
  private:
-  friend class Cst;
+  friend ReverseNodeRange Cst::reverseChildren(NodeId) const;
   ReverseNodeRange(const Cst* cst, NodeId firstCursor, NodeId lastCursor)
       : _cst(cst), _firstCursor(firstCursor), _lastCursor(lastCursor) {}
   const Cst* _cst;

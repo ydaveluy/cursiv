@@ -42,8 +42,6 @@ struct PureBase : ChainBase {
       : rule<create<ChainDocument>(skip(ignore<WS>, hide<>, eof) + eof)> {};
   using entry = Root;
 };
-struct PureLl : PureBase {};
-struct PureLr : PureBase {};
 
 }  // namespace teofregion
 
@@ -192,7 +190,5 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"bytecond:"> + ref<tbytecond::Base::Entry>)> {};
   using entry = Entry;
 };
-struct Ll : Suite {};
-struct Lr : Suite {};
 struct Aux : Suite {};
 }  // namespace teofregion

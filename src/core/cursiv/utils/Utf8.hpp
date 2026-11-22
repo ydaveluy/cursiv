@@ -12,7 +12,7 @@ namespace cursiv {
 // The length a lead byte gives. A byte that leads nothing (a
 // continuation byte, 0xF8 and above) counts as one, so a walk always moves.
 // Masks, not a table: a load would cost more than three compares.
-[[nodiscard]] constexpr std::size_t utf8_width(char lead) noexcept {
+[[nodiscard]] constexpr std::size_t utf8Width(char lead) noexcept {
   const auto b = static_cast<unsigned char>(lead);
   return (b & 0xF8u) == 0xF0u   ? 4
          : (b & 0xF0u) == 0xE0u ? 3

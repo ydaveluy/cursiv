@@ -1,10 +1,7 @@
-#include "lexicalbackendsll/generated/Ll/Module.hpp"
 #include "characterslr/generated/Lr/Module.hpp"
-#include "characterslr/generated/Lr/Table.hpp"
-#include "cursiv/lr/runtime/lr_matcher.hpp"
-#include "cursiv/shared/runtime/LexBoundary.hpp"
-#include "cursiv/shared/utils/ClassSpelling.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/CstUtils.hpp"
+#include "cursiv/text/ClassRanges.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/CharactersGrammar.hpp"
@@ -20,46 +17,48 @@
 
 namespace characters_cases {
 
-// Membership. A reversed range is a compile error, so it has no test here.
-static_assert(cursiv::engine::parse_charset("a-z").test('m'));
-static_assert(!cursiv::engine::parse_charset("a-z").test('M'));
-static_assert(cursiv::engine::parse_charset("a-zA-Z_").test('_'));
+// A class spelling names the scalars it spells: a range, an escaped dash, a
+// numeric escape and a bare dash after a range.
+namespace {
 
-// A bare `-` between two atoms is a range operator, even right after a range
-// -- `"a-z--x"` is 'a'..'z' unioned with '-'..'x', not the set `"a-z\-x"`
-// spells.
-inline constexpr auto kDashLiteral = cursiv::engine::parse_charset(R"(a-z\-x)");
-static_assert(kDashLiteral.test('a') && kDashLiteral.test('z') &&
-              kDashLiteral.test('-') && kDashLiteral.test('x'));
-static_assert(!kDashLiteral.test('0') && !kDashLiteral.test('A') &&
-              !kDashLiteral.test('.'));
-static_assert(kDashLiteral.count() == 27);
-// ...and the range spelling admits the whole of 0x2d..0x7a.
-static_assert(cursiv::engine::parse_charset("a-z--x").count() == 78);
-static_assert(cursiv::engine::parse_charset("a-z--x").test('.') &&
-              cursiv::engine::parse_charset("a-z--x").test('A'));
+bool spells(std::string_view spec, char32_t scalar) {
+  const auto ranges = cursiv::detail::ClassRanges::of(spec);
+  return cursiv::unicode::within(ranges.r.data(), ranges.r.size(), scalar);
+}
 
-// `\xNN` spells one byte outright, so NUL is expressible even though it
-// cannot be a literal character.
-static_assert(cursiv::engine::parse_charset(R"(\x00)").test(0x00));
-static_assert(cursiv::engine::parse_charset(R"(\x00)").count() == 1);
-// A range with `\xNN` bounds on both ends: the C0 control range.
-inline constexpr auto kC0 = cursiv::engine::parse_charset(R"(\x00-\x1f)");
-static_assert(kC0.test(0x00) && kC0.test(0x1f) && !kC0.test(0x20));
-static_assert(kC0.count() == 32);
-static_assert(cursiv::engine::parse_charset(R"(\\)").test('\\'));
-static_assert(cursiv::engine::parse_charset(R"(\\)").count() == 1);
+std::size_t spelled(std::string_view spec) {
+  std::size_t count = 0;
+  for (const auto& range : cursiv::detail::ClassRanges::of(spec).r)
+    count += range.hi - range.lo + 1;
+  return count;
+}
 
+void class_spellings() {
+  CHECK(spells("a-z", 'm') && !spells("a-z", 'M'));
+  CHECK(spells("a-zA-Z_", '_'));
+  CHECK(spells(R"(a-z\-x)", 'a') && spells(R"(a-z\-x)", 'z') &&
+        spells(R"(a-z\-x)", '-') && spells(R"(a-z\-x)", 'x'));
+  CHECK(!spells(R"(a-z\-x)", '0') && !spells(R"(a-z\-x)", 'A') &&
+        !spells(R"(a-z\-x)", '.'));
+  CHECK(spelled(R"(a-z\-x)") == 27);
+  // A bare `-` between two atoms is a range operator, even right after a
+  // range: `a-z--x` is a..z joined with -..x.
+  CHECK(spelled("a-z--x") == 78);
+  CHECK(spells("a-z--x", '.') && spells("a-z--x", 'A'));
+  // `\xNN` spells one scalar, so NUL is expressible.
+  CHECK(spells(R"(\x00)", 0x00) && spelled(R"(\x00)") == 1);
+  CHECK(spells(R"(\x00-\x1f)", 0x00) && spells(R"(\x00-\x1f)", 0x1f) &&
+        !spells(R"(\x00-\x1f)", 0x20) && spelled(R"(\x00-\x1f)") == 32);
+  CHECK(spells(R"(\\)", '\\') && spelled(R"(\\)") == 1);
+}
 
 // A class reads one character -- a well-formed scalar whole, or the byte where
-// none starts -- in both engines.
-
-namespace {
+// none starts.
 
 constexpr std::string_view kAcute = "\xC3\xA9";
 constexpr std::string_view kLone = "\xE9";
 
-const char* engine = "";
+constexpr const char* kEngine = "LR";
 
 bool accepted(const cursiv::ParseResult& r) {
   return r.accepted && r.diagnostics.empty();
@@ -82,7 +81,7 @@ std::string read(const cursiv::Parser& parser, std::string_view text,
 void check(const cursiv::Parser& parser, std::string_view text,
            std::string_view expected, std::string_view prefix = {}) {
   const std::string got = read(parser, text, prefix);
-  same_text(engine, text, got, expected);
+  same_text(kEngine, text, got, expected);
 }
 
 std::string with(std::string_view tag, std::string_view body) {
@@ -174,6 +173,31 @@ void classes(const cursiv::Parser& p) {
   check(p, with("strict:", kAcute), kAcute);
   check(p, with("strict:", kLone), "<refused>");
   check(p, "strict:\xFF", "<refused>");
+}
+
+// A caret behind a token writes in it when the token's last unit is a whole
+// word scalar: a stray continuation byte or a cut sequence ends no word.
+void a_caret_word_ends_in_a_whole_scalar(const cursiv::Parser& p) {
+  for (const auto& [body, word] : {std::pair<std::string_view, bool>{"a", true},
+                                   {"\xC3\xA9", true},
+                                   {"9", true},
+                                   {"_", true},
+                                   {"a;", false},
+                                   {"a\x80", false},
+                                   {"\xC3\xA9\x80", false},
+                                   {"a\x80\x80\x80\x80", false},
+                                   {"a\xC3", false},
+                                   {"a\xE2\x82", false}}) {
+    const std::string text = with("whole:", body);
+    const cursiv::ParseResult r = p.parse(text);
+    same_text(kEngine, text, read(p, text), body);
+    same_text(kEngine, text,
+              cursiv::detail::word_at(
+                  r.cst(), static_cast<cursiv::TextOffset>(text.size()))
+                  ? "word"
+                  : "none",
+              word ? "word" : "none");
+  }
 }
 
 void the_scalar_and_the_byte(const cursiv::Parser& p) {
@@ -336,7 +360,7 @@ void gaps(const cursiv::Parser& p, std::string_view prefix = {}) {
     const std::string source = std::string(prefix) + "gaps:" + std::string(text);
     const cursiv::ParseResult r = p.parse(source);
     if (accepted(r) != expected)
-      std::printf("  [%s] %.*s expected %s\n", engine,
+      std::printf("  [%s] %.*s expected %s\n", kEngine,
                   static_cast<int>(text.size()), text.data(),
                   expected ? "accepted" : "refused");
     CHECK(accepted(r) == expected);
@@ -471,6 +495,7 @@ void exercise(const cursiv::Parser& p) {
   an_invalid_byte_stands_alone(p);
   a_byte_is_one_byte(p);
   classes(p);
+  a_caret_word_ends_in_a_whole_scalar(p);
   the_scalar_and_the_byte(p);
   a_word_boundary_reads_a_character(p);
   a_run_and_a_mark_read_characters(p);
@@ -478,60 +503,12 @@ void exercise(const cursiv::Parser& p) {
   any_text(p);
 }
 
-// LexDfaBuild, LexTape and scalar_at supply both backends' Unicode matching.
-// Keep the full codec/class corpus above on LR and cover the LL adapter's
-// first-token conditions, longest match and trivia with this smaller entry.
-void ll_integration(const cursiv::Parser& parser) {
-  for (const auto& [text, want] : {
-           std::pair<std::string_view, std::string_view>{"one:é", "é"},
-           {"one:𝒳", "𝒳"},
-           {"two:é", "<refused>"},
-           {"two:éa", "éa"},
-           {"bytes:é", "\xC3|\xA9"},
-           {"bytes:a\xFF", "a|\xFF"},
-           {"rb:a\xC3" "b", ""},
-           {"rb:ab", "<refused>"},
-           {"rc1:x", ""},
-           {"rc2:é", "<refused>"},
-           {"rc3:é", ""},
-           {"rc4:}", ""},
-           {"rc5:\xE9", ""},
-           {"rc6:\xE9", ""},
-           {"rt1:x", "x"},
-           {"rt1:é", "<refused>"},
-           {"rt1:\xE9", "\xE9"},
-           {"rt3:é", "é"},
-           {"rt3:\xE9", "\xE9"},
-           {"xa:xé", "x|é"},
-           {"xa:xe", "<refused>"},
-           {"xa:x\xC3", "<refused>"},
-           {"xo:xe", "x|e"},
-           {"xo:xé", "<refused>"},
-           {"xo:x\xC3", "x|\xC3"},
-           {"xg:xé", "x|é"},
-           {"xg:xe", "<refused>"},
-           {"rn1:é", "é"},
-           {"rn1:e", "<refused>"},
-           {"rn2:e", "e"},
-           {"rn2:é", "<refused>"},
-           {"first:é", "é"},
-           {"first:\xE9", "<refused>"},
-           {"rna:é日a", "é日|a"},
-           {"rne:aé", "a|é"},
-           {"rne:éa", "<refused>"},
-       })
-    check(parser, text, want, "chars:");
-  gaps(parser, "chars:");
-}
-
 }  // namespace
 
 void run() {
-  engine = "LL";
-  ll_integration(*tlexbackends::generated::Ll::create_parser());
-  engine = "LR";
-  exercise(*tchars::generated::Lr::create_parser());
-  gaps(*tchars::generated::Lr::create_parser());
+  class_spellings();
+  exercise(*tchars::generated::Lr::createParser());
+  gaps(*tchars::generated::Lr::createParser());
 }
 
 }  // namespace characters_cases
@@ -594,7 +571,7 @@ void exercise(const cursiv::Parser& parser) {
 }  // namespace
 
 void run() {
-  exercise(*tchars::generated::Lr::create_parser());
+  exercise(*tchars::generated::Lr::createParser());
 }
 
 }  // namespace repeated_unicode_cases
@@ -605,25 +582,8 @@ namespace unicode_lexical_cases {
 
 namespace {
 
-// The shared word reader keeps the grammar's XID_Continue | "$" boundary,
-// including refusals and an incomplete UTF-8 scalar.
-void the_word_class_obeys_the_declared_boundary() {
-  for (const auto& [text, word] : {std::pair<std::string_view, bool>{"a", true},
-                                   {"$", true},
-                                   {"\xC3\xA9", true},
-                                   {"\xE6\x97\xA5", true},
-                                   {"\xF0\x9D\x92\xB3", true},
-                                   {"\xC2\xAC", false},
-                                   {"\xC3", false},
-                                   {"!", false}}) {
-    const auto len = static_cast<cursiv::TextOffset>(text.size());
-    CHECK(cursiv::engine::lex_boundary(tchars::generated::Lr::kTable.cfg)
-              .word_at(text.data(), 0, len) == word);
-  }
-}
-
 const cursiv::Parser& wide() {
-  static const auto p = tchars::generated::Lr::create_parser();
+  static const auto p = tchars::generated::Lr::createParser();
   return *p;
 }
 
@@ -680,8 +640,7 @@ bool names(const cursiv::Parser& p, const std::string& doc,
 }  // namespace
 
 int run() {
-  cursiv::test::count_expectations();
-  the_word_class_obeys_the_declared_boundary();
+  cursiv::test::countExpectations();
   const auto& parser = wide();
   for (const std::string_view digits : {"42", "٣٤", "๑"})
     characters_cases::check(parser, "digits:" + std::string(digits), digits);
@@ -738,24 +697,6 @@ int run() {
   // word: the keyword stands before `€`, the name before `·`; where both
   // stand, the first arm wins.
   {
-    static constexpr auto& A = tchars::generated::Lr::kTable;
-    std::uint16_t mode = 0xFFFF;
-    for (unsigned s = 0; s < A.nstates; ++s) {
-      const auto t = A.derived.expect.shiftTerm[s];
-      if (t < A.cfg.nterms && A.cfg.term_text(t) == "rawlead") mode = A.mode[s];
-    }
-    CHECK(mode != 0xFFFF);
-    const auto at = [&](std::string_view t) {
-      const cursiv::engine::Scan s = cursiv::engine::lr_match_text<A>(
-          t.data(), static_cast<cursiv::TextOffset>(t.size()), mode, 0);
-      return s.term == cursiv::engine::kInvalidSymbol
-                 ? std::string("<none>")
-                 : std::string(A.cfg.term_name(s.term)) + "@" +
-                       std::to_string(s.end);
-    };
-    CHECK(at("if\xE2\x82\xAC") == "K@2");
-    CHECK(at("if\xC2\xB7") == "ID@2");
-    CHECK(at("if!") == "P@2");
     CHECK(names(wide(), in("rawlead", "if\xE2\x82\xAC"), {"", "\xE2\x82\xAC"}));
     CHECK(names(wide(), in("rawlead", "if\xC2\xB7"), {"if", "\xC2\xB7"}));
     CHECK(names(wide(), in("rawlead", "if!"), {"if", "!"}));
@@ -770,7 +711,7 @@ int run() {
 }  // namespace unicode_lexical_cases
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   characters_cases::run();
   repeated_unicode_cases::run();
   unicode_lexical_cases::run();

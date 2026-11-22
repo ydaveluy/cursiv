@@ -30,13 +30,13 @@ DefaultWorkspaceManager::~DefaultWorkspaceManager() noexcept = default;
 
 void DefaultWorkspaceManager::loadAdditionalDocuments(
     std::span<const WorkspaceFolder>,
-    cursiv::function_ref<void(std::string_view, std::string)>) {
+    cursiv::FunctionRef<void(std::string_view, std::string)>) {
   // no additional document by default: a language adds its library here
 }
 
 bool DefaultWorkspaceManager::shouldIncludeEntry(
     const FileSystemNode& entry) const {
-  const std::string name = uri_file_name(entry.uri);
+  const std::string name = uriFileName(entry.uri);
   // Hidden entries are out.
   if (name.empty() || name.front() == '.') return false;
   // So are directories that hold no source of their own: scanning them can
@@ -48,38 +48,34 @@ bool DefaultWorkspaceManager::shouldIncludeEntry(
 }
 
 bool DefaultWorkspaceManager::isIncluded(const FileSystemNode& entry) const {
-  // The folder holding `uri`, by its last segment.
-  const auto parent = [](std::string_view uri) {
-    while (uri.ends_with('/')) uri.remove_suffix(1);
-    const std::size_t slash = uri.rfind('/');
-    return std::string(
-        uri.substr(0, slash == std::string_view::npos ? 0 : slash));
-  };
   // Held by a workspace folder or by its root: an entry inside a folder but
   // outside its root is one the scan never reaches.
   bool held = false;
   for (const WorkspaceFolder& folder : _folders) {
     const std::string root = getRootFolder(folder);
-    const bool inRoot = contains_uri(root, entry.uri);
-    if (!inRoot && !contains_uri(normalize_uri(folder.uri), entry.uri))
-      continue;
+    const bool inRoot = containsUri(root, entry.uri);
+    if (!inRoot && !containsUri(folder.uri, entry.uri)) continue;
     held = true;
     if (!inRoot) continue;
-    // Up to the root, not into it: the scan enters a root whatever its name.
-    bool reached = true;
-    FileSystemNode step = entry;
-    while (reached && !step.uri.empty() && !contains_uri(step.uri, root)) {
-      reached = shouldIncludeEntry(step);
-      step = {.isFile = false, .isDirectory = true, .uri = parent(step.uri)};
+    // Walk canonical path segments. The scan enters the root unconditionally.
+    FileSystemNode step{entry.isFile, entry.isDirectory,
+                        normalizeUri(entry.uri)};
+    for (;;) {
+      if (step.uri.empty() || containsUri(step.uri, root)) return true;
+      if (!shouldIncludeEntry(step)) break;
+      step.isFile = false;
+      step.isDirectory = true;
+      while (step.uri.ends_with('/')) step.uri.pop_back();
+      const auto slash = step.uri.rfind('/');
+      step.uri.resize(slash == std::string::npos ? 0 : slash);
     }
-    if (reached) return true;
   }
   return !held && shouldIncludeEntry(entry);
 }
 
 std::string DefaultWorkspaceManager::getRootFolder(
     const WorkspaceFolder& folder) const {
-  return normalize_uri(folder.uri);
+  return normalizeUri(folder.uri);
 }
 
 std::vector<std::string> DefaultWorkspaceManager::searchFolder(
@@ -88,18 +84,20 @@ std::vector<std::string> DefaultWorkspaceManager::searchFolder(
   std::vector<std::string> kept;
   std::vector pending{std::string(folderUri)};
   while (!pending.empty()) {
+    throwIfCancelled(cancelToken);
     const std::string folder = std::move(pending.back());
     pending.pop_back();
     std::vector<FileSystemNode> entries;
     try {
       entries = files.readDirectory(folder);
     } catch (const FileSystemError&) {
+      if (_readErrors == ReadErrors::Throw) throw;
       // Reported and skipped, a root's refusal included: one folder that cannot
       // be listed must not hide the others. A folder an update saw change is no
       // root.
       const bool root = std::ranges::any_of(
           _folders, [&](const WorkspaceFolder& open) {
-            return getRootFolder(open) == normalize_uri(folder);
+            return getRootFolder(open) == normalizeUri(folder);
           });
       shared.observabilitySink->publish(
           {.severity = root ? ObservationSeverity::Error
@@ -113,7 +111,7 @@ std::vector<std::string> DefaultWorkspaceManager::searchFolder(
       continue;
     }
     for (const FileSystemNode& entry : entries) {
-      throw_if_cancelled(cancelToken);
+      throwIfCancelled(cancelToken);
       if (!shouldIncludeEntry(entry)) continue;
       if (entry.isDirectory)
         pending.push_back(entry.uri);
@@ -153,15 +151,15 @@ void DefaultWorkspaceManager::initializeWorkspace(
   };
 
 
+  std::exception_ptr failure;
   try {
     _folders.assign(folders.begin(), folders.end());
 
     // (1) The additional documents, first and always.
     loadAdditionalDocuments(folders, add);
 
-    // (2) The folders. Each file is read and parsed on the pool, then added in
-    // walk order; an unreadable or unclaimed file is skipped. Not cancellable:
-    // the token governs the build below, which the next build resumes.
+    // (2) Load on the pool and add in scan order. Cancellation applies to
+    // the build below.
     for (const WorkspaceFolder& folder : folders) {
       const std::vector<std::string> uris = searchFolder(getRootFolder(folder));
       std::vector<std::size_t> unheld;
@@ -183,6 +181,7 @@ void DefaultWorkspaceManager::initializeWorkspace(
           if (failures[i] != nullptr) std::rethrow_exception(failures[i]);
           store.addDocument(std::move(loaded[i]));
         } catch (const FileSystemError&) {
+          if (_readErrors == ReadErrors::Throw) throw;
           shared.observabilitySink->publish(
               {.severity = ObservationSeverity::Warning,
                .code = ObservationCode::WorkspaceDocumentReadFailed,
@@ -195,26 +194,30 @@ void DefaultWorkspaceManager::initializeWorkspace(
       }
     }
   } catch (...) {
-    markReady();
-    throw;
+    failure = std::current_exception();
   }
   markReady();
 
-  // (3) One build over the whole store, not over the documents this call
-  // added: a document already there and still broken links against what just
-  // arrived, which is the point of scanning.
-  throw_if_cancelled(cancelToken);
-  const std::vector<std::shared_ptr<Document>> held = store.all();
-  std::vector<Document*> all;
-  all.reserve(held.size());
-  for (const std::shared_ptr<Document>& document : held) {
-    if (document->state.load() >= DocumentState::IndexedReferences &&
-        document->hasLinkingErrors())
-      shared.documentBuilder->resetToState(*document,
-                                           DocumentState::ComputedScopes);
-    all.push_back(document.get());
+  // (3) One build over the whole store, after a failed scan too: a document
+  // already there and still broken links against what just arrived, and every
+  // waiter is answered. The scan's own failure is rethrown last.
+  try {
+    throwIfCancelled(cancelToken);
+    const std::vector<std::shared_ptr<Document>> held = store.all();
+    std::vector<Document*> all;
+    all.reserve(held.size());
+    for (const std::shared_ptr<Document>& document : held) {
+      if (document->state.load() >= DocumentState::IndexedReferences &&
+          document->hasLinkingErrors())
+        shared.documentBuilder->resetToState(*document,
+                                             DocumentState::ComputedScopes);
+      all.push_back(document.get());
+    }
+    shared.documentBuilder->build(all, _initialBuildOptions, cancelToken);
+  } catch (...) {
+    if (failure == nullptr) throw;
   }
-  shared.documentBuilder->build(all, _initialBuildOptions, cancelToken);
+  if (failure != nullptr) std::rethrow_exception(failure);
 }
 
 }  // namespace cursiv

@@ -1,7 +1,7 @@
 # Nested documents with objects, arrays and four scalars, for completion and
 # colouring.
 cursiv_grammar(docg doc/DocGrammar.hpp fdoc::DocG EXTENSIONS .doc OUT languages/doc/generated
-    INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/languages ENGINE LR)
+    INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/languages)
 
 # One name for a group: the fixture whose column binds to several FROM items.
 cursiv_grammar(multiref multiref/MultiRefGrammar.hpp fmulti::MultiG EXTENSIONS .mref
@@ -10,13 +10,13 @@ cursiv_grammar(multiref multiref/MultiRefGrammar.hpp fmulti::MultiG EXTENSIONS .
 # The fixture language most tests use: names, cross-references, containers and
 # a scope, so every service has something to answer.
 cursiv_grammar(ws workspace/core/WorkspaceGrammar.hpp ws::Workspace EXTENSIONS .ws
-    OUT languages/workspace/generated INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/languages ENGINE LR)
+    OUT languages/workspace/generated INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/languages)
 
 file(GLOB_RECURSE _ws_core CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/languages/workspace/core/*.cpp)
 list(FILTER _ws_core EXCLUDE REGEX "/CoreModule[.]cpp$")
 add_library(wsCoreObjects OBJECT ${_ws_core})
-target_link_libraries(wsCoreObjects PUBLIC cursiv::engine::lr)
+target_link_libraries(wsCoreObjects PUBLIC cursiv::engine)
 target_include_directories(wsCoreObjects PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/languages>)
 
@@ -29,40 +29,19 @@ if(BUILD_SHARED_LIBS)
   set_target_properties(wsCoreObjects wsLspObjects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
-# The same fixture with a small `--stamp-row-bits`, the layout of a table with
-# many states, which no grammar small enough to build here reaches on its own.
-set(CURSIV_NARROW_ROW_BITS 7)
-cursiv_grammar(wsnarrow workspace/core/WorkspaceGrammar.hpp ws::Workspace EXTENSIONS .ws
-    OUT narrow/workspace/generated INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/languages ENGINE LR
-    GENERATOR_ARGS --stamp-row-bits=${CURSIV_NARROW_ROW_BITS})
-foreach(_variant IN ITEMS ws wsnarrow)
-  add_library(${_variant}Core languages/workspace/core/CoreModule.cpp)
-  target_link_libraries(${_variant}Core PUBLIC ${_variant}Generated wsCoreObjects)
-  add_library(${_variant}Lsp languages/workspace/lsp/LspModule.cpp)
-  target_link_libraries(${_variant}Lsp PUBLIC ${_variant}Core wsLspObjects)
-endforeach()
+add_library(wsCore languages/workspace/core/CoreModule.cpp)
+target_link_libraries(wsCore PUBLIC wsGenerated wsCoreObjects)
+add_library(wsLsp languages/workspace/lsp/LspModule.cpp)
+target_link_libraries(wsLsp PUBLIC wsCore wsLspObjects)
 
-# The runtime's state: contexts, stacks, ranks, the root wrapper, a parse handed
-# over, and records read with a small `--stamp-row-bits`.
-cursiv_test(LrRuntime_test engines/lr/LrRuntime_test.cpp wsnarrowCore)
-cursiv_test(LrGssForest_test engines/lr/LrGssForest_test.cpp)
-cursiv_test(LrGssRope_test engines/lr/LrGssRope_test.cpp)
-cursiv_test(LrGssGraph_test engines/lr/LrGssGraph_test.cpp)
-target_compile_definitions(LrRuntime_test PRIVATE
-    CURSIV_NARROW_ROW_BITS=${CURSIV_NARROW_ROW_BITS})
-# edits_test and edits_narrow_test share this object; only their parser
-# differs.
 add_library(editsObjects OBJECT lsp/edits_test.cpp)
 target_link_libraries(editsObjects PRIVATE cursiv::test wsLspObjects)
 target_include_directories(editsObjects PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-cursiv_test(edits_narrow_test $<TARGET_OBJECTS:editsObjects> cursiv::lsp wsnarrowLsp)
 
 # A service holds a type-erased `Parser&`; a text is translated before it is
-# lexed, on both engines.
-cursiv_grammar_pair(translate core/parser/TranslationGrammar.hpp ttrans::Lr
-    ttrans::Ll)
-cursiv_test(parser_test core/parser/parser_test.cpp cursiv::lsp wsCore translatelrGenerated
-    translatellGenerated)
+# lexed.
+cursiv_grammar(translatelr core/parser/TranslationGrammar.hpp ttrans::Base)
+cursiv_test(parser_test core/parser/parser_test.cpp cursiv::lsp wsCore translatelrGenerated)
 
 cursiv_test(services_test core/services/services_test.cpp wsLsp)
 

@@ -15,7 +15,7 @@ FetchContent_MakeAvailable(cursiv)
 add_compile_definitions(TINY_CONSUMER=1)
 
 cursiv_generate_language(ID         tiny
-    GRAMMAR    tiny/TinyParser.hpp
+    GRAMMAR    Module.hpp
     NAMESPACE  tiny::Tiny
     EXTENSIONS .tiny
     OUT        ${CMAKE_CURRENT_BINARY_DIR}/generated-src/src/tiny/generated)

@@ -110,12 +110,12 @@ struct DocComment {
 
 /// Whether `comment` starts with `options.start` and ends with `options.end`,
 /// whitespace tolerated. An empty marker disables its half of the test.
-[[nodiscard]] bool is_doc_comment(std::string_view comment,
+[[nodiscard]] bool isDocComment(std::string_view comment,
                                   const DocCommentParseOptions& options = {});
 
 /// Parses `comment`; an empty marker in `options` disables its role. `start`
 /// is where the comment sits in the document, and anchors every node range.
-[[nodiscard]] DocComment parse_doc_comment(
+[[nodiscard]] DocComment parseDocComment(
     std::string_view comment, DocCommentPosition start = {},
     const DocCommentParseOptions& options = {});
 

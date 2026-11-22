@@ -95,8 +95,8 @@ struct PutOffs {
 struct Frame {
   // The reference's state byte, unique per reference; null for a root.
   const void* ref = nullptr;
-  // A root's: the phase's token, found by any wait above it.
-  const CancellationToken* cancelToken = nullptr;
+  // The phase's token: a root's own, inherited by every resolution under it.
+  const CancellationToken* cancelToken = &kNoCancel;
   Frame* prev = nullptr;
   // A driving resolution's: what its nest put off.
   const PutOffs* putOffs = nullptr;
@@ -126,7 +126,11 @@ Waits& waits() {
   return shared;
 }
 
-thread_local Frame* newest = nullptr;
+// The root every thread's frames start from: outside a phase, nothing cancels
+// a resolution.
+Frame no_phase;
+
+thread_local Frame* newest = &no_phase;
 
 class Filed {
  public:
@@ -187,12 +191,6 @@ bool closes_cycle(Waits& shared, Wait& request) noexcept {
   return false;
 }
 
-const CancellationToken& cancellation(const Frame* chain) noexcept {
-  for (auto* frame = chain; frame != nullptr; frame = frame->prev)
-    if (frame->cancelToken != nullptr) return *frame->cancelToken;
-  return kNoCancel;
-}
-
 RefState wait_for_reference(RefState& state) {
   Frame* const chain = newest;
   if (const auto* mine = resolving_frame(chain, &state)) {
@@ -201,7 +199,7 @@ RefState wait_for_reference(RefState& state) {
   }
 
   auto& shared = waits();
-  Wait request{state, chain, cancellation(chain), {}};
+  Wait request{state, chain, *chain->cancelToken, {}};
   // Construct before locking: an already cancelled token invokes this inline.
   // Destruction joins any callback after the unique_lock below has unlocked,
   // and before the condition variable is destroyed.
@@ -210,7 +208,7 @@ RefState wait_for_reference(RefState& state) {
     request.wake.notify_one();
   });
   std::unique_lock lock(shared.mutex);
-  throw_if_cancelled(request.token);
+  throwIfCancelled(request.token);
   const std::atomic_ref st(state);
   if (RefState expected = RefState::Resolving;
       !st.compare_exchange_strong(expected, kRefObserved,
@@ -238,7 +236,7 @@ RefState wait_for_reference(RefState& state) {
     return request.token.stop_requested() ||
            st.load(std::memory_order_acquire) != kRefObserved;
   });
-  throw_if_cancelled(request.token);
+  throwIfCancelled(request.token);
   return st.load(std::memory_order_acquire);
 }
 
@@ -257,14 +255,15 @@ void publish(RefState& state, RefState result) noexcept {
     if (&w->target == &state) w->wake.notify_one();
 }
 
-// Computes under `frame`: the answer published, or what leaves cleared and
-// published.
+// Computes under `frame` unless its phase is cancelled: the answer published,
+// or what leaves cleared and published.
 template <class Compute, class Clear>
 CURSIV_ALWAYS_INLINE inline RefState settle(RefState& state, const Frame& frame,
                                             Compute compute, Clear clear) {
   try {
+    throwIfCancelled(*frame.cancelToken);
     RefState result = compute();
-    if (frame.cycle.load(std::memory_order_relaxed) && has_error(result))
+    if (frame.cycle.load(std::memory_order_relaxed) && hasError(result))
       result = RefState::ErrorCycle;
     publish(state, result);
     return result;
@@ -294,8 +293,7 @@ CURSIV_COLD CURSIV_NOINLINE RefState resolve_far(Frame& frame,
   const auto clear = [&]() noexcept {
     forget(asked.target, asked.which, asked.items);
   };
-  for (const Frame* f = frame.prev; f != nullptr && f->ref != nullptr;
-       f = f->prev) {
+  for (const Frame* f = frame.prev; f->ref != nullptr; f = f->prev) {
     if (f->putOffs == nullptr) continue;
     if (f->putOffs->refs.contains(frame.ref))
       return settle(state, frame, compute, clear);
@@ -320,34 +318,28 @@ CURSIV_COLD CURSIV_NOINLINE RefState resolve_far(Frame& frame,
       clear);
 }
 
-// `compute` and `clear` are the lookup as the usual path inlines it; the
-// values after them are the same lookup as a far resolution keeps it.
-template <class Compute, class Clear>
-RefState resolve_guarded(RefState& state, Compute compute, Clear clear,
-                         const RefResolver* resolver, std::uint32_t handle,
-                         AstNode** target, std::uint8_t* which,
-                         MultiRefItems* items) {
+CURSIV_ALWAYS_INLINE inline RefState resolve_guarded(
+    RefState& state, const RefResolver* resolver, std::uint32_t handle,
+    AstNode** target, std::uint8_t* which, MultiRefItems* items) {
   const std::atomic_ref st(state);
-  RefState current = st.load(std::memory_order_acquire);
-  for (;;) {
-    if (ref_running(current)) {
-      current = wait_for_reference(state);
-      continue;
-    }
+  RefState current = RefState::Unresolved;
+  while (!st.compare_exchange_strong(current, RefState::Resolving,
+                                     std::memory_order_acq_rel,
+                                     std::memory_order_acquire)) {
+    while (ref_running(current)) current = wait_for_reference(state);
     if (current != RefState::Unresolved) return current;
-    if (st.compare_exchange_strong(current, RefState::Resolving,
-                                   std::memory_order_acq_rel,
-                                   std::memory_order_acquire))
-      break;
   }
-  Frame frame{.ref = &state};
+  Frame frame{.ref = &state, .cancelToken = newest->cancelToken};
   const Filed filed(frame);
   if (((reinterpret_cast<std::uintptr_t>(&frame) ^
         reinterpret_cast<std::uintptr_t>(frame.prev)) >>
        kStretchBits) != 0 &&
-      frame.prev != nullptr && frame.prev->ref != nullptr) [[unlikely]]
+      frame.prev->ref != nullptr) [[unlikely]]
     return resolve_far(frame, {&state, resolver, handle, target, which, items});
-  return settle(state, frame, compute, clear);
+  return settle(
+      state, frame,
+      [&] { return look_up(resolver, handle, target, which, items); },
+      [&]() noexcept { forget(target, which, items); });
 }
 
 }  // namespace
@@ -355,37 +347,30 @@ RefState resolve_guarded(RefState& state, Compute compute, Clear clear,
 RefState resolve_one_slow(RefState& state, const RefResolver* resolver,
                           std::uint32_t handle, AstNode*& target,
                           std::uint8_t& which) {
-  return resolve_guarded(
-      state,
-      [&] { return look_up(resolver, handle, &target, &which, nullptr); },
-      [&]() noexcept { forget(&target, &which, nullptr); }, resolver, handle,
-      &target, &which, nullptr);
+  return resolve_guarded(state, resolver, handle, &target, &which, nullptr);
 }
 
 RefState resolve_all_slow(RefState& state, const RefResolver* resolver,
                           std::uint32_t handle, MultiRefItems& out) {
-  return resolve_guarded(
-      state, [&] { return look_up(resolver, handle, nullptr, nullptr, &out); },
-      [&]() noexcept { forget(nullptr, nullptr, &out); }, resolver, handle,
-      nullptr, nullptr, &out);
+  return resolve_guarded(state, resolver, handle, nullptr, nullptr, &out);
 }
 
 }  // namespace cursiv::detail
 
 namespace cursiv {
 
-// Here, beside the frames: resolving a batch is a phase, and its root frame is
-// where a wait under it finds `cancelToken`.
+// Here, beside the frames: resolving a batch is a phase, and its root frame
+// holds the `cancelToken` every resolution under it polls before it computes.
 void DefaultDocumentReferences::force(std::span<const detail::RefHandle> which,
                                       const CancellationToken& cancelToken) {
   if (which.empty()) return;
   detail::Frame root{.cancelToken = &cancelToken};
   const detail::Filed filed(root);
+  const detail::RefOps* const ops = _f.refOps;
   for (const detail::RefHandle& h : which) {
-    throw_if_cancelled(cancelToken);
     if (h.owner == nullptr) continue;
     try {
-      _f.refOps[h.field].force(*h.owner, h.index);
+      ops[h.field].force(*h.owner, h.index);
     } catch (const OperationCancelled&) {
       throw;
     } catch (...) {

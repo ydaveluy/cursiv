@@ -26,7 +26,7 @@
     },
     "keywords": {
       "name": "keyword.control.@CURSIV_NEW_ID@",
-      "match": "\\b(person|Hello)\\b"
+      "match": "(?<![0-9A-Z_a-z])(person|Hello)(?![0-9A-Z_a-z])"
     }
   }
 }

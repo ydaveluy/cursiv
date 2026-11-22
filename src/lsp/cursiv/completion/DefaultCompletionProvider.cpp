@@ -52,8 +52,8 @@ namespace {
   if (const NodeId after = cst.leafAfter(offset); after < cst.size())
     if (const CstLeaf at = cst.asLeaf(after);
         at.begin <= offset && offset < at.end && !at.hidden && !at.recovered)
-      return owner_of_leaf(cst, at.id);
-  return owner_at(cst, offset);
+      return ownerOfLeaf(cst, at.id);
+  return ownerAt(cst, offset);
 }
 
 // A hidden leaf is a comment, a recovered one is what a repair discarded --
@@ -99,7 +99,7 @@ struct ItemKeyHash {
                                   NodeId record, NodeId from, NodeId to) {
   const auto writes = [&](NodeId k) {
     const CstNode& n = cst[k];
-    return !n.hidden && (!grammar.recordFeature(n).empty() ||
+    return !n.isHidden() && (!grammar.recordProperty(n).empty() ||
                          (n.subtreeSize > 1 && grammar.recordRule(n).empty()));
   };
   for (NodeId k = cst.subtreeBegin(record); k < from; ++k)
@@ -120,7 +120,7 @@ AstNode* CompletionContext::node() const {
 lsp::CompletionList DefaultCompletionProvider::getCompletion(
     const Document& document, const lsp::CompletionParams& params,
     const CancellationToken& cancelToken) const {
-  throw_if_cancelled(cancelToken);
+  throwIfCancelled(cancelToken);
   lsp::CompletionList list;
   list.isIncomplete = true;
   std::vector<lsp::CompletionItem> items;
@@ -133,7 +133,7 @@ lsp::CompletionList DefaultCompletionProvider::getCompletion(
   buildContexts(document, params, cancelToken,
                 [&](const CompletionContext& context) {
                   for (const NextFeature& next : context.features) {
-                    throw_if_cancelled(cancelToken);
+                    throwIfCancelled(cancelToken);
                     completionFor(context, next, accept);
                   }
                   return continueCompletion(items);
@@ -145,11 +145,11 @@ lsp::CompletionList DefaultCompletionProvider::getCompletion(
 void DefaultCompletionProvider::buildContexts(
     const Document& document, const lsp::CompletionParams& params,
     const CancellationToken& cancelToken,
-    function_ref<bool(const CompletionContext&)> visit) const {
+    FunctionRef<bool(const CompletionContext&)> visit) const {
   const lsp::Position position = params.position;
   const TextDocument& lines = document.textDocument();
   const std::string_view text = lines.getText();
-  const TextOffset offset = std::min(lines.offsetAt(from_lsp(position)),
+  const TextOffset offset = std::min(lines.offsetAt(fromLsp(position)),
                                      static_cast<TextOffset>(text.size()));
   const Cst& cst = document.parseResult.cst();
   // Nothing is offered inside a comment or inside text a repair discarded: the
@@ -167,8 +167,8 @@ void DefaultCompletionProvider::buildContexts(
     const TextOffset from = std::max(begin, lineStart);
     const CompletionContext context(
         document, features, begin, end, nodeOffset, offset, position,
-        identifier, to_lsp(lines.rangeAt(from, offset)),
-        to_lsp(lines.rangeAt(from, std::min(end, lineEnd))), params.context,
+        identifier, toLsp(lines.rangeAt(from, offset)),
+        toLsp(lines.rangeAt(from, std::min(end, lineEnd))), params.context,
         cancelToken);
     return visit(context);
   };
@@ -221,7 +221,7 @@ bool DefaultCompletionProvider::performCurrentTokenCompletion(
     const Document&, std::string_view text, TextOffset, TextOffset) const {
   for (std::size_t at = 0; at < text.size();) {
     std::size_t len = 0;
-    if (detail::word_scalar(scalar_at(text.data() + at, text.size() - at, len)))
+    if (detail::word_scalar(scalarAt(text.data() + at, text.size() - at, len)))
       return true;
     at += std::max<std::size_t>(len, 1);
   }
@@ -230,12 +230,7 @@ bool DefaultCompletionProvider::performCurrentTokenCompletion(
 
 bool DefaultCompletionProvider::performNextTokenCompletion(
     const Document&, std::string_view text, TextOffset, TextOffset) const {
-  if (text.empty()) return false;
-  std::size_t last = text.size() - 1;
-  while (last > 0 && (static_cast<unsigned char>(text[last]) & 0xC0u) == 0x80u)
-    --last;
-  std::size_t len = 0;
-  return !is_letter(scalar_at(text.data() + last, text.size() - last, len));
+  return !text.empty() && !is_letter(detail::last_scalar(text));
 }
 
 std::optional<std::pair<TextOffset, TextOffset>>
@@ -246,7 +241,7 @@ DefaultCompletionProvider::findDataTypeRuleStart(const Cst& cst,
   // The leaf at the caret, or the one behind it where no word goes on there.
   std::size_t len = 0;
   const bool word = offset < text.size() &&
-                    detail::word_scalar(scalar_at(text.data() + offset,
+                    detail::word_scalar(scalarAt(text.data() + offset,
                                                   text.size() - offset, len));
   const TextOffset at = word || offset == 0 ? offset : offset - 1;
   const NodeId after = cst.leafAfter(at);
@@ -386,7 +381,7 @@ void DefaultCompletionProvider::completionForCrossReference(
   std::unordered_set<Seen, decltype(hash)> seen(16, hash);
   visitReferenceCandidates(
       reference, context, [&](const AstNodeDescription& candidate) {
-        throw_if_cancelled(context.cancelToken);
+        throwIfCancelled(context.cancelToken);
         if (!matcher.match(context.identifier, candidate.name)) return true;
         if (!seen.emplace(candidate.name, candidate.type, candidate.documentId,
                           candidate.symbolId)
@@ -401,7 +396,7 @@ void DefaultCompletionProvider::completionForCrossReference(
 
 void DefaultCompletionProvider::visitReferenceCandidates(
     const ReferenceInfo& reference, const CompletionContext&,
-    function_ref<bool(const AstNodeDescription&)> visitor) const {
+    FunctionRef<bool(const AstNodeDescription&)> visitor) const {
   (void)services.scopeProvider->visitScopeEntries(reference, visitor);
 }
 
@@ -475,7 +470,7 @@ bool DefaultCompletionProvider::filterKeyword(const CompletionContext&,
                                               std::string_view keyword) const {
   for (std::size_t at = 0; at < keyword.size();) {
     std::size_t len = 0;
-    if (is_letter(scalar_at(keyword.data() + at, keyword.size() - at, len)))
+    if (is_letter(scalarAt(keyword.data() + at, keyword.size() - at, len)))
       return true;
     at += std::max<std::size_t>(len, 1);
   }

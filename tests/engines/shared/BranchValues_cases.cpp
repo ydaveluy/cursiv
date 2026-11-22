@@ -1,15 +1,12 @@
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdio>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "branchvaluesll/generated/Ll/Module.hpp"
-#include "branchvalueslr/generated/Lr/Module.hpp"
+#include "branchvalueslr/generated/Suite/Module.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
@@ -19,20 +16,16 @@
 
 namespace branch_values_cases {
 
-// One boolean three ways, as a terminal, a data rule and words in place: the
+// One boolean three ways, as documented, plain and inline alternatives: the
 // same tree, the same records but for the rule, the same words at the carets.
 
 namespace {
 
 using namespace tbranch;
 
-constexpr const char* kEngine[] = {"LL", "LR"};
-
-const auto& engines() {
-  static const std::array<std::unique_ptr<cursiv::Parser>, 2> parsers{
-      tbranch::generated::Ll::create_parser(),
-      tbranch::generated::Lr::create_parser()};
-  return parsers;
+const cursiv::Parser& parser() {
+  static const auto instance = tbranch::generated::Suite::createParser();
+  return *instance;
 }
 
 bool clean(const cursiv::ParseResult& r) {
@@ -62,32 +55,28 @@ std::string items(const cursiv::ParseResult& r) {
 // parse repaired the text: `clean ` leads a document read as written.
 template <class Show>
 void built(std::string_view text, std::string_view want, Show show) {
-  for (unsigned e = 0; e < 2; ++e) {
-    const std::string source(text);
-    const cursiv::ParseResult r = engines()[e]->parse(source);
-    const auto* in = r.valueAs<ast::Items>();
-    std::string got = r.diagnostics.empty() ? "clean " : "";
-    if (in != nullptr)
-      for (const ast::Item* i : in->items)
-        got += std::string(i->name) + '=' + show(*i) + ' ';
-    if (got != want)
-      std::printf("%s [%s]: got [%s], wanted [%s]\n", kEngine[e],
-                  source.c_str(), got.c_str(), std::string(want).c_str());
-    CHECK(got == want);
-  }
+  const std::string source(text);
+  const cursiv::ParseResult r = parser().parse(source);
+  const auto* in = r.valueAs<ast::Items>();
+  std::string got = r.diagnostics.empty() ? "clean " : "";
+  if (in != nullptr)
+    for (const ast::Item* i : in->items)
+      got += std::string(i->name) + '=' + show(*i) + ' ';
+  if (got != want)
+    std::printf("[%s]: got [%s], wanted [%s]\n", source.c_str(), got.c_str(),
+                std::string(want).c_str());
+  CHECK(got == want);
 }
 std::string flag_of(const ast::Item& i) { return i.flag ? "true" : "false"; }
 std::string count_of(const ast::Item& i) { return std::to_string(i.count); }
 
 void values(std::string_view text, std::string_view want) {
-  for (unsigned e = 0; e < 2; ++e) {
-    const std::string source(text);
-    const std::string got = items(engines()[e]->parse(source));
-    if (got != want)
-      std::printf("%s [%s]: got [%s], wanted [%s]\n", kEngine[e],
-                  source.c_str(), got.c_str(), std::string(want).c_str());
-    CHECK(got == want);
-  }
+  const std::string source(text);
+  const std::string got = items(parser().parse(source));
+  if (got != want)
+    std::printf("[%s]: got [%s], wanted [%s]\n", source.c_str(), got.c_str(),
+                std::string(want).c_str());
+  CHECK(got == want);
 }
 
 // What may replace the word at the caret, as a completion asks: spellings,
@@ -128,62 +117,53 @@ std::string show(const std::vector<std::string>& entries) {
   return out;
 }
 
-// At every caret of a document and of every cut of it, through the terminal,
-// the data rule and in place.
+// Compare documented, plain and inline alternatives at every caret.
 void same_carets(std::string_view document) {
-  for (unsigned e = 0; e < 2; ++e) {
-    const cursiv::Parser& parser = *engines()[e];
-    std::size_t asked = 0, agreed = 0;
-    for (std::size_t cut = 0; cut <= document.size(); ++cut) {
-      const std::string_view body = document.substr(0, cut);
-      for (std::size_t at = 0; at <= body.size(); ++at) {
-        const auto a = features(parser, "token:", body, at);
-        const auto b = features(parser, "rule:", body, at);
-        const auto c = features(parser, "inline:", body, at);
-        ++asked;
-        agreed += a == b && a == c;
-        if (a != b || a != c)
-          std::printf("%s [%.*s] at %zu\n  token: %s\n  rule:  %s\n"
-                      "  inline:%s\n",
-                      kEngine[e], static_cast<int>(body.size()), body.data(),
-                      at, show(a).c_str(), show(b).c_str(), show(c).c_str());
-      }
+  std::size_t asked = 0, agreed = 0;
+  for (std::size_t cut = 0; cut <= document.size(); ++cut) {
+    const std::string_view body = document.substr(0, cut);
+    for (std::size_t at = 0; at <= body.size(); ++at) {
+      const auto a = features(parser(), "doc:", body, at);
+      const auto b = features(parser(), "rule:", body, at);
+      const auto c = features(parser(), "inline:", body, at);
+      ++asked;
+      agreed += a == b && a == c;
+      if (a != b || a != c)
+        std::printf("[%.*s] at %zu\n  doc: %s\n  rule:  %s\n  inline:%s\n",
+                    static_cast<int>(body.size()), body.data(), at,
+                    show(a).c_str(), show(b).c_str(), show(c).c_str());
     }
-    CHECK(agreed == asked);
   }
+  CHECK(agreed == asked);
 }
 
 // What an editor reads of each record that names a rule or a member: its
 // text, the rule and the member. The words `as` reads keep the record of the
 // rule around them.
 void records(std::string_view text, std::string_view want) {
-  for (unsigned e = 0; e < 2; ++e) {
-    const std::string source(text);
-    const cursiv::ParseResult r = engines()[e]->parse(source);
-    const cursiv::Cst& cst = r.cst();
-    const auto& g = engines()[e]->getGrammar();
-    std::string got;
-    for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
-      const cursiv::CstNode& n = cst[id];
-      const std::string_view rule = g.recordRule(n);
-      const std::string_view member = g.recordFeature(n);
-      if (n.hidden || (rule.empty() && member.empty())) continue;
-      got += '[' + std::string(cst.text(id)) + '|' + std::string(rule) + '|' +
-             std::string(member) + ']';
-    }
-    if (got != want)
-      std::printf("%s [%s]: got [%s]\n", kEngine[e], source.c_str(),
-                  got.c_str());
-    CHECK(got == want);
+  const std::string source(text);
+  const cursiv::ParseResult r = parser().parse(source);
+  const cursiv::Cst& cst = r.cst();
+  const auto& g = parser().getGrammar();
+  std::string got;
+  for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
+    const cursiv::CstNode& n = cst[id];
+    const std::string_view rule = g.recordRule(n);
+    const std::string_view member = g.recordProperty(n);
+    if (n.isHidden() || (rule.empty() && member.empty())) continue;
+    got += '[' + std::string(cst.text(id)) + '|' + std::string(rule) + '|' +
+           std::string(member) + ']';
   }
+  if (got != want)
+    std::printf("[%s]: got [%s]\n", source.c_str(), got.c_str());
+  CHECK(got == want);
 }
 
 }  // namespace
 
 void run() {
-  // Any case of the words, through the terminal, the data rule and in place;
-  // a longer word is a name.
-  for (const char* form : {"token:", "rule:", "inline:"})
+  CHECK(parser().getGrammar().spellingDoc("TRUE") == "Enables the feature.");
+  for (const char* form : {"doc:", "rule:", "inline:"})
     values(std::string(form) +
                " a = TRUE; b = false; c = True; d = fAlSe; e = Truex;",
            "a=true b=false c=true d=false e=Truex ");
@@ -196,17 +176,15 @@ void run() {
   values("size: a : medium;", "refused");
 
   // The same carets, where a boolean can stand and elsewhere.
-  for (unsigned e = 0; e < 2; ++e) {
-    for (const char* form : {"token:", "rule:", "inline:"})
-      CHECK(features(*engines()[e], form, "a = ", 4) ==
-            std::vector<std::string>{"FALSE:flag", "ID:other", "TRUE:flag"});
-    CHECK(features(*engines()[e], "flag:", "a ~ ", 4) ==
-          std::vector<std::string>{"FALSE:flag", "TRUE:flag"});
-    CHECK(features(*engines()[e], "flag:", "a ! ", 4) ==
-          std::vector<std::string>{"FALSE:flag", "TRUE:flag"});
-    CHECK(features(*engines()[e], "flag:", "a ? ", 4) ==
-          std::vector<std::string>{"NO:flag", "YES:flag"});
-  }
+  for (const char* form : {"doc:", "rule:", "inline:"})
+    CHECK(features(parser(), form, "a = ", 4) ==
+          std::vector<std::string>{"FALSE:flag", "ID:other", "TRUE:flag"});
+  CHECK(features(parser(), "flag:", "a ~ ", 4) ==
+        std::vector<std::string>{"FALSE:flag", "TRUE:flag"});
+  CHECK(features(parser(), "flag:", "a ! ", 4) ==
+        std::vector<std::string>{"FALSE:flag", "TRUE:flag"});
+  CHECK(features(parser(), "flag:", "a ? ", 4) ==
+        std::vector<std::string>{"NO:flag", "YES:flag"});
   same_carets("a = TRUE; b = false; c = d;");
 
   // A misspelled word gives the constant of the word it is read as, in every
@@ -224,7 +202,7 @@ void run() {
   built("faced: a faced;", "clean a=23 ", count_of);
 
   // One record a word, naming the rule written there, if any.
-  records("token: a = TRUE;", "[a|ID|name][TRUE|BOOL|flag][a = TRUE;||items]");
+  records("doc: a = TRUE;", "[a|ID|name][TRUE|DocumentedBool|flag][a = TRUE;||items]");
   records("rule: a = TRUE;", "[a|ID|name][TRUE|Bool|flag][a = TRUE;||items]");
   records("inline: a = TRUE;", "[a|ID|name][TRUE||flag][a = TRUE;||items]");
   records("flag: a ! TRUE; c ? no;",

@@ -17,7 +17,7 @@ std::string QualifiedNameProvider::qualifierOf(
   std::size_t size = 0;
   for (const cursiv::AstNode* at = &package;
        at != nullptr &&
-       at->type == &cursiv::ast_type_tag<ast::PackageDeclaration>;
+       at->type == &cursiv::kAstTypeTag<ast::PackageDeclaration>;
        at = at->parent) {
     names.push_back(static_cast<const ast::PackageDeclaration*>(at)->name);
     size += names.back().size() + 1;

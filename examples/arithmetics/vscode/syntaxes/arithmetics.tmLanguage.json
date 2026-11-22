@@ -19,7 +19,7 @@
   "repository": {
     "keywords": {
       "name": "keyword.control.arithmetics",
-      "match": "(?i)\\b(module|def)\\b"
+      "match": "(?<![0-9A-Z_a-z])([mM][oO][dD][uU][lL][eE]|[dD][eE][fF])(?![0-9A-Z_a-z])"
     },
     "comments": {
       "patterns": [

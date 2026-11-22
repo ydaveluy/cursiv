@@ -5,6 +5,7 @@
 
 namespace cursiv {
 struct SharedCoreServices;
+struct Document;
 }
 
 namespace arith {
@@ -15,5 +16,9 @@ namespace arith {
 [[nodiscard]] int eval_file(std::string_view path,
                             cursiv::SharedCoreServices& shared,
                             std::ostream& out, std::ostream& err);
+
+[[nodiscard]] int eval_document(const cursiv::Document& document,
+                                std::string_view path, std::ostream& out,
+                                std::ostream& err);
 
 }  // namespace arith

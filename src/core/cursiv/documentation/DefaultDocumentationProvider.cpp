@@ -32,7 +32,7 @@ std::optional<std::string> DefaultDocumentationProvider::getDocumentation(
   const Document& document = *nodeDocument;
   const std::optional<std::string> written =
       services.commentProvider->getComment(node, &document);
-  if (!written || !is_doc_comment(*written)) return std::nullopt;
+  if (!written || !isDocComment(*written)) return std::nullopt;
 
   DocCommentRenderOptions options;
   options.renderLink = [this, &node, &document](std::string_view target,
@@ -44,7 +44,7 @@ std::optional<std::string> DefaultDocumentationProvider::getDocumentation(
                                                bool inlineTag) {
     return documentationTagRenderer(node, document, name, content, inlineTag);
   };
-  std::string markdown = parse_doc_comment(*written).toMarkdown(options);
+  std::string markdown = parseDocComment(*written).toMarkdown(options);
   if (markdown.empty()) return std::nullopt;
   return markdown;
 }
@@ -79,7 +79,7 @@ DefaultDocumentationProvider::documentationLinkRenderer(
   const Position at = target->textDocument().positionAt(site.begin());
   const std::string_view uri(target->uri);
   return std::format("[{}]({})", display,
-                     normalize_uri(std::format("{}#L{},{}",
+                     normalizeUri(std::format("{}#L{},{}",
                                                uri.substr(0, uri.find('#')),
                                                at.line + 1, at.character + 1)));
 }

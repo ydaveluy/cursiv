@@ -1,5 +1,3 @@
-#include "workspace/generated/Workspace/Parser.hpp"
-
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -24,34 +22,20 @@
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/workspace/Document.hpp"
-#include "cursiv/lr/runtime/LrParser.hpp"
-#include "cursiv/shared/runtime/AstReducer.hpp"
 #include "cursiv/Check.hpp"
 #include "support/Throws.hpp"
 #include "support/World.hpp"
-#include "translatell/generated/Ll/Module.hpp"
-#include "translatelr/generated/Lr/Module.hpp"
-#include "workspace/generated/Workspace/AstReflection.hpp"
+#include "translatelr/generated/Base/Module.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
-#include "workspace/generated/Workspace/Table.hpp"
 
 // The type-erased parser: a service reaches the grammar without knowing its
-// type, and gets the AST the generated table gives directly.
+// type, and gets its AST.
 namespace parser_service {
 
 namespace {
 
-namespace dmg = ws::generated::Workspace;
-
 const cursiv::Parser& service() {
-  return support::parser_of<&ws::generated::Workspace::create_parser>();
-}
-
-// The same tree from the generated table and drive directly, with no service
-// in front of them.
-bool direct_parse(std::string_view text, cursiv::Cst& cst) {
-  return cursiv::engine::lr_parser<dmg::kTable>.parse(text, cst, nullptr,
-                                                      &dmg::kDrive);
+  return support::parser_of<&ws::generated::Workspace::createParser>();
 }
 
 // The type-erased grammar answers about records and tokens, all a service
@@ -71,29 +55,16 @@ void the_grammar_is_reachable_without_the_template() {
   CHECK(!g.terminalSpellings(1).empty() || !g.terminalName(1).empty());
 }
 
-void a_parse_through_the_interface_builds_the_same_tree() {
+void a_parse_through_the_interface_builds_the_tree() {
   const std::string src = "datatype String\nentity A { x : String }\n";
   const cursiv::ParseResult through = service().parse(src);
   CHECK(static_cast<bool>(through));
   CHECK(through.value != nullptr);
   CHECK(through.diagnostics.empty());
 
-  // The table read directly gives the same outcome, the reference list
-  // included: the document declares one reference, and both paths give its
-  // handle.
-  cursiv::Cst cst;
-  direct_parse(src, cst);
-  const cursiv::ParseResult direct =
-      cursiv::engine::AstReducer::build<dmg::kTable.stamp>(dmg::kAstActions,
-                                                           std::move(cst));
-  CHECK(through.nodes().size() == direct.nodes().size());
-  CHECK(through.cst().size() == direct.cst().size());
-  CHECK(through.references != nullptr && direct.references != nullptr);
-  CHECK(through.references->handles.size() == 1);
-  CHECK(through.references->handles.size() ==
-        direct.references->handles.size());
-  CHECK(through.references->handles[0].field ==
-        direct.references->handles[0].field);
+  // The document declares one reference, and the result gives its handle.
+  CHECK(through.references != nullptr);
+  CHECK(through.references != nullptr && through.references->handles.size() == 1);
   CHECK(through.error == cursiv::AstBuildError::None && through.accepted);
 }
 
@@ -107,14 +78,11 @@ void a_parse_reads_only_the_borrowed_view() {
   for (const std::string& text : cases) {
     const cursiv::ParseResult reference = service().parse(text);
     const auto check = [&](std::string_view view) {
-      cursiv::Cst direct;
-      CHECK(direct_parse(view, direct) == reference.accepted);
       const cursiv::ParseResult actual = service().parse(view);
       CHECK(actual.accepted == reference.accepted);
       CHECK(actual.cst().text().data() == view.data());
       CHECK(actual.cst().text() == view);
       CHECK(actual.cst().size() == reference.cst().size());
-      CHECK(direct.size() == reference.cst().size());
       CHECK(actual.diagnostics.size() == reference.diagnostics.size());
       CHECK(actual.nodes().size() == reference.nodes().size());
       for (cursiv::NodeId i = 0;
@@ -129,7 +97,7 @@ void a_parse_reads_only_the_borrowed_view() {
     check(std::string_view(exact.get(), text.size()));
 #if defined(__unix__) || defined(__APPLE__)
     // End the view immediately before an unreadable page: even a one-byte
-    // overread in the generated drive or the shared runtime must fail.
+    // overread must fail.
     const long pageSize = sysconf(_SC_PAGESIZE);
     CHECK(pageSize > 0 && text.size() < static_cast<std::size_t>(pageSize));
     if (pageSize <= 0 || text.size() >= static_cast<std::size_t>(pageSize))
@@ -184,11 +152,8 @@ void a_long_reading_runs_whole_and_the_service_still_cancels() {
   for (int i = 0; i < 20000; ++i)
     src += "entity E" + std::to_string(i) + " { x : String }\n";
 
-  cursiv::Cst cst;
-  CHECK(direct_parse(src, cst));
-  cursiv::Cst whole;
-  CHECK(direct_parse(src, whole));
-  CHECK(cst.size() == whole.size());
+  const cursiv::ParseResult whole = service().parse(src);
+  CHECK(whole.accepted && whole.diagnostics.empty());
 
   cursiv::CancellationTokenSource source;
   source.request_stop();
@@ -197,177 +162,22 @@ void a_long_reading_runs_whole_and_the_service_still_cancels() {
   }));
 }
 
-cursiv::engine::AstEntryFn stoppedEntry = nullptr;
-cursiv::CancellationTokenSource* astStop = nullptr;
-
-void a_cancelled_token_stops_the_ast_before_work() {
-  cursiv::Cst cst;
-  CHECK(direct_parse("datatype String\n", cst));
-  cursiv::CancellationTokenSource source;
-  source.request_stop();
-  CHECK(support::throws<cursiv::OperationCancelled>([&] {
-    (void)cursiv::engine::AstReducer::build<dmg::kTable.stamp>(
-        dmg::kAstActions, std::move(cst), source.get_token());
-  }));
-}
-
-void stop_after_an_ast_entry(cursiv::engine::AstReducer& builder,
-                             cursiv::NodeId id, const cursiv::CstNode& node) {
-  stoppedEntry(builder, id, node);
-  astStop->request_stop();
-}
-
-void a_stop_during_ast_work_is_observed() {
-  cursiv::Cst cst;
-  CHECK(direct_parse("datatype String\nentity A { x : String }\n", cst));
-  auto actions = dmg::kAstActions;
-  std::vector<cursiv::engine::AstEntryFn> entries(
-      actions.entries, actions.entries + actions.entryCount);
-  cursiv::ElementId first = cursiv::kNoElement;
-  for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
-    const auto row = dmg::kTable.stamp.row(cst[id]);
-    if (!cst[id].hidden && row != cursiv::kNoElement &&
-        row < actions.entryCount && entries[row] != nullptr) {
-      first = row;
-      break;
-    }
-  }
-  CHECK(first != cursiv::kNoElement);
-  if (first == cursiv::kNoElement) return;
-  cursiv::CancellationTokenSource source;
-  astStop = &source;
-  stoppedEntry = entries[first];
-  entries[first] = &stop_after_an_ast_entry;
-  actions.entries = entries.data();
-  bool threw = false;
-  try {
-    (void)cursiv::engine::AstReducer::build<dmg::kTable.stamp>(
-        actions, std::move(cst), source.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    threw = true;
-  }
-  astStop = nullptr;
-  CHECK(source.stop_requested() && threw);
-}
-
-// The materialisation reads the stop between runs of records: a stop
-// requested at the first entry leaves most of a long document unbuilt.
-std::vector<cursiv::engine::AstEntryFn> countedEntries;
-std::vector<cursiv::ElementId> rowById;
-std::size_t entryCalls = 0;
-
-void count_an_ast_entry(cursiv::engine::AstReducer& builder, cursiv::NodeId id,
-                        const cursiv::CstNode& node) {
-  if (++entryCalls == 1 && astStop != nullptr) astStop->request_stop();
-  countedEntries[rowById[id]](builder, id, node);
-}
-
-std::size_t entries_built(const std::string& src,
-                          cursiv::CancellationTokenSource* stop) {
-  cursiv::Cst cst;
-  CHECK(direct_parse(src, cst));
-  rowById.assign(cst.size(), cursiv::kNoElement);
-  for (cursiv::NodeId id = 0; id < cst.size(); ++id)
-    rowById[id] = dmg::kTable.stamp.row(cst[id]);
-  auto actions = dmg::kAstActions;
-  countedEntries.assign(actions.entries, actions.entries + actions.entryCount);
-  std::vector<cursiv::engine::AstEntryFn> entries(countedEntries);
-  for (cursiv::engine::AstEntryFn& e : entries)
-    if (e != nullptr) e = &count_an_ast_entry;
-  actions.entries = entries.data();
-  entryCalls = 0;
-  astStop = stop;
-  try {
-    (void)cursiv::engine::AstReducer::build<dmg::kTable.stamp>(
-        actions, std::move(cst),
-        stop != nullptr ? stop->get_token() : cursiv::kNoCancel);
-  } catch (const cursiv::OperationCancelled&) {
-  }
-  astStop = nullptr;
-  return entryCalls;
-}
-
-// A stop requested as a long data rule is converted is seen inside that
-// record.
-std::vector<cursiv::NodeCount> extentById;
-bool stoppedInside = false;
-
-void stop_before_a_long_entry(cursiv::engine::AstReducer& builder,
-                              cursiv::NodeId id, const cursiv::CstNode& node) {
-  if (extentById[id] < 1000)
-    return countedEntries[rowById[id]](builder, id, node);
-  astStop->request_stop();
-  try {
-    countedEntries[rowById[id]](builder, id, node);
-  } catch (const cursiv::OperationCancelled&) {
-    stoppedInside = true;
-    throw;
-  }
-}
-
-void a_stop_inside_a_long_data_rule_is_observed_there() {
-  std::string src = "package a";
-  for (int i = 0; i < 4000; ++i) src += ".a";
-  src += " { }\n";
-  cursiv::Cst cst;
-  CHECK(direct_parse(src, cst));
-  rowById.assign(cst.size(), cursiv::kNoElement);
-  extentById.assign(cst.size(), 0);
-  for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
-    rowById[id] = dmg::kTable.stamp.row(cst[id]);
-    extentById[id] = cst[id].subtreeSize;
-  }
-  auto actions = dmg::kAstActions;
-  countedEntries.assign(actions.entries, actions.entries + actions.entryCount);
-  std::vector<cursiv::engine::AstEntryFn> entries(countedEntries);
-  for (cursiv::engine::AstEntryFn& e : entries)
-    if (e != nullptr) e = &stop_before_a_long_entry;
-  actions.entries = entries.data();
-  cursiv::CancellationTokenSource source;
-  astStop = &source;
-  stoppedInside = false;
-  bool threw = false;
-  try {
-    (void)cursiv::engine::AstReducer::build<dmg::kTable.stamp>(
-        actions, std::move(cst), source.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    threw = true;
-  }
-  astStop = nullptr;
-  CHECK(threw && stoppedInside);
-}
-
-void a_stop_during_a_long_ast_build_is_observed_early() {
-  std::string src = "datatype String\n";
-  for (int i = 0; i < 40000; ++i)
-    src += "entity E" + std::to_string(i) + " { x : String }\n";
-  const std::size_t whole = entries_built(src, nullptr);
-  cursiv::CancellationTokenSource source;
-  const std::size_t stopped = entries_built(src, &source);
-  CHECK(whole > 2 * 64 * 1024);
-  CHECK(stopped < whole / 2);
-}
-
 }  // namespace
 
 void run() {
   the_grammar_is_reachable_without_the_template();
-  a_parse_through_the_interface_builds_the_same_tree();
+  a_parse_through_the_interface_builds_the_tree();
   a_parse_reads_only_the_borrowed_view();
   a_broken_text_still_answers();
   a_cancelled_token_stops_the_parse();
   a_long_reading_runs_whole_and_the_service_still_cancels();
-  a_cancelled_token_stops_the_ast_before_work();
-  a_stop_during_ast_work_is_observed();
-  a_stop_during_a_long_ast_build_is_observed_early();
-  a_stop_inside_a_long_data_rule_is_observed_there();
 }
 
 }  // namespace parser_service
 
 // A translating parser against the same parser reading the decoded text:
 // every record, diagnostic and completion is the decoded parse's, at the
-// document's offsets, on both engines.
+// document's offsets.
 namespace source_translation {
 
 namespace {
@@ -394,7 +204,7 @@ void unicode_escapes(std::string_view source, cursiv::SourceTranslation& out) {
       value = value * 16 + hex(source[p]);
     std::string spelling;
     if (digits == 4)
-      cursiv::append_scalar(spelling, value);
+      cursiv::appendScalar(spelling, value);
     else
       out.error(at, p, "malformed escape");
     out.replace(at, p, spelling);
@@ -443,10 +253,10 @@ struct Engine {
 
 template <class Make>
 Engine engine(Make make) {
-  return {make(), cursiv::translating_parser(make(), unicode_escapes),
-          cursiv::translating_parser(make(), line_splices),
-          cursiv::translating_parser(make(), class_sigils),
-          cursiv::translating_parser(make(), implied_keywords)};
+  return {make(), cursiv::translatingParser(make(), unicode_escapes),
+          cursiv::translatingParser(make(), line_splices),
+          cursiv::translatingParser(make(), class_sigils),
+          cursiv::translatingParser(make(), implied_keywords)};
 }
 
 std::vector<std::string> names(const cursiv::ParseResult& r) {
@@ -515,8 +325,8 @@ cursiv::ParseResult check_against_decoded(const Engine& e,
     const TextRange moved = t->original({b.begin, b.end});
     CHECK(a.begin == moved.begin && a.end == moved.end);
     CHECK(rc.spelling(id) == pc.text(id));
-    CHECK(a.subtreeSize == b.subtreeSize && a.engine == b.engine &&
-          a.hidden == b.hidden && a.recovered == b.recovered);
+    CHECK(a.subtreeSize == b.subtreeSize && a.isHidden() == b.isHidden() &&
+          a.isRecovered() == b.isRecovered());
   }
   CHECK(rc.diagnostics().size() == pc.diagnostics().size());
   const std::size_t errors = t->errors().size();
@@ -592,6 +402,19 @@ void completion_refuses_a_caret_inside_an_escape(const Engine& e) {
   CHECK(!features(*e.unicode, r.cst(), TextOffset(text.size())).empty());
 }
 
+// A stopped completion throws wherever the caret stands, inside an escape too.
+void a_stopped_completion_throws(const Engine& e) {
+  const auto r = e.unicode->parse("cl\\u0061ss A; ");
+  cursiv::CancellationTokenSource source;
+  source.request_stop();
+  for (const TextOffset at : {TextOffset(2), TextOffset(3)}) {
+    std::vector<cursiv::NextFeature> out;
+    CHECK(support::throws<cursiv::OperationCancelled>([&] {
+      e.unicode->nextFeaturesAt(r.cst(), at, at, out, source.get_token());
+    }));
+  }
+}
+
 void a_name_span_maps_back_to_the_document(const Engine& e) {
   cursiv::Document document(cursiv::TextDocument::create(
       "file:///t", "t", 0, "class f\\u006fo; class bar;"));
@@ -620,7 +443,7 @@ void a_keyword_anchor_reads_the_parsed_spelling(const Engine& e) {
     CHECK(unit != nullptr && unit->decls.size() == 1);
     std::optional<TextRange> found;
     if (unit == nullptr || unit->decls.size() != 1) return found;
-    if (const auto keyword = cursiv::find_node_for_keyword(
+    if (const auto keyword = cursiv::findNodeForKeyword(
             *unit->decls[0], "class", 0, &document)) {
       CHECK(keyword.cst->spelling(keyword.id) == "class");
       found = TextRange{keyword.begin(), keyword.end()};
@@ -723,12 +546,12 @@ bool refused(F f) {
 template <class Make>
 void translations_do_not_nest(Make make) {
   CHECK(refused([&] {
-    (void)cursiv::translating_parser(
-        cursiv::translating_parser(make(), unicode_escapes), line_splices);
+    (void)cursiv::translatingParser(
+        cursiv::translatingParser(make(), unicode_escapes), line_splices);
   }));
-  const auto hidden = cursiv::translating_parser(
+  const auto hidden = cursiv::translatingParser(
       std::make_unique<support::CountingParser>(
-          cursiv::translating_parser(make(), unicode_escapes)),
+          cursiv::translatingParser(make(), unicode_escapes)),
       line_splices);
   CHECK(refused([&] { (void)hidden->parse("cl\\u0061ss A\\\nB;"); }));
   CHECK(names(hidden->parse("cl\\u0061ss A;")) ==
@@ -744,6 +567,7 @@ void run_engine(const Engine& e) {
   a_malformed_escape_is_reported_where_it_stands(e);
   a_repair_after_an_escape_is_reported_in_the_document(e);
   completion_refuses_a_caret_inside_an_escape(e);
+  a_stopped_completion_throws(e);
   a_name_span_maps_back_to_the_document(e);
   a_keyword_anchor_reads_the_parsed_spelling(e);
   a_word_is_read_in_the_parsed_spelling(e);
@@ -756,10 +580,8 @@ void run_engine(const Engine& e) {
 }  // namespace
 
 void run() {
-  run_engine(engine(&ttrans::generated::Lr::create_parser));
-  run_engine(engine(&ttrans::generated::Ll::create_parser));
-  translations_do_not_nest(&ttrans::generated::Lr::create_parser);
-  translations_do_not_nest(&ttrans::generated::Ll::create_parser);
+  run_engine(engine(&ttrans::generated::Base::createParser));
+  translations_do_not_nest(&ttrans::generated::Base::createParser);
 }
 
 }  // namespace source_translation

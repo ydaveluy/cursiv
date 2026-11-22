@@ -43,7 +43,7 @@ inline bool final_sigma(std::string_view s, std::size_t begin,
     std::size_t b = i - 1;
     while (b > 0 && (static_cast<unsigned char>(s[b]) & 0xC0u) == 0x80u) --b;
     std::size_t len = 0;
-    const char32_t cp = scalar_at(s.data() + b, s.size() - b, len);
+    const char32_t cp = scalarAt(s.data() + b, s.size() - b, len);
     if (len == 0 || b + len != i) break;
     if (!case_ignorable(cp)) {
       preceded = cased(cp);
@@ -54,7 +54,7 @@ inline bool final_sigma(std::string_view s, std::size_t begin,
   if (!preceded) return false;
   for (std::size_t i = end; i < s.size();) {
     std::size_t len = 0;
-    const char32_t cp = scalar_at(s.data() + i, s.size() - i, len);
+    const char32_t cp = scalarAt(s.data() + i, s.size() - i, len);
     if (len == 0) return true;
     if (!case_ignorable(cp)) return !cased(cp);
     i += len;
@@ -68,7 +68,7 @@ inline std::string lower_case(std::string_view text) {
   out.reserve(text.size());
   for (std::size_t i = 0; i < text.size();) {
     std::size_t len = 0;
-    const char32_t cp = scalar_at(text.data() + i, text.size() - i, len);
+    const char32_t cp = scalarAt(text.data() + i, text.size() - i, len);
     if (len == 0) {
       out += text[i++];
       continue;
@@ -76,9 +76,9 @@ inline std::string lower_case(std::string_view text) {
     if (cp == 0x130)
       out += "i\xCC\x87";
     else if (cp == 0x3A3)
-      append_scalar(out, final_sigma(text, i, i + len) ? 0x3C2 : 0x3C3);
+      appendScalar(out, final_sigma(text, i, i + len) ? 0x3C2 : 0x3C3);
     else
-      append_scalar(out, lower_scalar(cp));
+      appendScalar(out, lower_scalar(cp));
     i += len;
   }
   return out;

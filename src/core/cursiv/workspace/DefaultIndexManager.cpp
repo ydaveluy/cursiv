@@ -1,4 +1,5 @@
 #include "cursiv/workspace/DefaultIndexManager.hpp"
+#include "cursiv/workspace/LanguageServiceError.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -36,11 +37,6 @@
 
 namespace cursiv {
 
-namespace {
-
-
-}  // namespace
-
 std::size_t DefaultIndexManager::Exports::Shard::slotOf(
     std::uint64_t hash) const noexcept {
   const auto mask = slots.size() - 1;
@@ -51,7 +47,7 @@ std::size_t DefaultIndexManager::Exports::Shard::slotOf(
 
 std::span<const AstNodeDescription* const> DefaultIndexManager::Exports::named(
     std::string_view name) const {
-  const auto hash = folded_hash(name);
+  const auto hash = foldedHash(name);
   auto& shard = shards[shardOf(hash)];
   if (!shard.built.load(std::memory_order_acquire)) {
     const std::scoped_lock lock(shard.building);
@@ -73,25 +69,26 @@ void DefaultIndexManager::Exports::fill(Shard& shard, std::size_t at) const {
                  exported.shardBegin[at + 1] - exported.shardBegin[at]);
   };
   std::size_t count = 0;
-  for (const auto& [id, exported] : rows) count += group(*exported).size();
+  for (const auto& exported : rows) count += group(*exported).size();
   // A run's bounds are 32 bits: a shard too large is refused before it is
   // built.
   if (count > std::numeric_limits<std::uint32_t>::max())
     throw std::length_error("cursiv: too many exported names in one shard");
   shard.slots.assign(detail::table_size(count), {});
-  for (const auto& [id, exported] : rows)
-    for (const auto& entry : group(*exported)) {
-      auto& slot = shard.slots[shard.slotOf(entry.hash)];
-      slot.hash = entry.hash;
+  for (const auto& exported : rows)
+    for (const auto index : group(*exported)) {
+      const auto hash = exported->hashes[index];
+      auto& slot = shard.slots[shard.slotOf(hash)];
+      slot.hash = hash;
       ++slot.count;
     }
   std::uint32_t end = 0;
   for (auto& slot : shard.slots) slot.begin = end += slot.count;
   shard.byName.resize(count);
-  for (const auto& [id, exported] : rows | std::views::reverse)
-    for (const auto& entry : group(*exported) | std::views::reverse)
-      shard.byName[--shard.slots[shard.slotOf(entry.hash)].begin] =
-          entry.element;
+  for (const auto& exported : rows | std::views::reverse)
+    for (const auto index : group(*exported) | std::views::reverse)
+      shard.byName[--shard.slots[shard.slotOf(exported->hashes[index])].begin] =
+          &exported->elements[index];
 }
 
 void DefaultIndexManager::updateContent(const Document& document,
@@ -101,7 +98,10 @@ void DefaultIndexManager::updateContent(const Document& document,
   // Computed here, off the lock and with the token: this walk is the phase's
   // whole cost.
   std::vector<AstNodeDescription> exported =
-      language->scopeComputation->collectExportedSymbols(document, cancelToken);
+      detail::language_call("Exporting symbols", [&] {
+        return language->scopeComputation->collectExportedSymbols(document,
+                                                                  cancelToken);
+      });
 
   // The shard bounds of one document are 32 bits.
   if (exported.size() > std::numeric_limits<std::uint32_t>::max())
@@ -109,18 +109,18 @@ void DefaultIndexManager::updateContent(const Document& document,
   auto fresh = std::make_shared<Exported>();
   fresh->uri = document.uri;
   fresh->elements = std::move(exported);
-  std::vector<Hashed> hashed;
-  hashed.reserve(fresh->elements.size());
+  fresh->hashes.reserve(fresh->elements.size());
   for (const auto& element : fresh->elements) {
-    hashed.push_back({folded_hash(element.name), &element});
-    ++fresh->shardBegin[shardOf(hashed.back().hash) + 1];
+    const auto hash = foldedHash(element.name);
+    fresh->hashes.push_back(hash);
+    ++fresh->shardBegin[shardOf(hash) + 1];
   }
   std::partial_sum(fresh->shardBegin.begin(), fresh->shardBegin.end(),
                    fresh->shardBegin.begin());
-  fresh->byShard.resize(hashed.size());
+  fresh->byShard.resize(fresh->elements.size());
   auto next = fresh->shardBegin;
-  for (const auto& entry : hashed)
-    fresh->byShard[next[shardOf(entry.hash)]++] = entry;
+  for (std::uint32_t i = 0; i < fresh->hashes.size(); ++i)
+    fresh->byShard[next[shardOf(fresh->hashes[i])]++] = i;
   const std::scoped_lock lock(_mutex);
   // Released first, so a throw leaves the table as the view shows it; readers
   // keep what they hold, and the next one rebuilds. Only the export view.
@@ -133,16 +133,17 @@ void DefaultIndexManager::updateContent(const Document& document,
 
 void DefaultIndexManager::updateReferences(
     const Document& document, const CancellationToken& cancelToken) {
-  throw_if_cancelled(cancelToken);
+  throwIfCancelled(cancelToken);
   // The language's own provider says what the document points at.
   const CoreServices* const language = document.language;
   if (language == nullptr) return;
 
   // Collected off the lock, as the exports are.
   Referenced referenced;
-  referenced.descriptions =
-      language->referenceDescriptionProvider->createDescriptions(document,
-                                                                 cancelToken);
+  referenced.descriptions = detail::language_call("Collecting references", [&] {
+    return language->referenceDescriptionProvider->createDescriptions(
+        document, cancelToken);
+  });
   for (const auto& reference : referenced.descriptions)
     if (!reference.local &&
         (referenced.targets.empty() ||
@@ -248,9 +249,9 @@ void DefaultIndexManager::affectImporters(const Exported& exports) {
   if (_importers.empty()) return;
   // Homonyms share a hash: their importers are affected once.
   std::unordered_set<std::uint64_t> asked;
-  for (const auto& entry : exports.byShard)
-    if (const auto at = _importers.find(entry.hash);
-        at != _importers.end() && asked.insert(entry.hash).second)
+  for (const auto hash : exports.hashes)
+    if (const auto at = _importers.find(hash);
+        at != _importers.end() && asked.insert(hash).second)
       for (const auto& importer : at->second)
         _affected.insert(importer.document);
 }
@@ -278,10 +279,9 @@ bool DefaultIndexManager::isAffected(
 // this index, which a held lock would deadlock on.
 bool DefaultIndexManager::visitElements(
     const AstTypeTag* type, std::span<const DocumentId> documents,
-    cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
-  const auto view = exportsView();
-  const auto visit = [&](const Exported& exported) {
-    for (const AstNodeDescription& element : exported.elements) {
+    cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const {
+  const auto visit = [&](const auto& row) {
+    for (const AstNodeDescription& element : row->elements) {
       if (type != nullptr &&
           (element.type == nullptr || !element.type->derivesFrom(type)))
         continue;
@@ -289,19 +289,13 @@ bool DefaultIndexManager::visitElements(
     }
     return true;
   };
-  if (documents.empty())
-    return std::ranges::all_of(
-        view->rows, [&](const auto& row) { return visit(*row.second); });
-  // The documents asked alone, in the view's order.
-  std::vector<std::uint32_t> rows;
-  rows.reserve(documents.size());
-  for (const DocumentId id : documents)
-    if (const auto at = view->rowAt.find(id); at != view->rowAt.end())
-      rows.push_back(at->second);
-  std::ranges::sort(rows);
-  rows.erase(std::ranges::unique(rows).begin(), rows.end());
-  return std::ranges::all_of(
-      rows, [&](std::uint32_t at) { return visit(*view->rows[at].second); });
+  if (documents.empty()) return std::ranges::all_of(exportsView()->rows, visit);
+  ExportRows rows;
+  {
+    const std::scoped_lock lock(_mutex);
+    rows = exportRows(documents);
+  }
+  return std::ranges::all_of(rows, visit);
 }
 
 const AstNodeDescription* DefaultIndexManager::findByName(
@@ -310,7 +304,7 @@ const AstNodeDescription* DefaultIndexManager::findByName(
   if (name.empty()) return nullptr;
   const auto view = exportsView();
   for (const auto* const entry : view->named(name)) {
-    if (caseSensitive ? entry->name != name : !folded_equal(entry->name, name))
+    if (caseSensitive ? entry->name != name : !foldedEqual(entry->name, name))
       continue;
     if (reflection.acceptsTag(accepts, entry->type)) return entry;
   }
@@ -320,11 +314,11 @@ const AstNodeDescription* DefaultIndexManager::findByName(
 bool DefaultIndexManager::visitByName(
     std::string_view name, bool caseSensitive, AcceptSet accepts,
     const AstReflection& reflection,
-    cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
+    cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const {
   if (name.empty()) return true;
   const auto view = exportsView();
   return std::ranges::all_of(view->named(name), [&](const auto* entry) {
-    if (caseSensitive ? entry->name != name : !folded_equal(entry->name, name))
+    if (caseSensitive ? entry->name != name : !foldedEqual(entry->name, name))
       return true;
     return !reflection.acceptsTag(accepts, entry->type) || visitor(*entry);
   });
@@ -332,7 +326,7 @@ bool DefaultIndexManager::visitByName(
 
 bool DefaultIndexManager::visitReferences(
     DocumentId targetDocument, NodeId targetSymbol,
-    cursiv::function_ref<bool(const ReferenceDescription&)> visitor) const {
+    cursiv::FunctionRef<bool(const ReferenceDescription&)> visitor) const {
   if (targetDocument == kNoDocument || targetSymbol == kNoNode) return true;
   // The guard stands for the whole walk: it is what keeps the snapshot from
   // being released under the visitor.
@@ -344,6 +338,23 @@ bool DefaultIndexManager::visitReferences(
   return std::ranges::all_of(*symbol->second, visitor);
 }
 
+DefaultIndexManager::ExportRows DefaultIndexManager::exportRows(
+    std::span<const DocumentId> documents) const {
+  ExportRows rows;
+  if (documents.empty()) {
+    const auto values = _exported | std::views::values;
+    rows.assign(values.begin(), values.end());
+  } else {
+    rows.reserve(documents.size());
+    for (const DocumentId id : documents)
+      if (const auto at = _exported.find(id); at != _exported.end())
+        rows.push_back(at->second);
+  }
+  std::ranges::sort(rows, {}, &Exported::uri);
+  if (!documents.empty()) rows.erase(std::ranges::unique(rows).begin(), rows.end());
+  return rows;
+}
+
 cursiv::detail::Published<DefaultIndexManager::Exports>::Read
 DefaultIndexManager::exportsView() const {
   if (auto live = _exports.read(); live) return live;
@@ -353,16 +364,7 @@ DefaultIndexManager::exportsView() const {
   if (auto live = _exports.read(); live) return live;
 
   auto built = std::make_shared<Exports>();
-  built->rows.assign(_exported.begin(), _exported.end());
-  // Normalized URI order keeps homonyms independent of worker completion and
-  // document registration. Sort the snapshot once, never individual lookups.
-  std::ranges::sort(built->rows, {},
-                    [](const auto& row) -> const std::string& {
-                      return row.second->uri;
-                    });
-  built->rowAt.reserve(built->rows.size());
-  for (std::uint32_t at = 0; at < built->rows.size(); ++at)
-    built->rowAt.emplace(built->rows[at].first, at);
+  built->rows = exportRows({});
   _exports.publish(std::move(built));
   return _exports.read();
 }

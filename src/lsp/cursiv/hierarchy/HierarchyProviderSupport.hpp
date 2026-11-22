@@ -17,13 +17,13 @@ class Documents;
 
 // The declarations a position denotes, all of them: a multi-reference names
 // its whole set, and prepare gives one item per target.
-[[nodiscard]] std::vector<const AstNode*> hierarchy_nodes_at(
+[[nodiscard]] std::vector<const AstNode*> hierarchyNodesAt(
     const References& references, const Document& document,
     lsp::Position position, const CancellationToken& cancelToken);
 
 // The node an item names, read in the document's current text: after an
 // edit, an older item names the declaration that stands there.
-[[nodiscard]] const AstNode* hierarchy_node_of_item(
+[[nodiscard]] const AstNode* hierarchyNodeOfItem(
     const Documents& store, const References& references,
     const lsp::DocumentUri& uri, lsp::Position selection,
     const CancellationToken& cancelToken);

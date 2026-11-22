@@ -23,25 +23,18 @@ node from a rule that writes no member. See
 
 ### Can a rule match the empty string?
 
-Yes, but a repeated item must read input
-([`nullableRepetition`](reference/refusals.md#nullablerepetition)), and rules
-may not call each other in a cycle that reads no text
-([`unitProductionCycle`](reference/refusals.md#unitproductioncycle)):
+Yes. A rule can match empty input. Each turn of an unbounded repetition
+should consume input, and a cycle of rule calls must consume input before
+returning to the same position. See [grammar errors](reference/refusals.md#rules-and-repetitions).
 
-```cpp
-struct Item : rule<option(ref<ID>)> {};
-struct List : rule<many(ref<Item>)> {};   // refused
-```
-
-For an optional list, make each item read input and let `many` allow zero
-items: `struct Item : rule<ref<ID>> {};`.
+For a list of names, `many(ref<ID>)` accepts an empty list when `ID` consumes
+at least one character.
 
 ### My keyword matches inside a longer word
 
-Write words with `kw<>` or `ikw<>`, not `lit<>`. A keyword matches only when
-the next character cannot continue a word: a letter, a digit or `_` by
-default. If your identifiers contain other characters, set `word_boundary` in
-the grammar. For identifiers that may contain `-`:
+Use `kw<"if">` or `ikw<"if">` for a word. With the default boundary,
+`if2` is one identifier because the digit continues the word. If your
+identifiers also allow `-`, include it in `word_boundary`:
 
 ```cpp
 static constexpr auto word_boundary = cr<"a-zA-Z0-9_-">;
@@ -73,8 +66,8 @@ server then offers formatting to the editor. See
 
 Ship the WebAssembly server: the VS Code extension runs it with Node.js, on
 every platform VS Code supports. See
-[Cross-compiling to wasm](recipes/wasm.md). Native builds are tested on Linux,
-and also build on Windows (MSYS2) and macOS.
+[Cross-compiling to wasm](recipes/wasm.md). The native CI builds and runs
+tests on Linux, Windows (MSYS2 UCRT64) and macOS (Apple Clang).
 
 ### What C++ do I need?
 

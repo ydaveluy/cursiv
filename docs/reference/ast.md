@@ -16,7 +16,7 @@ struct Person : cursiv::Extends<cursiv::AstNode> {
 
 | Type | Stores |
 |---|---|
-| `string_view` | Text from the source; prefer it, it costs nothing |
+| `string_view` | Borrowed text, such as the spelling of an identifier |
 | `string` | Text a converter built; it owns its bytes |
 | `boolean` | A `bool` |
 | `int8`…`int64`, `uint8`…`uint64` | Sized integers |
@@ -38,7 +38,7 @@ replaces it: give a type with no default constructor a first value, as in
 
 Use `string_view` for text whenever you can. It holds the matched text, a slice
 of it that a converter returns, or the parts of a data rule. A converter that returns
-a `std::string` needs a `string` member, and a `string_view` over it is refused. A
+a `std::string` needs an owning `string` member so its bytes survive the call. A
 `string_view` points into the source text or the `ParseResult`, so keep both alive
 while you read the AST.
 `Parser::parse` refuses a temporary `std::string` at compile time for that reason: name
@@ -55,9 +55,9 @@ struct STRING : terminal<as<between_quotes>(lit<"\""> + text + lit<"\"">)> {};
 struct Decoded : rule<as<decode_escapes>(ref<STRING>)> {};
 ```
 
-A `string_view` member on `ref<STRING>` allocates nothing but holds escapes as
-written, so use it only where the language refuses them. A member that needs the
-value is a `string` on `ref<Decoded>`.
+Choose `ref<STRING>` for the spelling between the quotes, including any
+escapes as written. Use `ref<Decoded>` and an owning `string` when the AST
+should hold decoded characters.
 
 Treat a tree as read-only once it is built. Its services rely on it: adding to a
 list does not set a node's parent, and changing a `string` that names a node leaves
@@ -88,9 +88,6 @@ struct Typed : cursiv::VirtualExtends<Named> {};
 struct Documented : cursiv::VirtualExtends<Named> {};
 struct Field : cursiv::Extends<Typed, Documented> {};
 ```
-
-`VirtualExtends` costs a little time and memory, and only the classes that use
-it pay for it.
 
 ## References
 
@@ -130,7 +127,7 @@ from `T`. It returns null otherwise, and for a null node:
 const auto* model = cursiv::ast_cast<recipe::ast::Model>(root);
 ```
 
-For an exact class match, compare `node->type == &cursiv::ast_type_tag<T>`.
+For an exact class match, compare `node->type == &cursiv::kAstTypeTag<T>`.
 
 ## Walk a tree
 
@@ -141,18 +138,18 @@ up through the parents:
 const cursiv::AstReflection& reflection = *services.astReflection;
 
 // The nodes directly inside `node`.
-cursiv::visit_contents(reflection, node, [&](cursiv::AstNode& child) { /* ... */ });
+cursiv::visitContents(reflection, node, [&](cursiv::AstNode& child) { /* ... */ });
 
 // Every node below `node`, a parent first. Return AstWalk::Prune to skip what
 // a node contains, or return nothing to read them all.
-cursiv::visit_all_contents(reflection, node, [&](cursiv::AstNode& child) {
+cursiv::visitAllContents(reflection, node, [&](cursiv::AstNode& child) {
   return cursiv::ast_cast<ast::Comment>(&child) != nullptr
              ? cursiv::AstWalk::Prune
              : cursiv::AstWalk::Enter;
 });
 
 // The node itself or the nearest node containing it of that class, or null.
-const auto* entity = cursiv::container_of_type<ast::Entity>(&node);
+const auto* entity = cursiv::containerOfType<ast::Entity>(&node);
 ```
 
 ## Read a node's comment
@@ -163,10 +160,10 @@ document:
 
 ```cpp
 const std::vector<std::string> rules{"ML_COMMENT"};
-const cursiv::NodeId comment = cursiv::find_comment_node(document, node, rules);
+const cursiv::NodeId comment = cursiv::findCommentNode(document, node, rules);
 if (comment != cursiv::kNoNode) {
   const cursiv::DocComment doc =
-      cursiv::parse_doc_comment(document, comment);
+      cursiv::parseDocComment(document, comment);
   if (const auto* tag = doc.getTag("uuid")) {
     // tag->range.start.offset and tag->range.end.offset are document offsets.
   }
@@ -183,8 +180,8 @@ if (comment != cursiv::kNoNode) {
 | `cstNodeId` | The concrete syntax tree (CST) node it was built from |
 
 A property of your grammar may have one of these names, and then hides the
-member in its class: `entity.parent` is the property. `cursiv::parent_of(node)`,
-`cursiv::type_of(node)` and `cursiv::cst_node_id_of(node)` always read the
+member in its class: `entity.parent` is the property. `cursiv::parentOf(node)`,
+`cursiv::typeOf(node)` and `cursiv::cstNodeIdOf(node)` always read the
 node's own.
 
 A node cannot be copied or assigned: it is one place in one tree. Make a new

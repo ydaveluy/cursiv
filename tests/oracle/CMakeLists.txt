@@ -27,7 +27,7 @@ function(cursiv_rgram seed)
       COMMENT "${id}: drawing its grammar")
   add_custom_target(${id}_grammar DEPENDS ${own}/Grammar.hpp)
   cursiv_grammar_generator(${id} "${own}/Grammar.hpp" ${id}::G
-                            ${id}::generated::G "" "" "" "${root}" LR)
+                            ${id}::generated::G "" "" "" "${root}")
   add_dependencies(${id}_gen ${id}_grammar)
   add_custom_command(OUTPUT ${own}/generated.stamp
       COMMAND ${CMAKE_COMMAND} -DGEN=$<TARGET_FILE:${id}_gen>
@@ -39,9 +39,7 @@ function(cursiv_rgram seed)
   # The generated code and checker share one unit, empty of parser code when
   # the grammar was refused. Recompile it after every generator run.
   set(source "")
-  foreach(unit ParserStates ParserGroups0 ParserGroups1 ParserGroups2
-          ParserGroups3 ParserGroups4 ParserGroups5 ParserGroups6
-          ParserGroups7 AstReflection Grammar Module)
+  foreach(unit Parser Explorer Repairer Ast Grammar Module)
     set(inc "${id}/generated/G/${unit}.cpp")
     string(APPEND source
         "#if __has_include(\"${inc}\")\n#include \"${inc}\"\n#endif\n")
@@ -58,7 +56,7 @@ function(cursiv_rgram seed)
       RGRAM_SEED=${seed} RGRAM_NS=${id}
       RGRAM_MODULE="${id}/generated/G/Module.hpp"
       RGRAM_REFUSED="${own}/refused.txt")
-  target_link_libraries(${id}_check PRIVATE rgramOracle cursiv::engine::lr)
+  target_link_libraries(${id}_check PRIVATE rgramOracle cursiv::engine)
 endfunction()
 
 # One accepted seed per family. 107 and 242 close a region on a rule;
@@ -77,7 +75,7 @@ foreach(index RANGE 0 1)
   list(SUBLIST _rgram_fixed ${first} 4 batch)
   list(TRANSFORM batch PREPEND rgram)
   list(TRANSFORM batch APPEND _gen)
-  _cursiv_generator_batch(lr rgram${index} ${batch})
+  _cursiv_generator_batch(rgram${index} ${batch})
 endforeach()
 
 # The long run, asked for at configure (`-DCURSIV_RGRAM_COUNT=<n>

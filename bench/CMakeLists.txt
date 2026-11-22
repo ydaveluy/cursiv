@@ -12,40 +12,27 @@ target_include_directories(recover_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(recover_bench PRIVATE cursiv::bench arithmeticsCore
     domainmodelCore)
 
-# The same lane over the growth grammar of the suites, whose texts fork the LR
-# graph stack. Its parser is compiled here at the optimisation the products
-# use, in a binary of its own.
-if(TARGET growthGenerated)
-  get_target_property(_growthParser growthGenerated
-      CURSIV_GENERATED_PARSER_SOURCES)
-  add_executable(growth_bench EXCLUDE_FROM_ALL recover_bench/main.cpp
-      ${_growthParser})
-  set_source_files_properties(${_growthParser} PROPERTIES
-      COMPILE_OPTIONS $<$<CONFIG:Release>:-O2>)
-  add_dependencies(growth_bench growth_generate)
-  target_compile_definitions(growth_bench PRIVATE GROWTH_BENCH)
-  target_include_directories(growth_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-  target_link_libraries(growth_bench PRIVATE cursiv::bench
-      $<COMPILE_ONLY:growthGenerated> cursiv::engine::lr)
-endif()
+# The same lane over a grammar whose texts fork the LR graph stack, generated
+# here at the optimisation the products use, in a binary of its own.
+cursiv_generate_language(ID benchgrowth
+    GRAMMAR      growth_bench/GrowthGrammar.hpp
+    NAMESPACE    tgrowth::G
+    OUT          generated/benchgrowth/generated)
+set_target_properties(benchgrowthGenerated PROPERTIES EXCLUDE_FROM_ALL ON)
+add_executable(growth_bench EXCLUDE_FROM_ALL recover_bench/main.cpp)
+target_compile_definitions(growth_bench PRIVATE GROWTH_BENCH)
+target_include_directories(growth_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(growth_bench PRIVATE cursiv::bench benchgrowthGenerated)
 
-# What a completion costs in the middle of a large document, in each engine:
-# conditions that read two terminals, generated here at
-# the optimisation the products use.
-foreach(_engine IN ITEMS Ll Lr)
-  string(TOLOWER ${_engine} _id)
-  string(TOUPPER ${_engine} _engine_id)
-  cursiv_generate_language(ID benchcaret${_id}
-      GRAMMAR      caret_bench/CaretPhraseGrammar.hpp
-      NAMESPACE    tcaretphrase::${_engine}
-      ENGINE       ${_engine_id}
-      OUT          generated/benchcaret${_id}/generated)
-  set_target_properties(benchcaret${_id}Generated PROPERTIES
-      EXCLUDE_FROM_ALL ON)
-endforeach()
+# What a completion costs in the middle of a large document: conditions that
+# read two terminals, generated here at the optimisation the products use.
+cursiv_generate_language(ID benchcaret
+    GRAMMAR      caret_bench/CaretPhraseGrammar.hpp
+    NAMESPACE    tcaretphrase::G
+    OUT          generated/benchcaret/generated)
+set_target_properties(benchcaretGenerated PROPERTIES EXCLUDE_FROM_ALL ON)
 add_executable(caret_bench EXCLUDE_FROM_ALL caret_bench/main.cpp)
-target_link_libraries(caret_bench PRIVATE cursiv::bench benchcaretllGenerated
-    benchcaretlrGenerated)
+target_link_libraries(caret_bench PRIVATE cursiv::bench benchcaretGenerated)
 
 # The repair quality report: faults planted in valid documents, each faulted
 # copy compared with its twin, per grammar and per class of fault.
@@ -63,8 +50,7 @@ if(TARGET indentGenerated AND TARGET asiGenerated)
   list(APPEND _metricLinks indentGenerated asiGenerated)
 endif()
 add_executable(recovery_metric EXCLUDE_FROM_ALL ${_metricSources})
-target_link_libraries(recovery_metric PRIVATE ${_metricLinks} cursiv::test
-    cursiv::engine::ll cursiv::engine::lr)
+target_link_libraries(recovery_metric PRIVATE ${_metricLinks} cursiv::test)
 target_include_directories(recovery_metric PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests)
 target_compile_definitions(recovery_metric PRIVATE
@@ -88,6 +74,5 @@ if(CURSIV_BUILD_TESTS)
           "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
           -DOUT=${CMAKE_CURRENT_BINARY_DIR}/recovery_metric_lane
           -DTSV=${CMAKE_CURRENT_SOURCE_DIR}/recovery_metric/lane.tsv
-          -DENGINE=${CURSIV_DEFAULT_ENGINE}
           -P ${CMAKE_CURRENT_SOURCE_DIR}/recovery_metric/lane.cmake)
 endif()

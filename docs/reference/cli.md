@@ -4,15 +4,16 @@ The command-line tool of a scaffolded project checks one file and can print
 its syntax tree. Use it to validate files from a script:
 
 ```bash
-mylang_cli [--dump] [--json] [--root <dir>] [--help] <file>
+mylang_cli [--dump] [--json] [--root <dir>] [--help] [--] <file>
 ```
 
 | Option | Effect |
 |---|---|
 | `--dump` | Print the CST as text on stdout. |
 | `--json` | Print the CST as JSON on stdout; takes precedence over `--dump`. |
-| `--root <dir>` | Load supported files from a workspace folder before validating the file. |
-| `--help`, `-h` | Print usage and the registered file extensions. |
+| `--root <dir>`, `-r <dir>` | Load supported files from a workspace folder before validating the file. |
+| `--help`, `-h` | List commands, file names and extensions. |
+| `--` | End option parsing so the input file name can start with a dash. |
 
 Diagnostics and the final `<file>: ok` or `<file>: not clean` line go to
 stderr, so you can pipe the tree from stdout. Lines and columns are 1-based;
@@ -25,7 +26,10 @@ columns count bytes.
 | `0` | No error diagnostic (warnings allowed), or help was requested |
 | `1` | At least one error diagnostic |
 | `2` | Invalid arguments, unreadable path, unsupported file, or a file past the document size limit (just under 4 GiB) |
-| `3` | An internal error or output failure |
+| `3` | An internal error or a stream write that reports failure |
+
+On POSIX, closing the read end of a pipe can terminate the process with
+`SIGPIPE` before it returns an exit code.
 
 ## Load a workspace
 
@@ -36,8 +40,8 @@ references target declarations in other files:
 ./build/src/mylang_cli --root example example/hello.mylang
 ```
 
-The CLI reads files from disk, so it does not see unsaved changes in an
-editor.
+The CLI uses the saved files on disk. If its workspace scan cannot read a
+selected file or directory, it reports the path and exits with code `2`.
 
 ## Inspect the syntax tree
 
@@ -52,14 +56,15 @@ Module [0..35)
   Definition [9..29)
 ```
 
-Comments and other `hidden` trivia appear between the tokens; `ignored`
-trivia does not. The text dump shortens long token text. `--json` keeps the
-full text and gives each node its `element` (terminal or data rule) and its
-`type` (AST class).
+The dump includes `hidden` trivia such as comments and omits `ignored`
+trivia. Use `--json` for untruncated leaf text and half-open byte ranges
+(`begin`, `end`). Each node has an `element` string, empty for anonymous
+elements, and a `type` when it built an AST node. The output is `null` if
+there is no CST entry.
 
 ## Customize the CLI
 
-The scaffold's `src/cli.cpp` calls `run_cli` with your language registration
+The scaffold's `src/cli.cpp` calls `runCli` with your language registration
 function:
 
 ```cpp title="src/cli.cpp"
@@ -68,12 +73,12 @@ function:
 #include "mylang/CoreServices.hpp"
 
 constexpr auto kRegister =
-    &cursiv::register_language<mylang::MyLangCoreServices,
+    &cursiv::registerLanguage<mylang::MyLangCoreServices,
                                mylang::MyLangSharedCoreServices,
                                mylang::install_core_module>;
 
 int main(int argc, char** argv) {
-  return cursiv::run_cli<mylang::MyLangSharedCoreServices>(argc, argv,
+  return cursiv::runCli<mylang::MyLangSharedCoreServices>(argc, argv,
                                                          kRegister);
 }
 ```
@@ -81,11 +86,21 @@ int main(int argc, char** argv) {
 A registration function may install several languages; see
 [Several languages](../recipes/multiple-languages.md).
 
-To add a command of your own, such as `generate`, run it with `run_command`.
-It gives the command the same exit codes: `2` for a `UsageError`, `3` for any
-other exception or a failed write to stdout.
+Pass file commands to `runCli` alongside the language registrar. Each command
+receives the built document, the input path and an optional destination.
+For example, the domainmodel CLI registers its Java generator like this:
 
 ```cpp
-if (argc == 3 && std::string_view(argv[1]) == "generate")
-  return cursiv::run_command([&] { return generate(argv[2]); });
+return cursiv::runCli<dm::DomainModelSharedCoreServices>(
+    argc, argv, kRegister,
+    {{.name = "generate", .run = generate,
+      .acceptsDestination = true, .loadSiblings = true}});
 ```
+
+`generate --help` lists the command's options. With `loadSiblings` the
+workspace defaults to the input file's directory. An explicit `--root`
+selects another directory. With `acceptsDestination`, the command accepts
+`-d <dir>` and `--destination <dir>`.
+
+For a command with its own argument syntax, `runCommand` runs a callable
+with the same exit codes and checks writes to stdout and stderr.

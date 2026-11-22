@@ -7,6 +7,7 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #ifdef SIGALRM
@@ -75,10 +76,24 @@ std::string bare(std::string_view tree) {
   return out;
 }
 
+bool same_parse(const ParseResult& a, const ParseResult& b) {
+  const Cst& x = a.cst();
+  const Cst& y = b.cst();
+  if (a.accepted != b.accepted || a.error != b.error || x.entryRoot() != y.entryRoot() ||
+      x.size() != y.size()) return false;
+  for (NodeId i = 0; i < x.size(); ++i)
+    if (x[i].begin != y[i].begin || x[i].end != y[i].end ||
+        x[i].subtreeSize != y[i].subtreeSize || x[i].engine() != y[i].engine()) return false;
+  const auto fields = [](const ParseDiagnostic& d) {
+    return std::tie(d.kind, d.mixedIndent, d.element, d.also, d.begin, d.end, d.message);
+  };
+  return std::ranges::equal(a.diagnostics, b.diagnostics, {}, fields, fields);
+}
+
 }  // namespace
 
-int rgram_lane(unsigned seed, const Parser& parser,
-               const AstReflection& reflection, unsigned documents) {
+int rgram_lane(unsigned seed, const Parser& parser, const AstReflection& reflection,
+               unsigned documents, const Parser* election) {
   const RgramGrammar g = RgramGrammar::draw(seed);
   const RgramCfg cfg(g);
   const std::vector<RgramDocument> docs =
@@ -99,6 +114,11 @@ int rgram_lane(unsigned seed, const Parser& parser,
     gHangLen = len < 0 ? 0 : std::min<std::size_t>(len, sizeof gHang - 1);
     watch(kWatchSeconds);
     const ParseResult r = parser.parse(d.text);
+    if (election && !same_parse(r, election->parse(d.text))) {
+      ++bad;
+      std::printf("rgram %u: document %zu \"%s\": prediction and full election disagree\n",
+                  seed, i, shown(d.text).c_str());
+    }
     watch(0);
     const bool clean = r.accepted && r.diagnostics.empty();
     if (clean != o.accepted || (clean && r.value == nullptr)) {

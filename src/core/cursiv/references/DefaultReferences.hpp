@@ -1,5 +1,6 @@
 #pragma once
 
+#include <span>
 #include <vector>
 
 #include "cursiv/references/References.hpp"
@@ -19,15 +20,16 @@ class DefaultReferences : public References, protected DefaultCoreService {
       const CancellationToken& cancelToken = kNoCancel) const override;
 
   [[nodiscard]] std::vector<ReferenceDescription> findReferences(
-      const AstNode& target, const FindReferencesOptions& options = {},
+      std::span<const AstNode* const> targets,
+      const FindReferencesOptions& options,
       const CancellationToken& cancelToken = kNoCancel) const override;
 
   ~DefaultReferences() noexcept override = default;
 
  protected:
-  // The logical siblings of a declaration: the whole set of the first multi
-  // reference, in (document, offset) order, that has `node` among its targets,
-  // or `{node}` otherwise.
+  // The group a declaration stands for, the same for each of its members: the
+  // targets of the first multi reference, in (document, offset) order, that
+  // names `node`, or `{node}` otherwise.
   [[nodiscard]] virtual std::vector<const AstNode*> getSelfNodes(
       const AstNode& node, const CancellationToken& cancelToken) const;
 

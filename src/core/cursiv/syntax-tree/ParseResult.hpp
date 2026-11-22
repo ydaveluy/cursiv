@@ -6,7 +6,6 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/syntax-tree/AstArena.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
@@ -14,31 +13,45 @@
 #include "cursiv/syntax-tree/OwnedNodes.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 
-// What one parse left behind: the two trees, the arena that owns the AST, the
+// What one parse left behind: the CST and the AST nodes its pool holds, the
 // references to link, and what the repairs had to do.
 
 namespace cursiv {
 
 struct Grammar;
-namespace engine {
-class AstReducer;
-}
+class ParseResultBuilder;
 
-// The tree is held by pointer so the result can move. Member order is
-// teardown order: the tree outlives every member that lives on its pool.
 class ParseResult {
+ public:
+  struct PropertyOrigin {
+    NodeId record;
+    const AstNode* owner;
+  };
+
+ private:
+  // The tree, where the nodes live on its pool, and every node the builder
+  // created, sorted by `cstNodeId`. Held by pointer so the result can move;
+  // member order is teardown order: the tree outlives what lives on its
+  // pool.
+  struct Tree {
+    explicit Tree(Cst&& tree) : cst(std::move(tree)), nodes(cst._pool.get()) {}
+    Cst cst;
+    std::pmr::vector<AstNode*> nodes;
+    std::vector<PropertyOrigin> origins;
+
+    struct Joined {
+      std::span<char> storage;
+      std::string_view text;
+    };
+
+    // Successive joins may extend the last view into unused space on either side.
+    std::string_view keepText(std::span<const std::string_view> parts, Joined* last = nullptr) const;
+  };
   std::shared_ptr<const Grammar> _grammarOwner;
-  std::unique_ptr<Cst> _cst;  // destroyed after the arena, before its grammar
-  // Where the nodes live, on the tree's pool. The builder is the one writer.
-  detail::AstArena _arena;
-  // Every node the builder created, sorted by `cstNodeId`, beside the records
-  // it indexes. See `nodes()`.
-  std::pmr::vector<AstNode*> _nodes;
+  std::unique_ptr<Tree> _tree;  // destroyed before its grammar
   friend struct Document;
   void destroyNodes() noexcept;
-  // Runs the destructors of `gone`; their memory stays with the pool.
-  static void destroyDetached(std::span<AstNode* const> gone) noexcept;
-  friend class engine::AstReducer;
+  friend class ParseResultBuilder;
 
  public:
   ParseResult();
@@ -50,8 +63,8 @@ class ParseResult {
   // would free the pool it lives on first.
   ParseResult& operator=(ParseResult&& src) noexcept;
 
-  // Const only: `Cst::reset` on a mutable tree would free the buffers the
-  // arena still allocates from.
+  // Const only: `Cst::reset` on a mutable tree would free the pool the AST
+  // nodes live on.
   [[nodiscard]] const Cst& cst() const noexcept;
   // Called by the language parser once the build is over, so readers get the
   // grammar from the tree.
@@ -64,8 +77,8 @@ class ParseResult {
                        std::unique_ptr<SourceTranslation> translation);
 
   AstNode* value = nullptr;
-  // Held by pointer: this result moves, and every reference of the tree
-  // stores the address of what answers it.
+  // What answers the tree's references, null where its language has none.
+  // Held by pointer: this result moves, and every reference stores its address.
   std::unique_ptr<DocumentReferences> references;
   // What the repairs said, then what the conversions added, in one list.
   std::vector<ParseDiagnostic> diagnostics;
@@ -80,10 +93,18 @@ class ParseResult {
     return const_cast<T*>(ast_cast<T>(value));
   }
 
+  // Former records that directly filled an adopted node, in record order.
+  [[nodiscard]] std::span<const PropertyOrigin> propertyOrigins() const noexcept {
+    if (!_tree) return {};
+    return _tree->origins;
+  }
+
   // Every node the builder created, sorted by `cstNodeId`: postorder, so the
   // first hit containing an offset is the innermost. An id is not a key: a
   // wrapper shares its content's record.
-  [[nodiscard]] OwnedNodes nodes() const noexcept { return _nodes; }
+  [[nodiscard]] OwnedNodes nodes() const noexcept {
+    return _tree != nullptr ? OwnedNodes(_tree->nodes) : OwnedNodes();
+  }
 };
 
 }  // namespace cursiv

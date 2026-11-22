@@ -31,7 +31,7 @@ detail::NamedNodes detail::collect_named_nodes(const Document& document,
   std::vector opens(document.parseResult.cst().size(), kNone);
   std::vector rankAt(all.size(), kNone);
   for (std::uint32_t at = 0; at < all.size(); ++at) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     const AstNode* const node = all[at];
     const NodeId record = node->cstNodeId;
     if (record >= opens.size()) continue;
@@ -50,7 +50,7 @@ detail::NamedNodes detail::collect_named_nodes(const Document& document,
   std::vector<std::uint32_t> walked;
   named.owners.reserve(named.nodes.size());
   for (const AstNode* const node : named.nodes) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     std::size_t owner = NamedNodes::kNoOwner;
     walked.clear();
     for (const AstNode* p = node->parent; p != nullptr; p = p->parent) {

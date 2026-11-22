@@ -16,7 +16,7 @@ using namespace cursiv::test;
 void run(Lane& lane) {
   lane.lang = "statemachine";
   const std::unique_ptr<cursiv::Parser> engine =
-      sm::generated::SM::create_parser();
+      sm::generated::SM::createParser();
   {
     const auto seed = document("valid.statemachine");
     const auto before = engine->parse(seed);
@@ -78,7 +78,7 @@ void run(Lane& lane) {
             "07_two_faults.statemachine", "08_head_fault.statemachine",
             "09_list_delim.statemachine", "10_noise.statemachine",
             "11_head_typo.statemachine"});
-  mutation_oracle(*engine, "statemachine", document("valid.statemachine"));
+  mutationOracle(*engine, "statemachine", document("valid.statemachine"));
 }
 }  // namespace
 

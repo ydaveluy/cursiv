@@ -2,11 +2,14 @@
 
 #include <lsp/json/json.h>
 
+#include <atomic>
+#include <cstddef>
 #include <functional>
+#include <iosfwd>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
+#include <unordered_map>
 
 #include "cursiv/utils/Cancellation.hpp"
 
@@ -33,6 +36,7 @@ struct McpToolResult {
   bool isError = false;
 };
 
+// Omitted arguments reach the tool as an empty object.
 using McpToolFunction = std::function<McpToolResult(
     const lsp::json::Value& arguments, const CancellationToken&)>;
 
@@ -55,40 +59,45 @@ class McpServer {
   void registerTool(McpTool tool, McpToolFunction execute);
   void registerResource(McpResource resource, McpResourceFunction read);
 
-  // Appends a paragraph to the guide the handshake gives the model: the
-  // workflow, not the tools, which describe themselves.
+  // Appends a paragraph to the instructions returned by server/discover.
   void addInstructions(std::string_view paragraph);
 
-  // Handles one JSON-RPC message or batch: its response, or nothing for a
-  // notification. Registrations all precede the first message. A request id is
-  // a string or a 32-bit integer.
+  // Handles a message after registration. A transport sharing this server
+  // between clients can supply the version of this request.
   [[nodiscard]] std::optional<lsp::json::Value> handle(
-      lsp::json::Value message, const CancellationToken& = {}) const;
+      lsp::json::Value message, const CancellationToken& = {},
+      std::string_view transportVersion = {}) const;
   // `handle` over serialized text; a parse failure answers as JSON-RPC
   // requires.
   [[nodiscard]] std::optional<std::string> handleText(
       std::string_view text, const CancellationToken& = {}) const;
 
+  // Serves newline-delimited JSON until EOF, draining accepted requests.
+  // Returns false when a response could not be written.
+  [[nodiscard]] bool serveStdio(std::istream& input,
+                                std::ostream& output) const;
+
  private:
-  struct ToolEntry {
-    McpTool tool;
-    McpToolFunction execute;
-  };
-  struct ResourceEntry {
-    McpResource resource;
-    McpResourceFunction read;
+  template <class Handler>
+  struct Entry {
+    lsp::json::Object descriptor;
+    Handler handle;
+    std::size_t order;
   };
 
   std::string _name;
   std::string _version;
   std::string _instructions;
-  std::vector<ToolEntry> _tools;
-  std::vector<ResourceEntry> _resources;
+  // The handshake selects a static version for unversioned messages on this
+  // connection.
+  alignas(std::atomic_ref<const char*>::required_alignment) mutable const
+      char* _negotiated = nullptr;
+  std::unordered_map<std::string, Entry<McpToolFunction>> _tools;
+  std::unordered_map<std::string, Entry<McpResourceFunction>> _resources;
 
-  [[nodiscard]] lsp::json::Value initializeResult(
-      const std::optional<lsp::json::Value>& params) const;
-  [[nodiscard]] lsp::json::Value listTools() const;
-  [[nodiscard]] lsp::json::Value listResources() const;
+  [[nodiscard]] std::optional<lsp::json::Value> handleMessage(
+      const lsp::json::Value& message, const CancellationToken& token,
+      std::string_view wire, bool rememberVersion) const;
 };
 
 }  // namespace cursiv

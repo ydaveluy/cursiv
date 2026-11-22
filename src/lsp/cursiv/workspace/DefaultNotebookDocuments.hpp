@@ -4,6 +4,8 @@
 
 #include <lsp/types.h>
 
+#include <cstddef>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -12,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/utils/TransparentStringHash.hpp"
 #include "cursiv/workspace/NotebookDocuments.hpp"
 
 namespace cursiv {
@@ -39,13 +42,20 @@ class DefaultNotebookDocuments : public NotebookDocuments {
   // Each records what the client sent: an override that reacts calls the base
   // first.
   void didOpen(const lsp::DidOpenNotebookDocumentParams& params) override;
-  void didChange(const lsp::DidChangeNotebookDocumentParams& params) override;
+  bool didChange(const lsp::DidChangeNotebookDocumentParams& params) override;
   void didSave(const lsp::DidSaveNotebookDocumentParams& params) override;
   void didClose(const lsp::DidCloseNotebookDocumentParams& params) override;
 
  private:
-  // The notebook of each cell, by the cell's URI.
-  using CellIndex = std::unordered_map<std::string, std::string>;
+  struct CellLocation {
+    std::string notebook;
+    std::size_t position;
+  };
+  using CellIndex =
+      std::unordered_map<std::string, CellLocation,
+                         detail::TransparentStringHash, std::equal_to<>>;
+  static CellIndex indexOf(const std::string& uri,
+                           const std::vector<lsp::NotebookCell>& cells);
 
   // Moves the notebook `uri` from its `previous` cells to `cells` without
   // allocating: `_cells` already has room. Callers prepare what may fail first,

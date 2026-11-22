@@ -28,18 +28,6 @@ constexpr bool spec_holds(std::string_view spec, char32_t cp) {
   return fault == ClassFault::none && in;
 }
 
-// The scalar a spelling ends in, `kNoScalar` where its last unit is no whole
-// one.
-constexpr char32_t last_scalar(std::string_view s) {
-  std::size_t at = s.size();
-  while (at > 0 && (static_cast<unsigned char>(s[at - 1]) & 0xC0u) == 0x80u)
-    --at;
-  if (at > 0) --at;
-  std::size_t len = 0;
-  const char32_t cp = scalar_at(s.data() + at, s.size() - at, len);
-  return at + len == s.size() ? cp : kNoScalar;
-}
-
 // Whether the class of properties `m` and scalars `spec`, complemented where
 // `n`, holds `cp`.
 constexpr bool class_holds(std::uint64_t m, bool n, std::string_view spec,

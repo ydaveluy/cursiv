@@ -1,6 +1,4 @@
-// A parse written as text to compare: CST records by span, size and flags; the
-// AST by class and member, or by span. No node id: each engine numbers nodes
-// its own way.
+// Compare CST records by span, size and flags, and AST nodes by class and member or span.
 #pragma once
 
 #include <cstdint>
@@ -18,8 +16,8 @@ inline std::string records(const cursiv::Cst& cst) {
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
     const cursiv::CstNode& n = cst[i];
     out += std::to_string(n.begin) + ',' + std::to_string(n.end) + ',' +
-           std::to_string(n.subtreeSize) + ',' + (n.hidden ? 'h' : '.') +
-           (n.recovered ? 'r' : '.') + ';';
+           std::to_string(n.subtreeSize) + ',' + (n.isHidden() ? 'h' : '.') +
+           (n.isRecovered() ? 'r' : '.') + ';';
   }
   return out;
 }

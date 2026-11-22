@@ -95,7 +95,7 @@ class RangeLines {
     const Document& document, const Cst& cst,
     const lsp::FormattingOptions& options,
     const std::optional<RangeLines>& range, FormattingActions& actions,
-    cursiv::function_ref<void(NodeId, std::int32_t, std::string_view)>
+    cursiv::FunctionRef<void(NodeId, std::int32_t, std::string_view)>
         visitHidden,
     const CancellationToken& token);
 

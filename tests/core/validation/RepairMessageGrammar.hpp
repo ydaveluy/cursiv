@@ -24,7 +24,10 @@ struct MessageG : cursiv::GrammarSpec {
   struct ExprRule
       : rule<(ref<Primary> + lit<"+"> + ref<ExprRule>) | ref<Primary>> {};
   struct Choice : rule<create<Sum>(ref<ExprRule> + lit<";">)> {};
-  struct Root : rule<ref<Tight> | ref<Choice>> {};
+  static constexpr auto numbers = some(ref<NUM>, lit<",">);
+  struct Series : rule<create<Sum>(lit<"series:"> +
+      ((kw<"list"> + numbers + lit<";">) | (kw<"tuple"> + numbers + lit<".">)))> {};
+  struct Root : rule<ref<Tight> | ref<Choice> | ref<Series>> {};
   using entry = Root;
   using ignored = WS;
 };

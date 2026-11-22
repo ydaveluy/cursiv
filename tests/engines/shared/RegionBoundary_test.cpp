@@ -9,8 +9,7 @@
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/RegionBoundaryGrammar.hpp"
-#include "regionboundaryll/generated/Ll/Module.hpp"
-#include "regionboundarylr/generated/Lr/Module.hpp"
+#include "regionboundarylr/generated/Suite/Module.hpp"
 
 namespace {
 using tregionboundary::Document;
@@ -106,6 +105,23 @@ void a_called_first_item_keeps_the_callers_gap(const Reading& parser) {
     rejects(parser, source);
 }
 
+// A called rule's last token ends the region when the optional part after it
+// is absent.
+void a_called_last_token_keeps_the_callers_boundary(const Reading& parser) {
+  for (const std::string_view mode :
+       {"called-tail:", "called-many:", "called-unordered:",
+        "called-nullable:"}) {
+    for (const std::string_view text :
+         {"[x].", "[x ].", "[x\n].", "~[x~]~.", "[x!].", "[x! ] ."})
+      accepts(parser, std::string(mode) + std::string(text), 1);
+    accepts(parser, std::string(mode) + "[xx ] .", 2);
+    for (const std::string_view text : {"[x !].", "[x x].", "[ x].", "[x~!]."})
+      rejects(parser, std::string(mode) + std::string(text));
+  }
+  accepts(parser, "called-unordered:[!x ].", 1);
+  rejects(parser, "called-unordered:[! x].");
+}
+
 void a_larger_floor_keeps_the_same_boundaries(const Reading& parser) {
   for (const std::string_view source : {"two:[xx].", "two:[xx ].",
                                        "two:[xx\n].", "two:~[xx~]~."})
@@ -126,7 +142,7 @@ void hidden_trivia_is_kept_only_outside_the_region(const Reading& parser) {
   unsigned notes = 0;
   for (cursiv::NodeId id = 0; id < result.cst().size(); ++id) {
     const auto& node = result.cst()[id];
-    if (node.hidden && node.subtreeSize == 1) {
+    if (node.isHidden() && node.subtreeSize == 1) {
       CHECK(result.cst().text(id) == "~");
       ++notes;
     }
@@ -173,7 +189,7 @@ void distinct_tokens_may_share_a_prefix(const Reading& parser) {
 void a_nest_at_the_head_keeps_the_callers_gap(const Reading& parser) {
   for (const std::string_view source :
        {"nest-head:x.x;", "nest-head:x .x;", "nest-head:x\n.x ;",
-        "nest-head:~x~.x~;"}) {
+        "nest-head:~x~.x~;", "nest-head:x :x;", "nest-head:x~:x;"}) {
     const auto result = parser.parse(source);
     if (!clean(result))
       std::fprintf(stderr, "region boundary [%s]: expected clean %.*s\n",
@@ -183,7 +199,7 @@ void a_nest_at_the_head_keeps_the_callers_gap(const Reading& parser) {
     CHECK(doc && doc->items.size() == 1 && doc->in && doc->in->parent == doc);
     CHECK(result.cst().text() == source);
   }
-  for (const std::string_view source : {"nest-head:x. x;", "nest-head:x.~x;"})
+  for (const std::string_view source : {"nest-head:x. x;", "nest-head:x.~x;", "nest-head:x: x;"})
     rejects(parser, source);
 }
 
@@ -246,6 +262,7 @@ void a_caret_crosses_the_gap_under_each_candidates_alphabet(
   check("many:~xx<|>~].", {"]", "x"});
   check("many:xx ~ <|>].", {"]"});
   check("commit-note:[ ,x ,x ~ <|>;", {";"});
+  check("commit-note:[ ,x ,x ~ ~\n~ <|>;", {";"});
   check("commit-note:[ ,x ,x ~<|>;", {";"});
   check("commit-note:[ ,x ,x <|>~;", {",", ";"});
   check("commit-note:[,x~<|>;", {";"});
@@ -261,24 +278,40 @@ void a_caret_crosses_the_gap_under_each_candidates_alphabet(
   check("skip-not:~~<|>.", {".", "~"});
   check("skip-not:~~~~~~~~~~~~~~~~<|>.", {".", "~"});
   check("skip-not:<|>~~~~~~~~~~~~~~~~x.", {"."});
+  check("skip-not:<|>" + std::string(600, '~') + "x.", {"."});
+  accepts(reading, "skip-nested:~~x.", 1);
+  rejects(reading, "skip-nested:~~y.");
+  check("skip-nested:~~<|>.", {"x"});
   check("skip-rec:a~<|>", {".", "~"});
   check("skip-rec:a~~~~~~~~<|>", {".", "~"});
   check("skip-rec:a~~~~~~~~<|>.", {".", "~"});
   // Each reading asks its conditions of the token its own trivia make.
   accepts(reading, "lines:x<\n ?", 0);
   check("lines:x<<|>\n ?", {"LINES"});
+  check("lines:x<<|>" + std::string(600, '\n') + " ?", {"LINES"});
 }
 
 }  // namespace
 
 int main() {
-  const auto ll = tregionboundary::generated::Ll::create_parser();
-  const auto lr = tregionboundary::generated::Lr::create_parser();
-  for (const Reading parser : {Reading{*ll, "LL"}, Reading{*lr, "LR"}}) {
+  const auto lr = tregionboundary::generated::Suite::createParser();
+  for (const Reading parser : {Reading{*lr, "LR"}}) {
+    accepts(parser, "gap-cache:pa b", 1, "b");
+    accepts(parser, "gap-cache:pa  b", 0);
+    rejects(parser, "gap-cache:pab");
+    accepts(parser, "host:foo$", 0);
+    rejects(parser, "host:foo_");
+    accepts(parser, "section:[foo_]", 0);
+    rejects(parser, "section:[foo$]");
+    const auto typo = parser.parse("section:[fo o_]");
+    CHECK(typo.accepted && typo.diagnostics.size() == 1 &&
+          typo.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced &&
+          typo.diagnostics[0].begin == 9 && typo.diagnostics[0].end == 13);
     required_tail_keeps_the_callers_boundary(parser);
     the_written_closing_token_decides_trivia(parser);
     an_empty_tail_keeps_the_callers_boundary(parser);
     a_called_first_item_keeps_the_callers_gap(parser);
+    a_called_last_token_keeps_the_callers_boundary(parser);
     a_larger_floor_keeps_the_same_boundaries(parser);
     hidden_trivia_is_kept_only_outside_the_region(parser);
     a_long_run_keeps_the_same_boundaries(parser);

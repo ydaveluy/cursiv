@@ -54,8 +54,9 @@ example to attach comments to declarations; `ignored` drops them.
 **Index** — the workspace's exported symbols, used to resolve references
 across documents.
 
-**Keyword** — a literal that must not be followed by a word character:
-`kw<"if">` matches `if` but not the start of `iffy`.
+**Keyword** — a literal declared with `kw<>` or `ikw<>`. A keyword ending
+in a word character requires a word boundary, so `kw<"if">` matches the word
+`if` in `if x` and leaves `iffy` as one identifier.
 
 **Linker** — resolves the name written in a reference against a scope, after
 the parse.

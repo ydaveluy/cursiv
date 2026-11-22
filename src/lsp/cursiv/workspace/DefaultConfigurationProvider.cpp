@@ -50,14 +50,14 @@ std::vector<const cursiv::ValidationCategory*> detail::validation_categories(
     const std::string& spelled = name.string();
     const cursiv::ValidationCategory* found = nullptr;
     // The built-in categories match by name whether or not a check declared
-    // them yet ("fast" always means cursiv's `fast`); the language's own
+    // them yet ("fast" always means cursiv's `kFast`); the language's own
     // categories match through its registry.
-    if (spelled == cursiv::built_in.description) {
-      found = &cursiv::built_in;
-    } else if (spelled == cursiv::fast.description) {
-      found = &cursiv::fast;
-    } else if (spelled == cursiv::slow.description) {
-      found = &cursiv::slow;
+    if (spelled == cursiv::kBuiltIn.description) {
+      found = &cursiv::kBuiltIn;
+    } else if (spelled == cursiv::kFast.description) {
+      found = &cursiv::kFast;
+    } else if (spelled == cursiv::kSlow.description) {
+      found = &cursiv::kSlow;
     } else {
       for (const cursiv::ValidationCategory* category : registry.categories())
         if (category->description != nullptr &&

@@ -27,11 +27,12 @@ std::string TextBuilder::take() {
   return std::exchange(_text, {});
 }
 
+bool TextBuilder::holds(std::string_view text) const noexcept {
+  return std::less_equal<>()(_text.data(), text.data()) &&
+         std::less<>()(text.data(), _text.data() + _text.size());
+}
+
 void TextBuilder::addText(std::string_view text) {
-  // A part may view this builder's own text, which the writes below move.
-  if (std::less_equal<>()(_text.data(), text.data()) &&
-      std::less<>()(text.data(), _text.data() + _text.size()))
-    return addText(std::string(text));
   for (auto end = text.find('\n'); end != std::string_view::npos;
        end = text.find('\n')) {
     startLine();

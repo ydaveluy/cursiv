@@ -40,7 +40,7 @@ class DefaultCompletionProvider : public CompletionProvider {
   virtual void buildContexts(
       const Document& document, const lsp::CompletionParams& params,
       const CancellationToken& cancelToken,
-      function_ref<bool(const CompletionContext&)> visit) const;
+      FunctionRef<bool(const CompletionContext&)> visit) const;
 
   // What may stand at `offset`, where the document's text resumes at `end`.
   virtual void findFeaturesAt(const Document& document, TextOffset offset,
@@ -100,7 +100,7 @@ class DefaultCompletionProvider : public CompletionProvider {
   // visitor returning false stops the walk.
   virtual void visitReferenceCandidates(
       const ReferenceInfo& reference, const CompletionContext& context,
-      function_ref<bool(const AstNodeDescription&)> visitor) const;
+      FunctionRef<bool(const AstNodeDescription&)> visitor) const;
 
   [[nodiscard]] virtual CompletionValueItem createReferenceCompletionItem(
       const AstNodeDescription& candidate, const ReferenceInfo& reference,

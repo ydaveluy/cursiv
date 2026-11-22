@@ -1,8 +1,7 @@
 #pragma once
 
 // Statements whose first token is told apart by a condition that reads two
-// whole terminals past it, the shape a ported grammar's guards take, in the
-// two engines a caret is asked of.
+// whole terminals past it, the shape a ported grammar's guards take.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -38,7 +37,7 @@ struct Unit : cursiv::Extends<cursiv::AstNode> {
   vector<Stmt*> stmts;
 };
 
-struct Base : cursiv::GrammarSpec {
+struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
@@ -74,8 +73,5 @@ struct Base : cursiv::GrammarSpec {
   using ignored = WS;
   using hidden = COMMENT;
 };
-
-struct Ll : Base {};
-struct Lr : Base {};
 
 }  // namespace tcaretphrase

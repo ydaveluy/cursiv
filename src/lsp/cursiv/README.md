@@ -2,7 +2,7 @@
 
 This directory implements Cursiv's Language Server Protocol (LSP) support.
 To add editor support to your language, follow
-[Editor integration](../../../../docs/learn/editor-integration.md).
+[Editor integration](../../../docs/learn/editor-integration.md).
 
 ## Dependency boundary
 

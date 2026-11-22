@@ -3,11 +3,15 @@
 #include <lsp/types.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <functional>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -15,12 +19,9 @@
 #include "cursiv/ExpectationError.hpp"
 #include "cursiv/RangeUtils.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
-#include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/CstNodeView.hpp"
 #include "cursiv/syntax-tree/CstUtils.hpp"
 #include "cursiv/text/LspPosition.hpp"
-#include "cursiv/text/TextRange.hpp"
 #include "cursiv/utils/JsonValue.hpp"
 #include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/workspace/Document.hpp"
@@ -30,105 +31,160 @@ namespace cursiv::test {
 
 namespace {
 
-// The node's own span, or the record that wrote one of its members; a miss
-// here is the caller's mistake, not a filter that matches nothing.
-std::optional<TextRange> anchorOf(const ValidationResult& result,
-                                  const ExpectDiagnosticOptions& options) {
-  const Document& document = *result.document;
+CstNodeView anchorOf(const Document& document,
+                     const ExpectDiagnosticOptions& options) {
   const AstNode& node = *options.node;
-  if (node.cstNodeId == kNoNode || document.parseResult.value == nullptr)
-    return std::nullopt;
-  const Cst& cst = document.parseResult.cst();
-  if (!options.property.has_value()) {
-    const CstNode& own = cst[node.cstNodeId];
-    return TextRange{own.begin, own.end};
-  }
-  const CstNodeView at = find_node_for_property(
-      node, *options.property, options.propertyIndex.value_or(0), &document);
-  if (!at) return std::nullopt;
-  return TextRange{at.begin(), at.end()};
+  if (node.getDocument() != &document) return {};
+  if (!options.property) return cstNodeOf(node, &document);
+  const auto index = options.propertyIndex.value_or(0);
+  if (index == 0)
+    return findNodeForProperty(node, *options.property, 0, &document);
+  const auto sites =
+      findNodesForProperty(node, *options.property, &document);
+  return index < sites.size() ? sites[index] : CstNodeView{};
+}
+
+bool sameNumber(const JsonValue& lhs, const JsonValue& rhs) {
+  if (!lhs.isNumber()) return false;
+  if (lhs.isInteger() && rhs.isInteger()) return lhs.integer() == rhs.integer();
+  if (!lhs.isInteger() && !rhs.isInteger()) return lhs.number() == rhs.number();
+  const auto integer = lhs.isInteger() ? lhs.integer() : rhs.integer();
+  const double decimal = lhs.isInteger() ? rhs.number() : lhs.number();
+  return decimal >= -0x1p63 && decimal < 0x1p63 &&
+         std::trunc(decimal) == decimal &&
+         static_cast<std::int64_t>(decimal) == integer;
 }
 
 }  // namespace
 
 bool isDiagnosticDataEqual(const JsonValue& lhs, const JsonValue& rhs) {
-  if (lhs.isObject() && rhs.isObject())
-    return std::ranges::all_of(rhs.object(), [&lhs](const auto& entry) {
-      const auto at = lhs.object().find(entry.first);
-      return at != lhs.object().end() &&
-             isDiagnosticDataEqual(at->second, entry.second);
-    });
-  // An array is read the same way, by position: each element `rhs` gives must
-  // match the one `lhs` holds at that place.
-  if (lhs.isArray() && rhs.isArray()) {
-    const JsonValue::Array& held = lhs.array();
-    const JsonValue::Array& asked = rhs.array();
-    if (asked.size() > held.size()) return false;
-    for (std::size_t i = 0; i < asked.size(); ++i)
-      if (!isDiagnosticDataEqual(held[i], asked[i])) return false;
-    return true;
+  std::vector<std::pair<const JsonValue*, const JsonValue*>> pending;
+  const JsonValue* held = &lhs;
+  const JsonValue* wanted = &rhs;
+  for (;;) {
+    if (wanted->isObject()) {
+      if (!held->isObject()) return false;
+      for (const auto& [key, value] : wanted->object()) {
+        const auto at = held->object().find(key);
+        if (at == held->object().end()) return false;
+        pending.emplace_back(&at->second, &value);
+      }
+    } else if (wanted->isArray()) {
+      if (!held->isArray() || wanted->array().size() > held->array().size())
+        return false;
+      for (std::size_t i = wanted->array().size(); i > 0; --i)
+        pending.emplace_back(&held->array()[i - 1], &wanted->array()[i - 1]);
+    } else if (wanted->isString()) {
+      if (!held->isString() || held->string() != wanted->string()) return false;
+    } else if (wanted->isNumber()) {
+      if (!sameNumber(*held, *wanted)) return false;
+    } else if (wanted->isBoolean()) {
+      if (!held->isBoolean() || held->boolean() != wanted->boolean())
+        return false;
+    } else if (!held->isNull()) {
+      return false;
+    }
+    if (pending.empty()) return true;
+    std::tie(held, wanted) = pending.back();
+    pending.pop_back();
   }
-  // The serialization is deterministic, which makes it the deep comparison.
-  return lhs.toJsonString() == rhs.toJsonString();
 }
+
+namespace {
+
+auto matchingDiagnostics(const Document& document,
+                         std::span<const Diagnostic> diagnostics,
+                         const ExpectDiagnosticOptions& options) {
+  const TextDocument& text = document.textDocument();
+  if (options.property && !options.node)
+    throw ExpectationError("a property filter requires a node");
+  if (options.propertyIndex && !options.property)
+    throw ExpectationError("a property index requires a property");
+  if (options.length && !options.offset)
+    throw ExpectationError("a diagnostic length requires an offset");
+  CstNodeView anchor;
+  if (options.node) {
+    anchor = anchorOf(document, options);
+    if (!anchor)
+      throw ExpectationError(
+          "cannot find the requested node or property in the document");
+  }
+
+  const auto matches = [anchor, &text, &options](const Diagnostic& d) {
+    if (anchor &&
+        (d.range.begin != anchor.begin() || d.range.end != anchor.end()))
+      return false;
+    if (options.offset &&
+        (d.range.begin != *options.offset || d.range.end < d.range.begin ||
+         d.range.end - d.range.begin != options.length))
+      return false;
+    if (options.range.has_value() &&
+        !isRangeEqual(*options.range,
+                      toLsp(text.rangeAt(d.range.begin, d.range.end))))
+      return false;
+    if (options.source && d.source != *options.source) return false;
+    if (options.tags && !std::ranges::is_permutation(d.tags, *options.tags))
+      return false;
+    if (options.code.has_value() && d.code != options.code) return false;
+    if (options.data.has_value() &&
+        !(d.data.has_value() && isDiagnosticDataEqual(*d.data, *options.data)))
+      return false;
+    if (options.message.has_value() && d.message != *options.message)
+      return false;
+    if (options.messageMatches && !options.messageMatches(d.message))
+      return false;
+    if (options.severity.has_value() && d.severity != *options.severity)
+      return false;
+    return true;
+  };
+  return diagnostics | std::views::filter(matches);
+}
+
+}  // namespace
 
 std::vector<Diagnostic> filterByOptions(
     const ValidationResult& validationResult,
     const ExpectDiagnosticOptions& options) {
-  const TextDocument& text = validationResult.document->textDocument();
-  const auto rangeOf = [&text](const Diagnostic& d) {
-    return to_lsp(text.rangeAt(d.range.begin, d.range.end));
-  };
-
-  std::optional<lsp::Range> anchor;
-  if (options.node != nullptr) {
-    const std::optional<TextRange> span = anchorOf(validationResult, options);
-    if (!span.has_value())
-      throw ExpectationError("cursiv: cannot find the node!");
-    anchor = to_lsp(text.rangeAt(span->begin, span->end));
-  }
-
-  std::optional<lsp::Range> outer;
-  if (options.offset.has_value())
-    outer =
-        to_lsp(text.rangeAt(*options.offset, *options.offset + options.length));
-
-  std::vector<Diagnostic> kept;
-  for (const Diagnostic& d : validationResult.diagnostics) {
-    if (anchor.has_value() && !isRangeEqual(*anchor, rangeOf(d))) continue;
-    if (outer.has_value() && !isRangeEqual(*outer, rangeOf(d))) continue;
-    if (options.range.has_value() && !isRangeEqual(*options.range, rangeOf(d)))
-      continue;
-    if (options.code.has_value() && d.code != options.code) continue;
-    if (options.data.has_value() &&
-        !(d.data.has_value() && isDiagnosticDataEqual(*d.data, *options.data)))
-      continue;
-    if (options.message.has_value() && d.message != *options.message) continue;
-    if (options.messageMatches && !options.messageMatches(d.message)) continue;
-    if (options.severity.has_value() && d.severity != *options.severity)
-      continue;
-    kept.push_back(d);
-  }
-  return kept;
+  std::vector<Diagnostic> matched;
+  for (const auto& d : matchingDiagnostics(
+           *validationResult.document, validationResult.diagnostics, options))
+    matched.push_back(d);
+  return matched;
 }
 
-void expectNoIssues(const ValidationResult& validationResult,
-                    const ExpectDiagnosticOptions& filterOptions) {
-  const std::vector<Diagnostic> filtered =
-      filterByOptions(validationResult, filterOptions);
-  expectedFunction(std::to_string(filtered.size()), "0",
-                   "expected no issues in '" + validationResult.document->uri +
-                       "', but found " + std::to_string(filtered.size()) +
-                       ":\n" + printDiagnostics(filtered));
+namespace {
+void check_issues(const Document& doc, std::span<const Diagnostic> diagnostics,
+                  const ExpectDiagnosticOptions& options, bool wantIssue) {
+  auto matched = matchingDiagnostics(doc, diagnostics, options);
+  if (wantIssue) {
+    expectedFunction(matched.empty() ? "false" : "true", "true",
+                     "found no issues in '" + doc.uri + "'");
+    return;
+  }
+  std::string report;
+  std::size_t count = 0;
+  for (const Diagnostic& d : matched) {
+    ++count;
+    report += '\n' + printDiagnostics({&d, 1});
+  }
+  expectedFunction(std::to_string(count), "0",
+                   "unexpected diagnostics in '" + doc.uri + "'" + report);
 }
-
-void expectIssue(const ValidationResult& validationResult,
-                 const ExpectDiagnosticOptions& filterOptions) {
-  const std::vector<Diagnostic> filtered =
-      filterByOptions(validationResult, filterOptions);
-  expectedFunction(
-      filtered.empty() ? "false" : "true", "true",
-      "found no issues in '" + validationResult.document->uri + "'");
+}  // namespace
+void expectNoIssues(const ValidationResult& result,
+                    const ExpectDiagnosticOptions& options) {
+  check_issues(*result.document, result.diagnostics, options, false);
+}
+void expectIssue(const ValidationResult& result,
+                 const ExpectDiagnosticOptions& options) {
+  check_issues(*result.document, result.diagnostics, options, true);
+}
+void expectNoIssues(const Document& doc,
+                    const ExpectDiagnosticOptions& options) {
+  check_issues(doc, doc.diagnostics, options, false);
+}
+void expectIssue(const Document& doc, const ExpectDiagnosticOptions& options) {
+  check_issues(doc, doc.diagnostics, options, true);
 }
 
 namespace {
@@ -152,7 +208,9 @@ ExpectDiagnosticOptions withFilters(
                                  .data = filterOptions.data,
                                  .node = filterOptions.node,
                                  .property = filterOptions.property,
-                                 .propertyIndex = filterOptions.propertyIndex};
+                                 .propertyIndex = filterOptions.propertyIndex,
+                                 .source = filterOptions.source,
+                                 .tags = filterOptions.tags};
 }
 
 }  // namespace

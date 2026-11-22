@@ -7,8 +7,7 @@
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/RegionBoundaryGrammar.hpp"
-#include "regionboundaryll/generated/Ll/Module.hpp"
-#include "regionboundarylr/generated/Lr/Module.hpp"
+#include "regionboundarylr/generated/Suite/Module.hpp"
 
 namespace {
 struct Reading {
@@ -54,7 +53,7 @@ void accepts(const Reading& reading, std::string_view source,
   std::vector<cursiv::TextOffset> actual;
   for (cursiv::NodeId id = 0; id < result.cst().size(); ++id) {
     const auto& node = result.cst()[id];
-    if (node.hidden && node.subtreeSize == 1) {
+    if (node.isHidden() && node.subtreeSize == 1) {
       CHECK(result.cst().text(id) == "~");
       CHECK(node.end == node.begin + 1);
       actual.push_back(node.begin);
@@ -152,9 +151,8 @@ void completion_respects_the_committed_gap(const Reading& reading) {
 }  // namespace
 
 int main() {
-  const auto ll = tregionboundary::generated::Ll::create_parser();
-  const auto lr = tregionboundary::generated::Lr::create_parser();
-  for (const Reading reading : {Reading{*ll, "LL"}, Reading{*lr, "LR"}}) {
+  const auto lr = tregionboundary::generated::Suite::createParser();
+  for (const Reading reading : {Reading{*lr, "LR"}}) {
     owning_a_record_preserves_the_consuming_gap(reading);
     the_first_item_keeps_the_callers_gap(reading);
     completion_respects_the_committed_gap(reading);

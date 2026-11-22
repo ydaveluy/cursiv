@@ -58,37 +58,80 @@ DomainModelValidator::~DomainModelValidator() noexcept {
     shared.documentBuilder->removeDocumentUpdateListener(*this);
 }
 
-void DomainModelValidator::noteDependency(cursiv::DocumentId from,
-                                          cursiv::DocumentId through) const {
-  const std::scoped_lock lock(_dependenciesMutex);
-  _dependencies[from].insert(through);
+std::optional<bool> DomainModelValidator::noteStep(
+    const ast::Entity& from, const ast::Entity& to) const {
+  const cursiv::Document* const left = from.getDocument();
+  const cursiv::Document* const entered = to.getDocument();
+  if (left == nullptr || entered == nullptr) return std::nullopt;
+  const Step source{.document = left->id, .entity = &from};
+  const Step target{.document = entered->id, .entity = &to};
+  const std::scoped_lock lock(_stepsMutex);
+  Walked& onward = _steps[target];
+  if (Walked& here = _steps[source]; here.next != target) {
+    onward.from.push_back(source);
+    here.next = target;
+  }
+  return onward.ends;
 }
 
-// A validated document whose walks went through a document now gone or
-// unlinked goes back to validation. Any other entry is dropped until the
-// document's next validation.
+void DomainModelValidator::noteEnds(const ast::Entity& start,
+                                    std::span<const ast::Entity* const> entered,
+                                    bool ends) const {
+  const std::scoped_lock lock(_stepsMutex);
+  const auto mark = [this, ends](const ast::Entity& entity) {
+    if (const cursiv::Document* const document = entity.getDocument())
+      if (const auto found = _steps.find({document->id, &entity});
+          found != _steps.end())
+        found->second.ends = ends;
+  };
+  mark(start);
+  for (const ast::Entity* const entity : entered) mark(*entity);
+}
+
+// Forgets every answer, and drops the steps of documents now gone or unlinked
+// with every step whose walk went on through one of them. A validated document
+// that loses a step goes back to validation.
 void DomainModelValidator::onUpdate(std::span<const std::string_view>,
                                     std::span<const std::string_view>) {
   const cursiv::Documents& store = *shared.documents;
-  const auto moved = [&store](cursiv::DocumentId id) {
-    const std::shared_ptr<cursiv::Document> document = store.getDocument(id);
-    return document == nullptr
-           || document->state.load() < cursiv::DocumentState::IndexedReferences;
-  };
-  const std::scoped_lock lock(_dependenciesMutex);
-  for (auto at = _dependencies.begin(); at != _dependencies.end();) {
+  const std::scoped_lock lock(_stepsMutex);
+  std::vector<Step> pending;
+  for (auto& [step, walked] : _steps) {
+    walked.ends.reset();
+    if (const std::shared_ptr<cursiv::Document> document =
+            store.getDocument(step.document);
+        document == nullptr
+        || document->state.load() < cursiv::DocumentState::IndexedReferences)
+      pending.push_back(step);
+  }
+  if (pending.empty()) return;
+  std::unordered_set<Step, StepHash> reached(pending.begin(), pending.end());
+  while (!pending.empty()) {
+    const auto found = _steps.find(pending.back());
+    pending.pop_back();
+    if (found == _steps.end()) continue;
+    for (const Step& from : found->second.from)
+      if (reached.insert(from).second) pending.push_back(from);
+  }
+  std::unordered_set<cursiv::DocumentId> sent;
+  for (const Step& step : reached) {
+    if (!sent.insert(step.document).second) continue;
     const std::shared_ptr<cursiv::Document> document =
-        store.getDocument(at->first);
+        store.getDocument(step.document);
     if (document != nullptr
-        && document->state.load() == cursiv::DocumentState::Validated) {
-      if (std::ranges::none_of(at->second, moved)) {
-        ++at;
-        continue;
-      }
+        && document->state.load() == cursiv::DocumentState::Validated)
       shared.documentBuilder->resetToState(
           *document, cursiv::DocumentState::IndexedReferences);
+  }
+  for (auto at = _steps.begin(); at != _steps.end();) {
+    if (reached.contains(at->first)) {
+      at = _steps.erase(at);
+      continue;
     }
-    at = _dependencies.erase(at);
+    std::erase_if(at->second.from, [&reached](const Step& from) {
+      return reached.contains(from);
+    });
+    ++at;
   }
 }
 
@@ -143,25 +186,32 @@ DomainModelValidator::Exit DomainModelValidator::exitOf(
 }
 
 // From one document to the next: a walk that enters an entity twice loops.
-// Each document it enters is noted, since the result depends on it.
+// Each step into another document is noted, and the answer is noted for every
+// entity entered, so a later walk stops at the first one answered.
 void DomainModelValidator::checkEntityDoesNotExtendItself(
     const ast::Entity& entity, cursiv::ValidationAcceptor& accept) const {
-  const cursiv::Document* const entityDocument = entity.getDocument();
   Passed entered;
+  bool ends = false;
   for (const ast::Entity* at = &entity;;) {
     const Exit exit = exitOf(*at);
-    if (exit.ends) return;
-    if (exit.next == nullptr || exit.next == &entity
-        || entered.contains(exit.next))
+    if (exit.ends) {
+      ends = true;
       break;
-    if (const cursiv::Document* const next = exit.next->getDocument();
-        entityDocument != nullptr && next != nullptr && next != entityDocument)
-      noteDependency(entityDocument->id, next->id);
+    }
+    if (exit.next == nullptr) break;
+    const std::optional<bool> known = noteStep(*at, *exit.next);
+    if (exit.next == &entity || entered.contains(exit.next)) break;
     entered.add(exit.next);
+    if (known) {
+      ends = *known;
+      break;
+    }
     at = exit.next;
   }
-  accept.error(entity, "Entity extends itself, directly or through a cycle.")
-      .property<&ast::Entity::superType>();
+  if (!entered.all().empty()) noteEnds(entity, entered.all(), ends);
+  if (!ends)
+    accept.error(entity, "Entity extends itself, directly or through a cycle.")
+        .property<&ast::Entity::superType>();
 }
 
 }  // namespace dm

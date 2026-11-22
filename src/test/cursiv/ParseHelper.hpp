@@ -8,6 +8,7 @@
 #include <string>
 
 #include "cursiv/ParseHelperOptions.hpp"
+#include "cursiv/utils/Cancellation.hpp"
 
 namespace cursiv {
 struct CoreServices;
@@ -32,4 +33,10 @@ void clearDocuments(const SharedCoreServices& shared,
 void clearDocuments(const CoreServices& services,
                     std::span<const std::shared_ptr<Document>> documents = {});
 
+namespace detail {
+void build_documents(const SharedCoreServices& shared,
+                     std::span<const std::shared_ptr<Document>> documents,
+                     const BuildOptions& options,
+                     const CancellationToken& cancel);
+}
 }  // namespace cursiv::test

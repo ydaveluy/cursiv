@@ -1,6 +1,6 @@
 // Surplus optional clauses use auxiliaries while preserving the values and
-// order of the distributed body, without moving end assertions and without
-// adding conflicts where a clause opens on the keyword that may follow it.
+// order of the distributed body, without moving end assertions, including where
+// a clause opens on the keyword that may follow it.
 
 #include <cstdio>
 #include <memory>
@@ -13,7 +13,6 @@
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
 #include "optionals/generated/OptionalsG/Module.hpp"
-#include "optionals/generated/OptionalsG/Table.hpp"
 #include "torture/OptionalsGrammar.hpp"
 
 namespace {
@@ -166,11 +165,7 @@ void entangled(const cursiv::Parser& parser) {
 }  // namespace
 
 void torture_optionals() {
-  // Every conflict comes from the entangled suffix: auxiliaries add none, and
-  // the other shapes stay deterministic.
-  CHECK(g::kTable.nconflicts <= 22);
-
-  const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
+  const std::unique_ptr<cursiv::Parser> parser = g::createParser();
   optionals(*parser);
   separated(*parser);
   entangled(*parser);

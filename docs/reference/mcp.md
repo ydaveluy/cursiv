@@ -15,7 +15,10 @@ server on standard input and output. It reads the saved files in `<dir>`, or
 in the current directory without `--folder`, as they are when it starts:
 restart it to see later changes on disk.
 
-Request ids are strings or integers that fit in 32 bits.
+Cursiv supports MCP `2026-07-28` with `server/discover`. Clients using
+`initialize` can select `2025-11-25`, `2025-06-18`, `2025-03-26` or
+`2024-11-05`. Use stdio for `2024-11-05`. The editor bridge uses
+Streamable HTTP.
 
 ## Available tools
 
@@ -37,8 +40,9 @@ Request ids are strings or integers that fit in 32 bits.
 | `scope-candidates` | the declarations each reference at a position could resolve to |
 | `format` | the formatted document text; needs an installed formatter |
 
-None of these tools saves text or applies edits. Each grammar is also a text
-resource at `cursiv://grammar/<languageId>`.
+Each grammar is also a text resource. Use the URI returned by `languages` or
+`resources/list`. For example, the ID `my language` gives
+`cursiv://grammar/my%20language`. The tools leave workspace files untouched.
 
 ## Select a language or document
 
@@ -47,8 +51,9 @@ resource at `cursiv://grammar/<languageId>`.
 It needs one of the two even when only one language is registered. With both,
 `languageId` selects the language and `file` names the document. While
 `validate` runs, its text is part of the workspace, so other requests can see
-its declarations. The other tools take the `file` path or URI of a document
-in the workspace.
+its declarations. Document tools such as `hover` take the `file` path or URI
+of a workspace document. Use `documents` to find its URI and `symbols` to
+search exported names across files.
 
 Positions use **1-based lines and columns**, with columns in UTF-16 code
 units; ranges exclude their end.
@@ -88,42 +93,42 @@ void install_mcp_service(cursiv::SharedLspServices& sharedServices) {
 }
 ```
 
-A tool about one document can call `route_document_tool` from
+A tool about one document can call `routeDocumentTool` from
 `cursiv/McpToolKit.hpp`. It runs your function once the document reaches a
 `DocumentState`, or once the whole workspace does when you pass a
-`WorkspaceState` such as `WorkspaceState::IndexedReferences`, which a tool
+`WorkspaceState` such as `WorkspaceState::kIndexedReferences`, which a tool
 that reads references needs.
 
 The same header helps you describe a tool's arguments and read them:
 
 | Helper | Result |
 |---|---|
-| `tool_property(type, description)` | One property of an input schema, such as `tool_property("string", "the rule's name")` |
-| `tool_object_schema(properties, required)` | An object schema for `inputSchema`; the names in `required` are mandatory |
-| `tool_position_schema()` | The input schema of a position: `file`, `line` and `column`, all required; lines and columns count from 1, columns in UTF-16 units |
-| `tool_argument(arguments, key)` | The argument named `key`, or `nullptr` if the call does not pass it |
-| `tool_file_uri(file)` | A `file://` URI for a path; a URI is returned as is |
-| `tool_position(arguments)` | The `McpToolPosition` the arguments name: its URI, and its line and column from 0. A missing or bad argument throws, and the call answers an error the model reads |
-| `append_tool_position(out, document, offset)` | Appends the `line:column` of an offset, from 1, as the built-in tools write it |
+| `toolProperty(type, description)` | One property of an input schema, such as `toolProperty("string", "the rule's name")` |
+| `toolObjectSchema(properties, required)` | An object schema for `inputSchema`; the names in `required` are mandatory |
+| `toolPositionSchema()` | The input schema of a position: `file`, `line` and `column`, all required; lines and columns count from 1, columns in UTF-16 units |
+| `toolArgument(arguments, key)` | The argument named `key`, or `nullptr` if the call does not pass it |
+| `toolFileUri(file)` | A `file://` URI for a path; a URI is returned as is |
+| `toolPosition(arguments)` | The `McpToolPosition` the arguments name: its URI, and its line and column from 0. A missing or bad argument throws, and the call answers an error the model reads |
+| `appendToolPosition(out, document, offset)` | Appends the `line:column` of an offset, from 1, as the built-in tools write it |
 
 ```cpp
 lsp::json::Object properties;
 properties["file"] =
-    cursiv::tool_property("string", "path or file:// uri of the document");
+    cursiv::toolProperty("string", "path or file:// uri of the document");
 lsp::json::Array required;
 required.emplace_back(lsp::json::String("file"));
 server->registerTool(
     {.name = "byte-count",
      .description = "How many bytes a document holds.",
-     .inputSchema = cursiv::tool_object_schema(std::move(properties),
+     .inputSchema = cursiv::toolObjectSchema(std::move(properties),
                                                std::move(required))},
-    [&shared = _shared](const lsp::json::Value& arguments,
+    [&shared = sharedServices](const lsp::json::Value& arguments,
                         const cursiv::CancellationToken& token) {
-      const lsp::json::Value* file = cursiv::tool_argument(arguments, "file");
+      const lsp::json::Value* file = cursiv::toolArgument(arguments, "file");
       if (file == nullptr || !file->isString())
         return cursiv::McpToolResult{"'file' names the document", true};
-      return cursiv::route_document_tool(
-          shared, cursiv::tool_file_uri(file->string()),
+      return cursiv::routeDocumentTool(
+          shared, cursiv::toolFileUri(file->string()),
           cursiv::DocumentState::Parsed, token,
           [](const cursiv::Document& document, const cursiv::CoreServices&,
              std::string& out) {
@@ -137,6 +142,6 @@ Call `install_mcp_service` from the function that registers your languages
 starts. A core-only application derives from `DefaultMcpService`, which has
 the same tools except `format`.
 
-Each tool name and resource URI can be registered once: registering it again
-throws `std::invalid_argument`. To replace or remove a standard tool,
-override the method that registers it, such as `registerRenameTool`.
+Give each tool a unique name and each resource a unique URI. To replace or
+remove a standard tool, override its registration method, such as
+`registerRenameTool`.

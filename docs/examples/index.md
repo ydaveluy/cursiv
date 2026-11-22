@@ -39,9 +39,9 @@ to try an example in VS Code.
 
 ## Adapt an example
 
-In `src/<example>/core/`, read `*Grammar.hpp` and `ast.hpp` first: they
-define the syntax and the AST it builds. Then read the validation, scoping or
-formatting service you need.
+Start with `examples/<example>/src/core/<example>/`. Its `*Grammar.hpp` and
+`ast.hpp` define the syntax and the tree it builds. Formatters and other
+editor providers live under `src/lsp/<example>/` in the same example.
 
 To start your own project, see [Create a project](../learn/scaffold.md). To
 extend another grammar, see

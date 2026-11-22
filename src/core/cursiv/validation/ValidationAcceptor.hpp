@@ -222,13 +222,18 @@ class ValidationAcceptor {
  public:
   // The collector must outlive the acceptor. Diagnostics move by rvalue through
   // every arm, as one is hundreds of bytes.
-  using Sink = cursiv::function_ref<void(Diagnostic&&)>;
+  using Sink = cursiv::FunctionRef<void(Diagnostic&&)>;
 
   // Precondition: `document` keeps its `ParseResult` for the acceptor's life,
   // which the validating phase guarantees. On a tree that names no grammar the
   // `.property`/`.keyword` anchors degrade to the node's span.
   ValidationAcceptor(Sink sink, const Document& document,
                      std::string_view source) noexcept;
+  // Both destinations must outlive the acceptor. The sink places individual
+  // diagnostics in emission order with the completed batches in this vector.
+  ValidationAcceptor(Sink sink, const Document& document, std::string_view source,
+                     std::vector<std::vector<Diagnostic>>& batches) noexcept
+      : ValidationAcceptor(sink, document, source) { _runs = &batches; }
 
   // A diagnostic of any severity, as a builder. The four arms below are its
   // shorthands; the last argument sets the code.
@@ -398,6 +403,10 @@ class ValidationAcceptor {
   void accept(TextRange span, DiagnosticSeverity severity,
               std::string_view message, std::string_view code = {}) const;
   void accept(Diagnostic&& diagnostic) const;
+  // Consumes diagnostics already emitted by worker acceptors, preserving
+  // their source and batch order.
+  void acceptBatches(std::vector<std::vector<Diagnostic>> batches) const;
+  [[nodiscard]] std::string_view source() const noexcept { return _source; }
 
   // Rethrows the error that lost a diagnostic, if any. Call it after the
   // checks: a builder emits from its destructor, which cannot throw.
@@ -432,8 +441,8 @@ class ValidationAcceptor {
   std::optional<TextRange> anchorSpan(const AstNode& node,
                                      std::string_view name, std::size_t index,
                                      bool keyword) const noexcept;
-  // The CST a node was read into, null where it was read into none.
-  const Cst* cstOf(const AstNode& node) const noexcept;
+  // The document a node was read into, null where it was read into none.
+  const Document* documentOf(const AstNode& node) const noexcept;
 
   Sink _sink;
   const Document* _document;
@@ -447,6 +456,9 @@ class ValidationAcceptor {
   mutable std::vector<Anchor> _anchors;
   // The first error that lost a diagnostic.
   mutable std::exception_ptr _lost;
+
+  // The default collector adopts completed runs in emission order.
+  std::vector<std::vector<Diagnostic>>* _runs = nullptr;
 };
 
 // Builder bodies that need the acceptor's surface.

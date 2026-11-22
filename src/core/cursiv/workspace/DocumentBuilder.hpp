@@ -45,6 +45,9 @@ class DocumentPhaseListener {
   virtual ~DocumentPhaseListener() noexcept = default;
   virtual void onDocumentPhase(Document& document, DocumentState reached,
                                const CancellationToken&) = 0;
+  // Delivered before the workspace publishes its diagnostics, even with
+  // validation disabled.
+  virtual void onDocumentBuildFailed(const Document&) {}
 };
 
 // What an update changes: the documents it names, and those the builder sends
@@ -88,7 +91,7 @@ class DocumentBuilder {
                       std::span<const std::string_view> deleted,
                       const CancellationToken& = {}) = 0;
 
-  // What an update asks of every document it builds: `built_in` and `fast`
+  // What an update asks of every document it builds: `kBuiltIn` and `kFast`
   // unless set otherwise here. A request a cancelled build left unfinished is
   // finished first.
   [[nodiscard]] virtual BuildOptions& updateBuildOptions() noexcept = 0;
@@ -100,9 +103,9 @@ class DocumentBuilder {
   // first. Throws `std::logic_error` once its write has built.
   virtual void resetToState(Document&, DocumentState) = 0;
 
-  // Waits for a state, not a build; `Unreachable` when the document cannot get
-  // there. A cancelled build answers nothing, so pass a token when no further
-  // build may come.
+  // A document wait returns `BuildFailed` if a service failed before the
+  // requested state, or `Unreachable` if the build skipped it. A cancelled
+  // build leaves the wait pending until another build or the caller's token.
   [[nodiscard]] virtual WaitOutcome waitUntil(
       DocumentState, const CancellationToken& = {}) const = 0;
   [[nodiscard]] virtual WaitOutcome waitUntil(

@@ -39,9 +39,9 @@ Services& add_language(Shared& shared, cursiv::LanguageMetaData meta,
   language->parser = std::move(parser);
   language->astReflection = std::move(reflection);
   if constexpr (std::is_base_of_v<cursiv::LspServices, Services>)
-    cursiv::install_default_lsp_services(*language);
+    cursiv::installDefaultLspServices(*language);
   else
-    cursiv::install_default_core_services(*language);
+    cursiv::installDefaultCoreServices(*language);
   if (tweak) tweak(*language);
   Services& added = *language;
   shared.serviceRegistry->registerServices(std::move(language));
@@ -128,9 +128,9 @@ struct World {
 
   World() {
     if constexpr (std::is_base_of_v<cursiv::SharedLspServices, Shared>)
-      cursiv::install_default_shared_lsp_services(shared);
+      cursiv::installDefaultSharedLspServices(shared);
     else
-      cursiv::install_default_shared_core_services(shared);
+      cursiv::installDefaultSharedCoreServices(shared);
   }
 
   cursiv::Document* add(std::string_view uri, std::string text) const {

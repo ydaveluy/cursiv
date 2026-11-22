@@ -13,8 +13,8 @@ void StateMachineValidator::checkStateNameStartsWithCapital(
     const ast::State& state, cursiv::ValidationAcceptor& accept) const {
   if (!state.name.empty() && state.name.front() >= 'a'
       && state.name.front() <= 'z')
-    accept.warning(state, "State name should start with a capital letter.")
-        .property<&ast::State::name>();
+    accept.warning(accept.spanOfName(state.name, state),
+                   "State name should start with a capital letter.");
 }
 
 // One table over both families: a state and an event with the same name
@@ -26,7 +26,7 @@ void StateMachineValidator::checkUniqueStatesAndEvents(
                           std::string_view name) {
     const std::string message =
         "Duplicate identifier name: " + std::string(name);
-    if (symbol.type == &cursiv::ast_type_tag<ast::State>)
+    if (symbol.type == &cursiv::kAstTypeTag<ast::State>)
       accept.error(static_cast<const ast::State&>(symbol), message)
           .property<&ast::State::name>();
     else
@@ -64,7 +64,7 @@ void StateMachineValidator::checkNamesAreNotKeywords(
       "state",        "actions", "end"};
   const auto isKeyword = [](std::string_view name) {
     return std::ranges::any_of(kKeywords, [name](std::string_view keyword) {
-      return cursiv::folded_equal(name, keyword);
+      return cursiv::foldedEqual(name, keyword);
     });
   };
   const auto message = [](std::string_view name) {

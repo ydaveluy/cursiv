@@ -95,7 +95,7 @@ struct Diagnostic {
 inline constexpr std::string_view kDataCode = "code";
 
 // The code `data` carries, empty where it carries none.
-[[nodiscard]] inline std::string_view data_code(const Diagnostic& d) {
+[[nodiscard]] inline std::string_view dataCode(const Diagnostic& d) {
   if (!d.data.has_value() || !d.data->isObject()) return {};
   const auto at = d.data->object().find(std::string(kDataCode));
   return at != d.data->object().end() && at->second.isString()
@@ -104,7 +104,7 @@ inline constexpr std::string_view kDataCode = "code";
 }
 
 // Adds it to what `data` already holds.
-inline void set_data_code(Diagnostic& d, std::string_view code) {
+inline void setDataCode(Diagnostic& d, std::string_view code) {
   if (!d.data.has_value() || !d.data->isObject())
     d.data = JsonValue(JsonValue::Object{});
   d.data->object().insert_or_assign(std::string(kDataCode), std::string(code));

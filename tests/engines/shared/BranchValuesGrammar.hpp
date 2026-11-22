@@ -1,5 +1,4 @@
-// One boolean three ways: a terminal whose alternatives give constants, a data
-// rule that gives the same, and the same words in place, competing with names.
+// Documented, plain and inline boolean alternatives compete with identifiers.
 // Beside them, `as` converts the text or the parts of what it reads.
 #pragma once
 
@@ -42,16 +41,16 @@ inline constexpr auto text_length = [](std::string_view t) {
 struct Suite : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
-  // One boolean, written as a terminal and as a data rule.
-  struct BOOL : terminal<as<true>(ikw<"TRUE">) | as<false>(ikw<"FALSE">)> {};
+  static constexpr auto on = ikw<"TRUE">.doc<"Enables the feature.">();
+  struct DocumentedBool : rule<as<true>(on) | as<false>(ikw<"FALSE">)> {};
   struct Bool : rule<as<true>(ikw<"TRUE">) | as<false>(ikw<"FALSE">)> {};
   // Two alternatives spell `s`: the first one written gives the value.
-  struct SIZE : terminal<as<ast::Size::small>(kw<"s"> | kw<"small">) |
-                         as<ast::Size::large>(ikw<"S"> | ikw<"large">)> {};
+  struct Size : rule<as<ast::Size::small>(kw<"s"> | kw<"small">) |
+                     as<ast::Size::large>(ikw<"S"> | ikw<"large">)> {};
 
-  struct TokenItem
+  struct DocumentedItem
       : rule<create<ast::Item>(assign<&ast::Item::name>(ref<ID>) + lit<"="> +
-                               (assign<&ast::Item::flag>(ref<BOOL>) |
+                               (assign<&ast::Item::flag>(ref<DocumentedBool>) |
                                 assign<&ast::Item::other>(ref<ID>)) +
                                lit<";">)> {};
   struct RuleItem
@@ -66,13 +65,12 @@ struct Suite : cursiv::GrammarSpec {
                                       as<false>(ikw<"FALSE">)) |
              assign<&ast::Item::other>(ref<ID>)) +
             lit<";">)> {};
-  // Only the words stand here, through the terminal, the data rule or in
-  // place, so a misspelled one is repaired.
+  // A misspelled boolean is repaired when only its words are expected.
   struct FlagItem
       : rule<create<ast::Item>(
             assign<&ast::Item::name>(ref<ID>) +
             ((lit<"!"> + assign<&ast::Item::flag>(ref<Bool>)) |
-             (lit<"~"> + assign<&ast::Item::flag>(ref<BOOL>)) |
+             (lit<"~"> + assign<&ast::Item::flag>(ref<DocumentedBool>)) |
              (lit<"*"> + assign<&ast::Item::flag>(as<true>(ikw<"TRUE">) |
                                                   as<false>(ikw<"FALSE">))) |
              (lit<"?"> + assign<&ast::Item::flag>(as<true>(ikw<"YES">) |
@@ -93,8 +91,8 @@ struct Suite : cursiv::GrammarSpec {
             lit<";">)> {};
   // A choice of values behind a condition adds a record of its own where a
   // repair leaves a token beside the value, and passes on the value it read.
-  struct SWITCH : terminal<as<true>(ikw<"ON">) | as<false>(ikw<"OFF">)> {};
-  struct Gated : rule<!lit<"%"> + (ref<BOOL> | ref<SWITCH>)> {};
+  struct Switch : rule<as<true>(ikw<"ON">) | as<false>(ikw<"OFF">)> {};
+  struct Gated : rule<!lit<"%"> + (ref<DocumentedBool> | ref<Switch>)> {};
   struct GatedItem
       : rule<create<ast::Item>(assign<&ast::Item::name>(ref<ID>) + lit<"="> +
                                assign<&ast::Item::flag>(ref<Gated>) +
@@ -111,10 +109,10 @@ struct Suite : cursiv::GrammarSpec {
                                             lit<";">)> {};
   struct SizeItem : rule<create<ast::Item>(
                         assign<&ast::Item::name>(ref<ID>) + lit<":"> +
-                        assign<&ast::Item::size>(ref<SIZE>) + lit<";">)> {};
+                        assign<&ast::Item::size>(ref<Size>) + lit<";">)> {};
   struct Root
       : rule<create<ast::Items>(
-            (lit<"token:"> + many(append<&ast::Items::items>(ref<TokenItem>))) |
+            (lit<"doc:"> + many(append<&ast::Items::items>(ref<DocumentedItem>))) |
             (lit<"rule:"> + many(append<&ast::Items::items>(ref<RuleItem>))) |
             (lit<"inline:"> +
              many(append<&ast::Items::items>(ref<InlineItem>))) |
@@ -130,7 +128,5 @@ struct Suite : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct Ll : Suite {};
-struct Lr : Suite {};
 
 }  // namespace tbranch

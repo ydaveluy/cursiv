@@ -1,11 +1,10 @@
 # The caret against the table: a named keyword, a k=2 cell's two arms, and the
 # state a repair leaves behind an unclosed construct.
-cursiv_grammar(caret lsp/completion/CaretGrammar.hpp tcaret::Caret EXTENSIONS .caret ENGINE LR)
+cursiv_grammar(caret lsp/completion/CaretGrammar.hpp tcaret::Caret EXTENSIONS .caret)
 # A word that spans lines, which a completion edit may not.
-cursiv_grammar(block lsp/completion/BlockGrammar.hpp tblock::Block EXTENSIONS .block ENGINE LR)
-# Terminals of words beside the data rule reading the same words, in both
-# engines.
-cursiv_grammar_pair(words lsp/completion/WordsGrammar.hpp twords::Lr twords::Ll)
+cursiv_grammar(block lsp/completion/BlockGrammar.hpp tblock::Block EXTENSIONS .block)
+# Terminals of words beside the data rule reading the same words.
+cursiv_grammar(wordslr lsp/completion/WordsGrammar.hpp twords::Suite)
 
 cursiv_grammar(repairmsg core/validation/RepairMessageGrammar.hpp tmsg::MessageG)
 cursiv_test(validation_test core/validation/validation_test.cpp cursiv::lsp wsCore repairmsgGenerated)
@@ -38,7 +37,7 @@ if(CURSIV_NODE AND TARGET domainmodel_lsp AND CMAKE_SYSTEM_NAME STREQUAL "WASI")
       $<TARGET_FILE:requirements_lsp> $<TARGET_FILE:statemachine_lsp>)
 endif()
 if(CURSIV_NODE AND TARGET domainmodel_lsp AND NOT CMAKE_CROSSCOMPILING)
-  # The MCP stdio session end to end: spawn `--mcp`, handshake, tools, one rule.
+  # The MCP stdio session discovers the server, lists its tools and reads a rule.
   add_test(NAME mcp_session COMMAND ${CURSIV_NODE}
       ${CURSIV_SOURCE_ROOT}/tools/mcp-session.mjs $<TARGET_FILE:domainmodel_lsp>
       --folder ${CURSIV_SOURCE_ROOT}/examples/domainmodel/example
@@ -76,9 +75,10 @@ if(TARGET domainmodel_lsp AND NOT CMAKE_CROSSCOMPILING AND EXISTS /dev/full)
 endif()
 
 cursiv_test(navigation_test lsp/navigation_test.cpp cursiv::lsp wsLsp multirefGenerated
-    duallrGenerated dualllGenerated)
+    duallrGenerated)
 
-cursiv_test(presentation_test lsp/presentation_test.cpp cursiv::lsp wsCore)
+cursiv_test(presentation_test lsp/presentation_test.cpp cursiv::lsp wsCore
+    duallrGenerated)
 
 cursiv_test(server_test lsp/server_test.cpp cursiv::lsp wsCore docgGenerated)
 target_compile_definitions(server_test PRIVATE
@@ -92,7 +92,7 @@ if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
 endif()
 
 cursiv_test(completion_test "lsp/completion/completion_test.cpp;lsp/completion/CaretLane.cpp" cursiv::lsp wsCore
-    caretGenerated blockGenerated wordsllGenerated wordslrGenerated)
+    caretGenerated blockGenerated wordslrGenerated)
 set_target_properties(completion_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 
 cursiv_test(edits_test $<TARGET_OBJECTS:editsObjects> cursiv::lsp wsLsp)

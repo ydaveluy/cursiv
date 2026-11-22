@@ -2,11 +2,14 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <initializer_list>
+#include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string_view>
+#include <tuple>
 #include <unordered_set>
-#include <utility>
 #include <vector>
 
 #include "cursiv/references/NameProvider.hpp"
@@ -37,8 +40,11 @@ namespace {
 [[nodiscard]] Declaration reference_at(const Document& document,
                                        TextOffset offset) {
   Declaration found;
+  const DocumentReferences* const references =
+      document.parseResult.references.get();
+  if (references == nullptr) return found;
   std::optional<TextRange> failed;
-  document.parseResult.references->visitIn(
+  references->visitIn(
       document.parseResult.cst(), offset, offset,
       [&](TextOffset begin, TextOffset end, const AstNode& target, bool) {
         if (offset < begin || offset >= end) return;
@@ -74,7 +80,7 @@ namespace {
   if (after == cst.size()) return nullptr;
   const CstLeaf leaf = cst.asLeaf(after);
   if (leaf.begin > offset) return nullptr;
-  return owner_of_leaf(cst, leaf.id);
+  return ownerOfLeaf(cst, leaf.id);
 }
 
 // The targets of the reference a row describes, matched by the whole span its
@@ -94,12 +100,60 @@ void visit_row_targets(const Documents& store, const ReferenceDescription& row,
       [](RefState, TextOffset, TextOffset, const ReferenceInfo&) {});
 }
 
-// A row of one group: within it, the site and the symbol tell two apart.
+// Whether another node is built on `node`'s CST record: the index then keys
+// the rows of both alike.
+[[nodiscard]] bool shares_record(const AstNode& node,
+                                 const Document& document) {
+  const OwnedNodes nodes = document.parseResult.nodes();
+  return std::ranges::equal_range(
+             nodes, node.cstNodeId, {},
+             [](const AstNode* owned) { return owned->cstNodeId; })
+             .size() > 1;
+}
+
+// Whether a row's reference names `node` itself, and not only its record.
+[[nodiscard]] bool names_node(const Documents& store,
+                              const ReferenceDescription& row,
+                              const AstNode& node, bool sharedRecord) {
+  bool names = !sharedRecord;
+  if (sharedRecord)
+    visit_row_targets(store, row, [&](const AstNode& to, bool) {
+      names = names || &to == &node;
+    });
+  return names;
+}
+
+// The multi reference that makes `node`'s group: the first, in (document,
+// offset) order, that has `node` among its targets. Incoming references count
+// from any language, even one the declaring grammar does not describe.
+[[nodiscard]] std::optional<ReferenceDescription> group_reference(
+    const Documents& store, const IndexManager& index, const AstNode& node,
+    const CancellationToken& cancelToken) {
+  const Document* const declaringDocument = node.getDocument();
+  if (declaringDocument == nullptr || node.cstNodeId == kNoNode) return {};
+  const bool sharedRecord = shares_record(node, *declaringDocument);
+  std::optional<ReferenceDescription> group;
+  (void)index.visitReferences(
+      declaringDocument->id, node.cstNodeId,
+      [&](const ReferenceDescription& incoming) {
+        throwIfCancelled(cancelToken);
+        if (!incoming.multiReference ||
+            !names_node(store, incoming, node, sharedRecord))
+          return true;
+        group = incoming;
+        return false;
+      });
+  return group;
+}
+
+// A row of one group: its document, site and symbol tell two apart.
 struct RowHash {
   std::size_t operator()(const ReferenceDescription& row) const noexcept {
-    const auto site = static_cast<std::size_t>(row.sourceBegin);
-    const auto symbol = static_cast<std::size_t>(row.targetSymbolId);
-    return site ^ (symbol + 0x9e3779b9u + (site << 6u) + (site >> 2u));
+    auto h = static_cast<std::size_t>(row.sourceDocumentId);
+    for (const std::size_t part :
+         {std::size_t{row.sourceBegin}, std::size_t{row.targetSymbolId}})
+      h ^= part + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+    return h;
   }
 };
 
@@ -123,7 +177,7 @@ struct RowHash {
 // both regions, and the reference is the more specific answer.
 Declaration DefaultReferences::at(const Document& document, TextOffset offset,
                                   const CancellationToken& cancelToken) const {
-  throw_if_cancelled(cancelToken);
+  throwIfCancelled(cancelToken);
   if (Declaration reference = reference_at(document, offset);
       reference || reference.span.end > reference.span.begin)
     return reference;
@@ -148,33 +202,15 @@ Declaration DefaultReferences::at(const Document& document, TextOffset offset,
 
 std::vector<const AstNode*> DefaultReferences::getSelfNodes(
     const AstNode& node, const CancellationToken& cancelToken) const {
-  const Documents& store = *shared.documents;
-  const IndexManager& index = *shared.indexManager;
-  const Document* const declaringDocument = node.getDocument();
-  if (declaringDocument == nullptr || node.cstNodeId == kNoNode) return {&node};
-  // Incoming references define the group, including those from another
-  // language whose reference kinds the declaring grammar does not describe.
-
-  std::vector<const AstNode*> overloads;
-  (void)index.visitReferences(
-      declaringDocument->id, node.cstNodeId,
-      [&](const ReferenceDescription& incoming) {
-        throw_if_cancelled(cancelToken);
-        if (!incoming.multiReference) return true;
-        std::vector<const AstNode*> siblings;
-        bool member = false;
-        visit_row_targets(store, incoming,
-                          [&](const AstNode& target, bool multi) {
-                            if (!multi) return;
-                            siblings.push_back(&target);
-                            member = member || &target == &node;
-                          });
-        if (!member) return true;
-        overloads = std::move(siblings);
-        return false;
-      });
-  if (!overloads.empty()) return overloads;
-  return {&node};
+  std::vector<const AstNode*> members;
+  if (const std::optional<ReferenceDescription> group = group_reference(
+          *shared.documents, *shared.indexManager, node, cancelToken))
+    visit_row_targets(*shared.documents, *group,
+                      [&](const AstNode& target, bool multi) {
+                        if (multi) members.push_back(&target);
+                      });
+  if (members.empty()) members.push_back(&node);
+  return members;
 }
 
 std::vector<ReferenceDescription> DefaultReferences::getSelfReferences(
@@ -183,7 +219,7 @@ std::vector<ReferenceDescription> DefaultReferences::getSelfReferences(
   // Hashed, not scanned: a group may hold thousands of members.
   std::unordered_set<ReferenceDescription, RowHash> drawn;
   for (const AstNode* const member : getSelfNodes(node, cancelToken)) {
-    throw_if_cancelled(cancelToken);
+    throwIfCancelled(cancelToken);
     const Document* const declaringDocument = member->getDocument();
     if (declaringDocument == nullptr || member->cstNodeId == kNoNode) continue;
     // The name node comes from the language that built the member, not from
@@ -210,10 +246,10 @@ std::vector<ReferenceDescription> DefaultReferences::getSelfReferences(
 Declaration DefaultReferences::findDeclarations(
     const Document& document, TextOffset offset,
     const CancellationToken& cancelToken) const {
-  throw_if_cancelled(cancelToken);
-  if (!document.hasAst() || document.parseResult.references == nullptr)
-    return {};
+  throwIfCancelled(cancelToken);
+  if (!document.hasAst()) return {};
   if (const DocumentState state = document.state.load();
+      document.parseResult.references != nullptr &&
       state >= DocumentState::ComputedScopes && state < DocumentState::Linked)
     document.parseResult.references->forceAt(document.parseResult.cst(), offset,
                                              cancelToken);
@@ -226,60 +262,66 @@ Declaration DefaultReferences::findDeclarations(
 }
 
 std::vector<ReferenceDescription> DefaultReferences::findReferences(
-    const AstNode& target, const FindReferencesOptions& options,
+    std::span<const AstNode* const> targets,
+    const FindReferencesOptions& options,
     const CancellationToken& cancelToken) const {
   std::vector<ReferenceDescription> references;
-  throw_if_cancelled(cancelToken);
+  const Documents& store = *shared.documents;
   const IndexManager& index = *shared.indexManager;
-
-  // The declaring document, found through the containers: a target from the
-  // global index often lives in another file.
-  const Document* const declaringDocument = target.getDocument();
-  if (declaringDocument == nullptr || target.cstNodeId == kNoNode)
-    return references;
-
   const auto wanted = [&](DocumentId source) {
     return options.documentId == kNoDocument || options.documentId == source;
   };
+  const auto site = [](const ReferenceDescription& row) {
+    return std::tuple{row.sourceDocumentId, row.sourceBegin, row.sourceEnd};
+  };
 
-  // The whole group's declarations, not the member's alone: a target of a
-  // multi reference stands for its overload set. Filtered like any row -- a
-  // sibling declared in another document is not a highlight of this one.
-  if (options.includeDeclaration)
-    for (const ReferenceDescription& row :
-         getSelfReferences(target, cancelToken))
-      if (wanted(row.sourceDocumentId)) references.push_back(row);
+  // The groups drawn, by the site of the multi reference that makes each, with
+  // their members: a member asked later finds its group drawn.
+  std::map<std::tuple<DocumentId, TextOffset, TextOffset>,
+           std::unordered_set<const AstNode*>>
+      drawn;
+  const auto undrawn = [&](const AstNode& target) {
+    const std::optional<ReferenceDescription> group =
+        group_reference(store, index, target, cancelToken);
+    if (!group) return true;
+    const auto [at, added] = drawn.try_emplace(site(*group));
+    if (added)
+      for (const AstNode* const member : getSelfNodes(target, cancelToken))
+        at->second.insert(member);
+    return added || !at->second.contains(&target);
+  };
 
-  // A record two nodes share keys the rows of both: a row then counts where
-  // its reference names the target itself.
-  const OwnedNodes nodes = declaringDocument->parseResult.nodes();
-  const bool twinned = std::ranges::equal_range(
-                           nodes, target.cstNodeId, {},
-                           [](const AstNode* node) { return node->cstNodeId; })
-                           .size() > 1;
-  (void)index.visitReferences(declaringDocument->id, target.cstNodeId,
-                              [&](const ReferenceDescription& described) {
-                                throw_if_cancelled(cancelToken);
-                                bool names = !twinned;
-                                if (twinned)
-                                  visit_row_targets(
-                                      *shared.documents, described,
-                                      [&](const AstNode& to, bool) {
-                                        names = names || &to == &target;
-                                      });
-                                if (names && wanted(described.sourceDocumentId))
-                                  references.push_back(described);
-                                return true;
-                              });
+  for (const AstNode* const target : targets) {
+    throwIfCancelled(cancelToken);
+    // The declaring document, found through the containers: a target from the
+    // global index often lives in another file.
+    const Document* const declaringDocument = target->getDocument();
+    if (declaringDocument == nullptr || target->cstNodeId == kNoNode) continue;
 
-  // Sorted: the inverse table comes from a hash map, and a rename's edits need
-  // a stable order.
-  std::ranges::sort(references, [](const ReferenceDescription& a,
-                                   const ReferenceDescription& b) {
-    return a.sourceDocumentId != b.sourceDocumentId
-               ? a.sourceDocumentId < b.sourceDocumentId
-               : a.sourceBegin < b.sourceBegin;
-  });
+    // The whole group's declarations, once per group, filtered like any row: a
+    // target of a multi reference stands for its overload set.
+    if (options.includeDeclaration && undrawn(*target))
+      for (const ReferenceDescription& row :
+           getSelfReferences(*target, cancelToken))
+        if (wanted(row.sourceDocumentId)) references.push_back(row);
+
+    const bool sharedRecord = shares_record(*target, *declaringDocument);
+    (void)index.visitReferences(
+        declaringDocument->id, target->cstNodeId,
+        [&](const ReferenceDescription& described) {
+          throwIfCancelled(cancelToken);
+          if (names_node(store, described, *target, sharedRecord) &&
+              wanted(described.sourceDocumentId))
+            references.push_back(described);
+          return true;
+        });
+  }
+
+  // Sorted, as the inverse table comes from a hash map and a rename's edits
+  // need a stable order; stably, so a site keeps the first target's row.
+  std::ranges::stable_sort(references, {}, site);
+  const auto repeats = std::ranges::unique(references, {}, site);
+  references.erase(repeats.begin(), repeats.end());
   return references;
 }
 

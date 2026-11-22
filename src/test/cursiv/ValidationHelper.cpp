@@ -5,11 +5,9 @@
 #include <utility>
 
 #include "cursiv/DocumentDisposable.hpp"
-#include "cursiv/ExpectDiagnosticOptions.hpp"
+#include "cursiv/ExpectFunction.hpp"
 #include "cursiv/ParseHelper.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/validation/Diagnostic.hpp"
-#include "cursiv/validation/DocumentValidator.hpp"
 #include "cursiv/workspace/Document.hpp"
 
 namespace cursiv::test {
@@ -22,25 +20,13 @@ ValidationResult validationHelper(const CoreServices& services,
   const std::shared_ptr<Document> document =
       parseHelper(services, std::move(text), options);
 
-  // Constructed, never assigned: copy-assigning a `Diagnostic` walks the
-  // variant assignment of its `data` payload, which g++ reads as a delete of an
-  // object it cannot see allocated.
-  ValidationResult result{detail::documentDisposable(services, document),
-                          document->diagnostics, document, &services};
-  const detail::DisposeOnThrow cleanup(result);
-
-  if (options.failOnParsingErrors) {
-    // Of the parse codes, these two say the tree is not what the author wrote.
-    ExpectDiagnosticOptions syntactic;
-    syntactic.severity = DiagnosticSeverity::Error;
-    for (const std::string_view code : {kSyntaxError, kParseRepaired}) {
-      JsonValue::Object wanted;
-      wanted.try_emplace(std::string(kDataCode), std::string(code));
-      syntactic.data.emplace(std::move(wanted));
-      expectNoIssues(result, syntactic);
-    }
-  }
-  return result;
+  Disposable added = detail::documentDisposable(services, document);
+  const detail::DisposeOnThrow cleanup(added);
+  if (options.failOnParsingErrors &&
+      (!document->parseResult || document->parseRecovered()))
+    expectedFunction("syntax errors", "clean parse", document->uri);
+  auto diagnostics = document->diagnostics;
+  return {std::move(added), std::move(diagnostics), document, &services};
 }
 
 }  // namespace cursiv::test

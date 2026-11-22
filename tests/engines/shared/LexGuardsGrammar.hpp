@@ -1,8 +1,7 @@
 #pragma once
 
-// Guards that decide where a token ends, on both engines: word boundaries,
-// passable refusals, and assertions that let a longer token read over a
-// shorter one.
+// Guards that decide where a token ends: word boundaries, passable refusals,
+// and assertions that let a longer token read over a shorter one.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -65,15 +64,13 @@ struct Main : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct Lr : Main {};
-struct Ll : Main {};
 
 // A name ends before `->` or `=>` and goes on before `-` or `=`. `->` stands
 // only before a letter, and `=>` asserts its `>` before reading it.
 struct Overtake : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<" ">)> {};
   struct NAME : terminal<some(cr<"a-z">)> {};
-  struct ARROW : terminal<lit<"->", &cr<"a-z">>> {};
+  struct ARROW : terminal<lit<"->", ref<NAME>>> {};
   struct FAT : terminal<lit<"="> + &lit<">"> + lit<">">> {};
   struct Step : rule<create<Link>(assign<&Link::from>(ref<NAME>) +
                                   option((lit<"-"> | lit<"=">) + lit<">"> +
@@ -88,8 +85,6 @@ struct Overtake : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct OvertakeLr : Overtake {};
-struct OvertakeLl : Overtake {};
 
 // A token that starts with a blank behind an assertion: the blanks in front
 // of `!` are its own, not an ignored run crossed ahead of the token.
@@ -102,7 +97,5 @@ struct BlankHead : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct BlankHeadLr : BlankHead {};
-struct BlankHeadLl : BlankHead {};
 
 }  // namespace tlexguards

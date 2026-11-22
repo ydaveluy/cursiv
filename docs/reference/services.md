@@ -15,15 +15,16 @@ Services live in four containers:
 
 - **Shared services** serve the whole workspace and every language in it:
   documents, index, document builder.
-- **Language services** belong to one language: parser, scoping, validation,
-  editor providers. They reach the shared services through `services.shared()`.
+- **Language services** provide one language's parser, scoping, validation and
+  editor features. Access the workspace through `services.shared` in scaffolded
+  containers or `services.shared()` on a `CoreServices&`.
 - **Core services** are what the CLI, tests and programs need. **LSP
   services** add the editor features. An LSP container extends the core one,
   so a language server has both.
 
-The scaffold derives the four in `core/CoreServices.hpp`
-(`MyLangSharedCoreServices`, `MyLangCoreServices`) and `lsp/LspServices.hpp`
-(`MyLangSharedServices`, `MyLangServices`).
+The MyLang scaffold declares its core containers in
+`src/core/mylang/CoreServices.hpp` and its editor containers in
+`src/lsp/mylang/LspServices.hpp`.
 
 ## Replace a service
 
@@ -33,7 +34,7 @@ services in `install_core_module`:
 
 ```cpp title="core/CoreModule.cpp"
 void install_core_module(MyLangCoreServices& services) {
-  mylang::generated::MyLang::install_generated_module(services);
+  mylang::generated::MyLang::installGeneratedModule(services);
   services.scopeProvider = std::make_unique<MyScopeProvider>(services);
   register_validation_checks(services);
 }
@@ -82,7 +83,7 @@ framework, the module generated from your grammar, or nothing.
 
 | Service | Purpose | Default |
 |---|---|---|
-| `languageMetaData` | Give the language id and file extensions | Generated |
+| `languageMetaData` | Give the language ID, file extensions and exact file names | Generated |
 | `parser` | Parse a document's text | Generated |
 | `astReflection` | Describe the AST types | Generated |
 | `grammarSource` | Give the grammar's text to tools such as MCP | Generated |
@@ -123,7 +124,7 @@ The server advertises an editor feature only when its provider is installed.
 It calls a provider once the document has reached the state in the
 **Called at** column, or once every document has, where it says *workspace*.
 See [Document lifecycle](#document-lifecycle). To choose other states, replace
-the server that `install_default_shared_lsp_services` installed, in
+the server that `installDefaultSharedLspServices` installed, in
 `register_lsp_services` like any shared service; here for a completion that
 offers only keywords:
 
@@ -132,13 +133,8 @@ shared.languageServer = std::make_unique<cursiv::DefaultLanguageServer>(
     shared, cursiv::RequestStates{.completion = cursiv::DocumentState::Parsed});
 ```
 
-A request sees every edit sent before it. After `didOpen`, `didChange`,
-`didClose`, `didChangeWatchedFiles`, or a notebook's `didOpen`, `didChange` or
-`didClose`, it waits until the change is applied and the state in **Called at**
-is reached, not for the rest of the build, such as validation. After any other
-notification, it waits until that notification is handled. A provider runs
-beside the rest of the build, so one called before `Validated` must not read
-diagnostics.
+A request sees edits sent before it. A provider that uses diagnostics needs
+`Validated`. A provider that works on syntax alone can run at `Parsed`.
 
 | Service | Feature | Called at | Default |
 |---|---|---|---|
@@ -164,6 +160,26 @@ diagnostics.
 | `documentLinkProvider` | Document links | `Parsed` | None |
 | `codeLensProvider` | Code lenses | `IndexedReferences` | None |
 
+## Customize references
+
+Find references, document highlight, rename and the MCP tools ask the
+`references` service about every declaration under the caret at once, with
+`findReferences(targets, options)`. For one declaration, pass a span of one.
+Each place comes once, in document order. Derive from `DefaultReferences` and
+override:
+
+| Hook | Decides |
+|---|---|
+| `findDeclarations` | What a position in a document names |
+| `findReferences` | Where the targets are named |
+| `getSelfNodes` | The group a declaration stands for: by default, all the targets of a `multi_reference<T>` that names it |
+| `getSelfReferences` | Where the declarations of that group are written |
+
+With `includeDeclaration`, the default `findReferences` draws each group's
+declarations once per call, so `getSelfNodes` and `getSelfReferences` must
+answer alike for every member of a group. An override of `findReferences` that
+adds places keeps the document order and gives each place once.
+
 ## Customize completion
 
 Derive from `DefaultCompletionProvider` and override what your language changes:
@@ -180,7 +196,6 @@ Derive from `DefaultCompletionProvider` and override what your language changes:
 | `continueCompletion` | Whether to try the next way of reading the caret |
 | `deduplicateItems` | Which items are kept |
 | `fillCompletionItem`, `buildCompletionTextEdit` | How a value becomes an item and what it replaces |
-| `buildContexts`, `findFeaturesAt`, `findDataTypeRuleStart`, `backtrackToAnyToken`, `performCurrentTokenCompletion`, `performNextTokenCompletion` | How the caret is read |
 
 `getCompletion` receives the request's `CompletionParams`. Every hook that
 takes a `context` reads how the client asked in `context.trigger`: its
@@ -196,13 +211,10 @@ sees a new node of that class as `container`, with the node at the caret as its
 parent and its own members empty. It lasts only for the request, so do not keep
 it.
 
-Keywords are always offered. Names stop once an answer holds 1000 items,
-keywords included: what the author types next asks again. A terminal offers nothing, whatever it reads. To offer a
-choice of words, write it as a data rule. A terminal with `as<V>` on each
-alternative is one. Where a [condition](grammar.md#conditions) reads the next
-token's text, a terminal such as `ID` is expected when the condition accepts
-one of a few sample words, such as `a`, `name`, `0` or `_`, and offered
-unchecked when it reads none of them.
+For a choice of suggested words, write a data rule such as
+`rule<kw<"public"> | kw<"private">>`. The default provider offers its
+keywords and visible reference targets. A named terminal such as `ID` can
+recognize a name but supplies no suggestions of its own.
 
 ## Customize semantic tokens
 
@@ -253,11 +265,10 @@ The server announces one legend for all its languages. Keep the standard names
 at their index and add your own after them: `initialize` fails if two languages
 give one index different names.
 
-Every answer is computed for the whole document, so a delta saves only the
-transfer, and none is announced by default. To announce it, set `full` to
-`SemanticTokensFullDelta{.delta = true}` in `semanticTokensOptions`. Each open
-document then keeps its last answer, and the client receives only the changes
-from it. The server announces a delta only if every language does.
+To let clients request only changes since the previous highlighting result,
+set `full` to `lsp::SemanticTokensFullDelta{.delta = true}` in
+`semanticTokensOptions`. Every language advertising semantic tokens must
+support deltas for the shared server to advertise them.
 
 ## Saves and notebooks
 
@@ -267,9 +278,9 @@ are announced:
 
 | Option | Hook | Called |
 |---|---|---|
-| `willSave` | `willSaveDocument` | Before the save, with no lock held |
-| `willSaveWaitUntil` | `willSaveDocumentWaitUntil` | Before the save, for an open document, under the read lock. The client applies the returned edits, then saves |
-| `didSave` | `didSaveDocument` | After the save, with no lock held |
+| `willSave` | `willSaveDocument` | Before the client saves |
+| `willSaveWaitUntil` | `willSaveDocumentWaitUntil` | Before saving an open document. The client applies the returned edits |
+| `didSave` | `didSaveDocument` | After the client saves |
 
 To sync notebooks, install `notebookDocuments` with the notebook types and cell
 languages the client sends:
@@ -284,13 +295,13 @@ shared.notebookDocuments =
     std::make_unique<cursiv::DefaultNotebookDocuments>(std::move(options));
 ```
 
-Each cell is then an open document of its language: it is built and validated,
-answers requests like any other document, and leaves when its notebook closes.
-`getNotebookDocument`, `getNotebookCell` and `findNotebookDocumentForCell`
-give a notebook and its cells as the client last sent them. To react to a
-notebook notification, derive from `DefaultNotebookDocuments` and override
-`didOpen`, `didChange`, `didSave` or `didClose`, calling its version first.
-They run before the cells change.
+Each cell is an open document of its language. It is built, validated and
+available for requests until its notebook closes. Use `getNotebookDocument`,
+`getNotebookCell` or `findNotebookDocumentForCell` to read the current state.
+To react before the cells change, override `didOpen`, `didChange`, `didSave` or
+`didClose` on `DefaultNotebookDocuments` and call the base method first.
+A `didChange` override returns the base result so the server applies cell
+edits only for a newer version of an open notebook.
 
 ## Add your own protocol methods
 
@@ -331,16 +342,16 @@ void join_lines(std::string_view source, cursiv::SourceTranslation& out) {
 }
 
 void install_core_module(MyLangCoreServices& services) {
-  mylang::generated::MyLang::install_generated_module(services);
+  mylang::generated::MyLang::installGeneratedModule(services);
   services.parser =
-      cursiv::translating_parser(std::move(services.parser), join_lines);
+      cursiv::translatingParser(std::move(services.parser), join_lines);
 }
 ```
 
 Call `replace(begin, end, spelling)` in source order, without overlaps; the
 text between calls is kept. `out.error(begin, end, message)` reports a
 malformed piece. A document the translator leaves untouched is parsed as it
-is. Put all the rewrites in one translator: `translating_parser` throws
+is. Put all the rewrites in one translator: `translatingParser` throws
 `std::invalid_argument` for a parser that already translates.
 
 The parser reads the translated text, so AST values hold the decoded text
@@ -350,13 +361,13 @@ document.
 
 ## Use a language from a program
 
-`create_language` creates a workspace with your language registered:
+`createLanguage` creates a workspace with your language registered:
 
 ```cpp
 #include "cursiv/services/CoreLanguage.hpp"
 #include "mylang/CoreServices.hpp"
 
-const auto language = cursiv::create_language<
+const auto language = cursiv::createLanguage<
     mylang::MyLangCoreServices, mylang::MyLangSharedCoreServices,
     mylang::install_core_module>();
 ```
@@ -366,9 +377,8 @@ shared services. Keep the returned object alive while you use them. See
 [Read the AST from a program](../learn/consume-the-ast.md) and
 [Several languages](../recipes/multiple-languages.md).
 
-A loaded language does not expose the structure of its rules: `grammarSource`
-gives the grammar's text, its rule names and each rule's text, and the syntax
-tree tells which rule, member and terminal each node reads.
+Use `language.language.grammarSource` to display the grammar or look up a
+rule's text by name.
 
 ## Document lifecycle
 
@@ -382,12 +392,16 @@ through these states, in order:
 | `ComputedScopes` | Local symbols; a reference resolves when you read it |
 | `Linked` | Resolved references or linking errors |
 | `IndexedReferences` | Reference information for navigation and dependency tracking |
-| `Validated` | Built-in diagnostics and registered validation checks |
+| `Validated` | Diagnostics for the validation categories selected for this build |
 
-A build stops at `IndexedReferences` with `BuildOptions{.validation = false}`.
-After an edit, `documentBuilder->update` rebuilds the changed documents and
-relinks the documents that depend on them. Each `Document` stays the same
-object, but the trees of a changed document are replaced.
+With validation disabled, a successful build ends at `IndexedReferences`.
+If a language service throws, the document keeps its last completed state and
+reports a `language-service-error` diagnostic. Documents that can finish continue
+through the build. A wait for a later state of the failed document returns
+`WaitOutcome::BuildFailed`. An explicit build retries the failed service. Editing
+the document replaces its tree, preserves its identity, and rebuilds its
+dependants. Cancellation and failures in shared workspace infrastructure propagate
+to the caller.
 
 To customize scopes, override `collectExportedSymbols` (symbols other
 documents can see) and `collectLocalSymbols` (symbols visible inside the
@@ -410,6 +424,9 @@ Add a member to the scaffold's `MyLangCoreServices` and initialize it in
 ```cpp
 // In MyLangCoreServices:
 std::unique_ptr<const MyAnalysis> analysis;
+
+// In MyLangCoreServices::visitServices, after the existing entries:
+yield({"analysis", true, analysis != nullptr});
 
 // In install_core_module:
 services.analysis = std::make_unique<const MyAnalysis>(services);

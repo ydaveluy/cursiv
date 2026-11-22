@@ -52,7 +52,8 @@ inline constexpr NoGuard no_guard{};
 template <class E, str T>
 struct Doc;
 
-template <str S, bool CI = false, class Guard = void>
+template <str S, bool CI = false, class Guard = void,
+          bool Keyword = std::is_same_v<Guard, WordBound>>
 struct Lit : GrammarNode {
   static_assert(S.size() > 0, "lit<> needs a non-empty literal");
   static_assert(std::is_void_v<Guard> || std::is_same_v<Guard, WordBound> ||
@@ -65,7 +66,7 @@ struct Lit : GrammarNode {
   // The text a hover shows over this word.
   template <str D>
   consteval auto doc() const {
-    return Doc<Lit<S, CI, Guard>, D>{};
+    return Doc<Lit, D>{};
   }
 };
 
@@ -90,6 +91,12 @@ using AnyChar = CpSet<0, true, "">;
 
 // One raw byte, whatever it is.
 struct Byte : GrammarNode {};
+template <auto F>
+struct Scan : GrammarNode {
+  static_assert(requires(std::string_view input) { { F(input) } -> std::same_as<std::size_t>; },
+                "scan<F> needs a function returning std::size_t for a std::string_view");
+  static constexpr auto read = F;
+};
 
 // The end of the text: zero width.
 struct Eof : GrammarNode {};
@@ -305,16 +312,22 @@ struct Skip : GrammarNode {};
 // An operator has a length known at compile time: the table is sorted on it.
 template <class Op>
 struct LeftAssoc {
+  template <class E>
+  using rebind = LeftAssoc<E>;
   using op_expr = Op;
   static constexpr Association kGroup = Association::Left;
 };
 template <class Op>
 struct RightAssoc {
+  template <class E>
+  using rebind = RightAssoc<E>;
   using op_expr = Op;
   static constexpr Association kGroup = Association::Right;
 };
 template <class Op>
 struct NonAssoc {
+  template <class E>
+  using rebind = NonAssoc<E>;
   using op_expr = Op;
   static constexpr Association kGroup = Association::Non;
 };
@@ -330,6 +343,8 @@ struct UnaryLevel {
               typename member_traits<decltype(OperandPtr)>::class_type, Node>,
       "prefix/postfix: the operator and operand members must belong to the "
       "level's class (or a base of it)");
+  template <class E>
+  using rebind = UnaryLevel<A, Node, OpPtr, OperandPtr, E>;
   using op_expr = Op;
   using node_type = Node;
   static constexpr Association kGroup = A;
@@ -382,11 +397,6 @@ struct LevelsFn {
 template <class... Es>
 struct cat_seq;
 
-// A list under construction; not a grammar shape, so Seq and the choices can
-// assert their arity at class scope.
-template <class... Es>
-struct Pack {};
-
 // The one place a sequence is built: `F<a,b> + c` is `F<a,b,c>`, never
 // `F<F<a,b>,c>`, so an expression has one shape however it is grouped.
 template <template <class...> class F, class A, class B>
@@ -414,10 +424,6 @@ template <class N, class B>
 struct SeqCat<Create<N, Epsilon>, B> {
   using type = Create<N, B>;
 };
-template <class N, class... Bs>
-struct SeqCat<Create<N, Epsilon>, Seq<Bs...>> {
-  using type = Create<N, Seq<Bs...>>;
-};
 template <class A, class B>
 using ChoiceCat = FlatCat<Choice, A, B>;
 
@@ -426,9 +432,6 @@ using ChoiceCat = FlatCat<Choice, A, B>;
 // A create absorbs both sides up to a nest; a nest absorbs what follows it.
 // So `a + create<T>(b) + c + nest<W, &W::f>(d)` is
 // `create<T>(a + b + c) + nest<W, &W::f>(d)`, however it is grouped.
-
-// No region open yet -- the run is still collecting its bare prefix.
-struct NoRegion {};
 
 // One element joins the region currently open. The region's body is re-folded,
 // so a nest inside it keeps absorbing what comes after it.
@@ -443,122 +446,48 @@ struct region_add<Nest<T, P, X>, E> {
   using type = Nest<T, P, typename cat_seq<X, E>::type>;
 };
 
-// The canonical run back to a shape: one part is the shape (Seq asserts
-// arity two at class scope). The parts are regions and bare elements, never
-// a Seq -- SeqCat flattened before the fold ran.
-template <class... Xs>
-struct run_shape;
-template <class X>
-struct run_shape<X> {
-  using type = X;
-};
-template <class X, class Y, class... Zs>
-struct run_shape<X, Y, Zs...> {
-  using type = Seq<X, Y, Zs...>;
-};
-
-template <class Pre, class Done, class Cur>
-struct close_region_run;
-template <class... Pre, class... Done>
-struct close_region_run<Pack<Pre...>, Pack<Done...>, NoRegion>
-    : run_shape<Pre..., Done...> {};
-template <class... Pre, class... Done, class Cur>
-struct close_region_run<Pack<Pre...>, Pack<Done...>, Cur>
-    : run_shape<Pre..., Done..., Cur> {};
-
-// Which transition an element takes. A non-type argument, so the step
-// specializations never have to out-specialize each other on the state.
-template <class E>
-inline constexpr int step_kind = 0;
-template <class T, class X>
-inline constexpr int step_kind<Create<T, X>> = 1;
-template <class T, auto P, class X>
-inline constexpr int step_kind<Nest<T, P, X>> = 2;
-
-template <class Pre, class Done, class Cur, class Es>
+// Done holds the finished elements. Open is empty or holds the create or nest
+// still collecting its following elements.
+template <class Done, class Open, class... Rest>
 struct fold_run;
+template <class... Done, class... Open>
+struct fold_run<TypeList<Done...>, TypeList<Open...>> {
+  using type = Seq<Done..., Open...>;
+};
+template <class E>
+struct fold_run<TypeList<>, TypeList<E>> { using type = E; };
+template <class E>
+struct fold_run<TypeList<E>, TypeList<>> { using type = E; };
 
-template <class Pre, class Done, class Cur, class E, class Rest>
-struct plain_bare;
-template <class... Pre, class Done, class Cur, class E, class... Rest>
-struct plain_bare<Pack<Pre...>, Done, Cur, E, Pack<Rest...>>
-    : fold_run<Pack<Pre..., E>, Done, Cur, Pack<Rest...>> {};
+template <class... Done, class E, class... Rest>
+  requires (!is_create<E> && !is_nest<E>)
+struct fold_run<TypeList<Done...>, TypeList<>, E, Rest...>
+    : fold_run<TypeList<Done..., E>, TypeList<>, Rest...> {};
+template <class Done, class Open, class E, class... Rest>
+  requires (!is_create<E> && !is_nest<E>)
+struct fold_run<Done, TypeList<Open>, E, Rest...>
+    : fold_run<Done, TypeList<typename region_add<Open, E>::type>, Rest...> {};
 
-template <class Pre, class Done, class Cur, class E, class Rest>
-struct plain_absorb;
-template <class Pre, class Done, class Cur, class E, class... Rest>
-struct plain_absorb<Pre, Done, Cur, E, Pack<Rest...>>
-    : fold_run<Pre, Done, typename region_add<Cur, E>::type, Pack<Rest...>> {};
-
-// The head creation opens: it takes the bare prefix with it.
-template <class Pre, class Done, class T, class X, class Rest>
-struct create_open;
-template <class... Pre, class Done, class T, class X, class... Rest>
-struct create_open<Pack<Pre...>, Done, T, X, Pack<Rest...>>
-    : fold_run<Pack<>, Done, Create<T, typename cat_seq<Pre..., X>::type>,
-               Pack<Rest...>> {};
-
-// A create with a region already open. Two named mistakes, and exactly one of
-// the two asserts below fires: the open region is a Create (two heads in one
-// sequence) or a Nest (a head declared after the current node moved).
-template <class Pre, class Done, class Cur, class T, class X, class Rest>
-struct create_second;
-template <class Pre, class Done, class Cur, class T, class X, class... Rest>
-struct create_second<Pre, Done, Cur, T, X, Pack<Rest...>> {
-  static_assert(!is_nest<Cur>,
+// The first create absorbs the bare prefix. A second create loses the first node.
+template <class... Done, class T, class E, class... Rest>
+struct fold_run<TypeList<Done...>, TypeList<>, Create<T, E>, Rest...>
+    : fold_run<TypeList<>, TypeList<Create<T, typename cat_seq<Done..., E>::type>>, Rest...> {};
+template <class Done, class Open, class T, class E, class... Rest>
+struct fold_run<Done, TypeList<Open>, Create<T, E>, Rest...> {
+  static_assert(!is_nest<Open>,
                 "a create<> after a nest<> starts a second node: the nest "
                 "already made its wrapper the current node. Put the create "
                 "before the nest, or in its own alternative");
-  static_assert(is_nest<Cur>,
+  static_assert(!is_create<Open>,
                 "a sequence builds one node, so it cannot hold two create<>: "
                 "put each create in its own alternative");
-  // The errors above have already been reported; carrying on keeps the
-  // diagnostic to the one line that states the mistake.
-  using type =
-      typename fold_run<Pre, Done, typename region_add<Cur, Create<T, X>>::type,
-                        Pack<Rest...>>::type;
+  using type = Open;
 };
 
-// The first nest: the bare prefix stays bare (adoption).
-template <class Pre, class Done, class T, auto P, class X, class Rest>
-struct nest_first;
-template <class Pre, class Done, class T, auto P, class X, class... Rest>
-struct nest_first<Pre, Done, T, P, X, Pack<Rest...>>
-    : fold_run<Pre, Done, Nest<T, P, X>, Pack<Rest...>> {};
-
-// Any later nest closes the region before it: the chain grows outwards.
-template <class Pre, class Done, class Cur, class T, auto P, class X,
-          class Rest>
-struct nest_next;
-template <class Pre, class... Done, class Cur, class T, auto P, class X,
-          class... Rest>
-struct nest_next<Pre, Pack<Done...>, Cur, T, P, X, Pack<Rest...>>
-    : fold_run<Pre, Pack<Done..., Cur>, Nest<T, P, X>, Pack<Rest...>> {};
-
-template <int K, class Pre, class Done, class Cur, class E, class Rest>
-struct fold_step;
-// conditional_t picks the class; only the winner is asked for ::type, so the
-// absorbing branch never forms `region_add<NoRegion, E>`.
-template <class Pre, class Done, class Cur, class E, class Rest>
-struct fold_step<0, Pre, Done, Cur, E, Rest>
-    : cond_t<std::is_same_v<Cur, NoRegion>, plain_bare<Pre, Done, Cur, E, Rest>,
-             plain_absorb<Pre, Done, Cur, E, Rest>> {};
-template <class Pre, class Done, class Cur, class T, class X, class Rest>
-struct fold_step<1, Pre, Done, Cur, Create<T, X>, Rest>
-    : cond_t<std::is_same_v<Cur, NoRegion>, create_open<Pre, Done, T, X, Rest>,
-             create_second<Pre, Done, Cur, T, X, Rest>> {};
-template <class Pre, class Done, class Cur, class T, auto P, class X,
-          class Rest>
-struct fold_step<2, Pre, Done, Cur, Nest<T, P, X>, Rest>
-    : cond_t<std::is_same_v<Cur, NoRegion>,
-             nest_first<Pre, Done, T, P, X, Rest>,
-             nest_next<Pre, Done, Cur, T, P, X, Rest>> {};
-
-template <class Pre, class Done, class Cur>
-struct fold_run<Pre, Done, Cur, Pack<>> : close_region_run<Pre, Done, Cur> {};
-template <class Pre, class Done, class Cur, class E, class... Rest>
-struct fold_run<Pre, Done, Cur, Pack<E, Rest...>>
-    : fold_step<step_kind<E>, Pre, Done, Cur, E, Pack<Rest...>> {};
+// A nest closes the previous region and starts its own.
+template <class... Done, class... Open, class T, auto P, class E, class... Rest>
+struct fold_run<TypeList<Done...>, TypeList<Open...>, Nest<T, P, E>, Rest...>
+    : fold_run<TypeList<Done..., Open...>, TypeList<Nest<T, P, E>>, Rest...> {};
 
 template <class S>
 struct normalize_seq {
@@ -566,12 +495,12 @@ struct normalize_seq {
 };
 template <class... Es>
 struct normalize_seq<Seq<Es...>>
-    : fold_run<Pack<>, Pack<>, NoRegion, Pack<Es...>> {};
+    : fold_run<TypeList<>, TypeList<>, Es...> {};
 // A run with no creation and no nest folds to itself, answered at once: `+`
 // asks this at every element it appends, and a fold step per element would
 // walk the whole run again each time.
 template <class... Es>
-  requires((step_kind<Es> == 0) && ...)
+  requires((!is_create<Es> && !is_nest<Es>) && ...)
 struct normalize_seq<Seq<Es...>> {
   using type = Seq<Es...>;
 };

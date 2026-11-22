@@ -38,8 +38,8 @@ class DefaultMcpService : public McpService {
   virtual void registerGrammarTool(McpServer& server) const;
   virtual void registerRuleTool(McpServer& server) const;
 
-  SharedCoreServices& _shared;
-  McpServiceOptions _options;
+  SharedCoreServices& sharedServices;
+  McpServiceOptions serverOptions;
 };
 
 }  // namespace cursiv

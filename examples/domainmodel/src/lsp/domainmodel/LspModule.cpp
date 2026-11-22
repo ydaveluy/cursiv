@@ -25,14 +25,14 @@ void install_lsp_module(DomainModelServices& services) {
 
 DomainModelLanguage create_lsp_services(
     std::unique_ptr<cursiv::FileSystemProvider> files) {
-  return cursiv::create_lsp_language<DomainModelServices,
+  return cursiv::createLspLanguage<DomainModelServices,
                                      DomainModelSharedServices,
                                      install_core_module, install_lsp_module>(
       std::move(files));
 }
 
 void register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
-  cursiv::register_lsp_language<DomainModelServices, DomainModelSharedServices,
+  cursiv::registerLspLanguage<DomainModelServices, DomainModelSharedServices,
                                 install_core_module, install_lsp_module>(
       sharedServices);
 }

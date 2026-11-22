@@ -5,17 +5,25 @@
 #include <string>
 #include <string_view>
 
+#include "cursiv/text/scalar_at.hpp"
+
 namespace cursiv {
 namespace {
 
-// Every control character becomes a space: a line break would split the
-// line, a NUL end it where a C string stops, an escape control a terminal.
+// Every control character, C0, DEL or C1, becomes a space: a line break would
+// split the line, a NUL end it where a C string stops, an escape control a
+// terminal. Bytes that encode no character are copied as they are.
 void append_flat(std::string& out, std::string_view text) {
-  const std::size_t at = out.size();
-  out.append(text);
-  std::ranges::replace_if(
-      out.begin() + static_cast<std::ptrdiff_t>(at), out.end(),
-      [](char c) { return static_cast<unsigned char>(c) < 0x20; }, ' ');
+  for (std::size_t at = 0; at < text.size();) {
+    std::size_t len = 0;
+    const char32_t scalar = scalarAt(text.data() + at, text.size() - at, len);
+    len = std::max<std::size_t>(len, 1);
+    if (scalar < 0x20 || (scalar >= 0x7F && scalar <= 0x9F))
+      out += ' ';
+    else
+      out.append(text.substr(at, len));
+    at += len;
+  }
 }
 
 void append_field(std::string& out, std::string_view key,
@@ -69,7 +77,7 @@ std::string_view to_string(ObservationCode code) noexcept {
 
 }  // namespace
 
-std::string format_observation(const Observation& observation) {
+std::string formatObservation(const Observation& observation) {
   std::string formatted;
   formatted.reserve(observation.message.size() + 64);
   formatted.append(to_string(observation.severity));

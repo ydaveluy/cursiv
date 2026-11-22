@@ -3,7 +3,8 @@
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "LexicalBackendsAst.hpp"
 #include "RecursiveTerminalsGrammar.hpp"
-#include "CharactersGrammar.hpp"
+#include <charconv>
+#include <limits>
 namespace tlexbackends {
 struct Hashes {};
 struct Delimiter {};
@@ -43,6 +44,23 @@ struct Base : cursiv::GrammarSpec {
                          lit<"]"> + same<Delimiter> + lit<"]">)> {};
   struct Twin : terminal<lit<"<"> + mark<Delimiter>(some(cr<"a-z">)) +
                          lit<"-"> + same<Delimiter> + lit<">">> {};
+  struct CountedChoice
+      : terminal<lit<"a", &(repeat<2, 4>(lit<"bc"> | lit<"bd">) + lit<"bc!">)> +
+                 some(any)> {};
+  struct StoppedChoice
+      : terminal<lit<"a", &(repeat<0, 4>(lit<"bc"> | lit<"bd">) + lit<"!">)> +
+                 some(any)> {};
+  struct Digits
+      : terminal<lit<"n", &(some(d | lit<"_">) + lit<"!">)> + some(any)> {};
+  struct ChainedDigits
+      : terminal<!some(cr<"a-z">) + &(some(d) | lit<"Z">) +
+                 !some(cr<"A-Z">) + some(d)> {};
+  struct NullableGuard
+      : terminal<lit<"n"> + !(some(d) + lit<"x">) + option(lit<"a">)> {};
+  struct EmptyGuard : terminal<lit<"e"> + !some(d)> {};
+  struct CyclicGuard
+      : terminal<lit<"c"> + many(&lit<"a">) + lit<"a">> {};
+  struct GuardedRaw : terminal<&some(lit<"#">) + SwiftRaw> {};
 
   struct Root
       : rule<create<Document>(
@@ -56,6 +74,14 @@ struct Base : cursiv::GrammarSpec {
                  (kw<"empty"> + append<&Document::items>(ref<Empty>)) |
                  (kw<"after"> + append<&Document::items>(ref<After>)) |
                  (kw<"fast"> + append<&Document::items>(ref<Fast>)) |
+                 (kw<"counted"> + append<&Document::items>(ref<CountedChoice>)) |
+                 (kw<"stopped"> + append<&Document::items>(ref<StoppedChoice>)) |
+                 (kw<"digits"> + append<&Document::items>(ref<Digits>)) |
+                 (kw<"chained"> + append<&Document::items>(ref<ChainedDigits>)) |
+                 (kw<"nullable-guard"> + append<&Document::items>(ref<NullableGuard>) + lit<"b">) |
+                 (kw<"empty-guard"> + append<&Document::items>(ref<EmptyGuard>)) |
+                 (kw<"cyclic-guard"> + append<&Document::items>(ref<CyclicGuard>)) |
+                 (kw<"guarded-raw"> + append<&Document::items>(ref<GuardedRaw>)) |
                  (kw<"twin"> + append<&Document::items>(ref<Twin>))) +
              eof> {};
   using entry = Root;
@@ -158,7 +184,8 @@ struct Base : cursiv::GrammarSpec {
   struct ManualComment
       : terminal<lit<"/*"> + many(!lit<"*/"> + any) + lit<"*/">> {};
   struct Folded : terminal<through(lit<"[">, ikw<"end">)> {};
-  struct Choices : terminal<through(lit<"[">, lit<"END"> | lit<"STOP">)> {};
+  struct Choices : terminal<through(lit<"[">, &lit<"END"> | lit<"END"> |
+                                     lit<"STOP"> | &lit<"STOP"> | &lit<"tail">)> {};
   struct EndChoices
       : terminal<through(lit<"[">, lit<"END"> | lit<"STOP"> | eof)> {};
   struct Nullable : terminal<through(lit<"[">, option(lit<"]">))> {};
@@ -277,6 +304,80 @@ struct Base : cursiv::GrammarSpec {
 }  // namespace trulethrough
 
 namespace tlexbackends {
+inline std::size_t read_payload(std::string_view input) {
+  if (input.empty()) return 0;
+  const char* end = input.data() + input.size();
+  std::size_t count;
+  const auto [payload, error] = std::from_chars(input.data(), end, count);
+  if (error != std::errc{} || count > static_cast<std::size_t>(end - payload))
+    return 0;
+  return static_cast<std::size_t>(payload - input.data()) + count;
+}
+
+template<char Prefix>
+inline std::size_t read_counted(std::string_view input) {
+  if (!input.starts_with(Prefix)) return 0;
+  const auto bytes = read_payload(input.substr(1));
+  return bytes ? 1 + bytes : 0;
+}
+
+struct Scanners : cursiv::GrammarSpec {
+  template<char C> struct Data : terminal<scan<read_counted<C>>> {};
+  template<cursiv::str Prefix> struct Prefixed : terminal<lit<Prefix> + scan<read_payload>> {};
+  struct Suffix : terminal<ref<Data<'D'>> + lit<";">> {};
+  struct ID : terminal<some(cr<"A-Za-z0-9">)> {};
+  struct Delimited : terminal<through(lit<"[">, scan<read_counted<'D'>>)> {};
+  struct Run : terminal<some(scan<read_counted<'D'>>) + lit<";">> {};
+  struct PrefixedRun : terminal<some(lit<"D0">) + scan<read_counted<'A'>>> {};
+  struct OptionalRun : terminal<many(scan<read_counted<'D'>>) + lit<";">> {};
+  struct Guarded : terminal<lit<"@", &scan<read_counted<'D'>>> + ref<ID>> {};
+  struct Negative : terminal<!scan<read_counted<'D'>> + ref<ID>> {};
+  static constexpr auto colon = [](std::string_view text) -> std::size_t { return text.starts_with(':'); };
+  struct Tag : terminal<lit<"tag"> + &scan<colon>> {};
+  struct OtherTag : terminal<lit<"tag"> + !scan<colon>> {};
+  struct Mixed : terminal<ref<Tag> | (some(cr<"a-z">) + !scan<colon>)> {};
+  struct Key : terminal<some(cr<"A-Za-z0-9">)> {};
+  static constexpr auto oversize = [](std::string_view) { return std::numeric_limits<std::size_t>::max(); };
+  struct Invalid : terminal<scan<oversize>> {};
+  template<class T> static constexpr auto item = append<&Document::items>(ref<T>);
+  template<class T, class U> static constexpr auto tagOrder =
+      (ref<ID> | item<terminal<ref<T> | ref<U>>>) + (lit<":"> | lit<"!">);
+  struct Plain : rule<lit<":">> {};
+  struct Longer : rule<lit<":"> + &(lit<"ab"> + lit<"?">)> {};
+  struct PlainComma : rule<lit<":"> + lit<",">> {};
+  struct GuardedComma : rule<lit<":"> + &(lit<","> + lit<"ab"> + lit<"?">) + lit<",">> {};
+  template<class Short, class Long> static constexpr auto choice = skip(ignore<Base::WS>, hide<>,
+      (ref<Short> + lit<"a"> + lit<"b"> + lit<"!">) | (ref<Long> + lit<"ab"> + lit<"?">));
+  struct Root : rule<create<Document>(
+      (lit<"one:"> + some(item<Data<'D'>>)) |
+      (lit<"adjacent:"> + skip(ignore<Base::WS>, hide<>, ref<ID> + item<Prefixed<"D">>)) |
+      (lit<"alternate:"> + skip(ignore<Base::WS>, hide<>,
+          ref<ID> + item<terminal<(lit<"D"> | lit<"~">) + scan<read_payload>>>)) |
+      (lit<"choose:"> + choice<Plain, Longer>) | (lit<"comma:"> + choice<PlainComma, GuardedComma>) |
+      (lit<"four:"> + some(item<Data<'D'>> | item<Data<'A'>> | item<Data<'B'>> | item<Data<'C'>>)) |
+      (lit<"prefix:"> + some(item<Prefixed<"D">> | item<Prefixed<"A">> |
+                             item<Prefixed<"B">> | item<Prefixed<"C">>)) |
+      (lit<"probe:"> + &ref<terminal<scan<read_counted<'Z'>>>> + item<ID>) |
+      (lit<"suffix:"> + item<Suffix>) |
+      (lit<"retry:"> + some(append<&Document::items>(ref<Run> | ref<Data<'D'>>))) |
+      (lit<"either:"> + some(item<terminal<ref<Run> | ref<Data<'D'>>>>)) |
+      (lit<"loop:"> + some(item<terminal<ref<PrefixedRun> | ref<Data<'D'>>>>)) |
+      (lit<"run:"> + item<Run>) | (lit<"optional:"> + item<OptionalRun>) |
+      (lit<"positive:"> + item<Guarded>) |
+      (lit<"negative:"> + item<Negative>) |
+      (lit<"rank:"> + (ref<ID> | item<Tag>) + lit<":">) |
+      (lit<"pair:"> + tagOrder<Tag, OtherTag>) | (lit<"reverse:"> + tagOrder<OtherTag, Tag>) |
+      (lit<"mixed:"> + ((ref<ID> + (lit<":"> | lit<"!i">)) |
+                        (item<Mixed> + (lit<":"> | lit<"!m">)))) |
+      (lit<"mixedtie:"> + ((ref<Tag> + lit<":i">) | (item<Mixed> + lit<":m">))) |
+      (lit<"keys:"> + ((ref<ID> + lit<";">) | (item<Key> + lit<":">))) |
+      (lit<"invalid:"> + item<Invalid>) | (lit<"binary:"> + item<Data<'\0'>>) |
+      (lit<"delimited:"> + item<Delimited>) |
+      (lit<"tie:"> + ((item<Data<'D'>> + lit<"!">) | (item<ID> + lit<"?">))) |
+      (lit<"held:"> + ((item<terminal<ref<Data<'D'>> + &lit<"!">>> + lit<"!!">) |
+                        (item<terminal<ref<Data<'D'>> + !lit<"!">>> + lit<";">))) |
+      (lit<"literal:"> + ((item<Data<'D'>> + lit<"!">) | (lit<"D0"> + lit<"?">))))> {};
+};
 // Literal modes, captures and rule tokens share a dispatch; trivia stays local.
 struct Suite : cursiv::GrammarSpec {
   struct Entry : rule<skip(ignore<Base::WS>, hide<>, ref<Base::Root> + eof) |
@@ -284,14 +385,7 @@ struct Suite : cursiv::GrammarSpec {
                        (ref<tcaptures::Base::Root> | ref<tthrough::Base::Root>)) |
                       (lit<"rule:"> + skip(ignore<trulethrough::Base::WS>,
                           hide<>, ref<trulethrough::Base::Root> + eof)) |
-                      ref<trecursive::Suite::Entry>> {};
+                      (lit<"scan:"> + ref<Scanners::Root>) | ref<trecursive::Suite::Entry>> {};
   using entry = Entry;
 };
-struct Ll : Suite {
-  // These entries use no keywords, so they need no global Unicode boundary.
-  struct Entry : rule<ref<Suite::Entry> |
-                      (lit<"chars:"> + ref<tchars::Integration::Entry>)> {};
-  using entry = Entry;
-};
-struct Lr : Suite {};
 }  // namespace tlexbackends

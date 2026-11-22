@@ -17,7 +17,7 @@ First create the services of your language:
 #include "recipe/CoreServices.hpp"
 #include "recipe/ast.hpp"
 
-const auto language = cursiv::create_language<
+const auto language = cursiv::createLanguage<
     recipe::RecipeCoreServices, recipe::RecipeSharedCoreServices,
     recipe::install_core_module>();
 ```
@@ -49,9 +49,9 @@ the input. The parser alone does not resolve references or run validation.
 
 !!! warning "A `string_view` borrows the text"
 
-    A `string_view` member points into the input buffer. Keep it alive while
-    you read the tree, and until the tree is gone if a node's destructor reads it.
-    A `Document` owns it.
+    Keep the input string alive and its contents stable until the
+    `ParseResult` is destroyed. A text property can borrow from the input or
+    from text held by that result. A workspace `Document` owns both.
 
 AST lists are `std::vector`; see
 [AST vocabulary](../reference/ast.md#child-nodes).
@@ -78,7 +78,7 @@ cursiv::Document* batch[] = {document.get()};
 shared.documentBuilder->build(batch);
 ```
 
-The URI's extension selects the language. `document->diagnostics` holds the
+The URI's file name or extension selects the language. `document->diagnostics` holds the
 syntax, reference and validation diagnostics. Read reference targets with
 `get()`:
 
@@ -123,14 +123,14 @@ references.
 
 ## Read a whole folder
 
-By default, `create_language()` reads no files from disk. Pass a
+By default, `createLanguage()` reads no files from disk. Pass a
 `LocalFileSystemProvider`, then let the workspace manager scan a folder URI:
 
 ```cpp
 #include "cursiv/workspace/LocalFileSystemProvider.hpp"
 #include "cursiv/workspace/WorkspaceManager.hpp"
 
-const auto language = cursiv::create_language<
+const auto language = cursiv::createLanguage<
     recipe::RecipeCoreServices, recipe::RecipeSharedCoreServices,
     recipe::install_core_module>(
     std::make_unique<cursiv::LocalFileSystemProvider>());

@@ -44,7 +44,7 @@ cursiv::CoreServices& services() {
   static cursiv::CoreServices language(shared);
   static const bool ready = [] {
     language.languageMetaData = {"t", {".t"}, {}};
-    language.parser = tcomment::generated::Comments::create_parser();
+    language.parser = tcomment::generated::Comments::createParser();
     return true;
   }();
   (void)ready;
@@ -90,8 +90,8 @@ void comments_read_without_the_file_before_them() {
     const auto begin = std::chrono::steady_clock::now();
     std::uint32_t last = 0;
     for (cursiv::NodeId id = 0; id < cst.size(); ++id)
-      if (cst[id].hidden != 0 && cst.text(id).starts_with("/**"))
-        last = cursiv::parse_doc_comment(p.document, id).range.start.line;
+      if (cst[id].isHidden() && cst.text(id).starts_with("/**"))
+        last = cursiv::parseDocComment(p.document, id).range.start.line;
     CHECK(last == (after == "\n" ? 19999u : 0u));
     CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
   }
@@ -103,12 +103,12 @@ void a_comment_node_gives_its_tags_their_place() {
   const Parsed p(text);
   const std::vector<std::string> names{"ML_COMMENT"};
   const cursiv::NodeId id =
-      cursiv::find_comment_node(p.document, *p.element(1), names);
+      cursiv::findCommentNode(p.document, *p.element(1), names);
   CHECK(id != cursiv::kNoNode);
   if (id == cursiv::kNoNode) return;
   const cursiv::Cst& cst = p.result.cst();
   CHECK(cst.text(id).starts_with("/** @first"));
-  const cursiv::DocComment doc = cursiv::parse_doc_comment(p.document, id);
+  const cursiv::DocComment doc = cursiv::parseDocComment(p.document, id);
   const auto spelled = [&](const cursiv::DocCommentRange& range) {
     return text.substr(range.start.offset, range.end.offset - range.start.offset);
   };
@@ -122,7 +122,7 @@ void a_comment_node_gives_its_tags_their_place() {
     CHECK(second->range.start.line == 1);
     CHECK(spelled(second->range).ends_with("two"));
   }
-  CHECK(cursiv::find_comment_node(p.document, *p.element(0), names) ==
+  CHECK(cursiv::findCommentNode(p.document, *p.element(0), names) ==
         cursiv::kNoNode);
 }
 
@@ -271,7 +271,7 @@ void a_degenerate_marker_is_still_the_image() {
 void a_node_with_no_document_answers_nothing() {
   const Parsed p("entity Person { }\n");
   ast::Entity made;
-  made.type = &cursiv::ast_type_tag<ast::Entity>;
+  made.type = &cursiv::kAstTypeTag<ast::Entity>;
   // No document to walk up to.
   CHECK(!provider().getComment(made));
   // In a document, but no CST record.
@@ -312,7 +312,7 @@ namespace doc_comment {
 namespace {
 
 [[nodiscard]] bool is_doc(std::string_view text) {
-  return cursiv::is_doc_comment(text);
+  return cursiv::isDocComment(text);
 }
 
 // The delimiters decide: first line starts with `start`, last line ends with
@@ -344,7 +344,7 @@ void whitespace_is_bytes() {
   // U+00A0, a blank to a Unicode reader, is not one here: a trailing NBSP
   // stays in the rendered line.
   CHECK(!is_doc("\xC2\xA0/** x */"));
-  CHECK(cursiv::parse_doc_comment("/** A\xC2\xA0 */").toString() ==
+  CHECK(cursiv::parseDocComment("/** A\xC2\xA0 */").toString() ==
         "A\xC2\xA0");
 }
 
@@ -352,25 +352,25 @@ void whitespace_is_bytes() {
 // default rather than disabling the test.
 void the_markers_are_configurable() {
   const cursiv::DocCommentParseOptions xml{.start = "<!--", .end = "-->"};
-  CHECK(cursiv::is_doc_comment("<!-- A \n B -->", xml));
-  CHECK(!cursiv::is_doc_comment("/** x */", xml));
+  CHECK(cursiv::isDocComment("<!-- A \n B -->", xml));
+  CHECK(!cursiv::isDocComment("/** x */", xml));
 
   const cursiv::DocCommentParseOptions partial{.start = "/**"};
-  CHECK(cursiv::is_doc_comment("/** x */", partial));
+  CHECK(cursiv::isDocComment("/** x */", partial));
 }
 
 // An empty marker disables its half of the test.
 void an_empty_marker_disables_its_half() {
   const cursiv::DocCommentParseOptions noEnd{.end = ""};
-  CHECK(cursiv::is_doc_comment("/** x", noEnd));
+  CHECK(cursiv::isDocComment("/** x", noEnd));
   const cursiv::DocCommentParseOptions noStart{.start = ""};
-  CHECK(cursiv::is_doc_comment("x */", noStart));
+  CHECK(cursiv::isDocComment("x */", noStart));
 }
 
 // The first of the name wins, all of them come in document order, and only
 // top-level block tags answer: an inline tag lives inside its paragraph.
 void the_tag_queries_read_the_top_level() {
-  const cursiv::DocComment comment = cursiv::parse_doc_comment(
+  const cursiv::DocComment comment = cursiv::parseDocComment(
       "/**\n * @param a\n * @param b {@link Value}\n * @returns c\n */");
   CHECK(comment.getTags("param").size() == 2);
   const cursiv::DocCommentNode* const first = comment.getTag("param");
@@ -388,7 +388,7 @@ void the_tag_queries_read_the_top_level() {
 // Only paragraphs and block tags live at the top level -- the invariant the
 // tag queries rely on without re-testing `inlineTag`.
 void the_top_level_holds_paragraphs_and_block_tags() {
-  const cursiv::DocComment comment = cursiv::parse_doc_comment(
+  const cursiv::DocComment comment = cursiv::parseDocComment(
       "/** {@link X}\n * @param a\n * text\n * \n * more\n */");
   CHECK(!comment.elements.empty());
   for (const cursiv::DocCommentNode& element : comment.elements) {
@@ -401,7 +401,7 @@ void the_top_level_holds_paragraphs_and_block_tags() {
 // Children hold only lines and inline tags: a paragraph never nests, a block
 // tag always ends its paragraph, and an inline tag holds at most one line.
 void children_hold_lines_and_inline_tags() {
-  const cursiv::DocComment comment = cursiv::parse_doc_comment(
+  const cursiv::DocComment comment = cursiv::parseDocComment(
       "/** pre {@link A B} post\n * @param x the @deprecated thing\n */");
   CHECK(comment.elements.size() == 2);
   for (const cursiv::DocCommentNode& element : comment.elements)
@@ -419,7 +419,7 @@ void children_hold_lines_and_inline_tags() {
 // An empty {@link} still parses: an inline tag holding an empty line.
 void an_empty_inline_link_still_parses() {
   const cursiv::DocComment comment =
-      cursiv::parse_doc_comment("/** pre {@link} post */");
+      cursiv::parseDocComment("/** pre {@link} post */");
   const std::string text = comment.toString();
   CHECK(text.find("pre") != std::string::npos);
   CHECK(text.find("post") != std::string::npos);
@@ -429,16 +429,16 @@ void unfinished_inline_tags_leave_the_following_line_readable() {
   std::string unfinished;
   for (unsigned i = 0; i < 4096; ++i) unfinished += "{@link x ";
   unfinished.pop_back();
-  const auto comment = cursiv::parse_doc_comment(
+  const auto comment = cursiv::parseDocComment(
       "/** " + unfinished + "\n * {@link https://example.org shown}\n */");
   const std::string rendered = comment.toMarkdown();
   CHECK(rendered.starts_with(unfinished));
   CHECK(rendered.ends_with("[shown](https://example.org)"));
-  CHECK(cursiv::parse_doc_comment("/** {@link x\r {@link https://a label} */")
+  CHECK(cursiv::parseDocComment("/** {@link x\r {@link https://a label} */")
             .toMarkdown().ends_with("[label](https://a)"));
   // A lone CR ends the line as LF does, so the tag it splits stays text.
   for (const std::string_view eol : {"\n", "\r"})
-    CHECK(cursiv::parse_doc_comment("/** {@bad x {@link " + std::string(eol) +
+    CHECK(cursiv::parseDocComment("/** {@bad x {@link " + std::string(eol) +
                                     "https://a label} */")
               .toMarkdown() == "{@bad x {@link\nhttps://a label}");
 }
@@ -454,7 +454,7 @@ void every_line_ending_splits_lines() {
       text += line;
     }
     return std::pair{
-        cursiv::parse_doc_comment(text),
+        cursiv::parseDocComment(text),
         cursiv::TextDocument::create("file:///doc.ws", "ws", 1, text)
             .positionAt(static_cast<cursiv::TextOffset>(text.find("first")))};
   };
@@ -484,7 +484,7 @@ void every_line_ending_splits_lines() {
 // space, and the whole render is trimmed.
 void paragraphs_join_with_a_blank_line() {
   const cursiv::DocComment comment =
-      cursiv::parse_doc_comment("/**\n * A\n * B\n * \n * C\n */");
+      cursiv::parseDocComment("/**\n * A\n * B\n * \n * C\n */");
   CHECK(comment.toString() == "A\n B\n\n C");
   CHECK(comment.toMarkdown() == "A\n B\n\n C");
 }
@@ -492,17 +492,17 @@ void paragraphs_join_with_a_blank_line() {
 // Blank lines traverse the render untouched: newlines come out as written.
 void empty_lines_are_preserved() {
   const cursiv::DocComment comment =
-      cursiv::parse_doc_comment("/** ```\nA\n\n\nB\nC\n\n``` */");
+      cursiv::parseDocComment("/** ```\nA\n\n\nB\nC\n\n``` */");
   CHECK(comment.toMarkdown() == "```\nA\n\n\nB\nC\n\n```");
 }
 
 // The line marker is decoration: present, absent, or custom, the text reads
 // the same.
 void the_render_survives_the_markers() {
-  CHECK(cursiv::parse_doc_comment("/** A \n * B \n */").toString() == "A\n B");
-  CHECK(cursiv::parse_doc_comment("/** A \n B */").toString() == "A\n B");
+  CHECK(cursiv::parseDocComment("/** A \n * B \n */").toString() == "A\n B");
+  CHECK(cursiv::parseDocComment("/** A \n B */").toString() == "A\n B");
   const cursiv::DocCommentParseOptions xml{.start = "<!--", .end = "-->"};
-  CHECK(cursiv::parse_doc_comment("<!-- A \n B -->", {}, xml).toString() ==
+  CHECK(cursiv::parseDocComment("<!-- A \n B -->", {}, xml).toString() ==
         "A\n B");
 }
 
@@ -511,7 +511,7 @@ void the_render_survives_the_markers() {
 // to its start.
 void the_range_spans_the_elements() {
   const cursiv::DocComment tagged =
-      cursiv::parse_doc_comment("/** A \n   *  @B  \n* @C D \n*/");
+      cursiv::parseDocComment("/** A \n   *  @B  \n* @C D \n*/");
   CHECK(tagged.elements.size() == 3);
   CHECK(tagged.elements[0].kind == cursiv::DocCommentNode::Kind::Paragraph);
   CHECK(tagged.elements[0].children.size() == 1);
@@ -530,7 +530,7 @@ void the_range_spans_the_elements() {
   CHECK(tagged.range.start.line == 0 && tagged.range.start.character == 3);
   CHECK(tagged.range.end.line == 2 && tagged.range.end.character == 6);
 
-  const cursiv::DocComment empty = cursiv::parse_doc_comment("/** */");
+  const cursiv::DocComment empty = cursiv::parseDocComment("/** */");
   CHECK(empty.range.start.line == empty.range.end.line &&
         empty.range.start.character == empty.range.end.character);
 }
@@ -540,7 +540,7 @@ void the_range_spans_the_elements() {
 // appended empty line is a zero-width child the parent's range still covers.
 void the_multiline_text_carries_line_by_line_ranges() {
   const cursiv::DocComment c =
-      cursiv::parse_doc_comment("/** A \n   *   B  \n*C \n\n D*/");
+      cursiv::parseDocComment("/** A \n   *   B  \n*C \n\n D*/");
   CHECK(c.elements.size() == 2);
   CHECK(c.range.start.line == 0 && c.range.start.character == 3);
   CHECK(c.range.end.line == 4 && c.range.end.character == 2);
@@ -568,7 +568,7 @@ void the_multiline_text_carries_line_by_line_ranges() {
 }
 
 void the_line_children_of_a_paragraph_are_individually_ranged() {
-  const cursiv::DocComment c = cursiv::parse_doc_comment("/** A \n * B \n */");
+  const cursiv::DocComment c = cursiv::parseDocComment("/** A \n * B \n */");
   CHECK(c.elements.size() == 1);
   CHECK(c.elements[0].children.size() == 2);
   CHECK(c.elements[0].children[0].text == " A");
@@ -583,7 +583,7 @@ void the_line_children_of_a_paragraph_are_individually_ranged() {
 // The start position offsets the first line by its character, later lines by
 // nothing.
 void a_start_position_offsets_every_range() {
-  const cursiv::DocComment c = cursiv::parse_doc_comment("/** A */", {4, 7});
+  const cursiv::DocComment c = cursiv::parseDocComment("/** A */", {4, 7});
   CHECK(c.elements.size() == 1);
   CHECK(c.elements[0].range.start.line == 4);
   CHECK(c.elements[0].range.start.character == 10);
@@ -593,7 +593,7 @@ void a_start_position_offsets_every_range() {
 
 void the_inline_tag_splits_into_line_tag_line() {
   const cursiv::DocComment c =
-      cursiv::parse_doc_comment("/** A {@link B} C */");
+      cursiv::parseDocComment("/** A {@link B} C */");
   CHECK(c.elements.size() == 1);
   const cursiv::DocCommentNode& para = c.elements[0];
   CHECK(para.children.size() == 3);
@@ -609,7 +609,7 @@ void the_inline_tag_splits_into_line_tag_line() {
 // reaches the link's content, and a leading inline belongs to the tag.
 void a_range_covers_its_children() {
   const cursiv::DocComment c =
-      cursiv::parse_doc_comment("/**\n * @param b {@link Value}\n */");
+      cursiv::parseDocComment("/**\n * @param b {@link Value}\n */");
   CHECK(c.elements.size() == 1);
   const cursiv::DocCommentNode& tag = c.elements[0];
   CHECK(tag.range.start.character == 3 && tag.range.end.character == 24);
@@ -617,7 +617,7 @@ void a_range_covers_its_children() {
   CHECK(tag.children[1].range.end.character == 24);
 
   const cursiv::DocComment see =
-      cursiv::parse_doc_comment("/** @see {@link A} */");
+      cursiv::parseDocComment("/** @see {@link A} */");
   CHECK(see.elements.size() == 1);
   CHECK(see.elements[0].name == "see");
   CHECK(see.elements[0].children.size() == 1);
@@ -629,17 +629,17 @@ void a_range_covers_its_children() {
 // content.
 void a_tag_name_is_letters_in_any_script() {
   const cursiv::DocComment accent =
-      cursiv::parse_doc_comment("/** @\xC3\xA9tat2 oui */");
+      cursiv::parseDocComment("/** @\xC3\xA9tat2 oui */");
   CHECK(accent.getTag("\xC3\xA9tat2") != nullptr);
 
-  const cursiv::DocComment digit = cursiv::parse_doc_comment("/** @2nd oui */");
+  const cursiv::DocComment digit = cursiv::parseDocComment("/** @2nd oui */");
   CHECK(digit.elements.size() == 1);
   CHECK(digit.elements[0].kind == cursiv::DocCommentNode::Kind::Tag);
   CHECK(digit.elements[0].name.empty());
   CHECK(digit.elements[0].children[0].text == "2nd oui");
 
   const cursiv::DocComment inlineAccent =
-      cursiv::parse_doc_comment("/** pre {@\xC3\xA9tat X} post */");
+      cursiv::parseDocComment("/** pre {@\xC3\xA9tat X} post */");
   CHECK(inlineAccent.elements.size() == 1);
   CHECK(std::ranges::any_of(inlineAccent.elements[0].children,
                             [](const cursiv::DocCommentNode& child) {
@@ -655,56 +655,65 @@ void an_empty_line_marker_keeps_the_line() {
   cursiv::DocCommentParseOptions noLine;
   noLine.line = "";
   const cursiv::DocComment c =
-      cursiv::parse_doc_comment("/**\n * a\n */", {}, noLine);
+      cursiv::parseDocComment("/**\n * a\n */", {}, noLine);
   CHECK(c.toString() == "* a");
 
   cursiv::DocCommentParseOptions noStart;
   noStart.start = "";
   const cursiv::DocComment d =
-      cursiv::parse_doc_comment("* a\n * b\n */", {}, noStart);
+      cursiv::parseDocComment("* a\n * b\n */", {}, noStart);
   CHECK(d.toString() == "a\n b");
 }
 
 void links_render_to_markdown() {
-  CHECK(cursiv::parse_doc_comment("/** {@link https://example.org/} */")
+  CHECK(cursiv::parseDocComment("/** {@link https://example.org/} */")
             .toMarkdown() == "[https://example.org/](https://example.org/)");
-  CHECK(cursiv::parse_doc_comment("/** {@linkcode https://example.org/} */")
+  CHECK(cursiv::parseDocComment("/** {@linkcode https://example.org/} */")
             .toMarkdown() == "[`https://example.org/`](https://example.org/)");
   cursiv::DocCommentRenderOptions code;
   code.link = cursiv::DocCommentRenderOptions::LinkStyle::Code;
-  CHECK(cursiv::parse_doc_comment("/** {@link https://example.org/} */")
+  CHECK(cursiv::parseDocComment("/** {@link https://example.org/} */")
             .toMarkdown(code) ==
         "[`https://example.org/`](https://example.org/)");
-  CHECK(cursiv::parse_doc_comment("/** {@link Value} */").toMarkdown() ==
+  CHECK(cursiv::parseDocComment("/** {@link Value} */").toMarkdown() ==
         "Value");
-  CHECK(cursiv::parse_doc_comment("/** {@link https://x/|shown} */")
+  CHECK(cursiv::parseDocComment("/** {@link https://x/|shown} */")
             .toMarkdown() == "[shown](https://x/)");
   // A bare `://` carries no scheme: text, never a link.
-  CHECK(cursiv::parse_doc_comment("/** {@link ://x} */").toMarkdown() ==
+  CHECK(cursiv::parseDocComment("/** {@link ://x} */").toMarkdown() ==
         "://x");
   CHECK(
-      cursiv::parse_doc_comment("/** {@link x:////a label} */").toMarkdown() ==
+      cursiv::parseDocComment("/** {@link x:////a label} */").toMarkdown() ==
       "x:////a");
-  CHECK(cursiv::parse_doc_comment("/** {@link x:%2f%2fa label} */")
+  CHECK(cursiv::parseDocComment("/** {@link x:%2f%2fa label} */")
             .toMarkdown() == "x:%2f%2fa");
   CHECK(
-      cursiv::parse_doc_comment("/** {@link x:/%2Fa label} */").toMarkdown() ==
+      cursiv::parseDocComment("/** {@link x:/%2Fa label} */").toMarkdown() ==
       "x:/%2Fa");
-  CHECK(cursiv::parse_doc_comment("/** {@link x://host//a label} */")
+  CHECK(cursiv::parseDocComment("/** {@link x://host//a label} */")
             .toMarkdown() == "[label](x://host//a)");
-  CHECK(cursiv::parse_doc_comment("/** {@link file:relative label} */")
+  CHECK(cursiv::parseDocComment("/** {@link file:relative label} */")
             .toMarkdown() == "[label](file:relative)");
+  // The destination escapes `(`, `)` and `\`, so it holds the whole URI.
+  CHECK(cursiv::parseDocComment("/** {@link https://x/a)b label} */")
+            .toMarkdown() == "[label](https://x/a\\)b)");
+  CHECK(cursiv::parseDocComment("/** {@link https://x/(a) label} */")
+            .toMarkdown() == "[label](https://x/\\(a\\))");
+  CHECK(cursiv::parseDocComment("/** {@link https://x/a\\( label} */")
+            .toMarkdown() == "[label](https://x/a\\\\\\()");
+  CHECK(cursiv::parseDocComment("/** {@link mailto:a)b label} */")
+            .toMarkdown() == "[label](mailto:a\\)b)");
 }
 
 void inline_link_trims_and_falls_back_on_empty_display() {
-  CHECK(cursiv::parse_doc_comment("/** {@link Value } */").toMarkdown() ==
+  CHECK(cursiv::parseDocComment("/** {@link Value } */").toMarkdown() ==
         "Value");
   // No scheme: the target is written, whatever the display said.
-  CHECK(cursiv::parse_doc_comment("/** {@link a|b } */").toMarkdown() == "a");
-  CHECK(cursiv::parse_doc_comment("/** {@link\tA\tB} */").toMarkdown() == "A");
-  CHECK(cursiv::parse_doc_comment("/** {@link -://x} */").toMarkdown() ==
+  CHECK(cursiv::parseDocComment("/** {@link a|b } */").toMarkdown() == "a");
+  CHECK(cursiv::parseDocComment("/** {@link\tA\tB} */").toMarkdown() == "A");
+  CHECK(cursiv::parseDocComment("/** {@link -://x} */").toMarkdown() ==
         "-://x");
-  CHECK(cursiv::parse_doc_comment("/** {@link mailto:x y} */").toMarkdown() ==
+  CHECK(cursiv::parseDocComment("/** {@link mailto:x y} */").toMarkdown() ==
         "[y](mailto:x)");
 }
 
@@ -714,27 +723,27 @@ void a_custom_link_renderer_overrides_the_default() {
     return std::optional<std::string>("[[" + std::string(target) + "|" +
                                       std::string(display) + "]]");
   };
-  CHECK(cursiv::parse_doc_comment("/** {@link target shown} */")
+  CHECK(cursiv::parseDocComment("/** {@link target shown} */")
             .toMarkdown(options) == "[[target|shown]]");
 }
 
 void single_line_tags_render_with_an_em_dash() {
   const cursiv::DocComment c =
-      cursiv::parse_doc_comment("/** @deprecated Since 1.0 */");
+      cursiv::parseDocComment("/** @deprecated Since 1.0 */");
   CHECK(c.toMarkdown() == "*@deprecated* — Since 1.0");
   CHECK(c.toString() == "@deprecated Since 1.0");
 }
 
 void multi_line_tags_render_each_line_on_its_own_line() {
   const cursiv::DocComment c =
-      cursiv::parse_doc_comment("/** @deprecated Since\n1.0*/");
+      cursiv::parseDocComment("/** @deprecated Since\n1.0*/");
   CHECK(c.toMarkdown() == "*@deprecated*\nSince\n1.0");
   CHECK(c.toString() == "@deprecated\nSince\n1.0");
 }
 
 void the_tag_style_changes_only_the_marker() {
   const cursiv::DocComment c =
-      cursiv::parse_doc_comment("/** @deprecated Since 1.0 */");
+      cursiv::parseDocComment("/** @deprecated Since 1.0 */");
   cursiv::DocCommentRenderOptions bold;
   bold.tag = cursiv::DocCommentRenderOptions::TagStyle::Bold;
   CHECK(c.toMarkdown(bold) == "**@deprecated** — Since 1.0");
@@ -753,9 +762,9 @@ void a_custom_tag_renderer_overrides_every_tag() {
     return std::optional<std::string>("<" + std::string(name) + ":" +
                                       std::string(content) + ">");
   };
-  CHECK(cursiv::parse_doc_comment("/** @deprecated soon */")
+  CHECK(cursiv::parseDocComment("/** @deprecated soon */")
             .toMarkdown(options) == "<deprecated:soon>");
-  CHECK(cursiv::parse_doc_comment("/** {@link target shown} */")
+  CHECK(cursiv::parseDocComment("/** {@link target shown} */")
             .toMarkdown(options) == "<link:target shown>");
 }
 
@@ -998,7 +1007,7 @@ void a_node_without_a_record_says_nothing() {
   const World w;
   const auto doc = w.built("file:///w/a.ws", "entity Person { }\n");
   ws::ast::Entity made;
-  made.type = &cursiv::ast_type_tag<ws::ast::Entity>;
+  made.type = &cursiv::kAstTypeTag<ws::ast::Entity>;
   const cursiv::DefaultDocumentationProvider docs(*w.ws);
   CHECK(!docs.getDocumentation(made));
   CHECK(!docs.getDocumentation(made, doc.get()));

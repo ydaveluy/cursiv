@@ -10,6 +10,6 @@
 
 namespace cursiv {
 
-[[nodiscard]] std::string format_observation(const Observation&);
+[[nodiscard]] std::string formatObservation(const Observation&);
 
 }  // namespace cursiv

@@ -3,7 +3,6 @@
 #pragma once
 
 #include <cstdint>
-#include <vector>
 
 #include "recovery_metric/support/AstOverlap.hpp"
 #include "recovery_metric/support/TextKept.hpp"
@@ -25,8 +24,6 @@ struct RepairVerdict {
   // parse(faulted) over parse(valid), in released instructions; negative when
   // no counter was read.
   double cost = -1;
-  // How often the parse reached each ceiling its caller names.
-  std::vector<std::uint32_t> ceilings;
 };
 
 }  // namespace cursiv::recovery_metric

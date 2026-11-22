@@ -1,7 +1,6 @@
 #include "cursiv/workspace/LocalSymbols.hpp"
 
 #include <algorithm>
-#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -21,201 +20,100 @@ namespace cursiv {
 
 void LocalSymbols::clear() noexcept {
   _entries.clear();
-  _containerOf.clear();
-  _nextSameName.clear();
   _groups.clear();
   _names.clear();
-  _groupMask = 0;
   _nameMask = 0;
+  _nextSameName.clear();
   _held.reset();
   _shortcuts.reset();
 }
-namespace {
 
-
-}  // namespace
-
-void LocalSymbols::reserve(std::size_t entries) {
-  _entries.reserve(entries);
-  _containerOf.reserve(entries);
-}
+void LocalSymbols::reserve(std::size_t entries) { _entries.reserve(entries); }
 
 void LocalSymbols::add(const AstNode* container,
                        AstNodeDescription description) {
-  // Null is the empty slot of every table `buildIndex` builds.
+  // A null container marks an empty group.
   assert(container != nullptr && "a local symbol needs a container");
+  if (_groups.empty() || _groups.back().container != container)
+    _groups.push_back(
+        {container, static_cast<std::uint32_t>(_entries.size()), 0});
   _entries.push_back(std::move(description));
-  _containerOf.push_back(container);
 }
 
 void LocalSymbols::buildIndex() {
   const std::size_t count = _entries.size();
-  // Indexing drops `_containerOf`: an indexed table has nothing left to do.
-  if (count == 0 || _containerOf.empty()) return;
-  // Positions, counts and slots are 32 bits, and a table is at least twice its
-  // entries: more than 2^31 entries is refused before anything changes.
-  if (count > std::size_t{1} << 31u)
+  if (count == 0 || !_names.empty()) return;
+  if (count > (std::size_t{1} << 31u) || count > _names.max_size() / 2)
     throw std::length_error("cursiv: too many local symbols in one document");
 
-  // The groups' slots in the order their containers were first met: the order
-  // the entries lie in and the name table is filled in, whatever the addresses.
-  std::vector<std::uint32_t> met;
-  // One container already defines the only group: no counting or source
-  // permutation is needed, whatever names or declarations it contains.
-  if (const AstNode* const firstContainer = _containerOf.front();
-      std::all_of(_containerOf.begin() + 1, _containerOf.end(),
-                  [firstContainer](const AstNode* at) {
-                    return at == firstContainer;
-                  })) {
-    _groups.assign(detail::table_size(1), Group{});
-    _groupMask = _groups.size() - 1;
-    met.push_back(static_cast<std::uint32_t>(
-        static_cast<std::size_t>(mix(firstContainer)) & _groupMask));
-    _groups[met.front()] =
-        Group{firstContainer, 0, static_cast<std::uint32_t>(count)};
+  // Link disjoint runs of the same scope, preserving declaration order.
+  std::vector<std::uint32_t> slots;
+  {
+    auto runs = std::move(_groups);
+    std::vector<std::uint32_t> last(detail::table_size(runs.size()), kNone);
+    std::vector<std::uint32_t> next;
+    for (std::uint32_t i = 0; i < runs.size(); ++i) {
+      Group& run = runs[i];
+      run.count = (i + 1 < runs.size() ? runs[i + 1].begin : count) - run.begin;
+      std::size_t at = mix(run.container) & (last.size() - 1);
+      while (last[at] != kNone && runs[last[at]].container != run.container)
+        at = (at + 1) & (last.size() - 1);
+      if (last[at] == kNone) {
+        slots.push_back(i);
+      } else {
+        if (next.empty()) next.assign(runs.size(), kNone);
+        next[last[at]] = i;
+      }
+      last[at] = i;
+    }
+
+    _groups.assign(detail::table_size(slots.size()), Group{});
+    const auto mask = _groups.size() - 1;
     const std::size_t words = _groups.size() / 2;
     _held = std::make_unique<std::uint64_t[]>(1 + words);
     _held[0] = words * 64 - 1;
-    const std::size_t bit = heldBit(firstContainer, _held[0]);
-    _held[1 + (bit >> 6u)] |= std::uint64_t{1} << (bit & 63u);
-    if (_entries.capacity() != count)
-      std::vector<AstNodeDescription>(_entries).swap(_entries);
-    _containerOf.clear();
-    _containerOf.shrink_to_fit();
-  } else {
-    // 1. The containers, and how many entries each holds. They are met in a
-    // probe table as wide as the entries, with one bit per slot, then filed in
-    // slot order.
-    struct Holder {
-      const AstNode* container;
-      std::uint32_t count;
-      std::uint32_t slot;
-      std::uint32_t next;
-    };
-    const std::size_t wideSize = detail::table_size(count);
-    const std::size_t wideMask = wideSize - 1;
-    std::vector<std::uint64_t> taken((wideSize + 63) / 64);
-    const auto isTaken = [&](std::size_t at) {
-      return ((taken[at >> 6u] >> (at & 63u)) & 1u) != 0;
-    };
-    const auto holderAt =
-        std::make_unique_for_overwrite<std::uint32_t[]>(wideSize);
-    const auto holders = std::make_unique_for_overwrite<Holder[]>(count);
-    const auto holderOf =
-        std::make_unique_for_overwrite<std::uint32_t[]>(count);
-    std::uint32_t containers = 0;
-    const AstNode* last = nullptr;
-    std::uint32_t lastHolder = 0;
-    bool alreadyGrouped = true;
-    for (std::size_t i = 0; i < count; ++i) {
-      if (const AstNode* container = _containerOf[i]; container != last) {
-        std::size_t at = static_cast<std::size_t>(mix(container)) & wideMask;
-        while (isTaken(at) && holders[holderAt[at]].container != container)
-          at = (at + 1) & wideMask;
-        if (!isTaken(at)) {
-          taken[at >> 6u] |= std::uint64_t{1} << (at & 63u);
-          holderAt[at] = containers;
-          // The first source position is also the group's beginning when
-          // no container returns in a later run. The scatter reuses it below.
-          holders[containers++] =
-              Holder{container, 0, 0, static_cast<std::uint32_t>(i)};
-        } else {
-          alreadyGrouped = false;
+    std::vector<AstNodeDescription> grouped;
+    const bool interleaved = !next.empty();
+    if (interleaved) grouped.reserve(count);
+    for (auto& slot : slots) {
+      const auto first = slot;
+      Group group = runs[first];
+      if (interleaved) {
+        group.begin = static_cast<std::uint32_t>(grouped.size());
+        for (auto i = first; i != kNone; i = next[i]) {
+          const auto begin = _entries.begin() + runs[i].begin;
+          grouped.insert(grouped.end(), begin, begin + runs[i].count);
         }
-        last = container;
-        lastHolder = holderAt[at];
+        group.count = static_cast<std::uint32_t>(grouped.size()) - group.begin;
       }
-      ++holders[lastHolder].count;
-      holderOf[i] = lastHolder;
+      std::size_t at = mix(group.container) & mask;
+      while (_groups[at].container != nullptr) at = (at + 1) & mask;
+      _groups[at] = group;
+      slot = static_cast<std::uint32_t>(at);
+      const std::size_t bit = heldBit(group.container, _held[0]);
+      _held[1 + (bit >> 6u)] |= std::uint64_t{1} << (bit & 63u);
     }
-    _groups.assign(detail::table_size(containers), Group{});
-    _groupMask = _groups.size() - 1;
-    // Sixty-four bits per container at least, so a false "maybe" is rare.
-    const std::size_t words = _groups.size() / 2;
-    _held = std::make_unique<std::uint64_t[]>(1 + words);
-    _held[0] = words * 64 - 1;
-    for (std::size_t word = 0; word < taken.size(); ++word)
-      for (std::uint64_t bits = taken[word]; bits != 0; bits &= bits - 1) {
-        Holder& m = holders[holderAt[word * 64 + std::countr_zero(bits)]];
-        std::size_t at = static_cast<std::size_t>(mix(m.container)) & _groupMask;
-        while (_groups[at].container != nullptr) at = (at + 1) & _groupMask;
-        _groups[at] = Group{m.container, m.next, m.count};
-        m.slot = static_cast<std::uint32_t>(at);
-        const std::size_t bit = heldBit(m.container, _held[0]);
-        _held[1 + (bit >> 6u)] |= std::uint64_t{1} << (bit & 63u);
-      }
-    met.reserve(containers);
-    for (std::uint32_t k = 0; k < containers; ++k)
-      met.push_back(holders[k].slot);
-
-    // A group already in one source run needs no permutation. Group order
-    // is private; declaration order inside every group stays exactly as read.
-    if (alreadyGrouped) {
-      // Keep the grouped descriptions compact without rebuilding their order.
-      if (_entries.capacity() != count)
-        std::vector<AstNodeDescription>(_entries).swap(_entries);
-    } else {
-      // 2. Where each group starts, in the order the containers were met. The
-      // scatter below keeps the declaration order inside each group.
-      std::uint32_t next = 0;
-      for (std::uint32_t k = 0; k < containers; ++k) {
-        Group& g = _groups[met[k]];
-        g.begin = next;
-        holders[k].next = next;
-        next += g.count;
-      }
-
-      // 3. The counting sort, by destination: each position learns which entry
-      // it takes, then the entries are copied in position order, so the new array
-      // is written once and never cleared first.
-      const auto from = std::make_unique_for_overwrite<std::uint32_t[]>(count);
-      for (std::size_t i = 0; i < count; ++i)
-        from[holders[holderOf[i]].next++] = static_cast<std::uint32_t>(i);
-      std::vector<AstNodeDescription> grouped;
-      grouped.reserve(count);
-      for (std::size_t at = 0; at < count; ++at)
-        grouped.push_back(_entries[from[at]]);
+    if (grouped.empty())
+      _entries.shrink_to_fit();
+    else
       _entries = std::move(grouped);
-    }
-
-    // The groups now carry every container and range the name table needs.
-    // Release the build scaffolding before allocating that table.
-    _containerOf.clear();
-    _containerOf.shrink_to_fit();
   }
 
-  // 4. The name table, after the last move: its keys are views of the entries'
-  // names. The groups go in the order they were met, the first keeping its
-  // slots; each run is walked backwards so homonyms are prepended in
-  // declaration order.
-  _names.assign(detail::table_size(count), NameSlot{});
+  _names.resize(detail::table_size(count));
   _nameMask = _names.size() - 1;
-  _nextSameName.assign(count, kNone);
-  for (const std::uint32_t g : met) {
-    const AstNode* container = _groups[g].container;
-    const std::uint64_t containerHash = mix(container);
-    const std::uint32_t begin = _groups[g].begin;
-    for (std::uint32_t i = begin + _groups[g].count; i-- > begin;) {
-      const std::string_view name = _entries[i].name;
-      const std::uint64_t hash = containerHash ^ hashName(name);
-      const auto tag = static_cast<std::uint32_t>(hash >> 32u);
-      std::size_t at = static_cast<std::size_t>(hash) & _nameMask;
-      for (;;) {
-        NameSlot& slot = _names[at];
-        if (slot.container == nullptr) {
-          slot = NameSlot{container, i, tag};
-          break;
-        }
-        if (slot.container == container && slot.tag == tag &&
-            folded_equal(_entries[slot.first].name, name)) {
-          // Walking backwards lets us prepend in constant time while keeping
-          // declaration order, even for thousands of overloads of one name.
-          _nextSameName[i] = slot.first;
-          slot.first = i;
-          break;
-        }
-        at = (at + 1) & _nameMask;
+  for (const auto slotIndex : slots) {
+    const Group& group = _groups[slotIndex];
+    const auto scopeHash = mix(group.container);
+    for (auto i = group.begin + group.count; i-- > group.begin;) {
+      const auto name = _entries[i].name;
+      const auto hash = scopeHash ^ hashName(name);
+      const auto at = nameSlot(group.container, hash, name).first;
+      auto& slot = _names[at];
+      if (slot.first != kNone) {
+        if (_nextSameName.empty()) _nextSameName.assign(count, kNone);
+        _nextSameName[i] = slot.first;
       }
+      slot = {group.container, i, static_cast<std::uint32_t>(hash >> 32u)};
     }
   }
 
@@ -285,9 +183,7 @@ const LocalSymbols::Shortcut* LocalSymbols::shortcut(
       std::vector<Shortcut> found;
       if (!each_shortcut(
               tree->parseResult.nodes(), document, kStride,
-              [&](const AstNode* at) {
-                return mayHold(at) && group(at) != nullptr;
-              },
+              [&](const AstNode* at) { return group(at) != nullptr; },
               [&](const AstNode* at, const AstNode* holder) {
                 found.push_back(Shortcut{at, holder});
               }))
@@ -324,41 +220,17 @@ const LocalSymbols::Shortcut* LocalSymbols::shortcut(
   }
 }
 
-LocalSymbols::NameMatches LocalSymbols::findHeld(
+LocalSymbols::NameMatches LocalSymbols::find(
     const AstNode* container, std::string_view name,
     std::uint64_t nameHash) const noexcept {
-  assert((_entries.empty() || !_names.empty()) &&
-         "LocalSymbols::buildIndex() has to run before the first lookup");
-  const std::uint64_t hash = mix(container) ^ nameHash;
-  const auto tag = static_cast<std::uint32_t>(hash >> 32u);
-  std::size_t at = static_cast<std::size_t>(hash) & _nameMask;
-  for (;;) {
-    const NameSlot& slot = _names[at];
-    if (slot.container == nullptr) return {};
-    if (slot.container == container && slot.tag == tag &&
-        folded_equal(_entries[slot.first].name, name))
-      return NameMatches{this, slot.first};
-    at = (at + 1) & _nameMask;
-  }
-}
-
-const LocalSymbols::Group* LocalSymbols::group(
-    const AstNode* container) const noexcept {
-  assert((_entries.empty() || !_groups.empty()) &&
-         "LocalSymbols::buildIndex() has to run before the first lookup");
-  if (_groups.empty()) return nullptr;
-  std::size_t at = static_cast<std::size_t>(mix(container)) & _groupMask;
-  for (;;) {
-    const Group& g = _groups[at];
-    if (g.container == nullptr) return nullptr;
-    if (g.container == container) return &g;
-    at = (at + 1) & _groupMask;
-  }
+  if (!mayHold(container)) return {};
+  const auto at = nameSlot(container, mix(container) ^ nameHash, name).first;
+  return {this, _names[at].first};
 }
 
 std::span<const AstNodeDescription> LocalSymbols::forContainer(
     const AstNode* container) const noexcept {
-  const Group* g = mayHold(container) ? group(container) : nullptr;
+  const Group* g = group(container);
   return g == nullptr ? std::span<const AstNodeDescription>{}
                       : std::span<const AstNodeDescription>(
                             _entries.data() + g->begin, g->count);

@@ -194,6 +194,8 @@ void a_deep_data_rule_costs_its_depth(const CaretEngine& engine) {
 // `beta`: completion offers the targets of both.
 void readings_of_one_token_each_name_their_member(const CaretEngine& engine) {
   const World world(engine);
+  CHECK(identifier_members(world, "fn f() { alpha a; split ") ==
+        (std::vector<std::string_view>{"alpha"}));
   const std::vector<std::string_view> both{"alpha", "beta"};
   for (const std::string_view head : {"either", "dotted", "opens"}) {
     const std::string text =

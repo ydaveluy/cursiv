@@ -58,37 +58,80 @@ WorkspaceValidator::~WorkspaceValidator() noexcept {
     shared.documentBuilder->removeDocumentUpdateListener(*this);
 }
 
-void WorkspaceValidator::noteChainedDocument(cursiv::DocumentId from,
-                                             cursiv::DocumentId through) const {
-  const std::scoped_lock lock(_chainedMutex);
-  _chainedDocuments[from].insert(through);
+std::optional<bool> WorkspaceValidator::noteStep(const ast::Entity& from,
+                                                 const ast::Entity& to) const {
+  const cursiv::Document* const left = from.getDocument();
+  const cursiv::Document* const entered = to.getDocument();
+  if (left == nullptr || entered == nullptr) return std::nullopt;
+  const Step source{.document = left->id, .entity = &from};
+  const Step target{.document = entered->id, .entity = &to};
+  const std::scoped_lock lock(_stepsMutex);
+  Chained& onward = _steps[target];
+  if (Chained& here = _steps[source]; here.next != target) {
+    onward.from.push_back(source);
+    here.next = target;
+  }
+  return onward.ends;
 }
 
-// Called after the update's resets. A validated document whose chains went
-// through a removed or unlinked document goes back to validation; any other
-// drops its entry, which its next validation writes again.
+void WorkspaceValidator::noteEnds(const ast::Entity& start,
+                                  std::span<const ast::Entity* const> entered,
+                                  bool ends) const {
+  const std::scoped_lock lock(_stepsMutex);
+  const auto mark = [this, ends](const ast::Entity& entity) {
+    if (const cursiv::Document* const document = entity.getDocument())
+      if (const auto found = _steps.find({document->id, &entity});
+          found != _steps.end())
+        found->second.ends = ends;
+  };
+  mark(start);
+  for (const ast::Entity* const entity : entered) mark(*entity);
+}
+
+// Called after the update's resets. Forgets every verdict, and drops the steps
+// of removed or unlinked documents with every step whose chain went on through
+// one of them; a validated document that loses a step goes back to validation.
 void WorkspaceValidator::onUpdate(std::span<const std::string_view>,
                                   std::span<const std::string_view>) {
   const cursiv::Documents& store = *shared.documents;
-  const auto moved = [&store](cursiv::DocumentId id) {
-    const std::shared_ptr<cursiv::Document> document = store.getDocument(id);
-    return document == nullptr ||
-           document->state.load() < cursiv::DocumentState::IndexedReferences;
-  };
-  const std::scoped_lock lock(_chainedMutex);
-  for (auto at = _chainedDocuments.begin(); at != _chainedDocuments.end();) {
+  const std::scoped_lock lock(_stepsMutex);
+  std::vector<Step> pending;
+  for (auto& [step, chained] : _steps) {
+    chained.ends.reset();
+    if (const std::shared_ptr<cursiv::Document> document =
+            store.getDocument(step.document);
+        document == nullptr ||
+        document->state.load() < cursiv::DocumentState::IndexedReferences)
+      pending.push_back(step);
+  }
+  if (pending.empty()) return;
+  std::unordered_set<Step, StepHash> reached(pending.begin(), pending.end());
+  while (!pending.empty()) {
+    const auto found = _steps.find(pending.back());
+    pending.pop_back();
+    if (found == _steps.end()) continue;
+    for (const Step& from : found->second.from)
+      if (reached.insert(from).second) pending.push_back(from);
+  }
+  std::unordered_set<cursiv::DocumentId> sent;
+  for (const Step& step : reached) {
+    if (!sent.insert(step.document).second) continue;
     const std::shared_ptr<cursiv::Document> document =
-        store.getDocument(at->first);
+        store.getDocument(step.document);
     if (document != nullptr &&
-        document->state.load() == cursiv::DocumentState::Validated) {
-      if (std::ranges::none_of(at->second, moved)) {
-        ++at;
-        continue;
-      }
+        document->state.load() == cursiv::DocumentState::Validated)
       shared.documentBuilder->resetToState(
           *document, cursiv::DocumentState::IndexedReferences);
+  }
+  for (auto at = _steps.begin(); at != _steps.end();) {
+    if (reached.contains(at->first)) {
+      at = _steps.erase(at);
+      continue;
     }
-    at = _chainedDocuments.erase(at);
+    std::erase_if(at->second.from, [&reached](const Step& from) {
+      return reached.contains(from);
+    });
+    ++at;
   }
 }
 
@@ -143,25 +186,32 @@ WorkspaceValidator::Exit WorkspaceValidator::exitOf(
 }
 
 // Follows the chain document by document: entering an entity twice is a loop.
-// Each document entered is noted, since the verdict depends on it.
+// Each step into another document is noted, and the verdict is noted for every
+// entity entered, so a later chain stops at the first one with a verdict.
 void WorkspaceValidator::checkEntityDoesNotExtendItself(
     const ast::Entity& entity, cursiv::ValidationAcceptor& accept) const {
-  const cursiv::Document* const entityDocument = entity.getDocument();
   Passed entered;
+  bool ends = false;
   for (const ast::Entity* at = &entity;;) {
     const Exit exit = exitOf(*at);
-    if (exit.ends) return;
-    if (exit.next == nullptr || exit.next == &entity ||
-        entered.contains(exit.next))
+    if (exit.ends) {
+      ends = true;
       break;
-    if (const cursiv::Document* const next = exit.next->getDocument();
-        entityDocument != nullptr && next != nullptr && next != entityDocument)
-      noteChainedDocument(entityDocument->id, next->id);
+    }
+    if (exit.next == nullptr) break;
+    const std::optional<bool> known = noteStep(*at, *exit.next);
+    if (exit.next == &entity || entered.contains(exit.next)) break;
     entered.add(exit.next);
+    if (known) {
+      ends = *known;
+      break;
+    }
     at = exit.next;
   }
-  accept.error(entity, "Entity extends itself, directly or through a cycle.")
-      .property<&ast::Entity::superType>();
+  if (!entered.all().empty()) noteEnds(entity, entered.all(), ends);
+  if (!ends)
+    accept.error(entity, "Entity extends itself, directly or through a cycle.")
+        .property<&ast::Entity::superType>();
 }
 
 }  // namespace ws

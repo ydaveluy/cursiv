@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <exception>
 #include <format>
+#include <iterator>
 #include <ranges>
 #include <span>
 #include <string>
@@ -42,8 +43,7 @@
 namespace cursiv {
 namespace {
 
-// The fewest nodes a worker checks at once: enough to outweigh the cost of
-// handing them out, few enough that a medium document spreads over the pool.
+// Batch size for long validation walks and for collecting diagnostics.
 constexpr std::size_t kCheckRun = 512;
 
 // The validator whose default node options answered last on this thread.
@@ -63,7 +63,7 @@ std::unordered_set<const AstNode*> refused_nodes(
   };
   const auto askRun = [&](OwnedNodes run, Nodes& unchecked, Nodes& pruned) {
     for (const AstNode* const node : run) {
-      throw_if_cancelled(token);
+      throwIfCancelled(token);
       if (node != &first) note(*node, ask(*node), unchecked, pruned);
     }
   };
@@ -105,7 +105,7 @@ std::unordered_set<const AstNode*> refused_nodes(
         under = known->second;
         break;
       }
-      throw_if_cancelled(token);
+      throwIfCancelled(token);
       path.push_back(up);
     }
     for (const AstNode* up : path) ancestry.emplace(up, under);
@@ -115,11 +115,11 @@ std::unordered_set<const AstNode*> refused_nodes(
 }
 
 // Naming no category runs everything; naming some runs the built-in half only
-// when `built_in` is among them, and the checks only when something else is.
+// when `kBuiltIn` is among them, and the checks only when something else is.
 [[nodiscard]] bool runs_checks(ValidationCategories categories) noexcept {
   return categories.empty() ||
          std::ranges::any_of(categories, [](const ValidationCategory* c) {
-           return c != &built_in;
+           return c != &kBuiltIn;
          });
 }
 // Whether the parse reported a fault; a `bounded` note alone is none.
@@ -141,12 +141,12 @@ std::unordered_set<const AstNode*> refused_nodes(
 void DefaultDocumentValidator::validateDocument(
     const Document& document, std::vector<Diagnostic>& diagnostics,
     const ValidationOptions& options, const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   const std::span<const ValidationCategory* const> categories =
       options.categories;
   // Both halves are filtered, so a client asking only for fast checks does not
   // pay the walk over `document.references()` on every keystroke.
-  const bool builtIn = detail::runs_category(categories, &built_in);
+  const bool builtIn = detail::runs_category(categories, &kBuiltIn);
   if (builtIn) processParsingErrors(document, diagnostics, token);
   // The stops belong to built-in validation, so a filtered pass runs only
   // its selected checks.
@@ -162,12 +162,13 @@ void DefaultDocumentValidator::validateDocument(
     if (!stopOnLinking && runs_checks(categories))
       validateAst(document, diagnostics, options, token);
   }
-  // Sorted into document order on the way out, stably: parse, then linking,
-  // then checks at one position. The (offset, index) pairs are sorted rather
-  // than the large diagnostics, and a list already in order is kept as is.
-  if (diagnostics.size() > 1 &&
-      !std::ranges::is_sorted(
-          diagnostics, {}, [](const Diagnostic& d) { return d.range.begin; })) {
+  // Preserve emission order at equal offsets. Two sorted runs merge directly.
+  const auto position = [](const Diagnostic& d) { return d.range.begin; };
+  const auto middle = std::ranges::is_sorted_until(diagnostics, {}, position);
+  if (middle != diagnostics.end() &&
+      std::ranges::is_sorted(middle, diagnostics.end(), {}, position)) {
+    std::ranges::inplace_merge(diagnostics, middle, {}, position);
+  } else if (middle != diagnostics.end()) {
     std::vector<std::pair<TextOffset, std::size_t>> order;
     order.reserve(diagnostics.size());
     for (std::size_t i = 0; i < diagnostics.size(); ++i)
@@ -179,11 +180,12 @@ void DefaultDocumentValidator::validateDocument(
       ordered.push_back(std::move(diagnostics[i]));
     diagnostics.swap(ordered);
   }
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
 }
 
-// What the recovery inserted or replaced, as edit rows the code-action provider
-// turns into quick fixes.
+// The tokens a repair needed, as edit rows the code-action provider turns into
+// quick fixes: a misspelling's are written over its text, any other repair's
+// after the text it covers, which stays as the author wrote it.
 void DefaultDocumentValidator::attachRepairActions(
     const Document& document, TextRange range,
     const ParseDiagnostic& parseDiagnostic, Diagnostic& diagnostic) const {
@@ -194,12 +196,14 @@ void DefaultDocumentValidator::attachRepairActions(
     return;
 
   constexpr std::size_t kMaxActions = 4;
-  const std::vector<std::string_view> spellings = expected_spellings(
+  const std::vector<std::string_view> spellings = expectedSpellings(
       services.parser->getGrammar(), parseDiagnostic, kMaxActions);
   if (spellings.empty()) return;
 
   const std::string_view text = document.textDocument().getText();
-  const bool insert = range.begin == range.end;
+  const bool insert = parseDiagnostic.kind != DiagnosticKind::Replaced ||
+                      range.begin == range.end;
+  const TextRange at = insert ? TextRange{range.end, range.end} : range;
   const std::string_view replaced =
       insert || range.end > text.size()
           ? std::string_view{}
@@ -209,9 +213,8 @@ void DefaultDocumentValidator::attachRepairActions(
   for (const std::string_view spelling : spellings) {
     if (spelling == replaced) continue;
     rows.push_back(detail::make_action_row(
-        insert ? detail::kInsertEdit : detail::kReplaceEdit,
         std::format("{} '{}'", insert ? "Insert" : "Replace with", spelling),
-        range, std::string(spelling), document.buildRevision));
+        at, std::string(spelling), document.buildRevision));
   }
   if (rows.empty()) return;
 
@@ -234,7 +237,7 @@ void DefaultDocumentValidator::processParsingErrors(
   // Not gated on the tree: a document too damaged to build one still reports
   // its repairs.
   if (parsed.diagnostics.empty()) return;
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   const std::string_view source = getSource();
   const std::string_view text = document.textDocument().getText();
   const Grammar& grammar = services.parser->getGrammar();
@@ -242,25 +245,20 @@ void DefaultDocumentValidator::processParsingErrors(
       *services.parserErrorMessageProvider;
   diagnostics.reserve(diagnostics.size() + parsed.diagnostics.size());
   for (const ParseDiagnostic& d : parsed.diagnostics) {
-    throw_if_cancelled(token);
-    // A diagnostic is its kind: a conversion says so, and everything else is
-    // a repair the parser made.
-    const std::string_view code = d.kind == DiagnosticKind::ConversionError
-                                      ? kConversionError
-                                      : kParseRepaired;
+    throwIfCancelled(token);
+    std::string_view code = kParseRepaired;
+    if (d.kind == DiagnosticKind::ConversionError) code = kConversionError;
     Diagnostic diagnostic;
     diagnostic.range = TextRange{d.begin, d.end};
-    // `bounded` is no fault of the author: it says the reading or the repairs
-    // around it may not be the best.
     diagnostic.severity = d.kind == DiagnosticKind::Bounded
                               ? DiagnosticSeverity::Information
                               : DiagnosticSeverity::Error;
     diagnostic.message = words.buildMessage(grammar, d, text);
     diagnostic.source = source;
     // A quick fix is built from the element the repair expected.
-    if (d.kind != DiagnosticKind::ConversionError)
+    if (d.isSyntax())
       attachRepairActions(document, diagnostic.range, d, diagnostic);
-    set_data_code(diagnostic, code);
+    setDataCode(diagnostic, code);
     diagnostics.push_back(std::move(diagnostic));
   }
 }
@@ -280,7 +278,7 @@ Diagnostic DefaultDocumentValidator::unrepairedParseError(
   // The syntax code, never the repair one: nothing was repaired here, and no
   // quick fix is attached to it -- a client filtering on `parse-repaired`
   // must not be offered an action that does not exist.
-  set_data_code(d, kSyntaxError);
+  setDataCode(d, kSyntaxError);
   if (document.parseResult.accepted) {
     // The tree stands and no node could be made of it: the repairs left a
     // shape the grammar's classes do not describe.
@@ -313,7 +311,7 @@ void DefaultDocumentValidator::processLinkingErrors(
           const ReferenceInfo& site) {
         // Tested per reference, not only per document: one workspace-sized
         // file is the case a between-documents test never reaches.
-        throw_if_cancelled(token);
+        throwIfCancelled(token);
         const std::string_view text = site.referenceText;
         Diagnostic d;
         d.range = TextRange{begin, end};
@@ -350,24 +348,23 @@ void DefaultDocumentValidator::processLinkingErrors(
       });
 }
 
-// A document hook that throws fails alone, not the whole pass, as a per-node
-// check does: the registry's `handleException` reports it, with no node.
-// Cancellation passes through.
 namespace {
-void run_document_check(const ValidationRegistry& registry,
-                        const DocumentCheckEntry& entry,
-                        std::string_view context, const Document& document,
-                        ValidationAcceptor& accept,
-                        ValidationCategories categories,
-                        const CancellationToken& token) {
-  if (!detail::runs_category(categories, entry.category)) return;
-  try {
-    entry.check(document, accept, token);
-  } catch (const OperationCancelled&) {
-    throw;
-  } catch (...) {
-    registry.handleException(std::current_exception(), context, accept,
-                             nullptr);
+// Report a failed hook through the registry and propagate cancellation.
+void run_document_checks(const ValidationRegistry& registry,
+                         std::span<const DocumentCheckEntry> entries,
+                         std::string_view context, const Document& document,
+                         ValidationAcceptor& accept, ValidationCategories categories,
+                         const CancellationToken& token) {
+  for (const auto& entry : entries) {
+    throwIfCancelled(token);
+    if (!detail::runs_category(categories, entry.category)) continue;
+    try {
+      entry.check(document, accept, token);
+    } catch (const OperationCancelled&) {
+      throw;
+    } catch (...) {
+      registry.handleException(std::current_exception(), context, accept, nullptr);
+    }
   }
 }
 }  // namespace
@@ -375,28 +372,20 @@ void run_document_check(const ValidationRegistry& registry,
 void DefaultDocumentValidator::validateAst(
     const Document& document, std::vector<Diagnostic>& diagnostics,
     const ValidationOptions& options, const CancellationToken& token) const {
-  const ValidationRegistry* registry = validationRegistry();
-  // Nothing registered is nothing to walk: a language with no check pays no
-  // tree traversal, and one with only document hooks pays the hooks alone --
-  // which take no node, so a document with no tree still runs them.
-  if (registry == nullptr) return;
-  if (registry->checkCount() == 0 && registry->checksBefore().empty() &&
-      registry->checksAfter().empty())
-    return;
-  if (!options.categories.empty() &&
-      std::ranges::none_of(registry->categories(), [&](const auto* category) {
-        return detail::runs_category(options.categories, category);
-      }))
-    return;
-
-  // The collector lives on this frame, which is what makes the acceptor's
-  // `function_ref` legal for the whole walk.
-  const auto collect = [&diagnostics](Diagnostic&& diagnostic) {
-    diagnostics.push_back(std::move(diagnostic));
+  // Hooks and node checks share the same ordered batches.
+  std::vector<std::vector<Diagnostic>> batches;
+  const auto collect = [&](Diagnostic&& diagnostic) {
+    auto* batch = batches.empty() ? &diagnostics : &batches.back();
+    if (batch->size() == batch->capacity() && batch->size() >= kCheckRun) {
+      batch = &batches.emplace_back();
+      batch->reserve(kCheckRun);
+    }
+    batch->push_back(std::move(diagnostic));
   };
-  ValidationAcceptor accept(ValidationAcceptor::Sink(collect), document,
-                            getSource());
+  ValidationAcceptor accept(collect, document, getSource(), batches);
 
+  // Each default part skips what the registry does not hold; the document
+  // hooks take no node and run on a document with no tree too.
   validateAstBefore(document, accept, options, token);
   if (document.parseResult.value != nullptr)
     validateAstNodes(document, accept, options, token);
@@ -404,6 +393,13 @@ void DefaultDocumentValidator::validateAst(
   // A refused diagnostic fails the pass, so its categories are not recorded as
   // run.
   accept.throwIfDiagnosticLost();
+  if (!batches.empty()) {
+    auto total = diagnostics.size();
+    for (const auto& run : batches) total += run.size();
+    diagnostics.reserve(total);
+    for (auto& run : batches)
+      std::ranges::move(run, std::back_inserter(diagnostics));
+  }
 }
 
 std::string_view DefaultDocumentValidator::getSource() const noexcept {
@@ -418,14 +414,10 @@ const ValidationRegistry* DefaultDocumentValidator::validationRegistry()
 void DefaultDocumentValidator::validateAstBefore(
     const Document& document, ValidationAcceptor& accept,
     const ValidationOptions& options, const CancellationToken& token) const {
-  const ValidationRegistry* registry = validationRegistry();
-  if (registry == nullptr) return;
-  for (const DocumentCheckEntry& entry : registry->checksBefore()) {
-    throw_if_cancelled(token);
-    run_document_check(*registry, entry,
-                       "An error occurred during set-up of the validation",
-                       document, accept, options.categories, token);
-  }
+  if (const auto* registry = validationRegistry())
+    run_document_checks(*registry, registry->checksBefore(),
+                        "An error occurred during set-up of the validation",
+                        document, accept, options.categories, token);
 }
 
 ValidateSingleNodeOptions DefaultDocumentValidator::validateSingleNodeOptions(
@@ -438,7 +430,13 @@ void DefaultDocumentValidator::validateAstNodes(
     const Document& document, ValidationAcceptor& accept,
     const ValidationOptions& options, const CancellationToken& token) const {
   const ValidationRegistry* registry = validationRegistry();
-  if (registry == nullptr || registry->checkCount() == 0) return;
+  // No check in a selected category is no walk: a language with no check pays
+  // no tree traversal.
+  if (registry == nullptr || registry->checkCount() == 0 ||
+      std::ranges::none_of(registry->categories(), [&](const auto* category) {
+        return detail::runs_category(options.categories, category);
+      }))
+    return;
 
   const AstNode* root = document.parseResult.value;
   const OwnedNodes nodes = document.parseResult.nodes();
@@ -460,75 +458,52 @@ void DefaultDocumentValidator::validateAstNodes(
                           return validateSingleNodeOptions(node, options);
                         });
   }
-  // The root first, the one node whose position is a decision: a check about
-  // the whole document belongs at the head of the block rather than after every
-  // per-node finding.
-  if (root != nullptr) {
-    throw_if_cancelled(token);
-    if (!refused.contains(root))
-      registry->runChecks(*root, accept, options.categories, token);
-  }
-
-  // Then the rest in `nodes` order, children first; `validateDocument` sorts
-  // the findings into document order. The same loop writes directly, or into
-  // each worker's collector before the findings are joined.
-  const auto checkKept = [&](OwnedNodes run, ValidationAcceptor& target,
-                             auto kept) {
-    for (const AstNode* const node : run) {
-      throw_if_cancelled(token);
-      if (node != root && kept(node))
-        registry->runChecks(*node, target, options.categories, token);
-    }
-  };
-  // Nothing refused is the usual case: its loop looks no node up.
   const auto checkRun = [&](OwnedNodes run, ValidationAcceptor& target) {
-    if (refused.empty())
-      checkKept(run, target, [](const AstNode*) { return true; });
-    else
-      checkKept(run, target,
-                [&](const AstNode* node) { return !refused.contains(node); });
+    const auto check = [&](const AstNode* node) {
+      throwIfCancelled(token);
+      if (refused.empty() || !refused.contains(node))
+        registry->runChecks(*node, target, options.categories, token);
+    };
+    // The root runs first, even when the arena does not own it.
+    if (run.data() == nodes.data() && root != nullptr) check(root);
+    for (const AstNode* node : run)
+      if (node != root) check(node);
   };
-  if (nodes.size() < 2 * kCheckRun) {
+  const auto& scheduler = shared.taskScheduler;
+  const auto workers =
+      nodes.size() < 2 * kCheckRun ? 0 : scheduler->workerCount();
+  if (workers == 0) {
     checkRun(nodes, accept);
+    throwIfCancelled(token);
     return;
   }
-  if (services.shared().taskScheduler->workerCount() == 0) {
-    checkRun(nodes, accept);
-    throw_if_cancelled(token);
-    return;
-  }
-  // A larger one is checked in runs spread over the pool. Each run keeps its
-  // findings in the slot its place gives it, handed on in run order, so the
-  // list is the one a single walk makes.
-  std::vector<std::vector<Diagnostic>> found(nodes.size() / kCheckRun);
-  services.shared().taskScheduler->parallelFor(
-      token, nodes, kCheckRun, [&](OwnedNodes run) {
-        std::vector<Diagnostic>& kept =
-            found[static_cast<std::size_t>(run.data() - nodes.data()) /
-                  kCheckRun];
-        const auto keep = [&kept](Diagnostic&& diagnostic) {
-          kept.push_back(std::move(diagnostic));
-        };
-        ValidationAcceptor local(ValidationAcceptor::Sink(keep), document,
-                                 getSource());
-        checkRun(run, local);
-        local.throwIfDiagnosticLost();
-      });
-  for (std::vector<Diagnostic>& run : found)
-    for (Diagnostic& diagnostic : run) accept.accept(std::move(diagnostic));
+  // Each worker fills a private vector and publishes it once in run order.
+  const auto runSize =
+      nodes.size() / kCheckRun < 4 * workers ? kCheckRun / 4 : kCheckRun;
+  std::vector<std::vector<Diagnostic>> found(nodes.size() / runSize);
+  scheduler->parallelFor(token, nodes, runSize, [&](OwnedNodes run) {
+    std::vector<Diagnostic> kept;
+    const auto keep = [&kept](Diagnostic&& diagnostic) {
+      kept.push_back(std::move(diagnostic));
+    };
+    const auto source = getSource();
+    ValidationAcceptor local(keep, document,
+                             source.empty() ? accept.source() : source);
+    checkRun(run, local);
+    local.throwIfDiagnosticLost();
+    found[static_cast<std::size_t>(run.data() - nodes.data()) / runSize] =
+        std::move(kept);
+  });
+  accept.acceptBatches(std::move(found));
 }
 
 void DefaultDocumentValidator::validateAstAfter(
     const Document& document, ValidationAcceptor& accept,
     const ValidationOptions& options, const CancellationToken& token) const {
-  const ValidationRegistry* registry = validationRegistry();
-  if (registry == nullptr) return;
-  for (const DocumentCheckEntry& entry : registry->checksAfter()) {
-    throw_if_cancelled(token);
-    run_document_check(*registry, entry,
-                       "An error occurred during tear-down of the validation",
-                       document, accept, options.categories, token);
-  }
+  if (const auto* registry = validationRegistry())
+    run_document_checks(*registry, registry->checksAfter(),
+                        "An error occurred during tear-down of the validation",
+                        document, accept, options.categories, token);
 }
 
 }  // namespace cursiv

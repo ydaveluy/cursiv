@@ -30,14 +30,14 @@ namespace cursiv {
 
 namespace json = lsp::json;
 
-json::Value tool_property(std::string_view type, std::string_view description) {
+json::Value toolProperty(std::string_view type, std::string_view description) {
   json::Object out;
   out["type"] = json::Value(json::String(type));
   out["description"] = json::Value(json::String(description));
   return json::Value(std::move(out));
 }
 
-json::Value tool_object_schema(json::Object properties, json::Array required) {
+json::Value toolObjectSchema(json::Object properties, json::Array required) {
   json::Object out;
   out["type"] = json::Value(json::String("object"));
   out["properties"] = json::Value(std::move(properties));
@@ -45,28 +45,28 @@ json::Value tool_object_schema(json::Object properties, json::Array required) {
   return json::Value(std::move(out));
 }
 
-json::Value tool_position_schema() {
+json::Value detail::positive_integer_property(std::string_view description) {
+  json::Value property = toolProperty("integer", description);
+  property.object()["minimum"] = 1;
+  property.object()["maximum"] = std::numeric_limits<json::Integer>::max();
+  return property;
+}
+
+json::Value toolPositionSchema() {
   json::Object properties;
   properties["file"] =
-      tool_property("string", "path or file:// uri of the document");
-  // The domain `tool_position` accepts, said where a client reads it.
-  const auto coordinate = [](std::string_view description) {
-    json::Value property = tool_property("integer", description);
-    property.object()["minimum"] = json::Value(json::Integer{1});
-    property.object()["maximum"] =
-        json::Value(std::numeric_limits<json::Integer>::max());
-    return property;
-  };
-  properties["line"] = coordinate("1-based line");
-  properties["column"] = coordinate("1-based column, in utf-16 units");
+      toolProperty("string", "path or file:// uri of the document");
+  properties["line"] = detail::positive_integer_property("1-based line");
+  properties["column"] =
+      detail::positive_integer_property("1-based column, in utf-16 units");
   json::Array required;
   required.emplace_back(json::String("file"));
   required.emplace_back(json::String("line"));
   required.emplace_back(json::String("column"));
-  return tool_object_schema(std::move(properties), std::move(required));
+  return toolObjectSchema(std::move(properties), std::move(required));
 }
 
-const json::Value* tool_argument(const json::Value& arguments,
+const json::Value* toolArgument(const json::Value& arguments,
                                  std::string_view key) {
   return arguments.isObject() ? arguments.object().find(key) : nullptr;
 }
@@ -91,15 +91,15 @@ bool has_scheme(std::string_view text) {
 
 }  // namespace
 
-std::string tool_file_uri(std::string_view file) {
+std::string toolFileUri(std::string_view file) {
   if (has_scheme(file)) return std::string(file);
-  return path_to_file_uri(file);
+  return pathToFileUri(file);
 }
 
-McpToolPosition tool_position(const json::Value& arguments) {
-  const json::Value* const file = tool_argument(arguments, "file");
-  const json::Value* const line = tool_argument(arguments, "line");
-  const json::Value* const column = tool_argument(arguments, "column");
+McpToolPosition toolPosition(const json::Value& arguments) {
+  const json::Value* const file = toolArgument(arguments, "file");
+  const json::Value* const line = toolArgument(arguments, "line");
+  const json::Value* const column = toolArgument(arguments, "column");
   if (file == nullptr || !file->isString())
     throw std::invalid_argument("'file' names the document");
   const std::optional<std::int32_t> lineNumber = detail::tool_integer(line, 1);
@@ -108,20 +108,15 @@ McpToolPosition tool_position(const json::Value& arguments) {
       detail::tool_integer(column, 1);
   if (!columnNumber.has_value())
     throw std::invalid_argument("'column' is 1-based");
-  return {tool_file_uri(file->string()),
+  return {toolFileUri(file->string()),
           static_cast<std::uint32_t>(*lineNumber - 1),
           static_cast<std::uint32_t>(*columnNumber - 1)};
 }
 
 std::optional<std::int32_t> detail::tool_integer(const json::Value* value,
                                                  std::int32_t minimum) {
-  if (value == nullptr) return std::nullopt;
-  if (value->isInteger()) {
-    const json::Integer number = value->integer();
-    return number >= minimum ? std::optional(number) : std::nullopt;
-  }
-  if (!value->isDecimal()) return std::nullopt;
-  const double number = value->decimal();
+  if (value == nullptr || !value->isNumber()) return std::nullopt;
+  const double number = value->number();
   // A NaN or an infinity fails the range test.
   if (!(number >= minimum &&
         number <= std::numeric_limits<std::int32_t>::max()) ||
@@ -130,7 +125,7 @@ std::optional<std::int32_t> detail::tool_integer(const json::Value* value,
   return static_cast<std::int32_t>(number);
 }
 
-void append_tool_position(std::string& out, const Document& document,
+void appendToolPosition(std::string& out, const Document& document,
                           TextOffset offset) {
   const Position position = document.textDocument().positionAt(offset);
   out += std::to_string(position.line + 1);
@@ -151,10 +146,10 @@ McpToolResult not_held(const std::string& uri) {
 
 // `body` runs once, on a document at the requirement's state. Every other end
 // is an error the model reads, never an empty answer.
-McpToolResult route_document_tool(
+McpToolResult routeDocumentTool(
     SharedCoreServices& shared, const std::string& uri,
     ServiceRequirement requirement, const CancellationToken& token,
-    cursiv::function_ref<void(const Document&, const CoreServices&,
+    cursiv::FunctionRef<void(const Document&, const CoreServices&,
                               std::string&)>
         body) {
   const DocumentState target = requirement.state;

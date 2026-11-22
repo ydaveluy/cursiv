@@ -1,21 +1,22 @@
 // How the engine elects among parses: the arm written first, between rules
 // and between the alternatives of one, a condition against a shift, the
 // dangling else at depth, and a run split two ways. A reduce/reduce conflict
-// keeps its fallback; look-ahead can resolve a cell without a fork.
+// keeps its fallback.
 
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
 
+#include "cursiv/engine/parser/Explorer.hpp"
+#include "cursiv/engine/parser/Parse.hpp"
+#include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/lr/runtime/LrParseStats.hpp"
-#include "cursiv/lr/runtime/LrParser.hpp"
-#include "cursiv/shared/runtime/AstReducer.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
-#include "election/generated/Election/AstReflection.hpp"
-#include "election/generated/Election/Parser.hpp"
+#include "election/generated/Election/Module.hpp"
 #include "election/generated/Election/Table.hpp"
 #include "torture/DeepIfGrammar.hpp"
 #include "torture/ElectionGrammar.hpp"
@@ -26,36 +27,31 @@ namespace ast = telect::ast;
 namespace e = telect::generated::Election;
 using Stmt = tdang::ast::Stmt;
 
-// Drives the generated table directly: its counters are not available through
-// the type-erased parser.
-template <const auto& A>
-bool accepts(std::string_view text, const cursiv::engine::LrDrive* drive,
-             cursiv::Cst& cst, cursiv::engine::LrParseStats* stats = nullptr) {
-  return cursiv::engine::lr_parser<A>.parse(text, cst, stats, drive) &&
-         cst.accepted() && !cst.recovered();
+const cursiv::Parser& parser() {
+  static const std::unique_ptr<cursiv::Parser> instance = e::createParser();
+  return *instance;
 }
 
-// One case of the election table, read clean, its tree built. The tree reads
-// the document in place: the caller keeps it alive.
-cursiv::ParseResult elect(std::string_view doc,
-                          cursiv::engine::LrParseStats* stats = nullptr) {
-  cursiv::Cst cst;
-  CHECK(accepts<e::kTable>(doc, &e::kDrive, cst, stats));
-  return cursiv::engine::AstReducer::build<e::kTable.stamp>(e::kAstActions,
-                                                            std::move(cst));
+bool clean(const cursiv::ParseResult& r) {
+  return r.cst().accepted() && !r.cst().recovered();
+}
+
+// One case of the election table, read clean. The tree reads the document in
+// place: the caller keeps it alive.
+cursiv::ParseResult elect(std::string_view doc) {
+  cursiv::ParseResult r = parser().parse(doc);
+  CHECK(clean(r));
+  return r;
 }
 
 const ast::Case* case_of(const cursiv::ParseResult& r) {
   return r.valueAs<ast::Case>();
 }
 
-// One cell, both reductions kept: the look-ahead elects the earlier complete
-// parse without forking on this input.
-void resolves_without_fork(std::string_view opener, bool wantX) {
-  cursiv::engine::LrParseStats stats;
+// One cell, both reductions kept: the earlier complete parse is elected.
+void rank_elects(std::string_view opener, bool wantX) {
   const std::string doc = std::string(opener) + " a b x";
-  const cursiv::ParseResult r = elect(doc, &stats);
-  CHECK(stats.splits == 0);
+  const cursiv::ParseResult r = elect(doc);
   const ast::Case* c = case_of(r);
   const ast::Top* top = c != nullptr ? c->top : nullptr;
   CHECK(top != nullptr);
@@ -71,15 +67,13 @@ void resolves_without_fork(std::string_view opener, bool wantX) {
 // R's own alternatives, so the conflict survives to the table and the parse
 // forks over it.
 void runtime_elects(std::string_view opener, bool wantX) {
-  // Whether the cell forked or the look-ahead resolved it is the engine's
-  // own business; what is checked is the arm elected.
   const std::string doc = std::string(opener) + " c a x";
   const cursiv::ParseResult r = elect(doc);
   const ast::Case* c = case_of(r);
   const ast::Hold* top = c != nullptr ? c->hold : nullptr;
   CHECK(top != nullptr && top->r != nullptr);
   if (top == nullptr || top->r == nullptr) return;
-  const bool gotX = top->r->type == &cursiv::ast_type_tag<ast::RX>;
+  const bool gotX = top->r->type == &cursiv::kAstTypeTag<ast::RX>;
   CHECK(gotX == wantX);
   if (gotX != wantX)
     std::printf("    %.*s elected %s\n", static_cast<int>(opener.size()),
@@ -142,16 +136,37 @@ std::string nested(std::string_view opener, unsigned depth, unsigned elses) {
   return s;
 }
 
-void small_ast_checks() {
-  cursiv::Cst cst;
+void common_tokens_distinguish_siblings_in_their_stack_context() {
+  constexpr std::string_view siblings = "tags <r><a>#</a><b>#</b></r>";
+  static unsigned predicted;
+  auto tables = e::kTables;
+  CHECK(tables.predict != nullptr);
+  if (!tables.predict) return;
+  tables.predict = [](cursiv::engine::Machine& m) {
+    const auto choice = e::kTables.predict(m);
+    if (choice.arm != cursiv::engine::kNoStack && m.src[m.tok.begin(m)] == '#') ++predicted;
+    return choice;
+  };
+  cursiv::Cst tree;
+  predicted = 0;
+  CHECK(parse(tables, siblings, tree) && tree.diagnostics().empty());
+  CHECK(predicted != 0);
+  const auto both = elect(siblings);
+  const auto* root = both.valueAs<ast::Tag>();
+  CHECK(root && root->children.size() == 2 && root->children[0]->close == "a" &&
+        root->children[1]->close == "b" && root->close == "r");
+  const auto one = elect("tags <r><a>#</r>");
+  root = one.valueAs<ast::Tag>();
+  CHECK(root && root->children.size() == 1 && root->children[0]->close.empty() && root->close == "r");
+}
 
+void small_ast_checks() {
   // A lone if: no conflict, no ambiguity to elect.
-  CHECK(accepts<e::kTable>("if a then x", &e::kDrive, cst));
   {
-    cursiv::ParseResult r = cursiv::engine::AstReducer::build<e::kTable.stamp>(
-        e::kAstActions, std::move(cst));
+    const cursiv::ParseResult r = elect("if a then x");
     const Stmt* root = r.valueAs<Stmt>();
     CHECK(root != nullptr);
+    if (root == nullptr) return;
     CHECK(root->cond == "a");
     CHECK(root->then_ != nullptr && root->then_->cond == "x");
     CHECK(root->else_ == nullptr);
@@ -159,27 +174,27 @@ void small_ast_checks() {
 
   // "if a then if b then x else e" reads two ways, parting first at the
   // outer if, which keeps its first arm written: the nearest takes the else.
-  cursiv::Cst cst2;
-  CHECK(accepts<e::kTable>("if a then if b then x else e", &e::kDrive, cst2));
+  const std::string_view text = "if a then if b then x else e";
   {
-    cursiv::ParseResult r = cursiv::engine::AstReducer::build<e::kTable.stamp>(
-        e::kAstActions, std::move(cst2));
+    const cursiv::ParseResult r = elect(text);
     const Stmt* root = r.valueAs<Stmt>();
     CHECK(root != nullptr && root->cond == "a");
-    CHECK(root->else_ == nullptr);
-    const Stmt* inner = root->then_;
+    CHECK(root != nullptr && root->else_ == nullptr);
+    const Stmt* inner = root != nullptr ? root->then_ : nullptr;
     CHECK(inner != nullptr && inner->cond == "b");
-    CHECK(inner->else_ != nullptr && inner->else_->cond == "e");
-    CHECK(inner->then_ != nullptr && inner->then_->cond == "x");
+    CHECK(inner != nullptr && inner->else_ != nullptr &&
+          inner->else_->cond == "e");
+    CHECK(inner != nullptr && inner->then_ != nullptr &&
+          inner->then_->cond == "x");
   }
 
   // The entry's own extent covers the whole document -- a span check, not
   // just a boolean.
-  cursiv::Cst cst3;
-  const std::string_view text = "if a then if b then x else e";
-  CHECK(accepts<e::kTable>(text, &e::kDrive, cst3));
-  CHECK(cst3[cst3.entryRoot()].begin == 0);
-  CHECK(cst3[cst3.entryRoot()].end == text.size());
+  {
+    const cursiv::ParseResult r = elect(text);
+    CHECK(r.cst()[r.cst().entryRoot()].begin == 0);
+    CHECK(r.cst()[r.cst().entryRoot()].end == text.size());
+  }
 
   // The same text, arms declared in the opposite order: the outer if keeps
   // its first arm, the one with an else.
@@ -196,21 +211,17 @@ void small_ast_checks() {
 }
 
 // A valid document nested deep parses to its one tree.
-template <const auto& A>
-void depth_probe(const Dangling& g, const cursiv::engine::LrDrive* drive,
-                 const cursiv::engine::AstActions& actions, unsigned maxDepth) {
+void depth_probe(const Dangling& g, unsigned maxDepth) {
   for (unsigned n = 1; n <= maxDepth; ++n) {
     const std::string text =
         nested(g.opener, n, n);  // N ifs, N elses: forces a bind at every level
-    cursiv::Cst cst;
-    cursiv::engine::LrParseStats stats;
-    const bool clean = accepts<A>(text, drive, cst, &stats);
+    const cursiv::ParseResult r = parser().parse(text);
 
     // A fully-nested N-if/N-else document has exactly one completion (every
     // if must take its own else, since there are exactly as many of each) --
     // it must read clean.
-    CHECK(clean);
-    if (!clean) {
+    CHECK(clean(r));
+    if (!clean(r)) {
       std::printf("    %s: depth=%u NOT clean\n", g.label, n);
       continue;
     }
@@ -218,8 +229,6 @@ void depth_probe(const Dangling& g, const cursiv::engine::LrDrive* drive,
     // The tree must be the one valid nesting: elses were typed
     // innermost-first, so walking outer to inner (c0, c1, ...) reaches them in
     // reverse -- c_k binds e_{n-1-k}.
-    const cursiv::ParseResult r =
-        cursiv::engine::AstReducer::build<A.stamp>(actions, std::move(cst));
     const Stmt* cur = g.root(r);
     bool shapeOk = cur != nullptr;
     for (unsigned k = 0; shapeOk && k < n; ++k) {
@@ -239,20 +248,12 @@ void depth_probe(const Dangling& g, const cursiv::engine::LrDrive* drive,
 
 // Stability: N nested ifs, one trailing else, bound to the same if at every
 // depth: the election does not move with the depth.
-template <const auto& A>
-void election_stable_in_depth(const Dangling& g,
-                              const cursiv::engine::LrDrive* drive,
-                              const cursiv::engine::AstActions& actions,
-                              unsigned maxDepth) {
+void election_stable_in_depth(const Dangling& g, unsigned maxDepth) {
   for (unsigned depth = 2; depth <= maxDepth; ++depth) {
     const std::string text = nested(g.opener, depth, 1);
-    cursiv::Cst cst;
-    cursiv::engine::LrParseStats stats;
-    const bool clean = accepts<A>(text, drive, cst, &stats);
-    CHECK(clean);
-    if (!clean) continue;
-    const cursiv::ParseResult r =
-        cursiv::engine::AstReducer::build<A.stamp>(actions, std::move(cst));
+    const cursiv::ParseResult r = parser().parse(text);
+    CHECK(clean(r));
+    if (!clean(r)) continue;
     const Stmt* cur = g.root(r);
     unsigned level = 0;
     while (cur && cur->else_ == nullptr) {
@@ -283,7 +284,7 @@ void overlap() {
     const ast::List* list = groups_of(r);
     CHECK(list != nullptr && list->groups.size() == 1);
     CHECK(list != nullptr && !list->groups.empty() &&
-          list->groups[0]->type == &cursiv::ast_type_tag<ast::Pair>);
+          list->groups[0]->type == &cursiv::kAstTypeTag<ast::Pair>);
   }
 
   // "aaa": only a triple fits.
@@ -292,15 +293,12 @@ void overlap() {
     const ast::List* list = groups_of(r);
     CHECK(list != nullptr && list->groups.size() == 1);
     CHECK(list != nullptr && !list->groups.empty() &&
-          list->groups[0]->type == &cursiv::ast_type_tag<ast::Triple>);
+          list->groups[0]->type == &cursiv::kAstTypeTag<ast::Triple>);
   }
 
   // "a" alone: neither group shape fits -- refused, not silently accepted
   // as a partial group.
-  {
-    cursiv::Cst cst;
-    CHECK(!accepts<e::kTable>("overlap a", &e::kDrive, cst));
-  }
+  CHECK(!clean(parser().parse("overlap a")));
 
   // "aaaaaa" (6): two genuinely different partitions exist -- three pairs,
   // or two triples. The pair is the arm written first: three pairs.
@@ -312,9 +310,9 @@ void overlap() {
       unsigned consumed = 0;
       bool allPairs = true;
       for (const ast::Group* grp : list->groups) {
-        if (grp->type == &cursiv::ast_type_tag<ast::Pair>) {
+        if (grp->type == &cursiv::kAstTypeTag<ast::Pair>) {
           consumed += 2;
-        } else if (grp->type == &cursiv::ast_type_tag<ast::Triple>) {
+        } else if (grp->type == &cursiv::kAstTypeTag<ast::Triple>) {
           consumed += 3;
           allPairs = false;
         }
@@ -333,13 +331,10 @@ void overlap() {
 }  // namespace
 
 void torture_election() {
-  // Each election case keeps its conflict, and the standalone dangling-else
-  // entry contributes one more. None is decided at construction.
-  CHECK(e::kTable.nconflicts == 11);
-
+  common_tokens_distinguish_siblings_in_their_stack_context();
   // X declared first: X wins; Y declared first: Y wins.
-  resolves_without_fork("rankxy", true);
-  resolves_without_fork("rankyx", false);
+  rank_elects("rankxy", true);
+  rank_elects("rankyx", false);
   // The parses part first at Hold's arms, not R's: Hold's first arm, which
   // reads "c a" as R, wins whatever the order of R's arms.
   runtime_elects("runxy", true);
@@ -352,15 +347,13 @@ void torture_election() {
   guard_elects("mixedyx", false);
 
   small_ast_checks();
-  election_stable_in_depth<e::kTable>(kDeepIf, &e::kDrive, e::kAstActions,
-                                      24);
-  election_stable_in_depth<e::kTable>(kDeepIfRev, &e::kDrive, e::kAstActions,
-                                      24);
+  election_stable_in_depth(kDeepIf, 24);
+  election_stable_in_depth(kDeepIfRev, 24);
   // 30-deep nesting, in both declaration orders: here (elses == depth, no
   // surplus to elect over) the tree is unambiguous, so a clean parse is
   // provable.
-  depth_probe<e::kTable>(kDeepIf, &e::kDrive, e::kAstActions, 30);
-  depth_probe<e::kTable>(kDeepIfRev, &e::kDrive, e::kAstActions, 30);
+  depth_probe(kDeepIf, 30);
+  depth_probe(kDeepIfRev, 30);
 
   overlap();
 }

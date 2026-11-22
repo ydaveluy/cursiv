@@ -82,7 +82,7 @@ struct CompletionValueItem : lsp::CompletionItem {
 // Takes one value. False once the answer is full: nothing more is worth
 // offering.
 using CompletionAcceptor =
-    function_ref<bool(const CompletionContext&, CompletionValueItem&&)>;
+    FunctionRef<bool(const CompletionContext&, CompletionValueItem&&)>;
 
 // The tokens around a caret. The next is the one holding the caret, empty at
 // the caret where none does; the previous is the last one before it.

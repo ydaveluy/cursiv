@@ -4,14 +4,9 @@
 #include <vector>
 
 #include "arithmetics/ArithmeticsGrammar.hpp"
-#include "arithmetics/generated/Arith/AstReflection.hpp"
-#include "arithmetics/generated/Arith/Grammar.hpp"
 #include "arithmetics/generated/Arith/Module.hpp"
-#include "arithmetics/generated/Arith/Parser.hpp"
-#include "arithmetics/generated/Arith/Table.hpp"
 #include "bench.hpp"
 #include "cursiv/CursivActions.hpp"
-#include "recovery_metric/Searching.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
 
 namespace metric = cursiv::recovery_metric;
@@ -24,8 +19,8 @@ const cursiv::fuzzer::CursivActions<arith::Arith> kActions{};
 const metric::Registered kLanguage{{
     .rank = 6,
     .name = "arithmetics",
-    .parser = &g::create_parser,
-    .reflection = &g::create_ast_reflection,
+    .parser = &g::createParser,
+    .reflection = &g::createAstReflection,
     .actions = &kActions,
     .documents =
         [] {
@@ -35,11 +30,6 @@ const metric::Registered kLanguage{{
               metric::source_file("examples/arithmetics/example.calc"),
               bench::generateArithmeticsSource(2048)};
         },
-    .ceilings = &metric::ceilings<g::kTable, g::kDrive,
-                                          g::kGrammarMetaData, g::kAstActions>,
-    .searching = &metric::searching<g::kTable, g::kDrive,
-                                                g::kGrammarMetaData,
-                                                g::kAstActions>,
 }};
 
 }  // namespace

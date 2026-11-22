@@ -37,7 +37,7 @@ using DocumentCheck = std::function<void(const Document&, ValidationAcceptor&,
 // A hook declares its category at registration, as a per-node check does: the
 // incremental build must know which pass it belongs to.
 struct DocumentCheckEntry {
-  const ValidationCategory* category = &fast;
+  const ValidationCategory* category = &kFast;
   DocumentCheck check;
 };
 
@@ -86,11 +86,11 @@ class ValidationRegistry {
   // thread; after that the registry is only read. A check runs on several
   // threads at once over a large document: it keeps its state on its stack.
   virtual void registerCheck(ValidationCheckRegistration,
-                             const ValidationCategory* category = &fast) = 0;
+                             const ValidationCategory* category = &kFast) = 0;
 
   // A language's whole table in one call, under one category.
   void registerChecks(std::initializer_list<ValidationCheckRegistration> checks,
-                      const ValidationCategory* category = &fast) {
+                      const ValidationCategory* category = &kFast) {
     for (const ValidationCheckRegistration& check : checks)
       registerCheck(check, category);
   }
@@ -115,12 +115,12 @@ class ValidationRegistry {
   static ValidationCheckRegistration makeExactValidationCheck(const Object&&) =
       delete;
 
-  // `built_in` is refused: it names the runtime's own half. Same rule as
+  // `kBuiltIn` is refused: it names the runtime's own half. Same rule as
   // `registerCheck`: registered once, on one thread, then only read.
   virtual void registerBeforeDocument(
-      DocumentCheck, const ValidationCategory* category = &fast) = 0;
+      DocumentCheck, const ValidationCategory* category = &kFast) = 0;
   virtual void registerAfterDocument(
-      DocumentCheck, const ValidationCategory* category = &fast) = 0;
+      DocumentCheck, const ValidationCategory* category = &kFast) = 0;
   // What was filed, in registration order, for the validator to run around
   // the walk.
   [[nodiscard]] virtual std::span<const DocumentCheckEntry> checksBefore()
@@ -199,7 +199,7 @@ class ValidationRegistry {
     constexpr bool kEveryNode = std::same_as<Node, AstNode>;
 
     return ValidationCheckRegistration{
-        kEveryNode ? nullptr : &cursiv::ast_type_tag<Node>, exactTypeOnly,
+        kEveryNode ? nullptr : &cursiv::kAstTypeTag<Node>, exactTypeOnly,
         [held = &held](const AstNode& node, ValidationAcceptor& accept,
                        const CancellationToken& token) {
           // The downcast is the filing's proof: the registry put this closure

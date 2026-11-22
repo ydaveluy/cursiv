@@ -152,7 +152,7 @@ struct CommentLine {
 std::vector<lsp::TextEdit> AbstractFormatter::formatDocument(
     const Document& document, const lsp::DocumentFormattingParams& params,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   // The tape of a repaired parse describes text the author did not write.
   if (document.parseRecovered()) return {};
   return doDocumentFormat(document, params.options, std::nullopt, token);
@@ -161,7 +161,7 @@ std::vector<lsp::TextEdit> AbstractFormatter::formatDocument(
 std::vector<lsp::TextEdit> AbstractFormatter::formatDocumentRange(
     const Document& document, const lsp::DocumentRangeFormattingParams& params,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   if (!isFormatRangeErrorFree(document, params.range)) return {};
   return doDocumentFormat(document, params.options, params.range, token);
 }
@@ -169,7 +169,7 @@ std::vector<lsp::TextEdit> AbstractFormatter::formatDocumentRange(
 std::vector<lsp::TextEdit> AbstractFormatter::formatDocumentOnType(
     const Document& document, const lsp::DocumentOnTypeFormattingParams& params,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   // From the start of the caret's line to the caret. Edits are kept by line,
   // as for a selection, so the whole line is formatted, text past the caret
   // included.
@@ -209,7 +209,7 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
     const Document& document, const lsp::FormattingOptions& options,
     const std::optional<lsp::Range>& range,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   if (!document.hasAst()) return {};
   const ParseResult& parsed = document.parseResult;
   const Cst& cst = parsed.cst();
@@ -228,7 +228,7 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
   std::vector<const AstNode*> pending{parsed.value};
   std::vector<const AstNode*> children;
   while (!pending.empty()) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     const AstNode* const node = pending.back();
     pending.pop_back();
     if (node == nullptr) continue;

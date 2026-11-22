@@ -14,7 +14,7 @@
 namespace ws {
 
 void install_core_module(WorkspaceCoreServices& services) {
-  ws::generated::Workspace::install_generated_module(services);
+  ws::generated::Workspace::installGeneratedModule(services);
   services.qualifiedNameProvider =
       std::make_unique<const QualifiedNameProvider>(services.shared);
   services.scopeComputation =
@@ -38,11 +38,11 @@ void install_core_module(WorkspaceCoreServices& services) {
 namespace support {
 
 std::unique_ptr<cursiv::Parser> create_workspace_parser() {
-  return ws::generated::Workspace::create_parser();
+  return ws::generated::Workspace::createParser();
 }
 
 std::unique_ptr<cursiv::AstReflection> create_workspace_reflection() {
-  return ws::generated::Workspace::create_ast_reflection();
+  return ws::generated::Workspace::createAstReflection();
 }
 
 }  // namespace support

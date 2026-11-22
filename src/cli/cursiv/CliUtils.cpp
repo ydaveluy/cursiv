@@ -4,9 +4,11 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <ios>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -32,9 +34,9 @@
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/utils/Utf8.hpp"
 #include "cursiv/validation/Diagnostic.hpp"
+#include "cursiv/workspace/DefaultWorkspaceManager.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
-#include "cursiv/workspace/DocumentFactory.hpp"
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/FileSystemProvider.hpp"
 #include "cursiv/workspace/LocalFileSystemProvider.hpp"
@@ -58,16 +60,16 @@ constexpr std::string_view severity_name(DiagnosticSeverity s) noexcept {
   return "error";
 }
 
-// Extensions in registration order, so the usage line reads the way the
-// example's `main` names them.
-std::string served_extensions(const ServiceRegistry& registry) {
+// Files in language registration order.
+std::string served_files(const ServiceRegistry& registry) {
   std::string out;
   for (const CoreServices* language : registry.all()) {
-    for (const std::string& extension :
-         language->languageMetaData.fileExtensions) {
-      if (!out.empty()) out += ", ";
-      out += extension;
-    }
+    const auto& meta = language->languageMetaData;
+    for (const auto* names : {&meta.fileExtensions, &meta.fileNames})
+      for (const auto& name : *names) {
+        if (!out.empty()) out += ", ";
+        out += name;
+      }
   }
   return out;
 }
@@ -79,90 +81,90 @@ void flush_output(std::ostream& out) {
   if (!out) throw std::ios_base::failure("cannot write CLI output");
 }
 
-// `help` wins over every other flag on the line. `root`, when set, is
-// scanned into the workspace before the file is judged.
 struct Invocation {
-  std::string path;
-  std::string root;
-  bool dump = false;
-  bool json = false;
-  bool help = false;
+  std::string_view path, root;
+  std::optional<std::string_view> destination;
+  bool dump = false, json = false, help = false;
 };
 
-// Empty when the arguments do not form a run: the caller then prints the
-// usage and answers `kUsage`. `--help` always answers a value.
-std::optional<Invocation> parse_args(int argc, char** argv) {
+std::optional<Invocation> parse_args(std::span<char* const> args,
+                                     const CliCommand* command) {
   Invocation invocation;
-  // Help is independent of whether the rest forms a valid invocation.
-  for (int index = 1; index < argc; ++index) {
-    const std::string_view arg(argv[index]);
-    if (arg == "--help" || arg == "-h") {
-      invocation.help = true;
-      return invocation;
-    }
+  const auto end = std::ranges::find(args, std::string_view("--"));
+  const auto options = args.first(end - args.begin());
+  if (std::ranges::any_of(options, [](std::string_view arg) {
+        return arg == "--help" || arg == "-h";
+      })) {
+    invocation.help = true;
+    return invocation;
   }
-  for (int index = 1; index < argc; ++index) {
-    const std::string_view arg(argv[index]);
-    if (arg == "--dump") {
-      invocation.dump = true;
-      continue;
+  for (auto it = args.begin(); it != args.end(); ++it) {
+    const std::string_view arg(*it);
+    if (it == end) continue;
+    if (it < end && arg.starts_with('-')) {
+      const bool root = arg == "--root" || arg == "-r";
+      if (!command && arg == "--dump")
+        invocation.dump = true;
+      else if (!command && arg == "--json")
+        invocation.json = true;
+      else if (root || (command && command->acceptsDestination &&
+                        (arg == "-d" || arg == "--destination"))) {
+        if (++it == end || std::string_view(*it).empty()) return std::nullopt;
+        if (root)
+          invocation.root = *it;
+        else
+          invocation.destination = *it;
+      } else
+        return std::nullopt;
+    } else {
+      if (arg.empty() || !invocation.path.empty()) return std::nullopt;
+      invocation.path = arg;
     }
-    if (arg == "--json") {
-      invocation.json = true;
-      continue;
-    }
-    if (arg == "--root") {
-      // The flag consumes the next argument; a `--root` with nothing
-      // behind it is not a run.
-      if (index + 1 >= argc) return std::nullopt;
-      invocation.root = argv[++index];
-      if (invocation.root.empty()) return std::nullopt;
-      continue;
-    }
-    // A second positional, or an option nobody knows, is not a run: guessing
-    // what was meant is how a CLI silently parses the wrong file.
-    if (arg.empty() || !invocation.path.empty() || arg.starts_with("-"))
-      return std::nullopt;
-    invocation.path = arg;
   }
   if (invocation.path.empty()) return std::nullopt;
   return invocation;
 }
 
-// The usage line, with the extensions the registered languages serve.
 void print_usage(std::string_view program, const ServiceRegistry& registry,
-                 std::ostream& out) {
-  out << "usage: " << program
-      << " [--dump] [--json] [--root <dir>] [--help] <file>\n"
-      << "  parses <file>, prints its diagnostics on stderr and answers 0 "
-         "when it is clean, 1 when it is not.\n"
-      << "  --dump        print the concrete syntax tree on stdout.\n"
-      << "  --json        print that tree as JSON, untruncated.\n"
-      << "  --root <dir>  scan <dir> into the workspace first, so\n"
-      << "                cross-file references resolve as the servers'.\n"
-      << "  --help        print this usage and answer 0.\n"
-      << "  this binary serves " << served_extensions(registry) << "\n";
+                 std::span<const CliCommand> commands,
+                 const CliCommand* selected, std::ostream& out) {
+  if (!selected)
+    out << "usage: " << program
+        << " [--dump] [--json] [--root <dir>] [--help] [--] <file>\n"
+        << "  check <file>, print diagnostics on stderr and return 1 for "
+           "errors.\n"
+        << "  --dump        print the concrete syntax tree on stdout.\n"
+        << "  --json        print that tree as JSON, untruncated.\n";
+  for (const auto& command : commands)
+    if (!selected || selected == &command)
+      out << "usage: " << program << ' ' << command.name
+          << (command.acceptsDestination ? " [-d|--destination <dir>]" : "")
+          << " [--root <dir>] [--help] [--] <file>\n";
+  out << "  -r, --root <dir>  load the workspace for cross-file references.\n"
+      << "  --help, -h    print this usage.\n"
+      << "  this binary serves " << served_files(registry) << '\n';
 }
 
 }  // namespace
 
-void initialize_root(std::string_view root, SharedCoreServices& shared) {
+void initializeRoot(std::string_view root, SharedCoreServices& shared) {
   std::error_code error;
   const std::filesystem::path absolute =
       std::filesystem::absolute(std::filesystem::path(root), error);
   if (error || !std::filesystem::is_directory(absolute, error))
     throw UsageError(std::string(root) + " is not a directory");
-  const std::string uri = cursiv::path_to_file_uri(absolute.string());
-  const std::vector<WorkspaceFolder> folders{{std::string(uri), {}}};
+  const WorkspaceFolder folder{pathToFileUri(absolute.string()), {}};
   try {
-    shared.workspaceManager->initializeWorkspace(folders);
+    shared.workspaceManager->initializeWorkspace(std::span(&folder, 1));
   } catch (const FileSystemError& failure) {
     throw UsageError(failure.what());
   }
 }
 
-Document& build_document_from_path(std::string_view path,
-                                   SharedCoreServices& shared) {
+namespace {
+
+Document& build_document(std::string_view path, SharedCoreServices& shared,
+                         std::string_view root, bool loadSiblings) {
   if (path.empty()) throw UsageError("no file given");
 
   std::error_code error;
@@ -174,14 +176,7 @@ Document& build_document_from_path(std::string_view path,
 
   // Must match the encoder the scan and the store use, or the same file
   // could be spelled as two different URIs.
-  const std::string uri = cursiv::path_to_file_uri(absolute.string());
-
-  if (const ServiceRegistry& registry = *shared.serviceRegistry;
-      registry.findServices(uri) == nullptr)
-    throw UsageError(absolute.string() +
-                     ": no language here claims this extension -- this binary "
-                     "serves " +
-                     served_extensions(registry));
+  const std::string uri = cursiv::pathToFileUri(absolute.string());
 
   // `TextOffset` is 32 bits; a document past this bound would parse into a
   // tree whose offsets have wrapped.
@@ -191,32 +186,43 @@ Document& build_document_from_path(std::string_view path,
                      std::to_string(cursiv::kMaxDocument) +
                      " byte limit a document offset can address");
 
-  // The store's copy wins if `--root` already brought this file in;
-  // re-reading it would make a second document for one file.
-  Documents& store = *shared.documents;
-  std::shared_ptr<Document> document = store.getDocument(uri);
-  if (document == nullptr) {
-    try {
-      document = shared.documentFactory->fromUri(uri);
-    } catch (const FileSystemError& failure) {
-      throw UsageError(failure.what());
-    }
-    if (document == nullptr)
-      throw UsageError(absolute.string() + " cannot be read");
-    store.addDocument(document);
+  if (!shared.serviceRegistry->hasServices(uri))
+    throw UsageError(absolute.string() +
+                     ": no language claims this file. This binary serves " +
+                     served_files(*shared.serviceRegistry));
+  if (!root.empty())
+    initializeRoot(root, shared);
+  else if (loadSiblings)
+    initializeRoot(absolute.parent_path().string(), shared);
+
+  std::shared_ptr<Document> document;
+  try {
+    document = shared.documents->getOrCreateDocument(uri);
+  } catch (const FileSystemError& failure) {
+    throw UsageError(failure.what());
+  } catch (const ServiceRegistryError& failure) {
+    throw UsageError(failure.what());
   }
+  if (!document) throw UsageError(absolute.string() + " cannot be read");
   Document* one = document.get();
   shared.documentBuilder->build(std::span<Document* const>(&one, 1));
   return *one;
 }
 
-bool has_error_diagnostics(const Document& document) noexcept {
+}  // namespace
+
+Document& buildDocumentFromPath(std::string_view path,
+                                   SharedCoreServices& shared) {
+  return build_document(path, shared, {}, false);
+}
+
+bool hasErrorDiagnostics(const Document& document) noexcept {
   return std::ranges::any_of(document.diagnostics, [](const Diagnostic& d) {
     return d.severity == DiagnosticSeverity::Error;
   });
 }
 
-void print_diagnostics(const Document& document, std::string_view displayPath,
+void printDiagnostics(const Document& document, std::string_view displayPath,
                        std::ostream& out) {
   if (document.diagnostics.empty()) return;
   // Sorted by position, not discovery order, so a human reads top to bottom.
@@ -225,16 +231,18 @@ void print_diagnostics(const Document& document, std::string_view displayPath,
   std::vector<const Diagnostic*> ordered;
   ordered.reserve(document.diagnostics.size());
   for (const Diagnostic& d : document.diagnostics) ordered.push_back(&d);
-  std::ranges::stable_sort(ordered, [](const Diagnostic* a,
-                                       const Diagnostic* b) {
+  const auto before = [](const Diagnostic* a, const Diagnostic* b) {
     return a->range.begin != b->range.begin ? a->range.begin < b->range.begin
                                             : a->range.end < b->range.end;
-  });
+  };
+  if (!std::ranges::is_sorted(ordered, before))
+    std::ranges::stable_sort(ordered, before);
 
   // Diagnostics are already in source order: advance once up to the last
   // reported offset, without allocating a line index or searching it per row.
   const std::string_view text = document.textDocument().getText();
   std::size_t cursor = 0, lineStart = 0, line = 1;
+  std::string row;
   for (const Diagnostic* d : ordered) {
     const std::size_t offset =
         std::min<std::size_t>(d->range.begin, text.size());
@@ -248,22 +256,23 @@ void print_diagnostics(const Document& document, std::string_view displayPath,
       }
     }
     const std::size_t column = offset - lineStart + 1;
-    out << displayPath << ':' << line << ':' << column << ": "
-        << severity_name(d->severity) << ": " << d->message;
-    // `[source:code]` lets a script filter by rule and shows which
-    // language spoke.
-    if (!d->source.empty() || d->code.has_value()) {
-      out << " [" << d->source;
-      if (!d->source.empty() && d->code.has_value()) out << ':';
-      if (d->code.has_value()) {
+    row.clear();
+    std::format_to(std::back_inserter(row), "{}:{}:{}: {}: {}", displayPath,
+                   line, column, severity_name(d->severity), d->message);
+    if (!d->source.empty() || d->code) {
+      row += " [";
+      row += d->source;
+      if (d->code) {
+        if (!d->source.empty()) row += ':';
         if (d->code->isString())
-          out << d->code->string();
+          row += d->code->string();
         else
-          out << d->code->integer();
+          std::format_to(std::back_inserter(row), "{}", d->code->integer());
       }
-      out << ']';
+      row += ']';
     }
-    out << '\n';
+    row += '\n';
+    out.write(row.data(), static_cast<std::streamsize>(row.size()));
   }
 }
 
@@ -303,16 +312,19 @@ void dump_cst(const Document& document, const Grammar& grammar,
   // otherwise decide how much native stack a CLI needs.
   struct Frame {
     cursiv::NodeId id;
-    int depth;
+    std::size_t depth;
   };
   const std::vector<std::string_view> classes =
       ast_classes(document.parseResult);
   std::vector<Frame> stack{{cst.entryRoot(), 0}};
+  std::string indentation;
   while (!stack.empty()) {
     const Frame frame = stack.back();
     stack.pop_back();
 
-    for (int i = 0; i < frame.depth; ++i) out << "  ";
+    const auto width = frame.depth * 2;
+    if (indentation.size() < width) indentation.resize(width, ' ');
+    out.write(indentation.data(), static_cast<std::streamsize>(width));
     const cursiv::CstNode& node = cst[frame.id];
     // The AST class first: a token that builds a node, such as a number
     // literal, is read as that node.
@@ -320,8 +332,8 @@ void dump_cst(const Document& document, const Grammar& grammar,
                                       ? grammar.recordRule(node)
                                       : classes[frame.id];
     out << name << " [" << node.begin << ".." << node.end << ')';
-    if (node.hidden != 0) out << " hidden";
-    if (node.recovered != 0) out << " recovered";
+    if (node.isHidden()) out << " hidden";
+    if (node.isRecovered()) out << " recovered";
     if (cst.childless(frame.id)) {
       // A long leaf is cut at 60 bytes, never inside a UTF-8 sequence.
       const std::string_view text = cst.text(frame.id);
@@ -445,8 +457,8 @@ void dump_cst_json(const Document& document, const Grammar& grammar,
     write_json_offset(out, node.begin);
     out << ",\"end\":";
     write_json_offset(out, node.end);
-    if (node.hidden != 0) out << ",\"hidden\":true";
-    if (node.recovered != 0) out << ",\"recovered\":true";
+    if (node.isHidden()) out << ",\"hidden\":true";
+    if (node.isRecovered()) out << ",\"recovered\":true";
     if (cst.childless(frame.id)) {
       // Untruncated: the text dump's cut serves a human's terminal, this
       // spelling serves a parser.
@@ -471,27 +483,21 @@ void dump_cst_json(const Document& document, const Grammar& grammar,
 // The tree (`--json` wins over `--dump`) on `out`, and the diagnostics and
 // the verdict line on `err`, so a script piping the tree does not see them
 // mixed in. Throws `std::ios_base::failure` when a write fails.
-int report(const Document& document, const Grammar& grammar,
-           std::string_view displayPath, bool dump, bool json,
-           std::ostream& out, std::ostream& err) {
-  if (json)
-    dump_cst_json(document, grammar, out);
-  else if (dump)
-    dump_cst(document, grammar, out);
-  if (json || dump) flush_output(out);
-  print_diagnostics(document, displayPath, err);
-  const bool errors = has_error_diagnostics(document);
-  if (errors)
-    err << displayPath << ": not clean\n";
-  else
-    err << displayPath << ": ok\n";
-  flush_output(err);
+int report(const Document& document, std::string_view displayPath, bool dump,
+           bool json, std::ostream& out, std::ostream& err) {
+  if (json || dump) {
+    const auto& grammar = document.language->parser->getGrammar();
+    (json ? dump_cst_json : dump_cst)(document, grammar, out);
+  }
+  printDiagnostics(document, displayPath, err);
+  const bool errors = hasErrorDiagnostics(document);
+  err << displayPath << (errors ? ": not clean\n" : ": ok\n");
   return errors ? kDiagnostics : kClean;
 }
 
 }  // namespace
 
-int run_command(const std::function<int()>& command) {
+int runCommand(const std::function<int()>& command) {
   // Says why on stderr and answers `status`, even when stderr throws.
   const auto failed = [](int status, const char* prefix,
                          const char* what) noexcept {
@@ -505,6 +511,7 @@ int run_command(const std::function<int()>& command) {
     detail::enter_host_directory();
     const int status = command();
     flush_output(std::cout);
+    flush_output(std::cerr);
     return status;
   } catch (const UsageError& error) {
     return failed(kUsage, "", error.what());
@@ -520,43 +527,41 @@ namespace detail {
 int run_cli_on(
     int argc, char** argv,
     const std::function<void(SharedCoreServices&)>& registerLanguageServices,
-    SharedCoreServices& shared) {
-  return run_command([&] {
-    // A CLI reads the disk, and says so: without this, the shared default
-    // would be the empty provider.
-    if (shared.fileSystemProvider == nullptr)
-      shared.fileSystemProvider = std::make_unique<LocalFileSystemProvider>();
-    install_default_shared_core_services(shared);
-    // The registry owns the languages. A language it refuses throws, and the
-    // run ends as a fatal one does.
-    if (registerLanguageServices) registerLanguageServices(shared);
+    SharedCoreServices& shared, std::span<const CliCommand> commands) {
+  if (!shared.fileSystemProvider)
+    shared.fileSystemProvider =
+        std::make_unique<LocalFileSystemProvider>(kMaxDocument);
+  if (!shared.workspaceManager)
+    shared.workspaceManager = std::make_unique<DefaultWorkspaceManager>(
+        shared, DefaultWorkspaceManager::ReadErrors::Throw);
+  installDefaultSharedCoreServices(shared);
+  if (registerLanguageServices) registerLanguageServices(shared);
 
-    const std::string_view program = argc > 0 ? argv[0] : "cli";
-    const ServiceRegistry& registry = *shared.serviceRegistry;
-    const std::optional<Invocation> invocation = parse_args(argc, argv);
-    if (!invocation.has_value()) {
-      print_usage(program, registry, std::cerr);
-      flush_output(std::cerr);
-      return kUsage;
+  const std::string_view program = argc > 0 ? argv[0] : "cli";
+  std::span<char* const> args =
+      argc > 1 ? std::span(argv + 1, argc - 1) : std::span<char* const>{};
+  const CliCommand* command = nullptr;
+  if (!args.empty()) {
+    const auto found = std::ranges::find(
+        commands, std::string_view(args.front()), &CliCommand::name);
+    if (found != commands.end()) {
+      command = &*found;
+      args = args.subspan(1);
     }
-    // Asking for usage is a run that succeeded: a `set -e` script calling
-    // `--help` must not die of asking.
-    if (invocation->help) {
-      print_usage(program, registry, std::cout);
-      return kClean;
-    }
-
-    // `--root` first, so the document's references see the neighbours an
-    // editor's scan would have brought in.
-    if (!invocation->root.empty()) initialize_root(invocation->root, shared);
-    const Document& document =
-        build_document_from_path(invocation->path, shared);
-    // The factory may override URI routing; its bound language interprets
-    // the records produced by this document's parser.
-    return report(document, document.language->parser->getGrammar(),
-                  invocation->path, invocation->dump, invocation->json,
-                  std::cout, std::cerr);
-  });
+  }
+  const auto invocation = parse_args(args, command);
+  if (!invocation || invocation->help) {
+    print_usage(program, *shared.serviceRegistry, commands, command,
+                invocation ? std::cout : std::cerr);
+    return invocation ? kClean : kUsage;
+  }
+  const auto& document =
+      build_document(invocation->path, shared, invocation->root,
+                     command && command->loadSiblings);
+  if (command)
+    return command->run(document, invocation->path, invocation->destination);
+  return report(document, invocation->path, invocation->dump, invocation->json,
+                std::cout, std::cerr);
 }
 
 }  // namespace detail

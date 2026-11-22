@@ -11,7 +11,7 @@ namespace cursiv {
 // Runs one session on an open stream: 0 if the client asked for `shutdown`
 // before `exit`, else 1. `shared` must hold its server and languages, and
 // serves one session only: its services keep what the session told them.
-[[nodiscard]] int start_language_server(SharedLspServices& shared,
+[[nodiscard]] int startLanguageServer(SharedLspServices& shared,
                                         lsp::io::Stream& stream);
 
 namespace detail {

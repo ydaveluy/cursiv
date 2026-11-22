@@ -13,7 +13,7 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 
 // A literal's guard names a terminal: the dialect's override is the one it
-// asks, in both engines.
+// asks.
 namespace tguard {
 
 namespace ast {
@@ -87,21 +87,11 @@ inline constexpr auto hex_or_dec = [](std::string_view t) {
 };
 
 struct Dialect : cursiv::extends<Base> {
-  template <class>
-  struct override;
-
-  template <class T>
-    requires std::same_as<T, Base::NUM>
-  struct override<T>
-      : terminal<as<hex_or_dec>((lit<"0x"> + some(cr<"0-9a-f">)) | some(d))> {};
-
-  template <class T>
-    requires std::same_as<T, Base::KW>
-  struct override<T> : terminal<kw<"var">> {};
-
-  template <class T>
-    requires std::same_as<T, tguard::Base::WORDCH>
-  struct override<T> : terminal<cr<"a-z0-9">> {};
+  using overrides =
+      list<replace<Base::NUM, terminal<as<hex_or_dec>(
+                                  (lit<"0x"> + some(cr<"0-9a-f">)) | some(d))>>,
+           replace<Base::KW, terminal<kw<"var">>>,
+           replace<tguard::Base::WORDCH, terminal<cr<"a-z0-9">>>>;
 
   struct COMMENT : terminal<lit<"#"> + many(cr<R"(^\n)">)> {};
 
@@ -111,16 +101,12 @@ struct Dialect : cursiv::extends<Base> {
 // A dialect that adds an alternative to a node rule of its base: the new one
 // builds a class derived from the rule's, and the base's own alternative stays.
 struct RuleDialect : cursiv::extends<Base> {
-  template <class>
-  struct override;
-
-  template <class T>
-    requires std::same_as<T, Base::ItemRule>
-  struct override<T>
-      : rule<create<ast::Starred>(
-                 lit<"*"> + assign<&ast::Item::name>(ref<Base::ID>) + lit<"="> +
-                 assign<&ast::Item::value>(ref<Base::NUM>)) |
-             super> {};
+  using overrides = list<
+      replace<Base::ItemRule,
+              rule<create<ast::Starred>(
+                       lit<"*"> + assign<&ast::Item::name>(ref<Base::ID>) +
+                       lit<"="> + assign<&ast::Item::value>(ref<Base::NUM>)) |
+                   super>>>;
   // The node-rule override; Base and Dialect cover the terminal guards.
   using entry = Base::DocRule;
 };
@@ -158,35 +144,26 @@ struct Base : cursiv::GrammarSpec {
   static constexpr bool case_insensitive = true;
   struct WS : terminal<some(s)> {};
   struct WORD : terminal<as<drop_one>(lit<"@"> + some(cr<"a-z@">))> {};
+  struct Label : rule<kw<"old">> {};
   struct Path : rule<ref<WORD> + lit<"."> + ref<WORD>> {};
   struct DocRule
       : rule<create<ast::Doc>(option(kw<"début"> + lit<":">) +
-                              many(append<&ast::Doc::paths>(ref<Path>)) +
+                              many(append<&ast::Doc::paths>(ref<Path> | ref<Label>)) +
                               option(section<Exact>(lit<"[">, lit<"]">)))> {};
 
   using ignored = WS;
 };
 
-struct Dialect : cursiv::extends<Base> {
-  template <class>
-  struct override;
-
-  template <class T>
-    requires std::same_as<T, Base::WORD>
-  struct override<T> : terminal<as<drop_two>(lit<"@@"> + some(cr<"a-z">))> {};
-
-  using entry = DocRule;
+struct Labels : cursiv::extends<Base> {
+  static constexpr auto canonical = [](std::string_view) -> std::string_view { return "canonical"; };
+  using overrides =
+      list<replace<Base::Label, rule<as<canonical>(super) | kw<"new">>>>;
 };
 
-struct BaseLl : Base {};
-
-struct DialectLl : cursiv::extends<BaseLl> {
-  template <class>
-  struct override;
-
-  template <class T>
-    requires std::same_as<T, Base::WORD>
-  struct override<T> : terminal<as<drop_two>(lit<"@@"> + some(cr<"a-z">))> {};
+struct Dialect : cursiv::extends<Labels> {
+  using overrides = list<
+      replace<Base::WORD, terminal<as<drop_two>(lit<"@@"> + some(cr<"a-z">))>>,
+      replace<Base::Label, rule<super | kw<"last">>>>;
 
   using entry = DocRule;
 };

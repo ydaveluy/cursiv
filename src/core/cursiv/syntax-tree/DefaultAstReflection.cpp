@@ -5,10 +5,6 @@
 #include <optional>
 #include <span>
 #include <string_view>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
-#include <vector>
 
 #include "cursiv/syntax-tree/AstMetaData.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -30,56 +26,6 @@ DefaultAstReflection::DefaultAstReflection(const detail::AstMetaData& meta)
     while (_byTag[at].tag != nullptr) at = (at + 1) & _mask;
     _byTag[at] = {tag, i};
   }
-  _superTypes.resize(meta.typeCount);
-  _properties.resize(meta.typeCount);
-  std::vector<bool> filled(meta.typeCount);
-  // Where each property is declared, the row entry its class wrote: two
-  // members of one name are two properties.
-  std::vector<std::vector<const PropertyMetaData*>> declared(meta.typeCount);
-  // A class's direct bases: those no base of it reaches through its own
-  // direct bases. Found once for each class, registered or not.
-  std::unordered_map<const AstTypeTag*, std::vector<const AstTypeTag*>> direct;
-  const auto direct_of =
-      [&](const auto& self,
-          const AstTypeTag* tag) -> const std::vector<const AstTypeTag*>& {
-    if (const auto known = direct.find(tag); known != direct.end())
-      return known->second;
-    const std::span bases{tag->bases, tag->baseCount};
-    std::unordered_set<const AstTypeTag*> reached;
-    for (const AstTypeTag* const base : bases)
-      for (const AstTypeTag* const above : self(self, base))
-        reached.insert(above);
-    std::vector<const AstTypeTag*> out;
-    for (const AstTypeTag* const base : bases)
-      if (!reached.contains(base)) out.push_back(base);
-    return direct.emplace(tag, std::move(out)).first->second;
-  };
-  // A base's properties come before the class's own; a base reached twice
-  // gives its properties once.
-  const auto fill = [&](const auto& self, std::uint16_t i) -> void {
-    if (filled[i]) return;
-    filled[i] = true;
-    std::vector<PropertyMetaData>& all = _properties[i];
-    std::vector<const PropertyMetaData*>& from = declared[i];
-    std::unordered_set<const PropertyMetaData*> seen;
-    for (const AstTypeTag* const base : direct_of(direct_of, meta.types[i])) {
-      _superTypes[i].push_back(base);
-      const std::uint16_t known = typeIndexOf(base);
-      if (known == kNoType) continue;
-      self(self, known);
-      for (std::size_t k = 0; k < _properties[known].size(); ++k)
-        if (seen.insert(declared[known][k]).second) {
-          all.push_back(_properties[known][k]);
-          from.push_back(declared[known][k]);
-        }
-    }
-    const detail::PropertyRow row = meta.propertyRows[i];
-    for (std::size_t k = 0; k < row.count; ++k) {
-      all.push_back(row.at[k]);
-      from.push_back(&row.at[k]);
-    }
-  };
-  for (std::uint16_t i = 0; i < meta.typeCount; ++i) fill(fill, i);
 }
 
 TypeMetaData DefaultAstReflection::getTypeMetaData(
@@ -89,7 +35,9 @@ TypeMetaData DefaultAstReflection::getTypeMetaData(
   if (i == kNoType)
     return TypeMetaData{
         type != nullptr ? type->name : std::string_view{}, {}, {}};
-  return TypeMetaData{type->name, _superTypes[i], _properties[i]};
+  const detail::PropertyRow properties = _f.propertyRows[i];
+  return TypeMetaData{type->name, type->directBases(),
+                      {properties.at, properties.count}};
 }
 
 std::span<const AstTypeTag* const> DefaultAstReflection::getAllTypes()
@@ -111,8 +59,9 @@ const AstTypeTag* DefaultAstReflection::typeTagOf(
 }
 
 std::string_view DefaultAstReflection::propertyName(
-    std::uint16_t field) const noexcept {
-  return field < _f.fieldCount ? _f.fields[field].name : std::string_view{};
+    std::uint16_t propertyIndex) const noexcept {
+  return propertyIndex < _f.fieldCount ? _f.fields[propertyIndex].name
+                                       : std::string_view{};
 }
 
 std::uint16_t DefaultAstReflection::referenceIndexOf(
@@ -124,13 +73,13 @@ std::uint16_t DefaultAstReflection::referenceIndexOf(
 }
 
 std::uint16_t DefaultAstReflection::referenceIndexOf(
-    const AstTypeTag* container, std::string_view feature) const noexcept {
+    const AstTypeTag* container, std::string_view property) const noexcept {
   const std::uint16_t owner = typeIndexOf(container);
-  if (owner == kNoType || feature.empty() || _f.referenceBound == 0)
+  if (owner == kNoType || property.empty() || _f.referenceBound == 0)
     return kNoReference;
   // Inherited reference fields are already included, in declaration order.
   for (const auto f : _f.referenceRows[owner])
-    if (_f.fields[f].name == feature) return f;
+    if (_f.fields[f].name == property) return f;
   return kNoReference;
 }
 

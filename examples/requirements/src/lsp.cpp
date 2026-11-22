@@ -4,6 +4,6 @@
 #include "requirements/LspModule.hpp"
 
 int main(int argc, char** argv) {
-  return cursiv::run_language_server_main<req::RequirementsSharedServices>(
+  return cursiv::runLanguageServerMain<req::RequirementsSharedServices>(
       argc, argv, "requirements-lsp", &req::register_lsp_services);
 }

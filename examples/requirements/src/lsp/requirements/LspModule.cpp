@@ -28,7 +28,7 @@ std::unique_ptr<RequirementsServices> build(
     MakeFormatter makeFormatter) {
   auto services = std::make_unique<RequirementsServices>(sharedServices);
   services->languageMetaData.languageId = std::move(languageId);
-  cursiv::install_default_core_services(*services);
+  cursiv::installDefaultCoreServices(*services);
   installCore(*services);
   install_lsp_module(*services);
   // Built on the container it will read, and after it: a formatter holds the
@@ -46,7 +46,7 @@ std::unique_ptr<const cursiv::Formatter> make(
 }  // namespace
 
 void install_lsp_module(RequirementsServices& services) {
-  cursiv::install_default_lsp_services(services);
+  cursiv::installDefaultLspServices(services);
   services.semanticTokenProvider =
       std::make_unique<const cursiv::GrammarSemanticTokenProvider>(services);
 }
@@ -69,7 +69,7 @@ RequirementsLanguage create_lsp_services(
   shared->fileSystemProvider =
       files != nullptr ? std::move(files)
                        : std::make_unique<cursiv::EmptyFileSystemProvider>();
-  cursiv::install_default_shared_lsp_services(*shared);
+  cursiv::installDefaultSharedLspServices(*shared);
   auto requirements = create_requirements_lsp_services(*shared);
   auto tests = create_tests_lsp_services(*shared);
   RequirementsServices& one = *requirements;

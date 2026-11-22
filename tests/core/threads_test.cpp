@@ -1069,5 +1069,5 @@ int main() {
   workspace_lock::run();
   imported_names::run();
   grammar_dump::run();
-  return cursiv::test::report("threads");
+  return cursiv::test::report("threads_test");
 }

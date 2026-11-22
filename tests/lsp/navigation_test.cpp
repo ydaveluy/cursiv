@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/references/DefaultNameProvider.hpp"
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/references/References.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
@@ -33,9 +34,10 @@
 #include "cursiv/ExpectedHover.hpp"
 #include "cursiv/ExpectedRename.hpp"
 #include "cursiv/ExpectedSymbols.hpp"
-#include "dualll/generated/Ll/Module.hpp"
-#include "duallr/generated/Lr/Module.hpp"
+#include "cursiv/TestWorkspace.hpp"
+#include "duallr/generated/D2/Module.hpp"
 #include "multiref/generated/MultiG/Module.hpp"
+#include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/lsp/LspModule.hpp"
 #include "workspace/lsp/LspServices.hpp"
@@ -78,10 +80,10 @@ struct World : support::World<cursiv::SharedLspServices> {
   }
 };
 
-using Workspace = World<&ws::generated::Workspace::create_parser,
-                        &ws::generated::Workspace::create_ast_reflection>;
-using MultiRef = World<&fmulti::generated::MultiG::create_parser,
-                       &fmulti::generated::MultiG::create_ast_reflection>;
+using Workspace = World<&ws::generated::Workspace::createParser,
+                        &ws::generated::Workspace::createAstReflection>;
+using MultiRef = World<&fmulti::generated::MultiG::createParser,
+                       &fmulti::generated::MultiG::createAstReflection>;
 
 //  0         1         2
 //  012345678901234567890123
@@ -134,18 +136,13 @@ void a_link_reaches_into_another_document() {
 // One link per member of the group, all from the same origin.
 void a_multi_reference_links_every_member() {
   const MultiRef world("multiref", ".mref");
-  const std::vector<cursiv::Document*> documents =
-      world.built({{"file:///w/q.mref", "SELECT t FROM t, t"}});
-  //                                     0123456789012345678
-  std::optional<std::vector<lsp::LocationLink>> links =
-      world.at(*documents[0], 0, 7);
-  CHECK(links.has_value() && links->size() == 2);
-  if (!links.has_value() || links->size() != 2) return;
-  std::ranges::sort(*links, {}, [](const lsp::LocationLink& link) {
-    return link.targetSelectionRange.start.character;
-  });
-  CHECK(spans((*links)[0].targetSelectionRange, 0, 14, 15));
-  CHECK(spans((*links)[1].targetSelectionRange, 0, 17, 18));
+  cursiv::test::TestWorkspace fixture(world.shared);
+  constexpr auto uri = "file:///w/q.mref";
+  const auto docs = fixture.parse(
+      {{uri, "SELECT <|target>t FROM <|target:t|>, <|target:t|>"}});
+  fixture.expectDefinition(uri, "target");
+  const auto links = world.at(*docs.front(), 0, 7);
+  if (!links) return;
   for (const lsp::LocationLink& link : *links)
     CHECK(link.originSelectionRange.has_value() &&
           spans(*link.originSelectionRange, 0, 7, 8));
@@ -155,7 +152,7 @@ void a_hierarchy_item_keeps_the_selected_overload() {
   const MultiRef world("multiref", ".mref");
   const auto documents =
       world.built({{"file:///w/q.mref", "SELECT t FROM t, t"}});
-  const auto targets = cursiv::hierarchy_nodes_at(
+  const auto targets = cursiv::hierarchyNodesAt(
       *world.language->references, *documents[0], {0, 7}, cursiv::kNoCancel);
   CHECK(targets.size() == 2);
   if (targets.size() != 2) return;
@@ -165,7 +162,7 @@ void a_hierarchy_item_keeps_the_selected_overload() {
     CHECK(name);
     if (!name) continue;
     const auto position = documents[0]->textDocument().positionAt(name.begin());
-    const auto* selected = cursiv::hierarchy_node_of_item(
+    const auto* selected = cursiv::hierarchyNodeOfItem(
         *world.shared.documents, *world.language->references,
         lsp::Uri::parse(documents[0]->uri),
         {static_cast<lsp::Uint>(position.line),
@@ -256,11 +253,38 @@ void a_declaration_elsewhere_is_not_painted_here() {
   CHECK(spans(painted[1], 1, 15, 21));
 }
 
+// Names known to the scopes but written nowhere.
+struct UnplacedNames final : cursiv::DefaultNameProvider {
+  using DefaultNameProvider::DefaultNameProvider;
+
+  cursiv::CstNodeView getNameNode(const cursiv::AstNode&,
+                                  const cursiv::Document*) const override {
+    return {};
+  }
+};
+
+// A declaration here that writes no name is not painted: its site would be
+// its whole record.
+void a_declaration_without_a_name_is_not_painted() {
+  World world;
+  world.services.language.nameProvider =
+      std::make_unique<UnplacedNames>(world.services.language);
+  const std::vector<cursiv::Document*> documents =
+      world.built({{"file:///w/a.ws", std::string(kLib) + std::string(kUse)}});
+  const std::vector<lsp::DocumentHighlight> painted =
+      world.at(*documents[0], 1, 16);
+  CHECK(painted.size() == 2);
+  if (painted.size() != 2) return;
+  CHECK(spans(painted[0], 1, 15, 21));
+  CHECK(spans(painted[1], 2, 15, 21));
+}
+
 }  // namespace
 
 void run() {
   a_highlight_is_a_range_and_nothing_more();
   a_declaration_elsewhere_is_not_painted_here();
+  a_declaration_without_a_name_is_not_painted();
 }
 
 }  // namespace document_highlight_provider
@@ -355,10 +379,10 @@ void distinct_ranges_at_one_start_are_preserved() {
       return declaration;
     }
     std::vector<cursiv::ReferenceDescription> findReferences(
-        const cursiv::AstNode&, const cursiv::FindReferencesOptions&,
+        std::span<const cursiv::AstNode* const>,
+        const cursiv::FindReferencesOptions&,
         const cursiv::CancellationToken&) const override {
       return {
-          {.sourceDocumentId = document, .sourceBegin = 9, .sourceEnd = 15},
           {.sourceDocumentId = document, .sourceBegin = 9, .sourceEnd = 12},
           {.sourceDocumentId = document, .sourceBegin = 9, .sourceEnd = 15}};
     }
@@ -738,8 +762,8 @@ void a_documented_keyword_answers_the_grammars_prose() {
 }
 
 // A word with a text per use answers with the text of the use under the caret,
-// even where two rules start the same. A word with one text answers it
-// anywhere.
+// even where two rules start the same or a data rule reads it alone. A word
+// with one text answers it wherever it is a keyword, never on a name.
 void a_word_answers_the_text_of_its_use(
     std::unique_ptr<cursiv::Parser> parser,
     std::unique_ptr<cursiv::AstReflection> reflection) {
@@ -748,7 +772,7 @@ void a_word_answers_the_text_of_its_use(
       &support::add_language<cursiv::LspServices>(
           world.shared, {"dual", {".dual"}, {}}, std::move(parser),
           std::move(reflection));
-  const auto expect = [&](std::string text, std::string hover) {
+  const auto expect = [&](std::string text, std::optional<std::string> hover) {
     (void)ct::expectHover(*language, {.text = std::move(text),
                                       .hover = std::move(hover),
                                       .disposeAfterCheck = true});
@@ -757,7 +781,17 @@ void a_word_answers_the_text_of_its_use(
   expect("t<|>win a?", "Second twin.");
   expect("tw<|>ice a twice", "Opens.");
   expect("twice a tw<|>ice", "Closes.");
+  expect("use twin h<|>igh", "High.");
   expect("st<|>ate a", "Names a state.");
+  expect("twin st<|>ate!", std::nullopt);
+}
+
+// A name spelled like a documented keyword shows no keyword prose.
+void a_name_spelled_like_a_keyword_is_not_one() {
+  const World world;
+  (void)ct::expectHover(*world.ws, {.text = "datatype String\n"
+                                            "entity Ent<|>ity { f : String }\n",
+                                    .disposeAfterCheck = true});
 }
 
 // A CST span is half-open, so a caret right after a word is outside it: hover
@@ -814,12 +848,10 @@ void a_caret_on_nothing_answers_nothing() {
 void run() {
   a_documented_keyword_answers_the_grammars_prose();
   a_word_answers_the_text_of_its_use(
-      tdual::generated::Lr::create_parser(),
-      tdual::generated::Lr::create_ast_reflection());
-  a_word_answers_the_text_of_its_use(
-      tdual::generated::Ll::create_parser(),
-      tdual::generated::Ll::create_ast_reflection());
+      tdual::generated::D2::createParser(),
+      tdual::generated::D2::createAstReflection());
   a_caret_one_byte_past_the_word_is_still_on_it();
+  a_name_spelled_like_a_keyword_is_not_one();
   a_resolved_reference_answers_its_declarations_documentation();
   a_caret_on_nothing_answers_nothing();
 }
@@ -903,6 +935,12 @@ void an_unnamed_root_lists_its_named_children() {
 // A query that matches nothing gives an empty list, not every symbol.
 void a_query_that_matches_nothing_answers_nothing() {
   const World world;
+  cursiv::CancellationTokenSource cancelled;
+  cancelled.request_stop();
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
+    (void)world.shared.workspaceSymbolProvider->getSymbols(
+        "", cancelled.get_token());
+  }));
   (void)world.built("file:///w/a.ws", std::string(kModel));
   // `kModel` exports only its package, so `Person` is declared at the top of a
   // second document.
@@ -948,17 +986,22 @@ void one_symbol_is_changed_through_get_workspace_symbol() {
   }
 }
 
-// Answers no query, resolves every symbol.
 struct ResolvingProvider final : cursiv::WorkspaceSymbolProvider {
   [[nodiscard]] std::vector<lsp::WorkspaceSymbol> getSymbols(
-      std::string_view, const cursiv::CancellationToken&) const override {
-    return {};
+      std::string_view query, const cursiv::CancellationToken&) const override {
+    lsp::WorkspaceSymbol symbol;
+    symbol.name = query.empty() ? "Person" : std::string(query);
+    symbol.location = lsp::LocationUriOnly{lsp::Uri::parse("file:///w/a.ws")};
+    return {std::move(symbol)};
   }
   [[nodiscard]] bool resolvesSymbols() const noexcept override { return true; }
   [[nodiscard]] lsp::WorkspaceSymbol resolveSymbol(
       lsp::WorkspaceSymbol symbol,
       const cursiv::CancellationToken&) const override {
+    if (symbol.name == "Gone") return symbol;
     symbol.containerName = std::string("resolved");
+    symbol.location =
+        lsp::Location{lsp::Uri::parse("file:///w/a.ws"), {{5, 9}, {5, 15}}};
     return symbol;
   }
 };
@@ -973,7 +1016,7 @@ struct ResolvingProvider final : cursiv::WorkspaceSymbolProvider {
 // A resolving provider is announced and reached through the resolve request;
 // the default does not resolve and returns the symbol unchanged.
 void a_resolving_provider_is_announced_and_reached() {
-  const lsp::InitializeParams handshake;
+  lsp::InitializeParams handshake;
   lsp::WorkspaceSymbol symbol;
   symbol.name = "Person";
 
@@ -984,6 +1027,28 @@ void a_resolving_provider_is_announced_and_reached() {
       resolving.shared.languageServer->initialize(handshake);
   CHECK(announces_resolve(announced));
   (void)resolving.built("file:///w/a.ws", std::string(kModel));
+  const auto query = [&] {
+    return resolving.shared.languageServer->workspaceSymbol({},
+                                                            cursiv::kNoCancel);
+  };
+  const auto eager = query();
+  CHECK(eager.size() == 1);
+  if (eager.size() == 1) {
+    const auto* location = std::get_if<lsp::Location>(&eager.front().location);
+    CHECK(location && location->range.start.line == 5 &&
+          location->range.start.character == 9);
+  }
+  lsp::WorkspaceSymbolParams missing;
+  missing.query = "Gone";
+  CHECK(resolving.shared.languageServer->workspaceSymbol(missing, {}).empty());
+  handshake.capabilities.workspace.emplace()
+      .symbol.emplace()
+      .resolveSupport.emplace()
+      .properties = {"location.range"};
+  (void)resolving.shared.languageServer->initialize(handshake);
+  const auto deferred = query();
+  CHECK(deferred.size() == 1 && std::holds_alternative<lsp::LocationUriOnly>(
+                                    deferred.front().location));
   const lsp::WorkspaceSymbol resolved =
       resolving.shared.languageServer->workspaceSymbolResolve(
           symbol, cursiv::kNoCancel);
@@ -1102,7 +1167,7 @@ void run() {
 }  // namespace workspace_symbol_provider
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   definition_provider::run();
   document_highlight_provider::run();
   references_provider::run();

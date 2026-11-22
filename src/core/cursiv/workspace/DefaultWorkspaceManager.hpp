@@ -24,7 +24,10 @@ namespace cursiv {
 class DefaultWorkspaceManager : public WorkspaceManager,
                                 protected DefaultSharedCoreService {
  public:
-  using DefaultSharedCoreService::DefaultSharedCoreService;
+  enum class ReadErrors { Report, Throw };
+  explicit DefaultWorkspaceManager(const SharedCoreServices& services,
+                                   ReadErrors readErrors = ReadErrors::Report)
+      : DefaultSharedCoreService(services), _readErrors(readErrors) {}
   ~DefaultWorkspaceManager() noexcept override;
 
   void initializeWorkspace(
@@ -51,9 +54,8 @@ class DefaultWorkspaceManager : public WorkspaceManager,
   // `shouldIncludeEntry` of every folder met, as the scan would going down.
   [[nodiscard]] bool isIncluded(const FileSystemNode& entry) const override;
 
-  // One walk with an explicit stack and a cancellation check per entry. A
-  // folder that refuses listing is reported, as a failure for a root and a
-  // warning otherwise, and the walk goes on.
+  // Walks iteratively. ReadErrors controls whether an unreadable entry
+  // is reported and skipped or fails the scan.
   [[nodiscard]] std::vector<std::string> searchFolder(
       std::string_view folderUri,
       const CancellationToken& cancelToken = kNoCancel) const override;
@@ -76,7 +78,7 @@ class DefaultWorkspaceManager : public WorkspaceManager,
   // with no folder.
   virtual void loadAdditionalDocuments(
       std::span<const WorkspaceFolder> folders,
-      cursiv::function_ref<void(std::string_view uri, std::string text)> add);
+      cursiv::FunctionRef<void(std::string_view uri, std::string text)> add);
 
   // Where a folder starts. A language whose sources live under a subdirectory
   // returns it here and keeps the walk.
@@ -84,6 +86,7 @@ class DefaultWorkspaceManager : public WorkspaceManager,
       const WorkspaceFolder& folder) const;
 
  private:
+  ReadErrors _readErrors;
   BuildOptions _initialBuildOptions = detail::typing_build_options();
   std::vector<WorkspaceFolder> _folders;
   // Set once, by `markReady`; the lock is taken to wait and to wake.

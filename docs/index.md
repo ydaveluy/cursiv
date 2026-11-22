@@ -24,9 +24,8 @@ struct Person : rule<kw<"person"> + assign<&ast::Person::name>(ref<ID>)> {};
 
 The [tutorial](learn/walkthrough.md) builds a complete language this way.
 
-Performance comes first: the generated parsers and the editor features stay
-fast on large documents and workspaces. See the
-[benchmarks](benchmarks/README.md).
+To measure parsing, validation and editor requests on your own documents,
+run the [language benchmark](benchmarks/README.md) included in each project.
 
 ## Start here
 

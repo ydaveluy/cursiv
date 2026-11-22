@@ -1,8 +1,7 @@
 #pragma once
 
-// One boolean read three ways: a terminal of constant alternatives, a
-// terminal converted whole, and a data rule. A size is a terminal of words in
-// nested choices, keywords of either case.
+// Boolean words convert by branch or by whole token. A size token reads a
+// nested choice of keywords in either case.
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -25,15 +24,18 @@ struct Suite : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
-  struct BRANCH : terminal<as<true>(ikw<"TRUE">) | as<false>(ikw<"FALSE">)> {};
+  struct DocumentedBool
+      : rule<as<true>(ikw<"TRUE">.doc<"Enables the feature.">()) |
+             as<false>(ikw<"FALSE">)> {};
   struct WHOLE : terminal<as<bool>(ikw<"TRUE"> | ikw<"FALSE">)> {};
   struct Bool : rule<as<true>(ikw<"TRUE">) | as<false>(ikw<"FALSE">)> {};
   struct SIZE : terminal<(kw<"s"> | kw<"small">) | (ikw<"L"> | ikw<"large">)> {
   };
+  struct STATUS : terminal<ikw<"active">> {};
 
   struct BranchItem : rule<create<ast::Item>(
                           assign<&ast::Item::name>(ref<ID>) +
-                          assign<&ast::Item::flag>(ref<BRANCH>) + lit<";">)> {};
+                          assign<&ast::Item::flag>(ref<DocumentedBool>) + lit<";">)> {};
   struct WholeItem : rule<create<ast::Item>(
                          assign<&ast::Item::name>(ref<ID>) +
                          assign<&ast::Item::flag>(ref<WHOLE>) + lit<";">)> {};
@@ -43,6 +45,9 @@ struct Suite : cursiv::GrammarSpec {
   struct SizeItem : rule<create<ast::Item>(assign<&ast::Item::name>(ref<ID>) +
                                            assign<&ast::Item::size>(ref<SIZE>) +
                                            lit<";">)> {};
+  struct MaskedSizeItem : rule<create<ast::Item>(
+      (assign<&ast::Item::size>(ref<SIZE>) + lit<":">) |
+      lit<"s:"> | lit<"L:"> | lit<"l:">)> {};
   // A name in several tokens, through rules that write nothing on the way.
   struct Part : rule<ref<ID> | kw<"in">> {};
   struct Path : rule<some(ref<Part>, lit<".">)> {};
@@ -64,6 +69,9 @@ struct Suite : cursiv::GrammarSpec {
             (lit<"path:"> + many(append<&ast::Items::items>(ref<PathItem>))) |
             (lit<"cap:"> + many(append<&ast::Items::items>(ref<CapItem>))) |
             (lit<"new:"> + many(append<&ast::Items::items>(ref<NewItem>))) |
+            (lit<"masked:"> + append<&ast::Items::items>(ref<MaskedSizeItem>)) |
+            (lit<"case:"> + append<&ast::Items::items>(create<ast::Item>(
+                (assign<&ast::Item::name>(ref<STATUS>) + lit<":">) | lit<"active:">))) |
             (lit<"branch:"> +
              many(append<&ast::Items::items>(ref<BranchItem>))) |
             (lit<"whole:"> + many(append<&ast::Items::items>(ref<WholeItem>))) |
@@ -74,7 +82,5 @@ struct Suite : cursiv::GrammarSpec {
   using ignored = WS;
   using hidden = COMMENT;
 };
-struct Ll : Suite {};
-struct Lr : Suite {};
 
 }  // namespace twords

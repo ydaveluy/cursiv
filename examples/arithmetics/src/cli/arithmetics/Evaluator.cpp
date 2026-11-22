@@ -11,16 +11,20 @@ namespace arith {
 
 int eval_file(std::string_view path, cursiv::SharedCoreServices& shared,
               std::ostream& out, std::ostream& err) {
-  const cursiv::Document& document =
-      cursiv::build_document_from_path(path, shared);
-  if (cursiv::has_error_diagnostics(document)) {
+  return eval_document(cursiv::buildDocumentFromPath(path, shared), path,
+                       out, err);
+}
+
+int eval_document(const cursiv::Document& document, std::string_view path,
+                  std::ostream& out, std::ostream& err) {
+  if (cursiv::hasErrorDiagnostics(document)) {
     err << "There are validation errors:\n";
-    cursiv::print_diagnostics(document, path, err);
+    cursiv::printDiagnostics(document, path, err);
     return cursiv::kDiagnostics;
   }
 
   const cursiv::AstNode* const root = document.parseResult.value;
-  if (root == nullptr || root->type != &cursiv::ast_type_tag<ast::Module>) {
+  if (root == nullptr || root->type != &cursiv::kAstTypeTag<ast::Module>) {
     err << "Unable to evaluate invalid arithmetics module.\n";
     return cursiv::kDiagnostics;
   }
@@ -31,7 +35,7 @@ int eval_file(std::string_view path, cursiv::SharedCoreServices& shared,
   bool failed = false;
   for (const ast::Statement* const statement : module.statements) {
     if (statement == nullptr
-        || statement->type != &cursiv::ast_type_tag<ast::Evaluation>)
+        || statement->type != &cursiv::kAstTypeTag<ast::Evaluation>)
       continue;
     const auto& evaluation = static_cast<const ast::Evaluation&>(*statement);
     const auto found = results.find(&evaluation);

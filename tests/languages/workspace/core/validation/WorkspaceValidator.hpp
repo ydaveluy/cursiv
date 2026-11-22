@@ -1,10 +1,13 @@
 #pragma once
 
+#include <cstddef>
+#include <functional>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
+#include <vector>
 
 #include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/utils/DocumentCache.hpp"
@@ -59,13 +62,37 @@ class WorkspaceValidator final : public cursiv::DefaultCoreService,
   // whose parent changed), so it sends this document back to validation.
   void onUpdate(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted) override;
-  void noteChainedDocument(cursiv::DocumentId from,
-                           cursiv::DocumentId through) const;
 
-  mutable std::mutex _chainedMutex;
-  mutable std::unordered_map<cursiv::DocumentId,
-                             std::unordered_set<cursiv::DocumentId>>
-      _chainedDocuments;
+  // An entity a chain started from or entered another document at.
+  struct Step {
+    cursiv::DocumentId document = cursiv::kNoDocument;
+    const ast::Entity* entity = nullptr;
+    bool operator==(const Step&) const = default;
+  };
+  struct StepHash {
+    [[nodiscard]] std::size_t operator()(const Step& step) const noexcept {
+      return std::hash<const ast::Entity*>{}(step.entity);
+    }
+  };
+  // Where the chain from a step last entered the next document, every step
+  // whose chain has entered here, and whether the chain ends, once known in
+  // this build.
+  struct Chained {
+    Step next;
+    std::vector<Step> from;
+    std::optional<bool> ends;
+  };
+
+  // Notes that the chain from `from` enters another document at `to`, and
+  // returns the verdict of the chain from `to`, if known.
+  [[nodiscard]] std::optional<bool> noteStep(const ast::Entity& from,
+                                             const ast::Entity& to) const;
+  // Notes the verdict of the chains from `start` and each entity it entered.
+  void noteEnds(const ast::Entity& start,
+                std::span<const ast::Entity* const> entered, bool ends) const;
+
+  mutable std::mutex _stepsMutex;
+  mutable std::unordered_map<Step, Chained, StepHash> _steps;
 };
 
 }  // namespace ws

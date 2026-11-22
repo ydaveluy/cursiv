@@ -1,5 +1,5 @@
-// Guards that decide where a token ends read the same on both engines,
-// whatever order the grammar names its tokens in.
+// Guards that decide where a token ends, whatever order the grammar names its
+// tokens in.
 
 #include <string>
 #include <string_view>
@@ -8,12 +8,9 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/LexGuardsGrammar.hpp"
-#include "lexblankheadll/generated/BlankHeadLl/Module.hpp"
-#include "lexblankheadlr/generated/BlankHeadLr/Module.hpp"
-#include "lexguardsll/generated/Ll/Module.hpp"
-#include "lexguardslr/generated/Lr/Module.hpp"
-#include "lexovertakell/generated/OvertakeLl/Module.hpp"
-#include "lexovertakelr/generated/OvertakeLr/Module.hpp"
+#include "lexblankheadlr/generated/BlankHead/Module.hpp"
+#include "lexguardslr/generated/Main/Module.hpp"
+#include "lexovertakelr/generated/Overtake/Module.hpp"
 
 namespace {
 
@@ -114,22 +111,15 @@ void an_asserted_token_keeps_its_leading_blanks(const cursiv::Parser& p) {
 }  // namespace
 
 int main() {
-  cursiv::test::count_expectations();
-  auto ll = tlexguards::generated::Ll::create_parser();
-  auto lr = tlexguards::generated::Lr::create_parser();
-  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
-    a_keyword_keeps_a_complemented_boundary(*parser);
-    a_passable_refusal_keeps_the_shorter_match(*parser);
-    an_assertion_reads_a_choice_of_many_words(*parser);
-    an_assertion_reads_a_run_of_many_refusals(*parser);
-  }
-  auto overtakeLl = tlexguards::generated::OvertakeLl::create_parser();
-  auto overtakeLr = tlexguards::generated::OvertakeLr::create_parser();
-  for (const cursiv::Parser* parser : {overtakeLl.get(), overtakeLr.get()})
-    an_assertion_decides_no_unexpected_token(*parser);
-  auto blankLl = tlexguards::generated::BlankHeadLl::create_parser();
-  auto blankLr = tlexguards::generated::BlankHeadLr::create_parser();
-  for (const cursiv::Parser* parser : {blankLl.get(), blankLr.get()})
-    an_asserted_token_keeps_its_leading_blanks(*parser);
+  cursiv::test::countExpectations();
+  const auto parser = tlexguards::generated::Main::createParser();
+  a_keyword_keeps_a_complemented_boundary(*parser);
+  a_passable_refusal_keeps_the_shorter_match(*parser);
+  an_assertion_reads_a_choice_of_many_words(*parser);
+  an_assertion_reads_a_run_of_many_refusals(*parser);
+  const auto overtake = tlexguards::generated::Overtake::createParser();
+  an_assertion_decides_no_unexpected_token(*overtake);
+  const auto blank = tlexguards::generated::BlankHead::createParser();
+  an_asserted_token_keeps_its_leading_blanks(*blank);
   return cursiv::test::report("LexGuards_test");
 }

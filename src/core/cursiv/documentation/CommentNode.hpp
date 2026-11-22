@@ -16,13 +16,13 @@ struct Document;
 // The record of one of the terminal rules `ruleNames` standing right before
 // `node`, or `kNoNode`. The root reads its whole leading trivia. Read its text
 // and range from the document's CST.
-[[nodiscard]] NodeId find_comment_node(const Document& document,
+[[nodiscard]] NodeId findCommentNode(const Document& document,
                                        const AstNode& node,
                                        std::span<const std::string> ruleNames);
 
 // Parses comment record `comment`. Its ranges are document ranges: `offset`
 // can feed a diagnostic's range.
-[[nodiscard]] DocComment parse_doc_comment(
+[[nodiscard]] DocComment parseDocComment(
     const Document& document, NodeId comment, const DocCommentParseOptions& options = {});
 
 }  // namespace cursiv

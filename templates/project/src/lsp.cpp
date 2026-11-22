@@ -5,7 +5,7 @@
 #include "@CURSIV_NEW_ID@/LspModule.hpp"
 
 int main(int argc, char** argv) {
-  return cursiv::run_language_server_main<
+  return cursiv::runLanguageServerMain<
       @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@SharedServices>(
       argc, argv, "@CURSIV_NEW_ID@-lsp", &@CURSIV_NEW_ID@::register_lsp_services);
 }

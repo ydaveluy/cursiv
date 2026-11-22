@@ -2,7 +2,7 @@
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
-#include "engines/lr/BracketCaretGrammar.hpp"
+#include "grammars/BracketCaretGrammar.hpp"
 #include "engines/shared/UnaryLevelsGrammar.hpp"
 // What a terminal read as trivia is: two ignored terminals may read the same
 // text, a literal outranks a tied pattern, one is no bracket of the
@@ -340,7 +340,7 @@ struct Both : cursiv::GrammarSpec {
 struct Noted : cursiv::GrammarSpec {
   struct WS : terminal<some(s | lit<"''">)> {};
   struct NOTE : terminal<lit<"#"> + many(cr<"a-z">)> {};
-  struct TALLY : terminal<lit<"%"> + many(d)> {};
+  struct TALLY : terminal<(lit<"%"> + many(d)) | (lit<"@"> + many(cr<"é𐐀">))> {};
   struct LATER : terminal<lit<" "> + kw<"later">> {};
   struct ID : terminal<some(cr<"a-z">)> {};
   struct Item : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>) |
@@ -428,9 +428,9 @@ struct Suite : cursiv::GrammarSpec {
   static constexpr auto indent_open = lit<"(">;
   static constexpr auto indent_close = lit<")">;
 };
-struct Ll : Suite {};
 // Newline completion without INDENT/DEDENT shares this bracket-aware table.
 struct Lr : Suite {
+  static constexpr auto word_boundary = w | cr<"é𐐀">;
   struct Entry
       : rule<ref<Suite::Entry> |
              skip(ignore<tbracketcaret::G::WS, tbracketcaret::G::NL>, hide<>,

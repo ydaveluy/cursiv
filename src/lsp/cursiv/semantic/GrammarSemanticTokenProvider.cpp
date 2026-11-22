@@ -81,7 +81,7 @@ constexpr std::array<std::string_view, 8> kCategoryTypes = {
   for (auto at = std::ranges::upper_bound(all, id, {}, &AstNode::cstNodeId);
        at != all.begin() && (*std::prev(at))->cstNodeId >= from;) {
     const AstNode* const candidate = *--at;
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     if (candidate == &node || !names.getNameNode(*candidate, &document))
       continue;
     // A parent's record never comes before its child's.
@@ -97,7 +97,7 @@ constexpr std::array<std::string_view, 8> kCategoryTypes = {
 void GrammarSemanticTokenProvider::computeHighlighting(
     const Document& document, TextOffset begin, TextOffset end,
     SemanticTokenAcceptor accept, const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   if (!document.hasAst()) return;
 
   // Resolved per request: a derived provider may rename the legend's rows.
@@ -159,7 +159,7 @@ void GrammarSemanticTokenProvider::computeHighlighting(
       if (p->cstNodeId < cst.size() && cst.subtreeBegin(p->cstNodeId) <= hi)
         touching.push_back(p);
     for (const AstNode* const node : touching) {
-      throw_if_cancelled(token);
+      throwIfCancelled(token);
       if (const auto nameNode =
               services.nameProvider->getNameNode(*node, &document);
           nameNode && nameNode.end() > nameNode.begin() &&
@@ -192,7 +192,7 @@ void GrammarSemanticTokenProvider::computeHighlighting(
   // before the first keyword sits before `entryBegin` but is still text the
   // editor colours.
   const auto colourLeaf = [&](const CstLeaf& leaf) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     if (leaf.end <= leaf.begin) return;
     // `hidden` means comment: the grammar's `hidden` list is recorded, its
     // `ignored` list is not, so whitespace never appears here to be mistaken
@@ -204,14 +204,12 @@ void GrammarSemanticTokenProvider::computeHighlighting(
     // Read as the parser spelled it; coloured at the document's offsets.
     const std::string_view text = cst.spelling(leaf.id);
     Category category = Category::Keyword;
-    // An empty record means the leaf is a literal the grammar spelled, not
-    // text captured by a named rule.
-    if (grammar.recordRule(cst[leaf.id]).empty()) {
+    if (grammar.recordIsLiteral(cst[leaf.id])) {
       // A literal that opens with a letter or `_` is a keyword the grammar
       // reserved; the rest of them is punctuation.
       std::size_t len = 0;
       const char32_t head =
-          text.empty() ? U'\0' : scalar_at(text.data(), text.size(), len);
+          text.empty() ? U'\0' : scalarAt(text.data(), text.size(), len);
       const bool word =
           detail::word_scalar(head) && (head < U'0' || head > U'9');
       category = word ? Category::Keyword : Category::Operator;

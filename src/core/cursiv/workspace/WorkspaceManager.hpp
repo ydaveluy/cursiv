@@ -20,9 +20,9 @@ class WorkspaceManager {
  public:
   virtual ~WorkspaceManager() noexcept = default;
 
-  // Scans `folderUris`, adds every claimed document to the store, and builds
-  // them together. Like `DocumentBuilder::build`, it does not take the
-  // workspace lock: a caller inside a write passes that write's token.
+  // Scans `folders`, adds every claimed document to the store and builds the
+  // whole store, even after a failed scan, whose error it then rethrows. It
+  // takes no workspace lock: a caller inside a write passes that write's token.
   virtual void initializeWorkspace(
       std::span<const WorkspaceFolder> folders,
       const CancellationToken& cancelToken = kNoCancel) = 0;
@@ -33,7 +33,7 @@ class WorkspaceManager {
   [[nodiscard]] virtual std::span<const WorkspaceFolder> workspaceFolders()
       const noexcept = 0;
 
-  // What the first scan asks, read by that scan alone: `built_in` and `fast`,
+  // What the first scan asks, read by that scan alone: `kBuiltIn` and `kFast`,
   // as an update does by default. Set it before the first scan, for instance
   // to skip validation at startup.
   [[nodiscard]] virtual BuildOptions& initialBuildOptions() noexcept = 0;

@@ -105,7 +105,7 @@ struct FaultCorpus {
         const NodeId child = c - 1;
         c = cst.subtreeBegin(child);
         const CstNode& k = cst[child];
-        if (k.hidden || (k.subtreeSize == 1 && k.begin == k.end)) continue;
+        if (k.isHidden() || (k.subtreeSize == 1 && k.begin == k.end)) continue;
         const std::uint32_t r = k.subtreeSize == 1 ? rank(child) : kNoRank;
         if (close == kNoRank) close = r == kNoRank ? kNoTail : r;
         open = r;

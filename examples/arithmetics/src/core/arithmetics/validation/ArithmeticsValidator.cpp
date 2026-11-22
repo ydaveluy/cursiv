@@ -25,7 +25,7 @@ namespace {
 const ast::Definition* definition_of(const ast::FunctionCall& call) {
   const cursiv::AstNode* const target = call.func.get();
   return target != nullptr
-                 && target->type == &cursiv::ast_type_tag<ast::Definition>
+                 && target->type == &cursiv::kAstTypeTag<ast::Definition>
              ? static_cast<const ast::Definition*>(target)
              : nullptr;
 }
@@ -33,7 +33,7 @@ const ast::Definition* definition_of(const ast::FunctionCall& call) {
 // Parentheses are transparent to every walk below.
 const ast::Expression* unwrap(const ast::Expression* expression) {
   while (expression != nullptr
-         && expression->type == &cursiv::ast_type_tag<ast::GroupedExpression>)
+         && expression->type == &cursiv::kAstTypeTag<ast::GroupedExpression>)
     expression =
         static_cast<const ast::GroupedExpression*>(expression)->expression;
   return expression;
@@ -49,12 +49,12 @@ std::vector<const ast::FunctionCall*> select_calls(
     const ast::Expression* const expression = unwrap(pending.back());
     pending.pop_back();
     if (expression == nullptr) continue;
-    if (expression->type == &cursiv::ast_type_tag<ast::FunctionCall>) {
+    if (expression->type == &cursiv::kAstTypeTag<ast::FunctionCall>) {
       const auto& call = static_cast<const ast::FunctionCall&>(*expression);
       if (definition_of(call) != nullptr) calls.push_back(&call);
       pending.insert(pending.end(), call.args.rbegin(), call.args.rend());
     } else if (expression->type
-               == &cursiv::ast_type_tag<ast::BinaryExpression>) {
+               == &cursiv::kAstTypeTag<ast::BinaryExpression>) {
       const auto& binary =
           static_cast<const ast::BinaryExpression&>(*expression);
       pending.push_back(binary.right);
@@ -82,7 +82,7 @@ std::optional<double> known(
     const std::unordered_map<const ast::Expression*, double>& folded) {
   expression = unwrap(expression);
   if (expression == nullptr) return std::nullopt;
-  if (expression->type == &cursiv::ast_type_tag<ast::NumberLiteral>)
+  if (expression->type == &cursiv::kAstTypeTag<ast::NumberLiteral>)
     return static_cast<const ast::NumberLiteral*>(expression)->value;
   const auto found = folded.find(expression);
   return found == folded.end() ? std::nullopt
@@ -101,7 +101,7 @@ void fold(const ast::Expression& root,
     pending.pop_back();
     const ast::Expression* const expression = unwrap(node);
     if (expression == nullptr
-        || expression->type != &cursiv::ast_type_tag<ast::BinaryExpression>)
+        || expression->type != &cursiv::kAstTypeTag<ast::BinaryExpression>)
       continue;
     const auto& binary = static_cast<const ast::BinaryExpression&>(*expression);
     if (binary.left == nullptr || binary.right == nullptr) continue;
@@ -169,18 +169,18 @@ void walk_divisions(const ast::Expression* root,
       expression = pending.back();
       pending.pop_back();
     }
-    cursiv::throw_if_cancelled(token);
-    if (expression->type == &cursiv::ast_type_tag<ast::GroupedExpression>) {
+    cursiv::throwIfCancelled(token);
+    if (expression->type == &cursiv::kAstTypeTag<ast::GroupedExpression>) {
       expression =
           static_cast<const ast::GroupedExpression&>(*expression).expression;
     } else if (expression->type
-               == &cursiv::ast_type_tag<ast::BinaryExpression>) {
+               == &cursiv::kAstTypeTag<ast::BinaryExpression>) {
       const auto& binary =
           static_cast<const ast::BinaryExpression&>(*expression);
       say_if_zero(binary, interpreter, accept);
       pending.push_back(binary.right);
       expression = binary.left;
-    } else if (expression->type == &cursiv::ast_type_tag<ast::FunctionCall>) {
+    } else if (expression->type == &cursiv::kAstTypeTag<ast::FunctionCall>) {
       const auto& call = static_cast<const ast::FunctionCall&>(*expression);
       expression = call.args.empty() ? nullptr : call.args.front();
       if (call.args.size() > 1)
@@ -197,7 +197,7 @@ void ArithmeticsValidator::checkDivisionsByZero(
     const cursiv::Document& document, cursiv::ValidationAcceptor& accept,
     const cursiv::CancellationToken& token) const {
   const cursiv::AstNode* const root = document.parseResult.value;
-  if (root == nullptr || root->type != &cursiv::ast_type_tag<ast::Module>)
+  if (root == nullptr || root->type != &cursiv::kAstTypeTag<ast::Module>)
     return;
   // One interpreter for the pass, so the divisors share its working memory.
   Interpreter interpreter;
@@ -205,10 +205,10 @@ void ArithmeticsValidator::checkDivisionsByZero(
   for (const ast::Statement* const statement :
        static_cast<const ast::Module&>(*root).statements) {
     if (statement == nullptr) continue;
-    if (statement->type == &cursiv::ast_type_tag<ast::Evaluation>)
+    if (statement->type == &cursiv::kAstTypeTag<ast::Evaluation>)
       walk_divisions(static_cast<const ast::Evaluation&>(*statement).expression,
                      pending, interpreter, accept, token);
-    else if (statement->type == &cursiv::ast_type_tag<ast::Definition>)
+    else if (statement->type == &cursiv::kAstTypeTag<ast::Definition>)
       walk_divisions(static_cast<const ast::Definition&>(*statement).expr,
                      pending, interpreter, accept, token);
   }
@@ -260,7 +260,7 @@ void ArithmeticsValidator::checkUniqueDefinitions(
   Duplicates duplicates(module.statements.size());
   for (const ast::Statement* const statement : module.statements)
     if (statement != nullptr
-        && statement->type == &cursiv::ast_type_tag<ast::Definition>)
+        && statement->type == &cursiv::kAstTypeTag<ast::Definition>)
       duplicates.visit(static_cast<const ast::Definition&>(*statement), accept);
 }
 
@@ -269,13 +269,13 @@ void ArithmeticsValidator::checkMatchingParameters(
   const ast::AbstractDefinition* const target = call.func.get();
   if (target == nullptr) return;
   // A parameter stands for a number, so it takes no argument.
-  if (target->type == &cursiv::ast_type_tag<ast::DeclaredParameter>) {
+  if (target->type == &cursiv::kAstTypeTag<ast::DeclaredParameter>) {
     if (!call.args.empty())
       accept.error(
           call, std::format("Parameter {} takes no arguments.", target->name));
     return;
   }
-  if (target->type != &cursiv::ast_type_tag<ast::Definition>) return;
+  if (target->type != &cursiv::kAstTypeTag<ast::Definition>) return;
   const auto* const definition = static_cast<const ast::Definition*>(target);
   if (definition->args.size() == call.args.size()) return;
   accept.error(
@@ -285,9 +285,9 @@ void ArithmeticsValidator::checkMatchingParameters(
                   definition->name, definition->args.size(), call.args.size()));
 }
 
-// A cycle of calls, reported at each of its call sites with its path. A
-// depth-first walk: a call into a definition still on the stack closes a cycle,
-// and each definition is followed once, so a shared cycle is reported once.
+// A cycle of calls, reported with its path at each of its call sites in this
+// module. A depth-first walk: a call into a definition on the stack closes a
+// cycle; each definition is followed once, so a shared cycle is reported once.
 void ArithmeticsValidator::checkFunctionRecursion(
     const ast::Module& module, cursiv::ValidationAcceptor& accept) const {
   // A definition on the stack, the call that entered it (null at the start)
@@ -305,7 +305,7 @@ void ArithmeticsValidator::checkFunctionRecursion(
 
   for (const ast::Statement* const statement : module.statements) {
     if (statement == nullptr
-        || statement->type != &cursiv::ast_type_tag<ast::Definition>)
+        || statement->type != &cursiv::kAstTypeTag<ast::Definition>)
       continue;
     const auto& start = static_cast<const ast::Definition&>(*statement);
     if (!levelOf.try_emplace(&start, 0).second) continue;
@@ -335,7 +335,8 @@ void ArithmeticsValidator::checkFunctionRecursion(
           std::format("Recursion is not allowed [{}]", print_cycle(cycle));
       // The closing call first, back to the one that entered the cycle.
       for (const ast::FunctionCall* const site : std::views::reverse(cycle))
-        accept.error(*site, message).property<&ast::FunctionCall::func>();
+        if (&cursiv::rootOf(*site) == &module)
+          accept.error(*site, message).property<&ast::FunctionCall::func>();
     }
   }
 }
@@ -346,7 +347,7 @@ void ArithmeticsValidator::checkNormalizable(
     const ast::Definition& definition,
     cursiv::ValidationAcceptor& accept) const {
   if (definition.expr == nullptr
-      || definition.expr->type == &cursiv::ast_type_tag<ast::NumberLiteral>)
+      || definition.expr->type == &cursiv::kAstTypeTag<ast::NumberLiteral>)
     return;
 
   std::unordered_map<const ast::Expression*, double> folded;

@@ -51,7 +51,7 @@ class TaskScheduler {
  private:
   // Precondition: `count > 1` and a live pool.
   void parallelForIndexed(const CancellationToken& token, std::size_t count,
-                          cursiv::function_ref<void(std::size_t)> body);
+                          cursiv::FunctionRef<void(std::size_t)> body);
 
   std::unique_ptr<detail::WorkerPool> _pool;  // null when there are no workers
 };
@@ -59,7 +59,7 @@ class TaskScheduler {
 template <class Range, class F>
 void TaskScheduler::parallelFor(const CancellationToken& token, Range&& range,
                                 F&& task, std::size_t minParallelCount) {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   // One iterator, never copied: an input range's may only move.
   auto current = std::ranges::begin(range);
   const auto end = std::ranges::end(range);
@@ -80,10 +80,10 @@ void TaskScheduler::parallelFor(const CancellationToken& token, Range&& range,
   // load, which a tight range of cheap bodies would feel.
   std::size_t polls = 0;
   for (; current != end; ++current) {
-    if ((polls++ & 0x3f) == 0) throw_if_cancelled(token);
+    if ((polls++ & 0x3f) == 0) throwIfCancelled(token);
     task(*current);
   }
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
 }
 
 template <class T, class F>

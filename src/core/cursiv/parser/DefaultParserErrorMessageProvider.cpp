@@ -46,12 +46,6 @@ std::string quote_found(std::string_view text) {
   return out;
 }
 
-// The start of the line that holds `at`.
-std::size_t line_start(std::string_view text, std::size_t at) {
-  while (at > 0 && text[at - 1] != '\n' && text[at - 1] != '\r') --at;
-  return at;
-}
-
 // The end of the leading blanks from `at`.
 std::size_t blanks_end(std::string_view text, std::size_t at) {
   return std::min(text.find_first_not_of(kIndentBlanks, at), text.size());
@@ -66,9 +60,12 @@ bool in_text(std::string_view text, const ParseDiagnostic& d) {
 // or one just before them where a dropped indent took no byte: it rejects the
 // line's indentation, and any text it goes on over.
 bool starts_indentation(std::string_view text, const ParseDiagnostic& d) {
-  const std::size_t head = line_start(text, d.begin);
-  return blanks_end(text, head) >= d.begin &&
-         blanks_end(text, d.begin) > d.begin;
+  if (blanks_end(text, d.begin) == d.begin) return false;
+  std::size_t head = d.begin;
+  while (head > 0 &&
+         kIndentBlanks.find(text[head - 1]) != std::string_view::npos)
+    --head;
+  return head == 0 || text[head - 1] == '\n' || text[head - 1] == '\r';
 }
 
 // `'a'`, `'a' or 'b'`, `one of 'a', 'b', 'c'`.
@@ -119,7 +116,7 @@ Wording wording(const Grammar& grammar, const ParseDiagnostic& d,
   // A found token that is one of the expected ones is not named twice:
   // "Unexpected '+'." says it all.
   const std::vector<std::string_view> named =
-      expected_spellings(grammar, d, kMaxNamed);
+      expectedSpellings(grammar, d, kMaxNamed);
   if (const bool echoes =
           !w.found.empty() &&
           std::ranges::find(named, std::string_view(w.found)) != named.end();
@@ -160,9 +157,9 @@ std::string DefaultParserErrorMessageProvider::buildMismatchTokenMessage(
   return wording(grammar, diagnostic, text).opposed(/*foundFirst=*/false);
 }
 
-// A frame stops where it has no more text it can place: at the end of the
-// document, or where an enclosing frame resumes, so "end of input" before a
-// `}` would be wrong.
+// A construct given up still needed its element after the text it read: at the
+// end of the document that is the end of input, elsewhere the text itself,
+// which stays as written and is no misspelling.
 std::string DefaultParserErrorMessageProvider::buildIncompleteMessage(
     const Grammar& grammar, const ParseDiagnostic& diagnostic,
     std::string_view text) const {
@@ -171,12 +168,13 @@ std::string DefaultParserErrorMessageProvider::buildIncompleteMessage(
     return w.expected.empty()
                ? "Unexpected end of input."
                : "Expecting " + w.expected + " but found end of input.";
-  return w.opposed(/*foundFirst=*/false);
+  if (w.found.empty() || w.expected.empty()) return w.expecting();
+  return "Expecting " + w.expected + " after '" + w.found + "'.";
 }
 
 std::string DefaultParserErrorMessageProvider::buildBoundedMessage(
     const Grammar&, const ParseDiagnostic&, std::string_view) const {
-  return "This span was decided by the parser's work bound.";
+  return "Recovery reached its work limit while comparing repairs.";
 }
 
 std::string DefaultParserErrorMessageProvider::buildNotAllInputParsedMessage(

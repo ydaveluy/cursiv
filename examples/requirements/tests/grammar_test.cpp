@@ -415,7 +415,7 @@ void the_shipped_pair_generates_its_golden_summary() {
        {"file:///requirements.req", "file:///tests.tst"}) {
     const std::string posix(uri.substr(std::string_view("file://").size()));
     const std::string native =
-        cursiv::file_uri_to_path(uri).value_or(std::string(uri));
+        cursiv::fileUriToPath(uri).value_or(std::string(uri));
     for (std::size_t at = expected.find(posix); at != std::string::npos;
          at = expected.find(posix, at + native.size()))
       expected.replace(at, posix.size(), native);
@@ -504,7 +504,7 @@ void simultaneous_coverage_checks_scan_the_workspace_once() {
 }  // namespace
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   a_requirement_says_what_it_lacks();
   an_uncovered_requirement_is_the_workspace_speaking();
   a_test_says_what_it_lacks();

@@ -76,7 +76,7 @@ class DefaultValidationRegistry : public ValidationRegistry,
     std::vector<Entry> entries;
   };
 
-  // Refuses `built_in` (reserved) and a null check; notes the category.
+  // Refuses `kBuiltIn` (reserved) and a null check; notes the category.
   void fileDocumentCheck(std::vector<DocumentCheckEntry>& into,
                          DocumentCheck check,
                          const ValidationCategory* category);
@@ -84,7 +84,7 @@ class DefaultValidationRegistry : public ValidationRegistry,
   // The slot holding `type`, or the empty one where it would go.
   [[nodiscard]] std::size_t slotOf(const AstTypeTag* type) const noexcept;
   [[nodiscard]] std::vector<Entry>& entriesOf(const AstTypeTag* type);
-  void rehash(std::size_t size, std::uint64_t mul);
+  [[nodiscard]] bool rehash(std::size_t size, std::uint64_t mul);
   void runMatched(const AstNode&, ValidationAcceptor&, ValidationCategories,
                   const CancellationToken&) const;
 

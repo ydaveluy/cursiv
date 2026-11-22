@@ -24,16 +24,17 @@
 #include "conv/generated/G/Module.hpp"
 #include "core/syntax-tree/ConvertGrammars.hpp"
 #include "cursiv/Check.hpp"
+#include "cursiv/engine/parser/Explorer.hpp"
 #include "cursiv/execution/TaskQueue.hpp"
 #include "cursiv/execution/WorkerPool.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/DefaultServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
-#include "cursiv/shared/runtime/AstBuildCtx.hpp"
-#include "cursiv/shared/runtime/AstConvThunks.hpp"
+#include "cursiv/syntax-tree/AstMetaData.hpp"
 #include "cursiv/syntax-tree/CstRun.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/syntax-tree/ParseResultBuilder.hpp"
 #include "cursiv/syntax-tree/SourceTranslation.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/ConcurrentTable.hpp"
@@ -193,11 +194,11 @@ struct RefusingResource : std::pmr::memory_resource {
 
 void reservation_sizes_do_not_wrap() {
   RefusingResource memory;
-  cursiv::detail::CstRun run;
+  cursiv::CstRun run;
   run.bind(&memory);
   bool threw = false;
   try {
-    run.reserve_for(std::numeric_limits<std::size_t>::max());
+    run.reserveRecords(std::numeric_limits<std::size_t>::max());
   } catch (const std::bad_alloc&) {
     threw = true;
   }
@@ -207,7 +208,7 @@ void reservation_sizes_do_not_wrap() {
 // Every allocation of a parse refused in turn: what it built is gone, and a
 // sanitizer run says nothing died twice.
 void a_refused_allocation_frees_what_the_parse_built() {
-  const auto parser = ws::generated::Workspace::create_parser();
+  const auto parser = ws::generated::Workspace::createParser();
   std::string text = "datatype D\n";
   for (int i = 0; i < 40; ++i) text += "entity E { many a : D b : D }\n";
   (void)parser->parse(text);
@@ -244,8 +245,8 @@ void spelled_keywords(std::string_view source, cursiv::SourceTranslation& out) {
 // nodes borrow outlives them, so a node that reads its view when destroyed
 // reads live text.
 void a_refused_bind_keeps_the_translated_text_past_the_nodes() {
-  const auto parser = cursiv::translating_parser(
-      tconv::generated::G::create_parser(), spelled_keywords);
+  const auto parser = cursiv::translatingParser(
+      tconv::generated::G::createParser(), spelled_keywords);
   const std::string text = R"(% "abcdefghijklmnopqrstuvwxyz" "b")";
   const std::size_t read = tconv::chain::Doc::read;
   (void)parser->parse(text);
@@ -270,7 +271,7 @@ void a_refused_bind_keeps_the_translated_text_past_the_nodes() {
 
 // A stop asked at many points of a large parse, the tree's build included.
 void a_stopped_parse_frees_what_it_built() {
-  const auto parser = ws::generated::Workspace::create_parser();
+  const auto parser = ws::generated::Workspace::createParser();
   std::string text = "datatype D\n";
   for (int i = 0; i < 5000; ++i) text += "entity E { many a : D b : D }\n";
   const int idle = allocations.load(std::memory_order_relaxed);
@@ -355,6 +356,19 @@ void a_pending_free_asks_for_no_memory() {
   CHECK(!threw);
   support::collect_pending_tables();
   CHECK(Counted::alive == 0);
+}
+
+// A table a growth takes out goes once the insert that grew it has left: it
+// waits for no later release.
+void a_grown_out_table_waits_for_no_later_release() {
+  support::collect_pending_tables();
+  const int aligned = alignedAllocations.load();
+  cursiv::detail::ConcurrentTable<int, int> grown;
+  for (int k = 0; k < 64; ++k) {
+    int kept = k;
+    (void)grown.insert(grown.generation(), k, kept);
+  }
+  CHECK(alignedAllocations.load() == aligned + 1);
 }
 
 void a_queue_allocation_failure_leaves_no_leak_or_lost_item() {
@@ -445,9 +459,9 @@ struct Tracked final : cursiv::CoreServices {
 // Every allocation of one registration refused in turn, into a registry that
 // already routes the extension. A route always names a live container, and a
 // refused registration leaves no route.
-void a_refused_allocation_leaves_no_route_to_a_freed_container() {
+void a_refused_allocation_leaves_no_route_to_a_freed_container(bool replace) {
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   bool finished = false;
   for (int step = 0; step < 1000 && !finished; ++step) {
     // Outlives the registry, which destroys what writes it.
@@ -455,17 +469,19 @@ void a_refused_allocation_leaves_no_route_to_a_freed_container() {
     cursiv::DefaultServiceRegistry registry(shared);
     auto first = std::make_unique<cursiv::CoreServices>(shared);
     const cursiv::CoreServices* const firstAddress = first.get();
-    first->languageMetaData = {"first", {".q"}, {}};
-    first->parser = ws::generated::Workspace::create_parser();
-    first->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*first);
+    first->languageMetaData = {"first", {".q", ".old"}, {"Makefile"}};
+    first->parser = ws::generated::Workspace::createParser();
+    first->astReflection = ws::generated::Workspace::createAstReflection();
+    cursiv::installDefaultCoreServices(*first);
     registry.registerServices(std::move(first));
 
     auto tracked = std::make_unique<Tracked>(shared, destroyed);
-    tracked->languageMetaData = {"tracked", {".q"}, {}};
-    tracked->parser = ws::generated::Workspace::create_parser();
-    tracked->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*tracked);
+    const std::string id = replace ? "first" : "tracked";
+    tracked->languageMetaData = {
+        id, {".x", ".q", "Q"}, {"NewFile", "Makefile"}};
+    tracked->parser = ws::generated::Workspace::createParser();
+    tracked->astReflection = ws::generated::Workspace::createAstReflection();
+    cursiv::installDefaultCoreServices(*tracked);
     const cursiv::CoreServices* const address = tracked.get();
 
     bool refused = false;
@@ -481,29 +497,59 @@ void a_refused_allocation_leaves_no_route_to_a_freed_container() {
     if (refused) {
       CHECK(destroyed);
       CHECK(registry.findServices("file:///a.q") == firstAddress);
+      CHECK(registry.findServices("file:///a.old") == firstAddress);
+      CHECK(registry.findServices("file:///Makefile") == firstAddress);
+      CHECK(registry.findServices("file:///NewFile") == nullptr);
+      CHECK(registry.findServices("file:///a.x") == nullptr);
       CHECK(registry.all().size() == 1);
     }
     if (destroyed) {
-      CHECK(registry.findServices("file:///a.x", "tracked") != address);
+      CHECK(registry.findServices("file:///a.x", id) != address);
       CHECK(registry.findServices("file:///a.q") != address);
     } else {
       // Routed by its id exactly when listed: the walk over every language
       // and the lookup see the same set.
       CHECK(
-          (registry.findServices("file:///a.x", "tracked") == address) ==
+          (registry.findServices("file:///a.x", id) == address) ==
           (std::ranges::find(registry.all(), address) != registry.all().end()));
+      CHECK(registry.findServices("file:///a.old") ==
+            (replace ? nullptr : firstAddress));
     }
   }
   CHECK(finished);
+}
+
+void a_refused_document_id_can_be_retried() {
+  constexpr std::string_view uri = "file:///a/document-with-a-long-name.ws";
+  constexpr cursiv::DocumentId first{0};
+  for (int step = 0;; ++step) {
+    cursiv::SharedCoreServices shared;
+    cursiv::installDefaultSharedCoreServices(shared);
+    auto& documents = *shared.documents;
+    cursiv::DocumentId id = cursiv::kNoDocument;
+    fail_allocation(step);
+    try {
+      id = documents.getOrCreateDocumentId(uri);
+    } catch (const std::bad_alloc&) {
+    }
+    failAfter.store(-1, std::memory_order_release);
+    if (id != cursiv::kNoDocument) {
+      CHECK(id == first);
+      break;
+    }
+    CHECK(documents.getDocumentId(uri) == cursiv::kNoDocument);
+    CHECK(documents.getDocumentUri(first).empty());
+    CHECK(documents.getOrCreateDocumentId(uri) == first);
+  }
 }
 
 // The workspace grammar as a language of `shared`, with default services.
 const cursiv::CoreServices& add_workspace(cursiv::SharedCoreServices& shared) {
   auto language = std::make_unique<cursiv::CoreServices>(shared);
   language->languageMetaData = {"workspace", {".ws"}, {}};
-  language->parser = ws::generated::Workspace::create_parser();
-  language->astReflection = ws::generated::Workspace::create_ast_reflection();
-  cursiv::install_default_core_services(*language);
+  language->parser = ws::generated::Workspace::createParser();
+  language->astReflection = ws::generated::Workspace::createAstReflection();
+  cursiv::installDefaultCoreServices(*language);
   const cursiv::CoreServices& added = *language;
   shared.serviceRegistry->registerServices(std::move(language));
   return added;
@@ -516,7 +562,7 @@ void a_refused_removal_leaves_no_stale_view() {
   bool finished = false;
   for (int step = 0; step < 100 && !finished; ++step) {
     cursiv::SharedCoreServices shared;
-    cursiv::install_default_shared_core_services(shared);
+    cursiv::installDefaultSharedCoreServices(shared);
     const cursiv::AstReflection& reflection =
         *add_workspace(shared).astReflection;
     const auto declared =
@@ -576,7 +622,7 @@ void a_refused_record_keeps_no_part_of_it() {
   const cursiv::ValidationCategory* const first[] = {&a};
   const cursiv::ValidationCategory* const pass[] = {&b, &c};
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   const cursiv::CoreServices& language = add_workspace(shared);
   const auto document =
       shared.documentFactory->fromString("datatype D\n", "file:///d.ws");
@@ -604,20 +650,20 @@ void a_refused_record_keeps_no_part_of_it() {
 // registration tried again is found too.
 void a_refused_rehash_keeps_the_checks_reachable() {
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   const cursiv::CoreServices& language = add_workspace(shared);
   const auto document =
       shared.documentFactory->fromString("datatype D\n", "file:///d.ws");
   const auto discard = [](cursiv::Diagnostic&&) {};
   cursiv::ValidationAcceptor accept(discard, *document, "test");
   const cursiv::AstTypeTag* const tags[] = {
-      &cursiv::ast_type_tag<ws::ast::AbstractElement>,
-      &cursiv::ast_type_tag<ws::ast::Type>,
-      &cursiv::ast_type_tag<ws::ast::DataType>,
-      &cursiv::ast_type_tag<ws::ast::Feature>,
-      &cursiv::ast_type_tag<ws::ast::Entity>,
-      &cursiv::ast_type_tag<ws::ast::PackageDeclaration>,
-      &cursiv::ast_type_tag<ws::ast::Workspace>};
+      &cursiv::kAstTypeTag<ws::ast::AbstractElement>,
+      &cursiv::kAstTypeTag<ws::ast::Type>,
+      &cursiv::kAstTypeTag<ws::ast::DataType>,
+      &cursiv::kAstTypeTag<ws::ast::Feature>,
+      &cursiv::kAstTypeTag<ws::ast::Entity>,
+      &cursiv::kAstTypeTag<ws::ast::PackageDeclaration>,
+      &cursiv::kAstTypeTag<ws::ast::Workspace>};
   constexpr std::size_t kTags = std::size(tags);
   bool finished = false;
   for (int step = 0; step < 4000 && !finished; ++step) {
@@ -630,7 +676,7 @@ void a_refused_rehash_keeps_the_checks_reachable() {
            .check = [&ran, at](
                         const cursiv::AstNode&, cursiv::ValidationAcceptor&,
                         const cursiv::CancellationToken&) { ++ran[at]; }},
-          &cursiv::fast);
+          &cursiv::kFast);
     };
     std::size_t filed = 0;
     bool refused = false;
@@ -656,13 +702,13 @@ void a_refused_rehash_keeps_the_checks_reachable() {
 // An anchor whose list cannot be kept is no better anchor: the caller keeps
 // its range, and the check goes on.
 void a_refused_anchor_list_is_no_anchor() {
-  const auto parser = ws::generated::Workspace::create_parser();
+  const auto parser = ws::generated::Workspace::createParser();
   cursiv::Document document(cursiv::TextDocument::create(
       "file:///a.ws", "workspace", 0, "entity E { a : E }\n"));
   document.parseResult = parser->parse(document.textDocument().getText());
   const cursiv::AstNode* entity = nullptr;
   for (const cursiv::AstNode* const node : document.parseResult.nodes())
-    if (node->type == &cursiv::ast_type_tag<ws::ast::Entity>) entity = node;
+    if (node->type == &cursiv::kAstTypeTag<ws::ast::Entity>) entity = node;
   CHECK(entity != nullptr);
   if (entity == nullptr) return;
   const auto discard = [](cursiv::Diagnostic&&) {};
@@ -686,7 +732,7 @@ void a_refused_anchor_list_is_no_anchor() {
 // The first anchor of a tree may index the tree's nodes: refused, the caller
 // keeps its range, as for a list.
 void a_refused_first_anchor_is_no_anchor() {
-  const auto parser = ws::generated::Workspace::create_parser();
+  const auto parser = ws::generated::Workspace::createParser();
   const auto discard = [](cursiv::Diagnostic&&) {};
   bool finished = false;
   for (int step = 0; step < 16 && !finished; ++step) {
@@ -695,7 +741,7 @@ void a_refused_first_anchor_is_no_anchor() {
     document.parseResult = parser->parse(document.textDocument().getText());
     const cursiv::AstNode* entity = nullptr;
     for (const cursiv::AstNode* const node : document.parseResult.nodes())
-      if (node->type == &cursiv::ast_type_tag<ws::ast::Entity>) entity = node;
+      if (node->type == &cursiv::kAstTypeTag<ws::ast::Entity>) entity = node;
     CHECK(entity != nullptr);
     if (entity == nullptr) return;
     const cursiv::ValidationAcceptor accept(discard, document, "test");
@@ -717,10 +763,10 @@ void a_refused_first_anchor_is_no_anchor() {
 void a_refused_emission_fails_the_pass() {
   static constexpr cursiv::ValidationCategory mine{"mine"};
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   const cursiv::CoreServices& language = add_workspace(shared);
   language.validationRegistry->registerCheck(
-      {.target = &cursiv::ast_type_tag<ws::ast::Entity>,
+      {.target = &cursiv::kAstTypeTag<ws::ast::Entity>,
        .check =
            [](const cursiv::AstNode& node, cursiv::ValidationAcceptor& accept,
               const cursiv::CancellationToken&) {
@@ -755,14 +801,14 @@ void a_refused_emission_fails_the_pass() {
 // nothing counts it; tried again, it runs once on every member.
 void a_refused_registration_leaves_no_part_of_it() {
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   const cursiv::CoreServices& language = add_workspace(shared);
   const auto document =
       shared.documentFactory->fromString("datatype D\n", "file:///d.ws");
   const auto discard = [](cursiv::Diagnostic&&) {};
   cursiv::ValidationAcceptor accept(discard, *document, "test");
   const cursiv::AstTypeTag* const base =
-      &cursiv::ast_type_tag<ws::ast::AbstractElement>;
+      &cursiv::kAstTypeTag<ws::ast::AbstractElement>;
   const auto family = language.astReflection->getAllSubTypes(base);
   CHECK(family.size() > 2);
   bool finished = false;
@@ -774,7 +820,7 @@ void a_refused_registration_leaves_no_part_of_it() {
           {.target = base,
            .check = [&ran](const cursiv::AstNode&, cursiv::ValidationAcceptor&,
                            const cursiv::CancellationToken&) { ++ran; }},
-          &cursiv::fast);
+          &cursiv::kFast);
     };
     bool refused = false;
     fail_allocation(step);
@@ -808,7 +854,7 @@ void a_refused_scan_still_sets_ready() {
   bool finished = false;
   for (int step = 0; step < 400 && !finished; ++step) {
     cursiv::SharedCoreServices shared;
-    cursiv::install_default_shared_core_services(shared);
+    cursiv::installDefaultSharedCoreServices(shared);
     add_workspace(shared);
     bool refused = false;
     fail_allocation(step);
@@ -829,19 +875,25 @@ void a_refused_scan_still_sets_ready() {
 // goes on.
 void a_refused_eviction_still_empties_the_document() {
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   add_workspace(shared);
   const auto declared =
       shared.documentFactory->fromString("datatype D\n", "file:///d.ws");
   shared.documents->addDocument(declared);
   cursiv::Document* const set[] = {declared.get()};
-  // Notified first, on the thread that notifies the caches next.
+  // Notified before the caches, on their thread, it fills them so that the
+  // refused eviction has a value to drop.
   struct Refuse final : cursiv::DocumentPhaseListener {
     bool armed = false;
-    void onDocumentPhase(cursiv::Document&, cursiv::DocumentState reached,
+    cursiv::DocumentCache<int>* single = nullptr;
+    cursiv::DocumentCache<int, int>* keyed = nullptr;
+    void onDocumentPhase(cursiv::Document& document,
+                         cursiv::DocumentState reached,
                          const cursiv::CancellationToken&) override {
       if (!armed || reached != cursiv::DocumentState::IndexedReferences) return;
       armed = false;
+      CHECK(single->get(document.id, [] { return 5; }) == 5);
+      CHECK(keyed->get(document.id, 0, [] { return 5; }) == 5);
       fail_allocation(0);
       refuse_aligned_allocation();
     }
@@ -851,6 +903,8 @@ void a_refused_eviction_still_empties_the_document() {
     const auto eviction = cursiv::DocumentState::IndexedReferences;
     cursiv::DocumentCache<int> single(shared, eviction);
     cursiv::DocumentCache<int, int> keyed(shared, eviction);
+    refuse.single = &single;
+    refuse.keyed = &keyed;
     shared.documentBuilder->build(set);
     const cursiv::DocumentId id = declared->id;
     CHECK(single.get(id, [] { return 1; }) == 1);
@@ -890,7 +944,7 @@ void a_refused_eviction_still_empties_the_document() {
 // nothing in the cache.
 void a_lookup_makes_no_partition() {
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   cursiv::DocumentCache<int> single(shared);
   cursiv::DocumentCache<int, int> keyed(shared);
   const int plain = allocations.load();
@@ -907,7 +961,7 @@ void a_lookup_makes_no_partition() {
 // the next update parses it.
 void a_refused_reset_keeps_the_document() {
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   add_workspace(shared);
   const auto document =
       shared.documentFactory->fromString("datatype D\n", "file:///d.ws");
@@ -962,18 +1016,17 @@ void a_refused_reset_keeps_the_document() {
 void a_join_writes_its_parts_where_they_stay() {
   const std::string left(2048, 'a');
   const std::string right(2048, 'b');
-  cursiv::Cst tree("x");
-  cursiv::engine::AstBuildCtx ctx;
-  ctx.cst = &tree;
-  (void)ctx.keep_text(std::string_view("x"));  // the pool's first block
-  cursiv::engine::PartRun run;
-  run.push_back(left);
-  run.push_back(right);
+  const cursiv::detail::AstMetaData meta{};
+  cursiv::ParseResult result{cursiv::Cst("x")};
+  cursiv::ParseResultBuilder builder(result, meta);
+  const std::string_view first = "x";
+  (void)builder.keepText({&first, 1});  // the pool's first block
+  const std::array<std::string_view, 2> run{left, right};
   std::string_view joined;
   bool allocated = false;
   fail_allocation(0);
   try {
-    joined = cursiv::engine::join_parts(ctx, run);
+    joined = builder.keepText(run);
   } catch (const std::bad_alloc&) {
     allocated = true;
   }
@@ -982,7 +1035,26 @@ void a_join_writes_its_parts_where_they_stay() {
   CHECK(joined == left + right);
 }
 
+void a_full_cactus_only_grows_for_a_new_node() {
+  using namespace cursiv::engine;
+  for (int fail : {0, 1}) {
+    Cactus graph;
+    for (unsigned i = 0; i < 32; ++i) CHECK(graph.probe(i, kNoStack) == i);
+    fail_allocation(fail);
+    try {
+      for (unsigned i = 0; i < 32; ++i) CHECK(graph.probe(i, kNoStack) == i);
+    } catch (const std::bad_alloc&) { CHECK(false); }
+    fail_allocation(fail);
+    try {
+      CHECK(graph.probe(32, kNoStack) == 32);
+    } catch (const std::bad_alloc&) { CHECK(graph.size() == 32); }
+    failAfter.store(-1, std::memory_order_release);
+    for (unsigned i = 0; i <= 32; ++i) CHECK(graph.probe(i, kNoStack) == i);
+  }
+}
+
 int main() {
+  a_full_cactus_only_grows_for_a_new_node();
   reservation_sizes_do_not_wrap();
   a_join_writes_its_parts_where_they_stay();
   a_refused_allocation_frees_what_the_parse_built();
@@ -990,9 +1062,12 @@ int main() {
   a_stopped_parse_frees_what_it_built();
   a_failed_replacement_keeps_the_published_value_alive();
   a_pending_free_asks_for_no_memory();
+  a_grown_out_table_waits_for_no_later_release();
   a_queue_allocation_failure_leaves_no_leak_or_lost_item();
   a_partial_submission_joins_before_unwinding();
-  a_refused_allocation_leaves_no_route_to_a_freed_container();
+  a_refused_allocation_leaves_no_route_to_a_freed_container(false);
+  a_refused_allocation_leaves_no_route_to_a_freed_container(true);
+  a_refused_document_id_can_be_retried();
   a_refused_removal_leaves_no_stale_view();
   a_refused_record_keeps_no_part_of_it();
   a_refused_rehash_keeps_the_checks_reachable();

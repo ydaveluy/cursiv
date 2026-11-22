@@ -22,7 +22,7 @@ language changes. Check the parse result and its diagnostics before reading
 the tree:
 
 ```cpp title="tests/grammar_test.cpp"
-const auto language = cursiv::create_language<
+const auto language = cursiv::createLanguage<
     recipe::RecipeCoreServices, recipe::RecipeSharedCoreServices,
     recipe::install_core_module>();
 
@@ -36,7 +36,7 @@ if (root == nullptr)
 const auto& model = *root;
 ```
 
-`create_language` sets up the services of your language. `ast_cast<T>`
+`createLanguage` sets up the services of your language. `ast_cast<T>`
 returns null when the node is not a `T`. The parser alone does not resolve
 references or run validation: the next section does both.
 
@@ -62,7 +62,7 @@ add_test(NAME recipe_validation_test COMMAND recipe_validation_test)
 namespace ct = cursiv::test;
 
 void a_duplicate_use_is_refused() {
-  const auto language = cursiv::create_language<
+  const auto language = cursiv::createLanguage<
       recipe::RecipeCoreServices, recipe::RecipeSharedCoreServices,
       recipe::install_core_module>();
 
@@ -80,7 +80,7 @@ void a_duplicate_use_is_refused() {
 }
 
 void a_clean_document_says_nothing() {
-  const auto language = cursiv::create_language<
+  const auto language = cursiv::createLanguage<
       recipe::RecipeCoreServices, recipe::RecipeSharedCoreServices,
       recipe::install_core_module>();
 
@@ -94,7 +94,7 @@ void a_clean_document_says_nothing() {
 }
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   a_duplicate_use_is_refused();
   a_clean_document_says_nothing();
   return cursiv::test::report("recipe_validation_test");
@@ -107,7 +107,7 @@ optional filters, such as an offset, a diagnostic code or an AST property.
 `expectNoIssues` expects no diagnostic at all. `dispose()` removes the document
 from the workspace.
 
-Without `count_expectations()`, the first failed `expect*` throws an exception.
+Without `countExpectations()`, the first failed `expect*` throws an exception.
 With it, each failure prints a message and the test goes on. `report` prints
 the result and returns the exit code that CTest reads. For your own
 assertions, use `CHECK(condition)` from `cursiv/Check.hpp`.
@@ -126,7 +126,7 @@ expected range:
 #include "recipe/LspModule.hpp"
 
 recipe::RecipeSharedServices shared;
-cursiv::install_default_shared_lsp_services(shared);
+cursiv::installDefaultSharedLspServices(shared);
 recipe::register_lsp_services(shared);
 const auto& services = dynamic_cast<const recipe::RecipeServices&>(
     *shared.serviceRegistry->all().front());

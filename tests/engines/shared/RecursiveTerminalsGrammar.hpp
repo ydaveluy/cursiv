@@ -49,6 +49,8 @@ struct Base : cursiv::GrammarSpec {
   struct Filled : terminal<option(ref<Run>) + lit<"q">> {};
   struct Positive : terminal<lit<"@", &ref<Comment>> + some(any)> {};
   struct Negative : terminal<lit<"~", !ref<Comment>> + some(any)> {};
+  static constexpr auto Padding = many(cr<" "> | ref<Comment>);
+  struct Directive : terminal<lit<"#!"> + !(Padding + lit<"[">) + some(any)> {};
   struct Asserted : terminal<&ref<Code> + ref<Code>> {};
   struct Refused : terminal<!ref<Code> + lit<"b">> {};
   struct Repeated : terminal<many(ref<Code>) + lit<"z">> {};
@@ -127,6 +129,7 @@ struct Base : cursiv::GrammarSpec {
              (lit<"code:"> + Read<Code> + lit<"!">) |
              (lit<"continuation:"> + Read<Continued> + lit<"!">) |
              (lit<"optional:"> + Read<Filled> + lit<"!">) |
+             (lit<"directive:"> + (Read<Directive> | (lit<"#"> + lit<"!"> + Padding + lit<"[">))) |
              (lit<"asserted:"> + Read<Asserted> + lit<"!">) |
              (lit<"refused:"> + Read<Refused> + lit<"!">) |
              (lit<"many:"> + Read<Repeated> + lit<"!">) |
@@ -217,8 +220,6 @@ struct Base : cursiv::GrammarSpec {
                                   (lit<"nested:"> + Read<Nested>))> {};
   using entry = Root;
 };
-struct Ll : Base {};
-struct Lr : Base {};
 }  // namespace trightlinear
 
 namespace trecursive {

@@ -12,7 +12,7 @@
 namespace cursiv {
 
 // The codes the runtime itself writes in a diagnostic's `data`, as opposed to a
-// language's own checks. A code action comparing `data_code` against these acts
+// language's own checks. A code action comparing `dataCode` against these acts
 // on the failing construct without reading the English back out of the message.
 
 // A reference nothing in scope answers, or one whose resolution cycles.
@@ -25,11 +25,9 @@ inline constexpr std::string_view kLinkingContainerType = "containerType";
 inline constexpr std::string_view kLinkingProperty = "property";
 // A check that threw; the diagnostic replaces whatever it would have said.
 inline constexpr std::string_view kValidationError = "validation-error";
-// The parse half: three codes, so a client can filter all syntax errors. The
-// parser stopped, or recovery gave up: only the byte it reached is known.
+// The parser found invalid syntax which recovery could not repair.
 inline constexpr std::string_view kSyntaxError = "syntax-error";
-// Recovery repaired here: the document parses, and the text under this range is
-// not what the author wrote.
+// Recovery edited this range to parse the document.
 inline constexpr std::string_view kParseRepaired = "parse-repaired";
 // A value its converter refused; the member keeps its default and the AST
 // stands.

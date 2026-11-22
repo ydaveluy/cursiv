@@ -25,17 +25,17 @@ struct ServiceRequirement {
 // One constant per state, workspace-scoped.
 namespace WorkspaceState {
 
-inline constexpr ServiceRequirement Parsed{ServiceRequirement::Type::Workspace,
+inline constexpr ServiceRequirement kParsed{ServiceRequirement::Type::Workspace,
                                            DocumentState::Parsed};
-inline constexpr ServiceRequirement IndexedContent{
+inline constexpr ServiceRequirement kIndexedContent{
     ServiceRequirement::Type::Workspace, DocumentState::IndexedContent};
-inline constexpr ServiceRequirement ComputedScopes{
+inline constexpr ServiceRequirement kComputedScopes{
     ServiceRequirement::Type::Workspace, DocumentState::ComputedScopes};
-inline constexpr ServiceRequirement Linked{ServiceRequirement::Type::Workspace,
+inline constexpr ServiceRequirement kLinked{ServiceRequirement::Type::Workspace,
                                            DocumentState::Linked};
-inline constexpr ServiceRequirement IndexedReferences{
+inline constexpr ServiceRequirement kIndexedReferences{
     ServiceRequirement::Type::Workspace, DocumentState::IndexedReferences};
-inline constexpr ServiceRequirement Validated{
+inline constexpr ServiceRequirement kValidated{
     ServiceRequirement::Type::Workspace, DocumentState::Validated};
 
 }  // namespace WorkspaceState

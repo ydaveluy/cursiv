@@ -58,7 +58,7 @@ inline void mutation_floor(std::string_view lang, const cursiv::Grammar& grammar
 
 }  // namespace detail
 
-inline void mutation_oracle(const cursiv::Parser& engine, std::string_view lang,
+inline void mutationOracle(const cursiv::Parser& engine, std::string_view lang,
                             const std::string& seed) {
   const Proj valid = project(engine, seed);
   if (!valid.accepted || valid.recovered) {

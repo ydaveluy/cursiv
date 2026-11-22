@@ -37,7 +37,7 @@
   "repository": {
     "keywords": {
       "name": "keyword.control.tests-lang",
-      "match": "(?i)\\b(applicable|testfile|contact|tests|for|tst)\\b"
+      "match": "(?<![0-9A-Z_a-z])([aA][pP][pP][lL][iI][cC][aA][bB][lL][eE]|[tT][eE][sS][tT][fF][iI][lL][eE]|[cC][oO][nN][tT][aA][cC][tT]|[tT][eE][sS][tT][sS]|[fF][oO][rR]|[tT][sS][tT])(?![0-9A-Z_a-z])"
     },
     "comments": {
       "patterns": [

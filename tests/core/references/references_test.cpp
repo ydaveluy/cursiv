@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -56,17 +57,17 @@
 #include "cursiv/workspace/ReferenceDescription.hpp"
 #include "cursiv/workspace/WorkspaceLock.hpp"
 #include "languages/multiref/MultiRefGrammar.hpp"
-#include "multiref/generated/MultiG/AstReflection.hpp"
 #include "multiref/generated/MultiG/Module.hpp"
-#include "narrowedsite/generated/NarrowedSite/AstReflection.hpp"
+#include "multiref/generated/MultiG/Table.hpp"
 #include "narrowedsite/generated/NarrowedSite/Module.hpp"
+#include "narrowedsite/generated/NarrowedSite/Table.hpp"
 #include "sharedrecord/generated/SharedRecord/Module.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/core/references/WorkspaceScopeProvider.hpp"
-#include "workspace/generated/Workspace/AstReflection.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
+#include "workspace/generated/Workspace/Table.hpp"
 
 // What a name points at. Reading a reference resolves it, through the linker.
 namespace linker {
@@ -224,7 +225,7 @@ void the_candidate_is_the_scope_s_first_fit() {
   const auto document =
       world.scoped("datatype String\nentity Person { age : String }\n");
   const cursiv::ReferenceInfo site =
-      site_of(ws::generated::Workspace::kAstMetaData,
+      site_of(*ws::generated::Workspace::kAst.meta,
               document->parseResult.references->handles.front(), "String");
 
   const cursiv::AstNodeDescription* const found =
@@ -248,7 +249,7 @@ void plural_candidates_keep_first_identity_in_scope_order() {
     std::vector<cursiv::AstNodeDescription> entries;
     bool visitScopeEntries(
         const cursiv::ReferenceInfo&, std::string_view,
-        cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+        cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
         const override {
       for (const auto& entry : entries)
         if (!visitor(entry)) return false;
@@ -280,7 +281,7 @@ void the_failure_names_the_expected_type() {
   const auto document =
       world.scoped("datatype String\nentity Person extends String { }\n");
   const cursiv::ReferenceInfo site =
-      site_of(ws::generated::Workspace::kAstMetaData,
+      site_of(*ws::generated::Workspace::kAst.meta,
               document->parseResult.references->handles.front(), "String");
 
   CHECK(world.ws->linker->getCandidate(site) == nullptr);
@@ -294,7 +295,7 @@ void a_name_nothing_declares_reads_the_same() {
   const World world;
   const auto document = world.scoped("entity Person extends Absent { }\n");
   const cursiv::ReferenceInfo site =
-      site_of(ws::generated::Workspace::kAstMetaData,
+      site_of(*ws::generated::Workspace::kAst.meta,
               document->parseResult.references->handles.front(), "Absent");
 
   CHECK(world.ws->linker->getCandidate(site) == nullptr);
@@ -327,7 +328,7 @@ void the_policy_decides_what_a_reference_reaches() {
 
   // The two candidate questions agree, head and set.
   const cursiv::ReferenceInfo site =
-      site_of(ws::generated::Workspace::kAstMetaData,
+      site_of(*ws::generated::Workspace::kAst.meta,
               document->parseResult.references->handles.front(), "StrinG");
   const cursiv::AstNodeDescription* const one =
       world.ws->linker->getCandidate(site);
@@ -386,8 +387,7 @@ void the_self_hooks_take_effect() {
   const cursiv::Declaration found = references.findDeclarations(*document, at);
   CHECK(references.nodes == 1 && found.targets.size() == 1);
   if (found.targets.empty()) return;
-  (void)references.findReferences(*found.targets.front(),
-                                  {.includeDeclaration = true});
+  (void)references.findReferences(found.targets, {.includeDeclaration = true});
   CHECK(references.sites == 1);
 }
 
@@ -431,16 +431,22 @@ void every_link_of_a_loop_says_cycle() {
   CHECK(b.superType.resolve() == cursiv::RefState::ErrorCycle);
 }
 
-// A provider that reads the candidate's own reference before it answers, and
-// counts how many of its calls stand on one another.
+// A provider that reads the candidate's own reference before it answers,
+// counts its lookups and how many stand on one another, and stops `stop` at
+// lookup `stopAt`.
 struct NestingProvider final : cursiv::DefaultScopeProvider {
   using DefaultScopeProvider::DefaultScopeProvider;
 
   mutable std::atomic<std::size_t> deepest{0};
+  mutable std::atomic<std::size_t> lookups{0};
+  cursiv::CancellationTokenSource* stop = nullptr;
+  std::size_t stopAt = 0;
 
   [[nodiscard]] const cursiv::AstNodeDescription* getScopeEntry(
       const cursiv::ReferenceInfo& context,
       std::string_view name) const override {
+    if (lookups.fetch_add(1) + 1 == stopAt && stop != nullptr)
+      stop->request_stop();
     thread_local std::size_t standing = 0;
     struct Call {
       Call() noexcept { ++standing; }
@@ -487,6 +493,50 @@ void a_long_chain_resolves_on_a_bounded_stack() {
       ++resolved;
   CHECK(resolved == kLinks);
   CHECK(measured.deepest.load() < kLinks / 4);
+}
+
+// A link cancelled inside such a chain stops at its next nested resolution:
+// what it left is unresolved, not failed, and a later link resolves it.
+void a_cancelled_chain_stops_where_it_is() {
+  constexpr std::size_t kLinks = 4000;
+  constexpr std::size_t kStopAt = 1000;
+  std::string text;
+  for (std::size_t i = 0; i < kLinks; ++i)
+    text += "entity E" + std::to_string(i) + " extends E" +
+            std::to_string(i + 1) + " { }\n";
+  text += "entity E" + std::to_string(kLinks) + " { }\n";
+  World world;
+  world.shared.taskScheduler = std::make_unique<cursiv::TaskScheduler>(0);
+  const auto document = world.scoped(text);
+  cursiv::CancellationTokenSource source;
+  auto provider = std::make_unique<NestingProvider>(*world.ws);
+  provider->stop = &source;
+  provider->stopAt = kStopAt;
+  const NestingProvider& measured = *provider;
+  world.ws->scopeProvider = std::move(provider);
+  bool cancelled = false;
+  try {
+    world.ws->linker->link(*document, source.get_token());
+  } catch (const cursiv::OperationCancelled&) {
+    cancelled = true;
+  }
+  CHECK(cancelled);
+  CHECK(measured.lookups.load() == kStopAt);
+
+  const auto& refs = *document->parseResult.references;
+  const auto& ops = ws::generated::Workspace::kAst.meta->refOps;
+  std::size_t unresolved = 0;
+  for (const auto& h : refs.handles) {
+    const cursiv::RefState state = ops[h.field].state(*h.owner, h.index);
+    CHECK(state == cursiv::RefState::Resolved ||
+          state == cursiv::RefState::Unresolved);
+    if (state == cursiv::RefState::Unresolved) ++unresolved;
+  }
+  CHECK(unresolved > kLinks / 2);
+
+  world.ws->linker->link(*document);
+  for (const auto& h : refs.handles)
+    CHECK(ops[h.field].state(*h.owner, h.index) == cursiv::RefState::Resolved);
 }
 
 struct ThrowingProvider final : cursiv::DefaultScopeProvider {
@@ -629,7 +679,7 @@ struct EchoingProvider final : cursiv::DefaultScopeProvider {
 
   [[nodiscard]] bool visitScopeEntries(
       const cursiv::ReferenceInfo& context, std::string_view name,
-      cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+      cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
       const override {
     return cursiv::DefaultScopeProvider::visitScopeEntries(
         context, name, [&](const cursiv::AstNodeDescription& entry) {
@@ -645,7 +695,7 @@ void a_candidate_is_answered_once() {
   world.ws->scopeProvider = std::make_unique<EchoingProvider>(*world.ws);
 
   const cursiv::ReferenceInfo site =
-      site_of(ws::generated::Workspace::kAstMetaData,
+      site_of(*ws::generated::Workspace::kAst.meta,
               document->parseResult.references->handles.front(), "String");
   CHECK(world.ws->linker->getCandidates(site).size() == 1);
 }
@@ -662,7 +712,7 @@ void an_early_read_is_said() {
   world.shared.documents->addDocument(document);
 
   const cursiv::ReferenceInfo site =
-      site_of(ws::generated::Workspace::kAstMetaData,
+      site_of(*ws::generated::Workspace::kAst.meta,
               document->parseResult.references->handles.front(), "String");
   (void)world.ws->linker->getCandidate(site);
   CHECK(!sunk.seen.empty());
@@ -676,8 +726,8 @@ void an_early_read_is_said() {
 void is_subtype_reads_subtype_first() {
   const World world;
   const cursiv::AstReflection& r = *world.ws->astReflection;
-  const cursiv::AstTypeTag* entity = &cursiv::ast_type_tag<ws::ast::Entity>;
-  const cursiv::AstTypeTag* type = &cursiv::ast_type_tag<ws::ast::Type>;
+  const cursiv::AstTypeTag* entity = &cursiv::kAstTypeTag<ws::ast::Entity>;
+  const cursiv::AstTypeTag* type = &cursiv::kAstTypeTag<ws::ast::Type>;
   CHECK(r.isSubtype(entity, type));
   CHECK(!r.isSubtype(type, entity));
   CHECK(r.isSubtype(entity, nullptr));  // null supertype accepts everything
@@ -694,7 +744,7 @@ struct CancellingProvider final : cursiv::DefaultScopeProvider {
       const cursiv::ReferenceInfo& context,
       std::string_view name) const override {
     if (source != nullptr) source->request_stop();
-    cursiv::throw_if_cancelled(source->get_token());
+    cursiv::throwIfCancelled(source->get_token());
     return cursiv::DefaultScopeProvider::getScopeEntry(context, name);
   }
 };
@@ -739,8 +789,8 @@ using tns::Use;
 struct NsWorld : support::World<> {
   cursiv::CoreServices* lang = &support::add_language<cursiv::CoreServices>(
       shared, {"narrowedsite", {".ns"}, {}},
-      tns::generated::NarrowedSite::create_parser(),
-      tns::generated::NarrowedSite::create_ast_reflection());
+      tns::generated::NarrowedSite::createParser(),
+      tns::generated::NarrowedSite::createAstReflection());
 
   std::shared_ptr<cursiv::Document> scoped(std::string text) const {
     auto document =
@@ -800,11 +850,11 @@ void a_narrow_that_fits_still_resolves() {
 
   // The site holds the narrowed class and no other the member declares.
   const cursiv::ReferenceInfo info =
-      site_of(tns::generated::NarrowedSite::kAstMetaData,
+      site_of(*tns::generated::NarrowedSite::kAst.meta,
               document->parseResult.references->handles.front(), "a");
   const cursiv::AstReflection& reflection = *world.lang->astReflection;
-  CHECK(reflection.accepts(info, &cursiv::ast_type_tag<Kind1>));
-  CHECK(!reflection.accepts(info, &cursiv::ast_type_tag<Kind2>));
+  CHECK(reflection.accepts(info, &cursiv::kAstTypeTag<Kind1>));
+  CHECK(!reflection.accepts(info, &cursiv::kAstTypeTag<Kind2>));
 }
 
 // A failed narrowing draws no edge: navigation follows what resolved.
@@ -962,6 +1012,7 @@ void run() {
   a_cycle_is_told_apart_from_a_missing_name();
   every_link_of_a_loop_says_cycle();
   a_long_chain_resolves_on_a_bounded_stack();
+  a_cancelled_chain_stops_where_it_is();
   a_throwing_provider_fails_only_its_reference();
   a_throwing_provider_stays_on_its_reference();
   an_early_failure_is_judged_where_the_read_began();
@@ -995,7 +1046,7 @@ cursiv::CoreServices& language() {
   static cursiv::CoreServices services(shared);
   static const bool ready = [] {
     services.languageMetaData = {"workspace", {".ws"}, {}};
-    services.parser = ws::generated::Workspace::create_parser();
+    services.parser = ws::generated::Workspace::createParser();
     return true;
   }();
   (void)ready;
@@ -1077,7 +1128,7 @@ void an_unnamed_node_has_no_name_node() {
 void a_handmade_node_has_a_name_and_no_range() {
   const Parsed p("datatype String\n");
   ws::ast::DataType made;
-  made.type = &cursiv::ast_type_tag<ws::ast::DataType>;
+  made.type = &cursiv::kAstTypeTag<ws::ast::DataType>;
   made.name = "Invented";
   CHECK(provider().getName(made) ==
         std::optional<std::string_view>("Invented"));
@@ -1089,7 +1140,7 @@ void a_handmade_node_has_a_name_and_no_range() {
 // class answers, and what it spells is the caller's to judge.
 void an_empty_name_is_still_a_name() {
   ws::ast::DataType made;
-  made.type = &cursiv::ast_type_tag<ws::ast::DataType>;
+  made.type = &cursiv::kAstTypeTag<ws::ast::DataType>;
   const std::optional<std::string_view> name = provider().getName(made);
   CHECK(name.has_value());
   CHECK(name->empty());
@@ -1121,8 +1172,8 @@ namespace ct = cursiv::test;
 struct World : support::World<cursiv::SharedLspServices> {
   cursiv::LspServices* mref = &support::add_language<cursiv::LspServices>(
       shared, {"multiref", {".mref"}, {}},
-      fmulti::generated::MultiG::create_parser(),
-      fmulti::generated::MultiG::create_ast_reflection());
+      fmulti::generated::MultiG::createParser(),
+      fmulti::generated::MultiG::createAstReflection());
 
   cursiv::Document* built(std::string text) const {
     return support::built(shared, "file:///q.mref", std::move(text));
@@ -1142,7 +1193,7 @@ void navigation_uses_the_documents_language_id() {
   CHECK(declaration.targets.size() == 2);
   if (declaration.targets.size() != 2) return;
   const auto references = world.mref->references->findReferences(
-      *declaration.targets.front(), {.includeDeclaration = true});
+      {declaration.targets.data(), 1}, {.includeDeclaration = true});
   CHECK(references.size() == 3);
   CHECK(references[1].sourceBegin == 14 && references[1].sourceEnd == 15);
   CHECK(references[2].sourceBegin == 17 && references[2].sourceEnd == 18);
@@ -1333,16 +1384,29 @@ void navigation_resolves_a_reference_at_computed_scopes() {
   });
 }
 
+void unlinking_during_a_visit_drops_the_remaining_targets() {
+  const World world;
+  cursiv::Document* const document = world.built("SELECT t FROM t, t");
+  auto& refs = *document->parseResult.references;
+  unsigned visited = 0;
+  refs.visitResolved(document->parseResult.cst(),
+                     [&](auto, auto, const cursiv::AstNode&, bool) {
+                       ++visited;
+                       world.mref->linker->unlink(*document);
+                     });
+  CHECK(visited == 1);
+}
+
 // The grammar knows at compile time that it holds one.
 void the_grammar_confesses_its_multi_reference() {
-  const auto reflection = fmulti::generated::MultiG::create_ast_reflection();
+  const auto reflection = fmulti::generated::MultiG::createAstReflection();
   CHECK(static_cast<const cursiv::DefaultAstReflection&>(*reflection)
             .hasMultiReference());
 }
 
 // `SELECT t FROM t, t`: one written column name, both table items at once.
 void a_declaration_stands_for_its_group(bool declaresMulti) {
-  auto metadata = fmulti::generated::MultiG::kAstMetaData;
+  auto metadata = *fmulti::generated::MultiG::kAst.meta;
   metadata.anyMultiReference = declaresMulti;
   const World world;
   // Declaration metadata cannot rule out a group formed by incoming references.
@@ -1361,7 +1425,7 @@ void a_declaration_stands_for_its_group(bool declaresMulti) {
   // find-references from one member: the group's two declarations and the
   // one written site, in reading order.
   const std::vector<cursiv::ReferenceDescription> rows =
-      world.mref->references->findReferences(*found.targets.front(),
+      world.mref->references->findReferences({found.targets.data(), 1},
                                              {.includeDeclaration = true});
   CHECK(rows.size() == 3);
   if (rows.size() != 3) return;
@@ -1423,36 +1487,159 @@ void a_shared_site_keeps_the_first_target_s_row() {
   CHECK(found.targets.size() == 40);
   if (found.targets.size() != 40) return;
   const std::vector<cursiv::ReferenceDescription> rows =
-      cursiv::detail::collect_references_per_declaration(
-          *world.mref->references, found.targets,
-          [](const cursiv::AstNode&) {
-            return cursiv::FindReferencesOptions{};
-          },
-          cursiv::kNoCancel);
+      world.mref->references->findReferences(found.targets, {});
   CHECK(rows.size() == 1);
   if (rows.size() != 1) return;
   CHECK(rows[0].sourceBegin == 7);
   CHECK(rows[0].targetSymbolId == found.targets.front()->cstNodeId);
 }
 
-void a_multi_reference_tracks_new_global_candidates(bool ignoreCase) {
-  World world;
-  struct ExportItems final : cursiv::DefaultScopeComputation {
-    using DefaultScopeComputation::DefaultScopeComputation;
+// Every member of a wide group asks for its declarations: each site is one
+// row, in reading order, and a declaration's row names its own member.
+void a_wide_group_draws_each_declaration_once() {
+  constexpr std::size_t kMembers = 200;
+  const World world;
+  std::string text = "SELECT t FROM t";
+  for (std::size_t i = 1; i < kMembers; ++i) text += ", t";
+  cursiv::Document* const document = world.built(std::move(text));
+  const cursiv::Declaration found =
+      world.mref->references->findDeclarations(*document, 7);
+  CHECK(found.targets.size() == kMembers);
+  if (found.targets.size() != kMembers) return;
+  const std::vector<cursiv::ReferenceDescription> rows =
+      world.mref->references->findReferences(found.targets,
+                                             {.includeDeclaration = true});
+  CHECK(rows.size() == kMembers + 1);
+  if (rows.size() != kMembers + 1) return;
+  CHECK(rows[0].sourceBegin == 7 && rows[0].multiReference);
+  CHECK(rows[0].targetSymbolId == found.targets.front()->cstNodeId);
+  for (std::size_t i = 1; i < rows.size(); ++i) {
+    CHECK(rows[i - 1].sourceBegin < rows[i].sourceBegin);
+    CHECK(rows[i].targetSymbolId == found.targets[i - 1]->cstNodeId);
+  }
+}
 
-    std::vector<cursiv::AstNodeDescription> collectExportedSymbols(
-        const cursiv::Document& document,
-        const cursiv::CancellationToken& token) const override {
-      std::vector<cursiv::AstNodeDescription> exported;
-      const auto* model = document.parseResult.valueAs<fmulti::ast::Model>();
-      if (model == nullptr || model->query == nullptr) return exported;
-      for (auto* item : model->query->items) {
-        cursiv::throw_if_cancelled(token);
-        addExportedSymbol(*item, exported, document);
-      }
+// The FROM items of every document, or of the one `only` names, are exported:
+// a multi reference elsewhere sees them.
+struct ExportItems final : cursiv::DefaultScopeComputation {
+  using DefaultScopeComputation::DefaultScopeComputation;
+  std::string_view only;
+
+  std::vector<cursiv::AstNodeDescription> collectExportedSymbols(
+      const cursiv::Document& document,
+      const cursiv::CancellationToken& token) const override {
+    std::vector<cursiv::AstNodeDescription> exported;
+    const auto* model = document.parseResult.valueAs<fmulti::ast::Model>();
+    if (model == nullptr || model->query == nullptr ||
+        (!only.empty() && document.uri != only))
       return exported;
+    for (auto* item : model->query->items) {
+      cursiv::throwIfCancelled(token);
+      addExportedSymbol(*item, exported, document);
+    }
+    return exported;
+  }
+};
+
+// A group whose members sit at the same offset of identical documents: its
+// declarations are drawn once, not once for each member.
+void a_group_over_identical_documents_is_drawn_fast() {
+  // Unoptimised code runs the same work many times slower.
+#ifdef NDEBUG
+  constexpr auto kLimit = std::chrono::milliseconds(100);
+#else
+  constexpr auto kLimit = std::chrono::seconds(2);
+#endif
+  constexpr std::size_t kMembers = 2000;
+  World world;
+  world.mref->scopeComputation = std::make_unique<ExportItems>(*world.mref);
+  std::vector<cursiv::Document*> set;
+  for (std::size_t i = 0; i < kMembers; ++i) {
+    auto document = world.shared.documentFactory->fromString(
+        "SELECT x FROM t", "file:///t" + std::to_string(i) + ".mref");
+    set.push_back(document.get());
+    world.shared.documents->addDocument(std::move(document));
+  }
+  auto consumer = world.shared.documentFactory->fromString(
+      "SELECT t FROM u", "file:///consumer.mref");
+  cursiv::Document* const reader = consumer.get();
+  set.push_back(reader);
+  world.shared.documents->addDocument(std::move(consumer));
+  world.shared.documentBuilder->build(set);
+  const cursiv::Declaration found =
+      world.mref->references->findDeclarations(*reader, 7);
+  CHECK(found.targets.size() == kMembers);
+  const auto start = std::chrono::steady_clock::now();
+  const std::vector<cursiv::ReferenceDescription> rows =
+      world.mref->references->findReferences(found.targets,
+                                             {.includeDeclaration = true});
+  CHECK(std::chrono::steady_clock::now() - start < kLimit);
+  CHECK(rows.size() == kMembers + 1);
+}
+
+// Asking for many targets at once answers what asking each alone gives, row
+// for row, each site once: over groups that overlap, under a document filter,
+// and when a language splits the groups.
+void many_targets_answer_as_each_target_alone() {
+  struct Split final : cursiv::DefaultReferences {
+    using DefaultReferences::DefaultReferences;
+    std::vector<const cursiv::AstNode*> getSelfNodes(
+        const cursiv::AstNode& node,
+        const cursiv::CancellationToken&) const override {
+      return {&node};
     }
   };
+  World world;
+  auto exports = std::make_unique<ExportItems>(*world.mref);
+  exports->only = "file:///e.mref";
+  world.mref->scopeComputation = std::move(exports);
+  // `a` and `b` see their own `t` and `e`'s: `e`'s items belong to `a`'s
+  // group, which reaches past what `b` names.
+  std::vector<cursiv::Document*> set;
+  for (const auto& [uri, text] :
+       {std::pair{"file:///a.mref", "SELECT t FROM t"},
+        std::pair{"file:///b.mref", "SELECT t FROM t, t"},
+        std::pair{"file:///e.mref", "SELECT x FROM t, t"}}) {
+    auto document = world.shared.documentFactory->fromString(text, uri);
+    set.push_back(document.get());
+    world.shared.documents->addDocument(std::move(document));
+  }
+  world.shared.documentBuilder->build(set);
+  const cursiv::Document& b = *set[1];
+
+  const cursiv::DefaultReferences plain(*world.mref);
+  const Split split(*world.mref);
+  using Options = cursiv::FindReferencesOptions;
+  const Options asks[] = {{.includeDeclaration = true},
+                          {.includeDeclaration = true, .documentId = b.id},
+                          {}};
+  const auto site = [](const cursiv::ReferenceDescription& row) {
+    return std::tuple{row.sourceDocumentId, row.sourceBegin, row.sourceEnd};
+  };
+  const cursiv::References* const kinds[] = {&plain, &split};
+  for (const cursiv::References* const references : kinds)
+    for (const cursiv::Document* const at : {set[0], set[1]})
+      for (const Options& ask : asks) {
+        const std::vector<const cursiv::AstNode*> targets =
+            plain.findDeclarations(*at, 7).targets;
+        CHECK(targets.size() == (at == set[0] ? 3U : 4U));
+        std::vector<cursiv::ReferenceDescription> alone;
+        for (const cursiv::AstNode* const target : targets) {
+          const auto rows = references->findReferences({&target, 1}, ask);
+          alone.insert(alone.end(), rows.begin(), rows.end());
+        }
+        std::ranges::stable_sort(alone, {}, site);
+        const auto repeats = std::ranges::unique(alone, {}, site);
+        alone.erase(repeats.begin(), repeats.end());
+        CHECK(references->findReferences(targets, ask) == alone);
+      }
+  const std::vector<cursiv::ReferenceDescription> fromB =
+      plain.findReferences(plain.findDeclarations(b, 7).targets, asks[0]);
+  CHECK(fromB.size() == 7 && fromB.front().sourceDocumentId == set[0]->id);
+}
+
+void a_multi_reference_tracks_new_global_candidates(bool ignoreCase) {
+  World world;
   world.mref->scopeComputation = std::make_unique<ExportItems>(*world.mref);
   if (ignoreCase)
     world.mref->scopeProvider =
@@ -1533,7 +1720,7 @@ struct PeekingMultiProvider final : cursiv::DefaultScopeProvider {
 
   [[nodiscard]] bool visitScopeEntries(
       const cursiv::ReferenceInfo& context, std::string_view name,
-      cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+      cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
       const override {
     if (name == "Boom") throw std::runtime_error("provider exploded");
     if (name == "good" && other != nullptr) (void)other->name.size();
@@ -1605,8 +1792,8 @@ void an_unresolved_reference_names_every_type_it_accepts() {
   support::World<> world;
   (void)support::add_language<cursiv::CoreServices>(
       world.shared, {"sharedrecord", {".srm"}, {}},
-      tsr::generated::SharedRecord::create_parser(),
-      tsr::generated::SharedRecord::create_ast_reflection());
+      tsr::generated::SharedRecord::createParser(),
+      tsr::generated::SharedRecord::createAstReflection());
 
   const cursiv::Document* const document =
       world.built("file:///absent.srm", "same;absent");
@@ -1624,8 +1811,8 @@ void two_nodes_on_one_record_are_two_targets() {
   const cursiv::CoreServices* const srm =
       &support::add_language<cursiv::CoreServices>(
           world.shared, {"sharedrecord", {".srm"}, {}},
-          tsr::generated::SharedRecord::create_parser(),
-          tsr::generated::SharedRecord::create_ast_reflection(),
+          tsr::generated::SharedRecord::createParser(),
+          tsr::generated::SharedRecord::createAstReflection(),
           [](cursiv::CoreServices& language) {
             language.scopeComputation = std::make_unique<ExportPair>(language);
           });
@@ -1653,7 +1840,8 @@ void two_nodes_on_one_record_are_two_targets() {
   const cursiv::AstNode* const declared[] = {outer, inner};
   for (const cursiv::AstNode* const node : declared) {
     const std::vector<cursiv::ReferenceDescription> rows =
-        srm->references->findReferences(*node, {.includeDeclaration = true});
+        srm->references->findReferences({&node, 1},
+                                        {.includeDeclaration = true});
     CHECK(rows.size() == 2);
     if (rows.size() != 2) continue;
     CHECK(rows[0].sourceBegin == 0 && rows[0].sourceEnd == 4);
@@ -1668,13 +1856,13 @@ void a_reference_before_any_node_reads_from_the_root() {
   const cursiv::CoreServices* const srm =
       &support::add_language<cursiv::CoreServices>(
           world.shared, {"sharedrecord", {".srm"}, {}},
-          tsr::generated::SharedRecord::create_parser(),
-          tsr::generated::SharedRecord::create_ast_reflection());
+          tsr::generated::SharedRecord::createParser(),
+          tsr::generated::SharedRecord::createAstReflection());
   const cursiv::Document* const document =
       world.built("file:///root.srm", "same;same");
   cursiv::NextFeature next;
   next.property = "target";
-  next.type = &cursiv::ast_type_tag<tsr::Use>;
+  next.type = &cursiv::kAstTypeTag<tsr::Use>;
   next.entered = true;
   cursiv::AstNodePtr entered;
   const std::optional<cursiv::ReferenceInfo> info =
@@ -1691,8 +1879,8 @@ void a_reference_to_one_node_of_a_record_is_not_the_others() {
   const cursiv::CoreServices* const srm =
       &support::add_language<cursiv::CoreServices>(
           world.shared, {"sharedrecord", {".srm"}, {}},
-          tsr::generated::SharedRecord::create_parser(),
-          tsr::generated::SharedRecord::create_ast_reflection(),
+          tsr::generated::SharedRecord::createParser(),
+          tsr::generated::SharedRecord::createAstReflection(),
           [](cursiv::CoreServices& language) {
             language.scopeComputation = std::make_unique<ExportPair>(language);
           });
@@ -1709,8 +1897,10 @@ void a_reference_to_one_node_of_a_record_is_not_the_others() {
     return rows.size() == 1 && rows[0].sourceDocumentId == source.id &&
            rows[0].sourceBegin == 6;
   };
-  CHECK(only(srm->references->findReferences(*model->pair->child, {}), *a));
-  CHECK(only(srm->references->findReferences(*model->pair, {}), *b));
+  const cursiv::AstNode* const inner[] = {model->pair->child};
+  const cursiv::AstNode* const outer[] = {model->pair};
+  CHECK(only(srm->references->findReferences(inner, {}), *a));
+  CHECK(only(srm->references->findReferences(outer, {}), *b));
 }
 
 // A window's visit is the whole table's, kept to the names that touch it, in
@@ -1786,8 +1976,8 @@ void every_window_visits_what_touches_it() {
   support::World<> shared;
   (void)support::add_language<cursiv::CoreServices>(
       shared.shared, {"sharedrecord", {".srm"}, {}},
-      tsr::generated::SharedRecord::create_parser(),
-      tsr::generated::SharedRecord::create_ast_reflection(),
+      tsr::generated::SharedRecord::createParser(),
+      tsr::generated::SharedRecord::createAstReflection(),
       [](cursiv::CoreServices& language) {
         language.scopeComputation = std::make_unique<ExportPair>(language);
       });
@@ -1800,6 +1990,7 @@ void every_window_visits_what_touches_it() {
 }  // namespace
 
 void run() {
+  unlinking_during_a_visit_drops_the_remaining_targets();
   the_grammar_confesses_its_multi_reference();
   an_unresolved_reference_names_every_type_it_accepts();
   navigation_uses_the_documents_language_id();
@@ -1811,6 +2002,9 @@ void run() {
   the_group_does_not_leak_into_plain_references();
   two_documents_built_together_keep_their_own_group();
   a_shared_site_keeps_the_first_target_s_row();
+  a_wide_group_draws_each_declaration_once();
+  a_group_over_identical_documents_is_drawn_fast();
+  many_targets_answer_as_each_target_alone();
   a_multi_reference_tracks_new_global_candidates(false);
   a_multi_reference_tracks_new_global_candidates(true);
   a_throwing_provider_stays_on_its_multi_reference(false);
@@ -1974,7 +2168,7 @@ struct World : support::CoreWorkspace {
 
 cursiv::ReferenceInfo site(const cursiv::Document& document,
                            std::size_t which = 0) {
-  const auto reflection = ws::generated::Workspace::create_ast_reflection();
+  const auto reflection = ws::generated::Workspace::createAstReflection();
   return static_cast<cursiv::DefaultAstReflection&>(*reflection)
       .referenceInfo(document.parseResult.references->handles[which]);
 }
@@ -2026,11 +2220,11 @@ void a_site_index_says_what_the_member_is() {
     return reflection.typeIndexOf(tag);
   };
   CHECK(cursiv::AstReflection::accepts(
-      accepts, indexOf(&cursiv::ast_type_tag<ws::ast::DataType>)));
+      accepts, indexOf(&cursiv::kAstTypeTag<ws::ast::DataType>)));
   CHECK(cursiv::AstReflection::accepts(
-      accepts, indexOf(&cursiv::ast_type_tag<ws::ast::Entity>)));
+      accepts, indexOf(&cursiv::kAstTypeTag<ws::ast::Entity>)));
   CHECK(!cursiv::AstReflection::accepts(
-      accepts, indexOf(&cursiv::ast_type_tag<ws::ast::Feature>)));
+      accepts, indexOf(&cursiv::kAstTypeTag<ws::ast::Feature>)));
 
   // And nothing at all is a site that filters nothing.
   CHECK(cursiv::AstReflection::accepts(
@@ -2064,7 +2258,7 @@ void a_site_can_be_filled_by_hand() {
   typed.reference =
       static_cast<const cursiv::DefaultAstReflection&>(*world.ws->astReflection)
           .referenceIndexOf(
-              &cursiv::ast_type_tag<cursiv::reference<ws::ast::Type>>);
+              &cursiv::kAstTypeTag<cursiv::reference<ws::ast::Type>>);
   CHECK(typed.reference == real.reference);
   CHECK(world.ws->scopeProvider->getScopeEntry(typed, "String") != nullptr);
   CHECK(!world.visible(typed).empty());
@@ -2285,7 +2479,7 @@ void run() {
 }  // namespace scope_provider
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   linker::run();
   name_provider::run();
   references::run();

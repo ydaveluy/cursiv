@@ -25,24 +25,24 @@ std::optional<std::vector<lsp::LocationLink>>
 DefaultDefinitionProvider::getDefinition(const Document& document,
                                          lsp::Position position,
                                          const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   if (!document.hasAst()) return std::nullopt;
 
   const References& references = *services.references;
 
   const Declaration found = references.findDeclarations(
-      document, document.textDocument().offsetAt(from_lsp(position)), token);
+      document, document.textDocument().offsetAt(fromLsp(position)), token);
   if (!found) return std::nullopt;
   std::vector<lsp::LocationLink> links;
 
   // The underline under the mouse: the name as written here, whether the caret
   // was on the reference or on the declaration's own name.
   const lsp::Range origin =
-      to_lsp(document.textDocument().rangeAt(found.span.begin, found.span.end));
+      toLsp(document.textDocument().rangeAt(found.span.begin, found.span.end));
 
   // A multi-reference gives one link per declaration.
   for (const AstNode* target : found.targets) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     if (target == nullptr) continue;
     // The target's own document, often another file.
     const Document* targetDocument = target->getDocument();
@@ -63,15 +63,15 @@ DefaultDefinitionProvider::getDefinition(const Document& document,
       const CstNode& node =
           targetDocument->parseResult.cst()[target->cstNodeId];
       link.targetRange =
-          to_lsp(targetDocument->textDocument().rangeAt(node.begin, node.end));
+          toLsp(targetDocument->textDocument().rangeAt(node.begin, node.end));
     } else if (nameNode) {
-      link.targetRange = to_lsp(targetDocument->textDocument().rangeAt(
+      link.targetRange = toLsp(targetDocument->textDocument().rangeAt(
           nameNode.begin(), nameNode.end()));
     } else {
       continue;
     }
     link.targetSelectionRange =
-        nameNode ? to_lsp(targetDocument->textDocument().rangeAt(
+        nameNode ? toLsp(targetDocument->textDocument().rangeAt(
                        nameNode.begin(), nameNode.end()))
                  : link.targetRange;
     link.originSelectionRange = origin;

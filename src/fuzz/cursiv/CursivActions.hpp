@@ -15,14 +15,14 @@
 
 #include "cursiv/DeclaredModel.hpp"
 #include "cursiv/GrammarActions.hpp"
+#include "cursiv/engine/ast/Actions.hpp"
+#include "cursiv/engine/grammar/Facts.hpp"
+#include "cursiv/engine/grammar/Row.hpp"
+#include "cursiv/grammar/Conversion.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/PayloadOf.hpp"
 #include "cursiv/grammar/expr.hpp"
-#include "cursiv/shared/gen/GrammarBindings.hpp"
-#include "cursiv/shared/gen/Row.hpp"
-#include "cursiv/shared/runtime/ast_conv.hpp"
-#include "cursiv/shared/table/WriteKind.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/VariantNodeAlt.hpp"
@@ -35,7 +35,7 @@ namespace detail {
 template <class T>
 [[nodiscard]] inline bool node_is(const AstNode* n) {
   return n != nullptr && n->type != nullptr &&
-         n->type->derivesFrom(&ast_type_tag<T>);
+         n->type->derivesFrom(&kAstTypeTag<T>);
 }
 
 // Rendered as text, so both trees compare the same way and a difference is
@@ -178,6 +178,11 @@ using MakeFn = AstNode* (*)(WalkTree&);
 using NodeFn = Write (*)(AstNode&, AstNode*);
 using TextFn = Write (*)(AstNode&, ElementId, std::string_view);
 
+// A converter's answer that may fail: a `ConversionResult`.
+template <class R>
+concept fallible = !std::is_same_v<cursiv::detail::unwrap_result_t<R>,
+                                   std::remove_cvref_t<R>>;
+
 template <class T>
 AstNode* make_node(WalkTree& ar) {
   return ar.template make<T>();
@@ -199,7 +204,7 @@ auto convert_leaf([[maybe_unused]] std::string_view raw) {
 template <class R>
 std::optional<std::string> denote_of(std::string_view raw) {
   auto result = convert_leaf<R>(raw);
-  if constexpr (cursiv::engine::is_conversion_result<decltype(result)>) {
+  if constexpr (fallible<decltype(result)>) {
     if (!result) return std::nullopt;
     return std::string(*result.value);
   } else {
@@ -213,12 +218,14 @@ template <class E>
 consteval DenoteFn denote_entry() {
   using T = std::remove_cvref_t<E>;
   if constexpr (requires { typename T::kind; })
-    if constexpr (is_terminal_rule<T> || cursiv::detail::is_data_rule<T>)
-      if constexpr (cursiv::detail::HasConverter<cursiv::detail::conv_t<T>>)
-        if constexpr (cursiv::engine::is_text_value<
-                          cursiv::detail::unwrap_result_t<
-                              decltype(convert_leaf<T>(std::string_view{}))>>)
+    if constexpr (kIsTerminalRule<T> || cursiv::detail::is_data_rule<T>)
+      if constexpr (cursiv::detail::HasConverter<cursiv::detail::conv_t<T>>) {
+        using V = cursiv::detail::unwrap_result_t<decltype(convert_leaf<T>(
+            std::string_view{}))>;
+        if constexpr (std::is_same_v<V, std::string_view> ||
+                      std::is_same_v<V, std::string>)
           return &denote_of<T>;
+      }
   return nullptr;
 }
 
@@ -251,8 +258,7 @@ Write write_node_of(AstNode& owner, AstNode* child) {
 // engine leaves the member at its default, as here.
 template <class F, class A, class Res>
 Write accept(typename F::owner& o, Res&& r) {
-  using R = std::remove_cvref_t<Res>;
-  if constexpr (cursiv::engine::is_conversion_result<R>) {
+  if constexpr (fallible<Res>) {
     if (!r) return Write::Modelled;
     return store<F, A>(o, std::move(*r.value));
   } else {
@@ -300,8 +306,9 @@ Write one_text([[maybe_unused]] typename F::owner& o,
       return Write::NotModelled;
     // The name picks the source; the resolved rule converts it.
     using RR = typename payload_rule<C, R>::type;
-    using A = typename cursiv::engine::conv_alt<
-        typename F::held, cursiv::detail::text_payload<RR>>::type;
+    using A = typename cursiv::engine::written_as<
+        typename F::member, typename F::held,
+        cursiv::detail::text_payload<RR>>::type;
     using CR = cursiv::detail::converter_rule_t<RR>;
     if constexpr (!std::is_void_v<CR>) {
       if constexpr (cursiv::detail::ConvertsText<CR>) {
@@ -569,23 +576,18 @@ struct act_rows<C, TypeList<Es...>> {
 };
 
 // The members a grammar writes, read off the engine's rows.
-template <class R>
-struct written_field {
-  using type = TypeList<>;
-};
-template <engine::WriteKind K, class T, auto P, class N, class Src>
-struct written_field<engine::Row<K, T, engine::Wrote<P>, N, Src>> {
-  using type = TypeList<cursiv::detail::field_tag<P>>;
-};
+template <class F>
+using field_list_t =
+    cursiv::detail::cond_t<std::is_void_v<F>, TypeList<>, TypeList<F>>;
 
 template <class L>
 struct written_fields;
 template <class... Rs>
 struct written_fields<TypeList<Rs...>>
-    : cursiv::detail::dedupe<
-          cursiv::detail::tl_cat_t<typename written_field<Rs>::type...>> {};
+    : cursiv::detail::dedupe<cursiv::detail::tl_cat_t<
+          field_list_t<typename Rs::field>...>> {};
 
-using ValueYield = cursiv::function_ref<void(std::string_view, std::uint32_t,
+using ValueYield = cursiv::FunctionRef<void(std::string_view, std::uint32_t,
                                              ValueKind, std::string_view)>;
 
 template <class F, class X>
@@ -643,8 +645,8 @@ template <class C>
 struct CursivActions final : GrammarActions {
   using Rows =
       detail::act_rows<C, typename detail::model::positions_for<C>::type>;
-  using Fields = typename detail::written_fields<
-      typename engine::GrammarBindings<C>::rows>::type;
+  using Properties = typename detail::written_fields<
+      typename engine::Facts<C>::rows>::type;
 
   [[nodiscard]] AstNode* make(ElementId e, WalkTree& ar) const override {
     if (e >= Rows::kMake.size() || Rows::kMake[e] == nullptr) return nullptr;
@@ -687,7 +689,7 @@ struct CursivActions final : GrammarActions {
   }
 
   void visitValues(const AstNode& n, detail::ValueYield yield) const override {
-    detail::value_walk<Fields>::run(n, yield);
+    detail::value_walk<Properties>::run(n, yield);
   }
 };
 

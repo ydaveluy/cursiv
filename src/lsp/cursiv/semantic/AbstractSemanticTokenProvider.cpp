@@ -61,7 +61,7 @@ void emit(std::vector<lsp::Uint>& data, TextDocument::Cursor& cursor,
           const CancellationToken& cancel) {
   Position from = cursor.positionAt(token.begin);
   while (cursor.crossesLine(token.end)) {
-    throw_if_cancelled(cancel);
+    throwIfCancelled(cancel);
     const Position end = cursor.lineEnd();
     encode_token(data, prevLine, prevChar, from.line, from.character,
                  end.character, token);
@@ -169,8 +169,8 @@ lsp::SemanticTokens AbstractSemanticTokenProvider::semanticHighlightRange(
     const CancellationToken& token) const {
   const TextDocument& text = document.textDocument();
   lsp::SemanticTokens answer;
-  answer.data = encode(document, text.offsetAt(from_lsp(params.range.start)),
-                       text.offsetAt(from_lsp(params.range.end)), token);
+  answer.data = encode(document, text.offsetAt(fromLsp(params.range.start)),
+                       text.offsetAt(fromLsp(params.range.end)), token);
   return answer;
 }
 
@@ -195,7 +195,7 @@ AbstractSemanticTokenProvider::semanticHighlightDelta(
 std::vector<lsp::Uint> AbstractSemanticTokenProvider::encode(
     const Document& document, TextOffset begin, TextOffset end,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   std::vector<SemanticToken> tokens;
   computeHighlighting(
       document, begin, end,
@@ -229,7 +229,7 @@ std::vector<lsp::Uint> AbstractSemanticTokenProvider::encode(
   // begin before the first byte, so the first token is never dropped by it.
   TextOffset emitted = 0;
   for (const SemanticToken& t : tokens) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     if (t.begin < emitted) continue;
     emit(data, cursor, prevLine, prevChar, t, token);
     emitted = t.end;
@@ -273,7 +273,7 @@ std::optional<lsp::SemanticTokensDelta> AbstractSemanticTokenProvider::keep(
   std::optional<lsp::SemanticTokensDelta> delta;
   if (base != nullptr) delta = edits_between(*base, data);
   // A cancelled request keeps nothing: the client's answer stays its base.
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   // Only an open document's answer is kept; the one it replaces goes after the
   // lock.
   std::shared_ptr<const std::vector<lsp::Uint>> kept;

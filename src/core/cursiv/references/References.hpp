@@ -7,7 +7,6 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/text/TextRange.hpp"
 #include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
 
@@ -53,24 +52,13 @@ class References {
       const Document& document, TextOffset offset,
       const CancellationToken& cancelToken = kNoCancel) const = 0;
 
-  // Ordered by (document, offset), so a rename's edits come in a stable order.
+  // Every target's references, each site once, ordered by (document, offset)
+  // so a rename's edits come in a stable order. A site several targets reach
+  // keeps the row of the first.
   [[nodiscard]] virtual std::vector<ReferenceDescription> findReferences(
-      const AstNode& target, const FindReferencesOptions& options = {},
+      std::span<const AstNode* const> targets,
+      const FindReferencesOptions& options,
       const CancellationToken& cancelToken = kNoCancel) const = 0;
 };
-
-namespace detail {
-
-/**
- * Every target's rows, once each, in (document, offset) order. A site shared
- * by several targets keeps the row of the first target that reaches it.
- */
-[[nodiscard]] std::vector<ReferenceDescription>
-collect_references_per_declaration(
-    const References& references, std::span<const AstNode* const> targets,
-    function_ref<FindReferencesOptions(const AstNode&)> options,
-    const CancellationToken& cancelToken);
-
-}  // namespace detail
 
 }  // namespace cursiv

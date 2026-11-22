@@ -74,7 +74,7 @@ struct CoreServices {
   // `firstMissingService` checks exactly what this yields; a derived container
   // adds its own slots.
   virtual void visitServices(
-      cursiv::function_ref<void(const ServiceSlot&)> yield) const;
+      cursiv::FunctionRef<void(const ServiceSlot&)> yield) const;
 
   [[nodiscard]] std::string_view firstMissingService() const;
 
@@ -92,6 +92,6 @@ struct CoreServices {
 
 // Fills the slots no grammar decides, keeping any already set.
 // `languageMetaData`, `parser` and `astReflection` are the language's own.
-void install_default_core_services(CoreServices& services);
+void installDefaultCoreServices(CoreServices& services);
 
 }  // namespace cursiv

@@ -23,7 +23,7 @@
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstBuilder.hpp"
-#include "engines/lr/AsiGrammar.hpp"
+#include "grammars/AsiGrammar.hpp"
 #include "fuzz/InfixEntryGrammar.hpp"
 #include "infixentry/generated/InfixEntryG/Module.hpp"
 
@@ -33,6 +33,10 @@ using ClosedBy =
     typename cursiv::fuzzer::detail::closed_by<std::remove_cvref_t<E>>::type;
 template <class E>
 using Plain = std::remove_cvref_t<E>;
+using ScopedKeyword = cursiv::detail::scoped_t<
+    finfix::InfixEntryG, Plain<decltype(finfix::InfixEntryG::kw<"if">)>>;
+static_assert(cursiv::fuzzer::detail::model::text_of<ScopedKeyword>::value == "if");
+static_assert(cursiv::fuzzer::detail::Spell<finfix::InfixEntryG, ScopedKeyword, 0>::min == 2);
 static_assert(std::is_same_v<ClosedBy<decltype(cursiv::GrammarSpec::lit<"*/"> |
                                                cursiv::GrammarSpec::eof)>,
                              Plain<decltype(cursiv::GrammarSpec::lit<"*/">)>>);
@@ -85,7 +89,7 @@ void trees_compare_at_any_depth(const cursiv::Parser& parser,
 void a_subtree_holds_its_children_whole() {
   const auto judged = [](cursiv::NodeCount last) {
     cursiv::Cst cst("ab");
-    cursiv::detail::CstBuilder b(cst);
+    cursiv::CstBuilder b(cst);
     b.stream().leaf(0, 1, 0);
     b.stream().close(0, 1, 2, 0);
     b.stream().leaf(1, 2, 0);
@@ -98,7 +102,7 @@ void a_subtree_holds_its_children_whole() {
 
   // Ends never go back along the run, from one root to the next too.
   cursiv::Cst roots("ab");
-  cursiv::detail::CstBuilder b(roots);
+  cursiv::CstBuilder b(roots);
   b.stream().leaf(1, 2, 0);
   b.stream().leaf(0, 1, 0);
   const auto back = cursiv::fuzzer::detail::CstInvariants{}.run(roots, "ab");
@@ -376,9 +380,9 @@ int main() {
   a_wide_float_is_not_read_as_a_double();
   an_operand_builds_the_value_of_its_member();
   namespace g = finfix::generated::InfixEntryG;
-  const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
+  const std::unique_ptr<cursiv::Parser> parser = g::createParser();
   const std::unique_ptr<cursiv::AstReflection> reflection =
-      g::create_ast_reflection();
+      g::createAstReflection();
   trees_compare_at_any_depth(*parser, *reflection);
   // Every write of this grammar is modelled, a converter's whole list included.
   CHECK(cursiv::fuzzer::lane<finfix::InfixEntryG>(
@@ -388,8 +392,22 @@ int main() {
   // An implied token is always written out: the walk cannot tell where the
   // parser would imply it.
   const std::unique_ptr<cursiv::Parser> asi =
-      tasi::generated::G::create_parser();
+      tasi::generated::G::createParser();
   cursiv::fuzzer::lane<tasi::G>(
-      "asi", *asi, *tasi::generated::G::create_ast_reflection(), 300, 0x3f3f3f);
+      "asi", *asi, *tasi::generated::G::createAstReflection(), 300, 0x3f3f3f);
+  // Every reading of the first `go` fails at `@`, three real tokens past the
+  // bare `go`'s: the repair mends `@` alone.
+  const cursiv::ParseResult mended = asi->parse("go a\ngo b\n@c\n");
+  CHECK(mended.diagnostics.size() == 1 && mended.diagnostics[0].begin == 10);
+  constexpr std::string_view block = "{ (a; } b(); } c();";
+  const auto groups = asi->parse(block);
+  const auto* doc = groups.valueAs<tasi::ast::Doc>();
+  CHECK(groups.diagnostics.size() == 1 &&
+        groups.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced &&
+        groups.diagnostics[0].begin == 2 && groups.diagnostics[0].end == 3);
+  CHECK(doc && doc->body.size() == 2 && doc->body[0]->body.size() == 2 &&
+        doc->body[0]->body[0]->body.size() == 1 && doc->body[0]->body[1]->head == "b" &&
+        doc->body[1]->head == "c");
+  CHECK(cursiv::fuzzer::detail::CstInvariants{}.run(groups.cst(), block).ok);
   return cursiv::test::report("gen_fuzz_test");
 }

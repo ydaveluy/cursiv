@@ -27,7 +27,7 @@ namespace {
 // Read through the type tag: `ast_cast` is exact, so it would not see an
 // `Entity` as the `AbstractElement` that holds the name.
 std::string_view name_of(const cursiv::AstNode& node) {
-  return cursiv::is_named(node) ? node.type->readName(node)
+  return cursiv::isNamed(node) ? node.type->readName(node)
                                 : std::string_view{};
 }
 
@@ -96,7 +96,7 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
   if (!edit.has_value()) return edit;
 
   const cursiv::Declaration found = references.findDeclarations(
-      document, document.textDocument().offsetAt(cursiv::from_lsp(position)),
+      document, document.textDocument().offsetAt(cursiv::fromLsp(position)),
       token);
   if (!found || found.targets.empty()) return edit;
 
@@ -114,7 +114,7 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
       sites;
 
   for (const cursiv::AstNode* const node : renamed) {
-    cursiv::throw_if_cancelled(token);
+    cursiv::throwIfCancelled(token);
     const std::string qualified =
         qualified_after_rename(*node, *found.targets.front(), newName, names);
     const std::string bare = node == found.targets.front()
@@ -122,7 +122,7 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
                                  : std::string(name_of(*node));
 
     for (const cursiv::ReferenceDescription& reference :
-         references.findReferences(*node, {false, cursiv::kNoDocument},
+         references.findReferences({&node, 1}, {false, cursiv::kNoDocument},
                                    token)) {
       const std::shared_ptr<cursiv::Document> source =
           store.getDocument(reference.sourceDocumentId);
@@ -138,7 +138,7 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
           written.find('.') == std::string_view::npos ? bare : qualified;
 
       lsp::TextEdit rewrite;
-      rewrite.range = cursiv::to_lsp(
+      rewrite.range = cursiv::toLsp(
           text.rangeAt(reference.sourceBegin, reference.sourceEnd));
       rewrite.newText = std::string(replacement);
 

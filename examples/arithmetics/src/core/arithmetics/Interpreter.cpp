@@ -88,20 +88,20 @@ class Interpreter::Machine {
       --*_remaining;
     }
 
-    if (expression.type == &cursiv::ast_type_tag<ast::NumberLiteral>) {
+    if (expression.type == &cursiv::kAstTypeTag<ast::NumberLiteral>) {
       _values.push_back(
           static_cast<const ast::NumberLiteral&>(expression).value);
       return {Kind::done, nullptr};
     }
 
-    if (expression.type == &cursiv::ast_type_tag<ast::GroupedExpression>) {
+    if (expression.type == &cursiv::kAstTypeTag<ast::GroupedExpression>) {
       const ast::Expression* const inner =
           static_cast<const ast::GroupedExpression&>(expression).expression;
       if (inner == nullptr) return {Kind::failed, nullptr};
       return {Kind::evaluate, inner};
     }
 
-    if (expression.type == &cursiv::ast_type_tag<ast::BinaryExpression>) {
+    if (expression.type == &cursiv::kAstTypeTag<ast::BinaryExpression>) {
       const auto& binary =
           static_cast<const ast::BinaryExpression&>(expression);
       if (binary.left == nullptr || binary.right == nullptr)
@@ -113,7 +113,7 @@ class Interpreter::Machine {
       return {Kind::evaluate, binary.left};
     }
 
-    if (expression.type == &cursiv::ast_type_tag<ast::FunctionCall>)
+    if (expression.type == &cursiv::kAstTypeTag<ast::FunctionCall>)
       return call(static_cast<const ast::FunctionCall&>(expression));
 
     return {Kind::failed, nullptr};
@@ -125,7 +125,7 @@ class Interpreter::Machine {
 
     // A parameter used as a value: the name stands for what the enclosing
     // call bound, and it takes no argument.
-    if (target->type == &cursiv::ast_type_tag<ast::DeclaredParameter>) {
+    if (target->type == &cursiv::kAstTypeTag<ast::DeclaredParameter>) {
       if (_frames.empty() || !call.args.empty()) return {Kind::failed, nullptr};
       const Frame& frame = _frames.back();
       if (target->parent != frame.definition) return {Kind::failed, nullptr};
@@ -136,7 +136,7 @@ class Interpreter::Machine {
       return {Kind::done, nullptr};
     }
 
-    if (target->type != &cursiv::ast_type_tag<ast::Definition>)
+    if (target->type != &cursiv::kAstTypeTag<ast::Definition>)
       return {Kind::failed, nullptr};
     const auto& definition = static_cast<const ast::Definition&>(*target);
     if (definition.args.size() != call.args.size())
@@ -237,7 +237,7 @@ EvaluationResult interpret_evaluations(const ast::Module& module) {
   Interpreter interpreter;
   for (const ast::Statement* const statement : module.statements) {
     if (statement == nullptr
-        || statement->type != &cursiv::ast_type_tag<ast::Evaluation>)
+        || statement->type != &cursiv::kAstTypeTag<ast::Evaluation>)
       continue;
     const auto& evaluation = static_cast<const ast::Evaluation&>(*statement);
     // One that answers nothing does not stop the others: they are still

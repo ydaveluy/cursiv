@@ -143,9 +143,9 @@ class HiddenNodeFormatter {
   // The whitespace prefix for `baseIndentation() + delta`.
   [[nodiscard]] std::string indentation(std::int32_t delta = 0) const;
 
-  // Replace the record's text wholesale. The engine re-indents the replacement
-  // to the record's own column, so a rewriter writes the comment and not its
-  // margin.
+  // Replace the record's text wholesale. Each of its lines that starts a line
+  // gets the record's margin, `baseIndentation()` unless this formatter sets a
+  // rule on it. A rewriter writes the comment and not its margin.
   void replace(std::string text) const;
 
   // A rule on a hidden record sets its margin only, from its move's `tabs`: the

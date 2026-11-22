@@ -96,12 +96,15 @@ void WorkerPool::drain(Job& job) const noexcept {
   }
 }
 
-// The cell is read before the work: the publisher's stack dies when the count
-// reaches zero, while the pool's cell does not. `asleep` and the count are
-// both sequentially consistent: the last part cannot miss a sleeping publisher.
-void WorkerPool::runTask(Task& task) const noexcept {
+// A part that finds more items than it takes wakes up to two more workers. The
+// cell is read before the work, as the publisher's stack dies at a zero count;
+// `asleep` and the count are sequentially consistent so neither misses the other.
+void WorkerPool::runTask(Task& task) noexcept {
   Job& job = *task.job;
   Cell& cell = *job.cell;
+  if (const std::size_t claimed = job.next.load(std::memory_order_relaxed);
+      claimed + 1 < job.count)
+    _idle.notifyN(std::min<std::size_t>(2, job.count - claimed - 1));
   drain(job);
   if (cell.pending.fetch_sub(1, std::memory_order_seq_cst) == 1 &&
       cell.asleep.load(std::memory_order_seq_cst)) {
@@ -256,7 +259,7 @@ void WorkerPool::corun(const Job& job, std::size_t self) noexcept {
 }
 
 void WorkerPool::run(std::size_t count,
-                     cursiv::function_ref<bool(std::size_t)> body) {
+                     cursiv::FunctionRef<bool(std::size_t)> body) {
   if (count == 0) return;
 
   // No more parts than items or than the pool runs. Each part claims once past
@@ -283,14 +286,15 @@ void WorkerPool::run(std::size_t count,
   try {
     submit(task, self, parts - 1);
   } catch (...) {
-    _idle.notifyN(parts - 1);
+    _idle.notifyN(1);
     drain(job);
     if (cell->pending.fetch_sub(1, std::memory_order_acq_rel) != 1)
       corun(job, self);
     cell->taken.store(false, std::memory_order_release);
     throw;
   }
-  _idle.notifyN(parts - 1);
+  // One worker starts; each part it takes wakes more while items remain.
+  _idle.notifyN(1);
 
   // The publisher runs the last part itself, then co-runs until every part
   // has reported.

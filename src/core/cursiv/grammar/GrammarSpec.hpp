@@ -84,14 +84,8 @@ struct as_resolved {
 };
 template <class E>
 using as_resolved_t = typename as_resolved<E>::type;
-template <class E, class Children>
-struct as_rebuilt;
-template <class E, class... Ks>
-struct as_rebuilt<E, TypeList<Ks...>> {
-  using type = typename ExprShape<E>::template rebind<as_resolved_t<Ks>...>;
-};
 template <class E>
-struct as_resolved<E, true> : as_rebuilt<E, typename ExprShape<E>::children> {};
+struct as_resolved<E, true> : rebuild<E, as_resolved_t> {};
 template <class C, class E>
 struct as_resolved<As<C, E>, true> {
   using type = Ref<Rule<E{}, C>>;
@@ -103,9 +97,8 @@ template <auto Body, class... Opts>
 struct TerminalRule {
   static_assert(body_not_a_rule<Body>::ok);
   static_assert(!holds_as<std::remove_cv_t<decltype(Body)>>,
-                "inside a terminal, as<X>(e) must wrap the whole body or "
-                "each of its alternatives: write terminal<as<X>(...)> or "
-                "terminal<as<A>(...) | as<B>(...)>");
+                "terminal<as<X>(e)> converts the whole token; for values on "
+                "individual alternatives write rule<as<A>(a) | as<B>(b)>");
   static_assert(!holds_commit<std::remove_cv_t<decltype(Body)>>,
                 "a commit is allowed in a rule, not in a terminal: inside a "
                 "terminal, use option, many, some or repeat without commit");
@@ -122,12 +115,12 @@ struct Rule {
   static_assert(body_not_a_rule<Body>::ok);
   static_assert(
       !misplaced_commit<as_resolved_t<std::remove_cv_t<decltype(Body)>>>,
-      "commit(prefix, body) must be the direct item of option, "
-      "many, some or repeat, as in many(commit(a, b))");
+      "commit(prefix, body) must be the direct item of option, many, some "
+      "or a repeat<Min, Max> with Min < Max, as in many(commit(a, b))");
   using kind = node_kind;
   using slot = TypeList<Opts...>;
-  static constexpr auto body =
-      commit_free_t<as_resolved_t<std::remove_cv_t<decltype(Body)>>>{};
+  using expression = std::remove_cv_t<decltype(Body)>;
+  static constexpr auto body = commit_free_t<as_resolved_t<expression>>{};
 };
 
 // The operators of a table's levels of one kind, as alternatives: `prefix`,
@@ -221,50 +214,25 @@ struct unnamed_data_operands {
 };
 template <class E>
 using unnamed_data_operands_t = typename unnamed_data_operands<E>::type;
-template <class E, class Children>
-struct operands_rebuilt;
-template <class E, class... Ks>
-struct operands_rebuilt<E, TypeList<Ks...>> {
-  using type =
-      typename ExprShape<E>::template rebind<unnamed_data_operands_t<Ks>...>;
-};
 template <class E>
-struct unnamed_data_operands<E, true>
-    : operands_rebuilt<E, typename ExprShape<E>::children> {};
-template <auto Sp, class E>
-struct unnamed_data_operands<Assign<Sp, E>, true> {
-  using type = Assign<Sp, unnamed_data_t<true, unnamed_data_operands_t<E>>>;
-};
-template <auto Sp, class E>
-struct unnamed_data_operands<Append<Sp, E>, true> {
-  using type = Append<Sp, unnamed_data_t<true, unnamed_data_operands_t<E>>>;
+struct unnamed_data_operands<E, true> : rebuild<E, unnamed_data_operands_t> {};
+template <template <auto, class> class Write, auto Sp, class E>
+  requires writes_value<Write<Sp, E>>
+struct unnamed_data_operands<Write<Sp, E>, true> {
+  using type = Write<Sp, unnamed_data_t<true, unnamed_data_operands_t<E>>>;
 };
 
-template <class Lvls>
-struct inline_operators;
-template <class Lvls>
-using inline_operators_t = typename inline_operators<Lvls>::type;
+template <class Level>
+struct inline_operators {
+  using Op = unnamed_data_t<false, as_resolved_t<typename Level::op_expr>>;
+  using type = typename Level::template rebind<Op>;
+};
 template <class... Ls>
 struct inline_operators<Levels<Ls...>> {
   using type = Levels<typename inline_operators<Ls>::type...>;
 };
-template <class Op>
-struct inline_operators<LeftAssoc<Op>> {
-  using type = LeftAssoc<unnamed_data_t<false, as_resolved_t<Op>>>;
-};
-template <class Op>
-struct inline_operators<RightAssoc<Op>> {
-  using type = RightAssoc<unnamed_data_t<false, as_resolved_t<Op>>>;
-};
-template <class Op>
-struct inline_operators<NonAssoc<Op>> {
-  using type = NonAssoc<unnamed_data_t<false, as_resolved_t<Op>>>;
-};
-template <Association A, class N, auto O, auto X, class Op>
-struct inline_operators<UnaryLevel<A, N, O, X, Op>> {
-  using type =
-      UnaryLevel<A, N, O, X, unnamed_data_t<false, as_resolved_t<Op>>>;
-};
+template <class Lvls>
+using inline_operators_t = typename inline_operators<Lvls>::type;
 
 // Any number of the alternatives, as a list of one item; none where there
 // are none.
@@ -394,9 +362,28 @@ inline constexpr bool is_inline_terminal = false;
 template <auto Body, class... Opts>
 inline constexpr bool is_inline_terminal<TerminalRule<Body, Opts...>> = true;
 
-// The deductions below walk a rule's body into the rules it names, with
-// the path of rules they are in, so a cycle stops. A callee gets only the
-// path's rules it reaches again, so each rule outside a cycle has one answer.
+// The deductions below walk a rule's body into the rules whose answer it
+// takes. Rules that reach one another this way answer once, together: each is
+// walked with all of them on the path, so a cycle stops.
+
+// An alternative resolves its own node when a creation it always reaches
+// decides the type: at its root (`create` or `nest`), further along its
+// sequence, or in every branch of a choice. A repetition or a directive's
+// payload does not.
+template <class E>
+inline constexpr bool is_self_resolving = is_create<E> || is_nest<E>;
+template <class... Es>
+inline constexpr bool is_self_resolving<Seq<Es...>> =
+    (is_self_resolving<Es> || ...);
+template <class... Es>
+inline constexpr bool is_self_resolving<Choice<Es...>> =
+    (is_self_resolving<Es> && ...);
+template <class I, class H, class E>
+inline constexpr bool is_self_resolving<Skip<I, H, E>> = is_self_resolving<E>;
+template <class G, class E>
+inline constexpr bool is_self_resolving<Embed<G, E>> = is_self_resolving<E>;
+template <auto P, class E>
+inline constexpr bool is_self_resolving<Flag<P, E>> = is_self_resolving<E>;
 
 // The references a deduction can follow: through the shapes that gather or
 // wrap their children, never into a directive's payload or a lookahead.
@@ -420,18 +407,34 @@ template <class R>
 struct walked_calls<Ref<R>, TypeList<>> {
   using type = TypeList<named_rule_t<R>>;
 };
+// Those of a body, but an alternative that resolves its own node takes no
+// other rule's answer, so its references are not followed.
+template <class B, bool Alt = false>
+struct alt_calls : cond_t<is_self_resolving<B>, std::type_identity<TypeList<>>,
+                          walked_calls<B>> {};
+template <class... As>
+struct alt_calls<Choice<As...>, false>
+    : tl_cat<typename alt_calls<As, true>::type...> {};
 template <class R>
 using body_calls_t =
-    typename walked_calls<std::remove_cv_t<decltype(R::body)>>::type;
+    typename alt_calls<std::remove_cv_t<decltype(R::body)>>::type;
+
+template <class R>
+inline constexpr bool slot_empty = std::is_same_v<typename R::slot, TypeList<>>;
 
 // The rules a deduction enters from R: those its body names, and an infix
-// rule's primary. A rule read in a section adds those the rule that applies
-// there names (`InGrammar.hpp`).
-template <class R, bool Infix = std::is_same_v<typename R::kind, infix_kind>>
-struct rule_calls : dedupe<body_calls_t<R>> {};
+// rule's primary alone; none from a terminal or a slot, typed without a walk.
+// A rule read in a section adds those of the rule in force (`InGrammar.hpp`).
+template <class R, class Kind = typename R::kind, bool Walks = slot_empty<R>>
+struct rule_calls {
+  using type = TypeList<>;
+};
 template <class R>
-struct rule_calls<R, true>
-    : dedupe<tl_cat_t<TypeList<typename R::primary>, body_calls_t<R>>> {};
+struct rule_calls<R, node_kind, true> : dedupe<body_calls_t<R>> {};
+template <class R, bool Walks>
+struct rule_calls<R, infix_kind, Walks> {
+  using type = TypeList<typename R::primary>;
+};
 template <class R>
 struct deduction_calls : rule_calls<R> {};
 
@@ -455,112 +458,71 @@ struct reached_by
     : calls_closure<Calls, typename Calls<R>::type, typename Calls<R>::type> {
 };
 
-// The positions in `Reach` of the rules of `Kept` it holds, sorted, each
-// once, and the rules at those positions.
-template <std::size_t N>
-struct reach_positions {
-  std::size_t at[N];
-  std::size_t size = 0;
-};
-template <std::size_t N>
-consteval reach_positions<N> sorted_positions(const std::size_t (&in)[N],
-                                              std::size_t held) {
-  reach_positions<N> out{};
-  for (const std::size_t p : in) {
-    std::size_t i = 0;
-    while (i < out.size && out.at[i] < p) ++i;
-    if (p >= held || (i < out.size && out.at[i] == p)) continue;
-    for (std::size_t j = out.size; j > i; --j) out.at[j] = out.at[j - 1];
-    out.at[i] = p;
-    ++out.size;
-  }
-  return out;
-}
-template <class Reach, auto Pos, class Is = std::make_index_sequence<Pos.size>>
-struct reach_pick;
-template <class Reach, auto Pos, std::size_t... Is>
-struct reach_pick<Reach, Pos, std::index_sequence<Is...>> {
-  using type = TypeList<tl_at_t<Pos.at[Is], Reach>...>;
-};
-template <class Kept, class Reach>
-struct in_reach_order;
-template <class... Ys, class Reach>
-struct in_reach_order<TypeList<Ys...>, Reach>
-    : reach_pick<Reach, sorted_positions<sizeof...(Ys)>(
-                            {index_of<Ys, Reach>::value...},
-                            tl_size<Reach>::value)> {};
-
-// The path a deduction entering R carries on: the rules of `Seen` R reaches,
-// in the order R reaches them, so one set gives one path whatever the order it
-// was walked in.
-template <template <class> class Calls, class Seen, class R>
-struct path_into;
-template <template <class> class Calls, class R>
-struct path_into<Calls, TypeList<>, R> {
+// The rules of R's component, in the order R reaches them: those it reaches
+// that reach it back, R among them, or none when R is on no cycle. A rule R
+// reaches reaches as many rules as R only when it reaches R back.
+template <class R, class Reach = typename reached_by<deduction_calls, R>::type,
+          bool Cyclic = tl_has<R, Reach>::value>
+struct component_of {
   using type = TypeList<>;
 };
-template <template <class> class Calls, class... Ys, class R>
-struct path_into<Calls, TypeList<Ys...>, R>
-    : in_reach_order<TypeList<Ys...>, typename reached_by<Calls, R>::type> {};
-// The path R's own walk carries: the rules of `Seen` it can reach, then R.
-template <class Seen, class R>
-using deduction_path_t =
-    tl_cat_t<typename path_into<deduction_calls, Seen, R>::type, TypeList<R>>;
-
-// Whether a `rule<>` builds a node: its body commits a create, a nest, a
-// directive, or a reference to a node rule. A slot makes it a value rule. A
-// rule already on the `Seen` path commits nothing new.
-template <class R, class Seen, bool OnPath>
-struct rule_builds_node_of;
-
-template <class E, class Seen, class Children = typename ExprShape<E>::children>
-inline constexpr bool builds_node = false;
-template <class E, class Seen, class... Ks>
-  requires grouping<E>
-inline constexpr bool builds_node<E, Seen, TypeList<Ks...>> =
-    (builds_node<Ks, Seen> || ...);
-template <class T, class E, class Seen>
-inline constexpr bool builds_node<Create<T, E>, Seen> = true;
-template <class T, auto P, class E, class Seen>
-inline constexpr bool builds_node<Nest<T, P, E>, Seen> = true;
-template <auto Sp, class E, class Seen>
-inline constexpr bool builds_node<Assign<Sp, E>, Seen> = true;
-template <auto Sp, class E, class Seen>
-inline constexpr bool builds_node<Append<Sp, E>, Seen> = true;
-template <auto P, class E, class Seen>
-inline constexpr bool builds_node<Flag<P, E>, Seen> = true;
-// A lookahead commits nothing and `through()` is a token shape, so neither is
-// descended into; a reference answers what the rule it names is.
-template <class R, class Seen>
-inline constexpr bool builds_node<Ref<R>, Seen> =
-    rule_builds_node_of<named_rule_t<R>, Seen,
-                        tl_has<named_rule_t<R>, Seen>::value>::value;
-
+template <class R, class... Xs>
+struct component_of<R, TypeList<Xs...>, true>
+    : tl_cat<cond_t<tl_size<typename reached_by<deduction_calls, Xs>::type>::
+                            value == sizeof...(Xs),
+                    TypeList<Xs>, TypeList<>>...> {};
 template <class R>
-inline constexpr bool slot_empty = std::is_same_v<typename R::slot, TypeList<>>;
+using component_t = typename component_of<R>::type;
 
-// Dispatched on the path, never guarded by an `&&`: naming `::value` of the
-// other operand instantiates it, so a cycle would recurse to the depth limit
-// instead of stopping.
-template <class R, class Seen>
-struct rule_builds_node_of<R, Seen, true> : std::false_type {};
-// Only a `rule<>` with no slot is answered by its body: the walk, and the
-// path it carries, are formed for that rule alone.
-template <class R, class Seen,
-          bool Walks =
-              std::is_same_v<typename R::kind, node_kind> && slot_empty<R>>
-struct body_builds_node
-    : std::bool_constant<std::is_same_v<typename R::kind, infix_kind>> {};
-template <class R, class Seen>
-struct body_builds_node<R, Seen, true>
-    : std::bool_constant<builds_node<std::remove_cv_t<decltype(R::body)>,
-                                     deduction_path_t<Seen, R>>> {};
-template <class R, class Seen>
-struct rule_builds_node_of<R, Seen, false> : body_builds_node<R, Seen> {};
+// Whether E commits a node itself: a create, a nest, a directive, or a
+// reference to an infix rule. A lookahead commits nothing and `through()` is
+// a token shape, so neither is descended into.
+template <class E, class Children = typename ExprShape<E>::children>
+inline constexpr bool commits_node = false;
+template <class E, class... Ks>
+  requires grouping<E>
+inline constexpr bool commits_node<E, TypeList<Ks...>> =
+    (commits_node<Ks> || ...);
+template <class T, class E>
+inline constexpr bool commits_node<Create<T, E>> = true;
+template <class T, auto P, class E>
+inline constexpr bool commits_node<Nest<T, P, E>> = true;
+template <auto Sp, class E>
+inline constexpr bool commits_node<Assign<Sp, E>> = true;
+template <auto Sp, class E>
+inline constexpr bool commits_node<Append<Sp, E>> = true;
+template <auto P, class E>
+inline constexpr bool commits_node<Flag<P, E>> = true;
+template <class R>
+inline constexpr bool commits_node<Ref<R>> =
+    std::is_same_v<typename named_rule_t<R>::kind, infix_kind>;
 
+// Whether a `rule<>` with no slot commits a node in its own body.
+template <class R, bool Walks = std::is_same_v<typename R::kind, node_kind> &&
+                                slot_empty<R>>
+inline constexpr bool body_commits = false;
+template <class R>
+inline constexpr bool body_commits<R, true> =
+    commits_node<std::remove_cv_t<decltype(R::body)>>;
+template <class L>
+inline constexpr bool any_commits = false;
+template <class... Rs>
+inline constexpr bool any_commits<TypeList<Rs...>> = (body_commits<Rs> || ...);
+
+// Whether a rule builds a node: an infix rule does, and a `rule<>` with no
+// slot does when it or a rule it reaches commits one. A slot makes it a
+// value rule.
 template <class R>
 inline constexpr bool kind_is_node =
-    rule_builds_node_of<R, TypeList<>, false>::value;
+    std::is_same_v<typename R::kind, infix_kind> || body_commits<R> ||
+    any_commits<typename reached_by<deduction_calls, R>::type>;
+
+// Whether E builds a node: it commits one, or names a rule that builds one.
+template <class E, class Calls = typename walked_calls<E>::type>
+inline constexpr bool builds_node = false;
+template <class E, class... Rs>
+inline constexpr bool builds_node<E, TypeList<Rs...>> =
+    commits_node<E> || (kind_is_node<Rs> || ...);
 
 // A rule declared `rule<>` whose body commits nothing is a value rule: it
 // composes its text from the parts.
@@ -576,7 +538,7 @@ inline constexpr bool is_infix_rule =
 
 template <class... Es>
 struct sequence_builds_node<Seq<Es...>>
-    : std::bool_constant<builds_node<Seq<Es...>, TypeList<>>> {};
+    : std::bool_constant<builds_node<Seq<Es...>>> {};
 
 // A rule's body as declared. An infix rule's is its `infix_body`.
 template <class R>
@@ -711,63 +673,14 @@ constexpr auto as_with() {
   return As<C, E>{};
 }
 
-// A word an alternative of a terminal reads: a literal with no guard, a
-// keyword, or a choice of those.
-template <class E>
-inline constexpr bool word_of = false;
-template <str S, bool CI, class G>
-  requires(std::is_void_v<G> || std::is_same_v<G, WordBound>)
-inline constexpr bool word_of<Lit<S, CI, G>> = true;
-template <class... Es>
-inline constexpr bool word_of<Choice<Es...>> = (word_of<Es> && ...);
-
-template <class C>
-inline constexpr bool is_value_conv = false;
-template <auto V>
-inline constexpr bool is_value_conv<value_conv<V>> = true;
-template <class... Cs>
-inline constexpr bool one_value_type = true;
-template <auto V, auto... Vs>
-inline constexpr bool one_value_type<value_conv<V>, value_conv<Vs>...> =
-    (std::is_same_v<std::remove_cv_t<decltype(V)>,
-                    std::remove_cv_t<decltype(Vs)>> &&
-     ...);
-
-// `terminal<as<X>(e)>` and `rule<as<X>(e)>`: the whole body's conversion.
-// A terminal that gives each alternative a constant is the data rule over the
-// same body.
-template <auto Body, class E = std::remove_cv_t<decltype(Body)>>
-struct terminal_of {
-  using type = TerminalRule<Body>;
-};
-template <auto Body, class C, class E>
-struct terminal_of<Body, As<C, E>> {
-  using type = TerminalRule<E{}, C>;
-};
-template <auto Body, class... Cs, class... Es>
-struct terminal_of<Body, Choice<As<Cs, Es>...>> {
-  static_assert((is_value_conv<Cs> && ...),
-                "inside a terminal, as<V>(e) on one alternative must give a "
-                "constant value, such as as<true>(...): to convert with a "
-                "type or a function, wrap the whole body, "
-                "terminal<as<X>(...)>");
-  static_assert((word_of<Es> && ...),
-                "inside a terminal, an alternative with its own as<V>(e) "
-                R"(may only match words: lit<"...">, kw<"...">, )"
-                R"(ikw<"..."> or a choice of those. For other text, write a )"
-                "data rule");
-  static_assert(one_value_type<Cs...>,
-                "inside a terminal, the constants of the alternatives' "
-                "as<V>(e) have different types: give them one type");
-  using type = Rule<Body>;
-};
-template <auto Body, class E = std::remove_cv_t<decltype(Body)>>
+// A conversion around the whole body belongs to the rule itself.
+template <template <auto, class...> class R, auto Body, class E = std::remove_cv_t<decltype(Body)>>
 struct rule_of {
-  using type = Rule<Body>;
+  using type = R<Body>;
 };
-template <auto Body, class C, class E>
-struct rule_of<Body, As<C, E>> {
-  using type = Rule<E{}, C>;
+template <template <auto, class...> class R, auto Body, class C, class E>
+struct rule_of<R, Body, As<C, E>> {
+  using type = R<E{}, C>;
 };
 
 }  // namespace detail
@@ -858,25 +771,6 @@ template <class A, class Seen = TypeList<>>
 struct branch_type;
 template <class Branches>
 struct common_base_of;
-
-// An alternative resolves its own node when a creation it always reaches
-// decides the type: at its root (`create` or `nest`), further along its
-// sequence, or in every branch of a choice. A repetition or a directive's
-// payload does not.
-template <class E>
-inline constexpr bool is_self_resolving = step_kind<E> != 0;
-template <class... Es>
-inline constexpr bool is_self_resolving<Seq<Es...>> =
-    (is_self_resolving<Es> || ...);
-template <class... Es>
-inline constexpr bool is_self_resolving<Choice<Es...>> =
-    (is_self_resolving<Es> && ...);
-template <class I, class H, class E>
-inline constexpr bool is_self_resolving<Skip<I, H, E>> = is_self_resolving<E>;
-template <class G, class E>
-inline constexpr bool is_self_resolving<Embed<G, E>> = is_self_resolving<E>;
-template <auto P, class E>
-inline constexpr bool is_self_resolving<Flag<P, E>> = is_self_resolving<E>;
 
 // The candidates a body contributes: created types, and the classes the
 // directives write. `assign` and `append` payloads build values and are not
@@ -983,15 +877,12 @@ struct most_derived<TypeList<R, Rest...>, TypeList<All...>>
 
 // The elements of `Candidates` that are bases of every branch type.
 template <class Candidates, class Branches>
-struct keep_bases {
-  using type = TypeList<>;
-};
-template <class R, class... Rest, class... Bs>
-struct keep_bases<TypeList<R, Rest...>, TypeList<Bs...>> {
-  using tail = typename keep_bases<TypeList<Rest...>, TypeList<Bs...>>::type;
-  using type = typename cond_t<(std::is_base_of_v<R, Bs> && ...),
-                               tl_cat<TypeList<R>, tail>,
-                               std::type_identity<tail>>::type;
+struct keep_bases;
+template <class... Rs, class... Bs>
+struct keep_bases<TypeList<Rs...>, TypeList<Bs...>> {
+  template <class R>
+  using kept = cond_t<(std::is_base_of_v<R, Bs> && ...), TypeList<R>, TypeList<>>;
+  using type = tl_cat_t<kept<Rs>...>;
 };
 
 // All ancestors of T, T first, then the `Extends<>` chain it declares: the
@@ -1008,9 +899,9 @@ struct ancestors_of_all<TypeList<Bs...>> {
   using type = tl_cat_t<typename ancestor_list<Bs>::type...>;
 };
 template <class T>
-struct ancestor_list<T, std::void_t<typename T::ast_bases>> {
+struct ancestor_list<T, std::void_t<typename T::AstBases>> {
   using type = tl_cat_t<TypeList<T>,
-                        typename ancestors_of_all<typename T::ast_bases>::type>;
+                        typename ancestors_of_all<typename T::AstBases>::type>;
 };
 template <class T>
 using ancestor_list_t = typename ancestor_list<T>::type;
@@ -1062,8 +953,8 @@ template <class R>
 using infix_answer_t = typename infix_answer<R>::type;
 
 // The classes the current node can be at each point of an alternative: the
-// head, then each nest's wrapper. Each must fit the member a nest or
-// directive names.
+// node it adopts or creates, then each nest's wrapper. Each must fit the
+// member a nest or directive names.
 template <class Ts, class C>
 inline constexpr bool all_derive = false;
 template <class... Ts, class C>
@@ -1125,16 +1016,11 @@ struct in_hand<In, Unordered<Es...>, Check>
     : unordered_hand<In, TypeList<Es...>, Check> {};
 // A second turn asks the classes the first one left, and only those: the
 // rest were asked already.
-template <class Ts, class Seen>
-struct hand_new;
-template <class... Ts, class Seen>
-struct hand_new<TypeList<Ts...>, Seen>
-    : tl_cat<cond_t<tl_has<Ts, Seen>::value, TypeList<>, TypeList<Ts>>...> {};
 template <class In, std::size_t Mn, std::size_t Mx, class E, bool Check>
 struct in_hand<In, Repeat<Mn, Mx, E>, Check> {
   using first = typename in_hand<In, E, Check>::type;
   using again =
-      cond_t<(Mx > 1), typename hand_new<first, In>::type, TypeList<>>;
+      cond_t<(Mx > 1), typename tl_minus<first, In>::type, TypeList<>>;
   using type =
       typename dedupe<tl_cat_t<cond_t<Mn == 0, In, TypeList<>>, first,
                                typename in_hand<again, E, Check>::type>>::type;
@@ -1340,56 +1226,41 @@ struct adopted_type<R, Seen, true> : on_path_answer<R, is_infix_rule<R>> {};
 
 template <class Body, class Seen = TypeList<>>
 struct deduce_node_type : branch_type<Body, Seen> {};
-template <class A0, class... As, class Seen>
-struct deduce_node_type<Choice<A0, As...>, Seen> {
-  using Branches = TypeList<typename branch_type<A0, Seen>::type,
-                            typename branch_type<As, Seen>::type...>;
+// The common base of what the branches build, those answering nothing left
+// out. All may answer nothing only under a path; walking a rule's own body,
+// that is a fault.
+template <class Branches, bool OnPath>
+struct choice_base {
   using Named = typename drop_void<Branches>::type;
   using type = typename common_base_of<Named>::type;
-  // Under a path, a choice whose every branch comes back onto the path
-  // answers nothing, as a lone alternative does; walked as the rule's own
-  // body, it is a fault.
   static_assert(!std::is_void_v<type> ||
-                    (std::is_same_v<Named, TypeList<>> &&
-                     !std::is_same_v<Seen, TypeList<>>),
+                    (std::is_same_v<Named, TypeList<>> && OnPath),
                 "the alternatives of this rule build classes with no common "
                 "base: derive these classes from one base class, or add "
                 "create<T> to say which class each alternative builds");
 };
-// Whether the node type comes from the members written: a pointer to an
-// inherited member names its declaring class, so this source alone can be
-// wrong. A `create<T>` and an adoption are not descended into.
-template <class E, class Children = typename ExprShape<E>::children>
-inline constexpr bool type_from_members = false;
-template <auto Sp, class E>
-inline constexpr bool type_from_members<Assign<Sp, E>> = true;
-template <auto Sp, class E>
-inline constexpr bool type_from_members<Append<Sp, E>> = true;
-template <auto P, class E>
-inline constexpr bool type_from_members<Flag<P, E>> = true;
-template <class E, class... Ks>
-  requires grouping<E>
-inline constexpr bool type_from_members<E, TypeList<Ks...>> =
-    (type_from_members<Ks> || ...);
-
+template <class A0, class... As, class Seen>
+struct deduce_node_type<Choice<A0, As...>, Seen>
+    : choice_base<TypeList<typename branch_type<A0, Seen>::type,
+                           typename branch_type<As, Seen>::type...>,
+                  !std::is_same_v<Seen, TypeList<>>> {};
 template <class R, class Kind = typename R::kind, class Seen = TypeList<>>
 struct rule_type;
 
-// Adopting from a climb. An infix rule hands back the chain's node when an
-// operator matched and the primary's when none did, so what a caller adopts
-// is what both are -- the rule's own answer is the chain alone.
-template <class R, class Seen, bool Climb = is_infix_rule<R>>
+// Adopting R walks it with `Path` on the way, or each rule of its `Cycle`. An
+// infix rule hands back the chain's node, or the primary's when no operator
+// matched: a caller adopts what both are, its own answer is the chain alone.
+template <class R, class Path, class Cycle = TypeList<>,
+          bool Climb = is_infix_rule<R>>
 struct adopt_answer {
-  using type =
-      typename rule_type<R, typename R::kind, deduction_path_t<Seen, R>>::type;
+  using type = typename rule_type<R, typename R::kind, Path>::type;
 };
-template <class R, class Seen>
-struct adopt_answer<R, Seen, true> {
+template <class R, class Path>
+struct adopt_answer<R, Path, TypeList<>, true> {
   using P = typename R::primary;
-  // The primary answers as any adopted rule does, this rule on the path so a
-  // climb that reaches its own operands ends there: a primary that only
-  // chooses between rules answers what they build, not nothing.
-  using Path = deduction_path_t<Seen, R>;
+  // The primary answers as any adopted rule does, so a climb that reaches its
+  // own operands ends on the path: a primary that only chooses between rules
+  // answers what they build, not nothing.
   using Both = typename common_base_of<typename drop_void<TypeList<
       infix_answer_t<R>,
       typename adopted_type<P, Path, tl_has<P, Path>::value>::type>>::type>::
@@ -1398,8 +1269,14 @@ struct adopt_answer<R, Seen, true> {
   // the caller then names the class it takes.
   using type = cond_t<std::is_void_v<Both>, infix_answer_t<R>, Both>;
 };
+template <class R, class Path, class C0, class... Cs, bool Climb>
+struct adopt_answer<R, Path, TypeList<C0, Cs...>, Climb>
+    : choice_base<TypeList<typename adopt_answer<C0, component_t<C0>>::type,
+                           typename adopt_answer<Cs, component_t<Cs>>::type...>,
+                  true> {};
 template <class R, class Seen>
-struct adopted_type<R, Seen, false> : adopt_answer<R, Seen> {};
+struct adopted_type<R, Seen, false>
+    : adopt_answer<R, TypeList<R>, component_t<R>> {};
 template <class R, class Seen>
 struct branch_type<Ref<R>, Seen>
     : adopted_type<named_rule_t<R>, Seen,
@@ -1410,51 +1287,41 @@ struct branch_type<Ref<R>, Seen>
 template <class E, class Seen, class Children>
 struct adopt_cands {
   using type = TypeList<>;
+  static constexpr bool cycles = false;
 };
 template <class E, class Seen, class... Ks>
   requires grouping<E>
 struct adopt_cands<E, Seen, TypeList<Ks...>>
-    : tl_cat<typename adopt_cands<Ks, Seen>::type...> {};
+    : tl_cat<typename adopt_cands<Ks, Seen>::type...> {
+  static constexpr bool cycles = (adopt_cands<Ks, Seen>::cycles || ...);
+};
 template <class R0, class Seen>
 struct adopt_cands<Ref<R0>, Seen> {
   using R = named_rule_t<R0>;
+  static constexpr bool onPath = tl_has<R, Seen>::value;
   using T = typename cond_t<is_node_rule<R> || is_infix_rule<R>,
-                            adopted_type<R, Seen, tl_has<R, Seen>::value>,
+                            adopted_type<R, Seen, onPath>,
                             std::type_identity<void>>::type;
   using type = cond_t<std::is_void_v<T>, TypeList<>, TypeList<T>>;
+  static constexpr bool cycles = [] {
+    if constexpr (onPath || (is_node_rule<R> && !std::is_same_v<Seen, TypeList<>>))
+      return std::is_void_v<typename adopted_type<R, Seen, onPath>::type>;
+    return false;
+  }();
 };
 template <auto P, class E, class Seen>
 struct adopt_cands<Flag<P, E>, Seen, TypeList<E>> : adopt_cands<E, Seen> {};
-
-// Whether an alternative reaches back onto the path through rules that
-// commit nothing: it answers nothing, and the other branches answer.
-template <class E, class Seen, class Children = typename ExprShape<E>::children>
-struct adopt_cycles : std::false_type {};
-template <class E, class Seen, class... Ks>
-  requires grouping<E>
-struct adopt_cycles<E, Seen, TypeList<Ks...>>
-    : std::bool_constant<(adopt_cycles<Ks, Seen>::value || ...)> {};
-// A rule answers nothing only when every way out of it comes back onto the
-// path. Walking its own body, an answer of nothing is a fault.
-template <class R, class Seen, bool OnPath = tl_has<R, Seen>::value,
-          bool Walked = OnPath || (is_node_rule<R> &&
-                                   !std::is_same_v<Seen, TypeList<>>)>
-struct adopt_cycles_of : std::false_type {};
-template <class R, class Seen, bool OnPath>
-struct adopt_cycles_of<R, Seen, OnPath, true>
-    : std::bool_constant<
-          std::is_void_v<typename adopted_type<R, Seen, OnPath>::type>> {};
-template <class R, class Seen>
-struct adopt_cycles<Ref<R>, Seen> : adopt_cycles_of<named_rule_t<R>, Seen> {};
-template <auto P, class E, class Seen>
-struct adopt_cycles<Flag<P, E>, Seen, TypeList<E>> : adopt_cycles<E, Seen> {};
+// Checking an alternative, a call made while the current node is still empty
+// puts the node it adopts in hand, on that path.
+template <class R>
+struct in_hand<TypeList<>, Ref<R>, true> : adopt_cands<Ref<R>, TypeList<>> {};
 
 // An alternative that commits nothing adopts. `'(' Expression ')'` writes no
 // member and creates nothing, so what it produces is the node it wraps.
 template <class A, class Seen>
 struct branch_type_from<A, Seen, TypeList<>, false> {
   using L = typename adopt_cands<A, Seen>::type;
-  static constexpr bool cycles = adopt_cycles<A, Seen>::value;
+  static constexpr bool cycles = adopt_cands<A, Seen>::cycles;
   static_assert(!std::is_same_v<L, TypeList<>> || cycles,
                 "cannot find the class this alternative builds: it has no "
                 "create<>, assign<>, append<> or flag<>. Add create<T>");
@@ -1523,20 +1390,6 @@ template <class E, str T, class Seen>
 struct value_flow<Doc<E, T>, Seen> : value_flow<E, Seen> {};
 template <class I, class H, class E, class Seen>
 struct value_flow<Skip<I, H, E>, Seen> : value_flow<E, Seen> {};
-// Dispatched on the path, as `adopted_type` is: the arm not taken must not
-// instantiate.
-template <class R, class Seen, bool OnPath>
-struct called_value {
-  using type = void;
-};
-template <class R, class Seen>
-struct called_value<R, Seen, false>
-    : rule_type<R, typename R::kind, deduction_path_t<Seen, R>> {};
-template <class R0, class Seen>
-struct value_flow<Ref<R0>, Seen>
-    : called_value<named_rule_t<R0>, Seen,
-                   tl_has<named_rule_t<R0>, Seen>::value> {};
-
 // The one type the branches of a choice pass.
 template <class L>
 struct one_value {
@@ -1550,6 +1403,28 @@ struct one_value<TypeList<T, Ts...>> {
                 "alternative give the same type");
   using type = T;
 };
+
+// What a rule passes to the rule naming it, as one rule or with its `Cycle`;
+// on the path, nothing. Dispatched on the path, as `adopted_type` is: the arm
+// not taken must not instantiate.
+template <class R, class Seen, bool OnPath, class Cycle = component_t<R>>
+struct called_value {
+  using type = void;
+};
+template <class R, class Seen>
+struct called_value<R, Seen, false, TypeList<>>
+    : rule_type<R, typename R::kind, TypeList<R>> {};
+template <class R, class Seen, class C0, class... Cs>
+struct called_value<R, Seen, false, TypeList<C0, Cs...>>
+    : one_value<typename drop_void<TypeList<
+          typename rule_type<C0, typename C0::kind, component_t<C0>>::type,
+          typename rule_type<Cs, typename Cs::kind,
+                             component_t<Cs>>::type...>>::type> {};
+template <class R0, class Seen>
+struct value_flow<Ref<R0>, Seen>
+    : called_value<named_rule_t<R0>, Seen,
+                   tl_has<named_rule_t<R0>, Seen>::value> {};
+
 template <class... Bs, class Seen>
 struct value_flow<Choice<Bs...>, Seen>
     : one_value<typename drop_void<
@@ -1571,7 +1446,7 @@ struct rule_type {
     if constexpr (std::is_same_v<typename R::kind, node_kind> &&
                   !slot_empty<R>)
       static_assert(
-          !builds_node<std::remove_cv_t<decltype(R::body)>, TypeList<R>>,
+          !builds_node<std::remove_cv_t<decltype(R::body)>>,
           "as<X>(e) converts text, but this e builds an AST node: convert "
           "the text inside the node rule, not the rule itself");
     if constexpr (ConvertsParts<Cv>) {
@@ -1624,14 +1499,11 @@ using rule_type_t = typename rule_type<R>::type;
 
 }  // namespace detail
 
-// Grammar inheritance. It hides the parents' `override` primary, so a grammar
-// that overrides nothing inherits their effective rules once instead of
-// applying their overrides again.
+// Each dialect declares its own replacements and inherits its parents' effective rules.
 template <class... Parents>
 struct extends : Parents... {
   using parents = TypeList<Parents...>;
-  template <class>
-  struct override;
+  using overrides = TypeList<>;
 };
 
 // Everything a grammar spells, as members, so a derived grammar writes
@@ -1641,11 +1513,17 @@ struct extends : Parents... {
 struct GrammarSpec {
   template <class... Ts>
   using list = TypeList<Ts...>;
+  template <class Target, class Definition>
+  struct replace {
+    using target = Target;
+    using definition = Definition;
+  };
+  using overrides = list<>;
 
   template <auto Body>
-  using terminal = typename detail::terminal_of<Body>::type;
+  using terminal = typename detail::rule_of<detail::TerminalRule, Body>::type;
   template <auto Body>
-  using rule = typename detail::rule_of<Body>::type;
+  using rule = typename detail::rule_of<detail::Rule, Body>::type;
   // The infix that builds a `T`, climbing over `T::left`, `T::op` and
   // `T::right`, even where a base of `T` declares them; three member pointers
   // after the levels name other members.
@@ -1674,6 +1552,8 @@ struct GrammarSpec {
   static constexpr auto cr = detail::cr_of<Spec>();
   static constexpr detail::AnyChar any{};
   static constexpr detail::Byte byte{};
+  template <auto F>
+  static constexpr detail::Scan<F> scan{};
   template <class R>
   static constexpr detail::Ref<R> ref{};
   static constexpr detail::Super super{};
@@ -1843,9 +1723,9 @@ struct GrammarSpec {
     static constexpr of<unicode::Property::Cc> Cc{};
     static constexpr of<unicode::Property::Cf> Cf{};
     static constexpr of<unicode::Property::Co> Co{};
-    static constexpr of<unicode::Property::XID_Start> XID_Start{};
-    static constexpr of<unicode::Property::XID_Continue> XID_Continue{};
-    static constexpr of<unicode::Property::White_Space> White_Space{};
+    static constexpr of<unicode::Property::XidStart> XID_Start{};
+    static constexpr of<unicode::Property::XidContinue> XID_Continue{};
+    static constexpr of<unicode::Property::WhiteSpace> White_Space{};
     static constexpr of<unicode::Property::Alphabetic> Alphabetic{};
   };
 

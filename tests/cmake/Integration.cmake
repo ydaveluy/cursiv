@@ -101,24 +101,4 @@ if(NOT CMAKE_CROSSCOMPILING)
       RESOURCE_LOCK cursiv_build RUN_SERIAL TRUE
       FIXTURES_REQUIRED scaffold_build)
 
-  # Bad grammar arguments are refused at configure time, before any compile.
-  add_test(NAME refused_grammar_name_test COMMAND ${CMAKE_COMMAND}
-      -S ${CMAKE_CURRENT_SOURCE_DIR}/integration/refused_grammar_name
-      -B ${CMAKE_CURRENT_BINARY_DIR}/integration/refused_grammar_name
-      -DCURSIV_SOURCE_DIR=${CURSIV_SOURCE_ROOT})
-  set_tests_properties(refused_grammar_name_test PROPERTIES
-      PASS_REGULAR_EXPRESSION
-      "GRAMMAR lr_build.hpp is named like a source of the LR generator")
-  add_test(NAME refused_file_name_test COMMAND ${CMAKE_COMMAND}
-      -S ${CMAKE_CURRENT_SOURCE_DIR}/integration/refused_grammar_name
-      -B ${CMAKE_CURRENT_BINARY_DIR}/integration/refused_file_name
-      -DCURSIV_SOURCE_DIR=${CURSIV_SOURCE_ROOT} -DCASE=file-name)
-  set_tests_properties(refused_file_name_test PROPERTIES
-      PASS_REGULAR_EXPRESSION "FILE_NAMES entry `my,file` holds a comma")
-  add_test(NAME refused_missing_value_test COMMAND ${CMAKE_COMMAND}
-      -S ${CMAKE_CURRENT_SOURCE_DIR}/integration/refused_grammar_name
-      -B ${CMAKE_CURRENT_BINARY_DIR}/integration/refused_missing_value
-      -DCURSIV_SOURCE_DIR=${CURSIV_SOURCE_ROOT} -DCASE=missing-value)
-  set_tests_properties(refused_missing_value_test PROPERTIES
-      PASS_REGULAR_EXPRESSION "no value after ENGINE")
 endif()

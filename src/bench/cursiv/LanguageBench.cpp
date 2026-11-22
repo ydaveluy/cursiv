@@ -213,7 +213,7 @@ std::size_t parse_size(std::string_view text) {
                " [--json P] [--csv P] [--dump-corpus D] [--corpus D]"
                " [--multi|--no-multi] [--multi-bytes N] [--workers L]"
                " [--single-workers N]"
-               " [--rss]"
+               " [--rss] [--pause MS]"
                " [--list] [--file PATH] [filter]\n"
                "       <language>_bench [options] file [file ...]\n");
   throw Stop{2};
@@ -257,7 +257,12 @@ Options options(int argc, char** argv, std::span<const Language> languages) {
       o.dumpDir = value(i);
     else if (arg == "--corpus")
       o.corpusDir = value(i);
-    else if (arg == "--rss") {
+    else if (arg == "--pause") {
+      const int ms = std::atoi(value(i).c_str());
+      if (ms <= 0)
+        usage_error("--pause needs a positive number of milliseconds");
+      o.pause = std::chrono::milliseconds(ms);
+    } else if (arg == "--rss") {
       o.rss = true;
       o.multi = false;
       o.iterations = 1;
@@ -305,6 +310,8 @@ Options options(int argc, char** argv, std::span<const Language> languages) {
   if (!o.full && env("CURSIV_BENCH_FULL") != nullptr) o.full = true;
 
   if (o.help) return o;
+  if (!o.dumpDir.empty() && !o.corpusDir.empty())
+    usage_error("--corpus cannot be combined with --dump-corpus");
   if (!o.files.empty()) {
     if (!o.dumpDir.empty() || !o.corpusDir.empty())
       usage_error(
@@ -506,15 +513,21 @@ void print_rss_row(const Row& row) {
 }
 
 void print_row(const Row& row) {
-  std::printf("\n[bench] %s-%s  %s B  %d iteration%s\n", row.language.c_str(),
+  std::printf("\n[bench] %s-%s  %s B  %d iteration%s", row.language.c_str(),
               printable(row.label).c_str(), grouped(row.bytes).c_str(),
               row.iterations, row.iterations == 1 ? "" : "s");
+  const bool paused = row.pause.count() > 0;
+  if (paused)
+    std::printf(", %lld ms idle before each",
+                static_cast<long long>(row.pause.count()));
+  std::printf("\n");
   const bool hardware =
       row.bytes != 0 && std::ranges::any_of(row.perf, [](const PerfSample& p) {
         return p.valid;
       });
   std::printf("\n  Pipeline\n");
-  std::printf("    %-14s %12s %12s", "Stage", "best (ms)", "MiB/s");
+  std::printf("    %-14s %12s %12s", "Stage",
+              paused ? "median (ms)" : "best (ms)", "MiB/s");
   if (hardware) std::printf(" %12s %12s", "cycles/B", "instr/B");
   std::printf("\n");
   for (std::size_t stage = 0; stage < kStageCount; ++stage) {
@@ -732,6 +745,7 @@ void write_json(const std::string& path, const std::vector<Row>& rows,
            R"(", "label": ")" + json_escape(row.label) + R"(", "bytes": )" +
            std::to_string(row.bytes) +
            ", \"iterations\": " + std::to_string(row.iterations) +
+           ", \"pause_ms\": " + std::to_string(row.pause.count()) +
            R"(, "source": ")" + json_escape(row.source) + R"(", "stages": {)";
     for (std::size_t stage = 0; stage < kStageCount; ++stage) {
       if (stage != 0) out += ", ";
@@ -782,7 +796,7 @@ void write_json(const std::string& path, const std::vector<Row>& rows,
 
 void write_csv(const std::string& path, const std::vector<Row>& rows,
                bool resident) {
-  std::string out = "language,label,bytes,iterations";
+  std::string out = "language,label,bytes,iterations,pause_ms";
   for (const char* name : kStageName) {
     out += ",";
     out += name;
@@ -802,7 +816,8 @@ void write_csv(const std::string& path, const std::vector<Row>& rows,
   out += ",rss_peak_bytes,rss_peak_reset\n";
   for (const Row& row : rows) {
     out += csv_field(row.language) + "," + csv_field(row.label) + "," +
-           std::to_string(row.bytes) + "," + std::to_string(row.iterations);
+           std::to_string(row.bytes) + "," + std::to_string(row.iterations) +
+           "," + std::to_string(row.pause.count());
     char buf[32];
     for (double m : row.ms) {
       if (m < 0.0) {
@@ -887,9 +902,7 @@ std::vector<std::string> multi_texts(const Options& o, const Language& language,
   return files;
 }
 
-// The payloads are written once and read by both engines. The manifest
-// is the contract between them: the harness and the comparison script
-// read it rather than reconstructing a file name.
+// Record the file names in the manifest so another benchmark run can reuse the corpus.
 int dump_corpus(const Options& o, std::span<const Language> languages) {
   std::error_code ec;
   std::filesystem::create_directories(checked_path(o.dumpDir), ec);
@@ -986,6 +999,8 @@ int cursiv::bench::run(int argc, char** argv,
         "  --json PATH            write JSON results\n"
         "  --csv PATH             write CSV results\n"
         "  --rss                  one input, one cold workspace build\n"
+        "  --pause MS             idle before each timed build (median "
+        "pipeline)\n"
         "  --no-lsp               skip LSP provider timings\n"
         "  --list                 list languages and inputs\n"
         "  --sizes 16K,4M,...      generated corpus sizes\n"
@@ -1061,6 +1076,7 @@ int cursiv::bench::run(int argc, char** argv,
       row.bytes = source.size();
       row.iterations =
           o.iterations > 0 ? o.iterations : iterations_for(row.bytes);
+      row.pause = o.pause;
 
       if (irMode) {
         language.parse(source);
@@ -1069,7 +1085,8 @@ int cursiv::bench::run(int argc, char** argv,
 
       if (!o.rss) language.parse(source);
       if (language.workspace != nullptr)
-        language.workspace(row.iterations, o.rss, o.singleWorkers, source, row);
+        language.workspace(row.iterations, o.rss, o.pause, o.singleWorkers,
+                           source, row);
       if (!o.rss && o.lsp && language.lsp != nullptr)
         language.lsp(row.iterations, source, row);
       if (o.rss)

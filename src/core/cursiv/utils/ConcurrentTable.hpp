@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "cursiv/utils/Pause.hpp"
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv::detail {
 
@@ -77,25 +78,32 @@ class TableEpochs {
         return;
       }
       s.slot->store(kIdle, std::memory_order_release);
-      if (s.exiting) [[unlikely]]
-        giveBack(s);
+      if (s.onLeave != 0) [[unlikely]]
+        leave(s);
     }
     Guard(const Guard&) = delete;
     Guard& operator=(const Guard&) = delete;
   };
 
   // `object` is out of every new reader's reach and is freed once the readers
-  // that may hold it have left; `record` lives in it. A release collects once
-  // enough releases, `bytes` or time have gone by since the last collection.
-  static void freeLater(PendingFree& record, void* object, void (*free)(void*),
-                        std::size_t bytes) noexcept;
+  // that may hold it have left; `record` lives in it. Called under a guard,
+  // whose outermost one collects as it leaves.
+  static void freeLater(PendingFree& record, void* object,
+                        void (*free)(void*)) noexcept;
+  // Frees what no reader can still hold. A table or value collects as it goes.
+  static void collect() noexcept;
+
+  // What the outermost guard does as it leaves: give the slot back, once the
+  // thread ends, and collect what the thread released while it read.
+  static constexpr std::uint8_t kGiveBack = 1;
+  static constexpr std::uint8_t kCollect = 2;
 
   // Trivial and `constinit`, so a read needs no initialisation check. Defined
   // in the source file: Apple's linker refuses an inline thread-local.
   struct Reader {
     std::atomic<std::uint64_t>* slot = nullptr;
     std::uint32_t depth = 0;
-    bool exiting = false;
+    std::uint8_t onLeave = 0;
   };
   static constinit thread_local Reader reader;
   static std::atomic<std::uint64_t> current;
@@ -113,6 +121,7 @@ class TableEpochs {
   // Null when every slot is held.
   static std::atomic<std::uint64_t>* takeSlot() noexcept;
   static void giveBack(Reader& s) noexcept;
+  static void leave(Reader& s) noexcept;
   static void enterWithoutSlot() noexcept;
   static void leaveWithoutSlot() noexcept;
 };
@@ -181,6 +190,8 @@ class ConcurrentTable {
   static constexpr std::size_t kQuadrupleBelow = 4096;
   // The generation of the closed table, which no cache reaches by counting.
   static constexpr std::uint64_t kClosed = ~std::uint64_t{0};
+  // Marks the generation of a table no insert has passed yet.
+  static constexpr std::uint64_t kUnfilled = std::uint64_t{1} << 63;
 
   struct alignas(64) Count {
     std::atomic<std::uint32_t> fullGroups{0};
@@ -210,8 +221,9 @@ class ConcurrentTable {
 
   // Header, counts and groups in one allocation.
   struct alignas(64) Table {
-    // Read by every operation, and never written: on a line of its own.
-    std::uint64_t generation;
+    // Read by every operation: on a line of its own. Marked `kUnfilled` until
+    // the first insert unmarks it; a clear keeps the table only while marked.
+    std::atomic<std::uint64_t> generation;
     std::size_t mask;       // groups - 1
     std::size_t countMask;  // counts - 1
     // A growth under way: the successor, the blocks handed out, the blocks
@@ -263,10 +275,6 @@ class ConcurrentTable {
     [[nodiscard]] const Group& group(std::size_t at) const noexcept {
       return const_cast<Table*>(this)->group(at);
     }
-    // The table's own allocation; entries kept apart are not counted.
-    [[nodiscard]] std::size_t allocated() const noexcept {
-      return bytes(groups());
-    }
 
    private:
     Table(std::uint64_t g, std::size_t m, std::size_t c)
@@ -300,8 +308,10 @@ class ConcurrentTable {
   };
 
  public:
-  ConcurrentTable() : _table(Table::make(0, kMinGroups)) {}
+  ConcurrentTable() : _table(Table::make(kUnfilled, kMinGroups)) {}
+  // Collects first: what was released is freed while this table still works.
   ~ConcurrentTable() {
+    TableEpochs::collect();
     if (Table* const t = _table.load(); t != &Table::closed())
       destroy_with_entries(t);
   }
@@ -356,18 +366,25 @@ class ConcurrentTable {
       const std::scoped_lock lock(_writers);
       // Sequentially consistent, as a read's: a growth may release this table
       // meanwhile, and the guard keeps it only for loads in that order.
-      const Table* current = _table.load(std::memory_order_seq_cst);
-      const std::uint64_t next =
-          _generation.load(std::memory_order_relaxed) + 1;
+      Table* const current = _table.load(std::memory_order_seq_cst);
+      const std::uint64_t now = _generation.load(std::memory_order_relaxed);
       const std::size_t groups =
           keepCapacity ? std::max(current->groups(), kMinGroups) : kMinGroups;
+      // A table of that size no insert has passed stays, a generation on: an
+      // insert that read the older generation can no longer unmark it.
+      std::uint64_t unfilled = now | kUnfilled;
+      const bool kept = current->groups() == groups &&
+                        current->generation.compare_exchange_strong(
+                            unfilled, (now + 1) | kUnfilled,
+                            std::memory_order_relaxed);
+      _generation.store(now + 1, std::memory_order_seq_cst);
+      if (kept) return;
       Table* fresh = &Table::closed();
       try {
-        fresh = Table::make(next, groups);
+        fresh = Table::make((now + 1) | kUnfilled, groups);
       } catch (const std::bad_alloc&) {
         // The cache is closed.
       }
-      _generation.store(next, std::memory_order_seq_cst);
       // An exchange: a growth may publish a successor meanwhile, and the table
       // taken out is the one whose entries go.
       old = _table.exchange(fresh, std::memory_order_seq_cst);
@@ -376,7 +393,7 @@ class ConcurrentTable {
     // table.
     if (old != &Table::closed())
       TableEpochs::freeLater(old->pendingFree, old,
-                             &destroy_with_entries_erased, old->allocated());
+                             &destroy_with_entries_erased);
   }
 
   // Every value, in no particular order.
@@ -422,7 +439,9 @@ class ConcurrentTable {
     std::unique_ptr<Node> fresh;
     for (;;) {
       Table* t = _table.load(std::memory_order_seq_cst);
-      if (t->generation != generation) {
+      if (const std::uint64_t seen =
+              t->generation.load(std::memory_order_relaxed);
+          seen != generation && !unmark(t->generation, seen, generation)) {
         if constexpr (!kInline)
           if (fresh) value = std::move(fresh->value);
         return nullptr;
@@ -495,6 +514,18 @@ class ConcurrentTable {
       if (crowded) startGrowth(t, true);
       help(t);
     }
+  }
+
+  // Whether an insert for `generation` passes a table whose generation was
+  // `seen`: the first insert of a generation unmarks it, unless a clear has
+  // moved it first.
+  CURSIV_COLD CURSIV_NOINLINE static bool unmark(
+      std::atomic<std::uint64_t>& own, std::uint64_t seen,
+      std::uint64_t generation) noexcept {
+    return seen == (generation | kUnfilled) &&
+           (own.compare_exchange_strong(seen, generation,
+                                        std::memory_order_relaxed) ||
+            seen == generation);
   }
 
   // Mixed first: a standard hash of an integer is often the value itself.
@@ -580,7 +611,8 @@ class ConcurrentTable {
     if (t->next.load(std::memory_order_relaxed) != nullptr) return true;
     if (refused()) return false;
     const std::size_t factor = t->groups() < kQuadrupleBelow ? 4 : 2;
-    t->next.store(Table::make(t->generation, factor * t->groups()),
+    t->next.store(Table::make(t->generation.load(std::memory_order_relaxed),
+                              factor * t->groups()),
                   std::memory_order_release);
     return true;
   }
@@ -657,8 +689,7 @@ class ConcurrentTable {
     Table* expected = t;
     if (_table.compare_exchange_strong(expected, bigger,
                                        std::memory_order_seq_cst))
-      TableEpochs::freeLater(t->pendingFree, t, &destroy_table_erased,
-                             t->allocated());
+      TableEpochs::freeLater(t->pendingFree, t, &destroy_table_erased);
   }
 
   static void destroy_table_erased(void* t) {

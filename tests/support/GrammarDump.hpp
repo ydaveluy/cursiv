@@ -1,53 +1,57 @@
-// A grammar as reviewable text: `dump_declared<G>()` as written,
-// `dump_compiled<G>()` resolved. Safe on several threads at once.
+// A grammar as reviewable text, as the engine reads it: `dump_declared<G>()`
+// and `dump_compiled<G>()` print the whole grammar, `dump_closure<G, R>()` a
+// rule and what it reaches, `dump_expr<E>()` one expression, `dump_indexed<G>()`
+// the grammar with its rule dependencies. Safe on several threads at once.
 #pragma once
 
 #include <string>
 #include <type_traits>
 
-#include "cursiv/grammar/GrammarImage.hpp"
-#include "cursiv/grammar/ImageOf.hpp"
-#include "cursiv/shared/utils/GrammarPrinter.hpp"
+#include "cursiv/engine/generator/GrammarPrinter.hpp"
+#include "cursiv/engine/grammar/ImageOf.hpp"
+#include "cursiv/engine/grammar/View.hpp"
 
 namespace support {
 
-// One expression, as written.
+// One expression, which names no grammar: a keyword is guarded by the default
+// word class.
 template <class E>
 std::string dump_expr() {
-  cursiv::detail::GrammarImage image;
-  cursiv::engine::GrammarPrinter printer(image,
-                                         cursiv::engine::ImageView::written);
-  return printer.spell(
-      image.node(cursiv::detail::kNode<void, std::remove_cvref_t<E>>));
+  using namespace cursiv::engine::gen;
+  GrammarImage image;
+  image.bound = image.plain = class_of_bound<std::remove_cvref_t<
+      decltype(cursiv::GrammarSpec::w)>>::value;
+  return GrammarPrinter(image).spell(
+      image.node(kNode<void, std::remove_cvref_t<E>>));
+}
+
+// The whole grammar with the rules each rule uses, by index.
+template <class G>
+cursiv::engine::gen::GrammarDump dump_indexed() {
+  using namespace cursiv::engine::gen;
+  GrammarImage image = grammar_image<View<G>>();
+  return GrammarPrinter(image).render();
 }
 
 template <class G>
 std::string dump_declared() {
-  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
-  return cursiv::engine::GrammarPrinter(image,
-                                        cursiv::engine::ImageView::written)
-      .render()
-      .text;
+  return dump_indexed<G>().text;
 }
 
-// A rule and everything it reaches, one per line, in order of first
-// appearance.
-template <class R>
+// Rule `R` of grammar `G` and everything it reaches, one per line, in order of
+// first appearance.
+template <class G, class R>
 std::string dump_closure() {
-  cursiv::detail::GrammarImage image;
-  cursiv::engine::GrammarPrinter printer(image,
-                                         cursiv::engine::ImageView::written);
-  return printer.closure(image.rule(
-      cursiv::detail::kRule<void, cursiv::detail::declared_of_t<R>>));
+  using namespace cursiv::engine::gen;
+  GrammarImage image = grammar_image<View<G>>();
+  return GrammarPrinter(image).closure(
+      image.rule(kRule<View<G>, cursiv::detail::declared_of_t<R>>));
 }
 
-template <class C>
+// The engine reads one form of a grammar: its overrides are resolved.
+template <class G>
 std::string dump_compiled() {
-  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<C>();
-  return cursiv::engine::GrammarPrinter(image,
-                                        cursiv::engine::ImageView::resolved)
-      .render()
-      .text;
+  return dump_declared<G>();
 }
 
 }  // namespace support

@@ -30,9 +30,9 @@ scaffolded projects accept the same option.
 | Target | Provides |
 |---|---|
 | `cursiv::core` | parsing, syntax trees, linking and validation |
-| `cursiv::engine::ll`, `cursiv::engine::lr` | the parser runtime of each engine; `<ID>Generated` links its own |
+| `cursiv::engine` | the parser runtime; `<ID>Generated` links it |
 | `cursiv::lsp` | the language server and its providers |
-| `cursiv::cli` | `run_cli` and `run_command`, for a [command-line tool](cli.md) |
+| `cursiv::cli` | `runCli` and `runCommand`, for a [command-line tool](cli.md) |
 | `cursiv::mcp` | the MCP server and its default tools |
 | `cursiv::test` | the [test helpers](test.md) |
 | `cursiv::bench` | the benchmark driver |
@@ -61,8 +61,8 @@ cursiv_generate_language(ID         mylang
 | `EXTENSIONS` | no | file extensions associated with the language |
 | `FILE_NAMES` | no | exact file names it claims, for a language like `Makefile` |
 | `BASE` | no | id of a language declared earlier in CMake; adds its generated library and include roots as dependencies |
-| `ENGINE` | no | `LL` or `LR`; defaults to `CURSIV_DEFAULT_ENGINE`, which is `LR`, the recommended engine |
 | `TEXTMATE` | no | the TextMate file of the editor extension, which the build keeps in step with the grammar's keywords |
+| `LR_MAX_STATES` | no | maximum number of states used during parser generation, with `CURSIV_LR_MAX_STATES` as the default |
 | `GENERATOR_ARGS` | no | additional arguments passed to the generator |
 
 `NAMESPACE ns::Type` generates into `ns::generated::Type`, under
@@ -77,16 +77,24 @@ stay out of reach. `GRAMMAR mylang/MyLangGrammar.hpp` in
 `BASE` only adds build dependencies; declare grammar inheritance in C++ with
 `cursiv::extends<BaseGrammar>`.
 
-`TEXTMATE` names a file relative to the calling `CMakeLists.txt`. Each time
-the parser is generated, the `match` of its `repository.keywords` entry is set
-to the grammar's keywords that hold a letter, and the rest of the file is kept.
-A missing file is left alone. See
+`TEXTMATE` names a file relative to the calling `CMakeLists.txt`. In an
+existing file, provide a string at `repository.keywords.match`. Each parser
+generation updates that pattern with the grammar's spellings that contain a
+letter. The build skips missing files. See
 [Ship an editor extension](../learn/editor-integration.md#declare-the-language-to-vs-code).
+
+Leave `LR_MAX_STATES` at its default of zero for no state cap. If a
+large grammar is expensive to build, try a cap such as `LR_MAX_STATES 3000`
+on that language or `-DCURSIV_LR_MAX_STATES=3000` for the whole project.
+Generation reports the minimum if the cap is too low. Compare build time,
+parse time and the resulting trees on representative documents.
 
 The generator compiles the grammar with the compile definitions and include
 directories of the directory that declares the language. When cross-compiling,
-it runs on the host, so the grammar must not depend on the target's compiler
-flags or predefined macros.
+the generators are built for the host and run there, so the grammar must not
+depend on the target's compiler flags or predefined macros. They are built
+first, before the rest of the build. Under Ninja, `-j` does not reach them;
+`CMAKE_BUILD_PARALLEL_LEVEL` sets their parallelism.
 
 ## `cursiv_package_language`
 
@@ -112,18 +120,14 @@ it to the aggregate `bench` target. Declare `mylangLsp` first.
 
 | Option | Default | Use it to… |
 |---|---|---|
-| `CURSIV_DEFAULT_ENGINE` | `LR` | Select `LL` or `LR` when a language does not specify `ENGINE`. |
 | `CURSIV_MIMALLOC` | `ON`; `OFF` on Windows and macOS | Link the mimalloc allocator into every executable. |
 | `CURSIV_SOURCE_DIR` | — | Select a local checkout in the FetchContent setup above. |
 | `CURSIV_HOST_TOOLS` | — | When cross-compiling, run the parser generators from this existing native build instead of building them in `host-tools/` inside the build directory. |
+| `CURSIV_LR_MAX_STATES` | `0` (no cap) | Set the default state limit for language generation. |
 | `CURSIV_WASI_THREADS` | `ON` with the WASI toolchain | Build the threaded WebAssembly target, which the packaged language server needs. Set it only with the WASI toolchain. |
 | `CURSIV_WASI_MAX_MEMORY` | `2147483648` (2 GiB) with WASI threads | Set the shared-memory limit in bytes. |
 | `CURSIV_WASI_STACK` | `1048576` (1 MiB) with the WASI toolchain | Set the main thread's stack size in bytes. |
 | `WASI_SDK` | Environment or conventional install location | Select the wasi-sdk directory; see [WebAssembly](../recipes/wasm.md). |
-
-Generated parser sources use `-O1` in WASI Debug builds to stay within
-WebAssembly engine limits on function local counts. Debug symbols remain
-enabled; handwritten sources retain the selected build's compilation flags.
 
 Sanitizer flags set for the whole build turn mimalloc off. If only one target
 uses a sanitizer, configure with `-DCURSIV_MIMALLOC=OFF`, or set the

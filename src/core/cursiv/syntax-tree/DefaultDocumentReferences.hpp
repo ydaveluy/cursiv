@@ -16,6 +16,7 @@
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/macros.hpp"
 
 // The references of one document for one compiled grammar: each site is a
 // `RefHandle`, read through the metadata's `RefOps` row.
@@ -61,8 +62,9 @@ struct DefaultDocumentReferences : DocumentReferences {
   // One reference's share of `visitResolved` and `visitUnresolved`.
   void forEachResolved(const Cst& cst, const detail::RefHandle& h,
                        ResolvedReferenceVisitor visitor) const;
-  void forEachUnresolved(const Cst& cst, const detail::RefHandle& h,
-                         UnresolvedReferenceVisitor visitor) const;
+  CURSIV_ALWAYS_INLINE inline void forEachUnresolved(
+      const Cst& cst, const detail::RefHandle& h,
+      UnresolvedReferenceVisitor visitor) const;
 
   // The ranks whose name touches `[begin, end]`, in rank order.
   [[nodiscard]] std::vector<std::uint32_t> ranksIn(const Cst& cst,
@@ -88,7 +90,8 @@ struct DefaultDocumentReferences : DocumentReferences {
   // Set when a resolution answers a failure, cleared by `reset`: what
   // `anyUnresolved` reads.
   mutable std::atomic<bool> _anyFailed{false};
-  void keepFailure(std::uint32_t rank, std::string what) const;
+  void keepFailure(std::uint32_t rank, const Document* document,
+                   std::string_view name) const;
   // What each lookup that threw said, by rank, until `reset`; a refused
   // allocation leaves it unsaid.
   mutable std::mutex _failuresLock;

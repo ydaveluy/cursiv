@@ -31,8 +31,17 @@ cmake --build --preset gcc-release --target requirements_cli --parallel
 ```
 
 `--root` loads both languages' files into one workspace so requirement names
-resolve. Without it, the CLI loads only the named file and reports references
-to declarations in other files as unresolved.
+resolve. A single-file check loads only the named file.
+
+To see which tests cover each requirement, generate the HTML report:
+
+```sh
+./build/examples/requirements/src/requirements_cli generate \
+  -d build/coverage examples/requirements/example/requirements.req
+```
+
+This command loads the input file's folder by default and prints the path
+to `requirements.html`.
 
 ## Read the implementation
 

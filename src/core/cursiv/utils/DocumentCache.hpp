@@ -32,9 +32,13 @@ namespace cursiv {
 // listeners hear it. A value may read its own document and, with `state`, its
 // references' targets; one that reads further belongs in a `WorkspaceCache`.
 //
-// DocumentCache<V> holds one value per document. get(document, provider)
-// returns a copy, get(document) only looks it up, and withValue(document,
-// provider, consumer) passes the consumer a reference it must not keep.
+// DocumentCache<K, V> holds one value per key of a document: get(document,
+// key, provider) returns a copy, and get(document, key) only looks it up.
+// `Hash` and `KeyEqual` are default-constructed at each use, so all their
+// instances must agree, and `Hash` must not throw. DocumentCache<V> holds one
+// value per document: get(document, provider) returns a copy, get(document)
+// only looks it up, and withValue(document, provider, consumer) passes the
+// consumer a reference it must not keep.
 template <class K, class V = void, class Hash = std::hash<K>,
           class KeyEqual = std::equal_to<K>>
 class DocumentCache : private DocumentPhaseListener,

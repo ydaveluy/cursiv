@@ -14,7 +14,7 @@ inline constexpr char32_t kNoScalar = 0xFFFFFFFFu;
 // The scalar at `p` and, in `len`, the bytes it takes; `kNoScalar` and no
 // bytes where they are not one -- a lone continuation, a truncated tail, an
 // overlong form, a surrogate.
-constexpr char32_t scalar_at(const char* p, std::size_t avail,
+constexpr char32_t scalarAt(const char* p, std::size_t avail,
                              std::size_t& len) {
   len = 0;
   if (avail == 0) return kNoScalar;
@@ -35,8 +35,32 @@ constexpr char32_t scalar_at(const char* p, std::size_t avail,
   return cp;
 }
 
+namespace detail {
+
+// The first byte of the scalar containing byte `at`. An invalid byte stands alone.
+constexpr std::size_t scalar_start(std::string_view text, std::size_t at) noexcept {
+  if (at >= text.size()) return at;
+  std::size_t lead = at;
+  while (lead > 0 && at - lead < 3 &&
+         (static_cast<unsigned char>(text[lead]) & 0xC0u) == 0x80u) --lead;
+  if (lead == at) return at;
+  std::size_t width = 0;
+  (void)scalarAt(text.data() + lead, text.size() - lead, width);
+  return width > at - lead ? lead : at;
+}
+
+// The last complete scalar, or `kNoScalar` when the spelling ends in an invalid byte.
+constexpr char32_t last_scalar(std::string_view text) {
+  if (text.empty()) return kNoScalar;
+  const auto at = scalar_start(text, text.size() - 1);
+  std::size_t width = 0;
+  return scalarAt(text.data() + at, text.size() - at, width);
+}
+
+}  // namespace detail
+
 // The UTF-8 form of a scalar, appended to `out`.
-inline void append_scalar(std::string& out, char32_t cp) {
+inline void appendScalar(std::string& out, char32_t cp) {
   if (cp < 0x80) {
     out += static_cast<char>(cp);
     return;

@@ -31,12 +31,11 @@ void check_tree(const cursiv::ParseResult& r, const std::string& text,
 
 // Every span the elected parse skipped lies inside a diagnostic's span: a
 // skipped token nobody reports is what an editor cannot work with.
-void check_coverage(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
-                    const std::string& name) {
+void check_coverage(const cursiv::Cst& cst, const std::string& name) {
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
     const cursiv::CstNode& n = cst[i];
-    if (n.subtreeSize != 1 || !cursiv::test::detail::skipped_leaf(grammar, n) ||
-        n.hidden)
+    if (n.subtreeSize != 1 || !cursiv::test::detail::skipped_leaf(n) ||
+        n.isHidden())
       continue;
     bool covered = false;
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
@@ -58,10 +57,10 @@ void check_coverage(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
 void check_claims(const cursiv::Cst& cst, const std::string& name) {
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
     const cursiv::CstNode& n = cst[i];
-    if (n.subtreeSize != 1 || n.hidden || n.recovered) continue;
+    if (n.subtreeSize != 1 || n.isHidden() || n.isRecovered()) continue;
     bool wrapped = false;
     for (cursiv::NodeId j = i + 1; j < cst.size() && !wrapped; ++j)
-      if (cst[j].recovered && cst[j].subtreeSize > 1 &&
+      if (cst[j].isRecovered() && cst[j].subtreeSize > 1 &&
           j - cst[j].subtreeSize + 1 <= i)
         wrapped = true;
     if (wrapped) continue;
@@ -98,7 +97,7 @@ void row(const cursiv::Parser& engine, const std::string& text,
   std::printf("%-38s %s\n", name.c_str(),
               cursiv::test::detail::signature(p, validTokens, inv).c_str());
   check_tree(result, text, name);
-  check_coverage(engine.getGrammar(), result.cst(), name);
+  check_coverage(result.cst(), name);
   check_claims(result.cst(), name);
   check_value(result, name);
 }
@@ -163,7 +162,7 @@ void mutate_pass(const cursiv::Parser& engine, const std::string& seed) {
 // the election.
 void recycled_neighbour() {
   const std::unique_ptr<cursiv::Parser> parser =
-      topt::generated::OptionalsG::create_parser();
+      topt::generated::OptionalsG::createParser();
   const cursiv::Parser& engine = *parser;
   const auto one = [&](const std::string& text, const std::string& name) {
     const cursiv::ParseResult result = engine.parse(text);
@@ -173,7 +172,7 @@ void recycled_neighbour() {
     std::printf("%-38s %s\n", name.c_str(),
                 cursiv::test::detail::signature(p, p.tokens.size(), 0).c_str());
     check_tree(result, text, name);
-    check_coverage(engine.getGrammar(), result.cst(), name);
+    check_coverage(result.cst(), name);
     if (std::ranges::find(p.tokens, "Y") == p.tokens.end()) {
       std::printf("  FAIL %s: Y was fed to the previous repair\n", name.c_str());
       ++failures;
@@ -208,7 +207,7 @@ void torture_boundary();
 
 int main() {
   const std::unique_ptr<cursiv::Parser> parser =
-      tort::generated::Torture::create_parser();
+      tort::generated::Torture::createParser();
   const cursiv::Parser& engine = *parser;
 
   const std::vector<std::string> names = {
@@ -239,7 +238,7 @@ int main() {
       "24_recycled_decl.trt",
   };
 
-  const std::string validText = cursiv::test::read_file(
+  const std::string validText = cursiv::test::readFile(
       std::string(CURSIV_TORTURE_CORPUS) + "/00_valid.trt");
   const cursiv::test::Proj valid = cursiv::test::project(engine, validText);
   if (!valid.accepted || valid.recovered) {
@@ -248,7 +247,7 @@ int main() {
   }
 
   for (const std::string& name : names) {
-    const std::string text = cursiv::test::read_file(
+    const std::string text = cursiv::test::readFile(
         std::string(CURSIV_TORTURE_CORPUS) + "/" + name);
     if (text.empty() && name != "00_valid.trt") {
       std::printf("FAIL torture/%s: document not found\n", name.c_str());

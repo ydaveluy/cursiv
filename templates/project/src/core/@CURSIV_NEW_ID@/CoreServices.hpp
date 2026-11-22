@@ -24,7 +24,7 @@ struct @CURSIV_NEW_CLASS@CoreServices
   // Lists the services after the default ones, so that a missing required
   // service is reported by name. Add a line for each service you add.
   void visitServices(
-      cursiv::function_ref<void(const cursiv::ServiceSlot&)> yield) const override {
+      cursiv::FunctionRef<void(const cursiv::ServiceSlot&)> yield) const override {
     cursiv::CoreServices::visitServices(yield);
     yield({"validator", true, validator != nullptr});
   }

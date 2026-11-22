@@ -1,14 +1,14 @@
 ---
-description: Write documents in the cursiv++ example languages in your browser, with their language servers compiled to WebAssembly.
+description: Edit Cursiv examples in your browser, fix errors and follow references between files.
 hide:
   - toc
 ---
 
 # Try it online
 
-Write documents in the example languages. Each language server is compiled
-to WebAssembly and runs in this page: diagnostics, completion, hover, go to
-definition, rename and formatting all come from it.
+Choose a language and edit its example files. You can switch between files
+in the same language and keep your edits. Switching languages, restarting
+the server or reloading this page restores the original files.
 
 <section class="cursiv-demo" data-search-exclude>
 <!-- The language servers need SharedArrayBuffer, hence cross-origin
@@ -44,3 +44,16 @@ definition, rename and formatting all come from it.
 </div>
 <script type="module" src="app.js"></script>
 </section>
+
+## Try an editor feature
+
+- **Completion.** In **State machine**, open `trafficlight.statemachine`.
+  Delete `PowerOff` from the `initialState` line, leave the space after the
+  keyword and press **Ctrl+Space** to see the available states.
+- **Diagnostics and formatting.** In **Arithmetics**, open `broken.calc`
+  and add the missing `;` after `x * 2`. The error count drops to zero.
+  Right-click in the editor and choose **Format Document** to format the file.
+- **Cross-file references.** In **Requirements**, open `tests.tst` and hover
+  over `ReqId001_tstID` to read its description. Right-click the name and
+  choose **Go to Definition** to open its declaration in `requirements.req`,
+  or **Rename Symbol** to rename it in both files.

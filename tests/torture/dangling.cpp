@@ -26,8 +26,8 @@ namespace ct = cursiv::test;
 struct World : support::World<cursiv::SharedLspServices> {
   cursiv::LspServices* lang = &support::add_language<cursiv::LspServices>(
       shared, {"dangling", {".dangling"}, {}},
-      telect::generated::Election::create_parser(),
-      telect::generated::Election::create_ast_reflection());
+      telect::generated::Election::createParser(),
+      telect::generated::Election::createAstReflection());
 
   World() { support::take_both_ranges(shared); }
 };
@@ -75,7 +75,7 @@ const Case kCases[] = {
 // A broken document parses with diagnostics whose spans sit inside the text.
 void recovery() {
   const std::unique_ptr<cursiv::Parser> engine =
-      telect::generated::Election::create_parser();
+      telect::generated::Election::createParser();
   for (const Case& c : kCases) {
     const cursiv::ParseResult r = engine->parse(c.text);  // must not crash
     const cursiv::Cst& cst = r.cst();

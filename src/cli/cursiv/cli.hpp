@@ -4,7 +4,10 @@
 
 #include <concepts>
 #include <functional>
+#include <initializer_list>
+#include <optional>
 #include <ostream>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -28,29 +31,39 @@ class UsageError : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
-// Scans `root` into the workspace, as an editor's `initialized` does, so
-// cross-file references resolve. Throws `UsageError` if `root` is not a
-// directory.
-void initialize_root(std::string_view root, cursiv::SharedCoreServices& shared);
+// Loads a workspace folder for cross-file references. File system errors
+// from the workspace manager are reported as `UsageError`.
+void initializeRoot(std::string_view root, cursiv::SharedCoreServices& shared);
 
 // Reads `path`, adds it to the workspace and builds it fully. Throws
 // `UsageError` when no language claims the file or it cannot be read. The
 // reference stays valid while `shared.documents` holds the document.
-[[nodiscard]] cursiv::Document& build_document_from_path(
+[[nodiscard]] cursiv::Document& buildDocumentFromPath(
     std::string_view path, cursiv::SharedCoreServices& shared);
 
-[[nodiscard]] bool has_error_diagnostics(
+[[nodiscard]] bool hasErrorDiagnostics(
     const cursiv::Document& document) noexcept;
 
 // Prints one `path:line:column: severity: message [source:code]` line per
 // diagnostic, sorted by range; line and column are 1-based bytes.
-void print_diagnostics(const cursiv::Document& document,
+void printDiagnostics(const cursiv::Document& document,
                        std::string_view displayPath, std::ostream& out);
 
-// Runs a language's own command, such as `generate`, with `run_cli`'s exit
+// Runs a language's own command, such as `generate`, with `runCli`'s exit
 // codes: `command`'s answer, `kUsage` for a `UsageError`, `kFatal` for any
 // other exception or a failed write. Errors go to stderr.
-[[nodiscard]] int run_command(const std::function<int()>& command);
+[[nodiscard]] int runCommand(const std::function<int()>& command);
+
+// A file command runs on the built document. It may accept an output directory
+// and load the file's folder when the caller omits --root.
+struct CliCommand {
+  std::string_view name;
+  std::function<int(const Document&, std::string_view path,
+                    std::optional<std::string_view> destination)>
+      run;
+  bool acceptsDestination = false;
+  bool loadSiblings = false;
+};
 
 namespace detail {
 
@@ -59,7 +72,8 @@ namespace detail {
 [[nodiscard]] int run_cli_on(
     int argc, char** argv,
     const std::function<void(SharedCoreServices&)>& registerLanguageServices,
-    SharedCoreServices& sharedServices);
+    SharedCoreServices& sharedServices,
+    std::span<const CliCommand> commands = {});
 
 }  // namespace detail
 
@@ -68,12 +82,15 @@ namespace detail {
 // languages over one workspace.
 template <class TShared = SharedCoreServices>
   requires std::derived_from<TShared, SharedCoreServices>
-[[nodiscard]] int run_cli(
+[[nodiscard]] int runCli(
     int argc, char** argv,
-    const std::function<void(SharedCoreServices&)>& registerLanguageServices) {
-  TShared sharedServices;
-  return detail::run_cli_on(argc, argv, registerLanguageServices,
-                            sharedServices);
+    const std::function<void(SharedCoreServices&)>& registerLanguageServices,
+    std::initializer_list<CliCommand> commands = {}) {
+  return runCommand([&] {
+    TShared sharedServices;
+    return detail::run_cli_on(argc, argv, registerLanguageServices,
+                              sharedServices, commands);
+  });
 }
 
 }  // namespace cursiv

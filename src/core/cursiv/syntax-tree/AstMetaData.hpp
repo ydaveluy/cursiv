@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -13,17 +12,15 @@
 
 // One compiled grammar's AST types as data: classes, subtyping and
 // members, written by the generator for `DefaultAstReflection`. Nothing here
-// builds a node: that is `AstActions`.
+// builds a node.
 
 namespace cursiv::detail {
 
-// 0xFFFF reads "no entry" in every column of the registries, `field` included
-// (`kNoField` is the same value, spelled for the element table).
+// 0xFFFF reads "no entry" in every column of the registries.
 inline constexpr std::uint16_t kNoIndex = 0xFFFF;
 
-// What the builder reads of one field. `targets` lists every type the member
-// accepts, in declaration order; its index is the variant alternative to
-// emplace, and `target` is the first. The writers' casts rely on these tests.
+// One member. `targets` lists every type the member accepts, in declaration
+// order, and `target` is the first.
 struct FieldDesc {
   std::string_view name;
   FieldContent content = FieldContent::value;
@@ -34,13 +31,13 @@ struct FieldDesc {
   std::uint16_t target_count = 0;
 };
 
-// Every subtype of one type, itself first.
+// A row of classes.
 struct TagSet {
   const AstTypeTag* const* tags = nullptr;
   std::uint16_t count = 0;
 };
 
-// The members one class declares, as a run of the flattened property array.
+// A class's properties in declaration order, the inherited ones first.
 struct PropertyRow {
   const PropertyMetaData* at = nullptr;
   std::size_t count = 0;
@@ -49,14 +46,14 @@ struct PropertyRow {
 using NewNodeFn = AstNodePtr (*)();
 using YieldFn = void (*)(
     const AstNode&,
-    cursiv::function_ref<void(std::string_view, std::uint32_t, AstNode&)>);
+    cursiv::FunctionRef<void(std::string_view, std::uint32_t, AstNode&)>, std::size_t limit);
 
 struct AstMetaData {
   const AstTypeTag* const* types = nullptr;
+  // Per type: every class that is one, itself first.
   const TagSet* subtypes = nullptr;
-  // One row of `typeWords` per type: the types that derive from it.
-  const std::uint64_t* derivesBits = nullptr;
   std::uint16_t typeCount = 0;
+  // The words of one row of `acceptBits`: a bit per type.
   std::uint16_t typeWords = 0;
 
   const FieldDesc* fields = nullptr;
@@ -68,11 +65,13 @@ struct AstMetaData {
   const std::uint64_t* acceptBits = nullptr;
   const PropertyRow* propertyRows = nullptr;
   const AstTypeTag* const* referenceTags = nullptr;
-  // One dispatch per known type, with inherited members selected at generation.
-  const YieldFn* memberVisitors = nullptr;
+  // Per member, what yields the nodes it holds; null for a member that holds
+  // none.
+  const YieldFn* yields = nullptr;
+  // Per type, the members that hold nodes, the inherited ones first.
+  const std::span<const std::uint16_t>* nodeRows = nullptr;
   // One per known type, null for a class no rule builds.
   const NewNodeFn* newNodes = nullptr;
-  YieldFn unknownMembers = nullptr;
   std::span<const std::uint16_t> referenceFields;
   const std::span<const std::uint16_t>* referenceRows = nullptr;
   std::uint16_t fieldCount = 0;
@@ -85,23 +84,6 @@ struct AstMetaData {
   // The tag of type `i`, null past the last type.
   constexpr const AstTypeTag* tag_of(std::uint16_t i) const {
     return i < typeCount ? types[i] : nullptr;
-  }
-
-  // Both indexes come from this grammar's tables, so the range is asserted,
-  // not tested.
-  constexpr bool derives(std::uint16_t base, std::uint16_t sub) const {
-    assert(base < typeCount && sub < typeCount &&
-           "a pair of classes this grammar names");
-    return ((derivesBits[std::size_t{base} * typeWords + sub / 64] >>
-             (sub % 64)) &
-            1u) != 0;
-  }
-
-  constexpr std::uint16_t field_alt_of(const FieldDesc& f,
-                                       std::uint16_t sub) const {
-    for (std::uint16_t i = 0; i < f.target_count; ++i)
-      if (derives(f.targets[i], sub)) return i;
-    return kNoIndex;
   }
 };
 }  // namespace cursiv::detail

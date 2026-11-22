@@ -1,13 +1,12 @@
 #include "engines/shared/EofRegionAst.hpp"
 #include "engines/shared/Checks.hpp"
+#include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
-#include "eofpurell/generated/PureLl/Module.hpp"
-#include "eofpurelr/generated/PureLr/Module.hpp"
+#include "eofpurelr/generated/PureBase/Module.hpp"
 #include "eofregionaux/generated/Aux/Module.hpp"
-#include "eofregionll/generated/Ll/Module.hpp"
-#include "eofregionlr/generated/Lr/Module.hpp"
+#include "eofregionlr/generated/Suite/Module.hpp"
 #include <string>
 #include <string_view>
 #include <variant>
@@ -16,10 +15,9 @@
 namespace eof_region_cases {
 
 void run() {
-  const auto ll = teofregion::generated::Ll::create_parser();
-  const auto lr = teofregion::generated::Lr::create_parser();
-  const auto aux = teofregion::generated::Aux::create_parser();
-  for (const auto* parser : {ll.get(), lr.get(), aux.get()}) {
+  const auto lr = teofregion::generated::Suite::createParser();
+  const auto aux = teofregion::generated::Aux::createParser();
+  for (const auto* parser : {lr.get(), aux.get()}) {
     for (const std::string_view source :
          {"a <? x ?> b", "a <? x   ", "a <?   "}) {
       const std::string input = "island:" + std::string(source);
@@ -47,7 +45,7 @@ void run() {
     CHECK(!rejected.diagnostics.empty() || rejected.cst().recovered() ||
           !rejected.accepted);
   }
-  for (const auto* parser : {ll.get(), lr.get(), aux.get()}) {
+  for (const auto* parser : {lr.get(), aux.get()}) {
     for (const std::string_view source :
          {"inner", "inner   ", "ref-inner   ", "node   ", "directx", "callx"}) {
       const std::string input = "chain:" + std::string(source);
@@ -56,8 +54,11 @@ void run() {
             result.diagnostics.empty());
       const auto* doc = result.valueAs<teofregion::ChainDocument>();
       CHECK(doc);
-      if (doc && source.starts_with("node"))
+      if (doc && source.starts_with("node")) {
         CHECK(doc->empty && doc->empty->parent == doc);
+        if (doc->empty)
+          CHECK(!parser->getGrammar().recordIsLiteral(result.cst()[doc->empty->cstNodeId]));
+      }
     }
     for (const std::string_view source :
          {"outer   ", "ref-outer   ", "directx   ", "callx   "}) {
@@ -67,19 +68,16 @@ void run() {
             !result.diagnostics.empty());
     }
   }
-  const auto pureLl = teofregion::generated::PureLl::create_parser();
-  const auto pureLr = teofregion::generated::PureLr::create_parser();
-  for (const auto* parser : {pureLl.get(), pureLr.get()}) {
-    for (const std::string_view source : {"", " ", "   "}) {
-      const auto result = parser->parse(source);
-      CHECK(result.accepted && !result.cst().recovered() &&
-            result.diagnostics.empty());
-      CHECK(result.valueAs<teofregion::ChainDocument>());
-    }
-    const auto invalid = parser->parse(" x");
-    CHECK(!invalid.accepted || invalid.cst().recovered() ||
-          !invalid.diagnostics.empty());
+  const auto pure = teofregion::generated::PureBase::createParser();
+  for (const std::string_view source : {"", " ", "   "}) {
+    const auto result = pure->parse(source);
+    CHECK(result.accepted && !result.cst().recovered() &&
+          result.diagnostics.empty());
+    CHECK(result.valueAs<teofregion::ChainDocument>());
   }
+  const auto invalid = pure->parse(" x");
+  CHECK(!invalid.accepted || invalid.cst().recovered() ||
+        !invalid.diagnostics.empty());
 }
 
 }  // namespace eof_region_cases
@@ -87,10 +85,9 @@ void run() {
 namespace nullable_region_cases {
 
 void run() {
-  const auto ll = teofregion::generated::Ll::create_parser();
-  const auto lr = teofregion::generated::Lr::create_parser();
-  const auto aux = teofregion::generated::Aux::create_parser();
-  for (const cursiv::Parser* parser : {ll.get(), lr.get(), aux.get()}) {
+  const auto lr = teofregion::generated::Suite::createParser();
+  const auto aux = teofregion::generated::Aux::createParser();
+  for (const cursiv::Parser* parser : {lr.get(), aux.get()}) {
     for (std::string_view source :
          {"", "  # empty\n", "1", "\"#{}\"", "\"#{ 1 }\"",
           "\"#{# comment\n 1}\"", "\"#{\"#{2}\"}\""}) {
@@ -144,8 +141,7 @@ void run() {
 namespace regional_read_mode_cases {
 
 void run() {
-  const auto ll = teofregion::generated::Ll::create_parser();
-  const auto lr = teofregion::generated::Lr::create_parser();
+  const auto lr = teofregion::generated::Suite::createParser();
   struct Case {
     std::string_view source, prefix, suffix, value;
     std::vector<std::string_view> args = {};
@@ -162,44 +158,42 @@ void run() {
       {"<?php echo a ? b : c ?> \t ", "", " \t ", "a", {"b", "c"}},
       {"<?php echo a(b) ?> \t ", "", " \t ", "a", {"b"}},
   };
-  for (const auto* parser : {ll.get(), lr.get()}) {
-    for (const auto& test : cases) {
-      const std::string input = "regional:" + std::string(test.source);
-      const auto result = parser->parse(input);
-      CHECK(result.accepted);
-      CHECK(!result.cst().recovered());
-      CHECK(result.diagnostics.empty());
-      const auto* document = result.valueAs<tregionalreadmode::Doc>();
-      CHECK(document);
-      const std::size_t prefix = !test.prefix.empty();
-      const std::size_t count = 1u + prefix + !test.suffix.empty();
-      CHECK(document && document->items.size() == count);
-      if (!document || document->items.size() != count) continue;
-      const auto check_text = [&](std::size_t index,
-                                  std::string_view expected) {
-        const auto* text =
-            cursiv::ast_cast<tregionalreadmode::Text>(document->items[index]);
-        CHECK(text && text->name == expected && text->parent == document);
-      };
-      if (prefix) check_text(0, test.prefix);
-      if (!test.suffix.empty()) check_text(count - 1u, test.suffix);
-      const auto* block =
-          cursiv::ast_cast<tregionalreadmode::Block>(document->items[prefix]);
-      CHECK(block && block->parent == document && block->args.size() == 1);
-      if (!block || block->args.size() != 1) continue;
-      const auto* echo =
-          cursiv::ast_cast<tregionalreadmode::Echo>(block->args[0]);
-      CHECK(echo && echo->parent == block && echo->args.size() == 1);
-      if (!echo || echo->args.size() != 1) continue;
-      const auto* value = echo->args[0];
-      CHECK(value && value->parent == echo && value->name == test.value);
-      CHECK(value && value->args.size() == test.args.size());
-      if (!value || value->args.size() != test.args.size()) continue;
-      for (std::size_t i = 0; const std::string_view arg : test.args) {
-        const auto* operand = value->args[i++];
-        CHECK(operand && operand->parent == value && operand->name == arg &&
-              operand->args.empty());
-      }
+  for (const auto& test : cases) {
+    const std::string input = "regional:" + std::string(test.source);
+    const auto result = lr->parse(input);
+    CHECK(result.accepted);
+    CHECK(!result.cst().recovered());
+    CHECK(result.diagnostics.empty());
+    const auto* document = result.valueAs<tregionalreadmode::Doc>();
+    CHECK(document);
+    const std::size_t prefix = !test.prefix.empty();
+    const std::size_t count = 1u + prefix + !test.suffix.empty();
+    CHECK(document && document->items.size() == count);
+    if (!document || document->items.size() != count) continue;
+    const auto check_text = [&](std::size_t index,
+                                std::string_view expected) {
+      const auto* text =
+          cursiv::ast_cast<tregionalreadmode::Text>(document->items[index]);
+      CHECK(text && text->name == expected && text->parent == document);
+    };
+    if (prefix) check_text(0, test.prefix);
+    if (!test.suffix.empty()) check_text(count - 1u, test.suffix);
+    const auto* block =
+        cursiv::ast_cast<tregionalreadmode::Block>(document->items[prefix]);
+    CHECK(block && block->parent == document && block->args.size() == 1);
+    if (!block || block->args.size() != 1) continue;
+    const auto* echo =
+        cursiv::ast_cast<tregionalreadmode::Echo>(block->args[0]);
+    CHECK(echo && echo->parent == block && echo->args.size() == 1);
+    if (!echo || echo->args.size() != 1) continue;
+    const auto* value = echo->args[0];
+    CHECK(value && value->parent == echo && value->name == test.value);
+    CHECK(value && value->args.size() == test.args.size());
+    if (!value || value->args.size() != test.args.size()) continue;
+    for (std::size_t i = 0; const std::string_view arg : test.args) {
+      const auto* operand = value->args[i++];
+      CHECK(operand && operand->parent == value && operand->name == arg &&
+            operand->args.empty());
     }
   }
 }
@@ -208,12 +202,10 @@ void run() {
 
 namespace byte_condition_cases {
 
-// `eof` is the end of the text in both engines, and `!byte` is a condition
+// `eof` is the end of the text, and `!byte` is a condition
 // like any: it asks the token in hand.
 
 namespace {
-
-const char* engine = "";
 
 std::string read(const cursiv::Parser& parser, std::string_view text,
                  bool inside = false) {
@@ -237,7 +229,7 @@ std::string read(const cursiv::Parser& parser, std::string_view text,
 void check(const cursiv::Parser& parser, std::string_view text,
            std::string_view expected, bool inside) {
   const std::string got = read(parser, text, inside);
-  same_text(engine, text, got, expected);
+  same_text("Lr", text, got, expected);
 }
 
 void exercise(const cursiv::Parser& parser) {
@@ -279,17 +271,12 @@ void exercise(const cursiv::Parser& parser) {
 
 }  // namespace
 
-void run() {
-  engine = "LL";
-  exercise(*teofregion::generated::Ll::create_parser());
-  engine = "LR";
-  exercise(*teofregion::generated::Lr::create_parser());
-}
+void run() { exercise(*teofregion::generated::Suite::createParser()); }
 
 }  // namespace byte_condition_cases
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   eof_region_cases::run();
   nullable_region_cases::run();
   regional_read_mode_cases::run();

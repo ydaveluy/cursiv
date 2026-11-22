@@ -57,13 +57,13 @@ namespace {
 
 void install_workspace(cursiv::CoreServices& services) {
   services.languageMetaData = {"workspace", {".ws"}, {}};
-  services.parser = ws::generated::Workspace::create_parser();
-  services.astReflection = ws::generated::Workspace::create_ast_reflection();
+  services.parser = ws::generated::Workspace::createParser();
+  services.astReflection = ws::generated::Workspace::createAstReflection();
 }
 
 void create_language_builds_a_workspace_of_its_own() {
   const cursiv::CoreLanguage<cursiv::CoreServices, cursiv::SharedCoreServices>
-      built = cursiv::create_language<cursiv::CoreServices,
+      built = cursiv::createLanguage<cursiv::CoreServices,
                                       cursiv::SharedCoreServices,
                                       install_workspace>();
   CHECK(built.language.languageMetaData.languageId == "workspace");
@@ -73,15 +73,15 @@ void create_language_builds_a_workspace_of_its_own() {
 
 void install_nothing(cursiv::CoreServices&) {}
 
-// `register_language` throws on an incomplete container rather than return
+// `registerLanguage` throws on an incomplete container rather than return
 // `false`.
 void register_language_throws_instead_of_answering_false() {
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
 
   bool threw = false;
   try {
-    (void)cursiv::register_language<
+    (void)cursiv::registerLanguage<
         cursiv::CoreServices, cursiv::SharedCoreServices, install_nothing>(
         shared);
   } catch (const cursiv::ServiceRegistrationError&) {
@@ -123,9 +123,9 @@ void what_is_written_is_no_longer_missing() {
   CHECK(s.languageMetaData.languageId == "workspace");
   // The metadata is in, so the next hole is the one after it.
   CHECK(s.firstMissingService() == "parser");
-  s.parser = ws::generated::Workspace::create_parser();
+  s.parser = ws::generated::Workspace::createParser();
   CHECK(s.firstMissingService() == "astReflection");
-  s.astReflection = ws::generated::Workspace::create_ast_reflection();
+  s.astReflection = ws::generated::Workspace::createAstReflection();
   CHECK(s.firstMissingService() == "nameProvider");
   s.nameProvider = std::make_unique<cursiv::DefaultNameProvider>(s);
   // The node locator is optional: nothing in the framework reads it.
@@ -138,7 +138,7 @@ void what_is_written_is_no_longer_missing() {
   const cursiv::ScopeComputation* const mine = s.scopeComputation.get();
 
   // What no grammar decides is filled in one call.
-  cursiv::install_default_core_services(s);
+  cursiv::installDefaultCoreServices(s);
   CHECK(s.firstMissingService().empty());
   CHECK(s.astNodeDescriptionProvider != nullptr);
   CHECK(s.scopeComputation.get() == mine);
@@ -148,7 +148,7 @@ void what_is_written_is_no_longer_missing() {
 void the_container_s_parser_is_the_engine() {
   cursiv::CoreServices s(shared);
   s.languageMetaData = meta();
-  s.parser = ws::generated::Workspace::create_parser();
+  s.parser = ws::generated::Workspace::createParser();
 
   const cursiv::ParseResult r = s.parser->parse("datatype String\n");
   CHECK(static_cast<bool>(r));
@@ -162,7 +162,7 @@ struct Derived final : cursiv::CoreServicesFor<cursiv::SharedCoreServices> {
 
   using CoreServicesFor::CoreServicesFor;
 
-  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+  void visitServices(cursiv::FunctionRef<void(const cursiv::ServiceSlot&)>
                          yield) const override {
     cursiv::CoreServices::visitServices(yield);
     yield({"extra", true, extra != nullptr});
@@ -172,18 +172,18 @@ struct Derived final : cursiv::CoreServicesFor<cursiv::SharedCoreServices> {
 void an_added_slot_is_declared_and_required() {
   Derived s(shared);
   s.languageMetaData = meta();
-  s.parser = ws::generated::Workspace::create_parser();
-  s.astReflection = ws::generated::Workspace::create_ast_reflection();
-  cursiv::install_default_core_services(s);
+  s.parser = ws::generated::Workspace::createParser();
+  s.astReflection = ws::generated::Workspace::createAstReflection();
+  cursiv::installDefaultCoreServices(s);
   // Every framework row is filled; the language's own row is the hole left.
   CHECK(s.firstMissingService() == "extra");
   s.extra = std::make_unique<cursiv::DefaultNameProvider>(s);
   CHECK(s.firstMissingService().empty());
 }
 
-// `make_default_core_services` builds, names and fills in one call.
+// `makeDefaultCoreServices` builds, names and fills in one call.
 void make_default_builds_a_complete_container() {
-  auto s = cursiv::make_default_core_services<Derived>(shared, "made");
+  auto s = cursiv::makeDefaultCoreServices<Derived>(shared, "made");
   CHECK(s->languageMetaData.languageId == "made");
   // The three the installer leaves to the language, plus the derived row.
   CHECK(s->parser == nullptr);
@@ -213,7 +213,7 @@ void the_diamond_holds_one_container() {
   cursiv::CoreServices& a = static_cast<FacadeA&>(s);
   cursiv::CoreServices& b = static_cast<FacadeB&>(s);
   CHECK(&a == &b);
-  a.parser = ws::generated::Workspace::create_parser();
+  a.parser = ws::generated::Workspace::createParser();
   CHECK(b.parser != nullptr);
 }
 
@@ -229,7 +229,7 @@ void a_preinstalled_shared_service_is_kept() {
   cursiv::SharedCoreServices s;
   s.fileSystemProvider = std::make_unique<cursiv::EmptyFileSystemProvider>();
   const cursiv::FileSystemProvider* const mine = s.fileSystemProvider.get();
-  cursiv::install_default_shared_core_services(s);
+  cursiv::installDefaultSharedCoreServices(s);
   CHECK(s.firstMissingService().empty());
   CHECK(s.fileSystemProvider.get() == mine);
 }
@@ -405,10 +405,10 @@ std::unique_ptr<cursiv::CoreServices> language(
   auto s = std::make_unique<cursiv::CoreServices>(shared);
   s->languageMetaData = {std::move(id), std::move(extensions),
                          std::move(names)};
-  s->parser = ws::generated::Workspace::create_parser();
+  s->parser = ws::generated::Workspace::createParser();
   s->nameProvider = std::make_unique<cursiv::DefaultNameProvider>(*s);
-  s->astReflection = ws::generated::Workspace::create_ast_reflection();
-  cursiv::install_default_core_services(*s);
+  s->astReflection = ws::generated::Workspace::createAstReflection();
+  cursiv::installDefaultCoreServices(*s);
   return s;
 }
 
@@ -466,12 +466,12 @@ void an_incomplete_language_is_refused() {
 // already read that workspace's documents and index.
 void a_language_of_another_workspace_is_refused() {
   cursiv::SharedCoreServices other;
-  cursiv::install_default_shared_core_services(other);
+  cursiv::installDefaultSharedCoreServices(other);
   auto foreign = std::make_unique<cursiv::CoreServices>(other);
   foreign->languageMetaData = {"ws", {".ws"}, {}};
-  foreign->parser = ws::generated::Workspace::create_parser();
-  foreign->astReflection = ws::generated::Workspace::create_ast_reflection();
-  cursiv::install_default_core_services(*foreign);
+  foreign->parser = ws::generated::Workspace::createParser();
+  foreign->astReflection = ws::generated::Workspace::createAstReflection();
+  cursiv::installDefaultCoreServices(*foreign);
   cursiv::DefaultServiceRegistry registry(shared);
   bool threw = false;
   try {
@@ -605,9 +605,9 @@ void a_replaced_container_outlives_its_documents() {
     cursiv::DefaultServiceRegistry registry(shared);
     auto first = std::make_unique<TrackedServices>(destroyed);
     first->languageMetaData = {"tracked", {".ws"}, {}};
-    first->parser = ws::generated::Workspace::create_parser();
-    first->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*first);
+    first->parser = ws::generated::Workspace::createParser();
+    first->astReflection = ws::generated::Workspace::createAstReflection();
+    cursiv::installDefaultCoreServices(*first);
     registry.registerServices(std::move(first));
     registry.registerServices(language("tracked", {".ws"}));
     CHECK(!destroyed);
@@ -647,7 +647,7 @@ void a_null_registration_is_refused() {
 }  // namespace
 
 void run() {
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   an_incomplete_shared_container_is_refused();
   an_incomplete_language_is_refused();
   a_language_of_another_workspace_is_refused();
@@ -678,7 +678,7 @@ struct Container final : cursiv::CoreServices {
   std::vector<cursiv::ServiceSlot> slots;
   explicit Container(std::vector<cursiv::ServiceSlot> given)
       : cursiv::CoreServices(workspace), slots(std::move(given)) {}
-  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+  void visitServices(cursiv::FunctionRef<void(const cursiv::ServiceSlot&)>
                          yield) const override {
     for (const cursiv::ServiceSlot& s : slots) yield(s);
   }
@@ -768,7 +768,7 @@ struct Observed {
 
   explicit Observed(std::unique_ptr<cursiv::FileSystemProvider> disk = {}) {
     shared.fileSystemProvider = std::move(disk);
-    cursiv::install_default_shared_core_services(shared);
+    cursiv::installDefaultSharedCoreServices(shared);
   }
 };
 
@@ -779,7 +779,7 @@ void an_observation_is_one_line() {
       .message = "line one\nline two\r\nthree",
       .uri = "file:///w",
       .languageId = "ws"};
-  const std::string line = cursiv::format_observation(observation);
+  const std::string line = cursiv::formatObservation(observation);
   CHECK(line.find('\n') == std::string::npos);
   CHECK(line.find('\r') == std::string::npos);
   CHECK(line.find("warning WorkspaceDirectoryReadFailed:") == 0);
@@ -790,9 +790,17 @@ void an_observation_is_one_line() {
   cursiv::Observation controls;
   controls.message = std::string("a\0b\x1b[2Jc", 8);
   controls.uri = std::string("file:///\0w", 10);
-  const std::string flat = cursiv::format_observation(controls);
+  const std::string flat = cursiv::formatObservation(controls);
   CHECK(flat.find("a b [2Jc") != std::string::npos);
   CHECK(flat.ends_with("uri=file:/// w"));
+  // DEL and the C1 controls, a line break and an escape among them, are
+  // control characters too; a letter that shares their bytes is kept.
+  controls.message = "a\x7f"
+                     "b\xC2\x85"
+                     "c\xC2\x9B"
+                     "2Jd \xC3\xA9\xC4\x80";
+  CHECK(cursiv::formatObservation(controls).find(
+            "a b c 2Jd \xC3\xA9\xC4\x80") != std::string::npos);
 }
 
 // `publish` may run on any thread; the static mutex inside it is what keeps
@@ -858,9 +866,9 @@ void concurrent_publishes_never_splice_two_lines() {
     cursiv::SharedCoreServices& shared, std::string id, std::string extension) {
   auto services = std::make_unique<cursiv::CoreServices>(shared);
   services->languageMetaData = {std::move(id), {std::move(extension)}, {}};
-  services->parser = ws::generated::Workspace::create_parser();
-  services->astReflection = ws::generated::Workspace::create_ast_reflection();
-  cursiv::install_default_core_services(*services);
+  services->parser = ws::generated::Workspace::createParser();
+  services->astReflection = ws::generated::Workspace::createAstReflection();
+  cursiv::installDefaultCoreServices(*services);
   return services;
 }
 

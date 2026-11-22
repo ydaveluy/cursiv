@@ -46,7 +46,7 @@ class DefaultIndexManager : public IndexManager,
 
   [[nodiscard]] bool visitElements(
       const AstTypeTag* type, std::span<const DocumentId> documents,
-      cursiv::function_ref<bool(const AstNodeDescription&)> visitor)
+      cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor)
       const override;
 
   [[nodiscard]] const AstNodeDescription* findByName(
@@ -56,12 +56,12 @@ class DefaultIndexManager : public IndexManager,
   [[nodiscard]] bool visitByName(
       std::string_view name, bool caseSensitive, AcceptSet accepts,
       const AstReflection& reflection,
-      cursiv::function_ref<bool(const AstNodeDescription&)> visitor)
+      cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor)
       const override;
 
   [[nodiscard]] bool visitReferences(
       DocumentId targetDocument, NodeId targetSymbol,
-      cursiv::function_ref<bool(const ReferenceDescription&)> visitor)
+      cursiv::FunctionRef<bool(const ReferenceDescription&)> visitor)
       const override;
 
   ~DefaultIndexManager() noexcept override = default;
@@ -75,28 +75,21 @@ class DefaultIndexManager : public IndexManager,
       std::uint64_t hash) noexcept {
     return static_cast<std::size_t>(hash >> (64 - kShardBits));
   }
-  struct Hashed {
-    std::uint64_t hash;
-    const AstNodeDescription* element;
-  };
-
   // Published, not locked: a visitor may reach back into the index. Apart from
   // `Incoming`, so a reference write does not drop the exports the linker
   // reads.
   struct Exported {
     std::string uri;
     std::vector<AstNodeDescription> elements;
-    // The same elements, folded-hashed and grouped by shard on the indexing
-    // worker, each group in export order: building a shard hashes nothing.
-    std::vector<Hashed> byShard;
+    // Hashes follow export order; each shard lists indices in that order.
+    std::vector<std::uint64_t> hashes;
+    std::vector<std::uint32_t> byShard;
     std::array<std::uint32_t, kShards + 1> shardBegin{};
   };
+  using ExportRows = std::vector<std::shared_ptr<const Exported>>;
   struct Exports {
-    // Owning: a write replaces a row's holder, and a reader still walking this
-    // snapshot keeps the row it is on.
-    std::vector<std::pair<DocumentId, std::shared_ptr<const Exported>>> rows;
-    // Where each document's row is, for a walk over a few documents.
-    std::unordered_map<DocumentId, std::uint32_t> rowAt;
+    // A reader keeps its rows when another write replaces them.
+    ExportRows rows;
     // Built from the rows so a lookup does not scan every export. Keyed by the
     // folded name's hash: a run may hold a colliding name, which a reader
     // filters.
@@ -206,6 +199,8 @@ class DefaultIndexManager : public IndexManager,
   void affectImporters(const Exported& exports);
   // Each takes `_mutex` only when nothing is published. The handle keeps the
   // snapshot alive for the whole read, as the answers point into it.
+  // Selected rows in normalized URI order, with the index locked.
+  [[nodiscard]] ExportRows exportRows(std::span<const DocumentId> documents) const;
   [[nodiscard]] detail::Published<Exports>::Read exportsView() const;
   [[nodiscard]] IncomingView incomingView() const;
 };

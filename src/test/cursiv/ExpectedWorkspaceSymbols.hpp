@@ -5,6 +5,7 @@
 #include <lsp/types.h>
 
 #include <functional>
+#include <map>
 #include <span>
 #include <string>
 #include <variant>
@@ -16,11 +17,15 @@ struct SharedLspServices;
 
 namespace cursiv::test {
 
+enum class SymbolMatch { Ordered, ExactSet, Contains };
+
 struct ExpectedWorkspaceSymbolsList {
   std::string query{};
   std::vector<std::string> expectedSymbols{};
   // Empty prints a symbol's `name`.
   std::function<std::string(const lsp::WorkspaceSymbol&)> symbolToString{};
+  SymbolMatch match = SymbolMatch::Ordered;
+  std::map<std::string, lsp::SymbolKind, std::less<>> kinds{};
 };
 
 struct ExpectedWorkspaceSymbolsCallback {

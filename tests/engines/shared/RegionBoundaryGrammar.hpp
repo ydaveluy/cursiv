@@ -9,6 +9,12 @@ struct Document : cursiv::Extends<cursiv::AstNode> {
   Document* in{};
 };
 
+struct Words : cursiv::GrammarSpec {
+  static constexpr auto word_boundary = cr<"a-z$">;
+  struct Root : rule<create<Document>(kw<"foo"> + (lit<"$"> | lit<"_">))> {};
+  using entry = Root;
+};
+
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct NOTE : terminal<lit<"~">> {};
@@ -52,6 +58,22 @@ struct Base : cursiv::GrammarSpec {
       lit<"]"> + lit<".">> {};
   struct CalledEntry : rule<
       lit<"called-entry:"> + tight(ref<OptionalRun>) + lit<"]"> + lit<".">> {};
+  // A rule before what the region's tail may leave out ends the region on its
+  // last token when that part is absent.
+  struct CalledTail : rule<
+      lit<"called-tail:"> + tight(lit<"["> + ref<Run> + option(lit<"!">)) +
+      lit<"]"> + lit<".">> {};
+  struct CalledMany : rule<
+      lit<"called-many:"> + tight(lit<"["> + ref<Run> + many(lit<"!">)) +
+      lit<"]"> + lit<".">> {};
+  struct CalledUnordered : rule<
+      lit<"called-unordered:"> +
+      tight(lit<"["> + unordered(ref<Run>, option(lit<"!">))) + lit<"]"> +
+      lit<".">> {};
+  struct OptionalBang : rule<option(lit<"!">)> {};
+  struct CalledNullable : rule<
+      lit<"called-nullable:"> + tight(lit<"["> + ref<Run> + ref<OptionalBang>) +
+      lit<"]"> + lit<".">> {};
   // An unchanged trivia configuration introduces no region boundary, even
   // when its last item is optional.
   struct Same : rule<create<Document>(
@@ -80,7 +102,7 @@ struct Base : cursiv::GrammarSpec {
   // caller's, as before any other first token of a region.
   struct NestHead : rule<
       lit<"nest-head:"> + create<Document>(item) +
-      tight(nest<&Document::in>(lit<"."> + item)) + lit<";">> {};
+      tight(nest<&Document::in>(lit<"."> + item) | nest<&Document::in>(lit<":"> + item)) + lit<";">> {};
   // A commit's loop that ends a region: the gap after its last iteration is the
   // caller's, as after a plain loop.
   struct CommitTail : rule<create<Document>(
@@ -101,6 +123,9 @@ struct Base : cursiv::GrammarSpec {
   struct SkipRecord : rule<create<Document>(
       lit<"skip-rec:"> + assign<&Document::in>(ref<SkipInner>) +
       many(lit<"~">) + option(item) + lit<".">)> {};
+  struct SkipNested : rule<create<Document>(
+      lit<"skip-nested:"> + &(!lit<"y"> + (lit<"x"> | lit<"y">)) +
+      many(lit<"~">) + (item | lit<"y">) + lit<".">)> {};
   struct SkipNot : rule<create<Document>(
       lit<"skip-not:"> + !lit<"x"> + many(lit<"~">) + option(item) +
       lit<".">)> {};
@@ -118,13 +143,25 @@ struct Base : cursiv::GrammarSpec {
                        skip(ignore<BLANKS>, hide<>,
                             lit<"<"> + &(ref<LINES> + lit<"?">)+ref<LINES> +
                                 lit<"?">))))> {};
+  struct P1 : terminal<lit<"p">> {};
+  struct P2 : terminal<lit<"p">> {};
+  struct A : terminal<lit<"a">> {};
+  struct Space : terminal<lit<" ">> {};
+  static constexpr auto gate = &(gap::is(lit<" ">) + lit<"b">);
+  struct GapCache : rule<create<Document>(
+      (skip(ignore<A>, hide<>, ref<P1> + ref<Space>) + gate + lit<"b">) |
+      (ref<P2> + ref<A> + gate + append<&Document::items>(lit<"b">)))> {};
   struct Root
-      : rule<ref<Required> | ref<Nonempty> | ref<AtLeastTwo> | ref<Optional> |
+      : rule<(lit<"gap-cache:"> + ref<GapCache>) |
+             (lit<"section:"> + section<Words>(lit<"[">, lit<"]">)) |
+             create<Document>(lit<"host:"> + kw<"foo"> + (lit<"$"> | lit<"_">)) |
+             ref<Required> | ref<Nonempty> | ref<AtLeastTwo> | ref<Optional> |
              ref<Fixed> | ref<ClosingInside> | ref<Called> |
-             ref<CalledOptional> | ref<CalledEntry> | ref<Same> |
-             ref<SameHead> | ref<PatternHead> | ref<ShortItem> | ref<LongItem> |
-             ref<NestHead> | ref<CommitTail> | ref<CommitNote> | ref<SkipHas> |
-             ref<SkipNot> | ref<SkipRecord> | ref<Lines>> {};
+             ref<CalledOptional> | ref<CalledEntry> | ref<CalledTail> |
+             ref<CalledMany> | ref<CalledUnordered> | ref<CalledNullable> |
+             ref<Same> | ref<SameHead> | ref<PatternHead> | ref<ShortItem> |
+             ref<LongItem> | ref<NestHead> | ref<CommitTail> | ref<CommitNote> |
+             ref<SkipHas> | ref<SkipNot> | ref<SkipNested> | ref<SkipRecord> | ref<Lines>> {};
   using entry = Root;
   using ignored = WS;
   using hidden = NOTE;
@@ -177,12 +214,9 @@ struct Base : cursiv::GrammarSpec {
 }  // namespace tregionconsumption
 
 namespace tregionboundary {
-// Both boundary suites share one generated language per backend. Prefixes
-// select their entries; each suite keeps its own AST types and assertions.
+// Prefixes select the two boundary suites in the same generated language.
 struct Suite : Base {
   struct Root : rule<ref<Base::Root> | ref<tregionconsumption::Base::Root>> {};
   using entry = Root;
 };
-struct Lr : Suite {};
-struct Ll : Suite {};
 }  // namespace tregionboundary

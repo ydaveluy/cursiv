@@ -743,7 +743,7 @@ void what_does_not_resolve_is_said() {
   // The machine's half: the code names the failure class, `data` carries the
   // written text so a quick fix needs no English parsed back out.
   CHECK(!d.code.has_value());
-  CHECK(cursiv::data_code(d) == cursiv::kLinkingError);
+  CHECK(cursiv::dataCode(d) == cursiv::kLinkingError);
   CHECK(d.data.has_value() && d.data->isObject());
   if (d.data.has_value() && d.data->isObject()) {
     const auto at = d.data->object().find(cursiv::kLinkingRefText);
@@ -901,6 +901,69 @@ void a_reset_forgets_an_interrupted_request() {
   world.shared.documentBuilder->update(changed, {});
   CHECK(a->state.load() == cursiv::DocumentState::Validated);
   CHECK(!a->diagnostics.empty());
+}
+
+// A listener's reset keeps the build's request on the build's own documents:
+// `b`, asked for no validating, is not validated. `c`, sent down from outside
+// the build, is rebuilt with what an update asks.
+void a_document_sent_down_by_a_listener_keeps_the_builds_request() {
+  const World world;
+  cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
+  cursiv::Document* const c =
+      world.built("file:///c.ws", "entity F { f : Gone }\n");
+  cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
+  cursiv::Document* const b =
+      world.add("file:///b.ws", "entity E { f : Missing }\n");
+  struct SendingDown final : cursiv::DocumentUpdateListener {
+    cursiv::DocumentBuilder* builder = nullptr;
+    std::vector<cursiv::Document*> sent;
+    void onUpdate(std::span<const std::string_view>,
+                  std::span<const std::string_view>) override {
+      for (cursiv::Document* const d : sent)
+        builder->resetToState(*d, cursiv::DocumentState::IndexedReferences);
+    }
+  } sendingDown;
+  sendingDown.builder = &builder;
+  sendingDown.sent = {b, c};
+  builder.addDocumentUpdateListener(sendingDown);
+  cursiv::Document* const both[] = {a, b};
+  builder.build(both, cursiv::BuildOptions{false, {}});
+  builder.removeDocumentUpdateListener(sendingDown);
+  CHECK(b->state.load() == cursiv::DocumentState::IndexedReferences);
+  CHECK(b->diagnostics.empty());
+  CHECK(c->state.load() == cursiv::DocumentState::Validated);
+  CHECK(!c->diagnostics.empty());
+}
+
+void an_update_lists_the_post_notification_workspace_once() {
+  World world;
+  struct Store final : cursiv::DefaultDocuments, cursiv::DocumentUpdateListener {
+    using DefaultDocuments::DefaultDocuments;
+    mutable unsigned listings = 0;
+    std::vector<std::shared_ptr<cursiv::Document>> all() const override {
+      ++listings;
+      return DefaultDocuments::all();
+    }
+    void onUpdate(std::span<const std::string_view>,
+                  std::span<const std::string_view>) override {
+      createDocument("file:///listener.ws", "datatype Added");
+      listings = 0;
+    }
+  };
+  auto store = std::make_unique<Store>(world.shared);
+  auto& listener = *store;
+  world.shared.documents = std::move(store);
+  auto& builder = *world.shared.documentBuilder;
+  auto* pending = world.add("file:///pending.ws", "datatype Pending");
+  builder.build({});
+  CHECK(pending->state == cursiv::DocumentState::Parsed);
+  builder.addDocumentUpdateListener(listener);
+  builder.update({}, {});
+  builder.removeDocumentUpdateListener(listener);
+  CHECK(listener.listings == 1);
+  CHECK(pending->state == cursiv::DocumentState::Validated);
+  const auto added = listener.getDocument("file:///listener.ws");
+  CHECK(added && added->state == cursiv::DocumentState::Validated);
 }
 
 // A request cut after its last state is finished by the next update, however
@@ -1594,6 +1657,29 @@ void a_new_file_and_a_recreated_file_are_parsed_once() {
   CHECK(recreated->state.load() == cursiv::DocumentState::Validated);
 }
 
+// A wait on a document follows its id: one deleted and made again by the same
+// update is awaited in its new form.
+void a_wait_follows_a_document_made_again() {
+  using namespace std::chrono_literals;
+  World world;
+  world.shared.fileSystemProvider = std::make_unique<FakeFiles>();
+  const cursiv::DocumentId id =
+      world.add(std::string(FakeFiles::kA), "datatype A\n")->id;
+  cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
+  cursiv::CancellationTokenSource stop;
+  auto waiter = std::async(std::launch::async, [&] {
+    return builder.waitUntil(cursiv::DocumentState::Linked, id,
+                             stop.get_token());
+  });
+  CHECK(waiter.wait_for(20ms) == std::future_status::timeout);
+  const std::string_view again[] = {FakeFiles::kA};
+  builder.update(again, again);
+  const bool answered = waiter.wait_for(2s) == std::future_status::ready;
+  CHECK(answered);
+  if (!answered) stop.request_stop();
+  CHECK(waiter.get() == cursiv::WaitOutcome::Reached);
+}
+
 // A changed folder is every document under it. A checkout, a bulk copy, or a
 // watcher that coalesced its events reports the directory -- and without the
 // expansion nothing under it would be rebuilt.
@@ -2073,6 +2159,46 @@ void a_build_cut_after_linking_relinks_next_time() {
   CHECK(!a->diagnostics.empty());
 }
 
+void a_reference_index_failure_keeps_the_completed_link() {
+  using enum cursiv::DocumentState;
+  struct Provider final : cursiv::DefaultReferenceDescriptionProvider {
+    using DefaultReferenceDescriptionProvider::
+        DefaultReferenceDescriptionProvider;
+    mutable std::atomic<bool> refuse{true};
+    std::vector<cursiv::ReferenceDescription> createDescriptions(
+        const cursiv::Document& document,
+        const cursiv::CancellationToken& token) const override {
+      if (document.textDocument().getText().starts_with("entity Bug") &&
+          refuse.exchange(false))
+        throw 1;
+      return DefaultReferenceDescriptionProvider::createDescriptions(document,
+                                                                     token);
+    }
+  };
+  World world([](cursiv::CoreServices& language) {
+    language.referenceDescriptionProvider =
+        std::make_unique<Provider>(language);
+  });
+  const auto docs = world.built({{"file:///target.ws", "datatype T"},
+                                 {"file:///use.ws", "entity Bug { f : T }"}});
+  auto& use = *docs[1];
+  auto& builder = *world.shared.documentBuilder;
+  CHECK(docs[0]->state == Validated && use.state == Linked);
+  CHECK(referenced_type(use) != nullptr);
+  CHECK(builder.waitUntil(IndexedReferences, use.id) ==
+        cursiv::WaitOutcome::BuildFailed);
+  CHECK(builder.waitUntil(Validated) == cursiv::WaitOutcome::Reached);
+  CHECK(use.diagnostics.size() == 1 &&
+        use.diagnostics[0].message ==
+            "Collecting references failed: unknown exception");
+
+  builder.update({}, {});
+  CHECK(use.buildFailed);
+  builder.build({&docs[1], 1});
+  CHECK(use.state == Validated && use.diagnostics.empty());
+  CHECK(world.shared.indexManager->isAffected(use, {docs[0]->id}));
+}
+
 void a_reset_to_computed_scopes_keeps_lazy_resolution() {
   World world;
   auto& builder = *world.shared.documentBuilder;
@@ -2517,7 +2643,7 @@ struct PlainScopes final : cursiv::DefaultScopeComputation {
       const cursiv::CancellationToken&) const override {
     cursiv::LocalSymbols symbols;
     for (cursiv::AstNode* const node : document.parseResult.nodes())
-      if (node->parent != nullptr && cursiv::is_named(*node))
+      if (node->parent != nullptr && cursiv::isNamed(*node))
         if (const auto described =
                 services.astNodeDescriptionProvider->createDescription(
                     *node, {}, &document))
@@ -2751,8 +2877,8 @@ void an_update_builds_with_the_update_options() {
   cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
   CHECK(builder.updateBuildOptions().validation);
   CHECK((builder.updateBuildOptions().validationCategories ==
-         std::vector<const cursiv::ValidationCategory*>{&cursiv::built_in,
-                                                        &cursiv::fast}));
+         std::vector<const cursiv::ValidationCategory*>{&cursiv::kBuiltIn,
+                                                        &cursiv::kFast}));
   cursiv::Document* const a =
       world.add("file:///a.ws", "entity E { f : Missing }\n");
   const std::string_view changed[] = {"file:///a.ws"};
@@ -2774,7 +2900,7 @@ void an_update_runs_a_category_added_to_its_options() {
           accept.accept(cursiv::TextRange{0, 0},
                         cursiv::DiagnosticSeverity::Warning, "slow check ran");
         },
-        &cursiv::slow);
+        &cursiv::kSlow);
   });
   cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
   const cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
@@ -2782,7 +2908,7 @@ void an_update_runs_a_category_added_to_its_options() {
   builder.update(changed, {});
   CHECK(a->state.load() == cursiv::DocumentState::Validated);
   CHECK(a->diagnostics.empty());
-  builder.updateBuildOptions().validationCategories.push_back(&cursiv::slow);
+  builder.updateBuildOptions().validationCategories.push_back(&cursiv::kSlow);
   builder.update({}, {});
   CHECK(a->diagnostics.size() == 1);
 }
@@ -2797,7 +2923,7 @@ void a_build_runs_a_category_a_cut_build_did_not_ask() {
           accept.accept(cursiv::TextRange{0, 0},
                         cursiv::DiagnosticSeverity::Warning, "slow check ran");
         },
-        &cursiv::slow);
+        &cursiv::kSlow);
   });
   // One thread, so `a` is validated before `b`, and the cut falls between.
   world.shared.taskScheduler = std::make_unique<cursiv::TaskScheduler>(0);
@@ -2831,7 +2957,7 @@ void a_build_runs_a_category_a_cut_build_did_not_ask() {
   CHECK(a->diagnostics.empty());
 
   cursiv::BuildOptions wider = builder.updateBuildOptions();
-  wider.validationCategories.push_back(&cursiv::slow);
+  wider.validationCategories.push_back(&cursiv::kSlow);
   cursiv::Document* const one[] = {a};
   builder.build(one, wider);
   CHECK(a->diagnostics.size() == 1);
@@ -3074,6 +3200,7 @@ void run() {
   a_reference_read_while_scoping_is_read_again();
   factory_then_build_parses_once();
   a_new_file_and_a_recreated_file_are_parsed_once();
+  a_wait_follows_a_document_made_again();
   a_build_runs_every_phase();
   the_states_are_reported_in_order();
   what_does_not_resolve_is_said();
@@ -3083,7 +3210,9 @@ void run() {
   a_document_made_again_is_validated_again();
   a_relinked_document_takes_the_updates_request();
   a_reset_forgets_an_interrupted_request();
+  a_document_sent_down_by_a_listener_keeps_the_builds_request();
   an_update_finishes_an_interrupted_request();
+  an_update_lists_the_post_notification_workspace_once();
   a_new_file_waits_unparsed_for_the_parse_phase();
   a_new_text_leaves_no_row_of_the_old_tree();
   a_new_file_is_read_once();
@@ -3108,6 +3237,7 @@ void run() {
   a_request_reads_beside_a_running_build();
   a_request_reads_the_index_beside_a_running_build();
   a_build_cut_after_linking_relinks_next_time();
+  a_reference_index_failure_keeps_the_completed_link();
   a_cut_update_leaves_no_half_reset();
   a_cut_update_takes_the_workspace_state_down();
   a_state_reached_once_is_reported_once();
@@ -3153,7 +3283,7 @@ struct World : support::CoreWorkspace {
   }
 };
 
-bool throws(cursiv::function_ref<void()> f) {
+bool throws(cursiv::FunctionRef<void()> f) {
   try {
     f();
   } catch (...) {
@@ -3224,7 +3354,7 @@ void a_uri_is_read_from_the_disk_it_names() {
     std::ofstream out(dir / "a.ws", std::ios::binary);
     out << kSource;
   }
-  const std::string uri = cursiv::path_to_file_uri((dir / "a.ws").string());
+  const std::string uri = cursiv::pathToFileUri((dir / "a.ws").string());
 
   World world(true);
   const auto d = world.factory.fromUri(uri);
@@ -3235,7 +3365,7 @@ void a_uri_is_read_from_the_disk_it_names() {
   // Nothing readable behind it is not a document.
   CHECK(throws([&] {
     (void)world.factory.fromUri(
-        cursiv::path_to_file_uri((dir / "gone.ws").string()));
+        cursiv::pathToFileUri((dir / "gone.ws").string()));
   }));
   std::filesystem::remove_all(dir);
 }
@@ -3257,7 +3387,7 @@ void an_update_reads_the_disk_again() {
     std::ofstream out(dir / "a.ws", std::ios::binary);
     out << kSource;
   }
-  const std::string uri = cursiv::path_to_file_uri((dir / "a.ws").string());
+  const std::string uri = cursiv::pathToFileUri((dir / "a.ws").string());
   World world(true);
   const auto d = world.factory.fromUri(uri);
   const std::string edited = "datatype Other\n";
@@ -3341,15 +3471,22 @@ void a_text_document_becomes_a_parsed_document() {
   CHECK(waiting->parseResult.accepted && waiting->hasAst());
 }
 
-// Unlike `fromString`, `fromTextDocument` does not renormalize the
-// `TextDocument` it is handed: `d->uri` is canonical, its own text document's
-// is not.
-void from_text_document_keeps_the_callers_uri_spelling() {
+void from_text_document_preserves_the_buffer_and_client_metadata() {
   World world(false);
-  const auto d = world.factory.fromTextDocument(cursiv::TextDocument::create(
-      "FILE:/w/a%2Ews", "workspace", 0, kSource));
-  CHECK(d->uri == "file:///w/a.ws");
-  CHECK(d->textDocument().uri() == "FILE:/w/a%2Ews");
+  std::string source = kSource;
+  source.resize(64 * 1024, ' ');
+  for (const std::string_view id : {"", "editor-ws"}) {
+    auto input = cursiv::TextDocument::create("FILE:/w/a%2Ews", std::string(id),
+                                              7, source);
+    const auto buffer = reinterpret_cast<std::uintptr_t>(input.getText().data());
+    const auto d = world.factory.fromTextDocument(std::move(input));
+    const auto& text = d->textDocument();
+    CHECK(reinterpret_cast<std::uintptr_t>(text.getText().data()) == buffer);
+    CHECK(text.getText() == source);
+    CHECK(text.languageId() == (id.empty() ? "workspace" : id));
+    CHECK(text.version() == 7 && text.uri() == "FILE:/w/a%2Ews");
+    CHECK(d->uri == "file:///w/a.ws" && d->language == world.ws);
+  }
 }
 
 // The LSP layer, which holds the client's newest text, installs it here: same
@@ -3407,7 +3544,7 @@ void run() {
   an_update_reads_the_disk_again();
   a_cancelled_token_makes_no_document();
   a_text_document_becomes_a_parsed_document();
-  from_text_document_keeps_the_callers_uri_spelling();
+  from_text_document_preserves_the_buffer_and_client_metadata();
   an_attached_text_takes_the_document_back_down();
   an_edit_moves_the_text_in_place();
 }
@@ -3504,7 +3641,7 @@ namespace {
 cursiv::SharedCoreServices& completeShared() {
   static cursiv::SharedCoreServices shared;
   static const bool installed = [] {
-    cursiv::install_default_shared_core_services(shared);
+    cursiv::installDefaultSharedCoreServices(shared);
     return true;
   }();
   (void)installed;
@@ -3562,13 +3699,13 @@ void one_file_is_one_id_however_it_is_spelled() {
 }
 
 // A scheme has no case, whatever it names: the store's gates and
-// `contains_uri` agree that both spellings are one document.
+// `containsUri` agree that both spellings are one document.
 void one_scheme_is_one_id_whatever_its_case() {
   cursiv::DefaultDocuments store{completeShared()};
   const auto d = document("MEM:///w/a.t");
   store.addDocument(d);
 
-  CHECK(cursiv::contains_uri("mem:///w", d->uri));
+  CHECK(cursiv::containsUri("mem:///w", d->uri));
   CHECK(store.getDocument("mem:///w/a.t") == d);
   CHECK(store.getDocuments("mem:///w").size() == 1);
   CHECK(store.getDocuments("MEM:///w").size() == 1);
@@ -3662,7 +3799,7 @@ void get_or_create_reads_the_disk_when_nothing_is_held() {
   auto memory = std::make_unique<cursiv::MemoryFileSystemProvider>();
   memory->addFile("file:///w/a.ws", "datatype A\n");
   world.fileSystemProvider = std::move(memory);
-  cursiv::install_default_shared_core_services(world);
+  cursiv::installDefaultSharedCoreServices(world);
   (void)support::add_workspace<cursiv::CoreServices>(world);
 
   const auto created = world.documents->getOrCreateDocument("file:///w/a.ws");
@@ -3695,6 +3832,38 @@ void a_folder_answers_and_deletes_as_one() {
   CHECK(store.getDocument("file:///w/b/z.t") != nullptr);
 }
 
+// A listing and a folder query cost the documents held, not every URI ever
+// named; `all` lists them in the order their ids were made.
+void a_listing_walks_the_held_documents_only() {
+  cursiv::DefaultDocuments store{completeShared()};
+  const auto first = document("file:///w/first.t");
+  store.addDocument(first);
+  for (int i = 0; i < 40'000; ++i) {
+    const std::string uri = "file:///w/gone/" + std::to_string(i) + ".t";
+    store.addDocument(document(uri));
+    CHECK(store.deleteDocument(uri) != nullptr);
+  }
+  (void)store.getOrCreateDocumentId("file:///w/gone/named.t");
+  const auto last = document("file:///w/last.t");
+  store.addDocument(last);
+  const auto back = document("file:///w/gone/7.t");
+  store.addDocument(back);
+  // A document at the folder's own URI leaves alone what is under it.
+  store.addDocument(document("file:///w/gone"));
+  CHECK(store.deleteDocument("file:///w/gone") != nullptr);
+
+  const auto start = std::chrono::steady_clock::now();
+  for (int i = 0; i < 5'000; ++i) {
+    CHECK(store.all() == std::vector{first, back, last});
+    CHECK(store.getDocuments("file:///w/gone") == std::vector{back});
+  }
+  CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(1));
+
+  CHECK(store.deleteDocuments("file:///w/gone") == std::vector{back});
+  CHECK(store.all() == std::vector{first, last});
+  CHECK(store.getDocumentUri(back->id) == "file:///w/gone/7.t");
+}
+
 }  // namespace
 
 void run() {
@@ -3710,6 +3879,7 @@ void run() {
   one_uri_is_added_once();
   get_or_create_reads_the_disk_when_nothing_is_held();
   a_folder_answers_and_deletes_as_one();
+  a_listing_walks_the_held_documents_only();
 }
 
 }  // namespace documents
@@ -3765,12 +3935,17 @@ void what_is_on_disk_reads_back() {
 
   const cursiv::LocalFileSystemProvider fs;
   const std::string fileUri =
-      cursiv::path_to_file_uri((dir / "a.txt").string());
-  const std::string dirUri = cursiv::path_to_file_uri(dir.string());
+      cursiv::pathToFileUri((dir / "a.txt").string());
+  const std::string dirUri = cursiv::pathToFileUri(dir.string());
 
   CHECK(fs.exists(fileUri));
   CHECK(fs.readFile(fileUri) == "hello");
   CHECK(fs.readBinary(fileUri).size() == 5);
+  const cursiv::LocalFileSystemProvider limited(4);
+  CHECK(support::throws<cursiv::FileSystemError>(
+      [&] { (void)limited.readFile(fileUri); }));
+  CHECK(limited.readBinary(fileUri).size() == 5);
+  CHECK(cursiv::LocalFileSystemProvider(5).readFile(fileUri) == "hello");
 
   const cursiv::FileSystemNode node = fs.stat(fileUri);
   CHECK(node.isFile);
@@ -3780,9 +3955,9 @@ void what_is_on_disk_reads_back() {
   CHECK(fs.stat(dirUri).isDirectory);
 
   // Absent is false, not an error.
-  CHECK(!fs.exists(cursiv::path_to_file_uri((dir / "nope.txt").string())));
+  CHECK(!fs.exists(cursiv::pathToFileUri((dir / "nope.txt").string())));
   CHECK(support::throws<cursiv::FileSystemError>([&] {
-    (void)fs.readFile(cursiv::path_to_file_uri((dir / "nope.txt").string()));
+    (void)fs.readFile(cursiv::pathToFileUri((dir / "nope.txt").string()));
   }));
   // A folder is not readable as a file, and says so as this interface does.
   CHECK(support::throws<cursiv::FileSystemError>([&] {
@@ -3806,7 +3981,7 @@ void what_is_on_disk_reads_back() {
   std::filesystem::create_directory_symlink(dir, dir / "sub" / "loop", symlinkError);
   if (!symlinkError) {
     const auto linked = fs.readDirectory(
-        cursiv::path_to_file_uri((dir / "sub").string()));
+        cursiv::pathToFileUri((dir / "sub").string()));
     CHECK(linked.size() == 1);
     CHECK(!linked.front().isDirectory && !linked.front().isFile);
     const cursiv::FileSystemNode loop = fs.stat(linked.front().uri);
@@ -3816,7 +3991,7 @@ void what_is_on_disk_reads_back() {
                                   symlinkError);
   if (!symlinkError) {
     const cursiv::FileSystemNode link =
-        fs.stat(cursiv::path_to_file_uri((dir / "sub" / "b.ws").string()));
+        fs.stat(cursiv::pathToFileUri((dir / "sub" / "b.ws").string()));
     CHECK(!link.isDirectory && !link.isFile);
   }
 
@@ -3832,8 +4007,8 @@ void an_escaped_nul_names_no_file() {
   std::filesystem::create_directories(dir);
   { std::ofstream(dir / "secret") << "not a .ws file"; }
   const std::string uri =
-      cursiv::path_to_file_uri((dir / "secret").string()) + "%00.ws";
-  CHECK(!cursiv::file_uri_to_path(uri).has_value());
+      cursiv::pathToFileUri((dir / "secret").string()) + "%00.ws";
+  CHECK(!cursiv::fileUriToPath(uri).has_value());
   const cursiv::LocalFileSystemProvider fs;
   CHECK(support::throws<cursiv::FileSystemError>([&] { (void)fs.readFile(uri); }));
   std::filesystem::remove_all(dir);
@@ -3847,6 +4022,10 @@ void size_is_a_hint_and_read_errors_are_reported() {
   if (std::filesystem::exists("/proc/self/status")) {
     CHECK(std::filesystem::file_size("/proc/self/status") == 0);
     CHECK(fs.readFile("file:///proc/self/status").starts_with("Name:"));
+    CHECK(support::throws<cursiv::FileSystemError>([] {
+      (void)cursiv::LocalFileSystemProvider(16).readFile(
+          "file:///proc/self/status");
+    }));
     CHECK(!fs.readBinary("file:///proc/self/status").empty());
   }
   // Reading the unmapped zero page fails with EIO, after open succeeds.
@@ -3927,12 +4106,12 @@ void a_type_filter_includes_derived_types() {
   const World world;
   const auto document = world.built(
       "file:///a.ws", "datatype String\nentity Person { age : String }\n");
-  const auto types = world.exported(&cursiv::ast_type_tag<ws::ast::Type>);
+  const auto types = world.exported(&cursiv::kAstTypeTag<ws::ast::Type>);
   CHECK(types.size() == 2);
   CHECK(has(types, "String") && has(types, "Person"));
-  const auto datatypes = world.exported(&cursiv::ast_type_tag<ws::ast::DataType>);
+  const auto datatypes = world.exported(&cursiv::kAstTypeTag<ws::ast::DataType>);
   CHECK(datatypes.size() == 1 && has(datatypes, "String"));
-  CHECK(world.exported(&cursiv::ast_type_tag<ws::ast::Feature>).empty());
+  CHECK(world.exported(&cursiv::kAstTypeTag<ws::ast::Feature>).empty());
 }
 
 void homonyms_follow_normalized_uri_order() {
@@ -4145,7 +4324,7 @@ void a_symbol_knows_what_points_at_it() {
   // The `String` datatype is what `age : String` names.
   const cursiv::AstNode* const target =
       document->parseResult.references->handles.front().owner;
-  CHECK(&cursiv::root_of(*target) == document->parseResult.value);
+  CHECK(&cursiv::rootOf(*target) == document->parseResult.value);
 
   const cursiv::AstNodeDescription* string = nullptr;
   (void)world.shared.indexManager->visitElements(
@@ -4365,8 +4544,8 @@ void two_languages_share_the_index() {
   // keeps the default.
   cursiv::CoreServices* const ci = &support::add_language<cursiv::CoreServices>(
       world.shared, {"workspace-ci", {".wsci"}, {}},
-      ws::generated::Workspace::create_parser(),
-      ws::generated::Workspace::create_ast_reflection(),
+      ws::generated::Workspace::createParser(),
+      ws::generated::Workspace::createAstReflection(),
       [](cursiv::CoreServices& language) {
         language.scopeProvider =
             std::make_unique<ws::WorkspaceScopeProvider>(language);
@@ -4393,8 +4572,8 @@ void insensitive_names_fold_every_letter() {
   World world;
   cursiv::CoreServices* const ci = &support::add_language<cursiv::CoreServices>(
       world.shared, {"workspace-ci", {".wsci"}, {}},
-      ws::generated::Workspace::create_parser(),
-      ws::generated::Workspace::create_ast_reflection(),
+      ws::generated::Workspace::createParser(),
+      ws::generated::Workspace::createAstReflection(),
       [](cursiv::CoreServices& language) {
         language.scopeProvider =
             std::make_unique<ws::WorkspaceScopeProvider>(language);
@@ -4712,21 +4891,30 @@ void grouping_keeps_each_containers_declarations_and_homonyms() {
   }
 }
 
-// `find` answers the folded class whole: two spellings of one name share a
-// chain, in declaration order, and an exact reader filters for itself.
+// The names have the same folded hash on little-endian targets. The saved
+// matches must keep their spelling after the caller changes the query.
 void find_folds_the_case_and_keeps_the_order() {
   cursiv::LocalSymbols symbols;
-  const auto* const container = reinterpret_cast<const cursiv::AstNode*>(0x10);
-  symbols.add(container, named("Foo", cursiv::NodeId{1}));
-  symbols.add(container, named("fOO", cursiv::NodeId{2}));
-  symbols.add(container, named("Bar", cursiv::NodeId{3}));
+  const cursiv::AstNode container;
+  symbols.add(&container, named("localkeypbddwrda", 1));
+  symbols.add(&container, named("iuz4pm7718_8_9yo", 2));
+  symbols.add(&container, named("LOCALKEYPBDDWRDA", 3));
+  symbols.add(&container, named("iuz4pm7718_8_9yo", 4));
   symbols.buildIndex();
 
-  const auto folded = by_name(symbols, container, "foo");
-  CHECK(folded.size() == 2);
-  CHECK(folded[0]->name == "Foo");
-  CHECK(folded[1]->name == "fOO");
-  CHECK(by_name(symbols, container, "BAR").size() == 1);
+  std::string query = "Localkeypbddwrda";
+  const auto matches =
+      symbols.find(&container, query, cursiv::LocalSymbols::hashName(query));
+  query[0] = 'x';
+  std::vector<cursiv::NodeId> ids;
+  matches.forEach([&](const auto& entry) {
+    ids.push_back(entry.symbolId);
+    return true;
+  });
+  CHECK((ids == std::vector<cursiv::NodeId>{1, 3}));
+  const auto other = by_name(symbols, &container, "IUZ4PM7718_8_9YO");
+  CHECK(other.size() == 2 && other.front()->symbolId == 2 &&
+        other.back()->symbolId == 4);
 }
 
 // A callback may change the caller's view: the value-taking lookup keeps
@@ -4836,7 +5024,7 @@ void a_deep_walk_reaches_the_holders_in_order() {
       nested_packages(world, 300, "", -1, "", "entity E { f : E }\n");
   const cursiv::AstNode* feature = nullptr;
   for (const cursiv::AstNode* node : document->parseResult.nodes())
-    if (node->type == &cursiv::ast_type_tag<ws::ast::Feature>) feature = node;
+    if (node->type == &cursiv::kAstTypeTag<ws::ast::Feature>) feature = node;
   CHECK(feature != nullptr);
   if (feature == nullptr) return;
   // The feature, its entity, the 300 packages, the root.
@@ -5374,6 +5562,30 @@ void a_far_column_costs_a_block_of_its_line() {
   CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(1));
 }
 
+// A column near the start of a long line that is not ASCII, or past its end,
+// costs no count of the line, even after an edit elsewhere drops what was
+// counted on it.
+void a_line_end_costs_no_count_of_its_line() {
+  constexpr cursiv::TextOffset kUnits = 1U << 22;
+  std::string text;
+  text.reserve(2 * kUnits + 2);
+  for (cursiv::TextOffset i = 0; i < kUnits; ++i) text += "\xC3\xA9";
+  text += "\nz";
+  cursiv::TextDocument d = doc(std::move(text));
+  const auto start = std::chrono::steady_clock::now();
+  for (std::uint32_t k = 0; k < 2000; ++k) {
+    const cursiv::TextDocumentContentChangeEvent change{
+        cursiv::Range{{1, k + 1}, {1, k + 1}}, "z"};
+    cursiv::TextDocument::update(d, std::span(&change, 1), k + 2);
+    CHECK(d.offsetAt({0, 0}) == 0);
+    CHECK(d.offsetAt({0, 1000}) == 2000);
+    CHECK(d.offsetAt({0, ~0U}) == 2 * kUnits);
+  }
+  CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(1));
+  CHECK(d.offsetAt({0, kUnits - 1}) == 2 * kUnits - 2);
+  CHECK(d.offsetAt({0, kUnits}) == 2 * kUnits);
+}
+
 }  // namespace
 
 // Both conversions count eight bytes at a time where the word ends on a
@@ -5386,7 +5598,7 @@ void the_word_count_answers_what_a_byte_walk_answers() {
                         std::size_t to) {
     std::uint32_t n = 0;
     for (std::size_t at = from; at < to;) {
-      const std::size_t step = cursiv::utf8_width(text[at]);
+      const std::size_t step = cursiv::utf8Width(text[at]);
       n += step == 4 ? 2U : 1U;
       at += step;
     }
@@ -5645,6 +5857,7 @@ void run() {
   a_pair_across_a_word_still_counts_once();
   the_flag_holds_past_sixty_four_lines();
   a_far_column_costs_a_block_of_its_line();
+  a_line_end_costs_no_count_of_its_line();
   the_word_count_answers_what_a_byte_walk_answers();
   an_ill_formed_subpart_is_one_replacement();
   ill_formed_text_answers_what_a_replacing_decoder_answers();
@@ -5804,7 +6017,7 @@ class LibraryWorkspaceManager final : public cursiv::DefaultWorkspaceManager {
  protected:
   void loadAdditionalDocuments(
       std::span<const cursiv::WorkspaceFolder>,
-      cursiv::function_ref<void(std::string_view, std::string)> add) override {
+      cursiv::FunctionRef<void(std::string_view, std::string)> add) override {
     add("mem:///lib.ws", "datatype Library\n");
   }
 };
@@ -5820,7 +6033,7 @@ struct World {
     if (withLibrary)
       shared.workspaceManager =
           std::make_unique<LibraryWorkspaceManager>(shared);
-    cursiv::install_default_shared_core_services(shared);
+    cursiv::installDefaultSharedCoreServices(shared);
     (void)support::add_workspace<cursiv::CoreServices>(shared);
   }
 };
@@ -5905,7 +6118,7 @@ void the_filter_keeps_what_a_language_claims() {
       {.isFile = false, .isDirectory = true, .uri = "file:///w/.git"}));
 }
 
-// The memory provider keys a file as `normalize_uri` spells it: added under
+// The memory provider keys a file as `normalizeUri` spells it: added under
 // an upper-case scheme, it reads back under either case, and a workspace
 // opened on the same upper-case folder finds it.
 void an_upper_case_scheme_names_the_same_file() {
@@ -5929,7 +6142,7 @@ void an_entry_outside_the_root_of_its_folder_is_not_included() {
    protected:
     std::string getRootFolder(
         const cursiv::WorkspaceFolder& folder) const override {
-      return cursiv::normalize_uri(folder.uri) + "/src";
+      return cursiv::normalizeUri(folder.uri) + "/src";
     }
   };
   World world;
@@ -5947,8 +6160,15 @@ void an_entry_outside_the_root_of_its_folder_is_not_included() {
         .isFile = true, .isDirectory = false, .uri = std::move(uri)};
   };
   CHECK(manager.isIncluded(file("mem:///w/src/a.ws")));
+  CHECK(!manager.isIncluded(file("mem:///w/src/out%2Fa.ws")));
+  CHECK(!manager.isIncluded(file("mem:///w/src/.cache%2Fa.ws")));
   CHECK(!manager.isIncluded(file("mem:///w/docs/b.ws")));
   CHECK(manager.isIncluded(file("mem:///elsewhere/c.ws")));
+  cursiv::CancellationTokenSource cancelled;
+  cancelled.request_stop();
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
+    (void)manager.searchFolder("mem:///w/empty", cancelled.get_token());
+  }));
 }
 
 // The hook's documents are in the store and built, workspace files beside
@@ -6042,7 +6262,7 @@ void the_scan_asks_what_an_update_asks() {
                           cursiv::DiagnosticSeverity::Warning,
                           "slow check ran");
           },
-          &cursiv::slow);
+          &cursiv::kSlow);
   world.disk->addFile("file:///w/a.ws", "datatype A\n");
   const cursiv::WorkspaceFolder folders[] = {{"file:///w", "w"}};
   world.shared.workspaceManager->initializeWorkspace(folders);
@@ -6064,7 +6284,7 @@ void ready_resolves_when_the_scan_throws() {
    protected:
     void loadAdditionalDocuments(
         std::span<const cursiv::WorkspaceFolder>,
-        cursiv::function_ref<void(std::string_view, std::string)>) override {
+        cursiv::FunctionRef<void(std::string_view, std::string)>) override {
       throw std::runtime_error("the library is gone");
     }
   };
@@ -6125,34 +6345,67 @@ void the_scan_parses_a_folder_on_the_pool() {
 }
 #endif
 
-// A failure the scan does not step over stops it where the walk reaches it, as
-// in a scan reading the files one by one: the files before it are in the
-// store, none after it, and `ready` resolves.
-void a_failure_stops_the_scan_where_the_walk_reaches_it() {
+void a_parser_failure_is_local_to_its_document() {
+  using enum cursiv::DocumentState;
+  using enum cursiv::WaitOutcome;
   struct Failing final : cursiv::DefaultDocumentFactory {
     using DefaultDocumentFactory::DefaultDocumentFactory;
-
-   protected:
     void parse(cursiv::Document& document, const cursiv::CoreServices& services,
                const cursiv::CancellationToken& token) const override {
-      if (document.uri == "file:///w/b.ws")
-        throw std::runtime_error("the parser is gone");
+      if (document.textDocument().getText() == "broken")
+        throw std::runtime_error("test parser");
+      if (document.textDocument().getText() == "exhausted")
+        throw std::bad_alloc();
       DefaultDocumentFactory::parse(document, services, token);
     }
   };
   World world;
   world.shared.documentFactory = std::make_unique<Failing>(world.shared);
-  world.disk->addFile("file:///w/a.ws", "datatype A\n");
-  world.disk->addFile("file:///w/b.ws", "datatype B\n");
-  world.disk->addFile("file:///w/c.ws", "datatype C\n");
+  world.disk->addFile("file:///w/a.ws", "entity A { f : B }");
+  world.disk->addFile("file:///w/b.ws", "broken");
+  world.disk->addFile("file:///w/c.ws", "datatype C");
   const cursiv::WorkspaceFolder folders[] = {{"file:///w", "w"}};
-  CHECK(support::throws<std::runtime_error>(
-      [&] { world.shared.workspaceManager->initializeWorkspace(folders); }));
-  const cursiv::Documents& store = *world.shared.documents;
-  CHECK(store.hasDocument("file:///w/a.ws"));
-  CHECK(!store.hasDocument("file:///w/b.ws"));
-  CHECK(!store.hasDocument("file:///w/c.ws"));
+  world.shared.workspaceManager->initializeWorkspace(folders);
+  auto& builder = *world.shared.documentBuilder;
+  const auto& store = *world.shared.documents;
+  const auto a = store.getDocument("file:///w/a.ws");
+  const auto b = store.getDocument("file:///w/b.ws");
+  const auto c = store.getDocument("file:///w/c.ws");
+  CHECK(a && b && c);
+  if (!a || !b || !c) return;
   CHECK(world.shared.workspaceManager->isReady());
+  CHECK(builder.waitUntil(Validated) == Reached);
+  CHECK(builder.waitUntil(Validated, c->id) == Reached);
+  CHECK(builder.waitUntil(Validated, a->id) == Reached);
+  CHECK(a->hasLinkingErrors());
+
+  const auto failed = [&] {
+    CHECK(b->buildFailed && b->state == Changed && !b->hasAst());
+    CHECK(b->textDocument().getText() == "broken");
+    CHECK(builder.waitUntil(Parsed, b->id) == BuildFailed);
+    CHECK(b->diagnostics.size() == 1);
+    if (!b->diagnostics.empty()) {
+      CHECK(b->diagnostics[0].code == "language-service-error");
+      CHECK(b->diagnostics[0].message == "Parsing failed: test parser");
+    }
+  };
+  failed();
+  const std::string_view changed[] = {b->uri};
+  world.disk->addFile(b->uri, "datatype B");
+  builder.update(changed, {});
+  CHECK(builder.waitUntil(Validated, b->id) == Reached);
+  CHECK(!b->buildFailed && b->diagnostics.empty());
+  CHECK(!a->hasLinkingErrors());
+  world.disk->addFile(b->uri, "broken");
+  builder.update(changed, {});
+  failed();
+  CHECK(a->hasLinkingErrors());
+  CHECK(c->state == Validated && c->diagnostics.empty());
+
+  world.disk->addFile(b->uri, "exhausted");
+  CHECK(support::throws<std::bad_alloc>([&] { builder.update(changed, {}); }));
+  CHECK(!b->buildFailed && b->diagnostics.empty());
+  CHECK(builder.waitUntil(Validated) == BuildFailed);
 }
 
 }  // namespace
@@ -6173,7 +6426,7 @@ void run() {
 #if !defined(__wasi__) || defined(_REENTRANT)
   the_scan_parses_a_folder_on_the_pool();
 #endif
-  a_failure_stops_the_scan_where_the_walk_reaches_it();
+  a_parser_failure_is_local_to_its_document();
 }
 
 }  // namespace workspace_manager

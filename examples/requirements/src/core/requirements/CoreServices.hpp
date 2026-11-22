@@ -25,7 +25,7 @@ struct RequirementsCoreServices
   using CoreServicesFor::CoreServicesFor;
 
   // Both optional, as each language leaves the other's slot empty.
-  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+  void visitServices(cursiv::FunctionRef<void(const cursiv::ServiceSlot&)>
                          yield) const override {
     cursiv::CoreServices::visitServices(yield);
     yield({"requirementsValidator", false, requirementsValidator != nullptr});

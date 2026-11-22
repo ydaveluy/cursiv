@@ -23,7 +23,7 @@ struct RepairTwin {
   std::string text;
   ParseResult result;
   std::vector<CstLeaf> tokens;
-  // Per token: spelled by the grammar rather than matched by a named rule.
+  // Per token: spelled by the grammar rather than read by a named terminal.
   std::vector<bool> literal;
   // Trivia that carries bytes: comments, and blanks a grammar records.
   std::vector<CstLeaf> hidden;
@@ -50,7 +50,7 @@ struct RepairTwin {
       }
       twin->tokens.push_back(leaf);
       twin->literal.push_back(grammar == nullptr ||
-                              grammar->recordRule(cst[leaf.id]).empty());
+                              grammar->recordIsLiteral(cst[leaf.id]));
     });
     return twin;
   }

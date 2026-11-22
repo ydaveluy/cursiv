@@ -100,6 +100,8 @@ struct Row {
   std::string source;  // "generated" | "disk:<path>"
   std::size_t bytes = 0;
   int iterations = 0;
+  // A pause before each timed build makes the stage times medians, not bests.
+  std::chrono::milliseconds pause{};
   double ms[kStageCount] = {kAbsent, kAbsent, kAbsent, kAbsent, kAbsent};
   // What the link stage actually did. A `link` figure with zero references is
   // a figure for an empty loop, and it must be visible as one.
@@ -190,6 +192,9 @@ struct Options {
   // One language, one cold build, read for resident bytes alone: a warm
   // allocator would hide what the build needs.
   bool rss = false;
+  // The idle time before each timed build of a document alone: the latency of
+  // one edit, once the cores have slowed down.
+  std::chrono::milliseconds pause{};
   // The filter matches a whole name, not a prefix: `--rss` sets it once it
   // has chosen its language.
   bool exact = false;
@@ -271,7 +276,8 @@ struct Language {
   std::string (*corpus)(std::size_t bytes);
   void (*parse)(const std::string& src);
   // Workspace callbacks are null on threadless cross builds.
-  void (*workspace)(int iterations, bool resident, std::size_t workers,
+  void (*workspace)(int iterations, bool resident,
+                    std::chrono::milliseconds pause, std::size_t workers,
                     const std::string& src, detail::Row&);
 
   // Null on both when the language has no per-file generator: a workspace of N
@@ -340,11 +346,11 @@ class PhaseClock final : public cursiv::BuildPhaseListener {
   }
   // The same two windows, in hardware counts.
   [[nodiscard]] PerfSample counts(cursiv::DocumentState to) const {
-    return perf_delta(_startSample, _sample[static_cast<std::size_t>(to)]);
+    return perfDelta(_startSample, _sample[static_cast<std::size_t>(to)]);
   }
   [[nodiscard]] PerfSample counts(cursiv::DocumentState from,
                                   cursiv::DocumentState to) const {
-    return perf_delta(_sample[static_cast<std::size_t>(from)],
+    return perfDelta(_sample[static_cast<std::size_t>(from)],
                       _sample[static_cast<std::size_t>(to)]);
   }
   // ...and in resident bytes.
@@ -445,18 +451,22 @@ inline void dump_build(const std::string& name,
 }
 
 // `resident` is `--rss`: one build, read for resident bytes alone. Otherwise
-// each repetition is a counted build, when the PMU answers, then a timed one.
+// untimed builds warm the pool for `kWarmup`, then each repetition is a
+// counted build, when the PMU answers, then a timed one, after `pause`. The
+// row keeps the fastest timed build, or the median one after a pause.
 template <class Shared>
 void ws_stages(
-    int iterations, bool resident, std::size_t workers, const char* languageId,
-    const char* extension, const std::string& src, Row& row,
+    int iterations, bool resident, std::chrono::milliseconds pause,
+    std::size_t workers, const char* languageId, const char* extension,
+    const std::string& src, Row& row,
     const std::function<void(cursiv::SharedCoreServices&)>& register_) {
   using namespace cursiv;
-  enum class Probe : std::uint8_t { Clock, Counters, Resident };
+  enum class Probe : std::uint8_t { Clock, Counters, Resident, Warm };
+  // A worker's first run of a stage faults in its own allocator pages, which a
+  // server pays once.
+  constexpr auto kWarmup = std::chrono::milliseconds(100);
 
-  double best[kStageCount];
-  for (double& v : best) v = 1e30;
-  bool timed = false;
+  std::vector<std::array<double, kStageCount>> timings;
   bool validated = false;
   PerfCounters perf;
   const int builds = resident ? 1 : perf.active() ? 2 * iterations : iterations;
@@ -465,15 +475,18 @@ void ws_stages(
   auto pool = std::make_unique<TaskScheduler>(workers);
   auto alone = std::make_unique<TaskScheduler>(0);
 
-  for (int n = 0; n < builds; ++n) {
-    const Probe probe = resident                      ? Probe::Resident
+  const auto warmUntil = std::chrono::steady_clock::now() + kWarmup;
+  for (int n = 0; n < builds;) {
+    const Probe probe = resident ? Probe::Resident
+                        : std::chrono::steady_clock::now() < warmUntil
+                            ? Probe::Warm
                         : perf.active() && n % 2 == 0 ? Probe::Counters
                                                       : Probe::Clock;
     Shared shared;
     std::unique_ptr<TaskScheduler>& scheduler =
         probe == Probe::Counters ? alone : pool;
     shared.taskScheduler = std::move(scheduler);
-    install_default_shared_lsp_services(shared);
+    installDefaultSharedLspServices(shared);
     register_(shared);
     const CoreServices& core = shared.serviceRegistry->getServices(
         std::string("file:///bench/main") + extension);
@@ -495,6 +508,7 @@ void ws_stages(
     }
     // Brought down so the peak is this build's, not the process's.
     const bool peakReset = probe == Probe::Resident && rss_reset();
+    if (probe == Probe::Clock) std::this_thread::sleep_for(pause);
     clock.start(probe == Probe::Counters ? &perf : nullptr,
                 probe == Probe::Resident);
     builder.build(all);
@@ -531,16 +545,17 @@ void ws_stages(
         row.rssPeakReset = peakReset;
         break;
       case Probe::Clock: {
-        timed = true;
-        // Every stage of the fastest build, as `record_perf` keeps its counts.
-        const double build = clock.span(DocumentState::Validated);
-        if (build >= best[kBuild]) break;
-        best[kBuild] = build;
-        best[kIndex] = clock.span(DocumentState::IndexedContent);
-        best[kScopes] = clock.span(DocumentState::IndexedContent,
-                                   DocumentState::ComputedScopes);
-        best[kLink] = clock.span(DocumentState::ComputedScopes,
-                                 DocumentState::IndexedReferences);
+        // Every stage of one build, as `record_perf` keeps its counts.
+        timings.push_back({});
+        auto& stages = timings.back();
+        stages[kBuild] = clock.span(DocumentState::Validated);
+        stages[kIndex] = clock.span(DocumentState::IndexedContent);
+        stages[kScopes] = clock.span(DocumentState::IndexedContent,
+                                     DocumentState::ComputedScopes);
+        stages[kLink] = clock.span(DocumentState::ComputedScopes,
+                                   DocumentState::IndexedReferences);
+        stages[kValidate] = clock.span(DocumentState::IndexedReferences,
+                                       DocumentState::Validated);
         // A language with no check, document hooks included, and nothing to
         // publish has no validation to time -- see `kValidateAbsentWhy`.
         const ValidationRegistry* registry = core.validationRegistry.get();
@@ -550,13 +565,13 @@ void ws_stages(
                                       !registry->checksBefore().empty() ||
                                       !registry->checksAfter().empty())) ||
              !d.diagnostics.empty());
-        best[kValidate] = clock.span(DocumentState::IndexedReferences,
-                                     DocumentState::Validated);
         break;
       }
+      case Probe::Warm:
+        break;
     }
 
-    if (n + 1 == builds) {
+    if (probe != Probe::Warm && n + 1 == builds) {
       const DocumentReferences* references = d.parseResult.references.get();
       std::size_t resolved = 0;
       if (references != nullptr)
@@ -571,16 +586,21 @@ void ws_stages(
     }
     // Taken back before `shared` goes, for the row's next build.
     scheduler = std::move(shared.taskScheduler);
+    if (probe != Probe::Warm) ++n;
   }
 
-  if (!timed) return;
-  row.ms[kIndex] = best[kIndex];
-  row.ms[kScopes] = best[kScopes];
+  if (timings.empty()) return;
+  std::ranges::sort(timings, {},
+                    [](const auto& stages) { return stages[kBuild]; });
+  const auto& kept =
+      pause.count() > 0 ? timings[timings.size() / 2] : timings.front();
+  row.ms[kIndex] = kept[kIndex];
+  row.ms[kScopes] = kept[kScopes];
   // Zero references make the stage an empty loop whose throughput would read
   // as millions of MiB/s: absent, like `validate`.
-  row.ms[kLink] = row.references == 0 ? kAbsent : best[kLink];
-  row.ms[kBuild] = best[kBuild];
-  row.ms[kValidate] = validated ? best[kValidate] : kAbsent;
+  row.ms[kLink] = row.references == 0 ? kAbsent : kept[kLink];
+  row.ms[kBuild] = kept[kBuild];
+  row.ms[kValidate] = validated ? kept[kValidate] : kAbsent;
 }
 
 // Returns once every worker has run a part: on a wasm host, a worker boots
@@ -628,7 +648,7 @@ void multi_stages(
       Shared shared;
       shared.taskScheduler = std::make_unique<TaskScheduler>(workers);
       warm_pool(*shared.taskScheduler, workers);
-      install_default_shared_lsp_services(shared);
+      installDefaultSharedLspServices(shared);
       register_(shared);
 
       Documents& docs = *shared.documents;
@@ -710,7 +730,7 @@ void lsp_stages(int iterations, SharedLspServices& shared,
 template <class Shared, auto register_>
 std::unique_ptr<Shared> language_host() {
   auto shared = std::make_unique<Shared>();
-  install_default_shared_lsp_services(*shared);
+  installDefaultSharedLspServices(*shared);
   register_(*shared);
   if (shared->serviceRegistry->all().empty())
     refused("language", "not registered for the benchmark");
@@ -744,7 +764,7 @@ void measure_lsp(int iterations, const std::string& src, Row& row) {
 // Metadata strings must outlive the descriptor. The registration hook is the
 // language server's hook, including its custom providers and validation checks.
 template <class Shared, auto register_>
-Language make_language(const char* name, const char* languageId,
+Language makeLanguage(const char* name, const char* languageId,
                        const char* extension,
                        std::string (*corpus)(std::size_t) = nullptr,
                        std::string (*multiFile)(std::size_t,
@@ -767,13 +787,14 @@ Language make_language(const char* name, const char* languageId,
                     nullptr,
                     multiRefs};
 #ifndef CURSIV_BENCH_PARSE_ONLY
-  language.workspace = +[](int iterations, bool resident, std::size_t workers,
+  language.workspace = +[](int iterations, bool resident,
+                           std::chrono::milliseconds pause, std::size_t workers,
                            const std::string& src, detail::Row& row) {
     auto shared = detail::language_host<Shared, register_>();
     const auto& meta = shared->serviceRegistry->all().front()->languageMetaData;
     const char* ext =
         meta.fileExtensions.empty() ? "" : meta.fileExtensions.front().c_str();
-    detail::ws_stages<Shared>(iterations, resident, workers,
+    detail::ws_stages<Shared>(iterations, resident, pause, workers,
                               meta.languageId.c_str(), ext, src, row,
                               register_);
   };
@@ -798,7 +819,7 @@ Language make_language(const char* name, const char* languageId,
 // A language executable needs only its shared services and registration hook.
 // Optional generators enable the sizes and the multi-document worker curve.
 template <class Shared, auto register_>
-int run_language(int argc, char** argv,
+int runLanguage(int argc, char** argv,
                  std::string (*corpus)(std::size_t) = nullptr,
                  std::string (*multiFile)(std::size_t, std::size_t) = nullptr,
                  Refs multiRefs = Refs::Intra) try {
@@ -807,7 +828,7 @@ int run_language(int argc, char** argv,
   const char* extension = metadata.fileExtensions.empty()
                               ? ""
                               : metadata.fileExtensions.front().c_str();
-  const Language language = make_language<Shared, register_>(
+  const Language language = makeLanguage<Shared, register_>(
       metadata.languageId.c_str(), metadata.languageId.c_str(), extension,
       corpus, multiFile, multiRefs);
   return run(argc, argv, std::span<const Language>(&language, 1));

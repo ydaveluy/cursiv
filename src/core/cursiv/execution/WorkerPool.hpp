@@ -35,7 +35,7 @@ class WorkerPool {
   // Calls `body(index)` for every index below `count` and returns once every
   // call has returned. A call that returns false ends the run. `body` must not
   // throw.
-  void run(std::size_t count, cursiv::function_ref<bool(std::size_t)> body);
+  void run(std::size_t count, cursiv::FunctionRef<bool(std::size_t)> body);
 
  private:
   // Runs in flight at once; when every cell is taken, a run runs alone.
@@ -55,7 +55,7 @@ class WorkerPool {
   // One run's claim counter, on the publisher's stack, which outlives every
   // task of the run.
   struct Job {
-    cursiv::function_ref<bool(std::size_t)> body;
+    cursiv::FunctionRef<bool(std::size_t)> body;
     std::size_t count;
     Cell* cell;
     // On its own line: every part hammers the claim counter for the whole run.
@@ -87,7 +87,7 @@ class WorkerPool {
 
   // Claims and runs one index at a time until none is left.
   void drain(Job& job) const noexcept;
-  void runTask(Task& task) const noexcept;
+  void runTask(Task& task) noexcept;
   // Null when nothing was found. `self` is the worker index, or the worker
   // count for a caller that is not one.
   [[nodiscard]] Task* steal(std::size_t victim) noexcept;

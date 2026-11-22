@@ -27,14 +27,14 @@ class ScopeProvider {
   // stops the walk, and the return says whether it ran to the end.
   [[nodiscard]] virtual bool visitScopeEntries(
       const ReferenceInfo& context,
-      cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const = 0;
+      cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const = 0;
 
   // Every entry named `name` at the site -- inner levels first, the global
   // scope last -- skipping the homonyms that fail the type filter. Nothing
   // for an empty name.
   [[nodiscard]] virtual bool visitScopeEntries(
       const ReferenceInfo& context, std::string_view name,
-      cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const = 0;
+      cursiv::FunctionRef<bool(const AstNodeDescription&)> visitor) const = 0;
 };
 
 }  // namespace cursiv

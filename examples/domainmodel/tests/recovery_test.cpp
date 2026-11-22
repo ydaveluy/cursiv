@@ -16,7 +16,7 @@ void split_keywords_preserve_the_package(const cursiv::Parser& engine) {
   const auto start = seed.find("entity E3");
   CHECK(start != std::string::npos);
   if (start == std::string::npos) return;
-  const auto reflection = dm::generated::DomainModel::create_ast_reflection();
+  const auto reflection = dm::generated::DomainModel::createAstReflection();
   for (const char blank : {' ', '\t', '\n', '\r'}) {
     for (unsigned offset = 1; offset < 5; ++offset) {
       for (const bool replace : {false, true}) {
@@ -38,7 +38,7 @@ void split_keywords_preserve_the_package(const cursiv::Parser& engine) {
         const auto* element = model->elements.back();
         CHECK(element->name == "baz");
         const bool package = reflection->isInstance(
-            *element, &cursiv::ast_type_tag<dm::ast::PackageDeclaration>);
+            *element, &cursiv::kAstTypeTag<dm::ast::PackageDeclaration>);
         CHECK(package);
         if (!package) continue;
         const auto* baz =
@@ -48,7 +48,7 @@ void split_keywords_preserve_the_package(const cursiv::Parser& engine) {
         for (unsigned i = 0; i < 2; ++i) {
           const auto* child = baz->elements[i];
           const bool entity = reflection->isInstance(
-              *child, &cursiv::ast_type_tag<dm::ast::Entity>);
+              *child, &cursiv::kAstTypeTag<dm::ast::Entity>);
           CHECK(entity && child->name == (i == 0 ? "E3" : "E4"));
           if (!entity) continue;
           const auto* e = static_cast<const dm::ast::Entity*>(child);
@@ -61,7 +61,7 @@ void split_keywords_preserve_the_package(const cursiv::Parser& engine) {
         }
         const auto* child = baz->elements[2];
         const bool nested = reflection->isInstance(
-            *child, &cursiv::ast_type_tag<dm::ast::PackageDeclaration>);
+            *child, &cursiv::kAstTypeTag<dm::ast::PackageDeclaration>);
         CHECK(nested && child->name == "nested");
         if (!nested) continue;
         const auto* p = static_cast<const dm::ast::PackageDeclaration*>(child);
@@ -75,7 +75,7 @@ void split_keywords_preserve_the_package(const cursiv::Parser& engine) {
 void run(Lane& lane) {
   lane.lang = "domainmodel";
   const std::unique_ptr<cursiv::Parser> engine =
-      dm::generated::DomainModel::create_parser();
+      dm::generated::DomainModel::createParser();
   split_keywords_preserve_the_package(*engine);
   {
     // EOF repair must retain the already read package, including its complete
@@ -83,14 +83,14 @@ void run(Lane& lane) {
     const auto text = document("06_truncated.dmodel");
     const auto result = engine->parse(text);
     const auto* model = result.valueAs<dm::ast::DomainModel>();
-    const auto reflection = dm::generated::DomainModel::create_ast_reflection();
+    const auto reflection = dm::generated::DomainModel::createAstReflection();
     CHECK(result.accepted && model);
     const dm::ast::PackageDeclaration* baz = nullptr;
     if (model) {
       for (const auto* element : model->elements)
         if (element->name == "baz"
             && reflection->isInstance(
-                *element, &cursiv::ast_type_tag<dm::ast::PackageDeclaration>))
+                *element, &cursiv::kAstTypeTag<dm::ast::PackageDeclaration>))
           baz = static_cast<const dm::ast::PackageDeclaration*>(element);
     }
     CHECK(baz && baz->elements.size() == 2);
@@ -98,7 +98,7 @@ void run(Lane& lane) {
       for (unsigned i = 0; i < 2; ++i) {
         const auto* element = baz->elements[i];
         const bool entity = reflection->isInstance(
-            *element, &cursiv::ast_type_tag<dm::ast::Entity>);
+            *element, &cursiv::kAstTypeTag<dm::ast::Entity>);
         CHECK(entity);
         CHECK(element->name == (i == 0 ? "E3" : "E4"));
         if (entity)
@@ -113,7 +113,7 @@ void run(Lane& lane) {
        "04_closer_eof.dmodel", "05_extra_token.dmodel", "06_truncated.dmodel",
        "07_two_faults.dmodel", "08_head_fault.dmodel", "09_list_delim.dmodel",
        "10_noise.dmodel", "11_head_typo.dmodel"});
-  mutation_oracle(*engine, "domainmodel", document("valid.dmodel"));
+  mutationOracle(*engine, "domainmodel", document("valid.dmodel"));
 }
 }  // namespace
 

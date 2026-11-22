@@ -14,6 +14,7 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
@@ -31,11 +32,13 @@
 #include "cursiv/mcp/LspMcpService.hpp"
 #include "cursiv/references/DefaultLinker.hpp"
 #include "cursiv/references/DefaultScopeComputation.hpp"
+#include "cursiv/references/ScopeProvider.hpp"
 #include "cursiv/runtime/LanguageClient.hpp"
 #include "cursiv/runtime/LanguageServer.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/UriUtils.hpp"
+#include "cursiv/validation/DocumentValidator.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
@@ -51,25 +54,36 @@
 #include "multiref/generated/MultiG/Module.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
-#include "wordslr/generated/Lr/Module.hpp"
+#include "wordslr/generated/Suite/Module.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 #include "workspace/lsp/LspModule.hpp"
 
-// The MCP server without a transport: the handshake, the two registries, the
-// dispatch, and the errors JSON-RPC requires.
-namespace mcp_server {
-
 namespace {
-
 namespace json = lsp::json;
 
-json::Value ask(cursiv::McpServer& server, std::string_view text) {
-  const std::optional<std::string> answer = server.handleText(text);
-  CHECK(answer.has_value());
-  if (!answer.has_value()) return {};
-  return json::parse(*answer);
+std::optional<std::string> send_request(
+    cursiv::McpServer& server, std::string_view text,
+    const cursiv::CancellationToken& token = {}) {
+  auto message = json::parse(text);
+  auto& params = message.object()["params"];
+  if (params.isNull()) params = json::Object{};
+  if (!params.object().contains("_meta"))
+    params.object()["_meta"] = json::Object{
+        {"io.modelcontextprotocol/protocolVersion", "2026-07-28"},
+        {"io.modelcontextprotocol/clientCapabilities", json::Object{}}};
+  return server.handleText(json::stringify(message), token);
 }
+
+json::Value ask(cursiv::McpServer& server, std::string_view text) {
+  const auto answer = send_request(server, text);
+  CHECK(answer.has_value());
+  return answer ? json::parse(*answer) : json::Value{};
+}
+}  // namespace
+
+namespace mcp_server {
+namespace {
 
 const json::Value* find(const json::Value& value, std::string_view key) {
   return value.isObject() ? value.object().find(key) : nullptr;
@@ -81,57 +95,118 @@ bool is_string(const json::Value* value, std::string_view expected) {
 
 cursiv::McpServer make() { return {"test-server", "1.0.0"}; }
 
-void initialize_echoes_a_known_protocol() {
-  cursiv::McpServer server = make();
-  const json::Value reply =
-      ask(server, R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":)"
-                  R"({"protocolVersion":"2025-03-26","capabilities":{},)"
-                  R"("clientInfo":{"name":"t","version":"0"}}})");
-  const json::Value* const result = find(reply, "result");
-  CHECK(result != nullptr);
-  CHECK(is_string(find(*result, "protocolVersion"), "2025-03-26"));
-  const json::Value* const info = find(*result, "serverInfo");
-  CHECK(info != nullptr && is_string(find(*info, "name"), "test-server"));
-  CHECK(info != nullptr && is_string(find(*info, "version"), "1.0.0"));
-  const json::Value* const capabilities = find(*result, "capabilities");
-  CHECK(capabilities != nullptr && find(*capabilities, "tools") != nullptr);
-  CHECK(capabilities != nullptr && find(*capabilities, "resources") != nullptr);
+const json::Array kSupportedVersions{"2026-07-28", "2025-11-25", "2025-06-18",
+                                     "2025-03-26", "2024-11-05"};
+
+void discovery_describes_the_server() {
+  auto server = make();
+  server.addInstructions("read the grammar");
+  auto reply =
+      ask(server, R"({"jsonrpc":"2.0","id":"a","method":"server/discover"})");
+  const auto& result = reply.object().get("result").object();
+  CHECK(result.get("supportedVersions").array() == kSupportedVersions);
+  CHECK(result.get("capabilities").object().contains("tools"));
+  CHECK(result.get("capabilities").object().contains("resources"));
+  CHECK(result.get("instructions").string() == "read the grammar");
+  CHECK(result.get("resultType").string() == "complete");
+  CHECK(result.get("ttlMs").integer() >= 0);
+  CHECK(result.get("cacheScope").string() == "private");
+  const auto& info = result.get("_meta")
+                         .object()
+                         .get("io.modelcontextprotocol/serverInfo")
+                         .object();
+  CHECK(info.get("name").string() == "test-server" &&
+        info.get("version").string() == "1.0.0");
 }
 
-// The instructions come with the handshake, only when some were written.
-void instructions_come_with_the_handshake() {
-  cursiv::McpServer bare = make();
-  const json::Value silent = ask(
-      bare, R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})");
-  CHECK(find(*find(silent, "result"), "instructions") == nullptr);
-  cursiv::McpServer guided = make();
-  guided.addInstructions("read the grammar first");
-  guided.addInstructions("then validate");
-  const json::Value reply = ask(
-      guided, R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})");
-  const json::Value* const instructions =
-      find(*find(reply, "result"), "instructions");
-  CHECK(instructions != nullptr && instructions->isString());
-  CHECK(instructions != nullptr &&
-        instructions->string() == "read the grammar first\nthen validate");
+void metadata_is_checked_on_each_request() {
+  auto server = make();
+  const auto wrong =
+      ask(server,
+          R"({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{
+    "io.modelcontextprotocol/protocolVersion":"1999-01-01","io.modelcontextprotocol/clientCapabilities":{}}}})");
+  const auto& error = wrong.object().get("error").object();
+  CHECK(error.get("code").integer() == -32022);
+  CHECK(error.get("data").object().get("requested").string() == "1999-01-01");
+  CHECK(error.get("data").object().get("supported").array() ==
+        kSupportedVersions);
+  for (
+      auto text :
+      {R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})",
+       R"({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}})"}) {
+    const auto answer = server.handle(json::parse(text));
+    CHECK(answer->object().get("error").object().get("code").integer() ==
+          -32602);
+  }
+  const auto badId =
+      ask(server, R"({"jsonrpc":"2.0","id":null,"method":"tools/list"})");
+  CHECK(badId.object().get("error").object().get("code").integer() == -32600);
+  CHECK(!badId.object().contains("id"));
 }
 
-void a_stranger_protocol_gets_the_latest() {
-  cursiv::McpServer server = make();
-  const json::Value reply =
-      ask(server, R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":)"
-                  R"({"protocolVersion":"1999-01-01"}})");
-  const json::Value* const result = find(reply, "result");
-  CHECK(result != nullptr);
-  CHECK(is_string(find(*result, "protocolVersion"), "2025-06-18"));
-}
-
-void ping_answers_an_empty_object() {
-  cursiv::McpServer server = make();
-  const json::Value reply =
-      ask(server, R"({"jsonrpc":"2.0","id":2,"method":"ping"})");
-  const json::Value* const result = find(reply, "result");
-  CHECK(result != nullptr && result->isObject() && result->object().isEmpty());
+void legacy_handshakes_share_tools_with_modern_requests() {
+  auto server = make();
+  const auto ping = json::parse(R"({"jsonrpc":"2.0","id":2,"method":"ping"})");
+  const auto batch = json::parse(
+      R"([{"jsonrpc":"2.0","id":2,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"}])");
+  auto init = json::parse(
+      R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})");
+  for (const auto& version : std::span(kSupportedVersions).subspan(1)) {
+    init.object().get("params").object()["protocolVersion"] = version;
+    const auto reply = server.handle(init);
+    const auto& result = reply->object().get("result").object();
+    CHECK(result.get("protocolVersion") == version);
+    CHECK(result.get("serverInfo").object().get("name").string() ==
+          "test-server");
+    CHECK(result.get("capabilities").object().contains("tools"));
+    CHECK(!result.contains("resultType"));
+    CHECK(server.handle(ping)->object().get("result").object().isEmpty());
+    CHECK(server
+              .handle(json::parse(
+                  R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})"))
+              ->object()
+              .get("result")
+              .object()
+              .contains("tools"));
+    CHECK(
+        !server.handle(json::parse(R"({"jsonrpc":"2.0","id":3,"result":{}})")));
+    const auto answer = server.handle(batch);
+    if (version.string() == "2025-03-26") {
+      CHECK(answer->array().size() == 1 &&
+            answer->array().front().object().get("id").integer() == 2);
+      CHECK(!server.handle(json::Array{batch.array().back()}));
+      CHECK(server.handle(json::Array{batch})
+                ->array()
+                .front()
+                .object()
+                .get("id")
+                .isNull());
+    } else {
+      CHECK(answer->object().get("error").object().get("code").integer() ==
+            -32600);
+    }
+  }
+  init.object().get("params").object()["protocolVersion"] = "2099-01-01";
+  CHECK(server.handle(init)
+            ->object()
+            .get("result")
+            .object()
+            .get("protocolVersion")
+            .string() == "2025-11-25");
+  CHECK(ask(server, R"({"jsonrpc":"2.0","id":4,"method":"server/discover"})")
+            .object()
+            .get("result")
+            .object()
+            .get("supportedVersions")
+            .array() == kSupportedVersions);
+  CHECK(ask(server, R"({"jsonrpc":"2.0","id":5,"method":"tools/list"})")
+            .object()
+            .get("result")
+            .object()
+            .contains("resultType"));
+  CHECK(server.handle(batch, {}, "2025-03-26")->isArray());
+  CHECK(server.handle(batch)->object().contains("error"));
+  CHECK(server.handle(ping)->object().get("result").object().isEmpty());
 }
 
 void an_unregistered_server_lists_no_tools() {
@@ -142,6 +217,14 @@ void an_unregistered_server_lists_no_tools() {
   const json::Value* const tools =
       result == nullptr ? nullptr : find(*result, "tools");
   CHECK(tools != nullptr && tools->isArray() && tools->array().empty());
+  for (const std::string method :
+       {"tools/list", "resources/list", "resources/templates/list"}) {
+    const auto stale =
+        ask(server, R"({"jsonrpc":"2.0","id":4,"method":")" + method +
+                        R"(","params":{"cursor":"old"}})");
+    const auto* error = find(stale, "error");
+    CHECK(error && error->object().get("code").integer() == -32602);
+  }
 }
 
 void a_registered_tool_is_listed_and_called() {
@@ -149,6 +232,7 @@ void a_registered_tool_is_listed_and_called() {
   server.registerTool(
       {.name = "echo", .title = "Echo", .description = "answers its argument"},
       [](const json::Value& arguments, const cursiv::CancellationToken&) {
+        CHECK(arguments.isObject());
         const json::Value* const text = find(arguments, "text");
         return cursiv::McpToolResult{
             text != nullptr && text->isString() ? text->string() : ""};
@@ -177,6 +261,19 @@ void a_registered_tool_is_listed_and_called() {
   CHECK(content != nullptr && content->isArray() &&
         content->array().size() == 1);
   CHECK(is_string(find(content->array().front(), "text"), "hi"));
+  CHECK(
+      ask(server,
+          R"({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"echo"}})")
+          .object()
+          .contains("result"));
+  for (const std::string value : {"null", "[]", "1"}) {
+    const json::Value invalid = ask(
+        server,
+        R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"echo","arguments":)" +
+            value + "}}");
+    CHECK(invalid.object().get("error").object().get("code").integer() ==
+          -32602);
+  }
 }
 
 // A tool that throws answers inside the result, so the model reads the
@@ -246,38 +343,39 @@ void malformed_json_is_a_parse_error() {
       error == nullptr ? nullptr : find(*error, "code");
   CHECK(code != nullptr && code->isInteger() && code->integer() == -32700);
   const json::Value* const id = find(reply, "id");
-  CHECK(id != nullptr && id->isNull());
+  CHECK(id == nullptr);
 }
 
-// A batch, which a 2025-03-26 client may send, answers each request in it;
-// an empty one, or one inside another, is an invalid request.
-void a_batch_answers_each_request() {
-  cursiv::McpServer server = make();
-  const json::Value reply =
-      ask(server, R"([{"jsonrpc":"2.0","id":1,"method":"ping"},
-      {"jsonrpc":"2.0","method":"notifications/initialized"},
-      {"jsonrpc":"2.0","id":2,"method":"tools/list"}])");
-  CHECK(reply.isArray() && reply.array().size() == 2);
-  if (reply.isArray() && reply.array().size() == 2) {
-    CHECK(find(reply.array()[0], "result") != nullptr);
-    const json::Value* const tools = find(reply.array()[1], "result");
-    CHECK(tools != nullptr && find(*tools, "tools") != nullptr);
-  }
-  CHECK(!server
-             .handleText(
-                 R"([{"jsonrpc":"2.0","method":"notifications/initialized"}])")
-             .has_value());
-  const auto invalid = [](const json::Value& error) {
-    const json::Value* const body = find(error, "error");
-    const json::Value* const code =
-        body == nullptr ? nullptr : find(*body, "code");
-    return code != nullptr && code->isInteger() && code->integer() == -32600;
-  };
-  CHECK(invalid(ask(server, "[]")));
-  const json::Value nested =
-      ask(server, R"([[{"jsonrpc":"2.0","id":1,"method":"ping"}]])");
-  CHECK(nested.isArray() && nested.array().size() == 1 &&
-        invalid(nested.array()[0]));
+void batches_are_refused() {
+  auto server = make();
+  const auto reply = server.handle(
+      json::parse(R"([{"jsonrpc":"2.0","id":1,"method":"tools/list"}])"));
+  CHECK(reply->object().get("error").object().get("code").integer() == -32600);
+}
+
+void stdio_cancels_a_request_and_drains_the_remaining_answers() {
+  auto server = make();
+  server.registerTool(
+      {.name = "wait"},
+      [](const json::Value&, const cursiv::CancellationToken& token) {
+        std::mutex mutex;
+        std::unique_lock lock(mutex);
+        std::condition_variable_any event;
+        event.wait_for(lock, token, std::chrono::seconds(2),
+                       [] { return false; });
+        CHECK(token.stop_requested());
+        return cursiv::McpToolResult{};
+      });
+  std::istringstream input(
+      R"({"jsonrpc":"2.0","id":"one","method":"tools/call","params":{"name":"wait","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
+{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"one"}}
+{"jsonrpc":"2.0","id":2147483648,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
+)");
+  std::ostringstream output;
+  CHECK(server.serveStdio(input, output));
+  const auto reply = json::parse(output.str());
+  CHECK(reply.object().get("id").number() == 2147483648.);
+  CHECK(reply.object().get("result").object().get("tools").array().size() == 1);
 }
 
 void a_resource_is_listed_and_read() {
@@ -311,7 +409,7 @@ void a_resource_is_listed_and_read() {
   const json::Value* const error = find(missing, "error");
   const json::Value* const code =
       error == nullptr ? nullptr : find(*error, "code");
-  CHECK(code != nullptr && code->isInteger() && code->integer() == -32002);
+  CHECK(code != nullptr && code->isInteger() && code->integer() == -32602);
 }
 
 // One entry per name: a second one would be listed and never called.
@@ -328,21 +426,29 @@ void a_name_is_registered_once() {
   CHECK(support::throws<std::invalid_argument>([&] {
     server.registerResource({.uri = "cursiv://x", .name = "y"}, text);
   }));
+  server.registerTool({.name = "another"}, first);
+  server.registerResource({.uri = "cursiv://a", .name = "a"}, text);
   const json::Value tools =
       ask(server, R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
-  CHECK(find(*find(tools, "result"), "tools")->array().size() == 1);
+  const auto& listedTools = find(*find(tools, "result"), "tools")->array();
+  CHECK(listedTools.size() == 2 &&
+        is_string(find(listedTools[0], "name"), "echo") &&
+        is_string(find(listedTools[1], "name"), "another"));
   const json::Value resources =
       ask(server, R"({"jsonrpc":"2.0","id":2,"method":"resources/list"})");
-  CHECK(find(*find(resources, "result"), "resources")->array().size() == 1);
+  const auto& listedResources =
+      find(*find(resources, "result"), "resources")->array();
+  CHECK(listedResources.size() == 2 &&
+        is_string(find(listedResources[0], "uri"), "cursiv://x") &&
+        is_string(find(listedResources[1], "uri"), "cursiv://a"));
 }
 
 }  // namespace
 
 void run() {
-  initialize_echoes_a_known_protocol();
-  instructions_come_with_the_handshake();
-  a_stranger_protocol_gets_the_latest();
-  ping_answers_an_empty_object();
+  discovery_describes_the_server();
+  metadata_is_checked_on_each_request();
+  legacy_handshakes_share_tools_with_modern_requests();
   an_unregistered_server_lists_no_tools();
   a_registered_tool_is_listed_and_called();
   a_throwing_tool_reports_inside_the_result();
@@ -350,7 +456,8 @@ void run() {
   an_unknown_method_is_method_not_found();
   a_notification_answers_nothing();
   malformed_json_is_a_parse_error();
-  a_batch_answers_each_request();
+  batches_are_refused();
+  stdio_cancels_a_request_and_drains_the_remaining_answers();
   a_resource_is_listed_and_read();
   a_name_is_registered_once();
 }
@@ -373,24 +480,24 @@ constexpr std::string_view kC = "file:///w/c.ws";
 // is named.
 struct GeneratedModule {
   std::unique_ptr<cursiv::Parser> (*parser)() =
-      &ws::generated::Workspace::create_parser;
+      &ws::generated::Workspace::createParser;
   std::unique_ptr<cursiv::AstReflection> (*reflection)() =
-      &ws::generated::Workspace::create_ast_reflection;
+      &ws::generated::Workspace::createAstReflection;
   std::unique_ptr<const cursiv::GrammarSource> (*source)() =
-      &ws::generated::Workspace::create_grammar_source;
+      &ws::generated::Workspace::createGrammarSource;
 };
 
 constexpr GeneratedModule kCaret{
-    &tcaret::generated::Caret::create_parser,
-    &tcaret::generated::Caret::create_ast_reflection,
-    &tcaret::generated::Caret::create_grammar_source};
-constexpr GeneratedModule kDoc{&fdoc::generated::DocG::create_parser,
-                               &fdoc::generated::DocG::create_ast_reflection,
-                               &fdoc::generated::DocG::create_grammar_source};
+    &tcaret::generated::Caret::createParser,
+    &tcaret::generated::Caret::createAstReflection,
+    &tcaret::generated::Caret::createGrammarSource};
+constexpr GeneratedModule kDoc{&fdoc::generated::DocG::createParser,
+                               &fdoc::generated::DocG::createAstReflection,
+                               &fdoc::generated::DocG::createGrammarSource};
 constexpr GeneratedModule kMultiRef{
-    &fmulti::generated::MultiG::create_parser,
-    &fmulti::generated::MultiG::create_ast_reflection,
-    &fmulti::generated::MultiG::create_grammar_source};
+    &fmulti::generated::MultiG::createParser,
+    &fmulti::generated::MultiG::createAstReflection,
+    &fmulti::generated::MultiG::createGrammarSource};
 
 // The workspace's lock, with a hook around each read the test thread makes
 // outside a write, ranked from 1, and `asking` called for each write the test
@@ -497,7 +604,7 @@ Answer call_tool(cursiv::McpServer& server, std::string_view name,
   request += R"(","arguments":)";
   request += argumentsJson;
   request += "}}";
-  const std::optional<std::string> raw = server.handleText(request, token);
+  const std::optional<std::string> raw = send_request(server, request, token);
   CHECK(raw.has_value());
   if (!raw.has_value()) return {};
   const json::Value reply = json::parse(*raw);
@@ -546,6 +653,8 @@ void diagnostics_report_the_broken_documents_only() {
   CHECK(contains(answer.text, "b.ws"));
   CHECK(contains(answer.text, "[error at 1:"));
   CHECK(!contains(answer.text, "a.ws"));
+  CHECK(call_tool(server, "get-diagnostics", R"({"directory":""})").text ==
+        answer.text);
 }
 
 // A fix the validator attached reaches a caller with no editor: the
@@ -558,6 +667,37 @@ void diagnostics_name_the_fixes_they_carry() {
   const Answer answer = call_tool(server, "get-diagnostics", "{}");
   CHECK(!answer.isError);
   CHECK(contains(answer.text, "-- fix: Replace with 'String'"));
+}
+
+// One answer spells its first linking errors only, however many documents it
+// lists: every error is listed, the later ones without their fixes.
+void diagnostics_spell_one_budget_per_answer() {
+  World own;
+  std::vector<std::string> uris{"file:///w/string.ws"};
+  for (int i = 0; i < 128; ++i)
+    uris.push_back("file:///w/f" + std::to_string(i) + ".ws");
+  own.shared.workspaceLock->write([&](const cursiv::CancellationToken& token) {
+    (void)own.shared.documents->createDocument(uris[0], "datatype String\n",
+                                               token);
+    for (std::size_t i = 1; i < uris.size(); ++i)
+      (void)own.shared.documents->createDocument(
+          uris[i], "entity F" + std::to_string(i) + " { x : Strng }\n", token);
+    const std::vector<std::string_view> changed(uris.begin(), uris.end());
+    own.shared.documentBuilder->update(changed, {}, token);
+  });
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  cursiv::McpServer server = std::move(*service.createServer());
+  const Answer answer = call_tool(server, "get-diagnostics", "{}");
+  const auto count = [&](std::string_view needle) {
+    std::size_t found = 0;
+    for (std::size_t at = answer.text.find(needle); at != std::string::npos;
+         at = answer.text.find(needle, at + 1))
+      ++found;
+    return found;
+  };
+  CHECK(!answer.isError);
+  CHECK(count("[error at") == 128);
+  CHECK(count("-- fix: Replace with 'String'") == 64);
 }
 
 void symbols_list_the_exported_names() {
@@ -614,6 +754,11 @@ void expected_at_names_the_member_being_filled() {
 void expected_at_answers_in_place_of_the_word_typed() {
   World own;
   own.build({{"file:///w/w.ws", "datatype D\nent"}});
+  own.shared.workspaceLock->write([&](const cursiv::CancellationToken&) {
+    own.shared.documentBuilder->resetToState(
+        *own.shared.documents->getDocument("file:///w/w.ws"),
+        cursiv::DocumentState::Parsed);
+  });
   const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
   cursiv::McpServer server = std::move(*service.createServer());
   const Answer answer =
@@ -629,9 +774,9 @@ void expected_at_answers_in_place_of_the_word_typed() {
 void expected_at_spells_the_words_of_a_terminal() {
   World own;
   own.addLanguage("words", {".words"}, {},
-                  {&twords::generated::Lr::create_parser,
-                   &twords::generated::Lr::create_ast_reflection,
-                   &twords::generated::Lr::create_grammar_source});
+                  {&twords::generated::Suite::createParser,
+                   &twords::generated::Suite::createAstReflection,
+                   &twords::generated::Suite::createGrammarSource});
   own.build({{"file:///w/b.words", "branch:\na "},
              {"file:///w/w.words", "whole:\na "},
              {"file:///w/r.words", "rule:\na "}});
@@ -685,8 +830,8 @@ void text_document_content_serves_the_held_text() {
   const Answer lettered = call_tool(server, "text-document-content",
                                     R"({"file":"x://host/library.ws"})");
   CHECK(!lettered.isError && lettered.text == "entity L { }\n");
-  CHECK(cursiv::tool_file_uri("C:/w/a.ws").starts_with("file:"));
-  CHECK(cursiv::tool_file_uri("C:\\w\\a.ws").starts_with("file:"));
+  CHECK(cursiv::toolFileUri("C:/w/a.ws").starts_with("file:"));
+  CHECK(cursiv::toolFileUri("C:\\w\\a.ws").starts_with("file:"));
   const Answer text = call_tool(server, "text-document-content",
                                 R"({"file":"file:///w/a.ws"})");
   CHECK(!text.isError);
@@ -871,7 +1016,7 @@ void validate_discards_the_scratch_after_an_initial_build_failure() {
 void validate_keeps_a_document_it_did_not_install() {
   World own;
   const std::string reserved =
-      cursiv::path_to_file_uri("/.mcp-scratch/0/reserved.ws");
+      cursiv::pathToFileUri("/.mcp-scratch/0/reserved.ws");
   own.build({{reserved, "datatype D\n"}, {kB, "entity B { y : D }\n"}});
   const auto existing = own.shared.documents->getDocument(reserved);
   const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
@@ -886,6 +1031,30 @@ void validate_keeps_a_document_it_did_not_install() {
   CHECK(own.shared.documents->getDocument(reserved) == existing);
   CHECK(existing->textDocument().getText() == "datatype D\n");
   CHECK(!own.shared.documents->getDocument(kB)->hasLinkingErrors());
+}
+
+void validate_reports_a_language_service_failure() {
+  struct Broken final : cursiv::DocumentValidator {
+    void validateDocument(const cursiv::Document&,
+                          std::vector<cursiv::Diagnostic>&,
+                          const cursiv::ValidationOptions&,
+                          const cursiv::CancellationToken&) const override {
+      throw std::runtime_error("test validator");
+    }
+  };
+  World own;
+  own.addLanguage("broken", {".broken"}, {}, {},
+                  [](cursiv::CoreServices& language) {
+                    language.documentValidator = std::make_unique<Broken>();
+                  });
+  own.build({{kA, "datatype D"}});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  const Answer result = call_tool(
+      *server, "validate", R"({"text":"datatype B","languageId":"broken"})");
+  CHECK(result.isError &&
+        contains(result.text, "Validation failed: test validator"));
+  CHECK(own.shared.documents->all().size() == 1);
 }
 
 void validate_reports_the_broken_text_and_pollutes_nothing() {
@@ -938,19 +1107,19 @@ void validate_reuses_one_scratch_identity() {
                     R"({"text":"datatype D\n","file":"again.ws"})");
   const cursiv::Documents& store = *world().shared.documents;
   CHECK(!store.hasDocument(
-      cursiv::path_to_file_uri("/.mcp-scratch/0/again.ws")));
-  CHECK(store.getDocumentId(cursiv::path_to_file_uri(
+      cursiv::pathToFileUri("/.mcp-scratch/0/again.ws")));
+  CHECK(store.getDocumentId(cursiv::pathToFileUri(
             "/.mcp-scratch/1/again.ws")) == cursiv::kNoDocument);
 }
 
 void the_grammar_resource_serves_the_golden_text() {
   cursiv::McpServer server = make_server();
-  const std::optional<std::string> listed = server.handleText(
-      R"({"jsonrpc":"2.0","id":1,"method":"resources/list"})");
+  const std::optional<std::string> listed = send_request(
+      server, R"({"jsonrpc":"2.0","id":1,"method":"resources/list"})");
   CHECK(listed.has_value() && contains(*listed, "cursiv://grammar/workspace"));
-  const std::optional<std::string> raw =
-      server.handleText(R"({"jsonrpc":"2.0","id":2,"method":"resources/read",)"
-                        R"("params":{"uri":"cursiv://grammar/workspace"}})");
+  const std::optional<std::string> raw = send_request(
+      server, R"({"jsonrpc":"2.0","id":2,"method":"resources/read",)"
+              R"("params":{"uri":"cursiv://grammar/workspace"}})");
   CHECK(raw.has_value());
   if (!raw.has_value()) return;
   const json::Value reply = json::parse(*raw);
@@ -964,7 +1133,7 @@ void the_grammar_resource_serves_the_golden_text() {
                                  .object()
                                  .get("text")
                                  .string();
-  std::string golden = cursiv::test::read_file(
+  std::string golden = cursiv::test::readFile(
       std::string(CURSIV_WORKSPACE_GENERATED) + "/GRAMMAR.txt");
   while (!golden.empty() && (golden.back() == '\n' || golden.back() == ' '))
     golden.pop_back();
@@ -976,12 +1145,27 @@ void the_grammar_resource_serves_the_golden_text() {
 }
 
 void languages_list_the_registry() {
-  cursiv::McpServer server = make_server();
-  const Answer answer = call_tool(server, "languages", "{}");
+  World own;
+  own.addLanguage("model #/%é", {".model"});
+  own.addLanguage("..", {".dot"});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  const Answer answer = call_tool(*server, "languages", "{}");
   CHECK(!answer.isError);
   CHECK(contains(answer.text, "workspace"));
   CHECK(contains(answer.text, ".ws"));
   CHECK(contains(answer.text, "grammar: cursiv://grammar/workspace"));
+  const std::string uri = "cursiv://grammar/model%20%23%2F%25%C3%A9";
+  CHECK(contains(answer.text, uri));
+  CHECK(contains(answer.text, "cursiv://grammar/?id=.."));
+  const auto listed = send_request(
+      *server, R"({"jsonrpc":"2.0","id":2,"method":"resources/list"})");
+  CHECK(listed && contains(*listed, uri));
+  const auto read = ask(
+      *server,
+      R"({"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":")" +
+          uri + R"("}})");
+  CHECK(read.object().contains("result"));
 }
 
 // `languageId` is required even with one language: the contract must read the
@@ -1027,6 +1211,14 @@ void a_wrong_call_reports_inside_the_result() {
                 R"({"file":"file:///w/nope.ws","line":1,"column":1})");
   CHECK(stranger.isError);
   CHECK(contains(stranger.text, "not in the workspace"));
+  CHECK(call_tool(server, "get-diagnostics", R"({"directory":false})").isError);
+  CHECK(call_tool(server, "symbols", R"({"query":17})").isError);
+  CHECK(call_tool(server, "validate",
+                  R"({"text":"","file":"draft.ws","languageId":false})")
+            .isError);
+  CHECK(call_tool(server, "validate",
+                  R"({"text":"","languageId":"workspace","file":null})")
+            .isError);
 }
 
 // A tool whose read never happened says so, rather than answer an empty
@@ -1175,7 +1367,7 @@ void validate_runs_every_category() {
                             cursiv::DiagnosticSeverity::Warning,
                             "slow check ran");
             },
-            &cursiv::slow);
+            &cursiv::kSlow);
       });
   const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
   auto server = service.createServer();
@@ -1247,7 +1439,7 @@ void validate_sets_nothing_back_under_an_admitted_reader() {
                               cursiv::DiagnosticSeverity::Warning,
                               "slow check ran");
               },
-              &cursiv::slow);
+              &cursiv::kSlow);
         });
     if (built) own.build({{kA, "datatype D\n"}});
     HookedLock& lock = own.hook();
@@ -1329,9 +1521,9 @@ void validate_stops_when_its_request_is_cancelled() {
                      std::chrono::steady_clock::now() < deadline)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
               stopped = token.stop_requested();
-              cursiv::throw_if_cancelled(token);
+              cursiv::throwIfCancelled(token);
             },
-            &cursiv::slow);
+            &cursiv::kSlow);
       });
   own.build({{kA, "datatype D\n"}});
   const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
@@ -1344,6 +1536,114 @@ void validate_stops_when_its_request_is_cancelled() {
   CHECK(own.shared.documents->all().size() == 1);
   CHECK(own.shared.documentBuilder->currentState() ==
         cursiv::DocumentState::Validated);
+}
+
+// Calls made at once answer in turn: none cancels the others' builds over and
+// over. A call still running after a long while is stopped, and fails.
+void validate_answers_calls_made_at_once() {
+  World own;
+  own.addLanguage(
+      "slowed", {".slowed"}, {}, {}, [](cursiv::CoreServices& language) {
+        language.validationRegistry->registerAfterDocument(
+            [](const cursiv::Document&, cursiv::ValidationAcceptor& accept,
+               const cursiv::CancellationToken&) {
+              // Long enough for another call to queue its write.
+              std::this_thread::sleep_for(std::chrono::milliseconds(2));
+              accept.accept(cursiv::TextRange{0, 0},
+                            cursiv::DiagnosticSeverity::Warning,
+                            "slow check ran");
+            },
+            &cursiv::kSlow);
+      });
+  own.build({{kA, "datatype D\n"}});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  for (const std::size_t calls : {std::size_t{2}, std::size_t{4}}) {
+    std::vector<std::stop_source> stops(calls);
+    std::vector<Answer> answers(calls);
+    std::mutex mutex;
+    std::condition_variable finished;
+    bool done = false;
+    std::thread watchdog([&] {
+      std::unique_lock hold(mutex);
+      if (!finished.wait_for(hold, std::chrono::seconds(10),
+                             [&] { return done; }))
+        for (std::stop_source& stop : stops) stop.request_stop();
+    });
+    std::vector<std::thread> callers;
+    for (std::size_t i = 0; i < calls; ++i)
+      callers.emplace_back([&, i] {
+        answers[i] = call_tool(
+            *server, "validate",
+            R"({"text":"datatype D\n","languageId":"slowed"})",
+            stops[i].get_token());
+      });
+    for (std::thread& caller : callers) caller.join();
+    {
+      const std::scoped_lock hold(mutex);
+      done = true;
+    }
+    finished.notify_all();
+    watchdog.join();
+    for (const Answer& answer : answers)
+      CHECK(!answer.isError && contains(answer.text, "slow check ran"));
+    CHECK(own.shared.documents->all().size() == 1);
+  }
+}
+
+// A write asked while the answer is listed sends the call round again, and a
+// request stopped there answers that it was cancelled: never an empty verdict.
+void validate_answers_whatever_stops_its_listing() {
+  World own;
+  // Run once, at the next unnamed walk of a scope: only the spelling fixes
+  // walk one, once the text is built.
+  std::function<void()> once;
+  struct Stopping final : cursiv::ScopeProvider {
+    std::unique_ptr<const cursiv::ScopeProvider> inner;
+    std::function<void()>* once = nullptr;
+    const cursiv::AstNodeDescription* getScopeEntry(
+        const cursiv::ReferenceInfo& context,
+        std::string_view name) const override {
+      return inner->getScopeEntry(context, name);
+    }
+    bool visitScopeEntries(
+        const cursiv::ReferenceInfo& context,
+        cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
+        const override {
+      if (*once) std::exchange(*once, {})();
+      return inner->visitScopeEntries(context, visitor);
+    }
+    bool visitScopeEntries(
+        const cursiv::ReferenceInfo& context, std::string_view name,
+        cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
+        const override {
+      return inner->visitScopeEntries(context, name, visitor);
+    }
+  };
+  own.addLanguage(
+      "stopping", {".stopping"}, {}, {}, [&](cursiv::CoreServices& language) {
+        auto stopping = std::make_unique<Stopping>();
+        stopping->inner = std::move(language.scopeProvider);
+        stopping->once = &once;
+        language.scopeProvider = std::move(stopping);
+      });
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  constexpr std::string_view kMisspelt =
+      R"({"text":"datatype String\nentity E { x : Strng }\n",)"
+      R"("languageId":"stopping"})";
+  once = [&] { own.shared.workspaceLock->cancelWrite(); };
+  const Answer listed = call_tool(*server, "validate", kMisspelt);
+  CHECK(!once);
+  CHECK(!listed.isError &&
+        contains(listed.text, "-- fix: Replace with 'String'"));
+  std::stop_source request;
+  once = [&] { request.request_stop(); };
+  const Answer stopped =
+      call_tool(*server, "validate", kMisspelt, request.get_token());
+  CHECK(!once);
+  CHECK(stopped.isError && contains(stopped.text, "cancelled"));
+  CHECK(own.shared.documents->all().empty());
 }
 
 // A document keeps the language it was opened with, whatever its uri says:
@@ -1539,6 +1839,7 @@ void validate_abandons_a_slot_it_could_not_empty() {
 void run() {
   diagnostics_report_the_broken_documents_only();
   diagnostics_name_the_fixes_they_carry();
+  diagnostics_spell_one_budget_per_answer();
   symbols_list_the_exported_names();
   references_answer_declaration_and_uses();
   expected_at_names_the_member_being_filled();
@@ -1555,6 +1856,7 @@ void run() {
   validate_accepts_an_extension_without_a_dot_or_no_mapping();
   validate_discards_the_scratch_after_an_initial_build_failure();
   validate_keeps_a_document_it_did_not_install();
+  validate_reports_a_language_service_failure();
   validate_reports_the_broken_text_and_pollutes_nothing();
   validate_reuses_one_scratch_identity();
   the_grammar_resource_serves_the_golden_text();
@@ -1567,6 +1869,8 @@ void run() {
   validate_runs_every_category();
   validate_sets_nothing_back_under_an_admitted_reader();
   validate_stops_when_its_request_is_cancelled();
+  validate_answers_calls_made_at_once();
+  validate_answers_whatever_stops_its_listing();
   hover_reads_the_language_the_document_was_opened_with();
   symbols_name_a_symbol_without_a_record();
   a_site_two_targets_share_is_listed_once();
@@ -1617,23 +1921,15 @@ bool contains(const std::string& text, std::string_view needle) {
   return text.find(needle) != std::string::npos;
 }
 
-json::Value ask(cursiv::McpServer& server, std::string_view text) {
-  const std::optional<std::string> answer = server.handleText(text);
-  CHECK(answer.has_value());
-  if (!answer.has_value()) return {};
-  return json::parse(*answer);
-}
-
 void the_lsp_service_extends_the_default_set() {
   cursiv::McpServer server = make_server();
   const std::optional<std::string> tools =
-      server.handleText(R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
+      send_request(server, R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
   CHECK(tools.has_value());
   CHECK(tools.has_value() && contains(*tools, "\"format\""));
   CHECK(tools.has_value() && contains(*tools, "get-diagnostics"));
   const json::Value init =
-      ask(server, R"({"jsonrpc":"2.0","id":2,"method":"initialize","params":)"
-                  R"({"protocolVersion":"2025-06-18"}})");
+      ask(server, R"({"jsonrpc":"2.0","id":2,"method":"server/discover"})");
   const std::string instructions =
       init.object().get("result").object().get("instructions").string();
   CHECK(contains(instructions, "'format'"));
@@ -1706,14 +2002,24 @@ void format_names_the_document_to_the_formatter() {
             R"({"name":"format","arguments":{"file":"file:///w/messy.ws",)"
             R"("tabSize":4.0}}})");
   CHECK(tabSize == 4);
+  for (const std::string option :
+       {R"("tabSize":0)", R"("tabSize":2.5)", R"("insertSpaces":"yes")"}) {
+    seen.clear();
+    const auto invalid = ask(
+        server,
+        R"({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"format","arguments":{"file":"file:///w/messy.ws",)" +
+            option + "}}}");
+    CHECK(invalid.object().get("result").object().get("isError").boolean());
+    CHECK(seen.empty());
+  }
 }
 
 // The `file` argument, as a uri.
 std::string file_argument(const json::Value& arguments) {
-  const json::Value* const file = cursiv::tool_argument(arguments, "file");
+  const json::Value* const file = cursiv::toolArgument(arguments, "file");
   if (file == nullptr || !file->isString())
     throw std::invalid_argument("'file' names the document");
-  return cursiv::tool_file_uri(file->string());
+  return cursiv::toolFileUri(file->string());
 }
 
 // What a language project does: subclass, add its own tools with the public
@@ -1728,19 +2034,19 @@ struct BlogMcpService final : cursiv::LspMcpService {
         cursiv::LspMcpService::createServer();
     json::Object properties;
     properties["file"] =
-        cursiv::tool_property("string", "path or file:// uri of the document");
+        cursiv::toolProperty("string", "path or file:// uri of the document");
     json::Array required;
     required.emplace_back(json::String("file"));
     const json::Value schema =
-        cursiv::tool_object_schema(std::move(properties), std::move(required));
+        cursiv::toolObjectSchema(std::move(properties), std::move(required));
     server->registerTool(
         {.name = "byte-count",
          .title = "Byte Count",
          .description = "how many bytes a document holds",
          .inputSchema = schema},
-        [&shared = _shared](const json::Value& arguments,
+        [&shared = sharedServices](const json::Value& arguments,
                             const cursiv::CancellationToken& token) {
-          return cursiv::route_document_tool(
+          return cursiv::routeDocumentTool(
               shared, file_argument(arguments), cursiv::DocumentState::Parsed,
               token,
               [&](const cursiv::Document& document, const cursiv::CoreServices&,
@@ -1754,11 +2060,11 @@ struct BlogMcpService final : cursiv::LspMcpService {
          .title = "Workspace Indexed",
          .description = "whether every document's references are indexed",
          .inputSchema = schema},
-        [&shared = _shared](const json::Value& arguments,
+        [&shared = sharedServices](const json::Value& arguments,
                             const cursiv::CancellationToken& token) {
-          return cursiv::route_document_tool(
+          return cursiv::routeDocumentTool(
               shared, file_argument(arguments),
-              cursiv::WorkspaceState::IndexedReferences, token,
+              cursiv::WorkspaceState::kIndexedReferences, token,
               [&](const cursiv::Document&, const cursiv::CoreServices&,
                   std::string& out) {
                 out = shared.documentBuilder->currentState() >=
@@ -1777,7 +2083,7 @@ void a_language_extends_and_prunes_the_set() {
   const BlogMcpService service(*world().services.shared, {"blog-mcp", "0"});
   cursiv::McpServer server = std::move(*service.createServer());
   const std::optional<std::string> tools =
-      server.handleText(R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
+      send_request(server, R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
   CHECK(tools.has_value());
   if (!tools.has_value()) return;
   CHECK(contains(*tools, "byte-count"));

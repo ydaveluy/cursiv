@@ -10,16 +10,19 @@
 #include "cursiv/workspace/FileSystemProvider.hpp"
 
 // A file system in memory: a map from URI to text, enumerated by prefix. URIs
-// of any scheme, kept as `normalize_uri` spells them. Reads may run on several
-// threads at once, but `addFile` must not run beside them.
+// of any scheme, kept as `normalizeUri` spells them. Reads may run on several
+// threads at once, while mutations require exclusive access.
 
 namespace cursiv {
 
-class MemoryFileSystemProvider final : public FileSystemProvider {
+class MemoryFileSystemProvider : public FileSystemProvider {
  public:
-  // Adds or replaces one file, under `normalize_uri(uri)`: the spelling the
+  // Adds or replaces one file, under `normalizeUri(uri)`: the spelling the
   // workspace keys its documents by, whatever case the scheme came in.
   void addFile(std::string_view uri, std::string text);
+
+  // Erases a file or an entire directory subtree.
+  void erase(std::string_view uri);
 
   [[nodiscard]] FileSystemNode stat(std::string_view uri) const override;
   [[nodiscard]] bool exists(std::string_view uri) const override;

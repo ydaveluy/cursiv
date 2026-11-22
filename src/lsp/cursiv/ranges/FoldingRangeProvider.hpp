@@ -23,6 +23,6 @@ class FoldingRangeProvider {
       const Document& document, const CancellationToken& = {}) const = 0;
 };
 
-using FoldingRangeAcceptor = function_ref<void(lsp::FoldingRange)>;
+using FoldingRangeAcceptor = FunctionRef<void(lsp::FoldingRange)>;
 
 }  // namespace cursiv

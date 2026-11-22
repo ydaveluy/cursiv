@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -20,16 +21,16 @@
 #include "core/grammar/SpellingGrammars.hpp"
 #include "core/syntax-tree/DualGrammar.hpp"
 #include "cursiv/Check.hpp"
+#include "cursiv/engine/generator/GrammarPrinter.hpp"
+#include "cursiv/engine/generator/TextMate.hpp"
+#include "cursiv/engine/grammar/View.hpp"
+#include "cursiv/engine/lexer/CharClass.hpp"
 #include "cursiv/grammar/DefaultGrammarSource.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/GrammarUtils.hpp"
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/grammar/word_final_in.hpp"
 #include "cursiv/parser/Parser.hpp"
-#include "cursiv/shared/gen/LexCodePoints.hpp"
-#include "cursiv/shared/utils/GrammarDump.hpp"
-#include "cursiv/shared/utils/GrammarPrinter.hpp"
-#include "cursiv/shared/utils/dump.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
@@ -38,11 +39,8 @@
 #include "derivedialect/generated/Dialect/Module.hpp"
 #include "deriverule/generated/RuleDialect/Module.hpp"
 #include "derivetextdialect/generated/Dialect/Module.hpp"
-#include "derivetextdialectll/generated/DialectLl/Module.hpp"
 #include "docswide/generated/G/Module.hpp"
-#include "docswidell/generated/Ll/Module.hpp"
-#include "dualll/generated/Ll/Module.hpp"
-#include "duallr/generated/Lr/Module.hpp"
+#include "duallr/generated/D2/Module.hpp"
 #include "sentblob/generated/Blob/Module.hpp"
 #include "sentfree/generated/Free/Module.hpp"
 #include "sentword/generated/Word/Module.hpp"
@@ -54,6 +52,8 @@
 // The expression layer: NTTP usability, operator+ flattening, create
 // absorption, combinator shapes, directive shapes.
 namespace expr {
+
+static_assert(cursiv::engine::gen::dump_type_name<long double>() == "long double");
 
 using namespace cursiv;
 
@@ -405,10 +405,6 @@ static_assert(
         detail::Flag<&ast::Node::many,
                      detail::Choice<detail::Seq<A, B>, Stop>>>);
 static_assert(
-    std::is_same_v<detail::commit_free_t<decltype(GrammarSpec::repeat<2>(
-                       GrammarSpec::commit(A{}, B{})))>,
-                   detail::Repeat<2, 2, detail::Seq<A, B>>>);
-static_assert(
     std::is_same_v<
         detail::commit_free_t<
             decltype(GrammarSpec::repeat<1, 3>(GrammarSpec::commit(A{}, B{})))>,
@@ -449,6 +445,8 @@ static_assert(detail::misplaced_commit<decltype(GrammarSpec::commit(A{}, B{}) |
                                                 GrammarSpec::lit<"x">)>);
 static_assert(detail::misplaced_commit<
               decltype(GrammarSpec::many(!GrammarSpec::commit(A{}, B{})))>);
+static_assert(detail::misplaced_commit<
+              decltype(GrammarSpec::repeat<2>(GrammarSpec::commit(A{}, B{})))>);
 static_assert(
     !detail::holds_commit<decltype(GrammarSpec::lit<"x"> +
                                    GrammarSpec::many(GrammarSpec::lit<"y">))>);
@@ -931,7 +929,8 @@ void run() {
 
 namespace source_test {
 using namespace cursiv;
-using namespace cursiv::engine;
+using cursiv::engine::gen::dump_wrapped;
+using cursiv::engine::gen::GrammarDump;
 namespace left {
 struct ID : cursiv::detail::TerminalRule<GrammarSpec::lit<"left">> {};
 }  // namespace left
@@ -953,11 +952,7 @@ struct G : GrammarSpec {
   using ignored = z;
 };
 struct Overridden : extends<G> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, left::ID>
-  struct override<T> : terminal<ref<right::ID>> {};
+  using overrides = list<replace<left::ID, terminal<ref<right::ID>>>>;
 };
 
 // The same data layout as emitted source, with storage owned by this fixture.
@@ -978,7 +973,7 @@ struct Source {
 };
 
 void exact_dependencies_and_cycles() {
-  Source fixture(dump_compiled_indexed<G>());
+  Source fixture(support::dump_indexed<G>());
   const auto source = fixture.service();
   CHECK(source.grammarText() == dump_wrapped(support::dump_compiled<G>()));
   CHECK(source.ruleNames().front() == "Root");
@@ -1004,7 +999,7 @@ void exact_dependencies_and_cycles() {
 }
 
 void overrides_change_the_graph() {
-  Source fixture(dump_compiled_indexed<Overridden>());
+  Source fixture(support::dump_indexed<Overridden>());
   const auto source = fixture.service();
   CHECK(source.ruleClosure("ID") ==
         std::string(source.ruleText("ID")) + '\n' +
@@ -1066,11 +1061,8 @@ static_assert(!Plain::overrides<Doc::ID>);
 static_assert(!Plain::overrides<Doc::Root>);
 
 struct Wide : extends<Doc> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, Doc::ID>
-  struct override<T> : terminal<cr<"a-zA-Z_$"> + many(w | lit<"$">)> {};
+  using overrides =
+      list<replace<Doc::ID, terminal<cr<"a-zA-Z_$"> + many(w | lit<"$">)>>>;
 };
 
 using Wid = detail::ResolveOverride<Wide>;
@@ -1084,7 +1076,7 @@ static_assert(std::same_as<Wid::rule<Doc::ID>::declared, Doc::ID>);
 static_assert(std::same_as<Wid::rule<Doc::ID>::kind, Doc::ID::kind>);
 // The body is the override's, and it is not the base's.
 static_assert(
-    std::same_as<Wid::body<Doc::ID>, base_body<Wide::override<Doc::ID>>>);
+    std::same_as<Wid::body<Doc::ID>, decltype(GrammarSpec::cr<"a-zA-Z_$"> + GrammarSpec::many(GrammarSpec::w | GrammarSpec::lit<"$">))>);
 static_assert(!std::same_as<Wid::body<Doc::ID>, Plain::body<Doc::ID>>);
 // ...and what nothing restates is still itself, in the same grammar.
 static_assert(std::same_as<Wid::rule<Doc::Word>, Doc::Word>);
@@ -1116,16 +1108,9 @@ struct Spelled : GrammarSpec {
   using entry = SeqThenZ;
 };
 
-// One override grammar per (rule, spelling). The macro is the only way to keep
-// the twelve cases readable; each expands to the four lines a specialization
-// of `override<>` takes.
-#define CURSIV_OV(NAME, RULE, KIND, ...)       \
-  struct NAME : extends<Shapes> {              \
-    template <class>                           \
-    struct override;                           \
-    template <class T>                         \
-      requires std::same_as<T, Shapes::RULE>   \
-    struct override<T> : KIND<__VA_ARGS__> {}; \
+#define CURSIV_OV(NAME, RULE, KIND, ...)                              \
+  struct NAME : extends<Shapes> {                                     \
+    using overrides = list<replace<Shapes::RULE, KIND<__VA_ARGS__>>>; \
   };
 
 CURSIV_OV(BareT, SeqT, terminal, super)
@@ -1154,11 +1139,8 @@ struct EmptyCreation : GrammarSpec {
   using entry = Root;
 };
 struct SuffixedCreation : extends<EmptyCreation> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, EmptyCreation::Root>
-  struct override<T> : rule<super + lit<"suffix">> {};
+  using overrides =
+      list<replace<EmptyCreation::Root, rule<super + lit<"suffix">>>>;
 };
 static_assert(std::same_as<
               eff<SuffixedCreation, EmptyCreation::Root>,
@@ -1212,11 +1194,7 @@ static_assert(
                  Shapes::SeqR::kind>);
 
 struct Thrice : extends<CatSeqT> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, Shapes::SeqT>
-  struct override<T> : terminal<super + lit<"y">> {};
+  using overrides = list<replace<Shapes::SeqT, terminal<super + lit<"y">>>>;
 };
 
 struct SpelledTwice : GrammarSpec {
@@ -1266,11 +1244,7 @@ static_assert(
 struct Tagged;
 
 struct Slotted : extends<Doc> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, Doc::ID>
-  struct override<T> : terminal<as<Tagged>(super)> {};
+  using overrides = list<replace<Doc::ID, terminal<as<Tagged>(super)>>>;
 };
 
 static_assert(
@@ -1281,11 +1255,7 @@ static_assert(std::same_as<Plain::rule<Doc::ID>::slot, TypeList<>>);
 // Two sides that restate a rule apart join where a grammar restates it once
 // more, as the refusal advises: a body with no `super` needs neither side's.
 struct Chosen : extends<CatSeqT, PreSeqT> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, Shapes::SeqT>
-  struct override<T> : terminal<lit<"a">> {};
+  using overrides = list<replace<Shapes::SeqT, terminal<lit<"a">>>>;
 };
 
 static_assert(detail::ResolveOverride<Chosen>::overrides<Shapes::SeqT>);
@@ -1295,11 +1265,7 @@ static_assert(std::same_as<eff<Chosen, Shapes::SeqT>, base_body<Shapes::OneT>>);
 // restatement states its own.
 struct Retagged : extends<Slotted, Wide> {
   using ignored = Doc::WS;
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, Doc::ID>
-  struct override<T> : terminal<as<Tagged>(lit<"id">)> {};
+  using overrides = list<replace<Doc::ID, terminal<as<Tagged>(lit<"id">)>>>;
 };
 
 static_assert(
@@ -1308,20 +1274,12 @@ static_assert(
 
 // ...and where both sides state one converter apart, it may state none.
 struct Twin : extends<Doc> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, Doc::ID>
-  struct override<T> : terminal<as<Tagged>(super)> {};
+  using overrides = list<replace<Doc::ID, terminal<as<Tagged>(super)>>>;
 };
 
 struct Twins : extends<Slotted, Twin> {
   using ignored = Doc::WS;
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, Doc::ID>
-  struct override<T> : terminal<lit<"id">> {};
+  using overrides = list<replace<Doc::ID, terminal<lit<"id">>>>;
 };
 
 static_assert(
@@ -1329,20 +1287,13 @@ static_assert(
                      detail::ResolveOverride<Twins>::rule<Doc::ID>>::type::slot,
                  TypeList<Tagged>>);
 
-// The resolution is a push: a grammar is asked rule by rule, never for the
-// list of what it overrides. So a declaration for a rule outside the entry's
-// reach costs nothing and answers when asked.
-
+// A replacement may target a rule outside the entry.
 struct Elsewhere : GrammarSpec {
   struct Never : terminal<lit<"never">> {};
 };
 
 struct Reaching : extends<Doc> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, Elsewhere::Never>
-  struct override<T> : terminal<lit<"always">> {};
+  using overrides = list<replace<Elsewhere::Never, terminal<lit<"always">>>>;
 };
 
 static_assert(detail::ResolveOverride<Reaching>::overrides<Elsewhere::Never>);
@@ -1482,7 +1433,7 @@ static_assert(every_alt_heads<F::body<Flat::RepMany>>);
 namespace nst {
 
 // `cursiv::Extends` and not plain inheritance: the deduction walks a node's
-// bases through `ast_bases`, and a common base it cannot see is a common base
+// bases through `AstBases`, and a common base it cannot see is a common base
 // it answers `void` for.
 struct Inner : cursiv::Extends<cursiv::AstNode> {
   string_view name;
@@ -1792,29 +1743,73 @@ static_assert(
 
 }  // namespace hand
 
-// A rule outside every cycle has one answer whatever the path, and one
-// inside a cycle one answer per set of rules on the path.
+// The rules that take one another's answer answer once, together: the work
+// follows the rules and their references, never the paths through them.
 namespace paths {
 
 struct Leaf : cursiv::Extends<cursiv::AstNode> {
   string_view text;
 };
 
+// Forks that join again, then close a cycle, ending on `End`.
+template <auto End>
 struct Diamond : GrammarSpec {
-  template <int I, bool Last = (I == 8)>
-  struct R;
+  template <int I>
+  struct A;
+  template <int I>
+  struct B;
+  template <int I, bool Last = (I == 12)>
+  struct R : rule<ref<A<I>> | ref<B<I>>> {};
+  template <int I>
+  struct R<I, true> : rule<End | (lit<"("> + ref<R<0>> + lit<")">)> {};
   template <int I>
   struct A : rule<lit<"a"> + ref<R<I + 1>>> {};
   template <int I>
   struct B : rule<lit<"b"> + ref<R<I + 1>>> {};
-  template <int I, bool Last>
-  struct R : rule<ref<A<I>> | ref<B<I>>> {};
-  template <int I>
-  struct R<I, true> : rule<create<Leaf>(assign<&Leaf::text>(lit<"x">))> {};
   using entry = R<0>;
 };
-static_assert(std::same_as<cursiv::detail::rule_type_t<Diamond::R<0>>, Leaf>);
-static_assert(cursiv::detail::is_node_rule<Diamond::A<3>>);
+using NodeDiamond = Diamond<GrammarSpec::create<Leaf>(
+    GrammarSpec::assign<&Leaf::text>(GrammarSpec::lit<"x">))>;
+using DataDiamond = Diamond<GrammarSpec::lit<"x">>;
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<NodeDiamond::R<0>>, Leaf>);
+static_assert(cursiv::detail::is_node_rule<NodeDiamond::A<3>>);
+static_assert(cursiv::detail::is_data_rule<DataDiamond::A<3>>);
+static_assert(std::same_as<cursiv::detail::rule_type_t<DataDiamond::R<0>>,
+                           std::string_view>);
+
+// A member access wraps a primary, which holds any expression: the access
+// adopts nothing, so a target takes only what an access and a name build.
+struct Value : cursiv::Extends<cursiv::AstNode> {};
+struct Place : cursiv::Extends<Value> {};
+struct Name : cursiv::Extends<Place> {
+  string_view name;
+};
+struct Member : cursiv::Extends<Place> {
+  Value* object = nullptr;
+  string_view member;
+};
+struct Number : cursiv::Extends<Value> {
+  string_view digits;
+};
+struct Targets : GrammarSpec {
+  struct Expression;
+  struct NameRef : rule<create<Name>(assign<&Name::name>(lit<"n">))> {};
+  struct Primary
+      : rule<create<Number>(assign<&Number::digits>(lit<"1">)) | ref<NameRef> |
+             (lit<"("> + ref<Expression> + lit<")">)> {};
+  struct Access
+      : rule<ref<Primary> + nest<Member, &Member::object>(
+                                lit<"."> + assign<&Member::member>(lit<"m">))> {
+  };
+  struct Expression : rule<ref<Access> | ref<Primary>> {};
+  struct Target : rule<ref<Access> | ref<NameRef>> {};
+  using entry = Target;
+};
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<Targets::Target>, Place>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<Targets::Expression>, Value>);
 
 struct Clique : GrammarSpec {
   template <int I>
@@ -1838,6 +1833,7 @@ struct Ring : GrammarSpec {
                            (lit<"("> + ref<L<0>> + lit<")">)> {};
   using entry = L<0>;
 };
+static_assert(std::same_as<cursiv::detail::rule_type_t<Ring::L<0>>, Leaf>);
 static_assert(std::same_as<cursiv::detail::rule_type_t<Ring::L<1>>, Leaf>);
 static_assert(std::same_as<cursiv::detail::rule_type_t<Ring::L<2>>, Leaf>);
 
@@ -1857,11 +1853,7 @@ static_assert(every_alt_heads<M::body<G::Mixed>>);
 // compiles, not on what the base declared.
 
 struct Restated : extends<G> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, G::Plain>
-  struct override<T> : rule<create<Node>(lit<"x">)> {};
+  using overrides = list<replace<G::Plain, rule<create<Node>(lit<"x">)>>>;
 };
 
 // The creation is needed on the body the grammar compiles: the override's, not
@@ -1898,14 +1890,9 @@ struct Base : GrammarSpec {
 // by overriding it -- and the resolution has to reach it, not only the rules
 // the entry names.
 struct Wider : extends<Base> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, Base::WS>
-  struct override<T> : terminal<some(s | lit<"\\">)> {};
-  template <class U>
-    requires std::same_as<U, Base::DOC>
-  struct override<U> : terminal<lit<"#"> + many(cr<R"(^\n)">)> {};
+  using overrides =
+      list<replace<Base::WS, terminal<some(s | lit<"\\">)>>,
+           replace<Base::DOC, terminal<lit<"#"> + many(cr<R"(^\n)">)>>>;
 };
 
 using P0 = detail::ResolveOverride<Base>;
@@ -2012,10 +1999,10 @@ static_assert(
                    detail::Lit<"toto">>);
 
 const cursiv::Parser& spellplain() {
-  return support::parser_of<&tspell::generated::Plain::create_parser>();
+  return support::parser_of<&tspell::generated::Plain::createParser>();
 }
 const cursiv::Parser& spelldashed() {
-  return support::parser_of<&tspell::generated::Dashed::create_parser>();
+  return support::parser_of<&tspell::generated::Dashed::createParser>();
 }
 
 bool parses(const cursiv::Parser& engine, std::string_view text) {
@@ -2035,9 +2022,6 @@ void the_word_final_rule() {
         std::string::npos);
   // ...and it gains one exactly where the class admits it.
   CHECK(support::dump_compiled<tspell::Bracketed>().find("\"[\"\\b[[a-z]") !=
-        std::string::npos);
-  // A `declared<>` view shows the request, not the answer: `kw<>` asked.
-  CHECK(support::dump_declared<tspell::Default>().find("\"[\" NAME") !=
         std::string::npos);
 }
 
@@ -2164,11 +2148,7 @@ struct Dg : cursiv::GrammarSpec {
 };
 
 struct D2 : cursiv::extends<Dg> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, Dg::ID>
-  struct override<T> : terminal<cr<"A-Z"> + many(w)> {};
+  using overrides = list<replace<Dg::ID, terminal<cr<"A-Z"> + many(w)>>>;
 };
 
 }  // namespace
@@ -2311,11 +2291,8 @@ struct SelfBase : cursiv::GrammarSpec {
   using entry = List;
 };
 struct SelfDerived : cursiv::extends<SelfBase> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, SelfBase::List>
-  struct override<T> : rule<ref<ID> + option(lit<";"> + ref<List>)> {};
+  using overrides = list<
+      replace<SelfBase::List, rule<ref<ID> + option(lit<";"> + ref<List>)>>>;
 };
 struct SkipBase : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t)">)> {};
@@ -2325,11 +2302,8 @@ struct SkipBase : cursiv::GrammarSpec {
   using ignored = WS;
 };
 struct SkipDerived : cursiv::extends<SkipBase> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, SkipBase::WS>
-  struct override<T> : terminal<some(cr<R"( \t\r\n)">)> {};
+  using overrides =
+      list<replace<SkipBase::WS, terminal<some(cr<R"( \t\r\n)">)>>>;
 };
 }  // namespace Q5
 
@@ -2360,12 +2334,11 @@ void run() {
   expect(
       support::dump_expr<decltype(GrammarSpec::many(GrammarSpec::kw<"a">))>(),
       "\"a\"*", "many");
-  // A raw expression view has no grammar, so a `kw<>` that names no class of
-  // its own prints its guard as spelled: the grammar resolves it, and
-  // `compiled<>` is where it shows.
+  // A keyword prints in double quotes where it ends in a word character, in
+  // single quotes where it does not.
   expect(support::dump_expr<decltype(GrammarSpec::some(
              GrammarSpec::kw<"a">, GrammarSpec::kw<",">))>(),
-         R"("a" ("," "a")*)", "separated");
+         R"("a" (',' "a")*)", "separated");
   expect(support::dump_expr<decltype(GrammarSpec::repeat<2, 5>(
              GrammarSpec::kw<"a">))>(),
          "\"a\"{2,5}", "bounded");
@@ -2393,37 +2366,39 @@ void run() {
   expect(support::dump_expr<
              decltype(GrammarSpec::nest<ast::Node, &ast::Node::target>(
                  GrammarSpec::kw<".">))>(),
-         "{Node.target=} \".\"", "nest");
+         "{Node.target=} '.'", "nest");
 
   expect(support::dump_declared<Q4::G>(),
          "grammar G skip WS;\n"
          "entry data Root: $0 $1;\n"
          "terminal WS: \\s+;\n"
          "terminal $0: [0-9]+;\n"
-         "data $1: \"(\" \")\";",
+         "data $1: '(' ')';",
          "inline rules named");
 
-  expect(support::dump_declared<Dg>(),
+  namespace gen = cursiv::engine::gen;
+  auto image = gen::grammar_image<gen::View<Dg>>();
+  gen::GrammarPrinter printer(image);
+  expect(printer.render().text,
          "grammar Dg skip WS;\n"
-         "entry Item returns Node: \"item\" name=ID;\n"
+         "entry Item returns Node: {Node} \"item\" name=ID;\n"
          "terminal WS: \\s+;\n"
          "terminal ID: [a-z] [0-9A-Z_a-z]*;",
          "declared grammar");
 
-  // The compiled view shows the resolved grammar: the override's body under
-  // the same rule name.
+  // The override's body stands under the same rule name.
   expect(support::dump_compiled<D2>(),
          "grammar D2 skip WS;\n"
-         "entry Item returns Node: \"item\" name=ID;\n"
+         "entry Item returns Node: {Node} \"item\" name=ID;\n"
          "terminal WS: \\s+;\n"
          "terminal ID: [A-Z] [0-9A-Z_a-z]*;",
          "compiled grammar with override");
 
-  // rule() and closure(): one rule, and a rule with everything it reaches.
-  expect(cursiv::engine::dump_rule<Dg::ID>(),
+  // closure(): one rule, and a rule with everything it reaches.
+  expect(printer.closure(image.rule(gen::kRule<gen::View<Dg>, Dg::ID>)),
          "terminal ID: [a-z] [0-9A-Z_a-z]*;", "rule");
-  expect(support::dump_closure<Dg::Item>(),
-         "Item returns Node: \"item\" name=ID;\n"
+  expect(printer.closure(image.rule(gen::kRule<gen::View<Dg>, Dg::Item>)),
+         "Item returns Node: {Node} \"item\" name=ID;\n"
          "terminal ID: [a-z] [0-9A-Z_a-z]*;",
          "closure");
 
@@ -2465,36 +2440,39 @@ void run() {
                                      GrammarSpec::same<Close>)>(),
          "mark<Open>('='+) same<Close>", "tagged runs");
 
-  // An infix rule prints its declaration, not the synthesized chain -- and
-  // the node it builds with the three members it writes, which nothing else
-  // in the dump says.
+  // An infix rule prints the node it builds and the three members it writes,
+  // which nothing else in the dump says, then its levels.
   {
     const std::string g = support::dump_declared<Q3::G>();
     expect(g.find("infix Expr returns Bin(left, op, right) on Num: "
-                  "levels(left(\"*\" | \"/\"), left(\"+\" | \"-\"), "
-                  "nonassoc(\"<\"));") != std::string::npos
+                  "levels(left('*' | '/'), left('+' | '-'), "
+                  "nonassoc('<'));") != std::string::npos
                ? "y"
                : g.c_str(),
            "y", "infix header");
-    // ...and the one-rule forms reach it too. They render a rule with no
-    // grammar in hand, and an infix rule is the one that asks such a view for
-    // more than a body.
-    expect(cursiv::engine::dump_rule<Q3::G::Expr>(),
+    // The closure of an infix rule reaches its primary.
+    expect(support::dump_closure<Q3::G, Q3::G::Expr>(),
            "infix Expr returns Bin(left, op, right) on Num: "
-           "levels(left(\"*\" | \"/\"), left(\"+\" | \"-\"), "
-           "nonassoc(\"<\"));",
+           "levels(left('*' | '/'), left('+' | '-'), nonassoc('<'));\n"
+           "terminal Num: [0-9]+;",
            "infix rule alone");
-    // A unary level prints its class and its two members.
-    expect(
-        cursiv::engine::dump_rule<Q3u::G::Expr>(),
-        "infix Expr returns Bin(left, op, right) on Num: "
-        "levels(postfix<Fact(bang, arg)>('!'), prefix<Neg(op, operand)>('-'), "
-        "left('*'));",
-        "infix rule with unary levels");
-    const std::string c = support::dump_closure<Q3::G::Expr>();
-    expect(c.find("terminal Num: [0-9]+;") != std::string::npos ? "y" : c.c_str(),
-           "y",
-           "infix closure reaches the primary");
+    // An infix rule with unary levels is read as a chain of rules, one per
+    // level, named by their level.
+    expect(support::dump_closure<Q3u::G, Q3u::G::Expr>(),
+           "infix Expr returns Bin(left, op, right) on "
+           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 2, true>: "
+           "left('*');\n"
+           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 2, true> returns "
+           "Expr: {Neg} op='-' operand="
+           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 2, true> | "
+           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 1, true>;\n"
+           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 1, true> returns "
+           "Expr: {Fact} arg="
+           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 1, true> bang='!' | "
+           "Num;\n"
+           "Num returns Num: {Num} text=$0;\n"
+           "terminal $0: [0-9]+;",
+           "infix rule with unary levels");
   }
 
   // A skip() region prints as written, inline where it stands.
@@ -2522,24 +2500,31 @@ void run() {
          "'a' {Node.target=} ('b' 'c')", "nest bounded");
 
   // Two rules named ID in one closure: the second keeps its qualified name.
-  expect(support::dump_closure<R3>(),
-         "R3 returns Node: ID dumpcol::ID;\n"
+  expect(support::dump_closure<Dg, R3>(),
+         "R3 returns Node: {Node} ID dumpcol::ID;\n"
          "terminal ID: [a-z] [0-9A-Z_a-z]*;\n"
          "terminal dumpcol::ID: [0-9]+;",
          "name collision");
   // ...and one whose qualified name is taken too gets one spelled from the
   // global scope.
-  expect(support::dump_closure<R4>(),
-         "R4 returns Node: DumpDup ::DumpDup;\n"
+  expect(support::dump_closure<Dg, R4>(),
+         "R4 returns Node: {Node} DumpDup ::DumpDup;\n"
          "terminal DumpDup: [0-9]+;\n"
          "terminal ::DumpDup: [a-z]+;",
          "global name collision");
+
+  using Same = std::remove_cvref_t<decltype(GrammarSpec::ref<::DumpDup>)>;
+  std::string names;
+  for (const auto* ref : {&gen::kNode<gen::View<Dg>, Same>, &gen::kNode<gen::View<D2>, Same>,
+                          &gen::kNode<gen::View<Q>, Same>, &gen::kNode<gen::View<Q4::G>, Same>})
+    names += printer.spell(image.node(*ref)) + ' ';
+  expect(names, "DumpDup ::DumpDup ::DumpDup#2 ::DumpDup#3 ", "numbered name collisions");
 
   // data header, a converter-typed terminal, a skipperless grammar head --
   // and a ConversionResult converter, whose rule returns the value.
   expect(support::dump_declared<Q>(),
          "grammar Q;\n"
-         "entry R returns Node: name=QN REAL;\n"
+         "entry R returns Node: {Node} name=QN REAL;\n"
          "data QN: NUM (',' NUM)*;\n"
          "terminal REAL returns float64: [0-9]+ '.' [0-9]+;\n"
          "terminal NUM returns int32: [0-9]+;",
@@ -2560,10 +2545,10 @@ void run() {
          "overridden skipper");
 
   // Folding: stable, in the library, shared with the golden.
-  expect(cursiv::engine::dump_wrapped("Item: 'a' / 'b';\n", 92),
+  expect(cursiv::engine::gen::dump_wrapped("Item: 'a' / 'b';\n", 92),
          "Item: 'a' / 'b';\n", "wrap short");
   // A doc's apostrophe is prose, not a quote.
-  expect(cursiv::engine::dump_wrapped(
+  expect(cursiv::engine::gen::dump_wrapped(
              "Keyword: /** opens the machine's block */ 'state' | /** closes "
              "the block */ 'end' | /** names the start */ 'initialState' | "
              "'events';\n"),
@@ -2573,7 +2558,7 @@ void run() {
          "    | 'events';\n",
          "wrap past a doc's apostrophe");
   // A space a quote or a class spells is never a break; a doc's prose is.
-  expect(cursiv::engine::dump_wrapped(
+  expect(cursiv::engine::gen::dump_wrapped(
              "Item: 'one two' [\\t ] \"say \\\"hi there\\\"\" tail;\n", 12),
          "Item: 'one two'\n"
          "      [\\t ]\n"
@@ -2581,14 +2566,14 @@ void run() {
          "      tail;\n",
          "wrap keeps quotes and classes whole");
   // A class of properties spells its scalars bare, a quote and a space too.
-  expect(cursiv::engine::dump_wrapped(
+  expect(cursiv::engine::gen::dump_wrapped(
              "Item: \\p{^\\x0a\"\\x5c} x | \\p{L \\xa0} 'y';\n", 16),
          "Item: \\p{^\\x0a\"\\x5c}\n"
          "      x\n"
          "    | \\p{L \\xa0}\n"
          "      'y';\n",
          "wrap keeps property classes whole");
-  expect(cursiv::engine::dump_wrapped("Item: /** a long doc here */ x;\n", 16),
+  expect(cursiv::engine::gen::dump_wrapped("Item: /** a long doc here */ x;\n", 16),
          "Item: /** a long\n"
          "      doc here\n"
          "      */ x;\n",
@@ -2597,44 +2582,15 @@ void run() {
 
 }  // namespace dump
 
-// A node a rewrite makes is interned once for the same fields: two texts over
-// one buffer are two fields when their lengths differ.
-namespace derived_nodes {
-
-void a_derived_node_keeps_the_length_of_each_text() {
-  static constexpr char kText[] = "Longer";
-  cursiv::detail::GrammarImage image;
-  const cursiv::detail::ImageDesc token{.kind = cursiv::detail::ImageKind::lit,
-                                        .text = "x"};
-  const cursiv::detail::ImageId child = image.node(token);
-  const cursiv::detail::ImageNode shorter{
-      .kind = cursiv::detail::ImageKind::assign,
-      .text = "value",
-      .text2 = std::string_view(kText, 4)};
-  cursiv::detail::ImageNode longer = shorter;
-  longer.text2 = std::string_view(kText, 6);
-  const cursiv::detail::ImageId a = image.derive(shorter, std::span(&child, 1));
-  const cursiv::detail::ImageId b = image.derive(longer, std::span(&child, 1));
-  CHECK(a != b);
-  CHECK(image.nodes[a].text2 == "Long");
-  CHECK(image.nodes[b].text2 == "Longer");
-  CHECK(image.derive(longer, std::span(&child, 1)) == b);
-}
-
-void run() { a_derived_node_keeps_the_length_of_each_text(); }
-
-}  // namespace derived_nodes
-
-// The one `Grammar` over the generated metadata, asked through both engines:
-// a documented word answers its prose from any spelling it matches, and only
-// from those.
+// The one `Grammar` over the generated metadata: a documented word answers its
+// prose from any spelling it matches, and only from those.
 namespace default_grammar {
 
 namespace {
 
-void expect(bool ok, const char* engine, const char* what) {
+void expect(bool ok, const char* what) {
   if (!ok) {
-    std::printf("FAIL %s: %s\n", engine, what);
+    std::printf("FAIL %s\n", what);
     ++cursiv::test::failures;
   }
 }
@@ -2650,12 +2606,11 @@ std::string_view use_doc(const cursiv::Parser& parser, std::string_view text,
   return {};
 }
 
-void words_with_a_text_per_use(const cursiv::Parser& parser,
-                               const char* engine) {
+void words_with_a_text_per_use(const cursiv::Parser& parser) {
   const auto is = [&](std::string_view text, std::string_view word,
                       std::string_view doc, const char* what,
                       unsigned nth = 0) {
-    expect(use_doc(parser, text, word, nth) == doc, engine, what);
+    expect(use_doc(parser, text, word, nth) == doc, what);
   };
   is("twin a!", "twin", "First twin.", "a rule's own text, the start shared");
   is("twin a?", "twin", "Second twin.", "the other rule's own text");
@@ -2665,56 +2620,117 @@ void words_with_a_text_per_use(const cursiv::Parser& parser,
   is("use twin high", "high", "High.", "an arm of a data rule");
   is("use twin low", "low", "Low.", "the other arm");
   is("use twin named", "named", "Named.", "a use that writes a member");
-  is("use twin opt high", "opt", "Maybe.", "an optional use");
+  is("use twin opt high", "opt", std::string_view("May\0be.", 7), "an optional use");
   is("use twin rep rep high", "rep", "Again.", "a repeated use", 1);
   is("other opt rep high low named", "opt", "Perhaps.", "another optional use");
   is("other opt rep high low named", "rep", "Once more.", "another use");
   is("other opt rep high low named", "high", "Tall.", "a use in a sequence");
+  is("use twin HiGh", "HiGh", "High.", "a folded word keeps the data rule's meaning");
+  is("other enable high low named", "enable", "Allows this declaration.", "an exact use beside a folded terminal");
+  is("other HiGh low named", "HiGh", "Tall.", "the same spelling keeps the other rule's meaning");
   is("other opt rep high low named", "named", "Called.", "another member use");
   is("state x", "state", "", "a word with one text is left to its spelling");
   const cursiv::Grammar& g = parser.getGrammar();
-  expect(g.spellingDoc("twin").empty(), engine,
+  expect(g.spellingDoc("enable").empty(), "the exact spelling matches both documented meanings");
+  expect(g.spellingDoc("HiGh").empty(), "a folded spelling with two meanings has no shared text");
+  expect(g.spellingDoc("twin").empty(),
          "a word with several texts has none of its own");
   const cursiv::ParseResult low = parser.parse("use twin low");
   const auto* const word = low.valueAs<tdual::Word>();
-  expect(word != nullptr && word->name == "low", engine,
+  expect(word != nullptr && word->name == "low",
          "a data rule's value keeps its text");
   const cursiv::ParseResult named = parser.parse("use twin named");
   const auto* const member = named.valueAs<tdual::Word>();
-  expect(member != nullptr && member->name == "named", engine,
+  expect(member != nullptr && member->name == "named",
          "a write keeps its value");
 }
 
-void documented_words(const cursiv::Parser& parser, const char* engine) {
+void documented_words(const cursiv::Parser& parser) {
   const cursiv::Grammar& g = parser.getGrammar();
-  expect(g.spellingDoc("events") == "Opens the events.", engine, "events");
-  expect(g.spellingDoc("EvEnTs") == "Opens the events.", engine,
+  expect(g.spellingDoc("events") == "Opens the events.", "events");
+  expect(g.spellingDoc("EvEnTs") == "Opens the events.",
          "a folded word answers any case it matches");
-  expect(g.spellingDoc("state") == "Names a state.", engine, "state");
-  expect(g.spellingDoc("STATE").empty(), engine,
+  expect(g.spellingDoc("state") == "Names a state.", "state");
+  expect(g.spellingDoc("STATE").empty(),
          "an exact word answers its own spelling alone");
-  expect(g.spellingDoc("x").empty(), engine, "a name spells no word");
-  expect(g.spellingDoc(std::string_view("a\0b", 3)) == "binary literal", engine,
-         "a spelling holding a NUL keeps every byte");
-  expect(parser.parse("EVENTS x").accepted, engine, "the folded word parses");
+  expect(g.spellingDoc("x").empty(), "a name spells no word");
+  expect(g.spellingFolds("ENABLE") && g.spellingDoc("EnAbLe") == "Turns it on.",
+         "a folded alternative keeps its own documentation");
+  expect(!g.spellingFolds("off") && g.spellingDoc("off") == "Turns it off." &&
+         g.spellingDoc("OFF").empty(), "a case-sensitive alternative answers only its spelling");
+  expect(g.spellingDoc("signal").empty(), "several texts for the same alternative stay ambiguous");
+  const auto mixed = parser.parse("ENABLE x");
+  const auto* const word = mixed.valueAs<tdual::Word>();
+  expect(mixed.accepted && mixed.diagnostics.empty() && word && word->mode == tdual::Mode::enable,
+         "a named terminal converts its folded alternative to an enumerator");
+  const auto exact = parser.parse("off x");
+  const auto* const off = exact.valueAs<tdual::Word>();
+  expect(off && off->mode == tdual::Mode::off && exact.diagnostics.empty(),
+         "the exact alternative converts with its declared case");
+  const auto mismatch = parser.parse("SLOW x");
+  expect(mismatch.accepted && !mismatch.diagnostics.empty(),
+         "an exact alternative preserves the enumerator's case requirement");
+  expect(g.spellingDoc(std::string_view("a\0b", 3)) == std::string_view("binary\0literal", 14),
+         "a spelling and its documentation keep embedded NULs");
+  expect(cursiv::engine::gen::textmate_keyword_match({{"東京"}, {"β"}, {"+"}}, {.scalars = "a-z$"}) ==
+             R"((?<![$a-z])(東京|β))", "TextMate includes keywords written with Unicode letters");
+  expect(cursiv::engine::gen::textmate_keyword_match({{"if", true}}, {.scalars = R"(&\[\])"}) ==
+             R"((?<![\&\[\]])([iI][fF]))", "TextMate escapes metacharacters in word boundaries");
+  expect(cursiv::engine::gen::textmate_keyword_match({{"end"}, {"end!"}}, {.scalars = "a-z"}) ==
+             R"((?<![a-z])(end!|end(?![a-z])))", "only a word ending in the word class checks its right boundary");
+  expect(cursiv::engine::gen::textmate_keyword_match({{"ss", true}, {"Σ", true}}, {}) ==
+             "([sS][sS]|[Σσς])", "TextMate captures a folded word using the lexer's scalar cases");
+  expect(cursiv::engine::gen::with_keyword_match(
+             R"({"repositor\u0079":{"keywords":{"\u006datch":"old","name":"keep"}}})", "new") ==
+             R"({"repositor\u0079":{"keywords":{"\u006datch":"new","name":"keep"}}})",
+         "TextMate updates an escaped path and preserves neighbouring settings");
+  expect(parser.parse("EVENTS x").accepted, "the folded word parses");
   const char bytes[] = {'E', 'V', 'E', 'N', 'T', 'S', ' ', 'x', '!'};
   const std::string_view view(bytes, 8);
   const cursiv::ParseResult bounded = parser.parse(view);
-  expect(bounded.accepted && !bounded.cst().recovered(), engine,
+  expect(bounded.accepted && !bounded.cst().recovered(),
          "a view needs no terminator");
-  expect(bounded.cst().text().data() == bytes, engine,
+  expect(bounded.cst().text().data() == bytes,
          "the view's bytes are borrowed");
-  expect(parser.parse({}).cst().text().empty(), engine,
+  expect(parser.parse({}).cst().text().empty(),
          "an empty view needs no backing byte");
+}
+
+// A token the grammar spells is a literal wherever it is read, alone in a data
+// rule too; a named terminal's text is not, even spelled like a keyword.
+void literal_leaves(const cursiv::Parser& parser) {
+  // Whether the first leaf spelling `word` is a literal; empty for none.
+  const auto literal = [&](std::string_view text,
+                           std::string_view word) -> std::optional<bool> {
+    const cursiv::ParseResult read = parser.parse(text);
+    const cursiv::Cst& cst = read.cst();
+    for (cursiv::NodeId id = 0; id < cst.size(); ++id)
+      if (cst[id].subtreeSize == 1 && cst.text(id) == word)
+        return parser.getGrammar().recordIsLiteral(cst[id]);
+    return std::nullopt;
+  };
+  expect(literal("twin a!", "twin") == true, "a keyword");
+  expect(literal("twin a!", "!") == true, "punctuation");
+  expect(literal("use twin high", "high") == true,
+         "a keyword a data rule reads alone");
+  expect(literal("use twin named", "named") == true,
+         "a keyword that writes a member");
+  expect(literal("twin a!", "a") == false, "a name");
+  expect(literal("twin state!", "state") == false,
+         "a name spelled like a keyword");
+  expect(literal("# note\nstate a", "# note") == false, "a comment");
+  const cursiv::ParseResult read = parser.parse("twin a!");
+  expect(
+      !parser.getGrammar().recordIsLiteral(read.cst()[read.cst().entryRoot()]), "a record with children");
 }
 
 }  // namespace
 
 void run() {
-  documented_words(*tdual::generated::Lr::create_parser(), "LR");
-  documented_words(*tdual::generated::Ll::create_parser(), "LL");
-  words_with_a_text_per_use(*tdual::generated::Lr::create_parser(), "LR");
-  words_with_a_text_per_use(*tdual::generated::Ll::create_parser(), "LL");
+  const auto parser = tdual::generated::D2::createParser();
+  documented_words(*parser);
+  words_with_a_text_per_use(*parser);
+  literal_leaves(*parser);
 }
 
 }  // namespace default_grammar
@@ -2735,8 +2751,7 @@ void check(const cursiv::Parser& parser) {
 }
 
 void run() {
-  check(*tdocs::generated::G::create_parser());
-  check(*tdocs::generated::Ll::create_parser());
+  check(*tdocs::generated::G::createParser());
 }
 
 }  // namespace wide_docs
@@ -2748,13 +2763,13 @@ namespace compiler {
 namespace {
 
 const cursiv::Parser& sentblob() {
-  return support::parser_of<&tsent::generated::Blob::create_parser>();
+  return support::parser_of<&tsent::generated::Blob::createParser>();
 }
 const cursiv::Parser& sentword() {
-  return support::parser_of<&tsent::generated::Word::create_parser>();
+  return support::parser_of<&tsent::generated::Word::createParser>();
 }
 const cursiv::Parser& sentfree() {
-  return support::parser_of<&tsent::generated::Free::create_parser>();
+  return support::parser_of<&tsent::generated::Free::createParser>();
 }
 
 // A document with a NUL embedded, counted among its bytes.
@@ -2901,35 +2916,30 @@ namespace spec_scalar {
 namespace {
 
 using namespace cursiv;
-using namespace cursiv::engine;
+using cursiv::engine::gen::CharClass;
 
-bool holds(const LexCodePoints& c, char32_t cp) {
-  for (const auto& r : c.ranges)
-    if (r.lo <= cp && cp <= r.hi) return true;
-  return false;
-}
+bool holds(const CharClass& c, char32_t cp) { return c.has(cp); }
 
 template <std::uint64_t M, bool N, str S>
-LexCodePoints points(detail::CpSet<M, N, S>) {
-  return LexCodePoints::of(M, N, S.view());
+CharClass points(detail::CpSet<M, N, S>) {
+  return CharClass::of(M, N, S.view());
 }
 
-bool same_below(const LexCodePoints& a, const LexCodePoints& b,
-                char32_t end) {
+bool same_below(const CharClass& a, const CharClass& b, char32_t end) {
   for (char32_t cp = 0; cp < end; ++cp)
     if (holds(a, cp) != holds(b, cp)) return false;
   return true;
 }
 
 void a_spelling_reads_as_scalars() {
-  const auto wide = LexCodePoints::of(0, true, R"('\\\r\n\u2028)");
+  const auto wide = CharClass::of(0, true, R"('\\\r\n\u2028)");
   CHECK(!holds(wide, U'\\') && !holds(wide, U'\r') && holds(wide, U'r') &&
         !holds(wide, 0x2028));
-  CHECK(wide.holds_invalid());
-  const auto wideSign = LexCodePoints::of(0, false, R"(\u00e9+\\-)");
+  CHECK(wide.invalid);
+  const auto wideSign = CharClass::of(0, false, R"(\u00e9+\\-)");
   CHECK(holds(wideSign, U'\\') && holds(wideSign, U'-') &&
         holds(wideSign, 0xE9));
-  CHECK(!wideSign.holds_invalid());
+  CHECK(!wideSign.invalid);
 }
 
 // A union reads as the spelling that holds them all.
@@ -2944,20 +2954,15 @@ void a_union_reads_as_one_spelling() {
         !holds(outside, U'^') && holds(outside, U'a'));
 }
 
-// Whether a class of code points holds exactly `in` among `probe`; a class
-// the generator refuses holds nothing.
+// Whether a class of code points holds exactly `in` among `probe`.
 template <std::uint64_t M, bool N, str S>
 bool holds_exactly(detail::CpSet<M, N, S> set, std::u32string_view probe,
                    std::u32string_view in) {
-  try {
-    const LexCodePoints c = points(set);
-    for (const char32_t cp : probe)
-      if (holds(c, cp) != (in.find(cp) != std::u32string_view::npos))
-        return false;
-    return true;
-  } catch (const std::invalid_argument&) {
-    return false;
-  }
+  const CharClass c = points(set);
+  for (const char32_t cp : probe)
+    if (holds(c, cp) != (in.find(cp) != std::u32string_view::npos))
+      return false;
+  return true;
 }
 
 // Each side of a union reads as it did alone: a literal `-` at the seam opens
@@ -3003,9 +3008,7 @@ void run() {
   a_union_reads_as_one_spelling();
   a_union_reads_each_side_as_alone();
   a_wide_string_body_excludes_the_backslash(
-      *tdual::generated::Lr::create_parser());
-  a_wide_string_body_excludes_the_backslash(
-      *tdual::generated::Ll::create_parser());
+      *tdual::generated::D2::createParser());
 }
 
 }  // namespace spec_scalar
@@ -3022,8 +3025,8 @@ const tderive::ast::Doc* doc_of(const cursiv::ParseResult& r) {
 }
 
 void a_dialect_reads_what_its_base_reads() {
-  const auto base = tderive::generated::Base::create_parser();
-  const auto dialect = tderive::generated::Dialect::create_parser();
+  const auto base = tderive::generated::Base::createParser();
+  const auto dialect = tderive::generated::Dialect::createParser();
   for (const cursiv::Parser* p : {base.get(), dialect.get()}) {
     const cursiv::ParseResult r = p->parse("a = 1\nb = 22\n");
     const tderive::ast::Doc* doc = doc_of(r);
@@ -3035,9 +3038,9 @@ void a_dialect_reads_what_its_base_reads() {
 
 void only_the_dialect_reads_its_own_spellings() {
   constexpr std::string_view text = "a = 0x1f # hex\nb = 2\n";
-  const auto base = tderive::generated::Base::create_parser();
+  const auto base = tderive::generated::Base::createParser();
   CHECK(doc_of(base->parse(text)) == nullptr);
-  const auto dialect = tderive::generated::Dialect::create_parser();
+  const auto dialect = tderive::generated::Dialect::createParser();
   const cursiv::ParseResult r = dialect->parse(text);
   const tderive::ast::Doc* doc = doc_of(r);
   CHECK(doc != nullptr && doc->items.size() == 2);
@@ -3048,25 +3051,25 @@ void only_the_dialect_reads_its_own_spellings() {
 // a class derived from the rule's, and the base's own alternative stays.
 void a_dialect_adds_an_alternative_to_a_node_rule() {
   constexpr std::string_view text = "*a = 1\nb = 22\n";
-  const auto base = tderive::generated::Base::create_parser();
+  const auto base = tderive::generated::Base::createParser();
   CHECK(doc_of(base->parse(text)) == nullptr);
-  const auto dialect = tderive::generated::RuleDialect::create_parser();
+  const auto dialect = tderive::generated::RuleDialect::createParser();
   const cursiv::ParseResult r = dialect->parse(text);
   const tderive::ast::Doc* doc = doc_of(r);
   CHECK(doc != nullptr && doc->items.size() == 2);
   CHECK(doc != nullptr &&
-        doc->items[0]->type == &cursiv::ast_type_tag<tderive::ast::Starred> &&
+        doc->items[0]->type == &cursiv::kAstTypeTag<tderive::ast::Starred> &&
         doc->items[0]->name == "a" && doc->items[0]->value == 1);
   CHECK(doc != nullptr &&
-        doc->items[1]->type == &cursiv::ast_type_tag<tderive::ast::Item> &&
+        doc->items[1]->type == &cursiv::kAstTypeTag<tderive::ast::Item> &&
         doc->items[1]->name == "b" && doc->items[1]->value == 22);
 }
 
 // A refusal in a rule asks the terminal the grammar in force spells, not the
 // one its base declared.
 void a_refusal_asks_the_dialects_terminal() {
-  const auto base = tderive::generated::Base::create_parser();
-  const auto dialect = tderive::generated::Dialect::create_parser();
+  const auto base = tderive::generated::Base::createParser();
+  const auto dialect = tderive::generated::Dialect::createParser();
   const auto reads = [](const cursiv::Parser& p, std::string_view text) {
     return doc_of(p.parse(text)) != nullptr;
   };
@@ -3084,15 +3087,15 @@ void a_literal_guard_asks_the_dialects_terminal() {
     const cursiv::ParseResult r = p.parse(source);
     return r.accepted && r.diagnostics.empty();
   };
-  const auto base = tderive::generated::Base::create_parser();
-  const auto dialect = tderive::generated::Dialect::create_parser();
+  const auto base = tderive::generated::Base::createParser();
+  const auto dialect = tderive::generated::Dialect::createParser();
   CHECK(clean(*base, "in1") && clean(*base, "in 1") && !clean(*base, "ina"));
   CHECK(!clean(*dialect, "in1") && clean(*dialect, "in 1") &&
         !clean(*dialect, "ina"));
 }
 
 // The text a data rule joins reads each part through the converter the
-// dialect restated, in both engines.
+// dialect restated.
 void a_joined_part_runs_the_dialects_converter() {
   const auto paths = [](const cursiv::Parser& p, std::string_view text) {
     const cursiv::ParseResult r = p.parse(text);
@@ -3102,10 +3105,11 @@ void a_joined_part_runs_the_dialects_converter() {
                ? std::string(doc->paths[0])
                : std::string("<none>");
   };
-  CHECK(paths(*ttext::generated::Dialect::create_parser(), "@@ab.@@cd") ==
-        "ab.cd");
-  CHECK(paths(*ttext::generated::DialectLl::create_parser(), "@@ab.@@cd") ==
-        "ab.cd");
+  const auto parser = ttext::generated::Dialect::createParser();
+  CHECK(paths(*parser, "@@ab.@@cd") == "ab.cd");
+  CHECK(paths(*parser, "old") == "canonical");
+  CHECK(paths(*parser, "new") == "new");
+  CHECK(paths(*parser, "last") == "last");
 }
 
 // A case-insensitive base makes its dialects case-insensitive: the keyword in
@@ -3115,21 +3119,18 @@ void a_dialect_inherits_case_insensitivity() {
     const cursiv::ParseResult r = p.parse(text);
     return r.accepted && r.diagnostics.empty();
   };
-  const std::unique_ptr<cursiv::Parser> parsers[] = {
-      ttext::generated::Dialect::create_parser(),
-      ttext::generated::DialectLl::create_parser()};
-  for (const auto& parser : parsers) {
-    CHECK(reads(*parser, "début: @@ab.@@cd"));
-    CHECK(reads(*parser, "DÉBUT: @@ab.@@cd"));
-    CHECK(reads(*parser, "Début : @@ab.@@cd"));
-    CHECK(!reads(*parser, "DÉBUTS: @@ab.@@cd"));
-    CHECK(!reads(*parser, "DEBUT: @@ab.@@cd"));
-    CHECK(reads(*parser, "@@ab.@@cd [raw]"));
-    CHECK(!reads(*parser, "@@ab.@@cd [RAW]"));
-    // The tree's readers fold the keyword too.
-    CHECK(parser->getGrammar().spellingFolds("début"));
-    CHECK(!parser->getGrammar().spellingFolds(":"));
-  }
+  const std::unique_ptr<cursiv::Parser> parser =
+      ttext::generated::Dialect::createParser();
+  CHECK(reads(*parser, "début: @@ab.@@cd"));
+  CHECK(reads(*parser, "DÉBUT: @@ab.@@cd"));
+  CHECK(reads(*parser, "Début : @@ab.@@cd"));
+  CHECK(!reads(*parser, "DÉBUTS: @@ab.@@cd"));
+  CHECK(!reads(*parser, "DEBUT: @@ab.@@cd"));
+  CHECK(reads(*parser, "@@ab.@@cd [raw]"));
+  CHECK(!reads(*parser, "@@ab.@@cd [RAW]"));
+  // The tree's readers fold the keyword too.
+  CHECK(parser->getGrammar().spellingFolds("début"));
+  CHECK(!parser->getGrammar().spellingFolds(":"));
 }
 
 }  // namespace
@@ -3152,7 +3153,6 @@ int main() {
   grammar_utils::run();
   grammar_spec::run();
   dump::run();
-  derived_nodes::run();
   default_grammar::run();
   wide_docs::run();
   compiler::run();

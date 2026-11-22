@@ -41,9 +41,8 @@ cmake --build --preset wasi-release --target mylang_lsp
 The parser generator is still built and run natively on your machine. The
 WASI presets use their own build directories, apart from the native ones.
 
-LTO is disabled for WASI, including explicit CMake IPO requests, because the
-current SDK does not preserve C++ exception handlers with LTO. Native builds
-keep their own IPO setting.
+The supplied WASI toolchain disables link-time optimization so C++ exceptions
+work with the supported SDK.
 
 ## Use your own toolchain
 
@@ -65,8 +64,10 @@ Then pass it to a preset:
 cmake --preset wasi-release --toolchain cmake/my-wasi.cmake
 ```
 
-Cursiv needs C++ exceptions and wasi-libc. It adds the tail-call options of the
-parser for Clang only; another compiler must enable tail calls itself.
+Cursiv needs C++ exceptions, wasi-libc and WebAssembly SIMD, which Chrome 91,
+Firefox 89, Safari 16.4 and Node.js 16.4 or later run. It adds the tail-call
+options of the parser for Clang only; another compiler must enable tail calls
+itself.
 
 To try the server, select `wasi-release` or `wasi-debug` in VS Code and press
 F5. See [Ship an editor extension](../learn/editor-integration.md).
@@ -92,7 +93,7 @@ The Cursiv runner can load an application-owned host module before starting
 WebAssembly:
 
 ```bash
-node tools/wasi-run.mjs --host-module /path/to/host.mjs server.wasm --stdio
+node vscode/server/wasi-run.mjs --host-module /path/to/host.mjs vscode/server/mylang_lsp.wasm --stdio
 ```
 
 The module exports `createHost(context)`, which may be asynchronous and returns
@@ -113,11 +114,11 @@ export function createHost({ memory }) {
 }
 ```
 
-Call `memory()` inside imported functions to obtain the current memory after
-any growth. Read an address as `offset >>> 0`: it arrives signed, negative past
-2 GiB. The context also contains the WebAssembly `args` and the resolved
-`runner` and `hostModule` paths. Application environment entries supplement the
-host environment; `PWD` always reflects the actual working directory.
+Call `memory()` inside imported functions to obtain the current memory, and
+use `offset >>> 0` for an unsigned byte offset. The context also contains
+`args` and the resolved `runner` and `hostModule` paths. When passing a
+workspace folder or document to the WASI server from a shell, use its absolute
+path.
 
 `instantiated(instance)` runs on each thread after the module's start function
 and before `_start` or the thread's entry point. A host can use it to load more

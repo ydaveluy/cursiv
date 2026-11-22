@@ -41,12 +41,11 @@ class ParserErrorMessageProvider {
   [[nodiscard]] virtual std::string buildMismatchTokenMessage(
       const Grammar& grammar, const ParseDiagnostic& diagnostic,
       std::string_view text) const = 0;
-  // The text ended before an expected construct.
+  // A construct given up: what it still needed after the text it read.
   [[nodiscard]] virtual std::string buildIncompleteMessage(
       const Grammar& grammar, const ParseDiagnostic& diagnostic,
       std::string_view text) const = 0;
-  // A span where the parser hit its work limit: the reading or the repairs
-  // around it may not be the best.
+  // Recovery stopped comparing repairs on this span.
   [[nodiscard]] virtual std::string buildBoundedMessage(
       const Grammar& grammar, const ParseDiagnostic& diagnostic,
       std::string_view text) const = 0;
@@ -65,7 +64,7 @@ class ParserErrorMessageProvider {
 
 // The spellings of what the repair expected, the first named first, at most
 // `limit` of them: what a message quotes and what a quick fix writes.
-[[nodiscard]] std::vector<std::string_view> expected_spellings(
+[[nodiscard]] std::vector<std::string_view> expectedSpellings(
     const Grammar& grammar, const ParseDiagnostic& diagnostic,
     std::size_t limit);
 

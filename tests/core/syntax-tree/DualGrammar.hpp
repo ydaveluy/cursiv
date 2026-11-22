@@ -1,21 +1,21 @@
 #pragma once
 
-// One grammar both engines generate, each body entered by its own first
-// token: documented keywords, a derived node, a string body, a root owning its
-// children, and terminals an override chain replaces.
+// Distinct first tokens select the keyword, AST and converter cases.
 
 #include <concepts>
 #include <cstdint>
 #include <string_view>
 
 #include "cursiv/grammar/GrammarSpec.hpp"
-#include "ConvertGrammars.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tdual {
 
+enum class Mode { unset, enable, off, signal, slow };
+
 struct Word : cursiv::Extends<cursiv::AstNode> {
   string_view name;
+  Mode mode = Mode::unset;
 };
 
 struct Child : cursiv::Extends<cursiv::AstNode> {
@@ -74,12 +74,15 @@ struct G : cursiv::GrammarSpec {
   struct DEC : terminal<as<hex_conv>(lit<"0x"> + some(cr<"0-9a-fA-F">))> {};
   struct TEN : terminal<as<hex_conv>(lit<"0x"> + some(cr<"0-9a-fA-F">))> {};
 
-  // One word read case-insensitively, one exactly, and a spelling holding a
-  // NUL.
+  struct Register : terminal<ikw<"enable">.doc<"Turns it on.">() |
+                             kw<"enable">.doc<"Exact spelling.">() | kw<"off"> |
+                             kw<"off">.doc<"Turns it off.">() |
+                             kw<"signal">.doc<"First.">() | kw<"signal">.doc<"Second.">() |
+                             kw<"signal">.doc<"Third.">() | kw<"SLOW">> {};
   struct Documented
       : rule<create<Word>((ikw<"events">.doc<"Opens the events.">() |
                            kw<"state">.doc<"Names a state.">() |
-                           lit<"a\0b">.doc<"binary literal">()) +
+                           lit<"a\0b">.doc<"binary\0literal">() | assign<&Word::mode>(ref<Register>)) +
                           assign<&Word::name>(ref<ID>))> {};
 
   // Words with a text per use: two rules that part only after the name, two uses
@@ -92,18 +95,19 @@ struct G : cursiv::GrammarSpec {
   struct Twice : rule<create<Word>(kw<"twice">.doc<"Opens.">() +
                                    assign<&Word::name>(ref<ID>) +
                                    kw<"twice">.doc<"Closes.">())> {};
-  struct Level : rule<kw<"high">.doc<"High.">() | kw<"low">.doc<"Low.">()> {};
+  struct Level : rule<ikw<"high">.doc<"High.">() | kw<"low">.doc<"Low.">()> {};
   struct Uses
       : rule<create<Word>(kw<"use"> + kw<"twin"> +
-                          option(kw<"opt">.doc<"Maybe.">()) +
+                          option(kw<"opt">.doc<"May\0be.">()) +
                           many(kw<"rep">.doc<"Again.">()) +
                           (assign<&Word::name>(ref<Level>) |
                            assign<&Word::name>(kw<"named">.doc<"Named.">())))> {
   };
   struct Others : rule<create<Word>(kw<"other"> +
+                                    option(kw<"enable">.doc<"Allows this declaration.">()) +
                                     option(kw<"opt">.doc<"Perhaps.">()) +
                                     option(kw<"rep">.doc<"Once more.">()) +
-                                    kw<"high">.doc<"Tall.">() +
+                                    ikw<"HIGH">.doc<"Tall.">() +
                                     kw<"low">.doc<"Short.">() +
                                     assign<&Word::name>(
                                         kw<"named">.doc<"Called.">()))> {};
@@ -118,6 +122,9 @@ struct G : cursiv::GrammarSpec {
              option(kw<"links"> + assign<&Derived::links>(ref<ID>))> {};
 
   struct Quoted : rule<create<Str> + assign<&Str::text>(ref<STR>)> {};
+  // A data rule's word written to a member that names nothing.
+  struct Toned
+      : rule<create<Str>(kw<"tone"> + assign<&Str::text>(ref<Level>))> {};
 
   struct ItemR : rule<create<Item> + assign<&Item::name>(ref<ID>)> {};
   struct MarkR : rule<create<Mark> + kw<"mark">> {};
@@ -137,9 +144,10 @@ struct G : cursiv::GrammarSpec {
                           (kw<"dec"> + assign<&N::n>(ref<DEC>)) |
                           (kw<"ten"> + assign<&N::n>(ref<TEN>))> {};
 
-  struct Root : rule<ref<Documented> | ref<Reflected> | ref<Quoted> |
-                     ref<Owner> | ref<Converted> | ref<Declared> | ref<TwinA> |
-                     ref<TwinB> | ref<Twice> | ref<Uses> | ref<Others>> {};
+  struct Root
+      : rule<ref<Documented> | ref<Reflected> | ref<Quoted> | ref<Owner> |
+             ref<Converted> | ref<Declared> | ref<TwinA> | ref<TwinB> |
+             ref<Twice> | ref<Uses> | ref<Others> | ref<Toned>> {};
   using entry = Root;
   using ignored = WS;
   using hidden = list<NOTE>;
@@ -152,37 +160,15 @@ struct D1 : cursiv::extends<G> {
   static constexpr auto tens_conv = [](std::string_view t) {
     return static_cast<std::uint32_t>(t.size() * 10);
   };
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, G::TEN>
-  struct override<T>
-      : terminal<as<tens_conv>(lit<"0x"> + some(cr<"0-9a-fA-F">))> {};
+  using overrides =
+      list<replace<G::TEN,
+                   terminal<as<tens_conv>(lit<"0x"> + some(cr<"0-9a-fA-F">))>>>;
 };
 struct D2 : cursiv::extends<D1> {
-  template <class>
-  struct override;
-  template <class T>
-    requires std::same_as<T, G::HEX>
-  struct override<T> : terminal<lit<"0X"> + some(cr<"0-9a-fA-F">)> {};
-  template <class T>
-    requires std::same_as<T, G::DEC>
-  struct override<T> : terminal<as<std::uint64_t>(some(cr<"0-9">))> {};
-  template <class T>
-    requires std::same_as<T, G::TEN>
-  struct override<T> : terminal<lit<"0Y"> + some(cr<"0-9a-fA-F">)> {};
-};
-struct Lr : D2 {};
-struct Ll : D2 {
-  // A keyword in a converter's template argument must remain qualified in
-  // LL output as well as LR output, without generating all converters twice.
-  struct Root
-      : rule<ref<G::Root> |
-             (lit<"$conv:"> +
-              skip(ignore<tconv::G::WS>, hide<tconv::G::CM>,
-                   (ref<tconv::G::KeywordRoot> | ref<tconv::G::BlankRoot>) +
-                       eof))> {};
-  using entry = Root;
+  using overrides =
+      list<replace<G::HEX, terminal<lit<"0X"> + some(cr<"0-9a-fA-F">)>>,
+           replace<G::DEC, terminal<as<std::uint64_t>(some(cr<"0-9">))>>,
+           replace<G::TEN, terminal<lit<"0Y"> + some(cr<"0-9a-fA-F">)>>>;
 };
 
 }  // namespace tdual

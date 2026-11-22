@@ -21,7 +21,7 @@ class OperationCancelled : public std::runtime_error {
   [[noreturn]] static void raise();
 };
 
-inline void throw_if_cancelled(const CancellationToken& token) {
+inline void throwIfCancelled(const CancellationToken& token) {
   if (token.stop_requested()) [[unlikely]]
     OperationCancelled::raise();
 }

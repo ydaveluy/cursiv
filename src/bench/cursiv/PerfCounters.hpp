@@ -175,7 +175,7 @@ class PerfCounters {
   std::size_t _groupCount = 0;
 };
 
-inline PerfSample perf_delta(const PerfSample& from, const PerfSample& to) {
+inline PerfSample perfDelta(const PerfSample& from, const PerfSample& to) {
   PerfSample d;
   if (!from.valid || !to.valid || from.pmuCount != to.pmuCount) return d;
   std::uint64_t dominantRunning = 0;

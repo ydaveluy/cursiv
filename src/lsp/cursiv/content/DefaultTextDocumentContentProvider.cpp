@@ -31,7 +31,7 @@ DefaultTextDocumentContentProvider::provideTextDocumentContent(
   // A scheme has no case, and the URI type lowers the one the client sent.
   if (const auto scheme = params.uri.scheme();
       scheme.empty() || std::ranges::none_of(_schemes, [&](const auto& own) {
-        return folded_equal(own, scheme);
+        return foldedEqual(own, scheme);
       }))
     return std::nullopt;
   const std::shared_ptr<Document> document =

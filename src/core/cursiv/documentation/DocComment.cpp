@@ -35,7 +35,7 @@ bool is_alnum(char c) noexcept { return is_alpha(c) || (c >= '0' && c <= '9'); }
 std::size_t tag_name_end(std::string_view text, std::size_t at) noexcept {
   for (bool first = true;; first = false) {
     std::size_t length = 0;
-    const char32_t c = scalar_at(text.data() + at, text.size() - at, length);
+    const char32_t c = scalarAt(text.data() + at, text.size() - at, length);
     if (length == 0 ||
         !(unicode::within(unicode::kL, std::size(unicode::kL), c) ||
           (!first && unicode::within(unicode::kN, std::size(unicode::kN), c))))
@@ -153,112 +153,57 @@ std::optional<BlockTagMatch> match_block_tag(std::string_view line,
                        line.substr(nameStart, cursor - nameStart)};
 }
 
-// One `{@tag ...}` occurrence inside a line fragment.
-struct InlineTagMatch {
-  std::size_t begin = 0;       // index of `{` in the fragment
-  std::size_t fullLength = 0;  // length including `{` and `}`
-  std::size_t whitespace = 0;  // whitespace between name and content
-  std::string_view name;       // "@name"
-  std::string_view content;    // content between name and `}` (may be empty)
-  bool hasContent = false;
-};
-
-std::vector<InlineTagMatch> find_inline_tags(std::string_view fragment) {
-  std::vector<InlineTagMatch> matches;
-  std::size_t pos = 0;
+// The tokens of a line fragment: its text, and for each `{@tag ...}` the
+// `@tag` then a Text of its content, empty at the name's end when it has none.
+void build_inline_tokens(std::string_view fragment, std::uint32_t lineIndex,
+                         std::size_t characterBase,
+                         std::vector<Token>& tokens) {
+  const auto text = [&](std::size_t begin, std::size_t end) {
+    tokens.push_back({Token::Type::Text,
+                      fragment.substr(begin, end - begin),
+                      {position(lineIndex, characterBase + begin),
+                       position(lineIndex, characterBase + end)}});
+  };
+  std::size_t lastIndex = 0;
   std::size_t boundary = 0;
-  while (pos < fragment.size()) {
-    if (fragment[pos] != '{') {
-      ++pos;
+  for (std::size_t pos = 0; pos < fragment.size(); ++pos) {
+    if (fragment[pos] != '{' || pos + 1 >= fragment.size() ||
+        fragment[pos + 1] != '@') {
       continue;
     }
-    std::size_t cursor = pos + 1;
-    if (cursor >= fragment.size() || fragment[cursor] != '@') {
-      ++pos;
+    const std::size_t nameStart = pos + 1;
+    const std::size_t nameEnd = tag_name_end(fragment, nameStart + 1);
+    if (nameEnd == nameStart + 1) {
       continue;
     }
-    const std::size_t nameStart = cursor;
-    cursor = tag_name_end(fragment, cursor + 1);
-    if (cursor == nameStart + 1) {
-      ++pos;
-      continue;
-    }
-    const std::size_t nameEnd = cursor;
-    const std::size_t wsStart = cursor;
-    cursor = skip_whitespace(fragment, cursor);
-    const std::size_t contentStart = cursor;
+    const std::size_t contentStart = skip_whitespace(fragment, nameEnd);
     // A failed opener scanned up to `boundary` without a stop: the next one
     // resumes there, unless its own blanks already ran past it.
-    boundary = std::max(boundary, cursor);
+    boundary = std::max(boundary, contentStart);
     while (boundary < fragment.size() && fragment[boundary] != '}' &&
            fragment[boundary] != '\n' && fragment[boundary] != '\r') {
       ++boundary;
     }
-    cursor = boundary;
-    if (cursor >= fragment.size() || fragment[cursor] != '}') {
-      ++pos;
+    if (boundary >= fragment.size() || fragment[boundary] != '}') {
       continue;
     }
-    InlineTagMatch match;
-    match.begin = pos;
-    match.fullLength = (cursor + 1) - pos;
-    match.name = fragment.substr(nameStart, nameEnd - nameStart);
-    match.whitespace = contentStart - wsStart;
-    match.hasContent = cursor > contentStart;
-    match.content = fragment.substr(contentStart, cursor - contentStart);
-    matches.push_back(match);
-    pos = cursor + 1;
-  }
-  return matches;
-}
-
-void build_inline_tokens(std::string_view fragment, std::uint32_t lineIndex,
-                         std::size_t characterBase,
-                         std::vector<Token>& tokens) {
-  const auto matches = find_inline_tags(fragment);
-  if (matches.empty()) {
-    tokens.push_back({Token::Type::Text,
-                      fragment,
-                      {position(lineIndex, characterBase),
-                       position(lineIndex, characterBase + fragment.size())}});
-    return;
-  }
-
-  std::size_t lastIndex = 0;
-  for (const auto& match : matches) {
-    if (match.begin > lastIndex) {
-      tokens.push_back({Token::Type::Text,
-                        fragment.substr(lastIndex, match.begin - lastIndex),
-                        {position(lineIndex, characterBase + lastIndex),
-                         position(lineIndex, characterBase + match.begin)}});
+    if (pos > lastIndex) {
+      text(lastIndex, pos);
     }
-    std::size_t offset = match.begin + 1;  // skip '{'
-    tokens.push_back(
-        {Token::Type::InlineTag,
-         match.name,
-         {position(lineIndex, characterBase + offset),
-          position(lineIndex, characterBase + offset + match.name.size())}});
-    offset += match.name.size();
-    if (match.hasContent) {
-      offset += match.whitespace;
-      tokens.push_back({Token::Type::Text,
-                        match.content,
-                        {position(lineIndex, characterBase + offset),
-                         position(lineIndex, characterBase + offset +
-                                                 match.content.size())}});
+    tokens.push_back({Token::Type::InlineTag,
+                      fragment.substr(nameStart, nameEnd - nameStart),
+                      {position(lineIndex, characterBase + nameStart),
+                       position(lineIndex, characterBase + nameEnd)}});
+    if (boundary > contentStart) {
+      text(contentStart, boundary);
     } else {
-      tokens.push_back({Token::Type::Text,
-                        "",
-                        {position(lineIndex, characterBase + offset),
-                         position(lineIndex, characterBase + offset)}});
+      text(nameEnd, nameEnd);
     }
-    lastIndex = match.begin + match.fullLength;
+    lastIndex = boundary + 1;
+    pos = boundary;
   }
   if (lastIndex < fragment.size()) {
-    tokens.push_back({Token::Type::Text,
-                      fragment.substr(lastIndex),
-                      {position(lineIndex, characterBase + lastIndex),
-                       position(lineIndex, characterBase + fragment.size())}});
+    text(lastIndex, fragment.size());
   }
 }
 
@@ -495,11 +440,20 @@ std::string render_link_default(std::string_view target,
         return is_alnum(c) || c == '_' || c == '+' || c == '.' || c == '-';
       });
   if (!scheme) return std::string(target);
+  // The destination escapes `(`, `)` and `\`, so it holds the whole URI.
+  const auto link = [&] {
+    std::string destination;
+    for (const char c : target) {
+      if (c == '(' || c == ')' || c == '\\') destination += '\\';
+      destination += c;
+    }
+    return std::format("[{}]({})", display, destination);
+  };
   std::string_view path = target.substr(colon + 1);
   if (path.starts_with("//")) {
     if (const auto end = path.find_first_of("/?#", 2);
         (end == std::string_view::npos ? path.size() : end) > 2)
-      return std::format("[{}]({})", display, target);
+      return link();
     path.remove_prefix(2);
   }
   path = path.substr(0, path.find_first_of("?#"));
@@ -515,7 +469,7 @@ std::string render_link_default(std::string_view target,
     return false;
   };
   if (slash() && slash()) return std::string(target);
-  return std::format("[{}]({})", display, target);
+  return link();
 }
 
 std::optional<std::string> render_inline_tag(
@@ -671,7 +625,7 @@ std::string DocComment::toMarkdown(
   });
 }
 
-bool is_doc_comment(std::string_view comment,
+bool isDocComment(std::string_view comment,
                     const DocCommentParseOptions& options) {
   const std::size_t lastBreak = comment.find_last_of("\r\n");
   const std::string_view first = comment.substr(0, comment.find_first_of("\r\n"));
@@ -682,7 +636,7 @@ bool is_doc_comment(std::string_view comment,
          (options.end.empty() || match_suffix_marker(last, options.end).has_value());
 }
 
-DocComment parse_doc_comment(std::string_view comment, DocCommentPosition start,
+DocComment parseDocComment(std::string_view comment, DocCommentPosition start,
                              const DocCommentParseOptions& options) {
   const auto lines = get_lines(comment);
   const auto tokens = tokenize(lines, start, options);

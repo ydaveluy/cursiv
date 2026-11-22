@@ -15,9 +15,9 @@ namespace cursiv::detail {
 
 // The rows of each diagnostic, in order: up to three replacements, nearest
 // first. None for a diagnostic that is not a not-found reference, or past the
-// first sites of its document. The references are walked once per request.
+// first sites of the request: `spelt` counts them over all its calls.
 [[nodiscard]] std::vector<JsonValue::Array> spelling_actions(
     const Document& document, std::span<const Diagnostic* const> diagnostics,
-    const CancellationToken& token = {});
+    unsigned& spelt, const CancellationToken& token = {});
 
 }  // namespace cursiv::detail

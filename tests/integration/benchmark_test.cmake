@@ -26,8 +26,8 @@ function(run_bench executable)
   set(BENCH_OUTPUT "${_out}" PARENT_SCOPE)
 endfunction()
 
-function(refuse_bench)
-  execute_process(COMMAND "${BENCH}" ${ARGN} TIMEOUT ${_timeout}
+function(refuse_bench executable)
+  execute_process(COMMAND "${executable}" ${ARGN} TIMEOUT ${_timeout}
       RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
   if(_rc MATCHES "timeout")
     message(FATAL_ERROR "benchmark hung: ${ARGN}")
@@ -153,15 +153,20 @@ string(JSON _iterations GET "${_rss}" rows 0 iterations)
 if(NOT _iterations EQUAL 1)
   message(FATAL_ERROR "RSS mode depended on the option order")
 endif()
-refuse_bench()
-refuse_bench("${WORK}/missing.tiny")
-refuse_bench("${_input}" --rss "${_other}")
-refuse_bench("${_input}" --multi)
-refuse_bench(--dump-corpus "${WORK}/invalid")
-refuse_bench(--unknown)
+refuse_bench("${BENCH}")
+refuse_bench("${BENCH}" "${WORK}/missing.tiny")
+refuse_bench("${BENCH}" "${_input}" --rss "${_other}")
+refuse_bench("${BENCH}" "${_input}" --multi)
+refuse_bench("${BENCH}" --dump-corpus "${WORK}/invalid")
+refuse_bench("${BENCH}" --unknown)
 
 # The consumer's generator: a corpus dumped then replayed, and the worker curve.
 run_bench("${GENERATED}" --sizes 64 --no-multi --dump-corpus "${WORK}/corpus")
+refuse_bench("${GENERATED}" --sizes 64 --no-multi --corpus "${WORK}/corpus"
+    --dump-corpus "${WORK}/again")
+if(EXISTS "${WORK}/again")
+  message(FATAL_ERROR "a refused corpus dump wrote ${WORK}/again")
+endif()
 run_bench("${GENERATED}" --sizes 64 --no-multi --iterations 1
     --corpus "${WORK}/corpus" --json "${WORK}/replay.json")
 file(READ "${WORK}/replay.json" _replay)

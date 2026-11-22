@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -73,10 +74,11 @@ class DefaultDocuments : public Documents {
   std::unordered_map<std::string, DocumentId, detail::TransparentStringHash,
                      std::equal_to<>>
       _byUri;
-  // A second index over the same truth, never a second truth: `_rows` holds the
-  // documents, `_byUri` answers one URI in a hash, and this answers a folder --
-  // which a flat map only answers by reading every key.
+  // Two more indexes over `_rows`, never a second truth, holding only the ids
+  // with a document: by folder for the folder queries, and one bit per id for
+  // `all`, which reads them in id order.
   UriTrie<DocumentId> _byFolder;
+  std::vector<std::uint64_t> _held;
 };
 
 }  // namespace cursiv

@@ -6,10 +6,10 @@ you write them inside the grammar. Terminals read text, rules combine tokens,
 and directives fill your AST. To learn step by step, start with
 [Write a grammar](../learn/write-a-grammar.md).
 
-The syntax is the same for both engines, LR (the default and recommended one)
-and LL, within their [support limits](refusals.md#where-the-engines-differ).
-Snippets assume the surrounding grammar and AST declarations. Examples show
-what the grammar accepts or rejects before error recovery repairs the input.
+The generator refuses a grammar it cannot read; see
+[Grammar errors and fixes](refusals.md). Snippets assume the surrounding
+grammar and AST declarations. Examples show what the grammar accepts or
+rejects before error recovery repairs the input.
 
 | To… | See |
 |---|---|
@@ -76,7 +76,7 @@ them, and may build an AST node. You call either with `ref<R>`.
 
 | Declaration | Meaning |
 |---|---|
-| `terminal<Body>` | One token, with no trivia inside. Its value is its text. |
+| `terminal<Body>` | One token, with adjacent input. Its value is the matched text unless a converter wraps the whole body. |
 | `rule<Body>` | Tokens, with trivia allowed between them. |
 | `terminal<as<X>(Body)>`, `rule<as<X>(Body)>` | A terminal or data rule whose text is [converted](#conversion). |
 | `ref<R>` | A call to a terminal or rule. `ref<terminal<…>>` and `ref<rule<…>>` declare one in place. |
@@ -136,19 +136,19 @@ escapes and Unicode.
 |---|---|
 | `lit<"…">` | these exact bytes, never empty; use it for punctuation, such as `lit<";">` |
 | `lit<"…", G>` | the literal, only if the guard `G` holds right after it: `lit<"=", !lit<"=">>` |
-| `kw<"…">` | the literal, unless the next character continues a word; use it for words, such as `kw<"if">` |
+| `kw<"…">` | a literal with a word-boundary test when its last character belongs to `word_boundary` |
 | `ikw<"…">` | the same, ignoring letter case: `ikw<"if">` also matches `IF` (see [Case-insensitive languages](../recipes/case-insensitive.md)) |
 | `eol` | CRLF, LF or CR; not the end of input, so write `eol | eof` to accept either |
 | `eof` | the end of input, after any trailing trivia |
 
-`kw<"if">` matches `if` but not the start of `iffy`, whereas `lit<"end">` also
-matches the start of `endx`. In a rule, the generator
-[warns](refusals.md#a-word-literal-with-no-guard) about such a literal unless
-it has a guard. The `word_boundary` setting decides which characters continue
-a word: `w` (`a-zA-Z0-9_`) by default, or for example
-`uc::XID_Continue | cr<"_$">` in a Unicode language. `kw<"if">.doc<"…">()`
-adds hover text. A word with one text shows it wherever it is read. Give uses
-different texts, and each one shows its own.
+`word_boundary` defaults to `w` (ASCII letters, digits and underscore).
+`kw<"if">` matches `if` only when the next character is outside that class
+or the input ends. A spelling ending in punctuation has no such test, so
+`kw<"(">` can match immediately before a name. For Unicode identifiers,
+use a continuation class such as `uc::XID_Continue | cr<"_$">`.
+
+Use `kw<"if">.doc<"…">()` to add hover text. A keyword can share one
+description across the grammar or have a different description at each use.
 
 Keywords are contextual: a word reads as a keyword only where the grammar
 expects that keyword ([Tokens](#tokens)). Where only an identifier is
@@ -166,6 +166,37 @@ A rule with the same body reads three tokens and allows trivia between them.
 A terminal used as a token or as trivia must consume input, unless its whole
 body is `indent` or `dedent`. A terminal used only in a condition may match
 nothing. See also [Recursive terminals](#recursive-terminals).
+
+### Scanning bytes with a function
+
+Use `scan<F>` inside a terminal when its length comes from the input. For
+example, a byte string starting with `5:` has exactly five payload bytes.
+Define the scanner before the grammar:
+
+```cpp
+#include <charconv>
+#include <string_view>
+
+inline std::size_t read_byte_string(std::string_view input) {
+  if (input.empty()) return 0;
+  const char* const end = input.data() + input.size();
+  std::size_t count;
+  const auto [colon, error] = std::from_chars(input.data(), end, count);
+  if (error != std::errc{} || colon == end || *colon != ':') return 0;
+  const auto header = static_cast<std::size_t>(colon + 1 - input.data());
+  return count <= input.size() - header ? header + count : 0;
+}
+```
+
+In the grammar, `struct DATA : terminal<scan<read_byte_string>> {};` reads
+`5:abcde` or `0:` as one token and rejects the truncated `5:abc`. You can
+compose the scanner with other expressions, for example
+`terminal<lit<"data="> + scan<read_byte_string>>`.
+
+The function sees the remaining input at its position and returns the number
+of bytes consumed. Zero or a count beyond the view means no match. The
+parser may try it more than once, so keep it deterministic, free of side
+effects and quick to reject an unrelated prefix.
 
 ### Through
 
@@ -191,13 +222,11 @@ category, and any other terminal, such as `some(d)`, is a pattern.
 | Rule | Example |
 |---|---|
 | Only the terminals that a viable parse can accept at this point are tried, plus trivia and what the [conditions](#conditions) there name. | Where only `ID` is expected, `if` reads as an `ID`, even if the grammar uses `kw<"if">` elsewhere. |
-| The longest match wins. At equal length, other tokens beat trivia, and keywords and literals beat patterns. An expected keyword also beats trivia that starts with the same word, up to a [limit on case spellings](refusals.md#keywordspellings). | Where `kw<"if">` and `ID` are both expected, `if` reads as the keyword and `iffy` as an `ID`. |
+| The longest match wins. At equal length, other tokens beat trivia, and keywords and literals beat patterns. An expected keyword also beats trivia that starts with the same word, when its word boundary holds. | Where `kw<"if">` and `ID` are both expected, `if` reads as the keyword and `iffy` as an `ID`. |
 | Other ties keep every match: each parse continues with the token it can accept. | With `LOW : terminal<some(cr<"a-z">)>` and `NAME : terminal<some(cr<"a-zA-Z">)>`, `(ref<LOW> + lit<";">) | (ref<NAME> + lit<":">)` accepts `abc:`. |
 | Once read, a token is never split again, even if the parse then fails. | `(lit<"a"> + lit<"b">) | (lit<"ab"> + lit<"c">)` rejects `ab`. |
 
-Two trivia terminals that tie are [refused](refusals.md#triviatied) unless
-both are ignored. If two terminals stand for the same kind of token, define
-one and use it everywhere.
+If two trivia terminals describe the same text, use one terminal everywhere.
 
 ## Composition
 
@@ -230,19 +259,17 @@ many(append<&Block::statements>(ref<Statement>)) // zero or more statements
 | `repeat<Min, Max>(e)` | Min to Max; Min ≤ Max and Max ≥ 1; `kUnbounded` means no upper bound |
 
 Put `append` inside the repetition to collect one child per item, as in
-`many(append<&Block::statements>(ref<Statement>))`. `append<…>(many(…))` is
-refused, because `append` takes one element. A trailing separator must be
-written out: `option(some(e, sep) + option(sep))`. In a rule or a recursive
-terminal, a repeated item must consume input: write `many(x)`, not
-[`many(option(x))`](refusals.md#nullablerepetition). Large `repeat` bounds
-make the generated parser [larger](refusals.md#grammar-size-limits).
+`many(append<&Block::statements>(ref<Statement>))`. A trailing separator must be
+written out: `option(some(e, sep) + option(sep))`. In a rule, a repeated item
+should consume input on each turn. Use `many(x)` for an optional list of
+items that each read `x`. Large counted repetitions increase parser size.
 
 ### Unordered groups
 
 `unordered(a, b, …)` reads each of its items once, in any order. It needs at
-least two items. An item may be optional, with `option(x)`, `many(x)` or
-`repeat<0, n>(x)`; any other item must read input
-([refused](refusals.md#nullableunordereditem) otherwise).
+least two and accepts at most eleven. Use `option(x)` for an optional item
+or `many(x)` for a contiguous run of zero or more items. A bounded optional
+run such as `repeat<0, 3>(x)` cannot be an unordered item.
 
 | Expression | Accepted input |
 |---|---|
@@ -252,15 +279,14 @@ least two items. An item may be optional, with `option(x)`, `many(x)` or
 
 For items that may repeat anywhere, collect them with
 `many(append<&ast::Box::settings>(ref<Setting>))` and report duplicates in a
-[validation check](../recipes/validation.md). Groups have a
-[size limit](refusals.md#unorderedtoowide).
+[validation check](../recipes/validation.md). See [grammar limits](refusals.md#grammar-size-limits).
 
 ### Choosing between parses
 
-The parser keeps every alternative that can still complete the input. When
-several complete parses remain, it compares their decisions from left to
-right, outer before nested. At the first difference, the grammar's order
-decides:
+The parser keeps competing readings until the input or the grammar decides
+between them. When several complete parses
+remain, it compares their decisions from left to right, outer before nested.
+The grammar's order decides at the first difference.
 
 | Construct | Preferred decision |
 |---|---|
@@ -271,14 +297,20 @@ decides:
 
 A terminal takes its longest match instead, and
 [left recursion](#left-recursion) has its own order. An alternative that reads
-the same tokens as an earlier one is never chosen: the generator
-[warns and drops it](refusals.md#an-alternative-that-repeats-an-earlier-one).
+the same tokens as an earlier one loses that tie, even when it writes different members.
 
 So with `option(kw<"else"> + ref<Statement>)` at the end of an `if` rule,
 `if a if b x else y` gives the `else` to the nearest `if`.
 [`commit`](#committed-items) does the same, but removes the other reading.
-Factoring `A B | A C` into `A (B | C)` accepts the same input but can change
-the tree, because `A`'s own decision then comes first.
+Factoring can change which property is written. Suppose `A` reads `x y | x`,
+`B` reads `y z` and `C` reads `z`. On `x y z`, `a=A b=B | a=A c=C` selects
+the first outer alternative and fills `b`. In `a=A (b=B | c=C)`, the first
+alternative of `A` consumes `x y`, so the following `z` fills `c`.
+
+Run the language generator with `CURSIV_CONFLICTS=1` to see local LR
+conflicts, their lookahead, and the grammar declarations and properties involved.
+A local conflict identifies a choice at a parser state. Establishing ambiguity
+requires a complete input accepted through both readings.
 
 ## Building the tree
 
@@ -343,9 +375,11 @@ a `nest` makes a new node on each turn. Directives inside a
 [condition](#conditions), a `through` or a `mark` are refused, because they
 would never run.
 
-`flag<&T::m>(e)` does not make `e` optional: `flag<…>(option(…))` always sets
-the member, and the generator warns. Initialize the member to `false` and put
-the `option` outside: `option(flag<&Decl::isStatic>(kw<"static">))`.
+`flag<&T::m>(e)` sets the property whenever `e` succeeds, including an empty
+match. The generator warns when `e` can succeed without consuming a token,
+including through a rule call. For a presence flag, initialize the property to
+`false` and write `option(flag<&Decl::isStatic>(kw<"static">))`. Both `indent`
+and `dedent` consume a parser token even at a zero-width source position.
 
 `nest` wraps the current node, so a `create`, an adoption or a write must come
 before it. Its member must be able to hold that node:
@@ -369,12 +403,10 @@ The value of an operand of `assign`, `append` or an
 | A [token](#tokens), rule or `section` | Its value, after its converter. |
 | An alternative | The value of the alternative that matched. |
 | A sequence that builds no node | Its text, joined as in a [data rule](#rules-and-grammar-settings). |
-| Only a quantifier, building no node | No value; [refused](refusals.md#a-directive-over-a-shape-with-no-value). |
+| Optional or repeated text | Put the directive inside the quantifier to write once per matched item. |
 
-So `assign<&T::name>(ref<ID> + many(lit<"."> + ref<ID>))` stores `a.b.c`, but
-`assign<&T::n>(option(ref<NUMBER>))` is refused. Write
-`option(assign<&T::n>(ref<NUMBER>))` instead, or move the quantifier into a
-data rule to store its text.
+So `assign<&T::name>(ref<ID> + many(lit<"."> + ref<ID>))` stores `a.b.c`. Write `option(assign<&T::n>(ref<NUMBER>))` to leave the
+member untouched when the number is absent.
 
 ## Conversion
 
@@ -394,7 +426,7 @@ struct STRING : terminal<as<unquote>(through(lit<"\"">, lit<"\"">))> {};
 
 | `X` | Value |
 |---|---|
-| A type `T` | `cursiv::default_converter<T>`, built in for `string_view`, `boolean`, sized integers, `float32`/`float64` and enumerations by enumerator name. For other types, specialize it with `static ConversionResult<T> convert(std::string_view text)`: it then also converts every member of type `T` written without a converter. |
+| A type `T` | `cursiv::default_converter<T>` converts text to `std::string_view`, `std::string`, booleans, sized integers, floating-point values (`float`, `double`) or an enum by name. Specialize it with `static ConversionResult<T> convert(std::string_view text)` to support your own type in both `as<T>` and assignments. |
 | A function `f` | `f(text)`, `f(parts)` or `f()`. |
 | Another constant | The constant itself, such as an enumerator. |
 
@@ -408,9 +440,11 @@ or `variant<...>`, of values, written whole with `assign`. `parts` is valid only
 during the call.
 
 `as<T>` makes a `T` first and the member takes that value, as with a function:
-`as<std::int8_t>` on an `int64` member reports `128` as out of range. A number the
-member would cut short is refused: `as<std::int64_t>` on an `int8` member does not
-compile. An integer is accepted in a `float64` member.
+`as<std::int8_t>` on an `int64` member reports `128` as out of range. Use a member wide enough for the converter’s result.
+
+Automatic enum conversion looks up names for values from −64 through 511 by
+default. For other values or spellings, map the keyword explicitly, as in
+`as<Status::Ready>(kw<"ready">)`.
 
 A converter returns a value or a `ConversionResult`. `::ok(v)` gives a value.
 `::err("message")` reports a diagnostic over the matched text; the member then
@@ -418,9 +452,13 @@ keeps its initial value, or `append` adds nothing. Converters run only for the
 selected parse, never in conditions.
 
 `as` can also give a value to part of a rule, as in the `Visibility` rule
-[above](#rules-and-grammar-settings), without changing its tokens: `private` stays a keyword. `as`
-cannot wrap another `as` (combine the two in one function) or an expression
-that builds an AST node.
+[above](#rules-and-grammar-settings), without changing its tokens: `private` stays a keyword.
+Use `rule<as<true>(kw<"on">) | as<false>(kw<"off">)>` when the branches
+give different values. A branch can document its keyword with
+`as<true>(kw<"on">.doc<"Enables the feature.">())`. The spelling, hover
+text and completion stay attached to the keyword. A terminal accepts one
+converter around its entire lexical pattern. Nested conversions belong in
+one function, and the operand of a text conversion must produce text.
 
 ## Operator precedence
 
@@ -458,11 +496,8 @@ with a looser postfix:
 `infix` does not add parentheses: if your language has them, `Primary` must
 read them, and a full expression starts again inside them. A single level
 needs no `levels`, but each argument of `levels` must be a level; a bare
-operator does not [compile](refusals.md#a-level-table-that-lists-an-operator).
-An operator may be both prefix and binary, like `-` here, but not both postfix
-and binary ([refused](refusals.md#postfixbinaryclash)), nor on two levels of
-one table, even with other levels between them
-([refused](refusals.md#precedenceclash)). Two tables may each give it a level.
+operator does not compile. A prefix and a binary operator can share a spelling,
+as in `-a` and `a - b`. Give each binary operator one precedence and associativity.
 
 `Primary` must [build a node](#building-the-tree); a lone primary returns it.
 A binary operator builds a `T` and writes its members `left`, `op` and
@@ -479,8 +514,7 @@ struct Assignment
 ```
 
 An operator is a literal, a terminal, a data rule or a sequence of them,
-possibly with conditions; one that builds a node is
-[refused](refusals.md#infixoperatornottext). Trivia may occur between its
+possibly with conditions. It supplies a value for the operator member. Trivia may occur between its
 tokens unless `gap::none` forbids it: `lit<">"> + gap::none + lit<">">` reads
 `>>` but not `> >`. The operator member stores the operator's
 [expression value](#expression-values): `kw<"NOT"> + kw<"EQUAL">` gives
@@ -542,15 +576,13 @@ or a literal guard, it tests the bytes that follow. With an alphabetic `ID`:
 A condition does not need to match up to the end of input; add `eof` to
 require that. Test the end of input with `eof`, not `!any`. In a rule, the
 first token of a condition must match the whole next token, not only its
-start: `!lit<"<"> + lit<"<<">` reads `<<`. The generator
-[warns](refusals.md#warnings) about an unbounded repetition in a
-condition; bound it, as in `repeat<1, 8>(lit<"-">)`, when the language
-allows. See [Where expressions are allowed](#where-expressions-are-allowed) for what a
+start: `!lit<"<"> + lit<"<<">` reads `<<`. Bound a lookahead when the
+language allows it to limit how far a condition reads. See [Where expressions are allowed](#where-expressions-are-allowed) for what a
 condition may contain.
 
-A condition in a rule also decides which token stands where it stands, by one
-rule on both engines. The token is the longest match among the terminals a
-viable parse can read there and the spellings the conditions there name. A
+A condition in a rule also decides which token stands where it stands. The
+token is the longest match among the terminals a viable parse can read there
+and the spellings the conditions there name. A
 terminal that only a refused condition would let the parse read is not viable,
 so the text is read again without it:
 `(gap::none + lit<"->"> + ref<ID>) | (lit<"-"> + lit<">"> + ref<ID>)` reads
@@ -561,7 +593,8 @@ there, `->` is an error and `- >` is read.
 
 ### Committed items
 
-`commit(p, b)` is an item of `option`, `many`, `some` or `repeat`. It reads
+`commit(p, b)` is the direct item of `option`, `many`, `some` or a
+`repeat<Min, Max>` with Min < Max: a quantifier that may stop early. It reads
 `p + b`, but once the prefix `p` matches, the body `b` must follow: a missing
 body is reported right after `p`. This can change the accepted input:
 
@@ -574,13 +607,12 @@ body is reported right after `p`. This can change the accepted input:
 like `(p + b) | !p`. So `option(commit(kw<"else">, ref<Statement>))` gives
 each `else` to the nearest `if` and removes the other reading.
 
-`commit` must be the direct item of its quantifier. The prefix must consume
-input and may contain only what a condition allows, so it cannot contain
-directives. Commit on a token you do not store, such as a separator or a
-keyword, and read what you store in the body. In a separated list, the
-separator and the prefix commit together, and the prefix is tested on the
-text, like a condition. If a keyword such as `end` may follow a trailing
-separator, guard the prefix against it, as in `!kw<"end"> + ref<ID>`.
+The prefix must consume input and may contain only what a condition allows,
+so it cannot contain directives. Commit on a token you do not store, such as a
+separator or a keyword, and read what you store in the body. In a separated
+list, the separator and the prefix commit together, and the prefix is tested
+on the text, like a condition. If a keyword such as `end` may follow a
+trailing separator, guard the prefix against it, as in `!kw<"end"> + ref<ID>`.
 
 ## Layout
 
@@ -597,7 +629,7 @@ that has a width (or to the start of input): its whitespace and comments.
 | `gap::none` | the gap is empty; even a comment with no spaces around it makes it false |
 
 `e` is a simple text pattern: a class, a literal, `eol` or a repetition of
-them ([other shapes are refused](refusals.md#gapshape)). For example,
+them ([other shapes are refused](refusals.md#tokens-and-layout)). For example,
 `kw<"return"> + option(!gap::line + ref<Expression>)` takes no operand from
 the next line, and `ref<Operand> + gap::none + lit<"++">` requires the two to
 touch.
@@ -611,9 +643,9 @@ parse in any other way, as in
 blocks the insertion**, even one that fails later: with a statement-ending
 `implied(lit<";">, gap::line | eof)`, `a \n (b)` stays a call.
 
-`tok` is an unguarded literal, or a terminal whose body is one, and not a
-bracket named by `indent_open` or `indent_close`. An inserted token has zero
-width. `cond` combines gap conditions, `&e`, `!e` and `eof` with `|` and `+`.
+Use a token such as `lit<";">` or `kw<"end">` for `tok`. Indentation brackets
+must be written explicitly. Use `|` for alternatives in `cond`, or `+` to
+combine one gap test with one token test (`&e`, `!e` or `eof`).
 
 ### Trivia scopes
 
@@ -624,7 +656,7 @@ kept in the CST. `tight(e)` is `skip(ignore<>, hide<>, e)`, so
 inside `e` use the same trivia. Trivia before and after `e` follows the
 caller's settings. A grammar where the trivia before a token may belong to
 the scope or not, depending on how the input is read, is
-[refused](refusals.md#regionboundaryshared).
+[refused](refusals.md#tokens-and-layout).
 
 ### Indentation
 
@@ -687,13 +719,12 @@ through(lit<"["> + mark<Eq>(many(lit<"=">)) + lit<"[">,
 This reads `[[x]]` or `[=[x]=]` with matching delimiters. A capture works
 only inside one token and does not pass into or out of a called terminal. A
 later `mark` of the same tag replaces the stored bytes. Every path must mark a
-tag before `same` reads it ([`echoUnmarked`](refusals.md#echounmarked)).
+tag before `same` reads it. A terminal may use up to four capture tags.
 
 ### Recursive terminals
 
-A terminal may call itself only if every cycle consumes input first
-([`terminalCycle`](refusals.md#terminalcycle)), and it never calls a parser
-rule ([`terminalReadsRule`](refusals.md#terminalreadsrule)). In nested
+Read input before a recursive terminal call and give it a way to finish.
+Terminals can call other terminals. Use parser rules to combine tokens. In nested
 delimited text, keep both delimiters out of the `any` case, so that it reads
 neither an unfinished opening delimiter nor a closing one as plain text:
 
@@ -705,11 +736,10 @@ struct COMMENT
 
 ### Left recursion
 
-A left-recursive rule calls itself before reading a token. Both engines
-support direct and indirect left recursion, including a call inside or behind
-an `option` or behind a `many`, and build the same AST. LL
-[refuses](refusals.md#leftrecursion) some indirect cycles and a call inside
-`many` or `some`. Use [infix](#operator-precedence) for binary operators.
+A left-recursive rule calls itself before reading a token. The parser
+supports direct and indirect left recursion, including a call inside or behind
+an `option`, behind a `many`, or inside a `many` or `some`. Use
+[infix](#operator-precedence) for binary operators.
 
 In the short notation below, `A := x y | x` is a rule `A` that reads `x y` or
 `x`. The non-recursive alternatives start the match, in written order. After
@@ -724,16 +754,9 @@ A := option(A ".") ID       means A "." ID | ID
 So `E` reads `-a!` as `-(a!)`, whatever the order of its alternatives. For
 `(-a)!`, use separate levels: `E := E "!" | N`, `N := "-" N | a`.
 
-Refused forms:
-
-- [An alternative](refusals.md#selfboundedarm) that begins and ends with its
-  own rule, such as `E "+" E`; use `infix` or levels such as
-  `E := E "+" T | T`.
-- [A cycle](refusals.md#unitproductioncycle) that reads no input, such as
-  `A := A | x`.
-- [Left recursion](refusals.md#hiddenleftrecursion) behind something that may
-  match nothing, such as `A := B A x | y` with nullable `B`, or behind more
-  than seven optional items.
+A cycle such as `A := A | x` reads no input and is refused. Use
+`infix` or separate levels such as `E := E "+" T | T` to give an
+ambiguous expression an explicit grouping.
 
 ### Embedded grammars
 
@@ -753,27 +776,31 @@ Inside the section, `G` keeps its own trivia, keywords, `word_boundary`,
 where `close` matches; a missing `close` is an error. The tree holds the nodes
 of both languages.
 
-Refused: a `G` token that matches or begins with `close`
-([`sectionEndShared`](refusals.md#sectionendshared)), alternatives that differ
-only after `open` ([`sectionPointShared`](refusals.md#sectionpointshared)),
-indentation in either grammar
-([`sectionIndented`](refusals.md#sectionindented)), and a terminal as `G`'s
-entry.
+Choose a closing token distinct from every embedded token and its prefixes.
+The alternatives must distinguish the section before entering it. Both grammars
+must be free of indentation and the embedded entry must be a rule.
+See [sections and conditions](refusals.md#sections-and-conditions).
 
 ### Derived grammars
 
-A `cursiv::extends<Base>` grammar may add rules, redeclare `entry`,
-`ignored`, `hidden`, `word_boundary` or `case_insensitive`, and
-[override rules](../recipes/reuse-a-grammar.md#derive-a-dialect). Every call
-to an overridden rule uses the new body, in which `super` stands for the old
-one: `ref<Extra> | super` adds an alternative. An override keeps the rule's
-kind (terminal or rule, AST or data rule). An AST rule's override builds the
-rule's class or a class derived from it. An override inherits the rule's
-converter unless it states its own; without one, a data rule's new body must
-give a value of the same type.
-With `extends<A, B>`, you must restate anything that both parents declare or
-override. The override of a rule that both parents override cannot use
-`super`, and states its own converter when theirs differ.
+A `cursiv::extends<Base>` grammar can add rules, redeclare grammar settings,
+and replace rules in one list. Each target appears once.
+
+```cpp
+using overrides = list<
+    replace<Base::WS, terminal<super | lit<"~">>>,
+    replace<Base::Label, rule<as<canonical>(super) | kw<"new">>>>;
+```
+
+Every call to the target uses its replacement. `super` denotes the effective
+parent body at this level. In `Label` above only the inherited branch uses
+`canonical`. Replacements keep the rule kind, return a compatible AST class
+or data type, and inherit a whole-body converter unless they supply one.
+
+With `extends<A, B>`, a replacement inherited from one common ancestor is
+shared. When both parents supply their own replacement for a target, resolve
+it explicitly in the child with a full body and supply a converter if the
+parents' converters differ. See [Reuse a grammar](../recipes/reuse-a-grammar.md).
 
 ## Where expressions are allowed
 
@@ -783,27 +810,27 @@ override. The override of a rule that both parents override cannot use
 | `eof` | Test | Test | Allowed |
 | `ref<T>`, terminal `T` | Inline body | Token `T` | Text of `T`, under [Conditions](#conditions) |
 | `ref<D>`, data rule `D` | Refused | Value of `D` | Allowed unless recursive |
-| `ref<R>`, AST rule `R` | Refused | Node of `R` | Refused |
+| `ref<R>`, AST rule `R` | Refused | Node of `R` | Can test the text of a non-recursive rule without building its node |
 | `+`, `|`, `option`, `many`, `some`, `repeat` | Allowed | Allowed | Allowed |
-| `commit(p, b)` | Refused | Direct quantifier item | Direct quantifier item |
-| `unordered(…)` | Refused | Allowed | Refused |
+| `commit(p, b)` | Refused | Direct item of a quantifier that may stop early | Same restriction |
+| `unordered(…)` | Refused | Allowed | Allowed |
 | `skip`, `tight`, gap conditions | Refused | Allowed | Allowed |
 | `through` | Allowed | One token | One token |
 | `as<X>(e)` | Whole body | Allowed | Allowed |
+| `scan<F>` | Reads bytes at the current position | Inside a terminal or `through` | Same restriction |
 | `mark`, `same` | Allowed | Inside `through` or an inline terminal | Same restriction |
 | `&e`, `!e` | Test adjacent input | [Conditions](#conditions) | Allowed |
-| `implied`, `indent`, `dedent` | Only `indent`/`dedent`, as the whole body | Allowed | Refused |
+| `implied` | Refused | Allowed | Allowed |
+| `indent`, `dedent` | As the whole body | Read the level change | Read the level change in the enclosing rule |
 | Directives, `section<G>(…)` | Refused | Allowed | Refused |
 
-`eof`, conditions, `create`, absent options and implied tokens consume
-nothing. `indent` and `dedent` have no width but count as consumed tokens, so
-a loop that reads one makes progress.
+`eof`, conditions, `create` and absent options consume no input. An
+`implied` token consumes its spelling when present and has zero width when
+inserted. Each `indent` or `dedent` counts as one token at a zero-width
+position.
 
 ## Warnings and limits
 
-The generator [warns](refusals.md#warnings) about valid expressions
-that are likely mistakes or slow to parse. Warnings never change the grammar,
-except that a [repeated alternative](refusals.md#an-alternative-that-repeats-an-earlier-one) is dropped.
-A **refused** form, including a support limit, fails grammar compilation
-([Grammar errors and fixes](refusals.md)). **Rejected** input, such as invalid
-indentation or a chain at a `nonassoc` level, is an error in the document.
+A grammar error stops the build. Warnings let generation continue, for
+example when a presence flag can be set on empty input or an embedded token
+may overlap its closing delimiter. See [Grammar errors and fixes](refusals.md).

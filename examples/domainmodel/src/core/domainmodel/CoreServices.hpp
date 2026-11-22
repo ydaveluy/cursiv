@@ -27,7 +27,7 @@ struct DomainModelCoreServices
 
   using CoreServicesFor::CoreServicesFor;
 
-  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+  void visitServices(cursiv::FunctionRef<void(const cursiv::ServiceSlot&)>
                          yield) const override {
     cursiv::CoreServices::visitServices(yield);
     yield({"qualifiedNameProvider", true, qualifiedNameProvider != nullptr});

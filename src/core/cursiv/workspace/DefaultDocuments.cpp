@@ -1,7 +1,9 @@
 #include "cursiv/workspace/DefaultDocuments.hpp"
 
+#include <bit>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -40,13 +42,13 @@ const DefaultDocuments::Row* DefaultDocuments::row(
 }
 
 DocumentId DefaultDocuments::getDocumentId(std::string_view uri) const {
-  const std::string canonical = normalize_uri(uri);
+  const std::string canonical = normalizeUri(uri);
   const auto it = _byUri.find(document_key(canonical));
   return it == _byUri.end() ? kNoDocument : it->second;
 }
 
 DocumentId DefaultDocuments::getOrCreateDocumentId(std::string_view uri) {
-  std::string canonical = normalize_uri(uri);
+  std::string canonical = normalizeUri(uri);
   const std::size_t key = document_key(canonical).size();
   if (const auto it = _byUri.find(std::string_view(canonical).substr(0, key));
       it != _byUri.end())
@@ -57,9 +59,13 @@ DocumentId DefaultDocuments::getOrCreateDocumentId(std::string_view uri) {
     throw DocumentStoreError("cursiv: the store has no document id left");
   const auto id = static_cast<DocumentId>(_rows.size());
   _rows.emplace_back(canonical, nullptr);
-  _byFolder.insert(canonical, id);
   canonical.resize(key);
-  _byUri.try_emplace(std::move(canonical), id);
+  try {
+    _byUri.try_emplace(std::move(canonical), id);
+  } catch (...) {
+    _rows.pop_back();
+    throw;
+  }
   return id;
 }
 
@@ -71,11 +77,17 @@ std::string DefaultDocuments::getDocumentUri(DocumentId id) const {
 void DefaultDocuments::addDocument(std::shared_ptr<Document> document) {
   if (document == nullptr) return;
   const DocumentId id = getOrCreateDocumentId(document->uri);
-  if (_rows[static_cast<std::size_t>(id)].document != nullptr)
+  const auto index = static_cast<std::size_t>(id);
+  Row& target = _rows[index];
+  if (target.document != nullptr)
     throw DocumentStoreError("cursiv: a document with the URI '" +
                              document->uri + "' is already present");
+  // Indexed before it is held: a refused allocation leaves it in neither.
+  if (index / 64 >= _held.size()) _held.resize(index / 64 + 1);
+  _byFolder.insert(target.uri, id);
+  _held[index / 64] |= std::uint64_t{1} << (index % 64);
   document->id = id;
-  _rows[static_cast<std::size_t>(id)].document = std::move(document);
+  target.document = std::move(document);
 }
 
 bool DefaultDocuments::hasDocument(std::string_view uri) const {
@@ -94,26 +106,29 @@ std::shared_ptr<Document> DefaultDocuments::getDocument(DocumentId id) const {
 
 std::shared_ptr<Document> DefaultDocuments::deleteDocument(DocumentId id) {
   const auto index = static_cast<std::size_t>(id);
-  if (id == kNoDocument || index >= _rows.size()) return nullptr;
+  if (id == kNoDocument || index >= _rows.size() ||
+      _rows[index].document == nullptr)
+    return nullptr;
 #ifndef NDEBUG
   // Catches the use-after-free `Documents::deleteDocument` warns about: a
   // dependent's resolved reference into `id`, left by a caller that bypassed
   // `DocumentBuilder::update`, would otherwise dangle silently.
-  if (_rows[index].document != nullptr) {
-    const DocumentId self[] = {id};
-    const bool unreferenced = _shared.indexManager->visitElements(
-        nullptr, self, [&](const AstNodeDescription& symbol) {
-          return _shared.indexManager->visitReferences(
-              id, symbol.symbolId,
-              [](const ReferenceDescription&) { return false; });
-        });
-    assert(unreferenced &&
-           "deleteDocument: still referenced by an indexed dependent -- "
-           "purge indexes and unlink dependents first (DocumentBuilder::"
-           "update), or clear the reference before deleting directly");
-  }
+  const DocumentId self[] = {id};
+  const bool unreferenced = _shared.indexManager->visitElements(
+      nullptr, self, [&](const AstNodeDescription& symbol) {
+        return _shared.indexManager->visitReferences(
+            id, symbol.symbolId,
+            [](const ReferenceDescription&) { return false; });
+      });
+  assert(unreferenced &&
+         "deleteDocument: still referenced by an indexed dependent -- "
+         "purge indexes and unlink dependents first (DocumentBuilder::"
+         "update), or clear the reference before deleting directly");
 #endif
-  // The row stays: its id must still name its URI.
+  // The row stays, so the id still names its URI; the folder index drops this
+  // value alone, never the documents under it.
+  _byFolder.eraseValue(_rows[index].uri);
+  _held[index / 64] &= ~(std::uint64_t{1} << (index % 64));
   return std::exchange(_rows[index].document, nullptr);
 }
 
@@ -128,8 +143,7 @@ std::vector<std::shared_ptr<Document>> DefaultDocuments::getDocuments(
     std::string_view folderUri) const {
   std::vector<std::shared_ptr<Document>> documents;
   for (const DocumentId id : _byFolder.findAll(folderUri))
-    if (const Row* const r = row(id); r != nullptr && r->document != nullptr)
-      documents.push_back(r->document);
+    documents.push_back(_rows[static_cast<std::size_t>(id)].document);
   return documents;
 }
 
@@ -137,16 +151,22 @@ std::vector<std::shared_ptr<Document>> DefaultDocuments::deleteDocuments(
     std::string_view folderUri) {
   std::vector<std::shared_ptr<Document>> removed;
   for (const DocumentId id : _byFolder.findAll(folderUri))
-    if (std::shared_ptr<Document> gone = deleteDocument(id); gone != nullptr)
-      removed.push_back(std::move(gone));
+    removed.push_back(deleteDocument(id));
   return removed;
 }
 
+// In id order: the order their URIs were first named.
 std::vector<std::shared_ptr<Document>> DefaultDocuments::all() const {
+  std::size_t count = 0;
+  for (const std::uint64_t bits : _held)
+    count += static_cast<std::size_t>(std::popcount(bits));
   std::vector<std::shared_ptr<Document>> documents;
-  documents.reserve(_rows.size());
-  for (const Row& r : _rows)
-    if (r.document != nullptr) documents.push_back(r.document);
+  documents.reserve(count);
+  for (std::size_t word = 0; word < _held.size(); ++word)
+    for (std::uint64_t bits = _held[word]; bits != 0; bits &= bits - 1)
+      documents.push_back(
+          _rows[word * 64 + static_cast<std::size_t>(std::countr_zero(bits))]
+              .document);
   return documents;
 }
 

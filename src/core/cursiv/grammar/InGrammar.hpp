@@ -73,10 +73,10 @@ struct scoped_guard<G, S, CI, WordBound> {
   using type = cond_t<word_final_in<S, bound, CI>(), Not<bound>, void>;
 };
 // A literal also folds case when G is case-insensitive.
-template <class G, str S, bool CI, class Gd>
-struct scoped<G, Lit<S, CI, Gd>, TypeList<>> {
+template <class G, str S, bool CI, class Gd, bool Keyword>
+struct scoped<G, Lit<S, CI, Gd, Keyword>, TypeList<>> {
   static constexpr bool folded = CI || folds_case<G, S>();
-  using type = Lit<S, folded, typename scoped_guard<G, S, folded, Gd>::type>;
+  using type = Lit<S, folded, typename scoped_guard<G, S, folded, Gd>::type, Keyword>;
 };
 
 template <class G, class E>
@@ -107,28 +107,10 @@ template <class G>
 struct scoped<G, Dedent, TypeList<>> : unindented<G, Dedent> {};
 
 template <class G, class L>
-struct scoped_level;
-template <class G, class Op>
-struct scoped_level<G, LeftAssoc<Op>> {
-  using type = LeftAssoc<scoped_t<G, Op>>;
-};
-template <class G, class Op>
-struct scoped_level<G, RightAssoc<Op>> {
-  using type = RightAssoc<scoped_t<G, Op>>;
-};
-template <class G, class Op>
-struct scoped_level<G, NonAssoc<Op>> {
-  using type = NonAssoc<scoped_t<G, Op>>;
-};
-template <class G, Association A, class N, auto O, auto X, class Op>
-struct scoped_level<G, UnaryLevel<A, N, O, X, Op>> {
-  using type = UnaryLevel<A, N, O, X, scoped_t<G, Op>>;
-};
-template <class G, class L>
 struct scoped_levels;
 template <class G, class... Ls>
 struct scoped_levels<G, Levels<Ls...>> {
-  using type = Levels<typename scoped_level<G, Ls>::type...>;
+  using type = Levels<typename Ls::template rebind<scoped_t<G, typename Ls::op_expr>>...>;
 };
 
 template <class G, class X, class Eff = in_force_t<G, X>,
@@ -192,7 +174,7 @@ inline constexpr bool is_inline_terminal<InGrammar<G, X>> =
 
 template <class G, class E = named_rule_t<G>>
 struct section_entry {
-  static_assert(!is_terminal_rule<E>,
+  static_assert(!kIsTerminalRule<E>,
                 "a grammar embedded with `section<>` has a terminal as its "
                 "entry, but a section is parsed by rules: give the grammar an "
                 "entry rule that uses the terminal");

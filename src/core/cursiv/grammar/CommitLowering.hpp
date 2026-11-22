@@ -12,30 +12,22 @@
 
 namespace cursiv::detail {
 
+enum : unsigned { kPlacedCommit = 1, kMisplacedCommit = 2 };
 template <class E, class Children = typename ExprShape<E>::children>
-inline constexpr bool holds_commit = false;
+inline constexpr unsigned commits = 0;
 template <class E, class... Ks>
-inline constexpr bool holds_commit<E, TypeList<Ks...>> =
-    (holds_commit<Ks> || ...);
+inline constexpr unsigned commits<E, TypeList<Ks...>> = (0u | ... | commits<Ks>);
 template <class P, class B>
-inline constexpr bool holds_commit<Commit<P, B>, TypeList<P, B>> = true;
-template <class T, class C>
-inline constexpr bool holds_commit<Implied<T, C>, TypeList<>> = holds_commit<C>;
-
-template <class E, class Children = typename ExprShape<E>::children>
-inline constexpr bool misplaced_commit = false;
-template <class E, class... Ks>
-inline constexpr bool misplaced_commit<E, TypeList<Ks...>> =
-    (misplaced_commit<Ks> || ...);
-template <class P, class B>
-inline constexpr bool misplaced_commit<Commit<P, B>, TypeList<P, B>> = true;
+inline constexpr unsigned commits<Commit<P, B>, TypeList<P, B>> = kMisplacedCommit;
 template <std::size_t Mn, std::size_t Mx, class P, class B>
-inline constexpr bool
-    misplaced_commit<Repeat<Mn, Mx, Commit<P, B>>, TypeList<Commit<P, B>>> =
-        misplaced_commit<P> || misplaced_commit<B>;
+inline constexpr unsigned commits<Repeat<Mn, Mx, Commit<P, B>>, TypeList<Commit<P, B>>> =
+    (Mn == Mx ? kMisplacedCommit : kPlacedCommit) | commits<P> | commits<B>;
 template <class T, class C>
-inline constexpr bool misplaced_commit<Implied<T, C>, TypeList<>> =
-    misplaced_commit<C>;
+inline constexpr unsigned commits<Implied<T, C>, TypeList<>> = commits<C>;
+template <class E>
+inline constexpr bool holds_commit = commits<E> != 0;
+template <class E>
+inline constexpr bool misplaced_commit = (commits<E> & kMisplacedCommit) != 0;
 
 template <class E, bool Holds = holds_commit<E>>
 struct CommitLowering {
@@ -44,15 +36,8 @@ struct CommitLowering {
 template <class E>
 using commit_free_t = typename CommitLowering<E>::type;
 
-template <class E, class Children>
-struct commit_rebuilt;
-template <class E, class... Ks>
-struct commit_rebuilt<E, TypeList<Ks...>> {
-  using type = typename ExprShape<E>::template rebind<commit_free_t<Ks>...>;
-};
 template <class E>
-struct CommitLowering<E, true>
-    : commit_rebuilt<E, typename ExprShape<E>::children> {};
+struct CommitLowering<E, true> : rebuild<E, commit_free_t> {};
 template <class... Es>
 struct CommitLowering<Seq<Es...>, true> {
   using type = cat_seq_t<commit_free_t<Es>...>;
@@ -80,15 +65,10 @@ struct commit_lead {
 };
 
 template <std::size_t Mn, std::size_t Mx, class Item, class Stop,
-          int Kind = Mn == Mx           ? 0
-                     : Mx == kUnbounded ? 1
-                     : Mn == 0          ? 2
-                                        : 3>
+          int Kind = Mx == kUnbounded ? 1
+                     : Mn == 0        ? 2
+                                      : 3>
 struct commit_exits;
-template <std::size_t Mn, std::size_t Mx, class Item, class Stop>
-struct commit_exits<Mn, Mx, Item, Stop, 0> {
-  using type = Repeat<Mn, Mx, Item>;
-};
 template <std::size_t Mn, std::size_t Mx, class Item, class Stop>
 struct commit_exits<Mn, Mx, Item, Stop, 1> {
   using type = cat_seq_t<Repeat<Mn, kUnbounded, Item>, Stop>;
@@ -104,6 +84,7 @@ struct commit_exits<Mn, Mx, Item, Stop, 3> {
 };
 
 template <std::size_t Mn, std::size_t Mx, class P, class B>
+  requires(Mn < Mx)
 struct CommitLowering<Repeat<Mn, Mx, Commit<P, B>>, true>
     : commit_exits<Mn, Mx, cat_seq_t<commit_free_t<P>, commit_free_t<B>>,
                    Not<Trigger<commit_free_t<P>>>> {};

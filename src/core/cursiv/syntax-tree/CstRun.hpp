@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory_resource>
 #include <limits>
 #include <stdexcept>
@@ -17,7 +19,7 @@
 // order they close, record index is the node id -- what an engine writes is
 // what every reader reads.
 
-namespace cursiv::detail {
+namespace cursiv {
 
 // The records, and how many. The buffer is not a vector: a vector's only way
 // to hand out room is `resize`, which value-initialises what the writer is
@@ -30,7 +32,6 @@ class CstRun {
   CstRun(CstRun&& other) noexcept { *this = std::move(other); }
   CstRun& operator=(CstRun&& other) noexcept {
     if (this == &other) return *this;
-    if (_mem == nullptr) delete[] _r;
     _r = std::exchange(other._r, nullptr);
     _cap = std::exchange(other._cap, 0);
     _mark = _cap;
@@ -42,15 +43,10 @@ class CstRun {
     other._stop = nullptr;
     return *this;
   }
-  ~CstRun() {
-    if (_mem == nullptr) delete[] _r;
-  }
 
-  // The tree's own arena: the records and the AST share it and are freed in
-  // one release. Binding drops the buffer; unbound, the run owns a heap
-  // buffer.
+  // The tree's arena owns the records and the AST. Binding forgets the
+  // previous buffer.
   void bind(std::pmr::memory_resource* mem) {
-    if (_mem == nullptr) delete[] _r;
     _r = nullptr;
     _cap = 0;
     _mark = 0;
@@ -60,18 +56,15 @@ class CstRun {
     _mem = mem;
   }
 
-  // Sized from the document, a record per byte; the room past the records is
-  // never written. Wasm memory charges for that room, so there a quarter is
-  // reserved, and the rest taken in one step when records reach it.
-  void reserve_for(std::size_t textBytes) {
-    const std::size_t words = sizeof(void*) < 8 ? textBytes / 4 : textBytes;
-    std::size_t want =
-        words > kMaxRecords - 64 ? kMaxRecords : words + 64;
-    if constexpr (sizeof(void*) < 8) {
-      _reserveHint = static_cast<std::uint32_t>(want);
-      if (words > kFirstRecords * 4) want = kFirstRecords;
-    }
-    if (want > _cap) reallocate(want);
+  // Room for `records` now; the room past the records is never written.
+  // Where `later`, the records a text of `later` bytes takes at most, is
+  // more, a growth goes in one step to what the whole text takes at the
+  // density read so far.
+  void reserveRecords(std::size_t records, std::size_t later = 0) {
+    _reserveHint =
+        static_cast<std::uint32_t>(later < kMaxRecords ? later : kMaxRecords);
+    if (records > kMaxRecords) records = kMaxRecords;
+    if (records > _cap) reallocate(records);
   }
 
   // The records past zero are room again: the buffer stays.
@@ -104,25 +97,35 @@ class CstRun {
   [[nodiscard]] const CstNode* data() const { return _r; }
   [[nodiscard]] std::size_t capacity() const { return _cap; }
 
+  // Whether the next records fit before the next capacity or cancellation check.
+  [[nodiscard]] bool room(std::size_t n = 1) const {
+    return _records <= _mark && n <= _mark - _records;
+  }
+  // Room for `need` records in all, a watched stop read first.
+  CURSIV_NOINLINE void makeRoom(std::size_t need) {
+    if (_stop != nullptr) throwIfCancelled(*_stop);
+    if (need > _cap) grow(need);
+    rearm();
+  }
+
+  // With `Roomed`, the writer made the room first: `room`.
+  template <bool Roomed = false>
   CURSIV_ALWAYS_INLINE void leaf(TextOffset begin, TextOffset end,
-                                 std::uint32_t engine) {
-    put(begin, end, 1, engine, false, false);
+                                 std::uint32_t element) {
+    put<Roomed>(begin, end, 1, element, false, false);
   }
   CURSIV_ALWAYS_INLINE void hidden(TextOffset begin, TextOffset end,
-                                   std::uint32_t engine) {
-    put(begin, end, 1, engine, true, false);
+                                   std::uint32_t element) {
+    put(begin, end, 1, element, true, false);
   }
-  CURSIV_ALWAYS_INLINE void repaired_leaf(TextOffset begin, TextOffset end,
-                                          std::uint32_t engine) {
-    put(begin, end, 1, engine, false, true);
+  CURSIV_ALWAYS_INLINE void repairedLeaf(TextOffset begin, TextOffset end,
+                                          std::uint32_t element) {
+    put(begin, end, 1, element, false, true);
   }
+  template <bool Roomed = false>
   CURSIV_ALWAYS_INLINE void close(TextOffset begin, TextOffset end,
-                                  NodeCount extent, std::uint32_t engine) {
-    put(begin, end, extent, engine, false, false);
-  }
-  void repaired_close(TextOffset begin, TextOffset end, NodeCount extent,
-                      std::uint32_t engine) {
-    put(begin, end, extent, engine, false, true);
+                                  NodeCount extent, std::uint32_t element) {
+    put<Roomed>(begin, end, extent, element, false, false);
   }
 
   // A word index is a base subtracted from a coordinate, so it is asserted to
@@ -136,50 +139,27 @@ class CstRun {
     return _r[i];
   }
 
-  // One record placed at `at`, the records from there on moving up by one: a
-  // parent that precedes trailing trivia, or a group over records that others
-  // already follow. Off the per-record path.
-  CURSIV_NOINLINE void insert(NodeId at, TextOffset begin, TextOffset end,
-                              NodeCount extent, std::uint32_t engine) {
-    assert(at <= _records && "an insertion stands inside its own run");
-    reserve(1);
-    for (std::size_t i = _records; i > at; --i) _r[i] = _r[i - 1];
-    ++_records;
-    fill(_r[at], begin, end, extent, engine, false, false);
-  }
-
  private:
-  // Field by field: the bit-field byte is written once rather than read back
-  // and merged.
   CURSIV_ALWAYS_INLINE static void fill(CstNode& n, TextOffset begin,
                                         TextOffset end, NodeCount extent,
-                                        std::uint32_t engine, bool hidden,
+                                        std::uint32_t element, bool hidden,
                                         bool recovered) {
     n.begin = begin;
     n.end = end;
     n.subtreeSize = extent;
-    n.hidden = hidden;
-    n.recovered = recovered;
-    n.engine = engine;
+    n.setEngine(element);
+    n.setHidden(hidden);
+    n.setRecovered(recovered);
   }
 
+  template <bool Roomed = false>
   CURSIV_ALWAYS_INLINE void put(TextOffset begin, TextOffset end,
-                                NodeCount extent, std::uint32_t engine,
+                                NodeCount extent, std::uint32_t element,
                                 bool hidden, bool recovered) {
-    reserve(1);
-    fill(_r[_records++], begin, end, extent, engine, hidden, recovered);
-  }
-
-  CURSIV_ALWAYS_INLINE void reserve(std::size_t k) {
-    if (_records + k > _mark) [[unlikely]]
-      make_room(_records + k);
-  }
-  // Where the watermark stops a write: a watched stop is read here, and the
-  // room grows only when the write reaches its end.
-  CURSIV_NOINLINE void make_room(std::size_t need) {
-    if (_stop != nullptr) throw_if_cancelled(*_stop);
-    if (need > _cap) grow(need);
-    rearm();
+    if (!Roomed && !room()) [[unlikely]]
+      makeRoom(_records + 1);
+    assert(room());
+    fill(_r[_records++], begin, end, extent, element, hidden, recovered);
   }
   // The room's end, or sooner where a stop is watched.
   void rearm() {
@@ -194,23 +174,25 @@ class CstRun {
       throw std::overflow_error("cursiv: CST exceeds the node-id space");
     // Only the arena jumps to 1 024, since it keeps every step it leaves.
     const std::size_t twice =
-        _cap == 0 ? 64 : _cap < 1024 && _mem != nullptr ? 1024 : _cap * 2;
-    const std::size_t want = sizeof(void*) < 8 && _reserveHint > _cap
-                                 ? _reserveHint
-                                 : twice;
+        _cap == 0 ? 64 : _cap < 1024 ? 1024 : _cap * 2;
+    std::size_t want = twice;
+    if (const TextOffset read = _records == 0 ? 0 : _r[_records - 1].end;
+        _reserveHint > _cap && read != 0) {
+      // Forecast from the observed density. On 32-bit targets grow past 16 MiB in steps.
+      const double whole = static_cast<double>(_records) * 1.125 * _reserveHint / read;
+      want = static_cast<std::size_t>(std::min<double>(_reserveHint, std::max<double>(twice, whole)));
+      if constexpr (sizeof(std::size_t) == 4)
+        want = std::min(want, std::max(twice, (std::size_t{16} << 20) / sizeof(CstNode)));
+    }
     reallocate(want < need ? need : want < kMaxRecords ? want : kMaxRecords);
   }
   // It never zeroes: only the records already written are carried over, the
   // rest is room.
   CURSIV_NOINLINE void reallocate(std::size_t cap) {
-    CstNode* const q = _mem != nullptr
-                           ? static_cast<CstNode*>(_mem->allocate(
-                                 cap * sizeof(CstNode), alignof(CstNode)))
-                           : new CstNode[cap];
-    for (std::size_t i = 0; i < _records; ++i) q[i] = _r[i];
-    if (_mem == nullptr)
-      delete[] _r;
-    else if (_r != nullptr)
+    auto* const q = static_cast<CstNode*>(
+        _mem->allocate(cap * sizeof(CstNode), alignof(CstNode)));
+    if (_records != 0) std::memcpy(q, _r, _records * sizeof(CstNode));
+    if (_r != nullptr)
       _mem->deallocate(_r, _cap * sizeof(CstNode), alignof(CstNode));
     _r = q;
     _cap = cap;
@@ -222,7 +204,6 @@ class CstRun {
       std::numeric_limits<std::size_t>::max() / sizeof(CstNode);
   static constexpr std::size_t kMaxRecords =
       kByBytes < kNoNode - 1 ? kByBytes : kNoNode - 1;
-  static constexpr std::size_t kFirstRecords = 64 * 1024;
   // About a millisecond of parsing between two reads of a watched stop.
   static constexpr std::size_t kWatchedRecords = 64 * 1024;
 
@@ -237,4 +218,4 @@ class CstRun {
   std::pmr::memory_resource* _mem = nullptr;
 };
 
-}  // namespace cursiv::detail
+}  // namespace cursiv

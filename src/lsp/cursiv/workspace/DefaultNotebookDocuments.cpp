@@ -9,7 +9,6 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -21,8 +20,7 @@ namespace {
 // half an update behind.
 static_assert(std::is_nothrow_move_assignable_v<lsp::NotebookDocument>);
 static_assert(std::is_nothrow_move_assignable_v<std::optional<lsp::LSPObject>>);
-static_assert(
-    std::is_nothrow_move_assignable_v<std::vector<lsp::NotebookCell>>);
+static_assert(std::is_nothrow_move_assignable_v<lsp::NotebookCell>);
 
 // The URI of each cell, as the index keys it.
 std::vector<std::string> uris_of(const std::vector<lsp::NotebookCell>& cells) {
@@ -33,17 +31,16 @@ std::vector<std::string> uris_of(const std::vector<lsp::NotebookCell>& cells) {
   return uris;
 }
 
-// Each cell named as the notebook `uri`'s.
-std::unordered_map<std::string, std::string> index_of(
+}  // namespace
+
+DefaultNotebookDocuments::CellIndex DefaultNotebookDocuments::indexOf(
     const std::string& uri, const std::vector<lsp::NotebookCell>& cells) {
-  std::unordered_map<std::string, std::string> index;
+  CellIndex index;
   index.reserve(cells.size());
-  for (const lsp::NotebookCell& cell : cells)
-    index.insert_or_assign(cell.document.toString(), uri);
+  for (std::size_t i = 0; i < cells.size(); ++i)
+    index.try_emplace(cells[i].document.toString(), uri, i);
   return index;
 }
-
-}  // namespace
 
 std::optional<lsp::NotebookDocument>
 DefaultNotebookDocuments::getNotebookDocument(std::string_view uri) const {
@@ -56,27 +53,26 @@ DefaultNotebookDocuments::getNotebookDocument(std::string_view uri) const {
 std::optional<lsp::NotebookCell> DefaultNotebookDocuments::getNotebookCell(
     std::string_view cellUri) const {
   const std::scoped_lock lock(_mutex);
-  const auto owner = _cells.find(std::string(cellUri));
+  const auto owner = _cells.find(cellUri);
   if (owner == _cells.end()) return std::nullopt;
-  for (const lsp::NotebookCell& cell : _notebooks.at(owner->second).cells)
-    if (cell.document.toString() == cellUri) return cell;
-  return std::nullopt;
+  const auto& [notebook, position] = owner->second;
+  return _notebooks.at(notebook).cells[position];
 }
 
 std::optional<lsp::NotebookDocument>
 DefaultNotebookDocuments::findNotebookDocumentForCell(
     std::string_view cellUri) const {
   const std::scoped_lock lock(_mutex);
-  const auto owner = _cells.find(std::string(cellUri));
+  const auto owner = _cells.find(cellUri);
   if (owner == _cells.end()) return std::nullopt;
-  return _notebooks.at(owner->second);
+  return _notebooks.at(owner->second.notebook);
 }
 
 void DefaultNotebookDocuments::didOpen(
     const lsp::DidOpenNotebookDocumentParams& params) {
   const std::string uri = params.notebookDocument.uri.toString();
   lsp::NotebookDocument notebook = params.notebookDocument;
-  CellIndex cells = index_of(uri, notebook.cells);
+  CellIndex cells = indexOf(uri, notebook.cells);
   const std::scoped_lock lock(_mutex);
   // A notebook opened again replaces the one held, cells and all.
   std::vector<std::string> previous;
@@ -88,57 +84,61 @@ void DefaultNotebookDocuments::didOpen(
   indexCells(uri, previous, std::move(cells));
 }
 
-void DefaultNotebookDocuments::didChange(
+bool DefaultNotebookDocuments::didChange(
     const lsp::DidChangeNotebookDocumentParams& params) {
   const std::string uri = params.notebookDocument.uri.toString();
   const lsp::NotebookDocumentChangeEvent& change = params.change;
   const std::scoped_lock lock(_mutex);
   const auto at = _notebooks.find(uri);
-  if (at == _notebooks.end()) return;
+  if (at == _notebooks.end() ||
+      params.notebookDocument.version <= at->second.version)
+    return false;
   lsp::NotebookDocument& notebook = at->second;
 
-  // What changes is made aside and moved in once nothing is left to fail. Only
-  // a change of the structure moves the cells' index.
-  std::optional<lsp::LSPObject> metadata = change.metadata;
+  // Prepare all copies before committing the new notebook version.
+  auto metadata = change.metadata;
   std::optional<std::vector<lsp::NotebookCell>> cells;
-  const bool restructured =
-      change.cells.has_value() && change.cells->structure.has_value();
   std::vector<std::string> previous;
   CellIndex index;
-  if (change.cells.has_value() && (restructured || change.cells->data)) {
-    std::vector<lsp::NotebookCell>& next = cells.emplace(notebook.cells);
-    if (restructured) {
-      // Clamped: a change past the end, from a client out of step, edits the
-      // tail rather than memory past it.
-      const auto& array = change.cells->structure->array;
-      const std::size_t start = std::min<std::size_t>(array.start, next.size());
-      const std::size_t count =
-          std::min<std::size_t>(array.deleteCount, next.size() - start);
-      const auto first = next.begin() + static_cast<std::ptrdiff_t>(start);
-      const auto inserted =
-          next.erase(first, first + static_cast<std::ptrdiff_t>(count));
-      if (array.cells.has_value())
-        next.insert(inserted, array.cells->begin(), array.cells->end());
-      previous = uris_of(notebook.cells);
-      index = index_of(uri, next);
-      _cells.reserve(_cells.size() + index.size());
-    }
-    // A cell's kind, metadata or execution summary, matched by its URI.
-    if (const auto& data = change.cells->data) {
-      std::unordered_map<std::string, const lsp::NotebookCell*> changed;
-      for (const lsp::NotebookCell& cell : *data)
-        changed[cell.document.toString()] = &cell;
-      for (lsp::NotebookCell& cell : next)
-        if (const auto found = changed.find(cell.document.toString());
-            found != changed.end())
-          cell = *found->second;
+  if (change.cells && change.cells->structure) {
+    const auto& array = change.cells->structure->array;
+    const auto& held = notebook.cells;
+    const std::size_t start = std::min<std::size_t>(array.start, held.size());
+    const std::size_t count =
+        std::min<std::size_t>(array.deleteCount, held.size() - start);
+    auto& next = cells.emplace();
+    next.reserve(held.size() - count + (array.cells ? array.cells->size() : 0));
+    const auto first = held.begin() + static_cast<std::ptrdiff_t>(start);
+    next.insert(next.end(), held.begin(), first);
+    if (array.cells)
+      next.insert(next.end(), array.cells->begin(), array.cells->end());
+    next.insert(next.end(), first + static_cast<std::ptrdiff_t>(count),
+                held.end());
+    previous = uris_of(held);
+    index = indexOf(uri, next);
+    _cells.reserve(_cells.size() + index.size());
+  }
+
+  std::vector<std::pair<lsp::NotebookCell*, lsp::NotebookCell>> updates;
+  if (change.cells && change.cells->data) {
+    const auto& positions = cells ? index : _cells;
+    auto& target = cells ? *cells : notebook.cells;
+    updates.reserve(change.cells->data->size());
+    for (const auto& cell : *change.cells->data) {
+      const auto pos = positions.find(cell.document.toString());
+      if (pos != positions.end() && pos->second.notebook == uri)
+        updates.emplace_back(&target[pos->second.position], cell);
     }
   }
 
+  for (auto& [target, cell] : updates) *target = std::move(cell);
+  if (metadata) notebook.metadata = std::move(metadata);
+  if (cells) {
+    notebook.cells = std::move(*cells);
+    indexCells(uri, previous, std::move(index));
+  }
   notebook.version = params.notebookDocument.version;
-  if (metadata.has_value()) notebook.metadata = std::move(metadata);
-  if (cells.has_value()) notebook.cells = std::move(*cells);
-  if (restructured) indexCells(uri, previous, std::move(index));
+  return true;
 }
 
 void DefaultNotebookDocuments::didSave(
@@ -161,7 +161,7 @@ void DefaultNotebookDocuments::indexCells(
     CellIndex cells) noexcept {
   for (const std::string& cell : previous)
     if (const auto at = _cells.find(cell);
-        at != _cells.end() && at->second == uri)
+        at != _cells.end() && at->second.notebook == uri)
       _cells.erase(at);
   _cells.merge(cells);
   // A cell another notebook still claims goes to this one, the notebook the

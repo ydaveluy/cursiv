@@ -18,7 +18,7 @@ lsp::TextDocumentIdentifier textDocumentParams(const Document& document) {
 lsp::TextDocumentPositionParams textDocumentPositionParams(
     const Document& document, TextOffset offset) {
   return {textDocumentParams(document),
-          to_lsp(document.textDocument().positionAt(offset))};
+          toLsp(document.textDocument().positionAt(offset))};
 }
 
 lsp::ReferenceParams referenceParams(const Document& document,
@@ -26,7 +26,7 @@ lsp::ReferenceParams referenceParams(const Document& document,
                                      bool includeDeclaration) {
   lsp::ReferenceParams params;
   params.textDocument = textDocumentParams(document);
-  params.position = to_lsp(document.textDocument().positionAt(offset));
+  params.position = toLsp(document.textDocument().positionAt(offset));
   params.context.includeDeclaration = includeDeclaration;
   return params;
 }

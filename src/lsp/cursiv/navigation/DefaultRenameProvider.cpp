@@ -6,7 +6,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include "cursiv/grammar/Grammar.hpp"
@@ -14,7 +13,6 @@
 #include "cursiv/references/NameProvider.hpp"
 #include "cursiv/references/References.hpp"
 #include "cursiv/services/CoreServices.hpp"
-#include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
@@ -28,7 +26,6 @@
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/navigation/ReferenceLocation.hpp"
 #include "cursiv/text/LspPosition.hpp"
 #include "lsp/uri.h"
 
@@ -39,7 +36,7 @@ namespace {
 // What a name is written as: the member its record writes, the class of the
 // node it writes it into, and whether a repair produced any part of it.
 struct NameRole {
-  std::string_view feature;
+  std::string_view property;
   const AstTypeTag* owner = nullptr;
   bool repaired = false;
 };
@@ -55,17 +52,17 @@ struct NameRole {
   if (first == cst.size()) return std::nullopt;
   for (NodeId id = first; id < cst.size() && cst[id].end <= end; ++id) {
     const CstNode& record = cst[id];
-    if (record.begin != begin || record.end != end || record.hidden != 0)
+    if (record.begin != begin || record.end != end || record.isHidden())
       continue;
-    const std::string_view feature = grammar->recordFeature(record);
-    if (feature.empty()) continue;
-    const AstNode* const owner = owner_of_leaf(cst, id);
+    const std::string_view property = grammar->recordProperty(record);
+    if (property.empty()) continue;
+    const AstNode* const owner = ownerOfLeaf(cst, id);
     if (owner == nullptr) continue;
     // A qualified name may hold a segment the repair inserted.
     bool repaired = false;
     for (NodeId at = cst.subtreeBegin(id); at <= id && !repaired; ++at)
-      repaired = cst[at].recovered != 0;
-    return NameRole{feature, owner->type, repaired};
+      repaired = cst[at].isRecovered();
+    return NameRole{property, owner->type, repaired};
   }
   return std::nullopt;
 }
@@ -75,14 +72,14 @@ struct NameRole {
 std::optional<lsp::Range> DefaultRenameProvider::prepareRename(
     const Document& document, lsp::Position position,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   // The span is the leaf range of either arm of `findDeclarations` -- a
   // cross-reference or a declaration's own name -- so one call answers both.
   // An unresolved reference is still renamable: `rename` fixes the typo alone.
   const Declaration found = services.references->findDeclarations(
-      document, document.textDocument().offsetAt(from_lsp(position)), token);
+      document, document.textDocument().offsetAt(fromLsp(position)), token);
   if (!found && found.span.end <= found.span.begin) return std::nullopt;
-  return to_lsp(
+  return toLsp(
       document.textDocument().rangeAt(found.span.begin, found.span.end));
 }
 
@@ -124,14 +121,14 @@ bool DefaultRenameProvider::isNameOfLanguage(
   TextOffset at = 0;
   copied = 0;
   for (const TextRange& span : spans) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     at += span.begin - copied;
     copied = span.end;
     const std::optional<NameRole> was =
         name_role_at(before.cst(), span.begin, span.end);
     if (const std::optional<NameRole> now =
             name_role_at(reparsed.cst(), at, at + length);
-        !was || !now || now->repaired || now->feature != was->feature ||
+        !was || !now || now->repaired || now->property != was->property ||
         now->owner != was->owner)
       return false;
     at += length;
@@ -142,28 +139,31 @@ bool DefaultRenameProvider::isNameOfLanguage(
 std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
     const Document& document, lsp::Position position, std::string_view newName,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   const References& references = *services.references;
   const Documents& store = *services.shared().documents;
 
   const Declaration found = references.findDeclarations(
-      document, document.textDocument().offsetAt(from_lsp(position)), token);
+      document, document.textDocument().offsetAt(fromLsp(position)), token);
+  lsp::WorkspaceEdit edit;
+  auto& changes = edit.changes.emplace();
+  const auto rewrite = [&](const Document& source,
+                           std::span<const TextRange> spans) {
+    if (!isNameOfLanguage(source, spans, newName, token)) return false;
+    auto& edits = changes[lsp::Uri::parse(source.uri)];
+    edits.reserve(spans.size());
+    for (const TextRange span : spans) {
+      throwIfCancelled(token);
+      edits.push_back(
+          {.range = toLsp(source.textDocument().rangeAt(span.begin, span.end)),
+           .newText = std::string(newName)});
+    }
+    return true;
+  };
   if (!found) {
-    // The unresolved reference, renamed alone: no declaration to walk from, so
-    // the one occurrence is the name as written here. The language still
-    // judges the new name, in this document.
-    if (found.span.end <= found.span.begin) return std::nullopt;
-    if (!isNameOfLanguage(document, {&found.span, 1}, newName, token))
+    if (found.span.end <= found.span.begin ||
+        !rewrite(document, {&found.span, 1}))
       return std::nullopt;
-    lsp::WorkspaceEdit edit;
-    lsp::Map<lsp::DocumentUri, lsp::Array<lsp::TextEdit>> changes;
-    lsp::TextEdit rewrite;
-    rewrite.range = to_lsp(
-        document.textDocument().rangeAt(found.span.begin, found.span.end));
-    rewrite.newText = std::string(newName);
-    changes[lsp::DocumentUri::parse(document.uri)].push_back(
-        std::move(rewrite));
-    edit.changes = std::move(changes);
     return edit;
   }
   // A declaration that writes no name has none to rename: its site would be
@@ -171,51 +171,28 @@ std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
   const AstNode* target = found.targets.front();
   const Document* declaringDocument = target->getDocument();
   if (declaringDocument == nullptr) return std::nullopt;
-  const CoreServices* declaring = declaringDocument->language;
-  const NameProvider* names =
-      declaring == nullptr ? nullptr : declaring->nameProvider.get();
-  if (const CstNodeView declared =
-          names == nullptr ? CstNodeView{}
-                           : names->getNameNode(*target, declaringDocument);
-      !declared)
+  const auto* language = declaringDocument->language;
+  if (!language || !language->nameProvider ||
+      !language->nameProvider->getNameNode(*target, declaringDocument))
     return std::nullopt;
 
   const std::vector<ReferenceDescription> rows =
-      detail::collect_references_per_declaration(
-          references, found.targets,
-          [](const AstNode&) {
-            return FindReferencesOptions{true, kNoDocument};
-          },
-          token);
+      references.findReferences(found.targets, {true, kNoDocument}, token);
 
   // Each touched document is read back with all its substitutions, by its own
   // language; one refusal refuses the whole rename. Rows come grouped by
   // document, in document order.
   std::vector<TextRange> spans;
   for (auto row = rows.begin(); row != rows.end();) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     const DocumentId id = row->sourceDocumentId;
     spans.clear();
     for (; row != rows.end() && row->sourceDocumentId == id; ++row)
       spans.push_back(TextRange{row->sourceBegin, row->sourceEnd});
     const std::shared_ptr<Document> source = store.getDocument(id);
-    if (source == nullptr || source->language == nullptr) continue;
-    if (!isNameOfLanguage(*source, spans, newName, token)) return std::nullopt;
-  }
-
-  lsp::WorkspaceEdit edit;
-  lsp::Map<lsp::DocumentUri, lsp::Array<lsp::TextEdit>> changes;
-  // The declaration and every reference: renaming only the references would
-  // leave them pointing at a name nothing declares.
-  for (lsp::Location& location : detail::reference_locations(store, rows)) {
-    throw_if_cancelled(token);
-    lsp::TextEdit rewrite;
-    rewrite.range = location.range;
-    rewrite.newText = std::string(newName);
-    changes[std::move(location.uri)].push_back(std::move(rewrite));
+    if (source && !rewrite(*source, spans)) return std::nullopt;
   }
   if (changes.empty()) return std::nullopt;
-  edit.changes = std::move(changes);
   return edit;
 }
 

@@ -52,7 +52,7 @@ std::size_t TaskScheduler::defaultWorkerCount() noexcept {
 
 void TaskScheduler::parallelForIndexed(
     const CancellationToken& token, std::size_t count,
-    cursiv::function_ref<void(std::size_t)> body) {
+    cursiv::FunctionRef<void(std::size_t)> body) {
   std::atomic<bool> failed{false};
   std::exception_ptr first;
 
@@ -74,7 +74,7 @@ void TaskScheduler::parallelForIndexed(
   });
 
   if (first != nullptr) std::rethrow_exception(first);
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
 }
 
 }  // namespace cursiv

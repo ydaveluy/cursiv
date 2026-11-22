@@ -3,8 +3,8 @@
 ## Parsing and syntax trees
 
 Grammar rules are C++ types that fill your abstract syntax tree (AST) with
-`assign` and `append`. Cursiv generates an LL or an LR parser; LR is the
-default and recommended one. See the [grammar reference](../reference/grammar.md).
+`assign` and `append`. Cursiv generates an LR parser from them. See the
+[grammar reference](../reference/grammar.md).
 
 ## Performance
 
@@ -12,17 +12,17 @@ Cursiv aims to be as fast as possible: the generated parsers and the
 language services are compiled C++, and a workspace builds its documents in
 parallel. See [Benchmarks](../benchmarks/README.md).
 
-## Ambiguity diagnostics
+## Grammar checks
 
-The generator rejects unsupported grammar constructions when you build. The
-LR generator also reports parser conflicts and overlapping tokens, with
-examples that show the ambiguity.
+The generator rejects unsupported grammar constructions when you build. See
+[Grammar errors and fixes](../reference/refusals.md). Where a text has several
+parses, the grammar's order [chooses one](../reference/grammar.md#choosing-between-parses).
 
 ## Error recovery
 
-The parsers report syntax errors and keep a usable tree, so editor features
-keep working while a document is incomplete. The parse result tells whether
-recovery was needed.
+The parser reports syntax errors and can return a tree for incomplete input.
+Check the [parse result](../learn/consume-the-ast.md#parse-only) before reading
+its root.
 
 ## Cross references and scoping
 
@@ -39,9 +39,9 @@ node or one member: `.property<&ast::Person::name>()` underlines the name.
 ## Editor features
 
 Default Language Server Protocol (LSP) services provide completion, hover,
-go-to-definition, find-references, rename, symbols, folding and semantic
-tokens. You can replace any provider. Formatting needs a formatter written
-for your language. See [Services](../reference/services.md).
+go-to-definition, find references, rename, symbols and folding. Install
+`GrammarSemanticTokenProvider` for semantic highlighting or a formatter for
+your language's layout. See [editor integration](../learn/editor-integration.md).
 
 ## A command line
 

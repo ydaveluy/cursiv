@@ -9,12 +9,14 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 #include "cursiv/Check.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/text/unicode/UnicodeRange.hpp"
 #include "cursiv/grammar/word_final_in.hpp"
-#include "cursiv/shared/gen/LexCodePoints.hpp"
+#include "cursiv/engine/lexer/CharClass.hpp"
 #include "cursiv/text/ClassItem.hpp"
 #include "cursiv/text/TextBuilder.hpp"
 #include "cursiv/text/lower_case.hpp"
@@ -172,6 +174,47 @@ static_assert(union_is("x-zc-fa-d", "", {{U'a', U'f'}, {U'x', U'z'}}));
 static_assert(union_is(R"(\u{10ffff}\u{0}\x01)", "",
                        {{0, 1}, {0x10ffff, 0x10ffff}}));
 
+// An intersection is what De Morgan's law gives, range for range.
+constexpr bool intersection_is(std::string_view a, std::string_view b,
+                               std::initializer_list<unicode::Range> want) {
+  const auto x = detail::ClassRanges::of(a);
+  const auto y = detail::ClassRanges::of(b);
+  const auto actual = x.intersected(y);
+  const auto law = x.complemented().united(y.complemented()).complemented();
+  return actual.r == law.r && actual.holdsInvalid == law.holdsInvalid &&
+         std::equal(actual.r.begin(), actual.r.end(), want.begin(),
+                    want.end());
+}
+
+static_assert(intersection_is("", "", {}));
+static_assert(intersection_is("a-z", "", {}));
+static_assert(intersection_is("", "a-z", {}));
+static_assert(intersection_is("a-z", "a-z", {{U'a', U'z'}}));
+static_assert(intersection_is("a-f", "m-z", {}));
+static_assert(intersection_is("a-f", "g-z", {}));
+static_assert(intersection_is("a-m", "f-z", {{U'f', U'm'}}));
+static_assert(intersection_is("d-f", "a-z", {{U'd', U'f'}}));
+static_assert(intersection_is("a-cm-px-z", "b-n",
+                              {{U'b', U'c'}, {U'm', U'n'}}));
+static_assert(intersection_is("a-cm-px-z", "b-y",
+                              {{U'b', U'c'}, {U'm', U'p'}, {U'x', U'y'}}));
+static_assert(intersection_is(R"(\D)", "0-9a", {{U'a', U'a'}}));
+static_assert(intersection_is(R"(\u{0}\u{10ffff})", R"(\u{0}-\u{10ffff})",
+                              {{0, 0}, {0x10ffff, 0x10ffff}}));
+static_assert(intersection_is(R"(\u{10fffe}-\u{10ffff})", R"(\u{10ffff})",
+                              {{0x10ffff, 0x10ffff}}));
+// Two runs only surrogates part are one range.
+static_assert(intersection_is(R"(\u{0}-\u{d7ff}\u{e000}-\u{10ffff})",
+                              R"(\u{0}-\u{10ffff})", {{0, 0x10ffff}}));
+static_assert(intersection_is(R"(\u{d7ff}\u{e000})", R"(\u{d000}-\u{f000})",
+                              {{0xd7ff, 0xe000}}));
+static_assert(intersection_is(R"(\u{d7fe}-\u{e001})", R"(\u{d7ff}-\u{e000})",
+                              {{0xd7ff, 0xe000}}));
+static_assert(intersection_is(R"(\u{d000}-\u{d7ff})", R"(\u{d7ff}-\u{e000})",
+                              {{0xd7ff, 0xd7ff}}));
+static_assert(intersection_is(R"(\u{e000}-\u{f000})", R"(\u{d000}-\u{e000})",
+                              {{0xe000, 0xe000}}));
+
 template <str S>
 consteval bool holds(char32_t cp) {
   return detail::word_class<CR<S>>::has(cp);
@@ -242,6 +285,12 @@ static_assert(detail::word_class<Other>::has(0xE000));
 static_assert(!detail::word_class<Other>::has(U'A'));
 static_assert(!detail::word_class<Other>::has(0xD800));
 
+static_assert(detail::scalar_start("a\x80" "b", 1) == 1);
+static_assert(detail::scalar_start("a\xc3\x80", 2) == 1);
+static_assert(detail::scalar_start("a\xe0\x80\x80", 3) == 3);
+static_assert(detail::scalar_start("a\xf0\x9f\x98\x80", 4) == 1);
+static_assert(detail::last_scalar("a\x80") == kNoScalar && detail::last_scalar("aé") == U'é');
+
 // What the compile-time refusals of `cr<>` stand on.
 using detail::ClassFault;
 constexpr ClassFault fault(std::string_view spec) {
@@ -279,7 +328,7 @@ static_assert(fault("\xff") == ClassFault::malformed);
 static_assert(fault("\xc3") == ClassFault::malformed);
 static_assert(fault(R"(\d\-x-)") == ClassFault::none);
 
-bool same_ranges(const LexCodePoints& c,
+bool same_ranges(const gen::CharClass& c,
                  std::initializer_list<unicode::Range> want) {
   if (c.ranges.size() != want.size()) return false;
   std::size_t i = 0;
@@ -288,6 +337,29 @@ bool same_ranges(const LexCodePoints& c,
     ++i;
   }
   return true;
+}
+
+void utf8_ranges_cover_the_scalars_in_order() {
+  for (const auto [first, last] : {unicode::Range{0, 0x10FFFF}, {0x809, 0x274B},
+                                   {0xD813, 0xE041}, {0x46FFF, 0x87002}}) {
+    char32_t next = first;
+    auto check = [&](const gen::ByteRange* bytes, unsigned length) {
+      char lo[4], hi[4];
+      unsigned count = 1;
+      for (unsigned i = 0; i < length; ++i) {
+        lo[i] = static_cast<char>(bytes[i].lo);
+        hi[i] = static_cast<char>(bytes[i].hi);
+        count *= bytes[i].hi - bytes[i].lo + 1;
+      }
+      if (next >= 0xD800 && next <= 0xDFFF) next = 0xE000;
+      std::size_t size = 0;
+      CHECK(scalarAt(lo, length, size) == next && size == length);
+      next += count;
+      CHECK(scalarAt(hi, length, size) == next - 1 && size == length);
+    };
+    gen::utf8_sequences(first, last, check);
+    CHECK(next == last + 1);
+  }
 }
 
 // As a client's `toLowerCase` lowers: each scalar by its full mapping, and a
@@ -398,18 +470,29 @@ void a_builder_hands_over_its_text() {
   CHECK(w.take() == "    b\n");
 }
 
-// A part may be the builder's own text, which the write moves as it grows.
+// A part may view the builder's own text, which a part twice its size moves:
+// every part, a list's separator too, reads the text the call started from.
 void a_builder_writes_its_own_text() {
   TextBuilder w;
   const std::string first(100, 'a');
   w.line(first);
   w.line("b");
   w.write(w.text());
-  CHECK(w.text() == first + "\nb\n" + first + "\nb\n");
+  std::string want = first + "\nb\n" + first + "\nb\n";
+  CHECK(w.text() == want);
+  const std::string grows(2 * w.size(), 'c');
+  w.line(grows, std::string_view(w.text()).substr(0, 3), w.text()[101]);
+  CHECK(w.text() == (want += grows + "aaab\n"));
+  w.write("x", w.text());
+  CHECK(w.text() == (want += "x" + want));
+  const std::string more(2 * w.size(), 'd');
+  w.line(joined(std::vector<std::string>{more, "e"},
+                std::string_view(w.text()).substr(99, 3)));
+  CHECK(w.text() == (want += more + "a\nbe\n"));
 }
 
 int main() {
-  CHECK(same_ranges(LexCodePoints::of(0, false, R"(\s)"),
+  CHECK(same_ranges(gen::CharClass::of(0, false, R"(\s)"),
                     {{0x09, 0x0D},
                      {0x20, 0x20},
                      {0xA0, 0xA0},
@@ -420,7 +503,7 @@ int main() {
                      {0x205F, 0x205F},
                      {0x3000, 0x3000},
                      {0xFEFF, 0xFEFF}}));
-  CHECK(same_ranges(LexCodePoints::of(0, false, R"(\S)"),
+  CHECK(same_ranges(gen::CharClass::of(0, false, R"(\S)"),
                     {{0, 0x08},
                      {0x0E, 0x1F},
                      {0x21, 0x9F},
@@ -430,26 +513,28 @@ int main() {
                      {0x202A, 0x202E},
                      {0x2030, 0x205E},
                      {0x2060, 0x2FFF},
-                     {0x3001, 0xFEFE},
+                     {0x3001, 0xD7FF},
+                     {0xE000, 0xFEFE},
                      {0xFF00, 0x10FFFF}}));
-  CHECK(same_ranges(LexCodePoints::of(0, false, R"(\D)"),
-             {{0, 0x2F}, {0x3A, 0x10FFFF}}));
-  CHECK(same_ranges(LexCodePoints::of(0, false, R"(\u00e9-\u00ff\cA)"),
+  CHECK(same_ranges(gen::CharClass::of(0, false, R"(\D)"),
+                    {{0, 0x2F}, {0x3A, 0xD7FF}, {0xE000, 0x10FFFF}}));
+  CHECK(same_ranges(gen::CharClass::of(0, false, R"(\u00e9-\u00ff\cA)"),
              {{0x01, 0x01}, {0xE9, 0xFF}}));
-  CHECK(same_ranges(LexCodePoints::of(0, false, R"(\u{e9}-\u{ff}\x41)"),
+  CHECK(same_ranges(gen::CharClass::of(0, false, R"(\u{e9}-\u{ff}\x41)"),
                     {{0x41, 0x41}, {0xE9, 0xFF}}));
-  CHECK(same_ranges(LexCodePoints::of(0, true, R"(\w)"),
+  CHECK(same_ranges(gen::CharClass::of(0, true, R"(\w)"),
                     {{0, 0x2F},
                      {0x3A, 0x40},
                      {0x5B, 0x5E},
                      {0x60, 0x60},
-                     {0x7B, 0x10FFFF},
-                     {LexCodePoints::kInvalid, LexCodePoints::kInvalid}}));
-  CHECK(!LexCodePoints::of(0, false, R"(\w)").holds_invalid());
-  CHECK(LexCodePoints::of(0, true, R"(\w)").holds_invalid());
-  CHECK(!LexCodePoints::of(0, true, R"(\u{0}-\u{10FFFF})").ranges.empty());
+                     {0x7B, 0xD7FF},
+                     {0xE000, 0x10FFFF}}));
+  CHECK(!gen::CharClass::of(0, false, R"(\w)").invalid);
+  CHECK(gen::CharClass::of(0, true, R"(\w)").invalid);
+  CHECK(gen::CharClass::of(0, true, R"(\u{0}-\u{10FFFF})").ranges.empty());
+  CHECK(gen::CharClass::of(0, true, R"(\u{0}-\u{10FFFF})").invalid);
   CHECK(same_ranges(
-      LexCodePoints::of(detail::cp_bit(unicode::Property::White_Space), false,
+      gen::CharClass::of(detail::cp_bit(unicode::Property::WhiteSpace), false,
                         ""),
       {{0x09, 0x0D},
        {0x20, 0x20},
@@ -461,12 +546,7 @@ int main() {
        {0x202F, 0x202F},
        {0x205F, 0x205F},
        {0x3000, 0x3000}}));
-  for (const char* refused_spec :
-       {R"(é\d-z)", R"(\u{D800})", R"(\u{110000})"}) {
-    CHECK(support::throws<std::invalid_argument>([&] {
-      (void)LexCodePoints::of(0, false, refused_spec);
-    }));
-  }
+  utf8_ranges_cover_the_scalars_in_order();
   a_text_lowers_as_a_client_lowers_it();
   a_text_is_quoted_as_messages_show_it();
   a_builder_lays_out_its_parts();

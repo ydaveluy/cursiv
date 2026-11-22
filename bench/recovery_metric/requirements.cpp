@@ -5,14 +5,9 @@
 
 #include "bench.hpp"
 #include "cursiv/CursivActions.hpp"
-#include "recovery_metric/Searching.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
 #include "requirements/RequirementsGrammar.hpp"
-#include "requirements/generated/Requirements/AstReflection.hpp"
-#include "requirements/generated/Requirements/Grammar.hpp"
 #include "requirements/generated/Requirements/Module.hpp"
-#include "requirements/generated/Requirements/Parser.hpp"
-#include "requirements/generated/Requirements/Table.hpp"
 
 namespace metric = cursiv::recovery_metric;
 
@@ -24,8 +19,8 @@ const cursiv::fuzzer::CursivActions<req::Requirements> kActions{};
 const metric::Registered kLanguage{{
     .rank = 3,
     .name = "requirements",
-    .parser = &g::create_parser,
-    .reflection = &g::create_ast_reflection,
+    .parser = &g::createParser,
+    .reflection = &g::createAstReflection,
     .actions = &kActions,
     .documents =
         [] {
@@ -35,11 +30,6 @@ const metric::Registered kLanguage{{
               metric::source_file("examples/requirements/example.req"),
               bench::generateRequirementsSource(3072)};
         },
-    .ceilings = &metric::ceilings<g::kTable, g::kDrive,
-                                          g::kGrammarMetaData, g::kAstActions>,
-    .searching = &metric::searching<g::kTable, g::kDrive,
-                                                g::kGrammarMetaData,
-                                                g::kAstActions>,
 }};
 
 }  // namespace

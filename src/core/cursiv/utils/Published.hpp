@@ -30,7 +30,8 @@ class Published {
   struct alignas(128) Stripe {
     std::atomic<std::uint32_t> active{0};
   };
-  static constexpr std::size_t kStripes = 64;
+  static constexpr std::size_t kStripeBits = 6;
+  static constexpr std::size_t kStripes = std::size_t{1} << kStripeBits;
 
  public:
   Published() = default;
@@ -107,10 +108,14 @@ class Published {
   }
 
  private:
-  // Stable per thread and spread across threads, never unique.
+  // Stable per thread and spread across threads, never unique: the hash is
+  // mixed before its top bits are taken, as a library may hash an aligned
+  // pointer to itself.
   [[nodiscard]] Stripe& stripeForThisThread() const noexcept {
-    return _stripes[std::hash<std::thread::id>{}(std::this_thread::get_id()) %
-                    kStripes];
+    const auto hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    const std::uint64_t mixed =
+        static_cast<std::uint64_t>(hash) * 0x9e3779b97f4a7c15ULL;
+    return _stripes[mixed >> (64 - kStripeBits)];
   }
 
   // `_writers` held. A value is free once every stripe has been seen idle

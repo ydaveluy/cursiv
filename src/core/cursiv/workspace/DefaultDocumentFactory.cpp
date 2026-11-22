@@ -14,6 +14,7 @@
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/FileSystemProvider.hpp"
+#include "cursiv/workspace/LanguageServiceError.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 
 namespace cursiv {
@@ -35,7 +36,7 @@ void DefaultDocumentFactory::dropTree(Document& document) const {
 void DefaultDocumentFactory::parse(Document& document,
                                    const CoreServices& services,
                                    const CancellationToken& cancelToken) const {
-  throw_if_cancelled(cancelToken);
+  throwIfCancelled(cancelToken);
   // The result views the document's own text, which the document owns and
   // outlives it.
   document.parseResult =
@@ -43,21 +44,28 @@ void DefaultDocumentFactory::parse(Document& document,
   // The root's parent is the document, which is how a node finds it back.
   if (document.parseResult.value != nullptr)
     document.parseResult.value->parent = &document;
-  // Publish only after the result and its owner are installed. The builder
-  // resumes at indexing instead of parsing these same bytes a second time.
-  document.state = DocumentState::Parsed;
+}
+
+void DefaultDocumentFactory::parseDocument(
+    Document& document, const CancellationToken& token) const {
+  try {
+    detail::language_call("Parsing",
+                          [&] { parse(document, *document.language, token); });
+    document.state = DocumentState::Parsed;
+  } catch (const detail::LanguageServiceError& error) {
+    document.parseResult = ParseResult{};
+    document.state = DocumentState::Changed;
+    document.reportBuildFailure(error.what());
+  }
 }
 
 std::shared_ptr<Document> DefaultDocumentFactory::create(
     TextDocument textDocument) const {
-  const std::string uri = normalize_uri(textDocument.uri());
+  std::string uri = normalizeUri(textDocument.uri());
   const CoreServices& services = servicesFor(uri, textDocument.languageId());
-  if (textDocument.languageId().empty())
-    textDocument = TextDocument::create(
-        std::string(textDocument.uri()), services.languageMetaData.languageId,
-        textDocument.version(), std::string(textDocument.getText()));
+  textDocument.setDefaultLanguageId(services.languageMetaData.languageId);
   const auto document =
-      std::make_shared<Document>(std::move(textDocument), uri);
+      std::make_shared<Document>(std::move(textDocument), std::move(uri));
   document->language = &services;
   return document;
 }
@@ -65,14 +73,14 @@ std::shared_ptr<Document> DefaultDocumentFactory::create(
 std::shared_ptr<Document> DefaultDocumentFactory::fromTextDocument(
     TextDocument textDocument, const CancellationToken& cancelToken) const {
   const std::shared_ptr<Document> document = create(std::move(textDocument));
-  parse(*document, *document->language, cancelToken);
+  parseDocument(*document, cancelToken);
   return document;
 }
 
 std::shared_ptr<Document> DefaultDocumentFactory::fromString(
     std::string text, std::string_view uri,
     const CancellationToken& cancelToken) const {
-  const std::string canonical = normalize_uri(uri);
+  const std::string canonical = normalizeUri(uri);
   const CoreServices& services = servicesFor(canonical, {});
   // Disk content is version 0: it has no client to set one.
   return fromTextDocument(
@@ -83,15 +91,15 @@ std::shared_ptr<Document> DefaultDocumentFactory::fromString(
 
 std::shared_ptr<Document> DefaultDocumentFactory::fromUri(
     std::string_view uri, const CancellationToken& cancelToken) const {
-  throw_if_cancelled(cancelToken);
-  const std::string canonical = normalize_uri(uri);
+  throwIfCancelled(cancelToken);
+  const std::string canonical = normalizeUri(uri);
   return fromString(shared.fileSystemProvider->readFile(canonical), canonical,
                     cancelToken);
 }
 
 Document& DefaultDocumentFactory::update(
     Document& document, const CancellationToken& cancelToken) const {
-  throw_if_cancelled(cancelToken);
+  throwIfCancelled(cancelToken);
   dropTree(document);
   // The truth is the client's buffer while a tab is open, the disk otherwise;
   // a text nothing readable stands behind is kept as it is.
@@ -118,7 +126,7 @@ Document& DefaultDocumentFactory::update(
   const CoreServices& services =
       servicesFor(document.uri, document.textDocument().languageId());
   document.language = &services;
-  parse(document, services, cancelToken);
+  parseDocument(document, cancelToken);
   return document;
 }
 

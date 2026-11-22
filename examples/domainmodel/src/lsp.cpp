@@ -4,6 +4,6 @@
 #include "domainmodel/LspModule.hpp"
 
 int main(int argc, char** argv) {
-  return cursiv::run_language_server_main<dm::DomainModelSharedServices>(
+  return cursiv::runLanguageServerMain<dm::DomainModelSharedServices>(
       argc, argv, "domainmodel-lsp", &dm::register_lsp_services);
 }

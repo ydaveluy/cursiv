@@ -10,9 +10,7 @@
 #include <vector>
 
 #include "block/generated/Block/Module.hpp"
-#include "caret/generated/Caret/AstReflection.hpp"
 #include "caret/generated/Caret/Module.hpp"
-#include "caret/generated/Caret/Table.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/DefaultScopeProvider.hpp"
@@ -23,12 +21,12 @@
 #include "cursiv/services/LspServices.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/ExpectedCompletion.hpp"
+#include "cursiv/ExpectedHover.hpp"
 #include "lsp/completion/CaretLane.hpp"
 #include "support/OffersEveryKeyword.hpp"
 #include "support/Editor.hpp"
 #include "support/WorkspaceWorld.hpp"
-#include "wordsll/generated/Ll/Module.hpp"
-#include "wordslr/generated/Lr/Module.hpp"
+#include "wordslr/generated/Suite/Module.hpp"
 
 namespace default_completion_provider {
 
@@ -63,7 +61,7 @@ struct PropertyScope final : cursiv::DefaultScopeProvider {
 
   bool visitScopeEntries(
       const cursiv::ReferenceInfo& context,
-      cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+      cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
       const override {
     asked = true;
     CHECK(context.property == "superType");
@@ -151,8 +149,8 @@ namespace {
 
 struct World : support::World<cursiv::SharedLspServices> {
   cursiv::LspServices* lang = &support::add_language<cursiv::LspServices>(
-      shared, {"caret", {".caret"}, {}}, g::create_parser(),
-      g::create_ast_reflection());
+      shared, {"caret", {".caret"}, {}}, g::createParser(),
+      g::createAstReflection());
 };
 
 }  // namespace
@@ -182,7 +180,7 @@ void a_repair_behind_the_caret_does_not_silence_it(const World& world) {
 // After `@~`, `DeclR` and `UseR` are both still possible. A repair nearby may
 // drop one of them, never add another feature.
 void a_repair_beside_a_two_token_cell_offers_nothing_new() {
-  const std::unique_ptr<cursiv::Parser> engine = g::create_parser();
+  const std::unique_ptr<cursiv::Parser> engine = g::createParser();
   const auto after_tilde = [&engine](const std::string& text) {
     const cursiv::ParseResult r = engine->parse(text);
     const auto at = static_cast<cursiv::TextOffset>(text.find('~') + 1);
@@ -246,10 +244,10 @@ void an_escaped_prefix_matches_the_decoded_keyword() {
     cursiv::LspServices* lang = nullptr;
   } world;
   world.lang = &support::add_language<cursiv::LspServices>(
-      world.shared, {"caret", {".caret"}, {}}, g::create_parser(),
-      g::create_ast_reflection(), [&](cursiv::LspServices& services) {
+      world.shared, {"caret", {".caret"}, {}}, g::createParser(),
+      g::createAstReflection(), [&](cursiv::LspServices& services) {
         services.parser =
-            cursiv::translating_parser(std::move(services.parser), escapes);
+            cursiv::translatingParser(std::move(services.parser), escapes);
       });
   bool offered = false;
   (void)cursiv::test::expectCompletion(
@@ -281,12 +279,8 @@ namespace lr_completion_caret {
 
 namespace g = tcaret::generated::Caret;
 
-// The table must look two tokens ahead after `@~`, or
-// `a_two_token_cell_offers_both_arms` would pass without testing anything.
-static_assert(g::kTable.npeeks != 0);
-
 void run() {
-  run_caret_lane(CaretEngine{&g::create_parser, &g::create_ast_reflection});
+  run_caret_lane(CaretEngine{&g::createParser, &g::createAstReflection});
 }
 
 }  // namespace lr_completion_caret
@@ -301,8 +295,8 @@ namespace {
 
 struct World : support::World<cursiv::SharedLspServices> {
   cursiv::LspServices* lang = &support::add_language<cursiv::LspServices>(
-      shared, {"block", {".block"}, {}}, g::create_parser(),
-      g::create_ast_reflection());
+      shared, {"block", {".block"}, {}}, g::createParser(),
+      g::createAstReflection());
 
   World() { support::take_both_ranges(shared); }
 };
@@ -382,7 +376,7 @@ struct Hooked final : cursiv::DefaultCompletionProvider {
   void visitReferenceCandidates(
       const cursiv::ReferenceInfo& reference,
       const cursiv::CompletionContext& context,
-      cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+      cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
       const override {
     DefaultCompletionProvider::visitReferenceCandidates(
         reference, context, [&](const cursiv::AstNodeDescription& candidate) {
@@ -414,7 +408,7 @@ struct SeesNode final : cursiv::DefaultCompletionProvider {
   void visitReferenceCandidates(
       const cursiv::ReferenceInfo& reference,
       const cursiv::CompletionContext& context,
-      cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+      cursiv::FunctionRef<bool(const cursiv::AstNodeDescription&)> visitor)
       const override {
     const cursiv::AstNode* const node = reference.container;
     container = std::string(node->type->name);
@@ -441,19 +435,15 @@ struct SeesNode final : cursiv::DefaultCompletionProvider {
 };
 
 struct World : support::World<cursiv::SharedLspServices> {
-  const cursiv::LspServices* ll = &support::add_language<cursiv::LspServices>(
-      shared, {"words-ll", {".wll"}, {}},
-      twords::generated::Ll::create_parser(),
-      twords::generated::Ll::create_ast_reflection());
   const cursiv::LspServices* lr = &support::add_language<cursiv::LspServices>(
       shared, {"words-lr", {".wlr"}, {}},
-      twords::generated::Lr::create_parser(),
-      twords::generated::Lr::create_ast_reflection());
+      twords::generated::Suite::createParser(),
+      twords::generated::Suite::createAstReflection());
   const cursiv::LspServices* hooked =
       &support::add_language<cursiv::LspServices>(
           shared, {"words-hooked", {".whk"}, {}},
-          twords::generated::Lr::create_parser(),
-          twords::generated::Lr::create_ast_reflection(),
+          twords::generated::Suite::createParser(),
+          twords::generated::Suite::createAstReflection(),
           [](cursiv::LspServices& language) {
             language.completionProvider = std::make_unique<Hooked>(language);
           });
@@ -461,22 +451,11 @@ struct World : support::World<cursiv::SharedLspServices> {
   const cursiv::LspServices* seeing =
       &support::add_language<cursiv::LspServices>(
           shared, {"words-seeing", {".wse"}, {}},
-          twords::generated::Lr::create_parser(),
-          twords::generated::Lr::create_ast_reflection(),
+          twords::generated::Suite::createParser(),
+          twords::generated::Suite::createAstReflection(),
           [this](cursiv::LspServices& language) {
             auto provider = std::make_unique<SeesNode>(language);
             sees = provider.get();
-            language.completionProvider = std::move(provider);
-          });
-  const SeesNode* seesLl = nullptr;
-  const cursiv::LspServices* seeingLl =
-      &support::add_language<cursiv::LspServices>(
-          shared, {"words-seeing-ll", {".wsl"}, {}},
-          twords::generated::Ll::create_parser(),
-          twords::generated::Ll::create_ast_reflection(),
-          [this](cursiv::LspServices& language) {
-            auto provider = std::make_unique<SeesNode>(language);
-            seesLl = provider.get();
             language.completionProvider = std::move(provider);
           });
 };
@@ -531,7 +510,7 @@ std::vector<std::string> labels_at(const cursiv::LspServices& language,
 void a_scope_sees_the_node_of_the_rule_entered() {
   const World world;
   const std::pair<const cursiv::LspServices*, const SeesNode*> engines[] = {
-      {world.seeing, world.sees}, {world.seeingLl, world.seesLl}};
+      {world.seeing, world.sees}};
   for (const auto& [language, sees] : engines) {
     sees->container.clear();
     (void)items_at(*language, "new:\n<|>");
@@ -545,13 +524,12 @@ void a_scope_sees_the_node_of_the_rule_entered() {
   }
 }
 
-// A data rule, or a terminal whose alternatives each convert, offers its words
-// filtered on what is typed, but none attached to a name or ending a comment.
-// Any other terminal offers nothing.
+// Word alternatives offer matching spellings at a value, including converted
+// branches. Names and comments keep their own completions.
 void a_data_rule_offers_its_words_and_a_terminal_none() {
   const World world;
   using Labels = std::vector<std::string>;
-  for (const cursiv::LspServices* language : {world.ll, world.lr}) {
+  for (const cursiv::LspServices* language : {world.lr}) {
     for (const std::string form : {"rule:\n", "branch:\n"}) {
       CHECK(labels_at(*language, form + "a <|>") == (Labels{"FALSE", "TRUE"}));
       CHECK(labels_at(*language, form + "a t<|>") == Labels{"TRUE"});
@@ -559,6 +537,11 @@ void a_data_rule_offers_its_words_and_a_terminal_none() {
       CHECK(labels_at(*language, form + "a // c<|>").empty());
       CHECK(labels_at(*language, form + "<|>").empty());
     }
+    (void)cursiv::test::expectHover(*language, {.text = "branch:\na T<|>rue;",
+                                                .hover = "Enables the feature.",
+                                                .disposeAfterCheck = true});
+    const auto documented = items_at(*language, "branch:\na t<|>");
+    CHECK(documented.size() == 1 && documented.front().find("|doc|") != std::string::npos);
     for (const std::string form : {"whole:\n", "size:\n"}) {
       CHECK(labels_at(*language, form + "a <|>").empty());
       CHECK(labels_at(*language, form + "a t<|>").empty());
@@ -572,7 +555,7 @@ void the_cap_on_names_leaves_the_keywords() {
   std::string text = "cap:\n";
   for (unsigned i = 0; i < 1100; ++i)
     text += "n" + std::to_string(i) + ": none;\n";
-  for (const cursiv::LspServices* language : {world.ll, world.lr}) {
+  for (const cursiv::LspServices* language : {world.lr}) {
     const std::vector<std::string> labels =
         labels_at(*language, text + "z: <|>");
     CHECK(labels.size() == 1001);
@@ -590,7 +573,7 @@ void a_data_rule_is_completed_from_its_start() {
       "John.Smith.Senior -> Z;\nZ -> ";
   const Labels john{"John.Miller", "John.Smith.Junior", "John.Smith.Senior"};
   const Labels smith{"John.Smith.Junior", "John.Smith.Senior"};
-  for (const cursiv::LspServices* language : {world.ll, world.lr}) {
+  for (const cursiv::LspServices* language : {world.lr}) {
     Labels all = john;
     all.emplace_back("Z");
     CHECK(labels_at(*language, names + "<|>John.Smith.Junior;") == all);
@@ -611,7 +594,7 @@ void a_data_rule_of_one_token_is_read_whole() {
   const World world;
   using Span = std::pair<unsigned, unsigned>;
   const std::pair<const cursiv::LspServices*, const SeesNode*> engines[] = {
-      {world.seeing, world.sees}, {world.seeingLl, world.seesLl}};
+      {world.seeing, world.sees}};
   for (const auto& [language, sees] : engines) {
     const auto first_span = [&, sees = sees, language = language](std::string text) {
       sees->span.reset();
@@ -648,6 +631,60 @@ void a_context_names_the_node_of_its_token() {
   for (const std::string& node : behind) CHECK(node == "Item");
 }
 
+void a_word_terminal_offers_its_property_if_any_spelling_fits() {
+  const auto parser = twords::generated::Suite::createParser();
+  constexpr std::string_view text = "masked:small:";
+  const auto parsed = parser->parse(text);
+  CHECK(parsed.accepted && parsed.diagnostics.empty());
+  std::vector<cursiv::NextFeature> features;
+  parser->nextFeaturesAt(parsed.cst(), 7, 12, features);
+  CHECK(std::ranges::any_of(features, [](const auto& feature) { return feature.property == "size"; }));
+
+  cursiv::CancellationTokenSource stop;
+  stop.request_stop();
+  try {
+    parser->nextFeaturesAt(parsed.cst(), text.size(), text.size(), features, stop.get_token());
+    CHECK(false);
+  } catch (const cursiv::OperationCancelled&) {}
+}
+
+void the_replaced_token_is_a_spelling_only_over_its_whole_span() {
+  const auto parser = twords::generated::Suite::createParser();
+  const auto parsed = parser->parse("case:ACTIVE:");
+  CHECK(parsed.accepted && parsed.diagnostics.empty());
+  const auto offers_name = [&](cursiv::TextOffset resume) {
+    std::vector<cursiv::NextFeature> features;
+    parser->nextFeaturesAt(parsed.cst(), 5, resume, features);
+    return std::ranges::any_of(features, [](const auto& f) { return f.property == "name"; });
+  };
+  CHECK(offers_name(11));
+  CHECK(!offers_name(7));
+}
+
+// A token is still typed where its last unit is a whole letter: a stray
+// continuation byte or a cut sequence after one ends it.
+void a_token_ending_in_a_whole_letter_is_still_typed() {
+  struct Asks final : cursiv::DefaultCompletionProvider {
+    using DefaultCompletionProvider::DefaultCompletionProvider;
+    using DefaultCompletionProvider::performNextTokenCompletion;
+  };
+  const World world;
+  const Asks provider(*world.lr);
+  const cursiv::Document document(
+      cursiv::TextDocument::create("file:///t.wlr", "words-lr", 0, ""));
+  for (const auto& [token, next] :
+       {std::pair<std::string_view, bool>{"a", false},
+        {"\xC3\xA9", false},
+        {"9", true},
+        {"a;", true},
+        {"a\x80", true},
+        {"\xC3\xA9\x80", true},
+        {"a\xC3", true}})
+    CHECK(provider.performNextTokenCompletion(
+              document, token, 0,
+              static_cast<cursiv::TextOffset>(token.size())) == next);
+}
+
 // A language overrides what one feature offers, which candidates a reference
 // has and their form, and whether the next way of reading the caret is tried.
 void the_hooks_shape_what_is_offered() {
@@ -675,13 +712,16 @@ void run() {
   a_data_rule_is_completed_from_its_start();
   a_data_rule_of_one_token_is_read_whole();
   the_hooks_shape_what_is_offered();
+  a_word_terminal_offers_its_property_if_any_spelling_fits();
+  the_replaced_token_is_a_spelling_only_over_its_whole_span();
   a_context_names_the_node_of_its_token();
+  a_token_ending_in_a_whole_letter_is_still_typed();
 }
 
 }  // namespace word_terminals
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   default_completion_provider::run();
   fuzzy_matcher::run();
   caret_repaired::run();

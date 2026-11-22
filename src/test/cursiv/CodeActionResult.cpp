@@ -2,6 +2,7 @@
 
 #include <lsp/types.h>
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -17,6 +18,8 @@
 #include "cursiv/ValidationHelper.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
 #include "cursiv/services/LspServices.hpp"
+#include "cursiv/actions/JsonBridge.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/text/LspPosition.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/validation/Diagnostic.hpp"
@@ -24,19 +27,6 @@
 #include "cursiv/workspace/TextDocument.hpp"
 
 namespace cursiv::test {
-
-namespace {
-
-std::vector<Diagnostic> withCode(const std::vector<Diagnostic>& diagnostics,
-                                 std::string_view code) {
-  std::vector<Diagnostic> kept;
-  for (const Diagnostic& d : diagnostics)
-    if ((d.code.has_value() && *d.code == code) || data_code(d) == code)
-      kept.push_back(d);
-  return kept;
-}
-
-}  // namespace
 
 CodeActionResult testCodeAction(const LspServices& services, std::string input,
                                 std::string_view diagnosticCode,
@@ -52,22 +42,26 @@ CodeActionResult testCodeAction(const LspServices& services, std::string input,
       std::move(static_cast<Disposable&>(before));
   const detail::DisposeOnThrow cleanup(result);
 
-  const std::vector<Diagnostic> relevant =
-      withCode(before.diagnostics, diagnosticCode);
-  expectedFunction(std::to_string(relevant.size()), "1");
-
   result.document = before.document;
-  result.diagnosticsAll = before.diagnostics;
-  if (relevant.empty()) return result;
-  result.diagnosticRelevant = relevant.front();
+  result.diagnosticsAll = std::move(before.diagnostics);
+  const auto matches = [diagnosticCode](const Diagnostic& d) {
+    return (d.code && *d.code == diagnosticCode) ||
+           dataCode(d) == diagnosticCode;
+  };
+  const auto count = std::ranges::count_if(result.diagnosticsAll, matches);
+  expectedFunction(std::to_string(count), "1");
+  if (!count) return result;
+  result.diagnosticRelevant =
+      *std::ranges::find_if(result.diagnosticsAll, matches);
 
   const TextDocument& text = before.document->textDocument();
   lsp::CodeActionParams params;
   params.textDocument = textDocumentParams(*before.document);
-  params.range = to_lsp(text.rangeAt(result.diagnosticRelevant.range.begin,
-                                     result.diagnosticRelevant.range.end));
-  // The context stays empty: this tree's provider reads the document's own
-  // published block rather than the client's echo of it.
+  params.context.diagnostics.push_back(cursiv::detail::to_lsp_diagnostic(
+      *before.document, result.diagnosticRelevant,
+      *services.shared().documents));
+  params.range = params.context.diagnostics.front().range;
+  params.context.triggerKind = lsp::CodeActionTriggerKind::Invoked;
   std::vector<lsp::CodeAction> actions;
   if (services.codeActionProvider != nullptr)
     actions = services.codeActionProvider->getCodeActions(*before.document,
@@ -80,14 +74,14 @@ CodeActionResult testCodeAction(const LspServices& services, std::string input,
   expectedFunction(std::to_string(actions.size()), "1");
   if (actions.empty()) return result;
 
-  result.action = actions.front();
+  result.action = std::move(actions.front());
   const lsp::CodeAction& action = *result.action;
   // Only the edits filed under this document change its text; an action may
   // edit other documents as well.
   std::vector<TextEdit> converted;
   if (action.edit.has_value())
     for (const lsp::TextEdit& edit : detail::editsFor(*action.edit, text.uri()))
-      converted.emplace_back(from_lsp(edit.range), edit.newText);
+      converted.emplace_back(fromLsp(edit.range), edit.newText);
   expectedFunction(converted.empty() ? "false" : "true", "true",
                    "the code action carries no edit for this document");
   const std::string updated = TextDocument::applyEdits(text, converted);
@@ -100,7 +94,7 @@ CodeActionResult testCodeAction(const LspServices& services, std::string input,
   ValidationResult after = validationHelper(services, updated, asked);
   static_cast<Disposable&>(result) = std::move(static_cast<Disposable&>(after));
   expectedFunction(
-      std::to_string(withCode(after.diagnostics, diagnosticCode).size()), "0");
+      std::to_string(std::ranges::count_if(after.diagnostics, matches)), "0");
   result.dispose();
   ValidationResult again = validationHelper(services, std::move(input), asked);
   static_cast<Disposable&>(result) = std::move(static_cast<Disposable&>(again));

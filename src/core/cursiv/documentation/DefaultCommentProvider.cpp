@@ -21,7 +21,7 @@
 
 namespace cursiv {
 
-NodeId find_comment_node(const Document& document, const AstNode& node,
+NodeId findCommentNode(const Document& document, const AstNode& node,
                          std::span<const std::string> ruleNames) {
   const Cst& cst = document.parseResult.cst();
   if (node.cstNodeId == kNoNode || node.cstNodeId >= cst.size() ||
@@ -52,7 +52,7 @@ NodeId find_comment_node(const Document& document, const AstNode& node,
     const CstNode& record = cst[id];
     // A zero-width record separates nothing.
     if (record.begin == record.end) continue;
-    if (record.hidden == 0) return kNoNode;
+    if (!record.isHidden()) return kNoNode;
     if (std::ranges::find(ruleNames, grammar.recordRule(record)) !=
         ruleNames.end())
       return id;
@@ -61,7 +61,7 @@ NodeId find_comment_node(const Document& document, const AstNode& node,
   return kNoNode;
 }
 
-DocComment parse_doc_comment(const Document& document, NodeId comment,
+DocComment parseDocComment(const Document& document, NodeId comment,
                              const DocCommentParseOptions& options) {
   const Cst& cst = document.parseResult.cst();
   const TextOffset begin = cst[comment].begin;
@@ -72,14 +72,14 @@ DocComment parse_doc_comment(const Document& document, NodeId comment,
   const TextOffset lineStart = text.offsetAt(Position{line, 0});
   const DocCommentPosition start{
       line, static_cast<std::uint32_t>(begin - lineStart), begin};
-  return parse_doc_comment(cst.text(comment), start, options);
+  return parseDocComment(cst.text(comment), start, options);
 }
 
 std::optional<std::string> DefaultCommentProvider::getComment(
     const AstNode& node, const Document* document) const {
   if (document == nullptr) document = node.getDocument();
   if (document == nullptr) return std::nullopt;
-  const NodeId comment = find_comment_node(*document, node, _mlCommentRuleNames);
+  const NodeId comment = findCommentNode(*document, node, _mlCommentRuleNames);
   if (comment == kNoNode) return std::nullopt;
   return std::string(document->parseResult.cst().text(comment));
 }

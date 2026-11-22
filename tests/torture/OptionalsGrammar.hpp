@@ -6,8 +6,8 @@
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
-#include "engines/lr/BoundaryGrammar.hpp"
-#include "engines/lr/NewlineGrammar.hpp"
+#include "grammars/BoundaryGrammar.hpp"
+#include "grammars/NewlineGrammar.hpp"
 
 namespace topt {
 

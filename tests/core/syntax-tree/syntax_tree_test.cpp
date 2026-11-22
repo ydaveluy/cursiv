@@ -36,17 +36,15 @@
 #include <variant>
 #include <vector>
 
-#include "aball/generated/All/AstReflection.hpp"
 #include "aball/generated/All/Module.hpp"
 #include "aball/generated/All/Table.hpp"
-#include "abbare/generated/G/AstReflection.hpp"
 #include "abbare/generated/G/Module.hpp"
 #include "conv/generated/G/Module.hpp"
 #include "core/syntax-tree/AstBuilderGrammars.hpp"
+#include "cursiv/engine/ast/Actions.hpp"
 #include "core/syntax-tree/ConvertGrammars.hpp"
 #include "core/syntax-tree/CstNodeGrammars.hpp"
 #include "core/syntax-tree/DualGrammar.hpp"
-#include "core/syntax-tree/EntryHeld.hpp"
 #include "cstinfix/generated/InfixG/Module.hpp"
 #include "cstinfix/generated/InfixG/Table.hpp"
 #include "cstlex/generated/LexG/Module.hpp"
@@ -58,16 +56,9 @@
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/GrammarUtils.hpp"
 #include "cursiv/grammar/PayloadOf.hpp"
-#include "cursiv/lr/gen/LrLowering.hpp"
-#include "cursiv/lr/gen/lr_build.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/ranges/DefaultSelectionRangeProvider.hpp"
 #include "cursiv/references/NameProvider.hpp"
-#include "cursiv/shared/gen/AstRowOf.hpp"
-#include "cursiv/shared/runtime/AstConvThunks.hpp"
-#include "cursiv/shared/runtime/AstReducer.hpp"
-#include "cursiv/shared/runtime/ast_fields.hpp"
-#include "cursiv/shared/table/WriteKind.hpp"
 #include "cursiv/symbols/NamedNodes.hpp"
 #include "cursiv/syntax-tree/AstArena.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
@@ -87,6 +78,7 @@
 #include "cursiv/syntax-tree/DefaultDocumentReferences.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/syntax-tree/ParseResultBuilder.hpp"
 #include "cursiv/utils/TypeName.hpp"
 #include "cursiv/utils/typelist.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
@@ -94,8 +86,7 @@
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/ReferenceDescriptionProvider.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
-#include "dualll/generated/Ll/Module.hpp"
-#include "duallr/generated/Lr/Module.hpp"
+#include "duallr/generated/D2/Module.hpp"
 #include "support/World.hpp"
 
 // The AST tables through the erased reflection, then the reducer: one case
@@ -118,14 +109,14 @@ const cursiv::DefaultAstReflection& reflection_of() {
 
 // The grammar most tests below read, and its tables.
 const cursiv::Parser& engine() {
-  return parser_of<&tab::generated::All::create_parser>();
+  return parser_of<&tab::generated::All::createParser>();
 }
 const cursiv::DefaultAstReflection& refl() {
-  return reflection_of<&tab::generated::All::create_ast_reflection>();
+  return reflection_of<&tab::generated::All::createAstReflection>();
 }
 
 template <class T>
-inline constexpr const cursiv::AstTypeTag* kTag = &cursiv::ast_type_tag<T>;
+inline constexpr const cursiv::AstTypeTag* kTag = &cursiv::kAstTypeTag<T>;
 
 std::uint16_t field_of(const cursiv::DefaultAstReflection& refl,
                        const cursiv::AstTypeTag* owner, std::string_view name) {
@@ -161,14 +152,17 @@ bool fields_are_coherent(const cursiv::DefaultAstReflection& refl) {
   return true;
 }
 
-// The reducer asks `derives` of indices, a tag holder walks the tag's
-// bases: both agree for every pair.
+// The subtypes a table lists and the tag's walk of its bases agree for every
+// pair.
 bool folds_agree(const cursiv::DefaultAstReflection& refl) {
   const cursiv::detail::AstMetaData& m = refl.metaData();
   for (std::uint16_t b = 0; b < m.typeCount; ++b)
-    for (std::uint16_t s = 0; s < m.typeCount; ++s)
-      if (m.derives(b, s) != m.tag_of(s)->derivesFrom(m.tag_of(b)))
-        return false;
+    for (std::uint16_t s = 0; s < m.typeCount; ++s) {
+      const std::span<const cursiv::AstTypeTag* const> listed(
+          m.subtypes[b].tags, m.subtypes[b].count);
+      const bool in = std::ranges::find(listed, m.tag_of(s)) != listed.end();
+      if (in != m.tag_of(s)->derivesFrom(m.tag_of(b))) return false;
+    }
   return true;
 }
 
@@ -254,12 +248,6 @@ void the_tables_read_back() {
   CHECK(name.target == cursiv::detail::kNoIndex);
   CHECK(name.owner == r.typeIndexOf(kTag<Base>));
 
-  // The converter of NUM into the variant's int64 alternative, and the default
-  // path into a reference's name: two different entries.
-  CHECK(cursiv::engine::ast_registry<tab::hier::G,
-                                     cursiv::engine::LrLowering<tab::hier::G>>()
-            .convCount >= 2);
-
   // Built types and the pointee of a node member, each once.
   CHECK(std::count_if(m.types, m.types + m.typeCount, [](const auto* t) {
     return t == kTag<Base> || t == kTag<Mid> || t == kTag<Leaf> || t == kTag<Holder>;
@@ -298,36 +286,6 @@ void the_tables_read_back() {
   // through -- the completion and MCP path into the same table.
   CHECK(r.referenceIndexOf(kTag<Holder>, "target") == targetAt);
   CHECK(r.referenceIndexOf(kTag<Holder>, "missing") == cursiv::kNoReference);
-}
-
-// Two bases each declare `x`, written with one literal as a compiler may pool
-// them, and share a base of their own: the class below has both `x`, and the
-// shared base's `y` once.
-void two_members_of_one_name_stay_two() {
-  static constexpr std::string_view kX = "x";
-  static const cursiv::PropertyMetaData top[] = {{.name = "y"}};
-  static const cursiv::PropertyMetaData left[] = {{.name = kX}};
-  static const cursiv::PropertyMetaData right[] = {{.name = kX}};
-  static const cursiv::PropertyMetaData bottom[] = {{.name = "z"}};
-  static cursiv::AstTypeTag base{.name = "Top"};
-  static const cursiv::AstTypeTag* const toBase[] = {&base};
-  static cursiv::AstTypeTag a{.baseCount = 1, .bases = toBase, .name = "A"};
-  static cursiv::AstTypeTag b{.baseCount = 1, .bases = toBase, .name = "B"};
-  static const cursiv::AstTypeTag* const toAll[] = {&a, &b, &base};
-  static cursiv::AstTypeTag d{.baseCount = 3, .bases = toAll, .name = "D"};
-  static const cursiv::AstTypeTag* const types[] = {&base, &a, &b, &d};
-  static const cursiv::detail::PropertyRow rows[] = {
-      {top, 1}, {left, 1}, {right, 1}, {bottom, 1}};
-  cursiv::detail::AstMetaData meta;
-  meta.types = types;
-  meta.typeCount = 4;
-  meta.propertyRows = rows;
-  const cursiv::DefaultAstReflection r(meta);
-  const auto properties = r.getTypeMetaData(&d).properties;
-  std::vector<std::string_view> names;
-  for (const cursiv::PropertyMetaData& property : properties)
-    names.push_back(property.name);
-  CHECK((names == std::vector<std::string_view>{"y", "x", "x", "z"}));
 }
 
 }  // namespace hier
@@ -441,12 +399,6 @@ void an_enum_is_a_plain_value_member() {
   // No storage, no node, no reference.
   CHECK(desc_of(r, kTag<Decl>, "vis").content ==
         cursiv::detail::FieldContent::value);
-  // It converts through its own entry: (VIS's converter, Vis) is not
-  // (default path, string_view), and the converter-less spelling of the same
-  // member is one entry more -- (default path, Vis).
-  CHECK(cursiv::engine::ast_registry<tab::enm::G,
-                                     cursiv::engine::LrLowering<tab::enm::G>>()
-            .convCount == 3);
 }
 
 }  // namespace enm
@@ -457,12 +409,9 @@ using namespace tab::bare;
 
 void no_directive_no_columns() {
   const cursiv::DefaultAstReflection& r =
-      reflection_of<&tab::bare::generated::G::create_ast_reflection>();
+      reflection_of<&tab::bare::generated::G::createAstReflection>();
   CHECK(r.metaData().fieldCount == 0);
   CHECK(r.metaData().typeCount == 1);
-  CHECK(cursiv::engine::ast_registry<tab::bare::G,
-                                     cursiv::engine::LrLowering<tab::bare::G>>()
-            .convCount == 0);
   CHECK(r.typeIndexOf(kTag<Node>) != cursiv::kNoType);
 }
 
@@ -504,12 +453,67 @@ void builds_doc() {
   CHECK(!r.nodes().empty() && r.nodes().back() == doc);
 }
 
+struct CancelledWrites { using rows = cursiv::TypeList<std::type_identity<Doc>>; };
+
+void a_large_reduction_stops_between_values() {
+  using namespace cursiv;
+  using namespace cursiv::engine;
+  static CancellationTokenSource stop;
+  static NodeCount calls;
+  constexpr auto count = 2 * AstBuilder::kStopRecords;
+  const std::string source(count, 'x');
+  static constexpr auto visit = [] {
+    if (++calls == 1) stop.request_stop();
+  };
+  const AstRecord fill = [](AstBuilder& b, NodeId id, const CstNode& n) {
+    fill_class<CancelledWrites, 0>(b, b.out.createNode<Doc>(id), b.inside(id, n));
+  };
+  const AstRecord gather = [](AstBuilder& b, NodeId id, const CstNode&) {
+    std::span<const std::string_view> parts;
+    (void)b.parts(id, parts);
+  };
+  const AstWrite write = [](AstBuilder&, AstNode*, const Pending&) { visit(); return true; };
+  const AstText convert[] = {{[](AstBuilder&, NodeId, std::span<const std::string_view>, std::string_view& out) {
+    visit();
+    out = "x";
+    return true;
+  }}};
+  const AstText* block = convert;
+  const DeferredWrite deferred{0, 0};
+  AstTables tables{};
+  tables.meta = tab::generated::All::kAst.meta;
+  tables.writeCount = 1;
+  tables.elementCount = tables.recordCount = 2;
+  tables.deferred = &deferred;
+  tables.writes = &write;
+  tables.texts.blocks = &block;
+  for (const auto root : {fill, gather}) {
+    Cst tree;
+    tree.reset(source);
+    {
+      CstBuilder tape(tree);
+      tape.reserveRecords(count + 1);
+      for (NodeId i = 0; i < count; ++i) tape.stream().leaf(i, i + 1, 0);
+      tape.stream().close(0, count, count + 1, 1);
+      tape.finish(count, true);
+    }
+    tables.records = &root;
+    stop = CancellationTokenSource{};
+    calls = 0;
+    try {
+      (void)AstBuilder::build(tables, std::move(tree), stop.get_token());
+      CHECK(false);
+    } catch (const OperationCancelled&) {
+      CHECK(calls > 0 && calls < count);
+    }
+  }
+}
+
 void structural_errors() {
   // A tree that never parsed: nothing to materialise.
   cursiv::Cst empty;
-  cursiv::ParseResult none =
-      cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
-          tab::generated::All::kAstActions, std::move(empty));
+  cursiv::ParseResult none = cursiv::engine::AstBuilder::build(
+      tab::generated::All::kAst, std::move(empty));
   CHECK(!none && none.error == cursiv::AstBuildError::NoEntry);
   CHECK(none.value == nullptr);
 
@@ -527,7 +531,7 @@ void structural_errors() {
 // root past the end of the tape, (2) a root that reduces to nothing, (3) an
 // extent out of bounds.
 void a_hand_built_entry_is_answered_not_trusted() {
-  const cursiv::engine::AstActions& acts = tab::generated::All::kAstActions;
+  const cursiv::engine::AstTables& tables = tab::generated::All::kAst;
   // (1) Out of range. The public wrapper refuses to bind a root that names no
   // record, so the tape comes back with no entry at all rather than with a
   // wild one.
@@ -535,14 +539,14 @@ void a_hand_built_entry_is_answered_not_trusted() {
     cursiv::Cst cst;
     cst.reset("doc item a");
     {
-      cursiv::detail::CstBuilder b(cst);
-      b.leaf(0, 3, 0);
-      b.bind_entry(0, cst.size(), 5000000);
+      cursiv::CstBuilder b(cst);
+      b.reserveRecords(1);
+      b.stream().leaf(0, 3, 0);
+      b.finish(5000000, true);
     }
     CHECK(!cst.hasEntry());
     cursiv::ParseResult r =
-        cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
-            acts, std::move(cst));
+        cursiv::engine::AstBuilder::build(tables, std::move(cst));
     CHECK(!r && r.error == cursiv::AstBuildError::NoEntry);
     CHECK(r.value == nullptr);
   }
@@ -553,14 +557,14 @@ void a_hand_built_entry_is_answered_not_trusted() {
     cursiv::Cst cst;
     cst.reset("doc item a");
     {
-      cursiv::detail::CstBuilder b(cst);
-      b.hidden(0, 3, 0);
-      b.bind_entry(0, cst.size(), 0);
+      cursiv::CstBuilder b(cst);
+      b.reserveRecords(1);
+      b.stream().hidden(0, 3, 0);
+      b.finish(0, true);
     }
     CHECK(cst.hasEntry());
     cursiv::ParseResult r =
-        cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
-            acts, std::move(cst));
+        cursiv::engine::AstBuilder::build(tables, std::move(cst));
     CHECK(!r && r.error == cursiv::AstBuildError::MalformedCst);
     CHECK(r.value == nullptr);
   }
@@ -569,15 +573,14 @@ void a_hand_built_entry_is_answered_not_trusted() {
     cursiv::Cst cst;
     cst.reset("doc item a");
     {
-      cursiv::detail::CstBuilder b(cst);
+      cursiv::CstBuilder b(cst);
+      b.reserveRecords(1);
       b.stream().close(0, 3, extent, 0);
-      b.bind_stream();
-      b.bind_entry(0, cst.size(), 0);
+      b.finish(0, true);
     }
     CHECK(cst.hasEntry());
     cursiv::ParseResult r =
-        cursiv::engine::AstReducer::build<tab::generated::All::kTable.stamp>(
-            acts, std::move(cst));
+        cursiv::engine::AstBuilder::build(tables, std::move(cst));
     CHECK(!r && r.error == cursiv::AstBuildError::MalformedCst);
     CHECK(r.value == nullptr);
   }
@@ -742,106 +745,6 @@ void assigning_again_keeps_one_reference_site() {
   std::sort(resolved.begin(), resolved.end());
   CHECK(resolved == unresolved);
 
-  // A grammar writes a scalar once, so a second write is the builder's own to
-  // keep whole: the site stays, the text follows it, and a refused conversion
-  // leaves the value in place.
-  cursiv::engine::AstBuildCtx ctx;
-  ctx.cst = &r.cst();
-  ctx.refs = &r.references->handles;
-  ctx.resolver = r.references.get();
-  const cursiv::engine::Pending again{
-      .root = cursiv::detail::RefAccess::node_id(rec->also[0]),
-      .text = cursiv::detail::RefAccess::node_id(rec->also[0]),
-      .kind = cursiv::detail::ActKind::assign};
-  const cursiv::engine::ConvSlot text{
-      .fn = [](cursiv::engine::AstBuildCtx& c, cursiv::NodeId id, void* out) {
-        *static_cast<cursiv::AstNode::string_view*>(out) = c.cst->text(id);
-        return true;
-      }};
-  const cursiv::engine::ConvSlot refuses{.fn = [](cursiv::engine::AstBuildCtx&,
-                                                  cursiv::NodeId,
-                                                  void*) { return false; }};
-  const auto one = field_of(refl(), kTag<Rec>, "one");
-  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::one>>(
-      ctx, again, rec, &text, one, 0);
-  CHECK(rec->one.refText == "ee" &&
-        cursiv::detail::RefAccess::handle(rec->one) == 0);
-  CHECK(r.references->handles.size() == 4);
-  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::one>>(
-      ctx, again, rec, &refuses, one, 0);
-  CHECK(rec->one.refText == "ee" &&
-        cursiv::detail::RefAccess::handle(rec->one) == 0);
-  CHECK(r.references->handles.size() == 4);
-  // An optional keeps its site the same way.
-  const auto held = field_of(refl(), kTag<Rec>, "maybe");
-  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
-      ctx, again, rec, &text, held, 0);
-  CHECK(rec->maybe->refText == "ee" &&
-        cursiv::detail::RefAccess::handle(*rec->maybe) == 1);
-  CHECK(r.references->handles.size() == 4);
-  cursiv::engine::write_into<cursiv::detail::field_tag<&Rec::maybe>>(
-      ctx, again, rec, &refuses, held, 0);
-  CHECK(rec->maybe->refText == "ee" && r.references->handles.size() == 4);
-}
-
-// Each single-valued form that can hold a node.
-struct NodeHolder : cursiv::Extends<cursiv::AstNode> {
-  Target* direct = nullptr;
-  optional<Target*> maybe;
-  variant<Target*, int64> either;
-  optional<variant<Target*, int64>> both;
-};
-
-// A write replaces the node a member held, and the node no longer has that
-// parent; a refused conversion replaces nothing.
-template <auto Member>
-void a_write_replaces_the_node_of(auto hold) {
-  using F = cursiv::detail::field_tag<Member>;
-  NodeHolder holder;
-  Target before;
-  Target after;
-  hold(holder, &before);
-  before.parent = &holder;
-  const cursiv::engine::ConvSlot refuses{.fn = [](cursiv::engine::AstBuildCtx&,
-                                                  cursiv::NodeId,
-                                                  void*) { return false; }};
-  cursiv::engine::AstBuildCtx ctx;
-  if constexpr (F::content == cursiv::detail::FieldContent::variant) {
-    const cursiv::engine::Pending value{.kind =
-                                            cursiv::detail::ActKind::assign};
-    cursiv::engine::write_into<F>(ctx, value, &holder, &refuses, 0, 0);
-    CHECK(before.parent == &holder && !ctx.detached);
-  }
-  const cursiv::engine::Pending node{.kind = cursiv::detail::ActKind::assign,
-                                     .value = &after};
-  cursiv::engine::write_into<F>(ctx, node, &holder, nullptr, 0, 0);
-  CHECK(before.parent == nullptr && ctx.detached);
-  CHECK(after.parent == &holder && ctx.attached == 1);
-  if constexpr (F::content == cursiv::detail::FieldContent::variant) {
-    // A value replaces it too.
-    ctx.detached = false;
-    const cursiv::engine::ConvSlot number{
-        .fn = [](cursiv::engine::AstBuildCtx&, cursiv::NodeId, void* out) {
-          cursiv::detail::place<std::int64_t>(
-              *static_cast<typename F::member*>(out), std::int64_t{7});
-          return true;
-        }};
-    const cursiv::engine::Pending value{.kind =
-                                            cursiv::detail::ActKind::assign};
-    cursiv::engine::write_into<F>(ctx, value, &holder, &number, 0, 0);
-    CHECK(after.parent == nullptr && ctx.detached);
-  }
-}
-
-void a_write_replaces_the_node_a_member_held() {
-  a_write_replaces_the_node_of<&NodeHolder::direct>(
-      [](NodeHolder& h, Target* t) { h.direct = t; });
-  a_write_replaces_the_node_of<&NodeHolder::maybe>(
-      [](NodeHolder& h, Target* t) { h.maybe = t; });
-  a_write_replaces_the_node_of<&NodeHolder::either>(
-      [](NodeHolder& h, Target* t) { h.either = t; });
-  a_write_replaces_the_node_of<&NodeHolder::both>(
-      [](NodeHolder& h, Target* t) { h.both = t; });
 }
 
 // A reference is one site of one tree: never copied, only moved into place.
@@ -883,36 +786,12 @@ namespace exact {
 
 using namespace tab::exact;
 
-// The slot the builder emplaces is the exact alternative -- the same list the
-// validation counted, so the two cannot disagree.
-template <class R>
-using slot_of =
-    typename cursiv::engine::conv_alt<decltype(Val::v),
-                                      cursiv::detail::text_payload<R>>::type;
-static_assert(std::is_same_v<slot_of<G::BOOL>, bool>);
-static_assert(std::is_same_v<slot_of<G::NUM>, double>);
-static_assert(std::is_same_v<slot_of<G::STR>, std::string_view>);
-// The positioned wrapper never reaches the comparison: PCT's value type is
-// `double`, so it takes the same exact slot a bare double converter does.
-static_assert(std::is_same_v<slot_of<G::PCT>, double>);
-
-// A payload no alternative names exactly still goes through the scan: int8
-// is constructible into `float64` and into nothing else here, so it resolves.
-static_assert(std::is_same_v<typename cursiv::engine::conv_alt<
-                                 std::variant<double, std::string_view>,
-                                 cursiv::detail::text_payload<G::BOOL>>::type,
-                             double>);
-
 // Validation accepts all three, where the constructibility scan alone would
 // have refused bool and double.
 void every_alternative_is_kept() {
   const cursiv::DefaultAstReflection& r = refl();
   CHECK(desc_of(r, kTag<Val>, "v").content ==
         cursiv::detail::FieldContent::variant);
-  CHECK(
-      cursiv::engine::ast_registry<tab::exact::G,
-                                   cursiv::engine::LrLowering<tab::exact::G>>()
-          .convCount == 4);
 }
 
 void each_payload_goes_to_its_own_slot() {
@@ -952,22 +831,6 @@ namespace annot {
 
 using namespace tab::annot;
 
-template <class R>
-using slot_of =
-    typename cursiv::engine::conv_alt<decltype(Val::v),
-                                      cursiv::detail::text_payload<R>>::type;
-static_assert(std::is_same_v<slot_of<G::NUM>, std::int64_t>);
-static_assert(std::is_same_v<slot_of<G::WORD>, std::string_view>);
-
-// The two rules keep two conversion entries: the annotated one may not share
-// the bare-text one, or the writer emplaces the wrong slot.
-void the_annotated_rule_keeps_its_own_entry() {
-  CHECK(
-      cursiv::engine::ast_registry<tab::annot::G,
-                                   cursiv::engine::LrLowering<tab::annot::G>>()
-          .convCount == 2);
-}
-
 void annotated_terminal_goes_to_its_annotated_slot() {
   const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult rn = engine.parse("$annot 42");
@@ -990,12 +853,6 @@ void annotated_terminal_goes_to_its_annotated_slot() {
 namespace annot2 {
 
 using namespace tab::annot2;
-
-static_assert(
-    std::is_same_v<typename cursiv::engine::conv_alt<
-                       decltype(Num::n),
-                       cursiv::detail::text_payload<tab::All::Annot2INT>>::type,
-                   std::int32_t>);
 
 void the_validated_alternative_is_the_written_one() {
   cursiv::ParseResult r = engine().parse("$annot2 42");
@@ -1034,13 +891,12 @@ static_assert(
         cursiv::detail::erased_src_t<cursiv::detail::text_payload<DerivedHex>>,
         cursiv::detail::text_payload<DerivedHex>>);
 
-void an_override_runs_the_converter_it_inherited(const cursiv::Parser& parser,
-                                                 const char* engine) {
+void an_override_runs_the_converter_it_inherited(const cursiv::Parser& parser) {
   cursiv::ParseResult r = parser.parse("0X1f");
   CHECK(r.error == cursiv::AstBuildError::None && r.diagnostics.empty());
   const N* n = r.valueAs<N>();
   if (n == nullptr || n->n != 4000) {
-    std::printf("FAIL %s: 0X1f converted to %llu\n", engine,
+    std::printf("FAIL: 0X1f converted to %llu\n",
                 n == nullptr ? 0ull : static_cast<unsigned long long>(n->n));
     ++cursiv::test::failures;
   }
@@ -1055,13 +911,12 @@ static_assert(
 static_assert(std::is_same_v<cursiv::detail::converter_rule_t<DecimalHex>,
                              cursiv::default_converter<std::uint64_t>>);
 
-void an_override_naming_a_target_converts_to_it(const cursiv::Parser& parser,
-                                               const char* engine) {
+void an_override_naming_a_target_converts_to_it(const cursiv::Parser& parser) {
   cursiv::ParseResult r = parser.parse("dec 10");
   CHECK(r.error == cursiv::AstBuildError::None && r.diagnostics.empty());
   const N* n = r.valueAs<N>();
   if (n == nullptr || n->n != 10) {
-    std::printf("FAIL %s: 10 converted to %llu\n", engine,
+    std::printf("FAIL: 10 converted to %llu\n",
                 n == nullptr ? 0ull : static_cast<unsigned long long>(n->n));
     ++cursiv::test::failures;
   }
@@ -1076,13 +931,12 @@ static_assert(
 static_assert(std::is_same_v<cursiv::detail::converter_rule_t<ChainHex>,
                              cursiv::detail::text_conv<tdual::D1::tens_conv>>);
 
-void an_override_keeps_the_converter_it_replaced(const cursiv::Parser& parser,
-                                                 const char* engine) {
+void an_override_keeps_the_converter_it_replaced(const cursiv::Parser& parser) {
   cursiv::ParseResult r = parser.parse("ten 0Y1f");
   CHECK(r.error == cursiv::AstBuildError::None && r.diagnostics.empty());
   const N* n = r.valueAs<N>();
   if (n == nullptr || n->n != 40) {
-    std::printf("FAIL %s: 0Y1f converted to %llu\n", engine,
+    std::printf("FAIL: 0Y1f converted to %llu\n",
                 n == nullptr ? 0ull : static_cast<unsigned long long>(n->n));
     ++cursiv::test::failures;
   }
@@ -1094,14 +948,12 @@ void an_override_keeps_the_converter_it_replaced(const cursiv::Parser& parser,
 // holds them.
 namespace precreate {
 
-void a_create_keeps_the_writes_before_it(const cursiv::Parser& parser,
-                                        const char* engine) {
+void a_create_keeps_the_writes_before_it(const cursiv::Parser& parser) {
   cursiv::ParseResult r = parser.parse("fn run ()");
   CHECK(r.error == cursiv::AstBuildError::None && r.diagnostics.empty());
   const auto* f = r.valueAs<tdual::Function>();
   if (f == nullptr || f->name != "run") {
-    std::printf("FAIL %s: the Function lost the name written before it\n",
-                engine);
+    std::printf("FAIL: the Function lost the name written before it\n");
     ++cursiv::test::failures;
   }
 }
@@ -1172,21 +1024,21 @@ void a_walk_reads_what_a_node_contains() {
   CHECK(outer != nullptr && outer->child != nullptr);
   if (outer == nullptr || outer->child == nullptr) return;
   std::vector<const cursiv::AstNode*> all;
-  cursiv::visit_all_contents(refl(), *outer,
+  cursiv::visitAllContents(refl(), *outer,
                              [&](cursiv::AstNode& node) { all.push_back(&node); });
   CHECK(all.size() >= 2);
   if (!all.empty()) CHECK(all.front() == outer->child);
   CHECK(std::ranges::find(all, outer) == all.end());
   std::size_t direct = 0, pruned = 0;
-  cursiv::visit_contents(refl(), *outer, [&](cursiv::AstNode&) { ++direct; });
-  cursiv::visit_all_contents(refl(), *outer, [&](cursiv::AstNode&) {
+  cursiv::visitContents(refl(), *outer, [&](cursiv::AstNode&) { ++direct; });
+  cursiv::visitAllContents(refl(), *outer, [&](cursiv::AstNode&) {
     ++pruned;
     return cursiv::AstWalk::Prune;
   });
   CHECK(direct != 0 && pruned == direct && pruned < all.size());
-  CHECK(cursiv::container_of_type<N>(all.back()) != nullptr);
-  CHECK(cursiv::container_of_type<N>(outer) == outer);
-  CHECK(cursiv::container_of_type<N>(nullptr) == nullptr);
+  CHECK(cursiv::containerOfType<N>(all.back()) != nullptr);
+  CHECK(cursiv::containerOfType<N>(outer) == outer);
+  CHECK(cursiv::containerOfType<N>(nullptr) == nullptr);
 }
 
 void nest_chain() {
@@ -1489,23 +1341,6 @@ namespace textlaw {
 
 using namespace tab::textlaw;
 
-// The rule itself, on every shape at once.
-template <class M, class R>
-inline constexpr bool takes =
-    cursiv::engine::admits<M, cursiv::detail::text_payload<R>>();
-static_assert(takes<std::string_view, tab::All::TextID>);
-static_assert(takes<std::string_view, tab::All::TextQUOTED>);
-static_assert(!takes<std::string_view, tab::All::TextNUM>);
-static_assert(!takes<std::string, tab::All::TextNUM>);
-static_assert(takes<std::int64_t, tab::All::TextNUM>);
-// A converter that builds its text answers a string, which a view cannot hold.
-static_assert(!takes<std::string_view, tab::All::TextLOWER>);
-static_assert(!takes<std::string_view, tab::All::TextOWNS>);
-// A `string` takes any text.
-static_assert(takes<std::string, tab::All::TextOWNS>);
-static_assert(takes<std::string, tab::All::TextQUOTED>);
-static_assert(takes<std::string, tab::All::TextID>);
-
 void the_law_leaves_the_safe_combinations_alone() {
   cursiv::ParseResult r = engine().parse("$text abc 'xy' 42 HELLO");
   CHECK(r.accepted && static_cast<bool>(r) && r.diagnostics.empty());
@@ -1652,6 +1487,26 @@ void a_narrowed_site_records_and_filters() {
   CHECK(narrowed.branch(kTag<Kind2>) == cursiv::detail::kNoBranch);
 }
 
+// No rule builds either kind, as when another language builds them: the
+// member accepts both through their base, and the site's narrowing keeps one.
+void a_class_the_grammar_does_not_index_is_accepted_through_its_base() {
+  const cursiv::DefaultAstReflection& refl = ast_builder::refl();
+  CHECK(refl.typeIndexOf(kTag<Kind1>) == cursiv::kNoType);
+  CHECK(refl.typeIndexOf(kTag<Kind2>) == cursiv::kNoType);
+  const std::uint16_t broad = field_of(refl, kTag<Site>, "broad");
+  const cursiv::AcceptSet accepts = refl.referenceAccepts(broad);
+  CHECK(refl.acceptsTag(accepts, kTag<Kind1>));
+  CHECK(refl.acceptsTag(accepts, kTag<Kind2>));
+  // A class of another grammar, under no class the member declares.
+  CHECK(!refl.acceptsTag(accepts, kTag<tab::bare::Node>));
+  CHECK(!refl.acceptsTag(accepts, nullptr));
+  cursiv::ReferenceInfo site;
+  site.reference = broad;
+  site.narrow = 0;
+  CHECK(refl.accepts(site, kTag<Kind1>));
+  CHECK(!refl.accepts(site, kTag<Kind2>));
+}
+
 }  // namespace narrow
 
 // `a + b + (d | e) + c`, where d and e create their own class: the writes
@@ -1679,6 +1534,24 @@ void writes_go_to_the_branch_node() {
 
 }  // namespace deferred
 
+// A base the grammar does not index still hands down what is above it.
+namespace unnamed {
+
+using namespace tab::unnamed;
+
+void a_base_the_grammar_does_not_index_keeps_what_is_above_it() {
+  const cursiv::DefaultAstReflection& r = refl();
+  CHECK(r.typeIndexOf(kTag<Between>) == cursiv::kNoType);
+  const cursiv::TypeMetaData bottom = r.getTypeMetaData(kTag<Bottom>);
+  CHECK(bottom.superTypes.size() == 1 && bottom.superTypes[0] == kTag<Between>);
+  std::vector<std::string_view> names;
+  for (const cursiv::PropertyMetaData& property : bottom.properties)
+    names.push_back(property.name);
+  CHECK((names == std::vector<std::string_view>{"name", "marked"}));
+}
+
+}  // namespace unnamed
+
 }  // namespace
 
 // A class may name a property like a field of every node: the free accessors
@@ -1694,12 +1567,12 @@ void the_accessors_read_past_a_property_of_the_same_name() {
   node.AstNode::parent = &above;
   node.AstNode::cstNodeId = 42;
   CHECK(node.parent == 7);
-  CHECK(cursiv::parent_of(node) == &above);
-  CHECK(cursiv::type_of(node) == node.AstNode::type);
-  CHECK(cursiv::cst_node_id_of(node) == 42);
+  CHECK(cursiv::parentOf(node) == &above);
+  CHECK(cursiv::typeOf(node) == node.AstNode::type);
+  CHECK(cursiv::cstNodeIdOf(node) == 42);
   // The root is the top of the tree, the document above it left out.
-  CHECK(&cursiv::root_of(node) == &above);
-  CHECK(&cursiv::root_of(above) == &above);
+  CHECK(&cursiv::rootOf(node) == &above);
+  CHECK(&cursiv::rootOf(above) == &above);
 }
 
 void run() {
@@ -1707,37 +1580,34 @@ void run() {
   // The tables the generator wrote, read back through the reflection.
   hier::a_tag_answers_its_family();
   hier::the_tables_read_back();
-  hier::two_members_of_one_name_stay_two();
+  unnamed::a_base_the_grammar_does_not_index_keeps_what_is_above_it();
   infix::the_climb_contributes_its_members();
   region::the_nest_names_a_node_member();
   enm::an_enum_is_a_plain_value_member();
   bare::no_directive_no_columns();
   exact::every_alternative_is_kept();
-  annot::the_annotated_rule_keeps_its_own_entry();
   nodealt::both_families_are_reachable();
 
   // ...and the reducer that reads them.
   wiring::builds_doc();
   narrow::a_narrowed_site_records_and_filters();
+  narrow::a_class_the_grammar_does_not_index_is_accepted_through_its_base();
   wiring::structural_errors();
+  wiring::a_large_reduction_stops_between_values();
   wiring::a_hand_built_entry_is_answered_not_trusted();
   vocab::whole_vocabulary();
   vocab::minimal_document();
   vocab::other_variant_branch();
   vocab::conversion_failure_continues();
   vocab::assigning_again_keeps_one_reference_site();
-  vocab::a_write_replaces_the_node_a_member_held();
   exact::each_payload_goes_to_its_own_slot();
   annot::annotated_terminal_goes_to_its_annotated_slot();
   annot2::the_validated_alternative_is_the_written_one();
-  for (const auto& [name, parser] : {
-           std::pair{"LR", &parser_of<&tdual::generated::Lr::create_parser>()},
-           std::pair{"LL", &parser_of<&tdual::generated::Ll::create_parser>()}}) {
-    over::an_override_runs_the_converter_it_inherited(*parser, name);
-    over::an_override_naming_a_target_converts_to_it(*parser, name);
-    over::an_override_keeps_the_converter_it_replaced(*parser, name);
-    precreate::a_create_keeps_the_writes_before_it(*parser, name);
-  }
+  const cursiv::Parser& dual = parser_of<&tdual::generated::D2::createParser>();
+  over::an_override_runs_the_converter_it_inherited(dual);
+  over::an_override_naming_a_target_converts_to_it(dual);
+  over::an_override_keeps_the_converter_it_replaced(dual);
+  precreate::a_create_keeps_the_writes_before_it(dual);
   nodealt::both_node_alternatives_build();
   nodealt::the_variant_child_is_visited();
   region::adopts_and_wraps();
@@ -1785,8 +1655,8 @@ static_assert(std::is_base_of_v<cursiv::AstNode, N>);
 // Checked on 64-bit targets only, where a pointer is eight bytes: the size
 // catches a field added.
 static_assert(sizeof(void*) != 8 || sizeof(cursiv::detail::RefHandle) == 16);
-static_assert(!cursiv::has_error(cursiv::RefState::Resolved) &&
-              cursiv::has_error(cursiv::RefState::ErrorNotFound));
+static_assert(!cursiv::hasError(cursiv::RefState::Resolved) &&
+              cursiv::hasError(cursiv::RefState::ErrorNotFound));
 
 // A diagnostic positions by range alone: its reader holds the tree.
 static_assert(std::is_same_v<decltype(cursiv::ParseDiagnostic::begin),
@@ -1796,7 +1666,7 @@ static_assert(cursiv::ParseDiagnostic{}.begin == 0 &&
 static_assert(cursiv::ParseDiagnostic{}.element == cursiv::kNoElement);
 
 const cursiv::Parser& engine() {
-  return support::parser_of<&tcstn::generated::LexG::create_parser>();
+  return support::parser_of<&tcstn::generated::LexG::createParser>();
 }
 
 void cst_node_view_and_bind_round_trip() {
@@ -1892,8 +1762,7 @@ struct counting_resource : std::pmr::memory_resource {
   }
 };
 
-// `release()` frees the arena's blocks. Checked by what the arena asks for,
-// since a reclaimed pool gives the same bytes back.
+// Nodes share the chunks the arena asks its pool for.
 void arena_lifetimes() {
   counting_resource pool;
   cursiv::detail::AstArena a(&pool);
@@ -1904,9 +1773,16 @@ void arena_lifetimes() {
   CHECK(first == 1);  // one chunk allocated, not one block per node
   (void)a.make<D>();
   CHECK(pool.blocks == first);  // the second node goes in that chunk
-  a.release();
+
+  struct alignas(64) Aligned : cursiv::Extends<cursiv::AstNode> {};
+  struct Large : cursiv::Extends<cursiv::AstNode> { char text[32 * 1024]; };
+  Aligned* aligned = a.make<Aligned>();
+  CHECK(reinterpret_cast<std::uintptr_t>(aligned) % alignof(Aligned) == 0);
+  Large* large = a.make<Large>();
+  large->text[sizeof(large->text) - 1] = 'z';
   (void)a.make<D>();
-  CHECK(pool.blocks == first + 1);
+  CHECK(large->text[sizeof(large->text) - 1] == 'z');
+  CHECK(d->payload == 7);
 }
 
 struct A2 : cursiv::Extends<cursiv::AstNode> {};
@@ -1917,11 +1793,11 @@ struct D2 : cursiv::Extends<C2> {};
 // The closure is transitive and names every base once: three levels down,
 // `derivesFrom` still answers in one walk of one array.
 void the_closure_is_transitive() {
-  const cursiv::AstTypeTag& d = cursiv::ast_type_tag<D2>;
-  CHECK(d.derivesFrom(&cursiv::ast_type_tag<C2>));
-  CHECK(d.derivesFrom(&cursiv::ast_type_tag<A2>));
-  CHECK(d.derivesFrom(&cursiv::ast_type_tag<cursiv::AstNode>));
-  CHECK(!d.derivesFrom(&cursiv::ast_type_tag<B2>));
+  const cursiv::AstTypeTag& d = cursiv::kAstTypeTag<D2>;
+  CHECK(d.derivesFrom(&cursiv::kAstTypeTag<C2>));
+  CHECK(d.derivesFrom(&cursiv::kAstTypeTag<A2>));
+  CHECK(d.derivesFrom(&cursiv::kAstTypeTag<cursiv::AstNode>));
+  CHECK(!d.derivesFrom(&cursiv::kAstTypeTag<B2>));
   CHECK(d.baseCount == 3);
   for (std::uint32_t i = 0; i < d.baseCount; ++i)
     for (std::uint32_t j = i + 1; j < d.baseCount; ++j)
@@ -1932,7 +1808,7 @@ void the_closure_is_transitive() {
 // dereferences what it refuses.
 void ast_cast_accepts_the_family_and_refuses_the_rest() {
   D2 d;
-  d.type = &cursiv::ast_type_tag<D2>;
+  d.type = &cursiv::kAstTypeTag<D2>;
   CHECK(cursiv::ast_cast<A2>(&d) == &d);
   CHECK(cursiv::ast_cast<C2>(&d) == &d);
   CHECK(cursiv::ast_cast<D2>(&d) == &d);
@@ -1940,7 +1816,7 @@ void ast_cast_accepts_the_family_and_refuses_the_rest() {
   CHECK(cursiv::ast_cast<B2>(&d) == nullptr);  // the other family
 
   A2 a;
-  a.type = &cursiv::ast_type_tag<A2>;
+  a.type = &cursiv::kAstTypeTag<A2>;
   CHECK(cursiv::ast_cast<D2>(&a) == nullptr);  // a base is not its subtype
   CHECK(cursiv::ast_cast<A2>(static_cast<cursiv::AstNode*>(nullptr)) ==
         nullptr);
@@ -1953,14 +1829,14 @@ void ast_cast_accepts_the_family_and_refuses_the_rest() {
 void a_two_candidate_reference_answers_by_branch() {
   cursiv::reference<A2, B2> r;
   A2 a;
-  a.type = &cursiv::ast_type_tag<A2>;
+  a.type = &cursiv::kAstTypeTag<A2>;
   cursiv::detail::RefAccess::target(r) = &a;
   cursiv::detail::RefAccess::which(r) = 0;  // the linker decided: the A2 branch
   cursiv::detail::RefAccess::state(r) = cursiv::RefState::Resolved;
   CHECK(r.get<A2>() == &a);
   CHECK(r.get<B2>() == nullptr);
   B2 b;
-  b.type = &cursiv::ast_type_tag<B2>;
+  b.type = &cursiv::kAstTypeTag<B2>;
   cursiv::detail::RefAccess::target(r) = &b;
   cursiv::detail::RefAccess::which(r) = 1;
   CHECK(r.get<B2>() == &b);
@@ -2000,7 +1876,7 @@ std::vector<std::string> children(const AstReflection& reflection,
   std::vector<std::string> result;
   reflection.visitProperties(
       node, [&](std::string_view name, std::uint32_t index, AstNode& child) {
-        CHECK(child.type == &ast_type_tag<Child>);
+        CHECK(child.type == &kAstTypeTag<Child>);
         result.push_back(std::string(name) + ':' + std::to_string(index));
       });
   return result;
@@ -2019,23 +1895,23 @@ void check(const Parser& parser, const AstReflection& served) {
       (seen == std::vector<std::string>{"head:4294967295", "choice:4294967295",
                                         "tail:4294967295", "items:0"}));
   const auto target =
-      reflection.referenceIndexOf(&ast_type_tag<Base>, "target");
+      reflection.referenceIndexOf(&kAstTypeTag<Base>, "target");
   CHECK(target != kNoReference);
-  CHECK(reflection.referenceIndexOf(&ast_type_tag<Derived>, "target") ==
+  CHECK(reflection.referenceIndexOf(&kAstTypeTag<Derived>, "target") ==
         target);
-  CHECK(reflection.referenceIndexOf(&ast_type_tag<reference<Child>>) == target);
-  CHECK(reflection.referenceIndexOf(&ast_type_tag<Derived>, "head") ==
+  CHECK(reflection.referenceIndexOf(&kAstTypeTag<reference<Child>>) == target);
+  CHECK(reflection.referenceIndexOf(&kAstTypeTag<Derived>, "head") ==
         kNoReference);
-  CHECK(reflection.referenceIndexOf(&ast_type_tag<Derived>, "missing") ==
+  CHECK(reflection.referenceIndexOf(&kAstTypeTag<Derived>, "missing") ==
         kNoReference);
   CHECK(reflection.hasMultiReference());
   const auto links =
-      reflection.referenceIndexOf(&ast_type_tag<Derived>, "links");
+      reflection.referenceIndexOf(&kAstTypeTag<Derived>, "links");
   CHECK(links != kNoReference && reflection.isMultiReference(links));
 
   // Unknown derived tags retain their inherited children without duplicates.
   Manual manual;
-  manual.type = &ast_type_tag<Manual>;
+  manual.type = &kAstTypeTag<Manual>;
   manual.head = root->head;
   manual.choice = root->choice;
   manual.tail = root->tail;
@@ -2048,10 +1924,8 @@ void check(const Parser& parser, const AstReflection& served) {
 }  // namespace
 
 void run() {
-  check(*tdual::generated::Lr::create_parser(),
-        *tdual::generated::Lr::create_ast_reflection());
-  check(*tdual::generated::Ll::create_parser(),
-        *tdual::generated::Ll::create_ast_reflection());
+  check(*tdual::generated::D2::createParser(),
+        *tdual::generated::D2::createAstReflection());
 }
 
 }  // namespace ast_reflection
@@ -2064,26 +1938,21 @@ namespace {
 using namespace tconv;
 
 const cursiv::Parser& engine() {
-  return support::parser_of<&tconv::generated::G::create_parser>();
+  return support::parser_of<&tconv::generated::G::createParser>();
 }
 
 void keyword_template_converters_compile_and_parse() {
-  const auto ll = tdual::generated::Ll::create_parser();
-  for (const auto* parser :
-       std::array<const cursiv::Parser*, 2>{&engine(), ll.get()}) {
-    const auto result = parser->parse(parser == ll.get() ? "$conv:keyword is"
-                                                        : "keyword is");
-    CHECK(result.accepted && !result.cst().recovered() &&
-          result.diagnostics.empty());
-    const auto* value = result.valueAs<tconv::comp::N>();
-    CHECK(value && value->name == "is");
-  }
+  const auto result = engine().parse("keyword is");
+  CHECK(result.accepted && !result.cst().recovered() &&
+        result.diagnostics.empty());
+  const auto* value = result.valueAs<tconv::comp::N>();
+  CHECK(value && value->name == "is");
 }
 
 // A data rule with a separator -- `some(ref<IDT>, lit<".">)` matches one IDT,
 // then repeats `lit<"."> + ref<IDT>` -- exactly the shape Parts is built for.
 const cursiv::Parser& separated() {
-  return support::parser_of<&tab::generated::All::create_parser>();
+  return support::parser_of<&tab::generated::All::createParser>();
 }
 
 void defaults() {
@@ -2108,6 +1977,26 @@ void defaults() {
   CHECK(sv && *sv.value == "xyz");
   auto bad = cursiv::default_converter<std::int32_t>::convert("abc");
   CHECK(!bad && !bad.error.message.empty());
+}
+
+void nested_text_joins_preserve_every_view() {
+  cursiv::ParseResult result(cursiv::Cst{"name"});
+  const cursiv::detail::AstMetaData meta{};
+  cursiv::ParseResultBuilder builder(result, meta);
+  std::string expected = "name";
+  std::string_view text = "name";
+  std::vector<std::pair<std::string_view, std::string>> retained;
+  for (unsigned i = 0; i < 64; ++i) {
+    const std::string_view prefix = i % 2 ? "a." : "";
+    const std::string_view suffix = i % 2 ? "" : ".b";
+    text = builder.keepText(std::array{prefix, text, suffix});
+    expected = std::string(prefix) + expected + std::string(suffix);
+    retained.emplace_back(text, expected);
+  }
+  const auto slice = text.substr(10, 5);
+  const auto name = builder.keepText(std::array{slice, std::string_view{"!"}});
+  CHECK(name == std::string(slice) + "!");
+  for (const auto& [view, original] : retained) CHECK(view == original);
 }
 
 void text_helpers_keep_empty_values_present() {
@@ -2177,7 +2066,7 @@ void converters_answer_classes_of_their_own() {
 }
 
 void a_class_reached_by_two_paths_is_one_node() {
-  const auto reflection = tconv::generated::G::create_ast_reflection();
+  const auto reflection = tconv::generated::G::createAstReflection();
   const auto parsed =
       engine().parse("diamond first : int &hello second : text &world");
   CHECK(parsed && parsed.diagnostics.empty());
@@ -2195,7 +2084,7 @@ void a_class_reached_by_two_paths_is_one_node() {
         documented->name == "second");
   CHECK(cursiv::ast_cast<diamond::Doc>(node) == nullptr);
   std::size_t count = 1;
-  cursiv::visit_all_contents(*reflection, *parsed.value,
+  cursiv::visitAllContents(*reflection, *parsed.value,
                              [&](cursiv::AstNode&) { ++count; });
   CHECK(count == 3);
 }
@@ -2213,8 +2102,8 @@ void a_class_reached_by_two_paths_links_and_validates() {
   support::World<cursiv::SharedCoreServices> world;
   auto& language = support::add_language<cursiv::CoreServices>(
       world.shared, {"conv", {".conv"}, {}},
-      tconv::generated::G::create_parser(),
-      tconv::generated::G::create_ast_reflection());
+      tconv::generated::G::createParser(),
+      tconv::generated::G::createAstReflection());
   const DiamondChecks checks;
   language.validationRegistry->registerCheck(
       cursiv::ValidationRegistry::makeValidationCheck<&DiamondChecks::onTyped>(
@@ -2239,7 +2128,7 @@ void a_node_typed_by_hand_is_cast_too() {
   diamond::Hand hand;
   cursiv::AstNode& node = hand;
   const diamond::Named* const named = &hand;
-  node.type = &cursiv::ast_type_tag<diamond::Hand>;
+  node.type = &cursiv::kAstTypeTag<diamond::Hand>;
   CHECK(cursiv::ast_cast<diamond::Named>(&node) == named);
   node.type = nullptr;
   CHECK(cursiv::detail::ast_cast_unchecked<const diamond::Named>(&node) ==
@@ -2394,8 +2283,8 @@ void a_deep_tree_is_walked_once() {
   support::World<cursiv::SharedCoreServices> world;
   const auto* const language = &support::add_language<cursiv::CoreServices>(
       world.shared, {"conv", {".conv"}, {}},
-      tconv::generated::G::create_parser(),
-      tconv::generated::G::create_ast_reflection());
+      tconv::generated::G::createParser(),
+      tconv::generated::G::createAstReflection());
   const auto start = std::chrono::steady_clock::now();
   const cursiv::Document* const document =
       world.built("file:///deep.conv", std::move(text));
@@ -2444,6 +2333,13 @@ static_assert(cursiv::detail::bases_of<Level<2>>::kCount == 2 * 3 + 1);
 void a_class_of_many_paths_states_each_base_once() {
   diamonds::Level<2> node;
   cursiv::AstNode* const base = cursiv::detail::set_type_tag(node);
+  const auto direct = base->type->directBases();
+  CHECK(base->type->bases[1] == &cursiv::kAstTypeTag<diamonds::Level<1>>);
+  CHECK(direct.size() == 2);
+  if (direct.size() == 2) {
+    CHECK((direct.front() == &cursiv::kAstTypeTag<diamonds::Path<1, 0>>));
+    CHECK((direct.back() == &cursiv::kAstTypeTag<diamonds::Path<1, 1>>));
+  }
   const auto* const path = cursiv::ast_cast<diamonds::Path<1, 1>>(base);
   CHECK(path == static_cast<const diamonds::Path<1, 1>*>(&node));
   const auto* const low = cursiv::ast_cast<diamonds::Level<0>>(base);
@@ -2455,8 +2351,8 @@ void a_reference_names_its_target_without_a_type() {
   support::World<cursiv::SharedCoreServices> world;
   (void)support::add_language<cursiv::CoreServices>(
       world.shared, {"conv", {".conv"}, {}},
-      tconv::generated::G::create_parser(),
-      tconv::generated::G::create_ast_reflection());
+      tconv::generated::G::createParser(),
+      tconv::generated::G::createAstReflection());
   const cursiv::Document* const document = world.built(
       "file:///target.conv", "diamond first : int &hello use first use none");
   const auto* const doc = document->parseResult.valueAs<diamond::Doc>();
@@ -2477,8 +2373,8 @@ void a_document_keeps_its_text_past_its_nodes() {
     support::World<cursiv::SharedCoreServices> world;
     (void)support::add_language<cursiv::CoreServices>(
         world.shared, {"conv", {".conv"}, {}},
-        tconv::generated::G::create_parser(),
-        tconv::generated::G::create_ast_reflection());
+        tconv::generated::G::createParser(),
+        tconv::generated::G::createAstReflection());
     (void)world.built("file:///chain.conv",
                       R"(chain "abcdefghijklmnopqrstuvwxyz" "b")");
   }
@@ -2509,18 +2405,19 @@ void empty_materialized_members_keep_their_value() {
 // Parts that are all present but convert to empty text still write the
 // member: only a member no conversion reached holds the null view.
 void empty_joined_parts_keep_their_value() {
-  const auto ll = tdual::generated::Ll::create_parser();
-  const cursiv::Parser* const engines[]{&engine(), ll.get()};
-  for (const cursiv::Parser* const parser : engines) {
-    const auto parsed = parser->parse(parser == ll.get()
-                                          ? "$conv:blank \"\" \"\""
-                                          : "blank \"\" \"\"");
-    CHECK(parsed && parsed.diagnostics.empty());
-    const auto* value = parsed.valueAs<comp::N>();
-    CHECK(value != nullptr);
-    if (value == nullptr) continue;
-    CHECK(value->name.empty() && value->name.data() != nullptr);
-  }
+  const auto parsed = engine().parse("blank \"\" \"\"");
+  CHECK(parsed && parsed.diagnostics.empty());
+  const auto* value = parsed.valueAs<comp::N>();
+  CHECK(value != nullptr);
+  if (value == nullptr) return;
+  CHECK(value->name.empty() && value->name.data() != nullptr);
+  const std::string_view text = "blank \"\" name";
+  const auto single = engine().parse(text);
+  const auto* named = single.valueAs<comp::N>();
+  CHECK(single && named && named->name == "name" && named->name.data() == text.data() + 9);
+  const auto joined = engine().parse("blank \"ab\" \"cd\"");
+  const auto* both = joined.valueAs<comp::N>();
+  CHECK(joined && both && both->name == "abcd");
 }
 
 void floating_conversion_ignores_host_rounding() {
@@ -2936,6 +2833,7 @@ void run() {
   defaults();
   keyword_template_converters_compile_and_parse();
   text_helpers_keep_empty_values_present();
+  nested_text_joins_preserve_every_view();
   converters_answer_classes_of_their_own();
   a_class_reached_by_two_paths_is_one_node();
   a_class_reached_by_two_paths_links_and_validates();
@@ -2987,12 +2885,11 @@ namespace {
 // ids are 0, 1 and 2 and stay numbers here: what they name is the grammar's
 // answer, and this test is about the tape.
 void build_pair(cursiv::Cst& cst) {
-  cursiv::detail::CstBuilder b(cst);
-  const auto open = b.enter();
-  b.leaf(0, 2, 0);
-  b.hidden(2, 3, 1);
-  b.leaf(3, 5, 0);
-  b.exit(open, 0, 2);
+  cursiv::CstRun& run = cursiv::CstBuilder(cst).stream();
+  run.leaf(0, 2, 0);
+  run.hidden(2, 3, 1);
+  run.leaf(3, 5, 0);
+  run.close(0, 5, 4, 2);
 }
 
 void basics() {
@@ -3007,7 +2904,7 @@ void basics() {
   CHECK(cst.text(0) == "ab");
   CHECK(cst.text(2) == "cd");
   CHECK(cst.text(3) == "ab cd");
-  CHECK(cst[0].engine == 0 && cst[3].engine == 2);
+  CHECK(cst[0].element() == 0 && cst[3].element() == 2);
   CHECK(cst.subtreeBegin(3) == 0);
   CHECK(cst.contains(3, 1));
 
@@ -3015,7 +2912,7 @@ void basics() {
   // is recovered, the parent is neither.
   CHECK(cst.childless(0) && cst.childless(1) && cst.childless(2));
   CHECK(!cst.childless(3));
-  CHECK(cst[1].hidden && !cst[0].hidden && !cst[3].hidden);
+  CHECK(cst[1].isHidden() && !cst[0].isHidden() && !cst[3].isHidden());
 
   // Reverse children: last child first, hidden leaf included.
   std::vector<cursiv::NodeId> children;
@@ -3028,10 +2925,10 @@ void basics() {
 void growth_keeps_the_records() {
   std::string big(20000, 'x');
   cursiv::Cst cst{std::string_view(big)};
-  cursiv::detail::CstBuilder b(cst);
+  cursiv::CstRun& run = cursiv::CstBuilder(cst).stream();
   for (int i = 0; i < 10000; ++i)
-    b.leaf(static_cast<cursiv::TextOffset>(i),
-           static_cast<cursiv::TextOffset>(i + 1), 0);
+    run.leaf(static_cast<cursiv::TextOffset>(i),
+             static_cast<cursiv::TextOffset>(i + 1), 0);
   CHECK(cst.size() == 10000);
   CHECK(cst[0].begin == 0);
   CHECK(cst[9999].begin == 9999);
@@ -3039,9 +2936,9 @@ void growth_keeps_the_records() {
 
 void a_large_document_is_reserved_for() {
   cursiv::Cst cst;
-  cursiv::detail::CstBuilder b(cst);
-  b.reserve_stream(std::size_t{72} << 20);
-  b.leaf(0, 1, 0);
+  cursiv::CstBuilder b(cst);
+  b.reserveRecords(0, std::size_t{72} << 20);
+  b.stream().leaf(0, 1, 0);
   CHECK(cst.size() == 1);
 }
 
@@ -3062,19 +2959,19 @@ void reservation_follows_record_density() {
     }
     std::pmr::monotonic_buffer_resource _storage;
   } memory;
-  cursiv::detail::CstRun run;
+  cursiv::CstRun run;
   run.bind(&memory);
-  run.reserve_for(sizeof(void*) < 8 ? std::size_t{64} << 20
-                                   : std::size_t{256} << 10);
+  run.reserveRecords(0, sizeof(void*) < 8 ? std::size_t{64} << 20
+                                        : std::size_t{256} << 10);
   if constexpr (sizeof(void*) < 8)
     CHECK(memory.allocated <= (std::size_t{1} << 20));
   CHECK(run.records() == 0);
 
   run.bind(&memory);
-  run.reserve_for(sizeof(void*) < 8 ? std::size_t{4} << 20
-                                   : std::size_t{256} << 10);
+  run.reserveRecords(0, sizeof(void*) < 8 ? std::size_t{4} << 20
+                                        : std::size_t{256} << 10);
   const std::size_t initial = memory.allocated;
-  cursiv::detail::CstRun moved(std::move(run));
+  cursiv::CstRun moved(std::move(run));
   run = std::move(moved);
   constexpr cursiv::NodeCount count = 1024 * 1024;
   for (cursiv::NodeCount i = 0; i < count; ++i) run.leaf(i, i + 1, 0);
@@ -3095,16 +2992,6 @@ void reservation_follows_record_density() {
   CHECK(memory.allocated - allocated <= 1024 * sizeof(cursiv::CstNode));
 }
 
-// A run on the heap is one parse branch among thousands: whatever it writes,
-// it holds at most twice that.
-void a_branch_run_holds_at_most_twice_its_records() {
-  cursiv::detail::CstRun run;
-  for (cursiv::NodeCount i = 0; i < 5000; ++i) {
-    run.leaf(i, i + 1, 0);
-    CHECK(run.capacity() <= std::max<std::size_t>(64, 2 * run.records()));
-  }
-}
-
 // A watched run reads the stop once per run of records, at the check that
 // guards its capacity; the watch ends with its scope and never travels with a
 // move.
@@ -3112,12 +2999,13 @@ void a_watched_run_answers_a_stop_within_a_run_of_records() {
   constexpr cursiv::NodeCount kRun = 64 * 1024;
   cursiv::CancellationTokenSource source;
   const cursiv::CancellationToken token = source.get_token();
-  cursiv::detail::CstRun run;
-  run.reserve_for(std::size_t{4} * kRun);
+  cursiv::CstRun run;
+  run.bind(std::pmr::new_delete_resource());
+  run.reserveRecords(std::size_t{4} * kRun);
   cursiv::NodeCount written = 0;
   bool threw = false;
   {
-    cursiv::detail::CstRun::Watch watch(run, token);
+    cursiv::CstRun::Watch watch(run, token);
     for (; written < kRun / 2; ++written) run.leaf(written, written + 1, 0);
     source.request_stop();
     try {
@@ -3132,9 +3020,10 @@ void a_watched_run_answers_a_stop_within_a_run_of_records() {
   for (cursiv::NodeCount i = 0; i < 4 * kRun; ++i) run.leaf(i, i + 1, 0);
   CHECK(run.records() == written + 4 * kRun);
 
-  cursiv::detail::CstRun watched;
-  cursiv::detail::CstRun::Watch watch(watched, token);
-  cursiv::detail::CstRun moved(std::move(watched));
+  cursiv::CstRun watched;
+  watched.bind(std::pmr::new_delete_resource());
+  cursiv::CstRun::Watch watch(watched, token);
+  cursiv::CstRun moved(std::move(watched));
   for (cursiv::NodeCount i = 0; i < 4 * kRun; ++i) moved.leaf(i, i + 1, 0);
   CHECK(moved.records() == 4 * kRun);
 }
@@ -3165,8 +3054,7 @@ void moved_from_is_empty() {
 
   // Reusable afterwards: `reset` rebuilds the pool the move took away.
   cst.reset("zz");
-  cursiv::detail::CstBuilder b(cst);
-  b.leaf(0, 2, 0);
+  cursiv::CstBuilder(cst).stream().leaf(0, 2, 0);
   CHECK(cst.size() == 1 && cst.text(0) == "zz");
 
   // Move-assignment leaves the same state, and self-assignment is a no-op.
@@ -3185,8 +3073,8 @@ void moved_from_is_empty() {
 // A repair belongs to the tree: it moves with it and goes with a reset.
 void diagnostics_follow_the_tree() {
   cursiv::Cst cst{"ab cd"};
-  cursiv::detail::CstBuilder b(cst);
-  b.note_repair(cursiv::DiagnosticKind::Deleted, cursiv::kNoElement, 0, 2);
+  cursiv::CstBuilder b(cst);
+  b.noteRepair(cursiv::DiagnosticKind::Deleted, cursiv::kNoElement, 0, 2);
   CHECK(cst.recovered() && cst.diagnostics().size() == 1);
   CHECK(cst.diagnostics()[0].kind == cursiv::DiagnosticKind::Deleted);
 
@@ -3197,10 +3085,10 @@ void diagnostics_follow_the_tree() {
   // A work-bound note repairs nothing: it is kept, and the tree is
   // not recovered by it alone.
   cursiv::Cst bounded{"ab cd"};
-  cursiv::detail::CstBuilder(bounded).note_repair(
+  cursiv::CstBuilder(bounded).noteRepair(
       cursiv::DiagnosticKind::Bounded, cursiv::kNoElement, 0, 5);
   CHECK(!bounded.recovered() && bounded.diagnostics().size() == 1);
-  cursiv::detail::CstBuilder(bounded).note_repair(
+  cursiv::CstBuilder(bounded).noteRepair(
       cursiv::DiagnosticKind::Deleted, cursiv::kNoElement, 0, 2);
   CHECK(bounded.recovered());
 
@@ -3212,84 +3100,15 @@ void diagnostics_follow_the_tree() {
   // A repair equal to the one before is the same fault; one that names other
   // alternatives is another.
   cursiv::Cst closers{"ab"};
-  cursiv::detail::CstBuilder c(closers);
+  cursiv::CstBuilder c(closers);
   const auto insert = [&c](std::vector<cursiv::ElementId> also) {
-    c.note_repair(cursiv::DiagnosticKind::Inserted, 1, 1, 1, std::move(also));
+    c.noteRepair(cursiv::DiagnosticKind::Inserted, 1, 1, 1, std::move(also));
   };
   insert({2});
   insert({2});
   insert({3});
   CHECK(closers.diagnostics().size() == 2);
   CHECK(closers.diagnostics().back().also == std::vector<cursiv::ElementId>{3});
-}
-
-// The tape's end order, at the builder: a parent closing behind trailing
-// trivia is inserted in front of it, so `end` never goes back as ids grow.
-void exit_inserts_before_trailing_trivia() {
-  cursiv::Cst cst{"ab cd "};
-  cursiv::detail::CstBuilder b(cst);
-  const auto open = b.enter();
-  b.leaf(0, 2, 0);
-  b.hidden(2, 3, 1);
-  b.leaf(3, 5, 0);
-  b.hidden(5, 6, 1);  // trailing: taken after the last visible record
-  const cursiv::NodeId id = b.exit(open, 0, 2);
-  CHECK(id == 3);  // right after the last visible child, not at the tape's end
-  CHECK(cst.size() == 5);
-  CHECK(cst[3].subtreeSize == 4);  // the trailing trivia is not a child
-  CHECK(cst[3].end == 5);          // ...and not in the span
-  CHECK(cst[4].hidden && cst[4].begin == 5);
-  for (cursiv::NodeId i = 1; i < cst.size(); ++i)
-    CHECK(cst[i - 1].end <= cst[i].end);
-}
-
-// An empty composite goes at its region's open -- in front of trivia taken
-// inside -- and becomes the last visible record there.
-void empty_composite_keeps_the_order() {
-  cursiv::Cst cst{" x"};
-  cursiv::detail::CstBuilder b(cst);
-  const auto open = b.enter();
-  b.hidden(0, 1, 1);  // trivia taken inside the (otherwise empty) region
-  const cursiv::NodeId id = b.exit(open, 0, 2);
-  CHECK(id == 0);
-  CHECK(cst.size() == 2);
-  CHECK(cst[0].begin == 0 && cst[0].end == 0 && cst[0].subtreeSize == 1);
-  CHECK(cst[1].hidden);
-  CHECK(cst[0].end <= cst[1].end);
-
-  // With nothing on the tape at all it simply appends.
-  cursiv::Cst flat{"x"};
-  cursiv::detail::CstBuilder c(flat);
-  const auto o2 = c.enter();
-  CHECK(c.exit(o2, 0, 2) == 0);
-  CHECK(flat.size() == 1 && flat[0].begin == 0 && flat[0].end == 0);
-
-  // A visible record before the open is not the region's: still empty.
-  const auto o3 = c.enter();
-  c.hidden(1, 1, 1);
-  CHECK(c.exit(o3, 1, 2) == 1);
-  CHECK(flat.size() == 3 && flat[1].begin == 1 && flat[1].end == 1);
-  CHECK(flat[2].hidden);
-}
-
-// An insert into a full buffer is what grows it: the suffix moves
-// into the new buffer, and the next append goes behind it.
-void insert_across_a_reallocation() {
-  std::string big(9000, 'x');
-  cursiv::Cst cst{std::string_view(big)};
-  cursiv::detail::CstBuilder b(cst);
-  const auto open = b.enter();
-  for (int i = 0; i < 4095; ++i)
-    b.leaf(static_cast<cursiv::TextOffset>(i),
-           static_cast<cursiv::TextOffset>(i + 1), 0);
-  b.hidden(4095, 4096, 1);  // record 4095 fills the doubled buffer exactly
-  const cursiv::NodeId id = b.exit(open, 0, 2);
-  CHECK(id == 4095);
-  CHECK(cst.size() == 4097);
-  CHECK(cst[4095].subtreeSize == 4096 && cst[4095].end == 4095);
-  CHECK(cst[4096].hidden && cst[4096].end == 4096);
-  b.leaf(4096, 4097, 0);
-  CHECK(cst.size() == 4098 && cst[4097].begin == 4096);
 }
 
 // The leaves are found from the records: the first ending past an offset, the
@@ -3299,17 +3118,15 @@ void leaves_are_found_from_the_records() {
   const std::string_view text = "ab cd ef";
   cursiv::Cst cst{text};
   {
-    cursiv::detail::CstBuilder b(cst);
-    const auto outer = b.enter();
-    (void)b.leaf(0, 2, 0);      // 0
-    (void)b.hidden(2, 3, 0);    // 1
-    (void)b.leaf(3, 5, 0);      // 2
-    (void)b.exit(outer, 0, 0);  // 3, a parent
-    (void)b.hidden(5, 6, 0);    // 4, trailing trivia
-    const auto last = b.enter();
-    (void)b.exit(b.enter(), 6, 0);  // 5, an empty record
-    (void)b.leaf(6, 8, 0);          // 6
-    (void)b.exit(last, 6, 0);       // 7, a parent
+    cursiv::CstRun& run = cursiv::CstBuilder(cst).stream();
+    run.leaf(0, 2, 0);       // 0
+    run.hidden(2, 3, 0);     // 1
+    run.leaf(3, 5, 0);       // 2
+    run.close(0, 5, 4, 0);   // 3, a parent
+    run.hidden(5, 6, 0);     // 4, trailing trivia
+    run.leaf(6, 6, 0);       // 5, an empty record
+    run.leaf(6, 8, 0);       // 6
+    run.close(6, 8, 3, 0);   // 7, a parent
   }
   CHECK(cst.size() == 8 && !cst.childless(3) && !cst.childless(7));
   CHECK(cst.leafAfter(0) == 0 && cst.leafAfter(1) == 0);
@@ -3332,47 +3149,39 @@ void run() {
   growth_keeps_the_records();
   a_large_document_is_reserved_for();
   reservation_follows_record_density();
-  a_branch_run_holds_at_most_twice_its_records();
   a_watched_run_answers_a_stop_within_a_run_of_records();
   entry_defaults();
   moved_from_is_empty();
   diagnostics_follow_the_tree();
-  exit_inserts_before_trailing_trivia();
-  empty_composite_keeps_the_order();
-  insert_across_a_reallocation();
   leaves_are_found_from_the_records();
 }
 
 }  // namespace cst
 
-// The DSL surface the table engine reads: each construction of the example
-// grammars on the smallest grammar that spells it, checked by what it accepts
-// and refuses.
+// Check each grammar construct against accepted and rejected input.
 namespace cst_node {
 
 namespace {
 
 using namespace tcstn;
 
-// `table` only where a test reads the frozen table itself.
 template <class G>
 struct Gen;
 template <>
 struct Gen<LexG> {
-  static constexpr auto make = &tcstn::generated::LexG::create_parser;
+  static constexpr auto make = &tcstn::generated::LexG::createParser;
 };
 template <>
 struct Gen<InfixG> {
-  static constexpr auto make = &tcstn::generated::InfixG::create_parser;
-  static constexpr const auto& table = tcstn::generated::InfixG::kTable;
+  static constexpr auto make = &tcstn::generated::InfixG::createParser;
 };
 template <>
 struct Gen<OverlapG> {
-  static constexpr auto make = &tcstn::generated::LexG::create_parser;
+  static constexpr auto make = &tcstn::generated::LexG::createParser;
 };
 template <>
 struct Gen<WordGuardG> {
-  static constexpr auto make = &tcstn::generated::LexG::create_parser;
+  static constexpr auto make = &tcstn::generated::LexG::createParser;
 };
 
 template <class G>
@@ -3391,47 +3200,22 @@ bool reads(std::string_view text) {
   return r.accepted && !r.cst().recovered();
 }
 
-// Every span a record of `row` covers, in tape order: a precedence table
-// shows as the nesting of the folds.
-template <class T, class... Rs>
-constexpr auto climbs(cursiv::TypeList<Rs...>) {
-  return std::array<bool, sizeof...(Rs)>{
-      (cursiv::engine::row_of<Rs>::kind == cursiv::engine::WriteKind::climb &&
-       std::is_same_v<typename cursiv::engine::row_of<Rs>::type, T>)...};
-}
-template <class G, class T>
-const std::vector<bool>& builds() {
-  static const std::vector<bool> out = [] {
-    constexpr auto climb =
-        climbs<T>(typename cursiv::engine::LrLowering<G>::actions{});
-    const auto& low = cursiv::engine::LrLowering<G>::table();
-    const cursiv::engine::LrBuildTable a =
-        cursiv::engine::lr_build_automaton(low);
-    // The core graph stands, and no condition joins two chains: the
-    // lowering's are the table's.
-    CHECK(a.nMergeInduced == 0 && a.nImpliedMixed == 0);
-    CHECK(low.cfg.ngapConds == 0);
-    const std::span<const cursiv::engine::LrFusedRow> fused(a.fused.data(),
-                                                            a.nfused);
-    std::vector<bool> b(low.writes.nchains + fused.size(), false);
-    for (std::uint32_t i = 0; i < b.size(); ++i)
-      for (const std::uint16_t r :
-           cursiv::test::entry_runs(low.writes, fused, i).held)
-        b[i] = b[i] || climb[r];
-    return b;
-  }();
-  return out;
-}
-
-template <class G, class T>
+// Every span of a fold, a record that holds an operator, in tape order: a
+// precedence table shows as the nesting of the folds.
+template <class G>
 std::string spans_of(std::string_view text) {
   const cursiv::ParseResult r = engine<G>().parse(text);
   if (!r.accepted) return "<refused>";
   const cursiv::Cst& cst = r.cst();
   std::string out;
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
-    const cursiv::ElementId row = Gen<G>::table.stamp.row(cst[i]);
-    if (row >= builds<G, T>().size() || !builds<G, T>()[row]) continue;
+    bool fold = false;
+    for (const cursiv::NodeId child : cst.reverseChildren(i)) {
+      const std::string_view word = cst.text(child);
+      fold = fold || word == "+" || word == "-" || word == "*" ||
+             word == "/" || word == "^";
+    }
+    if (!fold) continue;
     const cursiv::CstNode& n = cst[i];
     out += '[';
     out += std::to_string(n.begin);
@@ -3501,14 +3285,6 @@ void a_frontier_of_one_byte_refuses_the_digit_behind_it() {
 }
 
 void two_overlapping_bytes_are_decided_by_the_state() {
-  // The pair asks for a candidate walk, and the table says so instead of
-  // lowering the grammar to the character.
-  const auto isolated = cursiv::engine::lr_build_automaton(
-      cursiv::engine::LrLowering<OverlapG>::table());
-  CHECK(isolated.multiCand && isolated.ncls > 0);
-  static_assert(tcstn::generated::LexG::kTable.multiCand);
-  static_assert(tcstn::generated::LexG::kTable.ncls > 0);
-
   // The same byte, read as either terminal, by what follows it alone.
   CHECK(reads<OverlapG>("a*b"));
   CHECK(reads<OverlapG>("a*1"));
@@ -3535,7 +3311,7 @@ void every_record_around_the_caret_is_a_selection_step() {
             document, {&caret, 1});
     for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
       const cursiv::CstNode& node = cst[id];
-      if (node.hidden != 0 || cst.subtreeBegin(id) == id ||
+      if (node.isHidden() || cst.subtreeBegin(id) == id ||
           offset < node.begin || offset >= node.end)
         continue;
       bool step = false;
@@ -3557,15 +3333,15 @@ void infix_binds_by_its_levels() {
   CHECK(!reads<InfixG>("+1"));
 
   // A primary alone is no fold: it commits no record of the infix row.
-  CHECK(spans_of<InfixG, ast::Expr>("1").empty());
+  CHECK(spans_of<InfixG>("1").empty());
   // `*` binds tighter, so the multiplication is the inner fold either way.
-  CHECK(spans_of<InfixG, ast::Expr>("1+2*3") == "[2,5)[0,5)");
-  CHECK(spans_of<InfixG, ast::Expr>("1*2+3") == "[0,3)[0,5)");
+  CHECK(spans_of<InfixG>("1+2*3") == "[2,5)[0,5)");
+  CHECK(spans_of<InfixG>("1*2+3") == "[0,3)[0,5)");
   // Equal steps group to the left, as the table declares.
-  CHECK(spans_of<InfixG, ast::Expr>("1+2+3") == "[0,3)[0,5)");
-  CHECK(spans_of<InfixG, ast::Expr>("1*2*3") == "[0,3)[0,5)");
+  CHECK(spans_of<InfixG>("1+2+3") == "[0,3)[0,5)");
+  CHECK(spans_of<InfixG>("1*2*3") == "[0,3)[0,5)");
 
-  CHECK(spans_of<InfixG, ast::Expr>("~1^2^3") == "[3,6)[1,6)");
+  CHECK(spans_of<InfixG>("~1^2^3") == "[3,6)[1,6)");
 }
 
 }  // namespace
@@ -3594,21 +3370,16 @@ using tdual::Doc;
 using tdual::Item;
 
 const cursiv::Parser& engine() {
-  return support::parser_of<&tdual::generated::Lr::create_parser>();
+  return support::parser_of<&tdual::generated::D2::createParser>();
 }
 
-enum class Engine : std::uint8_t { lr, ll };
-
-// A document of the dual grammar, parsed by one engine: a lookup walks up from
-// a node to it for the tree it searches. Both engines build the same classes,
-// so one reflection serves.
-cursiv::Document* dual_document(support::World<>& world, std::string_view text,
-                                Engine engine) {
+// A document of the dual grammar: a lookup walks up from a node to it for the
+// tree it searches.
+cursiv::Document* dual_document(support::World<>& world, std::string_view text) {
   support::add_language<cursiv::CoreServices>(
       world.shared, {"dual", {".dual"}, {}},
-      engine == Engine::ll ? tdual::generated::Ll::create_parser()
-                           : tdual::generated::Lr::create_parser(),
-      tdual::generated::Lr::create_ast_reflection());
+      tdual::generated::D2::createParser(),
+      tdual::generated::D2::createAstReflection());
   return support::add(world.shared, "file:///lookup.dual", std::string(text));
 }
 
@@ -3616,8 +3387,8 @@ struct Parsed {
   support::World<> world;
   cursiv::Document* document;
   cursiv::ParseResult& r;
-  explicit Parsed(std::string_view text, Engine engine = Engine::lr)
-      : document(dual_document(world, text, engine)), r(document->parseResult) {
+  explicit Parsed(std::string_view text)
+      : document(dual_document(world, text)), r(document->parseResult) {
     CHECK(r.accepted);
     CHECK(static_cast<bool>(r));
   }
@@ -3630,43 +3401,43 @@ void a_feature_is_found_and_an_owned_child_is_a_boundary() {
   const Parsed p("doc item aa item bb");
   // `name` is written inside each Item, which owns its node: asked of the
   // root, the walk must not answer with a grandchild's member.
-  CHECK(cursiv::find_nodes_for_property(p.root(), "name").empty());
+  CHECK(cursiv::findNodesForProperty(p.root(), "name").empty());
   // Asked of the Item itself, it answers.
   const std::vector<cursiv::CstNodeView> names =
-      cursiv::find_nodes_for_property(*p.doc().items[0], "name");
+      cursiv::findNodesForProperty(*p.doc().items[0], "name");
   CHECK(names.size() == 1);
   if (!names.empty()) CHECK(names[0].text() == "aa");
 }
 
 // A node whose one record is its keyword answers for that keyword, and its
 // parent, for which that record is a boundary, does not.
-void a_keyword_node_answers_for_its_own_keyword(Engine engine) {
-  const Parsed p("doc mark item aa", engine);
+void a_keyword_node_answers_for_its_own_keyword() {
+  const Parsed p("doc mark item aa");
   const auto* doc = static_cast<Doc*>(p.r.value);
   CHECK(doc != nullptr && doc->mark.has_value());
   if (doc == nullptr || !doc->mark.has_value()) return;
   const cursiv::AstNode& mark = **doc->mark;
   const std::vector<cursiv::CstNodeView> own =
-      cursiv::find_nodes_for_keyword(mark, "mark");
+      cursiv::findNodesForKeyword(mark, "mark");
   CHECK(own.size() == 1);
   if (!own.empty()) CHECK(own[0].id == mark.cstNodeId);
-  const auto one = cursiv::find_node_for_keyword(mark, "mark");
+  const auto one = cursiv::findNodeForKeyword(mark, "mark");
   CHECK(one);
   if (one) CHECK(one.id == mark.cstNodeId);
-  CHECK(cursiv::find_nodes_for_keyword(p.root(), "mark").empty());
-  CHECK(!cursiv::find_node_for_keyword(p.root(), "mark"));
-  CHECK(cursiv::find_nodes_for_keyword(p.root(), "item").size() == 1);
+  CHECK(cursiv::findNodesForKeyword(p.root(), "mark").empty());
+  CHECK(!cursiv::findNodeForKeyword(p.root(), "mark"));
+  CHECK(cursiv::findNodesForKeyword(p.root(), "item").size() == 1);
 }
 
 // Out of range clamps to the last occurrence; nullopt stays "never at all".
 void an_out_of_range_index_clamps() {
   const Parsed p("doc item aa item bb");
-  const auto second = cursiv::find_node_for_keyword(p.root(), "item", 1);
+  const auto second = cursiv::findNodeForKeyword(p.root(), "item", 1);
   CHECK(second);
-  const auto far = cursiv::find_node_for_keyword(p.root(), "item", 9);
+  const auto far = cursiv::findNodeForKeyword(p.root(), "item", 9);
   CHECK(far);
   if (second && far) CHECK(far.id == second.id);
-  CHECK(!cursiv::find_node_for_keyword(p.root(), "absent", 0));
+  CHECK(!cursiv::findNodeForKeyword(p.root(), "absent", 0));
 }
 
 // A keyword fused under `?=` is the directive's own record, relabelled; it is
@@ -3675,70 +3446,150 @@ void a_fused_keyword_is_still_found() {
   const Parsed p("doc locked item aa");
   CHECK(static_cast<Doc*>(p.r.value)->locked);
   const std::vector<cursiv::CstNodeView> found =
-      cursiv::find_nodes_for_keyword(p.root(), "locked");
+      cursiv::findNodesForKeyword(p.root(), "locked");
   CHECK(found.size() == 1);
   if (!found.empty()) CHECK(found[0].text() == "locked");
   // The unfused neighbour is found too.
-  CHECK(cursiv::find_nodes_for_keyword(p.root(), "doc").size() == 1);
+  CHECK(cursiv::findNodesForKeyword(p.root(), "doc").size() == 1);
 }
 
 // A word the grammar reads in either case is that keyword in any case, written
 // or asked; a word read exactly is asked exactly.
-void a_folded_keyword_is_found_in_any_case(Engine engine) {
-  const Parsed cased("EvEnTs aa", engine);
-  CHECK(cursiv::find_nodes_for_keyword(cased.root(), "events").size() == 1);
-  const auto upper = cursiv::find_node_for_keyword(cased.root(), "EVENTS");
+void a_folded_keyword_is_found_in_any_case() {
+  const Parsed cased("EvEnTs aa");
+  CHECK(cursiv::findNodesForKeyword(cased.root(), "events").size() == 1);
+  const auto upper = cursiv::findNodeForKeyword(cased.root(), "EVENTS");
   CHECK(upper);
   if (upper) CHECK(upper.text() == "EvEnTs");
-  const Parsed exact("state aa", engine);
-  CHECK(cursiv::find_nodes_for_keyword(exact.root(), "state").size() == 1);
-  CHECK(cursiv::find_nodes_for_keyword(exact.root(), "STATE").empty());
+  const Parsed exact("state aa");
+  CHECK(cursiv::findNodesForKeyword(exact.root(), "state").size() == 1);
+  CHECK(cursiv::findNodesForKeyword(exact.root(), "STATE").empty());
+}
+
+// A keyword a data rule reads alone is still the word the author spelled.
+void a_keyword_alone_in_a_data_rule_is_found() {
+  const Parsed p("use twin high");
+  const std::vector<cursiv::CstNodeView> found =
+      cursiv::findNodesForKeyword(p.root(), "high");
+  CHECK(found.size() == 1);
+  if (!found.empty()) CHECK(found[0].text() == "high");
 }
 
 // The records strictly between two others, as maximal subtrees.
 void interior_nodes_walk_the_extent() {
   const Parsed p("doc item aa item bb item cc");
   const std::vector<cursiv::CstNodeView> kws =
-      cursiv::find_nodes_for_keyword(p.root(), "item");
+      cursiv::findNodesForKeyword(p.root(), "item");
   CHECK(kws.size() == 3);
   if (kws.size() != 3) return;
   const std::vector<cursiv::NodeId> mid =
-      cursiv::interior_nodes(p.r.cst(), kws[0].id, kws[2].id);
+      cursiv::interiorNodes(p.root(), kws[0].id, kws[2].id);
   // Whatever sits between the first and third `item` covers the second.
   bool coversSecond = false;
   for (const cursiv::NodeId id : mid)
     coversSecond |= p.r.cst().subtreeBegin(id) <= kws[1].id && kws[1].id <= id;
   CHECK(coversSecond);
-  CHECK(cursiv::interior_nodes(p.r.cst(), cursiv::kNoNode, kws[2].id).empty());
+  // Asked of an item, the search starts at the root that holds both.
+  CHECK(p.doc().items.size() == 3);
+  if (p.doc().items.size() == 3)
+    CHECK(cursiv::interiorNodes(*p.doc().items[2], kws[0].id, kws[2].id) ==
+          mid);
+  CHECK(cursiv::interiorNodes(p.root(), cursiv::kNoNode, kws[2].id).empty());
+}
+
+// A document holding a tree built by hand.
+std::unique_ptr<cursiv::Document> holding(cursiv::Cst&& cst) {
+  auto held = std::make_unique<cursiv::Document>(cursiv::TextDocument::create(
+      "file:///held", "held", 0, std::string(cst.text())));
+  held->parseResult = cursiv::ParseResult(std::move(cst));
+  return held;
 }
 
 void interior_nodes_exclude_the_endpoint_branches() {
   cursiv::Cst cst("abmcd");
-  cursiv::detail::CstBuilder builder(cst);
-  const auto root = builder.enter();
-  const auto left = builder.enter();
-  const auto open = builder.leaf(0, 1, 0);
-  builder.leaf(1, 2, 0);
-  const auto leftNode = builder.exit(left, 0, 0);
-  const auto middle = builder.leaf(2, 3, 0);
-  const auto right = builder.enter();
-  builder.leaf(3, 4, 0);
-  const auto close = builder.leaf(4, 5, 0);
-  builder.exit(right, 3, 0);
-  builder.exit(root, 0, 0);
-  CHECK((cursiv::interior_nodes(cst, open, close) ==
+  cursiv::CstRun& run = cursiv::CstBuilder(cst).stream();
+  constexpr cursiv::NodeId open = 0, leftNode = 2, middle = 3, close = 5,
+                           rightNode = 6, rootNode = 7;
+  run.leaf(0, 1, 0);       // open
+  run.leaf(1, 2, 0);
+  run.close(0, 2, 3, 0);   // leftNode
+  run.leaf(2, 3, 0);       // middle
+  run.leaf(3, 4, 0);
+  run.leaf(4, 5, 0);       // close
+  run.close(3, 5, 3, 0);   // rightNode
+  run.close(0, 5, 8, 0);   // rootNode
+  const auto held = holding(std::move(cst));
+  cursiv::AstNode top;
+  top.cstNodeId = rootNode;
+  const auto between = [&](cursiv::NodeId from, cursiv::NodeId to) {
+    return cursiv::interiorNodes(top, from, to, held.get());
+  };
+  CHECK((between(open, close) == std::vector<cursiv::NodeId>{middle}));
+  CHECK((between(leftNode, close) == std::vector<cursiv::NodeId>{middle}));
+  CHECK(between(open, leftNode).empty());
+  CHECK((between(close, open) == std::vector<cursiv::NodeId>{middle}));
+  // A node holding one endpoint only asks its container, and alone finds none.
+  cursiv::AstNode inner;
+  inner.cstNodeId = rightNode;
+  inner.parent = &top;
+  CHECK((cursiv::interiorNodes(inner, open, close, held.get()) ==
          std::vector<cursiv::NodeId>{middle}));
-  CHECK((cursiv::interior_nodes(cst, leftNode, close) ==
-         std::vector<cursiv::NodeId>{middle}));
-  CHECK(cursiv::interior_nodes(cst, open, leftNode).empty());
-  CHECK((cursiv::interior_nodes(cst, close, open) ==
-         std::vector<cursiv::NodeId>{middle}));
+  inner.parent = nullptr;
+  CHECK(cursiv::interiorNodes(inner, open, close, held.get()).empty());
 
   cursiv::Cst forest("ab");
-  cursiv::detail::CstBuilder roots(forest);
-  const auto first = roots.leaf(0, 1, 0);
-  const auto last = roots.leaf(1, 2, 0);
-  CHECK(cursiv::interior_nodes(forest, first, last).empty());
+  cursiv::CstRun& roots = cursiv::CstBuilder(forest).stream();
+  roots.leaf(0, 1, 0);
+  roots.leaf(1, 2, 0);
+  constexpr cursiv::NodeId first = 0, last = 1;
+  const auto trees = holding(std::move(forest));
+  cursiv::AstNode tree;
+  tree.cstNodeId = last;
+  CHECK(cursiv::interiorNodes(tree, first, last, trees.get()).empty());
+}
+
+// Each level owns `{x}` followed by the rest of the chain. Finding x should
+// cost about the same near the root and near the tip.
+void interior_nodes_skip_what_follows_the_close() {
+  constexpr std::size_t kDepth = 48000;
+  std::string text;
+  for (std::size_t i = 0; i < kDepth; ++i) text += "{x}";
+  cursiv::Cst cst(text);
+  cursiv::CstRun& run = cursiv::CstBuilder(cst).stream();
+  std::vector<cursiv::NodeId> leaves;
+  for (std::size_t i = 0; i < kDepth; ++i) {
+    const auto at = static_cast<cursiv::TextOffset>(3 * i);
+    for (cursiv::TextOffset k = 0; k < 3; ++k) {
+      leaves.push_back(static_cast<cursiv::NodeId>(run.records()));
+      run.leaf(at + k, at + k + 1, 0);
+    }
+  }
+  // The levels close innermost first, each over its own leaves and the levels
+  // closed before it.
+  std::vector<cursiv::AstNode> nodes(kDepth);
+  for (std::size_t i = kDepth; i-- > 0;) {
+    const cursiv::NodeId id = run.records();
+    const auto from = static_cast<cursiv::NodeId>(3 * i);
+    run.close(static_cast<cursiv::TextOffset>(from),
+              static_cast<cursiv::TextOffset>(3 * kDepth), id - from + 1, 0);
+    nodes[i].cstNodeId = id;
+  }
+  const auto held = holding(std::move(cst));
+  const auto search = [&](std::size_t levels) {
+    const auto begin = std::chrono::steady_clock::now();
+    std::size_t found = 0;
+    for (std::size_t n = 0; n < kDepth; ++n) {
+      const std::size_t i = kDepth - levels + n % levels;
+      const auto inside = cursiv::interiorNodes(nodes[i], leaves[3 * i],
+                                                 leaves[3 * i + 2], held.get());
+      found += inside.size() == 1 && inside.front() == leaves[3 * i + 1];
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    CHECK(found == kDepth);
+    return elapsed;
+  };
+  const auto nearTip = search(kDepth / 16);
+  CHECK(search(kDepth) < nearTip * 8);
 }
 
 // A hidden record is found by rule name; the leaf a caret resolves to is the
@@ -3749,22 +3600,22 @@ void find_hidden_nodes_and_leaf_and_owner_answer_a_caret() {
   const Parsed p(kText);
 
   const std::vector<cursiv::CstNodeView> notes =
-      cursiv::find_hidden_nodes(p.root(), "NOTE");
+      cursiv::findHiddenNodes(p.root(), "NOTE");
   CHECK(notes.size() == 1);
   if (!notes.empty()) CHECK(notes[0].text() == "# note");
 
   const auto beforeFirstItem =
       static_cast<cursiv::TextOffset>(kText.find("item"));
   const cursiv::CstLeaf leaf =
-      cursiv::find_leaf_before_offset(p.r.cst(), beforeFirstItem);
+      cursiv::findLeafBeforeOffset(p.r.cst(), beforeFirstItem);
   CHECK(static_cast<bool>(leaf));
   CHECK(p.r.cst().text(leaf.id) == "doc");  // the hidden comment is skipped
 
   const auto insideAa = static_cast<cursiv::TextOffset>(kText.find("aa") + 2);
-  cursiv::AstNode* const owner = cursiv::owner_at(p.r.cst(), insideAa);
+  cursiv::AstNode* const owner = cursiv::ownerAt(p.r.cst(), insideAa);
   CHECK(owner != nullptr && cursiv::ast_cast<Item>(owner) != nullptr);
 
-  CHECK(cursiv::owner_at(p.r.cst(), 0) == nullptr);
+  CHECK(cursiv::ownerAt(p.r.cst(), 0) == nullptr);
 }
 
 // A parsed tree names the grammar that built it and the records that
@@ -3777,19 +3628,18 @@ void the_tree_names_the_grammar_that_built_it() {
 
   cursiv::Cst bare("doc item aa");
   {
-    cursiv::detail::CstBuilder builder(bare);
-    const cursiv::detail::CstBuilder::Open all = builder.enter();
-    builder.leaf(0, 3, cursiv::kNoElement);
-    builder.exit(all, 0, cursiv::kNoElement);
+    cursiv::CstRun& run = cursiv::CstBuilder(bare).stream();
+    run.leaf(0, 3, cursiv::kNoElement);
+    run.close(0, 3, 2, cursiv::kNoElement);
   }
   CHECK(bare.grammar() == nullptr);
   cursiv::AstNode root;
   root.cstNodeId = bare.entryRoot();
-  CHECK(cursiv::find_nodes_for_property(root, "name").empty());
-  CHECK(!cursiv::find_node_for_property(root, "name"));
-  CHECK(cursiv::find_nodes_for_keyword(root, "doc").empty());
-  CHECK(!cursiv::find_node_for_keyword(root, "doc"));
-  CHECK(cursiv::find_hidden_nodes(root, "NOTE").empty());
+  CHECK(cursiv::findNodesForProperty(root, "name").empty());
+  CHECK(!cursiv::findNodeForProperty(root, "name"));
+  CHECK(cursiv::findNodesForKeyword(root, "doc").empty());
+  CHECK(!cursiv::findNodeForKeyword(root, "doc"));
+  CHECK(cursiv::findHiddenNodes(root, "NOTE").empty());
 }
 
 // The map follows the result through a move, by construction and by
@@ -3797,7 +3647,7 @@ void the_tree_names_the_grammar_that_built_it() {
 void the_map_follows_the_result_through_a_move() {
   Parsed p("doc item aa item bb");
   const std::vector<cursiv::CstNodeView> before =
-      cursiv::find_nodes_for_keyword(p.root(), "item");
+      cursiv::findNodesForKeyword(p.root(), "item");
   CHECK(before.size() == 2);
 
   cursiv::ParseResult moved = std::move(p.r);
@@ -3809,7 +3659,7 @@ void the_map_follows_the_result_through_a_move() {
   Parsed other("doc item cc");
   other.r = std::move(moved);
   const std::vector<cursiv::CstNodeView> after =
-      cursiv::find_nodes_for_keyword(other.root(), "item", other.document);
+      cursiv::findNodesForKeyword(other.root(), "item", other.document);
   CHECK(after.size() == 2);
   if (before.size() == 2 && after.size() == 2)
     CHECK(before[0].id == after[0].id && before[1].id == after[1].id);
@@ -3825,10 +3675,10 @@ void index_zero_answers_what_the_list_answers() {
   if (doc == nullptr || doc->items.size() != 3) return;
 
   const std::vector<cursiv::CstNodeView> keywords =
-      cursiv::find_nodes_for_keyword(p.root(), "item");
+      cursiv::findNodesForKeyword(p.root(), "item");
   CHECK(keywords.size() == 3);
-  const auto first = cursiv::find_node_for_keyword(p.root(), "item");
-  const auto zero = cursiv::find_node_for_keyword(p.root(), "item", 0);
+  const auto first = cursiv::findNodeForKeyword(p.root(), "item");
+  const auto zero = cursiv::findNodeForKeyword(p.root(), "item", 0);
   CHECK(first && zero && !keywords.empty());
   if (first && zero && !keywords.empty()) {
     CHECK(first.id == keywords.front().id);
@@ -3839,15 +3689,15 @@ void index_zero_answers_what_the_list_answers() {
   // itself, in both spellings.
   const cursiv::AstNode& item = *doc->items[1];
   const std::vector<cursiv::CstNodeView> names =
-      cursiv::find_nodes_for_property(item, "name");
-  const auto name = cursiv::find_node_for_property(item, "name");
+      cursiv::findNodesForProperty(item, "name");
+  const auto name = cursiv::findNodeForProperty(item, "name");
   CHECK(!names.empty() && name);
   if (!names.empty() && name) CHECK(name.id == names.front().id);
   if (name) CHECK(name.text() == "bb");
 
-  CHECK(cursiv::find_nodes_for_property(p.root(), "nosuch").empty());
-  CHECK(!cursiv::find_node_for_property(p.root(), "nosuch"));
-  CHECK(!cursiv::find_node_for_keyword(p.root(), "nosuch"));
+  CHECK(cursiv::findNodesForProperty(p.root(), "nosuch").empty());
+  CHECK(!cursiv::findNodeForProperty(p.root(), "nosuch"));
+  CHECK(!cursiv::findNodeForKeyword(p.root(), "nosuch"));
 }
 
 // Every index answers the list's clamped entry, on both sides -- including a
@@ -3855,10 +3705,10 @@ void index_zero_answers_what_the_list_answers() {
 void every_index_clamps_to_the_list() {
   const Parsed p("doc item aa item bb item cc");
   const std::vector<cursiv::CstNodeView> keywords =
-      cursiv::find_nodes_for_keyword(p.root(), "item");
+      cursiv::findNodesForKeyword(p.root(), "item");
   CHECK(keywords.size() == 3);
   for (const std::size_t k : {0u, 1u, 2u, 3u, 99u}) {
-    const auto at = cursiv::find_node_for_keyword(p.root(), "item", k);
+    const auto at = cursiv::findNodeForKeyword(p.root(), "item", k);
     CHECK(at);
     if (at && !keywords.empty())
       CHECK(at.id ==
@@ -3868,9 +3718,9 @@ void every_index_clamps_to_the_list() {
   if (doc == nullptr || doc->items.empty()) return;
   const cursiv::AstNode& item = *doc->items[0];
   const std::vector<cursiv::CstNodeView> names =
-      cursiv::find_nodes_for_property(item, "name");
+      cursiv::findNodesForProperty(item, "name");
   CHECK(names.size() == 1);
-  const auto past = cursiv::find_node_for_property(item, "name", 5);
+  const auto past = cursiv::findNodeForProperty(item, "name", 5);
   CHECK(past);
   if (past && !names.empty()) CHECK(past.id == names.front().id);
 }
@@ -3921,8 +3771,8 @@ void the_cursor_answers_what_a_search_answers() {
   const cursiv::Grammar& grammar = engine().getGrammar();
   const auto spells = [&](cursiv::NodeId id, std::string_view word) {
     const cursiv::CstNode& n = cst[id];
-    return n.subtreeSize == 1 && n.hidden == 0 && cst.text(id) == word &&
-           grammar.recordRule(n).empty();
+    return n.subtreeSize == 1 && !n.isHidden() && cst.text(id) == word &&
+           grammar.recordIsLiteral(n);
   };
   const auto keywordAt = [&](cursiv::NodeId root, std::string_view word) {
     if (spells(root, word)) return std::vector<cursiv::NodeId>{root};
@@ -3945,25 +3795,25 @@ void the_cursor_answers_what_a_search_answers() {
            doc->items[199]}) {
     const cursiv::NodeId root = node->cstNodeId;
     for (const std::string_view word : {"item", "mark"})
-      CHECK(same(cursiv::find_nodes_for_keyword(*node, word),
+      CHECK(same(cursiv::findNodesForKeyword(*node, word),
                  keywordAt(root, word)));
-    CHECK(same(cursiv::find_nodes_for_property(*node, "name"),
+    CHECK(same(cursiv::findNodesForProperty(*node, "name"),
                withOwn(root, reference(root, name, true))));
   }
 }
 
-// A data rule whose text spells a keyword is not one: the rule clause is
-// asked last, and it still refuses the name leaf.
+// A name whose text spells a keyword is not one: the grammar is asked last,
+// and it still refuses the name leaf.
 void a_data_rule_that_spells_a_keyword_is_not_one() {
   const Parsed p("doc item item");
   const std::vector<cursiv::CstNodeView> found =
-      cursiv::find_nodes_for_keyword(p.root(), "item");
+      cursiv::findNodesForKeyword(p.root(), "item");
   CHECK(found.size() == 1);
   const auto* doc = static_cast<Doc*>(p.r.value);
   CHECK(doc != nullptr && doc->items.size() == 1);
   if (doc != nullptr && doc->items.size() == 1) {
     CHECK(doc->items[0]->name == "item");
-    CHECK(cursiv::find_nodes_for_keyword(*doc->items[0], "item").empty());
+    CHECK(cursiv::findNodesForKeyword(*doc->items[0], "item").empty());
   }
 }
 
@@ -3973,16 +3823,16 @@ void a_data_rule_that_spells_a_keyword_is_not_one() {
 // boundary. A search must not use one call-stack frame per composite.
 void deep_concrete_regions_need_no_recursive_stack() {
   const Parsed parsed("doc # note\nitem aa");
-  const auto notes = cursiv::find_hidden_nodes(parsed.root(), "NOTE");
+  const auto notes = cursiv::findHiddenNodes(parsed.root(), "NOTE");
   CHECK(notes.size() == 1);
-  const auto stamp = notes.front().node().engine;
+  const auto stamp = notes.front().node().element();
 
   cursiv::Cst cst("# note");
-  cursiv::detail::CstBuilder builder(cst);
-  builder.hidden(0, 6, stamp);
+  cursiv::CstBuilder builder(cst);
+  builder.stream().hidden(0, 6, stamp);
   for (cursiv::NodeCount depth = 0; depth < 100000; ++depth)
-    builder.stream().close(0, 6, cst.size() + 1, 0);
-  builder.bind_model(engine().getGrammar(), {});
+    builder.stream().close(0, 6, builder.stream().records() + 1, 0);
+  builder.bindModel(engine().getGrammar(), {});
   // A document holds the hand-built tree, which owns no node: nothing stops
   // the walk.
   cursiv::Document holder(
@@ -3990,18 +3840,80 @@ void deep_concrete_regions_need_no_recursive_stack() {
   holder.parseResult = cursiv::ParseResult(std::move(cst));
   cursiv::AstNode root;
   root.cstNodeId = holder.parseResult.cst().size() - 1;
-  const auto found = cursiv::find_hidden_nodes(root, "NOTE", &holder);
+  const auto found = cursiv::findHiddenNodes(root, "NOTE", &holder);
   CHECK(found.size() == 1 && found.front().id == 0);
   CHECK(found.front().text() == "# note");
 }
 
+void only_retained_nodes_keep_their_property_origins() {
+  cursiv::Cst cst("ab");
+  auto& records = cursiv::CstBuilder(cst).stream();
+  records.leaf(0, 1, 0);
+  records.close(0, 1, 2, 0);
+  records.leaf(1, 2, 0);
+  records.close(0, 2, 4, 0);
+  cursiv::ParseResult result(std::move(cst));
+  const cursiv::detail::AstMetaData meta{};
+  cursiv::ParseResultBuilder builder(result, meta);
+  auto* discarded = builder.createNode<tcstn::ast::Expr>(0);
+  builder.moveNode(*discarded, 1, true);
+  auto* root = builder.createNode<tcstn::ast::Expr>(2);
+  builder.moveNode(*root, 2, true);
+  builder.moveNode(*root, 3, true);
+  builder.finish(root, cursiv::AstBuildError::None);
+  const auto origins = result.propertyOrigins();
+  CHECK(result.nodes().size() == 1 && result.value == root);
+  CHECK(origins.size() == 1 && origins.front().record == 2 && origins.front().owner == root);
+}
+
+void a_property_site_belongs_to_the_node_that_took_it() {
+  const auto parser = tcstn::generated::InfixG::createParser();
+  for (const std::string_view text : {"v", "@v!", "{@v!}", "w", "[b]"}) {
+    cursiv::Document document{cursiv::TextDocument{}};
+    document.parseResult = parser->parse(text);
+    const auto* root = document.parseResult.valueAs<tcstn::ast::Expr>();
+    CHECK(document.parseResult.diagnostics.empty());
+    CHECK(root && root->left);
+    if (!root || !root->left) continue;
+    const auto check = [&](const cursiv::AstNode& node, std::string_view field,
+                           std::string_view spelling) {
+      const auto sites = cursiv::findNodesForProperty(node, field, &document);
+      const auto first = cursiv::findNodeForProperty(node, field, 0, &document);
+      if (spelling.empty()) {
+        CHECK(sites.empty() && !first);
+      } else {
+        CHECK(sites.size() == 1 && first && first.id == sites.front().id);
+        CHECK(first && first.text() == spelling);
+      }
+    };
+    if (text == "w") {
+      CHECK(root->left->left);
+      if (!root->left->left) continue;
+      check(*root, "left", "w");
+      check(*root->left, "left", "w");
+      check(*root->left, "value", "");
+      check(*root->left->left, "left", "");
+      check(*root->left->left, "value", "w");
+    } else {
+      check(*root, "left", text == "[b]" ? "[b]" : "v");
+      check(*root, "value", text == "{@v!}" ? "}" : "");
+      check(*root, "op", text.find('!') != text.npos ? "!" : "");
+      check(*root->left, "value", text == "[b]" ? "b" : "v");
+      check(*root->left, "left", "");
+    }
+  }
+}
+
 void run() {
+  only_retained_nodes_keep_their_property_origins();
+  a_property_site_belongs_to_the_node_that_took_it();
   deep_concrete_regions_need_no_recursive_stack();
   a_feature_is_found_and_an_owned_child_is_a_boundary();
   an_out_of_range_index_clamps();
   a_fused_keyword_is_still_found();
   interior_nodes_walk_the_extent();
   interior_nodes_exclude_the_endpoint_branches();
+  interior_nodes_skip_what_follows_the_close();
   find_hidden_nodes_and_leaf_and_owner_answer_a_caret();
   the_tree_names_the_grammar_that_built_it();
   the_map_follows_the_result_through_a_move();
@@ -4009,10 +3921,9 @@ void run() {
   every_index_clamps_to_the_list();
   the_cursor_answers_what_a_search_answers();
   a_data_rule_that_spells_a_keyword_is_not_one();
-  a_keyword_node_answers_for_its_own_keyword(Engine::lr);
-  a_keyword_node_answers_for_its_own_keyword(Engine::ll);
-  a_folded_keyword_is_found_in_any_case(Engine::lr);
-  a_folded_keyword_is_found_in_any_case(Engine::ll);
+  a_keyword_node_answers_for_its_own_keyword();
+  a_folded_keyword_is_found_in_any_case();
+  a_keyword_alone_in_a_data_rule_is_found();
 }
 
 }  // namespace cst_utils
@@ -4471,7 +4382,7 @@ void threads_around_a_ring_all_see_the_cycle() {
     for (const Ref& r : graph.refs) CHECK(!detail::ref_running(raw(r)));
     for (const Ref& r : graph.refs) {
       const RefState s = r.resolve();
-      CHECK(cancel ? has_error(s) : s == RefState::ErrorCycle);
+      CHECK(cancel ? hasError(s) : s == RefState::ErrorCycle);
     }
   }
 }
@@ -4533,7 +4444,7 @@ struct Later : cursiv::Extends<Plain, cursiv::AstNode> {
 
 void run() {
   const cursiv::AstNodePtr node = cursiv::detail::new_ast_node<Later>();
-  CHECK(node->type == &cursiv::ast_type_tag<Later>);
+  CHECK(node->type == &cursiv::kAstTypeTag<Later>);
   CHECK(node->parent == nullptr && node->cstNodeId == cursiv::kNoNode);
   const auto* const later = static_cast<const Later*>(node.get());
   CHECK(later->before == 7 && later->after == 3);
@@ -4634,16 +4545,16 @@ void a_request_past_the_address_space_is_refused() {
 }
 
 // A run that outgrows a block of its own gives it back: the nodes that follow
-// the records fit in what it left.
+// the records fit in what it left, but for one block.
 void an_outgrown_run_gives_its_buffer_back() {
   LinearMemory memory;
   cursiv::detail::BlockArena pool(std::size_t{64} << 10, &memory);
-  cursiv::detail::CstRun run;
+  cursiv::CstRun run;
   run.bind(&pool);
   for (cursiv::TextOffset i = 0; i < (1u << 21); ++i) run.leaf(i, i + 1, 0);
   const std::size_t peak = memory.peak;
   for (int i = 0; i < 256; ++i) (void)pool.allocate(std::size_t{64} << 10, 8);
-  CHECK(memory.peak == peak);
+  CHECK(memory.peak <= peak + cursiv::detail::BlockArena::kCap);
 }
 
 // A large request the current block served is not a block of its own:
@@ -4704,5 +4615,5 @@ int main() {
   run("cst_utils", cst_utils::run);
   run("reference_resolution", reference_resolution::run);
   run("block_arena", block_arena::run);
-  return cursiv::test::report("syntax_tree");
+  return cursiv::test::report("syntax_tree_test");
 }

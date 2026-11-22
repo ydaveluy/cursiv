@@ -28,7 +28,5 @@ struct Base : cursiv::GrammarSpec {
   using hidden = list<LINE>;
 };
 
-struct Lr : Base {};
-struct Ll : Base {};
 
 }  // namespace ttrans

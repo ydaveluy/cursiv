@@ -103,6 +103,20 @@ struct Arms : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+struct CaretGuards : cursiv::GrammarSpec {
+  struct Plain : terminal<lit<"x"> + !lit<"!">> {};
+  struct BeforeBang : terminal<lit<"x"> + &lit<"!">> {};
+  struct Label : terminal<some(cr<"a-z">) + &lit<":">> {};
+  struct Number : terminal<some(d)> {};
+  struct Stem : terminal<lit<"p"> | lit<"p!a">> {};
+  struct Tail : terminal<lit<"!"> + cr<"ab"> + lit<"+">> {};
+  struct Root : rule<create<ast::Won>(
+      (ref<Stem> + option(assign<&ast::Won::name>(ref<Tail>))) |
+      (ref<Plain> + (lit<";"> | lit<"!">)) | (ref<BeforeBang> + lit<"!!">) |
+      (lit<"@"> + ((assign<&ast::Won::name>(ref<Label>) + lit<":">) |
+                   (assign<&ast::Won::token>(ref<Number>) + lit<";">))))> {};
+};
+
 // The tie of `Arms` where one terminal is read behind a condition the lexer
 // checks apart from its other terminals: a field is never a number. A word
 // stands where no field prefix can complete.
@@ -218,20 +232,30 @@ struct MixedRank : cursiv::GrammarSpec {
   struct NAME : terminal<some(cr<"a-zA-Z">)> {};
   struct LIT_IF : terminal<lit<"if">> {};
   struct MIX : terminal<ref<NAME> | kw<"if">> {};
+  struct OPEN : terminal<lit<"{"> | cr<"A-Z">> {};
   struct Root : rule<create<ast::Pick>(
                     (assign<&ast::Pick::literal>(ref<LIT_IF>) + lit<"(">) |
-                    (assign<&ast::Pick::keyword>(ref<MIX>) + lit<"(">))> {};
+                    (assign<&ast::Pick::keyword>(ref<MIX>) + lit<"(">) |
+                    (lit<":"> + ref<OPEN>))> {};
   using entry = Root;
   using ignored = WS;
 };
 
+// The literal keeps its rank through a test before a call of its terminal,
+// a test after it, and a test that waits for what follows.
 struct MixedRefused : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct NAME : terminal<some(cr<"a-zA-Z">)> {};
   struct MIX : terminal<(lit<"if"> | ref<NAME>) + !cr<"0-9">> {};
-  struct Root : rule<create<ast::Won>(
-                    (assign<&ast::Won::name>(ref<NAME>) + lit<";">) |
-                    (assign<&ast::Won::token>(ref<MIX>) + lit<";">))> {};
+  struct LEADING : terminal<&lit<"i"> + ref<MIX>> {};
+  struct TRAILING : terminal<ref<MIX> + &lit<";">> {};
+  struct WAITING : terminal<(lit<"if"> | ref<NAME>) + &lit<";">> {};
+  template <class Token>
+  static constexpr auto pick =
+      (assign<&ast::Won::name>(ref<NAME>) | assign<&ast::Won::token>(ref<Token>)) + lit<";">;
+  struct Root : rule<create<ast::Won>(pick<MIX> | (lit<"<"> + pick<LEADING>) |
+                                      (lit<">"> + pick<TRAILING>) |
+                                      (lit<"="> + pick<WAITING>))> {};
   using entry = Root;
   using ignored = WS;
 };
@@ -688,7 +712,27 @@ struct Calls : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// A twin branch or optional item is dropped: case `n` holds the twin, and case
+// Statements stand side by side, and one may open on `(`: a run of calls
+// after a member goes on as one after a name does.
+struct MemberCalls : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Expression;
+  struct Name : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>))> {};
+  static constexpr auto calls = many(nest<&ast::Call::callee>(
+      lit<"("> + assign<&ast::Call::argument>(ref<Expression>) + lit<")">));
+  struct Expression
+      : rule<(ref<Name> | (lit<"("> + ref<Expression> + lit<")">)) + calls +
+             many(nest<&ast::Call::callee>(lit<"."> +
+                                          assign<&ast::Call::argument>(ref<Name>)) +
+                  calls)> {};
+  struct Root : rule<create<ast::Program>(
+                    many(append<&ast::Program::statements>(ref<Expression>)))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+
 // `n.` the rule written without it. Cases 6 and 7 hold branches that stay.
 struct Twins : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -770,6 +814,7 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"turn:"> + ref<Turn::Root>) |
              (lit<"turnshortfirst:"> + ref<TurnShortFirst::Root>) |
              (lit<"arms:"> + ref<Arms::Root>) |
+             (lit<"caretguards:"> + ref<CaretGuards::Root>) |
              (lit<"fields:"> + ref<Fields::Root>) |
              (lit<"twins:"> + ref<Twins::Root>) |
              (lit<"separated:"> + ref<Separated::Root>) |
@@ -790,6 +835,7 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"atendhost:"> + ref<Hosted<AtEnd>::Root>) |
              (lit<"wordhost:"> + ref<Adopting<Word>::Root>) |
              (lit<"calls:"> + ref<Calls::Root>) |
+             (lit<"membercalls:"> + ref<MemberCalls::Root>) |
              (lit<"atclosehost:"> + ref<Hosted<AtClose>::Root>) |
              (lit<"namedclosehost:"> + ref<NamedClose<AtClose>::Root>) |
              (lit<"namedendhost:"> + ref<NamedClose<AtEnd>::Root>) |
@@ -820,7 +866,5 @@ struct Suite : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct Ll : Suite {};
-struct Lr : Suite {};
 
 }  // namespace tconformance

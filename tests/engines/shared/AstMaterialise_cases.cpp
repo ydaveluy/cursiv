@@ -1,17 +1,14 @@
-#include "asttreell/generated/Ll/Module.hpp"
-#include "asttreelr/generated/Lr/Module.hpp"
+#include "asttreelr/generated/Combined/Module.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/CursivLexicon.hpp"
 #include "cursiv/FuzzLane.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/AstMaterialiseGrammars.hpp"
 #include "engines/shared/AstTreeGrammars.hpp"
 #include "support/AstText.hpp"
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <memory>
@@ -32,12 +29,9 @@ struct Reader {
   std::string_view prefix;
 };
 
-using Pair = std::array<Reader, 2>;
-
-Pair readers(std::string_view prefix) {
+Reader reader(std::string_view prefix) {
   namespace g = ttree::generated;
-  return {Reader{g::Ll::create_parser(), g::Ll::create_ast_reflection(), prefix},
-          Reader{g::Lr::create_parser(), g::Lr::create_ast_reflection(), prefix}};
+  return {g::Combined::createParser(), g::Combined::createAstReflection(), prefix};
 }
 
 std::string tree(const Reader& r, const cursiv::ParseResult& result) {
@@ -46,25 +40,18 @@ std::string tree(const Reader& r, const cursiv::ParseResult& result) {
   return out;
 }
 
-void expect(const Pair& readers, std::string_view text, std::string_view want) {
-  for (const Reader& r : readers) {
-    const std::string source = "mat:" + std::string(r.prefix) + std::string(text);
-    const auto result = r.parser->parse(source);
-    CHECK(result.accepted && result.diagnostics.empty() &&
-          !result.cst().recovered());
-    CHECK(result.error == cursiv::AstBuildError::None);
-    const std::string got = tree(r, result);
-    if (got != want)
-      std::printf("'%.*s'\n  built %s\n  wants %.*s\n",
-                  static_cast<int>(text.size()), text.data(), got.c_str(),
-                  static_cast<int>(want.size()), want.data());
-    CHECK(got == want);
-  }
-}
-
-template <class G>
-void fuzz(const char* name, const Reader& r) {
-  cursiv::fuzzer::lane<G>(name, *r.parser, *r.reflection, 200, 0x5eed);
+void expect(const Reader& r, std::string_view text, std::string_view want) {
+  const std::string source = "mat:" + std::string(r.prefix) + std::string(text);
+  const auto result = r.parser->parse(source);
+  CHECK(result.accepted && result.diagnostics.empty() &&
+        !result.cst().recovered());
+  CHECK(result.error == cursiv::AstBuildError::None);
+  const std::string got = tree(r, result);
+  if (got != want)
+    std::printf("'%.*s'\n  built %s\n  wants %.*s\n",
+                static_cast<int>(text.size()), text.data(), got.c_str(),
+                static_cast<int>(want.size()), want.data());
+  CHECK(got == want);
 }
 
 void part_span(const cursiv::ParseResult& result, const cursiv::AstNode* node,
@@ -151,7 +138,7 @@ void stacked_wrappers_and_post_operand_flags_keep_their_meaning(const Reader& e)
     parent = box;
     current = box->in;
   }
-  CHECK(current && current->type == &cursiv::ast_type_tag<tmaterialise::Flags> &&
+  CHECK(current && current->type == &cursiv::kAstTypeTag<tmaterialise::Flags> &&
         !current->on && seen.insert(current).second);
   if (current) part_span(result, current, parent, 12, 13);
   CHECK(seen.size() == 21 && result.nodes().size() == 21);
@@ -206,10 +193,9 @@ void recursive_call_arguments_close_before_the_callers_effects(const Reader& e) 
 }  // namespace
 
 void run() {
-  namespace g = ttree::generated;
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
 
-  const Pair chain = readers("atomchain:");
+  const Reader chain = reader("atomchain:");
   expect(chain, "", "Block{}");
   expect(chain, "A", "Block{}");
   expect(chain, "$a", "Block{atoms0=Var{} }");
@@ -217,40 +203,42 @@ void run() {
   expect(chain, "A $a.b[1] B $c",
          "Block{atoms1=Index{object=Prop{object=Var{} } index=Num{} } "
          "atoms3=Var{} }");
-  for (const Reader& r : chain) {
-    const auto result = r.parser->parse("mat:atomchain:A $a B");
+  {
+    const auto result = chain.parser->parse("mat:atomchain:A $a B");
     const auto* block = result.valueAs<tmaterialise::Block>();
     CHECK(block != nullptr && block->atoms.size() == 3);
-    if (block == nullptr || block->atoms.size() != 3) continue;
-    CHECK(std::get<std::string_view>(block->atoms[0]) == "A");
-    CHECK(std::get<tmaterialise::Expr*>(block->atoms[1]) != nullptr);
-    CHECK(std::get<std::string_view>(block->atoms[2]) == "B");
+    if (block != nullptr && block->atoms.size() == 3) {
+      CHECK(std::get<std::string_view>(block->atoms[0]) == "A");
+      CHECK(std::get<tmaterialise::Expr*>(block->atoms[1]) != nullptr);
+      CHECK(std::get<std::string_view>(block->atoms[2]) == "B");
+    }
   }
 
-  const Pair flanked = readers("flanked:");
+  const Reader flanked = reader("flanked:");
   expect(flanked, "[1]", "Row{}");
   expect(flanked, "[1, 2]", "Row{}");
   expect(flanked, "[\n1,\n[2, 3]\n]", "Row{items1=Row{} }");
   expect(flanked, "[[1], [[2]]]",
          "Row{items0=Row{} items1=Row{items0=Row{} } }");
-  for (const Reader& r : flanked) {
-    const auto result = r.parser->parse("mat:flanked:[1, [2], 3]");
+  {
+    const auto result = flanked.parser->parse("mat:flanked:[1, [2], 3]");
     const auto* row = result.valueAs<tmaterialise::Row>();
     CHECK(row != nullptr && row->items.size() == 3);
-    if (row == nullptr || row->items.size() != 3) continue;
-    CHECK(std::get<std::int64_t>(row->items[0]) == 1);
-    const auto* inner = std::get<tmaterialise::Row*>(row->items[1]);
-    CHECK(inner != nullptr && inner->items.size() == 1);
-    CHECK(std::get<std::int64_t>(row->items[2]) == 3);
+    if (row != nullptr && row->items.size() == 3) {
+      CHECK(std::get<std::int64_t>(row->items[0]) == 1);
+      const auto* inner = std::get<tmaterialise::Row*>(row->items[1]);
+      CHECK(inner != nullptr && inner->items.size() == 1);
+      CHECK(std::get<std::int64_t>(row->items[2]) == 3);
+    }
   }
 
-  const Pair shared = readers("sharedprefix:");
+  const Reader shared = reader("sharedprefix:");
   expect(shared, "$a.b[1]", "Index{object=Prop{object=Var{} } index=Num{} }");
   expect(shared, "7.x", "Prop{object=Num{} }");
   expect(shared, "-$a.b[1]",
          "Neg{operand=Index{object=Prop{object=Var{} } index=Num{} } }");
 
-  const Pair payload = readers("payloadcreate:");
+  const Reader payload = reader("payloadcreate:");
   expect(payload, "a", "Holder{value=Var{} }");
   expect(payload, "a.b", "Holder{value=Prop{object=Var{} } }");
   expect(payload, "a[1].c",
@@ -258,25 +246,26 @@ void run() {
   expect(payload, "a; b.c; d[2]",
          "Holder{value=Var{} children0=Prop{object=Var{} } "
          "children1=Index{object=Var{} index=Num{} } }");
-  for (const Reader& r : payload)
-    successive_assigned_and_appended_values_keep_their_spans(r);
+  successive_assigned_and_appended_values_keep_their_spans(payload);
 
-  const Pair group = readers("flaggroup:");
+  const auto marked = reader({}).parser->parse("mat:marks:x");
+  const auto* marks = marked.valueAs<tmaterialise::Marks>();
+  CHECK(marks != nullptr && marks->m0 && marks->m7 && marks->m15);
+
+  const Reader group = reader("flaggroup:");
   expect(group, "", "Holder{}");
   expect(group, "!$a", "Holder{value=Var{} }");
   expect(group, "!$a; $b; $c",
          "Holder{value=Var{} children0=Var{} children1=Var{} }");
   expect(group, "; $b", "Holder{children0=Var{} }");
-  for (const Reader& r : group) {
-    const auto flagged = r.parser->parse("mat:flaggroup:!$a");
-    const auto* holder = flagged.valueAs<tmaterialise::Holder>();
-    CHECK(holder != nullptr && holder->flag);
-    const auto plain = r.parser->parse("mat:flaggroup:; $b");
-    holder = plain.valueAs<tmaterialise::Holder>();
-    CHECK(holder != nullptr && !holder->flag);
-  }
+  const auto flagged = group.parser->parse("mat:flaggroup:!$a");
+  const auto* holder = flagged.valueAs<tmaterialise::Holder>();
+  CHECK(holder != nullptr && holder->flag);
+  const auto plain = group.parser->parse("mat:flaggroup:; $b");
+  holder = plain.valueAs<tmaterialise::Holder>();
+  CHECK(holder != nullptr && !holder->flag);
 
-  const Pair nest = readers("optionalnest:");
+  const Reader nest = reader("optionalnest:");
   expect(nest, "$a", "Var{}");
   expect(nest, "7", "Num{}");
   expect(nest, "$a cast as t", "Cast{operand=Var{} }");
@@ -291,7 +280,7 @@ void run() {
   expect(nest, "((1))", "Num{}");
   expect(nest, "-($a + 1)", "Neg{operand=Bin{left=Var{} right=Num{} } }");
 
-  const Pair pass = readers("passthrough:");
+  const Reader pass = reader("passthrough:");
   expect(pass, "i", "Var{}");
   expect(pass, "1", "Num{}");
   expect(pass, "(i)", "Var{}");
@@ -302,7 +291,7 @@ void run() {
   expect(pass, "x=a<b",
          "Assign{target=Var{} value=Bin{left=Var{} right=Var{} } }");
 
-  const Pair relay = readers("relay:");
+  const Reader relay = reader("relay:");
   expect(relay, "!$x", "Neg{operand=Var{} }");
   expect(relay, "!($x+$y)", "Neg{operand=Bin{left=Var{} right=Var{} } }");
   expect(relay, "!!$x", "Neg{operand=Neg{operand=Var{} } }");
@@ -311,46 +300,39 @@ void run() {
       "Bin{left=Neg{operand=Var{} } right=Pair{first=Var{} second=Var{} } }");
   expect(relay, "[$x,$y]", "Pair{first=Var{} second=Var{} }");
 
-  const Pair terminal = readers("unassignedterminal:");
+  const Reader terminal = reader("unassignedterminal:");
   expect(terminal, "fn f", "Var{}");
   expect(terminal, "new.target", "Target{}");
-  for (const Reader& r : terminal) {
-    const auto result = r.parser->parse("mat:unassignedterminal:fn f");
-    const auto* var = result.valueAs<tmaterialise::Var>();
-    CHECK(var != nullptr && var->name == "f");
+  const auto fnResult = terminal.parser->parse("mat:unassignedterminal:fn f");
+  const auto* var = fnResult.valueAs<tmaterialise::Var>();
+  CHECK(var != nullptr && var->name == "f");
+
+  // A call whose test fails after it read its text keeps its node, and only
+  // the repair says so: the holder takes it.
+  const Reader lr = reader({});
+  for (const char* text : {"mat:givenup:x n a ? ;", "mat:passed:n a ?"}) {
+    const auto result = lr.parser->parse(text);
+    CHECK(result.accepted && !result.diagnostics.empty());
+    CHECK(result.value != nullptr ||
+          result.error == cursiv::AstBuildError::NoEntry);
+    for (const cursiv::ParseDiagnostic& d : result.diagnostics)
+      CHECK(d.kind != cursiv::DiagnosticKind::ConversionError);
   }
+  const auto held = lr.parser->parse("mat:givenup:x n a ? ;");
+  CHECK(tree(lr, held) == "Holder{value=Var{} }");
 
-  // The node of a call a repair gave up is absent, and only the repair says
-  // so; where it gives up the call alone, the holder stands without it.
-  const Pair givenUp = readers({});
-  for (const Reader& r : givenUp)
-    for (const char* text : {"mat:givenup:x n a ? ;", "mat:passed:n a ?"}) {
-      const auto result = r.parser->parse(text);
-      CHECK(result.accepted && !result.diagnostics.empty());
-      CHECK(result.value != nullptr ||
-            result.error == cursiv::AstBuildError::NoEntry);
-      for (const cursiv::ParseDiagnostic& d : result.diagnostics)
-        CHECK(d.kind != cursiv::DiagnosticKind::ConversionError);
-    }
-  const auto held = givenUp[0].parser->parse("mat:givenup:x n a ? ;");
-  CHECK(tree(givenUp[0], held) == "Holder{}");
-
-  const Reader ll{g::Ll::create_parser(), g::Ll::create_ast_reflection(), {}};
-  const Reader lr{g::Lr::create_parser(), g::Lr::create_ast_reflection(), {}};
-  stacked_wrappers_and_post_operand_flags_keep_their_meaning(ll);
   stacked_wrappers_and_post_operand_flags_keep_their_meaning(lr);
-  recursive_call_arguments_close_before_the_callers_effects(ll);
   recursive_call_arguments_close_before_the_callers_effects(lr);
-  fuzz<tmaterialise::FuzzSuite>("AstMaterialiseLl", ll);
-  fuzz<tmaterialise::FuzzSuite>("AstMaterialiseLr", lr);
+  cursiv::fuzzer::lane<tmaterialise::FuzzSuite>("AstMaterialiseLr", *lr.parser,
+                                                *lr.reflection, 200, 0x5eed);
 }
 
 }  // namespace ast_materialise_cases
 
 namespace nest_adopt_cases {
 
-// A nest behind a called rule wraps the node that rule made, in both engines:
-// the wrapper holds it and no empty node stands in its place.
+// A nest behind a called rule wraps the node that rule made: the wrapper holds
+// it and no empty node stands in its place.
 
 namespace {
 
@@ -774,10 +756,8 @@ void every_engine(const Engine& e) {
 }  // namespace
 
 void run() {
-  every_engine({ttree::generated::Ll::create_parser(),
-                ttree::generated::Ll::create_ast_reflection(), "LL"});
-  every_engine({ttree::generated::Lr::create_parser(),
-                ttree::generated::Lr::create_ast_reflection(), "LR"});
+  every_engine({ttree::generated::Combined::createParser(),
+                ttree::generated::Combined::createAstReflection(), "LR"});
 }
 
 }  // namespace nest_adopt_cases

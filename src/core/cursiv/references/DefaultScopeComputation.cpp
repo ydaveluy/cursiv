@@ -20,7 +20,7 @@ std::vector<AstNodeDescription> DefaultScopeComputation::collectExportedSymbols(
   // exports its top level only.
   return collectExportedSymbolsForNode(
       *root, document,
-      [&](function_ref<void(AstNode&)> visit) {
+      [&](FunctionRef<void(AstNode&)> visit) {
         services.astReflection->visitProperties(
             *root, [&](std::string_view, std::uint32_t, AstNode& child) {
               visit(child);
@@ -32,12 +32,12 @@ std::vector<AstNodeDescription> DefaultScopeComputation::collectExportedSymbols(
 std::vector<AstNodeDescription>
 DefaultScopeComputation::collectExportedSymbolsForNode(
     AstNode& parent, const Document& document,
-    function_ref<void(function_ref<void(AstNode&)>)> children,
+    FunctionRef<void(FunctionRef<void(AstNode&)>)> children,
     const CancellationToken& cancelToken) const {
   std::vector<AstNodeDescription> exported;
   addExportedSymbol(parent, exported, document);
   children([&](AstNode& node) {
-    throw_if_cancelled(cancelToken);
+    throwIfCancelled(cancelToken);
     addExportedSymbol(node, exported, document);
   });
   return exported;
@@ -55,7 +55,7 @@ LocalSymbols DefaultScopeComputation::collectLocalSymbols(
     const Document& document, const CancellationToken& cancelToken) const {
   LocalSymbols symbols;
   for (AstNode* const node : document.parseResult.nodes()) {
-    throw_if_cancelled(cancelToken);
+    throwIfCancelled(cancelToken);
     addLocalSymbol(*node, document, symbols);
   }
   // Collected flat in declaration order, grouped and indexed once: nothing is

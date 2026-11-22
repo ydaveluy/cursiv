@@ -15,77 +15,49 @@ package other {
 }
 ```
 
-This recipe uses the AST of the [Domainmodel example](../examples/index.md).
+This recipe uses the AST and `QualifiedNameProvider` of the
+[Domainmodel example](../examples/index.md).
 
 ## Export a qualified name
 
 Override `collectExportedSymbols` to export each type under its full name.
-Local scopes keep their default, so `Thing` still resolves inside its own
-package:
+The bare name `Thing` inside its package comes from the local scope.
 
-```cpp title="core/references/QualifiedScopeComputation.hpp"
-#pragma once
+```cpp title="DomainModelScopeComputation.cpp"
+std::vector<cursiv::AstNodeDescription>
+DomainModelScopeComputation::collectExportedSymbols(
+    const cursiv::Document& document, const cursiv::CancellationToken& token) const {
+  std::vector<cursiv::AstNodeDescription> exported;
+  for (cursiv::AstNode* node : document.parseResult.nodes()) {
+    cursiv::throwIfCancelled(token);
+    const auto* type = cursiv::ast_cast<ast::Type>(node);
+    if (type == nullptr || type->name.empty()) continue;
 
-#include <string>
-#include <vector>
-
-#include "cursiv/grammar/Conversion.hpp"
-#include "cursiv/references/DefaultScopeComputation.hpp"
-#include "cursiv/workspace/AstNodeDescriptionProvider.hpp"
-#include "cursiv/workspace/Document.hpp"
-#include "domainmodel/ast.hpp"
-
-namespace dm {
-
-class QualifiedScopeComputation final : public cursiv::DefaultScopeComputation {
- public:
-  using DefaultScopeComputation::DefaultScopeComputation;
-
-  std::vector<cursiv::AstNodeDescription> collectExportedSymbols(
-      const cursiv::Document& document,
-      const cursiv::CancellationToken& token = cursiv::kNoCancel) const override {
-    std::vector<cursiv::AstNodeDescription> exported;
-    for (cursiv::AstNode* node : document.parseResult.nodes()) {
-      cursiv::throw_if_cancelled(token);
-      const auto* type = cursiv::ast_cast<const ast::Type>(node);
-      if (type == nullptr || type->name.empty()) continue;
-
-      std::string name(type->name);
-      for (const cursiv::AstNode* parent = node->parent;
-           parent != nullptr; parent = parent->parent) {
-        if (const auto* package =
-                cursiv::ast_cast<const ast::PackageDeclaration>(parent))
-          name = std::string(package->name) + "." + name;
-      }
-
-      const auto stored = document.keepText(name);
-      if (auto description = services.astNodeDescriptionProvider->createDescription(
-              *node, stored, &document))
-        exported.push_back(*description);
-    }
-    return exported;
+    std::string_view name = type->name;
+    if (const auto* package = cursiv::ast_cast<ast::PackageDeclaration>(node->parent))
+      name = _dm.qualifiedNameProvider->keepQualifiedName(document, *package, name);
+    if (auto symbol = _dm.astNodeDescriptionProvider->createDescription(*node, name, &document))
+      exported.push_back(*symbol);
   }
-};
-
-}  // namespace dm
+  return exported;
+}
 ```
 
-A description does not copy its name, so `keepText` stores the computed name
-with the document, which frees it at the next parse. It also takes the parts of a
-name, as in `keepText(outer, ".", inner)`, and writes them in one piece. Each call
-adds to the document's memory, so call it only from a scope computation, which
-runs once per parse; resetting a document to `IndexedContent` or `Parsed` runs it
-again. Do not resolve references here: other documents may not have exported their
-symbols yet.
+Here `_dm` is the language's `DomainModelCoreServices`. A top-level type can
+use its AST name directly. For a nested type, `keepQualifiedName` collects
+the enclosing package names and uses `document.keepText` to keep the result
+alive until the next parse. The index borrows that text. Compute exports from
+this document's declarations, since other files may still be building.
 
 ## Install the implementation
 
-In `install_core_module`, after the generated module, replace the default
-service:
+In `install_core_module`, install the name provider before the scope computation:
 
 ```cpp
+services.qualifiedNameProvider =
+    std::make_unique<dm::QualifiedNameProvider>(services.shared);
 services.scopeComputation =
-    std::make_unique<dm::QualifiedScopeComputation>(services);
+    std::make_unique<dm::DomainModelScopeComputation>(services);
 ```
 
 The default scope provider then finds `foo.bar.Thing` among the exported
@@ -98,7 +70,7 @@ With the test helpers from [Test your language](../learn/testing.md), mark the
 declaration and the reference:
 
 ```cpp
-(void)ct::expectGoToDefinition(*services,
+(void)ct::expectGoToDefinition(services,
     {.text = "package foo.bar { entity <|Thing|> { } }\n"
              "package other { entity U extends foo.bar.T<|>hing { } }\n",
      .disposeAfterCheck = true});

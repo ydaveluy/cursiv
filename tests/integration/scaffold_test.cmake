@@ -50,7 +50,7 @@ endforeach()
 
 # A name the project's C++ already uses, which as the grammar class would hide
 # it: a rule of the starter grammar, or a word of the grammar language.
-foreach(_name IN ITEMS Model Person terminal)
+foreach(_name IN ITEMS Model Person terminal ID kw)
   execute_process(COMMAND ${CMAKE_COMMAND} -DNAME=${_name}
       -DDIR=${WORK}/used-${_name} -P ${SCAFFOLD}
       RESULT_VARIABLE _rc OUTPUT_VARIABLE _log ERROR_VARIABLE _log)
@@ -98,7 +98,7 @@ math(EXPR _built "${_t1} - ${_t0}")
 file(WRITE ${_project}/build/seconds ${_built})
 file(READ ${_syntax} _json)
 string(JSON _match GET "${_json}" repository keywords match)
-if(NOT _match STREQUAL [[\b(person|Hello)\b]])
+if(NOT _match STREQUAL [=[(?<![0-9A-Z_a-z])(person|Hello)(?![0-9A-Z_a-z])]=])
   message(FATAL_ERROR "the build did not write the keywords into ${_syntax}: ${_match}")
 endif()
 _step("the tests" ${CMAKE_CTEST_COMMAND} --test-dir ${_project}/build

@@ -1,6 +1,8 @@
+diff --git a/include/mimalloc/atomic.h b/include/mimalloc/atomic.h
+index ff489ede..81abe938 100644
 --- a/include/mimalloc/atomic.h
 +++ b/include/mimalloc/atomic.h
-@@ -15,7 +15,7 @@
+@@ -15,7 +15,7 @@ terms of the MIT license. A copy of the license can be found in the file
  #endif
  #include <windows.h>
  #endif
@@ -9,24 +11,42 @@
  #define  MI_USE_PTHREADS        1
  #include <pthread.h>
  #endif
+diff --git a/include/mimalloc/types.h b/include/mimalloc/types.h
+index 36698ea7..4e650b3e 100644
 --- a/include/mimalloc/types.h
 +++ b/include/mimalloc/types.h
-@@ -551,7 +551,12 @@
+@@ -569,7 +569,12 @@ typedef struct mi_decl_memtag_unit_align mi_page_s {
  #define MI_PAGE_MIN_START_BLOCK_ALIGN     MI_MAX_ALIGN_SIZE         // minimal block alignment for the first block in a page (16b)
- #define MI_PAGE_MAX_START_BLOCK_ALIGN2    (4*MI_KiB)                // maximal block alignment for "power of 2"-sized blocks (such that we guarantee natural alignment)
- #define MI_PAGE_OSPAGE_BLOCK_ALIGN2       (4*MI_KiB)                // also aligns any multiple of this size to avoid TLB misses.
+ #define MI_PAGE_MAX_START_BLOCK_ALIGN2    (4*MI_KiB)                // maximal block alignment for "power of 2"-sized blocks (such that we guarantee natural alignment, i.e. aligned to their own size)
+ #define MI_PAGE_OSPAGE_BLOCK_ALIGN2       (4*MI_KiB)                // alignment of blocks that are a multiple of this size.
 +#if defined(__wasi__)
 +// WASM cannot release OS pages. Keep large aligned blocks in recyclable arenas.
 +#define MI_PAGE_MAX_OVERALLOC_ALIGN       (MI_ZU(1) << (MI_SIZE_BITS - 1))
 +#else
  #define MI_PAGE_MAX_OVERALLOC_ALIGN       MI_ARENA_SLICE_SIZE       // (64 KiB) limit for which we overallocate in arena pages, beyond this use OS allocation
 +#endif
-
+ 
  // Offset the first block in pages with larger blocks (using the unused space at the end of the page) spread across cache sets (issue #1121).
- #if !defined(MI_PAGE_CACHE_OFFSET)
+ #if !defined(MI_PAGE_LARGE_CACHE_OFFSET)
+diff --git a/src/heap/page-map.c b/src/heap/page-map.c
+index ce72aa51..5fb66bf0 100644
+--- a/src/heap/page-map.c
++++ b/src/heap/page-map.c
+@@ -318,7 +318,9 @@ static bool mi_page_map_set_range(mi_page_map_t* pmap, mi_page_t* page, size_t i
+ static size_t mi_page_map_get_idx(mi_page_t* page, size_t* sub_idx, size_t* slice_count) {
+   size_t page_size;
+   uint8_t* page_start = mi_page_area(page, &page_size);
++  #if !defined(__wasi__)
+   if (page_size > MI_LARGE_PAGE_SIZE) { page_size = MI_LARGE_PAGE_SIZE - MI_ARENA_SLICE_SIZE; }  // furthest interior pointer
++  #endif // WASI also aligns large blocks inside arenas; map their entire area.
+   mi_assert_internal(page_size > 0);
+   // count the slices spanned by `[page_start, page_start + page_size)` exactly
+   const mi_addr_t start = mi_addr(page_start);
+diff --git a/src/prim/wasi/prim.c b/src/prim/wasi/prim.c
+index e16d6c23..b464a035 100644
 --- a/src/prim/wasi/prim.c
 +++ b/src/prim/wasi/prim.c
-@@ -123,7 +123,8 @@
+@@ -124,7 +124,8 @@ static void* mi_prim_mem_grow(size_t size, size_t try_alignment) {
  int _mi_prim_alloc(void* hint_addr, size_t size, size_t try_alignment, bool commit, bool allow_large, bool* is_large, bool* is_zero, void** addr) {
    MI_UNUSED(allow_large); MI_UNUSED(commit); MI_UNUSED(hint_addr);
    *is_large = false;
@@ -36,10 +56,10 @@
    *addr = mi_prim_mem_grow(size, try_alignment);
    return (*addr != NULL ? 0 : ENOMEM);
  }
-@@ -245,23 +246,21 @@
+@@ -251,28 +252,19 @@ void _mi_prim_out_stderr( const char* msg ) {
  // Environment
  //----------------------------------------------------------------
-
+ 
 +// Referencing environ selects wasi-libc's eager environment initialization.
 +// Reading it does not allocate while the allocator initializes its options.
 +extern char** environ;
@@ -57,27 +77,27 @@
 -    buf[len] = 0;
 -    s = getenv(buf);
 -  }
--  if (s == NULL || _mi_strnlen(s,result_size) >= result_size)  return 0; // not found
--  _mi_strlcpy(result, s, result_size);
+-  if (s == NULL) return 0; // not found
+-  if (!_mi_strlcpy(result, s, result_size)) return -2;  // too long
 -  return 1; // found
-+  if (_mi_preloading()) return -1;
-+  const size_t len = _mi_strlen(name);
-+  for (char** entry = environ; entry != NULL && *entry != NULL; ++entry) {
-+    if (_mi_strnicmp(*entry, name, len) == 0 && (*entry)[len] == '=') {
-+      const char* value = *entry + len + 1;
-+      if (_mi_strnlen(value, result_size) >= result_size) return 0;
-+      _mi_strlcpy(result, value, result_size);
-+      return 1;
-+    }
-+  }
-+  return 0;
++  return _mi_prim_getenv_by_visit(name, result, result_size);
  }
-
-
-@@ -278,6 +277,44 @@
+ 
+ bool _mi_prim_env_visit(mi_env_visit_fun* visit, void* arg) {
+-  MI_UNUSED(visit); MI_UNUSED(arg);
+-  return false;  // cannot iterate the environment
++  if (_mi_preloading()) return false;  // try again later
++  for (char** entry = environ; entry != NULL && *entry != NULL; ++entry) {
++    visit(*entry, arg);
++  }
++  return true;
+ }
+ 
+ 
+@@ -289,6 +281,44 @@ bool _mi_prim_random_buf(void* buf, size_t buf_len) {
  // Thread init/done
  //----------------------------------------------------------------
-
+ 
 +#if defined(MI_USE_PTHREADS)
 +
 +// use pthread local storage keys to detect thread ending
@@ -119,43 +139,12 @@
  void _mi_prim_thread_init_auto_done(void) {
    // nothing
  }
-@@ -290,6 +327,8 @@
+@@ -301,6 +331,8 @@ void _mi_prim_thread_associate_default_theap(mi_theap_t* theap) {
    MI_UNUSED(theap);
  }
-
+ 
 +#endif
 +
- bool _mi_prim_thread_is_in_threadpool(void) {
-   return false;
+ void _mi_prim_thread_init(void) {
+   // nothing
  }
---- a/src/heap/page-map.c
-+++ b/src/heap/page-map.c
-@@ -273,7 +273,9 @@
- static size_t mi_page_map_get_idx(mi_page_t* page, size_t* sub_idx, size_t* slice_count) {
-   size_t page_size;
-   uint8_t* page_start = mi_page_area(page, &page_size);
-+  #if !defined(__wasi__)
-   if (page_size > MI_LARGE_PAGE_SIZE) { page_size = MI_LARGE_PAGE_SIZE - MI_ARENA_SLICE_SIZE; }  // furthest interior pointer
-+  #endif // WASI also aligns large blocks inside arenas; map their entire area.
-   *slice_count = _mi_slice_count_of_size(page_size) + ((page_start - mi_page_slice_start(page))/MI_ARENA_SLICE_SIZE); // add for large aligned blocks
-   return mi_page_map_index(page_start, sub_idx);
- }
---- a/src/prim/os.c
-+++ b/src/prim/os.c
-@@ -120,13 +120,16 @@
- void _mi_os_init(void) {
-   mi_os_mem_config_t config = mi_os_mem_config_default;
-   _mi_prim_mem_init(&config);
-   mi_assert(config.page_size != 0);
-   _mi_process.os_mem_config = config;  // publish at once
-+  // WASI arenas are fully committed; unguarded slices need no OS protection.
-+  #if !defined(__wasi__) || MI_SECURE || MI_GUARDED
-   if (_mi_os_page_size() > MI_ARENA_SLICE_SIZE) {
-     _mi_error_message(ENOTSUP, "the OS page size (%zu KiB) is larger than the arena slice size (%zu KiB); increase MI_ARENA_SLICE_SHIFT\n", _mi_os_page_size()/MI_KiB, (size_t)(MI_ARENA_SLICE_SIZE/MI_KiB));
-   }
-+  #endif
- }
-
-
- /* -----------------------------------------------------------
-   Util

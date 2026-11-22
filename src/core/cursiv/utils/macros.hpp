@@ -40,10 +40,20 @@
 #define CURSIV_NOINLINE
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
+// Forced only where the compiler optimizes: unoptimised, GCC refuses tail
+// calls at the end of long chains of forced inlines.
+#if (defined(__GNUC__) || defined(__clang__)) && defined(__OPTIMIZE__)
 #define CURSIV_ALWAYS_INLINE __attribute__((always_inline))
 #else
 #define CURSIV_ALWAYS_INLINE
+#endif
+
+// Inlines the calls of the statement it marks, on Clang only: for a library
+// call that Clang's inliner leaves out of line on a per-node path.
+#if defined(__clang__) && defined(__OPTIMIZE__)
+#define CURSIV_INLINE_CALLS [[clang::always_inline]]
+#else
+#define CURSIV_INLINE_CALLS
 #endif
 
 // A callee that saves no register for its caller: a call into it costs the

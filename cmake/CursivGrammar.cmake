@@ -1,7 +1,5 @@
 include_guard(GLOBAL)
 
-set(CURSIV_DEFAULT_ENGINE "LR" CACHE STRING "Default parser engine: LL or LR")
-set_property(CACHE CURSIV_DEFAULT_ENGINE PROPERTY STRINGS LL LR)
 cmake_path(GET CMAKE_CURRENT_LIST_DIR PARENT_PATH _cursiv_root)
 set(CURSIV_SOURCE_ROOT "${_cursiv_root}" CACHE INTERNAL "")
 # How the host names an executable, whatever the build targets.
@@ -11,38 +9,21 @@ else()
   set(CURSIV_HOST_EXE "")
 endif()
 set(CURSIV_HOST_TOOLS "" CACHE PATH "An existing native build containing the generators")
-# The units a generated parser spreads over, as many as the generators'
-# `kParserUnits`: the build names them before a generator runs.
-set(_cursiv_units_header "${_cursiv_root}/src/engines/cursiv/shared/gen/CommonArtifacts.hpp")
-file(STRINGS "${_cursiv_units_header}" _cursiv_units
-     REGEX "^inline constexpr unsigned kParserUnits = [0-9]+;$")
-if(NOT _cursiv_units MATCHES "kParserUnits = ([0-9]+)")
-  message(FATAL_ERROR "cursiv: no `kParserUnits` in ${_cursiv_units_header}")
-endif()
-set(CURSIV_PARSER_UNITS "${CMAKE_MATCH_1}" CACHE INTERNAL "")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_cursiv_units_header}")
+set(CURSIV_LR_MAX_STATES "0" CACHE STRING
+    "Maximum LR construction states; zero keeps full IELR")
+# The source every language's generator is compiled from.
+set(CURSIV_GENERATOR_MAIN
+    "${_cursiv_root}/src/engine/cursiv/engine/generator/Main.cpp" CACHE INTERNAL "")
 if(CURSIV_HOST_TOOLS)
   set(CURSIV_HOST_DIR "${CURSIV_HOST_TOOLS}" CACHE INTERNAL "")
 else()
   set(CURSIV_HOST_DIR "${CMAKE_BINARY_DIR}/host-tools" CACHE INTERNAL "")
 endif()
 
-function(cursiv_engine_parts engine outMain outLib)
-  string(TOLOWER "${engine}" _engine)
-  if(NOT _engine MATCHES "^(ll|lr)$")
-    message(FATAL_ERROR "cursiv: ENGINE must be LL or LR, got `${engine}`")
-  endif()
-  cmake_path(SET _main NORMALIZE
-      "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../src/engines/cursiv/${_engine}/gen/${_engine}_main.cpp")
-  set(${outMain} "${_main}" PARENT_SCOPE)
-  set(${outLib} "cursiv::${_engine}_gen" PARENT_SCOPE)
-endfunction()
-
 # What a target holding generators links and is compiled with. Generators run
 # briefly; large grammars need generous compile-time limits.
-function(cursiv_generator_build target engine)
-  cursiv_engine_parts("${engine}" _main _lib)
-  target_link_libraries(${target} PRIVATE cursiv::core ${_lib})
+function(cursiv_generator_build target)
+  target_link_libraries(${target} PRIVATE cursiv::core cursiv::gen)
   target_compile_options(${target} PRIVATE -O0 -pipe
       $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fbracket-depth=16384>
       $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fconstexpr-steps=2147483647>
@@ -52,13 +33,12 @@ function(cursiv_generator_build target engine)
   set_target_properties(${target} PROPERTIES CXX_SCAN_FOR_MODULES OFF)
 endfunction()
 
-function(cursiv_grammar_generator name header ns gns id exts fileNames roots engine)
+function(cursiv_grammar_generator name header ns gns id exts fileNames roots)
   string(REPLACE ";" "," _exts "${exts}")
   string(REPLACE ";" "," _fileNames "${fileNames}")
-  cursiv_engine_parts("${engine}" _main _lib)
-  add_executable(${name}_gen EXCLUDE_FROM_ALL ${_main})
+  add_executable(${name}_gen EXCLUDE_FROM_ALL ${CURSIV_GENERATOR_MAIN})
   target_include_directories(${name}_gen PRIVATE ${roots})
-  cursiv_generator_build(${name}_gen "${engine}")
+  cursiv_generator_build(${name}_gen)
   target_compile_definitions(${name}_gen PRIVATE
       CURSIV_GEN_HEADER="${header}"
       CURSIV_GEN_GRAMMAR=${ns}
@@ -109,12 +89,16 @@ function(cursiv_host_tools)
         -DFETCHCONTENT_SOURCE_DIR_LSP_FRAMEWORK=${_lsp}
         COMMAND_ERROR_IS_FATAL ANY)
   endif()
+  # It runs before anything that links the core, so its build never runs beside
+  # this one's. Under Make it also shares this build's job slots.
   add_custom_target(cursiv_host_tools
       COMMAND ${CMAKE_COMMAND} --build ${CURSIV_HOST_DIR} --config Release --target ${_targets}
       BYPRODUCTS ${_files}
       COMMENT "cursiv: building the host generators"
+      JOB_SERVER_AWARE ON
       VERBATIM)
   add_dependencies(lspgen cursiv_host_tools)
+  add_dependencies(cursivCore cursiv_host_tools)
 endfunction()
 
 if(CMAKE_CROSSCOMPILING AND TARGET lspgen)
@@ -175,7 +159,7 @@ endfunction()
 # Shared implementation: test languages get a default output path and cheaper compilation.
 function(_cursiv_generate_language test_only)
   cmake_parse_arguments(PARSE_ARGV 1 ARG "SEPARATE_UNITS"
-      "GRAMMAR;NAMESPACE;ID;OUT;BASE;ENGINE;TEXTMATE"
+      "GRAMMAR;NAMESPACE;ID;OUT;BASE;TEXTMATE;LR_MAX_STATES"
       "EXTENSIONS;FILE_NAMES;INCLUDE_DIRS;GENERATOR_ARGS")
   if(NOT "${ARG_UNPARSED_ARGUMENTS}" STREQUAL "")
     message(FATAL_ERROR "cursiv_generate_language: unknown arguments ${ARG_UNPARSED_ARGUMENTS}")
@@ -211,17 +195,12 @@ function(_cursiv_generate_language test_only)
   if("${ARG_OUT}" STREQUAL "")
     message(FATAL_ERROR "cursiv_generate_language: OUT is required")
   endif()
-  if("${ARG_ENGINE}" STREQUAL "")
-    set(ARG_ENGINE ${CURSIV_DEFAULT_ENGINE})
-  endif()
-  string(TOUPPER "${ARG_ENGINE}" ARG_ENGINE)
-  cursiv_engine_parts("${ARG_ENGINE}" _engineMain _engineLib)
-  cmake_path(GET _engineMain PARENT_PATH _engineDir)
+  cmake_path(GET CURSIV_GENERATOR_MAIN PARENT_PATH _generatorDir)
   # Quoted includes search beside the generator before the language's include roots.
-  if(EXISTS ${_engineDir}/${ARG_GRAMMAR})
+  if(EXISTS ${_generatorDir}/${ARG_GRAMMAR})
     message(FATAL_ERROR
         "cursiv: GRAMMAR ${ARG_GRAMMAR} is named like a source of the "
-        "${ARG_ENGINE} generator, which would include that source instead -- "
+        "generator, which would include that source instead -- "
         "rename the header, or spell it from a directory above it")
   endif()
   if(NOT ARG_NAMESPACE MATCHES "^(.+)::([^:]+)$")
@@ -268,20 +247,10 @@ function(_cursiv_generate_language test_only)
   list(REMOVE_DUPLICATES _roots)
   set(_dir ${ARG_OUT}/${_leaf})
 
-  set(_parserUnits ParserStates.cpp)
-  set(_headers Table.hpp Parser.hpp AstReflection.hpp Grammar.hpp GrammarSource.hpp Module.hpp GRAMMAR.txt)
-  if(ARG_ENGINE STREQUAL "LL")
-    set(_part ParserRules)
-  else()
-    set(_part ParserGroups)
-  endif()
-  # One file per unit the generators write.
-  math(EXPR _lastUnit "${CURSIV_PARSER_UNITS} - 1")
-  foreach(_unit RANGE 0 ${_lastUnit})
-    list(APPEND _parserUnits ${_part}${_unit}.cpp)
-  endforeach()
-  list(APPEND _headers ${_part}.hpp)
-  set(_units ${_parserUnits} AstReflection.cpp Grammar.cpp Module.cpp)
+  # What a generator writes.
+  set(_parserUnits Parser.cpp Explorer.cpp Repairer.cpp)
+  set(_headers ParserStates.hpp Table.hpp Module.hpp GrammarSource.hpp GRAMMAR.txt)
+  set(_units ${_parserUnits} Ast.cpp Grammar.cpp Module.cpp)
   set(_written ${_units} ${_headers})
   list(TRANSFORM _written PREPEND "${_dir}/")
   list(TRANSFORM _units PREPEND "${_dir}/" OUTPUT_VARIABLE _generatedSources)
@@ -289,7 +258,7 @@ function(_cursiv_generate_language test_only)
 
   if(CMAKE_CROSSCOMPILING)
     cursiv_host_manifest(
-        "cursiv_grammar_generator(${_name} \"${ARG_GRAMMAR}\" \"${ARG_NAMESPACE}\" \"${_gns}\" \"${ARG_ID}\" \"${ARG_EXTENSIONS}\" \"${ARG_FILE_NAMES}\" \"${_roots}\" \"${ARG_ENGINE}\")")
+        "cursiv_grammar_generator(${_name} \"${ARG_GRAMMAR}\" \"${ARG_NAMESPACE}\" \"${_gns}\" \"${ARG_ID}\" \"${ARG_EXTENSIONS}\" \"${ARG_FILE_NAMES}\" \"${_roots}\")")
     foreach(_setting IN ITEMS STANDARD STANDARD_REQUIRED EXTENSIONS)
       if(DEFINED CMAKE_CXX_${_setting})
         cursiv_host_manifest("set_property(TARGET ${_name}_gen PROPERTY CXX_${_setting} \"${CMAKE_CXX_${_setting}}\")")
@@ -303,9 +272,21 @@ function(_cursiv_generate_language test_only)
     set(_dep ${_gen})
   else()
     cursiv_grammar_generator(${_name} "${ARG_GRAMMAR}" ${ARG_NAMESPACE} ${_gns}
-        "${ARG_ID}" "${ARG_EXTENSIONS}" "${ARG_FILE_NAMES}" "${_roots}" "${ARG_ENGINE}")
+        "${ARG_ID}" "${ARG_EXTENSIONS}" "${ARG_FILE_NAMES}" "${_roots}")
     set(_gen $<TARGET_FILE:${_name}_gen>)
     set(_dep ${_name}_gen)
+  endif()
+
+  set(_maxStates "${CURSIV_LR_MAX_STATES}")
+  if(DEFINED ARG_LR_MAX_STATES)
+    set(_maxStates "${ARG_LR_MAX_STATES}")
+  endif()
+  if(NOT _maxStates MATCHES "^[0-9]+$" OR _maxStates GREATER 4294967295)
+    message(FATAL_ERROR "cursiv_generate_language: LR_MAX_STATES is a uint32 count, zero for no limit")
+  endif()
+  set(_stateLimit "")
+  if(_maxStates GREATER 0)
+    set(_stateLimit "--max-states=${_maxStates}")
   endif()
 
   # The generator rewrites the keywords of this hand-written file, which is
@@ -320,7 +301,7 @@ function(_cursiv_generate_language test_only)
   # Compiler dependency files track grammar headers through the generator executable.
   add_custom_command(OUTPUT ${_written}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${_dir}
-      COMMAND ${_gen} ${ARG_GENERATOR_ARGS} ${_textmate} ${_dir}
+      COMMAND ${_gen} ${ARG_GENERATOR_ARGS} ${_stateLimit} ${_textmate} ${_dir}
       DEPENDS ${_dep}
       COMMENT "${_name}: writing ${_dir}"
       VERBATIM)
@@ -334,7 +315,7 @@ function(_cursiv_generate_language test_only)
       string(APPEND _testSource "#include \"${_dir}/${_unit}\"\n")
     endforeach()
     string(APPEND _testSource
-        "#include \"${_dir}/AstReflection.cpp\"\n"
+        "#include \"${_dir}/Ast.cpp\"\n"
         "#include \"${_dir}/Grammar.cpp\"\n"
         "#include \"${_dir}/Module.cpp\"\n")
     file(GENERATE OUTPUT "${_testParser}" CONTENT "${_testSource}")
@@ -360,31 +341,27 @@ function(_cursiv_generate_language test_only)
     if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
       set(_parserOptimization -O1)
     endif()
-    # WASI engines limit function size and locals; unoptimised generated
+    # WASI runtimes limit function size and locals; unoptimised generated
     # parsers can exceed those limits even in otherwise Debug builds.
     target_compile_options(${_name}Generated PRIVATE
         $<$<CONFIG:Release>:${_parserOptimization}>
         $<$<PLATFORM_ID:WASI>:-O1>)
   endif()
-  # Keep generated WASI Debug functions within the engines' local limits. WASI
-  # needs tail calls between parser groups only: Clang's spelling is below,
-  # another compiler adds its own.
+  # The states go on to one another by tail calls, Clang's for WASI by its option;
+  # WASI Debug functions stay within the runtimes' limits. GCC keeps line tables
+  # but tracks no variables, its slowest pass with -g on these units.
   set_property(SOURCE ${_parserSources} PROPERTY COMPILE_OPTIONS
       $<$<CONFIG:Release>:${_parserOptimization}>
       $<$<AND:$<PLATFORM_ID:WASI>,$<CONFIG:Debug>>:-O1>
-      $<$<AND:$<PLATFORM_ID:WASI>,$<CXX_COMPILER_ID:Clang>>:-mtail-call>
-      $<$<AND:$<PLATFORM_ID:WASI>,$<CXX_COMPILER_ID:Clang>>:-fno-optimize-sibling-calls>)
+      $<$<AND:$<PLATFORM_ID:WASI>,$<CXX_COMPILER_ID:Clang>>:-mtail-call;-fno-optimize-sibling-calls>
+      $<$<CXX_COMPILER_ID:GNU>:-fno-var-tracking>)
   target_include_directories(${_name}Generated PUBLIC ${_roots})
-  string(TOLOWER "${ARG_ENGINE}" _engineTarget)
-  target_link_libraries(${_name}Generated PUBLIC
-      cursiv::engine::${_engineTarget})
-  target_compile_definitions(${_name}Generated PUBLIC CURSIV_ENGINE_${ARG_ENGINE}=1)
+  target_link_libraries(${_name}Generated PUBLIC cursiv::engine)
   set_target_properties(${_name}Generated PROPERTIES
       CURSIV_GENERATED_DIR ${_dir}
       CURSIV_GENERATED_NAMESPACE ${_gns}
       CURSIV_GRAMMAR_HEADER ${ARG_GRAMMAR}
-      CURSIV_GENERATED_PARSER_SOURCES "${_parserSources}"
-      CURSIV_ENGINE ${ARG_ENGINE})
+      CURSIV_GENERATED_PARSER_SOURCES "${_parserSources}")
   if(NOT "${ARG_BASE}" STREQUAL "")
     target_link_libraries(${_name}Generated PUBLIC ${ARG_BASE}Generated)
   endif()

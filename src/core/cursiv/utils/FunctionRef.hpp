@@ -9,10 +9,10 @@
 namespace cursiv {
 
 template <class Sig>
-class function_ref;
+class FunctionRef;
 
 template <class R, class... A>
-class function_ref<R(A...)> {
+class FunctionRef<R(A...)> {
   union Bound {
     const void* constObject;
     void* object;
@@ -31,13 +31,29 @@ class function_ref<R(A...)> {
     }
   };
 
+  // Whether calling a `G` with `A...` gives an `R`. A reference `R` binds only
+  // to a reference the call returns, never to a temporary: a proxy is refused.
+  template <class G>
+  static consteval bool accepts() {
+    if constexpr (!std::is_invocable_r_v<R, G, A...>) {
+      return false;
+    } else if constexpr (!std::is_reference_v<R>) {
+      return true;
+    } else {
+      using Result = std::invoke_result_t<G, A...>;
+      return std::is_reference_v<Result> &&
+             std::is_convertible_v<std::remove_reference_t<Result>*,
+                                   std::remove_reference_t<R>*>;
+    }
+  }
+
  public:
   // `A` is the stored signature, not a deduced type: `static_cast<A&&>` passes
   // each argument on as declared -- moved when taken by value, unchanged when
   // a reference.
   template <class F>
-    requires(std::is_function_v<F> && std::is_invocable_r_v<R, F*, A...>)
-  function_ref(F* callable) noexcept
+    requires(std::is_function_v<F> && accepts<F*>())
+  FunctionRef(F* callable) noexcept
       : _bound(reinterpret_cast<void (*)()>(callable)),
         _call(+[](Bound bound, A... args) -> R {
           if constexpr (std::is_void_v<R>)
@@ -49,12 +65,12 @@ class function_ref<R(A...)> {
         }) {}
 
   template <class F>
-    requires(!std::is_same_v<std::remove_cvref_t<F>, function_ref> &&
+    requires(!std::is_same_v<std::remove_cvref_t<F>, FunctionRef> &&
              !std::is_function_v<std::remove_reference_t<F>> &&
              !(std::is_pointer_v<std::remove_cvref_t<F>> &&
                std::is_function_v<std::remove_pointer_t<std::remove_cvref_t<F>>>) &&
-             std::is_invocable_r_v<R, F&, A...>)
-  constexpr function_ref(F&& callable) noexcept
+             accepts<F&>())
+  constexpr FunctionRef(F&& callable) noexcept
       : _bound(std::addressof(callable)),
         _call(+[](Bound bound, A... args) -> R {
           auto& callable =

@@ -18,25 +18,59 @@ inline constexpr NodeId kNoNode = std::numeric_limits<NodeId>::max();
 // interchangeable at a call site.
 using NodeCount = std::uint32_t;
 
+// The element of text a repair skipped: a recovered leaf read as nothing of
+// the grammar.
+inline constexpr std::uint32_t kSkippedElement = 0x3FFFFFFFu;
+
 // Sixteen bytes. `begin`/`end` are offsets and not pointers, `subtreeSize` is
-// the only structural word, and the flags share a word with the engine's data.
+// the only structural word, and the element shares a word with the flags.
 struct CstNode {
   TextOffset begin;
   TextOffset end;
   // Postorder records in this subtree, root included. A childless record is
   // one; the last child of any other record is `id - 1`.
   NodeCount subtreeSize;
-  // What the engine wrote on the record, decoded only by the grammar that
-  // engine generated. First in the word, so an engine writes it with a plain
-  // store.
-  std::uint32_t engine : 30;
+
+  // The whole word: the element and both flags.
+  [[nodiscard]] constexpr std::uint32_t engine() const noexcept { return _engine; }
+  // The element of the grammar the record was read as, a number its
+  // language's tables give a meaning to, with whether it is hidden: trivia
+  // stands past every element, so one comparison with a count of elements
+  // leaves it out.
+  [[nodiscard]] constexpr std::uint32_t element() const noexcept {
+    return _engine & kElementMask;
+  }
   // Whitespace and comments are kept: a formatter and the language server
   // need them.
-  std::uint32_t hidden : 1;
+  [[nodiscard]] constexpr bool isHidden() const noexcept { return (_engine & kHiddenFlag) != 0; }
   // A node the parse repaired to produce: an error span the recovery
   // skipped, or a parent whose body needed one. The tree stays navigable;
-  // the bit says which parts to trust.
-  std::uint32_t recovered : 1;
+  // the flag says which parts to trust.
+  [[nodiscard]] constexpr bool isRecovered() const noexcept {
+    return (_engine & kRecoveredFlag) != 0;
+  }
+
+  // On a new record `setEngine` comes first: the other setters read the
+  // word.
+  constexpr void setEngine(std::uint32_t value) noexcept { _engine = value; }
+  // Replaces the element and whether the record is hidden; a repair's flag
+  // stays.
+  constexpr void setElement(std::uint32_t value) noexcept {
+    _engine = (_engine & kRecoveredFlag) | (value & kElementMask);
+  }
+  constexpr void setHidden(bool value) noexcept {
+    _engine = (_engine & ~kHiddenFlag) | (value ? kHiddenFlag : 0u);
+  }
+  constexpr void setRecovered(bool value) noexcept {
+    _engine = (_engine & ~kRecoveredFlag) | (value ? kRecoveredFlag : 0u);
+  }
+
+ private:
+  static constexpr std::uint32_t kHiddenFlag = std::uint32_t{1} << 30;
+  static constexpr std::uint32_t kRecoveredFlag = std::uint32_t{1} << 31;
+  static constexpr std::uint32_t kElementMask = ~kRecoveredFlag;
+
+  std::uint32_t _engine;
 };
 
 // No pointer-size guard, unlike the AST checks: every column is a `uint32`,

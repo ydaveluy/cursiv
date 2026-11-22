@@ -9,7 +9,7 @@
 namespace @CURSIV_NEW_ID@ {
 
 void install_core_module(@CURSIV_NEW_CLASS@CoreServices& services) {
-  @CURSIV_NEW_ID@::generated::@CURSIV_NEW_CLASS@::install_generated_module(services);
+  @CURSIV_NEW_ID@::generated::@CURSIV_NEW_CLASS@::installGeneratedModule(services);
   register_validation_checks(services);
 }
 

@@ -17,7 +17,7 @@ inline constexpr int kRgramUnjudged = 77;
 // Zero where the parser and the oracle agree on every document and judged some
 // in the language, one where they disagree, `kRgramUnjudged` where they agree
 // on too little to tell.
-int rgram_lane(unsigned seed, const Parser& parser,
-               const AstReflection& reflection, unsigned documents = 40);
+int rgram_lane(unsigned seed, const Parser& parser, const AstReflection& reflection,
+               unsigned documents, const Parser* election = nullptr);
 
 }  // namespace cursiv

@@ -47,6 +47,9 @@ def ranges(cps):
             out.append([cp, cp])
     return out
 
+def cpp_name(name):
+    return ''.join(part.capitalize() for part in name.split('_'))
+
 props = {}
 for major in 'LMNPSZC':
     cps = sorted(cp for name, l in cats.items()
@@ -83,7 +86,7 @@ out = [
     'enum class Property : unsigned {',
 ]
 for name in props:
-    out.append(f'  {name},')
+    out.append(f'  {cpp_name(name)},')
 out += ['  Count', '};', '', 'namespace detail {', '',
         '// For a dump alone: what a property is called.',
         'inline constexpr std::string_view kNames[] = {']
@@ -104,10 +107,10 @@ out = [
 ]
 for name, rs in props.items():
     body = ','.join(f'{{{lo:#x},{hi:#x}}}' for lo, hi in rs)
-    out.append(f'inline constexpr Range k{name}[] = {{{body}}};')
+    out.append(f'inline constexpr Range k{cpp_name(name)}[] = {{{body}}};')
 out += ['', 'inline constexpr std::span<const Range> kTables[] = {']
 for name in props:
-    out.append(f'    k{name},')
+    out.append(f'    k{cpp_name(name)},')
 out += ['};', '', '}  // namespace cursiv::unicode', '']
 path = os.path.join(unicode_dir, 'UnicodeRanges.hpp')
 open(path, 'w').write('\n'.join(out))

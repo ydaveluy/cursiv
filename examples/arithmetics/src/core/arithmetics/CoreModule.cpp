@@ -11,7 +11,7 @@
 namespace arith {
 
 void install_core_module(ArithmeticsCoreServices& services) {
-  arith::generated::Arith::install_generated_module(services);
+  arith::generated::Arith::installGeneratedModule(services);
 
   using V = ArithmeticsValidator;
   services.validator = std::make_unique<const V>(services);

@@ -14,7 +14,7 @@
 namespace dm {
 
 void install_core_module(DomainModelCoreServices& services) {
-  dm::generated::DomainModel::install_generated_module(services);
+  dm::generated::DomainModel::installGeneratedModule(services);
   services.qualifiedNameProvider =
       std::make_unique<const QualifiedNameProvider>(services.shared);
   services.scopeComputation =

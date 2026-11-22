@@ -25,7 +25,7 @@ namespace detail {
 // What the first scan and every update ask by default: the checks that keep
 // up with typing.
 [[nodiscard]] inline BuildOptions typing_build_options() {
-  return {true, {&built_in, &fast}};
+  return {true, {&kBuiltIn, &kFast}};
 }
 
 }  // namespace detail

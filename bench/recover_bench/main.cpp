@@ -5,8 +5,8 @@
 //                 [--only <drop|burst|typo|unclosed>] [--print]
 //
 // Each altered copy carries k faults of one alteration, one by default. With
-// no site the document is parsed alone. growth_bench is the same lane over
-// the growth grammar of the suites.
+// no site the document is parsed alone. growth_bench is the same lane over a
+// grammar whose texts fork the LR graph stack.
 
 #include <cstdint>
 #include <cstdio>
@@ -21,7 +21,7 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #ifdef GROWTH_BENCH
-#include "growth/generated/G/Module.hpp"
+#include "benchgrowth/generated/G/Module.hpp"
 #else
 #include "arithmetics/generated/Arith/Module.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
@@ -37,7 +37,7 @@ std::uint64_t fingerprint(const cursiv::Cst& tree, bool accepted) {
   for (cursiv::NodeId id = 0; id < tree.size(); ++id) {
     const auto& n = tree[id];
     mix(n.begin); mix(n.end); mix(n.subtreeSize);
-    mix(n.hidden); mix(n.recovered); mix(n.engine);
+    mix(n.engine());
   }
   mix(tree.diagnostics().size());
   for (const auto& d : tree.diagnostics()) {
@@ -69,13 +69,13 @@ std::string repeated(std::string head, std::string_view unit,
 // Three texts the LR graph stack reads many ways: a chain that is an operand
 // or a loop, arguments with no delimiter, elements whose close is optional.
 constexpr Language kLanguages[] = {
-    {"chain", &tgrowth::generated::G::create_parser,
+    {"chain", &tgrowth::generated::G::createParser,
      [](std::size_t bytes) { return repeated("chain a", ".b", bytes); },
      "chaain"},
-    {"call", &tgrowth::generated::G::create_parser,
+    {"call", &tgrowth::generated::G::createParser,
      [](std::size_t bytes) { return repeated("call f ", "a ", bytes, "!"); },
      "caall"},
-    {"html", &tgrowth::generated::G::create_parser,
+    {"html", &tgrowth::generated::G::createParser,
      [](std::size_t bytes) {
        return repeated("html <div>", "<p><br>X</p>", bytes, "</div>");
      },
@@ -84,9 +84,9 @@ constexpr Language kLanguages[] = {
 #else
 // An expression language and a language of nested declarations.
 constexpr Language kLanguages[] = {
-    {"arithmetics", &arith::generated::Arith::create_parser,
+    {"arithmetics", &arith::generated::Arith::createParser,
      &bench::generateArithmeticsSource, "deef", " /* "},
-    {"domainmodel", &dm::generated::DomainModel::create_parser,
+    {"domainmodel", &dm::generated::DomainModel::createParser,
      &bench::generateDomainModelSource, "enntity", " /* "},
 };
 #endif
@@ -176,7 +176,7 @@ int main(int argc, char** argv) {
                  static_cast<int>(lang.size()), lang.data());
     return 2;
   }
-  const std::unique_ptr<cursiv::Parser> engine = language->parser();
+  const std::unique_ptr<cursiv::Parser> parser = language->parser();
   const std::string text = language->generate(bytes);
   const std::vector<std::string> docs =
       altered(text, sites, faults, alterations);
@@ -196,7 +196,7 @@ int main(int argc, char** argv) {
     const double s = bench::seconds_of([&] {
       for (std::size_t i = 0; i < docs.size(); ++i)
         spent[group(i)] += bench::seconds_of([&] {
-          cursiv::ParseResult res = engine->parse(docs[i]);
+          cursiv::ParseResult res = parser->parse(docs[i]);
           h ^= fingerprint(res.cst(), res.cst().diagnostics().empty());
           if (r == 0) notes[group(i)] += res.cst().diagnostics().size();
         });
@@ -208,7 +208,7 @@ int main(int argc, char** argv) {
   }
   if (print)
     for (const std::string& d : docs) {
-      cursiv::ParseResult res = engine->parse(d);
+      cursiv::ParseResult res = parser->parse(d);
       std::printf("%zu %016llx\n", d.size(),
                   static_cast<unsigned long long>(
                       fingerprint(res.cst(), res.cst().diagnostics().empty())));

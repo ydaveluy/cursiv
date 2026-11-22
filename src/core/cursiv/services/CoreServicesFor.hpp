@@ -34,7 +34,7 @@ struct CoreServicesFor : virtual CoreServices {
 // them. `TShared` is deduced, so a custom workspace type reaches the
 // container's constructor as itself.
 template <class TServices = CoreServices, class TShared>
-[[nodiscard]] std::unique_ptr<TServices> make_default_core_services(
+[[nodiscard]] std::unique_ptr<TServices> makeDefaultCoreServices(
     TShared& sharedServices, std::string languageId) {
   static_assert(std::is_base_of_v<CoreServices, TServices>,
                 "TServices derives from cursiv::CoreServices");
@@ -43,7 +43,7 @@ template <class TServices = CoreServices, class TShared>
 
   auto services = std::make_unique<TServices>(sharedServices);
   services->languageMetaData.languageId = std::move(languageId);
-  install_default_core_services(*services);
+  installDefaultCoreServices(*services);
   return services;
 }
 

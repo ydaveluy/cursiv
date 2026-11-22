@@ -29,10 +29,6 @@ struct RepairTally {
   // to four, beyond.
   std::array<std::uint32_t, 6> perFault{};
   std::vector<double> costs;
-  // Per named ceiling, the documents that reached it; `machine` those that
-  // reached any, whose answer a limit of the parser may have given.
-  std::vector<std::uint32_t> ceilings;
-  std::uint32_t machine = 0;
 
   void add(const RepairVerdict& v) {
     if (v.noop) {
@@ -68,14 +64,6 @@ struct RepairTally {
              : r <= 4.0         ? 4
                                 : 5]++;
     if (v.cost >= 0) costs.push_back(v.cost);
-    if (ceilings.size() < v.ceilings.size()) ceilings.resize(v.ceilings.size());
-    bool any = false;
-    for (std::size_t i = 0; i < v.ceilings.size(); ++i)
-      if (v.ceilings[i] != 0) {
-        ++ceilings[i];
-        any = true;
-      }
-    machine += any ? 1 : 0;
   }
 
   // Nearest rank; negative when nothing was measured.

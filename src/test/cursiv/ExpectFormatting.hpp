@@ -1,5 +1,4 @@
-// `textDocument/formatting`: the edits applied to `before` must give `after`,
-// the line terminators of both normalized first.
+// Document, range or on-type formatting edits must turn `before` into `after`.
 #pragma once
 
 #include <lsp/types.h>
@@ -25,6 +24,8 @@ struct ExpectFormatting {
   // Absent formats with four spaces per level.
   std::optional<lsp::FormattingOptions> options{};
   bool disposeAfterCheck = false;
+  // The character just typed, with <|> marking the resulting caret in before.
+  std::optional<std::string> onType{};
 };
 
 [[nodiscard]] Disposable expectFormatting(

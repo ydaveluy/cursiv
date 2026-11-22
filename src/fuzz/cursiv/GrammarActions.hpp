@@ -87,7 +87,7 @@ struct GrammarActions {
   // grammar. A member holding a node is left to `AstReflection`.
   virtual void visitValues(
       const AstNode& node,
-      cursiv::function_ref<void(std::string_view property, std::uint32_t index,
+      cursiv::FunctionRef<void(std::string_view property, std::uint32_t index,
                                 ValueKind, std::string_view text)>
           yield) const = 0;
 };

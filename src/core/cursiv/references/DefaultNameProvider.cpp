@@ -14,7 +14,7 @@ std::optional<std::string_view> DefaultNameProvider::getName(
     const AstNode& node) const {
   // Absent is "the class declares no name"; a declared name that matched
   // nothing is the empty name, which no default scope offers.
-  if (!is_named(node)) return std::nullopt;
+  if (!isNamed(node)) return std::nullopt;
   return node.type->readName(node);
 }
 
@@ -24,8 +24,8 @@ CstNodeView DefaultNameProvider::getNameNode(const AstNode& node,
                                              const Document* document) const {
   // Ask the class first: a record may create two nodes over one span, so a
   // class that declares no name has no name node, whatever its records wrote.
-  if (!is_named(node)) return {};
-  return find_node_for_property(node, kNameFeature, 0, document);
+  if (!isNamed(node)) return {};
+  return findNodeForProperty(node, kNameProperty, 0, document);
 }
 
 }  // namespace cursiv

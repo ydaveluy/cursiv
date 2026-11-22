@@ -28,7 +28,7 @@ struct super_escaped {
 }  // namespace detail
 
 template <class R>
-inline constexpr bool is_terminal_rule =
+inline constexpr bool kIsTerminalRule =
     std::is_same_v<typename R::kind, detail::terminal_kind>;
 
 }  // namespace cursiv

@@ -23,7 +23,8 @@ class ConcurrentValue {
   enum class Fill : std::uint8_t { kEmpty, kReady, kClosed };
   struct ValueSlot {
     TableEpochs::PendingFree pendingFree;
-    const std::uint64_t generation;
+    // Moved under the lock by a clear that keeps the slot, still empty.
+    std::atomic<std::uint64_t> generation;
     std::atomic<Fill> fill{Fill::kEmpty};
     std::optional<V> value;
 
@@ -32,7 +33,11 @@ class ConcurrentValue {
 
  public:
   ConcurrentValue() : _slot(new ValueSlot(0)) {}
-  ~ConcurrentValue() { destroy(_slot.load()); }
+  // Collects first: what was released is freed while this value still works.
+  ~ConcurrentValue() {
+    TableEpochs::collect();
+    destroy(_slot.load());
+  }
   ConcurrentValue(const ConcurrentValue&) = delete;
   ConcurrentValue& operator=(const ConcurrentValue&) = delete;
 
@@ -63,14 +68,22 @@ class ConcurrentValue {
                  std::forward<Consumer>(consumer));
   }
 
-  // Never fails: with no memory for the next slot, the current one closes.
+  // Never fails. An empty slot stays, a generation on, so a provider that read
+  // the older one stores nothing; any other is replaced, or closed when there
+  // is no memory for the next.
   void clear() noexcept {
     const TableEpochs::Guard guard;
     ValueSlot* previous = nullptr;
     {
       const std::lock_guard lock(_writers);
       previous = _slot.load(std::memory_order_seq_cst);
-      auto* const next = new (std::nothrow) ValueSlot(previous->generation + 1);
+      const std::uint64_t generation =
+          previous->generation.load(std::memory_order_relaxed) + 1;
+      if (previous->fill.load(std::memory_order_relaxed) == Fill::kEmpty) {
+        previous->generation.store(generation, std::memory_order_seq_cst);
+        return;
+      }
+      auto* const next = new (std::nothrow) ValueSlot(generation);
       if (next == nullptr) {
         previous->fill.store(Fill::kClosed, std::memory_order_relaxed);
         return;
@@ -78,8 +91,7 @@ class ConcurrentValue {
       _slot.store(next, std::memory_order_seq_cst);
     }
     // A collection may run value destructors; no cache lock is held there.
-    TableEpochs::freeLater(previous->pendingFree, previous, &destroy,
-                           sizeof(ValueSlot));
+    TableEpochs::freeLater(previous->pendingFree, previous, &destroy);
   }
 
  private:
@@ -92,7 +104,7 @@ class ConcurrentValue {
       const ValueSlot* const slot = _slot.load(std::memory_order_seq_cst);
       if (slot->fill.load(std::memory_order_acquire) == Fill::kReady)
         return std::invoke(std::forward<Consumer>(consumer), *slot->value);
-      generation = slot->generation;
+      generation = slot->generation.load(std::memory_order_seq_cst);
     }
 
     // Outside both the guard and lock: providers may reenter the cache, and
@@ -103,7 +115,8 @@ class ConcurrentValue {
       std::unique_lock lock(_writers);
       ValueSlot* const slot = _slot.load(std::memory_order_seq_cst);
       const Fill fill = slot->fill.load(std::memory_order_relaxed);
-      if (slot->generation == generation && fill != Fill::kClosed) {
+      if (slot->generation.load(std::memory_order_relaxed) == generation &&
+          fill != Fill::kClosed) {
         // Moved in under the lock: V's move (or copy) must not use this cache.
         if (fill == Fill::kEmpty) {
           slot->value.emplace(std::move(computed));

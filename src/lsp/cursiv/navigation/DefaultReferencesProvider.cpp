@@ -6,7 +6,6 @@
 
 #include "cursiv/references/References.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
-#include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
@@ -20,17 +19,15 @@ namespace cursiv {
 std::vector<lsp::Location> DefaultReferencesProvider::findReferences(
     const Document& document, lsp::Position position, bool includeDeclaration,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   const References& references = *services.references;
 
   const Declaration found = references.findDeclarations(
-      document, document.textDocument().offsetAt(from_lsp(position)), token);
+      document, document.textDocument().offsetAt(fromLsp(position)), token);
   const FindReferencesOptions options{includeDeclaration, kNoDocument};
   return detail::reference_locations(
       *services.shared().documents,
-      detail::collect_references_per_declaration(
-          references, found.targets,
-          [&options](const AstNode&) { return options; }, token));
+      references.findReferences(found.targets, options, token));
 }
 
 }  // namespace cursiv

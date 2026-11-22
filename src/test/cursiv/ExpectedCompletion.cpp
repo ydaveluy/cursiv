@@ -24,22 +24,6 @@
 
 namespace cursiv::test {
 
-namespace {
-
-std::size_t indexOf(const ExpectedCompletion& input) {
-  if (const auto* const items = std::get_if<ExpectedCompletionItems>(&input))
-    return items->index;
-  return std::get<ExpectedCompletionCallback>(input).index;
-}
-
-// The order the client would show, and the rank a candidate carries: an item
-// with none ranks where `"0"` would.
-std::string rankOf(const lsp::CompletionItem& item) {
-  return item.sortText.has_value() ? *item.sortText : std::string("0");
-}
-
-}  // namespace
-
 Disposable expectCompletion(const LspServices& services,
                             const ExpectedCompletion& expectedCompletion) {
   const ExpectedBase base = detail::baseOf(expectedCompletion);
@@ -49,13 +33,14 @@ Disposable expectCompletion(const LspServices& services,
   Disposable disposable = detail::documentDisposable(services, document);
   const detail::DisposeOnThrow cleanup(disposable);
 
+  const auto index =
+      std::visit([](const auto& arm) { return arm.index; }, expectedCompletion);
   lsp::CompletionList completions;
-  if (const auto* const caret =
-          detail::markerAt(marked.indices, indexOf(expectedCompletion));
+  if (const auto* const caret = detail::markerAt(marked.indices, index);
       caret != nullptr && services.completionProvider != nullptr) {
     lsp::CompletionParams params;
     params.textDocument.uri = lsp::Uri::parse(document->uri);
-    params.position = to_lsp(document->textDocument().positionAt(*caret));
+    params.position = toLsp(document->textDocument().positionAt(*caret));
     completions = services.completionProvider->getCompletion(*document, params,
                                                              kNoCancel);
   }
@@ -66,7 +51,11 @@ Disposable expectCompletion(const LspServices& services,
   } else {
     const auto& expected =
         std::get<ExpectedCompletionItems>(expectedCompletion);
-    std::ranges::stable_sort(completions.items, {}, rankOf);
+    std::ranges::stable_sort(
+        completions.items, {},
+        [](const lsp::CompletionItem& item) -> const std::string& {
+          return item.sortText ? *item.sortText : item.label;
+        });
 
     std::vector<std::string> actual;
     actual.reserve(completions.items.size());

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -9,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/utils/TransparentStringHash.hpp"
 #include "cursiv/utils/UriUtils.hpp"
 
 // A URI-keyed store that also answers by prefix, such as every document
@@ -45,13 +47,13 @@ class UriTrie {
   }
 
   void insert(std::string_view uri, T element) {
-    getNode(normalize_uri(uri), true)->element = std::move(element);
+    getNode(normalizeUri(uri), true)->element = std::move(element);
   }
 
   // The subtree goes with it: erasing a folder erases what it holds. The
   // root has no parent to be erased from, so it stays: that is `clear`.
   void erase(std::string_view uri) {
-    Node* const node = getNode(normalize_uri(uri), false);
+    Node* const node = getNode(normalizeUri(uri), false);
     if (node != nullptr && node->parent != nullptr)
       node->parent->children.erase(node->segment);
   }
@@ -59,7 +61,7 @@ class UriTrie {
   // Drops the value alone, then the path nodes that held only it: a path kept
   // for a removed document would answer `findAll` forever.
   void eraseValue(std::string_view uri) {
-    Node* node = getNode(normalize_uri(uri), false);
+    Node* node = getNode(normalizeUri(uri), false);
     if (node == nullptr) return;
     node->element.reset();
     while (node->parent != nullptr && node->children.empty() &&
@@ -71,18 +73,18 @@ class UriTrie {
   }
 
   [[nodiscard]] bool has(std::string_view uri) const {
-    const Node* const node = getNode(normalize_uri(uri));
+    const Node* const node = getNode(normalizeUri(uri));
     return node != nullptr && node->element.has_value();
   }
 
   [[nodiscard]] const T* find(std::string_view uri) const {
-    const Node* const node = getNode(normalize_uri(uri));
+    const Node* const node = getNode(normalizeUri(uri));
     return node != nullptr && node->element.has_value()
                ? std::addressof(*node->element)
                : nullptr;
   }
   [[nodiscard]] T* find(std::string_view uri) {
-    Node* const node = getNode(normalize_uri(uri), false);
+    Node* const node = getNode(normalizeUri(uri), false);
     return node != nullptr && node->element.has_value()
                ? std::addressof(*node->element)
                : nullptr;
@@ -93,7 +95,7 @@ class UriTrie {
   // Everything under `uri`, itself included -- the query a flat map cannot
   // answer without reading every key.
   [[nodiscard]] std::vector<T> findAll(std::string_view uri) const {
-    const Node* const node = getNode(normalize_uri(uri));
+    const Node* const node = getNode(normalizeUri(uri));
     return node != nullptr ? collectValues(*node) : std::vector<T>{};
   }
 
@@ -107,27 +109,11 @@ class UriTrie {
   struct Node {
     std::string segment;
     Node* parent = nullptr;
-    std::unordered_map<std::string, std::unique_ptr<Node, FreeNode>> children;
+    std::unordered_map<std::string, std::unique_ptr<Node, FreeNode>,
+                       detail::TransparentStringHash, std::equal_to<>>
+        children;
     std::optional<T> element;
   };
-
-  [[nodiscard]] static std::vector<std::string> splitSegments(
-      std::string_view uri) {
-    std::vector<std::string> segments;
-    if (uri.empty()) return segments;
-    std::size_t begin = 0;
-    while (begin <= uri.size()) {
-      const std::size_t end = uri.find('/', begin);
-      if (end == std::string_view::npos) {
-        segments.emplace_back(uri.substr(begin));
-        break;
-      }
-      segments.emplace_back(uri.substr(begin, end - begin));
-      begin = end + 1;
-      if (begin == uri.size()) break;
-    }
-    return segments;
-  }
 
   // One walk for both constnesses: a const one never creates, which the
   // `if constexpr` states rather than a second body repeating the descent.
@@ -136,23 +122,27 @@ class UriTrie {
                                           std::string_view normalizedUri,
                                           bool create) {
     NodeT* current = std::addressof(root);
-    for (const std::string& segment : splitSegments(normalizedUri)) {
+    while (!normalizedUri.empty()) {
+      const auto slash = normalizedUri.find('/');
+      const auto segment = normalizedUri.substr(0, slash);
       auto child = current->children.find(segment);
       if (child == current->children.end()) {
         if constexpr (std::is_const_v<NodeT>) {
           return nullptr;
         } else {
           if (!create) return nullptr;
-          child = current->children
-                      .try_emplace(segment, std::unique_ptr<Node, FreeNode>(
-                                                new Node{.segment = segment,
-                                                         .parent = current,
-                                                         .children = {},
-                                                         .element = {}}))
+          std::unique_ptr<Node, FreeNode> node(
+              new Node{.segment = std::string(segment),
+                       .parent = current,
+                       .children = {},
+                       .element = {}});
+          child = current->children.try_emplace(node->segment, std::move(node))
                       .first;
         }
       }
       current = child->second.get();
+      if (slash == std::string_view::npos) break;
+      normalizedUri.remove_prefix(slash + 1);
     }
     return current;
   }
@@ -166,7 +156,8 @@ class UriTrie {
 
   // Depth first, each node before its children, the levels still to visit
   // kept on the heap: a deep path costs no native stack.
-  static void appendValues(const Node& node, std::vector<T>& values) {
+  [[nodiscard]] static std::vector<T> collectValues(const Node& node) {
+    std::vector<T> values;
     using Child = typename decltype(Node::children)::const_iterator;
     std::vector<std::pair<Child, Child>> levels;
     for (const Node* at = &node; at != nullptr;) {
@@ -181,11 +172,6 @@ class UriTrie {
           at = (next++)->second.get();
       }
     }
-  }
-
-  [[nodiscard]] static std::vector<T> collectValues(const Node& node) {
-    std::vector<T> values;
-    appendValues(node, values);
     return values;
   }
 

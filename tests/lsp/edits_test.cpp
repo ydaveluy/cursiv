@@ -1,5 +1,4 @@
-// Completion items and formatting edits on the workspace language;
-// `edits_narrow_test` runs the same tests on a parser with narrow table rows.
+// Completion items and formatting edits on the workspace language.
 
 #include <lsp/types.h>
 
@@ -509,6 +508,20 @@ struct HeldRecordsFormatter final : ws::WorkspaceFormatter {
   }
 };
 
+// Handed no node, a formatter selects nothing, even between braces a
+// formatter with a node found.
+struct NodelessFormatter final : ws::WorkspaceFormatter {
+  using WorkspaceFormatter::WorkspaceFormatter;
+  void formatEntity(cursiv::FormattingBuilder& builder,
+                    const ws::ast::Entity* entity) const override {
+    WorkspaceFormatter::formatEntity(builder, entity);
+    const auto own = builder.getNodeFormatter(entity);
+    builder.getNodeFormatter(static_cast<const ws::ast::Entity*>(nullptr))
+        .interior(own.keyword("{"), own.keyword("}"))
+        .prepend(blankLineIndented());
+  }
+};
+
 struct SelfTargetingFormatter final : ws::WorkspaceFormatter {
   using WorkspaceFormatter::WorkspaceFormatter;
   void formatEntity(cursiv::FormattingBuilder& builder,
@@ -571,6 +584,13 @@ struct CompositeAppendFormatter final : ws::WorkspaceFormatter {
 
 struct OnTypeFormatter final : ws::WorkspaceFormatter {
   using WorkspaceFormatter::WorkspaceFormatter;
+  std::vector<lsp::TextEdit> formatDocumentOnType(
+      const cursiv::Document& doc,
+      const lsp::DocumentOnTypeFormattingParams& params,
+      const cursiv::CancellationToken&) const override {
+    CHECK(params.textDocument.uri.toString() == doc.uri);
+    return {{{params.position, params.position}, params.ch}};
+  }
   [[nodiscard]] std::optional<lsp::DocumentOnTypeFormattingOptions>
   formatOnTypeOptions() const noexcept override {
     return lsp::DocumentOnTypeFormattingOptions{.firstTriggerCharacter = "}"};
@@ -665,7 +685,7 @@ template <class W>
   std::vector<cursiv::TextEdit> converted;
   converted.reserve(edits.size());
   for (const lsp::TextEdit& edit : edits)
-    converted.push_back({cursiv::from_lsp(edit.range), edit.newText});
+    converted.push_back({cursiv::fromLsp(edit.range), edit.newText});
   return cursiv::TextDocument::applyEdits(document.textDocument(), converted);
 }
 
@@ -894,6 +914,17 @@ void a_rule_targets_the_records_it_holds() {
                               .disposeAfterCheck = true});
 }
 
+void a_formatter_without_a_node_selects_nothing() {
+  World world;
+  install<NodelessFormatter>(world);
+  const std::string text = "entity Person {\n  name: String\n}\n";
+  (void)ct::expectFormatting(world.services.language,
+                             {.before = text,
+                              .after = text,
+                              .options = options(),
+                              .disposeAfterCheck = true});
+}
+
 // The root's rule on its elements and an element's rule on itself claim the
 // same boundary; the walk visits the root first, so the element's own rule is
 // the one that stays.
@@ -961,6 +992,22 @@ void a_hidden_callback_can_add_rules_after_a_deferred_append() {
   CHECK(comments == 1);
   CHECK(applied(document, edits) ==
         "datatype String\n  // c\nentity Person {}\n");
+}
+
+void formatting_preserves_ignored_comments() {
+  World world;
+  install<AppendIndentFormatter>(world);
+  for (const std::string before :
+       {"datatype(*keep*)Text\n",
+        "datatype A\n(*keep*) //note\nentity E {}\n"}) {
+    const cursiv::Document& document = *world.built(before);
+    CHECK(document.hasAst() && !document.parseRecovered());
+    const auto formatted = applied(document, format(world, document));
+    CHECK(formatted.find("(*keep*)") != std::string::npos);
+    CHECK(format(world, *world.built(formatted)).empty());
+  }
+  const auto& spaced = *world.built("datatype\u00a0Text\n");
+  CHECK(applied(spaced, format(world, spaced)) == "datatype Text\n");
 }
 
 void comment_margins_follow_all_text_document_line_breaks() {
@@ -1099,7 +1146,7 @@ void a_format_on_type_stays_on_the_carets_line() {
   lsp::DocumentOnTypeFormattingParams params;
   params.options = options();
   params.position = {1, 2};
-  params.ch = "m";
+  params.ch = "a";
   const std::vector<lsp::TextEdit> typed =
       world.formatter().formatDocumentOnType(*messy, params, cursiv::kNoCancel);
   CHECK(!typed.empty());
@@ -1116,15 +1163,29 @@ void a_format_on_type_stays_on_the_carets_line() {
   CHECK(intoTheLine);
   // The columns of a range do not narrow it: the caret's range and the whole
   // line answer the same edits.
-  const std::string whole =
+  const auto whole =
       applied(*messy, formatRange(world, *messy, {{1, 0}, {1, 14}}));
-  CHECK(applied(*messy, typed) == whole);
+  (void)ct::expectFormatting(world.services.language,
+                             {.before = "entity   Person{\n"
+                                        "na<|>me   :String\n"
+                                        "     age:String\n"
+                                        "}\n"
+                                        "datatype     String\n",
+                              .after = whole,
+                              .options = options(),
+                              .disposeAfterCheck = true,
+                              .onType = "a"});
   CHECK(applied(*messy, formatRange(world, *messy, {{1, 0}, {1, 2}})) == whole);
   CHECK(typed.size() < format(world, *messy).size());
 
   install<OnTypeFormatter>(world);
   const auto advertised = world.formatter().formatOnTypeOptions();
   CHECK(advertised.has_value() && advertised->firstTriggerCharacter == "}");
+  (void)ct::expectFormatting(world.services.language,
+                             {.before = "entity É {}<|>\n",
+                              .after = "entity É {}}\n",
+                              .disposeAfterCheck = true,
+                              .onType = "}"});
 }
 
 // A conversion error leaves the tree intact: only a syntax error withholds
@@ -1169,6 +1230,29 @@ void a_multiline_comment_is_reindented() {
 
   const cursiv::Document* const formatted =
       world.built(std::string(kCommented));
+  CHECK(format(world, *formatted).empty());
+}
+
+// A rewritten comment after code on its line has its later lines where the
+// comment would start on a line of its own, in one pass.
+void a_rewritten_trailing_comment_is_reindented() {
+  World world;
+  constexpr std::string_view kTrailing =
+      "entity Person {\n"
+      "  name: String /**\n"
+      "   * a\n"
+      "   * b\n"
+      "   */\n"
+      "}\n";
+  (void)ct::expectFormatting(world.services.language,
+                             {.before = "entity Person {\n"
+                                        "      name: String /** a\n"
+                                        "                    * b */\n"
+                                        "}\n",
+                              .after = std::string(kTrailing),
+                              .options = options(),
+                              .disposeAfterCheck = true});
+  const cursiv::Document* const formatted = world.built(std::string(kTrailing));
   CHECK(format(world, *formatted).empty());
 }
 
@@ -1299,9 +1383,11 @@ void run() {
   a_kept_gap_holds_against_the_other_side();
   a_multi_name_selection_keeps_the_order_given();
   a_rule_targets_the_records_it_holds();
+  a_formatter_without_a_node_selects_nothing();
   a_descendant_rule_wins_over_an_ancestor_rule();
   an_append_shapes_the_margin_of_the_comment_after_it();
   a_hidden_callback_can_add_rules_after_a_deferred_append();
+  formatting_preserves_ignored_comments();
   comment_margins_follow_all_text_document_line_breaks();
   a_mixed_comment_margin_is_shaped_in_one_pass();
   a_block_comment_keeps_its_alignment_over_a_mixed_margin();
@@ -1309,6 +1395,7 @@ void run() {
   an_append_level_stays_while_its_target_is_a_construction();
   a_property_index_clamps_to_the_last_occurrence();
   a_multiline_comment_is_reindented();
+  a_rewritten_trailing_comment_is_reindented();
   a_doc_comment_reaches_its_shape_in_one_pass();
   a_one_line_comment_keeps_the_stars_it_starts_with();
   a_crlf_document_keeps_its_terminators();
@@ -1317,7 +1404,7 @@ void run() {
 }  // namespace formatter
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   completion_provider::run();
   formatter::run();
   return cursiv::test::report("edits");

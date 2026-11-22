@@ -122,7 +122,9 @@ struct InfixEntryG : cursiv::GrammarSpec {
   struct CONST_TEXT : terminal<as<&const_text>(lit<"="> + some(cr<"a-z">))> {};
   struct ANSWER : terminal<as<&answer>(lit<"?"> + some(cr<"a-z">))> {};
   struct SMALL : terminal<as<std::int8_t>(some(d))> {};
+  struct NOTE : terminal<lit<";"> + many(cr<"^\n">)> {};
   struct Sum;
+  struct Cmp;
   struct Primary
       : rule<create<ast::Num>(assign<&ast::Num::text>(ref<NUM>)) |
              create<ast::Held>(
@@ -138,10 +140,28 @@ struct InfixEntryG : cursiv::GrammarSpec {
              create<ast::Text>(assign<&ast::Text::value>(ref<CheckedJoined>)) |
              create<ast::Text>(assign<&ast::Text::value>(ref<Banged>)) |
              create<ast::Words>(assign<&ast::Words::items>(ref<WORDS>)) |
+             // A run read as one token, a table whose operand is another
+             // table, and regions whose own trivia differ from their edges',
+             // one of them led by a line comment.
+             create<ast::Text>(kw<"block"> + assign<&ast::Text::value>(through(
+                                                 lit<"[[">, lit<"]]">))) |
+             (kw<"cmp"> + lit<"("> + ref<Cmp> + lit<")">) |
+             create<ast::Num>(
+                 kw<"pair"> +
+                 tight(lit<"`"> +
+                       skip(ignore<WS>, hide<>,
+                            ref<NUM> + assign<&ast::Num::text>(ref<NUM>)) +
+                       lit<"`">)) |
+             create<ast::Num>(
+                 kw<"note"> +
+                 skip(ignore<>, hide<NOTE, WS>,
+                      lit<"<"> + assign<&ast::Num::text>(ref<NUM>) +
+                      lit<">">)) |
              (lit<"("> + ref<Sum> + lit<")">)> {};
   struct Sum : infix<Primary, ast::Bin,
                      (left(lit<"+"> | lit<"-"> | (kw<"NOT"> + kw<"EQUAL">)))> {
   };
+  struct Cmp : infix<Sum, ast::Bin, left(lit<"<">)> {};
   using entry = Sum;
   using ignored = WS;
 };

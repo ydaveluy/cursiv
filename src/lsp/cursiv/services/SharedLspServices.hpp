@@ -56,10 +56,10 @@ struct SharedLspServices : virtual SharedCoreServices {
   std::unique_ptr<ConfigurationProvider> configurationProvider;
 
   void visitServices(
-      cursiv::function_ref<void(const ServiceSlot&)> yield) const override;
+      cursiv::FunctionRef<void(const ServiceSlot&)> yield) const override;
 };
 
 // Installs the shared core defaults, then the LSP ones.
-void install_default_shared_lsp_services(SharedLspServices& shared);
+void installDefaultSharedLspServices(SharedLspServices& shared);
 
 }  // namespace cursiv

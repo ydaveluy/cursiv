@@ -32,7 +32,7 @@ struct TextKept {
       std::span<const CstLeaf> twin, const RepairCase& c,
       std::span<const FaultWindow> windows, std::span<const CstLeaf> got,
       std::span<const ParseDiagnostic> diagnostics,
-      function_ref<bool(std::size_t token, ElementId expected)> restores) {
+      FunctionRef<bool(std::size_t token, ElementId expected)> restores) {
     TextKept t;
     const std::size_t n = twin.size();
     std::vector<std::uint8_t> touched(n);

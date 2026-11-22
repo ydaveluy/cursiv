@@ -24,21 +24,21 @@ struct Document;
 struct SharedCoreServices;
 
 // One property of an input schema: its JSON type and what it holds.
-[[nodiscard]] lsp::json::Value tool_property(std::string_view type,
+[[nodiscard]] lsp::json::Value toolProperty(std::string_view type,
                                              std::string_view description);
 // An object schema of `properties`, the names in `required` mandatory.
-[[nodiscard]] lsp::json::Value tool_object_schema(lsp::json::Object properties,
+[[nodiscard]] lsp::json::Value toolObjectSchema(lsp::json::Object properties,
                                                   lsp::json::Array required);
 // The schema of a position: `file`, `line` and `column`, all required.
-[[nodiscard]] lsp::json::Value tool_position_schema();
+[[nodiscard]] lsp::json::Value toolPositionSchema();
 // The argument named `key`; null when the call did not pass it.
-[[nodiscard]] const lsp::json::Value* tool_argument(
+[[nodiscard]] const lsp::json::Value* toolArgument(
     const lsp::json::Value& arguments, std::string_view key);
 
 /**
  * A path becomes an absolute file:// uri; anything already a uri passes.
  */
-[[nodiscard]] std::string tool_file_uri(std::string_view file);
+[[nodiscard]] std::string toolFileUri(std::string_view file);
 
 // A position as the store reads it: 0-based, where the call is 1-based.
 struct McpToolPosition {
@@ -47,12 +47,15 @@ struct McpToolPosition {
   std::uint32_t column = 0;
 };
 // The position the arguments name; a bad one throws a message the model reads.
-[[nodiscard]] McpToolPosition tool_position(const lsp::json::Value& arguments);
+[[nodiscard]] McpToolPosition toolPosition(const lsp::json::Value& arguments);
 // Appends `line:column`, 1-based, the form every answer uses.
-void append_tool_position(std::string& out, const Document& document,
+void appendToolPosition(std::string& out, const Document& document,
                           TextOffset offset);
 
 namespace detail {
+
+[[nodiscard]] lsp::json::Value positive_integer_property(
+    std::string_view description);
 
 // An `integer` argument as JSON Schema reads one: a number with no fractional
 // part, such as `1.0`, within `[minimum, INT32_MAX]`.
@@ -64,10 +67,10 @@ namespace detail {
 // Awaits `requirement` (a `WorkspaceState` waits for the whole workspace),
 // checks it again under the lock, then runs `body` once to append the answer.
 // A cancelled request, or a document gone or never there, answers an error.
-[[nodiscard]] McpToolResult route_document_tool(
+[[nodiscard]] McpToolResult routeDocumentTool(
     SharedCoreServices& shared, const std::string& uri,
     ServiceRequirement requirement, const CancellationToken& token,
-    cursiv::function_ref<void(const Document&, const CoreServices&,
+    cursiv::FunctionRef<void(const Document&, const CoreServices&,
                               std::string&)> body);
 
 }  // namespace cursiv

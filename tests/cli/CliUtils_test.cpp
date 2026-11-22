@@ -29,7 +29,7 @@ namespace {
 
 struct CountingParser final : cursiv::Parser {
   std::unique_ptr<cursiv::Parser> parser =
-      ws::generated::Workspace::create_parser();
+      ws::generated::Workspace::createParser();
   mutable int calls = 0;
   mutable int grammarQueries = 0;
   // Off, a parse keeps its tree and drops its AST, as a failed AST
@@ -54,8 +54,8 @@ CountingParser& register_workspace(cursiv::SharedCoreServices& shared,
   auto parser = std::make_unique<CountingParser>();
   auto& counter = *parser;
   (void)support::add_language<cursiv::CoreServices>(
-      shared, {std::move(id), {".ws"}, {}}, std::move(parser),
-      ws::generated::Workspace::create_ast_reflection());
+      shared, {std::move(id), {".ws"}, {"CustomName"}}, std::move(parser),
+      ws::generated::Workspace::createAstReflection());
   return counter;
 }
 
@@ -113,13 +113,15 @@ struct Run {
 Run run_on(cursiv::SharedCoreServices& shared, Arguments& args,
            bool keepsAst = true) {
   Capture capture;
-  const int status = cursiv::detail::run_cli_on(
-      args.argc(), args.argv.data(),
-      [keepsAst](auto& world) {
-        register_workspace(world).keepsAst = keepsAst;
-        return true;
-      },
-      shared);
+  const int status = cursiv::runCommand([&] {
+    return cursiv::detail::run_cli_on(
+        args.argc(), args.argv.data(),
+        [keepsAst](auto& world) {
+          register_workspace(world).keepsAst = keepsAst;
+          return true;
+        },
+        shared);
+  });
   return {status, capture.out.str(), capture.err.str()};
 }
 
@@ -137,6 +139,7 @@ void help_wins_even_over_invalid_arguments() {
     const Run answer = run(std::move(args));
     CHECK(answer.status == cursiv::kClean);
     CHECK(answer.out.starts_with("usage: cli "));
+    CHECK(answer.out.find("CustomName") != std::string::npos);
   }
   Arguments misuses[] = {Arguments{"cli"}, Arguments{"cli", "--root"},
                          Arguments{"cli", "a.ws", "b.ws"},
@@ -167,7 +170,7 @@ void diagnostics_use_byte_columns_and_all_line_terminators() {
       {.range = {4, 4}, .message = "same range", .source = {}},
       {.range = {13, 13}, .message = "eof", .source = {}}};
   std::ostringstream out;
-  cursiv::print_diagnostics(document, "a.ws", out);
+  cursiv::printDiagnostics(document, "a.ws", out);
   CHECK(out.str() ==
         "a.ws:1:3: error: first\n"
         "a.ws:2:1: error: second\n"
@@ -277,20 +280,20 @@ void json_replaces_invalid_utf8_without_changing_the_document() {
 void root_documents_are_reused_and_references_resolve() {
   Scratch files;
   cursiv::SharedCoreServices shared;
-  cursiv::install_default_shared_core_services(shared);
+  cursiv::installDefaultSharedCoreServices(shared);
   shared.fileSystemProvider =
       std::make_unique<cursiv::LocalFileSystemProvider>();
   auto& parser = register_workspace(shared);
-  cursiv::initialize_root(files.root.string(), shared);
+  cursiv::initializeRoot(files.root.string(), shared);
   CHECK(parser.calls == 2);
-  auto& document = cursiv::build_document_from_path(
+  auto& document = cursiv::buildDocumentFromPath(
       (files.root / "sub" / "main.ws").string(), shared);
   CHECK(parser.calls == 2);
   CHECK(shared.documents->all().size() == 2);
   CHECK(document.diagnostics.empty());
   CHECK(document.state.load() == cursiv::DocumentState::Validated);
   auto* ast = document.parseResult.value;
-  auto& again = cursiv::build_document_from_path(
+  auto& again = cursiv::buildDocumentFromPath(
       (files.root / "sub" / ".." / "sub" / "main.ws").string(), shared);
   CHECK(&again == &document && again.parseResult.value == ast);
   CHECK(parser.calls == 2);
@@ -310,6 +313,18 @@ void read_failures_are_usage_errors() {
   CHECK(!answer.err.empty());
 }
 
+void an_unreadable_neighbour_prevents_a_partial_workspace() {
+  const Scratch files;
+  cursiv::SharedCoreServices shared;
+  shared.fileSystemProvider =
+      std::make_unique<cursiv::LocalFileSystemProvider>(20);
+  Arguments args{"cli", "--root", files.root.string(),
+                 (files.root / "types.ws").string()};
+  const Run answer = run_on(shared, args);
+  CHECK(answer.status == cursiv::kUsage);
+  CHECK(answer.out.empty() && answer.err.find("main.ws") != std::string::npos);
+}
+
 void the_factory_selects_the_grammar_used_for_reporting() {
   struct Factory final : cursiv::DefaultDocumentFactory {
     using DefaultDocumentFactory::DefaultDocumentFactory;
@@ -324,19 +339,70 @@ void the_factory_selects_the_grammar_used_for_reporting() {
   CountingParser *selected = nullptr, *byExtension = nullptr;
   Arguments args{"cli", "--json", (files.root / "types.ws").string()};
   Capture capture;
-  const int status = cursiv::detail::run_cli_on(
-      args.argc(), args.argv.data(),
-      [&](auto& world) {
-        selected = &register_workspace(world);
-        byExtension = &register_workspace(world, "alternate");
-        selected->grammarQueries = byExtension->grammarQueries = 0;
-        return true;
-      },
-      shared);
+  const int status = cursiv::runCommand([&] {
+    return cursiv::detail::run_cli_on(
+        args.argc(), args.argv.data(),
+        [&](auto& world) {
+          selected = &register_workspace(world);
+          byExtension = &register_workspace(world, "alternate");
+          selected->grammarQueries = byExtension->grammarQueries = 0;
+          return true;
+        },
+        shared);
+  });
   CHECK(status == cursiv::kClean);
   CHECK(selected != nullptr && selected->grammarQueries > 0);
   CHECK(byExtension != nullptr && byExtension->grammarQueries == 0);
   CHECK(capture.out.str().starts_with("{\"element\":"));
+  std::ofstream(files.root / "CustomName") << "datatype Number";
+  CHECK(cursiv::buildDocumentFromPath((files.root / "CustomName").string(),
+                                         shared)
+            .language->languageMetaData.languageId == "workspace");
+}
+
+void file_commands_use_the_common_arguments_and_workspace() {
+  const Scratch files;
+  const auto execute = +[](const cursiv::Document& doc, std::string_view path,
+                           std::optional<std::string_view> destination) {
+    CHECK(doc.diagnostics.empty());
+    CHECK(path.ends_with("main.ws"));
+    CHECK(destination == "output");
+    return 17;
+  };
+  const auto invoke = [&](Arguments&& args) {
+    Capture capture;
+    const int status =
+        cursiv::runCli(args.argc(), args.argv.data(),
+                        [](auto& world) { register_workspace(world); },
+                        {{.name = "generate",
+                          .run = execute,
+                          .acceptsDestination = true,
+                          .loadSiblings = true}});
+    return Run{status, capture.out.str(), capture.err.str()};
+  };
+  const auto path = (files.root / "sub/main.ws").string();
+  CHECK(invoke({"cli", "generate", "-d", "output", "-r",
+                files.root.string(), "--", path})
+            .status == 17);
+  CHECK(invoke({"cli", "generate", path, "--destination", "output", "--root",
+                files.root.string()})
+            .status == 17);
+  CHECK(invoke({"cli", "--help"}).out.find("cli generate") !=
+        std::string::npos);
+  CHECK(invoke({"cli", "generate", "--help"})
+            .out.starts_with("usage: cli generate"));
+  CHECK(invoke({"cli", "generate"}).err.starts_with("usage: cli generate"));
+  CHECK(invoke({"cli", "generate", path, "-d"}).status == cursiv::kUsage);
+  CHECK(invoke({"cli", "generate", "--", "--help"}).status == cursiv::kUsage);
+}
+
+void workspace_constructor_errors_are_fatal() {
+  struct Throwing : cursiv::SharedCoreServices {
+    Throwing() { throw std::runtime_error("workspace unavailable"); }
+  };
+  Capture capture;
+  CHECK(cursiv::runCli<Throwing>(0, nullptr, {}) == cursiv::kFatal);
+  CHECK(capture.err.str() == "fatal: workspace unavailable\n");
 }
 
 void failed_output_is_not_a_successful_command() {
@@ -352,13 +418,15 @@ void failed_output_is_not_a_successful_command() {
     Capture capture;
     FailedFlush output;
     std::cout.rdbuf(&output);
-    const int status = cursiv::detail::run_cli_on(
-        args.argc(), args.argv.data(),
-        [](auto& world) {
-          register_workspace(world);
-          return true;
-        },
-        shared);
+    const int status = cursiv::runCommand([&] {
+      return cursiv::detail::run_cli_on(
+          args.argc(), args.argv.data(),
+          [](auto& world) {
+            register_workspace(world);
+            return true;
+          },
+          shared);
+    });
     std::cout.rdbuf(capture.out.rdbuf());
     CHECK(status == cursiv::kFatal);
     CHECK(capture.err.str().find("fatal:") != std::string::npos);
@@ -370,7 +438,7 @@ void failed_output_is_not_a_successful_command() {
 void a_command_answers_like_the_verdict() {
   {
     Capture capture;
-    CHECK(cursiv::run_command([] {
+    CHECK(cursiv::runCommand([] {
             std::cout << "generated";
             return cursiv::kDiagnostics;
           }) == cursiv::kDiagnostics);
@@ -379,14 +447,14 @@ void a_command_answers_like_the_verdict() {
   }
   {
     Capture capture;
-    CHECK(cursiv::run_command([]() -> int {
+    CHECK(cursiv::runCommand([]() -> int {
             throw cursiv::UsageError("x.req is not a regular file");
           }) == cursiv::kUsage);
     CHECK(capture.err.str() == "x.req is not a regular file\n");
   }
   {
     Capture capture;
-    CHECK(cursiv::run_command([]() -> int {
+    CHECK(cursiv::runCommand([]() -> int {
             throw std::runtime_error("cannot create the directory");
           }) == cursiv::kFatal);
     CHECK(capture.err.str() == "fatal: cannot create the directory\n");
@@ -394,7 +462,7 @@ void a_command_answers_like_the_verdict() {
   {
     // A command may throw what no standard type names.
     Capture capture;
-    CHECK(cursiv::run_command([]() -> int { throw 42; }) == cursiv::kFatal);
+    CHECK(cursiv::runCommand([]() -> int { throw 42; }) == cursiv::kFatal);
     CHECK(capture.err.str() == "fatal: an unknown exception\n");
   }
   {
@@ -404,13 +472,24 @@ void a_command_answers_like_the_verdict() {
     Capture capture;
     FailedFlush output;
     std::cout.rdbuf(&output);
-    const int status = cursiv::run_command([] {
+    const int status = cursiv::runCommand([] {
       std::cout << "generated";
       return cursiv::kClean;
     });
     std::cout.rdbuf(capture.out.rdbuf());
     CHECK(status == cursiv::kFatal);
     CHECK(capture.err.str().starts_with("fatal: cannot write CLI output"));
+  }
+  {
+    struct Refusing : std::streambuf {};
+    Capture capture;
+    Refusing stream;
+    std::cerr.rdbuf(&stream);
+    CHECK(cursiv::runCommand([] {
+            std::cerr << "document error";
+            return cursiv::kDiagnostics;
+          }) == cursiv::kFatal);
+    std::cerr.rdbuf(capture.err.rdbuf());
   }
   {
     // A stderr that throws when it cannot write still leaves the code.
@@ -427,7 +506,7 @@ void a_command_answers_like_the_verdict() {
     for (const auto& command : commands) {
       std::cerr.clear();
       try {
-        statuses.push_back(cursiv::run_command(command));
+        statuses.push_back(cursiv::runCommand(command));
       } catch (...) {
         statuses.push_back(-1);
       }
@@ -442,7 +521,7 @@ void a_command_answers_like_the_verdict() {
 }  // namespace
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   help_wins_even_over_invalid_arguments();
   diagnostics_use_byte_columns_and_all_line_terminators();
   json_keeps_a_cst_without_an_ast();
@@ -453,7 +532,10 @@ int main() {
   json_replaces_invalid_utf8_without_changing_the_document();
   root_documents_are_reused_and_references_resolve();
   read_failures_are_usage_errors();
+  an_unreadable_neighbour_prevents_a_partial_workspace();
   the_factory_selects_the_grammar_used_for_reporting();
+  file_commands_use_the_common_arguments_and_workspace();
+  workspace_constructor_errors_are_fatal();
   failed_output_is_not_a_successful_command();
   a_command_answers_like_the_verdict();
   return cursiv::test::report("cli_utils");

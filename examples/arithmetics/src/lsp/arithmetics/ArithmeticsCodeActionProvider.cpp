@@ -27,12 +27,12 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
     const cursiv::CancellationToken& cancelToken) const {
   const cursiv::TextDocument& text = document.textDocument();
   const cursiv::TextOffset from =
-      text.offsetAt(cursiv::from_lsp(params.range.start));
+      text.offsetAt(cursiv::fromLsp(params.range.start));
   const cursiv::TextOffset to =
-      text.offsetAt(cursiv::from_lsp(params.range.end));
+      text.offsetAt(cursiv::fromLsp(params.range.end));
 
   for (const cursiv::Diagnostic& diagnostic : document.diagnostics) {
-    cursiv::throw_if_cancelled(cancelToken);
+    cursiv::throwIfCancelled(cancelToken);
     if (!diagnostic.code.has_value() || !diagnostic.code->isString()
         || diagnostic.code->string() != kExpressionNormalizable)
       continue;
@@ -53,7 +53,7 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
       continue;
 
     lsp::TextEdit edit;
-    edit.range = cursiv::to_lsp(
+    edit.range = cursiv::toLsp(
         text.rangeAt(diagnostic.range.begin, diagnostic.range.end));
     edit.newText = written;
 

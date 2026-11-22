@@ -6,9 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <optional>
-#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -17,6 +17,8 @@
 
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/text/scalar_at.hpp"
+#include "cursiv/text/unicode/UnicodeRanges.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/workspace/Document.hpp"
@@ -38,7 +40,7 @@ struct TextSpan {
   const TextDocument* text = nullptr;
 
   [[nodiscard]] const lsp::Range& range() const {
-    if (!lines.has_value()) lines = to_lsp(text->rangeAt(begin, end));
+    if (!lines.has_value()) lines = toLsp(text->rangeAt(begin, end));
     return *lines;
   }
 };
@@ -62,6 +64,24 @@ struct FormatContext {
   std::string_view newlineStyle = "\n";
 };
 
+// Ignored tokens share the gaps between CST records with whitespace.
+bool whitespace_only(std::string_view text) {
+  while (!text.empty()) {
+    const char c = text.front();
+    if (c == ' ' || (c >= '\t' && c <= '\r')) {
+      text.remove_prefix(1);
+    } else {
+      std::size_t bytes = 0;
+      const auto scalar = scalarAt(text.data(), text.size(), bytes);
+      if (!unicode::within(unicode::kWhiteSpace,
+                           std::size(unicode::kWhiteSpace), scalar))
+        return false;
+      text.remove_prefix(bytes);
+    }
+  }
+  return true;
+}
+
 constexpr std::uint32_t kMaxTabSize = 64;
 
 [[nodiscard]] constexpr std::uint32_t effective_tab_size(
@@ -83,21 +103,14 @@ constexpr std::uint32_t kMaxTabSize = 64;
                      options.insertSpaces ? ' ' : '\t');
 }
 
-[[nodiscard]] TextSpan span_of(const Document& document, TextOffset begin,
-                               TextOffset end) {
-  return TextSpan{.begin = begin,
-                  .end = end,
-                  .lines = std::nullopt,
-                  .text = &document.textDocument()};
-}
-
 // The gap before `node`: from the end of `previous`, or from the start of the
 // document when there is none.
 [[nodiscard]] TextSpan gap_before(const FormatContext& context, NodeId previous,
                                   NodeId node) {
-  return span_of(context.document,
-                 previous == kNoNode ? 0u : context.cst[previous].end,
-                 context.cst[node].begin);
+  return {.begin = previous == kNoNode ? 0u : context.cst[previous].end,
+          .end = context.cst[node].begin,
+          .lines = std::nullopt,
+          .text = &context.document.textDocument()};
 }
 
 [[nodiscard]] std::int32_t line_count(const lsp::Range& range) {
@@ -329,26 +342,25 @@ void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
   const CstNode& node = context.cst[hidden];
   const TextDocument& document = context.document.textDocument();
   const std::uint32_t startLine = gap.range().end.line;
-  const bool previousOnSameLine =
-      previous != kNoNode && gap.range().start.line == startLine;
-
   const TextOffset lineStart = document.offsetAt(Position{startLine, 0});
   const std::string_view margin =
       document.getText().substr(lineStart, node.begin - lineStart);
-
-  const std::int32_t existing =
-      existing_indentation_count(margin, context.options);
-  const std::int32_t expected =
-      previousOnSameLine ? existing : indentation_count(level, context.options);
+  const bool trailing =
+      (previous != kNoNode && gap.range().start.line == startLine) ||
+      !whitespace_only(margin);
+  const std::int32_t expected = indentation_count(level, context.options);
   const std::int32_t increase =
-      checked_count(static_cast<std::int64_t>(expected) - existing);
+      trailing
+          ? 0
+          : checked_count(static_cast<std::int64_t>(expected) -
+                          existing_indentation_count(margin, context.options));
 
   // A rewritten comment is replaced whole, and its first line's margin travels
   // inside the replacement when the comment starts the line -- a separate
   // margin edit would collide with the node replacement at the same offset.
   if (replacement != nullptr) {
     std::string foldedIndent;
-    if (!previousOnSameLine && increase != 0) {
+    if (increase != 0) {
       if (lineStart == node.begin)
         foldedIndent = indentation_text(level, context.options);
       else
@@ -357,17 +369,14 @@ void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
                         .end = node.begin,
                         .newText = indentation_text(level, context.options)});
     }
-    std::string text =
-        previousOnSameLine
-            ? std::string(*replacement)
-            : reindent_text(*replacement, expected, context.options);
+    std::string text = reindent_text(*replacement, expected, context.options);
     if (!foldedIndent.empty()) text.insert(0, foldedIndent);
     sink.push(PendingEdit{
         .begin = node.begin, .end = node.end, .newText = std::move(text)});
     return;
   }
 
-  if (previousOnSameLine || increase == 0) return;
+  if (increase == 0) return;
 
   // Margin only, one column-0 edit per line of the comment. No whole-node
   // replacement, so there is no offset to collide with -- and the comment's own
@@ -442,24 +451,22 @@ void emit_gap_edits(NodeId previous, NodeId node,
     sink.push(std::move(edit));
   };
   const FormattingMove* move = find_fitting_move(gap, action);
+  if (move && move->tabs.has_value())
+    context.indentation = checked_count(
+        static_cast<std::int64_t>(context.indentation) + *move->tabs);
+  const auto text = gap.text->getText().substr(gap.begin, gap.end - gap.begin);
+  if (!whitespace_only(text)) return;
   if (move == nullptr) {
     // A rule with no move keeps the gap, at its priority, against a rule on the
     // gap's other side.
     push(PendingEdit{
-        .begin = gap.begin,
-        .end = gap.end,
-        .newText = std::string(context.document.textDocument().getText().substr(
-            gap.begin, gap.end - gap.begin))});
+        .begin = gap.begin, .end = gap.end, .newText = std::string(text)});
     return;
   }
 
-  if (move->tabs.has_value())
-    context.indentation = checked_count(
-        static_cast<std::int64_t>(context.indentation) + *move->tabs);
-
   if (move->characters.has_value()) {
     // The break ending a line comment must not be replaced by spaces.
-    if (previous == kNoNode || context.cst[previous].hidden == 0)
+    if (previous == kNoNode || !context.cst[previous].isHidden())
       push(create_space_edit(gap, *move->characters, action.options));
   } else if (move->lines.has_value()) {
     push(create_line_edit(gap, *move->lines, context, action.options));
@@ -501,25 +508,10 @@ void emit_gap_edits(NodeId previous, NodeId node,
     if (edit.newText == text.substr(edit.begin, edit.end - edit.begin))
       continue;
     result.push_back(
-        lsp::TextEdit{.range = to_lsp(lines.rangeAt(edit.begin, edit.end)),
+        lsp::TextEdit{.range = toLsp(lines.rangeAt(edit.begin, edit.end)),
                       .newText = std::move(edit.newText)});
   }
   return result;
-}
-
-// The roots of the physical forest, in document order. Leading trivia can be a
-// root of its own (it precedes the entry rule), so neither `entryRoot()` nor
-// id 0 is a sound place to start: the tape is walked whole.
-[[nodiscard]] std::vector<NodeId> forest_roots(const Cst& cst) {
-  std::vector<NodeId> roots;
-  NodeId next = cst.size();
-  while (next > 0) {
-    const NodeId root = next - 1;
-    roots.push_back(root);
-    next = cst.subtreeBegin(root);
-  }
-  std::ranges::reverse(roots);
-  return roots;
 }
 
 }  // namespace
@@ -579,10 +571,10 @@ std::vector<lsp::TextEdit> run_formatting(
     const Document& document, const Cst& cst,
     const lsp::FormattingOptions& options,
     const std::optional<RangeLines>& range, FormattingActions& actions,
-    cursiv::function_ref<void(NodeId, std::int32_t, std::string_view)>
+    cursiv::FunctionRef<void(NodeId, std::int32_t, std::string_view)>
         visitHidden,
     const CancellationToken& token) {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   if (cst.size() == 0) return {};
 
   FormatContext context{
@@ -604,11 +596,8 @@ std::vector<lsp::TextEdit> run_formatting(
     if (!frame.exit) pending.push_back(stack.size());
     stack.push_back(frame);
   };
-  {
-    const std::vector<NodeId> roots = forest_roots(cst);
-    for (unsigned int root : std::views::reverse(roots))
-      push(Frame{.id = root, .saved = 0, .exit = false});
-  }
+  for (NodeId past = cst.size(); past > 0; past = cst.subtreeBegin(past - 1))
+    push(Frame{.id = past - 1, .saved = 0, .exit = false});
   // The node after the one just popped, its children not yet pushed: its next
   // sibling, or the nearest ancestor's -- what an `append` targets.
   const auto next_node = [&]() {
@@ -630,7 +619,7 @@ std::vector<lsp::TextEdit> run_formatting(
   EditSink sink(edits, range);
   NodeId lastLeaf = kNoNode;
   while (!stack.empty()) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     const Frame frame = stack.back();
     stack.pop_back();
     if (!frame.exit) pending.pop_back();
@@ -641,7 +630,7 @@ std::vector<lsp::TextEdit> run_formatting(
 
     const NodeId id = frame.id;
     const std::int32_t initial = context.indentation;
-    const bool hidden = cst[id].hidden != 0;
+    const bool hidden = cst[id].isHidden();
     const FormattingAction* prepend = actions.find(id, FormattingMode::Prepend);
 
     if (hidden) {
@@ -683,7 +672,7 @@ std::vector<lsp::TextEdit> run_formatting(
         append != nullptr) {
       if (const NodeId next = next_node(); next == kNoNode) {
         // nothing follows: there is no gap to format
-      } else if (cst[next].hidden != 0) {
+      } else if (cst[next].isHidden()) {
         pendingAppend = PendingAppend{.target = next,
                                       .source = id,
                                       .indentation = context.indentation};

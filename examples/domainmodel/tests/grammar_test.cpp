@@ -3,6 +3,7 @@
 // and the cycle in `extends`, which is the one check no single node can answer.
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
@@ -31,8 +32,10 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/validation/Diagnostic.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/workspace/DefaultDocuments.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/MemoryFileSystemProvider.hpp"
 #include "domainmodel/CoreServices.hpp"
@@ -53,7 +56,7 @@ constexpr std::string_view kCycle =
 
 struct World {
   cursiv::CoreLanguage<Services, Shared> services =
-      cursiv::create_language<Services, Shared, dm::install_core_module>();
+      cursiv::createLanguage<Services, Shared, dm::install_core_module>();
 
   [[nodiscard]] ct::ValidationResult validate(std::string text) const {
     return ct::validationHelper(services.language, std::move(text));
@@ -128,7 +131,7 @@ struct Disk {
       cursiv::MemoryFileSystemProvider*& files) {
     auto disk = std::make_unique<cursiv::MemoryFileSystemProvider>();
     files = disk.get();
-    return cursiv::create_language<Services, Shared, dm::install_core_module>(
+    return cursiv::createLanguage<Services, Shared, dm::install_core_module>(
         std::move(disk));
   }
 
@@ -205,6 +208,110 @@ void a_cycle_closed_two_documents_away_is_an_error_at_the_start() {
   CHECK(disk.cycles(kC) == 1);
 }
 
+// A new `B` in `a` takes over the reference of `c`, which the edit does not
+// touch: the loop it closes is an error, and it goes when `d` opens it.
+void a_loop_closed_through_a_homonym_comes_and_goes() {
+  Disk disk;
+  const std::string kD = "file:///d.dmodel";
+  disk.write({{std::string(kA), "entity C {\n}\n"},
+              {std::string(kB), "entity B {\n}\n"},
+              {std::string(kC), "entity A extends B {\n}\n"},
+              {kD, "entity Z extends A {\n}\n"}});
+  disk.write({{std::string(kA), "entity B extends Z {\n}\n"}});
+  CHECK(disk.cycles(kA) == 1);
+  CHECK(disk.cycles(kC) == 1);
+  disk.write({{kD, "entity Z {\n}\n"}});
+  CHECK(disk.cycles(kA) == 0);
+  CHECK(disk.cycles(kC) == 0);
+  CHECK(disk.cycles(kD) == 0);
+}
+
+// A chain over many documents, each entity extending the next one's. An edit
+// looks up the document of each step the walks took once, not once per pair
+// of documents, and a loop closed at the far end reaches every document.
+void a_chain_over_many_documents_is_looked_up_once_per_edit() {
+  struct CountingDocuments : cursiv::DefaultDocuments {
+    using cursiv::DefaultDocuments::DefaultDocuments;
+    using cursiv::DefaultDocuments::getDocument;
+    mutable std::atomic<std::size_t> lookups{0};
+
+    std::shared_ptr<cursiv::Document> getDocument(
+        cursiv::DocumentId id) const override {
+      ++lookups;
+      return cursiv::DefaultDocuments::getDocument(id);
+    }
+  };
+  constexpr std::size_t kLength = 200;
+  Disk disk;
+  auto store = std::make_unique<CountingDocuments>(*disk.services.shared);
+  const CountingDocuments& counted = *store;
+  disk.services.shared->documents = std::move(store);
+
+  const auto uri = [](std::size_t i) {
+    return "file:///f" + std::to_string(i) + ".dmodel";
+  };
+  const auto extending = [](std::size_t i, std::size_t super) {
+    return "entity E" + std::to_string(i) + " extends E" + std::to_string(super)
+           + " {\n}\n";
+  };
+  std::vector<std::pair<std::string, std::string>> chain;
+  for (std::size_t i = 0; i + 1 < kLength; ++i)
+    chain.emplace_back(uri(i), extending(i, i + 1));
+  chain.emplace_back(uri(kLength - 1),
+                     "entity E" + std::to_string(kLength - 1) + " {\n}\n");
+  disk.write(chain);
+  CHECK(disk.cycles(uri(0)) == 0);
+
+  counted.lookups = 0;
+  disk.write({{uri(0), extending(0, 1)}});
+  CHECK(counted.lookups.load() < 4 * kLength);
+
+  disk.write({{uri(kLength - 1), extending(kLength - 1, 0)}});
+  std::size_t cycles = 0;
+  for (std::size_t i = 0; i < kLength; ++i) cycles += disk.cycles(uri(i));
+  CHECK(cycles == kLength);
+}
+
+// An edit sends back to validation the documents whose walks go through it,
+// not those that only share a document with such a walk, nor one whose walks
+// no longer go through it.
+void an_edit_revalidates_only_the_walks_through_it() {
+  struct Validated : cursiv::DocumentPhaseListener {
+    std::atomic<std::size_t> count{0};
+    void onDocumentPhase(cursiv::Document&, cursiv::DocumentState reached,
+                         const cursiv::CancellationToken&) override {
+      if (reached == cursiv::DocumentState::Validated) ++count;
+    }
+  };
+  constexpr std::size_t kSharing = 20;
+  Disk disk;
+  Validated validated;
+  disk.services.shared->documentBuilder->addDocumentPhaseListener(validated);
+  const std::string lib = "file:///lib.dmodel";
+  const std::string mid = "file:///mid.dmodel";
+  const std::string base = "file:///base.dmodel";
+  std::vector<std::pair<std::string, std::string>> all{
+      {lib, "entity Named {\n}\n"},
+      {mid, "entity Mid extends Named {\n}\n"},
+      {base, "entity Person extends Mid {\n}\nentity Thing {\n}\n"}};
+  for (std::size_t i = 0; i < kSharing; ++i)
+    all.emplace_back("file:///x" + std::to_string(i) + ".dmodel",
+                     "entity X" + std::to_string(i) + " extends Thing {\n}\n");
+  disk.write(all);
+
+  validated.count = 0;
+  disk.write({{lib, "entity Named {\n}\n"}});
+  CHECK(validated.count.load() == 3);
+
+  // `x0` no longer goes on into `base`: an edit of `base` revalidates it and
+  // the other `x` documents.
+  disk.write({{"file:///x0.dmodel", "entity X0 {\n}\n"}});
+  validated.count = 0;
+  disk.write({{base, "entity Person extends Mid {\n}\nentity Thing {\n}\n"}});
+  CHECK(validated.count.load() == kSharing);
+  disk.services.shared->documentBuilder->removeDocumentPhaseListener(validated);
+}
+
 std::string read_file(const std::filesystem::path& path) {
   std::ifstream in(path, std::ios::binary);
   CHECK(in.is_open());
@@ -263,7 +370,7 @@ void a_long_chain_written_head_first_fits_a_small_stack() {
     const dm::DomainModelValidator fresh(world.services.language);
     Climb job{.validator = &fresh, .document = said.document.get()};
     for (const cursiv::AstNode* node : said.document->parseResult.nodes())
-      if (node->type == &cursiv::ast_type_tag<dm::ast::Entity>
+      if (node->type == &cursiv::kAstTypeTag<dm::ast::Entity>
           && static_cast<const dm::ast::Entity*>(node)->name == "E0")
         job.head = static_cast<const dm::ast::Entity*>(node);
     CHECK(job.head != nullptr);
@@ -407,7 +514,7 @@ void models_generate_their_golden_java() {
 // every rule that holds elements uses that one name.
 void a_token_that_opens_an_element_names_the_member_it_fills() {
   const std::unique_ptr<cursiv::Parser> engine =
-      dm::generated::DomainModel::create_parser();
+      dm::generated::DomainModel::createParser();
   const std::string src = "datatype String\n";
   const cursiv::ParseResult r = engine->parse(src);
   std::vector<cursiv::NextFeature> out;
@@ -471,7 +578,7 @@ void qualified_names_borrow_the_documents_own_text() {
 }
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   a_lowercase_entity_is_a_warning_on_its_name();
   a_lowercase_datatype_says_the_same_sentence();
   capitalised_names_say_nothing();
@@ -481,6 +588,9 @@ int main() {
   a_cycle_closed_in_another_document_is_an_error_in_both();
   a_cycle_through_an_untouched_document_is_an_error();
   a_cycle_closed_two_documents_away_is_an_error_at_the_start();
+  a_loop_closed_through_a_homonym_comes_and_goes();
+  a_chain_over_many_documents_is_looked_up_once_per_edit();
+  an_edit_revalidates_only_the_walks_through_it();
   models_generate_their_golden_java();
   qualified_names_borrow_the_documents_own_text();
 #if defined(__linux__)

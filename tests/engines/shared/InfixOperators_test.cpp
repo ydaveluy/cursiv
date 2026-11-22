@@ -6,27 +6,23 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/FuzzLane.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/CaretOffers.hpp"
 #include "engines/shared/InfixOperatorsGrammar.hpp"
 #include "engines/shared/Checks.hpp"
 #include "engines/shared/UnaryLevelsGrammar.hpp"
-#include "infixoperatorsll/generated/Ll/Module.hpp"
-#include "infixoperatorslr/generated/Lr/Module.hpp"
-#include "unarylevelsll/generated/Ll/Module.hpp"
-#include "unarylevelslr/generated/Lr/Module.hpp"
+#include "infixoperatorslr/generated/Suite/Module.hpp"
+#include "unarylevelslr/generated/Suite/Module.hpp"
 
 namespace infix_operators_cases {
 
-// Operators written in place as sequences, in both engines: each reads as an
+// Operators written in place as sequences: each reads as an
 // unnamed data rule, with its trivia and its conditions, and hands over its
 // parts joined.
 
@@ -85,18 +81,26 @@ std::string read(const cursiv::Parser& parser, std::string_view text) {
   return out;
 }
 
-const char* engine = "";
-
 void check(const cursiv::Parser& parser, std::string_view tag,
            std::string_view text,
            std::string_view expected) {
   const std::string got = read(parser, std::string(tag) + std::string(text));
-  same_text(engine, text, got, expected);
+  same_text("Lr", text, got, expected);
 }
 
 void a_sequence_hands_over_its_parts_joined(const cursiv::Parser& p) {
   check(p, "joined:", "a NOT EQUAL b", "(a NOTEQUAL b)");
   check(p, "enumerated:", "a NOT EQUAL b", "(a NOTEQUAL b)");
+  for (const auto& [text, doc] : {std::pair{"joined:a NOT EQUAL b", "Infix negation."},
+                                  std::pair{"stated:NOT SAME", "Prefix negation."}}) {
+    const auto parsed = p.parse(text);
+    std::string_view found;
+    for (cursiv::NodeId id = 0; id < parsed.cst().size(); ++id)
+      if (parsed.cst()[id].subtreeSize == 1 && parsed.cst().text(id) == "NOT")
+        found = p.getGrammar().recordDoc(parsed.cst()[id]);
+    CHECK(found == doc);
+  }
+  CHECK(p.getGrammar().spellingDoc("NOT").empty());
 }
 
 void trivia_stands_inside_the_sequence(const cursiv::Parser& p) {
@@ -128,6 +132,7 @@ void a_sequence_groups_as_its_level_says(const cursiv::Parser& p) {
 
 void a_terminal_keeps_its_value(const cursiv::Parser& p) {
   check(p, "terminal:", "a = b", "(a equal b)");
+  check(p, "terminal:", "a != b", "(a NOTEQUAL b)");
   check(p, "terminal:", "a = b = c", "((a equal b) equal c)");
 }
 
@@ -213,6 +218,13 @@ void a_data_rule_passes_its_alternative_value(const cursiv::Parser& p) {
         {"visible:regioned protected a", Vis::Protected},
         {"visible:tightenedrepeated protected a", Vis::Protected},
         {"visible:regionedtail protected a", Vis::Protected},
+        {"visible:scopedchoice public a", Vis::Public},
+        {"visible:scopedchoice private a", Vis::Private},
+        {"visible:guardedchoice public a", Vis::Public},
+        {"visible:guardedchoice private a", Vis::Private},
+        {"visible:optionalvalue public a", Vis::Public},
+        {"visible:optionalvalue private a", Vis::Private},
+        {"visible:optionalvalue a", Vis::Private},
         {"visible:inline public a", Vis::Public},
         {"visible:inline protected a", Vis::Protected},
         {"visible:inline private a", Vis::Private}}) {
@@ -373,7 +385,7 @@ void check_marked(const cursiv::Parser& p, std::string_view text,
     got = std::string(name_of(doc->direct)) + ' ';
     spell_marked(*doc->value, got);
   }
-  same_text(engine, text, got, expected);
+  same_text("Lr", text, got, expected);
 }
 
 // Each word of a data rule's alternatives gives its constant to the operator
@@ -408,7 +420,7 @@ void an_operator_naming_its_value_keeps_it(const cursiv::Parser& p) {
   check_marked(p, "÷; a MOD b ^ c / d", "divide (a MOD ((b power c) slash d))");
 }
 
-void every_engine(const cursiv::Parser& p) {
+void exercise(const cursiv::Parser& p) {
   a_sequence_hands_over_its_parts_joined(p);
   trivia_stands_inside_the_sequence(p);
   a_chain_of_the_sequence_groups_by_the_level(p);
@@ -436,19 +448,14 @@ void every_engine(const cursiv::Parser& p) {
 
 }  // namespace
 
-void run() {
-  engine = "Ll";
-  every_engine(*toperators::generated::Ll::create_parser());
-  engine = "Lr";
-  every_engine(*toperators::generated::Lr::create_parser());
-}
+void run() { exercise(*toperators::generated::Suite::createParser()); }
 
 }  // namespace infix_operators_cases
 
 namespace nonassoc_cases {
 
 // A chain of two operators of a `nonassoc` level is an error in the document,
-// in both engines, wherever the chain stands among the other levels.
+// wherever the chain stands among the other levels.
 
 namespace {
 
@@ -477,12 +484,10 @@ std::string read(const cursiv::Parser& parser, std::string_view text) {
   return out;
 }
 
-const char* engine = "";
-
 void check(const cursiv::Parser& parser, std::string_view text,
            std::string_view expected) {
   const std::string got = read(parser, text);
-  same_text(engine, text, got, expected);
+  same_text("Lr", text, got, expected);
 }
 
 void one_operator_of_the_level_reads(const cursiv::Parser& parser) {
@@ -518,7 +523,7 @@ void offers(const cursiv::Parser& parser, std::string_view text,
   const Offers got = caret_offers::offered(
       parser, source, static_cast<cursiv::TextOffset>(9 + at));
   if (got != expected)
-    std::printf("  [%s] caret %zu of %.*s offered a wrong set\n", engine, at,
+    std::printf("  caret %zu of %.*s offered a wrong set\n", at,
                 static_cast<int>(text.size()), text.data());
   CHECK(got == expected);
 }
@@ -543,7 +548,7 @@ void a_caret_in_dropped_text_reads_from_before_it(
     offers(parser, "SAME(~", at, {"(", "ID"});
 }
 
-void every_engine(const cursiv::Parser& parser) {
+void exercise(const cursiv::Parser& parser) {
   one_operator_of_the_level_reads(parser);
   a_chain_of_the_level_is_refused(parser);
   a_chain_behind_a_looser_operator_is_refused(parser);
@@ -554,12 +559,7 @@ void every_engine(const cursiv::Parser& parser) {
 
 }  // namespace
 
-void run() {
-  engine = "Ll";
-  every_engine(*toperators::generated::Ll::create_parser());
-  engine = "Lr";
-  every_engine(*toperators::generated::Lr::create_parser());
-}
+void run() { exercise(*toperators::generated::Suite::createParser()); }
 
 }  // namespace nonassoc_cases
 
@@ -632,28 +632,19 @@ void agree(std::string_view prefix,
            std::initializer_list<std::pair<std::string_view, std::string_view>>
                cases) {
   namespace gen = toperators::generated;
-  const auto ll = gen::Ll::create_parser();
-  const auto llAst = gen::Ll::create_ast_reflection();
-  const auto lr = gen::Lr::create_parser();
-  const auto lrAst = gen::Lr::create_ast_reflection();
-  const auto check = [&](const auto& parser, const auto& ast,
-                         std::string_view engine, std::string_view text,
-                         std::string_view want) {
+  const auto parser = gen::Suite::createParser();
+  const auto ast = gen::Suite::createAstReflection();
+  for (const auto& [text, want] : cases) {
     const std::string source = "election:" + std::string(prefix) +
                                std::string(text);
     const auto result = parser->parse(source);
     CHECK(result.accepted && result.diagnostics.empty() && result.value);
-    if (!result.value) return;
+    if (!result.value) continue;
     const auto got = shape(result.value);
     if (got != want)
-      std::cerr << engine << ": " << text << "\nwant: " << want
-                << "\n got: " << got << '\n';
+      std::cerr << text << "\nwant: " << want << "\n got: " << got << '\n';
     CHECK(got == want);
     check_tree(*ast, result.cst(), *result.value, nullptr);
-  };
-  for (const auto& [text, want] : cases) {
-    check(ll, llAst, "LL", text, want);
-    check(lr, lrAst, "LR", text, want);
   }
 }
 
@@ -698,7 +689,7 @@ void run() {
 
 namespace unary_level_cases {
 
-// Prefix and postfix levels in one table, in both engines: groupings, the
+// Prefix and postfix levels in one table: groupings, the
 // operands a looser prefix may not start, the class each level builds, the
 // value its operator writes, and where a line break ends an operand.
 
@@ -752,8 +743,6 @@ const ast::Expr* value(const cursiv::ParseResult& r) {
   return doc->value;
 }
 
-const char* engine = "";
-
 void check(const cursiv::Parser& parser, std::string_view tag,
            std::string_view text, std::string_view expected) {
   const std::string source = std::string(tag) + std::string(text);
@@ -763,7 +752,7 @@ void check(const cursiv::Parser& parser, std::string_view tag,
     got.clear();
     spell(*v, got);
   }
-  same_text(engine, text, got, expected);
+  same_text("Lr", text, got, expected);
 }
 
 void a_prefix_binds_what_is_tighter(const cursiv::Parser& p) {
@@ -833,6 +822,29 @@ void a_cyclic_table_reads_its_levels(const cursiv::Parser& p) {
   check(p, "cyclic:", "-a++", "(-(a++))");
   check(p, "cyclic:", "a++ * b", "((a++) * b)");
   check(p, "cyclic:", "a?", "[a?]");
+  check(p, "guarded:direct:", "a??", "[[a?]?]");
+  check(p, "guarded:direct:", "1", "1");
+  check(p, "guarded:compound:", "if?", "[if?]");
+  check(p, "guarded:compound:", "else??", "[[else?]?]");
+  check(p, "guarded:compound:", "other", "other");
+  check(p, "guarded:infix:", "\n1?", "[1?]");
+  check(p, "guarded:infix:", "a?+b?", "([a?] + [b?])");
+  check(p, "guarded:infix:", "1+b?", "(1 + [b?])");
+  check(p, "guarded:gap:", "\na!!", "[[a?]?]");
+  check(p, "guarded:word:", "if$", "[if?]");
+  check(p, "guarded:word:", "else", "else");
+  check(p, "guarded:word:", "else!!", "[[else?]?]");
+  check(p, "guarded:scoped:", "a??", "[[a?]?]");
+  check(p, "guarded:scoped:", "if", "if");
+  check(p, "guarded:overlap:", "!a?", "[a?]");
+  CHECK(!p.parse("guarded:compound:other?").diagnostics.empty());
+  CHECK(!p.parse("guarded:direct:1?").diagnostics.empty());
+  CHECK(!p.parse("guarded:infix:1?").diagnostics.empty());
+  CHECK(!p.parse("guarded:gap: a!").diagnostics.empty());
+  CHECK(!p.parse("guarded:word:else$").diagnostics.empty());
+  CHECK(!p.parse("guarded:word:if$!").diagnostics.empty());
+  CHECK(!p.parse("guarded:scoped:if?").diagnostics.empty());
+  CHECK(!p.parse("guarded:overlap:!!a?").diagnostics.empty());
 }
 
 // A newline ends a statement where a reading takes it as a token, and is
@@ -869,7 +881,7 @@ void a_newline_ends_what_reads_it(const cursiv::Parser& p) {
     const bool ok = r.accepted && r.diagnostics.empty() &&
                     !r.cst().recovered() && read == sample.statements;
     if (!ok)
-      std::printf("  [%s] %.*s: %zu diagnostics, %zu statements\n", engine,
+      std::printf("  %.*s: %zu diagnostics, %zu statements\n",
                   static_cast<int>(sample.text.size()), sample.text.data(),
                   r.diagnostics.size(), read);
     CHECK(ok);
@@ -889,23 +901,16 @@ void a_nested_choice_costs_its_depth(const cursiv::Parser& p) {
   CHECK(r.accepted && r.diagnostics.empty() && !r.cst().recovered());
 }
 
-// A closure over rules that may read nothing lasts seconds: a stop reaches it.
-void a_stop_reaches_a_long_closure(const cursiv::Parser& p) {
-  cursiv::CancellationTokenSource source;
-  std::thread stopper([&source] {
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    source.request_stop();
-  });
+// Nested climbs that all end on one token each ask the callers once: asked
+// again from the top, twenty thousand of them would last seconds.
+void a_chain_of_bodies_costs_its_depth(const cursiv::Parser& p) {
+  std::string source = "bodies:";
+  for (unsigned level = 0; level < 20000; ++level) source += "fn ";
+  source += "a;";
   const auto begin = std::chrono::steady_clock::now();
-  bool stopped = false;
-  try {
-    (void)p.parse("empties:a;", source.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    stopped = true;
-  }
-  stopper.join();
-  CHECK(stopped);
+  const cursiv::ParseResult r = p.parse(source);
   CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
+  CHECK(r.accepted && r.diagnostics.empty() && !r.cst().recovered());
 }
 
 // The stacks of a caret's closure merge over rules that read nothing, and every
@@ -920,30 +925,7 @@ void the_token_behind_rules_that_read_nothing_is_offered(
   }
 }
 
-// A caret reads as many ways through those rules as the closure does, each once
-// however many readings reach it. No counter sees this: the time is its proof,
-// by two orders of magnitude.
-void a_caret_keeps_each_way_once(const cursiv::Parser& p) {
-  const std::string text = "empties:a;";
-  const cursiv::ParseResult r = p.parse(text);
-  CHECK(r.accepted && r.diagnostics.empty());
-  std::vector<cursiv::NextFeature> next;
-  const auto begin = std::chrono::steady_clock::now();
-  p.nextFeaturesAt(r.cst(), 8, 8, next);
-  CHECK(!next.empty());
-  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(30));
-  next.clear();
-  p.nextFeaturesAt(r.cst(), 9, 9, next);
-  std::vector<std::string_view> spelt;
-  for (const cursiv::NextFeature& f : next)
-    for (const std::string_view s : p.getGrammar().terminalSpellings(f.feature))
-      spelt.push_back(s);
-  std::sort(spelt.begin(), spelt.end());
-  spelt.erase(std::unique(spelt.begin(), spelt.end()), spelt.end());
-  CHECK((spelt == std::vector<std::string_view>{"!", "(", ";"}));
-}
-
-void every_engine(const cursiv::Parser& p) {
+void exercise(const cursiv::Parser& p) {
   the_token_behind_rules_that_read_nothing_is_offered(p);
   a_prefix_binds_what_is_tighter(p);
   a_postfix_binds_what_is_tighter(p);
@@ -952,37 +934,31 @@ void every_engine(const cursiv::Parser& p) {
   a_cyclic_table_reads_its_levels(p);
   a_newline_ends_what_reads_it(p);
   a_nested_choice_costs_its_depth(p);
+  a_chain_of_bodies_costs_its_depth(p);
 }
 
 }  // namespace
 
 void run() {
-  engine = "Ll";
-  every_engine(*tunary::generated::Ll::create_parser());
-  a_stop_reaches_a_long_closure(*tunary::generated::Ll::create_parser());
-  a_caret_keeps_each_way_once(*tunary::generated::Ll::create_parser());
-  engine = "Lr";
-  every_engine(*tunary::generated::Lr::create_parser());
-  {
-    const auto lr = tunary::generated::Lr::create_parser();
-    const std::string text = "empties:a ;";
-    CHECK(caret_offers::offered(*lr, text, 10) ==
-          (std::vector<std::string>{"!", "(", ";", "a"}));
-  }
+  const auto parser = tunary::generated::Suite::createParser();
+  exercise(*parser);
+  const std::string text = "empties:a ;";
+  const auto parsed = parser->parse(text);
+  CHECK(parsed.accepted && parsed.diagnostics.empty());
+  CHECK(parsed.cst().size() >= (1u << 16));
+  CHECK(caret_offers::offered(*parser, text, 10) ==
+        (std::vector<std::string>{"!", "(", ";", "a"}));
   // The fuzz lane writes the binary chains of a table with unary levels, and
-  // each engine's tree agrees with the one the table states.
+  // the parser's tree agrees with the one the table states.
   cursiv::fuzzer::lane<Fuzzed>(
-      "unary_levels_ll", *tunary::generated::Ll::create_parser(),
-      *tunary::generated::Ll::create_ast_reflection(), 200, 0x5a5a5a);
-  cursiv::fuzzer::lane<Fuzzed>(
-      "unary_levels_lr", *tunary::generated::Lr::create_parser(),
-      *tunary::generated::Lr::create_ast_reflection(), 200, 0x6b6b6b);
+      "unary_levels_lr", *parser,
+      *tunary::generated::Suite::createAstReflection(), 200, 0x6b6b6b);
 }
 
 }  // namespace unary_level_cases
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   infix_operators_cases::run();
   nonassoc_cases::run();
   election_loop_cases::run();

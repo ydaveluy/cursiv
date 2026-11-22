@@ -30,7 +30,7 @@ if(_allocator_flags MATCHES "[-/]fsanitize=")
 endif()
 
 include(FetchContent)
-set(_mimalloc_revision 56dc5eb80145f9a3ba7ca23d47c6a248b9d8586c) # v3.6.1
+set(_mimalloc_revision 1ed67b5156a763441d2ec3c20221a7b3cd866129) # v3.7.0
 set(_mimalloc_dir "cursiv_mimalloc-${_mimalloc_revision}")
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
   # A changed WASI patch gets fresh sources, never a tree an older one patched.
@@ -53,10 +53,11 @@ set_source_files_properties(${cursiv_mimalloc_SOURCE_DIR}/src/static.c
     PROPERTIES LANGUAGE CXX)
 target_include_directories(cursivAllocator SYSTEM PRIVATE
     ${cursiv_mimalloc_SOURCE_DIR}/include)
-# Documents are small: huge pages would hold far more memory than they use, and
-# clearing them costs more than they save. MIMALLOC_ALLOW_THP=1 restores them.
+# Documents are small: OS huge pages hold more memory than they use and cost more
+# to clear than they save (MIMALLOC_ALLOW_THP=1 restores them). Their blocks of
+# 80 to 512 KiB share 4 MiB allocator pages, which is faster and smaller.
 target_compile_definitions(cursivAllocator PRIVATE
-    MI_STATIC_LIB MI_MALLOC_OVERRIDE MI_DEFAULT_ALLOW_THP=0)
+    MI_STATIC_LIB MI_MALLOC_OVERRIDE MI_DEFAULT_ALLOW_THP=0 MI_ENABLE_LARGE_PAGES=1)
 # Third-party code: its warnings are silenced.
 target_compile_options(cursivAllocator PRIVATE -w)
 set_target_properties(cursivAllocator PROPERTIES COMPILE_WARNING_AS_ERROR OFF)

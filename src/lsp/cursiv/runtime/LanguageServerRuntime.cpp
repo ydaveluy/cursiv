@@ -454,9 +454,10 @@ template <class Result, class Call, class Params>
 Result serve(NotificationQueue& queue, std::uint64_t behind,
              const CancellationToken& token, Call& call, Params&& params) {
   queue.wait_applied(behind, token);
-  Result result;
   try {
-    result = call(std::forward<Params>(params), token);
+    Result result = call(std::forward<Params>(params), token);
+    if (token.stop_requested()) throw_request_cancelled();
+    return result;
   } catch (const OperationCancelled&) {
     throw_request_cancelled();
   } catch (const std::exception&) {
@@ -464,8 +465,6 @@ Result serve(NotificationQueue& queue, std::uint64_t behind,
   } catch (...) {
     throw_unknown_failure();
   }
-  if (token.stop_requested()) throw_request_cancelled();
-  return result;
 }
 
 // Every request leaves the read loop -- lifecycle refusals are the endpoint's
@@ -489,6 +488,28 @@ auto request(Session& session, Call call) {
         });
     return lsp::RequestResult<Result>(std::move(task));
   };
+}
+
+// Forward a service result into the nullable result type defined by the protocol.
+template <class Result, auto method>
+auto request(Session& session) {
+  return request(session, [&server = session.server](const auto& params, const CancellationToken& token) {
+    auto value = (server.*method)(params, token);
+    Result result;
+    if constexpr (requires { value.has_value(); }) {
+      if (value) result.emplace(std::move(*value));
+    } else {
+      result.emplace(std::move(value));
+    }
+    return result;
+  });
+}
+
+template <auto method>
+auto notification(Session& session, std::string_view name, bool update) {
+  return notification(session, name, update, [&server = session.server](const auto& params) {
+    (server.*method)(params);
+  });
 }
 
 void add_lifecycle_handlers(Session& session, SharedCoreServices& shared) {
@@ -589,71 +610,39 @@ std::vector<lsp::SymbolInformation> flat_symbols(
 void add_text_document_handlers(Session& session) {
   lsp::ServerEndpoint& endpoint = session.endpoint;
   LanguageServer& server = session.server;
-  endpoint.onTextDocumentDidOpen(notification(
-      session, lsp::notifications::TextDocumentDidOpen::Method, true,
-      [&server](const lsp::DidOpenTextDocumentParams& params) {
-        server.didOpen(params);
-      }));
+  endpoint.onTextDocumentDidOpen(notification<&LanguageServer::didOpen>(
+      session, lsp::notifications::TextDocumentDidOpen::Method, true));
 
-  endpoint.onTextDocumentDidChange(notification(
-      session, lsp::notifications::TextDocumentDidChange::Method, true,
-      [&server](const lsp::DidChangeTextDocumentParams& params) {
-        server.didChange(params);
-      }));
+  endpoint.onTextDocumentDidChange(notification<&LanguageServer::didChange>(
+      session, lsp::notifications::TextDocumentDidChange::Method, true));
 
-  endpoint.onTextDocumentDidClose(notification(
-      session, lsp::notifications::TextDocumentDidClose::Method, true,
-      [&server](const lsp::DidCloseTextDocumentParams& params) {
-        server.didClose(params);
-      }));
+  endpoint.onTextDocumentDidClose(notification<&LanguageServer::didClose>(
+      session, lsp::notifications::TextDocumentDidClose::Method, true));
 
   // A save moves no text: the two notifications are not document updates.
-  endpoint.onTextDocumentWillSave(notification(
-      session, lsp::notifications::TextDocumentWillSave::Method, false,
-      [&server](const lsp::WillSaveTextDocumentParams& params) {
-        server.willSave(params);
-      }));
+  endpoint.onTextDocumentWillSave(notification<&LanguageServer::willSave>(
+      session, lsp::notifications::TextDocumentWillSave::Method, false));
 
-  endpoint.onTextDocumentDidSave(notification(
-      session, lsp::notifications::TextDocumentDidSave::Method, false,
-      [&server](const lsp::DidSaveTextDocumentParams& params) {
-        server.didSave(params);
-      }));
+  endpoint.onTextDocumentDidSave(notification<&LanguageServer::didSave>(
+      session, lsp::notifications::TextDocumentDidSave::Method, false));
 
   // The array arm, empty and not null: the client saves either way.
   endpoint.onTextDocumentWillSaveWaitUntil(
-      request(session, [&server](const lsp::WillSaveTextDocumentParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentWillSaveWaitUntilResult result;
-        result = server.willSaveWaitUntil(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentWillSaveWaitUntilResult, &LanguageServer::willSaveWaitUntil>(session));
 
   // A notebook's cells are documents, so the three notifications that move
   // them are document updates.
-  endpoint.onNotebookDocumentDidOpen(notification(
-      session, lsp::notifications::NotebookDocumentDidOpen::Method, true,
-      [&server](const lsp::DidOpenNotebookDocumentParams& params) {
-        server.didOpenNotebookDocument(params);
-      }));
+  endpoint.onNotebookDocumentDidOpen(notification<&LanguageServer::didOpenNotebookDocument>(
+      session, lsp::notifications::NotebookDocumentDidOpen::Method, true));
 
-  endpoint.onNotebookDocumentDidChange(notification(
-      session, lsp::notifications::NotebookDocumentDidChange::Method, true,
-      [&server](const lsp::DidChangeNotebookDocumentParams& params) {
-        server.didChangeNotebookDocument(params);
-      }));
+  endpoint.onNotebookDocumentDidChange(notification<&LanguageServer::didChangeNotebookDocument>(
+      session, lsp::notifications::NotebookDocumentDidChange::Method, true));
 
-  endpoint.onNotebookDocumentDidSave(notification(
-      session, lsp::notifications::NotebookDocumentDidSave::Method, false,
-      [&server](const lsp::DidSaveNotebookDocumentParams& params) {
-        server.didSaveNotebookDocument(params);
-      }));
+  endpoint.onNotebookDocumentDidSave(notification<&LanguageServer::didSaveNotebookDocument>(
+      session, lsp::notifications::NotebookDocumentDidSave::Method, false));
 
-  endpoint.onNotebookDocumentDidClose(notification(
-      session, lsp::notifications::NotebookDocumentDidClose::Method, true,
-      [&server](const lsp::DidCloseNotebookDocumentParams& params) {
-        server.didCloseNotebookDocument(params);
-      }));
+  endpoint.onNotebookDocumentDidClose(notification<&LanguageServer::didCloseNotebookDocument>(
+      session, lsp::notifications::NotebookDocumentDidClose::Method, true));
 
   // The hierarchical answer for a client that reads it; any other client gets
   // the flat `SymbolInformation` list.
@@ -707,126 +696,54 @@ void add_text_document_handlers(Session& session) {
   // The array arm, empty and not null: an empty list is "nothing names
   // this", while null reads as "the server could not answer".
   endpoint.onTextDocumentReferences(
-      request(session, [&server](const lsp::ReferenceParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentReferencesResult result;
-        result = server.references(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentReferencesResult, &LanguageServer::references>(session));
 
   endpoint.onTextDocumentDocumentHighlight(
-      request(session, [&server](const lsp::DocumentHighlightParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentDocumentHighlightResult result;
-        result = server.documentHighlight(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentDocumentHighlightResult, &LanguageServer::documentHighlight>(session));
 
   // Null is the protocol's "this cannot be renamed": the editor shows
   // its own message. The other two arms -- a placeholder, a default --
   // would both promise a rename this server may refuse.
   endpoint.onTextDocumentPrepareRename(
-      request(session, [&server](const lsp::PrepareRenameParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentPrepareRenameResult result;
-        if (const std::optional<lsp::Range> span =
-                server.prepareRename(params, token))
-          result = lsp::PrepareRenameResult(*span);
-        return result;
-      }));
+      request<lsp::TextDocumentPrepareRenameResult, &LanguageServer::prepareRename>(session));
 
   // Null again for a refused rename: a client with no edit applies
   // nothing, with no message worth an error's interruption.
   endpoint.onTextDocumentRename(
-      request(session, [&server](const lsp::RenameParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentRenameResult result;
-        if (std::optional<lsp::WorkspaceEdit> edit =
-                server.rename(params, token))
-          result = std::move(*edit);
-        return result;
-      }));
+      request<lsp::TextDocumentRenameResult, &LanguageServer::rename>(session));
 
   endpoint.onTextDocumentSemanticTokensFull(
-      request(session, [&server](const lsp::SemanticTokensParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentSemanticTokensFullResult result;
-        result = server.semanticTokensFull(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentSemanticTokensFullResult, &LanguageServer::semanticTokensFull>(session));
 
   endpoint.onTextDocumentSemanticTokensRange(
-      request(session, [&server](const lsp::SemanticTokensRangeParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentSemanticTokensRangeResult result;
-        result = server.semanticTokensRange(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentSemanticTokensRangeResult, &LanguageServer::semanticTokensRange>(session));
 
   endpoint.onTextDocumentSemanticTokensFullDelta(
-      request(session, [&server](const lsp::SemanticTokensDeltaParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentSemanticTokensFullDeltaResult result;
-        result.emplace(server.semanticTokensFullDelta(params, token));
-        return result;
-      }));
+      request<lsp::TextDocumentSemanticTokensFullDeltaResult, &LanguageServer::semanticTokensFullDelta>(session));
 
   endpoint.onTextDocumentInlayHint(
-      request(session, [&server](const lsp::InlayHintParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentInlayHintResult result;
-        result = server.inlayHint(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentInlayHintResult, &LanguageServer::inlayHint>(session));
 
   endpoint.onTextDocumentFoldingRange(
-      request(session, [&server](const lsp::FoldingRangeParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentFoldingRangeResult result;
-        result = server.foldingRange(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentFoldingRangeResult, &LanguageServer::foldingRange>(session));
 
   endpoint.onTextDocumentSelectionRange(
-      request(session, [&server](const lsp::SelectionRangeParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentSelectionRangeResult result;
-        result = server.selectionRange(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentSelectionRangeResult, &LanguageServer::selectionRange>(session));
 
   // Null is the protocol's "nothing to show", and the default of the
   // result: a position on no documented word leaves it untouched.
   endpoint.onTextDocumentHover(
-      request(session, [&server](const lsp::HoverParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentHoverResult result;
-        if (std::optional<lsp::Hover> hover = server.hover(params, token))
-          result = std::move(*hover);
-        return result;
-      }));
+      request<lsp::TextDocumentHoverResult, &LanguageServer::hover>(session));
 
   // The list form: `isIncomplete` makes the next keystroke ask again rather
   // than filter what it already has.
   endpoint.onTextDocumentCompletion(
-      request(session, [&server](const lsp::CompletionParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentCompletionResult result;
-        result = server.completion(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentCompletionResult, &LanguageServer::completion>(session));
 
   // Null when there is no signature under the caret: the popup closes rather
   // than showing an empty frame.
   endpoint.onTextDocumentSignatureHelp(
-      request(session, [&server](const lsp::SignatureHelpParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentSignatureHelpResult result;
-        if (std::optional<lsp::SignatureHelp> help =
-                server.signatureHelp(params, token))
-          result = std::move(*help);
-        return result;
-      }));
+      request<lsp::TextDocumentSignatureHelpResult, &LanguageServer::signatureHelp>(session));
 
   // Null when there is nothing to offer: an empty array still draws a lightbulb
   // on some clients. A client without code action literals gets the actions
@@ -853,94 +770,39 @@ void add_text_document_handlers(Session& session) {
   // edits" and "cannot format this" are the same thing to an editor,
   // and the empty list leaves the document alone.
   endpoint.onTextDocumentFormatting(
-      request(session, [&server](const lsp::DocumentFormattingParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentFormattingResult result;
-        result = server.formatting(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentFormattingResult, &LanguageServer::formatting>(session));
 
-  endpoint.onTextDocumentRangeFormatting(request(
-      session, [&server](const lsp::DocumentRangeFormattingParams& params,
-                         const CancellationToken& token) {
-        lsp::TextDocumentRangeFormattingResult result;
-        result = server.rangeFormatting(params, token);
-        return result;
-      }));
+  endpoint.onTextDocumentRangeFormatting(
+      request<lsp::TextDocumentRangeFormattingResult, &LanguageServer::rangeFormatting>(session));
 
-  endpoint.onTextDocumentOnTypeFormatting(request(
-      session, [&server](const lsp::DocumentOnTypeFormattingParams& params,
-                         const CancellationToken& token) {
-        lsp::TextDocumentOnTypeFormattingResult result;
-        result = server.onTypeFormatting(params, token);
-        return result;
-      }));
+  endpoint.onTextDocumentOnTypeFormatting(
+      request<lsp::TextDocumentOnTypeFormattingResult, &LanguageServer::onTypeFormatting>(session));
 
   endpoint.onTextDocumentDocumentLink(
-      request(session, [&server](const lsp::DocumentLinkParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentDocumentLinkResult result;
-        result = server.documentLink(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentDocumentLinkResult, &LanguageServer::documentLink>(session));
 
   endpoint.onTextDocumentCodeLens(
-      request(session, [&server](const lsp::CodeLensParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentCodeLensResult result;
-        result = server.codeLens(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentCodeLensResult, &LanguageServer::codeLens>(session));
 
   // The two hierarchies, three arms each. The client walks the tree one level
   // at a time, so an expansion is its own request carrying the item it expands.
   endpoint.onTextDocumentPrepareCallHierarchy(
-      request(session, [&server](const lsp::CallHierarchyPrepareParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentPrepareCallHierarchyResult result;
-        result = server.prepareCallHierarchy(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentPrepareCallHierarchyResult, &LanguageServer::prepareCallHierarchy>(session));
 
-  endpoint.onCallHierarchyIncomingCalls(request(
-      session, [&server](const lsp::CallHierarchyIncomingCallsParams& params,
-                         const CancellationToken& token) {
-        lsp::CallHierarchyIncomingCallsResult result;
-        result = server.incomingCalls(params, token);
-        return result;
-      }));
+  endpoint.onCallHierarchyIncomingCalls(
+      request<lsp::CallHierarchyIncomingCallsResult, &LanguageServer::incomingCalls>(session));
 
-  endpoint.onCallHierarchyOutgoingCalls(request(
-      session, [&server](const lsp::CallHierarchyOutgoingCallsParams& params,
-                         const CancellationToken& token) {
-        lsp::CallHierarchyOutgoingCallsResult result;
-        result = server.outgoingCalls(params, token);
-        return result;
-      }));
+  endpoint.onCallHierarchyOutgoingCalls(
+      request<lsp::CallHierarchyOutgoingCallsResult, &LanguageServer::outgoingCalls>(session));
 
   endpoint.onTextDocumentPrepareTypeHierarchy(
-      request(session, [&server](const lsp::TypeHierarchyPrepareParams& params,
-                                 const CancellationToken& token) {
-        lsp::TextDocumentPrepareTypeHierarchyResult result;
-        result = server.prepareTypeHierarchy(params, token);
-        return result;
-      }));
+      request<lsp::TextDocumentPrepareTypeHierarchyResult, &LanguageServer::prepareTypeHierarchy>(session));
 
-  endpoint.onTypeHierarchySupertypes(request(
-      session, [&server](const lsp::TypeHierarchySupertypesParams& params,
-                         const CancellationToken& token) {
-        lsp::TypeHierarchySupertypesResult result;
-        result = server.supertypes(params, token);
-        return result;
-      }));
+  endpoint.onTypeHierarchySupertypes(
+      request<lsp::TypeHierarchySupertypesResult, &LanguageServer::supertypes>(session));
 
   endpoint.onTypeHierarchySubtypes(
-      request(session, [&server](const lsp::TypeHierarchySubtypesParams& params,
-                                 const CancellationToken& token) {
-        lsp::TypeHierarchySubtypesResult result;
-        result = server.subtypes(params, token);
-        return result;
-      }));
+      request<lsp::TypeHierarchySubtypesResult, &LanguageServer::subtypes>(session));
 
   // An unknown URI answers empty text rather than an error: the request has
   // no null arm, and "no such document" is not a protocol fault.
@@ -957,31 +819,17 @@ void add_text_document_handlers(Session& session) {
 void add_workspace_handlers(Session& session) {
   lsp::ServerEndpoint& endpoint = session.endpoint;
   LanguageServer& server = session.server;
-  endpoint.onWorkspaceDidChangeWatchedFiles(notification(
-      session, lsp::notifications::WorkspaceDidChangeWatchedFiles::Method, true,
-      [&server](const lsp::DidChangeWatchedFilesParams& params) {
-        server.didChangeWatchedFiles(params);
-      }));
+  endpoint.onWorkspaceDidChangeWatchedFiles(notification<&LanguageServer::didChangeWatchedFiles>(
+      session, lsp::notifications::WorkspaceDidChangeWatchedFiles::Method, true));
 
-  endpoint.onWorkspaceDidChangeConfiguration(notification(
-      session, lsp::notifications::WorkspaceDidChangeConfiguration::Method,
-      false, [&server](const lsp::DidChangeConfigurationParams& params) {
-        server.didChangeConfiguration(params);
-      }));
+  endpoint.onWorkspaceDidChangeConfiguration(notification<&LanguageServer::didChangeConfiguration>(
+      session, lsp::notifications::WorkspaceDidChangeConfiguration::Method, false));
 
-  endpoint.onWorkspaceDidChangeWorkspaceFolders(notification(
-      session, lsp::notifications::WorkspaceDidChangeWorkspaceFolders::Method,
-      false, [&server](const lsp::DidChangeWorkspaceFoldersParams& params) {
-        server.didChangeWorkspaceFolders(params);
-      }));
+  endpoint.onWorkspaceDidChangeWorkspaceFolders(notification<&LanguageServer::didChangeWorkspaceFolders>(
+      session, lsp::notifications::WorkspaceDidChangeWorkspaceFolders::Method, false));
 
   endpoint.onWorkspaceSymbol(
-      request(session, [&server](const lsp::WorkspaceSymbolParams& params,
-                                 const CancellationToken& token) {
-        lsp::WorkspaceSymbolResult result;
-        result = server.workspaceSymbol(params, token);
-        return result;
-      }));
+      request<lsp::WorkspaceSymbolResult, &LanguageServer::workspaceSymbol>(session));
 
   // Registered whether or not the provider resolves: the capability says
   // which, and a symbol nobody resolves goes back as it came.
@@ -994,14 +842,7 @@ void add_workspace_handlers(Session& session) {
   // Null is "no result", also the answer for an unknown name: a
   // command nobody registered is not worth an error across the wire.
   endpoint.onWorkspaceExecuteCommand(
-      request(session, [&server](const lsp::ExecuteCommandParams& params,
-                                 const CancellationToken& token) {
-        lsp::WorkspaceExecuteCommandResult result;
-        if (std::optional<lsp::LSPAny> answer =
-                server.executeCommand(params, token))
-          result = std::move(*answer);
-        return result;
-      }));
+      request<lsp::WorkspaceExecuteCommandResult, &LanguageServer::executeCommand>(session));
 }
 
 // The explorer's six, routed with a handler whatever its options: the
@@ -1009,58 +850,27 @@ void add_workspace_handlers(Session& session) {
 void add_file_operation_handlers(Session& session,
                                  const SharedLspServices& shared) {
   lsp::ServerEndpoint& endpoint = session.endpoint;
-  LanguageServer& server = session.server;
   if (shared.fileOperationHandler == nullptr) return;
 
-  endpoint.onWorkspaceDidCreateFiles(
-      notification(session, lsp::notifications::WorkspaceDidCreateFiles::Method,
-                   false, [&server](const lsp::CreateFilesParams& params) {
-                     server.didCreateFiles(params);
-                   }));
+  endpoint.onWorkspaceDidCreateFiles(notification<&LanguageServer::didCreateFiles>(
+      session, lsp::notifications::WorkspaceDidCreateFiles::Method, false));
 
-  endpoint.onWorkspaceDidRenameFiles(
-      notification(session, lsp::notifications::WorkspaceDidRenameFiles::Method,
-                   false, [&server](const lsp::RenameFilesParams& params) {
-                     server.didRenameFiles(params);
-                   }));
+  endpoint.onWorkspaceDidRenameFiles(notification<&LanguageServer::didRenameFiles>(
+      session, lsp::notifications::WorkspaceDidRenameFiles::Method, false));
 
-  endpoint.onWorkspaceDidDeleteFiles(
-      notification(session, lsp::notifications::WorkspaceDidDeleteFiles::Method,
-                   false, [&server](const lsp::DeleteFilesParams& params) {
-                     server.didDeleteFiles(params);
-                   }));
+  endpoint.onWorkspaceDidDeleteFiles(notification<&LanguageServer::didDeleteFiles>(
+      session, lsp::notifications::WorkspaceDidDeleteFiles::Method, false));
 
   // Null is "nothing to change": the client moves the files with no edit
   // first.
   endpoint.onWorkspaceWillCreateFiles(
-      request(session, [&server](const lsp::CreateFilesParams& params,
-                                 const CancellationToken& token) {
-        lsp::WorkspaceWillCreateFilesResult result;
-        if (std::optional<lsp::WorkspaceEdit> edit =
-                server.willCreateFiles(params, token))
-          result = std::move(*edit);
-        return result;
-      }));
+      request<lsp::WorkspaceWillCreateFilesResult, &LanguageServer::willCreateFiles>(session));
 
   endpoint.onWorkspaceWillRenameFiles(
-      request(session, [&server](const lsp::RenameFilesParams& params,
-                                 const CancellationToken& token) {
-        lsp::WorkspaceWillRenameFilesResult result;
-        if (std::optional<lsp::WorkspaceEdit> edit =
-                server.willRenameFiles(params, token))
-          result = std::move(*edit);
-        return result;
-      }));
+      request<lsp::WorkspaceWillRenameFilesResult, &LanguageServer::willRenameFiles>(session));
 
   endpoint.onWorkspaceWillDeleteFiles(
-      request(session, [&server](const lsp::DeleteFilesParams& params,
-                                 const CancellationToken& token) {
-        lsp::WorkspaceWillDeleteFilesResult result;
-        if (std::optional<lsp::WorkspaceEdit> edit =
-                server.willDeleteFiles(params, token))
-          result = std::move(*edit);
-        return result;
-      }));
+      request<lsp::WorkspaceWillDeleteFilesResult, &LanguageServer::willDeleteFiles>(session));
 }
 
 // MCP over the LSP wire as one request: the params carry an MCP message, the
@@ -1070,8 +880,18 @@ void add_mcp_tunnel(Session& session, const McpService& service) {
       session,
       [server = std::shared_ptr<const McpServer>(service.createServer())](
           lsp::json::Value&& params, const CancellationToken& token) {
-        std::optional<lsp::json::Value> response =
-            server->handle(std::move(params), token);
+        // HTTP carries the negotiated version separately for each client.
+        std::string_view version;
+        auto* message = &params;
+        if (params.isObject() && !params.object().contains("jsonrpc")) {
+          const auto* header = params.object().find("protocolVersion");
+          auto* body = params.object().find("message");
+          if (header && header->isString() && body) {
+            version = header->string();
+            message = body;
+          }
+        }
+        auto response = server->handle(std::move(*message), token, version);
         return std::move(response).value_or(lsp::json::Value(nullptr));
       });
   session.endpoint.onCustomRequest(
@@ -1130,7 +950,7 @@ void add_custom_handlers(Session& session) {
 
 // The endpoint's JSON writer sends each ill-formed UTF-8 part of a string as
 // U+FFFD.
-int start_language_server(SharedLspServices& shared, lsp::io::Stream& stream) {
+int startLanguageServer(SharedLspServices& shared, lsp::io::Stream& stream) {
   ignore_sigpipe_process_wide();
 
   // Declared before the endpoint, whose pool still serves requests as it dies:
@@ -1181,7 +1001,7 @@ int start_language_server(SharedLspServices& shared, lsp::io::Stream& stream) {
 }
 
 int detail::run_language_server_stdio(SharedLspServices& shared) {
-  return start_language_server(shared, lsp::io::standardIO());
+  return startLanguageServer(shared, lsp::io::standardIO());
 }
 
 }  // namespace cursiv

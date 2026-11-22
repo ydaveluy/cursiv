@@ -35,7 +35,7 @@ std::vector<lsp::Location> reference_locations(
     if (source == nullptr) continue;
     locations.push_back(
         lsp::Location{.uri = uri,
-                      .range = to_lsp(source->textDocument().rangeAt(
+                      .range = toLsp(source->textDocument().rangeAt(
                           reference.sourceBegin, reference.sourceEnd))});
   }
   return locations;

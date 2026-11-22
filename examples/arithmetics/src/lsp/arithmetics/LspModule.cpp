@@ -25,14 +25,14 @@ void install_lsp_module(ArithmeticsServices& services) {
 
 ArithmeticsLanguage create_lsp_services(
     std::unique_ptr<cursiv::FileSystemProvider> files) {
-  return cursiv::create_lsp_language<ArithmeticsServices,
+  return cursiv::createLspLanguage<ArithmeticsServices,
                                      ArithmeticsSharedServices,
                                      install_core_module, install_lsp_module>(
       std::move(files));
 }
 
 void register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
-  cursiv::register_lsp_language<ArithmeticsServices, ArithmeticsSharedServices,
+  cursiv::registerLspLanguage<ArithmeticsServices, ArithmeticsSharedServices,
                                 install_core_module, install_lsp_module>(
       sharedServices);
 }

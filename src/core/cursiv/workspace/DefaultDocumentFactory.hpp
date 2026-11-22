@@ -58,6 +58,7 @@ class DefaultDocumentFactory : public DocumentFactory,
                      const CancellationToken& cancelToken) const;
 
  private:
+  void parseDocument(Document& document, const CancellationToken& token) const;
   // Takes the document back to `Changed` with nothing left that names its tree.
   void dropTree(Document& document) const;
 };

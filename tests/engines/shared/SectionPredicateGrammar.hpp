@@ -89,16 +89,22 @@ struct Quoted : cursiv::GrammarSpec {
 // crossed, up to the token that closes the section. An item behind `=` ends
 // on `;`, so the section cannot close behind its name.
 struct Hushed : cursiv::GrammarSpec {
+  static constexpr auto word_boundary = w | cr<"-">;
   struct WS : terminal<some(cr<" ">)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
-  struct MUTE : terminal<cr<"N">> {};
+  struct MUTE : terminal<cr<"N"> | lit<"if!"> | lit<"if-"> | lit<"GO!"> |
+                         lit<"%!"> | lit<":!">> {};
+  struct Keyword
+      : rule<create<ast::Marked>(assign<&ast::Item::text>(kw<"if"> | ikw<"go"> |
+                                                          kw<"%"> | lit<":">) +
+                                 lit<"!">)> {};
   struct Item : rule<create<ast::Item>(assign<&ast::Item::text>(ref<ID>) +
                                        option(gap::none + kw<"N">))> {};
   struct Ended
       : rule<create<ast::Marked>(lit<"="> + assign<&ast::Item::text>(ref<ID>) +
                                  option(gap::none + kw<"N">) + lit<";">)> {};
   struct Root : rule<create<ast::Items>(many(
-                    append<&ast::Items::items>(ref<Item> | ref<Ended>)))> {};
+                    append<&ast::Items::items>(ref<Item> | ref<Ended> | ref<Keyword>)))> {};
   using entry = Root;
   using ignored = WS;
   using hidden = MUTE;
@@ -179,7 +185,5 @@ struct Suite : Last {
                      (lit<"values:"> + ref<SectionValues::Root>)> {};
   using entry = Root;
 };
-struct Ll : Suite {};
-struct Lr : Suite {};
 
 }  // namespace tsecpred

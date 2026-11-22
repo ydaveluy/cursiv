@@ -14,7 +14,7 @@
   do {                                                                   \
     if (!(__VA_ARGS__)) {                                                \
       std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #__VA_ARGS__); \
-      ++failures;                                                        \
+      ++::cursiv::test::failures;                                        \
     }                                                                    \
   } while (0)
 
@@ -37,11 +37,11 @@ inline int report(const char* suite) {
 // The test module's verdicts, counted like a check. `cursiv::test` throws on
 // a mismatch unless a hook says otherwise, and a lane that counts must reach
 // its end: installed first thing in `main`, this one reports and keeps going.
-void count_expectations();
+void countExpectations();
 
 // A whole file, or the empty string when it cannot be read -- what a missing
 // corpus must look like to the check that reads it.
-std::string read_file(const std::string& path);
+std::string readFile(const std::string& path);
 
 }  // namespace cursiv::test
 

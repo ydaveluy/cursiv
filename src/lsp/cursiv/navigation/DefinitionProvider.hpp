@@ -1,5 +1,5 @@
 // Go to definition: the declarations the name at a position links to.
-// `install_default_lsp_services` installs the default.
+// `installDefaultLspServices` installs the default.
 #pragma once
 
 #include <lsp/types.h>

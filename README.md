@@ -41,9 +41,7 @@ editor extension.
 
 - **C++ grammars and ASTs:** grammar rules fill your structs, and the C++
   compiler checks the bindings.
-- **LL and LR parsing:** generated parsers with syntax error recovery.
-- **Fast:** performance comes first, from the generated parsers to the editor
-  services.
+- **LR parsing:** generated parsers with syntax error recovery.
 - **Language services:** symbol indexing, scoping, cross-reference resolution,
   validation and formatting, each one customizable.
 - **Editor and tool integration:** LSP, command-line and Model Context
@@ -97,15 +95,9 @@ its own, with a CLI, a language server and tests.
 
 ## Performance
 
-Performance is a first-class feature of Cursiv: every part is designed to be
-as fast as possible, from the generated parsers to the editor services. The
-parsers are compiled C++, workspaces build their documents in parallel, and
-editor features stay responsive on large documents and workspaces. Cursiv
-suits projects where size and speed matter most.
-
-Each new project includes a benchmark for its language. The
-[benchmark page](docs/benchmarks/README.md) shows how to run it and the
-framework's results.
+Each new project includes a benchmark for measuring document builds and editor
+requests on your own files. The [benchmark guide](docs/benchmarks/README.md)
+shows how to run it and gives results for the example languages.
 
 ## Contributing to Cursiv
 

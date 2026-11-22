@@ -16,9 +16,7 @@ namespace cursiv::fuzzer::detail {
 struct GrammarToken {
   ElementId elem = kNoElement;  // the literal or terminal rule it spells
   std::string text;
-  std::string sep;     // the trivia in front of it, empty for none
-  bool attached =
-      false;  // in a region that ignores nothing: no trivia before it
+  std::string sep;  // the trivia in front of it, empty for none
   std::uint32_t begin = 0, end = 0;
   Veto after;  // what its last assertion forbids the byte after it
 };

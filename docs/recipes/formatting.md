@@ -59,9 +59,9 @@ action around a region:
 | `indent` | Insert a line break and increase indentation |
 | `keep` | Preserve the existing gap |
 
-`formatBlock` applies the usual block layout: a space before the brace,
-indented content and the closing brace on its own line. `BlockFormatOptions`
-changes those defaults.
+`formatBlock` puts a space before the opening brace. Empty blocks stay on
+one line as `{}`. A nonempty block has indented content and a closing brace
+on its own line. Customize these defaults with `BlockFormatOptions`.
 
 ## Install it
 
@@ -82,7 +82,7 @@ selection that ends before the line of the first error is.
 Test the expected text directly:
 
 ```cpp
-(void)ct::expectFormatting(*services,
+(void)ct::expectFormatting(services,
     {.before = "recipe P{use Flour 1}",
      .after = "recipe P {\n    use Flour 1\n}",
      .disposeAfterCheck = true});

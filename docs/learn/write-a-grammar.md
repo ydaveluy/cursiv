@@ -265,23 +265,8 @@ more options.
 
 ## 7. Check the result
 
-Build the project and run its command line on the sample:
-
-```bash
-cmake -B build
-cmake --build build --parallel
-./build/src/calc_cli example/hello.calc
-```
-
-If the parser generator refuses the grammar, the build stops. Look up the
-reported code or message in [Grammar errors](../reference/refusals.md).
-
-The command line prints `example/hello.calc: ok`, or the line and column of a
-syntax error. Add `--dump` to print the concrete syntax tree (CST), one node
-per line with its source range. Unlike the AST, the CST keeps the parentheses.
-
-Then check the tree in a test. In `tests/grammar_test.cpp`, keep the setup.
-Replace the final size check with:
+Update the scaffold's test before building. In `tests/grammar_test.cpp`, keep
+the setup and replace the final check on `persons` and `greetings` with:
 
 ```cpp
 if (model.statements.size() != 4)
@@ -299,14 +284,25 @@ const auto* plus =
     evaluation == nullptr
         ? nullptr
         : cursiv::ast_cast<calc::ast::Binary>(evaluation->expression);
-if (plus == nullptr || plus->op != "+" ||
-    cursiv::ast_cast<calc::ast::Binary>(plus->right) == nullptr)
+const auto* product =
+    plus == nullptr ? nullptr : cursiv::ast_cast<calc::ast::Binary>(plus->right);
+if (plus == nullptr || plus->op != "+" || product == nullptr || product->op != "*")
   return fail("1 + 2 * 3 is not read as 1 + (2 * 3)");
 ```
 
-`ast_cast<T>` returns null when a node is not a `T`, so the test checks each
-class before reading its members. Run the tests with
-`ctest --test-dir build --output-on-failure`.
+`ast_cast<T>` returns null for a different node type. Build, run the tests
+and check the sample:
+
+```bash
+cmake -B build
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+./build/src/calc_cli example/hello.calc
+```
+
+The CLI reports `example/hello.calc: ok`. Add `--dump` to see the concrete
+syntax tree, including the parentheses and their source ranges. If the build
+reports a grammar error, look up its message in [Grammar errors](../reference/refusals.md).
 
 ## Next
 

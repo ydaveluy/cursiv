@@ -9,12 +9,6 @@
 #include <variant>
 #include <vector>
 
-#include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/workspace/Document.hpp"
-#include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/navigation/DefinitionProvider.hpp"
-#include "cursiv/services/LspServices.hpp"
-#include "cursiv/text/LspPosition.hpp"
 #include "cursiv/Disposable.hpp"
 #include "cursiv/DocumentDisposable.hpp"
 #include "cursiv/ExpectFunction.hpp"
@@ -22,6 +16,12 @@
 #include "cursiv/ParseHelper.hpp"
 #include "cursiv/RangeUtils.hpp"
 #include "cursiv/ReplacedIndices.hpp"
+#include "cursiv/navigation/DefinitionProvider.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/text/LspPosition.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
 
 namespace cursiv::test {
 
@@ -35,44 +35,22 @@ Disposable expectGoToDefinition(
   Disposable disposable = detail::documentDisposable(services, document);
   const detail::DisposeOnThrow cleanup(disposable);
 
-  std::vector<lsp::LocationLink> links;
-  if (const auto* const caret =
-          detail::markerAt(marked.indices, expectedGoToDefinition.index);
-      caret != nullptr && services.definitionProvider != nullptr)
-    if (std::optional<std::vector<lsp::LocationLink>> found =
-            services.definitionProvider->getDefinition(
-                *document, to_lsp(document->textDocument().positionAt(*caret)),
-                kNoCancel))
-      links = *std::move(found);
-  // A link answers when it selects the marked span of this document.
-  const auto expect_target = [&](const lsp::LocationLink& link,
-                                 std::size_t rangeIndex) {
-    const auto* const range = detail::markerAt(marked.ranges, rangeIndex);
-    if (range == nullptr) return;
-    detail::expectSameRange(link.targetSelectionRange,
-                            detail::markedRange(*document, *range));
-    expectedFunction(link.targetUri.toString(), document->uri,
-                     "definition at range " +
-                         rangeToString(link.targetSelectionRange) +
-                         " is in another document");
+  std::vector<lsp::Location> targets;
+  const auto uri = lsp::Uri::parse(document->uri);
+  const auto add = [&](std::size_t index) {
+    if (const auto* range = detail::markerAt(marked.ranges, index))
+      targets.push_back({uri, detail::markedRange(*document, *range)});
   };
-
-  if (const auto* const many = std::get_if<std::vector<std::size_t>>(
-          &expectedGoToDefinition.rangeIndex)) {
-    expectedFunction(std::to_string(links.size()), std::to_string(many->size()),
-                     "expected " + std::to_string(many->size()) +
-                         " definitions but received " +
-                         std::to_string(links.size()));
-    for (std::size_t at = 0; at < many->size() && at < links.size(); ++at)
-      expect_target(links[at], (*many)[at]);
-  } else {
-    const std::size_t index =
-        std::get<std::size_t>(expectedGoToDefinition.rangeIndex);
-    expectedFunction(std::to_string(links.size()), "1",
-                     "expected a single definition but received " +
-                         std::to_string(links.size()));
-    if (!links.empty()) expect_target(links.front(), index);
-  }
+  if (const auto* many = std::get_if<std::vector<std::size_t>>(
+          &expectedGoToDefinition.rangeIndex))
+    for (auto index : *many) add(index);
+  else
+    add(std::get<std::size_t>(expectedGoToDefinition.rangeIndex));
+  if (const auto* caret =
+          detail::markerAt(marked.indices, expectedGoToDefinition.index))
+    detail::check_navigation(services, *document, *caret,
+                             detail::NavigationQuery::Definition,
+                             targets, kNoCancel, true);
 
   if (expectedGoToDefinition.disposeAfterCheck) disposable.dispose();
   return disposable;

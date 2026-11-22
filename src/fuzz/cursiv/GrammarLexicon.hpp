@@ -41,25 +41,21 @@ struct Veto {
 struct GrammarLexicon {
   virtual ~GrammarLexicon() = default;
 
-  // The bytes a terminal rule or a literal spells, empty when its expression
-  // spells none; `after` is what its last assertion forbids the byte after
-  // them.
+  // The bytes a token spells, a terminal rule, a literal or a `through`, empty
+  // when its expression spells none; `after` is what its last assertion
+  // forbids the byte after them.
   [[nodiscard]] virtual std::string spell(ElementId, SpellStyle,
                                           DecisionSource&,
                                           Veto& after) const = 0;
   // A spelling the grammar already owns as a literal belongs to that literal,
   // never to a terminal that happens to reach it.
   [[nodiscard]] virtual bool reserved(std::string_view) const = 0;
-  // The shortest ignored word, which leaves no node; empty when the grammar
-  // ignores nothing.
-  [[nodiscard]] virtual std::string_view separator() const = 0;
-  // A region whose skipper runs nothing: two of its tokens admit no separator
-  // between them.
-  [[nodiscard]] virtual bool ignores_nothing(ElementId) const = 0;
-  // A terminal whose own expression begins or ends on a separator byte
-  // includes the trivia beside it: what would separate two tokens becomes
-  // part of one.
-  [[nodiscard]] virtual bool reads_separator(ElementId) const = 0;
+  // The trivia between `before` and `after` in a trivia region, or in the
+  // grammar for `kNoElement`: the shortest word of its first ignored, then
+  // hidden, rule that neither token would merge with; empty when none.
+  [[nodiscard]] virtual std::string_view separator(ElementId scope,
+                                                   ElementId before,
+                                                   ElementId after) const = 0;
 };
 
 }  // namespace cursiv::fuzzer::detail

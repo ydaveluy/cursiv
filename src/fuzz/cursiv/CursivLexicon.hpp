@@ -234,8 +234,8 @@ struct lit_guard<C, S, CI, cursiv::detail::WordBound>
                 typename cursiv::detail::scoped_guard<
                     C, S, CI, cursiv::detail::WordBound>::type> {};
 
-template <class C, str S, bool CI, class Gd, unsigned D>
-struct SpellOf<C, cursiv::detail::Lit<S, CI, Gd>, D> {
+template <class C, str S, bool CI, class Gd, bool Keyword, unsigned D>
+struct SpellOf<C, cursiv::detail::Lit<S, CI, Gd, Keyword>, D> {
   static constexpr std::size_t min = S.size();
   static constexpr Reach reach() {
     cursiv::detail::CharSet f, l;
@@ -272,7 +272,7 @@ struct SpellOf<C, cursiv::detail::CpSet<M, N, S>, D> {
     for (char32_t cp = 0x80; cp <= 0x10FFFF; ++cp)
       if (cursiv::detail::word_class<cursiv::detail::CpSet<M, N, S>>::has(cp)) {
         const std::size_t at = out.size();
-        append_scalar(out, cp);
+        appendScalar(out, cp);
         return cx.admits(out[at]);
       }
     return false;
@@ -486,14 +486,21 @@ bool spell_token(std::string& out, SpellStyle st, DecisionSource& src,
   return spelled;
 }
 
-template <class C, class R>
-constexpr Reach reach_terminal() {
-  return Spell<C, typename cursiv::detail::Normalize<C>::template body<R>,
-               kSpellDepth>::reach();
+template <class C, class E>
+constexpr Reach reach_token() {
+  return Spell<C, E, kSpellDepth>::reach();
 }
+
+// A trivia rule's shortest word, and the bytes the rule's words end on: a
+// token that begins on one of them may be read as more of that trivia.
+struct Trivia {
+  std::string word;
+  cursiv::detail::CharSet ends;
+};
 
 using SpellFn = bool (*)(std::string&, SpellStyle, DecisionSource&, Veto&);
 using ReachFn = Reach (*)();
+using TriviaFn = std::vector<Trivia> (*)();
 
 template <class C, class E>
 consteval SpellFn spell_entry() {
@@ -501,31 +508,55 @@ consteval SpellFn spell_entry() {
   if constexpr (model::kind_of<T>() == ElementKind::terminal_rule)
     return &spell_token<
         C, typename cursiv::detail::Normalize<C>::template body<T>>;
-  else if constexpr (model::kind_of<T>() == ElementKind::literal)
+  else if constexpr (model::kind_of<T>() == ElementKind::literal ||
+                     model::kind_of<T>() == ElementKind::through)
     return &spell_token<C, T>;
   else
     return nullptr;
 }
 
-// A function: only the separator, known at construction, turns a `Reach` into
-// the one bit the walk reads.
+// A function: the bytes a terminal or a `through` begins and ends on, which
+// decide the trivia beside it.
 template <class C, class E>
 consteval ReachFn reach_entry() {
   using T = std::remove_cvref_t<E>;
-  if constexpr (requires { typename T::kind; }) {
-    if constexpr (is_terminal_rule<T>) return &reach_terminal<C, T>;
-  }
-  return nullptr;
+  if constexpr (model::kind_of<T>() == ElementKind::terminal_rule)
+    return &reach_token<
+        C, typename cursiv::detail::Normalize<C>::template body<T>>;
+  else if constexpr (model::kind_of<T>() == ElementKind::through)
+    return &reach_token<C, T>;
+  else
+    return nullptr;
 }
 
-// A region that ignores nothing: its tokens follow one another with no trivia
-// between them. Substitution has already resolved the region's configuration
-// to rule lists.
-template <class E>
-inline constexpr bool region_ignores_nothing = false;
-template <class H, class E>
-inline constexpr bool
-    region_ignores_nothing<cursiv::detail::Skip<TypeList<>, H, E>> = true;
+// Each rule of a list of trivia rules that spells a word, in order.
+template <class C, class L>
+struct lex_trivia;
+template <class C, class... Rs>
+struct lex_trivia<C, TypeList<Rs...>> {
+  static std::vector<Trivia> of() {
+    std::vector<Trivia> out;
+    (add<typename cursiv::detail::Normalize<C>::template body<Rs>>(out), ...);
+    return out;
+  }
+  template <class B>
+  static void add(std::vector<Trivia>& out) {
+    FixedSource none;
+    SpellCtx cx{none};
+    Trivia t{{}, Spell<C, B, kSpellDepth>::reach().last};
+    if (Spell<C, B, kSpellDepth>::run(t.word, SpellStyle::shortest, cx) &&
+        !t.word.empty())
+      out.push_back(std::move(t));
+  }
+};
+
+// A trivia region's trivia, its ignored rules then its hidden ones.
+// Substitution has already resolved the region's configuration to rule lists.
+template <class C, class E>
+inline constexpr TriviaFn region_trivia = nullptr;
+template <class C, class I, class H, class E>
+inline constexpr TriviaFn region_trivia<C, cursiv::detail::Skip<I, H, E>> =
+    &lex_trivia<C, typename cursiv::detail::tl_cat<I, H>::type>::of;
 
 template <class C, class L>
 struct lex_rows;
@@ -533,27 +564,10 @@ template <class C, class... Es>
 struct lex_rows<C, TypeList<Es...>> {
   static constexpr std::array<SpellFn, sizeof...(Es)> kSpell = {
       spell_entry<C, Es>()...};
-  static constexpr std::array<bool, sizeof...(Es)> kIgnoresNothing = {
-      region_ignores_nothing<std::remove_cvref_t<Es>>...};
+  static constexpr std::array<TriviaFn, sizeof...(Es)> kTrivia = {
+      region_trivia<C, std::remove_cvref_t<Es>>...};
   static constexpr std::array<ReachFn, sizeof...(Es)> kReach = {
       reach_entry<C, Es>()...};
-};
-
-template <class C, class L>
-struct lex_separator {
-  static std::string of() { return {}; }
-};
-template <class C, class R0, class... Rs>
-struct lex_separator<C, TypeList<R0, Rs...>> {
-  static std::string of() {
-    FixedSource none;
-    SpellCtx cx{none};
-    std::string out;
-    if (!Spell<C, typename cursiv::detail::Normalize<C>::template body<R0>,
-               kSpellDepth>::run(out, SpellStyle::shortest, cx))
-      return {};
-    return out;
-  }
 };
 
 template <class C>
@@ -561,22 +575,27 @@ struct CursivLexicon final : GrammarLexicon {
   // The literal column comes off the erased model: a spelling the grammar owns
   // is the same whichever path asks for it.
   explicit CursivLexicon(const GrammarModel& g)
-      : _sep(lex_separator<
-             C, typename cursiv::detail::Normalize<C>::ignored>::of()) {
+      : _trivia(lex_trivia<
+                C, typename cursiv::detail::tl_cat<
+                       typename cursiv::detail::Normalize<C>::ignored,
+                       typename cursiv::detail::Normalize<C>::hidden>::type>::
+                    of()) {
     using Rows = lex_rows<C, typename model::positions_for<C>::type>;
-    _readsSeparator.assign(Rows::kReach.size(), false);
+    _regionTrivia.resize(Rows::kTrivia.size());
+    _reads.resize(Rows::kReach.size());
+    _first.resize(Rows::kReach.size());
     for (std::size_t e = 0; e < Rows::kReach.size(); ++e) {
+      if (Rows::kTrivia[e] != nullptr) _regionTrivia[e] = Rows::kTrivia[e]();
       if (Rows::kReach[e] == nullptr) continue;
       const Reach r = Rows::kReach[e]();
-      for (const char c : _sep) {
-        const auto b = static_cast<unsigned char>(c);
-        _readsSeparator[e] =
-            _readsSeparator[e] || r.first.test(b) || r.last.test(b);
-      }
+      _reads[e] = r.first | r.last;
+      _first[e] = r.first;
     }
     for (ElementId e = 0; e < g.positionCount(); ++e) {
       const std::string_view t = g.textOf(e);
-      if (!t.empty()) _reserved.push_back(folded(t));
+      if (t.empty()) continue;
+      _reserved.push_back(folded(t));
+      if (e < _first.size()) _first[e].set(static_cast<unsigned char>(t[0]));
     }
     std::sort(_reserved.begin(), _reserved.end());
     _reserved.erase(std::unique(_reserved.begin(), _reserved.end()),
@@ -600,15 +619,27 @@ struct CursivLexicon final : GrammarLexicon {
     return std::binary_search(_reserved.begin(), _reserved.end(), folded(s));
   }
 
-  [[nodiscard]] std::string_view separator() const override { return _sep; }
-
-  [[nodiscard]] bool ignores_nothing(ElementId e) const override {
-    using Rows = lex_rows<C, typename model::positions_for<C>::type>;
-    return e < Rows::kIgnoresNothing.size() && Rows::kIgnoresNothing[e];
-  }
-
-  [[nodiscard]] bool reads_separator(ElementId e) const override {
-    return e < _readsSeparator.size() && _readsSeparator[e];
+  [[nodiscard]] std::string_view separator(ElementId scope, ElementId before,
+                                           ElementId after) const override {
+    const auto reads = [this](ElementId e, std::string_view word) {
+      return e < _reads.size() &&
+             std::ranges::any_of(word, [&](char c) {
+               return _reads[e].test(static_cast<unsigned char>(c));
+             });
+    };
+    const auto runsOn = [this, after](const Trivia& t) {
+      if (after >= _first.size()) return false;
+      for (unsigned b = 0; b < 256; ++b)
+        if (t.ends.test(static_cast<unsigned char>(b)) &&
+            _first[after].test(static_cast<unsigned char>(b)))
+          return true;
+      return false;
+    };
+    for (const Trivia& t :
+         scope < _regionTrivia.size() ? _regionTrivia[scope] : _trivia)
+      if (!reads(before, t.word) && !reads(after, t.word) && !runsOn(t))
+        return t.word;
+    return {};
   }
 
  private:
@@ -617,19 +648,23 @@ struct CursivLexicon final : GrammarLexicon {
     out.reserve(s.size());
     for (std::size_t i = 0; i < s.size();) {
       std::size_t len = 0;
-      const char32_t cp = scalar_at(s.data() + i, s.size() - i, len);
+      const char32_t cp = scalarAt(s.data() + i, s.size() - i, len);
       if (len == 0) {
         out += s[i++];
         continue;
       }
-      append_scalar(out, cursiv::detail::fold_scalar(cp));
+      appendScalar(out, cursiv::detail::fold_scalar(cp));
       i += len;
     }
     return out;
   }
 
-  std::string _sep;
-  std::vector<bool> _readsSeparator;
+  // The grammar's trivia and each region's, then the bytes each terminal or
+  // `through` begins or ends on, and the bytes each token begins on.
+  std::vector<Trivia> _trivia;
+  std::vector<std::vector<Trivia>> _regionTrivia;
+  std::vector<cursiv::detail::CharSet> _reads;
+  std::vector<cursiv::detail::CharSet> _first;
   std::vector<std::string> _reserved;
 };
 

@@ -1,6 +1,6 @@
 # Cursiv for Agents
 
-This is a C++20 language-engineering framework with LL and LR parser backends.
+This is a C++20 language-engineering framework with an LR parser engine.
 
 For project documentation, read:
 
@@ -13,7 +13,7 @@ For project documentation, read:
 Source directories:
 
 - `src/core/cursiv/`: Grammar model, syntax trees, linking, and workspaces.
-- `src/engines/cursiv/`: LL/LR generators, runtimes, and shared code.
+- `src/engine/cursiv/`: Parser generator and runtime.
 - `src/cli/cursiv/`: Command-line support for language tools.
 - `src/lsp/cursiv/`: Language-server services.
 - `src/mcp/cursiv/`: Model Context Protocol server and language tools.
@@ -34,6 +34,8 @@ Source directories:
 - Fix the existing code and fit into it. Do not add a helper, member, flag,
   code path, check, wrapper, friend or thread-local next to one that already
   does nearly the same: change that one, and delete what becomes unused.
+- Avoid granting friendship to an entire class or struct. Keep operations
+  with the type that owns the data. Ask before changing an API to remove a friend.
 - Fix the cause with one general rule, not a special case per input.
 - Keep comments short: one to three lines saying what the code does, or the
   one rule a caller must know. No reasoning, history, proofs, measurements or
@@ -43,11 +45,12 @@ Source directories:
 
 ## Naming
 
-The public surface follows one rule; `detail` and the engines' internals are
+The public surface follows one rule; `detail` and the engine's internals are
 not held to it.
 
-- Types are `PascalCase`. Member functions and fields are `camelCase`, private
-  fields `_name`. Free functions and grammar DSL names are `snake_case`.
+- Types are `PascalCase`. Functions and fields are `camelCase`, with `_name`
+  for private fields. The grammar DSL and the AST downcast `ast_cast<T>` use
+  `snake_case`.
 - Constants are `kName`. Enumerators are `PascalCase`.
 - A named slot of an AST node is a `property`.
 

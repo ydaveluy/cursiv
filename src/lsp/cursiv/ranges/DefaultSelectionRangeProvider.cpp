@@ -37,32 +37,24 @@ struct TokenSpan {
   TextOffset end = 0;
 };
 
-// The first byte of the code point holding `at`.
-[[nodiscard]] TextOffset scalar_start(std::string_view text,
-                                      TextOffset at) noexcept {
-  while (at > 0 && (static_cast<unsigned char>(text[at]) & 0xC0u) == 0x80u)
-    --at;
-  return at;
-}
-
 [[nodiscard]] TokenSpan token_at(std::string_view text, TextOffset offset) {
   const auto size = static_cast<TextOffset>(text.size());
   const auto is = [&](TextOffset lead) {
     std::size_t len = 0;
     return lead < size &&
-           detail::word_scalar(scalar_at(text.data() + lead, size - lead, len));
+           detail::word_scalar(scalarAt(text.data() + lead, size - lead, len));
   };
   const auto width = [&](TextOffset lead) {
-    return static_cast<TextOffset>(utf8_width(text[lead]));
+    return static_cast<TextOffset>(utf8Width(text[lead]));
   };
-  TextOffset cursor = offset < size ? scalar_start(text, offset) : size;
+  TextOffset cursor = offset < size ? detail::scalar_start(text, offset) : size;
   // A caret just past a word is still on it.
-  if (!is(cursor) && cursor > 0 && is(scalar_start(text, cursor - 1)))
-    cursor = scalar_start(text, cursor - 1);
+  if (!is(cursor) && cursor > 0 && is(detail::scalar_start(text, cursor - 1)))
+    cursor = detail::scalar_start(text, cursor - 1);
   if (!is(cursor)) return {};
   TextOffset begin = cursor;
-  while (begin > 0 && is(scalar_start(text, begin - 1)))
-    begin = scalar_start(text, begin - 1);
+  while (begin > 0 && is(detail::scalar_start(text, begin - 1)))
+    begin = detail::scalar_start(text, begin - 1);
   TextOffset end = cursor + width(cursor);
   while (is(end)) end += width(end);
   return {begin, end};
@@ -78,7 +70,7 @@ class Children {
     const auto [at, fresh] = _of.try_emplace(id);
     if (fresh) {
       for (const NodeId child : _cst.reverseChildren(id)) {
-        throw_if_cancelled(token);
+        throwIfCancelled(token);
         at->second.push_back(child);
       }
       std::ranges::reverse(at->second);
@@ -100,12 +92,12 @@ class Children {
   std::vector<NodeId> chain;
   NodeId found = kNoNode;
   for (NodeId cursor = cst.size(); cursor > 0;) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     const NodeId root = cursor - 1;
     if (covers(cst[root], offset)) {
       // Roots are disjoint: a hidden root covering the offset means no
       // visible one does.
-      if (cst[root].hidden == 0) found = root;
+      if (!cst[root].isHidden()) found = root;
       break;
     }
     cursor = cst.subtreeBegin(root);
@@ -120,7 +112,7 @@ class Children {
     found = kNoNode;
     if (after != under.begin())
       if (const NodeId child = *(after - 1);
-          cst[child].hidden == 0 && covers(cst[child], offset))
+          !cst[child].isHidden() && covers(cst[child], offset))
         found = child;
   }
   return chain;
@@ -132,31 +124,31 @@ std::vector<lsp::SelectionRange>
 DefaultSelectionRangeProvider::getSelectionRanges(
     const Document& document, std::span<const lsp::Position> positions,
     const CancellationToken& token) const {
-  throw_if_cancelled(token);
+  throwIfCancelled(token);
   std::vector<lsp::SelectionRange> answer;
   const Cst& cst = document.parseResult.cst();
 
   answer.reserve(positions.size());
   Children children(cst);
   for (const lsp::Position& position : positions) {
-    throw_if_cancelled(token);
+    throwIfCancelled(token);
     const TextOffset offset =
-        document.textDocument().offsetAt(from_lsp(position));
-    std::vector<NodeId> chain = chain_at(cst, children, offset, token);
-    // A caret one past the last character is still on the word: a CST span
-    // is half-open, so a double-click or word-wise motion often falls one
-    // past the name. One retry, only when nothing covered the offset.
-    if (chain.empty() && offset > 0)
+        document.textDocument().offsetAt(fromLsp(position));
+    // The chain is read where the word under the caret starts, so a caret
+    // just past a word also reaches every record the word ends. Off a word,
+    // one retry one byte back when nothing covers the caret.
+    const TokenSpan word = token_at(document.textDocument().getText(), offset);
+    const bool onWord = word.end > word.begin;
+    std::vector<NodeId> chain =
+        chain_at(cst, children, onWord ? word.begin : offset, token);
+    if (chain.empty() && !onWord && offset > 0)
       chain = chain_at(cst, children, offset - 1, token);
 
     // Innermost first: the word seeds the chain, then each record must
     // contain what it grows, since the protocol requires every step's
     // parent to cover it. A record adding no visible bytes is said once.
     std::vector<TextRange> spans;
-    if (const TokenSpan word =
-            token_at(document.textDocument().getText(), offset);
-        word.end > word.begin)
-      spans.push_back(TextRange{word.begin, word.end});
+    if (onWord) spans.push_back(TextRange{word.begin, word.end});
     for (const unsigned int it : std::views::reverse(chain)) {
       const CstNode& node = cst[it];
       if (!spans.empty()) {
@@ -172,7 +164,7 @@ DefaultSelectionRangeProvider::getSelectionRanges(
     // cursor after it onto another cursor's answer.
     if (spans.empty()) {
       lsp::SelectionRange bare;
-      bare.range = to_lsp(document.textDocument().rangeAt(offset, offset));
+      bare.range = toLsp(document.textDocument().rangeAt(offset, offset));
       answer.push_back(std::move(bare));
       continue;
     }
@@ -186,7 +178,7 @@ DefaultSelectionRangeProvider::getSelectionRanges(
     for (const auto& span : std::views::reverse(spans)) {
       auto next = std::make_unique<lsp::SelectionRange>();
       next->range =
-          to_lsp(document.textDocument().rangeAt(span.begin, span.end));
+          toLsp(document.textDocument().rangeAt(span.begin, span.end));
       next->parent = std::move(parent);
       parent = std::move(next);
     }

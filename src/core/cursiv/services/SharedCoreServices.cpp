@@ -24,7 +24,7 @@ SharedCoreServices::~SharedCoreServices() noexcept = default;
 // Declaration order: `firstMissingService` reports the first missing slot in
 // this order.
 void SharedCoreServices::visitServices(
-    cursiv::function_ref<void(const ServiceSlot&)> yield) const {
+    cursiv::FunctionRef<void(const ServiceSlot&)> yield) const {
   yield({"observabilitySink", true, observabilitySink != nullptr});
   yield({"taskScheduler", true, taskScheduler != nullptr});
   yield({"documents", true, documents != nullptr});
@@ -41,7 +41,7 @@ std::string_view SharedCoreServices::firstMissingService() const {
   return detail::first_missing_service(*this);
 }
 
-void install_default_shared_core_services(SharedCoreServices& shared) {
+void installDefaultSharedCoreServices(SharedCoreServices& shared) {
   if (shared.documents == nullptr)
     shared.documents = std::make_unique<DefaultDocuments>(shared);
   if (shared.serviceRegistry == nullptr)

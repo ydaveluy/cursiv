@@ -7,7 +7,7 @@
 #include "cursiv/grammar/Conversion.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
-// What a condition in a rule tests, on both engines: the token the lexer
+// What a condition in a rule tests: the token the lexer
 // chooses among the terminals the parser can take there. Each shape stands
 // behind its own opening word.
 
@@ -112,6 +112,8 @@ struct Main : cursiv::GrammarSpec {
                   lit<"x"> + lit<"ab">) |
                  (kw<"stope"> + many(lit<"x"> + lit<"a"> + lit<"!">) +
                   !(lit<"x"> + lit<"a">)+lit<"x"> + lit<"ab">) |
+                 (kw<"nullableprefix"> + option(commit(many(lit<"~">) + lit<"{">, lit<"}">)) +
+                  lit<"x">) |
                  (kw<"pair"> + &ref<Pair> + lit<"a"> + lit<"b">) |
                  (kw<"expand"> + many(lit<"<"> + lit<"x">) + !lit<"<"> +
                   lit<"<<">) |

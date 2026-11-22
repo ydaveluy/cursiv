@@ -173,6 +173,11 @@ struct Caret : cursiv::GrammarSpec {
   struct OpensBeta : rule<create<ast::SeesBeta>(
                          assign<&ast::SeesBeta::beta>(ref<ID>) + lit<"-">)> {};
   struct OpensR : rule<kw<"opens"> + (ref<OpensAlpha> | ref<OpensBeta>)> {};
+  struct Mark : rule<option(lit<"!">)> {};
+  struct SplitName : rule<ref<Mark> + ((option(lit<"?">) + ref<ID> + lit<"+">) |
+                                      (option(lit<"~">) + ref<ID> + lit<"-">))> {};
+  struct SplitR : rule<create<ast::SeesAlpha>(kw<"split"> +
+                          assign<&ast::SeesAlpha::alpha>(ref<SplitName>) + lit<";">)> {};
   struct MaybeR
       : rule<create<ast::SeesAlpha>(kw<"maybe"> +
                                     assign<&ast::SeesAlpha::alpha>(ref<ID>) +
@@ -212,7 +217,7 @@ struct Caret : cursiv::GrammarSpec {
   struct StmtR : rule<ref<TickR> | ref<BareR> | ref<DeepR> | ref<DeclR> | ref<UseR> | ref<WordR> | ref<CallR> |
                       ref<AlphaR> | ref<BetaR> | ref<SeeR> | ref<TieR> |
                       ref<AnyR> | ref<HoldR> | ref<NestR> | ref<EitherR> |
-                      ref<DottedR> | ref<OpensR> | ref<MaybeR> | ref<InstanceR>> {};
+                      ref<DottedR> | ref<OpensR> | ref<SplitR> | ref<MaybeR> | ref<InstanceR>> {};
   struct BlockR : rule<create<ast::Block>(
                       lit<"{"> + many(append<&ast::Block::stmts>(ref<StmtR>)) +
                       lit<"}">)> {};

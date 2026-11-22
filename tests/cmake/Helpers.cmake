@@ -1,7 +1,6 @@
 function(cursiv_test name src)
   add_executable(${name} ${src})
-  target_link_libraries(${name} PRIVATE cursiv::test cursiv::engine::ll
-      cursiv::engine::lr ${ARGN})
+  target_link_libraries(${name} PRIVATE cursiv::test cursiv::engine ${ARGN})
   target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   # The executable that runs the test: its own, unless a batch takes it.
   set_target_properties(${name} PROPERTIES CURSIV_TEST_HOST ${name})
@@ -42,15 +41,4 @@ function(cursiv_grammar id header ns)
   else()
     set_property(GLOBAL APPEND PROPERTY CURSIV_TEST_GENERATORS ${id}_gen)
   endif()
-endfunction()
-
-function(cursiv_grammar_pair id header lr ll)
-  cursiv_grammar(${id}lr "${header}" "${lr}" ENGINE LR ${ARGN})
-  cursiv_grammar(${id}ll "${header}" "${ll}" ENGINE LL ${ARGN})
-endfunction()
-
-# Force optional positions through auxiliary rules, including in host tools.
-function(cursiv_aux_grammar id header ns)
-  cursiv_grammar(${id} "${header}" "${ns}" ENGINE LR
-      GENERATOR_ARGS --optional-gate=0)
 endfunction()

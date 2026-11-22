@@ -22,7 +22,7 @@ using cursiv::TextBuilder;
 [[nodiscard]] std::string document_source_path(const cursiv::AstNode& node) {
   const cursiv::Document* const document = node.getDocument();
   if (document == nullptr) return {};
-  return cursiv::file_uri_to_path(document->uri).value_or(document->uri);
+  return cursiv::fileUriToPath(document->uri).value_or(document->uri);
 }
 
 // Escapes text for safe inclusion in the generated HTML body (paths can contain

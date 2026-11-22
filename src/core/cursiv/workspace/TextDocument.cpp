@@ -214,18 +214,23 @@ TextOffset TextDocument::offsetAt(const Position& position) const {
   if (position.line >= _lineStarts.size()) return size();
   const TextOffset begin = _lineStarts[position.line];
   const TextOffset end = lineEnd(position.line);
+  // A line never counts more UTF-16 units than bytes: a column at its byte
+  // length or past it is its end, and one on an ASCII line is a byte count.
+  if (position.character >= end - begin) return end;
   if (asciiLine(position.line))
-    return position.character >= end - begin
-               ? end
-               : static_cast<TextOffset>(begin + position.character);
+    return static_cast<TextOffset>(begin + position.character);
   TextOffset at = begin;
   std::uint32_t units = 0;
-  const std::span<const Mark> marks = marksOf(position.line);
-  if (const auto after =
-          std::ranges::upper_bound(marks, position.character, {}, &Mark::units);
-      after != marks.begin()) {
-    at = std::prev(after)->at;
-    units = std::prev(after)->units;
+  // A unit takes at most three bytes: a column that fits in the line's first
+  // block is counted from its start, with no marks.
+  if (position.character > kMarkSpan / 3) {
+    const std::span<const Mark> marks = marksOf(position.line);
+    if (const auto after = std::ranges::upper_bound(marks, position.character,
+                                                    {}, &Mark::units);
+        after != marks.begin()) {
+      at = std::prev(after)->at;
+      units = std::prev(after)->units;
+    }
   }
   const char* const p = _text.data();
   // Whole words while one keeps the count at or under the column asked, and
@@ -364,7 +369,9 @@ std::span<const TextDocument::Mark> TextDocument::marksOf(
     TextOffset at = start;
     std::uint32_t units = 0;
     row->second.reserve((end - start) / kMarkSpan);
-    for (TextOffset next = start + kMarkSpan; next < end; next += kMarkSpan) {
+    // A mark every `kMarkSpan` bytes short of the end, never an offset past it.
+    for (TextOffset next = start; end - next > kMarkSpan;) {
+      next += kMarkSpan;
       units += advanceUtf16(at, next, wellFormed);
       row->second.push_back({at, units});
     }

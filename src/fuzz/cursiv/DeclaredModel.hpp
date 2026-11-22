@@ -34,26 +34,16 @@ using cursiv::detail::tl_size;
 
 // `refs<E>` names the direct references of one body, so every position
 // holding the same expression shares one instantiation.
-template <class E>
-struct refs_impl;
-template <class E>
-using refs = refs_impl<E>;
 template <class E, class Children = typename ExprShape<E>::children>
-struct refs_form;
-template <class E>
-struct refs_form<E, TypeList<>> {
-  using type = TypeList<>;
-};
+struct refs;
 template <class E, class... Ks>
-struct refs_form<E, TypeList<Ks...>> : tl_cat<typename refs<Ks>::type...> {};
-template <class E>
-struct refs_impl : refs_form<E> {};
+struct refs<E, TypeList<Ks...>> : tl_cat<typename refs<Ks>::type...> {};
 // A region's configuration names rules: they are reachable through it.
 template <class... Is, class... Hs, class E>
-struct refs_impl<cursiv::detail::Skip<TypeList<Is...>, TypeList<Hs...>, E>>
+struct refs<cursiv::detail::Skip<TypeList<Is...>, TypeList<Hs...>, E>, TypeList<E>>
     : tl_cat<TypeList<Is...>, TypeList<Hs...>, typename refs<E>::type> {};
 template <class R>
-struct refs_impl<cursiv::detail::Ref<R>> {
+struct refs<cursiv::detail::Ref<R>, TypeList<>> {
   using type = TypeList<R>;
 };
 // A literal's guard is an expression the lexer runs, so a rule named only
@@ -66,8 +56,8 @@ struct guard_refs {
 };
 template <class Gd>
 struct guard_refs<Gd, true> : refs<Gd> {};
-template <str S, bool CI, class Gd>
-struct refs_impl<cursiv::detail::Lit<S, CI, Gd>> : guard_refs<Gd> {};
+template <str S, bool CI, class Gd, bool Keyword>
+struct refs<cursiv::detail::Lit<S, CI, Gd, Keyword>, TypeList<>> : guard_refs<Gd> {};
 
 // The primary an infix rule climbs over is reached by declaration, not by its
 // synthesised body.
@@ -90,26 +80,11 @@ struct rule_edges
 // so every rule's edges are read once.
 template <class Seen, class Cs>
 struct fresh_of;
-template <class Seen, class... Cs>
-struct fresh_of<Seen, TypeList<Cs...>> {
-  static constexpr std::size_t K = sizeof...(Cs);
-  static constexpr auto kPick = [] {
-    std::array<std::size_t, K + 1> idx{};
-    const std::array<bool, K + 1> in{
-        (index_of<Cs, Seen>::value < tl_size<Seen>::value)...};
-    std::size_t n = 0;
-    for (std::size_t j = 0; j < K; ++j)
-      if (!in[j]) idx[n++] = j;
-    return std::pair<std::size_t, std::array<std::size_t, K + 1>>{n, idx};
-  }();
-  template <std::size_t... I>
-  static auto pick(std::index_sequence<I...>)
-      -> TypeList<cursiv::detail::pack_at_t<kPick.second[I], Cs...>...>;
-  using type = decltype(pick(std::make_index_sequence<kPick.first>{}));
-};
-template <class Seen>
-struct fresh_of<Seen, TypeList<>> {
-  using type = TypeList<>;
+template <class... Seen, class... Cs>
+struct fresh_of<TypeList<Seen...>, TypeList<Cs...>> {
+  struct Known : std::type_identity<Seen>... {};
+  using type = tl_cat_t<cond_t<std::is_base_of_v<std::type_identity<Cs>, Known>,
+                               TypeList<>, TypeList<Cs>>...>;
 };
 
 template <class S, class Seen, class Frontier>
@@ -125,122 +100,90 @@ struct close_rules<S, Seen, TypeList<Fs...>> {
   using type = typename close_rules<S, tl_cat_t<Seen, fresh>, fresh>::type;
 };
 
-// A reference contributes none: the rule it names carries its own.
+// A rule is told apart by its own predicates; every other node states its
+// kind here, so a combinator added without a line fails to compile rather
+// than falling into a permissive default.
 template <class E>
-struct local_impl {
+inline constexpr ElementKind shape_kind = [] {
   static_assert(dependent_false<E>,
-                "this expression node has no position rule: the walk covers "
-                "every node of expr.hpp, so a node reaching here is a new one "
-                "-- give it its own specialization rather than let it "
-                "contribute no position at all");
-};
-template <class E>
-using local = local_impl<E>;
-template <str S, bool CI, class Gd>
-struct local_impl<cursiv::detail::Lit<S, CI, Gd>> {
-  using type = TypeList<cursiv::detail::Lit<S, CI, Gd>>;
-};
-template <class E>
-struct local_impl<cursiv::detail::Trigger<E>> : local<E> {};
-// Prose takes no position: the word under it does.
-template <class E, str T>
-struct local_impl<cursiv::detail::Doc<E, T>> : local<E> {};
+                "this expression node states no kind: give it a line rather "
+                "than let it read as a group");
+  return ElementKind{};
+}();
+template <str S, bool CI, class Gd, bool Keyword>
+inline constexpr ElementKind shape_kind<cursiv::detail::Lit<S, CI, Gd, Keyword>> = ElementKind::literal;
 template <std::uint64_t M, bool N, str S>
-struct local_impl<cursiv::detail::CpSet<M, N, S>> {
-  using type = TypeList<cursiv::detail::CpSet<M, N, S>>;
-};
+inline constexpr ElementKind shape_kind<cursiv::detail::CpSet<M, N, S>> = ElementKind::character_range;
 template <>
-struct local_impl<cursiv::detail::Byte> {
-  using type = TypeList<cursiv::detail::Byte>;
-};
+inline constexpr ElementKind shape_kind<cursiv::detail::Byte> = ElementKind::any_character;
 template <>
-struct local_impl<cursiv::detail::Eof> {
-  using type = TypeList<cursiv::detail::Eof>;
-};
-// An implied token and a gap condition: one zero-width position each, whose
-// condition stands on no position.
-template <class T, class C>
-struct local_impl<cursiv::detail::Implied<T, C>> {
-  using type = TypeList<cursiv::detail::Implied<T, C>>;
-};
-template <class E>
-struct local_impl<cursiv::detail::GapHas<E>> {
-  using type = TypeList<cursiv::detail::GapHas<E>>;
-};
-template <class E>
-struct local_impl<cursiv::detail::GapIs<E>> {
-  using type = TypeList<cursiv::detail::GapIs<E>>;
-};
-template <>
-struct local_impl<cursiv::detail::Epsilon> {
-  using type = TypeList<>;
-};
-template <class D>
-struct local_impl<cursiv::detail::SuperT<D>> {
-  using type = TypeList<>;
-};
-// One position, not three: the run is lexed inside the token, so the
-// operands never stand on the tape.
+inline constexpr ElementKind shape_kind<cursiv::detail::AnyChar> = ElementKind::any_character;
 template <class O, class Cl>
-struct local_impl<cursiv::detail::Through<O, Cl>> {
-  using type = TypeList<cursiv::detail::Through<O, Cl>>;
-};
+inline constexpr ElementKind shape_kind<cursiv::detail::Through<O, Cl>> = ElementKind::through;
 template <class... Es>
-struct local_impl<cursiv::detail::Seq<Es...>>
-    : tl_cat<TypeList<cursiv::detail::Seq<Es...>>,
-             typename local<Es>::type...> {};
+inline constexpr ElementKind shape_kind<cursiv::detail::Seq<Es...>> = ElementKind::group;
 template <class... Es>
-struct local_impl<cursiv::detail::Choice<Es...>>
-    : tl_cat<TypeList<cursiv::detail::Choice<Es...>>,
-             typename local<Es>::type...> {};
+inline constexpr ElementKind shape_kind<cursiv::detail::Choice<Es...>> = ElementKind::ordered_choice;
 template <class... Es>
-struct local_impl<cursiv::detail::Unordered<Es...>>
-    : tl_cat<TypeList<cursiv::detail::Unordered<Es...>>,
-             typename local<Es>::type...> {};
+inline constexpr ElementKind shape_kind<cursiv::detail::Unordered<Es...>> = ElementKind::unordered_group;
 template <std::size_t Mn, std::size_t Mx, class E>
-struct local_impl<cursiv::detail::Repeat<Mn, Mx, E>>
-    : tl_cat<TypeList<cursiv::detail::Repeat<Mn, Mx, E>>,
-             typename local<E>::type> {};
+inline constexpr ElementKind shape_kind<cursiv::detail::Repeat<Mn, Mx, E>> = ElementKind::repetition;
+template <>
+inline constexpr ElementKind shape_kind<cursiv::detail::Eof> = ElementKind::not_predicate;
 template <class E>
-struct local_impl<cursiv::detail::Not<E>>
-    : tl_cat<TypeList<cursiv::detail::Not<E>>, typename local<E>::type> {};
+inline constexpr ElementKind shape_kind<cursiv::detail::Not<E>> = ElementKind::not_predicate;
 template <class E>
-struct local_impl<cursiv::detail::And<E>>
-    : tl_cat<TypeList<cursiv::detail::And<E>>, typename local<E>::type> {};
+inline constexpr ElementKind shape_kind<cursiv::detail::And<E>> = ElementKind::and_predicate;
+// Zero-width where a condition holds, which the walk cannot impose: an
+// assertion.
+template <class T, class C>
+inline constexpr ElementKind shape_kind<cursiv::detail::Implied<T, C>> = ElementKind::and_predicate;
+template <class E>
+inline constexpr ElementKind shape_kind<cursiv::detail::GapHas<E>> = ElementKind::and_predicate;
+template <class E>
+inline constexpr ElementKind shape_kind<cursiv::detail::GapIs<E>> = ElementKind::and_predicate;
 template <auto P, class E>
-struct local_impl<cursiv::detail::Assign<P, E>>
-    : tl_cat<TypeList<cursiv::detail::Assign<P, E>>, typename local<E>::type> {
-};
+inline constexpr ElementKind shape_kind<cursiv::detail::Assign<P, E>> = ElementKind::assignment;
 template <auto P, class E>
-struct local_impl<cursiv::detail::Append<P, E>>
-    : tl_cat<TypeList<cursiv::detail::Append<P, E>>, typename local<E>::type> {
-};
+inline constexpr ElementKind shape_kind<cursiv::detail::Append<P, E>> = ElementKind::assignment;
 template <auto P, class E>
-struct local_impl<cursiv::detail::Flag<P, E>>
-    : tl_cat<TypeList<cursiv::detail::Flag<P, E>>, typename local<E>::type> {};
+inline constexpr ElementKind shape_kind<cursiv::detail::Flag<P, E>> = ElementKind::assignment;
 template <class T, class E>
-struct local_impl<cursiv::detail::Create<T, E>>
-    : tl_cat<TypeList<cursiv::detail::Create<T, E>>, typename local<E>::type> {
-};
-template <class I, class H, class E>
-struct local_impl<cursiv::detail::Skip<I, H, E>>
-    : tl_cat<TypeList<cursiv::detail::Skip<I, H, E>>, typename local<E>::type> {
-};
+inline constexpr ElementKind shape_kind<cursiv::detail::Create<T, E>> = ElementKind::create;
 template <class T, auto P, class E>
-struct local_impl<cursiv::detail::Nest<T, P, E>>
-    : tl_cat<TypeList<cursiv::detail::Nest<T, P, E>>, typename local<E>::type> {
-};
+inline constexpr ElementKind shape_kind<cursiv::detail::Nest<T, P, E>> = ElementKind::nest;
+template <class I, class H, class E>
+inline constexpr ElementKind shape_kind<cursiv::detail::Skip<I, H, E>> = ElementKind::skip_region;
+
+template <class E>
+struct local;
+template <class E, class Children>
+struct local_children;
+template <class E, class... Ks>
+struct local_children<E, TypeList<Ks...>> : tl_cat<TypeList<E>, typename local<Ks>::type...> {};
+
+// Each position precedes its children. A bounded scan occupies a single position.
+template <class E>
+struct local : local_children<E, cond_t<shape_kind<E> == ElementKind::through,
+                                        TypeList<>, typename ExprShape<E>::children>> {};
+template <class E>
+struct local<cursiv::detail::Trigger<E>> : local<E> {};
+template <class E, str T>
+struct local<cursiv::detail::Doc<E, T>> : local<E> {};
+template <>
+struct local<cursiv::detail::Epsilon> { using type = TypeList<>; };
+template <class D>
+struct local<cursiv::detail::SuperT<D>> { using type = TypeList<>; };
+// The named rule owns the position of a reference.
 template <class R>
-struct local_impl<cursiv::detail::Ref<R>> {
-  using type = TypeList<>;
-};
+struct local<cursiv::detail::Ref<R>> { using type = TypeList<>; };
 
 // A terminal is one token and an infix rule builds its own shape: neither's
 // body is walked. The climb's operators are positions of their own, named
 // by the level table rather than by the synthesised body.
 template <class R>
 inline constexpr bool atomic_rule =
-    is_terminal_rule<R> || cursiv::detail::is_infix_rule<R>;
+    kIsTerminalRule<R> || cursiv::detail::is_infix_rule<R>;
 
 // An operator may be spelled, or it may call a terminal or a data rule. A
 // call is no position of its own -- the rule it names carries it, as
@@ -290,104 +233,11 @@ template <class S, class... Rs>
 struct positions_all<S, TypeList<Rs...>>
     : tl_cat<typename positions_of<S, Rs>::type...> {};
 
-// A rule is told apart by its own predicates; every other node states its
-// kind here, so a combinator added without a line fails to compile rather
-// than falling into a permissive default.
-template <class E>
-struct shape_kind {
-  static_assert(dependent_false<E>,
-                "this expression node states no kind: give it a line rather "
-                "than let it read as a group");
-};
-template <str S, bool CI, class Gd>
-struct shape_kind<cursiv::detail::Lit<S, CI, Gd>> {
-  static constexpr ElementKind value = ElementKind::literal;
-};
-template <std::uint64_t M, bool N, str S>
-struct shape_kind<cursiv::detail::CpSet<M, N, S>> {
-  static constexpr ElementKind value = ElementKind::character_range;
-};
-template <>
-struct shape_kind<cursiv::detail::Byte> {
-  static constexpr ElementKind value = ElementKind::any_character;
-};
-template <>
-struct shape_kind<cursiv::detail::AnyChar> {
-  static constexpr ElementKind value = ElementKind::any_character;
-};
-template <class O, class Cl>
-struct shape_kind<cursiv::detail::Through<O, Cl>> {
-  static constexpr ElementKind value = ElementKind::through;
-};
-template <class... Es>
-struct shape_kind<cursiv::detail::Seq<Es...>> {
-  static constexpr ElementKind value = ElementKind::group;
-};
-template <class... Es>
-struct shape_kind<cursiv::detail::Choice<Es...>> {
-  static constexpr ElementKind value = ElementKind::ordered_choice;
-};
-template <class... Es>
-struct shape_kind<cursiv::detail::Unordered<Es...>> {
-  static constexpr ElementKind value = ElementKind::unordered_group;
-};
-template <std::size_t Mn, std::size_t Mx, class E>
-struct shape_kind<cursiv::detail::Repeat<Mn, Mx, E>> {
-  static constexpr ElementKind value = ElementKind::repetition;
-};
-template <>
-struct shape_kind<cursiv::detail::Eof> {
-  static constexpr ElementKind value = ElementKind::not_predicate;
-};
-template <class E>
-struct shape_kind<cursiv::detail::Not<E>> {
-  static constexpr ElementKind value = ElementKind::not_predicate;
-};
-template <class E>
-struct shape_kind<cursiv::detail::And<E>> {
-  static constexpr ElementKind value = ElementKind::and_predicate;
-};
-// Zero-width where a condition holds, which the walk cannot impose: an
-// assertion.
-template <class T, class C>
-struct shape_kind<cursiv::detail::Implied<T, C>>
-    : shape_kind<cursiv::detail::And<C>> {};
-template <class E>
-struct shape_kind<cursiv::detail::GapHas<E>>
-    : shape_kind<cursiv::detail::And<E>> {};
-template <class E>
-struct shape_kind<cursiv::detail::GapIs<E>>
-    : shape_kind<cursiv::detail::And<E>> {};
-template <auto P, class E>
-struct shape_kind<cursiv::detail::Assign<P, E>> {
-  static constexpr ElementKind value = ElementKind::assignment;
-};
-template <auto P, class E>
-struct shape_kind<cursiv::detail::Append<P, E>> {
-  static constexpr ElementKind value = ElementKind::assignment;
-};
-template <auto P, class E>
-struct shape_kind<cursiv::detail::Flag<P, E>> {
-  static constexpr ElementKind value = ElementKind::assignment;
-};
-template <class T, class E>
-struct shape_kind<cursiv::detail::Create<T, E>> {
-  static constexpr ElementKind value = ElementKind::create;
-};
-template <class T, auto P, class E>
-struct shape_kind<cursiv::detail::Nest<T, P, E>> {
-  static constexpr ElementKind value = ElementKind::nest;
-};
-template <class I, class H, class E>
-struct shape_kind<cursiv::detail::Skip<I, H, E>> {
-  static constexpr ElementKind value = ElementKind::skip_region;
-};
-
 template <class E>
 consteval ElementKind kind_of() {
   using T = std::remove_cvref_t<E>;
   if constexpr (requires { typename T::kind; }) {
-    if constexpr (is_terminal_rule<T>)
+    if constexpr (kIsTerminalRule<T>)
       return ElementKind::terminal_rule;
     else if constexpr (cursiv::detail::is_infix_rule<T>)
       return ElementKind::infix_rule;
@@ -396,7 +246,7 @@ consteval ElementKind kind_of() {
     else
       return ElementKind::parser_rule;
   } else {
-    return shape_kind<T>::value;
+    return shape_kind<T>;
   }
 }
 
@@ -404,8 +254,8 @@ template <class E>
 struct text_of {
   static constexpr std::string_view value{};
 };
-template <str S, bool CI, class Gd>
-struct text_of<cursiv::detail::Lit<S, CI, Gd>> {
+template <str S, bool CI, class Gd, bool Keyword>
+struct text_of<cursiv::detail::Lit<S, CI, Gd, Keyword>> {
   static constexpr std::string_view value = S.view();
 };
 
@@ -414,7 +264,7 @@ template <class E>
 consteval std::string_view name_of() {
   using T = std::remove_cvref_t<E>;
   if constexpr (requires { typename T::kind; }) {
-    if constexpr (is_terminal_rule<T>)
+    if constexpr (kIsTerminalRule<T>)
       return cursiv::detail::type_name<cursiv::detail::declared_of_t<T>>();
   }
   return {};

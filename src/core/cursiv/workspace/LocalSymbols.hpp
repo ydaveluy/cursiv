@@ -12,6 +12,7 @@
 
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/utils/CaseFold.hpp"
+#include "cursiv/utils/macros.hpp"
 #include "cursiv/workspace/AstNodeDescription.hpp"
 
 // The local scopes of one document: what is visible from inside the tree,
@@ -46,9 +47,12 @@ class LocalSymbols {
     // call answered, or true over an empty sequence.
     template <class Fn>
     bool forEach(Fn&& fn) const {
-      for (std::uint32_t at = _at; at != kNone;
-           at = _symbols->_nextSameName[at])
-        if (!fn(_symbols->_entries[at])) return false;
+      if (_at == kNone) return true;
+      if (!fn(_symbols->_entries[_at])) return false;
+      if (_symbols->_nextSameName.empty()) return true;
+      for (auto i = _symbols->_nextSameName[_at]; i != kNone;
+           i = _symbols->_nextSameName[i])
+        if (!fn(_symbols->_entries[i])) return false;
       return true;
     }
 
@@ -73,19 +77,16 @@ class LocalSymbols {
   // second call does nothing.
   void buildIndex();
 
-  // Reading, after `buildIndex`. The name is hashed once per walk, on 64 bits
-  // on every target, like `mix`.
-  [[nodiscard]] static std::uint64_t hashName(std::string_view name) noexcept {
-    return folded_hash(name);
+  // Reading, after `buildIndex`. Each scope in a walk uses the same hash.
+  [[nodiscard]] CURSIV_ALWAYS_INLINE static std::uint64_t hashName(
+      std::string_view name) noexcept {
+    return foldedHash(name);
   }
   // Every entry at `container` whose name folds like `name`, in declaration
   // order: an exact reader filters them, a folded one takes them all.
   [[nodiscard]] NameMatches find(const AstNode* container,
                                  std::string_view name,
-                                 std::uint64_t nameHash) const noexcept {
-    return mayHold(container) ? findHeld(container, name, nameHash)
-                              : NameMatches{};
-  }
+                                 std::uint64_t nameHash) const noexcept;
   // The first entry at `container` named `name` that `take` accepts, or null.
   template <class Take>
   [[nodiscard]] const AstNodeDescription* firstNamed(
@@ -99,29 +100,18 @@ class LocalSymbols {
   [[nodiscard]] const AstNodeDescription* firstNamed(
       const AstNode* container, const NameQuery& query, Take&& take) const {
     if (!mayHold(container)) return nullptr;
-    const std::string_view& name = query.name;
-    const std::uint64_t hash = mix(container) ^ query.nameHash;
-    const auto tag = static_cast<std::uint32_t>(hash >> 32u);
-    std::uint32_t first = kNone;
-    bool spelled = false;
-    for (auto at = static_cast<std::size_t>(hash) & _nameMask;;
-         at = (at + 1) & _nameMask) {
-      const NameSlot& slot = _names[at];
-      if (slot.container == nullptr) return nullptr;
-      if (slot.container != container || slot.tag != tag) continue;
-      const auto match = detail::name_match(_entries[slot.first].name, name);
-      if (match != detail::NameMatch::None) {
-        spelled = match == detail::NameMatch::Exact;
-        first = slot.first;
-        break;
-      }
-    }
-    if ((spelled || !query.exact) && take(_entries[first]))
+    const auto [at, match] =
+        nameSlot(container, mix(container) ^ query.nameHash, query.name);
+    if (match == detail::NameMatch::None) return nullptr;
+    const auto first = _names[at].first;
+    if ((!query.exact || match == detail::NameMatch::Exact) &&
+        take(_entries[first]))
       return &_entries[first];
-    for (auto at = _nextSameName[first]; at != kNone; at = _nextSameName[at]) {
-      const AstNodeDescription& entry = _entries[at];
-      if (query.exact && entry.name != name) continue;
-      if (take(entry)) return &entry;
+    if (_nextSameName.empty()) return nullptr;
+    for (auto i = _nextSameName[first]; i != kNone; i = _nextSameName[i]) {
+      const auto& entry = _entries[i];
+      if ((!query.exact || entry.name == query.name) && take(entry))
+        return &entry;
     }
     return nullptr;
   }
@@ -156,13 +146,27 @@ class LocalSymbols {
     std::uint32_t count = 0;
   };
 
-  // The key is in the slot, and the tag with it, so a probe that misses reads
-  // this cache line and no other: the entry array is touched only on a hit.
   struct NameSlot {
     const AstNode* container = nullptr;
     std::uint32_t first = kNone;
     std::uint32_t tag = 0;
   };
+
+  // The matching slot and its spelling, or the first empty slot on a miss.
+  [[nodiscard]] std::pair<std::size_t, detail::NameMatch> nameSlot(
+      const AstNode* container, std::uint64_t hash,
+      std::string_view name) const noexcept {
+    const auto tag = static_cast<std::uint32_t>(hash >> 32u);
+    for (auto at = static_cast<std::size_t>(hash) & _nameMask;;
+         at = (at + 1) & _nameMask) {
+      const auto& slot = _names[at];
+      if (slot.container == nullptr) return {at, detail::NameMatch::None};
+      if (slot.container == container && slot.tag == tag) {
+        const auto match = detail::name_match(_entries[slot.first].name, name);
+        if (match != detail::NameMatch::None) return {at, match};
+      }
+    }
+  }
 
   // A node at a depth that is a multiple of `kStride`, with at least `kStride`
   // levels below it, and the nearest node at or above it that holds entries.
@@ -184,21 +188,25 @@ class LocalSymbols {
     std::size_t mask = 0;
   };
 
-  [[nodiscard]] const Group* group(const AstNode* container) const noexcept;
-  [[nodiscard]] NameMatches findHeld(const AstNode* container,
-                                     std::string_view name,
-                                     std::uint64_t nameHash) const noexcept;
+  [[nodiscard]] const Group* group(const AstNode* container) const noexcept {
+    if (!mayHold(container)) return nullptr;
+    const auto mask = _groups.size() - 1;
+    auto at = static_cast<std::size_t>(mix(container)) & mask;
+    while (_groups[at].container != nullptr) {
+      if (_groups[at].container == container) return &_groups[at];
+      at = (at + 1) & mask;
+    }
+    return nullptr;
+  }
   // The nearest holder at or above `node`, when `node` has a shortcut and the
   // walk ends at `document`. The first call builds the table.
   [[nodiscard]] const Shortcut* shortcut(
       const AstNode* node, const AstNode* document) const noexcept;
 
-  // 64 bits on every target, as the tag is the high half. The pointer's low
-  // bits are alignment, so they are shifted away before spreading.
+  // The high product bits spread aligned addresses across power-of-two tables.
   [[nodiscard]] static std::uint64_t mix(const void* p) noexcept {
-    std::uint64_t h = reinterpret_cast<std::uintptr_t>(p) >> 4u;
-    h *= 0x9e3779b97f4a7c15ull;
-    return h ^ (h >> 29u);
+    const std::uint64_t address = reinterpret_cast<std::uintptr_t>(p);
+    return (address * 0x9e3779b97f4a7c15ull) >> 32u;
   }
 
   // Inline, and one bit: a walk passes several containers holding nothing for
@@ -220,16 +228,12 @@ class LocalSymbols {
 
   // Grouped by container after `buildIndex`, each group in declaration order.
   std::vector<AstNodeDescription> _entries;
-  // The container of `_entries[i]`, while building only: `buildIndex` groups
-  // the entries by it and drops it, since each group then names its container.
-  std::vector<const AstNode*> _containerOf;
-  // The next entry of the same container carrying the same name, or `kNone`.
-  std::vector<std::uint32_t> _nextSameName;
-  // Open-addressed, power of two, linear probing.
+  // Declaration runs during collection, then a lookup table by container.
   std::vector<Group> _groups;
+  // Each slot links one scope's homonyms in declaration order.
   std::vector<NameSlot> _names;
-  std::size_t _groupMask = 0;
   std::size_t _nameMask = 0;
+  std::vector<std::uint32_t> _nextSameName;
   // The containers, one bit each by address, behind the mask that indexes
   // them: what `mayHold` reads. Null is an empty filter, which a moved-from
   // table is too.
@@ -241,21 +245,17 @@ class LocalSymbols {
 template <class Visit>
 bool LocalSymbols::walkScopes(const AstNode* from, const AstNode* document,
                               Visit&& visit) const {
-  const AstNode* at = from;
-  for (std::uint32_t left = kStride; left != 0; --left) {
-    if (at == nullptr || at == document) return false;
-    if (visit(at)) return true;
-    at = at->parent;
-  }
-  // Nothing holds an entry anywhere.
-  if (_held == nullptr) return false;
-  while (at != nullptr && at != document) {
-    if (const Shortcut* found = shortcut(at, document)) {
-      at = found->holder;
-      if (at == nullptr) return false;
+  std::size_t depth = 0;
+  for (const AstNode* at = from; at != nullptr && at != document;
+       at = at->parent, ++depth) {
+    if (depth >= kStride) [[unlikely]] {
+      if (_held == nullptr) return false;
+      if (const Shortcut* found = shortcut(at, document)) {
+        at = found->holder;
+        if (at == nullptr) return false;
+      }
     }
     if (visit(at)) return true;
-    at = at->parent;
   }
   return false;
 }

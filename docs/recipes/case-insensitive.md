@@ -66,10 +66,8 @@ Each letter matches its other cases, one letter for one letter:
 - `É` matches `é`, and `Σ` matches `σ` and `ς`.
 - A letter never matches two: `ß` does not match `SS`.
 - `İ` and `ı` match only themselves, so `I` matches `i` alone.
-- A case of another length in UTF-8 does not match: `ẞ` and `ß`, the Kelvin
-  sign `K` and `k`, the long `ſ` and `s`, and the Ohm `Ω` and Angstrom `Å`
-  signs and their letters stay apart. An ASCII letter matches only its two
-  ASCII cases.
+- Case variants must have the same UTF-8 length. For example, the Kelvin
+  sign `K` (U+212A) is distinct from both ASCII `K` and `k`.
 - Text is not normalized: `é` written as `e` and a combining accent does not
   match `é`.
 

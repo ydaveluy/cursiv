@@ -20,7 +20,7 @@ class DefaultNameProvider : public NameProvider, protected DefaultCoreService {
 
  private:
   // The member a grammar spells a declared name with.
-  static constexpr std::string_view kNameFeature = "name";
+  static constexpr std::string_view kNameProperty = "name";
 };
 
 }  // namespace cursiv

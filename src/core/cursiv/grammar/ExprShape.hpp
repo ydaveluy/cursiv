@@ -27,10 +27,31 @@ struct ExprAtom {
   template <class...>
   using rebind = E;
 };
+template <template <class...> class Node, class... Es>
+struct ExprBranch {
+  using children = TypeList<Es...>;
+  template <class... Ks>
+  using rebind = Node<Ks...>;
+};
+template <template <class, class> class Node, class T, class E>
+struct ExprOperand {
+  using children = TypeList<E>;
+  template <class K>
+  using rebind = Node<T, K>;
+};
+template <template <auto, class> class Node, auto P, class E>
+struct ExprMember {
+  using children = TypeList<E>;
+  template <class K>
+  using rebind = Node<P, K>;
+};
+
 template <>
 struct ExprShape<Epsilon> : ExprAtom<Epsilon> {};
 template <>
 struct ExprShape<Byte> : ExprAtom<Byte> {};
+template <auto F>
+struct ExprShape<Scan<F>> : ExprAtom<Scan<F>> {};
 template <>
 struct ExprShape<Eof> : ExprAtom<Eof> {};
 template <>
@@ -45,8 +66,8 @@ template <class T, class C>
 struct ExprShape<Implied<T, C>> : ExprAtom<Implied<T, C>> {};
 template <std::uint64_t M, bool N, str S>
 struct ExprShape<CpSet<M, N, S>> : ExprAtom<CpSet<M, N, S>> {};
-template <str S, bool CI, class Gd>
-struct ExprShape<Lit<S, CI, Gd>> : ExprAtom<Lit<S, CI, Gd>> {};
+template <str S, bool CI, class Gd, bool Keyword>
+struct ExprShape<Lit<S, CI, Gd, Keyword>> : ExprAtom<Lit<S, CI, Gd, Keyword>> {};
 // One child and nothing else: the doc text is not a shape, so a splice rebuilds
 // the body and carries the text across unchanged.
 template <class E, str T>
@@ -58,50 +79,22 @@ struct ExprShape<Doc<E, T>> {
 template <class R>
 struct ExprShape<Ref<R>> : ExprAtom<Ref<R>> {};
 template <class C, class E>
-struct ExprShape<As<C, E>> {
-  using children = TypeList<E>;
-  template <class K>
-  using rebind = As<C, K>;
-};
+struct ExprShape<As<C, E>> : ExprOperand<As, C, E> {};
 template <class D>
 struct ExprShape<SuperT<D>> : ExprAtom<SuperT<D>> {};
 
 template <class... Es>
-struct ExprShape<Seq<Es...>> {
-  using children = TypeList<Es...>;
-  template <class... K>
-  using rebind = Seq<K...>;
-};
+struct ExprShape<Seq<Es...>> : ExprBranch<Seq, Es...> {};
 template <class... Es>
-struct ExprShape<Choice<Es...>> {
-  using children = TypeList<Es...>;
-  template <class... K>
-  using rebind = Choice<K...>;
-};
+struct ExprShape<Choice<Es...>> : ExprBranch<Choice, Es...> {};
 template <class... Es>
-struct ExprShape<Unordered<Es...>> {
-  using children = TypeList<Es...>;
-  template <class... K>
-  using rebind = Unordered<K...>;
-};
+struct ExprShape<Unordered<Es...>> : ExprBranch<Unordered, Es...> {};
 template <class O, class Cl>
-struct ExprShape<Through<O, Cl>> {
-  using children = TypeList<O, Cl>;
-  template <class... K>
-  using rebind = Through<K...>;
-};
+struct ExprShape<Through<O, Cl>> : ExprBranch<Through, O, Cl> {};
 template <class G, class E>
-struct ExprShape<Embed<G, E>> {
-  using children = TypeList<E>;
-  template <class... K>
-  using rebind = Embed<G, K...>;
-};
+struct ExprShape<Embed<G, E>> : ExprOperand<Embed, G, E> {};
 template <class Tag, class E>
-struct ExprShape<Mark<Tag, E>> {
-  using children = TypeList<E>;
-  template <class... K>
-  using rebind = Mark<Tag, K...>;
-};
+struct ExprShape<Mark<Tag, E>> : ExprOperand<Mark, Tag, E> {};
 template <class Tag>
 struct ExprShape<Same<Tag>> : ExprAtom<Same<Tag>> {};
 template <std::size_t Mn, std::size_t Mx, class E>
@@ -111,53 +104,21 @@ struct ExprShape<Repeat<Mn, Mx, E>> {
   using rebind = Repeat<Mn, Mx, K>;
 };
 template <class P, class B>
-struct ExprShape<Commit<P, B>> {
-  using children = TypeList<P, B>;
-  template <class... K>
-  using rebind = Commit<K...>;
-};
+struct ExprShape<Commit<P, B>> : ExprBranch<Commit, P, B> {};
 template <class E>
-struct ExprShape<Trigger<E>> {
-  using children = TypeList<E>;
-  template <class... K>
-  using rebind = Trigger<K...>;
-};
+struct ExprShape<Trigger<E>> : ExprBranch<Trigger, E> {};
 template <class E>
-struct ExprShape<Not<E>> {
-  using children = TypeList<E>;
-  template <class... K>
-  using rebind = Not<K...>;
-};
+struct ExprShape<Not<E>> : ExprBranch<Not, E> {};
 template <class E>
-struct ExprShape<And<E>> {
-  using children = TypeList<E>;
-  template <class... K>
-  using rebind = And<K...>;
-};
+struct ExprShape<And<E>> : ExprBranch<And, E> {};
 template <auto Sp, class E>
-struct ExprShape<Assign<Sp, E>> {
-  using children = TypeList<E>;
-  template <class... K>
-  using rebind = Assign<Sp, K...>;
-};
+struct ExprShape<Assign<Sp, E>> : ExprMember<Assign, Sp, E> {};
 template <auto Sp, class E>
-struct ExprShape<Append<Sp, E>> {
-  using children = TypeList<E>;
-  template <class... K>
-  using rebind = Append<Sp, K...>;
-};
+struct ExprShape<Append<Sp, E>> : ExprMember<Append, Sp, E> {};
 template <auto P, class E>
-struct ExprShape<Flag<P, E>> {
-  using children = TypeList<E>;
-  template <class... K>
-  using rebind = Flag<P, K...>;
-};
+struct ExprShape<Flag<P, E>> : ExprMember<Flag, P, E> {};
 template <class T, class E>
-struct ExprShape<Create<T, E>> {
-  using children = TypeList<E>;
-  template <class... K>
-  using rebind = Create<T, K...>;
-};
+struct ExprShape<Create<T, E>> : ExprOperand<Create, T, E> {};
 template <class T, auto P, class E>
 struct ExprShape<Nest<T, P, E>> {
   using children = TypeList<E>;
@@ -171,6 +132,14 @@ struct ExprShape<Skip<I, H, E>> {
   using children = TypeList<E>;
   template <class... K>
   using rebind = Skip<I, H, K...>;
+};
+
+// Rebuild the same expression after transforming each child.
+template <class E, template <class> class Transform, class Children = typename ExprShape<E>::children>
+struct rebuild;
+template <class E, template <class> class Transform, class... Ks>
+struct rebuild<E, Transform, TypeList<Ks...>> {
+  using type = typename ExprShape<E>::template rebind<Transform<Ks>...>;
 };
 
 // A node whose reading is its one child's: doc text, a mark, a region or a
@@ -214,17 +183,20 @@ inline constexpr bool grouping<Skip<I, H, E>> = true;
 template <class G, class E>
 inline constexpr bool grouping<Embed<G, E>> = true;
 
+template <class E>
+inline constexpr bool writes_value = false;
+template <auto Sp, class E>
+inline constexpr bool writes_value<Assign<Sp, E>> = true;
+template <auto Sp, class E>
+inline constexpr bool writes_value<Append<Sp, E>> = true;
+
 // Whether E itself is a directive; `holds_directive` also looks inside.
 template <class E>
-inline constexpr bool is_directive = false;
+inline constexpr bool is_directive = writes_value<E>;
 template <class T, class E>
 inline constexpr bool is_directive<Create<T, E>> = true;
 template <class T, auto P, class E>
 inline constexpr bool is_directive<Nest<T, P, E>> = true;
-template <auto Sp, class E>
-inline constexpr bool is_directive<Assign<Sp, E>> = true;
-template <auto Sp, class E>
-inline constexpr bool is_directive<Append<Sp, E>> = true;
 template <auto P, class E>
 inline constexpr bool is_directive<Flag<P, E>> = true;
 

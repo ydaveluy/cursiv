@@ -73,7 +73,7 @@ RequirementsValidator::computeCoverage() const {
   auto referenced = std::make_shared<Covered>();
   for (const std::shared_ptr<cursiv::Document>& document : documents.all()) {
     const cursiv::AstNode* const root = document->parseResult.value;
-    if (root == nullptr || root->type != &cursiv::ast_type_tag<ast::TestModel>)
+    if (root == nullptr || root->type != &cursiv::kAstTypeTag<ast::TestModel>)
       continue;
     for (const ast::Test* const test :
          static_cast<const ast::TestModel*>(root)->tests) {

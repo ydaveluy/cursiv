@@ -31,7 +31,7 @@ using Shared = sm::StateMachineSharedCoreServices;
 
 struct World {
   cursiv::CoreLanguage<Services, Shared> services =
-      cursiv::create_language<Services, Shared, sm::install_core_module>();
+      cursiv::createLanguage<Services, Shared, sm::install_core_module>();
 
   [[nodiscard]] ct::ValidationResult validate(std::string text) const {
     return ct::validationHelper(services.language, std::move(text));
@@ -243,7 +243,7 @@ void a_failed_generation_is_an_error_and_keeps_the_old_output() {
 }  // namespace
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   a_state_and_an_event_of_one_name_collide();
   two_states_of_one_name_still_collide();
   two_events_of_one_name_still_collide();

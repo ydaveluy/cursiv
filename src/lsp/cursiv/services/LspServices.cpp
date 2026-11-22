@@ -39,7 +39,7 @@ LspServices::~LspServices() noexcept = default;
 // The core rows first, then the LSP ones: `firstMissingService` reports the
 // first missing slot.
 void LspServices::visitServices(
-    cursiv::function_ref<void(const ServiceSlot&)> yield) const {
+    cursiv::FunctionRef<void(const ServiceSlot&)> yield) const {
   CoreServices::visitServices(yield);
   visitOwnServices(yield);
 }
@@ -48,7 +48,7 @@ void LspServices::visitServices(
 // once. None is required: a language answers the requests it has a provider
 // for.
 void LspServices::visitOwnServices(
-    cursiv::function_ref<void(const ServiceSlot&)> yield) const {
+    cursiv::FunctionRef<void(const ServiceSlot&)> yield) const {
   yield({"documentSymbolProvider", false, documentSymbolProvider != nullptr});
   yield({"declarationProvider", false, declarationProvider != nullptr});
   yield({"implementationProvider", false, implementationProvider != nullptr});
@@ -73,8 +73,8 @@ void LspServices::visitOwnServices(
   yield({"codeActionProvider", false, codeActionProvider != nullptr});
 }
 
-void install_default_lsp_services(LspServices& services) {
-  install_default_core_services(services);
+void installDefaultLspServices(LspServices& services) {
+  installDefaultCoreServices(services);
   if (services.documentSymbolProvider == nullptr)
     services.documentSymbolProvider =
         std::make_unique<DefaultDocumentSymbolProvider>(services);

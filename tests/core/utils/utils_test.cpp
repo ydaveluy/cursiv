@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -24,7 +25,6 @@
 #include "cursiv/Version.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
-#include "cursiv/shared/utils/RoundMarks.hpp"
 #include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/ConcurrentTable.hpp"
 #include "cursiv/utils/DocumentCache.hpp"
@@ -73,16 +73,16 @@ void every_byte_is_compared_folded() {
     for (std::size_t at = 0; at < size; ++at) {
       std::string upper = name;
       upper[at] = static_cast<char>(upper[at] - 'a' + 'A');
-      CHECK(cursiv::folded_equal(name, upper));
+      CHECK(cursiv::foldedEqual(name, upper));
       CHECK(cursiv::detail::name_match(name, upper) ==
             cursiv::detail::NameMatch::Folded);
       CHECK(cursiv::detail::name_match(name, std::string(name)) ==
             cursiv::detail::NameMatch::Exact);
-      CHECK(cursiv::folded_hash(name) == cursiv::folded_hash(upper));
+      CHECK(cursiv::foldedHash(name) == cursiv::foldedHash(upper));
       std::string other = name;
       other[at] = '_';
-      CHECK(!cursiv::folded_equal(name, other));
-      CHECK(!cursiv::folded_equal(other, upper));
+      CHECK(!cursiv::foldedEqual(name, other));
+      CHECK(!cursiv::foldedEqual(other, upper));
     }
   }
 }
@@ -91,13 +91,13 @@ void every_byte_is_compared_folded() {
 // nothing else.
 void every_case_of_a_letter_is_one_name() {
   const auto same = [](std::string_view a, std::string_view b) {
-    CHECK(cursiv::folded_equal(a, b));
-    CHECK(cursiv::folded_equal(b, a));
-    CHECK(cursiv::folded_hash(a) == cursiv::folded_hash(b));
+    CHECK(cursiv::foldedEqual(a, b));
+    CHECK(cursiv::foldedEqual(b, a));
+    CHECK(cursiv::foldedHash(a) == cursiv::foldedHash(b));
   };
   const auto apart = [](std::string_view a, std::string_view b) {
-    CHECK(!cursiv::folded_equal(a, b));
-    CHECK(!cursiv::folded_equal(b, a));
+    CHECK(!cursiv::foldedEqual(a, b));
+    CHECK(!cursiv::foldedEqual(b, a));
   };
   same("École", "éCOLE");
   same("ΣΟΦΊΑ", "σοφία");
@@ -121,65 +121,146 @@ void every_case_of_a_letter_is_one_name() {
   apart("\xff" "A", "\xfe" "a");
 }
 
+// A scalar's other cases are every other scalar that folds as it does: the
+// one it folds to first, then the rest ascending.
+void other_cases_are_every_scalar_folding_alike() {
+  using cursiv::detail::fold_scalar;
+  std::unordered_map<char32_t, std::vector<char32_t>> folding_to;
+  for (char32_t x = 0; x <= 0x10FFFF; ++x)
+    if (fold_scalar(x) != x) folding_to[fold_scalar(x)].push_back(x);
+  std::size_t wrong = 0;
+  std::vector<char32_t> want;
+  std::vector<char32_t> got;
+  for (char32_t cp = 0; cp <= 0x10FFFF; ++cp) {
+    if (cp >= 0xD800 && cp <= 0xDFFF) continue;
+    const char32_t to = fold_scalar(cp);
+    want.clear();
+    if (to != cp) want.push_back(to);
+    if (const auto it = folding_to.find(to); it != folding_to.end())
+      for (const char32_t x : it->second)
+        if (x != cp) want.push_back(x);
+    got.clear();
+    cursiv::detail::for_each_other_case(
+        cp, [&got](char32_t other) { got.push_back(other); });
+    if (got != want || cursiv::detail::has_other_case(cp) != !want.empty())
+      ++wrong;
+  }
+  CHECK(wrong == 0);
+  CHECK(!cursiv::detail::has_other_case(0xAA));  // the ordinal indicators
+  CHECK(!cursiv::detail::has_other_case(0xBA));
+}
+
+// A long text without a letter that has another case is read fast.
+void a_text_without_cased_letters_is_read_fast() {
+#if defined(__wasi__) && !defined(NDEBUG)
+  constexpr int kSlowdown = 10;  // unoptimised wasm
+#else
+  constexpr int kSlowdown = 1;
+#endif
+  std::string han;
+  for (std::size_t i = 0; i < 250000; ++i) han += "漢字書文";
+  const auto begin = std::chrono::steady_clock::now();
+  CHECK(!cursiv::detail::has_cased_letter(han));
+  CHECK(std::chrono::steady_clock::now() - begin <
+        std::chrono::seconds(kSlowdown));
+}
+
 }  // namespace
 
 void run() {
   every_byte_is_compared_folded();
   every_case_of_a_letter_is_one_name();
+  a_text_without_cased_letters_is_read_fast();
+  other_cases_are_every_scalar_folding_alike();
 }
 
 }  // namespace case_fold
 
-// A `function_ref` calls what it was bound to: a function, a pointer read at
+// A `FunctionRef` calls what it was bound to: a function, a pointer read at
 // binding, a borrowed callable whose later state it sees.
-namespace function_ref {
+namespace FunctionRef {
 
 namespace {
 int next(int n) { return n + 1; }
 int previous(int n) noexcept { return n - 1; }
-auto from_temporary_pointer() { return cursiv::function_ref<int(int)>(&next); }
+auto from_temporary_pointer() { return cursiv::FunctionRef<int(int)>(&next); }
 struct Value {
   int offset = 4;
   int operator()(int n) const { return n + offset; }
 };
+struct Base {};
+struct Derived : Base {};
+
+// A reference result binds to a reference the callable returns, never to a
+// temporary made from what it returns.
+void a_reference_result_is_never_a_temporary() {
+  using Reads = cursiv::FunctionRef<const std::string&()>;
+  const auto byValue = [] { return std::string("made"); };
+  static_assert(!std::is_constructible_v<Reads, decltype(byValue)&>);
+  static_assert(!std::is_constructible_v<Reads, std::string (*)()>);
+  static_assert(!std::is_constructible_v<cursiv::FunctionRef<std::string&&()>,
+                                         decltype(byValue)&>);
+  int number = 1;
+  const auto widened = [&number]() -> int& { return number; };
+  static_assert(!std::is_constructible_v<cursiv::FunctionRef<const long&()>,
+                                         decltype(widened)&>);
+  std::string text = "kept";
+  const auto byReference = [&text]() -> std::string& { return text; };
+  const auto byMove = [&text]() -> std::string&& { return std::move(text); };
+  static_assert(std::is_constructible_v<Reads, std::string& (*)()>);
+  const Reads kept(byReference);
+  CHECK(&kept() == &text);
+  const Reads moved(byMove);
+  CHECK(&moved() == &text);
+  Derived derived;
+  const auto asDerived = [&derived]() -> Derived& { return derived; };
+  const cursiv::FunctionRef<const Base&()> base(asDerived);
+  CHECK(&base() == &derived);
+  // A value or no result converts or drops what the callable returns.
+  CHECK(cursiv::FunctionRef<std::string()>(byReference)() == "kept");
+  CHECK(cursiv::FunctionRef<long()>(widened)() == 1);
+  const cursiv::FunctionRef<void()> dropped(byValue);
+  dropped();
+}
 }  // namespace
 
 void run() {
-  cursiv::function_ref<int(int)> direct(next);
+  a_reference_result_is_never_a_temporary();
+  cursiv::FunctionRef<int(int)> direct(next);
   CHECK(direct(7) == 8);
   auto held = from_temporary_pointer();
   CHECK(held(2) == 3);
   auto pointer = &next;
-  cursiv::function_ref<int(int)> copied(pointer);
+  cursiv::FunctionRef<int(int)> copied(pointer);
   pointer = &previous;
   CHECK(copied(2) == 3);
-  CHECK(cursiv::function_ref<int(int)>(&previous)(2) == 1);
+  CHECK(cursiv::FunctionRef<int(int)>(&previous)(2) == 1);
   Value value;
-  cursiv::function_ref<int(int)> borrowed(value);
+  cursiv::FunctionRef<int(int)> borrowed(value);
   CHECK(borrowed(1) == 5);
   value.offset = 8;
   CHECK(borrowed(1) == 9);
   const Value constant{3};
-  cursiv::function_ref<int(int)> constBorrowed(constant);
+  cursiv::FunctionRef<int(int)> constBorrowed(constant);
   CHECK(constBorrowed(2) == 5);
   auto mutableCallback = [count = 0]() mutable { return ++count; };
-  cursiv::function_ref<int()> mutableBorrowed(mutableCallback);
+  cursiv::FunctionRef<int()> mutableBorrowed(mutableCallback);
   CHECK(mutableBorrowed() == 1);
   CHECK(mutableBorrowed() == 2);
   CHECK(mutableCallback() == 3);
-  static_assert(!std::is_constructible_v<cursiv::function_ref<int()>,
+  static_assert(!std::is_constructible_v<cursiv::FunctionRef<int()>,
                                          const decltype(mutableCallback)&>);
   int calls = 0;
   const auto callback = [&] { return ++calls; };
-  cursiv::function_ref<void()> discard(callback);
+  cursiv::FunctionRef<void()> discard(callback);
   discard();
   CHECK(calls == 1);
-  cursiv::function_ref<void(int)> discarded_function(next);
+  cursiv::FunctionRef<void(int)> discarded_function(next);
   discarded_function(3);
   static_assert(std::is_trivially_copyable_v<decltype(borrowed)>);
 }
 
-}  // namespace function_ref
+}  // namespace FunctionRef
 
 // The folder tree: the exact query, the prefix at two depths, and the erasure
 // that takes a subtree with it, as the registry uses them.
@@ -291,126 +372,129 @@ namespace uri_utils {
 namespace {
 
 void the_scheme_is_recognized_whatever_its_case() {
-  CHECK(cursiv::is_file_uri("file:///a/b"));
-  CHECK(cursiv::is_file_uri("FILE:///a/b"));
-  CHECK(!cursiv::is_file_uri("http://x/a"));
-  CHECK(cursiv::is_file_uri("file:/a"));
-  CHECK(cursiv::is_file_uri("file:/"));
+  CHECK(cursiv::isFileUri("file:///a/b"));
+  CHECK(cursiv::isFileUri("FILE:///a/b"));
+  CHECK(!cursiv::isFileUri("http://x/a"));
+  CHECK(cursiv::isFileUri("file:/a"));
+  CHECK(cursiv::isFileUri("file:/"));
 }
 
 // `file:/path` has no authority at all (RFC 8089): a Java client sends it
 // where the folder scan sends `file:///path`, and both name one document.
 void a_single_slash_names_the_same_file() {
   if constexpr (!kWindowsPaths)
-    CHECK(cursiv::file_uri_to_path("file:/a/b/c.txt").value() == "/a/b/c.txt");
-  CHECK(cursiv::normalize_uri("file:/a/b/c.txt") == "file:///a/b/c.txt");
-  CHECK(cursiv::equals_uri("file:/a/b/c.txt", "file:///a/b/c.txt"));
-  CHECK(cursiv::normalize_uri("file:/a/b.ws?rev=2#name") ==
+    CHECK(cursiv::fileUriToPath("file:/a/b/c.txt").value() == "/a/b/c.txt");
+  CHECK(cursiv::normalizeUri("file:/a/b/c.txt") == "file:///a/b/c.txt");
+  CHECK(cursiv::equalsUri("file:/a/b/c.txt", "file:///a/b/c.txt"));
+  CHECK(cursiv::normalizeUri("file:/a/b.ws?rev=2#name") ==
         "file:///a/b.ws?rev%3D2#name");
-  CHECK(cursiv::contains_uri("file:/a", "file:///a/b"));
+  CHECK(cursiv::containsUri("file:/a", "file:///a/b"));
   // No authority and no root: it is rooted, the scheme having no relative form.
-  CHECK(cursiv::normalize_uri("file:a/b") == "file:///a/b");
+  CHECK(cursiv::normalizeUri("file:a/b") == "file:///a/b");
 }
 
 // A name is read with its escapes decoded: an escaped dot is still the dot of an
 // extension.
 void an_escape_does_not_hide_an_extension() {
-  CHECK(cursiv::uri_extension("file:///a/b%2Ecalc") == ".calc");
-  CHECK(cursiv::uri_file_name("file:///a/b%2Ecalc") == "b.calc");
-  CHECK(cursiv::uri_file_name("mem:///w/a%20b.ws") == "a b.ws");
-  CHECK(cursiv::uri_file_name("file:///a/c%2Fd") == "d");
+  CHECK(cursiv::uriExtension("file:///a/b%2Ecalc") == ".calc");
+  CHECK(cursiv::uriFileName("file:///a/b%2Ecalc") == "b.calc");
+  CHECK(cursiv::uriFileName("mem:///w/a%20b.ws") == "a b.ws");
+  CHECK(cursiv::uriFileName("file:///a/c%2Fd") == "d");
   // A query is cut where it starts, before anything is decoded.
-  CHECK(cursiv::uri_file_name("file:///a/b%3Fc.ws?x#y") == "b?c.ws");
+  CHECK(cursiv::uriFileName("file:///a/b%3Fc.ws?x#y") == "b?c.ws");
 }
 
 // The authority is written in lower case, userinfo apart: two spellings of one
 // host are one place.
 void a_host_is_lower_case() {
-  CHECK(cursiv::normalize_uri("http://Host:80/A") == "http://host:80/A");
-  CHECK(cursiv::normalize_uri("http://User@Host/a") == "http://User@host/a");
-  CHECK(cursiv::normalize_uri("file://OtherHost/a") == "file://otherhost/a");
-  CHECK(cursiv::equals_uri("http://HOST/a", "http://host/a"));
-  CHECK(cursiv::contains_uri("http://Host/a", "http://host/a/b"));
+  CHECK(cursiv::normalizeUri("http://Host:80/A") == "http://host:80/A");
+  CHECK(cursiv::normalizeUri("http://User@Host/a") == "http://User@host/a");
+  CHECK(cursiv::normalizeUri("file://OtherHost/a") == "file://otherhost/a");
+  CHECK(cursiv::equalsUri("http://HOST/a", "http://host/a"));
+  CHECK(cursiv::containsUri("http://Host/a", "http://host/a/b"));
 }
 
 void an_empty_path_names_no_file() {
   CHECK(support::throws<std::invalid_argument>([&] {
-    (void)cursiv::path_to_file_uri("");
+    (void)cursiv::pathToFileUri("");
   }));
 }
 
 void uri_suffixes_are_not_file_names() {
   if constexpr (!kWindowsPaths) {
-    CHECK(cursiv::file_uri_to_path("file:///a.ws?rev=2#name") == "/a.ws");
-    CHECK(cursiv::file_uri_to_path("file:///a%3Frev%23name.ws") ==
+    CHECK(cursiv::fileUriToPath("file:///a.ws?rev=2#name") == "/a.ws");
+    CHECK(cursiv::fileUriToPath("file:///a%3Frev%23name.ws") ==
           "/a?rev#name.ws");
   }
-  const std::string canonical = cursiv::normalize_uri("file:///a.ws?rev=2#name");
+  const std::string canonical = cursiv::normalizeUri("file:///a.ws?rev=2#name");
   CHECK(canonical == "file:///a.ws?rev%3D2#name");
-  CHECK(cursiv::uri_extension(canonical) == ".ws");
-  CHECK(!cursiv::equals_uri("file:///a.ws?rev=1", "file:///a.ws?rev=2"));
-  CHECK(cursiv::contains_uri("http://host?query", "http://host/child"));
+  CHECK(cursiv::uriExtension(canonical) == ".ws");
+  CHECK(!cursiv::equalsUri("file:///a.ws?rev=1", "file:///a.ws?rev=2"));
+  CHECK(cursiv::containsUri("http://host?query", "http://host/child"));
 }
 
 void a_path_makes_a_uri_and_back() {
   if constexpr (kWindowsPaths) {
     // A rooted path with no drive sits on the current one, unknown here. The
-    // drive letter is spelled as `normalize_uri` spells it.
-    CHECK(cursiv::path_to_file_uri("C:\\a\\b.txt") == "file:///c%3A/a/b.txt");
-    CHECK(cursiv::file_uri_to_path("file:///c%3A/a/b.txt").value() ==
+    // drive letter is spelled as `normalizeUri` spells it.
+    CHECK(cursiv::pathToFileUri("C:\\a\\b.txt") == "file:///c%3A/a/b.txt");
+    CHECK(cursiv::fileUriToPath("file:///c%3A/a/b.txt").value() ==
           "c:\\a\\b.txt");
-    CHECK(cursiv::normalize_uri("file:///w/a.ws") == "file:///w/a.ws");
-    CHECK(cursiv::file_uri_to_path("file://localhost/c:/a").value() == "c:\\a");
-    CHECK(cursiv::file_uri_to_path("file://local%68ost/c:/a").value() ==
+    CHECK(cursiv::normalizeUri("file:///w/a.ws") == "file:///w/a.ws");
+    CHECK(cursiv::fileUriToPath("file://localhost/c:/a").value() == "c:\\a");
+    CHECK(cursiv::fileUriToPath("file://local%68ost/c:/a").value() ==
           "c:\\a");
     // A share: the host stands first, and its drive-like name is no drive.
-    CHECK(cursiv::file_uri_to_path("file://server/share/a.ws").value() ==
+    CHECK(cursiv::fileUriToPath("file://server/share/a.ws").value() ==
           "\\\\server\\share\\a.ws");
-    CHECK(cursiv::file_uri_to_path("file://server/C:/a").value() ==
+    CHECK(cursiv::fileUriToPath("file://server/C:/a").value() ==
           "\\\\server\\C:\\a");
-    CHECK(cursiv::file_uri_to_path("file://wsl.localhost/Ubuntu/a").value() ==
+    CHECK(cursiv::fileUriToPath("file://wsl.localhost/Ubuntu/a").value() ==
           "\\\\wsl.localhost\\Ubuntu\\a");
-    CHECK(cursiv::path_to_file_uri("\\\\Server\\share\\a b") ==
+    CHECK(cursiv::pathToFileUri("\\\\Server\\share\\a b") ==
           "file://server/share/a%20b");
     // Before a share, `localhost` is that share's host, not the current drive.
-    CHECK(cursiv::path_to_file_uri("\\\\localhost\\share\\a") ==
+    CHECK(cursiv::pathToFileUri("\\\\localhost\\share\\a") ==
           "file://localhost/share/a");
-    CHECK(cursiv::file_uri_to_path("file://localhost/share/a").value() ==
+    CHECK(cursiv::fileUriToPath("file://localhost/share/a").value() ==
           "\\\\localhost\\share\\a");
-    CHECK(!cursiv::file_uri_to_path("file://server").has_value());
+    CHECK(!cursiv::fileUriToPath("file://server").has_value());
+    // An escaped NUL in a share's host would end the path it stands in.
+    CHECK(!cursiv::fileUriToPath("file://ser%00ver/share/a").has_value());
   } else {
-    CHECK(cursiv::path_to_file_uri("/a/b/c.txt") == "file:///a/b/c.txt");
-    CHECK(cursiv::file_uri_to_path("file:///a/b/c.txt").value() == "/a/b/c.txt");
+    CHECK(cursiv::pathToFileUri("/a/b/c.txt") == "file:///a/b/c.txt");
+    CHECK(cursiv::fileUriToPath("file:///a/b/c.txt").value() == "/a/b/c.txt");
     // Only `localhost` is a host this process can read a file from.
-    CHECK(cursiv::file_uri_to_path("file://localhost/a").value() == "/a");
-    CHECK(cursiv::file_uri_to_path("file://local%68ost/a") == "/a");
-    CHECK(!cursiv::file_uri_to_path("file://other-host/a").has_value());
+    CHECK(cursiv::fileUriToPath("file://localhost/a").value() == "/a");
+    CHECK(cursiv::fileUriToPath("file://local%68ost/a") == "/a");
+    CHECK(!cursiv::fileUriToPath("file://other-host/a").has_value());
+    CHECK(!cursiv::fileUriToPath("file://local%00host/a").has_value());
     // A drive letter keeps its root, and one spelling: a WASI runner on Windows
     // preopens each drive under that name.
-    CHECK(cursiv::file_uri_to_path("file:///C%3A/a").value() == "/c:/a");
-    CHECK(cursiv::path_to_file_uri("/C:/a") == "file:///c%3A/a");
+    CHECK(cursiv::fileUriToPath("file:///C%3A/a").value() == "/c:/a");
+    CHECK(cursiv::pathToFileUri("/C:/a") == "file:///c%3A/a");
     // A path is resolved, which a URI is not.
-    CHECK(cursiv::path_to_file_uri("/a/./b/../c") == "file:///a/c");
+    CHECK(cursiv::pathToFileUri("/a/./b/../c") == "file:///a/c");
   }
-  CHECK(!cursiv::file_uri_to_path("http://x/a").has_value());
+  CHECK(!cursiv::fileUriToPath("http://x/a").has_value());
 }
 
 // A byte outside the unreserved set travels percent-encoded, and comes back.
 void what_is_escaped_comes_back() {
   if constexpr (kWindowsPaths) {
-    const std::string uri = cursiv::path_to_file_uri("C:\\a\\b c\\d%e");
+    const std::string uri = cursiv::pathToFileUri("C:\\a\\b c\\d%e");
     CHECK(uri == "file:///c%3A/a/b%20c/d%25e");
-    CHECK(cursiv::file_uri_to_path(uri).value() == "c:\\a\\b c\\d%e");
+    CHECK(cursiv::fileUriToPath(uri).value() == "c:\\a\\b c\\d%e");
   } else {
-    const std::string uri = cursiv::path_to_file_uri("/a/b c/d%e");
+    const std::string uri = cursiv::pathToFileUri("/a/b c/d%e");
     CHECK(uri == "file:///a/b%20c/d%25e");
-    CHECK(cursiv::file_uri_to_path(uri).value() == "/a/b c/d%e");
+    CHECK(cursiv::fileUriToPath(uri).value() == "/a/b c/d%e");
     // A UTF-8 byte is never unreserved, whatever the locale says.
-    CHECK(cursiv::path_to_file_uri("/\xC3\xA9") == "file:///%C3%A9");
-    CHECK(cursiv::file_uri_to_path("file:///%C3%A9").value() == "/\xC3\xA9");
+    CHECK(cursiv::pathToFileUri("/\xC3\xA9") == "file:///%C3%A9");
+    CHECK(cursiv::fileUriToPath("file:///%C3%A9").value() == "/\xC3\xA9");
     // A colon is not unreserved in a path: it travels escaped.
-    CHECK(cursiv::path_to_file_uri("/a:b") == "file:///a%3Ab");
-    CHECK(cursiv::file_uri_to_path("file:///a%3Ab").value() == "/a:b");
+    CHECK(cursiv::pathToFileUri("/a:b") == "file:///a%3Ab");
+    CHECK(cursiv::fileUriToPath("file:///a%3Ab").value() == "/a:b");
   }
 }
 
@@ -466,70 +550,70 @@ void a_uri_has_one_spelling() {
       {R"(mem:///a b)", R"(mem:/a%20b)"},
   };
   for (const auto& [uri, canonical] : spelled) {
-    CHECK(cursiv::normalize_uri(uri) == canonical);
-    if (cursiv::normalize_uri(uri) != canonical)
+    CHECK(cursiv::normalizeUri(uri) == canonical);
+    if (cursiv::normalizeUri(uri) != canonical)
       std::printf("%.*s\n", static_cast<int>(uri.size()), uri.data());
     // Read again, it does not move.
-    CHECK(cursiv::normalize_uri(canonical) == canonical);
+    CHECK(cursiv::normalizeUri(canonical) == canonical);
   }
   // Text, not a path: what `..` names is for the file system to say.
-  CHECK(cursiv::normalize_uri("file:///a/./b/../c") == "file:///a/./b/../c");
+  CHECK(cursiv::normalizeUri("file:///a/./b/../c") == "file:///a/./b/../c");
 }
 
 // One file, one key.
 void one_file_normalizes_to_one_string() {
-  CHECK(cursiv::equals_uri("file:///a/b c", "file:///a/b%20c"));
-  CHECK(!cursiv::equals_uri("file:///a/b", "file:///a/c"));
+  CHECK(cursiv::equalsUri("file:///a/b c", "file:///a/b%20c"));
+  CHECK(!cursiv::equalsUri("file:///a/b", "file:///a/c"));
   // `localhost` is a host like any other: on Windows it may name a share.
-  CHECK(!cursiv::equals_uri("file://localhost/a/b", "file:///a/b"));
-  CHECK(!cursiv::contains_uri("file:///a", "file://localhost/a/b"));
+  CHECK(!cursiv::equalsUri("file://localhost/a/b", "file:///a/b"));
+  CHECK(!cursiv::containsUri("file:///a", "file://localhost/a/b"));
   // Not a file URI: left alone, and still comparable.
-  CHECK(cursiv::normalize_uri("http://x/a") == "http://x/a");
-  CHECK(cursiv::equals_uri("http://x/a", "http://x/a"));
+  CHECK(cursiv::normalizeUri("http://x/a") == "http://x/a");
+  CHECK(cursiv::equalsUri("http://x/a", "http://x/a"));
   // ...but for its scheme, which has no case (RFC 3986): one spelling, the
   // lower one, which is how a client's URI already arrives. The path keeps its
   // case, and a colon after a `/` is no scheme.
-  CHECK(cursiv::normalize_uri("MEM:///A.ws") == "mem:/A.ws");
-  CHECK(cursiv::equals_uri("MEM:///A.ws", "mem:///A.ws"));
-  CHECK(!cursiv::equals_uri("mem:///A.ws", "mem:///a.ws"));
-  CHECK(cursiv::normalize_uri("dir/A:b.ws") == "dir/A:b.ws");
+  CHECK(cursiv::normalizeUri("MEM:///A.ws") == "mem:/A.ws");
+  CHECK(cursiv::equalsUri("MEM:///A.ws", "mem:///A.ws"));
+  CHECK(!cursiv::equalsUri("mem:///A.ws", "mem:///a.ws"));
+  CHECK(cursiv::normalizeUri("dir/A:b.ws") == "dir/A:b.ws");
 }
 
 // Segment by segment: `/a/bc` does not live under `/a/b`.
 void containment_counts_segments() {
-  CHECK(cursiv::contains_uri("file:///a", "file:///a/b/c"));
-  CHECK(cursiv::contains_uri("file:///a", "file:///a"));
-  CHECK(!cursiv::contains_uri("file:///a/b", "file:///a/bc"));
-  CHECK(!cursiv::contains_uri("file:///a/b/c", "file:///a/b"));
-  CHECK(cursiv::contains_uri("file:///a/", "file:///a/b"));
+  CHECK(cursiv::containsUri("file:///a", "file:///a/b/c"));
+  CHECK(cursiv::containsUri("file:///a", "file:///a"));
+  CHECK(!cursiv::containsUri("file:///a/b", "file:///a/bc"));
+  CHECK(!cursiv::containsUri("file:///a/b/c", "file:///a/b"));
+  CHECK(cursiv::containsUri("file:///a/", "file:///a/b"));
   // Any scheme, on its path -- but one scheme and one authority.
-  CHECK(cursiv::contains_uri("http://x/a", "http://x/a/b"));
-  CHECK(!cursiv::contains_uri("http://x/a", "https://x/a/b"));
-  CHECK(!cursiv::contains_uri("http://x/a", "http://y/a/b"));
+  CHECK(cursiv::containsUri("http://x/a", "http://x/a/b"));
+  CHECK(!cursiv::containsUri("http://x/a", "https://x/a/b"));
+  CHECK(!cursiv::containsUri("http://x/a", "http://y/a/b"));
 }
 
 void a_relative_path_walks_back_up() {
-  CHECK(cursiv::relative_uri("file:///a/b", "file:///a/b/c") == "c");
-  CHECK(cursiv::relative_uri("file:///a/b/c", "file:///a/d") == "../../d");
-  CHECK(cursiv::relative_uri("mem:///w/a", "mem:///w/b/c") == "../b/c");
-  CHECK(cursiv::relative_uri("file:///a/b", "file:///a/b").empty());
-  CHECK(cursiv::relative_uri("dir/a:one.ws", "dir/b:two.ws") == "../b:two.ws");
+  CHECK(cursiv::relativeUri("file:///a/b", "file:///a/b/c") == "c");
+  CHECK(cursiv::relativeUri("file:///a/b/c", "file:///a/d") == "../../d");
+  CHECK(cursiv::relativeUri("mem:///w/a", "mem:///w/b/c") == "../b/c");
+  CHECK(cursiv::relativeUri("file:///a/b", "file:///a/b").empty());
+  CHECK(cursiv::relativeUri("dir/a:one.ws", "dir/b:two.ws") == "../b:two.ws");
   // The answer is a decoded path; another drive, scheme or host gives the
   // absolute target.
-  CHECK(cursiv::relative_uri("file:///a/b%20c", "file:///a/d%20e") == "../d e");
-  CHECK(cursiv::relative_uri("file:///c%3A/a", "file:///C:/a/b") == "b");
-  CHECK(cursiv::relative_uri("file:///c%3A/a", "file:///d%3A/b%20c") == "d:/b c");
-  CHECK(cursiv::relative_uri("http://x/a", "file:///a/b") == "file:///a/b");
-  CHECK(cursiv::relative_uri("//first.host/a", "//second.host/b") ==
+  CHECK(cursiv::relativeUri("file:///a/b%20c", "file:///a/d%20e") == "../d e");
+  CHECK(cursiv::relativeUri("file:///c%3A/a", "file:///C:/a/b") == "b");
+  CHECK(cursiv::relativeUri("file:///c%3A/a", "file:///d%3A/b%20c") == "d:/b c");
+  CHECK(cursiv::relativeUri("http://x/a", "file:///a/b") == "file:///a/b");
+  CHECK(cursiv::relativeUri("//first.host/a", "//second.host/b") ==
         "//second.host/b");
 }
 
 void a_name_is_what_follows_the_last_separator() {
-  CHECK(cursiv::uri_file_name("file:///a/b.ws?x#y") == "b.ws");
-  CHECK(cursiv::uri_file_name("file:///a/") == "a");
-  CHECK(cursiv::uri_extension("file:///a/b.WS") == ".ws");
-  CHECK(cursiv::uri_extension("file:///a.dir/b").empty());
-  CHECK(cursiv::uri_extension("file:///a/b").empty());
+  CHECK(cursiv::uriFileName("file:///a/b.ws?x#y") == "b.ws");
+  CHECK(cursiv::uriFileName("file:///a/") == "a");
+  CHECK(cursiv::uriExtension("file:///a/b.WS") == ".ws");
+  CHECK(cursiv::uriExtension("file:///a.dir/b").empty());
+  CHECK(cursiv::uriExtension("file:///a/b").empty());
 }
 
 void names_and_extensions_follow_the_uri_path() {
@@ -567,15 +651,15 @@ void names_and_extensions_follow_the_uri_path() {
       {"mem:///a/b%3Fc.ws?other#name", "b?c.ws", ".ws"},
   };
   for (const Example& example : examples) {
-    CHECK(cursiv::uri_file_name(example.uri) == example.name);
-    CHECK(cursiv::uri_extension(example.uri) == example.extension);
+    CHECK(cursiv::uriFileName(example.uri) == example.name);
+    CHECK(cursiv::uriExtension(example.uri) == example.extension);
   }
 }
 
 void an_extension_gets_its_leading_dot() {
-  CHECK(cursiv::normalize_extension("calc") == ".calc");
-  CHECK(cursiv::normalize_extension(".calc") == ".calc");
-  CHECK(cursiv::normalize_extension("").empty());
+  CHECK(cursiv::normalizeExtension("calc") == ".calc");
+  CHECK(cursiv::normalizeExtension(".calc") == ".calc");
+  CHECK(cursiv::normalizeExtension("").empty());
 }
 
 }  // namespace
@@ -583,13 +667,13 @@ void an_extension_gets_its_leading_dot() {
 // A Windows drive letter is a syntactic fact of the URI: the three spellings
 // a client may send map to one, whatever platform the server runs on.
 void a_drive_letter_normalizes_on_any_host() {
-  const std::string canonical = cursiv::normalize_uri("file:///c:/w/a.ws");
-  CHECK(cursiv::normalize_uri("file:///C:/w/a.ws") == canonical);
-  CHECK(cursiv::normalize_uri("file:///c%3A/w/a.ws") == canonical);
+  const std::string canonical = cursiv::normalizeUri("file:///c:/w/a.ws");
+  CHECK(cursiv::normalizeUri("file:///C:/w/a.ws") == canonical);
+  CHECK(cursiv::normalizeUri("file:///c%3A/w/a.ws") == canonical);
   CHECK(canonical.starts_with("file:///c%3A/"));
   // Any first segment `<letter>:` is a drive: the letter is lowered and the
   // colon escaped, on every host.
-  CHECK(cursiv::normalize_uri("file:///X:foo/bar") == "file:///x%3Afoo/bar");
+  CHECK(cursiv::normalizeUri("file:///X:foo/bar") == "file:///x%3Afoo/bar");
 }
 
 void run() {
@@ -639,6 +723,31 @@ void a_hit_never_recomputes() {
   cache.clear();
   CHECK(cache.get(1, provider) == "v2");
   CHECK(computed == 2);
+}
+
+// A clear of an empty cache costs nothing however large its room, as every
+// document of a build may clear it; a provider that started before it still
+// stores nothing.
+void clearing_an_empty_cache_costs_nothing() {
+  cursiv::SimpleCache<int, int> keyed;
+  for (int k = 0; k < (1 << 17); ++k) (void)keyed.get(k, [k] { return k; });
+  keyed.clear();
+  const auto start = std::chrono::steady_clock::now();
+  for (int i = 0; i < 40000; ++i) keyed.clear();
+  CHECK(std::chrono::steady_clock::now() - start <
+        std::chrono::milliseconds(500));
+  CHECK(keyed.get(1, [&] {
+    keyed.clear();
+    return 1;
+  }) == 1);
+  CHECK(keyed.get(1, [] { return 2; }) == 2);
+
+  cursiv::SimpleCache<int> single;
+  CHECK(single.get([&] {
+    single.clear();
+    return 1;
+  }) == 1);
+  CHECK(single.get([] { return 2; }) == 2);
 }
 
 // A value that counts its copies, to tell how often a fill copies the cache's
@@ -852,8 +961,6 @@ void a_cleared_value_can_reenter_the_cache_when_destroyed() {
     });
   });
   cache.clear();
-  for (int i = 0; i < 64; ++i) cache.clear();
-  support::collect_pending_tables();
   CHECK(released == 1);
   CHECK(observed == 7);
 
@@ -862,12 +969,12 @@ void a_cleared_value_can_reenter_the_cache_when_destroyed() {
     return std::shared_ptr<int>(new int(41), [&](int* value) {
       delete value;
       ++released;
+      (void)keyed.get(3, [] { return std::make_shared<int>(9); });
       keyed.clear();
       observed = *keyed.get(2, [] { return std::make_shared<int>(8); });
     });
   });
-  for (int i = 0; i < 64; ++i) keyed.clear();
-  support::collect_pending_tables();
+  keyed.clear();
   CHECK(released == 2);
   CHECK(observed == 8);
 }
@@ -898,13 +1005,23 @@ void a_stale_answer_holds_back_no_collection() {
   CHECK(consumed);
 }
 
-// Waits past the collection delay. A loop on the clock, not a sleep, so a
-// build without threads runs it too.
-void wait_past_the_collection_delay() {
-  const auto until =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(150);
-  while (std::chrono::steady_clock::now() < until) {
-  }
+#if !defined(__wasi__) || defined(_REENTRANT)
+// Runs `act` while another thread reads `table`, which must hold an entry:
+// what `act` releases is held back by that read, and stays pending after it.
+template <class Act>
+void while_another_thread_reads(
+    const cursiv::detail::ConcurrentTable<int, int>& table, Act act) {
+  std::barrier reading(2), acted(2);
+  std::thread other([&] {
+    table.forEach([&](int) {
+      reading.arrive_and_wait();
+      acted.arrive_and_wait();
+    });
+  });
+  reading.arrive_and_wait();
+  act();
+  acted.arrive_and_wait();
+  other.join();
 }
 
 // A first read of a document may grow the cache's table and collect; a
@@ -920,16 +1037,16 @@ void a_cleared_value_can_read_a_growing_document_cache() {
       observed = cache.get(cursiv::DocumentId{100000}, 0, [] { return 9; });
     });
   });
-  // The only release since a collection, then a wait: the next release
-  // collects.
-  support::collect_pending_tables();
-  holder.clear();
-  wait_past_the_collection_delay();
+  cursiv::detail::ConcurrentTable<int, int> reader;
+  int one = 1;
+  CHECK(reader.insert(reader.generation(), 1, one).has_value());
+  while_another_thread_reads(reader, [&] { holder.clear(); });
   CHECK(observed == 0);
   for (std::uint32_t d = 1; d <= 64 && observed == 0; ++d)
     (void)cache.get(cursiv::DocumentId{d}, 0, [] { return 1; });
   CHECK(observed == 9);
 }
+#endif
 
 // A cache built before the builder exists would never be emptied: refused.
 void a_cache_needs_the_builder_that_empties_it() {
@@ -1678,48 +1795,62 @@ void a_guard_holds_back_only_what_follows_it() {
   cursiv::detail::ConcurrentTable<int, int> reader;
   int one = 1;
   CHECK(reader.insert(reader.generation(), 1, one).has_value());
+#if !defined(__wasi__) || defined(_REENTRANT)
+  // Still pending as the reader below comes: another read held it.
+  while_another_thread_reads(reader, [&] { before.clear(); });
+  CHECK(Live::count == 2);
+#else
   before.clear();
+#endif
   reader.forEach([&](int) {
     after.clear();
     support::collect_pending_tables();
     CHECK(Live::count == 1);
   });
-  support::collect_pending_tables();
   CHECK(Live::count == 0);
 }
 
-// A release that holds a lot is collected soon: a dozen large tables
-// bring a collection that frees the small one released before them.
-void a_large_pending_free_is_collected_soon() {
-  support::collect_pending_tables();
-  cursiv::detail::ConcurrentTable<int, Live> small;
-  {
-    Live value;
-    CHECK(small.insert(small.generation(), 1, value).has_value());
-  }
-  small.clear();
-  CHECK(Live::count == 1);
-  support::collect_pending_tables();
-  CHECK(Live::count == 0);
-}
+// A release needs no later one: each clear frees what it drops, one right
+// after another; one made during a read goes as the read leaves, and one
+// another thread's read held goes with the cache.
+void a_pending_free_needs_no_later_one() {
+  std::weak_ptr<int> first;
+  std::weak_ptr<int> second;
+  const auto value = [](std::weak_ptr<int>& life) {
+    return [&life] {
+      auto made = std::make_shared<int>(1);
+      life = made;
+      return made;
+    };
+  };
+  cursiv::SimpleCache<std::shared_ptr<int>> single;
+  cursiv::SimpleCache<int, std::shared_ptr<int>> keyed;
+  (void)single.get(value(first));
+  (void)keyed.get(1, value(second));
+  single.clear();
+  keyed.clear();
+  CHECK(first.expired());
+  CHECK(second.expired());
 
-// A rare release does not wait for dozens more: the first release
-// after a short pause collects.
-void a_rare_pending_free_is_collected_after_a_pause() {
-  support::collect_pending_tables();
-  cursiv::SimpleCache<std::shared_ptr<int>> cache;
-  std::weak_ptr<int> dropped;
-  (void)cache.get([&] {
-    auto value = std::make_shared<int>(1);
-    dropped = value;
-    return value;
+  cursiv::detail::ConcurrentTable<int, int> reader;
+  int one = 1;
+  CHECK(reader.insert(reader.generation(), 1, one).has_value());
+  (void)keyed.get(2, value(second));
+  reader.forEach([&](int) {
+    keyed.clear();
+    CHECK(!second.expired());
   });
-  cache.clear();
-  CHECK(!dropped.expired());
-  wait_past_the_collection_delay();
-  cursiv::SimpleCache<int> other;
-  other.clear();
-  CHECK(dropped.expired());
+  CHECK(second.expired());
+
+#if !defined(__wasi__) || defined(_REENTRANT)
+  {
+    cursiv::SimpleCache<int, std::shared_ptr<int>> held;
+    (void)held.get(1, value(first));
+    while_another_thread_reads(reader, [&] { held.clear(); });
+    CHECK(!first.expired());
+  }
+  CHECK(first.expired());
+#endif
 }
 
 #if !defined(__wasi__) || defined(_REENTRANT)
@@ -1833,6 +1964,7 @@ void more_threads_than_slots_read_at_once() {
 
 void run() {
   a_hit_never_recomputes();
+  clearing_an_empty_cache_costs_nothing();
   filling_the_cache_is_linear();
   providers_can_reenter_the_cache();
 #if !defined(__wasi__) || defined(_REENTRANT)
@@ -1843,7 +1975,9 @@ void run() {
   a_value_cache_keeps_null_and_borrows_without_copying();
   value_providers_and_consumers_can_reenter();
   a_cleared_value_can_reenter_the_cache_when_destroyed();
+#if !defined(__wasi__) || defined(_REENTRANT)
   a_cleared_value_can_read_a_growing_document_cache();
+#endif
   a_cache_needs_the_builder_that_empties_it();
   a_stale_answer_holds_back_no_collection();
   a_workspace_value_uses_the_same_invalidation_lifecycle();
@@ -1882,30 +2016,16 @@ void run() {
   keys_of_one_hash_still_fit();
   a_lookup_compares_about_one_key();
   a_guard_holds_back_only_what_follows_it();
-  a_large_pending_free_is_collected_soon();
-  a_rare_pending_free_is_collected_after_a_pause();
+  a_pending_free_needs_no_later_one();
 }
 
 }  // namespace caching
 
-namespace round_marks {
-
-void run() {
-  cursiv::engine::RoundMarks marks(2);
-  // Past its first size, and each id once a round.
-  CHECK(marks.first(0) && !marks.first(0) && marks.first(9) && !marks.first(9));
-  marks.next();
-  CHECK(marks.first(0) && marks.first(9) && !marks.first(0));
-}
-
-}  // namespace round_marks
-
 int main() {
-  round_marks::run();
   case_fold::run();
-  function_ref::run();
+  FunctionRef::run();
   uri_trie::run();
   uri_utils::run();
   caching::run();
-  return cursiv::test::report("utils");
+  return cursiv::test::report("utils_test");
 }

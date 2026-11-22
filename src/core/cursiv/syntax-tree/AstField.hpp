@@ -11,22 +11,10 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/MemberTraits.hpp"
 
-// What an AST member is, and what an element does to it: the field columns of
-// `AstMetaData`, and the action a record applies to the tree. Read by
+// What an AST member is: the field columns of `AstMetaData`. Read by
 // services; nothing here needs a grammar.
 
 namespace cursiv::detail {
-
-enum class ActKind : std::uint8_t {
-  none,
-  create,
-  assign,
-  append,
-  flag,
-  nest
-};
-// "Names no member", in every column of the registries.
-inline constexpr std::uint16_t kNoField = 0xFFFF;
 
 // The three storage forms a handle factory distinguishes; `RefHandle::index`
 // exists for the vector one.

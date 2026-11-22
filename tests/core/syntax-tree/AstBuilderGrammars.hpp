@@ -467,6 +467,19 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 
 }  // namespace tab::deferred
 
+// A built class whose direct base the grammar never names.
+namespace tab::unnamed {
+
+struct Top : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+};
+struct Between : cursiv::Extends<Top> {};
+struct Bottom : cursiv::Extends<Between> {
+  boolean marked = false;
+};
+
+}  // namespace tab::unnamed
+
 namespace tab {
 
 // A body whose leading word is its own is offered as it stands; the others are
@@ -700,6 +713,12 @@ struct All : cursiv::GrammarSpec {
       : rule<kw<"pets"> + many(append<&deferred::Doc::pets>(ref<DeferPetR>))> {
   };
 
+  struct UnnamedID : terminal<some(cr<"a-z">)> {};
+  struct UnnamedRoot
+      : rule<create<unnamed::Bottom> +
+             assign<&unnamed::Top::name>(ref<UnnamedID>) +
+             option(flag<&unnamed::Bottom::marked>(kw<"!">))> {};
+
   struct Entry
       : rule<ref<hier::G::Root> | ref<WiringDoc> | ref<VocabRoot> |
              ref<NodealtRoot> | ref<MoveRoot> | ref<HeldRoot> | ref<WholeRoot> |
@@ -717,7 +736,8 @@ struct All : cursiv::GrammarSpec {
              (kw<"$own"> + ref<OwnRoot>) | (kw<"$ownplain"> + ref<OwnPlain>) |
              (kw<"$ownlevel"> + ref<OwnLevel>) |
              (kw<"$rebind"> + ref<RebindRoot>) | (kw<"$opt"> + ref<OptRoot>) |
-             (kw<"$inl"> + ref<InlRoot>)> {};
+             (kw<"$inl"> + ref<InlRoot>) |
+             (kw<"$unnamed"> + ref<UnnamedRoot>)> {};
   using entry = Entry;
   using ignored = WS;
 };

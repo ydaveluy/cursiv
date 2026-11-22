@@ -25,7 +25,7 @@ struct LspServicesFor : TCore, LspServices {
   // Each set once through the diamond: the language rows through the core
   // side, then the LSP rows alone.
   void visitServices(
-      function_ref<void(const ServiceSlot&)> yield) const override {
+      FunctionRef<void(const ServiceSlot&)> yield) const override {
     TCore::visitServices(yield);
     LspServices::visitOwnServices(yield);
   }

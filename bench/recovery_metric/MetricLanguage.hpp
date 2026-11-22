@@ -1,11 +1,8 @@
-// A language the recovery metric runs: its parser, how its tree is read, its
-// valid documents and, for a generated table, its ceilings. Each language
-// registers itself, so a binary runs what it links.
+// A language the recovery metric runs: its parser, how its tree is read and its
+// valid documents. Each language registers itself, so a binary runs what it
+// links.
 #pragma once
 
-#include <array>
-#include <cstddef>
-#include <cstdint>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -17,16 +14,7 @@
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/GrammarActions.hpp"
 
-namespace cursiv::engine {
-struct RepairBudget;
-}
-
 namespace cursiv::recovery_metric {
-
-inline constexpr std::array<std::string_view, 8> kCeilings = {
-    "search", "look", "bounded", "reach", "budget", "degraded", "replan",
-    "episode"};
-using Ceilings = std::array<std::uint32_t, kCeilings.size()>;
 
 struct MetricLanguage {
   // The report's order.
@@ -36,13 +24,6 @@ struct MetricLanguage {
   std::unique_ptr<cursiv::AstReflection> (*reflection)() = nullptr;
   const cursiv::fuzzer::GrammarActions* actions = nullptr;
   std::vector<std::string> (*documents)() = nullptr;
-  // Null for a parser that counts none; under the budget `searching`'s
-  // parser repairs with.
-  Ceilings (*ceilings)(std::string_view,
-                       const cursiv::engine::RepairBudget& budget) = nullptr;
-  // The same language under a budget; null where its engine takes none.
-  std::unique_ptr<cursiv::Parser> (*searching)(
-      const cursiv::engine::RepairBudget&) = nullptr;
 };
 
 inline std::vector<MetricLanguage>& languages() {

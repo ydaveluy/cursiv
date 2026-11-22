@@ -44,9 +44,9 @@
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/hover/HoverProvider.hpp"
-#include "cursiv/lr/runtime/LrParser.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/references/DefaultScopeComputation.hpp"
 #include "cursiv/runtime/DefaultLanguageServer.hpp"
 #include "cursiv/runtime/LanguageClient.hpp"
 #include "cursiv/runtime/LanguageServer.hpp"
@@ -65,7 +65,6 @@
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/DefaultAstReflection.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
-#include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/text/LspPosition.hpp"
 #include "cursiv/text/Position.hpp"
 #include "cursiv/text/Range.hpp"
@@ -97,8 +96,6 @@
 #include "cursiv/workspace/WorkspaceLock.hpp"
 #include "cursiv/workspace/WorkspaceManager.hpp"
 #include "doc/generated/DocG/Module.hpp"
-#include "doc/generated/DocG/Parser.hpp"
-#include "doc/generated/DocG/Table.hpp"
 #include "lsp/types.h"
 #include "lsp/uri.h"
 #include "support/Editor.hpp"
@@ -307,7 +304,7 @@ struct RecordingSaves final : cursiv::DocumentSaveHandler {
       const cursiv::CancellationToken&) const override {
     const std::string_view text = document.textDocument().getText();
     if (text.ends_with('\n')) return {};
-    const lsp::Position end = cursiv::to_lsp(document.textDocument().positionAt(
+    const lsp::Position end = cursiv::toLsp(document.textDocument().positionAt(
         static_cast<cursiv::TextOffset>(text.size())));
     return {lsp::TextEdit{.range = {end, end}, .newText = "\n"}};
   }
@@ -343,7 +340,7 @@ struct World {
     auto recordingLock = std::make_unique<RecordingLock>();
     lock = recordingLock.get();
     shared.workspaceLock = std::move(recordingLock);
-    cursiv::install_default_shared_lsp_services(shared);
+    cursiv::installDefaultSharedLspServices(shared);
     ws = &support::add_workspace<cursiv::LspServices>(shared);
     auto recording = std::make_unique<RecordingClient>();
     client = recording.get();
@@ -506,8 +503,8 @@ void add_coloured_language(
         colours) {
   (void)support::add_language<cursiv::LspServices>(
       world.shared, {id, {"." + id}, {}},
-      ws::generated::Workspace::create_parser(),
-      ws::generated::Workspace::create_ast_reflection(),
+      ws::generated::Workspace::createParser(),
+      ws::generated::Workspace::createAstReflection(),
       [&](cursiv::LspServices& second) {
         second.semanticTokenProvider = colours(second);
       });
@@ -683,10 +680,7 @@ void completion_edits_follow_insert_replace_support() {
   }
 }
 
-// Hover and completion prose go as markdown when the client lists markdown
-// anywhere, as plain text otherwise. Each feature reads its own list; the
-// workspace grammar documents its keywords.
-void prose_is_markdown_when_the_client_lists_it() {
+void hover_and_completion_follow_their_own_format_preferences() {
   using Formats = std::optional<lsp::Array<lsp::MarkupKindEnum>>;
   using enum lsp::MarkupKind;
   const lsp::MarkupKindEnum markdown(Markdown);
@@ -696,6 +690,8 @@ void prose_is_markdown_when_the_client_lists_it() {
   const Formats plainFirst{{plain, markdown}};
   const Formats markdownFirst{{markdown, plain}};
   const Formats markdownOnly{{markdown}};
+  const Formats unknownFirst{
+      {lsp::MarkupKindEnum(std::string("custom")), markdown}};
   struct Case {
     Formats hover;
     Formats completion;
@@ -704,11 +700,11 @@ void prose_is_markdown_when_the_client_lists_it() {
   };
   const Case cases[] = {{none, none, PlainText, PlainText},
                         {plainOnly, plainOnly, PlainText, PlainText},
-                        {plainFirst, plainFirst, Markdown, Markdown},
+                        {plainFirst, plainFirst, PlainText, PlainText},
                         {markdownFirst, markdownFirst, Markdown, Markdown},
                         {markdownOnly, none, Markdown, PlainText},
                         {none, markdownOnly, PlainText, Markdown},
-                        {plainFirst, plainOnly, Markdown, PlainText}};
+                        {plainFirst, unknownFirst, PlainText, Markdown}};
   for (const Case& each : cases) {
     World world;
     lsp::InitializeParams params;
@@ -803,7 +799,7 @@ void a_closed_virtual_document_stays() {
    protected:
     void loadAdditionalDocuments(
         std::span<const cursiv::WorkspaceFolder>,
-        cursiv::function_ref<void(std::string_view, std::string)> add)
+        cursiv::FunctionRef<void(std::string_view, std::string)> add)
         override {
       add("builtin:/library.ws", "datatype Library\n");
     }
@@ -1045,6 +1041,16 @@ void a_notebook_syncs_its_cells_as_documents() {
   CHECK(relabelled.has_value() && relabelled->version == 3 &&
         relabelled->metadata.has_value() && relabelled->cells.size() == 2);
 
+  support::change(world.server(), kThird, 5, "datatype Text\n");
+  for (const int stale : {3, 2}) {
+    change.notebookDocument.version = stale;
+    world.server().didChangeNotebookDocument(change);
+    const auto held = model.getNotebookDocument(kNotebook);
+    const auto cell = documents.getDocument(kThird);
+    CHECK(held && held->version == 3);
+    CHECK(cell && cell->textDocument().version() == 5);
+  }
+
   lsp::DidSaveNotebookDocumentParams save;
   save.notebookDocument.uri = open.notebookDocument.uri;
   world.server().didSaveNotebookDocument(save);
@@ -1056,12 +1062,15 @@ void a_notebook_syncs_its_cells_as_documents() {
       lsp::TextDocumentIdentifier{.uri = lsp::Uri::parse(std::string(kThird))},
       lsp::TextDocumentIdentifier{.uri =
                                       lsp::Uri::parse(std::string(kSecond))}};
+  const auto beforeClose = world.lock->modes.size();
   world.server().didCloseNotebookDocument(close);
-  CHECK(world.lock->modes.size() == writes + 4);
+  CHECK(world.lock->modes.size() == beforeClose + 1);
   CHECK(documents.getDocument(kSecond) == nullptr &&
         documents.getDocument(kThird) == nullptr);
   CHECK(!model.getNotebookDocument(kNotebook).has_value() &&
         !model.findNotebookDocumentForCell(kSecond).has_value());
+  world.server().didChangeNotebookDocument(change);
+  CHECK(documents.getDocument(kThird) == nullptr);
 }
 
 // When the notebook store throws on a change, the cells still get their new
@@ -1071,7 +1080,7 @@ void a_failing_notebook_still_moves_its_cells() {
   constexpr std::string_view kCell = "vscode-notebook-cell:/w/book.wsnb#a";
   struct Deaf final : cursiv::DefaultNotebookDocuments {
     using DefaultNotebookDocuments::DefaultNotebookDocuments;
-    void didChange(const lsp::DidChangeNotebookDocumentParams&) override {
+    bool didChange(const lsp::DidChangeNotebookDocumentParams&) override {
       throw std::runtime_error("deaf");
     }
   };
@@ -1110,6 +1119,65 @@ void a_failing_notebook_still_moves_its_cells() {
   CHECK(repaired != nullptr && repaired->diagnostics.empty());
 }
 
+// A change that replaces every cell of a notebook costs about what opening
+// them did, not a comparison per pair of cells: long URIs of one length make
+// each comparison cost.
+void replacing_every_cell_is_linear_in_the_cells() {
+  constexpr std::size_t kCells = 5000;
+  const std::string prefix =
+      "vscode-notebook-cell:/w/" + std::string(1000, 'n') + ".wsnb#";
+  const auto uri = [&](char generation, std::size_t i) {
+    const std::string digits = std::to_string(i);
+    return prefix + generation + std::string(5 - digits.size(), '0') + digits;
+  };
+  World world;
+  lsp::NotebookDocumentSyncOptions options;
+  lsp::NotebookDocumentFilterWithNotebook filter;
+  filter.notebook = std::string("workspace-notebook");
+  filter.cells =
+      lsp::Array<lsp::NotebookCellLanguage>{{.language = "workspace"}};
+  options.notebookSelector.emplace_back(std::move(filter));
+  world.shared.notebookDocuments =
+      std::make_unique<cursiv::DefaultNotebookDocuments>(options);
+  (void)world.handshake();
+
+  lsp::DidOpenNotebookDocumentParams open;
+  open.notebookDocument.uri = lsp::Uri::parse("file:///w/book.wsnb");
+  open.notebookDocument.notebookType = "workspace-notebook";
+  open.notebookDocument.version = 1;
+  lsp::DidChangeNotebookDocumentParams change;
+  change.notebookDocument.uri = open.notebookDocument.uri;
+  change.notebookDocument.version = 2;
+  lsp::NotebookDocumentCellChangeStructure structure;
+  structure.array.start = 0;
+  structure.array.deleteCount = kCells;
+  structure.array.cells.emplace();
+  structure.didOpen.emplace();
+  structure.didClose.emplace();
+  for (std::size_t i = 0; i < kCells; ++i) {
+    open.notebookDocument.cells.push_back(code_cell(uri('a', i)));
+    open.cellTextDocuments.push_back(cell_text(uri('a', i), ""));
+    structure.array.cells->push_back(code_cell(uri('b', i)));
+    structure.didOpen->push_back(cell_text(uri('b', i), ""));
+    structure.didClose->push_back(
+        lsp::TextDocumentIdentifier{.uri = lsp::Uri::parse(uri('a', i))});
+  }
+  lsp::NotebookDocumentCellChanges cells;
+  cells.structure = std::move(structure);
+  change.change.cells = std::move(cells);
+
+  // The change opens and closes as many cells as the open opened.
+  const auto start = std::chrono::steady_clock::now();
+  world.server().didOpenNotebookDocument(open);
+  const auto opened = std::chrono::steady_clock::now();
+  world.server().didChangeNotebookDocument(change);
+  const auto changed = std::chrono::steady_clock::now();
+  CHECK(changed - opened < 4 * (opened - start));
+  const cursiv::Documents& documents = *world.shared.documents;
+  CHECK(documents.getDocument(uri('a', 0)) == nullptr &&
+        documents.getDocument(uri('b', 0)) != nullptr);
+}
+
 // An allocation that fails part-way through a notebook's update leaves the
 // store as it was or as the update made it, never between: each cell names its
 // notebook, and that notebook lists it.
@@ -1127,16 +1195,21 @@ void a_refused_allocation_leaves_the_notebook_index_whole() {
   open.notebookDocument.version = 1;
   open.notebookDocument.cells = {code_cell(cellUris[0]), code_cell(cellUris[1]),
                                  code_cell(cellUris[2])};
-  // The second cell replaced by a fourth.
+  // Insert a fourth cell before the second.
   lsp::DidChangeNotebookDocumentParams change;
   change.notebookDocument.uri = open.notebookDocument.uri;
   change.notebookDocument.version = 2;
   lsp::NotebookDocumentCellChangeStructure structure;
   structure.array.start = 1;
-  structure.array.deleteCount = 1;
+  structure.array.deleteCount = 0;
   structure.array.cells = lsp::Array<lsp::NotebookCell>{code_cell(cellUris[3])};
   lsp::NotebookDocumentCellChanges cells;
   cells.structure = std::move(structure);
+  cells.data.emplace();
+  for (const auto i : {1, 0, 3}) {
+    auto& updated = cells.data->emplace_back(code_cell(cellUris[i]));
+    updated.kind = lsp::NotebookCellKind::Markup;
+  }
   change.change.cells = std::move(cells);
 
   // A store that throws on a read, or holds a half-copied URI, is not whole.
@@ -1154,9 +1227,12 @@ void a_refused_allocation_leaves_the_notebook_index_whole() {
       }
       const auto notebook = store.getNotebookDocument(notebookUri);
       if (notebook.has_value())
-        for (const lsp::NotebookCell& held : notebook->cells)
-          if (!store.findNotebookDocumentForCell(held.document.toString()))
+        for (const lsp::NotebookCell& held : notebook->cells) {
+          const auto cell = store.getNotebookCell(held.document.toString());
+          if (!cell || cell->document != held.document ||
+              !store.findNotebookDocumentForCell(held.document.toString()))
             return false;
+        }
       return true;
     } catch (const std::out_of_range&) {
       return false;
@@ -1173,17 +1249,34 @@ void a_refused_allocation_leaves_the_notebook_index_whole() {
     CHECK(whole(store));
     if (!refused) break;
   }
-  for (int after = 0;; ++after) {
-    cursiv::DefaultNotebookDocuments store({});
-    store.didOpen(open);
-    refuse_allocation(after);
-    try {
-      store.didChange(change);
-    } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+  for (const bool structural : {true, false}) {
+    if (!structural) change.change.cells->structure.reset();
+    for (int after = 0;; ++after) {
+      cursiv::DefaultNotebookDocuments store({});
+      store.didOpen(open);
+      refuse_allocation(after);
+      try {
+        store.didChange(change);
+      } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+      }
+      const bool refused = refusal_made();
+      CHECK(whole(store));
+      const auto held = store.getNotebookDocument(notebookUri);
+      CHECK(held && held->version == (refused ? 1 : 2));
+      CHECK(held && held->cells.size() == (structural && !refused ? 4u : 3u));
+      const auto changed = store.getNotebookCell(cellUris[1]);
+      CHECK(changed &&
+            changed->kind == (refused ? lsp::NotebookCellKind::Code
+                                      : lsp::NotebookCellKind::Markup));
+      if (!refused) {
+        CHECK(!store.didChange(change));
+        const auto inserted = store.getNotebookCell(cellUris[3]);
+        CHECK(structural
+                  ? inserted && inserted->kind == lsp::NotebookCellKind::Markup
+                  : !inserted);
+        break;
+      }
     }
-    const bool refused = refusal_made();
-    CHECK(whole(store));
-    if (!refused) break;
   }
 }
 
@@ -1328,7 +1421,7 @@ void a_failed_publication_is_retried_by_the_next_build() {
           accept.accept(cursiv::TextRange{7, 12},
                         cursiv::DiagnosticSeverity::Warning, "Capitalize.");
       },
-      &cursiv::fast);
+      &cursiv::kFast);
   world.disk->addFile(std::string(kA), "entity lower { }\n");
   world.disk->addFile(std::string(kB), "entity lower { }\n");
   world.client->failing = 1;
@@ -1482,6 +1575,59 @@ void an_edit_republishes_what_it_repaired() {
   CHECK(clean != nullptr && clean->diagnostics.empty() && clean->version == 3);
 }
 
+void a_failed_export_publishes_diagnostics_until_the_edit_that_repairs_it() {
+  struct Exporter final : cursiv::DefaultScopeComputation {
+    using DefaultScopeComputation::DefaultScopeComputation;
+    std::vector<cursiv::AstNodeDescription> collectExportedSymbols(
+        const cursiv::Document& d,
+        const cursiv::CancellationToken& token) const override {
+      if (d.textDocument().getText() == "datatype Bug")
+        throw std::runtime_error("test exporter");
+      return DefaultScopeComputation::collectExportedSymbols(d, token);
+    }
+  };
+  for (const bool validate : {true, false}) {
+    World world;
+    world.ws->scopeComputation = std::make_unique<Exporter>(*world.ws);
+    world.shared.documentBuilder->updateBuildOptions().validation = validate;
+    (void)world.handshake();
+    world.open("datatype Bug");
+    const auto failed = [&](int version) {
+      const auto* snapshot = lastSnapshotOf(*world.client, kUri);
+      CHECK(snapshot && snapshot->version == version &&
+            snapshot->diagnostics.size() == 1);
+      if (snapshot && !snapshot->diagnostics.empty())
+        CHECK(std::get<std::string>(snapshot->diagnostics[0].message) ==
+              "Exporting symbols failed: test exporter");
+    };
+    failed(1);
+    const auto doc = world.shared.documents->getDocument(kUri);
+    CHECK(doc && doc->state == cursiv::DocumentState::Parsed);
+    if (!doc) return;
+    CHECK(world.shared.documentBuilder->waitUntil(cursiv::DocumentState::Parsed,
+                                                  doc->id) ==
+          cursiv::WaitOutcome::Reached);
+    CHECK(world.shared.documentBuilder->waitUntil(
+              cursiv::DocumentState::IndexedContent, doc->id) ==
+          cursiv::WaitOutcome::BuildFailed);
+    lsp::DocumentSymbolParams symbols;
+    symbols.textDocument.uri = lsp::Uri::parse(kUri);
+    CHECK(!world.server().documentSymbol(symbols).empty());
+    lsp::HoverParams hover;
+    hover.textDocument.uri = symbols.textDocument.uri;
+    CHECK(!world.server().hover(hover).has_value());
+    world.change(2, "datatype Bug");
+    failed(2);
+    world.change(3, "datatype Fixed");
+    const auto* fixed = lastSnapshotOf(*world.client, kUri);
+    CHECK(fixed && fixed->version == 3 && fixed->diagnostics.empty());
+    CHECK(!doc->buildFailed &&
+          doc->state == (validate ? cursiv::DocumentState::Validated
+                                  : cursiv::DocumentState::IndexedReferences));
+    CHECK(world.client->shown.empty());
+  }
+}
+
 // A change is the whole text or a ranged edit, and one notification may carry
 // both: they apply in order, the edit's range read in the protocol's units.
 void a_change_applies_whole_texts_and_ranged_edits_in_order() {
@@ -1500,6 +1646,9 @@ void a_change_applies_whole_texts_and_ranged_edits_in_order() {
   params.contentChanges.emplace_back(std::move(ranged));
   world.server().didChange(params);
   const auto document = world.shared.documents->getDocument(kUri);
+  CHECK(document != nullptr &&
+        document->textDocument().getText() == "datatype Every\n");
+  world.change(2, "datatype Replay\n");
   CHECK(document != nullptr &&
         document->textDocument().getText() == "datatype Every\n");
 }
@@ -1536,8 +1685,8 @@ void opening_parses_once_and_unchanged_edits_keep_the_tree() {
   CHECK(document->textDocument().version() == 2);
 }
 
-// Two actions over one text edit: one in `changes` alone, one that also wrote
-// its own `documentChanges` -- a file to create first, then the edit.
+// One action edits two documents through `changes`. The other supplies a file
+// creation and a text edit in its own `documentChanges`.
 struct ShapedActions final : cursiv::CodeActionProvider {
   [[nodiscard]] std::vector<lsp::CodeAction> getCodeActions(
       const cursiv::Document& document, const lsp::CodeActionParams&,
@@ -1546,7 +1695,9 @@ struct ShapedActions final : cursiv::CodeActionProvider {
     const lsp::TextEdit x{.range = {}, .newText = std::string("x")};
     std::vector<lsp::CodeAction> actions(2);
     actions[0].title = "plain";
-    actions[0].edit.emplace().changes.emplace()[uri].push_back(x);
+    auto& changes = actions[0].edit.emplace().changes.emplace();
+    changes[uri].push_back(x);
+    changes[lsp::Uri::parse("file:///w/other.ws")].push_back(x);
     actions[1].title = "written";
     lsp::WorkspaceEdit& written = actions[1].edit.emplace();
     written.changes.emplace()[uri].push_back(x);
@@ -1565,7 +1716,8 @@ struct ShapedActions final : cursiv::CodeActionProvider {
 // there with the version they were measured against. An action that wrote its
 // own `documentChanges` keeps them as written, and its `changes` with them.
 void a_code_action_keeps_the_document_changes_it_wrote() {
-  World world;
+  World world(true);
+  world.disk->addFile(std::string(kUri), std::string(kRepaired));
   world.ws->codeActionProvider = std::make_unique<const ShapedActions>();
   lsp::InitializeParams params;
   params.capabilities.workspace.emplace()
@@ -1573,6 +1725,9 @@ void a_code_action_keeps_the_document_changes_it_wrote() {
       .documentChanges = true;
   (void)world.handshake(params);
   world.open(kRepaired);
+  support::open(world.server(), "file:///w/other.ws", "workspace",
+                "datatype Other");
+  support::change(world.server(), "file:///w/other.ws", 7, "datatype Changed");
   lsp::CodeActionParams asked;
   asked.textDocument.uri = lsp::Uri::parse(kUri);
   const std::vector<lsp::CodeAction> actions = world.server().codeAction(asked);
@@ -1581,14 +1736,14 @@ void a_code_action_keeps_the_document_changes_it_wrote() {
 
   const lsp::WorkspaceEdit& plain = *actions[0].edit;
   CHECK(!plain.changes.has_value());
-  CHECK(plain.documentChanges.has_value() &&
-        plain.documentChanges->size() == 1);
-  if (plain.documentChanges.has_value() && plain.documentChanges->size() == 1) {
-    const auto* versioned =
-        std::get_if<lsp::TextDocumentEdit>(&plain.documentChanges->front());
-    CHECK(versioned != nullptr && !versioned->textDocument.version.isNull() &&
-          versioned->textDocument.version.value() == 1);
-  }
+  CHECK(plain.documentChanges && plain.documentChanges->size() == 2);
+  if (plain.documentChanges)
+    for (const auto& change : *plain.documentChanges) {
+      const auto& target = std::get<lsp::TextDocumentEdit>(change).textDocument;
+      CHECK(!target.version.isNull() &&
+            target.version.value() ==
+                (target.uri == asked.textDocument.uri ? 1 : 7));
+    }
 
   const lsp::WorkspaceEdit& written = *actions[1].edit;
   CHECK(written.changes.has_value());
@@ -1598,6 +1753,59 @@ void a_code_action_keeps_the_document_changes_it_wrote() {
       written.documentChanges->size() == 2)
     CHECK(std::holds_alternative<lsp::CreateFile>(
         written.documentChanges->front()));
+
+  world.close();
+  const auto closed = world.server().codeAction(asked);
+  CHECK(closed.size() == 2 && closed[0].edit &&
+        closed[0].edit->documentChanges &&
+        closed[0].edit->documentChanges->size() == 2);
+  if (closed.size() == 2 && closed[0].edit && closed[0].edit->documentChanges)
+    for (const auto& change : *closed[0].edit->documentChanges) {
+      const auto& target = std::get<lsp::TextDocumentEdit>(change).textDocument;
+      CHECK(target.version.isNull() == (target.uri == asked.textDocument.uri));
+    }
+}
+
+void a_rename_versions_each_open_document() {
+  World world;
+  world.shared.fileOperationHandler = std::make_unique<RecordingFiles>();
+  lsp::InitializeParams init;
+  init.capabilities.workspace.emplace()
+      .workspaceEdit.emplace()
+      .documentChanges = true;
+  (void)world.handshake(init);
+  world.open("datatype T");
+  const auto other = lsp::Uri::parse("file:///w/b.ws");
+  support::open(world.server(), other.toString(), "workspace", "entity E {}");
+  support::change(world.server(), other.toString(), 7, "entity E { f : T }");
+  lsp::RenameParams rename;
+  rename.textDocument.uri = lsp::Uri::parse(kUri);
+  rename.position = {0, 9};
+  rename.newName = "Text";
+  const auto result = world.server().rename(rename, cursiv::kNoCancel);
+  CHECK(result && !result->changes && result->documentChanges &&
+        result->documentChanges->size() == 2);
+  if (result && result->documentChanges)
+    for (const auto& change : *result->documentChanges) {
+      const auto& edit = std::get<lsp::TextDocumentEdit>(change);
+      CHECK(!edit.textDocument.version.isNull() &&
+            edit.textDocument.version.value() ==
+                (edit.textDocument.uri == other ? 7 : 1));
+      CHECK(edit.edits.size() == 1);
+    }
+  lsp::RenameFilesParams files;
+  files.files.push_back({.oldUri = rename.textDocument.uri, .newUri = other});
+  const auto beforeMove =
+      world.server().willRenameFiles(files, cursiv::kNoCancel);
+  CHECK(beforeMove && beforeMove->documentChanges &&
+        beforeMove->documentChanges->size() == 1);
+  if (beforeMove && beforeMove->documentChanges &&
+      beforeMove->documentChanges->size() == 1) {
+    const auto& edit =
+        std::get<lsp::TextDocumentEdit>(beforeMove->documentChanges->front());
+    CHECK(!edit.textDocument.version.isNull() &&
+          edit.textDocument.version.value() == 7);
+  }
 }
 
 void requests_use_the_language_attached_to_an_untitled_document() {
@@ -1631,11 +1839,11 @@ void requests_use_the_language_attached_to_an_untitled_document() {
 void opening_can_override_the_language_of_an_existing_document() {
   World world;
   auto parser = std::make_unique<CountingParser>(
-      ws::generated::Workspace::create_parser());
+      ws::generated::Workspace::createParser());
   const auto* counter = parser.get();
   const auto* alternate = &support::add_language<cursiv::LspServices>(
       world.shared, {"alternate", {".alt"}, {}}, std::move(parser),
-      ws::generated::Workspace::create_ast_reflection());
+      ws::generated::Workspace::createAstReflection());
   (void)world.handshake();
   // A file may already have been loaded under its extension's language.
   auto document = world.shared.documentFactory->fromString(
@@ -1657,7 +1865,7 @@ void opening_uses_the_document_factorys_construction_hook() {
     mutable const cursiv::Document* created = nullptr;
     std::shared_ptr<cursiv::Document> create(
         cursiv::TextDocument text) const override {
-      std::string uri = cursiv::normalize_uri(text.uri());
+      std::string uri = cursiv::normalizeUri(text.uri());
       const cursiv::CoreServices& services =
           servicesFor(uri, text.languageId());
       auto document =
@@ -1718,7 +1926,7 @@ void references_do_not_wait_for_validation() {
         validating.count_down();
         release.wait();
       },
-      &cursiv::fast);
+      &cursiv::kFast);
   (void)world.handshake();
   world.open(kRepaired);
   // The edit moves every line down, so an answer read from the old text would
@@ -1879,7 +2087,7 @@ void a_scanned_document_publishes_without_a_tab() {
                             cursiv::DiagnosticSeverity::Warning,
                             "Type name should start with a capital.");
           },
-          &cursiv::fast);
+          &cursiv::kFast);
     world.disk->addFile("file:///w/b.ws",
                        configuration ? "entity lower { }\n" : std::string(kBroken));
     lsp::InitializeParams params = world.folderParams();
@@ -2059,6 +2267,8 @@ void a_closed_file_outside_the_folders_keeps_its_saved_content() {
         closed->textDocument().getText() == "datatype Saved\n");
   CHECK(symbol_names(world, "Saved").size() == 1);
   CHECK(symbol_names(world, "Buffered").empty());
+  support::change(world.server(), kOutside, 7, "datatype Saved\n");
+  CHECK(closed != nullptr && closed->textDocument().version() == 0);
 }
 
 // A buffer the file system cannot name (`untitled:` with the local provider)
@@ -2133,8 +2343,8 @@ void the_on_type_triggers_are_a_union_over_the_languages() {
   world.ws->formatter = std::make_unique<KeystrokeFormatter>("}");
   (void)support::add_language<cursiv::LspServices>(
       world.shared, {"second", {".second"}, {}},
-      ws::generated::Workspace::create_parser(),
-      ws::generated::Workspace::create_ast_reflection(),
+      ws::generated::Workspace::createParser(),
+      ws::generated::Workspace::createAstReflection(),
       [](cursiv::LspServices& second) {
         second.formatter = std::make_unique<KeystrokeFormatter>(";");
       });
@@ -2306,15 +2516,17 @@ void run() {
   the_completion_context_reaches_the_hooks();
   each_declaration_of_a_name_reaches_the_item_hook();
   completion_edits_follow_insert_replace_support();
-  prose_is_markdown_when_the_client_lists_it();
+  hover_and_completion_follow_their_own_format_preferences();
   virtual_content_waits_for_the_workspace_scan(false);
   virtual_content_waits_for_the_workspace_scan(true);
   a_closed_virtual_document_stays();
   the_file_operations_are_the_handlers_own();
   an_edit_republishes_what_it_repaired();
+  a_failed_export_publishes_diagnostics_until_the_edit_that_repairs_it();
   a_change_applies_whole_texts_and_ranged_edits_in_order();
   opening_parses_once_and_unchanged_edits_keep_the_tree();
   a_code_action_keeps_the_document_changes_it_wrote();
+  a_rename_versions_each_open_document();
   requests_use_the_language_attached_to_an_untitled_document();
   opening_can_override_the_language_of_an_existing_document();
   opening_uses_the_document_factorys_construction_hook();
@@ -2338,6 +2550,7 @@ void run() {
   the_save_notifications_reach_the_handler();
   a_notebook_syncs_its_cells_as_documents();
   a_failing_notebook_still_moves_its_cells();
+  replacing_every_cell_is_linear_in_the_cells();
   a_refused_allocation_leaves_the_notebook_index_whole();
   an_update_always_reaches_a_build();
   a_failed_build_is_shown_once_until_one_succeeds();
@@ -2521,7 +2734,7 @@ struct Session {
   StopLock* lock;
   std::future<int> running;
   explicit Session(const std::function<void(Server&)>& before = {}) {
-    cursiv::install_default_shared_lsp_services(shared);
+    cursiv::installDefaultSharedLspServices(shared);
     auto heldLock = std::make_unique<StopLock>();
     lock = heldLock.get();
     shared.workspaceLock = std::move(heldLock);
@@ -2530,7 +2743,7 @@ struct Session {
     if (before) before(*server);
     shared.languageServer = std::move(held);
     running = std::async(std::launch::async, [&] {
-      return cursiv::start_language_server(shared, serverStream);
+      return cursiv::startLanguageServer(shared, serverStream);
     });
   }
   void request(int id, std::string_view method,
@@ -2562,6 +2775,23 @@ struct Session {
         "textDocument/didOpen",
         R"({"textDocument":{"uri":"untitled:one","languageId":"test","version":1,"text":"x"}})");
     server->entered.wait();
+  }
+  void prepareEditWorkspace(bool neighbour) {
+    // Scanned: an edit queued from here cancels the write in flight.
+    shared.workspaceManager->initializeWorkspace({});
+    shared.workspaceLock->write([&](const cursiv::CancellationToken& token) {
+      const auto open = shared.documentFactory->create(
+          cursiv::TextDocument::create("untitled:one", "workspace", 1, "x"));
+      open->isOpen = true;
+      shared.documents->addDocument(open);
+      if (!neighbour) return;
+      const auto built =
+          shared.documentFactory->create(cursiv::TextDocument::create(
+              "untitled:two", "workspace", 1, "datatype T\n"));
+      shared.documents->addDocument(built);
+      cursiv::Document* const documents[] = {built.get()};
+      shared.documentBuilder->build(documents, {}, token);
+    });
   }
   ~Session() {
     requests.close();
@@ -3278,19 +3508,7 @@ void queued_edits_leave_their_builds_to_the_last() {
       (void)support::add_workspace<cursiv::LspServices>(server.shared);
     });
     s.initialize();
-    // Scanned: an edit queued from here cancels the write in flight.
-    s.shared.workspaceManager->initializeWorkspace({});
-    s.shared.workspaceLock->write([&](const cursiv::CancellationToken& token) {
-      s.shared.documents->addDocument(s.shared.documentFactory->create(
-          cursiv::TextDocument::create("untitled:one", "workspace", 1, "x")));
-      if (!neighbour) return;
-      const auto built = s.shared.documentFactory->create(
-          cursiv::TextDocument::create("untitled:two", "workspace", 1,
-                                       "datatype T\n"));
-      s.shared.documents->addDocument(built);
-      cursiv::Document* const documents[] = {built.get()};
-      s.shared.documentBuilder->build(documents, {}, token);
-    });
+    s.prepareEditWorkspace(neighbour);
     s.shared.documentBuilder->addDocumentUpdateListener(counted);
     s.shared.documentBuilder->addDocumentPhaseListener(counted);
     s.shared.documentBuilder->addBuildPhaseListener(counted);
@@ -3358,19 +3576,7 @@ void an_edit_cuts_the_content_phase_in_flight() {
       server.shared.indexManager = std::move(held);
     });
     s.initialize();
-    // Scanned: an edit queued from here cancels the write in flight.
-    s.shared.workspaceManager->initializeWorkspace({});
-    s.shared.workspaceLock->write([&](const cursiv::CancellationToken& token) {
-      s.shared.documents->addDocument(s.shared.documentFactory->create(
-          cursiv::TextDocument::create("untitled:one", "workspace", 1, "x")));
-      if (!neighbour) return;
-      const auto built = s.shared.documentFactory->create(
-          cursiv::TextDocument::create("untitled:two", "workspace", 1,
-                                       "datatype T\n"));
-      s.shared.documents->addDocument(built);
-      cursiv::Document* const documents[] = {built.get()};
-      s.shared.documentBuilder->build(documents, {}, token);
-    });
+    s.prepareEditWorkspace(neighbour);
     index->armed = true;
     s.notify("textDocument/didChange", kEdit);
     index->indexing.wait();
@@ -3546,8 +3752,8 @@ namespace {
 // tokens.
 struct World : support::World<cursiv::SharedLspServices> {
   cursiv::LspServices* doc = &support::add_language<cursiv::LspServices>(
-      shared, {"doc", {".doc"}, {}}, fdoc::generated::DocG::create_parser(),
-      fdoc::generated::DocG::create_ast_reflection(),
+      shared, {"doc", {".doc"}, {}}, fdoc::generated::DocG::createParser(),
+      fdoc::generated::DocG::createAstReflection(),
       [](cursiv::LspServices& language) {
         language.semanticTokenProvider =
             std::make_unique<const cursiv::GrammarSemanticTokenProvider>(
@@ -3581,7 +3787,7 @@ const std::string kDocs[] = {
                                        cursiv::TextOffset offset) {
   lsp::CompletionParams params;
   params.textDocument.uri = lsp::Uri::parse(document.uri);
-  params.position = cursiv::to_lsp(document.textDocument().positionAt(offset));
+  params.position = cursiv::toLsp(document.textDocument().positionAt(offset));
   return params;
 }
 
@@ -3650,91 +3856,26 @@ void the_state_names_exactly_what_may_be_written() {
   CHECK(std::find(closed.begin(), closed.end(), "]") != closed.end());
 }
 
-// A CST built by hand records no parser state, so `nextFeaturesAt` offers
-// nothing rather than guessing from the start state.
-void a_tape_is_declined_and_not_answered_from_the_start_state() {
+// A CST the engine wrote gets an answer.
+void a_cst_the_engine_wrote_gets_an_answer() {
   const std::string text = R"({"a":1})";
-  cursiv::Cst tape(text);
-  {
-    cursiv::detail::CstBuilder builder(tape);
-    const cursiv::detail::CstBuilder::Open all = builder.enter();
-    builder.leaf(0, 1, cursiv::kNoElement);
-    builder.leaf(1, 4, cursiv::kNoElement);
-    builder.leaf(4, 5, cursiv::kNoElement);
-    builder.leaf(5, 6, cursiv::kNoElement);
-    builder.leaf(6, 7, cursiv::kNoElement);
-    builder.exit(all, 0, cursiv::kNoElement);
-  }
-  CHECK(!tape.engineStamped());
-  CHECK(tape.grammar() == nullptr);
+  const std::unique_ptr<cursiv::Parser> engine =
+      fdoc::generated::DocG::createParser();
+  const cursiv::ParseResult parsed = engine->parse(text);
   std::vector<cursiv::NextFeature> out;
-  const std::unique_ptr<cursiv::Parser> engine =
-      fdoc::generated::DocG::create_parser();
-  engine->nextFeaturesAt(tape, 5, 5, out);
-  CHECK(out.empty());
-
-  // A CST the engine wrote does get an answer.
-  namespace g = fdoc::generated::DocG;
-  cursiv::Cst stream;
-  cursiv::engine::lr_parser<g::kTable>.parse(text, stream, nullptr, &g::kDrive);
-  CHECK(stream.engineStamped());
-  CHECK(stream.grammar() ==
-        nullptr);  // the engine wrote it, no parser finished it
-  engine->nextFeaturesAt(stream, 5, 5, out);
+  engine->nextFeaturesAt(parsed.cst(), 5, 5, out);
   CHECK(!out.empty());
-}
-
-// A CST whose leaves record a state past the end of the table:
-// `nextFeaturesAt` must offer nothing, not read past the table.
-void a_stamp_past_the_table_is_declined() {
-  const std::string text = R"({"a":1})";
-  namespace g = fdoc::generated::DocG;
-  // The first state past the DocG table's rows.
-  const std::uint32_t wild =
-      g::kTable.stamp.make(cursiv::kNoElement, g::kTable.nstates);
-  // State 1 is a valid DocG state.
-  const std::uint32_t named = g::kTable.stamp.make(cursiv::kNoElement, 1);
-  const std::unique_ptr<cursiv::Parser> engine =
-      fdoc::generated::DocG::create_parser();
-
-  // `at` is the state recorded on the caret's leaf and after, `before` the
-  // state of the leaves before it.
-  const auto answers = [&](std::uint32_t at, std::uint32_t before) {
-    cursiv::Cst tape(text);
-    {
-      cursiv::detail::CstBuilder builder(tape);
-      builder.bind_stream();
-      const cursiv::detail::CstBuilder::Open all = builder.enter();
-      builder.leaf(0, 1, before);
-      builder.leaf(1, 4, before);
-      builder.leaf(4, 5, at);
-      builder.leaf(5, 6, at);
-      builder.leaf(6, 7, at);
-      builder.exit(all, 0, at);
-    }
-    CHECK(tape.engineStamped());
-    std::vector<cursiv::NextFeature> out;
-    engine->nextFeaturesAt(tape, 5, 5, out);
-    return out.size();
-  };
-
-  // A valid state gets an answer; a state past the table in either place gets
-  // none.
-  CHECK(answers(named, named) > 0);
-  CHECK(answers(wild, wild) == 0);
-  CHECK(answers(wild, named) == 0);
-  CHECK(answers(named, wild) == 0);
 }
 
 // A language with no optional provider still has every required service.
 void a_language_with_no_provider_misses_no_slot() {
   cursiv::SharedLspServices shared;
-  cursiv::install_default_shared_lsp_services(shared);
+  cursiv::installDefaultSharedLspServices(shared);
   cursiv::LspServices language(shared);
   language.languageMetaData = {"doc", {".doc"}, {}};
-  language.parser = fdoc::generated::DocG::create_parser();
-  language.astReflection = fdoc::generated::DocG::create_ast_reflection();
-  cursiv::install_default_core_services(language);
+  language.parser = fdoc::generated::DocG::createParser();
+  language.astReflection = fdoc::generated::DocG::createAstReflection();
+  cursiv::installDefaultCoreServices(language);
   CHECK(language.hoverProvider == nullptr);
   CHECK(language.firstMissingService().empty());
 }
@@ -3743,7 +3884,7 @@ void a_language_with_no_provider_misses_no_slot() {
 // member answers as no reference, and no lookup finds one.
 void a_grammar_without_references_answers_none() {
   const std::unique_ptr<cursiv::AstReflection> made =
-      fdoc::generated::DocG::create_ast_reflection();
+      fdoc::generated::DocG::createAstReflection();
   const auto* const reflection =
       static_cast<const cursiv::DefaultAstReflection*>(made.get());
   CHECK(!reflection->hasMultiReference());
@@ -3762,16 +3903,30 @@ void a_grammar_without_references_answers_none() {
   }
 }
 
+void a_declaration_in_a_reference_free_grammar_has_a_definition() {
+  const World world;
+  const auto* document = world.built(R"({"member":1})");
+  CHECK(document->parseResult.references == nullptr);
+  lsp::DefinitionParams params;
+  params.textDocument.uri = lsp::Uri::parse(document->uri);
+  params.position = {0, 4};
+  const auto links = world.shared.languageServer->definition(params);
+  CHECK(links.size() == 1 &&
+        links.front().targetUri == params.textDocument.uri &&
+        links.front().targetSelectionRange.start.character == 1 &&
+        links.front().targetSelectionRange.end.character == 9);
+}
+
 }  // namespace
 
 void run() {
   a_language_with_no_provider_misses_no_slot();
   a_grammar_without_references_answers_none();
+  a_declaration_in_a_reference_free_grammar_has_a_definition();
   the_colours_are_the_same_colours();
   the_two_answers_never_cross();
   the_state_names_exactly_what_may_be_written();
-  a_tape_is_declined_and_not_answered_from_the_start_state();
-  a_stamp_past_the_table_is_declined();
+  a_cst_the_engine_wrote_gets_an_answer();
 }
 
 }  // namespace lsp_services
@@ -3784,11 +3939,11 @@ void a_position_round_trips() {
   const cursiv::Position zero{0, 0};
   const cursiv::Position big{UINT32_MAX, UINT32_MAX};
   for (const cursiv::Position p : {zero, big}) {
-    const cursiv::Position back = cursiv::from_lsp(cursiv::to_lsp(p));
+    const cursiv::Position back = cursiv::fromLsp(cursiv::toLsp(p));
     CHECK(back == p);
   }
   const cursiv::Range r{{1, 2}, {3, 4}};
-  const cursiv::Range back = cursiv::from_lsp(cursiv::to_lsp(r));
+  const cursiv::Range back = cursiv::fromLsp(cursiv::toLsp(r));
   CHECK(back == r);
 }
 
@@ -4184,10 +4339,10 @@ void validation_categories_reads_both_spellings() {
 
   const auto flat = parse(R"(["fast", "slow", "fast"])");
   CHECK(flat.size() == 2);
-  CHECK(flat[0] == &cursiv::fast && flat[1] == &cursiv::slow);
+  CHECK(flat[0] == &cursiv::kFast && flat[1] == &cursiv::kSlow);
 
   const auto nested = parse(R"({"categories": ["built-in"]})");
-  CHECK(nested.size() == 1 && nested[0] == &cursiv::built_in);
+  CHECK(nested.size() == 1 && nested[0] == &cursiv::kBuiltIn);
 
   CHECK(parse(R"(["no-such-category"])").empty());
   CHECK(parse(R"({"other": 1})").empty());
@@ -4237,7 +4392,7 @@ struct World : support::World<cursiv::SharedLspServices> {
             accept.accept(cursiv::TextRange{0, 0},
                           cursiv::DiagnosticSeverity::Warning, "slow check");
           },
-          &cursiv::slow);
+          &cursiv::kSlow);
     });
     lsp::DidChangeConfigurationParams settings;
     settings.settings = lsp::json::parse(
@@ -4253,8 +4408,8 @@ struct World : support::World<cursiv::SharedLspServices> {
       const std::function<void(cursiv::ValidationRegistry&)>& checks = {}) {
     (void)support::add_language<cursiv::LspServices>(
         shared, {id, {extension}, {}},
-        ws::generated::Workspace::create_parser(),
-        ws::generated::Workspace::create_ast_reflection(),
+        ws::generated::Workspace::createParser(),
+        ws::generated::Workspace::createAstReflection(),
         [&](cursiv::LspServices& language) {
           if (checks) checks(*language.validationRegistry);
         });
@@ -4292,7 +4447,7 @@ void run() {
 }  // namespace lsp_document_builder
 
 int main() {
-  cursiv::test::count_expectations();
+  cursiv::test::countExpectations();
   language_server::run();
   language_server_runtime::run();
   language_server_main::run();

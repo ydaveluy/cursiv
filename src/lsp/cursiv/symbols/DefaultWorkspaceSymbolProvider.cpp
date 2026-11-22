@@ -25,6 +25,7 @@ namespace cursiv {
 
 std::vector<lsp::WorkspaceSymbol> DefaultWorkspaceSymbolProvider::getSymbols(
     std::string_view query, const CancellationToken& cancelToken) const {
+  throwIfCancelled(cancelToken);
   std::vector<lsp::WorkspaceSymbol> found;
   // Folded as the matcher folds, ASCII alone: a name written exactly matches.
   std::string normalized(query);
@@ -32,7 +33,7 @@ std::vector<lsp::WorkspaceSymbol> DefaultWorkspaceSymbolProvider::getSymbols(
     if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
   (void)_shared.indexManager->visitElements(
       nullptr, {}, [&](const AstNodeDescription& description) {
-        throw_if_cancelled(cancelToken);
+        throwIfCancelled(cancelToken);
         if (!_shared.fuzzyMatcher->match(normalized, description.name))
           return true;
         if (std::optional<lsp::WorkspaceSymbol> symbol =
@@ -62,7 +63,7 @@ DefaultWorkspaceSymbolProvider::getWorkspaceSymbol(
   symbol.kind = _shared.nodeKindProvider->getSymbolKind(astDescription);
   lsp::Location location;
   location.uri = lsp::Uri::parse(document->uri);
-  location.range = to_lsp(
+  location.range = toLsp(
       document->textDocument().rangeAt(nameNode.begin(), nameNode.end()));
   symbol.location = std::move(location);
   return symbol;

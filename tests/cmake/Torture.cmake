@@ -1,15 +1,16 @@
 # Structural fuzzing: documents generated from the grammar, each with the tree
 # it states, compared with the tree the parser builds.
 cursiv_grammar(infixentry fuzz/InfixEntryGrammar.hpp finfix::InfixEntryG)
+cursiv_grammar(asi grammars/AsiGrammar.hpp tasi::G)
 cursiv_test(gen_fuzz_test fuzz/infix_entry.cpp infixentryGenerated asiGenerated)
 
 # The recovery metric's instruments on cases built by hand.
 cursiv_test(RepairMetric_test metric/RepairMetric_test.cpp domain-modelGenerated)
 target_include_directories(RepairMetric_test PRIVATE ${PROJECT_SOURCE_DIR}/bench)
 # Grammars built to force forks, merges, election and the version cap.
-cursiv_grammar(torture torture/TortureGrammar.hpp tort::Torture ENGINE LR)
-cursiv_grammar(optionals torture/OptionalsGrammar.hpp topt::OptionalsG ENGINE LR)
-cursiv_grammar(election torture/ElectionGrammar.hpp telect::Election EXTENSIONS .dangling ENGINE LR)
+cursiv_grammar(torture torture/TortureGrammar.hpp tort::Torture)
+cursiv_grammar(optionals torture/OptionalsGrammar.hpp topt::OptionalsG)
+cursiv_grammar(election torture/ElectionGrammar.hpp telect::Election EXTENSIONS .dangling)
 file(GLOB CURSIV_TORTURE_SOURCES CONFIGURE_DEPENDS torture/*.cpp)
 
 cursiv_test(torture_test "${CURSIV_TORTURE_SOURCES}" cursiv::lsp tortureGenerated

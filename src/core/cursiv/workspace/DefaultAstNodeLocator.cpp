@@ -67,7 +67,7 @@ std::string DefaultAstNodeLocator::getAstNodePath(const AstNode& node) const {
   std::vector<const AstNode*> ancestors;
   for (const AstNode* current = &node;
        current->parent != nullptr &&
-       current->parent->type != &ast_type_tag<Document>;
+       current->parent->type != &kAstTypeTag<Document>;
        current = current->parent)
     ancestors.push_back(current);
   std::string path;

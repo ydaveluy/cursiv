@@ -9,7 +9,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -18,7 +17,6 @@
 #include "cursiv/SeededSource.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/parser/Parser.hpp"
-#include "cursiv/shared/runtime/RepairFault.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/CstLeaf.hpp"
@@ -39,9 +37,6 @@
 using cursiv::test::failures;
 
 namespace metric = cursiv::recovery_metric;
-
-static_assert(
-    !std::is_same_v<cursiv::engine::RepairFault, metric::RepairFault>);
 
 namespace {
 
@@ -217,7 +212,7 @@ void an_insertion_that_restores_is_no_invention() {
 }
 
 std::unique_ptr<cursiv::Parser> dm_parser() {
-  return dm::generated::DomainModel::create_parser();
+  return dm::generated::DomainModel::createParser();
 }
 
 const cursiv::fuzzer::CursivActions<dm::DomainModel> kDmActions{};
@@ -226,7 +221,7 @@ const cursiv::fuzzer::CursivActions<dm::DomainModel> kDmActions{};
 // touches is out of the count on both sides.
 void the_tree_is_aligned_per_member() {
   const auto parser = dm_parser();
-  const auto reflection = dm::generated::DomainModel::create_ast_reflection();
+  const auto reflection = dm::generated::DomainModel::createAstReflection();
   const std::string a =
       "package p { entity A {} entity B { x: A } entity C { y: A } }";
   const std::string b = "package p { entity A {} entity C { y: A } }";
@@ -303,7 +298,7 @@ struct SaidValues final : cursiv::fuzzer::GrammarActions {
   }
   void visitValues(
       const cursiv::AstNode& n,
-      cursiv::function_ref<void(std::string_view, std::uint32_t,
+      cursiv::FunctionRef<void(std::string_view, std::uint32_t,
                                 cursiv::fuzzer::ValueKind, std::string_view)>
           yield) const override {
     const auto it = values.find(&n);
@@ -317,7 +312,7 @@ struct SaidValues final : cursiv::fuzzer::GrammarActions {
 // the node out of the count and the tree not whole.
 void a_node_is_kept_by_values_read_whole() {
   const auto parser = dm_parser();
-  const auto reflection = dm::generated::DomainModel::create_ast_reflection();
+  const auto reflection = dm::generated::DomainModel::createAstReflection();
   const std::string text = "package p { entity A {} }";
   const auto ra = parser->parse(text);
   const auto rb = parser->parse(text);

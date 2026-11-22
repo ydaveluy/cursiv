@@ -15,56 +15,47 @@ find_package(Threads REQUIRED)
 target_link_libraries(cursivCore PUBLIC Threads::Threads)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CursivAllocator.cmake)
 
-# The parser runtimes, what they share first, with the utilities the
-# generators read too. A generated language links the runtime of its engine.
-file(GLOB_RECURSE CURSIV_ENGINE_SHARED_SOURCES CONFIGURE_DEPENDS
-     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/shared/runtime/*.cpp
-     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/shared/utils/*.cpp)
-add_library(cursivEngineShared STATIC ${CURSIV_ENGINE_SHARED_SOURCES})
-add_library(cursiv::engine::shared ALIAS cursivEngineShared)
-target_include_directories(cursivEngineShared PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engines>)
-target_link_libraries(cursivEngineShared PUBLIC cursiv::core)
+# The parser engine. A generated language links its runtime; a language's
+# generator links what builds a parser, which the runtime is no part of.
+set(_engine ${CMAKE_CURRENT_SOURCE_DIR}/engine/cursiv/engine)
+add_library(cursivEngine STATIC
+    ${_engine}/ast/AstBuilder.cpp
+    ${_engine}/completion/Caret.cpp
+    ${_engine}/parser/LanguageParser.cpp
+    ${_engine}/parser/Match.cpp
+    ${_engine}/parser/Parse.cpp
+    ${_engine}/parser/Split.cpp
+    ${_engine}/recovery/Repair.cpp
+    ${_engine}/recovery/Typos.cpp
+    ${_engine}/recovery/Unclosed.cpp)
+add_library(cursiv::engine ALIAS cursivEngine)
+target_include_directories(cursivEngine PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engine>)
+target_link_libraries(cursivEngine PUBLIC cursiv::core)
 
-file(GLOB_RECURSE CURSIV_ENGINE_LL_SOURCES CONFIGURE_DEPENDS
-     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/ll/runtime/*.cpp
-     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/ll/table/*.cpp)
-add_library(cursivEngineLl STATIC ${CURSIV_ENGINE_LL_SOURCES})
-add_library(cursiv::engine::ll ALIAS cursivEngineLl)
-target_include_directories(cursivEngineLl PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engines>)
-target_link_libraries(cursivEngineLl PUBLIC cursiv::engine::shared)
-
-file(GLOB_RECURSE CURSIV_ENGINE_LR_SOURCES CONFIGURE_DEPENDS
-     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/lr/runtime/*.cpp)
-add_library(cursivEngineLr STATIC ${CURSIV_ENGINE_LR_SOURCES})
-add_library(cursiv::engine::lr ALIAS cursivEngineLr)
-target_include_directories(cursivEngineLr PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engines>)
-target_link_libraries(cursivEngineLr PUBLIC cursiv::engine::shared)
-
-# Shared generator support and parser backends.
-file(GLOB CURSIV_GEN_SOURCES CONFIGURE_DEPENDS
-     ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/shared/gen/*.cpp)
-add_library(cursivGen STATIC EXCLUDE_FROM_ALL ${CURSIV_GEN_SOURCES})
+add_library(cursivGen STATIC EXCLUDE_FROM_ALL
+    ${_engine}/ast/EmitAst.cpp
+    ${_engine}/generator/Generate.cpp
+    ${_engine}/generator/GrammarPrinter.cpp
+    ${_engine}/generator/TextMate.cpp
+    ${_engine}/grammar/GrammarImage.cpp
+    ${_engine}/grammar/Lower.cpp
+    ${_engine}/grammar/WritesOnce.cpp
+    ${_engine}/lexer/CharClass.cpp
+    ${_engine}/lexer/LexAutomaton.cpp
+    ${_engine}/parser/Closers.cpp
+    ${_engine}/parser/EmitDrive.cpp
+    ${_engine}/parser/InsertOrder.cpp
+    ${_engine}/parser/Lr1.cpp
+    ${_engine}/parser/Pack.cpp)
 add_library(cursiv::gen ALIAS cursivGen)
-target_link_libraries(cursivGen PUBLIC cursiv::engine::shared)
-
-foreach(_backend IN ITEMS Ll Lr)
-  string(TOLOWER ${_backend} _engine)
-  file(GLOB _sources CONFIGURE_DEPENDS
-       ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/${_engine}/gen/*.cpp)
-  list(REMOVE_ITEM _sources
-       ${CMAKE_CURRENT_SOURCE_DIR}/engines/cursiv/${_engine}/gen/${_engine}_main.cpp)
-  add_library(cursiv${_backend}Gen STATIC EXCLUDE_FROM_ALL ${_sources})
-  add_library(cursiv::${_engine}_gen ALIAS cursiv${_backend}Gen)
-  target_link_libraries(cursiv${_backend}Gen PUBLIC cursiv::gen
-      cursiv::engine::${_engine})
-  # These large emitters only write source files. Keep grammar analysis and
-  # parser runtimes at the configured optimisation level.
-  set_property(SOURCE engines/cursiv/${_engine}/gen/${_engine}_emit_parser.cpp
-      APPEND PROPERTY COMPILE_OPTIONS $<$<CONFIG:Release>:-O1>)
-endforeach()
+target_include_directories(cursivGen PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engine>)
+target_link_libraries(cursivGen PUBLIC cursiv::core)
+# The emitter only writes source files: the grammar's analysis keeps the
+# configured optimisation level.
+set_property(SOURCE ${_engine}/parser/EmitDrive.cpp
+    APPEND PROPERTY COMPILE_OPTIONS $<$<CONFIG:Release>:-O1>)
 
 # Protocol types, JSON-RPC and transports from our pinned lsp-framework fork.
 set(LSP_BUILD_EXAMPLES OFF CACHE BOOL "")
@@ -120,7 +111,7 @@ target_include_directories(cursivTest PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/test>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/fuzz>)
 # Core-only tests should not inherit LSP dependencies.
-target_link_libraries(cursivTest PUBLIC cursiv::engine::shared PRIVATE cursiv::lsp)
+target_link_libraries(cursivTest PUBLIC cursiv::engine PRIVATE cursiv::lsp)
 
 add_library(cursivBench STATIC EXCLUDE_FROM_ALL
     bench/cursiv/LanguageBench.cpp bench/cursiv/LspBench.cpp)

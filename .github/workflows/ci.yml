@@ -30,7 +30,7 @@ jobs:
       matrix:
         preset: [gcc-debug, gcc-release]
         include:
-          # Keep generated tables within the GCC Debug runner's memory.
+          # Limit debug information for large generated parsers.
           - preset: gcc-debug
             debug-info: -g1
     steps:
@@ -132,8 +132,7 @@ jobs:
           examples/domainmodel/example/blog.dmodel
           --folder examples/domainmodel/example
 
-  # MinGW-w64 GCC from MSYS2, the GCC of the gcc job on Windows: generated
-  # parsers use computed goto and guaranteed tail calls, which MSVC lacks.
+  # MinGW-w64 GCC supports the guaranteed tail calls used by generated parsers.
   windows:
     runs-on: windows-2025
     timeout-minutes: 240

@@ -18,7 +18,7 @@ function setStatus(phase, text, detail = '') {
   $('server-state').dataset.phase = phase;
   $('server-state').title = detail;
   $('server-text').textContent = text;
-  $('restart').hidden = phase !== 'stopped';
+  $('restart').hidden = phase !== 'stopped' && phase !== 'unavailable';
 }
 
 // A Material palette colour as opaque hex, painted over the page background:
@@ -315,7 +315,7 @@ async function main() {
     return null;
   });
   if (!monaco) {
-    setStatus('unavailable', 'This build has no editor: tools/build-demo.sh adds it with the language servers.');
+    setStatus('unavailable', 'The editor could not load.');
     return;
   }
   if (!crossOriginIsolated) {
@@ -343,6 +343,8 @@ async function main() {
     quickSuggestions: { other: true, comments: false, strings: false },
   });
   state.editor = editor;
+  // Keep the documentation site's shortcuts out of the editor while typing.
+  $('editor').addEventListener('keydown', (event) => event.stopPropagation());
   // The code font of the site loads on first use: measure it again then.
   document.fonts.addEventListener('loadingdone', () => monaco.editor.remeasureFonts());
   editor.onDidChangeCursorPosition((e) => { $('cursor').textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`; });
@@ -361,11 +363,16 @@ async function main() {
     },
   });
   renderPicker();
-  $('restart').addEventListener('click', () => { const doc = current?.documents.find((d) => d.uri === state.document)?.name; const id = state.language; stopCurrent(); openLanguage(id, doc); });
   await openLanguage(params.get('lang') ?? languages[0].id, params.get('doc'));
 }
 
+$('restart').addEventListener('click', () => {
+  if (!current) { location.reload(); return; }
+  const doc = current.documents.find((d) => d.uri === state.document);
+  openLanguage(current.lang.id, doc?.name);
+});
+
 main().catch((error) => {
   state.error = String(error?.stack ?? error);
-  setStatus('stopped', `Error: ${error.message ?? error}`);
+  setStatus('stopped', 'The editor could not start.');
 });
