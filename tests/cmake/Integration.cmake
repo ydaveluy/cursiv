@@ -83,6 +83,11 @@ if(NOT CMAKE_CROSSCOMPILING)
       -DCURSIV=${CURSIV_SOURCE_ROOT}
       -DCXX=${CMAKE_CXX_COMPILER}
       "-DFLAGS=${_flags}"
+      # This build, which the test installs, and what its libraries link under.
+      -DBUILD=${CMAKE_BINARY_DIR}
+      -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
+      "-DBUILD_FLAGS=${CMAKE_CXX_FLAGS}"
+      "-DBUILD_LINK_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
       -P ${CMAKE_CURRENT_SOURCE_DIR}/integration/scaffold_test.cmake)
   set_tests_properties(scaffold_test PROPERTIES TIMEOUT 900
       RESOURCE_LOCK cursiv_build RUN_SERIAL TRUE FIXTURES_SETUP scaffold_build)

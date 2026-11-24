@@ -48,6 +48,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI" AND CURSIV_NODE)
       ${CMAKE_CURRENT_SOURCE_DIR}/tools/wasi-run.mjs)
 endif()
 
+include(GNUInstallDirs)
 add_subdirectory(src)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CursivGrammar.cmake)
@@ -57,6 +58,11 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CursivBenchmark.cmake)
 if(CURSIV_HOST_MANIFEST)
   include(${CURSIV_HOST_MANIFEST})
   return()
+endif()
+
+# Cursiv's own native build installs as a CMake package.
+if(PROJECT_IS_TOP_LEVEL AND NOT CMAKE_CROSSCOMPILING)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CursivInstall.cmake)
 endif()
 
 # Enable testing before entering examples, which declare tests too.

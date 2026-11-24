@@ -1,0 +1,15 @@
+@PACKAGE_INIT@
+
+# The libraries are a native build: a cross build compiles Cursiv itself.
+if(CMAKE_CROSSCOMPILING)
+  set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+  set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+      "the installed Cursiv is a native build")
+  return()
+endif()
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+include("${CMAKE_CURRENT_LIST_DIR}/cursivTargets.cmake")
+include("@PACKAGE_CURSIV_INSTALL_DATADIR@/cmake/CursivGrammar.cmake")
+include("@PACKAGE_CURSIV_INSTALL_DATADIR@/cmake/CursivBenchmark.cmake")

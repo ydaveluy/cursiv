@@ -1,5 +1,6 @@
 # Runs `docs/cursiv-new.cmake`, then configures, builds and tests the project
-# as its README says, from a tree with nothing generated in it.
+# as its README says, from a tree with nothing generated in it, then against
+# the installed package.
 cmake_minimum_required(VERSION 3.30)
 
 file(REMOVE_RECURSE ${WORK})
@@ -116,6 +117,18 @@ string(JSON _stages LENGTH "${_bench}" rows 0 stages)
 if(NOT _completion STREQUAL "NUMBER" OR NOT _stages EQUAL 5)
   message(FATAL_ERROR "the scaffold's benchmark does not measure LSP completion")
 endif()
+
+# The same project against this build once installed. Disconnected, a package
+# that is not found is an error, never a download.
+_step("the install" ${CMAKE_COMMAND} --install ${BUILD} --prefix ${WORK}/prefix)
+_step("the configure against the package" ${CMAKE_COMMAND} -S ${_project}
+      -B ${_project}/build-package -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
+      -DCMAKE_CXX_COMPILER=${CXX} "-DCMAKE_CXX_FLAGS=${BUILD_FLAGS}"
+      "-DCMAKE_EXE_LINKER_FLAGS=${BUILD_LINK_FLAGS}"
+      -DCMAKE_PREFIX_PATH=${WORK}/prefix -DFETCHCONTENT_FULLY_DISCONNECTED=ON)
+_step("the build against the package" ${CMAKE_COMMAND} --build ${_project}/build-package)
+_step("the tests against the package" ${CMAKE_CTEST_COMMAND}
+      --test-dir ${_project}/build-package --output-on-failure)
 
 # Each package has its own include root: the language core cannot reach the
 # server by either spelling, so a forbidden include is a compile error.

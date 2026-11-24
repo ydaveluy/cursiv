@@ -235,14 +235,16 @@ _cursiv_new_emit([==[CMakeLists.txt]==] [==[cmake_minimum_required(VERSION 3.30)
 project(@CURSIV_NEW_ID@ LANGUAGES CXX)
 
 include(FetchContent)
-# Cursiv is downloaded at the tag below. To build against a local copy of
-# Cursiv instead, configure with `-DCURSIV_SOURCE_DIR=<path>`.
+# An installed Cursiv is used when CMake finds one; otherwise Cursiv is
+# downloaded at the tag below. To build against a local copy of Cursiv
+# instead, configure with `-DCURSIV_SOURCE_DIR=<path>`.
 if(CURSIV_SOURCE_DIR)
   FetchContent_Declare(cursiv SOURCE_DIR ${CURSIV_SOURCE_DIR})
 else()
   FetchContent_Declare(cursiv
       GIT_REPOSITORY https://github.com/ydaveluy/cursiv.git
-      GIT_TAG        @CURSIV_NEW_TAG@)
+      GIT_TAG        @CURSIV_NEW_TAG@
+      FIND_PACKAGE_ARGS CONFIG)
 endif()
 FetchContent_MakeAvailable(cursiv)
 

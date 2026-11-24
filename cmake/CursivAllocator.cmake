@@ -47,6 +47,7 @@ FetchContent_Declare(cursiv_mimalloc
 FetchContent_MakeAvailable(cursiv_mimalloc)
 
 add_library(cursivAllocator OBJECT ${cursiv_mimalloc_SOURCE_DIR}/src/static.c)
+add_library(cursiv::allocator ALIAS cursivAllocator)
 # Built as C++, its `operator new` throws `std::bad_alloc` when memory runs out,
 # where the C build aborts.
 set_source_files_properties(${cursiv_mimalloc_SOURCE_DIR}/src/static.c
@@ -86,4 +87,4 @@ endif()
 
 # Sanitized targets and targets defining their own allocator opt out explicitly.
 target_link_libraries(cursivCore INTERFACE
-    $<$<NOT:$<BOOL:$<TARGET_PROPERTY:CURSIV_OWN_ALLOCATOR>>>:$<TARGET_OBJECTS:cursivAllocator>>)
+    $<$<NOT:$<BOOL:$<TARGET_PROPERTY:CURSIV_OWN_ALLOCATOR>>>:$<TARGET_OBJECTS:cursiv::allocator>>)

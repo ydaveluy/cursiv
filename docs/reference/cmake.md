@@ -14,16 +14,38 @@ if(CURSIV_SOURCE_DIR)
 else()
   FetchContent_Declare(cursiv
       GIT_REPOSITORY https://github.com/ydaveluy/cursiv.git
-      GIT_TAG        main)
+      GIT_TAG        main
+      FIND_PACKAGE_ARGS CONFIG)
 endif()
 FetchContent_MakeAvailable(cursiv)
 ```
 
-Configure with `-DCURSIV_SOURCE_DIR=/path/to/cursiv` to use a local checkout;
+This uses an [installed Cursiv](#install-cursiv) when CMake finds one, and
+downloads Cursiv otherwise. Configure with
+`-DCURSIV_SOURCE_DIR=/path/to/cursiv` to use a local checkout instead;
 scaffolded projects accept the same option.
 
 `cursiv/Version.hpp` defines `CURSIV_VERSION_MAJOR`, `CURSIV_VERSION_MINOR` and
 `CURSIV_VERSION_PATCH`, for code that builds against several versions.
+
+## Install Cursiv
+
+Install Cursiv to compile it once for several projects:
+
+```sh
+cmake -S cursiv -B cursiv/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build cursiv/build --target src/all
+cmake --install cursiv/build --prefix /path/to/cursiv-install
+```
+
+`src/all` builds the libraries without the examples and benchmarks. Configure
+your projects with `-DCMAKE_PREFIX_PATH=/path/to/cursiv-install`, and build
+them with the compiler that built Cursiv. The package provides the targets and
+functions of this page.
+
+The installed libraries are a native build. WebAssembly builds ignore them and
+download Cursiv. To ignore them yourself, for a sanitizer build for example,
+configure with `-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER`.
 
 ## The targets you link
 

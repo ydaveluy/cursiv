@@ -9,7 +9,8 @@ file(GLOB_RECURSE CURSIV_CORE_SOURCES CONFIGURE_DEPENDS
 add_library(cursivCore STATIC ${CURSIV_CORE_SOURCES})
 add_library(cursiv::core ALIAS cursivCore)
 target_include_directories(cursivCore PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/cursiv/core>)
 target_compile_features(cursivCore PUBLIC cxx_std_20)
 find_package(Threads REQUIRED)
 target_link_libraries(cursivCore PUBLIC Threads::Threads)
@@ -30,7 +31,8 @@ add_library(cursivEngine STATIC
     ${_engine}/recovery/Unclosed.cpp)
 add_library(cursiv::engine ALIAS cursivEngine)
 target_include_directories(cursivEngine PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engine>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engine>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/cursiv/engine>)
 target_link_libraries(cursivEngine PUBLIC cursiv::core)
 
 add_library(cursivGen STATIC EXCLUDE_FROM_ALL
@@ -50,7 +52,8 @@ add_library(cursivGen STATIC EXCLUDE_FROM_ALL
     ${_engine}/parser/Pack.cpp)
 add_library(cursiv::gen ALIAS cursivGen)
 target_include_directories(cursivGen PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engine>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engine>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/cursiv/engine>)
 target_link_libraries(cursivGen PUBLIC cursiv::core)
 # The emitter only writes source files: the grammar's analysis keeps the
 # configured optimisation level.
@@ -81,7 +84,8 @@ file(GLOB CURSIV_CLI_SOURCES CONFIGURE_DEPENDS
 add_library(cursivCli STATIC EXCLUDE_FROM_ALL ${CURSIV_CLI_SOURCES})
 add_library(cursiv::cli ALIAS cursivCli)
 target_include_directories(cursivCli PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cli>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cli>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/cursiv/cli>)
 target_link_libraries(cursivCli PUBLIC cursiv::core)
 
 file(GLOB_RECURSE CURSIV_MCP_SOURCES CONFIGURE_DEPENDS
@@ -89,7 +93,8 @@ file(GLOB_RECURSE CURSIV_MCP_SOURCES CONFIGURE_DEPENDS
 add_library(cursivMcp STATIC EXCLUDE_FROM_ALL ${CURSIV_MCP_SOURCES})
 add_library(cursiv::mcp ALIAS cursivMcp)
 target_include_directories(cursivMcp PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mcp>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mcp>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/cursiv/mcp>)
 target_link_libraries(cursivMcp PUBLIC cursiv::core lsp)
 
 file(GLOB_RECURSE CURSIV_LSP_SOURCES CONFIGURE_DEPENDS
@@ -97,7 +102,8 @@ file(GLOB_RECURSE CURSIV_LSP_SOURCES CONFIGURE_DEPENDS
 add_library(cursivLsp STATIC EXCLUDE_FROM_ALL ${CURSIV_LSP_SOURCES})
 add_library(cursiv::lsp ALIAS cursivLsp)
 target_include_directories(cursivLsp PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lsp>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lsp>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/cursiv/lsp>)
 # Public headers expose protocol types.
 target_link_libraries(cursivLsp PUBLIC cursiv::core cursiv::mcp lsp)
 
@@ -109,7 +115,9 @@ add_library(cursiv::test ALIAS cursivTest)
 # The fuzz helpers are headers on top of the test helpers.
 target_include_directories(cursivTest PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/test>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/fuzz>)
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/cursiv/test>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/fuzz>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/cursiv/fuzz>)
 # Core-only tests should not inherit LSP dependencies.
 target_link_libraries(cursivTest PUBLIC cursiv::engine PRIVATE cursiv::lsp)
 
@@ -117,7 +125,8 @@ add_library(cursivBench STATIC EXCLUDE_FROM_ALL
     bench/cursiv/LanguageBench.cpp bench/cursiv/LspBench.cpp)
 add_library(cursiv::bench ALIAS cursivBench)
 target_include_directories(cursivBench PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/bench>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/bench>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/cursiv/bench>)
 target_link_libraries(cursivBench PUBLIC cursiv::lsp)
 if(CMAKE_CROSSCOMPILING AND NOT CURSIV_WASI_THREADS)
   target_compile_definitions(cursivBench PUBLIC CURSIV_BENCH_PARSE_ONLY)
