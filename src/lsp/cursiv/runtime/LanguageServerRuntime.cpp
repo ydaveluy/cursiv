@@ -520,16 +520,15 @@ void add_lifecycle_handlers(Session& session, SharedCoreServices& shared) {
   endpoint.onInitialize(
       [&session, &server](const lsp::InitializeParams& params) {
         const ClientShapes shapes = client_shapes(params);
-        lsp::InitializeResult result;
         try {
-          result = server.initialize(params);
+          lsp::InitializeResult result = server.initialize(params);
+          session.shapes = shapes;
+          return result;
         } catch (const std::exception&) {
           throw;
         } catch (...) {
           throw_unknown_failure();
         }
-        session.shapes = shapes;
-        return result;
       });
 
   endpoint.onInitialized(notification(

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <initializer_list>
 #include <type_traits>
 #include <utility>
 
@@ -119,6 +120,16 @@ struct dedupe<TypeList<Ts...>> {
 
 #else
 
+// Where the first element `same` marks is.
+consteval std::size_t first_marked(std::initializer_list<bool> same) {
+  std::size_t i = 0;
+  for (const bool marked : same) {
+    if (marked) break;
+    ++i;
+  }
+  return i;
+}
+
 // Each element keeps its place when no earlier one is the same type. Types
 // are compared by position, never by address: g++ cannot compare two
 // addresses in a constant expression under `-fsanitize=undefined`.
@@ -129,18 +140,14 @@ struct dedupe_pack {
     std::size_t at[n == 0 ? 1 : n]{};
     std::size_t size = 0;
   };
-  // Where `T` first occurs in the pack.
+  // Where `T` first occurs in the pack: an alias, which no compiler names
+  // as a symbol.
   template <class T>
-  static consteval std::size_t first() {
-    constexpr bool same[] = {__is_same(T, Ts)...};
-    std::size_t i = 0;
-    while (!same[i]) ++i;
-    return i;
-  }
+  using first = std::integral_constant<std::size_t, first_marked({__is_same(T, Ts)...})>;
   static constexpr Kept kept = [] {
     Kept k;
     if constexpr (n != 0) {
-      constexpr std::size_t firsts[] = {first<Ts>()...};
+      constexpr std::size_t firsts[] = {first<Ts>::value...};
       for (std::size_t i = 0; i < n; ++i)
         if (firsts[i] == i) k.at[k.size++] = i;
     }

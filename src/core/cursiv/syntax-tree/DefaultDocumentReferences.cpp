@@ -12,6 +12,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "cursiv/observability/ObservabilitySink.hpp"
@@ -232,8 +233,10 @@ void DefaultDocumentReferences::indexNames(const Cst& cst) const {
     const NodeId at = _f.refOps[h.field].name_id(*h.owner, h.index);
     if (at != kNoNode) _names.push_back({cst[at].begin, cst[at].end, rank});
   }
-  // Stable, so names that begin together keep the list's order.
-  std::ranges::stable_sort(_names, {}, &NameAt::begin);
+  // By begin, then by rank: names that begin together keep the list's order.
+  std::ranges::sort(_names, {}, [](const NameAt& name) {
+    return std::pair(name.begin, name.rank);
+  });
   // Each entry was made with its own end, and becomes the furthest end so far.
   TextOffset reach = 0;
   for (NameAt& name : _names) {
