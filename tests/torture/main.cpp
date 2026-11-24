@@ -204,6 +204,7 @@ void torture_dangling();
 void torture_election();
 void torture_optionals();
 void torture_boundary();
+void torture_held();
 
 int main() {
   const std::unique_ptr<cursiv::Parser> parser =
@@ -265,6 +266,7 @@ int main() {
   torture_election();
   torture_optionals();
   torture_boundary();
+  torture_held();
 
   return cursiv::test::report("torture_test");
 }

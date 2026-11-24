@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <set>
 #include <string_view>
 #include <unordered_map>
@@ -43,6 +45,10 @@ constexpr std::uint64_t kWorkPerParse = std::uint64_t{1} << 21;
 constexpr std::uint64_t kWorkPerSearch = std::uint64_t{1} << 19;
 // The tokens a race between goals of one cost may read.
 constexpr std::uint32_t kRaceSteps = 1024;
+// The tokens before the one refused a search looks back over for a keyword
+// misspelt, and the rank of its readings: behind the edits of that token.
+constexpr unsigned kBackTokens = 8;
+constexpr std::uint32_t kBackChoice = 0x40000000u;
 
 // Where a reading stands in the fault it repairs, `(ins)* (rep | del+)?`, in
 // the order a fault goes through them.
@@ -63,6 +69,8 @@ struct Edit {
   Kind kind = root;
   // The first edit of a fault.
   bool opens = false;
+  // Made of a word the states read: the machine is stood before it first.
+  bool word = false;
   // The terminal inserted, or the one the bytes up to `end` are read as.
   std::uint16_t term = 0;
   TextOffset end = 0;
@@ -78,11 +86,11 @@ struct Edit {
     return m.tok.head == tok.head && m.tok.end == tok.end && m.under() == state;
   }
   [[nodiscard]] Token replacement(const Machine& m) const {
+    // The bytes are that terminal whatever they spell: no state reads them
+    // again.
     Token result = token(tok.begin(m), m.src + end, term);
-    if (kind == substitute) {
-      result.head |= kReplaced | kTold;
-      if (m.t.terminalRank[term] & 1) result.head |= kLiteralBranch;
-    }
+    result.head |= kReplaced | kTold;
+    if (kind == substitute && (m.t.terminalRank[term] & 1)) result.head |= kLiteralBranch;
     return result;
   }
 };
@@ -106,6 +114,9 @@ struct Candidate : Reading {
   std::uint32_t invented = 0;
   // The author's tokens it read since the search set out.
   std::uint32_t tokens = 0;
+  // Where the text was read up to at the refusal it repairs: it validates
+  // on the tokens past it.
+  TextOffset past = 0;
   // The required insertions it may still make at no cost.
   std::uint64_t freeInserts = 0;
   // Real tokens read since its last edit, as far as a goal counts them.
@@ -163,12 +174,14 @@ struct Future {
   std::uint64_t token;
   std::uint64_t flags;
   std::uint64_t indented;
+  TextOffset past;
   bool operator==(const Future&) const = default;
 };
 struct FutureHash {
   std::size_t operator()(const Future& f) const {
     return static_cast<std::size_t>((f.stack * 0x9E3779B97F4A7C15ull) ^ std::rotl(f.token, 29) ^
-                                    std::rotl(f.flags, 47) ^ std::rotl(f.indented, 13));
+                                    std::rotl(f.flags, 47) ^ std::rotl(f.indented, 13) ^
+                                    (std::uint64_t{f.past} << 17));
   }
 };
 
@@ -221,11 +234,14 @@ struct Step {
 
 class Repair {
  public:
-  explicit Repair(Machine& machine)
+  // With `backs`, a search may set the machine back before a word it read.
+  Repair(Machine& machine, bool backs)
       : m(machine),
         t(machine.t),
         _budget(std::min(static_cast<std::uint64_t>(m.end - m.src) * kWorkPerByte + kWorkFloor,
-                         kWorkPerParse)) {}
+                         kWorkPerParse)),
+        _backs(backs),
+        _marked(backs ? Marked::fresh : Marked::stale) {}
 
   // The token the machine was refused: the next edit is written, and the
   // machine set to go on. False where there is none.
@@ -257,16 +273,43 @@ class Repair {
                                 unsigned{r.held} << 6 | static_cast<unsigned>(r.pin) << 7;
     return {std::uint64_t{r.node} << 32 | offset(r.at), r.held ? r.tok.head : 0,
             std::uint64_t{r.held ? offset(r.tok.end) : 0} << 32 | flags,
-            std::uint64_t{r.indented.level} << 32 | r.indented.depth};
+            std::uint64_t{r.indented.level} << 32 | r.indented.depth, r.past};
+  }
+
+  // A word the machine read: the bytes of one token.
+  struct Word {
+    TextOffset begin, end;
+  };
+
+  // Whether `reads` is refused the end of the text, which ends before `word`
+  // as a token no state acts on, then in hand as `tok`: the stack is left as
+  // the tokens before the word made it.
+  template <class Reads>
+  bool stood(Word word, const Token& tok, Reads&& reads) {
+    const char* const whole = m.end;
+    const std::uint16_t ended = m.ended;
+    m.read_to(m.src + word.begin, t.terminalCount);
+    const Exit exit = reads();
+    m.read_to(whole, ended);
+    return exit == Exit::refused && tok.terminal() == t.terminalCount &&
+           tok.begin(m) == word.begin;
+  }
+  // `word` in hand as a token of no terminal: an edit of it is made on that.
+  [[nodiscard]] Token unread(Word word) const {
+    return token(word.begin, m.src + word.end, t.terminalCount);
   }
 
   // The search.
-  void start();
+  bool back();
+  void forth();
+  bool stand(Word word);
+  [[nodiscard]] bool misspelt(Word word);
+  void misread(std::uint32_t at, std::uint32_t read);
+  bool start();
   std::uint32_t run(bool& exhausted, bool& raced);
   void expand(std::uint32_t at);
   bool insertions(std::uint32_t from, std::uint32_t rank, bool required);
-  bool reread(std::uint32_t from, Edit::Kind kind, std::uint16_t term, TextOffset end,
-              std::uint32_t cost, std::uint32_t choice);
+  bool reread(std::uint32_t from, Edit edit, std::uint32_t cost);
   void lexical(std::uint32_t at, std::uint32_t& choice);
   void replacement(std::uint32_t from, std::uint32_t rank);
   bool more_ends(Ends& ends, TextOffset p, const Unclosed& reading);
@@ -291,7 +334,7 @@ class Repair {
   void forks(std::uint32_t at);
   std::uint32_t invent(std::uint32_t from, std::uint16_t term, std::uint32_t choice);
   Work read(std::uint32_t at);
-  Exit step(Candidate& r);
+  Exit step(Candidate& r, Token* taken = nullptr);
   void admit(std::uint32_t at, Work work);
   bool merge(std::uint32_t at, std::uint32_t& kept);
   void queue(std::uint32_t f, const Candidate& r, std::uint32_t at, Work work,
@@ -303,7 +346,7 @@ class Repair {
   void add_name(std::uint32_t path, ElementId term);
   void name(std::uint32_t path);
   std::uint32_t elect(bool& raced);
-  bool race(const std::vector<std::uint32_t>& of, std::vector<TextOffset>& reach);
+  bool race(std::vector<TextOffset>& reach);
   [[nodiscard]] TextOffset deleted_end(std::uint32_t state, Token tok);
   // A reading past an indent dropped, at a level that closes with no
   // dedent, or past a dedent dropped.
@@ -343,12 +386,38 @@ class Repair {
   std::uint64_t _limit = 0;
   bool _degraded = false;
 
-  // One search: the stacks, the readings, the paths and the queue.
+  // The machine as it last set out to read after an edit, where a search
+  // sets it back: stale once an edit is written, back while a search has it
+  // stand before a word it read, used once one did.
+  enum class Marked : std::uint8_t { stale, fresh, back, used };
+  const bool _backs;
+  Marked _marked;
+  Machine::Checkpoint _mark;
+  // For a reading that made no edit: how it stood before each word it read
+  // that misspells a literal, with the count of tokens read before it.
+  struct Looked {
+    Candidate before;
+    Word word;
+    std::uint32_t index;
+  };
+  std::vector<Looked> _looked;
+  // What the machine was refused when it was set back: the token, where it
+  // stood in the indentation and the states under it.
+  Token _refused{nullptr, 0};
+  Indented _refusedIn{};
+  std::vector<std::uint32_t> _refusedOn;
+  // The terminals read as literals, and per fault mode and spelling whether
+  // a word misspells one.
+  std::vector<std::uint64_t> _literals;
+  std::map<std::pair<std::uint16_t, std::string_view>, bool> _misspelt;
+
   // Where the end-of-text insertions were last made, how many, and how many
   // the stack found there may need.
   const char* _closedAt = nullptr;
   std::uint64_t _closed = 0;
   std::uint64_t _closeMost = 0;
+
+  // One search: the stacks, the readings, the paths and the queue.
   Cactus _stacks;
   // The stack and the actions a split met by a reading is decided with.
   std::vector<Frame> _frames;
@@ -495,7 +564,8 @@ void Repair::admit(std::uint32_t at, Work work) {
       return;
     }
   }
-  discard(at);
+  // The readings made of the words it read stand without it.
+  if (at + 1 == _readings.size()) discard(at);
 }
 
 // The reading of `from` with `term` put in hand before its token.
@@ -534,9 +604,10 @@ std::uint32_t Repair::child(std::uint32_t from, Edit edit) {
   return at;
 }
 
-// One token of `r`: shifted, refused in the state on top, the text's end, or
-// a split the text read ahead left undecided, which `r` then stands at.
-Exit Repair::step(Candidate& r) {
+// One token of `r`: shifted, which `taken` is then set to, refused in the
+// state on top, the text's end, or a split the text read ahead left
+// undecided, which `r` then stands at.
+Exit Repair::step(Candidate& r, Token* taken) {
   const std::uint32_t from = r.node;
   const auto before = m.explored;
   Explorer x(m, _stacks, r);
@@ -563,12 +634,13 @@ Exit Repair::step(Candidate& r) {
   _arms.clear();
   _work += m.explored - before;
   // A reread that dropped the substitute cannot validate its shift.
-  if (r.pin == Pin::reread && (r.tok.head & kReplaced) &&
+  if (r.pin == Pin::reread &&
       (exit == Exit::accepted || !((exit == Exit::shifted ? x.taken.head : x.tok.head) & kReplaced)))
     return Exit::refused;
   r.reading() = x.reading();
   r.held = exit == Exit::refused || exit == Exit::split;
   if (r.held) return exit;
+  if (taken != nullptr) *taken = x.taken;
   if (exit == Exit::accepted) {
     r.done = true;
   } else if (r.pin == Pin::invented) {
@@ -588,11 +660,11 @@ Exit Repair::step(Candidate& r) {
     r.freeInserts = !r.due ? 0 : goesOn ? r.freeInserts - 1 : most > 0 ? most - 1 : 0;
   } else {
     // The author's bytes read again are a token of theirs, but none past the
-    // edit that read them; a reading validates past an edit only, and
-    // indentation, made of blanks, validates nothing.
+    // edit that read them; a reading validates past an edit only, on tokens
+    // past the refusal, and indentation, made of blanks, validates nothing.
     const std::uint16_t taken = x.taken.terminal();
     if (r.pin == Pin::none && r.edits != 0 && r.shifts < kValidateShifts &&
-        taken != t.indentTerminal && taken != t.dedentTerminal)
+        taken != t.indentTerminal && taken != t.dedentTerminal && x.taken.begin(m) >= r.past)
       ++r.shifts;
     r.pin = Pin::none;
     ++r.tokens;
@@ -606,14 +678,60 @@ Exit Repair::step(Candidate& r) {
 // Reads on to a refusal, a split or a goal; none when its edit was refused
 // or the search's share ran out.
 Work Repair::read(std::uint32_t at) {
-  for (;;) {
+  // A keyword misspelt may read as a name, and be refused a token later: a
+  // reading that made no edit keeps how it stood before such words.
+  const bool plain = _backs && _readings[at].edits == 0;
+  if (plain) _looked.clear();
+  Candidate before;
+  Token taken{nullptr, 0};
+  for (std::uint32_t read = 0;; ++read) {
     Candidate& r = _readings[at];
     if (r.done || (r.pin == Pin::none && r.goal())) return Work::read;
     if (spent()) return Work::none;
-    const Exit exit = step(r);
-    if (exit == Exit::refused) return r.pin == Pin::none ? Work::read : Work::none;
-    if (exit == Exit::split) return Work::fork;
+    if (plain) before = r;
+    const Exit exit = step(r, &taken);
+    if (exit == Exit::refused && r.pin != Pin::none) return Work::none;
+    const Token tok = r.held ? r.tok : taken;
+    if (const Word word{tok.begin(m), offset(tok.end)};
+        plain && !before.held && tok.terminal() < t.terminalCount && misspelt(word)) {
+      if (_looked.size() > kBackTokens) _looked.erase(_looked.begin());
+      _looked.push_back({before, word, read});
+    }
+    if (!r.held) continue;
+    if (plain) misread(at, read);
+    return exit == Exit::refused ? Work::read : Work::fork;
   }
+}
+
+// The last words reading `at` read before it stopped, `read` tokens on, and
+// the word it stopped on: each read as the literals it misspells, by the
+// reading stood before it.
+void Repair::misread(std::uint32_t at, std::uint32_t read) {
+  const Candidate stopped = _readings[at];
+  std::uint32_t choice = kBackChoice;
+  for (Looked& looked : _looked) {
+    if (spent()) break;
+    if (looked.index + kBackTokens < read) continue;
+    const Word word = looked.word;
+    Candidate& before = looked.before;
+    if (!stood(word, before.tok, [&] { return step(before); })) continue;
+    const ModeLexer mode(m, _stacks.state(before.node));
+    std::vector<std::uint64_t> want = _literals;
+    for (std::uint32_t w = 0; w < t.followWords; ++w) want[w] &= mode.follow[w];
+    LexWork work{lex_room()};
+    const std::vector<Typo> found = typos(mode, std::move(want), word.begin, word.end, work);
+    charge(work);
+    before.tok = unread(word);
+    before.past = offset(stopped.at);
+    _readings[at] = before;
+    for (const Typo& typo : found) {
+      if (spent()) break;
+      if (typo.end == word.end)
+        reread(at, {.choice = choice++, .kind = Edit::rep, .word = true, .term = typo.terminal,
+                    .end = typo.end}, typo.cost);
+    }
+  }
+  _readings[at] = stopped;
 }
 
 // The actions of the split `r` stands at, from the first, and how many; none
@@ -770,11 +888,12 @@ const std::vector<Typo>& Repair::typos_at(std::uint32_t state, TextOffset at) {
   const Token whole = mode_token(t.modeFault[t.stateMode[state]], at);
   const TextOffset plain = whole.terminal() != t.terminalCount ? offset(whole.end) : at;
   LexWork work{lex_room()};
-  std::vector<Typo> found = typos(m, state, at, plain, work);
+  const ModeLexer mode(m, state);
+  std::vector<Typo> found =
+      typos(mode, {mode.follow, mode.follow + t.followWords}, at, plain, work);
   // A single literal opener may replace another opener the state expects.
   constexpr std::string_view openers = "([{";
   if (plain - at == 1 && !(m.rank(whole) & 1) && openers.find(m.src[at]) != openers.npos) {
-    const ModeLexer mode(m, state);
     for (const char other : openers) {
       if (other == m.src[at]) continue;
       if (!work.spend()) break;
@@ -802,9 +921,10 @@ bool Repair::rereads(const Candidate& r) {
 
 // The reading of `from` with its token's bytes up to `end` read as `term`,
 // or skipped as the trivia they are. Whether it holds.
-bool Repair::reread(std::uint32_t from, Edit::Kind kind, std::uint16_t term, TextOffset end,
-                    std::uint32_t cost, std::uint32_t choice) {
-  const std::uint32_t e = child(from, {.choice = choice, .kind = kind, .term = term, .end = end});
+bool Repair::reread(std::uint32_t from, Edit edit, std::uint32_t cost) {
+  const Edit::Kind kind = edit.kind;
+  const TextOffset end = edit.end;
+  const std::uint32_t e = child(from, edit);
   Candidate& r = _readings[e];
   r.cost += cost;
   r.lost += kind == Edit::substitute;
@@ -818,6 +938,7 @@ bool Repair::reread(std::uint32_t from, Edit::Kind kind, std::uint16_t term, Tex
   } else {
     r.tok = _links[e].replacement(m);
     r.held = true;
+    r.resume = 2 * _stacks.state(r.node) + 1;
     r.pin = Pin::reread;
   }
   const Work work = read(e);
@@ -880,7 +1001,8 @@ void Repair::lexical(std::uint32_t at, std::uint32_t& choice) {
   if (!trivia && (b.phase == Phase::discardOnly || !t.inSet(t.followOf[state], reading.terminal)))
     return;
   const auto one = [&](TextOffset end) {
-    return reread(at, trivia ? Edit::skip : Edit::rep, reading.terminal, end, kRereadCost, choice++);
+    return reread(at, {.choice = choice++, .kind = trivia ? Edit::skip : Edit::rep,
+                       .term = reading.terminal, .end = end}, kRereadCost);
   };
   if (reading.closed) {
     one(reading.end);
@@ -906,7 +1028,7 @@ void Repair::replacement(std::uint32_t from, std::uint32_t rank) {
   for (const Typo& typo : typos_at(state, tok.begin(m)))
     if (typo.end == end && typo.terminal == term) return;
   if (spent() || (m.src + end < m.end && m.word_at(m.src + end))) return;
-  reread(from, Edit::rep, term, end, kReplaceCost, rank);
+  reread(from, {.choice = rank, .kind = Edit::rep, .term = term, .end = end}, kReplaceCost);
 }
 
 // The insertions of refused reading `from` whose run its state may require,
@@ -949,8 +1071,8 @@ void Repair::expand(std::uint32_t at) {
       if (spent()) break;
       if (spelt && m.src + typo.end > b.tok.end) continue;
       ++_work;
-      reread(at, typo.substitutes ? Edit::substitute : Edit::rep, typo.terminal,
-             typo.end, typo.cost, choice++);
+      reread(at, {.choice = choice++, .kind = typo.substitutes ? Edit::substitute : Edit::rep,
+                  .term = typo.terminal, .end = typo.end}, typo.cost);
     }
   // What the fault mode reads where the state's own read no token.
   const bool unread = !atEnd && b.tok.terminal() == t.terminalCount &&
@@ -989,8 +1111,93 @@ void Repair::expand(std::uint32_t at) {
   }
 }
 
-// The machine's stack as the root of a search, queued as refused.
-void Repair::start() {
+// Whether `word` is a word that reads as a literal misspelt, in the mode the
+// text of a fault is read in: one a literal spells does not. Asked once a
+// spelling.
+bool Repair::misspelt(Word word) {
+  if (word.begin == word.end || !m.word_at(m.src + word.begin)) return false;
+  if (_literals.empty()) {
+    _literals.assign(t.followWords, 0);
+    for (std::uint32_t term = 1; term < t.terminalCount; ++term)
+      if ((t.terminalRank[term] & 1) == 0) _literals[term / 64] |= std::uint64_t{1} << (term % 64);
+  }
+  const ModeLexer mode(m, m.under(), true);
+  const std::pair key{mode.mode, std::string_view(m.src + word.begin, m.src + word.end)};
+  if (const auto known = _misspelt.find(key); known != _misspelt.end()) return known->second;
+  bool misspells = false;
+  if (const Token whole = mode_token(mode.mode, word.begin);
+      offset(whole.end) != word.end || whole.terminal() >= t.terminalCount ||
+      (m.rank(whole) & 1) != 0) {
+    LexWork work{lex_room()};
+    const std::vector<Typo> found = typos(mode, _literals, word.begin, word.end, work);
+    charge(work);
+    misspells = std::ranges::any_of(found, [&](const Typo& typo) { return typo.end == word.end; });
+  }
+  if (!spent()) _misspelt.emplace(key, misspells);
+  return misspells;
+}
+
+// The machine read on up to `word` and stood before it, the word in hand.
+// False where it does not stand there.
+bool Repair::stand(Word word) {
+  const bool stands = stood(word, m.tok, [&] {
+    // A token it holds past the cut is none of the text cut there: the state
+    // on top reads again.
+    if (m.tok.end > m.end) {
+      m.forget(m.at);
+      m.resume = 2 * m.under();
+    }
+    return engine::run(m);
+  });
+  m.tok = unread(word);
+  return stands;
+}
+
+// The machine set back before the first word that reads as a keyword
+// misspelt, of the last it read since it set out and the one in hand. False
+// with none, and where the text does not read up to that word alone.
+bool Repair::back() {
+  if (_marked != Marked::fresh) return false;
+  std::uint64_t scanned = 0;
+  unsigned tokens = 0;
+  // The token in hand first: the states reduced on it as on the name it reads as.
+  Word word{m.tok.begin(m), offset(m.tok.end)};
+  bool found = m.tok.terminal() < t.terminalCount && misspelt(word);
+  for (NodeCount i = m.tape.records(); i != _mark.records && tokens != kBackTokens && !spent();) {
+    const CstNode& n = m.tape.at(--i);
+    ++scanned;
+    if (n.subtreeSize != 1 || n.isHidden() || n.isRecovered() || n.begin == n.end) continue;
+    ++tokens;
+    if (misspelt({n.begin, n.end})) {
+      word = {n.begin, n.end};
+      found = true;
+    }
+  }
+  _work += scanned / kWorkBytes;
+  if (!found || spent()) return false;
+  _marked = Marked::back;
+  _refused = m.tok;
+  _refusedIn = m.indented;
+  _refusedOn.clear();
+  for (const Frame* f = m.frames; f != m.top; ++f) _refusedOn.push_back(f->state);
+  _work += _refusedOn.size() / kWorkBytes;
+  m.rewind(_mark);
+  return stand(word);
+}
+
+// The machine set out again from where it last did, up to the token it was
+// refused.
+void Repair::forth() {
+  m.rewind(_mark);
+  [[maybe_unused]] const Exit exit = engine::run(m);
+  assert(exit == Exit::refused && m.tok.head == _refused.head && m.tok.end == _refused.end);
+  _marked = Marked::used;
+}
+
+// The machine's stack as the root of a search, queued as refused. The root
+// of a machine set back reads on to the token refused; false where the text
+// does not read from there as it did.
+bool Repair::start() {
   // The search stands on the machine's stack, which only its plan changes.
   _stacks.clear({m.frames, static_cast<std::size_t>(m.top - m.frames)});
   _readings.clear();
@@ -1006,23 +1213,41 @@ void Repair::start() {
   _also.clear();
   _plan.clear();
   _seq = 0;
-  _limit = _work < _budget ? _work + std::min(kWorkPerSearch, _budget - _work) : _budget;
   _costBase = _cost;
   Candidate root;
   root.node = static_cast<std::uint32_t>(m.top - m.frames) - 1;
-  root.resume = 2 * m.under() + 1;
   root.at = m.at;
   root.tok = m.tok;
   root.indented = m.indented;
-  root.held = true;
   _links.emplace_back();
+  root.past = offset(m.at);
   // A fault a path left open goes on.
   root.fresh = !_fault.open;
-  // A machine stopped at a split the text left undecided: its actions are
-  // read on before any edit.
-  const Work work = split_at(root).second != 0 ? Work::fork : Work::read;
+  if (_marked != Marked::back) {
+    root.resume = 2 * m.under() + 1;
+    root.held = true;
+    // A machine stopped at a split the text left undecided: its actions are
+    // read on before any edit.
+    const Work work = split_at(root).second != 0 ? Work::fork : Work::read;
+    _readings.push_back(root);
+    queue(work == Work::fork ? 0 : kRereadCost, root, 0, work);
+    return true;
+  }
+  root.resume = 2 * m.under();
   _readings.push_back(root);
-  queue(work == Work::fork ? 0 : kRereadCost, root, 0, work);
+  // The text reads on as it did: to the same token, on the same stack.
+  const Work stopped = read(0);
+  const Candidate& stood = _readings[0];
+  if (stopped == Work::none || !stood.held || stood.tok.head != _refused.head ||
+      stood.tok.end != _refused.end || stood.indented != _refusedIn)
+    return false;
+  std::uint32_t node = stood.node;
+  for (std::size_t i = _refusedOn.size(); i-- != 0; node = _stacks.parent(node))
+    if (node == kNoStack || _stacks.state(node) != _refusedOn[i]) return false;
+  _work += _refusedOn.size() / kWorkBytes;
+  if (node != kNoStack) return false;
+  queue(stopped == Work::fork ? 0 : kRereadCost, stood, 0, stopped);
+  return true;
 }
 
 // The reading elected: a goal of the least cost, or with none before the
@@ -1097,10 +1322,10 @@ std::uint32_t Repair::run(bool& exhausted, bool& raced) {
 }
 
 // The goals read on with no edit, the one furthest back first, until all
-// that are left are of one candidate or the race's steps pass: `reach[k]` is
-// where candidate `k`'s furthest reading was refused. True when a work
-// limit stops readings that still disagree.
-bool Repair::race(const std::vector<std::uint32_t>& of, std::vector<TextOffset>& reach) {
+// that are left are of one set of goals or the race's steps pass: `reach[k]`
+// is where goal `k`'s furthest reading was refused. True when a work limit
+// stops readings that still disagree.
+bool Repair::race(std::vector<TextOffset>& reach) {
   struct Runner { Candidate reading; std::set<std::uint32_t> goals; };
   std::vector<Runner> runners;
   std::vector<std::uint32_t> racing;
@@ -1114,16 +1339,16 @@ bool Repair::race(const std::vector<std::uint32_t>& of, std::vector<TextOffset>&
   std::ranges::fill(reach, 0);
   for (std::uint32_t g = 0; g < _goals.size(); ++g) {
     if (_readings[_goals[g]].done) {
-      reach[of[g]] = kReachAll;
+      reach[g] = kReachAll;
       continue;
     }
-    runners.push_back({_readings[_goals[g]], {of[g]}});
+    runners.push_back({_readings[_goals[g]], {g}});
     enqueue(static_cast<std::uint32_t>(runners.size() - 1));
   }
   const auto reach_all = [&](std::uint32_t i) {
     for (const std::uint32_t k : runners[i].goals) reach[k] = kReachAll;
   };
-  // Whether what races is of one set of candidates no other can reach.
+  // Whether what races is of one set of goals no other can reach.
   const auto level = [&] {
     const auto& first = runners[racing[0]].goals;
     const char* least = m.end;
@@ -1173,69 +1398,28 @@ bool Repair::race(const std::vector<std::uint32_t>& of, std::vector<TextOffset>&
 }
 
 // The goal that reads furthest, then of the least key, then of the first
-// rank. Goals that make the same edits race as one candidate.
+// rank.
 std::uint32_t Repair::elect(bool& raced) {
-  if (_goals.size() == 1) {
-    name(_goals[0]);
-    std::ranges::sort(_also, {}, [&](ElementId term) { return t.terminalOrder[term]; });
-    return _goals[0];
-  }
-  const auto same = [&](std::uint32_t a, std::uint32_t b) {
-    for (; a != b; a = _links[a].parent, b = _links[b].parent) {
-      const Edit& x = _links[a];
-      const Edit& y = _links[b];
-      if (x.parent == kNoLink || y.parent == kNoLink || x.kind != y.kind || x.term != y.term ||
-          x.end != y.end || x.at != y.at || x.tok.head != y.tok.head || x.resume != y.resume)
-        return false;
-    }
-    return true;
-  };
-  // Paths that make the same edits fold the same: a goal is compared with
-  // the candidates of its fold alone.
-  const auto fold = [&](std::uint32_t l) {
-    std::uint64_t h = 0;
-    for (; _links[l].parent != kNoLink; l = _links[l].parent, ++_work) {
-      const Edit& g = _links[l];
-      h = (h ^ std::uint64_t{g.kind} << 56 ^ std::uint64_t{g.term} << 40 ^
-           std::uint64_t{g.end} << 20 ^ g.tok.head ^ offset(g.at) ^ std::uint64_t{g.resume} << 24) *
-          0x100000001b3ull;
-    }
-    return h ^ l;
-  };
-  std::vector<std::uint32_t> of(_goals.size());
-  std::unordered_multimap<std::uint64_t, std::size_t> folded;
-  for (std::size_t g = 0; g < _goals.size(); ++g) {
-    const auto hash = fold(_goals[g]);
-    const auto [first, last] = folded.equal_range(hash);
-    const auto known = std::find_if(first, last, [&](const auto& entry) {
-      return same(_goals[entry.second], _goals[g]);
-    });
-    if (known == last) {
-      of[g] = static_cast<std::uint32_t>(folded.size());
-      folded.emplace(hash, g);
-    } else of[g] = of[known->second];
-  }
-  std::vector<TextOffset> reach(folded.size(), kReachAll);
-  if (reach.size() > 1) raced = race(of, reach);
+  std::vector<TextOffset> reach(_goals.size(), kReachAll);
+  if (reach.size() > 1) raced = race(reach);
   std::size_t won = 0;
   for (std::size_t g = 1; g < _goals.size(); ++g) {
     const Candidate& a = _readings[_goals[g]];
     const Candidate& b = _readings[_goals[won]];
-    if (reach[of[g]] != reach[of[won]]) {
-      if (reach[of[g]] > reach[of[won]]) won = g;
+    if (reach[g] != reach[won]) {
+      if (reach[g] > reach[won]) won = g;
       continue;
     }
     const auto k = key_order(a.cost, a, b.cost, b);
     if (k != 0 ? k < 0 : before(part(_goals[g], _goals[won]))) won = g;
   }
   // What reads as far as the winner, as cheaply, names what its first written
-  // terminal could have been, in the grammar's order.
+  // terminal could have been.
   for (std::size_t g = 0; g < _goals.size(); ++g) {
     const Candidate& a = _readings[_goals[g]];
     const Candidate& b = _readings[_goals[won]];
-    if (reach[of[g]] == reach[of[won]] && cost_order(a.cost, a, b.cost, b) == 0) name(_goals[g]);
+    if (reach[g] == reach[won] && cost_order(a.cost, a, b.cost, b) == 0) name(_goals[g]);
   }
-  std::ranges::sort(_also, {}, [&](ElementId term) { return t.terminalOrder[term]; });
   return _goals[won];
 }
 
@@ -1255,10 +1439,13 @@ void Repair::plan_path(std::uint32_t reading) {
     first = writes(edit) ? edit.term : kNoElement;
     closes = edit.opens;
   }
+  // What its first written terminal could as cheaply have been, in the
+  // grammar's order.
   if (first != kNoElement)
     std::erase(_also, first);
   else
     _also.clear();
+  std::ranges::sort(_also, {}, [&](ElementId term) { return t.terminalOrder[term]; });
 }
 
 void Repair::open_span(TextOffset from, std::uint64_t least) {
@@ -1376,6 +1563,7 @@ void Repair::skip(const Edit& edit) {
 }
 
 bool Repair::write(const Step& st) {
+  _marked = Marked::stale;
   // The action the path took at a split, where the text read ahead could not
   // tell.
   if (st.edit.kind == Edit::arm) {
@@ -1417,7 +1605,8 @@ bool Repair::write(const Step& st) {
     f.del = true;
     skip(st.edit);
     f.end = offset(m.at);
-    f.resume = t.modes[t.stateMode[m.under()]].read(m, m.at).terminal();
+    const std::uint16_t mode = t.stateMode[m.under()];
+    f.resume = t.modes[mode].read(m, m.at, mode).terminal();
   }
   _cost += st.cost;
   if (st.closes) note();
@@ -1508,13 +1697,22 @@ bool Repair::apply() {
 // The first step of the elected path written, the rest planned; `bound`
 // says a work bound decided the election.
 bool Repair::take(std::uint32_t elected, bool bound) {
-  const TextOffset from = m.tok.begin(m);
+  const bool back = _marked == Marked::back;
+  if (back) _marked = Marked::used;
+  const TextOffset from = (back ? _refused : m.tok).begin(m);
   if (bound) open_span(from, _costBase + kRereadCost);
   _degraded = _work > _budget;
   if (elected != kNoReading)
     plan_path(elected);
   else
     _plan.clear();
+  // A machine set back reads on: to the word the path edits first, or to
+  // the token it was refused.
+  if (back) {
+    m.forget(m.at);
+    m.resume = 2 * m.under();
+    return true;
+  }
   if (!_plan.empty()) {
     if (apply()) return true;
     _degraded = true;
@@ -1541,7 +1739,16 @@ bool Repair::pause() {
     note_span();
   }
   _openAt = nullptr;
-  start();
+  _limit = _work < _budget ? _work + std::min(kWorkPerSearch, _budget - _work) : _budget;
+  // A keyword misspelt may read as a name, and be refused a token later: the
+  // search then sets out from before that word.
+  if (!back() || !start()) {
+    if (_marked == Marked::back) forth();
+    start();
+  }
+  // Nor does what a machine set back read ahead on its way.
+  m.plan.clear();
+  m.planned = 0;
   bool exhausted = false;
   bool raced = false;
   const std::uint32_t elected = run(exhausted, raced);
@@ -1556,6 +1763,19 @@ Exit Repair::onward() {
     const Exit exit = shift(false, false);
     if (exit != Exit::shifted) return exit;
   }
+  const bool word = !_plan.empty() && _plan.back().edit.word;
+  if (_backs && _marked == Marked::stale && (_plan.empty() || word) && !_degraded) {
+    m.checkpoint(_mark);
+    _marked = Marked::fresh;
+  }
+  // The next step edits a word the states read: the machine is stood before
+  // it, or with no way back from there, reads on without the plan.
+  if (word) {
+    const Token tok = _plan.back().edit.tok;
+    if (_marked != Marked::stale && stand({tok.begin(m), offset(tok.end)})) return Exit::refused;
+    _plan.clear();
+    if (_marked != Marked::stale) m.rewind(_mark);
+  }
   return engine::run(m);
 }
 
@@ -1569,7 +1789,7 @@ void Repair::finish(CstBuilder& builder) {
 }  // namespace
 
 bool repair(Machine& machine, CstBuilder& builder, const char* whole) {
-  Repair search(machine);
+  Repair search(machine, whole == nullptr);
   const char* const caret = machine.end;
   const std::uint16_t ended = machine.ended;
   Exit exit = Exit::refused;

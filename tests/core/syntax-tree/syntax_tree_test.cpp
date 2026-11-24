@@ -465,13 +465,13 @@ void a_large_reduction_stops_between_values() {
   static constexpr auto visit = [] {
     if (++calls == 1) stop.request_stop();
   };
-  const AstRecord fill = [](AstBuilder& b, NodeId id, const CstNode& n) {
+  const AstRecord fill{[](AstBuilder& b, NodeId id, const CstNode& n, DeferredWrite) {
     fill_class<CancelledWrites, 0>(b, b.out.createNode<Doc>(id), b.inside(id, n));
-  };
-  const AstRecord gather = [](AstBuilder& b, NodeId id, const CstNode&) {
+  }, {}};
+  const AstRecord gather{[](AstBuilder& b, NodeId id, const CstNode&, DeferredWrite) {
     std::span<const std::string_view> parts;
     (void)b.parts(id, parts);
-  };
+  }, {}};
   const AstWrite write = [](AstBuilder&, AstNode*, const Pending&) { visit(); return true; };
   const AstText convert[] = {{[](AstBuilder&, NodeId, std::span<const std::string_view>, std::string_view& out) {
     visit();

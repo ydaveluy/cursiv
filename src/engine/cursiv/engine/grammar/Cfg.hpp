@@ -181,9 +181,6 @@ struct Infix {
   std::vector<Level> levels;
 };
 
-// The change a shifted terminal makes to indentation.
-enum class Nesting : std::uint8_t { none, indent, dedent, open, close };
-
 struct Cfg {
   // An entry is what one record carries: the actions of the records fused
   // into it, innermost first, each by its number among those the grammar

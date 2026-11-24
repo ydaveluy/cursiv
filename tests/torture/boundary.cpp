@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "cursiv/engine/parser/Machine.hpp"
+#include "cursiv/engine/recovery/ModeLexer.hpp"
 #include "cursiv/engine/recovery/Typos.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
@@ -46,7 +47,9 @@ void generic_typo_runs_keep_the_terminal_guard() {
             ? static_cast<cursiv::TextOffset>(whole.end - m.src)
             : cursiv::TextOffset{0};
     cursiv::engine::LexWork work{~std::uint64_t{0}};
-    return cursiv::engine::typos(m, 0, 0, plain, work);
+    const cursiv::engine::ModeLexer lexer(m, 0);
+    return cursiv::engine::typos(
+        lexer, {lexer.follow, lexer.follow + g::kTables.followWords}, 0, plain, work);
   };
   const auto rereads = [&](std::string_view text, cursiv::TextOffset end) {
     const auto found = rescan(text);

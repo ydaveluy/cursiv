@@ -77,6 +77,43 @@ struct Lexer {
   }
 };
 
+// A matcher over the classes other, `a` and `!`: per state where each of the
+// two leads, and its ends. State 1 is the start of entry 0.
+struct Matcher {
+  struct State {
+    std::uint16_t onA = 0, onBang = 0;
+    std::vector<MatchEnd> ends{};
+  };
+  std::array<std::uint8_t, 256> classes{};
+  std::vector<std::uint16_t> next;
+  std::vector<std::uint32_t> rows;
+  std::vector<MatchState> states{{kNoRow, 0, 0}};
+  std::vector<MatchEnd> ends;
+  std::vector<MatchExit> exits;
+  std::uint16_t entry = 1;
+  MatchScan scan;
+  MatchTables tables;
+
+  Matcher(const std::vector<State>& of, std::vector<MatchExit> taken, MatchScan scanner = nullptr)
+      : exits(std::move(taken)), scan(scanner) {
+    classes['a'] = 1;
+    classes['!'] = 2;
+    for (const State& state : of) {
+      const bool leaves = state.onA != 0 || state.onBang != 0;
+      states.push_back({leaves ? static_cast<std::uint32_t>(rows.size()) : kNoRow,
+                        static_cast<std::uint32_t>(ends.size()), 0});
+      if (leaves) {
+        rows.push_back(static_cast<std::uint32_t>(next.size()));
+        next.insert(next.end(), {0, state.onA, state.onBang});
+      }
+      ends.insert(ends.end(), state.ends.begin(), state.ends.end());
+    }
+    states.push_back({kNoRow, static_cast<std::uint32_t>(ends.size()), 0});
+    tables = {classes.data(), {next.data(), rows.data()}, states.data(), ends.data(),
+              exits.data(),   &entry,                     nullptr,       &scan};
+  }
+};
+
 struct Reading {
   Cst tree;
   CstBuilder builder;
@@ -180,31 +217,23 @@ void many_reads_share_a_long_successful_or_failed_suffix() {
 
 void matcher_suffixes_share_the_furthest_end_until_the_cut_changes() {
   Lexer lexer;
-  lexer.tables.match = [](Machine& m, Matching& s) {
-    while (s.runs()) {
-      const auto th = s.take();
-      const char* p = m.src + th.at;
-      const char* limit = Matching::stride(m, p);
-      for (;;) {
-        s.end(th.call, static_cast<TextOffset>(p - m.src));
-        if (p >= limit && (m.observe_end(p == m.end) || !s.passes(m, th, 1, p, limit))) break;
-        ++scanned;
-        if (*p++ != 'a') break;
-      }
-    }
-  };
+  const Matcher matcher({{.onA = 1, .ends = {{0, 0, 0, LexTest::none}}}}, {{}});
+  lexer.tables.match = &matcher.tables;
   const std::string text = std::string(4096, 'a') + "!more";
   Reading reading(lexer.tables, text);
   Machine& m = reading.machine;
   for (const unsigned length : {4097u, 1030u, 4097u}) {
     m.read_to(m.src + length, lexer.tables.terminalCount);
     const auto matched = std::min(length, 4096u);
-    scanned = 0;
     for (unsigned at = 0; at < matched; at += kQuietSpan) {
       const auto result = m.on_text([&] { return m.match(0, m.src + at) == m.src + matched; });
       CHECK(result.value && result.atCut == (matched == length));
     }
-    CHECK(scanned <= 2 * length);
+    // A suffix known from a checkpoint is not read again.
+    char& later = const_cast<char&>(m.src[200]);
+    later = '!';
+    CHECK(m.match(0, m.src) == m.src + matched);
+    later = 'a';
   }
 }
 
@@ -222,15 +251,8 @@ void a_short_read_keeps_no_point() {
 
 void a_match_can_end_before_its_last_checkpoint() {
   Lexer lexer;
-  lexer.tables.match = [](Machine& m, Matching& s) {
-    while (s.runs()) {
-      const auto th = s.take();
-      const char* p = m.src + kQuietSpan;
-      const char* limit = nullptr;
-      if (s.passes(m, th, 1, p, limit) && *p == '!')
-        s.end(th.call, static_cast<TextOffset>(p + 1 - m.src - 4));
-    }
-  };
+  const Matcher matcher({{.onA = 1, .onBang = 2}, {.ends = {{0, 0, 4, LexTest::none}}}}, {{}});
+  lexer.tables.match = &matcher.tables;
   const std::string text = std::string(kQuietSpan, 'a') + '!';
   Reading reading(lexer.tables, text);
   auto& m = reading.machine;
@@ -240,19 +262,16 @@ void a_match_can_end_before_its_last_checkpoint() {
 
 void a_scanner_end_does_not_belong_to_a_checkpoint_it_jumped_over() {
   Lexer lexer;
-  lexer.tables.match = [](Machine& m, Matching& s) {
-    while (s.runs()) {
-      const auto th = s.take();
-      if (th.at == 0) s.end(th.call, 2 * kQuietSpan, true);
-      const char* limit = nullptr;
-      s.passes(m, th, 1, m.src + kQuietSpan, limit);
-    }
-  };
+  const Matcher matcher(
+      {{.onA = 2, .ends = {{0, 0, 0, LexTest::none}}}, {.onA = 2}},
+      {{.action = MatchAction::scan, .ends = true}},
+      [](std::string_view in) { return in.size() == 2 * kQuietSpan ? in.size() : 0; });
+  lexer.tables.match = &matcher.tables;
   const std::string text(2 * kQuietSpan, 'a');
   Reading reading(lexer.tables, text);
   auto& m = reading.machine;
   CHECK(m.match(0, m.src) == m.end);
-  CHECK(m.match(0, m.src + kQuietSpan) == nullptr);
+  CHECK(m.match(0, m.src + kQuietSpan / 2) == nullptr);
 }
 
 void context_dependent_tokens_keep_the_normal_matcher() {
@@ -440,18 +459,20 @@ void prefix_predictions_require_a_unique_shift() {
   Reading input(lexer.tables, "a");
   auto& m = input.machine;
   m.split(token(0, m.end, 1), 2, 2);
-  const Reader read = [](Machine& m, const char*) { return m.tok; };
+  const Reader read = [](Machine& m, const char*, std::uint32_t) { return m.tok; };
+  const Reader grouped = [](Machine& m, const char*, std::uint32_t) { return m.grouped(m.tok, {1, 2}); };
+  lexer.modes[1].read = read;
+  lexer.modes[2].read = grouped;
   const std::uint8_t absent[]{0, 0}, unknown[]{0, 1}, shifts[]{0, 2};
-  PrefixArm arms[]{{read, unknown}, {read, absent}};
+  PrefixArm arms[]{{1, unknown}, {1, absent}};
   CHECK(predict_prefix(m, arms).arm == kNoStack);
   arms[0].shifts = absent;
   CHECK(predict_prefix(m, arms).arm == kNoStack);
   arms[1].shifts = shifts;
   CHECK(predict_prefix(m, arms).arm == 3);
-  const Reader grouped = [](Machine& m, const char*) { return m.grouped(m.tok, {1, 2}); };
-  arms[0].read = grouped;
+  arms[0].mode = 2;
   CHECK(predict_prefix(m, arms).arm == kNoStack);
-  arms[0].read = read;
+  arms[0].mode = 1;
   lexer.modes[0].read = grouped;
   const std::array<std::uint16_t, 2> through[]{{0, 1}};
   const PrefixPath path{{}, through};
@@ -460,13 +481,13 @@ void prefix_predictions_require_a_unique_shift() {
   Reading longer(lexer.tables, "abc");
   auto& many = longer.machine;
   many.split(token(0, many.end, 1), 7, 3);
-  const Reader shortWord = [](Machine& m, const char*) { return token(0, m.src + 1, 1); };
-  const Reader longWord = [](Machine& m, const char*) { return token(0, m.end, 1); };
-  PrefixArm rivals[]{{shortWord, shifts}, {shortWord, shifts}, {longWord, shifts}};
+  lexer.modes[1].read = [](Machine& m, const char*, std::uint32_t) { return token(0, m.src + 1, 1); };
+  lexer.modes[2].read = [](Machine& m, const char*, std::uint32_t) { return token(0, m.end, 1); };
+  PrefixArm rivals[]{{1, shifts}, {1, shifts}, {2, shifts}};
   CHECK(predict_prefix(many, rivals).arm == 9);
   std::swap(rivals[0], rivals[2]);
   CHECK(predict_prefix(many, rivals).arm == 7);
-  rivals[1].read = longWord;
+  rivals[1].mode = 2;
   CHECK(predict_prefix(many, rivals).arm == kNoStack);
 }
 
@@ -524,11 +545,13 @@ void predictions_restore_the_stack_across_a_reduced_prefix() {
 
 void lexical_refusals_expire_only_after_real_shifts() {
   Lexer lexer;
+  lexer.modes[1].read = [](Machine& m, const char* p, std::uint32_t) {
+    return token(p - m.src, p + 1, m.t.terminalCount);
+  };
+  lexer.modes[2].read = [](Machine& m, const char* p, std::uint32_t) { return token(p - m.src, p + 1, 1); };
   lexer.tables.predict = [](Machine& m) {
     static constexpr std::uint8_t shifts[]{0, 2, 0, 0};
-    const PrefixArm arms[]{
-        {[](Machine& m, const char* p) { return token(p - m.src, p + 1, m.t.terminalCount); }, shifts},
-        {[](Machine& m, const char* p) { return token(p - m.src, p + 1, 1); }, shifts}};
+    const PrefixArm arms[]{{1, shifts}, {2, shifts}};
     return predict_prefix(m, arms);
   };
   lexer.tables.drive = [](Machine& m) {
@@ -564,6 +587,7 @@ void lexical_refusals_expire_only_after_real_shifts() {
 
 void only_divergent_predictions_restart_before_repair() {
   Lexer lexer;
+  lexer.modes[1].read = [](Machine& m, const char*, std::uint32_t) { return m.tok; };
   static std::array<unsigned, 3> predictions;
   lexer.tables.drive = [](Machine& m) {
     const auto first = (m.resume & ~1u) + 2;
@@ -579,7 +603,7 @@ void only_divergent_predictions_restart_before_repair() {
     ++predictions[(m.arms - 2) / 2];
     if (m.arms == 4) {
       constexpr std::uint8_t unknown[]{0, 1};
-      const PrefixArm arm{[](Machine& m, const char*) { return m.tok; }, unknown};
+      const PrefixArm arm{1, unknown};
       return predict_prefix(m, {&arm, 1});
     }
     const bool diverges = m.arms == 2 ? *m.src == 'b' : *m.src == 'c';

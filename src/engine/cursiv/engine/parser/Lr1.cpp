@@ -636,17 +636,14 @@ std::vector<Bits> lookaheads(const Items& it, const std::vector<Core>& cores, co
   return la;
 }
 
-// Per core, `la` being the lookaheads of one state per core: in `cells`, the
-// terminals whose presence in a state's lookahead changes what it does with
-// the token that comes. The core acts on them in several ways, or reduces on
-// them alone where they may stand where a terminal it reads does, its rivals,
-// and it does not bring them itself: those also in `rivalled`. Per kernel
-// item node, the terminals of its core's cells its lookahead brings to a
-// reduction.
+// Per core that reads a token, not `alone`: in `cells`, the terminals whose
+// presence in a state's lookahead changes what it does; in `rivalled`, those
+// it reduces on only as rivals of a terminal it reads. Returns per kernel
+// item node the terminals of its core's cells its lookahead reduces on.
 std::vector<Bits> cells_of(const Items& it, const std::vector<Core>& cores, const Nodes& nodes,
                            const std::vector<Bits>& la, const std::vector<RivalRow>& takes,
-                           const Bits& always, std::vector<Bits>& cells,
-                           std::vector<Bits>& rivalled) {
+                           const Bits& always, const std::vector<bool>& alone,
+                           std::vector<Bits>& cells, std::vector<Bits>& rivalled) {
   const std::size_t n = it.nterms;
   std::vector<Bits> seeds(nodes.size(), Bits(n));
   Bits shifted(n), once(n), twice(n), read(n), own(n), rivals(n), told(n), mark(n);
@@ -681,6 +678,7 @@ std::vector<Bits> cells_of(const Items& it, const std::vector<Core>& cores, cons
     told.remove(shifted);
     told.remove(own);
     rivalled[c] = told;
+    if (alone[c]) continue;
     told.merge(twice);
     if (!told.any()) continue;
     cells[c] = told;
@@ -1370,6 +1368,15 @@ Bits trivia_shadows(const Cfg& cfg, std::uint64_t scopes) {
   return out;
 }
 
+std::uint32_t reduced_alone(const Cfg& cfg, const LrState& state) {
+  if (!state.shifts.empty() || state.reduces.size() != 1 || state.barred) return kNone;
+  const std::uint32_t lone = state.reduces.front().first;
+  const Production& q = cfg.productions[lone];
+  const bool emptyNode = q.rhs.empty() && q.entry != kNone &&
+                         cfg.rows[cfg.entries[q.entry].action]->kind == WriteKind::create;
+  return lone != 0 && !q.tested() && !q.start && !emptyNode ? lone : kNone;
+}
+
 LrAutomaton build_lr1(const Cfg& cfg, const std::vector<RivalRow>& takes, const Bits& always,
                       std::uint32_t maxStates) {
   const Items it(cfg);
@@ -1388,7 +1395,21 @@ LrAutomaton build_lr1(const Cfg& cfg, const std::vector<RivalRow>& takes, const 
   auto la = lookaheads(it, cores, g, nodes, starts, startCores);
   std::vector<std::uint32_t> startStates = startCores;
   std::vector<Bits> selected;
-  if (auto seeds = cells_of(it, cores, nodes, la, takes, always, cells, rivalled);
+  // The cores whose states reduce without reading a token: no terminal
+  // leaves them, and they reduce one production alone.
+  std::vector<bool> alone(cores.size());
+  {
+    Closure closure(it);
+    for (std::uint32_t c = 0; c < cores.size(); ++c) {
+      const Core& core = cores[c];
+      if (core.reduces.size() != 1 ||
+          std::ranges::any_of(core.edges, [](const auto& edge) { return is_terminal(edge.first); }))
+        continue;
+      alone[c] = reduced_alone(cfg, facts(it, closure, core.kernel,
+                                          std::span(la).subspan(nodes.first[c], core.kernel.size()))) != kNone;
+    }
+  }
+  if (auto seeds = cells_of(it, cores, nodes, la, takes, always, alone, cells, rivalled);
       std::ranges::any_of(seeds, &Bits::any)) {
     la.clear();
     Relation flow = dependencies(cores, g, nodes);

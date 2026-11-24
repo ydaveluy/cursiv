@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -41,9 +42,6 @@ LexRivals lex_rivals(const GrammarImage& image, const Cfg& cfg, const LexDfa& df
 inline constexpr std::uint32_t kFirstLiterals = 1u << 30;
 inline constexpr std::uint32_t kFirstWord = 2u << 30;
 inline constexpr std::uint32_t kFirstIndex = kFirstLiterals - 1;
-// A shift's gap: whatever the lexer passed, or nothing.
-inline constexpr std::uint16_t kAnyGap = 0xFFFF;
-inline constexpr std::uint16_t kNoGap = 0xFFFE;
 inline constexpr std::uint16_t kNoMode = 0xFFFF;
 
 // A text a `WordPath` reads apart: its bytes, letters in either case where
@@ -183,6 +181,9 @@ struct Packed {
   // and per state of its automaton, one more than its set of `runSets`.
   LexMatcher matcher;
   std::vector<std::uint8_t> matchRun;
+  // The matcher's transitions in shared blocks, as `lexNext`.
+  std::vector<std::uint16_t> matchNext;
+  std::vector<std::uint32_t> matchBlocks, matchOf;
   // The conditions left to be read once a token ends, as the automaton has
   // them.
   std::vector<LexMonitor> monitors;
@@ -289,9 +290,6 @@ struct Packed {
 // with the walks they are made of, each read once.
 struct PrefixPredictions {
   static constexpr std::uint8_t kUnread = 0xFF;
-  // A plan this bit marks is the arm it numbers, taken with no token read.
-  static constexpr std::uint32_t kArm = std::uint32_t{1} << 31;
-  static constexpr std::uint32_t kPath = kArm >> 1;
   // From a goto site with a token held: shifted after `steps`, or gone
   // `missing` frames under the site's state to go on `lhs`, or stopped.
   struct Climb {
@@ -306,28 +304,8 @@ struct PrefixPredictions {
     std::uint16_t terminal;
     std::uint8_t steps;
     std::uint32_t depth, lhs;
+    auto operator<=>(const Under&) const = default;
   };
-  // By next token, whether a reader shifts it: 0 it reads it not, 1 it
-  // reads it without a known shift, 2 it shifts it. Its walks that go under
-  // it apart, by nonterminal, and the depth the first in reading order goes to.
-  struct Row {
-    std::vector<std::uint8_t> shifts;
-    std::vector<Under> under;
-    std::uint32_t deeper = 0;
-  };
-  std::vector<std::vector<std::uint32_t>> predecessors;
-  struct Site {
-    std::uint32_t target;
-    std::vector<Climb> climbs;
-  };
-  std::unordered_map<std::uint64_t, Site> sites;
-  std::vector<Bits> tied;
-  std::vector<std::uint32_t> readerOf;
-  std::vector<std::uint32_t> visited;
-  std::uint32_t generation = 0;
-  std::vector<std::vector<std::uint32_t>> actions;
-  // By reader's stack, the frames under it last.
-  std::map<std::vector<std::uint32_t>, Row> rows;
   // Rows ordered by their bytes read as text: the vectors' own order, whose
   // comparison some GCC releases flag at -O3.
   struct BytesLess {
@@ -339,8 +317,40 @@ struct PrefixPredictions {
       return text(a) < text(b);
     }
   };
+  // By next token, whether a reader shifts it: 0 it reads it not, 1 it
+  // reads it without a known shift, 2 it shifts it. Its walks that go under
+  // it apart, by nonterminal, and the depth the first in reading order goes to.
+  struct Row {
+    const std::vector<std::uint8_t>* shifts = nullptr;
+    const std::vector<Under>* under = nullptr;
+    std::uint32_t deeper = 0;
+  };
+  // A goto site's climbs. Where its target reads a token, `columns` places a
+  // token's climb by the target's one action on it; where the target reduces
+  // at once, the token does, or one place holds all where they climb alike.
+  struct Site {
+    std::uint32_t target;
+    std::vector<Climb> climbs;
+    const std::uint32_t* columns = nullptr;
+  };
+  // The walks every cell's prediction shares, dropped once the cells are
+  // predicted.
+  struct Cache {
+    std::vector<std::vector<std::uint32_t>> predecessors;
+    std::unordered_map<std::uint64_t, Site> sites;
+    std::vector<Bits> tied;
+    std::vector<std::uint32_t> readerOf;
+    std::vector<std::uint32_t> visited;
+    std::uint32_t generation = 0;
+    std::vector<std::vector<std::uint32_t>> actions;
+    // By reader's stack, the frames under it last; the parts of rows, each once.
+    std::map<std::vector<std::uint32_t>, Row> rows;
+    std::set<std::vector<std::uint8_t>, BytesLess> shifts;
+    std::set<std::vector<Under>> under;
+  };
+  Cache cache;
   std::map<std::vector<std::uint8_t>, std::uint32_t, BytesLess> shifts;
-  std::map<std::vector<std::array<std::uint32_t, 2>>, std::uint32_t> plans;
+  std::map<std::vector<std::array<std::uint32_t, 3>>, std::uint32_t> plans;
   std::map<std::vector<std::uint32_t>, std::uint32_t> stacks;
   struct Path {
     std::uint32_t stack, plan;
@@ -357,8 +367,10 @@ struct PrefixPredictions {
   std::map<std::pair<std::uint32_t, std::uint32_t>, Decision> cells;
 };
 
+// The plan of the cell whose arms are `actions`; with `tied`, each arm takes
+// the token in hand as its own action's terminal.
 void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& packed,
-    std::uint32_t state, std::uint32_t cell, std::span<const PackedAction> actions);
+    std::uint32_t state, std::uint32_t cell, std::span<const PackedAction> actions, bool tied);
 
 // `cfg` gains the entries the transitions compose; `takes` as `lex_rivals`
 // gives it. Throws `Refused` for what the engine does not read.

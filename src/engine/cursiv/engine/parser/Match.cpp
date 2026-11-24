@@ -1,6 +1,5 @@
 // The matcher: reads a terminal the lexer's automaton reads the first bytes
-// of only, every way the text allows. The code of a grammar's matcher takes
-// its steps; here are the searches its conditions ask for, and its calls.
+// of only, every way the text allows.
 #include "cursiv/engine/parser/Match.hpp"
 
 #include <deque>
@@ -30,8 +29,142 @@ bool Matching::echoes(Machine& m, MatchMark mark, TextOffset at) {
   return !m.observe_end(available < length);
 }
 
+namespace {
+
+bool in_set(const std::uint64_t* set, unsigned byte) {
+  return ((set[byte >> 6] >> (byte & 63)) & 1) != 0;
+}
+
+}  // namespace
+
+CURSIV_ALWAYS_INLINE inline void Matching::leave(Machine& m, const MatchTables& a,
+                                                 const MatchThread& th, const MatchExit& e,
+                                                 TextOffset at) {
+  const auto to = [&](std::uint32_t entry, TextOffset place) {
+    MatchThread next = th;
+    next.entry = entry;
+    next.at = place;
+    return next;
+  };
+  // A thread its next byte would end at once is not made.
+  if (e.first != 0 && (m.observe_end(m.src + at == m.end) ||
+                       !in_set(a.sets + 4 * (e.first - 1u), byte_at(m.src + at))))
+    return;
+  switch (e.action) {
+    case MatchAction::end:
+      end(th.call, at);
+      return;
+    case MatchAction::jump: {
+      MatchThread next;
+      next.entry = e.arg;
+      next.at = at;
+      next.call = th.call;
+      go(next);
+      return;
+    }
+    case MatchAction::open: {
+      MatchThread next = to(e.to, at);
+      next.marks[e.arg] = {at, kNoMark};
+      go(next);
+      return;
+    }
+    case MatchAction::close: {
+      if (th.marks[e.arg].end != kNoMark || th.marks[e.arg].begin == kNoMark) return;
+      MatchThread next = to(e.to, at);
+      next.marks[e.arg].end = at;
+      go(next);
+      return;
+    }
+    case MatchAction::scan: {
+      m.observe_end(true);
+      const std::string_view input(m.src + at, m.end);
+      const std::size_t length = a.scans[e.arg](input);
+      if (length == 0 || length > input.size()) return;
+      const auto past = at + static_cast<TextOffset>(length);
+      if (e.ends)
+        end(th.call, past, true);
+      else
+        go(to(e.to, past));
+      return;
+    }
+    case MatchAction::echo:
+      if (const MatchMark mark = th.marks[e.arg]; echoes(m, mark, at))
+        go(to(e.to, at + (mark.end - mark.begin)));
+      return;
+    case MatchAction::call:
+      call(m, e.arg, to(e.to, at), e.suffix != 0 ? a.sets + 4 * (e.suffix - 1u) : nullptr);
+      return;
+    case MatchAction::ahead:
+    case MatchAction::unless:
+      ask(e.arg, e.action == MatchAction::unless, to(e.to, at));
+      return;
+  }
+}
+
+void Matching::run(Machine& m) {
+  const MatchTables a = *m.t.match;
+  const char* const src = m.src;
+  const char* const end = m.end;
+  while (runs()) {
+    const MatchThread th = take();
+    const char* p = src + th.at;
+    const char* limit = stride(m, p);
+    for (std::uint32_t state = a.entries[th.entry]; state != 0;) {
+      const MatchState here = a.states[state];
+      for (std::uint32_t k = here.ends, last = a.states[state + 1].ends; k != last; ++k) {
+        const MatchEnd x = a.ends[k];
+        if (x.guard != LexTest::none &&
+            !(x.guard == LexTest::eof ? m.observe_end(p == end) : m.settles(x.waits, p)))
+          continue;
+        leave(m, a, th, a.exits[x.exit], static_cast<TextOffset>(p - src - x.back));
+      }
+      if (here.row == kNoRow) break;
+      if (here.run != 0) {
+        const std::uint32_t run = here.run - 1u;
+        const char* const r = m.t.runScanners[run](m.t.runSets + run * 256u, p, m.mark);
+        p = r < m.mark ? r : m.run_on(run, p);
+      }
+      if (p >= limit) [[unlikely]]
+        if (m.observe_end(p == end) || !passes(m, th, state, p, limit)) break;
+      state = a.next.at(here.row, a.byteClass[byte_at(p++)]);
+    }
+  }
+}
+
+bool Matching::alone(Machine& m, std::uint32_t entry, const char* begin, const char*& found) {
+  const MatchTables& a = *m.t.match;
+  const char* p = begin;
+  const char* const limit = stride(m, p);
+  found = nullptr;
+  for (std::uint32_t state = a.entries[entry]; state != 0;) {
+    const MatchState here = a.states[state];
+    for (std::uint32_t k = here.ends, last = a.states[state + 1].ends; k != last; ++k) {
+      const MatchEnd x = a.ends[k];
+      const MatchExit& e = a.exits[x.exit];
+      const bool scans = e.action == MatchAction::scan && e.ends;
+      if (e.action != MatchAction::end && !scans) return false;
+      if (x.guard != LexTest::none &&
+          !(x.guard == LexTest::eof ? m.observe_end(p == m.end) : m.settles(x.waits, p)))
+        continue;
+      const char* at = p - x.back;
+      if (scans) {
+        m.observe_end(true);
+        const std::string_view input(at, m.end);
+        const std::size_t length = a.scans[e.arg](input);
+        if (length == 0 || length > input.size()) continue;
+        at += length;
+      }
+      if (found == nullptr || at > found) found = at;
+    }
+    if (here.row == kNoRow) break;
+    if (here.run != 0 || p >= limit) return false;
+    state = a.next.at(here.row, a.byteClass[byte_at(p++)]);
+  }
+  return true;
+}
+
 void Matching::call(Machine& m, std::uint32_t callee, const MatchThread& then,
-                    OptionalByte suffix) {
+                    const std::uint64_t* suffix) {
   // A call starts with no mark; one a whole search found to read nothing
   // reads nothing again.
   if (m.unmatched(stretch_place(kUnmatched, callee, then.at))) return;
@@ -110,7 +243,7 @@ bool Matching::propagate(Machine& m) {
   for (const auto& [first, last] : pending) {
     watch();
     const char* p = m.src + last;
-    const bool reads = !m.observe_end(p == m.end) && c.suffix(byte_at(p));
+    const bool reads = !m.observe_end(p == m.end) && in_set(c.suffix, byte_at(p));
     ended(c.then.call, first, last + reads);
   }
   return true;
@@ -137,6 +270,7 @@ void Matching::remember(Machine& m) {
 }
 
 const char* Machine::match(std::uint32_t entry, const char* begin) {
+  if (const char* found; Matching::alone(*this, entry, begin, found)) return found;
   const auto from = static_cast<TextOffset>(begin - src);
   const std::uint64_t place = stretch_place(kUnmatched, entry, from);
   if (unmatched(place)) return nullptr;
@@ -152,7 +286,7 @@ const char* Machine::match(std::uint32_t entry, const char* begin) {
   std::size_t top = 0;
   Matching* s = &searches[0];
   for (;;) {
-    t.match(*this, *s);
+    s->run(*this);
     if (s->propagate(*this)) continue;
     if (!s->done()) {
       const Matching::Asked& asked = s->asked.back();

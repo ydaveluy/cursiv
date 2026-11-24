@@ -61,6 +61,9 @@ struct Base : cursiv::GrammarSpec {
   struct CyclicGuard
       : terminal<lit<"c"> + many(&lit<"a">) + lit<"a">> {};
   struct GuardedRaw : terminal<&some(lit<"#">) + SwiftRaw> {};
+  // Words the automaton and the matcher read alike: the token after tells.
+  struct TiedName : terminal<some(cr<"a-z">)> {};
+  struct TiedTag : terminal<!(lit<"q"> + many(d) + !cr<"a-z">) + some(cr<"a-z">)> {};
 
   struct Root
       : rule<create<Document>(
@@ -82,6 +85,8 @@ struct Base : cursiv::GrammarSpec {
                  (kw<"empty-guard"> + append<&Document::items>(ref<EmptyGuard>)) |
                  (kw<"cyclic-guard"> + append<&Document::items>(ref<CyclicGuard>)) |
                  (kw<"guarded-raw"> + append<&Document::items>(ref<GuardedRaw>)) |
+                 (kw<"tied"> + many((append<&Document::items>(ref<TiedName>) + lit<"(">) |
+                                    (append<&Document::items>(ref<TiedTag>) + lit<"=">))) |
                  (kw<"twin"> + append<&Document::items>(ref<Twin>))) +
              eof> {};
   using entry = Root;

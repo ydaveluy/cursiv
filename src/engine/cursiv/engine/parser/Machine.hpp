@@ -53,7 +53,7 @@ inline constexpr std::uint64_t kTold = std::uint64_t{1} << 18;
 // The line's indentation uses a different blank at an open level.
 inline constexpr std::uint64_t kMixedIndent = std::uint64_t{1} << 19;
 
-// A repair substituted a different literal for this source token.
+// A repair read this source token as a terminal its bytes may not spell.
 inline constexpr std::uint64_t kReplaced = std::uint64_t{1} << 20;
 
 CURSIV_ALWAYS_INLINE inline Token token(TextOffset begin, const char* end,
@@ -429,6 +429,8 @@ struct Machine {
   }
   // Whether the terminal's own mode reads the same span at the same rank.
   [[nodiscard]] bool reads_as(Token tok, std::uint32_t mode, std::uint16_t terminal);
+  // Whether an arm of tied terminal `terminal` takes `tok`, as `t.tied` reads it.
+  [[nodiscard]] bool takes_tied(Token tok, std::uint16_t terminal);
 
   // The lexer begins no token past `mark` without reading the stop there,
   // which throws `OperationCancelled`, and moving the mark on.
@@ -439,7 +441,8 @@ struct Machine {
   // The end of the run of set `run` from `p` on, read by its scanner with
   // the stop watched on the way.
   [[nodiscard]] const char* run_on(std::uint32_t run, const char* p);
-  // Resume a generated reader at a watched stop or an opening that needs the DFA.
+  // Resume a generated reader at a watched stop or an opening that needs the
+  // DFA. At the end of the text or past it, the token is the end.
   Token read_slow(Token x, unsigned mode, bool keep, Reader lex);
   // The longest token at `begin` among the terminals of `mode`, read by the
   // lexer's automaton from where it stands: in `state` at `q`, that state's
@@ -510,6 +513,28 @@ struct Machine {
   [[gnu::cold]] CURSIV_NOINLINE void more_hidden(Hidden value) {
     pending.push_back(value);
   }
+
+  // The machine as a run sets out: what `rewind` puts back to read the text
+  // from there again. One made new stands at the start of the text.
+  struct Checkpoint {
+    std::vector<Frame> frames{{0, 0}};
+    std::vector<Hidden> pending;
+    std::vector<std::uint32_t> plan;
+    std::size_t planned = 0;
+    NodeCount records = 0;
+    // The last record written, which a later reduction writes over.
+    CstNode last{};
+    TextOffset at = 0;
+    Token tok{nullptr, 0};
+    std::uint32_t resume = 0;
+    Indented indented{};
+  };
+  // `made` holds the checkpoint before: the frames standing since are kept.
+  void checkpoint(Checkpoint& made) const;
+  void rewind(const Checkpoint& to);
+  // How many frames from the bottom stand as they did when `records` records
+  // were written: those below the frame that spans them.
+  [[nodiscard]] std::size_t standing(NodeCount records) const;
 
   // A stretch of the automaton's walk that gave no token: `state`, entered
   // at `lo` and left at `hi`.

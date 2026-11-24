@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <memory>
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -39,6 +41,13 @@ void run();
 }
 
 namespace {
+
+// Unoptimised code runs the same work many times slower.
+#ifdef NDEBUG
+constexpr int kSlowdown = 1;
+#else
+constexpr int kSlowdown = 10;
+#endif
 
 using conformance_test::clean;
 using conformance_test::expect;
@@ -94,6 +103,117 @@ int main() {
   pick(keywordTieBoundary, "ifx", "if", "");
   const Entry firstArm{"firstarm:"};
   tree<ast::First>(firstArm, "if then", [](const ast::First&) { return true; });
+  // A misspelt word after the shared head and name leaves every statement
+  // open: it is read as the keyword it misspells, of the second as of the
+  // first.
+  const Entry sharedHead{"sharedhead:"};
+  won(sharedHead, "ev a.b early", "a.b", "");
+  won(sharedHead, "ev a.b late", "", "a.b");
+  for (const auto& [text, token, name] :
+       {std::tuple{"ev a.b eirly", "a.b", ""}, std::tuple{"ev a.b lite", "", "a.b"}}) {
+    const std::string source = sharedHead.source(text);
+    const auto r = conformance_test::parser().parse(source);
+    const auto* node = exactly<ast::Won>(r);
+    CHECK(r.accepted && node != nullptr && node->token == token && node->name == name);
+    CHECK(r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced &&
+          r.diagnostics[0].end == source.size());
+  }
+  // With names allowed before that word, its misspelling reads as one more
+  // name and the end of the text is refused: the word is read as the keyword
+  // by the statement that takes it.
+  const Entry sharedTags{"sharedtags:"};
+  won(sharedTags, "ev a.b x early", "a.b", "");
+  won(sharedTags, "ev a.b late", "", "a.b");
+  tree<ast::First>(sharedTags, "ev never", [](const ast::First&) { return true; });
+  for (const auto& [text, token, name] :
+       {std::tuple{"ev a.b x eirly", "a.b", ""}, std::tuple{"ev a.b x lste", "", "a.b"}}) {
+    const std::string source = sharedTags.source(text);
+    const auto r = conformance_test::parser().parse(source);
+    const auto* node = exactly<ast::Won>(r);
+    CHECK(r.accepted && node != nullptr && node->token == token && node->name == name);
+    CHECK(r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced &&
+          r.diagnostics[0].end == source.size());
+  }
+  // A name that reads as that word misspelt, before the word itself: the
+  // text does not read up to it alone, and the fault past the statement is
+  // repaired where it stands.
+  {
+    const std::string source = sharedTags.source("ev a.b eirly x late late");
+    const auto r = conformance_test::parser().parse(source);
+    const auto* node = exactly<ast::Won>(r);
+    CHECK(r.accepted && node != nullptr && node->token.empty() && node->name == "a.b");
+    CHECK(r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Deleted &&
+          r.diagnostics[0].end == source.size());
+  }
+  // The misspelt keyword of the third reads as the name the two others
+  // begin with: no statement is chosen when it is refused.
+  {
+    const std::string source = sharedTags.source("ev nevre");
+    const auto r = conformance_test::parser().parse(source);
+    CHECK(r.accepted && exactly<ast::First>(r) != nullptr);
+    CHECK(r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced &&
+          r.diagnostics[0].end == source.size());
+  }
+  // Two statements read a text alike up to the token refused past it, a
+  // third another way: the second reads it whole once a name is read as the
+  // keyword it misspells.
+  const Entry convergedArms{"convergedarms:"};
+  won(convergedArms, "ev a b ;", "a", "");
+  won(convergedArms, "ev a upto b ; c end ;", "", "a");
+  tree<ast::First>(convergedArms, "ev a b ; done", [](const ast::First&) { return true; });
+  {
+    const std::string source = convergedArms.source("ev a x upxo b ; c end ;");
+    const auto r = conformance_test::parser().parse(source);
+    const auto* node = exactly<ast::Won>(r);
+    CHECK(r.accepted && node != nullptr && node->token.empty() && node->name == "a");
+    CHECK(r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced);
+  }
+  // Two lists share their names up to their last word, each name read two
+  // ways alike: what a caret at their end is offered costs their length.
+  {
+    const Entry ambiguousList{"ambiguouslist:"};
+    tree<ast::Wons>(ambiguousList, "a b early", [](const ast::Wons& n) { return n.all.size() == 2; });
+    tree<ast::Wons>(ambiguousList, "a b ! late", [](const ast::Wons& n) { return n.all.size() == 2; });
+    std::string names;
+    for (int i = 0; i < 8192; ++i) names += "x ";
+    const std::string source = ambiguousList.source(names);
+    const auto begin = std::chrono::steady_clock::now();
+    const auto offers = caret_offers::offered(conformance_test::parser(), source,
+                                              static_cast<cursiv::TextOffset>(source.size()));
+    CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(8 * kSlowdown));
+    CHECK((offers == std::vector<std::string>{"!", "ID", "early", "late"}));
+  }
+  // A name is no number and no capitalised word, whatever its length; one
+  // that only begins as either is a name.
+  const Entry unboundedName{"unboundedname:"};
+  for (const char* text : {"abc", "Abc9", "12x"})
+    tree<ast::List>(unboundedName, text, [&](const ast::List& n) {
+      return n.items.size() == 1 && n.items[0] == text;
+    });
+  tree<ast::List>(unboundedName, "abc 12x Abc9",
+                  [](const ast::List& n) { return n.items.size() == 3; });
+  for (const char* text : {"12", "Abc", "abc 12"}) {
+    const std::string source = unboundedName.source(text);
+    CHECK(!clean(conformance_test::parser().parse(source)));
+  }
+  // A keyword with a letter left out or written wrong is read as itself,
+  // though other keywords of the same first letter come before it.
+  const Entry faultEdges{"faultedges:"};
+  tree<ast::First>(faultEdges, "i64", [](const ast::First&) { return true; });
+  tree<ast::Second>(faultEdges, "include", [](const ast::Second&) { return true; });
+  for (const char* text : {"iclude", "ixclude"}) {
+    const std::string source = faultEdges.source(text);
+    const auto r = conformance_test::parser().parse(source);
+    CHECK(r.accepted && exactly<ast::Second>(r) != nullptr);
+    CHECK(r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced &&
+          r.diagnostics[0].end == source.size());
+  }
   const Entry elected{"elected:"};
   tree<ast::First>(elected, "1 if;", [](const ast::First&) { return true; });
   tree<ast::Second>(elected, "1 if:", [](const ast::Second&) { return true; });

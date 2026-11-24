@@ -72,20 +72,11 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
                       Indented indented, std::uint32_t first, std::uint32_t count,
                       std::uint32_t rereads, std::vector<std::uint32_t>& plan);
 
-// One arm's generated reader and, by terminal, whether its stack shifts it:
-// 0 it reads it not, 1 it reads it without a known shift, 2 it shifts it.
-struct PrefixArm {
-  Reader read;
-  const std::uint8_t* shifts;
-};
-
-struct PrefixPath {
-  std::span<const std::uint32_t> stack;
-  std::span<const std::array<std::uint16_t, 2>> tokens;
-};
-
 // After any shared prefix, the arm whose stack alone shifts the longest token.
 Prediction predict_prefix(Machine& m, std::span<const PrefixArm> arms, const PrefixPath* path = nullptr);
+
+// The arm the proved prefixes elect for the cell the machine stopped at.
+Prediction predict_cell(Machine& m, const PrefixTable& table);
 
 // Whether an arm takes the held token, or elects a shift of `terminal` in `shifted`.
 bool takes(Machine& text, Cactus& stacks, const Reading& from,

@@ -45,15 +45,6 @@ inline bool word_guarded(const GrammarImage& image, const ImageNode& n) {
                                (n.flags & kLitFolded) != 0);
 }
 
-// A matcher exit continues at `to`. Its operand is an entry, a mark or a scanner.
-enum class MatchAction : std::uint8_t { end, call, jump, open, close, echo, ahead, unless, scan };
-
-struct MatchExit {
-  MatchAction action = MatchAction::end;
-  std::uint16_t to = 0;
-  std::uint32_t arg = 0;
-};
-
 // The matcher of the terminals the lexer's automaton reads the first bytes
 // of only: an automaton of its own, whose accepts are exits, and per entry
 // its start state. A matched terminal has at least one matcher branch.
@@ -218,7 +209,7 @@ class LexAutomatonBuilder {
     bool nullable, ignored;
   };
   void consider(std::size_t first, std::size_t ends, std::size_t root, bool ignored);
-  void factor(const Run& run, std::size_t first = 0);
+  void factor(const Run& run);
   // The branches of `body` that rank apart, each with whether it is one
   // literal.
   [[nodiscard]] std::vector<std::pair<ImageId, bool>> branches(ImageId body) const;

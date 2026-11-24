@@ -8,12 +8,14 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <map>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_map>
 #include <unordered_set>
@@ -351,14 +353,15 @@ std::string module_source(const LanguageNames& names) {
 
 namespace fs = std::filesystem;
 
-bool holds(const fs::path& path, std::string_view text) {
+bool holds(const fs::path& path, std::initializer_list<std::string_view> parts) {
   std::ifstream in(path, std::ios::binary);
   char buffer[8192];
-  while (!text.empty()) {
-    const auto n = std::min(text.size(), sizeof buffer);
-    if (!in.read(buffer, n) || !text.starts_with(std::string_view(buffer, n))) return false;
-    text.remove_prefix(n);
-  }
+  for (std::string_view text : parts)
+    while (!text.empty()) {
+      const auto n = std::min(text.size(), sizeof buffer);
+      if (!in.read(buffer, n) || !text.starts_with(std::string_view(buffer, n))) return false;
+      text.remove_prefix(n);
+    }
   return in && in.peek() == std::char_traits<char>::eof() && !in.bad();
 }
 
@@ -424,7 +427,8 @@ struct Outputs {
 #endif
   }
 
-  void write(const fs::path& path, const std::string& text, std::optional<std::string> original = {}) {
+  void write(const fs::path& path, std::initializer_list<std::string_view> text,
+             std::optional<std::string> original = {}) {
     auto target = fs::weakly_canonical(path);
     while (fs::is_symlink(fs::symlink_status(target)))
       target = fs::weakly_canonical(target.parent_path() / fs::read_symlink(target));
@@ -449,7 +453,7 @@ struct Outputs {
     }
     const auto staged = dir / std::to_string(files.size());
     std::ofstream out(staged, std::ios::binary);
-    out << text;
+    for (const std::string_view part : text) out << part;
     out.close();
     if (!out) throw std::runtime_error("cannot write " + path.string());
     fs::path previous;
@@ -467,7 +471,7 @@ struct Outputs {
     std::size_t done = 0;
     try {
       for (const auto& f : files) {
-        if (f.original && !holds(f.target, *f.original))
+        if (f.original && !holds(f.target, {*f.original}))
           throw std::runtime_error(f.target.string() + " changed during generation");
         fs::rename(f.staged, f.target);
         ++done;
@@ -496,7 +500,7 @@ void write_keywords(Outputs& files, const fs::path& path, const std::string& mat
   std::string json{std::istreambuf_iterator<char>(in), {}};
   if (in.is_open() && !in.bad())
     if (auto edited = with_keyword_match(json, match)) {
-      if (*edited != json) files.write(path, *edited, std::move(json));
+      if (*edited != json) files.write(path, {*edited}, std::move(json));
       return;
     }
   throw std::runtime_error(path.string() + " must be JSON with a string at repository.keywords.match");
@@ -745,16 +749,16 @@ int generate(GrammarImage& image, const LowerDesc& desc, const LanguageNames& na
     if (std::getenv("CURSIV_CONFLICTS") != nullptr) report_conflicts(who, image, dump, cfg, packed);
     const std::string wrapped = dump_wrapped(dump.text);
     Outputs files;
-    const auto write = [&](const char* name, const std::string& text) {
+    const auto write = [&](const char* name, std::initializer_list<std::string_view> text) {
       files.write(fs::path(dir) / name, text);
     };
     emit_drive(cfg, packed, names, write);
-    write("Ast.cpp", emit_ast(cfg, packed, ns, names.header, names.grammar));
-    write("Grammar.cpp", grammar_facts(cfg, packed, ns));
-    write("GrammarSource.hpp", grammar_source(names, dump, wrapped));
-    write("GRAMMAR.txt", wrapped);
-    write("Module.hpp", module_header(names));
-    write("Module.cpp", module_source(names));
+    write("Ast.cpp", {emit_ast(cfg, packed, ns, names.header, names.grammar)});
+    write("Grammar.cpp", {grammar_facts(cfg, packed, ns)});
+    write("GrammarSource.hpp", {grammar_source(names, dump, wrapped)});
+    write("GRAMMAR.txt", {wrapped});
+    write("Module.hpp", {module_header(names)});
+    write("Module.cpp", {module_source(names)});
     if (!textmate.empty())
       write_keywords(files, textmate, textmate_keyword_match(textmate_keywords(cfg, packed), image.bound));
     files.publish();

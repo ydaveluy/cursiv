@@ -67,8 +67,12 @@ class CstRun {
     if (records > _cap) reallocate(records);
   }
 
-  // The records past zero are room again: the buffer stays.
-  void clear() { _records = 0; }
+  // The records from `records` on are room again: the buffer stays.
+  void truncate(NodeCount records) {
+    assert(records <= _records);
+    _records = records;
+  }
+  void clear() { truncate(0); }
 
   // A parse's cancellation token, checked by the write that reaches `_mark`,
   // so the room check stays the only per-record cost. Null, or a token that

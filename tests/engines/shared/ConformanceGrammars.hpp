@@ -25,6 +25,9 @@ struct Won : cursiv::Extends<cursiv::AstNode> {
   string_view token;
   string_view name;
 };
+struct Wons : cursiv::Extends<cursiv::AstNode> {
+  vector<Won*> all;
+};
 struct Tally : cursiv::Extends<cursiv::AstNode> {
   vector<string_view> turns;
   boolean tail = false;
@@ -788,6 +791,96 @@ struct ClosedHead : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// Two statements share a head and a dotted name, behind a keyword each
+// documents its own way, and are told apart by the word after the name.
+struct SharedHead : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Path : rule<some(ref<ID>, lit<".">)> {};
+  struct Root
+      : rule<create<ast::Won>(kw<"ev">.doc<"An early event.">() +
+                              assign<&ast::Won::token>(ref<Path>) + kw<"early">) |
+             create<ast::Won>(kw<"ev">.doc<"A late event.">() +
+                              assign<&ast::Won::name>(ref<Path>) + kw<"late">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// The statements of `SharedHead` with names between the shared name and the
+// word that tells them apart, and a third that is that keyword and a word.
+struct SharedTags : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Path : rule<some(ref<ID>, lit<".">)> {};
+  struct Root
+      : rule<create<ast::Won>(kw<"ev">.doc<"An early event.">() +
+                              assign<&ast::Won::token>(ref<Path>) + many(ref<ID>) +
+                              kw<"early">) |
+             create<ast::Won>(kw<"ev">.doc<"A late event.">() +
+                              assign<&ast::Won::name>(ref<Path>) + many(ref<ID>) +
+                              kw<"late">) |
+             create<ast::First>(kw<"ev">.doc<"No event.">() + kw<"never">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// Two statements read the same names behind a name each keeps its own way,
+// the second alone on past its end mark behind a keyword; a third asks for a
+// word after that mark.
+struct ConvergedArms : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Root
+      : rule<create<ast::Won>(kw<"ev"> + assign<&ast::Won::token>(ref<ID>) + many(ref<ID>) +
+                              lit<";">) |
+             create<ast::Won>(kw<"ev"> + assign<&ast::Won::name>(ref<ID>) + many(ref<ID>) +
+                              option(kw<"upto"> + many(ref<ID> | lit<";">) + kw<"end">) +
+                              lit<";">) |
+             create<ast::First>(kw<"ev"> + some(ref<ID>) + lit<";"> + kw<"done">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// Two lists read the same names, each name one of two ways, and are told
+// apart by their last word.
+struct AmbiguousList : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Item : rule<create<ast::Won>(assign<&ast::Won::token>(ref<ID>)) |
+                     create<ast::Won>(assign<&ast::Won::name>(ref<ID>) + option(lit<"!">))> {};
+  struct Early : rule<create<ast::Won>(assign<&ast::Won::token>(ref<ID>))> {};
+  struct Late : rule<create<ast::Won>(assign<&ast::Won::name>(ref<ID>))> {};
+  struct Root
+      : rule<create<ast::Wons>(append<&ast::Wons::all>(ref<Early>) +
+                               many(append<&ast::Wons::all>(ref<Item>)) + kw<"early">) |
+             create<ast::Wons>(append<&ast::Wons::all>(ref<Late>) +
+                               many(append<&ast::Wons::all>(ref<Item>)) + kw<"late">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// A name is a run of characters that is no number and no capitalised word:
+// the condition before it reads on without bound.
+struct UnboundedName : cursiv::GrammarSpec {
+  static constexpr auto NameChar = cr<"^ ,">;
+  struct WS : terminal<some(s)> {};
+  struct Name : terminal<!((some(d) | (cr<"A-Z"> + many(cr<"a-z">))) + !NameChar) +
+                         some(NameChar)> {};
+  struct Root : rule<create<ast::List>(some(append<&ast::List::items>(ref<Name>)))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// A keyword among more keywords of its first letter than a fault tries when
+// the text reads on from none.
+struct FaultEdges : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Root : rule<create<ast::First>(kw<"i8"> | kw<"i16"> | kw<"i32"> | kw<"i64">) |
+                    create<ast::Second>(kw<"include">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 // One document selects a conformance scenario before its original rule.
 // Hidden-terminal policies are scoped to their own tagged cases.
 struct Suite : cursiv::GrammarSpec {
@@ -844,6 +937,12 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"absentclosehost:"> + ref<Hosted<AbsentClose>::Root>) |
              (lit<"followedhost:"> + ref<Followed<Bare>::Root>) |
              (lit<"closedhead:"> + ref<ClosedHead::Root>) |
+             (lit<"sharedhead:"> + ref<SharedHead::Root>) |
+             (lit<"sharedtags:"> + ref<SharedTags::Root>) |
+             (lit<"faultedges:"> + ref<FaultEdges::Root>) |
+             (lit<"convergedarms:"> + ref<ConvergedArms::Root>) |
+             (lit<"ambiguouslist:"> + ref<AmbiguousList::Root>) |
+             (lit<"unboundedname:"> + ref<UnboundedName::Root>) |
              (lit<"keywordtrivia:"> + skip(ignore<KeywordTrivia::WS>,
                                            hide<KeywordTrivia::NOTE>,
                                            ref<KeywordTrivia::Root> + eof)) |

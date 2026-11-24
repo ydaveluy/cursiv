@@ -118,6 +118,36 @@ void overlapping_runs_keep_their_own_matcher_entry(bool reversed) {
   }
 }
 
+// A name that is no number and no capitalised word: its condition reads on
+// without bound, and its ends wait on it in several ways.
+struct UnboundedCondition : cursiv::GrammarSpec {
+  static constexpr auto NameChar = cr<"^ ,">;
+  struct WS : terminal<some(lit<" ">)> {};
+  using ignored = WS;
+  struct Name : terminal<!((some(d) | (cr<"A-Z"> + many(cr<"a-z">))) + !NameChar) +
+                         some(NameChar)> {};
+  struct Root : rule<create<Postfix>(some(ref<Name>))> {};
+  using entry = Root;
+};
+
+void an_unbounded_condition_is_read_by_one_matcher_thread() {
+  using cursiv::engine::LexTest;
+  using cursiv::engine::MatchAction;
+  auto image = grammar_image<View<UnboundedCondition>>();
+  const auto cfg = lower(image, kLowerDesc<UnboundedCondition>);
+  LexAutomatonBuilder lexer(image);
+  for (std::uint16_t t = 1; t < cfg.terminals.size(); ++t) lexer.add(t, cfg.terminals[t]);
+  const auto dfa = lexer.build(cfg.terminals.size());
+  CHECK(std::ranges::any_of(dfa.acceptSets, [&](const auto& set) {
+    return std::ranges::any_of(set, [&](const auto& a) {
+      return a.guard == LexTest::match && cfg.terminals[a.term].name == "Name";
+    });
+  }));
+  // Each end of the name is weighed where its thread stands: none forks.
+  CHECK(std::ranges::all_of(dfa.matcher.exits,
+                            [](const auto& e) { return e.action == MatchAction::end; }));
+}
+
 struct MarkedSection : cursiv::GrammarSpec {
   struct Root : rule<create<Postfix>(flag<&Postfix::marked>(lit<"x">))> {};
   using entry = Root;
@@ -357,7 +387,7 @@ void a_shared_reader_needs_a_terminal_that_separates_its_arms() {
   p.states[2].actions = {{2, shift, 3}, {3, shift, 3}};
   const auto predict = [&] {
     PrefixPredictions out;
-    prefix_predictions(out, cfg, p, 0, 8, p.states[0].actions);
+    prefix_predictions(out, cfg, p, 0, 8, p.states[0].actions, false);
     return out;
   };
   CHECK(predict().plans.size() == 1);
@@ -385,6 +415,7 @@ int main() {
   CHECK((!shared_capture_is_defined<missing | first>()));
   overlapping_runs_keep_their_own_matcher_entry(false);
   overlapping_runs_keep_their_own_matcher_entry(true);
+  an_unbounded_condition_is_read_by_one_matcher_thread();
   CHECK(modifier_counts<SharedGroup::Once>() == modifier_counts<SharedGroup::Twice>());
   rejects_second_write<UnorderedWrites>("'marked' twice");
   rejects_second_write<AliasedOperands>("'child' twice");

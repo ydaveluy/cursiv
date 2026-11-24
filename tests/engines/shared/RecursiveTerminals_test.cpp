@@ -181,20 +181,32 @@ void check_window(std::string_view prefix, std::string_view text, unsigned width
 
 void a_stop_reaches_a_long_token(const cursiv::Parser& parser) {
   using namespace cursiv::engine;
-  namespace generated = tlexbackends::generated::Suite;
-  struct Stopping : Tables { cursiv::CancellationTokenSource& stop; };
-  cursiv::CancellationTokenSource stop;
-  Stopping tables{generated::kTables, stop};
-  tables.match = [](Machine& m, Matching& s) {
-    static_cast<const Stopping&>(m.t).stop.request_stop();
-    generated::kTables.match(m, s);
-    CHECK(false);  // The running matcher must observe the request.
-  };
+  const auto& t = tlexbackends::generated::Suite::kTables;
   const std::string text = "continuation:" + std::string(8000, 'a') + std::string(8000, 'b') + "!";
   check(parser, text, true);
+  cursiv::CancellationTokenSource stop;
+  const auto token = stop.get_token();
+  {
+    cursiv::Cst cst(text);
+    cursiv::CstBuilder builder(cst);
+    Machine m(t, text, builder.stream(), token);
+    const char* const begin = m.src + std::string_view("continuation:").size();
+    m.read_to(begin, t.terminalCount);
+    CHECK(t.drive(m) == Exit::refused);
+    m.read_to(m.end, t.terminalCount);
+    // Requested before the token is read: its reading stops.
+    stop.request_stop();
+    bool cancelled = false;
+    try {
+      (void)m.walk<true>(begin, t.stateMode[m.under()], 1, begin);
+    } catch (const cursiv::OperationCancelled&) {
+      cancelled = true;
+    }
+    CHECK(cancelled);
+  }
   cursiv::Cst cst;
   try {
-    parse(tables, text, cst, stop.get_token());
+    parse(t, text, cst, token);
     CHECK(false);
   } catch (const cursiv::OperationCancelled&) {
     CHECK(cst.text().empty());

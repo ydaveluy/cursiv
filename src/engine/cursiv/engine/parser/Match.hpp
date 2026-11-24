@@ -1,7 +1,6 @@
-// The matcher's search, which the code of a grammar's matcher runs: threads
-// of its automaton, each an entry at a place with the marks it holds, inside
-// a call. The code takes the steps; the runtime holds the calls and the
-// conditions.
+// The matcher's search: threads of its automaton, each an entry at a place
+// with the marks it holds, inside a call, with the calls and the conditions
+// they meet.
 #pragma once
 
 #include <algorithm>
@@ -105,11 +104,18 @@ class Matching {
   void ask(std::uint32_t entry, bool unless, const MatchThread& then) {
     asked.push_back({entry, unless, then});
   }
-  // `then` calls `callee` where it stands, and goes on past each end.
-  using OptionalByte = bool (*)(unsigned);
+  // `then` calls `callee` where it stands, and goes on past each end, and
+  // past one byte of `suffix` after it where given.
   void call(Machine& m, std::uint32_t callee, const MatchThread& then,
-            OptionalByte suffix = nullptr);
+            const std::uint64_t* suffix = nullptr);
   bool propagate(Machine& m);
+  // Takes the steps of its threads until none runs.
+  void run(Machine& m);
+  // The furthest end of `entry` at `begin`, null for none, where one thread
+  // reads it within its first stride and only ends: false where a search
+  // must read it.
+  [[nodiscard]] static bool alone(Machine& m, std::uint32_t entry, const char* begin,
+                                  const char*& found);
   // The place past `p` where a thread stops to be watched and weighed: a
   // stride of the text on.
   [[nodiscard]] static const char* stride(const Machine& m, const char* p) {
@@ -151,7 +157,7 @@ class Matching {
   };
   struct Caller {
     MatchThread then;
-    OptionalByte suffix;
+    const std::uint64_t* suffix;
     std::uint32_t next;
     Ranges pending{};
   };
@@ -160,6 +166,9 @@ class Matching {
   }
   template <class Each>
   void add(Ranges& ranges, TextOffset first, TextOffset last, Each each);
+  // Thread `th` takes exit `e` at `at`.
+  void leave(Machine& m, const MatchTables& a, const MatchThread& th, const MatchExit& e,
+             TextOffset at);
   void ended(std::uint32_t call, TextOffset first, TextOffset last);
   void resume(std::uint32_t caller, TextOffset first, TextOffset last);
 

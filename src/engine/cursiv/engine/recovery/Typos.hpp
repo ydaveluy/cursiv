@@ -10,8 +10,8 @@
 
 namespace cursiv::engine {
 
-struct Machine;
 struct LexWork;
+struct ModeLexer;
 
 // What a word read as a terminal it does not resemble costs: its deletion
 // and the terminal's insertion. What reading text again costs at least, the
@@ -27,9 +27,10 @@ struct Typo {
   bool substitutes = false;
 };
 
-// The readings of the text at `at` as a terminal `state` acts on, each
-// terminal and end once at its least cost: the cheapest first, then the
+// The readings of the text at `at` as a terminal of `want` that `mode` reads,
+// each terminal and end once at its least cost: the cheapest first, then the
 // longest. All branches and their guards share the same byte budget.
-std::vector<Typo> typos(Machine& m, std::uint32_t state, TextOffset at, TextOffset plain, LexWork& work);
+std::vector<Typo> typos(const ModeLexer& mode, std::vector<std::uint64_t> want, TextOffset at,
+                        TextOffset plain, LexWork& work);
 
 }  // namespace cursiv::engine

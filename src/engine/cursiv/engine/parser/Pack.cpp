@@ -614,18 +614,9 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
           }
       }
       state.actions.erase(kept, state.actions.end());
-      // A state with one reduce and nothing else, and no bar, reduces it
-      // without a token; a node that reads nothing waits for the token, to
-      // stand where it begins.
-      if (from.shifts.empty() && from.reduces.size() == 1 && !from.barred) {
-        const std::uint32_t lone = from.reduces.front().first;
-        const Production& q = cfg.productions[lone];
-        const bool emptyNode = q.rhs.empty() && q.entry != kNone &&
-                               cfg.rows[cfg.entries[q.entry].action]->kind == WriteKind::create;
-        if (lone != 0 && !q.tested() && !q.start && !emptyNode) {
-          state.reduce = lone;
-          state.actions.clear();
-        }
+      if (const std::uint32_t lone = reduced_alone(cfg, from); lone != kNone) {
+        state.reduce = lone;
+        state.actions.clear();
       }
       // The terminals in the order the grammar reaches them, kept where it
       // parts from their numbers': those it leaves out follow by number.
@@ -1775,6 +1766,28 @@ void section_closes(const Cfg& cfg, Packed& out) {
     out.modeClose.push_back(c == kUnseen || c == kNone ? kNoToken : static_cast<std::uint16_t>(c));
 }
 
+constexpr std::uint32_t kUncertain = kNone - 1;
+
+// Per terminal, the place among its actions of the one action `state` takes
+// on it: kNone where it takes none, kUncertain where several, a pass or a tie.
+const std::vector<std::uint32_t>& one_actions(PrefixPredictions::Cache& cache, const Cfg& cfg,
+                                              const Packed& p, std::uint32_t state) {
+  auto& row = cache.actions[state];
+  if (!row.empty()) return row;
+  const PackedState& s = p.states[state];
+  row.assign(cfg.terminals.size() + 1, kNone);
+  for (const auto t : s.passes) row[t] = kUncertain;
+  for (std::size_t i = 0; i < s.actions.size();) {
+    const auto t = s.actions[i].terminal;
+    const auto first = i++;
+    while (i < s.actions.size() && s.actions[i].terminal == t) ++i;
+    row[t] = (i == first + 1 || s.actions[first + 1].kind == PackedAction::Kind::reread)
+                 ? static_cast<std::uint32_t>(first) : kUncertain;
+  }
+  cache.tied[s.mode].each([&](std::size_t t) { row[t] = kUncertain; });
+  return row;
+}
+
 }  // namespace
 
 LexRivals lex_rivals(const GrammarImage& image, const Cfg& cfg, const LexDfa& dfa) {
@@ -1819,7 +1832,7 @@ LexRivals lex_rivals(const GrammarImage& image, const Cfg& cfg, const LexDfa& df
 }
 
 void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
-    std::uint32_t state, std::uint32_t cell, std::span<const PackedAction> actions) {
+    std::uint32_t state, std::uint32_t cell, std::span<const PackedAction> actions, bool tied) {
   constexpr std::size_t kWalkSteps = 32;
   // A cell whose last action reads the token again is told by the token in
   // hand; the others read the next token in a mode, whose reader sees no
@@ -1828,31 +1841,31 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
   if (!rereads && (cfg.indent != 0 || cfg.dedent != 0)) return;
   const auto terminal = actions.front().terminal;
   if (terminal == kEndOfInput) return;
-  if (out.tied.empty()) {
-    out.tied.assign(p.modeCount, Bits(cfg.terminals.size() + 1));
+  if (out.cache.tied.empty()) {
+    out.cache.tied.assign(p.modeCount, Bits(cfg.terminals.size() + 1));
     for (std::uint16_t mode = 0; mode < p.modeCount; ++mode)
       for (auto tie : p.modeTies[mode])
-        for (auto t : p.ties[tie].terminals) out.tied[mode].set(t);
-    out.actions.resize(p.states.size());
-    out.visited.resize(2 * p.states.size());
-    out.predecessors.resize(p.states.size());
+        for (auto t : p.ties[tie].terminals) out.cache.tied[mode].set(t);
+    out.cache.actions.resize(p.states.size());
+    out.cache.visited.resize(2 * p.states.size());
+    out.cache.predecessors.resize(p.states.size());
     std::map<std::vector<std::uint16_t>, std::uint32_t> readers;
     std::vector<std::uint16_t> signature;
     for (std::uint32_t from = 0; from < p.states.size(); ++from) {
       signature.assign(1, p.states[from].mode);
       for (const PackedAction& a : p.states[from].actions) {
         signature.push_back(a.terminal);
-        if (a.kind == PackedAction::Kind::shift) out.predecessors[a.value].push_back(from);
+        if (a.kind == PackedAction::Kind::shift) out.cache.predecessors[a.value].push_back(from);
       }
-      out.readerOf.push_back(readers.try_emplace(signature, readers.size()).first->second);
+      out.cache.readerOf.push_back(readers.try_emplace(signature, readers.size()).first->second);
     }
     for (std::uint32_t nt = 0; nt < p.gotos.size(); ++nt)
       for (const PackedGoto& site : p.gotos[nt]) {
-        out.predecessors[site.target].push_back(site.from);
-        out.sites.try_emplace(std::uint64_t{nt} << 32 | site.from, site.target);
+        out.cache.predecessors[site.target].push_back(site.from);
+        out.cache.sites.try_emplace(std::uint64_t{nt} << 32 | site.from, site.target);
       }
   }
-  if (out.tied[p.states[state].mode].test(terminal)) return;
+  if (!tied && out.cache.tied[p.states[state].mode].test(terminal)) return;
   struct Walk {
     const Cfg& cfg;
     const Packed& p;
@@ -1884,8 +1897,8 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
 
     // Goes from the top state on `nonterminal`, the token `held` or read.
     bool go(std::uint32_t nonterminal, bool held) {
-      const auto site = predictions.sites.find(std::uint64_t{nonterminal} << 32 | stack.back());
-      if (site == predictions.sites.end()) return false;
+      const auto site = predictions.cache.sites.find(std::uint64_t{nonterminal} << 32 | stack.back());
+      if (site == predictions.cache.sites.end()) return false;
       const auto target = site->second.target;
       if (held && p.states[target].rereads()) return false;
       const auto node = target + (held ? 0 : static_cast<std::uint32_t>(p.states.size()));
@@ -1921,22 +1934,8 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
         action = {terminal, PackedAction::Kind::reduce, state.reduce};
         return true;
       }
-      if (predictions.tied[state.mode].test(terminal)) return false;
-      auto& row = predictions.actions[stack.back()];
-      constexpr auto uncertain = kNone - 1;
-      if (row.empty()) {
-        row.assign(cfg.terminals.size() + 1, kNone);
-        for (const auto t : state.passes) row[t] = uncertain;
-        for (std::size_t i = 0; i < state.actions.size();) {
-          const auto t = state.actions[i].terminal;
-          const auto first = i++;
-          while (i < state.actions.size() && state.actions[i].terminal == t) ++i;
-          row[t] = (i == first + 1 || state.actions[first + 1].kind == PackedAction::Kind::reread)
-                       ? static_cast<std::uint32_t>(first) : uncertain;
-        }
-      }
-      const auto i = row[terminal];
-      if (i >= uncertain) {
+      const auto i = one_actions(predictions.cache, cfg, p, stack.back())[terminal];
+      if (i >= kUncertain) {
         refused = i == kNone;
         return false;
       }
@@ -1968,18 +1967,37 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
   };
   Walk w{cfg, p, out, 0, 0, {}, {}};
   Walk up{cfg, p, out, 0, 0, {}, {}};
+  // A target that reduces at once climbs alike on every token where the walk
+  // stops on its production or pops it past the site's two frames.
+  const auto alike = [&](const PackedState& target) {
+    const Production& rule = cfg.productions[target.reduce];
+    return rule.rhs.size() >= 2 || rule.tested() || rule.start || rule.implied;
+  };
   // The walks from state `from` on `nonterminal` by token held, none where
   // it has no goto.
   const auto walks = [&](std::uint32_t from, std::uint32_t nonterminal) -> PrefixPredictions::Site* {
-    const auto site = out.sites.find(std::uint64_t{nonterminal} << 32 | from);
-    if (site == out.sites.end() || p.states[site->second.target].rereads()) return nullptr;
-    auto& row = site->second.climbs;
-    if (row.empty()) row.resize(cfg.terminals.size() + 1);
-    return &site->second;
+    const auto site = out.cache.sites.find(std::uint64_t{nonterminal} << 32 | from);
+    if (site == out.cache.sites.end() || p.states[site->second.target].rereads()) return nullptr;
+    PrefixPredictions::Site& at = site->second;
+    if (at.columns == nullptr && at.climbs.empty()) {
+      const PackedState& target = p.states[at.target];
+      if (target.reduce == kNone) {
+        at.columns = one_actions(out.cache, cfg, p, at.target).data();
+        at.climbs.resize(target.actions.size());
+      } else {
+        at.climbs.resize(alike(target) ? 1 : cfg.terminals.size() + 1);
+      }
+    }
+    return &at;
   };
   const auto climb = [&](PrefixPredictions::Site* site, std::uint32_t from, std::uint16_t t) {
     if (!site) return PrefixPredictions::Climb{0, 0, 0, false};
-    auto& walk = site->climbs[t];
+    const std::uint32_t column = site->columns != nullptr ? site->columns[t]
+                                 : site->climbs.size() == 1 ? 0
+                                                            : t;
+    // A target that reads the token and takes no one action on it stops at once.
+    if (column >= kUncertain) return PrefixPredictions::Climb{0, 0, 1, false};
+    auto& walk = site->climbs[column];
     if (walk.steps == PrefixPredictions::kUnread) {
       up.begin(0, 0, std::span(&from, 1), 0);
       up.stack.push_back(site->target);
@@ -1998,31 +2016,33 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
     std::uint32_t below;
   };
   std::vector<std::uint32_t> key;
+  std::vector<std::uint8_t> rowShifts;
+  std::vector<PrefixPredictions::Under> rowUnder;
   // Whether a reader shifts each next token, the walks that go under its
   // stack apart: they go down one goto site at a time, read once.
   const auto row_of = [&](const Reached& r) -> const PrefixPredictions::Row& {
     key.assign(r.stack.begin(), r.stack.end());
     key.push_back(r.below);
-    const auto [at, fresh] = out.rows.try_emplace(key);
-    auto& [shifts, under, deeper] = at->second;
+    const auto [at, fresh] = out.cache.rows.try_emplace(key);
     if (!fresh) return at->second;
+    rowUnder.clear();
     const PackedState& next = p.states[r.stack.back()];
-    shifts.assign(cfg.terminals.size() + 1, 0);
+    rowShifts.assign(cfg.terminals.size() + 1, 0);
     // Bracket depth after the predicted shifts belongs to the full dispatch.
-    if (cfg.newline) shifts[cfg.newline] = 1;
+    if (cfg.newline) rowShifts[cfg.newline] = 1;
     for (std::size_t i = 0; i < next.actions.size(); ++i) {
       const PackedAction& action = next.actions[i];
       const std::uint16_t t = action.terminal;
       // A reread, which stands last, is taken only where the token is not.
       if (action.kind == PackedAction::Kind::reread) continue;
-      shifts[t] = 1;
-      if (t == kEndOfInput || t == cfg.newline || out.tied[next.mode].test(t) ||
+      rowShifts[t] = 1;
+      if (t == kEndOfInput || t == cfg.newline || out.cache.tied[next.mode].test(t) ||
           (i != 0 && next.actions[i - 1].terminal == t) ||
           (i + 1 != next.actions.size() && next.actions[i + 1].terminal == t &&
            next.actions[i + 1].kind != PackedAction::Kind::reread))
         continue;
       if (action.kind == PackedAction::Kind::shift) {
-        if (action.gap == kAnyGap) shifts[t] = 2;
+        if (action.gap == kAnyGap) rowShifts[t] = 2;
         continue;
       }
       if (action.kind != PackedAction::Kind::reduce) continue;
@@ -2033,17 +2053,19 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
       while (top >= 0) {
         const auto c = climb(walks(r.stack[top], lhs), r.stack[top], t);
         steps += c.steps;
-        if (c.shifted && steps <= kWalkSteps) shifts[t] = 2;
+        if (c.shifted && steps <= kWalkSteps) rowShifts[t] = 2;
         if (c.missing == 0 || steps > kWalkSteps) break;
         top -= c.missing;
         lhs = c.lhs;
       }
       if (top < 0)
-        under.push_back({t, static_cast<std::uint8_t>(steps),
-                         static_cast<std::uint32_t>(r.below - top), lhs});
+        rowUnder.push_back({t, static_cast<std::uint8_t>(steps),
+                            static_cast<std::uint32_t>(r.below - top), lhs});
     }
-    if (!under.empty()) deeper = under.front().depth;
-    std::ranges::stable_sort(under, {}, &PrefixPredictions::Under::lhs);
+    const std::uint32_t deeper = rowUnder.empty() ? 0 : rowUnder.front().depth;
+    std::ranges::stable_sort(rowUnder, {}, &PrefixPredictions::Under::lhs);
+    at->second = {&*out.cache.shifts.insert(rowShifts).first,
+                  &*out.cache.under.insert(rowUnder).first, deeper};
     return at->second;
   };
   std::vector<std::uint32_t> contexts{0}, chose;
@@ -2055,7 +2077,8 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
     for (std::size_t i = 0; i < depth; ++i) {
       previous.clear();
       for (const std::uint32_t s : sources)
-        previous.insert(previous.end(), out.predecessors[s].begin(), out.predecessors[s].end());
+        previous.insert(previous.end(), out.cache.predecessors[s].begin(),
+                        out.cache.predecessors[s].end());
       std::ranges::sort(previous);
       previous.erase(std::unique(previous.begin(), previous.end()), previous.end());
       sources.swap(previous);
@@ -2092,18 +2115,19 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
       first = end;
     }
     if (!winner) return kNone;
-    std::vector<std::array<std::uint32_t, 2>> refs;
-    for (const auto& [mode, shifts] : arms)
-      refs.push_back({mode, out.shifts.try_emplace(shifts, out.shifts.size()).first->second});
+    std::vector<std::array<std::uint32_t, 3>> refs;
+    for (std::size_t i = 0; i < arms.size(); ++i)
+      refs.push_back({arms[i].first, out.shifts.try_emplace(arms[i].second, out.shifts.size()).first->second,
+                      tied ? actions[i].terminal : kNoToken});
     return out.plans.try_emplace(std::move(refs), out.plans.size()).first->second;
   };
   // Two reductions can shift through the same readers over different stacks.
   // Follow their common tokens until the readers distinguish the stacks.
-  if (actions.size() == 2 && actions[0].kind == PackedAction::Kind::reduce &&
+  if (!tied && actions.size() == 2 && actions[0].kind == PackedAction::Kind::reduce &&
       actions[1].kind == PackedAction::Kind::reduce) {
     std::vector<std::uint32_t> stack{state};
-    while (stack.size() < kWalkSteps && !out.predecessors[stack.back()].empty()) {
-      const auto from = out.predecessors[stack.back()].front();
+    while (stack.size() < kWalkSteps && !out.cache.predecessors[stack.back()].empty()) {
+      const auto from = out.cache.predecessors[stack.back()].front();
       if (std::ranges::find(stack, from) != stack.end()) break;
       stack.push_back(from);
     }
@@ -2133,17 +2157,18 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
         const auto left = pair.stacks[0].back(), right = pair.stacks[1].back();
         const auto plain = [&](std::uint32_t reader) {
           const auto& s = p.states[reader];
-          return !s.rereads() && s.passes.empty() && s.again == kNoMode && !out.tied[s.mode].any();
+          return !s.rereads() && s.passes.empty() && s.again == kNoMode &&
+                 !out.cache.tied[s.mode].any();
         };
         if (!plain(left) || !plain(right)) continue;
-        if (out.readerOf[left] != out.readerOf[right]) {
+        if (out.cache.readerOf[left] != out.cache.readerOf[right]) {
           arms.clear();
           for (const auto& path : pair.stacks)
-            arms.emplace_back(p.states[path.back()].mode, row_of({path, 0}).shifts);
+            arms.emplace_back(p.states[path.back()].mode, *row_of({path, 0}).shifts);
           if (const auto plan = plan_of(); plan != kNone) {
             const auto context = out.stacks.try_emplace(std::move(stack), out.stacks.size()).first->second;
             PrefixPredictions::Path path{context, plan, std::move(pair.prefix)};
-            out.cells[{cell, 0}].fallback = PrefixPredictions::kPath |
+            out.cells[{cell, 0}].fallback = kPlanRoute |
                 out.paths.try_emplace(std::move(path), out.paths.size()).first->second;
             return;
           }
@@ -2180,7 +2205,7 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
         }
       }
       if (told)
-        chose.back() = PrefixPredictions::kArm |
+        chose.back() = kPlanArm |
                        (taker == kNone ? static_cast<std::uint32_t>(actions.size()) - 1 : taker);
       else if (depth == 0 && needed == 0)
         return;
@@ -2190,21 +2215,21 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
     }
     // The walks of the actions first, each to the state that reads the next
     // token: none may fail or meet another.
-    if (++out.generation == 0) {
-      std::ranges::fill(out.visited, 0);
-      ++out.generation;
+    if (++out.cache.generation == 0) {
+      std::ranges::fill(out.cache.visited, 0);
+      ++out.cache.generation;
     }
     reached.clear();
     for (const PackedAction& action : actions) {
       w.begin(depth, contexts[context], std::span(&state, 1), 0);
-      const bool walked = w.shift(terminal, action) && w.reader();
+      const bool walked = w.shift(action.terminal, action) && w.reader();
       if (!walked || std::ranges::any_of(w.made, [&](std::uint32_t node) {
-            return out.visited[node] == out.generation;
+            return out.cache.visited[node] == out.cache.generation;
           })) {
         needed = w.missing;
         break;
       }
-      for (const auto node : w.made) out.visited[node] = out.generation;
+      for (const auto node : w.made) out.cache.visited[node] = out.cache.generation;
       reached.push_back({w.stack, w.below});
     }
     if (reached.size() != actions.size()) {
@@ -2214,21 +2239,21 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
     } else {
       // Readers alike in mode and in the terminals they act on tell nothing
       // apart by the next token, whatever stands below.
-      const auto reader = out.readerOf[reached.front().stack.back()];
+      const auto reader = out.cache.readerOf[reached.front().stack.back()];
       if (std::ranges::all_of(reached, [&](const Reached& r) {
-            return out.readerOf[r.stack.back()] == reader;
+            return out.cache.readerOf[r.stack.back()] == reader;
           })) {
         if (depth == 0) return;
         continue;
       }
       for (const Reached& r : reached) {
-        const auto& [shifts, under, deeper] = row_of(r);
-        auto& arm = arms.emplace_back(p.states[r.stack.back()].mode, shifts).second;
+        const auto& [read, under, deeper] = row_of(r);
+        auto& arm = arms.emplace_back(p.states[r.stack.back()].mode, *read).second;
         if (needed == 0) needed = deeper;
         // The walks under the stack go on from the context's frame.
         PrefixPredictions::Site* known = nullptr;
         std::uint32_t knownOf = kNone;
-        for (const auto& u : under) {
+        for (const auto& u : *under) {
           if (u.depth != depth) continue;
           if (u.lhs != knownOf) known = walks(contexts[context], knownOf = u.lhs);
           const auto c = climb(known, contexts[context], u.terminal);
@@ -2391,6 +2416,9 @@ Packed pack(const GrammarImage& image, Cfg& cfg, LexDfa dfa, const std::vector<R
   dropped_bytes(cfg, dfa, out);
   terminal_sets(cfg, dfa, out);
   out.matcher = std::move(dfa.matcher);
+  out.matchNext = out.matcher.next;
+  out.matchBlocks = pack_rows(out.matchNext, out.matcher.nclasses, LexBlocks::kWidth);
+  out.matchOf = pack_rows(out.matchBlocks, LexBlocks::count(out.matcher.nclasses));
   out.monitors = std::move(dfa.monitors);
   out.waits = std::move(dfa.waits);
   // The automaton itself, as the runtime walks it: states that go alike

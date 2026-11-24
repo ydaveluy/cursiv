@@ -51,7 +51,10 @@ void run(Lane& lane) {
   }
   // A word two letters off a keyword is read as it. A word unlike it gets the
   // keyword inserted before it, or is replaced by it when a name follows and
-  // only that keyword may stand there.
+  // only that keyword may stand there. A misspelt keyword that reads as a
+  // name is read as the keyword once a later token is refused: a letter left
+  // out, one written before it, its first two swapped; a name that resembles
+  // another keyword before it, after it or not.
   for (const auto& [text, want] :
        {std::pair<std::string_view, std::vector<std::string>>{
             "statemacne Lamp\n\nevents toggle",
@@ -63,7 +66,30 @@ void run(Lane& lane) {
           "ins:initialState@19<Expecting 'initialState'.>"}},
         {"xyzzy Lamp\n\nevents toggle",
          {"rep:statemachine@0<Expecting 'statemachine' but found 'xyzzy'.>",
-          "ins:initialState@25<Expecting 'initialState'.>"}}}) {
+          "ins:initialState@25<Expecting 'initialState'.>"}},
+        {"statemachine Lamp\n\nevents toggle\n\ninitialStat Off\n\nstate Off\n"
+         "end\n",
+         {"rep:initialState@34<Expecting 'initialState' but found "
+          "'initialStat'.>"}},
+        {"statemachine Lamp\n\nevents toggle\n\ncommands blink\n\n"
+         "initialState Off\n\nstate Off\n    actons { blink }\n"
+         "    toggle => Off\nend\n",
+         {"rep:actions@82<Expecting 'actions' but found 'actons'.>"}},
+        {"statemachine Lamp\n\nevents toggle\n\ncommands blink\n\n"
+         "initialState Off\n\nstate Off\n    xactions { blink }\n"
+         "    toggle => Off\nend\n",
+         {"rep:actions@82<Expecting 'actions' but found 'xactions'.>"}},
+        {"statemachine Lamp\n\nevents toggle\n\ncommands blink\n\n"
+         "initialState Off\n\nstate Off\n    cations { blink }\n"
+         "    toggle => Off\nend\n",
+         {"rep:actions@82<Expecting 'actions' but found 'cations'.>"}},
+        {"statemachine Lamp\n\nevents stat\n\ninitialStat Off\n\nstate Off\nend\n",
+         {"rep:initialState@32<Expecting 'initialState' but found "
+          "'initialStat'.>"}},
+        {"statemachine Lamp\n\nevents toggle\n\ninitialStat stat\n\nstate stat\n"
+         "end\n",
+         {"rep:initialState@34<Expecting 'initialState' but found "
+          "'initialStat'.>"}}}) {
     const Proj p = project(*engine, std::string(text));
     CHECK(p.accepted && p.value);
     CHECK(p.diags == want);

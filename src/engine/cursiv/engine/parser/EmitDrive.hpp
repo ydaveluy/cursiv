@@ -1,8 +1,9 @@
-// A language's states written out as C++: each state is a label, its mode's
-// tokens are read by constants, and a transition is a jump.
+// A language's parser written out as C++: its tables, the steps the machines
+// take over them, and code of its own per state where the grammar is small.
 #pragma once
 
-#include <string>
+#include <initializer_list>
+#include <string_view>
 
 #include "cursiv/engine/grammar/Cfg.hpp"
 #include "cursiv/engine/parser/Pack.hpp"
@@ -10,8 +11,8 @@
 
 namespace cursiv::engine::gen {
 
-// Writes the shared state definitions and one entry unit per machine.
-using WriteSource = FunctionRef<void(const char*, const std::string&)>;
+// Writes one generated file: its name, and its text as parts in order.
+using WriteSource = FunctionRef<void(const char*, std::initializer_list<std::string_view>)>;
 struct LanguageNames;
 void emit_drive(const Cfg& cfg, const Packed& packed, const LanguageNames& names, WriteSource write);
 

@@ -1,5 +1,7 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/engine/parser/Machine.hpp"
+#include "cursiv/engine/parser/Split.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/LexicalBackendsAst.hpp"
@@ -40,14 +42,15 @@ void retained_readings_keep_their_ties() {
   const std::string_view source = "ns tag:i";
   cursiv::CstRun tape;
   Machine shared(tables, source, tape, cursiv::kNoCancel);
-  std::vector<std::pair<Reader, Token>> saved;
-  for (const auto& mode : tables.modes)
-    if (mode.read) saved.emplace_back(mode.read, mode.read(shared, shared.src + 3));
+  std::vector<std::pair<std::uint32_t, Token>> saved;
+  for (std::uint32_t mode = 0; mode < tables.modes.size(); ++mode)
+    if (const Reader read = tables.modes[mode].read)
+      saved.emplace_back(mode, read(shared, shared.src + 3, mode));
 
   std::set<std::vector<std::uint16_t>> groups;
-  for (const auto& [read, token] : saved) {
+  for (const auto& [mode, token] : saved) {
     Machine fresh(tables, source, tape, cursiv::kNoCancel);
-    const auto expected = read(fresh, fresh.src + 3);
+    const auto expected = tables.modes[mode].read(fresh, fresh.src + 3, mode);
     CHECK(token.begin(shared) == expected.begin(fresh));
     CHECK(token.terminal() == expected.terminal() && token.end == expected.end);
     CHECK(token.hasGroup() == expected.hasGroup());
@@ -60,6 +63,24 @@ void retained_readings_keep_their_ties() {
     if (!members.empty()) groups.insert(std::move(members));
   }
   CHECK(groups.size() >= 2);
+}
+
+// Words two terminals read alike are told by the token after each, with no
+// reading ahead.
+void tied_words_are_told_by_the_next_token(const cursiv::Parser& parser) {
+  using namespace cursiv::engine;
+  std::string text = "tied";
+  for (unsigned i = 0; i < 64; ++i) text += " ab( cd=";
+  Items items;
+  for (unsigned i = 0; i < 64; ++i) items.insert(items.end(), {"ab", "cd"});
+  check(parser, text, items);
+  const auto& t = tlexbackends::generated::Suite::kTables;
+  cursiv::Cst cst(text);
+  cursiv::CstBuilder builder(cst);
+  Machine m(t, cst.text(), builder.stream(), cursiv::kNoCancel);
+  bool retry = false;
+  CHECK(run(m, &retry) == Exit::accepted && !retry);
+  CHECK(m.explored == 0);
 }
 
 void scanners(const cursiv::Parser& parser) {
@@ -435,6 +456,7 @@ int main() {
   lexical_backends_cases::exercise(*parser);
   lexical_backends_cases::scanners(*parser);
   lexical_backends_cases::retained_readings_keep_their_ties();
+  lexical_backends_cases::tied_words_are_told_by_the_next_token(*parser);
   lexical_captures_cases::exercise(*parser);
   lexical_through_cases::exercise(*parser);
   rule_through_cases::exercise(*parser);

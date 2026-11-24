@@ -70,6 +70,11 @@ void bar_tests(Cfg& cfg);
 // a scope.
 Bits trivia_shadows(const Cfg& cfg, std::uint64_t scopes);
 
+// The production a state reduces without reading a token, kNone where it
+// reads one: its one action, no bar in it, and no token the production waits
+// for. A node that reads nothing waits for the token, to stand where it begins.
+std::uint32_t reduced_alone(const Cfg& cfg, const LrState& state);
+
 // `takes` as `lex_rivals` gives it; `always`: the trivia every state reads.
 // A nonzero `maxStates` bounds refinement to the hottest cells.
 LrAutomaton build_lr1(const Cfg& cfg, const std::vector<RivalRow>& takes, const Bits& always,

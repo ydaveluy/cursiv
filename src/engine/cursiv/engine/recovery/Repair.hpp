@@ -3,8 +3,6 @@
 // driven again.
 #pragma once
 
-#include "cursiv/text/TextOffset.hpp"
-
 namespace cursiv {
 class CstBuilder;
 }

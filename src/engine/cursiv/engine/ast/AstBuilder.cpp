@@ -342,7 +342,8 @@ void AstBuilder::run(NodeId first, NodeId root) {
         const auto [action, member] = deferred[element];
         push({id, action, member, nullptr});
       } else if (element < elements) {
-        records[element - writes](*this, id, *node);
+        const AstRecord& record = records[element - writes];
+        record.run(*this, id, *node, record.write);
       }
     }
   }

@@ -487,15 +487,27 @@ class Emitter {
       _out += ">;\n";
     }
     _out += "template <::std::uint16_t... Is>\n"
-            "constexpr ::cursiv::engine::AstRecord R =\n"
-            "    &::cursiv::engine::record<Does, Is...>;\n\n";
+            "constexpr auto R = &::cursiv::engine::record<Does, Is...>;\n\n";
+    const auto makes = [&](std::uint16_t action) {
+      const WriteKind kind = _rows[action]->kind;
+      return kind == WriteKind::create || kind == WriteKind::climb || kind == WriteKind::close ||
+             kind == WriteKind::nest;
+    };
     std::vector<std::string> writesOf, all;
     for (const auto& actions : kept_actions) {
       if (writesOf.size() < _packed.deferred) {
         const auto action = actions.front();
         writesOf.push_back("{" + std::to_string(action) + ", " + std::to_string(_memberOf[action]) + "}");
       } else if (!actions.empty()) {
-        all.push_back(slot('R', actions));
+        // A last action that writes the node made just before it is the
+        // record's `write`: records that differ only in it share their code.
+        const std::size_t n = actions.size();
+        const std::uint16_t last = actions.back();
+        if (n > 1 && _rows[last]->node && makes(actions[n - 2]))
+          all.push_back("{" + slot('R', std::span(actions).first(n - 1)) + ", {" +
+                        std::to_string(last) + ", " + std::to_string(_memberOf[last]) + "}}");
+        else
+          all.push_back("{" + slot('R', actions) + ", {}}");
       }
     }
     _recordCount = writesOf.size() + all.size();

@@ -125,6 +125,9 @@ for examples.
 | `the grammar has too many terminals`, `the grammar has too many sets of terminals`, `the grammar has too many lexer modes` | Reuse terminal definitions and simplify alternatives that expect different sets of tokens. |
 | `the grammar has too many trivia scopes` | Reduce the number of distinct trivia configurations. The limit is 64. |
 | `the terminals are too large for one lexer` | Simplify overlapping terminal patterns or move choices between tokens into rules. |
+| `the terminals start in too many ways for one lexer` | Reuse terminal definitions and reduce the literals and keywords that begin with different text. |
+| `the grammar has too many ties of terminals` | Reduce the terminals that can read the same text in one place. |
+| `the grammar's states act in too many ways`, `the grammar takes too many kinds of steps`, `a rule is called from too many kinds of places`, `a state has too many actions on one token` | The parser tables are full. Lower the [state limit](cmake.md#cursiv_generate_language), or merge rules that differ only in the node they build. |
 
 For a limit on rules, properties or actions, factor repeated directives into
 named rules. For a limit on reference candidates, narrow the target types of

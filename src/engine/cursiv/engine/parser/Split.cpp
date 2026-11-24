@@ -9,6 +9,7 @@
 #include <span>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -612,9 +613,12 @@ struct Machine::Lookahead {
   std::vector<Token> leaders;
   Routes routes;
   std::vector<Alike> alike;
-  // The readings that fell in each of the last real token positions.
+  // The readings that fell in each of the last real token positions; the
+  // nodes they stood on still to walk, and those walked.
   std::array<std::vector<Ahead::Trace>, kValidateShifts> falls;
   std::vector<std::uint32_t> fellPlan;
+  std::vector<std::uint32_t> stood;
+  std::unordered_set<std::uint32_t> walked;
 };
 
 void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token tok,
@@ -622,8 +626,8 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
                       std::uint32_t rereads, std::vector<std::uint32_t>& plan) {
   const Tables& t = text.t;
   if (text.lookahead == nullptr) text.lookahead = new Machine::Lookahead(text);
-  auto& [stacks, election, closure, live, next, forks, leaders, routes, alike, falls, fellPlan] =
-      *text.lookahead;
+  auto& [stacks, election, closure, live, next, forks, leaders, routes, alike, falls, fellPlan,
+         stood, walked] = *text.lookahead;
   stacks.clear(stack);
   const auto top = static_cast<std::uint32_t>(stack.size()) - 1;
   if (rereads) {
@@ -823,13 +827,31 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
     if (text.ended != kEndOfInput && elected.tok.terminal() == text.ended) {
       text.forked = std::min(text.forked, tok.begin(text));
     } else {
-      // Leave recovery at the last choice shared by the recently refused readings.
+      // Leave recovery at the last choice shared by the recently refused
+      // readings, and by the readings each stood for.
+      const auto shared = [&] {
+        plan.erase(std::ranges::mismatch(plan, fellPlan).in1, plan.end());
+      };
+      walked.clear();
       for (std::size_t i = 1; i <= falls.size(); ++i)
         for (const Ahead::Trace& fallen : falls[(round + i) % falls.size()]) {
           if (plan.empty()) break;
           fellPlan.clear();
           plan_of(fallen, fellPlan);
-          plan.erase(std::ranges::mismatch(plan, fellPlan).in1, plan.end());
+          shared();
+          stood.assign(1, fallen.node);
+          while (!stood.empty() && !plan.empty()) {
+            std::uint32_t node = stood.back();
+            stood.pop_back();
+            for (; node != kNoStack && node >= stacks.base() && walked.insert(node).second;
+                 node = stacks.parent(node))
+              stacks.others(node, [&](std::uint32_t other) {
+                fellPlan.clear();
+                election.plan(other, fellPlan);
+                shared();
+                stood.push_back(other);
+              });
+          }
         }
     }
   }
@@ -948,7 +970,7 @@ bool Machine::reads(std::uint32_t state, const char* from, Token tok, Indented i
     const auto before = endReads;
     Token first = next;
     if (const auto mode = t.stateMode[s]; mode != kNoToken) {
-      const Token read = observed(t.modes[mode].read(*this, src + next.begin(*this)));
+      const Token read = observed(t.modes[mode].read(*this, src + next.begin(*this), mode));
       if (read.begin(*this) != next.begin(*this) || read.end == next.end) first = read;
     }
     asked.push_back({place(root, next.end, level, p, next.head),
@@ -1025,22 +1047,25 @@ Prediction predict_prefix(Machine& m, std::span<const PrefixArm> arms, const Pre
         !std::equal(path->stack.begin(), path->stack.end(), m.top - path->stack.size(),
                     [](std::uint32_t state, Frame f) { return state == f.state; })) return {};
     for (const auto& [mode, terminal] : path->tokens) {
-      const Token tok = m.t.modes[mode].read(m, at);
+      const Token tok = m.t.modes[mode].read(m, at, mode);
       if (tok.hasGroup() || tok.terminal() != terminal || tok.end <= m.src + tok.begin(m)) return {};
       at = tok.end;
     }
   }
+  // Only the arms of tied terminals tell a token several terminals read.
+  if (m.tok.hasGroup() && arms.front().terminal == kNoToken) return {};
   std::uint32_t chosen = kNoStack;
   Token best{nullptr, 0};
   bool sole = !path;
   for (std::size_t i = 0; i < arms.size(); ++i) {
-    const Token next = arms[i].read(m, at);
+    const Token next = m.t.modes[arms[i].mode].read(m, at, arms[i].mode);
     if (next.hasGroup()) return {};
     const unsigned shifts = arms[i].shifts[next.terminal()];
     if (shifts == 0) {
       sole &= next.terminal() == m.t.terminalCount;
       continue;
     }
+    if (arms[i].terminal != kNoToken && !m.takes_tied(m.tok, arms[i].terminal)) continue;
     if (shifts == 1 || next.end <= m.src + next.begin(m) ||
         (best.end && next.begin(m) != best.begin(m))) return {};
     sole &= !best.end;
@@ -1053,6 +1078,30 @@ Prediction predict_prefix(Machine& m, std::span<const PrefixArm> arms, const Pre
   }
   if (chosen == kNoStack) return {};
   return {m.arms + chosen, sole ? static_cast<TextOffset>(best.end - m.src) : 0};
+}
+
+Prediction predict_cell(Machine& m, const PrefixTable& table) {
+  const std::size_t cell = m.arms - table.first;
+  if (cell >= table.wayOf.size() || table.wayOf[cell] == 0) return {};
+  const PrefixWay& way = table.ways[table.wayOf[cell] - 1];
+  if (way.depth != 0 && static_cast<std::size_t>(m.top - m.frames) <= way.depth) return {};
+  std::uint32_t plan = way.fallback;
+  if (way.count != 0) {
+    const std::span states{table.states + way.contexts, way.count};
+    const std::uint32_t state = m.top[-static_cast<std::ptrdiff_t>(way.depth) - 1].state;
+    const auto found = std::ranges::lower_bound(states, state);
+    if (found != states.end() && *found == state)
+      plan = table.plans[way.contexts + (found - states.begin())];
+  }
+  if (plan == kNoPlan) return {};
+  if ((plan & kPlanArm) != 0) return {m.arms + (plan & ~kPlanArm)};
+  const PrefixPath* path = nullptr;
+  if ((plan & kPlanRoute) != 0) {
+    const PrefixRoute& route = table.routes[plan & ~kPlanRoute];
+    plan = route.plan;
+    path = route.path;
+  }
+  return predict_prefix(m, {table.arms + table.planAt[plan], table.arms + table.planAt[plan + 1]}, path);
 }
 
 std::uint32_t arm(Machine& m, Prediction* prediction) {
@@ -1190,9 +1239,7 @@ Exit run(Machine& m, bool* retry) {
     if (predicted) {
       // At most the frame spanning the previous record boundary and its
       // suffix changed. Reuse the part that still matches the last snapshot.
-      Frame* from = m.top;
-      while (from != m.frames && from[-1].open >= records) --from;
-      if (from != m.frames) --from;
+      Frame* from = m.frames + m.standing(records);
       if (!sites.empty() && static_cast<std::size_t>(from - m.frames) >= sites.back().keep) {
         const auto start = sites.size() == 1 ? 0 : sites[sites.size() - 2].end;
         const auto offset = static_cast<std::size_t>(from - m.frames) - sites.back().keep;

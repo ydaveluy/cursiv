@@ -43,7 +43,7 @@ void same_reading(const Tables& tables, std::string_view text) {
   Machine reference(scalar, b.text(), writeB.stream(), kNoCancel);
   for (std::uint16_t mode = 0; mode < tables.modes.size(); ++mode) {
     if (!tables.modes[mode].read) continue;
-    const Token got = tables.modes[mode].read(generated, generated.src);
+    const Token got = tables.modes[mode].read(generated, generated.src, mode);
     const Token want = walked(reference, mode);
     const bool same = got.head == want.head && got.end - generated.src == want.end - reference.src;
     if (!same)

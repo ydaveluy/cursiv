@@ -512,17 +512,17 @@ CURSIV_ALWAYS_INLINE inline void apply(AstBuilder& b, NodeId id, const CstNode& 
 }
 
 // What the record of an element does: its actions `Is` of the rows,
-// innermost first. `Does::member` numbers the member each action writes and
-// `Does::fill<I>` fills the node action `I` builds. A node it made and no
-// member took waits for the record above.
+// innermost first, by `Does::member` and `Does::fill`. The node it holds
+// then waits for the record above: as `write` writes it, where given.
 template <class Does, std::uint16_t... Is>
-void record(AstBuilder& b, NodeId id, const CstNode& node) {
+void record(AstBuilder& b, NodeId id, const CstNode& node, DeferredWrite write) {
   AstNode* held = nullptr;
   bool written = false;
   [&]<std::size_t... Ps>(std::index_sequence<Ps...>) {
     (apply<Does, Ps, Is...>(b, id, node, held, written), ...);
   }(std::make_index_sequence<sizeof...(Is)>{});
-  if (held != nullptr && !written) b.push({id, kNoAction, detail::kNoIndex, held});
+  if (held != nullptr && (write.action != kNoAction || !written))
+    b.push({id, write.action, write.member, held});
 }
 
 template <class Rows>

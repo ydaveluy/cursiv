@@ -86,6 +86,42 @@ void Machine::grow() {
   limit = frames + room;
 }
 
+std::size_t Machine::standing(NodeCount records) const {
+  const Frame* from = top;
+  while (from != frames && from[-1].open >= records) --from;
+  if (from != frames) --from;
+  return static_cast<std::size_t>(from - frames);
+}
+
+void Machine::checkpoint(Checkpoint& made) const {
+  const std::size_t kept = std::min(standing(made.records), made.frames.size());
+  made.frames.resize(kept);
+  made.frames.insert(made.frames.end(), frames + kept, top);
+  made.pending = pending;
+  made.plan = plan;
+  made.planned = planned;
+  made.records = tape.records();
+  if (made.records != 0) made.last = tape.at(made.records - 1);
+  made.at = static_cast<TextOffset>(at - src);
+  made.tok = tok;
+  made.resume = resume;
+  made.indented = indented;
+}
+
+void Machine::rewind(const Checkpoint& to) {
+  std::ranges::copy(to.frames, frames);
+  top = frames + to.frames.size();
+  tape.truncate(to.records);
+  if (to.records != 0) tape.at(to.records - 1) = to.last;
+  pending = to.pending;
+  plan = to.plan;
+  planned = to.planned;
+  at = src + to.at;
+  tok = to.tok;
+  resume = to.resume;
+  indented = to.indented;
+}
+
 std::size_t Tables::wide_word_width(const char* p, const char* limit) const {
   std::size_t length = 0;
   const char32_t scalar = scalarAt(p, static_cast<std::size_t>(limit - p), length);
@@ -293,12 +329,22 @@ bool Machine::reads_as(Token tok, std::uint32_t mode, std::uint16_t terminal) {
   return again.end == tok.end && again.terminal() == terminal && rank(again) == rank(tok);
 }
 
+bool Machine::takes_tied(Token tok, std::uint16_t terminal) {
+  const TiedTerminal& as = t.tied[terminal];
+  if (as.solo != kNoToken) return tok.terminal() == terminal || reads_as(tok, as.solo, terminal);
+  if (!as.matched) return true;
+  bool reads = reads_tied(tok, terminal);
+  for (std::uint32_t k = as.ties; k != as.ties + 2u * as.n && !reads; k += 2)
+    reads = reads_tied(tok, t.tiedWords[k]) && tied(tok, t.tiedWords[k + 1]);
+  return reads;
+}
+
 Token Machine::read_slow(Token x, unsigned mode, bool keep, Reader lex) {
   do {
     const char* p = x.end;
     if (x.terminal() == kLexStop) {
       watch(p);
-      if (p == end) return token(static_cast<TextOffset>(p - src), p, ended);
+      if (p >= end) return token(static_cast<TextOffset>(end - src), end, ended);
     } else {
       x = walk(p, mode, 1, p);
       const auto trivia = t.terminalTrivia[x.terminal()];
@@ -306,7 +352,7 @@ Token Machine::read_slow(Token x, unsigned mode, bool keep, Reader lex) {
       if (keep && trivia == Trivia::hidden) hide(x.begin(*this), x.end, t.terminalEntry[x.terminal()]);
       p = x.end;
     }
-    x = lex(*this, p);
+    x = lex(*this, p, mode);
   } while (x.terminal() >= kLexStop);
   return x;
 }

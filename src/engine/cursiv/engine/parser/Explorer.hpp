@@ -134,6 +134,12 @@ class Cactus {
   // Whether a reading on `node` goes down through a node that stands for
   // others.
   [[nodiscard]] bool forks(std::uint32_t node);
+  // Each node `node` stands for.
+  template <class Visit>
+  void others(std::uint32_t node, Visit&& visit) const {
+    for (std::uint32_t at = _nodes[node - _base].next; at != kNoStack; at = _others[at].second)
+      visit(_others[at].first);
+  }
   // What nodes `push` made alike share, whatever their parents: the state,
   // where the text ends, and the token; and a hash of it.
   [[nodiscard]] std::tuple<std::uint32_t, TextOffset, std::uint64_t, TextOffset> key(

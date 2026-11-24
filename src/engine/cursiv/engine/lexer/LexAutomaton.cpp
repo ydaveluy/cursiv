@@ -571,7 +571,7 @@ void LexAutomatonBuilder::consider(std::size_t first, std::size_t ends, std::siz
   }
   run.nullable = std::ranges::any_of(endings, [&](const End& e) { return seen[e.first - first]; });
   if (_unboundedTest) {
-    factor(run, first);
+    factor(run);
     return;
   }
   if (!run.bytes.any()) return;
@@ -594,61 +594,20 @@ void LexAutomatonBuilder::consider(std::size_t first, std::size_t ends, std::siz
   else factor(run);
 }
 
-void LexAutomatonBuilder::factor(const Run& run, std::size_t first) {
-  const auto count = _states.size() - first;
+// The automaton reads the run's first byte and the matcher the whole body, as
+// one automaton: it weighs every end of a state, whatever its guard.
+void LexAutomatonBuilder::factor(const Run& run) {
   const auto endings = std::span(_accepts).subspan(run.ends, run.limit - run.ends);
   const auto term = endings.front().second.term;
-  std::map<LexAccept, std::vector<std::uint32_t>> groups;
-  for (auto& [q, action] : endings) {
-    action.term = 0;
-    if (first) groups[action].push_back(q - first);
-  }
-  if (groups.size() > 1) _accepts.resize(run.ends);
-  const auto original = _states[0].eps[run.root];
-  const auto dispatch = groups.size() > 1 ? state() : original;
-  const LexAccept match{term, 0, LexTest::match, static_cast<std::uint16_t>(entry(dispatch))};
+  for (auto& [q, action] : endings) action.term = 0;
+  const auto body = static_cast<std::uint16_t>(entry(_states[0].eps[run.root]));
+  const LexAccept match{term, 0, LexTest::match, body};
   const auto lead = state();
   const auto start = state();
   _states[0].eps[run.root] = start;
   edge(start, run.bytes, lead);
   _accepts.emplace_back(lead, match);
   if (run.nullable) _accepts.emplace_back(0, match);
-  if (original == dispatch) return;
-  const auto& [last, targets] = *groups.rbegin();
-  for (const auto q : targets) _accepts.emplace_back(first + q, last);
-  groups.erase(last);
-  std::vector<std::vector<std::uint32_t>> into(count);
-  for (std::uint32_t q = 0; q < count; ++q) {
-    for (const Edge& e : _states[first + q].edges) into[e.to - first].push_back(q);
-    for (const auto to : _states[first + q].eps) into[to - first].push_back(q);
-  }
-  std::vector<std::uint32_t> copy(count), ordered, work;
-  _exitAt.clear();
-  exit(dispatch, MatchAction::jump, entry(original), dispatch);
-  for (const auto& [action, targets] : groups) {
-    const auto start = state();
-    exit(dispatch, MatchAction::jump, entry(start), dispatch);
-    work = targets;
-    while (!work.empty()) {
-      const auto q = work.back();
-      work.pop_back();
-      if (copy[q]) continue;
-      copy[q] = state();
-      ordered.push_back(q);
-      work.insert(work.end(), into[q].begin(), into[q].end());
-    }
-    if (copy[original - first]) eps(start, copy[original - first]);
-    for (const auto q : ordered) {
-      for (const Edge& e : _states[first + q].edges)
-        if (copy[e.to - first]) edge(copy[q], e.on, copy[e.to - first], e.claim);
-      for (const auto to : _states[first + q].eps)
-        if (copy[to - first]) eps(copy[q], copy[to - first]);
-    }
-    for (const auto q : targets) _accepts.emplace_back(copy[q], action);
-    for (const auto q : ordered) copy[q] = 0;
-    ordered.clear();
-  }
-  _accepts.insert(_accepts.end(), _exitAt.begin(), _exitAt.end());
 }
 
 void LexAutomatonBuilder::begin_body() {

@@ -253,7 +253,7 @@ function(_cursiv_generate_language test_only)
   set(_dir ${ARG_OUT}/${_leaf})
 
   # What a generator writes.
-  set(_parserUnits Parser.cpp Explorer.cpp Repairer.cpp)
+  set(_parserUnits Parser.cpp Explorer.cpp Repairer.cpp Transitions.cpp)
   set(_headers ParserStates.hpp Table.hpp Module.hpp GrammarSource.hpp GRAMMAR.txt)
   set(_units ${_parserUnits} Ast.cpp Grammar.cpp Module.cpp)
   set(_written ${_units} ${_headers})

@@ -4,10 +4,12 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/macros.hpp"
@@ -75,6 +77,14 @@ constexpr std::uint8_t lexical_rank(Trivia trivia, bool literal) {
   return (trivia != Trivia::none ? 2 : 0) + !literal;
 }
 
+// The change a shifted terminal makes to indentation.
+enum class Nesting : std::uint8_t { none, indent, dedent, open, close };
+
+// What the text before a shifted token may read as: whatever the lexer
+// passed, nothing, or the trivia of the mode the gap names.
+inline constexpr std::uint16_t kAnyGap = 0xFFFF;
+inline constexpr std::uint16_t kNoGap = 0xFFFE;
+
 // What a production can find written when it closes its record: nothing, one
 // record it takes over, or several it closes under a new one.
 enum : unsigned { kRecordEmpty = 1, kRecordLone = 2, kRecordSeveral = 4 };
@@ -89,7 +99,57 @@ struct Prediction {
   // End of the predicted token when every other reader fails to lex one.
   TextOffset soleEnd = 0;
 };
-class Matching;
+// What predicts a cell's arm: the plan of arms it numbers; with `kPlanArm`,
+// the arm it numbers, taken with no token read; with `kPlanRoute`, the route
+// it numbers; `kNoPlan` for nothing.
+inline constexpr std::uint32_t kNoPlan = ~std::uint32_t{0};
+inline constexpr std::uint32_t kPlanArm = std::uint32_t{1} << 31;
+inline constexpr std::uint32_t kPlanRoute = kPlanArm >> 1;
+
+// The mode one arm reads in and, by terminal, whether its stack shifts it:
+// 0 it reads it not, 1 it reads it without a known shift, 2 it shifts it.
+// An arm of tied terminals names the terminal it takes the token in hand as.
+struct PrefixArm {
+  std::uint32_t mode;
+  const std::uint8_t* shifts;
+  std::uint16_t terminal = kNoToken;
+};
+
+// The states a stack ends with, top last, and the tokens read after it, each
+// in its mode.
+struct PrefixPath {
+  std::span<const std::uint32_t> stack;
+  std::span<const std::array<std::uint16_t, 2>> tokens;
+};
+
+// A plan of arms read after the stack and the text followed `path`.
+struct PrefixRoute {
+  std::uint32_t plan;
+  const PrefixPath* path;
+};
+
+// How cells are predicted by the state `depth` frames down: the plan of that
+// state among the `count` contexts from `contexts` on, else `fallback`.
+struct PrefixWay {
+  std::uint32_t depth;
+  std::uint32_t fallback;
+  std::uint32_t contexts;
+  std::uint32_t count;
+};
+
+// A language's proved prefixes: per cell from `first` on, its way plus one,
+// zero for none; per context of a way, its state, ascending, and its plan;
+// the arms of plan `k` from `planAt[k]` to `planAt[k + 1]`.
+struct PrefixTable {
+  std::uint32_t first;
+  std::span<const std::uint32_t> wayOf;
+  const PrefixWay* ways;
+  const std::uint32_t* states;
+  const std::uint32_t* plans;
+  const std::uint32_t* planAt;
+  const PrefixArm* arms;
+  const PrefixRoute* routes;
+};
 struct Explorer;
 struct Repairer;
 struct Token;
@@ -98,8 +158,8 @@ struct Token;
 // follows its continuation. A split supplies the actions to resume from.
 enum class Exit : std::uint8_t { accepted, refused, shifted, split, joined };
 
-// The token a state reads at `p`: the first past the trivia there.
-using Reader = Token (*)(Machine&, const char* p);
+// The token a state of `mode` reads at `p`: the first past the trivia there.
+using Reader = Token (*)(Machine&, const char* p, std::uint32_t mode);
 inline constexpr std::uint16_t kLexStop = 0xFFFE;
 inline constexpr std::uint16_t kLexWalk = 0xFFFF;
 
@@ -135,6 +195,169 @@ struct LexMode {
 // The end, at most `end`, of the bytes from `p` on that are flagged in `in`.
 using RunScanner = const char* (*)(const std::uint8_t* in, const char* p,
                                    const char* end);
+
+// How a thread of the matcher goes on from an exit: its operand is an entry,
+// a mark or a scanner.
+enum class MatchAction : std::uint8_t { end, call, jump, open, close, echo, ahead, unless, scan };
+
+// An exit of the matcher's automaton: its thread goes on at entry `to`, and
+// only ends with `ends`. One more than a set of `MatchTables::sets`, 0 for
+// none: `first`, the bytes it can begin with; `suffix`, a byte past a call.
+struct MatchExit {
+  MatchAction action = MatchAction::end;
+  std::uint16_t to = 0;
+  std::uint32_t arg = 0;
+  std::uint16_t first = 0;
+  std::uint16_t suffix = 0;
+  bool ends = false;
+};
+
+// An exit a matcher state takes where `guard` holds, `back` bytes before the
+// place read.
+struct MatchEnd {
+  std::uint16_t exit;
+  std::uint16_t waits;
+  std::uint8_t back;
+  LexTest guard;
+};
+
+// A matcher state: its row of `MatchTables::next`, `kNoRow` where no byte
+// leaves it, the first of its ends, and one more than its set of `runSets`.
+struct MatchState {
+  std::uint32_t row;
+  std::uint32_t ends;
+  std::uint8_t run;
+};
+inline constexpr std::uint32_t kNoRow = 0xFFFFFFFFu;
+
+// The length a scanner reads at the head of a text, 0 for none.
+using MatchScan = std::size_t (*)(std::string_view);
+
+// The matcher's automaton: state 0 is dead, and an entry names the state its
+// threads start in. A set of bytes is four words.
+struct MatchTables {
+  const std::uint8_t* byteClass = nullptr;
+  LexBlocks next;
+  const MatchState* states = nullptr;
+  const MatchEnd* ends = nullptr;
+  const MatchExit* exits = nullptr;
+  const std::uint16_t* entries = nullptr;
+  const std::uint64_t* sets = nullptr;
+  const MatchScan* scans = nullptr;
+};
+
+// What a row does with `terminal`: `step` of the language's steps, with its
+// operand. The steps that take more read it at the cell's place in the
+// language's `operands`.
+struct ActionCell {
+  std::uint32_t value = 0;
+  std::uint16_t terminal = kNoToken;
+  std::uint16_t step = 0;
+};
+
+// The cells of a language, a word each: `value`, then `terminal`, then `step`
+// from the low bits up.
+struct ActionCells {
+  const std::uint64_t* words;
+  constexpr ActionCell operator[](std::size_t at) const {
+    const std::uint64_t word = words[at];
+    return {
+        static_cast<std::uint32_t>(word),
+        static_cast<std::uint16_t>(word >> 32),
+        static_cast<std::uint16_t>(word >> 48),
+    };
+  }
+};
+
+// A language's first steps ask of the token in hand before cell `value`
+// acts: this many of them.
+inline constexpr std::uint16_t kAsks = 3;
+
+// A row of the comb of cells: the cell of terminal `t` is `base + t` where
+// that cell names `t`, else `otherwise`. The rows of the states come first,
+// each by its state's number.
+struct ActionRow {
+  std::uint32_t base;
+  std::uint32_t otherwise;
+};
+
+// Where a nonterminal reduced over a state leads: the state, the step that
+// enters it with no token, and which of the nonterminal's call sites it is;
+// `kRereads` where the state reads a token in hand again.
+struct GotoCell {
+  std::uint32_t target;
+  std::uint16_t enter;
+  std::uint16_t site;
+  static constexpr std::uint16_t kRereads = 0x8000;
+};
+
+// The gotos of a language, a word each: `target`, then `enter`, then `site`
+// from the low bits up.
+struct GotoCells {
+  const std::uint64_t* words;
+  constexpr GotoCell operator[](std::size_t at) const {
+    const std::uint64_t word = words[at];
+    return {
+        static_cast<std::uint32_t>(word),
+        static_cast<std::uint16_t>(word >> 32),
+        static_cast<std::uint16_t>(word >> 48),
+    };
+  }
+};
+
+// A reduction over a machine that steps: `production` of `size` symbols to
+// `lhs`, its records from `records`, one a call site with `bySite`. With one
+// site, its goto `to`; `next` is the cell a held token takes if that reduces.
+struct alignas(32) Reduction {
+  std::uint32_t production;
+  std::uint32_t lhs;
+  std::uint32_t records;
+  std::uint32_t next;
+  GotoCell to;
+  std::uint32_t size;
+  std::uint8_t shapes;
+  bool bySite;
+};
+
+// The forms a reduction's step is written for: the production reads
+// nothing; every call site leads to one state; that state only reduces; a
+// token the production's tests name goes back to the text.
+enum : unsigned { kReadsNothing = 1, kOneSite = 2, kThenReduces = 4, kGivesBack = 8 };
+
+// Whether the token in hand is one several terminals read: then the run
+// stops on the `count` arms from `first` on. By `kind`, tie row `test`, the
+// `n` terminals of `tiedWords` from `test` on, or the matcher's rank `test`.
+struct TieCheck {
+  enum Kind : std::uint16_t { row, alike, grouped, ranked };
+  std::uint32_t first;
+  std::uint16_t count;
+  std::uint16_t rereads;
+  std::uint32_t test;
+  Kind kind;
+  std::uint16_t n;
+};
+
+// How an arm of tied terminals reads the token as a terminal: in its own
+// mode `solo` if any; else, with `matched`, as the matcher read it or as one
+// of its `n` ties of `tiedWords` from `ties` on: a first terminal and a row.
+struct TiedTerminal {
+  std::uint16_t solo;
+  bool matched;
+  bool mixed;
+  std::uint16_t n;
+  std::uint32_t ties;
+};
+
+// A state whose tested reductions may refuse the token in hand: the text is
+// then read again in `mode` and dispatched in `row`, where the token is one
+// of the `n` terminals of `tiedWords` from `tested` on.
+struct ReadAgain {
+  std::uint32_t state;
+  std::uint32_t row;
+  std::uint32_t tested;
+  std::uint16_t n;
+  std::uint16_t mode;
+};
 
 struct Tables {
   // The language's code: its states, which read a text, and the scanner of
@@ -243,9 +466,8 @@ struct Tables {
   const TextMonitor* monitors = nullptr;
   const std::uint32_t* waitAt = nullptr;
   const std::uint32_t* waitWord = nullptr;
-  // The matcher's automaton, read from an entry: null where no terminal
-  // needs it.
-  void (*match)(Machine&, Matching&) = nullptr;
+  // The matcher's automaton: null where no terminal needs it.
+  const MatchTables* match = nullptr;
   // Per tie of terminals that read one text where a state expects them, a
   // bit a set of terminals ending together that such a text leads to: a row
   // is `tieWords` words.
@@ -292,6 +514,10 @@ struct Tables {
   Prediction (*predict)(Machine&) = nullptr;
   // Per DFA accept set, the terminals sharing that end. Null when no end is shared.
   const std::uint16_t* lexTieEnds = nullptr;
+  // Per terminal, how an arm of tied terminals reads the token as it; the
+  // lists of terminals that ties and reads again name.
+  const TiedTerminal* tied = nullptr;
+  const std::uint16_t* tiedWords = nullptr;
 
   // The words of set `set` of `terminalSets`, and whether it holds `terminal`.
   [[nodiscard]] const std::uint64_t* setOf(std::uint32_t set) const {

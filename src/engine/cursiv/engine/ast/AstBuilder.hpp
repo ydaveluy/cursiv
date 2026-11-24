@@ -34,8 +34,17 @@ struct Pending {
   AstNode* node;
 };
 
-// What a record does to the tree.
-using AstRecord = void (*)(AstBuilder&, NodeId, const CstNode&);
+// A write: its action, and the number of the member it writes.
+struct DeferredWrite {
+  std::uint16_t action = kNoAction;
+  std::uint16_t member = detail::kNoIndex;
+};
+// What a record does to the tree: `run`, then `write` of the node the record
+// holds where `write` names an action.
+struct AstRecord {
+  void (*run)(AstBuilder&, NodeId, const CstNode&, DeferredWrite write) = nullptr;
+  DeferredWrite write;
+};
 // Writes the waiting values from the one given up into a node and drops
 // them.
 using AstFill = void (*)(AstBuilder&, AstNode* owner, Pending* first);
@@ -66,11 +75,6 @@ using AstWrite = bool (*)(AstBuilder&, AstNode* owner, const Pending&);
 inline constexpr std::uint32_t kCaretRule = 0x80000000u;
 inline constexpr std::uint32_t kCaretNode = 0x40000000u;
 inline constexpr std::uint32_t kCaretTurn = 0xC0000000u;
-
-struct DeferredWrite {
-  std::uint16_t action;
-  std::uint16_t member;
-};
 
 // Each conversion block is stored once, including the all-empty block.
 template <class T> struct AstSlots {
