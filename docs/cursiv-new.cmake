@@ -1414,6 +1414,28 @@ _cursiv_new_emit([==[CMakePresets.json]==] [==[{
       }
     },
     {
+      "name": "gcc-asan",
+      "inherits": "gcc-debug",
+      "binaryDir": "${sourceDir}/build-asan",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-sanitize=null -fno-sanitize-recover=all -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
+        "CMAKE_CXX_FLAGS_DEBUG": "-O1 -g1",
+        "CURSIV_WARNINGS_AS_ERRORS": "OFF"
+      }
+    },
+    {
+      "name": "gcc-tsan",
+      "inherits": "gcc-debug",
+      "binaryDir": "${sourceDir}/build-tsan",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+        "CMAKE_CXX_FLAGS_DEBUG": "-O1 -g1",
+        "CURSIV_WARNINGS_AS_ERRORS": "OFF"
+      }
+    },
+    {
       "name": "wasi-release",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-wasi",
@@ -1437,6 +1459,8 @@ _cursiv_new_emit([==[CMakePresets.json]==] [==[{
     {"name": "gcc-debug", "configurePreset": "gcc-debug"},
     {"name": "clang-release", "configurePreset": "clang-release"},
     {"name": "clang-debug", "configurePreset": "clang-debug"},
+    {"name": "gcc-asan", "configurePreset": "gcc-asan"},
+    {"name": "gcc-tsan", "configurePreset": "gcc-tsan"},
     {"name": "wasi-release", "configurePreset": "wasi-release"},
     {"name": "wasi-debug", "configurePreset": "wasi-debug"}
   ],
@@ -1445,6 +1469,16 @@ _cursiv_new_emit([==[CMakePresets.json]==] [==[{
     {"name": "gcc-debug", "configurePreset": "gcc-debug"},
     {"name": "clang-release", "configurePreset": "clang-release"},
     {"name": "clang-debug", "configurePreset": "clang-debug"},
+    {
+      "name": "gcc-asan",
+      "configurePreset": "gcc-asan",
+      "environment": {"UBSAN_OPTIONS": "print_stacktrace=1"}
+    },
+    {
+      "name": "gcc-tsan",
+      "configurePreset": "gcc-tsan",
+      "environment": {"TSAN_OPTIONS": "halt_on_error=1:second_deadlock_stack=1"}
+    },
     {"name": "wasi-release", "configurePreset": "wasi-release"},
     {"name": "wasi-debug", "configurePreset": "wasi-debug"}
   ]

@@ -1,3 +1,4 @@
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -30,8 +31,9 @@ namespace {
 struct CountingParser final : cursiv::Parser {
   std::unique_ptr<cursiv::Parser> parser =
       ws::generated::Workspace::createParser();
-  mutable int calls = 0;
-  mutable int grammarQueries = 0;
+  // Counted on the workspace's worker threads as well.
+  mutable std::atomic<int> calls = 0;
+  mutable std::atomic<int> grammarQueries = 0;
   // Off, a parse keeps its tree and drops its AST, as a failed AST
   // construction does.
   bool keepsAst = true;

@@ -28,7 +28,9 @@ ctest --preset gcc-release --output-on-failure --parallel 4
 ```
 
 The build fetches its dependencies. Use `gcc-debug`, `clang-release` or
-`clang-debug` for another configuration. Clang presets use `clang++`; pass
+`clang-debug` for another configuration, and `gcc-asan` or `gcc-tsan` to run
+the tests under the address and undefined-behaviour sanitizers or the thread
+sanitizer. Clang presets use `clang++`; pass
 `-DCMAKE_CXX_COMPILER=clang++-22` when your installation uses that name.
 
 On Windows, run the `gcc-*` presets in an MSYS2 UCRT64 shell. On macOS, run the

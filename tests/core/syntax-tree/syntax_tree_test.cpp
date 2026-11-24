@@ -2997,10 +2997,12 @@ void reservation_follows_record_density() {
 // move.
 void a_watched_run_answers_a_stop_within_a_run_of_records() {
   constexpr cursiv::NodeCount kRun = 64 * 1024;
+  // The arena owns the records, as a tree's does.
+  std::pmr::monotonic_buffer_resource arena;
   cursiv::CancellationTokenSource source;
   const cursiv::CancellationToken token = source.get_token();
   cursiv::CstRun run;
-  run.bind(std::pmr::new_delete_resource());
+  run.bind(&arena);
   run.reserveRecords(std::size_t{4} * kRun);
   cursiv::NodeCount written = 0;
   bool threw = false;
@@ -3021,7 +3023,7 @@ void a_watched_run_answers_a_stop_within_a_run_of_records() {
   CHECK(run.records() == written + 4 * kRun);
 
   cursiv::CstRun watched;
-  watched.bind(std::pmr::new_delete_resource());
+  watched.bind(&arena);
   cursiv::CstRun::Watch watch(watched, token);
   cursiv::CstRun moved(std::move(watched));
   for (cursiv::NodeCount i = 0; i < 4 * kRun; ++i) moved.leaf(i, i + 1, 0);

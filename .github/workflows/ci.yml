@@ -102,6 +102,47 @@ jobs:
         if: always()
         run: ccache --show-stats
 
+  # The whole suite under the address and undefined-behaviour sanitizers, then
+  # the thread sanitizer. Their presets leave out the null check, which GCC
+  # miscompiles on thread-locals, and errors on warnings, which GCC raises falsely.
+  sanitizers:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
+    container: gcc:16
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_MAXSIZE: 1G
+      CCACHE_COMPILERCHECK: content
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [gcc-asan, gcc-tsan]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: tools
+        run: apt-get update && apt-get install -y --no-install-recommends ccache cmake git ninja-build
+      - name: cache compilation
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-v1-ubuntu26-gcc16-${{ matrix.preset }}-${{ github.sha }}
+          restore-keys: ccache-v1-ubuntu26-gcc16-${{ matrix.preset }}-
+      - name: configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: build
+        run: |
+          sed -n '1,5p' /proc/meminfo
+          df -h .
+          ccache --zero-stats
+          cmake --build --preset ${{ matrix.preset }}
+      - name: test
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+      - name: compilation cache statistics
+        if: always()
+        run: ccache --show-stats
+
   # One module runs on every host, but the runner maps its files differently on
   # each: a whole session on the module the Linux job built, whose workspace scan
   # reads the disk through file URIs.
