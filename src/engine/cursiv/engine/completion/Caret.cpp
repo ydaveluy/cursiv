@@ -110,10 +110,15 @@ class Stand : private Machine::CaretTests {
     std::unordered_set<Root, Root::Hash> known;
     std::map<std::tuple<std::uint32_t, TextOffset, std::uint32_t, std::uint32_t, std::uint16_t>, std::uint32_t> readers;
     Explorer::Closure closure{&chain};
+    // Readings that meet read on alike: the first one goes on.
+    std::set<std::tuple<SplitSite, std::uint32_t, std::uint32_t>> met;
     while (paths.pending()) {
       throwIfCancelled(_stop);
-      auto o = std::move(open.back());
+      auto o = open.back();
       open.pop_back();
+      if (paths.active.empty() &&
+          !met.emplace(o.reading.site(o.reading.resume), o.context.held, o.context.tests).second)
+        continue;
       const auto state = _stacks.state(o.reading.node);
       const std::uint16_t mode = t.stateMode[state];
       chain = o.context.tests;
@@ -412,11 +417,14 @@ class Stand : private Machine::CaretTests {
     std::size_t length;
     std::uint8_t rank;
   };
-  // A mode at the caret, the terminals it acts on and its reading before the edit.
+  // The trivia that covers the byte before the caret: where it begins and
+  // ends, a null end for none.
   struct TriviaSpan {
     TextOffset begin = 0;
     const char* end = nullptr;
   };
+  // A mode at the caret: the terminals it acts on, what it reads of the text
+  // replaced, the trivia before the caret and whether the caret is inside it.
   struct Mode {
     std::uint16_t mode;
     std::vector<std::uint64_t> takes;

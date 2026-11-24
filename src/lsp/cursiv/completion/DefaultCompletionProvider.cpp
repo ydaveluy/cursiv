@@ -16,7 +16,6 @@
 
 #include "cursiv/completion/FuzzyMatcher.hpp"
 #include "cursiv/documentation/DocumentationProvider.hpp"
-#include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/text/unicode/UnicodeRanges.hpp"
@@ -299,32 +298,28 @@ bool DefaultCompletionProvider::continueCompletion(
 
 std::vector<lsp::CompletionItem> DefaultCompletionProvider::deduplicateItems(
     std::vector<lsp::CompletionItem> items) const {
-  {
-    std::unordered_set<ItemKey, ItemKeyHash> seen;
-    seen.reserve(items.size());
-    std::vector<bool> doubled(items.size());
-    bool any = false;
-    for (std::size_t i = 0; i < items.size(); ++i) {
-      const lsp::CompletionItem& item = items[i];
-      const std::string_view detail =
-          item.detail.has_value() ? std::string_view(*item.detail)
-                                  : std::string_view{};
-      const unsigned kind = item.kind.has_value()
-                                ? static_cast<unsigned>(*item.kind)
-                                : ~0u;
-      doubled[i] = !seen.emplace(kind, item.label, detail).second;
-      any = any || doubled[i];
-    }
-    if (!any) return items;
-    std::size_t kept = 0;
-    for (std::size_t i = 0; i < items.size(); ++i)
-      if (!doubled[i]) {
-        if (kept != i) items[kept] = std::move(items[i]);
-        ++kept;
-      }
-    items.resize(kept);
+  std::unordered_set<ItemKey, ItemKeyHash> seen;
+  seen.reserve(items.size());
+  std::vector<bool> doubled(items.size());
+  std::size_t doubles = 0;
+  for (std::size_t i = 0; i < items.size(); ++i) {
+    const lsp::CompletionItem& item = items[i];
+    const std::string_view detail =
+        item.detail.has_value() ? std::string_view(*item.detail)
+                                : std::string_view{};
+    const unsigned kind = item.kind.has_value()
+                              ? static_cast<unsigned>(*item.kind)
+                              : ~0u;
+    doubled[i] = !seen.emplace(kind, item.label, detail).second;
+    if (doubled[i]) ++doubles;
   }
-  return items;
+  if (doubles == 0) return items;
+  // The keys read the items' strings: the items move once all are told.
+  std::vector<lsp::CompletionItem> kept;
+  kept.reserve(items.size() - doubles);
+  for (std::size_t i = 0; i < items.size(); ++i)
+    if (!doubled[i]) kept.push_back(std::move(items[i]));
+  return kept;
 }
 
 void DefaultCompletionProvider::completionFor(const CompletionContext& context,
