@@ -2629,6 +2629,8 @@ void words_with_a_text_per_use(const cursiv::Parser& parser) {
   is("other enable high low named", "enable", "Allows this declaration.", "an exact use beside a folded terminal");
   is("other HiGh low named", "HiGh", "Tall.", "the same spelling keeps the other rule's meaning");
   is("other opt rep high low named", "named", "Called.", "another member use");
+  is("ahead rep rep a", "rep", "Ahead.", "a use a condition reads first");
+  is("ahead rep rep a", "rep", "Ahead.", "its next turn, which the condition read too", 1);
   is("state x", "state", "", "a word with one text is left to its spelling");
   const cursiv::Grammar& g = parser.getGrammar();
   expect(g.spellingDoc("enable").empty(), "the exact spelling matches both documented meanings");

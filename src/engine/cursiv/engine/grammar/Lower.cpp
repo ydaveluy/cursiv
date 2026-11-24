@@ -8,7 +8,6 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 #include "cursiv/grammar/expr.hpp"
@@ -86,6 +85,7 @@ class Lowering {
     return std::move(_cfg);
   }
 
+ private:
   // A token that opens operators of several levels of an infix rule is read
   // as a copy of its own per level, spelled the same: the token after it
   // tells which reads on. A production several levels reach keeps its token.
@@ -131,7 +131,6 @@ class Lowering {
     }
   }
 
- private:
   std::uint16_t add_terminal(Terminal terminal) {
     const auto id = _cfg.terminals.size();
     if (id + 1 >= kWinNone) throw Refused("the grammar has too many terminals");
@@ -565,7 +564,7 @@ class Lowering {
             co_return;
           }
         }
-        const auto [nt, made] = auxiliary(scope().nodes, id);
+        const auto [nt, made] = auxiliary(nodes(), id);
         if (made) {
           if (n.kind == ImageKind::embed) _sections.push_back(nt);
           Alternative scoped;
@@ -593,7 +592,7 @@ class Lowering {
         }
         // A condition reads nothing: a nonterminal of its own is whole only
         // where the token that comes is, or is not, one the condition names.
-        const auto [nt, made] = auxiliary(scope().nodes, id);
+        const auto [nt, made] = auxiliary(nodes(), id);
         put(out, nonterminal(nt));
         if (!made) co_return;
         Test test = co_await condition(n);
@@ -604,7 +603,7 @@ class Lowering {
       case ImageKind::implied: {
         // The token where it is written; where it is not, nothing, if what
         // its condition asks holds and the state can do nothing else.
-        const auto [nt, made] = auxiliary(scope().nodes, id);
+        const auto [nt, made] = auxiliary(nodes(), id);
         put(out, nonterminal(nt));
         if (!made) co_return;
         Alternative read;
@@ -654,7 +653,7 @@ class Lowering {
           out = {nonterminal(nt)};
           co_return;
         }
-        const auto [nt, made] = auxiliary(scope().nodes, id);
+        const auto [nt, made] = auxiliary(nodes(), id);
         if (made) co_await alternatives(id, nt, kNone);
         put(out, nonterminal(nt));
         co_return;
@@ -683,7 +682,7 @@ class Lowering {
         const auto docs = terminal.folded ? group->second.all
             : GrammarWord::shared_doc(_exactDocs[terminal.text], group->second.folded);
         if (!docs.empty()) co_return;
-        const auto [nt, made] = auxiliary(scope().nodes, id);
+        const auto [nt, made] = auxiliary(nodes(), id);
         if (made) produce(nt, {out.back()}, marked(WriteKind::doc, n.text));
         out.symbols.back() = nonterminal(nt);
         co_return;
@@ -854,7 +853,7 @@ class Lowering {
   // its own is whole only where that text is, or with `unless` is not, what
   // `tested` says. `id` is the node the nonterminal is kept for.
   void gap_test(ImageId id, ImageId tested, bool unless, Alternative& out) {
-    const auto [nt, made] = auxiliary(scope().nodes, id);
+    const auto [nt, made] = auxiliary(nodes(), id);
     put(out, nonterminal(nt));
     if (!made) return;
     produce(nt, {});
@@ -886,8 +885,7 @@ class Lowering {
     const auto opening = out.opening;
     const auto start = _cfg.nonterminals;
     if (!prefix) {
-      auto& nodes = _conditional ? scope().conditionalGroups : scope().nodes;
-      const auto [nt, made] = auxiliary(nodes, id);
+      const auto [nt, made] = auxiliary(nodes(), id);
       put(out, nonterminal(nt));
       if (!made) co_return;
       _cfg.nonterminals += all - 1;
@@ -1068,7 +1066,7 @@ class Lowering {
   // A directive stands over what it wraps: a nonterminal of its own reads
   // that, and its record applies the directive.
   Descent<void> over(ImageId id, ImageId payload, std::uint32_t entry, Alternative& out) {
-    const auto [nt, made] = auxiliary(scope().nodes, id);
+    const auto [nt, made] = auxiliary(nodes(), id);
     if (made) co_await alternatives(payload, nt, entry);
     put(out, nonterminal(nt));
   }
@@ -1078,7 +1076,7 @@ class Lowering {
     for (std::uint64_t i = 0; i < n.m; ++i) co_await emit(item, out);
     if (n.n == kUnboundedCount) {
       // Left recursion: each turn is reduced as it ends.
-      const auto [nt, made] = auxiliary(scope().nodes, id);
+      const auto [nt, made] = auxiliary(nodes(), id);
       if (made) {
         produce(nt, {});
         Alternative turn{nonterminal(nt)};
@@ -1090,7 +1088,7 @@ class Lowering {
     }
     if (n.n <= n.m) co_return;
     // `x` up to k times is `option(x + (x up to k - 1 times))`.
-    const auto [outer, made] = auxiliary(scope().nodes, id);
+    const auto [outer, made] = auxiliary(nodes(), id);
     put(out, nonterminal(outer));
     if (!made) co_return;
     std::uint32_t at = outer;
@@ -1126,12 +1124,14 @@ class Lowering {
   std::unordered_map<std::string_view, Texts, decltype(&foldedHash), decltype(&foldedEqual)>
       _texts{0, foldedHash, foldedEqual};
   std::unordered_map<std::string_view, std::string_view> _exactDocs;
-  // Per scope, the symbols of its rules and expressions. Terminals are kept
-  // in scope 0 alone.
+  // Per scope, the symbols of its rules and expressions, those a condition
+  // writes kept apart: it names tokens its own way and writes no record.
+  // Terminals are kept in scope 0 alone.
   struct Scope {
-    std::vector<Symbol> rules, nodes, conditionalGroups;
+    std::vector<Symbol> rules, nodes, conditional;
   };
   Scope& scope() { return _scopes[_region]; }
+  std::vector<Symbol>& nodes() { return _conditional ? scope().conditional : scope().nodes; }
   // The scope of the given lists of trivia rules, made where it is new: in
   // the text of the scope under way, or of a section of `grammar` that ends
   // at `end`.

@@ -112,6 +112,12 @@ struct G : cursiv::GrammarSpec {
                                     assign<&Word::name>(
                                         kw<"named">.doc<"Called.">()))> {};
 
+  // A repeated use that a condition reads before the rule does.
+  struct Ahead
+      : rule<create<Word>(kw<"ahead"> +
+                          option(&(some(kw<"rep">.doc<"Ahead.">()) + lit<"!">) + lit<"?">) +
+                          some(kw<"rep">.doc<"Ahead.">()) + assign<&Word::name>(ref<ID>))> {};
+
   struct ChildR : rule<kw<"child"> + assign<&Child::name>(ref<ID>)> {};
   struct Reflected
       : rule<create<Derived> + assign<&Base::head>(ref<ChildR>) +
@@ -147,7 +153,7 @@ struct G : cursiv::GrammarSpec {
   struct Root
       : rule<ref<Documented> | ref<Reflected> | ref<Quoted> | ref<Owner> |
              ref<Converted> | ref<Declared> | ref<TwinA> | ref<TwinB> |
-             ref<Twice> | ref<Uses> | ref<Others> | ref<Toned>> {};
+             ref<Twice> | ref<Uses> | ref<Others> | ref<Toned> | ref<Ahead>> {};
   using entry = Root;
   using ignored = WS;
   using hidden = list<NOTE>;
