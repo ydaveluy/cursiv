@@ -140,6 +140,9 @@ struct Production {
   // An unordered item built over the prefix to its left is elected from
   // that prefix onwards, like a turn of a left recursion.
   bool prefixTurn = false;
+  // Per symbol, the entry its one record takes over, none where the record
+  // keeps its own: empty where no symbol's does.
+  std::vector<std::uint32_t> takes;
 };
 
 // A trivia scope: the terminals dropped between the tokens read in it, and
@@ -164,19 +167,17 @@ inline constexpr std::size_t kProductionLimit = std::size_t{1} << 12;
 // An action's number is 16 bits.
 inline constexpr std::size_t kActionLimit = std::size_t{1} << 16;
 
-// The operands of an infix rule. An operand that is whole when an operator
+// The levels of an infix rule. An operand that is whole when an operator
 // comes is the left one of that operator or the right one of the operator
-// before it: one production says each, and the levels say which holds.
+// before it: the levels say which holds.
 struct Infix {
   struct Level {
     Association group = Association::Left;
-    // The production that takes an operand as the right one of this level,
-    // and the nonterminal of the level's operators.
-    std::uint32_t right = 0;
+    // The production that builds a node of this level, and the nonterminal
+    // of the level's operators.
+    std::uint32_t node = 0;
     std::uint32_t operators = 0;
   };
-  // The production that takes an operand as a left one.
-  std::uint32_t left = 0;
   // The tightest first.
   std::vector<Level> levels;
 };

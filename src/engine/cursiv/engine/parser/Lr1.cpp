@@ -842,58 +842,47 @@ LrState facts(const Items& it, Closure& closure, std::span<const Position> kerne
   return state;
 }
 
-// Settles which operator an operand belongs to. Where an operand is whole
-// and an operator comes, a state reduces it as the right operand of the
-// operator before, of level `l`, or as the left operand of the one coming,
-// of level `m`: the tighter level takes it, and at one level its grouping
-// says which, or that the two do not chain.
+// Settles which operator an operand belongs to. Where a node of level `l`
+// is whole and an operator of level `m` comes, the tighter level takes the
+// operand between them; at one level its grouping tells, or forbids both.
 void settle_infix(const Items& it, std::vector<LrState>& states) {
   const Cfg& cfg = it.cfg;
   if (cfg.infixes.empty()) return;
-  constexpr std::uint32_t kLeftOperand = kNone - 1;
-  // Per production: its table and the level it is the right operand of.
-  std::vector<std::pair<std::uint32_t, std::uint32_t>> operand(cfg.productions.size(),
-                                                              {kNone, kNone});
+  // Per production that builds a node: its table and its level.
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> node(cfg.productions.size(), {kNone, kNone});
   // Per table, the terminals that begin operators, each with the level of
   // those operators; ascending.
   std::vector<std::vector<std::pair<std::uint16_t, std::uint32_t>>> opens(cfg.infixes.size());
   for (std::uint32_t x = 0; x < cfg.infixes.size(); ++x) {
     const Infix& table = cfg.infixes[x];
-    operand[table.left] = {x, kLeftOperand};
     for (std::uint32_t l = 0; l < table.levels.size(); ++l) {
-      operand[table.levels[l].right] = {x, l};
+      node[table.levels[l].node] = {x, l};
       it.first[table.levels[l].operators].each(
           [&](std::size_t t) { opens[x].emplace_back(static_cast<std::uint16_t>(t), l); });
     }
     std::ranges::sort(opens[x]);
   }
-  Bits both(it.nterms);
   for (LrState& state : states) {
-    for (auto& [leftProd, leftOn] : state.reduces) {
-      const auto [x, role] = operand[leftProd];
-      if (x == kNone || role != kLeftOperand) continue;
-      for (auto& [rightProd, rightOn] : state.reduces) {
-        const auto [y, l] = operand[rightProd];
-        if (y != x || l == kLeftOperand) continue;
-        both = leftOn;
-        both &= rightOn;
-        // Where the token begins operators of several levels, a reading
-        // stays where one of them lets it.
-        both.each([&](std::size_t t) {
-          const auto [from, to] = std::ranges::equal_range(
-              opens[x], static_cast<std::uint16_t>(t), {}, [](const auto& o) { return o.first; });
-          if (from == to) return;
-          const Association group = cfg.infixes[x].levels[l].group;
-          bool before = false, coming = false;
-          for (auto o = from; o != to; ++o) {
-            const std::uint32_t m = o->second;
-            before = before || l < m || (l == m && group == Association::Left);
-            coming = coming || m < l || (l == m && group == Association::Right);
-          }
-          if (!before) rightOn.reset(t);
-          if (!coming) leftOn.reset(t);
-        });
-      }
+    for (auto& [prod, on] : state.reduces) {
+      const auto [x, l] = node[prod];
+      if (x == kNone) continue;
+      const Association group = cfg.infixes[x].levels[l].group;
+      // Where the token begins operators of several levels, a reading
+      // stays where one of them lets it.
+      std::erase_if(state.shifts, [&](const auto& shift) {
+        const std::uint16_t t = shift.first;
+        const auto [from, to] =
+            std::ranges::equal_range(opens[x], t, {}, [](const auto& o) { return o.first; });
+        if (from == to || !on.test(t)) return false;
+        bool before = false, coming = false;
+        for (auto o = from; o != to; ++o) {
+          const std::uint32_t m = o->second;
+          before = before || l < m || (l == m && group == Association::Left);
+          coming = coming || m < l || (l == m && group == Association::Right);
+        }
+        if (!before) on.reset(t);
+        return !coming;
+      });
     }
   }
 }
@@ -1026,14 +1015,11 @@ void split_leads(Cfg& cfg) {
   const std::vector<std::vector<std::uint32_t>> of = cfg.productionsOf;
   // The productions an infix table names stay as they are.
   std::vector<bool> fixed(cfg.nonterminals, false);
-  for (const Infix& table : cfg.infixes) {
-    fixed[original[table.left].lhs] = true;
-    fixed[index_of(original[table.left].rhs[0])] = true;
+  for (const Infix& table : cfg.infixes)
     for (const Infix::Level& level : table.levels) {
-      fixed[original[level.right].lhs] = true;
+      fixed[original[level.node].lhs] = true;
       fixed[level.operators] = true;
     }
-  }
   const auto nullable = [&](Symbol s) { return !is_terminal(s) && it.nullable[index_of(s)]; };
   // Per nonterminal, its copy that reads nothing and its copy that reads
   // something, made where asked.

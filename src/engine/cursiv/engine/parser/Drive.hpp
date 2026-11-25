@@ -1,11 +1,12 @@
 // The steps of a language's states over its tables. What a state does with
 // a token is a cell of its row, and where a reduction leads a cell of its
-// gotos; the lexers, the reductions and the tests are the language's own code.
+// gotos; the lexers and the tests are the language's own code.
 #pragma once
 
 #include <algorithm>
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 #include "cursiv/engine/parser/Explorer.hpp"
 #include "cursiv/engine/parser/Machine.hpp"
@@ -27,18 +28,28 @@ template <class M>
 using State = CURSIV_PRESERVE_NONE Exit(M&, const char* p, NodeCount at, const char* tokenEnd,
                                         std::uint64_t tokenHead);
 
-// What a lone child's element becomes under the record closed around it.
-using Fuse = std::uint32_t (*)(std::uint32_t);
-
 // The steps over the tables of language `L`. Its first `kAsks` steps, in
 // order, are `newline`, `dedent_at_end` and `tie`.
 template <class L>
 struct Drive {
-  // The cell row `row` acts on `terminal` with.
+  // The cell row `row` acts on `terminal` with; `act` gives its step too. The
+  // rows lie over a comb: the cell after the terminal's place from the row's
+  // base where that cell names the terminal, else the one at the base.
+  struct Act {
+    std::uint32_t at;
+    std::uint16_t step;
+  };
+  CURSIV_ALWAYS_INLINE static Act act_at(std::uint32_t base, std::uint16_t terminal) {
+    const std::uint32_t at = base + 1 + terminal;
+    const ActionCell named = L::cells[at];
+    if (named.terminal == terminal) [[likely]] return {at, named.step};
+    return {base, L::cells[base].step};
+  }
+  CURSIV_ALWAYS_INLINE static Act act(std::uint32_t row, std::uint16_t terminal) {
+    return act_at(L::rows[row], terminal);
+  }
   CURSIV_ALWAYS_INLINE static std::uint32_t cell(std::uint32_t row, std::uint16_t terminal) {
-    const ActionRow& r = L::rows[row];
-    const std::uint32_t at = r.base + terminal;
-    return L::cells[at].terminal == terminal ? at : r.otherwise;
+    return act(row, terminal).at;
   }
   // The operands of a cell past its `value`: its element or count, then its
   // gap or what it reads again; or both as one.
@@ -80,13 +91,14 @@ struct Drive {
   }
 
   // The state on top entered with no token: it acts on the token its mode
-  // reads, or on a line's indentation before the line's first token.
-  template <class M>
+  // reads, or on a line's indentation before its first token. Written for a
+  // `Mode`, the `Base` of a state's row and the `Cells` of a row of few.
+  template <class M, std::uint32_t Mode = kNoStack, std::uint32_t Base = kNoStack,
+            std::uint32_t... Cells>
   CURSIV_PRESERVE_NONE static Exit read(M& m, const char* p, NodeCount, const char* tokenEnd,
                                         std::uint64_t tokenHead) {
     // The token is read into the registers it is handed on in.
     Token tok{tokenEnd, tokenHead};
-    const std::uint32_t state = m.under();
     bool indented = false;
     if constexpr (L::indents) {
       if (m.indented.depth == 0 && m.lexing().line_start(p)) [[unlikely]] {
@@ -95,27 +107,50 @@ struct Drive {
         if (indented) tok = made;
       }
     }
-    if (!indented) tok = lexed(m, p, m.lexing().t.stateMode[state]);
-    const std::uint32_t at = cell(state, tok.terminal());
-    CURSIV_MUSTTAIL return L::template steps<M>[L::cells[at].step](m, p, at, tok.end, tok.head);
+    if (!indented)
+      tok = lexed(m, p, Mode == kNoStack ? m.lexing().t.stateMode[m.under()]
+                                          : static_cast<std::uint16_t>(Mode));
+    if constexpr (sizeof...(Cells) != 0) {
+      CURSIV_MUSTTAIL return among<M, Base, Cells...>(m, p, 0, tok.end, tok.head);
+    } else {
+      const Act next =
+          Base == kNoStack ? act(m.under(), tok.terminal()) : act_at(Base, tok.terminal());
+      CURSIV_MUSTTAIL return L::template steps<M>[next.step](m, p, next.at, tok.end, tok.head);
+    }
+  }
+
+  // The row at `Base` acts on the token in hand: by the cell of its terminal
+  // among `Cells`, each a terminal then its step, else by `Otherwise`.
+  template <class M, std::uint32_t Base, std::uint32_t Otherwise,
+            std::uint32_t Terminal = kNoToken, std::uint32_t Step = 0, std::uint32_t... Cells>
+  CURSIV_PRESERVE_NONE static Exit among(M& m, const char* p, NodeCount, const char* tokenEnd,
+                                         std::uint64_t tokenHead) {
+    if constexpr (Terminal == kNoToken) {
+      CURSIV_MUSTTAIL return L::template steps<M>[Otherwise](m, p, Base, tokenEnd, tokenHead);
+    } else {
+      if (Token{tokenEnd, tokenHead}.terminal() == Terminal)
+        CURSIV_MUSTTAIL return L::template steps<M>[Step](m, p, Base + 1 + Terminal, tokenEnd,
+                                                          tokenHead);
+      CURSIV_MUSTTAIL return among<M, Base, Otherwise, Cells...>(m, p, 0, tokenEnd, tokenHead);
+    }
   }
 
   // State `state` acts on the token in hand.
   template <class M>
   CURSIV_PRESERVE_NONE static Exit held(M& m, const char* p, NodeCount state,
                                         const char* tokenEnd, std::uint64_t tokenHead) {
-    const std::uint32_t at = cell(state, Token{tokenEnd, tokenHead}.terminal());
-    CURSIV_MUSTTAIL return L::template steps<M>[L::cells[at].step](m, p, at, tokenEnd, tokenHead);
+    const Act next = act(state, Token{tokenEnd, tokenHead}.terminal());
+    CURSIV_MUSTTAIL return L::template steps<M>[next.step](m, p, next.at, tokenEnd, tokenHead);
   }
 
   // The token in hand shifted as the cell's element into the cell's state,
-  // which `Next` enters once the `Popped` frames of its reduction are popped.
-  // `Gapped` reads the cell's gap; `To` and `Element` stand for the cell's.
-  template <class M, auto Next, std::uint32_t Popped, bool Gapped, Nesting Nest,
-            std::uint32_t To = kNoStack, std::uint32_t Element = kNoStack>
-  CURSIV_ALWAYS_INLINE CURSIV_PRESERVE_NONE static Exit shift(M& m, const char* p, NodeCount at,
-                                                              const char* tokenEnd,
-                                                              std::uint64_t tokenHead) {
+  // which step `Enter` then enters. `Gapped` reads the cell's gap; `To` and
+  // `Element` stand for the cell's. `kInPlace`: `Drops` frames go instead.
+  template <class M, bool Gapped, Nesting Nest, std::uint32_t Enter = kNoStack,
+            std::uint32_t To = kNoStack, std::uint32_t Element = kNoStack,
+            std::uint32_t Drops = 0>
+  CURSIV_PRESERVE_NONE static Exit shift(M& m, const char* p, NodeCount at, const char* tokenEnd,
+                                         std::uint64_t tokenHead) {
     const Token tok{tokenEnd, tokenHead};
     if constexpr (Gapped) {
       const std::uint16_t gap = extra(at);
@@ -124,14 +159,17 @@ struct Drive {
                                 tok.begin(m.lexing())))
         CURSIV_MUSTTAIL return refuse<M>(m, p, at, tokenEnd, tokenHead);
     }
-    if (!m.roomy(Popped > 1 ? M::kSteps : true, true) || (L::hides && !m.flushed())) [[unlikely]]
+    if (!m.roomy(true, true) || (L::hides && !m.flushed())) [[unlikely]]
       CURSIV_MUSTTAIL return room_then<M, L::hides, &retake<M>>(m, p, at, tokenEnd, tokenHead);
-    const std::uint32_t state = To == kNoStack ? L::cells[at].value : To;
-    const std::uint32_t element = Element == kNoStack ? Drive::element(at) : Element;
-    NodeCount open = at;
-    if constexpr (M::kSteps) m.shift(state, element, tok);
-    else if constexpr (Popped != 0) open = m.template shift<Popped, L::matching>(state, element, tok);
-    else m.template shift<0, L::matching>(state, element, tok);
+    const std::uint32_t entry = Element == kNoStack ? element(at) : Element;
+    if constexpr (To == kInPlace) {
+      m.template leaf<L::matching>(entry, tok);
+      m.pop(Drops);
+    } else {
+      const std::uint32_t state = To == kNoStack ? L::cells[at].value : To;
+      if constexpr (M::kSteps) m.shift(state, entry, tok);
+      else m.template shift<L::matching>(state, entry, tok);
+    }
     if constexpr (Nest == Nesting::indent) m.lexing().indent(m.indented, tok);
     if constexpr (Nest == Nesting::dedent) m.lexing().dedent(m.indented);
     if constexpr (Nest == Nesting::open) ++m.indented.depth;
@@ -140,19 +178,8 @@ struct Drive {
     }
     if constexpr (M::kSteps)
       return m.shifted();
-    else if constexpr (std::is_null_pointer_v<decltype(Next)>)
-      CURSIV_MUSTTAIL return L::template steps<M>[L::enters[state]](m, tok.end, at, tok.end, tok.head);
     else
-      CURSIV_MUSTTAIL return Next(m, tok.end, open, tok.end, tok.head);
-  }
-
-  // A shift into one state that several cells take, each with its own
-  // element: written once.
-  template <class M, auto Next, std::uint32_t Popped, bool Gapped, Nesting Nest, std::uint32_t To>
-  CURSIV_NOINLINE CURSIV_PRESERVE_NONE static Exit shared(M& m, const char* p, NodeCount at,
-                                                          const char* tokenEnd,
-                                                          std::uint64_t tokenHead) {
-    CURSIV_MUSTTAIL return shift<M, Next, Popped, Gapped, Nest, To>(m, p, at, tokenEnd, tokenHead);
+      CURSIV_MUSTTAIL return L::template steps<M>[Enter](m, tok.end, at, tok.end, tok.head);
   }
 
   // The step of cell `at`, taken again.
@@ -168,8 +195,9 @@ struct Drive {
   CURSIV_PRESERVE_NONE static Exit followed(M& m, const char* p, NodeCount at,
                                             const char* tokenEnd, std::uint64_t tokenHead) {
     const std::uint16_t terminal = Token{tokenEnd, tokenHead}.terminal();
-    const Tables& t = m.lexing().t;
-    if (terminal < t.terminalCount && t.inSet(t.followOf[m.under()], terminal))
+    const std::uint64_t* const follows =
+        L::terminalSets + std::size_t{L::followOf[m.under()]} * L::followWords;
+    if (terminal < L::terminals && ((follows[terminal / 64] >> (terminal % 64)) & 1) != 0)
       CURSIV_MUSTTAIL return Next(m, p, at, tokenEnd, tokenHead);
     CURSIV_MUSTTAIL return refuse<M>(m, p, at, tokenEnd, tokenHead);
   }
@@ -343,61 +371,95 @@ struct Drive {
     CURSIV_MUSTTAIL return refuse<M>(m, p, at, tokenEnd, tokenHead);
   }
 
-  // A production reduced over a machine that steps, as `reductions` tells it
-  // for the step of cell `at`, or with no token for the step that enters the
-  // state on top; the step is written for its `Form` and its tests `Holds`.
-  template <class M, bool Held, unsigned Form, auto Holds = nullptr>
+  // The records reduction `r` gives an entry to, each among its first `K`.
+  template <class M, std::size_t... K>
+  CURSIV_ALWAYS_INLINE static void takes(M& m, const Reduction& r, std::index_sequence<K...>) {
+    ((K < r.taken ? m.take(r.takes[K].at, r.size,
+                           [row = r.takes[K].row](std::uint32_t inner) {
+                             return L::fuseMap[row + inner];
+                           })
+                  : void()),
+     ...);
+  }
+
+  // A production reduced as `reductions` tells it for the step of cell `at`,
+  // or with no token for the step that enters the state on top; the step is
+  // written for its `Form`, the `Shapes` of its record and its tests `Holds`.
+  template <class M, bool Held, unsigned Form, unsigned Shapes, auto Holds = nullptr,
+            const Reduction* R = nullptr>
   CURSIV_PRESERVE_NONE static Exit reduce(M& m, const char* p, NodeCount at, const char* tokenEnd,
                                           std::uint64_t tokenHead) {
     constexpr bool nothing = (Form & kReadsNothing) != 0;
     const Token tok = Held ? Token{tokenEnd, tokenHead} : Token{nullptr, 0};
-    const Reduction& r = L::reductions[Held ? L::cells[at].step : L::enters[m.under()]];
+    // Written for reduction `R`, the step knows it where it is written.
+    const Reduction& r =
+        R != nullptr ? *R : L::reductions[Held ? L::cells[at].step : L::enters[m.under()]];
     if constexpr (nothing && std::is_same_v<M, Explorer>)
       if (m.options.closure && m.visited(r.production, p, tok)) return Exit::joined;
     if constexpr (!std::is_null_pointer_v<decltype(Holds)>)
       if (!Holds(m, p, tok)) CURSIV_MUSTTAIL return again<M>(m, p, at, tokenEnd, tokenHead);
-    if (!m.roomy(nothing, (r.shapes & (kRecordEmpty | kRecordSeveral)) != 0)) [[unlikely]]
-      CURSIV_MUSTTAIL return room_then<M, false, &reduce<M, Held, Form, Holds>>(m, p, at, tokenEnd,
-                                                                                 tokenHead);
+    if (!m.roomy(nothing, (Shapes & (kRecordEmpty | kRecordSeveral)) != 0)) [[unlikely]]
+      CURSIV_MUSTTAIL return room_then<M, false, &reduce<M, Held, Form, Shapes, Holds, R>>(
+          m, p, at, tokenEnd, tokenHead);
     NodeCount open = nothing ? m.here(r.production) : m.pop(r.size, r.production);
-    const GotoCell to =
-        (Form & kOneSite) != 0 ? r.to : L::gotos[L::gotoBase[m.under()] + r.lhs];
-    // Its record as the call site below reads it, if any.
-    const std::uint32_t record =
-        L::records[r.records + (r.bySite ? to.site & ~GotoCell::kRereads : 0)];
-    if (static_cast<ElementId>(record) != kNoElement)
-      open = close(m, open, r.shapes, static_cast<ElementId>(record),
-                   nothing && Held ? m.lexing().src + tok.begin(m.lexing()) : p,
-                   L::fuses[record >> 16]);
+    if constexpr ((Form & kTakes) != 0) takes(m, r, std::make_index_sequence<kMostTakes>{});
+    GotoCell to = (Form & kOneSite) != 0 ? r.to : L::gotos[L::gotoBase[m.under()] + r.lhs];
+    // A machine that steps ends a turn of a list by the state that reduces it.
+    if constexpr (M::kSteps) {
+      if (to.tail != 0)
+        to = {to.tail, L::enters[to.tail],
+              static_cast<std::uint16_t>(to.site & ~GotoCell::kRereads), L::rows[to.tail]};
+    }
+    // Its record as the call site below reads it, if any, and the row of
+    // the fuses under it.
+    std::uint32_t record = r.records;
+    std::uint32_t fuse = r.fuse;
+    if (r.bySite) {
+      const std::uint64_t read = L::records[r.records + (to.site & ~GotoCell::kRereads)];
+      record = static_cast<std::uint32_t>(read);
+      fuse = static_cast<std::uint32_t>(read >> 32);
+    }
+    if (static_cast<ElementId>(record) != kNoElement) {
+      // The machine's always empty record stands behind the trivia read.
+      if constexpr (!M::kSteps && Shapes == kRecordEmpty) {
+        if (!m.flushed()) [[unlikely]] {
+          m.settle();
+          m.make_room();
+        }
+      }
+      const char* const where = nothing && Held ? m.lexing().src + tok.begin(m.lexing()) : p;
+      if constexpr ((Shapes & kRecordLone) != 0)
+        open = m.template close<Shapes>(
+            open, static_cast<ElementId>(record), where,
+            [fuse](std::uint32_t inner) { return L::fuseMap[fuse + inner]; });
+      else
+        open = m.template close<Shapes>(open, static_cast<ElementId>(record), where);
+    }
     // A token its tests name, or one the state reached reads again, goes
     // back to the text with the trivia before it; a repaired one does not.
-    if (!Held || ((tok.head & kReplaced) == 0 &&
+    const bool gives =
+        !Held || ((!M::kSteps || (tok.head & kReplaced) == 0) &&
                   ((Form & kGivesBack) != 0 ||
-                   ((to.site & GotoCell::kRereads) != 0 && tok.terminal() != kEndOfInput)))) {
-      m.push(to.target, open);
+                   ((to.site & GotoCell::kRereads) != 0 && tok.terminal() != kEndOfInput)));
+    // The machine leaves the state of a list where a turn of it ends.
+    if constexpr (!M::kSteps && (Form & kStays) != 0) {
+      m.pop(to.back - 1);
+      if (to.target == kNoStack) {
+        to.enter = L::enters[m.under()];
+        to.row = L::rows[m.under()];
+      }
+    } else {
+      m.push(to.target, open, gives || !L::splits ? Token{nullptr, 0} : tok);
+      if constexpr (!M::kSteps && (Form & kMayStay) != 0) m.pop(to.back);
+    }
+    if (gives) {
       if constexpr (Held) m.forget(p);
       CURSIV_MUSTTAIL return L::template steps<M>[to.enter](m, p, open, tok.end, tok.head);
     }
-    m.push(to.target, open, L::splits ? tok : Token{nullptr, 0});
-    const std::uint32_t next =
-        (Form & kThenReduces) != 0 ? r.next : cell(to.target, tok.terminal());
-    CURSIV_MUSTTAIL return L::template steps<M>[L::cells[next].step](m, p, next, tok.end, tok.head);
-  }
-  // The record a reduction closes with `element` over what it wrote since
-  // `open`, by the shapes of what that can be.
-  template <class M>
-  CURSIV_ALWAYS_INLINE static NodeCount close(M& m, NodeCount open, unsigned shapes,
-                                              std::uint32_t element, const char* at, Fuse fuse) {
-    switch (shapes) {
-      case 1: return m.template close<1>(open, element, at, fuse);
-      case 2: return m.template close<2>(open, element, at, fuse);
-      case 3: return m.template close<3>(open, element, at, fuse);
-      case 4: return m.template close<4>(open, element, at, fuse);
-      case 5: return m.template close<5>(open, element, at, fuse);
-      case 6: return m.template close<6>(open, element, at, fuse);
-      case 7: return m.template close<7>(open, element, at, fuse);
-      default: return m.template close<0>(open, element, at, fuse);
-    }
+    if constexpr ((Form & kThenReduces) != 0)
+      CURSIV_MUSTTAIL return L::template steps<M>[r.then](m, p, r.next, tok.end, tok.head);
+    const Act next = act_at(to.row, tok.terminal());
+    CURSIV_MUSTTAIL return L::template steps<M>[next.step](m, p, next.at, tok.end, tok.head);
   }
 
   // A run goes on from where the machine stopped: an arm, a state with the

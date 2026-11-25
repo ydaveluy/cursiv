@@ -31,6 +31,7 @@ keyword, use `option(flag<&Decl::isStatic>(kw<"static">))`.
 | `which its trivia scope passes` | The rule asks for a token it skips. Remove that call or change its trivia scope. |
 | `is read both inside a trivia scope and outside it` | Make the alternatives agree on which trivia to keep or skip before their shared token. |
 | `is a second indent or dedent terminal` | Declare each indentation terminal only once. |
+| `with its tag is not set on every path` | Set the `mark<>` on every path that reaches the `same<>` of its tag. |
 | `an indentation bracket is not one token` | Name each opening or closing bracket by its token, using a choice for several spellings. |
 | `an implied token cannot be a bracket named by indent_open` | Spell the opening and closing indentation brackets in the input. |
 | `a gap test's pattern is not regular` | Simplify the pattern that tests the text between tokens. |
@@ -124,10 +125,12 @@ for examples.
 | `more than LR_MAX_STATES allows` | Raise the [state limit](cmake.md#cursiv_generate_language) to at least the minimum in the message, or set it to zero for no cap. |
 | `the grammar has too many terminals`, `the grammar has too many sets of terminals`, `the grammar has too many lexer modes` | Reuse terminal definitions and simplify alternatives that expect different sets of tokens. |
 | `the grammar has too many trivia scopes` | Reduce the number of distinct trivia configurations. The limit is 64. |
-| `the terminals are too large for one lexer` | Simplify overlapping terminal patterns or move choices between tokens into rules. |
+| `the terminals are too large for one lexer`, `the terminals need more than 65534 lexer states`, `the terminals end in too many ways for one lexer` | Simplify overlapping terminal patterns or move choices between tokens into rules. |
 | `the terminals start in too many ways for one lexer` | Reuse terminal definitions and reduce the literals and keywords that begin with different text. |
 | `the grammar has too many ties of terminals` | Reduce the terminals that can read the same text in one place. |
-| `the grammar's states act in too many ways`, `the grammar takes too many kinds of steps`, `a rule is called from too many kinds of places`, `a state has too many actions on one token` | The parser tables are full. Lower the [state limit](cmake.md#cursiv_generate_language), or merge rules that differ only in the node they build. |
+| `the grammar takes too many kinds of steps`, `the grammar takes too many unit reductions`, `a rule is called from too many kinds of places`, `a state has too many actions on one token` | The parser tables are full. Lower the [state limit](cmake.md#cursiv_generate_language), or merge rules that differ only in the node they build. |
+| `the grammar has too many records`, `the grammar publishes too many actions`, `the grammar names too many members and rules`, `the grammar names too many AST classes or members`, `the grammar writes too many members for a completion` | The grammar holds more rules, properties or directives than the tables can number. Factor repeated directives into named rules. |
+| `a reference narrows to too many classes` | Narrow the target types of the reference, or give them a common base. |
 
 For a limit on rules, properties or actions, factor repeated directives into
 named rules. For a limit on reference candidates, narrow the target types of

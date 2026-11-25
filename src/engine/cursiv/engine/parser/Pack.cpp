@@ -128,12 +128,17 @@ std::vector<std::set<std::uint32_t>> record_shapes(Cfg& cfg, Packed& out) {
     for (const std::uint32_t p : cfg.productionsOf[nt]) {
       const Production& prod = cfg.productions[p];
       std::set<std::uint32_t>& children = childrenOf[p];
-      for (const Symbol s : prod.rhs) {
+      for (std::size_t at = 0; at < prod.rhs.size(); ++at) {
+        const Symbol s = prod.rhs[at];
         if (!may_be_lone(p, s)) continue;
-        if (is_terminal(s))
+        // A record the production gives an entry to carries the two.
+        const std::uint32_t take = prod.takes.empty() ? kNone : prod.takes[at];
+        if (is_terminal(s)) {
           children.insert(out.terminalEntry[s]);
-        else
-          children.insert(records[index_of(s)].begin(), records[index_of(s)].end());
+          continue;
+        }
+        for (const std::uint32_t child : records[index_of(s)])
+          children.insert(take == kNone ? child : cfg.fuse(child, take));
       }
       out.shapes[p] = (loud[p] == 0 ? kRecordEmpty : 0u) |
                       (children.empty() ? 0u : kRecordLone) |
@@ -152,6 +157,15 @@ std::vector<std::set<std::uint32_t>> record_shapes(Cfg& cfg, Packed& out) {
         work.push_back(cfg.productions[p].lhs);
   }
   if (done != nnts) throw Refused("a cycle of rules reads no input");
+  // What the one record of a symbol becomes under the entry its production
+  // gives it.
+  for (const Production& prod : cfg.productions)
+    for (std::size_t at = 0; at < prod.takes.size(); ++at) {
+      const std::uint32_t take = prod.takes[at];
+      if (take == kNone) continue;
+      for (const std::uint32_t child : records[index_of(prod.rhs[at])])
+        out.fused.try_emplace({take, child}, cfg.fuse(child, take));
+    }
   return childrenOf;
 }
 
@@ -329,7 +343,7 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
       continue;
     const std::uint32_t prod = state.reduces.front().first;
     if (prod != 0 && cfg.productions[prod].rhs.size() == 1 && !cfg.productions[prod].tested() &&
-        !cfg.productions[prod].start)
+        !cfg.productions[prod].start && cfg.productions[prod].takes.empty())
       unit[s] = prod;
   }
   struct Hop {

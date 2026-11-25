@@ -1720,7 +1720,6 @@ LexDfa LexAutomatonBuilder::automaton(std::vector<std::uint32_t>& starts) const 
     if (set.empty()) return 0;
     const auto [it, fresh] = ids.try_emplace(set, static_cast<std::uint32_t>(sets.size()));
     if (!fresh) return it->second;
-    if (sets.size() > UINT32_MAX) throw Refused("the lexer states exceed the 32-bit index");
     // A token whose last lead is not settled yet ends there only where the
     // input does.
     std::vector<LexAccept> accepts;

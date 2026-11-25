@@ -1,4 +1,4 @@
-// The machine a token at a time: the generated states write on it a token
+// The machine a token at a time: the language's steps write on it a token
 // the text does not hold as written, and come back once it is shifted.
 #pragma once
 
@@ -65,6 +65,10 @@ struct Repairer {
       m.make_room();
     }
     return m.template close<Shapes>(open, entry, where, fuse);
+  }
+  template <class Fuse>
+  CURSIV_ALWAYS_INLINE void take(std::uint32_t at, std::uint32_t size, Fuse&& fuse) {
+    m.take(at, size, fuse);
   }
   CURSIV_ALWAYS_INLINE void accept() { m.accept(); }
   CURSIV_ALWAYS_INLINE Exit shifted() { return m.shifted(); }

@@ -1,4 +1,4 @@
-// A reading of the text that writes no tree: the generated states run over
+// A reading of the text that writes no tree: the language's steps run over
 // it as they run over the machine, one token at a time, its stack a path of
 // a cactus that every reading of one search shares.
 #pragma once
@@ -307,6 +307,8 @@ struct Explorer : Reading {
                                        Fuse&& = nullptr) {
     return open;
   }
+  template <class Fuse>
+  CURSIV_ALWAYS_INLINE void take(std::uint32_t, std::uint32_t, Fuse&&) {}
   CURSIV_ALWAYS_INLINE void accept() {}
   CURSIV_ALWAYS_INLINE Exit shifted() {
     return Exit::shifted;

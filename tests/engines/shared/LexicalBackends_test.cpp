@@ -84,6 +84,8 @@ void tied_words_are_told_by_the_next_token(const cursiv::Parser& parser) {
 }
 
 void scanners(const cursiv::Parser& parser) {
+  // A scan written in a rule is a token of its own.
+  check(parser, "scan:bare:D0D0", {"D0", "D0"});
   const std::string_view items = "scan:one:D0";
   const auto parsed = parser.parse(items);
   CHECK(parsed.accepted && parsed.diagnostics.empty());

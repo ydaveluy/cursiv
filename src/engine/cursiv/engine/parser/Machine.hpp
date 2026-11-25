@@ -280,16 +280,17 @@ struct Machine {
       flush();
   }
 
-  // A token's leaf and frame. An immediate reduction takes its opening
-  // directly and pops only the frames preceding the token.
-  template <std::uint32_t Popped = 0, bool kMatching = true>
-  CURSIV_ALWAYS_INLINE NodeCount shift(std::uint32_t state, std::uint32_t entry,
-                                  Token token) {
+  // A token's leaf: where it stands.
+  template <bool kMatching = true>
+  CURSIV_ALWAYS_INLINE NodeCount leaf(std::uint32_t entry, Token token) {
     const NodeCount open = tape.records();
     tape.leaf<true>(token.begin(*this, kMatching), static_cast<TextOffset>(token.end - src), entry);
-    if constexpr (Popped == 0) push(state, open);
-    if constexpr (Popped > 1) return pop(Popped - 1);
     return open;
+  }
+  // A token's leaf and frame.
+  template <bool kMatching = true>
+  CURSIV_ALWAYS_INLINE void shift(std::uint32_t state, std::uint32_t entry, Token token) {
+    push(state, leaf<kMatching>(entry, token));
   }
 
   // The record over what was written since `open`, `Shapes` saying what that
@@ -330,6 +331,20 @@ struct Machine {
     }
     tape.close<true>(tape.at(open).begin, last.end, count + 1, entry);
     return open;
+  }
+
+  // The one record of symbol `at` among the `size` just popped takes an
+  // entry over, as `fuse` composes the two: the last record written, or the
+  // one that ends before the next symbol, trivia between them.
+  template <class Fuse>
+  CURSIV_ALWAYS_INLINE void take(std::uint32_t at, std::uint32_t size, Fuse&& fuse) {
+    NodeCount last = tape.records() - 1;
+    if (at + 1 != size) {
+      last = top[at + 1].open - 1;
+      while (last + 1 - tape.at(last).subtreeSize != top[at].open) --last;
+    }
+    CstNode& record = tape.at(last);
+    record.setElement(fuse(record.element()));
   }
 
   // Hidden trivia read before the next token, kept as it will be written;
@@ -611,7 +626,7 @@ struct Machine {
   std::map<MonitorPlace, PredicateResult> settled;
   std::vector<MonitorPlace> passed;
   NodeId root = kNoNode;
-  // Where the generated states go on from, and with what.
+  // Where the steps go on from, and with what.
   std::uint32_t resume = 0;
   const char* at;
   Token tok{nullptr, 0};

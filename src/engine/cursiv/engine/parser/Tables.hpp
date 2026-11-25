@@ -19,6 +19,8 @@ namespace cursiv::engine {
 
 inline constexpr std::uint16_t kNoToken = 0xFFFF;
 inline constexpr std::uint32_t kNoStack = 0xFFFFFFFFu;
+// As the state a shift is written for: its token ends a turn of a list.
+inline constexpr std::uint32_t kInPlace = kNoStack - 1;
 // The terminal that stands for the end of input.
 inline constexpr std::uint16_t kEndOfInput = 0;
 // No production: what a token is derived by.
@@ -163,6 +165,21 @@ using Reader = Token (*)(Machine&, const char* p, std::uint32_t mode);
 inline constexpr std::uint16_t kLexStop = 0xFFFE;
 inline constexpr std::uint16_t kLexWalk = 0xFFFF;
 
+// A reader goes on in another by a tail call, which takes a Token handed back
+// in registers. Windows hands it back through memory: there a word that drops
+// its token hands back `kLexOn`, and `lex` reads on from its end.
+#ifdef _WIN32
+inline constexpr std::uint64_t kLexOn = ~std::uint64_t{0};
+#define CURSIV_READ_ON(end) return Token{end, kLexOn}
+#define CURSIV_READ_WORD(word)                                                     \
+  if (const Token handed = word(m, p, mode); handed.head != kLexOn) return handed; \
+  else p = handed.end;                                                             \
+  continue
+#else
+#define CURSIV_READ_ON(end) CURSIV_MUSTTAIL return lex(m, end, mode)
+#define CURSIV_READ_WORD(word) CURSIV_MUSTTAIL return word(m, p, mode)
+#endif
+
 // DFA rows share identical blocks, including each row's short final block.
 struct LexBlocks {
   static constexpr std::uint32_t kWidth = 16;
@@ -273,56 +290,83 @@ struct ActionCells {
 // acts: this many of them.
 inline constexpr std::uint16_t kAsks = 3;
 
-// A row of the comb of cells: the cell of terminal `t` is `base + t` where
-// that cell names `t`, else `otherwise`. The rows of the states come first,
-// each by its state's number.
-struct ActionRow {
-  std::uint32_t base;
-  std::uint32_t otherwise;
-};
-
 // Where a nonterminal reduced over a state leads: the state, the step that
-// enters it with no token, and which of the nonterminal's call sites it is;
-// `kRereads` where the state reads a token in hand again.
+// enters it with no token, which of the nonterminal's call sites it is, and
+// the base of the state's row; `kRereads` where it reads a held token again.
 struct GotoCell {
   std::uint32_t target;
   std::uint16_t enter;
   std::uint16_t site;
+  std::uint32_t row;
+  // A turn of a list ended: the state that only reduces it. The cell is then
+  // of the list's state, `back` frames under one pushed anew: `kNoStack`
+  // for `target` where the stack tells that state.
+  std::uint32_t tail = 0;
+  std::uint32_t back = 0;
   static constexpr std::uint16_t kRereads = 0x8000;
 };
 
-// The gotos of a language, a word each: `target`, then `enter`, then `site`
-// from the low bits up.
+// The gotos of a language, two words each: `target`, then `enter`, then
+// `site` from the low bits up; then `row`, `back` on a byte, and `tail`.
 struct GotoCells {
   const std::uint64_t* words;
   constexpr GotoCell operator[](std::size_t at) const {
-    const std::uint64_t word = words[at];
+    const std::uint64_t word = words[2 * at];
+    const std::uint64_t more = words[2 * at + 1];
     return {
         static_cast<std::uint32_t>(word),
         static_cast<std::uint16_t>(word >> 32),
         static_cast<std::uint16_t>(word >> 48),
+        static_cast<std::uint32_t>(more),
+        static_cast<std::uint32_t>(more >> 40),
+        static_cast<std::uint32_t>(more >> 32) & 0xFF,
     };
   }
 };
 
-// A reduction over a machine that steps: `production` of `size` symbols to
-// `lhs`, its records from `records`, one a call site with `bySite`. With one
-// site, its goto `to`; `next` is the cell a held token takes if that reduces.
-struct alignas(32) Reduction {
+// The record of symbol `at` of a production takes an entry over: `row`
+// fuses the two. A production gives entries to `kMostTakes` records at most.
+struct Take {
+  std::uint32_t at;
+  std::uint32_t row;
+};
+inline constexpr std::size_t kMostTakes = 4;
+
+// A reduction as its step reads it: `production` of `size` symbols to `lhs`;
+// its record `records` and the row `fuse` that fuses a lone child under it,
+// or with `bySite` where its records begin, one a call site.
+struct Reduction {
   std::uint32_t production;
   std::uint32_t lhs;
   std::uint32_t records;
+  std::uint32_t fuse;
+  // With one site: its goto `to`, and where that state only reduces, the
+  // cell `next` a held token takes there by step `then`.
   std::uint32_t next;
   GotoCell to;
   std::uint32_t size;
-  std::uint8_t shapes;
+  std::uint16_t then;
   bool bySite;
+  // The symbols whose record takes an entry over.
+  std::uint32_t taken = 0;
+  Take takes[kMostTakes] = {};
 };
 
-// The forms a reduction's step is written for: the production reads
-// nothing; every call site leads to one state; that state only reduces; a
-// token the production's tests name goes back to the text.
-enum : unsigned { kReadsNothing = 1, kOneSite = 2, kThenReduces = 4, kGivesBack = 8 };
+// The forms a reduction's step is written for.
+enum : unsigned {
+  // The production reads nothing.
+  kReadsNothing = 1,
+  // Every call site leads to one state; that state only reduces.
+  kOneSite = 2,
+  kThenReduces = 4,
+  // A token the production's tests name goes back to the text.
+  kGivesBack = 8,
+  // Its goto ends a turn of a list: at every site, at some.
+  kStays = 16,
+  kMayStay = 32,
+  // Records of its symbols take an entry over.
+  kTakes = 64
+};
 
 // Whether the token in hand is one several terminals read: then the run
 // stops on the `count` arms from `first` on. By `kind`, tie row `test`, the

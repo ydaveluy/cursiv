@@ -56,6 +56,10 @@ template <>
 struct payload_of<Byte> {
   using type = TypeList<text_payload<void>>;
 };
+template <auto F>
+struct payload_of<Scan<F>> {
+  using type = TypeList<text_payload<void>>;
+};
 template <>
 struct payload_of<Indent> {
   using type = TypeList<text_payload<void>>;

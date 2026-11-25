@@ -1,5 +1,5 @@
-// A language's parser written out as C++: its tables, the steps the machines
-// take over them, and code of its own per state where the grammar is small.
+// A language's parser written out as C++: its tables, its lexers and tests,
+// and the steps its machines take over the tables.
 #pragma once
 
 #include <initializer_list>

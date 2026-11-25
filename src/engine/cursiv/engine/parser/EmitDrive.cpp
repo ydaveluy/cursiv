@@ -12,7 +12,6 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -60,8 +59,6 @@ struct Cell {
   std::uint16_t element = 0;
   std::uint16_t extra = 0;
   [[nodiscard]] std::uint32_t wide() const { return element | std::uint32_t{extra} << 16; }
-  // The shift it takes, which a state's own code writes with its operands.
-  const PackedAction* shifts = nullptr;
 };
 
 class Emitter {
@@ -72,10 +69,41 @@ class Emitter {
     _splits = std::ranges::any_of(packed.states, [&](const PackedState& state) {
       return state.reduce == kNone && has_arms(state);
     });
+    _preds.resize(packed.states.size());
+    for (std::uint32_t s = 0; s < packed.states.size(); ++s)
+      for (const PackedAction& action : packed.states[s].actions)
+        if (action.kind == PackedAction::Kind::shift) _preds[action.value].push_back(s);
+    for (const std::vector<PackedGoto>& gotos : packed.gotos)
+      for (const PackedGoto& site : gotos) _preds[site.target].push_back(site.from);
+    for (std::vector<std::uint32_t>& from : _preds) {
+      std::ranges::sort(from);
+      from.erase(std::ranges::unique(from).begin(), from.end());
+    }
     for (const std::vector<PackedGoto>& gotos : packed.gotos)
       _single.push_back(std::ranges::all_of(gotos, [&](const PackedGoto& site) {
         return site.target == gotos.front().target && site.entry == gotos.front().entry;
       }));
+    for (std::uint32_t s = 0; s < packed.states.size(); ++s) _tails.push_back(tail_of(s));
+    // Per nonterminal, the turns its sites end: one for all of them where they
+    // lead to one state, none of the lists' states reading a held token again.
+    _ends.resize(packed.gotos.size());
+    for (std::uint32_t nt = 0; nt < packed.gotos.size(); ++nt) {
+      Ends& ends = _ends[nt];
+      bool all = !packed.gotos[nt].empty() && _single[nt];
+      bool rereads = false;
+      for (const PackedGoto& site : packed.gotos[nt]) {
+        const Turn turn = turn_at(site.from, site.target);
+        if (turn.list == kNone) {
+          all = false;
+          continue;
+        }
+        ends.some = true;
+        rereads = rereads || packed.states[turn.list].rereads();
+        if (ends.all.list == kNone) ends.all = turn;
+        else if (ends.all.list != turn.list) ends.all.list = kSomeList;
+      }
+      if (!all || (ends.all.list == kSomeList && rereads)) ends.all = {};
+    }
   }
 
   void run(const LanguageNames& names, WriteSource write) {
@@ -106,16 +134,20 @@ class Emitter {
     // more steps.
     _rows.resize(_p.states.size());
     _enters.resize(_p.states.size());
-    own_states();
+    // The machine's reads and shifts are written per state where the cells
+    // of all states fit in a budget.
+    constexpr std::size_t kStateCells = std::size_t{1} << 15;
+    std::size_t cells = 0;
+    for (const PackedState& state : _p.states)
+      if (state.reduce == kNone) cells += state.actions.size() + 1;
+    _perState = cells <= kStateCells;
     for (std::uint32_t s = 0; s < _p.states.size(); ++s) rows_of(s);
     _prefixes.cache = {};
     lone_states();
     pack();
-    own_code();
-    for (std::size_t r = 0; r < _reduces.size(); ++r)
-      reduce(_reduces[r].first, _reduces[r].second);
-    arrivals();
-    const std::string functions = take();
+    // The step that enters each state that reads a token.
+    for (std::uint32_t s = 0; s < _p.states.size(); ++s)
+      if (_p.states[s].reduce == kNone) _enters[s] = step_of(entered(s), std::string(kRead));
     // The modes some text is read again in: the gaps of shifts, the alphabets
     // of tests, the fallbacks of cells.
     for (const PackedState& state : _p.states) {
@@ -134,8 +166,6 @@ class Emitter {
     lexer();
     const std::string lexers = take();
     transitions();
-    machine_code();
-    const std::string own = take();
     matcher();
     prefixes();
     tables();
@@ -186,7 +216,6 @@ class Emitter {
     for (unsigned b = 0; b < skip.size(); ++b) skip[b] = _p.skipped.has(b);
     array("::std::uint8_t", "kSkip", skip);
     for (std::size_t r = 0; r < _p.runBytes.size(); ++r) scanner(r);
-    fuses();
     openings();
     _out += lexers;
     _out += guards;
@@ -210,16 +239,20 @@ class Emitter {
     line("  static constexpr bool matching = ", _p.matcher.entries.empty() ? "false" : "true", ";");
     line("  static constexpr ActionCells cells{kLrCells};");
     line("  static constexpr const ::std::uint32_t* operands = kLrOperands;");
-    line("  static constexpr const ActionRow* rows = kLrRows;");
+    line("  static constexpr const ::std::uint32_t* rows = kLrRows;");
     line("  static constexpr const ::std::uint16_t* enters = kLrEnters;");
+    line("  static constexpr ::std::uint32_t terminals = ", _p.terminalElement.size(), ";");
+    line("  static constexpr const ::std::uint64_t* terminalSets = kTerminalSets;");
+    line("  static constexpr const ::std::uint16_t* followOf = kFollowOf;");
+    line("  static constexpr ::std::uint32_t followWords = ", (_p.terminalElement.size() + 63) / 64, ";");
     line("  static constexpr const ::std::uint32_t* gotoBase = kLrGotoBase;");
     line("  static constexpr GotoCells gotos{kLrGotos};");
     line("  static constexpr const TieCheck* ties = kLrTieChecks;");
     line("  static constexpr const ReadAgain* agains = kLrAgains;");
     line("  static constexpr ::std::uint32_t againCount = ", _agains.size(), ";");
     line("  static constexpr const Reduction* reductions = kLrReductions;");
-    line("  static constexpr const ::std::uint32_t* records = kLrRecords;");
-    line("  static constexpr const Fuse* fuses = kFuses;");
+    line("  static constexpr const ::std::uint64_t* records = kLrRecords;");
+    line("  static constexpr const ::std::uint32_t* fuseMap = kFuseMap;");
     line("  static constexpr Reader keep = full<true>;");
     line("  template <class M>");
     line("  static constexpr State<M>* const steps[] = {");
@@ -236,26 +269,19 @@ class Emitter {
     line("}  // namespace ", ns);
     write("ParserStates.hpp", {take()});
 
-    // The machine's own code, in its unit alone: its steps, the reductions,
-    // each a function a label, and the states. A reduction a state is entered
-    // by is jumped to; one called from one place stands there.
+    // The machine's steps, in its unit alone, with the reductions they are
+    // written for.
     line("namespace {");
     line("using M = Machine;");
-    for (std::uint32_t s = 0; s < _p.states.size(); ++s)
-      if (_special[s] && _lexAs[s] == s) line("State<M> S", s, ";");
-    for (std::uint32_t s = 0; s < _p.states.size(); ++s)
-      if (_special[s] && _dispatchAs[s] == s) line("State<M> H", s, ";");
-    for (const auto& [s, row] : _shiftRow)
-      if (row == s) line("State<M> W", s, ";");
-    for (const auto& label : _functions)
-      line(_entries.contains(label) ? "CURSIV_NOINLINE " :
-           _uses[label] == 1 ? "CURSIV_ALWAYS_INLINE inline " : "inline ", "State<M> ", label, ";");
+    for (std::size_t step = 0; step < _stepReduces.size(); ++step)
+      if (_stepReduces[step] != kNone)
+        line("constexpr Reduction kR", step, " = ", _reductions[step], ";");
     line("template <>");
     line("constexpr State<M>* const L::steps<M>[] = {");
-    for (const auto& expression : _steps) line("    ", expression, ",");
+    for (const auto& expression : _steps) line("    ", entering(expression), ",");
     line("};");
-    line("");
-    const std::string machineSteps = take();
+    line("}  // namespace");
+    const std::string code = take();
 
     for (const auto& [type, file] :
          {std::pair{"Machine", "Parser.cpp"}, {"Explorer", "Explorer.cpp"}, {"Repairer", "Repairer.cpp"}}) {
@@ -272,12 +298,7 @@ class Emitter {
         line("#include \"cursiv/engine/grammar/Facts.hpp\"");
       }
       line("namespace ", ns, " {");
-      if (machine) {
-        _out += machineSteps;
-        _out += functions;
-        _out += own;
-        line("}  // namespace");
-      }
+      if (machine) _out += code;
       if (scans) line("using ScanDependencies = ::cursiv::engine::reached_all_t<::cursiv::engine::Facts<::",
                       names.grammar, ">::stage>;");
       line("::cursiv::engine::Exit drive(::cursiv::engine::", type, "& m) { return run_states(m); }");
@@ -311,37 +332,6 @@ class Emitter {
   }
 
  private:
-  static constexpr std::string_view kParameters =
-      "(Machine& m, [[maybe_unused]] const char* p, [[maybe_unused]] NodeCount open, "
-      "[[maybe_unused]] const char* tokenEnd, [[maybe_unused]] ::std::uint64_t tokenHead)";
-
-  // A step's function begun, its body written next.
-  void open_function(const std::string& name, bool held = true) {
-    _functions.push_back(name);
-    _caller = name;
-    line("CURSIV_PRESERVE_NONE Exit ", name, kParameters, " {");
-    // A reduction made with no token holds none.
-    line(held ? "  [[maybe_unused]] Token tok{tokenEnd, tokenHead};"
-              : "  [[maybe_unused]] Token tok{nullptr, 0};");
-  }
-  // The run going on in `callee`, by a tail call.
-  static std::string tail(const std::string& callee) {
-    return "CURSIV_MUSTTAIL return " + callee + "(m, p, open, tok.end, tok.head);";
-  }
-  // A call of `label` written in `caller`: inlining only the forward calls
-  // leaves every cycle a callable label.
-  const std::string& use(const std::string& label, std::string_view caller) {
-    _uses[label] += caller < label ? 1 : 2;
-    return label;
-  }
-  // Room for a step's writes, the hidden trivia written with `flush`; made
-  // out of line before `label` is taken again where they are missing.
-  static std::string room(std::string_view test, bool flush, const std::string& label) {
-    return "if (" + std::string(test) + (flush ? " || !m.flushed()" : "") + ") [[unlikely]] " +
-           tail("D::template room_then<M, " + std::string(flush ? "true" : "false") + ", &" + label +
-                ">");
-  }
-
   template <class... Parts>
   void line(const Parts&... parts) {
     (append(parts), ...);
@@ -446,10 +436,9 @@ class Emitter {
     return {begin, end};
   }
 
-  std::string reduce_label(std::uint32_t production, bool held) {
-    if (_reduced.emplace(production, held).second)
-      _reduces.emplace_back(production, held);
-    return "R" + std::to_string(production) + (held ? "h" : "n");
+  // A reduction of `production` is reached, a token in hand or not.
+  void reached(std::uint32_t production, bool held) {
+    if (_reduced.emplace(production, held).second) _reduces.emplace_back(production, held);
   }
 
   template <class Values>
@@ -856,67 +845,7 @@ class Emitter {
     line("");
   }
 
-  // What a lone child's entry becomes under each record closed around it,
-  // and those functions by their number.
-  void fuses() {
-    std::vector<std::string> numbered(_fuses.size() + 1, "nullptr");
-    for (const auto& [outer, number] : _fuses) {
-      const auto begin = _p.fused.lower_bound({outer, 0});
-      const auto end = _p.fused.upper_bound({outer, kNone});
-      std::vector<std::pair<std::uint32_t, std::uint32_t>> pairs;
-      for (auto it = begin; it != end; ++it)
-        pairs.emplace_back(_p.element(it->first.second), _p.element(it->second));
-      const auto name = "fuse" + std::to_string(_p.element(outer));
-      numbered[number] = name;
-      const auto [lo, hi] = std::ranges::minmax_element(pairs, {}, &decltype(pairs)::value_type::first);
-      const bool indexed = pairs.size() >= 4 && hi->first - lo->first < 8 * pairs.size();
-      if (indexed) {
-        std::vector<std::uint32_t> values(hi->first - lo->first + 1);
-        for (auto [from, to] : pairs) values[from - lo->first] = to;
-        array(std::ranges::max(values) <= 0xFFFF ? "::std::uint16_t" : "::std::uint32_t",
-              name + "Map", values);
-      }
-      line("constexpr auto ", name, " = [](::std::uint32_t inner) -> ::std::uint32_t {");
-      if (indexed) {
-        line("  return ", name, "Map[inner - ", lo->first, "];");
-      } else {
-        line("  switch (inner) {");
-        for (auto [from, to] : pairs) line("    case ", from, ": return ", to, ";");
-        line("    default: __builtin_unreachable();");
-        line("  }");
-      }
-      line("};");
-    }
-    array("Fuse", "kFuses", numbered, 8);
-    line("");
-  }
-
-  // The record `production` closes with `entry` over what was written since
-  // `open`, by what that can be.
-  void close(std::uint32_t production, std::uint32_t entry, bool held, bool flushed,
-             std::string_view indent) {
-    if (entry == kNone) return;
-    const unsigned shapes = _p.shapes[production];
-    const std::uint32_t element = _p.element(entry);
-    // The record of a production that reads nothing stands behind the trivia
-    // kept before the token in hand: where that token begins.
-    const bool empties = (shapes & kRecordEmpty) != 0;
-    const std::string_view takes = empties ? "open = " : "";
-    if (shapes == kRecordEmpty && !flushed) line(indent, "m.settle();\n", indent, "m.make_room();");
-    const std::string_view at = _cfg.productions[production].rhs.empty() && held
-                                    ? "m.lexing().src + tok.begin(m.lexing())"
-                                    : "p";
-    if ((shapes & kRecordLone) == 0) {
-      line(indent, takes, "m.template close<", shapes, ">(open, ", element, ", ", at, ");");
-      return;
-    }
-    fuse_of(entry);
-    line(indent, takes, "m.template close<", shapes, ">(open, ", element, ", ", at, ", fuse",
-         element, ");");
-  }
-
-  // The number of the function that fuses a lone child under a record of
-  // `entry`.
+  // The number of the fuse of a lone child under a record of `entry`.
   std::uint16_t fuse_of(std::uint32_t entry) {
     return _fuses.try_emplace(entry, static_cast<std::uint16_t>(_fuses.size() + 1)).first->second;
   }
@@ -927,7 +856,7 @@ class Emitter {
     if (_p.matcher.matched[terminal] || trivia == Trivia::hidden) line(indent, "return Token{p, kLexWalk};");
     else if (trivia != Trivia::ignored) line(indent, "return token(begin, ", end, ", ", terminal, ");");
     // A dropped token: the lexer reads on, from a word of its own by a tail call.
-    else if (_ownWord) line(indent, "CURSIV_MUSTTAIL return lex(m, ", end, ", mode);");
+    else if (_ownWord) line(indent, "CURSIV_READ_ON(", end, ");");
     else line(indent, "p = ", end, ";\n", indent, "continue;");
   }
 
@@ -1123,7 +1052,7 @@ class Emitter {
 
   void openings() {
     for (std::size_t id = 0; id < _openingBodies.size(); ++id) {
-      // Out of the lexer, which stays small enough to stand in the states.
+      // Out of the lexer, which stays small enough to stand in the steps.
       line("CURSIV_NOINLINE inline Token open", id,
            "(Machine& m, const char* p, [[maybe_unused]] ::std::uint32_t mode) {");
       line("  [[maybe_unused]] const auto begin = static_cast<TextOffset>(p - m.src);");
@@ -1210,14 +1139,16 @@ class Emitter {
     if (bodies.size() + 2 > 0x100) table("::std::uint16_t", "kLexArms", arms);
     else table("::std::uint8_t", "kLexArms", std::vector<std::uint8_t>(arms.begin(), arms.end()));
     array("::std::uint32_t", "kLexRow", rowAt);
-    // The lexer stands in the code of each state while its copies hold at
-    // most `kInlineArms` arms; it is called otherwise.
+    // The lexer stands in each step that reads a token while its copies hold
+    // at most `kInlineArms` arms; it is called otherwise.
     constexpr std::size_t kInlineArms = 1024;
-    std::size_t readers = 0;
-    for (std::uint32_t s = 0; s < _p.states.size(); ++s) readers += _special[s] && _lexAs[s] == s;
+    std::set<std::uint16_t> reading;
+    for (std::uint32_t s = 0; s < _p.states.size(); ++s)
+      if (_p.states[s].reduce == kNone) reading.insert(_enters[s]);
+    const std::size_t readers = reading.size();
     const bool inlined = readers != 0 && (bodies.size() + 2) * readers <= kInlineArms;
     // A word is read out of the switch; where the switch stands in the
-    // states, one that spells nothing or drops its token stays in it.
+    // steps, one that spells nothing or drops its token stays in it.
     wordOf.resize(bodies.size(), kNone);
     const auto ignored = [&](auto t) { return t != kNoToken && _p.terminalTrivia[t] == Trivia::ignored; };
     if (!inlined) line("Token lex(Machine& m, const char* p, ::std::uint32_t mode);");
@@ -1261,7 +1192,8 @@ class Emitter {
       line("      case ", id + 2, ": {");
       // A called lexer goes on by a tail call: it keeps nothing across it.
       if (bodies[id].callee.empty()) _out += bodies[id].code;
-      else line("        ", inlined ? "" : "CURSIV_MUSTTAIL ", "return ", bodies[id].callee, "(m, p, mode);");
+      else if (inlined) line("        return ", bodies[id].callee, "(m, p, mode);");
+      else line("        CURSIV_READ_WORD(", bodies[id].callee, ");");
       line("      }");
     }
     line("      case 0: break;");
@@ -1280,29 +1212,22 @@ class Emitter {
     line("");
   }
 
-  // The states that read a token have code of their own over the machine
-  // where the cells of all of them fit in a budget: none has otherwise.
-  void own_states() {
-    constexpr std::size_t kOwnCells = std::size_t{1} << 15;
-    std::size_t cells = 0;
-    for (const PackedState& state : _p.states)
-      if (state.reduce == kNone) cells += state.actions.size() + 1;
-    _special.resize(_p.states.size());
-    for (std::uint32_t s = 0; s < _p.states.size(); ++s)
-      _special[s] = cells <= kOwnCells && _p.states[s].reduce == kNone;
-  }
-
   // The step an expression names, a function over machine `M`; `stepping`
   // names the one a machine that steps takes, where it is another, and
-  // `reduces` the production that one reduces.
+  // `reduces` the production it reduces: a step reduces one production.
   std::uint16_t step_of(const std::string& expression, const std::string& stepping = {},
                         std::uint32_t reduces = kNone) {
     const auto [at, fresh] =
-        _stepOf.try_emplace(expression, static_cast<std::uint16_t>(_steps.size()));
+        _stepOf.try_emplace({expression, reduces}, static_cast<std::uint16_t>(_steps.size()));
     if (fresh) {
       if (_steps.size() == 0xFFFF) throw Refused("the grammar takes too many kinds of steps");
-      _steps.push_back(expression);
-      _stepping.push_back(stepping.empty() ? expression : stepping);
+      // An expression names its own step by `@`.
+      std::string written = expression;
+      const std::string index = std::to_string(_steps.size());
+      for (auto at = written.find('@'); at != std::string::npos; at = written.find('@'))
+        written.replace(at, 1, index);
+      _stepping.push_back(stepping.empty() ? written : stepping);
+      _steps.push_back(std::move(written));
       _stepReduces.push_back(reduces);
     }
     return at->second;
@@ -1312,9 +1237,9 @@ class Emitter {
                                  kAccepted = 4, kSplit = 5, kPass = 6, kReread = 7,
                                  kRetryTie = 8, kTiedArm = 9, kRivalArm = 10;
 
-  // The steps that reduce a production: its own code over the machine, and
-  // the general reduction for its form, with its tests, over a machine that
-  // steps.
+  // The steps that reduce a production: over the machine, one written for its
+  // reduction, which `@` numbers; over a machine that steps, the general one
+  // for its form, with its tests.
   std::pair<std::string, std::string> reductions_of(std::uint32_t production, bool held) {
     const Production& prod = _cfg.productions[production];
     const std::vector<PackedGoto>& gotos = _p.gotos[prod.lhs];
@@ -1325,22 +1250,100 @@ class Emitter {
       if (held && _p.states[gotos.front().target].reduce != kNone) form |= kThenReduces;
     }
     if (held && names(prod)) form |= kGivesBack;
-    std::string stepping = "&Drive<L>::template reduce<M, " + std::string(held ? "true, " : "false, ") +
-                           std::to_string(form);
-    if (held && tested(production)) stepping += ", &holds" + std::to_string(production) + "<M>";
-    return {"&" + reduce_label(production, held), stepping + ">"};
+    if (!prod.takes.empty()) form |= kTakes;
+    const auto step = [&](unsigned as) {
+      return "&Drive<L>::template reduce<M, " + std::string(held ? "true, " : "false, ") +
+             std::to_string(as) + ", " + std::to_string(_p.shapes[production]);
+    };
+    const bool holds = held && tested(production);
+    std::string tests;
+    if (holds) {
+      _refutes = true;
+      tests = ", &holds" + std::to_string(production) + "<M>";
+    }
+    reached(production, held);
+    // The machine's form where sites end a turn of a list: all, or some.
+    unsigned machine = form;
+    if (_ends[prod.lhs].all.list != kNone) machine = (form & ~unsigned{kThenReduces}) | kStays;
+    else if ((form & kOneSite) == 0 && _ends[prod.lhs].some) machine |= kMayStay;
+    return {step(machine) + tests + (holds ? ", &kR@>" : ", nullptr, &kR@>"),
+            step(form) + tests + ">"};
+  }
+  // The turn of a list that a transition from `from` to `tail` ends: the
+  // list's state and the `drops` frames over it, where that state is one.
+  struct Turn {
+    std::uint32_t list = kNone;
+    std::uint32_t drops = 0;
+  };
+  // As the list of a turn: the stack tells it.
+  static constexpr std::uint32_t kSomeList = kNone - 1;
+  Turn turn_at(std::uint32_t from, std::uint32_t tail) {
+    if (_tails[tail] == 0) return {};
+    const auto [known, fresh] = _turns.try_emplace({from, tail});
+    if (!fresh) return known->second;
+    constexpr std::size_t kFewStates = 16;
+    const std::uint32_t drops = _tails[tail] - 1;
+    std::vector<std::uint32_t> under{from}, below;
+    for (std::uint32_t k = 0; k < drops && under.size() <= kFewStates; ++k) {
+      below.clear();
+      for (const std::uint32_t s : under)
+        below.insert(below.end(), _preds[s].begin(), _preds[s].end());
+      std::ranges::sort(below);
+      below.erase(std::ranges::unique(below).begin(), below.end());
+      under.swap(below);
+    }
+    if (under.size() == 1 && _p.states[under.front()].reduce == kNone)
+      known->second = {under.front(), drops};
+    return known->second;
+  }
+  // Where state `s` only reduces a turn of a list, `L -> L ..`, with no
+  // record, no test and no entry given: the frames it drops plus one.
+  std::uint32_t tail_of(std::uint32_t s) const {
+    const PackedState& state = _p.states[s];
+    if (state.reduce == kNone || state.rereads() || s >= 1u << 24) return 0;
+    const Production& prod = _cfg.productions[state.reduce];
+    if (prod.rhs.size() < 2 || prod.rhs.size() > 0x100 || prod.rhs[0] != nonterminal(prod.lhs) ||
+        prod.tested() || prod.implied || prod.start || !prod.takes.empty() ||
+        !std::ranges::all_of(_p.gotos[prod.lhs], [&](const PackedGoto& site) {
+          return _p.closed(prod.entry, site.entry) == kNone;
+        }))
+      return 0;
+    return static_cast<std::uint32_t>(prod.rhs.size() - 1);
   }
   std::uint16_t reduce_step(std::uint32_t production, bool held) {
-    const auto [own, stepping] = reductions_of(production, held);
-    return step_of(own, stepping, production);
+    const auto [machine, stepping] = reductions_of(production, held);
+    return step_of(machine, stepping, production);
   }
 
-  // The step that enters state `s` with no token: the reader of its mode and
-  // its row, or its own code over the machine.
+  // A step's expression, each step it names by the state it enters, `$state;`,
+  // given its number.
+  std::string entering(std::string expression) const {
+    for (auto at = expression.find('$'); at != std::string::npos; at = expression.find('$', at)) {
+      const auto end = expression.find(';', at);
+      const auto state = std::stoul(expression.substr(at + 1, end - at - 1));
+      expression.replace(at, end - at + 1, std::to_string(_enters[state]));
+    }
+    return expression;
+  }
+
+  // The step that enters state `s` with no token: over the machine, a read
+  // written for its mode, per state for its row, and for the cells of a row
+  // of few.
   static constexpr std::string_view kRead = "&Drive<L>::template read<M>";
   std::string entered(std::uint32_t s) {
+    constexpr std::size_t kFewCells = 3;
     _read[_p.states[s].mode] = true;
-    return _special[s] ? "&S" + std::to_string(_lexAs[s]) : std::string(kRead);
+    std::string read = "&Drive<L>::template read<M, " + std::to_string(_p.states[s].mode);
+    if (_perState) {
+      const Row& row = _rows[s];
+      read += ", " + std::to_string(_bases[s]);
+      if (row.cells.size() <= kFewCells) {
+        read += ", " + std::to_string(_loose[row.otherwise].step);
+        for (const Cell& cell : row.cells)
+          read += ", " + std::to_string(cell.terminal) + ", " + std::to_string(cell.step);
+      }
+    }
+    return read + ">";
   }
 
   // A cell no row holds, written once: its place among the cells.
@@ -1353,57 +1356,43 @@ class Emitter {
     return at->second;
   }
 
-  // The cell that shifts the token in hand, then enters the state reached.
-  Cell shift_cell(const PackedAction& action) {
+  // The cell that shifts the token in hand: the machine's shift goes on to
+  // the step that enters the state reached, `$state;`, and per state knows
+  // that state and its element. A turn of a list ended, its state stays.
+  Cell shift_cell(std::uint32_t s, const PackedAction& action) {
+    const std::string shift = "&Drive<L>::template shift<M" + shift_how(action);
+    std::string machine = shift + ", ";
+    if (const Turn turn = turn_at(s, action.value); turn.list != kNone) {
+      machine += (_perState ? "$" + std::to_string(turn.list) + ";"
+                            : std::to_string(step_of(entered(turn.list), std::string(kRead)))) +
+                 ", " + engine("kInPlace") + ", " +
+                 (_perState ? std::to_string(_p.element(action.entry)) : engine("kNoStack")) +
+                 ", " + std::to_string(turn.drops);
+    } else if (_perState) {
+      machine += "$" + std::to_string(action.value) + ";, " + std::to_string(action.value) + ", " +
+                 std::to_string(_p.element(action.entry));
+    } else {
+      const std::uint32_t lone = _p.states[action.value].reduce;
+      machine += std::to_string(lone == kNone ? step_of(entered(action.value), std::string(kRead))
+                                              : reduce_step(lone, false));
+    }
     return {.value = action.value,
             .terminal = action.terminal,
-            .step = step_of("&Drive<L>::template shift<M, nullptr, 0" + shift_how(action) + ">"),
+            .step = step_of(machine + ">", shift + ">"),
             .element = static_cast<std::uint16_t>(_p.element(action.entry)),
-            .extra = action.gap,
-            .shifts = &action};
+            .extra = action.gap};
   }
   std::string shift_how(const PackedAction& action) const {
     static constexpr std::string_view kNestings[] = {"none", "indent", "dedent", "open", "close"};
     return std::string(action.gap != kAnyGap ? ", true" : ", false") + ", Nesting::" +
            std::string(kNestings[static_cast<unsigned>(_cfg.nesting(action.terminal))]);
   }
-  // The same shift as a state's own code writes it: it names the state, its
-  // element, and what enters it, its lexer or its reduction where it reads
-  // no token.
-  std::string own_shift(const PackedAction& action) {
-    const std::uint32_t reduction = _p.states[action.value].reduce;
-    const std::size_t popped = reduction == kNone || _p.shapes[reduction] == kRecordEmpty
-                                   ? 0
-                                   : _cfg.productions[reduction].rhs.size();
-    std::string next, called;
-    if (reduction == kNone) {
-      next = entered(action.value);
-    } else if (popped == 0) {
-      called = reduce_label(reduction, false);
-      next = "&" + called;
-    } else {
-      _afterShift.insert(reduction);
-      reduce_label(reduction, false);
-      called = "B" + std::to_string(reduction);
-      next = "&" + called;
-    }
-    std::string written = "Drive<L>::template shift<M, " + next + ", " + std::to_string(popped) +
-                          shift_how(action) + ", " + std::to_string(action.value) + ", " +
-                          std::to_string(_p.element(action.entry)) + ">";
-    if (!called.empty() && _calls.emplace(any_element(written), called).second) use(called, {});
-    return written;
-  }
-  // A written shift whatever its element: what several cells may share.
-  static std::string any_element(const std::string& written) {
-    return written.substr(0, written.rfind(", ")) + ">";
-  }
-
   // The cell of one action of state `s`; `rows` names its row per mode.
   Cell action_cell(std::uint32_t s, const PackedAction& action,
                          const std::map<std::uint16_t, std::uint32_t>& rows) {
     switch (action.kind) {
       case PackedAction::Kind::shift:
-        return shift_cell(action);
+        return shift_cell(s, action);
       case PackedAction::Kind::reduce:
         return {.terminal = action.terminal, .step = reduce_step(action.value, true)};
       case PackedAction::Kind::accept:
@@ -1506,20 +1495,16 @@ class Emitter {
         common = it;
     std::uint32_t otherwise = 0;
     for (auto it = reduces.begin(); it != reduces.end(); ++it) {
-      const auto [own, stepping] = reductions_of(it->first, true);
+      const auto [machine, stepping] = reductions_of(it->first, true);
       if (it == common) {
         const auto followed = [](const std::string& next) {
           return "&Drive<L>::template followed<M, " + next + ">";
         };
-        if (!_stepOf.contains(followed(own))) use(reduce_label(it->first, true), {});
-        otherwise = loose({.step = step_of(followed(own), followed(stepping), it->first)});
-        _rows[s].common = reduce_label(it->first, true);
-        for (const std::uint16_t terminal : it->second)
-          if (_cfg.unread == 0 || terminal != _cfg.unread) _rows[s].commons.push_back(terminal);
+        otherwise = loose({.step = step_of(followed(machine), followed(stepping), it->first)});
       }
       for (const std::uint16_t terminal : it->second)
         if (it != common || (_cfg.unread != 0 && terminal == _cfg.unread))
-          plain[terminal] = {.terminal = terminal, .step = step_of(own, stepping, it->first)};
+          plain[terminal] = {.terminal = terminal, .step = step_of(machine, stepping, it->first)};
     }
     for (const std::uint16_t terminal : state.passes)
       plain[terminal] = {.value = otherwise, .terminal = terminal, .step = kPass};
@@ -1609,63 +1594,12 @@ class Emitter {
     }
   }
 
-  // States whose rows act alike share the code that takes their token, and
-  // those of one mode among them the code that reads it. Then the step that
-  // enters each state, and the shifts the shared code writes.
-  void own_code() {
-    using Key = std::tuple<std::uint32_t, std::uint32_t, std::string, std::uint32_t>;
-    std::map<Key, std::uint32_t> dispatches;
-    std::map<std::pair<std::uint32_t, std::uint16_t>, std::uint32_t> lexers;
-    _dispatchAs.resize(_p.states.size());
-    _lexAs.resize(_p.states.size());
-    for (std::uint32_t s = 0; s < _p.states.size(); ++s) {
-      if (!_special[s]) continue;
-      const Row& row = _rows[s];
-      _dispatchAs[s] = dispatches.try_emplace(Key{_bases[s], row.otherwise, row.common,
-                                                  row.common.empty() ? 0u : _p.followOf[s]}, s)
-                           .first->second;
-      _lexAs[s] = lexers.try_emplace({_dispatchAs[s], _p.states[s].mode}, s).first->second;
-    }
-    // A row of six shifts or more that several states take is written once.
-    std::map<std::vector<std::pair<std::uint16_t, std::string>>, std::vector<std::uint32_t>> rows;
-    for (std::uint32_t s = 0; s < _p.states.size(); ++s) {
-      if (_p.states[s].reduce != kNone) continue;
-      _enters[s] = step_of(entered(s), std::string(kRead));
-      if (!_special[s] || _dispatchAs[s] != s) continue;
-      std::vector<std::pair<std::uint16_t, std::string>> row;
-      for (const Cell& cell : _rows[s].cells) {
-        if (cell.shifts != nullptr) {
-          const auto at = _written.emplace(_bases[s] + cell.terminal, own_shift(*cell.shifts)).first;
-          row.emplace_back(cell.terminal, at->second);
-          continue;
-        }
-        // The shift behind cells that ask of the token first.
-        std::size_t behind = cell.value;
-        for (const Cell* asks = &cell; asks->step < kAsks; asks = &_cells[behind]) behind = asks->value;
-        if (cell.step < kAsks && _cells[behind].shifts != nullptr && !_written.contains(behind))
-          ++_directs[any_element(_written.emplace(behind, own_shift(*_cells[behind].shifts)).first->second)];
-      }
-      if (row.size() >= 6) rows[std::move(row)].push_back(s);
-    }
-    for (const auto& [row, states] : rows)
-      if (states.size() > 1)
-        for (const std::uint32_t s : states) _shiftRow.emplace(s, states.front());
-    // How many places write each shift: one shared by several is a function.
-    for (std::uint32_t s = 0; s < _p.states.size(); ++s) {
-      if (!_special[s] || _dispatchAs[s] != s) continue;
-      const auto shared = _shiftRow.find(s);
-      if (shared != _shiftRow.end() && shared->second != s) continue;
-      for (const Cell& cell : _rows[s].cells)
-        if (cell.shifts != nullptr) ++_directs[any_element(_written.at(_bases[s] + cell.terminal))];
-    }
-  }
-
   // A state that only reduces is entered by its reduction: with no token
   // where a shift or a reduction made with none leads to it, with one in
   // hand where a reduction made with one does. Entered otherwise, it refuses.
   void lone_states() {
     const auto enter = [&](std::uint32_t state, bool held) {
-      if (const std::uint32_t lone = _p.states[state].reduce; lone != kNone) reduce_label(lone, held);
+      if (const std::uint32_t lone = _p.states[state].reduce; lone != kNone) reached(lone, held);
     };
     enter(0, false);
     for (const std::uint32_t reads : _p.conditions) enter(reads, false);
@@ -1685,14 +1619,8 @@ class Emitter {
       const std::uint32_t lone = _p.states[s].reduce;
       if (lone == kNone) continue;
       _enters[s] = kRefuse;
-      if (_reduced.contains({lone, false})) {
-        _enters[s] = reduce_step(lone, false);
-        _entries.insert(reduce_label(lone, false));
-      }
-      if (_reduced.contains({lone, true})) {
-        _rows[s].otherwise = loose({.step = reduce_step(lone, true)});
-        _entries.insert(reduce_label(lone, true));
-      }
+      if (_reduced.contains({lone, false})) _enters[s] = reduce_step(lone, false);
+      if (_reduced.contains({lone, true})) _rows[s].otherwise = loose({.step = reduce_step(lone, true)});
     }
   }
 
@@ -1711,17 +1639,16 @@ class Emitter {
   }
 
   // Rows of ascending columns laid over one array, no two on one slot: per
-  // row its offset, and in `width` the slots used. With `checked`, a slot
-  // names its column: no two rows then share an offset. A row of no column
-  // stands past the last slot.
+  // row its offset, and in `width` the slots used. A row of no column stands
+  // past the last slot.
   static std::vector<std::uint32_t> comb(const std::vector<std::vector<std::uint32_t>>& rows,
-                                         bool checked, std::size_t& width) {
+                                         std::size_t& width) {
     std::vector<std::uint32_t> order;
     for (std::uint32_t r = 0; r < rows.size(); ++r)
       if (!rows[r].empty()) order.push_back(r);
     std::ranges::stable_sort(order, std::greater{}, [&](std::uint32_t r) { return rows[r].size(); });
-    // The slots used and the offsets taken, a bit each.
-    std::vector<std::uint64_t> used, taken;
+    // The slots used, a bit each.
+    std::vector<std::uint64_t> used;
     const auto test = [](const std::vector<std::uint64_t>& bits, std::size_t at) {
       return at / 64 < bits.size() && ((bits[at / 64] >> (at % 64)) & 1) != 0;
     };
@@ -1751,14 +1678,12 @@ class Emitter {
       std::size_t& from = next[columns];
       std::size_t at = std::max(from, lowest > first ? lowest - first : 0);
       const auto fits = [&] {
-        if (checked && test(taken, at)) return false;
         for (std::size_t w = 0; w < mask.size(); ++w)
           if ((window(at + first + 64 * w) & mask[w]) != 0) return false;
         return true;
       };
       while (!fits()) ++at;
       for (const std::uint32_t c : columns) set(used, at + c);
-      if (checked) set(taken, at);
       from = at + 1;
       base[r] = static_cast<std::uint32_t>(at);
       width = std::max(width, at + columns.back() + 1);
@@ -1770,33 +1695,35 @@ class Emitter {
   }
 
   // The cells, loose ones first, then the rows laid over a comb, then the
-  // arms. Rows that hold the same cells share their slots.
+  // arms. A row holds its `otherwise` at its base and the cell of terminal
+  // `t` after `t` more; rows that act alike share their slots.
   void pack() {
     const std::size_t nterms = _cfg.terminals.size();
     std::map<std::vector<std::array<std::uint32_t, 3>>, std::uint32_t> known;
     std::vector<std::uint32_t> same(_rows.size());
     std::vector<std::vector<std::uint32_t>> columns(_rows.size());
     for (std::uint32_t r = 0; r < _rows.size(); ++r) {
-      std::vector<std::array<std::uint32_t, 3>> key;
+      std::vector<std::array<std::uint32_t, 3>> key{{_rows[r].otherwise, 0, 0}};
       for (const Cell& cell : _rows[r].cells)
         key.push_back({cell.value, std::uint32_t{cell.terminal} << 16 | cell.step, cell.wide()});
       same[r] = known.try_emplace(std::move(key), r).first->second;
-      if (same[r] == r)
-        for (const Cell& cell : _rows[r].cells) columns[r].push_back(cell.terminal);
+      if (same[r] != r) continue;
+      columns[r].push_back(0);
+      for (const Cell& cell : _rows[r].cells) columns[r].push_back(cell.terminal + 1u);
     }
     std::size_t width = 0;
-    const std::vector<std::uint32_t> bases = comb(columns, true, width);
+    const std::vector<std::uint32_t> bases = comb(columns, width);
     _cells = _loose;
     const std::size_t rowsAt = _cells.size();
-    _cells.resize(rowsAt + width + nterms + 1);
+    _cells.resize(rowsAt + width + nterms + 2);
     for (std::uint32_t r = 0; r < _rows.size(); ++r) {
       _bases.push_back(static_cast<std::uint32_t>(rowsAt + bases[same[r]]));
-      if (same[r] == r)
-        for (const Cell& cell : _rows[r].cells) _cells[_bases[r] + cell.terminal] = cell;
+      if (same[r] != r) continue;
+      _cells[_bases[r]] = _loose[_rows[r].otherwise];
+      for (const Cell& cell : _rows[r].cells) _cells[_bases[r] + 1 + cell.terminal] = cell;
     }
     _armsAt = _cells.size();
     _cells.insert(_cells.end(), _arms.begin(), _arms.end());
-    if (_cells.size() > kNone) throw Refused("the grammar's states act in too many ways");
   }
 
   // A tie check as the code and the tables write it.
@@ -1825,23 +1752,26 @@ class Emitter {
     table("::std::uint64_t", "kLrCells", words, 12);
     table("::std::uint32_t", "kLrOperands", operands);
     std::vector<std::string> values;
-    for (std::uint32_t r = 0; r < _rows.size(); ++r)
-      values.push_back("{" + std::to_string(_bases[r]) + "," + std::to_string(_rows[r].otherwise) + "}");
-    table(engine("ActionRow"), "kLrRows", values, 12);
+    table("::std::uint32_t", "kLrRows", _bases);
     table("::std::uint16_t", "kLrEnters", _enters);
 
     // Per state, where each nonterminal reduced over it leads.
-    std::vector<std::vector<std::pair<std::uint32_t, std::uint64_t>>> leads(_p.states.size());
+    std::vector<std::vector<std::pair<std::uint32_t, std::array<std::uint64_t, 2>>>> leads(_p.states.size());
     for (std::uint32_t nt = 0; nt < _p.gotos.size(); ++nt) {
       const std::vector<std::uint32_t>& sites = sites_of(nt);
       for (const PackedGoto& site : _p.gotos[nt]) {
         const auto id = static_cast<std::uint16_t>(std::ranges::lower_bound(sites, site.entry) - sites.begin());
+        const Turn turn = turn_at(site.from, site.target);
+        const std::uint32_t to = turn.list != kNone ? turn.list : site.target;
+        const std::uint64_t tail = turn.list != kNone ? site.target << 8 | (turn.drops + 1) : 0;
         leads[site.from].emplace_back(
-            nt, cell_word(site.target, _enters[site.target],
-                     id | (_p.states[site.target].rereads() ? GotoCell::kRereads : 0)));
+            nt, std::array<std::uint64_t, 2>{
+                    cell_word(to, _enters[to],
+                              id | (_p.states[to].rereads() ? GotoCell::kRereads : 0)),
+                    _bases[to] | tail << 32});
       }
     }
-    std::map<std::vector<std::pair<std::uint32_t, std::uint64_t>>, std::uint32_t> led;
+    std::map<std::vector<std::pair<std::uint32_t, std::array<std::uint64_t, 2>>>, std::uint32_t> led;
     std::vector<std::uint32_t> like(leads.size());
     std::vector<std::vector<std::uint32_t>> columns(leads.size());
     std::size_t width = 0;
@@ -1851,11 +1781,12 @@ class Emitter {
       if (like[s] == s)
         for (const auto& [nt, cell] : leads[s]) columns[s].push_back(nt);
     }
-    const std::vector<std::uint32_t> gotoBases = comb(columns, false, width);
-    words.assign(std::max<std::size_t>(width, 1), 0);
+    const std::vector<std::uint32_t> gotoBases = comb(columns, width);
+    words.assign(2 * std::max<std::size_t>(width, 1), 0);
     for (std::uint32_t s = 0; s < leads.size(); ++s)
       if (like[s] == s)
-        for (const auto& [nt, cell] : leads[s]) words[gotoBases[s] + nt] = cell;
+        for (const auto& [nt, cell] : leads[s])
+          std::ranges::copy(cell, words.begin() + 2 * (gotoBases[s] + nt));
     table("::std::uint64_t", "kLrGotos", words, 12);
     std::vector<std::uint32_t> gotoBase;
     for (std::uint32_t s = 0; s < leads.size(); ++s) gotoBase.push_back(gotoBases[like[s]]);
@@ -1894,152 +1825,98 @@ class Emitter {
                        std::to_string(again.mode) + "}");
     table(engine("ReadAgain"), "kLrAgains", values, 6, "{}");
 
-    // Per step, the production it reduces over a machine that steps; its
-    // records, one per call site where they differ, each run written once.
-    std::map<std::vector<std::uint32_t>, std::uint32_t> runs;
-    std::vector<std::uint32_t> records;
+    // Per step, the production it reduces. Its record at each call site,
+    // with the number of the fuse under it.
+    std::vector<std::vector<std::array<std::uint32_t, 2>>> closes(_stepReduces.size());
+    for (std::size_t step = 0; step < _stepReduces.size(); ++step) {
+      const std::uint32_t production = _stepReduces[step];
+      if (production == kNone) continue;
+      const Production& prod = _cfg.productions[production];
+      for (const std::uint32_t site : sites_of(prod.lhs)) {
+        const std::uint32_t entry = _p.closed(prod.entry, site);
+        const bool lone = entry != kNone && (_p.shapes[production] & kRecordLone) != 0;
+        closes[step].push_back({entry == kNone ? std::uint32_t{kNoElement} : _p.element(entry),
+                                lone ? std::uint32_t{fuse_of(entry)} : 0});
+      }
+      for (const std::uint32_t take : prod.takes)
+        if (take != kNone) fuse_of(take);
+    }
+    // The fuses by number, laid over a comb: where the row of each begins,
+    // and at an inner element's place in it the fused one.
+    std::vector<std::vector<std::uint32_t>> inners(_fuses.size() + 1);
+    for (const auto& [outer, number] : _fuses) {
+      const auto begin = _p.fused.lower_bound({outer, 0});
+      const auto end = _p.fused.upper_bound({outer, kNone});
+      for (auto it = begin; it != end; ++it) inners[number].push_back(_p.element(it->first.second));
+      std::ranges::sort(inners[number]);
+    }
+    std::size_t slots = 0;
+    const std::vector<std::uint32_t> fuseAt = comb(inners, slots);
+    std::vector<std::uint32_t> map(std::max<std::size_t>(slots, 1));
+    for (const auto& [outer, number] : _fuses) {
+      const auto begin = _p.fused.lower_bound({outer, 0});
+      const auto end = _p.fused.upper_bound({outer, kNone});
+      for (auto it = begin; it != end; ++it)
+        map[fuseAt[number] + _p.element(it->first.second)] = _p.element(it->second);
+    }
+    // The records, one per call site where they differ, each run written
+    // once: a record, then the row of its fuse.
+    std::map<std::vector<std::uint64_t>, std::uint32_t> runs;
+    std::vector<std::uint64_t> records;
     values.clear();
-    for (const std::uint32_t production : _stepReduces) {
+    for (std::size_t step = 0; step < _stepReduces.size(); ++step) {
+      const std::uint32_t production = _stepReduces[step];
       if (production == kNone) {
         values.emplace_back("{}");
         continue;
       }
       const Production& prod = _cfg.productions[production];
-      std::vector<std::uint32_t> run;
-      for (const std::uint32_t site : sites_of(prod.lhs)) {
-        const std::uint32_t entry = _p.closed(prod.entry, site);
-        run.push_back(entry == kNone ? std::uint32_t{kNoElement}
-                      : _p.element(entry) | ((_p.shapes[production] & kRecordLone) != 0
-                                                 ? std::uint32_t{fuse_of(entry)} << 16
-                                                 : 0));
-      }
+      std::vector<std::uint64_t> run;
+      for (const auto& [element, fuse] : closes[step])
+        run.push_back(element | std::uint64_t{fuse != 0 ? fuseAt[fuse] : 0} << 32);
       const bool bySite = std::ranges::adjacent_find(run, std::not_equal_to{}) != run.end();
-      if (!bySite) run.assign(1, run.empty() ? std::uint32_t{kNoElement} : run.front());
-      const auto [at, fresh] = runs.try_emplace(run, static_cast<std::uint32_t>(records.size()));
-      if (fresh) records.insert(records.end(), run.begin(), run.end());
+      if (!bySite) run.assign(1, run.empty() ? std::uint64_t{kNoElement} : run.front());
+      std::uint64_t record = run.front();
+      if (bySite) {
+        const auto [at, fresh] = runs.try_emplace(run, static_cast<std::uint32_t>(records.size()));
+        if (fresh) records.insert(records.end(), run.begin(), run.end());
+        record = at->second;
+      }
       // Where every site leads to one state, its goto, and the cell a token in
       // hand takes there where that state only reduces.
       const std::vector<PackedGoto>& gotos = _p.gotos[prod.lhs];
       const bool one = !gotos.empty() && _single[prod.lhs];
       const std::uint32_t target = one ? gotos.front().target : 0;
-      const std::uint32_t next = one && _p.states[target].reduce != kNone ? _rows[target].otherwise : 0;
-      values.push_back("{" + std::to_string(production) + "," + std::to_string(prod.lhs) + "," +
-                       std::to_string(at->second) + "," + std::to_string(next) + ",{" +
-                       std::to_string(target) + "," + std::to_string(one ? _enters[target] : 0) + "," +
-                       std::to_string(one && _p.states[target].rereads() ? GotoCell::kRereads : 0) +
-                       "}," + std::to_string(prod.rhs.size()) + "," +
-                       std::to_string(_p.shapes[production]) + (bySite ? ",true}" : ",false}"));
+      const Turn turn = _ends[prod.lhs].all;
+      const bool told = turn.list == kSomeList;
+      const std::uint32_t to = turn.list != kNone && !told ? turn.list : target;
+      const std::uint32_t next =
+          one && _p.states[target].reduce != kNone ? _rows[target].otherwise : 0;
+      // The records its symbols give an entry to.
+      std::string takes;
+      std::size_t taken = 0;
+      for (std::size_t at = 0; at < prod.takes.size(); ++at)
+        if (prod.takes[at] != kNone) {
+          takes += (taken++ == 0 ? "{" : ",{") + std::to_string(at) + "," +
+                   std::to_string(fuseAt[fuse_of(prod.takes[at])]) + "}";
+        }
+      values.push_back(
+          "{" + std::to_string(production) + "," + std::to_string(prod.lhs) + "," +
+          std::to_string(static_cast<std::uint32_t>(record)) + "," + std::to_string(record >> 32) +
+          "," + std::to_string(next) + ",{" + (told ? engine("kNoStack") : std::to_string(to)) +
+          "," + std::to_string(one && !told ? _enters[to] : 0) + "," +
+          std::to_string(one && !told && _p.states[to].rereads() ? GotoCell::kRereads : 0) + "," +
+          std::to_string(one && !told ? _bases[to] : 0) +
+          (turn.list != kNone ? "," + std::to_string(target) + "," + std::to_string(turn.drops + 1)
+                              : std::string()) +
+          "}," + std::to_string(prod.rhs.size()) + "," +
+          std::to_string(next != 0 ? _cells[next].step : 0) + (bySite ? ",true" : ",false") +
+          (taken != 0 ? "," + std::to_string(taken) + ",{" + takes + "}" : std::string()) + "}");
     }
     table(engine("Reduction"), "kLrReductions", values, 4, "{}");
-    table("::std::uint32_t", "kLrRecords", records);
-  }
-
-  // The code of the states that have their own over the machine.
-  void machine_code() {
-    const std::size_t nterms = _cfg.terminals.size();
-    const std::vector<Cell>& cells = _cells;
-    // A state's own code: its lexer, then each cell of its row taken where
-    // its token is read.
-    std::string caller;
-    const auto taken = [&](std::size_t at) {
-      const std::string& step = _steps[cells[at].step];
-      // A plain reduction is called by its label.
-      if (step.starts_with("&R")) use(step.substr(1), caller);
-      const auto written = _written.find(at);
-      std::string expression = written == _written.end() ? step : written->second;
-      // A shift several cells take is written once, whatever their elements.
-      if (written != _written.end())
-        if (const auto shifts = _directs.find(any_element(expression));
-            shifts != _directs.end() && shifts->second > 1) {
-          expression = shifts->first;
-          expression.replace(expression.find("shift<"), 5, "shared");
-        }
-      return "CURSIV_MUSTTAIL return " + expression.substr(expression.front() == '&' ? 1 : 0) +
-             "(m, p, " + std::to_string(at) + ", tokenEnd, tokenHead);";
-    };
-    for (std::uint32_t s = 0; s < _p.states.size(); ++s) {
-      if (!_special[s]) continue;
-      if (_dispatchAs[s] == s) {
-        caller = "H" + std::to_string(s);
-        line("CURSIV_NOINLINE CURSIV_PRESERVE_NONE Exit H", s,
-             "(Machine& m, const char* p, NodeCount, const char* tokenEnd, ::std::uint64_t tokenHead) {");
-        line("  switch (Token{tokenEnd, tokenHead}.terminal()) {");
-        const auto shared = _shiftRow.find(s);
-        // A cell that asks of the token is written in place, then the cell
-        // behind it.
-        const auto act = [&](std::size_t at) {
-          for (;; at = cells[at].value) {
-            const Cell& cell = cells[at];
-            if (cell.step == kTie) {
-              const TieCheck& check = _ties[cell.wide()];
-              line("      if (D::ties(m, Token{tokenEnd, tokenHead}, ", tie_check(check),
-                   ")) return m.split(Token{tokenEnd, tokenHead}, ", check.first, ", ", check.count, ", ",
-                   check.rereads, ");");
-            } else if (cell.step == kNewline) {
-              line("      if (m.indented.depth != 0 && tokenEnd != m.src + Token{tokenEnd, tokenHead}.begin(m)) "
-                   "[[unlikely]] CURSIV_MUSTTAIL return S", _lexAs[s], "(m, tokenEnd, 0, tokenEnd, tokenHead);");
-            } else {
-              line("      ", taken(at));
-              return;
-            }
-          }
-        };
-        for (const Cell& cell : _rows[s].cells)
-          if (shared == _shiftRow.end() || cell.shifts == nullptr) {
-            line("    case ", cell.terminal, ":");
-            act(_bases[s] + cell.terminal);
-          }
-        if (shared != _shiftRow.end()) {
-          // Its shifts are a row of their own; its own reduction is written
-          // for each of its tokens.
-          std::vector<std::uint16_t> commons;
-          for (const std::uint16_t terminal : _rows[s].commons)
-            if (!std::ranges::binary_search(_rows[s].cells, terminal, {}, &Cell::terminal))
-              commons.push_back(terminal);
-          if (!commons.empty())
-            line(cases(commons, "    "), " CURSIV_MUSTTAIL return ", use(_rows[s].common, caller),
-                 "(m, p, 0, tokenEnd, tokenHead);");
-          line("    default: CURSIV_MUSTTAIL return W", shared->second, "(m, p, 0, tokenEnd, tokenHead);");
-          line("  }");
-        } else if (_rows[s].common.empty()) {
-          line("    default: ", taken(_rows[s].otherwise));
-          line("  }");
-        } else {
-          // The row's own reduction, where the state acts on the token.
-          line("    default: break;");
-          line("  }");
-          line("  if (Token{tokenEnd, tokenHead}.terminal() < ", nterms, " && kTables.inSet(", _p.followOf[s],
-               ", Token{tokenEnd, tokenHead}.terminal())) CURSIV_MUSTTAIL return ",
-               use(_rows[s].common, caller), "(m, p, 0, tokenEnd, tokenHead);");
-          line("  CURSIV_MUSTTAIL return D::refuse<M>(m, p, 0, tokenEnd, tokenHead);");
-        }
-        line("}");
-        if (shared != _shiftRow.end() && shared->second == s) {
-          line("CURSIV_NOINLINE CURSIV_PRESERVE_NONE Exit W", s,
-               "(Machine& m, const char* p, NodeCount, const char* tokenEnd, ::std::uint64_t tokenHead) {");
-          line("  switch (Token{tokenEnd, tokenHead}.terminal()) {");
-          for (const Cell& cell : _rows[s].cells)
-            if (cell.shifts != nullptr)
-              line("    case ", cell.terminal, ": ", taken(_bases[s] + cell.terminal));
-          line("    default: CURSIV_MUSTTAIL return D::refuse<M>(m, p, 0, tokenEnd, tokenHead);");
-          line("  }");
-          line("}");
-        }
-      }
-      if (_lexAs[s] != s) continue;
-      line("CURSIV_PRESERVE_NONE Exit S", s,
-           "(Machine& m, const char* p, NodeCount at, const char* tokenEnd, ::std::uint64_t tokenHead) {");
-      if (_cfg.indent != 0 || _cfg.dedent != 0) {
-        line("  if (m.indented.depth == 0 && m.line_start(p)) [[unlikely]]");
-        line("    if (const Token made = m.indentation(p, m.indented); made.end != nullptr)");
-        line("      CURSIV_MUSTTAIL return H", _dispatchAs[s], "(m, p, at, made.end, made.head);");
-      }
-      // The token is read into the registers it is handed on in.
-      line("  Token tok{tokenEnd, tokenHead};");
-      line("  tok = full<true>(m, p, ", _p.states[s].mode, ");");
-      line("  CURSIV_MUSTTAIL return H", _dispatchAs[s], "(m, p, at, tok.end, tok.head);");
-      line("}");
-    }
+    table("::std::uint64_t", "kLrRecords", records);
+    _reductions = std::move(values);
+    table("::std::uint32_t", "kFuseMap", map);
   }
 
   // Whether `p` holds before tokens it names: the token read among those
@@ -2122,174 +1999,6 @@ class Emitter {
     const auto [at, fresh] = _holds.try_emplace(production);
     if (fresh) at->second = holds_of(_cfg.productions[production]);
     return !at->second.empty();
-  }
-
-  // The switches the reductions written so far asked for.
-  void arrivals() {
-    for (const auto& [label, body] : std::exchange(_told, {})) {
-      open_function(label);
-      _out += *body;
-      line("}");
-    }
-  }
-
-
-  // One production reduced over the machine, a token in hand or not: its
-  // symbols popped, its record closed as the call site below reads it, and
-  // the state its goto names entered.
-  void reduce(std::uint32_t production, bool held) {
-    const Production& prod = _cfg.productions[production];
-    const std::string label = reduce_label(production, held);
-    arrivals();
-    open_function(label, held);
-    if (held && tested(production)) {
-      _refutes = true;
-      line("  if (!holds", production, "(m, p, tok)) ", tail("D::template again<M>"));
-    }
-    // Once a test that names tokens holds, the token goes back to the text,
-    // with the trivia before it: the state reached reads it again.
-    const bool gives = held && names(prod);
-    // The call sites by the record each closes.
-    const std::vector<std::uint32_t>& sites = sites_of(prod.lhs);
-    std::map<std::uint32_t, std::vector<std::uint32_t>> closes;
-    for (std::uint32_t site = 0; site < sites.size(); ++site)
-      closes[_p.closed(prod.entry, sites[site])].push_back(site);
-    // Room for the record it may write, and for the frame where it pops none.
-    // A record that is always empty stands behind the trivia read, written
-    // first.
-    const unsigned shapes = _p.shapes[production];
-    const bool records = (shapes & (kRecordEmpty | kRecordSeveral)) != 0 &&
-                         std::ranges::any_of(closes, [](const auto& c) { return c.first != kNone; });
-    const bool flushes =
-        shapes == kRecordEmpty &&
-        std::ranges::none_of(closes, [](const auto& c) { return c.first == kNone; });
-    const bool afterShift = !held && _afterShift.contains(production);
-    if (afterShift) {
-      const std::string body = "B" + std::to_string(production);
-      line("  open = m.pop(", prod.rhs.size(), ", ", production, ");");
-      line("  ", tail(use(body, label)));
-      line("}");
-      open_function(body, false);
-    }
-    if (prod.rhs.empty() || records)
-      line("  ", room(std::string("!m.roomy(") + (prod.rhs.empty() ? "true" : "false") + ", " +
-                          (records ? "true" : "false") + ")",
-                      flushes, _caller));
-    if (prod.rhs.empty())
-      line("  open = m.here(", production, ");");
-    else if (!afterShift)
-      line("  open = m.pop(", prod.rhs.size(), ", ", production, ");");
-    if (sites.empty()) {
-      line("  __builtin_unreachable();");
-      line("}");
-      return;
-    }
-    const std::vector<PackedGoto>& gotos = _p.gotos[prod.lhs];
-    const auto rereads = [&](std::uint32_t target) { return _p.states[target].rereads(); };
-    // Sites that lead to states with code of their own are told apart by the
-    // state below, and each goes on in its state's code.
-    const auto own = [&](const PackedGoto& site) {
-      return _special[site.target] || _p.states[site.target].reduce != kNone;
-    };
-    const bool single = _single[prod.lhs];
-    if (!single && std::ranges::all_of(gotos, own)) {
-      std::map<std::array<std::uint32_t, 2>, std::vector<std::uint32_t>> arrivals;
-      for (const PackedGoto& site : gotos)
-        arrivals[{_p.closed(prod.entry, site.entry), site.target}].push_back(site.from);
-      // One record whatever the site: it is closed before they are told apart.
-      const bool one = closes.size() == 1;
-      if (one) close(production, closes.begin()->first, held, flushes, "  ");
-      // The sites told apart, written once for the productions that tell
-      // them apart alike.
-      std::string before = take();
-      line("  switch (m.under()) {");
-      for (const auto& [arrival, from] : arrivals) {
-        const std::uint32_t target = arrival[1];
-        const std::uint32_t lone = _p.states[target].reduce;
-        line(cases(from, "    "));
-        if (!one) close(production, arrival[0], held, flushes, "      ");
-        const auto enter = [&](std::string_view indent) {
-          line(indent, "m.push(", target, ", open);");
-          if (held) line(indent, "m.forget(p);");
-          line(indent, tail(lone != kNone ? use(reduce_label(lone, false), _caller)
-                                          : "S" + std::to_string(_lexAs[target])));
-        };
-        if (!held || gives) {
-          enter("      ");
-          continue;
-        }
-        if (rereads(target)) {
-          line("      if (tok.terminal() != ", kEndOfInput, ") {");
-          enter("        ");
-          line("      }");
-        }
-        line("      m.push(", target, ", open);");
-        line("      ", tail(lone != kNone ? use(reduce_label(lone, true), _caller)
-                                          : "H" + std::to_string(_dispatchAs[target])));
-      }
-      line("    default: __builtin_unreachable();");
-      line("  }");
-      std::string told = take();
-      _out = std::move(before);
-      const auto [known, fresh] = _arrivals.try_emplace(std::move(told), _arrivals.size());
-      const std::string arrival = "A" + std::to_string(known->second);
-      line("  ", tail(use(arrival, _caller)));
-      line("}");
-      if (fresh) _told.emplace_back(arrival, &known->first);
-      return;
-    }
-    // A nonterminal every site of which leads to one state needs no table.
-    if (single)
-      line("  constexpr GotoCell to{", gotos.front().target, ", ", _enters[gotos.front().target], ", ",
-           _p.states[gotos.front().target].rereads() ? GotoCell::kRereads : 0, "};");
-    else
-      line("  const GotoCell to = L::gotos[L::gotoBase[m.under()] + ", prod.lhs, "];");
-    // One record whatever the site, or one per kind of site.
-    if (closes.size() == 1) {
-      close(production, closes.begin()->first, held, flushes, "  ");
-    } else {
-      line("  switch (to.site & ~GotoCell::kRereads) {");
-      for (const auto& [entry, of] : closes) {
-        line(cases(of, "    "));
-        close(production, entry, held, flushes, "      ");
-        line("      break;");
-      }
-      line("    default: __builtin_unreachable();");
-      line("  }");
-    }
-    // The one state every site leads to reduces at once: its reduction is
-    // called by its label.
-    const std::uint32_t lone = single ? _p.states[gotos.front().target].reduce : kNone;
-    // The state entered with no token: one it reads next, or again.
-    const auto enter = [&](std::string_view indent) {
-      line(indent, "m.push(to.target, open);");
-      if (held) line(indent, "m.forget(p);");
-      if (lone != kNone)
-        line(indent, tail(use(reduce_label(lone, false), _caller)));
-      else
-        line(indent, "CURSIV_MUSTTAIL return L::template steps<M>[to.enter](m, p, open, tok.end, tok.head);");
-    };
-    if (!held || gives) {
-      enter("  ");
-      line("}");
-      return;
-    }
-    if (std::ranges::any_of(gotos, [&](const PackedGoto& site) { return rereads(site.target); })) {
-      line("  if ((to.site & GotoCell::kRereads) != 0 && tok.terminal() != ", kEndOfInput, ") {");
-      enter("    ");
-      line("  }");
-    }
-    line("  m.push(to.target, open);");
-    if (lone != kNone) {
-      line("  ", tail(use(reduce_label(lone, true), _caller)));
-    } else if (single && _special[gotos.front().target]) {
-      line("  CURSIV_MUSTTAIL return H", _dispatchAs[gotos.front().target],
-           "(m, p, to.target, tok.end, tok.head);");
-    } else {
-      line("  const ::std::uint32_t at = D::cell(to.target, tok.terminal());");
-      line("  CURSIV_MUSTTAIL return L::template steps<M>[L::cells[at].step](m, p, at, tok.end, tok.head);");
-    }
-    line("}");
   }
 
   // Where some arms of a cell reduce productions with tests, those whose
@@ -2422,26 +2131,22 @@ class Emitter {
   // The plain tables, defined in a unit of their own, and their declarations.
   std::string _tables;
   std::string _declared;
+  // Per step, its reduction as the tables write it.
+  std::vector<std::string> _reductions;
   // The steps asked for, each an expression of a function over the machine
   // and over a machine that steps, with the production it reduces; and the
   // reductions in the order they were first reached.
   std::vector<std::string> _steps;
   std::vector<std::string> _stepping;
   std::vector<std::uint32_t> _stepReduces;
-  std::map<std::string, std::uint16_t> _stepOf;
+  std::map<std::pair<std::string, std::uint32_t>, std::uint16_t> _stepOf;
   std::set<std::pair<std::uint32_t, bool>> _reduced;
   std::vector<std::pair<std::uint32_t, bool>> _reduces;
-  // Reductions also entered with their final shift already popped.
-  std::set<std::uint32_t> _afterShift;
   // The rows of cells, the states' first; the cells no row holds; the arms
   // of the cells with several actions, in the order of their resume points.
   struct Row {
     std::vector<Cell> cells;
     std::uint32_t otherwise = 0;
-    // The reduction it takes on the tokens it has no cell for, if any, and
-    // those tokens.
-    std::string common;
-    std::vector<std::uint16_t> commons;
   };
   std::vector<Row> _rows;
   std::vector<Cell> _loose;
@@ -2452,19 +2157,10 @@ class Emitter {
   std::vector<Cell> _cells;
   std::vector<std::uint32_t> _bases;
   std::size_t _armsAt = 0;
-  // Per state, the step that enters it with no token, and whether the state
-  // has code of its own for it.
+  // Per state, the step that enters it with no token; whether the machine's
+  // reads and shifts are written per state.
   std::vector<std::uint16_t> _enters;
-  std::vector<bool> _special;
-  // Per state with code of its own, the state whose code takes its token,
-  // and the one whose code reads it; per cell, the shift that code writes.
-  std::vector<std::uint32_t> _dispatchAs;
-  std::vector<std::uint32_t> _lexAs;
-  std::map<std::size_t, std::string> _written;
-  // Per state whose shifts are a row several states take, the state that
-  // row is written for; and what each written shift calls.
-  std::map<std::uint32_t, std::uint32_t> _shiftRow;
-  std::map<std::string, std::string> _calls;
+  bool _perState = false;
   std::vector<TieCheck> _ties;
   std::vector<std::uint16_t> _words;
   std::vector<ReadAgain> _agains;
@@ -2476,6 +2172,17 @@ class Emitter {
   // Per nonterminal, whether every site of it leads to one state and adds
   // one entry.
   std::vector<bool> _single;
+  // Per state, the states a shift or a goto leads to it from, and the frames
+  // it drops plus one where it only ends a turn of a list; the turns told so
+  // far; per nonterminal, the turns its sites end: one for all, or for some.
+  std::vector<std::vector<std::uint32_t>> _preds;
+  std::vector<std::uint32_t> _tails;
+  std::map<std::pair<std::uint32_t, std::uint32_t>, Turn> _turns;
+  struct Ends {
+    Turn all;
+    bool some = false;
+  };
+  std::vector<Ends> _ends;
   // Whether the language hides trivia: a shift then writes what was read.
   bool _hides = false;
   // Whether the word being written is a function of its own under a called
@@ -2489,19 +2196,6 @@ class Emitter {
   bool _refutes = false;
   // The modes a lexer is written for.
   std::vector<bool> _read;
-  // Generated functions and the label to retry after growing the stack; how
-  // often each is called by its label, and those a state is entered by.
-  std::vector<std::string> _functions;
-  std::string _caller;
-  std::map<std::string, unsigned> _uses;
-  std::set<std::string> _entries;
-  // The switches that tell the sites of a reduction apart over the machine,
-  // each with its label's number, and those still to be written.
-  std::map<std::string, std::size_t> _arrivals;
-  std::vector<std::pair<std::string, const std::string*>> _told;
-  // The shifts written for the states with code of their own, each with the
-  // cells that take it.
-  std::map<std::string, unsigned> _directs;
   // The functions that read a token by the automaton's first steps: each
   // body once, numbered in the order met.
   std::map<std::string, std::size_t> _openings;

@@ -355,6 +355,7 @@ struct Scanners : cursiv::GrammarSpec {
       (ref<Short> + lit<"a"> + lit<"b"> + lit<"!">) | (ref<Long> + lit<"ab"> + lit<"?">));
   struct Root : rule<create<Document>(
       (lit<"one:"> + some(item<Data<'D'>>)) |
+      (lit<"bare:"> + some(append<&Document::items>(scan<read_counted<'D'>>))) |
       (lit<"adjacent:"> + skip(ignore<Base::WS>, hide<>, ref<ID> + item<Prefixed<"D">>)) |
       (lit<"alternate:"> + skip(ignore<Base::WS>, hide<>,
           ref<ID> + item<terminal<(lit<"D"> | lit<"~">) + scan<read_payload>>>)) |

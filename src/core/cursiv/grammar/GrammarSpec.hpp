@@ -277,6 +277,10 @@ struct infix_body {
 template <class Primary, auto LeftPtr, auto OpPtr, auto RightPtr, auto Lvls,
           class Node>
 struct InfixRule {
+  static_assert(
+      !holds_commit<typename infix_body<
+          Primary, inline_operators_t<std::remove_cv_t<decltype(Lvls)>>>::type>,
+      "a commit is allowed in a rule, not in an operator of an infix rule");
   using kind = infix_kind;
   using slot = TypeList<>;
   using primary = Primary;

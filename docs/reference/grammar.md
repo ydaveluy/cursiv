@@ -817,7 +817,7 @@ parents' converters differ. See [Reuse a grammar](../recipes/reuse-a-grammar.md)
 | `skip`, `tight`, gap conditions | Refused | Allowed | Allowed |
 | `through` | Allowed | One token | One token |
 | `as<X>(e)` | Whole body | Allowed | Allowed |
-| `scan<F>` | Reads bytes at the current position | Inside a terminal or `through` | Same restriction |
+| `scan<F>` | Reads bytes at the current position | One token | One token |
 | `mark`, `same` | Allowed | Inside `through` or an inline terminal | Same restriction |
 | `&e`, `!e` | Test adjacent input | [Conditions](#conditions) | Allowed |
 | `implied` | Refused | Allowed | Allowed |
