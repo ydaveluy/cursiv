@@ -30,7 +30,7 @@ if(_allocator_flags MATCHES "[-/]fsanitize=")
 endif()
 
 include(FetchContent)
-set(_mimalloc_revision 1ed67b5156a763441d2ec3c20221a7b3cd866129) # v3.7.0
+set(_mimalloc_revision 1c842769cd1ef35f044f659804806505b58f0b48) # v3.7.1
 set(_mimalloc_dir "cursiv_mimalloc-${_mimalloc_revision}")
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
   # A changed WASI patch gets fresh sources, never a tree an older one patched.
@@ -58,15 +58,13 @@ target_include_directories(cursivAllocator SYSTEM PRIVATE
 # to clear than they save (MIMALLOC_ALLOW_THP=1 restores them). Their blocks of
 # 80 to 512 KiB share 4 MiB allocator pages, which is faster and smaller.
 target_compile_definitions(cursivAllocator PRIVATE
-    MI_STATIC_LIB MI_MALLOC_OVERRIDE MI_DEFAULT_ALLOW_THP=0 MI_ENABLE_LARGE_PAGES=1)
+    MI_MALLOC_OVERRIDE MI_DEFAULT_ALLOW_THP=0 MI_ENABLE_LARGE_PAGES=1)
 # Third-party code: its warnings are silenced.
 target_compile_options(cursivAllocator PRIVATE -w)
-set_target_properties(cursivAllocator PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
-  # mimalloc's WASI port lacks locks, thread exit, arena reuse for large
-  # alignments and the module's initial memory, and clears new memory that is
-  # already zero: the patch fixes them. A tree it already patched is left as it is.
+  # mimalloc's WASI port lacks thread exit and does not use the module's
+  # initial memory: the patch adds them. A tree it already patched is left as it is.
   find_package(Git REQUIRED)
   set(_patch "${CMAKE_CURRENT_LIST_DIR}/patches/mimalloc-wasi.patch")
   execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check "${_patch}"
@@ -83,6 +81,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
       # Even very large blocks need recyclable arenas: WASM cannot release an
       # OS allocation. mimalloc clamps this KiB limit to its 32-bit arena size.
       MI_DEFAULT_ARENA_MAX_OBJECT_SIZE=2097152)
+  # mimalloc's locks, the one around memory growth included, need pthreads.
+  if(CURSIV_WASI_THREADS)
+    target_compile_definitions(cursivAllocator PRIVATE MI_USE_PTHREADS=1)
+  endif()
 endif()
 
 # Sanitized targets and targets defining their own allocator opt out explicitly.

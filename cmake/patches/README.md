@@ -4,11 +4,11 @@ This directory contains the WASI patch and license for Cursiv's mimalloc
 dependency. To configure a language project's allocator, see
 [CMake options](../../docs/reference/cmake.md#options).
 
-The dependency is pinned to mimalloc v3.7.0
-(`1ed67b5156a763441d2ec3c20221a7b3cd866129`). Each revision has its own source
+The dependency is pinned to mimalloc v3.7.1
+(`1c842769cd1ef35f044f659804806505b58f0b48`). Each revision has its own source
 directory so the WASI patch applies only to its matching revision.
 Distributed modules include `mimalloc.LICENSE`.
 
-WASM memory only grows, so the patch keeps large aligned blocks in recyclable
-arenas and reports new pages as zero. It also adds thread exit and locks for
-threaded WASI, and reads options from `environ` without allocating.
+A threaded module's memory starts at its full size and never grows, so the
+patch allocates from the module's initial memory first. It also runs thread
+exit through a pthread key when CMake turns pthreads on for the threaded target.
